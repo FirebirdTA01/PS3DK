@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // NO SPACE, so this IS a function-like definition - and "3.14159f" is not a
 // parameter name.  The reference rejects the DEFINITION:
 //     error C0105: Syntax error in #define

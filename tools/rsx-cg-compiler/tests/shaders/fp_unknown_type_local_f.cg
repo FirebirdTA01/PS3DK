@@ -1,4 +1,4 @@
-// t_472ff302, the second hang shape: an unknown type in a LOCAL declaration.
+// parser-progress, the second hang shape: an unknown type in a LOCAL declaration.
 // Before the fix this hung exactly like the parameter form.
 //
 // Its DIAGNOSTICS are still poor and that is recorded rather than hidden: the

@@ -1,4 +1,4 @@
-// t_3e342903, consumer half: a float4 literal used as the operand of a
+// vp-literal-vector-pool, consumer half: a float4 literal used as the operand of a
 // matrix multiply must keep all four of its lanes.
 //
 // The filed symptom had two parts.  The CONSTANT POOL half - a float4 literal

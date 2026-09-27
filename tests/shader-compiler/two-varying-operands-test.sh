@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# No fragment instruction may name two input registers (t_e89cd261).
+# No fragment instruction may name two input registers (distinct-varying-sources).
 #
 # An NV40 fragment instruction carries ONE input-source selector.  Two
 # operands of register type INPUT therefore read the SAME varying,
@@ -120,7 +120,7 @@ if bad:
         "FAIL: these fixtures combine two DIFFERENT varyings, and a fragment "
         "instruction has a single input-source selector - so an instruction "
         "with two INPUT operands here has lost one of them and reads the "
-        "other twice (t_e89cd261).  Note the same shape is LEGAL when both "
+        "other twice (distinct-varying-sources).  Note the same shape is LEGAL when both "
         "operands name the same varying; it is these sources that make it a "
         "defect.  Offending instructions:\n" + lines
     )

@@ -110,7 +110,7 @@ enum class VOp
     Ex2,
     Ddx,
     Ddy,
-    Pk2h,   // pack/unpack family (t_23f9d1a6), fragment-only
+    Pk2h,   // pack/unpack family (pack-unpack-intrinsics), fragment-only
     Up2h,
     Pk4ub,
     Up4ub,
@@ -141,14 +141,14 @@ enum class VOp
     // a literal register; its operands are read by nothing.
     Sfl,
     Lit,
-    // VP only (t_99b29225): load a lane of an ADDRESS register from the
+    // VP only (dynamic-uniform-array-index): load a lane of an ADDRESS register from the
     // index value of a run-time array read.  dst.address names A0/A1 and
     // the lane is the writemask; srcs[0] is the index with its swizzle.
     // The relative reads it serves carry VSrc::relative and depend on it
     // through the scheduler's address key.  The hardware floors, which
     // is what the reference emits for `u[int(idx)]`.
     Arl,
-    // t_a7dd471f: float-to-int is one condition-register sequence, not
+    // integer-float-conversion: float-to-int is one condition-register sequence, not
     // independent VInstrs.  It predates the scheduler's condition-register
     // dependency key and stays atomic so the sign-restore shape cannot be
     // torn apart.
@@ -196,7 +196,7 @@ struct VSrc
     // Meaningful lanes of `literal`.  A VECTOR literal has to keep all of
     // them: the vertex literal pool used to read literal[0] and nothing
     // else, so float4(a,b,c,d) shipped as a broadcast of `a` and every
-    // store of it painted one value four times (t_3e342903).
+    // store of it painted one value four times (vp-literal-vector-pool).
     uint8_t  literalLanes = 1;
     std::array<uint8_t, 4> swizzle = {0, 1, 2, 3};
     bool     neg = false;
@@ -269,7 +269,7 @@ struct VirtualProgram
     std::vector<unsigned> fpGlobalUniformSlots;
     // Slot -> (compiled default, component count) for a file-scope uniform
     // declared with an initialiser.  Emission writes the default into every
-    // const block the parameter lists (t_3bf3ce95); it does not see the
+    // const block the parameter lists (general-lowering-default); it does not see the
     // module, so the lowering pass carries it here.
     std::unordered_map<unsigned, std::pair<std::vector<float>, unsigned>>
         fpUniformDefaults;
@@ -284,7 +284,7 @@ struct VirtualProgram
     // from 467 and matrices grow UP from 256, and the literal pool
     // continues downward after the uniforms - so the matrix watermark is
     // the floor.  Carried here because emission allocates the pool and
-    // does not see the uniform walk (t_3e342903 made vector literals take
+    // does not see the uniform walk (vp-literal-vector-pool made vector literals take
     // a register each, which is what made this reachable).
     int vpConstFloor = 256;
     std::vector<std::string> diagnostics;
@@ -475,7 +475,7 @@ static uint32_t fpAttrMaskBitForInputSrc(int inputSrc)
 static int fragmentOutputIndex(const std::string& semanticUpper, int semanticIndex)
 {
     // Fragment outputs share the temporary file. R1.z is depth, so the
-    // four colour targets occupy R0, R2, R3, R4 (t_cfff9343).
+    // four colour targets occupy R0, R2, R3, R4 (output-register-count).
     if ((semanticUpper == "COLOR" || semanticUpper == "COL") &&
         semanticIndex >= 0 && semanticIndex < 4)
         return semanticIndex == 0 ? 0 : semanticIndex + 1;
@@ -530,7 +530,7 @@ static VSrc literalSrc(const IRConstant& constant)
     // the scalar broadcast swizzle: a scalar literal lands here as
     // {c,0,0,0}, and under the identity swizzle every lane past x would
     // read ZERO (`MUL R.xy, R, {6,0,0,0}` multiplies y by zero, compiles
-    // clean and renders wrong - t_b6f2a2a4).  The broadcast is applied by
+    // clean and renders wrong - scalar-operand-broadcast).  The broadcast is applied by
     // resolve(), which is the only place that knows the VALUE's width and
     // therefore the only place that can apply the same rule to a scalar
     // uniform and a scalar temp as well.  Do not reintroduce it here: a
@@ -557,7 +557,7 @@ static VSrc literalSrc(const IRConstant& constant)
 static void assignSwizzle(VSrc& src, int encoded, int count)
 {
     // The operand may already alias a shuffled source. Select its lanes,
-    // not the underlying register's lanes (t_6be25fd4). Snapshot the map:
+    // not the underlying register's lanes (source-alias-swizzle-composition). Snapshot the map:
     // assigning in place would corrupt permutations with repeated lanes.
     const auto original = src.swizzle;
     for (int i = 0; i < 4; ++i) {
@@ -581,7 +581,7 @@ static void assignSwizzle(VSrc& src, int encoded, int count)
 //   - otherwise declared return fields decide, even if never written, then
 //     the typed StoreOutput record handles a non-aggregate return.
 //     A half return carrying some other semantic cannot claim this colour
-//     register (t_5c12df56).
+//     register (fragment-output-precision).
 //
 // An unsemanticked fragment `out` binds COLOR0.
 //
@@ -744,9 +744,9 @@ private:
     // Array uniforms, by name: the source of each element the lowering
     // laid out (FP: one inline-const slot per element; VP: one constant
     // register per REFERENCED element).  Filled in the constructor from
-    // the pre-pass classification, read by lowerLoadUniform (t_f9ecd3ac).
+    // the pre-pass classification, read by lowerLoadUniform (constant-uniform-array-index).
     std::map<IRValueID, std::map<int, VSrc>> arrayElementSrcs_;
-    // Run-time array indexing (t_99b29225, VP only).  dynamicIndexUses_:
+    // Run-time array indexing (dynamic-uniform-array-index, VP only).  dynamicIndexUses_:
     // how many run-time array reads each value indexes, counted with the
     // other uses so a float-to-int consumed ONLY as an index can become
     // the ARL instead of a lowering this profile does not have.
@@ -779,7 +779,7 @@ private:
     std::vector<AddressLane> addressLanes_;
     std::unordered_map<IRValueID, VSrc> conditionToSource_;
     std::unordered_map<IRValueID, int> valueWidth_;
-    // CF-1a flatten state (t_91bbd575).  Set only when the entry
+    // CF-1a flatten state (general-path-discard).  Set only when the entry
     // function has more than one basic block; single-block programs
     // never engage the flatten and lower exactly as before.
     bool flattened_ = false;
@@ -1627,7 +1627,7 @@ private:
         // the LAST lane write, and every earlier lane was free to be
         // scheduled BELOW the instruction that reads it.
         //
-        // Measured on test_02_add (t_0a4e0ed4): `float3 result = col1 +
+        // Measured on test_02_add (scheduler-partial-write-raw): `float3 result = col1 +
         // col2` had its ADD emitted at instruction 11 while col2.y was
         // written at 15 and col1.x at the last instruction, so the sum read
         // stale registers and the shader rendered a near-constant colour.
@@ -1646,7 +1646,7 @@ private:
         // reads.  One key for both A0 and A1 and for every lane - the
         // reference keeps every ARL ahead of every relative read that
         // follows it in source order, and a lane-precise model would buy
-        // reorderings the oracle never shows (t_99b29225).
+        // reorderings the oracle never shows (dynamic-uniform-array-index).
         constexpr int kAddressKey = 3 << 16;
         std::unordered_map<int, std::vector<size_t>> writers, readers;
         const auto link = [&](size_t from, size_t to) {
@@ -1714,7 +1714,7 @@ private:
                 // were two writes to one register with no edge between
                 // them, and the scheduler was free to commit them in
                 // either order.  Measured on fp_discard_two_f
-                // (t_becbfa69): `o = c; if (..) discard; o = o*d; if (..)
+                // (post-discard-output-restores): `o = c; if (..) discard; o = o*d; if (..)
                 // discard; o = o+d;` emitted all three stores and put the
                 // FIRST one last, so every surviving pixel read `o = c`.
                 //
@@ -1752,7 +1752,7 @@ private:
                 writers[key].push_back(i);
 
                 // REPEATED STORES TO ONE OUTPUT KEEP PROGRAM ORDER
-                // (t_c2582cf1).
+                // (repeated-output-store).
                 //
                 // lowerStoreOutput's lane-by-lane branches do not emit a
                 // dst.output instruction: they compose the colour into a
@@ -2197,7 +2197,7 @@ private:
                     mv.rowSrcs.push_back(uniformSrc(static_cast<int>(base + row), true));
                     // A matrix entry parameter's DEFAULT lives on the rows,
                     // one slot each, the same as a file-scope matrix
-                    // (t_4b54f26b A1).  Without this the reflection table is
+                    // (uniform-default-records A1).  Without this the reflection table is
                     // right and every row's inline constant is zero, so an
                     // unpatched shader multiplies by a zero matrix - the
                     // exact failure A3 fixed for file-scope matrices, which
@@ -2242,7 +2242,7 @@ private:
                     uniformSrc(static_cast<int>(fpParamSlotBases[pi]), true);
                 // A uniform entry parameter declared with a DEFAULT carries
                 // it into the inline const block, exactly as an initialised
-                // file-scope uniform does (t_4b54f26b A1).  Both places
+                // file-scope uniform does (uniform-default-records A1).  Both places
                 // matter and they are independent: the parameter table is
                 // what cgGetParameterDefaultValue returns, this is what an
                 // UNPATCHED shader computes with.  Getting only the first
@@ -2313,7 +2313,7 @@ private:
                     // zero-filled and an unpatched shader computes with a zero
                     // matrix while the reflection table says otherwise - the
                     // reference puts [0.25,0.5,0.75,0] and so on into the
-                    // ucode (measured, t_4b54f26b A3; predicted from this
+                    // ucode (measured, uniform-default-records A3; predicted from this
                     // site by codex before it was reproduced).
                     const size_t rowBase =
                         static_cast<size_t>(row) * static_cast<size_t>(cols);
@@ -2742,10 +2742,10 @@ private:
             // dot lowered to DP3 - a 4D dot silently dropping its w term.
             // test_42_dot4 was the only shader in the corpus with one, and
             // it was the last general-path mismatch in the set
-            // (t_856689b2).
+            // (operand-lane-width).
             {
                 // ... and a 2-wide dot is DP2, not DP3 over a register
-                // whose third lane nothing wrote (t_a30159bf): the
+                // whose third lane nothing wrote (two-lane-dot): the
                 // operands are written with a two-lane mask, so DP3
                 // reads x*x + y*y + whatever the allocator left in z.
                 // The reference emits DP2 here.  Width 1 keeps its old
@@ -2967,7 +2967,7 @@ private:
                      !(!vertex && (sem == "FOG" || sem == "FOGC")))
             {
                 program_.diagnostics.push_back("input array semantic '" + sem +
-                    "' has no modelled array binding in our compiler (t_dddf962d)");
+                    "' has no modelled array binding in our compiler (input-array-semantic-binding)");
                 program_.loweringFailed = true;
                 return;
             }
@@ -3032,7 +3032,7 @@ private:
 
         // `m[r]` on a matrix is the whole row source - not a lane of
         // something.  Without this a uniform-matrix operand resolved to
-        // nothing and the program refused to lower (t_9da20b33).  The row
+        // nothing and the program refused to lower (uniform-matrix-row-index).  The row
         // is OPERAND 1: the IR for m[0] and m[2] differs only there, and
         // both carry componentIndex 0, so reading the field would compile
         // every row as row 0.
@@ -3117,7 +3117,7 @@ private:
             // overridden, `float4 c = color; c.x = 0.5;`.  Returning here
             // left the insert's result undefined and the consuming store
             // refused with "operand could not be resolved" - the general
-            // path's half of t_afb4af65, filed as t_be578e74.
+            // path's half of literal-lane-insert, filed as partial-varying-materialization.
             //
             // Materialise the base into a temp, masked to the lanes the
             // insert does NOT write, then write the lane.  That is the
@@ -3130,7 +3130,7 @@ private:
             // and the base %n has no producer anywhere in the function.
             // Both want the same emission: define the result and write
             // the lane, copying nothing.  th06_add is the second
-            // (t_b8bb521f); the reference agrees, never materialising `c`
+            // (half-precision-lowering); the reference agrees, never materialising `c`
             // at all and writing R0.w and R0.xyz from the two chains.
             //
             // "No producer" is checked against every instruction's result,
@@ -3169,7 +3169,7 @@ private:
                 // LANE EXTRACT is the lane it selected.  Forcing lane 0
                 // here made `color.y = lit.y` emit `MOV R0.y, R16.x` -
                 // the red channel broadcast into green and blue
-                // (t_856689b2's remaining four).  broadcastScalar's own
+                // (operand-lane-width's remaining four).  broadcastScalar's own
                 // comment warns against exactly this.
                 appendInsertMove(lane_);
                 return;
@@ -3188,7 +3188,7 @@ private:
             // LANE EXTRACT is the lane it selected.  Forcing lane 0
             // here made `color.y = lit.y` emit `MOV R0.y, R16.x` -
             // the red channel broadcast into green and blue
-            // (t_856689b2's remaining four).  broadcastScalar's own
+            // (operand-lane-width's remaining four).  broadcastScalar's own
             // comment warns against exactly this.
             appendInsertMove(vi);
             return;
@@ -3240,7 +3240,7 @@ private:
         // LANE EXTRACT is the lane it selected.  Forcing lane 0
         // here made `color.y = lit.y` emit `MOV R0.y, R16.x` -
         // the red channel broadcast into green and blue
-        // (t_856689b2's remaining four).  broadcastScalar's own
+        // (operand-lane-width's remaining four).  broadcastScalar's own
         // comment warns against exactly this.
         appendInsertMove(vi);
     }
@@ -3287,7 +3287,7 @@ private:
                 // LANE EXTRACT is the lane it selected.  Forcing lane 0
                 // here made `color.y = lit.y` emit `MOV R0.y, R16.x` -
                 // the red channel broadcast into green and blue
-                // (t_856689b2's remaining four).  broadcastScalar's own
+                // (operand-lane-width's remaining four).  broadcastScalar's own
                 // comment warns against exactly this.
                 program_.instrs.push_back(vi);
                 return;
@@ -3302,8 +3302,8 @@ private:
         // Before this the single-operand form fell into the packer below,
         // whose width sum (1) never matches a wider result, and refused;
         // that refusal was itself the honest replacement for a silent
-        // miscompile that dropped the store (t_c1d781ba), and this is the
-        // third and correct state (t_75de19a1).  resolve() replicates
+        // miscompile that dropped the store (struct-member-lvalue-swizzle), and this is the
+        // third and correct state (scalar-constructor-broadcast).  resolve() replicates
         // swizzle[0] for a width-1 value, so the lane a scalar EXTRACT
         // selected is the lane broadcast - never lane 0 forced.
         if (resultWidth > 1) {
@@ -3541,7 +3541,7 @@ private:
     // Ours emits the MOV.  That is one instruction more than the
     // reference wherever the source is already in the right file, and it
     // is the honest first slice: the fold is a peephole over this, not a
-    // different lowering (t_b8bb521f).
+    // different lowering (half-precision-lowering).
     void lowerPrecisionCast(const IRInstruction& inst, bool toHalf)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
@@ -3563,7 +3563,7 @@ private:
         program_.instrs.push_back(vi);
     }
 
-    // THE SCALAR UNIT COMPUTES ONE LANE (t_249b8088).
+    // THE SCALAR UNIT COMPUTES ONE LANE (scalar-unit-lane-selection).
     //
     // RCP, RSQ, SIN, COS, LG2 and EX2 read a single source COMPONENT and
     // write that one result into EVERY enabled destination lane.  So a
@@ -3686,7 +3686,7 @@ private:
         program_.instrs.push_back(vi);
     }
 
-    // The pack/unpack family (t_23f9d1a6): one instruction each, fragment
+    // The pack/unpack family (pack-unpack-intrinsics): one instruction each, fragment
     // only.  Measured on the reference (C:/cgdev/pack-probe, 2026-09-07):
     //
     //   * a PACK reads its argument directly - an input register with its
@@ -3703,7 +3703,7 @@ private:
     // Not modelled here, and named in pack-unpack-test.sh: when a pack's
     // result goes straight to the colour output the reference first moves
     // the argument into an H register (MOV H0.xy <- TEX0 prec=1; PK2H
-    // R0.xyzw <- H0) - that MOV is the half-temp allocation of t_cde25bad.
+    // R0.xyzw <- H0) - that MOV is the half-temp allocation of half-temporary-allocation.
     // A byte difference with the same pixels.  The FENCBR the reference
     // puts before an arithmetic reader of a pack result is fencePackedReads
     // below, with its contract stated there.
@@ -3762,7 +3762,7 @@ private:
         vi.srcs[0] = src;
         // Measured prec=0 on every member, INCLUDING unpack_2half, whose IR
         // result is half2: pinned as an explicit override so a pass that
-        // stamps half-typed results with FLOAT16 (t_cde25bad) leaves the
+        // stamps half-typed results with FLOAT16 (half-temporary-allocation) leaves the
         // packed-data instructions alone (review: codex).
         vi.fpPrecisionOverride = NVFX_FP_PRECISION_FP32;
         program_.instrs.push_back(vi);
@@ -3819,7 +3819,7 @@ private:
     // reader of each pack result - in IR order, since this runs before
     // applyOrderingPass - with a FENCBR.  It reproduces the three measured
     // shapes where the reference fences (PK4UB R0.x; FENCBR; MUL R0 <-
-    // R0.xxxx: t_23f9d1a6, C:/cgdev/pack-probe r03/r11/r12 against r02/p1,
+    // R0.xxxx: pack-unpack-intrinsics, C:/cgdev/pack-probe r03/r11/r12 against r02/p1,
     // none before an unpack reader or the output store).  It is NOT the
     // reference's whole rule: on two packs read by one ADD the reference
     // emits no fence, and a packed value COPIED by a MOV and then read
@@ -3887,7 +3887,7 @@ private:
         return s;
     }
 
-    // CF-2 (t_91bbd575): a fragment kill.
+    // CF-2 (general-path-discard): a fragment kill.
     //
     // The guard arrives as an operand from materialiseDiscardGuards -
     // the conjunction of the branch conditions on the path that reaches
@@ -4352,7 +4352,7 @@ private:
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
         // 1/x keeps its single-instruction form - for a SCALAR.  On a
         // vector it is one RCP per lane like every other scalar-unit op
-        // (t_249b8088).  General x/y division below uses DIVR for scalars,
+        // (scalar-unit-lane-selection).  General x/y division below uses DIVR for scalars,
         // but literal 1/x remains the scalar reciprocal shape.
         if (isLiteralOne(inst.operands[0])) {
             const int mask = componentMask(inst.resultType);
@@ -4492,7 +4492,7 @@ private:
             }
             program_.diagnostics.push_back(
                 "nv40-general: matrix arithmetic is not yet lowered "
-                "(t_ef0cb2e0 arithmetic slice); refusing");
+                "(matrix-array-layout arithmetic slice); refusing");
             program_.loweringFailed = true;
             return;
         }
@@ -4775,7 +4775,7 @@ private:
             // fall through to the scalar source below, which would read
             // element zero for every index (found in review: offsets[1]
             // emitted reading the base).  Per-element sources land with
-            // the array-uniform slice (t_f9ecd3ac); until then the constant
+            // the array-uniform slice (constant-uniform-array-index); until then the constant
             // case still refuses, by name.
             if (g.type.isArray()) {
                 // Only the BARE array reaches here (indexed loads were
@@ -4836,7 +4836,7 @@ private:
         program_.loweringFailed = true;
     }
 
-    // A VP array element chosen at run time (t_99b29225): the value is the
+    // A VP array element chosen at run time (dynamic-uniform-array-index): the value is the
     // array's block base read through an address-register lane, and the
     // lane is loaded by an ARL from the index.  Measured on the reference:
     //   - lanes are handed out in order of FIRST USE, A0.x..w then A1.x..w,
@@ -5469,7 +5469,7 @@ private:
             }
         }
 
-        // pow(x, 1) is x and pow(x, 0) is 1 on the reference (t_0f3b232e):
+        // pow(x, 1) is x and pow(x, 0) is 1 on the reference (constant-exponent-pow):
         // no instruction at all, so the value is an ALIAS of its source and
         // the consumer reads x (or the literal) directly - a MOV through a
         // temporary would be a byte the reference does not emit.
@@ -5488,7 +5488,7 @@ private:
         // resolve() already broadcasts a SCALAR base's own lane, and a VECTOR
         // base keeps its lanes: every path below reads each lane explicitly.
         // Vertex programs used to force .xxxx on a vector base, so
-        // pow(u, 2.5) wrote pow(u.x, 2.5) into every lane (t_07866923).
+        // pow(u, 2.5) wrote pow(u.x, 2.5) into every lane (vp-pow-vector-lanes).
         const auto baseRegIt = program_.valueToVReg.find(inst.operands[0]);
         if (baseRegIt != program_.valueToVReg.end() &&
             useCount_[inst.operands[0]] == 1 &&
@@ -5509,7 +5509,7 @@ private:
             }
         }
         // A CONSTANT exponent follows the reference's table, measured on
-        // sce-cgc 475 (t_0f3b232e, 2026-09-15, .local/probe-boyhair; FP and
+        // sce-cgc 475 (constant-exponent-pow, 2026-09-15, .local/probe-boyhair; FP and
         // VP): 0 and 1 are aliases (above); 2 -> MUL x, x (vectors
         // too); 3 -> MUL, MUL; -1 -> RCP; -0.5 -> RSQ; 0.5 -> DIVSQR |x|, x in
         // FP and RSQ + RCP in VP; in FP 4 / 8 / 0.25 / 0.125 and -2 / -4 / -8
@@ -5617,7 +5617,7 @@ private:
             }
         }
 
-        // A VECTOR pow is one chain PER LANE (t_249b8088): both LG2 and
+        // A VECTOR pow is one chain PER LANE (scalar-unit-lane-selection): both LG2 and
         // EX2 are scalar-unit instructions that read a single source
         // component, so the full-mask form computed pow(base.x, e) and
         // stored it in every lane.  The reference emits the same per-lane
@@ -5701,7 +5701,7 @@ private:
         // resolve() already broadcasts a scalar exponent's OWN lane.  Forcing
         // .x here read colorShine.x where the source said colorShine.w
         // (gcm multiple_context fpshader, 621 pixels off on the rig -
-        // t_f17de26c); a literal has its value in lane x already.
+        // scalar-uniform-lane); a literal has its value in lane x already.
         if (mul.srcs[1].kind == VSrcKind::Literal)
             mul.srcs[1].swizzle = {0, 0, 0, 0};
         program_.instrs.push_back(mul);
@@ -5716,7 +5716,7 @@ private:
         program_.instrs.push_back(ex2);
     }
 
-    // exp / exp2 / log / log2 / log10 (t_a7dd471f, t_fe6d143b).
+    // exp / exp2 / log / log2 / log10 (integer-float-conversion, unsafe-select-predication).
     //
     // NV40 has EX2 and LG2 and nothing else in this family, so the
     // natural-base pair is one of those plus a constant multiply.  WHICH
@@ -5764,7 +5764,7 @@ private:
         // exp2(v.x) and stores it in x, y, z AND w - three lanes silently
         // wrong.  The reference says so in its own bytes: for a float4 it
         // emits four EX2Rs, each naming its own component (EX2R R0.y, R0.y
-        // and so on).  This is the same family as t_e89cd261's one-input
+        // and so on).  This is the same family as distinct-varying-sources's one-input
         // rule - an encoding that reads less than the writemask suggests.
         //
         // exp's multiply is per lane too, because it feeds the scalar
@@ -5826,7 +5826,7 @@ private:
         }
     }
 
-    // tan(x) = sin(x) / cos(x) (t_a7dd471f).  That is what the reference
+    // tan(x) = sin(x) / cos(x) (integer-float-conversion).  That is what the reference
     // computes - MOVR, MOVR, SINR, COSR, DIVR - and the shape is worth
     // stating because a polynomial approximation would have been the other
     // reasonable guess and it is not what the oracle does.
@@ -6233,7 +6233,7 @@ private:
         program_.instrs.push_back(out);
     }
 
-    // atan2(y, x) (t_a7dd471f), read from sce-cgc before implementation.
+    // atan2(y, x) (integer-float-conversion), read from sce-cgc before implementation.
     //
     // The reference computes t = min(abs(y), abs(x)) / max(abs(y), abs(x)),
     // then evaluates a five-MADR Horner polynomial in u = t*t and multiplies
@@ -6435,14 +6435,14 @@ private:
         program_.instrs.push_back(yFix);
     }
 
-    // cross(a, b) = a.yzx * b.zxy - a.zxy * b.yzx (t_a7dd471f).
+    // cross(a, b) = a.yzx * b.zxy - a.zxy * b.yzx (integer-float-conversion).
     //
     // Two instructions: the second product into a temp, then a MAD that
     // negates it.  That is the reference's arithmetic too - MULR then MADR
     // with a negated third operand - and the MOVs it emits around them are
     // operand legalisation, which this path does for itself: `a` and `b`
     // are usually both varyings, and a fragment instruction has ONE input
-    // selector (t_e89cd261), so legalizeInputOperands has to copy one of
+    // selector (distinct-varying-sources), so legalizeInputOperands has to copy one of
     // them into a temp before either instruction can name both.
     //
     // The result is a float3; the w lane is not this op's business.
@@ -7135,7 +7135,7 @@ private:
         program_.instrs.push_back(blend);
     }
 
-    // TXP (t_483feb71) is TEX with the coordinate's last lane as the
+    // TXP (projective-texture-fetch) is TEX with the coordinate's last lane as the
     // divisor: the reference reads the coordinate exactly as TEX does (the
     // varying with its swizzle, or the producing temp), writes the consumed
     // lanes, and converts at the store for a half output.  One opcode, same
@@ -7207,7 +7207,7 @@ private:
         // `TEXR H0` for a half-typed fetch (fp16 DESTINATION, fp32 fetch) -
         // measured by claude and codex on h4tex2D under float4 and half4
         // outputs.  Pinned as an explicit override so a pass that stamps
-        // half-typed results with FLOAT16 (t_cde25bad) leaves the fetch
+        // half-typed results with FLOAT16 (half-temporary-allocation) leaves the fetch
         // alone, exactly as the pack/unpack family does.  The H destination
         // is a separate, unmodelled rule (typed-texture follow-up).
         if (profile_ == GeneralProfile::Fragment)
@@ -7811,7 +7811,7 @@ private:
     // colour" in an outputPin and emit no dst.output instruction at all,
     // so the post-allocation stamp this replaces reached neither of them
     // and left the lane-by-lane fold writing fp32 into R0 with
-    // outputFromH0 clear (t_80dad2dd).
+    // outputFromH0 clear (half-output-staging).
     //
     // Marking the vreg as well as the destination is what makes a reader
     // of the colour resolve to an H source; allocatePhysicalTemps copies
@@ -7864,7 +7864,7 @@ private:
         // the colour's writers, so a half temp that ends up pinned to the
         // colour must not move the flag: mrt-output's compose-float writes
         // a half COLOR0 beside a float COLOR1 and the reference keeps every
-        // output in the float bank, flag 0 (measured, t_5dc260b0 /
+        // output in the float bank, flag 0 (measured, fragment-output-liveness /
         // reference_h0_output).  So H registers are handed out only when
         // the colour already uses the half bank; when it does not, the
         // value is still COMPUTED in half - which is the correctness
@@ -7887,7 +7887,7 @@ private:
         // is one.  Dropping the override does NOT recover it (the fp16
         // destination refuses the merge on its own, measured), so the
         // relaxation belongs in the coalescer - merge when the two writers
-        // agree on bank AND precision - rather than here (t_12bc176c).
+        // agree on bank AND precision - rather than here (export-fold-precision).
         // A REGISTER THIS LOWERING DID NOT CREATE IS SHARED, and its format
         // belongs to the writers already in it, not to this instruction -
         // specifically to the LAST earlier writer, which is what the scan
@@ -7958,7 +7958,7 @@ private:
             // prec=0 into an R register whatever its result feeds -
             // measured on the merged tree, where UP2H came out prec=1
             // against the reference's 0 on fp_pack_roundtrip_f and
-            // fp_pack_family_f (codex raised it from the source; t_23f9d1a6
+            // fp_pack_family_f (codex raised it from the source; pack-unpack-intrinsics
             // + this card).  These instructions read and write RAW BITS;
             // their format is the ISA's, not the value's.
             if (vi.fpPrecisionOverride >= 0) continue;
@@ -8174,7 +8174,7 @@ private:
                 producer.dst.index == regIt->second &&
                 producer.dst.writemask != outMask &&
                 producerDefs > 1) {
-                // OUTPUT PIN, not a preference (t_5dc260b0 fallout).  This
+                // OUTPUT PIN, not a preference (fragment-output-liveness fallout).  This
                 // branch composes the colour lane by lane into a temp and
                 // returns WITHOUT emitting any dst.output instruction, so
                 // "this value is the colour" is carried by the pin alone.
@@ -8308,7 +8308,7 @@ private:
             // with no IRValue entry measured as width 1 and took the
             // scalar-broadcast branch below.  That is how `m[0]` came out
             // as `MOV o[n], c[256].x`, the row's x lane four times
-            // (t_9da20b33).
+            // (uniform-matrix-row-index).
             sourceWidth = valueWidthOf(value);
             if (sourceWidth <= 0)
                 sourceWidth = inst.resultType.componentCount();
@@ -8322,7 +8322,7 @@ private:
         // The depth branch a few lines above has always replicated
         // swizzle[0] rather than forcing lane 0; this is that rule applied
         // to the colour output, and it is the same idiom lowerSelect*
-        // already use for a scalar condition (t_cd76485f).
+        // already use for a scalar condition (output-store-swizzle).
         //
         // Only the WRITTEN lanes are corrected here.  What the reference
         // puts in the lanes outMask does not write is not a single rule -
@@ -8366,7 +8366,7 @@ private:
         // fallback below measures the VALUE.  For `float4 main() : COLOR
         // { return 1.0; }` that value is a scalar, which masked the colour
         // write to lane x and left y/z/w holding whatever the register
-        // had - exit 0, container written, no diagnostic (t_5c12df56).
+        // had - exit 0, container written, no diagnostic (fragment-output-precision).
         // The destination's width is the entry's DECLARED return type; the
         // out-parameter spelling of the same assignment already broadcasts
         // because its declared parameter is what the loop above reads.
@@ -8386,7 +8386,7 @@ private:
     // `a < b` on two varyings compared b with itself, and a comparison of
     // a uniform against a literal appended two const blocks after one
     // instruction, so the second was decoded as an instruction
-    // (t_40dd8159).  Everything not listed here is unary and cannot
+    // (fragment-operand-selector-limits).  Everything not listed here is unary and cannot
     // reach either rule.
     static bool isArithmeticOp(VOp op)
     {
@@ -8551,7 +8551,7 @@ private:
     // dot(p.xyz, n.zyx) as IN0.xyzx, R0.zyxz and dot(p.xyz, n.www) as
     // R0.wwww).  applyDp3Swizzle assumed an identity operand and reset a
     // swizzled one to xyz - a wrong value on every swizzled dot that went
-    // through the input staging (t_9d0ff137 review: codex).
+    // through the input staging (vp-input-selector-limits review: codex).
     // Idempotent by construction - it runs in appendPreload and again in
     // the final VP DP3 block, and the cache-reuse path relies on that final
     // block alone to shape a reused temp's read (review: claude).
@@ -8617,7 +8617,7 @@ private:
             // selector, so two operands of register type INPUT read the
             // SAME varying whatever the emitter meant: `a - b` on two
             // varyings emitted as one ADD is `b - b`, silently, and the
-            // container's input mask still names both (t_e89cd261).
+            // container's input mask still names both (distinct-varying-sources).
             // Preload whenever an instruction addresses more than one
             // distinct input register - the reference does the same, and
             // it is the fragment counterpart of the vertex rule that an
@@ -8629,7 +8629,7 @@ private:
             // A VERTEX instruction has one input field too.  The reference
             // keeps the FIRST operand's input direct and stages every other
             // distinct input through a temp - one MOV per input, reused by
-            // later consumers (t_9d0ff137, C:/cgdev/vp2in-probe: p*n is
+            // later consumers (vp-input-selector-limits, C:/cgdev/vp2in-probe: p*n is
             // MOV R0 <- IN2; MUL o7 <- IN0, R0; n*p stages the position).
             const bool forceVpInputPreload =
                 profile_ == GeneralProfile::Vertex && inputs.size() > 1;
@@ -8666,7 +8666,7 @@ private:
                     // Keep one preclamped color input direct, never two:
                     // the instruction shares a single input selector.
                     // A second color must use the half preload path below
-                    // (t_e89cd261), otherwise COL0 | COL1 selects FOGC.
+                    // (distinct-varying-sources), otherwise COL0 | COL1 selects FOGC.
                     directFpColor = src.index;
                     continue;
                 }
@@ -8891,7 +8891,7 @@ private:
         // the framebuffer reads it.  Temps were allocated with no
         // knowledge of that, so a temp whose live range crossed a store
         // could be given the store's register and clobber it.  Measured on
-        // fp_discard_nested_f (t_dabb23e1): `MOVR R0, f[TEX0]` then
+        // fp_discard_nested_f (output-temporary-reuse): `MOVR R0, f[TEX0]` then
         // `SLTR R0.x, ...` - the kill fired on exactly the right pixels
         // and every surviving one was painted with the comparison.
         //
@@ -8973,7 +8973,7 @@ private:
         // number of definitions, so a program holding 18 values at a time
         // declared 62 registers and was refused by the fragment budget
         // below at 48.  The registers past the peak were never touched;
-        // only their numbers were spent (t_5dc260b0).
+        // only their numbers were spent (fragment-output-liveness).
         //
         // Fragment fallback counter: the bank above the ordinary
         // descending range, used only when a candidate is rejected.  It
@@ -9149,7 +9149,7 @@ private:
                 // results share one register and a consumer reads the same
                 // value twice.  lowerStep pins EVERY step() result to
                 // phys 0, so `step(a,x) * step(x,b)` computed a*a
-                // (t_929c0177; measured as the wrong border columns of
+                // (live-physical-register-collision; measured as the wrong border columns of
                 // test_62_v_address_register).
                 //
                 // 3aec606 made that REFUSE.  This yields instead: when the
@@ -9212,7 +9212,7 @@ private:
                         std::to_string(vi.dst.preferredPhys) +
                         " is held by a value that outlives the store; "
                         "refusing rather than composing the colour off-slot "
-                        "(t_5dc260b0)");
+                        "(fragment-output-liveness)");
                     program_.loweringFailed = true;
                     return;
                 }
@@ -9399,7 +9399,7 @@ static struct nvfx_reg regFromSource(const VSrc& src)
 // An inline constant block holds the DISTINCT values the instruction reads,
 // in first-appearance order, zero-filled; the source swizzle selects, so
 // swizzle[lane] is the index of that lane's value.  `float4(1,1,1,1)` is a
-// block of {1,0,0,0} read .xxxx, not {1,1,1,1} read .xyzw (t_642eb36e).
+// block of {1,0,0,0} read .xxxx, not {1,1,1,1} read .xyzw (literal-vector-dedup-swizzle).
 //
 // EQUALITY IS `==`, NOT THE BIT PATTERN, and the stored representative is
 // whichever value appeared FIRST.  Both halves are measured, and the second
@@ -9413,7 +9413,7 @@ static struct nvfx_reg regFromSource(const VSrc& src)
 // reference's packing of a REPEATED non-finite is not characterised -
 // float4(inf,1,inf,2) comes back painting (inf,1,2,2), float4(1,inf,inf,3)
 // paints (1,1,3,3) with both infinities gone, and float4(inf,1,3,inf) paints
-// 3.0e38 in every lane (t_b737691f).  That looked like a reason to leave
+// 3.0e38 in every lane (nonfinite-literal-dedup).  That looked like a reason to leave
 // repeated non-finites un-merged.  It is not: merging them by == packs
 // {inf,1,2,0} read .xyxz, which PAINTS THE SOURCE exactly.  Whatever loses
 // the reference's lane is a different effect, so a special case here would
@@ -9753,7 +9753,7 @@ static VSrc assignVpLiteralSource(const VSrc& literal,
     // `MOV o[n], c[467]` with C[467] declared float4, and two identical
     // vec4 literals SHARE one register.  Reading literal[0] and
     // broadcasting it - which is what this did for every literal - made
-    // every such store paint one value four times (t_3e342903).
+    // every such store paint one value four times (vp-literal-vector-pool).
     if (literal.literalLanes > 1) {
         const uint8_t lanes = literal.literalLanes;
         for (size_t idx : alloc.vectorSlots) {
@@ -9956,12 +9956,12 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             return !vi.dst.none && vi.dst.output && vi.dst.index == 1 &&
                    (vi.dst.writemask & 0x4);
         }) ? 1 : 0;
-    // A DECLARED half colour output writes H0, not R0 (t_80dad2dd).  The
+    // A DECLARED half colour output writes H0, not R0 (half-output-staging).  The
     // reference decides this from the OUTPUT PARAMETER'S TYPE and nothing
     // else - half arithmetic alone does not do it - and records it in the
     // container's outputFromH0, which the runtime reads to decide which
     // register the colour comes from - the bit values are the SDK's business
-    // and have already moved once (t_96daf53b), so they are named in
+    // and have already moved once (half-colour-depth-control), so they are named in
     // cell/gcm/gcm_fp_control.h and nowhere in the compiler.
     //
     // The PRECISION is stamped during lowering now, in
@@ -10019,7 +10019,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                 "colour in H0, the low half of R0, and a temp writes that "
                 "register after the colour is live; refusing rather than "
                 "emitting a program whose colour is clobbered by its own "
-                "scratch (t_80dad2dd)");
+                "scratch (half-output-staging)");
             return out;
         }
     }
@@ -10255,7 +10255,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                     std::to_string(vi.dst.index) + " " +
                     registerName(vi.dst.phys, vi.dst.fp16);
                 const std::string refusal =
-                    "; refusing (t_3603033d; invariant t_652d6e42)";
+                    "; refusing (select-predication-record-boundary; invariant select-source-liveness)";
                 if (vi.dst.phys < 0) {
                     out.diagnostics.push_back(context + refusal);
                     return out;
@@ -10409,7 +10409,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         // follow it.  Appending a block per source put a SECOND block after
         // an instruction whose two slots read the same uniform with
         // different modifiers (DIVSQR |u.y|, u.y - sqrt of a uniform, and
-        // pow(u, 0.5) after t_0f3b232e): the hardware decoded that block as
+        // pow(u, 0.5) after constant-exponent-pow): the hardware decoded that block as
         // the next instruction, and the container's relocation list sent
         // the runtime's uniform patch into it (found by codex, offsets
         // {32, 16} for one DIVSQR).  Two DIFFERENT constants in one
@@ -10545,7 +10545,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // R-slot budget: a program that allocates past the usable fragment
     // register file does not merely render wrong.  On RPCS3 it paints
     // nothing AND poisons the RSX state, so every later draw in the run
-    // paints nothing either (t_5dc260b0; the rig's poison canary was built
+    // paints nothing either (fragment-output-liveness; the rig's poison canary was built
     // to catch it).  Refusing is the only safe answer while the allocator
     // can produce such a program.
     //
@@ -10567,7 +10567,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             "), at or past the usable fragment budget of " +
             std::to_string(kFpTempRegisterBudget) +
             " - such a program paints nothing and poisons the RSX for every "
-            "later draw; refusing (t_5dc260b0)");
+            "later draw; refusing (fragment-output-liveness)");
         out.ok = false;
         return out;
     }
@@ -10600,7 +10600,7 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     // hand a literal a register a matrix row already owns - a silent
     // wrong value, not a compile error.  Nothing checked it while every
     // literal was a single packed lane; vector literals take a register
-    // each, so it is now reachable and refused (t_3e342903).
+    // each, so it is now reachable and refused (vp-literal-vector-pool).
     // nextLiteralReg is the NEXT register to hand out, so the LOWEST one
     // actually allocated is nextLiteralReg + 1 - and the floor register
     // itself is legal.  Comparing the next pointer instead refused a
@@ -10613,7 +10613,7 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
             std::to_string(lowestLiteralReg) + "], below c[" +
             std::to_string(program.vpConstFloor) +
             "] where the matrix uniforms start; refusing rather than "
-            "emitting a literal that reads a matrix row (t_3e342903)");
+            "emitting a literal that reads a matrix row (vp-literal-vector-pool)");
         return out;
     }
 

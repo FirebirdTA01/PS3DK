@@ -2,7 +2,7 @@
 #define RSX_CG_COMPILER_EXTENSIONS_H
 
 /*
- * rsx-cg-compiler — named extensions (t_6f3fa9c3).
+ * rsx-cg-compiler — named extensions (named-extensions).
  *
  * An extension is a deliberate departure from the reference compiler.  Every
  * one is OFF by default, so an unflagged compile is reference-compatible in
@@ -15,7 +15,7 @@
  *   --extension=<name>    enable one named extension; repeatable
  *   --list-extensions     print the supported names
  *
- * Rules the director set (t_083035ac): no blanket "all", unknown names fail,
+ * Rules the director set (named-extension-validation): no blanket "all", unknown names fail,
  * a hint comes only from a detector written for that construct - never from
  * a generic error - and correctness refusals stay on in every mode.  An
  * extension is admissible only where its enabled output reduces to something

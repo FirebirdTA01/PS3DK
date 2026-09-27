@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // THE SDK's EXACT SHAPE, guard and all (CgTutorial Metallic, MetallicFp.cg).
 #ifndef K
 #define K		(3.14159f)

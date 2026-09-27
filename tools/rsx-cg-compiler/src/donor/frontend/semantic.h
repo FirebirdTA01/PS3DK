@@ -121,13 +121,13 @@ private:
     SymbolTable symbols_;
     // The top-level declaration pass 2 is currently inside.  Calls resolve
     // only against declarations with declIndex <= this, which is how "visible
-    // at the call" survives a two-pass frontend (t_36492ad8).
+    // at the call" survives a two-pass frontend (function-visibility).
     //
     // IT IS SIZE_MAX OUTSIDE analyzeDeclarations, ON PURPOSE: anything
     // resolving from another pass - shader validation, pass 1 itself - keeps
     // the old whole-unit view.  Nothing resolves a CALL from there today
     // (review: Fable), so the value is unobservable; if something ever does,
-    // it will see the pre-t_36492ad8 behaviour and this comment is the reason
+    // it will see the pre-function-visibility behaviour and this comment is the reason
     // why.
     size_t visibleThrough_ = SIZE_MAX;
     // Pass 1's declaration count, checked against pass 2's at the end.  The
@@ -144,7 +144,7 @@ private:
     // EVERY function declaration seen, in source order - prototypes INCLUDED.
     // The symbol table does not expose a name->FunctionDecl list and could not
     // answer this anyway: overloads share a name, so the C5122 check keys on
-    // the DECLARATION a call resolved to (t_61109061).  Prototypes must be in
+    // the DECLARATION a call resolved to (prototype-default-merging).  Prototypes must be in
     // here because the semantic that is judged is the one on the FIRST
     // declaration, which is frequently a prototype, and because a call resolves
     // to the prototype - walking stops there unless the definition is found.
@@ -190,22 +190,22 @@ private:
     void collectFunctionDecl(FunctionDecl* decl);
     void collectVarDecl(VarDecl* decl);
     // Validates the SHAPE of a uniform entry parameter's default value
-    // against the reference's rules (t_4b54f26b A1).
+    // against the reference's rules (uniform-default-records A1).
     void checkParameterDefaultShape(ParamDecl* p);
     // A function REACHED from the selected entry may not carry a return
-    // semantic (t_61109061).  Runs in pass 3, after every call has resolved.
+    // semantic (prototype-default-merging).  Runs in pass 3, after every call has resolved.
     void checkNonEntrySemantics();
 public:
     // The entry-reachable set, for the IR builder: the reference emits no code
     // for a function the entry cannot reach and reports no name error from
-    // inside one, so lowering skips them (t_36492ad8).
+    // inside one, so lowering skips them (function-visibility).
     // Returns DEFINITIONS, not first declarations: the IR builder walks
     // definitions, and reachedFunctions() keys on the first declaration
     // because that is what a call resolves to.
     std::unordered_set<const FunctionDecl*> entryReachableDefinitions() const;
 private:
     // The entry-reachable function set: transitive, syntactic, no branch
-    // pruning.  One walk, shared by checkNonEntrySemantics (t_61109061) and
+    // pruning.  One walk, shared by checkNonEntrySemantics (prototype-default-merging) and
     // the deferred name findings, so there is a single notion of reachable
     // and a single place it can be wrong.
     std::unordered_set<const FunctionDecl*> reachedFunctions() const;

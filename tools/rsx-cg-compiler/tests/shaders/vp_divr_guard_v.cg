@@ -1,4 +1,4 @@
-// t_b67cf02b: division on the vertex path uses scalar RCP plus vector MUL.
+// vp-division: division on the vertex path uses scalar RCP plus vector MUL.
 // The original fragment-only DIVR boundary witness must now compile with
 // those measured vertex opcodes rather than an unmapped opcode or MOV.
 void main(float4 p : POSITION,

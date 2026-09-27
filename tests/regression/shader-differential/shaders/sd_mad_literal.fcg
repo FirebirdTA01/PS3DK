@@ -1,4 +1,4 @@
-// shader-differential — curated regression row for t_a1f43b12 (P1, fixed
+// shader-differential — curated regression row for mad-literal-data (P1, fixed
 // 6b2f010): the literal MULTIPLICAND of a fused MAD.  Until 2026-09-02 the
 // default path emitted it as {0, 0, 0, 0} (the Mul matcher stored the
 // non-varying operand in a field the MAD emitter read as a uniform to be

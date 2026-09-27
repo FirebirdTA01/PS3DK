@@ -1,5 +1,5 @@
 // A default on a NON-UNIFORM entry parameter is refused, permanently
-// (t_4b54f26b A1).  This is not an interim state: the reference refuses it
+// (uniform-default-records A1).  This is not an interim state: the reference refuses it
 // too, with a named diagnostic -
 //     error C1114: only uniform parameters to the entry function can have
 //     default values: "texcoord"

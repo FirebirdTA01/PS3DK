@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Work that FOLLOWS a discard must reach the ucode (t_72810bd7).
+# Work that FOLLOWS a discard must reach the ucode (post-discard-colour).
 #
 # THE ASSERTION FLIPPED on 2026-09-02, as the item said it would.  While
 # the post-discard lerp was not a shape this path lowered, the required
@@ -9,7 +9,7 @@
 # AND the work is there.
 #
 # "The work is there" is asserted on the UCODE, not on the container's
-# input mask.  The mask is not evidence: t_e89cd261 was a defect where the
+# input mask.  The mask is not evidence: distinct-varying-sources was a defect where the
 # mask named a varying no instruction read, so a shader can claim an input
 # it never touches.  The lerp reads TEXCOORD2, so some instruction must
 # name input source 6 - and if the lerp were dropped again, only the
@@ -50,7 +50,7 @@ if ! run "$pos" positive; then
     tail -n 10 "$work/positive.log" >&2
     fail "fp_discard_then_work did NOT compile. Its post-discard lerp is a
 shape this path lowers now; refusing it is a regression to the behaviour
-t_72810bd7 replaced."
+post-discard-colour replaced."
 fi
 
 # The container run above prints no ucode, so take the dump separately.
@@ -96,9 +96,9 @@ if TEX2 not in read:
     raise SystemExit(
         "FAIL: no instruction reads TEXCOORD2 (input source %d); the ucode "
         "names %s.  The fog lerp after the discard reads it, so the work was "
-        "dropped - which is the whole of t_72810bd7.  Asserted on the ucode "
+        "dropped - which is the whole of post-discard-colour.  Asserted on the ucode "
         "and not on attributeInputMask, because a container can name an "
-        "input no instruction touches (t_e89cd261)."
+        "input no instruction touches (distinct-varying-sources)."
         % (TEX2, sorted(read))
     )
 if TEX0 not in read:
@@ -120,7 +120,7 @@ else
     fail "negative control shader is missing: $neg"
 fi
 
-# ... and its COLOUR must land in R0 (t_5dc260b0).
+# ... and its COLOUR must land in R0 (fragment-output-liveness).
 #
 # Compiling is not enough for this shader.  On a fragment program the
 # colour output IS R0, and lowerStoreOutput's lane-by-lane branch says so
@@ -227,7 +227,7 @@ if colour != 0xF:
     raise SystemExit(
         "FAIL: the ucode writes R0 lanes 0x%X, not all four.  R0 IS the "
         "colour output on a fragment program, so a lane never written is a "
-        "lane the framebuffer reads uninitialised (t_5dc260b0)." % colour)
+        "lane the framebuffer reads uninitialised (fragment-output-liveness)." % colour)
 
 dead = []
 for n, w in enumerate(instrs):
@@ -243,7 +243,7 @@ if dead:
         "this shader every computed value feeds a kill or the colour, so a "
         "dead write means the colour was composed somewhere the framebuffer "
         "does not read - it was composed in R%d and never moved to R0 "
-        "(t_5dc260b0)."
+        "(fragment-output-liveness)."
         % (", ".join("%d->R%d" % (n, s) for n, s in dead), dead[0][1]))
 PY
 

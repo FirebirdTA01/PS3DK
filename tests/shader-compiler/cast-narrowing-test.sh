@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C-STYLE NARROWING CASTS ON VECTORS AND MATRICES (t_d03921c3).
+# C-STYLE NARROWING CASTS ON VECTORS AND MATRICES (narrowing-aggregate-casts).
 #
 # C-style casts narrowing vector or matrix dimensions:
 #   - (float3)position lowers to position.xyz (VecShuffle leading components)

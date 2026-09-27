@@ -169,7 +169,7 @@ def check(case, path):
         # inverted the comparison instead would kill the same fragments
         # here and a different set on a NaN, and would be a different
         # container either way.  This is the shape the DEFAULT path gets
-        # backwards (t_79fc6bf7) - it emits the same SGT with the test on
+        # backwards (discard-guard-completeness) - it emits the same SGT with the test on
         # NE and kills exactly the fragments that must survive.
         expect(case, "0x%02X" % g["opcode"], "0x%02X" % SGT,
                "the guard opcode")
@@ -207,7 +207,7 @@ def check(case, path):
         if ks[0] == len(insns) - 1:
             fail("then_work: the KIL is the last instruction.  A kill is "
                  "NOT a terminator - the work after a discard runs, which "
-                 "is what th06_notex proved (t_72810bd7).")
+                 "is what th06_notex proved (post-discard-colour).")
         if not any(d["end"] for d in insns[ks[0] + 1:]):
             fail("then_work: nothing after the KIL carries the "
                  "program-end flag; the post-discard work was dropped")

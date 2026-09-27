@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_f16682d5: the leading UTF-8 byte order mark extension, --extension=bom.
+# utf8-bom-extension: the leading UTF-8 byte order mark extension, --extension=bom.
 #
 # The reference compiler refuses a source that begins with EF BB BF, and so
 # do we by default.  With --extension=bom exactly one leading mark is

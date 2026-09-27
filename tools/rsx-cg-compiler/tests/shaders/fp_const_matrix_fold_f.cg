@@ -1,5 +1,5 @@
 // A file-scope CONST matrix folds into the ucode and gets NO container
-// record (t_4b54f26b A3).
+// record (uniform-default-records A3).
 //
 // evaluateConstInitializerTyped capped a constructor at four arguments, so a
 // 3x3 built from nine scalars refused with "file-scope const 'M' has an
@@ -13,7 +13,7 @@
 // are separate: constant-matrix-row-test.sh pins the complete row payloads.
 //
 // Read rows through M[i] to exercise indexing independently of matrix-product
-// lowering. t_a3f93c78 found that this folded one flattened scalar per index:
+// lowering. constant-matrix-row-index found that this folded one flattened scalar per index:
 // uv=(0.5,0.25) produced [1,0,0,1] instead of [-0.5,-1.125,-2.75,1].
 // ASYMMETRIC values, so a transposed or mis-ordered fold cannot pass.
 const static float3x3 M = float3x3

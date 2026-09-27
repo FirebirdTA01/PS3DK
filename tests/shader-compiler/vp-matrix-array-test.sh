@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_ef0cb2e0, layout/load slice. Reference PS3_475 measurements are in the
+# matrix-array-layout, layout/load slice. Reference PS3_475 measurements are in the
 # local build/array-probe/results.json: one0/one1/both/dynamic/param/mat3/
 # mixed/stride_mix. Matrix elements grow from c256, unlike vector arrays.
 set -euo pipefail

@@ -1,4 +1,4 @@
-// t_472ff302 control: the same shape with a type the compiler DOES know.  It
+// parser-progress control: the same shape with a type the compiler DOES know.  It
 // must still compile.  The progress guarantee added to the parse loop is error
 // recovery, and recovery that changes what compiles is not recovery.
 void main(uniform sampler2D t, float4 c : TEXCOORD0, out float4 o : COLOR)

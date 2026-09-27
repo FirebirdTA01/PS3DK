@@ -1,4 +1,4 @@
-// tex2Dproj -> TXP (t_483feb71), judged on pixels.  TEXCOORD0 = (u, v,
+// tex2Dproj -> TXP (projective-texture-fetch), judged on pixels.  TEXCOORD0 = (u, v,
 // 0.1 + 0.5v, 0.92 - u) from sd_pos_allch.vcg, so the projective fetch
 // samples the bound texture at (u / w, v / w) with w = 0.92 - u: a real
 // division at every pixel, not a w of one.

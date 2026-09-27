@@ -227,7 +227,7 @@ static inline u32 pack_rgba(float r, float g, float b, float a)
 int main(int argc, const char **argv)
 {
 	(void)argc; (void)argv;
-	printf("uniform-readback: fragment uniform runtime update witness (t_224f9771)\n");
+	printf("uniform-readback: fragment uniform runtime update witness (fragment-uniform-update)\n");
 
 	void *host_addr = memalign(1024 * 1024, HOST_SIZE);
 	if (!init_screen(host_addr, HOST_SIZE)) {

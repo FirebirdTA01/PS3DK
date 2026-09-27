@@ -1,4 +1,4 @@
-// t_9e90fb38.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against sce-cgc 475.
 // The expansion-value control: an explicitly defined builtin
 // expands to the SOURCE value, not the driver one, and goes on
 // doing so on every later line.

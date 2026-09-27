@@ -161,7 +161,7 @@ void SemanticAnalyzer::collectDeclarations(TranslationUnit& unit)
     // the same order, so a call inside declaration #N sees exactly #0..#N -
     // its own index included, which is what makes direct recursion resolve.
     // Indices start at 1 so that 0 stays the builtins' "always visible"
-    // (t_36492ad8).
+    // (function-visibility).
     size_t declIndex = 0;
     for (auto& decl : unit.declarations)
     {
@@ -245,11 +245,11 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
     }
 
     // Every declaration, prototypes INCLUDED, in source order, for the C5122
-    // walk in pass 3 (t_61109061).  A prototype carries no body, but it can
+    // walk in pass 3 (prototype-default-merging).  A prototype carries no body, but it can
     // carry the SEMANTIC that is judged and it is what a call resolves to.
     allFunctions_.push_back(decl);
 
-    // WHERE A DEFAULT VALUE IS LEGAL (t_4b54f26b A1).  Measured on the
+    // WHERE A DEFAULT VALUE IS LEGAL (uniform-default-records A1).  Measured on the
     // reference, which has a named diagnostic for exactly this question:
     //
     //   float2 texcoord : TEXCOORD0 = {0.5, 0.25}   -> refused, C1114
@@ -282,14 +282,14 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
             }
         }
         // A default on a HELPER parameter is legal and its omitted argument
-        // is materialised at the call site (t_36492ad8).  There is no else
+        // is materialised at the call site (function-visibility).  There is no else
         // branch: the interim refusal that used to live here is what this
         // slice removes.
     }
 }
 
 // The one default-value rule the general type checker cannot see
-// (t_4b54f26b A1): a BRACED initialiser must supply exactly the declared
+// (uniform-default-records A1): a BRACED initialiser must supply exactly the declared
 // component count and never broadcasts, while the parenthesised constructor
 // it parses into DOES broadcast from a single argument.  Measured:
 //     float4 u = float4(2)   ACCEPT [2,2,2,2]
@@ -310,7 +310,7 @@ void SemanticAnalyzer::checkParameterDefaultShape(ParamDecl* p)
     // and componentCount() describes the ELEMENT.  The reference ACCEPTS
     // `uniform float4 a[2] = { float4(1,2,3,4), float4(5,6,7,8) }`; an
     // earlier version of this check refused it, which is worse than the gap.
-    // Array defaults are not measured yet (t_2b592fc7).
+    // Array defaults are not measured yet (array-default-records).
     if (p->type->arraySize > 0) return;
     if (p->defaultValue->kind != ExprKind::Constructor) return;
     const auto* ctor = static_cast<const ConstructorExpr*>(p->defaultValue.get());
@@ -423,7 +423,7 @@ void SemanticAnalyzer::analyzeDeclarations(TranslationUnit& unit)
                        "numbered " + std::to_string(declCountPass1_) +
                        " top-level declarations, pass 2 walked " +
                        std::to_string(declIndex) +
-                       "; call visibility would be wrong (t_36492ad8)");
+                       "; call visibility would be wrong (function-visibility)");
     }
 
 }
@@ -553,7 +553,7 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         }
 
         // A uniform entry parameter's DEFAULT is type-checked exactly like a
-        // variable's initialiser (t_4b54f26b A1).  This is the same
+        // variable's initialiser (uniform-default-records A1).  This is the same
         // analyzeExpr + checkAssignment pair analyzeVarDecl uses, and using
         // it rather than hand-rolled arithmetic is the whole point: three
         // rounds of review found width-only rules wrong in both directions -
@@ -579,7 +579,7 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         //
         // The reachability gate comes free: an undeclared name in here routes
         // through deferOrEmitNameError, which holds C1008-class findings until
-        // the reached set is known (t_36492ad8 commit 1).  currentFunction_ is
+        // the reached set is known (function-visibility commit 1).  currentFunction_ is
         // already this declaration, so the finding is attributed correctly.
         if (param->defaultValue && !resolvedType.isError())
         {
@@ -814,7 +814,7 @@ void SemanticAnalyzer::analyzeDeclStmt(DeclStmt* stmt)
 {
     // EVERY declarator, not just the first: `float a, b;` declares both, and
     // analysing only the first is what made a declared name read as
-    // undeclared later (t_a90b1ef1).  The existing redefinition check below
+    // undeclared later (multiple-declarators).  The existing redefinition check below
     // then also does its job on `float a, a;`, which used to compile.
     for (const auto& declaration : stmt->declarations)
     {
@@ -848,7 +848,7 @@ void SemanticAnalyzer::analyzeDeclStmt(DeclStmt* stmt)
         // it does so whether or not the function is reachable, so it is not
         // the deferred C1008 class.  Keyed by the SCOPE INSTANCE: use outer /
         // declare inner, use inner / declare outer, two sibling blocks and
-        // file-scope-later are all LEGAL and must stay accepted (t_17071b54).
+        // file-scope-later are all LEGAL and must stay accepted (file-scope-forward-visibility).
         if (symbols_.currentScopeHadUnresolvedUse(varDecl->name))
         {
             error(varDecl->loc, "the name '" + varDecl->name +
@@ -1052,7 +1052,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     // on two different lookups).
     //
     // A NON-FUNCTION binding still counts as visible here.  A file-scope
-    // variable declared later is the separately carded t_17071b54 case, and
+    // variable declared later is the separately carded file-scope-forward-visibility case, and
     // treating it as invisible would change that behaviour inside this commit
     // rather than on its own card.
     {
@@ -1253,7 +1253,7 @@ CgType SemanticAnalyzer::analyzeIndexExpr(IndexExpr* expr)
     // float or half index with int() semantics - a constant truncates
     // toward zero (u[1.7] is u[1], u[-0.5] is u[0], u[4.0] on four
     // elements is C1068), and a run-time float index is the same address
-    // register load as u[int(idx)] (t_050bebce).  The builder inserts the
+    // register load as u[int(idx)] (float-array-index-conversion).  The builder inserts the
     // truncation; the constant evaluator applies it.
     if (!indexType.isIntegral() && !indexType.isFloatingPoint())
     {
@@ -1283,7 +1283,7 @@ CgType SemanticAnalyzer::analyzeIndexExpr(IndexExpr* expr)
     {
         // Indexing a matrix returns a column vector
         // M[i] is a ROW: a vector as wide as the matrix has COLUMNS.  Rows
-        // and columns only coincide for square matrices (t_bc130064).
+        // and columns only coincide for square matrices (rectangular-matrices).
         return CgType::Vec(arrayType.scalarKind(), arrayType.matrixCols());
     }
 
@@ -1455,14 +1455,14 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
     // arraySize elements of the element type: `static const float2 taps[2] =
     // { float2(1,2), float2(3,4) }` needs 4 components, not 2, and the
     // reference accepts the constructor, nested and flat spellings
-    // byte-identically (t_6a929b40, measured; nested braces are still the
+    // byte-identically (aggregate-constructor-component-count, measured; nested braces are still the
     // parser's gap).
     int requiredComponents = constructedType.componentCount();
     if (constructedType.isArray())
         requiredComponents = constructedType.elementType().componentCount() * constructedType.arraySize();
 
     // Single-argument constructors in Cg are casts: narrowing is accepted,
-    // widening is refused with "error C1033: cast not allowed" (t_d03921c3).
+    // widening is refused with "error C1033: cast not allowed" (narrowing-aggregate-casts).
     bool allowSingleArg = false;
     if (expr->arguments.size() == 1 && !singleArgType.isError())
     {
@@ -1494,7 +1494,7 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
 
     // A matrix constructor packs its arguments ROW-MAJOR, and a VECTOR
     // argument may not straddle a row boundary.  Measured on the reference
-    // (2026-09-15, t_bc130064, .local/probe-rect m1-m11): float2x2(float2, s, s),
+    // (2026-09-15, rectangular-matrices, .local/probe-rect m1-m11): float2x2(float2, s, s),
     // float2x2(s, s, float2), float3x3(float3, s, s, s, float3),
     // float3x4(float2, float2, float4, float4) and float4x4(eight float2) all
     // ACCEPT; float2x2(s, float2, s), float4x3(float2, float2, ...) and
@@ -1707,7 +1707,7 @@ void SemanticAnalyzer::validateShader()
 }
 
 // A function REACHED FROM THE SELECTED ENTRY may not carry a RETURN semantic
-// (t_61109061).  MEASURED, because the diagnostic's own text is wrong about its
+// (prototype-default-merging).  MEASURED, because the diagnostic's own text is wrong about its
 // rule - it says "semantics not allowed on functions other than the entry
 // function", and the reference accepts two shapes that sentence forbids:
 //
@@ -1737,7 +1737,7 @@ void SemanticAnalyzer::validateShader()
 //    fixtures cover it behaviourally.
 // THE ONE REACHABILITY WALK.  Transitive and syntactic from the selected
 // entry, with no branch pruning - a call inside `if (false)` still reaches,
-// measured on the reference (t_61109061, and again for the C1008 class here).
+// measured on the reference (prototype-default-merging, and again for the C1008 class here).
 // It runs AFTER pass 2 so CallExpr::resolvedFunction is fully populated;
 // deciding reachability from a partly-resolved graph would under-approximate
 // the reached set, and under-approximating means SUPPRESSING a diagnostic the
@@ -1769,7 +1769,7 @@ std::unordered_set<const FunctionDecl*> SemanticAnalyzer::reachedFunctions() con
     //
     // C5122 SHARES THIS ROOT SET - measured, not assumed, because widening a
     // separately-measured graph on a hunch is how the prototype hole got into
-    // t_61109061.  A helper carrying a return semantic and called ONLY from a
+    // prototype-default-merging.  A helper carrying a return semantic and called ONLY from a
     // static initialiser is refused C5122 by the reference, while the same
     // helper never called at all is accepted.  So one walk serves both.
     for (VarDecl* global : allGlobalVars_)
@@ -1901,7 +1901,7 @@ bool SemanticAnalyzer::sameSignature(const FunctionDecl* a,
         // matrixRows/Cols and arraySize and differ only underneath.  Comparing
         // the flat fields merged those two overloads, which made the semantic
         // of one apply to a call that resolved to the other - measured as BOTH
-        // a new over-refusal and a missed refusal (t_61109061, found in review).
+        // a new over-refusal and a missed refusal (prototype-default-merging, found in review).
         // CgType::equals is the tree-walking identity the rest of the analyser
         // already uses; a second, shallower notion of "same type" living only
         // in this check is exactly how the two drift apart.

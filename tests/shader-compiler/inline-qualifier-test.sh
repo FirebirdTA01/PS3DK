@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_fe384b97: `inline` is a function qualifier the hardware compiler accepts
+# inline-function-qualifier: `inline` is a function qualifier the hardware compiler accepts
 # and ignores.  The general path lexed it as an identifier and rejected it as
 # an unknown type name, so every shader that declared an inline helper - 110
 # of the internet survey's remaining refusals - failed to compile.  The

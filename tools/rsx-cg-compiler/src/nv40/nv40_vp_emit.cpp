@@ -2477,7 +2477,7 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 // nothing else.  Recording it as a plain Const source lets
                 // the existing StoreOutput path emit exactly that; without
                 // it the store fell through to "not a direct Load or
-                // matvecmul" and the shader did not build (t_9da20b33).
+                // matvecmul" and the shader did not build (uniform-matrix-row-index).
                 //
                 // The row comes from OPERAND 1, not componentIndex: the IR
                 // for m[0] and m[2] differ only in that operand, and both
@@ -2654,7 +2654,7 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                 // `float4(float2_uv, 0, 1)` emit (uv.x, 0, 1, unwritten)
                 // and `float4(pos.xyz, 1)` emit (pos.x, 1, -, -), silently
                 // - the literals landed one lane early and the tail was
-                // never written (t_14d18f02).  Only the exact
+                // never written (vp-constructor-lane-layout).  Only the exact
                 // `float4(float3_input, literal)` shape was ever right,
                 // because it has its own case above.
                 int lane = 0;
@@ -2666,7 +2666,7 @@ UcodeOutput lowerVertexProgram(const IRModule& module, const IRFunction& entry,
                     // attribute, or a const register such as a matrix ROW
                     // (`float4(m[2], 1.0f)`).  A float2 fills x and y, a
                     // float3 x through z.  Const sources reach here only
-                    // since matrix rows resolve (t_9da20b33); before that
+                    // since matrix rows resolve (uniform-matrix-row-index); before that
                     // the whole shape refused, so this branch had no way
                     // to be wrong about them and no reason to handle them.
                     auto srcIt = valueToSource.find(id);

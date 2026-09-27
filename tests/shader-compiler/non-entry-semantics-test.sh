@@ -21,7 +21,7 @@
 # So the rule is transitive reachability from the SELECTED entry over the
 # SYNTACTIC call graph, without branch pruning, and default-argument
 # expressions create no edge.  ONLY THE ACCEPTANCE TABLE IS THE RULE; the
-# diagnostic is the compiler's account of it (t_61109061).
+# diagnostic is the compiler's account of it (prototype-default-merging).
 #
 # WHY THE CONTAINER ROWS EXIST.  The check walks the AST for call edges.  A
 # walker that misses ONE node kind under-approximates reachability, and
@@ -152,7 +152,7 @@ accept fp_c5122_nosem_f               "called helper with no semantics (control)
 
 # ---- the default-argument EXCLUSION control ----
 # A call in a default-argument expression creates no edge.  Both files are
-# refused TODAY by the constant evaluator (t_d60fbc59), so a bare "we refuse
+# refused TODAY by the constant evaluator (entry-default-call-fold), so a bare "we refuse
 # it" proves nothing - it would look the same if the walk wrongly descended.
 # The pair does: the two differ ONLY in the semantic, so identical diagnostics
 # mean the semantic did not matter, which is what "no edge" means.
@@ -162,7 +162,7 @@ accept fp_c5122_nosem_f               "called helper with no semantics (control)
 # codex measured exactly that against a wrapper returning 134 (2026-09-14).  So
 # each file is first held to the same bar as every other refusal row here -
 # exit 1 exactly, the named evaluator diagnostic, no container - and only then
-# are the two compared.  When t_d60fbc59 lands and the fold starts working,
+# are the two compared.  When entry-default-call-fold lands and the fold starts working,
 # this becomes exit 0 on both and the comparison moves to the recorded value;
 # the point is that "both failed somehow" is never the evidence.
 defarg_needle="has a default value this compiler cannot evaluate"

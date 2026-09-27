@@ -135,7 +135,7 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 	// following code back where it started.  Track the LOGICAL position
 	// instead - the file and line the text claims, updated from the markers we
 	// pass through - and emit a marker wherever the emitted text stops being
-	// contiguous with it (t_1366b9b9).
+	// contiguous with it (diagnostic-source-location).
 	int logicalLine = 1;
 	std::string logicalFile = filename;
 	int nextEmittedLine = 1;
@@ -228,7 +228,7 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 	// included - and the parser's refusal that follows would otherwise be
 	// unexplained.  Refusing here instead was wrong twice over: libretro's
 	// compat_macros.inc never closes its include guard and every shader in
-	// that corpus includes it (t_d594ccd9).
+	// that corpus includes it (include-preprocessor-state).
 	if (includeDepth == 0 && !conditionalStack.empty() && !conditionalStack.top().active)
 	{
 		std::cerr << filename << ": warning: unmatched #if - the rest of the unit was skipped\n";
@@ -265,14 +265,14 @@ void Preprocessor::initBuiltinMacros()
 	// The PSVita donor's set is gone on purpose: a shader that tests one of
 	// those names must take the same branch it takes on the reference. The
 	// SDK's SpuRender shaders test __CGC__ and fall into their PPU/SPU enum
-	// branch without it (t_1704e79e).
+	// branch without it (preprocessor-predefined-macros).
 	defineMacro("__CGC__", "20000");
 	defineMacro("__SCE_CGC__", "20000");
 }
 
 // ONE predicate for both spellings, because the reference has #ifdef and
 // #if defined agree on every cell, and two nearly-identical predicates is how
-// they stop agreeing (t_9e90fb38).  It asks the BINDING, never the name - see
+// they stop agreeing (preprocessor-defined-operator).  It asks the BINDING, never the name - see
 // MacroDefinition::countsAsDefined for the measured table.
 template <class Map>
 bool isDefinedMacro(const Map& macros, const std::string& name)
@@ -462,7 +462,7 @@ void Preprocessor::processInclude(const std::string& directive, std::string& out
 		// every macro a header defined was invisible to the file that
 		// included it, and a conditional left open at the header's end
 		// was an error rather than a block that continues in the includer
-		// (t_d594ccd9).  Only the current-file name is per file; the
+		// (include-preprocessor-state).  Only the current-file name is per file; the
 		// macro table, the conditional stack and the include set are the
 		// unit's.
 		// process() rebinds __FILE__ to the file it is given, so the
@@ -515,7 +515,7 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 	// The rule changes what the BODY IS, not merely whether we accept:
 	// `#define K (x) (2.0)` is object-like with body "(x) (2.0)" and the
 	// reference expands it and then fails on the undefined x (C1008),
-	// which is the cell that proves it (t_7cc742ed).
+	// which is the cell that proves it (macro-parenthesis-adjacency).
 	std::regex defineRegex(R"(#\s*define\s+(\w+)(\(([^)]*)\))?[ \t]*(.*))");
 
 	if (std::regex_search(directive, match, defineRegex))
@@ -1256,7 +1256,7 @@ static bool needsSpaceBefore(TokenType prevType, TokenType currType)
 // mutual cycle (`#define A B` / `#define B A`) stops when the name comes
 // round again.  The text-based fixpoint loop this replaced re-tokenised the
 // whole line after every substitution and so could not remember what had
-// already been expanded: on either shape it never terminated (t_53363b4b).
+// already been expanded: on either shape it never terminated (recursive-macro-termination).
 // The reference accepts both shapes; a preprocessor that spins cannot be
 // worked around at all.
 namespace {
@@ -2064,7 +2064,7 @@ bool Preprocessor::evaluateExpression(const std::string& expr)
 	// every object-like macro - it reported false exactly when the macro was
 	// defined, silently, on the branch, with no diagnostic.  The one shape it
 	// got right was a FUNCTION-LIKE macro, whose name survives `defined(F)`
-	// untouched because the "(" belongs to the operator (t_9e90fb38).
+	// untouched because the "(" belongs to the operator (preprocessor-defined-operator).
 	std::string processedExpr = trim(expandMacros(expr, "<expr>", 1, 1, true));
 
 	// An empty condition is an error in the directive, not false:

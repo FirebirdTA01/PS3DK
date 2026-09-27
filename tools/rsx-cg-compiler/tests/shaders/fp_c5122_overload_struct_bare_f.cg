@@ -1,4 +1,4 @@
-// t_61109061 OVERLOAD IDENTITY, STRUCT PARAMETERS.  Companion to the array
+// prototype-default-merging OVERLOAD IDENTITY, STRUCT PARAMETERS.  Companion to the array
 // pair: array identity hides in TypeNode::elementType, STRUCT identity hides in
 // structName and structFields.  One comparator (CgType::equals) reaches both
 // today, so these rows exist to keep a future struct-specific narrowing from

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FLUSH HALF SUBNORMALS TO ZERO IN CONSTANT EVALUATION (t_30825aaa).
+# FLUSH HALF SUBNORMALS TO ZERO IN CONSTANT EVALUATION (half-subnormal-flush).
 #
 # Reference compiler sce-cgc (PS3_450/475) oracle measurement across regions:
 # (where he = half exponent = float_exp - 127 + 15, normal halfs have he >= 1):

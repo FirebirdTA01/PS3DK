@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-fp-binding-') as td:
             src.write_text(source if bound else source.replace(':register(C9)','').replace(':C9','').replace(':C009','').replace(':C256','').replace(':C255',''))
             result=subprocess.run([compiler,'-p','sce_fp_rsx','--legacy-lowering' if legacy else '--general-lowering','--emit-container',str(out),str(src)],capture_output=True,text=True,timeout=20)
             if refusal:
-                require(result.returncode==1 and 'overlapping used FP constant bindings' in result.stderr and 't_642131af' in result.stderr,
+                require(result.returncode==1 and 'overlapping used FP constant bindings' in result.stderr and 'shared-embedded-patch-ownership' in result.stderr,
                         name+': expected named interim alias refusal, got '+str(result.returncode)+' '+result.stderr)
                 return
             if result.returncode!=0:
@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-fp-binding-') as td:
         for key,want in expected.items():require(records.get(key)==want,name+': '+str(key)+' '+str(records.get(key))+' != '+str(want))
         for key,want in (defaults or {}).items():require(values.get(key)==want,name+': wrong default '+str(key)+' '+str(values.get(key)))
     # C<N> on a sampler is a different binding family. Preserve its existing
-    # automatic unit and compact resource shape pending t_53a99605.
+    # automatic unit and compact resource shape pending sampler-constant-binding.
     for spelling in ('C9','register(C9)'):
         run('sampler-'+spelling,'uniform sampler2D s:'+spelling+'; float4 main(float2 p:TEXCOORD0):COLOR{return tex2D(s,p);}',
             {('s',0xffffffff):(1066,2048,0xffffffff,'',1,0)},compact=True)

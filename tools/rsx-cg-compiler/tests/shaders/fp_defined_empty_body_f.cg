@@ -1,4 +1,4 @@
-// t_9e90fb38.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against sce-cgc 475.
 // THE SHAPE THE SDK ACTUALLY USES: a configuration macro with an EMPTY
 // body. mrt_configuration.h spells it `#define EYE_SPACE_NORMALS` and
 // normal_transformation.cgh tests it with #elif defined (...). Expanding

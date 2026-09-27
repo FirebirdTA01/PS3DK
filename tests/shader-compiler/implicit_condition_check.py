@@ -1,4 +1,4 @@
-"""t_10e54e01: numeric conditions mean != 0, including fractions and negatives.
+"""numeric-condition-truth: numeric conditions mean != 0, including fractions and negatives.
 
 Reference 475: scalar float/half/int if, ternary, !, && and ||; both profiles.
 The two FP float/half ternary spellings have different reference bytes (MOVRC
@@ -95,7 +95,7 @@ def main(compiler):
                     require(blobs[0]==blobs[1],profile+'-literal-'+label+'-'+route+': bool constant twin differs')
                     if label=='zero-div-zero':
                         # Reference still emits a comparison against zero;
-                        # ours eagerly folds 0/0 to zero (t_3ff60769).
+                        # ours eagerly folds 0/0 to zero (zero-division-constant-fold).
                         # Same value; these are NOT reference-byte twins.
                         shape_gaps+=1
                     else:twins+=1

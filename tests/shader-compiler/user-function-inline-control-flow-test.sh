@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_7a4e3b36: user functions are inlined at the call site (there is no call
+# user-function-inlining: user functions are inlined at the call site (there is no call
 # instruction on NV40).  The inliner used to accept only straight-line bodies
 # ending in `return expr`, so a helper with an if/else in it, or a void helper
 # that writes file-scope state, made the whole program refuse: five
@@ -76,7 +76,7 @@ forbid() {   # <stem> <regex that must match no line>
 # The join must be WIRED, not merely present: the compare's destination lane
 # has to be read by a later instruction (the select/blend), and the row's
 # output must come from that consumer.  A compare that nothing reads is the
-# exact shape of the defect (t_cf17f501 / codex's review of d204f228: MUL,
+# exact shape of the defect (local-array-conditional-store / codex's review of d204f228: MUL,
 # SGT unused, MOV o0 <- MUL).  Works over vp_words.py and fp_sources.py lines.
 joined() {   # <stem> <compare opcode regex>
     python3 - "$work/$1.dec" "$2" <<'PYEOF' || { cat "$work/$1.dec" >&2; fail "$1: the compare's result is never read (unjoined store)"; }
@@ -258,16 +258,16 @@ expect fp_inline_param_inner_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]
 # Per-scope state is per FUNCTION: another function's local shadowing G
 # must leave nothing behind that a helper called from main could be bound
 # to (the stash is cleared with the rest of ScopeState at function exit;
-# the two-entry-point leak witness from the t_7a4e3b36 review).
+# the two-entry-point leak witness from the user-function-inlining review).
 accept vp_inline_cross_function_stash_v sce_vp_rsx "another function shadows G with a local; main's get() still reads the global p"
 expect vp_inline_cross_function_stash_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
 forbid vp_inline_cross_function_stash_v '^[0-9]+ MUL '
-accept fp_local_array_if_f sce_fp_rsx "LOCAL array: if (uv.x > 0.5) a[0] = 1.0 selects, not overwrites (t_cf17f501, red on the tip)"
+accept fp_local_array_if_f sce_fp_rsx "LOCAL array: if (uv.x > 0.5) a[0] = 1.0 selects, not overwrites (local-array-conditional-store, red on the tip)"
 joined fp_local_array_if_f 'SGT|SLT|SGE|SLE'
 accept fp_global_array_if_f sce_fp_rsx "file-scope array in a fragment program, conditional store"
 joined fp_global_array_if_f 'SGT|SLT|SGE|SLE'
 
-# The ENTRY function's parameters are a scope like its locals (t_3af598c8).
+# The ENTRY function's parameters are a scope like its locals (inline-entry-parameter-scope).
 # A parameter that shadows a file-scope name: an inlined helper reading that
 # name reads the GLOBAL (reference: MOVR R0, G from the uniform, both records
 # listed), and a helper WRITING it leaves the parameter alone (reference:
@@ -281,7 +281,7 @@ accept vp_inline_entry_param_write_v sce_vp_rsx "set() writes the global G while
 expect vp_inline_entry_param_write_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
 forbid vp_inline_entry_param_write_v 'src0=C[0-9]+'
 count  vp_inline_entry_param_write_v '^[0-9]+ ' 1
-accept fp_inline_entry_param_read_f sce_fp_rsx "fragment twin: main's PARAMETER G shadows the global get() reads (the t_3af598c8 witness)"
+accept fp_inline_entry_param_read_f sce_fp_rsx "fragment twin: main's PARAMETER G shadows the global get() reads (the inline-entry-parameter-scope witness)"
 expect fp_inline_entry_param_read_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.'
 forbid fp_inline_entry_param_read_f 's0=TEX0'
 accept fp_inline_entry_param_write_f sce_fp_rsx "fragment twin: set() writes the global while main's PARAMETER G is live: main returns TEXCOORD0"
@@ -317,7 +317,7 @@ factor vp_inline_local_rebound_v vp 6
 forbid vp_inline_local_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
 
 # The stash captures the global's binding ONCE (stashShadowedGlobal's
-# capture-once clause), and since t_3af598c8 that clause has a second caller:
+# capture-once clause), and since inline-entry-parameter-scope that clause has a second caller:
 # the parameter loop.  With it removed, a later shadowing declaration re-stashes
 # the EARLIER local (or the parameter) as "the global" and get() returns that
 # instead of loading the uniform (review: claude - mutant emitted MUL IN0*2 then
@@ -334,7 +334,7 @@ forbid fp_inline_param_then_local_shadow_f 's0=TEX0'
 forbid fp_inline_param_then_local_shadow_f '^[0-9]+ MUL '
 count  fp_inline_param_then_local_shadow_f '^[0-9]+ ' 2
 
-# ------------------------------------------------- block exit (t_7396e0c2)
+# ------------------------------------------------- block exit (dead-branch-local-predication)
 # A block's own declarations end with it: ScopeState's fourth boundary row.
 # Every row below is reference-measured (C:/cgdev/block-probe); the values are
 # the reference's, the SHAPE differs only by the standing export-fold MOV, the
@@ -395,10 +395,10 @@ accept fp_inline_loop_f sce_fp_rsx "a proven three-trip helper loop expands"
 accept fp_inline_loop_explicit_f sce_fp_rsx "the reference-identical explicit expansion"
 cmp -s "$work/fp_inline_loop_f.bin" "$work/fp_inline_loop_explicit_f.bin" || fail "helper loop differs from explicit expansion"
 refuse "out parameters on the helper"         vp_inline_void_out_v     sce_vp_rsx "out/inout parameters are not supported"
-# NESTED shadowing, formerly REFUSED by name (t_cf17f501's placeholder): an
+# NESTED shadowing, formerly REFUSED by name (local-array-conditional-store's placeholder): an
 # enclosing helper's parameter now stashes the global at binding and its
 # locals stash at declaration / unstash at block exit, so a nested helper
-# reads and writes the GLOBAL through the stash (t_1de985bd).  Every value
+# reads and writes the GLOBAL through the stash (inline-global-stash).  Every value
 # below is the reference's (sce-cgc 450, C:/cgdev/refusal-probe): the global
 # p in the three reads, and 2*(3*p) for the nested writer under an enclosing
 # parameter shadow - a write that the old epilogue would have ERASED with the

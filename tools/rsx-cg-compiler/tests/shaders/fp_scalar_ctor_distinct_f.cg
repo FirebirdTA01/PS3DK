@@ -1,4 +1,4 @@
-// t_75de19a1 negative control: three DIFFERENT scalars are not a broadcast.
+// scalar-constructor-broadcast negative control: three DIFFERENT scalars are not a broadcast.
 // This must keep packing lane by lane and must not compile to the
 // broadcast fixture's bytes - a fold that keyed on width alone would.
 struct Result { float4 colour : COLOR; };

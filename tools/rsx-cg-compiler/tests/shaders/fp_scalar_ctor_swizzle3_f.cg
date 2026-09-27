@@ -1,4 +1,4 @@
-// t_75de19a1 INDEPENDENT control: the same program spelled as a swizzle
+// scalar-constructor-broadcast INDEPENDENT control: the same program spelled as a swizzle
 // broadcast, `.bbb`, which never goes through the vector constructor.  Its
 // bytes are the oracle for float3(s): the two must agree, and this one
 // cannot be broken by a wrong constructor lowering.  Measured: the

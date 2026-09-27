@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # refusal-status-adversary-test.sh - a guard that cannot tell a refusal from a
-# crash is not a guard (t_fd95d1b9).
+# crash is not a guard (crash-versus-refusal-status).
 #
 # Every script in this directory that asserts "the compiler must REFUSE this"
 # is asserting something about an exit status, and `did not exit 0` is not that

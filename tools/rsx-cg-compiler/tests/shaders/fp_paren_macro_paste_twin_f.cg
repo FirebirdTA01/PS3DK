@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // The hand-expanded spelling that ALL FIVE paste rows must equal.  Measured,
 // not assumed: left, right, both, the nested ID(CAT(...)) and the ordinary
 // local-variable paste all produce one container on the reference

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Tests reflection resources for fragment varyings and MRT outputs:
-# - t_9f843922: WPOS varying reflection resource (CG_WPOS = 2373 / 0x0945)
+# - fragment-wpos-reflection: WPOS varying reflection resource (CG_WPOS = 2373 / 0x0945)
 #   Reference artifact: ShowDepth_frag.reference.bin (inputs.wPos sem=WPOS res=2373)
-# - t_cb6013f5: COLOR0..3 output reflection resources (2757..2760)
+# - fragment-colour-reflection: COLOR0..3 output reflection resources (2757..2760)
 #   Reference artifacts: sdk_fpshader_flat_notex_8658d8_ref.fpo (COLOR0=2757, COLOR1=2758, COLOR2=2759)
 #                        sdk_fpclearfloat4_b35acb_ref.fpo (COLOR3=2760)
 set -euo pipefail
@@ -77,7 +77,7 @@ def parse_params(path):
         })
     return params
 
-# 1. WPOS fixture check (t_9f843922)
+# 1. WPOS fixture check (fragment-wpos-reflection)
 wpos_params = parse_params(os.path.join(work, 'fp_wpos_resource_f.fpo'))
 wpos_rec = next((p for p in wpos_params if p['sem'] == 'WPOS' and p['direction'] == 4097), None)
 if not wpos_rec:
@@ -89,7 +89,7 @@ else:
     if wpos_rec['type'] != 1048:
         errors.append(f"fp_wpos_resource_f: WPOS CGtype is {wpos_rec['type']}, expected 1048 (CG_FLOAT4)")
 
-# 2. MRT COLOR0..3 output fixture check (t_cb6013f5)
+# 2. MRT COLOR0..3 output fixture check (fragment-colour-reflection)
 mrt_params = parse_params(os.path.join(work, 'fp_mrt_resource_f.fpo'))
 expected_colors = {
     'COLOR0': 2757,

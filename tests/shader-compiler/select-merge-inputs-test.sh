@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A vector-valued if/else merge of two RAW INPUTS keeps its width (t_7b20ffdc).
+# A vector-valued if/else merge of two RAW INPUTS keeps its width (vector-input-select-lanes).
 #
 # `float4 r; if (c.x > k) r = c; else r = d; o = r;` with c and d function
 # parameters.  The IR builder typed that merge's Select from the
@@ -31,7 +31,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # this wherever a compile's status is captured, whichever way that compile is
 # expected to go: it is silent for 0 and for 1 and names anything else.
 # Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
+# one from a SIGABRT (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
@@ -145,7 +145,7 @@ if bad:
         "FAIL: this fixture merges two float4 INPUTS, and the reference "
         "writes all four lanes on every value move of that merge; a MOV "
         "from an input with a partial mask here is the merge collapsing "
-        "to one lane (t_7b20ffdc).  Offending instructions:\n" + lines
+        "to one lane (vector-input-select-lanes).  Offending instructions:\n" + lines
     )
 PY
 if [[ ${#logs[@]} -eq 2 ]]; then

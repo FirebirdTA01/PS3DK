@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_397b859b: two-mode census.  Every tracked shader fixture is compiled with
+# tracked-shader-census: two-mode census.  Every tracked shader fixture is compiled with
 # no extensions and again with --extension=bom, and the flag must move
 # NOTHING except the constructs it names.
 #

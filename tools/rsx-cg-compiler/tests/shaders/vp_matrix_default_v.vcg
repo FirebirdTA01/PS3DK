@@ -1,4 +1,4 @@
-// Matrix reflection in the vertex container (t_4b54f26b A3, t_d90dbaed).
+// Matrix reflection in the vertex container (uniform-default-records A3, matrix-default-reflection).
 //
 // THREE things at once, because they can only be seen together:
 //   M    an INITIALISED file-scope matrix uniform.  The reference leaves the

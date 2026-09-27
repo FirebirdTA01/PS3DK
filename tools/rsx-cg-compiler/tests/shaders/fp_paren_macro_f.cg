@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // AN OBJECT-LIKE MACRO WHOSE BODY STARTS WITH '(' .  A macro is
 // function-like ONLY when '(' immediately follows the name; with a space or a
 // tab between them the parenthesis is the first character of the BODY.  We

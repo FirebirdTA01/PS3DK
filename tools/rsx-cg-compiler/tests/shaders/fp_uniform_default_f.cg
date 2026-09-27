@@ -1,4 +1,4 @@
-// A file-scope uniform's initialiser is its COMPILED DEFAULT (t_3bf3ce95).
+// A file-scope uniform's initialiser is its COMPILED DEFAULT (general-lowering-default).
 //
 // The reference compiler writes the initialiser into the same inline const
 // block that a runtime patch of that name later overwrites, so the shader

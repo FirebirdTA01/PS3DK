@@ -1,4 +1,4 @@
-// t_61109061.  A function REACHED from the SELECTED ENTRY may not carry a
+// prototype-default-merging.  A function REACHED from the SELECTED ENTRY may not carry a
 // RETURN semantic.  One row per AST container that can hold a call - a walker
 // that misses a kind under-approximates reachability and ACCEPTS a program the
 // reference refuses.

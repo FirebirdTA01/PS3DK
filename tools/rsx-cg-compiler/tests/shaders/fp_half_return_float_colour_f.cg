@@ -1,4 +1,4 @@
-// t_80dad2dd / t_5c12df56: the OUT-PARAMETER WINS over the return type.
+// half-output-staging / fragment-output-precision: the OUT-PARAMETER WINS over the return type.
 //
 // The entry returns half, but the thing bound to COLOR0 is a declared
 // `out float4`, so the colour stays full precision in R0 and outputFromH0

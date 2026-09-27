@@ -1,5 +1,5 @@
 // A fragment entry's `out` parameter with NO SEMANTIC binds to COLOR
-// (t_a15ec129).
+// (implicit-colour-output).
 //
 // The store was gated on the parameter HAVING a semantic, so this shader
 // emitted no StoreOutput at all - and then everything that only fed the

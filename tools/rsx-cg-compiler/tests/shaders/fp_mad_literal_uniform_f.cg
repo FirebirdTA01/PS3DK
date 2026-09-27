@@ -1,5 +1,5 @@
 // A fused multiply-add with a LITERAL multiplier and a UNIFORM addend
-// (t_a1f43b12), the half of the defect that is not fixed by knowing both
+// (mad-literal-data), the half of the defect that is not fixed by knowing both
 // operands are literals.
 //
 // Here the emitter preloads the addend uniform into R1 correctly and then

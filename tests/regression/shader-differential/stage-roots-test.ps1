@@ -1,5 +1,5 @@
 # stage-roots-test.ps1 -- the stager's three roots resolve to the tree they
-# belong to (t_b1269234).
+# belong to (differential-stage-roots).
 #
 # The coupling this pins: the stager used to resolve every repo-relative
 # path against the tree its own code lived in, while -WslCompiler pointed

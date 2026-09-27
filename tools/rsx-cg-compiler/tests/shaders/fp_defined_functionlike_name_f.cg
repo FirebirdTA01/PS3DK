@@ -1,4 +1,4 @@
-// t_9e90fb38.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against sce-cgc 475.
 // The one shape the old code got right, and for the right reason: the "("
 // belongs to the operator, so F is never invoked and its NAME survives.
 #define F(a) a

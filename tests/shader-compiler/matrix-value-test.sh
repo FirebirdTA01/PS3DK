@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_b4024c12: matrix values that are not bare uniforms must still lower.
+# computed-matrix-values: matrix values that are not bare uniforms must still lower.
 # The fragment fixture constructs a float2x2 from scalars and immediately
 # multiplies it by a vec2.  The vertex fixture multiplies two uniform mat4
 # values, then uses the computed matrix in a matvec multiply.  Sony accepts
@@ -17,7 +17,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # this wherever a compile's status is captured, whichever way that compile is
 # expected to go: it is silent for 0 and for 1 and names anything else.
 # Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
+# one from a SIGABRT (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
@@ -51,7 +51,7 @@ compile() {
             -p "$profile" "$src"
     ) >"$log" 2>&1 || {
         tail -n 30 "$log" >&2
-        fail "$tag refused.  Matrix constructors, matrix products, and a computed matrix feeding matvec are reference-accepted shapes (t_b4024c12)."
+        fail "$tag refused.  Matrix constructors, matrix products, and a computed matrix feeding matvec are reference-accepted shapes (computed-matrix-values)."
     }
     grep -qE '^ +[0-9]+:' "$log" ||
         fail "$tag compiled but emitted no ucode"

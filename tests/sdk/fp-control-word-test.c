@@ -18,7 +18,7 @@
  * it is known right.  There are no artefact rows left: the H0+DEPTH row was
  * one while 0x0e was believed to mean "output from H0" as well as "depth
  * export", because H0-alone and H0+DEPTH then collapsed onto the same word.
- * The 2026-09-06 boots settled it (t_96daf53b) - the half output is selected
+ * The 2026-09-06 boots settled it (half-colour-depth-control) - the half output is selected
  * by the ABSENCE of 0x40 and 0x0e is depth export alone - so H0 alone and
  * H0+DEPTH are now distinct words and both are asserted. */
 #include <stdio.h>

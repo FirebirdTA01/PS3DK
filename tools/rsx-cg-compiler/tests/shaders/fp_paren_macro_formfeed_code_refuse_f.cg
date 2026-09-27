@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // A FORM FEED IN ORDINARY CODE.  The reference refuses it - error C0000:
 // syntax error, unexpected $undef - and we used to ACCEPT it, because
 // std::isspace skips it.  Pre-existing, closed here because the fix belongs in

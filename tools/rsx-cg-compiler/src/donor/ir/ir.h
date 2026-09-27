@@ -61,7 +61,7 @@ enum class IRType
 // global's metadata is attached to a different global's parameter.  They
 // disagreed on SamplerRect - the emitter counted it, the container did
 // not - so it lives here now rather than being spelled out at each of the
-// four sites that need it (t_f5f750ff).
+// four sites that need it (fragment-global-uniform-order).
 inline bool isSamplerIRType(IRType t)
 {
     return t == IRType::Sampler1D ||
@@ -173,7 +173,7 @@ enum class IROp
     Saturate,
     Ddx,
     Ddy,
-    // Pack/unpack builtins (t_23f9d1a6): one NV40 instruction each,
+    // Pack/unpack builtins (pack-unpack-intrinsics): one NV40 instruction each,
     // fragment-only.  A pack reads a vector and yields one float whose bits
     // hold the packed lanes; an unpack reads that float.
     PackHalf2,
@@ -339,7 +339,7 @@ public:
 
     // LoadUniform of an ARRAY uniform: how the element was chosen.  Explicit
     // so a lowering can never mistake element 0 for the bare array, nor a
-    // run-time index for a lane selector (t_f9ecd3ac).
+    // run-time index for a lane selector (constant-uniform-array-index).
     //   None      the bare array (no index) - only meaningful to a caller
     //             that consumes whole arrays, and refused by the lowering
     //   Constant  componentIndex holds the element, already bounds-checked
@@ -357,7 +357,7 @@ public:
     // condition is FALSE.  The reference folds a negated guard into the
     // KIL's condition-code test (NE becomes EQ) and leaves the
     // comparison alone rather than inverting it, so the flag has to
-    // travel with the instruction (CF-2, t_91bbd575).
+    // travel with the instruction (CF-2, general-path-discard).
     bool guardIsNegated = false;
     bool shortCircuitRhs = false;
     std::string targetName;          // For branch targets, function calls
@@ -429,7 +429,7 @@ struct IRParameter
     char explicitRegisterBank = 0;
     int explicitRegisterIndex = 0;
     // Compiled DEFAULT of a uniform entry parameter, evaluated from the
-    // source's `= ...` (t_4b54f26b A1).  Same shape and meaning as
+    // source's `= ...` (uniform-default-records A1).  Same shape and meaning as
     // IRGlobal::initialValue below: empty when the parameter has no default.
     // The reference records it in the parameter table and writes it into the
     // inline const block, exactly as it does for a file-scope uniform.
@@ -507,7 +507,7 @@ struct IRGlobal
     // built.  Every reference to the const folds to an IRConstant made
     // from this, so a global without it is one whose value the backend
     // would have to invent rather than read from the source - which is
-    // exactly what used to happen (t_4584aa27).  Empty means the global is
+    // exactly what used to happen (file-scope-const-initializer).  Empty means the global is
     // not a file-scope const with an evaluable initialiser; ordinary
     // uniforms leave it empty.
     std::vector<float> initialValue;
@@ -534,7 +534,7 @@ public:
     // spaces must not overlap.  Both used to start at 1, so a file-scope
     // uniform's global id landed on an entry value's id and resolved to
     // whatever that value was: a varying.  `uniform float K;` read a
-    // texcoord, silently, in a well-formed container (t_f5f750ff).
+    // texcoord, silently, in a well-formed container (fragment-global-uniform-order).
     //
     // Disjoint by base rather than by a shared counter, because the IR
     // builder identifies a just-allocated value as `nextValueId - 1` in a

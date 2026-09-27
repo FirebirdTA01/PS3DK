@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_1704e79e: the preprocessor must predefine exactly what the reference
+# preprocessor-predefined-macros: the preprocessor must predefine exactly what the reference
 # predefines.  Measured on sce-cgc 475 (2026-09-14): __CGC__ and __SCE_CGC__
 # are defined, both 20000; __CG__, _CG_, _CGC_, CGC, __psp2__, __SCE__,
 # __STDC__ and __STDC_VERSION__ are not.

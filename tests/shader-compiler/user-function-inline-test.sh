@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_fe6d143b, large half: simple source-defined functions are inlined before
+# unsafe-select-predication, large half: simple source-defined functions are inlined before
 # the NV40 backend sees the IR.  A user call that survives to IROp::Call is a
 # backend refusal today and a wrong abstraction layer: the reference compiler
 # inlines these calls into the entry program.

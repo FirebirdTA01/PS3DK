@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // The twin: the same argument bound to a parameter the body DOES name, so it
 // is expanded and refused. This is what keeps the row above from passing by
 // never expanding anything.

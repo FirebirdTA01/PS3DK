@@ -1,4 +1,4 @@
-// t_56ff2244: the swapped half of the declaration-order pair.  The order an if/else join emits its Select instructions in is
+// deterministic-join-order: the swapped half of the declaration-order pair.  The order an if/else join emits its Select instructions in is
 // part of the compiler's output, and it must come from the source rather than
 // from a hash table.  Here `depth` is DECLARED first, so its
 // select is emitted first - the opposite of fp_join_order_decl_f.cg, which is

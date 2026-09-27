@@ -1,4 +1,4 @@
-// t_36492ad8 commit 1.  REFUSE: the same through a RELAY - initialiser calls h, h calls f, f has
+// function-visibility commit 1.  REFUSE: the same through a RELAY - initialiser calls h, h calls f, f has
 // the bad name.  The root has to be transitive, not one level.
 float f(float t) { return missing; }
 float h(float t) { return f(t); }

@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // A FORM FEED IS NOT A SEPARATOR, IT IS INVALID INPUT.  The whitespace rule
 // this slice introduces stopped treating everything \s matches as separating
 // the name from the body; form feed and vertical tab are the two characters

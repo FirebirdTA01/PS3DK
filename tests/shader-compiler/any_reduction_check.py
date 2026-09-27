@@ -50,7 +50,7 @@ def cases():
         for name,values in [('zero','0.0,-0.0,0.0,-0.0'),('negative','0.0,0.0,0.0,-2.0'),('positive','0.0,3.0,0.0,0.0')]:
             setup='float4 v=float4('+values+');'
             yield profile,name,program(profile,setup,'any(v)'),program(profile,setup,'v.x!=0 || v.y!=0 || v.z!=0 || v.w!=0')
-        # t_97433f3e: reference folds this literal reduction; ours still emits
+        # constant-any-fold: reference folds this literal reduction; ours still emits
         # an exact runtime reduction. Pin it against our explicit form.
         setup='float2 v=float2(-1.0,0.0);'
         yield profile,'negative-literal-lane',program(profile,setup,'any(v)'),program(profile,setup,'v.x!=0 || v.y!=0')
@@ -104,13 +104,13 @@ def main(compiler):
         b=compile_one(compiler,root,'spatial-twin',(fixtures/'fp_any_reduction_twin_f.cg').read_text(),'sce_fp_rsx')
         require(a==b,'spatial-any: explicit reduction twin differs')
         twins+=1
-        # t_158a8918: the constructor now compares against zero. Retain the
+        # numeric-bool-conversion: the constructor now compares against zero. Retain the
         # independent truncation spelling as a near-miss control.
         setup='bool b=bool(t.x);'
         gap=compile_one(compiler,root,'bool-cast-gap',program('sce_fp_rsx',setup,'any(b)'),'sce_fp_rsx')
         wrong=compile_one(compiler,root,'bool-cast-gap-int',program('sce_fp_rsx',setup,'int(t.x)'),'sce_fp_rsx')
         correct=compile_one(compiler,root,'bool-cast-gap-correct',program('sce_fp_rsx',setup,'t.x!=0'),'sce_fp_rsx')
-        require(gap==correct and gap!=wrong,'t_158a8918: bool cast must match nonzero and differ from truncation')
+        require(gap==correct and gap!=wrong,'numeric-bool-conversion: bool cast must match nonzero and differ from truncation')
         for profile in ('sce_fp_rsx','sce_vp_rsx'):
             for label,expr in [('no-args','any()'),('two-args','any(t.x,t.y)')]:
                 compile_one(compiler,root,profile+'-'+label,program(profile,'',expr),profile,refuse=True)

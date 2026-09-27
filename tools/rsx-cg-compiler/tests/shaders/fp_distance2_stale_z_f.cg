@@ -1,4 +1,4 @@
-// t_71ad405e: distance(float2,float2) is the same narrow-dot rule as length.
+// stdlib-dot-source-width: distance(float2,float2) is the same narrow-dot rule as length.
 //
 // The operands are built as float3s with non-zero z lanes, then sliced to xy.
 // A DP3 over the two-wide delta reads a lane outside the source value.

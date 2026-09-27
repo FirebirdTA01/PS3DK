@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A file-scope uniform declared with an initialiser carries that value as
 # its compiled default, in the const block a runtime patch overwrites, and
-# stays patchable (t_3bf3ce95).  Checked in the container: the defect
+# stays patchable (general-lowering-default).  Checked in the container: the defect
 # produced a well-formed, patchable parameter over a zero block, so
 # compiling successfully proves nothing.
 set -euo pipefail

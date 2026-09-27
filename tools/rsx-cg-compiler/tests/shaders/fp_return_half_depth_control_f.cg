@@ -1,4 +1,4 @@
-// t_5c12df56 control: a HALF return that is not the colour.
+// fragment-output-precision control: a HALF return that is not the colour.
 //
 // The entry returns half for the DEPTH export while an out parameter binds
 // COLOR0 at fp32.  A COLOR0 store an out parameter owns belongs to that

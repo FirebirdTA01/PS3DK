@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_6be25fd4: a composed source must encode the same lanes as its direct form.
+# source-alias-swizzle-composition: a composed source must encode the same lanes as its direct form.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler}}"

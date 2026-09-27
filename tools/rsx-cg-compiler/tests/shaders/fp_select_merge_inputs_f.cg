@@ -1,4 +1,4 @@
-// t_7b20ffdc: a vector-valued if/else merge whose arms are RAW INPUTS.
+// vector-input-select-lanes: a vector-valued if/else merge whose arms are RAW INPUTS.
 //
 // The IR builder types the merge's Select from the then-value; function
 // parameters were never entered in the function's value map, so a raw

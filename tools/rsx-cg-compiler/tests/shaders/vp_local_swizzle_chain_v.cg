@@ -1,4 +1,4 @@
-// t_6be25fd4: the same source-map composition is shared by FP and VP.
+// source-alias-swizzle-composition: the same source-map composition is shared by FP and VP.
 // TEXCOORD1 carries the result because the VP mismatch control proves
 // that channel discriminating. POSITION remains the input quad.
 void main(float4 p : POSITION, float4 a : TEXCOORD0,

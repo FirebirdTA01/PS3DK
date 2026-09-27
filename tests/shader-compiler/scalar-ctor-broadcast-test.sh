@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_75de19a1: a vector constructor from ONE scalar is a broadcast.
+# scalar-constructor-broadcast: a vector constructor from ONE scalar is a broadcast.
 #
 #   float3(s)        float4(s)        float3(s, s, s)
 #
@@ -10,7 +10,7 @@
 # Before this the single-scalar form fell into the general packer, whose
 # operand-width sum (1) never matches a wider result, and refused - itself
 # the honest replacement for a silent miscompile that dropped the store
-# (t_c1d781ba).  This is the third and correct state.
+# (struct-member-lvalue-swizzle).  This is the third and correct state.
 #
 # What is pinned, and why each half matters:
 #   - the single-scalar spelling COMPILES (red on the parent);
@@ -67,7 +67,7 @@ accept() {  # <stem>
 }
 
 # insns <stem>: one line per INSTRUCTION, from the shared decoder
-# (fp_sources.py, t_c83277c9).  This file used to carry its own, one of six
+# (fp_sources.py, instruction-source-decoding).  This file used to carry its own, one of six
 # in the tree; the shared one owns the on-disk half-swap, the inline-constant
 # skip and the opcode-to-arity table, and it names an input source's VARYING
 # instead of the register field - which is always zero for an input, so the
@@ -125,7 +125,7 @@ insns fp_scalar_ctor_return4_f > "$work/ret4.insns"
 grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xyzw .* s0=R[0-9]+[.]yyyy$' "$work/ret4.insns" \
     || { cat "$work/ret4.insns" >&2; fail "the float4(s) return has no xyzw MOV reading .yyyy - the scalar's lane (.g) is not what reaches all four lanes"; }
 # The .gggg spelling's broadcast MOV has the same decoded fields; its bytes
-# differ from float4(s) only by the extra return-store copy (t_e3af5f18),
+# differ from float4(s) only by the extra return-store copy (return-store-copy-coalescing),
 # so the comparison here is on the decoded MOV, not on the container.
 insns fp_scalar_ctor_swizzle4_f > "$work/swz4.insns"
 grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xyzw .* s0=R[0-9]+[.]yyyy$' "$work/swz4.insns" \
@@ -134,7 +134,7 @@ printf '  %-36s == explicit, MOV xyzw <- .yyyy as .gggg\n' "float4(scalar) retur
 
 # The two-lane shape, float2(s), which the parent refused.  Its bytes are
 # one MOV longer than the .gg spelling's (the broadcast lands in a temp and
-# the consumer copies it - the same uncoalesced shape as t_e3af5f18), so the
+# the consumer copies it - the same uncoalesced shape as return-store-copy-coalescing), so the
 # pin is the decoded MOV: mask xy reading .yyyy.
 accept fp_scalar_ctor_float2_swizzle_f
 accept fp_scalar_ctor_float2_f
@@ -189,7 +189,7 @@ printf '  %-36s packed: x<-.z y<-.y z<-.x\n' "float3(a, b, c)"
 # .xyyy and put h.y into lane z (a review found exactly that mutation green
 # before this row existed).  The reference merges the pair into one MOV
 # reading .xyxy (swizzle 0x44); that merge is a separate packer gap
-# (t_53f9b8ac), and when it lands this row's pins become that single MOV.
+# (repeated-vector-move-coalescing), and when it lands this row's pins become that single MOV.
 accept fp_scalar_ctor_pair2_f
 insns fp_scalar_ctor_pair2_f > "$work/pair2.insns"
 grep -qE '^[0-9]+ MOV dst=R0 mask=xy .* s0=TEX0[.]xyxx$' "$work/pair2.insns" \

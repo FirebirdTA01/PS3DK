@@ -122,7 +122,7 @@ float4 main(float4 a : TEXCOORD0) : COLOR {
         # 5b. Parameter DEFAULTS are ACCEPTED, and the `f` suffix survives into
         # the recorded value.  These two spellings sat in the negative controls
         # above asserting rc=1, written when the parser refused every parameter
-        # default; d5cb0e5b (t_4b54f26b A1) makes them legal and the REFERENCE
+        # default; d5cb0e5b (uniform-default-records A1) makes them legal and the REFERENCE
         # accepts both - measured against sce-cgc, `light` records [10,20,30] and
         # `x` records [1.0], byte-identical to ours.  The rows were a pinned
         # REFUSAL, not a property, so they are converted rather than deleted:
@@ -216,7 +216,7 @@ float4 main(float4 a : TEXCOORD0) : COLOR {
         sdk_root = Path("C:/SDKs/Sony/SCE/PS3/475")
         if sdk_root.exists():
             # These three SDK shaders were pinned here as REFUSALS while the
-            # parser rejected every parameter default.  d5cb0e5b (t_4b54f26b A1)
+            # parser rejected every parameter default.  d5cb0e5b (uniform-default-records A1)
             # compiles all three, and the reference compiles them too - they are
             # three of the six reference-SDK rows that flipped refused->accepted
             # in the 920-row sweep for that slice.  A pinned refusal is not a

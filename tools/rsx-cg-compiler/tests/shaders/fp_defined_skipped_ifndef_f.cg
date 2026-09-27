@@ -1,4 +1,4 @@
-// t_9e90fb38.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against sce-cgc 475.
 // EVERY DOOR INTO A GROUP HAS TO SUPPRESS IT, not just #if.  My first
 // skip fix covered processIf and left processIfdef taking everActive
 // from its own predicate and processElif evaluating before it read the

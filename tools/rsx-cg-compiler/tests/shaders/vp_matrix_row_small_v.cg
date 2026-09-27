@@ -1,5 +1,5 @@
 // A row of a NON-4x4 matrix uniform, and the constructor that widens it
-// (t_9da20b33).
+// (uniform-matrix-row-index).
 //
 // Two things are asserted through this one shader.  The row index must be
 // bounded by the rows the matrix actually OWNS: `m3[3]` on a float3x3 is

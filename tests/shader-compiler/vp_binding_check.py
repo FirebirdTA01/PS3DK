@@ -1,4 +1,4 @@
-"""Reusable VP binding checks for t_49f3cc72 / t_25fa9e31.
+"""Reusable VP binding checks for vp-explicit-binding / uniform-container-consistency.
 
 The evaluator covers the vector instruction subset used by binding probes.
 Constants supplied by the caller use independently expected registers, not

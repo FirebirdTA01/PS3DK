@@ -1,4 +1,4 @@
-"""Cross-check NV40 uniform metadata against encoded operands (t_25fa9e31).
+"""Cross-check NV40 uniform metadata against encoded operands (uniform-container-consistency).
 
 This checks structural agreement, not declaration identity: swapping two live
 uniforms while preserving the register set requires independent value witnesses.

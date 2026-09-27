@@ -39,7 +39,7 @@ void Parser::initBuiltinTypes()
         "sampler", "sampler1D", "sampler2D", "sampler3D", "samplerCUBE", "samplerRECT",
         "isampler1D", "isampler2D", "isampler3D", "isamplerCUBE", "isamplerRECT",
         "usampler1D", "usampler2D", "usampler3D", "usamplerCUBE", "usamplerRECT",
-        // The Cg 1.x spelling of the five sampler types (t_5c1f84d3).  The
+        // The Cg 1.x spelling of the five sampler types (texobj-sampler-alias).  The
         // lexer maps them to the same tokens; this list is what decides
         // whether a name is a TYPE, so it has to know them too.
         "texobj1D", "texobj2D", "texobj3D", "texobjCUBE", "texobjRECT"
@@ -70,7 +70,7 @@ std::unique_ptr<TranslationUnit> Parser::parse()
         // 'bogusType x;' - and it hung --dump-ast too, because it never
         // reached a back end.  95 shaders in the reference SDK sample tree
         // never terminated, most of them over the Cg 1.x texobj2D type name
-        // (t_472ff302).  A compiler that refuses is workable; one that spins
+        // (parser-progress).  A compiler that refuses is workable; one that spins
         // cannot be worked around at all.
         const size_t before = current;
         try
@@ -468,7 +468,7 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
     // NON-SQUARE matrix type names (float3x4, half4x3 ...) are not lexer
     // keywords; they arrive as identifiers listed in typeNames.  Build the
     // matrix node from the name so they do not fall through to the struct
-    // path below as an unknown struct (t_69aeaa84 / t_bc130064).  The
+    // path below as an unknown struct (rectangular-matrix-row-access / rectangular-matrices).  The
     // reference lays an RxC matrix out as R rows of C-wide vectors.
     if (tok.type == TokenType::IDENTIFIER && tok.lexeme.size() >= 7 &&
         tok.lexeme.size() <= 8 && typeNames.count(tok.lexeme) > 0)
@@ -1045,7 +1045,7 @@ std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration(
             // Every declarator is declared.  The first is returned and the
             // rest go to the caller through extraDeclarations - returning
             // only the first is what made `float g1, g2;` declare g1 and
-            // refuse g2 as undeclared (t_a90b1ef1).
+            // refuse g2 as undeclared (multiple-declarators).
             if (!vars.empty())
             {
                 vars[0]->vitaAttrs = vitaAttrs;
@@ -1213,7 +1213,7 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
     // Check for default value.  The parser only RECORDS it; whether it is
     // legal depends on which function was SELECTED as the entry, which the
     // parser does not know - see the C1114 check in SemanticAnalyzer's
-    // function collection (t_4b54f26b A1).  This used to error here on any
+    // function collection (uniform-default-records A1).  This used to error here on any
     // '=' in any parameter list, which refused the reference's own
     // `uniform float4 light = {1,1,1,1}` spelling on seven reference-SDK
     // rows and a helper's default argument on sixteen more.
@@ -1805,7 +1805,7 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
                 vars[0]->vitaAttrs = vitaAttrs;
                 // ALL of them.  Taking vars[0] alone declared only the first
                 // name of `float a, b;`, and using the second was then
-                // refused as undeclared (t_a90b1ef1).
+                // refused as undeclared (multiple-declarators).
                 std::vector<std::unique_ptr<DeclNode>> decls;
                 decls.reserve(vars.size());
                 for (auto& var : vars)
@@ -1842,8 +1842,8 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
     // Two adjacent identifiers are never a valid expression in Cg, so the
     // shape is unambiguous: name the unknown TYPE at its own position,
     // then let the caller's recovery consume to the ';' so a second, real
-    // mistake later in the body is still reported (t_ec186f0c).  The
-    // parameter path has reported it this way since t_472ff302; this is
+    // mistake later in the body is still reported (parser-error-cascade).  The
+    // parameter path has reported it this way since parser-progress; this is
     // the local path being made to agree with it.
     if (check(TokenType::IDENTIFIER) &&
         peek(1).type == TokenType::IDENTIFIER)
@@ -1853,7 +1853,7 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
               "unknown type name '" + typeToken.lexeme + "'");
         // CONSUME THE FAILED DECLARATION.  Returning without advancing
         // leaves the statement loop on the same token, which is the same
-        // no-progress shape t_472ff302 fixed at the top level - here it
+        // no-progress shape parser-progress fixed at the top level - here it
         // exhausted memory rather than hanging, because the shader tests
         // run under a virtual-memory limit.  Stop at the ';' or at a brace
         // so the rest of the body is still parsed and its own mistakes are

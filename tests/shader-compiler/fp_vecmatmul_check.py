@@ -1,5 +1,5 @@
 """Numerical FP vecmatmul guard; square types, plus one rectangular accept row
-(rectangular values and records are judged by rect-matrix-test.sh, t_bc130064).
+(rectangular values and records are judged by rect-matrix-test.sh, rectangular-matrices).
 
 Reference475 uniform/default/constant probes all use row order 1,0,2,3.
 The explicit twin uses vector broadcasts and MADs in that measured order.
@@ -179,7 +179,7 @@ def main(compiler):
                     vector = 't.'+swizzle
                     broadcasts = [f'v.{"xyzw"[r]*width}' for r in range(width)]
                     # Keep this twin independent of matrix indexing: the
-                    # separate t_a3f93c78 guard checks M[row].
+                    # separate constant-matrix-row-index guard checks M[row].
                     rows = [f'M[{r}]' if storage != 'const' else
                             f'float{width}('+','.join(str(x) for x in matrix[r])+')'
                             for r in range(width)]
@@ -200,7 +200,7 @@ def main(compiler):
                     if storage == 'default' and width == 3 and swizzle == 'xyz':
                         mutation_controls(blob, matrix, swizzle, t)
                     count += 1
-        # A vector times a RECTANGULAR matrix is accepted since t_bc130064 (the
+        # A vector times a RECTANGULAR matrix is accepted since rectangular-matrices (the
         # reference always did: mul(float3, float3x4) is a float4 built from
         # the three rows).  Its values are executed in rect-matrix-test.sh; here
         # it must compile and its container must agree with its ucode.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_e5fced4c: the preprocessor properties no command line can reach.
+# preprocessor-entry-guard: the preprocessor properties no command line can reach.
 #
 # Three defects shipped through this blind spot and none could have been
 # caught by a test that drives the compiler through argv:
@@ -25,7 +25,7 @@
 # __FILE__ never reach the code that read the uninitialised bool, so a
 # sanitized run over those alone would pass while the defect this row exists
 # for went unexercised.
-# Marker-relative __FILE__ remains a separate open property (t_b14c4cf7).
+# Marker-relative __FILE__ remains a separate open property (marker-relative-file-macro).
 # These fixtures assert physical include filenames, not a #line rename.
 # Include restoration is checked on normal return only; restoration after an
 # included file throws is not exercised. Exact paths target the Linux CI job:

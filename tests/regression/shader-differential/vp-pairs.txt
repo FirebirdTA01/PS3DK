@@ -12,13 +12,13 @@ tests/regression/shader-readback/shaders/rb_pos_uv.vcg|0|both
 tests/regression/shader-readback/shaders/rb_xform.vcg|auto|both
 tools/rsx-cg-compiler/tests/shaders/vp_attr_inputs_v.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/vp_clp0_output_v.cg|0|general
-# t_9da20b33: a uniform matrix row index, `m_auto[0]` / `m_auto[2]`,
+# uniform-matrix-row-index: a uniform matrix row index, `m_auto[0]` / `m_auto[2]`,
 # resolves to the row's VP const register.  Both containers are byte-identical
 # to the reference under the auto matrix values, so the stager records the
 # rows and skips pixel staging until a future byte drift needs judgement.
 tools/rsx-cg-compiler/tests/shaders/vp_matrix_row0_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_matrix_row2_v.cg|auto|general
-# t_99b29225: a run-time array index (ARL + relative const read over a
+# dynamic-uniform-array-index: a run-time array index (ARL + relative const read over a
 # contiguous block).  Two computed indices, one landing on the LAST element
 # everywhere and one splitting the quad between elements 2 and 3; every
 # element has its own auto value.  The row differs from the reference in
@@ -55,13 +55,13 @@ sdk/libdbgfont/shaders/vpshader_dbgfont.vcg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_insert_alpha_first_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_insert_alpha_last_v.cg|auto|general
 
-# t_3e342903 consumer half: a float4 literal into mul(M, .) must keep four lanes.
+# vp-literal-vector-pool consumer half: a float4 literal into mul(M, .) must keep four lanes.
 tools/rsx-cg-compiler/tests/shaders/vp_literal_matrix_mul_v.cg|auto|general
 
-# t_6be25fd4: three source aliases, judged on the proven tc1 channel.
+# source-alias-swizzle-composition: three source aliases, judged on the proven tc1 channel.
 tools/rsx-cg-compiler/tests/shaders/vp_local_swizzle_chain_v.cg|auto|general
 
-# t_b67cf02b: vertex division, with quotient observed on tc1.
+# vp-division: vertex division, with quotient observed on tc1.
 tools/rsx-cg-compiler/tests/shaders/vp_div_scalar_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_div_vector_scalar_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_div_vector_vector_v.cg|auto|general
@@ -70,13 +70,13 @@ tools/rsx-cg-compiler/tests/shaders/vp_div_literal_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_div_alias_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_div_vector2_v.cg|auto|general
 
-# TWO DISTINCT INPUTS IN ONE EXPRESSION (t_9d0ff137): p.wwww * n * 0.5 + t * 0.25 reads
+# TWO DISTINCT INPUTS IN ONE EXPRESSION (vp-input-selector-limits): p.wwww * n * 0.5 + t * 0.25 reads
 # POSITION, NORMAL and TEXCOORD0; the second and third are staged through
 # temps.  The rig binds every attribute with its own lane recipe, so a wrong
 # input selector paints a different gradient.
 tools/rsx-cg-compiler/tests/shaders/vp_two_inputs_rig_v.cg|auto|general
 
-# VP scalar intrinsics witnesses: sin/cos and clamp on hardware, pixel-judged (t_542450b2)
+# VP scalar intrinsics witnesses: sin/cos and clamp on hardware, pixel-judged (vp-scalar-intrinsics)
 tools/rsx-cg-compiler/tests/shaders/vp_scalar_sin_cos_v.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/vp_scalar_clamp_sat_v.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/vp_scalar_clamp_bounds_v.cg|auto|general

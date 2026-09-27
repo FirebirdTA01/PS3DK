@@ -1,4 +1,4 @@
-// t_58e2212c: scalar tan lowers as sin/cos followed by DIVR.  The reference
+// scalar-divr-lowering: scalar tan lowers as sin/cos followed by DIVR.  The reference
 // uses DIVR for scalar division only; vector tan stays on the per-lane
 // RCP-then-MUL divide shape.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)

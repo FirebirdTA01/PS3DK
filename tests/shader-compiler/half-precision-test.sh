@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Half precision on the general path (t_b8bb521f).
+# Half precision on the general path (half-precision-lowering).
 #
 # Two fixtures, one per half of the item, each reduced from a corpus
 # shader that NO path compiled - th06_mod and th06_add, the last two of
@@ -60,7 +60,7 @@ dump() {   # $1 stem
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$1.err" >&2
         fail "$1 did not compile on the general path.  Both shapes are
-what kept th06_mod and th06_add out of every sweep (t_b8bb521f)."
+what kept th06_mod and th06_add out of every sweep (half-precision-lowering)."
     fi
     return 0
 }
@@ -88,7 +88,7 @@ if not half_dsts:
         "FAIL: fp_half_cast_f emitted no fp16-precision instruction.  On "
         "NV40 the conversion IS the register file the value lands in, so "
         "a float-to-half cast must appear as a MOV with an fp16 "
-        "destination (t_b8bb521f).")
+        "destination (half-precision-lowering).")
 
 # 2.  Every lane of the output must be written.  `half4 c;` has no
 #     initialiser, so all four come from inserts.
@@ -103,7 +103,7 @@ if lanes != 0xF:
         "FAIL: fp_insert_undef_base_f writes output lanes 0x%X, not 0xF.  "
         "Its vector is built entirely by lane writes over an "
         "uninitialised base; a lane missing here is a lost insert, and "
-        "the register keeps whatever it held (t_b8bb521f)." % lanes)
+        "the register keeps whatever it held (half-precision-lowering)." % lanes)
 
 print("half-precision: the cast reaches the ucode as fp16, and a vector "
       "built over an undefined base writes all four lanes")

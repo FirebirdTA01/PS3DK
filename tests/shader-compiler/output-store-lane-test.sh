@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # output-store-lane-test.sh - a scalar or narrow vector stored DIRECTLY to the
-# colour output must read the lanes the source selected (t_cd76485f).
+# colour output must read the lanes the source selected (output-store-swizzle).
 #
 # `return p.z` and `o = p.z` painted p.x.  The widening branch in
 # lowerStoreOutput overwrote the source's swizzle with {0,0,0,0} instead of
@@ -36,7 +36,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 # A refusal is exit 1 exactly; 124 is a timeout and >= 128 a signal, and
 # either satisfies "not zero" while meaning the compiler never decided
-# (t_fd95d1b9).
+# (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
@@ -121,7 +121,7 @@ printf '  %-38s %s\n' "narrow outputs, widths 2 and 3" "the named lanes are what
 # .yzw).  A rule that only handled ascending runs would give the right
 # lanes for those two and the wrong ones here.  Measured against the
 # reference: `o = p.wz` reads .wz, `o = p.zyx` reads .zyx, and reversed,
-# repeated and permuted selections all compose - six samples (t_cd76485f).
+# repeated and permuted selections all compose - six samples (output-store-swizzle).
 emit w2_wz  'void main(float4 p : TEXCOORD0, out float2 o : COLOR) { o = p.wz; }'
 want w2_wz '^[0-9]+ MOV dst=R0 mask=xy .* s0=TEX0[.]wz' \
     "a reversed float2 store must read w then z, not z then w"
@@ -141,7 +141,7 @@ emit via_ctor  'float4 main(float4 p : TEXCOORD0) : COLOR { return float4(p.z); 
 emit via_mul   'float4 main(float4 p : TEXCOORD0) : COLOR { return p * p.z; }'
 for stem in via_local via_ctor via_mul; do
     grep -qE 's0=TEX0[.]zzzz|s1=TEX0[.]zzzz' "$work/$stem.ins" \
-        || { cat "$work/$stem.ins" >&2; fail "$stem lost the z lane; it reached the store through a temp and was correct before t_cd76485f"; }
+        || { cat "$work/$stem.ins" >&2; fail "$stem lost the z lane; it reached the store through a temp and was correct before output-store-swizzle"; }
 done
 printf '  %-38s %s\n' "local / constructor / arithmetic" "still carry the lane"
 

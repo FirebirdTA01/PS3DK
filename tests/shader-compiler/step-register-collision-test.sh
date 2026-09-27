@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_929c0177: preferredPhys must yield when a physical register is already live;
+# live-physical-register-collision: preferredPhys must yield when a physical register is already live;
 # two simultaneously-live pinned results must not collide on the same register.
 #
 # Measured on test_62 pattern: `border = step(0.05, u) * step(u, 0.95);`
@@ -71,7 +71,7 @@ for i, w in enumerate(gs):
                 sys.exit(
                     f"FAIL: step collision on physical register R{src0_reg}: "
                     f"consuming MUL at instruction {i} reads R{src0_reg} for both operands "
-                    f"(computes a*a instead of a*b; t_929c0177 regression)"
+                    f"(computes a*a instead of a*b; live-physical-register-collision regression)"
                 )
             print(f"step-register-collision-test: ok (MUL at {i} reads distinct registers R{src0_reg} and R{src1_reg})")
             break

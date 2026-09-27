@@ -73,7 +73,7 @@ if any(r["op"] == 0x04 for r in rows):
     raise SystemExit(
         "FAIL: unsafe select lowered as an arithmetic MAD blend.  A non-finite "
         "untaken arm can poison that blend; it must use predicated MOV "
-        "(t_fe6d143b).")
+        "(unsafe-select-predication).")
 
 cc_writes = [r for r in rows if r["ccw"] == 1 and r["none"] == 1]
 pred_moves = [r for r in rows if r["op"] == 0x01 and r["cc"] == "NE"]

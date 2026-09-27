@@ -1,4 +1,4 @@
-// Regression test for t_65e1b7fa:
+// Regression test for static-const-qualifiers:
 // Verify file-scope `static const` and `const static` declarations
 // are lowered as typed IR constants rather than falling through to
 // unregistered uniform loads (which triggered 'ldunif of INFINITY has no registered uniform source').

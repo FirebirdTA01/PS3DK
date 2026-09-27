@@ -1,7 +1,7 @@
 """VP pow() of a VECTOR base must compute every lane from its own base lane.
 
 A vertex program forced the base to .xxxx, so pow(u, 2.5) wrote pow(u.x, 2.5)
-into every lane of the result (t_07866923).  Checking the instruction shape
+into every lane of the result (vp-pow-vector-lanes).  Checking the instruction shape
 would not catch that - the lane-x program is well formed - so this EXECUTES the
 compiled container: a small NV40 vertex decoder runs the vector unit
 (MOV/MUL/ADD/MAD/MAX) and the scalar unit (MOV/RCP/RSQ/LG2/EX2), co-issued

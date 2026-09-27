@@ -1,4 +1,4 @@
-// t_80dad2dd: the colour store that does NOT come from lowerStoreOutput.
+// half-output-staging: the colour store that does NOT come from lowerStoreOutput.
 //
 // Two returns under a condition are merged into one predicated select, and
 // lowerMergedReturnSelect builds that store itself.  It is therefore the

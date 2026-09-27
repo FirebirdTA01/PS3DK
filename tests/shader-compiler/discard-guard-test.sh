@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CF-2 (t_91bbd575): `discard` on the general path.
+# CF-2 (general-path-discard): `discard` on the general path.
 #
 # A discard's guard is the PATH CONDITION that reaches it, not the last
 # comparison the emitter happened to walk past.  materialiseDiscardGuards
@@ -16,7 +16,7 @@
 # them away with every other test still green.
 #
 # Assertions are on the DECODED UCODE.  A container's parameter table and
-# input mask are not evidence about what the program does - t_e89cd261 was
+# input mask are not evidence about what the program does - distinct-varying-sources was
 # a mask naming a varying no instruction read.
 #
 # Three fixtures assert a REFUSAL, and each refusal is checked for its own
@@ -29,7 +29,7 @@
 #                            dynamic; our frontend fully unrolls a
 #                            constant one, so the refusal would never be
 #                            reached.
-#   fp_discard_else_f      - on the LEGACY path (the matcher), t_79fc6bf7.  EXPIRES
+#   fp_discard_else_f      - on the LEGACY path (the matcher), discard-guard-completeness.  EXPIRES
 #                            when the matcher is retired; the general path
 #                            compiles this shape correctly and is checked
 #                            for it above (case else_arm).
@@ -54,7 +54,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # this wherever a compile's status is captured, whichever way that compile is
 # expected to go: it is silent for 0 and for 1 and names anything else.
 # Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
+# one from a SIGABRT (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
@@ -146,7 +146,7 @@ run fp_discard_else_f "--legacy-lowering" else_legacy
 [[ "$rc" -eq 1 ]] || fail "fp_discard_else_f compiled on the LEGACY path (the matcher).
 That path recovers a discard's guard from the last comparison it walked
 past, so on the false arm of a branch it kills exactly the fragments that
-must survive (t_79fc6bf7).  It must refuse until the matcher is retired."
+must survive (discard-guard-completeness).  It must refuse until the matcher is retired."
 grep -q "FALSE arm" "$work/else_legacy.log" || {
     tail -n 5 "$work/else_legacy.log" >&2
     fail "fp_discard_else_f refused on the legacy path for some OTHER
@@ -158,7 +158,7 @@ run fp_discard_and_f "--legacy-lowering" and_legacy
 Its guard compares a varying against a uniform: the pre-pass puts the
 uniform in R1 and the varying's preload writes H2 with a full mask, and
 H2's four fp16 lanes cover all of R1.x and R1.y - so the uniform is gone
-before the second comparison reads it (t_ec804d32)."
+before the second comparison reads it (half-preload-register-alias)."
 grep -q "half-register preload" "$work/and_legacy.log" || {
     tail -n 5 "$work/and_legacy.log" >&2
     fail "fp_discard_and_f refused on the legacy path for some OTHER
@@ -168,7 +168,7 @@ reason than the half-preload aliasing."
 run fp_discard_two_f "--legacy-lowering" two_legacy
 [[ "$rc" -eq 1 ]] || fail "fp_discard_two_f compiled on the LEGACY path (the matcher).
 That path emits the FIRST store to an output and drops the rest, so every
-surviving fragment is painted the first value (t_becbfa69).  The
+surviving fragment is painted the first value (post-discard-output-restores).  The
 completeness check cannot see it - both varyings are read by the kills -
 so the re-store itself is what must refuse."
 grep -q "is stored" "$work/two_legacy.log" || {
@@ -196,7 +196,7 @@ run fp_discard_nested_f "--legacy-lowering" nested_legacy
 That path's guard is a single comparison, so an ENCLOSING branch is not
 accounted for: if_convert collapses the inner if and leaves the discard in
 the outer arm, and the kill then fires wherever the INNER condition holds,
-including on fragments the outer branch never reached (t_7ae60244).  The
+including on fragments the outer branch never reached (nested-discard-reachability).  The
 reference emits both comparisons and a multiply."
 grep -q "enclosing condition" "$work/nested_legacy.log" || {
     tail -n 5 "$work/nested_legacy.log" >&2

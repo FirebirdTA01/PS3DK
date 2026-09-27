@@ -1,4 +1,4 @@
-// Work that FOLLOWS a discard must not be silently dropped (t_72810bd7).
+// Work that FOLLOWS a discard must not be silently dropped (post-discard-colour).
 //
 // The default path is a shape matcher and enumerates exactly one
 // post-discard shape.  This lerp is not it, so the whole statement was
@@ -12,7 +12,7 @@
 // lerp was not a shape either path lowered, a REFUSAL was the required
 // behaviour - compiling meant shipping a shader missing a line of its
 // source.  c157570 lowered it on the default path, and CF-2
-// (t_91bbd575) lowers the discard on the general path, so the
+// (general-path-discard) lowers the discard on the general path, so the
 // requirement now is the strong one on BOTH paths: the shader compiles,
 // the kill is emitted, and the work after it survives.  The reference
 // puts the KIL mid-program and leaves what follows unpredicated - a kill

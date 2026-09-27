@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_652d6e42: output-pinned SelPred must not allocate its destination in
+# select-source-liveness: output-pinned SelPred must not allocate its destination in
 # the same R slot as the condition or then-value source it reads later.
 #
 # SelPred expands as:

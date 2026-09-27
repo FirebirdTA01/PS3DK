@@ -13,7 +13,7 @@
 # through to the default IROp::Bitcast, and the NV40 general path refuses
 # that outright - "unsupported IR op bitcast".  It is 22 rows of the
 # reference-SDK sweep and it is NOT half-only: the float spelling refused
-# too, which is why both are pinned here (t_cde25bad).
+# too, which is why both are pinned here (half-temporary-allocation).
 #
 # The assertion is the TWIN, not a shape: the cast container must be
 # byte-identical to the constructor container.  A fix that lowers the cast to

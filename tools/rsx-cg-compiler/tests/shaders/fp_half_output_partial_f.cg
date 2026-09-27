@@ -1,4 +1,4 @@
-// t_80dad2dd: a PARTIALLY written half colour output.
+// half-output-staging: a PARTIALLY written half colour output.
 //
 // The reference writes the output register twice and keeps no temp at all -
 // `MOVH o[COLH].w, {1}.---x` then `MOVH o[COLH].xyz, f[TEX0].xyz`.  The
@@ -10,7 +10,7 @@
 // refusal to stay: the day the composition learns to write H0 directly (or
 // the allocator learns the output is half before it places anything), this
 // test turns red and whoever lifts the refusal inherits a failing test that
-// names the shape, rather than a silent H0-vs-R0 mix.  See t_cde25bad.
+// names the shape, rather than a silent H0-vs-R0 mix.  See half-temporary-allocation.
 void main(float4 t : TEXCOORD0, out half4 o : COLOR)
 {
     o.xyz = t.xyz;

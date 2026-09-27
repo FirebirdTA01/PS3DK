@@ -1,4 +1,4 @@
-// t_80dad2dd: a declared half colour output whose value passes through a
+// half-output-staging: a declared half colour output whose value passes through a
 // TEMP that the allocator places in R0.
 //
 // H0 is the low half of R0, so this is the shape a blanket "no temp in R0"

@@ -1,4 +1,4 @@
-"""A struct field's swizzle updates its whole value (t_2c400883).
+"""A struct field's swizzle updates its whole value (struct-field-swizzle-update).
 
 Compare independent flat-vector spellings of each operation. Decoding only
 ucode excludes parameter names and struct layout from the comparison.

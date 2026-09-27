@@ -3,7 +3,7 @@
 Reference475: every row equals its explicit vector twin, both profiles.
 File-scope constants must match our explicit twins too. Local MatConstruct
 rows take a different path: float rows are numerical controls; local half
-element conversion is the separate pre-existing t_89de34c3 finding.
+element conversion is the separate pre-existing constant-matrix-element-conversion finding.
 Negative/past-end constant rows produce C1068 'array index
 out of bounds'; OUR refusal contract is exactly exit1 and no container.
 The existing fp_const_matrix_fold_f witness at uv=(.5,.25) must compute

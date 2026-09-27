@@ -1,5 +1,5 @@
 # rpcs3-process-guard-test.ps1
-# Regression test suite for t_41cb6b51:
+# Regression test suite for rpcs3-process-guard:
 # 1. Process appearance guards at actual harness call sites (run start, warm-up, judged boot)
 #    including red controls proving failure when checks are absent.
 # 2. Mid-run lock identity replacement (same owner, different PID) refused & preserved in finally.

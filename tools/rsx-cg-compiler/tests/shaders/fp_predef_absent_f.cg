@@ -1,4 +1,4 @@
-// t_1704e79e: none of these names is defined by the reference; each would add
+// preprocessor-predefined-macros: none of these names is defined by the reference; each would add
 // its own power of two, so the result must stay 0.  The first four were the
 // PSVita donor's predefinitions and are the ones a port is most likely to test.
 float4 main() : COLOR {

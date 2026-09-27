@@ -1,4 +1,4 @@
-// control-h0-nodepth twin (t_96daf53b): sd_h0_nodepth.fcg with the ONE token
+// control-h0-nodepth twin (half-colour-depth-control): sd_h0_nodepth.fcg with the ONE token
 // changed - out float4 instead of out half4.  Its container clears
 // outputFromH0 and its last instruction writes the full-precision output
 // register where the H0 side writes the half one, so the SDK builds a

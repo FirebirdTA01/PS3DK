@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_542450b2: VP scalar intrinsic lowering (sin, cos, clamp, sqrt, tan).
+# vp-scalar-intrinsics: VP scalar intrinsic lowering (sin, cos, clamp, sqrt, tan).
 #
 # Deliverable: close the 7 SDK rows previously failing with
 #   'nv40-general: VP scalar intrinsic lowering deferred'
@@ -8,7 +8,7 @@
 #   - Unit clamp lowering:
 #       Our compiler emits standalone MOV_sat (saturate bit set on MOV).
 #       The reference also uses standalone MOV_sat for the input-only fixture;
-#       vs_procAnim folds saturate into its arithmetic producer (t_c67a9c41).
+#       vs_procAnim folds saturate into its arithmetic producer (vp-saturate-producer-fold).
 #   - Container deltas measured:
 #       * vs_procAnim.cg:
 #           Reference: 1728 B (params: 1008 B, strings: 416 B, consts: 32 B, ucode: 240 B [15 instrs])

@@ -1,4 +1,4 @@
-"""pow() with a CONSTANT exponent (t_0f3b232e, Boy_HairFp).
+"""pow() with a CONSTANT exponent (constant-exponent-pow, Boy_HairFp).
 
 Reference (sce-cgc 475, measured 2026-09-15, .local/probe-boyhair, 30 cells):
 a constant exponent is not always the LG2 / MUL / EX2 chain.  In FP:
@@ -184,7 +184,7 @@ def check_shapes(work):
     # A UNIFORM exponent keeps its own lane: pow(t.z, u.w) must multiply the
     # log by u.w, not u.x (the old chain forced every uniform exponent to
     # lane x - gcm multiple_context's shininess = colorShine.w read the red
-    # channel instead, t_f17de26c).  A fragment uniform is an inline constant
+    # channel instead, scalar-uniform-lane).  A fragment uniform is an inline constant
     # block the runtime patches, so the reads are found through the
     # container's relocation offsets for 'u', not by source kind.
     blob = (work / 'fp_pow_uniform_exponent_f.fpo').read_bytes()

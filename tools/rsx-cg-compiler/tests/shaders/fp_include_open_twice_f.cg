@@ -1,4 +1,4 @@
-// t_d594ccd9 NEGATIVE: the unclosed guard included twice.  The second
+// include-preprocessor-state NEGATIVE: the unclosed guard included twice.  The second
 // inclusion's #ifndef is false and nothing ever closes it, so the entry is
 // swallowed.  The reference warns 'unmatched #if' and refuses; we must
 // refuse too (exit 1, no container) and say why - one stack per unit does

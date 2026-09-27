@@ -1,4 +1,4 @@
-// t_5c12df56 positive twin of fp_return_half_depth_control_f.cg: here the
+// fragment-output-precision positive twin of fp_return_half_depth_control_f.cg: here the
 // HALF is the colour and the out parameter is something else.
 //
 // No out parameter binds COLOR0, so the return type decides: the colour is

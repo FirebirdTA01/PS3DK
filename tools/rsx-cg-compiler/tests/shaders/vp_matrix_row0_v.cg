@@ -1,4 +1,4 @@
-// A matrix uniform's ROW is a const register, whole (t_9da20b33).
+// A matrix uniform's ROW is a const register, whole (uniform-matrix-row-index).
 //
 // `m[0]` refused on both paths - the default one with "StoreOutput source
 // is not a direct Load or matvecmul", the general one with "operand could

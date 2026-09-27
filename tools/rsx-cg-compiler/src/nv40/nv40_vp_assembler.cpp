@@ -53,7 +53,7 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
             // An ADDRESS destination (ARL into A0/A1) shares the temp
             // index field but is not a temp: the reference declares
             // registerCount 1 for a program whose only registers are A0
-            // and A1 (t_99b29225), so it must not raise the count.
+            // and A1 (dynamic-uniform-array-index), so it must not raise the count.
             if (dst.type == NVFXSR_TEMP && numTempRegs_ < (dst.index + 1))
                 numTempRegs_ = dst.index + 1;
             hw[3] |= NV40_VP_INST_DEST_MASK;

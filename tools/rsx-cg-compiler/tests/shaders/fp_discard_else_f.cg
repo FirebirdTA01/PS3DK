@@ -1,4 +1,4 @@
-// CF-2 / t_79fc6bf7: a discard on the FALSE arm of a branch.
+// CF-2 / discard-guard-completeness: a discard on the FALSE arm of a branch.
 //
 // The fragment that SURVIVES is the one that satisfied the condition, so
 // the reference emits SGT and predicates the kill on EQ.  The default

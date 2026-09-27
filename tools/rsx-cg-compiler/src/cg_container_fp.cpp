@@ -147,7 +147,7 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
         // CGtype packs every RxC shape as kCgFloat1x1 + (rows-1)*4 + (cols-1)
         // (2x2 = 1054, 3x3 = 1059, 3x4 = 1060, 4x3 = 1063, 4x4 = 1064); the
         // reference records half matrices with the float codes in FP
-        // (measured 2026-09-15, t_bc130064: half3x4 B -> 1060, rows 1048).
+        // (measured 2026-09-15, rectangular-matrices: half3x4 B -> 1060, rows 1048).
         if (t.matrixRows >= 1 && t.matrixRows <= 4 && t.matrixCols >= 1 && t.matrixCols <= 4)
             return kCgFloat4x4 - 15u + (t.matrixRows - 1) * 4u + (t.matrixCols - 1);
     }
@@ -160,7 +160,7 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     // half scalar uniform's record carried no type at all.
     case IRType::Float16: return kCgFloat;
     // An int, uint or bool SCALAR is recorded as FLOAT too (measured on
-    // the vertex side, t_99b29225: `int a : TEXCOORD1` -> 1045, and
+    // the vertex side, dynamic-uniform-array-index: `int a : TEXCOORD1` -> 1045, and
     // int2/int3/int4 -> 1046/1047/1048 like their float twins, which the
     // vector cases below already produce); this returned 0 for the scalar
     // and the record carried no type.
@@ -180,7 +180,7 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
 {
     // The reference canonicalises COL to COLOR (2757..2760 family), confirmed
     // on sce-cgc for both inputs and outputs.  Fragment MRT supports up to 4 targets
-    // (indices 0..3: 2757..2760, t_cb6013f5).  Indices > 3 are refused by the
+    // (indices 0..3: 2757..2760, fragment-colour-reflection).  Indices > 3 are refused by the
     // reference (error C5102) and by our lowering only on the output side
     // (nv40_general_lowering.cpp:742); our compiler accepts them as inputs.
     // 0 is the deliberate choice for an out-of-range index with no
@@ -193,7 +193,7 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
     }
     // DIFFUSE and SPECULAR are accepted by our frontend as legacy aliases mapping
     // to COLOR0/COLOR1 (2757/2758); the reference refuses them in fragment profile
-    // (error C5108: unknown semantics).  Tracked under leniency card t_e2666eed.
+    // (error C5108: unknown semantics).  Tracked under leniency card unknown-semantic-leniency.
     // An indexed DIFFUSE1 stays unmapped (0).
     if (semUpper == "DIFFUSE"  && semIndex == 0) return kCgColor0;
     if (semUpper == "SPECULAR" && semIndex == 0) return kCgColor0 + 1;
@@ -202,10 +202,10 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
     // The fragment DEPTH output.  Ours left this at 0, which the
     // reference disassembler prints as '???'; measured against the
     // reference on a `float depth : DEPTH` fixture, it is CG_DEPTH0
-    // (t_1722b8bc).  Only DEPTH0 exists — there is one depth output.
+    // (fragment-depth-export).  Only DEPTH0 exists — there is one depth output.
     if ((semUpper == "DEPTH" || semUpper == "DEPTH0") && semIndex == 0)
         return kCgDepth0;
-    // Fragment WPOS varying input (t_9f843922).  Matches CG_WPOS = 2373
+    // Fragment WPOS varying input (fragment-wpos-reflection).  Matches CG_WPOS = 2373
     // per sdk/include/Cg/NV/cg_bindlocations.h:69 and confirmed against
     // reference ShowDepth_frag.reference.bin inputs.wPos.
     // Index 0 only (WPOS is unindexed).
@@ -276,7 +276,7 @@ ContainerResult emitFragmentContainerImpl(
         // defaultValue field.  Measured against the reference on
         // `uniform float4 light : C3 = {1,2,3,4}`: semantic 'C3' at
         // 0xc3, default block at 0xd0, embeddedConst at 0xe0, name
-        // 'light' at 0xe8 (t_4b54f26b).
+        // 'light' at 0xe8 (uniform-default-records).
         std::vector<float> defaultValue;
     };
 
@@ -352,7 +352,7 @@ ContainerResult emitFragmentContainerImpl(
         // element carries its own inline-const relocation offsets and
         // isReferenced.  Its slots come from the shared rule, so the
         // lowering's sources, the emitter's seeding and these records
-        // count the same way (array_uniforms.h, t_f9ecd3ac).
+        // count the same way (array_uniforms.h, constant-uniform-array-index).
         if (p.storage == StorageQualifier::Uniform && p.type.isArray())
         {
             const unsigned base  = rsx_cg::fpParameterSlotBases(*entry)[i];
@@ -424,7 +424,7 @@ ContainerResult emitFragmentContainerImpl(
                 // stays 0 and each row carries its own columns, zero-padded.
                 // Measured on `uniform float3x3 M = float3x3(1..9)`: rows at
                 // 336/368/400 holding [1,2,3,0] [4,5,6,0] [7,8,9,0]
-                // (t_4b54f26b A1; found by codex, who also found that we
+                // (uniform-default-records A1; found by codex, who also found that we
                 // accepted this shape and computed with ZERO rows).
                 if (!p.initialValue.empty() &&
                     p.initialValue.size() >=
@@ -489,7 +489,7 @@ ContainerResult emitFragmentContainerImpl(
 
             // A uniform ENTRY PARAMETER's default is recorded exactly like a
             // file-scope uniform's initialiser - same 16-byte block, same
-            // placement (t_4b54f26b A1).  Measured on the reference:
+            // placement (uniform-default-records A1).  Measured on the reference:
             // `uniform float4 light = {1,2,3,4}` -> defOff 208 [1,2,3,4];
             // `uniform float3 Ka = 0.6f` -> [0.6,0.6,0.6,0], broadcast;
             // `uniform float s = 2.5` -> [2.5,0,0,0].  isReferenced does not
@@ -641,7 +641,7 @@ ContainerResult emitFragmentContainerImpl(
                     // zero-padded.  Measured on `float3x3 M = float3x3(0.25,
                     // 0.5, 0.75, 1.5, 2.5, 3.5, -1, -2, -4)`: M[0] at 528
                     // [0.25,0.5,0.75,0], M[1] at 560 [1.5,2.5,3.5,0], M[2] at
-                    // 592 [-1,-2,-4,0] (t_4b54f26b A3).  ir_builder hands the
+                    // 592 [-1,-2,-4,0] (uniform-default-records A3).  ir_builder hands the
                     // value over flattened row-major.
                     const size_t rowBase =
                         static_cast<size_t>(k) * static_cast<size_t>(cols);
@@ -694,7 +694,7 @@ ContainerResult emitFragmentContainerImpl(
                 // value is already in hand - we were writing zero over it.
                 // The reference records it in the parameter table and its
                 // runtime returns it from cgGetParameterDefaultValue
-                // (t_4b54f26b).  Measured: `uniform float4 gTint =
+                // (uniform-default-records).  Measured: `uniform float4 gTint =
                 // float4(1,2,3,4)` -> [1,2,3,4]; `uniform float gK = 0.75`
                 // -> [0.75,0,0,0]; a half4 default is recorded as four
                 // FLOATS, matching the half=float rule the array-uniform
@@ -1072,7 +1072,7 @@ ContainerResult emitFragmentContainerImpl(
     std::vector<StringSlots> slots(params.size());
 
     // Per-param the reference compiler layout order (verified 2026-04-18,
-    // step 2 added 2026-09-13 for t_4b54f26b):
+    // step 2 added 2026-09-13 for uniform-default-records):
     //   1. Semantic string (if any)
     //   2. Compiled default value block (if any) - 16-byte aligned,
     //      exactly 16 bytes, four big-endian floats zero-padded above

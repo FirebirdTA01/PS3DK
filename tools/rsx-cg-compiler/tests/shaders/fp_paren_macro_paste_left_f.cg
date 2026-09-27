@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // A ## OPERAND TAKES THE RAW ARGUMENT, so BAD is pasted, never expanded, and
 // its form-feed body never reaches the token stream: the reference ACCEPTS.
 // Deciding per PARAMETER rather than per OCCURRENCE refused this - the name

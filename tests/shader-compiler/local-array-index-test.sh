@@ -18,7 +18,7 @@ fail() {
 # this wherever a compile's status is captured, whichever way that compile is
 # expected to go: it is silent for 0 and for 1 and names anything else.
 # Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
+# one from a SIGABRT (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
@@ -44,7 +44,7 @@ refusal_status "$rc" "fp_local_array_dynamic_index_f"
 
 # Tracked array reads and writes now share the constant-selector proof.
 # This fixture remains a reference-refused dynamic read on the FP profile.
-grep -q "member-array store requires a constant index (t_4c95ef8b)" "$work/general.log" || {
+grep -q "member-array store requires a constant index (member-array-storage)" "$work/general.log" || {
     tail -n 20 "$work/general.log" >&2
     fail "dynamic local array index refused with an unexpected diagnostic"
 }

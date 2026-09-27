@@ -3,7 +3,7 @@
 #   |flags (optional, column 4): extra compiler flags for OUR side, space
 #   separated, on top of the path flag.  A row with flags is named
 #   <shader>__<flag-slug>__set<uniform_set>, so one shader can be staged
-#   under several flags or sets as distinct rows (t_3bf3ce95).
+#   under several flags or sets as distinct rows (general-lowering-default).
 #   path = general | legacy | both (default both): the lowering the row is
 #   compiled on - general is the DEFAULT since the flip (2026-09-02), legacy is
 #   the retired matcher under --legacy-lowering ('default' is accepted as an
@@ -42,21 +42,21 @@ samples/toolchain/hello-psgl-msaa/shaders/fpshader.fcg|0
 # uniform pool offsets; Class C: we emit fewer instructions than the
 # reference).  They read textures (bound by the sampler half) and take
 # uniforms (synthesised from parameter names under set auto).
-# discard-blend refused under --general-lowering until CF-2 discard landed (t_91bbd575, 61be582): |both since 2026-09-02.
+# discard-blend refused under --general-lowering until CF-2 discard landed (general-path-discard, 61be582): |both since 2026-09-02.
 samples/gcm/hello-ppu-cellgcm-discard-blend/shaders/fpshader.fcg|auto|both
 tools/rsx-cg-compiler/tests/shaders/fp_computed_color_store_f.cg|auto
 # The next two are RED on the DEFAULT path since the binder started giving
-# every sampler its own per-name image (t_c48f48c1): under the identity
+# every sampler its own per-name image (per-sampler-pixel-discrimination): under the identity
 # texture they judged identical all day; under diffuseMap = perm 1 (RGAB)
 # they diverge from the reference in a 2-3 scanline band (152 and 35
 # pixels) where the reference alternates values pixel to pixel - a
 # precision or near-zero region, which compiler is right is a source
-# question.  Green again only when t_c48f48c1 is understood; a green from
+# question.  Green again only when per-sampler-pixel-discrimination is understood; a green from
 # reverting the texture would be the one-input statement we retired.
 tools/rsx-cg-compiler/tests/shaders/fp_normalized_phong_vecinsert_f.cg|auto
 tools/rsx-cg-compiler/tests/shaders/fp_vecinsert_select_specular_f.cg|auto
 
-# NAMED REGRESSION for the scalar-broadcast defect (t_b6f2a2a4).  A scalar
+# NAMED REGRESSION for the scalar-broadcast defect (scalar-operand-broadcast).  A scalar
 # operand under a MULTI-LANE write mask must broadcast ITS OWN selected
 # component -- see the lane-extract companion below, which is the fixture
 # for that half of the rule.  In THIS fixture every scalar originates in
@@ -76,7 +76,7 @@ tools/rsx-cg-compiler/tests/shaders/fp_vecinsert_select_specular_f.cg|auto
 tests/regression/shader-differential/shaders/sd_scalar_broadcast.fcg|auto|general
 
 # Companion to sd_scalar_broadcast: the LANE-EXTRACT half of the scalar
-# rule (t_b6f2a2a4).  A scalar operand must replicate ITS OWN component,
+# rule (scalar-operand-broadcast).  A scalar operand must replicate ITS OWN component,
 # not lane 0 - a width-1 value can be a lane extract that already selected
 # its lane.  Each channel takes its scalar from a different non-x lane
 # (uv.y, u_lane.z, u_lane.w) so a failure names which lane was lost.
@@ -84,7 +84,7 @@ tests/regression/shader-differential/shaders/sd_scalar_broadcast.fcg|auto|genera
 # |general because it uses frac, which the default path refuses.
 tests/regression/shader-differential/shaders/sd_scalar_lane_extract.fcg|auto|general
 
-# NAMED REGRESSION for t_4584aa27: a FILE-SCOPE CONST's initialiser was
+# NAMED REGRESSION for file-scope-const-initializer: a FILE-SCOPE CONST's initialiser was
 # dropped and the const compiled as ZERO, on both paths, in the release
 # (containers byte-identical across v0.12.21 and two dev builds; the
 # literal 0x3ea00000 in none of them).  Ours vs the reference, no uniform
@@ -108,7 +108,7 @@ tests/regression/shader-differential/shaders/sd_const_promotion.fcg|0|both
 # zero.  GREEN only after canonical-lane const blocks as well.  Green
 # after the numbering fix alone is a finding, not a pass.
 # |both since e5b4a4d gave the general path its fragment globals branch
-# (t_f5f750ff closed); before that it refused or aliased this shader.
+# (fragment-global-uniform-order closed); before that it refused or aliased this shader.
 tests/regression/shader-differential/shaders/sd_uniform_order.fcg|auto|both
 
 # NAMED REGRESSION for file-scope SAMPLERS used out of declaration order
@@ -138,10 +138,10 @@ tests/regression/shader-differential/shaders/sd_sampler_units.fcg|0|both
 #   set 0   the COMPILED DEFAULT: the initialiser must be in the inline
 #           const block.  Was RED (ours zeros: black vs the reference's red,
 #           255/4096, both paths) until db6dbca wrote the initialiser as the
-#           compiled default (t_3bf3ce95, no flag per the director 22:24);
+#           compiled default (general-lowering-default, no flag per the director 22:24);
 #           identical on both paths since.  A red here is a regression.
 #   auto    PATCHABILITY: both sides patched by name, must be identical.
-#           Green since e5b4a4d (t_f5f750ff closed) - a red here is a regression.
+#           Green since e5b4a4d (fragment-global-uniform-order closed) - a red here is a regression.
 # The corpus copy is referenced by its build/ path (untracked, fetched by
 # the corpus tooling); the stager names the second row with its set.
 build/shader-corpus/rsxgl/files/src/samples/rsxgltest/program_uniforms.fcg|0|both
@@ -154,14 +154,14 @@ build/shader-corpus/rsxgl/files/src/samples/rsxgltest/program_uniforms.fcg|auto|
 # the declared width.  |both: the block is written on both paths.
 tests/regression/shader-differential/shaders/sd_uniform_init_broadcast.fcg|0|both
 
-# th06_notex (claude 2026-09-01 23:22, t_72810bd7): the default path DROPPED
+# th06_notex (claude 2026-09-01 23:22, post-discard-colour): the default path DROPPED
 # its post-discard fog lerp and compiled silently - RED here on 163088c
 # (189/4096, ours colour-through 64/64/1/1 vs the reference's lerp
 # 36/188/188/1), visible only because sd_pos_allch gives TEXCOORD2 a varying
 # w.  From f455215 the default path REFUSED it (the completeness guard) and
 # the row was withdrawn to the corpus sweep; 1ab43d0 (2026-09-02) lowers the
 # lerp after the discard and the row RETURNS, judged on the default path
-# (the general path refuses discard, CF-2, t_91bbd575).  Expected identical.
+# (the general path refuses discard, CF-2, general-path-discard).  Expected identical.
 # 2026-09-02 09:00: that identical was 4096/4096 painted on both sides - the
 # KIL never fired because TEXCOORD0.w stayed above 4/255 - so it proved the
 # lerp and nothing about the kill.  sd_pos_allch now takes TEXCOORD0.w below
@@ -175,15 +175,15 @@ tools/rsx-cg-compiler/tests/shaders/fp_discard_then_work_f.cg|0|both
 # 2026-09-02 regression rows: the two default-path P1s the VP work found (both fixed on
 # origin/main before these rows were added; each was RED on 963018a).  sd_lane_insert
 # was default-only until 2658714 lowered the VecInsert-of-literal shape on the general
-# path (t_be578e74); both paths are byte-identical to the reference on it now.
+# path (partial-varying-materialization); both paths are byte-identical to the reference on it now.
 tests/regression/shader-differential/shaders/sd_lane_insert.fcg|0|both
 tests/regression/shader-differential/shaders/sd_mad_literal.fcg|0|both
 
-# 2026-09-02 t_e89cd261: two distinct varyings in one instruction (one input selector);
+# 2026-09-02 distinct-varying-sources: two distinct varyings in one instruction (one input selector);
 # RED on both paths at eb51db7 by design - the row is the witness for the fix.
 tests/regression/shader-differential/shaders/sd_two_inputs.fcg|0|both
 
-# 2026-09-02 t_79fc6bf7 (claude, found measuring the reference for CF-2): a discard
+# 2026-09-02 discard-guard-completeness (claude, found measuring the reference for CF-2): a discard
 # on the FALSE arm of a branch - the default path recovers the guard from the last
 # comparison seen, not the path condition, and predicates the KIL on NE where the
 # reference uses EQ: it kills exactly the fragments that must survive.  RED on the
@@ -201,14 +201,14 @@ tests/regression/shader-differential/shaders/sd_two_inputs.fcg|0|both
 # WITHDRAWN 10:50 to the sweep: on the committed CF-2 tree the general path still
 # REFUSES the else-arm shape (CF-1a's 'output store off the exit block' rule; claude's
 # 286-shader sweep names it), so a curated row here would abort the general stage.
-# Returns when that rule is relaxed for the shape.  Until then t_79fc6bf7 is proven
+# Returns when that rule is relaxed for the shape.  Until then discard-guard-completeness is proven
 # by the default-path refusal fixture only.
 # RETURNED with CF-1a half 2 (a skippable store is safe when every path that misses it
 # is killed): the general path compiles the else-arm shape.  Expected identical,
-# painted a = b = 1728, kil 1/1 - t_79fc6bf7's pixel proof.
+# painted a = b = 1728, kil 1/1 - discard-guard-completeness's pixel proof.
 tests/regression/shader-differential/shaders/sd_discard_else.fcg|0|general
 
-# CF-2 landed: the general path lowers discard (t_91bbd575).  Two of claude's
+# CF-2 landed: the general path lowers discard (general-path-discard).  Two of claude's
 # fixtures as standing pixel witnesses on the general path, expected identical:
 # fp_discard_else_f - the else-arm kill (test EQ), painted a = b = 1728 like
 # sd_discard_else above;
@@ -222,11 +222,11 @@ tools/rsx-cg-compiler/tests/shaders/fp_discard_merge_f.cg|0|general
 
 # 2026-09-02 two general-path P1s found by claude while compiling CF-2's fixtures,
 # neither containing a discard, both live on fd5aa13 and both switch blockers:
-# t_7b20ffdc - a vector-valued if/else merge of two RAW INPUTS collapses to lane x and
+# vector-input-select-lanes - a vector-valued if/else merge of two RAW INPUTS collapses to lane x and
 # broadcasts it (the IR builder typed the merge's Select Void because its type lookup
 # never consulted parameters; Fable's fix in the builder).  The arms agree in x by
 # construction and differ in y/z/w, or the broadcast would paint identically.
-# t_40dd8159 - a comparison between two DISTINCT varyings compares one with itself
+# fragment-operand-selector-limits - a comparison between two DISTINCT varyings compares one with itself
 # (input legalisation covers arithmetic ops only; claude's fix).  Both |both: green on
 # default, RED on general until each fix lands.  Both |general only: the default
 # path REFUSES both shapes ('Select: two varying branches not yet supported' and
@@ -235,60 +235,60 @@ tools/rsx-cg-compiler/tests/shaders/fp_discard_merge_f.cg|0|general
 tests/regression/shader-differential/shaders/sd_select_merge.fcg|0|general
 tests/regression/shader-differential/shaders/sd_compare_inputs.fcg|0|general
 
-# 2026-09-02 t_7ae60244 (P1, DEFAULT path, shipping): a discard under a NESTED `if`
-# kills on the inner comparison alone (the outer guard dropped) - the t_79fc6bf7
+# 2026-09-02 nested-discard-reachability (P1, DEFAULT path, shipping): a discard under a NESTED `if`
+# kills on the inner comparison alone (the outer guard dropped) - the discard-guard-completeness
 # mechanism; fixed by REFUSAL in 13c32bc (one guard query asked by both paths).
 # (`&&` is NOT this item: the default path gets the conjunction right;
-# fp_discard_and_f's default red is t_ec804d32, the half-preload aliasing.)
+# fp_discard_and_f's default red is half-preload-register-alias, the half-preload aliasing.)
 # Found by the gate-1 tree sweep on the CF-2 tree: the
 # default containers of these two CF-2 fixtures MISMATCH the reference
 # (fp_discard_and_f diff 320, ours 2624 painted vs 2304; fp_discard_nested_f diff
 # 351, ours 3264 vs 3615 - the outer condition dropped).  Curated |general only:
 # the general path's guard is the conjunction of the path conditions (61be582);
 # fp_discard_and_f must read identical, and fp_discard_nested_f too since f56c3dc
-# (t_dabb23e1, see below); the default path's disposition is a refusal (claude).
+# (output-temporary-reuse, see below); the default path's disposition is a refusal (claude).
 # Measured 11:05: fp_discard_and_f IDENTICAL (painted 2304, the conjunction right on
-# pixels); fp_discard_nested_f RED by design for t_dabb23e1 - the kill set matches the
+# pixels); fp_discard_nested_f RED by design for output-temporary-reuse - the kill set matches the
 # reference exactly (3615 painted both sides) but the general path stores o = c into
 # R0 first and then hands R0.x to the outer comparison's temp, so every surviving
 # pixel's red channel was the compare result.  IDENTICAL since f56c3dc (a temp must
 # not take a live output's register), measured 2026-09-02 14:30 at painted 3615/3615.
 # fp_discard_and_f is |both since 11:05: on the DEFAULT path it is RED BY DESIGN for
-# t_ec804d32 (the fp16 preload of the varying lands on the R slot holding u_t, so
+# half-preload-register-alias (the fp16 preload of the varying lands on the R slot holding u_t, so
 # `u_t > 0` reads the fp16 copy's sign and the kill stops where c.a < 0: ours
 # 2624 painted vs the reference's 2304, columns 59..63) - identical at 2304 when
 # that fix lands.  Measured negative controls: the same predicate without the &&
 # (uniform or literal threshold) is identical at 2304 (TTY-ec804d32-probe.log).
-# |general since b126b95 (the t_ec804d32 refusal: the default path refuses the shape
+# |general since b126b95 (the half-preload-register-alias refusal: the default path refuses the shape
 # that aliases a preloaded uniform with the varying's full-mask half preload; a
 # refusing curated row aborts the stage).  Expected identical at 2304 on general.
 tools/rsx-cg-compiler/tests/shaders/fp_discard_and_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_discard_nested_f.cg|0|general
 
-# 2026-09-02 t_becbfa69 (P1, BOTH paths, shipping): an output re-stored after a discard
+# 2026-09-02 post-discard-output-restores (P1, BOTH paths, shipping): an output re-stored after a discard
 # keeps its FIRST value.  'o = c; if (c.a<0.5) discard; o = o*d; if (d.a<0.5) discard;
 # o = o+d;' paints o = c on default AND general (levels 28/52/52/28 both) where the
 # reference paints the saturated c*d+d (2/34/99/61); the kill set is exactly right
 # (painted 1377 both sides, kil 2/2).  RED by design on both paths until the fix;
 # identical after it.  General-path compile of the shape is a2ee345 (CF-1a half 1).
-# |general since 79226a2 (t_becbfa69's default half): the DEFAULT path now REFUSES an
+# |general since 79226a2 (post-discard-output-restores's default half): the DEFAULT path now REFUSES an
 # output it stores more than once, and a refusing curated row aborts the stage.  On
 # general it has been identical at painted 1377 since 70568e9.
 tools/rsx-cg-compiler/tests/shaders/fp_discard_two_f.cg|auto|general
 
-# 2026-09-02 codex counterexample to 5bee678 (t_7ae60244): a discard in a merge block
+# 2026-09-02 codex counterexample to 5bee678 (nested-discard-reachability): a discard in a merge block
 # inside an outer guarded block.  General identical at painted 2832 (measured); the
 # default path paints 3264 with the wrong kill set and its refusal did not fire, so
 # the row is |general only until the default disposition's replacement lands.
 tests/regression/shader-differential/shaders/sd_discard_merge_guard.fcg|0|general
-# 60b08a5's witnesses (t_5dc260b0 fallout): a colour stored twice pins two
+# 60b08a5's witnesses (fragment-output-liveness fallout): a colour stored twice pins two
 # vregs to slot 0; the single-owner reservation REFUSED both, the owner set
 # compiles them.  colour-reaches-r0-test asserts they compile; these rows
 # assert they PAINT the reference's picture - general only, the matcher
 # refuses the shape.
 tools/rsx-cg-compiler/tests/shaders/fp_output_restored_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_output_stored_thrice_f.cg|auto|general
-# 2026-09-02 18:05 (claude's find on t_a7dd471f's first slice): the NV40
+# 2026-09-02 18:05 (claude's find on integer-float-conversion's first slice): the NV40
 # scalar unit computes ONE lane; sin/cos/rsqrt/rcp/sqrt/exp2/log2/pow on a
 # VECTOR need one instruction per lane.  Ours emits one full-mask
 # instruction, so every lane but x carries lane x's value.  This row reads
@@ -305,21 +305,21 @@ tools/rsx-cg-compiler/tests/shaders/fp_scalar_unit_lanes_f.cg|auto|general
 # component n for lane n).  exp2/log2/sin on swizzled vectors, output
 # lanes read cross-component.  Red on cbb762e for that reason.
 tools/rsx-cg-compiler/tests/shaders/fp_scalar_unit_swizzle_f.cg|auto|general
-# t_a7dd471f ftoi/itof slice: signed truncation lowers through MOVRC,
+# integer-float-conversion ftoi/itof slice: signed truncation lowers through MOVRC,
 # FLR of the absolute value, LT-predicated sign restore and FENCBR
 # before the final value use.  Keep both rows: the first catches lane
 # broadcast/collapse, the second catches raw-lane reads through a
 # swizzled argument.
 tools/rsx-cg-compiler/tests/shaders/fp_ftoi_itof_lanes_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_ftoi_itof_swizzle_f.cg|auto|general
-# t_a7dd471f smoothstep slice: the scalar-constant edge case measured from
+# integer-float-conversion smoothstep slice: the scalar-constant edge case measured from
 # sce-cgc folds clamp((x - 0.25) / 0.5) into ADDR_2X_sat, then computes
 # t*t*(3 - 2*t).  Keep both rows: the first catches lane collapse, the
 # second catches raw-lane reads through a swizzled argument.
 tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_lanes_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_swizzle_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_variable_edges_f.cg|auto|general
-# t_58e2212c: DIVR is scalar-only.  These rows judge the scalar DIVR and
+# scalar-divr-lowering: DIVR is scalar-only.  These rows judge the scalar DIVR and
 # DIVR_sat shapes on pixels; the vector smoothstep row above remains the
 # negative control and must stay on per-lane RCP plus vector MUL.
 tools/rsx-cg-compiler/tests/shaders/fp_divr_scalar_f.cg|auto|general
@@ -328,7 +328,7 @@ tools/rsx-cg-compiler/tests/shaders/fp_smoothstep_scalar_variable_edges_f.cg|aut
 tools/rsx-cg-compiler/tests/shaders/fp_div_literal_recip_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_div_literal_vector_recip_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_length_scaled_divr_f.cg|auto|general
-# t_a7dd471f atan2 slice: scalar atan2 uses MIN/MAX plus scalar DIVR,
+# integer-float-conversion atan2 slice: scalar atan2 uses MIN/MAX plus scalar DIVR,
 # vector atan2 keeps the oracle's per-lane RCP plus vector MUL.  Keep both
 # vector rows: the first catches scalar-unit lane collapse, the second
 # catches raw-lane reads through swizzled atan2 operands.
@@ -336,7 +336,7 @@ tools/rsx-cg-compiler/tests/shaders/fp_atan2_scalar_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_atan2_lanes_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_atan2_swizzle_f.cg|auto|general
 
-# t_a7dd471f asin/acos/atan slice: atan shares atan2's minimax polynomial,
+# integer-float-conversion asin/acos/atan slice: atan shares atan2's minimax polynomial,
 # while asin and acos share a separate fitted table.  Keep scalar plus both
 # vector rows for each family: scalar pins DIVR, lanes pin scalar-unit
 # width, and swizzle pins composition through the operand swizzle.
@@ -347,7 +347,7 @@ tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_scalar_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_lanes_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_swizzle_f.cg|auto|general
 
-# t_b28f9994 / t_6f5f1694 derivative slice 1: scalar and float2
+# screen-space-derivatives / derivative-lane-width derivative slice 1: scalar and float2
 # ddx/ddy lower to native NV40 DDX/DDY. These linear-varying rows are
 # the durable pixel witnesses for the opcode semantics; the corpus row
 # test_56_deriv compiles after this slice but still has a one-byte
@@ -355,14 +355,14 @@ tools/rsx-cg-compiler/tests/shaders/fp_asin_acos_swizzle_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_deriv_scalar_f.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/fp_deriv_float2_f.cg|0|general
 
-# t_a290c3c8 Task 10: parser spelling for negative integer literals
+# static-loop-expansion Task 10: parser spelling for negative integer literals
 # must not decide whether a static loop is unrolled. This is the safe
 # half of test_74's 3x3 PCF loop shape: the row is pixel-identical, while
 # test_74 itself still refuses on the short-circuit sqrt hazard exposed
 # after the loop back-edge symptom was removed.
 tools/rsx-cg-compiler/tests/shaders/fp_static_negative_loop_f.cg|0|general
 
-# t_71ad405e: stdlib dot-reductions must use the source width.  The length
+# stdlib-dot-source-width: stdlib dot-reductions must use the source width.  The length
 # float2 row is the pixel witness for the stale-lane failure: its float3
 # source has a non-zero z lane, and the broken lowering reuses that physical
 # slot, overwrites only xy, then reads xyz with DP3.  The other rows keep
@@ -420,11 +420,11 @@ tools/rsx-cg-compiler/tests/shaders/fp_divr_vector4_uniform_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_divr_vector_divisor_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_divr_vector_separate_inputs_f.cg|auto|general
 
-# t_6be25fd4: source-map composition, original quotient and three-alias chain.
+# source-alias-swizzle-composition: source-map composition, original quotient and three-alias chain.
 tools/rsx-cg-compiler/tests/shaders/fp_divr_local_swizzle_known_red_f.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/fp_local_swizzle_chain_f.cg|auto|general
 
-# t_0970e943: packed RGB depth, compiled defaults and non-saturating patched factors.
+# packed-depth-decode: packed RGB depth, compiled defaults and non-saturating patched factors.
 tools/rsx-cg-compiler/tests/shaders/fp_texdepth_normal_intrinsic_f.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/fp_texdepth_normal_intrinsic_f.cg|td-normal|general
 tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_intrinsic_f.cg|0|general
@@ -432,13 +432,13 @@ tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_intrinsic_f.cg|td-precis
 tools/rsx-cg-compiler/tests/shaders/fp_texdepth_normal_control_f.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/fp_texdepth_precise_control_f.cg|0|general
 
-# PACK/UNPACK FAMILY (t_23f9d1a6): PK2H/UP4UB and PK4UB/UP2H/UP2US decide the
+# PACK/UNPACK FAMILY (pack-unpack-intrinsics): PK2H/UP4UB and PK4UB/UP2H/UP2US decide the
 # pixels; the reference twins carry the same instructions (the tip differs by
 # the export-fold MOV only), so a moved pixel here is a value defect.
 tests/regression/shader-differential/shaders/sd_pack_2half.fcg|0|general
 tests/regression/shader-differential/shaders/sd_pack_4ubyte.fcg|0|general
 
-# PROJECTIVE FETCH (t_483feb71): TXP decides the pixels; the explicit-divide
+# PROJECTIVE FETCH (projective-texture-fetch): TXP decides the pixels; the explicit-divide
 # twin beside it is what the projection must paint.
 tests/regression/shader-differential/shaders/sd_txp.fcg|0|general
 tests/regression/shader-differential/shaders/sd_txp_div_twin.fcg|0|general

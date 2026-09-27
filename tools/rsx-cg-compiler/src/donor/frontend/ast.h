@@ -336,7 +336,7 @@ struct ConstructorExpr : ExprNode
     // must supply exactly the declared component count (C1057 too little /
     // C1058 too much), while a parenthesised constructor with ONE argument
     // broadcasts.  `float4 u = {2}` is refused and `float4 u = float4(2)` is
-    // accepted, so the two cannot share a check (t_4b54f26b A1).
+    // accepted, so the two cannot share a check (uniform-default-records A1).
     bool bracedInitializer = false;
 
     std::shared_ptr<TypeNode> constructedType;
@@ -408,7 +408,7 @@ struct DeclStmt : StmtNode
     // declared.  This was a single pointer, so the parser - which has always
     // parsed the whole comma list correctly - had its result truncated to the
     // first name here, and using the second was then refused as an UNDECLARED
-    // IDENTIFIER (t_a90b1ef1).  A vector rather than a first-plus-extras pair
+    // IDENTIFIER (multiple-declarators).  A vector rather than a first-plus-extras pair
     // deliberately: nothing about the first declarator is special, and a
     // shape that makes it special is how the truncation happened.
     //
@@ -573,7 +573,7 @@ struct VarDecl : DeclNode
     // whether `static` was written, because the reference folds a static
     // const as a true constant but treats a non-static file-scope const as a
     // uniform with a default - so only a STATIC const may feed another
-    // initialiser (t_10dc2936: `const float W; const float2 D = {1/W}` is
+    // initialiser (file-scope-initializer-fold: `const float W; const float2 D = {1/W}` is
     // C1059 on the reference).
     bool isStatic = false;
     Semantic semantic;

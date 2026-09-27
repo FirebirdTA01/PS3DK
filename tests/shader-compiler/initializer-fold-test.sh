@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_10dc2936: arithmetic in a file-scope initialiser is folded the way the
+# file-scope-initializer-fold: arithmetic in a file-scope initialiser is folded the way the
 # reference folds it, or refused - never compiled as a guess.
 #
 # Measured on sce-cgc 475 (2026-09-14, .local/probe-init, byte twins against

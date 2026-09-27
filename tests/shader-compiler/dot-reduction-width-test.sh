@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A 2-component dot product is DP2, not DP3 (t_a30159bf).
+# A 2-component dot product is DP2, not DP3 (two-lane-dot).
 #
 # The general path chose DP4 for operand width >= 4 and DP3 for everything
 # else, so `dot(v, v)` on a float2 read a THIRD lane that nothing wrote:

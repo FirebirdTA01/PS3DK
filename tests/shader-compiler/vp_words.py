@@ -3,8 +3,8 @@
 
 Container in (CgBinary, our --emit-container output or the reference's),
 decoded VP instructions out, restricted to the fields this module has been
-measured on.  Written for the run-time array-index slice (t_99b29225) after
-the room ruled the older VP slot transcription UNTRUSTED (t_c83277c9): every
+measured on.  Written for the run-time array-index slice (dynamic-uniform-array-index) after
+the room ruled the older VP slot transcription UNTRUSTED (instruction-source-decoding): every
 field below was read back from reference containers whose source shape
 fixed the expected value (a POSITION input, a TEXCOORD1 index, c464..c467
 blocks, A0/A1 lanes), and nothing beyond those fields is claimed.

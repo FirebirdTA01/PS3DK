@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // A FUNCTION-LIKE NAME NOT FOLLOWED BY "(" IS NOT A USE.  F's body does not
 // tokenise, but naming F as a plain identifier never expands it, so the body
 // never reaches the token stream and the reference ACCEPTS.  My first

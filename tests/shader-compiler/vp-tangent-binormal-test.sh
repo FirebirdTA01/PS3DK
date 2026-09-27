@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vp-tangent-binormal-test.sh -- regression test for VP TANGENT and BINORMAL semantic attributes (t_cba15ecc).
+# vp-tangent-binormal-test.sh -- regression test for VP TANGENT and BINORMAL semantic attributes (vp-tangent-binormal-binding).
 #
 # Reference contract (sce-cgc 475, measured 2026-09-14/15): TANGENT and TANGENT0
 # bind ATTR14, BINORMAL and BINORMAL0 bind ATTR15; the container records the

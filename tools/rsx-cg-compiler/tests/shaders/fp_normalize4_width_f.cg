@@ -1,4 +1,4 @@
-// t_71ad405e: normalize(float4) must compute its reciprocal length with DP4
+// stdlib-dot-source-width: normalize(float4) must compute its reciprocal length with DP4
 // and scale all four lanes.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)
 {

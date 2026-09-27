@@ -1,4 +1,4 @@
-// t_36492ad8 commit 1.  RECORDING A NAME IS NOT DIAGNOSING IT.
+// function-visibility commit 1.  RECORDING A NAME IS NOT DIAGNOSING IT.
 //
 // An error-typed argument SUPPRESSES the diagnostics on its call - measured
 // both ways on sce-cgc 475 - but it must NOT suppress the record that the

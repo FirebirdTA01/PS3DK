@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_6f3fa9c3: the extension flag contract.
+# named-extensions: the extension flag contract.
 #
 # An extension is a deliberate departure from the reference compiler, off by
 # default so an unflagged compile stays reference-compatible in what it

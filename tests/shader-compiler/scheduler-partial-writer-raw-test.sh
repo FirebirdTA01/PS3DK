@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_0a4e0ed4: The FP scheduler must model RAW dependency edges for partial-writemask
+# scheduler-partial-write-raw: The FP scheduler must model RAW dependency edges for partial-writemask
 # writers to the same register, preventing consumers from being scheduled before
 # earlier lane writes.
 #
@@ -93,7 +93,7 @@ for src_reg in add_srcs:
             sys.exit(
                 f"FAIL: RAW hazard on R{src_reg}: writer at instruction {w_idx} "
                 f"was scheduled after or at the consuming ADD at instruction {add_idx} "
-                f"(t_0a4e0ed4 regression)"
+                f"(scheduler-partial-write-raw regression)"
             )
 
 print(f"scheduler-partial-writer-raw-test: ok (ADD at {add_idx} correctly follows all operand writers {add_srcs})")

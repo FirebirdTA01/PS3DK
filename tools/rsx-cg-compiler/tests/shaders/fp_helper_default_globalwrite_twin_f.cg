@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // bump() passed explicitly.  Twin of fp_helper_default_globalwrite_f.
 static float G = 1.0;
 float bump() { G = 2.0; return 0.5; }

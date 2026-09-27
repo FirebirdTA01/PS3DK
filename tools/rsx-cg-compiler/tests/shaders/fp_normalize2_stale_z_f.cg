@@ -1,4 +1,4 @@
-// t_71ad405e: normalize(float2) must compute its reciprocal length with DP2.
+// stdlib-dot-source-width: normalize(float2) must compute its reciprocal length with DP2.
 //
 // This keeps the normalize entry point in the same stale-lane family as
 // dot, length and distance.

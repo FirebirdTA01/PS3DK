@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# An INT literal in a float constructor converts (t_dc1d92b0).  The IR
+# An INT literal in a float constructor converts (integer-literal-constructor-conversion).  The IR
 # builder's constructor fold accepted float constants only, so one int
 # literal stopped the whole constructor folding and the back end saw four
 # loose constants where it wanted a literal vec4 - `float4(1,1,1,1)`, the
@@ -36,7 +36,7 @@ compile() {   # $1 shader, $2 tag, $3 extra flags
         tail -n 20 "$work/$2.log" >&2
         fail "$2 did not compile.  An int literal in a float constructor
 converts in Cg and in the reference compiler; refusing it is the defect
-(t_dc1d92b0)."
+(integer-literal-constructor-conversion)."
     fi
 }
 
@@ -100,7 +100,7 @@ lit_general = rows(sys.argv[3])
 if [ONE, ONE, ONE, ONE] not in lit_general and [ONE, 0, 0, 0] not in lit_general:
     raise SystemExit(
         "FAIL: general float4(1,1,1,1) must contain 1.0f after int literal "
-        "conversion; const/data rows were [%s] (t_dc1d92b0)."
+        "conversion; const/data rows were [%s] (integer-literal-constructor-conversion)."
         % "; ".join(",".join("0x%08x" % w for w in r)
                      for r in lit_general)
     )
@@ -109,7 +109,7 @@ var_general = rows(sys.argv[4])
 if [HALF, QUARTER, EIGHTH, ONE] not in var_general:
     raise SystemExit(
         "FAIL: general int-initialised variable must reach the w lane as "
-        "1.0f; const/data rows were [%s] (t_dc1d92b0)."
+        "1.0f; const/data rows were [%s] (integer-literal-constructor-conversion)."
         % "; ".join(",".join("0x%08x" % w for w in r)
                      for r in var_general)
     )

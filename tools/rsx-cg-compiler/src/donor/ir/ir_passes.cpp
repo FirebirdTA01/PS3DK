@@ -690,7 +690,7 @@ size_t CommonSubexprElimination::InstrHash::operator()(const IRInstruction* inst
     hash ^= std::hash<int>()(inst->swizzleMask);
     // The result SHAPE is part of the value: a vec3 shuffle "yzw" and a vec4
     // shuffle "yzwx" share operands and mask (the encoder pads lane 3 with x)
-    // and are different values (t_bc130064: merging them handed a float4 to a
+    // and are different values (rectangular-matrices: merging them handed a float4 to a
     // 3-wide matrix row and refused; on plain vectors it refused
     // float4(t.yzw, 1) + t.yzwx, which the reference accepts).
     hash ^= std::hash<int>()(static_cast<int>(inst->resultType.baseType) * 131 +

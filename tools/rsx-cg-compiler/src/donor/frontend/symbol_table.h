@@ -41,7 +41,7 @@ struct Symbol
     std::vector<std::string> parameterNames;
     // HOW FEW ARGUMENTS A CALL MAY SUPPLY.  Equals parameterTypes.size()
     // unless TRAILING parameters carry defaults, which the reference
-    // materialises at the call site (t_36492ad8).  Counted back from the end
+    // materialises at the call site (function-visibility).  Counted back from the end
     // and stopping at the first parameter without a default, because Cg
     // cannot skip a middle argument: a default on a non-trailing parameter
     // constrains nothing and the reference still requires all of them.
@@ -52,7 +52,7 @@ struct Symbol
     // this the whole unit is visible from everywhere and a call resolves to
     // things written after it.  A source location cannot serve as the order -
     // an #included file's line numbers are not comparable to the includer's -
-    // so this is a monotonic counter, not a position (t_36492ad8).
+    // so this is a monotonic counter, not a position (function-visibility).
     size_t declIndex = 0;
     bool isIntrinsic = false;
     std::string intrinsicOpcode;
@@ -89,7 +89,7 @@ public:
     // the name X is already defined"), and accepts every other arrangement:
     // use outer then declare inner, use inner then declare outer, two sibling
     // blocks, and file-scope-later are all legal (measured by codex over nine
-    // probes; t_17071b54).  So the record belongs to the SCOPE INSTANCE - not
+    // probes; file-scope-forward-visibility).  So the record belongs to the SCOPE INSTANCE - not
     // to the function, which would over-refuse three legal shapes, and not to
     // the depth, which cannot tell siblings apart.
     void noteUnresolvedUse(const std::string& name) { unresolvedUses.insert(name); }

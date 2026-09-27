@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // The invoked twin of fp_paren_macro_ff_named_not_called_f: the SAME macro,
 // actually called, so the body IS substituted and the reference refuses.
 // Without this pair the accept row above would pass for a compiler that had

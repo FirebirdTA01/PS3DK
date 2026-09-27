@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // THE CELL THAT SAYS WHERE THE RULE LIVES.  The same character in the body of
 // a macro that is NEVER EXPANDED: the reference ACCEPTS, because that body is
 // never tokenised.  We tokenise a replacement list eagerly, so a first fix

@@ -1,4 +1,4 @@
-// t_36492ad8 commit 1.  THE MIRROR OF fp_reach_unreached_undecl_id_f, and
+// function-visibility commit 1.  THE MIRROR OF fp_reach_unreached_undecl_id_f, and
 // together they are the row for the SECOND mechanism this commit adds.
 //
 // Deferring the SEMANTIC diagnostic was not enough on its own: the IR builder

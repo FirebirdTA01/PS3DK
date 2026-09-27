@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A float4 constructor's VECTOR operands fill one lane per component
-# (t_14d18f02).  The vertex lane classifier used each operand's argument
+# (vp-constructor-lane-layout).  The vertex lane classifier used each operand's argument
 # position as its destination lane, so a float2 or an `.xyz` swizzle
 # counted as one: the following literals landed early and the tail lanes
 # were never written.  Silent, in the shipping path.
@@ -87,7 +87,7 @@ expect(
     narrow_legacy,
     [0xF, 0xC, 0x3],
     "The pre-fix shape was 0xf, 0x8, 0x6 - one lane for the whole "
-    "float2, the literals shifted down, and w never written (t_14d18f02).",
+    "float2, the literals shifted down, and w never written (vp-constructor-lane-layout).",
 )
 
 # --- .xyz swizzle operand: out_position = float4(in_position.xyz, 1) --
@@ -101,7 +101,7 @@ expect(
     [0x1, 0x3, 0xC, 0xE],
     "The pre-fix shape was 0x4, 0x6, 0x8, 0x8, which leaves position "
     "with two lanes never written, so the quad does not rasterise "
-    "(t_14d18f02).",
+    "(vp-constructor-lane-layout).",
 )
 
 # Shipping general lowering is allowed to split the trailing literals into
@@ -123,7 +123,7 @@ expect(
     swizzle_general,
     [0x1, 0x1, 0x2, 0xC, 0xE],
     "The shipping path must cover both outputs completely; missing any "
-    "lane is the silent t_14d18f02 rasterisation failure.",
+    "lane is the silent vp-constructor-lane-layout rasterisation failure.",
 )
 PY
 

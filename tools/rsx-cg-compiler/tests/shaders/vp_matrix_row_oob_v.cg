@@ -1,4 +1,4 @@
-// Row 3 of a float3x3 (t_9da20b33).  The matrix owns three registers, so
+// Row 3 of a float3x3 (uniform-matrix-row-index).  The matrix owns three registers, so
 // c[base + 3] belongs to whatever was allocated after it; the reference
 // rejects this source outright - "array index out of bounds".
 //

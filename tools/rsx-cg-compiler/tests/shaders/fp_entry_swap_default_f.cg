@@ -1,4 +1,4 @@
-// THE ENTRY-SWAP CONTROL (t_4b54f26b A1, asked for by codex).
+// THE ENTRY-SWAP CONTROL (uniform-default-records A1, asked for by codex).
 //
 // The C1114 rule is about the SELECTED entry, not about the name "main" -
 // with -e the entry can be any function.  A check keyed on the name would
@@ -9,7 +9,7 @@
 //   -e alpha -> REFUSED, C1114 class: alpha is the entry and `bias` is not
 //               uniform
 //   -e beta  -> alpha is now a HELPER, so C1114 does not apply; it hits the
-//               INTERIM helper-default refusal instead (t_36492ad8), and when
+//               INTERIM helper-default refusal instead (function-visibility), and when
 //               that card lands this side becomes an ACCEPT
 //
 // Both sides refuse today, FOR DIFFERENT REASONS, which is why the guard

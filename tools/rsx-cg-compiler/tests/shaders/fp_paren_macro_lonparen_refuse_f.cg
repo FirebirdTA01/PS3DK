@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // A lone '(' as an OBJECT-like body (note the space).  The reference takes it
 // as the body and fails in the parser - C0000 "syntax error, unexpected ';'"
 // - NOT as a bad definition.  Pinned so the C0105 check above cannot creep

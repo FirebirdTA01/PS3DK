@@ -36,7 +36,7 @@
 // operation (w == 1 for a lerp or a projective divide, z == 0 for a dot
 // product term), and an identity hides a dropped or wrong use of that
 // lane - the default path's dropped fog lerp on th06_notex was invisible
-// while TEXCOORD2.w was 1 (t_72810bd7, 2026-09-01).  A shader reading any
+// while TEXCOORD2.w was 1 (post-discard-colour, 2026-09-01).  A shader reading any
 // lane sees a value that varies across the image.  Measured at the 64x64
 // pixel centres (2026-09-02, re-checked after the alpha lanes changed):
 // no lane is exactly 0 or 1 at any pixel

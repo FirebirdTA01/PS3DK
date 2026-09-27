@@ -1,6 +1,6 @@
 // The entry PARAMETER G shadows the global (stashed at function entry), then
 // a block local G shadows again: the local's declaration must not re-stash
-// the PARAMETER as "the global" - get() reads the uniform (t_3af598c8, the
+// the PARAMETER as "the global" - get() reads the uniform (inline-entry-parameter-scope, the
 // parameter path of the capture-once guard).
 float4 G;
 float4 get() { return G; }

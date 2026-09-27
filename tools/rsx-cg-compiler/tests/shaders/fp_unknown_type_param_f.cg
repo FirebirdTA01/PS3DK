@@ -1,4 +1,4 @@
-// t_472ff302: an unknown identifier in type position must be REFUSED, and the
+// parser-progress: an unknown identifier in type position must be REFUSED, and the
 // compiler must terminate.  Before the fix this source made rsx-cg-compiler
 // spin for ever - not slowly, never - and it did so under --dump-ast too,
 // because the parse loop never reached a back end.

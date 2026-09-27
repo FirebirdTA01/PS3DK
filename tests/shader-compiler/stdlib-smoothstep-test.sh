@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_a7dd471f: smoothstep on the general fragment path.
+# integer-float-conversion: smoothstep on the general fragment path.
 #
 # The oracle probe is smoothstep(0.25, 0.75, x).  sce-cgc folds the
 # reciprocal of (0.75 - 0.25) into the destination scale and spells the clamp

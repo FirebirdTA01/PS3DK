@@ -1,4 +1,4 @@
-// t_61109061 PROTOTYPE CELL.  The semantic that is JUDGED is the one on the
+// prototype-default-merging PROTOTYPE CELL.  The semantic that is JUDGED is the one on the
 // FIRST DECLARATION in source order; the body that is WALKED is the
 // DEFINITION's.  Measured on sce-cgc 475 - the four cells disagree, so neither
 // "judge the definition" nor "judge either" reproduces the reference.

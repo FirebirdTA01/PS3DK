@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_38a14d6f: a fragment program with NO EFFECT is legal.
+# no-effect-fragment: a fragment program with NO EFFECT is legal.
 #
 # The reference compiler accepts 'void main() {}' (SDK
 # samples/tutorial/SpuGraphics/SpuRender/shader/fnop.cg) and emits exactly

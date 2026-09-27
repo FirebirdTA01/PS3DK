@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A default value on an ENTRY PARAMETER: where it is legal, where it is not,
-# and what it records (t_4b54f26b A1).
+# and what it records (uniform-default-records A1).
 #
 # The reference's rule, measured, and it has a named diagnostic for it:
 #   error C1114: only uniform parameters to the entry function can have
@@ -15,7 +15,7 @@
 #     correctly;
 #  2. the two refusals exit 1 with the right diagnostic CLASS, one permanent
 #     (non-uniform entry parameter) and one INTERIM (helper default, deleted
-#     by t_36492ad8);
+#     by function-visibility);
 #  3. the same function is illegal under -e alpha and hits a DIFFERENT refusal
 #     under -e beta, from one unchanged source - which is what proves the
 #     check keys on the SELECTED entry rather than on the name "main".
@@ -118,7 +118,7 @@ expect_refusal nonuniform "only uniform parameters to the entry function" \
     "a default on a non-uniform ENTRY parameter (permanent, C1114)"
 
 # A DEFAULT ON A HELPER PARAMETER.  This row pinned the INTERIM REFUSAL until
-# t_36492ad8 commit 2; the reference always accepted it, so the row becomes the
+# function-visibility commit 2; the reference always accepted it, so the row becomes the
 # accept and its byte twin rather than a deleted line - a removed row is a rule
 # nobody checks, and the twin is what says the default was SUBSTITUTED and not
 # dropped.
@@ -141,16 +141,16 @@ expect_refusal swapalpha "only uniform parameters to the entry function" \
 # - and the refusal has nothing to do with the default: the same source with
 # `float2 bias` and no default at all is refused identically, on this build AND
 # on the pristine parent.  What changed is only that the interim helper-default
-# refusal used to fire first and hide it.  Card t_5f2a7c91.
+# refusal used to fire first and hide it.  Card helper-vector-parameter-lowering.
 #
 # READ THE PAIR BELOW HONESTLY.  While this row is a backend gap it no longer
 # demonstrates the entry-keyed DEFAULT rule - it only shows the two entries
 # take different paths.  The entry-keyed rule is carried by the -e alpha row
-# above (C1114, reference-measured).  When t_5f2a7c91 lands this becomes an
+# above (C1114, reference-measured).  When helper-vector-parameter-lowering lands this becomes an
 # accept row and the pair means what it used to again.
 run sce_fp_rsx "$shaders/fp_entry_swap_default_f.cg" swapbeta beta > "$work/swapbeta.rc"
 expect_refusal swapbeta "no instructions emitted" \
-    "-e beta: reference ACCEPTS; we stop in the backend (t_5f2a7c91, pre-existing)"
+    "-e beta: reference ACCEPTS; we stop in the backend (helper-vector-parameter-lowering, pre-existing)"
 # If those two ever produce the SAME diagnostic, the two entries have stopped
 # taking different paths.
 if cmp -s <(grep -o "error: [a-z ]*" "$work/swapalpha.log" | head -1) \
@@ -264,7 +264,7 @@ shape_case "float4 u = {1,2,3,4,5}"      "u*uv.x"             refuse s8
 shape_case "float4 u = float2(1)"        "u*uv.x"             refuse s9
 shape_case "float4 u = float2(1,2,3,4)"  "u*uv.x"             refuse s10
 # An ARRAY default: the reference ACCEPTS it and records a block per element;
-# we refuse by name until t_2b592fc7 measures the element rules.  The row is
+# we refuse by name until array-default-records measures the element rules.  The row is
 # here so the interim refusal cannot quietly become accept-and-drop - the
 # failure mode this whole slice kept producing.  When that card lands, this
 # expectation flips to accept WITH the per-element blocks checked.

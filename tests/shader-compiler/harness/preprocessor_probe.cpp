@@ -1,4 +1,4 @@
-// t_e5fced4c: reach the preprocessor's public interface directly.
+// preprocessor-entry-guard: reach the preprocessor's public interface directly.
 //
 // Two of its properties cannot be observed through the compiler's command
 // line at all: setNoLineMarkers() is never called by main.cpp, and the value

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""t_a290c3c8: typed, invariant static loops agree with explicit expansions.
+"""static-loop-expansion: typed, invariant static loops agree with explicit expansions.
 
 The 64-iteration limit is OUR resource bound. Reference unroll decisions depend
-on body and induction type (t_bc4fa4e5). The VP integer-eight arithmetic control
+on body and induction type (hardware-loop-selection). The VP integer-eight arithmetic control
 is a named instruction-shape divergence: reference BRA, our explicit expansion.
 No reference byte-identity claim is made for that form. VP texture samplelod is
-a separate gap, t_6346513f; arithmetic twins exercise this change in both profiles.
+a separate gap, vp-texture-fetch; arithmetic twins exercise this change in both profiles.
 """
 import os
 from pathlib import Path
@@ -89,7 +89,7 @@ def main():
             twin('uint-ascending', 'for(unsigned int i=0;i<3;i++){' + uint_body + '}',
                  'for(int i=0;i<3;i++){' + uint_body + '}', profile)
             # Reference uses FP LOOP / VP backward BRA for this spelling;
-            # our expansion is a named shape divergence (t_bc4fa4e5).
+            # our expansion is a named shape divergence (hardware-loop-selection).
             twin('uint-descending-shape-divergence', 'for(unsigned int i=3;i>0;i--){' + uint_body + '}',
                  ''.join('{int i=' + str(i) + ';' + uint_body + '}' for i in (3,2,1)), profile)
             uint_locals = 'unsigned int start=0;unsigned int bound=3;unsigned int step=1;'

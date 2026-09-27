@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_472ff302: the parser must ALWAYS make progress, and an unknown type must be
+# parser-progress: the parser must ALWAYS make progress, and an unknown type must be
 # refused rather than hung on.
 #
 # Parser::error() records a diagnostic without consuming a token and without
@@ -46,7 +46,7 @@ must_refuse() {
     local stem="$1"
     local rc=0
     run_one "$stem" || rc=$?
-    [[ $rc -ne 124 ]] || fail "$stem TIMED OUT after $limit - the parser did not terminate (t_472ff302). This is the defect, not a slow machine."
+    [[ $rc -ne 124 ]] || fail "$stem TIMED OUT after $limit - the parser did not terminate (parser-progress). This is the defect, not a slow machine."
     [[ $rc -lt 128 ]] || fail "$stem died on a signal (exit $rc); a refusal must be an ordinary failure"
     [[ $rc -eq 1 ]] || fail "$stem exited $rc; an invalid type must be an ordinary refusal (exit 1)"
     [[ ! -s "$work/$stem.fpo" ]] || fail "$stem refused but still wrote a container"

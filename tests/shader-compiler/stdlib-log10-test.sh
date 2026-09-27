@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_fe6d143b, small half: log10 is a registered builtin and must not fall
+# unsafe-select-predication, small half: log10 is a registered builtin and must not fall
 # through to IROp::Call.
 #
 # This deliberately does not solve user-function calls.  A source-defined

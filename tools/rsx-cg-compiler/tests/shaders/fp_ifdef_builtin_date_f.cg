@@ -1,4 +1,4 @@
-// t_9e90fb38.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against sce-cgc 475.
 // THE NEIGHBOUR THIS SLICE ALSO FIXES: #ifdef read macros.find()
 // alone, so `#ifdef __LINE__` was TRUE here and FALSE on the
 // reference. The two spellings now share one predicate because the

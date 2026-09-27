@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // *** THE CELL THAT FORCES PER-OCCURRENCE. *** The SAME parameter appears both
 // pasted and plain. The pasted occurrence takes the raw argument; the plain
 // one expands it, and that expansion puts the form feed into the token

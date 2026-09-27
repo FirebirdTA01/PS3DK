@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // *** THE CELL THAT PROVES THE BODY CHANGED, not merely that we accept more. ***
 // With the whitespace rule this is OBJECT-like with body "(x) (2.0)".  The
 // reference expands it and only then fails, on the undefined x:

@@ -38,7 +38,7 @@ int main()
         const bool correct = expectOk
             ? output.ok && !output.words.empty()
             : !output.ok && output.words.empty() &&
-              diagnostic.find("t_3603033d") != std::string::npos &&
+              diagnostic.find("select-predication-record-boundary") != std::string::npos &&
               diagnostic.find("SelPred alloc[0]") != std::string::npos &&
               diagnostic.find(detail) != std::string::npos;
         if (!correct) {

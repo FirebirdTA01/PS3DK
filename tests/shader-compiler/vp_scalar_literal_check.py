@@ -59,7 +59,7 @@ def main():
                 return None
             if refusal and not args.reference:
                 assert run.returncode == 1 and not dst.exists(), name+': expected exit 1 and no output file: '+diagnostic
-                assert 'our VP constant trig reduction bound' in diagnostic and 't_b939dc41' in diagnostic, name+': wrong refusal: '+diagnostic
+                assert 'our VP constant trig reduction bound' in diagnostic and 'constant-math-range' in diagnostic, name+': wrong refusal: '+diagnostic
                 return None
             assert run.returncode == 0 and dst.is_file(), name+': expected acceptance: '+diagnostic
             data = dst.read_bytes()

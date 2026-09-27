@@ -1,4 +1,4 @@
-// t_f078965f: a native entry point for Windows Python's subprocess.run.
+// native-windows-test-entry: a native entry point for Windows Python's subprocess.run.
 // Compiled into the test's temporary directory by Windows PowerShell Add-Type.
 // A .cmd cannot preserve argv: cmd parses &, | and % before its body starts.
 using System;

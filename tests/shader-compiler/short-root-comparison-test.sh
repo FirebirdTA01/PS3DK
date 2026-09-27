@@ -36,7 +36,7 @@ p=pathlib.Path(root)/'tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_shared_r
 r=subprocess.run([compiler,'-p','sce_fp_rsx',str(p)],capture_output=True,text=True,timeout=30)
 # Exit 1 EXACTLY: a timeout or a crash also has a non-zero status, and both
 # would have satisfied the old `not r.returncode` while meaning the compiler
-# never reached this decision (t_fd95d1b9).
+# never reached this decision (crash-versus-refusal-status).
 if r.returncode!=1:
     what=('died on signal %d'%-r.returncode) if r.returncode<0 else ('exited %d'%r.returncode)
     errors.append('shared root: expected exit 1, a refusal, but the compiler '+what+' - a timeout or a crash is not a refusal')

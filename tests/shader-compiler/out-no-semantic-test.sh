@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A fragment entry's `out` parameter with no semantic binds to COLOR
-# (t_a15ec129).  The store used to be gated on the parameter HAVING a
+# (implicit-colour-output).  The store used to be gated on the parameter HAVING a
 # semantic, so a shader declared this way emitted no StoreOutput at all -
 # and everything that only fed the output went with it.  Exit 0, no
 # diagnostic, and a container whose ucode never writes the output register.
@@ -58,7 +58,7 @@ compile() {   # $1 stem, $2 flags, $3 tag
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$3.log" >&2
         fail "$3 did not compile.  A fragment out parameter with no semantic
-binds to COLOR; refusing or dropping it is t_a15ec129."
+binds to COLOR; refusing or dropping it is implicit-colour-output."
     fi
     # A separate run for the ucode: --emit-container suppresses the dump.
     (
@@ -85,7 +85,7 @@ for path_flags in ":general" "--legacy-lowering:legacy"; do
         fail "on the $tag path the ucode for an out parameter WITHOUT a
 semantic differs from the one WITH ': COLOR'.  They are the same program:
 the reference binds an unsemanticked fragment out to COLOR0, and so must we
-(t_a15ec129)."
+(implicit-colour-output)."
     fi
 done
 
@@ -130,7 +130,7 @@ for path in paths:
             "FAIL: %s never writes the output register.  That is the whole "
             "defect: the store was dropped and everything feeding it went "
             "with it, leaving a well-formed container that paints whatever "
-            "R0 held (t_a15ec129)." % name
+            "R0 held (implicit-colour-output)." % name
         )
 PY
 

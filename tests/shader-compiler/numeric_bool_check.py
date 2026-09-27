@@ -1,4 +1,4 @@
-"""t_158a8918: numeric-to-bool is nonzero, never integer truncation.
+"""numeric-bool-conversion: numeric-to-bool is nonzero, never integer truncation.
 
 Reference475 independently makes all 96 constructor/cast/initialization pairs
 identical (FP/VP, widths1..4, float/half/int/unsigned int). Literal boundary
@@ -69,7 +69,7 @@ def main(compiler):
             b=compile_one(compiler,root,name+'-twin',twin,profile)
             require(a==b,name+': nonzero twin differs')
             count+=1
-        # t_f89d8b23: the unsigned operand's cast reaches an unsupported
+        # unsigned-conversion-lowering: the unsigned operand's cast reaches an unsupported
         # bitcast before conversion to bool. Reference accepts both forms.
         for profile in ('sce_fp_rsx','sce_vp_rsx'):
             for label,expr in [('bool','bool((unsigned int)4294967295)'),('compare','((unsigned int)4294967295)!=0')]:
@@ -77,7 +77,7 @@ def main(compiler):
                 compile_one(compiler,root,profile+'-uint-cast-gap-'+label,source,profile,
                             refuse=True,diagnostic='unsupported IR op bitcast')
     require(count==140,f'incomplete table: {count}')
-    print(f'numeric-bool: PASS ({count} strict twins, 4 inherited unsigned-cast refusals t_f89d8b23)')
+    print(f'numeric-bool: PASS ({count} strict twins, 4 inherited unsigned-cast refusals unsigned-conversion-lowering)')
 
 
 if __name__=='__main__':

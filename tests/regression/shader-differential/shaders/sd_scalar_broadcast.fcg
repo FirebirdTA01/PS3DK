@@ -1,5 +1,5 @@
 // shader-differential — NAMED REGRESSION for the scalar-broadcast defect
-// (t_b6f2a2a4).  Written because neither this project nor the Vita Cg
+// (scalar-operand-broadcast).  Written because neither this project nor the Vita Cg
 // compiler had a fixture for it: both were protected by general machinery,
 // which is not the same as a test that fails when someone removes it.
 //

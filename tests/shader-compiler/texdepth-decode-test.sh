@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_0970e943: depth fetches need an RGB decode, including a patchable
+# packed-depth-decode: depth fetches need an RGB decode, including a patchable
 # default parameter. A plain tex2D fetch cannot satisfy these assertions.
 # The companion pixel rows decode packed RGB bytes in the rig's A8R8G8B8
 # textures. They do not exercise a native depth-format fetch or a depth

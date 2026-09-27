@@ -1,7 +1,7 @@
 """The program's output is exactly FACTOR times its one input, lane by lane.
 
 For the rebound rows of user-function-inline-control-flow-test.sh
-(t_3af598c8): main returns 2*G or 6*p after an inlined helper writes the
+(inline-entry-parameter-scope): main returns 2*G or 6*p after an inlined helper writes the
 file-scope name.  A row that asserts "a MUL reads the input" plus "the bytes
 of 2.0 are somewhere in the container" is satisfied by a program that reads
 the const block's ZERO lane (swizzle .yyyy over {2,0,0,0}) or that negates

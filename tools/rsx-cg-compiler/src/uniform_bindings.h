@@ -28,7 +28,7 @@ struct ExplicitUniformBindings {
     }
 };
 
-// PS3_475, t_49f3cc72: register(CN) and :CN are the same binding, both
+// PS3_475, vp-explicit-binding: register(CN) and :CN are the same binding, both
 // already carried by IR. Explicit pins do not consume either auto cursor.
 // A referenced ordinary matrix occupies all rows; an array allocates only
 // referenced elements, or all elements for dynamic indexing. In particular,
@@ -134,7 +134,7 @@ inline ExplicitUniformBindings resolveFpExplicitUniformBindings(
 {
     auto result = resolveExplicitUniformBindings(entry, module, false);
     // FP aliases share ownership of embedded-constant patch sites in the
-    // reference. Until t_642131af coalesces those sites, exposing independent
+    // reference. Until shared-embedded-patch-ownership coalesces those sites, exposing independent
     // blocks as one binding would give a runtime patch the wrong reach.
     // Unused aliases carry no sites and remain legal (oracle u-only/v-only).
     std::map<int, std::string> usedRegisters;
@@ -151,7 +151,7 @@ inline ExplicitUniformBindings resolveFpExplicitUniformBindings(
                         "cg-container-fp: overlapping used FP constant bindings for '" +
                         inserted.first->second + "' and '" + uniform.name + "' at C" +
                         std::to_string(base + row) +
-                        "; interim refusal until shared embedded patch ownership (t_642131af)");
+                        "; interim refusal until shared embedded patch ownership (shared-embedded-patch-ownership)");
                     return;
                 }
             }

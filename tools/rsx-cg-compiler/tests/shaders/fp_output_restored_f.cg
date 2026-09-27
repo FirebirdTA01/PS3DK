@@ -1,5 +1,5 @@
 // Two pinned colour values for ONE output slot: the colour is stored, read
-// back through a temp, and stored again (t_5dc260b0).
+// back through a temp, and stored again (fragment-output-liveness).
 //
 // lowerStoreOutput pins the composing writes of EACH store to register 0,
 // so this program has two distinct virtual registers both claiming the

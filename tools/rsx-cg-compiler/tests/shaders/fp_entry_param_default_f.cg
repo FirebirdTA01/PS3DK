@@ -1,4 +1,4 @@
-// A UNIFORM ENTRY PARAMETER's default value (t_4b54f26b A1).
+// A UNIFORM ENTRY PARAMETER's default value (uniform-default-records A1).
 //
 // parser.cpp errored on any '=' in any parameter list, which refused the
 // reference's own spelling on seven reference-SDK rows.  The reference's rule,

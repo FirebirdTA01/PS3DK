@@ -1,4 +1,4 @@
-// t_d594ccd9: the header ends inside an open #ifndef.  The block continues
+// include-preprocessor-state: the header ends inside an open #ifndef.  The block continues
 // here, the includer's #endif closes it, and the macro it defined is
 // visible.  Must accept and equal fp_include_macro_control_f.
 #include "include/open_guard.h"

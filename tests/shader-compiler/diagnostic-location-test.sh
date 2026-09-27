@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_1366b9b9: a diagnostic must name the line the user wrote on.
+# diagnostic-source-location: a diagnostic must name the line the user wrote on.
 #
 # The driver composes the translation unit as
 #   #line 1 "<builtin>"   + the embedded Cg standard-library header
@@ -104,7 +104,7 @@ check() {
     [[ $status -eq 1 ]] || fail "$stem ($label) exited $status, expected 1"
 
     # The first diagnostic is the one that names the mistake; the cascade
-    # after it is a separate row (t_ec186f0c) and is not asserted here.
+    # after it is a separate row (parser-error-cascade) and is not asserted here.
     local first
     first="$(grep -m1 -E ':[0-9]+:[0-9]+: error:' "$log" || true)"
     [[ -n "$first" ]] || {
@@ -124,7 +124,7 @@ check() {
         "$stem ($label): diagnostic names line $got_line, the source has 'bogusType' on line $want_line (off by $((got_line - want_line))) - $first"
     # The local-declaration fixture's first diagnostic is still the
     # cascade one - it points at the identifier AFTER the unknown type -
-    # and moving it is t_ec186f0c's row, not this one.  Asserting its
+    # and moving it is parser-error-cascade's row, not this one.  Asserting its
     # column here would pin the cascade in place.  The parameter fixture
     # has no cascade and its column is asserted.
     if [[ "$want_column" == yes ]]; then
@@ -194,7 +194,7 @@ printf '  %-28s %-12s %s\n' "included header" "default" "bad_header.h:3:1"
 # option is API-only - main.cpp never calls it - so no test driving the
 # compiler through its command line can reach it, and a proxy assertion
 # here would only look like coverage.  It belongs to the preprocessor
-# harness guard (t_e5fced4c), which links the preprocessor directly.
+# harness guard (preprocessor-entry-guard), which links the preprocessor directly.
 probe_dir="$work/probes"
 mkdir -p "$probe_dir"
 printf '// good header line 1\n#define HDRVAL 1.0\n' > "$probe_dir/good_header.h"

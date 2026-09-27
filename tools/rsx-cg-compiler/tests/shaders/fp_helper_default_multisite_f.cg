@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // TWO CALL SITES, one omitting the default and one supplying the same value.
 // Substitution happens per call site, so the two must produce the same code;
 // a single shared materialisation would be observable here.

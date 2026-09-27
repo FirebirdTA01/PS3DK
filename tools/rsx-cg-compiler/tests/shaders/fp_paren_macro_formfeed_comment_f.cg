@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // And inside a COMMENT, where it never becomes a token at all.  Accepted by
 // the reference and by us.  With the two rows above this is the whole rule:
 // the character is an error where it is TOKENISED, nowhere else.

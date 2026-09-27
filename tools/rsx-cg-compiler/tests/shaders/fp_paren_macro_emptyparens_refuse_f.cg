@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // Body "()" - object-like, expands, then the parser refuses.  Reference
 // C0000 "syntax error, unexpected ')'".
 #define K ()

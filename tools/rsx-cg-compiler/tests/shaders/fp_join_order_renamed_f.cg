@@ -1,4 +1,4 @@
-// t_56ff2244: fp_join_order_decl_f.cg with both join variables RENAMED. The order an if/else join emits its Select instructions in is
+// deterministic-join-order: fp_join_order_decl_f.cg with both join variables RENAMED. The order an if/else join emits its Select instructions in is
 // part of the compiler's output, and it must come from the source rather than
 // from a hash table.  Its emitted order MUST MATCH that file exactly: `hue` is DECLARED
 // first, so its value id is the smaller one reaching the join and its select

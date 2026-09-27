@@ -1,5 +1,5 @@
 uniform float4 u_bones[4];
-// Rig row (t_99b29225): TEXCOORD1 is attribute 9 on the rig, x in [0.49, 0.59]
+// Rig row (dynamic-uniform-array-index): TEXCOORD1 is attribute 9 on the rig, x in [0.49, 0.59]
 // and y in [0.53, 0.64] across the quad, so int(x * 6) is 2 or 3 either side
 // of a diagonal and int(y * 6) is 3 - the LAST element - everywhere.  Each
 // element carries its own auto value, so a read of the wrong element paints

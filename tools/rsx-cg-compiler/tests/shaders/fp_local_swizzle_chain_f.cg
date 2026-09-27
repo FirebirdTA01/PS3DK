@@ -1,4 +1,4 @@
-// t_6be25fd4: three source aliases must compose to a.wxzy.
+// source-alias-swizzle-composition: three source aliases must compose to a.wxzy.
 // Scale and bias keep the varying lanes away from colour clamping.
 void main(float4 a : TEXCOORD0, out float4 o : COLOR)
 {

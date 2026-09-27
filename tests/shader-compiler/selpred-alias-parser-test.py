@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""t_3603033d: test record boundaries in both directions before trusting a trace."""
+"""select-predication-record-boundary: test record boundaries in both directions before trusting a trace."""
 import pathlib
 import subprocess
 import sys

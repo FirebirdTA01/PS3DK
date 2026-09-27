@@ -1,4 +1,4 @@
-// File-scope defaults on the STRUCT-FLATTENED vertex path (t_4b54f26b).
+// File-scope defaults on the STRUCT-FLATTENED vertex path (uniform-default-records).
 //
 // cg_container_vp.cpp has TWO file-scope-uniform loops - one for an ordinary
 // entry, one for an entry that takes a STRUCT parameter.  A2 added the
@@ -15,7 +15,7 @@
 // because they were dropped by the same omission.
 //
 // Measured on the reference: gTint's block at 800, gM's rows at 832/864/896.
-// KNOWN DIVERGENCE, not this fixture's business and carded as t_c304d08a:
+// KNOWN DIVERGENCE, not this fixture's business and carded as explicit-binding-shared-reflection:
 // on this path we emit isShared=1 where the reference gives 0, on every
 // file-scope record.  When that lands, this container becomes 15/15
 // field-for-field against the reference; today it is 5/15, the other ten

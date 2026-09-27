@@ -65,7 +65,7 @@ public:
     // Write a uniform's COMPILED DEFAULT into the inline const block at
     // `constBlockByteOffset`.  The block is emitted zero-filled and a
     // runtime patch overwrites it; a uniform declared with an initialiser
-    // has that initialiser as its value until something does (t_3bf3ce95).
+    // has that initialiser as its value until something does (general-lowering-default).
     // Lanes beyond `count` stay zero, matching where a patch of the same
     // width writes.
     void setUniformConstBlock(uint32_t constBlockByteOffset,

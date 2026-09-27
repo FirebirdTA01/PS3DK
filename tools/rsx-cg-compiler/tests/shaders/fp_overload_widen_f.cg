@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // OVERLOAD RANKING PUTS NARROWING LAST, and this is the shape that proved it.
 // `clamp(f, 0, 1)` with a float f appears verbatim in five SDK shaders
 // (MachoQHDR x4 and stereo3D/fp_anaglyph).  Two candidates are viable:

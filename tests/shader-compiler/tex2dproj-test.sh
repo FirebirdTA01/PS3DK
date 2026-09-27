@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_483feb71: tex2Dproj(sampler2D, float3|float4) - the projective texture
+# projective-texture-fetch: tex2Dproj(sampler2D, float3|float4) - the projective texture
 # fetch - is ONE NV40 instruction, TXP (opcode 0x18), as the reference emits
 # it.  texCUBEproj stays refused in this slice (see its row).  Four reference-SDK fragment
 # shaders (the two ShadowMapFp, Boy_FaceShadowFp, shadow_f) stopped at

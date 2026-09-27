@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_80dad2dd: a declared half colour output must reach H0 THROUGH THE
+# half-output-staging: a declared half colour output must reach H0 THROUGH THE
 # ALLOCATOR, not by a patch applied after it.
 #
 # H0 is the low half of R0.  The first version of this feature decided
@@ -27,7 +27,7 @@
 #   4. the float control is untouched.
 #
 # NO CONTROL-WORD VALUE APPEARS HERE.  Which bits the runtime bind sets is
-# the SDK's business and has moved once already (t_96daf53b); this test owns
+# the SDK's business and has moved once already (half-colour-depth-control); this test owns
 # the container flag and the decoded instructions.
 #
 # The instructions are decoded with the shared ucode_decode, not read out of
@@ -72,7 +72,7 @@ emit() {
             -p sce_fp_rsx --emit-container "$work/$stem.fpo" "$src"
     ) >"$work/$stem.clog" 2>"$work/$stem.cerr" || {
         tail -n 20 "$work/$stem.cerr" >&2
-        fail "$stem did not compile; a declared half colour output must not refuse merely for holding a temp in R0 (t_80dad2dd)"
+        fail "$stem did not compile; a declared half colour output must not refuse merely for holding a temp in R0 (half-output-staging)"
     }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem wrote no container"
     (

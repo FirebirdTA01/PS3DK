@@ -445,7 +445,7 @@ int main(int argc, char** argv)
 
     // Run NV40-specific IR transforms before back-end lowering.
     //
-    // CF-2 first (t_91bbd575): give every `discard` the path condition
+    // CF-2 first (general-path-discard): give every `discard` the path condition
     // that reaches it, while the control flow is still intact.  It has to
     // precede convertSimpleIfElse - that pass's shape 5 hoists a then-arm
     // discard into the entry block and deletes the CondBranch, after

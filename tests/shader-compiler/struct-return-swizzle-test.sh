@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_c1d781ba: a struct member written through .rgb/.a (or .stp/.q) swizzles is
+# struct-member-lvalue-swizzle: a struct member written through .rgb/.a (or .stp/.q) swizzles is
 # the SAME lane group as .xyz/.w.  A struct member is addressed through a
 # composite STRING key (field + member), which bypassed the swizzle decoders
 # the rest of the frontend uses: the write stored the author's spelling and the
@@ -11,7 +11,7 @@
 # a composite key is built, so .rgb and .xyz compose one key and the map holds
 # the last write by construction.  It covers the LOWERCASE rgba/stpq spellings
 # the reference treats as equivalent; an uppercase swizzle is left refusing, as
-# the reference refuses it (C1048), and is tracked in t_373d4005.
+# the reference refuses it (C1048), and is tracked in uppercase-swizzle-acceptance.
 #
 # THE GUARD IS ALIAS-SPELLING EQUIVALENCE WITH WRITE ORDER PRESERVED, not
 # order-insensitivity: spelling is free, write order is not.  Assertions:

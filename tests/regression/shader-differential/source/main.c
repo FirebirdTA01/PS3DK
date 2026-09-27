@@ -96,7 +96,7 @@
  * consts a=N b=N params a=N b=N` - container bytes, fragment
  * instructions, inline constant blocks (16-byte data entries in the
  * ucode, not instructions), container parameter count - so the price
- * of a green is on the row (t_3bf3ce95 compares const promotion against
+ * of a green is on the row (general-lowering-default compares const promotion against
  * folding on exactly these).
  *
  * Poison canary: after every row past the standing controls the rig
@@ -202,7 +202,7 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define RT_W 64
 #define RT_H 64
 
-/* ---- every declared output (t_678a4dab) ----
+/* ---- every declared output (differential-manifest-judging) ----
  * A fragment program can write four colour targets and replace depth,
  * and until this increment the rig read back colour target 0 only: a
  * wrong depth export survived for as long as the compiler had existed,
@@ -226,7 +226,7 @@ SYS_PROCESS_PARAM(1001, 0x100000);
  * two-identical-frames rule and surfaces as `unstable`, which is what
  * an instrument that could not read is.  The fill is NOT excluded from
  * the paint count: the first fill was opaque black, and a shader whose
- * honest output is opaque black (sd_const_promotion under t_4584aa27,
+ * honest output is opaque black (sd_const_promotion under file-scope-const-initializer,
  * K dropped to zero) read as "painted 0" for eleven draws and would
  * have read as vacuous against a black reference.  Any 32-bit colour
  * is a colour some shader can paint; only the clear mark, which the
@@ -264,7 +264,7 @@ typedef struct {
 	                          * SAME compiler on both sides (convention: the guest
 	                          * cannot tell compilers apart): between two compilers
 	                          * an undeclared target holds two allocators' scratch
-	                          * and comparing it is meaningless (t_96daf53b). */
+	                          * and comparing it is meaningless (half-colour-depth-control). */
 	int  judge_depth_extra;
 } sd_pair;
 
@@ -275,7 +275,7 @@ typedef struct {
 
 /* VP rows bind EVERY attribute index 0..15 with data, not just the ones
  * a container's input mask names: the mask is the field a compiler can
- * get wrong (t_a68be5c3), and a rig that bound by it would be blind to
+ * get wrong (vp-input-mask-binding), and a rig that bound by it would be blind to
  * exactly that.  Index 0 is the quad (vertex_t.pos); indices 1..15 read
  * this buffer, one float4 per vertex per attribute (stride 16, so the
  * u8 stride field holds), values from attr_lane(). */
@@ -647,7 +647,7 @@ static int init_procedural_texture(void)
 	 * the next row's fragment ucode was copied over the image, and its
 	 * texels at rows 4..6 became instruction words.  Measured: the
 	 * "2-3 scanline band where the reference alternates pixel to pixel"
-	 * (t_c48f48c1) and every 2..13-pixel mismatch of the gate-1 sweep
+	 * (per-sampler-pixel-discrimination) and every 2..13-pixel mismatch of the gate-1 sweep
 	 * under per-name images were the ucode of the following row, read
 	 * back through the sampler.  24 x 16 KB of local memory is the
 	 * price of never having that class again. */
@@ -667,7 +667,7 @@ static int init_procedural_texture(void)
  * per judged row is the price.  An instrument that changes what it
  * feeds the shader must re-prove that input intact when it is sampled;
  * "the texture control was green" only proved the control's image at
- * the control's moment (2026-09-01, t_c48f48c1 retraction). */
+ * the control's moment (2026-09-01, per-sampler-pixel-discrimination retraction). */
 #define TEX_CHECK_ROWS 8
 static int textures_intact(void)
 {
@@ -753,7 +753,7 @@ static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit, unsigned 
  * generic CG_SAMPLER 1143.  NOT a range over 1138..1143: 1141 and 1142
  * are CG_VERTEXSHADER_TYPE / CG_PIXELSHADER_TYPE (review finding).
  * Sampler kinds other than 2D, RECT, CUBE and 3D are refused,
- * so "unserved" is always loud (t_e230822b). */
+ * so "unserved" is always loud (unsupported-sampler-kind-refusal). */
 static int is_sampler_type(u32 type)
 {
 	return (type >= CG_SAMPLER1D && type <= CG_SAMPLERCUBE) ||
@@ -1136,7 +1136,7 @@ static int canary_paints(CellGcmContextData *ctx, void *canary_container,
 	return painted_pixels(save, rt_pitch) > 0;
 }
 
-/* Cost of one container, so a green can be priced (t_3bf3ce95 compares
+/* Cost of one container, so a green can be priced (general-lowering-default compares
  * const promotion against folding on exactly these): container bytes,
  * container parameters, and the ucode split into INSTRUCTIONS and inline
  * CONST BLOCKS.  The NV40 fragment ucode is 16-byte entries, but not all
@@ -1184,7 +1184,7 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 		 * writes its output at all - it paints whatever the register
 		 * held, the 'constant where the reference varies' signature the
 		 * sensitivity fields reported for two days before the decode
-		 * named it (t_a15ec129, claude).  Decoded per instruction, not
+		 * named it (implicit-colour-output, claude).  Decoded per instruction, not
 		 * read from any mask the container declares. */
 		{
 			u32 w0 = w[i * 4 + 0];
@@ -2142,7 +2142,7 @@ static int load_manifest(void)
  * stager, and the gate lives here: a hand-edited manifest that put
  * shader X's oracle before shader Y's pair would otherwise judge Y on
  * X's premise with a confident verdict (review findings on the
- * path-pair role, t_5d8795e7 family). */
+ * path-pair role, differential-pair-isolation family). */
 
 typedef struct {
 	const char *status;      /* identical | mismatch | load-failed-a/b */
@@ -2156,7 +2156,7 @@ typedef struct {
 	u32  kil_b;
 	int  diff_channels;      /* VP rows: channels that judged mismatch */
 	char diff_channel[8];    /* VP rows: the channel key when exactly one differs */
-	/* Every declared output (t_678a4dab): which outputs the row judged
+	/* Every declared output (differential-manifest-judging): which outputs the row judged
 	 * and what each said.  Indexed like SD_OUT_*; out_maxd for depth is
 	 * in Z24 units (the zeta word's high 24 bits), colour in 8-bit
 	 * levels.  The row's max_delta stays the worst COLOUR delta and its
@@ -2175,7 +2175,7 @@ typedef struct {
 	char artifact[96];
 } sd_result;
 
-/* ---- declared outputs (t_678a4dab) ----
+/* ---- declared outputs (differential-manifest-judging) ----
  * Read from the container BYTES, the same way the bridge header's own
  * parameter walk does: header words are big-endian u32 at file offsets
  * 12 (parameterCount), 16 (parameterArray) and 20 (program); parameter
@@ -2454,7 +2454,7 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	/* ... except for an instrument row that opts in (judge=): a bind
 	 * defect writes a surface the container never declared, and an
 	 * instrument that only looks where the declaration points cannot
-	 * see it (claude, t_96daf53b).  The opted-in outputs are judged
+	 * see it (claude, half-colour-depth-control).  The opted-in outputs are judged
 	 * with the ordinary comparison - identical means nothing
 	 * distinguishable was written - and the row still waits behind the
 	 * proving gates below like any other. */
@@ -2612,7 +2612,7 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		default:
 			/* A code this switch does not know must not borrow a
 			 * confident status it does not deserve (review finding on
-			 * the 3a commit, the t_5d8795e7 family). */
+			 * the 3a commit, the differential-pair-isolation family). */
 			r->status = "internal-error";
 			snprintf(r->diagnostic, sizeof(r->diagnostic),
 			         "render_side returned unmapped code %d on side %c", rc, side);
@@ -3217,7 +3217,7 @@ int main(int argc, const char **argv)
 
 	/* ---- four colour RTs per side (A and B), one shared zeta ----
 	 * Colour target 0 is every row's; targets 1..3 and the zeta surface
-	 * are bound only for rows whose containers declare them (t_678a4dab).
+	 * are bound only for rows whose containers declare them (differential-manifest-judging).
 	 * 64x64 A8R8G8B8, 16 KB each. */
 	u32 rt_pitch = RT_W * 4;
 	u32 rt_sz    = rt_pitch * RT_H;
@@ -3285,7 +3285,7 @@ int main(int argc, const char **argv)
 		return 2;
 	}
 	int have_tex_control = 0;
-	/* GATE EXISTENCE IS NOT GATE SUCCESS (t_678a4dab).  The MRT and
+	/* GATE EXISTENCE IS NOT GATE SUCCESS (differential-manifest-judging).  The MRT and
 	 * depth instruments are proven by a COMPLETE set of reference-
 	 * compiled controls, each of which must RUN AND PASS ahead of any row
 	 * that leans on the instrument.  Both gates start closed and nothing
@@ -3576,7 +3576,7 @@ int main(int argc, const char **argv)
 			goto post_row;
 		}
 
-		/* ---- every declared output (t_678a4dab): the instrument is
+		/* ---- every declared output (differential-manifest-judging): the instrument is
 		 * proven on reference-compiled controls before any row leans on
 		 * it.  All five are reference-compiled by the stager. ---- */
 		if (strcmp(p->role, "control-mrt-identical") == 0) {
@@ -3866,7 +3866,7 @@ int main(int argc, const char **argv)
 		 * above the bump heap's watermark, overwritten by the next row's
 		 * ucode) produced 2..13-pixel mismatches and a "reference
 		 * alternates pixel to pixel" band that were reported as compiler
-		 * findings (t_c48f48c1, retracted). */
+		 * findings (per-sampler-pixel-discrimination, retracted). */
 		if (i > 1) {
 			int bad = textures_intact();
 			if (bad >= 0) {

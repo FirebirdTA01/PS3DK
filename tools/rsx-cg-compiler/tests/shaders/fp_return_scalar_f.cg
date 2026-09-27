@@ -1,4 +1,4 @@
-// t_5c12df56: a scalar RETURNED from a float4 entry must broadcast.
+// fragment-output-precision: a scalar RETURNED from a float4 entry must broadcast.
 //
 // `return 1.0;` from a `float4 main() : COLOR` assigns a scalar to a
 // four-component output, so Cg broadcasts it.  The reference emits

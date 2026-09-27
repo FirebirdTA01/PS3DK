@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // A DEFAULTED out PARAMETER IS VIABLE, and the call that OMITS it is refused
 // on the ARGUMENT, not on arity:
 //     error C1111: non-lvalue actual parameter #2 cannot be out parameter ("o")

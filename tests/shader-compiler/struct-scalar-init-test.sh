@@ -11,7 +11,7 @@
 # log on the current tip finds the diagnostic ZERO times.  Two corpus sources
 # use the construct - CgTutorial/GCM/Metallic/shaders/MetallicFp.cg and
 # util/Cg/ShaderOptimizer/cg/MetallicFp.cg, both `(PS_OUTPUT)0` - and both
-# refuse EARLIER on the helper-default diagnostic (t_36492ad8), so they cannot
+# refuse EARLIER on the helper-default diagnostic (function-visibility), so they cannot
 # flip until that lands.  This slice is therefore paid in advance: it unmasks,
 # it does not move the census.  Do not restore a row count here without
 # re-measuring it.
@@ -80,7 +80,7 @@ different containers"
 twin fp_struct_zero_init_f        fp_struct_zero_init_twin_f        "(OUT)0"
 twin fp_struct_one_init_f         fp_struct_one_init_twin_f         "(OUT)1"
 # The fill reaches a NESTED leaf too.  This row needs nested struct member
-# access, which arrived in t_5386e484 (f36eb614) - on the commit before
+# access, which arrived in nested-struct-members (f36eb614) - on the commit before
 # it the fixture fails at "no member named 'v' in 'INNER'", which is why
 # the parent for this test is that landing rather than the one before.
 twin fp_struct_nested_zero_init_f fp_struct_nested_zero_init_twin_f "(OUT)0 through a nested leaf"

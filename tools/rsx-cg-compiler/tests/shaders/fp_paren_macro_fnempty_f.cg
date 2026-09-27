@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // A function-like macro with NO parameters, called with none.  Control: the
 // parameter-list check must not refuse an empty list.
 #define K() (2.0)

@@ -1,4 +1,4 @@
-// control-h0-r1known (t_96daf53b): the H0 shape whose R1.z is known.
+// control-h0-r1known (half-colour-depth-control): the H0 shape whose R1.z is known.
 //
 // sd_h0_nodepth.fcg answers "did the bit fire"; this one answers "with what",
 // so that a moved zeta is a NUMBER and not an adjective.  The reference emits

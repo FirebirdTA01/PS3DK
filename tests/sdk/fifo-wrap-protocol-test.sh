@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_38e8bf5a: the GCM FIFO wrap must not lose a lap that was never published.
+# fifo-wrap-publication: the GCM FIFO wrap must not lose a lap that was never published.
 #
 # Builds the host model (fifo-wrap-protocol-test.c) against the real protocol
 # header, which must pass every scenario, and again with -DONE_PHASE_CONTROL,

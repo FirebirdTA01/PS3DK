@@ -109,7 +109,7 @@ private:
     // the arm as already terminated and emits no branch to the merge.
     // That is a lie about the hardware - the KIL is not a terminator and
     // the work after a discard runs, which is exactly what th06_notex
-    // proved (t_72810bd7) - and it leaves the block without the edge the
+    // proved (post-discard-colour) - and it leaves the block without the edge the
     // flatten needs.  Close it with the branch the frontend elided.
     //
     // The target is the NEXT block in creation order.  buildIfStmt makes

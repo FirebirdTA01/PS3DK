@@ -1,4 +1,4 @@
-// t_56ff2244: the order an if/else join emits its Select instructions in is
+// deterministic-join-order: the order an if/else join emits its Select instructions in is
 // part of the compiler's output, and it must come from the source rather than
 // from a hash table.  This is the baseline of the pair: `colour` is DECLARED
 // first, so its value id is the smaller one reaching the join and its select

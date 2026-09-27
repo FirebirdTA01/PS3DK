@@ -15,7 +15,7 @@
 #
 # The three shaders this role was built for: pixel-identical to the
 # reference on the default path, mismatching on the general path
-# (t_856689b2).  Byte-divergent from the reference on BOTH paths, which is
+# (operand-lane-width).  Byte-divergent from the reference on BOTH paths, which is
 # why the premise is judged on pixels and not on bytes.
 tools/rsx-cg-compiler/tests/shaders/fp_computed_color_store_f.cg|auto
 tools/rsx-cg-compiler/tests/shaders/fp_normalized_phong_vecinsert_f.cg|auto

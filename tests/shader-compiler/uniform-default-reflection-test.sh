@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The CgBinaryParameter.defaultValue FIELD of an initialised file-scope
-# uniform (t_4b54f26b).
+# uniform (uniform-default-records).
 #
 # This is not the same thing as uniform-compiled-default-test.sh beside it.
 # That test reads the value out of the inline CONST BLOCK in the ucode -

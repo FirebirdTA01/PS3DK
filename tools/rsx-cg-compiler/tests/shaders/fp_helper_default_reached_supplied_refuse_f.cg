@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // CELL 2 OF 3, AND THE ONLY ONE THIS SLICE FIXES.  The helper IS reached and
 // the call SUPPLIES the argument, so the default is never used - and the
 // reference still refuses: "error C1008: undefined variable".  Analysis is

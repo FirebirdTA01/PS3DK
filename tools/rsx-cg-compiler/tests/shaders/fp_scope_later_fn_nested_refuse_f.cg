@@ -1,4 +1,4 @@
-// t_36492ad8 commit 1.  VISIBLE BINDING IDENTITY, NOT LOOKUP SUCCESS.
+// function-visibility commit 1.  VISIBLE BINDING IDENTITY, NOT LOOKUP SUCCESS.
 //
 // The symbol table has no visibility cutoff for lookup: pass 1 puts every
 // function in it, so a function declared AFTER a call is still "found".  The

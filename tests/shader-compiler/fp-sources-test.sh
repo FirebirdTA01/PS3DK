@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # fp-sources-test.sh - the shared source decoder, and the table it rests on
-# (t_c83277c9).
+# (instruction-source-decoding).
 #
 # fp_sources.py names the SOURCES of a fragment instruction, which
 # ucode_decode.py deliberately never did: it counts them.  Naming one needs
@@ -35,7 +35,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 # A refusal is exit 1 EXACTLY; 124 is a timeout and >= 128 is a signal, and
 # either would satisfy "did not exit 0" while meaning the compiler never
-# reached the decision (t_fd95d1b9).
+# reached the decision (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # rect-matrix-test.sh -- non-square matrix types float3x4 / float4x3 / float2x4 /
-# half3x4 (t_bc130064, t_69aeaa84, t_a5dbcca2).
+# half3x4 (rectangular-matrices, rectangular-matrix-row-access, rectangular-matrix-reflection).
 #
 # Reference contract (sce-cgc 475, measured 2026-09-15, .local/probe-rect): an
 # RxC matrix is R rows of C-wide vectors.  mul(M[RxC], v[C]) -> v[R] as one

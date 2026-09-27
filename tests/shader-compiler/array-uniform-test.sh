@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_f9ecd3ac: array uniforms with CONSTANT indices, parameter and file-scope,
+# constant-uniform-array-index: array uniforms with CONSTANT indices, parameter and file-scope,
 # fragment and vertex, laid out one element at a time the way the reference
 # lays them out.  A VERTEX run-time index is the next slice's contiguous
 # block (vp-array-dynamic-test.sh); a FRAGMENT one keeps its named refusal.
@@ -120,7 +120,7 @@ printf '  %-40s == literal\n' "FP u_colors[1 + 1]"
 # draft passing the operand through: (int)(bool)2 read element 2 where the
 # reference reads element 1).  Measured on the reference: (int)(bool)2 ==
 # u[1], (short)65538 == u[2], (int)2.5 == u[2], and a float-TYPED index
-# u[(float)2] == u[2] (accepted since t_050bebce, as the reference does).
+# u[(float)2] == u[2] (accepted since float-array-index-conversion, as the reference does).
 accept fp_array_uniform_index1_f
 accept fp_array_uniform_cast_bool_f
 cmp -s "$work/fp_array_uniform_cast_bool_f.bin" "$work/fp_array_uniform_index1_f.bin" \
@@ -131,7 +131,7 @@ cmp -s "$work/fp_array_uniform_cast_short_f.bin" "$work/fp_array_uniform_literal
 accept fp_array_uniform_cast_floatlit_f
 cmp -s "$work/fp_array_uniform_cast_floatlit_f.bin" "$work/fp_array_uniform_literal_f.bin" \
     || fail "u_colors[(int)2.5] did not compile to the bytes of u_colors[2] - the float literal was not truncated under the integral cast"
-# A FLOAT-TYPED index is accepted with int() semantics (t_050bebce; the
+# A FLOAT-TYPED index is accepted with int() semantics (float-array-index-conversion; the
 # reference accepts it): u_colors[(float)2] is element 2.
 accept fp_array_uniform_cast_float_f
 cmp -s "$work/fp_array_uniform_cast_float_f.bin" "$work/fp_array_uniform_literal_f.bin" \
@@ -279,7 +279,7 @@ refuse() {  # <label> <stem> <body>
 }
 refuse "FP run-time index"        fp_array_uniform_dynamic_refuse_f      "indexed at run time"
 # VP run-time indices (vp_array_uniform_{dynamic,mixed,consecutive,two_arrays}_v)
-# were refusal rows here until t_99b29225; they are accept rows in
+# were refusal rows here until dynamic-uniform-array-index; they are accept rows in
 # vp-array-dynamic-test.sh now.
 refuse "index 4 of [4]"           fp_array_uniform_oob_refuse_f          "array index 4 out of bounds"
 refuse "index -1"                 fp_array_uniform_negative_refuse_f     "array index -1 out of bounds"

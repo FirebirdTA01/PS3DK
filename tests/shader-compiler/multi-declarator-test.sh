@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_a90b1ef1: every declarator in one declaration is declared.
+# multiple-declarators: every declarator in one declaration is declared.
 #
 # `float a, b;` declared only `a`.  Using `b` afterwards was then refused as
 # an UNDECLARED IDENTIFIER - a variable the shader declares, reported as one

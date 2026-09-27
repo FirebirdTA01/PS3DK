@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // A FUNCTION'S NAME IS NOT VISIBLE INSIDE ITS OWN DEFAULT.  The reference
 // refuses this C1002 - the declaration is not complete while its own default
 // is being read.  It is also what stops the call-edge walk: without the rule

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_5c1f84d3: texobj<K> is the Cg 1.x spelling of sampler<K>, and nothing else.
+# texobj-sampler-alias: texobj<K> is the Cg 1.x spelling of sampler<K>, and nothing else.
 #
 # Measured against the reference before any of this was written: for every
 # one of the five names, the same program spelled sampler<K> and texobj<K>

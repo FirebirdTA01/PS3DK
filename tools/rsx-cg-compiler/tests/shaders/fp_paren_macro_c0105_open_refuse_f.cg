@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // An unterminated parameter list, same C0105 on the reference.  It is a
 // separate code path from the row above: the optional group does not match at
 // all here, so without an explicit check it would fall through to an

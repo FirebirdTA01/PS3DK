@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // THE CONTROL THAT STOPS THE OVER-FIX, and it is the whole reason the edge
 // belongs to the CALL SITE rather than to the declaration.  Identical program
 // except the argument is SUPPLIED, so the default is never substituted, inner

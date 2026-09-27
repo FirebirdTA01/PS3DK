@@ -1,4 +1,4 @@
-// t_80dad2dd: a value the half colour SHARES with another consumer.
+// half-output-staging: a value the half colour SHARES with another consumer.
 //
 // The two folds that pin a colour's producers to the output slot also, for
 // a half colour, stamp those producers fp16 - which changes the precision

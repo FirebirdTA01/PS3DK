@@ -1,6 +1,6 @@
 """Every lane of the colour output carries the VALUE the fixture computes.
 
-t_856689b2: the general path's VecInsert lowering forced the scalar
+operand-lane-width: the general path's VecInsert lowering forced the scalar
 source's swizzle to lane 0.  That is right for a literal - lane 0 of the
 const block - and wrong for a lane extract, whose lane resolve() had
 already selected.  So `color.y = lit.y` emitted `MOV R0.y, R16.x`, the red
@@ -273,7 +273,7 @@ def check(path):
                             for lane in wrong)
                 + ".  lit = v * float4(0.5, 0.25, 0.125, 1.0) and "
                   "c.xyz = lit.xyz, so lane L must be v.L scaled by L's own "
-                  "factor (t_856689b2).")
+                  "factor (operand-lane-width).")
     return None
 
 

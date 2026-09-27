@@ -173,7 +173,7 @@ IRTypeInfo IRTypeInfo::fromCgType(const CgType& cgType)
     // float[N] - the container declared CGtype 1045 (float) where the
     // reference declares 1048 (float4), and every element was allocated
     // one lane wide.  Convert the element type through this same function
-    // and carry only the count from the array (t_f9ecd3ac).
+    // and carry only the count from the array (constant-uniform-array-index).
     if (cgType.arraySize() > 0)
     {
         const CgType element = cgType.elementType();

@@ -1,5 +1,5 @@
 // VERTEX-profile twin of fp_uniform_default_f.cg, for the container's
-// defaultValue FIELD (t_4b54f26b).
+// defaultValue FIELD (uniform-default-records).
 //
 // The two profiles build their parameter tables in different files
 // (cg_container_fp.cpp and cg_container_vp.cpp), so a fix applied to one

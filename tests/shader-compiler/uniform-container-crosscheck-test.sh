@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_25fa9e31: check real containers, then every accepted tracked shader.
+# uniform-container-consistency: check real containers, then every accepted tracked shader.
 # Known findings are exact, carded entries; SDK evidence stays local-only.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"

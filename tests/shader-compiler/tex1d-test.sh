@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_74f97caa: FP tex1D coordinate packing and sampler reflection.
+# fp-tex1d-packing: FP tex1D coordinate packing and sampler reflection.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"

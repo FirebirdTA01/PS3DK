@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_58e2212c: NV40 fragment DIVR (opcode 0x3A) is the oracle's divide
+# scalar-divr-lowering: NV40 fragment DIVR (opcode 0x3A) is the oracle's divide
 # shape for tan, smoothstep's dynamic edge clamp, and the trig polynomial
 # family.  RCP-then-MUL is correct enough for some pixels but is not the
 # reference shape and blocks the rest of the stdlib lane.
@@ -267,7 +267,7 @@ broadcast = decode(sys.argv[13])
 if sum(d["op"] == DIV for d in broadcast) != 1 or any(d["op"] == RCP for d in broadcast):
     raise SystemExit("FAIL: scalar quotient broadcast must keep one DIVR, no RCP")
 
-# t_6be25fd4: the retained original witness now fails unconditionally if
+# source-alias-swizzle-composition: the retained original witness now fails unconditionally if
 # source-map composition selects the wrong lanes.
 # Evaluate the tiny witness's DIVR input selection at a=(2,3,5,7). Its
 # numerator must be (5,3,7), denominator 2; current code reads (3,5,2)/7.
@@ -282,11 +282,11 @@ if (w[1] & 3) == 1 and (w[2] & 3) == 1:
     denom = values[(w[2] >> 9) & 3]
     correct = numer == (5, 3, 7) and denom == 2
     if not correct:
-        raise SystemExit("FAIL t_6be25fd4: local swizzle reads %s/%s, expected (5, 3, 7)/2" % (numer, denom))
+        raise SystemExit("FAIL source-alias-swizzle-composition: local swizzle reads %s/%s, expected (5, 3, 7)/2" % (numer, denom))
     else:
         print("local-swizzle witness now selects the expected inputs")
 else:
-    raise SystemExit("FAIL: local-swizzle witness shape changed; re-evaluate t_6be25fd4 rather than waive it")
+    raise SystemExit("FAIL: local-swizzle witness shape changed; re-evaluate source-alias-swizzle-composition rather than waive it")
 PY
 
 vp_log="$work/vp_divr_guard_v.log"

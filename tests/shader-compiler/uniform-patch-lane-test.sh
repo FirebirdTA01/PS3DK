@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A uniform's inline const blocks must be readable by a runtime patch of
-# that uniform (t_f5f750ff).
+# that uniform (fragment-global-uniform-order).
 #
 # cellGcmSetFragmentProgramParameter transfers cols words, starting at
 # lane x, to every ucode offset listed in the parameter's embedded-constant

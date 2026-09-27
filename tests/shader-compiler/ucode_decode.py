@@ -2,7 +2,7 @@
 
 Shared by the shader-compiler shell tests that need to assert on the
 INSTRUCTIONS rather than on a container field or a diagnostic.  A field a
-container declares is not evidence about the ucode - t_e89cd261 was a
+container declares is not evidence about the ucode - distinct-varying-sources was a
 defect where the input mask named a varying no instruction read - so the
 tests that matter decode the words.
 
@@ -200,7 +200,7 @@ def decode(path):
             # NVFX_FP_OP_TEX_UNIT_SHIFT.  The header marks the mask a
             # guess; it is not one any more - an explicit TEXUNIT3
             # sampler decodes here as 3 and the reference container
-            # names TEX3 for the same fetch (t_750d55be probes).
+            # names TEX3 for the same fetch (sampler-first-use-order probes).
             "texunit": (w[0] >> 17) & 0xF,
             # NVFX_FP_OP_OUT_REG_HALF.  The destination BANK, which is not
             # the same field as the arithmetic precision in bits 22..23 and

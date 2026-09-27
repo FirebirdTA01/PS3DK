@@ -1,4 +1,4 @@
-// A float-to-half conversion must lower (t_b8bb521f).
+// A float-to-half conversion must lower (half-precision-lowering).
 //
 // NV40 has NO conversion opcode.  The conversion IS the register file the
 // value lands in: writing an H register converts, and every later

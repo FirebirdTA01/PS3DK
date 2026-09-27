@@ -1,4 +1,4 @@
-// t_58e2212c: vector division by a scalar literal divisor follows the same
+// scalar-divr-lowering: vector division by a scalar literal divisor follows the same
 // reference fold as the scalar case: one vector MUL by the reciprocal, not
 // per-lane RCP and not DIVR.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)

@@ -1,4 +1,4 @@
-// t_929c0177: Two simultaneously-live step() operations must not collide on
+// live-physical-register-collision: Two simultaneously-live step() operations must not collide on
 // physical register 0.
 //
 // NOTE: Passing this test proves absence of register collision between these

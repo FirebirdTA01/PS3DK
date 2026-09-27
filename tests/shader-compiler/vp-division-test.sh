@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_b67cf02b: VP division must reach the vertex scalar RCP unit, never FP
+# vp-division: VP division must reach the vertex scalar RCP unit, never FP
 # DIVR. Distinct denominator lanes and a composed alias reject a broadcast
 # or lost swizzle even if the instruction counts happen to agree.
 set -euo pipefail

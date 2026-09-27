@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // A DEFAULT'S WRITES TO A GLOBAL ARE REAL AND THE CALLER SEES THEM.  bump()
 // sets G, and the caller reads G on the next line: the reference makes this
 // byte-identical to passing bump() explicitly (the twin).  The default is

@@ -1,4 +1,4 @@
-// t_36492ad8 commit 1.  A NAME USED AND THEN DECLARED LATER IN THE SAME
+// function-visibility commit 1.  A NAME USED AND THEN DECLARED LATER IN THE SAME
 // LEXICAL SCOPE is refused - "error C1002: the name X is already defined" -
 // and the refusal does NOT depend on reachability, so it is not the deferred
 // C1008 class.  Every other arrangement is legal, measured over nine probes

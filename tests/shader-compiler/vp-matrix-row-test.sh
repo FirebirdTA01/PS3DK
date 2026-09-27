@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A matrix uniform's row indexes to a const register, on BOTH paths
-# (t_9da20b33).  `m[0]` used to refuse everywhere - "StoreOutput source is
+# (uniform-matrix-row-index).  `m[0]` used to refuse everywhere - "StoreOutput source is
 # not a direct Load or matvecmul" on the default path, "operand could not
 # be resolved" on the general one - although the reference compiles it to
 # one instruction, `MOV o[8], c[256]`.
@@ -24,7 +24,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # this wherever a compile's status is captured, whichever way that compile is
 # expected to go: it is silent for 0 and for 1 and names anything else.
 # Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
+# one from a SIGABRT (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
@@ -58,7 +58,7 @@ compile() {
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$3.log" >&2
         fail "$3 did not compile.  A matrix row is a const register the
-reference reads directly; refusing it is the defect (t_9da20b33)."
+reference reads directly; refusing it is the defect (uniform-matrix-row-index)."
     fi
     # The ucode rows alone, so the comparison below is about instructions
     # and not about anything else the compiler prints.
@@ -78,7 +78,7 @@ for path in general legacy; do
         cat "$work/row0_$path.ucode" >&2
         fail "on the $path path m_auto[0] and m_auto[2] compile to the SAME
 ucode, so the row index never reached the register.  Both extracts carry
-componentIndex 0; the row is operand 1 (t_9da20b33)."
+componentIndex 0; the row is operand 1 (uniform-matrix-row-index)."
     fi
 done
 
@@ -114,7 +114,7 @@ for path, name in zip(sys.argv[1:3], ("general", "legacy")):
             "FAIL: on the %s path float4(m3[2], 1.0f) must write the row's "
             "three lanes together (0xe) and the literal into w (0x1); write "
             "masks were [%s], expected [%s].  A row is a const source THREE "
-            "lanes wide (t_9da20b33)."
+            "lanes wide (uniform-matrix-row-index)."
             % (name, ", ".join("0x%x" % m for m in got),
                ", ".join("0x%x" % m for m in want))
         )
@@ -138,7 +138,7 @@ for flags_tag in ":oob_general" "--legacy-lowering:oob_legacy"; do
         fail "$tag COMPILED m3[3] on a float3x3.  The matrix owns three
 registers; row 3 is the next allocation's, and the reference rejects the
 source as an out-of-bounds index.  The row index must be bounded by the
-matrix's own row count (t_9da20b33)."
+matrix's own row count (uniform-matrix-row-index)."
     fi
 done
 

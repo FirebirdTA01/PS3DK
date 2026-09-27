@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The container's registerCount must be the highest R slot the ucode
-# actually writes, plus one (t_5dc260b0).
+# actually writes, plus one (fragment-output-liveness).
 #
 # registerCount is a HARDWARE ALLOCATION: the RSX is told how many temp
 # registers to reserve for the program.  Nothing in the pipeline checks it
@@ -42,7 +42,7 @@ run_checker() {
 # this wherever a compile's status is captured, whichever way that compile is
 # expected to go: it is silent for 0 and for 1 and names anything else.
 # Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
+# one from a SIGABRT (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"

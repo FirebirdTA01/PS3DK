@@ -30,7 +30,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # this wherever a compile's status is captured, whichever way that compile is
 # expected to go: it is silent for 0 and for 1 and names anything else.
 # Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
+# one from a SIGABRT (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
@@ -48,7 +48,7 @@ mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
 # A shape only the general path lowers, so "which path ran" is answerable
-# from the verdict rather than from a comment (t_b8bb521f).
+# from the verdict rather than from a comment (half-precision-lowering).
 src="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_half_cast_f.cg"
 [[ -f "$src" ]] || fail "fixture missing: $src"
 

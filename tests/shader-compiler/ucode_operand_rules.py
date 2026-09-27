@@ -5,7 +5,7 @@ inlined in the shell script because the walk below is the part that is
 easy to get wrong, and a decoder that is wrong reports a clean program as
 clean for the wrong reason.
 
-The two rules (t_40dd8159):
+The two rules (fragment-operand-selector-limits):
 
   1. ONE input-source selector per instruction.  The selector lives in
      hw[0] bits 13..16, on the INSTRUCTION, so two input-typed sources
@@ -73,13 +73,13 @@ def check(path):
                 "sources.  An NV40 fragment instruction has ONE input "
                 "selector, so both read the same varying - and this "
                 "fixture's operands are two different varyings "
-                "(t_40dd8159 / t_e89cd261)." % (name, idx, opcode, inputs))
+                "(fragment-operand-selector-limits / distinct-varying-sources)." % (name, idx, opcode, inputs))
         if consts > 1:
             raise SystemExit(
                 "FAIL: %s instruction %d (opcode 0x%02X) names %d inline "
                 "constants.  One block is appended per instruction, so the "
                 "second is decoded as an instruction and the operand reads "
-                "the first (t_40dd8159)." % (name, idx, opcode, consts))
+                "the first (fragment-operand-selector-limits)." % (name, idx, opcode, consts))
     if seen == 0:
         raise SystemExit(
             "FAIL: %s decoded no instructions, so both rules were checked "

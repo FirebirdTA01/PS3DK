@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_a7dd471f: ftoi/itof on the general fragment path.
+# integer-float-conversion: ftoi/itof on the general fragment path.
 #
 # The oracle shape for `(float)((int)x)` is not a raw FLR.  It sets the
 # condition code from the signed source (MOVRC), floors the absolute value,
@@ -11,7 +11,7 @@
 # a swizzled argument.  The second exists because this lane already shipped
 # one per-lane lowering that read raw lane N instead of arg.swizzle[N].
 #
-# CONTROL: this fails on compilers before t_a7dd471f's ftoi/itof slice because
+# CONTROL: this fails on compilers before integer-float-conversion's ftoi/itof slice because
 # FloatToInt/IntToFloat reach the general lowering as unsupported IR ops.
 set -euo pipefail
 

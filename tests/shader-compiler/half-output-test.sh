@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_80dad2dd: a DECLARED half fragment output must reach the container.
+# half-output-staging: a DECLARED half fragment output must reach the container.
 #
 # `out half4 o : COLOR` selects a different hardware output register (H0
 # rather than R0) at a different precision, and the container records that in
@@ -8,7 +8,7 @@
 # consistent - the runtime reads R0 and R0 was written - so this is not a
 # read of an unwritten register; it is the declared output type being
 # disregarded, so the program honours neither the register nor the
-# precision the source asked for (t_5c12df56 corrected this wording).
+# precision the source asked for (fragment-output-precision corrected this wording).
 #
 # NO CONTROL-WORD VALUE APPEARS IN THIS TEST, deliberately.  Which bits the
 # bind sets is the SDK's business and has been measured and corrected once
@@ -32,7 +32,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 # The refusal_status helper that stood here (exit 1 EXACTLY - a 124 timeout
 # and a >=128 signal both satisfy "did not exit 0" while meaning the
-# compiler never reached the decision, t_fd95d1b9) went with the partial
+# compiler never reached the decision, crash-versus-refusal-status) went with the partial
 # half output's refusal below.  This file no longer asserts any refusal, so
 # keeping an unused copy would be dead code; the same helper is still in
 # every test that does assert one.

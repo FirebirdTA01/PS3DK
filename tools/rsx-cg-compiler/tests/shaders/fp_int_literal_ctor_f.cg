@@ -1,4 +1,4 @@
-// An INT literal in a float constructor converts (t_dc1d92b0).
+// An INT literal in a float constructor converts (integer-literal-constructor-conversion).
 //
 // `float4(1,1,1,1)` is the most idiomatic constant in Cg and it did not
 // build.  The IR builder's constructor fold only accepted float

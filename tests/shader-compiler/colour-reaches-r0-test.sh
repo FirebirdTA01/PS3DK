@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # No fragment program may compute a value into a register nothing reads
-# again (t_5dc260b0).
+# again (fragment-output-liveness).
 #
 # WHY THIS IS A WHOLE-CORPUS CHECK AND NOT ONE FIXTURE.  On NV40 the colour
 # output IS R0, and lowerStoreOutput says so on some shapes only by PINNING
@@ -35,7 +35,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # This test does not care WHICH shaders refuse - it reads the ucode of the ones
 # that compile.  It does care that a refusal is a refusal: 124 is a timeout and
 # >= 128 is a signal, and a compiler that CRASHED on one of these would have its
-# log deleted below and be counted as "refused, not our business" (t_fd95d1b9).
+# log deleted below and be counted as "refused, not our business" (crash-versus-refusal-status).
 # Silent for 0 and for 1; names anything else.
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
@@ -120,7 +120,7 @@ for s in tools/rsx-cg-compiler/tests/shaders/fp_output_restored_f.cg \
     out="$work/$(printf '%s' "$s" | tr '/' '_').log"
     [[ -s "$out" ]] || fail "$s did not compile.  It stores the colour more
 than once, so it pins two colour values to the same output slot; a slot
-reserved for only one of them refuses the other (t_5dc260b0)"
+reserved for only one of them refuses the other (fragment-output-liveness)"
 done
 
 python3 - "$work" "$repo_root/tests/shader-compiler" <<'PY'
@@ -153,11 +153,11 @@ OUTPUT = re.compile(r"^store sem=\S+ outIdx=(\d+)\s")
 # the picture is right and the instruction is merely wasted.  If a lowering
 # change removes it, delete this entry - do not widen the rule.
 #
-# Two more, NAMED for the same reason (t_275b56c5): a then-only block local
+# Two more, NAMED for the same reason (dead-branch-compare): a then-only block local
 # that dies before the join leaves the arm's compare with no consumer, and
 # the general path keeps that SGT as a trailing dead write (the colour is
 # already complete in R0; the reference emits no compare at all).  When
-# t_275b56c5 removes the dead compare, this test's stale check forces these
+# dead-branch-compare removes the dead compare, this test's stale check forces these
 # two entries out - that is the point of naming them rather than skipping.
 KNOWN = {"fp_discard_not_f.cg",
          "fp_block_then_only_global_f.cg",
@@ -253,7 +253,7 @@ for shader, dead in bad:
         "FAIL: %s writes %s and never reads it again.  This register is not "
         "a declared output read after the program ends, so this is a "
         "value computed and thrown away - and when it is the colour, the "
-        "program paints whatever was already in R0 (t_5dc260b0).\n"
+        "program paints whatever was already in R0 (fragment-output-liveness).\n"
         % (shader, ", ".join("R%d at instruction %d" % (s, n)
                              for n, s in dead)))
 if bad:

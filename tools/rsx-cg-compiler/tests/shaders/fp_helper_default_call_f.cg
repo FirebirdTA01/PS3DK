@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // A CALL IN A HELPER DEFAULT.  Substituted at the call site like any other
 // default expression, so it is a byte twin of writing the call out - which is
 // what fp_helper_default_call_twin_f asserts.  The entry-uniform spelling of

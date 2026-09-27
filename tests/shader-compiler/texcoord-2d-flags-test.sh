@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # texCoords2D must follow the DECLARED width of each TEXCOORD varying, not
-# the lanes the shader consumes (t_f5f750ff follow-on).  Marking a float3 or
+# the lanes the shader consumes (fragment-global-uniform-order follow-on).  Marking a float3 or
 # float4 varying as 2D is how a varying's z or w stops being what the vertex
 # program wrote - which no amount of compiling successfully will reveal, so
 # this reads the container's FP sub-header directly.

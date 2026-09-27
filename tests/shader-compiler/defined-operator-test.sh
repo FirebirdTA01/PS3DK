@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_9e90fb38: THE `defined` OPERATOR, AND WHAT COUNTS AS DEFINED.
+# preprocessor-defined-operator: THE `defined` OPERATOR, AND WHAT COUNTS AS DEFINED.
 # Measured against sce-cgc 475.
 #
 # WHAT WENT WRONG.  evaluateExpression called expandMacros FIRST and applied
@@ -47,7 +47,7 @@
 # ONE CELL IS DELIBERATELY NOT HERE.  `#if defined(X) ? 1 : 0` is C0105 on the
 # reference and accepted by us, because our ExprParser has a ternary and the
 # reference #if grammar does not.  That is a property of the grammar, not of
-# this operator; it is carded as t_ebe8f97e and this guard asserts nothing
+# this operator; it is carded as preprocessor-conditional-grammar and this guard asserts nothing
 # about it.  Completing the refusal list by deleting one operator would be
 # this slice quietly becoming a grammar change.
 #

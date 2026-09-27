@@ -1,4 +1,4 @@
-// t_75de19a1 negative control: operand widths that do not sum to the result
+// scalar-constructor-broadcast negative control: operand widths that do not sum to the result
 // width still take the packer's named refusal, not the broadcast.
 // float3(float2, float2) is four lanes into three.  Measured: the reference
 // ACCEPTS this with warning C7541 ("too much data in type constructor") and

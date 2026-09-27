@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A literal vec4 store packs the DISTINCT values and selects with the source
-# swizzle, the way the reference compiler does (t_642eb36e).
+# swizzle, the way the reference compiler does (literal-vector-dedup-swizzle).
 #
 # THE RULE, derived from the oracle over the thirteen shapes below and
 # independently already present in the legacy emitter (FpConstBlockPacker,
@@ -15,7 +15,7 @@
 #
 # THIS SCRIPT USED TO RUN THE LEGACY PATH.  The property is reference parity,
 # and it was asserted only under --legacy-lowering while the SHIPPING path
-# silently failed it - t_8a7aa04d's finding, one of nine.  The subject is now
+# silently failed it - general-path-literal-dedup's finding, one of nine.  The subject is now
 # the shipping path; ONE legacy invocation survives as a differential control.
 #
 # TOMBSTONE FOR THAT CONTROL: the legacy matcher is retired.  When it goes,
@@ -31,7 +31,7 @@
 # the condition test (hw[1] bits 18..20) or the condition-code write (hw[0]
 # bit 8), so a container whose colour MOV carried NVFX_COND_FL - a write that
 # never executes - would carry a perfectly packed block that never reached a
-# pixel and every row below would still pass.  (t_7396e0c2's rows had the
+# pixel and every row below would still pass.  (dead-branch-local-predication's rows had the
 # harder version of it: they read fp_sources' RENDERED text, which really
 # does omit those fields.)
 #
@@ -124,7 +124,7 @@ done
 # NAMED DIVERGENCE, and the wording is deliberate: THE REFERENCE'S PACKING
 # OF REPEATED NON-FINITE VALUES IS NOT CHARACTERISED.  Four arrangements
 # gave four different results, and every one paints values the source does
-# not contain (t_b737691f):
+# not contain (nonfinite-literal-dedup):
 #
 #   float4(inf,1,inf,2)   ref {inf,1,2,0} .xyzz  paints (inf,1,2,2)
 #   float4(inf,1,3,inf)   ref {3.0e38,0,0,0} .xxxx paints 3.0e38 x4

@@ -9,7 +9,7 @@ namespace
 // when any source declaration of the name is visible the builtins are not
 // candidates at all, so a source-versus-builtin tie can no longer be reached,
 // and every remaining tie is source-versus-source, which the reference calls
-// C1101 rather than resolving by preference (t_36492ad8).
+// C1101 rather than resolving by preference (function-visibility).
 }
 
 // ============================================================================
@@ -480,7 +480,7 @@ void SymbolTable::registerBuiltinTypes()
     addType("float4x4", CgType::Float4x4());
     addType("matrix", CgType::Float4x4());
     // Non-square matrices are real types on the reference: RxC = R rows of
-    // C-wide vectors (t_bc130064 / t_69aeaa84).
+    // C-wide vectors (rectangular-matrices / rectangular-matrix-row-access).
     for (int r = 2; r <= 4; ++r)
         for (int c = 2; c <= 4; ++c)
         {
@@ -589,7 +589,7 @@ void SymbolTable::registerMathFunctions()
         addFunction("ddy", vec, {vec}, {"x"}, nullptr, true);
     }
 
-    // The pack/unpack family (t_23f9d1a6): one NV40 fragment instruction each.
+    // The pack/unpack family (pack-unpack-intrinsics): one NV40 fragment instruction each.
     // Measured on the reference: pack_2half / pack_2ushort take half2 or
     // float2 (a float scalar smears; a half scalar and a float3 are C1101
     // ambiguous, which the two overloads reproduce), pack_4ubyte / pack_4byte
@@ -741,7 +741,7 @@ void SymbolTable::registerVectorFunctions()
         addFunction("faceforward", vec, {vec, vec, vec}, {"n", "i", "nref"}, nullptr, true);
     }
 
-    // mul - matrix multiplication, over every RxC shape (t_bc130064).
+    // mul - matrix multiplication, over every RxC shape (rectangular-matrices).
     // Measured on the reference: mul(M[RxC], v[C]) -> v[R] (one DP(C) per
     // row), mul(v[R], M[RxC]) -> v[C] (a MUL/MAD chain over the rows), and
     // mul(A[RxK], B[KxC]) -> M[RxC].  The square entries below are the same

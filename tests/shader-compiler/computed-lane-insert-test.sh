@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# t_b25e6444: Non-contiguous lane-preserving insert of a computed vector must compile
+# computed-lane-insert: Non-contiguous lane-preserving insert of a computed vector must compile
 # on the general path and write all four destination channels into R0 (.yw preserved,
 # .xz inserted from computed temp).
 #
 # CONTROL: On the retired legacy matcher (--legacy-lowering), this shape refuses
-# with "nv40-fp: VecInsert scalar must be a float literal" (t_afb4af65).
+# with "nv40-fp: VecInsert scalar must be a float literal" (literal-lane-insert).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -18,7 +18,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # this wherever a compile's status is captured, whichever way that compile is
 # expected to go: it is silent for 0 and for 1 and names anything else.
 # Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
+# one from a SIGABRT (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
@@ -84,7 +84,7 @@ for i, w in enumerate(gs):
 if combined_mask != 0xF:
     sys.exit(
         f"FAIL: R0 channels not fully written: combined mask 0x{combined_mask:X} != 0xF "
-        f"(expected all 4 channels .xyzw; t_b25e6444 regression)"
+        f"(expected all 4 channels .xyzw; computed-lane-insert regression)"
     )
 
 if not has_x_insert or not has_z_insert:

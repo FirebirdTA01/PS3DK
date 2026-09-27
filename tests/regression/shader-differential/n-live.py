@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""shader-differential: the N-live-registers family (t_5dc260b0), 2026-09-02.
+"""shader-differential: the N-live-registers family (fragment-output-liveness), 2026-09-02.
 
 Two readouts: the FIRST REFUSAL per compiler (binary; the acceptance gate) and
 the SLOPE of emitted instructions per term (the gradient; the progress

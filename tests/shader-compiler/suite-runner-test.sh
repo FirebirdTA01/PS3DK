@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test shader-compiler suite runner self-check (t_3d2a99cf).
+# Test shader-compiler suite runner self-check (shader-suite-inventory).
 # Verifies workflow parsing, outcome categorization (PASS/FAIL/TIMEOUT/UNRUNNABLE),
 # SKIPPED section extraction, and execution timing arithmetic.
 set -euo pipefail

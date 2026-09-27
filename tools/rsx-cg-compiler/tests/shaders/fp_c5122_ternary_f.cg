@@ -1,4 +1,4 @@
-// t_61109061.  A function REACHED from the SELECTED ENTRY may not carry a
+// prototype-default-merging.  A function REACHED from the SELECTED ENTRY may not carry a
 // RETURN semantic.  MEASURED against sce-cgc 475 - the C5122 diagnostic's own
 // text ("semantics not allowed on functions other than the entry function") is
 // WRONG about its rule: the reference accepts a parameter semantic on a called

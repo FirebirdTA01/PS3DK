@@ -121,7 +121,7 @@ int fragmentOutputIndex(const std::string& semanticUpper, int /*semanticIndex*/)
 }  // namespace
 
 // ---------------------------------------------------------------------
-// Shape-binding types, hoisted out of lowerFragmentProgram (t_c44cc3b7).
+// Shape-binding types, hoisted out of lowerFragmentProgram (fragment-lowering-helper-extraction).
 // ---------------------------------------------------------------------
 // These are plain data describing a recognised source shape.  They were
 // declared INSIDE lowerFragmentProgram, which is why no shape matcher
@@ -297,7 +297,7 @@ struct FpMadBinding
 // Literal const blocks: the reference compiler packs the DISTINCT values
 // of a literal into the 16-byte block in first-appearance order, zero-fills
 // the rest, and selects per destination lane with the source swizzle
-// (t_642eb36e).  This accumulates the lanes of one or more literals into a
+// (literal-vector-dedup-swizzle).  This accumulates the lanes of one or more literals into a
 // single block, so an instruction reading two of them - a MAD with a
 // literal multiplier and a literal addend - can share one block when the
 // distinct values fit, which is exactly what the reference does.
@@ -384,7 +384,7 @@ struct GenericFpArithBinding
 };
 
 // The generic-arithmetic source descriptor, hoisted out of lowerFragmentProgram
-// (t_c44cc3b7, carve step 12).  Same rule as steps 0/0b/0c and 7: a helper
+// (fragment-lowering-helper-extraction, carve step 12).  Same rule as steps 0/0b/0c and 7: a helper
 // cannot become a free function while a type in its SIGNATURE is declared
 // inside the block that calls it.  This one gates a whole subsystem - twelve
 // generic-emission helpers take or return it - so it is hoisted on its own
@@ -430,7 +430,7 @@ struct FpNormalizeBinding
 };
 
 // Lighting-shape binding types, hoisted out of the vertex-lighting block
-// inside lowerFragmentProgram (t_c44cc3b7, carve step 7).  Same reason as
+// inside lowerFragmentProgram (fragment-lowering-helper-extraction, carve step 7).  Same reason as
 // steps 0/0b/0c one level up: a matcher cannot become a free function while
 // the types in its signature are declared inside the block that calls it.
 // These five sat two scopes deep, inside tryEmitComputedColorStore, which is
@@ -463,7 +463,7 @@ struct TexDiffuseMul
 };
 
 // ---------------------------------------------------------------------
-// Shared emission state for shape matchers (t_c44cc3b7, carve step 1).
+// Shared emission state for shape matchers (fragment-lowering-helper-extraction, carve step 1).
 // ---------------------------------------------------------------------
 // The 49 shape matchers inside lowerFragmentProgram are [&] lambdas, so each
 // one reaches the emission state through capture.  That capture is what pins
@@ -563,7 +563,7 @@ struct FpShapeContext
     bool& ambiguousBinding;
 };
 
-// First lambda converted out of lowerFragmentProgram (t_c44cc3b7, carve
+// First lambda converted out of lowerFragmentProgram (fragment-lowering-helper-extraction, carve
 // step 2).  Behaviour is unchanged - the body is the former lambda verbatim,
 // with its one captured map reached through the context.
 //
@@ -591,7 +591,7 @@ static SrcMod resolveSrcMods(const FpShapeReads& reads, IRValueID id)
     return r;
 }
 
-// Second lambda converted out of lowerFragmentProgram (t_c44cc3b7, carve
+// Second lambda converted out of lowerFragmentProgram (fragment-lowering-helper-extraction, carve
 // step 3).  Body is the former lambda verbatim, dedented, with its six
 // captures reached through the context.
 //
@@ -662,7 +662,7 @@ static bool emitTexSampleToDest(FpShapeContext& ctx,
     return true;
 }
 
-// FIRST MATCHER converted out of lowerFragmentProgram (t_c44cc3b7, carve
+// FIRST MATCHER converted out of lowerFragmentProgram (fragment-lowering-helper-extraction, carve
 // step 4) - the milestone the previous three steps existed to reach.
 //
 // Basic vertex-lighting FP:
@@ -787,7 +787,7 @@ static bool tryEmitTexColorSpecular(FpShapeContext& ctx,
     return true;
 }
 
-// Read-only predicates converted out of lowerFragmentProgram (t_c44cc3b7,
+// Read-only predicates converted out of lowerFragmentProgram (fragment-lowering-helper-extraction,
 // carve step 6).  Each takes `const FpShapeReads&`, so the compiler refuses
 // any attempt to emit from one - this is the read side of the convention
 // step 5 made enforceable, applied for the first time beyond resolveSrcMods.
@@ -868,7 +868,7 @@ return tyIt != reads.valueToType.end() &&
 }
 
 // Vertex-lighting shape matchers converted out of lowerFragmentProgram
-// (t_c44cc3b7, carve step 8).  All eight only INSPECT bindings, so all
+// (fragment-lowering-helper-extraction, carve step 8).  All eight only INSPECT bindings, so all
 // eight take `const FpShapeReads&` and the compiler refuses any attempt to
 // emit from them.
 //
@@ -1058,7 +1058,7 @@ return true;
 }
 
 // Four read-only helpers DEDUPLICATED out of lowerFragmentProgram
-// (t_c44cc3b7, carve step 9).  Each existed TWICE - byte-identical copies
+// (fragment-lowering-helper-extraction, carve step 9).  Each existed TWICE - byte-identical copies
 // in two different shape blocks - and each becomes one free function.
 //
 // This step removes something rather than moving it.  Nobody was choosing
@@ -1126,7 +1126,7 @@ return floatLiteralValue(reads, rid, f) && f == expected;
 }
 
 // Varying/texture base resolution, converted out of lowerFragmentProgram
-// (t_c44cc3b7, carve step 10).  Read-only, so all four take
+// (fragment-lowering-helper-extraction, carve step 10).  Read-only, so all four take
 // `const FpShapeReads&`.
 //
 // What they encode is a fact about the IR worth keeping visible now that
@@ -1176,7 +1176,7 @@ return -1;
 }
 
 // Two capture-free lambdas that were written out SEVEN times between three
-// emission blocks (t_c44cc3b7, carve step 11).  Unlike every conversion
+// emission blocks (fragment-lowering-helper-extraction, carve step 11).  Unlike every conversion
 // before this one they capture NOTHING, so they need no context at all -
 // which is why they are plain free functions and not `FpShapeReads` takers.
 //
@@ -1201,7 +1201,7 @@ static void swizzleAllLanes(struct nvfx_src& s, int lane)
 }
 
 // Three generic-emission helpers that declared `[&]` but capture NOTHING
-// (t_c44cc3b7, carve step 12).  A capture list is a CLAIM, not a measurement:
+// (fragment-lowering-helper-extraction, carve step 12).  A capture list is a CLAIM, not a measurement:
 // genericOpOpcode and makeGenericNvfxSrc were written `[&]` out of local habit
 // while using nothing but their own parameters, and only genericSourceNeedsInline
 // spelled its emptiness honestly as `[]`.
@@ -1214,7 +1214,7 @@ static void swizzleAllLanes(struct nvfx_src& s, int lane)
 // cheap seam is nearly, but not quite, exhausted.
 //
 // Bodies verbatim.  makeGenericNvfxSrc keeps its inert const_cast for the same
-// reason srcOfReg does (t_087b4ace).
+// reason srcOfReg does (emitter-source-helper-extraction).
 static uint8_t genericOpOpcode(GenericFpOp op)
 {
     switch (op)
@@ -1269,7 +1269,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
     FpAssembler asm_;
     FpAttributes attrs;
 
-    // FRAGMENT DEPTH OUTPUT: REFUSED ON THIS PATH (t_1722b8bc).
+    // FRAGMENT DEPTH OUTPUT: REFUSED ON THIS PATH (fragment-depth-export).
     //
     // fragmentOutputIndex above has always said DEPTH -> R1, ".z only".
     // Nothing here ever emitted it: a shader declaring `float d : DEPTH`
@@ -1291,7 +1291,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         if (fragmentOutputIndex(toUpper(p.semanticName), p.semanticIndex) == 1) {
             out.diagnostics.push_back(
                 "nv40-fp: fragment DEPTH output is not lowered on the legacy "
-                "path - it would be dropped silently; refusing (t_1722b8bc)");
+                "path - it would be dropped silently; refusing (fragment-depth-export)");
             out.ok = false;
             return out;
         }
@@ -1305,7 +1305,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 continue;
             out.diagnostics.push_back(
                 "nv40-fp: fragment DEPTH output is not lowered on the legacy "
-                "path - it would be dropped silently; refusing (t_1722b8bc)");
+                "path - it would be dropped silently; refusing (fragment-depth-export)");
             out.ok = false;
             return out;
         }
@@ -2389,10 +2389,10 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // When something does, the kill fires on fragments
                     // the branch never reached:
                     //
-                    //   t_79fc6bf7  a discard on the FALSE arm gets the
+                    //   discard-guard-completeness  a discard on the FALSE arm gets the
                     //               TRUE arm's polarity and kills exactly
                     //               the fragments that must survive.
-                    //   t_7ae60244  an ENCLOSING branch is not accounted
+                    //   nested-discard-reachability  an ENCLOSING branch is not accounted
                     //               for at all - if_convert collapses the
                     //               inner if of a nested pair and the kill
                     //               keeps only the inner comparison.
@@ -2420,7 +2420,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 "nv40-fp: cannot prove what guards this "
                                 "discard, so the single comparison this "
                                 "path would emit cannot be shown to be "
-                                "the whole guard (t_7ae60244)");
+                                "the whole guard (nested-discard-reachability)");
                             return out;
                         }
                         const bool wholeGuard =
@@ -2443,14 +2443,14 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                           "last comparison, not the path "
                                           "condition, and would kill the "
                                           "surviving fragments "
-                                          "(t_79fc6bf7)")
+                                          "(discard-guard-completeness)")
                                     : std::string(
                                           "nv40-fp: discard guarded by a "
                                           "branch this path cannot express "
                                           "- the kill would use only the "
                                           "innermost comparison and fire "
                                           "where an enclosing condition is "
-                                          "false (t_7ae60244)"));
+                                          "false (nested-discard-reachability)"));
                             return out;
                         }
                     }
@@ -2586,7 +2586,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // UniformScalar comparisons before any comparison
                 // instruction, matching the reference schedule.
                 //
-                // t_ec804d32: this pre-pass writes R1, and the varying
+                // half-preload-register-alias: this pre-pass writes R1, and the varying
                 // preload below writes H2 with a FULL mask.  H2's four
                 // fp16 lanes are 64 bits - ALL of R1.x and R1.y - so when
                 // one discard needs both, the preload destroys the
@@ -2655,7 +2655,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             return out;
                         }
 
-                        // t_ec804d32.  H2 and H3 pack into R1, and this
+                        // half-preload-register-alias.  H2 and H3 pack into R1, and this
                         // preload writes a FULL mask - four fp16 lanes,
                         // 64 bits, all of R1.x and R1.y - so a uniform
                         // the pre-pass put in R1 is gone by the time the
@@ -2689,7 +2689,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 "uniform in one guard; the varying's "
                                 "half-register preload occupies the same "
                                 "hardware register as the uniform and "
-                                "destroys it (t_ec804d32)");
+                                "destroys it (half-preload-register-alias)");
                             return out;
                         }
 
@@ -4580,8 +4580,8 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                                 "literal (other shapes land later), so the "
                                 "lane it writes cannot be emitted; refusing "
                                 "rather than shipping a shader missing part "
-                                "of its source (t_afb4af65; the post-discard "
-                                "lerp shape is t_72810bd7)");
+                                "of its source (literal-lane-insert; the post-discard "
+                                "lerp shape is post-discard-colour)");
                             return false;
                         }
                         // A saturate on the store applies to every lane
@@ -7045,7 +7045,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // The block holds the DISTINCT values in first-appearance
                 // order, zero-filled, and the source swizzle selects -
                 // lane i reads the const lane holding its value
-                // (t_642eb36e).  Measured against the reference:
+                // (literal-vector-dedup-swizzle).  Measured against the reference:
                 //
                 //   float4(1,1,1,1)            {1,0,0,0}           .xxxx
                 //   float4(1,0.5,1,0.5)        {1,0.5,0,0}         .xyxy
@@ -7057,7 +7057,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // reference for every literal with a repeated lane -
                 // which includes the most common shader there is, a
                 // constant colour.  Every lane is written here, so unlike
-                // the partial-mask case (t_835be4be) there are no
+                // the partial-mask case (literal-insert-coalescing) there are no
                 // don't-care swizzle lanes to guess: the rule is total.
                 auto lcIt = valueToLiteralVec4.find(srcId);
                 if (lcIt != valueToLiteralVec4.end())
@@ -7154,7 +7154,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // that can be a literal.  Reading it as a uniform is
                     // what made `v * float4(0.5,0.5,0.5,0.5) + ...` emit
                     // a multiplicand of {0,0,0,0} and collapse the output
-                    // to the addend, silently (t_a1f43b12).
+                    // to the addend, silently (mad-literal-data).
                     auto mulLitIt = valueToLiteralVec4.find(mb.multiplierUniformId);
                     auto addLitIt = valueToLiteralVec4.find(mb.addendId);
                     const bool mulIsLiteral = mulLitIt != valueToLiteralVec4.end();
@@ -7169,7 +7169,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             "nv40-fp: MAD multiplier is neither a literal nor a "
                             "uniform, so its value cannot be placed in the const "
                             "block; refusing rather than emitting zero "
-                            "(t_a1f43b12)");
+                            "(mad-literal-data)");
                         return out;
                     }
                     if (!addIsLiteral && valueToFpUniform.count(mb.addendId) == 0)
@@ -7178,7 +7178,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                             "nv40-fp: MAD addend is neither a literal nor a "
                             "uniform, so its value cannot be placed in the const "
                             "block; refusing rather than emitting zero "
-                            "(t_a1f43b12)");
+                            "(mad-literal-data)");
                         return out;
                     }
 
@@ -10059,7 +10059,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                     // selector, so two operands that are DIFFERENT varyings
                     // cannot ride in the same instruction: the second wins
                     // and `a - b` emits as `b - b`, silently, with the
-                    // container's input mask still naming both (t_e89cd261).
+                    // container's input mask still naming both (distinct-varying-sources).
                     // Preload every input after the first distinct one, the
                     // way the reference does.
                     {
@@ -11725,7 +11725,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // peeler above resolved `oColor = c` inward to the
                 // varying `c` copies, so an insert like `c.x = 0.5`
                 // sits in laneOverrides and is this branch's to emit.
-                // Until t_afb4af65 it was ignored here and the insert
+                // Until literal-lane-insert it was ignored here and the insert
                 // was dropped in silence — a full-width MOV of the
                 // varying, no diagnostic, well-formed container.
                 //
@@ -11777,7 +11777,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 // byte-identical ucode.  Emit the vector into the lanes it
                 // covers with the generic lowering rather than refusing,
                 // which is what the constructor spelling has always done
-                // (t_72810bd7).
+                // (post-discard-colour).
                 //
                 // Lane-preserving only: the extract's lane must be the lane
                 // it is written to.  `c.x = v.z` is a different program and
@@ -11853,7 +11853,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
         return out;
     }
 
-    // RE-STORED OUTPUT (t_becbfa69).
+    // RE-STORED OUTPUT (post-discard-output-restores).
     //
     // This path emits the FIRST store to an output and drops the rest:
     //
@@ -11894,12 +11894,12 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 std::to_string(kv.second) +
                 " times; this path emits the first store and drops the "
                 "rest, which paints every surviving fragment the first "
-                "value (t_becbfa69)");
+                "value (post-discard-output-restores)");
             return out;
         }
     }
 
-    // COMPLETENESS CHECK (t_72810bd7).
+    // COMPLETENESS CHECK (post-discard-colour).
     //
     // The default path is a shape matcher: an IR shape it does not
     // recognise is skipped, and nothing notices.  th06_notex compiled with
@@ -12012,7 +12012,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
                 " feeds an output in the IR but no emitted instruction reads "
                 "it, so a computation was silently dropped; refusing rather "
                 "than shipping a shader missing part of its source "
-                "(t_72810bd7)");
+                "(post-discard-colour)");
             return out;
         }
     }
@@ -12055,7 +12055,7 @@ UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry
             continue;
         // A declared initialiser is the parameter's compiled default: write
         // it into every block the parameter lists, which are exactly the
-        // blocks a runtime patch of that name overwrites (t_3bf3ce95).
+        // blocks a runtime patch of that name overwrites (general-lowering-default).
         const auto defIt = fpUniformSlotDefault.find(eu.entryParamIndex);
         for (uint32_t off : eu.ucodeByteOffsets)
         {

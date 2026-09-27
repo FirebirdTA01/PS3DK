@@ -1,4 +1,4 @@
-// ALIGNMENT witness for the container's defaultValue block (t_4b54f26b).
+// ALIGNMENT witness for the container's defaultValue block (uniform-default-records).
 //
 // fp_uniform_default_f.cg proves the VALUES.  It cannot prove the 16-byte
 // ALIGNMENT, because the strings that precede its first default block happen

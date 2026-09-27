@@ -1,4 +1,4 @@
-"""Name the SOURCES of an NV40 fragment instruction (t_c83277c9).
+"""Name the SOURCES of an NV40 fragment instruction (instruction-source-decoding).
 
 `ucode_decode.py` decodes hw[0] and COUNTS input and const sources; it never
 names one.  That is why every test that needed a source register or a swizzle
@@ -39,7 +39,7 @@ measured rather than assumed.
     varying in the corpus, and one that reported two input sources as two
     different registers would be inventing a distinction the hardware cannot
     express - which is the other end of the one-input-per-instruction rule
-    ucode_operand_rules.py already checks (t_40dd8159).
+    ucode_operand_rules.py already checks (fragment-operand-selector-limits).
 
 Nothing here guesses.  An opcode with no ARITY entry reports its sources as
 UNKNOWN and names none of them, rather than printing three plausible reads.
@@ -142,7 +142,7 @@ def ucode_words(blob):
     The subtype block is located from the header's programOffset - word 5 -
     and NOT derived from the ucode offset: the writer stores the locator
     explicitly, and deriving it from alignment reads padding the moment the
-    layout changes (measured the hard way on t_1722b8bc).
+    layout changes (measured the hard way on fragment-depth-export).
     """
     if len(blob) < 32:
         raise ContainerError("shorter than a container header (%d bytes)" % len(blob))

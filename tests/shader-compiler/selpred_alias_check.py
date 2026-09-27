@@ -1,6 +1,6 @@
 """Check SelPred allocation records, never sources belonging to later records.
 
-t_3603033d: leaving a SelPred open across another instruction both invented
+select-predication-record-boundary: leaving a SelPred open across another instruction both invented
 aliases with its consumers and hid real aliases by overwriting its sources.
 The compiler has a separate final-allocation guard; this checks its trace.
 """
@@ -77,7 +77,7 @@ for row in selpreds:
                 f"FAIL: SelPred at alloc[{row['instr']}] writes R{dst_slot} "
                 f"but early-read src{src_index} v{src['idx']} also occupies R{src_slot}; "
                 "the expanded default MOV would clobber a later source "
-                "(t_652d6e42 regression)"
+                "(select-source-liveness regression)"
             )
 
 if checked == 0:

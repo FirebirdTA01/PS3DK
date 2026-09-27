@@ -66,7 +66,7 @@ std::string IRBuilder::makeLabel(const std::string& prefix)
 // Main Build Entry Point
 // ============================================================================
 
-// Evaluate a file-scope const's initialiser to floats (t_4584aa27).
+// Evaluate a file-scope const's initialiser to floats (file-scope-const-initializer).
 // Deliberately NARROW: a scalar literal, or a constructor whose arguments
 // are all scalar literals, with an optional leading unary minus.  Anything
 // else returns false and the caller REFUSES the shader.
@@ -467,7 +467,7 @@ static bool evaluateConstScalar(const ExprNode* e, ConstEvalScalar& out)
 
 
 // ---------------------------------------------------------------------------
-// Constant VALUE evaluation for file-scope initialisers (t_10dc2936).
+// Constant VALUE evaluation for file-scope initialisers (file-scope-initializer-fold).
 //
 // The reference folds an initialiser expression before it becomes a default
 // or an inline constant.  Measured on sce-cgc 475 (.local/probe-init, byte
@@ -1020,7 +1020,7 @@ std::unique_ptr<IRModule> IRBuilder::build(TranslationUnit& unit, const Semantic
 
     // LOWER ONLY WHAT THE ENTRY CAN REACH.  The reference emits no code for an
     // unreachable function and reports no name error from inside one - the
-    // semantic pass already holds those back (t_36492ad8), and lowering one
+    // semantic pass already holds those back (function-visibility), and lowering one
     // anyway would re-raise them here as "IR generation error: Unknown
     // identifier".  Type and arity errors are NOT affected: pass 2 analyses
     // every body, reachable or not, which is what the reference does too.
@@ -1076,13 +1076,13 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             // it means two different things depending on the qualifier:
             //
             //   const   - every reference FOLDS to the value, so the value
-            //             must be known or the fold is a zero (t_4584aa27).
+            //             must be known or the fold is a zero (file-scope-const-initializer).
             //   uniform - the value is the parameter's COMPILED DEFAULT,
             //             written into the same inline const block that a
             //             runtime patch later overwrites.  So `uniform
             //             float4 c = float4(1,0,0,1);` works unpatched AND
             //             stays patchable by name, which is what the
-            //             reference compiler does (t_3bf3ce95).
+            //             reference compiler does (general-lowering-default).
             //
             // A uniform WITHOUT an initialiser is untouched: no compiled
             // default, blocks stay zero-filled, exactly as before.
@@ -1154,7 +1154,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             if (constInit.size() == 1)
             {
                 // An array declaration holds arraySize elements of its
-                // component count (t_10dc2936: `static const float A[3]`
+                // component count (file-scope-initializer-fold: `static const float A[3]`
                 // is three lanes, not one).
                 const int declared = global.type.componentCount() *
                                      (global.type.arraySize > 0 ? global.type.arraySize : 1);
@@ -1207,14 +1207,14 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             // Every reference then resolved to a value that was never
             // populated and the constant emitted as ZERO: `const float K =
             // 7.5; uv.x * K` compiled to `uv.x * 0.0`, on both paths, with
-            // no diagnostic (t_4584aa27).  A local const never had this
+            // no diagnostic (file-scope-const-initializer).  A local const never had this
             // problem because buildVarDeclStmt maps the name to
             // buildExpr(initialiser), which is a real IRConstant.
             //
             // File-scope `const` (including `static const` and `const static`,
             // both mapped to StorageQualifier::Const by the parser) folds to its
             // initializer so its value materializes as a typed IRConstant
-            // rather than an unbacked uniform load (t_65e1b7fa).
+            // rather than an unbacked uniform load (static-const-qualifiers).
             // Bare file-scope `static` is deliberately excluded here: static
             // variables in Cg are mutable, and folding an initial value at
             // every read would silently drop writes from helpers or other
@@ -1294,7 +1294,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
 // The reference compiler does this - its parameter table for a shader
 // declaring `out float4 oColor` with no semantic reads
 // "out.UNDEFINED: COLOR0", the declared semantic undefined and the resource
-// COLOR0 - and without it we dropped the whole shader (t_a15ec129).  The
+// COLOR0 - and without it we dropped the whole shader (implicit-colour-output).  The
 // store was gated on the parameter HAVING a semantic, so no StoreOutput was
 // emitted, everything that only fed it went with it, and the container came
 // out with eleven instructions, none of them writing the output register:
@@ -1412,7 +1412,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         }
 
         // A UNIFORM entry parameter's default value is its compiled default,
-        // the same as a file-scope uniform's initialiser (t_4b54f26b A1).
+        // the same as a file-scope uniform's initialiser (uniform-default-records A1).
         // Semantic analysis has already refused a default anywhere the
         // reference refuses one - C1114, only uniform parameters of the
         // SELECTED entry - so anything reaching here with a defaultValue is
@@ -1428,14 +1428,14 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             // entry parameter and records one default block per element
             // (measured 2026-09-14, entry-param-default-test row s11 and
             // .local/probe-init/s11_uniform). We do not emit per-element
-            // default records yet (t_2b592fc7), so this stays a refusal that
-            // names the gap; the array-aware evaluator (t_10dc2936) must not
+            // default records yet (array-default-records), so this stays a refusal that
+            // names the gap; the array-aware evaluator (file-scope-initializer-fold) must not
             // silently turn it into an acceptance without those records.
             if (param->type && param->type->isArray())
             {
                 error(param->loc,
                       "uniform entry parameter '" + param->name +
-                      "' is an array with a default value; per-element default records are not emitted yet (t_2b592fc7), refusing rather than dropping the default");
+                      "' is an array with a default value; per-element default records are not emitted yet (array-default-records), refusing rather than dropping the default");
                 pInit.clear();
                 pIntInit.clear();
             }
@@ -1519,7 +1519,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         currentFunction_->parameters.push_back(irParam);
 
         // A parameter that shadows a file-scope variable is a scope like a
-        // local's (t_3af598c8): the global keeps its own binding in the
+        // local's (inline-entry-parameter-scope): the global keeps its own binding in the
         // stash - unassigned at entry - so an inlined helper naming it
         // reads the global, and a helper's write to it lands in the stash,
         // not on the parameter.  Before this the entry function's parameter
@@ -1857,7 +1857,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     // global stashes all join through the same Select path under their
     // fold() keys: a name is its own key, an element "a[i]", a stashed
     // global "G@", a stashed element "B@[i]".  History of the omissions
-    // this replaces: t_cf17f501 (arrays never joined), t_7a4e3b36 review
+    // this replaces: local-array-conditional-store (arrays never joined), user-function-inlining review
     // (the stashes added and missed the same way).
     const ScopeState preIf = scope_;
     auto preIfMap = preIf.fold();
@@ -1907,7 +1907,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     // with no pre-if value keeps the name-join rule: the other path is
     // undefined in Cg and the written arm is taken.  The loads take SSA ids
     // and those ids are the join's sort key, so they are allocated in
-    // SORTED key order, never in a hash map's order (t_56ff2244 class).
+    // SORTED key order, never in a hash map's order (deterministic-join-order class).
     std::vector<std::string> unbound;
     for (const auto* post : {&postThenMap, &postElseMap})
         for (const auto& kv : *post)
@@ -1968,7 +1968,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
         // (c.x > k) r = c; else r = d;`) resolved to Void here, the
         // Select was typed Void, and the general path masked its write
         // to one lane and broadcast lane x into every channel
-        // (t_7b20ffdc, measured 2026-09-02 against the reference; the
+        // (vector-input-select-lanes, measured 2026-09-02 against the reference; the
         // default path happened not to read the width).  The comment
         // above used to claim this branch checked parameters; it never
         // had.
@@ -1994,7 +1994,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     // unordered_set here made that order the standard library's string-hash
     // bucket order, so an MSVC-built compiler and a gcc-built compiler emitted
     // DIFFERENT PROGRAMS from the same source - measured on 2026-09-06, three
-    // of 421 corpus shaders (t_56ff2244).  Never iterate an unordered container
+    // of 421 corpus shaders (deterministic-join-order).  Never iterate an unordered container
     // into emission.
     //
     // The key is the SMALLEST valid SSA id among a name's pre-if, then and else
@@ -2426,13 +2426,13 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
         }
     };
     // OUR resource bound, not the reference compiler's body/type-dependent
-    // unroll heuristic (t_bc4fa4e5). Complete the proof before emitting IR.
+    // unroll heuristic (hardware-loop-selection). Complete the proof before emitting IR.
     constexpr size_t kMaxUnroll = 64;
     std::vector<int64_t> iterations;
     int64_t final = first;
     while (test(final)) {
         if (iterations.size() == kMaxUnroll) {
-            error(stmt->loc, "static loop expansion exceeds 64 iterations; hardware-loop lowering required (t_a290c3c8)");
+            error(stmt->loc, "static loop expansion exceeds 64 iterations; hardware-loop lowering required (static-loop-expansion)");
             return true;
         }
         iterations.push_back(final);
@@ -2473,7 +2473,7 @@ void IRBuilder::buildForStmt(ForStmt* stmt)
     // would admit loop-carried bindings the inliner cannot yet preserve.
     if (!inlineStack_.empty()) {
         error(stmt->loc, "cannot inline user function '" + inlineStack_.back()->name +
-              "': unproven for-loop; hardware-loop lowering required (t_a290c3c8)");
+              "': unproven for-loop; hardware-loop lowering required (static-loop-expansion)");
         return;
     }
 
@@ -2641,14 +2641,14 @@ void IRBuilder::buildSwitchStmt(SwitchStmt* stmt)
 // branch/inline snapshot machinery the map already has (the branch control
 // proves that path rather than assuming it).  Call this ONLY for a confirmed
 // swizzle (MemberAccessExpr::isSwizzle); a real struct field named "rgb" or
-// "a" keeps its own key, so two members never merge (t_c1d781ba).
+// "a" keeps its own key, so two members never merge (struct-member-lvalue-swizzle).
 //
 // Only the LOWERCASE rgba/stpq spellings are mapped - the ones the reference
 // treats as equivalent to xyzw (measured: it accepts .rgb and .xyz alike).
 // An UPPERCASE output swizzle (.XYZ) is left unchanged: the reference rejects
 // it with C1048 "invalid character in swizzle", and our compiler also refuses
 // it, unchanged by this slice; that our validator accepts the uppercase
-// spelling at all is a separate upstream divergence (t_373d4005).
+// spelling at all is a separate upstream divergence (uppercase-swizzle-acceptance).
 static std::string canonicalizeSwizzleKey(const std::string& member)
 {
     std::string out;
@@ -2754,7 +2754,7 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                         IRTypeInfo elementType = getIRType(field.type.get());
                         if (elementType.isMatrix())
                         {
-                            error(stmt->loc, "matrix-array output emission is not supported (t_4c95ef8b)");
+                            error(stmt->loc, "matrix-array output emission is not supported (member-array-storage)");
                             continue;
                         }
                         elementType.arraySize = 0;
@@ -2959,7 +2959,7 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
 {
     // Every declarator in the statement, in source order, so `float a, b;`
     // builds both and an initialiser list `float a = x, b = y;` evaluates
-    // them left to right (t_a90b1ef1).
+    // them left to right (multiple-declarators).
     for (const auto& declaration : stmt->declarations)
     {
     if (!declaration) continue;
@@ -3486,7 +3486,7 @@ IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
         return InvalidIRValue;
 
     // A CONSTANT DIVISION BY ZERO IS NOT ONE CASE BUT THREE, and the
-    // reference distinguishes them (t_3ff60769, measured on sce-cgc 475 by
+    // reference distinguishes them (zero-division-constant-fold, measured on sce-cgc 475 by
     // reading every instruction and every const block of its container):
     //
     //   every denominator non-zero            fold per lane, like any op
@@ -3498,7 +3498,7 @@ IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
     // 0/0 folding to the NUMERATOR rather than to +0 is measured, not
     // assumed: -0.0/0.0 gives -0.0 and 0.0/-0.0 gives +0.0.  (At vector
     // width the +0 and -0 lanes are then merged by the const-block packing
-    // rule, since they compare equal - that is t_642eb36e's job, not this
+    // rule, since they compare equal - that is literal-vector-dedup-swizzle's job, not this
     // one's.)
     //
     // The third case is why this cannot be "drop the guard": the reference
@@ -3910,7 +3910,7 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
     }
 
     // AN OMITTED ARGUMENT IS THE DEFAULT EXPRESSION, BUILT HERE AT THE CALL
-    // SITE (t_36492ad8).  Measured against the reference: `shade(t)` where
+    // SITE (function-visibility).  Measured against the reference: `shade(t)` where
     // `float k = 0.5` produces a container BYTE-IDENTICAL to `shade(t, 0.5)`
     // written out, so the default is a call-site substitution and not a
     // property of the callee's body.
@@ -3925,7 +3925,7 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
     // A DEFAULT EXPRESSION BINDS ITS NAMES AT ITS DECLARATION, NOT AT THE CALL.
     // It is materialised here, so the instructions land in the caller's block -
     // but name resolution must not see the caller's locals.  Measured (codex,
-    // t_36492ad8 review):
+    // function-visibility review):
     //
     //     uniform float g = 2;
     //     float4 shade(float4 t, float k = g) { return t * k; }
@@ -3942,7 +3942,7 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
     //
     // So the default is built under a scope holding file-scope bindings ONLY.
     // A global the caller shadows is restored from the stash that
-    // stashShadowedGlobal (t_3af598c8) already keeps for exactly this shape -
+    // stashShadowedGlobal (inline-entry-parameter-scope) already keeps for exactly this shape -
     // an inlined helper naming a shadowed global reads the global - rather than
     // inventing a second mechanism for the same question.  A stash entry of
     // InvalidIRValue means "shadowed, never assigned", and leaving that name
@@ -4113,7 +4113,7 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         if ((expr->functionName == "texDepth2D" ||
              expr->functionName == "texDepth2D_precise") && argValues.size() == 2)
         {
-            // t_0970e943: these intrinsics decode packed RGB depth. Keep
+            // packed-depth-decode: these intrinsics decode packed RGB depth. Keep
             // the factor as a patchable uniform with its compiled default,
             // not a literal that the runtime cannot replace.
             const bool precise = expr->functionName == "texDepth2D_precise";
@@ -4127,7 +4127,7 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
             if ((factor && !generated) || parameterCollision)
             {
                 error(expr->loc, "depth decode parameter '" + factorName +
-                    "' conflicts with a source declaration; refusing ambiguous binding (t_0970e943)");
+                    "' conflicts with a source declaration; refusing ambiguous binding (packed-depth-decode)");
                 return InvalidIRValue;
             }
             if (!factor)
@@ -4223,7 +4223,7 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
                     if (!std::isfinite(value) || (trig && std::fabs(value) > 65536.0f))
                     {
                         error(expr->loc, "our VP constant trig reduction bound is finite |x| <= 65536; "
-                            "nonfinite constant math is also unsupported (t_b939dc41)");
+                            "nonfinite constant math is also unsupported (constant-math-range)");
                         return InvalidIRValue;
                     }
                 }
@@ -4387,9 +4387,9 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         declToValue_[param] = args[i];
         // A parameter that shadows a file-scope name moves the global's
         // binding into the stash, exactly as the entry function's does
-        // (t_3af598c8): a helper called from this body then reads the
+        // (inline-entry-parameter-scope): a helper called from this body then reads the
         // global, and its write to the global lands in the stash and
-        // comes back out below (t_1de985bd - this used to be REFUSED).
+        // comes back out below (inline-global-stash - this used to be REFUSED).
         stashShadowedGlobal(param->name);
         if (!param->name.empty())
             nameToValue_[param->name] = args[i];
@@ -4495,7 +4495,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
 
     // The nested-helper refusal that stood here ("names file-scope X while
     // an enclosing helper's parameter or local of that name is in scope")
-    // is gone (t_1de985bd): the enclosing helper's parameter now stashes
+    // is gone (inline-global-stash): the enclosing helper's parameter now stashes
     // the global at binding, its locals stash at declaration and unstash
     // at block exit, so a nested helper reads and writes the GLOBAL by
     // name through the stash like any other caller shadow.
@@ -4541,7 +4541,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // entry outlives every reassignment of that binding.  The earlier
     // test compared the name's current value with the declaration's
     // value, which stopped matching after one `G = G * 2` (review:
-    // codex, scope-param-rebound; t_3af598c8) - a reassigned local lost
+    // codex, scope-param-rebound; inline-entry-parameter-scope) - a reassigned local lost
     // the same way.
     auto callerLocalBinding = [&](const std::string& name, IRValueID) -> bool
     {
@@ -4999,7 +4999,7 @@ bool checkedMul(int64_t a, int64_t b, int64_t& out)
 // float literal (or its negation), and a cast to a floating type around a
 // constant this evaluator can already hold - and EVERY OTHER constant
 // expression with a floating leaf is REFUSED BY NAME rather than read
-// wrongly, until the typed constant evaluator (t_65e1b7fa) serves this
+// wrongly, until the typed constant evaluator (static-const-qualifiers) serves this
 // path.  An expression that names a VARIABLE is the run-time path's, typed,
 // as before.
 static bool isFloatingTarget(const TypeNode* t)
@@ -5115,7 +5115,7 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
         {
             // A float constant index TRUNCATES toward zero, as int() does
             // and as the reference reads it: u[1.7] is u[1], u[-0.5] is
-            // u[0] (measured, t_050bebce).  Arithmetic over float leaves
+            // u[0] (measured, float-array-index-conversion).  Arithmetic over float leaves
             // is left to the run-time path (see Binary below), because
             // truncating each leaf first would read u[1.7 * 2] as element
             // 2 where the reference reads element 3.
@@ -5229,7 +5229,7 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
             else if (!unsignedTarget && !(d > -2147483649.0 && d < 2147483648.0))
                 // A SIGNED target out of int32 range: the reference's
                 // float-to-int folds to INT_MIN (the x86 indefinite value,
-                // measured on t_65e1b7fa), so u[(int)4294967296.0] is out of
+                // measured on static-const-qualifiers), so u[(int)4294967296.0] is out of
                 // bounds.  An UNSIGNED target wraps instead - the reference
                 // reads u[(unsigned int)4294967296.0] as element 0 (review:
                 // codex) - and the narrowing below does that.
@@ -5310,7 +5310,7 @@ bool IRBuilder::copyArrayAggregate(const std::string& destination, ExprNode* sou
         source = static_cast<BinaryExpr*>(source)->left.get();
     if (!source || !arrayStorageKey(source, origin))
     {
-        error("array-bearing struct copy requires a tracked source (t_4c95ef8b)");
+        error("array-bearing struct copy requires a tracked source (member-array-storage)");
         return true;
     }
     const auto arrays = localArrayValues_;
@@ -5321,7 +5321,7 @@ bool IRBuilder::copyArrayAggregate(const std::string& destination, ExprNode* sou
         {
             const auto found = arrays.find(from);
             if (found == arrays.end())
-                error("array-bearing struct copy requires tracked elements (t_4c95ef8b)");
+                error("array-bearing struct copy requires tracked elements (member-array-storage)");
             else localArrayValues_[to] = found->second;
             return;
         }
@@ -5349,7 +5349,7 @@ bool IRBuilder::resolveTrackedArrayElement(IndexExpr* expr, std::string& key, in
     const auto type = getExprType(expr->array.get());
     if (!type.isArray() || !arrayStorageKey(expr->array.get(), key))
     {
-        error(expr->loc, "member-array storage path is not supported (t_4c95ef8b)");
+        error(expr->loc, "member-array storage path is not supported (member-array-storage)");
         return false;
     }
     auto found = localArrayValues_.find(key);
@@ -5364,7 +5364,7 @@ bool IRBuilder::resolveTrackedArrayElement(IndexExpr* expr, std::string& key, in
     }
     if (found == localArrayValues_.end())
     {
-        error(expr->loc, "member-array storage is not tracked (t_4c95ef8b)");
+        error(expr->loc, "member-array storage is not tracked (member-array-storage)");
         return false;
     }
     const IRValueID selector = buildExpr(expr->index.get());
@@ -5376,20 +5376,20 @@ bool IRBuilder::resolveTrackedArrayElement(IndexExpr* expr, std::string& key, in
         if (!constant || !constant->type.isScalar() ||
             !extractFloatComponents(*currentFunction_, selector, components) || components.size() != 1)
         {
-            error(expr->loc, "member-array store requires a constant index (t_4c95ef8b)");
+            error(expr->loc, "member-array store requires a constant index (member-array-storage)");
             return false;
         }
         const double truncated = std::trunc(static_cast<double>(components[0]));
         if (!std::isfinite(truncated) || truncated < 0 || truncated >= type.arraySize)
         {
-            error(expr->loc, "member-array index outside OUR supported range (t_4c95ef8b; reference accepts measured forwarding cases)");
+            error(expr->loc, "member-array index outside OUR supported range (member-array-storage; reference accepts measured forwarding cases)");
             return false;
         }
         index = static_cast<int32_t>(truncated);
     }
     if (index < 0 || index >= type.arraySize)
     {
-        error(expr->loc, "member-array index outside OUR supported range (t_4c95ef8b; reference accepts measured forwarding cases)");
+        error(expr->loc, "member-array index outside OUR supported range (member-array-storage; reference accepts measured forwarding cases)");
         return false;
     }
     return true;
@@ -5434,7 +5434,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
     // was chosen (IRInstruction::arrayIndexKind), never a VecExtract: the
     // VecExtract lowering reads its selector as a LANE and falls back to
     // lane 0, which for an array base would silently read element 0 for
-    // every index (t_f9ecd3ac).
+    // every index (constant-uniform-array-index).
     if (expr->array->kind == ExprKind::Identifier)
     {
         auto* ident = static_cast<IdentifierExpr*>(expr->array.get());
@@ -5473,7 +5473,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
             global = nullptr;
 
         // A file-scope array (implicitly uniform in Cg) that the program has
-        // ASSIGNED is promoted to a value array by the store (t_7a4e3b36):
+        // ASSIGNED is promoted to a value array by the store (user-function-inlining):
         // an element written earlier reads the written value, exactly as
         // the reference does (it lists the array as UNDEFINED params and
         // computes from the stores).  Before this, the store was dropped
@@ -5551,7 +5551,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                     return InvalidIRValue;
                 // A FLOAT or HALF index is int(index): the reference emits
                 // the same address-register load for u[idx] and u[int(idx)]
-                // with a float idx (t_050bebce).  The cast is what the
+                // with a float idx (float-array-index-conversion).  The cast is what the
                 // lowering folds into the ARL (vertex) or, when the value
                 // is a constant, into the element read on either profile.
                 const IRTypeInfo indexType = getExprType(expr->index.get());
@@ -6069,7 +6069,7 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
 
     // Same base and element type is not the same SHAPE for matrices: every
     // non-square matrix shares the Mat4x4 base tag, so (float3x4)float4x4
-    // must still narrow (t_bc130064).
+    // must still narrow (rectangular-matrices).
     if (sourceType.baseType == targetType.baseType &&
         sourceType.elementType == targetType.elementType &&
         sourceType.matrixRows == targetType.matrixRows &&
@@ -6150,7 +6150,7 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
     // through to the default Bitcast below, which the NV40 lowering refuses
     // outright ("unsupported IR op bitcast").  It is not a half-only gap -
     // the float row above refused too - and it is 22 rows of the
-    // reference-SDK sweep (t_cde25bad).
+    // reference-SDK sweep (half-temporary-allocation).
     //
     // The broadcast is built in the SOURCE's element type and any precision
     // conversion is left to the vector path below, so `(float4)h` is one

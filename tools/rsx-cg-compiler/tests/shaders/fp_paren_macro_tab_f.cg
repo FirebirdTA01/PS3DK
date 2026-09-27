@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // The SDK's actual spelling: a TAB between the name and the body.  Not a
 // tab rule - see fp_paren_macro_f, which uses a space - but this is the form
 // that was in front of us and it belongs in the table.

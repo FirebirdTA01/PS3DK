@@ -1,4 +1,4 @@
-// Arithmetic between two DIFFERENT varyings (t_e89cd261).
+// Arithmetic between two DIFFERENT varyings (distinct-varying-sources).
 //
 // An NV40 fragment instruction carries ONE input-source selector, so two
 // operands of register type INPUT read the SAME varying whatever the

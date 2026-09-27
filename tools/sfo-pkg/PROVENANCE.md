@@ -2,7 +2,7 @@
 
 Native `sfo` and `pkg` host tools. They replace `sfo.py` / `pkg.py` plus the
 `pkgcrypt` C extension, which together put a Python interpreter on the Windows
-first-run path (board task `t_3b2b85e3`).
+first-run path (board task `native-package-tools`).
 
 ## Where the code came from
 
@@ -97,7 +97,7 @@ given with and without a trailing separator. `PARAM.SFO` matches at
 length-field padding cases and multi-call streaming; the padding digests were
 computed independently with coreutils `sha1sum`.
 
-### 3. Path truncation, silent success on open failure, dynamic table growth (t_6858d853)
+### 3. Path truncation, silent success on open failure, dynamic table growth (package-path-error-handling)
 
 Reported by EMP Static relay (2026-09-24):
 * **Silent success defect**: When `read_file_alloc` failed to open a payload file,

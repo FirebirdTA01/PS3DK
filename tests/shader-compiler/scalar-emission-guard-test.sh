@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_a3d56b3f: malformed scalar operand lanes must refuse in the real emitter.
+# malformed-scalar-operand-lanes: malformed scalar operand lanes must refuse in the real emitter.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ps3dk-scalar-emission.XXXXXX")"

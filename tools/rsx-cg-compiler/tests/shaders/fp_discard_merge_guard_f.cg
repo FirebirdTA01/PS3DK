@@ -1,5 +1,5 @@
 // A discard in a two-predecessor MERGE, inside an outer guarded block
-// (codex's counterexample to the first form of t_7ae60244's refusal).
+// (codex's counterexample to the first form of nested-discard-reachability's refusal).
 //
 //   if (A) { if (B) { .. } else { .. }  discard; }
 //

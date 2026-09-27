@@ -1,4 +1,4 @@
-"""Tests for nested struct member lookup, lvalue handling, and swizzle assignments (t_5386e484)."""
+"""Tests for nested struct member lookup, lvalue handling, and swizzle assignments (nested-struct-members)."""
 from pathlib import Path
 import re
 import subprocess

@@ -1,7 +1,7 @@
 """No instruction in the program is predicated: every write is unconditional.
 
 For the then-only rows of user-function-inline-control-flow-test.sh
-(t_7396e0c2): a then-only local that dies before the join must leave NO
+(dead-branch-local-predication): a then-only local that dies before the join must leave NO
 Select behind.  A row that asserts this on fp_sources' text cannot see it:
 that decoder prints neither the condition test (hw[1] bits 18..20) nor the
 condition-code write (hw[0] bit 8), so a container whose output MOV carries

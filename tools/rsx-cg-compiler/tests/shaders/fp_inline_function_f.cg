@@ -1,4 +1,4 @@
-// t_fe384b97: `inline` on a function is a hint the reference accepts and
+// inline-function-qualifier: `inline` on a function is a hint the reference accepts and
 // ignores - it emits the same program with or without it.  The general path
 // used to lex `inline` as an identifier and reject it as an unknown type
 // name; 110 of the internet survey's remaining gaps were this one keyword

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_53363b4b: macro expansion must TERMINATE on a macro that names itself,
+# recursive-macro-termination: macro expansion must TERMINATE on a macro that names itself,
 # directly or through another macro, and must expand it the way the
 # reference does - once.
 #
@@ -51,7 +51,7 @@ must_match() {
     local stem="$1" control="$2" why="$3"
     local rc=0
     run_one "$stem" || rc=$?
-    [[ $rc -ne 124 ]] || fail "$stem TIMED OUT after $limit - macro expansion did not terminate ($why; t_53363b4b)"
+    [[ $rc -ne 124 ]] || fail "$stem TIMED OUT after $limit - macro expansion did not terminate ($why; recursive-macro-termination)"
     [[ $rc -lt 128 ]] || fail "$stem died on a signal (exit $rc)"
     [[ $rc -eq 0 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; the reference accepts it ($why)"; }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem exited 0 but wrote no container"

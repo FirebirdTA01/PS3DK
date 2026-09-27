@@ -1,4 +1,4 @@
-// t_56ff2244, the TIE case: two joined names that share one pre-if value.
+// deterministic-join-order, the TIE case: two joined names that share one pre-if value.
 //
 // `b = a` binds both names to the SAME SSA value before the if, so both have
 // the same smallest reaching id and the primary key ties.  A comparator that

@@ -1,4 +1,4 @@
-"""t_99003db4: constant float selectors on runtime vectors select a truncated lane.
+"""float-vector-selector: constant float selectors on runtime vectors select a truncated lane.
 
 Reference475 measured all 216 cells before pinning: varying, uniform and local
 temporary vectors, widths 2/3/4, FP and VP, twelve selectors. Accepted programs

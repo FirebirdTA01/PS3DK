@@ -1,6 +1,6 @@
 # manifest-controls-test.ps1 -- the stager refuses a manifest whose proving
 # controls are omitted, duplicated or placed after the corpus, and builds a
-# correctly ordered one by construction (t_678a4dab).
+# correctly ordered one by construction (differential-manifest-judging).
 #
 # The guest's MRT/depth gates start closed and open only when the complete
 # proving set has run and passed ahead of a row.  These cases pin the host

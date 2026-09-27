@@ -1,4 +1,4 @@
-// shader-differential — curated row for t_e89cd261 (P1, both paths):
+// shader-differential — curated row for distinct-varying-sources (P1, both paths):
 // arithmetic between two DIFFERENT varyings in one instruction.  An NV40
 // fragment instruction has ONE input-source selector, so two operands of
 // register type INPUT read the SAME varying; the reference preloads one

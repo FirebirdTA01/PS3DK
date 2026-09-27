@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // The same shape with no semantic anywhere: accepted, so the rows above are
 // pinning the SEMANTIC and not merely the presence of a call in a default.
 float inner(float x) { return x; }

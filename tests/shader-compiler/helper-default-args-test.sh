@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A DEFAULT ON A HELPER PARAMETER IS THE EXPRESSION, SUBSTITUTED AT THE CALL
-# SITE.  Measured against sce-cgc 475, sce_fp_rsx (t_36492ad8).
+# SITE.  Measured against sce-cgc 475, sce_fp_rsx (function-visibility).
 #
 # This is A1's contract INVERTED, which is why the two slices needed separate
 # guards.  An entry parameter's default is RECORDED - a defaultValue block, an
@@ -35,7 +35,7 @@
 #               CONVERSION - f(float3) is not viable at all for a float4
 #               argument - so for us the row passes by ELIMINATION and would
 #               pass under any ranking rule whatsoever.  It is pinned anyway
-#               because it pins WHICH BODY RAN, and because the day t_3aa92146
+#               because it pins WHICH BODY RAN, and because the day helper-vector-argument-conversion
 #               lands it becomes the preference test it reads like.
 #               fp_helper_default_narrow_gap_f is the row that makes that
 #               dependency explicit and goes red at the same moment.
@@ -70,8 +70,8 @@
 # accepts `f(t, k)` where k is a declared lvalue, in both out and inout
 # spellings, and accepts the declaration alone with no call.  We refuse the
 # first two in the IR inliner ("out/inout parameters are not supported"), which
-# is t_b11c19df, not this slice.  Pinning them here would pin the WRONG
-# verdict.  The six reference verdicts are recorded on t_b11c19df as its
+# is helper-out-inout-parameters, not this slice.  Pinning them here would pin the WRONG
+# verdict.  The six reference verdicts are recorded on helper-out-inout-parameters as its
 # acceptance criteria; when it lands, those three rows belong in this file.
 #
 # WHY THE REFUSAL ROWS PIN THE DIAGNOSTIC AND NOT JUST exit 1.  A call that
@@ -206,7 +206,7 @@ accept fp_helper_default_midparam_f "a default on a NON-trailing parameter"
 accept fp_helper_default_prefer_f      "exact match with a default fill vs a conversion"
 accept fp_helper_default_prefer_twin_f "only the overload the reference chooses"
 same    fp_helper_default_prefer_f fp_helper_default_prefer_twin_f \
-        "the DEFAULTED float4 overload is chosen, not f(float3) (by elimination for us - see the header and t_3aa92146)"
+        "the DEFAULTED float4 overload is chosen, not f(float3) (by elimination for us - see the header and helper-vector-argument-conversion)"
 
 refuse fp_helper_default_crossparam_refuse_f "a default naming another parameter"
 refuse fp_helper_default_ambiguous_refuse_f  "exact arity beside a defaulted overload"
@@ -351,16 +351,16 @@ same    fp_helper_default_proto_f fp_helper_default_proto_twin_f \
 # ---- so the row goes red the day its card lands and forces a rewrite here.
 refuse_saying fp_helper_default_braced_struct_gap_f \
     "too much data|Complex constructor|constructor requires" \
-    "t_084fba44: braced struct default (reference ACCEPTS)"
+    "braced-parameter-defaults: braced struct default (reference ACCEPTS)"
 refuse_saying fp_helper_default_braced_array_gap_f \
     "constructor requires|too much data|Complex constructor" \
-    "t_084fba44: braced array default (reference ACCEPTS)"
+    "braced-parameter-defaults: braced array default (reference ACCEPTS)"
 refuse_saying fp_helper_default_entrycall_gap_f \
     "cannot evaluate" \
-    "t_d60fbc59: a call in an ENTRY uniform default (reference ACCEPTS)"
+    "entry-default-call-fold: a call in an ENTRY uniform default (reference ACCEPTS)"
 refuse_saying fp_helper_default_narrow_gap_f \
     "no matching function" \
-    "t_3aa92146: a float4 argument for a float3 parameter (reference warns C7011 and ACCEPTS)"
+    "helper-vector-argument-conversion: a float4 argument for a float3 parameter (reference warns C7011 and ACCEPTS)"
 
 # SELF-CHECK: this guard's own refusal contract.  Sixteen rows above are
 # refuse_saying / refuse_not_saying, and the failure they are most exposed to

@@ -1,4 +1,4 @@
-// control-h0-nodepth (t_96daf53b): half colour output, NO depth declared.
+// control-h0-nodepth (half-colour-depth-control): half colour output, NO depth declared.
 //
 // A half colour output is the only thing that makes the reference set the
 // container's outputFromH0 flag - measured 2026-09-06: half ARITHMETIC does

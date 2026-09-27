@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // A DEFAULT'S NAMES BIND AT THE HELPER'S DECLARATION.  K is declared AFTER f,
 // so it is not a binding for f's default - it is a collision, and the
 // reference says so at f: error C1002: the name "K" is already defined.

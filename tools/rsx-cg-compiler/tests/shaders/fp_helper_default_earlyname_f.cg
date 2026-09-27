@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // The same program with K declared BEFORE f: accepted, which is the control
 // that keeps the two rows above from passing on the mere presence of a global.
 static const float K = 0.75;

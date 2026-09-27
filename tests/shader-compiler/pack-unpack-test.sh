@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_23f9d1a6: the Cg pack/unpack family - pack_2half, unpack_2half,
+# pack-unpack-intrinsics: the Cg pack/unpack family - pack_2half, unpack_2half,
 # pack_4ubyte, unpack_4ubyte, pack_4byte, unpack_4byte, pack_2ushort,
 # unpack_2ushort - each ONE NV40 fragment instruction (PK2H/UP2H, PK4UB/UP4UB,
 # PK4B/UP4B, PK2US/UP2US), as the reference emits them.  Sixteen reference-SDK
@@ -27,7 +27,7 @@
 #   * When a pack's result goes STRAIGHT TO THE OUTPUT the reference stages
 #     the argument through an H register first (MOV H0.xy <- TEX0 prec=1,
 #     then PK2H R0.xyzw <- H0), and pack_2ushort through R (MOV R0.xy).  That
-#     staging is the half-temp allocation of t_cde25bad, not this slice: the
+#     staging is the half-temp allocation of half-temporary-allocation, not this slice: the
 #     output-direct rows below pin the pack instruction and its direct input
 #     read and NAME the reference's extra MOV as the known byte difference.
 #   * A pack result read by ARITHMETIC gets a FENCBR before the reader
@@ -38,7 +38,7 @@
 #     `return` spellings differ from it only by the export fold - the tip
 #     ends every `return expr` with a MOV into R0 and keeps the chain in R1,
 #     where the reference computes in R0 and ends on the last producer -
-#     which is t_12bc176c's export-fold work, not this family; their
+#     which is export-fold-precision's export-fold work, not this family; their
 #     instructions, masks and swizzles are pinned here and they join
 #     BYTE_IDENTICAL when that lands.
 #
@@ -198,7 +198,7 @@ expect fp_unpack_half_out_f '^[0-9]+ (UP4UB|MOV) dst=H0 mask=xyzw '
 # ------------------------------------------------- output-direct pack shapes
 # Pixel-correct today; the reference stages the argument through an H
 # register first (MOV H0.xy <- TEX0 prec=1; PK2H R0.xyzw <- H0) - that MOV
-# is t_cde25bad's half-temp allocation, so these rows pin the pack and its
+# is half-temporary-allocation's half-temp allocation, so these rows pin the pack and its
 # direct input read, and are NOT in BYTE_IDENTICAL until that lands.
 # (The tip also keeps the .xxxx broadcast as a MOV after the pack where the
 # reference folds it into the pack's own mask - the export fold again - so
@@ -219,7 +219,7 @@ refuse "unpack_4ubyte under sce_vp_rsx (reference: C5201)"    vp_unpack_refuse_v
 # in the reference (half -> half2 by smear ties with half -> float2 by smear
 # and promotion); our overload resolution prefers the half2 overload and
 # ACCEPTS it, smearing the lane as it does for a float scalar.  Pixel-safe
-# and named rather than imitated: a resolver tie rule is t_37cc2ead's
+# and named rather than imitated: a resolver tie rule is stdlib-overload-parity's
 # (stdlib overload parity), not this family's.
 accept fp_pack_half_scalar_f "pack_2half(half scalar): accepted as a smear (reference: C1101 ambiguous)"
 expect fp_pack_half_scalar_f '^[0-9]+ PK2H dst=R0 .* s0=TEX0\.xxxx'

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_a290c3c8 Task 10: static fragment loops whose literal bounds include
+# static-loop-expansion Task 10: static fragment loops whose literal bounds include
 # unary minus must unroll before NV40 lowering.
 #
 # The production break this catches: IRBuilder::tryUnrollStaticFor only
@@ -19,7 +19,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # this wherever a compile's status is captured, whichever way that compile is
 # expected to go: it is silent for 0 and for 1 and names anything else.
 # Measured: half the guards in this suite that assert a refusal could not tell
-# one from a SIGABRT (t_fd95d1b9).
+# one from a SIGABRT (crash-versus-refusal-status).
 refusal_status() {   # $1 rc, $2 what was compiled
     [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
     [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"

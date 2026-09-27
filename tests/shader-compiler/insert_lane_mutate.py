@@ -5,7 +5,7 @@ the compiler actually emitted and requires the checker to refuse each copy.
 Three mutations, each a defect that has either happened or was proposed in
 review:
 
-  broadcast   the original t_856689b2 defect: force every component of the
+  broadcast   the original operand-lane-width defect: force every component of the
               final colour write's source swizzle to x, so y and z read the
               red channel.
   bypass      codex's review finding against the second version of the

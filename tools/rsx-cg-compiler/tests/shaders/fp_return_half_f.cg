@@ -1,7 +1,7 @@
-// t_5c12df56: a half RETURN TYPE must reach the container, like a half
+// fragment-output-precision: a half RETURN TYPE must reach the container, like a half
 // out parameter does.
 //
-// The half-output detection added for t_80dad2dd walks the entry's
+// The half-output detection added for half-output-staging walks the entry's
 // PARAMETERS, so it never sees `half4 main() : COLOR`.  The reference
 // emits `MOVH H0, {1,0,0,0}.x` with outputFromH0 set; the general path
 // emits `MOVR R0.x` with the flag clear.  That pair is internally

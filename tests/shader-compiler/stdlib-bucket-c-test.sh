@@ -401,7 +401,7 @@ done
 # the instruction is PREDICATED, so a container whose colour writes carried
 # NVFX_COND_FL - writes that never execute - would satisfy every relocation
 # and association clause while the shader painted nothing.  That is the same
-# blindness codex found in t_7396e0c2's rows, in its harder form: those read
+# blindness codex found in dead-branch-local-predication's rows, in its harder form: those read
 # fp_sources' RENDERED text, which omits the condition test (hw[1] bits
 # 18..20) and the condition-code write (hw[0] bit 8) entirely.
 # predication_check.py reads those fields off the container these rows
@@ -588,7 +588,7 @@ if 0x31 not in opcodes3:
 # The ABSOLUTE numbers are deliberately not asserted: our allocator keeps
 # relative declaration order for used implicit samplers and the reference
 # numbers by first use, so this source is 3D=1/2D=0 here and 3D=0/2D=1
-# there.  That gap is recorded (t_750d55be) and is not this row's subject.
+# there.  That gap is recorded (sampler-first-use-order) and is not this row's subject.
 #
 # The records are pinned BY NAME, with their type, resource and live flag
 # together (codex): a bare "1067 appears among the types" is a numeric word

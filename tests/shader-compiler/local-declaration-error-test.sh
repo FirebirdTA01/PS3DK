@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_ec186f0c: one mistake, one message, at the mistake.
+# parser-error-cascade: one mistake, one message, at the mistake.
 #
 # `bogusType q;` inside a function body was parsed as an EXPRESSION
 # statement, because the declaration path is only taken when the first token

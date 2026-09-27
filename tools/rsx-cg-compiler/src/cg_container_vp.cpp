@@ -147,7 +147,7 @@ void padTo(std::vector<uint8_t>& out, size_t alignment)
 //   2x4 -> 1056
 // Before this, only 4x4 was mapped and every other shape fell through to
 // 0, so a `uniform float3x3` parent record carried NO TYPE at all
-// (t_d90dbaed).
+// (matrix-default-reflection).
 uint32_t cgMatrixType(int rows, int cols)
 {
     if (rows < 1 || rows > 4 || cols < 1 || cols > 4) return 0;
@@ -156,7 +156,7 @@ uint32_t cgMatrixType(int rows, int cols)
 
 // A matrix ROW is recorded as the float vector of the COLUMN width, not
 // always FLOAT4: the reference gives 1047 (CG_FLOAT3) for a 3x3's rows and
-// 1048 for a 4x4's.  Five sites here hard-coded kCgFloat4 (t_d90dbaed).
+// 1048 for a 4x4's.  Five sites here hard-coded kCgFloat4 (matrix-default-reflection).
 uint32_t cgMatrixRowType(int cols)
 {
     if (cols < 1 || cols > 4) return kCgFloat4;
@@ -171,7 +171,7 @@ uint32_t cgMatrixRowType(int cols)
 //
 // This exists as a helper because the same assignment is needed at FOUR
 // sites - the plain file-scope loop and the STRUCT-FLATTENED one, each with a
-// scalar/vector and a matrix branch.  t_4b54f26b A2 wrote it at one of them
+// scalar/vector and a matrix branch.  uniform-default-records A2 wrote it at one of them
 // and the struct-flattened path silently dropped every default until a
 // review probe found it (codex).  One helper, four call sites, no drift.
 std::vector<float> uniformDefaultSlice(const std::vector<float>& fv,
@@ -225,7 +225,7 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     // the fragment side: 1045 for `half`, 1048 for `half4` elements).
     case IRType::Float16: return kCgFloat;
     // An int, uint or bool SCALAR is recorded as FLOAT too (measured on
-    // the vertex side, t_99b29225: `int a : TEXCOORD1` -> 1045, and
+    // the vertex side, dynamic-uniform-array-index: `int a : TEXCOORD1` -> 1045, and
     // int2/int3/int4 -> 1046/1047/1048 like their float twins, which the
     // vector cases below already produce); this returned 0 for the scalar
     // and the record carried no type.
@@ -395,7 +395,7 @@ VpContainerResult emitVertexContainerImpl(
         uint32_t    defaultValueOffset = 0;
         // Compiled default of an initialised file-scope uniform - the same
         // 16-byte float[4] block the literal pool uses, on an ordinary
-        // user-visible parameter (t_4b54f26b).  Measured placement, VP
+        // user-visible parameter (uniform-default-records).  Measured placement, VP
         // fixture `uniform float4 gTint : C3 = float4(1,2,3,4)`: semantic
         // 'C3' at 540, block at 544, name at 560 - semantic, then block,
         // then name, the same order as the fragment container.  The
@@ -431,7 +431,7 @@ VpContainerResult emitVertexContainerImpl(
     // matrices grow upward by rows, scalar/vector elements downward by one.
     // Constant indexing assigns only referenced elements; dynamic indexing
     // assigns every element contiguously. Unreferenced elements and their
-    // matrix rows are still declared, with no resource (t_ef0cb2e0).
+    // matrix rows are still declared, with no resource (matrix-array-layout).
     const rsx_cg::ArrayUniformUses arrayUses =
         rsx_cg::classifyArrayUniformUses(*entry);
     constexpr uint32_t kCgUnassignedRes = 3256u;  // 0x0cb8: declared, no register
@@ -929,7 +929,7 @@ VpContainerResult emitVertexContainerImpl(
                 // own 16-byte block holding that row's columns, zero-padded.
                 // Measured on `float3x3 M = float3x3(nine scalars)`:
                 // M[0] [0.2209,0.339,0.4184,0], M[1] [0.1138,0.678,0.7319,0],
-                // M[2] [0.0102,0.113,0.2969,0] (t_4b54f26b A3).
+                // M[2] [0.0102,0.113,0.2969,0] (uniform-default-records A3).
                 r.defaultValue = uniformDefaultSlice(
                     g, static_cast<size_t>(row) *
                            static_cast<size_t>(g.type.matrixCols),
@@ -951,7 +951,7 @@ VpContainerResult emitVertexContainerImpl(
             // default.  ir_builder evaluates the initialiser onto IRGlobal
             // (ir.h:501-502) and refuses rather than dropping it when it
             // cannot, so the value is already in hand here; we wrote zero
-            // over it (t_4b54f26b A2).
+            // over it (uniform-default-records A2).
             d.defaultValue = uniformDefaultSlice(
                 g, 0u, static_cast<size_t>(g.type.componentCount()));
             params.push_back(d);
@@ -1065,7 +1065,7 @@ VpContainerResult emitVertexContainerImpl(
         for (auto& param : params) {
             if (param.var != kCgUniform) continue;
             // PS3_475: shared 1 only for a referenced explicit binding, also
-            // on struct-flattened entries (t_c304d08a). Unused pins keep C<N>
+            // on struct-flattened entries (explicit-binding-shared-reflection). Unused pins keep C<N>
             // but have UNDEFINED/no index/isRef0/isShared0.
             param.isShared = 0;
             const auto it = recordBindings.find({param.name, param.paramno});

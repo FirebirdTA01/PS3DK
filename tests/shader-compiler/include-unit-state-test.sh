@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_d594ccd9: an #include'd header shares the unit's preprocessor state.
+# include-preprocessor-state: an #include'd header shares the unit's preprocessor state.
 #
 # Two defects, one cause.  The header was processed in a COPY of the
 # preprocessor and the copy was discarded, so (1) every macro a header

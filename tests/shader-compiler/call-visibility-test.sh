@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A CALL RESOLVES AGAINST THE DECLARATIONS VISIBLE AT THAT CALL.
-# Measured against sce-cgc 475, sce_fp_rsx (t_36492ad8, commit 1 of 2).
+# Measured against sce-cgc 475, sce_fp_rsx (function-visibility, commit 1 of 2).
 #
 # NO DEFAULT ARGUMENT APPEARS IN ANY ROW HERE.  That is deliberate: the rule
 # is observable without them, which is why it lands as its own commit ahead of

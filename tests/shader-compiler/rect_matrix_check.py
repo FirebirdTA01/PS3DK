@@ -1,4 +1,4 @@
-"""Rectangular matrix guard checker (t_bc130064 / t_69aeaa84 / t_a5dbcca2).
+"""Rectangular matrix guard checker (rectangular-matrices / rectangular-matrix-row-access / rectangular-matrix-reflection).
 
 Reference (sce-cgc 475) contract, measured 2026-09-15 in .local/probe-rect:
 an RxC matrix is R rows of C-wide vectors; mul(M[RxC], v[C]) is one DP(C)

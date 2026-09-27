@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A literal division by zero is THREE cases and the reference folds only one
-# of them (t_3ff60769).
+# of them (zero-division-constant-fold).
 #
 # THE RULE, read off sce-cgc 475 by printing every instruction and every
 # const block of its container - not inferred from one probe:
@@ -28,7 +28,7 @@
 # WHAT THIS FILE DOES NOT ASSERT: the SHAPE of the unfolded cases.  We spend
 # five instructions and four blocks on float4(1.0/0.0, 1, 3, 2) where the
 # reference spends two and two, because we write one constant lane per MOV
-# instead of masking three into one.  That is t_49265c44 and it is a
+# instead of masking three into one.  That is constant-lane-move-coalescing and it is a
 # different subject; these rows only require that the division did not fold.
 #
 # THE ARTIFACT IS THE CONTAINER, for the values and for the predication
@@ -215,7 +215,7 @@ FOLDED = [
     ("zero_num",  "00000000 3f800000 40400000 40000000", "xyzw"),
     # The numerator rule at vector width: the lanes are (+0,-0,+0,-0) and the
     # const-block packing then merges them because they compare equal, so one
-    # representative is read .xxxx (t_642eb36e).
+    # representative is read .xxxx (literal-vector-dedup-swizzle).
     ("vec_signs", "00000000 00000000 00000000 00000000", "xxxx"),
 ]
 

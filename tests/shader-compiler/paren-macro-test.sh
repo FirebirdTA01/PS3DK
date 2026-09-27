@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_7cc742ed: A MACRO IS FUNCTION-LIKE ONLY WHEN '(' IMMEDIATELY FOLLOWS THE
+# macro-parenthesis-adjacency: A MACRO IS FUNCTION-LIKE ONLY WHEN '(' IMMEDIATELY FOLLOWS THE
 # NAME.  With a space or a tab between them the parenthesis is the first
 # character of an OBJECT-LIKE body.  Measured against sce-cgc 475.
 #
@@ -131,7 +131,7 @@ refuse_not_saying ${P}_emptyparens_refuse_f "C0105" "#define K () is a body, not
 # character where it REACHES THE TOKEN STREAM.  A form feed in a comment, in a
 # macro body that is never expanded, or in an argument bound to a parameter
 # the body never names, is accepted - the accept rows below are those cases.
-# The general rule is carded (t_a9273df1) and these rows pin the acceptance
+# The general rule is carded (deferred-macro-token-validation) and these rows pin the acceptance
 # this slice introduced.
 # The reference says "error C0000: syntax error, unexpected $undef"; we say
 # "unknown character", because the character reaches our lexer as an unknown

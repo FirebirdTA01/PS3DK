@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_3603033d: inject final allocations into the real emitter, including aliases.
+# select-predication-record-boundary: inject final allocations into the real emitter, including aliases.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ps3dk-selpred-emission.XXXXXX")"

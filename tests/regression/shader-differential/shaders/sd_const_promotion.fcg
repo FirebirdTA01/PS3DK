@@ -1,4 +1,4 @@
-// shader-differential - fixture for a FILE-SCOPE CONST (t_4584aa27).
+// shader-differential - fixture for a FILE-SCOPE CONST (file-scope-const-initializer).
 //
 // The reference compiler folds the constant's value inline AND adds a
 // parameter entry named K listing the code offsets where the value sits;
@@ -7,7 +7,7 @@
 // same either way, so promotion is container metadata, not a lowering, and
 // there is nothing to compare at draw time.  What this fixture guards is
 // the FOLD ITSELF: the release dropped the initialiser and compiled K as
-// zero on both paths (t_4584aa27, fixed in 0981daa).  One row, set 0,
+// zero on both paths (file-scope-const-initializer, fixed in 0981daa).  One row, set 0,
 // both paths: ours vs the reference, no uniform applied, identical since
 // the fix.
 //

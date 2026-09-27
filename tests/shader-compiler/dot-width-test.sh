@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A 4D dot lowers to DP4 and a 3D dot to DP3 (t_856689b2's last one).
+# A 4D dot lowers to DP4 and a 3D dot to DP3 (operand-lane-width's last one).
 #
 # The general path chose between them on the RESULT's width, and a dot
 # product's result is a scalar - always - so the test was never true and
@@ -66,7 +66,7 @@ if counts[DP4] != 1 or counts[DP3] != 1:
         "FAIL: the fixture has one 4D dot and one 3D dot, so the ucode must "
         "carry exactly one DP4 and one DP3; it has %d DP4 and %d DP3.  Two "
         "DP3s means the 4D dot dropped its w term - the width that chooses "
-        "is the OPERANDS', not the scalar result's (t_856689b2)."
+        "is the OPERANDS', not the scalar result's (operand-lane-width)."
         % (counts[DP4], counts[DP3])
     )
 PY

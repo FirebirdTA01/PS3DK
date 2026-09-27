@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A file-scope `const` must reach the ucode as its initialiser (t_4584aa27).
+# A file-scope `const` must reach the ucode as its initialiser (file-scope-const-initializer).
 #
 # The defect this pins: the initialiser was parsed and dropped, and each
 # backend then invented a different wrong value -- fragment default compiled

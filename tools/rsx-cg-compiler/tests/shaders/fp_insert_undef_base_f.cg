@@ -1,5 +1,5 @@
 // A vector built entirely by lane writes has an UNDEFINED base
-// (t_b8bb521f, the second half).
+// (half-precision-lowering, the second half).
 //
 //   half4 c;                       <- no initialiser: %n has no producer
 //   c.xyz = ...;                   <- insert, insert, insert

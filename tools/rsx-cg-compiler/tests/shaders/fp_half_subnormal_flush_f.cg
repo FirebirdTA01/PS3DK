@@ -1,4 +1,4 @@
-// FP half subnormal flush, boundary, and non-flush controls (t_30825aaa)
+// FP half subnormal flush, boundary, and non-flush controls (half-subnormal-flush)
 //
 // Reference compiler sce-cgc oracle measurement across regions:
 // 1. he in [-4, 0] (2^-19 <= |x| < 2^-14), positives & h-literals: flushes to 0.0f (0x00000000).

@@ -101,7 +101,7 @@ private:
     // declarators of a comma-separated declaration - `float g1, g2;` is
     // one declaration with two names and both are declared.  Returning
     // only the first is what made the second read as undeclared
-    // (t_a90b1ef1).
+    // (multiple-declarators).
     std::unique_ptr<DeclNode> parseTopLevelDeclaration(
         std::vector<std::unique_ptr<DeclNode>>* extraDeclarations = nullptr);
     std::unique_ptr<StructDecl> parseStructDeclaration();

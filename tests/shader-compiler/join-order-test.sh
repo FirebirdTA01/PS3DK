@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_56ff2244: an if/else join must emit its Select instructions in an order
+# deterministic-join-order: an if/else join must emit its Select instructions in an order
 # taken from the SOURCE, not from a hash table.
 #
 # The defect: the join collected its variable names into a
@@ -46,7 +46,7 @@ renamed=$(select_types fp_join_order_renamed_f)
 # THE REGRESSION GUARD FOR THE DEFECT ITSELF.  The renamed copy differs from
 # the baseline only in the two variable NAMES.  Under the defect the names
 # decided the order, so this comparison was the thing that could not hold.
-[[ "$renamed" == "$base" ]] || fail "renaming the join variables changed the emission order ($base vs $renamed): the join is keyed on names again (t_56ff2244)"
+[[ "$renamed" == "$base" ]] || fail "renaming the join variables changed the emission order ($base vs $renamed): the join is keyed on names again (deterministic-join-order)"
 
 # THE TIE CASE.  Both names share one pre-if value, so the
 # primary key - the smallest reaching SSA id - ties, and the NAME breaks it.
@@ -57,7 +57,7 @@ renamed=$(select_types fp_join_order_renamed_f)
 select_types fp_join_order_shared_prevalue_f > /dev/null
 mapfile -t tie < <(grep -oE '= select float %[0-9]+, %[0-9]+, %[0-9]+' "$work/fp_join_order_shared_prevalue_f.ir" | awk -F'%' '{print $3}' | tr -d ',')
 [[ ${#tie[@]} -eq 2 ]] || fail "the shared-pre-value fixture must emit exactly two selects, got ${#tie[@]}"
-[[ ${tie[0]} -lt ${tie[1]} ]] || fail "shared-pre-value join emitted its selects in ${tie[0]},${tie[1]} order; the tie must be broken by name and is not (t_56ff2244)"
+[[ ${tie[0]} -lt ${tie[1]} ]] || fail "shared-pre-value join emitted its selects in ${tie[0]},${tie[1]} order; the tie must be broken by name and is not (deterministic-join-order)"
 
 printf 'join-order-test: ok (declaration order followed, rename does not move it, tie broken deterministically)\n'
 printf 'PASS: join-order-test\n'

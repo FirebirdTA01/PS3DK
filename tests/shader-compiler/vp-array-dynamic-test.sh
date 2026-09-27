@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_99b29225: a VERTEX array uniform indexed at RUN TIME.  Commit B of the
+# dynamic-uniform-array-index: a VERTEX array uniform indexed at RUN TIME.  Commit B of the
 # array-uniform slice (commit A, 5896ac2a, laid constant-index elements out
 # one at a time and refused every run-time index by name).
 #
@@ -338,7 +338,7 @@ accept vp_array_uniform_dyn_same_expr_twice_v
 printf '  %-44s rewrite = two lanes; same expression twice = one
 ' "v.x = v.y between reads"
 
-# A FLOAT-TYPED index (t_050bebce).  The reference accepts it on both
+# A FLOAT-TYPED index (float-array-index-conversion).  The reference accepts it on both
 # profiles with int() semantics: a run-time float or half index is the same
 # ARL as int(idx) (byte-identical containers), a constant truncates toward
 # zero (1.7 -> 1, -0.5 -> 0, 3.9 -> 3; 4.0 refuses C1068), an UNSIGNED cast of
@@ -385,7 +385,7 @@ refuse "int(idx) + 1 (VP float-to-int deferred)" vp_array_uniform_dyn_arith_refu
 refuse "float index out of range (C1068 in the reference)" vp_array_uniform_dyn_float_oob_refuse_v "out of bounds"
 # A CONSTANT floating expression beyond a bare literal or a floating cast of
 # a constant is REFUSED BY NAME until the typed constant evaluator serves
-# this path (t_65e1b7fa follow-up): the reference evaluates it in float and
+# this path (static-const-qualifiers follow-up): the reference evaluates it in float and
 # truncates ONCE on the result - u[1.7 * 2.0] is element 3 (leaf truncation
 # reads 2), u[((float)3 / 2) * 2] is element 3 (leaf truncation reads 2, and
 # there is no float LITERAL in it), u[(int)(bool)(float)0.5] is element 1
@@ -400,7 +400,7 @@ refuse "u[(int)(bool)(float)0.5] (reference: 1)"     vp_array_uniform_dyn_float_
 # reads u[(fixed)3] as element 1 - and that conversion is the typed
 # evaluator's, so the cast refuses by name here (review: codex).  An integral
 # cast of an out-of-range float literal folds to INT_MIN (the x86 indefinite
-# value the reference uses, measured on t_65e1b7fa) and is out of bounds.
+# value the reference uses, measured on static-const-qualifiers) and is out of bounds.
 refuse "u[(fixed)3] (reference: element 1)"           vp_array_uniform_dyn_fixed_cast_refuse_v "floating value"
 refuse "u[(int)4294967296.0] (C1068 in the reference)" vp_array_uniform_dyn_int_cast_oob_refuse_v "out of bounds"
 # The float32 rule on bare literals, directly: 0.9999999999 is 1.0f before

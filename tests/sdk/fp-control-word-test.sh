@@ -26,7 +26,7 @@ fail() { echo "fp-control-word-test: FAIL: $*" >&2; exit 1; }
 # 1. one builder, three callers
 # The pattern accepts ANY hex constant against 0x40 so it matches both
 # spellings.  The H0 branch's constant changed from 0x0e to 0x00
-# (t_96daf53b); a literal '0x0e' pattern would still have caught a stale copy
+# (half-colour-depth-control); a literal '0x0e' pattern would still have caught a stale copy
 # written at the old spelling, but not one written at the new one, and the
 # point of this check is to catch a copy whatever it says.
 dups=$(grep -rl --include='*.h' --include='*.c' --include='*.cpp' \

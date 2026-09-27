@@ -1,4 +1,4 @@
-// A MATRIX entry parameter's default, on BOTH surfaces (t_4b54f26b A1).
+// A MATRIX entry parameter's default, on BOTH surfaces (uniform-default-records A1).
 //
 // A1's first version accepted this shape and discarded the value: the
 // parameter table read correctly and every row's ucode INLINE CONSTANT was

@@ -1,4 +1,4 @@
-// Uniform ENTRY PARAMETER defaults on the VERTEX profile (t_4b54f26b A1).
+// Uniform ENTRY PARAMETER defaults on the VERTEX profile (uniform-default-records A1).
 //
 // A1's first version wrote the entry-parameter block into cg_container_fp.cpp
 // only, and every fixture it shipped with was a FRAGMENT program - so the

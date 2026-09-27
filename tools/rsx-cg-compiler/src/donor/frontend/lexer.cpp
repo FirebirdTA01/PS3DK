@@ -148,7 +148,7 @@ void Lexer::initKeywords() {
     // the reference, the two spellings of the same program compile to
     // byte-identical containers - sampled and declared-but-unused alike, so
     // the parameter table records them the same way too.  An alias, not a
-    // type: same token, nothing downstream needs to know (t_5c1f84d3).
+    // type: same token, nothing downstream needs to know (texobj-sampler-alias).
     //
     // These five and no more.  The reference REJECTS texobj2DShadow and
     // texobjRECTShadow with a syntax error at the identifier, so the family
@@ -307,7 +307,7 @@ std::vector<Token> Lexer::tokenize()
                 // composition, plus 1 under --no-stdlib.  Columns were
                 // always right, which is what made it look like an
                 // off-by-one rather than a marker nobody read
-                // (t_1366b9b9).
+                // (diagnostic-source-location).
                 std::string directive;
                 while (!isAtEnd() && peek() != '\n')
                 {

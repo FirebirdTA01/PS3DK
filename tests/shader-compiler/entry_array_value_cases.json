@@ -340,7 +340,7 @@
         "FOG"
       ]
     },
-    "gap": "t_fb21bd39: inherited FP FOG reflection resource is 0; reference is 3156. Value and physical input are measured separately."
+    "gap": "fragment-fog-reflection: inherited FP FOG reflection resource is 0; reference is 3156. Value and physical input are measured separately."
   },
   {
     "name": "sce_fp_rsx-FOG-float-both-helper",
@@ -383,7 +383,7 @@
         "FOG"
       ]
     },
-    "gap": "t_fb21bd39: inherited FP FOG reflection resource is 0; reference is 3156. Value and physical input are measured separately."
+    "gap": "fragment-fog-reflection: inherited FP FOG reflection resource is 0; reference is 3156. Value and physical input are measured separately."
   },
   {
     "name": "sce_fp_rsx-TEXCOORD0-float2-both",
@@ -953,7 +953,7 @@
     "name": "sce_vp_rsx-FOG-float-both",
     "profile": "sce_vp_rsx",
     "source": "struct I{float a[2]:FOG;};float4 main(I i):POSITION{return float4(i.a[0]+i.a[1]);}",
-    "refusal": "input array semantic 'FOG' has no modelled array binding in our compiler (t_dddf962d)",
+    "refusal": "input array semantic 'FOG' has no modelled array binding in our compiler (input-array-semantic-binding)",
     "gap": "Reference ACCEPT: automatic allocation is outside this bounded slice."
   },
   {
@@ -1744,15 +1744,15 @@
     "name": "review-sce_vp_rsx-TEX0-both",
     "profile": "sce_vp_rsx",
     "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):POSITION{return i.a[0]+2*i.a[1];}",
-    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (t_dddf962d)",
-    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (input-array-semantic-binding)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; input-array-semantic-binding."
   },
   {
     "name": "review-sce_vp_rsx-TEX0-first",
     "profile": "sce_vp_rsx",
     "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):POSITION{return i.a[0];}",
-    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (t_dddf962d)",
-    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (input-array-semantic-binding)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; input-array-semantic-binding."
   },
   {
     "name": "review-sce_vp_rsx-TEX0-unused",
@@ -1778,15 +1778,15 @@
     "name": "review-sce_vp_rsx-COL0-both",
     "profile": "sce_vp_rsx",
     "source": "struct I{float4 a[2]:COL0;};float4 main(I i):POSITION{return i.a[0]+2*i.a[1];}",
-    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (t_dddf962d)",
-    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (input-array-semantic-binding)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; input-array-semantic-binding."
   },
   {
     "name": "review-sce_vp_rsx-COL0-first",
     "profile": "sce_vp_rsx",
     "source": "struct I{float4 a[2]:COL0;};float4 main(I i):POSITION{return i.a[0];}",
-    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (t_dddf962d)",
-    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (input-array-semantic-binding)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; input-array-semantic-binding."
   },
   {
     "name": "review-sce_vp_rsx-COL0-unused",
@@ -1930,15 +1930,15 @@
     "name": "review-sce_fp_rsx-TEX0-both",
     "profile": "sce_fp_rsx",
     "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):COLOR{return i.a[0]+2*i.a[1];}",
-    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (t_dddf962d)",
-    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (input-array-semantic-binding)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; input-array-semantic-binding."
   },
   {
     "name": "review-sce_fp_rsx-TEX0-first",
     "profile": "sce_fp_rsx",
     "source": "struct I{float4 a[2]:TEX0;};float4 main(I i):COLOR{return i.a[0];}",
-    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (t_dddf962d)",
-    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+    "refusal": "input array semantic 'TEX' has no modelled array binding in our compiler (input-array-semantic-binding)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; input-array-semantic-binding."
   },
   {
     "name": "review-sce_fp_rsx-TEX0-unused",
@@ -1964,15 +1964,15 @@
     "name": "review-sce_fp_rsx-COL0-both",
     "profile": "sce_fp_rsx",
     "source": "struct I{float4 a[2]:COL0;};float4 main(I i):COLOR{return i.a[0]+2*i.a[1];}",
-    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (t_dddf962d)",
-    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (input-array-semantic-binding)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; input-array-semantic-binding."
   },
   {
     "name": "review-sce_fp_rsx-COL0-first",
     "profile": "sce_fp_rsx",
     "source": "struct I{float4 a[2]:COL0;};float4 main(I i):COLOR{return i.a[0];}",
-    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (t_dddf962d)",
-    "gap": "Reference ACCEPT, alias-array allocation not modelled; t_dddf962d."
+    "refusal": "input array semantic 'COL' has no modelled array binding in our compiler (input-array-semantic-binding)",
+    "gap": "Reference ACCEPT, alias-array allocation not modelled; input-array-semantic-binding."
   },
   {
     "name": "review-sce_fp_rsx-COL0-unused",

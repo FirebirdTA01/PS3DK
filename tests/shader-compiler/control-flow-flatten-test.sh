@@ -3,7 +3,7 @@
 # flattens on the general path, and ONLY on the general path.
 #
 # Pins the tier-a battery of docs/design/shader-compiler-control-flow.md
-# §5 (board task t_91bbd575):
+# §5 (board task general-path-discard):
 #
 #   diamond          general: compiles    default: keeps refusing
 #   nested diamond   general: compiles    default: keeps refusing

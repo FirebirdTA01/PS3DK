@@ -1,4 +1,4 @@
-// t_36492ad8 commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against sce-cgc 475.
 // The call written out.  Twin of fp_helper_default_call_f.
 float4 g() { return float4(0.5, 0.5, 0.5, 0.5); }
 float4 h(float4 c, float4 k = g()) { return c * k; }

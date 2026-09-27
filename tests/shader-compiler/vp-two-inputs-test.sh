@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_9d0ff137: a vertex instruction may address ONE input register (the
+# vp-input-selector-limits: a vertex instruction may address ONE input register (the
 # hardware has one per-instruction input field; two distinct inputs in one
 # instruction silently read the same one, which is why the assembler refuses
 # them).  The reference makes such programs WORK by staging the second input

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_5c12df56: what a fragment entry RETURNS must reach the ucode with the
+# fragment-output-precision: what a fragment entry RETURNS must reach the ucode with the
 # same fidelity as what it writes through an out parameter.
 #
 # Two independent defects, both silent (exit 0, container written, no
@@ -7,7 +7,7 @@
 #
 #   A. a scalar returned into a float4 output is not broadcast.  The write
 #      mask is 0x1, so three of the four colour lanes are never written.
-#   B. a half RETURN TYPE is not detected at all.  The t_80dad2dd detection
+#   B. a half RETURN TYPE is not detected at all.  The half-output-staging detection
 #      walks the entry's parameters, so `half4 main() : COLOR` keeps
 #      outputFromH0 clear and emits a full-precision MOVR.
 #

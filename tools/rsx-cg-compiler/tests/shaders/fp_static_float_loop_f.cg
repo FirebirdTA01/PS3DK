@@ -1,4 +1,4 @@
-// t_a290c3c8: defined, varying loop result for the differential pixel rig.
+// static-loop-expansion: defined, varying loop result for the differential pixel rig.
 float4 main(float2 uv : TEXCOORD0) : COLOR
 {
     float4 a = float4(uv, 0.0, 1.0);

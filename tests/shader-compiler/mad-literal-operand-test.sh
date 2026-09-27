@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A literal operand of a fused multiply-add carries its value into the
-# ucode (t_a1f43b12).  Before the fix the emitter treated whichever
+# ucode (mad-literal-data).  Before the fix the emitter treated whichever
 # operand was not the varying as a uniform and wrote a zero placeholder
 # for the host to patch; nothing patched it, so `v * 0.5 + 0.5` shipped as
 # `v * 0 + 0.5` and painted a flat colour.  Exit 0, no diagnostic.
@@ -68,11 +68,11 @@ HALF = 0x00003F00        # 0.5f, in the byte order the container carries
 CONST_XXXX = 0x00020000  # a source reading c[0] with an .xxxx swizzle
 ZEROS = [0, 0, 0, 0]
 # The verbatim four-lane block the shipping path emitted BEFORE the dedup
-# rule (t_642eb36e).  Nothing asserts it any more; it stays in the filter
+# rule (literal-vector-dedup-swizzle).  Nothing asserts it any more; it stays in the filter
 # below so a regression to that shape is COLLECTED and printed in the
 # failure's block list instead of being silently filtered away.
 HALF4 = [HALF, HALF, HALF, HALF]
-# The dedup rule's shape: distinct values first, zero-filled (t_642eb36e).
+# The dedup rule's shape: distinct values first, zero-filled (literal-vector-dedup-swizzle).
 HALF_PACKED = [HALF, 0, 0, 0]
 
 # --- both operands literal -------------------------------------------
@@ -83,7 +83,7 @@ if len(both_legacy) != 3:
         "FAIL: fp_mad_literal_f must emit the varying MOV, one MAD and one "
         "shared const block - three ucode rows, not %d.  Six rows is the "
         "pre-fix preload shape, whose R1 held the zero placeholder nothing "
-        "ever patched (t_a1f43b12)." % len(both_legacy)
+        "ever patched (mad-literal-data)." % len(both_legacy)
     )
 if both_legacy[2] != [HALF, 0, 0, 0]:
     raise SystemExit(
@@ -202,22 +202,22 @@ def mad_multiplier_is_half(rs, label):
         "FAIL: general %s MAD multiplier must read a 0.5 literal block, "
         "either inline or through a temp preloaded from that block.  If it "
         "reads the zero uniform patch block instead, the shader compiles "
-        "and paints a flat colour (t_a1f43b12)." % label
+        "and paints a flat colour (mad-literal-data)." % label
     )
 
 
 # Shipping general lowering preloads literals into temps and still emits one
 # block per literal source where the reference shares a single block between
-# the MAD's two operands - that gap is t_741aef0e's fp_mad_literal_f row and
+# the MAD's two operands - that gap is mad-literal-block-sharing's fp_mad_literal_f row and
 # it is not this assertion's subject.  What IS asserted is that the 0.5
 # multiplier is carried AS DATA: if that block vanishes or becomes zero, the
-# pixels collapse to the old flat-colour t_a1f43b12 failure.
+# pixels collapse to the old flat-colour mad-literal-data failure.
 #
 # THE PACKED SHAPE, not the verbatim one: the block is {0.5, 0, 0, 0} read
 # .xxxx, which is what the reference emits for this fixture (see the
 # fixture's own header) and what the legacy arm above already expects.  It
 # used to be {0.5, 0.5, 0.5, 0.5} here, because the shipping path wrote
-# every lane verbatim; t_642eb36e's dedup landed and this expectation moved
+# every lane verbatim; literal-vector-dedup-swizzle's dedup landed and this expectation moved
 # with it rather than pinning the shape the compiler no longer has.
 both_general = rows(sys.argv[3])
 blocks = const_blocks(both_general)
@@ -226,14 +226,14 @@ if HALF_PACKED not in blocks:
         "FAIL: general fp_mad_literal_f must carry a 0.5 literal block for "
         "the MAD multiplier, packed as {0.5, 0, 0, 0}; blocks were [%s].  "
         "Without that block the shipping path multiplies by zero and paints "
-        "a flat colour (t_a1f43b12)."
+        "a flat colour (mad-literal-data)."
         % "; ".join(",".join("0x%08x" % w for w in b) for b in blocks)
     )
 if ZEROS in blocks:
     raise SystemExit(
         "FAIL: general fp_mad_literal_f has no uniform input, so an all-zero "
         "patch block means the literal multiplier can be treated as an "
-        "unpatched uniform (t_a1f43b12)."
+        "unpatched uniform (mad-literal-data)."
     )
 mad_multiplier_is_half(both_general, "fp_mad_literal_f")
 
@@ -244,7 +244,7 @@ if ZEROS not in blocks or HALF_PACKED not in blocks:
         "FAIL: general fp_mad_literal_uniform_f must carry both the zero "
         "uniform patch block and the 0.5 literal multiplier block; blocks "
         "were [%s].  Missing the literal block is the silent flat-colour "
-        "failure (t_a1f43b12)."
+        "failure (mad-literal-data)."
         % "; ".join(",".join("0x%08x" % w for w in b) for b in blocks)
     )
 mad_multiplier_is_half(mixed_general, "fp_mad_literal_uniform_f")

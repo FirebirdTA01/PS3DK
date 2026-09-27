@@ -1,4 +1,4 @@
-// t_75de19a1: float3(scalar) into a struct-member .rgb store.  The reference
+// scalar-constructor-broadcast: float3(scalar) into a struct-member .rgb store.  The reference
 // lowers it to one broadcast MOV (MOVR R0.xyz, R0.z) and compiles it to the
 // same bytes as the spelled-out float3(b, b, b) form.
 struct Result { float4 colour : COLOR; };

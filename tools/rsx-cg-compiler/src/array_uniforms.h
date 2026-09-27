@@ -14,7 +14,7 @@
  * and the two container writers declare the records - and every one of
  * them has to count and name the elements the same way, or a runtime patch
  * of one element lands in another's constant.  This header is that one
- * way (t_f9ecd3ac).
+ * way (constant-uniform-array-index).
  */
 
 #include <algorithm>
@@ -37,7 +37,7 @@ namespace rsx_cg
 // CONSTANT index 1 - per-element layout, no address register, on both
 // profiles - and refuses an out-of-range one (C1068), so the fold has to
 // happen where the layout is classified, before any register is handed
-// out (review, t_99b29225: two literal indices had shared one lane).
+// out (review, dynamic-uniform-array-index: two literal indices had shared one lane).
 inline bool foldConstantIndex(const IRFunction& entry, IRValueID id,
                               int& out)
 {
@@ -121,7 +121,7 @@ inline std::string arrayElementName(const std::string& name, int index)
 // The VP constant registers of an array's elements, in element order,
 // -1 for an element that holds none.  `cursor` is the descending uniform
 // walk (c467 first) and is advanced past what the array took.  Two
-// shapes, both measured on the reference (t_f9ecd3ac, t_99b29225):
+// shapes, both measured on the reference (constant-uniform-array-index, dynamic-uniform-array-index):
 //   - constant indices only: a register per REFERENCED element, taken
 //     from the cursor in ASCENDING element order (u_bones[1] -> c467,
 //     u_bones[3] -> c466); unreferenced elements hold none;

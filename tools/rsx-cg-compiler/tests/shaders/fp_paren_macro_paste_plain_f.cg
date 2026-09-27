@@ -1,4 +1,4 @@
-// t_7cc742ed.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
 // An ordinary paste with nothing untokenisable in sight: the control that says
 // the ## path still works at all.
 #define CAT(a,b) a##b

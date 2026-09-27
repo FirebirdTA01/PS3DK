@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Every lane of the colour output carries the VALUE the fixture computes
-# (t_856689b2).
+# (operand-lane-width).
 #
 # The rule, its scope, and why the two earlier versions of this guard were
 # too weak - one asserted a shape that 06baa4eb legitimately changed, the

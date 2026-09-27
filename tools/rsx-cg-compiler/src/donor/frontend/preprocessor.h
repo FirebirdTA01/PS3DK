@@ -37,7 +37,7 @@ struct MacroDefinition
 	// So the answer is a property of the BINDING - how it got there - and not
 	// of the spelling.  A list of special names would have got the pristine
 	// rows right and every source-#defined row wrong (codex found it; ruling
-	// by Fable, t_9e90fb38).  Default true, so an ordinary #define needs no
+	// by Fable, preprocessor-defined-operator).  Default true, so an ordinary #define needs no
 	// code; the driver clears it on the four it rebinds per line and file.
 	bool countsAsDefined = true;
 
@@ -46,7 +46,7 @@ struct MacroDefinition
 	                         // variadic tail was present - an uninitialized
 	                         // read that decided arity from stack garbage and
 	                         // gave one build's binary a different answer than
-	                         // another's on the same source (t_53363b4b).
+	                         // another's on the same source (recursive-macro-termination).
 };
 
 struct ConditionalState
@@ -54,7 +54,7 @@ struct ConditionalState
 	// In-class defaults on every bool: today each is assigned at both
 	// construction sites, but that is a property of the writers, not the
 	// type, and a single missing assignment would be another indeterminate
-	// read like MacroDefinition::isVariadic was (t_53363b4b).
+	// read like MacroDefinition::isVariadic was (recursive-macro-termination).
 	bool active = false; // Current branch is active
 	bool hasElse = false; // Already seen else
 	bool everActive = false; // Any branch has been active

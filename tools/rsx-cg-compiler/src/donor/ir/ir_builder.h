@@ -45,7 +45,7 @@ private:
     static bool evaluateConstIntInitializer(const ExprNode* init,
                                             std::vector<int64_t>& out);
     // `module` lets an identifier in the initialiser resolve to a file-scope
-    // const that was already folded (t_10dc2936); without it identifiers are
+    // const that was already folded (file-scope-initializer-fold); without it identifiers are
     // not constants.
     static bool evaluateConstInitializerTyped(const ExprNode* init,
                                               const TypeNode* declType,
@@ -56,7 +56,7 @@ private:
     // Value mapping from AST to IR
     std::unordered_map<DeclNode*, IRValueID> declToValue_;
     // ================================================================
-    // PER-SCOPE STATE, in ONE place (t_4ac44f78).  Every map that binds a
+    // PER-SCOPE STATE, in ONE place (inline-scope-state).  Every map that binds a
     // NAME to a value lives in ScopeState, and every scope boundary handles
     // the whole struct - the three boundaries are the rows of this table,
     // and a new map is wrong until it has an answer in every cell (block exit
@@ -70,9 +70,9 @@ private:
     //
     // History: nameToValue_ was joined from the start; localArrayValues_
     // was not snapshotted, restored or joined for as long as it existed
-    // (t_cf17f501 - a conditional element store applied unconditionally);
+    // (local-array-conditional-store - a conditional element store applied unconditionally);
     // the two stash maps were added and missed the SAME way within an hour
-    // (t_7a4e3b36 review).  The aliases below keep the historical member
+    // (user-function-inlining review).  The aliases below keep the historical member
     // names so the ~60 binding sites read unchanged; the struct is what the
     // boundaries copy, so a fifth map added HERE is carried everywhere, and
     // one added anywhere else is the bug this comment exists to prevent.
@@ -113,7 +113,7 @@ private:
     // function binds that name itself (a local or a parameter); no-op if
     // the name is not a global or is already stashed.
     void stashShadowedGlobal(const std::string& name);
-    // BLOCK EXIT (t_7396e0c2): the names each open block DECLARED, one set per
+    // BLOCK EXIT (dead-branch-local-predication): the names each open block DECLARED, one set per
     // block, pushed by buildBlockStmt and filled by buildDeclStmt as it reaches
     // each declarator - never pre-scanned, so a use before the declaration still
     // names the outer binding (oracle: `float4 r = G; float4 G = ...` reads the
@@ -164,7 +164,7 @@ private:
 
     // True for a FRAGMENT entry's `out` parameter declared with no
     // semantic, which binds to COLOR the way the reference compiler binds
-    // it (t_a15ec129).  Consulted wherever a parameter's semantic decides
+    // it (implicit-colour-output).  Consulted wherever a parameter's semantic decides
     // whether a store is emitted.
     bool isDefaultedFragmentOutput(const ParamDecl* param) const;
 
@@ -279,7 +279,7 @@ private:
     IRValueID createConstant(const IRTypeInfo& type, float value);
     IRValueID createConstant(const IRTypeInfo& type, const std::vector<float>& values, const std::vector<int64_t>& intValues = {});
 
-    // Narrowing helpers for vector and matrix casts and constructors (t_d03921c3)
+    // Narrowing helpers for vector and matrix casts and constructors (narrowing-aggregate-casts)
     IRValueID emitVectorNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType, IRValueID operandValue, SourceLocation loc, std::optional<BaseType> baseTypeOverride = std::nullopt);
     IRValueID emitMatrixNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType, IRValueID operandValue, SourceLocation loc);
 };

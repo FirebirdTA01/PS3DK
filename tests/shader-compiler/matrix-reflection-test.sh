@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Matrix reflection in the container: the CONST fold emits no record, and an
 # initialised matrix UNIFORM carries its default on the rows with
-# column-sized types (t_4b54f26b A3, t_d90dbaed).
+# column-sized types (uniform-default-records A3, matrix-default-reflection).
 #
 # Three defects, all measured against sce-cgc (475 host-win32, -e main):
 #   1. evaluateConstInitializerTyped capped a constructor at four arguments,

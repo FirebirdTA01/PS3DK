@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A float4 literal keeps all four lanes in the vertex constant pool
-# (t_3e342903).  The general path's pool read literal[0] and nothing else,
+# (vp-literal-vector-pool).  The general path's pool read literal[0] and nothing else,
 # so every literal became one packed lane read back with an .xxxx
 # broadcast: `out = float4(a,b,c,d)` painted `a` four times, silently.
 #
@@ -75,7 +75,7 @@ if len(slots) != 2:
         "FAIL: the pool must hold exactly two slots - two distinct float4 "
         "literals, the third store repeating the first - and holds %d: %s.  "
         "One slot means every literal was packed into lanes of a shared "
-        "register and broadcast (t_3e342903); three means the duplicate was "
+        "register and broadcast (vp-literal-vector-pool); three means the duplicate was "
         "not shared." % (len(slots), ", ".join(s[0] for s in slots))
     )
 

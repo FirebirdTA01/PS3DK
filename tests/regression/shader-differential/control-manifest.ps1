@@ -1,5 +1,5 @@
 # control-manifest.ps1 -- the proving-control invariant of a shader-differential
-# manifest, as data and as two functions (t_678a4dab).
+# manifest, as data and as two functions (differential-manifest-judging).
 #
 # GATE EXISTENCE IS NOT GATE SUCCESS.  The guest opens its MRT and depth
 # instruments only after every member of the proving set has RUN AND PASSED

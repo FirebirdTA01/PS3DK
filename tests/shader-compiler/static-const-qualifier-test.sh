@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_65e1b7fa: file-scope static const, const static, and static declarations.
+# static-const-qualifiers: file-scope static const, const static, and static declarations.
 #
 # Asserts:
 # 1. 'static const' and 'const static' variables are lowered as typed IR constants
@@ -428,7 +428,7 @@ if bytes((0x00, 0x00, 0x40, 0x20)) in u_bytes:
     raise SystemExit("FAIL: int2(1.5, 2.5) ucode unexpectedly contains unconverted 2.5f (0000 4020)")
 PY
 
-# Row 3d': arithmetic in a file-scope const initialiser FOLDS (t_10dc2936).
+# Row 3d': arithmetic in a file-scope const initialiser FOLDS (file-scope-initializer-fold).
 # This row used to pin our own refusal of `1 + 2`; the reference folds it, so
 # the row is now a byte twin against the hand-folded literal.
 cat >"$work/fold_int_arith.cg" <<'EOF'
@@ -448,7 +448,7 @@ for stem in fold_int_arith fold_int_arith_control; do
     "$compiler" -p sce_fp_rsx --emit-container "$work/$stem.fpo" "$work/$stem.cg" >"$work/$stem.log" 2>&1         || { tail -n 5 "$work/$stem.log" >&2; fail "$stem did not compile; the reference folds 1 + 2"; }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem exited 0 but wrote no container"
 done
-cmp -s "$work/fold_int_arith.fpo" "$work/fold_int_arith_control.fpo"     || fail "static const int K = 1 + 2 must fold byte-identically to K = 3 (t_10dc2936)"
+cmp -s "$work/fold_int_arith.fpo" "$work/fold_int_arith_control.fpo"     || fail "static const int K = 1 + 2 must fold byte-identically to K = 3 (file-scope-initializer-fold)"
 
 # -----------------------------------------------------------------------------
 # Row 3e: Target hardware semantics for out-of-range, half, and fixed conversions

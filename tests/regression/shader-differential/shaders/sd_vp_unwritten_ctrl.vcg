@@ -7,7 +7,7 @@
 // of output registers the ucode writes (VEC_RESULT / SCA_RESULT with the
 // output index at word 3 bits 2..6), decoded from the words rather than
 // read from any mask the container declares.  The fragment side's outw
-// named t_a15ec129 two days after the sensitivity fields had been pointing
+// named implicit-colour-output two days after the sensitivity fields had been pointing
 // at it; this is the vertex twin, seen to fire once before it is believed.
 void main(
     float2 in_position       : POSITION,

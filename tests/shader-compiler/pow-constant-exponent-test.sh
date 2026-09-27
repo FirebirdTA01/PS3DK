@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # pow-constant-exponent-test.sh -- pow() with a constant exponent follows the
-# reference's table (t_0f3b232e, the Boy_HairFp pixel mismatch).
+# reference's table (constant-exponent-pow, the Boy_HairFp pixel mismatch).
 #
 # Reference (sce-cgc 475, measured 2026-09-15, .local/probe-boyhair): in FP a
 # constant exponent lowers as 0 -> the constant 1, 1 -> a copy, 2 -> MUL x, x
