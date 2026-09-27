@@ -19,7 +19,15 @@ timeout or setup failure. The installed v0.16.0 parent produced 115 checks and
 24 failures in each of the six configurations, with guest exit 1. The failures
 were in the high-bit unsigned and signed 32-bit families; the low-constant,
 64-bit and register-operand controls passed. Missing or duplicate summaries
-are invalid. These measurements do not establish candidate correctness.
+are invalid.
+
+Matched Linux-hosted parent and corrected compilers were tested with the same
+SDK header contents and Windows linker/runtime inputs. The parent reproduced
+the same 24 mismatch identities in every configuration; the corrected compiler
+completed all six configurations with 115 checks, zero failures and guest exit
+0. Both matched runtime sessions released their leases cleanly. This is RPCS3
+evidence, not a physical-hardware result or proof that all seven backend
+patterns were selected by the source expressions.
 
 Retain compiler and runtime hashes, compile/link commands, ELF/SELF hashes,
 disassembly (and RTL for the minimal reproduction), guest logs and exit status.
@@ -28,8 +36,8 @@ must establish which backend patterns it actually exercises. Passing host builds
 would validate the fixture only, not PPU code generation.
 
 This row is not yet added to the release regression manifest. Independent source
-review and the parent measurement are complete. The private corrected compiler
-build is complete; its six-configuration witness and runtime validation remain
-pending. The parent runtime runner failed during lease
-release after all six guests exited normally; canonical recovery released the
-lease, and the original harness failure remains in the local evidence packet.
+review, the private corrected compiler build and matched six-configuration
+runtime validation are complete. The earlier Windows-parent runtime runner
+failed during lease release after all six guests exited normally; canonical
+recovery released that lease. Its original harness failure remains in the
+local evidence packet, separately from the later clean matched sessions.

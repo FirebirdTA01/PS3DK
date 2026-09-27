@@ -16,13 +16,23 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.16.4] — 2026-09-27
+
 ### Fixed
 
+- Correct optimized PPU 32-bit equality/inequality arithmetic when the
+  operands have different upper register halves. Restore the seven carry
+  patterns in GCC patch 0014 to the target's hardware-width mode. The defect
+  affects both ILP32 and LP64; a separate O0 judge now checks 115 literal
+  results at each of O1, O2 and O3 in both ABIs. Matched RPCS3 runs recorded
+  24 failures per configuration before the fix and zero after it.
 - Correct the NP Commerce2 and NP SNS sysmodule IDs to `0x0044` and
   `0x0059`, preserve their aliases, and add 26 missing IDs including
   `SYSUTIL_GAME` (`0x003e`). The earlier SNS firmware-retirement diagnosis
-  was based on the incorrect `0xf043` ID; corrected-ID runtime validation
-  is still pending. C11/C++17 constant checks now also run in host-only CI.
+  was based on the incorrect `0xf043` ID. Both corrected IDs now return
+  success in the RPCS3 sample runs; this does not establish online-service
+  functionality or physical-hardware support. C11/C++17 constant checks
+  now also run in host-only CI.
 
 ## [v0.16.0] — 2026-09-26
 

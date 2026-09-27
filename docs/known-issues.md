@@ -105,7 +105,7 @@ threading primitives already used by librt's pthread layer.
 
 ---
 
-## NP SNS module load needs remeasurement after correcting its ID
+## NP SNS and Commerce2: corrected IDs load in RPCS3
 
 **Status:** the header's former `CELL_SYSMODULE_SNS` value `0xf043` was
 incorrect. It now aliases `CELL_SYSMODULE_SYSUTIL_NP_SNS`, value `0x0059`.
@@ -116,11 +116,13 @@ was retired or that firmware rejects the corrected ID.
 The related Commerce2 alias is also corrected: `0x003e` belongs to
 `CELL_SYSMODULE_SYSUTIL_GAME`; NP Commerce2 is `0x0044`.
 
-**Remaining validation.** Rerun `samples/network/hello-ppu-np-sns/` with
-`0x0059` and retain its module-load result and firmware/emulator provenance.
-Header constant checks and a successful sample link alone do not prove that
-this module loads or that its online services work. The corrected sample's
-runtime result is not yet measured.
+**Measured validation (2026-09-27).** The corrected SNS and Commerce2
+samples both returned `0x00000000` from their module-load calls in RPCS3,
+then exited normally. The sample sources, SELF files, emulator and
+configuration were pinned for these runs. This establishes module loading
+on that tested emulator configuration; online services and physical
+hardware remain unverified. The earlier wrong-ID result is retained as
+historical evidence, not as a firmware-retirement diagnosis.
 
 ---
 
