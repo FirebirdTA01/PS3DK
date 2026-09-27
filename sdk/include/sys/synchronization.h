@@ -283,6 +283,225 @@ LV2_SYSCALL sys_cond_signal_all(sys_cond_t cond)
 	return_to_user_prog(s32);
 }
 
+LV2_SYSCALL sys_cond_signal_to(sys_cond_t cond, sys_ppu_thread_t thread)
+{
+	lv2syscall2(110, cond, thread);
+	return_to_user_prog(s32);
+}
+
+/* ------------------------------------------------------------------ *
+ * Syscall numbers, invalid ids and create-disposition values.
+ * ------------------------------------------------------------------ */
+
+#define SYS_MUTEX_CREATE            100
+#define SYS_MUTEX_DESTROY           101
+#define SYS_MUTEX_LOCK              102
+#define SYS_MUTEX_TRYLOCK           103
+#define SYS_MUTEX_UNLOCK            104
+#define SYS_COND_CREATE             105
+#define SYS_COND_DESTROY            106
+#define SYS_COND_WAIT               107
+#define SYS_COND_SIGNAL             108
+#define SYS_COND_SIGNAL_ALL         109
+#define SYS_COND_SIGNAL_TO          110
+#define SYS_SEMAPHORE_CREATE        90
+#define SYS_SEMAPHORE_DESTROY       91
+#define SYS_SEMAPHORE_WAIT          92
+#define SYS_SEMAPHORE_TRYWAIT       93
+#define SYS_SEMAPHORE_POST          94
+#define SYS_SEMAPHORE_GET_VALUE     114
+#define SYS_RWLOCK_CREATE           120
+#define SYS_RWLOCK_DESTROY          121
+#define SYS_RWLOCK_RLOCK            122
+#define SYS_RWLOCK_TRYRLOCK         123
+#define SYS_RWLOCK_RUNLOCK          124
+#define SYS_RWLOCK_WLOCK            125
+#define SYS_RWLOCK_WUNLOCK          127
+#define SYS_RWLOCK_TRYWLOCK         148
+
+#define SYS_MUTEX_ID_INVALID        0xFFFFFFFFU
+#define SYS_COND_ID_INVALID         0xFFFFFFFFU
+#define SYS_SEMAPHORE_ID_INVALID    0xFFFFFFFFU
+#define SYS_RWLOCK_ID_INVALID       0xFFFFFFFFU
+
+/* Values for the flags member of a process-shared attribute: create the
+   object, attach to an existing one, or either. */
+#define SYS_SYNC_NEWLY_CREATED      0x1
+#define SYS_SYNC_NOT_CREATE         0x2
+#define SYS_SYNC_NOT_CARE           0x3
+
+/* Copy a debugging name into an attribute's name[]: at most
+   SYS_SYNC_NAME_LENGTH characters, always NUL-terminated. */
+static inline void __sys_sync_name_set(char attr_name[], const char *name)
+{
+	int i = 0;
+	if (name)
+		for (; i < SYS_SYNC_NAME_LENGTH && name[i] != '\0'; ++i)
+			attr_name[i] = name[i];
+	attr_name[i] = '\0';
+}
+static inline void sys_mutex_attribute_name_set(char attr_name[], const char *name)
+{
+	__sys_sync_name_set(attr_name, name);
+}
+static inline void sys_cond_attribute_name_set(char attr_name[], const char *name)
+{
+	__sys_sync_name_set(attr_name, name);
+}
+
+/* ------------------------------------------------------------------ *
+ * Reader/writer lock - syscalls 120-127 and 148.
+ * ------------------------------------------------------------------ */
+
+#ifndef __SYS_RWLOCK_T_DEFINED
+#define __SYS_RWLOCK_T_DEFINED
+typedef uint32_t sys_rwlock_t;
+#endif
+
+typedef struct sys_rwlock_attribute {
+	sys_protocol_t        attr_protocol;
+	sys_process_shared_t  attr_pshared;
+	sys_ipc_key_t         key;
+	int                   flags;
+	u32                   pad;
+	char                  name[SYS_SYNC_NAME_SIZE];
+} sys_rwlock_attribute_t;
+
+#define sys_rwlock_attribute_initialize(_a)                     \
+	do {                                                        \
+		(_a).attr_protocol = SYS_SYNC_PRIORITY;                 \
+		(_a).attr_pshared  = SYS_SYNC_NOT_PROCESS_SHARED;       \
+		(_a).key           = 0;                                 \
+		(_a).flags         = 0;                                 \
+		(_a).name[0]       = '\0';                              \
+	} while (0)
+
+static inline void sys_rwlock_attribute_name_set(char attr_name[], const char *name)
+{
+	__sys_sync_name_set(attr_name, name);
+}
+
+LV2_SYSCALL sys_rwlock_create(sys_rwlock_t *rw_lock_id, sys_rwlock_attribute_t *attr)
+{
+	lv2syscall2(120, (u64)(uintptr_t)rw_lock_id, (u64)(uintptr_t)attr);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_rwlock_destroy(sys_rwlock_t rw_lock_id)
+{
+	lv2syscall1(121, rw_lock_id);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_rwlock_rlock(sys_rwlock_t rw_lock_id, usecond_t timeout)
+{
+	lv2syscall2(122, rw_lock_id, timeout);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_rwlock_tryrlock(sys_rwlock_t rw_lock_id)
+{
+	lv2syscall1(123, rw_lock_id);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_rwlock_runlock(sys_rwlock_t rw_lock_id)
+{
+	lv2syscall1(124, rw_lock_id);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_rwlock_wlock(sys_rwlock_t rw_lock_id, usecond_t timeout)
+{
+	lv2syscall2(125, rw_lock_id, timeout);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_rwlock_trywlock(sys_rwlock_t rw_lock_id)
+{
+	lv2syscall1(148, rw_lock_id);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_rwlock_wunlock(sys_rwlock_t rw_lock_id)
+{
+	lv2syscall1(127, rw_lock_id);
+	return_to_user_prog(s32);
+}
+
+/* ------------------------------------------------------------------ *
+ * Counting semaphore - syscalls 90-94 and 114.
+ * ------------------------------------------------------------------ */
+
+#ifndef __SYS_SEMAPHORE_T_DEFINED
+#define __SYS_SEMAPHORE_T_DEFINED
+typedef uint32_t sys_semaphore_t;
+#endif
+
+typedef int32_t sys_semaphore_value_t;
+
+typedef struct sys_semaphore_attribute {
+	sys_protocol_t        attr_protocol;
+	sys_process_shared_t  attr_pshared;
+	sys_ipc_key_t         key;
+	int                   flags;
+	u32                   pad;
+	char                  name[SYS_SYNC_NAME_SIZE];
+} sys_semaphore_attribute_t;
+
+#define sys_semaphore_attribute_initialize(_a)                  \
+	do {                                                        \
+		(_a).attr_protocol = SYS_SYNC_PRIORITY;                 \
+		(_a).attr_pshared  = SYS_SYNC_NOT_PROCESS_SHARED;       \
+		(_a).key           = 0;                                 \
+		(_a).flags         = 0;                                 \
+		(_a).name[0]       = '\0';                              \
+	} while (0)
+
+static inline void sys_semaphore_attribute_name_set(char attr_name[], const char *name)
+{
+	__sys_sync_name_set(attr_name, name);
+}
+
+LV2_SYSCALL sys_semaphore_create(sys_semaphore_t *sem, sys_semaphore_attribute_t *attr,
+                                 sys_semaphore_value_t initial_val,
+                                 sys_semaphore_value_t max_val)
+{
+	lv2syscall4(90, (u64)(uintptr_t)sem, (u64)(uintptr_t)attr,
+	            (u64)(s64)initial_val, (u64)(s64)max_val);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_semaphore_destroy(sys_semaphore_t sem)
+{
+	lv2syscall1(91, sem);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_semaphore_wait(sys_semaphore_t sem, usecond_t timeout)
+{
+	lv2syscall2(92, sem, timeout);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_semaphore_trywait(sys_semaphore_t sem)
+{
+	lv2syscall1(93, sem);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_semaphore_post(sys_semaphore_t sem, sys_semaphore_value_t val)
+{
+	lv2syscall2(94, sem, (u64)(s64)val);
+	return_to_user_prog(s32);
+}
+
+LV2_SYSCALL sys_semaphore_get_value(sys_semaphore_t sem, sys_semaphore_value_t *val)
+{
+	lv2syscall2(114, sem, (u64)(uintptr_t)val);
+	return_to_user_prog(s32);
+}
+
 /* ------------------------------------------------------------------ *
  * Lightweight Mutex (sys_lwmutex) and Condition Variable (sys_lwcond)
  * ------------------------------------------------------------------ */

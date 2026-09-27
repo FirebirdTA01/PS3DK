@@ -126,6 +126,11 @@ jobs:
       - name: Test lightweight mutex and condition variable synchronization
         run: bash tests/sdk/lwmutex-synchronization-test.sh
 
+      # Skips without PS3DEV; rwlock, semaphore, cond signal-to, event-queue
+      # try-receive, name setters and sync constants, pinned by value.
+      - name: Test the sys_ synchronisation surface
+        run: bash tests/sdk/sys-sync-surface-test.sh
+
       # The GCM FIFO wrap must retire a lap the application never published
       # (t_38e8bf5a): a host model of the RSX fetcher runs the protocol, and
       # the one-phase protocol it replaced must fail the idle-lap scenario.

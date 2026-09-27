@@ -44,8 +44,14 @@ extern "C" {
 #define SYS_DBG_SPU_GPR_NUM 128
 #endif
 
+#ifndef __SYS_RWLOCK_T_DEFINED
+#define __SYS_RWLOCK_T_DEFINED
 typedef uint32_t sys_rwlock_t;
-typedef sys_sem_t sys_semaphore_t;
+#endif
+#ifndef __SYS_SEMAPHORE_T_DEFINED
+#define __SYS_SEMAPHORE_T_DEFINED
+typedef uint32_t sys_semaphore_t;   /* the same type as sys_sem_t */
+#endif
 typedef uint32_t sys_event_flag_t;
 typedef uint32_t sys_lwmutex_pseudo_id_t;
 typedef uint32_t sys_lwcond_pseudo_id_t;
