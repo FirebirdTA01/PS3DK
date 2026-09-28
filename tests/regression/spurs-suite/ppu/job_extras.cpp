@@ -4,8 +4,8 @@
  * no fifth, and fills a job header with SetJobbin2Param.  The PPU checks
  * the chain's grab limit and urgent slots and compares the header with
  * its own SetJobbin2Param of the same image, then runs the chain: its
- * two list jobs and all four urgent jobs must run, and the memory-check
- * job must see a clean check and then the stack guard it broke. */
+ * two list jobs and all four urgent jobs must run, and one job checks the
+ * memory-check paths that write no guards. */
 #include "harness.h"
 #include "../job_extras.h"
 #include SUITE_SPU_HEADER
@@ -121,13 +121,14 @@ static int row_main()
             ran |= (s_out[i][0] == X_JOB_MAGIC + i) << i;
         return suite::fail("jobs that ran (bit per job)", ran, (1u << J_COUNT) - 1);
     }
-    /* unmarked header: PERM; marked: 0 */
-    if (s_out[J_MEMCHECK][1] != 0x0a090000u)
-        return suite::fail("memory check initialize (unmarked << 16 | marked)", s_out[J_MEMCHECK][1], 0x0a090000u);
-    if (s_out[J_MEMCHECK][2] != 0)
-        return suite::fail("clean memory check (rc | cause << 16)", s_out[J_MEMCHECK][2], 0);
-    if (s_out[J_MEMCHECK][3] != (0x0a12u | (0x40u << 16)))
-        return suite::fail("broken stack guard (rc | cause << 16)", s_out[J_MEMCHECK][3], 0x0a12u | (0x40u << 16));
+    /* memory check, the paths that write no guards (the positive path needs
+       the firmware's memory-check mode, which RPCS3 does not survive) */
+    if (s_out[J_MEMCHECK][1] != 0x80410a09u)
+        return suite::fail("memory check initialize, plain job", s_out[J_MEMCHECK][1], 0x80410a09u);
+    if (s_out[J_MEMCHECK][2] != 0x80410a11u)
+        return suite::fail("memory check initialize, null context", s_out[J_MEMCHECK][2], 0x80410a11u);
+    if (s_out[J_MEMCHECK][3] != (0x0a0fu | (0xffffu << 16)))
+        return suite::fail("memory check test before initialize (rc | cause << 16)", s_out[J_MEMCHECK][3], 0x0a0fu | (0xffffu << 16));
 
     suite::activity("shutting down the chain");
     if ((rc = cellSpursShutdownJobChain(jc))) return suite::fail("shutdown chain", rc, 0);
