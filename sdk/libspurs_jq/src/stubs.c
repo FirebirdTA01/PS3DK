@@ -62,104 +62,10 @@ void _fini(void)  { /* no-op */ }
  * have no atexit registrations. */
 void __do_atexit(void) { /* no-op */ }
 
-/* SysCall::__initialize - minimal per-invocation context setup.
- *
- * Populates the CellSpursJobContext2 fields a hello-class job
- * actually reads:
- *   - numIoBuffer / numCacheBuffer = 0 (no I/O buffer setup yet)
- *   - dmaTag inherited from the job descriptor's high-tag field
- *     (CellSpursJobHeader doesn't carry a per-job dmaTag explicitly;
- *     reuse a fixed slot - the real runtime allocates from a pool)
- *   - eaJobDescriptor = whatever the dispatcher passed via $4
- *
- * The reference SDK's __initialize additionally sets up trace +
- * memcheck globals, allocates LS regions for I/O buffers when the
- * descriptor declares them, and issues the input-side DMAs.  Those
- * paths are deferred to a successor pass.  Returns CELL_OK so
- * cellSpursJobMain2 falls through to the user body. */
-int _spurs_jq_syscall_initialize(CellSpursJobContext2 *ctx,
-                                 CellSpursJob256 *job)
-{
-    if (ctx == 0)
-        return CELL_SPURS_JOB_ERROR_NULL_POINTER;
-
-    ctx->ioBuffer        = 0;
-    ctx->cacheBuffer[0]  = 0;
-    ctx->cacheBuffer[1]  = 0;
-    ctx->cacheBuffer[2]  = 0;
-    ctx->cacheBuffer[3]  = 0;
-    ctx->numIoBuffer     = 0;
-    ctx->numCacheBuffer  = 0;
-    ctx->oBuffer         = 0;
-    ctx->sBuffer         = 0;
-    ctx->dmaTag          = 0;
-    ctx->eaJobDescriptor = (job != 0) ? (uint64_t)(uintptr_t)job : 0;
-
-    return _STUB_OK;
-}
-
-/* SysCall::__finalize - per-invocation teardown.
- *
- * Reference body (~60 bytes) flushes the trace ring buffer and a
- * memcheck assertion before returning to the cellSpursJobMain2
- * tail-call.  Until trace/memcheck are wired we just no-op. */
-void _spurs_jq_syscall_finalize(CellSpursJobContext2 *ctx)
-{
-    _UNUSED(ctx);
-}
-
-int cellSpursJobQueueWaitSignal(uint64_t eaSuspendedJob)
-{
-    _UNUSED(eaSuspendedJob);
-    return _STUB_INVAL;
-}
-
-int cellSpursJobQueueWaitSignal2(uint64_t eaSuspendedJob2,
-                                 enum CellSpursJobQueueSuspendedJobAttribute attr)
-{
-    _UNUSED(eaSuspendedJob2); _UNUSED(attr);
-    return _STUB_INVAL;
-}
-
 int cellSpursJobQueueSendSignal(uint64_t eaJob)
 {
     _UNUSED(eaJob);
     return _STUB_INVAL;
-}
-
-/* -- Information ----------------------------------------------------- */
-
-uint64_t cellSpursJobQueueGetSpurs(uint64_t eaJobQueue)
-{
-    _UNUSED(eaJobQueue);
-    return 0;
-}
-
-int cellSpursJobQueueGetHandleCount(uint64_t eaJobQueue)
-{
-    _UNUSED(eaJobQueue);
-    return 0;
-}
-
-int cellSpursJobQueueGetError(uint64_t eaJobQueue, int *exitCode, void **cause)
-{
-    _UNUSED(eaJobQueue);
-    if (exitCode) *exitCode = 0;
-    if (cause) *cause = 0;
-    return _STUB_OK;
-}
-
-int cellSpursJobQueueGetMaxSizeJobDescriptor(uint64_t eaJobQueue)
-{
-    _UNUSED(eaJobQueue);
-    return 256;
-}
-
-int cellSpursGetJobQueueId(uint64_t eaJobQueue, CellSpursWorkloadId *pId)
-{
-    _UNUSED(eaJobQueue);
-    if (pId) *pId = 0;
-    return _STUB_OK;
 }
 
 int cellSpursJobQueueGetSuspendedJobSize(const CellSpursJobHeader *pJob,
@@ -169,21 +75,6 @@ int cellSpursJobQueueGetSuspendedJobSize(const CellSpursJobHeader *pJob,
 {
     _UNUSED(pJob); _UNUSED(sizeJobDesc); _UNUSED(attr);
     if (pSize) *pSize = 0;
-    return _STUB_OK;
-}
-
-/* -- Open / Close ---------------------------------------------------- */
-
-int cellSpursJobQueueOpen(uint64_t eaJobQueue, CellSpursJobQueueHandle *handle)
-{
-    _UNUSED(eaJobQueue);
-    if (handle) *handle = 0;
-    return _STUB_OK;
-}
-
-int cellSpursJobQueueClose(uint64_t eaJobQueue, CellSpursJobQueueHandle handle)
-{
-    _UNUSED(eaJobQueue); _UNUSED(handle);
     return _STUB_OK;
 }
 
@@ -449,26 +340,6 @@ int cellSpursJobQueuePort2PushSync(uint64_t eaPort2, unsigned tagMask,
                                    unsigned int dmaTag, unsigned flag)
 {
     _UNUSED(eaPort2); _UNUSED(tagMask); _UNUSED(dmaTag); _UNUSED(flag);
-    return _STUB_INVAL;
-}
-
-/* -- Semaphore ------------------------------------------------------ */
-
-int cellSpursJobQueueSemaphoreInitialize(uint32_t eaSemaphore, uint32_t eaJobQueue)
-{
-    _UNUSED(eaSemaphore); _UNUSED(eaJobQueue);
-    return _STUB_INVAL;
-}
-
-int cellSpursJobQueueSemaphoreAcquire(uint32_t eaSemaphore, unsigned int acquireCount)
-{
-    _UNUSED(eaSemaphore); _UNUSED(acquireCount);
-    return _STUB_INVAL;
-}
-
-int cellSpursJobQueueSemaphoreTryAcquire(uint32_t eaSemaphore, unsigned int acquireCount)
-{
-    _UNUSED(eaSemaphore); _UNUSED(acquireCount);
     return _STUB_INVAL;
 }
 
