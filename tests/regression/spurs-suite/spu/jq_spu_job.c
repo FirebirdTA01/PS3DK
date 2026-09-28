@@ -56,11 +56,12 @@ static void push(CellSpursJob256 *job)
 {
     const uint64_t jq = job->workArea.userData[2];
     CellSpursJobQueueHandle h = -1;
-    unsigned i;
     EXPECT(20, cellSpursJobQueueOpen(jq, &h), 0);
-    for (i = 0; i < 2; ++i)
-        EXPECT(21 + i, _cellSpursJobQueuePushJobBody(jq, h, job->workArea.userData[4 + i], 128, 0, 2,
-                                                     job->workArea.userData[3], 0, 0), 0);
+    EXPECT(21, _cellSpursJobQueuePushJobBody(jq, h, job->workArea.userData[4], 128, 0, 2,
+                                             job->workArea.userData[3], 0, 0), 0);
+    EXPECT(22, _cellSpursJobQueuePushJob2Body(jq, h, job->workArea.userData[5], 128, 0, 2,
+                                              4 /* do not block */, job->workArea.userData[3]), 0);
+    EXPECT(29, _cellSpursJobQueuePushJob2Body(jq, h, job->workArea.userData[5], 128, 0, 2, 8, 0), JOB_INVAL);
     EXPECT(23, _cellSpursJobQueuePushJobBody(jq, 1000, job->workArea.userData[4], 128, 0, 2, 0, 0, 0), JOB_INVAL);
     EXPECT(24, _cellSpursJobQueuePushJobBody(jq, h, job->workArea.userData[4], 96, 0, 2, 0, 0, 0), JOB_INVAL);
     EXPECT(25, _cellSpursJobQueuePushFlush(jq, h, 2, 0), 0);

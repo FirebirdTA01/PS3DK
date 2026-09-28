@@ -92,39 +92,6 @@ int _cellSpursJobQueueAllocateJobDescriptor(uint64_t eaJobQueue,
     return _STUB_INVAL;
 }
 
-int _cellSpursJobQueuePushAndReleaseJobBody(uint64_t eaJobQueue,
-                                            CellSpursJobQueueHandle handle,
-                                            uint64_t eaJobHeader, size_t sizeJobDesc,
-                                            unsigned tag, unsigned dmaTag,
-                                            unsigned flag, uint64_t eaSemaphore)
-{
-    _UNUSED(eaJobQueue); _UNUSED(handle); _UNUSED(eaJobHeader); _UNUSED(sizeJobDesc);
-    _UNUSED(tag); _UNUSED(dmaTag); _UNUSED(flag); _UNUSED(eaSemaphore);
-    return _STUB_INVAL;
-}
-
-int _cellSpursJobQueuePushJob2Body(uint64_t eaJobQueue,
-                                   CellSpursJobQueueHandle handle,
-                                   uint64_t eaJobHeader, size_t sizeJobDesc,
-                                   unsigned tag, unsigned dmaTag,
-                                   unsigned flag, uint64_t eaSemaphore)
-{
-    _UNUSED(eaJobQueue); _UNUSED(handle); _UNUSED(eaJobHeader); _UNUSED(sizeJobDesc);
-    _UNUSED(tag); _UNUSED(dmaTag); _UNUSED(flag); _UNUSED(eaSemaphore);
-    return _STUB_INVAL;
-}
-
-int _cellSpursJobQueuePushJobListBody(uint64_t eaJobQueue,
-                                      CellSpursJobQueueHandle handle,
-                                      uint64_t eaJobList, unsigned tag,
-                                      unsigned dmaTag, uint64_t eaSemaphore,
-                                      unsigned isBlocking)
-{
-    _UNUSED(eaJobQueue); _UNUSED(handle); _UNUSED(eaJobList); _UNUSED(tag);
-    _UNUSED(dmaTag); _UNUSED(eaSemaphore); _UNUSED(isBlocking);
-    return _STUB_INVAL;
-}
-
 /* -- Port surface --------------------------------------------------- */
 
 uint64_t cellSpursJobQueuePortGetJobQueue(uint64_t eaPort)

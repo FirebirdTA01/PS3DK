@@ -267,3 +267,72 @@ int _cellSpursJobQueuePushJobBody(uint64_t eaJobQueue, int handle, uint64_t eaJo
 	    | (uint32_t)eaJob | (sizeDesc >> 7) * 2;
 	return pm_submit(eaJobQueue, handle, cmd, tag, isBlocking);
 }
+
+/* ---- job lists, Job2 and pushes that release pool descriptors ----------- */
+
+#define CMD_LIST     1u
+#define CMD_RELEASE  2u
+#define JQ_POOL_INFO 0x660          /* u32 pool start, u32 pool end */
+
+int _cellSpursJobQueuePushJobListBody(uint64_t eaJobQueue, int handle, uint64_t eaJobList, unsigned int tag,
+                                      unsigned int dmaTag, uint64_t eaSemaphore, unsigned int isBlocking)
+{
+	uint64_t cmd;
+	if (!eaJobQueue || !eaJobList)
+		return (int)JOB_NULL;
+	if ((eaJobList & 15) || (eaJobQueue & 0x7f) || (eaSemaphore & 0x7f))
+		return (int)JOB_ALIGN;
+	if (tag > 15 || dmaTag > 31)
+		return (int)JOB_INVAL;
+	if (isBlocking && _cellSpursTaskCanCallBlockWait())
+		return (int)JOB_PERM;
+	cmd = ((uint64_t)((uint32_t)eaSemaphore | tag << 3 | CMD_LIST) << 32) | (uint32_t)eaJobList;
+	return pm_submit(eaJobQueue, handle, cmd, dmaTag, isBlocking);
+}
+
+/* is the descriptor inside the job queue's descriptor pool */
+static int in_pool(uint64_t jq, uint64_t eaJob)
+{
+	static uint32_t pool[4] __attribute__((aligned(16)));
+	mfc_get(pool, jq + JQ_POOL_INFO, 16, 0, 0, 0);
+	mfc_write_tag_mask(1u << 0);
+	(void)mfc_read_tag_status_all();
+	return (uint32_t)eaJob >= pool[0] && (uint32_t)eaJob < pool[1];
+}
+
+/* flag: bit 1 exclusive, bit 2 do not block */
+static int push_job2(uint64_t jq, int handle, uint64_t eaJob, unsigned sizeDesc, unsigned tag, unsigned dmaTag,
+                     unsigned flag, uint64_t eaSemaphore, int release)
+{
+	const int blocking = !(flag & 4);
+	uint64_t cmd;
+	if (flag & ~7u)
+		return (int)JOB_INVAL;
+	if (!jq || !eaJob)
+		return (int)JOB_NULL;
+	if ((eaJob & 15) || (jq & 0x7f) || (eaSemaphore & 0x7f))
+		return (int)JOB_ALIGN;
+	if ((sizeDesc != 64 && (sizeDesc & 0x7f)) || sizeDesc > 1023 || tag > 15 || dmaTag > 31)
+		return (int)JOB_INVAL;
+	if (blocking && _cellSpursTaskCanCallBlockWait())
+		return (int)JOB_PERM;
+	if (in_pool(jq, eaJob) != release)
+		return (int)JOB_INVAL;      /* pool descriptors go back with PushAndRelease only */
+	cmd = ((uint64_t)((uint32_t)eaSemaphore | tag << 3 | ((flag >> 1) & 1 ? (unsigned)CMD_EXCL : 0)
+	                  | (release ? CMD_RELEASE : 0)) << 32)
+	    | (uint32_t)eaJob | (sizeDesc >> 7) * 2;
+	return pm_submit(jq, handle, cmd, dmaTag, blocking);
+}
+
+int _cellSpursJobQueuePushJob2Body(uint64_t eaJobQueue, int handle, uint64_t eaJob, unsigned int sizeDesc,
+                                   unsigned int tag, unsigned int dmaTag, unsigned int flag, uint64_t eaSemaphore)
+{
+	return push_job2(eaJobQueue, handle, eaJob, sizeDesc, tag, dmaTag, flag, eaSemaphore, 0);
+}
+
+int _cellSpursJobQueuePushAndReleaseJobBody(uint64_t eaJobQueue, int handle, uint64_t eaJob, unsigned int sizeDesc,
+                                            unsigned int tag, unsigned int dmaTag, unsigned int flag,
+                                            uint64_t eaSemaphore)
+{
+	return push_job2(eaJobQueue, handle, eaJob, sizeDesc, tag, dmaTag, flag, eaSemaphore, 1);
+}
