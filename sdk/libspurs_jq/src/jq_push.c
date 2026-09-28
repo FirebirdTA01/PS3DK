@@ -70,11 +70,13 @@ static int handle_open(uint64_t jq, int handle)
 	return (L32((h / 32) * 4) >> (31 - h % 32)) & 1;
 }
 
-/* a short pause before retrying a full ring */
+/* a short pause before retrying a full ring.  Counted in loop iterations,
+   not decrementer ticks: the decrementer need not be running on the SPU a
+   job or task happens to get, and a pause that waits for it never ends. */
 static void backoff(void)
 {
-	const uint32_t start = spu_readch(SPU_RdDec);
-	while (start - spu_readch(SPU_RdDec) < 2000)
+	volatile unsigned n;
+	for (n = 0; n < 2000; ++n)
 		;
 }
 

@@ -183,8 +183,8 @@ void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
                 out[1] = 92;
         }
     } else if (mode == Q_SLOW) {
-        const uint32_t start = spu_readch(SPU_RdDec);
-        while (start - spu_readch(SPU_RdDec) < 200000)
+        volatile uint32_t n;            /* iterations: the decrementer may not run */
+        for (n = 0; n < 400000; ++n)
             ;
     } else if (mode == Q_WAIT) {
         out[1] = 1;                                     /* about to suspend */
