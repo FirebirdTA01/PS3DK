@@ -2,11 +2,12 @@
  *
  * A policy module (PM) is the SPU program the SPURS kernel runs for a
  * workload; it decides what work the workload does on each SPU it gets.
- * The kernel enters it at cellSpursModuleEntry (built with the
- * -mcustom-module driver option) with its context and the workload
- * argument; it polls the kernel for higher-priority work and leaves with
- * cellSpursModuleExit.  <cell/spurs/policy_module2.h> has the status
- * form of the interface.
+ * The kernel loads it at LS 0xa00 and enters it at its entry point
+ * (cellSpursModuleEntry; link with -nostartfiles -Ttext=0xa00 and name
+ * the entry) with its context and the workload argument; it polls the
+ * kernel for higher-priority work and leaves with cellSpursModuleExit.
+ * (-mcustom-module builds the relocatable images such a module loads.)
+ * <cell/spurs/policy_module2.h> has the status form of the interface.
  */
 #ifndef __PS3DK_CELL_SPURS_POLICY_MODULE_H__
 #define __PS3DK_CELL_SPURS_POLICY_MODULE_H__

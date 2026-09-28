@@ -1,10 +1,13 @@
-/* cell/spurs/ready_count.h - SPU-side workload ready counts.
+/* cell/spurs/ready_count.h - workload ready counts.
  *
  * A workload's ready count (0..255) tells the SPURS kernel how many SPUs
- * the workload can use.  The _cellSpursReadyCount* calls change it
- * atomically in the SPURS instance and return the previous value.  The
- * cellSpursReadyCount* inlines keep the older interface, whose LS
- * buffer and instance EA arguments are no longer needed.
+ * the workload can use.
+ * SPU: the _cellSpursReadyCount* calls change it atomically in the SPURS
+ * instance and return the previous value.  The cellSpursReadyCount*
+ * inlines keep the older interface, whose LS buffer and instance EA
+ * arguments are no longer needed.
+ * PPU: cellSpursReadyCount* change it from the PPU; the swap, compare-and-
+ * swap and add forms store the previous value to *old.
  */
 #ifndef __PS3DK_CELL_SPURS_READY_COUNT_H__
 #define __PS3DK_CELL_SPURS_READY_COUNT_H__
@@ -12,6 +15,8 @@
 #include <stdint.h>
 #include <cell/spurs/types.h>
 #include <cell/spurs/error.h>
+
+#ifdef __SPU__
 
 #ifdef __cplusplus
 extern "C" {
@@ -81,5 +86,25 @@ cellSpursReadyCountStore(unsigned char *ls, uint64_t eaSpurs, CellSpursWorkloadI
     (void)_cellSpursReadyCountOperator(id, _CELL_SPURS_READY_COUNT_SWAP, value, 0);
     return CELL_OK;
 }
+
+#else /* PPU */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct CellSpurs CellSpurs;
+
+int cellSpursReadyCountStore(CellSpurs *spurs, CellSpursWorkloadId id, unsigned int value);
+int cellSpursReadyCountSwap(CellSpurs *spurs, CellSpursWorkloadId id, unsigned int *old, unsigned int swap);
+int cellSpursReadyCountCompareAndSwap(CellSpurs *spurs, CellSpursWorkloadId id, unsigned int *old,
+                                      unsigned int compare, unsigned int swap);
+int cellSpursReadyCountAdd(CellSpurs *spurs, CellSpursWorkloadId id, unsigned int *old, int value);
+
+#ifdef __cplusplus
+}   /* extern "C" */
+#endif
+
+#endif /* __SPU__ */
 
 #endif /* __PS3DK_CELL_SPURS_READY_COUNT_H__ */
