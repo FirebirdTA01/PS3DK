@@ -30,10 +30,10 @@ CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding -fpic \
 SFLAGS := -fpic
 
 BUILD := build
-OBJS  := $(BUILD)/stubs.o $(BUILD)/jq_core.o $(BUILD)/jq_semaphore.o $(BUILD)/job_queue_main.o $(BUILD)/job_start_w_crt.o $(BUILD)/job_crt.o
+OBJS  := $(BUILD)/stubs.o $(BUILD)/jq_core.o $(BUILD)/jq_semaphore.o $(BUILD)/jq_push.o $(BUILD)/job_queue_main.o $(BUILD)/job_start_w_crt.o $(BUILD)/job_crt.o
 LIB   := $(BUILD)/libspurs_jq.a
 RUNTIME_LIB := $(BUILD)/libspurs_jq_runtime.a
-RUNTIME_OBJS := $(BUILD)/stubs.o $(BUILD)/jq_core.o $(BUILD)/jq_semaphore.o $(BUILD)/job_queue_main.o
+RUNTIME_OBJS := $(BUILD)/stubs.o $(BUILD)/jq_core.o $(BUILD)/jq_semaphore.o $(BUILD)/jq_push.o $(BUILD)/job_queue_main.o
 
 .PHONY: all install clean
 

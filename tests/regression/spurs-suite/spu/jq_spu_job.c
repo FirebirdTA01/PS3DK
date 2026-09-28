@@ -50,6 +50,25 @@ static void info(uint64_t jq, uint64_t spurs)
     EXPECT(15, cellSpursJobQueueGetError(jq, 0, &cause), JOB_NULL);
 }
 
+/* push two jobs with a semaphore through our own handle (try forms: a
+   job may not block), then flush and a sync */
+static void push(CellSpursJob256 *job)
+{
+    const uint64_t jq = job->workArea.userData[2];
+    CellSpursJobQueueHandle h = -1;
+    unsigned i;
+    EXPECT(20, cellSpursJobQueueOpen(jq, &h), 0);
+    for (i = 0; i < 2; ++i)
+        EXPECT(21 + i, _cellSpursJobQueuePushJobBody(jq, h, job->workArea.userData[4 + i], 128, 0, 2,
+                                                     job->workArea.userData[3], 0, 0), 0);
+    EXPECT(23, _cellSpursJobQueuePushJobBody(jq, 1000, job->workArea.userData[4], 128, 0, 2, 0, 0, 0), JOB_INVAL);
+    EXPECT(24, _cellSpursJobQueuePushJobBody(jq, h, job->workArea.userData[4], 96, 0, 2, 0, 0, 0), JOB_INVAL);
+    EXPECT(25, _cellSpursJobQueuePushFlush(jq, h, 2, 0), 0);
+    EXPECT(26, _cellSpursJobQueuePushSync(jq, h, 1, 2, 0), 0);
+    EXPECT(27, _cellSpursJobQueuePushSync(jq, h, 0, 2, 0), JOB_INVAL);
+    EXPECT(28, cellSpursJobQueueClose(jq, h), 0);
+}
+
 void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
 {
     const uint64_t dst = job->workArea.userData[0];
@@ -58,6 +77,8 @@ void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
     out[0] = out[1] = out[2] = out[3] = 0;
     if (mode == Q_INFO) {
         info(job->workArea.userData[2], job->workArea.userData[3]);
+    } else if (mode == Q_PUSH) {
+        push(job);
     } else if (mode == Q_WAIT) {
         out[1] = 1;                                     /* about to suspend */
         put(dst);

@@ -16,11 +16,12 @@
 #include SUITE_JOB_JOBHEADER_HEADER
 
 #define JQ_DEPTH 16
-#define JQ_POOL  8
-enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_COUNT };
+#define JQ_POOL  12
+enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_COUNT };
 
 static CellSpursJobQueue s_jq __attribute__((aligned(128)));
 static CellSpursJobQueueSemaphore s_sem __attribute__((aligned(128)));
+static CellSpursJobQueueSemaphore s_sem2 __attribute__((aligned(128)));
 static CellSpursJob128 s_job[J_COUNT] __attribute__((aligned(128)));
 static uint64_t s_cmd[CELL_SPURS_JOBQUEUE_SIZE_COMMAND_BUFFER(JQ_DEPTH) / sizeof(uint64_t)]
     __attribute__((aligned(CELL_SPURS_JOBQUEUE_COMMAND_BUFFER_ALIGN)));
@@ -94,6 +95,29 @@ static int row_main()
         return suite::fail("wait job resumed", s_out[J_WAIT][0], Q_MAGIC + Q_WAIT);
     if (s_out[J_WAIT][1] != 0)
         return suite::fail("WaitSignal rc", s_out[J_WAIT][1], 0);
+
+    /* a job pushes two jobs itself */
+    if ((rc = cellSpursJobQueueSemaphoreInitialize(&s_sem2, &s_jq))) return suite::invalid("jq semaphore 2", rc);
+    make_job(J_CHILD0, Q_PLAIN, 0);
+    make_job(J_CHILD1, Q_PLAIN, 0);
+    make_job(J_PUSH, Q_PUSH, reinterpret_cast<uintptr_t>(&s_sem2));
+    s_job[J_PUSH].workArea.userData[4] = reinterpret_cast<uintptr_t>(&s_job[J_CHILD0]);
+    s_job[J_PUSH].workArea.userData[5] = reinterpret_cast<uintptr_t>(&s_job[J_CHILD1]);
+    suite::activity("pushing a job that pushes two jobs");
+    if ((rc = cellSpursJobQueuePushJob(&s_jq, h, &s_job[J_PUSH].header, sizeof s_job[J_PUSH], 0, nullptr)))
+        return suite::invalid("push job", rc);
+    if ((rc = cellSpursJobQueuePushFlush(&s_jq, h))) return suite::invalid("push flush", rc);
+    if (!suite::wait_for([] { return s_out[J_PUSH][0] == Q_MAGIC + Q_PUSH; }))
+        return suite::fail("pushing job", s_out[J_PUSH][0], Q_MAGIC + Q_PUSH);
+    if (s_out[J_PUSH][1]) {
+        std::printf("push job: step %u got %#x want %#x\n", s_out[J_PUSH][1], s_out[J_PUSH][2], s_out[J_PUSH][3]);
+        return suite::fail("push job step", s_out[J_PUSH][1], 0);
+    }
+    suite::activity("acquiring the children's semaphore");
+    if ((rc = cellSpursJobQueueSemaphoreAcquire(&s_sem2, 2))) return suite::fail("children semaphore", rc, 0);
+    for (unsigned i : { J_CHILD0, J_CHILD1 })
+        if (s_out[i][0] != Q_MAGIC + Q_PLAIN)
+            return suite::fail("child job ran", s_out[i][0], Q_MAGIC + Q_PLAIN);
 
     /* semaphore: a task waits for two jobs */
     cell::Spurs::Taskset *ts = suite::taskset_up(spurs, &rc);

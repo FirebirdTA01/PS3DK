@@ -114,19 +114,6 @@ int _cellSpursJobQueuePushJob2Body(uint64_t eaJobQueue,
     return _STUB_INVAL;
 }
 
-int _cellSpursJobQueuePushJobBody(uint64_t eaJobQueue,
-                                  CellSpursJobQueueHandle handle,
-                                  uint64_t eaJobHeader, size_t sizeJobDesc,
-                                  unsigned tag, unsigned dmaTag,
-                                  uint64_t eaSemaphore,
-                                  unsigned isExclusive, unsigned isBlocking)
-{
-    _UNUSED(eaJobQueue); _UNUSED(handle); _UNUSED(eaJobHeader); _UNUSED(sizeJobDesc);
-    _UNUSED(tag); _UNUSED(dmaTag); _UNUSED(eaSemaphore);
-    _UNUSED(isExclusive); _UNUSED(isBlocking);
-    return _STUB_INVAL;
-}
-
 int _cellSpursJobQueuePushJobListBody(uint64_t eaJobQueue,
                                       CellSpursJobQueueHandle handle,
                                       uint64_t eaJobList, unsigned tag,
@@ -135,24 +122,6 @@ int _cellSpursJobQueuePushJobListBody(uint64_t eaJobQueue,
 {
     _UNUSED(eaJobQueue); _UNUSED(handle); _UNUSED(eaJobList); _UNUSED(tag);
     _UNUSED(dmaTag); _UNUSED(eaSemaphore); _UNUSED(isBlocking);
-    return _STUB_INVAL;
-}
-
-int _cellSpursJobQueuePushFlush(uint64_t eaJobQueue,
-                                CellSpursJobQueueHandle handle,
-                                unsigned dmaTag, unsigned isBlocking)
-{
-    _UNUSED(eaJobQueue); _UNUSED(handle); _UNUSED(dmaTag); _UNUSED(isBlocking);
-    return _STUB_INVAL;
-}
-
-int _cellSpursJobQueuePushSync(uint64_t eaJobQueue,
-                               CellSpursJobQueueHandle handle,
-                               unsigned tagMask, unsigned dmaTag,
-                               unsigned isBlocking)
-{
-    _UNUSED(eaJobQueue); _UNUSED(handle); _UNUSED(tagMask);
-    _UNUSED(dmaTag); _UNUSED(isBlocking);
     return _STUB_INVAL;
 }
 
