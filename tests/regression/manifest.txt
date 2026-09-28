@@ -56,6 +56,12 @@ spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self
 # sys_spu_thread_argument words ($3-$6) from crt1.o; SPU exit status is
 # the mask of wrong arguments, 0 = pass.
 spu-thread-args,tests/regression/spu-thread-args/spu-thread-args.fake.self,60,RAN-CLEAN,SPU_THREAD_ARGS_OK,SPU_THREAD_ARGS_FAIL
+# spurs-event-flag: the SPU side of the SPURS event flag against the firmware
+# SPURS kernel (PPU2SPU, SPU2SPU, SPU2PPU, each on its blocking path), after
+# syscall checks (yield, signal-self, blocking wait-signal).  Tasks built
+# before the task crt moved to a task-owned stack crash when a blocked task
+# is switched back in.
+spurs-event-flag,tests/regression/spurs-event-flag/spurs-event-flag.fake.self,90,RAN-CLEAN,EVENTFLAG_OK,EVENTFLAG_FAIL|EVENTFLAG_INVALID
 # spu-sheap: SPU libsheap against the firmware cellSheap (PPU side through
 # libsheap_stub).  *_HLE lines mean the emulator's built-in cellSheap is in
 # use instead of the firmware module: a configuration failure, not a pass.
