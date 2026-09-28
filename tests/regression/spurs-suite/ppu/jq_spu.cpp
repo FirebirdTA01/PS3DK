@@ -320,8 +320,20 @@ static int row_main()
     if (g_result[0].status)
         return suite::fail("semaphore task step", g_result[0].status, 0);
     suite::activity("the task allocates from the descriptor pool and copy-pushes");
-    if (!suite::wait_for([] { return g_result[0].value == 3 || g_result[0].status; }))
+    if (!suite::wait_for([] { return g_result[0].value == 3 || g_result[0].status; })) {
+        /* where the task stopped, and the pool's class-1 record and waiter ring */
+        const volatile uint8_t *q = reinterpret_cast<const volatile uint8_t *>(&s_jq);
+        const volatile uint32_t *rec = reinterpret_cast<const volatile uint32_t *>(q + 0x680 + 16);
+        const uint32_t ringEa = *reinterpret_cast<const volatile uint32_t *>(q + 0x640 + 4);
+        std::printf("pool task stopped at %#x; class-1 record %08x %08x %08x %08x; ring %#x\n",
+                    g_result[0].extra, rec[0], rec[1], rec[2], rec[3], ringEa);
+        if (ringEa)
+            for (unsigned i = 0; i < 4; ++i) {
+                const volatile uint64_t *e = reinterpret_cast<const volatile uint64_t *>(static_cast<uintptr_t>(ringEa)) + i;
+                std::printf("  ring[%u] %016llx\n", i, static_cast<unsigned long long>(*e));
+            }
         return suite::fail("pool task done", g_result[0].value, 3);
+    }
     if (g_result[0].status) {
         std::printf("pool task: step %u got %#x\n", g_result[0].status, g_result[0].extra);
         return suite::fail("pool task step", g_result[0].status, 0);

@@ -3,7 +3,8 @@
  * queue EA (jq_spu.h).  Then the job queue's descriptor pool through a
  * Port2: allocate it empty, give it back through PushAndRelease jobs,
  * allocate it again, and CopyPush while slow jobs hold every descriptor
- * (CopyPush waits in the pool's waiter ring for them). */
+ * (CopyPush waits in the pool's waiter ring for them).  While the pool
+ * phase runs, extra carries a progress marker for a timeout report. */
 #include <stdint.h>
 #include <spu_intrinsics.h>
 #include <spu_mfcio.h>
@@ -87,13 +88,18 @@ int cellSpursTaskMain(qword argTask, uint64_t argTaskset)
             mfc_read_tag_status_all();
             EXPECT(38 + round, cellSpursJobQueuePort2PushAndReleaseJob(port, desc[i], 128, 0, 2, 1), 0);
         }
+        report(slot, 0, 2, 0x100 + round * 0x10 + 1);       /* progress: round pushed */
         EXPECT(40 + round, cellSpursJobQueuePort2PushFlush(port, 2, 0), 0);
         if (round == 0)
             EXPECT(42, cellSpursJobQueuePort2Sync(port, 0), 0);    /* the pool is whole again */
+        report(slot, 0, 2, 0x100 + round * 0x10 + 2);       /* progress: round done */
     }
     /* sixteen slow jobs hold the pool: each CopyPush waits for one */
-    for (i = 0; i < Q_COPIES; ++i)
+    for (i = 0; i < Q_COPIES; ++i) {
+        report(slot, 0, 2, 0x200 + i);                      /* progress: CopyPush i */
         EXPECT(50, cellSpursJobQueuePort2CopyPushJob(port, (const CellSpursJobHeader *)plain, 128, 128, 0, 2, 1), 0);
+    }
+    report(slot, 0, 2, 0x300);                              /* progress: copies pushed */
     EXPECT(51, cellSpursJobQueuePort2PushFlush(port, 2, 0), 0);
     EXPECT(52, cellSpursJobQueuePort2Sync(port, 0), 0);
     EXPECT(53, cellSpursJobQueuePort2Destroy(port), 0);
