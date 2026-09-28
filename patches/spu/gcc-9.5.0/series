@@ -7,3 +7,4 @@
 0008-spu-reference-predefines.patch
 0009-spu-vector-keyword-strict-std.patch
 0010-spu-pic-multilib.patch
+0011-spu-relocatable-jobs-and-custom-modules.patch
