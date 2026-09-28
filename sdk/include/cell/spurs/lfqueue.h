@@ -15,11 +15,11 @@
 #define CELL_SPURS_LFQUEUE_ALIGN 128
 #define CELL_SPURS_LFQUEUE_SIZE  128
 
+#ifdef __SPU__
+
 typedef struct CellSpursLFQueue {
     unsigned char skip[CELL_SPURS_LFQUEUE_SIZE];
 } __attribute__((aligned(CELL_SPURS_LFQUEUE_ALIGN))) CellSpursLFQueue;
-
-#ifdef __SPU__
 
 #include <cell/sync/lfqueue.h>
 #include <cell/spurs/task_types.h>
@@ -38,8 +38,8 @@ typedef CellSyncLFQueuePopContainer   CellSpursLFQueuePopContainer;
 extern "C" {
 #endif
 
-/* Declared only: the SPURS-flavoured bodies (which block through the
- * taskset instead of spinning) are not in the SPU runtime yet. */
+/* Implemented in libspurs.a / libspurs_task.a over libsync.a (link both);
+ * blocking forms are valid only in a SPURS task. */
 int cellSpursLFQueueInitialize(uint64_t ea, uint64_t buffer,
                                unsigned int size, unsigned int depth,
                                CellSpursLFQueueDirection direction);
@@ -124,6 +124,115 @@ cellSpursLFQueuePopBegin(uint64_t ea, CellSpursLFQueuePopContainer *pContainer)
 static inline int
 cellSpursLFQueueTryPopBegin(uint64_t ea, CellSpursLFQueuePopContainer *pContainer)
 { return _cellSpursLFQueuePopBeginBody(ea, pContainer, 0); }
+
+#else /* PPU */
+
+#include <stdbool.h>
+#include <cell/sync.h>
+#include <cell/spurs/types.h>
+#include <cell/spurs/error.h>
+
+/* The SPURS queue is a libsync lock-free queue whose waiters block
+ * through SPURS: a taskset's tasks, or a whole instance's (IWL). */
+typedef CellSyncLFQueue CellSpursLFQueue;
+typedef CellSyncQueueDirection CellSpursLFQueueDirection;
+
+#define CELL_SPURS_LFQUEUE_SPU2SPU  CELL_SYNC_QUEUE_SPU2SPU
+#define CELL_SPURS_LFQUEUE_SPU2PPU  CELL_SYNC_QUEUE_SPU2PPU
+#define CELL_SPURS_LFQUEUE_PPU2SPU  CELL_SYNC_QUEUE_PPU2SPU
+#define CELL_SPURS_LFQUEUE_ANY2ANY  CELL_SYNC_QUEUE_ANY2ANY
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* pTasksetOrSpurs: a CellSpursTaskset, or a CellSpurs with bit 0 set */
+int _cellSpursLFQueueInitialize(void *pTasksetOrSpurs, CellSpursLFQueue *pQueue,
+                                const void *buffer, unsigned int size,
+                                unsigned int depth, CellSpursLFQueueDirection direction);
+int cellSpursLFQueueAttachLv2EventQueue(CellSpursLFQueue *pQueue);
+int cellSpursLFQueueDetachLv2EventQueue(CellSpursLFQueue *pQueue);
+int cellSpursLFQueueGetTasksetAddress(const CellSpursLFQueue *pQueue,
+                                      struct CellSpursTaskset **ppTaskset);
+int _cellSpursLFQueuePushBody(CellSpursLFQueue *pQueue, const void *buffer,
+                              unsigned int isBlocking);
+int _cellSpursLFQueuePopBody(CellSpursLFQueue *pQueue, void *buffer,
+                             unsigned int isBlocking);
+
+#ifdef __cplusplus
+}   /* extern "C" */
+#endif
+
+/* Re-express a libsync failure in the SPURS task error facility; the
+ * low byte (the errno-style code) is kept. */
+static inline int
+__ps3dk_spurs_lfqueue_status(int ret)
+{
+    if (ret < 0)
+        return CELL_ERROR_CAST(0x80410900u | ((unsigned int)ret & 0xffu));
+    return ret;
+}
+
+static inline int
+cellSpursLFQueueInitialize(struct CellSpursTaskset *pTaskset, CellSpursLFQueue *pQueue,
+                           const void *buffer, unsigned int size, unsigned int depth,
+                           CellSpursLFQueueDirection direction)
+{
+    if (!pTaskset)
+        return CELL_SPURS_TASK_ERROR_NULL_POINTER;
+    if ((uintptr_t)pTaskset & 0x7f)
+        return CELL_SPURS_TASK_ERROR_ALIGN;
+    return _cellSpursLFQueueInitialize((void *)pTaskset, pQueue, buffer, size, depth, direction);
+}
+
+static inline int
+cellSpursLFQueueInitializeIWL(CellSpurs *pSpurs, CellSpursLFQueue *pQueue,
+                              const void *buffer, unsigned int size, unsigned int depth,
+                              CellSpursLFQueueDirection direction)
+{
+    if (!pSpurs)
+        return CELL_SPURS_TASK_ERROR_NULL_POINTER;
+    if ((uintptr_t)pSpurs & 0x7f)
+        return CELL_SPURS_TASK_ERROR_ALIGN;
+    return _cellSpursLFQueueInitialize((void *)((uintptr_t)pSpurs | 1), pQueue, buffer,
+                                       size, depth, direction);
+}
+
+static inline int
+cellSpursLFQueueSize(CellSpursLFQueue *pQueue, unsigned int *size)
+{ return __ps3dk_spurs_lfqueue_status(cellSyncLFQueueSize(pQueue, size)); }
+
+static inline int
+cellSpursLFQueueDepth(CellSpursLFQueue *pQueue, unsigned int *depth)
+{ return __ps3dk_spurs_lfqueue_status(cellSyncLFQueueDepth(pQueue, depth)); }
+
+static inline int
+cellSpursLFQueueGetDirection(const CellSpursLFQueue *pQueue, CellSpursLFQueueDirection *direction)
+{ return __ps3dk_spurs_lfqueue_status(cellSyncLFQueueGetDirection(pQueue, direction)); }
+
+static inline int
+cellSpursLFQueueGetEntrySize(const CellSpursLFQueue *pQueue, unsigned int *size)
+{ return __ps3dk_spurs_lfqueue_status(cellSyncLFQueueGetEntrySize(pQueue, size)); }
+
+static inline int
+cellSpursLFQueueClear(CellSpursLFQueue *pQueue)
+{ return __ps3dk_spurs_lfqueue_status(cellSyncLFQueueClear(pQueue)); }
+
+static inline int
+cellSpursLFQueuePush(CellSpursLFQueue *pQueue, const void *buffer)
+{ return _cellSpursLFQueuePushBody(pQueue, buffer, 1); }
+
+static inline int
+cellSpursLFQueueTryPush(CellSpursLFQueue *pQueue, const void *buffer)
+{ return _cellSpursLFQueuePushBody(pQueue, buffer, 0); }
+
+static inline int
+cellSpursLFQueuePop(CellSpursLFQueue *pQueue, void *buffer)
+{ return _cellSpursLFQueuePopBody(pQueue, buffer, 1); }
+
+static inline int
+cellSpursLFQueueTryPop(CellSpursLFQueue *pQueue, void *buffer)
+{ return _cellSpursLFQueuePopBody(pQueue, buffer, 0); }
 
 #endif /* __SPU__ */
 

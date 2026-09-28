@@ -61,13 +61,15 @@ spu-thread-args,tests/regression/spu-thread-args/spu-thread-args.fake.self,60,RA
 # has a -driver row beside the same code linked by hand (-manual or plain).
 # task: SPU task services (getters, yield, signal, semaphore); event-flag:
 # PPU2SPU, SPU2SPU and SPU2PPU on their blocking paths; queue: SPU push/pop
-# against the PPU side in all three directions; job-chain: BINARY2
+# against the PPU side in all three directions; lfqueue: the same for the
+# lock-free queue; job-chain: BINARY2
 # jobs in a job chain; job-queue: jobs pushed through a job-queue handle.
 spurs-task-manual,tests/regression/spurs-suite/spurs-task-manual.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-task-manual OK,SPURS_SUITE spurs-task-manual (FAIL|INVALID)
 spurs-task-driver,tests/regression/spurs-suite/spurs-task-driver.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-task-driver OK,SPURS_SUITE spurs-task-driver (FAIL|INVALID)
 spurs-event-flag,tests/regression/spurs-suite/spurs-event-flag.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-event-flag OK,SPURS_SUITE spurs-event-flag (FAIL|INVALID)
 spurs-event-flag-driver,tests/regression/spurs-suite/spurs-event-flag-driver.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-event-flag-driver OK,SPURS_SUITE spurs-event-flag-driver (FAIL|INVALID)
 spurs-queue,tests/regression/spurs-suite/spurs-queue.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-queue OK,SPURS_SUITE spurs-queue (FAIL|INVALID)
+spurs-lfqueue,tests/regression/spurs-suite/spurs-lfqueue.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-lfqueue OK,SPURS_SUITE spurs-lfqueue (FAIL|INVALID)
 spurs-job-chain-manual,tests/regression/spurs-suite/spurs-job-chain-manual.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-chain-manual OK,SPURS_SUITE spurs-job-chain-manual (FAIL|INVALID)
 spurs-job-chain-driver,tests/regression/spurs-suite/spurs-job-chain-driver.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-chain-driver OK,SPURS_SUITE spurs-job-chain-driver (FAIL|INVALID)
 spurs-job-queue-manual,tests/regression/spurs-suite/spurs-job-queue-manual.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-queue-manual OK,SPURS_SUITE spurs-job-queue-manual (FAIL|INVALID)

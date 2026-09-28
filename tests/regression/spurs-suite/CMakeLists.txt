@@ -27,7 +27,8 @@ function(suite_ppu target source)
     target_link_libraries(${target} PRIVATE ${ARGN} ${SUITE_PPU_LIBS})
 endfunction()
 
-# SPURS tasks linked by hand: task startup, runtime and layout named explicitly
+# SPURS tasks linked by hand: task startup, runtime and layout named
+# explicitly; extra SPU libraries follow the source
 function(suite_task_manual target spu_source)
     ps3_add_spu_image(${target}
         NAME spu_task
@@ -36,7 +37,7 @@ function(suite_task_manual target spu_source)
         NOSTARTFILES
         FREESTANDING
         LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_task.ld
-        LIBS spurs_task)
+        LIBS spurs_task ${ARGN})
 endfunction()
 
 add_subdirectory(rows/spurs-task-manual)
@@ -44,6 +45,7 @@ add_subdirectory(rows/spurs-task-driver)
 add_subdirectory(rows/spurs-event-flag)
 add_subdirectory(rows/spurs-event-flag-driver)
 add_subdirectory(rows/spurs-queue)
+add_subdirectory(rows/spurs-lfqueue)
 add_subdirectory(rows/spurs-job-chain-manual)
 add_subdirectory(rows/spurs-job-chain-driver)
 add_subdirectory(rows/spurs-job-queue-manual)

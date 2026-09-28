@@ -23,7 +23,7 @@ AR      := spu-elf-ar
 CFLAGS  := -O2 -Wall -Wextra -fno-exceptions -ffreestanding \
            -falign-functions=8 -mno-branch-hints \
            -fno-schedule-insns2 \
-           -Iinclude -I../include
+           -Iinclude -I../include -I../include-spu
 SFLAGS  := -Wall
 
 # -fno-schedule-insns2 disables GCC's post-RA instruction scheduler.
@@ -48,7 +48,8 @@ OBJS    := $(BUILD)/crt_spurs_task.o \
            $(BUILD)/spurs_semaphore_p.o \
            $(BUILD)/spurs_semaphore_v.o \
            $(BUILD)/spurs_event_flag.o \
-           $(BUILD)/spurs_queue.o
+           $(BUILD)/spurs_queue.o \
+           $(BUILD)/spurs_lfqueue.o
 
 LIB     := $(BUILD)/libspurs_task.a
 RUNTIME_LIB := $(BUILD)/libspurs_task_runtime.a
@@ -66,7 +67,8 @@ COMMON_OBJS := $(BUILD)/spurs_task_exit.o \
                $(BUILD)/spurs_semaphore_p.o \
                $(BUILD)/spurs_semaphore_v.o \
                $(BUILD)/spurs_event_flag.o \
-               $(BUILD)/spurs_queue.o
+               $(BUILD)/spurs_queue.o \
+               $(BUILD)/spurs_lfqueue.o
 
 .PHONY: all install clean
 
