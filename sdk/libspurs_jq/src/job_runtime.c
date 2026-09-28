@@ -16,7 +16,8 @@
  * address | bit 8 >> n for each word n to relocate, ending with 0);
  * spurs_job.ld brackets it with __fixup_start.  The words are moved by
  * the difference between where the image runs and where it was last
- * relocated, which a self-pointing word that is itself in the table
+ * relocated (except the job CRT header's _end / __bss_start words, which
+ * the job-queue kernel reads as image offsets), which a self-pointing word that is itself in the table
  * records - so a cached image that runs again is not relocated twice.
  * Independently written from the published object layouts and semantics.
  */
@@ -25,6 +26,7 @@
 typedef void (*init_fn)(void);
 
 extern const uint32_t __fixup_start[] __attribute__((weak));
+extern const char __job_crt_header_end[] __attribute__((weak));
 extern char __bss_start[], _end[];
 extern init_fn __ctors_start[] __attribute__((weak));
 extern init_fn __ctors_end[] __attribute__((weak));
@@ -52,6 +54,8 @@ static void relocate(void)
 	for (r = __fixup_start; *r; ++r) {
 		uint32_t *q = (uint32_t *)((*r & ~15u) + delta);
 		unsigned n;
+		if ((const char *)q < __job_crt_header_end)
+			continue;           /* the CRT header's words stay image offsets */
 		for (n = 0; n < 4; ++n)
 			if (*r & (8u >> n))
 				q[n] += delta;

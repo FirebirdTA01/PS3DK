@@ -51,6 +51,10 @@ SECTIONS
     .before_text : ALIGN(16) {
         KEEP(*(.before_text))
         . = ALIGN(16);
+        /* End of the job CRT header: its _end / __bss_start words are
+         * image offsets the job-queue kernel reads, so the job runtime
+         * must never relocate them. */
+        __job_crt_header_end = .;
     } :text =0x40200000
 
     .text : ALIGN(16) {
