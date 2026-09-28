@@ -125,6 +125,58 @@ static inline int
 cellSpursLFQueueTryPopBegin(uint64_t ea, CellSpursLFQueuePopContainer *pContainer)
 { return _cellSpursLFQueuePopBeginBody(ea, pContainer, 0); }
 
+#ifdef __cplusplus
+namespace cell {
+namespace Spurs {
+
+/* SPU handle on a lock-free queue in main memory: holds its EA and
+ * forwards to the EA-based C API. */
+class LFQueueStub {
+protected:
+    uint64_t object_ea;
+
+public:
+    static const uint32_t kAlign = CELL_SPURS_LFQUEUE_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_LFQUEUE_SIZE;
+
+    void setObject(uint64_t ea) { object_ea = ea; }
+    uint64_t getObject(void) const { return object_ea; }
+
+    int initialize(uint64_t buffer, unsigned int size, unsigned int depth,
+                   CellSpursLFQueueDirection direction) const
+    { return cellSpursLFQueueInitialize(object_ea, buffer, size, depth, direction); }
+    int initializeIWL(uint64_t buffer, unsigned int size, unsigned int depth,
+                      CellSpursLFQueueDirection direction) const
+    { return cellSpursLFQueueInitializeIWL(object_ea, buffer, size, depth, direction); }
+    int getTasksetAddress(uint64_t *pEaTaskset) const
+    { return cellSpursLFQueueGetTasksetAddress(object_ea, pEaTaskset); }
+
+    int pushBegin(CellSpursLFQueuePushContainer *c) const
+    { return cellSpursLFQueuePushBegin(object_ea, c); }
+    int tryPushBegin(CellSpursLFQueuePushContainer *c) const
+    { return cellSpursLFQueueTryPushBegin(object_ea, c); }
+    int pushEnd(CellSpursLFQueuePushContainer *c) const
+    { return cellSpursLFQueuePushEnd(object_ea, c); }
+    int popBegin(CellSpursLFQueuePopContainer *c) const
+    { return cellSpursLFQueuePopBegin(object_ea, c); }
+    int tryPopBegin(CellSpursLFQueuePopContainer *c) const
+    { return cellSpursLFQueueTryPopBegin(object_ea, c); }
+    int popEnd(CellSpursLFQueuePopContainer *c) const
+    { return cellSpursLFQueuePopEnd(object_ea, c); }
+
+    int size(unsigned int *size) const { return cellSpursLFQueueSize(object_ea, size); }
+    int depth(unsigned int *depth) const { return cellSpursLFQueueDepth(object_ea, depth); }
+    int clear(void) const { return cellSpursLFQueueClear(object_ea); }
+    int getDirection(CellSpursLFQueueDirection *direction) const
+    { return cellSpursLFQueueGetDirection(object_ea, direction); }
+    int getEntrySize(unsigned int *size) const
+    { return cellSpursLFQueueGetEntrySize(object_ea, size); }
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+#endif /* __cplusplus */
+
 #else /* PPU */
 
 #include <stdbool.h>

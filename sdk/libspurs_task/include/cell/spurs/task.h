@@ -205,6 +205,51 @@ cellSpursContextGenerateLsPattern(intptr_t start, int size)
 }
 
 #ifdef __cplusplus
+namespace cell {
+namespace Spurs {
+
+/* SPU handle on a taskset in main memory: holds its EA and forwards to
+ * the EA-based C API. */
+class TasksetStub {
+protected:
+    uint64_t object_ea;
+
+public:
+    void setObject(uint64_t ea) { object_ea = ea; }
+    uint64_t getObject(void) const { return object_ea; }
+
+    int shutdown(void) { return cellSpursShutdownTaskset(object_ea); }
+    int createTaskWithAttribute(CellSpursTaskId *tid, const CellSpursTaskAttribute *attr)
+    { return cellSpursCreateTaskWithAttribute(object_ea, tid, attr); }
+    int createTask(CellSpursTaskId *tid, uint64_t eaElf, uint64_t eaContext,
+                   uint32_t sizeContext, vec_uint4 lsPattern, qword argument)
+    { return cellSpursCreateTask(object_ea, tid, eaElf, eaContext, sizeContext, lsPattern, argument); }
+    int sendSignal(CellSpursTaskId tid) { return cellSpursSendSignal(object_ea, tid); }
+};
+
+/* A taskset of the second generation (tasks with exit codes). */
+class Taskset2Stub : public TasksetStub {
+public:
+    int createTask2(CellSpursTaskId *tid, uint64_t eaElf, qword argument,
+                    const CellSpursTaskAttribute2 *attr)
+    { return cellSpursCreateTask2(object_ea, tid, eaElf, argument, attr); }
+    int createTask2(CellSpursTaskId *tid, uint64_t eaTaskBinInfo, qword argument,
+                    uint64_t eaContext, const char *name, void *reserved = 0)
+    { return cellSpursCreateTask2WithBinInfo(object_ea, tid, eaTaskBinInfo, argument,
+                                             eaContext, name, reserved); }
+    int createTask2WithBinInfo(CellSpursTaskId *tid, uint64_t eaTaskBinInfo, qword argument,
+                               uint64_t eaContext, const char *name, void *reserved = 0)
+    { return cellSpursCreateTask2WithBinInfo(object_ea, tid, eaTaskBinInfo, argument,
+                                             eaContext, name, reserved); }
+    int joinTask2(CellSpursTaskId idTask, int *exitCode)
+    { return cellSpursJoinTask2(object_ea, idTask, exitCode); }
+    int tryJoinTask2(CellSpursTaskId idTask, int *exitCode)
+    { return cellSpursTryJoinTask2(object_ea, idTask, exitCode); }
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+
 /* The C++ task-side wrappers live next to their primitives. */
 #include <cell/spurs/event_flag.h>
 #include <cell/spurs/barrier.h>

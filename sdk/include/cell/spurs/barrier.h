@@ -26,8 +26,8 @@ typedef struct CellSpursBarrier {
 
 /* SPU side: the barrier lives in main memory and is named by its
  * effective address.  A task notifies its arrival, then waits for the
- * others; the blocking forms are valid only in a SPURS task.  Declared
- * only: the SPU runtime does not implement these yet. */
+ * others; the blocking forms are valid only in a SPURS task.
+ * Implemented in libspurs.a / libspurs_task.a. */
 extern int cellSpursBarrierInitialize(uint64_t ea, unsigned int total);
 extern int _cellSpursBarrierNotify(uint64_t ea, unsigned isBlocking);
 extern int _cellSpursBarrierWait(uint64_t ea, unsigned isBlocking);
@@ -49,6 +49,29 @@ class Barrier : public CellSpursBarrier {
 public:
     static const uint32_t kAlign = CELL_SPURS_BARRIER_ALIGN;
     static const uint32_t kSize  = CELL_SPURS_BARRIER_SIZE;
+};
+
+/* SPU handle on a barrier in main memory: holds its EA and forwards to
+ * the EA-based C API. */
+class BarrierStub {
+protected:
+    uint64_t object_ea;
+
+public:
+    static const uint32_t kAlign = CELL_SPURS_BARRIER_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_BARRIER_SIZE;
+
+    void setObject(uint64_t ea) { object_ea = ea; }
+    uint64_t getObject(void) const { return object_ea; }
+
+    int initialize(unsigned int total) const
+    { return cellSpursBarrierInitialize(object_ea, total); }
+    int getTasksetAddress(uint64_t *pEaTaskset) const
+    { return cellSpursBarrierGetTasksetAddress(object_ea, pEaTaskset); }
+    int tryNotify(void) const { return _cellSpursBarrierNotify(object_ea, 0); }
+    int notify(void) const    { return _cellSpursBarrierNotify(object_ea, 1); }
+    int tryWait(void) const   { return _cellSpursBarrierWait(object_ea, 0); }
+    int wait(void) const      { return _cellSpursBarrierWait(object_ea, 1); }
 };
 
 }   /* namespace Spurs */

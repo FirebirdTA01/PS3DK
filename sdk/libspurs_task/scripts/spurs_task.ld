@@ -30,11 +30,18 @@ SECTIONS
         *(.data .data.* .gnu.linkonce.d.*)
     }
 
+    PROVIDE(__bss_start = .);
     .bss : {
         *(.dynbss)
         *(.bss .bss.* .gnu.linkonce.b.*)
         *(COMMON)
     }
+
+    /* end of the image: newlib's sbrk starts the heap here, growing up
+       toward the task stack at the top of LS */
+    . = ALIGN(16);
+    _end = .;
+    PROVIDE(end = .);
 
     /DISCARD/ : { *(.note.GNU-stack) *(.note.gnu.property) }
 }

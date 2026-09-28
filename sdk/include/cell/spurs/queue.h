@@ -90,6 +90,56 @@ public:
     static const CellSpursQueueDirection kPpu2Spu = CELL_SPURS_QUEUE_PPU2SPU;
 };
 
+/* SPU handle on a queue in main memory: holds its EA and forwards to the
+ * EA-based C API. */
+class QueueStub {
+protected:
+    uint64_t object_ea;
+
+public:
+    static const uint32_t kAlign = CELL_SPURS_QUEUE_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_QUEUE_SIZE;
+
+    void setObject(uint64_t ea) { object_ea = ea; }
+    uint64_t getObject(void) const { return object_ea; }
+
+    int initialize(uint64_t buffer, unsigned int size, unsigned int depth,
+                   CellSpursQueueDirection direction) const
+    { return cellSpursQueueInitialize(object_ea, buffer, size, depth, direction); }
+    int initializeIWL(uint64_t buffer, unsigned int size, unsigned int depth,
+                      CellSpursQueueDirection direction) const
+    { return cellSpursQueueInitializeIWL(object_ea, buffer, size, depth, direction); }
+
+    int tryPushBegin(const void *buffer, unsigned int tag) const
+    { return cellSpursQueueTryPushBegin(object_ea, buffer, tag); }
+    int pushBegin(const void *buffer, unsigned int tag) const
+    { return cellSpursQueuePushBegin(object_ea, buffer, tag); }
+    int pushEnd(unsigned int tag) const
+    { return cellSpursQueuePushEnd(object_ea, tag); }
+    int tryPopBegin(void *buffer, unsigned int tag) const
+    { return cellSpursQueueTryPopBegin(object_ea, buffer, tag); }
+    int popBegin(void *buffer, unsigned int tag) const
+    { return cellSpursQueuePopBegin(object_ea, buffer, tag); }
+    int popEnd(unsigned int tag) const
+    { return cellSpursQueuePopEnd(object_ea, tag); }
+    int tryPeekBegin(void *buffer, unsigned int tag) const
+    { return cellSpursQueueTryPeekBegin(object_ea, buffer, tag); }
+    int peekBegin(void *buffer, unsigned int tag) const
+    { return cellSpursQueuePeekBegin(object_ea, buffer, tag); }
+    int peekEnd(unsigned int tag) const
+    { return cellSpursQueuePeekEnd(object_ea, tag); }
+
+    int size(unsigned int *size) const { return cellSpursQueueSize(object_ea, size); }
+    int depth(unsigned int *depth) const { return cellSpursQueueDepth(object_ea, depth); }
+    int clear(void) const { return cellSpursQueueClear(object_ea); }
+    int getDirection(CellSpursQueueDirection *direction) const
+    { return cellSpursQueueGetDirection(object_ea, direction); }
+    int getEntrySize(unsigned int *entrySize) const
+    { return cellSpursQueueGetEntrySize(object_ea, entrySize); }
+    int getTasksetAddress(uint64_t *pEaTaskset) const
+    { return cellSpursQueueGetTasksetAddress(object_ea, pEaTaskset); }
+};
+
 }   /* namespace Spurs */
 }   /* namespace cell */
 
