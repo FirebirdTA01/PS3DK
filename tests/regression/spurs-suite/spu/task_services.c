@@ -41,6 +41,8 @@ void cellSpursMain(qword argTask, uint64_t argTaskset)
                (unsigned)argTaskset);
         report(slots, TS_GETTERS_SPURS, 0, (unsigned)cellSpursGetSpursAddress(),
                cellSpursGetCurrentSpuId() | (cellSpursGetWorkloadId() << 8));
+        /* the back chain in cellSpursMain's frame is the crt's SP */
+        report(slots, TS_CRT_FRAME, 0, *(volatile unsigned *)(uintptr_t)sp, 0);
         report(slots, kind, 0, cellSpursGetTaskId(), sp);
         break;
     case TS_YIELD:

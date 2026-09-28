@@ -20,8 +20,11 @@ __spurs_task_start:
 	/* Run on a task-owned stack at the top of LS.  The policy module
 	 * enters with SP inside its own area below 0x3000, which a task's
 	 * LS pattern cannot cover, so a blocking service (wait-signal,
-	 * semaphore P, event-flag wait) would fail its context save. */
-	ila	$1, 0x3fff0
+	 * semaphore P, event-flag wait) would fail its context save.
+	 * The initial frame is 32 bytes: cellSpursMain saves its link
+	 * register at 16($sp), which must stay inside LS (0x3fff0) rather
+	 * than wrap to LS 0 in the kernel's area. */
+	ila	$1, 0x3ffe0
 	il	$2, 0
 	stqd	$2, 0($1)		/* null back chain */
 	brsl	$0, cellSpursMain

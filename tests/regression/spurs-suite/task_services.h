@@ -12,7 +12,8 @@
 #define TS_GETTERS_TASKSET  6
 #define TS_GETTERS_SPURS    7
 #define TS_WAIT_SIGNAL_READY 8
-#define TS_SLOTS            9
+#define TS_CRT_FRAME        9   /* value = the task crt's stack pointer */
+#define TS_SLOTS            10
 
 #define TS_SEM_ROUNDS       8
 

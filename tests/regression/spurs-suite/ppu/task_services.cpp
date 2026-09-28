@@ -29,6 +29,10 @@ int main()
     if (!suite::wait_for([&] { return done(TS_GETTERS); })) return suite::fail("getters never reported", 0, 1);
     if (g_slot[TS_GETTERS].extra < 0x3000)
         result = suite::fail("task stack below 0x3000", g_slot[TS_GETTERS].extra, 0x3000);
+    /* cellSpursMain saves its link register at 16(crt SP): that slot must
+       lie inside LS, not wrap to LS 0 in the kernel's area */
+    else if (g_slot[TS_CRT_FRAME].value < 0x3000 || g_slot[TS_CRT_FRAME].value > 0x3ffe0)
+        result = suite::fail("crt frame outside the task area", g_slot[TS_CRT_FRAME].value, 0x3ffe0);
     else if (g_slot[TS_GETTERS_TASKSET].value != static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ts)))
         result = suite::fail("cellSpursGetTasksetAddress", g_slot[TS_GETTERS_TASKSET].value, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ts)));
     else if (g_slot[TS_GETTERS_SPURS].value != static_cast<uint32_t>(reinterpret_cast<uintptr_t>(spurs)))
