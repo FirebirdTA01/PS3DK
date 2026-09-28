@@ -5,10 +5,12 @@ image from the table.  New -mcustom-module builds a position-independent image
 for a custom policy module to load: compiled -fpic (so the pic multilib is
 used), linked at 0 (the default layout) with --emit-fixups and -q, and started
 by crti.o, init_fixups.o and crtbegin.o.  init_fixups.o (libgcc, every
-multilib) adds the load address to the listed words from _init, before the
-constructors.  Both modes accept run-time relocations unless -merror-reloc or
+multilib) adds the load address to the listed words from _init, then runs the
+.init_array constructors (such an image has no crt0); its .fini fragment runs
+.fini_array.  Both modes accept run-time relocations unless -merror-reloc or
 -mwarn-reloc is given.
 
+diff -ruN a/gcc/config/spu/spu-elf.h b/gcc/config/spu/spu-elf.h
 --- a/gcc/config/spu/spu-elf.h
 +++ b/gcc/config/spu/spu-elf.h
 @@ -53,7 +53,8 @@
@@ -64,45 +66,101 @@ diff -ruN a/gcc/config/spu/spu.opt b/gcc/config/spu/spu.opt
 diff -ruN a/libgcc/config/spu/init_fixups.S b/libgcc/config/spu/init_fixups.S
 --- a/libgcc/config/spu/init_fixups.S
 +++ b/libgcc/config/spu/init_fixups.S
-@@ -0,0 +1,38 @@
-+/* Relocation of a position-independent SPU image (-mcustom-module).
+@@ -0,0 +1,94 @@
++/* Start-up and shut-down of a position-independent SPU image
++   (-mcustom-module).
 +
 +   Such an image is linked at address 0 with --emit-fixups, which lists
 +   every word holding an absolute address in .fixup: one word per
 +   quadword, the quadword's link address with bit 8 >> n set for each of
-+   its words n to relocate, ending with a zero word.  The fragment below
-+   runs in _init (crti.o's frame, before the constructors run) and adds
-+   the image's load address to each listed word.  Call _init once per
-+   load of the image.  */
++   its words n to relocate, ending with a zero word.  The .init fragment
++   below runs in _init (crti.o's frame) before the .ctors constructors:
++   it adds the image's load address to each listed word, then runs the
++   .init_array constructors (an image of this kind has no crt0 to run
++   them).  The .fini fragment runs the .fini_array destructors.  Call
++   _init once per load of the image.  */
 +
 +	.section .init,"ax",@progbits
-+	brsl	$lr, __spu_init_fixups
++	brsl	$lr, __spu_init_image
++
++	.section .fini,"ax",@progbits
++	brsl	$lr, __spu_fini_image
 +
 +	.text
 +	.align	3
-+	.type	__spu_init_fixups, @function
-+__spu_init_fixups:
++	.type	__spu_init_image, @function
++__spu_init_image:
++	stqd	$lr, 16($sp)
++	stqd	$80, -16($sp)
++	stqd	$81, -32($sp)
++	stqd	$sp, -64($sp)
++	ai	$sp, $sp, -64
 +	ila	$2, 1f			/* link address of 1: */
 +	brsl	$3, 1f			/* run-time address of 1: */
-+1:	sf	$4, $2, $3		/* $4 = load delta */
-+	biz	$4, $lr			/* loaded where linked: nothing to do */
++1:	sf	$80, $2, $3		/* $80 = load delta */
++	brz	$80, 3f			/* loaded where linked: no relocation */
 +	ila	$5, 0x10203
-+	shufb	$4, $4, $4, $5		/* delta in every word */
++	shufb	$4, $80, $80, $5	/* delta in every word */
 +	ila	$6, __fixup_start
-+	a	$6, $6, $4		/* run-time address of the table */
++	a	$6, $6, $80		/* run-time address of the table */
 +2:	lqd	$7, 0($6)
 +	rotqby	$7, $7, $6		/* this record in the preferred word */
 +	ai	$6, $6, 4
-+	biz	$7, $lr			/* zero record: done */
++	brz	$7, 3f			/* zero record: done */
 +	andi	$8, $7, -16
-+	a	$8, $8, $4		/* run-time address of the quadword */
++	a	$8, $8, $80		/* run-time address of the quadword */
 +	fsm	$9, $7			/* word select from the record's low bits */
 +	and	$9, $9, $4
 +	lqd	$10, 0($8)
 +	a	$10, $10, $9
 +	stqd	$10, 0($8)
 +	br	2b
-+	.size	__spu_init_fixups, . - __spu_init_fixups
++3:	ila	$81, __init_array_start
++	a	$81, $81, $80
++4:	ila	$2, __init_array_end
++	a	$2, $2, $80
++	clgt	$3, $2, $81		/* more entries? */
++	brz	$3, 5f
++	lqd	$4, 0($81)
++	rotqby	$4, $4, $81
++	ai	$81, $81, 4
++	bisl	$lr, $4
++	br	4b
++5:	ai	$sp, $sp, 64
++	lqd	$lr, 16($sp)
++	lqd	$80, -16($sp)
++	lqd	$81, -32($sp)
++	bi	$lr
++	.size	__spu_init_image, . - __spu_init_image
++
++	.align	3
++	.type	__spu_fini_image, @function
++__spu_fini_image:
++	stqd	$lr, 16($sp)
++	stqd	$80, -16($sp)
++	stqd	$81, -32($sp)
++	stqd	$sp, -64($sp)
++	ai	$sp, $sp, -64
++	ila	$2, 1f
++	brsl	$3, 1f
++1:	sf	$80, $2, $3		/* load delta */
++	ila	$81, __fini_array_end
++	a	$81, $81, $80
++2:	ila	$2, __fini_array_start
++	a	$2, $2, $80
++	clgt	$3, $81, $2		/* more entries (last first)? */
++	brz	$3, 3f
++	ai	$81, $81, -4
++	lqd	$4, 0($81)
++	rotqby	$4, $4, $81
++	bisl	$lr, $4
++	br	2b
++3:	ai	$sp, $sp, 64
++	lqd	$lr, 16($sp)
++	lqd	$80, -16($sp)
++	lqd	$81, -32($sp)
++	bi	$lr
++	.size	__spu_fini_image, . - __spu_fini_image
 diff -ruN a/libgcc/config/spu/t-elf b/libgcc/config/spu/t-elf
 --- a/libgcc/config/spu/t-elf
 +++ b/libgcc/config/spu/t-elf

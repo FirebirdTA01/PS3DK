@@ -21,9 +21,11 @@ struct Square : Shape { unsigned sides() const override { return 4; } };
 unsigned g_built;
 struct Global { Global() { g_built = 0x6c; } } g_global;
 
-const Triangle t;
-const Square s;
-const Shape *const g_shapes[] = { &t, &s };
+/* not const, and read through a volatile table: the calls must go through
+   the objects' vtables and the table's pointers, all relocated words */
+Triangle t;
+Square s;
+Shape *volatile g_shapes[] = { &t, &s };
 
 } // namespace
 
