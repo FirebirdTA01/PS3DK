@@ -10,7 +10,7 @@ ps3_add_spu_image(spurs-jq-spu
     CFLAGS -mspurs-job-initialize
     LDFLAGS -mspurs-job-initialize -Wl,-q -Wl,--gc-sections
     LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_job.ld
-    LIBS spurs_jq)
+    LIBS spurs_jq spurs)
 target_compile_definitions(spurs-jq-spu PRIVATE
     "SUITE_JOB_HEADER=\"${SUITE_SPU}_job_bin.h\""
     "SUITE_JOB_BIN=${SUITE_SPU}_job_bin"

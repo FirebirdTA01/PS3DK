@@ -8,6 +8,7 @@
 #include "harness.h"
 #include <cell/spurs/job_queue.h>
 #include <cell/spurs/job_queue_semaphore.h>
+#include <cell/spurs/job_queue_port.h>
 #include <cell/sysmodule.h>
 #include <initializer_list>
 #include "../jq_spu.h"
@@ -16,12 +17,15 @@
 #include SUITE_JOB_JOBHEADER_HEADER
 
 #define JQ_DEPTH 16
-#define JQ_POOL  12
-enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_COUNT };
+#define JQ_POOL  16
+enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_PORT, J_CHILD2, J_CHILD3, J_COUNT };
 
 static CellSpursJobQueue s_jq __attribute__((aligned(128)));
 static CellSpursJobQueueSemaphore s_sem __attribute__((aligned(128)));
 static CellSpursJobQueueSemaphore s_sem2 __attribute__((aligned(128)));
+static CellSpursJobQueuePort s_port1 __attribute__((aligned(128)));
+static CellSpursJobQueuePort s_port2 __attribute__((aligned(128)));
+alignas(128) static uint8_t s_descBuf[128];
 static CellSpursJob128 s_job[J_COUNT] __attribute__((aligned(128)));
 static uint64_t s_cmd[CELL_SPURS_JOBQUEUE_SIZE_COMMAND_BUFFER(JQ_DEPTH) / sizeof(uint64_t)]
     __attribute__((aligned(CELL_SPURS_JOBQUEUE_COMMAND_BUFFER_ALIGN)));
@@ -118,6 +122,35 @@ static int row_main()
     for (unsigned i : { J_CHILD0, J_CHILD1 })
         if (s_out[i][0] != Q_MAGIC + Q_PLAIN)
             return suite::fail("child job ran", s_out[i][0], Q_MAGIC + Q_PLAIN);
+
+    /* ports set up and pushed through by a job, synced and finalized here */
+    make_job(J_CHILD2, Q_PLAIN, 0);
+    make_job(J_CHILD3, Q_PLAIN, 0);
+    make_job(J_PORT, Q_PORT, reinterpret_cast<uintptr_t>(&s_port1));
+    s_job[J_PORT].workArea.userData[4] = reinterpret_cast<uintptr_t>(&s_job[J_CHILD2]);
+    s_job[J_PORT].workArea.userData[5] = reinterpret_cast<uintptr_t>(&s_port2);
+    s_job[J_PORT].workArea.userData[6] = reinterpret_cast<uintptr_t>(&s_job[J_CHILD3]);
+    s_job[J_PORT].workArea.userData[7] = reinterpret_cast<uintptr_t>(s_descBuf);
+    std::memset(&s_port1, 0, sizeof s_port1);
+    std::memset(&s_port2, 0, sizeof s_port2);
+    suite::activity("pushing a job that sets up two ports");
+    if ((rc = cellSpursJobQueuePushJob(&s_jq, h, &s_job[J_PORT].header, sizeof s_job[J_PORT], 0, nullptr)))
+        return suite::invalid("push job", rc);
+    if ((rc = cellSpursJobQueuePushFlush(&s_jq, h))) return suite::invalid("push flush", rc);
+    if (!suite::wait_for([] { return s_out[J_PORT][0] == Q_MAGIC + Q_PORT; }))
+        return suite::fail("port job", s_out[J_PORT][0], Q_MAGIC + Q_PORT);
+    if (s_out[J_PORT][1]) {
+        std::printf("port job: step %u got %#x want %#x\n", s_out[J_PORT][1], s_out[J_PORT][2], s_out[J_PORT][3]);
+        return suite::fail("port job step", s_out[J_PORT][1], 0);
+    }
+    suite::activity("syncing the job's ports from the PPU");
+    if ((rc = cellSpursJobQueuePortSync(&s_port1))) return suite::fail("PPU sync of the SPU-made port", rc, 0);
+    if ((rc = cellSpursJobQueuePortSync(&s_port2))) return suite::fail("PPU sync of the copy-push port", rc, 0);
+    for (unsigned i : { J_CHILD2, J_CHILD3 })
+        if (s_out[i][0] != Q_MAGIC + Q_PLAIN)
+            return suite::fail("port job's child ran", s_out[i][0], Q_MAGIC + Q_PLAIN);
+    if ((rc = cellSpursJobQueuePortFinalize(&s_port1))) return suite::fail("PPU finalize of port 1", rc, 0);
+    if ((rc = cellSpursJobQueuePortFinalize(&s_port2))) return suite::fail("PPU finalize of port 2", rc, 0);
 
     /* semaphore: a task waits for two jobs */
     cell::Spurs::Taskset *ts = suite::taskset_up(spurs, &rc);

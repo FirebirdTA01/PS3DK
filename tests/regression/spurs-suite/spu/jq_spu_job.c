@@ -7,8 +7,10 @@
 #include <cell/spurs/job_descriptor.h>
 #include <cell/spurs/job_context.h>
 #include <cell/spurs/job_queue.h>
+#include <cell/spurs/job_queue_port.h>
 #include "../jq_spu.h"
 
+#define JOB_AGAIN 0x80410A01u
 #define JOB_INVAL 0x80410A02u
 #define JOB_NULL  0x80410A11u
 
@@ -70,6 +72,25 @@ static void push(CellSpursJob256 *job)
     EXPECT(28, cellSpursJobQueueClose(jq, h), 0);
 }
 
+/* ports: the PPU syncs and finalizes them afterwards */
+static uint8_t desc[128] __attribute__((aligned(128)));
+
+static void port(CellSpursJob256 *job)
+{
+    const uint64_t jq = job->workArea.userData[2], p1 = job->workArea.userData[3], p2 = job->workArea.userData[5];
+    EXPECT(40, cellSpursJobQueuePortInitialize(p1, jq, 0), 0);
+    EXPECT(41, cellSpursJobQueuePortGetJobQueue(p1), jq);
+    EXPECT(42, _cellSpursJobQueuePortPushJobBody(p1, job->workArea.userData[4], 128, 0, 2, 1, 0, 0), 0);
+    EXPECT(43, _cellSpursJobQueuePortPushFlush(p1, 2, 0), 0);
+    EXPECT(44, cellSpursJobQueuePortInitializeWithDescriptorBuffer(p2, jq, job->workArea.userData[7], 128, 1, 0), 0);
+    mfc_get(desc, job->workArea.userData[6], sizeof desc, 2, 0, 0);
+    mfc_write_tag_mask(1u << 2);
+    mfc_read_tag_status_all();
+    EXPECT(45, _cellSpursJobQueuePortCopyPushJobBody(p2, desc, 128, 0, 2, 1, 0, 0), 0);
+    EXPECT(46, _cellSpursJobQueuePortCopyPushJobBody(p2, desc, 128, 0, 2, 1, 0, 0), JOB_AGAIN);   /* one entry */
+    EXPECT(47, _cellSpursJobQueuePortPushFlush(p2, 2, 0), 0);
+}
+
 void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
 {
     const uint64_t dst = job->workArea.userData[0];
@@ -78,6 +99,8 @@ void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
     out[0] = out[1] = out[2] = out[3] = 0;
     if (mode == Q_INFO) {
         info(job->workArea.userData[2], job->workArea.userData[3]);
+    } else if (mode == Q_PORT) {
+        port(job);
     } else if (mode == Q_PUSH) {
         push(job);
     } else if (mode == Q_WAIT) {
