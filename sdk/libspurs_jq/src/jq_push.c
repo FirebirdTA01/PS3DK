@@ -70,12 +70,20 @@ static int handle_open(uint64_t jq, int handle)
 	return (L32((h / 32) * 4) >> (31 - h % 32)) & 1;
 }
 
-/* a short pause before retrying a full ring.  Counted in loop iterations,
-   not decrementer ticks: the decrementer need not be running on the SPU a
-   job or task happens to get, and a pause that waits for it never ends. */
-static void backoff(void)
+/* A blocking push found the ring full: let the consumer run.  A task gives
+   its SPU back (the job queue's policy module may need exactly that SPU to
+   drain the ring, so spinning there can wait forever); anything else - a
+   blocking push is only allowed from a task, but be safe - pauses briefly,
+   counted in loop iterations since the decrementer need not be running. */
+extern int cellSpursYield(void);
+
+static void wait_for_room(void)
 {
 	volatile unsigned n;
+	if (!_cellSpursTaskCanCallBlockWait()) {
+		(void)cellSpursYield();
+		return;
+	}
 	for (n = 0; n < 2000; ++n)
 		;
 }
@@ -95,7 +103,7 @@ static int submit_single(uint64_t jq, uint64_t cmd, unsigned tag, int blocking, 
 		if (read == write && ((flags >> 5) & 1) != ((flags >> 6) & 1)) {
 			if (!blocking)
 				return (int)JOB_AGAIN;
-			backoff();                      /* full: wait for the consumer */
+			wait_for_room();                      /* full: wait for the consumer */
 			continue;
 		}
 		*wasEmpty = read == write;
@@ -133,7 +141,7 @@ static int submit_multi(uint64_t jq, uint64_t cmd, unsigned tag, int blocking, i
 		if (inflight + L8(0x06) == L16(0x16)) {
 			if (!blocking)
 				return (int)JOB_AGAIN;
-			backoff();
+			wait_for_room();
 			continue;
 		}
 		eff = write + inflight;
@@ -145,7 +153,7 @@ static int submit_multi(uint64_t jq, uint64_t cmd, unsigned tag, int blocking, i
 		if (eff == read && lap != ((flags >> 6) & 1)) {
 			if (!blocking)
 				return (int)JOB_AGAIN;
-			backoff();
+			wait_for_room();
 			continue;
 		}
 		L8(0x04) = (uint8_t)(inflight + 1);
