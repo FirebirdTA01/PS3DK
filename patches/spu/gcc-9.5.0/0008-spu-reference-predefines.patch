@@ -11,7 +11,7 @@ hardware fast single precision.
 @@ -103,3 +103,11 @@
    "%{mspurs-job:-lspurs_job_runtime} " \
    "%{mspurs-job-initialize:-lspurs_jq_runtime} " \
-   SPU_ORDINARY_LIB_SPEC " -lsync --end-group; :" SPU_ORDINARY_LIB_SPEC "}"
+   SPU_ORDINARY_LIB_SPEC " -lspurs -lsync --end-group; :" SPU_ORDINARY_LIB_SPEC "}"
 +
 +/* The reference PS3 SPU compiler predefines these; reference headers and
 +   samples select their PS3 code paths on __CELLOS_LV2__, and the accuracy
