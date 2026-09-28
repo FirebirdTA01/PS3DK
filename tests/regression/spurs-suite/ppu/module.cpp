@@ -2,12 +2,16 @@
  *   add      the PPU adds a policy module as a workload and makes it ready
  *   run      the kernel runs it, repeatedly while it stays ready; it records
  *            its workload id, SPU and argument
+ *   unit     each run loads a relocatable -mcustom-module work unit at an
+ *            LS address of its choosing and runs it: its _init must
+ *            relocate it (vtables, a pointer table) and construct it
  *   remove   ready count 0, shutdown, wait for the shutdown, remove */
 #include "harness.h"
 #include <cell/spurs/workload.h>
 #include <cell/spurs/ready_count.h>
 #include "../module.h"
 #include SUITE_PM_HEADER
+#include SUITE_UNIT_HEADER
 
 alignas(128) static volatile module_box s_box;
 static const uint8_t s_prio[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
@@ -16,6 +20,8 @@ static int row_main()
 {
     suite::watchdog(30);
     std::memset((void *)&s_box, 0, sizeof s_box);
+    s_box.unitEa = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SUITE_UNIT_BIN));
+    s_box.unitSize = SUITE_UNIT_BIN_SIZE;
     auto *spurs = new cell::Spurs::Spurs2;
     int rc = suite::spurs_up(spurs, "SuiteMod");
     if (rc) return suite::invalid("spurs", rc);
@@ -35,6 +41,8 @@ static int row_main()
     if (s_box.spu > 3) return suite::fail("module's SPU id", s_box.spu, 3);
     if (s_box.arg != static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&s_box)))
         return suite::fail("module's workload argument", s_box.arg, 0);
+    if (s_box.unitResult != M_UNIT_OK)
+        return suite::fail("work unit relocated and constructed", s_box.unitResult, M_UNIT_OK);
 
     suite::activity("removing the workload");
     unsigned old = 0;

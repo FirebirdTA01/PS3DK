@@ -6,6 +6,8 @@
 #include <stdint.h>
 
 #define M_MAGIC 0x504d0001u
+#define M_UNIT_BASE 0x20000u     /* where the module loads the work unit */
+#define M_UNIT_OK   0x226cu
 
 typedef struct module_box {
     uint32_t magic;         /* M_MAGIC once the module has run */
@@ -13,7 +15,10 @@ typedef struct module_box {
     uint32_t wid;           /* the module's own workload id */
     uint32_t spu;           /* the SPU it last ran on */
     uint32_t arg;           /* low word of the workload argument it was given */
-    uint32_t pad[27];
+    uint32_t unitEa;        /* in: a -mcustom-module work unit image to run, or 0 */
+    uint32_t unitSize;      /* in: its size in bytes */
+    uint32_t unitResult;    /* out: what the unit returned */
+    uint32_t pad[24];
 } __attribute__((aligned(128))) module_box;
 
 #endif

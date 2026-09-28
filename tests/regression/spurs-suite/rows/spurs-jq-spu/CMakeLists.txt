@@ -7,8 +7,8 @@ ps3_add_spu_image(spurs-jq-spu
     SOURCES ${SUITE_DIR}/spu/jq_spu_job.c ${SUITE_DIR}/spu/jq_spu_cpp.cpp
     NOSTARTFILES
     JOBBIN_WRAP
-    CFLAGS -mspurs-job-initialize -mno-error-reloc
-    LDFLAGS -mspurs-job-initialize -Wl,-q -Wl,--gc-sections -Wl,--emit-fixups
+    CFLAGS -mspurs-job-initialize
+    LDFLAGS -mspurs-job-initialize -Wl,-q -Wl,--gc-sections
     LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_job.ld
     LIBS spurs_jq spurs supc++ c)
 target_compile_definitions(spurs-jq-spu PRIVATE
