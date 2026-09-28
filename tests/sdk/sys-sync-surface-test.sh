@@ -26,7 +26,7 @@ cc="$ps3dev/ppu/bin/powerpc64-ps3-elf-gcc"
 { [ -x "$cc" ] || [ -x "$cc.exe" ]; } || { echo "sys-sync-surface: FAIL: no PPU compiler under $ps3dev"; exit 1; }
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/ov/sys" "$work/ov/lv2"
-for h in sys/synchronization.h sys/event.h sys/dbg.h lv2/mutex.h lv2/cond.h; do
+for h in sys/synchronization.h sys/event.h sys/event_queue.h sys/dbg.h lv2/mutex.h lv2/cond.h; do
     [ -f "$inc/$h" ] && cp "$inc/$h" "$work/ov/$h"
 done
 src="$root/tests/sdk/sys-sync-surface-test.c"

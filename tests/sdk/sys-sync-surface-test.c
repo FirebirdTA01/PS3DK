@@ -41,6 +41,13 @@ SA(sizeof(sys_cond_attribute_t) == 24, "cond attribute size");
 SA(sizeof(sys_rwlock_t) == 4 && sizeof(sys_semaphore_t) == 4, "object ids are 32-bit");
 SA(sizeof(sys_semaphore_value_t) == 4 && (sys_semaphore_value_t)-1 < 0, "semaphore value is int32");
 
+/* event record: canonical data1..data3 with the PSL1GHT data_1..data_3 aliases */
+SA(sizeof(sys_event_t) == 32, "event size");
+SA(offsetof(sys_event_t, source) == 0 && offsetof(sys_event_t, data1) == 8
+   && offsetof(sys_event_t, data2) == 16 && offsetof(sys_event_t, data3) == 24, "event layout");
+SA(offsetof(sys_event_t, data_1) == 8 && offsetof(sys_event_t, data_2) == 16
+   && offsetof(sys_event_t, data_3) == 24, "event PSL1GHT aliases");
+
 /* constants */
 SA(SYS_MUTEX_CREATE == 100 && SYS_MUTEX_DESTROY == 101 && SYS_MUTEX_LOCK == 102
    && SYS_MUTEX_TRYLOCK == 103 && SYS_MUTEX_UNLOCK == 104, "mutex syscalls");
@@ -92,6 +99,10 @@ int probe(void)
     sys_semaphore_attribute_initialize(sem);
     sys_rwlock_attribute_name_set(rw.name, "longer-than-seven");
     sys_semaphore_attribute_name_set(sem.name, "sem");
+    sys_event_t ev;
+    ev.source = 1; ev.data1 = 2; ev.data_2 = 5; ev.data3 = 4;   /* either spelling, same storage */
+    if (ev.data1 != 2 || ev.data2 != 5 || ev.data3 != 4)
+        return 0;
     return rw.attr_protocol == SYS_SYNC_PRIORITY && sem.attr_pshared == SYS_SYNC_NOT_PROCESS_SHARED
         && rw.name[7] == '\0' && rw.name[6] == 'n' && sem.name[3] == '\0';
 }
