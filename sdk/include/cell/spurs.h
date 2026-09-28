@@ -25,5 +25,15 @@
 #include <cell/spurs/job_guard.h>
 #include <cell/spurs/job_chain_types.h>
 #include <cell/spurs/job_chain.h>
+#include <cell/spurs/control.h>
+#include <cell/spurs/lv2_event_queue.h>
+#include <cell/spurs/system_workload.h>
+#include <cell/spurs/policy_module.h>
+#include <cell/spurs/lfqueue.h>
+#include <cell/spurs/task_exit_code.h>
+#include <cell/spurs/job_queue.h>
+#include <cell/spurs/job_queue_semaphore.h>
+#include <cell/spurs/job_queue_port.h>
+#include <cell/spurs/job_queue_port2.h>
 
 #endif /* __PS3DK_CELL_SPURS_H__ */
