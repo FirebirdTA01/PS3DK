@@ -870,6 +870,12 @@ function(ps3_add_spu_image target)
     if(_PSI_NOSTARTFILES)
         list(APPEND _spu_link_flags -nostartfiles)
     endif()
+    # A job image with no startup links clean but ships empty: _start stays
+    # undefined, --gc-sections drops the job entry, and the job faults on
+    # its first dispatch (NOSTARTFILES with -mspurs-job and no job library).
+    if(_PSI_JOBBIN OR _PSI_JOBBIN_WRAP)
+        list(APPEND _spu_link_flags -Wl,--require-defined=_start)
+    endif()
     set(_link_deps ${_spu_objs})
     if(_PSI_LDSCRIPT)
         list(APPEND _spu_link_flags "-T" "${_PSI_LDSCRIPT}")
