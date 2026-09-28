@@ -6,6 +6,7 @@
  *   _init                          global constructors
  *   cellSpursJobMain2              the job
  *   __do_atexit                    atexit / static-object destructors
+ *                                  (this runtime's own list; see below)
  *   _fini                          global destructors
  *   _cellSpursJobCrtAuxFinalize
  *
@@ -37,7 +38,6 @@ extern init_fn __init_array_end[] __attribute__((weak));
 extern init_fn __fini_array_start[] __attribute__((weak));
 extern init_fn __fini_array_end[] __attribute__((weak));
 
-extern void __call_exitprocs(int code, void *dso);
 
 /* C++ static destructors register against this module handle */
 void *__dso_handle __attribute__((visibility("hidden"))) = &__dso_handle;
@@ -104,11 +104,46 @@ void _fini(void)
 				(*f)();
 }
 
-/* run the functions registered with atexit and __cxa_atexit (static
-   objects with destructors), newest first */
+/* atexit and __cxa_atexit (static objects with destructors).  Kept here
+   rather than taken from newlib: the SPU libc is not position-independent
+   and addresses its exit list at its link-time location, which in a job
+   image is some other code's local store. */
+#define JOB_ATEXIT_MAX 32
+
+static struct {
+	void (*fn)(void *);
+	void *arg;
+} s_exit[JOB_ATEXIT_MAX];
+static unsigned s_exitCount;             /* .bss: empty at the start of every job */
+
+int __cxa_atexit(void (*fn)(void *), void *arg, void *dso)
+{
+	(void)dso;
+	if (s_exitCount == JOB_ATEXIT_MAX)
+		return -1;
+	s_exit[s_exitCount].fn = fn;
+	s_exit[s_exitCount].arg = arg;
+	++s_exitCount;
+	return 0;
+}
+
+static void call_plain(void *fn)
+{
+	((void (*)(void))fn)();
+}
+
+int atexit(void (*fn)(void))
+{
+	return __cxa_atexit(call_plain, (void *)fn, 0);
+}
+
+/* run them newest first */
 void __do_atexit(void)
 {
-	__call_exitprocs(0, 0);
+	while (s_exitCount) {
+		--s_exitCount;
+		s_exit[s_exitCount].fn(s_exit[s_exitCount].arg);
+	}
 }
 
 /* Function-local statics: a job runs on one SPU and nothing else touches
