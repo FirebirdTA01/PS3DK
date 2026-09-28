@@ -62,12 +62,6 @@ void _fini(void)  { /* no-op */ }
  * have no atexit registrations. */
 void __do_atexit(void) { /* no-op */ }
 
-int cellSpursJobQueueSendSignal(uint64_t eaJob)
-{
-    _UNUSED(eaJob);
-    return _STUB_INVAL;
-}
-
 int cellSpursJobQueueGetSuspendedJobSize(const CellSpursJobHeader *pJob,
                                          size_t sizeJobDesc,
                                          enum CellSpursJobQueueSuspendedJobAttribute attr,

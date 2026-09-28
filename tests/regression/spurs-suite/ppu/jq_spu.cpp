@@ -1,8 +1,8 @@
 /* spurs-suite SPU job-queue runtime (row spurs-jq-spu).
  *   info    a job opens and closes its own handle and reads the queue's
  *           handle count, SPURS, max descriptor size, workload id, error
- *   wait    a job suspends itself with WaitSignal; the PPU wakes it with
- *           SendSignal and the job finishes
+ *   wait    a job suspends itself with WaitSignal; another job wakes it
+ *           with SendSignal and the job finishes
  *   sem     an SPU task initializes a job-queue semaphore, waits in
  *           Acquire, and two jobs pushed with the semaphore release it */
 #include "harness.h"
@@ -19,7 +19,7 @@
 
 #define JQ_DEPTH 16
 #define JQ_POOL  Q_POOL
-enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_PORT, J_CHILD2, J_CHILD3, J_PORT2, J_CHILD4, J_CHILD5, J_PORT2S, J_TPLAIN, J_TSLOW, J_COUNT };
+enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_PORT, J_CHILD2, J_CHILD3, J_PORT2, J_CHILD4, J_CHILD5, J_PORT2S, J_TPLAIN, J_TSLOW, J_SIGNAL, J_COUNT };
 
 static CellSpursJobQueue s_jq __attribute__((aligned(128)));
 /* the task's semaphore, and its parameters in the next line */
@@ -103,8 +103,15 @@ static int row_main()
     if (s_out[J_WAIT][0] != 0)
         return suite::fail("wait job did not suspend (WaitSignal rc)", s_out[J_WAIT][1], 0);
     sys_timer_usleep(20000);
-    if ((rc = cellSpursJobQueueSendSignal(reinterpret_cast<CellSpursJobQueueWaitingJob *>(susp))))
-        return suite::fail("send signal", rc, 0);
+    /* the signal comes from another job */
+    make_job(J_SIGNAL, Q_SIGNAL, reinterpret_cast<uintptr_t>(susp));
+    if ((rc = cellSpursJobQueuePushJob(&s_jq, h, &s_job[J_SIGNAL].header, sizeof s_job[J_SIGNAL], 0, nullptr)))
+        return suite::invalid("push job", rc);
+    if ((rc = cellSpursJobQueuePushFlush(&s_jq, h))) return suite::invalid("push flush", rc);
+    if (!suite::wait_for([] { return s_out[J_SIGNAL][0] == Q_MAGIC + Q_SIGNAL; }))
+        return suite::fail("signal job", s_out[J_SIGNAL][0], Q_MAGIC + Q_SIGNAL);
+    if (s_out[J_SIGNAL][1])
+        return suite::fail("signal job step (SPU SendSignal rc in the log)", s_out[J_SIGNAL][1], s_out[J_SIGNAL][2]);
     if (!suite::wait_for([] { return s_out[J_WAIT][0] == Q_MAGIC + Q_WAIT; }))
         return suite::fail("wait job resumed", s_out[J_WAIT][0], Q_MAGIC + Q_WAIT);
     if (s_out[J_WAIT][1] != 0)

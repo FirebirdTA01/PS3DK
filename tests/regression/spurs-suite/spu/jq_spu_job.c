@@ -140,6 +140,17 @@ void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
         port2_sync(job);
     } else if (mode == Q_PUSH) {
         push(job);
+    } else if (mode == Q_SIGNAL) {
+        const uint64_t susp = job->workArea.userData[3];
+        if (cellSpursJobQueueSendSignal(0) != (int)JOB_NULL) {
+            out[1] = 90;
+        } else if (cellSpursJobQueueSendSignal(susp + 16) != (int)JOB_ALIGN) {
+            out[1] = 91;
+        } else {
+            out[2] = (uint32_t)cellSpursJobQueueSendSignal(susp);
+            if (out[2])
+                out[1] = 92;
+        }
     } else if (mode == Q_SLOW) {
         const uint32_t start = spu_readch(SPU_RdDec);
         while (start - spu_readch(SPU_RdDec) < 200000)

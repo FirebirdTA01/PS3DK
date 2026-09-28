@@ -18,6 +18,7 @@
 #define Q_PORT2     5   /* creates Port2 [3], pushes job [4] and job list [5] with sync */
 #define Q_PORT2S    6   /* syncs (without blocking) and destroys Port2 [3] made by the PPU */
 #define Q_SLOW      7   /* like PLAIN, but runs for a few milliseconds first */
+#define Q_SIGNAL    8   /* wakes the suspended WAIT job ([3] = its suspend buffer) */
 #define Q_MAGIC     0x0e0e0000u
 #define Q_MAX_DESC  256
 
