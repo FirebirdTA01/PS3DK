@@ -47,7 +47,8 @@ OBJS    := $(BUILD)/crt_spurs_task.o \
            $(BUILD)/spurs_send_signal.o \
            $(BUILD)/spurs_semaphore_p.o \
            $(BUILD)/spurs_semaphore_v.o \
-           $(BUILD)/spurs_event_flag.o
+           $(BUILD)/spurs_event_flag.o \
+           $(BUILD)/spurs_queue.o
 
 LIB     := $(BUILD)/libspurs_task.a
 RUNTIME_LIB := $(BUILD)/libspurs_task_runtime.a
@@ -64,7 +65,8 @@ COMMON_OBJS := $(BUILD)/spurs_task_exit.o \
                $(BUILD)/spurs_send_signal.o \
                $(BUILD)/spurs_semaphore_p.o \
                $(BUILD)/spurs_semaphore_v.o \
-               $(BUILD)/spurs_event_flag.o
+               $(BUILD)/spurs_event_flag.o \
+               $(BUILD)/spurs_queue.o
 
 .PHONY: all install clean
 

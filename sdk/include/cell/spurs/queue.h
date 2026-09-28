@@ -34,8 +34,8 @@ typedef struct CellSpursQueue {
 /* SPU side: the queue lives in main memory and is named by its
  * effective address.  An entry moves between the caller's LS buffer and
  * the queue by DMA on `tag`: *Begin starts the transfer and *End
- * completes it.  Blocking forms are valid only in a SPURS task.
- * Declared only: the SPU runtime does not implement these yet. */
+ * completes it.  Implemented in libspurs.a / libspurs_task.a; blocking
+ * forms are valid only in a SPURS task. */
 extern int _cellSpursQueueInitialize(uint64_t ea, uint64_t buffer,
                                      unsigned int size, unsigned int depth,
                                      CellSpursQueueDirection direction,
