@@ -54,9 +54,8 @@ typedef struct CellSpursEventFlag {
 #ifdef __SPU__
 
 /* SPU side: the event flag lives in main memory and is named by its
- * effective address.  Wait blocks and is valid only in a SPURS task.
- * Declared only: the SPU runtime (libspurs.a) does not implement these
- * yet, so callers compile and fail at link time. */
+ * effective address.  Implemented in libspurs.a / libspurs_task.a; Wait
+ * blocks, so it is valid only in a SPURS task. */
 int _cellSpursEventFlagInitialize(uint64_t ea,
                                   CellSpursEventFlagClearMode clearMode,
                                   CellSpursEventFlagDirection direction,

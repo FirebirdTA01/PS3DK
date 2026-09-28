@@ -30,6 +30,7 @@
 #define SPURS_TASKID_OFF       0xd4U
 
 #define SPURS_SVC_YIELD        1
+#define SPURS_SVC_WAIT_SIGNAL  2
 #define SPURS_SVC_TASK_POLL    3
 
 static inline uint32_t spurs_dispatch_base(void)
@@ -57,6 +58,13 @@ uint64_t cellSpursGetTasksetAddress(void)
 int cellSpursYield(void)
 {
     return (int)spurs_dispatch_call(spurs_dispatch_base(), SPURS_SVC_YIELD);
+}
+
+/* Block until this task's signal is sent (cellSpursSendSignal), then
+ * consume it. */
+int cellSpursWaitSignal(void)
+{
+    return (int)spurs_dispatch_call(spurs_dispatch_base(), SPURS_SVC_WAIT_SIGNAL);
 }
 
 unsigned int cellSpursTaskPoll(void)
