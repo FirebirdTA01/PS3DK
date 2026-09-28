@@ -10,7 +10,7 @@
 #include "../job_extras.h"
 #include SUITE_SPU_HEADER
 #include SUITE_JOB_HEADER
-#include SUITE_JOB_JOBHEADER_HEADER
+#include SUITE_JB2_HEADER
 
 enum { J_MAIN, J_MEMCHECK, J_URGENT0, J_COUNT = J_URGENT0 + X_URGENT_JOBS };
 
@@ -26,11 +26,10 @@ alignas(16) static uint64_t s_call[2];
 static void make_job(unsigned i, uint64_t mode)
 {
     std::memset(&s_job[i], 0, sizeof s_job[i]);
-    /* the jobbin2 header template, relocated to the embedded image */
-    std::memcpy(&s_job[i].header, SUITE_JOB_JOBHEADER, sizeof(CellSpursJobHeader));
-    s_job[i].header.eaBinary += reinterpret_cast<uint64_t>(SUITE_JOB_BIN);
-    if (mode == X_JOB_MEMCHECK)
-        s_job[i].header.jobType |= CELL_SPURS_JOB_TYPE_MEMORY_CHECK;
+    s_job[i].header.eaBinary = reinterpret_cast<uint64_t>(SUITE_JOB_BIN);
+    s_job[i].header.sizeBinary = CELL_SPURS_GET_SIZE_BINARY(SUITE_JOB_BIN_SIZE);
+    s_job[i].header.jobType = CELL_SPURS_JOB_TYPE_BINARY2 |
+                              (mode == X_JOB_MEMCHECK ? CELL_SPURS_JOB_TYPE_MEMORY_CHECK : 0);
     s_job[i].workArea.userData[0] = reinterpret_cast<uint64_t>(&s_out[i][0]);
     s_job[i].workArea.userData[1] = X_JOB_MAGIC + i;
     s_job[i].workArea.userData[2] = mode;
@@ -75,7 +74,7 @@ static int row_main()
     for (unsigned i = 2; i < X_URGENT_JOBS; ++i)
         s_params.jobs[i] = reinterpret_cast<uintptr_t>(&s_job[J_URGENT0 + i]);
     s_params.callList = reinterpret_cast<uintptr_t>(s_call);
-    s_params.jobbin2 = reinterpret_cast<uintptr_t>(SUITE_JOB_BIN);
+    s_params.jobbin2 = reinterpret_cast<uintptr_t>(SUITE_JB2_BIN);
     s_params.header = reinterpret_cast<uintptr_t>(s_header);
 
     if ((rc = suite::launch(ts, SUITE_SPU_BIN, reinterpret_cast<uintptr_t>(g_result),
@@ -102,7 +101,7 @@ static int row_main()
     /* SetJobbin2Param from the SPU matches the PPU's */
     alignas(16) CellSpursJobHeader mine;
     std::memset(&mine, 0, sizeof mine);
-    if ((rc = cellSpursJobHeaderSetJobbin2Param(&mine, SUITE_JOB_BIN)))
+    if ((rc = cellSpursJobHeaderSetJobbin2Param(&mine, SUITE_JB2_BIN)))
         return suite::invalid("PPU SetJobbin2Param", rc);
     for (unsigned i = 0; i < sizeof mine; ++i)
         if (s_header[i] != reinterpret_cast<const uint8_t *>(&mine)[i]) {
