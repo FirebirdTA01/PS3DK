@@ -111,6 +111,7 @@ static bool run_task2_demo(cell::Spurs::Spurs2 *spurs)
             break;
         }
         std::printf("hello-spurs-task2: task %u exit code %d\n", i, code);
+        std::free(reinterpret_cast<void *>(static_cast<uintptr_t>(attr.eaContext)));   /* joined: its context is free */
     }
 
     if (ok) {
