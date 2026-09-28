@@ -12,12 +12,10 @@
  * stub forwards to cellSpursJobMain2.  cellSpursJobInitialize zeroes
  * the .bss of the job binary before main runs (also in libspurs_job.a).
  *
- * The job-chain control entry points (cellSpursRunJobChain,
- * cellSpursShutdownJobChain, cellSpursAddUrgentCommand, etc.) are
- * declared with the same name on the PPU side at
- * <cell/spurs/job_chain.h>; the SPU-side prototypes live here for
- * symmetry but are intended for callers running on PPU - including
- * them from SPU code does no harm.
+ * The SPU-side job-chain control entry points (cellSpursRunJobChain,
+ * cellSpursKickJobChain, cellSpursShutdownJobChain and the job guard)
+ * take the job chain's effective address and are implemented in
+ * libspurs.a / libspurs_task.a.
  */
 
 #ifndef __PS3DK_CELL_SPURS_JOB_CHAIN_H_SPU__
