@@ -1,0 +1,22 @@
+Build a position-independent multilib for SPU target libraries.
+
+-fpic links (SPURS jobs, policy modules) select pic/ copies of libgcc, newlib,
+libsupc++ and libstdc++. Fixed-address images
+are unaffected by which copy they get. The pic build keeps its absolute data words
+(pointer tables) for the image's fixup table, so it may not refuse run-time
+relocations. The __ea (mea64) variant stays unbuilt as before.
+
+--- a/gcc/config/spu/t-spu-elf
++++ b/gcc/config/spu/t-spu-elf
+@@ -15,7 +15,10 @@
+ #  <http://www.gnu.org/licenses/>.
+ 
+ # Multi-lib support.
+-MULTILIB_OPTIONS=mea64
++MULTILIB_OPTIONS=fpic
++MULTILIB_DIRNAMES=pic
++MULTILIB_MATCHES=fpic=fPIC
++MULTILIB_EXTRA_OPTS=mno-error-reloc
+ 
+ spu.o: $(CONFIG_H) $(SYSTEM_H) coretypes.h $(TM_H) \
+   $(RTL_H) $(REGS_H) hard-reg-set.h dumpfile.h \

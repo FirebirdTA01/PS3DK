@@ -43,7 +43,7 @@ UPSTREAM="$PS3_TOOLCHAIN_ROOT/src/upstream"
 PATCHES="$PS3_TOOLCHAIN_ROOT/patches/spu"
 BUILD="$PS3_BUILD_ROOT/spu"
 
-JOBS="$(nproc 2>/dev/null || echo 4)"
+JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 say "Using $JOBS parallel jobs."
 
 ONLY=""
@@ -248,7 +248,7 @@ build_gcc_newlib() {
         --disable-libssp
         --disable-libstdcxx-pch
         --disable-libstdcxx-filesystem-ts
-        --disable-multilib
+        --enable-multilib
         --disable-nls
         --disable-shared
         --disable-threads
