@@ -327,6 +327,9 @@ static int row_main()
         const uint32_t ringEa = *reinterpret_cast<const volatile uint32_t *>(q + 0x640 + 4);
         std::printf("pool task stopped at %#x; class-1 record %08x %08x %08x %08x; ring %#x\n",
                     g_result[0].extra, rec[0], rec[1], rec[2], rec[3], ringEa);
+        const volatile uint32_t *l0 = reinterpret_cast<const volatile uint32_t *>(q);
+        std::printf("  jq line0 %08x %08x %08x %08x %08x %08x; +0x60 %08x %08x %08x %08x %08x %08x %08x %08x\n",
+                    l0[0], l0[1], l0[2], l0[3], l0[4], l0[5], l0[24], l0[25], l0[26], l0[27], l0[28], l0[29], l0[30], l0[31]);
         if (ringEa)
             for (unsigned i = 0; i < 4; ++i) {
                 const volatile uint64_t *e = reinterpret_cast<const volatile uint64_t *>(static_cast<uintptr_t>(ringEa)) + i;
