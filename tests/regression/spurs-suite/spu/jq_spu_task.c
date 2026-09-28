@@ -87,6 +87,10 @@ int cellSpursTaskMain(qword argTask, uint64_t argTaskset)
             mfc_write_tag_mask(1u << 2);
             mfc_read_tag_status_all();
             EXPECT(38 + round, cellSpursJobQueuePort2PushAndReleaseJob(port, desc[i], 128, 0, 2, 1), 0);
+            /* the command ring holds 16: flush half-way so a flush always
+               fits (pushed jobs need not run before a flush) */
+            if (i == Q_POOL / 2 - 1)
+                EXPECT(44 + round, cellSpursJobQueuePort2PushFlush(port, 2, 0), 0);
         }
         report(slot, 0, 2, 0x100 + round * 0x10 + 1);       /* progress: round pushed */
         EXPECT(40 + round, cellSpursJobQueuePort2PushFlush(port, 2, 0), 0);
