@@ -62,6 +62,8 @@ static void make_job(unsigned i, unsigned mode, uint64_t arg3)
     s_out[i][0] = s_out[i][1] = 0;
 }
 
+static cell::Spurs::Spurs2 *s_spurs;
+
 static int row_main()
 {
     suite::watch_slots(g_result, 1);
@@ -70,6 +72,7 @@ static int row_main()
     int rc = cellSysmoduleLoadModule(CELL_SYSMODULE_SPURS_JQ);
     if (rc) return suite::invalid("load SPURS_JQ", rc);
     auto *spurs = new cell::Spurs::Spurs2;
+    s_spurs = spurs;
     if ((rc = suite::spurs_up(spurs, "SuiteJqs"))) return suite::invalid("spurs", rc);
 
     CellSpursJobQueueAttribute attr;
@@ -330,6 +333,13 @@ static int row_main()
         const volatile uint32_t *l0 = reinterpret_cast<const volatile uint32_t *>(q);
         std::printf("  jq line0 %08x %08x %08x %08x %08x %08x; +0x60 %08x %08x %08x %08x %08x %08x %08x %08x\n",
                     l0[0], l0[1], l0[2], l0[3], l0[4], l0[5], l0[24], l0[25], l0[26], l0[27], l0[28], l0[29], l0[30], l0[31]);
+        CellSpursWorkloadId jqWid = 99;
+        cellSpursGetJobQueueId(&s_jq, &jqWid);
+        const volatile uint32_t *sp = reinterpret_cast<const volatile uint32_t *>(s_spurs);
+        std::printf("  jq wid %u; spurs +0x00 %08x %08x %08x %08x +0x10 %08x %08x %08x %08x\n",
+                    jqWid, sp[0], sp[1], sp[2], sp[3], sp[4], sp[5], sp[6], sp[7]);
+        std::printf("  spurs +0x60 %08x %08x %08x %08x %08x %08x %08x %08x\n",
+                    sp[24], sp[25], sp[26], sp[27], sp[28], sp[29], sp[30], sp[31]);
         if (ringEa)
             for (unsigned i = 0; i < 4; ++i) {
                 const volatile uint64_t *e = reinterpret_cast<const volatile uint64_t *>(static_cast<uintptr_t>(ringEa)) + i;
