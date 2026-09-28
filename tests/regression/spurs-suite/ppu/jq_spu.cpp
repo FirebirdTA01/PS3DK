@@ -338,8 +338,9 @@ static int row_main()
         const volatile uint32_t *sp = reinterpret_cast<const volatile uint32_t *>(s_spurs);
         std::printf("  jq wid %u; spurs +0x00 %08x %08x %08x %08x +0x10 %08x %08x %08x %08x\n",
                     jqWid, sp[0], sp[1], sp[2], sp[3], sp[4], sp[5], sp[6], sp[7]);
-        std::printf("  spurs +0x60 %08x %08x %08x %08x %08x %08x %08x %08x\n",
-                    sp[24], sp[25], sp[26], sp[27], sp[28], sp[29], sp[30], sp[31]);
+        for (unsigned row = 0x20 / 4; row < 0x100 / 4; row += 8)
+            std::printf("  spurs +0x%02x %08x %08x %08x %08x %08x %08x %08x %08x\n", row * 4,
+                        sp[row], sp[row + 1], sp[row + 2], sp[row + 3], sp[row + 4], sp[row + 5], sp[row + 6], sp[row + 7]);
         if (ringEa)
             for (unsigned i = 0; i < 4; ++i) {
                 const volatile uint64_t *e = reinterpret_cast<const volatile uint64_t *>(static_cast<uintptr_t>(ringEa)) + i;
