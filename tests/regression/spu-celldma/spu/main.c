@@ -81,7 +81,7 @@ int main(uint64_t control_ea, uint64_t arg2, uint64_t arg3, uint64_t arg4)
     cellDmaSmallGet(buf + 8, control.src + 8, 8, TAG, 0, 0);
     wait();
     for (i = 0; i < 16; ++i)
-        if (i == 0 || i == 3 ? buf[i] != 0xee : buf[i] != src_byte(i))
+        if (i == 0 ? buf[i] != 0xee : buf[i] != src_byte(i))   /* 1@1 2@2 4@4 8@8 cover 1..15 */
             sys_spu_thread_exit(5);
 
     /* 6: small puts of 8, 4, 2 and 1 bytes (the PPU checks `small`) */
