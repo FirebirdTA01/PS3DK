@@ -80,41 +80,9 @@ int cellSpursJobQueueGetSuspendedJobSize(const CellSpursJobHeader *pJob,
 
 /* -- JQ push body NIDs ----------------------------------------------- */
 
-int _cellSpursJobQueueAllocateJobDescriptor(uint64_t eaJobQueue,
-                                            CellSpursJobQueueHandle handle,
-                                            size_t sizeJobDesc,
-                                            unsigned dmaTag, unsigned flag,
-                                            uint64_t *eaAllocatedJobDesc)
-{
-    _UNUSED(eaJobQueue); _UNUSED(handle); _UNUSED(sizeJobDesc);
-    _UNUSED(dmaTag); _UNUSED(flag);
-    if (eaAllocatedJobDesc) *eaAllocatedJobDesc = 0;
-    return _STUB_INVAL;
-}
-
 /* -- Port surface --------------------------------------------------- */
 
 /* -- Port2 surface -------------------------------------------------- */
-
-int _cellSpursJobQueuePort2CopyPushJobBody(uint64_t eaPort2,
-                                           const CellSpursJobHeader *pJob,
-                                           size_t sizeDesc, size_t sizeDescFromPool,
-                                           unsigned tag, unsigned int dmaTag,
-                                           unsigned flag)
-{
-    _UNUSED(eaPort2); _UNUSED(pJob); _UNUSED(sizeDesc); _UNUSED(sizeDescFromPool);
-    _UNUSED(tag); _UNUSED(dmaTag); _UNUSED(flag);
-    return _STUB_INVAL;
-}
-
-int cellSpursJobQueuePort2AllocateJobDescriptor(uint64_t eaPort2, size_t sizeDesc,
-                                                unsigned int dmaTag, unsigned flag,
-                                                uint64_t *eaAllocatedJobDesc)
-{
-    _UNUSED(eaPort2); _UNUSED(sizeDesc); _UNUSED(dmaTag); _UNUSED(flag);
-    if (eaAllocatedJobDesc) *eaAllocatedJobDesc = 0;
-    return _STUB_INVAL;
-}
 
 /* -- Memcheck / hash check / trace ---------------------------------- */
 

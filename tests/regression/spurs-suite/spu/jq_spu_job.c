@@ -140,6 +140,10 @@ void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
         port2_sync(job);
     } else if (mode == Q_PUSH) {
         push(job);
+    } else if (mode == Q_SLOW) {
+        const uint32_t start = spu_readch(SPU_RdDec);
+        while (start - spu_readch(SPU_RdDec) < 200000)
+            ;
     } else if (mode == Q_WAIT) {
         out[1] = 1;                                     /* about to suspend */
         put(dst);

@@ -14,6 +14,8 @@
  *   0x14 u8   a Port2Sync is running
  *   0x18 u32  job queue EA, 0x1c u32 job-queue handle
  *   0x20 u8   created, 0x21 u8 being created / destroyed
+ * CopyPush takes its descriptor from the job queue's pool and pushes it
+ * with release, so it can wait for a free descriptor: tasks only.
  * Independently written from the published object layouts and semantics.
  */
 #include <stddef.h>
@@ -45,6 +47,9 @@ extern int _cellSpursJobQueuePushSync(uint64_t eaJobQueue, int handle, unsigned 
 extern int _cellSpursJobQueuePushJob2Body(uint64_t eaJobQueue, int handle, uint64_t eaJob, unsigned int sizeDesc,
                                           unsigned int tag, unsigned int dmaTag, unsigned int flag,
                                           uint64_t eaSemaphore);
+extern int _cellSpursJobQueueAllocateJobDescriptor(uint64_t eaJobQueue, int handle, size_t sizeJobDesc,
+                                                   unsigned int dmaTag, unsigned int flag,
+                                                   uint64_t *eaAllocatedJobDesc);
 extern int _cellSpursJobQueuePushAndReleaseJobBody(uint64_t eaJobQueue, int handle, uint64_t eaJob,
                                                    unsigned int sizeDesc, unsigned int tag, unsigned int dmaTag,
                                                    unsigned int flag, uint64_t eaSemaphore);
@@ -230,6 +235,59 @@ int _cellSpursJobQueuePort2PushJobListBody(uint64_t eaPort2, uint64_t eaJobList,
 	                                       sync ? eaPort2 : 0, !(flag & FLAG_NONBLOCK));
 	if (rc && sync) {
 		int rc2 = count_sub(eaPort2, n);
+		if (rc2)
+			return rc2;
+	}
+	return rc;
+}
+
+int cellSpursJobQueuePort2AllocateJobDescriptor(uint64_t eaPort2, size_t sizeDesc, unsigned int dmaTag, unsigned flag,
+                                                uint64_t *eaAllocatedJobDesc)
+{
+	if (flag & ~FLAG_NONBLOCK)
+		return (int)JOB_INVAL;
+	if (!eaPort2 || !eaAllocatedJobDesc)
+		return (int)JOB_NULL;
+	if (eaPort2 & 0x7f)
+		return (int)JOB_ALIGN;
+	if (dmaTag > 31)
+		return (int)JOB_INVAL;
+	get_line(eaPort2);
+	return _cellSpursJobQueueAllocateJobDescriptor(P32(0x18), (int)P32(0x1c), sizeDesc, dmaTag, flag,
+	                                              eaAllocatedJobDesc);
+}
+
+/* take a pool descriptor (waiting for one if need be), copy the LS job into
+   it and push it; the descriptor goes back to the pool when the job ends */
+int _cellSpursJobQueuePort2CopyPushJobBody(uint64_t eaPort2, const void *pJob, size_t sizeDesc,
+                                           size_t sizeDescFromPool, unsigned tag, unsigned int dmaTag,
+                                           unsigned flag)
+{
+	const int sync = flag & FLAG_SYNC;
+	uint64_t ea;
+	int rc;
+	if (flag & ~3u)
+		return (int)JOB_INVAL;
+	if (!eaPort2 || !pJob)
+		return (int)JOB_NULL;
+	if ((eaPort2 & 0x7f) || ((uintptr_t)pJob & 15))
+		return (int)JOB_ALIGN;
+	if ((sizeDesc != 64 && (sizeDesc & 0x7f)) || tag > 15 || sizeDesc > 1023 || dmaTag > 31)
+		return (int)JOB_INVAL;
+	if (sync && (rc = count_add(eaPort2, 1)) != 0)
+		return rc;
+	get_line(eaPort2);
+	rc = _cellSpursJobQueueAllocateJobDescriptor(P32(0x18), (int)P32(0x1c), sizeDescFromPool, dmaTag, 0, &ea);
+	if (!rc) {
+		mfc_put((volatile void *)pJob, ea, sizeDesc, 0, 0, 0);
+		mfc_write_tag_mask(1u << 0);
+		(void)mfc_read_tag_status_all();
+		get_line(eaPort2);
+		rc = _cellSpursJobQueuePushAndReleaseJobBody(P32(0x18), (int)P32(0x1c), ea, sizeDesc, tag, dmaTag, flag,
+		                                             sync ? eaPort2 : 0);
+	}
+	if (rc && sync) {
+		int rc2 = count_sub(eaPort2, 1);
 		if (rc2)
 			return rc2;
 	}

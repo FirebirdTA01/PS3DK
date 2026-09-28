@@ -17,6 +17,7 @@
                            buffer [7] copy-pushes descriptor [6] with sync */
 #define Q_PORT2     5   /* creates Port2 [3], pushes job [4] and job list [5] with sync */
 #define Q_PORT2S    6   /* syncs (without blocking) and destroys Port2 [3] made by the PPU */
+#define Q_SLOW      7   /* like PLAIN, but runs for a few milliseconds first */
 #define Q_MAGIC     0x0e0e0000u
 #define Q_MAX_DESC  256
 
@@ -24,5 +25,16 @@
  * u32[3] = job queue EA.  It reports value = 1 while it waits in
  * Acquire, then status = first failed step, value = 2 when done. */
 #define Q_ACQUIRE   2
+
+/* then the descriptor pool through a Port2 (value = 3 when done); its
+ * parameters sit in the line after the semaphore */
+typedef struct jq_task_params {
+    uint32_t port2;         /* Port2 EA */
+    uint32_t plain;         /* 128-byte Q_PLAIN job to copy into the pool */
+    uint32_t slow;          /* 128-byte Q_SLOW job */
+    uint32_t pad;
+} jq_task_params;
+#define Q_POOL      16      /* 128-byte descriptors in the pool */
+#define Q_COPIES    8       /* CopyPushes made while the pool is used up */
 
 #endif

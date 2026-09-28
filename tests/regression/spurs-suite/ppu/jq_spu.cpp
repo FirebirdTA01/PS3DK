@@ -18,11 +18,17 @@
 #include SUITE_JOB_JOBHEADER_HEADER
 
 #define JQ_DEPTH 16
-#define JQ_POOL  16
-enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_PORT, J_CHILD2, J_CHILD3, J_PORT2, J_CHILD4, J_CHILD5, J_PORT2S, J_COUNT };
+#define JQ_POOL  Q_POOL
+enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_PORT, J_CHILD2, J_CHILD3, J_PORT2, J_CHILD4, J_CHILD5, J_PORT2S, J_TPLAIN, J_TSLOW, J_COUNT };
 
 static CellSpursJobQueue s_jq __attribute__((aligned(128)));
-static CellSpursJobQueueSemaphore s_sem __attribute__((aligned(128)));
+/* the task's semaphore, and its parameters in the next line */
+static struct alignas(128) {
+    CellSpursJobQueueSemaphore sem;
+    alignas(128) jq_task_params prm;
+} s_task;
+#define s_sem (s_task.sem)
+static CellSpursJobQueuePort2 s_port2c __attribute__((aligned(128)));
 static CellSpursJobQueueSemaphore s_sem2 __attribute__((aligned(128)));
 static CellSpursJobQueuePort s_port1 __attribute__((aligned(128)));
 static CellSpursJobQueuePort s_port2 __attribute__((aligned(128)));
@@ -202,6 +208,11 @@ static int row_main()
         return suite::fail("PPU destroy after the job destroyed the Port2", rc, 0x80410a0f);
 
     /* semaphore: a task waits for two jobs */
+    make_job(J_TPLAIN, Q_PLAIN, 0);
+    make_job(J_TSLOW, Q_SLOW, 0);
+    s_task.prm.port2 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&s_port2c));
+    s_task.prm.plain = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&s_job[J_TPLAIN]));
+    s_task.prm.slow = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&s_job[J_TSLOW]));
     cell::Spurs::Taskset *ts = suite::taskset_up(spurs, &rc);
     if (!ts) return suite::invalid("taskset", rc);
     if ((rc = suite::launch(ts, SUITE_SPU_BIN, reinterpret_cast<uintptr_t>(g_result),
@@ -227,6 +238,15 @@ static int row_main()
         return suite::fail("task woke from Acquire", g_result[0].value, 2);
     if (g_result[0].status)
         return suite::fail("semaphore task step", g_result[0].status, 0);
+    suite::activity("the task allocates from the descriptor pool and copy-pushes");
+    if (!suite::wait_for([] { return g_result[0].value == 3 || g_result[0].status; }))
+        return suite::fail("pool task done", g_result[0].value, 3);
+    if (g_result[0].status) {
+        std::printf("pool task: step %u got %#x\n", g_result[0].status, g_result[0].extra);
+        return suite::fail("pool task step", g_result[0].status, 0);
+    }
+    if (s_out[J_TSLOW][0] != Q_MAGIC + Q_SLOW || s_out[J_TPLAIN][0] != Q_MAGIC + Q_PLAIN)
+        return suite::fail("pool jobs ran", s_out[J_TSLOW][0], Q_MAGIC + Q_SLOW);
 
     suite::activity("closing and joining the job queue");
     suite::taskset_down(ts);
