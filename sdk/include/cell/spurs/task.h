@@ -279,6 +279,20 @@ public:
     int destroy()
     { return cellSpursDestroyTaskset2(this); }
 
+    /* the Taskset operations, on the taskset this extends */
+    Taskset *taskset() { return static_cast<Taskset *>(static_cast<CellSpursTaskset *>(this)); }
+    const Taskset *taskset() const
+    { return static_cast<const Taskset *>(static_cast<const CellSpursTaskset *>(this)); }
+    int shutdown() { return taskset()->shutdown(); }
+    int join() { return taskset()->join(); }
+    int getTasksetId(CellSpursWorkloadId *wid) const { return taskset()->getTasksetId(wid); }
+    int getSpursAddress(CellSpurs **ppSpurs) const { return taskset()->getSpursAddress(ppSpurs); }
+    int sendSignal(CellSpursTaskId id) { return taskset()->sendSignal(id); }
+    int setExceptionEventHandler(CellSpursTasksetExceptionEventHandler handler, void *arg)
+    { return taskset()->setExceptionEventHandler(handler, arg); }
+    int unsetExceptionEventHandler() { return taskset()->unsetExceptionEventHandler(); }
+    int getTasksetInfo(CellSpursTasksetInfo *info) const { return taskset()->getTasksetInfo(info); }
+
     int createTask2(CellSpursTaskId *id,
                     const void *eaElf,
                     CellSpursTaskArgument *argument,

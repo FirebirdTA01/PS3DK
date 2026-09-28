@@ -44,6 +44,7 @@
 
 #ifndef __SPU__
 #include <stdbool.h>
+#include <assert.h>
 #endif
 
 #ifdef __cplusplus

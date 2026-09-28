@@ -59,11 +59,11 @@ class boolInVec
         //
         explicit inline boolInVec(bool scalar);
 
-#ifdef _VECTORMATH_NO_SCALAR_CAST
         // explicit cast to bool
-        // 
+        //
         inline bool getAsBool() const;
-#else
+
+#ifndef _VECTORMATH_NO_SCALAR_CAST
         // implicit cast to bool
         // 
         inline operator bool() const;
@@ -156,17 +156,20 @@ boolInVec::boolInVec(bool scalar)
     }
 }
 
-#ifdef _VECTORMATH_NO_SCALAR_CAST
 inline
 bool
 boolInVec::getAsBool() const
-#else
-inline
-boolInVec::operator bool() const
-#endif
 {
     return vec_all_gt(mData, ((vec_uint4){0,0,0,0}));
 }
+
+#ifndef _VECTORMATH_NO_SCALAR_CAST
+inline
+boolInVec::operator bool() const
+{
+    return getAsBool();
+}
+#endif
 
 inline
 vec_uint4

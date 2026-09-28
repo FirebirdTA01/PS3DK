@@ -8,6 +8,9 @@
 #define _PS3DK_SPU_STDLIB_WRAPPER_H
 
 #include_next <stdlib.h>
+/* SPU code expects the fixed-width integer types from <stdlib.h>, which
+ * reaches them through <sys/types.h>. */
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {

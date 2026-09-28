@@ -34,6 +34,8 @@
 #include <cell/spurs/job_queue_semaphore.h>
 #include <cell/spurs/job_queue_port.h>
 #include <cell/spurs/job_queue_port2.h>
+#include <cell/spurs/job_context.h>
+#include <cell/spurs/job_chain.h>
 
 /* CELL_SPURS_PPU_SYM(sym): the 32-bit PPU address of the PPU symbol
  * `sym`, for use in SPU code.  The SPU object records a `sym@ppu`

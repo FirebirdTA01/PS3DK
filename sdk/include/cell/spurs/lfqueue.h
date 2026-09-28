@@ -129,6 +129,20 @@ cellSpursLFQueueTryPopBegin(uint64_t ea, CellSpursLFQueuePopContainer *pContaine
 namespace cell {
 namespace Spurs {
 
+class LFQueuePushContainer : public CellSpursLFQueuePushContainer {
+public:
+    static void initialize(CellSpursLFQueuePushContainer *container, const void *buffer,
+                           const unsigned int tag)
+    { cellSpursLFQueuePushContainerInitialize(container, buffer, tag); }
+};
+
+class LFQueuePopContainer : public CellSpursLFQueuePopContainer {
+public:
+    static void initialize(CellSpursLFQueuePopContainer *container, void *buffer,
+                           const unsigned int tag)
+    { cellSpursLFQueuePopContainerInitialize(container, buffer, tag); }
+};
+
 /* SPU handle on a lock-free queue in main memory: holds its EA and
  * forwards to the EA-based C API. */
 class LFQueueStub {
@@ -285,6 +299,44 @@ cellSpursLFQueuePop(CellSpursLFQueue *pQueue, void *buffer)
 static inline int
 cellSpursLFQueueTryPop(CellSpursLFQueue *pQueue, void *buffer)
 { return _cellSpursLFQueuePopBody(pQueue, buffer, 0); }
+
+#ifdef __cplusplus
+namespace cell {
+namespace Spurs {
+
+class LFQueue : public CellSpursLFQueue {
+public:
+    static const uint32_t kAlign = CELL_SPURS_LFQUEUE_ALIGN;
+    static const uint32_t kSize  = CELL_SPURS_LFQUEUE_SIZE;
+
+    static int initialize(struct CellSpursTaskset *taskset, CellSpursLFQueue *queue,
+                          const void *buffer, unsigned int size, unsigned int depth,
+                          CellSpursLFQueueDirection direction)
+    { return cellSpursLFQueueInitialize(taskset, queue, buffer, size, depth, direction); }
+    static int initializeIWL(CellSpurs *spurs, CellSpursLFQueue *queue,
+                             const void *buffer, unsigned int size, unsigned int depth,
+                             CellSpursLFQueueDirection direction)
+    { return cellSpursLFQueueInitializeIWL(spurs, queue, buffer, size, depth, direction); }
+
+    int attachLv2EventQueue(void) { return cellSpursLFQueueAttachLv2EventQueue(this); }
+    int detachLv2EventQueue(void) { return cellSpursLFQueueDetachLv2EventQueue(this); }
+    int getTasksetAddress(struct CellSpursTaskset **taskset) const
+    { return cellSpursLFQueueGetTasksetAddress(this, taskset); }
+    int size(unsigned int *size) { return cellSpursLFQueueSize(this, size); }
+    int depth(unsigned int *depth) { return cellSpursLFQueueDepth(this, depth); }
+    int getDirection(CellSpursLFQueueDirection *direction) const
+    { return cellSpursLFQueueGetDirection(this, direction); }
+    int getEntrySize(unsigned int *size) const { return cellSpursLFQueueGetEntrySize(this, size); }
+    int clear(void) { return cellSpursLFQueueClear(this); }
+    int push(const void *buffer) { return cellSpursLFQueuePush(this, buffer); }
+    int tryPush(const void *buffer) { return cellSpursLFQueueTryPush(this, buffer); }
+    int pop(void *buffer) { return cellSpursLFQueuePop(this, buffer); }
+    int tryPop(void *buffer) { return cellSpursLFQueueTryPop(this, buffer); }
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+#endif /* __cplusplus */
 
 #endif /* __SPU__ */
 

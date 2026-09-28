@@ -65,11 +65,11 @@ class floatInVec
         //
         explicit inline floatInVec(float scalar);
 
-#ifdef _VECTORMATH_NO_SCALAR_CAST
         // explicit cast to float
-        // 
+        //
         inline float getAsFloat() const;
-#else
+
+#ifndef _VECTORMATH_NO_SCALAR_CAST
         // implicit cast to float
         //
         inline operator float() const;
@@ -179,17 +179,20 @@ floatInVec::floatInVec(float scalar)
     }
 }
 
-#ifdef _VECTORMATH_NO_SCALAR_CAST
 inline
 float
 floatInVec::getAsFloat() const
-#else
-inline
-floatInVec::operator float() const
-#endif
 {
     return *((float *)&mData);
 }
+
+#ifndef _VECTORMATH_NO_SCALAR_CAST
+inline
+floatInVec::operator float() const
+{
+    return getAsFloat();
+}
+#endif
 
 inline
 vec_float4

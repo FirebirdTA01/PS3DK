@@ -22,6 +22,7 @@
 #define __PS3DK_CELL_SPURS_JOB_CHAIN_H_SPU__
 
 #include <stdint.h>
+#include <stddef.h>
 #include <spu_intrinsics.h>
 #include <spu_mfcio.h>
 
