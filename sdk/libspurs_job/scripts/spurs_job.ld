@@ -9,7 +9,8 @@
  *     cellSpursJobInitialize knows the clear range.
  *
  * No exception tables and no crt0; .ctors/.dtors and .fixup are kept for
- * jobs linked with -mspurs-job-initialize (see libspurs_jq job_runtime.c).  Default newlib linker scripts assume a hosted runtime and
+ * jobs linked with -mspurs-job-initialize (see libspurs_jq job_runtime.c).
+ * Default newlib linker scripts assume a hosted runtime and
  * pull in start files - drive the SPU GCC link with -nostartfiles -T
  * spurs_job.ld to use this layout.
  */
