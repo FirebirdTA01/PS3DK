@@ -1,8 +1,9 @@
 /* spurs-suite job extras, SPU job (built with -mspurs-job).
  * workArea.userData[0] = 16-byte output EA, [1] = magic, [2] = mode.
  * X_JOB_PLAIN writes { magic, 0, 0, 0 }.  X_JOB_MEMCHECK writes
- * { magic, Initialize rc, clean Test rc | cause << 16, Test rc after a
- * write to the stack guard | cause << 16 }. */
+ * { magic, Initialize rc unmarked << 16 | Initialize rc marked (low 16
+ * bits each), clean Test rc | cause << 16, Test rc after a write to the
+ * stack guard | cause << 16 }. */
 #include <stdint.h>
 #include <spu_intrinsics.h>
 #include <spu_mfcio.h>
@@ -35,7 +36,11 @@ void cellSpursJobMain2(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
     if (job->workArea.userData[2] == X_JOB_MEMCHECK) {
         uint16_t cause = 0xffff;
         int rc;
-        buf[1] = (uint32_t)cellSpursJobMemoryCheckInitialize(ctx, &job->header);
+        /* the job runs as a plain job; the check reads only this LS copy
+           of the header, so mark the copy as a memory-check job */
+        buf[1] = (uint32_t)cellSpursJobMemoryCheckInitialize(ctx, &job->header);   /* PERM: not marked */
+        job->header.jobType |= CELL_SPURS_JOB_TYPE_MEMORY_CHECK;
+        buf[1] = (buf[1] & 0xffffu) << 16 | ((uint32_t)cellSpursJobMemoryCheckInitialize(ctx, &job->header) & 0xffffu);
         rc = cellSpursJobMemoryCheckTest(&cause);
         buf[2] = ((uint32_t)rc & 0xffffu) | ((uint32_t)cause << 16);
         /* overrun the stack's guard, just below the stack */

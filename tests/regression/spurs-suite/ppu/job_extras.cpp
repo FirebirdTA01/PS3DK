@@ -28,8 +28,7 @@ static void make_job(unsigned i, uint64_t mode)
     std::memset(&s_job[i], 0, sizeof s_job[i]);
     s_job[i].header.eaBinary = reinterpret_cast<uint64_t>(SUITE_JOB_BIN);
     s_job[i].header.sizeBinary = CELL_SPURS_GET_SIZE_BINARY(SUITE_JOB_BIN_SIZE);
-    s_job[i].header.jobType = CELL_SPURS_JOB_TYPE_BINARY2 |
-                              (mode == X_JOB_MEMCHECK ? CELL_SPURS_JOB_TYPE_MEMORY_CHECK : 0);
+    s_job[i].header.jobType = CELL_SPURS_JOB_TYPE_BINARY2;
     s_job[i].workArea.userData[0] = reinterpret_cast<uint64_t>(&s_out[i][0]);
     s_job[i].workArea.userData[1] = X_JOB_MAGIC + i;
     s_job[i].workArea.userData[2] = mode;
@@ -64,7 +63,6 @@ static int row_main()
     std::memset(&attr, 0, sizeof attr);
     rc = cellSpursJobChainAttributeInitialize(&attr, s_list, 256, 16, s_prio, 4, true, 0, 1, false, 256, 0);
     if (!rc) rc = cellSpursJobChainAttributeSetName(&attr, "suite-jx");
-    if (!rc) rc = cellSpursJobChainAttributeSetJobTypeMemoryCheck(&attr);
     if (!rc) rc = cellSpursCreateJobChainWithAttribute(reinterpret_cast<CellSpurs *>(spurs), jc, &attr);
     if (rc) return suite::invalid("create chain", rc);
 
@@ -123,8 +121,9 @@ static int row_main()
             ran |= (s_out[i][0] == X_JOB_MAGIC + i) << i;
         return suite::fail("jobs that ran (bit per job)", ran, (1u << J_COUNT) - 1);
     }
-    if (s_out[J_MEMCHECK][1] != 0)
-        return suite::fail("memory check initialize", s_out[J_MEMCHECK][1], 0);
+    /* unmarked header: PERM; marked: 0 */
+    if (s_out[J_MEMCHECK][1] != 0x0a090000u)
+        return suite::fail("memory check initialize (unmarked << 16 | marked)", s_out[J_MEMCHECK][1], 0x0a090000u);
     if (s_out[J_MEMCHECK][2] != 0)
         return suite::fail("clean memory check (rc | cause << 16)", s_out[J_MEMCHECK][2], 0);
     if (s_out[J_MEMCHECK][3] != (0x0a12u | (0x40u << 16)))
