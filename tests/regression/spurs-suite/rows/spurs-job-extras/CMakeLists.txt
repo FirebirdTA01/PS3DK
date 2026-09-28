@@ -7,7 +7,8 @@ ps3_add_spu_image(spurs-job-extras
     SOURCES ${SUITE_DIR}/spu/job_extras_job.c
     JOBBIN
     CFLAGS -mspurs-job
-    LDFLAGS -mspurs-job -Wl,-q)
+    LDFLAGS -mspurs-job -Wl,-q
+    LIBS spurs)
 target_compile_definitions(spurs-job-extras PRIVATE
     "SUITE_JOB_HEADER=\"${SUITE_SPU}_job_bin.h\""
     "SUITE_JOB_BIN=${SUITE_SPU}_job_bin"
