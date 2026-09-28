@@ -38,12 +38,9 @@
 #define RING_SLOTS   128
 
 extern int _cellSpursTaskCanCallBlockWait(void);
-extern uint64_t cellSpursGetTasksetAddress(void);
-extern unsigned int cellSpursGetTaskId(void);
-extern int cellSpursWaitSignal(void);
+extern int _cellSpursJobQueueWaitInRing(uint64_t lineEa, unsigned recOff, uint64_t ringEa, unsigned slots);
 
 static uint8_t pool[128] __attribute__((aligned(128)));
-static uint8_t ringLine[128] __attribute__((aligned(128)));
 static uint8_t scratch[128] __attribute__((aligned(128)));
 static uint32_t tab[32] __attribute__((aligned(128)));
 static uint32_t link[4] __attribute__((aligned(128)));
@@ -82,91 +79,13 @@ static int handle_open(uint64_t jq, int handle)
 	return (*(volatile uint32_t *)(scratch + (h / 32) * 4) >> (31 - h % 32)) & 1;
 }
 
-/* the lap an entry at slot carries once written, seen from write index w */
-static inline unsigned slot_lap(unsigned slot, unsigned w, unsigned lapW)
-{
-	return slot < w ? lapW ^ 1 : lapW;
-}
-
-static uint64_t read_entry(uint64_t ringEa, unsigned slot)
-{
-	const uint64_t ea = ringEa + slot * 8u;
-	get_line(scratch, ea & ~0x7full);
-	return *(volatile uint64_t *)(scratch + (ea & 0x7f));
-}
-
-/* put ourselves in the class's waiter ring; returns the entry's old value */
-static uint64_t enter_ring(uint64_t jq, unsigned r, uint64_t ringEa, uint64_t me)
-{
-	uint64_t old;
-	unsigned k = 0;
-
-	do {
-		get_line(pool, jq + JQ_POOL_LINE);
-		if (R8(r, 12) > 126)
-			spu_stop(0);
-		R8(r, 12) = (uint8_t)(R8(r, 12) + 1);
-	} while (!put_line(pool, jq + JQ_POOL_LINE));
-
-	for (;;) {
-		unsigned w, lapW, inflight, slot, gap, lap, i;
-		uint64_t ea, lineEa;
-		get_line(pool, jq + JQ_POOL_LINE);
-		w = R16(r, 10);
-		lapW = R8(r, 14) & 1;
-		inflight = R8(r, 12);
-		slot = (w + k) % RING_SLOTS;
-		gap = k;
-		if (gap >= inflight) {
-			k = 0;                          /* published meanwhile: rescan */
-			continue;
-		}
-		/* everything before our slot must be written first */
-		for (i = 0; i < gap; ++i) {
-			const unsigned s = (w + i) % RING_SLOTS;
-			if ((read_entry(ringEa, s) & 1) != slot_lap(s, w, lapW))
-				break;
-		}
-		if (i < gap) {
-			k = 0;
-			continue;
-		}
-		lap = slot_lap(slot, w, lapW);
-		ea = ringEa + slot * 8u;
-		lineEa = ea & ~0x7full;
-		get_line(ringLine, lineEa);
-		old = *(volatile uint64_t *)(ringLine + (ea & 0x7f));
-		if ((old & 1) == lap) {
-			++k;                            /* taken in this lap */
-			continue;
-		}
-		*(volatile uint64_t *)(ringLine + (ea & 0x7f)) = me | lap;
-		if (put_line(ringLine, lineEa))
-			break;
-	}
-
-	/* publish */
-	do {
-		unsigned w;
-		get_line(pool, jq + JQ_POOL_LINE);
-		R8(r, 12) = (uint8_t)(R8(r, 12) - 1);
-		w = R16(r, 10) + 1u;
-		if (w == RING_SLOTS) {
-			w = 0;
-			R8(r, 14) = R8(r, 14) ? 0 : 1;
-		}
-		R16(r, 10) = (uint16_t)w;
-	} while (!put_line(pool, jq + JQ_POOL_LINE));
-	return old;
-}
-
 int _cellSpursJobQueueAllocateJobDescriptor(uint64_t eaJobQueue, int handle, size_t sizeJobDesc,
                                             unsigned int dmaTag, unsigned int flag,
                                             uint64_t *eaAllocatedJobDesc)
 {
 	const int blocking = !(flag & 4);
 	unsigned n, r, woke = 0;
-	uint64_t ringEa, me = 0;
+	uint64_t ringEa;
 
 	if (!eaJobQueue || !eaAllocatedJobDesc)
 		return (int)JOB_NULL;
@@ -215,9 +134,7 @@ int _cellSpursJobQueueAllocateJobDescriptor(uint64_t eaJobQueue, int handle, siz
 			*eaAllocatedJobDesc = got;
 			return 0;
 		}
-		if (!me)
-			me = (uint64_t)((uint32_t)cellSpursGetTasksetAddress() | cellSpursGetTaskId()) << 32 | 0x01000000u;
-		if (!(enter_ring(eaJobQueue, r, ringEa, me) & 2) && cellSpursWaitSignal())
+		if (_cellSpursJobQueueWaitInRing(eaJobQueue + JQ_POOL_LINE, r + 8, ringEa, RING_SLOTS))
 			return (int)TASK_WAIT_FAILED;
 		woke = 1;
 	}
