@@ -9,6 +9,7 @@
 #include <cell/spurs/job_queue.h>
 #include <cell/spurs/job_queue_semaphore.h>
 #include <cell/sysmodule.h>
+#include <initializer_list>
 #include "../jq_spu.h"
 #include SUITE_SPU_HEADER
 #include SUITE_JOB_HEADER
