@@ -32,7 +32,13 @@ void cellSpursJobMain2(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
 {
     __attribute__((aligned(16))) uint32_t buf[4] = { 0, 0, 0, 0 };
     buf[0] = (uint32_t)job->workArea.userData[1];
-    if (job->workArea.userData[2] == X_JOB_MEMCHECK) {
+    if (job->workArea.userData[2] == 2) {                /* diagnostic: $1 */
+        qword sp;
+        __asm__ volatile("ori %0,$1,0" : "=r"(sp));
+        buf[1] = spu_extract((vec_uint4)sp, 0);
+        buf[2] = spu_extract((vec_uint4)sp, 1);
+        buf[3] = (uint32_t)(uintptr_t)ctx;
+    } else if (job->workArea.userData[2] == X_JOB_MEMCHECK) {
         uint16_t cause = 0xffff;
         int rc;
         buf[1] = (uint32_t)cellSpursJobMemoryCheckInitialize(ctx, &job->header);

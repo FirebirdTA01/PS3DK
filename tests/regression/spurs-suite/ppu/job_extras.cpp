@@ -48,7 +48,7 @@ static int row_main()
     if (!ts) return suite::invalid("taskset", rc);
 
     make_job(J_MAIN, X_JOB_PLAIN);
-    make_job(J_MEMCHECK, X_JOB_MEMCHECK);
+    make_job(J_MEMCHECK, 2);   /* diagnostic */
     for (unsigned i = 0; i < X_URGENT_JOBS; ++i)
         make_job(J_URGENT0 + i, X_JOB_PLAIN);
     s_list[0] = CELL_SPURS_JOB_COMMAND_JOB(&s_job[J_MAIN]);
@@ -123,6 +123,8 @@ static int row_main()
             ran |= (s_out[i][0] == X_JOB_MAGIC + i) << i;
         return suite::fail("jobs that ran (bit per job)", ran, (1u << J_COUNT) - 1);
     }
+    std::printf("diag: job $1 word0 %#x word1 %#x ctx %#x\n", s_out[J_MEMCHECK][1], s_out[J_MEMCHECK][2], s_out[J_MEMCHECK][3]);
+    return suite::fail("diagnostic run", 0, 1);
     if (s_out[J_MEMCHECK][1] != 0)
         return suite::fail("memory check initialize", s_out[J_MEMCHECK][1], 0);
     if (s_out[J_MEMCHECK][2] != 0)
