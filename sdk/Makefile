@@ -284,6 +284,7 @@ HEADERS := \
     include/cell/spurs/queue.h \
     include/cell/spurs/semaphore.h \
     include/cell/spurs/exception_types.h \
+    include/cell/spurs/exception.h \
     include/cell/spurs/version.h \
     include/cell/spurs/error.h \
     include/cell/spurs/job_commands.h \

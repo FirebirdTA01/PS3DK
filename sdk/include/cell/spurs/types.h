@@ -162,6 +162,8 @@ static inline int cellSpursAttributeInitialize(CellSpursAttribute *attr,
  * extra data members; these are pure methods living on top of the
  * inherited byte-array container. */
 
+#include <cell/spurs/exception.h>   /* the Spurs exception-handler members */
+
 namespace cell {
 namespace Spurs {
 
@@ -221,6 +223,21 @@ public:
 
     int wakeUp()
     { return cellSpursWakeUp(this); }
+
+    int enableExceptionEventHandler(bool flag)
+    { return cellSpursEnableExceptionEventHandler(this, flag); }
+
+    int setExceptionEventHandler(CellSpursWorkloadId id, CellSpursExceptionEventHandler eaHandler, void *arg)
+    { return cellSpursSetExceptionEventHandler(this, id, eaHandler, arg); }
+
+    int unsetExceptionEventHandler(CellSpursWorkloadId id)
+    { return cellSpursUnsetExceptionEventHandler(this, id); }
+
+    int setGlobalExceptionEventHandler(CellSpursGlobalExceptionEventHandler eaHandler, void *arg)
+    { return cellSpursSetGlobalExceptionEventHandler(this, eaHandler, arg); }
+
+    int unsetGlobalExceptionEventHandler()
+    { return cellSpursUnsetGlobalExceptionEventHandler(this); }
 
     int getNumSpuThread(unsigned int *nThreads)
     { return cellSpursGetNumSpuThread(this, nThreads); }
