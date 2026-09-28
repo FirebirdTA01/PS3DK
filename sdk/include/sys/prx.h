@@ -123,4 +123,92 @@ typedef struct sys_prx_module_info_t {
 
 #include <lv2/prx.h>
 
+/* Cell names.  The types are the structures above; the calls forward to
+ * the sysPrxForUser entry points, which the lv2 stub library exports under
+ * the older names. */
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef sysPrxId sys_prx_id_t;
+typedef sysPrxFlags sys_prx_flags_t;
+typedef sysPrxSegmentInfo sys_prx_segment_info_t;
+typedef sysPrxStartOption sys_prx_start_option_t;
+typedef sysPrxStopOption sys_prx_stop_option_t;
+typedef sysPrxLoadModuleOption sys_prx_load_module_option_t;
+typedef sysPrxLoadModuleListOption sys_prx_load_module_list_option_t;
+typedef sysPrxStartModuleOption sys_prx_start_module_option_t;
+typedef sysPrxStopModuleOption sys_prx_stop_module_option_t;
+typedef sysPrxUnloadModuleOption sys_prx_unload_module_option_t;
+typedef sysPrxRegisterModuleOption sys_prx_register_module_option_t;
+typedef sysPrxGetModuleIdByNameOption sys_prx_get_module_id_by_name_option_t;
+typedef sysPrxModuleList sys_prx_get_module_list_t;
+typedef sysPrxModuleInfo sys_prx_module_info_t;
+typedef sysPrxUserPchar sys_prx_user_pchar_t;
+typedef sysPrxUserSegmentVector sys_prx_user_segment_vector_t;
+typedef sysPrxUserPprxId sys_prx_user_p_prx_id_t;
+typedef sysPrxUserPconstVoid sys_prx_user_p_const_void_t;
+typedef sysPrxUserPstopLevel sys_prx_user_p_stop_level_t;
+
+#define SYS_PRX_STOP_FAILED SYS_PRX_STOP_FAIL
+
+/* entry points without an older declaration */
+sysPrxId sysPrxLoadModuleByFd(int fd, int64_t offset, sysPrxFlags flags, sysPrxLoadModuleOption *opt);
+sysPrxId sysPrxLoadModuleOnMemcontainer(const char *path, uint32_t container, sysPrxFlags flags,
+                                        sysPrxLoadModuleOption *opt);
+sysPrxId sysPrxLoadModuleOnMemcontainerByFd(int fd, int64_t offset, uint32_t container, sysPrxFlags flags,
+                                            sysPrxLoadModuleOption *opt);
+s32 sysPrxLoadModuleList(int n, const char **pathList, sysPrxFlags flags, sysPrxLoadModuleListOption *opt,
+                         sysPrxId *idList);
+s32 sysPrxLoadModuleListOnMemcontainer(int n, const char **pathList, uint32_t container, sysPrxFlags flags,
+                                       sysPrxLoadModuleListOption *opt, sysPrxId *idList);
+sysPrxId sysPrxGetModuleIdByAddress(void *addr);
+sysPrxId sysPrxGetModuleId(void);
+
+static inline sys_prx_id_t sys_prx_load_module(const char *path, uint64_t flags, sys_prx_load_module_option_t *opt)
+{ return sysPrxLoadModule(path, flags, opt); }
+static inline sys_prx_id_t sys_prx_load_module_by_fd(int fd, int64_t offset, uint64_t flags,
+                                                     sys_prx_load_module_option_t *opt)
+{ return sysPrxLoadModuleByFd(fd, offset, flags, opt); }
+static inline sys_prx_id_t sys_prx_load_module_on_memcontainer(const char *path, uint32_t container, uint64_t flags,
+                                                               sys_prx_load_module_option_t *opt)
+{ return sysPrxLoadModuleOnMemcontainer(path, container, flags, opt); }
+static inline sys_prx_id_t sys_prx_load_module_on_memcontainer_by_fd(int fd, int64_t offset, uint32_t container,
+                                                                     uint64_t flags,
+                                                                     sys_prx_load_module_option_t *opt)
+{ return sysPrxLoadModuleOnMemcontainerByFd(fd, offset, container, flags, opt); }
+static inline int sys_prx_load_module_list(int n, const char **pathList, uint64_t flags,
+                                           sys_prx_load_module_list_option_t *opt, sys_prx_id_t *idList)
+{ return sysPrxLoadModuleList(n, pathList, flags, opt, idList); }
+static inline int sys_prx_load_module_list_on_memcontainer(int n, const char **pathList, uint32_t container,
+                                                           uint64_t flags, sys_prx_load_module_list_option_t *opt,
+                                                           sys_prx_id_t *idList)
+{ return sysPrxLoadModuleListOnMemcontainer(n, pathList, container, flags, opt, idList); }
+static inline int sys_prx_start_module(sys_prx_id_t id, size_t args, void *argp, int *modres, sys_prx_flags_t flags,
+                                       sys_prx_start_module_option_t *opt)
+{ return sysPrxStartModule(id, args, argp, modres, flags, opt); }
+static inline int sys_prx_stop_module(sys_prx_id_t id, size_t args, void *argp, int *modres, sys_prx_flags_t flags,
+                                      sys_prx_stop_module_option_t *opt)
+{ return sysPrxStopModule(id, args, argp, modres, flags, (sysPrxStartModuleOption *)opt); }
+static inline int sys_prx_unload_module(sys_prx_id_t id, sys_prx_flags_t flags,
+                                        const sys_prx_unload_module_option_t *opt)
+{ return sysPrxUnloadModule(id, flags, (sysPrxLoadModuleOption *)(uintptr_t)opt); }
+static inline int sys_prx_get_module_list(sys_prx_flags_t flags, sys_prx_get_module_list_t *info)
+{ return sysPrxGetModuleList(flags, info); }
+static inline int sys_prx_get_module_info(sys_prx_id_t id, sys_prx_flags_t flags, sys_prx_module_info_t *info)
+{ return sysPrxGetModuleInfo(id, flags, info); }
+static inline sys_prx_id_t sys_prx_get_module_id_by_name(const char *name, sys_prx_flags_t flags,
+                                                         sys_prx_get_module_id_by_name_option_t *opt)
+{ return sysPrxGetModuleIdByName(name, flags, opt); }
+static inline sys_prx_id_t sys_prx_get_module_id_by_address(void *addr)
+{ return sysPrxGetModuleIdByAddress(addr); }
+static inline sys_prx_id_t sys_prx_get_my_module_id(void)
+{ return sysPrxGetModuleId(); }
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* __SYS_PRX_H__ */
