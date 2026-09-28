@@ -1,14 +1,14 @@
 Relocatable SPURS images: fixups for jobs with their CRT, and custom modules.
 
 -mspurs-job-initialize links with --emit-fixups; its job runtime relocates the
-image from the table. New -mcustom-module builds a position-independent image
-for a custom policy module to load: compiled -fpic (so the pic multilib is used),
-linked at 0 with --emit-fixups and -q, started by crti.o, init_fixups.o and
-crtbegin.o. init_fixups.o (libgcc, every multilib) adds the load address to the
-listed words from _init, before the constructors. Both modes accept run-time
-relocations unless -merror-reloc or -mwarn-reloc is given.
+image from the table.  New -mcustom-module builds a position-independent image
+for a custom policy module to load: compiled -fpic (so the pic multilib is
+used), linked at 0 (the default layout) with --emit-fixups and -q, and started
+by crti.o, init_fixups.o and crtbegin.o.  init_fixups.o (libgcc, every
+multilib) adds the load address to the listed words from _init, before the
+constructors.  Both modes accept run-time relocations unless -merror-reloc or
+-mwarn-reloc is given.
 
-diff -ruN a/gcc/config/spu/spu-elf.h b/gcc/config/spu/spu-elf.h
 --- a/gcc/config/spu/spu-elf.h
 +++ b/gcc/config/spu/spu-elf.h
 @@ -53,7 +53,8 @@
@@ -33,7 +33,7 @@ diff -ruN a/gcc/config/spu/spu-elf.h b/gcc/config/spu/spu-elf.h
    "%{mspurs-job: --spurs-job -dT spurs_job.ld%s} " \
 -  "%{mspurs-job-initialize: --spurs-job-initialize -dT spurs_job.ld%s} " \
 +  "%{mspurs-job-initialize: --spurs-job-initialize -dT spurs_job.ld%s --emit-fixups} " \
-+  "%{mcustom-module:%{!Ttext*:-Ttext=0} --emit-fixups -q} " \
++  "%{mcustom-module:--emit-fixups -q} " \
    "%{mspurs-task: --spurs-task -dT spurs_task.ld%s}"
  
 +/* A job linked with its CRT and a custom module are relocated at load time from
