@@ -1,4 +1,4 @@
-/* spurs-event-flag, SPU task.  argTask: u64[0] = event flag EA,
+/* spurs-suite event flag, SPU task.  argTask: u64[0] = event flag EA,
  * u32[2] = result slot EA, u32[3] = kind (values.h). */
 #include <stdint.h>
 #include <spu_intrinsics.h>
@@ -6,7 +6,7 @@
 #include <cell/spurs/spu_task.h>
 #include <cell/spurs/task_types.h>
 #include <cell/spurs/event_flag.h>
-#include "../values.h"
+#include "../event_flag.h"
 
 static result_slot out;
 
@@ -14,7 +14,7 @@ static void report(uint64_t ea, unsigned kind, int status, unsigned bits, unsign
 {
     out.magic = RESULT_MAGIC | kind;
     out.status = (unsigned)status;
-    out.bits = bits;
+    out.value = bits;
     out.extra = extra;
     mfc_put(&out, ea, sizeof out, 1, 0, 0);
     mfc_write_tag_mask(1u << 1);
