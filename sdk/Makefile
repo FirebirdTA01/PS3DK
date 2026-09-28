@@ -270,6 +270,10 @@ HEADERS := \
     include/cell/spurs/types.h \
     include/cell/spurs/common.h \
     include/cell/spurs/control.h \
+    include/cell/spurs/ready_count.h \
+    include/cell/spurs/policy_module2.h \
+    include/cell/spurs/trace.h \
+    include/cell/spurs/trace_types.h \
     include/cell/spurs/system_workload.h \
     include/cell/spurs/system_workload_types.h \
     include/cell/spurs/task_types.h \
@@ -510,6 +514,11 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/spurs/task_exit_code.h \
     include/cell/spurs/policy_module.h \
     include/cell/spurs/lfqueue.h \
+    include/cell/spurs/control.h \
+    include/cell/spurs/ready_count.h \
+    include/cell/spurs/policy_module2.h \
+    include/cell/spurs/trace.h \
+    include/cell/spurs/trace_types.h \
     include/cell/trace/trace_types.h \
     include/vectormath/cpp/vectormath_soa.h
 
