@@ -60,7 +60,10 @@ OBJS    := $(BUILD)/crt_spurs_task.o \
            $(BUILD)/spurs_task_services2.o \
            $(BUILD)/spurs_kernel_services.o \
            $(BUILD)/spurs_trace.o \
-           $(BUILD)/spurs_compat_entries.o
+           $(BUILD)/spurs_compat_entries.o \
+           $(BUILD)/spurs_job_chain_ctl.o \
+           $(BUILD)/spurs_jobbin2_param.o \
+           $(BUILD)/spurs_job_memory_check.o
 
 LIB     := $(BUILD)/libspurs_task.a
 RUNTIME_LIB := $(BUILD)/libspurs_task_runtime.a
@@ -90,7 +93,10 @@ COMMON_OBJS := $(BUILD)/spurs_task_exit.o \
                $(BUILD)/spurs_task_services2.o \
                $(BUILD)/spurs_kernel_services.o \
                $(BUILD)/spurs_trace.o \
-               $(BUILD)/spurs_compat_entries.o
+               $(BUILD)/spurs_compat_entries.o \
+               $(BUILD)/spurs_job_chain_ctl.o \
+               $(BUILD)/spurs_jobbin2_param.o \
+               $(BUILD)/spurs_job_memory_check.o
 
 .PHONY: all install clean
 

@@ -4,9 +4,8 @@
  *
  * Two header-only inlines walk the per-job DMA list the runtime built
  * for us and resurrect either a void* per input element or a
- * {size, pointer} pair per element.  The buddy entry points
- * cellSpursJobMemoryCheck{Initialize,Test} land in libspurs.sprx via
- * stub trampolines.
+ * {size, pointer} pair per element.  cellSpursJobMemoryCheck{Initialize,
+ * Test} (libspurs.a) guard the job's buffers of a memory-check job.
  *
  * The descriptor types (CellSpursJobHeader, CellSpursJobContext2,
  * CellSpursJobInputDataElement) come from cell/spurs/job_descriptor.h
@@ -102,10 +101,21 @@ cellSpursJobGetInputDataElements(CellSpursJobInputDataElement *elemList,
 }
 
 /*
- * Buffer-overrun watchdog the runtime arms before each job and
- * polls after.  Initialize copies the post-tail signature into the
- * scratch end; Test verifies it survived.
+ * Memory-check jobs (CELL_SPURS_JOB_TYPE_MEMORY_CHECK): Initialize, called
+ * first in the job, writes a guard pattern just past each job buffer,
+ * below the stack and at LS 0; Test reports in *cause which guards were
+ * overwritten and returns CELL_SPURS_JOB_ERROR_MEMORY_CORRUPTED if any.
  */
+enum CellSpursJobBufOverrunErrMask {
+    CELL_SPURS_JOB_BUF_OVERRUN_MASK_RO_DATA1      = 1u << 0,
+    CELL_SPURS_JOB_BUF_OVERRUN_MASK_RO_DATA2      = 1u << 1,
+    CELL_SPURS_JOB_BUF_OVERRUN_MASK_RO_DATA3      = 1u << 2,
+    CELL_SPURS_JOB_BUF_OVERRUN_MASK_RO_DATA4      = 1u << 3,
+    CELL_SPURS_JOB_BUF_OVERRUN_MASK_INOUT         = 1u << 4,
+    CELL_SPURS_JOB_BUF_OVERRUN_MASK_OUT           = 1u << 5,
+    CELL_SPURS_JOB_BUF_OVERRUN_MASK_STACK_SCRATCH = 1u << 6,
+    CELL_SPURS_JOB_BUF_OVERRUN_MASK_NULL_POINTER  = 1u << 7
+};
 extern int  cellSpursJobMemoryCheckInitialize(const CellSpursJobContext2 *jobContext,
                                               CellSpursJobHeader         *jobHeader);
 extern int  cellSpursJobMemoryCheckTest      (uint16_t *cause);

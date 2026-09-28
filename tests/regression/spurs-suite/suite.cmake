@@ -58,6 +58,6 @@ set(SUITE_ROW_DIRS
     spurs-task-manual spurs-task-driver
     spurs-event-flag spurs-event-flag-driver
     spurs-queue spurs-lfqueue
-    spurs-control spurs-barrier spurs-ls-pattern spurs-task2 spurs-services
+    spurs-control spurs-barrier spurs-ls-pattern spurs-task2 spurs-services spurs-job-extras
     spurs-job-chain-manual spurs-job-chain-driver
     spurs-job-queue-manual spurs-job-queue-driver)
