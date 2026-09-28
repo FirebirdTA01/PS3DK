@@ -87,7 +87,6 @@ uint64_t        cellSpursGetTasksetAddress(void);
 int             cellSpursYield(void);
 unsigned        cellSpursTaskPoll(void);
 
-/* Declared only (not yet in libspurs_task.a). */
 int             cellSpursYield2(void);
 unsigned        cellSpursTaskPoll2(void);
 int             cellSpursWaitSignal(void);
@@ -139,7 +138,6 @@ void _cellSpursTaskAttribute2Initialize(CellSpursTaskAttribute2 *attr,
 
 /* -- LS context pattern ---------------------------------------------- */
 
-/* Declared only (not yet in libspurs_task.a). */
 vec_uint4 cellSpursContextGetLsPattern(void);
 int       cellSpursContextSetLsPattern(vec_uint4 lsPattern);
 int       cellSpursTaskGenerateLsPattern(vec_uint4 *lsPattern,

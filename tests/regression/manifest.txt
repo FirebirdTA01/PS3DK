@@ -74,6 +74,7 @@ spurs-queue,tests/regression/spurs-suite/spurs-queue.fake.self,90,RAN-CLEAN,SPUR
 spurs-lfqueue,tests/regression/spurs-suite/spurs-lfqueue.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-lfqueue OK,SPURS_SUITE spurs-lfqueue (FAIL|INVALID)
 spurs-control,tests/regression/spurs-suite/spurs-control.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-control OK,SPURS_SUITE spurs-control (FAIL|INVALID)
 spurs-barrier,tests/regression/spurs-suite/spurs-barrier.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-barrier OK,SPURS_SUITE spurs-barrier (FAIL|INVALID)
+spurs-ls-pattern,tests/regression/spurs-suite/spurs-ls-pattern.fake.self,90,RAN-CLEAN,SPURS_SUITE spurs-ls-pattern OK,SPURS_SUITE spurs-ls-pattern (FAIL|INVALID)
 spurs-job-chain-manual,tests/regression/spurs-suite/spurs-job-chain-manual.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-chain-manual OK,SPURS_SUITE spurs-job-chain-manual (FAIL|INVALID)
 spurs-job-chain-driver,tests/regression/spurs-suite/spurs-job-chain-driver.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-chain-driver OK,SPURS_SUITE spurs-job-chain-driver (FAIL|INVALID)
 spurs-job-queue-manual,tests/regression/spurs-suite/spurs-job-queue-manual.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-queue-manual OK,SPURS_SUITE spurs-job-queue-manual (FAIL|INVALID)
