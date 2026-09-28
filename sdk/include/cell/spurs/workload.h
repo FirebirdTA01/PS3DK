@@ -12,6 +12,56 @@
 #include <ppu-types.h>   /* ATTRIBUTE_PRXPTR */
 #include <cell/spurs/types.h>
 
+#ifdef __SPU__
+/* SPU side: code running under SPURS (a policy module or a task) acts on
+ * workloads of its own instance by workload id (libspurs.a). */
+#include <cell/error.h>
+#include <cell/spurs/error.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int      _cellSpursSendWorkloadSignal(CellSpursWorkloadId id);
+int      _cellSpursShutdownWorkload(CellSpursWorkloadId id);
+/* the argument the workload was added with */
+uint64_t _cellSpursGetWorkloadData(CellSpursWorkloadId id);
+
+#ifdef __cplusplus
+}   /* extern "C" */
+#endif
+
+/* the older forms, whose LS buffer and instance EA are no longer needed */
+static inline int
+cellSpursSendWorkloadSignal(unsigned char *ls, uint64_t eaSpurs, CellSpursWorkloadId id)
+{
+    (void)ls; (void)eaSpurs;
+    if (id >= CELL_SPURS_MAX_WORKLOAD2)
+        return CELL_SPURS_POLICY_MODULE_ERROR_INVAL;
+    (void)_cellSpursSendWorkloadSignal(id);
+    return CELL_OK;
+}
+
+static inline int
+cellSpursShutdownWorkload(uint64_t eaSpurs, CellSpursWorkloadId id)
+{
+    (void)eaSpurs;
+    return _cellSpursShutdownWorkload(id);
+}
+
+static inline int
+cellSpursGetWorkloadData(uint64_t *data, CellSpursWorkloadId id)
+{
+    if (!data)
+        return CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER;
+    if (id >= CELL_SPURS_MAX_WORKLOAD2)
+        return CELL_SPURS_POLICY_MODULE_ERROR_INVAL;
+    *data = _cellSpursGetWorkloadData(id);
+    return CELL_OK;
+}
+
+#else /* PPU */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -177,5 +227,7 @@ struct WorkloadAttribute : public CellSpursWorkloadAttribute {
 }   /* namespace cell */
 
 #endif   /* __cplusplus */
+
+#endif   /* __SPU__ */
 
 #endif   /* __PS3DK_CELL_SPURS_WORKLOAD_H__ */

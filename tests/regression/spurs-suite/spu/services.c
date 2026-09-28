@@ -14,6 +14,7 @@
 #include <cell/spurs/queue.h>
 #include <cell/spurs/event_flag.h>
 #include <cell/spurs/trace.h>
+#include <cell/spurs/workload.h>
 #include "../services.h"
 
 CELL_SPU_LS_PARAM(16 * 1024, 16 * 1024);

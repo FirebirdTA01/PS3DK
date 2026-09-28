@@ -51,7 +51,7 @@ extern int cellSpursSendSignal(uint64_t eaTaskset, CellSpursTaskId idTask);
  * symbol to brsl against. */
 extern int      _cellSpursTaskCanCallBlockWait(void);
 extern uint64_t _cellSpursGetWorkloadFlag(void);
-extern int      _cellSpursSendWorkloadSignal(int signalBit);
+extern int      _cellSpursSendWorkloadSignal(CellSpursWorkloadId id);
 
 #ifdef __cplusplus
 }   /* extern "C" */

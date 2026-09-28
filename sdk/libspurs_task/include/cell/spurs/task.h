@@ -35,6 +35,7 @@
 #include <cell/spurs/error.h>
 #include <cell/spurs/version.h>
 #include <cell/spurs/common.h>
+#include <cell/spurs/workload.h>
 
 /* Return values of cellSpursTaskPoll / cellSpursTaskPoll2 (bit set). */
 #define CELL_SPURS_TASK_POLL_FOUND_TASK       1
@@ -150,6 +151,18 @@ int       cellSpursTaskGetContextSaveAreaSize(uint32_t *size,
 #endif
 
 /* -- Inline helpers -------------------------------------------------- */
+
+/* the taskset of workload `id` (a taskset workload's data is its EA) */
+static inline int
+cellSpursLookUpTasksetAddress(uint64_t *taskset, CellSpursWorkloadId id)
+{
+    if (!taskset)
+        return CELL_SPURS_TASK_ERROR_NULL_POINTER;
+    if (id >= CELL_SPURS_MAX_WORKLOAD2)
+        return CELL_SPURS_TASK_ERROR_INVAL;
+    *taskset = _cellSpursGetWorkloadData(id);
+    return CELL_OK;
+}
 
 static inline int
 cellSpursTaskAttributeInitialize(CellSpursTaskAttribute *attr,
