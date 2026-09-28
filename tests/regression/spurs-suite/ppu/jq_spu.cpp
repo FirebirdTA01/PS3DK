@@ -19,7 +19,7 @@
 
 #define JQ_DEPTH 16
 #define JQ_POOL  Q_POOL
-enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_PORT, J_CHILD2, J_CHILD3, J_PORT2, J_CHILD4, J_CHILD5, J_PORT2S, J_TPLAIN, J_TSLOW, J_SIGNAL, J_SUSPSIZE, J_COUNT };
+enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_PORT, J_CHILD2, J_CHILD3, J_PORT2, J_CHILD4, J_CHILD5, J_PORT2S, J_TPLAIN, J_TSLOW, J_SIGNAL, J_SUSPSIZE, J_CPP, J_COUNT };
 
 static CellSpursJobQueue s_jq __attribute__((aligned(128)));
 /* the task's semaphore, and its parameters in the next line */
@@ -40,6 +40,7 @@ static CellSpursJob256 s_ss[Q_SS_CASES] __attribute__((aligned(128)));
 alignas(16) static uint32_t s_ssSize[(Q_SS_CASES + 3) & ~3];
 alignas(16) static volatile uint32_t s_ssOut[Q_SS_CASES][4];
 alignas(128) static uint8_t s_ssBuf[1024];
+alignas(16) static volatile uint32_t s_cppDtor[4];
 static CellSpursJob128 s_job[J_COUNT] __attribute__((aligned(128)));
 static uint64_t s_cmd[CELL_SPURS_JOBQUEUE_SIZE_COMMAND_BUFFER(JQ_DEPTH) / sizeof(uint64_t)]
     __attribute__((aligned(CELL_SPURS_JOBQUEUE_COMMAND_BUFFER_ALIGN)));
@@ -169,6 +170,26 @@ static int row_main()
             if (want == 0 && s_ssOut[i][2 * attr + 1] != size)
                 return suite::fail("SPU GetSuspendedJobSize size", s_ssOut[i][2 * attr + 1], size);
         }
+
+    /* C++ in a job: relocated vtables and pointer tables, constructors, a
+       function-local static, a destructor after the job; twice, so the
+       second run may reuse the cached, already relocated image */
+    for (unsigned run = 0; run < 2; ++run) {
+        s_cppDtor[0] = s_cppDtor[1] = 0;
+        make_job(J_CPP, Q_CPP, reinterpret_cast<uintptr_t>(&s_cppDtor[0]));
+        suite::activity("C++ job, run %u", run + 1);
+        if ((rc = cellSpursJobQueuePushJob(&s_jq, h, &s_job[J_CPP].header, sizeof s_job[J_CPP], 0, nullptr)))
+            return suite::invalid("push job", rc);
+        if ((rc = cellSpursJobQueuePushFlush(&s_jq, h))) return suite::invalid("push flush", rc);
+        if (!suite::wait_for([] { return s_cppDtor[0] == Q_CPP_DTOR; }))
+            return suite::fail("C++ job's global destructor ran", s_cppDtor[0], Q_CPP_DTOR);
+        if (s_out[J_CPP][0] != Q_MAGIC + Q_CPP)
+            return suite::fail("C++ job", s_out[J_CPP][0], Q_MAGIC + Q_CPP);
+        if (s_out[J_CPP][1])
+            return suite::fail("C++ job step (got in the want field)", s_out[J_CPP][1], s_out[J_CPP][2]);
+        if (s_cppDtor[1] != 101)
+            return suite::fail("objects built during the C++ job", s_cppDtor[1], 101);
+    }
 
     /* a job pushes two jobs itself */
     if ((rc = cellSpursJobQueueSemaphoreInitialize(&s_sem2, &s_jq))) return suite::invalid("jq semaphore 2", rc);

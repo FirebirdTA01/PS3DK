@@ -8,8 +8,8 @@
  *   - .bss must be bracketed by __bss_start / _end so that
  *     cellSpursJobInitialize knows the clear range.
  *
- * Job binaries are tiny: no .ctors/.dtors, no exception tables, no
- * crt0.  Default newlib linker scripts assume a hosted runtime and
+ * No exception tables and no crt0; .ctors/.dtors and .fixup are kept for
+ * jobs linked with -mspurs-job-initialize (see libspurs_jq job_runtime.c).  Default newlib linker scripts assume a hosted runtime and
  * pull in start files - drive the SPU GCC link with -nostartfiles -T
  * spurs_job.ld to use this layout.
  */
@@ -64,6 +64,15 @@ SECTIONS
         . = ALIGN(16);
     } :text =0x00000000
 
+    /* Words holding absolute addresses, listed by ld --emit-fixups (PIC
+     * jobs with vtables or pointer tables); the job runtime relocates
+     * them to the load address.  Ends with a zero record. */
+    .fixup : ALIGN(16) {
+        __fixup_start = .;
+        KEEP(*(.fixup))
+        . = ALIGN(16);
+    } :text =0x00000000
+
     /* The jobbin2-wrapper tool requires LOAD-data's vaddr to equal
      * LOAD-code's end aligned to 0x80, so bump . to 0x80-alignment
      * before the data segment starts. */
@@ -78,6 +87,33 @@ SECTIONS
         *(.data.*)
         . = ALIGN(16);
     } :data =0x00000000
+
+    /* Global constructors and destructors, run by the job runtime's
+     * _init / _fini for -mspurs-job-initialize jobs. */
+    .ctors : ALIGN(4) {
+        __ctors_start = .;
+        KEEP(*(SORT(.ctors.*)))
+        KEEP(*(.ctors))
+        __ctors_end = .;
+    } :data
+    .dtors : ALIGN(4) {
+        __dtors_start = .;
+        KEEP(*(SORT(.dtors.*)))
+        KEEP(*(.dtors))
+        __dtors_end = .;
+    } :data
+    .init_array : ALIGN(4) {
+        __init_array_start = .;
+        KEEP(*(SORT(.init_array.*)))
+        KEEP(*(.init_array))
+        __init_array_end = .;
+    } :data
+    .fini_array : ALIGN(4) {
+        __fini_array_start = .;
+        KEEP(*(SORT(.fini_array.*)))
+        KEEP(*(.fini_array))
+        __fini_array_end = .;
+    } :data
 
     /* Companion `.cell_spu_ls_param` section (8 bytes: heap, stack)
      * the jobbin2-wrapper tool reads to populate metadata.  Non-

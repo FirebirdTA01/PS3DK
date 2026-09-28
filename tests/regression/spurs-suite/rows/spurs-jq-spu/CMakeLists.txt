@@ -4,13 +4,13 @@ suite_ppu(spurs-jq-spu jq_spu.cpp spurs_jq_stub)
 suite_task_manual(spurs-jq-spu jq_spu_task.c spurs_jq)
 ps3_add_spu_image(spurs-jq-spu
     NAME ${SUITE_SPU}_job
-    SOURCES ${SUITE_DIR}/spu/jq_spu_job.c
+    SOURCES ${SUITE_DIR}/spu/jq_spu_job.c ${SUITE_DIR}/spu/jq_spu_cpp.cpp
     NOSTARTFILES
     JOBBIN_WRAP
-    CFLAGS -mspurs-job-initialize
-    LDFLAGS -mspurs-job-initialize -Wl,-q -Wl,--gc-sections
+    CFLAGS -mspurs-job-initialize -mno-error-reloc
+    LDFLAGS -mspurs-job-initialize -Wl,-q -Wl,--gc-sections -Wl,--emit-fixups
     LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_job.ld
-    LIBS spurs_jq spurs)
+    LIBS spurs_jq spurs supc++ c)
 target_compile_definitions(spurs-jq-spu PRIVATE
     "SUITE_JOB_HEADER=\"${SUITE_SPU}_job_bin.h\""
     "SUITE_JOB_BIN=${SUITE_SPU}_job_bin"

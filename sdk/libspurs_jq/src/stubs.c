@@ -34,33 +34,8 @@
  * job_queue_main.c. Direct Main2 clients can use these helpers without
  * pulling in a competing entry definition or a QueueMain dependency. */
 
-/* CRT-Aux init/finalize - the outer CRT-layer wrappers __job_start
- * (in job_crt.S) calls before/after the SysCall layer.  Reference
- * bodies (~700 / ~250 bytes) snapshot job header + context quadwords
- * into _g_cellSpursJobMemoryCheckJob{Header,Context} markers, set
- * up trace state, configure cooperative-yield function pointers,
- * etc.  Stubbed to immediate return until those are wired. */
-int _cellSpursJobCrtAuxInitialize(CellSpursJobContext2 *ctx,
-                                  CellSpursJob256 *job)
-{
-    _UNUSED(ctx); _UNUSED(job);
-    return _STUB_OK;
-}
-
-void _cellSpursJobCrtAuxFinalize(CellSpursJobContext2 *ctx)
-{
-    _UNUSED(ctx);
-}
-
-/* CRT0 ctors / dtors - normally driven by .ctors / .dtors lists.
- * For a freestanding JQ job there's nothing to construct or destruct,
- * so these are no-ops. */
-void _init(void)  { /* no-op */ }
-void _fini(void)  { /* no-op */ }
-
-/* atexit hook - reference SDK uses this for fini-time cleanup; we
- * have no atexit registrations. */
-void __do_atexit(void) { /* no-op */ }
+/* The job CRT pieces (_cellSpursJobCrtAux*, _init, _fini, __do_atexit)
+ * live in job_runtime.c. */
 
 /* -- JQ push body NIDs ----------------------------------------------- */
 

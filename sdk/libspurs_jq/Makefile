@@ -30,10 +30,10 @@ CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding -fpic \
 SFLAGS := -fpic
 
 BUILD := build
-OBJS  := $(BUILD)/stubs.o $(BUILD)/jq_core.o $(BUILD)/jq_semaphore.o $(BUILD)/jq_push.o $(BUILD)/jq_port.o $(BUILD)/jq_port2.o $(BUILD)/jq_alloc.o $(BUILD)/jq_signal.o $(BUILD)/jq_suspend.o $(BUILD)/job_queue_main.o $(BUILD)/job_start_w_crt.o $(BUILD)/job_crt.o
+OBJS  := $(BUILD)/stubs.o $(BUILD)/jq_core.o $(BUILD)/jq_semaphore.o $(BUILD)/jq_push.o $(BUILD)/jq_port.o $(BUILD)/jq_port2.o $(BUILD)/jq_alloc.o $(BUILD)/jq_signal.o $(BUILD)/jq_suspend.o $(BUILD)/job_runtime.o $(BUILD)/job_queue_main.o $(BUILD)/job_start_w_crt.o $(BUILD)/job_crt.o
 LIB   := $(BUILD)/libspurs_jq.a
 RUNTIME_LIB := $(BUILD)/libspurs_jq_runtime.a
-RUNTIME_OBJS := $(BUILD)/stubs.o $(BUILD)/jq_core.o $(BUILD)/jq_semaphore.o $(BUILD)/jq_push.o $(BUILD)/jq_port.o $(BUILD)/jq_port2.o $(BUILD)/jq_alloc.o $(BUILD)/jq_signal.o $(BUILD)/jq_suspend.o $(BUILD)/job_queue_main.o
+RUNTIME_OBJS := $(BUILD)/stubs.o $(BUILD)/jq_core.o $(BUILD)/jq_semaphore.o $(BUILD)/jq_push.o $(BUILD)/jq_port.o $(BUILD)/jq_port2.o $(BUILD)/jq_alloc.o $(BUILD)/jq_signal.o $(BUILD)/jq_suspend.o $(BUILD)/job_runtime.o $(BUILD)/job_queue_main.o
 
 .PHONY: all install clean
 
@@ -46,6 +46,10 @@ $(LIB): $(OBJS)
 $(RUNTIME_LIB): $(RUNTIME_OBJS)
 	@echo "  AR    $(notdir $@)"
 	@$(AR) rcs $@ $(RUNTIME_OBJS)
+
+# the job runtime holds address words on purpose: the job's link with
+# --emit-fixups lists them and the runtime relocates them
+$(BUILD)/job_runtime.o: CFLAGS += -mno-error-reloc
 
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	@echo "  CC    $(notdir $<)"

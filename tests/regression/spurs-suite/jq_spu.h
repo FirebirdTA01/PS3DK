@@ -22,6 +22,9 @@
 #define Q_SUSPSIZE  9   /* GetSuspendedJobSize of descriptors [4] (Q_SS_CASES x 256 bytes)
                            with sizes [6]: puts { rc, size } for attr 0 and 1 to [5] */
 #define Q_SS_CASES  6
+#define Q_CPP       10  /* C++ checks (jq_spu_cpp.cpp); a global's destructor puts
+                           { Q_CPP_DTOR, objects built } to [3] after the job */
+#define Q_CPP_DTOR  0xd70a0000u
 #define Q_MAGIC     0x0e0e0000u
 #define Q_MAX_DESC  256
 

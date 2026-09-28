@@ -149,6 +149,8 @@ static void susp_size(CellSpursJob256 *job)
     }
 }
 
+extern unsigned jq_cpp_run(uint64_t reportEa, uint32_t *got);
+
 void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
 {
     const uint64_t dst = job->workArea.userData[0];
@@ -165,6 +167,8 @@ void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
         port2_sync(job);
     } else if (mode == Q_PUSH) {
         push(job);
+    } else if (mode == Q_CPP) {
+        out[1] = jq_cpp_run(job->workArea.userData[3], &out[2]);
     } else if (mode == Q_SUSPSIZE) {
         susp_size(job);
     } else if (mode == Q_SIGNAL) {
