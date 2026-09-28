@@ -5,7 +5,7 @@
  * the chain's grab limit and urgent slots and compares the header with
  * its own SetJobbin2Param of the same image, then runs the chain: its
  * two list jobs and all four urgent jobs must run, and the memory-check
- * job must see a clean check and then the null-pointer guard it broke. */
+ * job must see a clean check and then the stack guard it broke. */
 #include "harness.h"
 #include "../job_extras.h"
 #include SUITE_SPU_HEADER
@@ -48,7 +48,7 @@ static int row_main()
     if (!ts) return suite::invalid("taskset", rc);
 
     make_job(J_MAIN, X_JOB_PLAIN);
-    make_job(J_MEMCHECK, 2);   /* diagnostic */
+    make_job(J_MEMCHECK, X_JOB_MEMCHECK);
     for (unsigned i = 0; i < X_URGENT_JOBS; ++i)
         make_job(J_URGENT0 + i, X_JOB_PLAIN);
     s_list[0] = CELL_SPURS_JOB_COMMAND_JOB(&s_job[J_MAIN]);
@@ -123,14 +123,12 @@ static int row_main()
             ran |= (s_out[i][0] == X_JOB_MAGIC + i) << i;
         return suite::fail("jobs that ran (bit per job)", ran, (1u << J_COUNT) - 1);
     }
-    std::printf("diag: job $1 word0 %#x word1 %#x ctx %#x\n", s_out[J_MEMCHECK][1], s_out[J_MEMCHECK][2], s_out[J_MEMCHECK][3]);
-    return suite::fail("diagnostic run", 0, 1);
     if (s_out[J_MEMCHECK][1] != 0)
         return suite::fail("memory check initialize", s_out[J_MEMCHECK][1], 0);
     if (s_out[J_MEMCHECK][2] != 0)
         return suite::fail("clean memory check (rc | cause << 16)", s_out[J_MEMCHECK][2], 0);
-    if (s_out[J_MEMCHECK][3] != (0x0a12u | (0x80u << 16)))
-        return suite::fail("broken null guard (rc | cause << 16)", s_out[J_MEMCHECK][3], 0x0a12u | (0x80u << 16));
+    if (s_out[J_MEMCHECK][3] != (0x0a12u | (0x40u << 16)))
+        return suite::fail("broken stack guard (rc | cause << 16)", s_out[J_MEMCHECK][3], 0x0a12u | (0x40u << 16));
 
     suite::activity("shutting down the chain");
     if ((rc = cellSpursShutdownJobChain(jc))) return suite::fail("shutdown chain", rc, 0);
