@@ -19,12 +19,6 @@
  *
  * argTask arrives in r3 (full 16-byte vector),
  * argTaskset arrives in r4 preferred slot (64-bit EA).
- *
- * Declared-only entry points: some functions below are part of the SPU
- * task API but are not yet implemented by libspurs_task.a (for example
- * cellSpursWaitSignal, cellSpursShutdownTaskset, cellSpursCreateTask*,
- * cellSpursJoinTask2 and the LS-pattern queries).  Code that calls them
- * compiles and fails at link time until the runtime grows them.
  */
 #ifndef __PS3DK_CELL_SPURS_TASK_H__
 #define __PS3DK_CELL_SPURS_TASK_H__
@@ -100,9 +94,9 @@ int             cellSpursTaskReceiveWorkloadFlag2(void);
 /* Wake task `idTask` of the taskset at `eaTaskset` (libspurs_task.a). */
 int cellSpursSendSignal(uint64_t eaTaskset, CellSpursTaskId idTask);
 
-/* libspurs_task.a: ShutdownTaskset, CreateTask, CreateTaskWithAttribute and
- * the task attribute (exit-code containers return NOSYS for now).  The
- * Task2 forms are declared only. */
+/* Task creation from a task: CreateTask, CreateTaskWithAttribute (with an
+ * optional exit-code container, which needs a Taskset2) and the Task2
+ * forms, which also need a Taskset2. */
 int cellSpursShutdownTaskset(uint64_t eaTaskset);
 
 int cellSpursCreateTask(uint64_t eaTaskset, CellSpursTaskId *idTask,

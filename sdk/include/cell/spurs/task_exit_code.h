@@ -19,8 +19,7 @@ extern "C" {
 
 #ifdef __SPU__
 
-/* SPU side: the exit-code container is named by its effective address.
- * Declared only: the SPU runtime does not implement these yet. */
+/* SPU side: the exit-code container is named by its effective address. */
 extern int cellSpursTaskExitCodeInitialize(uint64_t eaExitCode);
 extern int cellSpursTaskExitCodeGet(uint64_t eaExitCode, int *value);
 extern int cellSpursTaskExitCodeTryGet(uint64_t eaExitCode, int *value);

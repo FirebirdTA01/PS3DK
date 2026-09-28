@@ -31,6 +31,15 @@
 #define CONTEXT_MIN      1024           /* CELL_SPURS_TASK_EXECUTION_CONTEXT_SIZE */
 #define TASK_INFO        0x80
 #define TASK_INFO_SIZE   0x30
+#define TASK_PERM        0x80410909u
+#define TS2_INFO         0x1880         /* Taskset2 line: size at +0x10, no-exit-code flag at +0x14 */
+#define TS2_SIZE_MIN     0x2900
+#define TS2_EXIT_DATA    0x1900
+#define EXIT_RECORDS     0x1980
+#define ELF_EXIT_CODE    1              /* task record ELF EA: has an exit-code container */
+
+extern int _cellSpursTaskExitCodeAttachTask(uint64_t ea, uint64_t eaTaskset, unsigned int idTask);
+extern int _cellSpursTaskExitCodeMakeReadyToWait(uint64_t ea, int noCode);
 
 extern int _cellSpursSendWorkloadSignal(unsigned int wid);
 
@@ -59,9 +68,10 @@ static unsigned bits_set(vec_uint4 v)
 	return n;
 }
 
-int cellSpursCreateTask(uint64_t eaTaskset, CellSpursTaskId *idTask, uint64_t eaElf,
-                        uint64_t eaContext, uint32_t sizeContext, vec_uint4 lsPattern,
-                        qword argument)
+/* eaExitCode: the task's exit-code container, or 0 */
+static int create_task(uint64_t eaTaskset, CellSpursTaskId *idTask, uint64_t eaElf,
+                       uint64_t eaContext, uint32_t sizeContext, vec_uint4 lsPattern,
+                       qword argument, uint64_t eaExitCode)
 {
 	unsigned id = MAX_TASKS, word, bit, wid;
 	uint64_t allocBlocks = 0, record;
@@ -69,6 +79,12 @@ int cellSpursCreateTask(uint64_t eaTaskset, CellSpursTaskId *idTask, uint64_t ea
 		return (int)TASK_NULL;
 	if ((eaTaskset & 0x7f) || (eaElf & 15) || (eaContext & 0x7f))
 		return (int)TASK_ALIGN;
+	if (eaExitCode) {
+		/* exit codes need a Taskset2 */
+		line_get(eaTaskset + TS2_INFO);
+		if (line[0x10 >> 2] < TS2_SIZE_MIN)
+			return (int)TASK_PERM;
+	}
 	if (eaContext) {
 		if (sizeContext < CONTEXT_MIN)
 			return (int)TASK_INVAL;
@@ -98,7 +114,7 @@ int cellSpursCreateTask(uint64_t eaTaskset, CellSpursTaskId *idTask, uint64_t ea
 
 	/* its record */
 	__builtin_memcpy(&info[0], &argument, 16);
-	info[2] = eaElf;
+	info[2] = eaElf | (eaExitCode ? ELF_EXIT_CODE : 0);
 	info[3] = eaContext | allocBlocks;
 	if (!eaContext)
 		lsPattern = (vec_uint4){ 0, 0, 0, 0 };
@@ -108,6 +124,19 @@ int cellSpursCreateTask(uint64_t eaTaskset, CellSpursTaskId *idTask, uint64_t ea
 	mfc_write_tag_mask(1u << 31);
 	(void)mfc_read_tag_status_all();
 
+	/* its exit code: attach the container and hand the policy module its
+	   exit record { u64 from Taskset2 +0x1900, u64 container EA } */
+	if (eaExitCode) {
+		(void)_cellSpursTaskExitCodeAttachTask(eaExitCode, eaTaskset, id);
+		mfc_get(&info[0], eaTaskset + TS2_EXIT_DATA, 8, 31, 0, 0);
+		mfc_write_tag_mask(1u << 31);
+		(void)mfc_read_tag_status_all();
+		info[1] = eaExitCode;
+		mfc_putf(info, eaTaskset + EXIT_RECORDS + (uint64_t)id * 16, 16, 31, 0, 0);
+		mfc_write_tag_mask(1u << 31);
+		(void)mfc_read_tag_status_all();
+	}
+
 	/* make it ready */
 	do {
 		line_get(eaTaskset);
@@ -115,7 +144,19 @@ int cellSpursCreateTask(uint64_t eaTaskset, CellSpursTaskId *idTask, uint64_t ea
 	} while (!line_put(eaTaskset));
 	*idTask = id;
 	(void)_cellSpursSendWorkloadSignal(wid);
+
+	if (eaExitCode) {
+		line_get(eaTaskset + TS2_INFO);
+		(void)_cellSpursTaskExitCodeMakeReadyToWait(eaExitCode, line[0x14 >> 2] == 1);
+	}
 	return 0;
+}
+
+int cellSpursCreateTask(uint64_t eaTaskset, CellSpursTaskId *idTask, uint64_t eaElf,
+                        uint64_t eaContext, uint32_t sizeContext, vec_uint4 lsPattern,
+                        qword argument)
+{
+	return create_task(eaTaskset, idTask, eaElf, eaContext, sizeContext, lsPattern, argument, 0);
 }
 
 /* ---- task attribute ---------------------------------------------------- */
@@ -165,8 +206,14 @@ int cellSpursTaskAttributeSetExitCodeContainer(CellSpursTaskAttribute *attr, uin
 		return (int)TASK_NULL;
 	if ((uintptr_t)attr & 15)
 		return (int)TASK_ALIGN;
-	(void)eaExitCode;
-	return (int)TASK_NOSYS;             /* exit-code containers: not yet */
+	if (!eaExitCode)
+		return (int)TASK_NULL;
+	if (eaExitCode & 0x7f)
+		return (int)TASK_ALIGN;
+	if (((task_attr_t *)attr)->magic != ATTR_MAGIC)
+		return (int)TASK_INVAL;
+	((task_attr_t *)attr)->eaExitCode = eaExitCode;
+	return 0;
 }
 
 int cellSpursCreateTaskWithAttribute(uint64_t eaTaskset, CellSpursTaskId *idTask,
@@ -179,6 +226,6 @@ int cellSpursCreateTaskWithAttribute(uint64_t eaTaskset, CellSpursTaskId *idTask
 		return (int)TASK_ALIGN;
 	if (a->magic != ATTR_MAGIC)
 		return (int)TASK_INVAL;
-	return cellSpursCreateTask(eaTaskset, idTask, a->eaElf, a->eaContext, a->sizeContext,
-	                           a->lsPattern, a->argument);
+	return create_task(eaTaskset, idTask, a->eaElf, a->eaContext, a->sizeContext,
+	                   a->lsPattern, a->argument, a->eaExitCode);
 }

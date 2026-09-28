@@ -23,7 +23,7 @@ AR      := spu-elf-ar
 CFLAGS  := -O2 -Wall -Wextra -fno-exceptions -ffreestanding \
            -falign-functions=8 -mno-branch-hints \
            -fno-schedule-insns2 \
-           -Iinclude -I../include -I../include-spu
+           -Iinclude -I../include -I../include-spu -I../libsputhread/include
 SFLAGS  := -Wall
 
 # -fno-schedule-insns2 disables GCC's post-RA instruction scheduler.
@@ -53,7 +53,10 @@ OBJS    := $(BUILD)/crt_spurs_task.o \
            $(BUILD)/spurs_control.o \
            $(BUILD)/spurs_create_task.o \
            $(BUILD)/spurs_barrier.o \
-           $(BUILD)/spurs_ls_pattern.o
+           $(BUILD)/spurs_ls_pattern.o \
+           $(BUILD)/spurs_post_event.o \
+           $(BUILD)/spurs_exit_code.o \
+           $(BUILD)/spurs_task2.o
 
 LIB     := $(BUILD)/libspurs_task.a
 RUNTIME_LIB := $(BUILD)/libspurs_task_runtime.a
@@ -76,7 +79,10 @@ COMMON_OBJS := $(BUILD)/spurs_task_exit.o \
                $(BUILD)/spurs_control.o \
                $(BUILD)/spurs_create_task.o \
                $(BUILD)/spurs_barrier.o \
-               $(BUILD)/spurs_ls_pattern.o
+               $(BUILD)/spurs_ls_pattern.o \
+               $(BUILD)/spurs_post_event.o \
+               $(BUILD)/spurs_exit_code.o \
+               $(BUILD)/spurs_task2.o
 
 .PHONY: all install clean
 
