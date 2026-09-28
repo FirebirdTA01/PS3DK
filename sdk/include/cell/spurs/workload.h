@@ -9,7 +9,6 @@
 #define __PS3DK_CELL_SPURS_WORKLOAD_H__
 
 #include <stdint.h>
-#include <ppu-types.h>   /* ATTRIBUTE_PRXPTR */
 #include <cell/spurs/types.h>
 
 #ifdef __SPU__
@@ -61,6 +60,8 @@ cellSpursGetWorkloadData(uint64_t *data, CellSpursWorkloadId id)
 }
 
 #else /* PPU */
+
+#include <ppu-types.h>   /* ATTRIBUTE_PRXPTR */
 
 #ifdef __cplusplus
 extern "C" {
