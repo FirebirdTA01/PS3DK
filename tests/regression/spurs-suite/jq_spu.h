@@ -19,6 +19,9 @@
 #define Q_PORT2S    6   /* syncs (without blocking) and destroys Port2 [3] made by the PPU */
 #define Q_SLOW      7   /* like PLAIN, but runs for a few milliseconds first */
 #define Q_SIGNAL    8   /* wakes the suspended WAIT job ([3] = its suspend buffer) */
+#define Q_SUSPSIZE  9   /* GetSuspendedJobSize of descriptors [4] (Q_SS_CASES x 256 bytes)
+                           with sizes [6]: puts { rc, size } for attr 0 and 1 to [5] */
+#define Q_SS_CASES  6
 #define Q_MAGIC     0x0e0e0000u
 #define Q_MAX_DESC  256
 

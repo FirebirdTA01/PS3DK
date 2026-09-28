@@ -62,16 +62,6 @@ void _fini(void)  { /* no-op */ }
  * have no atexit registrations. */
 void __do_atexit(void) { /* no-op */ }
 
-int cellSpursJobQueueGetSuspendedJobSize(const CellSpursJobHeader *pJob,
-                                         size_t sizeJobDesc,
-                                         enum CellSpursJobQueueSuspendedJobAttribute attr,
-                                         unsigned int *pSize)
-{
-    _UNUSED(pJob); _UNUSED(sizeJobDesc); _UNUSED(attr);
-    if (pSize) *pSize = 0;
-    return _STUB_OK;
-}
-
 /* -- JQ push body NIDs ----------------------------------------------- */
 
 /* -- Port surface --------------------------------------------------- */

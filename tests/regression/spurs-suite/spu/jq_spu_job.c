@@ -124,6 +124,31 @@ static void port2_sync(CellSpursJob256 *job)
     EXPECT(83, cellSpursJobQueuePort2Destroy(p), JOB_STAT);
 }
 
+/* suspended-job sizes, compared with the PPU's by the row */
+static void susp_size(CellSpursJob256 *job)
+{
+    static uint8_t desc[256] __attribute__((aligned(128)));
+    static uint32_t res[4] __attribute__((aligned(16)));
+    static uint32_t sizes[(Q_SS_CASES + 3) & ~3] __attribute__((aligned(16)));
+    unsigned i, attr;
+    mfc_get(sizes, job->workArea.userData[6], sizeof sizes, 3, 0, 0);
+    mfc_write_tag_mask(1u << 3);
+    mfc_read_tag_status_all();
+    for (i = 0; i < Q_SS_CASES; ++i) {
+        mfc_get(desc, job->workArea.userData[4] + 256 * i, 256, 3, 0, 0);
+        mfc_read_tag_status_all();
+        for (attr = 0; attr < 2; ++attr) {
+            unsigned size = 0xdeadu;
+            res[2 * attr] = (uint32_t)cellSpursJobQueueGetSuspendedJobSize((const CellSpursJobHeader *)desc, sizes[i],
+                                                                          (enum CellSpursJobQueueSuspendedJobAttribute)attr,
+                                                                          &size);
+            res[2 * attr + 1] = size;
+        }
+        mfc_put(res, job->workArea.userData[5] + 16 * i, 16, 3, 0, 0);
+        mfc_read_tag_status_all();
+    }
+}
+
 void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
 {
     const uint64_t dst = job->workArea.userData[0];
@@ -140,6 +165,8 @@ void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
         port2_sync(job);
     } else if (mode == Q_PUSH) {
         push(job);
+    } else if (mode == Q_SUSPSIZE) {
+        susp_size(job);
     } else if (mode == Q_SIGNAL) {
         const uint64_t susp = job->workArea.userData[3];
         if (cellSpursJobQueueSendSignal(0) != (int)JOB_NULL) {

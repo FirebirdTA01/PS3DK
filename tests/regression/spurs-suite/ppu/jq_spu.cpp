@@ -19,7 +19,7 @@
 
 #define JQ_DEPTH 16
 #define JQ_POOL  Q_POOL
-enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_PORT, J_CHILD2, J_CHILD3, J_PORT2, J_CHILD4, J_CHILD5, J_PORT2S, J_TPLAIN, J_TSLOW, J_SIGNAL, J_COUNT };
+enum { J_INFO, J_WAIT, J_PLAIN0, J_PLAIN1, J_PUSH, J_CHILD0, J_CHILD1, J_PORT, J_CHILD2, J_CHILD3, J_PORT2, J_CHILD4, J_CHILD5, J_PORT2S, J_TPLAIN, J_TSLOW, J_SIGNAL, J_SUSPSIZE, J_COUNT };
 
 static CellSpursJobQueue s_jq __attribute__((aligned(128)));
 /* the task's semaphore, and its parameters in the next line */
@@ -36,6 +36,10 @@ alignas(128) static uint8_t s_descBuf[128];
 static CellSpursJobQueuePort2 s_port2a __attribute__((aligned(128)));
 static CellSpursJobQueuePort2 s_port2b __attribute__((aligned(128)));
 alignas(16) static CellSpursJobList s_list;
+static CellSpursJob256 s_ss[Q_SS_CASES] __attribute__((aligned(128)));
+alignas(16) static uint32_t s_ssSize[(Q_SS_CASES + 3) & ~3];
+alignas(16) static volatile uint32_t s_ssOut[Q_SS_CASES][4];
+alignas(128) static uint8_t s_ssBuf[1024];
 static CellSpursJob128 s_job[J_COUNT] __attribute__((aligned(128)));
 static uint64_t s_cmd[CELL_SPURS_JOBQUEUE_SIZE_COMMAND_BUFFER(JQ_DEPTH) / sizeof(uint64_t)]
     __attribute__((aligned(CELL_SPURS_JOBQUEUE_COMMAND_BUFFER_ALIGN)));
@@ -116,6 +120,55 @@ static int row_main()
         return suite::fail("wait job resumed", s_out[J_WAIT][0], Q_MAGIC + Q_WAIT);
     if (s_out[J_WAIT][1] != 0)
         return suite::fail("WaitSignal rc", s_out[J_WAIT][1], 0);
+
+    /* suspended-job sizes: the SPU runtime must agree with the PPU's */
+    for (unsigned i = 0; i < Q_SS_CASES; ++i) {
+        std::memset(&s_ss[i], 0, sizeof s_ss[i]);
+        std::memcpy(&s_ss[i].header, SUITE_JOB_JOBHEADER, sizeof(CellSpursJobHeader));
+        s_ss[i].header.eaBinary += reinterpret_cast<uint64_t>(SUITE_JOB_BIN);
+        s_ssSize[i] = sizeof s_ss[i];
+    }
+    const uint64_t buf = reinterpret_cast<uintptr_t>(s_ssBuf);
+    s_ss[1].header.sizeDmaList = 16;                         /* input list, two entries */
+    s_ss[1].header.sizeInOrInOut = 256;
+    s_ss[1].workArea.dmaList[0] = (128ull << 32) | buf;
+    s_ss[1].workArea.dmaList[1] = (64ull << 32) | (buf + 128);
+    s_ss[2].header.sizeCacheDmaList = 16;                    /* cache list, two entries */
+    s_ss[2].workArea.dmaList[0] = (256ull << 32) | (buf + 256);
+    s_ss[2].workArea.dmaList[1] = (512ull << 32) | (buf + 512);
+    s_ss[3].header.jobType |= 2;                              /* memory checker guards */
+    s_ss[3].header.sizeStack = 64;
+    s_ss[3].header.sizeScratch = 4;
+    s_ss[3].header.sizeOut = 128;
+    s_ss[3].header.sizeInOrInOut = 256;
+    s_ss[3].header.sizeDmaList = 8;
+    s_ss[3].workArea.dmaList[0] = (32ull << 32) | buf;
+    s_ssSize[4] = 128;                                        /* too small to suspend */
+    s_ss[5].header.sizeDmaList = 8;                           /* misaligned list entry */
+    s_ss[5].header.sizeInOrInOut = 256;
+    s_ss[5].workArea.dmaList[0] = (32ull << 32) | (buf + 8);
+    make_job(J_SUSPSIZE, Q_SUSPSIZE, 0);
+    s_job[J_SUSPSIZE].workArea.userData[4] = reinterpret_cast<uintptr_t>(s_ss);
+    s_job[J_SUSPSIZE].workArea.userData[5] = reinterpret_cast<uintptr_t>(&s_ssOut[0][0]);
+    s_job[J_SUSPSIZE].workArea.userData[6] = reinterpret_cast<uintptr_t>(s_ssSize);
+    suite::activity("comparing suspended-job sizes with the SPU runtime");
+    if ((rc = cellSpursJobQueuePushJob(&s_jq, h, &s_job[J_SUSPSIZE].header, sizeof s_job[J_SUSPSIZE], 0, nullptr)))
+        return suite::invalid("push job", rc);
+    if ((rc = cellSpursJobQueuePushFlush(&s_jq, h))) return suite::invalid("push flush", rc);
+    if (!suite::wait_for([] { return s_out[J_SUSPSIZE][0] == Q_MAGIC + Q_SUSPSIZE; }))
+        return suite::fail("suspended-size job", s_out[J_SUSPSIZE][0], Q_MAGIC + Q_SUSPSIZE);
+    for (unsigned i = 0; i < Q_SS_CASES; ++i)
+        for (unsigned attr = 0; attr < 2; ++attr) {
+            unsigned size = 0xdead;
+            const int want = cellSpursJobQueueGetSuspendedJobSize(&s_ss[i].header, s_ssSize[i],
+                                 static_cast<CellSpursJobQueueSuspendedJobAttribute>(attr), &size);
+            std::printf("suspended size case %u attr %u: PPU rc %#x size %u, SPU rc %#x size %u\n",
+                        i, attr, static_cast<unsigned>(want), size, s_ssOut[i][2 * attr], s_ssOut[i][2 * attr + 1]);
+            if (s_ssOut[i][2 * attr] != static_cast<uint32_t>(want))
+                return suite::fail("SPU GetSuspendedJobSize rc", s_ssOut[i][2 * attr], static_cast<uint32_t>(want));
+            if (want == 0 && s_ssOut[i][2 * attr + 1] != size)
+                return suite::fail("SPU GetSuspendedJobSize size", s_ssOut[i][2 * attr + 1], size);
+        }
 
     /* a job pushes two jobs itself */
     if ((rc = cellSpursJobQueueSemaphoreInitialize(&s_sem2, &s_jq))) return suite::invalid("jq semaphore 2", rc);
