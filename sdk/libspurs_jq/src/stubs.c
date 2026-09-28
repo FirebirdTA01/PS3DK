@@ -96,43 +96,6 @@ int _cellSpursJobQueueAllocateJobDescriptor(uint64_t eaJobQueue,
 
 /* -- Port2 surface -------------------------------------------------- */
 
-uint64_t cellSpursJobQueuePort2GetJobQueue(uint64_t eaPort2)
-{
-    _UNUSED(eaPort2);
-    return 0;
-}
-
-int cellSpursJobQueuePort2Create(uint64_t eaPort2, uint64_t eaJobQueue)
-{
-    _UNUSED(eaPort2); _UNUSED(eaJobQueue);
-    return _STUB_INVAL;
-}
-
-int cellSpursJobQueuePort2Destroy(uint64_t eaPort2)
-{
-    _UNUSED(eaPort2);
-    return _STUB_INVAL;
-}
-
-int _cellSpursJobQueuePort2PushJobBody(uint64_t eaPort2, uint64_t eaJob,
-                                       size_t sizeDesc, unsigned tag,
-                                       unsigned int dmaTag, unsigned flag,
-                                       unsigned isAutoRelease)
-{
-    _UNUSED(eaPort2); _UNUSED(eaJob); _UNUSED(sizeDesc); _UNUSED(tag);
-    _UNUSED(dmaTag); _UNUSED(flag); _UNUSED(isAutoRelease);
-    return _STUB_INVAL;
-}
-
-int _cellSpursJobQueuePort2PushJobListBody(uint64_t eaPort2, uint64_t eaJobList,
-                                           unsigned tag, unsigned int dmaTag,
-                                           unsigned flag)
-{
-    _UNUSED(eaPort2); _UNUSED(eaJobList); _UNUSED(tag);
-    _UNUSED(dmaTag); _UNUSED(flag);
-    return _STUB_INVAL;
-}
-
 int _cellSpursJobQueuePort2CopyPushJobBody(uint64_t eaPort2,
                                            const CellSpursJobHeader *pJob,
                                            size_t sizeDesc, size_t sizeDescFromPool,
@@ -150,26 +113,6 @@ int cellSpursJobQueuePort2AllocateJobDescriptor(uint64_t eaPort2, size_t sizeDes
 {
     _UNUSED(eaPort2); _UNUSED(sizeDesc); _UNUSED(dmaTag); _UNUSED(flag);
     if (eaAllocatedJobDesc) *eaAllocatedJobDesc = 0;
-    return _STUB_INVAL;
-}
-
-int cellSpursJobQueuePort2Sync(uint64_t eaPort2, unsigned flag)
-{
-    _UNUSED(eaPort2); _UNUSED(flag);
-    return _STUB_INVAL;
-}
-
-int cellSpursJobQueuePort2PushFlush(uint64_t eaPort2, unsigned int dmaTag,
-                                    unsigned flag)
-{
-    _UNUSED(eaPort2); _UNUSED(dmaTag); _UNUSED(flag);
-    return _STUB_INVAL;
-}
-
-int cellSpursJobQueuePort2PushSync(uint64_t eaPort2, unsigned tagMask,
-                                   unsigned int dmaTag, unsigned flag)
-{
-    _UNUSED(eaPort2); _UNUSED(tagMask); _UNUSED(dmaTag); _UNUSED(flag);
     return _STUB_INVAL;
 }
 

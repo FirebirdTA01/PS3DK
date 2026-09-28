@@ -8,10 +8,14 @@
 #include <cell/spurs/job_context.h>
 #include <cell/spurs/job_queue.h>
 #include <cell/spurs/job_queue_port.h>
+#include <cell/spurs/job_queue_port2.h>
 #include "../jq_spu.h"
 
 #define JOB_AGAIN 0x80410A01u
 #define JOB_INVAL 0x80410A02u
+#define JOB_BUSY  0x80410A0Au
+#define JOB_STAT  0x80410A0Fu
+#define JOB_ALIGN 0x80410A10u
 #define JOB_NULL  0x80410A11u
 
 static uint32_t out[4] __attribute__((aligned(16)));
@@ -91,6 +95,35 @@ static void port(CellSpursJob256 *job)
     EXPECT(47, _cellSpursJobQueuePortPushFlush(p2, 2, 0), 0);
 }
 
+/* Port2 made here; the PPU syncs and destroys it */
+static void port2(CellSpursJob256 *job)
+{
+    const uint64_t jq = job->workArea.userData[2], p = job->workArea.userData[3];
+    EXPECT(60, cellSpursJobQueuePort2Create(0, jq), JOB_NULL);
+    EXPECT(61, cellSpursJobQueuePort2Create(p + 16, jq), JOB_ALIGN);
+    EXPECT(62, cellSpursJobQueuePort2Create(p, jq), 0);
+    EXPECT(63, cellSpursJobQueuePort2GetJobQueue(p), jq);
+    EXPECT(64, cellSpursJobQueuePort2PushJob(p, job->workArea.userData[4], 128, 0, 2, 8), JOB_INVAL);
+    EXPECT(65, cellSpursJobQueuePort2PushJob(p, job->workArea.userData[4], 128, 0, 2, 1 | 4), 0);
+    EXPECT(66, cellSpursJobQueuePort2PushJobList(p, job->workArea.userData[5], 0, 2, 2), JOB_INVAL);
+    EXPECT(67, cellSpursJobQueuePort2PushJobList(p, job->workArea.userData[5], 0, 2, 1 | 4), 0);
+    EXPECT(68, cellSpursJobQueuePort2PushSync(p, 1, 2, 4), 0);
+    EXPECT(69, cellSpursJobQueuePort2PushFlush(p, 2, 4), 0);
+    EXPECT(70, cellSpursJobQueuePort2PushFlush(p, 2, 1), JOB_INVAL);
+    EXPECT(71, cellSpursJobQueuePort2Sync(p, 8), JOB_INVAL);
+    EXPECT(72, cellSpursJobQueuePort2Destroy(p), JOB_BUSY);          /* two sync jobs not waited for */
+}
+
+/* Port2 made by the PPU: nothing pending, so a try-sync succeeds */
+static void port2_sync(CellSpursJob256 *job)
+{
+    const uint64_t p = job->workArea.userData[3];
+    EXPECT(80, cellSpursJobQueuePort2GetJobQueue(p), job->workArea.userData[2]);
+    EXPECT(81, cellSpursJobQueuePort2Sync(p, 4), 0);
+    EXPECT(82, cellSpursJobQueuePort2Destroy(p), 0);
+    EXPECT(83, cellSpursJobQueuePort2Destroy(p), JOB_STAT);
+}
+
 void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
 {
     const uint64_t dst = job->workArea.userData[0];
@@ -101,6 +134,10 @@ void cellSpursJobQueueMain(CellSpursJobContext2 *ctx, CellSpursJob256 *job)
         info(job->workArea.userData[2], job->workArea.userData[3]);
     } else if (mode == Q_PORT) {
         port(job);
+    } else if (mode == Q_PORT2) {
+        port2(job);
+    } else if (mode == Q_PORT2S) {
+        port2_sync(job);
     } else if (mode == Q_PUSH) {
         push(job);
     } else if (mode == Q_WAIT) {

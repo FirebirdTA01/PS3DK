@@ -15,6 +15,8 @@
 #define Q_PUSH      3   /* pushes two jobs ([4], [5]) with semaphore [3] */
 #define Q_PORT      4   /* port [3]: pushes [4] with sync; port [5] with a descriptor
                            buffer [7] copy-pushes descriptor [6] with sync */
+#define Q_PORT2     5   /* creates Port2 [3], pushes job [4] and job list [5] with sync */
+#define Q_PORT2S    6   /* syncs (without blocking) and destroys Port2 [3] made by the PPU */
 #define Q_MAGIC     0x0e0e0000u
 #define Q_MAX_DESC  256
 
