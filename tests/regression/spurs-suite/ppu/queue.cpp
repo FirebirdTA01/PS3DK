@@ -14,9 +14,7 @@
 #include "harness.h"
 #include <cell/spurs/queue.h>
 #include "../queue.h"
-#include "spu_task_bin.h"
-
-SYS_PROCESS_PARAM(1001, 0x10000);
+#include SUITE_SPU_HEADER
 
 struct queue_block {
     CellSpursQueue queue[Q_COUNT];
@@ -44,12 +42,14 @@ static void dump()
 
 static void phase(const char *name)
 {
+    suite::activity("phase %s", name);
     std::printf("queue phase %s\n", name);
     std::fflush(stdout);
 }
 
 static int check_task(unsigned kind, const char *what)
 {
+    suite::activity("waiting for %s", what);
     if (!suite::wait_for([&] { return done(kind); }))
         return suite::fail(what, g_result[kind].magic, RESULT_MAGIC | kind);
     if (g_result[kind].status) {
@@ -60,8 +60,9 @@ static int check_task(unsigned kind, const char *what)
     return 0;
 }
 
-int main()
+static int row_main()
 {
+    suite::watch_slots(g_result, Q_SLOTS);
     suite::watchdog(30, dump);
     auto *spurs = new cell::Spurs::Spurs2;
     int rc = suite::spurs_up(spurs, "SuiteQ");
@@ -88,7 +89,7 @@ int main()
 
     const uint64_t slots = reinterpret_cast<uintptr_t>(g_result);
     const uint32_t base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&s_block));
-    auto launch = [&](unsigned kind) { return suite::launch(ts, spu_task_bin, slots, base, kind); };
+    auto launch = [&](unsigned kind) { return suite::launch(ts, SUITE_SPU_BIN, slots, base, kind); };
     int result = 0;
 
     phase("api");
@@ -151,3 +152,5 @@ int main()
     spurs->finalize();
     return suite::ok();
 }
+
+SUITE_ENTRY_POINT(row_main)

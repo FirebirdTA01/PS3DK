@@ -14,9 +14,7 @@
 #include "harness.h"
 #include <cell/spurs/event_flag.h>
 #include "../event_flag.h"
-#include "spu_task_bin.h"
-
-SYS_PROCESS_PARAM(1001, 0x10000);
+#include SUITE_SPU_HEADER
 
 alignas(128) static CellSpursEventFlag g_ef[3];   /* 0 SPU2PPU, 1 PPU2SPU, 2 SPU2SPU */
 alignas(128) static volatile result_slot g_result[8];
@@ -27,8 +25,9 @@ static uint16_t ef_u16(int i, unsigned off)
     return static_cast<uint16_t>((p[off] << 8) | p[off + 1]);
 }
 
-int main()
+static int row_main()
 {
+    suite::watch_slots(g_result, 8);
     cell::Spurs::Spurs2 *spurs = new cell::Spurs::Spurs2;
     cell::Spurs::SpursAttribute attr;
     static const uint8_t prio[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
@@ -56,7 +55,7 @@ int main()
         a.u64[0] = reinterpret_cast<uint64_t>(&g_ef[ef]);
         a.u32[2] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_result[kind]));
         a.u32[3] = kind;
-        return ctx ? ts->createTask(&id, spu_task_bin, ctx, CELL_SPURS_TASK_CONTEXT_SIZE_ALL, &ls, &a) : -1;
+        return ctx ? ts->createTask(&id, SUITE_SPU_BIN, ctx, CELL_SPURS_TASK_CONTEXT_SIZE_ALL, &ls, &a) : -1;
     };
     auto done = [&](unsigned kind) { return g_result[kind].magic == (RESULT_MAGIC | kind); };
     int result = 0;
@@ -118,3 +117,5 @@ int main()
     spurs->finalize();
     return result ? result : suite::ok();
 }
+
+SUITE_ENTRY_POINT(row_main)

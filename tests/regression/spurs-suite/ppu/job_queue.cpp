@@ -6,10 +6,8 @@
 #include <cell/spurs/job_queue.h>
 #include <cell/spurs/job_queue_semaphore.h>
 #include <cell/sysmodule.h>
-#include "spu_jq_bin.h"
-#include "spu_jq_jobheader_bin.h"
-
-SYS_PROCESS_PARAM(1001, 0x10000);
+#include SUITE_SPU_HEADER
+#include SUITE_SPU_JOBHEADER_HEADER
 
 static const unsigned kJobs = 6;
 static const uint32_t kMagic = 0xc0ffe100u;
@@ -26,7 +24,7 @@ static const uint8_t s_prio[8] = { 8, 0, 0, 0, 0, 0, 0, 0 };
 static uint8_t s_pool[CELL_SPURS_JOBQUEUE_JOB_DESCRIPTOR_POOL_SIZE(0, JQ_POOL, 0, 0, 0, 0, 0, 0)]
     __attribute__((aligned(CELL_SPURS_JOBQUEUE_JOB_DESCRIPTOR_POOL_ALIGN)));
 
-int main()
+static int row_main()
 {
     int rc = cellSysmoduleLoadModule(CELL_SYSMODULE_SPURS_JQ);
     if (rc) return suite::invalid("load SPURS_JQ", rc);
@@ -47,10 +45,11 @@ int main()
     if ((rc = cellSpursJobQueueOpen(&s_jq, &h))) return suite::invalid("open handle", rc);
     if ((rc = cellSpursJobQueueSemaphoreInitialize(&s_sem, &s_jq))) return suite::invalid("jq semaphore", rc);
 
+    suite::activity("pushing %u jobs through the queue handle", kJobs);
     for (unsigned i = 0; i < kJobs; ++i) {
         std::memset(&s_job[i], 0, sizeof s_job[i]);
-        std::memcpy(&s_job[i].header, spu_jq_jobheader_bin, sizeof(CellSpursJobHeader));
-        s_job[i].header.eaBinary += reinterpret_cast<uint64_t>(spu_jq_bin);
+        std::memcpy(&s_job[i].header, SUITE_SPU_JOBHEADER, sizeof(CellSpursJobHeader));
+        s_job[i].header.eaBinary += reinterpret_cast<uint64_t>(SUITE_SPU_BIN);
         s_job[i].workArea.userData[0] = reinterpret_cast<uint64_t>(&s_out[i][0]);
         s_job[i].workArea.userData[1] = kMagic + i;
         if ((rc = cellSpursJobQueuePushJob(&s_jq, h, &s_job[i].header, sizeof s_job[i], 0, &s_sem)))
@@ -59,6 +58,7 @@ int main()
     if ((rc = cellSpursJobQueuePushFlush(&s_jq, h))) return suite::invalid("push flush", rc);
 
     int result = 0;
+    suite::activity("waiting on the job-queue semaphore");
     if ((rc = cellSpursJobQueueSemaphoreAcquire(&s_sem, kJobs)))
         result = suite::fail("semaphore acquire rc", rc, 0);
     for (unsigned i = 0; i < kJobs && !result; ++i) {
@@ -67,6 +67,7 @@ int main()
         else if (s_out[i][3] != 0x10b6u)
             result = suite::fail("job marker", s_out[i][3], 0x10b6u);
     }
+    suite::activity("closing and joining the job queue");
     cellSpursJobQueueClose(&s_jq, h);
     cellSpursShutdownJobQueue(&s_jq);
     int exitCode = 0;
@@ -75,3 +76,5 @@ int main()
     cellSysmoduleUnloadModule(CELL_SYSMODULE_SPURS_JQ);
     return result ? result : suite::ok();
 }
+
+SUITE_ENTRY_POINT(row_main)

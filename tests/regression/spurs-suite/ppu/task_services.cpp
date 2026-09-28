@@ -5,22 +5,21 @@
  * the -mspurs-task driver mode. */
 #include "harness.h"
 #include "../task_services.h"
-#include "spu_task_bin.h"
-
-SYS_PROCESS_PARAM(1001, 0x10000);
+#include SUITE_SPU_HEADER
 
 alignas(128) static volatile result_slot g_slot[TS_SLOTS];
 alignas(128) static CellSpursSemaphore g_sem;
 
-int main()
+static int row_main()
 {
+    suite::watch_slots(g_slot, TS_SLOTS);
     auto *spurs = new cell::Spurs::Spurs2;
     int rc = suite::spurs_up(spurs, "SuiteTs");
     if (rc) return suite::invalid("spurs", rc);
     cell::Spurs::Taskset *ts = suite::taskset_up(spurs, &rc);
     if (!ts) return suite::invalid("taskset", rc);
     const uint64_t slots = reinterpret_cast<uint64_t>(&g_slot[0]);
-    auto run = [&](unsigned kind) { return suite::launch(ts, spu_task_bin, slots, 0, kind); };
+    auto run = [&](unsigned kind) { return suite::launch(ts, SUITE_SPU_BIN, slots, 0, kind); };
     auto done = [&](unsigned kind) { return suite::slot_done(g_slot[kind], kind); };
     int result = 0;
 
@@ -64,9 +63,9 @@ int main()
     if (!result) {
         if ((rc = cellSpursSemaphoreInitialize(ts, &g_sem, 0))) return suite::invalid("semaphore init", rc);
         const uint32_t sem = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_sem));
-        if ((rc = suite::launch(ts, spu_task_bin, slots, sem, TS_SEM_CONSUMER))) return suite::invalid("launch consumer", rc);
+        if ((rc = suite::launch(ts, SUITE_SPU_BIN, slots, sem, TS_SEM_CONSUMER))) return suite::invalid("launch consumer", rc);
         sys_timer_usleep(20000);
-        if ((rc = suite::launch(ts, spu_task_bin, slots, sem, TS_SEM_PRODUCER))) return suite::invalid("launch producer", rc);
+        if ((rc = suite::launch(ts, SUITE_SPU_BIN, slots, sem, TS_SEM_PRODUCER))) return suite::invalid("launch producer", rc);
         if (!suite::wait_for([&] { return done(TS_SEM_CONSUMER) && done(TS_SEM_PRODUCER); }))
             return suite::fail("semaphore tasks never finished", g_slot[TS_SEM_CONSUMER].magic, RESULT_MAGIC | TS_SEM_CONSUMER);
         if (g_slot[TS_SEM_PRODUCER].status || g_slot[TS_SEM_PRODUCER].value != TS_SEM_ROUNDS)
@@ -79,3 +78,5 @@ int main()
     spurs->finalize();
     return result ? result : suite::ok();
 }
+
+SUITE_ENTRY_POINT(row_main)

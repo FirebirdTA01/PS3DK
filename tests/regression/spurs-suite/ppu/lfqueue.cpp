@@ -13,9 +13,7 @@
 #include "harness.h"
 #include <cell/spurs/lfqueue.h>
 #include "../lfqueue.h"
-#include "spu_task_bin.h"
-
-SYS_PROCESS_PARAM(1001, 0x10000);
+#include SUITE_SPU_HEADER
 
 struct queue_block {
     CellSpursLFQueue queue[LQ_COUNT];
@@ -53,7 +51,7 @@ static void probe_then_launch(uint64_t)
     std::printf("probe ppu-sleeping: %08x %08x %08x %08x pack30=%08x pack50=%08x bs=%08x\n",
                 w[0], w[1], w[2], w[3], w[12], w[20], w[8]);
     std::fflush(stdout);
-    s_probeRc = suite::launch(s_ts, spu_task_bin, reinterpret_cast<uintptr_t>(g_result),
+    s_probeRc = suite::launch(s_ts, SUITE_SPU_BIN, reinterpret_cast<uintptr_t>(g_result),
                               static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&s_block)),
                               LQ_SPU2PPU_PRODUCER);
     sys_ppu_thread_exit(0);
@@ -61,12 +59,14 @@ static void probe_then_launch(uint64_t)
 
 static void phase(const char *name)
 {
+    suite::activity("phase %s", name);
     std::printf("lfqueue phase %s\n", name);
     std::fflush(stdout);
 }
 
 static int check_task(unsigned kind, const char *what)
 {
+    suite::activity("waiting for %s", what);
     if (!suite::wait_for([&] { return done(kind); }))
         return suite::fail(what, g_result[kind].magic, RESULT_MAGIC | kind);
     if (g_result[kind].status) {
@@ -77,8 +77,9 @@ static int check_task(unsigned kind, const char *what)
     return 0;
 }
 
-int main()
+static int row_main()
 {
+    suite::watch_slots(g_result, LQ_SLOTS);
     suite::watchdog(30, dump);
     auto *spurs = new cell::Spurs::Spurs2;
     int rc = suite::spurs_up(spurs, "SuiteLq");
@@ -105,7 +106,7 @@ int main()
 
     const uint64_t slots = reinterpret_cast<uintptr_t>(g_result);
     const uint32_t base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&s_block));
-    auto launch = [&](unsigned kind) { return suite::launch(ts, spu_task_bin, slots, base, kind); };
+    auto launch = [&](unsigned kind) { return suite::launch(ts, SUITE_SPU_BIN, slots, base, kind); };
     int result = 0;
 
     phase("api");
@@ -168,3 +169,5 @@ int main()
     spurs->finalize();
     return suite::ok();
 }
+
+SUITE_ENTRY_POINT(row_main)
