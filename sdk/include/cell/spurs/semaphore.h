@@ -25,10 +25,13 @@ typedef struct CellSpursSemaphore {
 #ifdef __SPU__
 
 /* SPU side: the semaphore lives in main memory and is named by its
- * effective address.  P() blocks the calling task (valid only in a
- * SPURS task) while the count is zero; V() increments it and wakes a
- * waiter.  P and V are in libspurs_task.a; Initialize and
- * GetTasksetAddress are declared only (not yet in the SPU runtime). */
+ * effective address.  All four entry points are implemented in
+ * libspurs_task.a.  Initialize zeroes the 128-byte block and writes the
+ * initial count, the SPURS EA and (for non-IWL) the owning taskset EA.
+ * P() blocks the calling task (valid only in a SPURS task) while the
+ * count is zero; V() increments it and wakes a waiting task.
+ * GetTasksetAddress reads back the owning taskset EA recorded at
+ * initialize time. */
 extern int _cellSpursSemaphoreInitialize(uint64_t ea, int total,
                                          unsigned isIwl);
 extern int cellSpursSemaphoreP(uint64_t ea);
