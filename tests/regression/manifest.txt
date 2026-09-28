@@ -56,6 +56,12 @@ spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self
 # sys_spu_thread_argument words ($3-$6) from crt1.o; SPU exit status is
 # the mask of wrong arguments, 0 = pass.
 spu-thread-args,tests/regression/spu-thread-args/spu-thread-args.fake.self,60,RAN-CLEAN,SPU_THREAD_ARGS_OK,SPU_THREAD_ARGS_FAIL
+# spu-celldma: one SPU program drives every cellDma family (unaligned at each
+# start offset, 40KB large, small, scalar, lock-line, cancel) against PPU
+# memory, and the PPU checks every destination byte.  The v0.16.4 libdma
+# splitter issued illegal MFC sizes: that build ends in an SPU access
+# violation (the emulator row fails), this one prints CELLDMA_OK.
+spu-celldma,tests/regression/spu-celldma/spu-celldma.fake.self,60,RAN-CLEAN,CELLDMA_OK,CELLDMA_FAIL|CELLDMA_INVALID
 # spu-sheap: SPU libsheap against the firmware cellSheap (PPU side through
 # libsheap_stub).  *_HLE lines mean the emulator's built-in cellSheap is in
 # use instead of the firmware module: a configuration failure, not a pass.
