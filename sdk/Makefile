@@ -519,6 +519,7 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/spurs/policy_module2.h \
     include/cell/spurs/trace.h \
     include/cell/spurs/trace_types.h \
+    include/cell/spurs/workload.h \
     include/cell/trace/trace_types.h \
     include/vectormath/cpp/vectormath_soa.h
 
@@ -622,11 +623,11 @@ install-spu-only-headers:
 
 # Remove stale PPU-only spurs sub-headers that may linger in the SPU
 # sysroot from a prior install that installed a broader set.  The SPU
-# umbrella now deliberately excludes workload.h; if it exists from an
-# old install, purge it so no stale declarations leak into SPU compiles.
+# umbrella excluded workload.h until it gained an SPU section (task.h now
+# includes it), so nothing is stale today.
 # NOTE: job_chain.h is intentionally kept - installed by libspurs_job.
 clean-stale-spu-spurs:
-	@stale="workload.h"; \
+	@stale=""; \
 	for f in $$stale; do \
 	    path="$(INSTALL_INC_SPU)/cell/spurs/$$f"; \
 	    if test -f "$$path"; then \
