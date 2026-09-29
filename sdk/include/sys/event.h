@@ -105,6 +105,39 @@ static inline int sys_event_port_disconnect(sys_event_port_t portId)
     return (int)sysEventPortDisconnect(portId);
 }
 
+/* Non-blocking receive: copies up to `size` pending events into
+ * event_array and stores how many in *number (syscall 131). */
+static inline int sys_event_queue_tryreceive(sys_event_queue_t equeue_id,
+                                             sys_event_t *event_array,
+                                             int size, int *number)
+{
+    lv2syscall4(131, equeue_id, (u64)(uintptr_t)event_array, (u64)(s64)size,
+                (u64)(uintptr_t)number);
+    return_to_user_prog(int);
+}
+
+static inline void sys_event_queue_attribute_name_set(char attr_name[],
+                                                      const char *name)
+{
+    __sys_sync_name_set(attr_name, name);
+}
+
+/* Syscall numbers and invalid ids. */
+#define SYS_EVENT_QUEUE_CREATE          128
+#define SYS_EVENT_QUEUE_DESTROY         129
+#define SYS_EVENT_QUEUE_RECEIVE         130
+#define SYS_EVENT_QUEUE_TRYRECEIVE      131
+#define SYS_EVENT_QUEUE_DRAIN           133
+#define SYS_EVENT_PORT_CREATE           134
+#define SYS_EVENT_PORT_DESTROY          135
+#define SYS_EVENT_PORT_CONNECT_LOCAL    136
+#define SYS_EVENT_PORT_DISCONNECT       137
+#define SYS_EVENT_PORT_SEND             138
+#define SYS_EVENT_QUEUE_ID_INVALID      0xFFFFFFFFU
+#define SYS_EVENT_PORT_ID_INVALID       0xFFFFFFFFU
+/* sys_event_queue_destroy() mode: destroy even with waiting threads. */
+#define SYS_EVENT_QUEUE_DESTROY_FORCE   1
+
 /* sys_event_queue_attribute_initialize: macro form matching the
  * reference SDK's <sys/event.h> shape — takes the struct by value
  * and sets default attr_protocol = SYS_SYNC_PRIORITY, type = SYS_PPU_QUEUE,

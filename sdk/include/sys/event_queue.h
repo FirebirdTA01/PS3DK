@@ -23,11 +23,15 @@ typedef struct sys_event_queue_attr {
     char name[8];
 } sys_event_queue_attr_t;
 
+/* data1..data3 are the canonical member names; data_1..data_3 are the
+ * PSL1GHT spellings, kept as aliases of the same storage.  Because each pair
+ * is an anonymous union, an unbraced positional initialiser such as
+ * {src, a, b, c} draws -Wmissing-braces in C; name the members instead. */
 typedef struct sys_event {
     u64 source;
-    u64 data_1;
-    u64 data_2;
-    u64 data_3;
+    union { u64 data1; u64 data_1; };
+    union { u64 data2; u64 data_2; };
+    union { u64 data3; u64 data_3; };
 } sys_event_t;
 
 LV2_SYSCALL sysEventQueueCreate(sys_event_queue_t *eventQ, sys_event_queue_attr_t *attrib,

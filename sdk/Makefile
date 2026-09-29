@@ -86,6 +86,8 @@ HEADERS := \
     include/sys/spu.h \
     include/sys/prx.h \
     include/lv2/prx.h \
+    include/lv2/mutex.h \
+    include/lv2/cond.h \
     include/sys/time_util.h \
     include/sys/paths.h \
     include/sysutil/sysutil_sysparam.h \
