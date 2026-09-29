@@ -1,0 +1,285 @@
+spu: (vector-type)(e1, ..., en) literals and (vector-type)(scalar) splats
+
+PS3 SPU sources write vector constants as a parenthesised list after a
+cast to a vector type, and splats as a cast of one scalar.  GCC parses the
+list as a comma expression and rejects the cast of the resulting scalar.
+
+-fparen-vector-literals (C and C++; on by default for SPU, set in
+spu-c.c) makes the parser read the parenthesised operand of a cast to a
+vector type as a list:
+  n >= 2   a vector literal; each element is converted to the element
+           type as by a cast; missing elements are zero, extra elements
+           are dropped, and either mismatch is warned about
+  n == 1   a splat of an arithmetic scalar converted to the element type;
+           a vector (or any other) operand is an ordinary cast, postfix
+           operators included
+A cast to a vector type that is still dependent in a template keeps the
+ordinary meaning.
+
+diff --git a/gcc/c-family/c.opt b/gcc/c-family/c.opt
+index 916cc67b4..1dfb495ce 100644
+--- a/gcc/c-family/c.opt
++++ b/gcc/c-family/c.opt
+@@ -1684,6 +1684,10 @@ foptional-diags
+ C++ ObjC++ Ignore
+ Does nothing.  Preserved for backward compatibility.
+ 
++fparen-vector-literals
++C ObjC C++ ObjC++ Var(flag_paren_vector_literals)
++Accept (vector-type)(e1, ..., en) as a vector literal and (vector-type)(scalar) as a splat.
++
+ fpch-deps
+ C ObjC C++ ObjC++
+ 
+diff --git a/gcc/c/c-parser.c b/gcc/c/c-parser.c
+index 61fd12e2e..1fad0c055 100644
+--- a/gcc/c/c-parser.c
++++ b/gcc/c/c-parser.c
+@@ -1436,6 +1436,8 @@ static struct c_expr c_parser_postfix_expression_after_paren_type (c_parser *,
+ static struct c_expr c_parser_postfix_expression_after_primary (c_parser *,
+ 								location_t loc,
+ 								struct c_expr);
++static struct c_expr c_parser_paren_vector_literal (c_parser *, tree,
++						    location_t);
+ static tree c_parser_transaction (c_parser *, enum rid);
+ static struct c_expr c_parser_transaction_expression (c_parser *, enum rid);
+ static tree c_parser_transaction_cancel (c_parser *);
+@@ -7234,6 +7236,17 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
+       if (type_name->specs->alignas_p)
+ 	error_at (type_name->specs->locations[cdw_alignas],
+ 		  "alignment specified for type name in cast");
++      if (flag_paren_vector_literals
++	  && c_parser_next_token_is (parser, CPP_OPEN_PAREN))
++	{
++	  /* (vector-type)(e1, ..., en): see c_parser_paren_vector_literal.
++	     Other types fall through to the ordinary cast below.  */
++	  tree type_expr = NULL_TREE;
++	  bool type_expr_const = true;
++	  tree type = groktypename (type_name, &type_expr, &type_expr_const);
++	  if (type != error_mark_node && VECTOR_TYPE_P (type) && !type_expr)
++	    return c_parser_paren_vector_literal (parser, type, cast_loc);
++	}
+       {
+ 	location_t expr_loc = c_parser_peek_token (parser)->location;
+ 	expr = c_parser_cast_expression (parser, NULL);
+@@ -7250,6 +7263,99 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
+     return c_parser_unary_expression (parser);
+ }
+ 
++/* Parse the parenthesised operand of a cast to vector type TYPE when
++   -fparen-vector-literals is on.  The next token is the '('.
++
++   (TYPE)(e1, ..., en), n >= 2, is a vector literal: each element is
++   converted to the element type; missing elements are zero, extra ones
++   are dropped, and either mismatch is warned about.
++   (TYPE)(e) is an ordinary cast of the parenthesised expression (postfix
++   operators included) when E is a vector or not arithmetic, and a splat
++   of E converted to the element type when E is an arithmetic scalar.  */
++
++static struct c_expr
++c_parser_paren_vector_literal (c_parser *parser, tree type, location_t loc)
++{
++  struct c_expr ret;
++  ret.original_code = ERROR_MARK;
++  ret.original_type = NULL;
++  location_t open_loc = c_parser_peek_token (parser)->location;
++  matching_parens parens;
++  parens.consume_open (parser);
++  vec<tree, va_gc> *elts = c_parser_expr_list (parser, true, true, NULL,
++					       NULL, NULL, NULL, NULL);
++  location_t close_loc = c_parser_peek_token (parser)->location;
++  parens.skip_until_found_close (parser);
++  unsigned n = vec_safe_length (elts);
++  tree eltype = TREE_TYPE (type);
++  unsigned lanes = TYPE_VECTOR_SUBPARTS (type).to_constant ();
++  if (n == 0)
++    {
++      ret.set_error ();
++      return ret;
++    }
++  if (n == 1)
++    {
++      struct c_expr e;
++      e.value = (*elts)[0];
++      e.original_code = ERROR_MARK;
++      e.original_type = NULL;
++      set_c_expr_source_range (&e, open_loc, close_loc);
++      e = c_parser_postfix_expression_after_primary (parser, open_loc, e);
++      e = convert_lvalue_to_rvalue (open_loc, e, true, true);
++      tree v = e.value;
++      if (v == error_mark_node)
++	{
++	  ret.set_error ();
++	  return ret;
++	}
++      tree vt = TREE_TYPE (v);
++      if (VECTOR_TYPE_P (vt)
++	  || !(INTEGRAL_TYPE_P (vt) || SCALAR_FLOAT_TYPE_P (vt)))
++	ret.value = build_c_cast (loc, type, v);
++      else
++	{
++	  tree s = save_expr (c_fully_fold (build_c_cast (loc, eltype, v), false, NULL));
++	  vec<constructor_elt, va_gc> *ce = NULL;
++	  for (unsigned i = 0; i < lanes; i++)
++	    CONSTRUCTOR_APPEND_ELT (ce, NULL_TREE, s);
++	  ret.value = (TREE_CODE (s) == INTEGER_CST || TREE_CODE (s) == REAL_CST)
++		      ? build_vector_from_ctor (type, ce)
++		      : build_constructor (type, ce);
++	}
++      set_c_expr_source_range (&ret, loc, e.get_finish ());
++      return ret;
++    }
++  if (n != lanes)
++    warning_at (loc, 0, "incorrect number of vector elements");
++  vec<constructor_elt, va_gc> *ce = NULL;
++  bool all_const = true;
++  for (unsigned i = 0; i < n && i < lanes; i++)
++    {
++      tree c = build_c_cast (loc, eltype, (*elts)[i]);
++      if (c == error_mark_node)
++	{
++	  ret.set_error ();
++	  return ret;
++	}
++      c = c_fully_fold (c, false, NULL);
++      if (TREE_CODE (c) != INTEGER_CST && TREE_CODE (c) != REAL_CST)
++	all_const = false;
++      CONSTRUCTOR_APPEND_ELT (ce, NULL_TREE, c);
++    }
++  if (all_const)
++    ret.value = build_vector_from_ctor (type, ce);
++  else
++    {
++      /* a non-constant constructor has every lane */
++      for (unsigned i = n; i < lanes; i++)
++	CONSTRUCTOR_APPEND_ELT (ce, NULL_TREE, build_zero_cst (eltype));
++      ret.value = build_constructor (type, ce);
++    }
++  set_c_expr_source_range (&ret, loc, close_loc);
++  return ret;
++}
++
+ /* Parse an unary expression (C90 6.3.3, C99 6.5.3, C11 6.5.3).
+ 
+    unary-expression:
+diff --git a/gcc/config/spu/spu-c.c b/gcc/config/spu/spu-c.c
+index 5ce5f4923..187091675 100644
+--- a/gcc/config/spu/spu-c.c
++++ b/gcc/config/spu/spu-c.c
+@@ -188,6 +188,10 @@ spu_cpu_cpp_builtins (struct cpp_reader *pfile)
+ {
+   cpp_define (pfile, "__SPU__");
+   cpp_assert (pfile, "cpu=spu");
++  /* PS3 SPU sources write vector constants as (vector-type)(e1, ..., en)
++     and splats as (vector-type)(scalar).  */
++  if (!global_options_set.x_flag_paren_vector_literals)
++    flag_paren_vector_literals = 1;
+   cpp_assert (pfile, "machine=spu");
+   if (spu_arch == PROCESSOR_CELLEDP)
+     cpp_define (pfile, "__SPU_EDP__");
+diff --git a/gcc/cp/parser.c b/gcc/cp/parser.c
+index 61df63be9..983692a03 100644
+--- a/gcc/cp/parser.c
++++ b/gcc/cp/parser.c
+@@ -9191,6 +9191,78 @@ maybe_add_cast_fixit (rich_location *rich_loc, location_t open_paren_loc,
+ }
+ 
+ 
++/* With -fparen-vector-literals, whether the '(' that follows a cast to a
++   vector type opens an operand list for cp_parser_paren_vector_literal:
++   true unless the matching ')' is followed by a postfix operator, in
++   which case the operand is an ordinary postfix-expression.  */
++
++static bool
++cp_parser_paren_vector_list_p (cp_parser *parser)
++{
++  bool list = false;
++  cp_lexer_save_tokens (parser->lexer);
++  cp_lexer_consume_token (parser->lexer);
++  if (cp_parser_skip_to_closing_parenthesis (parser, false, false,
++					     /*consume_paren=*/true))
++    {
++      cp_token *t = cp_lexer_peek_token (parser->lexer);
++      list = !(t->type == CPP_OPEN_SQUARE || t->type == CPP_OPEN_PAREN
++	       || t->type == CPP_DOT || t->type == CPP_DEREF
++	       || t->type == CPP_PLUS_PLUS || t->type == CPP_MINUS_MINUS);
++    }
++  cp_lexer_rollback_tokens (parser->lexer);
++  return list;
++}
++
++/* Parse the operand list of (TYPE)(e1, ..., en), TYPE a vector type.
++   n >= 2 is a vector literal: each element is converted to the element
++   type as by a C-style cast; missing elements are zero, extra ones are
++   dropped, and either mismatch is warned about.  n == 1 with an
++   arithmetic scalar is a splat; with anything else it is the operand of
++   the ordinary cast the caller builds.  The result has TYPE, or is the
++   single operand.  */
++
++static tree
++cp_parser_paren_vector_literal (cp_parser *parser, tree type)
++{
++  location_t loc = cp_lexer_peek_token (parser->lexer)->location;
++  vec<tree, va_gc> *elts
++    = cp_parser_parenthesized_expression_list (parser, non_attr,
++					       /*cast_p=*/false,
++					       /*allow_expansion_p=*/false,
++					       /*non_constant_p=*/NULL);
++  if (elts == NULL || elts->is_empty ())
++    return error_mark_node;
++  unsigned n = elts->length ();
++  tree eltype = TREE_TYPE (type);
++  unsigned lanes = TYPE_VECTOR_SUBPARTS (type).to_constant ();
++  vec<constructor_elt, va_gc> *ce = NULL;
++  if (n == 1)
++    {
++      tree e = (*elts)[0];
++      tree et = TREE_TYPE (e);
++      if (type_dependent_expression_p (e) || et == NULL_TREE
++	  || VECTOR_TYPE_P (et) || !ARITHMETIC_TYPE_P (et))
++	return e;
++      tree s = build_c_cast (loc, eltype, e);
++      if (!processing_template_decl)
++	s = save_expr (s);
++      for (unsigned i = 0; i < lanes; i++)
++	CONSTRUCTOR_APPEND_ELT (ce, NULL_TREE, s);
++    }
++  else
++    {
++      if (n != lanes)
++	warning_at (loc, 0, "incorrect number of vector elements");
++      for (unsigned i = 0; i < n && i < lanes; i++)
++	CONSTRUCTOR_APPEND_ELT (ce, NULL_TREE,
++				build_c_cast (loc, eltype, (*elts)[i]));
++    }
++  tree init = build_constructor (init_list_type_node, ce);
++  CONSTRUCTOR_IS_DIRECT_INIT (init) = false;
++  return finish_compound_literal (type, init, tf_warning_or_error, fcl_c99);
++}
++
+ /* Parse a cast-expression.
+ 
+    cast-expression:
+@@ -9309,11 +9381,17 @@ cp_parser_cast_expression (cp_parser *parser, bool address_p, bool cast_p,
+ 	  if (cast_expression > 0)
+ 	    cp_parser_commit_to_topmost_tentative_parse (parser);
+ 
+-	  expr = cp_parser_cast_expression (parser,
+-					    /*address_p=*/false,
+-					    /*cast_p=*/true,
+-					    /*decltype_p=*/false,
+-					    pidk);
++	  if (flag_paren_vector_literals
++	      && type && VECTOR_TYPE_P (type)
++	      && cp_lexer_next_token_is (parser->lexer, CPP_OPEN_PAREN)
++	      && cp_parser_paren_vector_list_p (parser))
++	    expr = cp_parser_paren_vector_literal (parser, type);
++	  else
++	    expr = cp_parser_cast_expression (parser,
++					      /*address_p=*/false,
++					      /*cast_p=*/true,
++					      /*decltype_p=*/false,
++					      pidk);
+ 
+ 	  if (cp_parser_parse_definitely (parser))
+ 	    {
