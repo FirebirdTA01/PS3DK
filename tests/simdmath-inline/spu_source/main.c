@@ -71,15 +71,14 @@ static int s_exactf (float a, float b)
 }
 
 /* Build a vector double (two 64-bit IEEE-754 doubles, even lane first)
- * from a pair of bit patterns.  Uses an aligned-16 local storage area
- * and the standard Cell SPU vector-cast chain documented in
- * <spu_intrinsics.h>. */
+ * from a pair of bit patterns, through a union so the stores are not
+ * type-punned away. */
 static vector double s_d2 (uint64_t lo, uint64_t hi)
 {
-    __attribute__((aligned(16))) uint64_t pair[2];
-    pair[0] = lo;
-    pair[1] = hi;
-    return *(vector double *)pair;
+    union { uint64_t u[2]; vector double v; } pair;
+    pair.u[0] = lo;
+    pair.u[1] = hi;
+    return pair.v;
 }
 
 /* Lane value: +1 if the 64-bit word is all-1s, -1 if all-0s,
@@ -135,7 +134,7 @@ int main (uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
     /* ========== (B) d2 comparison family ========== */
 
     /* -- isnand2 --
-     * 0x7fc0_0000_0000_0001: exponent all-ones, non-zero fraction -> NaN.
+     * 0x7ff8000000000000: exponent all-ones, non-zero fraction -> NaN.
      * Both lanes are NaN in this test. */
     if (!s_chk (isnand2 (s_d2 (0x7ff8000000000000ull,
                                0x7ff8000000000000ull)), +1, +1))

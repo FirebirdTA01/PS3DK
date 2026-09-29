@@ -50,7 +50,7 @@ static volatile u32 spu_done[4] __attribute__((aligned(128)));
 int main (int argc, char **argv)
 {
     (void)argc; (void)argv;
-    int cause, status;
+    int cause = -1, status = -1;
     int spu_exit = -1;
     int r;
     sys_spu_image_t image;
@@ -66,7 +66,7 @@ int main (int argc, char **argv)
     if (r != 0) { printf ("sys_spu_image_import failed: %d\n", r);  return 4; }
 
     sys_spu_thread_group_attribute_t grpattr = {
-        .nsize     = 8,
+        .nsize     = sizeof "simd_inline_grp",
         .name      = (const char *) ptr2ea ("simd_inline_grp"),
         .type      = 0,
         .option.ct = 0,
@@ -76,7 +76,7 @@ int main (int argc, char **argv)
 
     sys_spu_thread_attribute_t attr = {
         .name   = (const char *) ptr2ea ("simd_inline_thr"),
-        .nsize  = 14,
+        .nsize  = sizeof "simd_inline_thr",
         .option = SPU_THREAD_ATTR_NONE,
     };
     /* Reference-SDK canonical argument type (arg1..arg4); the layout is
@@ -127,8 +127,8 @@ int main (int argc, char **argv)
 
     sys_spu_image_close (&image);
 
-    printf ("simdmath-inline(ppu): cause=%d status=%d "
-            "done[0]=0x%08x exit=%d\n",
+    printf ("simdmath-inline: spu finished cause=%d status=%d "
+            "done=0x%08x exit=%d\n",
             cause, status, (unsigned) spu_done [0], spu_exit);
 
     /* The SPU exits with 0 if every f4 + d2 check passed.  Propagate
