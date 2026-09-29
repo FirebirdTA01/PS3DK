@@ -1,0 +1,73 @@
+libstdc++: containers and <iterator> also bring in <string>
+
+PS3 code routinely uses std::string after including only <vector>,
+<deque>, <list>, <map>, <set> or <iterator>.  Include <string> at the
+end of those headers.  <string> itself only includes bits/ headers, so
+this adds no cycle.
+
+--- a/libstdc++-v3/include/std/vector
++++ b/libstdc++-v3/include/std/vector
+@@ -146,4 +146,8 @@
+ } // namespace std
+ #endif // C++20
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_VECTOR */
+--- a/libstdc++-v3/include/std/deque
++++ b/libstdc++-v3/include/std/deque
+@@ -134,4 +134,8 @@
+ } // namespace std
+ #endif // C++20
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_DEQUE */
+--- a/libstdc++-v3/include/std/list
++++ b/libstdc++-v3/include/std/list
+@@ -106,4 +106,8 @@
+ } // namespace std
+ #endif // C++20
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_LIST */
+--- a/libstdc++-v3/include/std/map
++++ b/libstdc++-v3/include/std/map
+@@ -112,4 +112,8 @@
+ } // namespace std
+ #endif // C++20
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_MAP */
+--- a/libstdc++-v3/include/std/set
++++ b/libstdc++-v3/include/std/set
+@@ -108,4 +108,8 @@
+ } // namespace std
+ #endif // C++20
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_SET */
+--- a/libstdc++-v3/include/std/iterator
++++ b/libstdc++-v3/include/std/iterator
+@@ -70,4 +70,8 @@
+ # define __cpp_lib_null_iterators 201304L
+ #endif
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_ITERATOR */
