@@ -19,11 +19,22 @@ with tempfile.TemporaryDirectory(prefix='spurs-task-entry-') as temp:
         'typedef unsigned int vec_uint4 __attribute__((vector_size(16)));\n')
     spurs = work/'cell'/'spurs'
     spurs.mkdir(parents=True)
-    for name in ('types.h', 'error.h', 'version.h', 'common.h'):
+    for name in ('types.h', 'error.h', 'version.h', 'common.h', 'workload.h'):
         (spurs/name).write_text('')
+    (spurs/'types.h').write_text(
+        '#include <stdint.h>\n'
+        'typedef uint32_t CellSpursWorkloadId;\n'
+        '#define CELL_OK 0\n'
+        '#define CELL_SPURS_MAX_WORKLOAD2 32\n')
+    (spurs/'error.h').write_text(
+        '#define CELL_SPURS_TASK_ERROR_INVAL 0x80410902\n'
+        '#define CELL_SPURS_TASK_ERROR_NULL_POINTER 0x80410911\n')
+    (spurs/'workload.h').write_text(
+        'uint64_t _cellSpursGetWorkloadData(CellSpursWorkloadId id);\n')
     (spurs/'task_types.h').write_text(
         '#include <stdint.h>\n'
         'typedef uint32_t CellSpursTaskId;\n'
+        'typedef uint32_t CellSpursWorkloadId;\n'
         'typedef struct { uint32_t u32[4]; } CellSpursTaskLsPattern;\n'
         'typedef struct { unsigned char opaque[256]; } CellSpursTaskAttribute;\n'
         'typedef struct { unsigned char opaque[256]; } CellSpursTaskAttribute2;\n'
