@@ -15,6 +15,7 @@
 
 #ifndef PS3TC_SYS_PROCESS_H
 #define PS3TC_SYS_PROCESS_H
+#include <cell/error.h>   /* CELL_OK */
 
 #include <stdint.h>
 #include <sys/lv2_syscall.h>

@@ -1,5 +1,6 @@
 #ifndef __PS3DK_CELL_SHEAP_KEY_SHEAP_BUFFER_H__
 #define __PS3DK_CELL_SHEAP_KEY_SHEAP_BUFFER_H__
+#include <cellstatus.h>   /* CELL_OK */
 
 #include <cell/sheap/key_sheap.h>
 

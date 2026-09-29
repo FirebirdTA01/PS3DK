@@ -1,5 +1,6 @@
 #ifndef __PS3DK_CELL_SWCACHE_PATCH_OBJECT_H__
 #define __PS3DK_CELL_SWCACHE_PATCH_OBJECT_H__
+#include <cellstatus.h>   /* CELL_OK */
 
 #include <cell/swcache/default_cache.h>
 

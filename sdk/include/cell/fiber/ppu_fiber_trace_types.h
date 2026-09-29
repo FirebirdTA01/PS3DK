@@ -8,6 +8,7 @@
  */
 #ifndef __PS3DK_CELL_FIBER_PPU_FIBER_TRACE_TYPES_H__
 #define __PS3DK_CELL_FIBER_PPU_FIBER_TRACE_TYPES_H__
+#include <cellstatus.h>   /* CELL_OK */
 
 #include <stdint.h>
 

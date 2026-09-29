@@ -19,6 +19,7 @@
  */
 #ifndef __PS3DK_SYS_SPU_IMAGE_H__
 #define __PS3DK_SYS_SPU_IMAGE_H__
+#include <cell/error.h>   /* CELL_OK */
 
 #include <stdint.h>
 #include <ppu-types.h>          /* sys_addr_t, u32, etc. */

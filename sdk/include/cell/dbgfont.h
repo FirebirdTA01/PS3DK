@@ -36,6 +36,7 @@
 
 #ifndef PS3TC_CELL_DBGFONT_H
 #define PS3TC_CELL_DBGFONT_H
+#include <cell/error.h>   /* CELL_OK */
 
 #include <stdarg.h>
 #include <stdint.h>

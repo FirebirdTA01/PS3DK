@@ -7,6 +7,7 @@
  */
 #ifndef __PS3DK_CELL_SPURS_POLICY_MODULE_H__
 #define __PS3DK_CELL_SPURS_POLICY_MODULE_H__
+#include <cellstatus.h>   /* CELL_OK */
 
 #include <stdint.h>
 

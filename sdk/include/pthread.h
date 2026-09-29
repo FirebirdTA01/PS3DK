@@ -35,6 +35,7 @@
  */
 #ifndef _PS3DK_PTHREAD_WRAPPER_H
 #define _PS3DK_PTHREAD_WRAPPER_H
+#include <cell/error.h>   /* CELL_OK */
 
 /* <sys/_pthreadtypes.h> publishes pthread_mutex_t and friends under
  * `defined(_POSIX_THREADS) || __POSIX_VISIBLE >= 199506`, and sets its own

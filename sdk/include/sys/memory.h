@@ -14,6 +14,7 @@
 
 #ifndef PS3TC_SYS_MEMORY_H
 #define PS3TC_SYS_MEMORY_H
+#include <cell/error.h>   /* CELL_OK */
 
 #include <ppu-types.h>
 #include <sys/lv2_syscall.h>

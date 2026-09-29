@@ -1,5 +1,6 @@
 #ifndef __PS3DK_CELL_SHEAP_ERROR_H__
 #define __PS3DK_CELL_SHEAP_ERROR_H__
+#include <cellstatus.h>   /* CELL_OK */
 
 #define CELL_SHEAP_ERROR_AGAIN      0x80410301
 #define CELL_SHEAP_ERROR_INVAL      0x80410302

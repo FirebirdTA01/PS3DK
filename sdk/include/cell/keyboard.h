@@ -9,6 +9,7 @@
 
 #ifndef PS3TC_CELL_KEYBOARD_H
 #define PS3TC_CELL_KEYBOARD_H
+#include <cell/error.h>   /* CELL_OK */
 
 #include <stdint.h>
 #include <io/kb.h>

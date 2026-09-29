@@ -27,6 +27,7 @@
 
 #ifndef __PS3DK_CELL_AUDIO_H__
 #define __PS3DK_CELL_AUDIO_H__
+#include <cell/error.h>   /* CELL_OK */
 
 #include <stdint.h>
 #include <ppu-types.h>

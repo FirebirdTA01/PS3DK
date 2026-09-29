@@ -7,6 +7,7 @@
  */
 #ifndef __PS3DK_CELL_RUDP_H__
 #define __PS3DK_CELL_RUDP_H__
+#include <cell/error.h>   /* CELL_OK */
 
 #include <stddef.h>
 #include <stdint.h>

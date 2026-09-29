@@ -1,5 +1,6 @@
 #ifndef __PS3DK_CELL_SWCACHE_PATCH_VTABLE_H__
 #define __PS3DK_CELL_SWCACHE_PATCH_VTABLE_H__
+#include <cellstatus.h>   /* CELL_OK */
 
 #include <cell/swcache/types.h>
 #include <cell/swcache/patch_object.h>
