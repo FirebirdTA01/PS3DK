@@ -15,8 +15,10 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 ps3_self_cmake="${1:-$repo_root/cmake/ps3-self.cmake}"
-: "${PS3DEV:?PS3DEV must point at an installed SDK}"
-: "${PS3DK:?PS3DK must point at an installed SDK}"
+if [ -z "${PS3DEV:-}" ] || [ -z "${PS3DK:-}" ]; then
+    echo "spu-jobbin-entry-guard: SKIP (set PS3DEV and PS3DK to an installed SDK)"
+    exit 0
+fi
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 note() { printf 'spu-jobbin-entry-guard-test: %s\n' "$*"; }

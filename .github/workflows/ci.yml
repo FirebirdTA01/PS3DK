@@ -131,6 +131,11 @@ jobs:
       - name: Test the sys_ synchronisation surface
         run: bash tests/sdk/sys-sync-surface-test.sh
 
+      # Skips without PS3DK; with an installed SDK, ps3_add_spu_image must
+      # refuse a SPURS job image that has no _start.
+      - name: Test the SPURS job image entry guard
+        run: bash tests/sdk/spu-jobbin-entry-guard-test.sh
+
       # The GCM FIFO wrap must retire a lap the application never published
       # (t_38e8bf5a): a host model of the RSX fetcher runs the protocol, and
       # the one-phase protocol it replaced must fail the idle-lap scenario.
