@@ -15,7 +15,6 @@ vector type as a list:
            operators included
 A cast to a vector type that is still dependent in a template keeps the
 ordinary meaning.
-
 diff --git a/gcc/c-family/c.opt b/gcc/c-family/c.opt
 index 916cc67b4..1dfb495ce 100644
 --- a/gcc/c-family/c.opt
@@ -32,7 +31,7 @@ index 916cc67b4..1dfb495ce 100644
  C ObjC C++ ObjC++
  
 diff --git a/gcc/c/c-parser.c b/gcc/c/c-parser.c
-index 61fd12e2e..1fad0c055 100644
+index 61fd12e2e..bc8f23ade 100644
 --- a/gcc/c/c-parser.c
 +++ b/gcc/c/c-parser.c
 @@ -1436,6 +1436,8 @@ static struct c_expr c_parser_postfix_expression_after_paren_type (c_parser *,
@@ -44,25 +43,39 @@ index 61fd12e2e..1fad0c055 100644
  static tree c_parser_transaction (c_parser *, enum rid);
  static struct c_expr c_parser_transaction_expression (c_parser *, enum rid);
  static tree c_parser_transaction_cancel (c_parser *);
-@@ -7234,6 +7236,17 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
+@@ -7234,12 +7236,30 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
        if (type_name->specs->alignas_p)
  	error_at (type_name->specs->locations[cdw_alignas],
  		  "alignment specified for type name in cast");
++      bool typed = false;
++      tree type = NULL_TREE, type_expr = NULL_TREE;
++      bool type_expr_const = true;
 +      if (flag_paren_vector_literals
 +	  && c_parser_next_token_is (parser, CPP_OPEN_PAREN))
 +	{
 +	  /* (vector-type)(e1, ..., en): see c_parser_paren_vector_literal.
-+	     Other types fall through to the ordinary cast below.  */
-+	  tree type_expr = NULL_TREE;
-+	  bool type_expr_const = true;
-+	  tree type = groktypename (type_name, &type_expr, &type_expr_const);
++	     Any other type makes an ordinary cast from the type computed
++	     here (groktypename must not run twice on one type name).  */
++	  type = groktypename (type_name, &type_expr, &type_expr_const);
++	  typed = true;
 +	  if (type != error_mark_node && VECTOR_TYPE_P (type) && !type_expr)
 +	    return c_parser_paren_vector_literal (parser, type, cast_loc);
 +	}
        {
  	location_t expr_loc = c_parser_peek_token (parser)->location;
  	expr = c_parser_cast_expression (parser, NULL);
-@@ -7250,6 +7263,99 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
+ 	expr = convert_lvalue_to_rvalue (expr_loc, expr, true, true);
+       }
+-      ret.value = c_cast_expr (cast_loc, type_name, expr.value);
++      if (typed)
++	ret.value = c_cast_expr_type (cast_loc, type_name, type, type_expr,
++				      type_expr_const, expr.value);
++      else
++	ret.value = c_cast_expr (cast_loc, type_name, expr.value);
+       if (ret.value && expr.value)
+ 	set_c_expr_source_range (&ret, cast_loc, expr.get_finish ());
+       ret.original_code = ERROR_MARK;
+@@ -7250,6 +7270,99 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
      return c_parser_unary_expression (parser);
  }
  
@@ -162,6 +175,51 @@ index 61fd12e2e..1fad0c055 100644
  /* Parse an unary expression (C90 6.3.3, C99 6.5.3, C11 6.5.3).
  
     unary-expression:
+diff --git a/gcc/c/c-tree.h b/gcc/c/c-tree.h
+index 4642d6824..73b6eeb22 100644
+--- a/gcc/c/c-tree.h
++++ b/gcc/c/c-tree.h
+@@ -672,6 +672,8 @@ extern tree build_conditional_expr (location_t, tree, bool, tree, tree,
+ 				    location_t, tree, tree, location_t);
+ extern tree build_compound_expr (location_t, tree, tree);
+ extern tree c_cast_expr (location_t, struct c_type_name *, tree);
++extern tree c_cast_expr_type (location_t, struct c_type_name *, tree, tree,
++			      bool, tree);
+ extern tree build_c_cast (location_t, tree, tree);
+ extern void store_init_value (location_t, tree, tree, tree);
+ extern void maybe_warn_string_init (location_t, tree, struct c_expr);
+diff --git a/gcc/c/c-typeck.c b/gcc/c/c-typeck.c
+index 643894188..851766d7a 100644
+--- a/gcc/c/c-typeck.c
++++ b/gcc/c/c-typeck.c
+@@ -6025,7 +6025,6 @@ c_cast_expr (location_t loc, struct c_type_name *type_name, tree expr)
+   tree type;
+   tree type_expr = NULL_TREE;
+   bool type_expr_const = true;
+-  tree ret;
+   int saved_wsp = warn_strict_prototypes;
+ 
+   /* This avoids warnings about unprototyped casts on
+@@ -6034,6 +6033,19 @@ c_cast_expr (location_t loc, struct c_type_name *type_name, tree expr)
+     warn_strict_prototypes = 0;
+   type = groktypename (type_name, &type_expr, &type_expr_const);
+   warn_strict_prototypes = saved_wsp;
++  return c_cast_expr_type (loc, type_name, type, type_expr, type_expr_const,
++			   expr);
++}
++
++/* The rest of c_cast_expr, for a TYPE_NAME that groktypename has already
++   turned into TYPE, TYPE_EXPR and TYPE_EXPR_CONST (groktypename must not
++   run twice on one type name).  */
++
++tree
++c_cast_expr_type (location_t loc, struct c_type_name *type_name, tree type,
++		  tree type_expr, bool type_expr_const, tree expr)
++{
++  tree ret;
+ 
+   if (TREE_CODE (expr) == ADDR_EXPR && !VOID_TYPE_P (type)
+       && reject_gcc_builtin (expr))
 diff --git a/gcc/config/spu/spu-c.c b/gcc/config/spu/spu-c.c
 index 5ce5f4923..187091675 100644
 --- a/gcc/config/spu/spu-c.c
