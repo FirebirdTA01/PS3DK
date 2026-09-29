@@ -162,7 +162,7 @@ void draw(unsigned frame)
         text(0.04f, y, 0.8f, color, "[%s]", badge);
         text(0.13f, y, 0.8f, r.state == PENDING ? kDim : kWhite, "%-24s", kRows[i].name);
         if (r.state != PENDING && r.state != SKIPPED)
-            text(0.40f, y, 0.8f, kDim, "%6.2fs", (double)(end - r.start) / 1e6);
+            text(0.40f, y, 0.8f, kDim, "%6.2fs", end > r.start ? (double)(end - r.start) / 1e6 : 0.0);
         if (r.state == FAILED || r.state == INVALID)
             text(0.48f, y, 0.7f, kRed, "%.60s", r.verdict);
     }
@@ -174,7 +174,8 @@ void draw(unsigned frame)
     text(0.04f, py, 0.9f, kCyan, "LIVE");
     if (cur < kRowCount) {
         RowStatus &r = g_rows[cur];
-        if (r.state == RUNNING && t - r.start > kRowTimeout)
+        /* the worker may stamp start after this frame read t */
+        if (r.state == RUNNING && t > r.start && t - r.start > kRowTimeout)
             r.state = TIMEOUT;
         text(0.12f, py, 0.9f, kWhite, "%s", kRows[cur].name);
         text(0.04f, py + 0.04f, 0.85f, kAmber, "%c PPU: %s", r.state == RUNNING ? spin : '!', v.activity);
