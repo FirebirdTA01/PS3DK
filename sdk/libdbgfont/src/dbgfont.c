@@ -133,6 +133,13 @@ static struct {
     int col_attrib;
     int uv_attrib;
     int tex_unit;
+
+    /* CELL_DBGFONT_MAGFILTER_* from the config (NEAREST unless asked). */
+    int mag_linear;
+    /* Half the screen size in pixels, from the config; 0 = unknown.
+     * When known, glyph origins, sizes and advances land on whole
+     * pixels, so every glyph samples the atlas at the same phase. */
+    float half_w, half_h;
 } g_dbgfont;
 
 /* ------------------------------------------------------------------ */
@@ -161,6 +168,21 @@ static inline float glyph_t0(uint8_t c) { return (float)((((c / 16) - 2) * DBGFO
 static inline float glyph_t1(uint8_t c) { return (float)((((c / 16) - 2) * DBGFONT_GLYPH_H_PX) + DBGFONT_GLYPH_H_PX + 1) / (float)DBGFONT_ATLAS_H; }
 
 static inline int is_printable(char c) { return ((uint8_t)c & 0x7fu) > 31; }
+
+/* Round an NDC coordinate or length to the pixel grid, when the screen
+ * size is known (half = half the screen size in pixels). */
+static float snap_pos(float ndc, float half)
+{
+    if (half <= 0.0f) return ndc;
+    return (float)(int)((ndc + 1.0f) * half + 0.5f) / half - 1.0f;
+}
+
+static float snap_len(float ndc, float half)
+{
+    if (half <= 0.0f) return ndc;
+    int px = (int)(ndc * half + 0.5f);
+    return (float)(px < 1 ? 1 : px) / half;
+}
 
 /* ------------------------------------------------------------------ */
 /*   Init / Exit                                                      */
@@ -249,6 +271,9 @@ int32_t cellDbgFontInitGcm(const CellDbgFontConfigGcm *cfg)
     g_dbgfont.uv_attrib  = (int)cellGcmCgGetParameterResource(g_dbgfont.vp, ta) - CG_ATTR0;
     g_dbgfont.tex_unit   = (int)cellGcmCgGetParameterResource(g_dbgfont.fp, tu) - CG_TEXUNIT0;
 
+    g_dbgfont.mag_linear = (cfg->option & CELL_DBGFONT_MAGFILTER_LINEAR) != 0;
+    g_dbgfont.half_w = cfg->screenWidth * 0.5f;
+    g_dbgfont.half_h = cfg->screenHeight * 0.5f;
     g_dbgfont.initialized = 1;
 
     /* Auto-create the stdout console at slot 0. */
@@ -280,8 +305,8 @@ static int append_glyph(float nx_tl, float ny_tl, float scale,
 {
     if (g_dbgfont.num_verts + 4 > g_dbgfont.max_verts) return -1;
 
-    float gw = DBGFONT_GLYPH_NDC_W * scale;
-    float gh = DBGFONT_GLYPH_NDC_H * scale;
+    float gw = snap_len(DBGFONT_GLYPH_NDC_W * scale, g_dbgfont.half_w);
+    float gh = snap_len(DBGFONT_GLYPH_NDC_H * scale, g_dbgfont.half_h);
     float nx_br = nx_tl + gw;
     float ny_br = ny_tl - gh;
 
@@ -323,12 +348,12 @@ int32_t cellDbgFontPuts(float x, float y, float scale, uint32_t color, const cha
     /* Convert normalized [0..1] anchor to NDC [-1..+1] with Y-down
      * screen convention (y=0 is top).  Subsequent glyph positions
      * are in NDC and track via cursor offsets. */
-    float cursor_x_ndc = 2.0f * x - 1.0f;
-    float cursor_y_ndc = 1.0f - 2.0f * y;
+    float cursor_x_ndc = snap_pos(2.0f * x - 1.0f, g_dbgfont.half_w);
+    float cursor_y_ndc = snap_pos(1.0f - 2.0f * y, g_dbgfont.half_h);
     float origin_x_ndc = cursor_x_ndc;
 
-    float kern_w = DBGFONT_KERN_NDC_W * scale;
-    float line_h = DBGFONT_LINE_NDC_H * scale;
+    float kern_w = snap_len(DBGFONT_KERN_NDC_W * scale, g_dbgfont.half_w);
+    float line_h = snap_len(DBGFONT_LINE_NDC_H * scale, g_dbgfont.half_h);
     float tab_w  = kern_w * DBGFONT_TAB_SIZE;
 
     int written = 0;
@@ -426,9 +451,13 @@ int32_t cellDbgFontDrawGcm(void)
     rsxLoadTexture(ctx, g_dbgfont.tex_unit, &tex);
     rsxTextureControl(ctx, g_dbgfont.tex_unit, GCM_TRUE, 0 << 8, 12 << 8,
                       GCM_TEXTURE_MAX_ANISO_1);
+    /* Minified text (smaller than the 8x9 font) filters, so a glyph
+     * keeps every stroke as coverage instead of dropping rows; the
+     * magnification filter follows the config. */
     rsxTextureFilter(ctx, g_dbgfont.tex_unit, 0,
-                     GCM_TEXTURE_NEAREST_MIPMAP_LINEAR,
-                     GCM_TEXTURE_LINEAR, GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+                     GCM_TEXTURE_LINEAR,
+                     g_dbgfont.mag_linear ? GCM_TEXTURE_LINEAR : GCM_TEXTURE_NEAREST,
+                     GCM_TEXTURE_CONVOLUTION_QUINCUNX);
     rsxTextureWrapMode(ctx, g_dbgfont.tex_unit,
                        GCM_TEXTURE_REPEAT, GCM_TEXTURE_REPEAT, GCM_TEXTURE_REPEAT,
                        GCM_TEXTURE_UNSIGNED_REMAP_NORMAL,

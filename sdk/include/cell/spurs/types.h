@@ -142,6 +142,54 @@ extern int cellSpursGetSpuThreadId(CellSpurs *spurs,
 extern int cellSpursGetSpuThreadGroupId(CellSpurs *spurs,
                                         sys_spu_group_t *groupId);
 
+/* Workload control from the PPU: priorities are per SPU (0 = highest,
+ * 0x0f = lowest, 0 on an SPU = never runs there). */
+extern int cellSpursSetMaxContention(CellSpurs *spurs, CellSpursWorkloadId id,
+                                     unsigned int maxContention);
+extern int cellSpursSetPriorities(CellSpurs *spurs, CellSpursWorkloadId id,
+                                  const uint8_t priorities[CELL_SPURS_MAX_SPU]);
+extern int cellSpursSetPriority(CellSpurs *spurs, CellSpursWorkloadId id,
+                                unsigned int spuId, unsigned int priority);
+extern int cellSpursSetPreemptionVictimHints(CellSpurs *spurs,
+                                             const bool isPreemptible[CELL_SPURS_MAX_SPU]);
+
+/* Filled by cellSpursGetInfo; 280 bytes. */
+typedef struct CellSpursInfo {
+    int nSpus;
+    int spuThreadGroupPriority;
+    int ppuThreadPriority;
+    bool exitIfNoWork;
+    bool spurs2;
+    uint8_t __padding24[2];
+    void *traceBuffer;
+    uint32_t __padding32;
+    uint64_t traceBufferSize;
+    uint32_t traceMode;
+    sys_spu_thread_group_t spuThreadGroup;
+    sys_spu_thread_t spuThreads[CELL_SPURS_MAX_SPU];
+    __extension__ union {                   /* both spellings are in use */
+        sys_ppu_thread_t spursHandlerThread0;
+        sys_ppu_thread_t spursHandelerThread0;
+    };
+    __extension__ union {
+        sys_ppu_thread_t spursHandlerThread1;
+        sys_ppu_thread_t spursHandelerThread1;
+    };
+    char namePrefix[CELL_SPURS_NAME_MAX_LENGTH + 1];
+    size_t namePrefixLength;
+    uint32_t deadlineMissCounter;
+    uint32_t deadlineMeetCounter;
+    uint8_t padding[280 - 3 * sizeof(int) - 2 * sizeof(bool) - 2
+                    - sizeof(void *) - 4 - 8 - 4
+                    - sizeof(sys_spu_thread_group_t)
+                    - CELL_SPURS_MAX_SPU * sizeof(sys_spu_thread_t)
+                    - 2 * sizeof(sys_ppu_thread_t)
+                    - (CELL_SPURS_NAME_MAX_LENGTH + 1)
+                    - sizeof(size_t) - 2 * 4];
+} CellSpursInfo;
+
+extern int cellSpursGetInfo(CellSpurs *spurs, CellSpursInfo *info);
+
 static inline int cellSpursAttributeInitialize(CellSpursAttribute *attr,
                                                unsigned int nSpus,
                                                int spuPriority,
@@ -161,6 +209,9 @@ static inline int cellSpursAttributeInitialize(CellSpursAttribute *attr,
 /* C++ class wrappers - inline forwarders over the C entry points.  No
  * extra data members; these are pure methods living on top of the
  * inherited byte-array container. */
+
+#include <cell/spurs/exception.h>   /* the Spurs exception-handler members */
+#include <cell/spurs/lv2_event_queue.h>   /* Spurs::attach/detachLv2EventQueue */
 
 namespace cell {
 namespace Spurs {
@@ -222,6 +273,21 @@ public:
     int wakeUp()
     { return cellSpursWakeUp(this); }
 
+    int enableExceptionEventHandler(bool flag)
+    { return cellSpursEnableExceptionEventHandler(this, flag); }
+
+    int setExceptionEventHandler(CellSpursWorkloadId id, CellSpursExceptionEventHandler eaHandler, void *arg)
+    { return cellSpursSetExceptionEventHandler(this, id, eaHandler, arg); }
+
+    int unsetExceptionEventHandler(CellSpursWorkloadId id)
+    { return cellSpursUnsetExceptionEventHandler(this, id); }
+
+    int setGlobalExceptionEventHandler(CellSpursGlobalExceptionEventHandler eaHandler, void *arg)
+    { return cellSpursSetGlobalExceptionEventHandler(this, eaHandler, arg); }
+
+    int unsetGlobalExceptionEventHandler()
+    { return cellSpursUnsetGlobalExceptionEventHandler(this); }
+
     int getNumSpuThread(unsigned int *nThreads)
     { return cellSpursGetNumSpuThread(this, nThreads); }
 
@@ -230,6 +296,27 @@ public:
 
     int getSpuThreadGroupId(sys_spu_group_t *groupId)
     { return cellSpursGetSpuThreadGroupId(this, groupId); }
+
+    int setMaxContention(CellSpursWorkloadId id, unsigned int maxContention)
+    { return cellSpursSetMaxContention(this, id, maxContention); }
+
+    int setPriorities(CellSpursWorkloadId id, const uint8_t priorities[CELL_SPURS_MAX_SPU])
+    { return cellSpursSetPriorities(this, id, priorities); }
+
+    int setPriority(CellSpursWorkloadId id, unsigned int spuId, unsigned int priority)
+    { return cellSpursSetPriority(this, id, spuId, priority); }
+
+    int setPreemptionVictimHints(const bool isPreemptible[CELL_SPURS_MAX_SPU])
+    { return cellSpursSetPreemptionVictimHints(this, isPreemptible); }
+
+    int getInfo(CellSpursInfo *info)
+    { return cellSpursGetInfo(this, info); }
+
+    int attachLv2EventQueue(sys_event_queue_t queue, uint8_t *port, int isDynamic)
+    { return cellSpursAttachLv2EventQueue(this, queue, port, isDynamic); }
+
+    int detachLv2EventQueue(uint8_t port)
+    { return cellSpursDetachLv2EventQueue(this, port); }
 };
 
 }   /* namespace Spurs */

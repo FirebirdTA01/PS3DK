@@ -8,6 +8,7 @@
 #define __PS3DK_CELL_SPURS_BARRIER_H__
 
 #include <stdint.h>
+#include <cellstatus.h>   /* CELL_OK, as callers expect */
 #include <cell/spurs/types.h>
 #include <cell/spurs/task_types.h>
 

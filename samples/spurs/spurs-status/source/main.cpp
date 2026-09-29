@@ -146,7 +146,7 @@ void draw(unsigned frame)
 
     /* board */
     float y = 0.15f;
-    for (unsigned i = 0; i < kRowCount; ++i, y += 0.034f) {
+    for (unsigned i = 0; i < kRowCount; ++i, y += 0.021f) {   /* 18 rows end above LIVE */
         const RowStatus &r = g_rows[i];
         const char *badge = " --- ";
         uint32_t color = kDim;
@@ -162,7 +162,7 @@ void draw(unsigned frame)
         text(0.04f, y, 0.8f, color, "[%s]", badge);
         text(0.13f, y, 0.8f, r.state == PENDING ? kDim : kWhite, "%-24s", kRows[i].name);
         if (r.state != PENDING && r.state != SKIPPED)
-            text(0.40f, y, 0.8f, kDim, "%6.2fs", (double)(end - r.start) / 1e6);
+            text(0.40f, y, 0.8f, kDim, "%6.2fs", end > r.start ? (double)(end - r.start) / 1e6 : 0.0);
         if (r.state == FAILED || r.state == INVALID)
             text(0.48f, y, 0.7f, kRed, "%.60s", r.verdict);
     }
@@ -174,7 +174,8 @@ void draw(unsigned frame)
     text(0.04f, py, 0.9f, kCyan, "LIVE");
     if (cur < kRowCount) {
         RowStatus &r = g_rows[cur];
-        if (r.state == RUNNING && t - r.start > kRowTimeout)
+        /* the worker may stamp start after this frame read t */
+        if (r.state == RUNNING && t > r.start && t - r.start > kRowTimeout)
             r.state = TIMEOUT;
         text(0.12f, py, 0.9f, kWhite, "%s", kRows[cur].name);
         text(0.04f, py + 0.04f, 0.85f, kAmber, "%c PPU: %s", r.state == RUNNING ? spin : '!', v.activity);
@@ -293,6 +294,8 @@ int main()
     std::memset(&fcfg, 0, sizeof fcfg);
     fcfg.localBufAddr = (sys_addr_t)(uintptr_t)rsxMemalign(128, fontSize);
     fcfg.localBufSize = (uint32_t)fontSize;
+    fcfg.screenWidth = res.width;     /* lets dbgfont put glyphs on whole pixels */
+    fcfg.screenHeight = res.height;
     fcfg.option = CELL_DBGFONT_VERTEX_LOCAL | CELL_DBGFONT_TEXTURE_LOCAL;
     if (cellDbgFontInitGcm(&fcfg) != 0)
         return 1;
@@ -304,6 +307,7 @@ int main()
 
     CellGcmContextData *ctx = CELL_GCM_CURRENT;
     unsigned cur = 0;
+    bool flipPending = false;   /* only wait for a flip that was issued */
     for (unsigned frame = 0; !g_exit; ++frame) {
         cellSysutilCheckCallback();
         set_target(ctx, bufs[cur]);
@@ -312,10 +316,11 @@ int main()
         draw(frame);
         cellDbgFontDrawGcm();
         cellGcmFlush(ctx);
-        while (cellGcmGetFlipStatus() != 0)
+        while (flipPending && cellGcmGetFlipStatus() != 0)
             usleep(200);
         cellGcmResetFlipStatus();
-        if (cellGcmSetFlip(ctx, cur) == 0) {
+        flipPending = cellGcmSetFlip(ctx, cur) == 0;
+        if (flipPending) {
             cellGcmFlush(ctx);
             cellGcmSetWaitFlip(ctx);
         }
