@@ -5,6 +5,8 @@
  *   unit     each run loads a relocatable -mcustom-module work unit at an
  *            LS address of its choosing and runs it: its _init must
  *            relocate it (vtables, a pointer table) and construct it
+ *   count    ready count compare-and-swap (miss and hit) and add, which
+ *            clamps at 0; each returns the previous count
  *   remove   ready count 0, shutdown, wait for the shutdown, remove */
 #include "harness.h"
 #include <cell/spurs/workload.h>
@@ -44,8 +46,21 @@ static int row_main()
     if (s_box.unitResult != M_UNIT_OK)
         return suite::fail("work unit relocated and constructed", s_box.unitResult, M_UNIT_OK);
 
-    suite::activity("removing the workload");
+    suite::activity("ready count compare-and-swap and add");
     unsigned old = 0;
+    if ((rc = cellSpursReadyCountCompareAndSwap(cs, wid, &old, 3, 7))) return suite::fail("ready count CAS (miss) rc", rc, 0);
+    if (old != 1) return suite::fail("CAS miss: previous ready count", old, 1);
+    /* the count stays 0..1: the module is not written to run on two SPUs */
+    if ((rc = cellSpursReadyCountCompareAndSwap(cs, wid, &old, 1, 0))) return suite::fail("ready count CAS rc", rc, 0);
+    if (old != 1) return suite::fail("CAS: previous ready count", old, 1);
+    if ((rc = cellSpursReadyCountAdd(cs, wid, &old, 1))) return suite::fail("ready count add rc", rc, 0);
+    if (old != 0) return suite::fail("add: previous ready count", old, 0);
+    if ((rc = cellSpursReadyCountAdd(cs, wid, &old, -5))) return suite::fail("ready count subtract rc", rc, 0);
+    if (old != 1) return suite::fail("subtract: previous ready count", old, 1);
+    if ((rc = cellSpursReadyCountAdd(cs, wid, &old, 1))) return suite::fail("ready count add after clamp rc", rc, 0);
+    if (old != 0) return suite::fail("subtract clamps at 0", old, 0);
+
+    suite::activity("removing the workload");
     if ((rc = cellSpursReadyCountSwap(cs, wid, &old, 0))) return suite::fail("ready count swap", rc, 0);
     if (old != 1) return suite::fail("previous ready count", old, 1);
     if ((rc = cellSpursShutdownWorkload(cs, wid))) return suite::fail("shutdown workload", rc, 0);

@@ -59,5 +59,6 @@ set(SUITE_ROW_DIRS
     spurs-event-flag spurs-event-flag-driver
     spurs-queue spurs-lfqueue
     spurs-control spurs-barrier spurs-ls-pattern spurs-task2 spurs-services spurs-job-extras spurs-jq-spu spurs-module
-    spurs-job-chain-manual spurs-job-chain-driver
-    spurs-job-queue-manual spurs-job-queue-driver)
+    spurs-job-chain-manual spurs-job-chain-driver spurs-job-cpp-driver
+    spurs-job-queue-manual spurs-job-queue-driver
+    spu-thread-ops)
