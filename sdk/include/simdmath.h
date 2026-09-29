@@ -29,12 +29,23 @@
 #ifndef PS3TC_SIMDMATH_UMBRELLA_H
 #define PS3TC_SIMDMATH_UMBRELLA_H
 
+/* SPU vector math (vec_aos.h and friends) uses uintptr_t and relies on
+   this header for <stdint.h>, as the reference SPU simdmath provides it. */
+#include <stdint.h>
 #include <simdmath/simdmath.h>
 
 #ifdef __SPU__
 #include <spu_intrinsics.h>
 #else
 #include <altivec.h>
+#endif
+
+/* The vendor inlines initialise unsigned vectors from negative constants,
+   which C++11 rejects as narrowing; they are correct C, so silence that one
+   diagnostic for them in C++. */
+#if defined(__cplusplus) && defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnarrowing"
 #endif
 
 /* ---- inline implementations shared by PPU + SPU ---- */
@@ -161,6 +172,10 @@
 #include <simdmath/_tand2.h>
 #include <simdmath/_truncd2.h>
 #endif /* __SPU__ */
+
+#if defined(__cplusplus) && defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /* ---- shared public-name aliases (function-like: value call inlines, &name keeps the library symbol) ---- */
 #define absi4(...) _absi4(__VA_ARGS__)
