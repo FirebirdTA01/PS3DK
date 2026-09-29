@@ -451,8 +451,11 @@ int32_t cellDbgFontDrawGcm(void)
     rsxLoadTexture(ctx, g_dbgfont.tex_unit, &tex);
     rsxTextureControl(ctx, g_dbgfont.tex_unit, GCM_TRUE, 0 << 8, 12 << 8,
                       GCM_TEXTURE_MAX_ANISO_1);
+    /* Minified text (smaller than the 8x9 font) filters, so a glyph
+     * keeps every stroke as coverage instead of dropping rows; the
+     * magnification filter follows the config. */
     rsxTextureFilter(ctx, g_dbgfont.tex_unit, 0,
-                     g_dbgfont.mag_linear ? GCM_TEXTURE_LINEAR : GCM_TEXTURE_NEAREST,
+                     GCM_TEXTURE_LINEAR,
                      g_dbgfont.mag_linear ? GCM_TEXTURE_LINEAR : GCM_TEXTURE_NEAREST,
                      GCM_TEXTURE_CONVOLUTION_QUINCUNX);
     rsxTextureWrapMode(ctx, g_dbgfont.tex_unit,
