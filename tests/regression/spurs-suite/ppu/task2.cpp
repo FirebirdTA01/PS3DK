@@ -87,8 +87,12 @@ static int row_main()
         if ((rc = cellSpursTaskAttributeSetExitCodeContainer(&tattr, &s_ppuExitCode)))
             return suite::fail("PPU set exit-code container", rc, 0);
         CellSpursTaskId cid;
-        if ((rc = cellSpursCreateTaskWithAttribute(reinterpret_cast<CellSpursTaskset *>(plain), &cid, &tattr)))
-            return suite::fail("PPU create task with exit code", rc, 0);
+        /* an exit-code container needs a Taskset2, as on the SPU side */
+        if ((rc = cellSpursCreateTaskWithAttribute(reinterpret_cast<CellSpursTaskset *>(plain), &cid, &tattr))
+            != static_cast<int>(CELL_SPURS_TASK_ERROR_PERM))
+            return suite::fail("PPU create with exit code on a plain taskset", rc, CELL_SPURS_TASK_ERROR_PERM);
+        if ((rc = cellSpursCreateTaskWithAttribute(reinterpret_cast<CellSpursTaskset *>(ts2), &cid, &tattr)))
+            return suite::fail("PPU create task with exit code on the Taskset2", rc, 0);
         code = 0;
         if ((rc = cellSpursTaskExitCodeGet(&s_ppuExitCode, &code))) return suite::fail("PPU exit code Get", rc, 0);
         if (code != static_cast<int>(T2_PPU_CHILD_CODE))
