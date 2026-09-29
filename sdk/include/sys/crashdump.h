@@ -13,6 +13,7 @@
  */
 #ifndef __PS3DK_SYS_CRASHDUMP_H__
 #define __PS3DK_SYS_CRASHDUMP_H__
+#include <cell/error.h>   /* CELL_OK */
 
 #include <stdint.h>
 

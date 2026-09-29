@@ -32,6 +32,7 @@
  */
 #ifndef __PS3DK_SPU_PRINTF_H__
 #define __PS3DK_SPU_PRINTF_H__
+#include <cell/error.h>   /* CELL_OK */
 
 #ifdef __cplusplus
 extern "C" {

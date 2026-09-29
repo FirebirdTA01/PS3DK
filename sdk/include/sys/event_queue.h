@@ -29,9 +29,9 @@ typedef struct sys_event_queue_attr {
  * {src, a, b, c} draws -Wmissing-braces in C; name the members instead. */
 typedef struct sys_event {
     u64 source;
-    union { u64 data1; u64 data_1; };
-    union { u64 data2; u64 data_2; };
-    union { u64 data3; u64 data_3; };
+    __extension__ union { u64 data1; u64 data_1; };
+    __extension__ union { u64 data2; u64 data_2; };
+    __extension__ union { u64 data3; u64 data_3; };
 } sys_event_t;
 
 LV2_SYSCALL sysEventQueueCreate(sys_event_queue_t *eventQ, sys_event_queue_attr_t *attrib,

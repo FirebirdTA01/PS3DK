@@ -6,6 +6,7 @@
  */
 #ifndef _PS3DK_SYSUTIL_USERINFO_H_
 #define _PS3DK_SYSUTIL_USERINFO_H_
+#include <cell/error.h>   /* CELL_OK */
 #include <sysutil/sysutil_common.h>
 #include <sys/memory.h>
 #include <cell/sysutil_userinfo.h>

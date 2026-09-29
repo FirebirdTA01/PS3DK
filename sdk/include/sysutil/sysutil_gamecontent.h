@@ -5,6 +5,7 @@
  */
 #ifndef _PS3DK_SYSUTIL_GAMECONTENT_H_
 #define _PS3DK_SYSUTIL_GAMECONTENT_H_
+#include <cell/error.h>   /* CELL_OK */
 #include <sysutil/sysutil_common.h>
 #include <sys/memory.h>
 #include <cell/sysutil_gamecontent.h>

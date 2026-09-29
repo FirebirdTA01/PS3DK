@@ -6,6 +6,7 @@
  */
 #ifndef __PS3DK_SYS_SYSTEM_TYPES_H__
 #define __PS3DK_SYS_SYSTEM_TYPES_H__
+#include <cell/error.h>   /* CELL_OK */
 
 #include <sys/types.h>
 #include <sys/sys_types.h>

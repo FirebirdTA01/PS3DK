@@ -20,6 +20,7 @@
 
 #ifndef __PSL1GHT_CELL_SYSMODULE_H__
 #define __PSL1GHT_CELL_SYSMODULE_H__
+#include <cell/error.h>   /* CELL_OK */
 
 #include <stdint.h>
 #include <sys/memory.h>

@@ -1,5 +1,6 @@
 #ifndef __PS3DK_CELL_SHEAP_BASE_H__
 #define __PS3DK_CELL_SHEAP_BASE_H__
+#include <cellstatus.h>   /* CELL_OK */
 
 #include <stdint.h>
 #include <cell/sheap/error.h>

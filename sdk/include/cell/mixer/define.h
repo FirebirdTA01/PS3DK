@@ -1,5 +1,6 @@
 #ifndef PS3TC_CELL_MIXER_DEFINE_H
 #define PS3TC_CELL_MIXER_DEFINE_H
+#include <cell/error.h>   /* CELL_OK */
 
 #include <math.h>
 #include <stdint.h>

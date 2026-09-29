@@ -27,6 +27,10 @@ void *memalign(size_t, size_t);
 
 #ifdef __cplusplus
 }
+
+/* Every <stdlib.h> function is also a std:: name, memalign included, so
+ * std::memalign works after <cstdlib>. */
+namespace std { using ::memalign; }
 #endif
 
 #endif /* _PS3DK_STDLIB_WRAPPER_H */

@@ -1,5 +1,6 @@
 #ifndef __PS3DK_CELL_MIC_ERROR_H__
 #define __PS3DK_CELL_MIC_ERROR_H__
+#include <cell/error.h>   /* CELL_OK */
 
 #define CELL_MICIN_ERROR_ALREADY_INIT       0x80140101
 #define CELL_MICIN_ERROR_DEVICE             0x80140102

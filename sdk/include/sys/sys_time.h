@@ -11,6 +11,7 @@
 
 #ifndef PS3TC_COMPAT_SYS_SYS_TIME_H
 #define PS3TC_COMPAT_SYS_SYS_TIME_H
+#include <cell/error.h>   /* CELL_OK */
 
 #include <stdint.h>
 #include <ppu-types.h>     /* `system_time_t` already declared here */

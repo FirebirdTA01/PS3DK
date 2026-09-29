@@ -25,6 +25,7 @@
 */
 #ifndef _PSL1GHT_SYS_STAT_H
 #define _PSL1GHT_SYS_STAT_H
+#include <cell/error.h>   /* CELL_OK */
 
 #include_next <sys/stat.h>
 
