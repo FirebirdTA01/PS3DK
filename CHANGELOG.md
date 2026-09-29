@@ -16,15 +16,6 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-### Added
-
-- `spu-elf-to-ppu-obj wrap --format task` embeds a SPURS task ELF with its
-  `CellSpursTaskBinInfo` (`_binary_<name>_taskbininfo`): the ELF address,
-  the context save size and the LS pattern.  A task that declares
-  `CELL_SPU_LS_PARAM(heap, stack)` saves its image, its heap and its stack;
-  otherwise all local storage above the SPURS area except whole read-only
-  blocks.
-
 ## [v0.17.0] — 2026-09-28
 
 ### Added
@@ -43,6 +34,12 @@ The version stamped into builds is generated from the most recent
 - **Custom policy modules and relocatable work units.**  `-mcustom-module`
   builds a position-independent SPU image that relocates itself and runs its
   `.init_array`/`.fini_array` (`init_fixups.o`).
+- `spu-elf-to-ppu-obj wrap --format task` embeds a SPURS task ELF with its
+  `CellSpursTaskBinInfo` (`_binary_<name>_taskbininfo`): the ELF address,
+  the context save size and the LS pattern.  A task that declares
+  `CELL_SPU_LS_PARAM(heap, stack)` saves its image, its heap and its stack;
+  otherwise all local storage above the SPURS area except whole read-only
+  blocks.
 - **SPU pic multilib.**  `-fpic` SPU code links position-independent
   `libc`, `libm`, `libstdc++` and `libgcc`.
 - The PPU SPURS surface is complete: workload control
