@@ -16,6 +16,76 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.17.0] — 2026-09-28
+
+### Added
+
+- **SPURS on the SPU.**  SPU tasks (`libspurs_task.a`, `-mspurs-task`) with
+  the task services: yield, signals, exit codes, Task2 create/join, LS
+  patterns and context save/restore, event flags, queues, lock-free queues,
+  barriers, semaphores, workload control, trace and task creation from a
+  task.  SPU jobs and job queues (`libspurs_jq.a`): pushes through the
+  command ring (job, job list, Job2, push-and-release, flush, sync), ports
+  and Port2, the descriptor pool, signals and suspended-job sizes.  A push on
+  a full ring or an exhausted pool sleeps until the queue makes room.
+- **C++ SPURS jobs.**  A job linked with `-mspurs-job-initialize` has its
+  `.bss` cleared, is relocated at load time, and runs its constructors and
+  destructors (with its own `atexit` list and static guards).
+- **Custom policy modules and relocatable work units.**  `-mcustom-module`
+  builds a position-independent SPU image that relocates itself and runs its
+  `.init_array`/`.fini_array` (`init_fixups.o`).
+- **SPU pic multilib.**  `-fpic` SPU code links position-independent
+  `libc`, `libm`, `libstdc++` and `libgcc`.
+- The PPU SPURS surface is complete: workload control
+  (`cellSpursSetMaxContention`, `SetPriorities`, `SetPriority`,
+  `SetPreemptionVictimHints`, `GetInfo` and `CellSpursInfo`), exception
+  event handlers (`<cell/spurs/exception.h>`), ready counts, and the matching
+  `cell::Spurs` C++ members.
+- `cellDma` for the SPU: the full `<cell/dma.h>` surface; unaligned
+  transfers are split into commands the MFC accepts.
+- The `sys_` synchronization surface: `sys_lwmutex`, `sys_lwcond`,
+  `sys_rwlock`, `sys_semaphore` and related types in
+  `<sys/synchronization.h>`.
+- `sys_prx_*` calls and types in `<sys/prx.h>`.
+- Driver options: PPU `-mp32` and `-mp64` (aliases of `-mno-lp64` and
+  `-mlp64`); SPU `-mraw` (link a Raw SPU program without the SPU thread
+  runtime), `-mfloat=`/`-mdouble=` (`accurate` turns off multiply-add
+  contraction for the unit), and `-q` (keep relocations).
+- Samples: `spurs-status`, a live on-screen board that runs the SPURS
+  regression suite, and `hello-spurs-task2`.
+- Regression suite `tests/regression/spurs-suite`: one row per SPURS feature
+  and SPU driver mode.
+
+### Changed
+
+- **Every SPU SPURS driver mode links `libspurs`.**
+- **`sys_event_t` members are `data1`..`data3`.**  `data_1`..`data_3`
+  remain as aliases of the same storage; an unbraced positional initializer
+  now draws `-Wmissing-braces` in C.
+- **In C++, `CellSpursTaskset2` derives from `cell::Spurs::Taskset`,** so a
+  `Taskset2` carries every `Taskset` member (`createWithAttribute`,
+  `shutdown`, `join`, ...).
+- **`std::string` is available after `<vector>`, `<deque>`, `<list>`,
+  `<map>`, `<set>` or `<iterator>`.**
+- **`memalign` is declared by `<stdlib.h>` and is `std::memalign` after
+  `<cstdlib>`.**
+- `cellSpursAttachLv2EventQueue` takes `isDynamic` as `int`.
+- `vector` is a context-sensitive keyword for SPU code under strict
+  `-std=` modes, as it already was for the PPU.
+- `CELL_OK` is defined by every header that returns Cell error codes, and
+  `<cell/gcm.h>`, `<cell/cell_fs.h>` and `<cell/dbgfont.h>` include
+  `<stdio.h>`.
+- dbgfont follows `CELL_DBGFONT_MAGFILTER_*` (nearest unless linear is
+  asked for), places glyphs on whole pixels when the config gives the screen
+  size, and filters text drawn below the font's size.
+- CMake refuses a SPURS job image that has no `_start`.
+
+### Fixed
+
+- SPU tasks run on a task-owned stack at the top of local storage, and the
+  task start-up frame keeps the link-register slot in local storage.
+- `<cell/spurs/workload.h>` is installed for the SPU as well.
+
 ## [v0.16.4] — 2026-09-27
 
 ### Fixed
