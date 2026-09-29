@@ -39,6 +39,60 @@ jobs:
           python3 scripts/leakscan.py --self-test
           python3 scripts/compare-builds.py --self-test
 
+  shellcheck:
+    name: ShellCheck ratchet over scripts/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Pin the exact shellcheck the baseline was generated with so the rule
+      # set is deterministic across runs and distros (a different version can
+      # flag, or fail to flag, different codes and break the ratchet).
+      # Install into $RUNNER_TEMP so no sudo is required; publish it to
+      # PATH via GITHUB_PATH so the Version and Ratchet steps see it.
+      # The tarball is additionally pinned by sha256 so a tampered download
+      # or a re-published release-asset with the same version fails the
+      # version-check step rather than the ratchet silently passing on a
+      # different binary.
+      - name: Install shellcheck 0.10.0
+        env:
+          SHELLCHECK_VERSION: 0.10.0
+          SHELLCHECK_TARBALL_SHA256: 6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/shellcheck"
+          mkdir -p "$dest"
+          curl -fsSL -o /tmp/shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          # Verify the tarball against the pinned sha256. A tampered or
+          # substituted release-asset (same URL, different bytes) fails the
+          # step here and not later inside the ratchet.
+          echo "${SHELLCHECK_TARBALL_SHA256}  /tmp/shellcheck.tar.xz" | sha256sum -c
+          # The 0.10.0 tarball extracts to  shellcheck-v{ver}/shellcheck
+          # at its root level, not shellcheck-v{ver}/bin/shellcheck.
+          tar -xf /tmp/shellcheck.tar.xz -C /tmp
+          cp "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" "$dest/shellcheck"
+          chmod +x "$dest/shellcheck"
+          printf '%s\n' "$dest" >> "$GITHUB_PATH"
+      # Confirm the installed binary actually reports 0.10.0 before
+      # running the ratchet, so a partial or corrupt download fails here
+      # instead of producing a green-with-wrong-tool run.
+      - name: Version
+        run: |
+          actual=$(shellcheck --version 2>&1 | awk 'NR==2{print $2}')
+          if [ "$actual" != "0.10.0" ]; then
+            echo "FAIL: shellcheck reports $actual, baseline was generated with 0.10.0"
+            exit 1
+          fi
+          shellcheck --version
+
+      # Ratchet: fails on any finding not already recorded in
+      # ci/shellcheck-baseline.txt, so the tree only ever gets cleaner.
+      # It self-checks that this shellcheck can flag an unquoted variable,
+      # so a stubbed runner fails closed instead of passing silently.
+      - name: Run the ratchet over scripts/**/*.sh
+        run: bash ci/shellcheck.sh
+
   rust-tools:
     name: Rust tools build + tests
     runs-on: ubuntu-latest
