@@ -31,7 +31,7 @@ index 916cc67b4..1dfb495ce 100644
  C ObjC C++ ObjC++
  
 diff --git a/gcc/c/c-parser.c b/gcc/c/c-parser.c
-index 61fd12e2e..bc8f23ade 100644
+index 61fd12e2e..b447a3278 100644
 --- a/gcc/c/c-parser.c
 +++ b/gcc/c/c-parser.c
 @@ -1436,6 +1436,8 @@ static struct c_expr c_parser_postfix_expression_after_paren_type (c_parser *,
@@ -43,7 +43,7 @@ index 61fd12e2e..bc8f23ade 100644
  static tree c_parser_transaction (c_parser *, enum rid);
  static struct c_expr c_parser_transaction_expression (c_parser *, enum rid);
  static tree c_parser_transaction_cancel (c_parser *);
-@@ -7234,12 +7236,30 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
+@@ -7234,12 +7236,31 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
        if (type_name->specs->alignas_p)
  	error_at (type_name->specs->locations[cdw_alignas],
  		  "alignment specified for type name in cast");
@@ -51,7 +51,8 @@ index 61fd12e2e..bc8f23ade 100644
 +      tree type = NULL_TREE, type_expr = NULL_TREE;
 +      bool type_expr_const = true;
 +      if (flag_paren_vector_literals
-+	  && c_parser_next_token_is (parser, CPP_OPEN_PAREN))
++	  && c_parser_next_token_is (parser, CPP_OPEN_PAREN)
++	  && !c_token_starts_typename (c_parser_peek_2nd_token (parser)))
 +	{
 +	  /* (vector-type)(e1, ..., en): see c_parser_paren_vector_literal.
 +	     Any other type makes an ordinary cast from the type computed
@@ -75,7 +76,7 @@ index 61fd12e2e..bc8f23ade 100644
        if (ret.value && expr.value)
  	set_c_expr_source_range (&ret, cast_loc, expr.get_finish ());
        ret.original_code = ERROR_MARK;
-@@ -7250,6 +7270,99 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
+@@ -7250,6 +7271,99 @@ c_parser_cast_expression (c_parser *parser, struct c_expr *after)
      return c_parser_unary_expression (parser);
  }
  
@@ -236,10 +237,10 @@ index 5ce5f4923..187091675 100644
    if (spu_arch == PROCESSOR_CELLEDP)
      cpp_define (pfile, "__SPU_EDP__");
 diff --git a/gcc/cp/parser.c b/gcc/cp/parser.c
-index 61df63be9..983692a03 100644
+index 61df63be9..1ce96bfc9 100644
 --- a/gcc/cp/parser.c
 +++ b/gcc/cp/parser.c
-@@ -9191,6 +9191,78 @@ maybe_add_cast_fixit (rich_location *rich_loc, location_t open_paren_loc,
+@@ -9191,6 +9191,79 @@ maybe_add_cast_fixit (rich_location *rich_loc, location_t open_paren_loc,
  }
  
  
@@ -260,7 +261,8 @@ index 61df63be9..983692a03 100644
 +      cp_token *t = cp_lexer_peek_token (parser->lexer);
 +      list = !(t->type == CPP_OPEN_SQUARE || t->type == CPP_OPEN_PAREN
 +	       || t->type == CPP_DOT || t->type == CPP_DEREF
-+	       || t->type == CPP_PLUS_PLUS || t->type == CPP_MINUS_MINUS);
++	       || t->type == CPP_PLUS_PLUS || t->type == CPP_MINUS_MINUS
++	       || t->type == CPP_OPEN_BRACE);
 +    }
 +  cp_lexer_rollback_tokens (parser->lexer);
 +  return list;
@@ -318,7 +320,7 @@ index 61df63be9..983692a03 100644
  /* Parse a cast-expression.
  
     cast-expression:
-@@ -9309,11 +9381,17 @@ cp_parser_cast_expression (cp_parser *parser, bool address_p, bool cast_p,
+@@ -9309,11 +9382,26 @@ cp_parser_cast_expression (cp_parser *parser, bool address_p, bool cast_p,
  	  if (cast_expression > 0)
  	    cp_parser_commit_to_topmost_tentative_parse (parser);
  
@@ -327,12 +329,21 @@ index 61df63be9..983692a03 100644
 -					    /*cast_p=*/true,
 -					    /*decltype_p=*/false,
 -					    pidk);
++	  expr = NULL_TREE;
 +	  if (flag_paren_vector_literals
 +	      && type && VECTOR_TYPE_P (type)
 +	      && cp_lexer_next_token_is (parser->lexer, CPP_OPEN_PAREN)
 +	      && cp_parser_paren_vector_list_p (parser))
-+	    expr = cp_parser_paren_vector_literal (parser, type);
-+	  else
++	    {
++	      /* The '(' may open a type name (a nested cast, a compound
++		 literal) rather than an expression list: try the list
++		 tentatively and fall back to the ordinary operand.  */
++	      cp_parser_parse_tentatively (parser);
++	      tree lit = cp_parser_paren_vector_literal (parser, type);
++	      if (cp_parser_parse_definitely (parser))
++		expr = lit;
++	    }
++	  if (!expr)
 +	    expr = cp_parser_cast_expression (parser,
 +					      /*address_p=*/false,
 +					      /*cast_p=*/true,
