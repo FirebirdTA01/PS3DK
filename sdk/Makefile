@@ -225,6 +225,19 @@ HEADERS := \
     include/cell/sync.h \
     include/cell/sync/barrier.h \
     include/cell/sync2.h \
+    include/cell/sync2/types.h \
+    include/cell/sync2/version.h \
+    include/cell/sync2/error.h \
+    include/cell/sync2/thread_types.h \
+    include/cell/sync2/thread.h \
+    include/cell/sync2/mutex_types.h \
+    include/cell/sync2/mutex.h \
+    include/cell/sync2/cond_types.h \
+    include/cell/sync2/cond.h \
+    include/cell/sync2/queue_types.h \
+    include/cell/sync2/queue.h \
+    include/cell/sync2/semaphore_types.h \
+    include/cell/sync2/semaphore.h \
     include/cell/sheap.h \
     include/cell/sheap/error.h \
     include/cell/sheap/sheap_base.h \
@@ -465,6 +478,14 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 # both $(PS3DK)/ppu/include/ (via HEADERS) and $(PS3DK)/spu/include/
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
+    include/cell/sync2/types.h \
+    include/cell/sync2/version.h \
+    include/cell/sync2/error.h \
+    include/cell/sync2/thread_types.h \
+    include/cell/sync2/mutex_types.h \
+    include/cell/sync2/cond_types.h \
+    include/cell/sync2/queue_types.h \
+    include/cell/sync2/semaphore_types.h \
     include/cellstatus.h \
     include/sdk_version.h \
     include/simdmath.h \
@@ -566,6 +587,11 @@ SPU_HEADERS := \
     include-spu/cell/sync/rwm.h \
     include-spu/cell/sync/lfqueue.h \
     include-spu/cell/sync2.h \
+    include-spu/cell/sync2/thread.h \
+    include-spu/cell/sync2/mutex.h \
+    include-spu/cell/sync2/cond.h \
+    include-spu/cell/sync2/queue.h \
+    include-spu/cell/sync2/semaphore.h \
     include-spu/cell/fiber.h \
     include-spu/cell/fiber/spu_context.h \
     include-spu/cell/sheap.h \
