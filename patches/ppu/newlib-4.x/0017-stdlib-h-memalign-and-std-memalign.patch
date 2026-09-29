@@ -1,0 +1,25 @@
+stdlib.h: declare memalign, and export it as std::memalign in C++.
+
+PS3 code allocates aligned blocks with memalign from <stdlib.h>, and C++
+code calls std::memalign after <cstdlib>.  newlib declares memalign only
+in <malloc.h>, and libstdc++ <cstdlib> reaches this header directly, so
+neither name was visible there.
+
+--- a/newlib/libc/include/stdlib.h
++++ b/newlib/libc/include/stdlib.h
+@@ -289,6 +289,15 @@
+ 	    __result_use_check;
+ #endif
+ 
++#if __MISC_VISIBLE
++/* memalign is declared here as well as in <malloc.h>, and in C++ it is
++   also std::memalign, which PS3 code reaches through <cstdlib>. */
++void *	memalign (size_t, size_t) __malloc_like __result_use_check;
++#ifdef __cplusplus
++namespace std { using ::memalign; }
++#endif
++#endif
++
+ char *	_dtoa_r (struct _reent *, double, int, int, int *, int*, char**);
+ #ifndef __CYGWIN__
+ void *	_malloc_r (struct _reent *, size_t) _NOTHROW;
