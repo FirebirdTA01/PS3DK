@@ -1,0 +1,72 @@
+spu: -mraw, -mfloat=, -mdouble= and -q driver options
+
+-mraw links a Raw SPU program: the SPU thread runtime library is left
+out, and the option is refused together with a SPURS mode.
+
+-mfloat=accurate and -mdouble=accurate turn off multiply-add
+contraction for the translation unit (GCC cannot limit it to one
+type); the fast forms leave the default.  Division and square-root
+accuracy are not changed.
+
+-q is accepted by the driver and passed to the linker (keep
+relocations); reference-style job makefiles use it.
+
+--- a/gcc/config/spu/spu-elf.h
++++ b/gcc/config/spu/spu-elf.h
+@@ -80,11 +80,13 @@
+   "%{shared:%eSPUDLL shared links are not supported by this toolchain} " \
+   "%{mspurs-task:%{mspurs-job|mspurs-job-initialize:%econflicting SPURS modes}} " \
+   "%{mspurs-job:%{mspurs-job-initialize:%econflicting SPURS modes}} " \
++  "%{mraw:%{mspurs-task|mspurs-job|mspurs-job-initialize|mcustom-module:%e-mraw cannot be combined with a SPURS mode}} " \
+   "%{mcustom-module:%{mspurs-task|mspurs-job|mspurs-job-initialize:%econflicting SPURS modes}} " \
+   "%{mcustom-module:%{shared|r:%ea custom module does not support shared or relocatable links}} " \
+   "%{mspurs-task|mspurs-job|mspurs-job-initialize:" \
+   "%{shared|r:%eSPURS mode does not support shared or relocatable links}} " \
+   "%{mlarge-mem: --defsym __stack=0xfffffff0 } " \
++  "%{q:-q} " \
+   "%{mspurs-job: --spurs-job -dT spurs_job.ld%s} " \
+   "%{mspurs-job-initialize: --spurs-job-initialize -dT spurs_job.ld%s --emit-fixups} " \
+   "%{mcustom-module:--emit-fixups -q} " \
+@@ -96,9 +98,10 @@
+    also selects the pic multilib.  */
+ #define DRIVER_SELF_SPECS \
+   "%{mspurs-job-initialize|mcustom-module:%{!merror-reloc:%{!mwarn-reloc:-mno-error-reloc}}}", \
+-  "%{mcustom-module:%{!fpic:%{!fPIC:-fpic}}}"
++  "%{mcustom-module:%{!fpic:%{!fPIC:-fpic}}}", \
++  "%{mfloat=accurate|mdouble=accurate:-ffp-contract=off}"
+ 
+-#define SPU_ORDINARY_LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -lsputhread -) \
++#define SPU_ORDINARY_LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss %{!mraw:-lsputhread} -) \
+     %{mno-atomic-updates:-lgcc_cachemgr_nonatomic; :-lgcc_cachemgr} \
+     %{mcache-size=128:-lgcc_cache128k; \
+       mcache-size=64 :-lgcc_cache64k; \
+--- a/gcc/config/spu/spu.opt
++++ b/gcc/config/spu/spu.opt
+@@ -119,3 +119,27 @@
+ Target Report
+ Atomically write back software data cache lines (default).
+ 
++
++mraw
++Target RejectNegative
++Link a Raw SPU program: leave out the SPU thread runtime library.
++
++mfloat=accurate
++Target RejectNegative
++Do not fuse multiplies and adds into multiply-add instructions (-ffp-contract=off for the unit).
++
++mfloat=fast
++Target RejectNegative
++Allow fused multiply-add for float arithmetic (the default).
++
++mdouble=accurate
++Target RejectNegative
++Do not fuse multiplies and adds into multiply-add instructions (-ffp-contract=off for the unit).
++
++mdouble=fast
++Target RejectNegative
++Allow fused multiply-add for double arithmetic.
++
++q
++Driver
++Keep relocations in the linked image (passes -q to the linker).

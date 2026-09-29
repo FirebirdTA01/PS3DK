@@ -8,3 +8,4 @@
 0009-spu-vector-keyword-strict-std.patch
 0010-spu-pic-multilib.patch
 0011-spu-relocatable-jobs-and-custom-modules.patch
+0012-spu-raw-and-float-mode-driver-flags.patch
