@@ -746,4 +746,7 @@ namespace cell { namespace Gcm {
 } }
 #endif
 
+/* cell::Gcm::CellGcmContext: the C++ command context (generated). */
+#include <cell/gcm/gcm_command_cpp_explicit.h>
+
 #endif /* __PSL1GHT_CELL_GCM_H__ */
