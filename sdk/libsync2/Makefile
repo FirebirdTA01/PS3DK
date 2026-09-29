@@ -4,10 +4,10 @@
 #   libsync2.a   -> $(SPU_PREFIX)/spu-elf/lib/ (canonical)
 #                -> $(PS3DK)/spu/lib/           (compatibility mirror)
 #
-# The SPU half of cellSync2: mutex over the shared object line and waiting
-# queue the PPU system module also operates on, plus the SPURS task thread
-# type and the notifiers that wake PPU threads, PPU fibers, SPURS tasks and
-# job queue jobs.  One object per public symbol so a link pulls only what
+# The SPU half of cellSync2: mutex, semaphore, condition variable and queue
+# over the shared object lines and waiting queues the PPU system module also
+# operates on, plus the SPURS task thread type and the notifiers that wake
+# PPU threads, PPU fibers, SPURS tasks and job queue jobs.  One object per public symbol so a link pulls only what
 # it names.
 #
 # Built with spu-elf-gcc.
@@ -25,7 +25,7 @@ AR := spu-elf-ar
 CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding -std=gnu99           -I../libspurs_task/include -I../include-spu -I../include -I../libsputhread/include
 
 BUILD := build
-OBJS  := $(addprefix $(BUILD)/,lock_line.o waiting_queue.o mutex.o            mutex_lock.o mutex_trylock.o mutex_unlock.o            spurs_task_thread.o spurs_task_notifier.o thread_config_spurs_task.o            ppu_thread_notifier.o ppu_fiber_notifier.o spurs_jqjob_notifier.o)
+OBJS  := $(addprefix $(BUILD)/,lock_line.o waiting_queue.o mutex.o            mutex_lock.o mutex_trylock.o mutex_unlock.o            semaphore.o semaphore_acquire.o semaphore_try_acquire.o semaphore_release.o semaphore_get_count.o            cond.o cond_wait.o cond_signal.o cond_signal_all.o            queue.o queue_push.o queue_try_push.o queue_pop.o queue_try_pop.o queue_get_size.o queue_get_depth.o            spurs_task_thread.o spurs_task_notifier.o thread_config_spurs_task.o            ppu_thread_notifier.o ppu_fiber_notifier.o spurs_jqjob_notifier.o)
 LIB   := $(BUILD)/libsync2.a
 
 .PHONY: all install clean

@@ -33,18 +33,18 @@
 #include <cell/sync2/error.h>
 #include <cell/sync2/thread_types.h>
 
-#define S2_AGAIN        0x80410C01
-#define S2_INVAL        0x80410C02
-#define S2_NOMEM        0x80410C04
-#define S2_DEADLK       0x80410C08
-#define S2_PERM         0x80410C09
-#define S2_BUSY         0x80410C0A
-#define S2_STAT         0x80410C0F
-#define S2_ALIGN        0x80410C10
-#define S2_NULL_POINTER 0x80410C11
-#define S2_NOT_SUPPORTED_THREAD 0x80410C12
-#define S2_NO_NOTIFIER  0x80410C13
-#define S2_NO_SPU_CONTEXT_STORAGE 0x80410C14
+#define S2_AGAIN        ((int)0x80410C01u)
+#define S2_INVAL        ((int)0x80410C02u)
+#define S2_NOMEM        ((int)0x80410C04u)
+#define S2_DEADLK       ((int)0x80410C08u)
+#define S2_PERM         ((int)0x80410C09u)
+#define S2_BUSY         ((int)0x80410C0Au)
+#define S2_STAT         ((int)0x80410C0Fu)
+#define S2_ALIGN        ((int)0x80410C10u)
+#define S2_NULL_POINTER ((int)0x80410C11u)
+#define S2_NOT_SUPPORTED_THREAD ((int)0x80410C12u)
+#define S2_NO_NOTIFIER  ((int)0x80410C13u)
+#define S2_NO_SPU_CONTEXT_STORAGE ((int)0x80410C14u)
 
 #define S2_PHASE        0x8000u
 #define S2_COUNT        0x7fffu
@@ -130,6 +130,21 @@ int __sync2_mutex_lock(uint32_t eaMutex, int wait, const CellSync2CallerThreadTy
 int __sync2_mutex_unlock(uint32_t eaMutex, const CellSync2CallerThreadType *caller,
                          CellSync2Notifier *const *notifiers, unsigned int numNotifier,
                          uint32_t *countOut, unsigned int dmaTag);
+
+int __sync2_semaphore_acquire(uint32_t eaSemaphore, int wait, unsigned int count,
+                              const CellSync2CallerThreadType *caller, unsigned int dmaTag);
+int __sync2_semaphore_release(uint32_t eaSemaphore, unsigned int count, const CellSync2CallerThreadType *caller,
+                              CellSync2Notifier *const *notifiers, unsigned int numNotifier, unsigned int dmaTag);
+
+int __sync2_cond_wait(uint32_t eaCond, const CellSync2CallerThreadType *caller, CellSync2Notifier *const *notifiers,
+                      unsigned int numNotifier, unsigned int dmaTag);
+int __sync2_cond_signal(uint32_t eaCond, int all, const CellSync2CallerThreadType *caller,
+                        CellSync2Notifier *const *notifiers, unsigned int numNotifier, unsigned int dmaTag);
+
+int __sync2_queue_push(uint32_t eaQueue, const void *data, const CellSync2CallerThreadType *caller,
+                       CellSync2Notifier *const *notifiers, unsigned int numNotifier, int wait, unsigned int dmaTag);
+int __sync2_queue_pop(uint32_t eaQueue, void *buffer, const CellSync2CallerThreadType *caller,
+                      CellSync2Notifier *const *notifiers, unsigned int numNotifier, int wait, unsigned int dmaTag);
 
 /* The argument checks every public entry point makes first. */
 static inline int s2_check_args(uint64_t ea, const CellSync2ThreadConfig *config, unsigned int dmaTag)
