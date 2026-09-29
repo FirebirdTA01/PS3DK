@@ -829,6 +829,12 @@ function(ps3_add_spu_image target)
     set(_spu_cxx_only_flags)
     if(_PSI_FREESTANDING)
         list(APPEND _spu_cflags -ffreestanding -fno-exceptions)
+    elseif(_PSI_JOBBIN)
+        # A job chain job (JOBBIN) is linked where the job manager loads it
+        # (spurs_job.ld, LS 0x4c00), so it is built position-dependent like
+        # the reference default: addresses held in its data are final.
+        list(APPEND _spu_cflags -fno-exceptions)
+        set(_spu_cxx_only_flags -fno-rtti)
     else()
         list(APPEND _spu_cflags -fpic -fno-exceptions)
         # -fno-rtti is C++-only; GCC warns when it reaches a C compile, and
@@ -863,7 +869,7 @@ function(ps3_add_spu_image target)
 
     # Link flags + libs
     set(_spu_link_flags)
-    if(NOT _PSI_FREESTANDING)
+    if(NOT _PSI_FREESTANDING AND NOT _PSI_JOBBIN)
         list(APPEND _spu_link_flags -fpic)
     endif()
     list(APPEND _spu_link_flags -Wl,--gc-sections "-L${PS3DK}/spu/lib" ${_PSI_LDFLAGS})

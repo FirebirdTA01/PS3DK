@@ -1,4 +1,4 @@
-/* sync2-objects: values shared by the PPU program and the SPU task. */
+/* sync2-objects: values shared by the PPU program and the SPU task / job. */
 #ifndef SYNC2_OBJECTS_COMMON_H
 #define SYNC2_OBJECTS_COMMON_H
 #include <stdint.h>
@@ -30,5 +30,9 @@ typedef struct box {
     uint32_t v1;
     uint32_t pad1[12];
 } __attribute__((aligned(128))) box;
+
+/* SPU job: workArea.userData[0] = semaphore EA, [1] = count to release,
+ * [2] = EA of a 16-byte result slot {magic, rc, 0, 0} */
+#define JOB_MAGIC 0x5e3a0b01u
 
 #endif

@@ -1,4 +1,4 @@
-/* sync2-objects: SPURS tasks and PPU threads sharing cellSync2
+/* sync2-objects: SPURS tasks, a SPURS job and PPU threads sharing cellSync2
  * objects.  The PPU side runs in the libsync2 system module; the SPU side
  * is libsync2.a.  Each row prints "SYNC2 <row> PASS" or the first check
  * that failed, and the program ends with "SYNC2_OBJECTS DONE passed=N of M".
@@ -16,6 +16,7 @@
  *              task pushes into a full queue and completes when the PPU
  *              pops; elements keep their order; TryPop on empty is AGAIN;
  *              GetSize / GetDepth from the SPU
+ *   job        a SPURS job releases a semaphore a PPU thread is waiting on
  */
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +28,7 @@
 #include <sys/timer.h>
 #include "common.h"
 #include "sync2_task_bin.h"
+#include "sync2_job_bin.h"
 
 #define TYPES (CELL_SYNC2_THREAD_TYPE_PPU_THREAD | CELL_SYNC2_THREAD_TYPE_SPURS_TASK)
 
@@ -379,6 +381,59 @@ static void row_queue()
     end_row();
 }
 
+static CellSpursJob256 s_job __attribute__((aligned(128)));
+static volatile uint32_t s_jobOut[4] __attribute__((aligned(128)));
+static uint64_t s_chain[4] __attribute__((aligned(16)));
+
+static void row_job()
+{
+    s_row = "job";
+    s_failed = 0;
+    CellSync2SemaphoreAttribute sattr;
+    cellSync2SemaphoreAttributeInitialize(&sattr);
+    sattr.maxWaiters = 4;   /* default thread types: PPU thread, fiber, task, job queue job, job */
+    std::strcpy(sattr.name, "sync2-job-sem");
+    size_t size;
+    cellSync2SemaphoreEstimateBufferSize(&sattr, &size);
+    int rc = cellSync2SemaphoreInitialize(&s_sem, buffer(size), 0, &sattr);
+    if (!check(rc == 0, "initialize", rc, 0))
+        return end_row();
+
+    sys_ppu_thread_t t = helper(sem_helper);
+    sys_timer_usleep(50000);
+    check(s_helper == 1, "PPU thread waits", s_helper, 1);
+
+    std::memset(&s_job, 0, sizeof s_job);
+    s_job.header.eaBinary = ea(sync2_job_bin);
+    s_job.header.sizeBinary = CELL_SPURS_GET_SIZE_BINARY(sync2_job_bin_size);
+    s_job.header.jobType = CELL_SPURS_JOB_TYPE_BINARY2;
+    s_job.workArea.userData[0] = ea(&s_sem);
+    s_job.workArea.userData[1] = 1;
+    s_job.workArea.userData[2] = ea(s_jobOut);
+    s_chain[0] = CELL_SPURS_JOB_COMMAND_JOB(&s_job);
+    s_chain[1] = CELL_SPURS_JOB_COMMAND_LWSYNC;
+    s_chain[2] = CELL_SPURS_JOB_COMMAND_END;
+    static const uint8_t prio[8] = { 8, 0, 0, 0, 0, 0, 0, 0 };
+    CellSpursJobChainAttribute attr;
+    std::memset(&attr, 0, sizeof attr);
+    rc = cellSpursJobChainAttributeInitialize(&attr, s_chain, 256, 16, prio, 1, true, 0, 1, false, 256, 0);
+    auto *jc = new CellSpursJobChain;
+    if (!rc)
+        rc = cellSpursCreateJobChainWithAttribute(reinterpret_cast<CellSpurs *>(s_spurs), jc, &attr);
+    if (!rc)
+        rc = cellSpursRunJobChain(jc);
+    if (check(rc == 0, "job chain", rc, 0)) {
+        check(wait_for([] { return s_jobOut[0] == JOB_MAGIC; }), "job ran", s_jobOut[0], JOB_MAGIC);
+        check(s_jobOut[1] == 0, "job's release rc", s_jobOut[1], 0);
+        cellSpursShutdownJobChain(jc);
+        cellSpursJoinJobChain(jc);
+    }
+    join(t);
+    check(s_helper == 2, "PPU thread woken by the job", s_helper, 2);
+    cellSync2SemaphoreFinalize(&s_sem);
+    end_row();
+}
+
 int main()
 {
     int rc = cellSysmoduleLoadModule(CELL_SYSMODULE_SYNC2);
@@ -400,7 +455,7 @@ int main()
         return 1;
     }
 
-    void (*rows[])() = { row_mutex, row_semaphore, row_cond, row_queue };
+    void (*rows[])() = { row_mutex, row_semaphore, row_cond, row_queue, row_job };
     int passed = 0, total = sizeof rows / sizeof rows[0];
     for (auto row : rows) {
         row();
