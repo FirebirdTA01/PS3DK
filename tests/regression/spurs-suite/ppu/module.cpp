@@ -5,18 +5,22 @@
  *   unit     each run loads a relocatable -mcustom-module work unit at an
  *            LS address of its choosing and runs it: its _init must
  *            relocate it (vtables, a pointer table) and construct it
+ *   trace    each run puts a module trace packet (cellSpursModulePutTrace);
+ *            the PPU finds it with the module's SPU and workload stamped
  *   count    ready count compare-and-swap (miss and hit) and add, which
  *            clamps at 0; each returns the previous count
  *   remove   ready count 0, shutdown, wait for the shutdown, remove */
 #include "harness.h"
 #include <cell/spurs/workload.h>
 #include <cell/spurs/ready_count.h>
+#include <cell/spurs/trace.h>
 #include "../module.h"
 #include SUITE_PM_HEADER
 #include SUITE_UNIT_HEADER
 
 alignas(128) static volatile module_box s_box;
 static const uint8_t s_prio[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
+alignas(128) static uint8_t s_trace[16 * 1024];
 
 static int row_main()
 {
@@ -28,6 +32,11 @@ static int row_main()
     int rc = suite::spurs_up(spurs, "SuiteMod");
     if (rc) return suite::invalid("spurs", rc);
     CellSpurs *cs = reinterpret_cast<CellSpurs *>(spurs);
+
+    suite::activity("starting a SPURS trace for the module's packets");
+    if ((rc = cellSpursTraceInitialize(cs, s_trace, sizeof s_trace, CELL_SPURS_TRACE_MODE_FLAG_WRAP_BUFFER)))
+        return suite::invalid("trace initialize", rc);
+    if ((rc = cellSpursTraceStart(cs))) return suite::invalid("trace start", rc);
 
     CellSpursWorkloadId wid = 99;
     suite::activity("adding the policy module (%u bytes)", static_cast<unsigned>(SUITE_PM_BIN_SIZE));
@@ -45,6 +54,27 @@ static int row_main()
         return suite::fail("module's workload argument", s_box.arg, 0);
     if (s_box.unitResult != M_UNIT_OK)
         return suite::fail("work unit relocated and constructed", s_box.unitResult, M_UNIT_OK);
+
+    suite::activity("looking for the module's trace packet");
+    if ((rc = cellSpursTraceStop(cs))) return suite::fail("trace stop", rc, 0);
+    {
+        /* cellSpursModulePutTrace: the header carries the SPU and workload
+           the module reported in the payload */
+        bool found = false, bad = false;
+        for (size_t off = sizeof(CellSpursTraceInfo); off + 16 <= sizeof s_trace; off += 16) {
+            const CellSpursTracePacket *p = reinterpret_cast<const CellSpursTracePacket *>(s_trace + off);
+            const uint64_t u = p->data.user;
+            if (p->header.tag != CELL_SPURS_TRACE_TAG_USER || static_cast<uint32_t>(u >> 32) != M_TRACE_MAGIC)
+                continue;
+            found = true;
+            if (p->header.length != 2 || p->header.spu != ((u >> 8) & 0xff) || p->header.workload != (u & 0xff)
+                || p->header.workload != wid || p->header.time == 0)
+                bad = true;
+        }
+        cellSpursTraceFinalize(cs);
+        if (!found) return suite::fail("module trace packet in the buffer", 0, 1);
+        if (bad) return suite::fail("module trace packet header (length, SPU, workload, time)", 1, 0);
+    }
 
     suite::activity("ready count compare-and-swap and add");
     unsigned old = 0;

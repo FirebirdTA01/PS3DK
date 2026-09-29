@@ -2,7 +2,9 @@
  * creates Task2 children from the SPU (plain, with a context and a name,
  * from a binary info block) and joins them, checks the argument errors,
  * and runs a child through an exit-code container.  The PPU then joins
- * the parent and must get its exit code. */
+ * the parent and must get its exit code, and itself creates a task with
+ * an exit-code container and collects the code (Get, then TryGet finds it
+ * consumed). */
 #include "harness.h"
 #include "../task2.h"
 #include SUITE_SPU_HEADER
@@ -10,6 +12,7 @@
 alignas(128) static volatile result_slot g_result[T2_SLOTS];
 alignas(128) static t2_params s_params;
 alignas(128) static CellSpursTaskExitCode s_exitCode;
+alignas(128) static CellSpursTaskExitCode s_ppuExitCode;   /* collected by the PPU */
 alignas(16) static CellSpursTaskBinInfo s_binInfo;
 
 static int row_main()
@@ -65,6 +68,34 @@ static int row_main()
     }
     if (code != T2_PARENT_CODE)
         return suite::fail("parent exit code", static_cast<unsigned>(code), T2_PARENT_CODE);
+
+    /* a task the PPU creates with an exit-code container, whose code the
+       PPU collects: Get waits for it, a second TryGet finds it consumed */
+    suite::activity("PPU exit-code container: create, Get, TryGet");
+    if ((rc = cellSpursTaskExitCodeInitialize(&s_ppuExitCode))) return suite::fail("PPU exit code initialize", rc, 0);
+    if ((rc = cellSpursTaskExitCodeTryGet(&s_ppuExitCode, &code)) != static_cast<int>(CELL_SPURS_TASK_ERROR_STAT))
+        return suite::fail("PPU TryGet with no task attached", rc, CELL_SPURS_TASK_ERROR_STAT);
+    {
+        CellSpursTaskArgument carg;
+        std::memset(&carg, 0, sizeof carg);
+        carg.u64[0] = reinterpret_cast<uintptr_t>(g_result);
+        carg.u32[2] = T2_PPU_CHILD_CODE;
+        carg.u32[3] = T2_CHILD;
+        CellSpursTaskAttribute tattr;
+        if ((rc = cellSpursTaskAttributeInitialize(&tattr, SUITE_SPU_BIN, nullptr, &carg)))
+            return suite::fail("PPU task attribute", rc, 0);
+        if ((rc = cellSpursTaskAttributeSetExitCodeContainer(&tattr, &s_ppuExitCode)))
+            return suite::fail("PPU set exit-code container", rc, 0);
+        CellSpursTaskId cid;
+        if ((rc = cellSpursCreateTaskWithAttribute(reinterpret_cast<CellSpursTaskset *>(plain), &cid, &tattr)))
+            return suite::fail("PPU create task with exit code", rc, 0);
+        code = 0;
+        if ((rc = cellSpursTaskExitCodeGet(&s_ppuExitCode, &code))) return suite::fail("PPU exit code Get", rc, 0);
+        if (code != static_cast<int>(T2_PPU_CHILD_CODE))
+            return suite::fail("PPU collected exit code", static_cast<unsigned>(code), T2_PPU_CHILD_CODE);
+        if ((rc = cellSpursTaskExitCodeTryGet(&s_ppuExitCode, &code)) != static_cast<int>(CELL_SPURS_TASK_ERROR_STAT))
+            return suite::fail("PPU TryGet after Get (consumed)", rc, CELL_SPURS_TASK_ERROR_STAT);
+    }
 
     suite::activity("shutting down the tasksets");
     suite::taskset_down(plain);

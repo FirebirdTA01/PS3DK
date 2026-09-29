@@ -8,6 +8,7 @@
 #define M_MAGIC 0x504d0001u
 #define M_UNIT_BASE 0x20000u     /* where the module loads the work unit */
 #define M_UNIT_OK   0x226cu
+#define M_TRACE_MAGIC 0x504d7ace   /* payload high word of the module trace packet */
 
 typedef struct module_box {
     uint32_t magic;         /* M_MAGIC once the module has run */

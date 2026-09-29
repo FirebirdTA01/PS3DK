@@ -7,10 +7,13 @@
 #include <spu_mfcio.h>
 #include <cell/spurs/common.h>
 #include <cell/spurs/policy_module.h>
+#include <cell/spurs/trace.h>
 #include "../module.h"
 
 /* in .data: the module image is loaded flat, without a .bss */
 static module_box box __attribute__((section(".data"))) = { 0 };
+/* a module trace packet: the magic, then the SPU and workload that put it */
+static CellSpursTracePacket packet __attribute__((section(".data"), aligned(16))) = { { 0 } };
 
 void cellSpursModuleEntry(uintptr_t context, uint64_t arg)
 {
@@ -35,6 +38,10 @@ void cellSpursModuleEntry(uintptr_t context, uint64_t arg)
         box.unitResult = ((unsigned (*)(void))M_UNIT_BASE)();
     }
     mfc_put(&box, arg, sizeof box, 0, 0, 0);
+    mfc_read_tag_status_all();
+    packet.header.tag = CELL_SPURS_TRACE_TAG_USER;
+    packet.data.user = ((uint64_t)M_TRACE_MAGIC << 32) | (box.spu << 8) | box.wid;
+    cellSpursModulePutTrace(&packet, 0);
     mfc_read_tag_status_all();
     cellSpursModuleExit();
 }
