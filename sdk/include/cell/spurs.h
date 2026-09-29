@@ -9,15 +9,19 @@
 #define __PS3DK_CELL_SPURS_H__
 
 #include <cell/spurs/types.h>
+#include <cell/spurs/trace_types.h>
 #include <cell/spurs/common.h>
 #include <cell/spurs/task_types.h>
 #include <cell/spurs/task.h>
 #include <cell/spurs/workload.h>
+#include <cell/spurs/trace.h>
+#include <cell/spurs/ready_count.h>
 #include <cell/spurs/barrier.h>
 #include <cell/spurs/event_flag.h>
 #include <cell/spurs/queue.h>
 #include <cell/spurs/semaphore.h>
 #include <cell/spurs/exception_types.h>
+#include <cell/spurs/exception.h>
 #include <cell/spurs/version.h>
 #include <cell/spurs/error.h>
 #include <cell/spurs/job_commands.h>

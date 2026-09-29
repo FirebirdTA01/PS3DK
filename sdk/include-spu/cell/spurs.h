@@ -2,9 +2,9 @@
  *
  * SPU-only umbrella pulling in the shared type headers, the SPU task
  * runtime surface (task.h), the EA-based SPU forms of the task sync
- * primitives (barrier, event flag, queue, lock-free queue, semaphore)
- * and the SPU job-queue surface.  Excludes PPU syscall surfaces
- * (workload.h) and job_chain.h (include that directly from job code).
+ * primitives (barrier, event flag, queue, lock-free queue, semaphore),
+ * ready counts, trace, and the SPU job surfaces.  Excludes the PPU
+ * syscall surfaces (workload.h).
  */
 #ifndef __PS3DK_CELL_SPURS_H_SPU__
 #define __PS3DK_CELL_SPURS_H_SPU__
@@ -15,6 +15,9 @@
 #include <cell/spurs/types.h>
 #include <cell/spurs/error.h>
 #include <cell/spurs/common.h>
+#include <cell/spurs/trace_types.h>
+#include <cell/spurs/trace.h>
+#include <cell/spurs/ready_count.h>
 #include <cell/spurs/exception_types.h>
 #include <cell/spurs/job_descriptor.h>
 #include <cell/spurs/job_commands.h>
