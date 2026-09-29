@@ -146,7 +146,7 @@ void draw(unsigned frame)
 
     /* board */
     float y = 0.15f;
-    for (unsigned i = 0; i < kRowCount; ++i, y += 0.034f) {
+    for (unsigned i = 0; i < kRowCount; ++i, y += 0.021f) {   /* 18 rows end above LIVE */
         const RowStatus &r = g_rows[i];
         const char *badge = " --- ";
         uint32_t color = kDim;
@@ -293,6 +293,8 @@ int main()
     std::memset(&fcfg, 0, sizeof fcfg);
     fcfg.localBufAddr = (sys_addr_t)(uintptr_t)rsxMemalign(128, fontSize);
     fcfg.localBufSize = (uint32_t)fontSize;
+    fcfg.screenWidth = res.width;     /* lets dbgfont put glyphs on whole pixels */
+    fcfg.screenHeight = res.height;
     fcfg.option = CELL_DBGFONT_VERTEX_LOCAL | CELL_DBGFONT_TEXTURE_LOCAL;
     if (cellDbgFontInitGcm(&fcfg) != 0)
         return 1;
