@@ -575,7 +575,18 @@ SPU_HEADERS := \
     include-spu/cell/sheap/key_sheap_barrier.h \
     include-spu/cell/sheap/key_sheap_queue.h \
     include-spu/cell/sheap/key_sheap_rwm.h \
-    include-spu/cell/sheap/key_sheap_semaphore.h
+    include-spu/cell/sheap/key_sheap_semaphore.h \
+    include-spu/vectormath/c/mat_aos.h \
+    include-spu/vectormath/c/quat_aos.h \
+    include-spu/vectormath/c/vec_aos.h \
+    include-spu/vectormath/c/vectormath_aos.h \
+    include-spu/vectormath/cpp/boolInVec.h \
+    include-spu/vectormath/cpp/floatInVec.h \
+    include-spu/vectormath/cpp/mat_aos.h \
+    include-spu/vectormath/cpp/quat_aos.h \
+    include-spu/vectormath/cpp/vec_aos.h \
+    include-spu/vectormath/cpp/vecidx_aos.h \
+    include-spu/vectormath/cpp/vectormath_aos.h
 
 .PHONY: all install clean version-header $(SUBLIBS) \
 	install-stub-archives install-native-aliases install-manifest verify-install \
