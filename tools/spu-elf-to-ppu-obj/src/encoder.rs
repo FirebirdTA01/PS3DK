@@ -56,10 +56,11 @@ pub fn encode_spu_elf(
         }
         EmbedFormat::Binary => {
             validate_binary_input(&spu.report)?;
-            let ppu_object = build_binary_ppu_object(symbol_base, &spu.ls_image)?;
+            let image = binary_image(&spu.ls_image, &spu.report.program_headers);
+            let ppu_object = build_binary_ppu_object(symbol_base, &image)?;
             Ok(EncodedArtifacts {
                 format,
-                image: spu.ls_image,
+                image,
                 jobheader: None,
                 ppu_object,
             })
@@ -150,12 +151,38 @@ pub fn write_sidecars(output: &Path, artifacts: &EncodedArtifacts) -> Result<Vec
     }
 }
 
+/// The binary form of an image: local store from its lowest loaded address
+/// to the end of its last segment (.bss included).  An image linked at 0 (a
+/// job) starts at 0; a policy module linked at 0xa00 starts there, which is
+/// where the kernel loads it.
+fn binary_image(
+    ls_image: &[u8],
+    program_headers: &[crate::spu_elf::ProgramHeaderReport],
+) -> Vec<u8> {
+    let base = program_headers
+        .iter()
+        .filter(|ph| ph.p_type == 1 && ph.p_memsz > 0)
+        .map(|ph| ph.p_vaddr as usize)
+        .min()
+        .unwrap_or(0)
+        .min(ls_image.len());
+    ls_image[base..].to_vec()
+}
+
 fn validate_common_input(report: &crate::spu_elf::SpuElfReport) -> Result<()> {
-    if !report.checks.is_elf32_be || !report.checks.is_em_spu || !report.checks.is_et_exec {
-        bail!("input must be an ELF32 big-endian EM_SPU executable");
-    }
+    validate_loadable_input(report)?;
     if !report.checks.entry_matches_start {
         bail!("input e_entry must match _start");
+    }
+    Ok(())
+}
+
+/// An executable whose load image can be taken as is: no entry-point rule,
+/// since a raw binary (a policy module linked with -e cellSpursModuleEntry,
+/// say) is entered wherever its loader decides.
+fn validate_loadable_input(report: &crate::spu_elf::SpuElfReport) -> Result<()> {
+    if !report.checks.is_elf32_be || !report.checks.is_em_spu || !report.checks.is_et_exec {
+        bail!("input must be an ELF32 big-endian EM_SPU executable");
     }
     if !report.checks.load_vaddr_equals_paddr {
         bail!("input PT_LOAD segments must use p_vaddr == p_paddr");
@@ -198,7 +225,7 @@ fn validate_jobbin2_input(report: &crate::spu_elf::SpuElfReport) -> Result<()> {
 }
 
 fn validate_binary_input(report: &crate::spu_elf::SpuElfReport) -> Result<()> {
-    validate_common_input(report)?;
+    validate_loadable_input(report)?;
     if report.e_flags == 2 {
         bail!("spu-elf-to-ppu-obj wrap --format=binary on an e_flags=2 (SPURS with-CRT job) SPU image is not yet supported; the e_flags=2 binary embed requires SPURS JOB INFO metadata that is not yet specified. Use --format=jobbin2 for JQ workloads, or wait for SPURS binary metadata support.");
     }
@@ -211,4 +238,45 @@ fn output_base(output: &Path) -> PathBuf {
         return PathBuf::from(stripped);
     }
     output.with_extension("")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::binary_image;
+    use crate::spu_elf::ProgramHeaderReport;
+
+    fn load(vaddr: u32, memsz: u32) -> ProgramHeaderReport {
+        ProgramHeaderReport {
+            index: 0,
+            p_type: 1,
+            p_offset: 0,
+            p_vaddr: vaddr,
+            p_paddr: vaddr,
+            p_filesz: memsz,
+            p_memsz: memsz,
+            p_flags: 0,
+            p_align: 0x80,
+        }
+    }
+
+    #[test]
+    fn binary_image_starts_at_the_lowest_load_address() {
+        let mut ls = vec![0u8; 0x1c00];
+        ls[0xa00] = 0x42;
+        let image = binary_image(&ls, &[load(0x1a00, 0x200), load(0xa00, 0xfb0)]);
+        assert_eq!(image.len(), 0x1200);
+        assert_eq!(image[0], 0x42);
+    }
+
+    #[test]
+    fn binary_image_of_an_image_linked_at_zero_is_the_whole_store() {
+        let ls = vec![7u8; 0x1a0];
+        assert_eq!(binary_image(&ls, &[load(0, 0x1a0)]), ls);
+    }
+
+    #[test]
+    fn binary_image_ignores_empty_segments() {
+        let ls = vec![0u8; 0x100];
+        assert_eq!(binary_image(&ls, &[load(0x80, 0), load(0, 0x100)]).len(), 0x100);
+    }
 }
