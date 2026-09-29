@@ -86,6 +86,7 @@ spurs-job-cpp-driver,tests/regression/spurs-suite/spurs-job-cpp-driver.fake.self
 spurs-job-queue-manual,tests/regression/spurs-suite/spurs-job-queue-manual.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-queue-manual OK,SPURS_SUITE spurs-job-queue-manual (FAIL|INVALID)
 spurs-job-queue-driver,tests/regression/spurs-suite/spurs-job-queue-driver.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-queue-driver OK,SPURS_SUITE spurs-job-queue-driver (FAIL|INVALID)
 spu-thread-ops,tests/regression/spurs-suite/spu-thread-ops.fake.self,60,RAN-CLEAN,SPURS_SUITE spu-thread-ops OK,SPURS_SUITE spu-thread-ops (FAIL|INVALID)
+spu-vector-literals,tests/regression/spurs-suite/spu-vector-literals.fake.self,60,RAN-CLEAN,SPURS_SUITE spu-vector-literals OK,SPURS_SUITE spu-vector-literals (FAIL|INVALID)
 # spu-celldma: one SPU program drives every cellDma family (unaligned at each
 # start offset, 40KB large, small, scalar, lock-line, cancel) against PPU
 # memory, and the PPU checks every destination byte.  The v0.16.4 libdma
