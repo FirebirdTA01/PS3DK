@@ -135,7 +135,7 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
 
     let object = object::File::parse(bytes).context("parsing SPU ELF with object crate")?;
     let mut symbols = BTreeMap::new();
-    for name in ["_start", "__bss_start", "_end"] {
+    for name in ["_start", "__bss_start", "_end", "_cell_spu_ls_param"] {
         let value = object
             .symbols()
             .find_map(|sym| match sym.name() {

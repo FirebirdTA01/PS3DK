@@ -69,7 +69,7 @@ pub fn inspect_ppu_obj(path: &Path) -> Result<PpuObjectReport> {
     let mut sections = BTreeMap::new();
     for section in object.sections() {
         if let Ok(name) = section.name() {
-            if matches!(name, ".spu_image" | ".spu_image.jobheader") {
+            if matches!(name, ".spu_image" | ".spu_image.jobheader" | ".spu_image.taskbininfo") {
                 let (file_offset, _) = section.file_range().unwrap_or((0, 0));
                 sections.insert(
                     name.to_string(),
@@ -100,6 +100,7 @@ pub fn inspect_ppu_obj(path: &Path) -> Result<PpuObjectReport> {
             || sym.name.ends_with("_elf_start")
             || sym.name.ends_with("_elf_end")
             || sym.name.ends_with("_elf_size")
+            || sym.name.ends_with("_taskbininfo")
         {
             symbols.insert(
                 sym.name.clone(),

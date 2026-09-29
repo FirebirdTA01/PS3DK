@@ -71,6 +71,7 @@ enum CliEmbedFormat {
     Jobbin2,
     Binary,
     Elf,
+    Task,
 }
 
 impl From<CliEmbedFormat> for EmbedFormat {
@@ -79,6 +80,7 @@ impl From<CliEmbedFormat> for EmbedFormat {
             CliEmbedFormat::Jobbin2 => EmbedFormat::Jobbin2,
             CliEmbedFormat::Binary => EmbedFormat::Binary,
             CliEmbedFormat::Elf => EmbedFormat::Elf,
+            CliEmbedFormat::Task => EmbedFormat::Task,
         }
     }
 }

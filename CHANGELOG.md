@@ -16,6 +16,15 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- `spu-elf-to-ppu-obj wrap --format task` embeds a SPURS task ELF with its
+  `CellSpursTaskBinInfo` (`_binary_<name>_taskbininfo`): the ELF address,
+  the context save size and the LS pattern.  A task that declares
+  `CELL_SPU_LS_PARAM(heap, stack)` saves its image, its heap and its stack;
+  otherwise all local storage above the SPURS area except whole read-only
+  blocks.
+
 ## [v0.17.0] — 2026-09-28
 
 ### Added
