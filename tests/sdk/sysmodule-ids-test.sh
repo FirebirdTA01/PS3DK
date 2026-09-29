@@ -32,6 +32,8 @@ src="$root/tests/sdk/sysmodule-ids-test.c"
 # installed SDK puts two copies of the libc wrapper headers in the chain
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/cell" && cp "$inc/cell/sysmodule.h" "$work/cell/" || { echo "sysmodule-ids: FAIL: no cell/sysmodule.h under $inc"; exit 1; }
+# CELL_OK comes from cell/error.h, which includes nothing further
+cp "$inc/cell/error.h" "$work/cell/" || { echo "sysmodule-ids: FAIL: no cell/error.h under $inc"; exit 1; }
 includes=(-I"$work")
 if [ "$host" -eq 1 ]; then
     # Value checks only: do not pull PPU syscall assembly into a host TU.
