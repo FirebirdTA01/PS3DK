@@ -84,6 +84,12 @@ spurs-job-chain-manual,tests/regression/spurs-suite/spurs-job-chain-manual.fake.
 spurs-job-chain-driver,tests/regression/spurs-suite/spurs-job-chain-driver.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-chain-driver OK,SPURS_SUITE spurs-job-chain-driver (FAIL|INVALID)
 spurs-job-queue-manual,tests/regression/spurs-suite/spurs-job-queue-manual.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-queue-manual OK,SPURS_SUITE spurs-job-queue-manual (FAIL|INVALID)
 spurs-job-queue-driver,tests/regression/spurs-suite/spurs-job-queue-driver.fake.self,60,RAN-CLEAN,SPURS_SUITE spurs-job-queue-driver OK,SPURS_SUITE spurs-job-queue-driver (FAIL|INVALID)
+# spu-celldma: one SPU program drives every cellDma family (unaligned at each
+# start offset, 40KB large, small, scalar, lock-line, cancel) against PPU
+# memory, and the PPU checks every destination byte.  The v0.16.4 libdma
+# splitter issued illegal MFC sizes: that build ends in an SPU access
+# violation (the emulator row fails), this one prints CELLDMA_OK.
+spu-celldma,tests/regression/spu-celldma/spu-celldma.fake.self,60,RAN-CLEAN,CELLDMA_OK,CELLDMA_FAIL|CELLDMA_INVALID
 # spu-sheap: SPU libsheap against the firmware cellSheap (PPU side through
 # libsheap_stub).  *_HLE lines mean the emulator's built-in cellSheap is in
 # use instead of the firmware module: a configuration failure, not a pass.

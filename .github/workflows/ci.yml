@@ -185,6 +185,9 @@ jobs:
       - name: Test librt joins relative paths to the working directory verbatim
         run: bash tests/sdk/librt-resolve-path-host-test.sh
 
+      - name: Test libdma splits large and unaligned transfers into legal MFC commands
+        run: bash tests/sdk/libdma-split-host-test.sh
+
       - name: Test librt heap configuration and failure diagnostics
         run: bash tests/sdk/librt-heap-test.sh
 
@@ -267,6 +270,10 @@ jobs:
       # Additional target-header check when a PPU toolchain is available.
       - name: Test the sysmodule ids with the PPU compiler
         run: bash tests/sdk/sysmodule-ids-test.sh
+
+      # Skips without PS3DEV; compiles and links every SPU cellDma name.
+      - name: Test the SPU cellDma surface compiles and links
+        run: bash tests/sdk/spu-celldma-api-test.sh
 
       # Skips without PS3DEV; compiles this tree's PRX headers in every order.
       - name: Test the PRX headers work alone and in either order

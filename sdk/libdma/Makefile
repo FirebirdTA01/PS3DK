@@ -4,8 +4,9 @@
 #   libdma.a     -> $(SPU_PREFIX)/spu-elf/lib/ (canonical)
 #                -> $(PS3DK)/spu/lib/           (compatibility mirror)
 #
-# Three extern entry points not covered by the inline macros in
-# <cell/dma.h>: cellDmaAndWait, cellDmaLargeCmd, cellDmaUnalignedCmd.
+# The three extern entry points behind <cell/dma.h>: cellDmaAndWait (also
+# used by the cellDmaGetUintN/PutUintN scalars), cellDmaLargeCmd (the
+# cellDmaLarge* macros) and cellDmaUnalignedCmd (the cellDmaUnaligned* macros).
 #
 # Built with spu-elf-gcc.
 
