@@ -50,6 +50,7 @@
 
 #ifndef __PSL1GHT_CELL_GCM_H__
 #define __PSL1GHT_CELL_GCM_H__
+#include <stdio.h>   /* callers use printf/stdout without including it */
 #define __CELL_GCM_H__
 
 #include <stdint.h>

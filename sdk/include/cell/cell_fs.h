@@ -12,6 +12,7 @@
  */
 #ifndef PS3TC_CELL_CELL_FS_H
 #define PS3TC_CELL_CELL_FS_H
+#include <stdio.h>   /* callers use printf/stdout without including it */
 
 #include <cell/fs/cell_fs_file_api.h>
 
