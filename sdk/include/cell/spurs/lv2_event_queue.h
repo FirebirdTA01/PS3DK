@@ -21,7 +21,7 @@ extern "C" {
 int cellSpursAttachLv2EventQueue(CellSpurs *spurs,
                                  sys_event_queue_t queue,
                                  uint8_t *port,
-                                 bool isDynamic);
+                                 int isDynamic);
 
 int cellSpursDetachLv2EventQueue(CellSpurs *spurs, uint8_t port);
 

@@ -195,66 +195,51 @@ cellSpursSendSignal(CellSpursTaskset *taskset, CellSpursTaskId id)
 namespace cell {
 namespace Spurs {
 
-class Taskset : public CellSpursTaskset {
-public:
-    static const uint32_t kSize  = CELL_SPURS_TASKSET_SIZE;
-    static const uint32_t kAlign = CELL_SPURS_TASKSET_ALIGN;
+/* cell::Spurs::Taskset is declared in <cell/spurs/task_types.h> (a
+ * Taskset2 derives from it); its members forward to the C entry points. */
+inline int Taskset::createWithAttribute(CellSpurs *spurs, CellSpursTaskset *taskset,
+                                        const CellSpursTasksetAttribute *attr)
+{ return cellSpursCreateTasksetWithAttribute(spurs, taskset, attr); }
 
-    static int createWithAttribute(CellSpurs *spurs,
-                                   CellSpursTaskset *taskset,
-                                   const CellSpursTasksetAttribute *attr)
-    { return cellSpursCreateTasksetWithAttribute(spurs, taskset, attr); }
+inline int Taskset::create(CellSpurs *spurs, CellSpursTaskset *taskset, uint64_t argTaskset,
+                           const uint8_t priority[8], unsigned int maxContention)
+{ return cellSpursCreateTaskset(spurs, taskset, argTaskset, priority, maxContention); }
 
-    static int create(CellSpurs *spurs,
-                      CellSpursTaskset *taskset,
-                      uint64_t argTaskset,
-                      const uint8_t priority[8],
-                      unsigned int maxContention)
-    { return cellSpursCreateTaskset(spurs, taskset, argTaskset, priority, maxContention); }
+inline int Taskset::lookUpTasksetAddress(CellSpurs *spurs, CellSpursTaskset **taskset,
+                                         CellSpursWorkloadId id)
+{ return cellSpursLookUpTasksetAddress(spurs, taskset, id); }
 
-    int shutdown()
-    { return cellSpursShutdownTaskset(this); }
+inline int Taskset::shutdown()
+{ return cellSpursShutdownTaskset(this); }
 
-    int join()
-    { return cellSpursJoinTaskset(this); }
+inline int Taskset::join()
+{ return cellSpursJoinTaskset(this); }
 
-    static int lookUpTasksetAddress(CellSpurs *spurs,
-                                    CellSpursTaskset **taskset,
-                                    CellSpursWorkloadId id)
-    { return cellSpursLookUpTasksetAddress(spurs, taskset, id); }
+inline int Taskset::getTasksetId(CellSpursWorkloadId *wid) const
+{ return cellSpursGetTasksetId(this, wid); }
 
-    int getTasksetId(CellSpursWorkloadId *wid) const
-    { return cellSpursGetTasksetId(this, wid); }
+inline int Taskset::getSpursAddress(CellSpurs **ppSpurs) const
+{ return cellSpursTasksetGetSpursAddress(this, ppSpurs); }
 
-    int getSpursAddress(CellSpurs **ppSpurs) const
-    { return cellSpursTasksetGetSpursAddress(this, ppSpurs); }
+inline int Taskset::createTaskWithAttribute(CellSpursTaskId *tid, const CellSpursTaskAttribute *attr)
+{ return cellSpursCreateTaskWithAttribute(this, tid, attr); }
 
-    int createTaskWithAttribute(CellSpursTaskId *tid,
-                                const CellSpursTaskAttribute *attr)
-    { return cellSpursCreateTaskWithAttribute(this, tid, attr); }
+inline int Taskset::createTask(CellSpursTaskId *tid, const void *eaElf, const void *eaContext,
+                               uint32_t sizeContext, const CellSpursTaskLsPattern *lsPattern,
+                               const CellSpursTaskArgument *arg)
+{ return cellSpursCreateTask(this, tid, eaElf, eaContext, sizeContext, lsPattern, arg); }
 
-    int createTask(CellSpursTaskId *tid,
-                   const void *eaElf,
-                   const void *eaContext,
-                   uint32_t sizeContext,
-                   const CellSpursTaskLsPattern *lsPattern,
-                   const CellSpursTaskArgument *arg)
-    { return cellSpursCreateTask(this, tid, eaElf, eaContext,
-                                 sizeContext, lsPattern, arg); }
+inline int Taskset::sendSignal(CellSpursTaskId id)
+{ return cellSpursSendSignal(this, id); }
 
-    int sendSignal(CellSpursTaskId id)
-    { return cellSpursSendSignal(this, id); }
+inline int Taskset::setExceptionEventHandler(CellSpursTasksetExceptionEventHandler handler, void *arg)
+{ return cellSpursTasksetSetExceptionEventHandler(this, handler, arg); }
 
-    int setExceptionEventHandler(CellSpursTasksetExceptionEventHandler handler,
-                                 void *arg)
-    { return cellSpursTasksetSetExceptionEventHandler(this, handler, arg); }
+inline int Taskset::unsetExceptionEventHandler()
+{ return cellSpursTasksetUnsetExceptionEventHandler(this); }
 
-    int unsetExceptionEventHandler()
-    { return cellSpursTasksetUnsetExceptionEventHandler(this); }
-
-    int getTasksetInfo(CellSpursTasksetInfo *info) const
-    { return cellSpursGetTasksetInfo(this, info); }
-};
+inline int Taskset::getTasksetInfo(CellSpursTasksetInfo *info) const
+{ return cellSpursGetTasksetInfo(this, info); }
 
 struct TasksetAttribute2 : public CellSpursTasksetAttribute2 {
     static void initialize(CellSpursTasksetAttribute2 *attr)
@@ -279,19 +264,10 @@ public:
     int destroy()
     { return cellSpursDestroyTaskset2(this); }
 
-    /* the Taskset operations, on the taskset this extends */
-    Taskset *taskset() { return static_cast<Taskset *>(static_cast<CellSpursTaskset *>(this)); }
-    const Taskset *taskset() const
-    { return static_cast<const Taskset *>(static_cast<const CellSpursTaskset *>(this)); }
-    int shutdown() { return taskset()->shutdown(); }
-    int join() { return taskset()->join(); }
-    int getTasksetId(CellSpursWorkloadId *wid) const { return taskset()->getTasksetId(wid); }
-    int getSpursAddress(CellSpurs **ppSpurs) const { return taskset()->getSpursAddress(ppSpurs); }
-    int sendSignal(CellSpursTaskId id) { return taskset()->sendSignal(id); }
-    int setExceptionEventHandler(CellSpursTasksetExceptionEventHandler handler, void *arg)
-    { return taskset()->setExceptionEventHandler(handler, arg); }
-    int unsetExceptionEventHandler() { return taskset()->unsetExceptionEventHandler(); }
-    int getTasksetInfo(CellSpursTasksetInfo *info) const { return taskset()->getTasksetInfo(info); }
+    /* the Taskset operations are inherited (CellSpursTaskset2 derives
+     * from Taskset); kept for code that asks for the base explicitly */
+    Taskset *taskset() { return this; }
+    const Taskset *taskset() const { return this; }
 
     int createTask2(CellSpursTaskId *id,
                     const void *eaElf,

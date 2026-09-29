@@ -228,9 +228,10 @@ typedef struct CellSpursTasksetAttribute2 {
                                              + 4 /* PRXPTR taskNameBuffer */)];
 } __attribute__((aligned(CELL_SPURS_TASKSET_ATTRIBUTE2_ALIGN))) CellSpursTasksetAttribute2;
 
-/* Taskset2: extends Taskset with the class-1 extended bytes.  The
- * C++ derived form below lets a CellSpursTaskset2* convert to a
- * CellSpursTaskset* without a pointer cast; the C branch is flat. */
+/* Taskset2: extends Taskset with the class-1 extended bytes.  In C++ it
+ * derives from cell::Spurs::Taskset, so a Taskset2 converts to a
+ * CellSpursTaskset* without a cast and carries every Taskset member
+ * (createWithAttribute, shutdown, join, ...); the C branch is flat. */
 #ifndef __cplusplus
 typedef struct CellSpursTaskset2 {
     unsigned char skip[CELL_SPURS_TASKSET2_SIZE];
@@ -240,7 +241,42 @@ typedef struct CellSpursTaskset2 {
 #ifdef __cplusplus
 }   /* extern "C" */
 
-struct CellSpursTaskset2 : public CellSpursTaskset {
+namespace cell {
+namespace Spurs {
+
+/* Declared here so CellSpursTaskset2 can derive from it; the PPU
+ * members are defined inline in <cell/spurs/task.h>. */
+class Taskset : public CellSpursTaskset {
+public:
+    static const uint32_t kSize  = CELL_SPURS_TASKSET_SIZE;
+    static const uint32_t kAlign = CELL_SPURS_TASKSET_ALIGN;
+
+#ifndef __SPU__
+    static int createWithAttribute(CellSpurs *spurs, CellSpursTaskset *taskset,
+                                   const CellSpursTasksetAttribute *attr);
+    static int create(CellSpurs *spurs, CellSpursTaskset *taskset, uint64_t argTaskset,
+                      const uint8_t priority[8], unsigned int maxContention);
+    static int lookUpTasksetAddress(CellSpurs *spurs, CellSpursTaskset **taskset,
+                                    CellSpursWorkloadId id);
+    int shutdown();
+    int join();
+    int getTasksetId(CellSpursWorkloadId *wid) const;
+    int getSpursAddress(CellSpurs **ppSpurs) const;
+    int createTaskWithAttribute(CellSpursTaskId *tid, const CellSpursTaskAttribute *attr);
+    int createTask(CellSpursTaskId *tid, const void *eaElf, const void *eaContext,
+                   uint32_t sizeContext, const CellSpursTaskLsPattern *lsPattern,
+                   const CellSpursTaskArgument *arg);
+    int sendSignal(CellSpursTaskId id);
+    int setExceptionEventHandler(CellSpursTasksetExceptionEventHandler handler, void *arg);
+    int unsetExceptionEventHandler();
+    int getTasksetInfo(CellSpursTasksetInfo *info) const;
+#endif
+};
+
+}   /* namespace Spurs */
+}   /* namespace cell */
+
+struct CellSpursTaskset2 : public cell::Spurs::Taskset {
     unsigned char skip[CELL_SPURS_TASKSET2_SIZE - CELL_SPURS_TASKSET_SIZE];
 } __attribute__((aligned(CELL_SPURS_TASKSET2_ALIGN)));
 
