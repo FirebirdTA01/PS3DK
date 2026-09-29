@@ -136,6 +136,9 @@ jobs:
       - name: Test the SPURS job image entry guard
         run: bash tests/sdk/spu-jobbin-entry-guard-test.sh
 
+      - name: Test librt pthread_mutex_trylock returns POSIX EBUSY
+        run: bash tests/sdk/librt-trylock-ebusy-test.sh
+
       # The GCM FIFO wrap must retire a lap the application never published
       # (t_38e8bf5a): a host model of the RSX fetcher runs the protocol, and
       # the one-phase protocol it replaced must fail the idle-lap scenario.

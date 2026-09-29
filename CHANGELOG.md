@@ -16,6 +16,13 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- librt: `pthread_mutex_trylock` on a held mutex returns POSIX `EBUSY` (16)
+  again.  v0.17.0 returned the Lv-2 code `0x8001000A`, because
+  `<sys/mutex.h>` now reaches `<sys/synchronization.h>`, which redefines
+  `EBUSY`.
+
 ## [v0.17.0] — 2026-09-28
 
 ### Added
