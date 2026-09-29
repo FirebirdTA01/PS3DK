@@ -22,10 +22,18 @@ INSTALL_LIB_MIRROR := $(PS3DK)/spu/lib
 override CC := spu-elf-gcc
 AR := spu-elf-ar
 
-CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding -std=gnu99           -I../libspurs_task/include -I../include-spu -I../include -I../libsputhread/include
+CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding -std=gnu99 \
+          -I../libspurs_task/include -I../include-spu -I../include
 
 BUILD := build
-OBJS  := $(addprefix $(BUILD)/,lock_line.o waiting_queue.o mutex.o            mutex_lock.o mutex_trylock.o mutex_unlock.o            semaphore.o semaphore_acquire.o semaphore_try_acquire.o semaphore_release.o semaphore_get_count.o            cond.o cond_wait.o cond_signal.o cond_signal_all.o            queue.o queue_push.o queue_try_push.o queue_pop.o queue_try_pop.o queue_get_size.o queue_get_depth.o            spurs_task_thread.o spurs_task_notifier.o thread_config_spurs_task.o            ppu_thread_notifier.o ppu_fiber_notifier.o spurs_jqjob_notifier.o)
+OBJS  := $(addprefix $(BUILD)/,lock_line.o waiting_queue.o \
+           mutex.o mutex_lock.o mutex_trylock.o mutex_unlock.o \
+           semaphore.o semaphore_acquire.o semaphore_try_acquire.o semaphore_release.o semaphore_get_count.o \
+           cond.o cond_wait.o cond_signal.o cond_signal_all.o \
+           queue.o queue_push.o queue_try_push.o queue_pop.o queue_try_pop.o queue_get_size.o queue_get_depth.o \
+           spurs_task_thread.o spurs_task_notifier.o thread_config_spurs_task.o \
+           spurs_job_thread.o thread_config_spurs_job.o spurs_jqjob_thread.o thread_config_spurs_jqjob.o \
+           ppu_thread_notifier.o ppu_fiber_notifier.o spurs_jqjob_notifier.o)
 LIB   := $(BUILD)/libsync2.a
 
 .PHONY: all install clean
@@ -37,7 +45,7 @@ $(LIB): $(OBJS)
 	@rm -f $@
 	@$(AR) rcs $@ $(OBJS)
 
-$(BUILD)/%.o: src/%.c src/sync2_internal.h | $(BUILD)
+$(BUILD)/%.o: src/%.c src/sync2_internal.h src/spurs_job_id.h | $(BUILD)
 	@echo "  CC    $(notdir $<)"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
