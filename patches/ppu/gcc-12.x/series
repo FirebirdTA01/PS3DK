@@ -44,3 +44,4 @@
 0043-cell64lv2-minimal-toc-ilp32.patch
 0046-cell64lv2-reference-predefines.patch
 0047-rs6000-ps3-mp32-mp64-aliases.patch
+0048-libstdcxx-containers-bring-in-string.patch
