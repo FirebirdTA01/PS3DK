@@ -24,6 +24,7 @@
 
 #include <stdint.h>
 #include <spu_mfcio.h>
+#include <cellstatus.h>   /* CELL_OK, as callers expect */
 
 #ifdef __cplusplus
 extern "C" {
