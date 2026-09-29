@@ -146,21 +146,5 @@ void __do_atexit(void)
 	}
 }
 
-/* Function-local statics: a job runs on one SPU and nothing else touches
-   its local store, so the guards need no locking.  Defining them here
-   also keeps libsupc++'s versions, and the exception, terminate and
-   demangler code they bring, out of job images. */
-int __cxa_guard_acquire(uint64_t *guard)
-{
-	return !*(volatile uint8_t *)guard;
-}
-
-void __cxa_guard_release(uint64_t *guard)
-{
-	*(volatile uint8_t *)guard = 1;
-}
-
-void __cxa_guard_abort(uint64_t *guard)
-{
-	(void)guard;
-}
+/* The function-local-static guards live in job_guard.c, linked into the
+   job_crt.o startfile. */
