@@ -304,6 +304,7 @@ int main()
 
     CellGcmContextData *ctx = CELL_GCM_CURRENT;
     unsigned cur = 0;
+    bool flipPending = false;   /* only wait for a flip that was issued */
     for (unsigned frame = 0; !g_exit; ++frame) {
         cellSysutilCheckCallback();
         set_target(ctx, bufs[cur]);
@@ -312,10 +313,11 @@ int main()
         draw(frame);
         cellDbgFontDrawGcm();
         cellGcmFlush(ctx);
-        while (cellGcmGetFlipStatus() != 0)
+        while (flipPending && cellGcmGetFlipStatus() != 0)
             usleep(200);
         cellGcmResetFlipStatus();
-        if (cellGcmSetFlip(ctx, cur) == 0) {
+        flipPending = cellGcmSetFlip(ctx, cur) == 0;
+        if (flipPending) {
             cellGcmFlush(ctx);
             cellGcmSetWaitFlip(ctx);
         }
