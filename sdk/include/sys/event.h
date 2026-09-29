@@ -47,8 +47,10 @@ extern "C" {
 typedef sys_event_queue_attr_t  sys_event_queue_attribute_t;
 
 /* ---- constants -------------------------------------------------- */
+/* The IPC key of a queue private to the process (not a queue type:
+ * SYS_PPU_QUEUE / SYS_SPU_QUEUE go in the attribute). */
 #ifndef SYS_EVENT_QUEUE_LOCAL
-# define SYS_EVENT_QUEUE_LOCAL  SYS_EVENT_QUEUE_PPU
+# define SYS_EVENT_QUEUE_LOCAL  0x00
 #endif
 
 /* ---- snake_case forwarders -------------------------------------- */
