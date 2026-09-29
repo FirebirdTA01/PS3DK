@@ -25,8 +25,10 @@ pub fn hard_stripped_spu_elf_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
         bail!("input must be an ELF32 big-endian EM_SPU executable");
     }
     let e_flags = be_u32(bytes, 0x24)?;
-    if e_flags != 0 {
-        bail!("spu-elf-to-ppu-obj wrap --format=elf supports only e_flags=0 SPU executables; e_flags=1/2 SPURS images use JOBBIN/JOBBIN_WRAP formats");
+    // 0: SPU thread image; 3: SPURS task image (embedded whole, with its
+    // taskbininfo).  SPURS job images (1, 2) use the jobbin2 or binary formats.
+    if e_flags != 0 && e_flags != 3 {
+        bail!("spu-elf-to-ppu-obj wrap --format=elf/task embeds only SPU thread (e_flags=0) or SPURS task (e_flags=3) executables; e_flags=1/2 SPURS job images use the jobbin2 or binary formats");
     }
 
     let e_phoff = be_u32(bytes, 0x1c)? as usize;

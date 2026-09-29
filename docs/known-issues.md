@@ -7,23 +7,6 @@ next surface.
 
 ---
 
-## SPURS task images have no `taskbininfo` embed yet
-
-**Symptom:** code that creates a task from an embedded
-`CellSpursTaskBinInfo` (`_binary_<name>_spu_elf_taskbininfo`, used with
-`createTask2WithBinInfo` and similar) fails to link: `spu-elf-to-ppu-obj`
-embeds a task ELF as `_binary_<name>_elf_start` / `_end` / `_size` only.
-
-**Works today:** create tasks from the embedded ELF (`createTask`,
-`createTask2` with the ELF's address and an explicit context size and LS
-pattern), as `samples/spurs/hello-spurs-task` and the spurs-suite rows do.
-
-**Planned fix:** `spu-elf-to-ppu-obj` emits the `taskbininfo` record
-(ELF address, context size and the LS pattern computed from the ELF's
-loaded segments) beside the embedded ELF.
-
----
-
 ## Small dbgfont text is hard to read at 720p
 
 **Symptom:** text drawn with a scale below 1.0 on a 1280x720 display gets

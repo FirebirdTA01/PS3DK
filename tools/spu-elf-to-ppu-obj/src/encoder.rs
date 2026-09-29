@@ -5,7 +5,10 @@ use anyhow::{bail, Context, Result};
 use crate::elf_embed::hard_stripped_spu_elf;
 use crate::jobheader::build_jobheader;
 use crate::patches::final_ls_image;
-use crate::ppu_write::{build_binary_ppu_object, build_elf_ppu_object, build_jobbin2_ppu_object};
+use crate::ppu_write::{
+    build_binary_ppu_object, build_elf_ppu_object, build_jobbin2_ppu_object, build_task_ppu_object,
+    task_context,
+};
 use crate::spu_elf::inspect_spu_elf;
 use crate::wrapper::build_jobbin2_blob;
 
@@ -14,6 +17,8 @@ pub enum EmbedFormat {
     Jobbin2,
     Binary,
     Elf,
+    /// A SPURS task ELF (e_flags 3) with its CellSpursTaskBinInfo.
+    Task,
 }
 
 pub struct EncodedArtifacts {
@@ -59,6 +64,43 @@ pub fn encode_spu_elf(
                 ppu_object,
             })
         }
+        EmbedFormat::Task => {
+            validate_task_input(&spu.report)?;
+            let image_end = spu
+                .report
+                .program_headers
+                .iter()
+                .filter(|ph| ph.p_type == 1)
+                .map(|ph| ph.p_vaddr.saturating_add(ph.p_memsz))
+                .max()
+                .context("task ELF has no PT_LOAD segment")?;
+            // CELL_SPU_LS_PARAM(heap, stack): 16 bytes, heap then stack.
+            let ls_param = spu.report.symbols.get("_cell_spu_ls_param").and_then(|v| *v).and_then(|a| {
+                let a = a as usize;
+                spu.ls_image.get(a..a + 8).map(|w| {
+                    (
+                        u32::from_be_bytes([w[0], w[1], w[2], w[3]]),
+                        u32::from_be_bytes([w[4], w[5], w[6], w[7]]),
+                    )
+                })
+            });
+            let read_only: Vec<(u32, u32)> = spu
+                .report
+                .program_headers
+                .iter()
+                .filter(|ph| ph.p_type == 1 && ph.p_flags & 2 == 0)
+                .map(|ph| (ph.p_vaddr, ph.p_vaddr.saturating_add(ph.p_filesz)))
+                .collect();
+            let (ls_pattern, size_context) = task_context(image_end, ls_param, &read_only);
+            let elf_image = hard_stripped_spu_elf(path)?;
+            let ppu_object = build_task_ppu_object(symbol_base, &elf_image, size_context, ls_pattern)?;
+            Ok(EncodedArtifacts {
+                format,
+                image: elf_image,
+                jobheader: None,
+                ppu_object,
+            })
+        }
         EmbedFormat::Elf => {
             let elf_image = hard_stripped_spu_elf(path)?;
             let ppu_object = build_elf_ppu_object(symbol_base, &elf_image)?;
@@ -99,7 +141,7 @@ pub fn write_sidecars(output: &Path, artifacts: &EncodedArtifacts) -> Result<Vec
                 .with_context(|| format!("writing {}", bin_path.display()))?;
             Ok(vec![bin_path])
         }
-        EmbedFormat::Elf => {
+        EmbedFormat::Elf | EmbedFormat::Task => {
             let elf_path = base.with_extension("elf");
             std::fs::write(&elf_path, &artifacts.image)
                 .with_context(|| format!("writing {}", elf_path.display()))?;
@@ -117,6 +159,19 @@ fn validate_common_input(report: &crate::spu_elf::SpuElfReport) -> Result<()> {
     }
     if !report.checks.load_vaddr_equals_paddr {
         bail!("input PT_LOAD segments must use p_vaddr == p_paddr");
+    }
+    Ok(())
+}
+
+fn validate_task_input(report: &crate::spu_elf::SpuElfReport) -> Result<()> {
+    if !report.checks.is_elf32_be || !report.checks.is_em_spu || !report.checks.is_et_exec {
+        bail!("input must be an ELF32 big-endian EM_SPU executable");
+    }
+    if report.e_flags != 3 {
+        bail!(
+            "--format=task needs a SPURS task ELF (e_flags 3, linked with -mspurs-task); this one has e_flags {}",
+            report.e_flags
+        );
     }
     Ok(())
 }
