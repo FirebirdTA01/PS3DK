@@ -61,4 +61,4 @@ set(SUITE_ROW_DIRS
     spurs-control spurs-barrier spurs-ls-pattern spurs-task2 spurs-services spurs-job-extras spurs-jq-spu spurs-module
     spurs-job-chain-manual spurs-job-chain-driver spurs-job-cpp-driver
     spurs-job-queue-manual spurs-job-queue-driver
-    spu-thread-ops spu-vector-literals)
+    spu-thread-ops spu-vector-literals spu-fiber-signal)

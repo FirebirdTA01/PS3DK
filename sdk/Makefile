@@ -359,6 +359,8 @@ HEADERS := \
     include/cell/fiber/ppu_fiber.h \
     include/cell/fiber/user_scheduler.h \
     include/cell/fiber/ppu_fiber_worker_control.h \
+    include/cell/fiber/ppuUtilDefine.h \
+    include/cell/fiber/ppuUtilRuntime.h \
     include/cell/usbd.h \
     include/cell/usbd/usb.h \
     include/cell/usbd/libusbd.h \
@@ -493,6 +495,10 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/error.h \
     include/cell/fiber/error.h \
     include/cell/fiber/spu_context_types.h \
+    include/cell/fiber/version.h \
+    include/cell/fiber/ppu_context_types.h \
+    include/cell/fiber/ppu_fiber_types.h \
+    include/cell/fiber/ppu_fiber_worker_control.h \
     include/cell/sheap/error.h \
     include/cell/sheap/sheap_types.h \
     include/cell/jdl.h \
@@ -594,6 +600,9 @@ SPU_HEADERS := \
     include-spu/cell/sync2/semaphore.h \
     include-spu/cell/fiber.h \
     include-spu/cell/fiber/spu_context.h \
+    include-spu/cell/fiber/ppu_fiber.h \
+    include-spu/cell/fiber/ppuUtilDefine.h \
+    include-spu/cell/fiber/ppuUtilRuntime.h \
     include-spu/cell/sheap.h \
     include-spu/cell/sheap/sheap_base.h \
     include-spu/cell/sheap/key_sheap.h \

@@ -28,7 +28,7 @@ ps3_add_spu_image(sync2-objects
     NOSTARTFILES
     FREESTANDING
     LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_task.ld
-    LIBS spurs_task sync2 spurs_jq spurs)
+    LIBS spurs_task sync2 spurs_jq spurs fiber)
 
 ps3_add_spu_image(sync2-objects
     NAME sync2_job
@@ -36,6 +36,6 @@ ps3_add_spu_image(sync2-objects
     JOBBIN
     CFLAGS -O2 -Wall -Wextra -mspurs-job
     LDFLAGS -mspurs-job -Wl,-q
-    LIBS sync2 spurs_jq spurs)
+    LIBS sync2 spurs_jq spurs fiber)
 
 ps3_add_self(sync2-objects)
