@@ -4,7 +4,7 @@
  * Exercises the PPU fiber surface end-to-end through the reference SDK
  * surface in <cell/fiber.h>:
  *
- *   1. cellFiberPpuInitialize          (sysmodule load + SPRX init)
+ *   1. cellSysmoduleLoadModule(FIBER) + cellFiberPpuInitialize
  *   2. cellFiberPpuSchedulerAttributeInitialize / cellFiberPpuInitializeScheduler
  *   3. cellFiberPpuAttributeInitialize / cellFiberPpuCreateFiber  (×2)
  *   4. cellFiberPpuRunFibers
@@ -19,6 +19,7 @@
  * validation needs a working HLE or hardware.
  */
 
+#include <cell/sysmodule.h>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -66,7 +67,11 @@ static int fiber_entry_b(std::uint64_t arg)
 
 static bool init_lib(void)
 {
-    int rc = cellFiberPpuInitialize();
+    int rc = cellSysmoduleLoadModule(CELL_SYSMODULE_FIBER);
+    std::printf("  cellSysmoduleLoadModule(FIBER): %#x\n", rc);
+    if (rc != CELL_OK)
+        return false;
+    rc = cellFiberPpuInitialize();
     std::printf("  cellFiberPpuInitialize: %#x\n", rc);
     return rc == CELL_OK;
 }
