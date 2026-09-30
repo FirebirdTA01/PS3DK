@@ -192,6 +192,40 @@ LV2_SYSCALL sysProcessGetPpuGuid(void)
     return_to_user_prog(sys_addr_t);
 }
 
+/* ---- reference names ------------------------------------------------ */
+
+static inline sys_pid_t sys_process_getpid(void)
+{
+    return sysProcessGetPid();
+}
+
+static inline sys_pid_t sys_process_getppid(void)
+{
+    return sysProcessGetPpid();
+}
+
+static inline int sys_process_get_number_of_object(uint32_t object, size_t *nump)
+{
+    return sysProcessGetNumberOfObject(object, nump);
+}
+
+/* Ids of the process's objects of one class (SYS_*_OBJECT) into buff[size];
+ * *set_size is how many were written. */
+LV2_SYSCALL sys_process_get_id(uint32_t object, uint32_t *buff, size_t size, size_t *set_size)
+{
+    lv2syscall4(SYSCALL_PROCESS_GET_ID, (u32)object, (u64)(uintptr_t)buff,
+                (u64)size, (u64)(uintptr_t)set_size);
+    return_to_user_prog(s32);
+}
+
+static inline int sys_process_is_spu_lock_line_reservation_address(sys_addr_t addr, uint64_t flags)
+{
+    return sysProcessIsSpuLockLinkReservation(addr, flags);
+}
+
+/* Whether p points into the calling thread's stack (system library). */
+int sys_process_is_stack(const void *p);
+
 /* ---- exit / spawn -------------------------------------------------- */
 /* Replace the current process with a new one loaded from `path`,
  * passing `argv` and `envp` through and seeding an optional data
