@@ -61,6 +61,9 @@ The version stamped into builds is generated from the most recent
 - `sys_spu_elf_get_information` and `sys_spu_elf_get_segments` are the
   system library functions again; the header had replaced them with inline
   versions that returned no segments.
+- `stat` and `fstat` fail with `EOVERFLOW` for a file larger than `off_t`
+  can represent (above 2 GiB in the default PPU ABI) instead of reporting a
+  truncated, possibly negative size.
 
 ## [v0.18.0] — 2026-09-30
 
