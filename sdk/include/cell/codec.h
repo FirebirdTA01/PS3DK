@@ -18,5 +18,9 @@
 #include <cell/codec/jpgdec.h>
 #include <cell/codec/jpgenc.h>
 #include <cell/codec/gifdec.h>
+#include <cell/codec/pngdec.h>
+#include <cell/codec/adec_celp.h>
+#include <cell/codec/adec_celp8.h>
+#include <cell/codec/vdec.h>
 
 #endif /* __PS3DK_CELL_CODEC_H__ */
