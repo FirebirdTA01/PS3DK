@@ -16,6 +16,12 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- `spu-elf-to-ppu-obj wrap --format binary` embeds job-queue jobs with
+  startup code (e_flags 2) with their SPURS JOB INFO trailer; they were
+  refused before.
+
 ## [v0.18.0] — 2026-09-30
 
 ### Added
