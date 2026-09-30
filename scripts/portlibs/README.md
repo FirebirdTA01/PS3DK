@@ -27,6 +27,19 @@ The recipe must:
 
 Recipes run with `set -euo pipefail`. Current dir is `$PS3_BUILD_ROOT/portlibs`.
 
+## ABI caveats for portlib recipes
+
+1. **POSIX file sizes are 32 bits.**  In the default PPU ABI `off_t` is a
+   signed 32-bit `long` (see `docs/abi/large-file-off-t.md`).  A size read
+   through `stat` / `fstat` (or `stat64` / `fstat64`, which use the same
+   `struct stat` here) is wrong above 2 GiB.  If a library's API exposes a
+   size, type it `uint64_t` (like libzip's `zip_uint64_t`) and take it from
+   `cellFsStat` / `cellFsFstat` or the library's own 64-bit field.  For
+   offsets use `lseek64` (`_off64_t`), not `lseek`.
+2. **Do not build a portlib with `_FILE_OFFSET_BITS=64`** or any flag that
+   widens `off_t`: the SDK's libc, libstdc++ and other portlibs are built with
+   a 4-byte `off_t`, and the library would no longer match them.
+
 ## Planned recipes (phase 4 scope)
 
 | Order | Name | Version | Notes |
