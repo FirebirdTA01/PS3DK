@@ -50,6 +50,13 @@ The version stamped into builds is generated from the most recent
 - `spu-elf-to-ppu-obj wrap --format binary` embeds job-queue jobs with
   startup code (e_flags 2) with their SPURS JOB INFO trailer; they were
   refused before.
+- **Data streams (libdaisy, `<cell/daisy.h>`).**  Producer and consumer
+  ports (`Pipe::InPort`, `Pipe::OutPort`) over a buffer and a queue
+  control: local streams within one SPU or between PPU threads, atomic
+  streams between SPUs and a PPU thread with several producers and
+  consumers, and signal-notification streams between two SPUs of a thread
+  group; buffers in local memory or in main memory by DMA.  Sample
+  `samples/spu/hello-daisy`.
 
 ### Known limitations
 
