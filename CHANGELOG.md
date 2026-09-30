@@ -28,6 +28,11 @@ The version stamped into builds is generated from the most recent
 - `<cell/error.h>`: the error flag, facility codes and
   `CELL_ERROR_MAKE_ERROR`.
 
+### Known limitations
+
+- Overlays work in SPU threads and SPURS tasks; SPURS jobs cannot use
+  them yet (the job linker script fixes the job's segments).
+
 ### Fixed
 
 - `sys_spu_elf_get_information` and `sys_spu_elf_get_segments` are the
