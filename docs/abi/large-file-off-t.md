@@ -48,9 +48,10 @@ ABI and `-mlp64`):
 `runtime/lv2/librt/fstat.c` (`convert_lv2stat`) does
 `dst->st_size = src->st_size`: a 64-bit LV2 size into the 32-bit signed
 `off_t`.  POSIX requires the non-`64` functions to fail with `EOVERFLOW` when
-a size does not fit `off_t`; we truncate instead.  Because `off_t` is signed, a
-file of 2 to 4 GiB reports a negative `st_size`, and a larger one its low 32
-bits.
+a size does not fit `off_t`; up to v0.18.0 we truncated instead.  Because
+`off_t` is signed, a file of 2 to 4 GiB reported a negative `st_size`, and a
+larger one its low 32 bits.  Fixed after v0.18.0: `stat` and `fstat` now
+fail with `-1` and `errno = EOVERFLOW` (tests/sdk/librt-fstat-eoverflow-test.sh).
 
 ## Decision
 
@@ -58,7 +59,7 @@ bits.
 truncation.**
 
 - `fstat` and `stat` should fail with `-1` and `errno = EOVERFLOW` when the
-  LV2 size does not fit `off_t` (follow-up below).
+  LV2 size does not fit `off_t` (done after v0.18.0).
 - For sizes above 2 GiB use the `cellFs*` interface (64-bit `st_size`); for
   64-bit offsets use `lseek64`.  The non-`64` POSIX functions stay 32-bit by
   design.
@@ -74,11 +75,11 @@ mismatch a library built with 8 bytes.  The 64-bit paths already exist:
 
 ## Follow-up (implementation)
 
-**Chosen:** in `runtime/lv2/librt/fstat.c`, before the `st_size`
-assignment, fail with `errno = EOVERFLOW` and `-1` when
-`src->st_size > INT32_MAX` (the largest ILP32 `off_t`), in both
-`__librt_fstat_r` and `__librt_stat_r`; state the bound in a comment in
-`sdk/include/sys/stat.h`.  No typedef change, no new type, no ABI change.
+**Done** (after v0.18.0): in `runtime/lv2/librt/fstat.c`, before the
+`st_size` assignment, `__librt_fstat_r` and `__librt_stat_r` fail with
+`errno = EOVERFLOW` and `-1` when the LV2 size exceeds the largest `off_t`
+(derived from `sizeof(off_t)`: `INT32_MAX` in ILP32).  No typedef change,
+no new type, no ABI change.  Host test: `tests/sdk/librt-fstat-eoverflow-test.sh`.
 
 **Rejected:** a separate `struct stat64` with a 64-bit `st_size` for
 `stat64` / `fstat64`.  It changes newlib's machine types, needs a libc

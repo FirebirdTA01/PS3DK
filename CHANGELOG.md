@@ -16,6 +16,12 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- `stat` and `fstat` fail with `EOVERFLOW` for a file larger than `off_t`
+  can represent (above 2 GiB in the default PPU ABI) instead of reporting a
+  truncated, possibly negative size.
+
 ## [v0.18.0] — 2026-09-30
 
 ### Added

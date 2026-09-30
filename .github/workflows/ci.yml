@@ -222,6 +222,9 @@ jobs:
       - name: Test librt low-level exit and finalizer registration
         run: bash tests/sdk/librt-exit-test.sh
 
+      - name: Test librt stat and fstat report EOVERFLOW for sizes beyond off_t
+        run: bash tests/sdk/librt-fstat-eoverflow-test.sh
+
       - name: Test POSIX clocks sleep and scheduling attributes
         run: python3 tests/sdk/posix-time-host-test.py
 
