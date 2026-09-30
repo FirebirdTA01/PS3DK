@@ -479,6 +479,10 @@ static inline void cellGcmSetFlipStatus(void)
 	gcmSetFlipStatus();
 }
 
+/* Time of the last vertical sync counted in the current second (system
+ * library, imported through libgcm_sys_stub). */
+system_time_t cellGcmGetLastSecondVTime(void);
+
 static inline int64_t cellGcmGetLastFlipTime(void)
 {
 	return (int64_t)gcmGetLastFlipTime();
@@ -758,6 +762,7 @@ namespace cell { namespace Gcm {
     using ::cellGcmGetFlipStatus;
     using ::cellGcmGetLabelAddress;
     using ::cellGcmGetLastFlipTime;
+    using ::cellGcmGetLastSecondVTime;
     using ::cellGcmGetMaxIoMapSize;
     using ::cellGcmGetReportDataAddress;
     using ::cellGcmGetReportDataAddressLocation;
@@ -840,6 +845,7 @@ namespace cell { namespace Gcm {
     using ::cellGcmSetNopCommand;
     using ::cellGcmSetPolySmoothEnable;
     using ::cellGcmSetLineSmoothEnable;
+    using ::cellGcmReserveMethodSize;
     using ::cellGcmSetDrawInlineArray;
     using ::cellGcmSetPolygonOffset;
     using ::cellGcmSetPolygonOffsetFillEnable;

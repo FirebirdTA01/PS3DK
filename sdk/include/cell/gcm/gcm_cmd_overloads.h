@@ -271,6 +271,9 @@ static inline void cellGcmSetTransferScaleSwizzle(const CellGcmTransferScale *sc
 static inline void cellGcmSetPolySmoothEnable(uint32_t enable)
 { cellGcmSetPolySmoothEnable(gCellGcmCurrentContext, enable); }
 
+static inline void cellGcmReserveMethodSize(uint32_t size)
+{ cellGcmReserveMethodSize(gCellGcmCurrentContext, size); }
+
 static inline void cellGcmSetLineSmoothEnable(uint32_t enable)
 { cellGcmSetLineSmoothEnable(gCellGcmCurrentContext, enable); }
 

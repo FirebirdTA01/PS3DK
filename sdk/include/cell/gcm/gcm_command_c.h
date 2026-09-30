@@ -653,6 +653,13 @@ static inline void cellGcmSetPolySmoothEnable(CellGcmContextData *thisContext, u
 	rsxSetPolygonSmoothEnable(thisContext, enable);
 }
 
+/* Make sure `size` more command words fit in the buffer, calling the
+ * context's callback (which may flush or switch buffers) if they do not. */
+static inline void cellGcmReserveMethodSize(CellGcmContextData *thisContext, uint32_t size)
+{
+	rsxReserveMethodSize(thisContext, size);
+}
+
 static inline void cellGcmSetLineSmoothEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
 	rsxSetLineSmoothEnable(thisContext, enable);

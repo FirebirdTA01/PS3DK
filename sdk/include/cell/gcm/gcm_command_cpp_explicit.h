@@ -25,6 +25,8 @@ struct CellGcmContext : public CellGcmContextData
     { ::cellGcmFlush(this); }
     void FlushUnsafe()
     { ::cellGcmFlushUnsafe(this); }
+    void ReserveMethodSize(uint32_t size)
+    { ::cellGcmReserveMethodSize(this, size); }
     void SetAlphaFunc(uint32_t func, uint32_t ref)
     { ::cellGcmSetAlphaFunc(this, func, ref); }
     void SetAlphaTestEnable(uint32_t enable)
