@@ -128,8 +128,9 @@ int main (uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
                     0.5f, tol))  fail = 1;
     if (!s_approxf (s_lane0f(rsqrtf4 (spu_splats(4.0f))),
                     0.5f, tol))  fail = 1;
+    /* divf4fast is the reciprocal estimate: about 12 bits, not 24 */
     if (!s_approxf (s_lane0f(divf4fast(spu_splats(2.0f), spu_splats(4.0f))),
-                    0.5f, tol))  fail = 1;
+                    0.5f, 0.5f / 1024.0f))  fail = 1;
 
     /* ========== (B) d2 comparison family ========== */
 
