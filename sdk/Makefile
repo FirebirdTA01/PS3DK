@@ -30,6 +30,7 @@ HEADERS := \
     include/stdarg.h \
     include/stdio.h \
     include/stdlib.h \
+    include/math.h \
     include/string.h \
     include/pthread.h \
     include/time.h \
@@ -46,6 +47,10 @@ HEADERS := \
     include/sys/heap.h \
     include/sys/spu_image.h \
     include/sys/raw_spu.h \
+    include/cell/keyboard/error.h \
+    include/cell/mouse/error.h \
+    include/sys/fixed_addr.h \
+    include/sys/sys_fixed_addr.h \
     include/sys/timer.h \
     include/sys/prx_module.h \
     include/sys/lv2_fs_ext.h \
@@ -582,6 +587,7 @@ SPU_HEADERS := \
     include-spu/bits/simd_float4.h \
     include-spu/bits/simd_double2.h \
     include-spu/stdlib.h \
+    include-spu/math.h \
     include-spu/cell/atomic.h \
     include-spu/cell/dma.h \
     include-spu/cell/sync.h \

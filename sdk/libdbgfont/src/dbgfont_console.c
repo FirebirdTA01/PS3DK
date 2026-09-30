@@ -105,6 +105,12 @@ int cellDbgFontConsolePrintf(CellDbgFontConsoleId id, const char *fmt, ...)
     return n;
 }
 
+int cellDbgFontConsolePuts(CellDbgFontConsoleId id, const char *string)
+{
+    if (!slot_valid(id) || !string) return -1;
+    return cellDbgFontConsolePrintf(id, "%s", string);
+}
+
 /* ----- integration with the overlay renderer -----------------------
  * Called from cellDbgFontDrawGcm before batching the overlay quads.
  * Iterates all active console slots and renders each line of text

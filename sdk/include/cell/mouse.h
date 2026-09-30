@@ -10,6 +10,7 @@
 #ifndef PS3TC_CELL_MOUSE_H
 #define PS3TC_CELL_MOUSE_H
 #include <cell/error.h>   /* CELL_OK */
+#include <cell/mouse/error.h>
 
 #include <stdint.h>
 #include <io/mouse.h>

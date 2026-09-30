@@ -47,4 +47,10 @@ void *memalign(size_t, size_t);
 }
 #endif
 
+/* The SDK stdlib.h brings in the SPU intrinsics and vector types
+ * (vec_uint4, spu_splats ...), which SPU code uses with no other include.
+ * Last: in C++ it reaches <cstdlib> again, which must see the
+ * declarations above complete. */
+#include <spu_intrinsics.h>
+
 #endif /* _PS3DK_SPU_STDLIB_WRAPPER_H */

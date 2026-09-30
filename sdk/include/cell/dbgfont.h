@@ -118,6 +118,8 @@ int  cellDbgFontConsoleOpen(const CellDbgFontConsoleConfig *cfg);
 int  cellDbgFontConsoleClose(CellDbgFontConsoleId id);
 int  cellDbgFontConsoleVprintf(CellDbgFontConsoleId id,
                                const char *fmt, va_list ap);
+/* Writes `string` to the console as it is (no format conversion). */
+int  cellDbgFontConsolePuts(CellDbgFontConsoleId id, const char *string);
 int  cellDbgFontConsolePrintf(CellDbgFontConsoleId id,
                               const char *fmt, ...)
                               __attribute__((format(printf, 2, 3)));

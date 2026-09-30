@@ -83,6 +83,7 @@ The `hello-event-flag-spu` sample additionally pulls in our
 | `hello-ppu-tls` | PPU `__thread` local-exec TLS for scalar and aggregate objects; prints `TLS_OK` when the loader-initialised main-thread TLS image is visible at runtime | **green** + RPCS3 runtime-verified |
 | `hello-ppu-pthread` | POSIX pthread shim over Lv-2 primitives: static mutex/cond/once initialisers, recursive mutexes, `pthread_mutex_trylock`, thread-specific data, create/join, self/equal, and condition signalling | **green** + RPCS3 runtime-verified |
 | `hello-sdata` | Developer SDATA files made by `make_sdata` at build time (current format, both older layouts, 1 KB blocks, compressed layout) are written to `/dev_hdd0/tmp` and read back through `cellFsSdataOpen` in odd-sized pieces; prints `HELLO_SDATA DONE passed=5 of 5` | **green** + RPCS3 runtime-verified |
+| `hello-raw-spu` | A raw SPU created, loaded and run through its problem-state registers with the `<sys/raw_spu.h>` names: `sys_raw_spu_create` / `image_load`, `SPU_In_MBox`, `SPU_NPC`, `SPU_RunCntl`, `SPU_Out_MBox` and `SPU_Status` via `sys_raw_spu_mmio_*`, the local store via `LS_BASE_ADDR`; prints `HELLO_RAW_SPU OK` | **green** + RPCS3 runtime-verified |
 
 ## audio/
 

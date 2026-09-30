@@ -596,6 +596,14 @@ void RSX_FUNC(SetPolygonSmoothEnable)(gcmContextData *context,u32 enable)
 	RSX_CONTEXT_CURRENT_END(2);
 }
 
+void RSX_FUNC(SetLineSmoothEnable)(gcmContextData *context,u32 enable)
+{
+	RSX_CONTEXT_CURRENT_BEGIN(2);
+	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_LINE_SMOOTH_ENABLE,1);
+	RSX_CONTEXT_CURRENTP[1] = enable;
+	RSX_CONTEXT_CURRENT_END(2);
+}
+
 void RSX_FUNC(SetDitherEnable)(gcmContextData *context,u32 enable)
 {
 	RSX_CONTEXT_CURRENT_BEGIN(2);
