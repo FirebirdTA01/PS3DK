@@ -2,9 +2,9 @@
  * spurs_job.ld - SPU linker script for cellSpursJobMain2 binaries.
  *
  * Layout requirements imposed by the SPRX job dispatcher:
- *   - _start must sit at the binary's entry offset (LS offset 0 once
- *     the binary is loaded).  Our trampoline lives in .before_text;
- *     the script anchors that section at the start of the image.
+ *   - _start must sit at the binary's entry offset (image offset 0x10).
+ *     Our trampoline lives in .before_text; the script anchors that
+ *     section at the start of the image.
  *   - .bss must be bracketed by __bss_start / _end so that
  *     cellSpursJobInitialize knows the clear range.
  *
@@ -31,10 +31,14 @@ PHDRS
 
 SECTIONS
 {
-    /* Tool requires vaddr=0 of LOAD-code AND entry != 0 AND entry =
-     * _start.  Reference layout: .SpuGUID (16 bytes) at vaddr 0, then
-     * .before_text + _start at vaddr 0x10. */
-    . = 0;
+    /* Image base.  A job without the job CRT (-mspurs-job) runs where
+     * the job manager loads BINARY2 images, LS 0x4c00: its job_start.o
+     * defines __spurs_job_base so that addresses stored in its data are
+     * right with no run-time relocation.  A job with the job CRT
+     * (-mspurs-job-initialize) is linked at 0 and relocates itself from
+     * its .fixup table (libspurs_jq job_runtime.c).  Layout from the
+     * base: .SpuGUID (16 bytes), then .before_text + _start at +0x10. */
+    . = DEFINED(__spurs_job_base) ? __spurs_job_base : 0;
 
     /* .SpuGUID (16 bytes) - the jobbin2-wrapper tool reads this named
      * section to compute the per-binary SPU GUID.  Placed first so it

@@ -34,6 +34,7 @@ extern char _end[];
 static result_slot out;
 static s_report report_block;
 static CellSpursTracePacket packet;
+static CellSpursTracePacket user_packet;
 static qword guid_words __attribute__((aligned(128)));
 
 static void report(uint64_t slots, unsigned step, unsigned got, unsigned want)
@@ -140,10 +141,20 @@ static void run(uint64_t slots, uint64_t eaReport)
     EXPECT(35, (cellSpursQueueTryPopBegin)(0, 0, 0), cellSpursQueueTryPopBegin(0, 0, 0));
     EXPECT(36, (cellSpursEventFlagTryWait)(0, &bits, 0), cellSpursEventFlagTryWait(0, &bits, 0));
 
-    /* a user trace packet; the PPU looks for it in the trace buffer */
+    /* two user trace packets, through cellSpursPutTrace and
+       cellSpursPutUserTrace; each carries the magic, which put it, and this
+       task's SPU and workload ids, which the PPU checks against the header
+       the put stamped */
     packet.header.tag = CELL_SPURS_TRACE_TAG_USER;
-    packet.data.user = S_TRACE_MAGIC;
+    packet.data.user = ((uint64_t)S_TRACE_MAGIC << 32) | (1u << 16)
+                     | (cellSpursGetCurrentSpuId() << 8) | wid;
     cellSpursPutTrace(&packet, 2);
+    mfc_write_tag_mask(1u << 2);
+    mfc_read_tag_status_all();
+    user_packet.header.tag = CELL_SPURS_TRACE_TAG_USER;
+    user_packet.data.user = ((uint64_t)S_TRACE_MAGIC << 32) | (2u << 16)
+                          | (cellSpursGetCurrentSpuId() << 8) | wid;
+    cellSpursPutUserTrace((CellTraceHeader *)&user_packet, 2);
     mfc_write_tag_mask(1u << 2);
     mfc_read_tag_status_all();
 

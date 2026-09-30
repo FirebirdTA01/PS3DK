@@ -4,6 +4,9 @@
  * DMA tag, the chain did not halt, and shutdown + join complete. */
 #include "harness.h"
 #include SUITE_SPU_HEADER
+#ifdef SUITE_JOB_FROM_HEADER
+#include SUITE_SPU_JOBHEADER_HEADER   /* the job kind and sizes come from its jobbin2 header */
+#endif
 
 static const unsigned kJobs = 4;
 static const uint32_t kMagic = 0xc0ffe000u;
@@ -22,9 +25,14 @@ static int row_main()
     unsigned n = 0;
     for (unsigned i = 0; i < kJobs; ++i) {
         std::memset(&s_job[i], 0, sizeof s_job[i]);
+#ifdef SUITE_JOB_FROM_HEADER
+        std::memcpy(&s_job[i].header, &SUITE_SPU_JOBHEADER, sizeof(CellSpursJobHeader));
+        s_job[i].header.eaBinary += reinterpret_cast<uint64_t>(SUITE_SPU_BIN);
+#else
         s_job[i].header.eaBinary = reinterpret_cast<uint64_t>(SUITE_SPU_BIN);
         s_job[i].header.sizeBinary = CELL_SPURS_GET_SIZE_BINARY(SUITE_SPU_BIN_SIZE);
         s_job[i].header.jobType = CELL_SPURS_JOB_TYPE_BINARY2;
+#endif
         s_job[i].workArea.userData[0] = reinterpret_cast<uint64_t>(&s_out[i][0]);
         s_job[i].workArea.userData[1] = kMagic + i;
         s_chain[n++] = CELL_SPURS_JOB_COMMAND_JOB(&s_job[i]);
@@ -67,8 +75,8 @@ static int row_main()
                 result = suite::fail("job marker", s_out[i][3], 0x10b5u);
             else if (s_out[i][1] > 31)
                 result = suite::fail("job dma tag", s_out[i][1], 31);
-            else if (s_out[i][2] != static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SUITE_SPU_BIN)))
-                result = suite::fail("job eaBinary", s_out[i][2], static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SUITE_SPU_BIN)));
+            else if (s_out[i][2] != static_cast<uint32_t>(s_job[i].header.eaBinary))
+                result = suite::fail("job eaBinary", s_out[i][2], static_cast<uint32_t>(s_job[i].header.eaBinary));
         }
     }
     std::printf("job chain: halted=%d status=%#x\n", (int)info.isHalted, (unsigned)info.statusCode);

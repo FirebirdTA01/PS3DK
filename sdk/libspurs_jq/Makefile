@@ -22,6 +22,7 @@ INSTALL_LIB_MIRROR := $(PS3DK)/spu/lib
 
 override CC := spu-elf-gcc
 AR := spu-elf-ar
+LD := spu-elf-ld
 
 CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding -fpic \
           -falign-functions=8 -mno-branch-hints \
@@ -54,6 +55,16 @@ $(BUILD)/job_runtime.o: CFLAGS += -mno-error-reloc
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	@echo "  CC    $(notdir $<)"
 	@$(CC) $(CFLAGS) -c $< -o $@
+
+# job_crt.o is a startfile: the crt code plus the C++ static guards
+# (job_guard.c), combined so they are linked ahead of libstdc++
+$(BUILD)/job_crt.o: $(BUILD)/job_crt_s.o $(BUILD)/job_guard.o
+	@echo "  LD -r $(notdir $@)"
+	@$(LD) -r $^ -o $@
+
+$(BUILD)/job_crt_s.o: src/job_crt.S | $(BUILD)
+	@echo "  AS    $(notdir $<)"
+	@$(CC) $(SFLAGS) -c $< -o $@
 
 $(BUILD)/%.o: src/%.S | $(BUILD)
 	@echo "  AS    $(notdir $<)"

@@ -12,6 +12,8 @@
 #include <stddef.h>
 #include <sys/return_code.h>
 
+#include <ppu-lv2.h>
+#include <ppu-types.h>
 #include <sys/spu.h>
 
 #define SYS_SPU_THREAD_GROUP_TYPE_NORMAL                              0x00
@@ -26,6 +28,40 @@
 #define SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT        0x0001
 #define SYS_SPU_THREAD_GROUP_JOIN_ALL_THREADS_EXIT  0x0002
 #define SYS_SPU_THREAD_GROUP_JOIN_TERMINATED        0x0004
+
+#ifndef _SYS_EVENT_TYPE_T_DEFINED
+#define _SYS_EVENT_TYPE_T_DEFINED
+typedef uint32_t sys_event_type_t;
+#endif
+
+/* sys_spu_thread_group_connect_event event types, and the event source
+ * keys an event queue receives them under. */
+#define SYS_SPU_THREAD_GROUP_EVENT_RUN               0x1
+#define SYS_SPU_THREAD_GROUP_EVENT_EXCEPTION         0x2
+#define SYS_SPU_THREAD_GROUP_EVENT_SYSTEM_MODULE     0x4
+#define SYS_SPU_THREAD_GROUP_EVENT_RUN_KEY           0xFFFFFFFF53505500ULL
+#define SYS_SPU_THREAD_GROUP_EVENT_EXCEPTION_KEY     0xFFFFFFFF53505503ULL
+#define SYS_SPU_THREAD_GROUP_EVENT_SYSTEM_MODULE_KEY 0xFFFFFFFF53505504ULL
+
+/* Exception causes reported by the group's exception event. */
+#define SYS_SPU_EXCEPTION_NO_VALUE          0x0U
+#define SYS_SPU_EXCEPTION_DMA_ALIGNMENT     0x0001U
+#define SYS_SPU_EXCEPTION_DMA_COMMAND       0x0002U
+#define SYS_SPU_EXCEPTION_SPU_ERROR         0x0004U
+#define SYS_SPU_EXCEPTION_MFC_FIR           0x0008U
+#define SYS_SPU_EXCEPTION_MFC_SEGMENT       0x0010U
+#define SYS_SPU_EXCEPTION_MFC_STORAGE       0x0020U
+#define SYS_SPU_EXCEPTION_STOP_CALL         0x0100U
+#define SYS_SPU_EXCEPTION_STOP_BREAK        0x0200U
+#define SYS_SPU_EXCEPTION_HALT              0x0400U
+#define SYS_SPU_EXCEPTION_UNKNOWN_SIGNAL    0x0800U
+#define SYS_SPU_EXCEPTION_NON_CONTEXT       0x1000U
+#define SYS_SPU_EXCEPTION_MAT               0x2000U
+
+/* sys_spu_thread_group_log commands. */
+#define SYS_SPU_THREAD_GROUP_LOG_ON         0x0
+#define SYS_SPU_THREAD_GROUP_LOG_OFF        0x1
+#define SYS_SPU_THREAD_GROUP_LOG_GET_STATUS 0x2
 
 #ifndef _SYS_MEMORY_CONTAINER_T_DEFINED
 #define _SYS_MEMORY_CONTAINER_T_DEFINED
@@ -134,5 +170,109 @@ typedef struct sys_spu_thread_argument {
 
 #define sys_spu_thread_group_attribute_type(x, t)    \
     do { (x).type = (t); } while (0)
+
+/* Create the group's SPU threads in memory container `c`. */
+#define sys_spu_thread_group_attribute_memory_container(x, c)          \
+    do {                                                             \
+        (x).type |= SYS_SPU_THREAD_GROUP_TYPE_MEMORY_FROM_CONTAINER; \
+        (x).option.ct = (c);                                         \
+    } while (0)
+
+/* ------------------------------------------------------------------ *
+ * Group scheduling, events and logging (Lv-2 syscalls 167..254)
+ * ------------------------------------------------------------------ */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+static inline int sys_spu_thread_group_suspend(sys_spu_thread_group_t id)
+{
+    lv2syscall1(174, id);
+    return_to_user_prog(int);
+}
+
+static inline int sys_spu_thread_group_resume(sys_spu_thread_group_t id)
+{
+    lv2syscall1(175, id);
+    return_to_user_prog(int);
+}
+
+/* Give up the group's SPUs to waiting groups of the same priority. */
+static inline int sys_spu_thread_group_yield(sys_spu_thread_group_t id)
+{
+    lv2syscall1(176, id);
+    return_to_user_prog(int);
+}
+
+static inline int sys_spu_thread_group_set_priority(sys_spu_thread_group_t id, int priority)
+{
+    lv2syscall2(179, id, priority);
+    return_to_user_prog(int);
+}
+
+static inline int sys_spu_thread_group_get_priority(sys_spu_thread_group_t id, int *priority)
+{
+    lv2syscall2(180, id, (u64)(uintptr_t)priority);
+    return_to_user_prog(int);
+}
+
+/* Start `ngroups` other groups when group `gid` exits. */
+static inline int sys_spu_thread_group_start_on_exit(sys_spu_thread_group_t gid, int ngroups,
+                                                     sys_spu_thread_group_t *groups)
+{
+    lv2syscall3(167, gid, ngroups, (u64)(uintptr_t)groups);
+    return_to_user_prog(int);
+}
+
+static inline int sys_spu_thread_group_connect_event(sys_spu_thread_group_t id,
+                                                     sys_event_queue_t eq, sys_event_type_t et)
+{
+    lv2syscall3(185, id, eq, et);
+    return_to_user_prog(int);
+}
+
+static inline int sys_spu_thread_group_disconnect_event(sys_spu_thread_group_t id,
+                                                        sys_event_type_t et)
+{
+    lv2syscall2(186, id, et);
+    return_to_user_prog(int);
+}
+
+/* Connect every thread's user events to `eq` on the first free SPU port
+ * in the `req` bitmap; the port chosen is stored to *spup. */
+static inline int sys_spu_thread_group_connect_event_all_threads(sys_spu_thread_group_t id,
+                                                                 sys_event_queue_t eq,
+                                                                 uint64_t req, uint8_t *spup)
+{
+    lv2syscall4(251, id, eq, req, (u64)(uintptr_t)spup);
+    return_to_user_prog(int);
+}
+
+static inline int sys_spu_thread_group_disconnect_event_all_threads(sys_spu_thread_group_t id,
+                                                                    uint8_t spup)
+{
+    lv2syscall2(252, id, spup);
+    return_to_user_prog(int);
+}
+
+static inline int sys_spu_thread_group_set_cooperative_victims(sys_spu_thread_group_t id,
+                                                               uint32_t victims)
+{
+    lv2syscall2(250, id, victims);
+    return_to_user_prog(int);
+}
+
+/* SYS_SPU_THREAD_GROUP_LOG_ON / _OFF / _GET_STATUS; the status is
+ * stored to *stat. */
+static inline int sys_spu_thread_group_log(int command, int *stat)
+{
+    lv2syscall2(254, command, (u64)(uintptr_t)stat);
+    return_to_user_prog(int);
+}
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __PS3DK_SYS_SPU_THREAD_GROUP_H__ */

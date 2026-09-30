@@ -23,7 +23,12 @@ SECTIONS
         *(.rodata .rodata.* .gnu.linkonce.r.*)
     }
 
-    .ctors : { KEEP(*(.ctors)) KEEP(*(SORT_BY_INIT_PRIORITY(.ctors.*))) }
+    /* the task startup runs these, last to first */
+    .ctors : {
+        PROVIDE_HIDDEN(__spurs_task_ctors_start = .);
+        KEEP(*(.ctors)) KEEP(*(SORT_BY_INIT_PRIORITY(.ctors.*)))
+        PROVIDE_HIDDEN(__spurs_task_ctors_end = .);
+    }
     .dtors : { KEEP(*(.dtors)) KEEP(*(SORT_BY_INIT_PRIORITY(.dtors.*))) }
 
     .data : {

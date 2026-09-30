@@ -27,6 +27,37 @@ __spurs_task_start:
 	ila	$1, 0x3ffe0
 	il	$2, 0
 	stqd	$2, 0($1)		/* null back chain */
+	/* Static constructors, last to first as GCC orders .ctors.  The
+	 * task arguments wait in callee-saved registers.  The bounds come
+	 * from spurs_task.ld; a script without them (weak, 0) runs none. */
+	ori	$82, $3, 0
+	ori	$83, $4, 0
+	ila	$80, __spurs_task_ctors_end
+	ila	$81, __spurs_task_ctors_start
+1:	ceq	$2, $80, $81
+	brnz	$2, 2f
+	ai	$80, $80, -4
+	lqd	$5, 0($80)
+	rotqby	$5, $5, $80		/* the entry's word to the preferred slot */
+	bisl	$0, $5
+	br	1b
+2:	ori	$3, $82, 0
+	ori	$4, $83, 0
 	brsl	$0, cellSpursMain
 	brsl	$0, cellSpursExit
 	.size	__spurs_task_start, . - __spurs_task_start
+
+	.weak	__spurs_task_ctors_start
+	.weak	__spurs_task_ctors_end
+
+	/* C++ registers static destructors against this module handle
+	 * (__cxa_atexit); a task is one static image, so it is 0, as
+	 * crtbegin defines it for an executable. */
+	.section .data.__dso_handle, "aw", @progbits
+	.align	2
+	.globl	__dso_handle
+	.hidden	__dso_handle
+	.type	__dso_handle, @object
+	.size	__dso_handle, 4
+__dso_handle:
+	.long	0

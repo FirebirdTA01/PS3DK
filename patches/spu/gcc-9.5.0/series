@@ -9,3 +9,5 @@
 0010-spu-pic-multilib.patch
 0011-spu-relocatable-jobs-and-custom-modules.patch
 0012-spu-raw-and-float-mode-driver-flags.patch
+0013-spu-reference-intptr-types.patch
+0014-spu-paren-vector-literals.patch

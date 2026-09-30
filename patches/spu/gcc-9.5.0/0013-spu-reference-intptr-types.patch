@@ -1,0 +1,49 @@
+spu: intptr_t and uintptr_t are int and unsigned int
+
+newlib-stdint.h makes the pointer-sized integers PTRDIFF_TYPE and
+SIZE_TYPE, which are long and unsigned long on SPU.  The reference SPU
+toolchain types them int and unsigned int (size_t and ptrdiff_t stay
+unsigned long and long).  With long, spu_splats((uintptr_t)p) has no
+matching overload, and C++ functions taking uintptr_t mangle differently
+from objects built by the reference toolchain.  spu-stdint.h, read after
+newlib-stdint.h, overrides the two.
+
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -3112,7 +3112,7 @@
+ 	tmake_file="${tmake_file} sparc/t-sparc"
+ 	;;
+ spu-*-elf*)
+-	tm_file="dbxelf.h elfos.h spu/spu-elf.h spu/spu.h newlib-stdint.h"
++	tm_file="dbxelf.h elfos.h spu/spu-elf.h spu/spu.h newlib-stdint.h spu/spu-stdint.h"
+ 	tmake_file="spu/t-spu-elf"
+         native_system_header_dir=/include
+ 	extra_headers="spu_intrinsics.h spu_internals.h vmx2spu.h spu_mfcio.h vec_types.h spu_cache.h"
+--- /dev/null
++++ b/gcc/config/spu/spu-stdint.h
+@@ -0,0 +1,25 @@
++/* Pointer-sized integer types for SPU.
++   Copyright (C) 2026 PS3 Custom Toolchain Contributors.
++
++This file is part of GCC.
++
++GCC is free software; you can redistribute it and/or modify it under
++the terms of the GNU General Public License as published by the Free
++Software Foundation; either version 3, or (at your option) any later
++version.
++
++GCC is distributed in the hope that it will be useful, but WITHOUT ANY
++WARRANTY; without even the implied warranty of MERCHANTABILITY or
++FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++for more details.  */
++
++/* Read after newlib-stdint.h, which makes intptr_t and uintptr_t the
++   ptrdiff_t and size_t types (long and unsigned long here).  The PS3 SPU
++   ABI types them int and unsigned int, so the intrinsic overloads accept
++   them and C++ names mangle as other PS3 SPU objects expect.  */
++
++#undef INTPTR_TYPE
++#define INTPTR_TYPE "int"
++
++#undef UINTPTR_TYPE
++#define UINTPTR_TYPE "unsigned int"

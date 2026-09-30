@@ -138,6 +138,7 @@ HEADERS := \
     include/cell/gcm/gcm_fp_control.h \
     include/cell/gcm/gcm_tex_bridge.h \
     include/cell/gcm/gcm_command_c.h \
+    include/cell/gcm/gcm_command_cpp_explicit.h \
     include/cell/cell_video_out.h \
     include/cell/cell_audio_out.h \
     include/cell/cell_fs.h \
@@ -224,6 +225,19 @@ HEADERS := \
     include/cell/sync.h \
     include/cell/sync/barrier.h \
     include/cell/sync2.h \
+    include/cell/sync2/types.h \
+    include/cell/sync2/version.h \
+    include/cell/sync2/error.h \
+    include/cell/sync2/thread_types.h \
+    include/cell/sync2/thread.h \
+    include/cell/sync2/mutex_types.h \
+    include/cell/sync2/mutex.h \
+    include/cell/sync2/cond_types.h \
+    include/cell/sync2/cond.h \
+    include/cell/sync2/queue_types.h \
+    include/cell/sync2/queue.h \
+    include/cell/sync2/semaphore_types.h \
+    include/cell/sync2/semaphore.h \
     include/cell/sheap.h \
     include/cell/sheap/error.h \
     include/cell/sheap/sheap_base.h \
@@ -345,6 +359,8 @@ HEADERS := \
     include/cell/fiber/ppu_fiber.h \
     include/cell/fiber/user_scheduler.h \
     include/cell/fiber/ppu_fiber_worker_control.h \
+    include/cell/fiber/ppuUtilDefine.h \
+    include/cell/fiber/ppuUtilRuntime.h \
     include/cell/usbd.h \
     include/cell/usbd/usb.h \
     include/cell/usbd/libusbd.h \
@@ -464,6 +480,14 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 # both $(PS3DK)/ppu/include/ (via HEADERS) and $(PS3DK)/spu/include/
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
+    include/cell/sync2/types.h \
+    include/cell/sync2/version.h \
+    include/cell/sync2/error.h \
+    include/cell/sync2/thread_types.h \
+    include/cell/sync2/mutex_types.h \
+    include/cell/sync2/cond_types.h \
+    include/cell/sync2/queue_types.h \
+    include/cell/sync2/semaphore_types.h \
     include/cellstatus.h \
     include/sdk_version.h \
     include/simdmath.h \
@@ -471,6 +495,10 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/error.h \
     include/cell/fiber/error.h \
     include/cell/fiber/spu_context_types.h \
+    include/cell/fiber/version.h \
+    include/cell/fiber/ppu_context_types.h \
+    include/cell/fiber/ppu_fiber_types.h \
+    include/cell/fiber/ppu_fiber_worker_control.h \
     include/cell/sheap/error.h \
     include/cell/sheap/sheap_types.h \
     include/cell/jdl.h \
@@ -565,8 +593,16 @@ SPU_HEADERS := \
     include-spu/cell/sync/rwm.h \
     include-spu/cell/sync/lfqueue.h \
     include-spu/cell/sync2.h \
+    include-spu/cell/sync2/thread.h \
+    include-spu/cell/sync2/mutex.h \
+    include-spu/cell/sync2/cond.h \
+    include-spu/cell/sync2/queue.h \
+    include-spu/cell/sync2/semaphore.h \
     include-spu/cell/fiber.h \
     include-spu/cell/fiber/spu_context.h \
+    include-spu/cell/fiber/ppu_fiber.h \
+    include-spu/cell/fiber/ppuUtilDefine.h \
+    include-spu/cell/fiber/ppuUtilRuntime.h \
     include-spu/cell/sheap.h \
     include-spu/cell/sheap/sheap_base.h \
     include-spu/cell/sheap/key_sheap.h \
@@ -575,7 +611,18 @@ SPU_HEADERS := \
     include-spu/cell/sheap/key_sheap_barrier.h \
     include-spu/cell/sheap/key_sheap_queue.h \
     include-spu/cell/sheap/key_sheap_rwm.h \
-    include-spu/cell/sheap/key_sheap_semaphore.h
+    include-spu/cell/sheap/key_sheap_semaphore.h \
+    include-spu/vectormath/c/mat_aos.h \
+    include-spu/vectormath/c/quat_aos.h \
+    include-spu/vectormath/c/vec_aos.h \
+    include-spu/vectormath/c/vectormath_aos.h \
+    include-spu/vectormath/cpp/boolInVec.h \
+    include-spu/vectormath/cpp/floatInVec.h \
+    include-spu/vectormath/cpp/mat_aos.h \
+    include-spu/vectormath/cpp/quat_aos.h \
+    include-spu/vectormath/cpp/vec_aos.h \
+    include-spu/vectormath/cpp/vecidx_aos.h \
+    include-spu/vectormath/cpp/vectormath_aos.h
 
 .PHONY: all install clean version-header $(SUBLIBS) \
 	install-stub-archives install-native-aliases install-manifest verify-install \

@@ -3,12 +3,18 @@
  *
  * Dispatcher branches here with $0 = return-to-dispatcher, $1 = job
  * stack pointer, $3 = CellSpursJobContext2*, $4 = CellSpursJob256*.
- * 4-instruction xori-dance at LS 0x10..0x1f tail-calls cellSpursJobMain2;
+ * 4-instruction xori-dance at image offset 0x10..0x1f tail-calls cellSpursJobMain2;
  * the xori pair leaves $80 bitwise unchanged so caller-saved state
- * round-trips intact.  The 16-byte .before_text tail at LS 0x20..0x2f
+ * round-trips intact.  The 16-byte .before_text tail at image offset 0x20..0x2f
  * carries the BINARY2 magic word the JM2 dispatcher checks before
  * accepting the image; see docs/abi/spurs-job-entry-point.md § 3.1.
  */
+
+	/* The job manager loads a BINARY2 image at LS 0x4c00; spurs_job.ld
+	 * links a job that has this startup file there, so that addresses
+	 * held in its data (pointer tables, vtables) need no relocation. */
+	.global	__spurs_job_base
+	.set	__spurs_job_base, 0x4c00
 
 	/* Opt in to the linker's final-content GUID generation. */
 	.section	.SpuGUID, "ax", @progbits
@@ -30,8 +36,8 @@ _start:
 	br	cellSpursJobMain2
 	.size	_start, . - _start
 
-	/* "bin2" magic at LS 0x20..0x23 - the JM2 dispatcher loads a
-	 * 16-byte block from LS 0x20 and accepts it as a valid BINARY2
+	/* "bin2" magic at image offset 0x20..0x23 - the JM2 dispatcher loads a
+	 * 16-byte block from image offset 0x20 and accepts it as a valid BINARY2
 	 * job image only if the leading word matches "BIN2" (uppercase)
 	 * or "bin2" (lowercase).  Without the magic the dispatcher's
 	 * deferred validator sets the JOB_DESCRIPTOR error

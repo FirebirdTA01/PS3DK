@@ -2,7 +2,8 @@
  * service calls against the live instance (services.h, spu/services.c).
  * The PPU signals it out of WaitSignal2, then checks what it changed in
  * the CellSpurs instance (max contention, priority) and finds its user
- * packet in the trace buffer. */
+ * packets in the trace buffer (one from cellSpursPutTrace, one from
+ * cellSpursPutUserTrace), with headers stamped for its SPU and workload. */
 #include "harness.h"
 #include <cell/spurs/trace.h>
 #include "../services.h"
@@ -68,14 +69,27 @@ static int row_main()
     suite::activity("stopping the trace, looking for the task's packet");
     suite::taskset_down(ts);
     if ((rc = cellSpursTraceStop(cs))) return suite::fail("trace stop", rc, 0);
-    bool found = false;
-    for (size_t off = sizeof(CellSpursTraceInfo); off + 16 <= sizeof s_trace && !found; off += 16) {
+    /* one packet from cellSpursPutTrace (kind 1), one from
+       cellSpursPutUserTrace (kind 2); each header must carry length 2, the
+       SPU and workload the task reported in the payload, and a time */
+    unsigned found = 0, bad = 0;
+    for (size_t off = sizeof(CellSpursTraceInfo); off + 16 <= sizeof s_trace; off += 16) {
         const CellSpursTracePacket *p = reinterpret_cast<const CellSpursTracePacket *>(s_trace + off);
-        found = p->header.tag == CELL_SPURS_TRACE_TAG_USER && p->data.user == S_TRACE_MAGIC;
+        const uint64_t u = p->data.user;
+        if (p->header.tag != CELL_SPURS_TRACE_TAG_USER || static_cast<uint32_t>(u >> 32) != S_TRACE_MAGIC)
+            continue;
+        const unsigned kind = (u >> 16) & 0xff, spu = (u >> 8) & 0xff, wid = u & 0xff;
+        if (kind == 1 || kind == 2)
+            found |= 1u << kind;
+        const CellSpursTraceHeader &h = p->header;
+        if (h.length != 2 || h.spu != spu || h.workload != wid || h.time == 0)
+            bad = kind;
     }
     cellSpursTraceFinalize(cs);
-    if (!found)
-        return suite::fail("user trace packet in the buffer", 0, 1);
+    if (found != 6)
+        return suite::fail("user trace packets in the buffer (bit1 PutTrace, bit2 PutUserTrace)", found, 6);
+    if (bad)
+        return suite::fail("trace packet header (length, SPU, workload, time) of kind", bad, 0);
 
     spurs->finalize();
     return suite::ok();

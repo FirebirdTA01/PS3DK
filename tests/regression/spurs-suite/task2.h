@@ -14,6 +14,9 @@
  * rc or code that step got, extra = what it wanted; its exit code is: */
 #define T2_PARENT_CODE 0x7a5c
 
+/* the exit code of the task the PPU creates with an exit-code container */
+#define T2_PPU_CHILD_CODE 0x2468
+
 typedef struct t2_params {
     unsigned long long elf;          /* the suite image (parent and children) */
     unsigned long long plainTaskset; /* a CellSpursTaskset that is not a Taskset2 */

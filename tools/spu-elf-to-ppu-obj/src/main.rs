@@ -64,6 +64,17 @@ enum Cmd {
         #[arg(long)]
         emit_sidecars: bool,
     },
+    /// Fail when a linked SPU ELF refers to PPU symbols (CELL_SPURS_PPU_SYM):
+    /// for embedding paths that copy raw bytes and so cannot carry the
+    /// references to the PPU link.  Writes --stamp on success.
+    NoPpuRefs {
+        /// Linked SPU ELF input.
+        #[arg(long)]
+        spu_elf: PathBuf,
+        /// File to create when the image has no PPU references.
+        #[arg(long)]
+        stamp: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -107,7 +118,7 @@ fn run() -> Result<()> {
             let spu = inspect_spu_elf(&spu_elf)?;
             let jobbin2_report = jobbin2
                 .as_ref()
-                .map(|path| inspect_jobbin2(path, Some(spu.report.ls_size)))
+                .map(|path| inspect_jobbin2(path, Some(spu.report.ls_size - spu.report.ls_base)))
                 .transpose()?;
             let jobheader_report = jobheader
                 .as_ref()
@@ -171,6 +182,21 @@ fn run() -> Result<()> {
                 eprintln!("wrote {}", paths.join(", "));
             } else {
                 eprintln!("wrote {}", output.display());
+            }
+        }
+        Cmd::NoPpuRefs { spu_elf, stamp } => {
+            let spu = inspect_spu_elf(&spu_elf)?;
+            if !spu.ppu_relocs.is_empty() {
+                for r in &spu.ppu_relocs {
+                    eprintln!("  LS {:#07x}: {}-bit address of PPU symbol {}", r.vaddr, r.size, r.symbol);
+                }
+                anyhow::bail!(
+                    "{} refers to PPU symbols (CELL_SPURS_PPU_SYM), but this embedding copies raw bytes and cannot pass the references to the PPU link: embed it with spu-elf-to-ppu-obj (ps3_add_spu_image PPU_OBJECT)",
+                    spu_elf.display()
+                );
+            }
+            if let Some(stamp) = stamp {
+                std::fs::write(&stamp, b"").with_context(|| format!("writing {}", stamp.display()))?;
             }
         }
     }
@@ -253,7 +279,7 @@ fn compare(
         ));
         checks.push(Comparison::eq(
             "jobheader.sizeBinary == ls_size / 16",
-            (spu.report.ls_size / 16).to_string(),
+            ((spu.report.ls_size - spu.report.ls_base) / 16).to_string(),
             jobheader.size_binary.to_string(),
         ));
         checks.push(Comparison::eq(
@@ -461,7 +487,7 @@ fn jq_runtime_metadata_patches(
     let Some(jobbin2) = jobbin2 else {
         return Vec::new();
     };
-    expected_jq_patches(spu.report.ls_size)
+    expected_jq_patches(spu.report.ls_size - spu.report.ls_base)
         .into_iter()
         .map(|patch| {
             let start = patch.offset as usize;

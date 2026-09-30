@@ -103,19 +103,33 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
     writeln!(out, "{}:", header_sym).ok();
     writeln!(out, "\t.4byte 0x2c000001       # size=44, version=1").ok();
     writeln!(out, "\t.2byte 0x0009         # import attributes").ok();
+    let funcs: Vec<_> = lib.exports.iter().filter(|e| e.kind.is_function()).collect();
+    let vars: Vec<_> = lib
+        .exports
+        .iter()
+        .filter(|e| e.kind == crate::db::ExportKind::Variable)
+        .collect();
+    let vnid_anchor = format!("__nidgen_{}_vnid_anchor", lib.library);
+    let vstub_anchor = format!("__nidgen_{}_vstub_anchor", lib.library);
     writeln!(
         out,
         "\t.2byte {}              # function import count",
-        lib.exports.len()
+        funcs.len()
     )
     .ok();
-    writeln!(out, "\t.4byte 0").ok();
+    writeln!(out, "\t.2byte {}              # variable import count", vars.len()).ok();
+    writeln!(out, "\t.2byte 0               # TLS variable import count").ok();
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out, "\t.4byte {}", name_sym).ok();
     writeln!(out, "\t.4byte {}", fnid_anchor_ref).ok();
     writeln!(out, "\t.4byte scefstub").ok();
-    writeln!(out, "\t.4byte 0").ok();
-    writeln!(out, "\t.4byte 0").ok();
+    if vars.is_empty() {
+        writeln!(out, "\t.4byte 0").ok();
+        writeln!(out, "\t.4byte 0").ok();
+    } else {
+        writeln!(out, "\t.4byte {}", vnid_anchor).ok();
+        writeln!(out, "\t.4byte {}", vstub_anchor).ok();
+    }
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out, "\t.4byte 0").ok();
     writeln!(out).ok();
@@ -148,7 +162,7 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
     //    re-enter the trampoline forever (stack overflow).  This matches
     //    PSL1GHT's existing fallback behaviour; it relies on the loader
     //    actually patching every slot.
-    for e in &lib.exports {
+    for e in funcs.iter().copied() {
         let stub_sym = format!("{}_stub", e.name);
         let fnid_sym = format!("{}_fnid", e.name);
         let tramp_sym = format!("__{}", e.name);
@@ -275,6 +289,48 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
         writeln!(out).ok();
     }
 
+    // 6. Variable imports.  The loader resolves each variable NID to the
+    //    variable's address in the module and walks the reference list its
+    //    vstub entry points to: {type, address, addend} triples ending with
+    //    type 0; type 1 stores the 32-bit address (+ addend) at `address`.
+    //    Each variable gets one such reference, to a 4-byte slot
+    //    <name>_vslot in .data; the loader rewrites it whenever the module
+    //    (re)loads.  The library's public header names the variable as a
+    //    dereference of that slot (e.g. cell/sync2/thread.h), because only
+    //    the header knows the variable's type.
+    if !vars.is_empty() {
+        writeln!(out, "\t.section \".rodata.sceVNID\",\"a\"").ok();
+        writeln!(out, "\t.align 2").ok();
+        writeln!(out, "{}:", vnid_anchor).ok();
+        for v in &vars {
+            writeln!(out, "\t.4byte 0x{:08x}         # {}", v.nid, v.name).ok();
+        }
+        writeln!(out, "\t.section \".rodata.sceVStub.{}\",\"a\"", lib.library).ok();
+        writeln!(out, "\t.align 2").ok();
+        writeln!(out, "{}:", vstub_anchor).ok();
+        for v in &vars {
+            writeln!(out, "\t.4byte __nidgen_{}_vrefs", v.name).ok();
+        }
+        writeln!(out, "\t.section \".rodata\",\"a\"").ok();
+        writeln!(out, "\t.align 2").ok();
+        for v in &vars {
+            writeln!(out, "__nidgen_{}_vrefs:", v.name).ok();
+            writeln!(out, "\t.4byte 1, {}_vslot, 0", v.name).ok();
+            writeln!(out, "\t.4byte 0, 0, 0").ok();
+        }
+        writeln!(out, "\t.section \".data\",\"aw\"").ok();
+        writeln!(out, "\t.align 2").ok();
+        for v in &vars {
+            let slot = format!("{}_vslot", v.name);
+            writeln!(out, "\t.globl {}", slot).ok();
+            writeln!(out, "\t.type {}, @object", slot).ok();
+            writeln!(out, "\t.size {}, 4", slot).ok();
+            writeln!(out, "{}:", slot).ok();
+            writeln!(out, "\t.4byte 0").ok();
+        }
+        writeln!(out).ok();
+    }
+
     out
 }
 
@@ -282,6 +338,40 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
 mod tests {
     use super::*;
     use crate::db::{Export, Library};
+
+    #[test]
+    fn variables_get_a_nid_a_reference_list_and_a_slot_and_no_trampoline() {
+        let lib: Library = serde_yaml::from_str(r#"
+library: vt
+module: vt
+exports:
+  - name: func
+    nid: 1
+  - name: gVar
+    nid: 0x1dbf2498
+    kind: variable
+"#).unwrap();
+        for abi in [AbiMode::Ilp32, AbiMode::Lp64] {
+            let s = render_library(&lib, abi);
+            assert!(s.contains("\t.2byte 1              # function import count"));
+            assert!(s.contains("\t.2byte 1              # variable import count"));
+            assert!(s.contains("\t.4byte __nidgen_vt_vnid_anchor\n\t.4byte __nidgen_vt_vstub_anchor\n"));
+            assert!(s.contains("__nidgen_vt_vnid_anchor:\n\t.4byte 0x1dbf2498"));
+            assert!(s.contains("__nidgen_gVar_vrefs:\n\t.4byte 1, gVar_vslot, 0\n\t.4byte 0, 0, 0"));
+            assert!(s.contains("gVar_vslot:\n\t.4byte 0"));
+            assert!(!s.contains("__gVar:"), "a variable must not get a trampoline");
+            assert!(!s.contains("gVar_fnid"), "a variable must not get an FNID");
+        }
+    }
+
+    #[test]
+    fn a_library_without_variables_keeps_zero_variable_fields() {
+        let lib: Library =
+            serde_yaml::from_str("library: nf\nmodule: nf\nexports:\n  - name: f\n    nid: 1\n").unwrap();
+        let s = render_library(&lib, AbiMode::Ilp32);
+        assert!(s.contains("\t.2byte 0              # variable import count"));
+        assert!(!s.contains("sceVNID"));
+    }
 
     #[test]
     fn weak_aliases_are_opt_in_and_keep_the_canonical_trampoline() {

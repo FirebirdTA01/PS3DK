@@ -1,14 +1,11 @@
 /* cell/fiber/ppu_initialize.h - libfiber SPRX bootstrap.
  *
- * Independent header.  cellFiberPpuInitialize loads / binds the
- * libfiber SPRX (if not already loaded) and initializes internal
- * global state.  Must be called once per process before any other
- * fiber entry point.
+ * cellFiberPpuInitialize initializes the libfiber SPRX's global state; the
+ * SPRX must already be loaded (cellSysmoduleLoadModule(CELL_SYSMODULE_FIBER)),
+ * otherwise it returns CELL_FIBER_ERROR_STAT.  Call it once per process
+ * before any other fiber entry point.
  *
- * The underscored _cellFiberPpuInitialize is the raw SPRX export;
- * the public cellFiberPpuInitialize wrapper (in
- * sdk/libfiber_stub_extras/) loads the system module first, then
- * forwards to the underscored entry.
+ * The underscored _cellFiberPpuInitialize is the raw SPRX export.
  */
 #ifndef __PS3DK_CELL_FIBER_PPU_INITIALIZE_H__
 #define __PS3DK_CELL_FIBER_PPU_INITIALIZE_H__
@@ -19,10 +16,10 @@
 extern "C" {
 #endif
 
-/* The SPRX entry takes a pointer to a per-process TLS scratch area
- * (16-byte aligned, 64 bytes minimum).  The public wrapper supplies
- * one out of its own BSS, so callers do not need to manage the area
- * themselves and should always use cellFiberPpuInitialize. */
+/* The SPRX entry takes the address of a 64-byte thread-local area (the
+ * libfiber stub's _gCellFiberPpuThreadLocalStorage, in .tbss): the SPRX
+ * reaches each thread's copy through the thread pointer.  Always use
+ * cellFiberPpuInitialize, which passes it. */
 int _cellFiberPpuInitialize(void *tlsArea);
 int cellFiberPpuInitialize(void);
 

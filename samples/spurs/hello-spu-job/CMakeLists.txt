@@ -23,18 +23,19 @@ target_link_libraries(hello-spu-job PRIVATE
 # The SPU job binary uses the spurs-job entry-point convention:
 #   - NOSTARTFILES (no SPU crt0 - libspurs_job's _start trampoline owns
 #     the entry point)
-#   - LDSCRIPT spurs_job.ld (anchors _start in .before_text at LS 0)
+#   - LDSCRIPT spurs_job.ld (links the image at LS 0x4c00, where the job
+#     manager loads it: .SpuGUID there, _start in .before_text at 0x4c10)
 #   - LIBS spurs_job (the trampoline + cellSpursJobInitialize)
 ps3_add_spu_image(hello-spu-job
     NAME hello_spu_job
     SOURCES spu/source/main.c
     NOSTARTFILES
     JOBBIN
-    # SPURS_JOB build posture: -fpic comes from the macro's non-FREESTANDING
-    # default; -mspurs-job sets ELF e_flags=1 (= "SPURS Job 2.0 w/o CRT")
-    # via our patched SPU GCC + binutils; -Wl,-q (--emit-relocs) keeps
-    # .rela* sections in the linked ELF for any runtime fix-up the
-    # dispatcher applies.
+    # SPURS_JOB build posture: JOBBIN builds position-dependent code for
+    # the fixed load address (no -fpic); -mspurs-job sets ELF e_flags=1
+    # (= "SPURS Job 2.0 w/o CRT") via our patched SPU GCC + binutils;
+    # -Wl,-q (--emit-relocs) keeps .rela* sections in the linked ELF for
+    # inspection tools (nothing relocates a job chain job at run time).
     CFLAGS -mspurs-job
     LDFLAGS -mspurs-job -Wl,-q
     LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_job.ld

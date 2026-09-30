@@ -2,13 +2,17 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use object::{Object, ObjectSymbol};
+use object::{Object, ObjectSection, ObjectSymbol, RelocationFlags, RelocationTarget};
 use serde::Serialize;
 
 const ELF32_EHDR_SIZE: usize = 0x34;
 const ELF32_PHDR_SIZE: usize = 0x20;
 const PT_LOAD: u32 = 1;
 const PT_NOTE: u32 = 4;
+/// SPU relocations the SPU link leaves for the PPU link to resolve: the
+/// 32- or 64-bit effective address of a PPU symbol (CELL_SPURS_PPU_SYM).
+const R_SPU_PPU32: u32 = 15;
+const R_SPU_PPU64: u32 = 16;
 
 #[derive(Debug, Serialize)]
 pub struct SpuElfReport {
@@ -23,7 +27,12 @@ pub struct SpuElfReport {
     pub e_phnum: u16,
     pub program_headers: Vec<ProgramHeaderReport>,
     pub symbols: BTreeMap<String, Option<u32>>,
+    /// End of the loaded image in LS (from address 0).
     pub ls_size: u32,
+    /// Lowest load address: 0 for most images, 0x4c00 for a job chain job
+    /// (linked where the job manager loads it).  Job image offsets (GUID,
+    /// entry stub, BINARY2 marker) count from here.
+    pub ls_base: u32,
     pub checks: SpuElfChecks,
 }
 
@@ -49,14 +58,31 @@ pub struct SpuElfChecks {
     pub load_vaddr_equals_paddr: bool,
     pub has_spu_guid_at_ls0: bool,
     pub has_bin2_at_ls_0x20: bool,
+    /// The BINARY2 marker slot (image offset 0x20) is still zero: the
+    /// wrapper stamps "bin2" there, as the SDK tool does for images whose
+    /// startup does not carry it.
+    pub bin2_slot_zero: bool,
     pub has_jobcrt_ver13_at_ls_0x30: bool,
     pub bss_extent_aligned_16: bool,
+}
+
+/// A word of the SPU image that holds a PPU symbol's address: the PPU link
+/// must fill it in (R_SPU_PPU32 / R_SPU_PPU64 in the linked SPU ELF).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PpuReloc {
+    /// SPU local-store address of the word.
+    pub vaddr: u32,
+    pub symbol: String,
+    pub addend: i64,
+    /// 32 or 64.
+    pub size: u8,
 }
 
 pub struct SpuElfAnalysis {
     pub report: SpuElfReport,
     pub ls_image: Vec<u8>,
     pub note_data: Vec<u8>,
+    pub ppu_relocs: Vec<PpuReloc>,
 }
 
 pub fn inspect_spu_elf(path: &Path) -> Result<SpuElfAnalysis> {
@@ -113,6 +139,13 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
         .max()
         .map(align16)
         .unwrap_or(0);
+    let ls_base = program_headers
+        .iter()
+        .filter(|ph| ph.p_type == PT_LOAD)
+        .map(|ph| ph.p_paddr & !0xf)
+        .min()
+        .unwrap_or(0)
+        .min(ls_size);
     let mut ls_image = vec![0u8; ls_size as usize];
     for ph in program_headers.iter().filter(|ph| ph.p_type == PT_LOAD) {
         let src = ph.p_offset as usize;
@@ -145,9 +178,31 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
         symbols.insert(name.to_string(), value);
     }
 
+    let mut ppu_relocs = Vec::new();
+    for section in object.sections() {
+        for (offset, rel) in section.relocations() {
+            let size = match rel.flags() {
+                RelocationFlags::Elf { r_type: R_SPU_PPU32 } => 32,
+                RelocationFlags::Elf { r_type: R_SPU_PPU64 } => 64,
+                _ => continue,
+            };
+            let symbol = match rel.target() {
+                RelocationTarget::Symbol(index) => object
+                    .symbol_by_index(index)
+                    .and_then(|sym| sym.name().map(str::to_string))
+                    .context("reading the symbol of a PPU relocation")?,
+                other => bail!("PPU relocation at {offset:#x} has an unsupported target {other:?}"),
+            };
+            let vaddr = u32::try_from(offset).context("PPU relocation address beyond 32 bits")?;
+            ppu_relocs.push(PpuReloc { vaddr, symbol, addend: rel.addend(), size });
+        }
+    }
+    ppu_relocs.sort_by_key(|r| r.vaddr);
+
     let start = symbols.get("_start").and_then(|v| *v);
     let bss_start = symbols.get("__bss_start").and_then(|v| *v);
     let end = symbols.get("_end").and_then(|v| *v);
+    let b = ls_base as usize;
     let checks = SpuElfChecks {
         is_elf32_be: class == 1 && data == 2,
         is_em_spu: e_machine == 23,
@@ -157,13 +212,20 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
             .iter()
             .filter(|ph| ph.p_type == PT_LOAD)
             .all(|ph| ph.p_vaddr == ph.p_paddr),
-        has_spu_guid_at_ls0: ls_image.len() >= 0x10 && ls_image[0..0x10].iter().any(|b| *b != 0),
+        has_spu_guid_at_ls0: ls_image
+            .get(b..b + 0x10)
+            .map(|s| s.iter().any(|b| *b != 0))
+            .unwrap_or(false),
         has_bin2_at_ls_0x20: ls_image
-            .get(0x20..0x24)
+            .get(b + 0x20..b + 0x24)
             .map(|s| s == b"bin2" || s == b"BIN2")
             .unwrap_or(false),
+        bin2_slot_zero: ls_image
+            .get(b + 0x20..b + 0x24)
+            .map(|s| s.iter().all(|b| *b == 0))
+            .unwrap_or(false),
         has_jobcrt_ver13_at_ls_0x30: ls_image
-            .get(0x30..0x3c)
+            .get(b + 0x30..b + 0x3c)
             .map(|s| s == b"JOBCRT Ver13")
             .unwrap_or(false),
         bss_extent_aligned_16: bss_start
@@ -194,10 +256,12 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
             program_headers,
             symbols,
             ls_size,
+            ls_base,
             checks,
         },
         ls_image,
         note_data,
+        ppu_relocs,
     })
 }
 

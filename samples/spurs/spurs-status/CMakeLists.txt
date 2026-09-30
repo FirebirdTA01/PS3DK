@@ -37,9 +37,9 @@ add_executable(spurs-status source/main.cpp)
 target_compile_features(spurs-status PRIVATE cxx_std_17)
 target_compile_options(spurs-status PRIVATE -Wall -Wextra)
 target_include_directories(spurs-status PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${SUITE_DIR}/ppu")
-foreach(_row IN LISTS _rows)
-    target_sources(spurs-status PRIVATE $<TARGET_OBJECTS:${_row}>)
-endforeach()
+# linked, not added as $<TARGET_OBJECTS>: a row's SPU image embedded as a
+# PPU object (PPU_OBJECT) reaches the link through the row's interface
+target_link_libraries(spurs-status PRIVATE ${_rows})
 list(REMOVE_DUPLICATES _row_libs)
 target_link_libraries(spurs-status PRIVATE
     ${_row_libs} dbgfont gcm_cmd gcm_sys io ${SUITE_PPU_LIBS})

@@ -744,6 +744,14 @@ endfunction()
 # spu_rules MACHDEP defaults (-Os, -fpic, -fno-exceptions / -fno-rtti
 # for C++).
 #
+# PPU_OBJECT: embed the ELF with spu-elf-to-ppu-obj instead of bin2s.  Needed
+# when the SPU code holds PPU addresses (CELL_SPURS_PPU_SYM): the tool turns
+# each reference into a PPU relocation, so the PPU link fills it in.  The
+# generated "${NAME}_bin.h" keeps the bin2s names (${NAME}_bin,
+# ${NAME}_bin_end, ${NAME}_bin_size), as macros.  The paths that copy raw
+# bytes (bin2s, JOBBIN) refuse an image with PPU references when the tool
+# is available, instead of shipping it with the addresses left 0.
+#
 # SOURCES paths are resolved against CMAKE_CURRENT_SOURCE_DIR.  LIBS
 # are -l-style names that exist in $PS3DEV/spu/powerpc-..-lib or
 # $PS3DK/spu/lib (e.g. simdmath, sputhread).  The SPU link command
@@ -794,7 +802,7 @@ endif()
 
 function(ps3_add_spu_image target)
     cmake_parse_arguments(_PSI
-        "NOSTARTFILES;FREESTANDING;JOBBIN;JOBBIN_WRAP"  # boolean flags
+        "NOSTARTFILES;FREESTANDING;JOBBIN;JOBBIN_WRAP;PPU_OBJECT"  # boolean flags
         "NAME;LDSCRIPT"                                 # single-value
         "SOURCES;LIBS;CFLAGS;LDFLAGS"                   # multi-value
         ${ARGN})
@@ -810,6 +818,12 @@ function(ps3_add_spu_image target)
     endif()
     if(NOT PS3_SPU_GCC)
         message(FATAL_ERROR "ps3_add_spu_image: spu-elf-gcc not found at ${PS3DEV}/spu/bin")
+    endif()
+    if(_PSI_PPU_OBJECT AND (_PSI_JOBBIN OR _PSI_JOBBIN_WRAP))
+        message(FATAL_ERROR "ps3_add_spu_image: PPU_OBJECT embeds an ELF image; it does not combine with JOBBIN or JOBBIN_WRAP")
+    endif()
+    if(_PSI_PPU_OBJECT AND NOT PS3_TOOL_spu_elf_to_ppu_obj)
+        message(FATAL_ERROR "ps3_add_spu_image: PPU_OBJECT needs spu-elf-to-ppu-obj (install it under ${PS3DEV}/bin, ${PS3DK}/bin, or put it on PATH)")
     endif()
 
     set(_spu_dir "${CMAKE_CURRENT_BINARY_DIR}/spu/${_PSI_NAME}")
@@ -829,6 +843,12 @@ function(ps3_add_spu_image target)
     set(_spu_cxx_only_flags)
     if(_PSI_FREESTANDING)
         list(APPEND _spu_cflags -ffreestanding -fno-exceptions)
+    elseif(_PSI_JOBBIN)
+        # A job chain job (JOBBIN) is linked where the job manager loads it
+        # (spurs_job.ld, LS 0x4c00), so it is built position-dependent like
+        # the reference default: addresses held in its data are final.
+        list(APPEND _spu_cflags -fno-exceptions)
+        set(_spu_cxx_only_flags -fno-rtti)
     else()
         list(APPEND _spu_cflags -fpic -fno-exceptions)
         # -fno-rtti is C++-only; GCC warns when it reaches a C compile, and
@@ -863,7 +883,7 @@ function(ps3_add_spu_image target)
 
     # Link flags + libs
     set(_spu_link_flags)
-    if(NOT _PSI_FREESTANDING)
+    if(NOT _PSI_FREESTANDING AND NOT _PSI_JOBBIN)
         list(APPEND _spu_link_flags -fpic)
     endif()
     list(APPEND _spu_link_flags -Wl,--gc-sections "-L${PS3DK}/spu/lib" ${_PSI_LDFLAGS})
@@ -900,15 +920,32 @@ function(ps3_add_spu_image target)
         endforeach()
     endif()
 
-    add_custom_command(
-        OUTPUT "${_spu_elf}"
-        COMMAND "${PS3_SPU_GCC}"
-                ${_spu_link_flags}
-                ${_spu_objs} ${_spu_libs}
-                -o "${_spu_elf}"
-        DEPENDS ${_link_deps}
-        COMMENT "ps3-spu: link ${_PSI_NAME}.elf"
-        VERBATIM)
+    # An image embedded as raw bytes cannot carry PPU references: link to a
+    # temporary name and only publish the ELF once the check passed, so a
+    # refused image is not picked up by the next build.
+    if(NOT _PSI_PPU_OBJECT AND NOT _PSI_JOBBIN_WRAP AND PS3_TOOL_spu_elf_to_ppu_obj)
+        add_custom_command(
+            OUTPUT "${_spu_elf}"
+            COMMAND "${PS3_SPU_GCC}"
+                    ${_spu_link_flags}
+                    ${_spu_objs} ${_spu_libs}
+                    -o "${_spu_elf}.tmp"
+            COMMAND "${PS3_TOOL_spu_elf_to_ppu_obj}" no-ppu-refs --spu-elf "${_spu_elf}.tmp"
+            COMMAND ${CMAKE_COMMAND} -E rename "${_spu_elf}.tmp" "${_spu_elf}"
+            DEPENDS ${_link_deps}
+            COMMENT "ps3-spu: link ${_PSI_NAME}.elf"
+            VERBATIM)
+    else()
+        add_custom_command(
+            OUTPUT "${_spu_elf}"
+            COMMAND "${PS3_SPU_GCC}"
+                    ${_spu_link_flags}
+                    ${_spu_objs} ${_spu_libs}
+                    -o "${_spu_elf}"
+            DEPENDS ${_link_deps}
+            COMMENT "ps3-spu: link ${_PSI_NAME}.elf"
+            VERBATIM)
+    endif()
 
     # JOBBIN: the SPRX JOB-CHAIN dispatcher DMAs raw bytes from
     # descriptor.eaBinary straight into LS — no ELF wrapper.  Convert the
@@ -1011,6 +1048,48 @@ function(ps3_add_spu_image target)
             COMMENT "ps3-spu: objcopy ${_PSI_NAME}.bin (flat job image)"
             VERBATIM)
         ps3_bin2s(${target} "${_spu_jobbin}")
+    elseif(_PSI_PPU_OBJECT)
+        set(_spu_obj_dir "${_spu_dir}/ppuobj")
+        file(MAKE_DIRECTORY "${_spu_obj_dir}")
+        set(_spu_ppu_o "${_spu_obj_dir}/${_PSI_NAME}.ppu.o")
+        add_custom_command(
+            OUTPUT "${_spu_ppu_o}"
+            COMMAND "${PS3_TOOL_spu_elf_to_ppu_obj}"
+                    wrap --format elf
+                    --spu-elf "${_spu_elf}"
+                    --output "${_spu_ppu_o}"
+                    --symbol-base "${_PSI_NAME}"
+            DEPENDS "${_spu_elf}"
+            COMMENT "ps3-spu: spu-elf-to-ppu-obj ${_PSI_NAME}.elf"
+            VERBATIM)
+        set_source_files_properties("${_spu_ppu_o}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+        target_sources(${target} PRIVATE "${_spu_ppu_o}")
+        # $<TARGET_OBJECTS> of an OBJECT library leaves external objects
+        # out: a program that links the library gets the image this way
+        get_target_property(_type ${target} TYPE)
+        if(_type STREQUAL "OBJECT_LIBRARY")
+            target_link_libraries(${target} INTERFACE "${_spu_ppu_o}")
+        endif()
+        set(_id "${_PSI_NAME}_bin")
+        set(_sym "_binary_${_PSI_NAME}_elf")
+        file(WRITE "${_spu_obj_dir}/${_id}.h.in"
+"/* Generated by ps3_add_spu_image (PPU_OBJECT) - do not edit. */\n"
+"#ifndef PS3_SPU_IMAGE_${_id}_H\n"
+"#define PS3_SPU_IMAGE_${_id}_H\n"
+"#ifdef __cplusplus\n"
+"extern \"C\" {\n"
+"#endif\n"
+"extern const unsigned char ${_sym}_start[];\n"
+"extern const unsigned char ${_sym}_end[];\n"
+"#ifdef __cplusplus\n"
+"}\n"
+"#endif\n"
+"#define ${_id} ${_sym}_start\n"
+"#define ${_id}_end ${_sym}_end\n"
+"#define ${_id}_size ((unsigned int)(${_sym}_end - ${_sym}_start))\n"
+"#endif\n")
+        configure_file("${_spu_obj_dir}/${_id}.h.in" "${_spu_obj_dir}/${_id}.h" COPYONLY)
+        target_include_directories(${target} PRIVATE "${_spu_obj_dir}")
     else()
         # Embed the SPU ELF into the PPU target via bin2s.  Symbol
         # prefix derives from the basename: "<NAME>.bin" → "<NAME>_bin".

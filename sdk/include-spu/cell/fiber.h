@@ -10,5 +10,6 @@
 #define __CELL_FIBER_H_SPU__
 
 #include <cell/fiber/spu_context.h>
+#include <cell/fiber/ppu_fiber.h>
 
 #endif /* __CELL_FIBER_H_SPU__ */

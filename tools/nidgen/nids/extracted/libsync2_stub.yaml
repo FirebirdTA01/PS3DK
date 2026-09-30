@@ -131,4 +131,34 @@ exports:
   nid: '0x5e4b0f87'
   signature: ''
   notes: extracted from _cellSync2_0001_13.o
+- name: gCellSync2CallerThreadTypePpuThread
+  nid: '0x970c7df3'
+  kind: variable
+  signature: ''
+  notes: module variable; the stub resolves it into gCellSync2CallerThreadTypePpuThread_vslot
+- name: gCellSync2NotifierPpuThread
+  nid: '0xc0845b36'
+  kind: variable
+  signature: ''
+  notes: module variable; the stub resolves it into gCellSync2NotifierPpuThread_vslot
+- name: gCellSync2CallerThreadTypePpuFiber
+  nid: '0x6dad635b'
+  kind: variable
+  signature: ''
+  notes: module variable; the stub resolves it into gCellSync2CallerThreadTypePpuFiber_vslot
+- name: gCellSync2NotifierPpuFiber
+  nid: '0x23cf1d76'
+  kind: variable
+  signature: ''
+  notes: module variable; the stub resolves it into gCellSync2NotifierPpuFiber_vslot
+- name: gCellSync2NotifierSpursTask
+  nid: '0x1dbf2498'
+  kind: variable
+  signature: ''
+  notes: module variable; the stub resolves it into gCellSync2NotifierSpursTask_vslot
+- name: gCellSync2NotifierSpursJobQueueJob
+  nid: '0xcac08c35'
+  kind: variable
+  signature: ''
+  notes: module variable; the stub resolves it into gCellSync2NotifierSpursJobQueueJob_vslot
 imports: []

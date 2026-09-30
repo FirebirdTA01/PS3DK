@@ -47,6 +47,20 @@ function(suite_task_manual target spu_source)
         LIBS spurs_task ${ARGN})
 endfunction()
 
+# the same, embedded with spu-elf-to-ppu-obj: the task may name PPU symbols
+# (CELL_SPURS_PPU_SYM)
+function(suite_task_ppu_object target spu_source)
+    ps3_add_spu_image(${target}
+        NAME ${SUITE_SPU}
+        SOURCES ${SUITE_DIR}/spu/${spu_source}
+        CFLAGS -O2 -Wall -Wextra -Werror -Wno-cpp
+        NOSTARTFILES
+        FREESTANDING
+        PPU_OBJECT
+        LDSCRIPT ${PS3DK}/spu/ldscripts/spurs_task.ld
+        LIBS spurs_task ${ARGN})
+endfunction()
+
 function(suite_self target)
     if(NOT SUITE_EMBEDDED)
         ps3_add_self(${target})
@@ -59,5 +73,6 @@ set(SUITE_ROW_DIRS
     spurs-event-flag spurs-event-flag-driver
     spurs-queue spurs-lfqueue
     spurs-control spurs-barrier spurs-ls-pattern spurs-task2 spurs-services spurs-job-extras spurs-jq-spu spurs-module
-    spurs-job-chain-manual spurs-job-chain-driver
-    spurs-job-queue-manual spurs-job-queue-driver)
+    spurs-job-chain-manual spurs-job-chain-driver spurs-job-cpp-driver
+    spurs-job-queue-manual spurs-job-queue-driver
+    spu-thread-ops spu-vector-literals spu-fiber-signal spurs-ppu-sym spurs-task-cpp-statics)
