@@ -32,6 +32,9 @@ fn main() -> ExitCode {
             wrapper = Some(v.to_string());
         } else if arg == "--spurs" {
             eprintln!("cellOvisMkLdscript: --spurs is not needed; link the task with -mspurs-task and this script");
+        } else if arg == "--version" || arg == "-v" {
+            println!("cellOvisMkLdscript {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
         } else if arg == "--help" || arg == "-h" {
             return usage();
         } else if arg.starts_with("--") || config.is_some() {

@@ -56,6 +56,16 @@ jobs:
         working-directory: tools
         run: cargo test --workspace
 
+      # The release workflow runs every shipped tool with --version and fails
+      # the release on one that rejects it; check the same list here.
+      - name: Every shipped Rust tool answers --version
+        run: |
+          bins="$(./scripts/list-rust-bins.sh)"
+          [ -n "$bins" ] || { echo "::error::list-rust-bins.sh listed no binaries"; exit 1; }
+          for bin in $bins; do
+            "tools/target/debug/$bin" --version
+          done
+
   host-tools-cxx:
     name: C/C++ host tools build (linux)
     runs-on: ubuntu-latest

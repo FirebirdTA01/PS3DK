@@ -28,6 +28,9 @@ fn main() -> ExitCode {
         } else if let Some(v) = arg.strip_prefix("--wrapper=") {
             wrapper = Some(v.to_string());
         } else if arg.starts_with("--nm=") {
+        } else if arg == "--version" || arg == "-v" {
+            println!("cellOvisConfigAuto {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
         } else if arg == "--help" || arg == "-h" {
             return usage();
         } else if arg.starts_with("--") {
