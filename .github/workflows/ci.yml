@@ -154,6 +154,12 @@ jobs:
       - name: Test the shared-heap core layout, allocator and key table
         run: bash tests/sdk/sheap-core-host-test.sh
 
+      # libdaisy ports on the host: a cancelled push or pop comes back on the
+      # port's next begin while other ends hold later entries, and the
+      # COPY / REFERENCE forms and COPY-mode cancel misuse fail to compile.
+      - name: Test libdaisy port cancel semantics and mode checks
+        run: bash tests/sdk/daisy-pipe-host-test.sh
+
       # The SPU libsync sources over a simulated MFC: queue and rwm
       # descriptors survive Initialize, the mutex is the PPU's ticket word
       # (checked against a PPU-side model), barrier counts are validated.
