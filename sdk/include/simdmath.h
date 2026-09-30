@@ -6,9 +6,10 @@
    link WITHOUT -lsimdmath.
 
    Mechanism:
-     1. The public prototypes in simdmath/simdmath.h are hidden
-        (__PS3DK_SIMDMATH_INLINE_NAMES); libsimdmath.a is built from the
-        same header without it, so the archive keeps its external symbols.
+     1. The public prototypes in simdmath/simdmath.h exist only for the
+        libsimdmath.a build (__PS3DK_SIMDMATH_BUILD), so the archive keeps
+        its external symbols; user code that includes simdmath/simdmath.h
+        directly gets this header from it.
      2. For each function this arch has, include its inline header
         (simdmath/_name.h), which defines a static inline _name.
      3. Define the public name as a static inline function calling _name

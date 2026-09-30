@@ -205,3 +205,4 @@ tests/regression/shader-differential/build/
 # (disk audit 2026-09-14); never tracked.
 /temp_census/
 /tools/rsx-cg-compiler/build-vs-red/
+tests/simdmath-inline/*.elf

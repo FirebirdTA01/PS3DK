@@ -34,7 +34,7 @@ PPU_LIB_LP64 := $(PPU_LIB)/lp64
 SPU_LIB      := $(PS3DEV)/spu/spu-elf/lib
 SPU_LIB_MIR  := $(PS3DK)/spu/lib
 
-COMMON_FLAGS := -O2 -Wall -Wextra -Wno-unused-parameter -std=c11
+COMMON_FLAGS := -O2 -Wall -Wextra -Wno-unused-parameter -std=c11 -D__PS3DK_SIMDMATH_BUILD
 PPU_INC_FLAGS := -Ippu -I. -Icommon -Icommon/simdmath
 SPU_INC_FLAGS := -Ispu -I. -Icommon -Icommon/simdmath
 PPU_CFLAGS      := $(COMMON_FLAGS) -mcpu=cell $(PPU_INC_FLAGS)

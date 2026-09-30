@@ -27,6 +27,13 @@ The version stamped into builds is generated from the most recent
   exp / log estimates.  Accuracy and domain per form are listed in
   `<simdmath/fastf4.h>`.
 
+### Fixed
+
+- Including `<simdmath/simdmath.h>` and `<simdmath.h>` in one unit (directly,
+  or through the vectormath headers) no longer fails with "declared extern
+  and later static": the library header brings in the inline definitions
+  instead of declaring its own prototypes.
+
 ## [v0.18.0] — 2026-09-30
 
 ### Added

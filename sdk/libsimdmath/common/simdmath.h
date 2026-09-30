@@ -115,9 +115,11 @@ typedef struct llroundf4_s {
 } llroundf4_t;
 #endif
 
-/* The public prototypes.  <simdmath.h> (the SDK umbrella) defines the same
- * names as static inline functions and hides these. */
-#ifndef __PS3DK_SIMDMATH_INLINE_NAMES
+/* The public prototypes, for building libsimdmath itself
+ * (__PS3DK_SIMDMATH_BUILD).  Everywhere else <simdmath.h> (the SDK umbrella)
+ * defines the same names as static inline functions; including this header
+ * directly brings the umbrella in (below), so the two spellings agree. */
+#ifdef __PS3DK_SIMDMATH_BUILD
 
 /* integer divide */
 
@@ -729,10 +731,16 @@ vector double fmodd2(vector double, vector double);
 vector double remainderd2(vector double, vector double);
 #endif 
 
-#endif /* __PS3DK_SIMDMATH_INLINE_NAMES */
+#endif /* __PS3DK_SIMDMATH_BUILD */
 
 #ifdef __cplusplus
 }
 #endif
 
+#endif
+
+/* Included directly by user code: the inline definitions of the SDK
+ * umbrella (which itself includes this header first). */
+#if !defined(__PS3DK_SIMDMATH_BUILD) && !defined(__PS3DK_SIMDMATH_INLINE_NAMES)
+#include <simdmath.h>
 #endif
