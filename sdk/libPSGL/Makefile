@@ -20,12 +20,19 @@ OBJ_DIR  := build
 SRCS     := $(wildcard $(SRC_DIR)/*.c)
 OBJS     := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
+# The Cgb reader (libcgb) is built into libPSGL too: PSGL loads programs
+# through it, and reference samples link -lPSGL without -lcgb.
+CGB_DIR  := ../libcgb/src
+CGB_SRCS := $(wildcard $(CGB_DIR)/*.c)
+OBJS     += $(patsubst $(CGB_DIR)/%.c,$(OBJ_DIR)/cgb_%.o,$(CGB_SRCS))
+
 ARCHIVE  := $(OBJ_DIR)/libPSGL.a
 
 # LP64 multilib
 LP64_OBJ_DIR  := $(OBJ_DIR)-lp64
 LP64_ARCHIVE  := $(LP64_OBJ_DIR)/libPSGL.a
 LP64_OBJS     := $(patsubst $(SRC_DIR)/%.c,$(LP64_OBJ_DIR)/%.o,$(SRCS))
+LP64_OBJS     += $(patsubst $(CGB_DIR)/%.c,$(LP64_OBJ_DIR)/cgb_%.o,$(CGB_SRCS))
 LP64_CFLAGS   := $(CFLAGS) -mlp64
 
 INSTALL_LIB := $(PS3DK)/ppu/lib
@@ -47,6 +54,12 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(LP64_OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(LP64_OBJ_DIR)
+	$(CC) $(LP64_CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+$(OBJ_DIR)/cgb_%.o: $(CGB_DIR)/%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+$(LP64_OBJ_DIR)/cgb_%.o: $(CGB_DIR)/%.c | $(LP64_OBJ_DIR)
 	$(CC) $(LP64_CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(OBJ_DIR) $(LP64_OBJ_DIR):
