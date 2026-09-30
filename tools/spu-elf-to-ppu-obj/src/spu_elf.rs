@@ -13,6 +13,7 @@ const PT_NOTE: u32 = 4;
 /// 32- or 64-bit effective address of a PPU symbol (CELL_SPURS_PPU_SYM).
 const R_SPU_PPU32: u32 = 15;
 const R_SPU_PPU64: u32 = 16;
+const R_SPU_ADDR32: u32 = 6;
 
 #[derive(Debug, Serialize)]
 pub struct SpuElfReport {
@@ -83,6 +84,9 @@ pub struct SpuElfAnalysis {
     pub ls_image: Vec<u8>,
     pub note_data: Vec<u8>,
     pub ppu_relocs: Vec<PpuReloc>,
+    /// LS addresses of the absolute 32-bit words (R_SPU_ADDR32) the link
+    /// resolved, sorted: what moves if the image is loaded elsewhere.
+    pub addr32_relocs: Vec<u32>,
 }
 
 pub fn inspect_spu_elf(path: &Path) -> Result<SpuElfAnalysis> {
@@ -179,8 +183,15 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
     }
 
     let mut ppu_relocs = Vec::new();
+    let mut addr32_relocs = Vec::new();
     for section in object.sections() {
         for (offset, rel) in section.relocations() {
+            if rel.flags() == (RelocationFlags::Elf { r_type: R_SPU_ADDR32 }) {
+                if let Ok(vaddr) = u32::try_from(offset) {
+                    addr32_relocs.push(vaddr);
+                }
+                continue;
+            }
             let size = match rel.flags() {
                 RelocationFlags::Elf { r_type: R_SPU_PPU32 } => 32,
                 RelocationFlags::Elf { r_type: R_SPU_PPU64 } => 64,
@@ -198,6 +209,8 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
         }
     }
     ppu_relocs.sort_by_key(|r| r.vaddr);
+    addr32_relocs.sort_unstable();
+    addr32_relocs.dedup();
 
     let start = symbols.get("_start").and_then(|v| *v);
     let bss_start = symbols.get("__bss_start").and_then(|v| *v);
@@ -262,6 +275,7 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
         ls_image,
         note_data,
         ppu_relocs,
+        addr32_relocs,
     })
 }
 
