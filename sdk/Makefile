@@ -146,6 +146,7 @@ HEADERS := \
     include/cell/gcm/gcm_command_cpp_explicit.h \
     include/cell/cell_video_out.h \
     include/cell/cell_audio_out.h \
+    include/cell/cell_audio_in.h \
     include/cell/cell_fs.h \
     include/cell/fs/cell_fs_file_api.h \
     include/cell/fs/cell_fs_errno.h \
@@ -379,6 +380,18 @@ HEADERS := \
     include/cell/codec/ac3_adapter.h \
     include/cell/codec/pamf.h \
     include/cell/codec/adec.h \
+    include/cell/codec/adec_celp.h \
+    include/cell/codec/adec_celp8.h \
+    include/cell/codec/vdec.h \
+    include/cell/codec/vdec_avc.h \
+    include/cell/codec/vdec_mpeg2.h \
+    include/cell/codec/vdec_divx.h \
+    include/cell/codec/lpcm_adapter.h \
+    include/cell/codec/at3_adapter.h \
+    include/cell/codec/mp3_adapter.h \
+    include/cell/codec/atx_adapter.h \
+    include/cell/codec/adec_m4aac.h \
+    include/cell/codec/mpegbc_adapter.h \
     include/cell/codec/adec_base.h \
     include/cell/vpost.h \
     include/cell/codec/libatrac3plus.h \
@@ -438,7 +451,9 @@ HEADERS := \
     include/sys/sce_cdefs.h \
     include/sysutil/sysutil_common.h \
     include/cell/keyboard.h \
+    include/cell/keyboard/kb_codes.h \
     include/cell/mouse.h \
+    include/cell/mouse/mouse_codes.h \
     include/cell/padfilter.h \
     include/rsx/commands.h \
     include/rsx/commands_inc.h \

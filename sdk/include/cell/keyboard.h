@@ -11,6 +11,7 @@
 #define PS3TC_CELL_KEYBOARD_H
 #include <cell/error.h>   /* CELL_OK */
 #include <cell/keyboard/error.h>
+#include <cell/keyboard/kb_codes.h>
 
 #include <stdint.h>
 #include <io/kb.h>

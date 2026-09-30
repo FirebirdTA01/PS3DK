@@ -18,5 +18,18 @@
 #include <cell/codec/jpgdec.h>
 #include <cell/codec/jpgenc.h>
 #include <cell/codec/gifdec.h>
+#include <cell/codec/pngdec.h>
+#include <cell/codec/adec_celp.h>
+#include <cell/codec/adec_celp8.h>
+#include <cell/codec/vdec.h>
+#include <cell/codec/vdec_avc.h>
+#include <cell/codec/vdec_divx.h>
+#include <cell/codec/vdec_mpeg2.h>
+#include <cell/codec/adec_m4aac.h>
+#include <cell/codec/at3_adapter.h>
+#include <cell/codec/atx_adapter.h>
+#include <cell/codec/lpcm_adapter.h>
+#include <cell/codec/mp3_adapter.h>
+#include <cell/codec/mpegbc_adapter.h>
 
 #endif /* __PS3DK_CELL_CODEC_H__ */

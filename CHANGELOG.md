@@ -27,6 +27,26 @@ The version stamped into builds is generated from the most recent
   `(... OVIS_AUTO <sources>)`.  Sample `samples/spu/hello-ovis`.
 - `<cell/error.h>`: the error flag, facility codes and
   `CELL_ERROR_MAKE_ERROR`.
+- **Video decoder headers:** `<cell/codec/vdec.h>` with `vdec_avc.h`,
+  `vdec_mpeg2.h` and `vdec_divx.h`.
+- **Audio decoder headers:** `adec_celp.h`, `adec_celp8.h`, `adec_m4aac.h`,
+  `at3_adapter.h`, `atx_adapter.h`, `lpcm_adapter.h`, `mp3_adapter.h` and
+  `mpegbc_adapter.h`; `<cell/codec.h>` includes every codec header.
+- Audio input devices (`cellAudioIn*`, `CellAudioInDeviceInfo`) through
+  `<sysutil/sysutil_sysparam.h>`.
+- gcm: `cellGcmSetTextureAddressAnisoBias`, `cellGcmSetTextureOptimization`,
+  `cellGcmSetVertexTexture`, `cellGcmReserveMethodSize`,
+  `cellGcmGetLastSecondVTime`, `CellGcmDisplayInfo`, further gcm enum
+  values and the performance-monitor counter selectors.
+- Constants under their standard names: keyboard key codes, modifier,
+  LED and mapping values (`<cell/keyboard/kb_codes.h>`), mouse info,
+  tablet and button values (`<cell/mouse/mouse_codes.h>`,
+  `cellMouseInfoTabletMode`), pad peripheral classes and BD remote codes,
+  l10n code pages, socket error codes (`SYS_NET_ERROR_*`, `SYS_NET_E*`),
+  SSL certificate selectors, process parameter limits and section
+  attributes.
+- `sys_process_getpid` and the other process calls under their standard
+  names; `CellSailFuture`; `struct sockaddr_in_p2p`.
 
 ### Known limitations
 

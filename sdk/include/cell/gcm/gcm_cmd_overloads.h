@@ -271,6 +271,20 @@ static inline void cellGcmSetTransferScaleSwizzle(const CellGcmTransferScale *sc
 static inline void cellGcmSetPolySmoothEnable(uint32_t enable)
 { cellGcmSetPolySmoothEnable(gCellGcmCurrentContext, enable); }
 
+static inline void cellGcmSetTextureAddressAnisoBias(uint8_t index, uint8_t wraps, uint8_t wrapt,
+                                                     uint8_t wrapr, uint8_t unsignedRemap,
+                                                     uint8_t zfunc, uint8_t gamma, uint8_t anisoBias)
+{ cellGcmSetTextureAddressAnisoBias(gCellGcmCurrentContext, index, wraps, wrapt, wrapr, unsignedRemap, zfunc, gamma, anisoBias); }
+
+static inline void cellGcmSetTextureOptimization(uint8_t index, uint8_t slope, uint8_t iso, uint8_t aniso)
+{ cellGcmSetTextureOptimization(gCellGcmCurrentContext, index, slope, iso, aniso); }
+
+static inline void cellGcmSetVertexTexture(uint8_t index, const CellGcmTexture *texture)
+{ cellGcmSetVertexTexture(gCellGcmCurrentContext, index, texture); }
+
+static inline void cellGcmReserveMethodSize(uint32_t size)
+{ cellGcmReserveMethodSize(gCellGcmCurrentContext, size); }
+
 static inline void cellGcmSetLineSmoothEnable(uint32_t enable)
 { cellGcmSetLineSmoothEnable(gCellGcmCurrentContext, enable); }
 

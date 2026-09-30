@@ -318,6 +318,27 @@ static inline void cellGcmSetTextureFilter(CellGcmContextData *thisContext,
 	ps3tc_gcm_tex_filter(thisContext, index, bias, min, mag, conv);
 }
 
+static inline void cellGcmSetTextureAddressAnisoBias(CellGcmContextData *thisContext, uint8_t index,
+                                                     uint8_t wraps, uint8_t wrapt, uint8_t wrapr,
+                                                     uint8_t unsignedRemap, uint8_t zfunc,
+                                                     uint8_t gamma, uint8_t anisoBias)
+{
+	ps3tc_gcm_tex_wrap_mode_aniso_bias(thisContext, index, wraps, wrapt, wrapr, unsignedRemap,
+	                                   zfunc, gamma, anisoBias);
+}
+
+static inline void cellGcmSetTextureOptimization(CellGcmContextData *thisContext, uint8_t index,
+                                                 uint8_t slope, uint8_t iso, uint8_t aniso)
+{
+	ps3tc_gcm_tex_optimization(thisContext, index, slope, iso, aniso);
+}
+
+static inline void cellGcmSetVertexTexture(CellGcmContextData *thisContext, uint8_t index,
+                                           const CellGcmTexture *texture)
+{
+	ps3tc_gcm_vertex_texture(thisContext, index, (const gcmTexture *)texture);
+}
+
 static inline void cellGcmSetTextureAddress(CellGcmContextData *thisContext,
                                             uint8_t index,
                                             uint8_t wraps, uint8_t wrapt, uint8_t wrapr,
@@ -651,6 +672,14 @@ static inline void cellGcmSetPolygonOffset(CellGcmContextData *thisContext,
 static inline void cellGcmSetPolySmoothEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
 	rsxSetPolygonSmoothEnable(thisContext, enable);
+}
+
+/* Make sure `size` more command words fit in the buffer, calling the
+ * context's callback (which may flush or switch buffers) if they do not. */
+static inline void cellGcmReserveMethodSize(CellGcmContextData *thisContext, uint32_t size)
+{
+	if (thisContext->current + size > thisContext->end && thisContext->callback)
+		ps3tc_gcm_invoke_callback(thisContext, size);
 }
 
 static inline void cellGcmSetLineSmoothEnable(CellGcmContextData *thisContext, uint32_t enable)
