@@ -87,6 +87,8 @@ struct CellGcmContext : public CellGcmContextData
     { ::cellGcmSetDrawEnd(this); }
     void SetDrawIndexArray(uint8_t mode, uint32_t count, uint8_t type, uint8_t location, uint32_t indicies)
     { ::cellGcmSetDrawIndexArray(this, mode, count, type, location, indicies); }
+    void SetDrawInlineArray(uint8_t mode, uint32_t count, const void *data)
+    { ::cellGcmSetDrawInlineArray(this, mode, count, data); }
     int32_t SetFlip(uint8_t id)
     { return ::cellGcmSetFlip(this, id); }
     void SetFogMode(uint32_t mode)
@@ -113,6 +115,8 @@ struct CellGcmContext : public CellGcmContextData
     { ::cellGcmSetInvalidateZcull(this); }
     void SetJumpCommand(uint32_t offset)
     { ::cellGcmSetJumpCommand(this, offset); }
+    void SetLineSmoothEnable(uint32_t enable)
+    { ::cellGcmSetLineSmoothEnable(this, enable); }
     void SetLogicOp(uint32_t op)
     { ::cellGcmSetLogicOp(this, op); }
     void SetLogicOpEnable(uint32_t enable)
