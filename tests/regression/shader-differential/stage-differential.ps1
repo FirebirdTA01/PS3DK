@@ -174,7 +174,8 @@ param(
     # Once container-metrics-baseline.csv exists beside this script, metric
     # regressions fail staging by default.  This switch keeps the report
     # visible but suppresses the failure for explicit investigative runs.
-    [switch]$MetricsReportOnly
+    [switch]$MetricsReportOnly,
+    [string]$MetricsAllowancePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -1604,10 +1605,7 @@ if ($containerMetricRows.Count -gt 0) {
 } else {
     Write-Host "SDIFF-METRICS|compared=0|instruction_mismatches=0|register_mismatches=0|both_mismatches=0|worse_instructions=0|better_instructions=0|worse_registers=0|better_registers=0|pixel_proof_candidates=0|pixel_proof_rows=0"
 }
-$metricsGate = Write-ContainerMetricsGateReport @($containerMetricRows) (Join-Path $rig "container-metrics-baseline.csv") -ReportOnly:$MetricsReportOnly
-if ($metricsGate.ShouldFail) {
-    throw "container metrics gate failed: $($metricsGate.Summary.BaselineRegressions) baseline regression(s)"
-}
+$metricsGate = Invoke-ContainerMetricsStageGate @($containerMetricRows) (Join-Path $rig "container-metrics-baseline.csv") -ReportOnly:$MetricsReportOnly -AllowancePath $MetricsAllowancePath -EvidencePath (Join-Path $root 'container-metrics-gate.json')
 # The proving controls go ahead of the first corpus row by construction, and
 # the manifest is refused if the set is incomplete, duplicated or out of
 # order - the guest's gates could not open and every MRT/depth row would be

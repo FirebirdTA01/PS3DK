@@ -28,3 +28,45 @@ stage, because no baseline row was actually compared.
 
 Any commit that moves an existing baseline row in the worse direction must say
 so in its commit message and explain why the higher cost is accepted.
+
+Reviewed, named allowances (opt-in only)
+
+stage-differential.ps1 accepts -MetricsAllowancePath <UTF-8 JSON>. With an empty
+path it preserves the existing gate and output. No allowance ships by default.
+The caller is responsible for obtaining approval for the named exceptions.
+
+Schema version 1 has exactly two top-level fields:
+  { "schema_version": 1, "entries": [ ... ] }
+Each entry has exactly these fields:
+  role, name, profile, source, uniform_set: exact case-sensitive row identity
+  card, reason: nonblank strings (a descriptive card is accepted)
+  count: the JSON integer 1 (the CSV key must identify one row)
+  historical, current: objects with these six JSON integer fields:
+    ours_instruction_count, reference_instruction_count, instruction_delta,
+    ours_register_count, reference_register_count, register_delta
+Raw counts must be nonnegative and each delta must equal ours minus reference.
+The historical object pins the baseline CSV values; current pins staged values.
+Counts and deltas must fit signed 32-bit integers. Identity fields cannot contain
+the key delimiter '|'. Unknown or missing fields are rejected.
+Repeated JSON member names are rejected, including equivalent escaped names.
+
+Each entry must match one actual regression, all five identity fields, and all
+twelve metric values. Missing/fixed/improved rows make an entry stale and fail;
+growth, changed reference counts, duplicate keys, or malformed files also fail.
+An allowance requires a baseline, even with -MetricsReportOnly. Invalid
+allowances throw regardless of ReportOnly. A valid partial allowance leaves
+unmatched regressions failing in the default enforcing mode.
+
+The original Summary.Status and BaselineRegressions remain visible. The opt-in
+result adds EffectiveStatus, AllowedRegressions, UnallowedRegressions,
+AllowedKeys, and Allowance (absolute Path and Sha256 of the exact parsed bytes).
+EffectiveStatus is allowed only when every raw regression matches an entry;
+otherwise it retains the raw status, including no-coverage. Empty entries
+waive nothing. SDIFF-METRICS-ALLOWANCE prints the effective verdict and pin.
+
+The stager writes container-metrics-gate.json beside container-metrics.csv
+before enforcing the verdict, so a mixed allowed/unallowed failure retains
+its evidence. The boot/session consumer must pin the allowance in advance,
+record that pin in its session evidence, and call
+Assert-ContainerMetricsAllowancePin before every boot, comparing the gate's
+pin with the session's expected pin. Metrics allowance is not pixel proof.

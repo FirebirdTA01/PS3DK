@@ -209,7 +209,7 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
     }
 }
 
-function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath, [switch]$ReportOnly) {
+function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath, [switch]$ReportOnly, [string]$AllowancePath = '') {
     $baselinePresent = Test-Path -LiteralPath $BaselinePath -PathType Leaf
     $baselineRows = @()
     if ($baselinePresent) {
@@ -226,18 +226,53 @@ function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath
         $baselineRows = @(Import-Csv -LiteralPath $BaselinePath)
     }
 
+    $allowanceMatch = $null
+    if ($AllowancePath) {
+        if (-not $baselinePresent) { throw 'container metrics allowance requires an existing baseline CSV' }
+        $allowanceMatch = Get-ContainerMetricsAllowanceMatch $Rows $baselineRows $AllowancePath
+    }
     $summary = Get-ContainerMetricsGateSummary $Rows $baselineRows
     $mode = if ($baselinePresent -and -not $ReportOnly) { "fail-by-default" } else { "report-only" }
-    $shouldFail = $mode -eq "fail-by-default" -and $summary.Status -ne "ok"
+    $effectiveStatus = $summary.Status
+    if ($allowanceMatch) {
+        $allowed = $allowanceMatch.MatchedKeys.Count
+        $unallowed = $summary.BaselineRegressions - $allowed
+        if ($unallowed -lt 0) { throw 'container metrics allowance exceeds raw regression count' }
+        if ($summary.Status -eq 'fail' -and $allowed -gt 0 -and $unallowed -eq 0) { $effectiveStatus = 'allowed' }
+    }
+    $shouldFail = $mode -eq "fail-by-default" -and $effectiveStatus -notin @('ok', 'allowed')
     $baselineState = if ($baselinePresent) { "present" } else { "absent" }
     Write-Host "SDIFF-METRICS-GATE|status=$($summary.Status)|mode=$mode|current_rows=$($summary.CurrentRows)|baseline_rows=$($summary.BaselineRows)|compared_baseline_rows=$($summary.ComparedBaselineRows)|missing_baseline_rows=$($summary.MissingBaselineRows)|baseline_regressions=$($summary.BaselineRegressions)|worst_instruction_regression=$($summary.WorstInstructionRegression)|worst_register_regression=$($summary.WorstRegisterRegression)|baseline=$baselineState"
-    return [pscustomobject]@{
+    $result = [pscustomobject]@{
         Summary = $summary
         Mode = $mode
         ShouldFail = $shouldFail
         BaselinePath = $BaselinePath
         BaselinePresent = $baselinePresent
     }
+    if ($allowanceMatch) {
+        $result | Add-Member NoteProperty EffectiveStatus $effectiveStatus
+        $result | Add-Member NoteProperty AllowedRegressions $allowed
+        $result | Add-Member NoteProperty UnallowedRegressions $unallowed
+        $result | Add-Member NoteProperty AllowedKeys $allowanceMatch.MatchedKeys
+        $result | Add-Member NoteProperty Allowance $allowanceMatch.Pin
+        Write-Host "SDIFF-METRICS-ALLOWANCE|effective_status=$effectiveStatus|matched=$allowed|unmatched=$unallowed|path=$($allowanceMatch.Pin.Path)|sha256=$($allowanceMatch.Pin.Sha256)"
+    }
+    return $result
+}
+
+. (Join-Path $PSScriptRoot 'container-metrics-allowances.ps1')
+
+# This is also the stager's boundary: persist evidence before enforcing failure.
+function Invoke-ContainerMetricsStageGate([object[]]$Rows, [string]$BaselinePath,
+        [switch]$ReportOnly, [string]$AllowancePath = '', [string]$EvidencePath = '') {
+    $gate = Write-ContainerMetricsGateReport $Rows $BaselinePath -ReportOnly:$ReportOnly -AllowancePath $AllowancePath
+    if ($AllowancePath) {
+        if (-not $EvidencePath) { throw 'container metrics allowance requires a gate evidence path' }
+        $gate | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $EvidencePath -Encoding UTF8
+    }
+    if ($gate.ShouldFail) { throw "container metrics gate failed: $($gate.Summary.BaselineRegressions) baseline regression(s)" }
+    return $gate
 }
 
 function Write-ContainerMetricsReport([object[]]$Rows, [string]$Path) {

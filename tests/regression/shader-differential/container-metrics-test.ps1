@@ -261,3 +261,4 @@ try {
 }
 
 Write-Host "container-metrics-test: ok"
+& (Join-Path $here 'container-metrics-allowance-test.ps1')
