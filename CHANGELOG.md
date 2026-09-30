@@ -22,6 +22,13 @@ The version stamped into builds is generated from the most recent
   again.  v0.17.0 returned the Lv-2 code `0x8001000A`, because
   `<sys/mutex.h>` now reaches `<sys/synchronization.h>`, which redefines
   `EBUSY`.
+### Added
+
+- `make_sdata` host tool: creates developer SDATA files for
+  `cellFsSdataOpen` (current and both older layouts, 1 to 32 KB blocks, the
+  compressed layout with stored blocks), prints their header (`-i`) and
+  extracts them (`-x`).  CMake helper `ps3_make_sdata()`; sample
+  `samples/lv2/hello-sdata`.
 
 ## [v0.17.0] — 2026-09-28
 

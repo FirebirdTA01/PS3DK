@@ -198,6 +198,26 @@ the SPU cross-compiler, links them, wraps the result, and links the wrapped
 object into the PPU target.  The `spu/` and `spurs/` samples are the worked
 examples.
 
+### Data files for cellFsSdataOpen (make_sdata)
+
+`make_sdata` wraps a file into a developer SDATA file, the container
+`cellFsSdataOpen` reads (plain data, no license).  Its options match the SDK
+tool of the same name: `-b <KB>` block size (1, 2, 4, 8, 16 or 32; default
+16), `--format2` / `--format3` for the older layouts, `-z` for the compressed
+layout, `-i` to print a file's header, `-x` to extract the data.  The
+compressed layout is written with every block stored uncompressed, so `-z`
+files are valid but not smaller; `-x` cannot read a block that was really
+compressed.
+
+```cmd
+make_sdata.exe -b 8 level1.dat level1.sdat
+make_sdata.exe -i level1.sdat
+```
+
+From CMake: `ps3_make_sdata(<output> <input> [BLOCK_KB <n>] [COMPRESS]
+[FORMAT 2|3])` adds the build rule; `samples/lv2/hello-sdata` embeds the
+results and reads them back.
+
 ### Building installable packages (ps3_add_pkg)
 
 Any sample (or your own app) becomes an installable `.pkg` with one CMake

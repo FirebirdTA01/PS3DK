@@ -1,0 +1,19 @@
+[package]
+name = "make-sdata"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Create, inspect and extract unprotected (developer) SDATA files for cellFsSdataOpen"
+
+[lib]
+name = "make_sdata"
+path = "src/lib.rs"
+
+[[bin]]
+name = "make_sdata"
+path = "src/main.rs"
+
+[dependencies]
+thiserror.workspace = true
