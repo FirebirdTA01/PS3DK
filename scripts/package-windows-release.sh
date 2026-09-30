@@ -228,6 +228,17 @@ if [[ -d "$PS3_TOOLCHAIN_ROOT/tools/psgl" ]]; then
     cp -a "$PS3_TOOLCHAIN_ROOT/tools/psgl" "$STAGE_DIR/tools/psgl"
 fi
 
+# tests/regression/spurs-suite: samples/spurs/spurs-status builds every suite
+# row into one program and includes the suite by a source-tree-relative path
+# (../../../tests/regression/spurs-suite), so the suite ships at the same
+# place.  Found by the v0.18.0 sample sweep.
+if [[ -d "$PS3_TOOLCHAIN_ROOT/tests/regression/spurs-suite" ]]; then
+    say "Staging tests/regression/spurs-suite (used by samples/spurs/spurs-status)"
+    mkdir -p "$STAGE_DIR/tests/regression"
+    cp -a "$PS3_TOOLCHAIN_ROOT/tests/regression/spurs-suite" "$STAGE_DIR/tests/regression/spurs-suite"
+    rm -rf "$STAGE_DIR/tests/regression/spurs-suite/build"
+fi
+
 # 4. Host tools zip (from CI's build-host-tools-windows job) OR locally
 #    cross-built tools staged at $STAGE_HOST_TOOLS_BIN by
 #    scripts/build-host-tools-windows.sh.  CI takes the zip path; local

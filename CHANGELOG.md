@@ -67,6 +67,8 @@ The version stamped into builds is generated from the most recent
 - The sync2 object headers include `thread.h` and `error.h`.
 - `SYS_EVENT_QUEUE_LOCAL` is the private IPC key 0.
 - SPU `intptr_t` / `uintptr_t` are `int` / `unsigned int`.
+- The `spurs-status` sample builds from the release package: the SPURS
+  suite it runs ships under `tests/regression/spurs-suite`.
 
 ### Changed
 
