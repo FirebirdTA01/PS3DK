@@ -47,6 +47,8 @@ HEADERS := \
     include/sys/heap.h \
     include/sys/spu_image.h \
     include/sys/raw_spu.h \
+    include/cell/keyboard/error.h \
+    include/cell/mouse/error.h \
     include/sys/fixed_addr.h \
     include/sys/sys_fixed_addr.h \
     include/sys/timer.h \
