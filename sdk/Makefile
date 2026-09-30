@@ -518,8 +518,6 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/ovis/types.h \
     include/cell/daisy/lfqueue2_types.h \
     include/cell/daisy/ato_qctl.h \
-    include/cell/daisy/remote_buffer.h \
-    include/cell/daisy/snr_qctl.h \
     include/cell/daisy.h \
     include/cell/daisy/daisy_defs.h \
     include/cell/daisy/return_code.h \
@@ -608,7 +606,9 @@ SHARED_SPURS_SPU_HEADERS := \
 # PPU side.  These are SPU-flavored variants (e.g. the slim SPU
 # spurs.h umbrella that omits PPU syscall surfaces).
 SPU_ONLY_HEADERS := \
-    include-spu/cell/spurs.h
+    include-spu/cell/spurs.h \
+    include-spu/cell/daisy/remote_buffer.h \
+    include-spu/cell/daisy/snr_qctl.h
 
 # SPU-side headers: SIMD class wrappers (simd + bits/simd_*.h).
 # Reference SDK convention is `target/spu/include/{simd,bits/simd_*.h}` and
