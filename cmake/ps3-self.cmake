@@ -729,6 +729,61 @@ function(ps3_bin2s target file)
 endfunction()
 
 # -----------------------------------------------------------------------------
+# ps3_make_sdata(<output> <input> [BLOCK_KB <n>] [COMPRESS] [FORMAT 2|3])
+# -----------------------------------------------------------------------------
+# Adds a build rule that wraps <input> into a developer SDATA file <output>
+# (read with cellFsSdataOpen) using the make_sdata host tool.  Relative
+# paths: <input> against the source dir, <output> against the binary dir.
+# Something must depend on <output>: embed it with ps3_bin2s, or list it in
+# a custom target that stages the application's files.
+if(NOT _PS3_SDATA_TOOL_PROBED)
+    set(_PS3_SDATA_TOOL_PROBED TRUE)
+    set(_ps3_sdata_exe "")
+    if(CMAKE_HOST_WIN32)
+        set(_ps3_sdata_exe ".exe")
+    endif()
+    find_program(PS3_TOOL_make_sdata
+        NAMES "make_sdata${_ps3_sdata_exe}" "make_sdata"
+        PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
+              "${CMAKE_CURRENT_LIST_DIR}/../tools/target/release"
+              "${CMAKE_CURRENT_LIST_DIR}/../tools/target/debug"
+        NO_DEFAULT_PATH)
+endif()
+
+function(ps3_make_sdata output input)
+    cmake_parse_arguments(_PMS "COMPRESS" "BLOCK_KB;FORMAT" "" ${ARGN})
+    if(NOT PS3_TOOL_make_sdata)
+        message(FATAL_ERROR "ps3_make_sdata: make_sdata host tool not found in ${PS3DEV}/bin or ${PS3DK}/bin")
+    endif()
+    if(NOT IS_ABSOLUTE "${input}")
+        set(input "${CMAKE_CURRENT_SOURCE_DIR}/${input}")
+    endif()
+    if(NOT IS_ABSOLUTE "${output}")
+        set(output "${CMAKE_CURRENT_BINARY_DIR}/${output}")
+    endif()
+    set(_args)
+    if(_PMS_BLOCK_KB)
+        list(APPEND _args -b ${_PMS_BLOCK_KB})
+    endif()
+    if(_PMS_COMPRESS)
+        list(APPEND _args -z)
+    endif()
+    if(_PMS_FORMAT)
+        if(NOT _PMS_FORMAT MATCHES "^[23]$")
+            message(FATAL_ERROR "ps3_make_sdata: FORMAT is 2 or 3 (the default is the current format)")
+        endif()
+        list(APPEND _args --format${_PMS_FORMAT})
+    endif()
+    get_filename_component(_name "${output}" NAME)
+    add_custom_command(
+        OUTPUT "${output}"
+        COMMAND "${PS3_TOOL_make_sdata}" ${_args} "${input}" "${output}"
+        DEPENDS "${input}"
+        COMMENT "ps3-sdata: ${_name}"
+        VERBATIM)
+endfunction()
+
+# -----------------------------------------------------------------------------
 # ps3_add_spu_image(target NAME <name> SOURCES <files...> [LIBS <libs...>])
 # -----------------------------------------------------------------------------
 # Compiles SPU sources via $PS3DEV/spu/bin/spu-elf-gcc into a single
