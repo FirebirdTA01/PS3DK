@@ -82,6 +82,7 @@ The `hello-event-flag-spu` sample additionally pulls in our
 | `hello-event-flag-spu` | Full PPU + SPU sync round-trip.  Master + 5 PPU workers coordinate via `sys_event_flag_*`, then master spawns one SPU thread (linked against `libsputhread.a`) which takes commands via SNR1/SNR2 and uses `sys_event_flag_set_bit_impatient` to notify the master.  SPU thread also emits `spu_printf("SPU Worker finished my job\n")` which the PPU surfaces via our `libc_stub.a`-resident server thread (see `sdk/libc_stub_extras/src/spu_printf.c` for the dual-path impl: real-HW-canonical via `spu_thread_printf` + RPCS3-friendly direct LS read) | **green** + RPCS3 runtime-verified |
 | `hello-ppu-tls` | PPU `__thread` local-exec TLS for scalar and aggregate objects; prints `TLS_OK` when the loader-initialised main-thread TLS image is visible at runtime | **green** + RPCS3 runtime-verified |
 | `hello-ppu-pthread` | POSIX pthread shim over Lv-2 primitives: static mutex/cond/once initialisers, recursive mutexes, `pthread_mutex_trylock`, thread-specific data, create/join, self/equal, and condition signalling | **green** + RPCS3 runtime-verified |
+| `hello-raw-spu` | A raw SPU created, loaded and run through its problem-state registers with the `<sys/raw_spu.h>` names: `sys_raw_spu_create` / `image_load`, `SPU_In_MBox`, `SPU_NPC`, `SPU_RunCntl`, `SPU_Out_MBox` and `SPU_Status` via `sys_raw_spu_mmio_*`, the local store via `LS_BASE_ADDR`; prints `HELLO_RAW_SPU OK` | **green** + RPCS3 runtime-verified |
 
 ## audio/
 
