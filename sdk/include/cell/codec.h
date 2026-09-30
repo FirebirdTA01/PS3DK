@@ -22,6 +22,9 @@
 #include <cell/codec/adec_celp.h>
 #include <cell/codec/adec_celp8.h>
 #include <cell/codec/vdec.h>
+#include <cell/codec/vdec_avc.h>
+#include <cell/codec/vdec_divx.h>
+#include <cell/codec/vdec_mpeg2.h>
 #include <cell/codec/adec_m4aac.h>
 #include <cell/codec/at3_adapter.h>
 #include <cell/codec/atx_adapter.h>
