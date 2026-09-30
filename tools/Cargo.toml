@@ -8,6 +8,7 @@ members = [
     "prx-gen",
     "sfo",
     "make-sdata",
+    "ovis",
 ]
 
 [workspace.package]
