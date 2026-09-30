@@ -6,6 +6,13 @@
 
 #define CELL_MAX_MICE                                127
 #define CELL_MOUSE_INFO_INTERCEPTED                  (1 << 0)
+/* cellMouseInfoTabletMode: whether the device can act as a tablet, and the
+ * mode it is in (CELL_MOUSE_INFO_TABLET_*). */
+typedef struct CellMouseInfoTablet {
+  uint32_t is_supported;
+  uint32_t mode;
+} CellMouseInfoTablet;
+
 #define CELL_MOUSE_INFO_TABLET_NOT_SUPPORTED         0
 #define CELL_MOUSE_INFO_TABLET_SUPPORTED             1
 #define CELL_MOUSE_INFO_TABLET_MOUSE_MODE            1

@@ -45,6 +45,7 @@ extern int32_t cellMouseGetDataList(uint32_t port_no, CellMouseList *list);
 extern int32_t cellMouseGetRawData(uint32_t port_no, CellMouseRawData *data);
 extern int32_t cellMouseGetTabletDataList(uint32_t port_no, void *list);
 extern int32_t cellMouseSetTabletMode(uint32_t port_no, uint32_t mode);
+extern int32_t cellMouseInfoTabletMode(uint32_t port_no, CellMouseInfoTablet *info);
 
 #ifdef __cplusplus
 }

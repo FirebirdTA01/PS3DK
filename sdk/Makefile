@@ -146,6 +146,7 @@ HEADERS := \
     include/cell/gcm/gcm_command_cpp_explicit.h \
     include/cell/cell_video_out.h \
     include/cell/cell_audio_out.h \
+    include/cell/cell_audio_in.h \
     include/cell/cell_fs.h \
     include/cell/fs/cell_fs_file_api.h \
     include/cell/fs/cell_fs_errno.h \
@@ -435,7 +436,9 @@ HEADERS := \
     include/sys/sce_cdefs.h \
     include/sysutil/sysutil_common.h \
     include/cell/keyboard.h \
+    include/cell/keyboard/kb_codes.h \
     include/cell/mouse.h \
+    include/cell/mouse/mouse_codes.h \
     include/cell/padfilter.h \
     include/rsx/commands.h \
     include/rsx/commands_inc.h \

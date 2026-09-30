@@ -37,6 +37,17 @@ struct sockaddr_in {
     uint8_t sin_zero[8];
 };
 
+/* sockaddr_in for PlayStation Network peer-to-peer sockets: the port the
+ * UDP packets travel on, plus a virtual port that selects the socket. */
+struct sockaddr_in_p2p {
+    uint8_t sin_len;
+    sa_family_t sin_family;
+    in_port_t sin_port;
+    struct in_addr sin_addr;
+    in_port_t sin_vport;
+    char sin_zero[6];
+};
+
 struct sockaddr_in6 {
     uint8_t sin6_len;
     sa_family_t sin6_family;

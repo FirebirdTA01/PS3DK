@@ -8,6 +8,7 @@
 #include <cell/error.h>
 #ifdef __PPU__
 #include <ppu-types.h>
+#include <sys/sys_types.h>   /* usecond_t */
 #else
 #ifndef ATTRIBUTE_PRXPTR
 #define ATTRIBUTE_PRXPTR
@@ -72,6 +73,25 @@ typedef struct {
     void *pArg ATTRIBUTE_PRXPTR;
 } CellSailMemAllocator;
 int cellSailMemAllocatorInitialize(CellSailMemAllocator*,const CellSailMemAllocatorFuncs*,void*);
+
+#ifdef __PPU__
+/* A one-shot result slot one thread waits on and another fills: the
+ * completion of an asynchronous player call. */
+typedef struct CellSailFuture {
+    sys_mutex_t       mutex;
+    sys_cond_t        cond;
+    volatile uint32_t flags;
+    int               result;
+    uint64_t          userParam;
+} CellSailFuture;
+
+int cellSailFutureInitialize(CellSailFuture *pSelf);
+int cellSailFutureFinalize(CellSailFuture *pSelf);
+int cellSailFutureReset(CellSailFuture *pSelf, bool wait);
+int cellSailFutureSet(CellSailFuture *pSelf, int result);
+int cellSailFutureGet(CellSailFuture *pSelf, usecond_t timeout, int *pResult);
+int cellSailFutureIsDone(CellSailFuture *pSelf, int *pResult);
+#endif
 
 #ifdef __cplusplus
 }

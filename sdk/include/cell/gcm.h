@@ -191,6 +191,14 @@ typedef struct CellGcmZcullInfo {
     union { uint32_t stat1; uint32_t status1; };
 } CellGcmZcullInfo;
 
+/* One display buffer registered with cellGcmSetDisplayBuffer. */
+typedef struct CellGcmDisplayInfo {
+	uint32_t offset;
+	uint32_t pitch;
+	uint32_t width;
+	uint32_t height;
+} CellGcmDisplayInfo;
+
 #define PS3TC_GCM_JOIN2(a, b) a##b
 #define PS3TC_GCM_JOIN(a, b) PS3TC_GCM_JOIN2(a, b)
 #ifdef __cplusplus
