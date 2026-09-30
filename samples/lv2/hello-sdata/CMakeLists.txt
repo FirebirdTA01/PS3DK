@@ -10,7 +10,7 @@
 #   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=<repo>/cmake/ps3-ppu-toolchain.cmake
 #   cmake --build build
 cmake_minimum_required(VERSION 3.20)
-project(hello-sdata C)
+project(hello-sdata C ASM)
 
 include(ps3-self)
 
