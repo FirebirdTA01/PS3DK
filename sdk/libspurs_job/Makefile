@@ -22,13 +22,12 @@ INSTALL_INC := $(PS3DK)/spu/include
 override CC := spu-elf-gcc
 AR := spu-elf-ar
 
-# -fpic: required for spurs-job binaries.  The SPRX dispatcher loads
-# the binary at a runtime-chosen LS offset, so all absolute references
-# (ila, ilhu/iohl) need PC-relative resolution.  The reference SDK's
-# patched GCC adds -mspurs-job which enables this plus a couple of
-# spurs-specific tweaks; stock GCC 9.5 doesn't have that flag, so we
-# stick with -fpic alone.  -Wl,-q (--emit-relocs) is applied at link
-# time by the consuming sample, not here (this archive is just objects).
+# -fpic: the archive's objects are position-independent, so they work in
+# an image linked at any base.  A -mspurs-job image itself is linked
+# where the job manager loads it (spurs_job.ld, LS 0x4c00, from
+# __spurs_job_base in job_start.S) and needs no run-time relocation;
+# only a -mspurs-job-initialize image, linked at 0, is relocated (by its
+# startup, libspurs_jq).
 CFLAGS := -O2 -Wall -Wextra -fno-exceptions -ffreestanding -fpic \
           -falign-functions=8 -mno-branch-hints
 SFLAGS := -Wall -fpic

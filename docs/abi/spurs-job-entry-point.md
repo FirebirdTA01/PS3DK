@@ -44,16 +44,21 @@ in `_start` and is not covered here.
 ## 2. Section layout
 
 A linked SPURS Job ELF has two LOAD segments and one PT_NOTE
-segment, laid out as follows:
+segment.  The job manager loads a job image at LS 0x4c00, and a
+`-mspurs-job` image is linked there (`spurs_job.ld` takes the base
+from `__spurs_job_base`, which the job startup defines as 0x4c00), so
+`.SpuGUID` is at LS 0x4c00 and `_start` at LS 0x4c10.  A
+`-mspurs-job-initialize` image is linked at 0 and relocated by its
+startup (§ 5).  Offsets below are from the start of the image:
 
 ```
-LS offset    Section                Notes
+Offset       Section                Notes
 ---------    -------------          --------------------------------------
 0x0000       .SpuGUID               16 bytes, AX (alloc + execute), align 1
 0x0010       .before_text           _start trampoline (32 bytes; § 3)
 0x0030       .text                  cellSpursJobMain2 + dependencies
 …            .rodata                optional; readonly, in LOAD-code segment
-0x????       .data                  vaddr 0x80-aligned (= LOAD-code end
+0x????       .data                  0x80-aligned (= LOAD-code end
                                     aligned up to 0x80)
 …            (BSS)                  bracketed by __bss_start / _end
 …            .note.spu_name         non-loadable PT_NOTE segment (§ 2.1)
@@ -100,30 +105,30 @@ The dispatcher branches to the binary's `_start` symbol with:
 | `$4` | `CellSpursJob256 *` (argument 2)               |
 | `$80..$127` | callee-saved; preserve bitwise across `_start` |
 
-Canonical `_start` body — exactly 16 bytes (4 instructions) at LS
-0x10..0x1f, followed by a 16-byte `.before_text` tail at LS 0x20..0x2f
-that carries the `BINARY2` magic.  With `.SpuGUID` at vaddr 0..0xF and
-`.before_text` at vaddr 0x10..0x2F the bytes are:
+Canonical `_start` body — exactly 16 bytes (4 instructions) at image
+offset 0x10..0x1f, followed by a 16-byte `.before_text` tail at
+0x20..0x2f that carries the `BINARY2` magic.  With `.SpuGUID` at
+offset 0..0xF and `.before_text` at 0x10..0x2F the bytes are:
 
 ```
-LS 0x10:  44 01 28 50  xori $80, $80, 4         ; toggle bit 2 of $80
-LS 0x14:  32 00 00 80  br   _start+0x8           ; (forward no-op branch)
-LS 0x18:  44 01 28 50  xori $80, $80, 4         ; toggle back -> net no-op
-LS 0x1c:  32 00 ?? ??  br   cellSpursJobMain2    ; tail-jump (REL16)
-LS 0x20:  62 69 6e 32  "bin2"                    ; BINARY2 magic word
-LS 0x24..0x2f: 0x00 padding (12 bytes; alignment fill)
++0x10:  44 01 28 50  xori $80, $80, 4         ; toggle bit 2 of $80
++0x14:  32 00 00 80  br   _start+0x8           ; (forward no-op branch)
++0x18:  44 01 28 50  xori $80, $80, 4         ; toggle back -> net no-op
++0x1c:  32 00 ?? ??  br   cellSpursJobMain2    ; tail-jump (REL16)
++0x20:  62 69 6e 32  "bin2"                    ; BINARY2 magic word
++0x24..0x2f: 0x00 padding (12 bytes; alignment fill)
 ```
 
 The xori-pair toggles bit 2 of `$80` and toggles it back — net no-op
 on the register. The dispatcher recognises this exact 4-instruction
 byte signature as a valid job entry stub.
 
-### 3.1 BINARY2 magic word at LS 0x20
+### 3.1 BINARY2 magic word at image offset 0x20
 
 The dispatcher's deferred descriptor validator reads a 16-byte block
-from LS 0x20 of the loaded job image and compares its leading word
+from offset 0x20 of the loaded job image and compares its leading word
 against `"BIN2"` (`0x42494e32`) and `"bin2"` (`0x62696e32`).  Images
-whose LS 0x20 word matches neither magic are rejected with
+whose 0x20 word matches neither magic are rejected with
 `CELL_SPURS_JOB_ERROR_JOB_DESCRIPTOR` (`0x80410a0b`) written to
 `CellSpursJobChain.error` (`+0x80`); the SPU side never enters the
 user job's `_start`.
@@ -131,9 +136,9 @@ user job's `_start`.
 The magic is emitted by the trampoline assembler in
 `sdk/libspurs_job/src/job_start.S` immediately after `_start`, so
 linking with `-T spurs_job.ld` and pulling `libspurs_job` into the
-job ELF places the four bytes at the correct LS offset automatically.
+job ELF places the four bytes at the correct offset automatically.
 Job binaries built with stand-alone `_start` stubs MUST replicate the
-magic — `0x40200000` (SPU NOP) or `0x00000000` zero padding at LS
+magic — `0x40200000` (SPU NOP) or `0x00000000` zero padding at offset
 0x20 trips the check.
 
 `cellSpursJobMain2` is responsible for normal stack-frame setup and
@@ -158,14 +163,19 @@ void cellSpursJobMain2(CellSpursJobContext2 *jobContext,
 
 ---
 
-## 5. Position-independence
+## 5. Load address and relocation
 
-Job binaries SHOULD be linked with `-fpic -Wl,-q` (PIC code, retained
-relocations) so the dispatcher can DMA-load them into LS at any
-runtime offset. The xori-pair `_start` trampoline is PC-relative-only
-and works at any load address; the runtime BSS-clear (when used)
-computes a PIC slide (`ila link-addr` + `brsl +8` + `sf slide`)
-before dereferencing `__bss_start` / `_end`.
+A `-mspurs-job` image (`e_flags = 1`) is linked at the LS address the
+job manager loads it to, 0x4c00, and built position-dependent: the
+addresses held in its data (pointers, function-pointer tables, C++
+vtables) are final and nothing relocates them at run time.  Code built
+`-fpic` also works there, but PIC code alone does not fix up data: a
+job linked at 0 and run at 0x4c00 reads every address stored in its
+data 0x4c00 too low.
+
+A `-mspurs-job-initialize` image (`e_flags = 2`) is linked at 0 with
+its relocations retained; its startup relocates it to the load address
+before running constructors and the job.
 
 ---
 
@@ -203,7 +213,7 @@ header.jobType    = CELL_SPURS_JOB_TYPE_BINARY2;
 `eaBinary` points directly at the flat SPU LS image — first 16 bytes
 MUST be the `.SpuGUID` content, followed by `.before_text` (the
 xori-pair entry stub) at offset 0x10. The dispatcher DMAs from
-`eaBinary` straight into LS starting at LS 0; it does NOT parse an
+`eaBinary` straight into LS starting at LS 0x4c00; it does NOT parse an
 ELF wrapper. The build-time pipeline therefore feeds the dispatcher a
 flat raw image obtained by running `spu-elf-objcopy -O binary` on the
 linked SPU ELF.
@@ -240,8 +250,9 @@ The `JOBBIN` flag on `ps3_add_spu_image` (CMake helper in
 `cmake/ps3-self.cmake`) implements the full pipeline:
 
 1. Compile SPU sources with the SPU GCC.
-2. Link with `-mspurs-job -fpic -Wl,-q -nostartfiles -T spurs_job.ld`,
-   pulling in `libspurs_job` for the `_start` trampoline + BSS clear.
+2. Link with `-mspurs-job -nostartfiles -T spurs_job.ld` (position-
+   dependent, at LS 0x4c00), pulling in `libspurs_job` for the `_start`
+   trampoline + BSS clear.
 3. Run `spu-elf-objcopy -O binary` on the linked ELF to extract a
    flat LS image (sized exactly to cover both LOAD segments).
 4. Run `bin2s` on the flat image to embed it as a `.rodata` blob in

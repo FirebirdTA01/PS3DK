@@ -61,10 +61,13 @@ def main():
         definitions = [line.split() for line in nm.stdout.splitlines() if len(line.split()) >= 3]
         symbols = {line[-1] for line in definitions}
         names = members.stdout.splitlines()
-        return (members.returncode == nm.returncode == 0 and len(names) == len(MEMBERS)
-                and set(names) == MEMBERS and not symbols.intersection(FORBIDDEN)
-                and symbols == EXPORTS and len(definitions) == len(EXPORTS)
-                and all(line[-2]=='T' for line in definitions)), nm.stdout
+        # the archive grows as SPU services land: it must hold at least these
+        # members and functions, each defined once, and never a startup or
+        # user entry symbol
+        functions = [line[-1] for line in definitions if line[-2] == 'T']
+        return (members.returncode == nm.returncode == 0 and len(names) == len(set(names))
+                and MEMBERS <= set(names) and not symbols.intersection(FORBIDDEN)
+                and EXPORTS <= set(functions) and len(functions) == len(set(functions))), nm.stdout
 
     if not archive.is_file():
         rows.append(dict(name='canonical-archive', ok=False, missing=str(archive)))
@@ -116,7 +119,10 @@ def main():
                 'initialized': 'void cellSpursJobQueueMain(CellSpursJobContext2 *a, CellSpursJob256 *b) { (void)a; (void)b; use_services(); }',
             }[mode]
             src.write_text(body+entry+'\n')
-            pic = ['-fpic'] if mode in ['job', 'initialized'] else []
+            # a job chain job is linked where the job manager runs it (LS
+            # 0x4c00) and built position-dependent; a job queue job is linked
+            # at 0 and relocated by its startup, so it stays PIC
+            pic = ['-fpic'] if mode == 'initialized' else []
             row, _ = run(name+'-compile', base+pic+['-x', language, '-O2', '-c', src, '-o', obj])
             if not row['ok']:
                 continue
@@ -155,7 +161,7 @@ def main():
                 row['start_owner'] = start_owner
                 row['ok'] &= 'libspurs.a(' not in start_owner
                 if mode != 'ordinary':
-                    row['ok'] &= entry_address == (0x3000 if mode=='task' else 0x10)
+                    row['ok'] &= entry_address == {'task':0x3000,'job':0x4c10,'initialized':0x10}[mode]
                     startup = {'task':'spurs_task.o','job':'job_start.o','initialized':'job_start_w_crt.o'}[mode]
                     row['ok'] &= start_owner == str(lib/startup)
                     if mode != 'task':

@@ -9,8 +9,8 @@ with a diagnostic. Ordinary relocatable linking remains available.
 | Mode | Startup objects | Internal service archive | Default layout |
 |---|---|---|---|
 | `-mspurs-task` | `spurs_task.o` | `libspurs_task_runtime.a` | `spurs_task.ld`, entry at 0x3000 |
-| `-mspurs-job` | `job_start.o` | `libspurs_job_runtime.a` | `spurs_job.ld`, entry at 0x10 |
-| `-mspurs-job-initialize` | `job_start_w_crt.o`, `job_crt.o` | `libspurs_jq_runtime.a` | `spurs_job.ld`, entry at 0x10 |
+| `-mspurs-job` | `job_start.o` | `libspurs_job_runtime.a` | `spurs_job.ld` at LS 0x4c00 (where the job manager loads it), entry at 0x4c10 |
+| `-mspurs-job-initialize` | `job_start_w_crt.o`, `job_crt.o` | `libspurs_jq_runtime.a` | `spurs_job.ld` at 0, entry at 0x10, relocated by its startup |
 
 The internal archives exclude startup symbols. `-nostartfiles` removes startup
 objects without silently retrieving them from a service archive. `-nodefaultlibs`

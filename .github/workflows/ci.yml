@@ -157,6 +157,13 @@ jobs:
       - name: Test the SPU libsync queue, rwm, mutex and barrier on the host
         run: bash tests/sdk/libsync-spu-host-test.sh
 
+      # The SPU libsync2 waiting queue over a simulated MFC, two local
+      # stores sharing one queue: FIFO wake-ups, the wake-before-entry
+      # marker and both phase bits across wraps, then again with every
+      # other conditional store lost.
+      - name: Test the SPU libsync2 waiting queue on the host
+        run: bash tests/sdk/sync2-waiting-queue-host-test.sh
+
       # install-headers copies an explicit list; a header missing from it is
       # left out of the installed SDK and breaks the full SDK build.
       - name: Test every tracked SDK header is installed
@@ -264,6 +271,10 @@ jobs:
       # a program calling its whole API.
       - name: Test the SPU libsheap archive exports and links its API
         run: bash tests/sdk/spu-sheap-link-test.sh
+
+      # Skips without PS3DEV; runs against an installed or candidate compiler.
+      - name: Test SPU C++ parenthesised vector literals and casts
+        run: bash tests/sdk/spu-paren-vector-cpp-test.sh
 
       # Skips without PS3DEV; compiles this tree's SPU atomic header in C/C++.
       - name: Test SPU atomic alignment predicates select integer intrinsics
