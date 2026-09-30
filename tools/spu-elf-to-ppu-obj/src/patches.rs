@@ -52,7 +52,12 @@ pub fn apply_jq_patches(image: &mut [u8], ls_size: u32) -> Result<()> {
 pub fn final_ls_image(raw_ls_image: &[u8], e_flags: u32) -> Result<Vec<u8>> {
     let mut image = raw_ls_image.to_vec();
     match e_flags {
-        1 => {}
+        1 => {
+            // the job manager checks for the BINARY2 marker at offset 0x20
+            if image.get(0x20..0x24).is_some_and(|s| s.iter().all(|b| *b == 0)) {
+                image[0x20..0x24].copy_from_slice(b"bin2");
+            }
+        }
         2 => apply_jq_patches(&mut image, raw_ls_image.len() as u32)?,
         other => bail!("unsupported SPURS job e_flags {other}; supported values are 1 and 2"),
     }

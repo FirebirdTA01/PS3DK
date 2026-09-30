@@ -10,17 +10,21 @@ const PF_W: u32 = 2;
 const PF_X: u32 = 1;
 
 pub fn build_jobbin2_blob(spu: &SpuElfAnalysis, final_ls_image: &[u8]) -> Result<(Vec<u8>, u32)> {
-    if final_ls_image.len() != spu.report.ls_size as usize {
+    // the image counts from the lowest load address (0x4c00 for a job
+    // chain job); the prefix keeps the addresses it is linked at
+    let base = spu.report.ls_base;
+    let image_size = spu.report.ls_size - base;
+    if final_ls_image.len() != image_size as usize {
         bail!(
-            "final LS image size 0x{:x} does not match SPU ls_size 0x{:x}",
+            "final LS image size 0x{:x} does not match the SPU image size 0x{:x}",
             final_ls_image.len(),
-            spu.report.ls_size
+            image_size
         );
     }
 
     let data_load = data_load(spu);
     let note = note_header(spu);
-    let note_offset = JOBBIN2_PREFIX_SIZE as u32 + spu.report.ls_size;
+    let note_offset = JOBBIN2_PREFIX_SIZE as u32 + image_size;
     let note_size = spu.note_data.len() as u32;
     let meaningful_blob_byte_count = note_offset + note_size;
 
@@ -49,10 +53,10 @@ pub fn build_jobbin2_blob(spu: &SpuElfAnalysis, final_ls_image: &[u8]) -> Result
         Phdr {
             p_type: PT_LOAD,
             p_offset: JOBBIN2_PREFIX_SIZE as u32,
-            p_vaddr: 0,
-            p_paddr: 0,
-            p_filesz: spu.report.ls_size,
-            p_memsz: spu.report.ls_size,
+            p_vaddr: base,
+            p_paddr: base,
+            p_filesz: image_size,
+            p_memsz: image_size,
             p_flags: PF_R | PF_X,
             p_align: 0x80,
         },
@@ -62,7 +66,7 @@ pub fn build_jobbin2_blob(spu: &SpuElfAnalysis, final_ls_image: &[u8]) -> Result
         0x54,
         Phdr {
             p_type: PT_LOAD,
-            p_offset: JOBBIN2_PREFIX_SIZE as u32 + data_load.p_paddr,
+            p_offset: JOBBIN2_PREFIX_SIZE as u32 + data_load.p_paddr - base,
             p_vaddr: data_load.p_vaddr,
             p_paddr: data_load.p_paddr,
             p_filesz: data_load.p_filesz,

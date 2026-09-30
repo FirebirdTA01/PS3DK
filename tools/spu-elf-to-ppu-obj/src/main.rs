@@ -118,7 +118,7 @@ fn run() -> Result<()> {
             let spu = inspect_spu_elf(&spu_elf)?;
             let jobbin2_report = jobbin2
                 .as_ref()
-                .map(|path| inspect_jobbin2(path, Some(spu.report.ls_size)))
+                .map(|path| inspect_jobbin2(path, Some(spu.report.ls_size - spu.report.ls_base)))
                 .transpose()?;
             let jobheader_report = jobheader
                 .as_ref()
@@ -279,7 +279,7 @@ fn compare(
         ));
         checks.push(Comparison::eq(
             "jobheader.sizeBinary == ls_size / 16",
-            (spu.report.ls_size / 16).to_string(),
+            ((spu.report.ls_size - spu.report.ls_base) / 16).to_string(),
             jobheader.size_binary.to_string(),
         ));
         checks.push(Comparison::eq(
@@ -487,7 +487,7 @@ fn jq_runtime_metadata_patches(
     let Some(jobbin2) = jobbin2 else {
         return Vec::new();
     };
-    expected_jq_patches(spu.report.ls_size)
+    expected_jq_patches(spu.report.ls_size - spu.report.ls_base)
         .into_iter()
         .map(|patch| {
             let start = patch.offset as usize;

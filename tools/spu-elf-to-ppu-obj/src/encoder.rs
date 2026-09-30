@@ -44,10 +44,11 @@ pub fn encode_spu_elf(
                     r.vaddr
                 );
             }
-            let final_image = final_ls_image(&spu.ls_image, spu.report.e_flags)?;
+            let image = &spu.ls_image[spu.report.ls_base as usize..];
+            let final_image = final_ls_image(image, spu.report.e_flags)?;
             let (jobbin2_blob, meaningful_blob_byte_count) =
                 build_jobbin2_blob(&spu, &final_image)?;
-            let jobheader = build_jobheader(spu.report.ls_size)?;
+            let jobheader = build_jobheader(final_image.len() as u32)?;
             let ppu_object = build_jobbin2_ppu_object(
                 symbol_base,
                 &jobbin2_blob,
@@ -267,8 +268,8 @@ fn validate_jobbin2_input(report: &crate::spu_elf::SpuElfReport) -> Result<()> {
     validate_common_input(report)?;
     match report.e_flags {
         1 => {
-            if !report.checks.has_bin2_at_ls_0x20 {
-                bail!("e_flags=1 JOBBIN input must contain bin2/BIN2 at LS 0x20");
+            if !report.checks.has_bin2_at_ls_0x20 && !report.checks.bin2_slot_zero {
+                bail!("e_flags=1 JOBBIN input must have bin2/BIN2 or zeros at image offset 0x20");
             }
         }
         2 => {
