@@ -587,3 +587,25 @@ The SDK ships the OpenGL-ES-flavoured PSGL runtime sitting on top of GCM:
    `psglSetCursorImageOffset`, `psglSetCursorPosition`,
    `psglUpdateCursor`) unconditionally return
    `PSGL_HW_CURSOR_ERROR_FAILURE` (`-1`).
+
+---
+
+## POSIX file sizes are 32-bit in the default PPU ABI
+
+**Status:** documented limitation; see `docs/abi/large-file-off-t.md`.
+
+**Symptom.**  In the default PPU ABI (ILP32), `off_t` is a signed 32-bit
+`long`, so `stat()` / `fstat()` return a 32-bit `st_size`.
+`runtime/lv2/librt/fstat.c` copies LV2's 64-bit size into it without a check:
+a file of 2 to 4 GiB reports a negative `st_size`, a larger one its low 32
+bits, and no error.  `stat64()` / `fstat64()` take the same `struct stat` and
+behave the same.  The LP64 multilib (`-mlp64`) has a 64-bit `off_t` and is not
+affected.
+
+**Workaround.**  For sizes, use `cellFsStat` / `cellFsFstat` (`st_size` is
+`uint64_t`); for offsets, use `lseek64` (`_off64_t`), not `lseek`.
+
+**Planned fix.**  `fstat` and `stat` fail with `-1` and `errno = EOVERFLOW`
+when the size does not fit `off_t` (above `INT32_MAX`), as POSIX requires.
+`off_t` itself stays 32-bit: widening it is a libc ABI break for every archive
+and portlib built against it.

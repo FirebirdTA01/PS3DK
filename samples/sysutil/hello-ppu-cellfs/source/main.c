@@ -79,7 +79,11 @@ int main(int argc, const char **argv)
     fd_w = -1;
     if (err != CELL_FS_OK) { ok = 0; }
 
-    /* 4. stat. */
+    /* 4. stat.
+     * cellFsStat reports st_size as uint64_t, so it is the way to size
+     * files above 2 GiB.  POSIX stat()/fstat() return the 32-bit signed
+     * off_t of the default PPU ABI and are wrong for such files; see
+     * docs/abi/large-file-off-t.md. */
     memset(&sb, 0, sizeof(sb));
     err = cellFsStat(SCRATCH_PATH, &sb);
     printf("  cellFsStat                     -> err=0x%08x size=%llu mode=0%o\n",
