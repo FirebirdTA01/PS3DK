@@ -231,6 +231,35 @@ int main (uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
             fail = 1;
     }
 
+    /* -- the cmp*d2 names, called directly -- */
+    {
+        vector double nan2 = s_d2 (0x7ff8000000000000ull, 0x7ff8000000000000ull),
+                     inf2 = s_d2 (0x7ff0000000000000ull, 0xfff0000000000000ull),
+                     one2 = s_d2 (0x3ff0000000000000ull, 0x3ff0000000000000ull),
+                     a    = s_d2 (0x3fe0000000000000ull,  /* +0.5  even */
+                                  0x3fc0000000000000ull), /* +0.25 odd  */
+                     b    = s_d2 (0x3fc0000000000000ull,
+                                  0x3fc0000000000000ull); /* +0.25 both */
+        if (!s_chk (cmpnand2 (nan2), +1, +1)) fail = 1;
+        if (!s_chk (cmpinfd2 (inf2), +1, +1)) fail = 1;
+        if (!s_chk (cmpzerodenormd2 (s_d2 (0, 1)), +1, +1)) fail = 1;   /* +0.0, smallest subnormal */
+        if (!s_chk (cmpeqd2 (one2, one2), +1, +1)) fail = 1;
+        if (!s_chk (cmpgtd2 (a, b), +1, -1)) fail = 1;
+        if (!s_chk (cmpged2 (a, b), +1, +1)) fail = 1;                  /* 0.5 >= 0.25, 0.25 >= 0.25 */
+        if (!s_chk (cmpged2 (b, a), -1, +1)) fail = 1;                  /* 0.25 >= 0.5 is false */
+        if (!s_chk (cmpged2 (nan2, one2), -1, -1)) fail = 1;            /* NaN compares false */
+        if (!s_chk (cmpnegsignd2 (s_d2 (0x8000000000000000ull, 0)), +1, -1)) fail = 1;
+    }
+
+    /* -- remainderf4 rounds the quotient to nearest, ties to even -- */
+    if (!s_exactf (s_lane0f (remainderf4 (spu_splats (7.0f), spu_splats (2.0f))), -1.0f)) fail = 1;
+    if (!s_exactf (s_lane0f (remainderf4 (spu_splats (5.0f), spu_splats (2.0f))),  1.0f)) fail = 1;
+    if (!s_exactf (s_lane0f (remainderf4 (spu_splats (7.5f), spu_splats (2.0f))), -0.5f)) fail = 1;
+
+    /* -- divf4fast is the reciprocal estimate: close to, not exactly, 1/3 -- */
+    if (!s_approxf (s_lane0f (divf4fast (spu_splats (1.0f), spu_splats (3.0f))),
+                    1.0f / 3.0f, (1.0f / 3.0f) / 1024.0f)) fail = 1;
+
     /* ========== signal completion to PPU, then exit with our status ========== */
     {
         __attribute__((aligned(16))) uint32_t buf[4] = { 0x5d3db123, 0, 0, 0 };

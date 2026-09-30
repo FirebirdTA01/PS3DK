@@ -37,7 +37,39 @@
 #include <sys/spu_thread_group.h>
 #include <sys/spu_thread.h>
 
+#include <simdmath.h>
+
 #include "simdmath_inline_spu_bin.h"
+
+/* PPU values through the same header, also without -lsimdmath: the PPU
+ * inlines are a separate set (remainderf4 was missing from it). */
+static float lane0 (vector float v)
+{
+    union { vector float v; float f[4]; } u;
+    u.v = v;
+    return u.f[0];
+}
+
+static vector float splat (float x)
+{
+    return (vector float){ x, x, x, x };
+}
+
+static int ppu_values (void)
+{
+    int bad = 0;
+    vector float (*sinp) (vector float) = &sinf4;     /* an address, no library */
+    float q;
+
+    if (lane0 (remainderf4 (splat (7.0f), splat (2.0f))) != -1.0f) bad |= 1;
+    if (lane0 (remainderf4 (splat (5.0f), splat (2.0f))) !=  1.0f) bad |= 2;
+    if (lane0 (remainderf4 (splat (7.5f), splat (2.0f))) != -0.5f) bad |= 4;
+    q = lane0 (divf4fast (splat (1.0f), splat (3.0f)));
+    if (q - 1.0f / 3.0f > (1.0f / 3.0f) / 1024.0f || 1.0f / 3.0f - q > (1.0f / 3.0f) / 1024.0f) bad |= 8;
+    if (lane0 (sinp (splat (0.0f))) != 0.0f) bad |= 16;
+    if (lane0 (divf4 (splat (1.0f), splat (4.0f))) != 0.25f) bad |= 32;
+    return bad;
+}
 
 #define ptr2ea(x) ((u64) ((uintptr_t) (x)))
 
@@ -127,12 +159,15 @@ int main (int argc, char **argv)
 
     sys_spu_image_close (&image);
 
+    int ppu_bad = ppu_values ();
+    int result = spu_exit != 0 ? spu_exit : (ppu_bad != 0 ? 16 + ppu_bad : 0);
+    printf ("simdmath-inline: ppu values bad=0x%x\n", ppu_bad);
     printf ("simdmath-inline: spu finished cause=%d status=%d "
             "done=0x%08x exit=%d\n",
-            cause, status, (unsigned) spu_done [0], spu_exit);
+            cause, status, (unsigned) spu_done [0], result);
 
     /* The SPU exits with 0 if every f4 + d2 check passed.  Propagate
      * that as our own exit code so the harness can assert 0 success /
      * nonzero failure directly. */
-    return spu_exit;
+    return result;
 }
