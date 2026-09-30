@@ -10,6 +10,17 @@
 #ifndef __PS3DK_SYS_SPU_THREAD_H__
 #define __PS3DK_SYS_SPU_THREAD_H__
 
+/* Where an SPU thread of the calling group appears in the effective address
+ * space: thread n (its index in the group) at BASE + OFFSET * n, its local
+ * store at LS_BASE and its signal notification registers at SNR1 / SNR2
+ * within that window. */
+#define SYS_SPU_THREAD_BASE_HIGH  0x00000000U
+#define SYS_SPU_THREAD_BASE_LOW   0xF0000000U
+#define SYS_SPU_THREAD_OFFSET     0x00100000U
+#define SYS_SPU_THREAD_LS_BASE    0x00000000U
+#define SYS_SPU_THREAD_SNR1       0x0005400CU
+#define SYS_SPU_THREAD_SNR2       0x0005C00CU
+
 #ifndef __SPU__
 #error "sys/spu_thread.h (SPU side) needs __SPU__; PPU has its own copy"
 #endif
