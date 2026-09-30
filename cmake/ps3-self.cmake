@@ -1064,6 +1064,12 @@ function(ps3_add_spu_image target)
             VERBATIM)
         set_source_files_properties("${_spu_ppu_o}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
         target_sources(${target} PRIVATE "${_spu_ppu_o}")
+        # $<TARGET_OBJECTS> of an OBJECT library leaves external objects
+        # out: a program that links the library gets the image this way
+        get_target_property(_type ${target} TYPE)
+        if(_type STREQUAL "OBJECT_LIBRARY")
+            target_link_libraries(${target} INTERFACE "${_spu_ppu_o}")
+        endif()
         set(_id "${_PSI_NAME}_bin")
         set(_sym "_binary_${_PSI_NAME}_elf")
         file(WRITE "${_spu_obj_dir}/${_id}.h.in"
