@@ -12,6 +12,9 @@
 #include <stdint.h>
 #include <ppu-types.h>
 #include <sys/spu_thread_group.h>
+/* as in the SDK: debugger code declares its process parameters with the
+ * SYS_PROCESS_PARAM this brings in */
+#include <sys/process.h>
 
 #ifdef __cplusplus
 extern "C" {
