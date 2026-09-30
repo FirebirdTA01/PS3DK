@@ -16,6 +16,17 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Changed
+
+- The simdmath `*f4fast` forms (`sinf4fast`, `cosf4fast`, `sincosf4fast`,
+  `tanf4fast`, `asinf4fast`, `acosf4fast`, `atanf4fast`, `atan2f4fast`,
+  `expf4fast`, `exp2f4fast`, `expm1f4fast`, `logf4fast`, `log2f4fast`,
+  `log10f4fast`, `log1pf4fast`, `powf4fast`, `sqrtf4fast`) are their own
+  reduced-accuracy implementations instead of the accurate ones: shorter
+  polynomials over each form's documented domain, and on the PPU the VMX
+  exp / log estimates.  Accuracy and domain per form are listed in
+  `<simdmath/fastf4.h>`.
+
 ## [v0.18.0] — 2026-09-30
 
 ### Added

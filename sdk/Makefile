@@ -475,7 +475,8 @@ HEADERS := \
     include/Cg/NV/cg_types.h \
     include/cell/cgb/cgb_levelc.h \
     include/cell/cgb/cgb_struct.h \
-    include/cell/sscgpu.h
+    include/cell/sscgpu.h \
+    include/simdmath/fastf4.h
 
 SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath
 
@@ -485,6 +486,7 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 # both $(PS3DK)/ppu/include/ (via HEADERS) and $(PS3DK)/spu/include/
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
+    include/simdmath/fastf4.h \
     include/cell/sync2/types.h \
     include/cell/sync2/version.h \
     include/cell/sync2/error.h \

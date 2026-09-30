@@ -154,6 +154,11 @@ jobs:
       - name: Test the shared-heap core layout, allocator and key table
         run: bash tests/sdk/sheap-core-host-test.sh
 
+      # The simdmath f4fast forms on the host: each form over its documented
+      # domain against double-precision libm, with 12-bit estimates.
+      - name: Test simdmath fast-form accuracy
+        run: bash tests/sdk/simdmath-fast-host-test.sh
+
       # The SPU libsync sources over a simulated MFC: queue and rwm
       # descriptors survive Initialize, the mutex is the PPU's ticket word
       # (checked against a PPU-side model), barrier counts are validated.
