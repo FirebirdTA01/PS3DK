@@ -24,33 +24,14 @@
 extern "C" {
 #endif
 
-/* Inspect an SPU ELF image already loaded into main memory.  Returns
- * the entry point address and segment count. */
-static inline int sys_spu_elf_get_information(sys_addr_t elf_img,
-                                              uint32_t *entry, int *nseg)
-{
-    if (!entry || !nseg) return -1;
-    sysSpuImage tmp;
-    int rc = sysSpuImageImport(&tmp, (const void *)(uintptr_t)elf_img,
-                               0 /* SPU_IMAGE_PROTECT */);
-    if (rc) return rc;
-    *entry = tmp.entryPoint;
-    *nseg  = (int)tmp.segmentCount;
-    sysSpuImageClose(&tmp);
-    return 0;
-}
+/* Inspect an SPU ELF image in main memory: its entry point, and how many
+ * segments sys_spu_elf_get_segments will describe.  Both are system
+ * library (sysPrxForUser) functions, imported through liblv2_stub. */
+int sys_spu_elf_get_information(sys_addr_t elf_img, uint32_t *entry, int *nseg);
 
-/* Walk the SPU ELF segment table — caller pre-sized via
- * sys_spu_elf_get_information(). */
-static inline int sys_spu_elf_get_segments(sys_addr_t elf_img,
-                                           sys_spu_segment_t *segments,
-                                           int nseg)
-{
-    (void)elf_img; (void)segments; (void)nseg;
-    /* Reference loader walks the ELF in-place; we forward via
-     * sysSpuImageImport / sysSpuImageGetEntryPoint when called. */
-    return 0;
-}
+/* Fill segments[0..nseg) with the image's load segments (COPY for file
+ * contents, FILL for zeroed space), sources pointing into elf_img. */
+int sys_spu_elf_get_segments(sys_addr_t elf_img, sys_spu_segment_t *segments, int nseg);
 
 /* Load an SPU ELF (by name) into a thread context.  Filled-in attr +
  * segment list returned to caller; the ELF blob remains caller-owned. */

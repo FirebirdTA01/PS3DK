@@ -1,0 +1,23 @@
+[package]
+name = "ovis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SPU overlay linker scripts and call wrappers for libovis (cellOvisMkLdscript, cellOvisConfigAuto)"
+
+[lib]
+name = "ovis"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cellOvisMkLdscript"
+path = "src/bin/mkldscript.rs"
+
+[[bin]]
+name = "cellOvisConfigAuto"
+path = "src/bin/config_auto.rs"
+
+[dependencies]
+object.workspace = true

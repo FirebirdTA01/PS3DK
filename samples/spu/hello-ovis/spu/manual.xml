@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!-- hello-ovis: two overlay regions.  Object names are the objects as
+     ps3_add_spu_image names them: <source file>.o -->
+<ovis_config>
+  <overlay>
+    <sections>
+      <section name="sec_add"><object name="op_add.c.o"/></section>
+    </sections>
+    <sections>
+      <section name="sec_mul"><object name="op_mul.c.o"/></section>
+    </sections>
+  </overlay>
+  <overlay>
+    <sections>
+      <section name="sec_fib"><object name="op_fib.c.o"/></section>
+    </sections>
+    <sections>
+      <section name="sec_gcd"><object name="op_gcd.c.o"/></section>
+    </sections>
+  </overlay>
+</ovis_config>

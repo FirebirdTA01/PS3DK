@@ -807,6 +807,19 @@ endfunction()
 # bytes (bin2s, JOBBIN) refuse an image with PPU references when the tool
 # is available, instead of shipping it with the addresses left 0.
 #
+# Overlays (libovis, <cell/ovis.h>):
+#   OVIS_CONFIG <file.xml>  sections laid out by an <ovis_config> file
+#                           (cellOvisMkLdscript); objects are named
+#                           <source file>.o, e.g. <object name="sort.c.o"/>
+#   OVIS_AUTO <sources...>  one overlay region, one section per source, every
+#                           global function wrapped so a call maps its
+#                           section (cellOvisConfigAuto); the sources must
+#                           also be in SOURCES
+# Either adds the generated script, the wrappers, -Wl,--no-overlays and
+# -lovis to the link.  The PPU builds the overlay table with
+# cellOvisInitializeOverlayTable and drops the overlay segments from the
+# image with cellOvisFixSpuSegments (link -lovis on the PPU too).
+#
 # SOURCES paths are resolved against CMAKE_CURRENT_SOURCE_DIR.  LIBS
 # are -l-style names that exist in $PS3DEV/spu/powerpc-..-lib or
 # $PS3DK/spu/lib (e.g. simdmath, sputhread).  The SPU link command
@@ -858,8 +871,8 @@ endif()
 function(ps3_add_spu_image target)
     cmake_parse_arguments(_PSI
         "NOSTARTFILES;FREESTANDING;JOBBIN;JOBBIN_WRAP;PPU_OBJECT"  # boolean flags
-        "NAME;LDSCRIPT"                                 # single-value
-        "SOURCES;LIBS;CFLAGS;LDFLAGS"                   # multi-value
+        "NAME;LDSCRIPT;OVIS_CONFIG"                     # single-value
+        "SOURCES;LIBS;CFLAGS;LDFLAGS;OVIS_AUTO"         # multi-value
         ${ARGN})
 
     if(NOT TARGET ${target})
@@ -952,9 +965,92 @@ function(ps3_add_spu_image target)
         list(APPEND _spu_link_flags -Wl,--require-defined=_start)
     endif()
     set(_link_deps ${_spu_objs})
+    set(_spu_link_objs ${_spu_objs})
     if(_PSI_LDSCRIPT)
         list(APPEND _spu_link_flags "-T" "${_PSI_LDSCRIPT}")
         list(APPEND _link_deps "${_PSI_LDSCRIPT}")
+    endif()
+
+    # Overlays (libovis).  The overlay linker script names objects as the
+    # link sees them, so an overlaid image links from its own directory
+    # with objects named <source file>.o, the names OVIS_CONFIG uses.
+    if(_PSI_OVIS_CONFIG AND _PSI_OVIS_AUTO)
+        message(FATAL_ERROR "ps3_add_spu_image: OVIS_CONFIG and OVIS_AUTO are two ways to lay out overlays; use one")
+    endif()
+    if(_PSI_OVIS_CONFIG OR _PSI_OVIS_AUTO)
+        if(_PSI_JOBBIN OR _PSI_JOBBIN_WRAP)
+            message(FATAL_ERROR "ps3_add_spu_image: overlays (OVIS_CONFIG / OVIS_AUTO) are for SPU thread and task images, not jobs")
+        endif()
+        set(_ovis_tool_name cellOvisMkLdscript)
+        if(_PSI_OVIS_AUTO)
+            set(_ovis_tool_name cellOvisConfigAuto)
+        endif()
+        find_program(PS3_TOOL_${_ovis_tool_name}
+            NAMES "${_ovis_tool_name}${_ps3_self_exe}" "${_ovis_tool_name}"
+            PATHS "${PS3DEV}/bin" "${PS3DK}/bin"
+                  "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/target/release"
+                  "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/target/debug"
+            NO_DEFAULT_PATH)
+        if(NOT PS3_TOOL_${_ovis_tool_name})
+            message(FATAL_ERROR "ps3_add_spu_image: overlays need the ${_ovis_tool_name} host tool (in ${PS3DEV}/bin or ${PS3DK}/bin)")
+        endif()
+        set(_ovis_ld "${_spu_dir}/ovis.ld")
+        set(_ovis_flags "${_spu_dir}/ovis.flags")
+        set(_ovis_wrap_s "${_spu_dir}/ovis_wrap.s")
+        set(_ovis_wrap_o "${_spu_dir}/ovis_wrap.o")
+        if(_PSI_OVIS_CONFIG)
+            if(IS_ABSOLUTE "${_PSI_OVIS_CONFIG}")
+                set(_ovis_xml "${_PSI_OVIS_CONFIG}")
+            else()
+                set(_ovis_xml "${CMAKE_CURRENT_SOURCE_DIR}/${_PSI_OVIS_CONFIG}")
+            endif()
+            add_custom_command(
+                OUTPUT "${_ovis_ld}" "${_ovis_flags}" "${_ovis_wrap_s}"
+                COMMAND "${PS3_TOOL_cellOvisMkLdscript}"
+                        "--ldscript=${_ovis_ld}" "--ldflags=${_ovis_flags}"
+                        "--wrapper=${_ovis_wrap_s}" "${_ovis_xml}"
+                DEPENDS "${_ovis_xml}"
+                COMMENT "ps3-spu: overlay layout for ${_PSI_NAME}"
+                VERBATIM)
+        else()
+            # the objects of the OVIS_AUTO sources, by the names the link uses
+            set(_ovis_auto_objs)
+            set(_ovis_auto_deps)
+            foreach(src ${_PSI_OVIS_AUTO})
+                get_filename_component(_in_name "${src}" NAME)
+                list(FIND _spu_objs "${_spu_dir}/${_in_name}.o" _ovis_idx)
+                if(_ovis_idx LESS 0)
+                    message(FATAL_ERROR "ps3_add_spu_image: OVIS_AUTO source ${src} is not in SOURCES")
+                endif()
+                list(APPEND _ovis_auto_objs "${_in_name}.o")
+                list(APPEND _ovis_auto_deps "${_spu_dir}/${_in_name}.o")
+            endforeach()
+            add_custom_command(
+                OUTPUT "${_ovis_ld}" "${_ovis_flags}" "${_ovis_wrap_s}"
+                COMMAND "${PS3_TOOL_cellOvisConfigAuto}"
+                        "--ldscript=${_ovis_ld}" "--ldflags=${_ovis_flags}"
+                        "--wrapper=${_ovis_wrap_s}" ${_ovis_auto_objs}
+                WORKING_DIRECTORY "${_spu_dir}"
+                DEPENDS ${_ovis_auto_deps}
+                COMMENT "ps3-spu: automatic overlays for ${_PSI_NAME}"
+                VERBATIM)
+        endif()
+        add_custom_command(
+            OUTPUT "${_ovis_wrap_o}"
+            COMMAND "${PS3_SPU_GCC}" -c "${_ovis_wrap_s}" -o "${_ovis_wrap_o}"
+            DEPENDS "${_ovis_wrap_s}"
+            COMMENT "ps3-spu: ${_PSI_NAME}/ovis_wrap.s"
+            VERBATIM)
+        set(_spu_link_objs)
+        foreach(o ${_spu_objs})
+            get_filename_component(_o_name "${o}" NAME)
+            list(APPEND _spu_link_objs "${_o_name}")
+        endforeach()
+        list(APPEND _spu_link_objs ovis_wrap.o)
+        # response file: --no-overlays plus one --wrap per wrapped function
+        list(APPEND _spu_link_flags "-T" "${_ovis_ld}" "@${_ovis_flags}")
+        list(APPEND _link_deps "${_ovis_ld}" "${_ovis_flags}" "${_ovis_wrap_o}")
+        list(APPEND _PSI_LIBS ovis)
     endif()
     # Wrap multi-lib lists in --start-group/--end-group so the linker
     # re-scans for cross-archive symbols (e.g. libspurs_job's _start
@@ -983,11 +1079,12 @@ function(ps3_add_spu_image target)
             OUTPUT "${_spu_elf}"
             COMMAND "${PS3_SPU_GCC}"
                     ${_spu_link_flags}
-                    ${_spu_objs} ${_spu_libs}
+                    ${_spu_link_objs} ${_spu_libs}
                     -o "${_spu_elf}.tmp"
             COMMAND "${PS3_TOOL_spu_elf_to_ppu_obj}" no-ppu-refs --spu-elf "${_spu_elf}.tmp"
             COMMAND ${CMAKE_COMMAND} -E rename "${_spu_elf}.tmp" "${_spu_elf}"
             DEPENDS ${_link_deps}
+            WORKING_DIRECTORY "${_spu_dir}"
             COMMENT "ps3-spu: link ${_PSI_NAME}.elf"
             VERBATIM)
     else()
@@ -995,9 +1092,10 @@ function(ps3_add_spu_image target)
             OUTPUT "${_spu_elf}"
             COMMAND "${PS3_SPU_GCC}"
                     ${_spu_link_flags}
-                    ${_spu_objs} ${_spu_libs}
+                    ${_spu_link_objs} ${_spu_libs}
                     -o "${_spu_elf}"
             DEPENDS ${_link_deps}
+            WORKING_DIRECTORY "${_spu_dir}"
             COMMENT "ps3-spu: link ${_PSI_NAME}.elf"
             VERBATIM)
     endif()

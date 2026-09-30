@@ -273,6 +273,9 @@ HEADERS := \
     include/cell/camera.h \
     include/cell/resc.h \
     include/cell/ovis.h \
+    include/cell/ovis/types.h \
+    include/cell/ovis/util.h \
+    include/cell/ovis/error.h \
     include/cell/perf/performance.h \
     include/cell/pngdec.h \
     include/cell/sysmodule.h \
@@ -477,7 +480,7 @@ HEADERS := \
     include/cell/cgb/cgb_struct.h \
     include/cell/sscgpu.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -485,6 +488,7 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 # both $(PS3DK)/ppu/include/ (via HEADERS) and $(PS3DK)/spu/include/
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
+    include/cell/ovis/types.h \
     include/cell/sync2/types.h \
     include/cell/sync2/version.h \
     include/cell/sync2/error.h \
@@ -569,6 +573,11 @@ SPU_ONLY_HEADERS := \
 # Reference SDK convention is `target/spu/include/{simd,bits/simd_*.h}` and
 # we mirror that under $(PS3DK)/spu/include/.
 SPU_HEADERS := \
+    include-spu/cell/ovis.h \
+    include-spu/cell/ovis/auto.h \
+    include-spu/cell/ovis/debug.h \
+    include-spu/cell/ovis/mapper.h \
+    include-spu/cell/ovis/error.h \
     include-spu/PSGL/spu_psgl.h \
     include-spu/simd \
     include-spu/bits/simd_scalars.h \
