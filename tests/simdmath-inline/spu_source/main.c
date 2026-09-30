@@ -65,6 +65,15 @@ static int s_approxf (float a, float b, float tol)
 }
 
 /* Bit-exact float scalar compare. */
+/* a within 2^-bits of b, relative */
+static int s_relf (float a, float b, int bits)
+{
+    float d = a - b;
+    if (d < 0) d = -d;
+    float m = b < 0 ? -b : b;
+    return d <= m * (1.0f / (float)(1u << bits));
+}
+
 static int s_exactf (float a, float b)
 {
     return a == b;
@@ -131,6 +140,34 @@ int main (uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
     /* divf4fast is the reciprocal estimate: about 12 bits, not 24 */
     if (!s_approxf (s_lane0f(divf4fast(spu_splats(2.0f), spu_splats(4.0f))),
                     0.5f, 0.5f / 1024.0f))  fail = 1;
+
+    /* ========== (A2) f4fast forms, to their documented accuracy ==========
+     * Failures here exit 2. */
+    {
+        int f = 0;
+        vector float fs, fc;
+        f |= !s_relf (s_lane0f(sinf4fast (spu_splats(1.0f))), 0.8414709848f, 18);
+        f |= !s_relf (s_lane0f(cosf4fast (spu_splats(1.0f))), 0.5403023059f, 18);
+        sincosf4fast (spu_splats(0.5f), &fs, &fc);
+        f |= !s_relf (s_lane0f(fs), 0.4794255386f, 18);
+        f |= !s_relf (s_lane0f(fc), 0.8775825619f, 18);
+        f |= !s_relf (s_lane0f(tanf4fast (spu_splats(0.5f))), 0.5463024898f, 18);
+        f |= !s_relf (s_lane0f(asinf4fast (spu_splats(0.7f))), 0.7753974966f, 8);
+        f |= !s_relf (s_lane0f(acosf4fast (spu_splats(-0.3f))), 1.8754889808f, 12);
+        f |= !s_relf (s_lane0f(atanf4fast (spu_splats(3.0f))), 1.2490457724f, 14);
+        f |= !s_relf (s_lane0f(atan2f4fast (spu_splats(-1.0f), spu_splats(-2.0f))), -2.6779450446f, 12);
+        f |= !s_relf (s_lane0f(expf4fast (spu_splats(2.0f))), 7.3890560989f, 15);
+        f |= !s_relf (s_lane0f(exp2f4fast (spu_splats(-3.5f))), 0.0883883476f, 15);
+        f |= !s_relf (s_lane0f(expm1f4fast (spu_splats(-0.4f))), -0.3296799540f, 18);
+        f |= !s_relf (s_lane0f(logf4fast (spu_splats(10.0f))), 2.3025850930f, 18);
+        f |= !s_relf (s_lane0f(log2f4fast (spu_splats(0.3f))), -1.7369655942f, 18);
+        f |= !s_relf (s_lane0f(log10f4fast (spu_splats(1234.0f))), 3.0913151597f, 18);
+        f |= !s_relf (s_lane0f(log1pf4fast (spu_splats(0.25f))), 0.2231435513f, 18);
+        f |= !s_relf (s_lane0f(powf4fast (spu_splats(3.0f), spu_splats(2.5f))), 15.5884572681f, 14);
+        f |= !s_relf (s_lane0f(sqrtf4fast (spu_splats(2.0f))), 1.4142135624f, 11);
+        f |= !s_relf (s_lane0f(cbrtf4fast (spu_splats(27.0f))), 3.0f, 20);
+        if (f && !fail) fail = 2;
+    }
 
     /* ========== (B) d2 comparison family ========== */
 

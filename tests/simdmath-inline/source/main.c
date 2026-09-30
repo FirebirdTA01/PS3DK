@@ -55,6 +55,43 @@ static vector float splat (float x)
     return (vector float){ x, x, x, x };
 }
 
+/* a within 2^-bits of b, relative */
+static int rel (float a, float b, int bits)
+{
+    float d = a - b;
+    if (d < 0) d = -d;
+    float m = b < 0 ? -b : b;
+    return d <= m * (1.0f / (float)(1u << bits));
+}
+
+/* the f4fast forms to their documented accuracy; the exp and log forms
+ * are the VMX estimates, architected to 1 part in 16 */
+static int ppu_fast (void)
+{
+    int f = 0;
+    vector float s, c;
+    f |= !rel (lane0 (sinf4fast (splat (1.0f))), 0.8414709848f, 18);
+    f |= !rel (lane0 (cosf4fast (splat (1.0f))), 0.5403023059f, 18);
+    sincosf4fast (splat (0.5f), &s, &c);
+    f |= !rel (lane0 (s), 0.4794255386f, 18);
+    f |= !rel (lane0 (c), 0.8775825619f, 18);
+    f |= !rel (lane0 (tanf4fast (splat (0.5f))), 0.5463024898f, 18);
+    f |= !rel (lane0 (asinf4fast (splat (0.7f))), 0.7753974966f, 8);
+    f |= !rel (lane0 (acosf4fast (splat (-0.3f))), 1.8754889808f, 12);
+    f |= !rel (lane0 (atanf4fast (splat (3.0f))), 1.2490457724f, 14);
+    f |= !rel (lane0 (atan2f4fast (splat (-1.0f), splat (-2.0f))), -2.6779450446f, 12);
+    f |= !rel (lane0 (expm1f4fast (splat (-0.4f))), -0.3296799540f, 18);
+    f |= !rel (lane0 (log1pf4fast (splat (0.25f))), 0.2231435513f, 18);
+    f |= !rel (lane0 (expf4fast (splat (2.0f))), 7.3890560989f, 4);
+    f |= !rel (lane0 (exp2f4fast (splat (-3.5f))), 0.0883883476f, 4);
+    f |= !rel (lane0 (logf4fast (splat (10.0f))), 2.3025850930f, 4);
+    f |= !rel (lane0 (log2f4fast (splat (0.3f))), -1.7369655942f, 4);
+    f |= !rel (lane0 (log10f4fast (splat (1234.0f))), 3.0913151597f, 4);
+    f |= !rel (lane0 (sqrtf4fast (splat (2.0f))), 1.4142135624f, 11);
+    f |= !rel (lane0 (cbrtf4fast (splat (27.0f))), 3.0f, 20);
+    return f;
+}
+
 static int ppu_values (void)
 {
     int bad = 0;
@@ -68,6 +105,7 @@ static int ppu_values (void)
     if (q - 1.0f / 3.0f > (1.0f / 3.0f) / 1024.0f || 1.0f / 3.0f - q > (1.0f / 3.0f) / 1024.0f) bad |= 8;
     if (lane0 (sinp (splat (0.0f))) != 0.0f) bad |= 16;
     if (lane0 (divf4 (splat (1.0f), splat (4.0f))) != 0.25f) bad |= 32;
+    if (ppu_fast ()) bad |= 64;
     return bad;
 }
 

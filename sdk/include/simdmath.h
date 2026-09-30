@@ -6,9 +6,10 @@
    link WITHOUT -lsimdmath.
 
    Mechanism:
-     1. The public prototypes in simdmath/simdmath.h are hidden
-        (__PS3DK_SIMDMATH_INLINE_NAMES); libsimdmath.a is built from the
-        same header without it, so the archive keeps its external symbols.
+     1. The public prototypes in simdmath/simdmath.h exist only for the
+        libsimdmath.a build (__PS3DK_SIMDMATH_BUILD), so the archive keeps
+        its external symbols; user code that includes simdmath/simdmath.h
+        directly gets this header from it.
      2. For each function this arch has, include its inline header
         (simdmath/_name.h), which defines a static inline _name.
      3. Define the public name as a static inline function calling _name
@@ -553,38 +554,88 @@ using ::truncd2;
 /* ---- END generated public names ---- */
 
 /* ---- fast forms ----
- * divf4fast, recipf4fast and rsqrtf4fast use the hardware estimates
- * (about 12 bits: the PPU vrefp / vrsqrtefp, the SPU frest / frsqest with
- * their interpolation).  The other f4fast forms use the accurate inline:
- * they are at least as accurate as the fast versions, but not faster. */
+ * divf4fast, recipf4fast and rsqrtf4fast are the hardware estimates (about
+ * 12 bits: the PPU vrefp / vrsqrtefp, the SPU frest / frsqest with their
+ * interpolation).  cbrtf4fast is cbrtf4.  The others are in
+ * simdmath/fastf4.h, over the vector layer defined here; see there for each
+ * form's accuracy and domain. */
 #ifdef __SPU__
 static inline vector float recipf4fast(vector float x) { return spu_re(x); }
 static inline vector float rsqrtf4fast(vector float x) { return spu_rsqrte(x); }
 static inline vector float divf4fast(vector float n, vector float d) { return spu_mul(n, spu_re(d)); }
+
+typedef vector float __fm_vf;
+typedef vector unsigned int __fm_vu;
+typedef vector signed int __fm_vi;
+static inline __fm_vf __fm_splat(float f) { return spu_splats(f); }
+static inline __fm_vi __fm_isplat(int n) { return spu_splats(n); }
+static inline __fm_vf __fm_madd(__fm_vf a, __fm_vf b, __fm_vf c) { return spu_madd(a, b, c); }
+static inline __fm_vf __fm_nmsub(__fm_vf a, __fm_vf b, __fm_vf c) { return spu_nmsub(a, b, c); }
+static inline __fm_vf __fm_mul(__fm_vf a, __fm_vf b) { return spu_mul(a, b); }
+static inline __fm_vf __fm_add(__fm_vf a, __fm_vf b) { return spu_add(a, b); }
+static inline __fm_vf __fm_sub(__fm_vf a, __fm_vf b) { return spu_sub(a, b); }
+static inline __fm_vf __fm_sel(__fm_vf a, __fm_vf b, __fm_vu m) { return spu_sel(a, b, m); }
+static inline __fm_vu __fm_cmpgt(__fm_vf a, __fm_vf b) { return spu_cmpgt(a, b); }
+static inline __fm_vu __fm_cmpeq(__fm_vf a, __fm_vf b) { return spu_cmpeq(a, b); }
+static inline __fm_vf __fm_re(__fm_vf x) { return spu_re(x); }
+static inline __fm_vf __fm_rsqrte(__fm_vf x) { return spu_rsqrte(x); }
+static inline __fm_vi __fm_cts(__fm_vf x) { return spu_convts(x, 0); }
+static inline __fm_vf __fm_ctf(__fm_vi i) { return spu_convtf(i, 0); }
+static inline __fm_vi __fm_iadd(__fm_vi a, __fm_vi b) { return spu_add(a, b); }
+static inline __fm_vi __fm_isub(__fm_vi a, __fm_vi b) { return spu_sub(a, b); }
+static inline __fm_vi __fm_sl(__fm_vi a, int n) { return spu_sl(a, (unsigned int)n); }
+static inline __fm_vu __fm_sr(__fm_vu a, int n) { return spu_rlmask(a, -n); }
 #else
 static inline vector float recipf4fast(vector float x) { return vec_re(x); }
 static inline vector float rsqrtf4fast(vector float x) { return vec_rsqrte(x); }
 static inline vector float divf4fast(vector float n, vector float d)
 { return vec_madd(n, vec_re(d), __vec_splatsf4(-0.0f)); }
+
+typedef vector float __fm_vf;
+typedef vector unsigned int __fm_vu;
+typedef vector signed int __fm_vi;
+#define __FM_VEC_ESTIMATES 1
+static inline __fm_vf __fm_splat(float f) { return (__fm_vf){ f, f, f, f }; }
+static inline __fm_vi __fm_isplat(int n) { return (__fm_vi){ n, n, n, n }; }
+static inline __fm_vf __fm_madd(__fm_vf a, __fm_vf b, __fm_vf c) { return vec_madd(a, b, c); }
+static inline __fm_vf __fm_nmsub(__fm_vf a, __fm_vf b, __fm_vf c) { return vec_nmsub(a, b, c); }
+static inline __fm_vf __fm_mul(__fm_vf a, __fm_vf b) { return vec_madd(a, b, __fm_splat(-0.0f)); }
+static inline __fm_vf __fm_add(__fm_vf a, __fm_vf b) { return vec_add(a, b); }
+static inline __fm_vf __fm_sub(__fm_vf a, __fm_vf b) { return vec_sub(a, b); }
+static inline __fm_vf __fm_sel(__fm_vf a, __fm_vf b, __fm_vu m) { return vec_sel(a, b, m); }
+static inline __fm_vu __fm_cmpgt(__fm_vf a, __fm_vf b) { return (__fm_vu)vec_cmpgt(a, b); }
+static inline __fm_vu __fm_cmpeq(__fm_vf a, __fm_vf b) { return (__fm_vu)vec_cmpeq(a, b); }
+static inline __fm_vf __fm_re(__fm_vf x) { return vec_re(x); }
+static inline __fm_vf __fm_rsqrte(__fm_vf x) { return vec_rsqrte(x); }
+static inline __fm_vi __fm_cts(__fm_vf x) { return vec_cts(x, 0); }
+static inline __fm_vf __fm_ctf(__fm_vi i) { return vec_ctf(i, 0); }
+static inline __fm_vi __fm_iadd(__fm_vi a, __fm_vi b) { return vec_add(a, b); }
+static inline __fm_vi __fm_isub(__fm_vi a, __fm_vi b) { return vec_sub(a, b); }
+static inline __fm_vi __fm_sl(__fm_vi a, int n) { return vec_sl(a, (__fm_vu){ (unsigned)n, (unsigned)n, (unsigned)n, (unsigned)n }); }
+static inline __fm_vu __fm_sr(__fm_vu a, int n) { return vec_sr(a, (__fm_vu){ (unsigned)n, (unsigned)n, (unsigned)n, (unsigned)n }); }
+static inline __fm_vf __fm_expte(__fm_vf x) { return vec_expte(x); }
+static inline __fm_vf __fm_loge(__fm_vf x) { return vec_loge(x); }
 #endif
-static inline vector float acosf4fast(vector float x) { return _acosf4(x); }
-static inline vector float asinf4fast(vector float x) { return _asinf4(x); }
-static inline vector float atan2f4fast(vector float y, vector float x) { return _atan2f4(y, x); }
-static inline vector float atanf4fast(vector float x) { return _atanf4(x); }
+#include <simdmath/fastf4.h>
+
+static inline vector float acosf4fast(vector float x) { return __fm_acosf4fast(x); }
+static inline vector float asinf4fast(vector float x) { return __fm_asinf4fast(x); }
+static inline vector float atan2f4fast(vector float y, vector float x) { return __fm_atan2f4fast(y, x); }
+static inline vector float atanf4fast(vector float x) { return __fm_atanf4fast(x); }
 static inline vector float cbrtf4fast(vector float x) { return _cbrtf4(x); }
-static inline vector float cosf4fast(vector float x) { return _cosf4(x); }
-static inline vector float exp2f4fast(vector float x) { return _exp2f4(x); }
-static inline vector float expf4fast(vector float x) { return _expf4(x); }
-static inline vector float expm1f4fast(vector float x) { return _expm1f4(x); }
-static inline vector float log10f4fast(vector float x) { return _log10f4(x); }
-static inline vector float log1pf4fast(vector float x) { return _log1pf4(x); }
-static inline vector float log2f4fast(vector float x) { return _log2f4(x); }
-static inline vector float logf4fast(vector float x) { return _logf4(x); }
-static inline vector float powf4fast(vector float x, vector float y) { return _powf4(x, y); }
-static inline void sincosf4fast(vector float x, vector float *s, vector float *c) { _sincosf4(x, s, c); }
-static inline vector float sinf4fast(vector float x) { return _sinf4(x); }
-static inline vector float sqrtf4fast(vector float x) { return _sqrtf4(x); }
-static inline vector float tanf4fast(vector float x) { return _tanf4(x); }
+static inline vector float cosf4fast(vector float x) { return __fm_cosf4fast(x); }
+static inline vector float exp2f4fast(vector float x) { return __fm_exp2f4fast(x); }
+static inline vector float expf4fast(vector float x) { return __fm_expf4fast(x); }
+static inline vector float expm1f4fast(vector float x) { return __fm_expm1f4fast(x); }
+static inline vector float log10f4fast(vector float x) { return __fm_log10f4fast(x); }
+static inline vector float log1pf4fast(vector float x) { return __fm_log1pf4fast(x); }
+static inline vector float log2f4fast(vector float x) { return __fm_log2f4fast(x); }
+static inline vector float logf4fast(vector float x) { return __fm_logf4fast(x); }
+static inline vector float powf4fast(vector float x, vector float y) { return __fm_powf4fast(x, y); }
+static inline void sincosf4fast(vector float x, vector float *s, vector float *c) { __fm_sincosf4fast(x, s, c); }
+static inline vector float sinf4fast(vector float x) { return __fm_sinf4fast(x); }
+static inline vector float sqrtf4fast(vector float x) { return __fm_sqrtf4fast(x); }
+static inline vector float tanf4fast(vector float x) { return __fm_tanf4fast(x); }
 #ifdef __cplusplus
 namespace std {
 using ::recipf4fast; using ::rsqrtf4fast; using ::divf4fast; using ::acosf4fast; using ::asinf4fast;

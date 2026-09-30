@@ -60,10 +60,16 @@ The version stamped into builds is generated from the most recent
   group; buffers in local memory or in main memory by DMA.  Sample
   `samples/spu/hello-daisy`.
 
-### Known limitations
+### Changed
 
-- Overlays work in SPU threads and SPURS tasks; SPURS jobs cannot use
-  them yet (the job linker script fixes the job's segments).
+- The simdmath `*f4fast` forms (`sinf4fast`, `cosf4fast`, `sincosf4fast`,
+  `tanf4fast`, `asinf4fast`, `acosf4fast`, `atanf4fast`, `atan2f4fast`,
+  `expf4fast`, `exp2f4fast`, `expm1f4fast`, `logf4fast`, `log2f4fast`,
+  `log10f4fast`, `log1pf4fast`, `powf4fast`, `sqrtf4fast`) are their own
+  reduced-accuracy implementations instead of the accurate ones: shorter
+  polynomials over each form's documented domain, and on the PPU the VMX
+  exp / log estimates.  Accuracy and domain per form are listed in
+  `<simdmath/fastf4.h>`.
 
 ### Fixed
 
@@ -73,6 +79,15 @@ The version stamped into builds is generated from the most recent
 - `stat` and `fstat` fail with `EOVERFLOW` for a file larger than `off_t`
   can represent (above 2 GiB in the default PPU ABI) instead of reporting a
   truncated, possibly negative size.
+- Including `<simdmath/simdmath.h>` and `<simdmath.h>` in one unit (directly,
+  or through the vectormath headers) no longer fails with "declared extern
+  and later static": the library header brings in the inline definitions
+  instead of declaring its own prototypes.
+
+### Known limitations
+
+- Overlays work in SPU threads and SPURS tasks; SPURS jobs cannot use
+  them yet (the job linker script fixes the job's segments).
 
 ## [v0.18.0] — 2026-09-30
 
