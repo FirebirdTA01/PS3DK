@@ -38,14 +38,14 @@ The version stamped into builds is generated from the most recent
   `cellGcmSetVertexTexture`, `cellGcmReserveMethodSize`,
   `cellGcmGetLastSecondVTime`, `CellGcmDisplayInfo`, further gcm enum
   values and the performance-monitor counter selectors.
-- Constants under their standard names: keyboard key codes, modifier,
+- Constants: keyboard key codes, modifier,
   LED and mapping values (`<cell/keyboard/kb_codes.h>`), mouse info,
   tablet and button values (`<cell/mouse/mouse_codes.h>`,
   `cellMouseInfoTabletMode`), pad peripheral classes and BD remote codes,
   l10n code pages, socket error codes (`SYS_NET_ERROR_*`, `SYS_NET_E*`),
   SSL certificate selectors, process parameter limits and section
   attributes.
-- `sys_process_getpid` and the other process calls under their standard
+- `sys_process_getpid` and the other process calls under their canonical
   names; `CellSailFuture`; `struct sockaddr_in_p2p`.
 - `spu-elf-to-ppu-obj wrap --format binary` embeds job-queue jobs with
   startup code (e_flags 2) with their SPURS JOB INFO trailer; they were
