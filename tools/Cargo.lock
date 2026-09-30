@@ -20,7 +20,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
 name = "abi-verify"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "ar",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "coverage-report"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "ar",
@@ -1547,7 +1547,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "make-sdata"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "thiserror 1.0.69",
 ]
@@ -1638,7 +1638,7 @@ dependencies = [
 
 [[package]]
 name = "nidgen"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "ar",
@@ -2007,7 +2007,7 @@ dependencies = [
 
 [[package]]
 name = "ovis"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "object",
 ]
@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "prx-gen"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2447,7 +2447,7 @@ dependencies = [
 
 [[package]]
 name = "sfo"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2603,7 +2603,7 @@ dependencies = [
 
 [[package]]
 name = "spu-elf-to-ppu-obj"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "clap",

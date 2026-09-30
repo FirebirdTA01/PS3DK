@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.19.0] — 2026-09-30
+
 ### Added
 
 - **SPU code overlays (libovis).**  Overlay sections share a local-store
