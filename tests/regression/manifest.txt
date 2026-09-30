@@ -106,3 +106,6 @@ sheap-p3-contention,tests/regression/spu-sheap/sheap-p3-contention.fake.self,180
 sheap-allocate,tests/regression/spu-sheap/sheap-allocate.fake.self,60,RAN-CLEAN,512 th PRIME NUMBER is 3671,FAILED|SHEAP_ALLOCATE_HLE
 sheap-key-buffer,tests/regression/spu-sheap/sheap-key-buffer.fake.self,60,RAN-CLEAN,"3613, 3617, 3623, 3631, 3637, 3643, 3659, 3671, ",FAILED|SHEAP_KEY_BUFFER_HLE
 sheap-key-mutex,tests/regression/spu-sheap/sheap-key-mutex.fake.self,120,RAN-CLEAN,ans => 4000,FAILED|SHEAP_KEY_MUTEX_HLE
+# gcm-method-words checks the command words of the gcm texture-state and
+# reserve functions against values computed from the method layouts.
+gcm-method-words,tests/regression/gcm-method-words/gcm-method-words.fake.self,20,RAN-CLEAN,GCM_WORDS_OK,GCM_WORDS_FAIL
