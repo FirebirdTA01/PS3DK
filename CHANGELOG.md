@@ -16,6 +16,24 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **SPU code overlays (libovis).**  Overlay sections share a local-store
+  range and are loaded on demand from an overlay table in main memory:
+  `<cell/ovis.h>` on the PPU (build the table, drop the overlay segments
+  from an SPU image) and on the SPU (map sections by hand with the mapper
+  macros, or automatically on each call).  Host tools `cellOvisMkLdscript`
+  and `cellOvisConfigAuto`; `ps3_add_spu_image(... OVIS_CONFIG <xml>)` or
+  `(... OVIS_AUTO <sources>)`.  Sample `samples/spu/hello-ovis`.
+- `<cell/error.h>`: the error flag, facility codes and
+  `CELL_ERROR_MAKE_ERROR`.
+
+### Fixed
+
+- `sys_spu_elf_get_information` and `sys_spu_elf_get_segments` are the
+  system library functions again; the header had replaced them with inline
+  versions that returned no segments.
+
 ## [v0.18.0] — 2026-09-30
 
 ### Added
