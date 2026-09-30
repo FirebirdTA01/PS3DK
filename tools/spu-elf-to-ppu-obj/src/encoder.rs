@@ -65,6 +65,14 @@ pub fn encode_spu_elf(
         EmbedFormat::Binary => {
             validate_binary_input(&spu.report)?;
             let mut image = binary_image(&spu.ls_image, &spu.report.program_headers);
+            if spu.report.e_flags == 2 {
+                // a job with its startup code carries the SPURS JOB INFO
+                // trailer after its image
+                if binary_base(&spu.report.program_headers) != 0 {
+                    bail!("an e_flags=2 job image must be linked from LS 0");
+                }
+                append_job_info(&mut image, &spu.report.program_headers, &spu.addr32_relocs);
+            }
             let base = binary_base(&spu.report.program_headers);
             let relocs = image_relocs(&spu.ppu_relocs, &mut image, |vaddr| {
                 vaddr.checked_sub(base).map(u64::from)
@@ -287,10 +295,53 @@ fn validate_jobbin2_input(report: &crate::spu_elf::SpuElfReport) -> Result<()> {
 
 fn validate_binary_input(report: &crate::spu_elf::SpuElfReport) -> Result<()> {
     validate_loadable_input(report)?;
-    if report.e_flags == 2 {
-        bail!("spu-elf-to-ppu-obj wrap --format=binary on an e_flags=2 (SPURS with-CRT job) SPU image is not yet supported; the e_flags=2 binary embed requires SPURS JOB INFO metadata that is not yet specified. Use --format=jobbin2 for JQ workloads, or wait for SPURS binary metadata support.");
-    }
     Ok(())
+}
+
+/// The SPURS JOB INFO trailer an e_flags=2 job carries in its binary form,
+/// 16 bytes after the end of its image (bss included):
+///
+///   "%SPURS JOB INFO%"
+///   (vaddr, filesz) of each writable segment, then (-1, -1)
+///   (addr, len) of the absolute 32-bit words to relocate by the load
+///     address, adjacent words merged up to 8 bytes, then (-1, -1)
+///
+/// all big-endian words; the whole image is padded to 128 bytes.
+fn append_job_info(
+    image: &mut Vec<u8>,
+    program_headers: &[crate::spu_elf::ProgramHeaderReport],
+    addr32_relocs: &[u32],
+) {
+    let end = (image.len() + 15) & !15;
+    image.resize(end + 16, 0);
+    image.extend_from_slice(b"%SPURS JOB INFO%");
+    let put = |a: u32, b: u32, image: &mut Vec<u8>| {
+        image.extend_from_slice(&a.to_be_bytes());
+        image.extend_from_slice(&b.to_be_bytes());
+    };
+    for ph in program_headers.iter().filter(|ph| ph.p_type == 1 && ph.p_flags & 2 != 0 && ph.p_filesz > 0) {
+        put(ph.p_vaddr, ph.p_filesz, image);
+    }
+    put(u32::MAX, u32::MAX, image);
+    for (addr, len) in merge_words(addr32_relocs) {
+        put(addr, len, image);
+    }
+    put(u32::MAX, u32::MAX, image);
+    let padded = (image.len() + 127) & !127;
+    image.resize(padded, 0);
+}
+
+/// Runs of 4-byte words at consecutive addresses, cut into pieces of at
+/// most 8 bytes.
+fn merge_words(words: &[u32]) -> Vec<(u32, u32)> {
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for &w in words {
+        match out.last_mut() {
+            Some((start, len)) if *start + *len == w && *len < 8 => *len += 4,
+            _ => out.push((w, 4)),
+        }
+    }
+    out
 }
 
 fn output_base(output: &Path) -> PathBuf {
@@ -303,8 +354,38 @@ fn output_base(output: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{binary_image, elf_file_offset, image_relocs};
+    use super::{append_job_info, binary_image, elf_file_offset, image_relocs, merge_words};
     use crate::spu_elf::{PpuReloc, ProgramHeaderReport};
+
+    #[test]
+    fn adjacent_relocated_words_merge_up_to_eight_bytes() {
+        assert_eq!(merge_words(&[0x3c, 0x40]), vec![(0x3c, 8)]);
+        assert_eq!(merge_words(&[0x700, 0x704, 0x708, 0x710]), vec![(0x700, 8), (0x708, 4), (0x710, 4)]);
+        assert_eq!(merge_words(&[0x1900, 0x1910]), vec![(0x1900, 4), (0x1910, 4)]);
+        assert_eq!(merge_words(&[]), vec![]);
+    }
+
+    #[test]
+    fn job_info_trailer_matches_the_measured_layout() {
+        // a job: text 0..0x5b0, data 0x600 (0x20 in the file, bss to 0x790),
+        // absolute words at 0x3c, 0x40 (crt header) and 0x610
+        let mut rx = load(0, 0x5b0);
+        rx.p_flags = 5;
+        let mut rw = load(0x600, 0x190);
+        rw.p_filesz = 0x20;
+        rw.p_flags = 6;
+        let mut image = vec![0u8; 0x790];
+        append_job_info(&mut image, &[rx, rw], &[0x3c, 0x40, 0x610]);
+        assert_eq!(image.len(), 0x800);
+        assert_eq!(&image[0x790..0x7a0], &[0u8; 16]);
+        assert_eq!(&image[0x7a0..0x7b0], b"%SPURS JOB INFO%");
+        let words: Vec<u32> = image[0x7b0..0x7d8]
+            .chunks(4)
+            .map(|w| u32::from_be_bytes([w[0], w[1], w[2], w[3]]))
+            .collect();
+        assert_eq!(words, vec![0x600, 0x20, !0, !0, 0x3c, 8, 0x610, 4, !0, !0]);
+        assert!(image[0x7d8..].iter().all(|b| *b == 0));
+    }
 
     fn load(vaddr: u32, memsz: u32) -> ProgramHeaderReport {
         ProgramHeaderReport {

@@ -47,6 +47,9 @@ The version stamped into builds is generated from the most recent
   attributes.
 - `sys_process_getpid` and the other process calls under their standard
   names; `CellSailFuture`; `struct sockaddr_in_p2p`.
+- `spu-elf-to-ppu-obj wrap --format binary` embeds job-queue jobs with
+  startup code (e_flags 2) with their SPURS JOB INFO trailer; they were
+  refused before.
 
 ### Known limitations
 
