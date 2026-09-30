@@ -20,9 +20,11 @@ The version stamped into builds is generated from the most recent
 
 - **SPU code overlays (libovis).**  Overlay sections share a local-store
   range and are loaded on demand from an overlay table in main memory:
-  `<cell/ovis.h>` on the PPU (build the table, drop the overlay segments
-  from an SPU image) and on the SPU (map sections by hand with the mapper
-  macros, or automatically on each call).  Host tools `cellOvisMkLdscript`
+  `<cell/ovis.h>` on the PPU (`cellOvisGetOverlayTableSize` and
+  `cellOvisInitializeOverlayTable` build the table; drop the overlay
+  segments from an SPU image) and on the SPU (map sections by hand with
+  `<cell/ovis/mapper.h>`, or automatically on each call with
+  `<cell/ovis/auto.h>`).  Host tools `cellOvisMkLdscript`
   and `cellOvisConfigAuto`; `ps3_add_spu_image(... OVIS_CONFIG <xml>)` or
   `(... OVIS_AUTO <sources>)`.  Sample `samples/spu/hello-ovis`.
 - `<cell/error.h>`: the error flag, facility codes and
