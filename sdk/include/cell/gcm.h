@@ -839,6 +839,8 @@ namespace cell { namespace Gcm {
     using ::cellGcmSetLogicOpEnable;
     using ::cellGcmSetNopCommand;
     using ::cellGcmSetPolySmoothEnable;
+    using ::cellGcmSetLineSmoothEnable;
+    using ::cellGcmSetDrawInlineArray;
     using ::cellGcmSetPolygonOffset;
     using ::cellGcmSetPolygonOffsetFillEnable;
     using ::cellGcmSetPrepareFlip;

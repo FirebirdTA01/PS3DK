@@ -653,6 +653,19 @@ static inline void cellGcmSetPolySmoothEnable(CellGcmContextData *thisContext, u
 	rsxSetPolygonSmoothEnable(thisContext, enable);
 }
 
+static inline void cellGcmSetLineSmoothEnable(CellGcmContextData *thisContext, uint32_t enable)
+{
+	rsxSetLineSmoothEnable(thisContext, enable);
+}
+
+/* Draw `count` 32-bit words of vertex data taken from `data` (the vertex
+ * layout set by cellGcmSetVertexDataArray) as primitive `mode`. */
+static inline void cellGcmSetDrawInlineArray(CellGcmContextData *thisContext, uint8_t mode,
+                                             uint32_t count, const void *data)
+{
+	rsxDrawInlineVertexArray(thisContext, mode, count, data);
+}
+
 /* ==========================================================
  * Frequency-divider operation — controls per-attribute frequency
  * divisor mode.  Used by GPU skinning paths to bind joint-matrix

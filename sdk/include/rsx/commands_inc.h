@@ -216,6 +216,7 @@ void RSX_FUNC(SetZCullControl)(gcmContextData *context,u8 zculldir,u8 zcullforma
 void RSX_FUNC(SetZCullStatsEnable)(gcmContextData *context,u32 enable);
 void RSX_FUNC(SetZCullInvalidate)(gcmContextData *context);
 void RSX_FUNC(SetPolygonSmoothEnable)(gcmContextData *context,u32 enable);
+void RSX_FUNC(SetLineSmoothEnable)(gcmContextData *context,u32 enable);
 void RSX_FUNC(SetDitherEnable)(gcmContextData *context,u32 enable);
 
 /*! \brief Setup the render surface.
@@ -375,6 +376,8 @@ void RSX_FUNC(SetFragmentProgramParameter)(gcmContextData *context,const rsxFrag
 void RSX_FUNC(DrawVertexArray)(gcmContextData *context,u32 type,u32 start,u32 count);
 void RSX_FUNC(BindVertexArrayAttrib)(gcmContextData *context,u8 attr,u16 frequency,u32 offset,u8 stride,u8 elems,u8 dtype,u8 location);
 void RSX_FUNC(DrawIndexArray)(gcmContextData *context,u8 type,u32 offset,u32 count,u8 data_type,u8 location);
+/* count 32-bit words of vertex data, drawn as primitive `type` */
+void RSX_FUNC(DrawInlineVertexArray)(gcmContextData *context,u8 type,u32 count,const void *data);
 void RSX_FUNC(DrawInlineIndexArray16)(gcmContextData *context,u8 type,u32 start,u32 count,const u16 *data);
 void RSX_FUNC(DrawInlineIndexArray32)(gcmContextData *context,u8 type,u32 start,u32 count,const u32 *data);
 void RSX_FUNC(InlineTransfer)(gcmContextData *context,u32 dstOffset,const void *srcAddress,u32 sizeInWords,u8 location);
