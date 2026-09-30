@@ -16,19 +16,66 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-### Fixed
+## [v0.18.0] — 2026-09-30
 
-- librt: `pthread_mutex_trylock` on a held mutex returns POSIX `EBUSY` (16)
-  again.  v0.17.0 returned the Lv-2 code `0x8001000A`, because
-  `<sys/mutex.h>` now reaches `<sys/synchronization.h>`, which redefines
-  `EBUSY`.
 ### Added
 
-- `make_sdata` host tool: creates developer SDATA files for
-  `cellFsSdataOpen` (current and both older layouts, 1 to 32 KB blocks, the
-  compressed layout with stored blocks), prints their header (`-i`) and
-  extracts them (`-x`).  CMake helper `ps3_make_sdata()`; sample
-  `samples/lv2/hello-sdata`.
+- **SPU libsync2.**  Mutex, semaphore, condition variable and queue for SPU
+  code, working with the system libsync2 module, with thread types and
+  notifiers for SPURS tasks, SPURS jobs, job queue jobs and PPU threads and
+  fibers.  Headers under `cell/sync2/` for PPU and SPU; the PPU module
+  variables work through their import slots.  Sample
+  `samples/spurs/sync2-objects`.
+- **Fibers.**  PPU fibers run on threads other than the one that
+  initialized them; `cell::Fiber::Ppu::Util::Runtime`; SPU code signals PPU
+  fibers (`cellFiberPpuSendSignal`, the fiber utility worker control).
+- **SPU code can name PPU symbols** (`CELL_SPURS_PPU_SYM`): embed the image
+  with `ps3_add_spu_image(... PPU_OBJECT)` and the PPU link fills in the
+  addresses.  The raw-byte embed paths refuse such an image.
+- **SPU C++:** parenthesised vector literals and scalar splats
+  (`(vector unsigned int)(1, 2, 3, 4)`, `(vector float)(x)`).
+- **SPURS tasks run C++ static constructors** before their main.
+- **simdmath:** `<simdmath.h>` defines every function as a static inline
+  (PPU and SPU), so calls, function addresses and `std::` names need no
+  `-lsimdmath`; PPU `remainderf4`; `divf4fast`, `recipf4fast` and
+  `rsqrtf4fast` use the hardware estimates.  The SDK builds `libsimdmath`
+  itself.
+- **`make_sdata`** host tool and `ps3_make_sdata()`: developer SDATA files
+  for `cellFsSdataOpen`.  Sample `samples/lv2/hello-sdata`.
+- **Raw SPUs:** `<sys/raw_spu.h>` with the `sys_raw_spu_*` calls, the local
+  store and problem-state addresses, register offsets (`SPU_NPC` ...) and
+  mmio accessors; `<sys/fixed_addr.h>`.  Sample `samples/lv2/hello-raw-spu`.
+- gcm: every gcm function is also callable as `cell::Gcm::cellGcm...`;
+  `cellGcmSetLineSmoothEnable`, `cellGcmSetDrawInlineArray`,
+  `cell::Gcm::CellGcmContext`.
+- `cellDbgFontConsolePuts`; `off64_t`; `CELL_KB_*` and `CELL_MOUSE_*`
+  return codes; `M_PI` in strict language modes; the SPU `<stdlib.h>`
+  brings in the SPU intrinsics and vector types; `<sys/dbg.h>` brings in
+  `SYS_PROCESS_PARAM`.
+- The rest of the `sys_spu_thread` and `sys_spu_thread_group` system calls.
+
+### Fixed
+
+- `pthread_mutex_trylock` on a held mutex returns POSIX `EBUSY` again
+  (v0.17.0 returned `0x8001000A`).
+- SPURS job chain jobs are linked where the job manager runs them (LS
+  0x4c00), so addresses stored in job data (pointers, function tables,
+  vtables) are right; `spu-elf-to-ppu-obj --format jobbin2` wraps them.
+- SPURS tasks define `__dso_handle`, so C++ tasks with static objects link.
+- libPSGL carries the Cg binary reader: PSGL programs link with `-lPSGL`
+  alone.
+- The sync2 object headers include `thread.h` and `error.h`.
+- `SYS_EVENT_QUEUE_LOCAL` is the private IPC key 0.
+- SPU `intptr_t` / `uintptr_t` are `int` / `unsigned int`.
+
+### Changed
+
+- The SPU `libfiber.a` and `libsync2.a` are required release artifacts.
+
+### Known limitations
+
+- POSIX file sizes are 32-bit in the default PPU ABI; see
+  `docs/abi/large-file-off-t.md`.
 
 ## [v0.17.0] — 2026-09-28
 
