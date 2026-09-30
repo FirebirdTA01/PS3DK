@@ -9,6 +9,11 @@
 #include <cell/daisy/local_buffer.h>
 #include <cell/daisy/qctl.h>
 #include <cell/daisy/lqctl.h>
+#include <cell/daisy/lfqueue2_types.h>
+#include <cell/daisy/ato_qctl.h>
+#ifdef __SPU__
+#include <cell/daisy/remote_buffer.h>
+#endif
 #include <cell/daisy/pipe.h>
 
 #endif /* PS3TC_CELL_DAISY_H */

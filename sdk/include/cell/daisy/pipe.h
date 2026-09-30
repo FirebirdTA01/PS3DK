@@ -83,8 +83,10 @@ protected:
 		if (mCount == 0)
 			return CELL_DAISY_ERROR_NO_BEGIN;
 		PointerType p = pendingOldest();
-		if (!wait && !mQueueControl.isTurn(p))
+		if (!wait && !(mBuffer.transferDone(p) && mQueueControl.isTurn(p)))
 			return QUEUE_IS_BUSY;
+		/* the entry's transfer lands before the entry is handed over */
+		mBuffer.waitTransfer(p);
 		mQueueControl.complete(p);
 		pendingDropOldest();
 		return CELL_OK;

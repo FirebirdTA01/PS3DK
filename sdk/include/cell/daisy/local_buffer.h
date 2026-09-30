@@ -40,6 +40,9 @@ public:
 	{
 		memcpy((void *)data, (const void *)getEntryReference(pointer), sizeof(tType));
 	}
+	/* nothing is in flight: copies finish in copyIn / copyOut */
+	bool transferDone(PointerType) { return true; }
+	void waitTransfer(PointerType) {}
 	const char *getClassName() { return "Buffer::Local"; }
 
 private:

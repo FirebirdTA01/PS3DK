@@ -485,7 +485,9 @@ HEADERS := \
     include/cell/daisy/local_buffer.h \
     include/cell/daisy/qctl.h \
     include/cell/daisy/lqctl.h \
-    include/cell/daisy/pipe.h
+    include/cell/daisy/pipe.h \
+    include/cell/daisy/lfqueue2_types.h \
+    include/cell/daisy/ato_qctl.h
 
 SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath
 
@@ -495,6 +497,9 @@ SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job 
 # both $(PS3DK)/ppu/include/ (via HEADERS) and $(PS3DK)/spu/include/
 # (via this list).
 SHARED_SPURS_SPU_HEADERS := \
+    include/cell/daisy/lfqueue2_types.h \
+    include/cell/daisy/ato_qctl.h \
+    include/cell/daisy/remote_buffer.h \
     include/cell/daisy.h \
     include/cell/daisy/daisy_defs.h \
     include/cell/daisy/return_code.h \
