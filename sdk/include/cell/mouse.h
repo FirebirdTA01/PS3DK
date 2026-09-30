@@ -11,6 +11,7 @@
 #define PS3TC_CELL_MOUSE_H
 #include <cell/error.h>   /* CELL_OK */
 #include <cell/mouse/error.h>
+#include <cell/mouse/mouse_codes.h>
 
 #include <stdint.h>
 #include <io/mouse.h>

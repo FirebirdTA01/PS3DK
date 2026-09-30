@@ -221,4 +221,46 @@ static inline __attribute__((noreturn)) void sys_process_exit(int status)
 }
 #endif
 
+/* Process parameter limits and versions, and other process constants. */
+#define SYS_PROCESS_PARAM_SECTION_NAME               ".sys_proc_param"
+#define SYS_PROCESS_PARAM_INVALID_PRIO               -32768
+#define SYS_PROCESS_PARAM_INVALID_STACK_SIZE         0xffffffffUL
+#define SYS_PROCESS_PARAM_STACK_SIZE_MIN             0x1000
+#define SYS_PROCESS_PARAM_STACK_SIZE_MAX             0x100000
+#define SYS_PROCESS_PARAM_VERSION_INVALID            0xffffffff
+#define SYS_PROCESS_PARAM_VERSION_1                  0x00000001
+#define SYS_PROCESS_PARAM_VERSION_084_0              0x00008400
+#define SYS_PROCESS_PARAM_VERSION_090_0              0x00009000
+#define SYS_PROCESS_PARAM_VERSION_330_0              0x00330000
+#define SYS_PROCESS_PARAM_MAGIC                      0x13bcc5f6
+#define SYS_PROCESS_PARAM_MALLOC_PAGE_SIZE_NONE      0x00000000
+#define SYS_PROCESS_PARAM_MALLOC_PAGE_SIZE_64K       0x00010000
+#define SYS_PROCESS_PARAM_MALLOC_PAGE_SIZE_1M        0x00100000
+#define SYS_PROCESS_PARAM_PPC_SEG_DEFAULT            0x00000000
+#define SYS_PROCESS_PARAM_PPC_SEG_OVLM               0x00000001
+#define SYS_PROCESS_PARAM_PPC_SEG_FIXEDADDR_PRX      0x00000002
+#define SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN        0xffffffff
+#define SYS_MEM_OBJECT                               (0x08UL)
+#define SYS_MUTEX_OBJECT                             (0x85UL)
+#define SYS_COND_OBJECT                              (0x86UL)
+#define SYS_RWLOCK_OBJECT                            (0x88UL)
+#define SYS_INTR_TAG_OBJECT                          (0x0AUL)
+#define SYS_INTR_SERVICE_HANDLE_OBJECT               (0x0BUL)
+#define SYS_EVENT_QUEUE_OBJECT                       (0x8DUL)
+#define SYS_EVENT_PORT_OBJECT                        (0x0EUL)
+#define SYS_TRACE_OBJECT                             (0x21UL)
+#define SYS_SPUIMAGE_OBJECT                          (0x22UL)
+#define SYS_PRX_OBJECT                               (0x23UL)
+#define SYS_SPUPORT_OBJECT                           (0x24UL)
+#define SYS_LWMUTEX_OBJECT                           (0x95UL)
+#define SYS_TIMER_OBJECT                             (0x11UL)
+#define SYS_SEMAPHORE_OBJECT                         (0x96UL)
+#define SYS_FS_FD_OBJECT                             (0x73UL)
+#define SYS_LWCOND_OBJECT                            (0x97UL)
+#define SYS_EVENT_FLAG_OBJECT                        (0x98UL)
+#define SYS_PROCESS_PARAM_SECTION                    __attribute__((aligned(8), section(SYS_PROCESS_PARAM_SECTION_NAME), unused))
+#define _PPU_PRIVATE_DATA_                           __attribute__((section (".ppu_data")))
+#define _PPU_PRIVATE_CONST_                          __attribute__((section (".ppu_rodata")))
+#define _RSX_IMAGE_                                  __attribute__((section (".rsx_image")))
+
 #endif  /* PS3TC_SYS_PROCESS_H */

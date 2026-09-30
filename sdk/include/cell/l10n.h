@@ -89,4 +89,66 @@ L10nResult  L10nConvertStr(L10nCode src_code, const void *src, size_t *src_len,
 }
 #endif
 
+/* Further reference constants: version, code-page identifiers, conversion helpers. */
+#define L10N_MAJOR_VERSION                           6
+#define L10N_MINOR_VERSION                           0
+#define L10N_PATCH_VERSION                           1
+#define L10N_VERSION_MODIFIER                        ""
+#define SS2                                          0x8e
+#define SS3                                          0x8f
+#define UTF8_MASK0                                   0xc0
+#define UTF8_MASK1                                   0x80
+#define UTF8_MASK2                                   0xe0
+#define UTF8_MASK3                                   0xf0
+#define UTF8_MASK4                                   0xf8
+#define UTF8_MASK5                                   0xfc
+#define UTF8_MASK6                                   0xfe
+#define UTF8_OCTET0                                  0x80
+#define UTF8_OCTET1                                  0x00
+#define UTF8_OCTET2                                  0xc0
+#define UTF8_OCTET3                                  0xe0
+#define UTF8_OCTET4                                  0xf0
+#define UTF8_OCTET5                                  0xf8
+#define UTF8_OCTET6                                  0xfc
+#define UTF16_SURROGATES_MASK1                       0xf800
+#define UTF16_SURROGATES_MASK2                       0xfc00
+#define UTF16_SURROGATES                             0xd800
+#define UTF16_HIGH_SURROGATES                        0xd800
+#define UTF16_LOW_SURROGATES                         0xdc00
+#define L10N_STR_UNKNOWN                             (1 << 0)
+#define L10N_STR_ASCII                               (1 << 1)
+#define L10N_STR_JIS                                 (1 << 2)
+#define L10N_STR_EUCJP                               (1 << 3)
+#define L10N_STR_SJIS                                (1 << 4)
+#define L10N_STR_UTF8                                (1 << 5)
+#define L10N_STR_ILLEGAL                             (1 << 16)
+#define L10N_STR_ERROR                               (1 << 17)
+#define L10N_EUC_KR                                  32
+#define L10N_ISO_2022_JP                             33
+#define L10N_ARIB                                    34
+#define L10N_HZ                                      35
+#define L10N_GB18030                                 36
+#define L10N_RIS_506                                 37
+#define L10N_CODEPAGE_852                            38
+#define L10N_CODEPAGE_1250                           39
+#define L10N_CODEPAGE_737                            40
+#define L10N_CODEPAGE_1253                           41
+#define L10N_CODEPAGE_857                            42
+#define L10N_CODEPAGE_1254                           43
+#define L10N_CODEPAGE_775                            44
+#define L10N_CODEPAGE_1257                           45
+#define L10N_CODEPAGE_855                            46
+#define L10N_CODEPAGE_858                            47
+#define L10N_CODEPAGE_860                            48
+#define L10N_CODEPAGE_861                            49
+#define L10N_CODEPAGE_865                            50
+#define L10N_CODEPAGE_869                            51
+#define _L10N_CODE_                                  52
+#define L10N_SHIFT_JIS                               L10N_CODEPAGE_932
+#define L10N_UHC                                     L10N_CODEPAGE_949
+#define L10N_GBK                                     L10N_CODEPAGE_936
+#define L10N_BIG5                                    L10N_CODEPAGE_950
+#define L10N_JIS                                     L10N_ISO_2022_JP
+#define L10N_MUSIC_SHIFT_JIS                         L10N_RIS_506
+
 #endif /* __PSL1GHT_CELL_L10N_H__ */
