@@ -16,6 +16,16 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **Data streams (libdaisy, `<cell/daisy.h>`).**  Producer and consumer
+  ports (`Pipe::InPort`, `Pipe::OutPort`) over a buffer and a queue
+  control: local streams within one SPU or between PPU threads, atomic
+  streams between SPUs and a PPU thread with several producers and
+  consumers, and signal-notification streams between two SPUs of a thread
+  group; buffers in local memory or in main memory by DMA.  Sample
+  `samples/spu/hello-daisy`.
+
 ## [v0.18.0] — 2026-09-30
 
 ### Added
