@@ -59,7 +59,7 @@ PPU_EXCLUDES := \
     isunorderedf4.c ldexpd2.c llabsi2.c lldivi2.c lldivu2.c llrintd2.c \
     llrintf4.c llroundd2.c llroundf4.c logbd2.c modfd2.c nearbyintd2.c \
     nearbyintf4.c negated2.c negatell2.c nextafterd2.c nextafterf4.c \
-    recipd2.c remainderd2.c remainderf4.c remquod2.c remquof4.c rintd2.c \
+    recipd2.c remainderd2.c remquod2.c remquof4.c rintd2.c \
     rintf4.c roundd2.c roundf4.c rsqrtd2.c scalbllnd2.c scalbnf4.c \
     signbitd2.c signbitf4.c sincosd2.c sind2.c sqrtd2.c tand2.c truncd2.c
 
