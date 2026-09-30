@@ -14,7 +14,7 @@ project(hello-sdata C ASM)
 
 include(ps3-self)
 
-# 40000 bytes of numbered 50-byte lines: three 16 KB blocks, the last one
+# 38400 bytes of numbered 48-byte lines: three 16 KB blocks, the last one
 # short, and no two blocks alike
 string(ASCII 10 _nl)
 set(_payload "")
