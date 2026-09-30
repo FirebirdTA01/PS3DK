@@ -13,7 +13,14 @@
  * publishes where this SPU's slots are, in a 256-byte zeroed area all the
  * SPUs share (CELL_DAISY_NBSNR_PARAM_SIZE bytes).  Pipe ids are
  * 0..MAX_PIPE-1, distinct among one SPU's receiving ends; a producer's send
- * id is its consumer's receive id and the other way round. */
+ * id is its consumer's receive id and the other way round.  A receive id
+ * already in use or out of range, or a fifth automatic one, leaves the queue
+ * invalid: its reservations fail with CELL_DAISY_ERROR_INVAL.  A receive id
+ * is free again once its queue control is destroyed.
+ *
+ * The slot update and signal for entry n use DMA tag
+ * (dmaTag + ((n % tSize) & mask)) % 32, mask from setDmaTagRangeMask()
+ * (default 0xffffffff); reads of the other end's slot use dmaTag. */
 #ifndef PS3TC_CELL_DAISY_SNR_QCTL_H
 #define PS3TC_CELL_DAISY_SNR_QCTL_H
 
@@ -100,17 +107,22 @@ public:
 	static const QueueControlType sQueueControlType = QCTL_TYPE_SIGNAL_NOTIFICATION;
 
 	explicit SignalNotification(uint64_t snrEa, uint32_t dmaTag, uint32_t sendPipeId, uint32_t receivePipeId)
+		: mValid(false), mMask(0xffffffff)
 	{
-		setup(snrEa, dmaTag, sendPipeId, receivePipeId);
+		if (sendPipeId < (uint32_t)MAX_PIPE && pipeFree(receivePipeId))
+			setup(snrEa, dmaTag, sendPipeId, receivePipeId);
 	}
 
 	/* PARAMETER: the two ends meet in the 128-byte area at parameterEa;
 	 * each writes {spu number, receive pipe id, 1} to its half (producer
 	 * first 16 bytes, consumer next 16) and reads the other's */
 	explicit SignalNotification(uint64_t parameterEa, uint32_t dmaTag, int receivePipeId = -1)
+		: mValid(false), mMask(0xffffffff)
 	{
 		SnrState &s = snrState();
 		uint32_t recv = receivePipeId >= 0 ? (uint32_t)receivePipeId : freePipe();
+		if (!pipeFree(recv))
+			return;
 		mInfo[0] = (uint32_t)s.mySpuNum;
 		mInfo[1] = recv;
 		mInfo[2] = 1;
@@ -124,14 +136,23 @@ public:
 		while (mInfo[2] == 0);
 		uint64_t peerSnr = snrLsEa((int)mInfo[0]) - SYS_SPU_THREAD_LS_BASE +
 		                   (tQueueIO == INPUT ? SYS_SPU_THREAD_SNR1 : SYS_SPU_THREAD_SNR2);
-		setup(peerSnr, dmaTag, mInfo[1], recv);
+		if (mInfo[1] < (uint32_t)MAX_PIPE)
+			setup(peerSnr, dmaTag, mInfo[1], recv);
+	}
+	~SignalNotification()
+	{
+		if (mValid)
+			snrState().usedPipes &= ~(1u << mRecvPipe);
 	}
 
-	void setDmaTagRangeMask(uint32_t mask) { (void)mask; }
+	void setDmaTagRangeMask(uint32_t mask) { mMask = mask; }
 	uint32_t getTag() const { return mTag; }
+	bool isValid() const { return mValid; }
 
 	int tryReserve(PointerType *entry)
 	{
+		if (!mValid)
+			return CELL_DAISY_ERROR_INVAL;
 		volatile uint32_t *peer = readPeer();
 		if (tQueueIO == INPUT) {
 			if (mReserved - peer[0] >= tSize)
@@ -147,28 +168,23 @@ public:
 	void complete(PointerType entry)
 	{
 		mCompleted = entry + 1;
-		publish();
-	}
-	bool release(PointerType entry)
-	{
-		if (entry + 1 != mReserved)
-			return false;
-		mReserved = entry;
-		return true;
+		publish(tagFor(entry));
 	}
 	int terminate()
 	{
-		if (!(mFlags & (SNR_FLAG_TERMINATED | SNR_FLAG_DETACHED))) {
+		if (mValid && !(mFlags & (SNR_FLAG_TERMINATED | SNR_FLAG_DETACHED))) {
 			mFlags |= tQueueIO == INPUT ? SNR_FLAG_TERMINATED : SNR_FLAG_DETACHED;
-			publish();
+			publish(mTag);
 		}
 		return CELL_OK;
 	}
-	bool hasUnfinishedConsumer() { return !(readPeer()[1] & SNR_FLAG_DETACHED); }
+	bool hasUnfinishedConsumer() { return mValid && !(readPeer()[1] & SNR_FLAG_DETACHED); }
 	bool isOutOfOrder() { return false; }
 	/* sleep until the other end signals */
 	void relax()
 	{
+		if (!mValid)
+			return;
 		if (tQueueIO == INPUT)
 			spu_readch(SPU_RdSigNotify2);
 		else
@@ -190,14 +206,21 @@ private:
 		s.slot[receivePipeId][1] = 0;
 		mReserved = mCompleted = 0;
 		mFlags = 0;
+		mValid = true;
 	}
-	uint32_t freePipe()
+	static bool pipeFree(uint32_t id)
+	{
+		return id < (uint32_t)MAX_PIPE && !(snrState().usedPipes & (1u << id));
+	}
+	/* the lowest free receive id, or MAX_PIPE when all are taken */
+	static uint32_t freePipe()
 	{
 		for (int i = 0; i < MAX_PIPE; i++)
 			if (!(snrState().usedPipes & (1u << i)))
 				return (uint32_t)i;
-		return 0;
+		return (uint32_t)MAX_PIPE;
 	}
+	uint32_t tagFor(PointerType entry) const { return (mTag + ((entry % tSize) & mMask)) % 32; }
 	/* the other end's slot: its completed count and flags */
 	volatile uint32_t *readPeer()
 	{
@@ -207,21 +230,23 @@ private:
 	/* our slot, then the wake-up: the entries' transfers have landed (the
 	 * port waits for them) and dsync orders our local-store writes before
 	 * the signal */
-	void publish()
+	void publish(uint32_t tag)
 	{
 		volatile uint32_t *mine = snrState().slot[mRecvPipe];
 		mine[1] = mFlags;
 		mine[0] = mCompleted;
 		spu_dsync();
 		mSignal[3] = 1u << mRecvPipe;
-		mfc_sndsig(&mSignal[3], mPeerSnrEa, mTag, 0, 0);
-		snrDmaWait(mTag);
+		mfc_sndsig(&mSignal[3], mPeerSnrEa, tag, 0, 0);
+		snrDmaWait(tag);
 	}
 
 	volatile uint32_t mPeer[4] __attribute__((aligned(16)));
 	volatile uint32_t mSignal[4] __attribute__((aligned(16)));
 	volatile uint32_t mInfo[4] __attribute__((aligned(16)));
 	uint64_t mPeerSnrEa, mPeerSlotEa;
+	bool mValid;
+	uint32_t mMask;
 	uint32_t mTag, mRecvPipe;
 	uint32_t mReserved, mCompleted, mFlags;
 };

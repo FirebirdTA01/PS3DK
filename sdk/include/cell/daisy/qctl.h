@@ -8,7 +8,6 @@
  *                                        every producer has terminated)
  *   bool isTurn(PointerType entry)       may this reservation complete now
  *   void complete(PointerType entry)     publish (INPUT) / free (OUTPUT) it
- *   void release(PointerType entry)      give back the newest reservation
  *   int  terminate()                     detach this end
  *   bool hasUnfinishedConsumer()         INPUT: consumers still attached */
 #ifndef PS3TC_CELL_DAISY_QCTL_H

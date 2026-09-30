@@ -5,7 +5,9 @@
  *   3. the same local-stream check inside an SPU thread
  *   4. an atomic stream from the PPU to two SPU consumers (5000 entries)
  *   5. an atomic stream from one SPU to another
- *   6. a signal-notification stream between two SPUs' local stores
+ *   6. a signal-notification stream between two SPUs' local stores, with
+ *      receive-pipe allocation checks
+ *   7. the same stream with a DMA tag range mask of 3
  *
  * Prints HELLO_DAISY <check> PASS/FAIL and HELLO_DAISY DONE passed=N of M. */
 #include <stdint.h>
@@ -207,7 +209,8 @@ static int run_spu_to_spu()
 static uint8_t gSnrArea[256] __attribute__((aligned(128)));
 static uint8_t gStreamArea[128] __attribute__((aligned(128)));
 
-static int run_snr()
+/* mask: DMA tag range mask for both ends (0 = the default) */
+static int run_snr(uint32_t mask)
 {
 	sys_spu_image_t img;
 	sys_spu_thread_group_t group;
@@ -223,7 +226,7 @@ static int run_snr()
 	int rc = sys_spu_thread_group_create(&group, 2, 100, &ga);
 	for (int i = 0; rc == CELL_OK && i < 2; i++) {
 		sys_spu_thread_argument_t arg = { (uint64_t)(uintptr_t)gSnrArea, (uint64_t)(uintptr_t)gStreamArea,
-		                                  (uint64_t)i, (uint64_t)(uintptr_t)&gResults[0] };
+		                                  (uint64_t)i | ((uint64_t)mask << 32), (uint64_t)(uintptr_t)&gResults[0] };
 		rc = sys_spu_thread_initialize(&threads[i], group, i, &img, &ta, &arg);
 		/* both signal notification registers in OR mode */
 		if (rc == CELL_OK)
@@ -237,7 +240,8 @@ static int run_snr()
 	sys_spu_image_close(&img);
 	if (rc != CELL_OK)
 		return 1;
-	return check_results(1);
+	/* the producer reports its pipe-check faults in the second slot */
+	return check_results(1) + (int)gResults[1].faults;
 }
 
 int main()
@@ -248,7 +252,8 @@ int main()
 	report("spu local", run_spu());
 	report("ppu to 2 spus (atomic)", run_ppu_to_spus());
 	report("spu to spu (atomic)", run_spu_to_spu());
-	report("spu to spu (signal notification)", run_snr());
+	report("spu to spu (signal notification)", run_snr(0));
+	report("spu to spu (signal notification, tag mask 3)", run_snr(3));
 	printf("HELLO_DAISY DONE passed=%d of %d\n", passed, checks);
 	return passed == checks ? 0 : 1;
 }

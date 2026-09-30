@@ -138,11 +138,6 @@ public:
 		add(word, 1);
 	}
 
-	bool release(PointerType entry)
-	{
-		int word = tQueueIO == INPUT ? ATO_RESERVED_PUSH : ATO_RESERVED_POP;
-		return cas(word, entry + 1, entry);
-	}
 
 	int terminate()
 	{

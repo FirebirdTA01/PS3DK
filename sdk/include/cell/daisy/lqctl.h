@@ -65,12 +65,6 @@ public:
 			LockOps::relax();
 		LockOps::store(tQueueIO == INPUT ? &mLock.published : &mLock.freed, entry + 1);
 	}
-	/* undo the newest reservation if nobody reserved after it */
-	bool release(PointerType entry)
-	{
-		return LockOps::cas(tQueueIO == INPUT ? &mLock.reservedPush : &mLock.reservedPop,
-		                    entry + 1, entry);
-	}
 
 	int terminate()
 	{
