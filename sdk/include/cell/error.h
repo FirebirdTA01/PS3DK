@@ -17,6 +17,10 @@ extern "C" {
 #define CELL_OK                0
 #define CELL_ERROR_CAST(x)     ((int)(x))
 
+#ifndef __ASSEMBLER__
+typedef int CellError;   /* a CELL_OK / error-code return value */
+#endif
+
 /* An error code is 0x80000000 | facility << 16 | status. */
 #define CELL_ERROR_ERROR_FLAG          0x80000000
 #define CELL_ERROR_IS_FAILURE(e)       (((e) & CELL_ERROR_ERROR_FLAG) == CELL_ERROR_ERROR_FLAG)
