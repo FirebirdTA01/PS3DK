@@ -500,6 +500,7 @@ SHARED_SPURS_SPU_HEADERS := \
     include/cell/daisy/lfqueue2_types.h \
     include/cell/daisy/ato_qctl.h \
     include/cell/daisy/remote_buffer.h \
+    include/cell/daisy/snr_qctl.h \
     include/cell/daisy.h \
     include/cell/daisy/daisy_defs.h \
     include/cell/daisy/return_code.h \
