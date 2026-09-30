@@ -1,14 +1,18 @@
 /* spurs-suite SPU vector literals (row spu-vector-literals): the PS3
  * parenthesised vector literal and scalar splat forms, checked lane by lane
- * on the SPU.  x comes from the PPU (arg2) so the variable forms cannot be
- * folded at compile time.  Bit i of the result mask is set when check i
- * fails; the mask is DMAed to the box with the magic, and is the exit code.
- * arg1 = box EA, arg2 = x. */
+ * on the SPU through the C front end here and the C++ front end in
+ * vector_literals_cpp.cpp (failure bits 16 and up).  x comes from the PPU
+ * (arg2) so the variable forms cannot be folded at compile time.  Bit i of
+ * the result mask is set when check i fails; the mask is DMAed to the box
+ * with the magic, and is the exit code.  arg1 = box EA, arg2 = x. */
 #include <stdint.h>
 #include <spu_intrinsics.h>
 #include <spu_mfcio.h>
 #include <sys/spu_thread.h>
 #include "../vector_literals.h"
+
+/* the C++ half (vector_literals_cpp.cpp) */
+extern unsigned vector_literals_cpp(int x);
 
 static int eq4(vec_int4 v, int a, int b, int c, int d)
 {
@@ -52,6 +56,9 @@ int main(uint64_t box_ea, uint64_t arg2, uint64_t arg3, uint64_t arg4)
     }
     /* 8: a splat of a run-time negative value */
     if (!eq4((vec_int4)(-x), -x, -x, -x, -x)) fail |= 1u << 8;
+
+    /* 16..: the C++ front end's checks */
+    fail |= vector_literals_cpp(x) << 16;
 
     __attribute__((aligned(16))) uint32_t buf[4] = { VL_MAGIC, fail, (uint32_t)x, 0 };
     mfc_put(buf, box_ea, sizeof buf, 0, 0, 0);
