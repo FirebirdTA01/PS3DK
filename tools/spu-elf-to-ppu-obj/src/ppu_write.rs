@@ -5,6 +5,58 @@ use object::{
     SectionKind, SymbolFlags, SymbolKind, SymbolScope,
 };
 
+/// A word of the embedded image that holds a PPU symbol's address: the PPU
+/// link fills it in (R_PPC64_ADDR32 / ADDR64 against the symbol).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageReloc {
+    /// Byte offset of the word in the embedded image.
+    pub offset: u64,
+    pub symbol: String,
+    pub addend: i64,
+    /// 32 or 64.
+    pub size: u8,
+}
+
+/// Add each image relocation to `section`, against an undefined symbol of
+/// the PPU program.
+fn add_image_relocations(
+    object: &mut Object<'_>,
+    section: object::write::SectionId,
+    relocs: &[ImageReloc],
+) -> Result<()> {
+    let mut symbols = std::collections::BTreeMap::new();
+    for reloc in relocs {
+        let symbol = *symbols.entry(reloc.symbol.clone()).or_insert_with(|| {
+            object.add_symbol(Symbol {
+                name: reloc.symbol.as_bytes().to_vec(),
+                value: 0,
+                size: 0,
+                kind: SymbolKind::Unknown,
+                scope: SymbolScope::Dynamic,
+                weak: false,
+                section: SymbolSection::Undefined,
+                flags: SymbolFlags::None,
+            })
+        });
+        object
+            .add_relocation(
+                section,
+                Relocation {
+                    offset: reloc.offset,
+                    symbol,
+                    addend: reloc.addend,
+                    flags: RelocationFlags::Generic {
+                        kind: RelocationKind::Absolute,
+                        encoding: RelocationEncoding::Generic,
+                        size: reloc.size,
+                    },
+                },
+            )
+            .with_context(|| format!("adding the PPU relocation for {} at {:#x}", reloc.symbol, reloc.offset))?;
+    }
+    Ok(())
+}
+
 pub fn build_jobbin2_ppu_object(
     symbol_base: &str,
     jobbin2_blob: &[u8],
@@ -77,12 +129,12 @@ pub fn build_jobbin2_ppu_object(
     object.write().context("writing PPU ELF object")
 }
 
-pub fn build_binary_ppu_object(symbol_base: &str, ls_image: &[u8]) -> Result<Vec<u8>> {
-    build_simple_ppu_object(symbol_base, "bin", ls_image)
+pub fn build_binary_ppu_object(symbol_base: &str, ls_image: &[u8], relocs: &[ImageReloc]) -> Result<Vec<u8>> {
+    build_simple_ppu_object(symbol_base, "bin", ls_image, relocs)
 }
 
-pub fn build_elf_ppu_object(symbol_base: &str, elf_image: &[u8]) -> Result<Vec<u8>> {
-    build_simple_ppu_object(symbol_base, "elf", elf_image)
+pub fn build_elf_ppu_object(symbol_base: &str, elf_image: &[u8], relocs: &[ImageReloc]) -> Result<Vec<u8>> {
+    build_simple_ppu_object(symbol_base, "elf", elf_image, relocs)
 }
 
 /// Local-storage block (2 KB) arithmetic for a SPURS task's context.
@@ -145,6 +197,7 @@ pub fn build_task_ppu_object(
     elf_image: &[u8],
     size_context: u32,
     ls_pattern: [u32; 4],
+    relocs: &[ImageReloc],
 ) -> Result<Vec<u8>> {
     let mut object = Object::new(BinaryFormat::Elf, Architecture::PowerPc64, Endianness::Big);
 
@@ -215,11 +268,12 @@ pub fn build_task_ppu_object(
             },
         )
         .context("adding taskbininfo eaElf relocation")?;
+    add_image_relocations(&mut object, spu_image, relocs)?;
 
     object.write().context("writing PPU ELF object")
 }
 
-fn build_simple_ppu_object(symbol_base: &str, infix: &str, image: &[u8]) -> Result<Vec<u8>> {
+fn build_simple_ppu_object(symbol_base: &str, infix: &str, image: &[u8], relocs: &[ImageReloc]) -> Result<Vec<u8>> {
     let mut object = Object::new(BinaryFormat::Elf, Architecture::PowerPc64, Endianness::Big);
 
     let spu_image = object.add_section(
@@ -252,6 +306,8 @@ fn build_simple_ppu_object(symbol_base: &str, infix: &str, image: &[u8]) -> Resu
         0,
         SymbolSection::Absolute,
     );
+
+    add_image_relocations(&mut object, spu_image, relocs)?;
 
     object.write().context("writing PPU ELF object")
 }
@@ -323,7 +379,7 @@ mod tests {
     fn writer_emits_binary_symbols_without_jobheader() {
         let dir = std::env::temp_dir();
         let path = dir.join("spu_elf_to_ppu_obj_binary_writer_test.ppu.o");
-        let object = build_binary_ppu_object("fixture", &[0u8; 0x88]).unwrap();
+        let object = build_binary_ppu_object("fixture", &[0u8; 0x88], &[]).unwrap();
         std::fs::write(&path, object).unwrap();
         let report = inspect_ppu_obj(&path).unwrap();
         assert_eq!(report.sections[".spu_image"].align, 0x80);
@@ -358,7 +414,7 @@ mod tests {
         let dir = std::env::temp_dir();
         let path = dir.join("spu_elf_to_ppu_obj_task_writer_test.ppu.o");
         let (pattern, size) = task_context(0x3310, Some((0x4000, 0x4000)), &[]);
-        let object = build_task_ppu_object("task_fixture_spu_elf", &[0u8; 0xd8], size, pattern).unwrap();
+        let object = build_task_ppu_object("task_fixture_spu_elf", &[0u8; 0xd8], size, pattern, &[]).unwrap();
         std::fs::write(&path, object).unwrap();
         let report = inspect_ppu_obj(&path).unwrap();
         assert_eq!(report.sections[".spu_image.taskbininfo"].size, 32);
@@ -371,7 +427,7 @@ mod tests {
     fn writer_emits_elf_symbols_without_jobheader() {
         let dir = std::env::temp_dir();
         let path = dir.join("spu_elf_to_ppu_obj_elf_writer_test.ppu.o");
-        let object = build_elf_ppu_object("fixture", &[0u8; 0xd8]).unwrap();
+        let object = build_elf_ppu_object("fixture", &[0u8; 0xd8], &[]).unwrap();
         std::fs::write(&path, object).unwrap();
         let report = inspect_ppu_obj(&path).unwrap();
         assert_eq!(report.sections[".spu_image"].align, 0x80);

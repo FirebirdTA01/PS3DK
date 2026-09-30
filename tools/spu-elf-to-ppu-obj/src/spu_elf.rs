@@ -2,13 +2,17 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use object::{Object, ObjectSymbol};
+use object::{Object, ObjectSection, ObjectSymbol, RelocationFlags, RelocationTarget};
 use serde::Serialize;
 
 const ELF32_EHDR_SIZE: usize = 0x34;
 const ELF32_PHDR_SIZE: usize = 0x20;
 const PT_LOAD: u32 = 1;
 const PT_NOTE: u32 = 4;
+/// SPU relocations the SPU link leaves for the PPU link to resolve: the
+/// 32- or 64-bit effective address of a PPU symbol (CELL_SPURS_PPU_SYM).
+const R_SPU_PPU32: u32 = 15;
+const R_SPU_PPU64: u32 = 16;
 
 #[derive(Debug, Serialize)]
 pub struct SpuElfReport {
@@ -53,10 +57,23 @@ pub struct SpuElfChecks {
     pub bss_extent_aligned_16: bool,
 }
 
+/// A word of the SPU image that holds a PPU symbol's address: the PPU link
+/// must fill it in (R_SPU_PPU32 / R_SPU_PPU64 in the linked SPU ELF).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PpuReloc {
+    /// SPU local-store address of the word.
+    pub vaddr: u32,
+    pub symbol: String,
+    pub addend: i64,
+    /// 32 or 64.
+    pub size: u8,
+}
+
 pub struct SpuElfAnalysis {
     pub report: SpuElfReport,
     pub ls_image: Vec<u8>,
     pub note_data: Vec<u8>,
+    pub ppu_relocs: Vec<PpuReloc>,
 }
 
 pub fn inspect_spu_elf(path: &Path) -> Result<SpuElfAnalysis> {
@@ -145,6 +162,27 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
         symbols.insert(name.to_string(), value);
     }
 
+    let mut ppu_relocs = Vec::new();
+    for section in object.sections() {
+        for (offset, rel) in section.relocations() {
+            let size = match rel.flags() {
+                RelocationFlags::Elf { r_type: R_SPU_PPU32 } => 32,
+                RelocationFlags::Elf { r_type: R_SPU_PPU64 } => 64,
+                _ => continue,
+            };
+            let symbol = match rel.target() {
+                RelocationTarget::Symbol(index) => object
+                    .symbol_by_index(index)
+                    .and_then(|sym| sym.name().map(str::to_string))
+                    .context("reading the symbol of a PPU relocation")?,
+                other => bail!("PPU relocation at {offset:#x} has an unsupported target {other:?}"),
+            };
+            let vaddr = u32::try_from(offset).context("PPU relocation address beyond 32 bits")?;
+            ppu_relocs.push(PpuReloc { vaddr, symbol, addend: rel.addend(), size });
+        }
+    }
+    ppu_relocs.sort_by_key(|r| r.vaddr);
+
     let start = symbols.get("_start").and_then(|v| *v);
     let bss_start = symbols.get("__bss_start").and_then(|v| *v);
     let end = symbols.get("_end").and_then(|v| *v);
@@ -198,6 +236,7 @@ fn inspect_spu_elf_bytes(path: &Path, bytes: &[u8]) -> Result<SpuElfAnalysis> {
         },
         ls_image,
         note_data,
+        ppu_relocs,
     })
 }
 

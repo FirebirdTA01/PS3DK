@@ -64,6 +64,17 @@ enum Cmd {
         #[arg(long)]
         emit_sidecars: bool,
     },
+    /// Fail when a linked SPU ELF refers to PPU symbols (CELL_SPURS_PPU_SYM):
+    /// for embedding paths that copy raw bytes and so cannot carry the
+    /// references to the PPU link.  Writes --stamp on success.
+    NoPpuRefs {
+        /// Linked SPU ELF input.
+        #[arg(long)]
+        spu_elf: PathBuf,
+        /// File to create when the image has no PPU references.
+        #[arg(long)]
+        stamp: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -171,6 +182,21 @@ fn run() -> Result<()> {
                 eprintln!("wrote {}", paths.join(", "));
             } else {
                 eprintln!("wrote {}", output.display());
+            }
+        }
+        Cmd::NoPpuRefs { spu_elf, stamp } => {
+            let spu = inspect_spu_elf(&spu_elf)?;
+            if !spu.ppu_relocs.is_empty() {
+                for r in &spu.ppu_relocs {
+                    eprintln!("  LS {:#07x}: {}-bit address of PPU symbol {}", r.vaddr, r.size, r.symbol);
+                }
+                anyhow::bail!(
+                    "{} refers to PPU symbols (CELL_SPURS_PPU_SYM), but this embedding copies raw bytes and cannot pass the references to the PPU link: embed it with spu-elf-to-ppu-obj (ps3_add_spu_image PPU_OBJECT)",
+                    spu_elf.display()
+                );
+            }
+            if let Some(stamp) = stamp {
+                std::fs::write(&stamp, b"").with_context(|| format!("writing {}", stamp.display()))?;
             }
         }
     }

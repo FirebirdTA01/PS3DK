@@ -6,7 +6,7 @@ use crate::elf_embed::hard_stripped_spu_elf;
 use crate::jobheader::build_jobheader;
 use crate::patches::final_ls_image;
 use crate::ppu_write::{
-    build_binary_ppu_object, build_elf_ppu_object, build_jobbin2_ppu_object, build_task_ppu_object,
+    build_binary_ppu_object, build_elf_ppu_object, build_jobbin2_ppu_object, build_task_ppu_object, ImageReloc,
     task_context,
 };
 use crate::spu_elf::inspect_spu_elf;
@@ -37,6 +37,13 @@ pub fn encode_spu_elf(
     match format {
         EmbedFormat::Jobbin2 => {
             validate_jobbin2_input(&spu.report)?;
+            if let Some(r) = spu.ppu_relocs.first() {
+                bail!(
+                    "--format=jobbin2 cannot carry PPU symbol references yet ({} at LS {:#x}): embed this image as --format=binary, or take the address from the job descriptor",
+                    r.symbol,
+                    r.vaddr
+                );
+            }
             let final_image = final_ls_image(&spu.ls_image, spu.report.e_flags)?;
             let (jobbin2_blob, meaningful_blob_byte_count) =
                 build_jobbin2_blob(&spu, &final_image)?;
@@ -56,8 +63,12 @@ pub fn encode_spu_elf(
         }
         EmbedFormat::Binary => {
             validate_binary_input(&spu.report)?;
-            let image = binary_image(&spu.ls_image, &spu.report.program_headers);
-            let ppu_object = build_binary_ppu_object(symbol_base, &image)?;
+            let mut image = binary_image(&spu.ls_image, &spu.report.program_headers);
+            let base = binary_base(&spu.report.program_headers);
+            let relocs = image_relocs(&spu.ppu_relocs, &mut image, |vaddr| {
+                vaddr.checked_sub(base).map(u64::from)
+            })?;
+            let ppu_object = build_binary_ppu_object(symbol_base, &image, &relocs)?;
             Ok(EncodedArtifacts {
                 format,
                 image,
@@ -93,8 +104,11 @@ pub fn encode_spu_elf(
                 .map(|ph| (ph.p_vaddr, ph.p_vaddr.saturating_add(ph.p_filesz)))
                 .collect();
             let (ls_pattern, size_context) = task_context(image_end, ls_param, &read_only);
-            let elf_image = hard_stripped_spu_elf(path)?;
-            let ppu_object = build_task_ppu_object(symbol_base, &elf_image, size_context, ls_pattern)?;
+            let mut elf_image = hard_stripped_spu_elf(path)?;
+            let relocs = image_relocs(&spu.ppu_relocs, &mut elf_image, |vaddr| {
+                elf_file_offset(&spu.report.program_headers, vaddr)
+            })?;
+            let ppu_object = build_task_ppu_object(symbol_base, &elf_image, size_context, ls_pattern, &relocs)?;
             Ok(EncodedArtifacts {
                 format,
                 image: elf_image,
@@ -103,8 +117,11 @@ pub fn encode_spu_elf(
             })
         }
         EmbedFormat::Elf => {
-            let elf_image = hard_stripped_spu_elf(path)?;
-            let ppu_object = build_elf_ppu_object(symbol_base, &elf_image)?;
+            let mut elf_image = hard_stripped_spu_elf(path)?;
+            let relocs = image_relocs(&spu.ppu_relocs, &mut elf_image, |vaddr| {
+                elf_file_offset(&spu.report.program_headers, vaddr)
+            })?;
+            let ppu_object = build_elf_ppu_object(symbol_base, &elf_image, &relocs)?;
             Ok(EncodedArtifacts {
                 format,
                 image: elf_image,
@@ -149,6 +166,49 @@ pub fn write_sidecars(output: &Path, artifacts: &EncodedArtifacts) -> Result<Vec
             Ok(vec![elf_path])
         }
     }
+}
+
+/// Where each PPU symbol reference lands in the embedded image, with the
+/// word itself cleared (the PPU link writes symbol + addend there).
+fn image_relocs(
+    ppu_relocs: &[crate::spu_elf::PpuReloc],
+    image: &mut [u8],
+    offset_of: impl Fn(u32) -> Option<u64>,
+) -> Result<Vec<ImageReloc>> {
+    let mut out = Vec::with_capacity(ppu_relocs.len());
+    for r in ppu_relocs {
+        let bytes = usize::from(r.size / 8);
+        let offset = offset_of(r.vaddr)
+            .filter(|&o| (o as usize).checked_add(bytes).map_or(false, |end| end <= image.len()))
+            .with_context(|| {
+                format!(
+                    "PPU symbol reference {} at LS {:#x} is not inside the embedded image's file data",
+                    r.symbol, r.vaddr
+                )
+            })?;
+        image[offset as usize..offset as usize + bytes].fill(0);
+        out.push(ImageReloc { offset, symbol: r.symbol.clone(), addend: r.addend, size: r.size });
+    }
+    Ok(out)
+}
+
+/// The file offset of an initialised LS address in an ELF image.
+fn elf_file_offset(program_headers: &[crate::spu_elf::ProgramHeaderReport], vaddr: u32) -> Option<u64> {
+    program_headers
+        .iter()
+        .filter(|ph| ph.p_type == 1)
+        .find(|ph| vaddr >= ph.p_vaddr && vaddr - ph.p_vaddr < ph.p_filesz)
+        .map(|ph| u64::from(ph.p_offset) + u64::from(vaddr - ph.p_vaddr))
+}
+
+/// The LS address the binary form of an image starts at.
+fn binary_base(program_headers: &[crate::spu_elf::ProgramHeaderReport]) -> u32 {
+    program_headers
+        .iter()
+        .filter(|ph| ph.p_type == 1 && ph.p_memsz > 0)
+        .map(|ph| ph.p_vaddr)
+        .min()
+        .unwrap_or(0)
 }
 
 /// The binary form of an image: local store from its lowest loaded address
@@ -242,8 +302,8 @@ fn output_base(output: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::binary_image;
-    use crate::spu_elf::ProgramHeaderReport;
+    use super::{binary_image, elf_file_offset, image_relocs};
+    use crate::spu_elf::{PpuReloc, ProgramHeaderReport};
 
     fn load(vaddr: u32, memsz: u32) -> ProgramHeaderReport {
         ProgramHeaderReport {
@@ -257,6 +317,38 @@ mod tests {
             p_flags: 0,
             p_align: 0x80,
         }
+    }
+
+    #[test]
+    fn ppu_references_land_at_the_file_offset_of_their_ls_word_and_are_cleared() {
+        // text at LS 0x3000 from file 0x80, data at LS 0x30b0.. from file 0x130
+        let text = ProgramHeaderReport { p_offset: 0x80, ..load(0x3000, 0x80) };
+        let data = ProgramHeaderReport { p_offset: 0x100, ..load(0x3080, 0x60) };
+        let phs = [text, data];
+        assert_eq!(elf_file_offset(&phs, 0x30b0), Some(0x130));
+        assert_eq!(elf_file_offset(&phs, 0x3000), Some(0x80));
+        assert_eq!(elf_file_offset(&phs, 0x2000), None);
+
+        let mut image = vec![0xaau8; 0x160];
+        let refs = [
+            PpuReloc { vaddr: 0x30b0, symbol: "g_a".into(), addend: 0, size: 32 },
+            PpuReloc { vaddr: 0x30c0, symbol: "g_b".into(), addend: 8, size: 64 },
+        ];
+        let out = image_relocs(&refs, &mut image, |v| elf_file_offset(&phs, v)).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!((out[0].offset, out[0].size, out[0].symbol.as_str()), (0x130, 32, "g_a"));
+        assert_eq!((out[1].offset, out[1].size, out[1].addend), (0x140, 64, 8));
+        assert_eq!(&image[0x130..0x134], &[0, 0, 0, 0]);
+        assert_eq!(&image[0x140..0x148], &[0; 8]);
+        assert_eq!(image[0x134], 0xaa, "only the referenced words are cleared");
+    }
+
+    #[test]
+    fn a_ppu_reference_outside_the_file_data_is_refused() {
+        let phs = [load(0x3000, 0x80)];
+        let mut image = vec![0u8; 0x80];
+        let refs = [PpuReloc { vaddr: 0x4000, symbol: "g".into(), addend: 0, size: 32 }];
+        assert!(image_relocs(&refs, &mut image, |v| elf_file_offset(&phs, v)).is_err());
     }
 
     #[test]

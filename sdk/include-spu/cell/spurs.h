@@ -44,11 +44,13 @@
  * `sym`, for use in SPU code.  The SPU object records a `sym@ppu`
  * reference (R_SPU_PPU32) in a data word.
  *
- * Limitation: the SDK's embedding paths (ps3_add_spu_image, bin2s and
- * spu-elf-to-ppu-obj) do not yet carry that relocation into the PPU
- * object, so the PPU link does not fill the word in.  Code using this
- * macro compiles but reads an unresolved address until the embedding
- * tools promote R_SPU_PPU32. */
+ *
+ * The PPU link fills the word in only when the image is embedded with
+ * spu-elf-to-ppu-obj (ps3_add_spu_image PPU_OBJECT, or `wrap --format
+ * elf|task|binary`), which turns each reference into a PPU relocation.
+ * Embedding the raw bytes (bin2s, objcopy) cannot carry it: the SDK's
+ * CMake paths refuse such an image.  A job chain job (JOBBIN) or a
+ * jobbin2 job cannot use this macro. */
 #define CELL_SPURS_PPU_SYM(sym)                                             \
     (__extension__({                                                        \
         extern char __ps3dk_ppu_sym_##sym[] __asm__(#sym "@ppu");           \
