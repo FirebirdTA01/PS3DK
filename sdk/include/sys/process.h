@@ -23,6 +23,11 @@
 #include <lv2/process.h>
 #include <lv2/syscalls.h>
 
+/* Older <lv2/syscalls.h> copies stop short of the object-id call. */
+#ifndef SYSCALL_PROCESS_GET_ID
+#define SYSCALL_PROCESS_GET_ID 13
+#endif
+
 /* ---- .sys_proc_param header layout constants ------------------------ */
 
 #define SYS_PROCESS_SPAWN_MAGIC                  0x13bcc5f6
