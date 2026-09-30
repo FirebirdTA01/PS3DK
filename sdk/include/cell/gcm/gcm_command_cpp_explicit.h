@@ -165,12 +165,16 @@ struct CellGcmContext : public CellGcmContextData
     { ::cellGcmSetTexture(this, index, texture); }
     void SetTextureAddress(uint8_t index, uint8_t wraps, uint8_t wrapt, uint8_t wrapr, uint8_t unsignedRemap, uint8_t zfunc, uint8_t gamma)
     { ::cellGcmSetTextureAddress(this, index, wraps, wrapt, wrapr, unsignedRemap, zfunc, gamma); }
+    void SetTextureAddressAnisoBias(uint8_t index, uint8_t wraps, uint8_t wrapt, uint8_t wrapr, uint8_t unsignedRemap, uint8_t zfunc, uint8_t gamma, uint8_t anisoBias)
+    { ::cellGcmSetTextureAddressAnisoBias(this, index, wraps, wrapt, wrapr, unsignedRemap, zfunc, gamma, anisoBias); }
     void SetTextureBorderColor(uint8_t index, uint32_t color)
     { ::cellGcmSetTextureBorderColor(this, index, color); }
     void SetTextureControl(uint8_t index, uint32_t enable, uint16_t minlod, uint16_t maxlod, uint8_t maxaniso)
     { ::cellGcmSetTextureControl(this, index, enable, minlod, maxlod, maxaniso); }
     void SetTextureFilter(uint8_t index, uint16_t bias, uint8_t min, uint8_t mag, uint8_t conv)
     { ::cellGcmSetTextureFilter(this, index, bias, min, mag, conv); }
+    void SetTextureOptimization(uint8_t index, uint8_t slope, uint8_t iso, uint8_t aniso)
+    { ::cellGcmSetTextureOptimization(this, index, slope, iso, aniso); }
     void SetTimeStamp(uint32_t index)
     { ::cellGcmSetTimeStamp(this, index); }
     void SetTransferData(uint8_t mode, uint32_t dst, uint32_t outpitch, uint32_t src, uint32_t inpitch, uint32_t linelength, uint32_t linecount)
@@ -211,6 +215,8 @@ struct CellGcmContext : public CellGcmContextData
     { ::cellGcmSetVertexProgramParameter(this, param, values); }
     void SetVertexProgramParameterBlock(uint32_t baseConst, uint32_t constCount, const float *values)
     { ::cellGcmSetVertexProgramParameterBlock(this, baseConst, constCount, values); }
+    void SetVertexTexture(uint8_t index, const CellGcmTexture *texture)
+    { ::cellGcmSetVertexTexture(this, index, texture); }
     void SetViewport(uint16_t x, uint16_t y, uint16_t w, uint16_t h, float min_z, float max_z, const float scale[4], const float offset[4])
     { ::cellGcmSetViewport(this, x, y, w, h, min_z, max_z, scale, offset); }
     void SetWaitFlip()

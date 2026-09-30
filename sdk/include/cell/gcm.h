@@ -854,6 +854,9 @@ namespace cell { namespace Gcm {
     using ::cellGcmSetPolySmoothEnable;
     using ::cellGcmSetLineSmoothEnable;
     using ::cellGcmReserveMethodSize;
+    using ::cellGcmSetTextureAddressAnisoBias;
+    using ::cellGcmSetTextureOptimization;
+    using ::cellGcmSetVertexTexture;
     using ::cellGcmSetDrawInlineArray;
     using ::cellGcmSetPolygonOffset;
     using ::cellGcmSetPolygonOffsetFillEnable;

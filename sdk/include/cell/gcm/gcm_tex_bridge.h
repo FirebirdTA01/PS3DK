@@ -187,6 +187,56 @@ static inline void ps3tc_gcm_tex_wrap_mode(CellGcmContextData *ctx,
     *w++ = val;
 }
 
+/* NV4097 texture methods the NV40 table above does not name. */
+#define PS3TC_GCM_TEXTURE_CONTROL2(i)           (0x0b00u + 4u * (i))
+#define PS3TC_GCM_VERTEX_TEXTURE_OFFSET(i)      (0x0900u + 32u * (i))  /* offset, format */
+#define PS3TC_GCM_VERTEX_TEXTURE_CONTROL3(i)    (0x0910u + 32u * (i))  /* pitch */
+#define PS3TC_GCM_VERTEX_TEXTURE_IMAGE_RECT(i)  (0x0918u + 32u * (i))  /* height | width << 16 */
+
+/* Texture address word with the anisotropic-filter bias in bits 4-7. */
+static inline void ps3tc_gcm_tex_wrap_mode_aniso_bias(CellGcmContextData *ctx, uint8_t index,
+                                                      uint8_t wraps, uint8_t wrapt, uint8_t wrapr,
+                                                      uint8_t unsignedRemap, uint8_t zfunc,
+                                                      uint8_t gamma, uint8_t anisoBias)
+{
+    if (!ctx) return;
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_TEX_WRAP(index), 1);
+    *w++ = (uint32_t)wraps | ((uint32_t)anisoBias << 4) | ((uint32_t)wrapt << 8)
+         | ((uint32_t)unsignedRemap << 12) | ((uint32_t)wrapr << 16)
+         | ((uint32_t)gamma << 20) | ((uint32_t)zfunc << 28);
+}
+
+/* Filtering optimisations: slope (bits 0-5), iso and aniso switches. */
+static inline void ps3tc_gcm_tex_optimization(CellGcmContextData *ctx, uint8_t index,
+                                              uint8_t slope, uint8_t iso, uint8_t aniso)
+{
+    if (!ctx) return;
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(PS3TC_GCM_TEXTURE_CONTROL2(index), 1);
+    *w++ = (uint32_t)slope | ((uint32_t)iso << 6) | ((uint32_t)aniso << 7) | (0x2du << 8);
+}
+
+/* A vertex-program texture (linear, normalized, X32 or W32Z32Y32X32 float):
+ * offset and format, pitch, size. */
+static inline void ps3tc_gcm_vertex_texture(CellGcmContextData *ctx, uint8_t index,
+                                            const gcmTexture *tex)
+{
+    if (!ctx || !tex) return;
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 7);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(PS3TC_GCM_VERTEX_TEXTURE_OFFSET(index), 2);
+    *w++ = tex->offset;
+    *w++ = ((uint32_t)tex->location + 1u) | ((uint32_t)tex->dimension << 4)
+         | ((uint32_t)tex->format << 8) | ((uint32_t)tex->mipmap << 16);
+    *w++ = PS3TC_GCM_METHOD(PS3TC_GCM_VERTEX_TEXTURE_CONTROL3(index), 1);
+    *w++ = tex->pitch;
+    *w++ = PS3TC_GCM_METHOD(PS3TC_GCM_VERTEX_TEXTURE_IMAGE_RECT(index), 1);
+    *w++ = (uint32_t)tex->height | ((uint32_t)tex->width << 16);
+}
+
 #ifdef __cplusplus
 }
 #endif

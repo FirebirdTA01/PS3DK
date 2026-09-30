@@ -606,13 +606,6 @@ void RSX_FUNC(SetPolygonSmoothEnable)(gcmContextData *context,u32 enable)
 	RSX_CONTEXT_CURRENT_END(2);
 }
 
-/* Only the buffer-space check: afterwards `count` words fit, or the
- * context callback has been asked to make room. */
-void RSX_FUNC(ReserveMethodSize)(gcmContextData *context,u32 count)
-{
-	RSX_CONTEXT_CURRENT_BEGIN(count);
-}
-
 void RSX_FUNC(SetLineSmoothEnable)(gcmContextData *context,u32 enable)
 {
 	RSX_CONTEXT_CURRENT_BEGIN(2);

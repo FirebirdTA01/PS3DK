@@ -217,8 +217,6 @@ void RSX_FUNC(SetZCullStatsEnable)(gcmContextData *context,u32 enable);
 void RSX_FUNC(SetZCullInvalidate)(gcmContextData *context);
 void RSX_FUNC(SetPolygonSmoothEnable)(gcmContextData *context,u32 enable);
 void RSX_FUNC(SetLineSmoothEnable)(gcmContextData *context,u32 enable);
-/* make sure count command words fit, asking the context callback for room */
-void RSX_FUNC(ReserveMethodSize)(gcmContextData *context,u32 count);
 void RSX_FUNC(SetDitherEnable)(gcmContextData *context,u32 enable);
 
 /*! \brief Setup the render surface.
