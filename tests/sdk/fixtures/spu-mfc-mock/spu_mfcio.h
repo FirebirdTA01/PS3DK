@@ -6,6 +6,7 @@
 #define MFC_MOCK_SPU_MFCIO_H
 
 #include <stdint.h>
+#include <spu_intrinsics.h>   /* as the real header does */
 
 #define MFC_PUTLLC_STATUS  0x00000001u
 #define MFC_PUT_CMD        0x20u

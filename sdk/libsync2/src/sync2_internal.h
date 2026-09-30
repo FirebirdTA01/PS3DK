@@ -111,11 +111,17 @@ static inline void s2_put(volatile void *ls, uint32_t ea, uint32_t size, unsigne
 	s2_wait_tag(tag);
 }
 
+#ifdef SYNC2_HOST_TEST
+/* tests/sdk/sync2-waiting-queue-host-test: the host test catches halts */
+extern void sync2_host_halt(void) __attribute__((noreturn));
+#define s2_halt() sync2_host_halt()
+#else
 static inline __attribute__((noreturn)) void s2_halt(void)
 {
 	for (;;)
 		__asm__ volatile("stopd $0,$0,$0");
 }
+#endif
 
 typedef int (*s2_wait_fn)(CellSync2SignalReceiverId, CellSync2ObjectTypeId, uint64_t, uint64_t);
 
