@@ -53,6 +53,8 @@ pub enum SdataError {
     UnsupportedVersion(u32),
     #[error("block size must be 1, 2, 4, 8, 16 or 32 KB")]
     BadBlockSize,
+    #[error("layout flags {flags:#010x} do not match format version {version}")]
+    LayoutMismatch { version: u32, flags: u32 },
     #[error("the file is truncated or its block table is inconsistent")]
     Truncated,
     #[error("block {0} is compressed; reading compressed blocks is not supported")]
@@ -189,6 +191,12 @@ pub fn info(file: &[u8]) -> Result<Info, SdataError> {
     let flags = be32(file, 0x80);
     if flags & 0xff00_0000 != FLAGS_BASE {
         return Err(SdataError::NotSdata);
+    }
+    // the layout decides where the data is: it must be one this version uses
+    let layout = flags & 0x00ff_ffff;
+    let expected = if version == 2 { LAYOUT_V2 } else { LAYOUT_V3_V4 };
+    if layout != expected && layout != LAYOUT_COMPRESSED {
+        return Err(SdataError::LayoutMismatch { version, flags });
     }
     let block_size = be32(file, 0x84);
     if !valid_block_size(block_size) {
@@ -363,6 +371,13 @@ mod tests {
         let mut z = create(&seq(100), opts(Format::V4, 16, true)).unwrap();
         z[0x11f] = 1;
         assert_eq!(extract(&z), Err(SdataError::CompressedBlock(0)));
+        // layout bits that disagree with the version
+        let mut m = create(&seq(100), CreateOptions::default()).unwrap();
+        m[0x83] = 0x0c;
+        assert_eq!(info(&m), Err(SdataError::LayoutMismatch { version: 4, flags: 0x8100_000c }));
+        let mut m2 = create(&seq(100), opts(Format::V2, 16, false)).unwrap();
+        m2[0x83] = 0x3c;
+        assert!(matches!(extract(&m2), Err(SdataError::LayoutMismatch { .. })));
         // a data length past the end of the file
         let mut t = create(&seq(100), CreateOptions::default()).unwrap();
         t[0x8f] = 0xff;
