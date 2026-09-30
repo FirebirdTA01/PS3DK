@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <cell/sync2/cond_types.h>
 #include <cell/sync2/thread_types.h>
+#include <cell/sync2/mutex.h>
+#include <cell/sync2/error.h>
 
 #ifdef __cplusplus
 extern "C" {

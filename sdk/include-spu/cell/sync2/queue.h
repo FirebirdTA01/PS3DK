@@ -9,6 +9,9 @@
 #include <stdint.h>
 #include <cell/sync2/queue_types.h>
 #include <cell/sync2/thread_types.h>
+#include <stddef.h>
+#include <cell/sync2/thread.h>
+#include <cell/sync2/error.h>
 
 #ifdef __cplusplus
 extern "C" {

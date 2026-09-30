@@ -5,6 +5,8 @@
 
 #include <cell/sync2/cond_types.h>
 #include <cell/sync2/thread_types.h>
+#include <cell/sync2/mutex.h>
+#include <cell/sync2/error.h>
 #include <cell/sync2/version.h>
 #include <cell/sync2/mutex_types.h>
 
