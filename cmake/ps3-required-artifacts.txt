@@ -193,6 +193,7 @@ ppu_stub  ppu/lib/libvpost_stub.a
 # --- SPU runtime archives ---------------------------------------------------
 # Same criterion as ppu_stub, for spu/lib.  The manifest had ZERO spu coverage
 # until 2026-08-27: 14 SPU archives shipped and none were validated.
+spu_lib   spu/lib/libfiber.a
 spu_lib   spu/lib/libsimdmath.a
 spu_lib   spu/lib/libspuPSGL.a
 spu_lib   spu/lib/libspumars.a
@@ -200,6 +201,7 @@ spu_lib   spu/lib/libspumarstask.a
 spu_lib   spu/lib/libspurs_jq.a
 spu_lib   spu/lib/libspurs_task.a
 spu_lib   spu/lib/libsputhread.a
+spu_lib   spu/lib/libsync2.a
 
 # --- Core SDK artifacts (cmake freshness probe requires these) ----------
 sdk_core  ppu/include/cell/sdk_version.h
@@ -340,7 +342,6 @@ optional  ppu/lib/libusbpspcm_stub.a             shipped-for-user-code
 optional  ppu/lib/libm_stub.a                    reference-link-name
 optional  ppu/lib/libstdc++_stub.a               reference-link-name
 optional  spu/lib/libdma.a                       shipped-for-user-code
-optional  spu/lib/libfiber.a                     shipped-for-user-code
 optional  spu/lib/libspuatomic.a                 shipped-for-user-code
 optional  spu/lib/libspudma.a                    shipped-for-user-code
 optional  spu/lib/libspurs_job.a                 shipped-for-user-code
@@ -354,4 +355,3 @@ optional  spu/lib/job_start.o                   spurs-driver-startup
 optional  spu/lib/job_start_w_crt.o              spurs-driver-startup
 optional  spu/lib/job_crt.o                      spurs-driver-startup
 optional  spu/lib/libsync.a                      shipped-for-user-code
-optional  spu/lib/libsync2.a                     shipped-for-user-code
