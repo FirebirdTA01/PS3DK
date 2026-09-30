@@ -6,6 +6,9 @@
  *   mutex      a task holds and hands over to a PPU thread; the PPU holds and
  *              hands over to a task; a task hands over to another task;
  *              TryLock on a held mutex is BUSY
+ *   globals    the module's thread types and notifiers (gCellSync2*) carry
+ *              the right thread type ids, and a thread configuration built
+ *              from them locks and unlocks against a SPURS task
  *   semaphore  a task waits for 1 and gets it from a PPU release; a PPU
  *              thread waits and gets it from the task; TryAcquire past the
  *              count is AGAIN; GetCount from the SPU; a lone waiter
@@ -205,6 +208,71 @@ static void row_mutex()
     wait_for([] { return s_box[0].state == 2; });
     check(s_box[0].rc == static_cast<uint32_t>(CELL_SYNC2_ERROR_BUSY), "TryLock on a held mutex", s_box[0].rc, CELL_SYNC2_ERROR_BUSY);
     cellSync2MutexUnlock(&s_mutex, nullptr);
+    end_row();
+}
+
+static volatile int s_cfgState;
+static CellSync2ThreadConfig s_ppuConfig;
+static CellSync2Notifier *s_ppuNotifiers[2];
+
+static void cfg_helper(uint64_t)
+{
+    s_cfgState = 1;
+    int rc = cellSync2MutexLock(&s_mutex, &s_ppuConfig);
+    if (!rc)
+        rc = cellSync2MutexUnlock(&s_mutex, &s_ppuConfig);
+    s_cfgState = rc ? 0x100 | rc : 2;
+    sys_ppu_thread_exit(0);
+}
+
+static void row_globals()
+{
+    s_row = "globals";
+    s_failed = 0;
+    check(gCellSync2CallerThreadTypePpuThread.threadTypeId == CELL_SYNC2_THREAD_TYPE_PPU_THREAD,
+          "caller type PPU thread", gCellSync2CallerThreadTypePpuThread.threadTypeId, CELL_SYNC2_THREAD_TYPE_PPU_THREAD);
+    check(gCellSync2NotifierPpuThread.threadTypeId == CELL_SYNC2_THREAD_TYPE_PPU_THREAD,
+          "notifier PPU thread", gCellSync2NotifierPpuThread.threadTypeId, CELL_SYNC2_THREAD_TYPE_PPU_THREAD);
+    check(gCellSync2CallerThreadTypePpuFiber.threadTypeId == CELL_SYNC2_THREAD_TYPE_PPU_FIBER,
+          "caller type PPU fiber", gCellSync2CallerThreadTypePpuFiber.threadTypeId, CELL_SYNC2_THREAD_TYPE_PPU_FIBER);
+    check(gCellSync2NotifierPpuFiber.threadTypeId == CELL_SYNC2_THREAD_TYPE_PPU_FIBER,
+          "notifier PPU fiber", gCellSync2NotifierPpuFiber.threadTypeId, CELL_SYNC2_THREAD_TYPE_PPU_FIBER);
+    check(gCellSync2NotifierSpursTask.threadTypeId == CELL_SYNC2_THREAD_TYPE_SPURS_TASK,
+          "notifier SPURS task", gCellSync2NotifierSpursTask.threadTypeId, CELL_SYNC2_THREAD_TYPE_SPURS_TASK);
+    check(gCellSync2NotifierSpursJobQueueJob.threadTypeId == CELL_SYNC2_THREAD_TYPE_SPURS_JOBQUEUE_JOB,
+          "notifier job queue job", gCellSync2NotifierSpursJobQueueJob.threadTypeId,
+          CELL_SYNC2_THREAD_TYPE_SPURS_JOBQUEUE_JOB);
+    check(gCellSync2NotifierPpuThread.sendSignal != 0, "PPU thread notifier has sendSignal", 0, 1);
+    if (s_failed)
+        return end_row();
+
+    /* a PPU configuration built from the module's variables */
+    s_ppuNotifiers[0] = &gCellSync2NotifierPpuThread;
+    s_ppuNotifiers[1] = &gCellSync2NotifierSpursTask;
+    s_ppuConfig.callerThreadType = &gCellSync2CallerThreadTypePpuThread;
+    s_ppuConfig.notifierTable = s_ppuNotifiers;
+    s_ppuConfig.numNotifier = 2;
+
+    /* the task holds; a PPU thread waits with the configuration */
+    start(0, K_MUTEX_HOLD, ea(&s_mutex));
+    if (reported(0, 1, "task locked")) {
+        sys_ppu_thread_t t;
+        s_cfgState = 0;
+        sys_ppu_thread_create(&t, cfg_helper, 0, 1000, 0x4000, SYS_PPU_THREAD_CREATE_JOINABLE, "sync2-cfg");
+        sys_timer_usleep(50000);
+        check(s_cfgState == 1, "PPU thread waits (configured)", s_cfgState, 1);
+        s_box[0].go = 1;
+        join(t);
+        reported(0, 2, "task unlocked");
+        check(s_cfgState == 2, "PPU thread locked and unlocked (configured)", s_cfgState, 2);
+    }
+    /* the PPU holds with the configuration; its unlock wakes the task */
+    check(cellSync2MutexLock(&s_mutex, &s_ppuConfig) == 0, "PPU lock (configured)", 1, 0);
+    start(0, K_MUTEX_LOCK, ea(&s_mutex));
+    sys_timer_usleep(100000);
+    check(s_box[0].state == 0, "task waits", s_box[0].state, 0);
+    check(cellSync2MutexUnlock(&s_mutex, &s_ppuConfig) == 0, "PPU unlock (configured)", 1, 0);
+    reported(0, 2, "task got the mutex from the configured PPU unlock");
     end_row();
 }
 
@@ -455,7 +523,7 @@ int main()
         return 1;
     }
 
-    void (*rows[])() = { row_mutex, row_semaphore, row_cond, row_queue, row_job };
+    void (*rows[])() = { row_mutex, row_globals, row_semaphore, row_cond, row_queue, row_job };
     int passed = 0, total = sizeof rows / sizeof rows[0];
     for (auto row : rows) {
         row();

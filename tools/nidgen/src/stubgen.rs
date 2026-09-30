@@ -294,9 +294,10 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
     //    vstub entry points to: {type, address, addend} triples ending with
     //    type 0; type 1 stores the 32-bit address (+ addend) at `address`.
     //    Each variable gets one such reference, to a 4-byte slot
-    //    <name>_vslot in .data.  The C-visible variable itself belongs to
-    //    the library's own code (a copy made from *<name>_vslot at start-up),
-    //    because only that code knows the variable's type and size.
+    //    <name>_vslot in .data; the loader rewrites it whenever the module
+    //    (re)loads.  The library's public header names the variable as a
+    //    dereference of that slot (e.g. cell/sync2/thread.h), because only
+    //    the header knows the variable's type.
     if !vars.is_empty() {
         writeln!(out, "\t.section \".rodata.sceVNID\",\"a\"").ok();
         writeln!(out, "\t.align 2").ok();
