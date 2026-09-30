@@ -1,6 +1,7 @@
 # hello-daisy - libdaisy data streams: a local stream on the PPU, one between
 # two PPU threads, one inside an SPU thread, and atomic streams from the PPU
-# to two SPUs and from one SPU to another.
+# to two SPUs and from one SPU to another, and a signal-notification stream
+# between two SPUs' local stores.
 cmake_minimum_required(VERSION 3.20)
 project(hello-daisy CXX ASM)
 
@@ -18,5 +19,9 @@ ps3_add_spu_image(hello-daisy
 ps3_add_spu_image(hello-daisy
     NAME spu_atomic
     SOURCES spu/atomic.cpp)
+
+ps3_add_spu_image(hello-daisy
+    NAME spu_snr
+    SOURCES spu/snr.cpp)
 
 ps3_add_self(hello-daisy)

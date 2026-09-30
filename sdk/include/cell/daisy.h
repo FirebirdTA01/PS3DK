@@ -13,6 +13,7 @@
 #include <cell/daisy/ato_qctl.h>
 #ifdef __SPU__
 #include <cell/daisy/remote_buffer.h>
+#include <cell/daisy/snr_qctl.h>
 #endif
 #include <cell/daisy/pipe.h>
 

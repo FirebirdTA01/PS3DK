@@ -67,4 +67,15 @@ enum QueueControlType {
 } /* namespace Daisy */
 } /* namespace cell */
 
+/* effective addresses of SPU thread spuNum of the calling group: its local
+ * store and its two signal notification registers */
+#define CELL_DAISY_GET_LS_AREA(spuNum)   (0xF0000000ULL + 0x00100000ULL * (spuNum))
+#define CELL_DAISY_GET_SNR1_AREA(spuNum) (CELL_DAISY_GET_LS_AREA(spuNum) + 0x0005400CULL)
+#define CELL_DAISY_GET_SNR2_AREA(spuNum) (CELL_DAISY_GET_LS_AREA(spuNum) + 0x0005C00CULL)
+
+/* a PARAMETER stream's 128-byte meeting area: the queue controls use the
+ * first 32 bytes, the buffers the 16 at this offset */
+#define CELL_DAISY_PARAM_SIZE          128
+#define CELL_DAISY_BUFFER_PARAM_OFFSET 32
+
 #endif /* PS3TC_CELL_DAISY_DEFS_H */

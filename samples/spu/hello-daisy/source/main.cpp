@@ -5,6 +5,7 @@
  *   3. the same local-stream check inside an SPU thread
  *   4. an atomic stream from the PPU to two SPU consumers (5000 entries)
  *   5. an atomic stream from one SPU to another
+ *   6. a signal-notification stream between two SPUs' local stores
  *
  * Prints HELLO_DAISY <check> PASS/FAIL and HELLO_DAISY DONE passed=N of M. */
 #include <stdint.h>
@@ -21,6 +22,7 @@
 #include "daisy_common.h"
 #include "spu_local_bin.h"
 #include "spu_atomic_bin.h"
+#include "spu_snr_bin.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 
@@ -200,6 +202,44 @@ static int run_spu_to_spu()
 	return check_results(1);
 }
 
+/* ---- signal notification ---------------------------------------------- */
+
+static uint8_t gSnrArea[256] __attribute__((aligned(128)));
+static uint8_t gStreamArea[128] __attribute__((aligned(128)));
+
+static int run_snr()
+{
+	sys_spu_image_t img;
+	sys_spu_thread_group_t group;
+	sys_spu_thread_t threads[2];
+	int cause, status;
+	memset(gSnrArea, 0, sizeof(gSnrArea));
+	memset(gStreamArea, 0, sizeof(gStreamArea));
+	memset(gResults, 0, sizeof(gResults));
+	if (sys_spu_image_import(&img, spu_snr_bin, SYS_SPU_IMAGE_PROTECT) != CELL_OK)
+		return 1;
+	sys_spu_thread_group_attribute_t ga = { .nsize = 6, .name = "daisy", .type = 0 };
+	sys_spu_thread_attribute_t ta = { .name = "daisy", .nsize = 6, .option = SPU_THREAD_ATTR_NONE };
+	int rc = sys_spu_thread_group_create(&group, 2, 100, &ga);
+	for (int i = 0; rc == CELL_OK && i < 2; i++) {
+		sys_spu_thread_argument_t arg = { (uint64_t)(uintptr_t)gSnrArea, (uint64_t)(uintptr_t)gStreamArea,
+		                                  (uint64_t)i, (uint64_t)(uintptr_t)&gResults[0] };
+		rc = sys_spu_thread_initialize(&threads[i], group, i, &img, &ta, &arg);
+		/* both signal notification registers in OR mode */
+		if (rc == CELL_OK)
+			rc = sys_spu_thread_set_spu_cfg(threads[i], 3);
+	}
+	if (rc == CELL_OK)
+		rc = sys_spu_thread_group_start(group);
+	if (rc == CELL_OK)
+		rc = sys_spu_thread_group_join(group, &cause, &status);
+	sys_spu_thread_group_destroy(group);
+	sys_spu_image_close(&img);
+	if (rc != CELL_OK)
+		return 1;
+	return check_results(1);
+}
+
 int main()
 {
 	sys_spu_initialize(6, 0);
@@ -208,6 +248,7 @@ int main()
 	report("spu local", run_spu());
 	report("ppu to 2 spus (atomic)", run_ppu_to_spus());
 	report("spu to spu (atomic)", run_spu_to_spu());
+	report("spu to spu (signal notification)", run_snr());
 	printf("HELLO_DAISY DONE passed=%d of %d\n", passed, checks);
 	return passed == checks ? 0 : 1;
 }

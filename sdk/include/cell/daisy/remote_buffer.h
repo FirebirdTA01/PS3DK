@@ -18,9 +18,21 @@ class Remote : public Abstract<tType, tSize> {
 public:
 	static const BufferType sBufferType = BUFFER_TYPE_REMOTE;
 
-	explicit Remote(uint64_t bufferStartEa, uint32_t dmaTag, uint32_t dmaTagRangeMask = 0xffffffff)
-		: mEa(bufferStartEa), mTag(dmaTag), mMask(dmaTagRangeMask)
+	/* NO_PARAMETER: ea is the entries' address.  PARAMETER: ea is the
+	 * stream's meeting area; the entries are wherever the Buffer::Local at
+	 * the other end published them. */
+	explicit Remote(uint64_t ea, uint32_t dmaTag, uint32_t dmaTagRangeMask = 0xffffffff)
+		: mEa(ea), mTag(dmaTag), mMask(dmaTagRangeMask)
 	{
+		if (tConstructorMode != PARAMETER)
+			return;
+		volatile uint32_t param[4] __attribute__((aligned(16)));
+		do {
+			mfc_get(param, ea + CELL_DAISY_BUFFER_PARAM_OFFSET, 16, dmaTag % 32, 0, 0);
+			mfc_write_tag_mask(1u << (dmaTag % 32));
+			mfc_read_tag_status_all();
+		} while (param[2] == 0);
+		mEa = ((uint64_t)param[0] << 32) | param[1];
 	}
 
 	void setDmaTagRangeMask(uint32_t dmaTagRangeMask) { mMask = dmaTagRangeMask; }
