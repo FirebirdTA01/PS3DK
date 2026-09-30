@@ -379,6 +379,7 @@ HEADERS := \
     include/cell/codec/adec.h \
     include/cell/codec/adec_celp.h \
     include/cell/codec/adec_celp8.h \
+    include/cell/codec/vdec.h \
     include/cell/codec/adec_base.h \
     include/cell/vpost.h \
     include/cell/codec/libatrac3plus.h \
