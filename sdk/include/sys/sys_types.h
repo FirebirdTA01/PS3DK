@@ -14,5 +14,7 @@
 
 typedef uint64_t usecond_t;
 typedef uint64_t second_t;
+/* a 64-bit file offset (newlib names it only _off64_t) */
+typedef int64_t off64_t;
 
 #endif  /* _PS3DK_SYS_SYS_TYPES_H */
