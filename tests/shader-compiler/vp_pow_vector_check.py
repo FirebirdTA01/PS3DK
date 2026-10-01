@@ -103,11 +103,14 @@ def evaluate(blob, uniforms, inputs=None, binary32=False):
                     width = 3 if vop == 5 else 4
                     assert all(a[k] is not None and b[k] is not None for k in range(width)), 'dot reads an undefined lane'
                     res[j] = sum(a[k] * b[k] for k in range(width))
-                elif vop in (2, 3, 4, 10):
-                    need = {2: (0, 1), 3: (0, 2), 4: (0, 1, 2), 10: (0, 1)}[vop]
+                elif vop in (2, 3, 4, 10, 12, 18):
+                    need = {2: (0, 1), 3: (0, 2), 4: (0, 1, 2), 10: (0, 1),
+                            12: (0, 1), 18: (0, 1)}[vop]
                     assert all(args[k] is not None for k in need), 'vector op reads an undefined lane'
                     res[j] = {2: lambda: a[j] * b[j], 3: lambda: a[j] + c[j],
-                              4: lambda: a[j] * b[j] + c[j], 10: lambda: max(a[j], b[j])}[vop]()
+                              4: lambda: a[j] * b[j] + c[j], 10: lambda: max(a[j], b[j]),
+                              12: lambda: float(a[j] >= b[j]),
+                              18: lambda: float(a[j] > b[j])}[vop]()
                 else:
                     raise AssertionError('unsupported vector opcode %d' % vop)
             out = bool(w[0] & (1 << 30))

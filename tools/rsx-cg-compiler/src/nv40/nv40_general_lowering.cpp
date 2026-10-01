@@ -5446,6 +5446,32 @@ private:
         program_.instrs.push_back(norm);
     }
 
+    // VP has no DP2. Both operands remain live; the caller supplies a distinct
+    // temporary. Collapse the product to x only when BOTH selected pairs repeat.
+    void emitVertexDot2(const VSrc& lhs, const VSrc& rhs, int result)
+    {
+        const bool sameLane = lhs.swizzle[0] == lhs.swizzle[1] &&
+                              rhs.swizzle[0] == rhs.swizzle[1];
+        VInstr product;
+        product.op = VOp::Mul;
+        product.dst.index = result;
+        product.dst.writemask = sameLane ? 0x1 : 0x3;
+        product.srcs[0] = lhs;
+        product.srcs[1] = rhs;
+        program_.instrs.push_back(product);
+
+        VInstr sum;
+        sum.op = VOp::Add;
+        sum.dst.index = result;
+        sum.dst.writemask = 0x1;
+        sum.srcs[0] = tempSrc(result);
+        sum.srcs[0].swizzle = {0, 0, 0, 0};
+        sum.srcs[1] = tempSrc(result);
+        const uint8_t secondLane = sameLane ? 0 : 1;
+        sum.srcs[1].swizzle = {secondLane, secondLane, secondLane, secondLane};
+        program_.instrs.push_back(sum);
+    }
+
     void lowerVertexNormalize(const IRInstruction& inst)
     {
         VInstr delayedPositionMov;
@@ -5468,25 +5494,7 @@ private:
             // preserving the operand's selected lanes and source modifiers.
             // The result vreg is distinct from the operand, which is still
             // live through the final multiply (including in-place source IR).
-            const bool sameLane = src.swizzle[0] == src.swizzle[1];
-            VInstr square;
-            square.op = VOp::Mul;
-            square.dst.index = result;
-            square.dst.writemask = sameLane ? 0x1 : 0x3;
-            square.srcs[0] = src;
-            square.srcs[1] = src;
-            program_.instrs.push_back(square);
-
-            VInstr sum;
-            sum.op = VOp::Add;
-            sum.dst.index = result;
-            sum.dst.writemask = 0x1;
-            sum.srcs[0] = tempSrc(result);
-            sum.srcs[0].swizzle = {0, 0, 0, 0};
-            sum.srcs[1] = tempSrc(result);
-            const uint8_t secondLane = sameLane ? 0 : 1;
-            sum.srcs[1].swizzle = {secondLane, secondLane, secondLane, secondLane};
-            program_.instrs.push_back(sum);
+            emitVertexDot2(src, src, result);
         } else {
             const bool fourLanes = width == 4;
             // float4 length includes w, and its final multiply must retain w.
@@ -7152,6 +7160,136 @@ private:
         program_.instrs.push_back(result);
     }
 
+    void lowerVertexRefract(const IRInstruction& inst)
+    {
+        const int width = inst.resultType.componentCount();
+        if (inst.operands.size() != 3 || inst.result == InvalidIRValue ||
+            width < 2 || width > 4) {
+            program_.diagnostics.push_back(
+                "nv40-general: VP refract requires width 2..4; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        const VSrc incident = resolve(inst.operands[0]);
+        const VSrc normal = resolve(inst.operands[1]);
+        const VSrc eta = resolve(inst.operands[2]);
+        VSrc negativeIncident = incident;
+        negativeIncident.neg = !negativeIncident.neg;
+        const int t = newVReg();
+        auto lane = [&](uint8_t component) {
+            VSrc value = tempSrc(t);
+            value.swizzle = {component, component, component, component};
+            return value;
+        };
+
+        // Match the oracle's d = dot(N, -I), preserving selected source lanes.
+        if (width == 2) {
+            emitVertexDot2(normal, negativeIncident, t);
+        } else {
+            VInstr dot;
+            dot.op = width == 4 ? VOp::Dp4 : VOp::Dp3;
+            dot.dst.index = t;
+            dot.dst.writemask = 0x1;
+            dot.srcs[0] = normal;
+            dot.srcs[1] = negativeIncident;
+            program_.instrs.push_back(dot);
+        }
+
+        VInstr complement;
+        complement.op = VOp::Mad;
+        complement.dst.index = t;
+        complement.dst.writemask = 0x4;
+        complement.srcs[0] = lane(0);
+        complement.srcs[0].neg = true;
+        complement.srcs[1] = lane(0);
+        complement.srcs[2] = floatLit(1.0f);
+        program_.instrs.push_back(complement);
+
+        VInstr etaSquared;
+        etaSquared.op = VOp::Mul;
+        etaSquared.dst.index = t;
+        etaSquared.dst.writemask = 0x2;
+        // resolve() already broadcasts eta's selected scalar lane.
+        etaSquared.srcs[0] = eta;
+        etaSquared.srcs[1] = eta;
+        program_.instrs.push_back(etaSquared);
+
+        VInstr q;
+        q.op = VOp::Mul;
+        q.dst.index = t;
+        q.dst.writemask = 0x2;
+        q.srcs[0] = lane(1);
+        q.srcs[1] = lane(2);
+        program_.instrs.push_back(q);
+
+        VInstr k;
+        k.op = VOp::Add;
+        k.dst.index = t;
+        k.dst.writemask = 0x4;
+        k.srcs[0] = floatLit(1.0f);
+        k.srcs[1] = lane(1);
+        k.srcs[1].neg = true;
+        program_.instrs.push_back(k);
+
+        VInstr root;
+        root.op = VOp::Rsq;
+        root.dst.index = t;
+        root.dst.writemask = 0x4;
+        root.srcs[0] = lane(2);
+        root.srcs[0].abs = true;
+        program_.instrs.push_back(root);
+        root.op = VOp::Rcp;
+        root.srcs[0] = lane(2);
+        program_.instrs.push_back(root);
+
+        VInstr coefficient;
+        coefficient.op = VOp::Mad;
+        coefficient.dst.index = t;
+        coefficient.dst.writemask = 0x4;
+        coefficient.srcs[0] = lane(0);
+        coefficient.srcs[1] = eta;
+        coefficient.srcs[2] = lane(2);
+        coefficient.srcs[2].neg = true;
+        program_.instrs.push_back(coefficient);
+
+        const int result = define(inst.result);
+        const int mask = componentMaskForWidth(width);
+        VInstr projection;
+        projection.op = VOp::Mul;
+        projection.dst.index = result;
+        projection.dst.writemask = mask;
+        projection.srcs[0] = lane(2);
+        projection.srcs[1] = normal;
+        program_.instrs.push_back(projection);
+
+        VInstr combine;
+        combine.op = VOp::Mad;
+        combine.dst.index = result;
+        combine.dst.writemask = mask;
+        combine.srcs[0] = eta;
+        combine.srcs[1] = incident;
+        combine.srcs[2] = tempSrc(result);
+        program_.instrs.push_back(combine);
+
+        // The oracle keeps only k > 0, including equality in the zero arm.
+        VInstr guard;
+        guard.op = VOp::Sgt;
+        guard.dst.index = t;
+        guard.dst.writemask = 0x1;
+        guard.srcs[0] = lane(1);
+        guard.srcs[0].neg = true;
+        guard.srcs[1] = floatLit(-1.0f);
+        program_.instrs.push_back(guard);
+
+        VInstr select;
+        select.op = VOp::Mul;
+        select.dst.index = result;
+        select.dst.writemask = mask;
+        select.srcs[0] = tempSrc(result);
+        select.srcs[1] = lane(0);
+        program_.instrs.push_back(select);
+    }
+
     // refract(I, N, eta):
     //   d = dot(N, I);  k = 1 - eta^2 * (1 - d^2)
     //   result = (k < 0) ? 0 : eta*I - (eta*d + sqrt(k)) * N
@@ -7163,6 +7301,10 @@ private:
     // That is the whole reason the |k| is there.
     void lowerRefract(const IRInstruction& inst)
     {
+        if (profile_ == GeneralProfile::Vertex) {
+            lowerVertexRefract(inst);
+            return;
+        }
         if (profile_ != GeneralProfile::Fragment ||
             inst.operands.size() < 3 || inst.result == InvalidIRValue) {
             program_.diagnostics.push_back(
