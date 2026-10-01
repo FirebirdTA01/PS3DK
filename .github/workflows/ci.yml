@@ -120,6 +120,9 @@ jobs:
       - name: Vertex coissue shared-source value regression
         run: bash tests/shader-compiler/vp-coissue-source-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Vertex normalize float3 and float4 value regression
+        run: bash tests/shader-compiler/vp-normalize-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test a run-time index into a vector is refused like the reference
         run: bash tests/shader-compiler/runtime-vector-selector-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

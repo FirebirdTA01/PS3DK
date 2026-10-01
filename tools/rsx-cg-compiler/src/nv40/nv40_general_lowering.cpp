@@ -5462,10 +5462,14 @@ private:
 
         const int result = define(inst.result);
         VSrc src = resolve(inst.operands[0]);
-        applyDp3Swizzle(src);
+        const bool fourLanes = valueWidthOf(inst.operands[0]) == 4;
+        // float4 length includes w, and its final multiply must retain w.
+        // The float3 path keeps its measured xyzx spelling unchanged.
+        if (!fourLanes)
+            applyDp3Swizzle(src);
 
         VInstr dp;
-        dp.op = VOp::Dp3;
+        dp.op = fourLanes ? VOp::Dp4 : VOp::Dp3;
         dp.dst.index = result;
         dp.dst.writemask = 0x1;
         dp.srcs[0] = src;
