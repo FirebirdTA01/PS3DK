@@ -156,14 +156,15 @@ int main(void)
 	printf("  cellDbgFontConsoleOpen -> %d\n", (int)cc_id);
 
 	/* Render loop: ~100 seconds at 60 fps, or until START. */
-	ioPadInit(7);
+	const int pad_ok = ioPadInit(7) == 0;
+	if (!pad_ok) printf("  ioPadInit failed; START will not exit\n");
 	int frame = 0;
 	int start_pressed = 0;
 	while (frame < 6000 && !start_pressed) {
 		frame++;
-		{
-			padInfo pi;
-			ioPadGetInfo(&pi);
+		if (pad_ok) {
+			padInfo pi = {0};
+			if (ioPadGetInfo(&pi) == 0)
 			for (int i = 0; i < MAX_PADS; i++) {
 				if (!pi.status[i]) continue;
 				padData pd = {0};

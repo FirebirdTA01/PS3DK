@@ -55,6 +55,7 @@ volatile unsigned g_current = ~0u;
 volatile bool g_done;
 uint64_t g_t0;
 volatile bool g_exit;
+bool g_padOk;
 
 void on_sysutil(uint64_t status, uint64_t, void *)
 {
@@ -203,7 +204,8 @@ void draw(unsigned frame)
         text(0.12f, py, 0.9f, failed ? kRed : kGreen,
              failed ? "run stopped at the first failing row" : "all rows passed");
     }
-    text(0.04f, 0.95f, 0.65f, kDim, "4 SPUs per row  -  verdicts also on the TTY  -  START exits  -  timeout %us",
+    text(0.04f, 0.95f, 0.65f, kDim, g_padOk ? "4 SPUs per row  -  verdicts also on the TTY  -  START exits  -  timeout %us"
+                                       : "4 SPUs per row  -  verdicts also on the TTY  -  NO PAD: START cannot exit  -  timeout %us",
          (unsigned)(kRowTimeout / 1000000u));
 }
 
@@ -302,7 +304,10 @@ int main()
         return 1;
 
     cellSysutilRegisterCallback(0, on_sysutil, nullptr);
-    ioPadInit(7);   /* START exits: there may be no PS button to reach Quit Game */
+    /* START exits: there may be no PS button to reach Quit Game */
+    g_padOk = ioPadInit(7) == 0;
+    if (!g_padOk)
+        std::printf("spurs-status: ioPadInit failed; START will not exit\n");
     sys_ppu_thread_t t;
     if (sys_ppu_thread_create(&t, worker, 0, 1500, 0x10000, 0, "spurs-status rows") != 0)
         return 1;
@@ -312,9 +317,9 @@ int main()
     bool flipPending = false;   /* only wait for a flip that was issued */
     for (unsigned frame = 0; !g_exit; ++frame) {
         cellSysutilCheckCallback();
-        {
-            padInfo pi;
-            ioPadGetInfo(&pi);
+        if (g_padOk) {
+            padInfo pi = {};
+            if (ioPadGetInfo(&pi) == 0)
             for (int i = 0; i < MAX_PADS; i++) {
                 if (!pi.status[i]) continue;
                 padData pd = {};
