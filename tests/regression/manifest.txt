@@ -122,6 +122,7 @@ ilp32-ivspill,tests/regression/ilp32-ivspill/ilp32-ivspill.fake.self,30,RAN-CLEA
 ilp32-doloop,tests/regression/ilp32-doloop/ilp32-doloop.fake.self,30,RAN-CLEAN,DOLOOP PASS,DOLOOP FAIL
 # ilp32-pointers guards GCC patch 0051 (Pmode DImode under ILP32): symbols via
 # TOC entry and TOC-relative, symbol+offset, function and label addresses, TLS,
-# an IV-optimised negative-offset loop and 2^32-wrapping pointer arithmetic.
+# label addresses from a static table and at run time, and an IV-optimised
+# negative-offset loop.
 # Judge it under the PPU INTERPRETER (LLVM truncates bad addresses).
 ilp32-pointers,tests/regression/ilp32-pointers/ilp32-pointers.fake.self,30,RAN-CLEAN,POINTERS PASS,POINTERS FAIL

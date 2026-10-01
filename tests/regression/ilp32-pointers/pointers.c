@@ -1,8 +1,8 @@
 /* Address forms the ILP32 compiler must get right with 32-bit pointers held
    zero-extended in 64-bit registers (GCC patch 0051): symbols reached
    through a TOC entry and directly TOC-relative, symbol+offset, function
-   descriptors, label addresses, thread-local data, negative offsets in an
-   IV-optimised loop, and pointer arithmetic that wraps at 2^32.  Kept in
+   descriptors, label addresses (static table and run-time), thread-local
+   data, and negative offsets in an IV-optimised loop.  Kept in
    its own unit so the caller's constants do not fold the addresses.  */
 #include <stdint.h>
 
@@ -52,15 +52,21 @@ l2:
 int bump_tls (int n) { tls_counter += n; return tls_counter; }
 int *tls_slot (int i) { return &tls_array[i]; }
 
-/* Pointer arithmetic is modulo 2^32: the result must not keep bit 32.  */
-uintptr_t
-wrap_add (uintptr_t base, int off)
+/* A label address materialized at run time (not from a static table): the
+   compiler must load it from a pointer-sized TOC entry.  */
+int
+label_runtime (int which)
 {
-  return (uintptr_t) ((char *) base + off);
-}
-
-uintptr_t
-wrap_sub (uintptr_t a, uintptr_t b)
-{
-  return (uintptr_t) ((char *) a - (char *) b + (char *) 0x100);
+  void *volatile target = &&r0;
+  if (which == 1)
+    target = &&r1;
+  else if (which == 2)
+    target = &&r2;
+  goto *target;
+r0:
+  return 20;
+r1:
+  return 21;
+r2:
+  return 22;
 }

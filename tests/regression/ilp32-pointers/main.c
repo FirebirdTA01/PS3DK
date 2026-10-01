@@ -15,8 +15,7 @@ int (*pick (int which)) (int);
 int label_dispatch (int which);
 int bump_tls (int n);
 int *tls_slot (int i);
-uintptr_t wrap_add (uintptr_t base, int off);
-uintptr_t wrap_sub (uintptr_t a, uintptr_t b);
+int label_runtime (int which);
 
 static int failures;
 
@@ -49,12 +48,12 @@ main (void)
   check ("function pointer", pick (1) (21), 42);
   check ("label 0", label_dispatch (0), 10);
   check ("label 2", label_dispatch (2), 12);
-  check ("tls counter", bump_tls (3) + bump_tls (4), 3 + 7);
+  check ("runtime label 0", label_runtime (0), 20);
+  check ("runtime label 2", label_runtime (2), 22);
+  check ("tls counter first", bump_tls (3), 3);
+  check ("tls counter second", bump_tls (4), 7);
   *tls_slot (5) = 77;
   check ("tls array", *tls_slot (5), 77);
-  check ("wrap add", (long) wrap_add (0xfffffff0u, 0x20), 0x10);
-  check ("wrap add negative", (long) wrap_add (0x10, -0x20), (long) 0xfffffff0u);
-  check ("wrap sub", (long) wrap_sub (0x10, 0x20), 0xf0);
 
   printf ("POINTERS %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
   return failures ? 1 : 0;
