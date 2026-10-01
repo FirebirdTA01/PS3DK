@@ -16,7 +16,7 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
 
 --- a/gcc/config/rs6000/rs6000.cc
 +++ b/gcc/config/rs6000/rs6000.cc
-@@ -3707,6 +3707,9 @@
+@@ -3694,6 +3694,9 @@
    /* Set the pointer size.  */
    /* Pointer width follows the data model selected by -mlp64; the 64-bit
       ISA is always available regardless. */
@@ -26,7 +26,7 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
    if (TARGET_LP64)
      {
        rs6000_pmode = DImode;
-@@ -3714,7 +3717,7 @@
+@@ -3701,7 +3704,7 @@
      }
    else
      {
@@ -35,7 +35,7 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
        rs6000_pointer_size = 32;
      }
  
-@@ -10597,6 +10600,23 @@
+@@ -10584,6 +10587,23 @@
        && !gpc_reg_operand (operands[1], mode))
      operands[1] = force_reg (mode, operands[1]);
  
