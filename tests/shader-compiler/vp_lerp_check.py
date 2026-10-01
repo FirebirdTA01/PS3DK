@@ -20,6 +20,7 @@ for width in range(1, 5):
                   [list(range(width))]*3, [1]*3, [False]*3))
 CASES += [
     ('scalar_factor', 4, ['A','B','T.x'], [list(range(4)),list(range(4)),[0]*4], [1]*3, [False]*3),
+    ('implicit_scalar_factor', 3, ['A.xyz','B.xyz','T.x'], [list(range(3)),list(range(3)),[0]*3], [1]*3, [False]*3),
     ('swizzled', 3, ['A.zyx','B.ywx','T.wzy'], [[2,1,0],[1,3,0],[3,2,1]], [1]*3, [False]*3),
     ('attributes', 4, ['A','B','T'], [list(range(4))]*3, [1]*3, [False]*3),
 ]
@@ -53,10 +54,13 @@ def source(case, form):
     # Scalar factor is explicitly broadcast, keeping overload conversion apart
     # from the lowering while still checking a scalar source swizzle.
     t = 'T.xxxx' if name == 'scalar_factor' else expressions[2]
+    # Keep t scalar through overload resolution; this exercises the implicit
+    # promotion used by lerp(float3, float3, float), without a cast/swizzle.
+    t_type = 'float' if name == 'implicit_scalar_factor' else ty
     expr = {'builtin':'lerp(a,b,t)', 'expanded':'a+t*(b-a)', 'weighted':'a*(1.0-t)+b*t'}[form]
     output = {1:'float4(r,0.,0.,1.)',2:'float4(r,0.,1.)',3:'float4(r,1.)',4:'r'}[width]
     return (f'void main(float4 p:POSITION, {declarations}, out float4 op:POSITION, out float4 color:COLOR0) {{\n'
-            f'op=p; {ty} a={expressions[0]}; {ty} b={expressions[1]}; {ty} t={t};\n'
+            f'op=p; {ty} a={expressions[0]}; {ty} b={expressions[1]}; {t_type} t={t};\n'
             f'{ty} r={expr}; color={output};\n}}\n')
 
 def expected(case, values):
