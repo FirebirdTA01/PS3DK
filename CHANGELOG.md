@@ -92,6 +92,11 @@ The version stamped into builds is generated from the most recent
   into bit 32.  `-fivopts` is now off by default under ILP32 (an explicit
   `-fivopts` still enables it; LP64 is unchanged).  New
   `scripts/ilp32-address-lint.py` scans a disassembly for the shape.
+- PPU compiler, ILP32: a counted loop could run about 4 billion times.  The
+  loop count went into the 64-bit count register as a 32-bit value without
+  clearing its upper half; a count computed from a negative `int` set bit
+  32.  The count is now zero-extended to register width, as in LP64.  This
+  showed up as `printf("%f")` writing digits until it faulted.
 
 ### Known limitations
 

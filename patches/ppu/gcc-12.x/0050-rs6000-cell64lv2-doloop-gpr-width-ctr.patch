@@ -1,0 +1,117 @@
+rs6000: give the doloop counter the width of CTR in the cell64lv2 ILP32 ABI
+
+CTR is a 64-bit register and bdnz decrements and tests all of it.  doloop_end
+accepted a counter in Pmode, which is SImode under the ILP32 hybrid, so a trip
+count computed in a 32-bit mode went into CTR with whatever its register held
+above bit 31.  A count derived from a negative int loaded with lwz (zero
+extended) and added at full width carries a 1 into bit 32, and the loop then
+runs about 4G times.  Found in newlib's _dtoa_r: printf("%6.2f", 0.106344f)
+wrote digits until it faulted.
+
+doloop_end now takes only a GPR-width counter (DImode when TARGET_64BIT), so
+loop-doloop.cc retries in word_mode and zero-extends the count, and the ctr
+patterns iterate over P (GPR width) instead of Pptr (pointer width).  The
+bdnztf split already used P.  rs6000-string.cc's compare loop still builds
+its CTR in Pmode while picking the _di patterns; that mismatch predates this
+patch and is not reached for -mcpu=cell (memcmp and strncmp stay library
+calls, even with the block-compare inline limits raised).
+
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -13443,24 +13443,29 @@
+    (use (match_operand 1))]	; label
+   ""
+ {
+-  if (GET_MODE (operands[0]) != Pmode)
++  /* CTR is as wide as a GPR and bdnz tests all of it.  Under the
++     cell64lv2 ILP32 hybrid Pmode is SImode, so a Pmode counter could
++     reach CTR with stale upper bits.  Take only the GPR-width counter;
++     loop-doloop.cc then zero-extends a narrower count into it.  */
++  machine_mode ctr_mode = TARGET_64BIT ? DImode : SImode;
++  if (GET_MODE (operands[0]) != ctr_mode)
+     FAIL;
+ 
+-  emit_jump_insn (gen_ctr (Pmode, operands[0], operands[1]));
++  emit_jump_insn (gen_ctr (ctr_mode, operands[0], operands[1]));
+   DONE;
+ })
+ 
+ (define_expand "@ctr<mode>"
+   [(parallel [(set (pc)
+-		   (if_then_else (ne (match_operand:Pptr 0 "register_operand")
++		   (if_then_else (ne (match_operand:P 0 "register_operand")
+ 				     (const_int 1))
+ 				 (label_ref (match_operand 1))
+ 				 (pc)))
+ 	      (set (match_dup 0)
+-		   (plus:Pptr (match_dup 0)
++		   (plus:P (match_dup 0)
+ 			    (const_int -1)))
+ 	      (clobber (match_scratch:CC 2))
+-	      (clobber (match_scratch:Pptr 3))])]
++	      (clobber (match_scratch:P 3))])]
+   ""
+   "")
+ 
+@@ -13478,15 +13483,15 @@
+ 
+ (define_insn "<bd>_<mode>"
+   [(set (pc)
+-	(if_then_else (eqne (match_operand:Pptr 1 "register_operand" "c,*b,*b,*b")
++	(if_then_else (eqne (match_operand:P 1 "register_operand" "c,*b,*b,*b")
+ 			  (const_int 1))
+ 		      (label_ref (match_operand 0))
+ 		      (pc)))
+-   (set (match_operand:Pptr 2 "nonimmediate_operand" "=1,*r,m,*d*wa*c*l")
+-	(plus:Pptr (match_dup 1)
++   (set (match_operand:P 2 "nonimmediate_operand" "=1,*r,m,*d*wa*c*l")
++	(plus:P (match_dup 1)
+ 		(const_int -1)))
+    (clobber (match_scratch:CC 3 "=X,&x,&x,&x"))
+-   (clobber (match_scratch:Pptr 4 "=X,X,&r,r"))]
++   (clobber (match_scratch:P 4 "=X,X,&r,r"))]
+   ""
+ {
+   if (which_alternative != 0)
+@@ -13512,15 +13517,15 @@
+ (define_split
+   [(set (pc)
+ 	(if_then_else (match_operator 2 "comparison_operator"
+-				      [(match_operand:Pptr 1 "gpc_reg_operand")
++				      [(match_operand:P 1 "gpc_reg_operand")
+ 				       (const_int 1)])
+ 		      (match_operand 5)
+ 		      (match_operand 6)))
+-   (set (match_operand:Pptr 0 "nonimmediate_operand")
+-	(plus:Pptr (match_dup 1)
++   (set (match_operand:P 0 "nonimmediate_operand")
++	(plus:P (match_dup 1)
+ 		(const_int -1)))
+    (clobber (match_scratch:CC 3))
+-   (clobber (match_scratch:Pptr 4))]
++   (clobber (match_scratch:P 4))]
+   "reload_completed"
+   [(set (pc)
+ 	(if_then_else (match_dup 7)
+@@ -13551,17 +13556,17 @@
+   [(set (pc)
+ 	(if_then_else
+ 	  (and
+-	     (eqne (match_operand:Pptr 1 "register_operand" "c,*b,*b,*b")
++	     (eqne (match_operand:P 1 "register_operand" "c,*b,*b,*b")
+ 		   (const_int 1))
+ 	     (match_operator 3 "branch_comparison_operator"
+ 		      [(match_operand 4 "cc_reg_operand" "y,y,y,y")
+ 		       (const_int 0)]))
+ 	  (label_ref (match_operand 0))
+ 	  (pc)))
+-   (set (match_operand:Pptr 2 "nonimmediate_operand" "=1,*r,m,*d*wa*c*l")
+-	(plus:Pptr (match_dup 1)
++   (set (match_operand:P 2 "nonimmediate_operand" "=1,*r,m,*d*wa*c*l")
++	(plus:P (match_dup 1)
+ 		(const_int -1)))
+-   (clobber (match_scratch:Pptr 5 "=X,X,&r,r"))
++   (clobber (match_scratch:P 5 "=X,X,&r,r"))
+    (clobber (match_scratch:CC 6 "=X,&y,&y,&y"))
+    (clobber (match_scratch:CCEQ 7 "=X,&y,&y,&y"))]
+   ""
