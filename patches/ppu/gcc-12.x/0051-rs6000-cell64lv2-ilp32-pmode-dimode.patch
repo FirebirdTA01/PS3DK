@@ -35,13 +35,14 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
        rs6000_pointer_size = 32;
      }
  
-@@ -10754,6 +10757,22 @@
-       return;
-     }
+@@ -10597,6 +10600,23 @@
+       && !gpc_reg_operand (operands[1], mode))
+     operands[1] = force_reg (mode, operands[1]);
  
 +  /* cell64lv2 ILP32 (t_3b6c018a): pointers are SImode in memory (ptr_mode)
 +     but addresses are formed in DImode registers (Pmode).  Build a symbolic
-+     address at Pmode width, then narrow it to the pointer.  */
++     address (including a thread-local one) at Pmode width, then narrow it
++     to the pointer.  */
 +  if (mode == ptr_mode && ptr_mode != Pmode
 +      && can_create_pseudo_p ()
 +      && (SYMBOL_REF_P (operands[1]) || GET_CODE (operands[1]) == LABEL_REF
@@ -55,6 +56,6 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
 +      return;
 +    }
 +
-   /* FIXME:  In the long term, this switch statement should go away
-      and be replaced by a sequence of tests based on things like
-      mode == Pmode.  */
+   /* Recognize the case where operand[1] is a reference to thread-local
+      data and load its address to a register.  */
+   if (tls_referenced_p (operands[1]))
