@@ -187,3 +187,5 @@ tools/rsx-cg-compiler/tests/shaders/fp_global_array_write_f.cg
 tools/rsx-cg-compiler/tests/shaders/fp_local_array_if_f.cg
 tools/rsx-cg-compiler/tests/shaders/fp_global_array_if_f.cg
 tools/rsx-cg-compiler/tests/shaders/fp_global_two_arrays_if_f.cg
+tools/rsx-cg-compiler/tests/shaders/fp_fog_after_kill_f.cg
+tools/rsx-cg-compiler/tests/shaders/fp_fog_distinct_inputs_f.cg

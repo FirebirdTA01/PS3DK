@@ -442,3 +442,7 @@ tests/regression/shader-differential/shaders/sd_pack_4ubyte.fcg|0|general
 # twin beside it is what the projection must paint.
 tests/regression/shader-differential/shaders/sd_txp.fcg|0|general
 tests/regression/shader-differential/shaders/sd_txp_div_twin.fcg|0|general
+
+# Fog after alpha kill: shared varying and distinct-varying preload control.
+tools/rsx-cg-compiler/tests/shaders/fp_fog_after_kill_f.cg|auto|general
+tools/rsx-cg-compiler/tests/shaders/fp_fog_distinct_inputs_f.cg|auto|general

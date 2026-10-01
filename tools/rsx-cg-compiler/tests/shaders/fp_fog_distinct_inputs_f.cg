@@ -1,0 +1,11 @@
+// Negative sharing control: tint and weight are DIFFERENT input attributes.
+// Sharing their preload would silently replace the blend weight or colour.
+void main(float2 uv : TEXCOORD1, float4 tint : TEXCOORD2,
+          float4 weight : TEXCOORD3, uniform sampler2D image,
+          out float4 result : COLOR)
+{
+    float4 sample = tex2D(image, uv);
+    if (sample.w < 0.0157) discard;
+    sample.xyz = tint.xyz + (sample.xyz - tint.xyz) * weight.w;
+    result = sample;
+}

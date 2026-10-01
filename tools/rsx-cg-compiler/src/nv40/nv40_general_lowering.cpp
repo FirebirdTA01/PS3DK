@@ -1799,6 +1799,7 @@ private:
         // The RAW/WAR/WAW, output and condition-code edges above remain the
         // authority; no operand pairing or floating-point association changes.
         std::vector<int> demandOrder(n, std::numeric_limits<int>::max());
+        int killDemandCount = 0;
         if (profile_ == GeneralProfile::Fragment) {
             std::unordered_set<int> singleUse;
             for (const auto& [value, reg] : program_.valueToVReg) {
@@ -1858,6 +1859,13 @@ private:
                     if (pred < i) self(self, pred);
                 demandOrder[i] = nextDemand++;
             };
+            // Finish kill prerequisites before materializing work needed only
+            // by surviving fragments. Keep every dependency edge: a prior
+            // output or condition-code write still precedes the kill when
+            // the graph requires it.
+            for (size_t i = 0; i < n; ++i)
+                if (program_.instrs[i].op == VOp::Kil) visit(visit, i);
+            killDemandCount = nextDemand;
             for (size_t i = 0; i < n; ++i)
                 if (chainLength[i] >= 3 && !extended[i]) visit(visit, i);
         }
@@ -1886,6 +1894,16 @@ private:
         ordered.reserve(n);
         int curCycle = 0;
         while (ordered.size() < n) {
+            // Latency estimates must not fill the TEX-to-KIL gap with fog
+            // preloads and lengthen their live ranges. Advancing this model
+            // emits no NOP; hardware dependencies still serialize the reads.
+            // Restrict this preference to the fragment kill subtree.
+            int killReadyTime = std::numeric_limits<int>::max();
+            for (const Node& node : ready)
+                if (!scheduled[node.index] && node.demandOrder < killDemandCount)
+                    killReadyTime = std::min(killReadyTime, node.readyTime);
+            if (killReadyTime != std::numeric_limits<int>::max())
+                curCycle = std::max(curCycle, killReadyTime);
             auto bestIt = ready.end();
             Node bestNode;
             bool found = false;
@@ -8434,7 +8452,7 @@ private:
 
     // The INPUT lanes a source reads: the instruction's required result
     // lanes pushed through the source swizzle (a DP reads all its lanes).
-    static int vpInputLanesRead(const VInstr& vi, size_t srcIndex)
+    static int inputLanesRead(const VInstr& vi, size_t srcIndex)
     {
         const int req = requiredSourceMask(vi, srcIndex);
         int lanes = 0;
@@ -8568,7 +8586,7 @@ private:
         shaped.reserve(program_.instrs.size());
         // Vertex: input register -> (staged vreg, lanes it carries).
         std::unordered_map<int, std::pair<int, int>> vpStagedInputs;
-        std::set<size_t> vpKeepSwizzle;
+        std::set<size_t> keepPreloadSwizzle;
         // Vertex: the UNION of lanes every non-direct read of an input
         // needs, so the one copy per input carries them all (the reference
         // packs n.xxxx and n.wwww into one MOV R0.xy).
@@ -8582,7 +8600,7 @@ private:
                     if (src.kind != VSrcKind::Input) continue;
                     if (first < 0) { first = src.index; continue; }
                     if (src.index == first) continue;
-                    vpNeedLanes[src.index] |= vpInputLanesRead(vi, i);
+                    vpNeedLanes[src.index] |= inputLanesRead(vi, i);
                 }
             }
         }
@@ -8642,7 +8660,7 @@ private:
             std::set<int> directInputs;
             if (profile_ == GeneralProfile::Vertex && !inputs.empty())
                 directInputs.insert(inputs.front());
-            vpKeepSwizzle.clear();
+            keepPreloadSwizzle.clear();
 
             struct PendingPreload
             {
@@ -8651,6 +8669,7 @@ private:
             };
             std::vector<PendingPreload> fullPreloads;
             std::vector<PendingPreload> halfPreloads;
+            std::unordered_map<int, size_t> fpMadPreloads;
             int directFpColor = -1;
 
             for (size_t srcIndex = 0; srcIndex < vi.srcs.size(); ++srcIndex) {
@@ -8677,7 +8696,7 @@ private:
                     // MUL o7 <- IN0.wzyx, R0.yyxx), so one copy per input
                     // serves every later consumer whose lanes it holds -
                     // the list is straight-line here, so it dominates.
-                    const int need = vpInputLanesRead(vi, srcIndex);
+                    const int need = inputLanesRead(vi, srcIndex);
                     const auto cached = vpStagedInputs.find(src.index);
                     if (cached != vpStagedInputs.end() &&
                         (cached->second.second & need) == need) {
@@ -8698,9 +8717,49 @@ private:
                     mov.srcs[0].swizzle = {0, 1, 2, 3};
                     mov.srcs[0].neg = false;
                     mov.srcs[0].abs = false;
-                    vpKeepSwizzle.insert(srcIndex);
+                    keepPreloadSwizzle.insert(srcIndex);
                     fullPreloads.push_back(PendingPreload{srcIndex, mov});
                     continue;
+                }
+
+                if (profile_ == GeneralProfile::Fragment && effOp == VOp::Mad &&
+                    !src.relative && !isHalfPrecisionFragmentInput(src)) {
+                    const int need = inputLanesRead(vi, srcIndex);
+                    const auto cached = fpMadPreloads.find(src.index);
+                    if (cached != fpMadPreloads.end()) {
+                        PendingPreload& pending = fullPreloads[cached->second];
+                        pending.mov.dst.writemask |= need;
+                        const auto swizzle = src.swizzle;
+                        const bool neg = src.neg, abs = src.abs;
+                        src = tempSrc(pending.mov.dst.index);
+                        src.swizzle = swizzle;
+                        src.neg = neg;
+                        src.abs = abs;
+                        continue;
+                    }
+                    const int input = src.index;
+                    const auto sameInput = [input](const VSrc& other) {
+                        return other.kind == VSrcKind::Input && !other.relative &&
+                               other.index == input;
+                    };
+                    if (std::count_if(vi.srcs.begin(), vi.srcs.end(), sameInput) > 1) {
+                        // One identity copy serves multiple swizzles of the
+                        // SAME attribute. Never merge different input indices:
+                        // fragment instructions carry just one input selector.
+                        VInstr mov;
+                        mov.op = VOp::Mov;
+                        mov.dst.index = newVReg();
+                        mov.dst.writemask = need;
+                        program_.vregToFp16[mov.dst.index] = false;
+                        mov.srcs[0] = src;
+                        mov.srcs[0].swizzle = {0, 1, 2, 3};
+                        mov.srcs[0].neg = false;
+                        mov.srcs[0].abs = false;
+                        fpMadPreloads[input] = fullPreloads.size();
+                        keepPreloadSwizzle.insert(srcIndex);
+                        fullPreloads.push_back(PendingPreload{srcIndex, mov});
+                        continue;
+                    }
                 }
 
                 VInstr mov;
@@ -8758,7 +8817,7 @@ private:
                     // reference DIVR fixture instead writes w and reads wwww;
                     // both demand just the component the hardware selects.
                     vi.scalarSourceDemandMask = 0x1;
-                if (vpKeepSwizzle.count(pending.srcIndex))
+                if (keepPreloadSwizzle.count(pending.srcIndex))
                     src.swizzle = keptSwizzle;
                 src.fp16 = pending.mov.dst.fp16;
                 if (effOp == VOp::Dp3 && profile_ != GeneralProfile::Fragment)

@@ -660,6 +660,8 @@ jobs:
         run: bash tests/shader-compiler/vector-subscript-bounds-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler accumulation order
         run: bash tests/shader-compiler/accumulation-order-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler fog after alpha kill
+        run: bash tests/shader-compiler/fog-order-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler composed outputs
         run: bash tests/shader-compiler/composed-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler computed lane inserts
