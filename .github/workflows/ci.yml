@@ -287,6 +287,7 @@ jobs:
       # CTR count must have a defined upper half (GCC patch 0050).
       - name: Test ILP32 counted-loop CTR counts
         run: bash tests/sdk/ilp32-doloop-codegen-test.sh
+
       # Skips without PS3DEV; with a PPU compiler, the E* errno names must be
       # the LV2 status codes (newlib patch 0018).
       - name: Test LV2 errno values
