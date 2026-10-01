@@ -109,3 +109,9 @@ sheap-key-mutex,tests/regression/spu-sheap/sheap-key-mutex.fake.self,120,RAN-CLE
 # gcm-method-words checks the command words of the gcm texture-state and
 # reserve functions against values computed from the method layouts.
 gcm-method-words,tests/regression/gcm-method-words/gcm-method-words.fake.self,20,RAN-CLEAN,GCM_WORDS_OK,GCM_WORDS_FAIL
+# ilp32-ivspill guards GCC patch 0049: an ILP32 loop whose IV bias the
+# optimizer used to spill as 32 bits and reload zero-extended, leaking bit 32
+# into an address.  Judge it under the PPU INTERPRETER: RPCS3's LLVM
+# recompiler truncates the bad address and the row passes on a broken
+# compiler.  tests/sdk/ilp32-ivspill-codegen-test.sh is the compile-time guard.
+ilp32-ivspill,tests/regression/ilp32-ivspill/ilp32-ivspill.fake.self,30,RAN-CLEAN,IVSPILL PASS,IVSPILL FAIL

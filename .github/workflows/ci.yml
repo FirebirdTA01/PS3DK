@@ -278,6 +278,11 @@ jobs:
       - name: Test AltiVec keywords under a strict -std=
         run: bash tests/sdk/altivec-strict-std-test.sh
 
+      # Skips without PS3DEV; with a PPU compiler, the ILP32 reproducer must
+      # form no address from an untruncated 32-bit reload (GCC patch 0049).
+      - name: Test ILP32 address formation in the IV-spill reproducer
+        run: bash tests/sdk/ilp32-ivspill-codegen-test.sh
+
       # Skips without PS3DEV; runs against an installed or candidate compiler.
       - name: Test -mminimal-toc in both PPU ABIs
         run: bash tests/sdk/minimal-toc-ilp32-test.sh
