@@ -39,11 +39,10 @@
  * pthread_exit (cleanup handlers pushed with pthread_cleanup_push run only
  * when popped with a non-zero argument).
  *
- * Errno note: <sys/mutex.h> reaches <sys/synchronization.h>, which
- * redefines EBUSY to the Lv-2 value 0x8001000A.  Everything here returns
- * POSIX errno values — pthread_mutex_trylock returns EBUSY == 16 — so the
- * POSIX value is restored after the includes, and lv2error() from
- * <sys/lv2errno.h> does the translation.
+ * Errno note: on this target the E* names are the Lv-2 status codes
+ * (EBUSY == 0x8001000A, see <sys/_lv2_errno.h>), so a pthread function
+ * returns the same value a caller compares against by name, and lv2error()
+ * from <sys/lv2errno.h> maps a status code to itself.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  * Copyright (c) 2026 PS3 Custom Toolchain Contributors
@@ -64,10 +63,6 @@
 #include <sys/systime.h>
 #include <sys/lv2errno.h>
 #include <lv2/thread.h>
-
-/* The Lv-2 headers above redefine EBUSY; this file speaks POSIX. */
-#undef EBUSY
-#define EBUSY 16
 
 /* ------------------------------------------------------------------ *
  * Tunables
@@ -502,8 +497,7 @@ pthread_mutex_trylock(pthread_mutex_t *mutex)
 	if (rc == PT_LV2_EDEADLK)
 		return EBUSY;
 
-	/* Everything else translates normally; CELL_EBUSY (0x8001000A)
-	 * becomes POSIX EBUSY (16). */
+	/* Everything else translates normally (CELL_EBUSY is EBUSY). */
 	return pt_err(rc);
 }
 

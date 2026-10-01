@@ -15,3 +15,4 @@
 0015-malloc-16-byte-align-for-vmx-quadwords.patch
 0016-newlib-remove-directories.patch
 0017-stdlib-h-memalign-and-std-memalign.patch
+0018-lv2-errno-values.patch

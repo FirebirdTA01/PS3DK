@@ -23,13 +23,6 @@
 #include <stdint.h>
 #include <ppu-types.h>
 #include <errno.h>
-/* lv2 syscalls return the kernel status CELL_EBUSY (0x8001000A), not the libc
- * POSIX EBUSY (16) that <errno.h> defines above.  Restore the lv2 value so
- * source-compatible callers that test a syscall result against EBUSY (e.g. the
- * FW flip handlers queue-full tolerance) compare correctly; other POSIX errno
- * names stay available for libc-style use. */
-#undef EBUSY
-#define EBUSY (-2147418102) /* 0x8001000A, lv2 CELL_EBUSY */
 #include <sys/lv2_syscall.h>
 #include <sys/return_code.h>
 #include <sys/sys_types.h>
