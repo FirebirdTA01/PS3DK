@@ -1,0 +1,60 @@
+rs6000: form ILP32 addresses in 64-bit registers (Pmode DImode, ptr_mode SImode)
+
+The cell64lv2 ILP32 data model kept Pmode at SImode, so the compiler formed
+addresses in 32-bit modes while the PPU uses all 64 bits of a base register.
+Any 32-bit address value whose upper half was not cleared (a spilled IV
+bias reloaded with lwz, a trip count in CTR) reached the hardware with bit
+32 set; 0049 (no ivopts) and 0050 (doloop width) patched two instances.
+
+Make Pmode DImode whenever the 64-bit ISA is on and keep POINTER_SIZE at 32
+under ILP32, so ptr_mode stays SImode: pointers are 32-bit in memory and
+zero-extended (POINTERS_EXTEND_UNSIGNED) into 64-bit registers to address.
+A symbolic address moved in ptr_mode is now built at Pmode width and then
+narrowed, since TOC-relative references are Pmode.
+
+EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -3707,6 +3707,9 @@
+   /* Set the pointer size.  */
+   /* Pointer width follows the data model selected by -mlp64; the 64-bit
+      ISA is always available regardless. */
++  /* EXPERIMENT (t_3b6c018a): addresses are formed in full 64-bit registers
++     whenever the 64-bit ISA is on; only the in-memory pointer (ptr_mode,
++     from POINTER_SIZE) follows the data model.  */
+   if (TARGET_LP64)
+     {
+       rs6000_pmode = DImode;
+@@ -3714,7 +3717,7 @@
+     }
+   else
+     {
+-      rs6000_pmode = SImode;
++      rs6000_pmode = TARGET_64BIT ? DImode : SImode;
+       rs6000_pointer_size = 32;
+     }
+ 
+@@ -10754,6 +10757,22 @@
+       return;
+     }
+ 
++  /* cell64lv2 ILP32 (t_3b6c018a): pointers are SImode in memory (ptr_mode)
++     but addresses are formed in DImode registers (Pmode).  Build a symbolic
++     address at Pmode width, then narrow it to the pointer.  */
++  if (mode == ptr_mode && ptr_mode != Pmode
++      && can_create_pseudo_p ()
++      && (SYMBOL_REF_P (operands[1]) || GET_CODE (operands[1]) == LABEL_REF
++	  || (GET_CODE (operands[1]) == CONST
++	      && !CONST_INT_P (XEXP (operands[1], 0)))))
++    {
++      rtx addr = convert_memory_address (Pmode, operands[1]);
++      rtx tmp = gen_reg_rtx (Pmode);
++      rs6000_emit_move (tmp, addr, Pmode);
++      emit_move_insn (operands[0], gen_lowpart (ptr_mode, tmp));
++      return;
++    }
++
+   /* FIXME:  In the long term, this switch statement should go away
+      and be replaced by a sequence of tests based on things like
+      mode == Pmode.  */
