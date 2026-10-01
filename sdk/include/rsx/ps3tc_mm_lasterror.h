@@ -19,10 +19,19 @@ never be split across the two libraries.  There is no duplicate-symbol
 error in either layout, so the guarantee is co-location in one object,
 not a link failure.
 
-Thread-safety: \c ps3tc_rsx_mm_last_error reads a process-global
-integer with no synchronisation, like a pre-thread-local errno.  Do
-not rely on it from two threads concurrently; on a single thread it
-reflects the most recent RSX heap call.
+Thread-safety: the code is a process-global word that the allocators
+write with __ATOMIC_RELAXED stores and the query reads with a matching
+load, so concurrent threads cannot corrupt it.  It is therefore the
+most recent outcome from ANY thread (last writer wins), well-defined
+but not per-thread; there is no thread-local result.  The store is
+performed by each allocator after the shared heap has released its
+internal lock, so a reader observes some complete store, never torn,
+on the PPU it compiles to a plain stw/lwz.
+
+Known limitation: rsxHeapInit does not check heapInit's return value,
+so a heapInit failure (which in practice never happens for this
+allocator) is not recorded as an error; a successful rsxHeapInit
+still leaves the code at PS3TC_RSX_MM_LASTERROR_OK.
 */
 
 #ifndef __PS3TC_RSX_MM_LASTERROR_H__

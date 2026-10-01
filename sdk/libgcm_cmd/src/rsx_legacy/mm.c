@@ -23,8 +23,12 @@ static u32 __rsxheap_initialized = 0;
  * static and the ps3tc_rsx_mm_last_error* getters below live in the
  * same object as the rsx*allocator they report on, so the query a
  * caller observes is the one for the allocator that was linked; the
- * pair cannot be split across librsx.a and libgcm_cmd.a.  Read/write
- * is not synchronised: pre-thread-local-errno semantics. */
+ * pair cannot be split across librsx.a and libgcm_cmd.a.
+ * The write goes through __atomic_store_n(..., __ATOMIC_RELAXED) and
+ * the query ps3tc_rsx_mm_last_error reads with a matching
+ * __atomic_load_n, so concurrent allocators and readers cannot corrupt
+ * the word and the reader sees some complete store (last writer wins).
+ * On the PPU target these lower to a plain stw / lwz with no fence. */
 static s32 __rsx_mm_last_error = PS3TC_RSX_MM_LASTERROR_OK;
 
 static void __rsx_mm_set_last_error(s32 code)
@@ -39,7 +43,7 @@ static void __rsx_mm_set_last_error(s32 code)
 		fprintf(stderr, "ps3tc rsx mm: %s\n",
 				ps3tc_rsx_mm_last_error_string(code));
 #endif
-	__rsx_mm_last_error = code;
+	__atomic_store_n(&__rsx_mm_last_error, code, __ATOMIC_RELAXED);
 }
 
 s32 rsxHeapInit()
@@ -122,7 +126,7 @@ void rsxFree(void *ptr)
 
 s32 ps3tc_rsx_mm_last_error(void)
 {
-	return __rsx_mm_last_error;
+	return __atomic_load_n(&__rsx_mm_last_error, __ATOMIC_RELAXED);
 }
 
 const char *ps3tc_rsx_mm_last_error_string(s32 code)

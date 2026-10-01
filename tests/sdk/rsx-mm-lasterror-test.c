@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #include <ppu-types.h>
 #include <rsx/gcm_sys.h>
@@ -49,6 +50,13 @@ static const void *blocks[MAX_BLOCKS];
 static size_t nblocks = 0;
 
 static int gcfg_force_fail = 0;               /* stub gcmGetConfiguration  */
+
+/* The stub heap is shared by the hammer threads.  Guard its arena pointer
+ * and block registry so the ONLY unsynchronised shared word left in the
+ * process is __rsx_mm_last_error (owned by mm.c) -- which is the word the
+ * atomicity row is checking.  If the stub itself raced, an ASan/UBSAN
+ * report would name the harness, not the code under test. */
+static pthread_mutex_t stub_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static void register_block(const void *p)
 {
@@ -82,19 +90,23 @@ uintptr_t heapInit(heap_cntrl *theheap, void *start_addr, uintptr_t size)
 {
     (void)theheap;
     (void)start_addr;                          /* stub uses its own arena */
+    pthread_mutex_lock(&stub_mu);
     capacity = (size_t)size;
     stub_reset();
+    pthread_mutex_unlock(&stub_mu);
     return (uintptr_t)1;
 }
 
 void *heapAllocate(heap_cntrl *theheap, uintptr_t size)
 {
     (void)theheap;
-    if (nblocks >= MAX_BLOCKS) return NULL;
-    if (size > capacity || arena_off + size > capacity) return NULL;
+    pthread_mutex_lock(&stub_mu);
+    if (nblocks >= MAX_BLOCKS) { pthread_mutex_unlock(&stub_mu); return NULL; }
+    if (size > capacity || arena_off + size > capacity) { pthread_mutex_unlock(&stub_mu); return NULL; }
     void *p = arena + arena_off;
     arena_off += size;
     register_block(p);
+    pthread_mutex_unlock(&stub_mu);
     return p;
 }
 
@@ -102,13 +114,15 @@ void *heapAllocateAligned(heap_cntrl *theheap, uintptr_t size, uintptr_t alignme
 {
     (void)theheap;
     if (alignment == 0) alignment = 1;
+    pthread_mutex_lock(&stub_mu);
     size_t base = arena_off;
     size_t aligned = (base + (alignment - 1)) & ~(size_t)(alignment - 1);
-    if (aligned >= capacity || aligned + size > capacity) return NULL;
-    if (nblocks >= MAX_BLOCKS) return NULL;
+    if (aligned >= capacity || aligned + size > capacity) { pthread_mutex_unlock(&stub_mu); return NULL; }
+    if (nblocks >= MAX_BLOCKS) { pthread_mutex_unlock(&stub_mu); return NULL; }
     void *p = arena + aligned;
     arena_off = aligned + size;
     register_block(p);
+    pthread_mutex_unlock(&stub_mu);
     return p;
 }
 
@@ -116,15 +130,55 @@ bool heapFree(heap_cntrl *theheap, void *ptr)
 {
     (void)theheap;
     if (ptr == NULL) return false;
-    if (!is_block_base(ptr)) return false;     /* interior / out-of-range */
+    pthread_mutex_lock(&stub_mu);
+    if (!is_block_base(ptr)) { pthread_mutex_unlock(&stub_mu); return false; }  /* interior / out-of-range */
     for (size_t i = 0; i < nblocks; i++)
         if (blocks[i] == ptr) { blocks[i] = blocks[--nblocks]; break; }
+    pthread_mutex_unlock(&stub_mu);
     return true;
 }
 
 /* ---- the test --------------------------------------------------------- */
 
 static int failures = 0;
+
+/* True for every code the library is documented to produce. */
+static int is_defined_code(int c)
+{
+    if (c == PS3TC_RSX_MM_LASTERROR_OK)            return 1;
+    if (c == PS3TC_RSX_MM_LASTERROR_GCM_CONFIG)    return 1;
+    if (c == PS3TC_RSX_MM_LASTERROR_UNINIT)        return 1;
+    if (c == PS3TC_RSX_MM_LASTERROR_ALLOCATION)    return 1;
+    if (c == PS3TC_RSX_MM_LASTERROR_FREE)          return 1;
+    return 0;
+}
+
+/* ---- concurrent-allocation hammer (codex change 1) --------------------
+ * Two pthreads hammer rsxMalloc / rsxFree at the same time, then the
+ * test asserts the final query returns a code from the defined set.
+ * The only unsynchronised shared word left in the process is the one
+ * mm.c owns (the stub heap itself is mutex-protected), so this row
+ * exercises the __atomic store/load pair in mm.c and must stay clean
+ * under ASan/UBSan.  The stub arena does not reclaim freed space, so
+ * after the working set is exhausted rsxMalloc starts returning NULL
+ * and interleaves ALLOCATION with OK verdicts; both are defined codes,
+ * so the final-query assertion holds regardless of scheduling.  */
+#define HAMMER_ITERS 2000
+struct hammer {
+    int iters;
+};
+static void *hammer_main(void *arg)
+{
+    struct hammer *h = (struct hammer *)arg;
+    for (int i = 0; i < h->iters; i++) {
+        void *p = rsxMalloc(64);
+        if (p) rsxFree(p);
+        /* also let the query read race the writer -- it is the read path
+         * in the row that needs to be clean too */
+        (void)ps3tc_rsx_mm_last_error();
+    }
+    return NULL;
+}
 
 static void expect(const char *what, int got, int want)
 {
@@ -197,13 +251,38 @@ int main(void)
     rsxFree(arena + ((1 << 16) - 8));          /* out-of-range (never handed out) */
     expect("out-of-range free", ps3tc_rsx_mm_last_error(), PS3TC_RSX_MM_LASTERROR_FREE);
 
-    /* --- OK: a valid free clears back to OK (sticky-clear contract) ----- */
+    /* --- OK: a valid free clears back to OK (sticky-clear contract) -----
+       Force a FREE first, otherwise the preceding successful malloc has
+       already set OK and this row would pass even if a valid free failed
+       to clear the code.                                      */
     printf("[OK free]\n");
     stub_reset();
     void *blk2 = rsxMalloc(64);
     if (blk2 == NULL) { printf("  FAIL  setup rsxMalloc(64) must succeed\n"); failures++; return 1; }
-    rsxFree(blk2);                             /* free the real block base */
+    rsxFree((char *)blk2 + 4);               /* interior -> FREE first */
+    expect("free an interior ptr -> FREE", ps3tc_rsx_mm_last_error(), PS3TC_RSX_MM_LASTERROR_FREE);
+    rsxFree(blk2);                           /* now free the real block base */
     expect("valid free clears to OK", ps3tc_rsx_mm_last_error(), PS3TC_RSX_MM_LASTERROR_OK);
+
+    /* --- THREADS: two pthreads hammer malloc/free; the query must observe
+       a defined code and the build must stay clean under ASan/UBSan.  --- */
+    printf("[THREADS]\n");
+    stub_reset();
+    struct hammer h = { .iters = HAMMER_ITERS };
+    pthread_t t0, t1;
+    if (pthread_create(&t0, NULL, hammer_main, &h) != 0 ||
+        pthread_create(&t1, NULL, hammer_main, &h) != 0) {
+        printf("  FAIL  pthread_create\n"); failures++; return 1;
+    }
+    pthread_join(t0, NULL);
+    pthread_join(t1, NULL);
+    int final_code = ps3tc_rsx_mm_last_error();
+    if (is_defined_code(final_code)) {
+        printf("  PASS  hammer: final code = %d (defined)\n", final_code);
+    } else {
+        printf("  FAIL  hammer: final code = %d (undefined)\n", final_code);
+        failures++;
+    }
 
     /* --- _string: every code has a stable, non-NULL description --------- */
     printf("[string]\n");
