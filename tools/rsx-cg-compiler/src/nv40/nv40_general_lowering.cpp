@@ -6587,6 +6587,51 @@ private:
 
     void lowerLerp(const IRInstruction& inst)
     {
+        if (profile_ == GeneralProfile::Vertex) {
+            const int width = inst.resultType.componentCount();
+            if (inst.operands.size() != 3 || inst.result == InvalidIRValue ||
+                width < 1 || width > 4) {
+                program_.diagnostics.push_back(
+                    "nv40-general: VP lerp requires scalar/vector operands; refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+
+            // Match the oracle's delta formula, not a*(1-t)+b*t. Preserve
+            // separate MUL/ADD rounding as on our expanded VP arithmetic
+            // path; selector-feasible MAD contraction is a separate debt.
+            const VSrc a = resolve(inst.operands[0]);
+            const VSrc b = resolve(inst.operands[1]);
+            const VSrc t = resolve(inst.operands[2]);
+            const int mask = componentMask(inst.resultType);
+            const int deltaReg = newVReg();
+            VInstr delta;
+            delta.op = VOp::Add;
+            delta.dst.index = deltaReg;
+            delta.dst.writemask = mask;
+            delta.srcs[0] = b;
+            delta.srcs[1] = a;
+            delta.srcs[1].neg = !delta.srcs[1].neg;
+            program_.instrs.push_back(delta);
+
+            const int productReg = newVReg();
+            VInstr product;
+            product.op = VOp::Mul;
+            product.dst.index = productReg;
+            product.dst.writemask = mask;
+            product.srcs[0] = tempSrc(deltaReg);
+            product.srcs[1] = t;
+            program_.instrs.push_back(product);
+
+            VInstr add;
+            add.op = VOp::Add;
+            add.dst.index = define(inst.result);
+            add.dst.writemask = mask;
+            add.srcs[0] = a;
+            add.srcs[1] = tempSrc(productReg);
+            program_.instrs.push_back(add);
+            return;
+        }
         if (profile_ != GeneralProfile::Fragment ||
             inst.operands.size() < 3 || inst.result == InvalidIRValue) {
             program_.diagnostics.push_back(

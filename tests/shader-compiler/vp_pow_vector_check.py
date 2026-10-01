@@ -49,7 +49,7 @@ INDEX_CONST = 1 << 1                    # word 3: address-register-relative cons
 COL0 = 1
 
 
-def evaluate(blob, uniforms, inputs=None):
+def evaluate(blob, uniforms, inputs=None, binary32=False):
     """Run a VP container; return {output register: [x, y, z, w]}."""
     u = lambda off: struct.unpack_from('>I', blob, off)[0]
     assert len(blob) >= 32 and u(0) == 7003, 'not a VP container'
@@ -129,7 +129,11 @@ def evaluate(blob, uniforms, inputs=None):
         for out, dst, lanes, res in writes:
             target = (outputs if out else regs).setdefault(dst, [None] * 4)
             for j in lanes:
-                target[j] = res[j]
+                # Opt-in for rounding-sensitive probes. Legacy transcendental
+                # tests retain their wider host model. MAD rounds once here;
+                # separate MUL/ADD instructions each round at their own write.
+                target[j] = (struct.unpack('>f', struct.pack('>f', res[j]))[0]
+                             if binary32 and res[j] is not None else res[j])
     return outputs
 
 
