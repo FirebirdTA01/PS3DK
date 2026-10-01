@@ -245,6 +245,7 @@ jobs:
 
       - name: Test librt stat and fstat report EOVERFLOW for sizes beyond off_t
         run: bash tests/sdk/librt-fstat-eoverflow-test.sh
+        run: bash tests/sdk/librt-lv2errno-test.sh
 
       - name: Test POSIX clocks sleep and scheduling attributes
         run: python3 tests/sdk/posix-time-host-test.py
