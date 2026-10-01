@@ -1,0 +1,5 @@
+// The second use of TEXCOORD2 must retain absolute value after preload sharing.
+float4 main(float4 fog : TEXCOORD2) : COLOR
+{
+    return float4(fog.xyz * abs(fog.www) + float3(0.125, 0.25, 0.5), 1.0);
+}
