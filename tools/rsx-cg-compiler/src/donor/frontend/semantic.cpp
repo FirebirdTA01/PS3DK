@@ -1142,6 +1142,20 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
                                  expr->functionName);
             return CgType::Error();
         }
+        // ONLY BUILTINS ARE VISIBLE AND NONE FITS.  The reference holds this
+        // like the C1008 class and reports it only in entry-reachable bodies:
+        // an unused helper calling tex1D(s, p, 0), tex1Dfetch(sampler1D, int4)
+        // or a wrong-arity builtin compiles, and the same call from main is
+        // refused (measured, t_a287040c).  libretro's gamma-management.h
+        // wrappers are exactly that shape.  A visible SOURCE declaration that
+        // does not fit stays C1103 everywhere (fp_reach_unreached_arity_refuse_f).
+        if (!symbols_.hasVisibleSourceFunction(expr->functionName, visibleThrough_))
+        {
+            deferOrEmitNameError(expr->loc,
+                                 "no matching function for call to '" + sig + "'",
+                                 std::string());
+            return CgType::Error();
+        }
         error(expr->loc, "no matching function for call to '" + sig + "'");
         return CgType::Error();
     }

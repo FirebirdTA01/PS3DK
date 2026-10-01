@@ -137,6 +137,20 @@ refuse fp_reach_unreached_arity_refuse_f        "a wrong ARITY is not gated - C1
 refuse fp_reach_visible_name_arity_refuse_f        "a VISIBLE name with wrong arity is C1103 even with a later exact overload"
 accept fp_reach_suppressed_no_cascade_f        "a suppressed missing name does not cascade into an arity error"
 
+# ---- a BUILTIN with no fitting overload is held like C1008 (t_a287040c) ----
+# Measured: when only builtins are visible for the name and none fits, the
+# reference reports it only in entry-reachable bodies, while a visible SOURCE
+# declaration with the wrong arity stays C1103 everywhere (rows above).  The
+# accepted containers are byte-identical to the reference passthrough.
+accept fp_reach_unreached_builtin_arity_f        "a builtin with no fitting overload (tex2D, 3 args), unreachable"
+accept fp_reach_unreached_builtin_libretro_f        "the libretro tex1D(sampler1D, float, int) wrapper, unreachable"
+accept fp_reach_unreached_builtin_type_f        "a builtin with no fitting TYPE (dot on samplers), unreachable"
+accept fp_reach_unreached_builtin_transitive_f        "the failing builtin two calls deep, unreachable"
+accept fp_reach_unreached_builtin_cascade_f        "a held builtin failure does not cascade into its caller"
+refuse fp_reach_reachable_builtin_arity_refuse_f        "the same builtin call in a REACHABLE body"
+refuse fp_reach_reachable_builtin_transitive_refuse_f        "the failing builtin reached through two calls"
+refuse fp_reach_if_false_builtin_refuse_f        "no branch pruning: the failing builtin inside if(false)"
+
 # The reachable mirrors.  Each ACCEPT above is satisfied by a compiler that
 # never reports the class at all; these are what stop that.
 refuse fp_reach_reachable_forward_refuse_f        "the same forward call in a REACHABLE body"

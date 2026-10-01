@@ -239,6 +239,22 @@ bool SymbolTable::hasVisibleFunction(const std::string& name,
     return false;
 }
 
+bool SymbolTable::hasVisibleSourceFunction(const std::string& name,
+                                           size_t visibleThrough) const
+{
+    auto it = functionOverloads.find(name);
+    if (it == functionOverloads.end()) return false;
+    for (Symbol* sym : it->second)
+    {
+        // Builtins are Function symbols too (isIntrinsic, no FunctionDecl);
+        // a source declaration is the one that carries its declaration.
+        if (sym->kind == SymbolKind::Function && sym->declaration &&
+            sym->declIndex <= visibleThrough)
+            return true;
+    }
+    return false;
+}
+
 std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
     const std::string& name,
     const std::vector<CgType>& argumentTypes,

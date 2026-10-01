@@ -188,6 +188,13 @@ public:
     // overload of it fits this call" (C1103, unconditional).
     bool hasVisibleFunction(const std::string& name, size_t visibleThrough) const;
 
+    // Does this NAME have a visible SOURCE declaration (not a builtin)?  A call
+    // whose only visible candidates are builtins and none fits is held like
+    // the C1008 class: the reference reports it only in entry-reachable
+    // bodies (measured, t_a287040c), while a visible source declaration that
+    // does not fit is C1103 everywhere.
+    bool hasVisibleSourceFunction(const std::string& name, size_t visibleThrough) const;
+
     // Record / query an unresolved use in the CURRENT scope instance; see
     // Scope::noteUnresolvedUse for why the scope and not the function.
     void noteUnresolvedUse(const std::string& name)
