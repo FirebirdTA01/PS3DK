@@ -65,6 +65,7 @@ EOF
 "$cc" -std=c11 -Wall -Wextra -Werror "${san[@]}" \
     -I "$shim" \
     -I "$inc_rsx" \
+    -I "$inc_rsx/rsx" \
     -I "$inc_gcm" \
     "$mm_c" "$src" \
     -o "$tmp/test"

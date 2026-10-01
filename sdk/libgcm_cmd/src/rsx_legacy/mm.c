@@ -137,7 +137,7 @@ const char *ps3tc_rsx_mm_last_error_string(s32 code)
 	case PS3TC_RSX_MM_LASTERROR_ALLOCATION:
 		return "RSX allocation failed (heap exhausted or request too large)";
 	case PS3TC_RSX_MM_LASTERROR_FREE:
-		return "rsxFree rejected the pointer (NULL, or interior / out of range)";
+		return "rsxFree rejected the pointer (interior or out of range)";
 	default:
 		return "unknown last error";
 	}
