@@ -9,8 +9,11 @@ bias reloaded with lwz, a trip count in CTR) reached the hardware with bit
 Make Pmode DImode whenever the 64-bit ISA is on and keep POINTER_SIZE at 32
 under ILP32, so ptr_mode stays SImode: pointers are 32-bit in memory and
 zero-extended (POINTERS_EXTEND_UNSIGNED) into 64-bit registers to address.
-A symbolic address moved in ptr_mode is now built at Pmode width and then
-narrowed, since TOC-relative references are Pmode.
+A symbolic address computed from the TOC pointer (local data, constant-pool
+labels) or a TLS address is built at Pmode width and then narrowed.  A symbol
+reached through a TOC entry keeps a pointer-sized (4-byte) entry loaded with
+lwz, and output_toc sizes entries by ptr_mode, as the reference toolchain
+does (ADDR32 relocations in .toc).
 
 EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
 
@@ -35,7 +38,7 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
        rs6000_pointer_size = 32;
      }
  
-@@ -10584,6 +10587,23 @@
+@@ -10584,6 +10587,48 @@
        && !gpc_reg_operand (operands[1], mode))
      operands[1] = force_reg (mode, operands[1]);
  
@@ -49,13 +52,47 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
 +	  || (GET_CODE (operands[1]) == CONST
 +	      && !CONST_INT_P (XEXP (operands[1], 0)))))
 +    {
-+      rtx addr = convert_memory_address (Pmode, operands[1]);
-+      rtx tmp = gen_reg_rtx (Pmode);
-+      rs6000_emit_move (tmp, addr, Pmode);
-+      emit_move_insn (operands[0], gen_lowpart (ptr_mode, tmp));
-+      return;
++      rtx base = operands[1];
++      if (GET_CODE (base) == CONST && GET_CODE (XEXP (base, 0)) == PLUS)
++	base = XEXP (XEXP (base, 0), 0);
++      bool direct = (!TARGET_TOC
++		     || tls_referenced_p (operands[1])
++		     || !SYMBOL_REF_P (base)
++		     || use_toc_relative_ref (base, Pmode));
++      if (direct)
++	{
++	  /* An address computed from the TOC pointer (or a TLS address) is
++	     formed at Pmode width, then narrowed to the pointer.  */
++	  rtx addr = convert_memory_address (Pmode, operands[1]);
++	  rtx tmp = gen_reg_rtx (Pmode);
++	  rs6000_emit_move (tmp, addr, Pmode);
++	  emit_move_insn (operands[0], gen_lowpart (ptr_mode, tmp));
++	  return;
++	}
++      /* Otherwise the address lives in a pointer-sized TOC entry: load it
++	 with lwz from a 4-byte slot, as the reference toolchain does.  */
++      rtx mem = force_const_mem (ptr_mode, operands[1]);
++      if (mem
++	  && SYMBOL_REF_P (XEXP (mem, 0))
++	  && use_toc_relative_ref (XEXP (mem, 0), ptr_mode))
++	{
++	  rtx tocref = create_TOC_reference (XEXP (mem, 0), NULL_RTX);
++	  mem = gen_const_mem (ptr_mode, tocref);
++	  set_mem_alias_set (mem, get_TOC_alias_set ());
++	  emit_move_insn (operands[0], mem);
++	  return;
++	}
 +    }
 +
    /* Recognize the case where operand[1] is a reference to thread-local
       data and load its address to a register.  */
    if (tls_referenced_p (operands[1]))
+@@ -17310,7 +17355,7 @@
+        even though TARGET_64BIT is set; gate on Pmode rather than
+        TARGET_32BIT so the .toc input section gets 4-byte slots that
+        a `lwz @toc@l(r2)` load can read directly.  */
+-    fputs (Pmode == SImode ? "\t.long " : DOUBLE_INT_ASM_OP, file);
++    fputs (ptr_mode == SImode ? "\t.long " : DOUBLE_INT_ASM_OP, file);
+   else
+     {
+       fputs ("\t.tc ", file);
