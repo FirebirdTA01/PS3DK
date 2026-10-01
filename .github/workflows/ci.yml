@@ -733,6 +733,10 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\container-metrics-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\container-metrics-allowance-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\container-metrics-identity-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\current-census-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\current-gap-summary-test.ps1
