@@ -347,10 +347,10 @@ int main()
     ioPadEnd();
     cellDbgFontExitGcm();
     cellGcmFinish(ctx, 0);
-    /* Leave without the C/C++ exit path.  A failed row keeps its SPURS
-       instance and SPUs on purpose, and a static destructor or atexit
-       handler that tears SPURS down waits on them forever on hardware (the
-       board froze on START after spurs-jq-spu failed).  The kernel reclaims
-       the SPU thread groups, threads and memory of an exiting process. */
+    /* Leave without the C/C++ exit path.  On a real PS3 the board froze on
+       START after spurs-jq-spu had failed.  A failed row keeps its SPURS
+       instance and SPUs on purpose; the SUSPECTED (not proven) cause is
+       exit-time teardown waiting on them.  The kernel reclaims the SPU
+       thread groups, threads and memory of an exiting process. */
     sys_process_exit(0);
 }
