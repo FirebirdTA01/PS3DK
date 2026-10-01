@@ -11,9 +11,11 @@ under ILP32, so ptr_mode stays SImode: pointers are 32-bit in memory and
 zero-extended (POINTERS_EXTEND_UNSIGNED) into 64-bit registers to address.
 A symbolic address computed from the TOC pointer (local data, constant-pool
 labels) or a TLS address is built at Pmode width and then narrowed.  A symbol
-reached through a TOC entry keeps a pointer-sized (4-byte) entry loaded with
-lwz, and output_toc sizes entries by ptr_mode, as the reference toolchain
-does (ADDR32 relocations in .toc).
+or label reached through a TOC entry keeps a pointer-sized (4-byte) entry
+loaded with lwz, as the reference toolchain does (ADDR32 relocations in .toc).
+output_toc sizes a symbolic entry by the mode it was created in, so a 4-byte
+slot is always read with lwz and an 8-byte one with ld; the -mminimal-toc
+base slot is 4 bytes and load_toc_aix_di reads it with lwz.
 
 EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
 
@@ -57,8 +59,8 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
 +	base = XEXP (XEXP (base, 0), 0);
 +      bool direct = (!TARGET_TOC
 +		     || tls_referenced_p (operands[1])
-+		     || !SYMBOL_REF_P (base)
-+		     || use_toc_relative_ref (base, Pmode));
++		     || (SYMBOL_REF_P (base)
++			 && use_toc_relative_ref (base, Pmode)));
 +      if (direct)
 +	{
 +	  /* An address computed from the TOC pointer (or a TLS address) is
@@ -87,12 +89,35 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
    /* Recognize the case where operand[1] is a reference to thread-local
       data and load its address to a register.  */
    if (tls_referenced_p (operands[1]))
-@@ -17310,7 +17355,7 @@
+@@ -17310,7 +17355,8 @@
         even though TARGET_64BIT is set; gate on Pmode rather than
         TARGET_32BIT so the .toc input section gets 4-byte slots that
         a `lwz @toc@l(r2)` load can read directly.  */
 -    fputs (Pmode == SImode ? "\t.long " : DOUBLE_INT_ASM_OP, file);
-+    fputs (ptr_mode == SImode ? "\t.long " : DOUBLE_INT_ASM_OP, file);
++    fputs ((mode == VOIDmode ? ptr_mode : mode) == SImode
++	   ? "\t.long " : DOUBLE_INT_ASM_OP, file);
    else
      {
        fputs ("\t.tc ", file);
+@@ -20333,7 +20379,7 @@
+ 	  (*targetm.asm_out.internal_label) (asm_out_file, "LCTOC", 0);
+ 	  /* CellOS Lv-2 hybrid ILP32: a TOC slot is one 32-bit address word
+ 	     (see output_toc), and load_toc_aix_si reads it with lwz.  */
+-	  if (TARGET_64BIT && Pmode == SImode)
++	  if (TARGET_64BIT && ptr_mode == SImode)
+ 	    fprintf (asm_out_file, "\t.long ");
+ 	  else
+ 	    {
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -10888,7 +10888,9 @@
+     strcat (buf, "@toc");
+   operands[1] = gen_rtx_SYMBOL_REF (Pmode, ggc_strdup (buf));
+   operands[2] = gen_rtx_REG (Pmode, 2);
+-  return "ld %0,%1(%2)";
++  /* cell64lv2 ILP32: the minimal-TOC base sits in a 4-byte pointer slot;
++     lwz zero-extends it into the 64-bit base register.  */
++  return ptr_mode == SImode ? "lwz %0,%1(%2)" : "ld %0,%1(%2)";
+ }
+   [(set_attr "type" "load")
+    (set_attr "update" "no")
