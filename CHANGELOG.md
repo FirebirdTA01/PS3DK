@@ -16,24 +16,6 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-### Fixed
-
-- PPU compiler, ILP32 (the default data model): a loop over arrays could form
-  an effective address above 4 GiB and fault.  The loop IV optimizer biased a
-  pointer offset by one element below the array, stored it to the stack as a
-  32-bit value and reloaded it zero-extended, and the full-width add carried
-  into bit 32.  `-fivopts` is now off by default under ILP32 (an explicit
-  `-fivopts` still enables it; LP64 is unchanged).  New
-  `scripts/ilp32-address-lint.py` scans a disassembly for the shape.
-
-### Known issues
-
-- The ILP32 compiler forms addresses from 32-bit values in 64-bit registers;
-  the fix above removes the one optimizer pass known to leak the upper bits,
-  not the cause.  RPCS3's default PPU recompiler truncates such addresses, so
-  a program can pass there and fault on hardware; the PPU interpreter reports
-  them as a narrowing error.
-
 ## [v0.19.0] — 2026-09-30
 
 ### Added
@@ -103,11 +85,23 @@ The version stamped into builds is generated from the most recent
   or through the vectormath headers) no longer fails with "declared extern
   and later static": the library header brings in the inline definitions
   instead of declaring its own prototypes.
+- PPU compiler, ILP32 (the default data model): a loop over arrays could form
+  an effective address above 4 GiB and fault.  The loop IV optimizer biased a
+  pointer offset by one element below the array, stored it to the stack as a
+  32-bit value and reloaded it zero-extended, and the full-width add carried
+  into bit 32.  `-fivopts` is now off by default under ILP32 (an explicit
+  `-fivopts` still enables it; LP64 is unchanged).  New
+  `scripts/ilp32-address-lint.py` scans a disassembly for the shape.
 
 ### Known limitations
 
 - Overlays work in SPU threads and SPURS tasks; SPURS jobs cannot use
   them yet (the job linker script fixes the job's segments).
+- The ILP32 compiler forms addresses from 32-bit values in 64-bit registers;
+  the fix above removes the one optimizer pass known to leak the upper bits,
+  not the cause.  RPCS3's default PPU recompiler truncates such addresses, so
+  a program can pass there and fault on hardware; the PPU interpreter reports
+  them as a narrowing error.
 
 ## [v0.18.0] — 2026-09-30
 
