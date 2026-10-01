@@ -7292,9 +7292,11 @@ private:
 
     // refract(I, N, eta):
     //   d = dot(N, I);  k = 1 - eta^2 * (1 - d^2)
-    //   result = (k < 0) ? 0 : eta*I - (eta*d + sqrt(k)) * N
+    //   q = eta^2 * (1 - d^2)
+    //   result = (q < 1) ? eta*I - (eta*d + sqrt(|k|)) * N : 0
+    // The reference uses strict SGT(-q,-1), zeroing the exact boundary.
     //
-    // The k<0 arm is resolved with the ARITHMETIC select - deliberately,
+    // The zero arm is resolved with the ARITHMETIC select - deliberately,
     // as the control-flow note's provably-finite opt-in: sqrt is taken of
     // |k| (abs modifier), so the "untaken" arm's value is finite for every
     // input and 0*finite cannot contaminate the blend the way 0*NaN would.
@@ -7328,6 +7330,7 @@ private:
         const VSrc I   = resolve(inst.operands[0]);
         const VSrc N   = resolve(inst.operands[1]);
         const VSrc eta = resolve(inst.operands[2]);
+        const bool constantEta = eta.kind == VSrcKind::Literal;
 
         // t.x = d = dot(N, I); t.y = 1 - d^2; t.z = eta^2; t.w = k
         const int t = newVReg();
@@ -7372,6 +7375,22 @@ private:
         k.srcs[1].swizzle = {1, 1, 1, 1};
         k.srcs[2] = floatLit(1.0f);
         program_.instrs.push_back(k);
+
+        // Retain the existing fused k calculation for the root. For runtime
+        // eta the oracle tests the separately rounded q, not rounded 1-k.
+        // Constant eta instead uses SGT(k,0) and needs no extra product.
+        if (!constantEta) {
+            // eta^2 is dead after k, so its lane can now hold q.
+            VInstr q;
+            q.op = VOp::Mul;
+            q.dst.index = t;
+            q.dst.writemask = 0x4;
+            q.srcs[0] = tempSrc(t);
+            q.srcs[0].swizzle = {2, 2, 2, 2};
+            q.srcs[1] = tempSrc(t);
+            q.srcs[1].swizzle = {1, 1, 1, 1};
+            program_.instrs.push_back(q);
+        }
 
         // s.y = sqrt(|k|); s.z = eta*d + sqrt(|k|). Refract uses
         // abs on BOTH root operands: k may be negative before the TIR
@@ -7422,25 +7441,26 @@ private:
         subN.srcs[2] = tempSrc(result);
         program_.instrs.push_back(subN);
 
-        // c = (k < 0); result = r - r*c  (arithmetic select, both arms finite)
+        // c = (k > 0) for constant eta, (-q > -1) otherwise; result = r*c.
+        // Both measured reference forms zero the exact boundary, unlike k<0.
         VInstr cmp;
-        cmp.op = VOp::Slt;
+        cmp.op = VOp::Sgt;
         cmp.dst.index = s;
         cmp.dst.writemask = 0x8;
         cmp.srcs[0] = tempSrc(t);
-        cmp.srcs[0].swizzle = {3, 3, 3, 3};
-        cmp.srcs[1] = floatLit(0.0f);
+        cmp.srcs[0].swizzle = constantEta ? std::array<uint8_t, 4>{3, 3, 3, 3}
+                                        : std::array<uint8_t, 4>{2, 2, 2, 2};
+        cmp.srcs[0].neg = !constantEta;
+        cmp.srcs[1] = floatLit(constantEta ? 0.0f : -1.0f);
         program_.instrs.push_back(cmp);
 
         VInstr blend;
-        blend.op = VOp::Mad;
+        blend.op = VOp::Mul;
         blend.dst.index = result;
         blend.dst.writemask = 0x7;
         blend.srcs[0] = tempSrc(result);
-        blend.srcs[0].neg = true;
         blend.srcs[1] = tempSrc(s);
         blend.srcs[1].swizzle = {3, 3, 3, 3};
-        blend.srcs[2] = tempSrc(result);
         program_.instrs.push_back(blend);
     }
 
