@@ -9857,6 +9857,12 @@ static bool canCoissueVp(const VInstr& sca, const VInstr& vec)
     if (sca.srcs[1].kind != VSrcKind::None ||
         sca.srcs[2].kind != VSrcKind::None)
         return false;
+    // The scalar partner owns hardware src2. ADD remaps virtual src1
+    // into that slot in makeInsn; other vector ops keep their slot map.
+    // emitCoIssued cannot preserve a vector operand in the shared field.
+    const VSrc& vecSrc2 = vec.op == VOp::Add ? vec.srcs[1] : vec.srcs[2];
+    if (vecSrc2.kind != VSrcKind::None)
+        return false;
     const int scaInput = singleInputSourceIndex(sca);
     const int vecInput = singleInputSourceIndex(vec);
     if (scaInput == -2 || vecInput == -2)
