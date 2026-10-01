@@ -296,6 +296,11 @@ jobs:
       - name: Test LV2 errno values
         run: bash tests/sdk/lv2-errno-values-test.sh
 
+      # Skips without PS3DEV; with a PPU compiler, AltiVec memory builtins that
+      # take a pointer must compile under the ILP32 address model (GCC 0051).
+      - name: Test AltiVec pointer builtins under ILP32
+        run: bash tests/sdk/altivec-builtin-address-test.sh
+
       # Skips without PS3DEV; runs against an installed or candidate compiler.
       - name: Test -mminimal-toc in both PPU ABIs
         run: bash tests/sdk/minimal-toc-ilp32-test.sh
