@@ -1,4 +1,4 @@
-"""Execute float3/float4 VP normalize, including a DP4-to-DP3 negative control."""
+"""Execute float2/float3/float4 VP normalize, including a DP4-to-DP3 negative control."""
 import argparse
 import math
 from pathlib import Path
@@ -9,6 +9,14 @@ import tempfile
 from vp_pow_vector_check import evaluate
 
 CASES={
+    'uniform2':('U.xy',2,False),
+    'attribute2':('n.xy',2,False),
+    'negated2':('-U.yx',2,False),
+    'absolute2':('abs(U.yx)',2,False),
+    'swizzled2':('U.yw',2,False),
+    'repeated2':('U.yy',2,False),
+    'retained2':('U.xy',2,False),
+    'inplace2':('n.xy',2,False),
     'uniform3':('U.xyz',3,False),
     'attribute3':('n.xyz',3,False),
     'negated3':('-U.zyx',3,False),
@@ -18,11 +26,16 @@ CASES={
     'absolute4':('abs(U)',4,False),
     'truncated4':('U',4,True),
 }
-INPUTS=[[1.,2.,2.,4.],[-2.,3.,-6.,2.],[.25,-.5,.75,-1.]]
+INPUTS=[[1.,2.,2.,4.],[-2.,3.,-6.,2.],[.25,-.5,.75,-1.],
+        [3.,4.,12.,5.],[-3.,4.,12.,5.],[3.,4.,0.,123.]]
 
 def source(name):
     expr,width,truncated=CASES[name]
-    output='float4(q.xyz,1.)' if width==3 or truncated else 'q'
+    output='float4(q,0.,1.)' if width==2 else 'float4(q.xyz,1.)' if width==3 or truncated else 'q'
+    if name=='retained2':output='float4(q,U.zw)'
+    if name=='inplace2':
+        return ('void main(float4 p:POSITION,float4 n:NORMAL,out float4 op:POSITION,out float4 color:COLOR0){'
+                'op=p;n.xy=normalize(n.xy);color=n;}\n')
     return ('void main(float4 p:POSITION,float4 n:NORMAL,uniform float4 U,'
             'out float4 op:POSITION,out float4 color:COLOR0){'
             f'op=p;float{width} q=normalize({expr});color={output};}}\n')
@@ -31,12 +44,16 @@ def judge(blob,name):
     expr,width,truncated=CASES[name]
     for vector in INPUTS:
         if name.startswith('negated'):
-            v=[-x for x in reversed(vector[:3] if width==3 else vector)]
+            v=[-x for x in reversed(vector[:width])]
+        elif name=='absolute2':v=[abs(vector[1]),abs(vector[0])]
         elif name=='absolute4':v=[abs(x) for x in vector]
+        elif name=='swizzled2':v=[vector[1],vector[3]]
+        elif name=='repeated2':v=[vector[1],vector[1]]
         else:v=vector[:width]
         length=math.sqrt(sum(x*x for x in v))
         want=[x/length for x in v]
-        if width==3 or truncated:want=want[:3]+[1.]
+        if width==2:want+=vector[2:] if name in ('retained2','inplace2') else [0.,1.]
+        elif width==3 or truncated:want=want[:3]+[1.]
         outputs=evaluate(blob,{'U':vector},{0:[.25,.5,.75,1.],2:vector},binary32=True)
         assert outputs.get(0)==[.25,.5,.75,1.], 'POSITION changed'
         got=outputs.get(1)

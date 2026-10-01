@@ -5462,19 +5462,46 @@ private:
 
         const int result = define(inst.result);
         VSrc src = resolve(inst.operands[0]);
-        const bool fourLanes = valueWidthOf(inst.operands[0]) == 4;
-        // float4 length includes w, and its final multiply must retain w.
-        // The float3 path keeps its measured xyzx spelling unchanged.
-        if (!fourLanes)
-            applyDp3Swizzle(src);
+        const int width = valueWidthOf(inst.operands[0]);
+        if (width == 2) {
+            // VP has no DP2. Match the reference's two-lane square/reduce,
+            // preserving the operand's selected lanes and source modifiers.
+            // The result vreg is distinct from the operand, which is still
+            // live through the final multiply (including in-place source IR).
+            const bool sameLane = src.swizzle[0] == src.swizzle[1];
+            VInstr square;
+            square.op = VOp::Mul;
+            square.dst.index = result;
+            square.dst.writemask = sameLane ? 0x1 : 0x3;
+            square.srcs[0] = src;
+            square.srcs[1] = src;
+            program_.instrs.push_back(square);
 
-        VInstr dp;
-        dp.op = fourLanes ? VOp::Dp4 : VOp::Dp3;
-        dp.dst.index = result;
-        dp.dst.writemask = 0x1;
-        dp.srcs[0] = src;
-        dp.srcs[1] = src;
-        program_.instrs.push_back(dp);
+            VInstr sum;
+            sum.op = VOp::Add;
+            sum.dst.index = result;
+            sum.dst.writemask = 0x1;
+            sum.srcs[0] = tempSrc(result);
+            sum.srcs[0].swizzle = {0, 0, 0, 0};
+            sum.srcs[1] = tempSrc(result);
+            const uint8_t secondLane = sameLane ? 0 : 1;
+            sum.srcs[1].swizzle = {secondLane, secondLane, secondLane, secondLane};
+            program_.instrs.push_back(sum);
+        } else {
+            const bool fourLanes = width == 4;
+            // float4 length includes w, and its final multiply must retain w.
+            // The float3 path keeps its measured xyzx spelling unchanged.
+            if (!fourLanes)
+                applyDp3Swizzle(src);
+
+            VInstr dp;
+            dp.op = fourLanes ? VOp::Dp4 : VOp::Dp3;
+            dp.dst.index = result;
+            dp.dst.writemask = 0x1;
+            dp.srcs[0] = src;
+            dp.srcs[1] = src;
+            program_.instrs.push_back(dp);
+        }
 
         VInstr rsq;
         rsq.op = VOp::Rsq;
