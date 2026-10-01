@@ -45,6 +45,5 @@
 0046-cell64lv2-reference-predefines.patch
 0047-rs6000-ps3-mp32-mp64-aliases.patch
 0048-libstdcxx-containers-bring-in-string.patch
-0049-cell64lv2-ilp32-no-ivopts-default.patch
 0050-rs6000-cell64lv2-doloop-gpr-width-ctr.patch
 0051-rs6000-cell64lv2-ilp32-pmode-dimode.patch
