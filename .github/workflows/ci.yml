@@ -301,6 +301,12 @@ jobs:
       - name: Test AltiVec pointer builtins under ILP32
         run: bash tests/sdk/altivec-builtin-address-test.sh
 
+      # An indirect call must save the TOC after any PRX stub call before it:
+      # stubs store it with a 4-byte stw, Pmode DImode restores it with ld
+      # (GCC 0054).
+      - name: Test the TOC is saved at each indirect call
+        run: bash tests/sdk/toc-save-indirect-test.sh
+
       # Skips without PS3DEV; runs against an installed or candidate compiler.
       - name: Test -mminimal-toc in both PPU ABIs
         run: bash tests/sdk/minimal-toc-ilp32-test.sh

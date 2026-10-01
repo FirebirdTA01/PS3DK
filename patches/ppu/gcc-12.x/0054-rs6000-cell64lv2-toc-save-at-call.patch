@@ -1,0 +1,37 @@
+rs6000: save the TOC at each indirect call (cell64lv2)
+
+PRX import stubs store the caller's TOC with a 4-byte stw at 40(r1).
+Before Pmode became DImode (0051) the compiler restored the TOC after an
+indirect call with a 4-byte lwz from the same word, so a TOC saved once in
+the prologue (-msave-toc-indirect, on by default when optimizing for speed)
+and then overwritten by a stub with the same value was harmless.  With
+Pmode DImode the restore is an 8-byte ld: a function that calls through a
+stub and then through a function pointer reloads a TOC whose high word is
+the stub's 32-bit copy, and its next TOC-relative access faults
+(samples/spurs/sync2-objects: main calls printf, then each row through a
+pointer).
+
+The reference compiler saves the TOC with std immediately before every
+bctrl, so no call can intervene.  Do the same: under POWERPC_CELL64LV2,
+-msave-toc-indirect is off unless given explicitly.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -4043,6 +4043,17 @@
+       && optimize_function_for_speed_p (cfun))
+     rs6000_isa_flags |= OPTION_MASK_SAVE_TOC_INDIRECT;
+ 
++#ifdef POWERPC_CELL64LV2
++  /* cell64lv2: save the TOC at each indirect call, as the reference
++     toolchain does, never once in the prologue.  A PRX import stub stores
++     the caller's TOC with a 4-byte stw at 40(r1); with Pmode DImode the
++     TOC is restored with an 8-byte ld, so a prologue save followed by a
++     stub call and then an indirect call reloads a TOC whose high word is
++     the stub's copy.  */
++  if ((rs6000_isa_flags_explicit & OPTION_MASK_SAVE_TOC_INDIRECT) == 0)
++    rs6000_isa_flags &= ~OPTION_MASK_SAVE_TOC_INDIRECT;
++#endif
++
+   /* Enable power8 fusion if we are tuning for power8, even if we aren't
+      generating power8 instructions.  Power9 does not optimize power8 fusion
+      cases.  */

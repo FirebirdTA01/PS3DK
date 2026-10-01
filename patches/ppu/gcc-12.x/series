@@ -49,3 +49,4 @@
 0051-rs6000-cell64lv2-ilp32-pmode-dimode.patch
 0052-rs6000-cell64lv2-char-signed-ilp32.patch
 0053-cell64lv2-wchar-16bit-lp64.patch
+0054-rs6000-cell64lv2-toc-save-at-call.patch
