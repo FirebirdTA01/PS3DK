@@ -16,6 +16,22 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Changed
+
+- **C/C++ ABI break: rebuild everything built with an earlier PS3DK.**
+  - Plain `char` is signed in the default PPU ABI (ILP32) and on the SPU,
+    and unsigned under `-mlp64`; `__CHAR_SIGNED__` is predefined when it is
+    signed.  `-fsigned-char`/`-funsigned-char` still override it (GCC
+    patches 0052 and SPU 0015).
+  - `wchar_t` is a 16-bit `unsigned short` and `wint_t` is `int` under
+    `-mlp64` and on the SPU too, as already in ILP32 (GCC patches 0053 and
+    SPU 0015).
+- PPU compiler, ILP32: addresses are formed in 64-bit registers from
+  zero-extended 32-bit pointers (GCC patch 0051).  This closes the class of
+  faults where a 32-bit value with bit 32 set reached an address, so the
+  loop IV optimizer is on again (`-fivopts` is no longer off by default;
+  0049 is dropped).  TOC entries stay 4 bytes.
+
 ## [v0.19.0] — 2026-09-30
 
 ### Added
