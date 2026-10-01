@@ -245,6 +245,8 @@ jobs:
 
       - name: Test librt stat and fstat report EOVERFLOW for sizes beyond off_t
         run: bash tests/sdk/librt-fstat-eoverflow-test.sh
+
+      - name: Test librt lv2error maps every LV2 status code to itself
         run: bash tests/sdk/librt-lv2errno-test.sh
 
       - name: Test POSIX clocks sleep and scheduling attributes
