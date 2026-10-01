@@ -1105,10 +1105,11 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         // visible and neither test below applies.  The reference calls this
         // C1101.
         //
-        // Then NAME-NOT-FOUND versus NO-VIABLE-OVERLOAD.  Only the first is
-        // the reference's C1008 class and only it is reachability-gated.  A
-        // name with at least one VISIBLE declaration but no overload that fits
-        // is C1103 and is reported everywhere - measured, and it holds even
+        // Then NAME-NOT-FOUND versus NO-VIABLE-OVERLOAD.  The first is the
+        // reference's C1008 class and is reachability-gated; so is a no-fit
+        // call whose only visible candidates are BUILTINS (below).  A name
+        // with a visible SOURCE declaration but no overload that fits is C1103
+        // and is reported everywhere - measured, and it holds even
         // when a later exact overload exists, which is why this asks about
         // visibility of the NAME and never about whole-unit resolvability
         // (review: codex).
