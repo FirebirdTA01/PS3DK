@@ -7,7 +7,8 @@ char-to-int conversions and C++ overload resolution on char differed from
 code built with the reference.
 
 Set flag_signed_char from the data model in option override, unless the user
-passed -fsigned-char or -funsigned-char.  Option override runs before the
+passed -fsigned-char or -funsigned-char, and predefine __CHAR_SIGNED__ when
+char is signed, as the reference does.  Option override runs before the
 front end builds char_type_node and predefines __CHAR_UNSIGNED__, so the type
 and the macro follow.  This is an ABI change for code that passes or
 stores plain char; it ships with the other v0.20.0 ABI changes.
