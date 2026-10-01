@@ -6919,6 +6919,58 @@ private:
 
     void lowerReflect(const IRInstruction& inst)
     {
+        if (profile_ == GeneralProfile::Vertex) {
+            if (inst.operands.size() != 2 || inst.result == InvalidIRValue ||
+                inst.resultType.componentCount() != 3) {
+                program_.diagnostics.push_back(
+                    "nv40-general: VP reflect requires float3; refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+
+            // The VP oracle uses DP3, MUL by N, MUL by -2, ADD I.
+            // VP has no FP destination scale: keep the factor explicit and
+            // leave source modifiers and selector legalization intact.
+            const VSrc incident = resolve(inst.operands[0]);
+            const VSrc normal = resolve(inst.operands[1]);
+            const int dotReg = newVReg();
+            VInstr dot;
+            dot.op = VOp::Dp3;
+            dot.dst.index = dotReg;
+            dot.dst.writemask = 0x1;
+            dot.srcs[0] = incident;
+            dot.srcs[1] = normal;
+            program_.instrs.push_back(dot);
+
+            const int projection = newVReg();
+            VInstr mul;
+            mul.op = VOp::Mul;
+            mul.dst.index = projection;
+            mul.dst.writemask = 0x7;
+            mul.srcs[0] = tempSrc(dotReg);
+            mul.srcs[0].swizzle = {0, 0, 0, 0};
+            mul.srcs[1] = normal;
+            program_.instrs.push_back(mul);
+
+            const int scaled = newVReg();
+            VInstr scale;
+            scale.op = VOp::Mul;
+            scale.dst.index = scaled;
+            scale.dst.writemask = 0x7;
+            scale.srcs[0] = tempSrc(projection);
+            scale.srcs[0].neg = true;
+            scale.srcs[1] = floatLit(2.0f);
+            program_.instrs.push_back(scale);
+
+            VInstr add;
+            add.op = VOp::Add;
+            add.dst.index = define(inst.result);
+            add.dst.writemask = 0x7;
+            add.srcs[0] = incident;
+            add.srcs[1] = tempSrc(scaled);
+            program_.instrs.push_back(add);
+            return;
+        }
         if (profile_ != GeneralProfile::Fragment ||
             inst.operands.size() < 2 || inst.result == InvalidIRValue) {
             program_.diagnostics.push_back(

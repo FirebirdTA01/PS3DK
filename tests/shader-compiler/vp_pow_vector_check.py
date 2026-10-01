@@ -49,7 +49,7 @@ INDEX_CONST = 1 << 1                    # word 3: address-register-relative cons
 COL0 = 1
 
 
-def evaluate(blob, uniforms):
+def evaluate(blob, uniforms, inputs=None):
     """Run a VP container; return {output register: [x, y, z, w]}."""
     u = lambda off: struct.unpack_from('>I', blob, off)[0]
     assert len(blob) >= 32 and u(0) == 7003, 'not a VP container'
@@ -66,7 +66,7 @@ def evaluate(blob, uniforms):
         if name in uniforms:
             consts[u(base + 12)] = list(uniforms[name])
     regs, outputs = {}, {}
-    inputs = {0: [0.0, 0.0, 0.0, 1.0]}
+    inputs = {0: [0.0, 0.0, 0.0, 1.0]} if inputs is None else inputs
     count = size // 16
     for n, pos in enumerate(range(off, off + size, 16)):
         w = struct.unpack_from('>4I', blob, pos)
@@ -99,6 +99,10 @@ def evaluate(blob, uniforms):
                 args = (a[j], b[j], c[j])
                 if vop == 1:
                     res[j] = a[j]
+                elif vop in (5, 7):  # VP DP3 / DP4 (FP DP4 has a different opcode)
+                    width = 3 if vop == 5 else 4
+                    assert all(a[k] is not None and b[k] is not None for k in range(width)), 'dot reads an undefined lane'
+                    res[j] = sum(a[k] * b[k] for k in range(width))
                 elif vop in (2, 3, 4, 10):
                     need = {2: (0, 1), 3: (0, 2), 4: (0, 1, 2), 10: (0, 1)}[vop]
                     assert all(args[k] is not None for k in need), 'vector op reads an undefined lane'

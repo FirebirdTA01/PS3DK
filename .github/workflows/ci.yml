@@ -111,6 +111,9 @@ jobs:
       - name: Test a vertex-program pow() of a vector computes every lane
         run: bash tests/shader-compiler/vp-pow-vector-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test vertex reflect float3 values and width refusal boundaries
+        run: bash tests/shader-compiler/vp-reflect-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test a run-time index into a vector is refused like the reference
         run: bash tests/shader-compiler/runtime-vector-selector-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
