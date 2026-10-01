@@ -1,4 +1,19 @@
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'container-metrics-identity.ps1')
+$script:containerCompileInputs = @{}
+$script:containerMetricAttempts = @()
+
+function Register-ContainerMetricAttempt([string]$Name, [string]$Role, [string]$Profile,
+        [string]$Source, [string]$UniformSet, [string]$SourcePath) {
+    $inputs=Get-ShaderCompileInputs $SourcePath @()
+    # This describes an attempt, not a measured container. Successful rows
+    # replace it at the gate; refused pairs remain visible without fake counts.
+    $script:containerMetricAttempts += [pscustomobject]@{
+        name=$Name;role=$Role;profile=$Profile;source=$Source;uniform_set=$UniformSet
+        input_status='unversioned'
+        input_reason=$(if($inputs.Reason) {"no successful pair: $($inputs.Reason)"} else {'no successful container pair'})
+    }
+}
 
 function Read-BeU16([byte[]]$bytes, [int]$offset) {
     if ($offset -lt 0 -or $offset + 2 -gt $bytes.Length) {
@@ -70,7 +85,8 @@ function Add-ContainerMetricsRow(
     [string]$ReferencePath,
     [switch]$ByteIdentical,
     [switch]$Staged,
-    [string]$PixelStatus = "unknown"
+    [string]$PixelStatus = "unknown",
+    [switch]$RequireInputIdentity
 ) {
     $ours = Read-ShaderContainerMetrics $OursPath
     $ref = Read-ShaderContainerMetrics $ReferencePath
@@ -81,7 +97,7 @@ function Add-ContainerMetricsRow(
         throw "metrics profile mismatch for ${Name}: row=$Profile, container=$($ours.profile)"
     }
 
-    $Rows.Value += [pscustomobject]@{
+    $row = [pscustomobject]@{
         name = $Name
         role = $Role
         profile = $ours.profile
@@ -97,6 +113,13 @@ function Add-ContainerMetricsRow(
         staged = [bool]$Staged
         pixel_status = $PixelStatus
     }
+    if ($RequireInputIdentity) {
+        $inputs=Join-ShaderCompileInputs `
+            $script:containerCompileInputs[[IO.Path]::GetFullPath($OursPath)] `
+            $script:containerCompileInputs[[IO.Path]::GetFullPath($ReferencePath)]
+        foreach($property in $inputs.PSObject.Properties) { $row | Add-Member NoteProperty $property.Name $property.Value }
+    }
+    $Rows.Value += $row
 }
 
 function Get-ContainerMetricsSummary([object[]]$Rows) {
@@ -147,20 +170,21 @@ function Get-ContainerMetricKey($Row) {
     return "$($Row.role)|$($Row.name)|$($Row.profile)|$($Row.source)|$($Row.uniform_set)"
 }
 
-function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRows) {
+function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRows, [object[]]$AttemptedInputs = @()) {
     function Metric-Int($value) {
         if ($null -eq $value -or $value -eq "") { return 0 }
         return [int]$value
     }
 
-    $baselineByKey = @{}
-    foreach ($row in @($BaselineRows)) {
-        $key = Get-ContainerMetricKey $row
-        if ($baselineByKey.ContainsKey($key)) {
-            throw "duplicate container metrics baseline row: $key"
-        }
-        $baselineByKey[$key] = $row
-    }
+    $index = Get-ContainerMetricBaselineIndex $BaselineRows
+    $baselineByKey = $index.Rows
+    $identityMismatches=0; $missingIdentities=0; $sourceMismatches=0
+    $flagMismatches=0; $includeMismatches=0; $oracleMismatches=0
+    $currentKeys=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach($r in $Rows) { $null=$currentKeys.Add((Get-ContainerMetricKey $r)) }
+    $missingInputs=@($AttemptedInputs | Where-Object {-not $currentKeys.Contains((Get-ContainerMetricKey $_))})
+    $missingVersionedResults=@($missingInputs | Where-Object {$index.Versions.ContainsKey((Get-ContainerMetricKey $_))} | ForEach-Object {Get-ContainerMetricKey $_})
+    $identityMismatches += $missingVersionedResults.Count
 
     $baselineRegressions = 0
     $missingBaselineRows = 0
@@ -169,6 +193,25 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
     $currentRows = @($Rows).Count
     foreach ($row in @($Rows)) {
         $key = Get-ContainerMetricKey $row
+        $identity = Get-ContainerMetricIdentity $row
+        if ($index.Versions.ContainsKey($key)) {
+            $versions=$index.Versions[$key]
+            $versionKey="$key|v1:$identity"
+            if (-not $identity -or -not $baselineByKey.ContainsKey($versionKey)) {
+                $identityMismatches++; $missingBaselineRows++
+                if (-not $identity) { $missingIdentities++ }
+                else {
+                    # More than one axis may have changed. Compare each axis
+                    # against the recorded versions; do not mislabel tool drift.
+                    if ($row.source_sha256 -cnotin @($versions.source_sha256)) { $sourceMismatches++ }
+                    if ($row.compile_flags -cnotin @($versions.compile_flags)) { $flagMismatches++ }
+                    if ($row.resolved_includes -cnotin @($versions.resolved_includes)) { $includeMismatches++ }
+                    if ($row.oracle_sha256 -cnotin @($versions.oracle_sha256)) { $oracleMismatches++ }
+                }
+                continue
+            }
+            $key=$versionKey
+        }
         if (-not $baselineByKey.ContainsKey($key)) {
             $missingBaselineRows++
             continue
@@ -189,7 +232,9 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
 
     $baselineRowCount = @($BaselineRows).Count
     $comparedBaselineRows = $currentRows - $missingBaselineRows
-    $status = if ($baselineRegressions -gt 0) {
+    $status = if ($identityMismatches -gt 0) {
+        "identity-mismatch"
+    } elseif ($baselineRegressions -gt 0) {
         "fail"
     } elseif ($baselineRowCount -gt 0 -and $currentRows -gt 0 -and $comparedBaselineRows -eq 0) {
         "no-coverage"
@@ -206,10 +251,21 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
         BaselineRegressions = $baselineRegressions
         WorstInstructionRegression = $worstInstructionRegression
         WorstRegisterRegression = $worstRegisterRegression
+        VersionedBaselineIdentities = $index.Versions.Count
+        IdentityMismatches = $identityMismatches
+        MissingIdentityRows = $missingIdentities
+        SourceVersionMismatches = $sourceMismatches
+        CompileFlagsMismatches = $flagMismatches
+        IncludeMismatches = $includeMismatches
+        OracleMismatches = $oracleMismatches
+        MissingVersionedResults = $missingVersionedResults
+        UnversionedRows = @((@($Rows)+@($missingInputs)) | Where-Object { $_.input_status -eq 'unversioned' } | ForEach-Object {
+            [pscustomobject]@{Key=(Get-ContainerMetricKey $_);Reason=$_.input_reason}
+        })
     }
 }
 
-function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath, [switch]$ReportOnly, [string]$AllowancePath = '') {
+function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath, [switch]$ReportOnly, [string]$AllowancePath = '', [object[]]$AttemptedInputs = @()) {
     $baselinePresent = Test-Path -LiteralPath $BaselinePath -PathType Leaf
     $baselineRows = @()
     if ($baselinePresent) {
@@ -231,7 +287,7 @@ function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath
         if (-not $baselinePresent) { throw 'container metrics allowance requires an existing baseline CSV' }
         $allowanceMatch = Get-ContainerMetricsAllowanceMatch $Rows $baselineRows $AllowancePath
     }
-    $summary = Get-ContainerMetricsGateSummary $Rows $baselineRows
+    $summary = Get-ContainerMetricsGateSummary $Rows $baselineRows -AttemptedInputs $AttemptedInputs
     $mode = if ($baselinePresent -and -not $ReportOnly) { "fail-by-default" } else { "report-only" }
     $effectiveStatus = $summary.Status
     if ($allowanceMatch) {
@@ -243,6 +299,16 @@ function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath
     $shouldFail = $mode -eq "fail-by-default" -and $effectiveStatus -notin @('ok', 'allowed')
     $baselineState = if ($baselinePresent) { "present" } else { "absent" }
     Write-Host "SDIFF-METRICS-GATE|status=$($summary.Status)|mode=$mode|current_rows=$($summary.CurrentRows)|baseline_rows=$($summary.BaselineRows)|compared_baseline_rows=$($summary.ComparedBaselineRows)|missing_baseline_rows=$($summary.MissingBaselineRows)|baseline_regressions=$($summary.BaselineRegressions)|worst_instruction_regression=$($summary.WorstInstructionRegression)|worst_register_regression=$($summary.WorstRegisterRegression)|baseline=$baselineState"
+    if($summary.VersionedBaselineIdentities -gt 0) {
+        Write-Host "SDIFF-METRICS-IDENTITY|mismatches=$($summary.IdentityMismatches)|missing=$($summary.MissingIdentityRows)|source=$($summary.SourceVersionMismatches)|flags=$($summary.CompileFlagsMismatches)|includes=$($summary.IncludeMismatches)|oracle=$($summary.OracleMismatches)|missing_results=$($summary.MissingVersionedResults.Count)"
+        foreach($key in $summary.MissingVersionedResults) { Write-Host "SDIFF-METRICS-MISSING-VERSIONED-RESULT|key=$key" }
+    }
+    if(@($Rows | Where-Object { $_.input_status }).Count -gt 0 -or $AttemptedInputs.Count -gt 0) {
+        Write-Host "SDIFF-METRICS-UNVERSIONED|count=$($summary.UnversionedRows.Count)"
+        foreach($unversioned in $summary.UnversionedRows) {
+            Write-Host "SDIFF-METRICS-UNVERSIONED-ROW|key=$($unversioned.Key)|reason=$($unversioned.Reason)"
+        }
+    }
     $result = [pscustomobject]@{
         Summary = $summary
         Mode = $mode
@@ -265,18 +331,21 @@ function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath
 
 # This is also the stager's boundary: persist evidence before enforcing failure.
 function Invoke-ContainerMetricsStageGate([object[]]$Rows, [string]$BaselinePath,
-        [switch]$ReportOnly, [string]$AllowancePath = '', [string]$EvidencePath = '') {
-    $gate = Write-ContainerMetricsGateReport $Rows $BaselinePath -ReportOnly:$ReportOnly -AllowancePath $AllowancePath
+        [switch]$ReportOnly, [string]$AllowancePath = '', [string]$EvidencePath = '', [object[]]$AttemptedInputs = @()) {
+    $gate = Write-ContainerMetricsGateReport $Rows $BaselinePath -ReportOnly:$ReportOnly -AllowancePath $AllowancePath -AttemptedInputs $AttemptedInputs
     if ($AllowancePath) {
         if (-not $EvidencePath) { throw 'container metrics allowance requires a gate evidence path' }
         $gate | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $EvidencePath -Encoding UTF8
     }
-    if ($gate.ShouldFail) { throw "container metrics gate failed: $($gate.Summary.BaselineRegressions) baseline regression(s)" }
+    if ($gate.ShouldFail) {
+        if($gate.Summary.IdentityMismatches -gt 0) { throw "container metrics identity gate failed: $($gate.Summary.IdentityMismatches) unmatched versioned input(s)" }
+        throw "container metrics gate failed: $($gate.Summary.BaselineRegressions) baseline regression(s)"
+    }
     return $gate
 }
 
 function Write-ContainerMetricsReport([object[]]$Rows, [string]$Path) {
-    $Rows | Export-Csv -NoTypeInformation -Path $Path -Encoding Ascii
+    $Rows | Export-Csv -NoTypeInformation -Path $Path -Encoding UTF8
     $s = Get-ContainerMetricsSummary $Rows
     Write-Host "SDIFF-METRICS|compared=$($s.Compared)|instruction_mismatches=$($s.InstructionMismatches)|register_mismatches=$($s.RegisterMismatches)|both_mismatches=$($s.BothMismatches)|worse_instructions=$($s.WorseInstructions)|better_instructions=$($s.BetterInstructions)|worse_registers=$($s.WorseRegisters)|better_registers=$($s.BetterRegisters)|pixel_proof_candidates=$($s.PixelProofCandidates)|pixel_proof_rows=$($s.PixelProofRows)"
     Write-Host "container metrics written to $Path"

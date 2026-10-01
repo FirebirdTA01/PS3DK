@@ -29,6 +29,50 @@ stage, because no baseline row was actually compared.
 Any commit that moves an existing baseline row in the worse direction must say
 so in its commit message and explain why the higher cost is accepted.
 
+Versioned input identities (incremental migration)
+
+identity_version=1 adds source_sha256, compile_flags, resolved_includes and
+oracle_sha256 to the five-field row identity. Source and include hashes fold
+CRLF bytes to LF; other bytes, including a BOM or standalone CR, are unchanged.
+The oracle hash covers the executable's exact bytes. Compiler-under-test hashes
+belong in session provenance, not this comparison key: changes between our
+compiler revisions are the regressions this gate is meant to detect.
+
+compile_flags is canonical compact JSON with ordered ours/reference arrays of
+arguments, including profile, excluding input/output filenames. Argument order
+is preserved. resolved_includes is canonical compact JSON, an array of objects
+with side (ours/reference), path (relative to the root source directory), and
+sha256. Each side records its own resolved includes. All hashes are lowercase
+64-hex. Unknown versions, partial identities, malformed JSON/hashes, duplicate
+includes and duplicate exact baseline versions are errors, even in ReportOnly.
+
+The stager records the effective arguments used by each actual compile. It
+checks input hashes before/after invocation and the reference executable hash
+before/after each reference compile. All eleven metrics insertion sites require
+those records. A row is versioned only for a proven dependency graph: literal
+quoted includes found beside the including file, without a conditional or macro
+include. System/search-path, cyclic/repeated, line-spliced, line-directive,
+non-UTF8 or cross-file conditional graphs remain unversioned. These conservative
+limits never silently stand in for a complete preprocessor dependency trace.
+SDIFF-METRICS-UNVERSIONED reports their count and full keys/reasons. Expansion to
+actual compiler/oracle dependency traces is tracked separately.
+
+Once any baseline version exists for a five-field identity, legacy fallback is
+disabled for that identity, even if a legacy row is also present. A missing or
+unmatched input version reports identity-mismatch and fails the enforcing gate;
+it is not counted as a compiler cost regression against a different program.
+Source, flags, include and oracle mismatch counts remain separately visible.
+Other never-versioned identities retain legacy matching during migration.
+No historical pixel status is inherited into a new input version.
+Corpus inputs are registered before compilation: a refused attempted versioned
+input fails with a named missing-result diagnostic even when no container row
+can be emitted. This does not demand baseline rows outside the stage's selected
+input set, and never-versioned corpus refusals retain their existing behavior.
+
+The scalar-lanes migration keeps separate old/current source rows for both
+reference and reference-tree-corpus. Their counts come from controlled fresh
+compiles, not guessed historical flags, dependencies or oracle provenance.
+
 Reviewed, named allowances (opt-in only)
 
 stage-differential.ps1 accepts -MetricsAllowancePath <UTF-8 JSON>. With an empty
@@ -48,6 +92,8 @@ Raw counts must be nonnegative and each delta must equal ours minus reference.
 The historical object pins the baseline CSV values; current pins staged values.
 Counts and deltas must fit signed 32-bit integers. Identity fields cannot contain
 the key delimiter '|'. Unknown or missing fields are rejected.
+Schema-v1 allowances cannot cover versioned baseline identities; a migrated
+entry must be removed explicitly. Remaining legacy entries still match exactly.
 Repeated JSON member names are rejected, including equivalent escaped names.
 
 Each entry must match one actual regression, all five identity fields, and all

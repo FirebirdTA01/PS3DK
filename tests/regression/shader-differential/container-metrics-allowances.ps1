@@ -130,13 +130,17 @@ function Get-ContainerMetricsAllowanceMatch([object[]]$Rows, [object[]]$Baseline
 
     $current = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
     $historical = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+    $baselineIndex = Get-ContainerMetricBaselineIndex $BaselineRows
     foreach ($row in $Rows) {
         $key = Key $row
+        $null = Get-ContainerMetricIdentity $row
+        if ($baselineIndex.Versions.ContainsKey($key)) { continue }
         if ($current.ContainsKey($key)) { Bad "duplicate current row: $key" }
         $current.Add($key, $row)
     }
     foreach ($row in $BaselineRows) {
         $key = Key $row
+        if ($baselineIndex.Versions.ContainsKey($key)) { continue }
         if ($historical.ContainsKey($key)) { Bad "duplicate historical row: $key" }
         $historical.Add($key, $row)
     }
@@ -145,6 +149,7 @@ function Get-ContainerMetricsAllowanceMatch([object[]]$Rows, [object[]]$Baseline
     foreach ($entry in $doc.entries) {
         Properties $entry ($identity + @('card', 'reason', 'count', 'historical', 'current')) 'entry'
         $key = Key $entry
+        if ($baselineIndex.Versions.ContainsKey($key)) { Bad "schema-v1 allowance cannot cover a versioned identity: $key" }
         if (-not $seen.Add($key)) { Bad "duplicate entry: $key" }
         foreach ($field in @('card', 'reason')) {
             if ($entry.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($entry.$field)) { Bad "entry requires $field" }

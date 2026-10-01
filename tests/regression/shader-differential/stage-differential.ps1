@@ -450,8 +450,8 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
     $srcPath = if ($Absolute) { $src } else { Join-Path $here "shaders\$src" }
     # [string[]] on purpose: a one-element array collapses to a String on
     # assignment, and splatting a String splats its CHARACTERS (measured:
-    # "- - g e n e r a l ..." reached the compiler).  Passed below as
-    # @($pathFlags), the array-subexpression form, never as @pathFlags.
+    # "- - g e n e r a l ..." reached the compiler). The final compileFlags
+    # array is used unchanged by both invocation and input provenance.
     # An EXPLICIT lowering on the call wins over the run's path flags: the
     # instruments (controls, probes, coverage FPs) name --general-lowering
     # because they ride the general path whatever the run judges, and under
@@ -460,6 +460,9 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
     # design (measured 2026-09-02 on the first flipped legacy run).
     $explicit = @($flags | Where-Object { $_ -eq "--general-lowering" -or $_ -eq "--legacy-lowering" })
     [string[]]$pathFlags = if ($NoExtraFlags -or $explicit.Count -gt 0) { @() } else { @($extraFlags) }
+    [string[]]$compileFlags = @(@($flags)+@($pathFlags) | Where-Object { $null -ne $_ })
+    $inputs = Get-ShaderCompileInputs $srcPath @(@($compileFlags)+@('-p',$Profile))
+    $script:containerCompileInputs.Remove([IO.Path]::GetFullPath($dst))
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     # Our compiler reports a refusal on stderr; under "Stop" a redirected
     # native stderr line is a terminating error (same trap as the
@@ -470,14 +473,15 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
         # timeout(1) inside WSL: an uncurated corpus shader must not be
         # able to stall the whole stage on a hung compile.
         $global:LASTEXITCODE = -1
-        $null = & wsl -- timeout 30s $WslCompiler @flags @($pathFlags) -p $Profile `
+        $null = & wsl -- timeout 30s $WslCompiler @compileFlags -p $Profile `
             --emit-container (To-WslPath $dst) (To-WslPath $srcPath) 2>&1
     } else {
         $global:LASTEXITCODE = -1
-        $null = & $Rsxcgc @flags @($pathFlags) -p $Profile --emit-container $dst $srcPath 2>&1
+        $null = & $Rsxcgc @compileFlags -p $Profile --emit-container $dst $srcPath 2>&1
     }
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
+    Assert-ShaderCompileInputs $inputs
     # Published for the refusal sidecar: rc 124 is timeout(1) inside WSL,
     # -1 is a launch that never set an exit code - neither is a refusal,
     # and a sidecar that cannot tell them apart once recorded a transient
@@ -497,6 +501,7 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
         throw "compile produced empty container: $src"
     }
     Write-Host "stager: $label -> $(Split-Path -Leaf $dst) ($((Get-Item $dst).Length) bytes)"
+    $script:containerCompileInputs[[IO.Path]::GetFullPath($dst)] = $inputs
     return $true
 }
 
@@ -640,6 +645,9 @@ if ($Corpus) {
 # compile then reports -1).  Returns $true iff a non-empty container
 # exists afterwards.
 function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_fp_rsx") {
+    $inputs = Get-ShaderCompileInputs $src @('-p',$Profile)
+    $oracleHash = (Get-FileHash -LiteralPath $ReferenceCompiler -Algorithm SHA256).Hash.ToLowerInvariant()
+    $script:containerCompileInputs.Remove([IO.Path]::GetFullPath($dst))
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -647,6 +655,12 @@ function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_f
     $null = & $ReferenceCompiler -p $Profile -o $dst $src 2>&1
     $refRc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
+    Assert-ShaderCompileInputs $inputs
+    if ((Get-FileHash -LiteralPath $ReferenceCompiler -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oracleHash) {
+        throw 'reference compiler changed during compile'
+    }
+    $inputs | Add-Member NoteProperty OracleHash $oracleHash
+    $script:containerCompileInputs[[IO.Path]::GetFullPath($dst)] = $inputs
     $script:lastCompileRc = $refRc
     return ($refRc -eq 0) -and (Test-Path -LiteralPath $dst) -and ((Get-Item $dst).Length -gt 0)
 }
@@ -908,7 +922,7 @@ if ($ReferenceCompiler) {
 
         $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
         $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-        Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+        Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
             -Role "reference" -Profile "sce_fp_rsx" -Source $rel `
             -UniformSet $set -OursPath $ours -ReferencePath $ref `
             -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -965,6 +979,7 @@ if ($ReferenceCompiler) {
             $seenNames[$name] = 1
             $ours = Join-Path $refScratch "$name`_ours.fpo"
             $ref  = Join-Path $refScratch "$name`_ref.fpo"
+            Register-ContainerMetricAttempt -Name $name -Role reference-corpus -Profile sce_fp_rsx -Source $rel -UniformSet auto -SourcePath $f.FullName
             $okOurs = Compile-Shader $f.FullName $ours @() -Absolute -NoThrow
             $rcOurs = $script:lastCompileRc
             $okRef  = Compile-Reference $f.FullName $ref
@@ -981,7 +996,7 @@ if ($ReferenceCompiler) {
             if (-not ($okOurs -and $okRef)) { continue }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
                 -Role "reference-corpus" -Profile "sce_fp_rsx" -Source $rel `
                 -UniformSet "auto" -OursPath $ours -ReferencePath $ref `
                 -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -1034,11 +1049,12 @@ if ($ReferenceCompiler) {
             $seenNames[$name] = 1
             $ours = Join-Path $refScratch "$name`_rtours.fpo"
             $ref  = Join-Path $refScratch "$name`_rtref.fpo"
+            $rtSet = if (Has-FileScopeConst $f.FullName) { "0" } else { "auto" }
+            Register-ContainerMetricAttempt -Name $name -Role reference-tree-corpus -Profile sce_fp_rsx -Source $rel -UniformSet $rtSet -SourcePath $f.FullName
             $okOurs = Compile-Shader $f.FullName $ours @() -Absolute -NoThrow -NoExtraFlags
             $rcOurs = $script:lastCompileRc
             $okRef  = Compile-Reference $f.FullName $ref
             $rcRef  = $script:lastCompileRc
-            $rtSet = if (Has-FileScopeConst $f.FullName) { "0" } else { "auto" }
             if ($rel -eq "tests/regression/shader-readback/shaders/rb_refract_k0.fcg") {
                 $rtAttributions += "rb_refract_k0=known-deliberate(reference k==0 boundary diverges; readback row uses PPU-computed expected values)"
             } elseif ($rel -eq "tests/regression/shader-differential/must-reject/accept_array_uniform.fcg") {
@@ -1057,7 +1073,7 @@ if ($ReferenceCompiler) {
             if (-not ($okOurs -and $okRef)) { continue }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
                 -Role "reference-tree-corpus" -Profile "sce_fp_rsx" -Source $rel `
                 -UniformSet $rtSet -OursPath $ours -ReferencePath $ref `
                 -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -1121,11 +1137,11 @@ if ($ReferenceCompiler) {
             $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
             $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
             $hRef = (Get-FileHash -Algorithm SHA256 -LiteralPath $dRef).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@legacy" `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name "$name@legacy" `
                 -Role "path-pair-reference" -Profile "sce_fp_rsx" -Source $rel `
                 -UniformSet $set -OursPath $dDef -ReferencePath $dRef `
                 -ByteIdentical:($hD -eq $hRef) -Staged:($hD -ne $hG)
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@general" `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name "$name@general" `
                 -Role "path-pair-reference" -Profile "sce_fp_rsx" -Source $rel `
                 -UniformSet $set -OursPath $dGen -ReferencePath $dRef `
                 -ByteIdentical:($hG -eq $hRef) -Staged:($hD -ne $hG)
@@ -1187,6 +1203,11 @@ if ($ReferenceCompiler) {
             $dDef = Join-Path $refScratch ("$name" + "_pclegacy.fpo")
             $dGen = Join-Path $refScratch ("$name" + "_pcgeneral.fpo")
             $dRef = Join-Path $refScratch ("$name" + "_pcref.fpo")
+            $pcSet = "auto"
+            if (Has-FileScopeConst $f.FullName) { $pcSet = "0" }
+            foreach($suffix in @('legacy','general')) {
+                Register-ContainerMetricAttempt -Name "$name@$suffix" -Role path-pair-corpus-reference -Profile sce_fp_rsx -Source $rel -UniformSet $pcSet -SourcePath $f.FullName
+            }
             if (-not (Compile-Shader $f.FullName $dDef @("--legacy-lowering") -Absolute -NoThrow -NoExtraFlags)) {
                 $pcDefRefused++; $pcRefusedRows += "$name|legacy|$rel|$($script:lastCompileRc)"; continue
             }
@@ -1199,13 +1220,11 @@ if ($ReferenceCompiler) {
             $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
             $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
             $hRef = (Get-FileHash -Algorithm SHA256 -LiteralPath $dRef).Hash
-            $pcSet = "auto"
-            if (Has-FileScopeConst $f.FullName) { $pcSet = "0" }
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@legacy" `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name "$name@legacy" `
                 -Role "path-pair-corpus-reference" -Profile "sce_fp_rsx" -Source $rel `
                 -UniformSet $pcSet -OursPath $dDef -ReferencePath $dRef `
                 -ByteIdentical:($hD -eq $hRef) -Staged:($hD -ne $hG)
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@general" `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name "$name@general" `
                 -Role "path-pair-corpus-reference" -Profile "sce_fp_rsx" -Source $rel `
                 -UniformSet $pcSet -OursPath $dGen -ReferencePath $dRef `
                 -ByteIdentical:($hG -eq $hRef) -Staged:($hD -ne $hG)
@@ -1416,7 +1435,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             if (-not (Compile-Reference $src $ref -Profile sce_vp_rsx)) { throw "vp-pairs: reference compile failed or produced no container: $rel" }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
                 -Role "vp-reference" -Profile "sce_vp_rsx" -Source $rel `
                 -UniformSet $set -OursPath $ours -ReferencePath $ref `
                 -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -1466,6 +1485,9 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             $vpSeen[$name] = 1
             $ours = Join-Path $vpScratch ("$name" + "_ours.vpo")
             $ref  = Join-Path $vpScratch ("$name" + "_ref.vpo")
+            $vcSet = "auto"
+            if (Has-FileScopeConst $f.FullName) { $vcSet = "0" }
+            Register-ContainerMetricAttempt -Name $name -Role vp-corpus-reference -Profile sce_vp_rsx -Source $rel -UniformSet $vcSet -SourcePath $f.FullName
             $okOurs = Compile-Shader $f.FullName $ours @() -Absolute -NoThrow -Profile sce_vp_rsx
             $rcOurs = $script:lastCompileRc
             $okRef  = Compile-Reference $f.FullName $ref -Profile sce_vp_rsx
@@ -1475,9 +1497,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             if (-not ($okOurs -and $okRef)) { continue }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-            $vcSet = "auto"
-            if (Has-FileScopeConst $f.FullName) { $vcSet = "0" }
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
                 -Role "vp-corpus-reference" -Profile "sce_vp_rsx" -Source $rel `
                 -UniformSet $vcSet -OursPath $ours -ReferencePath $ref `
                 -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -1576,11 +1596,11 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
             $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
             $hRef = (Get-FileHash -Algorithm SHA256 -LiteralPath $dRef).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@legacy" `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name "$name@legacy" `
                 -Role "vp-path-pair-reference" -Profile "sce_vp_rsx" -Source $($c.rel) `
                 -UniformSet $($c.set) -OursPath $dDef -ReferencePath $dRef `
                 -ByteIdentical:($hD -eq $hRef) -Staged:($hD -ne $hG)
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@general" `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name "$name@general" `
                 -Role "vp-path-pair-reference" -Profile "sce_vp_rsx" -Source $($c.rel) `
                 -UniformSet $($c.set) -OursPath $dGen -ReferencePath $dRef `
                 -ByteIdentical:($hG -eq $hRef) -Staged:($hD -ne $hG)
@@ -1605,7 +1625,7 @@ if ($containerMetricRows.Count -gt 0) {
 } else {
     Write-Host "SDIFF-METRICS|compared=0|instruction_mismatches=0|register_mismatches=0|both_mismatches=0|worse_instructions=0|better_instructions=0|worse_registers=0|better_registers=0|pixel_proof_candidates=0|pixel_proof_rows=0"
 }
-$metricsGate = Invoke-ContainerMetricsStageGate @($containerMetricRows) (Join-Path $rig "container-metrics-baseline.csv") -ReportOnly:$MetricsReportOnly -AllowancePath $MetricsAllowancePath -EvidencePath (Join-Path $root 'container-metrics-gate.json')
+$metricsGate = Invoke-ContainerMetricsStageGate @($containerMetricRows) (Join-Path $rig "container-metrics-baseline.csv") -ReportOnly:$MetricsReportOnly -AllowancePath $MetricsAllowancePath -EvidencePath (Join-Path $root 'container-metrics-gate.json') -AttemptedInputs $script:containerMetricAttempts
 # The proving controls go ahead of the first corpus row by construction, and
 # the manifest is refused if the set is incomplete, duplicated or out of
 # order - the guest's gates could not open and every MRT/depth row would be
