@@ -12,7 +12,7 @@ main (void)
 {
   int failures = 0;
   struct _reent r = { 0 };
-  for (uint32_t c = 0x80010001u; c <= 0x8001003Du; c++)
+  for (uint32_t c = 0x80010001u; c <= 0x8001003Eu; c++)
     {
       s32 code = (s32) c;
       if (lv2error (code) != code)
