@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 /*! \brief Initialize the RSX heap.
-\return 0 if no error, nonzero otherwise.
+\return 1 on success, 0 on failure.
 */
 s32 rsxHeapInit();
 
