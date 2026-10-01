@@ -160,5 +160,20 @@ def check(path, order_only=False, distinct=False):
         check_saturation_guard(blob)
 
 
+def check_unconditional_order(path):
+    decoded = list(instructions(ucode_words(Path(path).read_bytes())))
+    require([((w[0] >> 24) & 63) for w, _ in decoded] == [1, 1, 0x12],
+            'literal-only kill displaced the input-to-output MOV')
+    first = decoded[0][0]
+    require(not (first[0] & (1 << 30)) and ((first[0] >> 1) & 63) == 0 and
+            source(first, 1)['type'] == INPUT,
+            'expected input-to-colour MOV before unconditional kill')
+    require(decoded[-1][0][0] & 1, 'unconditional kill must retain END')
+    print('unconditional kill ordering: 1 pass, 0 fail')
+
+
 if __name__ == '__main__':
-    check(sys.argv[1], '--order-only' in sys.argv[2:], '--distinct' in sys.argv[2:])
+    if '--unconditional' in sys.argv[2:]:
+        check_unconditional_order(sys.argv[1])
+    else:
+        check(sys.argv[1], '--order-only' in sys.argv[2:], '--distinct' in sys.argv[2:])

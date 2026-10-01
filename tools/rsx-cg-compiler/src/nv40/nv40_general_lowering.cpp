@@ -1859,12 +1859,33 @@ private:
                     if (pred < i) self(self, pred);
                 demandOrder[i] = nextDemand++;
             };
-            // Finish kill prerequisites before materializing work needed only
-            // by surviving fragments. Keep every dependency edge: a prior
-            // output or condition-code write still precedes the kill when
-            // the graph requires it.
-            for (size_t i = 0; i < n; ++i)
-                if (program_.instrs[i].op == VOp::Kil) visit(visit, i);
+            // Prioritize a kill only when finishing it can retire a temporary
+            // produced earlier. Literal/input-only kills have no such live
+            // range: retain their prior ranking (including the reference's
+            // output MOV before an unconditional KIL).
+            // A predicated node also consumes the preceding CC writer's
+            // inputs. Track that value dependency separately from the graph's
+            // conservative CC ordering edges; an unrelated old CC write must
+            // not make an otherwise input-only kill demand a temporary.
+            std::vector<bool> hasTempPrerequisite(n, false);
+            size_t ccWriter = n;
+            for (size_t i = 0; i < n; ++i) {
+                const VInstr& vi = program_.instrs[i];
+                for (const VSrc& src : vi.srcs) {
+                    if (src.kind != VSrcKind::Temp) continue;
+                    const auto defs = writers.find(src.index);
+                    if (defs != writers.end() && !defs->second.empty() &&
+                        defs->second.front() < i)
+                        hasTempPrerequisite[i] = true;
+                }
+                if (vi.predicate != 0 && ccWriter != n)
+                    hasTempPrerequisite[i] = hasTempPrerequisite[i] ||
+                                             hasTempPrerequisite[ccWriter];
+                if (writesConditionRegister(vi)) ccWriter = i;
+                // visit still keeps every dependency edge, including output
+                // and CC ordering. Only the cost ranking is restricted.
+                if (vi.op == VOp::Kil && hasTempPrerequisite[i]) visit(visit, i);
+            }
             killDemandCount = nextDemand;
             for (size_t i = 0; i < n; ++i)
                 if (chainLength[i] >= 3 && !extended[i]) visit(visit, i);
