@@ -16,5 +16,5 @@ include(ps3-self)
 # instead of folding into main (GCC patch 0051).  Judge it under the PPU
 # interpreter: RPCS3's LLVM recompiler truncates a bad address to 32 bits.
 add_executable(ilp32-pointers main.c pointers.c)
-target_compile_options(ilp32-pointers PRIVATE -O2 -Wall)
+target_compile_options(ilp32-pointers PRIVATE -O2 -Wall -maltivec)
 ps3_add_self(ilp32-pointers)

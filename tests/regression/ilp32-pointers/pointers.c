@@ -5,6 +5,7 @@
    data, and negative offsets in an IV-optimised loop.  Kept in
    its own unit so the caller's constants do not fold the addresses.  */
 #include <stdint.h>
+#include <altivec.h>
 
 extern int ext_table[64];              /* defined in main.c: TOC entry */
 static int local_table[64];            /* local: TOC-relative address */
@@ -69,4 +70,24 @@ r1:
   return 21;
 r2:
   return 22;
+}
+
+/* AltiVec loads and stores with a NEGATIVE variable byte offset: the offset
+   is a signed int and must be sign-extended into the 64-bit address, not
+   zero-extended as a pointer would be (GCC patch 0051 builtin expanders).
+   vec_ldl/vec_stl, not vec_ld/vec_st: the lvx/stvx address mask narrows the
+   sum to 32 bits and hides a zero-extended offset.  */
+float vec_table[16] __attribute__ ((aligned (16)));
+
+float
+vec_load_back (int back)
+{
+  vector float v = vec_ldl (-back, &vec_table[8]);
+  return vec_extract (v, 0);
+}
+
+void
+vec_store_back (int back, float value)
+{
+  vec_stl (vec_splats (value), -back, &vec_table[8]);
 }

@@ -16,6 +16,9 @@ int label_dispatch (int which);
 int bump_tls (int n);
 int *tls_slot (int i);
 int label_runtime (int which);
+extern float vec_table[16];
+float vec_load_back (int back);
+void vec_store_back (int back, float value);
 
 static int failures;
 
@@ -50,6 +53,12 @@ main (void)
   check ("label 2", label_dispatch (2), 12);
   check ("runtime label 0", label_runtime (0), 20);
   check ("runtime label 2", label_runtime (2), 22);
+  for (int i = 0; i < 16; i++)
+    vec_table[i] = (float) (i * 10);
+  check ("vec_ldl negative offset", (long) vec_load_back (16), 40);
+  vec_store_back (32, 7.0f);
+  check ("vec_stl negative offset", (long) vec_table[0], 7);
+  check ("vec_stl left the rest", (long) vec_table[4], 40);
   check ("tls counter first", bump_tls (3), 3);
   check ("tls counter second", bump_tls (4), 7);
   *tls_slot (5) = 77;

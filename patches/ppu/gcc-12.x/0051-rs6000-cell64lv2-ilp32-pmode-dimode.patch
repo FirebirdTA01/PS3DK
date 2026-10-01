@@ -17,7 +17,10 @@ output_toc sizes a symbolic entry by the mode it was created in, so a 4-byte
 slot is always read with lwz and an 8-byte one with ld; the -mminimal-toc
 base slot is 4 bytes and load_toc_aix_di reads it with lwz.  AltiVec memory builtins
 extend a ptr_mode pointer argument to Pmode before forcing it into a register
-(the expanders asserted in copy_to_mode_reg, e.g. on vec_lvsl).
+(the expanders asserted in copy_to_mode_reg, e.g. on vec_lvsl): the pointer
+zero-extends (a constant one too, so 0x80000000 stays positive, and a symbolic
+one loads through its 4-byte TOC entry), while the byte offset is a signed int
+and sign-extends.
 
 EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
 
@@ -125,7 +128,7 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
     (set_attr "update" "no")
 --- a/gcc/config/rs6000/rs6000-builtin.cc
 +++ b/gcc/config/rs6000/rs6000-builtin.cc
-@@ -1078,6 +1078,18 @@
+@@ -1078,6 +1078,36 @@
      }
  }
  
@@ -136,15 +139,33 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
 +static rtx
 +rs6000_copy_addr_to_pmode_reg (rtx x)
 +{
-+  if (GET_MODE (x) != Pmode && GET_MODE (x) != VOIDmode)
++  /* A constant pointer is held sign-normalized in ptr_mode, so a high-bit
++     address such as 0x80000000 arrives negative: zero-extend it.  */
++  if (CONST_INT_P (x) && ptr_mode != Pmode)
++    x = GEN_INT (UINTVAL (x) & GET_MODE_MASK (ptr_mode));
++  else if (CONSTANT_P (x) && ptr_mode != Pmode)
++    /* Load a symbolic address through its 4-byte ptr_mode TOC entry, as
++       every other address is, rather than a Pmode one.  */
++    x = convert_memory_address (Pmode, force_reg (ptr_mode, x));
++  else if (GET_MODE (x) != Pmode && GET_MODE (x) != VOIDmode)
 +    x = convert_memory_address (Pmode, x);
++  return copy_to_mode_reg (Pmode, x);
++}
++
++/* A byte offset operand of the same builtins is a signed integer: extend it
++   with its sign, not as a pointer, before adding it to the Pmode base.  */
++static rtx
++rs6000_copy_offset_to_pmode_reg (rtx x)
++{
++  if (GET_MODE (x) != Pmode && GET_MODE (x) != VOIDmode)
++    x = convert_to_mode (Pmode, x, 0);
 +  return copy_to_mode_reg (Pmode, x);
 +}
 +
  /* Expand the MMA built-ins early, so that we can convert the pass-by-reference
     __vector_quad arguments into pass-by-value arguments, leading to more
     efficient code generation.  */
-@@ -2780,7 +2792,7 @@
+@@ -2780,7 +2810,7 @@
        || !insn_data[icode].operand[0].predicate (target, tmode))
      target = gen_reg_rtx (tmode);
  
@@ -153,25 +174,25 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
  
    /* These CELL built-ins use BLKmode instead of tmode for historical
       (i.e., unknown) reasons.  TODO: Is this necessary?  */
-@@ -2808,7 +2820,7 @@
+@@ -2808,7 +2838,7 @@
  	rawaddr = op[1];
        else
  	{
 -	  op[0] = copy_to_mode_reg (Pmode, op[0]);
-+	  op[0] = rs6000_copy_addr_to_pmode_reg (op[0]);
++	  op[0] = rs6000_copy_offset_to_pmode_reg (op[0]);
  	  rawaddr = gen_rtx_PLUS (Pmode, op[1], op[0]);
  	}
        rtx addr = gen_rtx_AND (Pmode, rawaddr, gen_rtx_CONST_INT (Pmode, -16));
-@@ -2823,7 +2835,7 @@
+@@ -2823,7 +2853,7 @@
  	addr = gen_rtx_MEM (blk ? BLKmode : tmode, op[1]);
        else
  	{
 -	  op[0] = copy_to_mode_reg (Pmode, op[0]);
-+	  op[0] = rs6000_copy_addr_to_pmode_reg (op[0]);
++	  op[0] = rs6000_copy_offset_to_pmode_reg (op[0]);
  	  addr = gen_rtx_MEM (blk ? BLKmode : tmode,
  			      gen_rtx_PLUS (Pmode, op[1], op[0]));
  	}
-@@ -2844,13 +2856,13 @@
+@@ -2844,13 +2874,13 @@
  		       machine_mode tmode, machine_mode smode)
  {
    rtx pat, addr;
@@ -183,11 +204,11 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
    else
      {
 -      op[0] = copy_to_mode_reg (Pmode, op[0]);
-+      op[0] = rs6000_copy_addr_to_pmode_reg (op[0]);
++      op[0] = rs6000_copy_offset_to_pmode_reg (op[0]);
        addr = gen_rtx_MEM (smode,
  			  gen_rtx_PLUS (Pmode, op[1], op[0]));
      }
-@@ -2900,13 +2912,13 @@
+@@ -2900,13 +2930,13 @@
  		       machine_mode tmode, machine_mode smode)
  {
    rtx pat, addr;
@@ -199,11 +220,11 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
    else
      {
 -      op[0] = copy_to_mode_reg (Pmode, op[0]);
-+      op[0] = rs6000_copy_addr_to_pmode_reg (op[0]);
++      op[0] = rs6000_copy_offset_to_pmode_reg (op[0]);
        addr = gen_rtx_MEM (smode,
  			  gen_rtx_PLUS (Pmode, op[1], op[0]));
      }
-@@ -2923,7 +2935,7 @@
+@@ -2923,7 +2953,7 @@
  stv_expand_builtin (insn_code icode, rtx *op,
  		    machine_mode tmode, machine_mode smode)
  {
@@ -212,30 +233,30 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
  
    /* For STVX, express the RTL accurately by ANDing the address with -16.
       STVXL and STVE*X expand to use UNSPECs to hide their special behavior,
-@@ -2943,7 +2955,7 @@
+@@ -2943,7 +2973,7 @@
  	rawaddr = op[2];
        else
  	{
 -	  op[1] = copy_to_mode_reg (Pmode, op[1]);
-+	  op[1] = rs6000_copy_addr_to_pmode_reg (op[1]);
++	  op[1] = rs6000_copy_offset_to_pmode_reg (op[1]);
  	  rawaddr = gen_rtx_PLUS (Pmode, op[2], op[1]);
  	}
  
-@@ -2965,7 +2977,7 @@
+@@ -2965,7 +2995,7 @@
  	addr = gen_rtx_MEM (tmode, op[2]);
        else
  	{
 -	  op[1] = copy_to_mode_reg (Pmode, op[1]);
-+	  op[1] = rs6000_copy_addr_to_pmode_reg (op[1]);
++	  op[1] = rs6000_copy_offset_to_pmode_reg (op[1]);
  	  addr = gen_rtx_MEM (tmode, gen_rtx_PLUS (Pmode, op[2], op[1]));
  	}
        rtx pat = GEN_FCN (icode) (addr, op[0]);
-@@ -2982,7 +2994,7 @@
+@@ -2982,7 +3012,7 @@
  	addr = gen_rtx_MEM (tmode, op[2]);
        else
  	{
 -	  op[1] = copy_to_mode_reg (Pmode, op[1]);
-+	  op[1] = rs6000_copy_addr_to_pmode_reg (op[1]);
++	  op[1] = rs6000_copy_offset_to_pmode_reg (op[1]);
  	  addr = gen_rtx_MEM (tmode, gen_rtx_PLUS (Pmode, op[2], op[1]));
  	}
  
