@@ -48,3 +48,4 @@
 0050-rs6000-cell64lv2-doloop-gpr-width-ctr.patch
 0051-rs6000-cell64lv2-ilp32-pmode-dimode.patch
 0052-rs6000-cell64lv2-char-signed-ilp32.patch
+0053-cell64lv2-wchar-16bit-lp64.patch

@@ -1,0 +1,41 @@
+rs6000: 16-bit wchar_t and int wint_t under -mlp64 too (cell64lv2)
+
+0041 matched the reference wchar_t (16-bit unsigned short) and wint_t (int)
+in the ILP32 data model only, on the belief that LP64 had no reference
+counterpart.  The reference compiler with -mlp64 predefines
+__WCHAR_TYPE__ short unsigned int, __WCHAR_MAX__ 65535U and __WINT_TYPE__
+int as well, so L"" literals and structs holding wchar_t in LP64 code still
+had a different layout.  Use the 16-bit wchar_t and int wint_t in both data
+models.  An ABI change for LP64 code using wchar_t; it ships with the other
+v0.20.0 ABI changes.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -377,18 +377,18 @@
+ #undef	PTRDIFF_TYPE
+ #define	PTRDIFF_TYPE (TARGET_LP64 ? "long int" : "int")
+ 
+-/* wchar_t and wint_t under ILP32 match the reference toolchain: wchar_t
+-   is a 16-bit unsigned short (UTF-16 code units, so L"" literals and
+-   structs holding wchar_t have the reference layout) and wint_t is int.
+-   newlib's wide-character code supports a 16-bit wchar_t (this newlib
+-   has no multibyte support).  The LP64 data model has no reference
+-   counterpart and keeps a 32-bit wchar_t.  */
++/* wchar_t and wint_t match the reference toolchain in both data models:
++   wchar_t is a 16-bit unsigned short (UTF-16 code units, so L"" literals
++   and structs holding wchar_t have the reference layout) and wint_t is
++   int; the reference compiler does the same under -mlp64.  newlib's
++   wide-character code supports a 16-bit wchar_t (this newlib has no
++   multibyte support).  */
+ #undef	WCHAR_TYPE
+-#define	WCHAR_TYPE (TARGET_LP64 ? "int" : "short unsigned int")
++#define	WCHAR_TYPE "short unsigned int"
+ #undef  WCHAR_TYPE_SIZE
+-#define WCHAR_TYPE_SIZE (TARGET_LP64 ? 32 : 16)
++#define WCHAR_TYPE_SIZE 16
+ #undef	WINT_TYPE
+-#define	WINT_TYPE (TARGET_LP64 ? "unsigned int" : "int")
++#define	WINT_TYPE "int"
+ 
+ /* The 64-bit ISA always defines TARGET_64BIT, so the rs6000.h
+    (TARGET_32BIT ? 32 : 64) gate would lock long at 64. The data
