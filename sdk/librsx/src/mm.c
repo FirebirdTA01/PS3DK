@@ -1,6 +1,7 @@
 #include <stdlib.h>
 
 #include <gcm_sys.h>
+#include <rsx/mm.h>
 #include <sys/heap.h>
 
 #define SAFE_AREA			4096
@@ -10,7 +11,7 @@ static gcmConfiguration __rsx_config;
 static heap_cntrl __rsx_heap;
 static u32 __rsxheap_initialized = 0;
 
-s64 rsxHeapInit()
+s32 rsxHeapInit()
 {
 	if(!__rsxheap_initialized) {
 		void *heapBuffer;
