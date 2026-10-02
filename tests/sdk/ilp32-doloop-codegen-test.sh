@@ -10,74 +10,46 @@
 # chain must reach an instruction that leaves the upper half defined (a
 # 32-bit rotate/shift, clrldi, a sign extension, li, or a 32-bit load with no
 # offset added after it) before any full-width arithmetic (add, subf, ...).
-# Controls (embedded below): the v0.19.0 candidate's listing of doloop.c and an
-# lwz+addi count must be reported; the fixed compiler's clrldi+addi must not.
 #
-# Skips without PS3DEV (CI has no PPU compiler); run it in the release gate.
+# The scanner itself now lives in the repo at tests/sdk/ctr-loop-scan.py and
+# is loop-aware: an mtctr is only judged as a possible loop count when no
+# straight-line code before the first branch of any kind proves another use
+# (mfctr -- CTR as a scratch register -- or bctrl/bctr -- an indirect call
+# or jump).  Those non-loop uses are reported separately and never counted.
+#
+# Controls (embedded below): the v0.19.0 candidate's listing of doloop.c and
+# an lwz+addi count must be reported; the fixed compiler's clrldi+addi must
+# not.  The scanner's own 6-case self-test (red-add, red-load-addi, green-
+# extended, green-scratch, red-branchy, green-indirect-call) runs first,
+# without a compiler, so the guard fails closed if the logic regresses even
+# on a build host that has no PPU toolchain.
+#
+# Skips the compiles without PS3DEV (CI has no PPU compiler); the self-test
+# and the controls still run and are the fast CI-facing coverage.
 # usage: ilp32-doloop-codegen-test.sh [--ps3dev DIR]
 #   EXTRA_CFLAGS is added to every compile (e.g. -B<dir> to test a candidate cc1).
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+scanner="$root/tests/sdk/ctr-loop-scan.py"
+[ -f "$scanner" ] || { echo "ilp32-doloop-codegen: FAIL: missing $scanner"; exit 1; }
 
-cat > "$work/scan.py" <<'EOF'
-import re, sys
-
-# Results whose full 64 bits are defined and at most 32 bits wide (or a
-# sign-extended / 64-bit value): an offset added to them stays in range.
-CLEAN = re.compile(r"^(clrldi|rlwinm\.?|rlwnm\.?|srwi\.?|slwi\.?|rotlwi|clrlwi\.?|"
-                   r"extsw\.?|extsh\.?|extsb\.?|li|lis|lhz|lhzx|lbz|lbzx|"
-                   r"lwa|lwax|ld|ldx|cntlzw\.?)$")
-# A 32-bit load zero-extends: clean as a count by itself, but an offset added
-# at full width to a negative int carries into bit 32.
-LOAD32 = re.compile(r"^(lwz|lwzx|lwzu|lwzux)$")
-# Instructions whose first operand is not a GPR they write.
-NOWRITE = re.compile(r"^(cmp|fcmp|st|b|tw|td|dcb|mt|sync|isync|nop|lfs|lfd|stfiwx)")
-LINE = re.compile(r"^\s*[0-9a-f]+:\s+(?:[0-9a-f]{2} ){4}\s*(\S+)\s*(.*)$")
-
-def scan(path):
-    insns = []
-    for raw in open(path):
-        m = LINE.match(raw)
-        if m:
-            insns.append((m.group(1), [a.strip() for a in m.group(2).split("#")[0].split(",")]))
-        elif re.match(r"^[0-9a-f]+ <", raw):
-            insns.append(("<fn>", []))
-    findings = 0
-    for i, (op, args) in enumerate(insns):
-        if op != "mtctr":
-            continue
-        reg, j, verdict, offset = args[0], i - 1, None, None
-        while j >= 0 and verdict is None:
-            o, a = insns[j]
-            if o == "<fn>":
-                verdict = "clean"  # an incoming argument: the caller extended it
-            elif a and a[0] == reg and not NOWRITE.match(o):
-                if CLEAN.match(o):
-                    verdict = "clean"
-                elif o == "rldicl" and len(a) == 4 and int(a[3], 0) >= 32:
-                    verdict = "clean"
-                elif LOAD32.match(o):
-                    verdict = ("dirty: %s %s then %s" % (o, ",".join(a), offset)
-                               if offset else "clean")
-                elif o == "mr" and len(a) == 2:
-                    reg = a[1]
-                elif o == "addi" and len(a) == 3:
-                    if int(a[2], 0) != 0 and offset is None:
-                        offset = "addi %s" % ",".join(a)
-                    reg = a[1]
-                else:
-                    verdict = "dirty: %s %s" % (o, ",".join(a))
-            j -= 1
-        if verdict and verdict != "clean":
-            findings += 1
-            print("finding: mtctr %s <- %s" % (args[0], verdict[7:]))
-    print("%s: %d findings" % (path, findings))
-    return findings
-
-sys.exit(0 if scan(sys.argv[1]) == 0 else 3)
-EOF
+# First run the scanner's own self-test: 6 synthetic cases covering both the
+# loop-usage rules (which instructions make a count clean/dirty) and the
+# non-loop detection (mfctr scratch and bctrl indirect call).  The exit code
+# is 0 only if all six pass (2 otherwise), so pass/fail is authoritative;
+# the per-case line counts below make the "6/6" requirement explicit.
+python3 "$scanner" --self-test > "$work/self-test.out" 2>&1
+rctest=$?
+n_ok=$(grep -c ' ok (findings' "$work/self-test.out")
+n_fail=$(grep -c 'FAIL (findings' "$work/self-test.out")
+if [ $rctest -ne 0 ] || [ "$n_ok" -ne 6 ] || [ "$n_fail" -ne 0 ]; then
+    echo "ilp32-doloop-codegen: FAIL self-test (exit $rctest, ${n_ok}/6 ok, ${n_fail} fail)"
+    cat "$work/self-test.out"
+    exit 1
+fi
+echo "ilp32-doloop-codegen: ok   self-test: 6/6 synthetic cases"
 
 # The v0.19.0 candidate (c13ee74f) at -O2: CTR loaded from add r5,r9,r5 where
 # r9 is a zero-extended lwz of a negative int.
@@ -120,19 +92,22 @@ cat > "$work/green.dis" <<'EOF'
   4c:	7d 49 03 a6 	mtctr   r10
 EOF
 status=0
-control() {  # <name> <expected exit> <expected text> <label>
-    python3 "$work/scan.py" "$work/$1.dis" > "$work/$1.out"
+control() {  # <name> <expected exit> <expected regex> <label>
+    python3 "$scanner" "$work/$1.dis" > "$work/$1.out"
     local rc=$?
-    if [ $rc -eq "$2" ] && grep -q -- "$3" "$work/$1.out"; then
+    if [ $rc -eq "$2" ] && grep -qE -- "$3" "$work/$1.out"; then
         echo "ilp32-doloop-codegen: ok   control: $4"
     else
         echo "ilp32-doloop-codegen: FAIL control: $4 (exit $rc)"
         cat "$work/$1.out"; status=1
     fi
 }
-control red 3 "finding: mtctr r5 <- add" "the v0.19.0 candidate listing is reported"
-control red-addi 3 "finding: mtctr r5 <- lwz .* then addi" "an offset on a 32-bit load is reported"
-control green 0 ": 0 findings" "a zero-extended count is accepted"
+# Scanner output (tests/sdk/ctr-loop-scan.py) for the three embedded listings:
+#   finding: <fn> <addr> mtctr <reg> <- <verdict>
+#   judged mtctr (possible loop count): N, findings: M, non-loop mtctr: K
+control red       3  'finding: .* mtctr r5 <- add .*'              "the v0.19.0 candidate listing is reported"
+control red-addi  3  'finding: .* mtctr r5 <- lwz .* then addi .*' "an offset on a 32-bit load is reported"
+control green     0  'findings: 0'                                 "a zero-extended count is accepted"
 
 ps3dev="${PS3DEV:-}"
 [ "${1:-}" = "--ps3dev" ] && ps3dev="$2"
@@ -155,7 +130,7 @@ for model in "" -mlp64; do
         if ! grep -q mtctr "$work/$name.dis"; then
             echo "ilp32-doloop-codegen: FAIL ${model:-ILP32} $opt: no counted loop; the reproducer no longer reaches doloop"
             status=1
-        elif python3 "$work/scan.py" "$work/$name.dis" > "$work/$name.out"; then
+        elif python3 "$scanner" "$work/$name.dis" > "$work/$name.out"; then
             echo "ilp32-doloop-codegen: ok   ${model:-ILP32} $opt: every CTR count has a defined upper half"
         else
             echo "ilp32-doloop-codegen: FAIL ${model:-ILP32} $opt"; cat "$work/$name.out"; status=1
