@@ -13,6 +13,7 @@
  * and jobType gains CELL_SPURS_JOB_TYPE_BINARY2.
  * Independently written from the published formats and semantics.
  */
+#include "spurs_dma.h"
 #include <stdint.h>
 #include <spu_mfcio.h>
 
@@ -37,8 +38,7 @@ static uint32_t be32(const uint8_t *p)
 static void fetch(void *ls, uint64_t ea, uint32_t size)
 {
 	mfc_get(ls, ea, size, 0, 0, 0);
-	mfc_write_tag_mask(1u << 0);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(0);
 }
 
 /* program header i: type, flags */

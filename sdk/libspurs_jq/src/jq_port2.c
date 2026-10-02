@@ -18,6 +18,7 @@
  * with release, so it can wait for a free descriptor: tasks only.
  * Independently written from the published object layouts and semantics.
  */
+#include "jq_dma.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <spu_mfcio.h>
@@ -222,8 +223,7 @@ int _cellSpursJobQueuePort2PushJobListBody(uint64_t eaPort2, uint64_t eaJobList,
 	if (tag > 15 || dmaTag > 31)
 		return (int)JOB_INVAL;
 	mfc_get(list, eaJobList, 16, dmaTag, 0, 0);
-	mfc_write_tag_mask(1u << dmaTag);
-	(void)mfc_read_tag_status_all();
+	jq_dma_wait(dmaTag);
 	n = list[0];
 	size = list[1];
 	if (size != 64 && ((size & 0x7f) || size > 1023))
@@ -280,8 +280,7 @@ int _cellSpursJobQueuePort2CopyPushJobBody(uint64_t eaPort2, const void *pJob, s
 	rc = _cellSpursJobQueueAllocateJobDescriptor(P32(0x18), (int)P32(0x1c), sizeDescFromPool, dmaTag, 0, &ea);
 	if (!rc) {
 		mfc_put((volatile void *)pJob, ea, sizeDesc, 0, 0, 0);
-		mfc_write_tag_mask(1u << 0);
-		(void)mfc_read_tag_status_all();
+		jq_dma_wait(0);
 		get_line(eaPort2);
 		rc = _cellSpursJobQueuePushAndReleaseJobBody(P32(0x18), (int)P32(0x1c), ea, sizeDesc, tag, dmaTag, flag,
 		                                             sync ? eaPort2 : 0);

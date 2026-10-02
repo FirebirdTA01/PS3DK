@@ -12,6 +12,7 @@
  * 0x66 bit 6 is set or the byte at 0x60 is nonzero.
  * Independently written from the published object layouts and semantics.
  */
+#include "jq_dma.h"
 #include <stdint.h>
 #include <spu_mfcio.h>
 
@@ -68,8 +69,7 @@ int cellSpursJobQueueSendSignal(uint64_t eaJob)
 		get_line(qline, jq);
 		link[0] = *(volatile uint32_t *)(qline + 0x68);
 		mfc_put(link, eaJob, 4, 0, 0, 0);
-		mfc_write_tag_mask(1u << 0);
-		(void)mfc_read_tag_status_all();
+		jq_dma_wait(0);
 		*(volatile uint32_t *)(qline + 0x68) = entry;
 		wake = (qline[0x66] & 0x40) ? 0 : qline[0x60] == 0;
 	} while (!put_line(qline, jq));

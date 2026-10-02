@@ -143,6 +143,15 @@ static void susp_size(CellSpursJob256 *job)
                                                                           (enum CellSpursJobQueueSuspendedJobAttribute)attr,
                                                                           &size);
             res[2 * attr + 1] = size;
+            /* the library must hand back the caller's tag mask: a mask left on
+               the library's own tag made this job read the next descriptor
+               before its DMA landed (real PS3 only; RPCS3 DMA is immediate) */
+            if (mfc_read_tag_mask() != (1u << 3) && !out[1]) {
+                out[1] = 93;
+                out[2] = mfc_read_tag_mask();
+                out[3] = 1u << 3;
+                mfc_write_tag_mask(1u << 3);
+            }
         }
         mfc_put(res, job->workArea.userData[5] + 16 * i, 16, 3, 0, 0);
         mfc_read_tag_status_all();

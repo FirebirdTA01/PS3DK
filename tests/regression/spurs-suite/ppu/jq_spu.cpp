@@ -161,6 +161,8 @@ static int row_main()
     if ((rc = cellSpursJobQueuePushFlush(&s_jq, h))) return suite::invalid("push flush", rc);
     if (!suite::wait_for([] { return s_out[J_SUSPSIZE][0] == Q_MAGIC + Q_SUSPSIZE; }))
         return suite::fail("suspended-size job", s_out[J_SUSPSIZE][0], Q_MAGIC + Q_SUSPSIZE);
+    if (s_out[J_SUSPSIZE][1] == 93)
+        return suite::fail("SPU tag mask after GetSuspendedJobSize", s_out[J_SUSPSIZE][2], s_out[J_SUSPSIZE][3]);
     for (unsigned i = 0; i < Q_SS_CASES; ++i)
         for (unsigned attr = 0; attr < 2; ++attr) {
             unsigned size = 0xdead;

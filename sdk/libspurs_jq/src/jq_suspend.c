@@ -11,6 +11,7 @@
  * read from the binary, instead of its loadable image and the cache.
  * Independently written from the published object layouts and semantics.
  */
+#include "jq_dma.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -35,8 +36,7 @@ static inline uint16_t w16(const void *p) { return *(const uint16_t *)p; }
 static void dma_get(void *ls, uint64_t ea, unsigned size)
 {
 	mfc_get(ls, ea, size, TAG, 0, 0);
-	mfc_write_tag_mask(1u << TAG);
-	(void)mfc_read_tag_status_all();
+	jq_dma_wait(TAG);
 }
 
 static unsigned hexdigit_pair(const uint8_t *p)
@@ -61,8 +61,7 @@ static uint32_t binary_area(uint64_t eaBin)
 	for (i = 0; i < 256; ++i, off += 8) {
 		const uint64_t ea = eaBin + off;
 		mfc_get(pair, ea & ~15ull, 16, TAG, 0, 0);
-		mfc_write_tag_mask(1u << TAG);
-		(void)mfc_read_tag_status_all();
+		jq_dma_wait(TAG);
 		const uint32_t *e = pair + ((ea & 15) >> 2);
 		if (e[0] == 0xffffffffu)
 			break;

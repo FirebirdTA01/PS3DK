@@ -19,6 +19,7 @@
  * +0x20, run-on-release at +0x30.
  * Independently written from the published object layouts and semantics.
  */
+#include "spurs_dma.h"
 #include <stdint.h>
 #include <spu_mfcio.h>
 
@@ -77,8 +78,7 @@ static void put_be32(uint8_t *p, uint32_t v)
 static const uint8_t *peek16(uint64_t ea)
 {
 	mfc_get(small, ea, 16, 31, 0, 0);
-	mfc_write_tag_mask(1u << 31);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(31);
 	return small;
 }
 

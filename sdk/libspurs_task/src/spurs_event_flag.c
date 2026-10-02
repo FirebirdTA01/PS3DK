@@ -26,6 +26,7 @@
  * cellSpursWaitSignal.  Independently written from the published object
  * layout and wake protocol.
  */
+#include "spurs_dma.h"
 #include <stdint.h>
 #include <spu_mfcio.h>
 
@@ -128,8 +129,7 @@ static int waiter_taskset(uint64_t addr, int isIwl, unsigned wkl, uint64_t *task
 	   (16-31); the 64-bit argument is at +0x08. */
 	info = addr + ((wkl & 0x10) ? 0x1000u : 0xb00u) + (wkl & 0xfu) * 0x20u + 0x08u;
 	mfc_get(&arg[(info >> 3) & 1], info, 8, 31, 0, 0);
-	mfc_write_tag_mask(1u << 31);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(31);
 	*taskset = arg[(info >> 3) & 1];
 	return 0;
 }
