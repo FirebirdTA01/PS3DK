@@ -28,6 +28,17 @@ from pathlib import Path
 
 import fp_eval
 from uniform_container_check import Container
+from fp_sources import instructions, ucode_words
+
+# The units the TEX instructions actually read (a record can be right while
+# the fetch reads another unit): row -> the set of fetched units, measured.
+TEX_UNITS = {'explicit_unit_member': {0, 3}, 'register_member': {5},
+             'unqualified_sampler_member': {0, 1}}
+# Not flattened yet: a sampler inside a NESTED struct member (the reference
+# accepts it as P.I.tex on TEXUNIT0) must refuse rather than guess a unit.
+NESTED_REFUSE = {'nested_sampler_member': """struct inner { sampler2D tex; }; struct prev { float2 tc; inner I; };
+float4 main(float4 uv : TEXCOORD0, prev P) : COLOR { return tex2D(P.I.tex, uv.xy); }
+"""}
 
 VAR, UNI = 4101, 4102
 TC = lambda n: 3220 + n
@@ -61,6 +72,14 @@ float4 main(float2 uv : TEXCOORD0, in d v, float2 z) : COLOR { return float4(uv 
 float4 main(float4 uv : TEXCOORD0, uniform sampler2D decal : TEXUNIT0, prev P) : COLOR { return tex2D(P.texture, uv.xy) + tex2D(decal, uv.zw); }
 """, {('uv', VAR, TC(0), 0, 1), ('decal', UNI, TEXUNIT0, 1, 1), ('P.tex_coord', VAR, UNDEF, 2, 0),
         ('P.texture', UNI, TEXUNIT0 + 1, 2, 1)}, None, set()),
+    # an explicit binding on a sampler member is honoured (review: codex; measured)
+    'explicit_unit_member': ("""struct prev { float2 tc; sampler2D tex : TEXUNIT3; };
+float4 main(float4 uv : TEXCOORD0, uniform sampler2D decal : TEXUNIT0, prev P) : COLOR { return tex2D(P.tex, uv.xy) + tex2D(decal, uv.zw); }
+""", {('uv', VAR, TC(0), 0, 1), ('decal', UNI, TEXUNIT0, 1, 1), ('P.tc', VAR, UNDEF, 2, 0),
+        ('P.tex', UNI, TEXUNIT0 + 3, 2, 1)}, None, set()),
+    'register_member': ("""struct prev { float2 tc; sampler2D tex : register(s5); };
+float4 main(float4 uv : TEXCOORD0, prev P) : COLOR { return tex2D(P.tex, uv.xy); }
+""", {('uv', VAR, TC(0), 0, 1), ('P.tc', VAR, UNDEF, 1, 0), ('P.tex', UNI, TEXUNIT0 + 5, 1, 1)}, None, set()),
     'uniform_sampler_member': ("""struct p { uniform float2 size; uniform sampler2D tex; };
 float4 main(float2 uv : TEXCOORD0, p P) : COLOR { return tex2D(P.tex, uv * P.size); }
 """, {('uv', VAR, TC(0), 0, 1), ('P.size', UNI, UNDEF, 1, 1), ('P.tex', UNI, TEXUNIT0, 1, 1)},
@@ -132,7 +151,18 @@ def main():
             if value is not None and fp_eval.evaluate(blob, INPUTS) != value:
                 failures.append('%s value %s, want %s' % (name, fp_eval.evaluate(blob, INPUTS), value))
                 notes.append('WRONG VALUE')
+            if name in TEX_UNITS:
+                units = {(w[0] >> 17) & 15 for w, _ in instructions(ucode_words(blob)) if (w[0] >> 24) & 63 == 0x17}
+                if units != TEX_UNITS[name]:
+                    failures.append('%s fetches units %s, want %s' % (name, sorted(units), sorted(TEX_UNITS[name])))
+                    notes.append('WRONG UNIT')
             print('  %-24s %s' % (name, ', '.join(notes) or 'as measured'))
+        for name, text in NESTED_REFUSE.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text)
+            ok = rc == 1 and not blob
+            print('  %-24s %s' % (name, 'refused (rc 1)' if ok else 'NOT refused (rc %d) - check the unit' % rc))
+            if not ok:
+                failures.append('%s: a nested sampler member must refuse until it is flattened' % name)
         for name, text in REUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
             ok = rc == 1 and not blob and 'implicit-varying-struct-reuse' in err
