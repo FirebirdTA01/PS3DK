@@ -17,8 +17,8 @@ CASES = [
      r'^nv40-general: VP atan2 lowering deferred'),
     ('vp_derivative', 'vp', 'void main(float4 p:POSITION,out float4 o:POSITION,out float4 c:COLOR) {o=p;c=ddx(p);}',
      r'^nv40-general: screen-space derivatives are fragment-only'),
-    ('member', 'fp', 'struct Input {float2 uv;}; float4 main(Input data):COLOR {return float4(data.uv,0,1);}',
-     r"unsupported input semantic.*<none>.*entry 'main'.*input 'data.uv'.*vec2"),
+    # A semantic-less struct member now takes an implicit TEXCOORD (measured;
+    # value-checked by implicit-varying); 'semantic' keeps this message's shape.
     ('semantic', 'fp', 'struct Input {float4 shade:TEXUNIT0;}; float4 main(Input data):COLOR {return data.shade;}',
      r"unsupported input semantic.*TEXUNIT0.*entry 'main'.*input 'data.shade'.*vec4"),
     ('sample_lod', 'fp', 'float4 main(float4 uv:TEXCOORD0,uniform sampler2D s):COLOR {return tex2Dlod(s,uv);}',
