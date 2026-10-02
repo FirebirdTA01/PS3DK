@@ -694,6 +694,8 @@ jobs:
         run: bash tests/shader-compiler/refract-root-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test fragment refract strict boundary
         run: bash tests/shader-compiler/fp-refract-boundary-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: FP refract selected scalar eta
+        run: bash tests/shader-compiler/fp-refract-scalar-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler faceforward
         run: bash tests/shader-compiler/faceforward-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler local array indexing

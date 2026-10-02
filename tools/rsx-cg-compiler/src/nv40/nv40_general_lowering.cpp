@@ -7330,6 +7330,8 @@ private:
         const VSrc I   = resolve(inst.operands[0]);
         const VSrc N   = resolve(inst.operands[1]);
         const VSrc eta = resolve(inst.operands[2]);
+        // resolve already broadcasts the selected scalar lane and retains
+        // its modifiers. Forcing xxxx here reads a.x for an eta such as a.w.
         const bool constantEta = eta.kind == VSrcKind::Literal;
 
         // t.x = d = dot(N, I); t.y = 1 - d^2; t.z = eta^2; t.w = k
@@ -7359,9 +7361,7 @@ private:
         eta2.dst.index = t;
         eta2.dst.writemask = 0x4;
         eta2.srcs[0] = eta;
-        eta2.srcs[0].swizzle = {0, 0, 0, 0};
         eta2.srcs[1] = eta;
-        eta2.srcs[1].swizzle = {0, 0, 0, 0};
         program_.instrs.push_back(eta2);
 
         VInstr k;
@@ -7412,7 +7412,6 @@ private:
         coef.dst.index = s;
         coef.dst.writemask = 0x4;
         coef.srcs[0] = eta;
-        coef.srcs[0].swizzle = {0, 0, 0, 0};
         coef.srcs[1] = tempSrc(t);
         coef.srcs[1].swizzle = {0, 0, 0, 0};
         coef.srcs[2] = tempSrc(s);
@@ -7427,7 +7426,6 @@ private:
         etaI.dst.writemask = 0x7;
         etaI.srcs[0] = I;
         etaI.srcs[1] = eta;
-        etaI.srcs[1].swizzle = {0, 0, 0, 0};
         program_.instrs.push_back(etaI);
 
         VInstr subN;
