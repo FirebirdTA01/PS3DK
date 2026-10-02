@@ -977,6 +977,10 @@ CgType SemanticAnalyzer::analyzeBinaryExpr(BinaryExpr* expr)
         return CgType::Error();
     }
 
+    // `a, b` is b; a is evaluated for its effects only.
+    if (expr->op == BinaryOp::Comma)
+        return rightType;
+
     // Check for assignment operators
     if (TypeOperations::isAssignmentOp(expr->op))
     {

@@ -651,6 +651,8 @@ jobs:
         run: bash tests/shader-compiler/tex2dproj-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test tex1D coordinate packing and sampler metadata
         run: bash tests/shader-compiler/tex1d-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test community parser gaps (comma, type-name variables, constant array sizes)
+        run: bash tests/shader-compiler/parser-gaps-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test fragment tex2Dlod lowers to TXL
         run: bash tests/shader-compiler/fp-tex2dlod-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test file-scope const matrices fold to literal rows

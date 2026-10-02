@@ -3966,6 +3966,13 @@ IRValueID IRBuilder::tryFoldVecConstruct(const IRTypeInfo& resultType,
 
 IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
 {
+    // `a, b`: evaluate a for its effects, then the value is b.
+    if (expr->op == BinaryOp::Comma)
+    {
+        buildExpr(expr->left.get());
+        return buildExpr(expr->right.get());
+    }
+
     // Handle assignment specially
     if (TypeOperations::isAssignmentOp(expr->op))
     {

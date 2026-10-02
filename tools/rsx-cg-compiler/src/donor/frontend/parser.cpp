@@ -697,6 +697,62 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
     return type;
 }
 
+Parser::ConstEval Parser::evalConstInt(const ExprNode* e, long long& out) const
+{
+    if (!e) return ConstEval::NotConstant;
+    switch (e->kind)
+    {
+    case ExprKind::Literal:
+    {
+        const auto* lit = static_cast<const LiteralExpr*>(e);
+        if (lit->literalKind != LiteralExpr::LiteralKind::Int) return ConstEval::NotIntegral;
+        out = static_cast<long long>(std::get<int64_t>(lit->value));
+        return ConstEval::Ok;
+    }
+    case ExprKind::Identifier:
+    {
+        const auto& name = static_cast<const IdentifierExpr*>(e)->name;
+        for (auto it = constScopes_.rbegin(); it != constScopes_.rend(); ++it)
+        {
+            const auto found = it->find(name);
+            if (found == it->end()) continue;
+            if (!found->second) return ConstEval::NotConstant;
+            out = *found->second;
+            return ConstEval::Ok;
+        }
+        return ConstEval::NotConstant;
+    }
+    case ExprKind::Unary:
+    {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        if (u->op != UnaryOp::Negate) return ConstEval::NotConstant;
+        const ConstEval r = evalConstInt(u->operand.get(), out);
+        if (r == ConstEval::Ok) out = -out;
+        return r;
+    }
+    case ExprKind::Binary:
+    {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        long long l = 0, r = 0;
+        const ConstEval lr = evalConstInt(b->left.get(), l);
+        if (lr != ConstEval::Ok) return lr;
+        const ConstEval rr = evalConstInt(b->right.get(), r);
+        if (rr != ConstEval::Ok) return rr;
+        switch (b->op)
+        {
+        case BinaryOp::Add: out = l + r; return ConstEval::Ok;
+        case BinaryOp::Sub: out = l - r; return ConstEval::Ok;
+        case BinaryOp::Mul: out = l * r; return ConstEval::Ok;
+        case BinaryOp::Div: if (r == 0) return ConstEval::NotConstant; out = l / r; return ConstEval::Ok;
+        case BinaryOp::Mod: if (r == 0) return ConstEval::NotConstant; out = l % r; return ConstEval::Ok;
+        default: return ConstEval::NotConstant;
+        }
+    }
+    default:
+        return ConstEval::NotConstant;
+    }
+}
+
 std::shared_ptr<TypeNode> Parser::parseArrayType(std::shared_ptr<TypeNode> elementType)
 {
     consume(TokenType::LBRACKET, "Expected '['");
@@ -705,17 +761,32 @@ std::shared_ptr<TypeNode> Parser::parseArrayType(std::shared_ptr<TypeNode> eleme
     arrayType->baseType = BaseType::Array;
     arrayType->elementType = elementType;
 
-    // Parse array size (must be constant expression, but for now just integer literal)
+    // An array size is an integral constant expression.  Measured on the
+    // reference: integer literals (after macro expansion, TAPS + 1),
+    // `static const int` names in scope (2*rad+1, grid_size*grid_size with a
+    // local int) and + - * / % are accepted; a float value - even 2.0*2.0 -
+    // is C1309, a uniform or a non-static const is C1307.
     if (!check(TokenType::RBRACKET))
     {
-        if (check(TokenType::NUMBER))
+        if (check(TokenType::NUMBER) && peek(1).type == TokenType::RBRACKET &&
+            peek().lexeme.find_first_of(".eEfFhH") == std::string::npos)
         {
             const Token& sizeTok = advance();
             arrayType->arraySize = std::stoi(sizeTok.lexeme);
         }
         else
         {
-            error("Expected array size");
+            auto sizeExpr = parseTernaryExpression();
+            long long value = 0;
+            const ConstEval r = sizeExpr ? evalConstInt(sizeExpr.get(), value) : ConstEval::NotConstant;
+            if (r == ConstEval::NotIntegral)
+                error("C1309: non integral expression for array size");
+            else if (r != ConstEval::Ok)
+                error("C1307: non constant expression for array size");
+            else if (value <= 0)
+                error("array size must be positive");
+            else
+                arrayType->arraySize = static_cast<int>(value);
         }
     }
     else
@@ -1151,6 +1222,19 @@ std::unique_ptr<VarDecl> Parser::parseVariableDeclaration(
             var->initializer = parseBracedInitializerExpression(var->type);
         else
             var->initializer = parseAssignmentExpression();
+    }
+
+    // Record the name for array extents: a `static const int/uint` scalar
+    // with a constant initialiser is a value, anything else shadows.
+    {
+        std::optional<long long> value;
+        long long v = 0;
+        if (var->isStatic && storage == StorageQualifier::Const && var->type &&
+            (var->type->baseType == BaseType::Int || var->type->baseType == BaseType::UInt) &&
+            var->type->isScalar() && var->initializer &&
+            evalConstInt(var->initializer.get(), v) == ConstEval::Ok)
+            value = v;
+        constScopes_.back()[name] = value;
     }
 
     return var;
@@ -1669,6 +1753,7 @@ std::unique_ptr<BlockStmt> Parser::parseBlock()
     consume(TokenType::LBRACE, "Expected '{'");
 
     auto block = std::make_unique<BlockStmt>(loc);
+    constScopes_.emplace_back();   // a block's names end with it (array extents)
 
     while (!check(TokenType::RBRACE) && !isAtEnd())
     {
@@ -1680,6 +1765,7 @@ std::unique_ptr<BlockStmt> Parser::parseBlock()
     }
 
     consume(TokenType::RBRACE, "Expected '}'");
+    if (constScopes_.size() > 1) constScopes_.pop_back();
     return block;
 }
 
@@ -1953,7 +2039,20 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
 
 std::unique_ptr<ExprNode> Parser::parseExpression()
 {
-    return parseAssignmentExpression();
+    // A full expression may be a comma sequence (C semantics, measured on the
+    // reference: `a = t.x, b = t.y;`, `float2((t.x, t.y) / 2, 0)` is t.y / 2,
+    // `for (i = 0, j = 2; ...; i++, j--)`).  Arguments, initialisers and
+    // defaults use parseAssignmentExpression, where a comma separates.
+    auto left = parseAssignmentExpression();
+    while (left && check(TokenType::COMMA))
+    {
+        SourceLocation loc = currentLocation();
+        advance();
+        auto right = parseAssignmentExpression();
+        if (!right) return nullptr;
+        left = std::make_unique<BinaryExpr>(loc, BinaryOp::Comma, std::move(left), std::move(right));
+    }
+    return left;
 }
 
 std::unique_ptr<ExprNode> Parser::parseAssignmentExpression()
@@ -2371,6 +2470,16 @@ std::unique_ptr<ExprNode> Parser::parsePrimaryExpression()
             advance();
             return std::make_unique<LiteralExpr>(loc, false);
         }
+    }
+
+    // A user type name (struct or typedef) NOT followed by '(' is a variable
+    // that shadows the type in this scope: measured, the reference accepts
+    // `struct input {...}; ... float4 input = t; input += 1;` (libretro's
+    // phosphor-trails, gb-pass-1).  Read it as an identifier.
+    if (check(TokenType::IDENTIFIER) && isTypeName() && peek(1).type != TokenType::LPAREN)
+    {
+        const Token& tok = advance();
+        return std::make_unique<IdentifierExpr>(loc, tok.lexeme);
     }
 
     // Type constructor: float4(1, 2, 3, 4)
