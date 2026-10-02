@@ -1105,10 +1105,11 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         // visible and neither test below applies.  The reference calls this
         // C1101.
         //
-        // Then NAME-NOT-FOUND versus NO-VIABLE-OVERLOAD.  Only the first is
-        // the reference's C1008 class and only it is reachability-gated.  A
-        // name with at least one VISIBLE declaration but no overload that fits
-        // is C1103 and is reported everywhere - measured, and it holds even
+        // Then NAME-NOT-FOUND versus NO-VIABLE-OVERLOAD.  The first is the
+        // reference's C1008 class and is reachability-gated; so is a no-fit
+        // call whose only visible candidates are BUILTINS (below).  A name
+        // with a visible SOURCE declaration but no overload that fits is C1103
+        // and is reported everywhere - measured, and it holds even
         // when a later exact overload exists, which is why this asks about
         // visibility of the NAME and never about whole-unit resolvability
         // (review: codex).
@@ -1140,6 +1141,20 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
                                  "use of undeclared identifier '" +
                                  expr->functionName + "'",
                                  expr->functionName);
+            return CgType::Error();
+        }
+        // ONLY BUILTINS ARE VISIBLE AND NONE FITS.  The reference holds this
+        // like the C1008 class and reports it only in entry-reachable bodies:
+        // an unused helper calling tex1D(s, p, 0), tex1Dfetch(sampler1D, int4)
+        // or a wrong-arity builtin compiles, and the same call from main is
+        // refused (measured, t_a287040c).  libretro's gamma-management.h
+        // wrappers are exactly that shape.  A visible SOURCE declaration that
+        // does not fit stays C1103 everywhere (fp_reach_unreached_arity_refuse_f).
+        if (!symbols_.hasVisibleSourceFunction(expr->functionName, visibleThrough_))
+        {
+            deferOrEmitNameError(expr->loc,
+                                 "no matching function for call to '" + sig + "'",
+                                 std::string());
             return CgType::Error();
         }
         error(expr->loc, "no matching function for call to '" + sig + "'");
@@ -1293,7 +1308,23 @@ CgType SemanticAnalyzer::analyzeIndexExpr(IndexExpr* expr)
 
 CgType SemanticAnalyzer::analyzeTernaryExpr(TernaryExpr* expr)
 {
-    checkCondition(expr->condition.get());
+    // A vector condition selects per lane (Cg ?: is component-wise).  The
+    // reference takes a bool or numeric vector condition of width N only
+    // when the arms' common type is an N-wide vector; two scalar arms or a
+    // width mismatch are refused.  if/while conditions stay scalar.
+    int condWidth = 1;
+    if (expr->condition)
+    {
+        CgType condType = analyzeExpr(expr->condition.get());
+        if (condType.isError()) return CgType::Error();
+        if (condType.isVector() && condType.isNumeric())  // isNumeric() includes bool
+            condWidth = condType.vectorSize();
+        else if (!condType.isScalar())
+        {
+            error(expr->condition->loc, "condition must be a scalar expression");
+            return CgType::Error();
+        }
+    }
 
     CgType thenType = analyzeExpr(expr->thenExpr.get());
     CgType elseType = analyzeExpr(expr->elseExpr.get());
@@ -1308,6 +1339,14 @@ CgType SemanticAnalyzer::analyzeTernaryExpr(TernaryExpr* expr)
     {
         error(expr->loc, "incompatible operand types in conditional expression ('" +
               thenType.toString() + "' and '" + elseType.toString() + "')");
+        return CgType::Error();
+    }
+
+    if (condWidth > 1 && !(commonType->isVector() && commonType->vectorSize() == condWidth))
+    {
+        error(expr->loc, "a " + std::to_string(condWidth) +
+              "-component condition needs " + std::to_string(condWidth) +
+              "-component operands in a conditional expression (got '" + commonType->toString() + "')");
         return CgType::Error();
     }
 

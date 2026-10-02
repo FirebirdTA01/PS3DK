@@ -559,6 +559,11 @@ jobs:
         run: bash tests/shader-compiler/cast-splat-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test a call resolves against the declarations visible at it
         run: bash tests/shader-compiler/call-visibility-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Vector !, && and || judged by value against Cg semantics
+        run: bash tests/shader-compiler/bool-vector-logic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Vector ?: conditions judged by value against Cg semantics
+        run: bash tests/shader-compiler/vector-select-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test helper parameter default arguments
         run: bash tests/shader-compiler/helper-default-args-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test a parenthesised object-like macro body

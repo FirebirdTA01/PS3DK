@@ -3,8 +3,9 @@
 Only unpredicated MOV/MUL/ADD/MAD/MAX/SNE/SEQ with literal blocks and TEX0
 are accepted. Exact binary inputs exercise zero, sign and fractional truth.
 Half temporaries are rounded on writes; unsupported instructions fail closed.
-The two reference FP ternaries use condition-code selection instead: their
-listings are independent oracle evidence, not instructions executed here.
+Fragment selects are predicated (condition-code write, gated MOV); those
+programs are run by fp_eval, whose per-lane condition-code model refuses
+anything it does not cover, so a fixture is never judged by guesswork.
 """
 import math
 import struct
@@ -65,6 +66,19 @@ def execute(blob, vector):
     return regs[(0,0)]
 
 
+def run(blob,vector):
+    # Fragment selects are predicated writes (a condition-code write, then a
+    # gated MOV), which execute() does not model; fp_eval does, per lane.
+    import fp_eval
+    try:
+        return execute(blob,vector)
+    except AssertionError:
+        try:
+            return fp_eval.evaluate(blob,{'TEX0':list(vector)})
+        except fp_eval.Unmodelled as e:
+            require(False,'unjudged by both evaluators: '+str(e))
+
+
 def verify(blob,route,name):
     for x,y in ((0.0,0.0),(-0.0,0.5),(0.5,0.0),(-0.5,0.5),(2.0,-2.0),(-2.0,0.0)):
         truth=x!=0
@@ -72,7 +86,7 @@ def verify(blob,route,name):
         else:
             result=(not truth) if route=='not' else (truth and y!=0) if route=='and' else (truth or y!=0)
             expected=[float(result),0.,0.,1.]
-        actual=execute(blob,[x,y,0.25,1.0])
+        actual=run(blob,[x,y,0.25,1.0])
         require(actual==expected,f'{name}: decoded value {actual} != {expected} at {x},{y}')
     # A wrong numerical expectation must disagree on the fractional cell.
-    require(execute(blob,[0.5,0.5,0.25,1.0])!=[0.5,0.,0.5,1.],name+': inert value witness')
+    require(run(blob,[0.5,0.5,0.25,1.0])!=[0.5,0.,0.5,1.],name+': inert value witness')
