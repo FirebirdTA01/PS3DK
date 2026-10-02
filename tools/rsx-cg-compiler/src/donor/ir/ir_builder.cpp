@@ -4960,6 +4960,7 @@ std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
         default:              return 1;   // the integer kinds
         }
     };
+    int depth = 0;
     std::function<bool(const ExprNode*)> namesLocal = [&](const ExprNode* x) -> bool {
         if (!x) return false;
         if (category(x) == 3) return true;
@@ -4984,7 +4985,31 @@ std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
         case ExprKind::Literal:
             return false;
         case ExprKind::Identifier:
-            return nameToValue_.count(static_cast<const IdentifierExpr*>(x)->name) != 0;
+        {
+            const auto* id = static_cast<const IdentifierExpr*>(x);
+            if (nameToValue_.count(id->name) != 0) return true;
+            // A static const carries its initialiser's precision rules with
+            // it (review: codex - static const bool B = (G == 16777217);
+            // if (B) bypassed the comparison guard, and the reference keeps
+            // static const float Z = 16777217; as 16777217, unequal to the
+            // float 16777217.0).  Walk the initialiser with the same guard,
+            // and decline when its category differs from the declared one.
+            const DeclNode* d = id->resolvedDecl;
+            if (!d || !globalDeclarations_.count(d) || d->kind != DeclKind::Variable)
+                return false;   // not a file-scope variable: the evaluator decides
+            const auto* v = static_cast<const VarDecl*>(d);
+            if (v->type && (v->type->baseType == BaseType::Half || v->type->baseType == BaseType::Fixed))
+                return true;
+            if (!v->initializer) return false;
+            if (++depth > 16) return true;
+            const int declared = !v->type ? -1
+                               : v->type->baseType == BaseType::Bool  ? 0
+                               : v->type->baseType == BaseType::Float ? 2 : 1;
+            const bool bad = category(v->initializer.get()) != declared ||
+                             namesLocal(v->initializer.get());
+            --depth;
+            return bad;
+        }
         case ExprKind::Unary:
             return namesLocal(static_cast<const UnaryExpr*>(x)->operand.get());
         case ExprKind::Binary:

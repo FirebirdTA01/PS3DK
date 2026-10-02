@@ -95,6 +95,24 @@ PREC_ROWS = [('F == 0.1', True), ('F == float(0.1)', True), ('F != 0.1', False),
 # against a float unrounded (G == 16777217 is FALSE there) and compares a
 # half constant above half precision (H == 0.1 is TRUE there).
 PREC_REFUSED = ['G == 16777217', 'H == 0.1', 'H != 0.25']
+# A static const that ALIASES one of those shapes through its initialiser is
+# refused too (review: codex), as is an int initialiser in a float const,
+# which the reference keeps unrounded (Z == 16777217.0 is FALSE there).
+ALIAS = """static const float G = 16777217.0;
+static const half H = 0.1;
+{decl}
+float4 pick(const float4 c)
+{{
+    if ({cond}) {{ return c * 2.0; }}
+    else {{ return c * 3.0; }}
+}}
+float4 main(float4 t : TEXCOORD0) : COLOR {{ return pick(t); }}
+"""
+ALIAS_REFUSED = [('static const bool B = (G == 16777217);', 'B'),
+                 ('static const bool B = (H == 0.1);', 'B'),
+                 ('static const float X = H;', 'X == 0.1'),
+                 ('static const float Z = 16777217;', 'Z == 16777217.0'),
+                 ('static const bool A = (G == 16777217); static const bool B = A;', 'B')]
 GRID = [-1.0, -0.25, 0.0, 0.5, 0.75, 1.0]
 
 
@@ -179,6 +197,13 @@ def main():
             print('  %-24s %s  %s' % (name, 'refused by name' if ok else 'NOT refused (rc %d)' % rc, cond))
             if not ok:
                 failures.append('%s (%s): expected the named refusal, got rc %d' % (name, cond, rc))
+        for i, (decl, cond) in enumerate(ALIAS_REFUSED):
+            name = 'alias_refused_%d' % i
+            rc, blob, err = compile_one(args.compiler, work, name, ALIAS.format(decl=decl, cond=cond))
+            ok = rc == 1 and not blob and 'a return inside control flow' in err
+            print('  %-24s %s  %s / %s' % (name, 'refused by name' if ok else 'NOT refused (rc %d)' % rc, decl, cond))
+            if not ok:
+                failures.append('%s (%s / %s): expected the named refusal, got rc %d' % (name, decl, cond, rc))
         for name, text in REFUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
             ok = rc == 1 and not blob and 'a return inside control flow' in err
