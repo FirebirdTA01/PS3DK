@@ -336,7 +336,7 @@ ContainerResult emitFragmentContainerImpl(
                     fd.type      = cgTypeForIRType(in.resultType);
                     fd.var       = kCgVarying;
                     fd.direction = kCgIn;
-                    fd.paramno   = static_cast<uint32_t>(i);
+                    fd.paramno   = irParamOrdinal(entry->parameters[i], i);
                     fd.res       = fpResourceFor(toUpper(in.semanticName),
                                                  in.semanticIndex);
                     fd.isReferenced = 1;
@@ -363,7 +363,7 @@ ContainerResult emitFragmentContainerImpl(
                 e.name      = rsx_cg::arrayElementName(p.name, static_cast<int>(k));
                 e.semantic  = std::string{};
                 e.type      = cgTypeForIRType(p.type);
-                e.paramno   = static_cast<uint32_t>(i);
+                e.paramno   = irParamOrdinal(entry->parameters[i], i);
                 e.res       = kCgUndefined;
                 e.var       = kCgUniform;
                 e.direction = kCgIn;
@@ -393,7 +393,7 @@ ContainerResult emitFragmentContainerImpl(
             parent.name = p.name;
             parent.semantic = std::string{};
             parent.type = cgTypeForIRType(p.type);
-            parent.paramno = static_cast<uint32_t>(i);
+            parent.paramno = irParamOrdinal(entry->parameters[i], i);
             parent.res = kCgUndefined;
             parent.var = kCgUniform;
             parent.direction = kCgIn;
@@ -406,7 +406,7 @@ ContainerResult emitFragmentContainerImpl(
                 e.name = rsx_cg::arrayElementName(p.name, k);
                 e.semantic = std::string{};
                 e.type = cgTypeForIRType(rowType);
-                e.paramno = static_cast<uint32_t>(i);
+                e.paramno = irParamOrdinal(entry->parameters[i], i);
                 e.res = kCgUndefined;
                 e.var = kCgUniform;
                 e.direction = kCgIn;
@@ -460,7 +460,7 @@ ContainerResult emitFragmentContainerImpl(
         if (p.storage == StorageQualifier::Out &&
             isFpDepthOutput(toUpper(p.semanticName), p.semanticIndex))
             d.type = kCgFloat3;
-        d.paramno   = static_cast<uint32_t>(i);
+        d.paramno   = irParamOrdinal(entry->parameters[i], i);
 
         // Shared predicate: this omitted SamplerRect while the emit side
         // counted it, so a samplerRECT ENTRY PARAMETER took a texture unit
@@ -896,7 +896,7 @@ ContainerResult emitFragmentContainerImpl(
         }
     };
     for (size_t i = 0; i < entry->parameters.size(); ++i)
-        addBinding(entry->parameters[i], static_cast<uint32_t>(i));
+        addBinding(entry->parameters[i], irParamOrdinal(entry->parameters[i], i));
     for (const auto& global : module.globals) addBinding(global, kInvalidIndex);
     for (auto& param : params) {
         if (param.var != kCgUniform) continue;

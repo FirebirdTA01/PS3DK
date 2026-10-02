@@ -1386,9 +1386,70 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     }
 
     // Build parameters
+    int sourceOrdinal = -1;
     for (auto& param : decl->parameters)
     {
+        ++sourceOrdinal;
+        // A UNIFORM STRUCT ENTRY PARAMETER is a set of uniforms, one per
+        // member, named `param.member` and sharing the parameter's paramno
+        // (measured on the reference: `uniform input IN` lists IN.video_size,
+        // IN.texture_size, ... all at paramno 1, an unread member included
+        // and marked unreferenced; a later parameter keeps its own ordinal).
+        // Flatten it into one uniform parameter per member so every member
+        // takes the ordinary uniform-parameter path; a member read resolves
+        // through nameToValue_ by its qualified name.  Before this a member
+        // read became an attribute load indexed by the member's position and
+        // the program was refused as an unsupported input semantic (libretro
+        // COMPAT_IN_FRAGMENT's `uniform input IN`).
+        if (currentFunction_->isEntryPoint &&
+            param->storage == StorageQualifier::Uniform && param->type &&
+            param->type->baseType == BaseType::Struct && !param->type->isArray())
+        {
+            const std::vector<StructField>* fields = getStructFields(param->type.get());
+            if (fields && !fields->empty())
+            {
+                // Nested struct members flatten the same way, named by their
+                // full path (the reference lists `IN.in1.a`).  Array members
+                // are not flattened yet and refuse by name.
+                const auto flatten = [&](const auto& self, const std::vector<StructField>& members,
+                                         const std::string& prefix) -> void {
+                    for (const auto& field : members)
+                    {
+                        const std::string qualified = prefix + "." + field.name;
+                        if (field.type && field.type->baseType == BaseType::Struct &&
+                            !field.type->isArray())
+                        {
+                            if (const auto* inner = getStructFields(field.type.get()))
+                            {
+                                self(self, *inner, qualified);
+                                continue;
+                            }
+                        }
+                        if (!field.type || field.type->baseType == BaseType::Struct ||
+                            field.type->isArray())
+                        {
+                            error(param->loc, "uniform struct entry parameter member '" + qualified +
+                                  "' is an array; only scalar, vector, matrix and struct members "
+                                  "are supported (uniform-struct-entry-parameter), refusing");
+                            continue;
+                        }
+                        IRParameter member;
+                        member.name = qualified;
+                        member.type = getIRType(field.type.get());
+                        member.valueId = currentFunction_->allocateValueId();
+                        member.storage = StorageQualifier::Uniform;
+                        member.sourceOrdinal = sourceOrdinal;
+                        currentFunction_->parameters.push_back(member);
+                        nameToValue_[qualified] = member.valueId;
+                    }
+                };
+                flatten(flatten, *fields, param->name);
+                stashShadowedGlobal(param->name);
+                continue;
+            }
+        }
         IRParameter irParam;
+        irParam.sourceOrdinal = sourceOrdinal;
         irParam.name = param->name;
         irParam.type = getIRType(param->type.get());
         irParam.valueId = currentFunction_->allocateValueId();

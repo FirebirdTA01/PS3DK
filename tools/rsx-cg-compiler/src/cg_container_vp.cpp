@@ -574,7 +574,7 @@ VpContainerResult emitVertexContainerImpl(
             if (vpSamplers && p.storage == StorageQualifier::Uniform &&
                 isSamplerIRType(p.type.baseType))
             {
-                params.push_back(samplerRecord(p, static_cast<uint32_t>(i)));
+                params.push_back(samplerRecord(p, irParamOrdinal(entry->parameters[i], i)));
                 continue;
             }
 
@@ -582,7 +582,7 @@ VpContainerResult emitVertexContainerImpl(
             d.name      = p.name;
             d.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
             d.type      = cgTypeForIRType(p.type);
-            d.paramno   = static_cast<uint32_t>(i);
+            d.paramno   = irParamOrdinal(entry->parameters[i], i);
 
             const bool isUniform = (p.storage == StorageQualifier::Uniform);
             if (isUniform)
@@ -605,7 +605,7 @@ VpContainerResult emitVertexContainerImpl(
                         r.var       = kCgUniform;
                         r.direction = kCgIn;
                         r.res       = kCgConst;
-                        r.paramno   = static_cast<uint32_t>(i);
+                        r.paramno   = irParamOrdinal(entry->parameters[i], i);
                         r.isReferenced = 1;
                         r.resIndex = static_cast<uint32_t>(base + row);
                         r.defaultValue = uniformDefaultSlice(
@@ -786,14 +786,14 @@ VpContainerResult emitVertexContainerImpl(
         if (vpSamplers && p.storage == StorageQualifier::Uniform &&
             isSamplerIRType(p.type.baseType))
         {
-            params.push_back(samplerRecord(p, static_cast<uint32_t>(i)));
+            params.push_back(samplerRecord(p, irParamOrdinal(entry->parameters[i], i)));
             continue;
         }
         ParamDesc d;
         d.name      = p.name;
         d.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
         d.type      = cgTypeForIRType(p.type);
-        d.paramno   = static_cast<uint32_t>(i);
+        d.paramno   = irParamOrdinal(entry->parameters[i], i);
 
         const bool isUniform = (p.storage == StorageQualifier::Uniform);
         if (isUniform)
@@ -819,7 +819,7 @@ VpContainerResult emitVertexContainerImpl(
                     r.res       = kCgConst;
                     r.var       = kCgUniform;
                     r.direction = kCgIn;
-                    r.paramno   = static_cast<uint32_t>(i);
+                    r.paramno   = irParamOrdinal(entry->parameters[i], i);
                     r.resIndex  = static_cast<uint32_t>(base + row);
                     r.defaultValue = uniformDefaultSlice(
                         p, static_cast<size_t>(row) *
@@ -1060,7 +1060,7 @@ VpContainerResult emitVertexContainerImpl(
             }
         };
         for (size_t i = 0; i < entry->parameters.size(); ++i)
-            addRecords(entry->parameters[i], static_cast<uint32_t>(i));
+            addRecords(entry->parameters[i], irParamOrdinal(entry->parameters[i], i));
         for (const auto& global : module.globals) addRecords(global, kInvalidIndex);
         for (auto& param : params) {
             if (param.var != kCgUniform) continue;

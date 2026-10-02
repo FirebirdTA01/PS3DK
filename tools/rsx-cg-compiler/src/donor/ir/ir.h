@@ -435,7 +435,20 @@ struct IRParameter
     // inline const block, exactly as it does for a file-scope uniform.
     std::vector<float>   initialValue;
     std::vector<int64_t> initialIntValues;
+    // The parameter's position in the SOURCE parameter list - its Cg
+    // paramno.  It differs from its index here when an earlier uniform
+    // struct parameter was flattened into one parameter per member
+    // (uniform-struct-entry-parameter), and every flattened member keeps its
+    // struct's ordinal, as the reference records them.  -1: use the index.
+    int sourceOrdinal = -1;
 };
+
+// The Cg paramno of entry parameter `index` (see IRParameter::sourceOrdinal).
+inline uint32_t irParamOrdinal(const IRParameter& p, size_t index)
+{
+    return p.sourceOrdinal >= 0 ? static_cast<uint32_t>(p.sourceOrdinal)
+                                : static_cast<uint32_t>(index);
+}
 
 class IRFunction
 {
