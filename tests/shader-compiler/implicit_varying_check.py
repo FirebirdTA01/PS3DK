@@ -125,6 +125,11 @@ READSET = {
                             {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     'static_false_branch': ('static const bool B = false; float4 main(float2 u, float2 k) : COLOR { float4 r = float4(k, 0, 1); if (B) r = float4(u, 0, 1); return r; }\n',
                             {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    # a constant select whose condition is itself a constant select (review: codex)
+    'chained_false': ('float4 main(float2 u, float2 k) : COLOR { bool b = true ? false : (u.x > 0); return b ? float4(u, 0, 1) : float4(k, 0, 1); }\n',
+                      {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    'chained_true': ('float4 main(float2 u, float2 k) : COLOR { bool b = false ? (u.x > 0) : true; return b ? float4(k, 0, 1) : float4(u, 0, 1); }\n',
+                      {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     # an UNREAD explicit TEXCOORD0 still reserves its index (measured)
     'unread_explicit_tc0': ('float4 main(float2 e : TEXCOORD0, float2 k) : COLOR { return float4(k, 0, 1); }\n',
                             {('e', VAR, TC(0), 0, 0), ('k', VAR, TC(1), 1, 1)}, [0.75, 0.125, 0.0, 1.0]),
