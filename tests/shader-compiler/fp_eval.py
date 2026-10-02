@@ -42,7 +42,8 @@ MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX = 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x0
 SLT, SGE, SLE, SGT, SNE, SEQ = 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
 FRC, FLR, FENCBR, DP2 = 0x10, 0x11, 0x3E, 0x38
 RCP = 0x1A   # nvfx_shader.h NVFX_FP_OP_OPCODE_RCP: scalar, reads the source's x lane
-MODELLED = {MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX, SLT, SGE, SLE, SGT, SNE, SEQ, FRC, FLR, FENCBR, DP2, RCP}
+DIV = 0x3A   # NVFX_FP_OP_OPCODE_DIV (NV_fragment_program2 DIV): vector src0 / scalar src1.x
+MODELLED = {MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX, SLT, SGE, SLE, SGT, SNE, SEQ, FRC, FLR, FENCBR, DP2, RCP, DIV}
 
 INPUT_SEL = {0x1: "COL0", 0x2: "COL1", 0x4: "TEX0", 0x5: "TEX1", 0x6: "TEX2", 0x7: "TEX3",
              0x8: "TEX4", 0x9: "TEX5", 0xA: "TEX6", 0xB: "TEX7"}
@@ -150,6 +151,10 @@ def _op(opc, a, b, c):
         return [f32(x - math.floor(x)) for x in a]
     if opc == FLR:
         return [float(math.floor(x)) for x in a]
+    if opc == DIV:
+        y = b[0]
+        return [f32(x / y) if y != 0 else (math.nan if x == 0 else math.copysign(math.inf, x) * math.copysign(1, y))
+                for x in a]
     if opc == RCP:
         x = a[0]
         return [f32(1.0 / x) if x != 0 else math.copysign(math.inf, x)] * 4
@@ -190,10 +195,12 @@ def evaluate(blob, inputs):
                 lanes = list(range({DP2: 2, DP3: 3, DP4: 4}[opc]))
             else:
                 lanes = [i for i in range(4) if mask & (1 << i)]
-            read_lanes = [0] if opc == RCP else lanes   # a scalar op reads lane x of its source
-            srcs = [_read(w, slot, regs, inputs, const, read_lanes) for slot in range(1, n + 1)]
-            for v in srcs:
-                for x in (v[i] for i in read_lanes):   # what the op reads, not what it writes
+            # a scalar operand reads lane x of its (swizzled) source: RCP's
+            # only source, DIV's divisor
+            read_lanes = {1: [0] if opc == RCP else lanes, 2: [0] if opc == DIV else lanes, 3: lanes}
+            srcs = [_read(w, slot, regs, inputs, const, read_lanes[slot]) for slot in range(1, n + 1)]
+            for slot, v in enumerate(srcs, 1):
+                for x in (v[i] for i in read_lanes[slot]):   # what the op reads, not what it writes
                     if prec == 1 and f16(x) != x:
                         raise Unmodelled("fp16 instruction on a non-fp16 value %r" % x)
                     if prec == 2 and not (-2.0 <= x < 2.0 and x * 1024 == int(x * 1024)):
@@ -312,6 +319,17 @@ def self_test():
     rows.append(('green: fx12 RCP R0.y, TEX0.z (masked)', _rcp(0x2, 0xAA, 2), [0.1, 4.0, 0.25, 1.0], tenth, b))
     rows.append(('green: fp16 RCP R0.xw, TEX0.y (swizzled)', _rcp(0x9, 0x55, 1), [2.0, 0.5, 0.25, 2.0], tenth, b))
     rows.append(('green: fp32 RCP R0.y, TEX0.x', _rcp(0x2, 0x00, 0), [0.1, f32(1 / 0.1), 0.25, 1.0], tenth, b))
+    # DIV: every lane of src0 over src1's x lane after swizzle
+    def _div(swz1, prec=0, mask=0xF):
+        words = _ins(DIV, 0, mask, [_src(I), _src(I, swz=swz1)], sel=tex0, end=1)
+        words[0] |= prec << 22
+        return _container(words)
+    rows.append(('green: DIV R0, TEX0, TEX0.y (vector / scalar)', _div(0x55), [-0.5, 1.0, -2.0, -3.0]))
+    # identity divisor swizzle: scalar src1.x gives a / a.x, a per-lane model would give 1s
+    rows.append(('green: DIV R0, TEX0, TEX0 (divisor is lane x)', _div(0xE4), [1.0, -2.0, 4.0, 6.0]))
+    rows.append(('green: DIV R0, TEX0, TEX0.w', _div(0xFF), [f32(x / 1.5) for x in a]))
+    rows.append(('red: fx12 DIV, divisor TEX0.x = 0.1 not fx12', _div(0x00, prec=2), None, tenth, b))
+    rows.append(('green: fx12 DIV R0, TEX0, TEX0.y (all fx12)', _div(0x55, prec=2), [-0.5, 1.0, -2.0, -3.0]))
     for scale in (1, 4):  # x2 and the reserved encoding (review: codex)
         words = _ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1)
         words[2] |= scale << 28
