@@ -137,6 +137,10 @@ private:
     // whether it is legal (a function ignores it, anything else refuses).
     StorageQualifier parseStorageQualifier(bool* sawInline = nullptr);
     bool lastStorageWasStatic_ = false;   // set by parseStorageQualifier, read by parseVariableDeclaration
+    // Every type parseType() produces, counted: a declarator list takes the
+    // LAST type named in an earlier initializer (parseMultipleVariableDeclarations).
+    std::shared_ptr<TypeNode> lastParsedType_;
+    unsigned typesParsed_ = 0;
     Semantic parseSemantic();
     VitaAttributes parseVitaAttributes();
     void skipGccAttributes();  // Skip __attribute__((...)) clauses

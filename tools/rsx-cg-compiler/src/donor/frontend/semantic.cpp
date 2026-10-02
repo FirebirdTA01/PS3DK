@@ -2464,6 +2464,20 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             shaderInfo_.hasColorOutput = true;
     }
 
+    // C5029: a program that returns a value must return a struct or give it a
+    // varying output semantic - whatever out parameters it also has.
+    // Measured on the reference (both profiles): `float4 f(float4 x :
+    // TEXCOORD0) { return x; }` and `float4 f(..., out float4 c : COLOR)`
+    // both refuse with C5029; a void program and a struct return do not.
+    // (ogre's DualQuaternionSkinning_Shadow.cg helpers compiled as entries.)
+    if (entryPoint->returnType && entryPoint->returnType->baseType != BaseType::Void &&
+        entryPoint->returnSemantic.isEmpty() &&
+        !resolveType(entryPoint->returnType.get()).isStruct())
+    {
+        error(entryPoint->loc, "C5029: program \"" + entryPoint->name +
+              "\" must return a struct or have a varying output semantic");
+    }
+
     // If return type is a struct, check for semantic annotations on its fields
     if (entryPoint->returnType && entryPoint->returnType->baseType == BaseType::Struct)
     {

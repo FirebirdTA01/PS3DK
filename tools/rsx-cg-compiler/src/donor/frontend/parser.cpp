@@ -430,6 +430,8 @@ std::shared_ptr<TypeNode> Parser::parseType()
         type = parseArrayType(type);
     }
 
+    lastParsedType_ = type;
+    ++typesParsed_;
     return type;
 }
 
@@ -1137,8 +1139,27 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
 {
     std::vector<std::unique_ptr<VarDecl>> vars;
 
+    // A LATER declarator in the list takes the type most recently named in
+    // an earlier declarator's initializer - a constructor or a cast, nested
+    // or not, the last one in source order - not the declared type.
+    // Measured on the reference (sce-cgc 475):
+    //   float3 a = float2(1,2).xyy, b = t.rgb;          b is float2 (C7011)
+    //   float3 a = float4(float2(1,2),3,4).xyz, b = ...  b is float2
+    //   float3 a = ((float2)t.xy).xyx, b = ...           b is float2
+    //   float3 a = float3(t.xy, 1), b = ...              b stays float3
+    //   float3 a = ...; float3 b = ...;                  separate: unaffected
+    // libretro bilateral.cg relies on it to be REFUSED (its `result` becomes
+    // float2 and float4(result / norm, 1.0) is C1067 there).
+    std::shared_ptr<TypeNode> declaratorType = type;
+    auto parseOne = [&](SourceLocation at, const std::string& name) {
+        const unsigned before = typesParsed_;
+        vars.push_back(parseVariableDeclaration(at, declaratorType, name, storage));
+        if (typesParsed_ != before && lastParsedType_)
+            declaratorType = lastParsedType_;
+    };
+
     // First variable
-    vars.push_back(parseVariableDeclaration(loc, type, firstName, storage));
+    parseOne(loc, firstName);
 
     // Additional variables (comma-separated)
     while (match(TokenType::COMMA))
@@ -1151,7 +1172,7 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
 
         SourceLocation varLoc = currentLocation();
         std::string varName = advance().lexeme;
-        vars.push_back(parseVariableDeclaration(varLoc, type, varName, storage));
+        parseOne(varLoc, varName);
     }
 
     consume(TokenType::SEMICOLON, "Expected ';' after variable declaration");
