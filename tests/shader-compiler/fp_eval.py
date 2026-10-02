@@ -161,8 +161,9 @@ def evaluate(blob, inputs):
             prec = (w[0] >> 22) & 3
             if prec == 3:
                 raise Unmodelled("precision 3")
-            if (w[2] >> 28) & 3:
-                raise Unmodelled("output scale %d" % ((w[2] >> 28) & 3))
+            # the scale field is 3 bits (28-30); 4 is reserved, 5-7 divide
+            if (w[2] >> 28) & 7:
+                raise Unmodelled("output scale %d" % ((w[2] >> 28) & 7))
             n = ARITY.get(opc, 0)
             out_none = (w[0] >> 30) & 1
             mask = (w[0] >> 9) & 0xF
@@ -244,6 +245,10 @@ def self_test():
                  _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, out_none=1, end=1)), None))
     rows.append(('red: R0.xy written, output needs zw',
                  _container(_ins(MOV, 0, 0x3, [_src(I)], sel=tex0, end=1)), None))
+    for scale in (1, 4):  # x2 and the reserved encoding (review: codex)
+        words = _ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1)
+        words[2] |= scale << 28
+        rows.append(('red: output scale encoding %d' % scale, _container(words), None))
     fails = 0
     for name, blob, want in rows:
         try:
