@@ -759,9 +759,55 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
 
     std::unordered_map<IRValueID, IRValueID> replacements;
 
-    for (auto& block : func.blocks)
+    // Dominators from the terminators (a branch names its target, a
+    // conditional branch "then,else").  An expression may be reused only
+    // where its defining block dominates the use: the sibling arm of an
+    // if/else must not take the other arm's value (libretro's ddt family -
+    // both arms compute A + D; the else arm read the then arm's result,
+    // which is not defined on its path, and the program was refused).
+    const size_t n = func.blocks.size();
+    std::unordered_map<std::string, size_t> index;
+    for (size_t i = 0; i < n; ++i) index[func.blocks[i]->name] = i;
+    std::vector<std::vector<size_t>> preds(n);
+    for (size_t i = 0; i < n; ++i)
     {
-        for (auto& inst : block->instructions)
+        const auto& insts = func.blocks[i]->instructions;
+        if (insts.empty()) continue;
+        const IRInstruction* term = insts.back().get();
+        if (term->op != IROp::Branch && term->op != IROp::CondBranch) continue;
+        std::string names = term->targetName;
+        size_t start = 0;
+        while (start <= names.size())
+        {
+            const size_t comma = names.find(',', start);
+            const std::string t = names.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+            const auto f = index.find(t);
+            if (f != index.end()) preds[f->second].push_back(i);
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
+    }
+    // dom[b] = set of blocks dominating b (entry = block 0); iterate to a
+    // fixed point, bounded by the block count.
+    std::vector<std::vector<bool>> dom(n, std::vector<bool>(n, true));
+    if (n) { dom[0].assign(n, false); dom[0][0] = true; }
+    for (size_t round = 0; round <= n; ++round)
+    {
+        bool changed = false;
+        for (size_t b = 1; b < n; ++b)
+        {
+            std::vector<bool> next(n, !preds[b].empty());
+            for (size_t p : preds[b])
+                for (size_t k = 0; k < n; ++k) next[k] = next[k] && dom[p][k];
+            next[b] = true;
+            if (next != dom[b]) { dom[b] = next; changed = true; }
+        }
+        if (!changed) break;
+    }
+
+    for (size_t bi = 0; bi < n; ++bi)
+    {
+        for (auto& inst : func.blocks[bi]->instructions)
         {
             // Only consider pure operations
             if (!IRPassUtils::isPure(inst->op) || inst->result == InvalidIRValue)
@@ -769,18 +815,19 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
                 continue;
             }
 
-            // Look for an existing equivalent expression
-            auto it = m_exprMap.find(inst.get());
-            if (it != m_exprMap.end())
+            // Reuse an equivalent expression only from a dominating block
+            auto& candidates = m_exprMap[inst.get()];
+            IRValueID reuse = InvalidIRValue;
+            for (const auto& c : candidates)
+                if (dom[bi][c.second]) { reuse = c.first; break; }
+            if (reuse != InvalidIRValue)
             {
-                // Found a duplicate - record replacement
-                replacements[inst->result] = it->second;
+                replacements[inst->result] = reuse;
                 m_stats.instructionsRemoved++;
             }
             else
             {
-                // New expression - record it
-                m_exprMap[inst.get()] = inst->result;
+                candidates.emplace_back(inst->result, bi);
             }
         }
     }

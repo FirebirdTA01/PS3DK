@@ -159,7 +159,9 @@ private:
     };
 
     // Map from instruction signature to existing result
-    std::unordered_map<const IRInstruction*, IRValueID, InstrHash, InstrEqual> m_exprMap;
+    // Every earlier equivalent expression with the index of its defining
+    // block: one is reused only where that block dominates the use.
+    std::unordered_map<const IRInstruction*, std::vector<std::pair<IRValueID, size_t>>, InstrHash, InstrEqual> m_exprMap;
 };
 
 // ============================================================================
