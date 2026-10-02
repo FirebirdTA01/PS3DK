@@ -62,6 +62,22 @@ float4 main(float4 p : POSITION, uniform float4x4 unused_m, uniform float4 unuse
 """
 VP_UNREAD_REGISTERS = {'used_b': 256, 'post': 467, 'g_a': 466,
                        'unused_m': None, 'unused_v': None, 'g_unused_m': None, 'g_unused_v': None}
+# Liveness is a SURVIVING use, not a syntactic one (measured): a uniform read
+# only into a dead local is unassigned too; and
+# an unread struct member BEFORE read ones moves no cursor.
+VP_LIVENESS = {
+    'dead_read': ("""float4 main(float4 p : POSITION, uniform float4 dead, uniform float4 live) : POSITION
+{ float4 unused = dead * 2.0; return p + live; }
+""", {'dead': None, 'live': 467}),
+    'dead_matrix': ("""uniform float4x4 g_m;
+float4 main(float4 p : POSITION, uniform float4x4 m, uniform float4 c) : POSITION
+{ float4 q = mul(g_m, p); return mul(m, p) + c; }
+""", {'m': 256, 'c': 467, 'g_m': None}),
+    'struct_first_unread': ("""struct input { float4 a; float4x4 m; float4 b; };
+float4 main(float4 p : POSITION, uniform input IN, uniform float4 post) : POSITION
+{ return mul(IN.m, p) + IN.b + post; }
+""", {'IN.a': None, 'IN.m': 256, 'IN.b': 467, 'post': 466}),
+}
 
 # A nested struct member is flattened by its full path (reference: IN.in1.a).
 NESTED = """struct inner { float2 a; };
@@ -188,7 +204,7 @@ def vp_registers(tag, recs, want):
                 bad.append('%s %s (resource, register, referenced) %s, want unassigned' % (tag, name, got))
             rows = [k for k in recs if k.startswith(name + '[')]
             for k in rows:
-                if recs[k]['register'] != 0xFFFFFFFF or recs[k]['referenced'] != 0:
+                if (recs[k]['resource'], recs[k]['register'], recs[k]['referenced']) != (UNASSIGNED, 0xFFFFFFFF, 0):
                     bad.append('%s %s row still allocated' % (tag, k))
         elif r['register'] != reg or r['referenced'] != 1:
             bad.append('%s %s register %d referenced %d, want c[%d] referenced' % (
@@ -262,6 +278,15 @@ def main():
                                VP_UNREAD_REGISTERS)
             failures += bad
             print('  vp_unread: %s' % ('read uniforms allocated, unread ones unassigned' if not bad else 'WRONG'))
+
+        for tag, (text, want) in VP_LIVENESS.items():
+            rc, blob, err = compile_one(args.compiler, work, tag, text, 'sce_vp_rsx')
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (tag, (err.strip().splitlines() or ['?'])[-1]))
+                continue
+            bad = vp_registers(tag, {r['name']: r for r in Container(blob).records}, want)
+            failures += bad
+            print('  %s: %s' % (tag, 'registers as measured' if not bad else 'WRONG'))
 
         rc, blob, err = compile_one(args.compiler, work, 'nested', NESTED, 'sce_fp_rsx')
         if rc != 0 or not blob:
