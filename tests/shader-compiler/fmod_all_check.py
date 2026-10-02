@@ -14,6 +14,7 @@ and two vector operands of different widths stay refused by name.
 import argparse
 import itertools
 import math
+import struct
 import subprocess
 import sys
 import tempfile
@@ -60,6 +61,59 @@ VP_ROWS = {
 VP_REFUSE = {
     'fmod_vector_vp': 'float4 main(float4 p : POSITION, uniform float4 d) : POSITION { return fmod(p, d); }\n',
 }
+# The VP evaluator's new vector opcodes (MIN, SLT, FRC, FLR, SNE) are proven
+# on hand-encoded programs here, not only on compiler output (review: codex):
+# R0 = v0; R1 = v1; COLOR0 = op(R0, R1), opcode numbers from nvfx_shader.h.
+VP_OPS = {'MIN': 9, 'SLT': 11, 'SGE': 12, 'FRC': 14, 'FLR': 15, 'SNE': 20}
+V0 = [-1.5, 0.25, -0.25, 2.0]
+
+
+def vp_encode(op, srcs, dst, out=False, end=False, mask=0xF, input_index=0):
+    """One vector-unit instruction; srcs = [(kind, reg)] with kind 1 temp, 2 input."""
+    fields = [kind | (reg << 2) | (0 << 14) | (1 << 12) | (2 << 10) | (3 << 8) for kind, reg in srcs]
+    fields += [1 << 0] * (3 - len(fields))
+    f0, f1, f2 = fields
+    w0 = (1 << 30) if out else (dst << 15)
+    w1 = (op << 22) | (input_index << 8) | (f0 >> 9)
+    w2 = ((f0 & 511) << 23) | (f1 << 6) | (f2 >> 11)
+    w3 = ((f2 & 0x7ff) << 21) | (mask << 13) | ((dst << 2) if out else 0) | int(end)
+    return [w0, w1, w2, w3]
+
+
+def vp_program(op, second=1):
+    words = (vp_encode(1, [(2, 0)], 0, input_index=0) + vp_encode(1, [(2, 0)], 1, input_index=1)
+             + vp_encode(op, [(1, 0), (1, second)], 1, out=True, end=True))
+    code = struct.pack('>%dI' % len(words), *words)
+    return struct.pack('>8I', 7003, 0, 0, 0, 32, 0, len(code), 32) + code
+
+
+VP_CONTROLS = [   # (name, opcode, v1, expected COLOR0); None = must be refused
+    ('green: SLT with negatives', 'SLT', [-1.0, 0.5, -1.0, 1.0], [1.0, 1.0, 0.0, 0.0]),
+    ('green: SNE mixed lanes', 'SNE', [-1.5, 0.5, -0.25, 1.0], [0.0, 1.0, 0.0, 1.0]),
+    ('green: FRC of negatives', 'FRC', [0.0] * 4, [0.5, 0.25, 0.75, 0.0]),
+    ('green: FLR of negatives', 'FLR', [0.0] * 4, [-2.0, 0.0, -1.0, 2.0]),
+    ('green: MIN with negatives', 'MIN', [-1.0, 0.5, -1.0, 1.0], [-1.5, 0.25, -1.0, 1.0]),
+    ('red: SGE is not SLT', 'SGE', [-1.0, 0.5, -1.0, 1.0], [1.0, 1.0, 0.0, 0.0]),
+]
+
+
+def vp_controls():
+    failures = []
+    for name, op, v1, want in VP_CONTROLS:
+        got = vp_eval.evaluate(vp_program(VP_OPS[op]), {}, inputs={0: V0, 1: v1}, binary32=True).get(1)
+        ok = (got == want) == name.startswith('green')
+        print('  %-30s %s  (got %s)' % (name, 'ok' if ok else 'FAIL', got))
+        if not ok:
+            failures.append('VP evaluator control %s: got %s' % (name, got))
+    try:   # SLT reading a temp nothing wrote must be refused, not evaluated
+        vp_eval.evaluate(vp_program(VP_OPS['SLT'], second=5), {}, inputs={0: V0, 1: V0})
+        failures.append('VP evaluator control red: SLT reads an unwritten temp was evaluated')
+        print('  %-30s FAIL' % 'red: SLT reads R5 (unwritten)')
+    except AssertionError as err:
+        print('  %-30s ok  (refused: %s)' % ('red: SLT reads R5 (unwritten)', err))
+    return failures
+
+
 VP_GRID = [[-2.75, 1.5, 0.375, 3.125], [0.375, -0.5, 2.0, 1.0], [-0.625, 1.5, 0.0, 3.125], [3.125, -2.75, 1.5, -0.0]]
 
 
@@ -78,6 +132,7 @@ def main():
     failures = []
     if not fp_eval.self_test():
         failures.append('fp_eval self-test failed')
+    failures += vp_controls()
     grid = []
     for i, (x, y) in enumerate(itertools.product(A, B)):
         a = [x, A[(i + 1) % len(A)], A[(i + 2) % len(A)], A[(i + 3) % len(A)]]
