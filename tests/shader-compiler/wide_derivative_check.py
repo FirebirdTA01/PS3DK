@@ -24,6 +24,22 @@ def lanes(swz):
     return [(swz >> (2 * i)) & 3 for i in range(4)]
 
 
+def plain(w):
+    """None, or the modifier this shape check does not allow (review: codex)."""
+    if (w[1] >> 18) & 7 != 7:
+        return 'a predicated instruction (condition %d)' % ((w[1] >> 18) & 7)
+    if (w[0] >> 7) & 1:
+        return 'a half-bank destination'
+    if (w[0] >> 31) & 1:
+        return 'saturation'
+    if (w[2] >> 28) & 7:
+        return 'an output scale'
+    src = source(w, 1)
+    if src['negate'] or src['abs']:
+        return 'a negated or absolute source'
+    return None
+
+
 def check(blob, op, width):
     rows = [w for w, _ in instructions(ucode_words(blob))]
     ops = [(w[0] >> 24) & 63 for w in rows]
@@ -33,6 +49,10 @@ def check(blob, op, width):
     hi, lo = rows[d[0]], rows[d[1]]
     dst = lambda w: (w[0] >> 1) & 63
     mask = lambda w: (w[0] >> 9) & 15
+    for which, w in (('high derivative', hi), ('low derivative', lo)):
+        why = plain(w)
+        if why:
+            return '%s has %s' % (which, why)
     hs, ls = source(hi, 1), source(lo, 1)
     if (hs['type'], hs['name']) != (ls['type'], ls['name']):
         return 'the two derivatives read different operands (%s, %s)' % (hs['name'], ls['name'])
@@ -48,6 +68,8 @@ def check(blob, op, width):
     if len(movs) != 1:
         return 'no single move of the high result between the derivatives'
     mv = movs[0]
+    if plain(mv):
+        return 'the move has %s' % plain(mv)
     want_mv = 0xC if width == 4 else 0x4
     if mask(mv) != want_mv or dst(mv) != dst(lo):
         return 'move writes R%d mask %#x, want R%d mask %#x' % (dst(mv), mask(mv), dst(lo), want_mv)
@@ -64,15 +86,16 @@ def self_test():
     tex0 = 0x4
     zwzw, xyxy, xyzw = 0xEE, 0x44, 0xE4
 
-    def prog(hi_swz=zwzw, mv_swz=xyxy, mv_dst=1):
-        return _container(_ins(DDY, 2, 0x3, [_src(INPUT, swz=hi_swz)], sel=tex0)
+    def prog(hi_swz=zwzw, mv_swz=xyxy, mv_dst=1, hi_neg=0):
+        return _container(_ins(DDY, 2, 0x3, [_src(INPUT, swz=hi_swz, neg=hi_neg)], sel=tex0)
                           + _ins(MOV, mv_dst, 0xC, [_src(TEMP, 2, swz=mv_swz)])
                           + _ins(DDY, 1, 0x3, [_src(INPUT, swz=xyzw)], sel=tex0)
                           + _ins(MOV, 0, 0xF, [_src(TEMP, 1)], end=1))
     rows = [('green: reference shape', prog(), True),
             ('red: high derivative reads x,y', prog(hi_swz=xyzw), False),
             ('red: move carries z,w', prog(mv_swz=0xEE), False),
-            ('red: move lands in another register', prog(mv_dst=3), False)]
+            ('red: move lands in another register', prog(mv_dst=3), False),
+            ('red: high half only negated', prog(hi_neg=1), False)]
     ok = True
     for name, blob, good in rows:
         why = check(blob, DDY, 4)
