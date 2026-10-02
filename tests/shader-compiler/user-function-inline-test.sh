@@ -237,7 +237,8 @@ expect_refusal() {
 }
 
 # A runtime return, out and inout parameters inline now (the reference
-# accepts all three); inline-out-param and helper-const-return check values.
+# accepts all three).  Values: helper-const-return's RUNTIME rows (the
+# runtime return), inline-out-param (out and inout).
 expect_compile_without_call inline_multi_return
 expect_compile_without_call inline_out_param
 expect_compile_without_call inline_inout_param
