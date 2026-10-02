@@ -67,9 +67,33 @@ def judge(blob, units, direct):
     return None
 
 
+def judge_controls():
+    """Hand-encoded TXL programs: the judge must accept the shape and reject
+    the mutants (review: codex - the earlier controls only perturbed the
+    expected unit and count, not the instruction)."""
+    from fp_eval import _container, _ins, _src
+    from fp_sources import INPUT, TEMP
+    tex0, wwww, xxxx = 0x4, 0xFF, 0x00
+
+    def txl(lod_src):
+        return _container(_ins(TXL, 0, 0xF, [_src(INPUT), lod_src], sel=tex0, end=1))
+    rows = [('green: TXL R0, TEX0, TEX0.w', txl(_src(INPUT, swz=wwww)), True),
+            ('red: LOD swizzle w -> x', txl(_src(INPUT, swz=xxxx)), False),
+            ('red: LOD from another operand', txl(_src(TEMP, 3, swz=wwww)), False),
+            ('red: LOD negated', txl(_src(INPUT, swz=wwww, neg=1)), False)]
+    failures = []
+    for name, blob, good in rows:
+        why = judge(blob, [0], True)
+        hit = (why is None) == good
+        print('  %-36s %s  (%s)' % (name, 'ok' if hit else 'FAIL', why or 'accepted'))
+        if not hit:
+            failures.append('judge control ' + name)
+    return failures
+
+
 def main():
     compiler = sys.argv[1]
-    failures = []
+    failures = judge_controls()
     with tempfile.TemporaryDirectory(prefix='tex2dlod-') as tmp:
         work = Path(tmp)
         for name, (body, units, direct) in ROWS.items():
