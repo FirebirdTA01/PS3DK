@@ -226,6 +226,7 @@ private:
     bool runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
                              IRValueID& result, bool& sawReturn);
     IRValueID buildMemberAccessExpr(MemberAccessExpr* expr);
+    bool emitInputMemberLoad(const ParamDecl* param, const std::string& member, IRValueID valueId);
     IRValueID buildIndexExpr(IndexExpr* expr);
     IRValueID buildTernaryExpr(TernaryExpr* expr);
     IRValueID buildCastExpr(CastExpr* expr);

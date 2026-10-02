@@ -4,8 +4,10 @@ Two shapes refused with an unresolved operand: a varying struct member read
 first inside one arm and again after the join (crt glow lanczos_horiz reads
 `vertex.one` only under an if), and a local declared without an initialiser
 that an if / else-if chain writes with no final else (the xbr family's
-`pix1`/`blend1`).  The join built Select(cond, value, <nothing>).  Rows are
-judged by value with fp_eval against the C formula.  The undefined path of
+`pix1`/`blend1`).  The join built Select(cond, value, <nothing>).  A member
+an arm ASSIGNS before any read is the third shape, and the one that must not
+take the assigned side: elsewhere it is the input.  Rows are judged by value
+with fp_eval against the C formula.  The undefined path of
 the second program (neither arm runs) is not judged: the value is undefined
 in Cg, and the reference reads an unwritten register there.
 """
@@ -54,7 +56,41 @@ def uninit_local(env):
     return [x * b for x in p] + [1.0]
 
 
+# An input member ASSIGNED in one arm before any read is not undefined on the
+# other side: it is the input (review: codex, join-input-write).  Both
+# branches are judged, and an else-only write.
+INPUT_WRITE_THEN = """struct D { float c : TEXCOORD0; float x : TEXCOORD1; };
+float4 main(D v) : COLOR
+{
+    if (v.c > 0.5) v.x = 0.75;
+    return float4(v.x, 0.0, 0.0, 1.0);
+}
+"""
+
+INPUT_WRITE_ELSE = """struct D { float c : TEXCOORD0; float x : TEXCOORD1; };
+float4 main(D v) : COLOR
+{
+    if (v.c > 0.5) { } else v.x = 0.75;
+    return float4(v.x, 0.0, 0.0, 1.0);
+}
+"""
+
+
+def input_write(on_true):
+    def formula(env):
+        taken = env['TEX0'][0] > 0.5
+        return [0.75 if taken == on_true else env['TEX1'][0], 0.0, 0.0, 1.0]
+    return formula
+
+
+INPUT_WRITE_INPUTS = [
+    {'TEX0': [0.75, 0.0, 0.0, 0.0], 'TEX1': [0.125, 0.0, 0.0, 0.0]},
+    {'TEX0': [0.25, 0.0, 0.0, 0.0], 'TEX1': [0.125, 0.0, 0.0, 0.0]},
+]
+
 ROWS = [
+    ('input_write_then', INPUT_WRITE_THEN, input_write(True), INPUT_WRITE_INPUTS),
+    ('input_write_else', INPUT_WRITE_ELSE, input_write(False), INPUT_WRITE_INPUTS),
     ('lazy_member', LAZY_MEMBER, lazy_member, [
         {'TEX0': [0.25, 0.75, 0.0, 0.0], 'TEX1': [0.5, 0.0, 0.0, 0.0]},
         {'TEX0': [0.25, 0.25, 0.0, 0.0], 'TEX1': [0.5, 0.0, 0.0, 0.0]},

@@ -2125,6 +2125,55 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
         nameToValue_[key] = loadId;
     }
 
+    // A varying struct member of the entry is bound lazily, at its first
+    // use.  When an arm ASSIGNS it before any read (`if (c) v.x = 0.75;`),
+    // the other side never bound it, yet its value there is the INPUT - not
+    // undefined (review: codex, join-input-write).  Load the input here at
+    // the merge so the join selects against it.  A key every arm only READ
+    // is left alone: both sides are the same input, and the join below
+    // takes the load as it is.
+    auto isLoad = [&](IRValueID id) {
+        for (const auto& bp : currentFunction_->blocks)
+            if (bp)
+                for (const auto& ip : bp->instructions)
+                    if (ip && ip->result == id) return ip->op == IROp::LoadAttribute;
+        return false;
+    };
+    std::vector<std::string> untouchedInputs;
+    if (currentFunctionDecl_)
+        for (const auto* post : {&postThenMap, &postElseMap})
+            for (const auto& kv : *post)
+            {
+                const std::string& key = kv.first;
+                if (preIfMap.count(key) || isLoad(kv.second)) continue;
+                const size_t dot = key.find('.');
+                if (dot == std::string::npos || key.find_first_of(".[@", dot + 1) != std::string::npos)
+                    continue;
+                untouchedInputs.push_back(key);
+            }
+    std::sort(untouchedInputs.begin(), untouchedInputs.end());
+    untouchedInputs.erase(std::unique(untouchedInputs.begin(), untouchedInputs.end()),
+                          untouchedInputs.end());
+    for (const std::string& key : untouchedInputs)
+    {
+        const size_t dot = key.find('.');
+        const std::string base = key.substr(0, dot);
+        for (const auto& param : currentFunctionDecl_->parameters)
+        {
+            if (!param || param->name != base) continue;
+            if (param->storage == StorageQualifier::Uniform ||
+                param->storage == StorageQualifier::Out ||
+                param->storage == StorageQualifier::InOut) break;
+            const IRValueID loadId = currentFunction_->allocateValueId();
+            if (emitInputMemberLoad(param.get(), key.substr(dot + 1), loadId))
+            {
+                preIfMap[key] = loadId;
+                nameToValue_[key] = loadId;
+            }
+            break;
+        }
+    }
+
 
     auto valueOrPre = [&](const std::unordered_map<std::string, IRValueID>& m,
                           const std::string& name) -> IRValueID
@@ -2296,25 +2345,29 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
             continue;
         }
 
-        // One side with NO DEFINITION takes the other side, no Select.  Two
-        // shapes reach here: a varying struct member bound lazily at its
-        // first read, inside one arm only (lanczos_horiz reads `vertex.one`
-        // only under an if - the other side is InvalidIRValue), and a local
-        // declared without an initialiser that a path never writes (the xbr
-        // family's `pix1`/`blend1` chains - the other side is the
-        // declaration's id, which nothing defines).  A Select against either
-        // left an operand the lowering could not resolve.  The first is a
-        // read of the same input wherever it sits; the second is undefined
-        // in Cg, and the reference reads whatever its register holds on that
-        // path (measured: an if / else-if writing `p` with no final else
-        // reads an unwritten r2 where neither arm ran).  Taking the written
-        // arm is the existing rule for local elements above.
-        const bool thenUndef = isUndefinedValue(thenVal);
-        const bool elseUndef = isUndefinedValue(elseVal);
-        if (thenUndef != elseUndef)
+        // One side with no definition takes the other side, no Select - in
+        // exactly two shapes, because a Select against nothing left an
+        // operand the lowering could not resolve:
+        //  - no binding at all (InvalidIRValue) where the other side is an
+        //    input LOAD: a varying member first READ inside one arm
+        //    (lanczos_horiz reads `vertex.one` only under an if).  It is the
+        //    same input wherever it sits.  A member an arm ASSIGNED got its
+        //    input loaded at the merge above, so it never reaches here.
+        //  - a local declared without an initialiser (its declaration id,
+        //    which nothing defines) that a path never writes: the xbr
+        //    family's `pix1`/`blend1`.  Undefined in Cg; the reference reads
+        //    whatever its register holds on that path (measured: an if /
+        //    else-if writing `p` with no final else reads an unwritten r2
+        //    where neither arm ran).  Taking the written arm is the existing
+        //    rule for local elements above.
+        // Anything else keeps the Select and its refusal.
         {
-            nameToValue_[name] = thenUndef ? elseVal : thenVal;
-            continue;
+            const auto takesOther = [&](IRValueID self, IRValueID other) {
+                if (self == InvalidIRValue) return isLoad(other);
+                return isUndefinedValue(self) && !isUndefinedValue(other);
+            };
+            if (takesOther(thenVal, elseVal)) { nameToValue_[name] = elseVal; continue; }
+            if (takesOther(elseVal, thenVal)) { nameToValue_[name] = thenVal; continue; }
         }
 
         IRTypeInfo selType = getValueType(thenVal);
@@ -5554,6 +5607,36 @@ bool IRBuilder::conditionFoldHazard(const ExprNode* e)
     }
 }
 
+// The load of a varying struct parameter's member, as `valueId`, into the
+// current block: the lazy first read, and an if-join's untouched side of a
+// member one arm assigned before any read.  False when `param` is not a
+// struct parameter with that member (nothing is emitted).
+bool IRBuilder::emitInputMemberLoad(const ParamDecl* param, const std::string& member,
+                                    IRValueID valueId)
+{
+    if (!param || !param->type || param->type->baseType != BaseType::Struct) return false;
+    const std::vector<StructField>* fields = getStructFields(param->type.get());
+    if (!fields) return false;
+    for (size_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
+    {
+        const auto& field = (*fields)[fieldIdx];
+        if (field.name != member) continue;
+        IRTypeInfo fieldType = getIRType(field.type.get());
+        auto inst = std::make_unique<IRInstruction>(IROp::LoadAttribute, valueId, fieldType);
+        inst->semanticName     = field.semantic.name;
+        inst->rawSemanticName  = field.semantic.rawName;
+        inst->inferredSemantic = field.semantic.inferred;
+        inst->semanticIndex    = field.semantic.isEmpty()
+            ? static_cast<int>(fieldIdx)
+            : field.semantic.index;
+        inst->structParamName  = param->name;       // e.g. "input"
+        inst->fieldName        = member;            // e.g. "pos"
+        currentBlock_->addInstruction(std::move(inst));
+        return true;
+    }
+    return false;
+}
+
 IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
 {
     // Check for swizzle first
@@ -5670,35 +5753,9 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
         // Emit a load for input parameters with semantics
         if (ident->resolvedDecl && ident->resolvedDecl->kind == DeclKind::Parameter)
         {
-            auto* param = static_cast<ParamDecl*>(ident->resolvedDecl);
-            if (param->type && param->type->baseType == BaseType::Struct)
-            {
-                // Look up semantic info for this struct member using helper
-                const std::vector<StructField>* fields = getStructFields(param->type.get());
-                if (fields)
-                {
-                    for (size_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
-                    {
-                        const auto& field = (*fields)[fieldIdx];
-                        if (field.name == expr->member)
-                        {
-                            IRTypeInfo fieldType = getIRType(field.type.get());
-                            auto inst = std::make_unique<IRInstruction>(IROp::LoadAttribute,
-                                valueId, fieldType);
-                            inst->semanticName     = field.semantic.name;
-                            inst->rawSemanticName  = field.semantic.rawName;
-                            inst->inferredSemantic = field.semantic.inferred;
-                            inst->semanticIndex    = field.semantic.isEmpty()
-                                ? static_cast<int>(fieldIdx)
-                                : field.semantic.index;
-                            inst->structParamName  = param->name;       // e.g. "input"
-                            inst->fieldName        = expr->member;       // e.g. "pos"
-                            currentBlock_->addInstruction(std::move(inst));
-                            return valueId;
-                        }
-                    }
-                }
-            }
+            if (emitInputMemberLoad(static_cast<ParamDecl*>(ident->resolvedDecl),
+                                    expr->member, valueId))
+                return valueId;
         }
 
         // Check if this is a uniform struct global - emit LoadUniform with qualified name
