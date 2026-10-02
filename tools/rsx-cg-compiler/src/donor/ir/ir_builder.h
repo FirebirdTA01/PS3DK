@@ -142,6 +142,7 @@ private:
     // and whether that happened.  Per inlined helper.
     std::vector<StmtNode*> inlineContinuation_;
     bool inlineContinuationRun_ = false;
+    size_t inlineContinuationFrame_ = 0;   // blockDeclared_ depth the continuation was captured at
     // Declaration identity prevents a local shadow from using a global's initializer.
     std::unordered_set<const DeclNode*> globalDeclarations_;
     std::vector<std::string> depthDecodeUniforms_;

@@ -34,7 +34,27 @@ float4 decode(const float4 c)
 }}
 float4 main(float4 t : TEXCOORD0) : COLOR {{ return decode(t); }}
 """
-REFUSE = {}
+REFUSE = {
+    # A nested run-time return inside a block that declares locals, with
+    # statements after the block: the continuation would run in the block
+    # scope (an inner k returned for the outer `return k`).  Named gap.
+    'scoped_arm_local': """float4 f(float4 c) { float4 k = c * 3.0; if (c.x > 0.0) { float4 k = c * 5.0; if (c.y > 0.0) return k; } return k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
+""",
+    # The same leak through a CONSTANT branch (review: codex): the taken
+    # block declares k, and the nested run-time return would run the
+    # outer `return k` inside it.
+    'const_block_shadow': """float4 f(float4 c) { float4 k = 1; if (true) { float4 k = 2; if (c.x > 0) return k; } return k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
+""",
+}
+# The run-time lowering is fragment-only: a vertex select is still an
+# arithmetic blend (t_ca8f99a6), so a vertex helper keeps the named refusal.
+VP_REFUSE = {
+    'vp_runtime_return': """float4 f(float4 c) { if (c.x > 0.0) return c * 1073741824.0; return c; }
+float4 main(float4 p : POSITION) : POSITION { return f(p); }
+""",
+}
 # A return under a RUN-TIME condition runs each arm with the rest of the body
 # and joins the results with Select.  Expected values are the Cg expression;
 # the reference agrees where its program is evaluable here (the first three
@@ -62,9 +82,6 @@ float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
     'sequential': ("""float4 f(float4 c) { if (c.x > 0.5) return c; if (c.y > 0.5) return c * 2.0; if (c.z > 0.5) return c * 4.0; return c * 8.0; }
 float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
 """, lambda c: [v * (1.0 if c[0] > 0.5 else 2.0 if c[1] > 0.5 else 4.0 if c[2] > 0.5 else 8.0) for v in c]),
-    'scoped_arm_local': ("""float4 f(float4 c) { float4 k = c * 3.0; if (c.x > 0.0) { float4 k = c * 5.0; if (c.y > 0.0) return k; } return k; }
-float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
-""", lambda c: [v * (5.0 if c[0] > 0.0 and c[1] > 0.0 else 3.0) for v in c]),
     'void_out_early': ("""void g(float4 c, out float4 o) { o = c; if (c.x > 0.0) { o = c * 2.0; return; } o = o * 3.0; }
 float4 main(float4 t : TEXCOORD0) : COLOR { float4 r; g(t, r); return r; }
 """, lambda c: [v * (2.0 if c[0] > 0.0 else 3.0) for v in c]),
@@ -74,7 +91,7 @@ float4 main(float4 t : TEXCOORD0) : COLOR { float4 r = f(t); return r + acc; }
 """, lambda c: [v * (3.0 if c[0] > 0.0 else 6.0) for v in c]),
 }
 RUNTIME_GRID = [[0.5, -0.25, 1.0, 0.75], [-1.0, 0.75, 0.25, 2.0], [0.75, 0.75, 0.0, 1.0],
-                [0.0, 0.0, 0.75, 0.5], [0.3, 0.6, 0.9, 0.1], [0.125, 0.25, 0.375, 0.5]]
+                [0.0, 0.0, 0.75, 0.5], [0.3125, 0.625, 0.875, 0.0625], [0.125, 0.25, 0.375, 0.5]]
 # A taken constant branch is still a block: its own local ends with it, so
 # the return after it reads the OUTER k (t * 3), never the inner one (t * 5).
 SCOPED = """static const bool on = true;
@@ -242,6 +259,15 @@ def main():
             if bad:
                 failures.append('%s: got %s for %s, want %s' % (
                     name, fp_eval.evaluate(blob, {'TEX0': bad[0]}), bad[0], want(bad[0])))
+        for name, text in VP_REFUSE.items():
+            src, dst = work / (name + '.cg'), work / (name + '.bin')
+            src.write_text(text)
+            run = subprocess.run([args.compiler, '-p', 'sce_vp_rsx', '--emit-container', str(dst), str(src)],
+                                 capture_output=True, text=True, timeout=60)
+            ok = run.returncode == 1 and not dst.exists() and 'a return inside control flow' in run.stderr
+            print('  %-24s %s' % (name, 'refused by name' if ok else 'NOT refused by name (rc %d)' % run.returncode))
+            if not ok:
+                failures.append('%s: expected the named VP refusal, got rc %d' % (name, run.returncode))
         for name, text in REFUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
             ok = rc == 1 and not blob and 'a return inside control flow' in err

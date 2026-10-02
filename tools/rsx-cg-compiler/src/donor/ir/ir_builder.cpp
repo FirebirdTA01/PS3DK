@@ -1328,7 +1328,12 @@ bool IRBuilder::isDefaultedFragmentOutput(const ParamDecl* param) const
     if (!module_ || module_->shaderStage != ShaderStage::Fragment) return false;
     if (!currentFunctionDecl_ ||
         currentFunctionDecl_->name != module_->entryPointName) return false;
-    return true;
+    // Only the ENTRY's own parameter: while a helper is inlined the current
+    // function is still the entry, and a helper's `out float4 o` assigned in
+    // its body was taken for the entry's default COLOR and stored there.
+    for (const auto& own : currentFunctionDecl_->parameters)
+        if (own.get() == param) return true;
+    return false;
 }
 
 // ============================================================================
@@ -4993,7 +4998,10 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 tail.insert(tail.end(), inherited.begin(), inherited.end());
                 inlineContinuation_ = tail;
                 inlineContinuationRun_ = false;
+                const size_t savedFrame = inlineContinuationFrame_;
+                inlineContinuationFrame_ = block ? blockDeclared_.size() - 1 : blockDeclared_.size();
                 const bool ok = runInlineStatements(callee, inner, result, sawReturn);
+                inlineContinuationFrame_ = savedFrame;
                 inlineContinuation_ = inherited;
                 const bool tailRan = inlineContinuationRun_;
                 if (block)
@@ -5023,7 +5031,8 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
         {
             auto* ifs = static_cast<IfStmt*>(stmt);
             bool hasReturn = false;
-            if (returnOnlyShape(ifs, hasReturn) && hasReturn)
+            if (returnOnlyShape(ifs, hasReturn) && hasReturn &&
+                module_->shaderStage == ShaderStage::Fragment)
             {
                 // A constant part of the condition that the guard declines to
                 // fold (mixed int/float or half comparisons, aliases of them)
@@ -5048,6 +5057,20 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 static const std::string kReturnKey = "#inline-return";
                 // The rest of the body: this list's tail, then whatever an
                 // enclosing arm or constant branch still has to run after it.
+                // The inherited continuation belongs OUTSIDE the enclosing
+                // arm's block; running it in here would let a local that
+                // block declared shadow the outer name it reads (an inner
+                // `float4 k` returned for the outer `return k`).  Refused by
+                // name until block bindings are unwound for it.
+                if (!inlineContinuation_.empty())
+                    for (size_t f = inlineContinuationFrame_; f < blockDeclared_.size(); ++f)
+                        if (!blockDeclared_[f].empty())
+                        {
+                            error(ifs->loc, "cannot inline user function '" + callee->name +
+                                            "': a return inside control flow inside a block that "
+                                            "declares locals, with statements after the block");
+                            return false;
+                        }
                 std::vector<StmtNode*> rest(statements.begin() + static_cast<std::ptrdiff_t>(index) + 1,
                                             statements.end());
                 rest.insert(rest.end(), inlineContinuation_.begin(), inlineContinuation_.end());
@@ -5066,7 +5089,10 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                     const ScopeState pre = scope_;
                     if (block) blockDeclared_.emplace_back();
                     inlineContinuation_ = rest;   // a nested run-time return runs it
+                    const size_t savedFrame = inlineContinuationFrame_;
+                    inlineContinuationFrame_ = block ? blockDeclared_.size() - 1 : blockDeclared_.size();
                     bool ok = runInlineStatements(callee, own, armResult, armReturned);
+                    inlineContinuationFrame_ = savedFrame;
                     inlineContinuation_.clear();  // `rest` already carries it
                     if (block)
                     {
@@ -5261,9 +5287,28 @@ std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
 bool IRBuilder::conditionFoldHazard(const ExprNode* e)
 {
     if (!e) return false;
+    // A name the function binds itself is a run-time value here, whatever a
+    // file-scope constant of that name would evaluate to.
+    std::function<bool(const ExprNode*)> mentionsLocal = [&](const ExprNode* x) -> bool {
+        if (!x) return false;
+        switch (x->kind)
+        {
+        case ExprKind::Identifier: return nameToValue_.count(static_cast<const IdentifierExpr*>(x)->name) != 0;
+        case ExprKind::Unary: return mentionsLocal(static_cast<const UnaryExpr*>(x)->operand.get());
+        case ExprKind::Binary: { const auto* b = static_cast<const BinaryExpr*>(x);
+                                 return mentionsLocal(b->left.get()) || mentionsLocal(b->right.get()); }
+        case ExprKind::Ternary: { const auto* t = static_cast<const TernaryExpr*>(x);
+                                  return mentionsLocal(t->condition.get()) || mentionsLocal(t->thenExpr.get()) ||
+                                         mentionsLocal(t->elseExpr.get()); }
+        case ExprKind::Cast: return mentionsLocal(static_cast<const CastExpr*>(x)->operand.get());
+        case ExprKind::MemberAccess: return mentionsLocal(static_cast<const MemberAccessExpr*>(x)->object.get());
+        default: return false;
+        }
+    };
     ConstLanes lanes;
     ConstShape shape;
-    if (evaluateConstValue(e, lanes, shape, module_.get()) && lanes.size() == 1 && shape.isScalar() &&
+    if (!mentionsLocal(e) &&
+        evaluateConstValue(e, lanes, shape, module_.get()) && lanes.size() == 1 && shape.isScalar() &&
         !constCondition(e))
         return true;
     switch (e->kind)
