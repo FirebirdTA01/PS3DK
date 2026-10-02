@@ -4060,11 +4060,23 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
     // Check for built-in function
     auto builtinOp = builtinToIROp(expr->functionName);
 
-    // Build arguments
+    // Build arguments.  An argument bound to a user function's `out`
+    // parameter is a destination only: it is never read (the caller's
+    // `float4 adjx;` is typically uninitialised), so no value is built for
+    // it; the inliner assigns the helper's final value back to it.
+    const auto* calleeDecl =
+        (expr->resolvedFunction && expr->resolvedFunction->kind == DeclKind::Function)
+            ? static_cast<const FunctionDecl*>(expr->resolvedFunction) : nullptr;
     std::vector<IRValueID> argValues;
-    for (auto& arg : expr->arguments)
+    for (size_t i = 0; i < expr->arguments.size(); ++i)
     {
-        argValues.push_back(buildExpr(arg.get()));
+        if (calleeDecl && i < calleeDecl->parameters.size() &&
+            calleeDecl->parameters[i]->storage == StorageQualifier::Out)
+        {
+            argValues.push_back(InvalidIRValue);
+            continue;
+        }
+        argValues.push_back(buildExpr(expr->arguments[i].get()));
     }
 
     // AN OMITTED ARGUMENT IS THE DEFAULT EXPRESSION, BUILT HERE AT THE CALL
@@ -4498,15 +4510,32 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         error(expr->loc, "cannot inline user function '" + name + "': argument count mismatch");
         return false;
     }
-    for (const auto& param : callee->parameters)
+    // out / inout parameters are copy-out: after the body the parameter's
+    // final value is assigned to the caller's argument (Cg copy-in/copy-out).
+    // When two arguments name the same variable the LEFTMOST parameter's
+    // value is the one that remains (measured: two(x, x) with a = 1, b = 2
+    // leaves x = 1), so the copies are made right to left.  Supported for a scalar/vector/matrix parameter whose
+    // argument is a plain caller lvalue; anything else is refused by name.
+    std::vector<size_t> copyOut;
+    for (size_t i = 0; i < callee->parameters.size(); ++i)
     {
-        if (param->storage == StorageQualifier::Out ||
-            param->storage == StorageQualifier::InOut)
+        const ParamDecl* param = callee->parameters[i].get();
+        if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)
+            continue;
+        const IRTypeInfo pt = getIRType(param->type.get());
+        const ExprNode* arg = i < expr->arguments.size() ? expr->arguments[i].get() : nullptr;
+        const bool lvalue = arg && (arg->kind == ExprKind::Identifier ||
+                                    (arg->kind == ExprKind::MemberAccess &&
+                                     static_cast<const MemberAccessExpr*>(arg)->object &&
+                                     static_cast<const MemberAccessExpr*>(arg)->object->kind == ExprKind::Identifier));
+        if (pt.isArray() || getStructFields(param->type.get()) || param->name.empty() || !lvalue)
         {
             error(expr->loc, "cannot inline user function '" + name +
-                             "': out/inout parameters are not supported");
+                             "': out/inout parameter '" + param->name +
+                             "' needs a scalar, vector or matrix type and a plain variable argument");
             return false;
         }
+        copyOut.push_back(i);
     }
 
     auto savedDecls = declToValue_;
@@ -4677,6 +4706,12 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     for (auto it = shadowedGlobalArrays_.begin(); it != shadowedGlobalArrays_.end(); )
         if (!savedStashArrays.count(it->first)) { createdStashArrays[it->first] = it->second; it = shadowedGlobalArrays_.erase(it); } else ++it;
 
+    std::vector<IRValueID> copyOutValues;
+    for (size_t i : copyOut)
+    {
+        auto it = nameToValue_.find(callee->parameters[i]->name);
+        copyOutValues.push_back(it == nameToValue_.end() ? InvalidIRValue : it->second);
+    }
     auto inlineSwizzles = identityPrefixSwizzleBase_;
     const auto bodyNames = nameToValue_;
     const auto bodyArrays = localArrayValues_;
@@ -4758,6 +4793,19 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     }
     for (const auto& kv : inlineSwizzles)
         identityPrefixSwizzleBase_.try_emplace(kv.first, kv.second);
+    // Copy-out into the caller's own scope (restored above), so the
+    // argument names the CALLER's variable; right to left, see above.
+    for (size_t k = copyOut.size(); ok && k-- > 0; )
+    {
+        const ParamDecl* param = callee->parameters[copyOut[k]].get();
+        if (copyOutValues[k] == InvalidIRValue)
+        {
+            error(expr->loc, "cannot inline user function '" + callee->name +
+                             "': out parameter '" + param->name + "' is never assigned");
+            return false;
+        }
+        buildAssignment(expr->arguments[copyOut[k]].get(), copyOutValues[k]);
+    }
     // A void helper (a statement-position call that writes globals or
     // nothing) has no result value; its inlined body is the whole effect.
     const bool returnsVoid =
