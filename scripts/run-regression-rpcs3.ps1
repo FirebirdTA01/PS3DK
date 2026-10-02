@@ -183,7 +183,13 @@ try {
         $sampleDir = Join-Path $ResultsRoot $name
         New-Item -ItemType Directory -Force -Path $sampleDir | Out-Null
 
-        if (-not (Test-Path -LiteralPath $selfPath)) {
+        # A row with no name or no SELF (a manifest without its header row
+        # parses to exactly that) must never boot: an empty relative_self
+        # joins to the repository DIRECTORY, which exists, and RPCS3 then
+        # raises a modal "Nothing to boot" dialog on the shared desktop.
+        if ([string]::IsNullOrWhiteSpace($name) -or
+            [string]::IsNullOrWhiteSpace($row.relative_self) -or
+            -not (Test-Path -LiteralPath $selfPath -PathType Leaf)) {
             $results += [pscustomobject]@{
                 name = $name
                 self = $row.relative_self

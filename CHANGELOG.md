@@ -22,6 +22,14 @@ The version stamped into builds is generated from the most recent
   lowering is the only back end.  `--legacy-lowering` and
   `RSXCG_GENERAL=0` now fail with a message saying the matcher was
   removed; `--general-lowering` is still accepted and does nothing.
+### Fixed
+
+- **`cellGcmSetTransferData` / `rsxSetTransferData` no longer overrun the
+  command buffer.**  Every call with an ordinary pitch took the
+  row-by-row path and never stopped emitting commands.  Pitches are now
+  signed, a pitch outside -32768..32767 is copied one row per command
+  with both offsets advanced, and a pitch of 32768 is treated as out of
+  range.  Fixed in both `libgcm_cmd` and `librsx`.
 
 ## [v0.19.0] — 2026-09-30
 

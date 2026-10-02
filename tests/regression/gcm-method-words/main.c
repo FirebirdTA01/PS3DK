@@ -88,6 +88,73 @@ int main(void)
 		expect("VertexTexture", w, 7);
 	}
 
+	/* memory-to-memory transfers (subchannel 1): the DMA pair, then one
+	 * OFFSET_IN..BUFFER_NOTIFY run of 8 per copy.  The pitches are signed and
+	 * the fields hold -32768..32767; a pitch outside that is copied one row
+	 * per run with both offsets advanced by their pitch.  Before this was
+	 * fixed every ordinary pitch took the row path and its u32 row count
+	 * never ran out, overrunning the buffer (EMP render-parity report). */
+	{
+		const uint32_t fb = 0xFEED0000u;
+#define SUB(m, n) (((uint32_t)(n) << 18) | (1u << 13) | (m))
+#define DMA SUB(0x184, 2), fb, fb
+#define RUN(src, dst, sp, dp, cols, rows) \
+		SUB(0x30c, 8), (src), (dst), (uint32_t)(sp), (uint32_t)(dp), (cols), (rows), 0x101u, 0u
+
+		/* packed rows (pitch == bytes per row) collapse to one 64-byte line */
+		reset();
+		cellGcmSetTransferData(&ctx, CELL_GCM_TRANSFER_LOCAL_TO_LOCAL, 0x1000, 16, 0x2000, 16, 16, 4);
+		{
+			const uint32_t w[] = { DMA, RUN(0x2000, 0x1000, 0, 0, 64, 1) };
+			expect("TransferData packed", w, 12);
+		}
+
+		/* padded pitches inside the field range: one run, three rows */
+		reset();
+		cellGcmSetTransferData(&ctx, CELL_GCM_TRANSFER_LOCAL_TO_LOCAL, 0x1000, 64, 0x2000, 32, 16, 3);
+		{
+			const uint32_t w[] = { DMA, RUN(0x2000, 0x1000, 32, 64, 16, 3) };
+			expect("TransferData padded", w, 12);
+		}
+
+		/* a negative destination pitch is in range and passes through */
+		reset();
+		cellGcmSetTransferData(&ctx, CELL_GCM_TRANSFER_LOCAL_TO_LOCAL, 0x1000, (uint32_t)-64, 0x2000, 32, 16, 2);
+		{
+			const uint32_t w[] = { DMA, RUN(0x2000, 0x1000, 32, -64, 16, 2) };
+			expect("TransferData negative pitch", w, 12);
+		}
+
+		/* a pitch the field cannot hold: one run per row, offsets advancing */
+		reset();
+		cellGcmSetTransferData(&ctx, CELL_GCM_TRANSFER_LOCAL_TO_LOCAL, 0x1000, 16, 0x2000, 40000, 16, 2);
+		{
+			const uint32_t w[] = { DMA, RUN(0x2000, 0x1000, 0, 0, 16, 1),
+			                       RUN(0x2000 + 40000, 0x1000 + 16, 0, 0, 16, 1) };
+			expect("TransferData wide pitch", w, 21);
+		}
+
+		/* 32768 is one past the field's maximum (32767) */
+		reset();
+		cellGcmSetTransferData(&ctx, CELL_GCM_TRANSFER_LOCAL_TO_LOCAL, 0x1000, 32768, 0x2000, 16, 16, 2);
+		{
+			const uint32_t w[] = { DMA, RUN(0x2000, 0x1000, 0, 0, 16, 1),
+			                       RUN(0x2000 + 16, 0x1000 + 32768, 0, 0, 16, 1) };
+			expect("TransferData pitch 32768", w, 21);
+		}
+
+		/* no rows: the DMA pair only */
+		reset();
+		cellGcmSetTransferData(&ctx, CELL_GCM_TRANSFER_LOCAL_TO_LOCAL, 0x1000, 64, 0x2000, 32, 16, 0);
+		{
+			const uint32_t w[] = { DMA };
+			expect("TransferData no rows", w, 3);
+		}
+#undef RUN
+#undef DMA
+#undef SUB
+	}
+
 	/* a reserve that fits writes nothing and moves nothing */
 	reset();
 	cellGcmReserveMethodSize(&ctx, 16);

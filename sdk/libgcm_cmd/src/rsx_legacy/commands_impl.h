@@ -1844,15 +1844,22 @@ void RSX_FUNC(SetPointSize)(gcmContextData *context,f32 size)
 	RSX_CONTEXT_CURRENT_END(2);
 }
 
-static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(SetTransferData)(gcmContextData *context,u32 dstOffset,u32 dstPitch,u32 srcOffset,u32 srcPitch,u32 bytesPerRow,u32 rowCount)
+/* The pitches are SIGNED (a negative pitch walks rows upward) and the
+ * hardware's pitch fields hold -32768..32767.  They used to be u32 compared
+ * against s32 bounds, which converted -32768 to 0xFFFF8000 and sent every
+ * ordinary pitch down the row-by-row path; that path then counted rows with
+ * `while (--rowCount >= 0)` on a u32, which never ends, and never moved to
+ * the next row.  A pitch the fields cannot hold is copied one row per
+ * command, advancing both offsets by their pitch. */
+static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(SetTransferData)(gcmContextData *context,u32 dstOffset,s32 dstPitch,u32 srcOffset,s32 srcPitch,u32 bytesPerRow,u32 rowCount)
 {
 	const s32 MIN_PITCH = -32768;
-	const s32 MAX_PITCH =  32768;
-	const s32 MAX_ROWS = 0x7ff;
+	const s32 MAX_PITCH =  32767;
+	const u32 MAX_ROWS = 0x7ff;
 	const u32 MAX_LINES = 0x3fffff;
-	u32 colCount, rows, cols;
+	u32 colCount, rows, cols, row;
 
-	if (srcPitch == bytesPerRow && dstPitch == bytesPerRow) {
+	if ((u32)srcPitch == bytesPerRow && (u32)dstPitch == bytesPerRow) {
 		bytesPerRow *= rowCount;
 		rowCount = 1;
 		srcPitch = 0;
@@ -1860,7 +1867,7 @@ static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(SetTransferD
 	}
 
 	if (srcPitch < MIN_PITCH || srcPitch > MAX_PITCH || dstPitch < MIN_PITCH || dstPitch > MAX_PITCH) {
-		while (--rowCount >= 0) {
+		for (row = 0; row < rowCount; row++) {
 			for (colCount=bytesPerRow;colCount > 0;colCount-=cols) {
 				cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
 
@@ -1876,6 +1883,8 @@ static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(SetTransferD
 				RSX_CONTEXT_CURRENTP[8] = 0;
 				RSX_CONTEXT_CURRENT_END(9);
 			}
+			srcOffset += (u32)srcPitch;
+			dstOffset += (u32)dstPitch;
 		}
 	} else {
 		for (;rowCount > 0;rowCount-=rows) {
@@ -1897,8 +1906,8 @@ static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(SetTransferD
 				RSX_CONTEXT_CURRENT_END(9);
 			}
 
-			srcOffset += (rows*srcPitch);
-			dstOffset += (rows*dstPitch);
+			srcOffset += rows*(u32)srcPitch;
+			dstOffset += rows*(u32)dstPitch;
 		}
 	}
 
@@ -1913,7 +1922,7 @@ void RSX_FUNC(SetTransferData)(gcmContextData *context,u8 mode,u32 dst,u32 outpi
 	RSX_CONTEXT_CURRENTP[2] = (mode&0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
 	RSX_CONTEXT_CURRENT_END(3);
 
-	RSX_FUNC_INTERNAL(SetTransferData)(context, dst, outpitch, src, inpitch, linelength, linecount);
+	RSX_FUNC_INTERNAL(SetTransferData)(context, dst, (s32)outpitch, src, (s32)inpitch, linelength, linecount);
 }
 
 void RSX_FUNC(SetTransferDataMode)(gcmContextData *context,u8 mode)
