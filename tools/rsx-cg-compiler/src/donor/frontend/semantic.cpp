@@ -1048,6 +1048,20 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         argTypes.push_back(argType);
     }
 
+    // modf's second argument is an OUT parameter: an assignable expression
+    // of exactly x's type (measured: an int variable for a float x is
+    // C1113, "actual parameter #2 must be same type as formal out
+    // parameter").  Overload conversion would otherwise accept it.
+    if (expr->functionName == "modf" && argTypes.size() == 2 &&
+        !argTypes[0].isError() && !argTypes[1].isError())
+    {
+        if (!isLvalue(expr->arguments[1].get()) || !(argTypes[0] == argTypes[1]))
+        {
+            error(expr->loc, "C1113: actual parameter #2 must be same type as formal out parameter (\"ip\")");
+            return CgType::Error();
+        }
+    }
+
     // RECORD THE UNRESOLVED CALLEE NAME BEFORE THE ERROR-ARGUMENT RETURN.
     // Recording is not diagnosing.  `f(missing(t)); float f;` is C1002 on the
     // reference - the later `float f` collides with the earlier use of the
@@ -1466,6 +1480,11 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
 
 CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
 {
+    // `float[](...)` has no extent of its own: it takes the argument count,
+    // before the type is resolved (an extent of 0 is not an array type).
+    if (expr->constructedType && expr->constructedType->baseType == BaseType::Array &&
+        expr->constructedType->arraySize == 0)
+        expr->constructedType->arraySize = static_cast<int>(expr->arguments.size());
     CgType constructedType = resolveType(expr->constructedType.get());
 
     if (constructedType.isError())
@@ -1505,6 +1524,35 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
     }
 
     if (hasError) return CgType::Error();
+
+    // An ARRAY constructor - `float[](0.0, 1.0, ...)`, `float[5](...)` - or a
+    // brace list for an array: one argument per element, each convertible
+    // to the element type; an empty extent takes the argument count
+    // (measured: libretro gb-pass-2's float offsets[5] = float[](...)).
+    if (constructedType.isArray())
+    {
+        const CgType element = constructedType.elementType();
+        const int declared = constructedType.arraySize();
+        const int count = static_cast<int>(argTypes.size());
+        if (declared > 0 && declared != count)
+        {
+            error(expr->loc, "array constructor has " + std::to_string(count) +
+                  " elements for an array of " + std::to_string(declared));
+            return CgType::Error();
+        }
+        for (size_t k = 0; k < argTypes.size(); ++k)
+        {
+            if (!(argTypes[k] == element) && !argTypes[k].isImplicitlyConvertibleTo(element))
+            {
+                error(expr->arguments[k]->loc, "array constructor element " + std::to_string(k) +
+                      " does not convert to the element type");
+                return CgType::Error();
+            }
+        }
+        if (declared == 0 && expr->constructedType)
+            expr->constructedType->arraySize = count;   // `float[](...)` takes its length here
+        return CgType::Array(element, count);
+    }
 
     // Check component count.  A brace list initialising an ARRAY constructs
     // arraySize elements of the element type: `static const float2 taps[2] =

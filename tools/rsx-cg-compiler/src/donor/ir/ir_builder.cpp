@@ -3295,6 +3295,50 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             }
         }
 
+        // A local ARRAY from a brace list or an array constructor - `float
+        // m[9] = {0, ...}`, `float o[5] = float[](0.0, 1.0, ...)` - fills its
+        // elements in order (measured: both accepted by the reference).  Each
+        // element is built and converted to the element type; a shape that
+        // does not match the element refuses by name.
+        if (varDecl->initializer && varDecl->initializer->kind == ExprKind::Constructor)
+        {
+            const IRTypeInfo declaredType = getIRType(varDecl->type.get());
+            auto* ctor = static_cast<ConstructorExpr*>(varDecl->initializer.get());
+            if (declaredType.isArray() && declaredType.arraySize > 0 && !getStructFields(varDecl->type->elementType.get()))
+            {
+                IRTypeInfo elementType = declaredType;
+                elementType.arraySize = 0;
+                if (ctor->arguments.size() != static_cast<size_t>(declaredType.arraySize))
+                {
+                    error(varDecl->loc, "array initialiser for '" + varDecl->name + "' has " +
+                          std::to_string(ctor->arguments.size()) + " elements for " +
+                          std::to_string(declaredType.arraySize) + " (local-array-initialiser)");
+                    continue;
+                }
+                auto& slots = localArrayValues_[varDecl->name];
+                slots.assign(static_cast<size_t>(declaredType.arraySize), InvalidIRValue);
+                bool ok = true;
+                for (size_t i = 0; i < ctor->arguments.size() && ok; ++i)
+                {
+                    const IRTypeInfo argType = getExprType(ctor->arguments[i].get());
+                    IRValueID v = buildExpr(ctor->arguments[i].get());
+                    const bool scalars = !elementType.isVector() && !elementType.isMatrix() &&
+                                         !argType.isVector() && !argType.isMatrix() && argType.arraySize == 0;
+                    if (scalars)
+                        v = emitScalarConversion(argType, elementType, v, ctor->arguments[i]->loc);
+                    else if (argType.vectorSize != elementType.vectorSize || argType.isMatrix() ||
+                             elementType.isMatrix() || argType.arraySize != 0)
+                    {
+                        error(ctor->arguments[i]->loc, "array initialiser element " + std::to_string(i) +
+                              " of '" + varDecl->name + "' does not match the element type (local-array-initialiser)");
+                        ok = false;
+                    }
+                    slots[i] = v;
+                }
+                continue;
+            }
+        }
+
         // If there's an initializer, evaluate it
         if (varDecl->initializer)
         {
@@ -4205,6 +4249,36 @@ IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
 
 IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 {
+    // modf(x, out ip), measured on the reference (FLR, then a predicated
+    // correction on x < 0): fl = floor(x); f = x - fl; ip = fl - and where
+    // x < 0, ip = fl + 1 and f = f - 1.  That is the usual split for every
+    // negative non-integer, and the reference's own result at a negative
+    // integer: modf(-2) is f = -1, ip = -1.  The second argument is a
+    // destination, never read (the semantic pass checked it is an lvalue of
+    // x's type).
+    if (expr->functionName == "modf" && expr->resolvedFunction == nullptr &&
+        expr->arguments.size() == 2)
+    {
+        const IRTypeInfo resultType = getExprType(expr);
+        const IRValueID x = buildExpr(expr->arguments[0].get());
+        const IRValueID fl = emitInstruction(IROp::Floor, resultType, {x}, expr->loc);
+        const IRValueID fr = emitBinaryOp(IROp::Sub, resultType, x, fl, expr->loc);
+        // createConstant(type, scalar) fills lane x only; build every lane.
+        const size_t lanes = static_cast<size_t>(std::max(1, resultType.vectorSize));
+        const IRValueID one = createConstant(resultType, std::vector<float>(lanes, 1.0f));
+        IRTypeInfo boolType = resultType;
+        if (resultType.isVector()) boolType.elementType = IRType::Bool;
+        else boolType = IRTypeInfo::Bool();
+        const IRValueID negative = emitBinaryOp(IROp::CmpLt, boolType, x,
+                                                createConstant(resultType, std::vector<float>(lanes, 0.0f)), expr->loc);
+        const IRValueID ip = emitInstruction(IROp::Select, resultType,
+            {negative, emitBinaryOp(IROp::Add, resultType, fl, one, expr->loc), fl}, expr->loc);
+        const IRValueID f = emitInstruction(IROp::Select, resultType,
+            {negative, emitBinaryOp(IROp::Sub, resultType, fr, one, expr->loc), fr}, expr->loc);
+        buildAssignment(expr->arguments[1].get(), ip);
+        return f;
+    }
+
     // Check for built-in function
     auto builtinOp = builtinToIROp(expr->functionName);
 
@@ -7052,6 +7126,20 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
                 return emitMatrixNarrowing(argType, resultType, argValues[0], expr->loc);
             }
 
+            // A vector whose lanes exactly fill the matrix constructs it
+            // row-major (measured: float2x2(float4) is accepted, rows a.xy and
+            // a.zw).  Only a cast of a different shape is C1033.
+            if (!argType.isMatrix() && resultType.isMatrix() && argType.isVector() &&
+                argType.vectorSize == resultType.matrixRows * resultType.matrixCols)
+            {
+                IRTypeInfo laneType = IRTypeInfo::Float();
+                laneType.baseType = argType.elementType;
+                std::vector<IRValueID> lanes;
+                for (int k = 0; k < argType.vectorSize; ++k)
+                    lanes.push_back(emitInstruction(IROp::VecExtract, laneType,
+                        {argValues[0], createConstant(static_cast<int32_t>(k))}, expr->loc));
+                return emitInstruction(IROp::MatConstruct, resultType, lanes, expr->loc);
+            }
             if ((argType.isMatrix() && !resultType.isMatrix()) ||
                 (!argType.isMatrix() && resultType.isMatrix() && !argType.isScalar()))
             {
@@ -7167,9 +7255,44 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
     // Matrix construction from vectors (e.g., half3x3(v1, v2, v3))
     if (resultType.isMatrix())
     {
+        // Component widths of the arguments (a matrix argument is not
+        // flattened here).
+        std::vector<int> widths;
+        bool anyMatrixArg = false;
+        for (size_t i = 0; i < argValues.size() && i < expr->arguments.size(); ++i)
+        {
+            const IRTypeInfo t = getExprType(expr->arguments[i].get());
+            anyMatrixArg = anyMatrixArg || t.isMatrix();
+            widths.push_back(t.isMatrix() ? 0 : std::max(1, t.vectorSize));
+        }
+        const bool rowVectors = widths.size() == static_cast<size_t>(resultType.matrixRows) &&
+            std::all_of(widths.begin(), widths.end(), [&](int w) { return w == resultType.matrixCols; });
+        int total = 0;
+        for (int w : widths) total += w;
+        // Mixed vector/scalar arguments fill the matrix in row-major order
+        // (measured: float4x4(a, b, a.x .. a.w, b.x .. b.w) has rows a, b,
+        // a, b; float4x4 from eight float2s; float2x2(float4)).  Flatten to
+        // scalar lanes when the arguments are not exactly the row vectors.
+        if (!rowVectors && !anyMatrixArg && widths.size() == argValues.size() &&
+            total == resultType.matrixRows * resultType.matrixCols &&
+            argValues.size() != static_cast<size_t>(total))
+        {
+            std::vector<IRValueID> lanes;
+            for (size_t i = 0; i < argValues.size(); ++i)
+            {
+                if (widths[i] == 1) { lanes.push_back(argValues[i]); continue; }
+                const IRTypeInfo t = getExprType(expr->arguments[i].get());
+                IRTypeInfo laneType = IRTypeInfo::Float();
+                laneType.baseType = t.elementType;
+                for (int k = 0; k < widths[i]; ++k)
+                    lanes.push_back(emitInstruction(IROp::VecExtract, laneType,
+                        {argValues[i], createConstant(static_cast<int32_t>(k))}, expr->loc));
+            }
+            argValues = std::move(lanes);
+        }
         // Verify we have the right number of row/column vectors
         int expectedVectors = resultType.matrixRows; // Assume row-major: N rows of M-component vectors
-        if (argValues.size() == (size_t)expectedVectors)
+        if (argValues.size() == (size_t)expectedVectors && rowVectors)
         {
             auto inst = std::make_unique<IRInstruction>(IROp::MatConstruct,
                 currentFunction_->allocateValueId(), resultType);

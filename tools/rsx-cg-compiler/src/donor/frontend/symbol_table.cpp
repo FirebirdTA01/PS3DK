@@ -696,6 +696,16 @@ void SymbolTable::registerMathFunctions()
         addFunction("fmod", vec, {vec, vec}, {"x", "y"}, nullptr, true);
     }
 
+    // modf(x, out ip): the second argument is an OUT parameter of exactly
+    // x's type (C1113 otherwise); the semantic pass enforces that.
+    for (int size = 1; size <= 4; ++size)
+    {
+        CgType f = size == 1 ? CgType::Float() : CgType::Vec(ScalarKind::Float, size);
+        CgType h = size == 1 ? CgType::Half() : CgType::Vec(ScalarKind::Half, size);
+        addFunction("modf", f, {f, f}, {"x", "ip"}, nullptr, true);
+        addFunction("modf", h, {h, h}, {"x", "ip"}, nullptr, true);
+    }
+
     // isnan, isinf, isfinite
     addFunction("isnan", CgType::Bool(), {CgType::Float()}, {"x"}, nullptr, true);
     addFunction("isinf", CgType::Bool(), {CgType::Float()}, {"x"}, nullptr, true);
