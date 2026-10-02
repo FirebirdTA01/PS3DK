@@ -1,0 +1,1 @@
+float4 main(float4 p : TEXCOORD0) : COLOR { return p[2]; }

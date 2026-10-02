@@ -1,0 +1,8 @@
+// A shadow-compare coordinate (tex2D with a float3) in a vertex program is
+// refused by name.
+uniform sampler2D depthMap;
+
+void main(float3 uvz : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex2D(depthMap, uvz);
+}

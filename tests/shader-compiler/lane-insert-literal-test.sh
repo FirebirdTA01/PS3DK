@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A literal written into one lane of a varying passthrough must reach the
-# ucode (t_afb4af65).  Before the fix the default path emitted a single
+# ucode (literal-lane-insert).  Before the fix the default path emitted a single
 # full-width MOV of the varying and the insert was gone, with no
 # diagnostic and a well-formed container.
 #
@@ -49,24 +49,16 @@ all="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_insert_literal_all_f.cg"
 [[ -f "$one" ]] || fail "fixture missing: $one"
 [[ -f "$all" ]] || fail "fixture missing: $all"
 
-compile "$one" one --legacy-lowering
-compile "$all" all --legacy-lowering
-
-# The GENERAL path refused this shape entirely - the insert's result was
-# never defined and the store reported "operand could not be resolved"
-# (t_be578e74).  It now materialises the varying into a temp masked to the
-# lanes the insert does not write, which is the reference's own shape, so
-# the one-lane case is judged by the same assertions as the matcher.
+# The general path once refused this shape entirely - the insert's result
+# was never defined and the store reported "operand could not be resolved"
+# (partial-varying-materialization).  It now materialises the varying into a
+# temp masked to the lanes the insert does not write, which is the
+# reference's own shape, so the one-lane case is judged on the exact rows
+# below.
 compile "$one" one_general
 compile "$all" all_general
-cmp -s "$work/one.log" "$work/one_general.log" || {
-    diff "$work/one.log" "$work/one_general.log" >&2 || true
-    fail "the general path's ucode for a single lane insert differs from the
-default path's, and both are byte-identical to the reference there
-(t_be578e74)."
-}
 
-python3 - "$work/one.log" "$work/all.log" "$work/all_general.log" <<'PY'
+python3 - "$work/one_general.log" "$work/all_general.log" <<'PY'
 import re
 import sys
 
@@ -104,8 +96,7 @@ def mask_of(row, what):
 
 
 one_rows = words(sys.argv[1])
-all_rows = words(sys.argv[2])
-all_general_rows = words(sys.argv[3])
+all_general_rows = words(sys.argv[2])
 
 # --- one lane overridden -------------------------------------------------
 # MOV R0.yzw, f[TEX0] ; MOV R0.x, {0.5,0,0,0}.x ; the const block.
@@ -113,7 +104,7 @@ if len(one_rows) != 3:
     raise SystemExit(
         "FAIL: fp_insert_literal_f must emit the masked base MOV, the "
         "literal override and its const block - three ucode rows, not %d.  "
-        "Fewer rows mean the insert was dropped (t_afb4af65): a single "
+        "Fewer rows mean the insert was dropped (literal-lane-insert): a single "
         "full-width MOV of the varying is exactly what the defect looked "
         "like." % len(one_rows)
     )
@@ -132,31 +123,12 @@ if one_rows[2][0] != LIT[0.5]:
     )
 
 # --- every lane overridden ----------------------------------------------
-# No read of the varying at all, so the completeness guard must not refuse.
-if len(all_rows) != 8:
-    raise SystemExit(
-        "FAIL: fp_insert_literal_all_f must emit four overrides and their "
-        "four const blocks - eight ucode rows, not %d" % len(all_rows)
-    )
-masks = [mask_of(all_rows[i], "override %d" % (i // 2)) for i in (0, 2, 4, 6)]
-if masks != [0x1, 0x2, 0x4, 0x8]:
-    raise SystemExit(
-        "FAIL: fp_insert_literal_all_f must write x, y, z then w; got "
-        + ", ".join("0x%x" % m for m in masks)
-    )
-for row, value in zip((1, 3, 5, 7), (0.5, 0.25, 0.125, 1.0)):
-    if all_rows[row][0] != LIT[value]:
-        raise SystemExit(
-            "FAIL: const block %d must hold %s (0x%08x), holds 0x%08x"
-            % (row // 2, value, LIT[value], all_rows[row][0])
-        )
-
-# Shipping general lowering currently keeps an unnecessary base MOV that
+# General lowering currently keeps an unnecessary base MOV that
 # reads TEXCOORD0 before overwriting every lane; that no-input/container-mask
-# divergence is tracked separately as t_1cc1cabf.  This guard does not pin
-# that bad shape in place.  It asserts only the original t_afb4af65 property:
+# divergence is tracked separately as overwritten-input-read.  This guard does not pin
+# that bad shape in place.  It asserts only the original literal-lane-insert property:
 # every literal override reaches R0 with the right lane value, whether that
-# is four single-lane MOVs today or one coalesced MOV after t_835be4be.
+# is four single-lane MOVs today or one coalesced MOV after literal-insert-coalescing.
 def logical(disk_word):
     return ((disk_word >> 16) | ((disk_word & 0xFFFF) << 16)) & 0xFFFFFFFF
 
@@ -198,14 +170,14 @@ for mask, src, block in writes:
             raise SystemExit(
                 "FAIL: general fp_insert_literal_all_f writes lane %d from "
                 "0x%08x, expected 0x%08x.  The container would compile but "
-                "paint the wrong literal lane (t_afb4af65)."
+                "paint the wrong literal lane (literal-lane-insert)."
                 % (lane, got, value)
             )
 if covered != 0xF:
     raise SystemExit(
         "FAIL: general fp_insert_literal_all_f literal writes cover mask "
         "0x%x, expected 0xf.  A missing lane is the silent dropped-insert "
-        "failure (t_afb4af65)." % covered
+        "failure (literal-lane-insert)." % covered
     )
 PY
 

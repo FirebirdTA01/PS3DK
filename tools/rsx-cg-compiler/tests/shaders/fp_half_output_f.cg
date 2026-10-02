@@ -1,4 +1,4 @@
-// t_80dad2dd: a fragment program whose colour output is DECLARED half.
+// half-output-staging: a fragment program whose colour output is DECLARED half.
 //
 // The reference compiles this to a single `MOVH o[COLH], f[TEX0]` - the
 // output register is H0, the instruction carries fp16 precision, and the

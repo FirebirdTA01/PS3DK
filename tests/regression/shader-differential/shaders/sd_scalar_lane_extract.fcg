@@ -1,5 +1,5 @@
 // shader-differential — NAMED REGRESSION for the LANE-EXTRACT half of the
-// scalar-broadcast rule (t_b6f2a2a4, companion to sd_scalar_broadcast.fcg).
+// scalar-broadcast rule (scalar-operand-broadcast, companion to sd_scalar_broadcast.fcg).
 //
 // THE RULE: a scalar operand under a multi-lane write mask must replicate
 // ITS OWN component, not lane 0.  A width-1 value can be a lane extract

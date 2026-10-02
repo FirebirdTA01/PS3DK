@@ -1,4 +1,4 @@
-// t_58e2212c: sce-cgc lowers a scalar length multiplied by a literal as
+// scalar-divr-lowering: sce-cgc lowers a scalar length multiplied by a literal as
 // RSQ followed by DIVR literal, rsq.  test_83's last one-ULP mismatch after
 // literal-divisor folding came from using DIVSQR then MUL for this shape.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)

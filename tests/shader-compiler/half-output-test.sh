@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# t_80dad2dd: a DECLARED half fragment output must reach the container.
+# half-output-staging: a DECLARED half fragment output must reach the container.
 #
 # `out half4 o : COLOR` selects a different hardware output register (H0
 # rather than R0) at a different precision, and the container records that in
 # outputFromH0.  The runtime reads that flag to decide which register the
-# colour is taken from, so a dropped flag is not cosmetic - the shader's
-# colour is read from a register it never wrote.
+# colour is taken from.  Dropping the flag AND emitting MOVR is internally
+# consistent - the runtime reads R0 and R0 was written - so this is not a
+# read of an unwritten register; it is the declared output type being
+# disregarded, so the program honours neither the register nor the
+# precision the source asked for (fragment-output-precision corrected this wording).
 #
 # NO CONTROL-WORD VALUE APPEARS IN THIS TEST, deliberately.  Which bits the
 # bind sets is the SDK's business and has been measured and corrected once
@@ -13,10 +16,9 @@
 # by the next runtime measurement even though nothing about the compiler
 # changed.  What this test owns is the CONTAINER: the flag and the ucode.
 #
-# The general path (the default) drops all three: it emits MOVR o[COLR] with
-# the flag clear, exit 0, container written, no diagnostic.  The retired
-# --legacy-lowering path gets it right and is byte-identical to the reference
-# on this shader, which is where the expected words below come from.
+# The defect: the general path dropped all three - it emitted MOVR o[COLR]
+# with the flag clear, exit 0, container written, no diagnostic.  The
+# expected words below are the reference's bytes for this shader.
 #
 # CONTROL: fp_float_output_f.cg is the same source with `out float4`.  It must
 # keep MOVR o[COLR] and a clear flag, so a fix that sets the bit
@@ -26,6 +28,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+# The refusal_status helper that stood here (exit 1 EXACTLY - a 124 timeout
+# and a >=128 signal both satisfy "did not exit 0" while meaning the
+# compiler never reached the decision, crash-versus-refusal-status) went with the partial
+# half output's refusal below.  This file no longer asserts any refusal, so
+# keeping an unused copy would be dead code; the same helper is still in
+# every test that does assert one.
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -56,28 +65,16 @@ emit() {
 emit fp_half_output_f
 emit fp_float_output_f
 
-# A PARTIALLY written half output must REFUSE, and must refuse by name.  The
-# general path composes a partial store in a temp pinned to the output slot,
-# which for a half output is H0 - the low half of the R0 that pin holds - so
-# emitting it would hand the program its own scratch as its colour.  The
-# reference needs no temp for this shape (two masked MOVH writes straight to
-# o[COLH]), so the refusal is ours to lift later, not a hardware limit: when
-# it is lifted this check turns red and names the shape.  Before the half
-# output reached the container at all, this source compiled SILENTLY as an
-# ordinary fp32 program, which is the state this test exists to prevent.
-refuse_log="$work/fp_half_output_partial_f.log"
-refuse_out="$work/fp_half_output_partial_f.fpo"
-if (
-    ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
-    timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler"         -p sce_fp_rsx --emit-container "$refuse_out"         "$shaders/fp_half_output_partial_f.cg"
-) >"$refuse_log" 2>&1; then
-    fail "fp_half_output_partial_f compiled; a partial half output must refuse while the composition still lands in the output pin (t_80dad2dd)"
-fi
-[[ -f "$refuse_out" ]] && fail "fp_half_output_partial_f refused but still wrote a container"
-grep -q "t_80dad2dd" "$refuse_log" || {
-    tail -n 5 "$refuse_log" >&2
-    fail "fp_half_output_partial_f refused without naming t_80dad2dd; a refusal that does not say which decision made it is a dead end for the next reader"
-}
+# THE PARTIAL HALF OUTPUT'S REFUSAL IS GONE, as the version of this block
+# that stood here said it would be: "when it is lifted this check turns red
+# and names the shape".  It was lifted by deciding half-ness in the builder
+# instead of after allocation, so the lane-by-lane composition writes H0
+# directly rather than being composed in an fp32 temp pinned to the output
+# slot.  That shape's assertions now live in h0-alias-test.sh, which owns
+# it properly - per-instruction precision and lane coverage, not just a
+# status - and this file keeps the one-variable half/float pair it was
+# built around.  Nothing is asserted about fp_half_output_partial_f here,
+# so the two tests do not both claim the same property.
 
 python3 - "$work/fp_half_output_f.fpo" "$work/fp_float_output_f.fpo" <<'PY'
 import struct
@@ -100,8 +97,7 @@ flt = container(sys.argv[2])
 
 problems = []
 
-# The reference's bytes for this shader, taken from the container the retired
-# path still produces byte-identically: MOVH into the half output carries
+# The reference's bytes for this shader: MOVH into the half output carries
 # OUT_REG_HALF (0x00800000) and fp16 precision (0x00000040) in word 0.
 HALF_WORD0 = 0x9E810140
 FLOAT_WORD0 = 0x9E010100
@@ -109,8 +105,8 @@ FLOAT_WORD0 = 0x9E010100
 if half["h0"] != 1:
     problems.append(
         "declared `out half4` produced outputFromH0=%d: the container does not "
-        "record the half output, so the runtime is told to read the colour "
-        "from the full-precision register the program never wrote"
+        "record the half output, so the colour stays in R0 at full precision "
+        "instead of the H0 the source asked for"
         % half["h0"])
 if half["words"][0] != HALF_WORD0:
     problems.append(

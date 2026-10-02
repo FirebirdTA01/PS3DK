@@ -4,14 +4,12 @@
 
 namespace
 {
-bool preferOverload(Symbol* candidate, Symbol* currentBest)
-{
-    if (!currentBest) return true;
-
-    // Builtins are registered before source declarations.  For an exact
-    // signature tie, a real source declaration shadows the registered fallback.
-    return currentBest->declaration == nullptr && candidate->declaration != nullptr;
-}
+// preferOverload used to live here: for an exact signature tie it let a source
+// declaration shadow a registered builtin.  PARTITION BY NAME subsumes it -
+// when any source declaration of the name is visible the builtins are not
+// candidates at all, so a source-versus-builtin tie can no longer be reached,
+// and every remaining tie is source-versus-source, which the reference calls
+// C1101 rather than resolving by preference (function-visibility).
 }
 
 // ============================================================================
@@ -167,6 +165,42 @@ bool SymbolTable::addFunction(const std::string& name,
     auto symbol = std::make_unique<Symbol>(SymbolKind::Function, name, returnType);
     symbol->parameterTypes = paramTypes;
     symbol->parameterNames = paramNames;
+    // ASK THE DECLARATION, never assume.  This path registers builtins (decl
+    // null, no defaults) and source functions alike.  Getting it wrong failed
+    // in both directions during this slice: left at its zero initialiser it
+    // made every BUILTIN viable for a call with too few arguments and turned
+    // the whole builtin header ambiguous; hardcoded to paramTypes.size() it
+    // refused every legitimate defaulted call.
+    symbol->requiredParameterCount = paramTypes.size();
+    if (decl)
+    {
+        // COUNT BACK OVER TRAILING DEFAULTS - and over ALL of them.
+        //
+        // An out/inout parameter that carries a default is NOT excluded here.
+        // Measured on sce-cgc 475: such a candidate still takes part in
+        // ranking.  `void f(float4)` beside `void f(float4, out float k=.5)`,
+        // called `f(t)`, is "error C1101: ambiguous overloaded function
+        // reference" in BOTH declaration orders, and a plain `float k=.5`
+        // second parameter behaves identically - so the default-filled
+        // candidate is viable and ties, and this is not an out/inout rule at
+        // all.  Excluding it here would leave `f(float4)` the unique winner
+        // and ACCEPT a program the reference refuses (verified: all four
+        // out/inout ambiguity cells emitted a container).
+        //
+        // The out/inout restriction is real but applies AFTER a unique winner
+        // is picked: the omitted argument is not an lvalue, which the semantic
+        // analyser reports as "error C1111: non-lvalue actual parameter #N
+        // cannot be out parameter".  Ruling: Fable, retracting the viability
+        // exclusion on codex's six cells.
+        size_t required = decl->parameters.size();
+        while (required > 0 && decl->parameters[required - 1] &&
+               decl->parameters[required - 1]->defaultValue != nullptr)
+        {
+            --required;
+        }
+        symbol->requiredParameterCount = required;
+    }
+    symbol->declIndex = declIndexCursor_;
     symbol->declaration = decl;
     symbol->isIntrinsic = isIntrinsic;
     symbol->intrinsicOpcode = opcode;
@@ -193,10 +227,42 @@ bool SymbolTable::addFunction(const std::string& name,
     return true;
 }
 
+bool SymbolTable::hasVisibleFunction(const std::string& name,
+                                     size_t visibleThrough) const
+{
+    auto it = functionOverloads.find(name);
+    if (it == functionOverloads.end()) return false;
+    for (Symbol* sym : it->second)
+    {
+        if (sym->declIndex <= visibleThrough) return true;
+    }
+    return false;
+}
+
+bool SymbolTable::hasVisibleSourceFunction(const std::string& name,
+                                           size_t visibleThrough) const
+{
+    auto it = functionOverloads.find(name);
+    if (it == functionOverloads.end()) return false;
+    for (Symbol* sym : it->second)
+    {
+        // Builtins are Function symbols too (isIntrinsic, no FunctionDecl);
+        // a source declaration is the one that carries its declaration.
+        if (sym->kind == SymbolKind::Function && sym->declaration &&
+            sym->declIndex <= visibleThrough)
+            return true;
+    }
+    return false;
+}
+
 std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
     const std::string& name,
-    const std::vector<CgType>& argumentTypes) const
+    const std::vector<CgType>& argumentTypes,
+    bool* ambiguous,
+    size_t visibleThrough) const
 {
+    if (ambiguous) *ambiguous = false;
+    int bestNarrowing = 0;
     auto it = functionOverloads.find(name);
     if (it == functionOverloads.end())
     {
@@ -209,23 +275,120 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
         return std::nullopt;
     }
 
+    // STEP 2 needs one look ahead: does the name have ANY visible source
+    // declaration?  If it does, the builtins of that name are out of
+    // consideration entirely, viable or not.
+    bool haveVisibleSource = false;
+    for (Symbol* sym : overloads)
+    {
+        if (sym->declIndex <= visibleThrough && sym->declaration != nullptr)
+        {
+            haveVisibleSource = true;
+            break;
+        }
+    }
+
+    // STEP 1, AND THE REASON IT HAS TO HAPPEN HERE.  Every declaration gets
+    // its own entry in functionOverloads - a prototype and its definition are
+    // two entries with ONE signature.  They are one function, so they are
+    // collapsed to the LATEST VISIBLE declaration before anything is ranked.
+    //
+    // Without this collapse the tie rule below would call every prototyped
+    // program ambiguous, since the prototype and the definition are both
+    // viable at the same cost.
+    //
+    // Collapsing to the LATEST is also rule 1 itself: the reference takes a
+    // default from the declaration visible at the call, so
+    //     proto k=.25 ; def k=.5 ; call        -> .5      (definition later)
+    //     proto k=.25 ; call ; def k=.5        -> .25     (definition unseen)
+    //     proto k=.25 ; def with NO default    -> C1103   (the default is gone)
+    // all fall out of "keep the one with the greatest declIndex <=
+    // visibleThrough", because requiredParameterCount travels with the
+    // declaration that set it.
+    auto sameSignature = [](const Symbol* a, const Symbol* b)
+    {
+        if (a->parameterTypes.size() != b->parameterTypes.size()) return false;
+        for (size_t i = 0; i < a->parameterTypes.size(); ++i)
+        {
+            if (!a->parameterTypes[i].equals(b->parameterTypes[i])) return false;
+        }
+        return true;
+    };
+
+    std::vector<Symbol*> visible;
+    for (Symbol* sym : overloads)
+    {
+        // A DECLARATION WRITTEN AFTER THIS CALL IS NOT A CANDIDATE: the
+        // reference refuses a forward call with no prior prototype ("error
+        // C1008: undefined variable") and does not let a source overload
+        // written later hide a builtin.  Builtins carry index 0 and so are
+        // never filtered here.
+        if (sym->declIndex > visibleThrough) continue;
+        bool merged = false;
+        for (Symbol*& kept : visible)
+        {
+            if (!sameSignature(kept, sym)) continue;
+            if (sym->declIndex >= kept->declIndex) kept = sym;
+            merged = true;
+            break;
+        }
+        if (!merged) visible.push_back(sym);
+    }
+
     OverloadCandidate best;
     best.symbol = nullptr;
     best.conversionCost = std::numeric_limits<int>::max();
     best.exactMatch = false;
+    bool tied = false;
 
-    for (Symbol* sym : overloads)
+    for (Symbol* sym : visible)
     {
-        // Check argument count
-        if (sym->parameterTypes.size() != argumentTypes.size())
+        // STEP 2, PARTITION BY NAME.  A visible source declaration hides the
+        // builtins of that name even when it is NOT VIABLE: measured, a source
+        // `float sin(float, float)` with two required parameters makes
+        // `sin(t.x)` C1103 "too few parameters", never the builtin sine.
+        if (haveVisibleSource && sym->declaration == nullptr)
         {
-            continue;  // Arity mismatch
+            continue;
         }
 
-        // Calculate conversion cost
+        // STEP 3, ARITY.  A call may omit TRAILING parameters that carry
+        // defaults; requiredParameterCount equals the parameter count for
+        // every function without them, so this is exact equality for those.
+        if (argumentTypes.size() > sym->parameterTypes.size() ||
+            argumentTypes.size() < sym->requiredParameterCount)
+        {
+            continue;
+        }
+
+        // STEP 4, COST over the SUPPLIED arguments only.  Filling a default
+        // costs nothing and so cannot break a tie - which is why
+        // `f(float4)` beside `f(float4, float k = 1.0)` called f(t) is
+        // ambiguous rather than resolved in favour of the exact arity.
+        //
+        // NARROWING IS COUNTED SEPARATELY AND COMPARED FIRST.  A single
+        // scalar-cost total cannot express the reference's rule, and the
+        // arithmetic collides in practice: with "a promotion costs its rank
+        // distance, a demotion costs twice it", clamp(float,float,float) for
+        // clamp(f, 0, 1) costs two promotions = 2, and clamp(int,int,int)
+        // costs one demotion = 2.  They tie, and a tie is C1101 - which
+        // refused five SDK shaders that the reference and our own parent both
+        // compiled (MachoQHDR x4, stereo3D fp_anaglyph).
+        //
+        // Measured on sce-cgc 475, in both directions and with named
+        // variables rather than literals, so this is a TYPE rule and not a
+        // literal rule:
+        //     clamp(float, int,   int  )  -> the float overload  (2 up)
+        //     clamp(int,   float, float)  -> the float overload  (1 up)
+        //     clamp(float, half,  half )  -> the float overload  (2 up)
+        // The second is the one that settles it: the all-widening candidate
+        // wins even when it needs FEWER conversions than the narrowing one
+        // needs, so no exchange rate reproduces it.  Any narrowing loses to a
+        // sequence of widenings, whatever the counts, and cost only separates
+        // candidates that narrow equally.
         int totalCost = 0;
+        int totalNarrowing = 0;
         bool viable = true;
-        bool exact = true;
 
         for (size_t i = 0; i < argumentTypes.size(); ++i)
         {
@@ -234,11 +397,8 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
 
             if (argType.equals(paramType))
             {
-                // Exact match for this parameter
                 continue;
             }
-
-            exact = false;
 
             int cost = TypeConversion::conversionCost(argType, paramType);
             if (cost < 0)
@@ -249,27 +409,42 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
             }
 
             totalCost += cost;
+            totalNarrowing += TypeConversion::narrowingSteps(argType, paramType);
         }
 
         if (!viable) continue;
 
-        // Check if this is a better match
-        if (exact)
-        {
-            // Exact match beats everything
-            if (!best.exactMatch || preferOverload(sym, best.symbol))
-            {
-                best.symbol = sym;
-                best.conversionCost = 0;
-                best.exactMatch = true;
-            }
-        }
-        else if (!best.exactMatch && totalCost < best.conversionCost)
+        const bool better = !best.symbol ||
+            totalNarrowing < bestNarrowing ||
+            (totalNarrowing == bestNarrowing && totalCost < best.conversionCost);
+        const bool equal = best.symbol &&
+            totalNarrowing == bestNarrowing && totalCost == best.conversionCost;
+
+        if (better)
         {
             best.symbol = sym;
             best.conversionCost = totalCost;
-            best.exactMatch = false;
+            bestNarrowing = totalNarrowing;
+            best.exactMatch = (totalCost == 0);
+            tied = false;
         }
+        else if (equal)
+        {
+            // TWO CANDIDATES AT THE BEST COST IS C1101, whatever distinguishes
+            // them.  Arity does not break it, exactness does not break it, and
+            // declaration order must not - measured on three shapes the
+            // reference refuses and we used to accept:
+            //     f(float4, float = .25) beside f(float4, int = 2)
+            //     f(half4)               beside f(half4, float = .25)
+            //     f(float4)              beside f(float4, float k = 1.0)
+            tied = true;
+        }
+    }
+
+    if (tied)
+    {
+        if (ambiguous) *ambiguous = true;
+        return std::nullopt;
     }
 
     if (best.symbol)
@@ -320,6 +495,15 @@ void SymbolTable::registerBuiltinTypes()
     addType("float3x3", CgType::Float3x3());
     addType("float4x4", CgType::Float4x4());
     addType("matrix", CgType::Float4x4());
+    // Non-square matrices are real types on the reference: RxC = R rows of
+    // C-wide vectors (rectangular-matrices / rectangular-matrix-row-access).
+    for (int r = 2; r <= 4; ++r)
+        for (int c = 2; c <= 4; ++c)
+        {
+            if (r == c) continue;
+            addType("float" + std::to_string(r) + "x" + std::to_string(c), CgType::Mat(ScalarKind::Float, r, c));
+            addType("half" + std::to_string(r) + "x" + std::to_string(c), CgType::Mat(ScalarKind::Half, r, c));
+        }
 
     // Sampler types
     addType("sampler1D", CgType::Sampler1D());
@@ -421,6 +605,29 @@ void SymbolTable::registerMathFunctions()
         addFunction("ddy", vec, {vec}, {"x"}, nullptr, true);
     }
 
+    // The pack/unpack family (pack-unpack-intrinsics): one NV40 fragment instruction each.
+    // Measured on the reference: pack_2half / pack_2ushort take half2 or
+    // float2 (a float scalar smears; a half scalar and a float3 are C1101
+    // ambiguous, which the two overloads reproduce), pack_4ubyte / pack_4byte
+    // take half4 or float4 (float3 is C1115), and the unpacks take a float:
+    // unpack_2half yields half2, the others float.  Registered for both
+    // profiles; the vertex lowering refuses them by name, as the reference
+    // does (C1115 / C5201).
+    for (const char* name : {"pack_2half", "pack_2ushort"})
+    {
+        addFunction(name, CgType::Float(), {CgType::Half2()}, {"a"}, nullptr, true);
+        addFunction(name, CgType::Float(), {CgType::Float2()}, {"a"}, nullptr, true);
+    }
+    for (const char* name : {"pack_4ubyte", "pack_4byte"})
+    {
+        addFunction(name, CgType::Float(), {CgType::Half4()}, {"a"}, nullptr, true);
+        addFunction(name, CgType::Float(), {CgType::Float4()}, {"a"}, nullptr, true);
+    }
+    addFunction("unpack_2half", CgType::Half2(), {CgType::Float()}, {"a"}, nullptr, true);
+    addFunction("unpack_2ushort", CgType::Float2(), {CgType::Float()}, {"a"}, nullptr, true);
+    addFunction("unpack_4ubyte", CgType::Float4(), {CgType::Float()}, {"a"}, nullptr, true);
+    addFunction("unpack_4byte", CgType::Float4(), {CgType::Float()}, {"a"}, nullptr, true);
+
     // min, max, clamp
     for (ScalarKind sk : {ScalarKind::Float, ScalarKind::Half, ScalarKind::Int, ScalarKind::UInt})
     {
@@ -518,6 +725,15 @@ void SymbolTable::registerVectorFunctions()
         addFunction("distance", CgType::Float(), {vec, vec}, {"a", "b"}, nullptr, true);
     }
     addFunction("length", CgType::Float(), {CgType::Float()}, {"v"}, nullptr, true);
+    // THE SCALAR distance, which the reference has and this table did not.
+    // `distance(p.x, p.y)` has no exact candidate without it, so every
+    // vector overload becomes viable by broadcasting BOTH arguments - three
+    // candidates at one broadcast each, all tying.  The parent hid that by
+    // taking the first viable one (and emitted 336 bytes where the reference
+    // emits 288); once ties are C1101 it surfaced as a refusal.  The
+    // reference lowers it to ADDR + |abs|, i.e. abs(a-b), and it is the
+    // exact-match partner of the scalar `length` registered directly above.
+    addFunction("distance", CgType::Float(), {CgType::Float(), CgType::Float()}, {"a", "b"}, nullptr, true);
 
     // normalize
     for (int size = 2; size <= 4; ++size)
@@ -541,31 +757,63 @@ void SymbolTable::registerVectorFunctions()
         addFunction("faceforward", vec, {vec, vec, vec}, {"n", "i", "nref"}, nullptr, true);
     }
 
-    // mul - matrix multiplication
-    // Matrix * vector
-    addFunction("mul", CgType::Float4(), {CgType::Float4x4(), CgType::Float4()}, {"m", "v"}, nullptr, true);
-    addFunction("mul", CgType::Float3(), {CgType::Float3x3(), CgType::Float3()}, {"m", "v"}, nullptr, true);
-    addFunction("mul", CgType::Float2(), {CgType::Float2x2(), CgType::Float2()}, {"m", "v"}, nullptr, true);
-
-    // Vector * matrix (for row-major)
-    addFunction("mul", CgType::Float4(), {CgType::Float4(), CgType::Float4x4()}, {"v", "m"}, nullptr, true);
-    addFunction("mul", CgType::Float3(), {CgType::Float3(), CgType::Float3x3()}, {"v", "m"}, nullptr, true);
-    addFunction("mul", CgType::Float2(), {CgType::Float2(), CgType::Float2x2()}, {"v", "m"}, nullptr, true);
-
+    // mul - matrix multiplication, over every RxC shape (rectangular-matrices).
+    // Measured on the reference: mul(M[RxC], v[C]) -> v[R] (one DP(C) per
+    // row), mul(v[R], M[RxC]) -> v[C] (a MUL/MAD chain over the rows), and
+    // mul(A[RxK], B[KxC]) -> M[RxC].  The square entries below are the same
+    // ones this table always had; the loops add the rectangular shapes.
+    for (int r = 2; r <= 4; ++r)
+    {
+        for (int c = 2; c <= 4; ++c)
+        {
+            const CgType m = CgType::Mat(ScalarKind::Float, r, c);
+            // Matrix * vector
+            addFunction("mul", CgType::Vec(ScalarKind::Float, r), {m, CgType::Vec(ScalarKind::Float, c)}, {"m", "v"}, nullptr, true);
+            // Vector * matrix (row-major)
+            addFunction("mul", CgType::Vec(ScalarKind::Float, c), {CgType::Vec(ScalarKind::Float, r), m}, {"v", "m"}, nullptr, true);
+        }
+    }
     // Matrix * matrix
-    addFunction("mul", CgType::Float4x4(), {CgType::Float4x4(), CgType::Float4x4()}, {"a", "b"}, nullptr, true);
-    addFunction("mul", CgType::Float3x3(), {CgType::Float3x3(), CgType::Float3x3()}, {"a", "b"}, nullptr, true);
-    addFunction("mul", CgType::Float2x2(), {CgType::Float2x2(), CgType::Float2x2()}, {"a", "b"}, nullptr, true);
+    for (int r = 2; r <= 4; ++r)
+        for (int k = 2; k <= 4; ++k)
+            for (int c = 2; c <= 4; ++c)
+                addFunction("mul", CgType::Mat(ScalarKind::Float, r, c),
+                            {CgType::Mat(ScalarKind::Float, r, k), CgType::Mat(ScalarKind::Float, k, c)},
+                            {"a", "b"}, nullptr, true);
 
     // transpose
-    addFunction("transpose", CgType::Float4x4(), {CgType::Float4x4()}, {"m"}, nullptr, true);
-    addFunction("transpose", CgType::Float3x3(), {CgType::Float3x3()}, {"m"}, nullptr, true);
-    addFunction("transpose", CgType::Float2x2(), {CgType::Float2x2()}, {"m"}, nullptr, true);
+    for (ScalarKind sk : {ScalarKind::Float, ScalarKind::Half})
+    {
+        for (int r = 2; r <= 4; ++r)
+        {
+            for (int c = 2; c <= 4; ++c)
+            {
+                addFunction("transpose", CgType::Mat(sk, c, r), {CgType::Mat(sk, r, c)}, {"m"}, nullptr, true);
+            }
+        }
+    }
+
+    // lit(NdotL, NdotH, m)
+    for (ScalarKind lSk : {ScalarKind::Float, ScalarKind::Half})
+    {
+        for (ScalarKind hSk : {ScalarKind::Float, ScalarKind::Half})
+        {
+            for (ScalarKind mSk : {ScalarKind::Float, ScalarKind::Half})
+            {
+                const bool allHalf = (lSk == ScalarKind::Half && hSk == ScalarKind::Half && mSk == ScalarKind::Half);
+                CgType retType = allHalf ? CgType::Half4() : CgType::Float4();
+                addFunction("lit", retType, {CgType::Scalar(lSk), CgType::Scalar(hSk), CgType::Scalar(mSk)}, {"NdotL", "NdotH", "m"}, nullptr, true);
+            }
+        }
+    }
 
     // determinant (3x3, 4x4)
     addFunction("determinant", CgType::Float(), {CgType::Float3x3()}, {"m"}, nullptr, true);
     addFunction("determinant", CgType::Float(), {CgType::Float4x4()}, {"m"}, nullptr, true);
 
+    // any accepts a scalar too; register it explicitly rather than relying
+    // on scalar-to-vector broadcasting during overload resolution.
+    addFunction("any", CgType::Bool(), {CgType::Bool()}, {"v"}, nullptr, true);
     // any, all (for bool vectors)
     for (int size = 2; size <= 4; ++size)
     {
@@ -577,17 +825,68 @@ void SymbolTable::registerVectorFunctions()
 
 void SymbolTable::registerTextureSymbols()
 {
-    // tex1D, tex2D, tex3D, texCUBE
+    // tex1D, tex2D, tex3D, texCUBE, texRECT
     addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Float4()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Half()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex1D", CgType::Float4(), {CgType::Sampler1D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex2D", CgType::Float4(), {CgType::Sampler2D(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
     addFunction("tex3D", CgType::Float4(), {CgType::Sampler3D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex3D", CgType::Float4(), {CgType::Sampler3D(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
     addFunction("texCUBE", CgType::Float4(), {CgType::SamplerCube(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
-    addFunction("h4tex2D", CgType::Half4(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
-    addFunction("h3tex2D", CgType::Half3(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("texCUBE", CgType::Float4(), {CgType::SamplerCube(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
+    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+
     addFunction("texDepth2D", CgType::Float(), {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
     addFunction("texDepth2D_precise", CgType::Float(), {CgType::Sampler2D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
-    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
-    addFunction("texRECT", CgType::Float4(), {CgType::SamplerRect(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+
+    // Typed texture lookup families: f1tex..f4tex and h1tex..h4tex
+    auto regTexFamily = [this](const std::string& prefix, ScalarKind sk, int retWidth) {
+        CgType retType = (retWidth == 1) ? CgType::Scalar(sk) : CgType::Vec(sk, retWidth);
+
+        // 1D: sampler1D, float/half/float2/half2
+        std::string name1D = prefix + "tex1D";
+        addFunction(name1D, retType, {CgType::Sampler1D(), CgType::Float()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name1D, retType, {CgType::Sampler1D(), CgType::Half()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name1D, retType, {CgType::Sampler1D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name1D, retType, {CgType::Sampler1D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+
+        // 2D: sampler2D, float2/half2/float3/half3
+        std::string name2D = prefix + "tex2D";
+        addFunction(name2D, retType, {CgType::Sampler2D(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name2D, retType, {CgType::Sampler2D(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name2D, retType, {CgType::Sampler2D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name2D, retType, {CgType::Sampler2D(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
+        // 3D: sampler3D, float3/half3
+        std::string name3D = prefix + "tex3D";
+        addFunction(name3D, retType, {CgType::Sampler3D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(name3D, retType, {CgType::Sampler3D(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
+        // CUBE: samplerCUBE, float3/half3
+        std::string nameCUBE = prefix + "texCUBE";
+        addFunction(nameCUBE, retType, {CgType::SamplerCube(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(nameCUBE, retType, {CgType::SamplerCube(), CgType::Half3()}, {"sampler", "coord"}, nullptr, true);
+
+        // RECT: samplerRECT, float2/half2
+        std::string nameRECT = prefix + "texRECT";
+        addFunction(nameRECT, retType, {CgType::SamplerRect(), CgType::Float2()}, {"sampler", "coord"}, nullptr, true);
+        addFunction(nameRECT, retType, {CgType::SamplerRect(), CgType::Half2()}, {"sampler", "coord"}, nullptr, true);
+    };
+
+    for (int w = 1; w <= 4; ++w) {
+        regTexFamily("f" + std::to_string(w), ScalarKind::Float, w);
+        regTexFamily("h" + std::to_string(w), ScalarKind::Half, w);
+    }
 
     // With explicit derivatives
     addFunction("tex2D", CgType::Float4(),
@@ -597,6 +896,7 @@ void SymbolTable::registerTextureSymbols()
     // tex2Dlod, tex2Dbias
     addFunction("tex2Dlod", CgType::Float4(), {CgType::Sampler2D(), CgType::Float4()}, {"sampler", "coord"}, nullptr, true);
     addFunction("tex2Dbias", CgType::Float4(), {CgType::Sampler2D(), CgType::Float4()}, {"sampler", "coord"}, nullptr, true);
+    addFunction("tex2Dbias", CgType::Float4(), {CgType::Sampler2D(), CgType::Half4()}, {"sampler", "coord"}, nullptr, true);
 
     // tex2Dproj
     addFunction("tex2Dproj", CgType::Float4(), {CgType::Sampler2D(), CgType::Float3()}, {"sampler", "coord"}, nullptr, true);

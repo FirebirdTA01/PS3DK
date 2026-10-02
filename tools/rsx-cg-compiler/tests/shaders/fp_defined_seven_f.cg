@@ -1,0 +1,3 @@
+// preprocessor-defined-operator.  Measured against sce-cgc 475.
+// The literal an explicitly defined builtin must equal.
+float4 main() : COLOR { return 7; }

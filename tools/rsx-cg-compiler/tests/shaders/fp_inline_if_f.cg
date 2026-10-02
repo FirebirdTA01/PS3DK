@@ -1,0 +1,1 @@
+float2 GenMotion(float4 cp, float4 pp, float scale) { float2 mv = pp.xy - cp.xy; mv = mv * float2(40.0, 22.5) * scale.xx; float mag = length(mv); if (mag > 1.0) { mv /= mag; mag = 1.0; } mv = mv * 0.5 + 0.5; return mv; } float4 main(float4 cur : TEXCOORD0, float4 prev : TEXCOORD1, uniform float4 scl) : COLOR { float4 r = 0; r.ar = GenMotion(cur, prev, scl.x); return r; }

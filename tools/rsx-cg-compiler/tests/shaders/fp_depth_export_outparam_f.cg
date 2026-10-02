@@ -1,4 +1,4 @@
-// Fragment DEPTH export, `out` PARAMETER spelling (t_1722b8bc).
+// Fragment DEPTH export, `out` PARAMETER spelling (fragment-depth-export).
 //
 // Same contract as fp_depth_export_f.cg, reached through a different
 // container code path: a struct return and an `out` parameter list build

@@ -1,4 +1,4 @@
-// shader-differential — vector-valued if/else merge of two raw inputs (t_7b20ffdc).
+// shader-differential — vector-valued if/else merge of two raw inputs (vector-input-select-lanes).
 //
 // Both arms are function INPUTS, not computed values, and they differ in
 // every channel other than x: under sd_pos_allch, c = TEXCOORD0 =

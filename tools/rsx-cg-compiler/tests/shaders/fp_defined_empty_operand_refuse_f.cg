@@ -1,0 +1,8 @@
+// preprocessor-defined-operator.  Measured against sce-cgc 475.
+// No operand at all.
+#if defined()
+#define V 1.0
+#else
+#define V 2.0
+#endif
+float4 main() : COLOR { return V; }

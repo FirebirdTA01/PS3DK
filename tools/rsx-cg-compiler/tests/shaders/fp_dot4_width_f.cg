@@ -1,4 +1,4 @@
-// A 4D dot lowers to DP4 and a 3D dot to DP3 (t_856689b2's last one).
+// A 4D dot lowers to DP4 and a 3D dot to DP3 (operand-lane-width's last one).
 //
 // The general path chose between them on the RESULT's width - and a dot
 // product's result is a scalar, always, so the test was never true and

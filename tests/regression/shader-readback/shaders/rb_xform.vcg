@@ -8,7 +8,7 @@
 //
 // The body deliberately uses the float4(float3_input, 1.0) + mul(matrix,
 // p) shape: the exact IR ('vec vec4 %input, %one') the general-lowering
-// path silently miscompiled into an attribute-zero read (t_a68be5c3).
+// path silently miscompiled into an attribute-zero read (vp-input-mask-binding).
 // When that path becomes the default this row is the first light that
 // regression shows up under.
 //

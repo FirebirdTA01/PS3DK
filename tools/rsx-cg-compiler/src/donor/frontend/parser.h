@@ -22,6 +22,9 @@ struct ParserConfig
     bool verboseErrors = true;
     bool continueOnError = true;  // Try to recover and continue parsing
     int maxErrors = 50;
+    // --extension=declarator-types: a later declarator in a list keeps the
+    // declared type instead of the reference's last-named-type rule.
+    bool standardDeclaratorTypes = false;
 };
 
 // Recursive descent parser for Cg shader language
@@ -97,10 +100,22 @@ private:
     // ========================================================================
 
     std::unique_ptr<DeclNode> parseDeclaration();
-    std::unique_ptr<DeclNode> parseTopLevelDeclaration();
+    // `extraDeclarations`, when given, receives the SECOND and later
+    // declarators of a comma-separated declaration - `float g1, g2;` is
+    // one declaration with two names and both are declared.  Returning
+    // only the first is what made the second read as undeclared
+    // (multiple-declarators).
+    std::unique_ptr<DeclNode> parseTopLevelDeclaration(
+        std::vector<std::unique_ptr<DeclNode>>* extraDeclarations = nullptr);
     std::unique_ptr<StructDecl> parseStructDeclaration();
-    std::unique_ptr<TypedefDecl> parseTypedefDeclaration();
-    std::unique_ptr<DeclNode> parseVariableOrFunctionDeclaration();
+    // `struct` [name] `{` fields `}` and nothing after it, so the two
+    // spellings that differ only in what FOLLOWS the body can share it.
+    std::unique_ptr<StructDecl> parseStructBody();
+    // Returns a StructDecl for `typedef struct { ... } Name;` and a
+    // TypedefDecl otherwise, so the return type is the common base.
+    std::unique_ptr<DeclNode> parseTypedefDeclaration();
+    std::unique_ptr<DeclNode> parseVariableOrFunctionDeclaration(
+        std::vector<std::unique_ptr<DeclNode>>* extraDeclarations = nullptr);
     std::unique_ptr<FunctionDecl> parseFunctionDeclaration(
         SourceLocation loc,
         std::shared_ptr<TypeNode> returnType,
@@ -120,7 +135,15 @@ private:
     std::vector<std::unique_ptr<ParamDecl>> parseParameterList();
 
     // Storage qualifiers and attributes
-    StorageQualifier parseStorageQualifier();
+    // `sawInline`, when given, reports whether an `inline` keyword was
+    // swallowed; `inline` has no storage meaning, so the caller rules on
+    // whether it is legal (a function ignores it, anything else refuses).
+    StorageQualifier parseStorageQualifier(bool* sawInline = nullptr);
+    bool lastStorageWasStatic_ = false;   // set by parseStorageQualifier, read by parseVariableDeclaration
+    // Every type parseType() produces, counted: a declarator list takes the
+    // LAST type named in an earlier initializer (parseMultipleVariableDeclarations).
+    std::shared_ptr<TypeNode> lastParsedType_;
+    unsigned typesParsed_ = 0;
     Semantic parseSemantic();
     VitaAttributes parseVitaAttributes();
     void skipGccAttributes();  // Skip __attribute__((...)) clauses
@@ -187,4 +210,5 @@ private:
 std::unique_ptr<TranslationUnit> parseShaderSource(
     const std::string& source,
     const std::string& filename = "<input>",
-    std::vector<ParseError>* outErrors = nullptr);
+    std::vector<ParseError>* outErrors = nullptr,
+    const ParserConfig& config = ParserConfig{});

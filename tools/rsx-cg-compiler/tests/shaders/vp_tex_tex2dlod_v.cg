@@ -1,0 +1,7 @@
+// tex2Dlod is the same vertex instruction as tex2Dbias: identical ucode.
+uniform sampler2D heightMap;
+
+void main(float4 uvl : TEXCOORD0, out float4 position : POSITION)
+{
+    position = tex2Dlod(heightMap, uvl);
+}

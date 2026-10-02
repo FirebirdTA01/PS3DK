@@ -1,0 +1,2 @@
+struct R { float4 c : COLOR; };
+R main(float2 uv : TEXCOORD0, uniform sampler2D t, uniform float k) { R r; if (k > 0.5) { r.c.xyz = tex2D(t,uv).xyz; } else { r.c.xyz = tex2D(t,uv).zyx; } r.c.w = 1.0; return r; }

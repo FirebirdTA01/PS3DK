@@ -1,4 +1,4 @@
-// t_71ad405e: length(float) is abs(x), not a dot reduction.
+// stdlib-dot-source-width: length(float) is abs(x), not a dot reduction.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)
 {
     float l = length(c.x - 0.5);

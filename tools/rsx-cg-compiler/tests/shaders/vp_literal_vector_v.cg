@@ -1,5 +1,5 @@
 // A float4 literal keeps all four of its lanes in the vertex constant
-// pool (t_3e342903).
+// pool (vp-literal-vector-pool).
 //
 // The general path's literal pool read literal[0] and nothing else: every
 // literal, of any width, was packed into one lane of a shared const

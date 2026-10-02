@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_a7dd471f: ftoi/itof on the general fragment path.
+# integer-float-conversion: ftoi/itof on the general fragment path.
 #
 # The oracle shape for `(float)((int)x)` is not a raw FLR.  It sets the
 # condition code from the signed source (MOVRC), floors the absolute value,
@@ -11,7 +11,7 @@
 # a swizzled argument.  The second exists because this lane already shipped
 # one per-lane lowering that read raw lane N instead of arg.swizzle[N].
 #
-# CONTROL: this fails on compilers before t_a7dd471f's ftoi/itof slice because
+# CONTROL: this fails on compilers before integer-float-conversion's ftoi/itof slice because
 # FloatToInt/IntToFloat reach the general lowering as unsupported IR ops.
 set -euo pipefail
 
@@ -31,14 +31,19 @@ trap 'rm -rf "$work"' EXIT
 compile_fixture() {
     local stem="$1"
     local src="$repo_root/tools/rsx-cg-compiler/tests/shaders/$stem.cg"
+    # stdout carries the ucode rows, stderr the diagnostics; merged, a
+    # stderr line can land inside a hex row and cost it (the false R33,
+    # 2026-09-07).  The decoder refuses such a log - this is why it does
+    # not have to.
     local log="$work/$stem.log"
+    local err="$work/$stem.err"
     [[ -f "$src" ]] || fail "fixture missing: $src"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" "$compiler" \
             -p sce_fp_rsx "$src"
-    ) >"$log" 2>&1 || {
-        tail -n 20 "$log" >&2
+    ) >"$log" 2>"$err" || {
+        tail -n 20 "$err" >&2
         fail "$stem did not compile"
     }
     python3 "$repo_root/tests/shader-compiler/ucode_decode.py" "$log" \

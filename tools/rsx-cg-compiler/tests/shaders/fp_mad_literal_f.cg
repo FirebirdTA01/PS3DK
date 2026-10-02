@@ -1,5 +1,5 @@
 // A fused multiply-add whose multiplier AND addend are both literals
-// (t_a1f43b12).
+// (mad-literal-data).
 //
 // The Mul matcher stores whichever operand was not the varying in a field
 // called `multiplierUniformId`, and the MAD emitter read that as a

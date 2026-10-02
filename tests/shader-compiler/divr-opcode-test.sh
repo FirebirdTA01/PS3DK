@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_58e2212c: NV40 fragment DIVR (opcode 0x3A) is the oracle's divide
+# scalar-divr-lowering: NV40 fragment DIVR (opcode 0x3A) is the oracle's divide
 # shape for tan, smoothstep's dynamic edge clamp, and the trig polynomial
 # family.  RCP-then-MUL is correct enough for some pixels but is not the
 # reference shape and blocks the rest of the stdlib lane.
@@ -7,9 +7,8 @@
 # This test deliberately has two halves:
 #   * fragment fixtures require DIVR, including a saturated DIVR for
 #     scalar variable-edge smoothstep;
-#   * a VP fixture still refuses by name.  The vertex unit's DIV encoding is
-#     unmeasured, so DIVR must not reach VP emission until that path has its
-#     own oracle fixture.
+#   * a VP fixture requires the separately measured scalar RCP/vector MUL
+#     sequence. Fragment DIVR must never reach the vertex emitter.
 #
 # CONTROL: before the DIVR lowering, the positive fragment fixtures compile
 # through RCP/MUL and this test names the missing 0x3A opcode.  The vector
@@ -268,9 +267,8 @@ broadcast = decode(sys.argv[13])
 if sum(d["op"] == DIV for d in broadcast) != 1 or any(d["op"] == RCP for d in broadcast):
     raise SystemExit("FAIL: scalar quotient broadcast must keep one DIVR, no RCP")
 
-# Keep the inherited local-alias miscompile visible without blessing its
-# wrong encoding. Set PS3TC_REQUIRE_LOCAL_SWIZZLE=1 to run its currently-red
-# guard as a failure; once t_6be25fd4 lands this should pass unconditionally.
+# source-alias-swizzle-composition: the retained original witness now fails unconditionally if
+# source-map composition selects the wrong lanes.
 # Evaluate the tiny witness's DIVR input selection at a=(2,3,5,7). Its
 # numerator must be (5,3,7), denominator 2; current code reads (3,5,2)/7.
 known = decode(sys.argv[14])
@@ -284,14 +282,11 @@ if (w[1] & 3) == 1 and (w[2] & 3) == 1:
     denom = values[(w[2] >> 9) & 3]
     correct = numer == (5, 3, 7) and denom == 2
     if not correct:
-        message = "KNOWN RED t_6be25fd4: local swizzle reads %s/%s, expected (5, 3, 7)/2" % (numer, denom)
-        if os.environ.get("PS3TC_REQUIRE_LOCAL_SWIZZLE") == "1":
-            raise SystemExit("FAIL: " + message)
-        print(message)
+        raise SystemExit("FAIL source-alias-swizzle-composition: local swizzle reads %s/%s, expected (5, 3, 7)/2" % (numer, denom))
     else:
         print("local-swizzle witness now selects the expected inputs")
 else:
-    raise SystemExit("FAIL: local-swizzle witness shape changed; re-evaluate t_6be25fd4 rather than waive it")
+    raise SystemExit("FAIL: local-swizzle witness shape changed; re-evaluate source-alias-swizzle-composition rather than waive it")
 PY
 
 vp_log="$work/vp_divr_guard_v.log"
@@ -299,12 +294,20 @@ vp_rc=0
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_vp_rsx "$shaders/vp_divr_guard_v.cg"
+        -p sce_vp_rsx --emit-container "$work/vp_divr_guard_v.vpo" "$shaders/vp_divr_guard_v.cg"
 ) >"$vp_log" 2>&1 || vp_rc=$?
-if [[ "$vp_rc" -eq 0 ]]; then
-    fail "vp_divr_guard_v compiled; DIVR must not reach the unmeasured VP path"
+if [[ "$vp_rc" -ne 0 ]]; then
+    fail "vp_divr_guard_v did not compile through the vertex RCP/MUL path (exit $vp_rc)"
 fi
-grep -Eq 'VP div lowering deferred|unsupported VP VOp' "$vp_log" \
-    || fail "vp_divr_guard_v did not refuse with a VP DIVR/div diagnostic"
+python3 - "$work/vp_divr_guard_v.vpo" <<'PY'
+import pathlib, struct, sys
+b = pathlib.Path(sys.argv[1]).read_bytes()
+size, offset = struct.unpack_from('>II', b, 24)
+if not size or size % 16 or offset + size > len(b):
+    raise SystemExit('FAIL: vertex division container has invalid ucode')
+words = [struct.unpack_from('>4I', b, p) for p in range(offset, offset + size, 16)]
+if sum((w[1] >> 27) & 31 == 2 for w in words) != 1 or sum((w[1] >> 22) & 31 == 2 for w in words) != 1:
+    raise SystemExit('FAIL: vertex division must emit one scalar RCP and one vector MUL')
+PY
 
 printf 'PASS: divr-opcode-test\n'

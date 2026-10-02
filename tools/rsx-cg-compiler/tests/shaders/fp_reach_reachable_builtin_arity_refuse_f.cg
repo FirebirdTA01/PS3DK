@@ -1,0 +1,11 @@
+// A BUILTIN CALL WITH NO FITTING OVERLOAD IS HELD LIKE THE C1008 CLASS.
+// Measured against sce-cgc 475, sce_fp_rsx (t_a287040c, 2026-10-01): when the
+// only visible candidates for the name are builtins and none fits, the
+// reference reports it ONLY in entry-reachable bodies; a wrong arity on a
+// visible SOURCE declaration is C1103 everywhere (fp_reach_unreached_arity_refuse_f).
+// libretro gamma-management.h ships unused tex1D(sampler1D, float, int)
+// wrappers; 108 community programs were refused only for those.
+//
+// REFUSE: the same tex2D call from the entry.
+uniform sampler2D s;
+float4 main(float4 t : TEXCOORD0) : COLOR { return tex2D(s, t.xy, 1); }

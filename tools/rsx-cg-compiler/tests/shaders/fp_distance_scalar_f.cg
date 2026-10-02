@@ -1,4 +1,4 @@
-// t_71ad405e: distance(float,float) is abs(a-b), not a dot reduction.
+// stdlib-dot-source-width: distance(float,float) is abs(a-b), not a dot reduction.
 //
 // The operands come from a float3 with a non-zero z lane so the broken
 // lowering can reuse that physical slot, overwrite x only, then read xyz

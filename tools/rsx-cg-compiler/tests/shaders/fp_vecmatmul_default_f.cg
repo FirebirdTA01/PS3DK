@@ -1,0 +1,9 @@
+// No upload under rig set 0: every default must reach its inline row block.
+uniform float4x4 M = float4x4(0.015625,0.03125,0.046875,0.0625,
+                              0.078125,0.09375,0.109375,0.125,
+                              0.140625,0.15625,0.171875,0.1875,
+                              0.203125,0.21875,0.234375,0.25);
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    return mul(t.wzyx, M);
+}

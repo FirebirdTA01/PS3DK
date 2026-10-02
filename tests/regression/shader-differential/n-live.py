@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""shader-differential: the N-live-registers family (t_5dc260b0), 2026-09-02.
+"""shader-differential: the N-live-registers family (fragment-output-liveness), 2026-09-02.
 
 Two readouts: the FIRST REFUSAL per compiler (binary; the acceptance gate) and
 the SLOPE of emitted instructions per term (the gradient; the progress
@@ -14,7 +14,7 @@ inputs by a distinct affine op, summed into the output:
 The sum is foldable term by term, so a lowering that folds as it goes
 keeps a handful of values live whatever N is, and one that materialises
 every term before the first add keeps N live.  Compiling the family with
-OUR compiler on both paths and with the reference gives the register
+OUR compiler on the general lowering and with the reference gives the register
 bound as a NUMBER instead of the 48 that gets cited: the first N each
 compiler refuses at.
 
@@ -121,7 +121,7 @@ def main():
         with open(src, "w", newline="\n") as f:
             f.write(shader(n))
         row = {"N": n}
-        for label, flags in (("legacy", ["--legacy-lowering"]), ("general", [])):
+        for label, flags in (("general", []),):
             # A bare compile (no --emit-container) prints the ucode dump the
             # instruction count is read from; a refusal still returns non-zero.
             rc, text = run(["wsl", "--", "timeout", "30s", a.ours] + flags +
@@ -135,7 +135,7 @@ def main():
             ri = reference_insn(a.reference, ref_out) if rc == 0 else None
             row["reference insn"] = ri if ri is not None else "-"
         rows.append(row)
-    cols = ["N", "legacy", "legacy insn", "general", "general insn"] + (["reference", "reference insn"] if a.reference else [])
+    cols = ["N", "general", "general insn"] + (["reference", "reference insn"] if a.reference else [])
     print("n-live: ours = wsl:%s%s" % (a.ours, ", reference present" if a.reference else ", no reference"))
     print("  ".join("%-22s" % c for c in cols))
     for row in rows:

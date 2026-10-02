@@ -1,6 +1,8 @@
 #pragma once
 
 #include "lexer.h"
+#include <functional>
+#include <vector>
 #include <stack>
 #include <set>
 
@@ -9,15 +11,53 @@ struct MacroDefinition
 	std::string name;
 	std::vector<std::string> parameters; // empty if not function-like
 	std::vector<Token> replacementList;
-	bool isFunctionLike;
-	bool isVariadic;
+	bool isFunctionLike = false;
+	// A REPLACEMENT LIST THAT DOES NOT TOKENISE IS NOT AN ERROR UNTIL IT IS
+	// USED.  The reference ACCEPTS `#define UNUSED (1.0<FF>)` when nothing
+	// expands it and refuses the same body the moment it does, so the error
+	// belongs to the expansion and not to the definition - we tokenise the
+	// body eagerly, which reported it too soon (codex asked for the cell that
+	// shows the difference).
+	bool bodyFailedToTokenise = false;
+	std::string bodyTokeniseError;
+
+	// EXPANDING AND BEING "DEFINED" ARE DIFFERENT THINGS.  Measured on
+	// sce-cgc 475, both spellings (#ifdef and #if defined):
+	//     pristine __LINE__/__FILE__/__DATE__/__TIME__   NOT defined, but
+	//                                                    they still expand
+	//     __CGC__ / __SCE_CGC__                          defined
+	//     #define __LINE__ 7                             defined, and it
+	//                                                    expands to 7 on
+	//                                                    every later line
+	//     #undef __LINE__                                not defined, and it
+	//                                                    goes back to
+	//                                                    expanding the line
+	//     #define __LINE__ 7 then #undef __LINE__        not defined, and it
+	//                                                    expands the line
+	// So the answer is a property of the BINDING - how it got there - and not
+	// of the spelling.  A list of special names would have got the pristine
+	// rows right and every source-#defined row wrong (codex found it; ruling
+	// by Fable, preprocessor-defined-operator).  Default true, so an ordinary #define needs no
+	// code; the driver clears it on the four it rebinds per line and file.
+	bool countsAsDefined = true;
+
+	bool isVariadic = false; // read by the expander for EVERY function-like
+	                         // macro, but processDefine set it only when a
+	                         // variadic tail was present - an uninitialized
+	                         // read that decided arity from stack garbage and
+	                         // gave one build's binary a different answer than
+	                         // another's on the same source (recursive-macro-termination).
 };
 
 struct ConditionalState
 {
-	bool active; // Current branch is active
-	bool hasElse; // Already seen else
-	bool everActive; // Any branch has been active
+	// In-class defaults on every bool: today each is assigned at both
+	// construction sites, but that is a property of the writers, not the
+	// type, and a single missing assignment would be another indeterminate
+	// read like MacroDefinition::isVariadic was (recursive-macro-termination).
+	bool active = false; // Current branch is active
+	bool hasElse = false; // Already seen else
+	bool everActive = false; // Any branch has been active
 };
 
 class Preprocessor
@@ -33,6 +73,19 @@ public:
 	// Options
 	void setNoLineMarkers(bool value);
 	void setKeepComments(bool value);
+
+	// Source-text hook, run on the raw bytes of every file THIS OBJECT reads
+	// (each #include, nested ones included) before anything else looks at
+	// them.  The driver installs the same function it runs on the file named
+	// on the command line, so a rule about how a file may begin is one
+	// definition with two call sites rather than two copies that drift.  The
+	// hook may rewrite the text or throw a std::runtime_error carrying a
+	// located diagnostic; a throw propagates out of process() like every
+	// other preprocessor error.  Default: no hook.  The policy behind it is
+	// the driver's, not this class's: another compiler built on this
+	// frontend installs its own or none.
+	using SourceTextHook = std::function<void(std::string& text, const std::string& path)>;
+	void setSourceTextHook(SourceTextHook hook);
 
 	// Process source
 	std::string process(const std::string& source, const std::string& filename);
@@ -50,11 +103,13 @@ private:
 	std::vector<std::string> includePaths;
 	std::unordered_map<std::string, MacroDefinition> macros;
 	std::stack<ConditionalState> conditionalStack;
+	int includeDepth = 0; // >0 while processing an #include'd file
 	std::set<std::string> includedFiles;
 	std::set<std::string> includeGuards; // For #pragma once
 	std::string currentProcessingFile;
 	bool noLineMarkers;
 	bool keepComments;
+	SourceTextHook sourceTextHook_;  // empty = no hook
 
 	// the reference SDK Cg pragma collectors.  Populated by processPragma.
 	std::vector<std::string> alphakillSamplers_;
@@ -75,12 +130,19 @@ private:
 	void processPragma(const std::string& directive, std::string& output);
 
 	// Macros
+	// `conditional` is the #if / #elif expression mode: the `defined` operator
+	// is recognised DURING expansion and its operand is taken raw.  It is a
+	// parameter and not a member on purpose - there is then no state to
+	// restore on the exception path when argument pre-expansion turns it off.
 	std::string expandMacros(
 		const std::string& text,
 		const std::string& currentFile = "<input>",
 		int lineNum = 1,
-		int startColumn = 1);
+		int startColumn = 1,
+		bool conditional = false);
 	bool evaluateExpression(const std::string& expr);
+	void setDriverMacro(const std::string& name, const Token& value);
+	bool enclosingInactive(size_t skipTop) const;
 
 	// File handling
 	std::string findIncludeFile(const std::string& filename, bool isSystem, const std::string& currentFile);
@@ -92,7 +154,12 @@ private:
 	std::vector<std::string> tokenizeArgs(const std::string& args);      // For macro invocation arguments
 
 	// Line splicing (backslash-newline continuation)
-	std::string spliceLines(const std::string& src);
+	// Joins backslash-newline continuations.  `physicalLinesPerSpliced`, when
+	// given, receives how many SOURCE lines each spliced line consumed, so a
+	// caller can keep counting the lines the author wrote rather than the
+	// lines that survived splicing.
+	std::string spliceLines(const std::string& src,
+	                        std::vector<int>* physicalLinesPerSpliced = nullptr);
 
 	// Comment handling
 	std::string stripCommentsPreserveNewlines(const std::string& src);

@@ -1,29 +1,23 @@
 #!/usr/bin/env bash
 # control-flow-flatten-test.sh — CF-1a: forward-only control flow
-# flattens on the general path, and ONLY on the general path.
+# flattens on the general path (the compiler's only back end).
 #
 # Pins the tier-a battery of docs/design/shader-compiler-control-flow.md
-# §5 (board task t_91bbd575):
+# §5 (board task general-path-discard):
 #
-#   diamond          general: compiles    default: keeps refusing
-#   nested diamond   general: compiles    default: keeps refusing
-#   guarded divide   general: REFUSES     default: keeps refusing
-#   back-edge (loop) general: REFUSES     (full both-path contract is
-#                    pinned by refusal-semantics-test.sh; reasserted
-#                    here because the dynamic-loop fixture doubles as
-#                    the tier-a back-edge refusal witness)
+#   diamond          compiles
+#   nested diamond   compiles
+#   early return     compiles
+#   guarded divide   compiles (CF-1b predicated write)
+#   back-edge (loop) REFUSES  (full refusal contract is pinned by
+#                    refusal-semantics-test.sh; reasserted here because
+#                    the dynamic-loop fixture doubles as the tier-a
+#                    back-edge refusal witness)
 #
-# The default-path assertions are the GATE, not a convenience: the
-# flatten runs only under --general-lowering, and a flattened shader
-# newly compiling on the default path would be a verdict change the
-# byte fence rejects.  The guarded-divide refusal is CF-1a's
-# contamination guard — an arithmetic-blend select lowering would let
-# the untaken arm's inf/NaN poison the join (0*inf != 0), so until
-# CF-1b's predicated write lands, arms that are not provably finite
-# must refuse rather than blend.  When CF-1b lands, the guarded-divide
-# expectation here flips from refusal to success WITH a pixel-judged
-# readback row as its acceptance (§5 tier c) — that flip is this
-# test's designed expiry, stated so it does not surprise.
+# The guarded divide was CF-1a's contamination guard — an
+# arithmetic-blend select lowering would let the untaken arm's inf/NaN
+# poison the join (0*inf != 0).  CF-1b's predicated write is what lets
+# it compile; its acceptance is a pixel-judged readback row (§5 tier c).
 #
 # Refusals are asserted in full per the refusal-semantics contract:
 # nonzero exit AND no container file AND a printed refusal line.
@@ -110,9 +104,8 @@ expect_refusal() {
     fi
 }
 
-# Success control on both paths: the harness must be able to SEE a
-# good compile or every verdict below means nothing.
-expect_success "success-control[legacy]" "$good_src" --legacy-lowering
+# Success control: the harness must be able to SEE a good compile or
+# every verdict below means nothing.
 expect_success "success-control[general]" "$good_src"
 
 # The unlock: forward-only diamonds compile on the general path.
@@ -122,21 +115,15 @@ expect_success "early-return[general]"   "$early_return_src"
 expect_success "early-return-tail-shared-expr[general]" \
                "$early_return_tail_shared_src"
 
-# The gate: the same shaders keep refusing on the matcher.
-expect_refusal "diamond[legacy]"        '' "$diamond_src" --legacy-lowering
-expect_refusal "nested-diamond[legacy]" '' "$nested_src" --legacy-lowering
-expect_refusal "early-return[legacy]"   '' "$early_return_src" --legacy-lowering
-expect_refusal "early-return-tail-shared-expr[legacy]" \
-               '' "$early_return_tail_shared_src" --legacy-lowering
+# legacy-path control removed with the shape matcher (chore/rsxcg-remove-legacy-lowering); it proved the flatten never reached the matcher (these four shapes kept refusing there).
 
 # CF-1b: non-provably-finite join arms lower as a PREDICATED WRITE
 # (MOV default, CC-set from cond, CC-gated commit) instead of the
 # contaminating arithmetic blend — the guarded divide compiles on the
 # general path.  Pixel-level acceptance is the §5 tier-c readback row;
-# this asserts the compile-level contract.  The matcher keeps
-# refusing: nothing about CF-1 touches it.
+# this asserts the compile-level contract.
 expect_success "guarded-divide[general]" "$guarded_src"
-expect_refusal "guarded-divide[legacy]" '' "$guarded_src" --legacy-lowering
+# legacy-path control removed with the shape matcher (chore/rsxcg-remove-legacy-lowering); it proved CF-1b left the matcher refusing the guarded divide.
 
 # The back-edge witness: a loop must refuse loudly, never flatten
 # wrong — and for its OWN reason, so this fixture cannot be satisfied

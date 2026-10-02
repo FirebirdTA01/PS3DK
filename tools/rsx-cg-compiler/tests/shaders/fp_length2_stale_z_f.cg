@@ -1,4 +1,4 @@
-// t_71ad405e: length(float2) must not read a stale third lane.
+// stdlib-dot-source-width: length(float2) must not read a stale third lane.
 //
 // The float3 producer and the length temp reuse the same physical register
 // on the broken lowering.  The length load overwrites xy only, leaving p.z

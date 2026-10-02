@@ -1,4 +1,4 @@
-// PPU C++17 runtime/link regression for t_1a75e28a. Run against a rebuilt SDK.
+// PPU C++17 runtime/link regression for cpp-filesystem-runtime. Run against a rebuilt SDK.
 // Every removed path belongs to the directory created by this invocation.
 #include <cerrno>
 #include <cstdio>

@@ -28,7 +28,8 @@
  *     Uniforms land in the const bank (C[0..511]):
  *       float4x4   → CG_C = 0x882, resIndex = first row's c[N]
  *       float4     → CG_C = 0x882, resIndex = scalar's c[N]
- *       sampler*   → not handled here yet (no VP sampler shader)
+ *       sampler*   → CG_TEXUNIT0 + unit = 0x800+n, never a c[] slot
+ *                    (general lowering; see samplerRecord below)
  *
  *   - Matrix uniforms expand: one "parent" CgBinaryParameter with
  *     type=CG_FLOAT4x4 + N child rows with type=CG_FLOAT4 sharing
@@ -43,6 +44,9 @@
 
 #include "cg_container_vp.h"
 #include "nv40/nv40_emit.h"
+#include "array_uniforms.h"
+#include "fp_sampler_bindings.h"
+#include "uniform_bindings.h"
 
 #include "ir.h"
 
@@ -83,12 +87,17 @@ constexpr uint32_t kCgTex0        = 2179u;  // 0x0883 — VP TEX/TEXCOORD output
 constexpr uint32_t kCgHpos        = 2243u;  // 0x08c3 — VP POSITION output
 constexpr uint32_t kCgCol0        = 2245u;  // 0x08c5 — VP COL0 output
 constexpr uint32_t kCgClp0        = 2310u;  // 0x0906 — VP CLP0 output
+constexpr uint32_t kCgPsiz        = 2309u;
+constexpr uint32_t kCgFogCoord    = 3156u;
+constexpr uint32_t kCgTexUnit0    = 2048u;  // 0x0800 — sampler on TEXUNIT0
 
 // CGtype values (from cg_datatypes.h, base = 1024).
 constexpr uint32_t kCgFloat       = 1045u;
 constexpr uint32_t kCgFloat2      = 1046u;
 constexpr uint32_t kCgFloat3      = 1047u;
 constexpr uint32_t kCgFloat4      = 1048u;
+constexpr uint32_t kCgFloat1x1    = 1049u;  // first of the contiguous
+                                            // float-matrix block
 constexpr uint32_t kCgFloat4x4    = 1064u;
 // Vector types of width 1 (`float1`, declared as separate enumerants
 // from CG_FLOAT scalar later in cg_datatypes.h).  The reference compiler
@@ -129,17 +138,121 @@ void padTo(std::vector<uint8_t>& out, size_t alignment)
     while (out.size() % alignment) out.push_back(0);
 }
 
+// CGtype for a matrix of the given shape.  The reference's own datatype
+// table (sdk/include/Cg/NV/cg_datatypes.h) lists the float matrices in a
+// contiguous block ordered rows-major-then-cols, starting at CG_FLOAT1x1,
+// so the code is kCgFloat1x1 + (rows-1)*4 + (cols-1).  Measured against
+// sce-cgc on six shapes rather than derived from the table alone:
+//   2x2 -> 1054   3x3 -> 1059   3x4 -> 1060   4x3 -> 1063   4x4 -> 1064
+//   2x4 -> 1056
+// Before this, only 4x4 was mapped and every other shape fell through to
+// 0, so a `uniform float3x3` parent record carried NO TYPE at all
+// (matrix-default-reflection).
+uint32_t cgMatrixType(int rows, int cols)
+{
+    if (rows < 1 || rows > 4 || cols < 1 || cols > 4) return 0;
+    return kCgFloat1x1 + static_cast<uint32_t>((rows - 1) * 4 + (cols - 1));
+}
+
+// A matrix ROW is recorded as the float vector of the COLUMN width, not
+// always FLOAT4: the reference gives 1047 (CG_FLOAT3) for a 3x3's rows and
+// 1048 for a 4x4's.  Five sites here hard-coded kCgFloat4 (matrix-default-reflection).
+uint32_t cgMatrixRowType(int cols)
+{
+    if (cols < 1 || cols > 4) return kCgFloat4;
+    return kCgFloat + static_cast<uint32_t>(cols - 1);
+}
+
+// A file-scope uniform's compiled default, as a slice of the value
+// ir_builder evaluated onto IRGlobal (ir.h:501-502).  `first`/`count` pick a
+// matrix ROW out of the row-major flattening; a scalar or vector passes
+// first=0 and its component count.  Returns empty when the global has no
+// initialiser, which is what keeps an uninitialised uniform's block absent.
+//
+// This exists as a helper because the same assignment is needed at FOUR
+// sites - the plain file-scope loop and the STRUCT-FLATTENED one, each with a
+// scalar/vector and a matrix branch.  uniform-default-records A2 wrote it at one of them
+// and the struct-flattened path silently dropped every default until a
+// review probe found it (codex).  One helper, four call sites, no drift.
+std::vector<float> uniformDefaultSlice(const std::vector<float>& fv,
+                                       const std::vector<int64_t>& iv,
+                                       size_t first, size_t count)
+{
+    if (!fv.empty())
+    {
+        if (fv.size() < first + count) return {};
+        return std::vector<float>(
+            fv.begin() + static_cast<std::ptrdiff_t>(first),
+            fv.begin() + static_cast<std::ptrdiff_t>(first + count));
+    }
+    if (!iv.empty())
+    {
+        if (iv.size() < first + count) return {};
+        std::vector<float> out;
+        out.reserve(count);
+        for (size_t k = first; k < first + count; ++k)
+            out.push_back(static_cast<float>(iv[k]));
+        return out;
+    }
+    return {};
+}
+
+// Same slice for a file-scope uniform and for a uniform ENTRY PARAMETER -
+// IRGlobal and IRParameter carry the evaluated default in identically named
+// fields, and both had to be routed through here.  A1 first wrote the entry
+// case into cg_container_fp.cpp only, and the VERTEX side silently dropped
+// every entry default until review caught it (codex and Fable, independently).
+std::vector<float> uniformDefaultSlice(const IRGlobal& g, size_t first, size_t count)
+{
+    return uniformDefaultSlice(g.initialValue, g.initialIntValues, first, count);
+}
+std::vector<float> uniformDefaultSlice(const IRParameter& p, size_t first, size_t count)
+{
+    return uniformDefaultSlice(p.initialValue, p.initialIntValues, first, count);
+}
+
 uint32_t cgTypeForIRType(const IRTypeInfo& t)
 {
-    if (t.isMatrix() && t.matrixRows == 4 && t.matrixCols == 4)
-        return kCgFloat4x4;
+    if (t.isMatrix())
+    {
+        const uint32_t m = cgMatrixType(t.matrixRows, t.matrixCols);
+        if (m) return m;
+    }
     switch (t.baseType)
     {
     case IRType::Float32: return kCgFloat;
+    // A `half` scalar is recorded as FLOAT by the reference (measured on
+    // the fragment side: 1045 for `half`, 1048 for `half4` elements).
+    case IRType::Float16: return kCgFloat;
+    // An int, uint or bool SCALAR is recorded as FLOAT too (measured on
+    // the vertex side, dynamic-uniform-array-index: `int a : TEXCOORD1` -> 1045, and
+    // int2/int3/int4 -> 1046/1047/1048 like their float twins, which the
+    // vector cases below already produce); this returned 0 for the scalar
+    // and the record carried no type.
+    case IRType::Bool:
+    case IRType::Int32:
+    case IRType::UInt32:  return kCgFloat;
     case IRType::Vec2:    return kCgFloat2;
     case IRType::Vec3:    return kCgFloat3;
     case IRType::Vec4:    return kCgFloat4;
     default:              return 0;
+    }
+}
+
+// CGtype of a sampler declaration, as the reference records a vertex
+// sampler: 0x429 sampler1D, 0x42a sampler2D, 0x42c samplerRECT, 0x42d
+// samplerCUBE (measured).  sampler3D has no vertex fetch and is refused by
+// the lowering before a container is written; its code is the table's.
+uint32_t cgSamplerType(IRType t)
+{
+    switch (t)
+    {
+    case IRType::Sampler1D:   return 1065u;
+    case IRType::Sampler2D:   return 1066u;
+    case IRType::Sampler3D:   return 1067u;
+    case IRType::SamplerRect: return 1068u;
+    case IRType::SamplerCube: return 1069u;
+    default:                  return 0u;
     }
 }
 
@@ -166,6 +279,10 @@ uint32_t vpInputResource(const std::string& semUpper, int semIndex)
         return kCgAttr0 + 7;                                  // ATTR7
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
         return kCgAttr8 + semIndex;                          // ATTR8..15
+    if (semUpper == "TANGENT" && semIndex == 0)
+        return kCgAttr0 + 14;                                // ATTR14
+    if (semUpper == "BINORMAL" && semIndex == 0)
+        return kCgAttr0 + 15;                                // ATTR15
     return 0;
 }
 
@@ -203,8 +320,12 @@ uint32_t vpOutputResource(const std::string& semUpper, int semIndex,
                        });
         return (wroteTexCoord ? kCgTexCoord0 : kCgTex0) + semIndex;
     }
-    if (semUpper == "CLP" && semIndex == 0)
-        return kCgClp0;
+    if (semUpper == "CLP" && semIndex >= 0 && semIndex < 6)
+        return kCgClp0 + semIndex;
+    if (semUpper == "PSIZE" && semIndex == 0)
+        return kCgPsiz;
+    if (semUpper == "FOG" || semUpper == "FOGC")
+        return kCgFogCoord;
     return 0;
 }
 
@@ -272,6 +393,19 @@ VpContainerResult emitVertexContainerImpl(
         bool        isLiteralPool = false;
         float       litValues[4]   = {0, 0, 0, 0};
         uint32_t    defaultValueOffset = 0;
+        // Compiled default of an initialised file-scope uniform - the same
+        // 16-byte float[4] block the literal pool uses, on an ordinary
+        // user-visible parameter (uniform-default-records).  Measured placement, VP
+        // fixture `uniform float4 gTint : C3 = float4(1,2,3,4)`: semantic
+        // 'C3' at 540, block at 544, name at 560 - semantic, then block,
+        // then name, the same order as the fragment container.  The
+        // literal-pool path above emits its block BEFORE the semantic;
+        // that is untested rather than contradictory, because an
+        // `internal-constant-N` param never carries one.
+        std::vector<float> defaultValue;
+        // A sampler record: res is a texture unit, and compact CGB lists it
+        // with the unit as its resource.
+        bool        isSampler = false;
     };
 
     std::vector<ParamDesc> params;
@@ -281,49 +415,116 @@ VpContainerResult emitVertexContainerImpl(
         std::any_of(module.globals.begin(), module.globals.end(),
                     [](const IRGlobal& g) { return g.name == "gBlendMatrices"; });
 
-    auto appendBlendMatrixPalette =
-        [&](uint32_t paramno, uint32_t isShared, int& nextMatrixReg)
-    {
-        const int base = nextMatrixReg;
-        nextMatrixReg += 32 * 4;
-        for (int elem = 0; elem < 32; ++elem)
-        {
-            const int elemBase = base + elem * 4;
-            ParamDesc d;
-            d.name      = "gBlendMatrices[" + std::to_string(elem) + "]";
-            d.semantic  = "";
-            d.type      = kCgFloat4x4;
-            d.var       = kCgUniform;
-            d.direction = kCgIn;
-            d.res       = kCgConst;
-            d.paramno   = paramno;
-            d.isReferenced = 1;
-            d.isShared     = isShared;
-            d.resIndex     = static_cast<uint32_t>(elemBase);
-            params.push_back(d);
+    // Mirror VP allocator: matrices grow from c[256] upward, scalars
+    // from c[467] downward, as the general VP lowering allocates them.
+    int nextMatrixReg = 256;
+    int nextVectorReg = 467;
+    const auto explicitBindings = attrs.resolvedExplicitBindings
+        ? rsx_cg::resolveVpExplicitUniformBindings(*entry, module)
+        : rsx_cg::VpExplicitUniformBindings{};
+    if (!explicitBindings.diagnostics.empty()) {
+        result.diagnostics = explicitBindings.diagnostics;
+        return result;
+    }
 
-            for (int row = 0; row < 4; ++row)
+    // Array uniforms share the lowering's use classification and cursors:
+    // matrices grow upward by rows, scalar/vector elements downward by one.
+    // Constant indexing assigns only referenced elements; dynamic indexing
+    // assigns every element contiguously. Unreferenced elements and their
+    // matrix rows are still declared, with no resource (matrix-array-layout).
+    const rsx_cg::ArrayUniformUses arrayUses =
+        rsx_cg::classifyArrayUniformUses(*entry);
+    constexpr uint32_t kCgUnassignedRes = 3256u;  // 0x0cb8: declared, no register
+    // An unread, unpinned uniform takes no c[] register (the reference
+    // declares it with no resource, register -1, isReferenced 0) and moves
+    // no cursor; the lowering skips it from the same set (vpReadUniforms).
+    // Recorded by (name, paramno) and rewritten after the records are built:
+    // a parameter member and a file-scope uniform can share a name.
+    const std::set<IRValueID> vpRead = rsx_cg::vpReadUniforms(*entry);
+    std::set<std::pair<std::string, uint32_t>> unreadUniforms;
+
+    // Samplers take a texture unit and never a c[] register, so no cursor
+    // moves for them.  Built from the same layout the general lowering
+    // allocated from (fp_sampler_bindings.h), so the unit a record names
+    // is the unit the TXL word carries.  The legacy lowering keeps the
+    // records it always had.  Measured record: resIndex -1, var uniform,
+    // defaultValue and embeddedConst 0, isReferenced from use; the unit
+    // survives on an UNUSED sampler bound in range (TEXUNIT2, isRef 0),
+    // otherwise an unused sampler is 0xcb8; the semantic is TEXUNITn for
+    // `: TEXUNITn` and `register(sn)` alike, empty for an implicit unit.
+    const bool vpSamplers = attrs.resolvedExplicitBindings;
+    const rsx_cg::FpSamplerLayout samplerLayout = vpSamplers
+        ? rsx_cg::buildVpSamplerLayout(module, *entry)
+        : rsx_cg::FpSamplerLayout{};
+    const auto samplerRecord = [&](const auto& decl, uint32_t paramno) {
+        ParamDesc d;
+        d.name      = decl.name;
+        const int declared = rsx_cg::explicitFpSamplerUnit(decl);
+        d.semantic  = declared >= 0 ? "TEXUNIT" + std::to_string(declared)
+                                    : std::string{};
+        d.type      = cgSamplerType(decl.type.baseType);
+        const int unit = samplerLayout.unit(decl.valueId);
+        d.res       = unit < 0 ? kCgUnassignedRes
+                               : kCgTexUnit0 + static_cast<uint32_t>(unit);
+        d.var       = kCgUniform;
+        d.direction = kCgIn;
+        d.paramno   = paramno;
+        d.resIndex  = kInvalidIndex;
+        d.isReferenced = samplerLayout.used.count(decl.valueId) ? 1u : 0u;
+        d.isShared  = 0;
+        d.isSampler = true;
+        return d;
+    };
+    const auto appendArrayElements = [&](const std::string& name,
+                                         const IRTypeInfo& type,
+                                         uint32_t paramno,
+                                         uint32_t isShared,
+                                         const rsx_cg::ExplicitUniformBinding* binding) {
+        const auto useIt = arrayUses.find(name);
+        const int count = type.arraySize;
+        const auto use = useIt != arrayUses.end() ? useIt->second : rsx_cg::ArrayUniformUse{};
+        const std::vector<int> regs = binding ? binding->registers : type.isMatrix()
+            ? rsx_cg::vpMatrixArrayElementRegisters(use, count, type.matrixRows, nextMatrixReg)
+            : rsx_cg::vpArrayElementRegisters(use, count, nextVectorReg);
+        for (int k = 0; k < count; ++k)
+        {
+            const int reg = regs[static_cast<size_t>(k)];
+            const bool referenced = reg >= 0;
+            ParamDesc e;
+            e.name      = rsx_cg::arrayElementName(name, k);
+            e.semantic  = binding ? binding->semantic : "";
+            e.type      = type.isMatrix()
+                ? cgMatrixType(type.matrixRows, type.matrixCols) : cgTypeForIRType(type);
+            e.var       = kCgUniform;
+            e.direction = kCgIn;
+            e.paramno   = paramno;
+            e.isShared  = binding ? static_cast<uint32_t>(referenced) : isShared;
+            if (referenced)
             {
-                ParamDesc r;
-                r.name      = d.name + "[" + std::to_string(row) + "]";
-                r.semantic  = "";
-                r.type      = kCgFloat4;
-                r.var       = kCgUniform;
-                r.direction = kCgIn;
-                r.res       = kCgConst;
-                r.paramno   = paramno;
-                r.isReferenced = 1;
-                r.isShared     = isShared;
-                r.resIndex     = static_cast<uint32_t>(elemBase + row);
-                params.push_back(r);
+                e.res          = kCgConst;
+                e.isReferenced = 1;
+                e.resIndex     = static_cast<uint32_t>(reg);
+            }
+            else
+            {
+                e.res          = kCgUnassignedRes;
+                e.isReferenced = 0;
+                e.resIndex     = kInvalidIndex;
+            }
+            params.push_back(e);
+            if (type.isMatrix()) {
+                for (int row = 0; row < type.matrixRows; ++row) {
+                    ParamDesc r = e;
+                    r.name += "[" + std::to_string(row) + "]";
+                    // Row width is the COLUMN count, not the row count.
+                    r.type = cgMatrixRowType(type.matrixCols);
+                    if (referenced)
+                        r.resIndex += row;
+                    params.push_back(r);
+                }
             }
         }
     };
-
-    // Mirror VP allocator: matrices grow from c[256] upward, scalars
-    // from c[467] downward.  Same algorithm runs inside lowerVertexProgram.
-    int nextMatrixReg = 256;
-    int nextVectorReg = 467;
 
     // ----- Struct-flattened path: synthesize params from
     // LdAttr / StOut walk.  Per the reference compiler:
@@ -374,14 +575,21 @@ VpContainerResult emitVertexContainerImpl(
         for (size_t i = 0; i < entry->parameters.size(); ++i)
         {
             const auto& p = entry->parameters[i];
+            const auto* binding = explicitBindings.find(p.valueId);
             if (p.type.baseType == IRType::Void)
                 continue;
+            if (vpSamplers && p.storage == StorageQualifier::Uniform &&
+                isSamplerIRType(p.type.baseType))
+            {
+                params.push_back(samplerRecord(p, irParamOrdinal(entry->parameters[i], i)));
+                continue;
+            }
 
             ParamDesc d;
             d.name      = p.name;
             d.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
             d.type      = cgTypeForIRType(p.type);
-            d.paramno   = static_cast<uint32_t>(i);
+            d.paramno   = irParamOrdinal(entry->parameters[i], i);
 
             const bool isUniform = (p.storage == StorageQualifier::Uniform);
             if (isUniform)
@@ -389,10 +597,12 @@ VpContainerResult emitVertexContainerImpl(
                 d.var       = kCgUniform;
                 d.direction = kCgIn;
                 d.res       = kCgConst;
-                if (p.type.isMatrix())
+                if (p.type.isMatrix() && !p.type.isArray())
                 {
-                    const int base = nextMatrixReg;
-                    nextMatrixReg += p.type.matrixRows;
+                    const bool unread = !binding && !vpRead.count(p.valueId);
+                    if (unread) unreadUniforms.insert({p.name, irParamOrdinal(entry->parameters[i], i)});
+                    const int base = binding ? binding->registers[0] : (unread ? -1 : nextMatrixReg);
+                    if (!binding && !unread) nextMatrixReg += p.type.matrixRows;
                     d.resIndex = static_cast<uint32_t>(base);
                     params.push_back(d);
                     for (int row = 0; row < p.type.matrixRows; ++row)
@@ -400,19 +610,34 @@ VpContainerResult emitVertexContainerImpl(
                         ParamDesc r;
                         r.name      = p.name + "[" + std::to_string(row) + "]";
                         r.semantic  = d.semantic;
-                        r.type      = kCgFloat4;
+                        r.type      = cgMatrixRowType(p.type.matrixCols);
                         r.var       = kCgUniform;
                         r.direction = kCgIn;
                         r.res       = kCgConst;
-                        r.paramno   = static_cast<uint32_t>(i);
+                        r.paramno   = irParamOrdinal(entry->parameters[i], i);
                         r.isReferenced = 1;
                         r.resIndex = static_cast<uint32_t>(base + row);
+                        r.defaultValue = uniformDefaultSlice(
+                            p, static_cast<size_t>(row) *
+                                   static_cast<size_t>(p.type.matrixCols),
+                            static_cast<size_t>(p.type.matrixCols));
                         params.push_back(r);
                     }
                     continue;
                 }
+                if (p.type.isArray())
+                {
+                    appendArrayElements(p.name, p.type,
+                                        static_cast<uint32_t>(i), 0u, binding);
+                    continue;
+                }
 
-                d.resIndex = static_cast<uint32_t>(nextVectorReg--);
+                const bool unread = !binding && !vpRead.count(p.valueId);
+                if (unread) unreadUniforms.insert({p.name, irParamOrdinal(entry->parameters[i], i)});
+                d.resIndex = static_cast<uint32_t>(binding ? binding->registers[0]
+                                                           : (unread ? -1 : nextVectorReg--));
+                d.defaultValue = uniformDefaultSlice(
+                    p, 0u, static_cast<size_t>(p.type.componentCount()));
             }
             else
             {
@@ -439,12 +664,12 @@ VpContainerResult emitVertexContainerImpl(
         for (const auto& g : module.globals)
         {
             if (g.storage != StorageQualifier::Uniform) continue;
-
-            if (g.name == "gBlendMatrices")
+            if (vpSamplers && isSamplerIRType(g.type.baseType))
             {
-                appendBlendMatrixPalette(kInvalidIndex, 1u, nextMatrixReg);
+                params.push_back(samplerRecord(g, kInvalidIndex));
                 continue;
             }
+            const auto* binding = explicitBindings.find(g.valueId);
 
             const bool hasExplicit = (g.explicitRegisterBank == 'C');
             std::string semantic;
@@ -455,6 +680,12 @@ VpContainerResult emitVertexContainerImpl(
             else if (hasExplicit)
             {
                 semantic = "C" + std::to_string(g.explicitRegisterIndex);
+            }
+
+            if (g.type.isArray() && (binding || !hasExplicit))
+            {
+                appendArrayElements(g.name, g.type, kInvalidIndex, 1u, binding);
+                continue;
             }
 
             ParamDesc d;
@@ -471,9 +702,18 @@ VpContainerResult emitVertexContainerImpl(
             if (g.type.isMatrix())
             {
                 int base;
-                if (hasExplicit)
+                if (binding)
+                {
+                    base = binding->registers[0];
+                }
+                else if (hasExplicit)
                 {
                     base = g.explicitRegisterIndex;
+                }
+                else if (!vpRead.count(g.valueId))
+                {
+                    unreadUniforms.insert({g.name, kInvalidIndex});
+                    base = -1;
                 }
                 else
                 {
@@ -487,7 +727,7 @@ VpContainerResult emitVertexContainerImpl(
                     ParamDesc r;
                     r.name      = g.name + "[" + std::to_string(row) + "]";
                     r.semantic  = semantic;
-                    r.type      = kCgFloat4;
+                    r.type      = cgMatrixRowType(g.type.matrixCols);
                     r.var       = kCgUniform;
                     r.direction = kCgIn;
                     r.res       = kCgConst;
@@ -495,21 +735,36 @@ VpContainerResult emitVertexContainerImpl(
                     r.isReferenced = 1;
                     r.isShared     = 1;
                     r.resIndex     = static_cast<uint32_t>(base + row);
+                    r.defaultValue = uniformDefaultSlice(
+                        g, static_cast<size_t>(row) *
+                               static_cast<size_t>(g.type.matrixCols),
+                        static_cast<size_t>(g.type.matrixCols));
                     params.push_back(r);
                 }
             }
             else
             {
                 int reg;
-                if (hasExplicit)
+                if (binding)
+                {
+                    reg = binding->registers[0];
+                }
+                else if (hasExplicit)
                 {
                     reg = g.explicitRegisterIndex;
+                }
+                else if (!vpRead.count(g.valueId))
+                {
+                    unreadUniforms.insert({g.name, kInvalidIndex});
+                    reg = -1;
                 }
                 else
                 {
                     reg = nextVectorReg--;
                 }
                 d.resIndex = static_cast<uint32_t>(reg);
+                d.defaultValue = uniformDefaultSlice(
+                    g, 0u, static_cast<size_t>(g.type.componentCount()));
                 params.push_back(d);
             }
         }
@@ -549,11 +804,18 @@ VpContainerResult emitVertexContainerImpl(
     for (size_t i = 0; i < entry->parameters.size(); ++i)
     {
         const auto& p = entry->parameters[i];
+        const auto* binding = explicitBindings.find(p.valueId);
+        if (vpSamplers && p.storage == StorageQualifier::Uniform &&
+            isSamplerIRType(p.type.baseType))
+        {
+            params.push_back(samplerRecord(p, irParamOrdinal(entry->parameters[i], i)));
+            continue;
+        }
         ParamDesc d;
         d.name      = p.name;
         d.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
         d.type      = cgTypeForIRType(p.type);
-        d.paramno   = static_cast<uint32_t>(i);
+        d.paramno   = irParamOrdinal(entry->parameters[i], i);
 
         const bool isUniform = (p.storage == StorageQualifier::Uniform);
         if (isUniform)
@@ -561,10 +823,12 @@ VpContainerResult emitVertexContainerImpl(
             d.var       = kCgUniform;
             d.direction = kCgIn;
             d.res       = kCgConst;
-            if (p.type.isMatrix())
+            if (p.type.isMatrix() && !p.type.isArray())
             {
-                const int base = nextMatrixReg;
-                nextMatrixReg += p.type.matrixRows;
+                const bool unread = !binding && !vpRead.count(p.valueId);
+                if (unread) unreadUniforms.insert({p.name, irParamOrdinal(entry->parameters[i], i)});
+                const int base = binding ? binding->registers[0] : (unread ? -1 : nextMatrixReg);
+                if (!binding && !unread) nextMatrixReg += p.type.matrixRows;
                 d.resIndex = static_cast<uint32_t>(base);
                 params.push_back(d);
                 // Expand into per-row entries.  Each child shares the
@@ -575,20 +839,34 @@ VpContainerResult emitVertexContainerImpl(
                     ParamDesc r;
                     r.name      = p.name + "[" + std::to_string(row) + "]";
                     r.semantic  = "";
-                    r.type      = kCgFloat4;
+                    r.type      = cgMatrixRowType(p.type.matrixCols);
                     r.res       = kCgConst;
                     r.var       = kCgUniform;
                     r.direction = kCgIn;
-                    r.paramno   = static_cast<uint32_t>(i);
+                    r.paramno   = irParamOrdinal(entry->parameters[i], i);
                     r.resIndex  = static_cast<uint32_t>(base + row);
+                    r.defaultValue = uniformDefaultSlice(
+                        p, static_cast<size_t>(row) *
+                               static_cast<size_t>(p.type.matrixCols),
+                        static_cast<size_t>(p.type.matrixCols));
                     params.push_back(r);
                 }
                 continue;
             }
+            else if (p.type.isArray())
+            {
+                appendArrayElements(p.name, p.type,
+                                    static_cast<uint32_t>(i), 0u, binding);
+                continue;
+            }
             else
             {
-                const int reg = nextVectorReg--;
+                const bool unread = !binding && !vpRead.count(p.valueId);
+                if (unread) unreadUniforms.insert({p.name, irParamOrdinal(entry->parameters[i], i)});
+                const int reg = binding ? binding->registers[0] : (unread ? -1 : nextVectorReg--);
                 d.resIndex = static_cast<uint32_t>(reg);
+                d.defaultValue = uniformDefaultSlice(
+                    p, 0u, static_cast<size_t>(p.type.componentCount()));
             }
         }
         else
@@ -613,12 +891,12 @@ VpContainerResult emitVertexContainerImpl(
     for (const auto& g : module.globals)
     {
         if (g.storage != StorageQualifier::Uniform) continue;
-
-        if (g.name == "gBlendMatrices")
+        if (vpSamplers && isSamplerIRType(g.type.baseType))
         {
-            appendBlendMatrixPalette(kInvalidIndex, 0u, nextMatrixReg);
+            params.push_back(samplerRecord(g, kInvalidIndex));
             continue;
         }
+        const auto* binding = explicitBindings.find(g.valueId);
 
         const bool hasExplicit = (g.explicitRegisterBank == 'C');
         std::string semantic;
@@ -626,6 +904,12 @@ VpContainerResult emitVertexContainerImpl(
             semantic = "PROJECTION";
         else if (hasExplicit)
             semantic = "C" + std::to_string(g.explicitRegisterIndex);
+
+        if (g.type.isArray() && (binding || !hasExplicit))
+        {
+            appendArrayElements(g.name, g.type, kInvalidIndex, 0u, binding);
+            continue;
+        }
 
         ParamDesc d;
         d.name      = g.name;
@@ -641,8 +925,15 @@ VpContainerResult emitVertexContainerImpl(
         if (g.type.isMatrix())
         {
             int base;
-            if (hasExplicit)
+            if (binding)
+                base = binding->registers[0];
+            else if (hasExplicit)
                 base = g.explicitRegisterIndex;
+            else if (!vpRead.count(g.valueId))
+            {
+                unreadUniforms.insert({g.name, kInvalidIndex});
+                base = -1;
+            }
             else
             {
                 base = nextMatrixReg;
@@ -655,7 +946,7 @@ VpContainerResult emitVertexContainerImpl(
                 ParamDesc r;
                 r.name      = g.name + "[" + std::to_string(row) + "]";
                 r.semantic  = semantic;
-                r.type      = kCgFloat4;
+                r.type      = cgMatrixRowType(g.type.matrixCols);
                 r.var       = kCgUniform;
                 r.direction = kCgIn;
                 r.res       = kCgConst;
@@ -663,17 +954,42 @@ VpContainerResult emitVertexContainerImpl(
                 r.isReferenced = 1;
                 r.isShared     = hasExplicit ? 1u : 0u;
                 r.resIndex     = static_cast<uint32_t>(base + row);
+                // An initialised matrix uniform's compiled default lives on
+                // the ROWS, never on the parent: the reference leaves the
+                // parent record's defaultValue at 0 and gives each row its
+                // own 16-byte block holding that row's columns, zero-padded.
+                // Measured on `float3x3 M = float3x3(nine scalars)`:
+                // M[0] [0.2209,0.339,0.4184,0], M[1] [0.1138,0.678,0.7319,0],
+                // M[2] [0.0102,0.113,0.2969,0] (uniform-default-records A3).
+                r.defaultValue = uniformDefaultSlice(
+                    g, static_cast<size_t>(row) *
+                           static_cast<size_t>(g.type.matrixCols),
+                    static_cast<size_t>(g.type.matrixCols));
                 params.push_back(r);
             }
         }
         else
         {
             int reg;
-            if (hasExplicit)
+            if (binding)
+                reg = binding->registers[0];
+            else if (hasExplicit)
                 reg = g.explicitRegisterIndex;
+            else if (!vpRead.count(g.valueId))
+            {
+                unreadUniforms.insert({g.name, kInvalidIndex});
+                reg = -1;
+            }
             else
                 reg = nextVectorReg--;
             d.resIndex = static_cast<uint32_t>(reg);
+            // An initialised file-scope uniform carries a compiled
+            // default.  ir_builder evaluates the initialiser onto IRGlobal
+            // (ir.h:501-502) and refuses rather than dropping it when it
+            // cannot, so the value is already in hand here; we wrote zero
+            // over it (uniform-default-records A2).
+            d.defaultValue = uniformDefaultSlice(
+                g, 0u, static_cast<size_t>(g.type.componentCount()));
             params.push_back(d);
         }
     }
@@ -710,6 +1026,129 @@ VpContainerResult emitVertexContainerImpl(
     }
     }
 
+    // Declared array outputs keep every element record, including unwritten
+    // ones. Their raw semantic spelling is shared; only the resource advances.
+    // The IR has no StoreOutput for an unwritten element and must not acquire
+    // one merely to make its reflection record visible.
+    for (const auto& output : entry->returnOutputs)
+    {
+        if (output.name.find('[') == std::string::npos) continue;
+        const std::string name = entry->name + "." + output.name;
+        if (std::any_of(params.begin(), params.end(),
+                [&](const ParamDesc& p) { return p.name == name; })) continue;
+        ParamDesc d;
+        d.name = name;
+        d.semantic = output.rawSemanticName.empty() ? output.semanticName : output.rawSemanticName;
+        d.type = cgTypeForIRType(output.type);
+        d.var = kCgVarying;
+        d.direction = kCgOut;
+        d.paramno = kInvalidIndex;
+        d.res = vpOutputResource(toUpper(output.semanticName), output.semanticIndex, output.rawSemanticName);
+        d.isReferenced = 0;
+        params.push_back(d);
+    }
+
+    // Direct scalar returns have no fieldName. Keep their special-output
+    // reflection alongside explicit out parameters, without duplicating them.
+    for (const auto& block : entry->blocks)
+        for (const auto& instruction : block->instructions)
+        {
+            const auto& in = *instruction;
+            if (in.op != IROp::StoreOutput || !in.fieldName.empty()) continue;
+            const auto sem = toUpper(in.semanticName);
+            if (sem != "PSIZE" && sem != "CLP") continue;
+            const auto resource = vpOutputResource(sem, in.semanticIndex, in.rawSemanticName);
+            bool present = false;
+            for (const auto& param : params)
+                if (param.direction == kCgOut && param.res == resource) present = true;
+            if (present) continue;
+            ParamDesc d;
+            d.name = entry->name;
+            d.semantic = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+            d.type = cgTypeForIRType(entry->returnType);
+            d.var = kCgVarying;
+            d.direction = kCgOut;
+            d.paramno = kInvalidIndex;
+            d.res = resource;
+            params.push_back(d);
+        }
+
+    // Unread uniforms (and a matrix's rows, named `m[k]`): declared, no
+    // resource, no register, not referenced - the reference's record.
+    for (auto& param : params)
+    {
+        if (param.var != kCgUniform) continue;
+        std::string base = param.name;
+        if (!unreadUniforms.count({base, param.paramno}))
+        {
+            const auto open = base.rfind('[');
+            if (open == std::string::npos || base.back() != ']') continue;
+            base = base.substr(0, open);
+            if (!unreadUniforms.count({base, param.paramno})) continue;
+        }
+        param.res          = kCgUnassignedRes;
+        param.resIndex     = kInvalidIndex;
+        param.isReferenced = 0;
+    }
+
+    // The active backend owns the binding contract. Apply general's shared
+    // resolver to every synthesized record after both entry-table paths have
+    // built their names/types/defaults. Legacy keeps its existing contract.
+    if (attrs.resolvedExplicitBindings) {
+        // Names may be shadowed by entry parameters. The parameter number
+        // distinguishes those records from the file-scope declaration.
+        std::map<std::pair<std::string, uint32_t>, std::pair<std::string, int>> recordBindings;
+        const auto addRecords = [&](const auto& uniform, uint32_t paramno) {
+            const auto* binding = explicitBindings.find(uniform.valueId);
+            if (!binding) return;
+            for (size_t element = 0; element < binding->registers.size(); ++element) {
+                const int base = binding->registers[element];
+                const std::string name = uniform.type.isArray()
+                    ? rsx_cg::arrayElementName(uniform.name, static_cast<int>(element))
+                    : uniform.name;
+                recordBindings[{name, paramno}] = {binding->semantic, base};
+                if (uniform.type.isMatrix())
+                    for (int row = 0; row < uniform.type.matrixRows; ++row)
+                        recordBindings[{name + "[" + std::to_string(row) + "]", paramno}] =
+                            {binding->semantic, base >= 0 ? base + row : -1};
+            }
+        };
+        for (size_t i = 0; i < entry->parameters.size(); ++i)
+            addRecords(entry->parameters[i], irParamOrdinal(entry->parameters[i], i));
+        for (const auto& global : module.globals) addRecords(global, kInvalidIndex);
+        for (auto& param : params) {
+            if (param.var != kCgUniform) continue;
+            // PS3_475: shared 1 only for a referenced explicit binding, also
+            // on struct-flattened entries (explicit-binding-shared-reflection). Unused pins keep C<N>
+            // but have UNDEFINED/no index/isRef0/isShared0.
+            param.isShared = 0;
+            const auto it = recordBindings.find({param.name, param.paramno});
+            if (it == recordBindings.end()) continue;
+            const int reg = it->second.second;
+            param.semantic = it->second.first;
+            param.resIndex = reg >= 0 ? static_cast<uint32_t>(reg) : kInvalidIndex;
+            param.res = reg >= 0 ? kCgConst : kCgUnassignedRes;
+            param.isReferenced = param.isShared = reg >= 0 ? 1u : 0u;
+        }
+        // Newly supported pinned arrays must retain their compiled defaults
+        // too. Ordinary scalar/matrix records already carry A2/A3's slices.
+        for (const auto& global : module.globals) {
+            if (!global.type.isArray() || !explicitBindings.find(global.valueId)) continue;
+            const size_t cols = static_cast<size_t>(global.type.isMatrix()
+                ? global.type.matrixCols : global.type.componentCount());
+            const int rows = global.type.isMatrix() ? global.type.matrixRows : 1;
+            for (int element = 0; element < global.type.arraySize; ++element)
+                for (int row = 0; row < rows; ++row) {
+                    std::string name = rsx_cg::arrayElementName(global.name, element);
+                    if (global.type.isMatrix()) name += "[" + std::to_string(row) + "]";
+                    for (auto& param : params)
+                        if (param.name == name && param.paramno == kInvalidIndex)
+                            param.defaultValue = uniformDefaultSlice(global,
+                                (static_cast<size_t>(element) * rows + row) * cols, cols);
+                }
+        }
+    }
+
     // ----- Append literal-pool params (one per c[N] reg the back-end
     // reserved for unique float literals).  These follow user-declared
     // params in the param table and get their own embedded 16-byte
@@ -739,11 +1178,18 @@ VpContainerResult emitVertexContainerImpl(
         params.push_back(d);
     }
 
+    // Clip resource types describe the physical output prefix: CLP0/3 use
+    // y (float2), CLP1/4 z (float3), CLP2/5 w (float4), even for scalar Cg
+    // declarations. Measured with every clip alone and all six plus FOG/PSIZE.
+    for (auto& param : params)
+        if (param.direction == kCgOut && param.res >= kCgClp0 && param.res < kCgClp0 + 6)
+            param.type = kCgFloat2 + (param.res - kCgClp0) % 3;
+
     if (compactCgb)
     {
         // Compact CGB mode is the runtime-facing `the reference compiler -mcgb` container.
-        // Target 1 emits LevelA as the empty reference block; compact VP
-        // internal constants will be added when a byte-diff target needs them.
+        // LevelA carries register indices, padded to 16 bytes, followed by
+        // their float4 values. In particular PSIZE's implicit clamp needs it.
         struct CompactEntry
         {
             std::string name;
@@ -764,6 +1210,21 @@ VpContainerResult emitVertexContainerImpl(
                     CompactEntry e;
                     e.name = d.name;
                     e.resource = static_cast<uint16_t>(d.res - kCgAttr0);
+                    entries.push_back(e);
+                }
+                continue;
+            }
+
+            // A referenced sampler is listed with its UNIT as the resource
+            // (measured: hm on TEXUNIT2 -> 2); an unused one is not listed.
+            if (d.isSampler)
+            {
+                if (d.isReferenced && d.res >= kCgTexUnit0 &&
+                    d.res < kCgTexUnit0 + 4u)
+                {
+                    CompactEntry e;
+                    e.name = d.name;
+                    e.resource = static_cast<uint16_t>(d.res - kCgTexUnit0);
                     entries.push_back(e);
                 }
                 continue;
@@ -802,11 +1263,13 @@ VpContainerResult emitVertexContainerImpl(
             return result;
         }
 
-        const uint32_t levelASize = 0x10u;
+        const uint32_t constantCount = static_cast<uint32_t>(attrs.literalPool.size());
+        const uint32_t constantValuesOffset = (4u + 2u * constantCount + 15u) & ~15u;
+        const uint32_t levelASize = constantValuesOffset + 16u * constantCount;
         const uint32_t levelBSize = 6u
             + static_cast<uint32_t>(entries.size() * 8u)
             + static_cast<uint32_t>(strings.size());
-        if (levelBSize > 0xFFFFu || entries.size() > 0xFFFFu)
+        if (levelASize > 0xFFFFu || levelBSize > 0xFFFFu || entries.size() > 0xFFFFu)
         {
             result.diagnostics.push_back("cg-container-vp: compact CGB LevelB too large");
             return result;
@@ -834,7 +1297,18 @@ VpContainerResult emitVertexContainerImpl(
         for (uint32_t w : ucode) put32(out, w);
 
         put16(out, static_cast<uint16_t>(levelASize));
-        put16(out, 0);                                   // constant count
+        put16(out, static_cast<uint16_t>(constantCount));
+        for (const auto& slot : attrs.literalPool)
+            put16(out, static_cast<uint16_t>(slot.constReg));
+        while (out.size() < 0x20u + ucodeSize + constantValuesOffset)
+            out.push_back(0);
+        for (const auto& slot : attrs.literalPool)
+            for (float value : slot.values)
+            {
+                uint32_t bits;
+                std::memcpy(&bits, &value, sizeof(bits));
+                put32(out, bits);
+            }
         while (out.size() < 0x20u + ucodeSize + levelASize)
             out.push_back(0);
 
@@ -897,6 +1371,29 @@ VpContainerResult emitVertexContainerImpl(
             slots[i].semanticOffset =
                 stringsStart + static_cast<uint32_t>(stringsBlob.size());
             putString(stringsBlob, params[i].semantic);
+        }
+        if (!params[i].isLiteralPool && !params[i].defaultValue.empty())
+        {
+            // Same 16-byte float[4] block as the literal pool, after the
+            // semantic and before the name - see the measurement on
+            // ParamDesc::defaultValue.  Four floats always, zero-padded
+            // above the declared component count.
+            padBlobTo(16);
+            params[i].defaultValueOffset =
+                stringsStart + static_cast<uint32_t>(stringsBlob.size());
+            for (int j = 0; j < 4; ++j)
+            {
+                const float v =
+                    (static_cast<size_t>(j) < params[i].defaultValue.size())
+                        ? params[i].defaultValue[static_cast<size_t>(j)]
+                        : 0.0f;
+                uint32_t bits = 0;
+                std::memcpy(&bits, &v, sizeof(bits));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >> 24) & 0xFF));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >> 16) & 0xFF));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >>  8) & 0xFF));
+                stringsBlob.push_back(static_cast<uint8_t>((bits >>  0) & 0xFF));
+            }
         }
         if (!params[i].name.empty())
         {

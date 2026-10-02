@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_929c0177: preferredPhys must yield when a physical register is already live;
+# live-physical-register-collision: preferredPhys must yield when a physical register is already live;
 # two simultaneously-live pinned results must not collide on the same register.
 #
 # Measured on test_62 pattern: `border = step(0.05, u) * step(u, 0.95);`
@@ -28,13 +28,19 @@ shaders="$repo_root/tools/rsx-cg-compiler/tests/shaders"
 src="$shaders/fp_step_collision_f.cg"
 [[ -f "$src" ]] || fail "fixture missing: $src"
 
+# The ucode dump is on stdout and the diagnostics are on stderr; merging
+# them lets a stderr line land INSIDE a hex row, which costs the row,
+# shifts every later one and decodes a constant as an instruction writing
+# a register nothing reads (the false R33, 2026-09-07).  Keep them apart;
+# the decoder's refusal is the fallback, not the fix.
 log="$work/fp_step_collision.log"
+err="${log%.log}.err"
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_fp_rsx "$src"
-) >"$log" 2>&1 || {
-    tail -n 30 "$log" >&2
+) >"$log" 2>"$err" || {
+    tail -n 30 "$err" >&2
     fail "fp_step_collision_f.cg did not compile"
 }
 
@@ -65,7 +71,7 @@ for i, w in enumerate(gs):
                 sys.exit(
                     f"FAIL: step collision on physical register R{src0_reg}: "
                     f"consuming MUL at instruction {i} reads R{src0_reg} for both operands "
-                    f"(computes a*a instead of a*b; t_929c0177 regression)"
+                    f"(computes a*a instead of a*b; live-physical-register-collision regression)"
                 )
             print(f"step-register-collision-test: ok (MUL at {i} reads distinct registers R{src0_reg} and R{src1_reg})")
             break

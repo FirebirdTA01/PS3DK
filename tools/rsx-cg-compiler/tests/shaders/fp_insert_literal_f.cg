@@ -1,12 +1,12 @@
 // A literal written into one lane of a varying that is otherwise passed
-// straight through (t_afb4af65).
+// straight through (literal-lane-insert).
 //
 // Until 2026-09-02 the default path peeled the VecInsert chain, resolved
 // the store's source inward to `color`, and then emitted ONE full-width
 // MOV of that varying - dropping `c.x = 0.5` in silence.  Exit 0, a
 // well-formed container, and an input mask that correctly described the
 // ucode, which was missing a line of the source.  The completeness guard
-// (t_72810bd7) cannot see this one: the varying IS read; it is the
+// (post-discard-colour) cannot see this one: the varying IS read; it is the
 // LITERAL that goes missing.
 //
 // Reference compiler, for this shader:

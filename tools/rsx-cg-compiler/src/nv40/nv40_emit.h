@@ -46,7 +46,7 @@ struct FpEmbeddedUniform
 };
 
 // Fields needed to populate the CgBinaryFragmentProgram subtype of a
-// .fpo container.  Filled by lowerFragmentProgram alongside ucode
+// .fpo container.  Filled by the general FP lowering alongside ucode
 // emission and surfaced via emitFragmentProgramEx.
 struct FpAttributes
 {
@@ -91,10 +91,14 @@ struct VpLiteralPoolSlot
 };
 
 // Fields needed to populate the CgBinaryVertexProgram subtype of a
-// .vpo container.  Filled by lowerVertexProgram alongside ucode
+// .vpo container.  Filled by the general VP lowering alongside ucode
 // emission and surfaced via emitVertexProgramEx.
 struct VpAttributes
 {
+    // General lowering implements both explicit C binding spellings, including
+    // entry parameters/arrays. Legacy uses its older allocation contract. The
+    // shared container must describe the contract used by the emitted ucode.
+    bool resolvedExplicitBindings = false;
     uint32_t instructionSlot     = 0;        // load address; non-zero enables indexed reads
     uint32_t registerCount       = 1;        // R registers used; the reference compiler minimum is 1
     uint32_t attributeInputMask  = 0;        // bit n iff v[n] is read

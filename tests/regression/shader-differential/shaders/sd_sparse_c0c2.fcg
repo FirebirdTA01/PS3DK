@@ -1,4 +1,4 @@
-// control-sparse-skip (t_678a4dab): COLOR0 and COLOR2 declared, COLOR1 not.
+// control-sparse-skip (differential-manifest-judging): COLOR0 and COLOR2 declared, COLOR1 not.
 // Three targets must be BOUND and only c0/c2 JUDGED: R2 (COLOR1's register) is
 // ordinary scratch for this program, so comparing the c1 target would compare
 // two compilers' scratch-allocation choices - a false mismatch when they differ

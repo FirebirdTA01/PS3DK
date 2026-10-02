@@ -95,7 +95,7 @@ function Get-ReferencePairsPathForStage(
 }
 
 # ---------------------------------------------------------------------------
-# Stage roots (t_b1269234).  The stager has THREE roots, and they used to be
+# Stage roots (differential-stage-roots).  The stager has THREE roots, and they used to be
 # one:
 #
 #   ScriptTree  the tree the stager CODE lives in - helpers, the sd_*

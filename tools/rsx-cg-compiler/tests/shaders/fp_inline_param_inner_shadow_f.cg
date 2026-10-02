@@ -1,0 +1,1 @@
+float4 D; void gen(float4 G) { { float4 G = float4(9,8,7,6); D = G; } } float4 main(float4 p : TEXCOORD0) : COLOR { gen(p); return D; }

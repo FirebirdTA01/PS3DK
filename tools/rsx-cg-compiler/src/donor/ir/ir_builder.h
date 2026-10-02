@@ -5,8 +5,10 @@
 #include "semantic.h"
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <stack>
 #include <vector>
+#include <optional>
 
 // ============================================================================
 // IR Builder - Converts AST to IR
@@ -25,6 +27,10 @@ public:
     const std::vector<std::string>& errors() const { return errors_; }
     bool hasErrors() const { return !errors_.empty(); }
 
+    // Type conversion helpers
+    static IRTypeInfo getIRType(const CgType& cgType);
+    static IRTypeInfo getIRType(TypeNode* typeNode);
+
 private:
     std::unique_ptr<IRModule> module_;
     IRFunction* currentFunction_ = nullptr;
@@ -36,14 +42,102 @@ private:
     // than compiling as zero.
     static bool evaluateConstInitializer(const ExprNode* init,
                                          std::vector<float>& out);
+    static bool evaluateConstIntInitializer(const ExprNode* init,
+                                            std::vector<int64_t>& out);
+    // `module` lets an identifier in the initialiser resolve to a file-scope
+    // const that was already folded (file-scope-initializer-fold); without it identifiers are
+    // not constants.
+    static bool evaluateConstInitializerTyped(const ExprNode* init,
+                                              const TypeNode* declType,
+                                              std::vector<float>& floatOut,
+                                              std::vector<int64_t>& intOut,
+                                              IRModule* module = nullptr);
 
     // Value mapping from AST to IR
     std::unordered_map<DeclNode*, IRValueID> declToValue_;
-    std::unordered_map<std::string, IRValueID> nameToValue_;
-    std::unordered_map<std::string, std::vector<IRValueID>> localArrayValues_;
+    // ================================================================
+    // PER-SCOPE STATE, in ONE place (inline-scope-state).  Every map that binds a
+    // NAME to a value lives in ScopeState, and every scope boundary handles
+    // the whole struct - the three boundaries are the rows of this table,
+    // and a new map is wrong until it has an answer in every cell (block exit
+    // is keyed on the names the block DECLARED, never on the keys it touched):
+    //
+    //   map                   function entry  if-join (buildIfStmt)   inline call                 block exit (buildBlockStmt)
+    //   names                 clear()         snapshot/restore/join   save/restore + propagate    declared names restored/unbound
+    //   arrays                clear()         join PER ELEMENT "a[i]" save/restore + propagate    declared names restored/unbound
+    //   shadowedGlobals       clear()         join "G@"               save/restore + propagate    entries the block created UNSTASHED
+    //   shadowedGlobalArrays  clear()         join "B@[i]"            save/restore + propagate    entries the block created UNSTASHED
+    //
+    // History: nameToValue_ was joined from the start; localArrayValues_
+    // was not snapshotted, restored or joined for as long as it existed
+    // (local-array-conditional-store - a conditional element store applied unconditionally);
+    // the two stash maps were added and missed the SAME way within an hour
+    // (user-function-inlining review).  The aliases below keep the historical member
+    // names so the ~60 binding sites read unchanged; the struct is what the
+    // boundaries copy, so a fifth map added HERE is carried everywhere, and
+    // one added anywhere else is the bug this comment exists to prevent.
+    struct ScopeState
+    {
+        std::unordered_map<std::string, IRValueID> names;
+        std::unordered_map<std::string, std::vector<IRValueID>> arrays;
+        // A file-scope variable a caller-local SHADOWS keeps its own binding
+        // here while the local owns the name in `names` / `arrays`: an
+        // inlined helper that names the global is bound to these for its
+        // body, and its writes come back here, not to the local.
+        // InvalidIRValue / an empty vector means "shadowed, never assigned"
+        // - the helper's read must then fall through to the global load.
+        std::unordered_map<std::string, IRValueID> shadowedGlobals;
+        std::unordered_map<std::string, std::vector<IRValueID>> shadowedGlobalArrays;
+
+        void clear()
+        {
+            names.clear(); arrays.clear();
+            shadowedGlobals.clear(); shadowedGlobalArrays.clear();
+        }
+        // The if-join works over ONE flat map of join keys: a name is its
+        // own key, an array element is "a[i]", a stashed global "G@" and a
+        // stashed element "B@[i]" ('[' and '@' cannot occur in identifiers).
+        // Only bound values fold; unfold() puts the joined values back.
+        std::unordered_map<std::string, IRValueID> fold() const;
+        void unfold(std::unordered_map<std::string, IRValueID>& joined);
+    };
+    ScopeState scope_;
+    std::unordered_map<std::string, IRValueID>& nameToValue_ = scope_.names;
+    // Immutable, function-local identities of unwritten vector-field bases.
+    // Assignments replace nameToValue_ bindings; this set needs no branch snapshot.
+    std::unordered_set<IRValueID> undefinedFieldBases_;
+    // Uniform struct ENTRY parameters flattened into one uniform per member
+    // (uniform-struct-entry-parameter): the name has no whole-struct value,
+    // only `name.member...` bindings, so a whole-struct copy copies those.
+    std::unordered_set<std::string> flattenedUniformStructParams_;
+    // The expression an expression STATEMENT is evaluating: a whole-struct
+    // copy of a flattened parameter has no value, so it is accepted only
+    // there (or as a link of that statement's assignment chain).
+    const ExprNode* statementExpr_ = nullptr;
+    std::unordered_map<std::string, std::vector<IRValueID>>& localArrayValues_ = scope_.arrays;
+    std::unordered_map<std::string, IRValueID>& shadowedGlobals_ = scope_.shadowedGlobals;
+    std::unordered_map<std::string, std::vector<IRValueID>>& shadowedGlobalArrays_ = scope_.shadowedGlobalArrays;
+    // Move a file-scope variable's binding into the stash when the current
+    // function binds that name itself (a local or a parameter); no-op if
+    // the name is not a global or is already stashed.
+    void stashShadowedGlobal(const std::string& name);
+    // BLOCK EXIT (dead-branch-local-predication): the names each open block DECLARED, one set per
+    // block, pushed by buildBlockStmt and filled by buildDeclStmt as it reaches
+    // each declarator - never pre-scanned, so a use before the declaration still
+    // names the outer binding (oracle: `float4 r = G; float4 G = ...` reads the
+    // global).  At block exit exactly these names are undone; every other key
+    // the block touched (assignments to outer names, struct-field bases, loop
+    // counters, join-time loads) is the block's effect on its enclosing scope
+    // and survives.  An inlined helper pushes its own frame so its top-level
+    // locals never land in the caller's block.
+    std::vector<std::unordered_set<std::string>> blockDeclared_;
+    void exitBlockBinding(const std::string& name, const ScopeState& pre);
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
     std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
     std::vector<FunctionDecl*> inlineStack_;
+    // Declaration identity prevents a local shadow from using a global's initializer.
+    std::unordered_set<const DeclNode*> globalDeclarations_;
+    std::vector<std::string> depthDecodeUniforms_;
     // Source text is the wrong boundary for short-circuit hazards:
     // a precomputed sqrt predicate is already eager, while an inlined
     // helper called from a logical RHS is still protected by the RHS.
@@ -78,7 +172,7 @@ private:
 
     // True for a FRAGMENT entry's `out` parameter declared with no
     // semantic, which binds to COLOR the way the reference compiler binds
-    // it (t_a15ec129).  Consulted wherever a parameter's semantic decides
+    // it (implicit-colour-output).  Consulted wherever a parameter's semantic decides
     // whether a store is emitted.
     bool isDefaultedFragmentOutput(const ParamDecl* param) const;
 
@@ -110,6 +204,13 @@ private:
     bool inlineUserFunctionCall(CallExpr* expr, const std::vector<IRValueID>& args,
                                 IRValueID& result);
     bool buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result);
+    // The truth of an if-condition that is a compile-time constant, by the
+    // file-scope initialiser evaluator (typed values, static consts only),
+    // when no name in it is shadowed by a local or parameter.  nullopt for
+    // anything else.
+    std::optional<bool> constCondition(const ExprNode* e);
+    bool runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
+                             IRValueID& result, bool& sawReturn);
     IRValueID buildMemberAccessExpr(MemberAccessExpr* expr);
     IRValueID buildIndexExpr(IndexExpr* expr);
     IRValueID buildTernaryExpr(TernaryExpr* expr);
@@ -118,6 +219,9 @@ private:
 
     // Assignment building (separate because it modifies lvalues)
     IRValueID buildAssignment(ExprNode* target, IRValueID value);
+    bool resolveTrackedArrayElement(IndexExpr* expr, std::string& key, int32_t& index);
+    IRValueID readTrackedArrayElement(IndexExpr* expr, const std::string& key, int32_t index);
+    bool copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type);
     IRValueID coerceAssignmentValue(ExprNode* target, IRValueID value);
 
     // Helper to get address/location for lvalue expressions
@@ -141,6 +245,9 @@ private:
                            const SourceLocation& loc = {});
     IRValueID emitUnaryOp(IROp op, const IRTypeInfo& resultType, IRValueID operand,
                           const SourceLocation& loc = {});
+    IRValueID emitNumericToBool(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
+                               IRValueID operand, const SourceLocation& loc);
+    IRValueID normalizeCondition(ExprNode* expr, IRValueID value);
 
     // Constant-folding helpers — return a fresh IRConstant id when
     // both operands are IRConstants, else InvalidIRValue.  Handle
@@ -151,7 +258,8 @@ private:
     IRValueID tryFoldUnaryOp(IROp op, const IRTypeInfo& resultType,
                               IRValueID operand);
     IRValueID tryFoldVecConstruct(const IRTypeInfo& resultType,
-                                   const std::vector<IRValueID>& args);
+                                   const std::vector<IRValueID>& args,
+                                   std::optional<BaseType> baseTypeOverride = std::nullopt);
     IRValueID emitCall(const std::string& funcName, const IRTypeInfo& resultType,
                        const std::vector<IRValueID>& args);
 
@@ -159,10 +267,6 @@ private:
     void emitCondBranch(IRValueID condition, IRBasicBlock* trueTarget, IRBasicBlock* falseTarget);
     void emitReturn(IRValueID value);
     void emitStore(IRValueID address, IRValueID value);
-
-    // Type conversion helpers
-    IRTypeInfo getIRType(const CgType& cgType);
-    IRTypeInfo getIRType(TypeNode* typeNode);
 
     // Get IR type for an expression
     IRTypeInfo getExprType(ExprNode* expr);
@@ -187,5 +291,10 @@ private:
     IRValueID createConstant(int32_t value);
     IRValueID createConstant(uint32_t value);
     IRValueID createConstant(float value);
-    IRValueID createConstant(const IRTypeInfo& type, const std::vector<float>& values);
+    IRValueID createConstant(const IRTypeInfo& type, float value);
+    IRValueID createConstant(const IRTypeInfo& type, const std::vector<float>& values, const std::vector<int64_t>& intValues = {});
+
+    // Narrowing helpers for vector and matrix casts and constructors (narrowing-aggregate-casts)
+    IRValueID emitVectorNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType, IRValueID operandValue, SourceLocation loc, std::optional<BaseType> baseTypeOverride = std::nullopt);
+    IRValueID emitMatrixNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType, IRValueID operandValue, SourceLocation loc);
 };

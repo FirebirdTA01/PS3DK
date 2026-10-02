@@ -1,5 +1,5 @@
 // Three pinned colour values for one output slot, with a kill between each
-// (t_5dc260b0).  The same two-owner shape as fp_output_restored_f, reached
+// (fragment-output-liveness).  The same two-owner shape as fp_output_restored_f, reached
 // the way real discard shaders reach it rather than through a read-back.
 void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)
 {

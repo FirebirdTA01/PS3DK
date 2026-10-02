@@ -16,6 +16,13 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Removed
+
+- **rsx-cg-compiler: the legacy NV40 shape matcher.**  The general
+  lowering is the only back end.  `--legacy-lowering` and
+  `RSXCG_GENERAL=0` now fail with a message saying the matcher was
+  removed; `--general-lowering` is still accepted and does nothing.
+
 ## [v0.19.0] — 2026-09-30
 
 ### Added

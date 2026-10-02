@@ -1,4 +1,4 @@
-// t_a7dd471f: float-to-int and int-to-float must preserve each lane.
+// integer-float-conversion: float-to-int and int-to-float must preserve each lane.
 // The reference lowers the signed truncation through MOVRC + FLR +
 // a LT-predicated sign restore, with a FENCBR before the final value use.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)

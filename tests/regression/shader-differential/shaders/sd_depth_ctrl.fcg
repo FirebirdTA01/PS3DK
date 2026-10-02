@@ -1,4 +1,4 @@
-// control-depth (t_678a4dab): colour plus an exported depth.  Reference-
+// control-depth (differential-manifest-judging): colour plus an exported depth.  Reference-
 // compiled by the stager; the reference writes the root to R1.z and sets the
 // container's depthReplace flag, which is what the judge keys on.
 struct O {

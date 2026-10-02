@@ -1,0 +1,13 @@
+// Implicit vertex texture units follow FIRST USE, not declaration:
+// firstDeclared is declared first and fetched second, so it gets unit 1.
+uniform sampler2D firstDeclared;
+uniform sampler2D secondDeclared;
+
+void main(float2 uv : TEXCOORD0,
+          float4 st : TEXCOORD1,
+          out float4 position : POSITION,
+          out float4 color : COLOR)
+{
+    position = tex2D(secondDeclared, uv);
+    color = tex2D(firstDeclared, st.zw);
+}

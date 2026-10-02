@@ -1,4 +1,4 @@
-# sampler-kind-refusal-test.ps1 - regression test for t_e230822b
+# sampler-kind-refusal-test.ps1 - regression test for unsupported-sampler-kind-refusal
 #
 # Asserts that the differential harness auto-binder rejects unsupported
 # sampler kinds (such as sampler arrays and generic sampler) with -1 refusal
@@ -42,7 +42,7 @@ static int is_sampler_type(uint32_t type)
            type == CG_SAMPLERCUBEARRAY || type == CG_SAMPLER;
 }
 
-// Simulates the buggy skip condition from 274a3df before t_e230822b was fixed
+// Simulates the buggy skip condition from 274a3df before unsupported-sampler-kind-refusal was fixed
 static int is_sampler_type_buggy(uint32_t type)
 {
     return (type >= CG_SAMPLER1D && type <= CG_SAMPLERCUBE);
@@ -82,7 +82,7 @@ int main(void)
         uint32_t k = unsupported_kinds[i];
         int res = classify_sampler(k, true, 0);
         if (res != -1) {
-            fprintf(stderr, "FAIL: sampler kind %u returned %d, expected -1 refusal (t_e230822b)\n", k, res);
+            fprintf(stderr, "FAIL: sampler kind %u returned %d, expected -1 refusal (unsupported-sampler-kind-refusal)\n", k, res);
             return 1;
         }
     }

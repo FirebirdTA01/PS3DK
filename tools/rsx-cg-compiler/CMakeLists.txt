@@ -115,9 +115,7 @@ set(SRC_NV40
     ${NV40_DIR}/nv40_emit.cpp
     ${NV40_DIR}/nv40_general_lowering.cpp
     ${NV40_DIR}/nv40_vp_assembler.cpp
-    ${NV40_DIR}/nv40_vp_emit.cpp
     ${NV40_DIR}/nv40_fp_assembler.cpp
-    ${NV40_DIR}/nv40_fp_emit.cpp
     ${NV40_DIR}/nv40_discard_guards.cpp
     ${NV40_DIR}/nv40_if_convert.cpp
 )
@@ -129,8 +127,9 @@ set(SRC_CONTAINER
     ${SRC_DIR}/cg_container_vp.cpp
 )
 
-# Driver / entry point.
+# Driver / entry point, and the named-extension registry it consults.
 set(SRC_MAIN
+    ${SRC_DIR}/extensions.cpp
     ${SRC_DIR}/main.cpp
 )
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Explicit VP ATTRn inputs and CLP0 outputs are real application shapes
-# (t_63b29467).  The general path used to carry ATTR as a parsed semantic
+# (vp-attribute-clip-binding).  The general path used to carry ATTR as a parsed semantic
 # but not resolve it to a hardware input, and rejected CLP0 as an output.
 #
 # The guard checks both layers that can drift independently: the ucode

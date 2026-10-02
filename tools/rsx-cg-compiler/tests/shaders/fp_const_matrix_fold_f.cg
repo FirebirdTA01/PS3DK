@@ -1,0 +1,29 @@
+// A file-scope CONST matrix folds into the ucode and gets NO container
+// record (uniform-default-records A3).
+//
+// evaluateConstInitializerTyped capped a constructor at four arguments, so a
+// 3x3 built from nine scalars refused with "file-scope const 'M' has an
+// initialiser this compiler cannot evaluate".  Eight reference-SDK rows were
+// that one shape, all of them including a single shared logluv.cg.
+//
+// Measured on the reference: the container is TWO records - the entry
+// parameter and the output - and M appears nowhere.  The record COUNT is the
+// assertion that matters: if a future change starts emitting parent/row
+// records for a const matrix, the record-count check catches it. Value checks
+// are separate: constant-matrix-row-test.sh pins the complete row payloads.
+//
+// Read rows through M[i] to exercise indexing independently of matrix-product
+// lowering. constant-matrix-row-index found that this folded one flattened scalar per index:
+// uv=(0.5,0.25) produced [1,0,0,1] instead of [-0.5,-1.125,-2.75,1].
+// ASYMMETRIC values, so a transposed or mis-ordered fold cannot pass.
+const static float3x3 M = float3x3
+	(
+	   0.25, 0.5, 0.75,
+	   1.5, 2.5, 3.5,
+	   -1.0, -2.0, -4.0
+	);
+
+float4 main(float2 uv : TEXCOORD0) : COLOR
+{
+	return float4(M[0] * uv.x + M[1] * uv.y + M[2], 1.0);
+}

@@ -45,6 +45,11 @@ public:
     // header — verified from reference-compiler output.
     void emitFencbr();
 
+    // An all-zero instruction (opcode NOP, every field zero).  The
+    // reference emits exactly one of these, with PROGRAM_END stamped by
+    // markEnd(), for a fragment program that has no effect at all.
+    void emitNop();
+
     // FENCTR is the sibling fence form used before temp-register reads
     // in some scalar-function sequences.  It matches FENCBR's operand
     // fields but uses opcode 0x3D instead of 0x3E.
@@ -60,7 +65,7 @@ public:
     // Write a uniform's COMPILED DEFAULT into the inline const block at
     // `constBlockByteOffset`.  The block is emitted zero-filled and a
     // runtime patch overwrites it; a uniform declared with an initialiser
-    // has that initialiser as its value until something does (t_3bf3ce95).
+    // has that initialiser as its value until something does (general-lowering-default).
     // Lanes beyond `count` stay zero, matching where a patch of the same
     // width writes.
     void setUniformConstBlock(uint32_t constBlockByteOffset,

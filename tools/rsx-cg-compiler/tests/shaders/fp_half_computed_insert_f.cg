@@ -1,0 +1,10 @@
+// The computed twin of fp_half_insert_chain_f: the base comes from half
+// arithmetic rather than from a copy, so the register is in the half
+// bank before the inserts arrive.
+half4 main(half4 p : TEXCOORD0) : COLOR
+{
+	half4 a = p * (half)1.003;
+	a.x = p.y;
+	a.y = p.z;
+	return a;
+}

@@ -22,15 +22,13 @@
 param(
     [string]$Rsxcgc = "",
     [string]$Rpcs3Path = "C:\Users\FirebirdTA01\Desktop\Emulators\RPCS3\rpcs3.exe",
-    # The general lowering is the DEFAULT since the flip (2026-09-02, director's
-    # D1); -GeneralLowering is accepted as a no-op for one release so scripts
-    # written before it keep working.  -LegacyLowering selects the retired
-    # matcher (--legacy-lowering) for the second half of the release gate.
+    # General lowering is the only implementation. Keep old switches parseable
+    # so callers receive a named migration error before any staging mutation.
     [switch]$GeneralLowering,
     [switch]$LegacyLowering,
     # -Corpus: also stage the ours-vs-ours fast/nofast corpus sweep
     # (increment 2).  The corpus compile loop runs in WSL via
-    # stage-corpus.sh, because dev builds of the compiler live there —
+    # stage-corpus.sh, because dev builds of the compiler live there â€”
     # pass the compiler's WSL path in -WslCompiler.  Refused shaders
     # land in the ours-refused.txt sidecar; only byte-differing pairs
     # are staged (byte-identical implies pixel-identical).
@@ -78,37 +76,15 @@ param(
     # the fix it waits for (CF-2's discard shaders, 2026-09-02).
     [switch]$ReferenceProbeRefused,
     # Corpus-relative paths to leave out of the sweep, one per line with
-    # the board id that says why (default <rig>/reference-corpus-exclude.txt).
+    # the defect key that says why (default <rig>/reference-corpus-exclude.txt).
     # A shader goes here only when it poisons the run for every row after
     # it; a plain mismatch or refusal stays in and is reported.
     [string]$ReferenceCorpusExclude = "",
-    # -PathPairs: for each shader in -PathPairsList (default <rig>/path-pairs.txt,
-    # repo-relative shader|uniform_set) stage our DEFAULT-path container
-    # against our GENERAL-path container, preceded by the premise row that
-    # makes the default container an oracle: default vs reference.  The
-    # guest judges the path-pair row only if that premise judged identical.
-    # Needs the reference compiler.  Both containers are compiled here
-    # regardless of -GeneralLowering; a refusal on any side aborts (the
-    # list is curated).
+    # Retired legacy/general comparisons. Use reference-backed routes below.
     [switch]$PathPairs,
     [string]$PathPairsList = "",
-    # -PathPairCorpus: the GATE-1 ACCEPTANCE SWEEP for switching the default
-    # lowering to the general path.  Every fragment shader under
-    # -PathPairCorpusDir (Windows path; default = the reference corpus dir)
-    # that the DEFAULT path compiles is staged as a path pair (default vs
-    # general, premise row first, uniform_set auto).  A default-path refusal
-    # is out of scope for the gate and only counted; a GENERAL-path refusal
-    # of a shader the default path compiles IS a gate failure and goes to
-    # path-pair-corpus-refused.txt (name|side|rel|rc); a reference refusal
-    # leaves the pair unoracled and is counted.  Exclusions come from
-    # -ReferenceCorpusExclude rows naming the general path (a general-path
-    # poisoner blanks every row after it).  Needs the reference compiler.
     [switch]$PathPairCorpus,
     [string]$PathPairCorpusDir = "",
-    # Optional root-relative input manifest for -PathPairCorpus.  When the
-    # corpus root is the repo root and this is omitted, the tracked gate-1
-    # manifest beside this script is used so the "tree" count is a repo fact
-    # instead of a working-directory accident.
     [string]$PathPairCorpusManifest = "",
     # -VpPairs: judge VERTEX programs on pixels (increment 4, gate 5).  Each
     # .vcg in -VpPairsList (default <rig>/vp-pairs.txt: repo-relative|set|path)
@@ -130,17 +106,7 @@ param(
     # applies by corpus-relative path as for the fragment sweep.
     [switch]$VpCorpus,
     [string]$VpCorpusDir = "",
-    # -VpPathPairs: GATE 5's acceptance sweep, the vertex twin of
-    # -PathPairCorpus.  Every vertex shader in -VpPairsList and under
-    # -VpCorpusDir that the DEFAULT path compiles is staged as a path pair:
-    # our default container vs our general container, preceded by the
-    # premise row (default vs reference) that makes the default container
-    # an oracle; the guest judges the pair only if the premise judged
-    # identical (vp-path-pair-unoracled otherwise).  A default refusal is
-    # out of the gate's scope and only counted; a GENERAL refusal of a VP the
-    # default path compiles IS a gate failure and goes to
-    # vp-path-pair-refused.txt; byte-identical legacy/general pairs are
-    # counted, not staged.  Needs the reference compiler.
+    # Retired; use -VpPairs and -VpCorpus.
     [switch]$VpPathPairs,
     [string]$Hdd0 = "",          # override dev_hdd0 root (testing)
     # -RepoRoot: the TREE THIS STAGE JUDGES, as a Windows path (relative or
@@ -156,7 +122,7 @@ param(
     # branch: the stager read the shared tree's lists, found no such
     # shader, and either aborted or, worse, judged the shared tree's copy
     # of a same-named file under the branch's compiler and called that a
-    # verdict (t_b1269234; three void builds on 2026-09-02 came from the
+    # verdict (differential-stage-roots; three void builds on 2026-09-02 came from the
     # same coupling in the other direction).
     #
     # With -RepoRoot, EVERYTHING THE JUDGED TREE OWNS resolves under it:
@@ -174,10 +140,16 @@ param(
     # Once container-metrics-baseline.csv exists beside this script, metric
     # regressions fail staging by default.  This switch keeps the report
     # visible but suppresses the failure for explicit investigative runs.
-    [switch]$MetricsReportOnly
+    [switch]$MetricsReportOnly,
+    [string]$MetricsAllowancePath = ""
 )
 
 $ErrorActionPreference = "Stop"
+# Fail before loading helpers, resolving roots, or touching dev_hdd0.
+if ($LegacyLowering) { throw '-LegacyLowering has been removed; general lowering is the only implementation.' }
+if ($PathPairs -or $PathPairsList) { throw '-PathPairs / -PathPairsList have been removed; use -ReferencePairs with reference-pairs.txt.' }
+if ($PathPairCorpus -or $PathPairCorpusDir -or $PathPairCorpusManifest) { throw '-PathPairCorpus and its options have been removed; use -ReferenceTreeCorpus / -ReferenceTreeCorpusDir / -ReferenceTreeCorpusManifest.' }
+if ($VpPathPairs) { throw '-VpPathPairs has been removed; use -VpPairs plus -VpCorpus.' }
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $here "container-metrics.ps1")
 . (Join-Path $here "path-pair-corpus-inputs.ps1")
@@ -203,7 +175,7 @@ function To-WslPath([string]$p) {
 # Compiler resolution, explicit before discovered.  Dev builds of the
 # compiler live in WSL on this host, so an EXPLICIT -WslCompiler
 # routes every compile (controls included) through `wsl --` and beats
-# the discovery fallbacks — the %PS3DK% release extract in particular
+# the discovery fallbacks â€” the %PS3DK% release extract in particular
 # must never silently outrank a dev compiler the caller named (it did,
 # in this script's first -Corpus run: the release refused the MAD
 # probe and the run judged the wrong compiler).  Judging the compiler
@@ -253,22 +225,14 @@ New-Item -ItemType Directory -Force $artifacts | Out-Null
 Get-ChildItem -LiteralPath $artifacts -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
 $extraFlags = @()
-if ($LegacyLowering) { $extraFlags += "--legacy-lowering" }
-if ($GeneralLowering) { Write-Host "stager: -GeneralLowering is the default since the flip; accepted as a no-op for one release" }
-# The lowering path this stage compiles OUR side on.  Curated and exclude
-# list rows may name the path they apply to (default | general | both);
-# a row for the other path is skipped, not compiled, so a general-only
-# regression fixture cannot abort a default-path stage and a general-path
-# poisoner cannot hide a shader the default path compiles fine.
-$activePath = if ($LegacyLowering) { "legacy" } else { "general" }
+$activePath = 'general'
+if ($GeneralLowering) { Write-Host 'stager: -GeneralLowering is an accepted no-op; general lowering is the only implementation' }
 $containerMetricRows = @()
 function Row-AppliesToPath([string[]]$fields, [int]$col) {
-    $p = if ($fields.Count -gt $col -and $fields[$col].Trim()) { $fields[$col].Trim().ToLower() } else { "both" }
-    # 'default' meant the matcher before the flip; accepted as an alias of
-    # legacy for one release, and named when it is seen.
-    if ($p -eq "default") { if (-not $script:defaultAliasSaid) { Write-Host "stager: a list row says |default - the matcher is |legacy since the flip; alias accepted for one release"; $script:defaultAliasSaid = $true }; $p = "legacy" }
-    if ($p -notin @("legacy", "general", "both")) { throw "list row names an unknown path '$p' (general | legacy | both): $($fields -join '|')" }
-    return ($p -eq "both") -or ($p -eq $activePath)
+    $p = if ($fields.Count -gt $col -and $fields[$col].Trim()) { $fields[$col].Trim().ToLower() } else { 'both' }
+    if ($p -in @('legacy', 'default')) { throw "list row names removed lowering '$p'; migrate its shader/set to reference-backed coverage: $($fields -join '|')" }
+    if ($p -notin @('general', 'both')) { throw "list row names an unknown path '$p' (general | both): $($fields -join '|')" }
+    return $true
 }
 
 # Auto-Value: the host copy of the guest's auto_value (main.c).  FNV-1a
@@ -449,16 +413,14 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
     $srcPath = if ($Absolute) { $src } else { Join-Path $here "shaders\$src" }
     # [string[]] on purpose: a one-element array collapses to a String on
     # assignment, and splatting a String splats its CHARACTERS (measured:
-    # "- - g e n e r a l ..." reached the compiler).  Passed below as
-    # @($pathFlags), the array-subexpression form, never as @pathFlags.
-    # An EXPLICIT lowering on the call wins over the run's path flags: the
-    # instruments (controls, probes, coverage FPs) name --general-lowering
-    # because they ride the general path whatever the run judges, and under
-    # -LegacyLowering they received both flags and the matcher won - the
-    # legacy stage died on sd_mad_probe, a probe the matcher refuses by
-    # design (measured 2026-09-02 on the first flipped legacy run).
-    $explicit = @($flags | Where-Object { $_ -eq "--general-lowering" -or $_ -eq "--legacy-lowering" })
+    # "- - g e n e r a l ..." reached the compiler). The final compileFlags
+    # array is used unchanged by both invocation and input provenance.
+    # Explicit general flags override inherited flags without changing provenance.
+    $explicit = @($flags | Where-Object { $_ -eq "--general-lowering" })
     [string[]]$pathFlags = if ($NoExtraFlags -or $explicit.Count -gt 0) { @() } else { @($extraFlags) }
+    [string[]]$compileFlags = @(@($flags)+@($pathFlags) | Where-Object { $null -ne $_ })
+    $inputs = Get-ShaderCompileInputs $srcPath @(@($compileFlags)+@('-p',$Profile))
+    $script:containerCompileInputs.Remove([IO.Path]::GetFullPath($dst))
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     # Our compiler reports a refusal on stderr; under "Stop" a redirected
     # native stderr line is a terminating error (same trap as the
@@ -469,14 +431,15 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
         # timeout(1) inside WSL: an uncurated corpus shader must not be
         # able to stall the whole stage on a hung compile.
         $global:LASTEXITCODE = -1
-        $null = & wsl -- timeout 30s $WslCompiler @flags @($pathFlags) -p $Profile `
+        $null = & wsl -- timeout 30s $WslCompiler @compileFlags -p $Profile `
             --emit-container (To-WslPath $dst) (To-WslPath $srcPath) 2>&1
     } else {
         $global:LASTEXITCODE = -1
-        $null = & $Rsxcgc @flags @($pathFlags) -p $Profile --emit-container $dst $srcPath 2>&1
+        $null = & $Rsxcgc @compileFlags -p $Profile --emit-container $dst $srcPath 2>&1
     }
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
+    Assert-ShaderCompileInputs $inputs
     # Published for the refusal sidecar: rc 124 is timeout(1) inside WSL,
     # -1 is a launch that never set an exit code - neither is a refusal,
     # and a sidecar that cannot tell them apart once recorded a transient
@@ -488,7 +451,7 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
     $ok = ($rc -eq 0) -and (Test-Path -LiteralPath $dst) -and ((Get-Item $dst).Length -gt 0)
     if (-not $ok) {
         if ($NoThrow) { return $false }
-        # Name the flags too: a flagged curated row (t_3bf3ce95) that refuses on
+        # Name the flags too: a flagged curated row (general-lowering-default) that refuses on
         # a compiler without its flag must say WHICH flag, not just which shader.
         $allFlags = @(@($flags) + @($pathFlags)) | Where-Object { $_ }
         $flagNote = if ($allFlags.Count) { " [flags: $($allFlags -join ' ')]" } else { "" }
@@ -496,6 +459,7 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
         throw "compile produced empty container: $src"
     }
     Write-Host "stager: $label -> $(Split-Path -Leaf $dst) ($((Get-Item $dst).Length) bytes)"
+    $script:containerCompileInputs[[IO.Path]::GetFullPath($dst)] = $inputs
     return $true
 }
 
@@ -531,6 +495,10 @@ $uniforms = @(
     "# shader-differential uniform sets -- generated by stage-differential.ps1",
     "# fields: set|name|x,y,z,w",
     "u1|u_color|0.75,0.25,0.5,1.0"
+    # Packed-depth factors stay patchable. Keep these probes below output
+    # saturation; generic auto values saturate the precise integer decode.
+    "td-normal|_depth_factor|0.25,0.5,0.125,0"
+    "td-precise|_depth_factor_precise|0.001953125,0.00000762939453125,0.0000000298023223876953125,0"
 )
 Set-Content -LiteralPath (Join-Path $root "uniforms.txt") -Value ($uniforms -join "`n") -Encoding Ascii
 
@@ -635,6 +603,9 @@ if ($Corpus) {
 # compile then reports -1).  Returns $true iff a non-empty container
 # exists afterwards.
 function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_fp_rsx") {
+    $inputs = Get-ShaderCompileInputs $src @('-p',$Profile)
+    $oracleHash = (Get-FileHash -LiteralPath $ReferenceCompiler -Algorithm SHA256).Hash.ToLowerInvariant()
+    $script:containerCompileInputs.Remove([IO.Path]::GetFullPath($dst))
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -642,6 +613,12 @@ function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_f
     $null = & $ReferenceCompiler -p $Profile -o $dst $src 2>&1
     $refRc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
+    Assert-ShaderCompileInputs $inputs
+    if ((Get-FileHash -LiteralPath $ReferenceCompiler -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oracleHash) {
+        throw 'reference compiler changed during compile'
+    }
+    $inputs | Add-Member NoteProperty OracleHash $oracleHash
+    $script:containerCompileInputs[[IO.Path]::GetFullPath($dst)] = $inputs
     $script:lastCompileRc = $refRc
     return ($refRc -eq 0) -and (Test-Path -LiteralPath $dst) -and ((Get-Item $dst).Length -gt 0)
 }
@@ -727,7 +704,7 @@ if ($ReferenceCompiler) {
     $manifest += "B|control-discard-blind|discard_never|controls/discard_blind.fpo|controls/discard_blind.fpo|0"
     Write-Host "stager: discard controls staged (reference-compiled; kill bands of 16 vs 32 columns, and a KIL that never fires)"
 
-    # Every declared output (t_678a4dab): the guest judges COLOR1..3 and
+    # Every declared output (differential-manifest-judging): the guest judges COLOR1..3 and
     # the exported depth, deriving each side's output set from its
     # container, and these ten reference-compiled controls are what prove
     # it can before any row leans on it.  MRT: control-mrt-mismatch
@@ -787,7 +764,7 @@ if ($ReferenceCompiler) {
         "B|control-depthonly-mismatch|depthonly_off|controls/depthonly_ctrl.fpo|controls/depthonly_twin.fpo|0"
     )
     # INSTRUMENT ROWS, not proving rows: they gate nothing, they ASK a
-    # question the declarations cannot answer (t_96daf53b).  Both sides of
+    # question the declarations cannot answer (half-colour-depth-control).  Both sides of
     # each pair are reference-compiled, and what they share is the CONTAINER
     # difference, not a source one: outputFromH0 plus the output
     # instruction's register and precision bits, and nothing else - three
@@ -830,13 +807,13 @@ if ($ReferenceCompiler) {
     # curated shader that refuses is a finding and aborts), while a
     # -GeneralLowering corpus sweep must be able to run without it -
     # discard-blend/fpshader, for one, refuses on the general path until
-    # CF-2 lands (t_91bbd575).
+    # CF-2 lands (general-path-discard).
     $ReferencePairs = Get-ReferencePairsPathForStage `
         -ReferencePairs $ReferencePairs `
         -DefaultPath (Join-Path $rig "reference-pairs.txt") `
         -ReferenceTreeCorpus ([bool]$ReferenceTreeCorpus) `
         -ReferenceCorpus ([bool]$ReferenceCorpus) `
-        -PathPairs ([bool]$PathPairs)
+        -PathPairs $false
     $pairLines = @()
     if ($ReferencePairs -ne '-') {
         $pairLines = @(Get-Content $ReferencePairs | Where-Object { $_ -and -not $_.StartsWith("#") })
@@ -903,7 +880,7 @@ if ($ReferenceCompiler) {
 
         $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
         $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-        Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+        Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
             -Role "reference" -Profile "sce_fp_rsx" -Source $rel `
             -UniformSet $set -OursPath $ours -ReferencePath $ref `
             -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -960,6 +937,7 @@ if ($ReferenceCompiler) {
             $seenNames[$name] = 1
             $ours = Join-Path $refScratch "$name`_ours.fpo"
             $ref  = Join-Path $refScratch "$name`_ref.fpo"
+            Register-ContainerMetricAttempt -Name $name -Role reference-corpus -Profile sce_fp_rsx -Source $rel -UniformSet auto -SourcePath $f.FullName
             $okOurs = Compile-Shader $f.FullName $ours @() -Absolute -NoThrow
             $rcOurs = $script:lastCompileRc
             $okRef  = Compile-Reference $f.FullName $ref
@@ -976,7 +954,7 @@ if ($ReferenceCompiler) {
             if (-not ($okOurs -and $okRef)) { continue }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
                 -Role "reference-corpus" -Profile "sce_fp_rsx" -Source $rel `
                 -UniformSet "auto" -OursPath $ours -ReferencePath $ref `
                 -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -1029,11 +1007,12 @@ if ($ReferenceCompiler) {
             $seenNames[$name] = 1
             $ours = Join-Path $refScratch "$name`_rtours.fpo"
             $ref  = Join-Path $refScratch "$name`_rtref.fpo"
+            $rtSet = if (Has-FileScopeConst $f.FullName) { "0" } else { "auto" }
+            Register-ContainerMetricAttempt -Name $name -Role reference-tree-corpus -Profile sce_fp_rsx -Source $rel -UniformSet $rtSet -SourcePath $f.FullName
             $okOurs = Compile-Shader $f.FullName $ours @() -Absolute -NoThrow -NoExtraFlags
             $rcOurs = $script:lastCompileRc
             $okRef  = Compile-Reference $f.FullName $ref
             $rcRef  = $script:lastCompileRc
-            $rtSet = if (Has-FileScopeConst $f.FullName) { "0" } else { "auto" }
             if ($rel -eq "tests/regression/shader-readback/shaders/rb_refract_k0.fcg") {
                 $rtAttributions += "rb_refract_k0=known-deliberate(reference k==0 boundary diverges; readback row uses PPU-computed expected values)"
             } elseif ($rel -eq "tests/regression/shader-differential/must-reject/accept_array_uniform.fcg") {
@@ -1052,7 +1031,7 @@ if ($ReferenceCompiler) {
             if (-not ($okOurs -and $okRef)) { continue }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
                 -Role "reference-tree-corpus" -Profile "sce_fp_rsx" -Source $rel `
                 -UniformSet $rtSet -OursPath $ours -ReferencePath $ref `
                 -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -1077,153 +1056,12 @@ if ($ReferenceCompiler) {
         }
     }
 
-    # Path pairs: our default-path container vs our general-path container
-    # of the same shader, each preceded by its premise row (default vs
-    # reference).  Byte-identical default/general pairs are counted, not
-    # staged.  The premise is judged in the guest on pixels - the three
-    # shaders this was built for are byte-divergent from the reference and
-    # pixel-identical to it, so a host-side byte check would call every one
-    # of them unoracled.
-    if ($PathPairs) {
-        if (-not $PathPairsList) { $PathPairsList = Join-Path $rig "path-pairs.txt" }
-        $ppLines = @(Get-Content $PathPairsList | Where-Object { $_ -and -not $_.StartsWith("#") })
-        if ($ppLines.Count -eq 0) { throw "path-pairs list is empty: $PathPairsList" }
-        $ppDst = Join-Path $root "pathpair"
-        New-Item -ItemType Directory -Force $ppDst | Out-Null
-        $ppRows = @(); $ppIdentical = 0
-        foreach ($line in $ppLines) {
-            $fields = $line.Split("|")
-            $rel = $fields[0].Trim()
-            $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
-            $src = Resolve-StageTreePath -RepoRoot $repoRoot -CorpusRoot $corpusRoot -Rel $rel
-            if (-not (Test-Path $src)) { throw "path-pairs: shader not found: $rel" }
-            $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
-            if ($seenNames.ContainsKey($name)) {
-                $md5 = [System.Security.Cryptography.MD5]::Create()
-                $hex = ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($rel)) | ForEach-Object { $_.ToString("x2") }) -join ""
-                $name = "$name`_" + $hex.Substring(0, 6)
-            }
-            $seenNames[$name] = 1
-            if ($set -eq "auto") { Print-AutoValues $src $name }
-            $dDef = Join-Path $refScratch "$name`_legacy.fpo"
-            $dGen = Join-Path $refScratch "$name`_general.fpo"
-            $dRef = Join-Path $refScratch "$name`_pathref.fpo"
-            $null = Compile-Shader $src $dDef @("--legacy-lowering") -Absolute -NoExtraFlags
-            Assert-Deterministic $src $dDef @("--legacy-lowering") -NoExtraFlags -Label "$name (legacy)"
-            $null = Compile-Shader $src $dGen @() -Absolute -NoExtraFlags
-            Assert-Deterministic $src $dGen @("--general-lowering") -NoExtraFlags -Label "$name (general)"
-            if (-not (Compile-Reference $src $dRef)) { throw "path-pairs: reference compile failed or produced no container: $rel" }
-            $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
-            $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
-            $hRef = (Get-FileHash -Algorithm SHA256 -LiteralPath $dRef).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@legacy" `
-                -Role "path-pair-reference" -Profile "sce_fp_rsx" -Source $rel `
-                -UniformSet $set -OursPath $dDef -ReferencePath $dRef `
-                -ByteIdentical:($hD -eq $hRef) -Staged:($hD -ne $hG)
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@general" `
-                -Role "path-pair-reference" -Profile "sce_fp_rsx" -Source $rel `
-                -UniformSet $set -OursPath $dGen -ReferencePath $dRef `
-                -ByteIdentical:($hG -eq $hRef) -Staged:($hD -ne $hG)
-            if ($hD -eq $hG) { $ppIdentical++; Write-Host "stager: $rel default and general containers byte-identical -- not staged"; continue }
-            Copy-Item $dDef (Join-Path $ppDst "$name`_legacy.fpo") -Force
-            Copy-Item $dGen (Join-Path $ppDst "$name`_general.fpo") -Force
-            Copy-Item $dRef (Join-Path $ppDst "$name`_ref.fpo") -Force
-            $ppRows += "B|reference|$name@oracle|pathpair/$name`_legacy.fpo|pathpair/$name`_ref.fpo|$set"
-            $ppRows += "B|path-pair|$name@paths|pathpair/$name`_legacy.fpo|pathpair/$name`_general.fpo|$set"
-        }
-        $manifest += $ppRows
-        Write-Host "stager: path pairs: $($ppRows.Count / 2) pairs staged (each with its premise row), $ppIdentical byte-identical skipped"
-    }
 
-    if ($PathPairCorpus) {
-        if (-not $PathPairCorpusDir) {
-            $PathPairCorpusDir = $corpusRoot
-        }
-        if (-not (Test-Path -LiteralPath $PathPairCorpusDir -PathType Container)) {
-            throw "path-pair corpus root not a directory: $PathPairCorpusDir"
-        }
-        $pcRoot = (Resolve-Path -LiteralPath $PathPairCorpusDir).Path.TrimEnd('\')
-        if (-not $PathPairCorpusManifest -and (Test-Path -LiteralPath (Join-Path $pcRoot ".git"))) {
-            $PathPairCorpusManifest = Join-Path $rig "path-pair-corpus.txt"
-        }
-        $pcFileRows = @(Get-PathPairCorpusFiles -Root $pcRoot -Manifest $PathPairCorpusManifest)
-        if ($pcFileRows.Count -eq 0) { throw "path-pair corpus is empty: $pcRoot" }
-        $pcExcludeFile = if ($ReferenceCorpusExclude) { $ReferenceCorpusExclude } else { Join-Path $rig "reference-corpus-exclude.txt" }
-        $pcExcluded = @{}
-        if (Test-Path -LiteralPath $pcExcludeFile -PathType Leaf) {
-            foreach ($line in (Get-Content $pcExcludeFile | Where-Object { $_ -and -not $_.StartsWith("#") })) {
-                $ef = $line.Split("|")
-                $ep = if ($ef.Count -gt 2 -and $ef[2].Trim()) { $ef[2].Trim().ToLower() } else { "both" }
-                # The general container is always compiled here, so rows
-                # naming general or both apply regardless of -GeneralLowering.
-                if ($ep -in @("general", "both")) { $pcExcluded[$ef[0].Trim()] = $line }
-            }
-        }
-        $pcDst = Join-Path $root "pathpair"
-        New-Item -ItemType Directory -Force $pcDst | Out-Null
-        $pcRefusedPath = Join-Path $root "path-pair-corpus-refused.txt"
-        $pcRefusedRows = @("# shader-differential path-pair corpus (gate 1) refusals -- generated by stage-differential.ps1",
-                           "# fields: name|side|corpus-relative path|rc.  side=general on a shader the default path compiles is a GATE-1 FAILURE;",
-                           "#         side=default is out of the gate's scope (the default path refuses it today); side=reference leaves the pair unoracled.")
-        $pcRows = @(); $pcStaged = 0; $pcIdentical = 0; $pcDefRefused = 0; $pcGenRefused = 0; $pcRefRefused = 0; $pcExcl = 0; $pcConstSet0 = 0
-        foreach ($fileRow in $pcFileRows) {
-            $f = $fileRow.File
-            $rel = $fileRow.RelativePath
-            if ($pcExcluded.ContainsKey($rel)) { $pcExcl++; Write-Host "stager: path-pair corpus excluded $rel ($($pcExcluded[$rel]))"; continue }
-            $name = $f.Name
-            if ($name.EndsWith('.cg')) { $name = $name.Substring(0, $name.Length - 3) }
-            if ($name.EndsWith('.fcg')) { $name = $name.Substring(0, $name.Length - 4) }
-            if ($seenNames.ContainsKey($name)) {
-                $md5 = [System.Security.Cryptography.MD5]::Create()
-                $hex = ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($rel)) | ForEach-Object { $_.ToString("x2") }) -join ""
-                $name = "$name" + "_" + $hex.Substring(0, 6)
-            }
-            $seenNames[$name] = 1
-            $dDef = Join-Path $refScratch ("$name" + "_pclegacy.fpo")
-            $dGen = Join-Path $refScratch ("$name" + "_pcgeneral.fpo")
-            $dRef = Join-Path $refScratch ("$name" + "_pcref.fpo")
-            if (-not (Compile-Shader $f.FullName $dDef @("--legacy-lowering") -Absolute -NoThrow -NoExtraFlags)) {
-                $pcDefRefused++; $pcRefusedRows += "$name|legacy|$rel|$($script:lastCompileRc)"; continue
-            }
-            if (-not (Compile-Shader $f.FullName $dGen @() -Absolute -NoThrow -NoExtraFlags)) {
-                $pcGenRefused++; $pcRefusedRows += "$name|general|$rel|$($script:lastCompileRc)"; continue
-            }
-            if (-not (Compile-Reference $f.FullName $dRef)) {
-                $pcRefRefused++; $pcRefusedRows += "$name|reference|$rel|$($script:lastCompileRc)"; continue
-            }
-            $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
-            $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
-            $hRef = (Get-FileHash -Algorithm SHA256 -LiteralPath $dRef).Hash
-            $pcSet = "auto"
-            if (Has-FileScopeConst $f.FullName) { $pcSet = "0" }
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@legacy" `
-                -Role "path-pair-corpus-reference" -Profile "sce_fp_rsx" -Source $rel `
-                -UniformSet $pcSet -OursPath $dDef -ReferencePath $dRef `
-                -ByteIdentical:($hD -eq $hRef) -Staged:($hD -ne $hG)
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@general" `
-                -Role "path-pair-corpus-reference" -Profile "sce_fp_rsx" -Source $rel `
-                -UniformSet $pcSet -OursPath $dGen -ReferencePath $dRef `
-                -ByteIdentical:($hG -eq $hRef) -Staged:($hD -ne $hG)
-            if ($hD -eq $hG) { $pcIdentical++; continue }
-            if ($pcSet -eq "0") { $pcConstSet0++; Write-Host "stager: path-pair corpus $rel has a file-scope const - staged under set 0, not auto (see Has-FileScopeConst)" }
-            Copy-Item $dDef (Join-Path $pcDst ("$name" + "_legacy.fpo")) -Force
-            Copy-Item $dGen (Join-Path $pcDst ("$name" + "_general.fpo")) -Force
-            Copy-Item $dRef (Join-Path $pcDst ("$name" + "_ref.fpo")) -Force
-            $pcRows += "B|reference|$name@oracle|pathpair/$name" + "_legacy.fpo|pathpair/$name" + "_ref.fpo|$pcSet|blind-ok"
-            $pcRows += "B|path-pair|$name@paths|pathpair/$name" + "_legacy.fpo|pathpair/$name" + "_general.fpo|$pcSet|blind-ok"
-            $pcStaged++
-        }
-        Set-Content -LiteralPath $pcRefusedPath -Value ($pcRefusedRows -join "`n") -Encoding Ascii
-        if (($pcStaged + $pcIdentical + $pcDefRefused + $pcGenRefused + $pcRefRefused) -eq 0) { throw "path-pair corpus sweep compiled nothing" }
-        $manifest += $pcRows
-        $pcInputLabel = if ($PathPairCorpusManifest) { "manifest $PathPairCorpusManifest" } else { "filesystem walk" }
-        Write-Host "stager: path-pair corpus (gate 1): $($pcFileRows.Count) shaders from $pcInputLabel, $pcExcl excluded, $pcDefRefused legacy-refused (out of scope), $pcGenRefused GENERAL-REFUSED (gate failures), $pcRefRefused reference-refused (unoracled), $pcIdentical byte-identical legacy/general, $pcStaged pairs staged ($pcConstSet0 under set 0 for a file-scope const)"
-    }
 }
 
 # ---- VP rows (increment 4, gate 5) ----
-if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
-    if (-not $ReferenceCompiler) { throw "-VpPairs / -VpCorpus / -VpPathPairs need the reference compiler (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)" }
+if ($VpPairs -or $VpCorpus) {
+    if (-not $ReferenceCompiler) { throw "-VpPairs / -VpCorpus need the reference compiler (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)" }
     $vpScratch = Join-Path $env:TEMP "sd-vp-stage"
     if (Test-Path $vpScratch) { Remove-Item -Recurse -Force $vpScratch }
     New-Item -ItemType Directory -Force $vpScratch | Out-Null
@@ -1231,15 +1069,14 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     # Coverage FPs, one per channel the guest can judge (main.c
     # k_vp_channels): cov paints 1 (which pixels the VP covers), the rest
     # paint one interpolated channel as lane * 0.5 + 0.5 so [-1, 1]
-    # survives RGBA8.  Compiled by our DEFAULT path (never the general one,
-    # whatever the stage's path) and byte-checked against the reference;
+    # survives RGBA8.  Compiled by the general lowering and byte-checked against the reference;
     # a provable channel that is not byte-identical is judged as a
     # reference row before any VP row (below).  Proven either way, never
     # assumed.
     $vpChannels = @(@{ key = "cov"; src = "void main(out float4 color : COLOR) { color = float4(1.0f, 1.0f, 1.0f, 1.0f); }" })
     # Spelled v * float4(0.5..) + float4(0.5..), the fused-MAD shape, and
     # the spelling has a history: on 963018a the default path emitted the
-    # literal multiplicand of that MAD as ZERO (t_a1f43b12, found by these
+    # literal multiplicand of that MAD as ZERO (mad-literal-data, found by these
     # very rows on 2026-09-02) and the instrument moved to (v + 1) * 0.5
     # for one evening.  Measured on 6b2f010 (the fix): nine of the thirteen
     # coverage FPs are byte-identical to the reference and stage no
@@ -1280,7 +1117,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
         if (-not $okOurs) {
             # A coverage FP is an instrument, not the program under test:
             # when the default path refuses its shape (fog's
-            # `float4(v,v,v,1) * k + k` - t_45ddb7c6's family, 2026-09-02)
+            # `float4(v,v,v,1) * k + k` - legacy-fog-expression's family, 2026-09-02)
             # compile it on the general path instead, so a VP row declaring
             # the channel is judged rather than reported vp-channel-missing.
             # Both VP containers of a row draw under the SAME coverage FP, so
@@ -1344,7 +1181,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     # rig control proves the guest's synthesis and upload against the
     # host's prediction, and must not rest on the compiler under test (the
     # first version compiled both on our general path, and the row went red
-    # on two of OUR defects - t_a1f43b12's sibling in the VP pool - rather
+    # on two of OUR defects - mad-literal-data's sibling in the VP pool - rather
     # than on anything the control measures).  Our compiler's handling of
     # the same source is the curated vp-reference row sd_vp_auto_ctrl.
     if (-not (Compile-Reference (Join-Path $here "shaders\sd_vp_auto_ctrl.vcg") (Join-Path $controls "vp_auto_ctrl.vpo") -Profile sce_vp_rsx)) { throw "reference compile of sd_vp_auto_ctrl.vcg failed" }
@@ -1411,7 +1248,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             if (-not (Compile-Reference $src $ref -Profile sce_vp_rsx)) { throw "vp-pairs: reference compile failed or produced no container: $rel" }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
                 -Role "vp-reference" -Profile "sce_vp_rsx" -Source $rel `
                 -UniformSet $set -OursPath $ours -ReferencePath $ref `
                 -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -1461,6 +1298,9 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             $vpSeen[$name] = 1
             $ours = Join-Path $vpScratch ("$name" + "_ours.vpo")
             $ref  = Join-Path $vpScratch ("$name" + "_ref.vpo")
+            $vcSet = "auto"
+            if (Has-FileScopeConst $f.FullName) { $vcSet = "0" }
+            Register-ContainerMetricAttempt -Name $name -Role vp-corpus-reference -Profile sce_vp_rsx -Source $rel -UniformSet $vcSet -SourcePath $f.FullName
             $okOurs = Compile-Shader $f.FullName $ours @() -Absolute -NoThrow -Profile sce_vp_rsx
             $rcOurs = $script:lastCompileRc
             $okRef  = Compile-Reference $f.FullName $ref -Profile sce_vp_rsx
@@ -1470,9 +1310,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
             if (-not ($okOurs -and $okRef)) { continue }
             $hOurs = (Get-FileHash -Algorithm SHA256 -LiteralPath $ours).Hash
             $hRef  = (Get-FileHash -Algorithm SHA256 -LiteralPath $ref).Hash
-            $vcSet = "auto"
-            if (Has-FileScopeConst $f.FullName) { $vcSet = "0" }
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name $name `
+            Add-ContainerMetricsRow ([ref]$containerMetricRows) -RequireInputIdentity -Name $name `
                 -Role "vp-corpus-reference" -Profile "sce_vp_rsx" -Source $rel `
                 -UniformSet $vcSet -OursPath $ours -ReferencePath $ref `
                 -ByteIdentical:($hOurs -eq $hRef) -Staged:($hOurs -ne $hRef)
@@ -1488,110 +1326,7 @@ if ($VpPairs -or $VpCorpus -or $VpPathPairs) {
     }
     $manifest += $vpRows
 
-    if ($VpPathPairs) {
-        # Candidates: the curated list (every row, whatever its path column -
-        # the sweep compiles both paths itself) plus the VP corpus dir.
-        if (-not $VpPairsList) { $VpPairsList = Join-Path $rig "vp-pairs.txt" }
-        if (-not $VpCorpusDir) {
-            $VpCorpusDir = $corpusRoot
-        }
-        $vppCands = @()
-        foreach ($line in @(Get-Content $VpPairsList | Where-Object { $_ -and -not $_.StartsWith("#") })) {
-            $fields = $line.Split("|")
-            $rel = $fields[0].Trim()
-            $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
-            $src = Resolve-StageTreePath -RepoRoot $repoRoot -CorpusRoot $corpusRoot -Rel $rel
-            if (-not (Test-Path $src)) { throw "vp-pairs: shader not found: $rel" }
-            $vppCands += @{ src = $src; rel = $rel; set = $set }
-        }
-        # A missing corpus root ABORTS, as it does for -VpCorpus and the
-        # fragment -PathPairCorpus: gate 5's number must never come from a
-        # run that silently shrank to the curated list (review finding,
-        # codex), and the gate line below prints the RESOLVED corpus root and
-        # the candidate count so a wrong directory is as visible as a missing
-        # one (claude).
-        if (-not (Test-Path -LiteralPath $VpCorpusDir -PathType Container)) { throw "vp path pairs: corpus root not a directory: $VpCorpusDir (gate 5 needs the corpus; pass -VpCorpusDir)" }
-        $vppRoot = (Resolve-Path -LiteralPath $VpCorpusDir).Path.TrimEnd('\')
-        $vppFiles = @(Get-ChildItem -LiteralPath $vppRoot -Recurse -File |
-            Where-Object { $_.Name -like '*.vcg' -or $_.Name -like '*_v.cg' } |
-            Where-Object {
-                $r = $_.FullName.Substring($vppRoot.Length + 1).Replace('\', '/')
-                -not ($r.StartsWith('build/') -or $r.Contains('/_work/') -or $r.StartsWith('_work/'))
-            } | Sort-Object FullName)
-        # A shader that is BOTH curated and in the corpus is one candidate,
-        # not two: keyed on the resolved full path (a pairing instrument
-        # keys on full path or its hash, never a basename), the curated
-        # entry wins and keeps its uniform set.  Dormant today (no curated
-        # VP lives under the corpus root); the count is printed so a
-        # duplicate is visible the day one appears (claude's note on the
-        # gate-5 sweep, 2026-09-02).
-        $vppSeen = @{}
-        foreach ($c in $vppCands) { $vppSeen[(Resolve-Path -LiteralPath $c.src).Path.ToLowerInvariant()] = 1 }
-        $vppDupes = 0
-        $vppCurated = $vppCands.Count
-        foreach ($f in $vppFiles) {
-            $key = $f.FullName.ToLowerInvariant()
-            if ($vppSeen.ContainsKey($key)) { $vppDupes++; continue }
-            $vppSeen[$key] = 1
-            $rel = $f.FullName.Substring($vppRoot.Length + 1).Replace('\', '/')
-            $set = if (Has-FileScopeConst $f.FullName) { "0" } else { "auto" }
-            $vppCands += @{ src = $f.FullName; rel = $rel; set = $set }
-        }
-        if ($vppDupes -gt 0) { Write-Host "stager: vp path pairs: $vppDupes corpus candidate(s) already curated - counted once, curated set kept" }
 
-        if ($vppCands.Count -eq 0) { throw "vp path pairs: no candidates (list empty and no corpus dir)" }
-        $vppDst = Join-Path $root "vppathpair"
-        New-Item -ItemType Directory -Force $vppDst | Out-Null
-        $vppRefusedPath = Join-Path $root "vp-path-pair-refused.txt"
-        $vppRefusedRows = @("# shader-differential vp path pairs (gate 5) refusals -- generated by stage-differential.ps1",
-                            "# fields: name|side|path|rc.  side=general on a VP the default path compiles is a GATE-5 FAILURE;",
-                            "#         side=default is out of the gate's scope; side=reference leaves the pair unoracled.")
-        $vppSeen = @{}
-        $vppRows = @(); $vppStaged = 0; $vppIdentical = 0; $vppDefRefused = 0; $vppGenRefused = 0; $vppRefRefused = 0
-        foreach ($c in $vppCands) {
-            $name = [System.IO.Path]::GetFileNameWithoutExtension($c.src)
-            if ($vppSeen.ContainsKey($name)) {
-                $md5 = [System.Security.Cryptography.MD5]::Create()
-                $hex = ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($c.rel)) | ForEach-Object { $_.ToString("x2") }) -join ""
-                $name = "$name" + "_" + $hex.Substring(0, 6)
-            }
-            $vppSeen[$name] = 1
-            $dDef = Join-Path $vpScratch ("$name" + "_pplegacy.vpo")
-            $dGen = Join-Path $vpScratch ("$name" + "_ppgeneral.vpo")
-            $dRef = Join-Path $vpScratch ("$name" + "_ppref.vpo")
-            if (-not (Compile-Shader $c.src $dDef @("--legacy-lowering") -Absolute -NoThrow -NoExtraFlags -Profile sce_vp_rsx)) {
-                $vppDefRefused++; $vppRefusedRows += "$name|legacy|$($c.rel)|$($script:lastCompileRc)"; continue
-            }
-            if (-not (Compile-Shader $c.src $dGen @() -Absolute -NoThrow -NoExtraFlags -Profile sce_vp_rsx)) {
-                $vppGenRefused++; $vppRefusedRows += "$name|general|$($c.rel)|$($script:lastCompileRc)"; continue
-            }
-            if (-not (Compile-Reference $c.src $dRef -Profile sce_vp_rsx)) {
-                $vppRefRefused++; $vppRefusedRows += "$name|reference|$($c.rel)|$($script:lastCompileRc)"; continue
-            }
-            $hD = (Get-FileHash -Algorithm SHA256 -LiteralPath $dDef).Hash
-            $hG = (Get-FileHash -Algorithm SHA256 -LiteralPath $dGen).Hash
-            $hRef = (Get-FileHash -Algorithm SHA256 -LiteralPath $dRef).Hash
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@legacy" `
-                -Role "vp-path-pair-reference" -Profile "sce_vp_rsx" -Source $($c.rel) `
-                -UniformSet $($c.set) -OursPath $dDef -ReferencePath $dRef `
-                -ByteIdentical:($hD -eq $hRef) -Staged:($hD -ne $hG)
-            Add-ContainerMetricsRow ([ref]$containerMetricRows) -Name "$name@general" `
-                -Role "vp-path-pair-reference" -Profile "sce_vp_rsx" -Source $($c.rel) `
-                -UniformSet $($c.set) -OursPath $dGen -ReferencePath $dRef `
-                -ByteIdentical:($hG -eq $hRef) -Staged:($hD -ne $hG)
-            if ($hD -eq $hG) { $vppIdentical++; continue }
-            Copy-Item $dDef (Join-Path $vppDst ("$name" + "_legacy.vpo")) -Force
-            Copy-Item $dGen (Join-Path $vppDst ("$name" + "_general.vpo")) -Force
-            Copy-Item $dRef (Join-Path $vppDst ("$name" + "_ref.vpo")) -Force
-            $vppRows += "B|vp-reference|$name@oracle|vppathpair/$name" + "_legacy.vpo|vppathpair/$name" + "_ref.vpo|$($c.set)"
-            $vppRows += "B|vp-path-pair|$name@paths|vppathpair/$name" + "_legacy.vpo|vppathpair/$name" + "_general.vpo|$($c.set)"
-            $vppStaged++
-        }
-        Set-Content -LiteralPath $vppRefusedPath -Value ($vppRefusedRows -join "`n") -Encoding Ascii
-        if (($vppStaged + $vppIdentical + $vppDefRefused + $vppGenRefused + $vppRefRefused) -eq 0) { throw "vp path pairs compiled nothing" }
-        $manifest += $vppRows
-        Write-Host "stager: vp path pairs (gate 5): $($vppCands.Count) candidates ($vppCurated curated from $VpPairsList + $($vppCands.Count - $vppCurated) from $vppRoot, $vppDupes already curated and counted once), $vppDefRefused legacy-refused (out of scope), $vppGenRefused GENERAL-REFUSED (gate failures), $vppRefRefused reference-refused (unoracled), $vppIdentical byte-identical legacy/general, $vppStaged pairs staged (sidecar: vp-path-pair-refused.txt)"
-    }
 }
 
 $metricsPath = Join-Path $root "container-metrics.csv"
@@ -1600,16 +1335,25 @@ if ($containerMetricRows.Count -gt 0) {
 } else {
     Write-Host "SDIFF-METRICS|compared=0|instruction_mismatches=0|register_mismatches=0|both_mismatches=0|worse_instructions=0|better_instructions=0|worse_registers=0|better_registers=0|pixel_proof_candidates=0|pixel_proof_rows=0"
 }
-$metricsGate = Write-ContainerMetricsGateReport @($containerMetricRows) (Join-Path $rig "container-metrics-baseline.csv") -ReportOnly:$MetricsReportOnly
-if ($metricsGate.ShouldFail) {
-    throw "container metrics gate failed: $($metricsGate.Summary.BaselineRegressions) baseline regression(s)"
-}
+$metricsGate = Invoke-ContainerMetricsStageGate @($containerMetricRows) (Join-Path $rig "container-metrics-baseline.csv") -ReportOnly:$MetricsReportOnly -AllowancePath $MetricsAllowancePath -EvidencePath (Join-Path $root 'container-metrics-gate.json') -AttemptedInputs $script:containerMetricAttempts
 # The proving controls go ahead of the first corpus row by construction, and
 # the manifest is refused if the set is incomplete, duplicated or out of
 # order - the guest's gates could not open and every MRT/depth row would be
 # withheld.  Refusing here says so before a boot is wasted.
+# These controls must run before a corpus row can use a new binder kind.
+. (Join-Path $here "binder-controls.ps1")
+$binderScratch = Join-Path $autoScratch "binder-controls"
+$binderRows = New-BinderControls $binderScratch $controls {
+    param($src, $dst)
+    if ($ReferenceCompiler) {
+        if (-not (Compile-Reference $src $dst)) { throw "binder control failed to compile: $src" }
+    } else {
+        Compile-Shader $src $dst @("--general-lowering") -Absolute
+    }
+}
+$manifest = Add-ProvingControls $manifest $binderRows
 if ($provingRows) { $manifest = Add-ProvingControls $manifest ($provingRows + $h0Rows) }
-$controlProblems = Get-ControlManifestProblems $manifest
+$controlProblems = (Get-ControlManifestProblems $manifest) + (Get-BinderManifestProblems $manifest)
 if ($controlProblems.Count -gt 0) {
     throw "manifest: proving controls invalid - $($controlProblems -join '; ')"
 }

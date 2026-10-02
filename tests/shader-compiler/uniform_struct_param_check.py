@@ -1,0 +1,428 @@
+"""A `uniform <struct>` ENTRY PARAMETER is one uniform per member (t_31ed8939).
+
+Measured on sce-cgc 475 (libretro's COMPAT_IN_FRAGMENT `uniform input IN`):
+every member is its own parameter record named `IN.member`, all sharing the
+struct parameter's paramno; a later parameter keeps its own source ordinal;
+a member the program never reads is still listed, unreferenced.  Before the
+fix a member read became an attribute load and the program was refused as an
+unsupported input semantic (133 community shaders).
+
+The records are pinned to those measured facts.  Values are judged by writing
+chosen uniform values into the container's embedded constant blocks (at the
+offsets its own records list) and running fp_eval: the result must equal the
+Cg expression, and bumping any one uniform must change it.
+"""
+import argparse
+import itertools
+import struct
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import fp_eval
+from uniform_container_check import Container
+
+FLOAT, FLOAT2, FLOAT4 = 1045, 1046, 1048
+UNIFORM = 4102
+
+FP_U2 = """struct out_vertex { float4 position : POSITION; float2 texCoord : TEXCOORD0; };
+struct input { float2 video_size; float2 texture_size; float2 output_size; float frame_count; };
+float4 main(out_vertex VOUT, uniform float4 pre, uniform input IN, uniform float post) : COLOR
+{ return float4(VOUT.texCoord * IN.texture_size + IN.video_size, IN.frame_count + post, pre.x); }
+"""
+# (name, type, paramno, referenced) for every uniform record, source order
+FP_U2_UNIFORMS = [('pre', FLOAT4, 1, 1),
+                  ('IN.video_size', FLOAT2, 2, 1), ('IN.texture_size', FLOAT2, 2, 1),
+                  ('IN.output_size', FLOAT2, 2, 0), ('IN.frame_count', FLOAT, 2, 1),
+                  ('post', FLOAT, 3, 1)]
+
+VP_V1 = """struct input { float2 video_size; float2 texture_size; float2 output_size; float frame_count; };
+struct out_vertex { float4 position : POSITION; float2 texCoord : TEXCOORD0; };
+out_vertex main(float4 position : POSITION, float2 texCoord : TEXCOORD0,
+                uniform float4x4 modelViewProj, uniform input IN, uniform float post)
+{ out_vertex OUT; OUT.position = mul(modelViewProj, position);
+  OUT.texCoord = texCoord * IN.texture_size + IN.video_size * post; return OUT; }
+"""
+# The reference gives NO register to an unread vertex uniform (t_67b3362b):
+# resource 3256, register -1, unreferenced; read ones are allocated in source
+# order, vectors from c[467] down, matrices from c[256] up.
+UNASSIGNED = 3256
+VP_V1_MEMBERS = [('IN.video_size', FLOAT2, 3), ('IN.texture_size', FLOAT2, 3),
+                 ('IN.output_size', FLOAT2, 3), ('IN.frame_count', FLOAT, 3), ('post', FLOAT, 4)]
+VP_V1_REGISTERS = {'modelViewProj': 256, 'IN.video_size': 467, 'IN.texture_size': 466, 'post': 465,
+                   'IN.output_size': None, 'IN.frame_count': None}
+# Plain parameters and file-scope uniforms, matrices and vectors, read and not.
+VP_UNREAD = """uniform float4x4 g_unused_m;
+uniform float4 g_a;
+uniform float4 g_unused_v;
+float4 main(float4 p : POSITION, uniform float4x4 unused_m, uniform float4 unused_v,
+            uniform float4x4 used_b, uniform float4 post) : POSITION
+{ return mul(used_b, p) + post + g_a; }
+"""
+VP_UNREAD_REGISTERS = {'used_b': 256, 'post': 467, 'g_a': 466,
+                       'unused_m': None, 'unused_v': None, 'g_unused_m': None, 'g_unused_v': None}
+# Liveness is a SURVIVING use, not a syntactic one (measured): a uniform read
+# only into a dead local is unassigned too; and
+# an unread struct member BEFORE read ones moves no cursor.
+VP_LIVENESS = {
+    'dead_read': ("""float4 main(float4 p : POSITION, uniform float4 dead, uniform float4 live) : POSITION
+{ float4 unused = dead * 2.0; return p + live; }
+""", {'dead': None, 'live': 467}),
+    'dead_matrix': ("""uniform float4x4 g_m;
+float4 main(float4 p : POSITION, uniform float4x4 m, uniform float4 c) : POSITION
+{ float4 q = mul(g_m, p); return mul(m, p) + c; }
+""", {'m': 256, 'c': 467, 'g_m': None}),
+    'struct_first_unread': ("""struct input { float4 a; float4x4 m; float4 b; };
+float4 main(float4 p : POSITION, uniform input IN, uniform float4 post) : POSITION
+{ return mul(IN.m, p) + IN.b + post; }
+""", {'IN.a': None, 'IN.m': 256, 'IN.b': 467, 'post': 466}),
+}
+
+# A nested struct member is flattened by its full path (reference: IN.in1.a).
+NESTED = """struct inner { float2 a; };
+struct input { inner in1; float2 b; };
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * IN.b + IN.in1.a, 0, 1); }
+"""
+NESTED_UNIFORMS = [('IN.in1.a', FLOAT2, 1, 1), ('IN.b', FLOAT2, 1, 1)]
+# A parameter SHADOWS a file-scope uniform struct of the same name: main reads
+# the parameter, a helper reads the global, and a helper's default argument
+# names the global too (all measured: the reference lists both sets, the
+# parameter's at paramno 1 and the global's at -1).
+GLOBAL = 0xFFFFFFFF
+SHADOW_HELPER = """struct inner { float2 a; };
+struct input { inner in1; float2 b; };
+uniform input IN;
+float2 helper_global() { return IN.b + IN.in1.a; }
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * IN.b + IN.in1.a, helper_global()); }
+"""
+SHADOW_DEFAULT = """struct inner { float2 a; };
+struct input { inner in1; float2 b; };
+uniform input IN;
+float2 helper_def(float2 x = IN.b) { return x * 2.0; }
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * IN.b, helper_def()); }
+"""
+GLOBAL_NESTED = """struct inner { float2 a; };
+struct input { inner in1; float2 b; };
+uniform input G;
+float4 main(float2 tc : TEXCOORD0) : COLOR { return float4(tc * G.b + G.in1.a, 0, 1); }
+"""
+# A whole-struct copy of a flattened parameter into a file-scope struct that a
+# helper reads (libretro `IN_global = IN;`).  The destination is filled from A,
+# then REPLACED from B, and both members are read: a stale binding left from A
+# or a missed member from B shows up as a wrong value (review: codex).
+COPY_REPLACE = """struct input { float2 video_size; float2 texture_size; };
+input G;
+float2 helper() { return G.texture_size * 2.0 + G.video_size; }
+float4 main(float2 tc : TEXCOORD0, uniform input A, uniform input B) : COLOR { G = A; G = B; return float4(tc * helper(), 0, 1); }
+"""
+# A sampler member of a uniform struct parameter, reached through a global
+# sampler a helper samples (libretro `s0_global = REFERENCE.texture;`).
+# Measured: REFERENCE.texture is its own sampler record on texture unit 1
+# (resource 2049) at the struct's paramno 2.
+SAMPLER_MEMBER = """struct prev { float2 texture_size; sampler2D texture; };
+sampler2D s0_global;
+float4 helper(float2 uv) { return tex2D(s0_global, uv); }
+float4 main(float2 tc : TEXCOORD0, uniform sampler2D s0 : TEXUNIT0, uniform prev REFERENCE) : COLOR
+{ s0_global = REFERENCE.texture; return helper(tc * REFERENCE.texture_size) + tex2D(s0, tc); }
+"""
+SAMPLER2D, TEXUNIT0 = 1066, 2048
+# Copy edges (review: codex; the reference accepts both): self-assignment must
+# not erase the members it copies, and a chain copies to every destination
+# (H.a and G.b both read IN, not the file-scope uniforms H and G).
+SELF_COPY = """struct input { float2 a; float2 b; };
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { IN = IN; return float4(tc * IN.a + IN.b, 0, 1); }
+"""
+CHAIN_COPY = """struct input { float2 a; float2 b; };
+input G; input H;
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { H = (G = IN); return float4(tc * H.a + G.b, 0, 1); }
+"""
+# The reference records per-member defaults (IN.b = 1 2); not emitted yet,
+# so a struct parameter default is REFUSED (semantic analysis refuses it before
+# the IR builder's named refusal is reached) rather than silently dropped.
+STRUCT_DEFAULT = """struct input { float2 b; float k; };
+float4 main(float2 tc : TEXCOORD0, uniform input IN = { float2(1.0, 2.0), 3.0 }) : COLOR { return float4(tc * IN.b, IN.k, 1); }
+"""
+# The flattened parameter has no whole value.  Using it as one - a copy used
+# as a value, or the parameter passed whole to a helper - is a NAMED GAP (the
+# reference accepts both); it must refuse by name, never read nothing.
+VALUE_USES = {
+    'copy_as_value': """struct input { float2 a; float2 b; };
+input G;
+float2 f(input s) { return s.a + s.b; }
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * f(G = IN), 0, 1); }
+""",
+    'param_as_value': """struct input { float2 a; float2 b; };
+float2 f(input s) { return s.a + s.b; }
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * f(IN), 0, 1); }
+""",
+}
+# An ARRAY member is not flattened yet: refused by name (not measured as a
+# reference refusal - a named gap).
+ARRAY_MEMBER = """struct input { float2 a[2]; float2 b; };
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * IN.b, 0, 1); }
+"""
+
+
+def compile_one(compiler, work, name, text, profile):
+    src, dst = work / (name + '.cg'), work / (name + '.bin')
+    src.write_text(text)
+    run = subprocess.run([compiler, '-p', profile, '--emit-container', str(dst), str(src)],
+                         capture_output=True, text=True, timeout=60)
+    return run.returncode, (dst.read_bytes() if dst.exists() else b''), run.stderr
+
+
+def with_uniforms(blob, container, values):
+    """values: name -> lanes, or (name, paramno) -> lanes when a parameter
+    and a file-scope uniform share the name (paramno 0xFFFFFFFF = global)."""
+    out = bytearray(blob)
+    for record in container.records:
+        key = (record['name'], record['paramno'])
+        lanes = values.get(key, values.get(record['name']))
+        if lanes is None:
+            continue
+        lanes = list(lanes) + [0.0] * 4
+        for offset in record['offsets']:
+            for k in range(4):
+                word = struct.unpack('>I', struct.pack('>f', lanes[k]))[0]
+                word = ((word >> 16) | (word << 16)) & 0xffffffff  # halfword-swapped
+                struct.pack_into('>I', out, container.ucode + offset + 4 * k, word)
+    return bytes(out)
+
+
+def vp_registers(tag, recs, want):
+    """want[name] is a c[] register, or None for the unassigned record."""
+    bad = []
+    for name, reg in want.items():
+        r = recs.get(name)
+        if r is None:
+            bad.append('%s %s: no record' % (tag, name))
+            continue
+        got = (r['resource'], r['register'], r['referenced'])
+        if reg is None:
+            if got != (UNASSIGNED, 0xFFFFFFFF, 0):
+                bad.append('%s %s (resource, register, referenced) %s, want unassigned' % (tag, name, got))
+            rows = [k for k in recs if k.startswith(name + '[')]
+            for k in rows:
+                if (recs[k]['resource'], recs[k]['register'], recs[k]['referenced']) != (UNASSIGNED, 0xFFFFFFFF, 0):
+                    bad.append('%s %s row still allocated' % (tag, k))
+        elif r['register'] != reg or r['referenced'] != 1:
+            bad.append('%s %s register %d referenced %d, want c[%d] referenced' % (
+                tag, name, r['register'], r['referenced'], reg))
+    return bad
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('compiler')
+    args = ap.parse_args()
+    failures = []
+    if not fp_eval.self_test():
+        failures.append('fp_eval self-test failed')
+    with tempfile.TemporaryDirectory(prefix='uniform-struct-param-') as tmp:
+        work = Path(tmp)
+
+        rc, blob, err = compile_one(args.compiler, work, 'fp_u2', FP_U2, 'sce_fp_rsx')
+        if rc != 0 or not blob:
+            failures.append('fp_u2 refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            c = Container(blob)
+            got = [(r['name'], r['type'], r['paramno'], r['referenced'])
+                   for r in c.records if r['variability'] == UNIFORM]
+            if got != FP_U2_UNIFORMS:
+                failures.append('fp_u2 uniform records %s, want %s' % (got, FP_U2_UNIFORMS))
+            base = {'IN.video_size': [0.5, 0.25], 'IN.texture_size': [2.0, 4.0],
+                    'IN.output_size': [7.0, 7.0], 'IN.frame_count': [3.0],
+                    'pre': [0.75, 0.5, 0.25, 1.0], 'post': [0.5]}
+
+            def expect(u, tc):
+                return [tc[0] * u['IN.texture_size'][0] + u['IN.video_size'][0],
+                        tc[1] * u['IN.texture_size'][1] + u['IN.video_size'][1],
+                        u['IN.frame_count'][0] + u['post'][0], u['pre'][0]]
+            bad = 0
+            grid = [-1.0, -0.5, 0.0, 0.25, 0.5, 1.0]
+            for tc in itertools.product(grid, repeat=2):
+                got_v = fp_eval.evaluate(with_uniforms(blob, c, base), {'TEX0': [tc[0], tc[1], 0, 0]})
+                if got_v != expect(base, tc):
+                    bad += 1
+                    if bad == 1:
+                        failures.append('fp_u2 tc=%s got %s want %s' % (tc, got_v, expect(base, tc)))
+            print('  fp_u2 values: %s' % ('ok (%d inputs)' % len(grid) ** 2 if not bad else 'WRONG'))
+            # every READ uniform must reach the output (the injection is live)
+            for name in ('IN.video_size', 'IN.texture_size', 'IN.frame_count', 'pre', 'post'):
+                bumped = dict(base)
+                bumped[name] = [v + 1.0 for v in base[name]]
+                a = fp_eval.evaluate(with_uniforms(blob, c, base), {'TEX0': [0.25, 0.5, 0, 0]})
+                b = fp_eval.evaluate(with_uniforms(blob, c, bumped), {'TEX0': [0.25, 0.5, 0, 0]})
+                if a == b:
+                    failures.append('fp_u2: changing %s did not change the output' % name)
+
+        rc, blob, err = compile_one(args.compiler, work, 'vp_v1', VP_V1, 'sce_vp_rsx')
+        if rc != 0 or not blob:
+            failures.append('vp_v1 refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            recs = {r['name']: r for r in Container(blob).records}
+            for name, ty, paramno in VP_V1_MEMBERS:
+                r = recs.get(name)
+                if not r or (r['type'], r['paramno']) != (ty, paramno):
+                    failures.append('vp_v1 %s: %s, want type %d paramno %d' % (
+                        name, r and (r['type'], r['paramno']), ty, paramno))
+            failures += vp_registers('vp_v1', recs, VP_V1_REGISTERS)
+            print('  vp_v1 records checked')
+
+        rc, blob, err = compile_one(args.compiler, work, 'vp_unread', VP_UNREAD, 'sce_vp_rsx')
+        if rc != 0 or not blob:
+            failures.append('vp_unread refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            bad = vp_registers('vp_unread', {r['name']: r for r in Container(blob).records},
+                               VP_UNREAD_REGISTERS)
+            failures += bad
+            print('  vp_unread: %s' % ('read uniforms allocated, unread ones unassigned' if not bad else 'WRONG'))
+
+        for tag, (text, want) in VP_LIVENESS.items():
+            rc, blob, err = compile_one(args.compiler, work, tag, text, 'sce_vp_rsx')
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (tag, (err.strip().splitlines() or ['?'])[-1]))
+                continue
+            bad = vp_registers(tag, {r['name']: r for r in Container(blob).records}, want)
+            failures += bad
+            print('  %s: %s' % (tag, 'registers as measured' if not bad else 'WRONG'))
+
+        rc, blob, err = compile_one(args.compiler, work, 'nested', NESTED, 'sce_fp_rsx')
+        if rc != 0 or not blob:
+            failures.append('nested refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            c = Container(blob)
+            got = [(r['name'], r['type'], r['paramno'], r['referenced'])
+                   for r in c.records if r['variability'] == UNIFORM]
+            if got != NESTED_UNIFORMS:
+                failures.append('nested uniform records %s, want %s' % (got, NESTED_UNIFORMS))
+            u = {'IN.in1.a': [0.25, -0.5], 'IN.b': [2.0, 0.5]}
+            bad = 0
+            for tc in itertools.product([-1.0, 0.0, 0.5, 1.0], repeat=2):
+                want = [tc[0] * 2.0 + 0.25, tc[1] * 0.5 - 0.5, 0.0, 1.0]
+                if fp_eval.evaluate(with_uniforms(blob, c, u), {'TEX0': [tc[0], tc[1], 0, 0]}) != want:
+                    bad += 1
+            print('  nested values: %s' % ('ok' if not bad else 'WRONG on %d' % bad))
+            if bad:
+                failures.append('nested member values wrong on %d inputs' % bad)
+
+        shadow_values = {('IN.in1.a', 1): [0.25, -0.5], ('IN.b', 1): [2.0, 0.5],
+                         ('IN.in1.a', GLOBAL): [0.75, 0.125], ('IN.b', GLOBAL): [-1.0, 1.5]}
+        P_a, P_b = [0.25, -0.5], [2.0, 0.5]
+        G_a, G_b = [0.75, 0.125], [-1.0, 1.5]
+        for name, text, want in (
+                ('shadow_helper', SHADOW_HELPER,
+                 lambda tc: [tc[0] * P_b[0] + P_a[0], tc[1] * P_b[1] + P_a[1], G_b[0] + G_a[0], G_b[1] + G_a[1]]),
+                ('shadow_default', SHADOW_DEFAULT,
+                 lambda tc: [tc[0] * P_b[0], tc[1] * P_b[1], G_b[0] * 2.0, G_b[1] * 2.0])):
+            rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_fp_rsx')
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (name, (err.strip().splitlines() or ['?'])[-1]))
+                continue
+            c = Container(blob)
+            # leaf records only: a file-scope struct also emits a record for
+            # the struct itself (a pre-existing metadata difference, not
+            # this check's concern)
+            params = sorted((r['name'], r['paramno']) for r in c.records
+                            if r['variability'] == UNIFORM and r['name'] in ('IN.in1.a', 'IN.b'))
+            want_params = sorted([('IN.in1.a', 1), ('IN.b', 1), ('IN.in1.a', GLOBAL), ('IN.b', GLOBAL)])
+            if params != want_params:
+                failures.append('%s uniform records %s, want %s' % (name, params, want_params))
+            bad = 0
+            for tc in itertools.product([-1.0, 0.0, 0.5, 1.0], repeat=2):
+                got = fp_eval.evaluate(with_uniforms(blob, c, shadow_values), {'TEX0': [tc[0], tc[1], 0, 0]})
+                if got != want(tc):
+                    bad += 1
+                    if bad == 1:
+                        failures.append('%s tc=%s got %s want %s' % (name, tc, got, want(tc)))
+            print('  %s: %s' % (name, 'parameter and global kept apart' if not bad else 'WRONG on %d' % bad))
+
+        # a FILE-SCOPE nested uniform struct alone (was refused: the inner
+        # struct became one unusable struct-typed global)
+        rc, blob, err = compile_one(args.compiler, work, 'global_nested', GLOBAL_NESTED, 'sce_fp_rsx')
+        if rc != 0 or not blob:
+            failures.append('global_nested refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            c = Container(blob)
+            u = {'G.in1.a': [0.25, -0.5], 'G.b': [2.0, 0.5]}
+            bad = sum(fp_eval.evaluate(with_uniforms(blob, c, u), {'TEX0': [tc[0], tc[1], 0, 0]})
+                      != [tc[0] * 2.0 + 0.25, tc[1] * 0.5 - 0.5, 0.0, 1.0]
+                      for tc in itertools.product([-1.0, 0.0, 0.5, 1.0], repeat=2))
+            print('  global_nested: %s' % ('values ok' if not bad else 'WRONG on %d' % bad))
+            if bad:
+                failures.append('global_nested values wrong on %d inputs' % bad)
+
+        rc, blob, err = compile_one(args.compiler, work, 'copy_replace', COPY_REPLACE, 'sce_fp_rsx')
+        if rc != 0 or not blob:
+            failures.append('copy_replace refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            c = Container(blob)
+            u = {'A.video_size': [9.0, 9.0], 'A.texture_size': [8.0, 8.0],
+                 'B.video_size': [0.25, -0.5], 'B.texture_size': [2.0, 0.5]}
+            bad = sum(fp_eval.evaluate(with_uniforms(blob, c, u), {'TEX0': [tc[0], tc[1], 0, 0]})
+                      != [tc[0] * (2.0 * 2.0 + 0.25), tc[1] * (0.5 * 2.0 - 0.5), 0.0, 1.0]
+                      for tc in itertools.product([-1.0, 0.0, 0.5, 1.0], repeat=2))
+            print('  copy_replace: %s' % ('B replaces A in every member' if not bad else 'WRONG on %d' % bad))
+            if bad:
+                failures.append('copy_replace values wrong on %d inputs' % bad)
+
+        for name, text in (('self_copy', SELF_COPY), ('chain_copy', CHAIN_COPY)):
+            rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_fp_rsx')
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (name, (err.strip().splitlines() or ['?'])[-1]))
+                continue
+            c = Container(blob)
+            # distinct values for the file-scope G/H records too, so reading
+            # them instead of IN shows up as a wrong value
+            u = {'IN.a': [2.0, 0.5], 'IN.b': [0.25, -0.5], 'G.a': [9.0, 9.0], 'G.b': [7.0, 7.0],
+                 'H.a': [5.0, 5.0], 'H.b': [3.0, 3.0]}
+            bad = sum(fp_eval.evaluate(with_uniforms(blob, c, u), {'TEX0': [tc[0], tc[1], 0, 0]})
+                      != [tc[0] * 2.0 + 0.25, tc[1] * 0.5 - 0.5, 0.0, 1.0]
+                      for tc in itertools.product([-1.0, 0.0, 0.5, 1.0], repeat=2))
+            print('  %s: %s' % (name, 'reads IN' if not bad else 'WRONG on %d' % bad))
+            if bad:
+                failures.append('%s values wrong on %d inputs' % (name, bad))
+
+        rc, blob, err = compile_one(args.compiler, work, 'sampler_member', SAMPLER_MEMBER, 'sce_fp_rsx')
+        if rc != 0 or not blob:
+            failures.append('sampler_member refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            recs = {r['name']: r for r in Container(blob).records}
+            r = recs.get('REFERENCE.texture')
+            want = (SAMPLER2D, TEXUNIT0 + 1, 2)
+            got = r and (r['type'], r['resource'], r['paramno'])
+            print('  sampler_member: %s' % ('REFERENCE.texture on texunit 1' if got == want else 'got %s' % (got,)))
+            if got != want:
+                failures.append('sampler_member REFERENCE.texture %s, want %s' % (got, want))
+            if recs.get('s0', {}).get('resource') != TEXUNIT0:
+                failures.append('sampler_member s0 not on texunit 0')
+
+        rc, blob, err = compile_one(args.compiler, work, 'struct_default', STRUCT_DEFAULT, 'sce_fp_rsx')
+        # semantic analysis refuses it before the IR builder does; either
+        # refusal is acceptable, a dropped default is not
+        ok = rc == 1 and not blob
+        print('  struct default: %s' % ('refused' if ok else 'NOT refused (rc %d)' % rc))
+        if not ok:
+            failures.append('struct parameter default: expected the named refusal, got rc %d' % rc)
+
+        for name, text in VALUE_USES.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_fp_rsx')
+            ok = rc == 1 and not blob and 'uniform-struct-entry-parameter' in err
+            print('  %s: %s' % (name, 'refused by name' if ok else 'NOT refused by name (rc %d)' % rc))
+            if not ok:
+                failures.append('%s: expected the named refusal, got rc %d' % (name, rc))
+
+        rc, blob, err = compile_one(args.compiler, work, 'array_member', ARRAY_MEMBER, 'sce_fp_rsx')
+        ok = rc == 1 and not blob and 'uniform-struct-entry-parameter' in err
+        print('  array member: %s' % ('refused by name' if ok else 'NOT refused (rc %d)' % rc))
+        if not ok:
+            failures.append('array member: expected the named refusal, got rc %d' % rc)
+    for f in failures:
+        print('FAIL:', f)
+    print('uniform-struct-param: %s' % ('PASS' if not failures else 'FAIL (%d)' % len(failures)))
+    sys.exit(1 if failures else 0)
+
+
+if __name__ == '__main__':
+    main()

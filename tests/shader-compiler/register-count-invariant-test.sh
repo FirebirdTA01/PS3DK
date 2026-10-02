@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The container's registerCount must be the highest R slot the ucode
-# actually writes, plus one (t_5dc260b0).
+# actually writes, plus one (fragment-output-liveness).
 #
 # registerCount is a HARDWARE ALLOCATION: the RSX is told how many temp
 # registers to reserve for the program.  Nothing in the pipeline checks it
@@ -28,6 +28,27 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+run_checker() {
+    local rc=0
+    python3 "$@" || rc=$?
+    [[ "$rc" -ne 126 && "$rc" -ne 127 ]] || fail "checker did not execute (exit $rc)"
+    return "$rc"
+}
+
+# A refusal is exit 1 EXACTLY.  124 is a timeout and >= 128 is a signal, and
+# either one satisfies "did not exit 0" while meaning the compiler never
+# reached the decision this guard is about - so a compiler that CRASHED on a
+# shader it should have refused BY NAME was reported as correct here.  Call
+# this wherever a compile's status is captured, whichever way that compile is
+# expected to go: it is silent for 0 and for 1 and names anything else.
+# Measured: half the guards in this suite that assert a refusal could not tell
+# one from a SIGABRT (crash-versus-refusal-status).
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -63,6 +84,7 @@ compile() {   # $1 source path, $2 tag
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" "$compiler" \
             -p sce_fp_rsx --emit-container "$work/$2.fpo" "$1"
     ) >"$work/$2.log" 2>&1 || rc=$?
+    refusal_status "$rc" "$2"
     [[ "$rc" -eq 124 ]] && fail "$2 timed out"
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$2.log" >&2
@@ -134,7 +156,8 @@ rc=0
         -p sce_fp_rsx --emit-container "$work/fp16_raw_limit.fpo" \
         "$work/fp16_raw_limit.fcg"
 ) >"$work/fp16_raw_limit.log" 2>&1 || rc=$?
-[[ "$rc" -ne 0 ]] || fail "fp16_raw_limit compiled despite reaching raw H64"
+refusal_status "$rc" "fp16_raw_limit"
+[[ "$rc" -eq 1 ]] || fail "fp16_raw_limit compiled despite reaching raw H64"
 [[ ! -e "$work/fp16_raw_limit.fpo" ]] || fail "fp16_raw_limit left a container behind after refusal"
 grep -q "six-bit FP temp field" "$work/fp16_raw_limit.log" || {
     tail -n 20 "$work/fp16_raw_limit.log" >&2
@@ -148,6 +171,7 @@ for stem in fp_normalized_phong_vecinsert_f fp_computed_color_store_f \
 done
 
 cat >"$work/check.py" <<'PY'
+from pathlib import Path
 import struct
 import sys
 
@@ -180,8 +204,12 @@ def unswap(v):
     return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
 
 
+paths = sys.argv[1:]
+if len(paths) == 2 and paths[0] == "--fixtures-in":
+    work = Path(paths[1])
+    paths = [str(work / "n16.fpo")] + [str(p) for p in sorted(work.glob("fp_*.fpo"))]
 bad = []
-for path in sys.argv[1:]:
+for path in paths:
     blob = open(path, "rb").read()
     program = be32(blob, PROGRAM_OFF)
     declared = blob[program + REGISTER_COUNT_IN_PROGRAM]
@@ -216,7 +244,7 @@ if bad:
         sys.stderr.write("FAIL: " + line + "\n")
     sys.exit(1)
 print("registerCount == highest written R slot + 1 on %d containers"
-      % (len(sys.argv) - 1))
+      % len(paths))
 PY
 
 # SELF-CONTROL, before the checker is believed about anything.
@@ -231,7 +259,7 @@ PY
 # it to object to each.  Down is the direction that paints garbage on the
 # console and reads identical on RPCS3; up is this defect's direction.
 mutate() {   # $1 source container, $2 delta, $3 output
-    python3 - "$1" "$2" "$3" <<'PY'
+    run_checker - "$1" "$2" "$3" <<'PY'
 import struct
 import sys
 
@@ -250,15 +278,19 @@ for delta in 1 -1; do
     mutate "$work/n16.fpo" "$delta" "$work/$tag.fpo" >/dev/null
     rc=0
     python3 "$work/check.py" "$work/$tag.fpo" >"$work/$tag.log" 2>&1 || rc=$?
+    if [[ "$rc" -eq 126 || "$rc" -eq 127 ]]; then
+        cat "$work/$tag.log" >&2
+        fail "checker did not execute (exit $rc)"
+    fi
     [[ "$rc" -ne 0 ]] || fail "checker accepted a registerCount mutated by $delta - it is not reading the field it claims to"
     grep -q "declared registerCount" "$work/$tag.log" \
         || fail "checker rejected the $delta mutation without naming the declared count"
 done
 
 # ... and only now on the real containers.
-python3 "$work/check.py" "$work"/n16.fpo "$work"/fp_*.fpo
+run_checker "$work/check.py" --fixtures-in "$work"
 
-python3 - "$work/fp16_promote_sparse.fpo" "$work/fp16_promote_sparse.order" <<'PY'
+run_checker - "$work/fp16_promote_sparse.fpo" "$work/fp16_promote_sparse.order" <<'PY'
 import re
 import struct
 import sys

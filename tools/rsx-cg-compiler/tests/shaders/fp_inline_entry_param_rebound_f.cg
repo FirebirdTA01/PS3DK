@@ -1,0 +1,6 @@
+// main's PARAMETER G is reassigned before an inlined helper writes the
+// file-scope G: main still returns its own (doubled) parameter.  Reference:
+// MOVR R0, f[TEX0]; MULR R0, R0, 2 (review: codex, scope-param-rebound).
+float4 G;
+void set() { G = float4(1.0, 0.0, 0.0, 1.0); }
+float4 main(float4 G : TEXCOORD0) : COLOR { G = G * 2.0; set(); return G; }

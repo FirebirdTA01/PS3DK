@@ -724,7 +724,7 @@ int main(int argc, const char **argv)
 		{ "guarded-divide-true", rb_guarded_divide_true_fpo,
 		  expect_divide_true, NULL, NULL, 0, 0 },
 		/* These expression-ternary rows stay single-block today and
-		 * therefore record t_4db7d191's open hardware/RPCS3 question:
+		 * therefore record singular-ternary-contamination's open hardware/RPCS3 question:
 		 * does the arithmetic blend path actually poison pixels when
 		 * the untaken arm is singular?  The true row is the robust
 		 * witness even if the singular arm is a large finite value;

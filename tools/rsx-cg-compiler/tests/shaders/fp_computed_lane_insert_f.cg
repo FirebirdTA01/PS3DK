@@ -1,4 +1,4 @@
-// t_b25e6444: Non-contiguous lane-preserving insert of a computed vector.
+// computed-lane-insert: Non-contiguous lane-preserving insert of a computed vector.
 //
 // Inserting computed vector components into non-contiguous destination channels
 // (c.x = v.x; c.z = v.z) must compile on the general path, preserving channels

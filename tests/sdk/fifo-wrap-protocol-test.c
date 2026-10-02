@@ -1,5 +1,5 @@
 /*
- * Host model of the GCM FIFO wrap protocol (t_38e8bf5a).
+ * Host model of the GCM FIFO wrap protocol (fifo-wrap-publication).
  *
  * A simulated RSX fetcher consumes a FIFO of words: it fetches only while
  * GET != PUT, records every word it fetches, and follows a JUMP by moving GET

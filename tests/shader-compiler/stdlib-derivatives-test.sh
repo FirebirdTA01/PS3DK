@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_b28f9994 / t_6f5f1694: screen-space derivative slice 1.
+# screen-space-derivatives / derivative-lane-width: screen-space derivative slice 1.
 #
 # The shipping path must accept scalar and float2 fragment ddx/ddy and emit
 # NV40's native DDX/DDY opcodes.  Widths 3/4 are deliberately out of scope for
@@ -10,6 +10,21 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+# A refusal is exit 1 EXACTLY.  124 is a timeout and >= 128 is a signal, and
+# either one satisfies "did not exit 0" while meaning the compiler never
+# reached the decision this guard is about - so a compiler that CRASHED on a
+# shader it should have refused BY NAME was reported as correct here.  Call
+# this wherever a compile's status is captured, whichever way that compile is
+# expected to go: it is silent for 0 and for 1 and names anything else.
+# Measured: half the guards in this suite that assert a refusal could not tell
+# one from a SIGABRT (crash-versus-refusal-status).
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -27,24 +42,30 @@ compile_fp() {
     local src="$shaders/$stem.cg"
     local out="$work/$stem.fpo"
     local log="$work/$stem.log"
+    local err="$work/$stem.err"
     [[ -f "$src" ]] || fail "fixture missing: $src"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx --emit-container "$out" "$src"
-    ) >"$log" 2>&1 || {
-        tail -n 30 "$log" >&2
+    ) >"$log" 2>"$err" || {
+        tail -n 30 "$err" >&2
         fail "$stem did not compile"
     }
     [[ -s "$out" ]] || fail "$stem did not emit a container"
 
+    # stdout carries the ucode rows, stderr the diagnostics; merged, a
+    # stderr line can land inside a hex row and cost it (the false R33,
+    # 2026-09-07).  The decoder refuses such a log - this is why it does
+    # not have to.
     local ucode_log="$work/$stem.ucode.log"
+    local ucode_err="$work/$stem.ucode.err"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx "$src"
-    ) >"$ucode_log" 2>&1 || {
-        tail -n 30 "$ucode_log" >&2
+    ) >"$ucode_log" 2>"$ucode_err" || {
+        tail -n 30 "$ucode_err" >&2
         fail "$stem failed while dumping ucode"
     }
     python3 "$repo_root/tests/shader-compiler/ucode_decode.py" "$ucode_log" \
@@ -58,18 +79,22 @@ expect_refusal() {
     local src="$4"
     local out="$work/$label.bin"
     local log="$work/$label.log"
+    local err="$work/$label.err"
     local rc=0
     rm -f "$out"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p "$profile" --emit-container "$out" "$src"
-    ) >"$log" 2>&1 || rc=$?
+    ) >"$log" 2>"$err" || rc=$?
 
-    [[ "$rc" -ne 0 ]] || fail "$label compiled; expected derivative refusal"
+    refusal_status "$rc" "$label"
+    [[ "$rc" -eq 1 ]] || fail "$label compiled; expected derivative refusal"
     [[ ! -e "$out" || ! -s "$out" ]] || fail "$label emitted a container after refusing"
-    grep -Eqi "$needle" "$log" \
-        || { tail -n 30 "$log" >&2; fail "$label refused for the wrong reason"; }
+    # the refusal text is on stderr; read both halves, because this asks
+    # "did the compiler say it", not "on which stream did it say it"
+    grep -Eqi "$needle" "$log" "$err" \
+        || { tail -n 30 "$err" >&2; fail "$label refused for the wrong reason"; }
 }
 
 compile_fp fp_deriv_scalar_f

@@ -1,4 +1,4 @@
-// The other spelling of t_dc1d92b0: a float variable initialised from an
+// The other spelling of integer-literal-constructor-conversion: a float variable initialised from an
 // int literal, used as a constructor component.  `float x = 1;` leaves an
 // int constant behind, so the constructor it feeds did not fold either.
 // One fix in the constructor fold covers both.

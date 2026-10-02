@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_dabb23e1: The colour output register R0 must stay live across the entire program
+# output-temporary-reuse: The colour output register R0 must stay live across the entire program
 # after an early store, and must not be allocated as a scratch temporary for
 # intermediate calculations (such as comparisons or conditions).
 #
@@ -33,13 +33,19 @@ src="$shaders/fp_discard_nested_f.cg"
 store_count=$(grep -c '\<o\s*=' "$src" || true)
 [[ "$store_count" -eq 1 ]] || fail "precondition failed: $src has $store_count output stores (expected 1); revisit single-store invariant"
 
+# The ucode dump is on stdout and the diagnostics are on stderr; merging
+# them lets a stderr line land INSIDE a hex row, which costs the row,
+# shifts every later one and decodes a constant as an instruction writing
+# a register nothing reads (the false R33, 2026-09-07).  Keep them apart;
+# the decoder's refusal is the fallback, not the fix.
 log="$work/fp_discard_nested.log"
+err="${log%.log}.err"
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_fp_rsx "$src"
-) >"$log" 2>&1 || {
-    tail -n 30 "$log" >&2
+) >"$log" 2>"$err" || {
+    tail -n 30 "$err" >&2
     fail "fp_discard_nested_f.cg did not compile"
 }
 
@@ -72,7 +78,7 @@ if first_store_idx is None:
 # output assignments, no instruction after first_store_idx is permitted to write
 # any lane that the store wrote. Any subsequent write to R0 (regardless of opcode —
 # whether comparison SLT, arithmetic ADD/MUL/MAD, etc.) represents the allocator
-# reusing live colour output R0 as a scratch temporary (t_dabb23e1).
+# reusing live colour output R0 as a scratch temporary (output-temporary-reuse).
 store_mask = (gs[first_store_idx][0] >> 9) & 0xf
 
 for i in range(first_store_idx + 1, len(gs)):
@@ -86,7 +92,7 @@ for i in range(first_store_idx + 1, len(gs)):
             f"FAIL: instruction at {i} (opcode 0x{opcode:02X}) writes to colour output "
             f"register R0 (mask 0x{mask:X}, overlapping store mask 0x{store_mask:X}), "
             f"clobbering live colour output after store at instruction {first_store_idx} "
-            f"(t_dabb23e1 regression)"
+            f"(output-temporary-reuse regression)"
         )
 
 print(f"output-temp-reuse-test: ok (R0 output at instruction {first_store_idx} preserved; no subsequent temp clobbers)")

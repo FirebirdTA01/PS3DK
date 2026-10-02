@@ -98,7 +98,10 @@ void FpAssembler::emitDst(const struct nvfx_insn& insn, uint32_t* hw)
     switch (dst.type)
     {
     case NVFXSR_TEMP:
+    case NVFXSR_OUTPUT:
     {
+        // Colour/depth exports occupy this same file. A lone COLOR3
+        // writes R4 and requires five slots even without a scratch temp.
         // fp16 registers pack two per hw slot: H0/H1 → R0, H2/H3 → R1, ...
         const int hwReg = dst.is_fp16 ? (index >> 1) : index;
         if (numTempRegs_ < hwReg + 1)
@@ -110,11 +113,6 @@ void FpAssembler::emitDst(const struct nvfx_insn& insn, uint32_t* hw)
         }
         break;
     }
-    case NVFXSR_OUTPUT:
-        // R0 is result.color, R1 is result.depth.  FPControl bit
-        // tracking (DEPTH_USE / KIL_USE) lands when those features
-        // do — identity_f only writes R0.
-        break;
     case NVFXSR_NONE:
         hw[0] |= NV40_FP_OP_OUT_NONE;
         break;
@@ -126,6 +124,14 @@ void FpAssembler::emitDst(const struct nvfx_insn& insn, uint32_t* hw)
         hw[0] |= NVFX_FP_OP_OUT_REG_HALF;
 
     hw[0] |= (static_cast<uint32_t>(index) << NVFX_FP_OP_OUT_REG_SHIFT);
+}
+
+void FpAssembler::emitNop()
+{
+    const size_t base = logicalWords_.size();
+    logicalWords_.resize(base + 4, 0u);
+    lastInstrOffset_ = base;
+    hasInstruction_  = true;
 }
 
 void FpAssembler::emitFencbr()
@@ -201,8 +207,15 @@ void FpAssembler::setUniformConstBlock(uint32_t constBlockByteOffset,
 
     // Same layout appendConstBlock writes: four fp32 in the caller's
     // natural order, with the on-disk halfword swap applied at words().
+    // An explicit memcpy, NOT `for (i < count) lanes[i] = values[i]`: clang 18
+    // (-O1 and up, loop-idiom recognition) turns that loop plus the
+    // zero-initialiser into a memset of the tail and drops the copy, so the
+    // block kept whatever was on the stack - garbage defaults in every
+    // clang-built compiler.  Well-defined code; a compiler bug, reproduced
+    // standalone.  tests/shader-compiler/cross-stl-determinism-test.sh
+    // catches it (clang/libc++ build vs gcc/libstdc++ build).
     float lanes[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-    for (unsigned i = 0; i < count; ++i) lanes[i] = values[i];
+    std::memcpy(lanes, values, count * sizeof(float));
     uint32_t raw[4];
     std::memcpy(raw, lanes, 16);
     for (int i = 0; i < 4; ++i) logicalWords_[w + i] = raw[i];

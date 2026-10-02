@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_652d6e42: source-only lane extracts reused across flattened blocks
+# select-source-liveness: source-only lane extracts reused across flattened blocks
 # must resolve as sources, not as block-local temporaries.
 #
 # The fixture mirrors the operand-resolution shape in test_48_refract:

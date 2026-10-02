@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_a7dd471f: atan2 on the general fragment path.
+# integer-float-conversion: atan2 on the general fragment path.
 #
 # Oracle shape, measured from sce-cgc before implementation:
 #   scalar atan2 uses MIN/MAX of the absolute inputs, scalar DIVR, SGTRC,
@@ -27,6 +27,21 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+# A refusal is exit 1 EXACTLY.  124 is a timeout and >= 128 is a signal, and
+# either one satisfies "did not exit 0" while meaning the compiler never
+# reached the decision this guard is about - so a compiler that CRASHED on a
+# shader it should have refused BY NAME was reported as correct here.  Call
+# this wherever a compile's status is captured, whichever way that compile is
+# expected to go: it is silent for 0 and for 1 and names anything else.
+# Measured: half the guards in this suite that assert a refusal could not tell
+# one from a SIGABRT (crash-versus-refusal-status).
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -203,6 +218,7 @@ vp_rc=0
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_vp_rsx "$shaders/vp_atan2_guard_v.cg"
 ) >"$vp_log" 2>&1 || vp_rc=$?
+refusal_status "$vp_rc" "vp_atan2_guard_v"
 if [[ "$vp_rc" -eq 0 ]]; then
     fail "vp_atan2_guard_v compiled; VP atan2 is unmeasured and must refuse"
 fi

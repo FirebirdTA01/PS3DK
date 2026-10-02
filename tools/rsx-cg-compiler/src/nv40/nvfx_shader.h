@@ -3,6 +3,16 @@
 
 #include "nvfx_types.h"
 
+/* <cmath> BEFORE the abs() macro below.  libstdc++'s <cmath> calls std::abs
+   inside std::__hypot3; if this header's function-like `abs` macro is defined
+   first, that call is rewritten to std::nvfx_src_abs and the gcc build dies
+   (measured on g++ 13.3: nv40_vp_emit.cpp and nv40_fp_emit.cpp).  Include
+   guards make the later <cmath> a no-op, so the standard header is parsed
+   while `abs` is still a function.  MSVC's headers do not reach that call,
+   which is the only reason this stayed latent. */
+#include <cmath>
+#include <cstdlib>
+
 #define NVFX_SWZ_IDENTITY ((3 << 6) | (2 << 4) | (1 << 2) | (0 << 0))
 
 /* this will resolve to either the NV30 or the NV40 version

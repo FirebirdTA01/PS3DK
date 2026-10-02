@@ -1,10 +1,14 @@
 #include "preprocessor.h"
 #include <cstring>
 #include <fstream>
+#include <cctype>
 #include <sstream>
 #include <filesystem>
 #include <regex>
 #include <algorithm>
+#include <deque>
+#include <iterator>
+#include <set>
 #include <iostream>
 
 Preprocessor::Preprocessor()
@@ -16,6 +20,26 @@ Preprocessor::Preprocessor()
 void Preprocessor::addIncludePath(const std::string& path)
 {
 	includePaths.push_back(path);
+}
+
+// Write (or rewrite) one of the bindings the DRIVER owns, unless the source
+// has taken the name over.  Called per file for __FILE__ and per line for
+// __LINE__, so it is also what restores the binding after a #undef - which is
+// exactly the reference's behaviour: `#undef __LINE__` stops the name being
+// "defined" and does NOT stop it expanding.
+void Preprocessor::setDriverMacro(const std::string& name, const Token& value)
+{
+	auto it = macros.find(name);
+	if (it != macros.end() && it->second.countsAsDefined)
+		return;   // the SOURCE defined this name; its binding wins outright
+	MacroDefinition& macro = macros[name];
+	macro.name = name;
+	macro.isFunctionLike = false;
+	macro.isVariadic = false;
+	macro.countsAsDefined = false;
+	macro.bodyFailedToTokenise = false;
+	macro.replacementList.clear();
+	macro.replacementList.push_back(value);
 }
 
 void Preprocessor::defineMacro(const std::string& name, const std::string& value)
@@ -67,11 +91,19 @@ void Preprocessor::setKeepComments(bool value)
 	keepComments = value;
 }
 
+void Preprocessor::setSourceTextHook(SourceTextHook hook)
+{
+	sourceTextHook_ = std::move(hook);
+}
+
 std::string Preprocessor::process(const std::string& source, const std::string& filename)
 {
 	// Phase 1: Handle backslash-newline continuation (line splicing)
 	// This joins physical lines ending with '\' into logical lines
-	std::string splicedSource = spliceLines(source);
+	// The counts come back so the logical line below can advance by the
+	// number of SOURCE lines each spliced line ate, not by one.
+	std::vector<int> physicalLinesPerSpliced;
+	std::string splicedSource = spliceLines(source, &physicalLinesPerSpliced);
 
 	// If comments should be removed (-C not set), strip them up-front while preserving newlines
 	const std::string& inputSource = keepComments ? splicedSource : stripCommentsPreserveNewlines(splicedSource);
@@ -85,19 +117,36 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 	currentProcessingFile = filename;
 
 	// Update __FILE__ macro
-	macros["__FILE__"].replacementList.clear();
-	macros["__FILE__"].replacementList.push_back({ TokenType::STRING, "\"" + filename + "\"", 0, 0, filename });
+	setDriverMacro("__FILE__",
+		{ TokenType::STRING, "\"" + filename + "\"", 0, 0, filename });
 
 	// Add to included files for dependency tracking
 	includedFiles.insert(filename);
 
 	bool inBlockComment = false; // Only used when keepComments == true
 
+	// process() runs on the COMPOSED unit - the builtin header, the driver's
+	// markers and the user's source, one string - so lineNum counts lines of
+	// that stream and is not the line anyone wrote.  Two things followed from
+	// using it as if it were: a directive line and every line inside an
+	// inactive conditional are CONSUMED and emit nothing, so each one shifted
+	// the text below it by a line, and the marker handleInclude() emits on the
+	// way back out of an include named a composed-stream line, which put the
+	// following code back where it started.  Track the LOGICAL position
+	// instead - the file and line the text claims, updated from the markers we
+	// pass through - and emit a marker wherever the emitted text stops being
+	// contiguous with it (diagnostic-source-location).
+	int logicalLine = 1;
+	std::string logicalFile = filename;
+	int nextEmittedLine = 1;
+	size_t splicedIndex = 0;
+	std::string nextEmittedFile = filename;
+
 	while (std::getline(input, line))
 	{
 		// Update __LINE__ macro
-		macros["__LINE__"].replacementList.clear();
-		macros["__LINE__"].replacementList.push_back({ TokenType::NUMBER, std::to_string(lineNum), lineNum, 0, filename });
+		setDriverMacro("__LINE__",
+			{ TokenType::NUMBER, std::to_string(logicalLine), logicalLine, 0, logicalFile });
 
 		// Check if we're in an active conditional block
 		bool active = true;
@@ -109,31 +158,80 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 		std::string trimmedLine = trim(line);
 		if(trimmedLine.size() > 0 && trimmedLine[0] == '#')
 		{
-			processDirective(trimmedLine, output, filename, lineNum);
+			// A marker we are passing through REPLACES the logical position
+			// rather than advancing it - it names the line of what follows.
+			//
+			// Unless it is SKIPPED.  A marker inside an inactive block names
+			// nothing: processDirective suppresses it, no text it describes is
+			// ever emitted, and adopting it renamed and renumbered the live
+			// source that followed the #endif - `#if 0 / #line 900 "hidden.h"
+			// / #endif` reported the next line as hidden.h:901.  A skipped
+			// marker is just another consumed line and advances the position
+			// by one like any other.
+			int markerLine = 0;
+			std::string markerFile;
+			const bool isMarker =
+				Lexer::parseLineMarker(trimmedLine, markerLine, markerFile);
+			processDirective(trimmedLine, output, logicalFile, logicalLine);
+			if (isMarker && active)
+			{
+				logicalLine = markerLine;
+				if (!markerFile.empty())
+					logicalFile = markerFile;
+				splicedIndex++;
+				lineNum++;
+				continue;
+			}
 		}
 		else if (active)
 		{
+			// TRACKING is unconditional; EMITTING a marker is not.  A caller
+			// that asked for no line markers gets none - the option exists so
+			// the output can be fed to something that does not understand
+			// them, and a marker this function invented is no more welcome
+			// there than one it passed through.  handleInclude has always
+			// gated its own the same way.
+			if (!noLineMarkers &&
+				(logicalLine != nextEmittedLine || logicalFile != nextEmittedFile))
+			{
+				output += "#line " + std::to_string(logicalLine) + " \"" + logicalFile + "\"\n";
+			}
 			if (keepComments)
 			{
 				// Expand macros only in code segments; preserve comments verbatim
-				std::string expanded = expandWithCommentsAware(line, inBlockComment, filename, lineNum);
+				std::string expanded = expandWithCommentsAware(line, inBlockComment, logicalFile, logicalLine);
 				output += expanded + "\n";
 			}
 			else
 			{
 				// Comments were stripped globally; just expand
-				std::string expandedLine = expandMacros(line, filename, lineNum);
+				std::string expandedLine = expandMacros(line, logicalFile, logicalLine);
 				output += expandedLine + "\n";
 			}
+			nextEmittedLine = logicalLine + 1;
+			nextEmittedFile = logicalFile;
 		}
 
+		logicalLine += (splicedIndex < physicalLinesPerSpliced.size())
+					  ? physicalLinesPerSpliced[splicedIndex]
+					  : 1;
+		splicedIndex++;
 		lineNum++;
 	}
 
-	// Check for unclosed conditionals
-	if(!conditionalStack.empty())
+	// ONE CONDITIONAL STACK PER TRANSLATION UNIT, not per file.  The
+	// reference lets an included file end inside an open #if: the block
+	// simply continues in the includer, whose next #else/#endif binds to
+	// it, and an open block at the end of the whole unit is closed
+	// silently.  Only a block still SKIPPING at the end of the unit draws
+	// a warning, because it swallowed everything after it - the entry
+	// included - and the parser's refusal that follows would otherwise be
+	// unexplained.  Refusing here instead was wrong twice over: libretro's
+	// compat_macros.inc never closes its include guard and every shader in
+	// that corpus includes it (include-preprocessor-state).
+	if (includeDepth == 0 && !conditionalStack.empty() && !conditionalStack.top().active)
 	{
-		throw std::runtime_error("Unterminated #if/#ifdef block in file " + filename);
+		std::cerr << filename << ": warning: unmatched #if - the rest of the unit was skipped\n";
 	}
 
 	return output;
@@ -153,12 +251,34 @@ void Preprocessor::initBuiltinMacros()
 	// Define __DATE__ and __TIME__
 	defineMacro("__DATE__", "\"" __DATE__ "\"");
 	defineMacro("__TIME__", "\"" __TIME__ "\"");
+
+	// These four EXPAND but do not count as defined - see countsAsDefined.
+	// __CGC__ and __SCE_CGC__ below are ordinary macros and keep the default.
+	for (const char* driverOwned : { "__LINE__", "__FILE__", "__DATE__", "__TIME__" })
+		macros[driverOwned].countsAsDefined = false;
 	
-	// PSVita specific macros
-	defineMacro("__psp2__", "1");
-	defineMacro("__SCE__", "1");
-	defineMacro("__STDC__", "1");
-	defineMacro("__STDC_VERSION__", "199901L"); // C99
+	// Target-identification macros. Beyond the standard __LINE__/__FILE__/
+	// __DATE__/__TIME__ above, sce-cgc 475 predefines __CGC__ and __SCE_CGC__,
+	// both 20000 (measured 2026-09-14 on the reference); of the names checked,
+	// __CG__, _CG_, _CGC_, CGC, __psp2__, __SCE__, __STDC__ and
+	// __STDC_VERSION__ are NOT defined.
+	// The PSVita donor's set is gone on purpose: a shader that tests one of
+	// those names must take the same branch it takes on the reference. The
+	// SDK's SpuRender shaders test __CGC__ and fall into their PPU/SPU enum
+	// branch without it (preprocessor-predefined-macros).
+	defineMacro("__CGC__", "20000");
+	defineMacro("__SCE_CGC__", "20000");
+}
+
+// ONE predicate for both spellings, because the reference has #ifdef and
+// #if defined agree on every cell, and two nearly-identical predicates is how
+// they stop agreeing (preprocessor-defined-operator).  It asks the BINDING, never the name - see
+// MacroDefinition::countsAsDefined for the measured table.
+template <class Map>
+bool isDefinedMacro(const Map& macros, const std::string& name)
+{
+	const auto it = macros.find(name);
+	return it != macros.end() && it->second.countsAsDefined;
 }
 
 void Preprocessor::processDirective(const std::string& directive, std::string& output, const std::string& currentFile, int lineNum)
@@ -185,6 +305,39 @@ void Preprocessor::processDirective(const std::string& directive, std::string& o
 		{
 			throw std::runtime_error("Invalid preprocessor directive: " + directive);
 		}
+	}
+
+	// THE DIRECTIVE NAME ENDS AT THE FIRST NON-IDENTIFIER CHARACTER, not at
+	// the first space.  `#if(SAMPLE_COUNT > 1)` is a directive named `if`
+	// whose expression happens to start with a parenthesis, and taking the
+	// whole whitespace-delimited token made the name `if(SAMPLE_COUNT` and
+	// reported it as an unknown directive - 20 reference-SDK sources, all
+	// of them shapes the reference compiles.
+	//
+	// Measured against the reference rather than assumed, because the
+	// obvious rule is too permissive in one direction:
+	//
+	//   #if(N > 1)     accepted        #elif(N > 1)   accepted
+	//   #endif(N)      accepted        #ifdef(N)      REFUSED, C0105
+	//                                                 "Syntax error in #ifdef"
+	//
+	// So `ifdef` IS recognised as the name - the reference reports a
+	// SYNTAX error in it, not the C0104 "Unknown pre-processor directive"
+	// it gives for `#frobnicate`.  The name is parsed the same way in every
+	// case; what differs is that `#ifdef` then requires an identifier and
+	// `(N)` is not one.  Splitting the name off here reproduces both: the
+	// expression directives get their `(`, and processIfdef's own regex
+	// still refuses `(N)` by name.
+	{
+		size_t n = 0;
+		while (n < cmd.size() &&
+		       (std::isalnum(static_cast<unsigned char>(cmd[n])) || cmd[n] == '_'))
+			++n;
+		if (n == 0)
+		{
+			throw std::runtime_error("Invalid preprocessor directive: " + directive);
+		}
+		cmd.resize(n);
 	}
 
 	// From here on, 'cmd' is the directive name 
@@ -304,9 +457,37 @@ void Preprocessor::processInclude(const std::string& directive, std::string& out
 			output += "#line 1 \"" + filepath + "\"\n";
 		}
 
-		// Recursively process the included file
-		Preprocessor subProcessor = *this; // Copy current state
-		std::string processedContent = subProcessor.process(fileContent, filepath);
+		// Process the included file IN THIS OBJECT.  It used to run in a
+		// copy, which threw away everything the header did to the state:
+		// every macro a header defined was invisible to the file that
+		// included it, and a conditional left open at the header's end
+		// was an error rather than a block that continues in the includer
+		// (include-preprocessor-state).  Only the current-file name is per file; the
+		// macro table, the conditional stack and the include set are the
+		// unit's.
+		// process() rebinds __FILE__ to the file it is given, so the
+		// includer's binding is saved here and put back on return - the
+		// text after the #include is the includer's again, whatever the
+		// header said its name was.  __LINE__ needs nothing: it is rebound
+		// on every line.
+		const std::string savedFile = currentProcessingFile;
+		const MacroDefinition savedFileMacro = macros["__FILE__"];
+		includeDepth++;
+		std::string processedContent;
+		try
+		{
+			processedContent = process(fileContent, filepath);
+		}
+		catch (...)
+		{
+			includeDepth--;
+			currentProcessingFile = savedFile;
+			macros["__FILE__"] = savedFileMacro;
+			throw;
+		}
+		includeDepth--;
+		currentProcessingFile = savedFile;
+		macros["__FILE__"] = savedFileMacro;
 		output += processedContent;
 
 		if(!noLineMarkers)
@@ -314,11 +495,6 @@ void Preprocessor::processInclude(const std::string& directive, std::string& out
 			output += "#line " + std::to_string(lineNum + 1) + " \"" + currentFile + "\"\n";
 		}
 
-		// Merge included files
-		for(const auto& incFile : subProcessor.getIncludedFiles())
-		{
-			includedFiles.insert(incFile);
-		}
 	}
 	else
 	{
@@ -330,12 +506,89 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 {
 	// Extract macro definition
 	std::smatch match;
-	std::regex defineRegex(R"(#\s*define\s+(\w+)(\s*\(([^)]*)\))?\s*(.*))");
+	// A MACRO IS FUNCTION-LIKE ONLY WHEN "(" IMMEDIATELY FOLLOWS THE NAME.
+	// With any space or tab between them the parenthesis is the first
+	// character of an OBJECT-LIKE body, and this pattern used to allow
+	// \s* there - so `#define fPI		(3.14159f)` was read as a function-like
+	// macro whose one parameter is named "3.14159f", a bare fPI never
+	// expanded, and eighteen SDK shaders died on "undeclared identifier".
+	// The rule changes what the BODY IS, not merely whether we accept:
+	// `#define K (x) (2.0)` is object-like with body "(x) (2.0)" and the
+	// reference expands it and then fails on the undefined x (C1008),
+	// which is the cell that proves it (macro-parenthesis-adjacency).
+	std::regex defineRegex(R"(#\s*define\s+(\w+)(\(([^)]*)\))?[ \t]*(.*))");
 
 	if (std::regex_search(directive, match, defineRegex))
 	{
 		MacroDefinition macro;
 		macro.name = match[1];
+
+		// A FORM FEED OR VERTICAL TAB IS NOT A SEPARATOR - IT IS INVALID INPUT.
+		// The whitespace rule above deliberately stopped treating everything
+		// \s matches as separating the name from the body, and \f and \v were
+		// the two characters where that mattered: `#define K<FF>(1.0)` used to
+		// be read as function-like (so a bare K refused, which happened to
+		// agree with the reference) and became object-like (so it ACCEPTED,
+		// which does not). Found by codex on the first revision.
+		//
+		// Measured: the reference refuses \f and \v ANYWHERE in a source, not
+		// only in a directive - `return<FF>t*2.0;` in ordinary code is
+		// "error C0000: syntax error, unexpected $undef" just the same. So
+		// this is not a #define rule at all, and the general form is carded;
+		// what is fixed here is the acceptance THIS slice introduced.
+		//     #define<FF>K (1.0)    C0105   (before the name)
+		//     #define K<FF>(1.0)    C0000   (between name and body)
+		//     #define K (1.0<FF>)   C0000   (inside the body)
+		// No file in either census population contains either character - 923
+		// shader sources and headers scanned, zero hits - so nothing that
+		// compiles today stops compiling.
+		{
+			// ONLY BEFORE THE NAME. A form feed there is a DIRECTIVE syntax
+			// error on the reference and is reported even when the macro is
+			// never used:
+			//     #define<FF>UNUSED (1.0)   C0105, with no use anywhere
+			// Everywhere else a form feed only matters when it reaches the
+			// TOKEN STREAM, which is the lexer's business and not this
+			// function's - my first version refused the whole directive and so
+			// refused `#define UNUSED_MACRO (1.0<FF>)`, which the reference
+			// ACCEPTS because that body is never tokenised (codex asked for
+			// exactly this qualification before I claimed "anywhere").
+			const size_t defineEnd = directive.find("define");
+			if (defineEnd != std::string::npos)
+			{
+				const size_t nameStart =
+					directive.find_first_not_of(" \t\f\v", defineEnd + 6);
+				if (nameStart != std::string::npos &&
+				    directive.find_first_of("\f\v", defineEnd + 6) < nameStart)
+				{
+					throw std::runtime_error(
+						"error C0105: Syntax error in #define");
+				}
+			}
+		}
+
+		// A PARAMETER LIST THAT DOES NOT PARSE IS AN ERROR IN THE DEFINITION,
+		// not in whatever the body turns out to say.  Measured, both no-space
+		// forms:
+		//     #define K(3.14159f)   error C0105: Syntax error in #define
+		//     #define K(            error C0105: Syntax error in #define
+		// Without this the first is a function-like macro with a parameter
+		// literally named "3.14159f" that no call can ever supply, and the
+		// second falls through to an object-like body of "(" - both then
+		// refuse for some unrelated reason further downstream, which is a
+		// worse answer than the reference's even though the verdict matches.
+		{
+			const std::string after = match.suffix().str();
+			const size_t nameEnd = static_cast<size_t>(match.position(1)) +
+			                       match[1].str().size();
+			const bool touchesParen =
+				nameEnd < directive.size() && directive[nameEnd] == '(';
+			if (touchesParen && !match[2].matched)
+			{
+				// touching '(' but the group did not match: no ')' on the line
+				throw std::runtime_error("error C0105: Syntax error in #define");
+			}
+		}
 
 		// Check for function-like macro parameters
 		if(match[2].matched)
@@ -347,6 +600,31 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 			if (!paramsStr.empty())
 			{
 				macro.parameters = tokenizeParams(paramsStr);
+
+				for (const std::string& param : macro.parameters)
+				{
+					const std::string p = trim(param);
+					if (p == "..." ) continue;
+					// A trailing "name..." is the GNU named-variadic spelling
+					// and is handled below; strip it before the check.
+					const std::string base =
+						(p.size() > 3 && p.compare(p.size() - 3, 3, "...") == 0)
+							? trim(p.substr(0, p.size() - 3)) : p;
+					bool ok = !base.empty() &&
+						(std::isalpha(static_cast<unsigned char>(base[0])) ||
+						 base[0] == '_');
+					for (size_t i = 1; ok && i < base.size(); ++i)
+					{
+						if (!std::isalnum(static_cast<unsigned char>(base[i])) &&
+						    base[i] != '_')
+							ok = false;
+					}
+					if (!ok)
+					{
+						throw std::runtime_error(
+							"error C0105: Syntax error in #define");
+					}
+				}
 
 				// Check for variadic and handle __VA_ARGS__
 				if (!macro.parameters.empty() && macro.parameters.back().find("...") != std::string::npos)
@@ -366,7 +644,22 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 		{
 			const int replacementColumn = static_cast<int>(match.position(4)) + 1;
 			Lexer lexer(replacement, currentFile, lineNum, replacementColumn);
-			macro.replacementList = lexer.tokenize();
+			try
+			{
+				macro.replacementList = lexer.tokenize();
+			}
+			catch (const std::exception& e)
+			{
+				// REMEMBERED, NOT RAISED.  A body that does not tokenise is not an
+				// error until something expands it: the reference ACCEPTS
+				// `#define UNUSED (1.0<FF>)` with no use anywhere and refuses the
+				// same body the moment it is used.  We tokenise the replacement
+				// list eagerly, which reported it at the definition - so the
+				// failure is carried on the macro and re-raised from substitute().
+				macro.bodyFailedToTokenise = true;
+				macro.bodyTokeniseError = e.what();
+				macro.replacementList.clear();
+			}
 			// Remove any trailing EOF token
 			if(!macro.replacementList.empty() && macro.replacementList.back().type == TokenType::END_OF_FILE)
 			{
@@ -406,18 +699,23 @@ void Preprocessor::processIfdef(const std::string& directive, bool isIfndef)
 
 	if (std::regex_search(directive, match, ifdefRegex))
 	{
-		std::string name = match[1];
-		bool defined = (macros.find(name) != macros.end());
-
 		ConditionalState state;
-		state.active = isIfndef ? !defined : defined;
 		state.hasElse = false;
-		state.everActive = state.active;
 
-		// If parent block is inactive, this block is also inactive
-		if(!conditionalStack.empty() && !conditionalStack.top().active)
+		// Same rule as processIf: a group inside a skipped one is inert, and
+		// everActive has to say so or its #elif and #else arms will be
+		// evaluated.  Setting only `active` left everActive false, which is
+		// exactly the door codex's cell walked through.
+		if (enclosingInactive(0))
 		{
 			state.active = false;
+			state.everActive = true;
+		}
+		else
+		{
+			const bool defined = isDefinedMacro(macros, match[1]);
+			state.active = isIfndef ? !defined : defined;
+			state.everActive = state.active;
 		}
 
 		conditionalStack.push(state);
@@ -426,6 +724,30 @@ void Preprocessor::processIfdef(const std::string& directive, bool isIfndef)
 	{
 		throw std::runtime_error("Malformed #ifdef/#ifndef directive: " + directive);
 	}
+}
+
+// Is the group ENCLOSING the one we are dealing with inactive?  skipTop is 0
+// when a new group is about to be pushed (the top of the stack IS the parent)
+// and 1 when we are inside a group and looking past our own entry (#elif).
+//
+// ONE test, because the three directives that open or continue a group must
+// agree.  They did not: processIf suppressed a skipped group correctly while
+// processIfdef still took everActive from its own predicate and processElif
+// evaluated before looking at the parent, so
+//     #if 0 / #ifdef NEVER / #elif defined( / #endif / #endif
+// reached the #elif expression and refused where the reference accepts
+// (codex, on the first review build - my own skip fix had covered one of the
+// three doors).
+bool Preprocessor::enclosingInactive(size_t skipTop) const
+{
+	std::stack<ConditionalState> temp = conditionalStack;
+	for (size_t i = 0; i < skipTop; ++i)
+	{
+		if (temp.empty())
+			return false;
+		temp.pop();
+	}
+	return !temp.empty() && !temp.top().active;
 }
 
 void Preprocessor::processIf(const std::string& directive)
@@ -441,14 +763,28 @@ void Preprocessor::processIf(const std::string& directive)
 	expr = trim(expr);
 
 	ConditionalState state;
-	state.active = evaluateExpression(expr);
 	state.hasElse = false;
-	state.everActive = state.active;
 
-	// If parent block is inactive, this block is also inactive
-	if(!conditionalStack.empty() && !conditionalStack.top().active)
+	// A GROUP THAT IS BEING SKIPPED HAS ITS CONDITION READ, NEVER EVALUATED.
+	// This used to evaluate first and zero the result afterwards, which was
+	// invisible while a malformed condition could not fail - and stopped being
+	// invisible the moment `defined` started diagnosing one:
+	//     #if 0
+	//     #if defined(          the reference ACCEPTS the file
+	//     #endif
+	//     #endif
+	// everActive is set so that no #elif or #else arm of the skipped group can
+	// activate either, and so that processElif's own guard keeps it from
+	// evaluating those arms' expressions.
+	if (enclosingInactive(0))
 	{
 		state.active = false;
+		state.everActive = true;
+	}
+	else
+	{
+		state.active = evaluateExpression(expr);
+		state.everActive = state.active;
 	}
 
 	conditionalStack.push(state);
@@ -467,7 +803,14 @@ void Preprocessor::processElif(const std::string& directive)
 		throw std::runtime_error("#elif after #else is not allowed");
 	}
 
-	if(!state.everActive) // Only evaluate if no previous branch was active
+	// The parent is read BEFORE anything is evaluated, not after.  Evaluating
+	// first and zeroing the result afterwards is only invisible while nothing
+	// in an expression can fail.
+	if (enclosingInactive(1))
+	{
+		state.active = false;
+	}
+	else if(!state.everActive) // Only evaluate if no previous branch was active
 	{
 		// Extract expression after #elif
 		size_t elifPos = directive.find("elif");
@@ -480,17 +823,6 @@ void Preprocessor::processElif(const std::string& directive)
 		expr = trim(expr);
 
 		state.active = evaluateExpression(expr);
-
-		// Check parent
-		if (conditionalStack.size() > 1)
-		{
-			std::stack<ConditionalState> temp = conditionalStack;
-			temp.pop();
-			if (!temp.top().active)
-			{
-				state.active = false;
-			}
-		}
 
 		if(state.active)
 		{
@@ -560,6 +892,9 @@ void Preprocessor::processPragma(const std::string& directive, std::string& outp
 
 	std::string content = directive.substr(pragmaPos + 6);
 	content = trim(content);
+	std::string pragmaName = content.substr(0, content.find_first_of(" \t"));
+	for (char& c : pragmaName)
+		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
 	// Handle specific pragmas
 	if(content == "once")
@@ -570,12 +905,12 @@ void Preprocessor::processPragma(const std::string& directive, std::string& outp
 			includeGuards.insert(currentProcessingFile);
 		}
 	}
-	else if (content.rfind("alphakill", 0) == 0)
+	else if (pragmaName == "alphakill")
 	{
 		// #pragma alphakill <samplerName>
 		// RSX Cg extension: tells the runtime to discard fragments
 		// where the named sampler returns alpha == 0.  Container-only
-		// (ucode unchanged) — recorded here so the .fpo emitter can
+		// recorded here so DCE preserves fetches and the .fpo emitter can
 		// inject one synthetic $kill_NNNN CgBinaryParameter per sampler
 		// in declaration order.
 		std::string rest = trim(content.substr(9));
@@ -635,10 +970,16 @@ void Preprocessor::processPragma(const std::string& directive, std::string& outp
 // Handle backslash-newline continuation (line splicing)
 // This is Phase 1 of preprocessing per the C standard
 // Lines ending with '\' followed by newline are joined together
-std::string Preprocessor::spliceLines(const std::string& src)
+std::string Preprocessor::spliceLines(const std::string& src,
+                                      std::vector<int>* physicalLinesPerSpliced)
 {
 	std::string result;
 	result.reserve(src.size());
+	// How many source lines the spliced line being built has eaten so far.
+	// A continuation removes a newline the author wrote; counting them here
+	// is what lets a diagnostic below a multi-line #define still name the
+	// author's line.
+	int physicalForCurrent = 1;
 
 	size_t i = 0;
 	while (i < src.size())
@@ -663,12 +1004,14 @@ std::string Preprocessor::spliceLines(const std::string& src)
 				{
 					// Backslash-newline: skip both, continue on next line
 					i = next + 1;
+					physicalForCurrent++;
 					continue;
 				}
 				else if (src[next] == '\r' && next + 1 < src.size() && src[next + 1] == '\n')
 				{
 					// Backslash-CRLF: skip all three characters
 					i = next + 2;
+					physicalForCurrent++;
 					continue;
 				}
 			}
@@ -680,6 +1023,12 @@ std::string Preprocessor::spliceLines(const std::string& src)
 		else
 		{
 			result.push_back(c);
+			if (c == '\n')
+			{
+				if (physicalLinesPerSpliced)
+					physicalLinesPerSpliced->push_back(physicalForCurrent);
+				physicalForCurrent = 1;
+			}
 			i++;
 		}
 	}
@@ -897,300 +1246,481 @@ static bool needsSpaceBefore(TokenType prevType, TokenType currType)
 	return true;
 }
 
-// Expand macros; only rewrite the line when we actually substitute something
+// Expand macros in one line of text.
+//
+// This is the standard hide-set algorithm (Prosser): every token carries the
+// set of macro names that must NOT be expanded at it.  A macro's replacement
+// inherits the invoking token's hide set plus the macro's own name, so a
+// macro that names itself - `#define dot(x,y) saturate(dot(x,y))`, the
+// "NVIDIA fix" idiom in the libretro corpus - expands exactly once, and a
+// mutual cycle (`#define A B` / `#define B A`) stops when the name comes
+// round again.  The text-based fixpoint loop this replaced re-tokenised the
+// whole line after every substitution and so could not remember what had
+// already been expanded: on either shape it never terminated (recursive-macro-termination).
+// The reference accepts both shapes; a preprocessor that spins cannot be
+// worked around at all.
+namespace {
+
+struct HsToken
+{
+	Token tok;
+	std::set<std::string> hs;
+};
+
+using HsTokens = std::vector<HsToken>;
+
+// Re-lex a spelling produced by token pasting into tokens carrying `hs`.
+void lexInto(const std::string& text, const std::set<std::string>& hs, HsTokens& out)
+{
+	Lexer partLexer(text);
+	for (const Token& t : partLexer.tokenize())
+	{
+		if (t.type != TokenType::END_OF_FILE)
+			out.push_back({ t, hs });
+	}
+}
+
+std::string spell(const HsTokens& toks)
+{
+	std::string text;
+	TokenType prev = TokenType::END_OF_FILE;
+	for (const HsToken& t : toks)
+	{
+		if (needsSpaceBefore(prev, t.tok.type) && !text.empty())
+			text += ' ';
+		text += t.tok.lexeme;
+		prev = t.tok.type;
+	}
+	return text;
+}
+
+class HideSetExpander
+{
+public:
+	explicit HideSetExpander(const std::unordered_map<std::string, MacroDefinition>& macros)
+		: macros_(macros) {}
+
+	// `conditional`: #if / #elif expression text.  See takeDefinedOperand.
+	HsTokens expand(std::deque<HsToken> in, bool conditional = false)
+	{
+		HsTokens out;
+		while (!in.empty())
+		{
+			HsToken t = std::move(in.front());
+			in.pop_front();
+			// THE `defined` OPERATOR IS RECOGNISED HERE, INSIDE THE EXPANSION,
+			// and before both the hide-set test and the macro lookup.
+			//
+			// Not before expansion and not after it.  Before is not enough:
+			//     #define D defined
+			//     #if D(X)                       reference TRUE
+			// only produces the operator once D has been replaced.  After is
+			// worse: this expander pushes a replacement onto the FRONT of the
+			// queue and rescans it, so by the time any later pass could look,
+			// D(X) has already become defined(1) and the operand name is gone.
+			// Sitting in the loop is the only place that sees the operator the
+			// moment it appears with its operand still unexpanded behind it.
+			//
+			// Before macros_.find, because the operator outranks a macro of
+			// the same name:
+			//     #define defined 9
+			//     #if defined(X)                 reference FALSE, not 9(X)
+			if (conditional && t.tok.type == TokenType::IDENTIFIER &&
+			    t.tok.lexeme == "defined")
+			{
+				out.push_back(takeDefinedOperand(in, t));
+				continue;
+			}
+			if (t.tok.type != TokenType::IDENTIFIER || t.hs.count(t.tok.lexeme))
+			{
+				out.push_back(std::move(t));
+				continue;
+			}
+			auto it = macros_.find(t.tok.lexeme);
+			if (it == macros_.end())
+			{
+				out.push_back(std::move(t));
+				continue;
+			}
+			const MacroDefinition& macro = it->second;
+
+			if (!macro.isFunctionLike)
+			{
+				std::set<std::string> hs = t.hs;
+				hs.insert(macro.name);
+				HsTokens rep = substitute(macro, {}, {}, hs);
+				in.insert(in.begin(), rep.begin(), rep.end());
+				continue;
+			}
+
+			// Function-like: only an invocation - the name followed by '(' -
+			// expands; a bare name is an ordinary identifier.
+			if (in.empty() || in.front().tok.type != TokenType::LPAREN)
+			{
+				out.push_back(std::move(t));
+				continue;
+			}
+			in.pop_front(); // '('
+			std::vector<HsTokens> args;
+			HsTokens cur;
+			int depth = 1;
+			std::set<std::string> rparenHs;
+			while (!in.empty())
+			{
+				HsToken a = std::move(in.front());
+				in.pop_front();
+				if (a.tok.type == TokenType::LPAREN)
+				{
+					depth++;
+				}
+				else if (a.tok.type == TokenType::RPAREN)
+				{
+					depth--;
+					if (depth == 0)
+					{
+						rparenHs = a.hs;
+						break;
+					}
+				}
+				else if (a.tok.type == TokenType::COMMA && depth == 1)
+				{
+					args.push_back(std::move(cur));
+					cur.clear();
+					continue;
+				}
+				cur.push_back(std::move(a));
+			}
+			if (!cur.empty())
+				args.push_back(std::move(cur));
+
+			if ((!macro.isVariadic && args.size() != macro.parameters.size()) ||
+				(macro.isVariadic && args.size() < (macro.parameters.empty() ? 0 : macro.parameters.size() - 1)))
+			{
+				throw std::runtime_error("Macro " + macro.name + " called with incorrect number of arguments");
+			}
+
+			// Arguments are fully expanded before substitution (except where
+			// they meet ##, which pastes their raw spelling) - BUT ONLY THE
+			// ONES THE REPLACEMENT LIST ACTUALLY NAMES.  An argument bound to
+			// a parameter the body never mentions is not expanded at all, so
+			// nothing in it reaches the token stream:
+			//     #define BAD  (1.0<FF>)
+			//     #define DROP(x) 2.0
+			//     DROP(BAD)          reference ACCEPTS
+			// Expanding every argument regardless made that refuse, because
+			// BAD's body does not tokenise (found by codex). Skipping the
+			// unused ones is also just what the language says.
+			// WHICH PARAMETERS NEED THE EXPANDED ARGUMENT - decided PER
+			// OCCURRENCE, not per parameter.  An occurrence that is an operand
+			// of ## takes the RAW spelling (substitute() already does that);
+			// only an occurrence it resolves through expandedArgs needs the
+			// argument expanded at all.
+			//
+			// Marking a parameter "used" because its name appears ANYWHERE was
+			// wrong and measurable: with BAD holding a form feed,
+			//     #define CAT(a,b) a##b      CAT(BAD,x)
+			// pastes BAD raw and the reference ACCEPTS, but pre-expanding the
+			// argument refused it (codex, confirmed on two independent builds;
+			// Fable measured the reference verdicts m19/m20). The mixed shape
+			//     #define BOTH(a,b) a##b + a    BOTH(BAD,x)
+			// is reference REFUSE, because the plain occurrence of `a` DOES
+			// expand - which is exactly why the decision cannot be per
+			// parameter in either direction.
+			//
+			// This walk mirrors substitute()'s: the ## right-hand run is
+			// consumed the same way, and a parameter immediately before ## is
+			// its left operand.
+			std::set<std::string> usedParams;
+			// Every identifier the replacement list spells, whatever its role.
+			std::set<std::string> mentionedParams;
+			for (const Token& rt : macro.replacementList)
+				if (rt.type == TokenType::IDENTIFIER)
+					mentionedParams.insert(rt.lexeme);
+			{
+				const std::vector<Token>& rl = macro.replacementList;
+				for (size_t ri = 0; ri < rl.size(); ++ri)
+				{
+					if (rl[ri].type == TokenType::OP_HASH_HASH)
+					{
+						size_t la = ri + 1;
+						TokenType prevKind = TokenType::END_OF_FILE;
+						bool first = true;
+						while (la < rl.size() &&
+						       (rl[la].type == TokenType::NUMBER ||
+						        rl[la].type == TokenType::IDENTIFIER) &&
+						       (first || rl[la].type != prevKind))
+						{
+							prevKind = rl[la].type;
+							first = false;
+							++la;   // pasted: raw, so no expansion needed
+						}
+						ri = la - 1;
+						continue;
+					}
+					if (rl[ri].type != TokenType::IDENTIFIER) continue;
+					// The left operand of ## is raw too.
+					if (ri + 1 < rl.size() &&
+					    rl[ri + 1].type == TokenType::OP_HASH_HASH) continue;
+					usedParams.insert(rl[ri].lexeme);
+				}
+			}
+			std::vector<HsTokens> expandedArgs;
+			expandedArgs.reserve(args.size());
+			for (size_t ai = 0; ai < args.size(); ++ai)
+			{
+				const bool named =
+					ai < macro.parameters.size()
+						? usedParams.count(macro.parameters[ai]) != 0
+						: usedParams.count("__VA_ARGS__") != 0;
+				if (named)
+				{
+					// EXPLICITLY NOT conditional.  A macro argument is
+					// pre-expanded like any other text, and the reference
+					// refuses what that produces rather than protecting it:
+					//     #define X 1
+					//     #define HAS(x) defined(x)
+					//     #if HAS(X)            C0105 - the argument became 1
+					//     #define ID(x) x
+					//     #if ID(defined(X))    C0105 - the same, from inside
+					// Inheriting the mode here would wrong-ACCEPT both and
+					// look like a fix (codex; cells f5 and g1).
+					expandedArgs.push_back(
+						expand(std::deque<HsToken>(args[ai].begin(), args[ai].end()), false));
+				}
+				else
+				{
+					// Never substituted through expandedArgs, so its expansion
+					// is never OUTPUT.  The raw spelling is kept so ## and #
+					// still see what was written.
+					//
+					// But an argument whose parameter the body does not mention
+					// AT ALL is still SCANNED: the reference checks the macro
+					// calls inside it (sce-cgc 475, C0107):
+					//     #define ONE(x) x      #define DROP(x) 1.0
+					//     DROP(ONE(1,2))          reference REFUSES
+					//     DROP(DROP(ONE(1,2)))    reference REFUSES
+					// while a body that does not tokenise is still only raised
+					// where it reaches the token stream, which a dry scan never
+					// does:
+					//     DROP(BAD)  DROP(KEEP(BAD))   reference ACCEPTS
+					// An argument used only as a # or ## operand is NOT scanned:
+					// CAT(ONE(1,2),1) and STR(ONE(1,2)) fail on the reference for
+					// the paste / the cast, never for ONE's arity.
+					const bool mentioned =
+						ai < macro.parameters.size()
+							? mentionedParams.count(macro.parameters[ai]) != 0
+							: mentionedParams.count("__VA_ARGS__") != 0;
+					if (!mentioned)
+					{
+						++dryScanDepth_;
+						try
+						{
+							(void)expand(std::deque<HsToken>(args[ai].begin(), args[ai].end()), false);
+						}
+						catch (...)
+						{
+							--dryScanDepth_;
+							throw;
+						}
+						--dryScanDepth_;
+					}
+					expandedArgs.push_back(args[ai]);
+				}
+			}
+
+			std::set<std::string> hs;
+			std::set_intersection(t.hs.begin(), t.hs.end(), rparenHs.begin(), rparenHs.end(),
+			                      std::inserter(hs, hs.begin()));
+			hs.insert(macro.name);
+			HsTokens rep = substitute(macro, args, expandedArgs, hs);
+			in.insert(in.begin(), rep.begin(), rep.end());
+		}
+		return out;
+	}
+
+private:
+	const std::unordered_map<std::string, MacroDefinition>& macros_;
+	// > 0 while scanning an argument whose expansion is discarded; see the
+	// argument loop in expand().
+	mutable int dryScanDepth_ = 0;
+
+	// Consume `( IDENT )` or a bare `IDENT` from the front of `in` WITHOUT
+	// expanding it, and answer 1 or 0.  The operand is the name as written:
+	//     #define X 1
+	//     #define A X
+	//     #if defined(A)        TRUE - A is a macro; what it expands to is
+	//                           never asked, and 1 is not a macro name.
+	// Anything that is not one of the two forms is an error in the directive,
+	// which is how the reference reads `defined(`, `defined()` and
+	// `defined(1)`.  A form that merely LOOKS well formed is not enough: the
+	// old regex pair matched only the good shapes and left the bad ones to the
+	// expression parser, which evaluated them happily.
+	HsToken takeDefinedOperand(std::deque<HsToken>& in, const HsToken& op) const
+	{
+		auto bad = []() {
+			throw std::runtime_error("error C0105: Syntax error in #if");
+		};
+		bool parenthesised = false;
+		if (!in.empty() && in.front().tok.type == TokenType::LPAREN)
+		{
+			parenthesised = true;
+			in.pop_front();
+		}
+		if (in.empty() || in.front().tok.type != TokenType::IDENTIFIER)
+			bad();
+		const std::string name = in.front().tok.lexeme;
+		in.pop_front();
+		if (parenthesised)
+		{
+			if (in.empty() || in.front().tok.type != TokenType::RPAREN)
+				bad();
+			in.pop_front();
+		}
+		// isDefinedMacro is the SAME predicate #ifdef uses, so the two
+		// spellings cannot drift apart.  defined(defined) is false because
+		// `defined` is not a macro; defined(__LINE__) is false because the
+		// binding the driver owns says so even though __LINE__ expands - and
+		// it becomes TRUE the moment the source writes its own #define.
+		HsToken answer = op;
+		answer.tok.type = TokenType::NUMBER;
+		answer.tok.lexeme = isDefinedMacro(macros_, name) ? "1" : "0";
+		answer.hs.clear();
+		return answer;
+	}
+
+	// The argument bound to `name`, raw or expanded; a variadic tail is the
+	// remaining arguments joined with commas.  Returns false for a
+	// non-parameter identifier.
+	bool argFor(const MacroDefinition& macro, const std::vector<HsTokens>& args,
+	            const std::string& name, HsTokens& out) const
+	{
+		for (size_t p = 0; p < macro.parameters.size(); ++p)
+		{
+			if (macro.parameters[p] != name)
+				continue;
+			out.clear();
+			if (macro.isVariadic && p == macro.parameters.size() - 1)
+			{
+				for (size_t v = p; v < args.size(); ++v)
+				{
+					if (v > p)
+						out.push_back({ Token{ TokenType::COMMA, ",", 0, 0, "" }, {} });
+					out.insert(out.end(), args[v].begin(), args[v].end());
+				}
+			}
+			else if (p < args.size())
+			{
+				out = args[p];
+			}
+			return true;
+		}
+		return false;
+	}
+
+	HsTokens substitute(const MacroDefinition& macro, const std::vector<HsTokens>& rawArgs,
+	                    const std::vector<HsTokens>& expandedArgs, const std::set<std::string>& hs) const
+	{
+		// THE DEFERRED BODY FAILURE, RAISED HERE AND NOWHERE ELSE.  This is the
+		// one place a replacement list actually becomes output, so it is the
+		// only place the body reaches the token stream.  Raising it where the
+		// NAME was looked up instead refused two shapes the reference accepts,
+		// found independently by codex and Fable within a minute of each other:
+		//   a FUNCTION-LIKE name not followed by "(" is not a use at all
+		//     #define F(x) ((x)<FF>*2.0)   then   float F = t.x;
+		//   and an argument the callee never substitutes is never expanded
+		//     #define DROP(x) 1.0          then   DROP(BAD)
+		// Both accept on the reference and on the parent.
+		// A DRY SCAN of an argument no parameter names never produces output,
+		// so it never reaches the token stream either (DROP(BAD) accepts).
+		if (macro.bodyFailedToTokenise && dryScanDepth_ == 0)
+		{
+			throw std::runtime_error(macro.bodyTokeniseError);
+		}
+		const std::vector<Token>& rl = macro.replacementList;
+		HsTokens out;
+		for (size_t ri = 0; ri < rl.size(); ++ri)
+		{
+			const Token& rt = rl[ri];
+			if (rt.type == TokenType::OP_HASH_HASH)
+			{
+				// Token pasting: the spelling before ## joined to the spelling
+				// after it, then re-lexed.  A run of adjacent NUMBER/IDENTIFIER
+				// tokens of alternating kind after ## is one spelling ("2D"
+				// lexes as NUMBER 2 + IDENTIFIER D), as before this rewrite.
+				std::string left;
+				if (!out.empty())
+				{
+					left = out.back().tok.lexeme;
+					out.pop_back();
+				}
+				std::string right;
+				size_t la = ri + 1;
+				TokenType prevKind = TokenType::END_OF_FILE;
+				while (la < rl.size() &&
+				       (rl[la].type == TokenType::NUMBER || rl[la].type == TokenType::IDENTIFIER) &&
+				       (right.empty() || rl[la].type != prevKind))
+				{
+					HsTokens raw;
+					if (rl[la].type == TokenType::IDENTIFIER && argFor(macro, rawArgs, rl[la].lexeme, raw))
+						right += spell(raw);
+					else
+						right += rl[la].lexeme;
+					prevKind = rl[la].type;
+					la++;
+				}
+				lexInto(left + right, hs, out);
+				ri = la - 1;
+				continue;
+			}
+			HsTokens arg;
+			if (rt.type == TokenType::IDENTIFIER && argFor(macro, expandedArgs, rt.lexeme, arg))
+			{
+				// A parameter that is itself the left operand of ## pastes raw.
+				if (ri + 1 < rl.size() && rl[ri + 1].type == TokenType::OP_HASH_HASH)
+					argFor(macro, rawArgs, rt.lexeme, arg);
+				for (HsToken a : arg)
+				{
+					a.hs.insert(hs.begin(), hs.end());
+					out.push_back(std::move(a));
+				}
+				continue;
+			}
+			out.push_back({ rt, hs });
+		}
+		return out;
+	}
+};
+
+} // namespace
+
 std::string Preprocessor::expandMacros(
 	const std::string& text,
 	const std::string& currentFile,
 	int lineNum,
-	int startColumn)
+	int startColumn,
+	bool conditional)
 {
-	std::string result = text;
-
-	bool expandedAny = false;
-	bool progress;
-	do
+	Lexer lexer(text, currentFile, lineNum, startColumn);
+	std::deque<HsToken> in;
+	bool anyMacroName = false;
+	for (const Token& t : lexer.tokenize())
 	{
-		progress = false;
-
-		// Tokenize the current result
-		Lexer lexer(result, currentFile, lineNum, startColumn);
-		std::vector<Token> tokens = lexer.tokenize();
-
-		std::string newResult;
-		size_t i = 0;
-		bool touchedThisPass = false;
-		TokenType prevTokenType = TokenType::END_OF_FILE;
-
-		// Helper lambda to append with proper spacing
-		auto appendToken = [&](const std::string& lexeme, TokenType type) {
-			if (needsSpaceBefore(prevTokenType, type) && !newResult.empty())
-			{
-				newResult += ' ';
-			}
-			newResult += lexeme;
-			prevTokenType = type;
-		};
-
-		while (i < tokens.size())
-		{
-			const Token& token = tokens[i];
-
-			// Skip EOF tokens if present
-			if (token.type == TokenType::END_OF_FILE) { i++; continue; }
-
-			if (token.type == TokenType::IDENTIFIER && macros.find(token.lexeme) != macros.end())
-			{
-				const MacroDefinition& macro = macros[token.lexeme];
-				if (macro.isFunctionLike)
-				{
-					// Function-like macro, expect '('
-					if (i + 1 < tokens.size() && tokens[i + 1].type == TokenType::LPAREN)
-					{
-						i += 2; // Skip macro name and '('
-						std::vector<std::string> args;
-						std::string currentArg;
-						TokenType prevArgTokenType = TokenType::END_OF_FILE;
-						int parenDepth = 1;
-
-						// Helper to append to currentArg with proper spacing
-						auto appendToArg = [&](const std::string& lexeme, TokenType type) {
-							if (needsSpaceBefore(prevArgTokenType, type) && !currentArg.empty())
-							{
-								currentArg += ' ';
-							}
-							currentArg += lexeme;
-							prevArgTokenType = type;
-						};
-
-						while (i < tokens.size() && parenDepth > 0)
-						{
-							const Token& argToken = tokens[i];
-							if (argToken.type == TokenType::LPAREN)
-							{
-								parenDepth++;
-								appendToArg(argToken.lexeme, argToken.type);
-							}
-							else if (argToken.type == TokenType::RPAREN)
-							{
-								parenDepth--;
-								if (parenDepth > 0)
-								{
-									appendToArg(argToken.lexeme, argToken.type);
-								}
-							}
-							else if (argToken.type == TokenType::COMMA && parenDepth == 1)
-							{
-								args.push_back(currentArg);
-								currentArg.clear();
-								prevArgTokenType = TokenType::END_OF_FILE;
-							}
-							else
-							{
-								appendToArg(argToken.lexeme, argToken.type);
-							}
-							i++;
-						}
-						if (!currentArg.empty())
-						{
-							args.push_back(currentArg);
-						}
-						// Arity checks
-						if ((!macro.isVariadic && args.size() != macro.parameters.size()) ||
-							(macro.isVariadic && args.size() < (macro.parameters.empty() ? 0 : macro.parameters.size() - 1)))
-						{
-							throw std::runtime_error("Macro " + macro.name + " called with incorrect number of arguments");
-						}
-						// Map parameters to arguments
-						std::unordered_map<std::string, std::string> paramMap;
-						for (size_t p = 0; p < macro.parameters.size(); ++p)
-						{
-							if (p < args.size())
-							{
-								paramMap[macro.parameters[p]] = args[p];
-							}
-							else if (macro.isVariadic && p == macro.parameters.size() - 1)
-							{
-								std::string variadicArgs;
-								for (size_t v = p; v < args.size(); ++v)
-								{
-									if (v > p) variadicArgs += ",";
-									variadicArgs += args[v];
-								}
-								paramMap[macro.parameters[p]] = variadicArgs;
-							}
-						}
-						// Emit replacement with ## token pasting support
-						// First pass: substitute parameters and build intermediate list
-						// Also combine adjacent NUMBER+IDENTIFIER tokens around ## operators
-						std::vector<std::string> replacementParts;
-						for (size_t ri = 0; ri < macro.replacementList.size(); ++ri)
-						{
-							const Token& repToken = macro.replacementList[ri];
-
-							if (repToken.type == TokenType::OP_HASH_HASH)
-							{
-								// Token pasting operator - mark it for processing
-								replacementParts.push_back("\x01##\x01"); // Special marker
-
-								// Look ahead: combine NUMBER+IDENTIFIER sequence (e.g., "2D" -> "2D")
-								// This handles cases like "SMPTY ## 2D" where 2D is tokenized separately
-								if (ri + 1 < macro.replacementList.size())
-								{
-									std::string combined;
-									size_t lookahead = ri + 1;
-
-									// Collect adjacent NUMBER/IDENTIFIER tokens
-									while (lookahead < macro.replacementList.size())
-									{
-										const Token& nextTok = macro.replacementList[lookahead];
-										if (nextTok.type == TokenType::NUMBER ||
-										    nextTok.type == TokenType::IDENTIFIER)
-										{
-											// Check if it's a parameter
-											if (nextTok.type == TokenType::IDENTIFIER &&
-											    paramMap.find(nextTok.lexeme) != paramMap.end())
-											{
-												combined += paramMap[nextTok.lexeme];
-											}
-											else
-											{
-												combined += nextTok.lexeme;
-											}
-
-											// Check if next token continues the sequence
-											if (lookahead + 1 < macro.replacementList.size())
-											{
-												const Token& afterNext = macro.replacementList[lookahead + 1];
-												if ((afterNext.type == TokenType::NUMBER ||
-												     afterNext.type == TokenType::IDENTIFIER) &&
-												    afterNext.type != macro.replacementList[lookahead].type)
-												{
-													// Different type, continue combining (NUMBER->ID or ID->NUMBER)
-													lookahead++;
-													continue;
-												}
-											}
-											lookahead++;
-											break;
-										}
-										else
-										{
-											break;
-										}
-									}
-
-									if (!combined.empty())
-									{
-										replacementParts.push_back(combined);
-										ri = lookahead - 1; // -1 because loop will increment
-									}
-								}
-							}
-							else if (repToken.type == TokenType::IDENTIFIER &&
-							         paramMap.find(repToken.lexeme) != paramMap.end())
-							{
-								// Parameter substitution
-								replacementParts.push_back(paramMap[repToken.lexeme]);
-							}
-							else
-							{
-								replacementParts.push_back(repToken.lexeme);
-							}
-						}
-
-						// Second pass: process ## operators
-						std::vector<std::string> pastedParts;
-						for (size_t pi = 0; pi < replacementParts.size(); ++pi)
-						{
-							if (replacementParts[pi] == "\x01##\x01")
-							{
-								// Token pasting: concatenate previous and next
-								if (!pastedParts.empty() && pi + 1 < replacementParts.size())
-								{
-									// Get previous part (remove trailing whitespace)
-									std::string prev = pastedParts.back();
-									while (!prev.empty() && (prev.back() == ' ' || prev.back() == '\t'))
-										prev.pop_back();
-									pastedParts.pop_back();
-
-									// Get next part (skip leading whitespace)
-									std::string next = replacementParts[pi + 1];
-									size_t start = 0;
-									while (start < next.size() && (next[start] == ' ' || next[start] == '\t'))
-										start++;
-									next = next.substr(start);
-
-									// Concatenate
-									pastedParts.push_back(prev + next);
-									pi++; // Skip the next part since we consumed it
-								}
-							}
-							else
-							{
-								pastedParts.push_back(replacementParts[pi]);
-							}
-						}
-
-						// Third pass: tokenize and emit with proper spacing
-						for (const auto& part : pastedParts)
-						{
-							Lexer partLexer(part);
-							auto partTokens = partLexer.tokenize();
-							for (const auto& partTok : partTokens)
-							{
-								if (partTok.type != TokenType::END_OF_FILE)
-								{
-									appendToken(partTok.lexeme, partTok.type);
-								}
-							}
-						}
-
-						// We performed a substitution in this pass
-						touchedThisPass = true;
-						progress = true;
-						expandedAny = true;
-						continue;
-					}
-					else
-					{
-						// Not a macro call, just append
-						appendToken(token.lexeme, token.type);
-						i++;
-						continue;
-					}
-				}
-				else
-				{
-					// Object-like macro
-					for (const Token& repToken : macro.replacementList)
-					{
-						appendToken(repToken.lexeme, repToken.type);
-					}
-					touchedThisPass = true;
-					progress = true;
-					expandedAny = true;
-					i++;
-					continue;
-				}
-			}
-
-			// Not a macro, just append
-			appendToken(token.lexeme, token.type);
-			i++;
-		}
-
-		if (!touchedThisPass)
-		{
-			// No substitutions this pass; keep original spacing/text
-			break;
-		}
-
-		// Apply this pass' result and try again
-		result = newResult;
-
-	} while (progress);
-
-	return result;
+		if (t.type == TokenType::END_OF_FILE)
+			continue;
+		if (t.type == TokenType::IDENTIFIER && macros.find(t.lexeme) != macros.end())
+			anyMacroName = true;
+		in.push_back({ t, {} });
+	}
+	// No macro name on the line: keep the original spacing and text.
+	// NOT in conditional mode, where the work is the `defined` operator rather
+	// than any macro.  `#if defined(NEVER)`, `#if defined(__LINE__)` and every
+	// malformed `defined(` line contain no macro name at all, so this return
+	// would hand them straight to the expression parser and the operator would
+	// never be seen (codex - found by reading the function, not by a cell).
+	if (!anyMacroName && !conditional)
+		return text;
+	HideSetExpander expander(macros);
+	return spell(expander.expand(std::move(in), conditional));
 }
 
 // Recursive descent parser for C preprocessor #if expressions.
@@ -1526,29 +2056,22 @@ struct ExprParser
 
 bool Preprocessor::evaluateExpression(const std::string& expr)
 {
-	std::string expanded = expandMacros(expr);
-	expanded = trim(expanded);
+	// `defined` is resolved INSIDE this expansion, not before or after it -
+	// see HideSetExpander::expand.  The two regexes that used to sit here ran
+	// AFTER expandMacros, so the operand they captured was the EXPANDED token:
+	// `#define X 1` turned defined(X) into defined(1), the lookup of "1"
+	// failed, and the answer was 0.  The operator was therefore INVERTED for
+	// every object-like macro - it reported false exactly when the macro was
+	// defined, silently, on the branch, with no diagnostic.  The one shape it
+	// got right was a FUNCTION-LIKE macro, whose name survives `defined(F)`
+	// untouched because the "(" belongs to the operator (preprocessor-defined-operator).
+	std::string processedExpr = trim(expandMacros(expr, "<expr>", 1, 1, true));
 
-	// Handle defined() operator before expression parsing
-	std::regex definedRegex(R"(defined\s*\(\s*(\w+)\s*\))");
-	std::smatch match;
-	std::string processedExpr = expanded;
-
-	while (std::regex_search(processedExpr, match, definedRegex))
-	{
-		std::string macroName = match[1];
-		bool isDefined = (macros.find(macroName) != macros.end());
-		processedExpr.replace(match.position(0), match.length(0), isDefined ? "1" : "0");
-	}
-
-	// Handle defined without parentheses
-	std::regex definedNoParenRegex(R"(defined\s+(\w+))");
-	while (std::regex_search(processedExpr, match, definedNoParenRegex))
-	{
-		std::string macroName = match[1];
-		bool isDefined = (macros.find(macroName) != macros.end());
-		processedExpr.replace(match.position(0), match.length(0), isDefined ? "1" : "0");
-	}
+	// An empty condition is an error in the directive, not false:
+	//     #define P
+	//     #if P                 reference C0105
+	if (processedExpr.empty())
+		throw std::runtime_error("error C0105: Syntax error in #if");
 
 	try
 	{
@@ -1601,7 +2124,18 @@ std::string Preprocessor::readFile(const std::string& filepath)
 
 	std::stringstream buffer;
 	buffer << file.rdbuf();
-	return buffer.str();
+	std::string text = buffer.str();
+	// The hook sees this file's raw bytes and nothing else, before the
+	// caller's emptiness check and before any #line text is put in front
+	// of them: a rule about how a file may BEGIN has to run where offset 0
+	// is still offset 0.  What the hook leaves behind is what the include
+	// is: a header that is only a byte order mark, admitted, is an empty
+	// header and is treated exactly as an empty header is.
+	if (sourceTextHook_)
+	{
+		sourceTextHook_(text, filepath);
+	}
+	return text;
 }
 
 std::string Preprocessor::trim(const std::string& str)

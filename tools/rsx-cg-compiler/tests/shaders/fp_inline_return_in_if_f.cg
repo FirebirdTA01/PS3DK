@@ -1,0 +1,1 @@
+float f(float a) { if (a > 0.5) return a * 2; return a; } float4 main(float4 t : TEXCOORD0) : COLOR { return f(t.x).xxxx; }

@@ -1,0 +1,9 @@
+struct OUT { float4 c : COLOR; };
+
+float4 main(float4 p : TEXCOORD0) : COLOR
+{
+	OUT o;
+	o.c = float4(1, 1, 1, 1);
+	o.c.xy = p.xy;
+	return o.c;
+}

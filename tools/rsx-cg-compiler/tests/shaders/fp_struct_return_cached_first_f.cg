@@ -1,0 +1,14 @@
+// Last-write pin for fp_struct_return_cached_rgb_f: the SAME program with the
+// second (existing-variable) write removed, so the computed write is the only
+// one.  cached_rgb takes the LAST write (the existing variable), so it must
+// DIFFER from this - if the fix wrongly kept the earlier computed write (the
+// max-SSA-id defect), cached_rgb would instead be identical to this.
+struct R { float4 c : COLOR; };
+R main(float2 uv : TEXCOORD0, uniform sampler2D t)
+{
+    R r;
+    float3 early = tex2D(t, uv).xyz;
+    r.c.xyz = tex2D(t, uv).xyz * 2.0;
+    r.c.a   = 1.0;
+    return r;
+}

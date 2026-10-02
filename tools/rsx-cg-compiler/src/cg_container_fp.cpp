@@ -40,6 +40,9 @@
 
 #include "cg_container_fp.h"
 #include "nv40/nv40_emit.h"
+#include "array_uniforms.h"
+#include "fp_sampler_bindings.h"
+#include "uniform_bindings.h"
 
 #include "ir.h"
 
@@ -67,6 +70,7 @@ constexpr uint32_t kInvalidIndex           = 0xFFFFFFFFu;
 
 // CGresource bind locations.
 constexpr uint32_t kCgTexUnit0   = 2048u;  // 0x0800
+constexpr uint32_t kCgWPos       = 2373u;  // 0x0945  (FP WPOS semantic, CG_WPOS, sdk/include/Cg/NV/cg_bindlocations.h:69)
 constexpr uint32_t kCgColor0     = 2757u;  // 0x0ac5  (FP COLOR semantic)
 constexpr uint32_t kCgDepth0     = 2933u;  // 0x0b75  (FP DEPTH semantic)
 constexpr uint32_t kCgTexCoord0  = 3220u;  // 0x0c94
@@ -76,6 +80,7 @@ constexpr uint32_t kCgTexCoord0  = 3220u;  // 0x0c94
 // synthetic `$kill_NNNN` parameters emitted by #pragma alphakill.
 // The runtime distinguishes via var / direction / embeddedConst.
 constexpr uint32_t kCgUndefined  = 3256u;  // 0x0cb8
+constexpr uint32_t kCgConst      = 2178u;  // CG_C for an explicitly bound uniform
 constexpr uint32_t kCgKillMarker = kCgUndefined;  // alphakill is res=UNDEFINED too
 
 // CGtype values.
@@ -83,8 +88,13 @@ constexpr uint32_t kCgFloat       = 1045u;
 constexpr uint32_t kCgFloat2      = 1046u;
 constexpr uint32_t kCgFloat3      = 1047u;
 constexpr uint32_t kCgFloat4      = 1048u;
+constexpr uint32_t kCgFloat2x2    = 1054u;
+constexpr uint32_t kCgFloat3x3    = 1059u;
 constexpr uint32_t kCgFloat4x4    = 1064u;
+constexpr uint32_t kCgSampler1D   = 1065u;
 constexpr uint32_t kCgSampler2D   = 1066u;
+constexpr uint32_t kCgSampler3D   = 1067u;
+constexpr uint32_t kCgSamplerRect = 1068u;
 constexpr uint32_t kCgSamplerCube = 1069u;
 
 std::string toUpper(std::string s)
@@ -128,13 +138,35 @@ void padTo(std::vector<uint8_t>& out, size_t alignment)
 // them.
 uint32_t cgTypeForIRType(const IRTypeInfo& t)
 {
+    if (t.baseType == IRType::Sampler1D)   return kCgSampler1D;
     if (t.baseType == IRType::Sampler2D)   return kCgSampler2D;
+    if (t.baseType == IRType::Sampler3D)   return kCgSampler3D;
+    if (t.baseType == IRType::SamplerRect) return kCgSamplerRect;
     if (t.baseType == IRType::SamplerCube) return kCgSamplerCube;
-    if (t.isMatrix() && t.matrixRows == 4 && t.matrixCols == 4)
-        return kCgFloat4x4;
+    if (t.isMatrix()) {
+        // CGtype packs every RxC shape as kCgFloat1x1 + (rows-1)*4 + (cols-1)
+        // (2x2 = 1054, 3x3 = 1059, 3x4 = 1060, 4x3 = 1063, 4x4 = 1064); the
+        // reference records half matrices with the float codes in FP
+        // (measured 2026-09-15, rectangular-matrices: half3x4 B -> 1060, rows 1048).
+        if (t.matrixRows >= 1 && t.matrixRows <= 4 && t.matrixCols >= 1 && t.matrixCols <= 4)
+            return kCgFloat4x4 - 15u + (t.matrixRows - 1) * 4u + (t.matrixCols - 1);
+    }
     switch (t.baseType)
     {
     case IRType::Float32: return kCgFloat;
+    // A `half` scalar is recorded as FLOAT by the reference (measured:
+    // `uniform half u_w` -> CGtype 1045, `half u_w[3]` elements 1045,
+    // `half4 u_h[3]` elements 1048); this returned 0 for it, so every
+    // half scalar uniform's record carried no type at all.
+    case IRType::Float16: return kCgFloat;
+    // An int, uint or bool SCALAR is recorded as FLOAT too (measured on
+    // the vertex side, dynamic-uniform-array-index: `int a : TEXCOORD1` -> 1045, and
+    // int2/int3/int4 -> 1046/1047/1048 like their float twins, which the
+    // vector cases below already produce); this returned 0 for the scalar
+    // and the record carried no type.
+    case IRType::Bool:
+    case IRType::Int32:
+    case IRType::UInt32:  return kCgFloat;
     case IRType::Vec2:    return kCgFloat2;
     case IRType::Vec3:    return kCgFloat3;
     case IRType::Vec4:    return kCgFloat4;
@@ -146,10 +178,23 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
 // map (uniform parameters, etc.).
 uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
 {
+    // The reference canonicalises COL to COLOR (2757..2760 family), confirmed
+    // on sce-cgc for both inputs and outputs.  Fragment MRT supports up to 4 targets
+    // (indices 0..3: 2757..2760, fragment-colour-reflection).  Indices > 3 are refused by the
+    // reference (error C5102) and by our lowering only on the output side
+    // (nv40_general_lowering.cpp:742); our compiler accepts them as inputs.
+    // 0 is the deliberate choice for an out-of-range index with no
+    // reference-defined bind location.
     if (semUpper == "COLOR" || semUpper == "COL")
-        return kCgColor0 + (semIndex == 1 ? 1 : 0);
-    // Index-less aliases of COLOR0/COLOR1 (mirrors the lowering's
-    // semantic tables; an indexed DIFFUSE1 stays unmapped).
+    {
+        if (semIndex >= 0 && semIndex <= 3)
+            return kCgColor0 + static_cast<uint32_t>(semIndex);
+        return 0;
+    }
+    // DIFFUSE and SPECULAR are accepted by our frontend as legacy aliases mapping
+    // to COLOR0/COLOR1 (2757/2758); the reference refuses them in fragment profile
+    // (error C5108: unknown semantics).  Tracked under leniency card unknown-semantic-leniency.
+    // An indexed DIFFUSE1 stays unmapped (0).
     if (semUpper == "DIFFUSE"  && semIndex == 0) return kCgColor0;
     if (semUpper == "SPECULAR" && semIndex == 0) return kCgColor0 + 1;
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
@@ -157,9 +202,15 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
     // The fragment DEPTH output.  Ours left this at 0, which the
     // reference disassembler prints as '???'; measured against the
     // reference on a `float depth : DEPTH` fixture, it is CG_DEPTH0
-    // (t_1722b8bc).  Only DEPTH0 exists — there is one depth output.
+    // (fragment-depth-export).  Only DEPTH0 exists — there is one depth output.
     if ((semUpper == "DEPTH" || semUpper == "DEPTH0") && semIndex == 0)
         return kCgDepth0;
+    // Fragment WPOS varying input (fragment-wpos-reflection).  Matches CG_WPOS = 2373
+    // per sdk/include/Cg/NV/cg_bindlocations.h:69 and confirmed against
+    // reference ShowDepth_frag.reference.bin inputs.wPos.
+    // Index 0 only (WPOS is unindexed).
+    if (semUpper == "WPOS" && semIndex == 0)
+        return kCgWPos;
     return 0;
 }
 
@@ -209,18 +260,34 @@ ContainerResult emitFragmentContainerImpl(
         uint32_t    direction;
         uint32_t    paramno;
         uint32_t    isReferenced = 0;
+        uint32_t    resIndex = kInvalidIndex;
+        uint32_t    isShared = 0;
         // Set by the FP-uniform pass below.  When non-empty, the
         // string-region layout emits a CgBinaryEmbeddedConstant
         // record right after the semantic (or at the start of the
         // param's slot if no semantic) and writes its offset into
         // the param entry's embeddedConst field.
         std::vector<uint32_t> embeddedConstUcodeOffsets;
+        // Compiled default value of an initialised file-scope uniform.
+        // When non-empty the string-region layout emits a 16-byte
+        // float[4] block (zero-padded above the declared component
+        // count) between the semantic string and the embedded-constant
+        // record, and writes its offset into the param entry's
+        // defaultValue field.  Measured against the reference on
+        // `uniform float4 light : C3 = {1,2,3,4}`: semantic 'C3' at
+        // 0xc3, default block at 0xd0, embeddedConst at 0xe0, name
+        // 'light' at 0xe8 (uniform-default-records).
+        std::vector<float> defaultValue;
     };
 
     std::vector<ParamDesc> params;
     params.reserve(entry->parameters.size());
 
-    int nextSamplerUnit = 0;
+    const auto samplerLayout = rsx_cg::buildFpSamplerLayout(module, *entry);
+    if (!samplerLayout.diagnostics.empty()) {
+        result.diagnostics = samplerLayout.diagnostics;
+        return result;
+    }
     for (size_t i = 0; i < entry->parameters.size(); ++i)
     {
         const auto& p = entry->parameters[i];
@@ -269,12 +336,109 @@ ContainerResult emitFragmentContainerImpl(
                     fd.type      = cgTypeForIRType(in.resultType);
                     fd.var       = kCgVarying;
                     fd.direction = kCgIn;
-                    fd.paramno   = static_cast<uint32_t>(i);
+                    fd.paramno   = irParamOrdinal(entry->parameters[i], i);
                     fd.res       = fpResourceFor(toUpper(in.semanticName),
                                                  in.semanticIndex);
                     fd.isReferenced = 1;
                     params.push_back(fd);
                 }
+            }
+            continue;
+        }
+
+        // An ARRAY uniform parameter is one record PER ELEMENT, named
+        // `name[k]`, typed as the element, all sharing the parameter's
+        // source ordinal as paramno, declared whether used or not; a used
+        // element carries its own inline-const relocation offsets and
+        // isReferenced.  Its slots come from the shared rule, so the
+        // lowering's sources, the emitter's seeding and these records
+        // count the same way (array_uniforms.h, constant-uniform-array-index).
+        if (p.storage == StorageQualifier::Uniform && p.type.isArray())
+        {
+            const unsigned base  = rsx_cg::fpParameterSlotBases(*entry)[i];
+            const unsigned count = rsx_cg::fpUniformSlotCount(p.type);
+            for (unsigned k = 0; k < count; ++k)
+            {
+                ParamDesc e;
+                e.name      = rsx_cg::arrayElementName(p.name, static_cast<int>(k));
+                e.semantic  = std::string{};
+                e.type      = cgTypeForIRType(p.type);
+                e.paramno   = irParamOrdinal(entry->parameters[i], i);
+                e.res       = kCgUndefined;
+                e.var       = kCgUniform;
+                e.direction = kCgIn;
+                for (const auto& eu : attrs.embeddedUniforms)
+                {
+                    if (eu.entryParamIndex == base + k)
+                    {
+                        e.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                        break;
+                    }
+                }
+                e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                params.push_back(e);
+            }
+            continue;
+        }
+
+        if (p.storage == StorageQualifier::Uniform && p.type.isMatrix())
+        {
+            const unsigned base = rsx_cg::fpParameterSlotBases(*entry)[i];
+            const int rows = std::max(1, p.type.matrixRows);
+            const int cols = std::max(1, p.type.matrixCols);
+            IRTypeInfo rowType = (cols == 2) ? IRTypeInfo::Float2() :
+                                 (cols == 3) ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
+
+            ParamDesc parent;
+            parent.name = p.name;
+            parent.semantic = std::string{};
+            parent.type = cgTypeForIRType(p.type);
+            parent.paramno = irParamOrdinal(entry->parameters[i], i);
+            parent.res = kCgUndefined;
+            parent.var = kCgUniform;
+            parent.direction = kCgIn;
+            parent.isReferenced = 1;
+            params.push_back(parent);
+
+            for (int k = 0; k < rows; ++k)
+            {
+                ParamDesc e;
+                e.name = rsx_cg::arrayElementName(p.name, k);
+                e.semantic = std::string{};
+                e.type = cgTypeForIRType(rowType);
+                e.paramno = irParamOrdinal(entry->parameters[i], i);
+                e.res = kCgUndefined;
+                e.var = kCgUniform;
+                e.direction = kCgIn;
+                for (const auto& eu : attrs.embeddedUniforms)
+                {
+                    if (eu.entryParamIndex == base + static_cast<unsigned>(k))
+                    {
+                        e.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                        break;
+                    }
+                }
+                e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                // A matrix ENTRY PARAMETER's default lives on the rows, the
+                // same rule a file-scope matrix follows: the parent's block
+                // stays 0 and each row carries its own columns, zero-padded.
+                // Measured on `uniform float3x3 M = float3x3(1..9)`: rows at
+                // 336/368/400 holding [1,2,3,0] [4,5,6,0] [7,8,9,0]
+                // (uniform-default-records A1; found by codex, who also found that we
+                // accepted this shape and computed with ZERO rows).
+                if (!p.initialValue.empty() &&
+                    p.initialValue.size() >=
+                        static_cast<size_t>(k + 1) * static_cast<size_t>(cols))
+                {
+                    e.defaultValue.assign(
+                        p.initialValue.begin() +
+                            static_cast<std::ptrdiff_t>(
+                                static_cast<size_t>(k) * static_cast<size_t>(cols)),
+                        p.initialValue.begin() +
+                            static_cast<std::ptrdiff_t>(
+                                static_cast<size_t>(k + 1) * static_cast<size_t>(cols)));
+                }
+                params.push_back(e);
             }
             continue;
         }
@@ -296,7 +460,7 @@ ContainerResult emitFragmentContainerImpl(
         if (p.storage == StorageQualifier::Out &&
             isFpDepthOutput(toUpper(p.semanticName), p.semanticIndex))
             d.type = kCgFloat3;
-        d.paramno   = static_cast<uint32_t>(i);
+        d.paramno   = irParamOrdinal(entry->parameters[i], i);
 
         // Shared predicate: this omitted SamplerRect while the emit side
         // counted it, so a samplerRECT ENTRY PARAMETER took a texture unit
@@ -306,7 +470,10 @@ ContainerResult emitFragmentContainerImpl(
 
         if (p.storage == StorageQualifier::Uniform && isSampler)
         {
-            d.res       = kCgTexUnit0 + nextSamplerUnit++;
+            const int unit = samplerLayout.unit(p.valueId);
+            d.res = unit < 0 ? kCgUndefined : kCgTexUnit0 + unit;
+            if (p.explicitRegisterBank == 'S')
+                d.semantic = "TEXUNIT" + std::to_string(p.explicitRegisterIndex);
             d.var       = kCgUniform;
             d.direction = kCgIn;
         }
@@ -320,10 +487,38 @@ ContainerResult emitFragmentContainerImpl(
             d.var       = kCgUniform;
             d.direction = kCgIn;
 
+            // A uniform ENTRY PARAMETER's default is recorded exactly like a
+            // file-scope uniform's initialiser - same 16-byte block, same
+            // placement (uniform-default-records A1).  Measured on the reference:
+            // `uniform float4 light = {1,2,3,4}` -> defOff 208 [1,2,3,4];
+            // `uniform float3 Ka = 0.6f` -> [0.6,0.6,0.6,0], broadcast;
+            // `uniform float s = 2.5` -> [2.5,0,0,0].  isReferenced does not
+            // gate it: an UNREFERENCED defaulted uniform still gets its block,
+            // with isRef 0.
+            if (!p.initialValue.empty())
+            {
+                d.defaultValue.assign(
+                    p.initialValue.begin(),
+                    p.initialValue.begin() +
+                        static_cast<std::ptrdiff_t>(
+                            std::min<size_t>(4u, p.initialValue.size())));
+            }
+            else if (!p.initialIntValues.empty())
+            {
+                const size_t n = std::min<size_t>(4u, p.initialIntValues.size());
+                d.defaultValue.reserve(n);
+                for (size_t k = 0; k < n; ++k)
+                    d.defaultValue.push_back(
+                        static_cast<float>(p.initialIntValues[k]));
+            }
+
             // Attach the per-use ucode offsets from the lowering pass.
+            // The slot is the parameter's index unless an earlier array
+            // parameter widened the numbering (shared rule).
+            const unsigned slot = rsx_cg::fpParameterSlotBases(*entry)[i];
             for (const auto& eu : attrs.embeddedUniforms)
             {
-                if (eu.entryParamIndex == i)
+                if (eu.entryParamIndex == slot)
                 {
                     d.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
                     break;
@@ -353,6 +548,8 @@ ContainerResult emitFragmentContainerImpl(
         // unconditionally (StoreOutput keys off semantic, not operand).
         d.isReferenced = attrs.referencedParamIndices.count(
                              static_cast<unsigned>(i)) ? 1u : 0u;
+        if (isSampler && p.storage == StorageQualifier::Uniform)
+            d.isReferenced = samplerLayout.used.count(p.valueId) ? 1u : 0u;
         params.push_back(d);
     }
 
@@ -363,13 +560,104 @@ ContainerResult emitFragmentContainerImpl(
     // entries get paramno = 0xFFFFFFFF (synthetic) and the embedded-
     // constant ucode-offset list comes from those higher slot ids.
     {
-        const unsigned firstGlobalSlot =
-            static_cast<unsigned>(entry->parameters.size());
+        const unsigned firstGlobalSlot = rsx_cg::fpFirstGlobalSlot(*entry);
         unsigned globalSlotCursor = firstGlobalSlot;
-        int      globalSamplerCursor = nextSamplerUnit;
         for (const auto& g : module.globals)
         {
             if (g.storage != StorageQualifier::Uniform) continue;
+
+            // A file-scope ARRAY uniform: one record per element, each on
+            // its own slot, in the same order the lowering numbered them.
+            if (g.type.isArray() && !isSamplerIRType(g.type.baseType))
+            {
+                const unsigned count = rsx_cg::fpUniformSlotCount(g.type);
+                for (unsigned k = 0; k < count; ++k)
+                {
+                    const unsigned slot = globalSlotCursor++;
+                    ParamDesc e;
+                    e.name      = rsx_cg::arrayElementName(g.name, static_cast<int>(k));
+                    e.semantic  = std::string{};
+                    e.type      = cgTypeForIRType(g.type);
+                    e.paramno   = kInvalidIndex;
+                    e.res       = kCgUndefined;
+                    e.var       = kCgUniform;
+                    e.direction = kCgIn;
+                    for (const auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == slot)
+                        {
+                            e.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                            break;
+                        }
+                    }
+                    e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                    params.push_back(e);
+                }
+                continue;
+            }
+
+            if (g.type.isMatrix() && !isSamplerIRType(g.type.baseType))
+            {
+                const int rows = std::max(1, g.type.matrixRows);
+                const int cols = std::max(1, g.type.matrixCols);
+                IRTypeInfo rowType = (cols == 2) ? IRTypeInfo::Float2() :
+                                     (cols == 3) ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
+
+                ParamDesc parent;
+                parent.name      = g.name;
+                parent.semantic  = std::string{};
+                parent.type      = cgTypeForIRType(g.type);
+                parent.paramno   = kInvalidIndex;
+                parent.res       = kCgUndefined;
+                parent.var       = kCgUniform;
+                parent.direction = kCgIn;
+                parent.isReferenced = 1;
+                params.push_back(parent);
+
+                for (int k = 0; k < rows; ++k)
+                {
+                    const unsigned slot = globalSlotCursor++;
+                    ParamDesc e;
+                    e.name      = rsx_cg::arrayElementName(g.name, static_cast<int>(k));
+                    e.semantic  = std::string{};
+                    e.type      = cgTypeForIRType(rowType);
+                    e.paramno   = kInvalidIndex;
+                    e.res       = kCgUndefined;
+                    e.var       = kCgUniform;
+                    e.direction = kCgIn;
+                    for (const auto& eu : attrs.embeddedUniforms)
+                    {
+                        if (eu.entryParamIndex == slot)
+                        {
+                            e.embeddedConstUcodeOffsets = eu.ucodeByteOffsets;
+                            break;
+                        }
+                    }
+                    e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                    // An initialised matrix uniform's compiled default lives
+                    // on the ROWS, never on the parent - the reference leaves
+                    // the parent's defaultValue at 0 and gives each row its
+                    // own 16-byte block holding that row's columns,
+                    // zero-padded.  Measured on `float3x3 M = float3x3(0.25,
+                    // 0.5, 0.75, 1.5, 2.5, 3.5, -1, -2, -4)`: M[0] at 528
+                    // [0.25,0.5,0.75,0], M[1] at 560 [1.5,2.5,3.5,0], M[2] at
+                    // 592 [-1,-2,-4,0] (uniform-default-records A3).  ir_builder hands the
+                    // value over flattened row-major.
+                    const size_t rowBase =
+                        static_cast<size_t>(k) * static_cast<size_t>(cols);
+                    if (g.initialValue.size() >= rowBase + static_cast<size_t>(cols))
+                    {
+                        e.defaultValue.assign(
+                            g.initialValue.begin() +
+                                static_cast<std::ptrdiff_t>(rowBase),
+                            g.initialValue.begin() +
+                                static_cast<std::ptrdiff_t>(
+                                    rowBase + static_cast<size_t>(cols)));
+                    }
+                    params.push_back(e);
+                }
+                continue;
+            }
 
             ParamDesc d;
             d.name      = g.name;
@@ -384,7 +672,11 @@ ContainerResult emitFragmentContainerImpl(
 
             if (isSampler)
             {
-                d.res       = kCgTexUnit0 + globalSamplerCursor++;
+                const int unit = samplerLayout.unit(g.valueId);
+                d.res = unit < 0 ? kCgUndefined : kCgTexUnit0 + unit;
+                d.isReferenced = samplerLayout.used.count(g.valueId) ? 1u : 0u;
+                const int declaredUnit = rsx_cg::explicitFpSamplerUnit(g);
+                if (declaredUnit >= 0) d.semantic = "TEXUNIT" + std::to_string(declaredUnit);
                 d.var       = kCgUniform;
                 d.direction = kCgIn;
             }
@@ -393,6 +685,36 @@ ContainerResult emitFragmentContainerImpl(
                 d.res       = kCgUndefined;
                 d.var       = kCgUniform;
                 d.direction = kCgIn;
+
+                // An initialised file-scope uniform carries a COMPILED
+                // DEFAULT.  ir_builder evaluates the initialiser into
+                // IRGlobal::initialValue / initialIntValues (ir.h:501-502)
+                // and refuses rather than dropping it when it cannot be
+                // evaluated, so by the time the container is built the
+                // value is already in hand - we were writing zero over it.
+                // The reference records it in the parameter table and its
+                // runtime returns it from cgGetParameterDefaultValue
+                // (uniform-default-records).  Measured: `uniform float4 gTint =
+                // float4(1,2,3,4)` -> [1,2,3,4]; `uniform float gK = 0.75`
+                // -> [0.75,0,0,0]; a half4 default is recorded as four
+                // FLOATS, matching the half=float rule the array-uniform
+                // records already follow.
+                if (!g.initialValue.empty())
+                {
+                    d.defaultValue.assign(
+                        g.initialValue.begin(),
+                        g.initialValue.begin() +
+                            static_cast<std::ptrdiff_t>(
+                                std::min<size_t>(4u, g.initialValue.size())));
+                }
+                else if (!g.initialIntValues.empty())
+                {
+                    const size_t n = std::min<size_t>(4u, g.initialIntValues.size());
+                    d.defaultValue.reserve(n);
+                    for (size_t k = 0; k < n; ++k)
+                        d.defaultValue.push_back(
+                            static_cast<float>(g.initialIntValues[k]));
+                }
 
                 const unsigned slot = globalSlotCursor++;
                 for (const auto& eu : attrs.embeddedUniforms)
@@ -439,7 +761,27 @@ ContainerResult emitFragmentContainerImpl(
     }
 
     // Synthetic return-value output — the entry point's return type
-    // carries a semantic (`float4 main(...) : COLOR { return ... }`)
+    // Keep declaration records for unwritten array outputs without emitting
+    // stores or filling their lanes with invented values.
+    for (const auto& output : entry->returnOutputs)
+    {
+        if (output.name.find('[') == std::string::npos) continue;
+        const std::string name = entry->name + "." + output.name;
+        if (std::any_of(params.begin(), params.end(),
+                [&](const ParamDesc& p) { return p.name == name; })) continue;
+        ParamDesc d;
+        d.name = name;
+        d.semantic = output.rawSemanticName.empty() ? output.semanticName : output.rawSemanticName;
+        d.type = cgTypeForIRType(output.type);
+        d.var = kCgVarying;
+        d.direction = kCgOut;
+        d.paramno = kInvalidIndex;
+        d.res = fpResourceFor(toUpper(output.semanticName), output.semanticIndex);
+        d.isReferenced = 0;
+        params.push_back(d);
+    }
+
+    // A scalar return carries a semantic (`float4 main(...) : COLOR { return ... }`)
     // and the IR builder emits a StoreOutput for the return value.
     // The container needs a param entry for that synthetic output
     // named `<entry>` (matching the reference compiler) with paramno =
@@ -525,6 +867,50 @@ ContainerResult emitFragmentContainerImpl(
             d.isReferenced = 0;
             params.push_back(d);
         }
+    }
+
+    // C<N> is reflection metadata on FP: the actual value remains in the
+    // existing inline block, patched through embeddedConst. Do not alter
+    // those slots or apply VP's c255 limit. Owners distinguish a global
+    // from a shadowing entry parameter with the same visible record name.
+    const auto bindings = rsx_cg::resolveFpExplicitUniformBindings(*entry, module);
+    if (!bindings.diagnostics.empty()) {
+        result.diagnostics = bindings.diagnostics;
+        return result;
+    }
+    struct BoundRecord { std::string semantic; int reg; bool matrixParent; };
+    std::map<std::pair<std::string, uint32_t>, BoundRecord> boundRecords;
+    const auto addBinding = [&](const auto& uniform, uint32_t paramno) {
+        const auto* binding = bindings.find(uniform.valueId);
+        if (!binding) return;
+        for (size_t element = 0; element < binding->registers.size(); ++element) {
+            const int base = binding->registers[element];
+            const std::string name = uniform.type.isArray()
+                ? rsx_cg::arrayElementName(uniform.name, static_cast<int>(element))
+                : uniform.name;
+            boundRecords[{name, paramno}] = {binding->semantic, base, uniform.type.isMatrix()};
+            if (uniform.type.isMatrix())
+                for (int row = 0; row < uniform.type.matrixRows; ++row)
+                    boundRecords[{name + "[" + std::to_string(row) + "]", paramno}] =
+                        {binding->semantic, base >= 0 ? base + row : -1, false};
+        }
+    };
+    for (size_t i = 0; i < entry->parameters.size(); ++i)
+        addBinding(entry->parameters[i], irParamOrdinal(entry->parameters[i], i));
+    for (const auto& global : module.globals) addBinding(global, kInvalidIndex);
+    for (auto& param : params) {
+        if (param.var != kCgUniform) continue;
+        const auto found = boundRecords.find({param.name, param.paramno});
+        if (found == boundRecords.end()) continue;
+        const auto& bound = found->second;
+        const bool used = bound.reg >= 0;
+        param.semantic = bound.semantic;
+        param.res = used && !bound.matrixParent ? kCgConst : kCgUndefined;
+        param.resIndex = used && !bound.matrixParent
+            ? static_cast<uint32_t>(bound.reg) : kInvalidIndex;
+        // These coincide only for explicit bindings: referenced means used,
+        // shared means bound AND used, not a general identity between flags.
+        param.isReferenced = param.isShared = used ? 1u : 0u;
     }
 
     if (compactCgb)
@@ -681,16 +1067,30 @@ ContainerResult emitFragmentContainerImpl(
         uint32_t semanticOffset = 0;
         uint32_t nameOffset     = 0;
         uint32_t embeddedConstOffset = 0;
+        uint32_t defaultValueOffset  = 0;
     };
     std::vector<StringSlots> slots(params.size());
 
-    // Per-param the reference compiler layout order (verified 2026-04-18):
+    // Per-param the reference compiler layout order (verified 2026-04-18,
+    // step 2 added 2026-09-13 for uniform-default-records):
     //   1. Semantic string (if any)
-    //   2. CgBinaryEmbeddedConstant record (if any) — 8-byte aligned
+    //   2. Compiled default value block (if any) - 16-byte aligned,
+    //      exactly 16 bytes, four big-endian floats zero-padded above
+    //      the declared component count
+    //   3. CgBinaryEmbeddedConstant record (if any) - 16-byte aligned
     //      { u32 ucodeCount; u32 ucodeOffset[ucodeCount]; }
-    //   3. Name string
+    //   4. Name string
     // Strings region as a whole is padded to a 16-byte boundary at the
     // end (see padTo(out, 16) below).
+    //
+    // Step 2's position is measured, not assumed.  Reference fixture
+    // `uniform float4 light : C3 = {1.0,2.0,3.0,4.0}` compiled with
+    // sce-cgc -p sce_fp_rsx lays the region out as: semantic 'C3' at
+    // 0xc3, pad, DEFAULT BLOCK at 0xd0, embeddedConst at 0xe0, name
+    // 'light' at 0xe8.  The same block appears with no semantic at
+    // 0xd0 in the braced-default fixture and at 0x270/0x290 on the
+    // vertex profile, always 16-byte aligned and always immediately
+    // before the param's own embedded-constant record and name.
     for (size_t i = 0; i < params.size(); ++i)
     {
         if (!params[i].semantic.empty())
@@ -698,6 +1098,21 @@ ContainerResult emitFragmentContainerImpl(
             slots[i].semanticOffset =
                 stringsStart + static_cast<uint32_t>(stringsBlob.size());
             putString(stringsBlob, params[i].semantic);
+        }
+        if (!params[i].defaultValue.empty())
+        {
+            while (stringsBlob.size() % 16) stringsBlob.push_back(0);
+            slots[i].defaultValueOffset =
+                stringsStart + static_cast<uint32_t>(stringsBlob.size());
+            for (int j = 0; j < 4; ++j)
+            {
+                const float v = (static_cast<size_t>(j) < params[i].defaultValue.size())
+                                    ? params[i].defaultValue[static_cast<size_t>(j)]
+                                    : 0.0f;
+                uint32_t bits = 0;
+                std::memcpy(&bits, &v, sizeof(bits));
+                put32(stringsBlob, bits);
+            }
         }
         if (!params[i].embeddedConstUcodeOffsets.empty())
         {
@@ -748,7 +1163,9 @@ ContainerResult emitFragmentContainerImpl(
     put32(out, kBinaryFormatRevision);
     put32(out, totalSize);
     put32(out, static_cast<uint32_t>(params.size()));
-    put32(out, headerSize);              // parameterArray
+    // parameterArray: the reference writes 0, not the header size, when
+    // there is no parameter table at all (SDK fnop.cg, 'void main() {}').
+    put32(out, params.empty() ? 0u : headerSize);
     put32(out, programOffset);
     put32(out, ucodeSize);
     put32(out, ucodeOffset);
@@ -760,15 +1177,15 @@ ContainerResult emitFragmentContainerImpl(
         put32(out, d.type);
         put32(out, d.res);
         put32(out, d.var);
-        put32(out, kInvalidIndex);              // resIndex (-1: not allocated by compiler)
+        put32(out, params[i].resIndex);         // explicit C<N>, otherwise -1
         put32(out, slots[i].nameOffset);        // 0 if no name
-        put32(out, 0);                          // defaultValue
+        put32(out, slots[i].defaultValueOffset); // 0 unless the param carries a compiled default
         put32(out, slots[i].embeddedConstOffset);
         put32(out, slots[i].semanticOffset);    // 0 if no semantic
         put32(out, d.direction);
         put32(out, d.paramno);
         put32(out, d.isReferenced);
-        put32(out, 0);                          // isShared
+        put32(out, params[i].isShared);
     }
 
     // Strings (already absolute offsets baked into the param table).

@@ -4,6 +4,8 @@
 #include "ast.h"
 #include "semantic.h"  // For ShaderStage
 #include <cstdint>
+#include <cstring>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <memory>
@@ -43,7 +45,9 @@ enum class IRType
     Mat4x4,
 
     // Sampler types
+    Sampler1D,
     Sampler2D,
+    Sampler3D,
     SamplerRect,
     SamplerCube,
 
@@ -57,10 +61,12 @@ enum class IRType
 // global's metadata is attached to a different global's parameter.  They
 // disagreed on SamplerRect - the emitter counted it, the container did
 // not - so it lives here now rather than being spelled out at each of the
-// four sites that need it (t_f5f750ff).
+// four sites that need it (fragment-global-uniform-order).
 inline bool isSamplerIRType(IRType t)
 {
-    return t == IRType::Sampler2D ||
+    return t == IRType::Sampler1D ||
+           t == IRType::Sampler2D ||
+           t == IRType::Sampler3D ||
            t == IRType::SamplerRect ||
            t == IRType::SamplerCube;
 }
@@ -92,6 +98,7 @@ struct IRTypeInfo
     static IRTypeInfo Int() { return {IRType::Int32, 1, 0, 0}; }
     static IRTypeInfo UInt() { return {IRType::UInt32, 1, 0, 0}; }
     static IRTypeInfo Float() { return {IRType::Float32, 1, 0, 0}; }
+    static IRTypeInfo Half() { return {IRType::Float16, 1, 0, 0}; }
     static IRTypeInfo Float2() { return {IRType::Vec2, 2, 0, 0, IRType::Float32}; }
     static IRTypeInfo Float3() { return {IRType::Vec3, 3, 0, 0, IRType::Float32}; }
     static IRTypeInfo Float4() { return {IRType::Vec4, 4, 0, 0, IRType::Float32}; }
@@ -166,9 +173,21 @@ enum class IROp
     Saturate,
     Ddx,
     Ddy,
+    // Pack/unpack builtins (pack-unpack-intrinsics): one NV40 instruction each,
+    // fragment-only.  A pack reads a vector and yields one float whose bits
+    // hold the packed lanes; an unpack reads that float.
+    PackHalf2,
+    UnpackHalf2,
+    PackUByte4,
+    UnpackUByte4,
+    PackByte4,
+    UnpackByte4,
+    PackUShort2,
+    UnpackUShort2,
     Lerp,
     Step,
     SmoothStep,
+    Lit,
 
     // Trigonometric
     Sin,
@@ -230,6 +249,7 @@ enum class IROp
     TexSampleLod,   // tex2Dlod
     TexSampleGrad,  // tex2Dgrad
     TexSampleProj,  // tex2Dproj
+    TexSampleBias,  // tex2Dbias
     TexFetch,       // texelFetch
 
     // Function calls
@@ -283,6 +303,7 @@ class IRConstant : public IRValue
 {
 public:
     std::variant<bool, int32_t, uint32_t, float, std::vector<float>> value;
+    std::vector<int64_t> intValues;
 
     IRConstant(IRValueID id, const IRTypeInfo& type, bool v)
         : IRValue(id, type), value(v) {}
@@ -294,6 +315,8 @@ public:
         : IRValue(id, type), value(v) {}
     IRConstant(IRValueID id, const IRTypeInfo& type, const std::vector<float>& v)
         : IRValue(id, type), value(v) {}
+    IRConstant(IRValueID id, const IRTypeInfo& type, const std::vector<float>& v, const std::vector<int64_t>& iv)
+        : IRValue(id, type), value(v), intValues(iv) {}
 
     std::string valueToString() const;
 };
@@ -313,13 +336,28 @@ public:
     // Additional data for specific instructions
     int swizzleMask = 0;            // For VecShuffle: encoded swizzle pattern
     int componentIndex = 0;          // For VecExtract/VecInsert
+
+    // LoadUniform of an ARRAY uniform: how the element was chosen.  Explicit
+    // so a lowering can never mistake element 0 for the bare array, nor a
+    // run-time index for a lane selector (constant-uniform-array-index).
+    //   None      the bare array (no index) - only meaningful to a caller
+    //             that consumes whole arrays, and refused by the lowering
+    //   Constant  componentIndex holds the element, already bounds-checked
+    //             by the builder against the declared count
+    //   Dynamic   operands[0] holds the integral index value; the element
+    //             is chosen at run time
+    enum class ArrayIndexKind { None, Constant, Dynamic };
+    ArrayIndexKind arrayIndexKind = ArrayIndexKind::None;
+    // Owner of a uniform load. A global and an entry parameter may have the
+    // same name; binding/use classification must not merge those declarations.
+    IRValueID uniformSource = InvalidIRValue;
     IROp predOp = IROp::Nop;         // For PredCarry: the inner op (Add/Mul/Mad/...)
     // For Discard: the guard operand is the condition on the path that
     // REACHES the discard, and this flag says the kill fires where that
     // condition is FALSE.  The reference folds a negated guard into the
     // KIL's condition-code test (NE becomes EQ) and leaves the
     // comparison alone rather than inverting it, so the flag has to
-    // travel with the instruction (CF-2, t_91bbd575).
+    // travel with the instruction (CF-2, general-path-discard).
     bool guardIsNegated = false;
     bool shortCircuitRhs = false;
     std::string targetName;          // For branch targets, function calls
@@ -387,13 +425,39 @@ struct IRParameter
     std::string rawSemanticName;  // original source spelling (e.g. "TEXCOORD0"); empty if absent
     int semanticIndex = 0;
     bool inferredSemantic = false;  // semantic was assigned by the unbound-input default pass
+    // Preserve entry-parameter register(sN) bindings for sampler lowering.
+    char explicitRegisterBank = 0;
+    int explicitRegisterIndex = 0;
+    // Compiled DEFAULT of a uniform entry parameter, evaluated from the
+    // source's `= ...` (uniform-default-records A1).  Same shape and meaning as
+    // IRGlobal::initialValue below: empty when the parameter has no default.
+    // The reference records it in the parameter table and writes it into the
+    // inline const block, exactly as it does for a file-scope uniform.
+    std::vector<float>   initialValue;
+    std::vector<int64_t> initialIntValues;
+    // The parameter's position in the SOURCE parameter list - its Cg
+    // paramno.  It differs from its index here when an earlier uniform
+    // struct parameter was flattened into one parameter per member
+    // (uniform-struct-entry-parameter), and every flattened member keeps its
+    // struct's ordinal, as the reference records them.  -1: use the index.
+    int sourceOrdinal = -1;
 };
+
+// The Cg paramno of entry parameter `index` (see IRParameter::sourceOrdinal).
+inline uint32_t irParamOrdinal(const IRParameter& p, size_t index)
+{
+    return p.sourceOrdinal >= 0 ? static_cast<uint32_t>(p.sourceOrdinal)
+                                : static_cast<uint32_t>(index);
+}
 
 class IRFunction
 {
 public:
     std::string name;
     IRTypeInfo returnType;
+    // Declared struct return fields, including those never stored. The
+    // fragment colour bank depends on all declarations, not just writes.
+    std::vector<IRParameter> returnOutputs;
     std::vector<IRParameter> parameters;
     std::vector<std::unique_ptr<IRBasicBlock>> blocks;
 
@@ -420,7 +484,7 @@ public:
     IRConstant* createConstant(const IRTypeInfo& type, int32_t value);
     IRConstant* createConstant(const IRTypeInfo& type, uint32_t value);
     IRConstant* createConstant(const IRTypeInfo& type, float value);
-    IRConstant* createConstant(const IRTypeInfo& type, const std::vector<float>& value);
+    IRConstant* createConstant(const IRTypeInfo& type, const std::vector<float>& value, const std::vector<int64_t>& intValues = {});
 
     std::string toString() const;
 };
@@ -437,7 +501,9 @@ struct IRGlobal
     IRValueID valueId;
 
     StorageQualifier storage = StorageQualifier::None;
+    bool declaredStatic = false;   // `static` was written: a true constant, not a defaulted uniform
     std::string semanticName;
+    std::string rawSemanticName;  // Preserve :C009 for reflection, as parameters do.
     int semanticIndex = 0;
 
     // For uniforms: buffer index and offset
@@ -454,10 +520,11 @@ struct IRGlobal
     // built.  Every reference to the const folds to an IRConstant made
     // from this, so a global without it is one whose value the backend
     // would have to invent rather than read from the source - which is
-    // exactly what used to happen (t_4584aa27).  Empty means the global is
+    // exactly what used to happen (file-scope-const-initializer).  Empty means the global is
     // not a file-scope const with an evaluable initialiser; ordinary
     // uniforms leave it empty.
     std::vector<float> initialValue;
+    std::vector<int64_t> initialIntValues;
 };
 
 class IRModule
@@ -480,7 +547,7 @@ public:
     // spaces must not overlap.  Both used to start at 1, so a file-scope
     // uniform's global id landed on an entry value's id and resolved to
     // whatever that value was: a varying.  `uniform float K;` read a
-    // texcoord, silently, in a well-formed container (t_f5f750ff).
+    // texcoord, silently, in a well-formed container (fragment-global-uniform-order).
     //
     // Disjoint by base rather than by a shared counter, because the IR
     // builder identifies a just-allocated value as `nextValueId - 1` in a
@@ -524,4 +591,57 @@ namespace IRUtils
 
     // Get number of operands for an operation
     int getOperandCount(IROp op);
+
+    // Round float to 16-bit half precision (ties round toward +infinity to match Cg hardware target semantics;
+    // NV40 half supports normal exponent range up to 2^16, overflowing to infinity at 2^17 / exp >= 32)
+    inline float roundToHalf(float f)
+    {
+        if (std::isnan(f) || std::isinf(f)) return f;
+
+        uint32_t u;
+        std::memcpy(&u, &f, sizeof(u));
+        uint32_t sign = u & 0x80000000u;
+        int32_t exp = static_cast<int32_t>((u >> 23) & 0xFFu) - 127 + 15;
+        uint32_t mant = u & 0x7FFFFFu;
+
+        uint32_t u_out;
+        if (exp >= 32)
+        {
+            u_out = sign | 0x7F800000u;
+        }
+        else if (exp <= 0)
+        {
+            u_out = 0;
+        }
+        else
+        {
+            uint32_t rem = mant & 0x1FFFu;
+            // Round ties toward +infinity:
+            // For positive (sign == 0), tie rounds to larger magnitude (roundUp = true).
+            // For negative (sign != 0), tie rounds toward zero / +infinity (roundUp = false).
+            bool roundUp = (rem > 0x1000u) || (rem == 0x1000u && sign == 0);
+            if (roundUp)
+            {
+                mant += 0x2000u - rem;
+                if (mant & 0x800000u)
+                {
+                    mant = 0;
+                    exp++;
+                }
+            }
+            if (exp >= 32)
+            {
+                u_out = sign | 0x7F800000u;
+            }
+            else
+            {
+                uint32_t h_mant = (mant >> 13) & 0x3FFu;
+                u_out = sign | ((static_cast<uint32_t>(exp) + 127 - 15) << 23) | (h_mant << 13);
+            }
+        }
+
+        float res;
+        std::memcpy(&res, &u_out, sizeof(res));
+        return res;
+    }
 }

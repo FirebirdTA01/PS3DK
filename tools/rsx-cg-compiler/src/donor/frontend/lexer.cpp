@@ -12,6 +12,31 @@ LexerError::LexerError(const Token& token, const std::string& fallbackFilename)
 {
 }
 
+namespace
+{
+// A FORM FEED AND A VERTICAL TAB ARE NOT WHITESPACE TO sce-cgc - they are
+// invalid input. `return<FF>t*2.0;` in ordinary code is
+// "error C0000: syntax error, unexpected $undef" there, and std::isspace
+// accepts both, so skipping them silently made us accept a program the
+// reference refuses.
+//
+// Doing it HERE rather than in the preprocessor is what makes the whole
+// measured table come out right: the character only matters when it reaches
+// the token stream, so a form feed inside a comment, inside a discarded #if
+// region, inside a #pragma, or in the body of a macro that is never expanded
+// stays harmless - all four are accepted by the reference - while one in code,
+// or in a macro body that IS expanded, is refused.
+//
+// It surfaces as our ordinary "unknown character" diagnostic rather than the
+// reference's C0000 wording; both refuse and write nothing, and the guard
+// pins the class rather than the text.
+bool isSkippableSpace(char c)
+{
+	return c != '\f' && c != '\v' &&
+	       std::isspace(static_cast<unsigned char>(c));
+}
+}  // namespace
+
 std::string Lexer::formatUnknownCharacterMessage(
 	const Token& token,
 	const std::string& fallbackFilename)
@@ -117,6 +142,23 @@ void Lexer::initKeywords() {
     keywords["usampler3D"] = TokenType::KW_USAMPLER3D;
     keywords["usamplerCUBE"] = TokenType::KW_USAMPLERCUBE;
 
+    // texobj<K> is the Cg 1.x spelling of sampler<K> and is what the
+    // reference SDK's samples use: 109 texobj2D and 2 texobj3D occurrences,
+    // and every one of them an unknown type name here.  Measured against
+    // the reference, the two spellings of the same program compile to
+    // byte-identical containers - sampled and declared-but-unused alike, so
+    // the parameter table records them the same way too.  An alias, not a
+    // type: same token, nothing downstream needs to know (texobj-sampler-alias).
+    //
+    // These five and no more.  The reference REJECTS texobj2DShadow and
+    // texobjRECTShadow with a syntax error at the identifier, so the family
+    // stops where measurement says it stops, not where the pattern suggests.
+    keywords["texobj1D"] = TokenType::KW_SAMPLER1D;
+    keywords["texobj2D"] = TokenType::KW_SAMPLER2D;
+    keywords["texobj3D"] = TokenType::KW_SAMPLER3D;
+    keywords["texobjCUBE"] = TokenType::KW_SAMPLERCUBE;
+    keywords["texobjRECT"] = TokenType::KW_SAMPLERRECT;
+
     // Storage
     keywords["uniform"] = TokenType::KW_UNIFORM;
     keywords["in"] = TokenType::KW_IN;
@@ -124,6 +166,9 @@ void Lexer::initKeywords() {
     keywords["inout"] = TokenType::KW_INOUT;
     keywords["const"] = TokenType::KW_CONST;
     keywords["static"] = TokenType::KW_STATIC;
+    // `inline` is a hint the hardware compiler accepts and ignores; the
+    // parser drops it on a function and refuses it on anything else.
+    keywords["inline"] = TokenType::KW_INLINE;
     keywords["extern"] = TokenType::KW_EXTERN;
     keywords["packed"] = TokenType::KW_PACKED;
     keywords["row_major"] = TokenType::KW_ROW_MAJOR;
@@ -157,6 +202,78 @@ void Lexer::initKeywords() {
     keywords["sizeof"] = TokenType::KW_SIZEOF;
 }
 
+bool Lexer::parseLineMarker(const std::string& directive,
+                            int& lineOut,
+                            std::string& fileOut)
+{
+    // Accepts `#line 12 "file"` and the bare `# 12 "file"` form.  Anything
+    // else - #pragma above all - is rejected: a directive we do not
+    // understand must not move the line count, because a location that is
+    // confidently wrong is worse than the one we already have.
+    size_t i = 0;
+    if (i < directive.size() && directive[i] == '#')
+        i++;
+
+    while (i < directive.size() && (directive[i] == ' ' || directive[i] == '\t'))
+        i++;
+
+    if (directive.compare(i, 4, "line") == 0)
+    {
+        i += 4;
+        // "line" must be a whole word - `#linear` is not a line marker.
+        if (i < directive.size() && directive[i] != ' ' && directive[i] != '\t')
+            return false;
+        while (i < directive.size() && (directive[i] == ' ' || directive[i] == '\t'))
+            i++;
+    }
+
+    if (i >= directive.size() || !std::isdigit(static_cast<unsigned char>(directive[i])))
+        return false;
+
+    long value = 0;
+    while (i < directive.size() && std::isdigit(static_cast<unsigned char>(directive[i])))
+    {
+        value = value * 10 + (directive[i] - '0');
+        if (value > 100000000L)  // absurd; refuse rather than wrap
+            return false;
+        i++;
+    }
+    lineOut = static_cast<int>(value);
+
+    // The optional file name follows, quoted.  A marker with no name leaves
+    // the current file alone, which is the C rule.
+    fileOut.clear();
+    while (i < directive.size() && (directive[i] == ' ' || directive[i] == '\t'))
+        i++;
+    if (i < directive.size() && directive[i] == '"')
+    {
+        const size_t open = i + 1;
+        const size_t close = directive.find('"', open);
+        if (close != std::string::npos)
+            fileOut = directive.substr(open, close - open);
+    }
+    return true;
+}
+
+void Lexer::applyLineDirective(const std::string& directive)
+{
+    int markerLine = 0;
+    std::string markerFile;
+    if (!parseLineMarker(directive, markerLine, markerFile))
+        return;
+
+    // Taking the file name is what keeps a diagnostic raised inside the
+    // embedded header, or inside an included file, from being reported
+    // against the file that pulled it in.
+    if (!markerFile.empty())
+        filename = markerFile;
+
+    // The marker names the line of the text that FOLLOWS it, and the
+    // newline terminating it has already been consumed by the caller.
+    line = markerLine;
+    column = 1;
+}
+
 std::vector<Token> Lexer::tokenize()
 {
     std::vector<Token> tokens;
@@ -180,15 +297,27 @@ std::vector<Token> Lexer::tokenize()
             char next = peek(1);
             if (next == 'l' || next == 'p' || std::isdigit(next) || next == ' ' || next == '\t')
             {
-                // Skip the entire line (it's a preprocessor directive)
+                // CAPTURE the directive while skipping it.  Throwing the
+                // text away is why every diagnostic from this lexer named
+                // the wrong line: the driver composes the unit as
+                // `#line 1 "<builtin>"` + the embedded header +
+                // `#line 1 "<input>"` + the user's source, and with the
+                // markers ignored a token carried its physical line in
+                // that stream - the source line plus 154 in the default
+                // composition, plus 1 under --no-stdlib.  Columns were
+                // always right, which is what made it look like an
+                // off-by-one rather than a marker nobody read
+                // (diagnostic-source-location).
+                std::string directive;
                 while (!isAtEnd() && peek() != '\n')
                 {
-                    advance();
+                    directive += advance();
                 }
                 if (!isAtEnd() && peek() == '\n')
                 {
                     advance(); // consume the newline
                 }
+                applyLineDirective(directive);
                 continue;
             }
         }
@@ -274,7 +403,7 @@ void Lexer::skipWhitespace()
 {
     while (!isAtEnd()) 
     {
-        if (std::isspace(peek()))
+        if (isSkippableSpace(peek()))
         {
             advance();
         }
@@ -287,7 +416,7 @@ void Lexer::skipWhiteSpaceAndComments()
 {
     while (!isAtEnd()) 
     {
-        if (std::isspace(peek())) 
+        if (isSkippableSpace(peek())) 
         {
             advance();
         } 
@@ -474,7 +603,12 @@ Token Lexer::nextToken(bool keepPreprocessor)
 
     case ';': return { TokenType::SEMICOLON, ";", startLine, startColumn };
     case ',': return { TokenType::COMMA, ",", startLine, startColumn };
-    case '.': return { TokenType::DOT, ".", startLine, startColumn };
+    case '.':
+        if (std::isdigit(peek()))
+        {
+            return scanNumber(startLine, startColumn);
+        }
+        return { TokenType::DOT, ".", startLine, startColumn };
     case '(': return { TokenType::LPAREN, "(", startLine, startColumn };
     case ')': return { TokenType::RPAREN, ")", startLine, startColumn };
     case '{': return { TokenType::LBRACE, "{", startLine, startColumn };
@@ -521,18 +655,19 @@ Token Lexer::scanIdentifierOrKeyword(int startLine, int startColumn)
 Token Lexer::scanNumber(int startLine, int startColumn) 
 {
     size_t start = currentPos - 1; // because we've already consumed the first character
-    bool hasDecimal = false;
-	bool hasExponent = false;
-	bool hasFloatSuffix = false;
+    char firstChar = source[start];
+    bool hasDecimal = (firstChar == '.');
+    bool hasExponent = false;
+    bool hasFloatSuffix = false;
 
-    // Integer part
-    while (std::isdigit(peek()) || peek() == '.') 
+    // Integer part / digits
+    while (std::isdigit(peek())) 
     {
         advance();
     }
 
-	// Decimal part
-    if(peek() == '.' && std::isdigit(peek(1)))
+    // Decimal part: at most one decimal point
+    if (!hasDecimal && peek() == '.')
     {
         hasDecimal = true;
         advance(); // consume '.'
@@ -540,27 +675,41 @@ Token Lexer::scanNumber(int startLine, int startColumn)
         {
             advance();
         }
-	}
+    }
 
-	// Scientific notation
+    // Scientific notation
     if (peek() == 'e' || peek() == 'E')
     {
-        hasExponent = true;
-        advance(); // consume 'e' or 'E'
-        if (peek() == '+' || peek() == '-') // optional sign
-            advance();
-        while (std::isdigit(peek()))
+        size_t lookahead = 1;
+        if (peek(lookahead) == '+' || peek(lookahead) == '-')
+            lookahead++;
+        if (std::isdigit(peek(lookahead)))
         {
-            advance();
+            hasExponent = true;
+            advance(); // consume 'e' or 'E'
+            if (peek() == '+' || peek() == '-') // optional sign
+                advance();
+            while (std::isdigit(peek()))
+            {
+                advance();
+            }
+        }
+        else
+        {
+            // 'e' without digits is a malformed exponent (C0124 in reference)
+            advance(); // consume 'e'
+            if (peek() == '+' || peek() == '-')
+                advance();
+            return { TokenType::UNKNOWN, source.substr(start, currentPos - start), startLine, startColumn, filename };
         }
     }
 
-	// Float suffix (f, h for half)
+    // Float suffix (f, h for half, F, H)
     if (peek() == 'f' || peek() == 'h' || peek() == 'F' || peek() == 'H')
     {
         hasFloatSuffix = true;
         advance(); // consume suffix
-	}
+    }
 
     std::string lexeme = source.substr(start, currentPos - start);
     return { TokenType::NUMBER, lexeme, startLine, startColumn, filename };

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# No fragment instruction may name two input registers (t_e89cd261).
+# No fragment instruction may name two input registers (distinct-varying-sources).
 #
 # An NV40 fragment instruction carries ONE input-source selector.  Two
 # operands of register type INPUT therefore read the SAME varying,
@@ -25,6 +25,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+run_checker() {
+    local rc=0
+    python3 "$@" || rc=$?
+    [[ "$rc" -ne 126 && "$rc" -ne 127 ]] || fail "checker did not execute (exit $rc)"
+    return "$rc"
+}
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -54,14 +60,12 @@ compile() {   # $1 fixture stem, $2 flags, $3 tag
     fi
 }
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
 for stem in fp_two_varyings_f fp_two_varyings_mul_f; do
     compile "$stem" ""                   "${stem}_general"
-    compile "$stem" --legacy-lowering    "${stem}_legacy"
 done
 
-python3 - "$work"/*.log <<'PY'
+run_checker - "$work" <<'PY'
+from pathlib import Path
 import re
 import sys
 
@@ -74,7 +78,9 @@ def unswap(v):
 
 bad = []
 seen = 0
-for path in sys.argv[1:]:
+paths = [str(p) for p in sorted(Path(sys.argv[1]).glob("*.log"))]
+assert paths, "no instruction logs to check"
+for path in paths:
     for line in open(path, "r", encoding="utf-8"):
         m = re.match(r"\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$", line)
         if not m:
@@ -111,10 +117,10 @@ if bad:
         "FAIL: these fixtures combine two DIFFERENT varyings, and a fragment "
         "instruction has a single input-source selector - so an instruction "
         "with two INPUT operands here has lost one of them and reads the "
-        "other twice (t_e89cd261).  Note the same shape is LEGAL when both "
+        "other twice (distinct-varying-sources).  Note the same shape is LEGAL when both "
         "operands name the same varying; it is these sources that make it a "
         "defect.  Offending instructions:\n" + lines
     )
 PY
 
-printf 'two-varying-operands-test: ok (rule checked on both paths)\n'
+printf 'two-varying-operands-test: ok (rule checked on the general path)\n'

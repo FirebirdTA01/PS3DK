@@ -1,5 +1,5 @@
 // A float4 constructor whose operands are VECTORS fills one lane per
-// COMPONENT, not one lane per operand (t_14d18f02).
+// COMPONENT, not one lane per operand (vp-constructor-lane-layout).
 //
 // The lane classifier used the operand's argument position as its
 // destination lane, so a float2 counted as one lane: the two literals

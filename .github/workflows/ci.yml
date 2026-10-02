@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, cg-compiler-dev]
   pull_request:
     branches: [main]
 
@@ -92,8 +92,48 @@ jobs:
           tools/rsx-cg-compiler/build/rsx-cg-compiler --version
           tools/rsx-cg-compiler/build/cgnv2elf --version
 
+      # A second rsx-cg-compiler on a DIFFERENT compiler and standard library
+      # (clang + libc++).  Output that depends on unordered_* iteration order,
+      # on undefined behaviour, or on a compiler's miscompile shows up as a
+      # container difference against the gcc/libstdc++ build above.  Two
+      # libstdc++ builds would agree with each other with the defect present.
+      - name: Build rsx-cg-compiler (clang + libc++)
+        run: |
+          sudo apt-get install -y --no-install-recommends clang libc++-dev libc++abi-dev
+          cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build-libcxx \
+              -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ \
+              -DCMAKE_CXX_FLAGS=-stdlib=libc++ -DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++
+          cmake --build tools/rsx-cg-compiler/build-libcxx --target rsx-cg-compiler
+
+      - name: Test rsx-cg-compiler output is independent of the C++ toolchain
+        run: bash tests/shader-compiler/cross-stl-determinism-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler tools/rsx-cg-compiler/build-libcxx/rsx-cg-compiler
+
+      - name: Test a vertex-program pow() of a vector computes every lane
+        run: bash tests/shader-compiler/vp-pow-vector-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test vertex reflect float3 values and width refusal boundaries
+        run: bash tests/shader-compiler/vp-reflect-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test vertex lerp delta order, endpoints and explicit contraction debt
+        run: bash tests/shader-compiler/vp-lerp-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Vertex coissue shared-source value regression
+        run: bash tests/shader-compiler/vp-coissue-source-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Vertex normalize float3 and float4 value regression
+        run: bash tests/shader-compiler/vp-normalize-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Vertex refract values and strict boundary comparison controls
+        run: bash tests/shader-compiler/vp-refract-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test a run-time index into a vector is refused like the reference
+        run: bash tests/shader-compiler/runtime-vector-selector-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Check every tracked test has a CI invocation
         run: python3 tests/ci-test-list-test.py
+
+      - name: Test shader-compiler suite runner self-check
+        run: bash tests/shader-compiler/suite-runner-test.sh
 
       - name: Test the SDK's fragment-program control word builder
         run: bash tests/sdk/fp-control-word-test.sh
@@ -374,6 +414,12 @@ jobs:
         run: bash tests/shader-compiler/stdlib-derivatives-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler DIVR opcode
         run: bash tests/shader-compiler/divr-opcode-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Vertex division scalar-unit guard
+        run: bash tests/shader-compiler/vp-division-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Packed depth texture decode guard
+        run: bash tests/shader-compiler/texdepth-decode-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test source swizzle composition in both shader profiles
+        run: bash tests/shader-compiler/local-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler user-function inlining
         run: bash tests/shader-compiler/user-function-inline-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
@@ -388,15 +434,51 @@ jobs:
 
       - name: Test rsx-cg-compiler static loop unroll
         run: bash tests/shader-compiler/static-loop-unroll-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test empty statements and surrounding control flow
+        run: bash tests/shader-compiler/empty-statement-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Static loop expansion twins
+        run: bash tests/shader-compiler/static-loop-expansion-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Helper static loop expansion twins
+        run: bash tests/shader-compiler/helper-static-loop-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Member array stores and current selectors
+        run: bash tests/shader-compiler/member-array-store-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler file-scope const folding
         run: bash tests/shader-compiler/const-fold-value-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler static const qualifiers
+        run: bash tests/shader-compiler/static-const-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test array uniforms are laid out one element at a time
+        run: bash tests/shader-compiler/array-uniform-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test vertex array uniforms indexed at run time
+        run: bash tests/shader-compiler/vp-array-dynamic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test vertex matrix-array records and indexed row reads
+        run: bash tests/shader-compiler/vp-matrix-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: VP matrix arithmetic
+        run: bash tests/shader-compiler/vp-matrix-arithmetic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test explicit vertex bindings match decoded register reads
+        run: bash tests/shader-compiler/vp-explicit-binding-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test fragment binding metadata preserves inline constants and relocations
+        run: bash tests/shader-compiler/fp-explicit-binding-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler uniform patch lanes
         run: bash tests/shader-compiler/uniform-patch-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler uniform compiled defaults
         run: bash tests/shader-compiler/uniform-compiled-default-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test file-scope uniform defaults reach the container parameter table
+        run: bash tests/shader-compiler/uniform-default-reflection-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test matrix reflection - const fold, parent and row types, row defaults
+        run: bash tests/shader-compiler/matrix-reflection-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Cross-check uniform records against encoded reads and inline defaults
+        run: bash tests/shader-compiler/uniform-container-crosscheck-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test entry-parameter default values - acceptance, refusals, entry swap
+        run: bash tests/shader-compiler/entry-param-default-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler texcoord 2D flags
         run: bash tests/shader-compiler/texcoord-2d-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -419,16 +501,33 @@ jobs:
       - name: Test rsx-cg-compiler literal const dedup
         run: bash tests/shader-compiler/literal-const-dedup-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler constant division fold
+        run: bash tests/shader-compiler/const-division-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Test rsx-cg-compiler MAD literal operands
         run: bash tests/shader-compiler/mad-literal-operand-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test a vector constructor from one scalar is a broadcast
+        run: bash tests/shader-compiler/scalar-ctor-broadcast-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler vertex constructor lanes
         run: bash tests/shader-compiler/vp-construct-lanes-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a struct initialised from a scalar
+        run: bash tests/shader-compiler/struct-scalar-init-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Semantics are not allowed on a function the entry reaches
+        run: bash tests/shader-compiler/non-entry-semantics-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler vertex literal pool
         run: bash tests/shader-compiler/vp-literal-vector-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler VP opcode fallthrough
         run: bash tests/shader-compiler/vp-opcode-fallthrough-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler VP scalar intrinsics
+        run: bash tests/shader-compiler/vp-scalar-intrinsic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler VP tangent and binormal semantics
+        run: bash tests/shader-compiler/vp-tangent-binormal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler rectangular matrix types
+        run: bash tests/shader-compiler/rect-matrix-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler pow with a constant exponent
+        run: bash tests/shader-compiler/pow-constant-exponent-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler int literals in float constructors
         run: bash tests/shader-compiler/int-literal-ctor-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -437,6 +536,8 @@ jobs:
         run: bash tests/shader-compiler/vp-matrix-row-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler matrix values
         run: bash tests/shader-compiler/matrix-value-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test fragment file-scope matrix uniform loads
+        run: bash tests/shader-compiler/fp-global-matrix-load-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler two-varying operands
         run: bash tests/shader-compiler/two-varying-operands-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -459,14 +560,133 @@ jobs:
         run: bash tests/shader-compiler/dot-reduction-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler half precision
         run: bash tests/shader-compiler/half-precision-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a half-typed value is computed in half
+        run: bash tests/shader-compiler/half-arithmetic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a scalar-to-vector cast is a broadcast
+        run: bash tests/shader-compiler/cast-splat-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a call resolves against the declarations visible at it
+        run: bash tests/shader-compiler/call-visibility-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Vector !, && and || judged by value against Cg semantics
+        run: bash tests/shader-compiler/bool-vector-logic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Vector ?: conditions judged by value against Cg semantics
+        run: bash tests/shader-compiler/vector-select-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Backend refusals lead with the unsupported construct
+        run: bash tests/shader-compiler/backend-diagnostics-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Uniform struct entry parameters as one uniform per member
+        run: bash tests/shader-compiler/uniform-struct-param-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Programs the reference refuses refuse here too
+        run: bash tests/shader-compiler/wrong-accept-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Helper returns under compile-time-constant conditions judged by value
+        run: bash tests/shader-compiler/helper-const-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test helper parameter default arguments
+        run: bash tests/shader-compiler/helper-default-args-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a parenthesised object-like macro body
+        run: bash tests/shader-compiler/paren-macro-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the defined operator and what counts as defined
+        run: bash tests/shader-compiler/defined-operator-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a fragment program with no effect is the one-NOP program
+        run: bash tests/shader-compiler/empty-entry-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test C-style narrowing casts on vectors and matrices
+        run: bash tests/shader-compiler/cast-narrowing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test half subnormal flush to zero in constant evaluation
+        run: bash tests/shader-compiler/half-subnormal-flush-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test FP vector times matrix products
+        run: bash tests/shader-compiler/fp-vecmatmul-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test constant matrix row extraction and bounds
+        run: bash tests/shader-compiler/constant-matrix-row-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test constant vector float indices and bounds
+        run: bash tests/shader-compiler/constant-vector-index-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Runtime vector constant float index
+        run: bash tests/shader-compiler/runtime-vector-index-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Any scalar and vector reduction
+        run: bash tests/shader-compiler/any-reduction-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Numeric bool conversion twins
+        run: bash tests/shader-compiler/numeric-bool-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Implicit numeric condition normalization
+        run: bash tests/shader-compiler/implicit-condition-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler declared half colour output
         run: bash tests/shader-compiler/half-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the half colour output reaches H0 through the allocator
+        run: bash tests/shader-compiler/h0-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test reference-SDK declaration and directive forms
+        run: bash tests/shader-compiler/frontend-declaration-forms-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the shared ucode decoder refuses a corrupted dump
+        run: bash tests/shader-compiler/ucode-decode-selftest.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test no decoded ucode dump is captured with the streams merged
+        run: bash tests/shader-compiler/capture-separation-test.sh
+      - name: Test what a fragment entry returns reaches the ucode
+        run: bash tests/shader-compiler/return-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the parser makes progress on an unknown type name
+        run: bash tests/shader-compiler/parser-progress-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test an unknown local type is reported once, at the type
+        run: bash tests/shader-compiler/local-declaration-error-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test every declarator in one declaration is declared
+        run: bash tests/shader-compiler/multi-declarator-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test struct-return .rgb/.a swizzles emit their store like .xyz/.w
+        run: bash tests/shader-compiler/struct-return-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test swizzle updates preserve a struct field's current value
+        run: bash tests/shader-compiler/struct-field-update-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test partial struct outputs preserve lane assignment order
+        run: bash tests/shader-compiler/partial-struct-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: VecInsert chain compaction
+        run: bash tests/shader-compiler/vecinsert-chain-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test nested struct member lookup and lvalue handling
+        run: bash tests/shader-compiler/nested-struct-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test float literal syntax, suffixes, swizzles, and attributes
+        run: bash tests/shader-compiler/float-literal-syntax-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler pack/unpack family
+        run: bash tests/shader-compiler/pack-unpack-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler tex2Dproj -> TXP
+        run: bash tests/shader-compiler/tex2dproj-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test tex1D coordinate packing and sampler metadata
+        run: bash tests/shader-compiler/tex1d-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test explicit sampler units and reflection agree
+        run: bash tests/shader-compiler/sampler-binding-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test dead texture removal preserves live fetches and discard
+        run: bash tests/shader-compiler/dead-texture-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler vertex instructions with two distinct inputs
+        run: bash tests/shader-compiler/vp-two-inputs-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler VP point size and clip outputs
+        run: bash tests/shader-compiler/vp-special-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler VP texture fetch (TXL, sampler units and records)
+        run: bash tests/shader-compiler/vp-texture-fetch-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler user-function inlining with control flow and void helpers
+        run: bash tests/shader-compiler/user-function-inline-control-flow-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: shader compiler stdlib overloads and texture intrinsics
+        run: bash tests/shader-compiler/stdlib-bucket-c-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test inline is a no-op function qualifier and refused elsewhere
+        run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test macro expansion terminates on self-referential macros
+        run: bash tests/shader-compiler/macro-hideset-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the preprocessor predefines exactly the reference's macros
+        run: bash tests/shader-compiler/predefined-macro-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test file-scope initialiser arithmetic folds like the reference
+        run: bash tests/shader-compiler/initializer-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test included headers share the unit's macros and conditional stack
+        run: bash tests/shader-compiler/include-unit-state-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test diagnostics name the source line and file
+        run: bash tests/shader-compiler/diagnostic-location-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test preprocessor properties the command line cannot reach
+        run: bash tests/shader-compiler/preprocessor-harness-test.sh
+      - name: Test texobj types are the sampler types under another name
+        run: bash tests/shader-compiler/texobj-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test if/else join emission order is taken from the source
+        run: bash tests/shader-compiler/join-order-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler lowering-path flags
         run: bash tests/shader-compiler/lowering-path-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the extension flag contract (--extension=<name>, --list-extensions)
+        run: bash tests/shader-compiler/extension-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the leading UTF-8 BOM extension in both modes
+        run: bash tests/shader-compiler/extension-bom-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Census every fixture in both extension modes (the flag moves only what it names)
+        run: bash tests/shader-compiler/extension-mode-census-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler fragment registerCount invariant
         run: bash tests/shader-compiler/register-count-invariant-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler colour reaches R0
         run: bash tests/shader-compiler/colour-reaches-r0-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler reflection resources (WPOS, COLOR0..3)
+        run: bash tests/shader-compiler/fp-reflection-resource-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler scalar-unit lanes
         run: bash tests/shader-compiler/scalar-unit-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler int-float casts
@@ -475,6 +695,10 @@ jobs:
         run: bash tests/shader-compiler/vector-subscript-bounds-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler accumulation order
         run: bash tests/shader-compiler/accumulation-order-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler fog after alpha kill
+        run: bash tests/shader-compiler/fog-order-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test MAD shared preload second-read modifiers
+        run: bash tests/shader-compiler/mad-preload-modifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler composed outputs
         run: bash tests/shader-compiler/composed-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler computed lane inserts
@@ -488,12 +712,16 @@ jobs:
 
       - name: Test refract native root
         run: bash tests/shader-compiler/refract-root-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test fragment refract strict boundary
+        run: bash tests/shader-compiler/fp-refract-boundary-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: FP refract selected scalar eta
+        run: bash tests/shader-compiler/fp-refract-scalar-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler faceforward
         run: bash tests/shader-compiler/faceforward-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler local array indexing
         run: bash tests/shader-compiler/local-array-index-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Test rsx-cg-compiler MRT refusal
-        run: bash tests/shader-compiler/mrt-output-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsx-cg-compiler MRT output registers and precision
+        run: bash tests/shader-compiler/mrt-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler output temporary reuse
         run: bash tests/shader-compiler/output-temp-reuse-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler scheduler output writes
@@ -502,12 +730,27 @@ jobs:
         run: bash tests/shader-compiler/scheduler-partial-writer-raw-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler predicated select output aliases
         run: bash tests/shader-compiler/selpred-output-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test predicated-select emission refuses invalid allocations
+        run: bash tests/shader-compiler/selpred-emission-guard-test.sh
+      # Linux host-tools job: the unit script requires a POSIX c++ compiler.
+      - name: Test scalar emission refuses conflicting operand lanes
+        run: bash tests/shader-compiler/scalar-emission-guard-test.sh
       - name: Test rsx-cg-compiler short-circuit root comparisons
         run: bash tests/shader-compiler/short-root-comparison-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler step register collisions
         run: bash tests/shader-compiler/step-register-collision-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler vertex attributes and clip planes
         run: bash tests/shader-compiler/vp-attr-clp-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Name the sources of a fragment instruction, and check the arity table
+        run: bash tests/shader-compiler/fp-sources-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A scalar stored to the colour output must read the lane it selected
+        run: bash tests/shader-compiler/output-store-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      # LAST of the shader-compiler steps on purpose: it runs every sibling
+      # script against a compiler that CRASHES instead of refusing, so it is
+      # only meaningful once those scripts have been seen green normally.
+      - name: No guard may read a crash as a refusal
+        run: bash tests/shader-compiler/refusal-status-adversary-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test shader corpus fetch metadata and destination guards
         run: bash tests/shader-corpus/fetch-shader-corpus-test.sh
@@ -529,11 +772,17 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\container-metrics-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\container-metrics-allowance-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\container-metrics-identity-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\current-census-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\current-gap-summary-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\reference-tree-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\retired-lowering-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\stage-roots-test.ps1
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\shader-differential\manifest-controls-test.ps1
@@ -593,3 +842,12 @@ jobs:
           tools/rsx-cg-compiler/build/rsx-cg-compiler.exe --version
           tools/rsx-cg-compiler/build/cgnv2elf.exe --version
           file tools/sprx-linker/sprxlinker.exe
+
+      - name: Exercise Windows refusal adversary
+        env:
+          PS3TC_ADVERSARY_VERBOSE: "1"
+          PS3TC_ADVERSARY_ONLY: >-
+            float-literal-syntax-test.sh mrt-output-test.sh nested-struct-test.sh
+            sampler-binding-test.sh short-root-comparison-test.sh
+            struct-field-update-test.sh tex1d-test.sh vp-special-output-test.sh
+        run: bash tests/shader-compiler/refusal-status-adversary-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler.exe

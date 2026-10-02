@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# A matrix uniform's row indexes to a const register, on BOTH paths
-# (t_9da20b33).  `m[0]` used to refuse everywhere - "StoreOutput source is
-# not a direct Load or matvecmul" on the default path, "operand could not
-# be resolved" on the general one - although the reference compiles it to
-# one instruction, `MOV o[8], c[256]`.
+# A matrix uniform's row indexes to a const register
+# (uniform-matrix-row-index).  `m[0]` used to refuse everywhere -
+# "StoreOutput source is not a direct Load or matvecmul" on the old default
+# path, "operand could not be resolved" on the general one - although the
+# reference compiles it to one instruction, `MOV o[8], c[256]`.
 #
 # Two fixtures that differ only in the row, because the interesting way to
 # get this wrong is not to refuse.  The row arrives as OPERAND 1 of the
@@ -16,6 +16,21 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+# A refusal is exit 1 EXACTLY.  124 is a timeout and >= 128 is a signal, and
+# either one satisfies "did not exit 0" while meaning the compiler never
+# reached the decision this guard is about - so a compiler that CRASHED on a
+# shader it should have refused BY NAME was reported as correct here.  Call
+# this wherever a compile's status is captured, whichever way that compile is
+# expected to go: it is silent for 0 and for 1 and names anything else.
+# Measured: half the guards in this suite that assert a refusal could not tell
+# one from a SIGABRT (crash-versus-refusal-status).
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -39,11 +54,11 @@ compile() {
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_vp_rsx ${2:+$2} "$shaders/$1.cg"
     ) >"$work/$3.log" 2>&1 || rc=$?
-    [[ "$rc" -eq 124 ]] && fail "$3 timed out"
+    refusal_status "$rc" "$3"
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$3.log" >&2
         fail "$3 did not compile.  A matrix row is a const register the
-reference reads directly; refusing it is the defect (t_9da20b33)."
+reference reads directly; refusing it is the defect (uniform-matrix-row-index)."
     fi
     # The ucode rows alone, so the comparison below is about instructions
     # and not about anything else the compiler prints.
@@ -51,19 +66,15 @@ reference reads directly; refusing it is the defect (t_9da20b33)."
     [[ -s "$work/$3.ucode" ]] || fail "$3 emitted no ucode"
 }
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
 compile vp_matrix_row0_v ""                   row0_general
 compile vp_matrix_row2_v ""                   row2_general
-compile vp_matrix_row0_v --legacy-lowering    row0_legacy
-compile vp_matrix_row2_v --legacy-lowering    row2_legacy
 
-for path in general legacy; do
+for path in general; do
     if cmp -s "$work/row0_$path.ucode" "$work/row2_$path.ucode"; then
         cat "$work/row0_$path.ucode" >&2
         fail "on the $path path m_auto[0] and m_auto[2] compile to the SAME
 ucode, so the row index never reached the register.  Both extracts carry
-componentIndex 0; the row is operand 1 (t_9da20b33)."
+componentIndex 0; the row is operand 1 (uniform-matrix-row-index)."
     fi
 done
 
@@ -71,9 +82,8 @@ done
 # register and one literal.  A constructor that counted operands instead of
 # components would write o[8].x and o[8].y and lose the row's y and z.
 compile vp_matrix_row_small_v ""                 small_general
-compile vp_matrix_row_small_v --legacy-lowering  small_legacy
 
-python3 - "$work/small_general.ucode" "$work/small_legacy.ucode" <<'PY'
+python3 - "$work/small_general.ucode" <<'PY'
 import re
 import sys
 
@@ -92,14 +102,14 @@ def masks(path):
 # Four DP4 lanes into the position (0x1, 0x2, 0x4, 0x8) plus the texcoord's
 # xyz (0xe) and w (0x1).
 want = [0x1, 0x1, 0x2, 0x4, 0x8, 0xE]
-for path, name in zip(sys.argv[1:3], ("general", "legacy")):
+for path, name in zip(sys.argv[1:2], ("general",)):
     got = masks(path)
     if got != want:
         raise SystemExit(
             "FAIL: on the %s path float4(m3[2], 1.0f) must write the row's "
             "three lanes together (0xe) and the literal into w (0x1); write "
             "masks were [%s], expected [%s].  A row is a const source THREE "
-            "lanes wide (t_9da20b33)."
+            "lanes wide (uniform-matrix-row-index)."
             % (name, ", ".join("0x%x" % m for m in got),
                ", ".join("0x%x" % m for m in want))
         )
@@ -107,7 +117,7 @@ PY
 
 # Row 3 of a float3x3 is out of bounds - the reference calls it that and
 # refuses.  Compiling it would read a register the matrix does not own.
-for flags_tag in ":oob_general" "--legacy-lowering:oob_legacy"; do
+for flags_tag in ":oob_general"; do
     flags="${flags_tag%%:*}"
     tag="${flags_tag##*:}"
     rc=0
@@ -117,13 +127,13 @@ for flags_tag in ":oob_general" "--legacy-lowering:oob_legacy"; do
             -p sce_vp_rsx ${flags:+$flags} \
             "$shaders/vp_matrix_row_oob_v.cg"
     ) >"$work/$tag.log" 2>&1 || rc=$?
-    [[ "$rc" -eq 124 ]] && fail "$tag timed out"
+    refusal_status "$rc" "$tag"
     if [[ "$rc" -eq 0 ]]; then
         tail -n 10 "$work/$tag.log" >&2
         fail "$tag COMPILED m3[3] on a float3x3.  The matrix owns three
 registers; row 3 is the next allocation's, and the reference rejects the
 source as an out-of-bounds index.  The row index must be bounded by the
-matrix's own row count (t_9da20b33)."
+matrix's own row count (uniform-matrix-row-index)."
     fi
 done
 

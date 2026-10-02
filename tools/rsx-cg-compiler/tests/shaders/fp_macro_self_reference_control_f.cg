@@ -1,0 +1,6 @@
+// Control for fp_macro_self_reference_f: the same program with the macro
+// expanded by hand.  The macro fixture must produce THIS container.
+void main(float4 c : TEXCOORD0, out float4 o : COLOR)
+{
+    o = saturate(dot(c, c));
+}

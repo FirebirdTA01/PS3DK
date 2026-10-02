@@ -1,0 +1,11 @@
+// Texture alpha is tested before the surviving RGB is blended with fog.
+// The sampled alpha must survive unchanged; the fog's RGB and weight share
+// one varying but use different swizzles.
+void main(float2 uv : TEXCOORD1, float4 fog : TEXCOORD2,
+          uniform sampler2D image, out float4 result : COLOR)
+{
+    float4 sample = tex2D(image, uv);
+    if (sample.w < 0.0157) discard;
+    sample.xyz = fog.xyz + (sample.xyz - fog.xyz) * fog.w;
+    result = sample;
+}

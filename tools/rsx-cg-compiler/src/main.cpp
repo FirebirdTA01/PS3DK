@@ -26,6 +26,7 @@
 #include "nv40/nv40_discard_guards.h"
 #include "nv40/nv40_if_convert.h"
 #include "compile_options.h"
+#include "extensions.h"
 #include "cg_container_fp.h"
 #include "cg_container_vp.h"
 #include "version.h"
@@ -50,6 +51,11 @@ struct CompilerContext
 
     rsx_cg::CompileOptions   compileOpts;       // --O0..O3 / --fastmath etc.
 
+    // --extension=<name>.  Kept apart from compileOpts on purpose: that
+    // struct is the flags that change output bytes, and an enabled
+    // extension changes none - its enabled output is the plain source's.
+    rsx_cg::ExtensionSet     extensions;
+
     // Populated by runPreprocessor — Cg pragma surface that the lexer
     // drops before it reaches the parser.
     std::vector<std::string> alphakillSamplers;
@@ -69,11 +75,15 @@ void usage()
         "  --no-stdlib            Skip the embedded Cg standard-library header\n"
         "  --emit-container <p>   Write the .vpo/.fpo container to <p> (binary)\n"
         "  --emit-cgb-container <p> Write the compact CGB\\0 container to <p> (binary)\n"
-        "  --legacy-lowering      Use the retired NV40 shape matcher instead\n"
         "  --general-lowering     Accepted and ignored: the general path is\n"
         "                         the default (removed after one release)\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
+        "  --extension=<name>     Enable a named extension to the reference\n"
+        "                         compiler's language (repeatable; none by\n"
+        "                         default, so an unflagged compile accepts and\n"
+        "                         emits what the reference does)\n"
+        "  --list-extensions      List the supported extension names and exit\n"
         "  -h, --help             Show this message\n"
         "  -V, --version          Print version and exit\n",
         RSX_CG_COMPILER_VERSION);
@@ -117,6 +127,15 @@ std::string runPreprocessor(const std::string& sourceCode,
     {
         pp.addIncludePath(dir);
     }
+    // The same admission rule the main source went through, on every
+    // #include's raw bytes.  Not installing this is the failure where the
+    // extension does not reach includes: their BOM gets the lexer's generic
+    // error with no hint, and with the flag on it is not stripped.  The
+    // include rows of extension-bom-test.sh exist to catch exactly that.
+    pp.setSourceTextHook([&ctx](std::string& text, const std::string& path)
+    {
+        rsx_cg::admitSourceText(text, path, ctx.extensions);
+    });
     std::string out = pp.process(composed.str(), ctx.inputFile);
     ctx.alphakillSamplers = pp.alphakillSamplers();
     return out;
@@ -129,22 +148,20 @@ int main(int argc, char** argv)
     CompilerContext ctx;
     bool dumpAst = false;
     bool dumpIr  = false;
-    // Both path flags on one command line is a CONTRADICTION, refused
-    // below rather than resolved: last-wins would compile one path while
-    // the caller's own command line says the other, and a container is
-    // not labelled with the path that produced it.  A rig stage that
-    // adds --legacy-lowering to a row already carrying --general-lowering
-    // would have compiled general and filed it as legacy.
-    bool sawGeneralFlag = false;
-    bool sawLegacyFlag = false;
-
-    // RSXCG_GENERAL kept its meaning across the flip rather than its
-    // effect: =0 now selects the matcher, anything else the general
-    // path.  A script that set it to 1 sees no change; one that set it
-    // to 0 to stay on the matcher still does.
+    // The NV40 shape matcher that --legacy-lowering and RSXCG_GENERAL=0
+    // used to select has been removed; the general lowering is the only
+    // back end.  Asking for the matcher is refused by name rather than
+    // ignored, so a script that relied on it learns why its output
+    // changed instead of silently getting the other path.
     const char* generalEnv = std::getenv("RSXCG_GENERAL");
-    if (generalEnv && generalEnv[0])
-        ctx.compileOpts.generalLowering = std::strcmp(generalEnv, "0") != 0;
+    if (generalEnv && std::strcmp(generalEnv, "0") == 0)
+    {
+        std::fprintf(stderr,
+            "rsx-cg-compiler: RSXCG_GENERAL=0 selected the legacy NV40 shape "
+            "matcher, which has been removed; the general lowering is the "
+            "only back end.  Unset RSXCG_GENERAL.\n");
+        return 1;
+    }
 
     int i = 1;
     while (i < argc)
@@ -206,13 +223,14 @@ int main(int argc, char** argv)
             // A no-op alias for one release, so every script, CI line
             // and rig column that names the path it wanted keeps
             // working.
-            sawGeneralFlag = true;
-            ctx.compileOpts.generalLowering = true;
         }
         else if (arg == "--legacy-lowering")
         {
-            sawLegacyFlag = true;
-            ctx.compileOpts.generalLowering = false;
+            std::fprintf(stderr,
+                "rsx-cg-compiler: --legacy-lowering selected the NV40 shape "
+                "matcher, which has been removed; the general lowering is "
+                "the only back end.  Drop the flag.\n");
+            return 1;
         }
         else if (arg == "-O0" || arg == "--O0")
         {
@@ -238,6 +256,44 @@ int main(int argc, char** argv)
         {
             ctx.compileOpts.fastmath = false;
         }
+        else if (arg == rsx_cg::kListExtensionsFlag)
+        {
+            std::size_t count = 0;
+            const rsx_cg::ExtensionInfo* table = rsx_cg::allExtensions(count);
+            for (std::size_t n = 0; n < count; ++n)
+                std::printf("%s\t%s\n", table[n].name, table[n].summary);
+            return 0;
+        }
+        else if (arg.compare(0, std::strlen(rsx_cg::kExtensionFlagPrefix),
+                             rsx_cg::kExtensionFlagPrefix) == 0)
+        {
+            // Validated HERE, before any file is read: an unknown name is a
+            // refusal in its own right, not something to tolerate and then
+            // fail on later for a reason that has nothing to do with it.
+            // One name per flag, exact spelling; there is no "all".
+            const std::string name = arg.substr(std::strlen(rsx_cg::kExtensionFlagPrefix));
+            const rsx_cg::ExtensionInfo* info = rsx_cg::findExtension(name);
+            if (!info)
+            {
+                std::fprintf(stderr,
+                    "rsx-cg-compiler: unknown extension '%s'; supported:",
+                    name.c_str());
+                std::size_t count = 0;
+                const rsx_cg::ExtensionInfo* table = rsx_cg::allExtensions(count);
+                for (std::size_t n = 0; n < count; ++n)
+                    std::fprintf(stderr, " %s", table[n].name);
+                std::fprintf(stderr, " (%s)\n", rsx_cg::kListExtensionsFlag);
+                return 1;
+            }
+            ctx.extensions.enable(info->id);
+        }
+        else if (arg == "--extension")
+        {
+            std::fprintf(stderr,
+                "rsx-cg-compiler: --extension needs =<name>, as in %sbom; see %s\n",
+                rsx_cg::kExtensionFlagPrefix, rsx_cg::kListExtensionsFlag);
+            return 1;
+        }
         else if (!arg.empty() && arg[0] == '-')
         {
             std::fprintf(stderr, "rsx-cg-compiler: unknown option '%s'\n", arg.c_str());
@@ -256,26 +312,22 @@ int main(int argc, char** argv)
         ++i;
     }
 
-    if (sawGeneralFlag && sawLegacyFlag)
-    {
-        std::fprintf(stderr,
-            "rsx-cg-compiler: --general-lowering and --legacy-lowering name "
-            "different lowerings; refusing rather than picking one.\n"
-            "  --general-lowering is the default and accepted as a no-op for "
-            "one release; drop it, or drop --legacy-lowering.\n");
-        return 1;
-    }
-
     if (ctx.inputFile.empty())
     {
         usage();
         return 1;
     }
 
-    const std::string sourceCode = slurpFile(ctx.inputFile);
+    std::string sourceCode = slurpFile(ctx.inputFile);
     std::string preprocessed;
     try
     {
+        // Admission runs on the main file's own bytes, before the stdlib
+        // and #line text are composed in front of them, and inside this
+        // try so a refusal is the same exit-1-no-artifact as any other
+        // preprocessor error.  slurpFile itself is unchanged: text mode,
+        // exit on open failure, as before this existed.
+        rsx_cg::admitSourceText(sourceCode, ctx.inputFile, ctx.extensions);
         preprocessed = runPreprocessor(sourceCode, ctx);
     }
     catch (const std::exception& err)
@@ -285,7 +337,10 @@ int main(int argc, char** argv)
     }
 
     std::vector<ParseError> parseErrors;
-    auto ast = parseShaderSource(preprocessed, ctx.inputFile, &parseErrors);
+    ParserConfig parserConfig;
+    parserConfig.standardDeclaratorTypes =
+        ctx.extensions.has(rsx_cg::Extension::DeclaratorTypes);
+    auto ast = parseShaderSource(preprocessed, ctx.inputFile, &parseErrors, parserConfig);
 
     int errorCount = 0;
     for (const auto& err : parseErrors)
@@ -370,7 +425,10 @@ int main(int argc, char** argv)
             if (algsimp.runOnFunction(*fn))     changed = true;
             CommonSubexprElimination cse;
             if (cse.runOnFunction(*fn))         changed = true;
-            DeadCodeElimination dce;
+            // Alpha-kill sampling can discard a fragment even if nobody
+            // consumes the sampled value. Until sampler provenance is on
+            // the IR operation, preserve all fetches in such programs.
+            DeadCodeElimination dce(!ctx.alphakillSamplers.empty());
             if (dce.runOnFunction(*fn))         changed = true;
         }
         if (!changed) break;
@@ -378,15 +436,12 @@ int main(int argc, char** argv)
 
     // Run NV40-specific IR transforms before back-end lowering.
     //
-    // CF-2 first (t_91bbd575): give every `discard` the path condition
+    // CF-2 first (general-path-discard): give every `discard` the path condition
     // that reaches it, while the control flow is still intact.  It has to
     // precede convertSimpleIfElse - that pass's shape 5 hoists a then-arm
     // discard into the entry block and deletes the CondBranch, after
     // which the guard is recoverable only by position, which is the
-    // fragility this removes.  General path only: the default path's
-    // matcher is unchanged by design, and a shader that newly compiled
-    // because of this pass would be a verdict change no fence asked for.
-    if (ctx.compileOpts.generalLowering)
+    // fragility this removes.
     {
         nv40::DiscardGuardResult dg = nv40::materialiseDiscardGuards(*irModule);
         for (const auto& diag : dg.diagnostics)

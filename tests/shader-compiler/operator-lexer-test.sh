@@ -171,16 +171,12 @@ fi
 for profile in sce_fp_rsx sce_vp_rsx; do
     src="$work/constant_bitwise_fp.fcg"
     [[ "$profile" == sce_vp_rsx ]] && src="$work/constant_bitwise_vp.vcg"
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-    for mode in general legacy; do
-        args=()
-        [[ "$mode" == legacy ]] && args+=(--legacy-lowering)
+    for mode in general; do
         rc=0
         (
             ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
             timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-                -p "$profile" "${args[@]}" \
+                -p "$profile" \
                 --emit-container "$work/constant_bitwise_${profile}_${mode}.bin" "$src"
         ) >"$work/constant_bitwise_${profile}_${mode}.log" 2>&1 || rc=$?
         [[ "$rc" -eq 0 ]] || { tail -n 10 "$work/constant_bitwise_${profile}_${mode}.log" >&2; fail "constant_bitwise refused on $profile/$mode"; }
@@ -245,18 +241,14 @@ SHADER
     for profile in sce_fp_rsx sce_vp_rsx; do
         src="$fp_src"
         [[ "$profile" == sce_vp_rsx ]] && src="$vp_src"
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-        for mode in general legacy; do
-            args=()
-            [[ "$mode" == legacy ]] && args+=(--legacy-lowering)
+        for mode in general; do
             out="$work/${name}_${profile}_${mode}.bin"
             log="$work/${name}_${profile}_${mode}.log"
             rc=0
             (
                 ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
                 timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-                    -p "$profile" "${args[@]}" \
+                    -p "$profile" \
                     --emit-container "$out" "$src"
             ) >"$log" 2>&1 || rc=$?
 
@@ -270,7 +262,16 @@ SHADER
             if grep -Eq 'std::bad_alloc|terminate called|Aborted|Killed' "$log"; then
                 fail "$name reported an allocation abort on $profile/$mode"
             fi
-            grep -Fq "$src:" "$log" \
+            # The BASENAME, not the whole path: the spelling the compiler
+            # prints is the one the SHELL handed it.  Git Bash rewrites a
+            # POSIX argv path into Windows form before exec'ing a native
+            # binary, so a '/tmp/x.fcg' argument reaches main() - and comes
+            # back in the diagnostic - as 'C:/Users/FIREBI~1/.../x.fcg'.
+            # Comparing the directory therefore fails on a compiler that is
+            # behaving perfectly.  What this guard is for is that the
+            # diagnostic names the USER'S FILE rather than <builtin> or the
+            # composed unit, and the file name carries that.
+            grep -Fq "$(basename "$src"):" "$log" \
                 || fail "$name diagnostic did not name the source file on $profile/$mode"
             if grep -Eq "unknown character|unexpected token|parse error|syntax error|unsupported IR op" "$log"; then
                 tail -n 10 "$log" >&2

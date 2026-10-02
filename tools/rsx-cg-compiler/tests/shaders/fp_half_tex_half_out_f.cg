@@ -1,0 +1,8 @@
+// The same fetch under a HALF output.  The colour's bank changes; the
+// fetch's precision does not - codex measured prec0 -> prec1 under BOTH
+// output types when the value rule owned the instruction, so both are pinned.
+half4 main(float2 uv : TEXCOORD0, uniform sampler2D s) : COLOR
+{
+	half4 t = h4tex2D(s, (half2)uv);
+	return t * (half)2.0;
+}

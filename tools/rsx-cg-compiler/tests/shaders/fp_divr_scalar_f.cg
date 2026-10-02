@@ -1,4 +1,4 @@
-// t_58e2212c: ordinary fragment division should use NV40 DIVR (0x3A),
+// scalar-divr-lowering: ordinary fragment division should use NV40 DIVR (0x3A),
 // not the older RCP-then-MUL idiom.  The operands are dynamic so there is
 // no constant reciprocal to fold.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)

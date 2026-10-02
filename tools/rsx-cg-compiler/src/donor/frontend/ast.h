@@ -116,6 +116,13 @@ struct StructField
     std::string name;
     std::shared_ptr<TypeNode> type;
     Semantic semantic;
+    // A member may carry a storage/interface qualifier - the reference
+    // SDK's own headers write `uniform sampler2D t : TEXUNIT0;` and
+    // `in float4 position : POSITION;` inside structs.  RECORDED rather
+    // than dropped: nothing reads it yet, because the SEMANTIC is what
+    // binds the member today, but a qualifier that is parsed and thrown
+    // away is indistinguishable from one that was never written.
+    StorageQualifier storage = StorageQualifier::None;
 };
 
 struct TypeNode
@@ -323,6 +330,15 @@ struct CastExpr : ExprNode
 // Type constructor: float4(1, 2, 3, 4)
 struct ConstructorExpr : ExprNode
 {
+    // True when the source wrote BRACES - `float4 u = {1,2,3,4}` - rather
+    // than a parenthesised constructor.  The parser builds the same node for
+    // both, but the reference applies DIFFERENT rules: a braced initialiser
+    // must supply exactly the declared component count (C1057 too little /
+    // C1058 too much), while a parenthesised constructor with ONE argument
+    // broadcasts.  `float4 u = {2}` is refused and `float4 u = float4(2)` is
+    // accepted, so the two cannot share a check (uniform-default-records A1).
+    bool bracedInitializer = false;
+
     std::shared_ptr<TypeNode> constructedType;
     std::vector<std::unique_ptr<ExprNode>> arguments;
 
@@ -387,10 +403,27 @@ struct ExprStmt : StmtNode
 // Declaration statement (variable declaration inside function)
 struct DeclStmt : StmtNode
 {
-    std::unique_ptr<DeclNode> declaration;
+    // ONE STATEMENT CAN DECLARE SEVERAL NAMES: `float a, b;` is one
+    // declaration statement with two declarators, and every one of them is
+    // declared.  This was a single pointer, so the parser - which has always
+    // parsed the whole comma list correctly - had its result truncated to the
+    // first name here, and using the second was then refused as an UNDECLARED
+    // IDENTIFIER (multiple-declarators).  A vector rather than a first-plus-extras pair
+    // deliberately: nothing about the first declarator is special, and a
+    // shape that makes it special is how the truncation happened.
+    //
+    // NOT a synthetic block: wrapping the declarators in a BlockStmt would
+    // introduce a scope and hide them from the rest of the enclosing one.
+    std::vector<std::unique_ptr<DeclNode>> declarations;
 
     DeclStmt(SourceLocation loc, std::unique_ptr<DeclNode> decl)
-        : StmtNode(StmtKind::Decl, loc), declaration(std::move(decl)) {}
+        : StmtNode(StmtKind::Decl, loc)
+    {
+        declarations.push_back(std::move(decl));
+    }
+
+    DeclStmt(SourceLocation loc, std::vector<std::unique_ptr<DeclNode>> decls)
+        : StmtNode(StmtKind::Decl, loc), declarations(std::move(decls)) {}
 };
 
 // Block statement { ... }
@@ -536,6 +569,13 @@ struct VarDecl : DeclNode
     std::shared_ptr<TypeNode> type;
     std::unique_ptr<ExprNode> initializer;  // nullable
     StorageQualifier storage = StorageQualifier::None;
+    // "static const" / "const static" both canonicalize to Const; this keeps
+    // whether `static` was written, because the reference folds a static
+    // const as a true constant but treats a non-static file-scope const as a
+    // uniform with a default - so only a STATIC const may feed another
+    // initialiser (file-scope-initializer-fold: `const float W; const float2 D = {1/W}` is
+    // C1059 on the reference).
+    bool isStatic = false;
     Semantic semantic;
     VitaAttributes vitaAttrs;
 

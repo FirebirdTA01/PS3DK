@@ -24,6 +24,7 @@ std::string IRTypeInfo::toString() const
     case IRType::Mat2x2:    result = "mat2"; break;
     case IRType::Mat3x3:    result = "mat3"; break;
     case IRType::Mat4x4:    result = "mat4"; break;
+    case IRType::Sampler1D: result = "sampler1D"; break;
     case IRType::Sampler2D: result = "sampler2D"; break;
     case IRType::SamplerRect: result = "samplerRECT"; break;
     case IRType::SamplerCube: result = "samplerCube"; break;
@@ -140,10 +141,24 @@ IRTypeInfo IRTypeInfo::fromCgType(const CgType& cgType)
         {
             info.baseType = IRType::SamplerCube;
         }
+        else if (typeStr == "sampler1D")
+        {
+            info.baseType = IRType::Sampler1D;
+        }
         else if (typeStr.find("RECT") != std::string::npos ||
                  typeStr.find("Rect") != std::string::npos)
         {
             info.baseType = IRType::SamplerRect;
+        }
+        else if (typeStr.find("3D") != std::string::npos ||
+                 typeStr.find("3d") != std::string::npos)
+        {
+            info.baseType = IRType::Sampler3D;
+        }
+        else if (typeStr.find("1D") != std::string::npos ||
+                 typeStr.find("1d") != std::string::npos)
+        {
+            info.baseType = IRType::Sampler1D;
         }
         else
         {
@@ -151,24 +166,32 @@ IRTypeInfo IRTypeInfo::fromCgType(const CgType& cgType)
         }
     }
 
-    // Preserve array size and set element type for arrays
+    // An array is described by its ELEMENT plus a count.  isScalar(),
+    // isVector() and isMatrix() are all false for an array, so nothing
+    // above set baseType or vectorSize; the old fallback here then took the
+    // scalar element kind and width 1, which turned `float4 x[N]` into
+    // float[N] - the container declared CGtype 1045 (float) where the
+    // reference declares 1048 (float4), and every element was allocated
+    // one lane wide.  Convert the element type through this same function
+    // and carry only the count from the array (constant-uniform-array-index).
     if (cgType.arraySize() > 0)
     {
-        info.arraySize = cgType.arraySize();
-
-        // For array types, baseType may not have been set above because
-        // CgType::isScalar()/isVector() return false for arrays.
-        // Set baseType based on the element type.
-        if (info.baseType == IRType::Void && info.elementType != IRType::Float32)
+        const CgType element = cgType.elementType();
+        if (!element.isVoid() && !element.isError())
         {
-            // Use whatever elementType was determined
+            const IRTypeInfo elementInfo = fromCgType(element);
+            info.baseType    = elementInfo.baseType;
+            info.elementType = elementInfo.elementType;
+            info.vectorSize  = elementInfo.vectorSize;
+            info.matrixRows  = elementInfo.matrixRows;
+            info.matrixCols  = elementInfo.matrixCols;
         }
-        if (info.baseType == IRType::Void)
+        else if (info.baseType == IRType::Void)
         {
-            // Array of scalars: use the element type as base type
             info.baseType = info.elementType;
             info.vectorSize = 1;
         }
+        info.arraySize = cgType.arraySize();
     }
 
     return info;
@@ -229,9 +252,18 @@ const char* irOpToString(IROp op)
     case IROp::Saturate:     return "sat";
     case IROp::Ddx:          return "ddx";
     case IROp::Ddy:          return "ddy";
+    case IROp::PackHalf2:    return "pack_2half";
+    case IROp::UnpackHalf2:  return "unpack_2half";
+    case IROp::PackUByte4:   return "pack_4ubyte";
+    case IROp::UnpackUByte4: return "unpack_4ubyte";
+    case IROp::PackByte4:    return "pack_4byte";
+    case IROp::UnpackByte4:  return "unpack_4byte";
+    case IROp::PackUShort2:  return "pack_2ushort";
+    case IROp::UnpackUShort2: return "unpack_2ushort";
     case IROp::Lerp:         return "lerp";
     case IROp::Step:         return "step";
     case IROp::SmoothStep:   return "smoothstep";
+    case IROp::Lit:          return "lit";
     case IROp::Sin:          return "sin";
     case IROp::Cos:          return "cos";
     case IROp::Tan:          return "tan";
@@ -277,6 +309,7 @@ const char* irOpToString(IROp op)
     case IROp::TexSampleLod: return "samplelod";
     case IROp::TexSampleGrad: return "samplegrad";
     case IROp::TexSampleProj: return "sampleproj";
+    case IROp::TexSampleBias: return "samplebias";
     case IROp::TexFetch:     return "texfetch";
     case IROp::Call:         return "call";
     case IROp::Nop:          return "nop";
@@ -510,10 +543,10 @@ IRConstant* IRFunction::createConstant(const IRTypeInfo& type, float value)
     return ptr;
 }
 
-IRConstant* IRFunction::createConstant(const IRTypeInfo& type, const std::vector<float>& value)
+IRConstant* IRFunction::createConstant(const IRTypeInfo& type, const std::vector<float>& value, const std::vector<int64_t>& intValues)
 {
     IRValueID id = allocateValueId();
-    auto constant = std::make_unique<IRConstant>(id, type, value);
+    auto constant = std::make_unique<IRConstant>(id, type, value, intValues);
     IRConstant* ptr = constant.get();
     values[id] = std::move(constant);
     return ptr;
@@ -734,6 +767,14 @@ int getOperandCount(IROp op)
     case IROp::Saturate:
     case IROp::Ddx:
     case IROp::Ddy:
+    case IROp::PackHalf2:
+    case IROp::UnpackHalf2:
+    case IROp::PackUByte4:
+    case IROp::UnpackUByte4:
+    case IROp::PackByte4:
+    case IROp::UnpackByte4:
+    case IROp::PackUShort2:
+    case IROp::UnpackUShort2:
     case IROp::Sin:
     case IROp::Cos:
     case IROp::Tan:
@@ -794,6 +835,7 @@ int getOperandCount(IROp op)
     case IROp::StoreOutput:
     case IROp::StoreVarying:
     case IROp::TexSample:
+    case IROp::TexSampleBias:
         return 2;
 
     // Ternary
@@ -801,6 +843,7 @@ int getOperandCount(IROp op)
     case IROp::Clamp:
     case IROp::Lerp:
     case IROp::SmoothStep:
+    case IROp::Lit:
     case IROp::Refract:
     case IROp::FaceForward:
     case IROp::VecInsert:

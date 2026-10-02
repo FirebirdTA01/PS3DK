@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# An INT literal in a float constructor converts (t_dc1d92b0).  The IR
+# An INT literal in a float constructor converts (integer-literal-constructor-conversion).  The IR
 # builder's constructor fold accepted float constants only, so one int
 # literal stopped the whole constructor folding and the back end saw four
 # loose constants where it wanted a literal vec4 - `float4(1,1,1,1)`, the
@@ -36,7 +36,7 @@ compile() {   # $1 shader, $2 tag, $3 extra flags
         tail -n 20 "$work/$2.log" >&2
         fail "$2 did not compile.  An int literal in a float constructor
 converts in Cg and in the reference compiler; refusing it is the defect
-(t_dc1d92b0)."
+(integer-literal-constructor-conversion)."
     fi
 }
 
@@ -45,13 +45,10 @@ var="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_int_var_ctor_f.cg"
 [[ -f "$lit" ]] || fail "fixture missing: $lit"
 [[ -f "$var" ]] || fail "fixture missing: $var"
 
-compile "$lit" lit_legacy --legacy-lowering
-compile "$var" var_legacy --legacy-lowering
 compile "$lit" lit_general
 compile "$var" var_general
 
-python3 - "$work/lit_legacy.log" "$work/var_legacy.log" \
-        "$work/lit_general.log" "$work/var_general.log" <<'PY'
+python3 - "$work/lit_general.log" "$work/var_general.log" <<'PY'
 import re
 import sys
 
@@ -68,48 +65,25 @@ def rows(path):
 # Const-block words in the byte order the container carries them.
 ONE, HALF, QUARTER, EIGHTH = 0x00003F80, 0x00003F00, 0x00003E80, 0x00003E00
 
-lit_legacy, var_legacy = rows(sys.argv[1]), rows(sys.argv[2])
-
-# float4(1,1,1,1): one distinct value, so one packed lane broadcast.
-if len(lit_legacy) != 3 or lit_legacy[2] != [ONE, 0, 0, 0]:
-    raise SystemExit(
-        "FAIL: float4(1,1,1,1) must pack a single 1.0 into the const block; "
-        "got %d rows, block [%s].  The int literal has to convert to 1.0f, "
-        "not to some other reading of the bits."
-        % (len(lit_legacy), ", ".join(
-            "0x%08x" % w for w in (
-                lit_legacy[2] if len(lit_legacy) > 2 else [])))
-    )
-
-# float x = 1; float4(0.5, 0.25, 0.125, x): four distinct values, identity.
-if len(var_legacy) != 3 or var_legacy[2] != [HALF, QUARTER, EIGHTH, ONE]:
-    raise SystemExit(
-        "FAIL: the int-initialised variable must reach the const block as "
-        "1.0 in the w lane; got %d rows, block [%s]"
-        % (len(var_legacy), ", ".join(
-            "0x%08x" % w for w in (
-                var_legacy[2] if len(var_legacy) > 2 else [])))
-    )
-
-# Shipping general lowering may materialise a full vec4 constant instead
+# General lowering may materialise a full vec4 constant instead
 # of a packed scalar broadcast.  The visible property is that integer
 # literals convert to floating values before they reach the emitted
 # container; refusing was the original defect, and bit-pattern conversion
 # would still compile but paint the wrong value.
-lit_general = rows(sys.argv[3])
+lit_general = rows(sys.argv[1])
 if [ONE, ONE, ONE, ONE] not in lit_general and [ONE, 0, 0, 0] not in lit_general:
     raise SystemExit(
         "FAIL: general float4(1,1,1,1) must contain 1.0f after int literal "
-        "conversion; const/data rows were [%s] (t_dc1d92b0)."
+        "conversion; const/data rows were [%s] (integer-literal-constructor-conversion)."
         % "; ".join(",".join("0x%08x" % w for w in r)
                      for r in lit_general)
     )
 
-var_general = rows(sys.argv[4])
+var_general = rows(sys.argv[2])
 if [HALF, QUARTER, EIGHTH, ONE] not in var_general:
     raise SystemExit(
         "FAIL: general int-initialised variable must reach the w lane as "
-        "1.0f; const/data rows were [%s] (t_dc1d92b0)."
+        "1.0f; const/data rows were [%s] (integer-literal-constructor-conversion)."
         % "; ".join(",".join("0x%08x" % w for w in r)
                      for r in var_general)
     )

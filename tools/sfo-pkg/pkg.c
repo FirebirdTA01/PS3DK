@@ -218,7 +218,7 @@ static void dynbuf_free(dynbuf_t *b)
 /* ------------------------------------------------------------------ */
 /* File header entry (in-memory, not the on-disk layout)               */
 /* ------------------------------------------------------------------ */
-/* LOCAL FIX 3 (PS3 Custom Toolchain, 2026-09-24, t_6858d853):
+/* LOCAL FIX 3 (PS3 Custom Toolchain, 2026-09-24, package-path-error-handling):
    Paths are dynamically allocated per entry rather than fixed buffers.
    This removes the FH_MAX_NAME (256) and src_path[512] truncation bugs
    reported in EMP Static relay. */

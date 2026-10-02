@@ -1,4 +1,4 @@
-// shader-differential — curated regression row for t_afb4af65 (P1, fixed
+// shader-differential — curated regression row for literal-lane-insert (P1, fixed
 // b24559e): a literal written into one lane of a varying that is otherwise
 // passed straight through.  Until 2026-09-02 the default path emitted one
 // full-width MOV of the varying and dropped `c.x = 0.5` in silence - exit

@@ -1,0 +1,5 @@
+void main(uniform float3x3 m, out float4 o : POSITION)
+{
+    float4x4 m4 = float4x4(m);
+    o = m4[0];
+}

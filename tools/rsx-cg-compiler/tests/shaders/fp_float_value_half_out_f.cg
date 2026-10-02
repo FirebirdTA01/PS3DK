@@ -1,0 +1,9 @@
+// The mirror control: FLOAT values, a HALF output.  The reference keeps the
+// arithmetic at prec=0 and only the move into the colour is half (codex's
+// 15-shape precision matrix).  A change that makes half OUTPUTS imply half
+// ARITHMETIC turns this row red.
+half4 main(float4 p : TEXCOORD0) : COLOR
+{
+	float4 a = p * 1.003;
+	return (half4)a;
+}

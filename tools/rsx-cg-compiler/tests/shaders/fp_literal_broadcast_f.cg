@@ -1,5 +1,5 @@
 // The most common fragment shader there is: one constant colour
-// (t_642eb36e).
+// (literal-vector-dedup-swizzle).
 //
 // Reference compiler:
 //

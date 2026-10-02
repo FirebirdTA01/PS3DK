@@ -1,6 +1,6 @@
 // CF-1a tier-a fixture: a single if/else diamond with provably
 // finite (literal) join arms — the smallest shape the general-path
-// control-flow flatten must unlock (t_91bbd575, design note
+// control-flow flatten must unlock (general-path-discard, design note
 // docs/design/shader-compiler-control-flow.md §5).
 //
 // Contract pinned by tests/shader-compiler/control-flow-flatten-test.sh:

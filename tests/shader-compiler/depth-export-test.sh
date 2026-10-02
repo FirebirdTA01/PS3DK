@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fragment DEPTH export contract (t_1722b8bc).
+# Fragment DEPTH export contract (fragment-depth-export).
 #
 # EVERY NUMBER BELOW WAS READ OUT OF THE REFERENCE'S OWN OUTPUT, not
 # derived from our model of what a depth export should look like.  The
@@ -53,7 +53,8 @@ trap 'rm -rf "$work"' EXIT
 for stem in "${fixtures[@]}"; do
     src="$repo_root/tools/rsx-cg-compiler/tests/shaders/$stem.cg"
 
-    # DEFAULT (general) path: must compile and honour the whole contract.
+    # The general path (the only back end): must compile and honour the
+    # whole contract.
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" "$compiler" \
@@ -73,27 +74,6 @@ for stem in "${fixtures[@]}"; do
     grep -qE '^\s*[0-9]+:(\s+[0-9a-fA-F]{8})+\s*$' "$work/$stem.log" || fail \
         "$stem emitted no ucode listing - the R1.z check below would pass
 vacuously, so the harness is refusing rather than reporting a green"
-
-    # LEGACY path: the retired shape matcher never lowered depth and used
-    # to DROP it silently.  It now refuses, and a refusal must not leave a
-    # container behind for a caller to pick up and ship.
-    rc=0
-    (
-        ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
-        timeout "${PS3TC_SHADER_TEST_TIMEOUT:-30s}" "$compiler" \
-            -p sce_fp_rsx --legacy-lowering \
-            --emit-container "$work/$stem.legacy.fpo" "$src"
-    ) >"$work/$stem.legacy.log" 2>&1 || rc=$?
-    [[ "$rc" -ne 0 ]] || fail \
-        "$stem compiled on the legacy path, which has no depth lowering -
-it drops the write silently, so it must refuse"
-    [[ ! -e "$work/$stem.legacy.fpo" ]] || fail \
-        "$stem left a container behind after the legacy refusal"
-    grep -q "fragment DEPTH output is not lowered on the legacy path" \
-        "$work/$stem.legacy.log" || {
-        tail -n 20 "$work/$stem.legacy.log" >&2
-        fail "$stem refused on the legacy path for another reason"
-    }
 done
 
 python3 - "$work" "${fixtures[@]}" <<'PY'
@@ -209,7 +189,7 @@ for tag in sys.argv[2:]:
 if problems:
     raise SystemExit("FAIL: depth-export\n  " + "\n  ".join(problems))
 
-print("depth export: R1.z, depthReplace=1, CG_DEPTH0/FLOAT3 on both paths")
+print("depth export: R1.z, depthReplace=1, CG_DEPTH0/FLOAT3 on both spellings")
 PY
 
 printf 'PASS: depth-export-test\n'

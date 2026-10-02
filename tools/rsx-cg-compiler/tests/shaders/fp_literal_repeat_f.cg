@@ -1,5 +1,5 @@
 // A literal vec4 with repeated lanes, written straight to the output
-// (t_642eb36e).
+// (literal-vector-dedup-swizzle).
 //
 // The reference compiler does not write the four lanes out verbatim.  It
 // packs the DISTINCT values into the const block in first-appearance

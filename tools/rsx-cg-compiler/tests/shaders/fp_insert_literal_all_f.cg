@@ -1,8 +1,8 @@
-// Every lane of a varying overwritten by a literal (t_afb4af65).
+// Every lane of a varying overwritten by a literal (literal-lane-insert).
 //
 // The interesting half here is the COMPLETENESS GUARD, not the emission.
 // The guard refuses a shader when a varying that feeds an output in the
-// IR is read by no emitted instruction (t_72810bd7).  Here `color` does
+// IR is read by no emitted instruction (post-discard-colour).  Here `color` does
 // feed the output in the IR - through the insert chain - and is correctly
 // read by nothing, because all four of its lanes are overwritten before
 // the store.  The guard has to know the difference between work that was

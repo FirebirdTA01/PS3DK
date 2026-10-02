@@ -1,4 +1,4 @@
-// CF-2 (t_91bbd575): the canonical conditional discard.
+// CF-2 (general-path-discard): the canonical conditional discard.
 //
 // The reference compiles this to exactly three instructions - the varying
 // load, a comparison whose destination is the CONDITION register with

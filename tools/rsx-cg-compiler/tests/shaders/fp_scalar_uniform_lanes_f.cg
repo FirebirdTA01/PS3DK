@@ -1,4 +1,4 @@
-// A scalar uniform read into every channel (t_f5f750ff).
+// A scalar uniform read into every channel (fragment-global-uniform-order).
 //
 // The runtime patches a scalar uniform by transferring ONE word, at lane
 // x, to every ucode offset the container parameter lists.  A const source

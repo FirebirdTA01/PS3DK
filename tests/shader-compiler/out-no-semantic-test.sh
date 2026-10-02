@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # A fragment entry's `out` parameter with no semantic binds to COLOR
-# (t_a15ec129).  The store used to be gated on the parameter HAVING a
+# (implicit-colour-output).  The store used to be gated on the parameter HAVING a
 # semantic, so a shader declared this way emitted no StoreOutput at all -
 # and everything that only fed the output went with it.  Exit 0, no
 # diagnostic, and a container whose ucode never writes the output register.
 #
 # The assertion is the twin: the same shader with `: COLOR` written out
-# must compile to the same PROGRAM, on both paths.  It cannot pass by
+# must compile to the same PROGRAM.  It cannot pass by
 # accident - if the omitted semantic changed what the shader computes, the
 # two would differ.
 #
@@ -25,6 +25,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+run_checker() {
+    local rc=0
+    python3 "$@" || rc=$?
+    [[ "$rc" -ne 126 && "$rc" -ne 127 ]] || fail "checker did not execute (exit $rc)"
+    return "$rc"
+}
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -52,7 +58,7 @@ compile() {   # $1 stem, $2 flags, $3 tag
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$3.log" >&2
         fail "$3 did not compile.  A fragment out parameter with no semantic
-binds to COLOR; refusing or dropping it is t_a15ec129."
+binds to COLOR; refusing or dropping it is implicit-colour-output."
     fi
     # A separate run for the ucode: --emit-container suppresses the dump.
     (
@@ -62,9 +68,7 @@ binds to COLOR; refusing or dropping it is t_a15ec129."
     ) >"$work/$3.dump" 2>&1 || fail "$3 compiled with a container but not without"
 }
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-for path_flags in ":general" "--legacy-lowering:legacy"; do
+for path_flags in ":general"; do
     flags="${path_flags%%:*}"
     tag="${path_flags##*:}"
     compile fp_out_no_semantic_f   "$flags" "none_$tag"
@@ -79,11 +83,12 @@ for path_flags in ":general" "--legacy-lowering:legacy"; do
         fail "on the $tag path the ucode for an out parameter WITHOUT a
 semantic differs from the one WITH ': COLOR'.  They are the same program:
 the reference binds an unsemanticked fragment out to COLOR0, and so must we
-(t_a15ec129)."
+(implicit-colour-output)."
     fi
 done
 
-python3 - "$work"/none_*.dump <<'PY'
+run_checker - "$work" <<'PY'
+from pathlib import Path
 import re
 import sys
 
@@ -92,7 +97,9 @@ def unswap(v):
     return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
 
 
-for path in sys.argv[1:]:
+paths = [str(p) for p in sorted(Path(sys.argv[1]).glob("none_*.dump"))]
+assert paths, "no output dumps to check"
+for path in paths:
     insns = 0
     writes_output = 0
     for line in open(path, "r", encoding="utf-8"):
@@ -121,8 +128,8 @@ for path in sys.argv[1:]:
             "FAIL: %s never writes the output register.  That is the whole "
             "defect: the store was dropped and everything feeding it went "
             "with it, leaving a well-formed container that paints whatever "
-            "R0 held (t_a15ec129)." % name
+            "R0 held (implicit-colour-output)." % name
         )
 PY
 
-printf 'out-no-semantic-test: ok (both paths, ucode identity + output written)\n'
+printf 'out-no-semantic-test: ok (general path, ucode identity + output written)\n'

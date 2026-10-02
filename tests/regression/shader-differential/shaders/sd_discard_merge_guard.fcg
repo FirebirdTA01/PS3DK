@@ -8,7 +8,7 @@
 // intersection cancels the merge's pair and keeps the outer literal); DEFAULT path
 // MISMATCH, ours painted 3264 in 4 instructions (kills on the wrong comparison), and
 // 5bee678's refusal did not fire - the shape codex named.  Curated |general only:
-// the default disposition is a refusal (t_7ae60244 replacement), and a refusing
+// the default disposition is a refusal (nested-discard-reachability replacement), and a refusing
 // curated row aborts the stage.
 //
 // The first spelling of this probe had the else arm read TEXCOORD1, whose alpha never

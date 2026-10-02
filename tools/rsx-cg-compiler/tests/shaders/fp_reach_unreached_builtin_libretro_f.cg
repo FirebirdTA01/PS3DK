@@ -1,0 +1,14 @@
+// A BUILTIN CALL WITH NO FITTING OVERLOAD IS HELD LIKE THE C1008 CLASS.
+// Measured against sce-cgc 475, sce_fp_rsx (t_a287040c, 2026-10-01): when the
+// only visible candidates for the name are builtins and none fits, the
+// reference reports it ONLY in entry-reachable bodies; a wrong arity on a
+// visible SOURCE declaration is C1103 everywhere (fp_reach_unreached_arity_refuse_f).
+// libretro gamma-management.h ships unused tex1D(sampler1D, float, int)
+// wrappers; 108 community programs were refused only for those.
+//
+// ACCEPT: the libretro wrapper shape, tex1D(sampler1D, float, int), unreachable.
+uniform sampler1D s;
+float4 decode_input(float4 c) { return c * c; }
+inline float4 tex1D_linearize(const sampler1D texture, const float tex_coords, const int texel_off)
+{ return decode_input(tex1D(texture, tex_coords, texel_off)); }
+float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

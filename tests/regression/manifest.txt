@@ -4,7 +4,7 @@ sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS
 pthread-sync,tests/regression/pthread-sync/pthread-sync.fake.self,25,RAN-CLEAN,PTHREAD_OK,PTHREAD_FAIL|ENOSYS
 # shader-readback must stay green: arith and angles cover the write-mask
-# clobber fixed by t_daf2da77, xform judges vertex-program geometry,
+# clobber fixed by instruction-write-mask, xform judges vertex-program geometry,
 # ops covers straight-line slice A/B lowering, refract checks the
 # opt-in general lowering path's boundary cases against absolute
 # PPU-computed truth, guarded divide pixel-checks CF-1b predicated
@@ -15,7 +15,7 @@ pthread-sync,tests/regression/pthread-sync/pthread-sync.fake.self,25,RAN-CLEAN,P
 shader-readback,tests/regression/shader-readback/shader-readback.fake.self,90,RAN-CLEAN,shader-readback: 15/15 tests passed,SHADER_READBACK_FAIL|readback .*: FAIL
 # uniform-readback must stay green: asserts that runtime fragment uniform
 # parameter updates via cellGcmSetFragmentProgramParameter actually reach
-# RSX local memory and alter draw output (witness for t_19ddcbee / t_224f9771).
+# RSX local memory and alter draw output (witness for fragment-uniform-upload / fragment-uniform-update).
 # Failure condition is sameness across two draws differing only in uniform value.
 uniform-readback,tests/regression/uniform-readback/uniform-readback.fake.self,30,RAN-CLEAN,UNIFORM_READBACK_OK,UNIFORM_READBACK_FAIL
 

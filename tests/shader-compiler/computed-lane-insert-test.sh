@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# t_b25e6444: Non-contiguous lane-preserving insert of a computed vector must compile
+# computed-lane-insert: Non-contiguous lane-preserving insert of a computed vector must compile
 # on the general path and write all four destination channels into R0 (.yw preserved,
 # .xz inserted from computed temp).
-#
-# CONTROL: On the retired legacy matcher (--legacy-lowering), this shape refuses
-# with "nv40-fp: VecInsert scalar must be a float literal" (t_afb4af65).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -25,13 +22,19 @@ src="$shaders/fp_computed_lane_insert_f.cg"
 [[ -f "$src" ]] || fail "fixture missing: $src"
 
 # 1. Shipping path (general lowering)
+# The ucode dump is on stdout and the diagnostics are on stderr; merging
+# them lets a stderr line land INSIDE a hex row, which costs the row,
+# shifts every later one and decodes a constant as an instruction writing
+# a register nothing reads (the false R33, 2026-09-07).  Keep them apart;
+# the decoder's refusal is the fallback, not the fix.
 log_gen="$work/computed_lane_insert_general.log"
+err_gen="$work/computed_lane_insert_general.err"
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_fp_rsx "$src"
-) >"$log_gen" 2>&1 || {
-    tail -n 30 "$log_gen" >&2
+) >"$log_gen" 2>"$err_gen" || {
+    tail -n 30 "$err_gen" >&2
     fail "fp_computed_lane_insert_f.cg did not compile on shipping path"
 }
 
@@ -63,7 +66,7 @@ for i, w in enumerate(gs):
 if combined_mask != 0xF:
     sys.exit(
         f"FAIL: R0 channels not fully written: combined mask 0x{combined_mask:X} != 0xF "
-        f"(expected all 4 channels .xyzw; t_b25e6444 regression)"
+        f"(expected all 4 channels .xyzw; computed-lane-insert regression)"
     )
 
 if not has_x_insert or not has_z_insert:
@@ -72,24 +75,6 @@ if not has_x_insert or not has_z_insert:
 print(f"computed-lane-insert-test: ok (general path writes all channels 0x{combined_mask:X} with non-contiguous .x/.z inserts)")
 PY
 
-# 2. Legacy path: verified differential control
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-log_legacy="$work/computed_lane_insert_legacy.log"
-legacy_rc=0
-(
-    ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
-    timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_fp_rsx --legacy-lowering "$src"
-) >"$log_legacy" 2>&1 || legacy_rc=$?
-
-if [[ "$legacy_rc" -eq 0 ]]; then
-    fail "fp_computed_lane_insert_f.cg compiled on legacy path; expected refusal for non-literal scalar VecInsert"
-fi
-
-grep -q "VecInsert scalar must be a float literal" "$log_legacy" || {
-    tail -n 20 "$log_legacy" >&2
-    fail "fp_computed_lane_insert_f.cg failed on legacy path for an unexpected reason"
-}
+# legacy-path control removed with the shape matcher (chore/rsxcg-remove-legacy-lowering); it proved the fixture is a non-literal VecInsert the matcher refused (literal-lane-insert).
 
 printf 'PASS: computed-lane-insert-test\n'

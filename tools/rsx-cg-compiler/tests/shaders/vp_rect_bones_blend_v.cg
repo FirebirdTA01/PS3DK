@@ -1,0 +1,1 @@
+uniform float3x4 bones[2]; void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { o = p; float3x4 blended = bones[0] * p.x + bones[1] * p.y; c = float4(mul(blended, p), 1); }

@@ -1,4 +1,4 @@
-// t_71ad405e: reflect(float3,float3) is the oracle-accepted reflect width.
+// stdlib-dot-source-width: reflect(float3,float3) is the oracle-accepted reflect width.
 //
 // reflect(float2) and reflect(float4) are overload-parity questions because
 // sce-cgc rejects them.  This row pins the width-3 path that this lowering

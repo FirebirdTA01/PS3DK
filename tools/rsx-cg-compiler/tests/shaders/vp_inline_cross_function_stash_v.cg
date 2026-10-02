@@ -1,0 +1,1 @@
+float4 G; float4 get() { return G; } float4 other(float4 p : POSITION) : POSITION { float4 G = p * 9; return get(); } float4 main(float4 p : POSITION) : POSITION { G = p; return get(); }

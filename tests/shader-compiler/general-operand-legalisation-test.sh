@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The general path must legalise a COMPARISON's operands (t_40dd8159).
+# The general path must legalise a COMPARISON's operands (fragment-operand-selector-limits).
 #
 # Two NV40 fragment rules, both already implemented for arithmetic and
 # both skipped for comparisons, because legalizeInputOperands consults a
@@ -10,7 +10,7 @@
 #      of the source, so two input-typed operands necessarily read the
 #      SAME varying: `c.w < d.w` on two varyings compiled to
 #      `SLT ..., f[TEX1].w, f[TEX1].w`, d.w compared with itself
-#      (t_e89cd261's rule, fixed for arithmetic in cf07e6c).
+#      (distinct-varying-sources's rule, fixed for arithmetic in cf07e6c).
 #
 #   2. ONE inline constant block per instruction.  A comparison of a
 #      uniform against a literal appended a block for each after the same

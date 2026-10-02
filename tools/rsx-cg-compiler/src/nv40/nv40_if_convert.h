@@ -53,10 +53,12 @@
  *                 %pN = predcarry %c, %p(N-1), OPN ... %p(N-1) ...
  *                 stout %pN SEM; ret }
  *
- *      Each PredCarry lowers in NV40 FP emit to a 2-instruction pair:
+ *      PredCarry was lowered by the removed shape matcher to a pair:
  *      MOVR Rdst, prev_value (carry the running result), then the
  *      inner OP re-executed against Rdst(NE.x) so it only commits
- *      when the predicate fires.  See nv40_fp_emit's PredCarry handler.
+ *      when the predicate fires.  The general lowering has no PredCarry
+ *      rule, so a program that still carries one after this pass is
+ *      refused there.
  *
  *   4. If-only with NO per-branch StoreOutput.  IRBuilder has already
  *      synthesised a Select at the merge for any local redefined inside
@@ -99,15 +101,9 @@
  * while the control flow is still intact, or a conditional kill quietly
  * becomes an unconditional one.
  *
- * Note the asymmetry that follows from it: this pass runs on BOTH
- * lowering paths, while guard materialisation runs on the general path
- * only.  On the legacy matcher the guard is therefore still recovered by
- * position, which holds for a single-level `if (cond) discard;` - both
- * paths emit the comparison and a KIL under NE - and is exactly the
- * fragility the guard pass was written to remove for anything nested.
- *
  * FINALLY, FOR ANYONE READING THIS AS A SPECIFICATION - and someone
- * has: this pass PREDATES the general lowering path, which resolves
+ * has: this pass PREDATES the general lowering path (the shape matcher
+ * it was written for has been removed), which resolves
  * diamonds through its own SelPred lowering and discards through guard
  * expression trees.  The live design is there.  This pass is where the
  * shapes were learned, and it still runs, but it is not the whole story.

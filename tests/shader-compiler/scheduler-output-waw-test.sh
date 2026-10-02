@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# t_582a7fff: The FP scheduler must model WAW dependency edges for output register
+# scheduler-output-write-order: The FP scheduler must model WAW dependency edges for output register
 # destinations (kOutputKeyBase), keeping repeated stores to one output in source order.
 #
-# Witness fixture: fp_output_stored_thrice_f.cg (t_c2582cf1 / t_becbfa69).
+# Witness fixture: fp_output_stored_thrice_f.cg (repeated-output-store / post-discard-output-restores).
 # Three sequential stores to output colour R0 set alpha constants:
 #   1.0f (0x3f800000), 0.5f (0x3f000000), 0.25f (0x3e800000).
 # Under the defect, missing WAW edges on output destinations caused the scheduler's
@@ -26,13 +26,19 @@ shaders="$repo_root/tools/rsx-cg-compiler/tests/shaders"
 src="$shaders/fp_output_stored_thrice_f.cg"
 [[ -f "$src" ]] || fail "fixture missing: $src"
 
+# The ucode dump is on stdout and the diagnostics are on stderr; merging
+# them lets a stderr line land INSIDE a hex row, which costs the row,
+# shifts every later one and decodes a constant as an instruction writing
+# a register nothing reads (the false R33, 2026-09-07).  Keep them apart;
+# the decoder's refusal is the fallback, not the fix.
 log="$work/fp_output_stored_thrice.log"
+err="${log%.log}.err"
 (
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_fp_rsx "$src"
-) >"$log" 2>&1 || {
-    tail -n 30 "$log" >&2
+) >"$log" 2>"$err" || {
+    tail -n 30 "$err" >&2
     fail "fp_output_stored_thrice_f.cg did not compile"
 }
 
@@ -64,7 +70,7 @@ if actual_vals != expected:
     sys.exit(
         f"FAIL: output store alpha constants out of order: got {[hex(v) for v in actual_vals]}, "
         f"expected {[hex(v) for v in expected]}. "
-        f"WAW dependency edges for output destination inverted stores (t_582a7fff regression)"
+        f"WAW dependency edges for output destination inverted stores (scheduler-output-write-order regression)"
     )
 
 print(f"scheduler-output-waw-test: ok (alpha stores preserve WAW program order {[hex(v) for v in actual_vals]})")

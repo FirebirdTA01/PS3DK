@@ -4,7 +4,7 @@
 // instruction: the second block was then decoded as an instruction (the
 // disassembler reads it as NOPR), so the ucode was not merely wrong, it
 // was malformed - and the comparison's second operand resolved to the
-// first block, making `u_t > 0.0` into `u_t > u_t` (t_40dd8159).
+// first block, making `u_t > 0.0` into `u_t > u_t` (fragment-operand-selector-limits).
 //
 // needsInlineConstPreload in legalizeInputOperands has always handled this
 // shape; comparisons were absent from the list of ops that pass looks at,

@@ -1,5 +1,5 @@
 // The same defect through a SWIZZLE rather than a narrow input
-// (t_14d18f02): `.xyz` of a float4 input is three lanes, not one.
+// (vp-constructor-lane-layout): `.xyz` of a float4 input is three lanes, not one.
 //
 //     out_position = float4(in_position.xyz, 1.0f);
 //     ours       MOV o[0].x, v[0].x;

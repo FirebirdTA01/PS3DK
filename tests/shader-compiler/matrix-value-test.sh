@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_b4024c12: matrix values that are not bare uniforms must still lower.
+# computed-matrix-values: matrix values that are not bare uniforms must still lower.
 # The fragment fixture constructs a float2x2 from scalars and immediately
 # multiplies it by a vec2.  The vertex fixture multiplies two uniform mat4
 # values, then uses the computed matrix in a matvec multiply.  Sony accepts
@@ -9,6 +9,21 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+# A refusal is exit 1 EXACTLY.  124 is a timeout and >= 128 is a signal, and
+# either one satisfies "did not exit 0" while meaning the compiler never
+# reached the decision this guard is about - so a compiler that CRASHED on a
+# shader it should have refused BY NAME was reported as correct here.  Call
+# this wherever a compile's status is captured, whichever way that compile is
+# expected to go: it is silent for 0 and for 1 and names anything else.
+# Measured: half the guards in this suite that assert a refusal could not tell
+# one from a SIGABRT (crash-versus-refusal-status).
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
 
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
@@ -36,7 +51,7 @@ compile() {
             -p "$profile" "$src"
     ) >"$log" 2>&1 || {
         tail -n 30 "$log" >&2
-        fail "$tag refused.  Matrix constructors, matrix products, and a computed matrix feeding matvec are reference-accepted shapes (t_b4024c12)."
+        fail "$tag refused.  Matrix constructors, matrix products, and a computed matrix feeding matvec are reference-accepted shapes (computed-matrix-values)."
     }
     grep -qE '^ +[0-9]+:' "$log" ||
         fail "$tag compiled but emitted no ucode"
@@ -89,7 +104,8 @@ mat2_rc=0
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_vp_rsx --emit-container "$mat2_out" "$work/vp_mat2_matvec.cg"
 ) >"$mat2_log" 2>&1 || mat2_rc=$?
-[[ "$mat2_rc" -ne 0 ]] ||
+refusal_status "$mat2_rc" "vp_mat2_matvec"
+[[ "$mat2_rc" -eq 1 ]] ||
     fail "vp_mat2_matvec compiled, but VP has no DP2 lowering in this slice"
 [[ ! -e "$mat2_out" ]] ||
     fail "vp_mat2_matvec left a container behind after refusing"

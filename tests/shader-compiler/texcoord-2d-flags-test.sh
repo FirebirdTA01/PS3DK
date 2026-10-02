@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # texCoords2D must follow the DECLARED width of each TEXCOORD varying, not
-# the lanes the shader consumes (t_f5f750ff follow-on).  Marking a float3 or
+# the lanes the shader consumes (fragment-global-uniform-order follow-on).  Marking a float3 or
 # float4 varying as 2D is how a varying's z or w stops being what the vertex
 # program wrote - which no amount of compiling successfully will reveal, so
 # this reads the container's FP sub-header directly.
 #
-# BOTH lowering paths.  An earlier version ran only the default path and so
-# could not see that the general path still decided the field at the use
-# site with the old consumed-lanes rule (review finding, codex).
+# Run on the general lowering, which once decided the field at the use site
+# with the old consumed-lanes rule (review finding, codex).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -24,16 +23,12 @@ work="${TMPDIR:-/tmp}/ps3dk-texcoord-2d-test.$$"
 mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-for path in general legacy; do
-    flags=()
-    [[ "$path" == legacy ]] && flags=(--legacy-lowering)
+for path in general; do
     rc=0
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-            -p sce_fp_rsx "${flags[@]}" \
+            -p sce_fp_rsx \
             --emit-container "$work/$path.fpo" "$src"
     ) >"$work/$path.log" 2>&1 || rc=$?
     [[ "$rc" -eq 124 ]] && fail "fp_texcoord_2d_flags ($path) timed out"

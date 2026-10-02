@@ -7,6 +7,7 @@
 #include <string>
 #include <memory>
 #include <functional>
+#include <unordered_set>
 
 // ============================================================================
 // Semantic Error/Warning
@@ -118,12 +119,59 @@ public:
 
 private:
     SymbolTable symbols_;
+    // The top-level declaration pass 2 is currently inside.  Calls resolve
+    // only against declarations with declIndex <= this, which is how "visible
+    // at the call" survives a two-pass frontend (function-visibility).
+    //
+    // IT IS SIZE_MAX OUTSIDE analyzeDeclarations, ON PURPOSE: anything
+    // resolving from another pass - shader validation, pass 1 itself - keeps
+    // the old whole-unit view.  Nothing resolves a CALL from there today
+    // (review: Fable), so the value is unobservable; if something ever does,
+    // it will see the pre-function-visibility behaviour and this comment is the reason
+    // why.
+    size_t visibleThrough_ = SIZE_MAX;
+    // Pass 1's declaration count, checked against pass 2's at the end.  The
+    // two walks must enumerate identically or every index is off and
+    // resolution silently shifts; see analyzeDeclarations (review: Fable).
+    size_t declCountPass1_ = 0;
     std::vector<SemanticDiagnostic> diagnostics_;
     ShaderInfo shaderInfo_;
     std::vector<std::unique_ptr<BufferDecl>> bufferDeclOwners_;  // Owns BufferDecl created from VarDecl+BUFFER semantic
 
     // Current context during analysis
     FunctionDecl* currentFunction_ = nullptr;
+
+    // EVERY function declaration seen, in source order - prototypes INCLUDED.
+    // The symbol table does not expose a name->FunctionDecl list and could not
+    // answer this anyway: overloads share a name, so the C5122 check keys on
+    // the DECLARATION a call resolved to (prototype-default-merging).  Prototypes must be in
+    // here because the semantic that is judged is the one on the FIRST
+    // declaration, which is frequently a prototype, and because a call resolves
+    // to the prototype - walking stops there unless the definition is found.
+    std::vector<FunctionDecl*> allFunctions_;
+    // File-scope variables, in declaration order.  Their INITIALISERS are
+    // reachability roots: a call from one reaches its callee's body even
+    // though the entry never mentions it (review: codex).
+    std::vector<VarDecl*> allGlobalVars_;
+
+    // WHERE each file-scope name was declared, in the same one-per-top-level
+    // declaration counting the call-visibility index uses.  A default
+    // expression's names bind at the HELPER'S DECLARATION, so a global
+    // declared after it is not a binding - it is a collision.
+    std::unordered_map<std::string, size_t> globalDeclIndex_;
+
+    // The same, for FUNCTION names: a default may call one, and a callee
+    // declared after the helper is the same collision.
+    std::unordered_map<std::string, size_t> functionDeclIndex_;
+
+    void checkDefaultNamesBindAtDeclaration(FunctionDecl* decl);
+    void analyzePrototypeDefaults(FunctionDecl* decl);
+
+    // The defaults currently being expanded by collectCallEdges.  A default
+    // may call the function that declares it; without this the walk recurses
+    // on the same CallExpr forever.
+    mutable std::unordered_set<const ExprNode*> defaultsBeingWalked_;
+    void checkDuplicateDefinition(FunctionDecl* decl);
     bool inLoop_ = false;
     bool inSwitch_ = false;
 
@@ -141,6 +189,51 @@ private:
     void collectStructDecl(StructDecl* decl);
     void collectFunctionDecl(FunctionDecl* decl);
     void collectVarDecl(VarDecl* decl);
+    // Validates the SHAPE of a uniform entry parameter's default value
+    // against the reference's rules (uniform-default-records A1).
+    void checkParameterDefaultShape(ParamDecl* p);
+    // A function REACHED from the selected entry may not carry a return
+    // semantic (prototype-default-merging).  Runs in pass 3, after every call has resolved.
+    void checkNonEntrySemantics();
+public:
+    // The entry-reachable set, for the IR builder: the reference emits no code
+    // for a function the entry cannot reach and reports no name error from
+    // inside one, so lowering skips them (function-visibility).
+    // Returns DEFINITIONS, not first declarations: the IR builder walks
+    // definitions, and reachedFunctions() keys on the first declaration
+    // because that is what a call resolves to.
+    std::unordered_set<const FunctionDecl*> entryReachableDefinitions() const;
+private:
+    // The entry-reachable function set: transitive, syntactic, no branch
+    // pruning.  One walk, shared by checkNonEntrySemantics (prototype-default-merging) and
+    // the deferred name findings, so there is a single notion of reachable
+    // and a single place it can be wrong.
+    std::unordered_set<const FunctionDecl*> reachedFunctions() const;
+    // A NAME-NOT-FOUND diagnostic held back until reachability is known.  The
+    // reference reports the C1008 class only inside functions reachable from
+    // the selected entry; it reports C1056 type errors and C1103 arity errors
+    // everywhere, so only this class is deferred.
+    struct DeferredNameFinding
+    {
+        FunctionDecl* function;
+        SourceLocation loc;
+        std::string message;
+    };
+    std::vector<DeferredNameFinding> deferredNameFindings_;
+    // Record it against the enclosing function, or emit now when there is no
+    // enclosing function - a file-scope initialiser or an entry-parameter
+    // default is not a body and keeps the check unconditionally.
+    void deferOrEmitNameError(const SourceLocation& loc, const std::string& message,
+                              const std::string& name = std::string());
+    void emitDeferredNameFindings();
+    void collectCallEdges(const StmtNode* stmt, std::vector<FunctionDecl*>& out) const;
+    void collectCallEdges(const ExprNode* expr, std::vector<FunctionDecl*>& out) const;
+    // Same name AND same parameter signature - never name alone, overloads.
+    bool sameSignature(const FunctionDecl* a, const FunctionDecl* b) const;
+    // The FIRST declaration in source order: the one whose return semantic the
+    // reference judges.  The DEFINITION: the one whose body is walked.
+    FunctionDecl* firstDeclarationOf(const FunctionDecl* fn) const;
+    FunctionDecl* definitionOf(const FunctionDecl* fn) const;
     void collectBufferDecl(BufferDecl* decl);
 
     void analyzeStructDecl(StructDecl* decl);

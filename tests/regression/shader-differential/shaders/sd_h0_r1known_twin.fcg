@@ -1,4 +1,4 @@
-// control-h0-r1known twin (t_96daf53b): sd_h0_r1known.fcg at fp32 output.
+// control-h0-r1known twin (half-colour-depth-control): sd_h0_r1known.fcg at fp32 output.
 //
 // TWO source differences, not one - the declaration (out float4 against out
 // half4) and the explicit (half4) cast the H0 side needs on its store.

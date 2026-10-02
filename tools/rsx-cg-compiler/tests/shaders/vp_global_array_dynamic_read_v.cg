@@ -1,0 +1,1 @@
+float3 B[3]; uniform int which; void main(float4 p : POSITION, float3 n : NORMAL, out float4 o : POSITION) { B[0] = p.xyz; B[1] = n; B[2] = p.xyz + n; o = float4(B[which], 1); }

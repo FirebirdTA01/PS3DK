@@ -96,7 +96,7 @@
  * consts a=N b=N params a=N b=N` - container bytes, fragment
  * instructions, inline constant blocks (16-byte data entries in the
  * ucode, not instructions), container parameter count - so the price
- * of a green is on the row (t_3bf3ce95 compares const promotion against
+ * of a green is on the row (general-lowering-default compares const promotion against
  * folding on exactly these).
  *
  * Poison canary: after every row past the standing controls the rig
@@ -202,7 +202,7 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define RT_W 64
 #define RT_H 64
 
-/* ---- every declared output (t_678a4dab) ----
+/* ---- every declared output (differential-manifest-judging) ----
  * A fragment program can write four colour targets and replace depth,
  * and until this increment the rig read back colour target 0 only: a
  * wrong depth export survived for as long as the compiler had existed,
@@ -226,7 +226,7 @@ SYS_PROCESS_PARAM(1001, 0x100000);
  * two-identical-frames rule and surfaces as `unstable`, which is what
  * an instrument that could not read is.  The fill is NOT excluded from
  * the paint count: the first fill was opaque black, and a shader whose
- * honest output is opaque black (sd_const_promotion under t_4584aa27,
+ * honest output is opaque black (sd_const_promotion under file-scope-const-initializer,
  * K dropped to zero) read as "painted 0" for eleven draws and would
  * have read as vacuous against a black reference.  Any 32-bit colour
  * is a colour some shader can paint; only the clear mark, which the
@@ -264,7 +264,7 @@ typedef struct {
 	                          * SAME compiler on both sides (convention: the guest
 	                          * cannot tell compilers apart): between two compilers
 	                          * an undeclared target holds two allocators' scratch
-	                          * and comparing it is meaningless (t_96daf53b). */
+	                          * and comparing it is meaningless (half-colour-depth-control). */
 	int  judge_depth_extra;
 } sd_pair;
 
@@ -275,7 +275,7 @@ typedef struct {
 
 /* VP rows bind EVERY attribute index 0..15 with data, not just the ones
  * a container's input mask names: the mask is the field a compiler can
- * get wrong (t_a68be5c3), and a rig that bound by it would be blind to
+ * get wrong (vp-input-mask-binding), and a rig that bound by it would be blind to
  * exactly that.  Index 0 is the quad (vertex_t.pos); indices 1..15 read
  * this buffer, one float4 per vertex per attribute (stride 16, so the
  * u8 stride field holds), values from attr_lane(). */
@@ -610,6 +610,34 @@ static int ensure_perm_texture(unsigned p)
 	return 1;
 }
 
+/* Cube faces (+X,-X,+Y,-Y,+Z,-Z) and volume slices have distinct
+ * blue values as well as XY/alpha ramps. Each image starts on a 128-byte
+ * boundary; a 64x64 face/slice is exactly 16 KiB with no mip levels. */
+static u32 *g_layer_base[2][24];
+static u32 g_layer_offset[2][24];
+static u32 layered_texel(u32 x, u32 y, unsigned layer, unsigned perm)
+{
+	u32 v[4] = {4u*x, 4u*(63u-y), 16u+28u*layer, 4u*y};
+	return pack_texel(v[perm_channel(perm,0)], v[perm_channel(perm,1)],
+	                  v[perm_channel(perm,2)], v[perm_channel(perm,3)]);
+}
+static int init_layered_textures(void)
+{
+	for (unsigned kind=0; kind<2; kind++) {
+		unsigned layers=kind ? 8u : 6u;
+		for (unsigned p=0; p<24; p++) {
+			u32 *pixels=(u32 *)local_align(128, layers*TEX_W*TEX_H*sizeof(u32));
+			for (unsigned z=0; z<layers; z++)
+				for (unsigned y=0; y<TEX_H; y++)
+					for (unsigned x=0; x<TEX_W; x++)
+						pixels[(z*TEX_H+y)*TEX_W+x]=layered_texel(x,y,z,p);
+			g_layer_base[kind][p]=pixels;
+			if (cellGcmAddressToOffset(pixels,&g_layer_offset[kind][p]) != 0) return 0;
+		}
+	}
+	return 1;
+}
+
 static int init_procedural_texture(void)
 {
 	/* ALL 24 permuted images are created HERE, at init, below every
@@ -619,7 +647,7 @@ static int init_procedural_texture(void)
 	 * the next row's fragment ucode was copied over the image, and its
 	 * texels at rows 4..6 became instruction words.  Measured: the
 	 * "2-3 scanline band where the reference alternates pixel to pixel"
-	 * (t_c48f48c1) and every 2..13-pixel mismatch of the gate-1 sweep
+	 * (per-sampler-pixel-discrimination) and every 2..13-pixel mismatch of the gate-1 sweep
 	 * under per-name images were the ucode of the following row, read
 	 * back through the sampler.  24 x 16 KB of local memory is the
 	 * price of never having that class again. */
@@ -627,7 +655,7 @@ static int init_procedural_texture(void)
 		if (!ensure_perm_texture(p))
 			return 0;
 	g_tex_offset = g_tex_perm_offset[0];
-	return 1;
+	return init_layered_textures();
 }
 
 /* Texture-integrity canary.  Re-reads the first TEX_CHECK_ROWS rows of
@@ -639,7 +667,7 @@ static int init_procedural_texture(void)
  * per judged row is the price.  An instrument that changes what it
  * feeds the shader must re-prove that input intact when it is sampled;
  * "the texture control was green" only proved the control's image at
- * the control's moment (2026-09-01, t_c48f48c1 retraction). */
+ * the control's moment (2026-09-01, per-sampler-pixel-discrimination retraction). */
 #define TEX_CHECK_ROWS 8
 static int textures_intact(void)
 {
@@ -658,21 +686,28 @@ static int textures_intact(void)
 					return (int)p;
 			}
 	}
+	for (unsigned kind=0; kind<2; kind++)
+		for (unsigned p=0; p<24; p++)
+			for (unsigned z=0; z<(kind ? 8u : 6u); z++)
+				for (unsigned y=0; y<TEX_CHECK_ROWS; y++)
+					for (unsigned x=0; x<TEX_W; x++)
+						if (g_layer_base[kind][p][(z*TEX_H+y)*TEX_W+x] != layered_texel(x,y,z,p))
+							return (int)(24u+24u*kind+p);
 	return -1;
 }
 
 /* Bind recipe from the cellgcm discard-blend sample (proven on the
  * emulator), with NEAREST filtering so the control's texel arithmetic
  * holds exactly. */
-static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit, unsigned perm)
+static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit, unsigned perm, u32 kind)
 {
 	CellGcmTexture t = {0};
 	t.format    = CELL_GCM_TEXTURE_A8R8G8B8
 	            | CELL_GCM_TEXTURE_LN
-	            | CELL_GCM_TEXTURE_NR;
+	            | (kind == CG_SAMPLERRECT ? CELL_GCM_TEXTURE_UN : CELL_GCM_TEXTURE_NR);
 	t.mipmap    = 1;
-	t.dimension = CELL_GCM_TEXTURE_DIMENSION_2;
-	t.cubemap   = CELL_GCM_FALSE;
+	t.dimension = kind == CG_SAMPLER3D ? CELL_GCM_TEXTURE_DIMENSION_3 : CELL_GCM_TEXTURE_DIMENSION_2;
+	t.cubemap   = kind == CG_SAMPLERCUBE ? CELL_GCM_TRUE : CELL_GCM_FALSE;
 	t.remap     = (CELL_GCM_TEXTURE_REMAP_REMAP <<  8)
 	            | (CELL_GCM_TEXTURE_REMAP_REMAP << 10)
 	            | (CELL_GCM_TEXTURE_REMAP_REMAP << 12)
@@ -683,10 +718,11 @@ static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit, unsigned 
 	            | (CELL_GCM_TEXTURE_REMAP_FROM_B <<  6);
 	t.width     = (u16)TEX_W;
 	t.height    = (u16)TEX_H;
-	t.depth     = 1;
+	t.depth     = kind == CG_SAMPLER3D ? 8 : 1;
 	t.location  = CELL_GCM_LOCATION_LOCAL;
 	t.pitch     = (u32)(TEX_W * sizeof(u32));
-	t.offset    = g_tex_perm_offset[perm];
+	t.offset    = kind == CG_SAMPLERCUBE ? g_layer_offset[0][perm] :
+	              kind == CG_SAMPLER3D ? g_layer_offset[1][perm] : g_tex_perm_offset[perm];
 	cellGcmSetTexture(ctx, (uint8_t)unit, &t);
 	cellGcmSetTextureControl(ctx, (uint8_t)unit, CELL_GCM_TRUE,
 	                         0, 0, CELL_GCM_TEXTURE_MAX_ANISO_1);
@@ -716,8 +752,8 @@ static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit, unsigned 
  * (1D, 2D, 3D, RECT, CUBE), the three array kinds 1138..1140 and the
  * generic CG_SAMPLER 1143.  NOT a range over 1138..1143: 1141 and 1142
  * are CG_VERTEXSHADER_TYPE / CG_PIXELSHADER_TYPE (review finding).
- * Any sampler kind that is not sampler2D on a texture unit is REFUSED,
- * so "unserved" is always loud (t_e230822b). */
+ * Sampler kinds other than 2D, RECT, CUBE and 3D are refused,
+ * so "unserved" is always loud (unsupported-sampler-kind-refusal). */
 static int is_sampler_type(u32 type)
 {
 	return (type >= CG_SAMPLER1D && type <= CG_SAMPLERCUBE) ||
@@ -727,11 +763,12 @@ static int is_sampler_type(u32 type)
 
 /* Walks the container's parameter table (a flat array; "leaf" is the
  * Cg API's word, there is no tree) and binds the procedural texture to
- * every sampler2D unit it declares.  Returns the count bound, or -1
+ * every supported sampler unit it declares.  Returns the count bound, or -1
  * when a REFERENCED sampler of a kind this binder does not serve, or
  * an out-of-range unit, is declared: such a pair cannot be judged, and
  * says so rather than sampling nothing.  A declared-but-unreferenced
  * sampler is skipped: refusal is use-based, not declaration-based. */
+static char g_binding_error[192];
 static int bind_container_samplers(CellGcmContextData *ctx, CGprogram fpo)
 {
 	int n = 0;
@@ -743,8 +780,13 @@ static int bind_container_samplers(CellGcmContextData *ctx, CGprogram fpo)
 		if (!cellGcmCgGetParameterReferenced(fpo, prm))
 			continue;
 		u32 res = cellGcmCgGetParameterResource(fpo, prm);
-		if (type != CG_SAMPLER2D || res < CG_TEXUNIT0 || res > CG_TEXUNIT15)
+		if ((type != CG_SAMPLER2D && type != CG_SAMPLERRECT &&
+		     type != CG_SAMPLERCUBE && type != CG_SAMPLER3D) ||
+		    res < CG_TEXUNIT0 || res > CG_TEXUNIT15) {
+			snprintf(g_binding_error,sizeof(g_binding_error),"unsupported sampler %s type=%u resource=%u",
+			         cellGcmCgGetParameterName(fpo,prm),type,res);
 			return -1;
+		}
 		/* Bound BY NAME to the unit the container reports for that
 		 * name, exactly as an application does: a container whose
 		 * ucode samples a different unit than it reports for the
@@ -753,7 +795,7 @@ static int bind_container_samplers(CellGcmContextData *ctx, CGprogram fpo)
 		unsigned perm = auto_tex_perm(name ? name : "");
 		if (!ensure_perm_texture(perm))
 			return -1;
-		bind_procedural_texture(ctx, res - CG_TEXUNIT0, perm);
+		bind_procedural_texture(ctx, res - CG_TEXUNIT0, perm, type);
 		n++;
 	}
 	return n;
@@ -780,10 +822,49 @@ static float auto_value(const char *name, unsigned k)
 	return 0.125f + (float)(x >> 9) / 16777216.0f;
 }
 
-/* Applies auto values to every float/half vector uniform the container
- * declares.  Returns the count applied, or -1 on a uniform of a kind
- * the binder does not synthesise (matrix, int, bool, fixed): the pair
+/* Applies auto values to float/half vectors and matrix row records.
+ * Returns the count applied, or -1 on malformed matrix records or a
+ * kind the binder does not synthesise (int, bool, fixed): the pair
  * is refused rather than judged against embedded defaults. */
+static unsigned matrix_rows(u32 type);
+static float auto_matrix_element(const char *name, unsigned r, unsigned c);
+static unsigned matrix_cols(u32 type)
+{
+	if (type>=CG_FLOAT1x1 && type<=CG_FLOAT4x4) return (type-CG_FLOAT1x1)%4u+1u;
+	if (type>=CG_HALF1x1 && type<=CG_HALF4x4) return (type-CG_HALF1x1)%4u+1u;
+	return 0;
+}
+/* Last bracket permits a matrix-array element M[1] to own M[1][r]. */
+static int fp_matrix_leaf(CGprogram fp,const char *name)
+{
+	const char *br=strrchr(name,'[');
+	if (!br || br==name) return 0;
+	char base[128],tail; unsigned row;
+	size_t len=(size_t)(br-name);
+	if (len>=sizeof(base) || sscanf(br,"[%u]%c",&row,&tail)!=1) return 0;
+	memcpy(base,name,len);base[len]=0;
+	CGparameter parent=cellGcmCgGetNamedParameter(fp,base);
+	return parent && row<matrix_rows(cellGcmCgGetParameterType(fp,parent));
+}
+static int apply_fp_matrix(CellGcmContextData *ctx,CGprogram fp,CGparameter parent,u32 offset)
+{
+	const char *name=cellGcmCgGetParameterName(fp,parent);
+	u32 type=cellGcmCgGetParameterType(fp,parent);
+	unsigned rows=matrix_rows(type),cols=matrix_cols(type);
+	for (unsigned r=0;r<rows;r++) {
+		char rowname[128];
+		int len=snprintf(rowname,sizeof(rowname),"%s[%u]",name,r);
+		if (len<0 || (size_t)len>=sizeof(rowname)) return -1;
+		CGparameter leaf=cellGcmCgGetNamedParameter(fp,rowname);
+		if (!leaf || cellGcmCgGetParameterVariability(fp,leaf)!=CG_UNIFORM) return -1;
+		u32 lt=cellGcmCgGetParameterType(fp,leaf);
+		if (lt!=CG_FLOAT+cols-1 && lt!=CG_HALF+cols-1) return -1;
+		float v[4]={0,0,0,0};
+		for (unsigned c=0;c<cols;c++) v[c]=auto_matrix_element(name,r,c);
+		cellGcmSetFragmentProgramParameter(ctx,fp,leaf,v,offset);
+	}
+	return 0;
+}
 static int apply_auto_uniforms(CellGcmContextData *ctx, CGprogram fpo,
                                u32 fp_offset)
 {
@@ -795,16 +876,23 @@ static int apply_auto_uniforms(CellGcmContextData *ctx, CGprogram fpo,
 		u32 type = cellGcmCgGetParameterType(fpo, prm);
 		if (is_sampler_type(type))
 			continue;   /* the sampler half's business */
+		const char *name = cellGcmCgGetParameterName(fpo, prm);
+		if (!name) { snprintf(g_binding_error,sizeof(g_binding_error),"uniform has no name, type=%u",type);return -1; }
+		if (fp_matrix_leaf(fpo,name)) continue;
+		if (matrix_rows(type)) {
+			if (apply_fp_matrix(ctx,fpo,prm,fp_offset)!=0) {
+				snprintf(g_binding_error,sizeof(g_binding_error),"invalid matrix row records for %s type=%u",name,type);return -1;
+			}
+			n++;continue;
+		}
 		unsigned words;
 		if (type >= CG_FLOAT && type <= CG_FLOAT4)
 			words = type - CG_FLOAT + 1u;
 		else if (type >= CG_HALF && type <= CG_HALF4)
 			words = type - CG_HALF + 1u;
-		else
-			return -1;
-		const char *name = cellGcmCgGetParameterName(fpo, prm);
-		if (!name)
-			return -1;
+		else {
+			snprintf(g_binding_error,sizeof(g_binding_error),"unsupported uniform %s type=%u",name,type);return -1;
+		}
 		float v[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 		for (unsigned k = 0; k < words; k++)
 			v[k] = auto_value(name, k);
@@ -1048,7 +1136,7 @@ static int canary_paints(CellGcmContextData *ctx, void *canary_container,
 	return painted_pixels(save, rt_pitch) > 0;
 }
 
-/* Cost of one container, so a green can be priced (t_3bf3ce95 compares
+/* Cost of one container, so a green can be priced (general-lowering-default compares
  * const promotion against folding on exactly these): container bytes,
  * container parameters, and the ucode split into INSTRUCTIONS and inline
  * CONST BLOCKS.  The NV40 fragment ucode is 16-byte entries, but not all
@@ -1096,7 +1184,7 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 		 * writes its output at all - it paints whatever the register
 		 * held, the 'constant where the reference varies' signature the
 		 * sensitivity fields reported for two days before the decode
-		 * named it (t_a15ec129, claude).  Decoded per instruction, not
+		 * named it (implicit-colour-output, claude).  Decoded per instruction, not
 		 * read from any mask the container declares. */
 		{
 			u32 w0 = w[i * 4 + 0];
@@ -2054,7 +2142,7 @@ static int load_manifest(void)
  * stager, and the gate lives here: a hand-edited manifest that put
  * shader X's oracle before shader Y's pair would otherwise judge Y on
  * X's premise with a confident verdict (review findings on the
- * path-pair role, t_5d8795e7 family). */
+ * path-pair role, differential-pair-isolation family). */
 
 typedef struct {
 	const char *status;      /* identical | mismatch | load-failed-a/b */
@@ -2068,7 +2156,7 @@ typedef struct {
 	u32  kil_b;
 	int  diff_channels;      /* VP rows: channels that judged mismatch */
 	char diff_channel[8];    /* VP rows: the channel key when exactly one differs */
-	/* Every declared output (t_678a4dab): which outputs the row judged
+	/* Every declared output (differential-manifest-judging): which outputs the row judged
 	 * and what each said.  Indexed like SD_OUT_*; out_maxd for depth is
 	 * in Z24 units (the zeta word's high 24 bits), colour in 8-bit
 	 * levels.  The row's max_delta stays the worst COLOUR delta and its
@@ -2087,7 +2175,7 @@ typedef struct {
 	char artifact[96];
 } sd_result;
 
-/* ---- declared outputs (t_678a4dab) ----
+/* ---- declared outputs (differential-manifest-judging) ----
  * Read from the container BYTES, the same way the bridge header's own
  * parameter walk does: header words are big-endian u32 at file offsets
  * 12 (parameterCount), 16 (parameterArray) and 20 (program); parameter
@@ -2207,6 +2295,53 @@ static long now_ms(void)
 	return (long)(tv.tv_sec * 1000L + tv.tv_usec / 1000L);
 }
 
+/* A control for one texture kind says nothing about another. Every bit
+ * is a distinct, named proving row; duplicates cannot fill missing rows. */
+static const char *const k_binder_roles[4]={"control-binder-rect","control-binder-cube","control-binder-volume","control-binder-matrix"};
+static const char *const k_binder_prefix[4]={"binder_rect_","binder_cube_","binder_volume_","binder_matrix_"};
+static const unsigned k_binder_expected[4]={3u,63u,255u,15u};
+static unsigned g_binder_pass[4],g_binder_failed;
+static int binder_group(const char *role)
+{
+	for (int i=0;i<4;i++) if (strcmp(role,k_binder_roles[i])==0) return i;
+	return -1;
+}
+static unsigned binder_ready(void)
+{
+	unsigned ready=0;
+	for (unsigned i=0;i<4;i++)
+		if (g_binder_pass[i]==k_binder_expected[i] && !(g_binder_failed&(1u<<i))) ready|=1u<<i;
+	return ready;
+}
+static unsigned binder_needed(CGprogram fp,int automatic)
+{
+	unsigned mask=0;
+	for (CGparameter p=cellGcmCgGetFirstLeafParameter(fp);p;p=cellGcmCgGetNextLeafParameter(fp,p)) {
+		u32 type=cellGcmCgGetParameterType(fp,p);
+		if (cellGcmCgGetParameterReferenced(fp,p)) {
+			if (type==CG_SAMPLERRECT) mask|=1u;
+			if (type==CG_SAMPLERCUBE) mask|=2u;
+			if (type==CG_SAMPLER3D) mask|=4u;
+		}
+		if (automatic && cellGcmCgGetParameterVariability(fp,p)==CG_UNIFORM && matrix_rows(type)) mask|=8u;
+	}
+	return mask;
+}
+static int binder_control_result(const sd_pair *p,const char *status)
+{
+	int group=binder_group(p->role);
+	if (group<0) return 0;
+	unsigned row=32;char tail;
+	size_t len=strlen(k_binder_prefix[group]);
+	if (strncmp(p->name,k_binder_prefix[group],len)!=0 ||
+	    sscanf(p->name+len,"%u%c",&row,&tail)!=1 || row>=8 ||
+	    !(k_binder_expected[group]&(1u<<row)) || strcmp(status,"identical")!=0) {
+		g_binder_failed|=1u<<group;return -1;
+	}
+	g_binder_pass[group]|=1u<<row;
+	return 1;
+}
+
 static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
                        int textures_ok, int have_tex_control,
                        int mrt_gate, int depth_gate,
@@ -2319,7 +2454,7 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	/* ... except for an instrument row that opts in (judge=): a bind
 	 * defect writes a surface the container never declared, and an
 	 * instrument that only looks where the declaration points cannot
-	 * see it (claude, t_96daf53b).  The opted-in outputs are judged
+	 * see it (claude, half-colour-depth-control).  The opted-in outputs are judged
 	 * with the ordinary comparison - identical means nothing
 	 * distinguishable was written - and the row still waits behind the
 	 * proving gates below like any other. */
@@ -2370,6 +2505,18 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 			r->status = "depth-invalid";
 			snprintf(r->diagnostic, sizeof(r->diagnostic), "skipped: a depth proving control failed");
 		}
+	}
+	/* New binder kinds may draw only after their own proving set. A
+	 * proving row bypasses its own bit, never another kind's gate. */
+	unsigned needed=binder_needed(cont_a,strcmp(p->uniform_set,"auto")==0) |
+	                binder_needed(cont_b,strcmp(set_b,"auto")==0);
+	int proving=binder_group(p->role);
+	unsigned available=binder_ready() | (proving>=0 ? (1u<<(unsigned)proving) : 0u);
+	if (strcmp(r->status,"identical")==0 && (needed & ~available)) {
+		r->status="binder-unvalidated";
+		snprintf(r->diagnostic,sizeof(r->diagnostic),
+		         "missing/red proving set: required=0x%x ready=0x%x failed=0x%x (RECT=1 CUBE=2 3D=4 matrix=8)",
+		         needed,binder_ready(),g_binder_failed);
 	}
 	/* Both sides declare DEPTH but only one exports it: the same source
 	 * compiled to two different contracts.  A red before any draw. */
@@ -2440,7 +2587,7 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		case -2:
 			r->status = side == 'a' ? "sampler-unsupported-a" : "sampler-unsupported-b";
 			snprintf(r->diagnostic, sizeof(r->diagnostic),
-			         "container declares a sampler kind or unit the binder does not serve");
+			         "%s", g_binding_error);
 			break;
 		case -3:
 			r->status = "textures-invalid";
@@ -2460,12 +2607,12 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 		case -5:
 			r->status = side == 'a' ? "uniform-unsupported-a" : "uniform-unsupported-b";
 			snprintf(r->diagnostic, sizeof(r->diagnostic),
-			         "container declares a uniform kind the auto-binder does not synthesise");
+			         "%s", g_binding_error);
 			break;
 		default:
 			/* A code this switch does not know must not borrow a
 			 * confident status it does not deserve (review finding on
-			 * the 3a commit, the t_5d8795e7 family). */
+			 * the 3a commit, the differential-pair-isolation family). */
 			r->status = "internal-error";
 			snprintf(r->diagnostic, sizeof(r->diagnostic),
 			         "render_side returned unmapped code %d on side %c", rc, side);
@@ -3070,7 +3217,7 @@ int main(int argc, const char **argv)
 
 	/* ---- four colour RTs per side (A and B), one shared zeta ----
 	 * Colour target 0 is every row's; targets 1..3 and the zeta surface
-	 * are bound only for rows whose containers declare them (t_678a4dab).
+	 * are bound only for rows whose containers declare them (differential-manifest-judging).
 	 * 64x64 A8R8G8B8, 16 KB each. */
 	u32 rt_pitch = RT_W * 4;
 	u32 rt_sz    = rt_pitch * RT_H;
@@ -3138,7 +3285,7 @@ int main(int argc, const char **argv)
 		return 2;
 	}
 	int have_tex_control = 0;
-	/* GATE EXISTENCE IS NOT GATE SUCCESS (t_678a4dab).  The MRT and
+	/* GATE EXISTENCE IS NOT GATE SUCCESS (differential-manifest-judging).  The MRT and
 	 * depth instruments are proven by a COMPLETE set of reference-
 	 * compiled controls, each of which must RUN AND PASS ahead of any row
 	 * that leans on the instrument.  Both gates start closed and nothing
@@ -3429,7 +3576,7 @@ int main(int argc, const char **argv)
 			goto post_row;
 		}
 
-		/* ---- every declared output (t_678a4dab): the instrument is
+		/* ---- every declared output (differential-manifest-judging): the instrument is
 		 * proven on reference-compiled controls before any row leans on
 		 * it.  All five are reference-compiled by the stager. ---- */
 		if (strcmp(p->role, "control-mrt-identical") == 0) {
@@ -3567,6 +3714,13 @@ int main(int argc, const char **argv)
 			       ok ? "the judge sees a depth-only difference" : "NOT AS EXPECTED - a wrong depth-only export could pass this rig unseen");
 			depth_seen |= SD_DEP_C_ONLY_MIS;
 			if (ok) depth_pass |= SD_DEP_C_ONLY_MIS; else failures++;
+			goto post_row;
+		}
+
+		if (binder_group(p->role)>=0) {
+			if (binder_control_result(p,r.status)<0) failures++;
+			printf("shader-differential: binder gate ready=0x%x failed=0x%x after %s\n",
+			       binder_ready(),g_binder_failed,p->name);
 			goto post_row;
 		}
 
@@ -3712,7 +3866,7 @@ int main(int argc, const char **argv)
 		 * above the bump heap's watermark, overwritten by the next row's
 		 * ucode) produced 2..13-pixel mismatches and a "reference
 		 * alternates pixel to pixel" band that were reported as compiler
-		 * findings (t_c48f48c1, retracted). */
+		 * findings (per-sampler-pixel-discrimination, retracted). */
 		if (i > 1) {
 			int bad = textures_intact();
 			if (bad >= 0) {

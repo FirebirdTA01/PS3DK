@@ -1,4 +1,4 @@
-// t_58e2212c: scalar division by a non-zero literal divisor follows the
+// scalar-divr-lowering: scalar division by a non-zero literal divisor follows the
 // reference fold: multiply by the reciprocal literal, not DIVR and not RCP.
 // 3.0 is deliberate: the reciprocal is inexact and the oracle emits the
 // correctly rounded 0x3eaaaaab multiplier.

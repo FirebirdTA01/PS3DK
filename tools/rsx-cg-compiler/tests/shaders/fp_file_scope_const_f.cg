@@ -1,4 +1,4 @@
-// A file-scope `const` must reach the ucode as its INITIALISER (t_4584aa27).
+// A file-scope `const` must reach the ucode as its INITIALISER (file-scope-const-initializer).
 //
 // Before the fix the initialiser was parsed and then dropped: the global was
 // promoted to a uniform-like load with no value behind it, and each backend

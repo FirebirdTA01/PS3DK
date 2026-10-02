@@ -1,0 +1,2 @@
+// A per-trip loop local does not carry into the next trip or past the loop; the outer t is read.
+float4 main(float4 p : TEXCOORD0) : COLOR { float4 t = p; for (int i = 0; i < 2; i++) { float4 t = p * 3.0; } return t; }

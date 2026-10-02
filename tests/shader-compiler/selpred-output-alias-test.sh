@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# t_652d6e42: output-pinned SelPred must not allocate its destination in
+# select-source-liveness: output-pinned SelPred must not allocate its destination in
 # the same R slot as the condition or then-value source it reads later.
 #
 # SelPred expands as:
@@ -23,13 +23,18 @@ if [[ -z "$compiler" ]]; then
 fi
 [[ -x "$compiler" ]] || fail "rsx-cg-compiler not executable: $compiler"
 
+# Prove the trace parser on safe adjacent records and genuine collisions.
+python3 "$repo_root/tests/shader-compiler/selpred-alias-parser-test.py"
+
 work="${TMPDIR:-/tmp}/ps3dk-selpred-output-alias-test.$$"
 mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
-src="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_selpred_output_alias_f.cg"
-out="$work/fp_selpred_output_alias.fpo"
-log="$work/fp_selpred_output_alias.log"
+for stem in fp_selpred_output_alias_f fp_selpred_reuse_alias_f \
+            fp_selpred_shared_scalar_f fp_selpred_scalar_assignment_f; do
+src="$repo_root/tools/rsx-cg-compiler/tests/shaders/$stem.cg"
+out="$work/$stem.fpo"
+log="$work/$stem.log"
 [[ -f "$src" ]] || fail "fixture missing: $src"
 
 (
@@ -38,78 +43,50 @@ log="$work/fp_selpred_output_alias.log"
         "$compiler" -p sce_fp_rsx --emit-container "$out" "$src"
 ) >"$log" 2>&1 || {
     tail -n 30 "$log" >&2
-    fail "fp_selpred_output_alias_f.cg did not compile"
+    fail "$stem.cg did not compile"
 }
 
 [[ -s "$out" ]] || fail "compiler exited 0 but produced no container"
 
-python3 - "$log" <<'PY'
-import re
-import sys
-
-log_path = sys.argv[1]
-alloc_re = re.compile(
-    r"alloc\[(\d+)\] op=\d+ opName=SelPred dstOut=(\d+) dstIdx=(\d+) "
-    r"dstPhys=(-?\d+) dstFp16=(\d+)"
-)
-src_re = re.compile(
-    r"\s+src([012]) kind=(\d+) idx=(\d+) phys=(-?\d+) fp16=(\d+)"
-)
-
-selpreds = []
-current = None
-with open(log_path, encoding="utf-8", errors="replace") as handle:
-    for line in handle:
-        m = alloc_re.match(line)
-        if m:
-            current = {
-                "instr": int(m.group(1)),
-                "dst_phys": int(m.group(4)),
-                "dst_fp16": int(m.group(5)) != 0,
-                "srcs": {},
-            }
-            selpreds.append(current)
-            continue
-        m = src_re.match(line)
-        if current is not None and m:
-            current["srcs"][int(m.group(1))] = {
-                "kind": int(m.group(2)),
-                "idx": int(m.group(3)),
-                "phys": int(m.group(4)),
-                "fp16": int(m.group(5)) != 0,
-            }
-
-if not selpreds:
-    raise SystemExit("FAIL: fixture compiled without any SelPred allocation trace")
-
-def slot(phys, fp16):
-    return phys >> 1 if fp16 else phys
-
-checked = 0
-for row in selpreds:
-    dst_slot = slot(row["dst_phys"], row["dst_fp16"])
-    for src_index in (0, 1):
-        src = row["srcs"].get(src_index)
-        if not src or src["kind"] != 1:
-            continue
-        if src["phys"] < 0:
-            raise SystemExit(
-                f"FAIL: SelPred at alloc[{row['instr']}] has unresolved temp src{src_index}"
-            )
-        checked += 1
-        src_slot = slot(src["phys"], src["fp16"])
-        if src_slot == dst_slot:
-            raise SystemExit(
-                f"FAIL: SelPred at alloc[{row['instr']}] writes R{dst_slot} "
-                f"but early-read src{src_index} v{src['idx']} also occupies R{src_slot}; "
-                "the expanded default MOV would clobber a later source "
-                "(t_652d6e42 regression)"
-            )
-
-if checked == 0:
-    raise SystemExit("FAIL: no temp condition/then sources were checked")
-
-print(f"selpred-output-alias-test: ok ({len(selpreds)} SelPred nodes, {checked} early temp sources)")
+# The plain-assignment control has an input then arm and uniform condition,
+# so it has no early-read temp for the alias checker to exercise.
+if [[ "$stem" != fp_selpred_scalar_assignment_f ]]; then
+    python3 "$repo_root/tests/shader-compiler/selpred_alias_check.py" "$log"
+fi
+if [[ "$stem" == fp_selpred_reuse_alias_f ]]; then
+    # Allocation alone can pass while VecInsert has already overwritten the
+    # else value. This fixture computes different values in its two arms.
+    python3 "$repo_root/tests/shader-compiler/selpred_alias_check.py" "$log" --distinct-arms
+fi
+if [[ "$stem" == fp_selpred_shared_scalar_f || "$stem" == fp_selpred_scalar_assignment_f ]]; then
+    python3 - "$out" "$repo_root/tests/shader-compiler" <<'PY'
+import pathlib, sys
+sys.path.insert(0, sys.argv[2])
+from fp_sources import instructions, ucode_words
+rows = list(instructions(ucode_words(pathlib.Path(sys.argv[1]).read_bytes())))
+if not rows:
+    raise SystemExit("FAIL: scalar fixture has no instructions")
+for words, _ in rows:
+    if ((words[0] >> 24) & 0x3f) == 1 and ((words[0] >> 9) & 0xf) == 0:
+        raise SystemExit("FAIL: scalar shared-base insert emitted an empty-mask MOV")
 PY
+fi
+done
+
+# A base copy must preserve only the declared lanes. Writing an absent z/w
+# lane here can be folded into the vertex export and change its defaults.
+src="$repo_root/tools/rsx-cg-compiler/tests/shaders/vp_shared_insert_narrow_v.cg"
+out="$work/narrow.vpo"
+timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" -p sce_vp_rsx \
+    --emit-container "$out" "$src" >"$work/narrow.log" 2>&1 || {
+    cat "$work/narrow.log" >&2
+    fail "narrow shared-base vertex fixture did not compile"
+}
+python3 "$repo_root/tests/shader-compiler/vp_words.py" "$out" >"$work/narrow.words" || fail "invalid VP container"
+grep -q 'dst=o7 mask=' "$work/narrow.words" || fail "narrow fixture has no TEXCOORD0 export"
+if grep -qE 'dst=o7 mask=[xyzw]*[zw]' "$work/narrow.words"; then
+    cat "$work/narrow.words" >&2
+    fail "float2 base copy exported undeclared z/w lanes"
+fi
 
 printf 'PASS: selpred-output-alias-test\n'

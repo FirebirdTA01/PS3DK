@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # On a shader whose lanes must DIFFER, a scalar-unit instruction may write
-# only one lane (t_249b8088).
+# only one lane (scalar-unit-lane-selection).
 #
 # RCP, RSQ, EX2, LG2, COS and SIN are computed by NV40's scalar unit: each
 # reads a single source COMPONENT and writes that one result into every
@@ -116,7 +116,7 @@ for n, op, mask in bad:
         "FAIL: instruction %d is %sR with write mask 0x%X.  The scalar unit "
         "computes ONE lane, and this shader's lanes are distinct by "
         "construction, so this stores f(one component) where several "
-        "different values belong (t_249b8088).\n" % (n, op, mask))
+        "different values belong (scalar-unit-lane-selection).\n" % (n, op, mask))
 if bad:
     raise SystemExit(1)
 

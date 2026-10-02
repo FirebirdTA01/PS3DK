@@ -41,8 +41,8 @@ SHADER
     ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
     timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
         -p sce_fp_rsx --dump-ir "$work/unsafe_select.fcg"
-) >"$work/unsafe_select.log" 2>&1 || {
-    tail -n 30 "$work/unsafe_select.log" >&2
+) >"$work/unsafe_select.log" 2>"$work/unsafe_select.err" || {
+    tail -n 30 "$work/unsafe_select.err" >&2
     fail "unsafe select witness did not compile"
 }
 
@@ -73,7 +73,7 @@ if any(r["op"] == 0x04 for r in rows):
     raise SystemExit(
         "FAIL: unsafe select lowered as an arithmetic MAD blend.  A non-finite "
         "untaken arm can poison that blend; it must use predicated MOV "
-        "(t_fe6d143b).")
+        "(unsafe-select-predication).")
 
 cc_writes = [r for r in rows if r["ccw"] == 1 and r["none"] == 1]
 pred_moves = [r for r in rows if r["op"] == 0x01 and r["cc"] == "NE"]

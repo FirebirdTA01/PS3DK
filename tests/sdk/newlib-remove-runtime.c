@@ -1,4 +1,4 @@
-/* Direct C regression for t_0d5902da; creates and removes only its own tree. */
+/* Direct C regression for newlib-remove; creates and removes only its own tree. */
 #include <errno.h>
 #include <stdio.h>
 #include <sys/stat.h>

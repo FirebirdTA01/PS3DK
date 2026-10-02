@@ -35,9 +35,14 @@ void Parser::initBuiltinTypes()
         "float2x3", "float2x4", "float3x2", "float3x4", "float4x2", "float4x3",
         "matrix",
         "half2x2", "half3x3", "half4x4",
+        "half2x3", "half2x4", "half3x2", "half3x4", "half4x2", "half4x3",
         "sampler", "sampler1D", "sampler2D", "sampler3D", "samplerCUBE", "samplerRECT",
         "isampler1D", "isampler2D", "isampler3D", "isamplerCUBE", "isamplerRECT",
-        "usampler1D", "usampler2D", "usampler3D", "usamplerCUBE", "usamplerRECT"
+        "usampler1D", "usampler2D", "usampler3D", "usamplerCUBE", "usamplerRECT",
+        // The Cg 1.x spelling of the five sampler types (texobj-sampler-alias).  The
+        // lexer maps them to the same tokens; this list is what decides
+        // whether a name is a TYPE, so it has to know them too.
+        "texobj1D", "texobj2D", "texobj3D", "texobjCUBE", "texobjRECT"
     };
 }
 
@@ -52,14 +57,39 @@ std::unique_ptr<TranslationUnit> Parser::parse()
 
     while (!isAtEnd())
     {
-        const size_t start = current;
+        // THE LOOP MUST MAKE PROGRESS.  error() records a diagnostic and sets
+        // panicMode; below the error cap it does not throw and it does not
+        // consume a token, so a declaration that fails WITHOUT advancing
+        // leaves the cursor where it was and this loop would call it again on
+        // the same token, for ever.  Only reaching config.maxErrors makes
+        // error() throw (and set 'abandoned'); the catch below then unwinds
+        // to the 'abandoned' break.
+        //
+        // That is not hypothetical: ANY unknown identifier in type position
+        // hung the compiler outright - 'uniform bogusType t', or a local
+        // 'bogusType x;' - and it hung --dump-ast too, because it never
+        // reached a back end.  95 shaders in the reference SDK sample tree
+        // never terminated, most of them over the Cg 1.x texobj2D type name
+        // (parser-progress).  A compiler that refuses is workable; one that spins
+        // cannot be worked around at all.
+        const size_t before = current;
         try
         {
-            auto decl = parseTopLevelDeclaration();
-            // A declaration that fails without consuming a token would be
-            // retried at the same token forever; skip ahead instead.
-            if (!decl && current == start)
+            std::vector<std::unique_ptr<DeclNode>> extraDeclarations;
+            auto decl = parseTopLevelDeclaration(&extraDeclarations);
+            if (!decl && current == before)
+            {
+                // No declaration and no progress: synchronize, which advances
+                // at least one token, so the diagnostic already recorded is
+                // reported instead of repeated.
                 synchronize();
+                if (static_cast<int>(errors.size()) >= config.maxErrors)
+                {
+                    error("Too many errors, stopping parse");
+                    break;
+                }
+                continue;
+            }
             if (decl)
             {
                 // Track struct/typedef names for type resolution
@@ -73,6 +103,13 @@ std::unique_ptr<TranslationUnit> Parser::parse()
                 }
 
                 unit->declarations.push_back(std::move(decl));
+
+                // The second and later declarators of `float g1, g2;`.
+                for (auto& extra : extraDeclarations)
+                {
+                    if (extra)
+                        unit->declarations.push_back(std::move(extra));
+                }
             }
         }
         catch (...)
@@ -393,6 +430,8 @@ std::shared_ptr<TypeNode> Parser::parseType()
         type = parseArrayType(type);
     }
 
+    lastParsedType_ = type;
+    ++typesParsed_;
     return type;
 }
 
@@ -426,6 +465,30 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
         type->matrixRows = 4;
         type->matrixCols = 4;
         return type;
+    }
+
+    // NON-SQUARE matrix type names (float3x4, half4x3 ...) are not lexer
+    // keywords; they arrive as identifiers listed in typeNames.  Build the
+    // matrix node from the name so they do not fall through to the struct
+    // path below as an unknown struct (rectangular-matrix-row-access / rectangular-matrices).  The
+    // reference lays an RxC matrix out as R rows of C-wide vectors.
+    if (tok.type == TokenType::IDENTIFIER && tok.lexeme.size() >= 7 &&
+        tok.lexeme.size() <= 8 && typeNames.count(tok.lexeme) > 0)
+    {
+        const std::string& n = tok.lexeme;
+        const size_t len = n.size();
+        const bool isFloat = n.compare(0, 5, "float") == 0 && len == 8;
+        const bool isHalf = n.compare(0, 4, "half") == 0 && len == 7;
+        if ((isFloat || isHalf) && n[len - 2] == 'x' &&
+            n[len - 3] >= '2' && n[len - 3] <= '4' &&
+            n[len - 1] >= '2' && n[len - 1] <= '4')
+        {
+            advance();
+            type->baseType = isFloat ? BaseType::Float : BaseType::Half;
+            type->matrixRows = n[len - 3] - '0';
+            type->matrixCols = n[len - 1] - '0';
+            return type;
+        }
     }
 
     // Check for struct type reference (user-defined type name)
@@ -512,7 +575,13 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
     type->baseType = tokenToBaseType(typeTok.type);
     if (type->baseType == BaseType::Void && typeTok.type != TokenType::KW_VOID)
     {
-        error("Expected type name (got '" + typeTok.lexeme + "')");
+        // Name the token: 'Expected type name' on its own leaves the reader
+        // hunting for which one, and the commonest cause is a type this
+        // compiler does not know yet rather than a syntax error.
+        if (tok.type == TokenType::IDENTIFIER)
+            error("unknown type name '" + tok.lexeme + "'");
+        else
+            error("Expected type name");
         return nullptr;
     }
 
@@ -741,7 +810,8 @@ BaseType Parser::tokenToBaseType(TokenType type) const
 // Declaration parsing
 // ============================================================================
 
-std::unique_ptr<DeclNode> Parser::parseTopLevelDeclaration()
+std::unique_ptr<DeclNode> Parser::parseTopLevelDeclaration(
+    std::vector<std::unique_ptr<DeclNode>>* extraDeclarations)
 {
     // Skip any stray semicolons
     while (match(TokenType::SEMICOLON))
@@ -764,10 +834,14 @@ std::unique_ptr<DeclNode> Parser::parseTopLevelDeclaration()
     }
 
     // Otherwise it's a variable or function declaration
-    return parseVariableOrFunctionDeclaration();
+    return parseVariableOrFunctionDeclaration(extraDeclarations);
 }
 
-std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
+// `struct` [name] `{` fields `}`, stopping at the closing brace.  What may
+// follow differs between the two spellings - a declarator and a semicolon
+// after a plain struct, the typedef's name after `typedef struct { ... }` -
+// so the caller owns that and this owns the body.
+std::unique_ptr<StructDecl> Parser::parseStructBody()
 {
     SourceLocation loc = currentLocation();
     consume(TokenType::KW_STRUCT, "Expected 'struct'");
@@ -784,6 +858,16 @@ std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
 
     while (!check(TokenType::RBRACE) && !isAtEnd())
     {
+        // A member may lead with a storage/interface qualifier.  The
+        // reference SDK writes both spellings inside structs - `uniform
+        // sampler2D texture_zstencil : TEXUNIT0;` in
+        // DeferredShading/shaders/light_structs.cgh and `in float4
+        // position : POSITION;` in the head_tracker shaders - and without
+        // this the member's TYPE is never reached and the parser reports
+        // "Expected type name" at the qualifier.
+        bool memberInline = false;
+        StorageQualifier memberStorage = parseStorageQualifier(&memberInline);
+
         // Parse struct member
         auto type = parseType();
         if (!type)
@@ -802,6 +886,7 @@ std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
         StructField field;
         field.name = advance().lexeme;
         field.type = type;
+        field.storage = memberStorage;
 
         // Check for array brackets after field name (e.g., float4 positions[8])
         while (check(TokenType::LBRACKET))
@@ -822,6 +907,15 @@ std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
 
     consume(TokenType::RBRACE, "Expected '}' after struct body");
 
+    return structDecl;
+}
+
+std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
+{
+    auto structDecl = parseStructBody();
+    if (!structDecl)
+        return nullptr;
+
     // Struct declarations are often followed by a semicolon or variable name
     if (check(TokenType::IDENTIFIER))
     {
@@ -836,10 +930,43 @@ std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
     return structDecl;
 }
 
-std::unique_ptr<TypedefDecl> Parser::parseTypedefDeclaration()
+std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration()
 {
     SourceLocation loc = currentLocation();
     consume(TokenType::KW_TYPEDEF, "Expected 'typedef'");
+
+    // `typedef struct { ... } Name;` - the struct is ANONYMOUS and the
+    // typedef supplies its name.  parseType() cannot see a struct BODY, so
+    // this used to fail at the brace with "Expected type name" followed by
+    // "Expected type in typedef".  It is the shape the reference SDK's own
+    // headers use (DeferredShading/shaders/light_structs.cgh declares both
+    // of its varying structs this way), and the reference compiles it.
+    //
+    // The result is returned as a StructDecl carrying the typedef's name
+    // rather than as a TypedefDecl wrapping an anonymous type: the name
+    // then registers through the DeclKind::Struct arm the same way
+    // `struct Name { ... };` does, so every later lookup of the name
+    // resolves without a second indirection.  A NAMED `typedef struct Tag
+    // { ... } Name;` keeps its tag in the body and takes the same path,
+    // which loses the tag as a separate spelling - no reference-SDK source
+    // uses the tag, and giving it one would need a real alias table.
+    if (check(TokenType::KW_STRUCT))
+    {
+        auto structDecl = parseStructBody();
+        if (!structDecl)
+        {
+            error("Expected struct body in typedef");
+            return nullptr;
+        }
+        if (!check(TokenType::IDENTIFIER))
+        {
+            error("Expected name for typedef");
+            return nullptr;
+        }
+        structDecl->name = advance().lexeme;
+        consume(TokenType::SEMICOLON, "Expected ';' after typedef");
+        return structDecl;
+    }
 
     auto type = parseType();
     if (!type)
@@ -861,12 +988,16 @@ std::unique_ptr<TypedefDecl> Parser::parseTypedefDeclaration()
     return std::make_unique<TypedefDecl>(loc, name, type);
 }
 
-std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration()
+std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration(
+    std::vector<std::unique_ptr<DeclNode>>* extraDeclarations)
 {
     SourceLocation loc = currentLocation();
 
-    // Parse storage qualifiers
-    StorageQualifier storage = parseStorageQualifier();
+    // Parse storage qualifiers.  `inline` is legal only on a function, so
+    // capture whether it was present and rule on it once the '(' or its
+    // absence has said which this declaration is.
+    bool declaredInline = false;
+    StorageQualifier storage = parseStorageQualifier(&declaredInline);
 
     // Parse Vita attributes (can appear before type)
     VitaAttributes vitaAttrs = parseVitaAttributes();
@@ -896,6 +1027,14 @@ std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration()
     }
     else
     {
+        // `inline float k = 0;` is not a function; the reference refuses it
+        // (C1005 "inline modifier only for functions"), so a program that
+        // relied on it being ignored must not silently compile here.
+        if (declaredInline)
+        {
+            error("inline modifier only for functions");
+            return nullptr;
+        }
         // Could be multiple variable declarations: int a, b, c;
         auto vars = parseMultipleVariableDeclarations(loc, type, name, storage);
         if (vars.size() == 1)
@@ -905,11 +1044,18 @@ std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration()
         }
         else
         {
-            // For multiple declarations, return the first and warn
-            // (proper handling would need a declaration list node)
+            // Every declarator is declared.  The first is returned and the
+            // rest go to the caller through extraDeclarations - returning
+            // only the first is what made `float g1, g2;` declare g1 and
+            // refuse g2 as undeclared (multiple-declarators).
             if (!vars.empty())
             {
                 vars[0]->vitaAttrs = vitaAttrs;
+                if (extraDeclarations)
+                {
+                    for (size_t i = 1; i < vars.size(); ++i)
+                        extraDeclarations->push_back(std::move(vars[i]));
+                }
                 return std::move(vars[0]);
             }
         }
@@ -959,6 +1105,7 @@ std::unique_ptr<VarDecl> Parser::parseVariableDeclaration(
 {
     auto var = std::make_unique<VarDecl>(loc, name, type);
     var->storage = storage;
+    var->isStatic = lastStorageWasStatic_;
 
     // Check for array brackets after name
     while (check(TokenType::LBRACKET))
@@ -992,8 +1139,39 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
 {
     std::vector<std::unique_ptr<VarDecl>> vars;
 
+    // A LATER declarator in the list takes the type most recently named in
+    // an earlier declarator's initializer - a constructor or a cast, nested
+    // or not, the last one in source order - not the declared type.
+    // Measured on the reference (sce-cgc 475):
+    //   float3 a = float2(1,2).xyy, b = t.rgb;          b is float2 (C7011)
+    //   float3 a = float4(float2(1,2),3,4).xyz, b = ...  b is float2
+    //   float3 a = ((float2)t.xy).xyx, b = ...           b is float2
+    //   float3 a = float3(t.xy, 1), b = ...              b stays float3
+    //   float3 a = ...; float3 b = ...;                  separate: unaffected
+    // libretro bilateral.cg relies on it to be REFUSED (its `result` becomes
+    // float2 and float4(result / norm, 1.0) is C1067 there).
+    std::shared_ptr<TypeNode> declaratorType = type;
+    // With --extension=declarator-types the list keeps the declared type,
+    // exactly the separate declarations it abbreviates (which the reference
+    // compiles).  Without it, a declarator whose type the rule CHANGES is
+    // reported with the flag that would keep it: this rule is the detector.
+    auto parseOne = [&](SourceLocation at, const std::string& name) {
+        if (declaratorType != type && type && declaratorType &&
+            declaratorType->toString() != type->toString())
+        {
+            warning("'" + name + "' takes type " + declaratorType->toString() +
+                    " from an earlier declarator in its list, as the reference "
+                    "compiler does (declared " + type->toString() + "); " +
+                    "--extension=declarator-types keeps the declared type");
+        }
+        const unsigned before = typesParsed_;
+        vars.push_back(parseVariableDeclaration(at, declaratorType, name, storage));
+        if (!config.standardDeclaratorTypes && typesParsed_ != before && lastParsedType_)
+            declaratorType = lastParsedType_;
+    };
+
     // First variable
-    vars.push_back(parseVariableDeclaration(loc, type, firstName, storage));
+    parseOne(loc, firstName);
 
     // Additional variables (comma-separated)
     while (match(TokenType::COMMA))
@@ -1006,7 +1184,7 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
 
         SourceLocation varLoc = currentLocation();
         std::string varName = advance().lexeme;
-        vars.push_back(parseVariableDeclaration(varLoc, type, varName, storage));
+        parseOne(varLoc, varName);
     }
 
     consume(TokenType::SEMICOLON, "Expected ';' after variable declaration");
@@ -1017,7 +1195,11 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
 {
     SourceLocation loc = currentLocation();
 
-    // Parse storage qualifier (in/out/inout/uniform)
+    // Parse storage qualifier (in/out/inout/uniform).  `inline` carries no
+    // meaning on a parameter and the reference accepts it in any position
+    // ("inline out", "out inline"), so it is swallowed before and after the
+    // storage word.
+    while (match(TokenType::KW_INLINE)) {}
     StorageQualifier storage = StorageQualifier::In;  // default
     if (match(TokenType::KW_IN))
         storage = StorageQualifier::In;
@@ -1029,6 +1211,7 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
         storage = StorageQualifier::Uniform;
     else if (match(TokenType::KW_CONST))
         storage = StorageQualifier::Const;
+    while (match(TokenType::KW_INLINE)) {}
 
     // Parse type
     auto type = parseType();
@@ -1060,10 +1243,19 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
         param->semantic = parseSemantic();
     }
 
-    // Check for default value
+    // Check for default value.  The parser only RECORDS it; whether it is
+    // legal depends on which function was SELECTED as the entry, which the
+    // parser does not know - see the C1114 check in SemanticAnalyzer's
+    // function collection (uniform-default-records A1).  This used to error here on any
+    // '=' in any parameter list, which refused the reference's own
+    // `uniform float4 light = {1,1,1,1}` spelling on seven reference-SDK
+    // rows and a helper's default argument on sixteen more.
     if (match(TokenType::OP_ASSIGN))
     {
-        param->defaultValue = parseAssignmentExpression();
+        if (check(TokenType::LBRACE))
+            param->defaultValue = parseBracedInitializerExpression(param->type);
+        else
+            param->defaultValue = parseAssignmentExpression();
     }
 
     return param;
@@ -1099,33 +1291,54 @@ std::vector<std::unique_ptr<ParamDecl>> Parser::parseParameterList()
     return params;
 }
 
-StorageQualifier Parser::parseStorageQualifier()
+StorageQualifier Parser::parseStorageQualifier(bool* sawInline)
 {
-    if (match(TokenType::KW_UNIFORM))
-        return StorageQualifier::Uniform;
-    if (match(TokenType::KW_IN))
-        return StorageQualifier::In;
-    if (match(TokenType::KW_OUT))
-        return StorageQualifier::Out;
-    if (match(TokenType::KW_INOUT))
-        return StorageQualifier::InOut;
-    if (match(TokenType::KW_CONST))
-    {
-        // Handle "const static" combination
+    // `inline` carries no storage meaning and may sit before or after the
+    // storage class ("inline float f", "static inline float f").  It is
+    // swallowed on either side of the storage decision and reported through
+    // `sawInline`; whether it is legal here at all is the caller's to decide.
+    // The storage decision itself is first-match, with "static const" and
+    // "const static" both canonicalized to StorageQualifier::Const so const
+    // evaluation and immutability are preserved regardless of qualifier order.
+    bool inlineSeen = false;
+    lastStorageWasStatic_ = false;
+    auto swallowInline = [&]() {
+        while (match(TokenType::KW_INLINE))
+            inlineSeen = true;
+    };
+    swallowInline();
+    StorageQualifier result = [&]() -> StorageQualifier {
+        if (match(TokenType::KW_UNIFORM))
+            return StorageQualifier::Uniform;
+        if (match(TokenType::KW_IN))
+            return StorageQualifier::In;
+        if (match(TokenType::KW_OUT))
+            return StorageQualifier::Out;
+        if (match(TokenType::KW_INOUT))
+            return StorageQualifier::InOut;
+        if (match(TokenType::KW_CONST))
+        {
+            // Handle "const static" combination: treat as Const
+            if (match(TokenType::KW_STATIC))
+                lastStorageWasStatic_ = true;
+            return StorageQualifier::Const;
+        }
         if (match(TokenType::KW_STATIC))
-            return StorageQualifier::Static;  // static const -> treat as static
-        return StorageQualifier::Const;
-    }
-    if (match(TokenType::KW_STATIC))
-    {
-        // Handle "static const" combination
-        match(TokenType::KW_CONST);  // consume const if present
-        return StorageQualifier::Static;
-    }
-    if (match(TokenType::KW_EXTERN))
-        return StorageQualifier::Extern;
-
-    return StorageQualifier::None;
+        {
+            lastStorageWasStatic_ = true;
+            // Handle "static const" combination: treat as Const
+            if (match(TokenType::KW_CONST))
+                return StorageQualifier::Const;
+            return StorageQualifier::Static;
+        }
+        if (match(TokenType::KW_EXTERN))
+            return StorageQualifier::Extern;
+        return StorageQualifier::None;
+    }();
+    swallowInline();
+    if (sawInline)
+        *sawInline = inlineSeen;
+    return result;
 }
 
 Semantic Parser::parseSemantic()
@@ -1323,6 +1536,43 @@ std::unique_ptr<StmtNode> Parser::parseStatement()
     if (match(TokenType::SEMICOLON))
     {
         return std::make_unique<EmptyStmt>(currentLocation());
+    }
+
+    // Flow control statement attributes: [branch] or [flatten] before 'if'
+    while (check(TokenType::LBRACKET))
+    {
+        SourceLocation attrLoc = currentLocation();
+        advance(); // consume '['
+        if (!check(TokenType::IDENTIFIER))
+        {
+            error(attrLoc, "expected attribute name after '['");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        std::string attrName = advance().lexeme;
+        if (attrName != "branch" && attrName != "flatten")
+        {
+            error(attrLoc, "unknown attribute '" + attrName + "'");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        if (!match(TokenType::RBRACKET))
+        {
+            error(attrLoc, "expected ']' after attribute '" + attrName + "'");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        if (!check(TokenType::KW_IF))
+        {
+            error(attrLoc, "attribute '" + attrName + "' is only supported on if statements");
+            return nullptr;
+        }
     }
 
     // Block
@@ -1552,7 +1802,8 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
     bool hasStorageQualifier = false;
     size_t savedPos = current;
 
-    StorageQualifier storage = parseStorageQualifier();
+    bool declaredInline = false;
+    StorageQualifier storage = parseStorageQualifier(&declaredInline);
     if (storage != StorageQualifier::None)
     {
         hasStorageQualifier = true;
@@ -1571,13 +1822,28 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
         auto type = parseType();
         if (type && check(TokenType::IDENTIFIER))
         {
+            // `inline` is legal only on a function, and there are no local
+            // functions here - a local declaration carrying it is the same
+            // C1005 the file-scope path refuses.
+            if (declaredInline)
+            {
+                error("inline modifier only for functions");
+                return nullptr;
+            }
             std::string name = advance().lexeme;
             auto vars = parseMultipleVariableDeclarations(loc, type, name, storage);
 
             if (!vars.empty())
             {
                 vars[0]->vitaAttrs = vitaAttrs;
-                return std::make_unique<DeclStmt>(loc, std::move(vars[0]));
+                // ALL of them.  Taking vars[0] alone declared only the first
+                // name of `float a, b;`, and using the second was then
+                // refused as undeclared (multiple-declarators).
+                std::vector<std::unique_ptr<DeclNode>> decls;
+                decls.reserve(vars.size());
+                for (auto& var : vars)
+                    decls.push_back(std::move(var));
+                return std::make_unique<DeclStmt>(loc, std::move(decls));
             }
         }
         else
@@ -1598,12 +1864,39 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
         current = savedPos;
     }
 
-    // Two identifiers in a row cannot start an expression: the first is a
-    // type name nobody declared.
-    if (check(TokenType::IDENTIFIER) && peek(1).type == TokenType::IDENTIFIER)
+    // A DECLARATION ATTEMPT WITH AN UNKNOWN TYPE.  `bogusType q;` is not
+    // an expression, but it reached expression parsing because the
+    // declaration path above is only taken when the first token is a
+    // KNOWN type name.  The result was five diagnostics for one mistake:
+    // the first pointing at the identifier AFTER the unknown type, and a
+    // later one inventing `unknown type name 'o'` about a name that is
+    // declared - the wrong line about the wrong identifier.
+    //
+    // Two adjacent identifiers are never a valid expression in Cg, so the
+    // shape is unambiguous: name the unknown TYPE at its own position,
+    // then let the caller's recovery consume to the ';' so a second, real
+    // mistake later in the body is still reported (parser-error-cascade).  The
+    // parameter path has reported it this way since parser-progress; this is
+    // the local path being made to agree with it.
+    if (check(TokenType::IDENTIFIER) &&
+        peek(1).type == TokenType::IDENTIFIER)
     {
-        error("Unknown type name '" + peek().lexeme + "'");
-        throw std::runtime_error("unknown type name");
+        const Token& typeToken = peek();
+        error(tokenLocation(typeToken),
+              "unknown type name '" + typeToken.lexeme + "'");
+        // CONSUME THE FAILED DECLARATION.  Returning without advancing
+        // leaves the statement loop on the same token, which is the same
+        // no-progress shape parser-progress fixed at the top level - here it
+        // exhausted memory rather than hanging, because the shader tests
+        // run under a virtual-memory limit.  Stop at the ';' or at a brace
+        // so the rest of the body is still parsed and its own mistakes are
+        // still reported.
+        while (!isAtEnd() && !check(TokenType::SEMICOLON) &&
+               !check(TokenType::LBRACE) && !check(TokenType::RBRACE))
+            advance();
+        if (check(TokenType::SEMICOLON))
+            advance();
+        return nullptr;
     }
 
     // Parse as expression statement
@@ -1870,6 +2163,12 @@ std::unique_ptr<ExprNode> Parser::parseMultiplicativeExpression()
 
 std::unique_ptr<ExprNode> Parser::parseUnaryExpression()
 {
+    // Unary plus is a no-op
+    if (match(TokenType::OP_PLUS))
+    {
+        return parseUnaryExpression();
+    }
+
     // Prefix operators
     if (match({TokenType::OP_MINUS, TokenType::OP_LOGICAL_NOT, TokenType::OP_BITWISE_NOT,
                TokenType::OP_INCREMENT, TokenType::OP_DECREMENT}))
@@ -2106,6 +2405,7 @@ std::unique_ptr<ExprNode> Parser::parseBracedInitializerExpression(std::shared_p
 {
     SourceLocation loc = currentLocation();
     auto ctor = std::make_unique<ConstructorExpr>(loc, type);
+    ctor->bracedInitializer = true;
 
     consume(TokenType::LBRACE, "Expected '{' in initializer");
 
@@ -2203,7 +2503,8 @@ std::unique_ptr<LiteralExpr> Parser::parseNumberLiteral()
 std::unique_ptr<TranslationUnit> parseShaderSource(
     const std::string& source,
     const std::string& filename,
-    std::vector<ParseError>* outErrors)
+    std::vector<ParseError>* outErrors,
+    const ParserConfig& config)
 {
     Lexer lexer(source, filename);
     std::vector<Token> tokens;
@@ -2223,6 +2524,7 @@ std::unique_ptr<TranslationUnit> parseShaderSource(
     }
 
     Parser parser(tokens, filename);
+    parser.setConfig(config);
     auto unit = parser.parse();
 
     if (outErrors)

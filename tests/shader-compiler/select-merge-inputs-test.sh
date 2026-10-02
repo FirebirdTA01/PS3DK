@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A vector-valued if/else merge of two RAW INPUTS keeps its width (t_7b20ffdc).
+# A vector-valued if/else merge of two RAW INPUTS keeps its width (vector-input-select-lanes).
 #
 # `float4 r; if (c.x > k) r = c; else r = d; o = r;` with c and d function
 # parameters.  The IR builder typed that merge's Select from the
@@ -14,15 +14,26 @@
 # mask.  In this fixture the only MOVs that read an input are the two
 # arm moves (the comparison is an SGT, not a MOV), so the rule is exact
 # here and NOT a general one - a shader that legitimately moves one lane
-# of an input would violate it.  The DEFAULT path refuses this shape
-# outright ("Select: two varying branches not yet supported", measured on
-# f021170 and after the fix alike) - an honest refusal, accepted here by
-# its message; should the matcher ever learn the shape, its words are
-# held to the same full-mask rule.
+# of an input would violate it.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+# A refusal is exit 1 EXACTLY.  124 is a timeout and >= 128 is a signal, and
+# either one satisfies "did not exit 0" while meaning the compiler never
+# reached the decision this guard is about - so a compiler that CRASHED on a
+# shader it should have refused BY NAME was reported as correct here.  Call
+# this wherever a compile's status is captured, whichever way that compile is
+# expected to go: it is silent for 0 and for 1 and names anything else.
+# Measured: half the guards in this suite that assert a refusal could not tell
+# one from a SIGABRT (crash-versus-refusal-status).
+refusal_status() {   # $1 rc, $2 what was compiled
+    [[ "$1" -eq 124 ]] && fail "$2: the compiler timed out; a timeout is not a refusal"
+    [[ "$1" -ge 128 ]] && fail "$2: the compiler died on signal $(( $1 - 128 )); a crash is not a refusal"
+    [[ "$1" -eq 0 || "$1" -eq 1 ]] || fail "$2: the compiler exited $1; a refusal is exit 1"
+    return 0
+}
 if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
 fi
@@ -41,6 +52,7 @@ compile() {   # $1 flags, $2 tag
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx ${1:+$1} "$shaders/$stem.cg"
     ) >"$work/$2.log" 2>&1 || rc=$?
+    refusal_status "$rc" "$2"
     [[ "$rc" -eq 124 ]] && fail "$2 timed out"
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$2.log" >&2
@@ -49,24 +61,7 @@ compile() {   # $1 flags, $2 tag
 }
 compile "" "${stem}_general"
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-# Legacy path: a refusal is accepted only with the measured message; a
-# compile is held to the same rule as the general path.
 logs=("$work/${stem}_general.log")
-rc=0
-(
-    ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
-    timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_fp_rsx --legacy-lowering "$shaders/$stem.cg"
-) >"$work/${stem}_legacy.log" 2>&1 || rc=$?
-[[ "$rc" -eq 124 ]] && fail "${stem}_legacy timed out"
-if [[ "$rc" -eq 0 ]]; then
-    logs+=("$work/${stem}_legacy.log")
-elif ! grep -q "Select: two varying branches not yet supported" "$work/${stem}_legacy.log"; then
-    tail -n 20 "$work/${stem}_legacy.log" >&2
-    fail "${stem}_legacy failed for a reason other than the measured refusal"
-fi
 
 python3 - "${logs[@]}" <<'PY'
 import re
@@ -129,11 +124,7 @@ if bad:
         "FAIL: this fixture merges two float4 INPUTS, and the reference "
         "writes all four lanes on every value move of that merge; a MOV "
         "from an input with a partial mask here is the merge collapsing "
-        "to one lane (t_7b20ffdc).  Offending instructions:\n" + lines
+        "to one lane (vector-input-select-lanes).  Offending instructions:\n" + lines
     )
 PY
-if [[ ${#logs[@]} -eq 2 ]]; then
-    printf 'select-merge-inputs-test: ok (full-width merge on both paths)\n'
-else
-    printf 'select-merge-inputs-test: ok (full-width merge on the general path; the legacy path refuses the shape as measured)\n'
-fi
+printf 'select-merge-inputs-test: ok (full-width merge on the general path)\n'

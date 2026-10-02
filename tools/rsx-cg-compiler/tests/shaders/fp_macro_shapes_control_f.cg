@@ -1,0 +1,7 @@
+// Control for fp_macro_shapes_f, expanded by hand.
+void main(uniform sampler2D decal, float2 uv : TEXCOORD0, out float4 o : COLOR)
+{
+    float v1 = ((uv.x) * 0.5);
+    float scale = v1;
+    o = tex2D(decal, uv + float2((0.5),(0.25))) + tex2D(decal, uv) * scale;
+}
