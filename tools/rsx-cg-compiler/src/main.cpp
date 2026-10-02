@@ -434,6 +434,37 @@ int main(int argc, char** argv)
         if (!changed) break;
     }
 
+    // C6014 (t_52640169): a vertex program must write POSITION/HPOS on some
+    // path.  Measured on the reference: refused when the program writes only
+    // other outputs, or declares `out float4 o : POSITION` and never assigns
+    // it; accepted for a write on one path, a partial write, or an HPOS
+    // struct member.  We accepted all three refused shapes.
+    if (stage == ShaderStage::Vertex)
+    {
+        for (const auto& fn : irModule->functions)
+        {
+            if (!fn->isEntryPoint) continue;
+            bool positionWritten = false;
+            for (const auto& block : fn->blocks)
+            {
+                if (!block) continue;
+                for (const auto& inst : block->instructions)
+                {
+                    if (!inst || inst->op != IROp::StoreOutput || inst->operands.empty()) continue;
+                    std::string sem = inst->semanticName;
+                    for (char& c : sem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    if (sem == "POSITION" || sem == "HPOS") positionWritten = true;
+                }
+            }
+            if (!positionWritten)
+            {
+                std::fprintf(stderr, "%s: error C6014: Required output 'HPOS' not written\n",
+                             ctx.inputFile.c_str());
+                return 1;
+            }
+        }
+    }
+
     // Run NV40-specific IR transforms before back-end lowering.
     //
     // CF-2 first (general-path-discard): give every `discard` the path condition
