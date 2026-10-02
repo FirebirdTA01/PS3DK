@@ -1,10 +1,11 @@
 # shader-differential must-reject list (frontend acceptance as a rig role, 2026-09-02).
-# fields: case|reference|ours-legacy|ours-general|note   (legacy = the retired
-#   matcher under --legacy-lowering; general = the default since the flip)
+# fields: case|reference|ours-general|note
+# Historical legacy expectations were retired with the removed matcher;
+# every general/reference expectation is preserved.
 #   reference    = what the reference compiler does: accept | reject (measured
 #                  2026-09-01 18:50, native; its diagnostic TEXT stays outside
 #                  the tree - only the verdict is recorded here)
-#   ours-<path>  = what OUR compiler must do on that lowering path:
+#   ours-general  = what OUR compiler must do on that lowering path:
 #                  accept          compiles a container
 #                  frontend-reject refuses with a diagnostic that NAMES THE
 #                                  SOURCE FILE (file:line:col) - the
@@ -25,30 +26,30 @@
 #                  accept/backend-refuse  either (the default matcher's
 #                                  coverage is not what this list judges;
 #                                  alternatives use '/', '|' separates columns)
-# The gate PASSES a row when the reference's verdict and both of ours read
+# The gate PASSES a row when the reference's verdict and ours read
 # as listed.  A row whose listed value is a KNOWN DIVERGENCE from the
 # reference names its board item in the note; the gate still holds ours to
 # the listed value, so the divergence closing (or widening) is a move.
 # Cases: written by the vita-cg-compiler team (their commit c5271ba), twenty
 # fragment-profile shaders; the expected verdict is in each filename, and two
 # of those expectations are wrong about Cg (all references accept them).
-accept_array_uniform|accept|accept/backend-refuse|accept|
-accept_const_promotion|accept|accept/backend-refuse|accept|
-accept_for_loop|accept|accept/backend-refuse|accept|
-accept_half_overload|accept|accept/backend-refuse|accept|half-precision-lowering CLOSED 2026-09-02 (ba2e820 + bbb6a0a): the general path lowers ftoh (half precision) and compiles this, as it does th06_add/th06_mod; legacy still refuses the overload
-accept_int_literal_in_float|accept|accept/backend-refuse|accept|
-accept_matrix_constructor|accept|backend-refuse|accept|computed-matrix-values: the general path lowers matconstruct plus fragment matvecmul; legacy still refuses
-accept_nested_swizzle|accept|accept/backend-refuse|accept|
-accept_preprocessor_macro|accept|accept/backend-refuse|accept|
-accept_struct_param|accept|accept/backend-refuse|accept|
-accept_ternary|accept|accept/backend-refuse|accept|
-reject_assign_to_literal|reject|frontend-reject|frontend-reject|
-reject_duplicate_semantic|accept|accept/backend-refuse|accept|the filename's expectation is wrong about Cg: every reference accepts two params on one semantic
-reject_missing_return|reject|backend-refuse|backend-refuse|SHARED GAP: our frontend accepts a missing return and the backend refuses the undef (vector-index-bounds family); the reference rejects at the frontend
-reject_narrowing_init|reject|frontend-reject|frontend-reject|
-reject_swizzle_out_of_range|reject|frontend-reject|frontend-reject|
-reject_undeclared_identifier|reject|frontend-reject|frontend-reject|
-reject_unknown_function|reject|frontend-reject|frontend-reject|
-reject_vector_index_out_of_range|reject|backend-refuse|backend-refuse|vector-index-bounds CLOSED: the compiler refuses out-of-range vector subscripts with a bounds diagnostic and leaves no container
-reject_write_to_uniform|accept|accept/backend-refuse|accept|the filename's expectation is wrong about Cg: every reference accepts assignment to a uniform parameter
-reject_wrong_arity|reject|frontend-reject|frontend-reject|
+accept_array_uniform|accept|accept|
+accept_const_promotion|accept|accept|
+accept_for_loop|accept|accept|
+accept_half_overload|accept|accept|half-precision-lowering CLOSED 2026-09-02 (ba2e820 + bbb6a0a): the general path lowers ftoh (half precision) and compiles this, as it does th06_add/th06_mod; the removed matcher refused the overload
+accept_int_literal_in_float|accept|accept|
+accept_matrix_constructor|accept|accept|computed-matrix-values: the general path lowers matconstruct plus fragment matvecmul; the removed matcher refused
+accept_nested_swizzle|accept|accept|
+accept_preprocessor_macro|accept|accept|
+accept_struct_param|accept|accept|
+accept_ternary|accept|accept|
+reject_assign_to_literal|reject|frontend-reject|
+reject_duplicate_semantic|accept|accept|the filename's expectation is wrong about Cg: every reference accepts two params on one semantic
+reject_missing_return|reject|backend-refuse|SHARED GAP: our frontend accepts a missing return and the backend refuses the undef (vector-index-bounds family); the reference rejects at the frontend
+reject_narrowing_init|reject|frontend-reject|
+reject_swizzle_out_of_range|reject|frontend-reject|
+reject_undeclared_identifier|reject|frontend-reject|
+reject_unknown_function|reject|frontend-reject|
+reject_vector_index_out_of_range|reject|frontend-reject|vector-index-bounds CLOSED in 2b7e1b66: semantic analysis refuses out-of-range vector subscripts with a source-located bounds diagnostic and leaves no container
+reject_write_to_uniform|accept|accept|the filename's expectation is wrong about Cg: every reference accepts assignment to a uniform parameter
+reject_wrong_arity|reject|frontend-reject|

@@ -166,7 +166,7 @@ try {
             [IO.File]::WriteAllBytes($args[$index+1],[byte[]]@(1,2,3,4))
             $global:LASTEXITCODE=0
         }
-        $useWsl=$false; $Rsxcgc='TestIdentityCompiler'; $extraFlags=@('--legacy-lowering')
+        $useWsl=$false; $Rsxcgc='TestIdentityCompiler'; $extraFlags=@('--general-lowering')
         $dst=Join-Path $work 'test.fpo'
         $null=Compile-Shader $src $dst @() -Absolute -NoExtraFlags
         $inputs=$script:containerCompileInputs[[IO.Path]::GetFullPath($dst)]
@@ -177,7 +177,7 @@ try {
         Assert (($inputs.Flags -join ',') -ceq '--general-lowering,-O0,-p,sce_fp_rsx')
         Assert (($script:seenCompilerArgs[0..3] -join ',') -ceq '--general-lowering,-O0,-p,sce_fp_rsx')
         $null=Compile-Shader $src $dst @() -Absolute
-        Assert (($script:containerCompileInputs[[IO.Path]::GetFullPath($dst)].Flags -join ',') -ceq '--legacy-lowering,-p,sce_fp_rsx')
+        Assert (($script:containerCompileInputs[[IO.Path]::GetFullPath($dst)].Flags -join ',') -ceq '--general-lowering,-p,sce_fp_rsx')
     }
     Check 'refused migrated corpus input cannot disappear from the identity gate' {
         $tokens=$null; $errors=$null
