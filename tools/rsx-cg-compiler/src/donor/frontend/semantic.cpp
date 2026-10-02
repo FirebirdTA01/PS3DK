@@ -2349,6 +2349,19 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
         {
             std::string fullName = prefix + "." + field.name;
             CgType fieldType = resolveType(field.type.get());
+            // A member whose TEXCOORD was INFERRED for an earlier input of the
+            // same struct type: the inference lives on the shared struct
+            // field, so this second input would bind the same TEXn.  The
+            // reference binds each instance separately (struct S { float2
+            // uv; }; main(S a, S b): a.uv TEX0, b.uv TEX1 - review: codex);
+            // refused by name until bindings are per instance.
+            if (field.semantic.inferred && !isOut && !flatteningUniformParam &&
+                shaderInfo_.stage == ShaderStage::Fragment && field.storage != StorageQualifier::Uniform)
+            {
+                error(entryPoint->loc, "a struct with semantic-less members is used by two "
+                      "fragment inputs: '" + fullName + "' (implicit-varying-struct-reuse)");
+                return;
+            }
             if (!field.semantic.isEmpty())
             {
                 if (fieldType.isStruct())
@@ -2390,12 +2403,6 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
                     // the struct's own field, so every reader of the member
                     // sees it; a second input of the same struct type would
                     // see it already inferred and is refused by name.
-                    if (field.semantic.inferred)
-                    {
-                        error(entryPoint->loc, "a struct with semantic-less members is used by two "
-                              "fragment inputs: '" + fullName + "' (implicit-varying-struct-reuse)");
-                        return;
-                    }
                     while (usedTexCoordIndices.count(nextTexCoordIndex))
                         ++nextTexCoordIndex;
                     const int index = nextTexCoordIndex++;

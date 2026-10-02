@@ -66,6 +66,18 @@ float4 main(in d v, float z) : COLOR { return float4(v.a, v.b, z); }
 }
 
 
+# The same semantic-less struct type for two inputs (or two nested members):
+# the reference binds each instance separately (a.uv TEX0, b.uv TEX1); here
+# the inferred binding lives on the shared struct type, so it refuses by
+# name rather than binding both to TEX0 (review: codex).
+REUSE = {
+    'two_inputs_same_struct': 'struct S { float2 uv; };' + chr(10) +
+        'float4 main(S a, S b) : COLOR { return float4(a.uv, b.uv); }' + chr(10),
+    'two_nested_same_struct': 'struct S { float2 uv; };' + chr(10) + 'struct O { S p; S q; };' + chr(10) +
+        'float4 main(O o) : COLOR { return float4(o.p.uv, o.q.uv); }' + chr(10),
+}
+
+
 def compile_one(compiler, work, name, text):
     src, dst = work / (name + '.cg'), work / (name + '.bin')
     src.write_text(text)
@@ -115,6 +127,12 @@ def main():
                 failures.append('%s value %s, want %s' % (name, fp_eval.evaluate(blob, INPUTS), value))
                 notes.append('WRONG VALUE')
             print('  %-24s %s' % (name, ', '.join(notes) or 'as measured'))
+        for name, text in REUSE.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text)
+            ok = rc == 1 and not blob and 'implicit-varying-struct-reuse' in err
+            print('  %-24s %s' % (name, 'refused by name' if ok else 'NOT refused by name (rc %d)' % rc))
+            if not ok:
+                failures.append('%s: expected the named reuse refusal, got rc %d' % (name, rc))
     for f in failures:
         print('FAIL:', f)
     print('implicit-varying: %s' % ('PASS' if not failures else 'FAIL (%d)' % len(failures)))
