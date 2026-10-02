@@ -736,6 +736,13 @@ bool CommonSubexprElimination::InstrEqual::operator()(const IRInstruction* a,
     // Compare semanticName/Index for LoadAttribute/StoreOutput instructions
     if (a->semanticName != b->semanticName) return false;
     if (a->semanticIndex != b->semanticIndex) return false;
+    // An implicit TEXCOORD index is provisional until bindImplicitTexCoords
+    // runs after this pass: two instances of one struct share it (it lives
+    // on the struct field) but are different varyings (t_3289f98f), so an
+    // implicit load is equal only to a load of the same instance and member.
+    if (a->inferredSemantic != b->inferredSemantic) return false;
+    if (a->inferredSemantic &&
+        (a->structParamName != b->structParamName || a->fieldName != b->fieldName)) return false;
 
     for (size_t i = 0; i < a->operands.size(); ++i)
     {

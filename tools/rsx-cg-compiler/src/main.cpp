@@ -432,16 +432,6 @@ int main(int argc, char** argv)
         if (!changed) break;
     }
 
-    // Implicit TEXCOORDs go to the fragment inputs the program still reads
-    // (t_3289f98f): decided here, after dead-code elimination.
-    if (stage == ShaderStage::Fragment)
-    {
-        for (auto& fn : irModule->functions)
-            if (fn->isEntryPoint)
-                rsx_cg::bindImplicitTexCoords(*fn, semantic.shaderInfo().implicitTexCoordOrder,
-                                              semantic.shaderInfo().explicitTexCoords);
-    }
-
     // Run NV40-specific IR transforms before back-end lowering.
     //
     // CF-2 first (general-path-discard): give every `discard` the path condition
@@ -464,6 +454,25 @@ int main(int argc, char** argv)
     // Then: collapse simple if-else diamonds into Select so the
     // existing FP emit path handles them without IF/ELSE/ENDIF.
     nv40::convertSimpleIfElse(*irModule);
+
+    // Implicit TEXCOORDs go to the fragment inputs the program still reads
+    // (t_3289f98f), decided once the if/else diamonds are selects: a select
+    // on a constant condition is folded first and dead code dropped, so an
+    // input read only on a constant-false path counts as unread (measured).
+    if (stage == ShaderStage::Fragment)
+    {
+        for (auto& fn : irModule->functions)
+        {
+            if (!fn->isEntryPoint) continue;
+            if (rsx_cg::foldConstantSelects(*fn))
+            {
+                DeadCodeElimination dce(!ctx.alphakillSamplers.empty());
+                for (int i = 0; i < 8 && dce.runOnFunction(*fn); ++i) {}
+            }
+            rsx_cg::bindImplicitTexCoords(*fn, semantic.shaderInfo().implicitTexCoordOrder,
+                                          semantic.shaderInfo().explicitTexCoords);
+        }
+    }
 
     if (dumpIr)
     {

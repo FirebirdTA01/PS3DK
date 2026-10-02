@@ -36,6 +36,13 @@ TEX_UNITS = {'explicit_unit_member': {0, 3}, 'register_member': {5},
              'unqualified_sampler_member': {0, 1}}
 # Not flattened yet: a sampler inside a NESTED struct member (the reference
 # accepts it as P.I.tex on TEXUNIT0) must refuse rather than guess a unit.
+# A varying struct NESTED in a varying struct gets no member loads at all
+# (pre-existing; card t_8370d759).  The reference accepts these, so they must
+# at least refuse (exit 1, no container) until it is implemented.
+NESTED_REFUSE_INSTANCES = {
+    'two_nested_same_struct': 'struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.p.uv, o.q.uv); }\n',
+    'nested_unread': 'struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.q.uv, 0, 1); }\n',
+}
 NESTED_REFUSE = {'nested_sampler_member': """struct inner { sampler2D tex; }; struct prev { float2 tc; inner I; };
 float4 main(float4 uv : TEXCOORD0, prev P) : COLOR { return tex2D(P.I.tex, uv.xy); }
 """}
@@ -111,14 +118,22 @@ READSET = {
                         {('b.uv', VAR, TC(0), 1, 1), ('c.uv', VAR, TC(1), 2, 1)}, [0.5, 0.25, 0.75, 0.125]),
     'two_inputs_same_struct': ('struct S { float2 uv; }; float4 main(S a, S b) : COLOR { return float4(a.uv, b.uv); }\n',
                                {('a.uv', VAR, TC(0), 0, 1), ('b.uv', VAR, TC(1), 1, 1)}, [0.5, 0.25, 0.75, 0.125]),
-    'two_nested_same_struct': ('struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.p.uv, o.q.uv); }\n',
-                               {('o.p.uv', VAR, TC(0), 0, 1), ('o.q.uv', VAR, TC(1), 0, 1)}, [0.5, 0.25, 0.75, 0.125]),
+    # read only on a constant-false path = unread (review: codex; measured)
+    'const_false_branch': ('float4 main(float2 u, float2 k) : COLOR { float4 r = float4(k, 0, 1); if (false) r = float4(u, 0, 1); return r; }\n',
+                           {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    'const_false_ternary': ('float4 main(float2 u, float2 k) : COLOR { return false ? float4(u, 0, 1) : float4(k, 0, 1); }\n',
+                            {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    'static_false_branch': ('static const bool B = false; float4 main(float2 u, float2 k) : COLOR { float4 r = float4(k, 0, 1); if (B) r = float4(u, 0, 1); return r; }\n',
+                            {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    # an UNREAD explicit TEXCOORD0 still reserves its index (measured)
+    'unread_explicit_tc0': ('float4 main(float2 e : TEXCOORD0, float2 k) : COLOR { return float4(k, 0, 1); }\n',
+                            {('e', VAR, TC(0), 0, 0), ('k', VAR, TC(1), 1, 1)}, [0.75, 0.125, 0.0, 1.0]),
+    'unread_explicit_member': ('struct d { float2 e : TEXCOORD0; float2 k; }; float4 main(d v) : COLOR { return float4(v.k, 0, 1); }\n',
+                               {('v.k', VAR, TC(1), 0, 1)}, [0.75, 0.125, 0.0, 1.0]),
     'dead_read': ('float4 main(float2 u, float2 k) : COLOR { float2 t = u * 2; return float4(k, 0, 1); }\n',
                   {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     'explicit_reserved': ('float4 main(float2 u, float2 k, float2 e : TEXCOORD0) : COLOR { return float4(k, e); }\n',
                           {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(1), 1, 1), ('e', VAR, TC(0), 2, 1)}, [0.75, 0.125, 0.5, 0.25]),
-    'nested_unread': ('struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.q.uv, 0, 1); }\n',
-                      {('o.q.uv', VAR, TC(0), 0, 1)}, [0.5, 0.25, 0.0, 1.0]),
 }
 
 
@@ -158,6 +173,8 @@ def main():
                 continue
             got = {(r['name'], r['variability'], r['resource'], r['paramno'], r['referenced'])
                    for r in Container(blob).records if r['name'] != 'main' and not r['name'].startswith('main.')}
+            got = {g for g in got if g[4] or '.' not in g[0]}   # unread-member record gap (t_be142e5b)
+            want = {w for w in want if w[4] or '.' not in w[0]}
             notes = []
             if got != want:
                 failures.append('%s records %s, want %s' % (name, sorted(got), sorted(want)))
@@ -176,6 +193,12 @@ def main():
                     failures.append('%s fetches units %s, want %s' % (name, sorted(units), sorted(TEX_UNITS[name])))
                     notes.append('WRONG UNIT')
             print('  %-24s %s' % (name, ', '.join(notes) or 'as measured'))
+        for name, text in NESTED_REFUSE_INSTANCES.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text)
+            ok = rc == 1 and not blob
+            print('  %-24s %s' % (name, 'refused (rc 1)' if ok else 'NOT refused (rc %d)' % rc))
+            if not ok:
+                failures.append('%s: a nested varying struct must refuse until it is implemented' % name)
         for name, text in NESTED_REFUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
             ok = rc == 1 and not blob

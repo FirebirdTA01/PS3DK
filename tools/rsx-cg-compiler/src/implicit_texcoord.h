@@ -22,11 +22,55 @@
 #include "ir.h"
 
 #include <map>
+#include <variant>
 #include <set>
 #include <string>
 #include <vector>
 
 namespace rsx_cg {
+
+// A select on a constant condition is its chosen operand.  Measured: an
+// input read only under `if (false)`, `false ? u : k` or a `static const
+// bool` that is false is UNREAD on the reference (UNDEFINED, no index), but
+// such a select survives into the backend here (review: codex), keeping
+// the dead load alive.  Fold it before deciding what is read; returns
+// whether anything changed (the caller re-runs dead-code elimination).
+inline bool foldConstantSelects(IRFunction& entry)
+{
+    std::map<IRValueID, IRValueID> chosen;
+    for (const auto& block : entry.blocks) {
+        if (!block) continue;
+        for (const auto& inst : block->instructions) {
+            if (!inst || inst->op != IROp::Select || inst->operands.size() != 3) continue;
+            const auto* c = dynamic_cast<const IRConstant*>(entry.getValue(inst->operands[0]));
+            if (!c) continue;
+            bool truth;
+            if (std::holds_alternative<bool>(c->value)) truth = std::get<bool>(c->value);
+            else if (std::holds_alternative<int32_t>(c->value)) truth = std::get<int32_t>(c->value) != 0;
+            else if (std::holds_alternative<uint32_t>(c->value)) truth = std::get<uint32_t>(c->value) != 0;
+            else if (std::holds_alternative<float>(c->value)) truth = std::get<float>(c->value) != 0.0f;
+            else continue;   // a vector condition selects per lane
+            chosen[inst->result] = truth ? inst->operands[1] : inst->operands[2];
+        }
+    }
+    if (chosen.empty()) return false;
+    const auto resolve = [&](IRValueID v) {
+        for (int guard = 0; guard < 64; ++guard) {
+            const auto it = chosen.find(v);
+            if (it == chosen.end()) break;
+            v = it->second;
+        }
+        return v;
+    };
+    for (auto& block : entry.blocks) {
+        if (!block) continue;
+        for (auto& inst : block->instructions) {
+            if (!inst) continue;
+            for (IRValueID& op : inst->operands) op = resolve(op);
+        }
+    }
+    return true;
+}
 
 inline void bindImplicitTexCoords(IRFunction& entry,
                                   const std::vector<std::string>& order,
