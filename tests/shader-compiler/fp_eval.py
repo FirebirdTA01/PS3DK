@@ -8,7 +8,8 @@ not model rather than stepping over it:
 
   - reading a register lane that was never written, or a colour output whose
     four lanes were not all written (no lane defaults to zero);
-  - predicated instructions (condition test other than TR), branches, KIL;
+  - a predicated instruction whose condition-code lane was never written, or
+    a condition-code write of a NaN; branches and KIL;
   - reading an R lane after either of its H halves was written, or an H lane
     after its R register was written (H2k/H2k+1 alias Rk with an unmodelled
     lane layout, so every lane of the other bank goes stale until rewritten);
@@ -20,6 +21,12 @@ not model rather than stepping over it:
     anything outside it stays unjudged rather than guessed;
   - any opcode outside MODELLED.
 
+The condition-code register is modelled per lane: an instruction with the
+condition-write bit (word 0 bit 8) stores its result lanes (after saturation
+and any fp16 rounding) under its write mask, also when OUT_NONE; a condition
+test (word 1 bits 18-20, swizzle bits 21-28) gates each destination lane on
+the CC lane its swizzle selects.  RC and HC writes share this one register in
+the encoding (no register-select bit differs between them).
 Saturation, negate, absolute value, swizzles, write masks, inline constant
 blocks, the instruction input selector and half-precision registers (values
 rounded to binary16 on write) are modelled.  The colour output is R0, or H0
@@ -145,9 +152,14 @@ def _op(opc, a, b, c):
     raise Unmodelled("opcode %#x" % opc)
 
 
+_CC_TEST = {0: lambda x: False, 1: lambda x: x < 0, 2: lambda x: x == 0, 3: lambda x: x <= 0,
+            4: lambda x: x > 0, 5: lambda x: x != 0, 6: lambda x: x >= 0, 7: lambda x: True}
+
+
 def evaluate(blob, inputs):
     """Run the program; `inputs` maps 'TEX0'.. / 'COL0' to 4-float lists. Returns R0."""
     regs = _Regs()
+    cc = [None] * 4
     ended = False
     for w, const in instructions(ucode_words(blob)):
         opc = (w[0] >> 24) & 0x3F
@@ -156,8 +168,9 @@ def evaluate(blob, inputs):
         if opc not in MODELLED:
             raise Unmodelled("opcode %#x" % opc)
         if opc != FENCBR:
-            if (w[1] >> 18) & 7 != 7:
-                raise Unmodelled("predicated instruction (cond %d)" % ((w[1] >> 18) & 7))
+            cond = (w[1] >> 18) & 7
+            ccswz = [(w[1] >> (21 + 2 * i)) & 3 for i in range(4)]
+            cc_write = (w[0] >> 8) & 1
             prec = (w[0] >> 22) & 3
             if prec == 3:
                 raise Unmodelled("precision 3")
@@ -167,9 +180,7 @@ def evaluate(blob, inputs):
             n = ARITY.get(opc, 0)
             out_none = (w[0] >> 30) & 1
             mask = (w[0] >> 9) & 0xF
-            if out_none:
-                # its only effect would be a condition code, and every
-                # predicated consumer is refused above
+            if out_none and not cc_write:
                 lanes = []
             elif opc in (DP2, DP3, DP4):
                 lanes = list(range({DP2: 2, DP3: 3, DP4: 4}[opc]))
@@ -187,11 +198,28 @@ def evaluate(blob, inputs):
             res = _op(opc, *srcs)
             if (w[0] >> 31) & 1:
                 res = [min(1.0, max(0.0, x)) for x in res]
+            half = (w[0] >> 7) & 1
+            if half or prec == 1:
+                res = [f16(x) for x in res]
+            # the test reads CC as it was BEFORE this instruction's own write
+            commit = mask
+            if cond != 7:
+                commit = 0
+                for i in range(4):
+                    if mask & (1 << i):
+                        v = cc[ccswz[i]]
+                        if v is None:
+                            raise Unmodelled("CC.%s tested before it was written" % "xyzw"[ccswz[i]])
+                        if _CC_TEST[cond](v):
+                            commit |= 1 << i
+            if cc_write:
+                for i in range(4):
+                    if commit & (1 << i):
+                        if res[i] != res[i]:
+                            raise Unmodelled("NaN written to CC.%s" % "xyzw"[i])
+                        cc[i] = res[i]
             if not out_none:
-                half = (w[0] >> 7) & 1
-                if half:
-                    res = [f16(x) for x in res]
-                regs.write(('H' if half else 'R', (w[0] >> 1) & 0x3F), mask, res)
+                regs.write(('H' if half else 'R', (w[0] >> 1) & 0x3F), commit, res)
         if w[0] & 1:
             ended = True
             break
@@ -245,14 +273,35 @@ def self_test():
                  _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, out_none=1, end=1)), None))
     rows.append(('red: R0.xy written, output needs zw',
                  _container(_ins(MOV, 0, 0x3, [_src(I)], sel=tex0, end=1)), None))
+    # condition codes: R0 = TEX1, CC = TEX0, R0(NE) = TEX0  ->  per-lane TEX0 != 0 ? TEX0 : TEX1
+    def _pred(words, cond, swz=(0, 1, 2, 3)):
+        words[1] = (words[1] & ~(0xFF << 18 | 7 << 18)) | (cond << 18)
+        for i, c in enumerate(swz):
+            words[1] |= c << (21 + 2 * i)
+        return words
+    tex1 = 0x5
+    b = [1.25, 0.75, -1.0, 0.5]
+    az = [0.25, 0.0, 1.0, 0.0]
+    ccset = _ins(MOV, 63, 0xF, [_src(I)], sel=tex0, out_none=1)
+    ccset[0] |= 1 << 8
+    sel = lambda cond, swz=(0, 1, 2, 3): (_ins(MOV, 0, 0xF, [_src(I)], sel=tex1) + ccset
+                                          + _pred(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1), cond, swz))
+    rows.append(('green: per-lane select on CC (NE)', _container(sel(5)), [0.25, 0.75, 1.0, 0.5], az, b))
+    rows.append(('green: per-lane select on CC (EQ)', _container(sel(2)), [1.25, 0.0, -1.0, 0.0], az, b))
+    rows.append(('green: scalar select broadcast CC.x', _container(sel(5, (0, 0, 0, 0))), [0.25, 0.0, 1.0, 0.0], az, b))
+    rows.append(('red: predicated MOV with CC never written',
+                 _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex1)
+                            + _pred(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1), 5)), None, az, b))
     for scale in (1, 4):  # x2 and the reserved encoding (review: codex)
         words = _ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1)
         words[2] |= scale << 28
         rows.append(('red: output scale encoding %d' % scale, _container(words), None))
     fails = 0
-    for name, blob, want in rows:
+    for row in rows:
+        name, blob, want = row[:3]
+        ins = {'TEX0': row[3], 'TEX1': row[4]} if len(row) > 3 else {'TEX0': a}
         try:
-            got = evaluate(blob, {'TEX0': a})
+            got = evaluate(blob, ins)
             ok = want is not None and got == want
             detail = 'got %s' % got
         except Unmodelled as e:

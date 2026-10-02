@@ -256,6 +256,10 @@ struct VInstr
     // rather than inverting the comparison.
     VOp  killFused = VOp::Mov;
     bool killTestEq = false;
+    // VOp::SelPred only: the condition is as wide as the result and
+    // selects per lane (CC written and tested lane by lane) instead of
+    // one scalar condition broadcast through CC.x.
+    bool selPerLane = false;
 };
 
 struct VirtualProgram
@@ -7825,26 +7829,31 @@ private:
     // SGTRC RC.x then RCPR R0.x(NE.x); ours sets CC with a separate
     // MOV rather than folding it into the comparison, a known
     // instruction-count divergence to revisit when branch shaders
-    // become byte-comparable).  Fragment-only and scalar-condition
-    // only: the VP virtual scheduler reorders on temp dependencies
-    // and has no CC model, and no VP witness exists in the corpus;
-    // vector conditions want a witness before choosing a CC lane
-    // strategy.  Returns false for shapes it does not cover — the
-    // caller refuses loudly.
+    // become byte-comparable).  Fragment-only: the VP virtual scheduler
+    // reorders on temp dependencies and has no CC model, and no VP
+    // witness exists in the corpus.  A vector condition as wide as the
+    // result selects per lane - the reference's shape for a vector ?:
+    // (measured: SGTRC HC.xyz, then a MOV gated on NE.xyz) - so CC is
+    // written through the result's mask and each lane tests its own CC
+    // lane.  Returns false for shapes it does not cover — the caller
+    // refuses loudly.
     bool lowerSelectPredicated(const IRInstruction& inst)
     {
         if (profile_ != GeneralProfile::Fragment)
             return false;
         if (inst.operands.size() < 3)
             return false;
-        if (valueWidthOf(inst.operands[0]) != 1)
+        const int condWidth = valueWidthOf(inst.operands[0]);
+        const bool perLane = condWidth > 1;
+        if (perLane && condWidth != inst.resultType.componentCount())
             return false;
         VInstr sel;
         sel.op = VOp::SelPred;
+        sel.selPerLane = perLane;
         sel.dst.index = define(inst.result);
         sel.dst.writemask = componentMask(inst.resultType);
         sel.srcs[0] = resolve(inst.operands[0]);
-        {
+        if (!perLane) {
             // CC is written through writemask x; make every lane of
             // the source read the condition lane so the encoding does
             // not depend on where the producer left it.
@@ -7902,6 +7911,20 @@ private:
     {
         if (inst.operands.size() < 3 || inst.result == InvalidIRValue)
             return;
+        // A vector condition on VP would reach the arithmetic blend
+        // (lowerSelectGeneral) or the scalar cmple special case.  The
+        // blend is not a conditional move: an untaken inf/NaN arm
+        // poisons the lane and (a - b) + b is not exactly a.  The
+        // reference predicates it (SGTC HC then MOV o(NE0)); until the
+        // VP scheduler has a CC model, refuse rather than blend.
+        if (profile_ == GeneralProfile::Vertex &&
+            valueWidthOf(inst.operands[0]) > 1) {
+            program_.diagnostics.push_back(
+                "nv40-general: vertex select with a vector condition needs "
+                "predicated lowering, which the VP path does not have; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
         if (profile_ != GeneralProfile::Vertex ||
             !isLiteralZero(inst.operands[1]) ||
             conditionToSource_.find(inst.operands[0]) == conditionToSource_.end()) {
@@ -10521,12 +10544,14 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                 if (ccSet)
                     insn.cc_update = 1;
                 if (ccGated) {
-                    // Commit only where cond != 0; every lane reads
-                    // CC.x, where the scalar condition was written.
+                    // Commit only where cond != 0.  A scalar condition
+                    // was written to CC.x and every lane reads it; a
+                    // per-lane condition was written lane by lane and
+                    // each lane tests its own.
                     insn.cc_test = 1;
                     insn.cc_cond = NVFX_FP_OP_COND_NE;
-                    insn.cc_swz[0] = insn.cc_swz[1] =
-                    insn.cc_swz[2] = insn.cc_swz[3] = 0;
+                    for (int l = 0; l < 4; ++l)
+                        insn.cc_swz[l] = static_cast<uint8_t>(vi.selPerLane ? l : 0);
                 }
                 asm_.emit(insn, NVFX_FP_OP_OPCODE_MOV);
                 if (s.kind == VSrcKind::Uniform) {
@@ -10540,7 +10565,8 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                 }
             };
             emitOne(selDst, vi.dst.writemask, vi.srcs[2], false, false);
-            emitOne(ccDst, 0x1, vi.srcs[0], true, false);
+            emitOne(ccDst, vi.selPerLane ? vi.dst.writemask : 0x1,
+                    vi.srcs[0], true, false);
             emitOne(selDst, vi.dst.writemask, vi.srcs[1], false, true);
             emittedInstruction = true;
             continue;
