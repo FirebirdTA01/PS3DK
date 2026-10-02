@@ -4278,10 +4278,19 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         const IRTypeInfo tb = getExprType(expr->arguments[1].get());
         const bool floating = (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float32 ||
                               (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float16;
-        if (floating && !resultType.isMatrix() && !resultType.isArray() &&
-            ta.vectorSize == resultType.vectorSize && tb.vectorSize == resultType.vectorSize)
+        // A scalar operand broadcasts (measured: fmod(a, b.x) and fmod(a.x, b)
+        // are accepted); two vectors of different widths keep the call.
+        const auto fits = [&](const IRTypeInfo& t) {
+            return t.vectorSize == resultType.vectorSize || (t.vectorSize == 1 && !t.isMatrix());
+        };
+        if (floating && !resultType.isMatrix() && !resultType.isArray() && fits(ta) && fits(tb))
         {
-            const IRValueID a = argValues[0], b = argValues[1];
+            const auto splat = [&](IRValueID v, const IRTypeInfo& t) {
+                if (!resultType.isVector() || t.vectorSize == resultType.vectorSize) return v;
+                std::vector<IRValueID> lanes(static_cast<size_t>(resultType.vectorSize), v);
+                return emitInstruction(IROp::VecConstruct, resultType, lanes, expr->loc);
+            };
+            const IRValueID a = splat(argValues[0], ta), b = splat(argValues[1], tb);
             const IRValueID q = emitBinaryOp(IROp::Div, resultType, a, b, expr->loc);
             const IRValueID aq = emitInstruction(IROp::Abs, resultType, {q}, expr->loc);
             const IRValueID f = emitInstruction(IROp::Frac, resultType, {aq}, expr->loc);

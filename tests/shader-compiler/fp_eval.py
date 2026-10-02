@@ -41,7 +41,8 @@ from fp_sources import CONST, INPUT, TEMP, ARITY, instructions, source, ucode_wo
 MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX = 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09
 SLT, SGE, SLE, SGT, SNE, SEQ = 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
 FRC, FLR, FENCBR, DP2 = 0x10, 0x11, 0x3E, 0x38
-MODELLED = {MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX, SLT, SGE, SLE, SGT, SNE, SEQ, FRC, FLR, FENCBR, DP2}
+RCP = 0x1A   # nvfx_shader.h NVFX_FP_OP_OPCODE_RCP: scalar, reads the source's x lane
+MODELLED = {MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX, SLT, SGE, SLE, SGT, SNE, SEQ, FRC, FLR, FENCBR, DP2, RCP}
 
 INPUT_SEL = {0x1: "COL0", 0x2: "COL1", 0x4: "TEX0", 0x5: "TEX1", 0x6: "TEX2", 0x7: "TEX3",
              0x8: "TEX4", 0x9: "TEX5", 0xA: "TEX6", 0xB: "TEX7"}
@@ -149,6 +150,9 @@ def _op(opc, a, b, c):
         return [f32(x - math.floor(x)) for x in a]
     if opc == FLR:
         return [float(math.floor(x)) for x in a]
+    if opc == RCP:
+        x = a[0]
+        return [f32(1.0 / x) if x != 0 else math.copysign(math.inf, x)] * 4
     raise Unmodelled("opcode %#x" % opc)
 
 
@@ -186,7 +190,8 @@ def evaluate(blob, inputs):
                 lanes = list(range({DP2: 2, DP3: 3, DP4: 4}[opc]))
             else:
                 lanes = [i for i in range(4) if mask & (1 << i)]
-            srcs = [_read(w, slot, regs, inputs, const, lanes) for slot in range(1, n + 1)]
+            read_lanes = [0] if opc == RCP else lanes   # a scalar op reads lane x of its source
+            srcs = [_read(w, slot, regs, inputs, const, read_lanes) for slot in range(1, n + 1)]
             for v in srcs:
                 for x in (v[i] for i in lanes):
                     if prec == 1 and f16(x) != x:
@@ -263,6 +268,8 @@ def self_test():
     rows.append(('green: R1=TEX0; R0=R1+R1',
                  _container(_ins(MOV, 1, 0xF, [_src(I)], sel=tex0) + _ins(ADD, 0, 0xF, [_src(T, 1), _src(T, 1)], end=1)),
                  [2 * x for x in a]))
+    rows.append(('green: R0 = RCP(TEX0.x) broadcast',
+                 _container(_ins(RCP, 0, 0xF, [_src(I)], sel=tex0, end=1)), [4.0] * 4))
     rows.append(('green: H0 output (outputFromH0)', _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, half=1, end=1), h0=1), a))
     # RED controls (codex review of fae9ca52): each must be refused, not evaluated
     rows.append(('red: MOV R0, R5 (undefined source)', _container(_ins(MOV, 0, 0xF, [_src(T, 5)], end=1)), None))

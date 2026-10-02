@@ -8,8 +8,8 @@ lane, multiplied into the condition register).  33 community programs
 
 Inputs are exact in float32 at every step (dyadic dividends, power-of-two
 divisors), so the expected value is the formula itself, signs both ways.
-Vertex rows check acceptance (no vertex evaluator here); a width mismatch
-between fmod's operands stays refused by name.
+Vertex rows are judged by value with the VP evaluator; a vertex vector fmod
+and two vector operands of different widths stay refused by name.
 """
 import argparse
 import itertools
@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 import fp_eval
+import vp_pow_vector_check as vp_eval
 
 A = [-2.75, -0.625, -0.0, 0.375, 1.5, 3.125]
 B = [0.25, 0.5, 2.0, 4.0, -0.5, -2.0]
@@ -39,13 +40,27 @@ FP_ROWS = {
                     lambda a, b: list(b) if a[0] != 0 and a[1] != 0 else [-v for v in b]),
     'all_compare': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { bool3 c = a.xyz > 0.0; return all(c) ? a : b; }\n',
                     lambda a, b: list(a) if a[0] > 0 and a[1] > 0 and a[2] > 0 else list(b)),
+    # a scalar operand broadcasts (measured on the reference)
+    'fmod_vec_by_scalar': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return fmod(a, b.x); }\n',
+                           lambda a, b: [fmod_ref(x, b[0]) for x in a]),
+    'fmod_scalar_by_vec': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return fmod(a.x, b); }\n',
+                           lambda a, b: [fmod_ref(a[0], y) for y in b]),
     'any_still': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return any(a.xy) ? b : -b; }\n',
                   lambda a, b: list(b) if a[0] != 0 or a[1] != 0 else [-v for v in b]),
 }
-VP_ACCEPT = {
-    'fmod_vp': 'float4 main(float4 p : POSITION, uniform float4 d) : POSITION { return fmod(p, d); }\n',
-    'all_vp': 'float4 main(float4 p : POSITION) : POSITION { return all(p.xyz) ? p : p * 2; }\n',
+# Vertex rows are judged by value with the VP evaluator (binary32).  A
+# vector fmod needs a per-lane select, which the vertex path does not have
+# (t_ca8f99a6): it stays refused by name although the reference accepts it.
+VP_ROWS = {
+    'fmod_scalar_vp': ('float4 main(float4 p : POSITION, uniform float d) : POSITION { return float4(fmod(p.x, d), p.yzw); }\n',
+                       lambda p: [fmod_ref(p[0], 0.5), p[1], p[2], p[3]]),
+    'all_vp': ('float4 main(float4 p : POSITION) : POSITION { return all(p.xyz) ? p : p * 2; }\n',
+               lambda p: list(p) if p[0] != 0 and p[1] != 0 and p[2] != 0 else [2 * x for x in p]),
 }
+VP_REFUSE = {
+    'fmod_vector_vp': 'float4 main(float4 p : POSITION, uniform float4 d) : POSITION { return fmod(p, d); }\n',
+}
+VP_GRID = [[-2.75, 1.5, 0.375, 3.125], [0.375, -0.5, 2.0, 1.0], [-0.625, 1.5, 0.0, 3.125], [3.125, -2.75, 1.5, -0.0]]
 
 
 def compile_one(compiler, work, name, text, profile):
@@ -86,12 +101,25 @@ def main():
             print('  %-14s %s' % (name, 'values ok (%d inputs)' % len(grid) if not bad else 'WRONG on %d' % len(bad)))
             if bad:
                 failures.append('%s: got %s for %s, want %s' % (name, bad[0][2], bad[0][:2], bad[0][3]))
-        for name, text in VP_ACCEPT.items():
+        for name, (text, want) in VP_ROWS.items():
             rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_vp_rsx')
-            ok = rc == 0 and blob
-            print('  %-14s %s' % (name, 'accepted' if ok else 'REFUSED'))
-            if not ok:
+            if rc != 0 or not blob:
                 failures.append('%s refused: %s' % (name, (err.strip().splitlines() or ['?'])[-1]))
+                print('  %-14s REFUSED' % name)
+                continue
+            bad = [p for p in VP_GRID
+                   if vp_eval.evaluate(blob, {'d': [0.5, 0.0, 0.0, 0.0]}, inputs={0: p}, binary32=True).get(0) != want(p)]
+            print('  %-14s %s' % (name, 'values ok (%d inputs)' % len(VP_GRID) if not bad else 'WRONG on %d' % len(bad)))
+            if bad:
+                failures.append('%s: got %s for %s, want %s' % (
+                    name, vp_eval.evaluate(blob, {'d': [0.5, 0.0, 0.0, 0.0]}, inputs={0: bad[0]}, binary32=True).get(0),
+                    bad[0], want(bad[0])))
+        for name, text in VP_REFUSE.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_vp_rsx')
+            ok = rc == 1 and not blob and 'vertex select with a vector condition' in err
+            print('  %-14s %s' % (name, 'refused by name' if ok else 'NOT refused by name (rc %d)' % rc))
+            if not ok:
+                failures.append('%s: expected the named VP select refusal, got rc %d' % (name, rc))
     for f in failures:
         print('FAIL:', f)
     print('fmod-all: %s' % ('PASS' if not failures else 'FAIL (%d)' % len(failures)))
