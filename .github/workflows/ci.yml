@@ -574,6 +574,8 @@ jobs:
         run: bash tests/shader-compiler/wrong-accept-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Fragment inputs with no semantic and uniform members of a varying struct
         run: bash tests/shader-compiler/implicit-varying-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: fmod and all are lowered, judged by value
+        run: bash tests/shader-compiler/fmod-all-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns under compile-time-constant conditions judged by value
         run: bash tests/shader-compiler/helper-const-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value

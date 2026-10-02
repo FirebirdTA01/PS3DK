@@ -4274,7 +4274,11 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 
     IRTypeInfo resultType = getExprType(expr);
 
-    if (expr->functionName == "any" && expr->resolvedFunction == nullptr &&
+    // any(v) ORs and all(v) ANDs the lanes' truth (a numeric lane is true
+    // for either sign of nonzero).  Measured on the reference: all(t.xy)
+    // is SNE per lane then a product into the condition register.
+    const bool reduceAll = expr->functionName == "all";
+    if ((expr->functionName == "any" || reduceAll) && expr->resolvedFunction == nullptr &&
         argValues.size() == 1)
     {
         // Arguments were evaluated once above. Reduce that value, never the
@@ -4329,9 +4333,51 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
                 value = emitBinaryOp(IROp::CmpNe, IRTypeInfo::Bool(), value, zero, expr->loc);
             }
             reduced = reduced == InvalidIRValue ? value
-                : emitBinaryOp(IROp::LogicalOr, IRTypeInfo::Bool(), reduced, value, expr->loc);
+                : emitBinaryOp(reduceAll ? IROp::LogicalAnd : IROp::LogicalOr,
+                               IRTypeInfo::Bool(), reduced, value, expr->loc);
         }
         return reduced;
+    }
+
+    // fmod(a, b): the remainder with the sign of a.  The reference lowers it
+    // as r = frac(|a / b|) * |b|, then -r where a < 0 (measured, both
+    // profiles: RCP+MUL or DIV, FRC |q|, MUL by |b|, a predicated negate on
+    // a's sign).  Expanded here into those operations, lane by lane through
+    // the ordinary vector paths.  Operands of differing width keep the call
+    // (refused by name downstream) rather than guessing a promotion.
+    if (expr->functionName == "fmod" && expr->resolvedFunction == nullptr &&
+        argValues.size() == 2)
+    {
+        const IRTypeInfo ta = getExprType(expr->arguments[0].get());
+        const IRTypeInfo tb = getExprType(expr->arguments[1].get());
+        const bool floating = (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float32 ||
+                              (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float16;
+        // A scalar operand broadcasts (measured: fmod(a, b.x) and fmod(a.x, b)
+        // are accepted); two vectors of different widths keep the call.
+        const auto fits = [&](const IRTypeInfo& t) {
+            return t.vectorSize == resultType.vectorSize || (t.vectorSize == 1 && !t.isMatrix());
+        };
+        if (floating && !resultType.isMatrix() && !resultType.isArray() && fits(ta) && fits(tb))
+        {
+            const auto splat = [&](IRValueID v, const IRTypeInfo& t) {
+                if (!resultType.isVector() || t.vectorSize == resultType.vectorSize) return v;
+                std::vector<IRValueID> lanes(static_cast<size_t>(resultType.vectorSize), v);
+                return emitInstruction(IROp::VecConstruct, resultType, lanes, expr->loc);
+            };
+            const IRValueID a = splat(argValues[0], ta), b = splat(argValues[1], tb);
+            const IRValueID q = emitBinaryOp(IROp::Div, resultType, a, b, expr->loc);
+            const IRValueID aq = emitInstruction(IROp::Abs, resultType, {q}, expr->loc);
+            const IRValueID f = emitInstruction(IROp::Frac, resultType, {aq}, expr->loc);
+            const IRValueID ab = emitInstruction(IROp::Abs, resultType, {b}, expr->loc);
+            const IRValueID r = emitBinaryOp(IROp::Mul, resultType, f, ab, expr->loc);
+            const IRValueID nr = emitInstruction(IROp::Neg, resultType, {r}, expr->loc);
+            IRTypeInfo boolType = resultType;
+            if (resultType.isVector()) boolType.elementType = IRType::Bool;
+            else boolType = IRTypeInfo::Bool();
+            const IRValueID negative = emitBinaryOp(IROp::CmpLt, boolType, a,
+                                                    createConstant(resultType, 0.0f), expr->loc);
+            return emitInstruction(IROp::Select, resultType, {negative, nr, r}, expr->loc);
+        }
     }
 
     if (auto scale = angleConversionScale(expr->functionName);
