@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
-"""Loop-aware CTR scan (draft for t_54ed85f8; not yet in the repo).
+"""Loop-aware CTR scan (t_54ed85f8).
 
-Reads objdump -d output and judges every mtctr as a possible loop count unless
-straight-line code (no branch in between) PROVES another use: an mfctr (CTR as
-a scratch register) or a bctr/bctrl (indirect jump or call).  Those proven
-uses are listed separately and never counted as loop hazards.
+Reads objdump -d output and judges every mtctr as a possible loop count
+(unproven = conservative) unless a TERMINAL is reached before any branch.
+Terminals (the CTR value is provably not loop-count):
 
-For a loop-consumed mtctr it walks back from the instruction to where the
-register was set, with the rules of tests/sdk/ilp32-doloop-codegen-test.sh:
-a full-width defined value (clrldi, rldicl mb>=32, rlw*, ext*, li, ...) is
+  * another mtctr          - CTR redefined, original value never consumed
+  * bctr / bctrl           - CTR consumed as an indirect jump/call target
+  * bl / blr               - unconditional call / return, CTR value is dead
+  * b to another function  - tail call (target "<sym>" with no "+off"),
+                             CTR is call-clobbered
+
+Everything else - any other branch (bdnz, bdz, be, bne, bgt, ..., a plain b
+to a local label, the common rotated-loop shape), mfctr (it only READS CTR,
+does not consume or redefine it), and end of the function or listing (no
+straight-line proof of non-use) - keeps the mtctr a possible loop count.
+
+For a loop-consumed mtctr it walks back to where the register was set:
+a full-width definition (clrldi, rldicl mb>=32, rlw*, ext*, li, ...) is
 clean; a 32-bit load is clean only if no offset was added after it; anything
 else (add, subf, ...) is a finding.
 
@@ -21,9 +30,7 @@ CLEAN = re.compile(r"^(clrldi|rlwinm\.?|rlwnm\.?|srwi\.?|slwi\.?|rotlwi|clrlwi\.
                    r"extsw\.?|extsh\.?|extsb\.?|li|lis|lhz|lhzx|lbz|lbzx|"
                    r"lwa|lwax|ld|ldx|cntlzw\.?)$")
 LOAD32 = re.compile(r"^(lwz|lwzx|lwzu|lwzux)$")
-NOWRITE = re.compile(r"^(cmp|fcmp|st|b|tw|td|dcb|mt|sync|isync|nop|lfs|lfd|stfiwx)")
-LOOPBR = re.compile(r"^bd(nz|z)")                      # bdnz, bdz, bdnzt, bdzf, bdnzl, ...
-END = re.compile(r"^(mtctr|mfctr|bl|bla|bctrl|bctr)$")  # CTR redefined, read, or a call
+NOWRITE = re.compile(r"^(cmp|fcmp|st|tw|td|dcb|mt|sync|isync|nop|lfs|lfd|stfiwx)")
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+(?:[0-9a-f]{2} ){4}\s*(\S+)\s*(.*)$")
 FN = re.compile(r"^([0-9a-f]+) <([^>]*)>:")
 
@@ -71,23 +78,45 @@ def scan(lines, out=sys.stdout):
     for i, (op, args, fn, addr) in enumerate(insns):
         if op != "mtctr":
             continue
-        # Non-loop only when PROVEN: straight-line code (no branch of any
-        # kind in between) reaches an mfctr (CTR as a scratch register) or a
-        # bctr/bctrl (indirect jump or call).  Anything else - a bdnz, a
-        # conditional branch that may lead to one, another mtctr reached on
-        # one path only - is judged as a possible loop count.
-        use = None
+        # A mtctr is a NON-LOOP use only if a real TERMINAL is reached before
+        # any branch.  Terminals (CTR provably not a loop count):
+        #   another mtctr          - CTR redefined
+        #   bctr / bctrl           - CTR consumed as an indirect target
+        #   bl / blr               - call / return, CTR value dead
+        #   b to another function  - tail call: a plain "b" whose last arg is
+        #                             another symbol with no "+off" (call
+        #                             clobbers CTR).  A plain b to a local
+        #                             label (<.f+0xN> or <.text...>) is the
+        #                             COMMON rotated-loop shape, so it is NOT
+        #                             a terminal.
+        #
+        # NOT terminals (the mtctr stays a possible loop count): any branch
+        # (bdnz, bdz, be, bne, bgt, ble, ...), mfctr (it only READS CTR - a
+        # later bdnz still sees the count), and simply reaching the end of
+        # the function / listing (no straight-line proof of non-use).
+        terminal = None
         for k in range(i + 1, len(insns)):
-            o = insns[k][0]
+            o, a = insns[k][0], insns[k][1]
             if o == "<fn>":
+                break                       # end of function/listing: proves nothing
+            if o == "mtctr":
+                terminal = "mtctr"
                 break
-            if o in ("mfctr", "bctr", "bctrl"):
-                use = o
+            if o in ("bctr", "bctrl"):
+                terminal = o
                 break
-            if o.startswith("b") or o == "mtctr":
+            if o in ("bl", "blr"):
+                terminal = o
                 break
-        if use is not None:
-            other.append("%s %s mtctr %s -> %s" % (fn, addr, args[0], use))
+            if o == "b" and a and not re.search(r"\+0x", a[-1]) and a[-1] != fn:
+                terminal = "b(tailcall)"    # b to another function: CTR call-clobbered
+                break
+            if o.startswith("b"):
+                terminal = None            # any other branch (incl. local b) = loop use
+                break
+            # mfctr / plain instructions: only reads or no CTR effect -> keep walking
+        if terminal is not None:
+            other.append("%s %s mtctr %s -> %s" % (fn, addr, args[0], terminal))
             continue
         loops += 1
         v = origin(insns, i, args[0])
@@ -121,12 +150,16 @@ def self_test():
    c:	42 00 ff fc 	bdnz    8 <.f+0x8>
 """, 0),
         # EMP spectralWater shape: CTR as a scratch register, no counted loop.
+        # The real terminal is the blr at the end (the fall-off-end does NOT
+        # prove non-use; it only survives because the mfctr is followed by a
+        # terminal).
         "green-scratch": ("""0000000000000000 <.f>:
-   0:	7c 00 00 26 	mfocrf  r0,128
-   4:	7c 00 03 78 	or      r0,r0,r9
-   8:	7c 09 03 a6 	mtctr   r0
-   c:	60 00 00 00 	nop
-  10:	7c 09 02 a6 	mfctr   r0
+    0:	7c 00 00 26 	mfocrf  r0,128
+    4:	7c 00 03 78 	or      r0,r0,r9
+    8:	7c 09 03 a6 	mtctr   r0
+    c:	60 00 00 00 	nop
+   10:	7c 09 02 a6 	mfctr   r0
+   14:	4e 80 00 20 	blr
 """, 0),
         # Two paths into one loop: the first mtctr reaches the bdnz through
         # the ble; a forward linear scan used to stop at the second mtctr.
@@ -141,9 +174,50 @@ def self_test():
   1c:	42 00 ff fc 	bdnz    18 <.f+0x18>
 """, 2),
         "green-indirect-call": ("""0000000000000000 <.f>:
-   0:	81 29 00 00 	lwz     r9,0(r9)
-   4:	7d 29 03 a6 	mtctr   r9
-   8:	4e 80 04 21 	bctrl
+    0:	81 29 00 00 	lwz     r9,0(r9)
+    4:	7d 29 03 a6 	mtctr   r9
+    8:	4e 80 04 21 	bctrl
+""", 0),
+        # Codex P1 (t_54ed85f8 review): mfctr only READS CTR; it does not
+        # consume or redefine it, so a later bdnz still sees the original
+        # count and the mtctr IS a loop use.  Old version (mfctr treated as
+        # non-loop terminal) reported 0 findings here; it must report 1.
+        "red-read-then-loop": ("""0000000000000000 <.f>:
+    0:	81 24 00 00 	lwz     r9,0(r4)
+    4:	38 a9 00 02 	addi    r5,r9,2
+    8:	7c a9 03 a6 	mtctr   r5
+    c:	7c 0a 02 a6 	mfctr   r10
+   10:	42 00 ff fc 	bdnz    10 <.f+0x10>
+""", 1),
+        # codex P1-b (v2 review): a plain b to a LOCAL label is the common
+        # rotated-loop shape, not proof the count is unused.  b .f+0x14 must
+        # NOT be a terminal; the mtctr stays a possible loop count (finding).
+        "red-b-into-loop": ("""0000000000000000 <.f>:
+    0:	81 24 00 00 	lwz     r9,0(r4)
+    4:	38 a9 00 02 	addi    r5,r9,2
+    8:	7c a9 03 a6 	mtctr   r5
+    c:	48 00 00 08 	b       14 <.f+0x14>
+   10:	60 00 00 00 	nop
+   14:	42 00 ff fc 	bdnz    10 <.f+0x10>
+   18:	4e 80 00 20 	blr
+""", 1),
+        # codex P1-a (v2 review): a listing that ENDS at the mtctr proves
+        # nothing; end-of-function/listing is not a non-loop terminal, so the
+        # count is still judged (finding).  Guards the two embedded .sh RED
+        # controls that fall off the end.
+        "red-truncated": ("""0000000000000000 <.text.f>:
+    0:	81 24 00 00 	lwz     r9,0(r4)
+    4:	38 a9 00 02 	addi    r5,r9,2
+    8:	7c a9 03 a6 	mtctr   r5
+""", 1),
+        # codex P1-b (v2 review): a b to ANOTHER function (target without
+        # "+off") is a tail call, which clobbers CTR - a genuine non-loop
+        # terminal.  Must stay green.
+        "green-b-tailcall": ("""0000000000000000 <.f>:
+    0:	81 24 00 00 	lwz     r9,0(r4)
+    4:	38 a9 00 02 	addi    r5,r9,2
+    8:	7c a9 03 a6 	mtctr   r5
+    c:	48 00 10 00 	b       .g
 """, 0),
     }
     ok = True

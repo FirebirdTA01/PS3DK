@@ -12,17 +12,25 @@
 # offset added after it) before any full-width arithmetic (add, subf, ...).
 #
 # The scanner itself now lives in the repo at tests/sdk/ctr-loop-scan.py and
-# is loop-aware: an mtctr is only judged as a possible loop count when no
-# straight-line code before the first branch of any kind proves another use
-# (mfctr -- CTR as a scratch register -- or bctrl/bctr -- an indirect call
-# or jump).  Those non-loop uses are reported separately and never counted.
+# is loop-aware: a mtctr is judged as a possible loop count (unproven, so
+# conservative) unless a TERMINAL is reached first.  Terminals (CTR provably
+# not a count): another mtctr (CTR redefined), bctr/bctrl (indirect
+# call/jump), bl/blr (call/return, value dead), or a plain b to ANOTHER
+# function (tail call - clobbers CTR).  NOT terminals: any other branch
+# (bdnz, bdz, be, bne, bgt, ...), mfctr (it only READS CTR, so a later bdnz
+# still sees the count), and the end of the function/listing (no straight-
+# line proof of non-use).  So a count that drives a bdnz - including the
+# read-then-loop shape (mfctr before the bdnz) or the common rotated
+# b-into-local-label loop - is a finding.  Non-loop uses are reported
+# separately and never counted.
 #
 # Controls (embedded below): the v0.19.0 candidate's listing of doloop.c and
 # an lwz+addi count must be reported; the fixed compiler's clrldi+addi must
-# not.  The scanner's own 6-case self-test (red-add, red-load-addi, green-
-# extended, green-scratch, red-branchy, green-indirect-call) runs first,
-# without a compiler, so the guard fails closed if the logic regresses even
-# on a build host that has no PPU toolchain.
+# not.  The scanner's own 10-case self-test (red-add, red-load-addi,
+# green-extended, green-scratch, red-branchy, green-indirect-call,
+# red-read-then-loop, red-b-into-loop, red-truncated, green-b-tailcall)
+# runs first, without a compiler, so the guard fails closed if the logic
+# regresses even on a build host with no PPU toolchain.
 #
 # Skips the compiles without PS3DEV (CI has no PPU compiler); the self-test
 # and the controls still run and are the fast CI-facing coverage.
@@ -35,21 +43,23 @@ trap 'rm -rf "$work"' EXIT
 scanner="$root/tests/sdk/ctr-loop-scan.py"
 [ -f "$scanner" ] || { echo "ilp32-doloop-codegen: FAIL: missing $scanner"; exit 1; }
 
-# First run the scanner's own self-test: 6 synthetic cases covering both the
-# loop-usage rules (which instructions make a count clean/dirty) and the
-# non-loop detection (mfctr scratch and bctrl indirect call).  The exit code
-# is 0 only if all six pass (2 otherwise), so pass/fail is authoritative;
-# the per-case line counts below make the "6/6" requirement explicit.
+# First run the scanner's own self-test: 10 synthetic cases covering the
+# loop-usage rules (which instructions make a count clean/dirty), the
+# non-loop terminals (mfocrf-scratch with a blr, bctrl indirect call, b
+# tail-call), and the loop-use cases (read-then-loop via mfctr, a plain b
+# into a local label, and a listing truncated at the mtctr).  The exit code
+# is 0 only if all ten pass (2 otherwise), so pass/fail is authoritative;
+# the per-case line counts below make the "10/10" requirement explicit.
 python3 "$scanner" --self-test > "$work/self-test.out" 2>&1
 rctest=$?
 n_ok=$(grep -c ' ok (findings' "$work/self-test.out")
 n_fail=$(grep -c 'FAIL (findings' "$work/self-test.out")
-if [ $rctest -ne 0 ] || [ "$n_ok" -ne 6 ] || [ "$n_fail" -ne 0 ]; then
-    echo "ilp32-doloop-codegen: FAIL self-test (exit $rctest, ${n_ok}/6 ok, ${n_fail} fail)"
+if [ $rctest -ne 0 ] || [ "$n_ok" -ne 10 ] || [ "$n_fail" -ne 0 ]; then
+    echo "ilp32-doloop-codegen: FAIL self-test (exit $rctest, ${n_ok}/10 ok, ${n_fail} fail)"
     cat "$work/self-test.out"
     exit 1
 fi
-echo "ilp32-doloop-codegen: ok   self-test: 6/6 synthetic cases"
+echo "ilp32-doloop-codegen: ok   self-test: 10/10 synthetic cases"
 
 # The v0.19.0 candidate (c13ee74f) at -O2: CTR loaded from add r5,r9,r5 where
 # r9 is a zero-extended lwz of a negative int.
