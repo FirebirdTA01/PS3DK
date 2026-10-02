@@ -98,6 +98,16 @@ float4 main(float2 tc : TEXCOORD0, uniform sampler2D s0 : TEXUNIT0, uniform prev
 { s0_global = REFERENCE.texture; return helper(tc * REFERENCE.texture_size) + tex2D(s0, tc); }
 """
 SAMPLER2D, TEXUNIT0 = 1066, 2048
+# Copy edges (review: codex; the reference accepts both): self-assignment must
+# not erase the members it copies, and a chain copies to every destination
+# (H.a and G.b both read IN, not the file-scope uniforms H and G).
+SELF_COPY = """struct input { float2 a; float2 b; };
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { IN = IN; return float4(tc * IN.a + IN.b, 0, 1); }
+"""
+CHAIN_COPY = """struct input { float2 a; float2 b; };
+input G; input H;
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { H = (G = IN); return float4(tc * H.a + G.b, 0, 1); }
+"""
 # The reference records per-member defaults (IN.b = 1 2); not emitted yet,
 # so a struct parameter default is REFUSED (semantic analysis refuses it before
 # the IR builder's named refusal is reached) rather than silently dropped.
@@ -275,6 +285,23 @@ def main():
             print('  copy_replace: %s' % ('B replaces A in every member' if not bad else 'WRONG on %d' % bad))
             if bad:
                 failures.append('copy_replace values wrong on %d inputs' % bad)
+
+        for name, text in (('self_copy', SELF_COPY), ('chain_copy', CHAIN_COPY)):
+            rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_fp_rsx')
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (name, (err.strip().splitlines() or ['?'])[-1]))
+                continue
+            c = Container(blob)
+            # distinct values for the file-scope G/H records too, so reading
+            # them instead of IN shows up as a wrong value
+            u = {'IN.a': [2.0, 0.5], 'IN.b': [0.25, -0.5], 'G.a': [9.0, 9.0], 'G.b': [7.0, 7.0],
+                 'H.a': [5.0, 5.0], 'H.b': [3.0, 3.0]}
+            bad = sum(fp_eval.evaluate(with_uniforms(blob, c, u), {'TEX0': [tc[0], tc[1], 0, 0]})
+                      != [tc[0] * 2.0 + 0.25, tc[1] * 0.5 - 0.5, 0.0, 1.0]
+                      for tc in itertools.product([-1.0, 0.0, 0.5, 1.0], repeat=2))
+            print('  %s: %s' % (name, 'reads IN' if not bad else 'WRONG on %d' % bad))
+            if bad:
+                failures.append('%s values wrong on %d inputs' % (name, bad))
 
         rc, blob, err = compile_one(args.compiler, work, 'sampler_member', SAMPLER_MEMBER, 'sce_fp_rsx')
         if rc != 0 or not blob:

@@ -1737,6 +1737,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     declToValue_.clear();
     nameToValue_.clear();
     undefinedFieldBases_.clear();
+    flattenedUniformStructParams_.clear();
     scope_.clear();   // every per-scope map, in one place (ScopeState)
     currentFunction_ = nullptr;
     currentFunctionDecl_ = nullptr;
@@ -3859,30 +3860,47 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
         // `G = IN` where IN is a flattened uniform struct entry parameter:
         // IN has no whole-struct value, so copy its member bindings onto
         // G's member keys (libretro: `IN_global = IN;` and helpers that
-        // read IN_global.texture_size).  Stale destination members are
-        // dropped first so an absent source member cannot leave an older
-        // value behind.
-        if (expr->op == BinaryOp::Assign && expr->right->kind == ExprKind::Identifier &&
-            flattenedUniformStructParams_.count(static_cast<IdentifierExpr*>(expr->right.get())->name) &&
-            !nameToValue_.count(static_cast<IdentifierExpr*>(expr->right.get())->name))
+        // read IN_global.texture_size).  A chain `H = (G = IN)` copies to
+        // every destination.  The source members are SNAPSHOT before any
+        // destination is cleared, so `IN = IN` (or an overlapping path)
+        // cannot erase what it copies (review: codex); each destination's
+        // old members are dropped so an absent source member cannot leave
+        // an older value behind.
+        if (expr->op == BinaryOp::Assign)
         {
-            const std::string from = static_cast<IdentifierExpr*>(expr->right.get())->name;
-            std::string to;
-            if (!arrayStorageKey(expr->left.get(), to))
+            std::vector<ExprNode*> destinations{expr->left.get()};
+            ExprNode* source = expr->right.get();
+            while (source && source->kind == ExprKind::Binary &&
+                   static_cast<BinaryExpr*>(source)->op == BinaryOp::Assign)
             {
-                error(expr->loc, "a uniform struct entry parameter can only be copied into a named struct "
-                                 "variable (uniform-struct-entry-parameter)");
+                destinations.push_back(static_cast<BinaryExpr*>(source)->left.get());
+                source = static_cast<BinaryExpr*>(source)->right.get();
+            }
+            if (source && source->kind == ExprKind::Identifier &&
+                flattenedUniformStructParams_.count(static_cast<IdentifierExpr*>(source)->name) &&
+                !nameToValue_.count(static_cast<IdentifierExpr*>(source)->name))
+            {
+                const std::string from = static_cast<IdentifierExpr*>(source)->name;
+                std::vector<std::pair<std::string, IRValueID>> members;
+                for (const auto& entry : nameToValue_)
+                    if (entry.first.compare(0, from.size() + 1, from + ".") == 0)
+                        members.emplace_back(entry.first.substr(from.size()), entry.second);
+                for (ExprNode* destination : destinations)
+                {
+                    std::string to;
+                    if (!arrayStorageKey(destination, to))
+                    {
+                        error(expr->loc, "a uniform struct entry parameter can only be copied into a "
+                                         "named struct variable (uniform-struct-entry-parameter)");
+                        return InvalidIRValue;
+                    }
+                    for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+                        if (it->first.compare(0, to.size() + 1, to + ".") == 0) it = nameToValue_.erase(it);
+                        else ++it;
+                    for (const auto& member : members) nameToValue_[to + member.first] = member.second;
+                }
                 return InvalidIRValue;
             }
-            for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
-                if (it->first.compare(0, to.size() + 1, to + ".") == 0) it = nameToValue_.erase(it);
-                else ++it;
-            std::vector<std::pair<std::string, IRValueID>> copies;
-            for (const auto& entry : nameToValue_)
-                if (entry.first.compare(0, from.size() + 1, from + ".") == 0)
-                    copies.emplace_back(to + entry.first.substr(from.size()), entry.second);
-            for (const auto& c : copies) nameToValue_[c.first] = c.second;
-            return InvalidIRValue;
         }
         IRValueID rhsValue = buildExpr(expr->right.get());
 
