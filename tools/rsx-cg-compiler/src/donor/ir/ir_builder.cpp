@@ -1480,6 +1480,47 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                 continue;
             }
         }
+        // A VARYING struct entry parameter may declare some members
+        // `uniform` (libretro's `struct prev { uniform float2 video_size;
+        // uniform sampler2D texture; float2 tex_coord; }` passed as a plain
+        // parameter).  The reference lists each such member as a uniform
+        // named `param.member` at the parameter's paramno, a sampler on its
+        // own texture unit, and keeps the other members as varyings
+        // (measured: P.size uniform, P.tc TEX1).  Bind the uniform members
+        // here as uniform parameters; a member read finds them by qualified
+        // name before any attribute load is made.  The parameter itself
+        // continues as the varying struct it is.
+        if (currentFunction_->isEntryPoint &&
+            param->storage != StorageQualifier::Uniform &&
+            param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
+            param->type && param->type->baseType == BaseType::Struct && !param->type->isArray())
+        {
+            if (const std::vector<StructField>* fields = getStructFields(param->type.get()))
+            {
+                bool stashed = false;
+                for (const auto& field : *fields)
+                {
+                    if (field.storage != StorageQualifier::Uniform) continue;
+                    const std::string qualified = param->name + "." + field.name;
+                    if (!field.type || field.type->baseType == BaseType::Struct || field.type->isArray())
+                    {
+                        error(param->loc, "uniform member '" + qualified + "' of a varying struct "
+                              "parameter is a struct or an array; only scalar, vector, matrix and "
+                              "sampler members are supported (varying-struct-uniform-member), refusing");
+                        continue;
+                    }
+                    if (!stashed) { stashShadowedGlobal(param->name); stashed = true; }
+                    IRParameter member;
+                    member.name = qualified;
+                    member.type = getIRType(field.type.get());
+                    member.valueId = currentFunction_->allocateValueId();
+                    member.storage = StorageQualifier::Uniform;
+                    member.sourceOrdinal = sourceOrdinal;
+                    currentFunction_->parameters.push_back(member);
+                    nameToValue_[qualified] = member.valueId;
+                }
+            }
+        }
         IRParameter irParam;
         irParam.sourceOrdinal = sourceOrdinal;
         irParam.name = param->name;
@@ -1696,6 +1737,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                     auto load = std::make_unique<IRInstruction>(IROp::LoadAttribute, value, elementType);
                     load->semanticName = semantic;
                     load->rawSemanticName = field.semantic.rawName;
+                    load->inferredSemantic = field.semantic.inferred;
                     load->semanticIndex = base + (repeated ? 0 : i);
                     load->structParamName = root;
                     load->fieldName = path + "[" + std::to_string(i) + "]";
@@ -2864,6 +2906,7 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                             output->addOperand(elements[i]);
                             output->semanticName = field.semantic.name;
                             output->rawSemanticName = field.semantic.rawName;
+                            output->inferredSemantic = field.semantic.inferred;
                             output->semanticIndex = field.semantic.index + static_cast<int>(i);
                             output->fieldName = fieldPath + "[" + std::to_string(i) + "]";
                             currentBlock_->addInstruction(std::move(output));
@@ -2949,6 +2992,7 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                     inst->addOperand(fieldValue);
                     inst->semanticName    = field.semantic.name;
                     inst->rawSemanticName = field.semantic.rawName;
+                    inst->inferredSemantic = field.semantic.inferred;
                     inst->semanticIndex   = field.semantic.index;
                     inst->fieldName       = fieldPath;
                     currentBlock_->addInstruction(std::move(inst));
@@ -5184,6 +5228,7 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
                                 valueId, fieldType);
                             inst->semanticName     = field.semantic.name;
                             inst->rawSemanticName  = field.semantic.rawName;
+                            inst->inferredSemantic = field.semantic.inferred;
                             inst->semanticIndex    = field.semantic.isEmpty()
                                 ? static_cast<int>(fieldIdx)
                                 : field.semantic.index;
@@ -6948,6 +6993,7 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                                 inst->addOperand(value);
                                 inst->semanticName    = field.semantic.name;
                                 inst->rawSemanticName = field.semantic.rawName;
+                                inst->inferredSemantic = field.semantic.inferred;
                                 inst->semanticIndex   = field.semantic.index;
                                 inst->fieldName       = memberExpr->member;
                                 currentBlock_->addInstruction(std::move(inst));
@@ -7329,6 +7375,7 @@ void IRBuilder::emitStructOutputs(ExprNode* structExpr, const std::vector<Struct
             inst->addOperand(fieldValue);
             inst->semanticName    = field.semantic.name;
             inst->rawSemanticName = field.semantic.rawName;
+            inst->inferredSemantic = field.semantic.inferred;
             inst->semanticIndex   = field.semantic.index;
             inst->fieldName       = field.name;
             currentBlock_->addInstruction(std::move(inst));

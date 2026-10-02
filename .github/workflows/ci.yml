@@ -570,6 +570,8 @@ jobs:
         run: bash tests/shader-compiler/backend-diagnostics-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Uniform struct entry parameters as one uniform per member
         run: bash tests/shader-compiler/uniform-struct-param-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Fragment inputs with no semantic and uniform members of a varying struct
+        run: bash tests/shader-compiler/implicit-varying-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns under compile-time-constant conditions judged by value
         run: bash tests/shader-compiler/helper-const-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test helper parameter default arguments
