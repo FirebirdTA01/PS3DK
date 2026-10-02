@@ -4938,54 +4938,52 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
 
 std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
 {
-    if (!e) return std::nullopt;
-    switch (e->kind)
-    {
-    case ExprKind::Literal:
-    {
-        ConstEvalScalar v;
-        if (evaluateConstScalar(e, v)) return v.isTruthy();
-        return std::nullopt;
-    }
-    case ExprKind::Identifier:
-    {
-        const auto* id = static_cast<const IdentifierExpr*>(e);
-        if (nameToValue_.count(id->name)) return std::nullopt;   // a local or parameter shadows it
-        const IRGlobal* g = module_->findGlobal(id->name);
-        if (!g || g->storage != StorageQualifier::Const || g->type.isVector() ||
-            g->type.isMatrix() || g->type.isArray())
-            return std::nullopt;
-        if (g->initialIntValues.size() == 1) return g->initialIntValues[0] != 0;
-        if (g->initialValue.size() == 1) return g->initialValue[0] != 0.0f;
-        return std::nullopt;
-    }
-    case ExprKind::Unary:
-    {
-        const auto* u = static_cast<const UnaryExpr*>(e);
-        if (u->op != UnaryOp::LogicalNot) return std::nullopt;
-        if (const auto v = constCondition(u->operand.get())) return !*v;
-        return std::nullopt;
-    }
-    case ExprKind::Binary:
-    {
-        const auto* b = static_cast<const BinaryExpr*>(e);
-        if (b->op != BinaryOp::LogicalAnd && b->op != BinaryOp::LogicalOr &&
-            b->op != BinaryOp::Equal && b->op != BinaryOp::NotEqual)
-            return std::nullopt;
-        const auto l = constCondition(b->left.get());
-        const auto r = constCondition(b->right.get());
-        if (!l || !r) return std::nullopt;
-        switch (b->op)
+    // Any name the function binds itself (a local or parameter) shadows the
+    // file-scope constant of that name: not a constant here.  An expression
+    // kind not walked below is treated the same way.
+    std::function<bool(const ExprNode*)> namesLocal = [&](const ExprNode* x) -> bool {
+        if (!x) return false;
+        switch (x->kind)
         {
-        case BinaryOp::LogicalAnd: return *l && *r;
-        case BinaryOp::LogicalOr:  return *l || *r;
-        case BinaryOp::Equal:      return *l == *r;
-        default:                   return *l != *r;
+        case ExprKind::Literal:
+            return false;
+        case ExprKind::Identifier:
+            return nameToValue_.count(static_cast<const IdentifierExpr*>(x)->name) != 0;
+        case ExprKind::Unary:
+            return namesLocal(static_cast<const UnaryExpr*>(x)->operand.get());
+        case ExprKind::Binary:
+        {
+            const auto* b = static_cast<const BinaryExpr*>(x);
+            return namesLocal(b->left.get()) || namesLocal(b->right.get());
         }
-    }
-    default:
+        case ExprKind::Ternary:
+        {
+            const auto* t = static_cast<const TernaryExpr*>(x);
+            return namesLocal(t->condition.get()) || namesLocal(t->thenExpr.get()) ||
+                   namesLocal(t->elseExpr.get());
+        }
+        case ExprKind::Cast:
+            return namesLocal(static_cast<const CastExpr*>(x)->operand.get());
+        case ExprKind::MemberAccess:
+            return namesLocal(static_cast<const MemberAccessExpr*>(x)->object.get());
+        case ExprKind::Constructor:
+            for (const auto& arg : static_cast<const ConstructorExpr*>(x)->arguments)
+                if (namesLocal(arg.get())) return true;
+            return false;
+        default:
+            return true;
+        }
+    };
+    if (!e || namesLocal(e)) return std::nullopt;
+    // The file-scope initialiser evaluator is the one constant semantics:
+    // typed scalar arithmetic and comparisons (1 == 2 is false, not "both
+    // truthy"), and only a STATIC const is a constant - a plain file-scope
+    // const is a uniform with a default in the reference.
+    ConstLanes lanes;
+    ConstShape shape;
+    if (!evaluateConstValue(e, lanes, shape, module_.get()) || lanes.size() != 1 || !shape.isScalar())
         return std::nullopt;
-    }
+    return lanes[0].isTruthy();
 }
 
 IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)

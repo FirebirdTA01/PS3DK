@@ -37,6 +37,12 @@ REFUSE = {
     'runtime_condition': """float4 decode(const float4 c) { if (c.x > 0.5) { return c * 2.0; } else { return c; } }
 float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t); }
 """,
+    # A file-scope const WITHOUT static is a uniform with a default in the
+    # reference, so its condition is run-time here, never folded.
+    'nonstatic_const': """const bool lin = true;
+float4 decode(const float4 c) { if (lin) { return c * 2.0; } else { return c; } }
+float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t); }
+""",
     'shadowed_constant': """static const bool lin = true;
 float4 decode(const float4 c, bool lin) { if (lin) { return c * 2.0; } else { return c; } }
 float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t, t.y > 0.5); }
@@ -53,6 +59,23 @@ float4 scale(const float4 c)
 }
 float4 main(float4 t : TEXCOORD0) : COLOR { return scale(t); }
 """
+# Conditions fold by TYPED value (review: codex - 1 == 2 once folded true
+# as "both truthy").  COND picks the helper's first return (c * 2) when true,
+# else the second (c * 3); every expected arm was measured on the reference.
+PICK = """static const int K = 3;
+static const int L = 4;
+static const float F = 0.5;
+float4 pick(const float4 c)
+{{
+    if ({cond}) {{ return c * 2.0; }}
+    else {{ return c * 3.0; }}
+}}
+float4 main(float4 t : TEXCOORD0) : COLOR {{ return pick(t); }}
+"""
+PICK_ROWS = [('1 == 2', False), ('1 != 2', True), ('2 == 2', True), ('K == L', False),
+             ('K != L', True), ('!(K != L)', False), ('K < L', True), ('(K < L) == false', False),
+             ('F == 0.5', True), ('F > 0.75 || K == 3', True), ('K == 3 && L == 3', False),
+             ('K * 2 == 6', True), ('-K == 3', False)]
 GRID = [-1.0, -0.25, 0.0, 0.5, 0.75, 1.0]
 
 
@@ -106,6 +129,19 @@ def main():
             print('  %-24s %s' % ('scoped_local', 'outer k returned' if not bad else 'WRONG on %d' % bad))
             if bad:
                 failures.append('scoped_local: inner block local leaked on %d inputs' % bad)
+        for i, (cond, first) in enumerate(PICK_ROWS):
+            name = 'pick_%d' % i
+            rc, blob, err = compile_one(args.compiler, work, name, PICK.format(cond=cond))
+            if rc != 0 or not blob:
+                failures.append('%s (%s) refused: %s' % (name, cond, (err.strip().splitlines() or ['?'])[-1]))
+                print('  %-24s REFUSED  %s' % (name, cond))
+                continue
+            k = 2.0 if first else 3.0
+            bad = sum(1 for a, b in rng_inputs
+                      if fp_eval.evaluate(blob, {'TEX0': [a, b, b, a]}) != [a * k, b * k, b * k, a * k])
+            print('  %-24s %s  %s' % (name, 'values ok' if not bad else 'WRONG on %d' % bad, cond))
+            if bad:
+                failures.append('%s (%s) picked the wrong return on %d inputs' % (name, cond, bad))
         for name, text in REFUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
             ok = rc == 1 and not blob and 'a return inside control flow' in err
