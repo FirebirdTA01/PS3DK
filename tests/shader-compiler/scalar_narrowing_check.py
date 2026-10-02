@@ -44,6 +44,8 @@ ROWS = {
     # an int vector into a float scalar converts lane x
     'int_vector_to_float': ('float4 main(float4 t : TEXCOORD0) : COLOR { int2 i = int2(t.xz * 4.0); float a = i; return float4(a, 0, 0, 1); }\n',
                             [2.0, 0.0, 0.0, 1.0]),
+    'int_vector_to_half': ('float4 main(float4 t : TEXCOORD0) : COLOR { int2 i = int2(t.xz * 4.0); half a = i; return float4(a, 0, 0, 1); }\n',
+                           [2.0, 0.0, 0.0, 1.0]),
     # a declaration narrows a vector to a shorter vector too (leading lanes;
     # the parent refused this as a vec construction of the wrong width)
     'vector_narrowing': ('float4 main(float4 t : TEXCOORD0) : COLOR { float2 a = t.zyx; return float4(a, 0, 1); }\n',
