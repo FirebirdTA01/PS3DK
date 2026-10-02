@@ -60,6 +60,8 @@ bool g_padOk;
 bool g_started;              /* rows start on X, or after kAutoStartUs */
 uint64_t g_waitStart;
 constexpr uint64_t kAutoStartUs = 30000000;
+/* the LIVE panel sits under the last row, wherever that is */
+constexpr float kRowTop = 0.15f, kRowPitch = 0.019f;
 
 void on_sysutil(uint64_t status, uint64_t, void *)
 {
@@ -146,8 +148,9 @@ void draw(unsigned frame)
     if (!g_started) {
         const uint64_t waited = t - g_waitStart;
         const unsigned left = waited >= kAutoStartUs ? 0u : (unsigned)((kAutoStartUs - waited + 999999u) / 1000000u);
-        text(0.20f, 0.45f, 1.4f, kAmber, g_padOk ? "press X to start the SPURS tests" : "no pad: starting automatically");
-        text(0.20f, 0.52f, 0.9f, kDim, "auto-start in %us   -   START exits", left);
+        const float wy = kRowTop + kRowCount * kRowPitch + 0.03f;
+        text(0.12f, wy, 1.2f, kAmber, g_padOk ? "press X to start the SPURS tests" : "no pad: starting automatically");
+        text(0.12f, wy + 0.05f, 0.85f, kDim, "auto-start in %us   -   START exits", left);
     }
     text(0.30f, 0.05f, 0.9f, kDim, "PPU <-> SPU runtime check   %c   %4.1fs",
          g_done ? ' ' : spin, (double)(t - g_t0) / 1e6);
@@ -157,8 +160,8 @@ void draw(unsigned frame)
     text(0.62f, 0.09f, 0.9f, kWhite, "pass %u   fail %u", passed, failed);
 
     /* board */
-    float y = 0.15f;
-    for (unsigned i = 0; i < kRowCount; ++i, y += 0.021f) {   /* 18 rows end above LIVE */
+    float y = kRowTop;
+    for (unsigned i = 0; i < kRowCount; ++i, y += kRowPitch) {
         const RowStatus &r = g_rows[i];
         const char *badge = " --- ";
         uint32_t color = kDim;
@@ -171,10 +174,10 @@ void draw(unsigned frame)
         case SKIPPED: badge = " skip"; color = kDim; break;
         }
         uint64_t end = r.state == RUNNING || r.state == TIMEOUT ? t : r.end;
-        text(0.04f, y, 0.8f, color, "[%s]", badge);
-        text(0.13f, y, 0.8f, r.state == PENDING ? kDim : kWhite, "%-24s", kRows[i].name);
+        text(0.04f, y, 0.75f, color, "[%s]", badge);
+        text(0.13f, y, 0.75f, r.state == PENDING ? kDim : kWhite, "%-24s", kRows[i].name);
         if (r.state != PENDING && r.state != SKIPPED)
-            text(0.40f, y, 0.8f, kDim, "%6.2fs", end > r.start ? (double)(end - r.start) / 1e6 : 0.0);
+            text(0.40f, y, 0.75f, kDim, "%6.2fs", end > r.start ? (double)(end - r.start) / 1e6 : 0.0);
         if (r.state == FAILED || r.state == INVALID)
             text(0.48f, y, 0.7f, kRed, "%.60s", r.verdict);
     }
@@ -182,7 +185,7 @@ void draw(unsigned frame)
     /* live panel for the running row */
     unsigned cur = g_current;
     const suite::live_view &v = suite::live();
-    float py = 0.54f;
+    const float py = kRowTop + kRowCount * kRowPitch + 0.015f;
     text(0.04f, py, 0.9f, kCyan, "LIVE");
     if (cur < kRowCount) {
         RowStatus &r = g_rows[cur];
@@ -190,25 +193,25 @@ void draw(unsigned frame)
         if (r.state == RUNNING && t > r.start && t - r.start > kRowTimeout)
             r.state = TIMEOUT;
         text(0.12f, py, 0.9f, kWhite, "%s", kRows[cur].name);
-        text(0.04f, py + 0.04f, 0.85f, kAmber, "%c PPU: %s", r.state == RUNNING ? spin : '!', v.activity);
+        text(0.04f, py + 0.03f, 0.8f, kAmber, "%c PPU: %s", r.state == RUNNING ? spin : '!', v.activity);
         unsigned n = v.logCount < (unsigned)suite::LOG_LINES ? v.logCount : (unsigned)suite::LOG_LINES;
         for (unsigned k = 1; k < n; ++k) {
             unsigned idx = (v.logCount - 1 - k) % suite::LOG_LINES;
-            text(0.06f, py + 0.04f + 0.03f * k, 0.7f, kDim, "%s", v.log[idx]);
+            text(0.06f, py + 0.03f + 0.022f * k, 0.62f, kDim, "%s", v.log[idx]);
         }
         /* SPU task slots */
-        float sy = py + 0.25f;
+        const float sy = py + 0.04f + 0.022f * suite::LOG_LINES + 0.005f;
         if (v.nSlots)
             text(0.04f, sy, 0.85f, kBlue, "SPU tasks");
         for (unsigned k = 0; k < v.nSlots; ++k) {
             const volatile result_slot &s = v.slots[k];
-            float x = 0.04f + (k % 3) * 0.31f, yy = sy + 0.035f * (1 + k / 3);
+            float x = 0.04f + (k % 4) * 0.235f, yy = sy + 0.028f * (1 + k / 4);
             if (s.magic != (RESULT_MAGIC | k))
-                text(x, yy, 0.7f, kDim, "task %2u  %c running / waiting", k, spin);
+                text(x, yy, 0.6f, kDim, "task %2u  %c running / waiting", k, spin);
             else if (s.status == 0)
-                text(x, yy, 0.7f, kGreen, "task %2u  done  v=%x", k, s.value);
+                text(x, yy, 0.6f, kGreen, "task %2u  done  v=%x", k, s.value);
             else
-                text(x, yy, 0.7f, kRed, "task %2u  rc=%08x step %u", k, s.status, s.value);
+                text(x, yy, 0.6f, kRed, "task %2u  rc=%08x step %u", k, s.status, s.value);
         }
     } else if (g_done) {
         text(0.12f, py, 0.9f, failed ? kRed : kGreen,
