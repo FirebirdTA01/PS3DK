@@ -268,6 +268,8 @@ private:
 
     // Helper methods
     bool checkAssignment(const CgType& target, const CgType& value, const SourceLocation& loc);
+    // A vector stored into a scalar keeps lane x (reference: C7011 warning).
+    bool allowsScalarNarrowing(const CgType& target, const CgType& value) const;
     bool checkCondition(ExprNode* expr);
     bool isLvalue(ExprNode* expr);
     void validateSwizzle(MemberAccessExpr* expr, const CgType& objectType);

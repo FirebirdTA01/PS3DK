@@ -2854,6 +2854,8 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
         }
 
         IRValueID retValue = buildExpr(stmt->value.get());
+        if (currentFunctionDecl_)
+            retValue = narrowToScalar(currentFunctionDecl_->returnType.get(), stmt->value.get(), retValue);
 
         // Non-struct return with a semantic on the return type itself
         // (e.g. `float4 main(...) : COLOR { return color; }`) — emit a
@@ -3288,6 +3290,20 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
                     initValue = emitVectorNarrowing(initType, declaredType, initValue, varDecl->loc);
                 else
                     initValue = emitNumericToBool(initType, declaredType, initValue, varDecl->loc);
+            }
+            else if (declaredType.arraySize == 0 && !declaredType.isMatrix() && declaredType.isVector() &&
+                     initType.isVector() && initType.arraySize == 0 && !initType.isMatrix() &&
+                     initType.componentCount() > declaredType.componentCount())
+            {
+                // float2 a = t.zyx keeps the leading lanes (t.zy), as an
+                // assignment already does (measured).
+                initValue = emitVectorNarrowing(initType, declaredType, initValue, varDecl->loc);
+            }
+            else if (declaredType.arraySize == 0 && !declaredType.isMatrix() && !declaredType.isVector() &&
+                     declaredType.baseType != IRType::Void && getStructFields(varDecl->type.get()) == nullptr &&
+                     initType.isVector() && initType.arraySize == 0 && !initType.isMatrix())
+            {
+                initValue = emitScalarNarrowing(initType, declaredType, initValue, varDecl->loc);
             }
             // For now, just use the initializer value as the variable value
             nameToValue_[varDecl->name] = initValue;
@@ -4020,6 +4036,16 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
             case BinaryOp::DivAssign: op = IROp::Div; break;
             case BinaryOp::ModAssign: op = IROp::Mod; break;
             default: op = IROp::Add; break;
+            }
+            // a op= v with a scalar a and a vector v is a op v.x (measured:
+            // the reference computes the vector and keeps lane x).
+            {
+                const IRTypeInfo leftType = getExprType(expr->left.get());
+                const IRTypeInfo rightType = getExprType(expr->right.get());
+                if (!leftType.isVector() && !leftType.isMatrix() && leftType.arraySize == 0 &&
+                    rightType.isVector() && !rightType.isMatrix() && rightType.arraySize == 0 &&
+                    leftType.baseType != IRType::Bool)
+                    rhsValue = emitScalarNarrowing(rightType, leftType, rhsValue, expr->loc);
             }
             rhsValue = emitBinaryOp(op, getExprType(expr->left.get()), lhsValue, rhsValue);
             if (arrayTarget)
@@ -5055,6 +5081,7 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 continue;
             }
             result = buildExpr(ret->value.get());
+            result = narrowToScalar(callee->returnType.get(), ret->value.get(), result);
             sawReturn = true;
             continue;
         }
@@ -7409,6 +7436,45 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
     return value;
 }
 
+// A vector stored into a numeric scalar keeps lane x, converted to the
+// scalar's type (measured on the reference; allowsScalarNarrowing).
+IRValueID IRBuilder::emitScalarNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
+                                         IRValueID value, const SourceLocation& loc)
+{
+    IRTypeInfo laneType = targetType;
+    laneType.baseType = sourceType.elementType;
+    const IRValueID lane = emitInstruction(IROp::VecExtract, laneType,
+        {value, createConstant(static_cast<int32_t>(0))}, loc);
+    const IRType from = sourceType.elementType, to = targetType.baseType;
+    if (from == to) return lane;
+    if ((from == IRType::Float32 || from == IRType::Float16) &&
+        (to == IRType::Int32 || to == IRType::UInt32))
+        return emitInstruction(IROp::FloatToInt, targetType, {lane}, loc);
+    if (from == IRType::Float32 && to == IRType::Float16)
+        return emitInstruction(IROp::FloatToHalf, targetType, {lane}, loc);
+    if (from == IRType::Float16 && to == IRType::Float32)
+        return emitInstruction(IROp::HalfToFloat, targetType, {lane}, loc);
+    if ((from == IRType::Int32 || from == IRType::UInt32) &&
+        (to == IRType::Float32 || to == IRType::Float16))
+        return emitInstruction(IROp::IntToFloat, targetType, {lane}, loc);
+    return lane;
+}
+
+// A vector returned from a function declared to return a numeric scalar
+// keeps lane x (measured: float f() { return t.zyx; } is t.z).
+IRValueID IRBuilder::narrowToScalar(TypeNode* declared, ExprNode* valueExpr, IRValueID value)
+{
+    if (!declared || !valueExpr || value == InvalidIRValue) return value;
+    const IRTypeInfo to = getIRType(declared);
+    const IRTypeInfo from = getExprType(valueExpr);
+    if (to.isVector() || to.isMatrix() || to.arraySize != 0 || to.baseType == IRType::Void ||
+        to.baseType == IRType::Bool || getStructFields(declared))
+        return value;
+    if (!from.isVector() || from.isMatrix() || from.arraySize != 0)
+        return value;
+    return emitScalarNarrowing(from, to, value, valueExpr->loc);
+}
+
 IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
 {
     if (value == InvalidIRValue || !target || !currentFunction_)
@@ -7433,6 +7499,21 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
                 return emitVectorNarrowing(sourceType, targetType, value, target->loc);
             return emitNumericToBool(sourceType, targetType, value, target->loc);
         }
+    }
+    // A vector into a numeric scalar keeps lane x, converted to the scalar's
+    // type (allowsScalarNarrowing in the semantic pass; measured).  The
+    // source's type is found the way the bool path above finds it: the value
+    // map holds constants only.
+    if (targetType.arraySize == 0 && !targetType.isMatrix() && !targetType.isVector())
+    {
+        IRTypeInfo sourceType = srcValue ? srcValue->type : IRTypeInfo::Void();
+        for (const auto& parameter : currentFunction_->parameters)
+            if (parameter.valueId == value) sourceType = parameter.type;
+        for (const auto& block : currentFunction_->blocks)
+            for (const auto& instruction : block->instructions)
+                if (instruction->result == value) sourceType = instruction->resultType;
+        if (sourceType.isVector() && sourceType.arraySize == 0 && !sourceType.isMatrix())
+            return emitScalarNarrowing(sourceType, targetType, value, target->loc);
     }
     if (!srcValue) return value;
 

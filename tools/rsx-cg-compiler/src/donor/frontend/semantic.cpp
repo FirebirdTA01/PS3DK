@@ -619,7 +619,7 @@ void SemanticAnalyzer::analyzeVarDecl(VarDecl* decl)
     if (decl->initializer)
     {
         CgType initType = analyzeExpr(decl->initializer.get());
-        if (!initType.isError())
+        if (!initType.isError() && !allowsScalarNarrowing(varType, initType))
         {
             checkAssignment(varType, initType, decl->initializer->loc);
         }
@@ -787,7 +787,8 @@ void SemanticAnalyzer::analyzeReturnStmt(ReturnStmt* stmt)
     if (stmt->value)
     {
         CgType valueType = analyzeExpr(stmt->value.get());
-        if (!valueType.isError() && !returnType.isVoid())
+        if (!valueType.isError() && !returnType.isVoid() &&
+            !allowsScalarNarrowing(returnType, valueType))
         {
             checkAssignment(returnType, valueType, stmt->value->loc);
         }
@@ -974,7 +975,8 @@ CgType SemanticAnalyzer::analyzeBinaryExpr(BinaryExpr* expr)
             error(expr->left->loc, "expression is not assignable");
             return CgType::Error();
         }
-        if (!checkAssignment(leftType, rightType, expr->right->loc))
+        const bool narrowing = allowsScalarNarrowing(leftType, rightType);
+        if (!narrowing && !checkAssignment(leftType, rightType, expr->right->loc))
         {
             return CgType::Error();
         }
@@ -1612,6 +1614,20 @@ CgType SemanticAnalyzer::resolveType(TypeNode* typeNode) const
     }
 
     return CgType(std::make_shared<TypeNode>(*typeNode));
+}
+
+// A numeric VECTOR stored into a numeric SCALAR - by a declaration's
+// initialiser, an assignment (compound included: a op= v is a op v.x) or a
+// return - keeps lane x, converted to the scalar's type.
+// Measured on the reference (C7011 warning, accepted): float a = t.xyz is
+// t.x, a = t.yz is t.y, half a = t.zw is t.z, int a = t.xy truncates t.x.
+// libretro's ddt-waterpaint / 2xbr / oldtv and ogre HeatVision rely on it.
+// Function ARGUMENTS are not widened by this (overload resolution).
+bool SemanticAnalyzer::allowsScalarNarrowing(const CgType& target, const CgType& value) const
+{
+    return !target.isError() && !value.isError() &&
+           target.isScalar() && value.isVector() &&
+           target.isNumeric() && value.isNumeric();
 }
 
 bool SemanticAnalyzer::checkAssignment(const CgType& target, const CgType& value,
