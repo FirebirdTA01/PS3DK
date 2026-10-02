@@ -1093,7 +1093,16 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             const bool isInitialisedUniform =
                 varDecl->storage == StorageQualifier::Uniform &&
                 varDecl->initializer != nullptr;
-            if (isFileScopeConst || isInitialisedUniform)
+            // A mutable `static` starts each invocation at its initialiser
+            // (measured: `static float k = 0.5;` read before any write folds
+            // to 0.5, `static float2 aspect = float2(1.0, 0.5)` to the pair,
+            // a brace-initialised static array to its elements).  The value
+            // is bound at the entry's start, and writes rebind it like any
+            // other file-scope name.
+            const bool isInitialisedStatic =
+                varDecl->storage == StorageQualifier::Static &&
+                varDecl->initializer != nullptr;
+            if (isFileScopeConst || isInitialisedUniform || isInitialisedStatic)
             {
                 if (!evaluateConstInitializerTyped(varDecl->initializer.get(),
                                                    varDecl->type.get(),
@@ -1110,7 +1119,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                     // until something patches it.
                     error(varDecl->loc,
                           std::string("file-scope ") +
-                          (isFileScopeConst ? "const '" : "uniform '") +
+                          (isFileScopeConst ? "const '" : isInitialisedStatic ? "static '" : "uniform '") +
                           varDecl->name +
                           "' has an initialiser this compiler cannot evaluate; "
                           "refusing rather than compiling it as zero");
@@ -1775,6 +1784,43 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             if (param->storage != StorageQualifier::Uniform &&
                 param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)
                 seedInputs(seedInputs, param->type.get(), param->name, "");
+    }
+
+    // A mutable file-scope `static` with an initialiser starts the program
+    // at that value.  Bound here, at the entry's start, so a read before any
+    // write is the initialiser and every write - the entry's own or an
+    // inlined helper's, which share these bindings - rebinds it the way an
+    // assigned file-scope name already does.  An array binds per element.
+    if (currentFunction_->isEntryPoint)
+    {
+        for (const IRGlobal& g : module_->globals)
+        {
+            if (g.storage != StorageQualifier::Static) continue;
+            if (g.initialValue.empty() && g.initialIntValues.empty()) continue;
+            if (g.type.arraySize > 0 && !g.type.isMatrix())
+            {
+                IRTypeInfo element = g.type;
+                element.arraySize = 0;
+                const size_t width = static_cast<size_t>(element.componentCount());
+                auto& values = localArrayValues_[g.name];
+                values.clear();
+                for (int i = 0; i < g.type.arraySize; ++i)
+                {
+                    const size_t at = static_cast<size_t>(i) * width;
+                    std::vector<float> lanes;
+                    std::vector<int64_t> intLanes;
+                    if (at + width <= g.initialValue.size())
+                        lanes.assign(g.initialValue.begin() + at, g.initialValue.begin() + at + width);
+                    if (at + width <= g.initialIntValues.size())
+                        intLanes.assign(g.initialIntValues.begin() + at,
+                                        g.initialIntValues.begin() + at + width);
+                    values.push_back(materialiseInitialiser(element, lanes, intLanes));
+                }
+                continue;
+            }
+            const IRValueID value = materialiseInitialiser(g.type, g.initialValue, g.initialIntValues);
+            if (value != InvalidIRValue) nameToValue_[g.name] = value;
+        }
     }
 
     // Build function body
@@ -3466,6 +3512,47 @@ IRValueID IRBuilder::buildLiteralExpr(LiteralExpr* expr)
     }
 }
 
+// A file-scope initialiser recorded on a global, as a typed IRConstant in
+// the current function: a const's every read, and a mutable static's value
+// at entry.  InvalidIRValue when there is nothing to build.
+IRValueID IRBuilder::materialiseInitialiser(const IRTypeInfo& type,
+                                            const std::vector<float>& values,
+                                            const std::vector<int64_t>& intValues)
+{
+    if (intValues.size() == 1)
+    {
+        const int64_t raw = intValues[0];
+        switch (type.baseType)
+        {
+        case IRType::Bool:
+            return createConstant(raw != 0);
+        case IRType::Int32:
+            return createConstant(static_cast<int32_t>(raw));
+        case IRType::UInt32:
+            return createConstant(static_cast<uint32_t>(raw));
+        default:
+            break;
+        }
+    }
+    if (values.empty()) return InvalidIRValue;
+    if (values.size() == 1)
+    {
+        const float raw = values[0];
+        switch (type.baseType)
+        {
+        case IRType::Bool:
+            return createConstant(raw != 0.0f);
+        case IRType::Int32:
+            return createConstant(static_cast<int32_t>(raw));
+        case IRType::UInt32:
+            return createConstant(static_cast<uint32_t>(raw));
+        default:
+            return createConstant(type, raw);
+        }
+    }
+    return createConstant(type, values, intValues);
+}
+
 IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
 {
     // Look up in local names first
@@ -3486,43 +3573,9 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
         if (global->storage == StorageQualifier::Const &&
             (!global->initialValue.empty() || !global->initialIntValues.empty()))
         {
-            if (!global->initialIntValues.empty())
-            {
-                if (global->initialIntValues.size() == 1)
-                {
-                    const int64_t raw = global->initialIntValues[0];
-                    switch (global->type.baseType)
-                    {
-                    case IRType::Bool:
-                        return createConstant(raw != 0);
-                    case IRType::Int32:
-                        return createConstant(static_cast<int32_t>(raw));
-                    case IRType::UInt32:
-                        return createConstant(static_cast<uint32_t>(raw));
-                    default:
-                        break;
-                    }
-                }
-            }
-            if (!global->initialValue.empty())
-            {
-                if (global->initialValue.size() == 1)
-                {
-                    const float raw = global->initialValue[0];
-                    switch (global->type.baseType)
-                    {
-                    case IRType::Bool:
-                        return createConstant(raw != 0.0f);
-                    case IRType::Int32:
-                        return createConstant(static_cast<int32_t>(raw));
-                    case IRType::UInt32:
-                        return createConstant(static_cast<uint32_t>(raw));
-                    default:
-                        return createConstant(global->type, raw);
-                    }
-                }
-                return createConstant(global->type, global->initialValue, global->initialIntValues);
-            }
+            const IRValueID folded = materialiseInitialiser(global->type, global->initialValue,
+                                                            global->initialIntValues);
+            if (folded != InvalidIRValue) return folded;
         }
 
         // Emit load from global

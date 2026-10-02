@@ -10,8 +10,8 @@
 #    - 'static const int A=5, B=2; float(A/B)' evaluates integer division to 2 (0x40000000),
 #      NOT float division 2.5 (0x40200000).
 #    - 'static const int K=7; float(K & 3)' folds bitwise AND to 3.0f (0x40400000).
-# 4. Plain mutable static ('static float s = 2.0') with helper mutation is REFUSED
-#    rather than silently compiled to wrong numbers (parent refuses unregistered 's').
+# 4. Plain mutable static ('static float s = 2.0') with helper mutation starts at
+#    its initialiser and sees the helper's write: (3, 3, 0, 1), as the reference.
 # 5. Zero uniform slots: the container parameter table carries 0 uniform parameters
 #    for static const and const static variables.
 # 6. Ucode carries immediate constant values: 255.0f (0x437f0000), 2.0f (0x40000000).
@@ -731,7 +731,7 @@ if inst_count != 3:
 PY
 
 # -----------------------------------------------------------------------------
-# Row 4: Bare mutable static exclusion / refusal (negative compile check)
+# Row 4: Bare mutable static starts at its initialiser (value check)
 # -----------------------------------------------------------------------------
 cat >"$work/neg_mutable_static.cg" <<'EOF'
 static float s = 2.0;
@@ -747,15 +747,19 @@ EOF
 
 mut_fpo="$work/neg_mutable_static.fpo"
 mut_log="$work/neg_mutable_static.log"
-mut_rc=0
-"$compiler" -p sce_fp_rsx --emit-container "$mut_fpo" "$work/neg_mutable_static.cg" >"$mut_log" 2>&1 || mut_rc=$?
-refusal_status "$mut_rc" "bare mutable static helper mutation"
-[[ "$mut_rc" -eq 1 ]] || fail "bare mutable static helper mutation exited $mut_rc, expected 1"
-[[ ! -e "$mut_fpo" ]] || fail "bare mutable static helper mutation produced a container; must be refused"
-grep -q "ldunif of 's' has no registered uniform source" "$mut_log" || {
+"$compiler" -p sce_fp_rsx --emit-container "$mut_fpo" "$work/neg_mutable_static.cg" >"$mut_log" 2>&1 || {
     tail -n 10 "$mut_log" >&2
-    fail "bare mutable static failed without expected diagnostic 'ldunif of s'"
+    fail "bare mutable static helper mutation was refused; it starts at its initialiser"
 }
+# The reference: the static starts at 2.0, the inlined helper's write is
+# seen after the call, so the colour is (3, 3, 0, 1).
+PYTHONPATH="$repo_root/tests/shader-compiler" "$python" - "$mut_fpo" <<'PY'
+import sys
+import fp_eval
+got = fp_eval.evaluate(open(sys.argv[1], 'rb').read(), {})
+if got != [3.0, 3.0, 0.0, 1.0]:
+    raise SystemExit("FAIL: mutable static helper mutation evaluated %s, want [3.0, 3.0, 0.0, 1.0]" % got)
+PY
 
 # -----------------------------------------------------------------------------
 # Row 5: Vertex profile (vp_static_const_v.cg)

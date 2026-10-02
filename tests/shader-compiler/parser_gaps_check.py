@@ -49,6 +49,7 @@ ROWS = {
     'array_ctor_glsl': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { float o[5] = float[](0.0, 1.0, 2.0, 3.0, 4.0); return float4(o[1] * a.x, o[4], o[2] * b.y, o[3]); }' + '\\n', [0.5, 4.0, 4.0, 3.0]),
     'array_ctor_sized': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { float o[3] = float[3](a.x, b.y, a.w); return float4(o[2], o[0], o[1], 1); }' + '\\n', [1.5, 0.5, 2.0, 1.0]),
     'array_brace_int_to_float': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { float m[3] = {1, 2, 3}; return float4(m[0] * a.x, m[1], m[2], 1); }' + '\\n', [0.5, 2.0, 3.0, 1.0]),
+    'struct_multi_member': ('struct D { float2 UL, UR, M; }; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { D d; d.UL = a.xy; d.UR = b.xy; d.M = a.zw; return float4(d.UL + d.M, d.UR); }' + '\\n', [1.25, 1.25, 1.0, 2.0]),
 }
 # Named debt: commas in for clauses parse, but the static-loop unroller does
 # not recognise the induction (the reference accepts; value 0.75); it must

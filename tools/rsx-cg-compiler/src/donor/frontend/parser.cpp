@@ -966,31 +966,42 @@ std::unique_ptr<StructDecl> Parser::parseStructBody()
             continue;
         }
 
-        if (!check(TokenType::IDENTIFIER))
+        // One type may name several members, `float2 UL, UR, DL, DR, M;`
+        // (fxaa-edge-detect), each with its own array extent and semantic.
+        bool memberOk = true;
+        do
         {
-            error("Expected member name");
+            if (!check(TokenType::IDENTIFIER))
+            {
+                error("Expected member name");
+                memberOk = false;
+                break;
+            }
+
+            StructField field;
+            field.name = advance().lexeme;
+            field.type = type;
+            field.storage = memberStorage;
+
+            // Check for array brackets after field name (e.g., float4 positions[8])
+            while (check(TokenType::LBRACKET))
+            {
+                field.type = parseArrayType(field.type);
+            }
+
+            // Check for semantic
+            if (match(TokenType::COLON))
+            {
+                field.semantic = parseSemantic();
+            }
+
+            structDecl->fields.push_back(field);
+        } while (match(TokenType::COMMA));
+        if (!memberOk)
+        {
             synchronize();
             continue;
         }
-
-        StructField field;
-        field.name = advance().lexeme;
-        field.type = type;
-        field.storage = memberStorage;
-
-        // Check for array brackets after field name (e.g., float4 positions[8])
-        while (check(TokenType::LBRACKET))
-        {
-            field.type = parseArrayType(field.type);
-        }
-
-        // Check for semantic
-        if (match(TokenType::COLON))
-        {
-            field.semantic = parseSemantic();
-        }
-
-        structDecl->fields.push_back(field);
 
         consume(TokenType::SEMICOLON, "Expected ';' after struct member");
     }
