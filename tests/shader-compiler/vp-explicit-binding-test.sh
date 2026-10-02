@@ -73,12 +73,12 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-binding-') as directory:
     run('helper-shadow-scalar','uniform float4 u:C9; float4 globalValue(){return u;} float4 main(float4 p:POSITION,uniform float4 u:C20):POSITION{return p*u+globalValue();}',
         {('u',0xffffffff):(1048,9,'C9',0xffffffff,1),('u',1):(1048,20,'C20',1,1)},
         {20:[2,3,4,5],9:[7,11,13,17]},[9,5,25,19.5])
-    # Existing automatic struct allocation reserves its parent at c467;
-    # the oracle omits that slot (a separate layout difference). Preserve
-    # the leaf reads at our declared c466/c465 through owner propagation.
+    # The struct's own record is never read, so it takes no register and
+    # the leaves start at c467 as in the oracle (t_67b3362b); the leaf
+    # reads still resolve through owner propagation.
     run('struct-leaf-owner','struct U{float4 a;float4 b;}; uniform U u; float4 main(float4 p:POSITION):POSITION{return p*u.a+u.b;}',
-        {'u.a':(1048,466,'',0xffffffff,0),'u.b':(1048,465,'',0xffffffff,0)},
-        {466:[2,3,4,5],465:[7,11,13,17]},[9,5,25,19.5])
+        {'u.a':(1048,467,'',0xffffffff,0),'u.b':(1048,466,'',0xffffffff,0)},
+        {467:[2,3,4,5],466:[7,11,13,17]},[9,5,25,19.5])
     for scope in ('global','entry'):
       for spelling in ('register(C9)','C9'):
         tag=scope+'-'+spelling

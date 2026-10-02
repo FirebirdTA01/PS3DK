@@ -1235,21 +1235,37 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                 const std::vector<StructField>* fields = getStructFields(varDecl->type.get());
                 if (fields)
                 {
-                    std::string prefix = varDecl->name;
-                    for (const auto& field : *fields)
-                    {
-                        std::string qualifiedName = prefix + "." + field.name;
-                        IRTypeInfo fieldIRType = getIRType(field.type.get());
+                    // A NESTED struct member flattens by its full path
+                    // ("u.in1.a"), the way the reference lists it; before
+                    // this the inner struct became one struct-typed global no
+                    // read could use, and the program was refused.
+                    const auto flatten = [&](const auto& self, const std::vector<StructField>& members,
+                                             const std::string& prefix) -> void {
+                        for (const auto& field : members)
+                        {
+                            std::string qualifiedName = prefix + "." + field.name;
+                            if (field.type && field.type->baseType == BaseType::Struct &&
+                                !field.type->isArray())
+                            {
+                                if (const auto* inner = getStructFields(field.type.get()))
+                                {
+                                    self(self, *inner, qualifiedName);
+                                    continue;
+                                }
+                            }
+                            IRTypeInfo fieldIRType = getIRType(field.type.get());
 
-                        IRGlobal memberGlobal;
-                        memberGlobal.name = qualifiedName;
-                        memberGlobal.type = fieldIRType;
-                        memberGlobal.valueId = module_->allocateGlobalId();
-                        memberGlobal.storage = StorageQualifier::Uniform;
+                            IRGlobal memberGlobal;
+                            memberGlobal.name = qualifiedName;
+                            memberGlobal.type = fieldIRType;
+                            memberGlobal.valueId = module_->allocateGlobalId();
+                            memberGlobal.storage = StorageQualifier::Uniform;
 
-                        module_->addGlobal(memberGlobal);
-                        nameToValue_[qualifiedName] = memberGlobal.valueId;
-                    }
+                            module_->addGlobal(memberGlobal);
+                            nameToValue_[qualifiedName] = memberGlobal.valueId;
+                        }
+                    };
+                    flatten(flatten, *fields, varDecl->name);
                 }
             }
         }
@@ -1386,9 +1402,86 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     }
 
     // Build parameters
+    int sourceOrdinal = -1;
     for (auto& param : decl->parameters)
     {
+        ++sourceOrdinal;
+        // A UNIFORM STRUCT ENTRY PARAMETER is a set of uniforms, one per
+        // member, named `param.member` and sharing the parameter's paramno
+        // (measured on the reference: `uniform input IN` lists IN.video_size,
+        // IN.texture_size, ... all at paramno 1, an unread member included
+        // and marked unreferenced; a later parameter keeps its own ordinal).
+        // Flatten it into one uniform parameter per member so every member
+        // takes the ordinary uniform-parameter path; a member read resolves
+        // through nameToValue_ by its qualified name.  Before this a member
+        // read became an attribute load indexed by the member's position and
+        // the program was refused as an unsupported input semantic (libretro
+        // COMPAT_IN_FRAGMENT's `uniform input IN`).
+        if (currentFunction_->isEntryPoint &&
+            param->storage == StorageQualifier::Uniform && param->type &&
+            param->type->baseType == BaseType::Struct && !param->type->isArray())
+        {
+            const std::vector<StructField>* fields = getStructFields(param->type.get());
+            if (fields && !fields->empty())
+            {
+                // The reference gives each member its own default record
+                // (`IN.b = 1 2`); per-member defaults are not evaluated here
+                // yet, so a default refuses by name rather than being dropped.
+                if (param->defaultValue)
+                {
+                    error(param->loc, "uniform struct entry parameter '" + param->name +
+                          "' has a default value; per-member defaults are not emitted yet "
+                          "(uniform-struct-entry-parameter), refusing rather than dropping it");
+                }
+                // Stash the file-scope bindings this parameter shadows BEFORE
+                // binding the members: the stash records each global key's
+                // current binding, so stashing after would save the
+                // parameter's members as the global's (review: codex), and a
+                // helper reading the file-scope `IN.b` would read the
+                // parameter.  The ordinary parameter path stashes first too.
+                stashShadowedGlobal(param->name);
+                // Nested struct members flatten the same way, named by their
+                // full path (the reference lists `IN.in1.a`).  Array members
+                // are not flattened yet and refuse by name.
+                const auto flatten = [&](const auto& self, const std::vector<StructField>& members,
+                                         const std::string& prefix) -> void {
+                    for (const auto& field : members)
+                    {
+                        const std::string qualified = prefix + "." + field.name;
+                        if (field.type && field.type->baseType == BaseType::Struct &&
+                            !field.type->isArray())
+                        {
+                            if (const auto* inner = getStructFields(field.type.get()))
+                            {
+                                self(self, *inner, qualified);
+                                continue;
+                            }
+                        }
+                        if (!field.type || field.type->baseType == BaseType::Struct ||
+                            field.type->isArray())
+                        {
+                            error(param->loc, "uniform struct entry parameter member '" + qualified +
+                                  "' is an array; only scalar, vector, matrix and struct members "
+                                  "are supported (uniform-struct-entry-parameter), refusing");
+                            continue;
+                        }
+                        IRParameter member;
+                        member.name = qualified;
+                        member.type = getIRType(field.type.get());
+                        member.valueId = currentFunction_->allocateValueId();
+                        member.storage = StorageQualifier::Uniform;
+                        member.sourceOrdinal = sourceOrdinal;
+                        currentFunction_->parameters.push_back(member);
+                        nameToValue_[qualified] = member.valueId;
+                    }
+                };
+                flatten(flatten, *fields, param->name);
+                flattenedUniformStructParams_.insert(param->name);
+                continue;
+            }
+        }
         IRParameter irParam;
+        irParam.sourceOrdinal = sourceOrdinal;
         irParam.name = param->name;
         irParam.type = getIRType(param->type.get());
         irParam.valueId = currentFunction_->allocateValueId();
@@ -1644,6 +1737,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     declToValue_.clear();
     nameToValue_.clear();
     undefinedFieldBases_.clear();
+    flattenedUniformStructParams_.clear();
     scope_.clear();   // every per-scope map, in one place (ScopeState)
     currentFunction_ = nullptr;
     currentFunctionDecl_ = nullptr;
@@ -2921,7 +3015,10 @@ void IRBuilder::buildExprStmt(ExprStmt* stmt)
 {
     if (stmt->expr)
     {
+        const ExprNode* outer = statementExpr_;
+        statementExpr_ = stmt->expr.get();
         buildExpr(stmt->expr.get());
+        statementExpr_ = outer;
     }
 }
 
@@ -3295,6 +3392,13 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
         return currentFunction_->nextValueId - 1;
     }
 
+    if (flattenedUniformStructParams_.count(expr->name))
+    {
+        error(expr->loc, "uniform struct entry parameter '" + expr->name +
+              "' is flattened into its members; using it as a whole value (a call "
+              "argument, a return) is not supported (uniform-struct-entry-parameter)");
+        return InvalidIRValue;
+    }
     error(expr->loc, "Unknown identifier: " + expr->name);
     return InvalidIRValue;
 }
@@ -3767,6 +3871,60 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
     // Handle assignment specially
     if (TypeOperations::isAssignmentOp(expr->op))
     {
+        // `G = IN` where IN is a flattened uniform struct entry parameter:
+        // IN has no whole-struct value, so copy its member bindings onto
+        // G's member keys (libretro: `IN_global = IN;` and helpers that
+        // read IN_global.texture_size).  A chain `H = (G = IN)` copies to
+        // every destination.  The source members are SNAPSHOT before any
+        // destination is cleared, so `IN = IN` (or an overlapping path)
+        // cannot erase what it copies (review: codex); each destination's
+        // old members are dropped so an absent source member cannot leave
+        // an older value behind.
+        if (expr->op == BinaryOp::Assign)
+        {
+            std::vector<ExprNode*> destinations{expr->left.get()};
+            ExprNode* source = expr->right.get();
+            while (source && source->kind == ExprKind::Binary &&
+                   static_cast<BinaryExpr*>(source)->op == BinaryOp::Assign)
+            {
+                destinations.push_back(static_cast<BinaryExpr*>(source)->left.get());
+                source = static_cast<BinaryExpr*>(source)->right.get();
+            }
+            if (source && source->kind == ExprKind::Identifier &&
+                flattenedUniformStructParams_.count(static_cast<IdentifierExpr*>(source)->name) &&
+                !nameToValue_.count(static_cast<IdentifierExpr*>(source)->name))
+            {
+                const std::string from = static_cast<IdentifierExpr*>(source)->name;
+                // The copy produces no value: used as one (f(G = IN), (G = IN).a)
+                // it would read nothing, so it refuses by name instead.
+                if (expr != statementExpr_)
+                {
+                    error(expr->loc, "a copy of uniform struct entry parameter '" + from +
+                          "' is only supported as a statement, not used as a value "
+                          "(uniform-struct-entry-parameter)");
+                    return InvalidIRValue;
+                }
+                std::vector<std::pair<std::string, IRValueID>> members;
+                for (const auto& entry : nameToValue_)
+                    if (entry.first.compare(0, from.size() + 1, from + ".") == 0)
+                        members.emplace_back(entry.first.substr(from.size()), entry.second);
+                for (ExprNode* destination : destinations)
+                {
+                    std::string to;
+                    if (!arrayStorageKey(destination, to))
+                    {
+                        error(expr->loc, "a uniform struct entry parameter can only be copied into a "
+                                         "named struct variable (uniform-struct-entry-parameter)");
+                        return InvalidIRValue;
+                    }
+                    for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+                        if (it->first.compare(0, to.size() + 1, to + ".") == 0) it = nameToValue_.erase(it);
+                        else ++it;
+                    for (const auto& member : members) nameToValue_[to + member.first] = member.second;
+                }
+                return InvalidIRValue;
+            }
+        }
         IRValueID rhsValue = buildExpr(expr->right.get());
 
         if (expr->op == BinaryOp::Assign)
@@ -4935,6 +5093,21 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
 
         IRValueID valueId = currentFunction_->allocateValueId();
         nameToValue_[compositeName] = valueId;
+        // A nested member of a FILE-SCOPE uniform struct ("u.in1.a") is a
+        // flattened uniform global of that full name: load it, the way the
+        // single-level path above loads "u.b".  Without this the value was
+        // allocated with no instruction behind it and lowering refused an
+        // unresolved operand - the shape a helper reading the global hits
+        // when an entry parameter of the same name shadows it.
+        if (const IRGlobal* member = module_->findGlobal(compositeName);
+            member && member->storage == StorageQualifier::Uniform)
+        {
+            auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
+                valueId, getExprType(expr));
+            inst->targetName = compositeName;
+            inst->uniformSource = member->valueId;
+            currentBlock_->addInstruction(std::move(inst));
+        }
         return valueId;
     }
 

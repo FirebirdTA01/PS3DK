@@ -113,6 +113,29 @@ inline ArrayUniformUses classifyArrayUniformUses(const IRFunction& entry)
 // is laid out in parameter order with 16-byte-aligned inline-constant
 // records after each name, so a different rendering of one element name
 // would shift every later record's bytes, not just its own string.
+// Every value the entry function READS: an instruction operand (a uniform
+// parameter is read through its value id) or the source of a LoadUniform (a
+// file-scope uniform).  The reference gives a VERTEX uniform a c[] register
+// only when it is read: an unread one is declared with no resource, register
+// -1 and isReferenced 0, and every later uniform keeps the register it would
+// have had without it (measured, vm1: unused_m / unused_v / g_unused_m).  The
+// lowering and both VP container mirrors allocate from this one set.
+inline std::set<IRValueID> vpReadUniforms(const IRFunction& entry)
+{
+    std::set<IRValueID> read;
+    for (const auto& block : entry.blocks)
+    {
+        if (!block) continue;
+        for (const auto& inst : block->instructions)
+        {
+            if (!inst) continue;
+            for (IRValueID op : inst->operands) read.insert(op);
+            if (inst->op == IROp::LoadUniform) read.insert(inst->uniformSource);
+        }
+    }
+    return read;
+}
+
 inline std::string arrayElementName(const std::string& name, int index)
 {
     return name + "[" + std::to_string(index) + "]";

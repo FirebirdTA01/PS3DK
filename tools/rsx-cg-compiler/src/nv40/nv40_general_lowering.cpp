@@ -2041,6 +2041,11 @@ private:
     {
         int nextVpMatrixConst = 256;
         int nextVpUniformConst = 467;
+        const std::set<IRValueID> vpRead = rsx_cg::vpReadUniforms(entry_);
+        // An unread, unpinned VP uniform takes no register (see vpReadUniforms).
+        const auto vpUnread = [&](IRValueID id, const void* binding) {
+            return profile_ == GeneralProfile::Vertex && !binding && !vpRead.count(id);
+        };
         // Each profile has its own unit rules (fp_sampler_bindings.h); the
         // container builds the same layout, so units and records agree.
         const auto samplerLayout = profile_ == GeneralProfile::Vertex
@@ -2146,6 +2151,15 @@ private:
             }
         };
         std::unordered_set<std::string> seenUniformNames;
+        const auto globalIsRead = [&](IRValueID id) {
+            for (const auto& block : entry_.blocks) {
+                if (!block) continue;
+                for (const auto& inst : block->instructions)
+                    if (inst && inst->op == IROp::LoadUniform && inst->uniformSource == id)
+                        return true;
+            }
+            return false;
+        };
         const bool dumpOrder = std::getenv("RSX_DUMP_ORDER") != nullptr;
         for (size_t pi = 0; pi < entry_.parameters.size(); ++pi) {
             const auto& p = entry_.parameters[pi];
@@ -2183,6 +2197,7 @@ private:
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform &&
                        p.type.isMatrix()) {
+                if (vpUnread(p.valueId, binding)) continue;
                 pendingMatrices.push_back(PendingMatrix{p.valueId, p.name,
                                                         p.type.matrixRows,
                                                         p.type.matrixCols, 0,
@@ -2230,6 +2245,7 @@ private:
                 samplerType_[p.valueId] = p.type.baseType;
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform) {
+                if (vpUnread(p.valueId, binding)) continue;
                 program_.valueToSource[p.valueId] =
                     uniformSrc(binding ? binding->registers[0] : nextVpUniformConst--, false);
             } else if (profile_ == GeneralProfile::Fragment &&
@@ -2266,10 +2282,32 @@ private:
             const auto* binding = explicitBindings.find(g.valueId);
             // A pinned global can still be read by an inlined helper when
             // an entry uniform shadows its name. It owns a separate source.
-            if (!seenUniformNames.insert(g.name).second && !binding)
+            // So does an unpinned one that a helper actually READS: a
+            // flattened `uniform input IN` parameter takes the name IN.b,
+            // and a helper naming the file-scope IN.b reads the global (the
+            // reference lists both).  An unread shadowed global still takes
+            // no source, so it costs no VP register.
+            // A global that takes no source still OWNS its FP slots: the
+            // container numbers every non-sampler uniform global in this
+            // order (cg_container_fp.cpp), so skipping one without
+            // reserving its slots shifted every later global's records onto
+            // its neighbour's const block (a helper read the right uniform,
+            // but the runtime patched the wrong record).
+            const auto reserveFpSlots = [&]() {
+                if (profile_ != GeneralProfile::Fragment || isSamplerIRType(g.type.baseType))
+                    return;
+                nextFpGlobalSlot += (g.type.isArray() || g.type.isMatrix())
+                    ? rsx_cg::fpUniformSlotCount(g.type) : 1u;
+            };
+            if (!seenUniformNames.insert(g.name).second && !binding &&
+                !globalIsRead(g.valueId)) {
+                reserveFpSlots();
                 continue;
-            if (binding && !g.type.isArray() && binding->registers[0] < 0)
+            }
+            if (binding && !g.type.isArray() && binding->registers[0] < 0) {
+                reserveFpSlots();
                 continue;
+            }
             if (g.type.isArray()) {
                 unsigned base = 0;
                 if (profile_ == GeneralProfile::Fragment) {
@@ -2296,6 +2334,7 @@ private:
                 continue;
             }
             if (profile_ == GeneralProfile::Vertex && g.type.isMatrix()) {
+                if (vpUnread(g.valueId, binding)) continue;
                 pendingMatrices.push_back(PendingMatrix{g.valueId, g.name,
                                                         g.type.matrixRows,
                                                         g.type.matrixCols, 0,
@@ -2340,6 +2379,7 @@ private:
                 samplerUnit_[g.valueId] = samplerLayout.unit(g.valueId);
                 samplerType_[g.valueId] = g.type.baseType;
             } else if (profile_ == GeneralProfile::Vertex) {
+                if (vpUnread(g.valueId, binding)) continue;
                 program_.valueToSource[g.valueId] =
                     uniformSrc(binding ? binding->registers[0] : nextVpUniformConst--, false);
             } else if (profile_ == GeneralProfile::Fragment &&
