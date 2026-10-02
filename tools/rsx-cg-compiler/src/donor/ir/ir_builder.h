@@ -106,6 +106,10 @@ private:
     // Immutable, function-local identities of unwritten vector-field bases.
     // Assignments replace nameToValue_ bindings; this set needs no branch snapshot.
     std::unordered_set<IRValueID> undefinedFieldBases_;
+    // Uniform struct ENTRY parameters flattened into one uniform per member
+    // (uniform-struct-entry-parameter): the name has no whole-struct value,
+    // only `name.member...` bindings, so a whole-struct copy copies those.
+    std::unordered_set<std::string> flattenedUniformStructParams_;
     std::unordered_map<std::string, std::vector<IRValueID>>& localArrayValues_ = scope_.arrays;
     std::unordered_map<std::string, IRValueID>& shadowedGlobals_ = scope_.shadowedGlobals;
     std::unordered_map<std::string, std::vector<IRValueID>>& shadowedGlobalArrays_ = scope_.shadowedGlobalArrays;

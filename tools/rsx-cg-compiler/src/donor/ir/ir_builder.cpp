@@ -1476,6 +1476,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                     }
                 };
                 flatten(flatten, *fields, param->name);
+                flattenedUniformStructParams_.insert(param->name);
                 continue;
             }
         }
@@ -3855,6 +3856,34 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
     // Handle assignment specially
     if (TypeOperations::isAssignmentOp(expr->op))
     {
+        // `G = IN` where IN is a flattened uniform struct entry parameter:
+        // IN has no whole-struct value, so copy its member bindings onto
+        // G's member keys (libretro: `IN_global = IN;` and helpers that
+        // read IN_global.texture_size).  Stale destination members are
+        // dropped first so an absent source member cannot leave an older
+        // value behind.
+        if (expr->op == BinaryOp::Assign && expr->right->kind == ExprKind::Identifier &&
+            flattenedUniformStructParams_.count(static_cast<IdentifierExpr*>(expr->right.get())->name) &&
+            !nameToValue_.count(static_cast<IdentifierExpr*>(expr->right.get())->name))
+        {
+            const std::string from = static_cast<IdentifierExpr*>(expr->right.get())->name;
+            std::string to;
+            if (!arrayStorageKey(expr->left.get(), to))
+            {
+                error(expr->loc, "a uniform struct entry parameter can only be copied into a named struct "
+                                 "variable (uniform-struct-entry-parameter)");
+                return InvalidIRValue;
+            }
+            for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+                if (it->first.compare(0, to.size() + 1, to + ".") == 0) it = nameToValue_.erase(it);
+                else ++it;
+            std::vector<std::pair<std::string, IRValueID>> copies;
+            for (const auto& entry : nameToValue_)
+                if (entry.first.compare(0, from.size() + 1, from + ".") == 0)
+                    copies.emplace_back(to + entry.first.substr(from.size()), entry.second);
+            for (const auto& c : copies) nameToValue_[c.first] = c.second;
+            return InvalidIRValue;
+        }
         IRValueID rhsValue = buildExpr(expr->right.get());
 
         if (expr->op == BinaryOp::Assign)

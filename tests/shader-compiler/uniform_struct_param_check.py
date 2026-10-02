@@ -78,8 +78,29 @@ struct input { inner in1; float2 b; };
 uniform input G;
 float4 main(float2 tc : TEXCOORD0) : COLOR { return float4(tc * G.b + G.in1.a, 0, 1); }
 """
+# A whole-struct copy of a flattened parameter into a file-scope struct that a
+# helper reads (libretro `IN_global = IN;`).  The destination is filled from A,
+# then REPLACED from B, and both members are read: a stale binding left from A
+# or a missed member from B shows up as a wrong value (review: codex).
+COPY_REPLACE = """struct input { float2 video_size; float2 texture_size; };
+input G;
+float2 helper() { return G.texture_size * 2.0 + G.video_size; }
+float4 main(float2 tc : TEXCOORD0, uniform input A, uniform input B) : COLOR { G = A; G = B; return float4(tc * helper(), 0, 1); }
+"""
+# A sampler member of a uniform struct parameter, reached through a global
+# sampler a helper samples (libretro `s0_global = REFERENCE.texture;`).
+# Measured: REFERENCE.texture is its own sampler record on texture unit 1
+# (resource 2049) at the struct's paramno 2.
+SAMPLER_MEMBER = """struct prev { float2 texture_size; sampler2D texture; };
+sampler2D s0_global;
+float4 helper(float2 uv) { return tex2D(s0_global, uv); }
+float4 main(float2 tc : TEXCOORD0, uniform sampler2D s0 : TEXUNIT0, uniform prev REFERENCE) : COLOR
+{ s0_global = REFERENCE.texture; return helper(tc * REFERENCE.texture_size) + tex2D(s0, tc); }
+"""
+SAMPLER2D, TEXUNIT0 = 1066, 2048
 # The reference records per-member defaults (IN.b = 1 2); not emitted yet,
-# so a struct parameter default refuses by name rather than being dropped.
+# so a struct parameter default is REFUSED (semantic analysis refuses it before
+# the IR builder's named refusal is reached) rather than silently dropped.
 STRUCT_DEFAULT = """struct input { float2 b; float k; };
 float4 main(float2 tc : TEXCOORD0, uniform input IN = { float2(1.0, 2.0), 3.0 }) : COLOR { return float4(tc * IN.b, IN.k, 1); }
 """
@@ -240,6 +261,34 @@ def main():
             print('  global_nested: %s' % ('values ok' if not bad else 'WRONG on %d' % bad))
             if bad:
                 failures.append('global_nested values wrong on %d inputs' % bad)
+
+        rc, blob, err = compile_one(args.compiler, work, 'copy_replace', COPY_REPLACE, 'sce_fp_rsx')
+        if rc != 0 or not blob:
+            failures.append('copy_replace refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            c = Container(blob)
+            u = {'A.video_size': [9.0, 9.0], 'A.texture_size': [8.0, 8.0],
+                 'B.video_size': [0.25, -0.5], 'B.texture_size': [2.0, 0.5]}
+            bad = sum(fp_eval.evaluate(with_uniforms(blob, c, u), {'TEX0': [tc[0], tc[1], 0, 0]})
+                      != [tc[0] * (2.0 * 2.0 + 0.25), tc[1] * (0.5 * 2.0 - 0.5), 0.0, 1.0]
+                      for tc in itertools.product([-1.0, 0.0, 0.5, 1.0], repeat=2))
+            print('  copy_replace: %s' % ('B replaces A in every member' if not bad else 'WRONG on %d' % bad))
+            if bad:
+                failures.append('copy_replace values wrong on %d inputs' % bad)
+
+        rc, blob, err = compile_one(args.compiler, work, 'sampler_member', SAMPLER_MEMBER, 'sce_fp_rsx')
+        if rc != 0 or not blob:
+            failures.append('sampler_member refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            recs = {r['name']: r for r in Container(blob).records}
+            r = recs.get('REFERENCE.texture')
+            want = (SAMPLER2D, TEXUNIT0 + 1, 2)
+            got = r and (r['type'], r['resource'], r['paramno'])
+            print('  sampler_member: %s' % ('REFERENCE.texture on texunit 1' if got == want else 'got %s' % (got,)))
+            if got != want:
+                failures.append('sampler_member REFERENCE.texture %s, want %s' % (got, want))
+            if recs.get('s0', {}).get('resource') != TEXUNIT0:
+                failures.append('sampler_member s0 not on texunit 0')
 
         rc, blob, err = compile_one(args.compiler, work, 'struct_default', STRUCT_DEFAULT, 'sce_fp_rsx')
         # semantic analysis refuses it before the IR builder does; either
