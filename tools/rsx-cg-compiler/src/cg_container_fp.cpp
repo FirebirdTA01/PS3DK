@@ -330,7 +330,10 @@ ContainerResult emitFragmentContainerImpl(
                                         ? in.structParamName + "."
                                         : std::string{})
                                  + in.fieldName;
-                    fd.semantic  = in.rawSemanticName.empty()
+                    // A member bound by the implicit-TEXCOORD rule carries the
+                    // resource but no semantic string, as a bare parameter does.
+                    fd.semantic  = in.inferredSemantic ? std::string{}
+                                 : in.rawSemanticName.empty()
                                        ? in.semanticName
                                        : in.rawSemanticName;
                     fd.type      = cgTypeForIRType(in.resultType);

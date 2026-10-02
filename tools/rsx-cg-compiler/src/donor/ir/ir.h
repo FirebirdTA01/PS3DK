@@ -364,6 +364,7 @@ public:
     int semanticIndex = 0;           // For shader I/O operations
     std::string semanticName;        // For shader I/O operations (digit-stripped)
     std::string rawSemanticName;     // For shader I/O operations (source spelling, e.g. "POSITION0")
+    bool inferredSemantic = false;   // an input member bound by the implicit-TEXCOORD rule: no semantic string
     SourceLocation loc;              // Source expression/statement for diagnostics.
     // Struct-flattened entry params:
     //   LoadAttribute  for `input.pos` carries structParamName="input", fieldName="pos"
