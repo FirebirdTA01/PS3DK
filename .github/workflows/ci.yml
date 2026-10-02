@@ -572,6 +572,8 @@ jobs:
         run: bash tests/shader-compiler/uniform-struct-param-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Programs the reference refuses refuse here too
         run: bash tests/shader-compiler/wrong-accept-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: fmod and all are lowered, judged by value
+        run: bash tests/shader-compiler/fmod-all-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns under compile-time-constant conditions judged by value
         run: bash tests/shader-compiler/helper-const-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test helper parameter default arguments
