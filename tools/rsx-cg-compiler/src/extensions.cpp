@@ -19,7 +19,7 @@ const ExtensionInfo kExtensions[] = {
       "and in #include files; the reference refuses it" },
     { Extension::DeclaratorTypes, "declarator-types",
       "a later declarator in a list keeps the declared type; the reference gives it "
-      "the type last named in an earlier declarator's initializer" },
+      "the type last named in an earlier declarator" },
 };
 
 constexpr std::size_t kExtensionCount = sizeof(kExtensions) / sizeof(kExtensions[0]);

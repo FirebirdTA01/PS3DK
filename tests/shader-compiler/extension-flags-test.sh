@@ -62,7 +62,7 @@ run "$compiler" list --list-extensions
 [[ "$rc" -eq 0 ]] || { cat "$work/list.err" >&2; fail "--list-extensions exited $rc, expected 0"; }
 expected_list="$work/expected-list.txt"
 printf 'bom\taccept one leading UTF-8 byte order mark (EF BB BF) in the main source and in #include files; the reference refuses it\n' > "$expected_list"
-printf 'declarator-types\ta later declarator in a list keeps the declared type; the reference gives it the type last named in an earlier declarator'"'"'s initializer\n' >> "$expected_list"
+printf 'declarator-types\ta later declarator in a list keeps the declared type; the reference gives it the type last named in an earlier declarator\n' >> "$expected_list"
 # A Windows-hosted build writes stdout with CRLF; the table is pinned on
 # its text, not its line ending.
 tr -d '\r' < "$work/list.out" > "$work/list.out.lf" && mv "$work/list.out.lf" "$work/list.out"

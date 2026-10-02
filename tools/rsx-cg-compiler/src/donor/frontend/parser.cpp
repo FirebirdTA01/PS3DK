@@ -1160,7 +1160,7 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
             declaratorType->toString() != type->toString())
         {
             warning("'" + name + "' takes type " + declaratorType->toString() +
-                    " from an earlier initializer in its declaration list, as the reference "
+                    " from an earlier declarator in its list, as the reference "
                     "compiler does (declared " + type->toString() + "); " +
                     "--extension=declarator-types keeps the declared type");
         }

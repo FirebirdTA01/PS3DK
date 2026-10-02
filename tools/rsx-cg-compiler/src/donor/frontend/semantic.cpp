@@ -2473,9 +2473,13 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
     // The RESOLVED type decides both tests: a typedef name parses as a named
     // type, so `typedef void V; V main(..., out float4 c : COLOR)` is a void
     // program (accepted by the reference) - review: codex.
+    // A return type this analyzer cannot resolve (`typedef void V` is not
+    // entered as a type here, so V resolves to the error type) is left to the
+    // diagnostics that already handle it, exactly as before this check: only
+    // a type KNOWN to be a non-void non-struct value triggers C5029.
+    const CgType resolvedReturn = resolveType(entryPoint->returnType.get());
     if (entryPoint->returnType && entryPoint->returnSemantic.isEmpty() &&
-        !resolveType(entryPoint->returnType.get()).isVoid() &&
-        !resolveType(entryPoint->returnType.get()).isStruct())
+        !resolvedReturn.isError() && !resolvedReturn.isVoid() && !resolvedReturn.isStruct())
     {
         error(entryPoint->loc, "C5029: program \"" + entryPoint->name +
               "\" must return a struct or have a varying output semantic");
