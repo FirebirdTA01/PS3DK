@@ -48,7 +48,7 @@ foreach ($s in $samples) {
     # lone backslash is an illegal regex and silently blanks the column.
     $fam  = ($rel -split '[\\/]')[0]
     # One log per sample: b<NNN>-<rel with path separators flattened>.
-    # Safe as a Windows filename — the samples tree has no names with
+    # Safe as a Windows filename: the samples tree has no names with
     # spaces or non-alnum path components (verified).
     $relFlat  = $rel -replace '[\\/]', '_'
     $log      = Join-Path $logdir ("b{0:000}-{1}.log" -f $i, $relFlat)
@@ -60,14 +60,14 @@ foreach ($s in $samples) {
     Append-Log $log $Rule
     Append-Log $log ("sample : " + $rel)
     Append-Log $log ("source : " + $s.FullName)
-    Append-Log $log ("start  : " + & $Stamp)
+    Append-Log $log ("start  : " + (& $Stamp))
     Append-Log $log $Rule
 
     # configure
     Append-Log $log ("--- cmake configure  " + $Dash)
     cmake -S $s.FullName -B $bdir -G Ninja `
         "-DCMAKE_MAKE_PROGRAM=$ninja" `
-        "-DCMAKE_TOOLCHAIN_FILE=$tc" 2>&1 | Out-File -Encoding ascii -Append $log
+        "-DCMAKE_TOOLCHAIN_FILE=$tc" 2>&1 | ForEach-Object { "$_" } | Out-File -Encoding ascii -Append $log
     $cfg_ec = $LASTEXITCODE
     Append-Log $log ("exit   : $cfg_ec")
     if ($cfg_ec -eq 0) { $cfg = "ok" } else { $cfg = "fail" }
@@ -75,7 +75,7 @@ foreach ($s in $samples) {
     # build (skipped if configure failed)
     if ($cfg -eq "ok") {
         Append-Log $log ("--- cmake build    " + $Dash)
-        cmake --build $bdir 2>&1 | Out-File -Encoding ascii -Append $log
+        cmake --build $bdir 2>&1 | ForEach-Object { "$_" } | Out-File -Encoding ascii -Append $log
         $bld_ec = $LASTEXITCODE
         Append-Log $log ("exit   : $bld_ec")
         if ($bld_ec -eq 0) { $bld = "ok" } else { $bld = "fail" }
@@ -84,9 +84,10 @@ foreach ($s in $samples) {
 
     # Footer
     Append-Log $log $Dash
-    Append-Log $log ("end    : " + & $Stamp)
+    Append-Log $log ("end    : " + (& $Stamp))
     Append-Log $log ("configure : $cfg  (exit $cfg_ec)")
-    Append-Log $log ("build     : $bld  (exit " + (if ($bld -eq "skip") { "-" } else { "$bld_ec" }) + ")")
+    $bld_exit = if ($bld -eq "skip") { "-" } else { "$bld_ec" }
+    Append-Log $log ("build     : $bld  (exit " + $bld_exit + ")")
     Append-Log $log $Rule
 
     "$fam,$($s.Name),$cfg,$bld,$self,$log" | Out-File -Encoding ascii -Append $csv
