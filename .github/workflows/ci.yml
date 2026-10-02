@@ -323,6 +323,11 @@ jobs:
       - name: Test ILP32 address formation in the IV-spill reproducer
         run: bash tests/sdk/ilp32-ivspill-codegen-test.sh
 
+      # The red control always runs; with a PPU compiler, every counted loop's
+      # CTR count must have a defined upper half (GCC patch 0050).
+      - name: Test ILP32 counted-loop CTR counts
+        run: bash tests/sdk/ilp32-doloop-codegen-test.sh
+
       # Skips without PS3DEV; runs against an installed or candidate compiler.
       - name: Test -mminimal-toc in both PPU ABIs
         run: bash tests/sdk/minimal-toc-ilp32-test.sh
@@ -644,6 +649,8 @@ jobs:
         run: bash tests/shader-compiler/tex2dproj-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test tex1D coordinate packing and sampler metadata
         run: bash tests/shader-compiler/tex1d-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test fragment tex2Dlod lowers to TXL
+        run: bash tests/shader-compiler/fp-tex2dlod-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test explicit sampler units and reflection agree
         run: bash tests/shader-compiler/sampler-binding-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test dead texture removal preserves live fetches and discard

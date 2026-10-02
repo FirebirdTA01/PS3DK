@@ -21,8 +21,10 @@ CASES = [
     # value-checked by implicit-varying); 'semantic' keeps this message's shape.
     ('semantic', 'fp', 'struct Input {float4 shade:TEXUNIT0;}; float4 main(Input data):COLOR {return data.shade;}',
      r"unsupported input semantic.*TEXUNIT0.*entry 'main'.*input 'data.shade'.*vec4"),
-    ('sample_lod', 'fp', 'float4 main(float4 uv:TEXCOORD0,uniform sampler2D s):COLOR {return tex2Dlod(s,uv);}',
-     r'unsupported IR op samplelod'),
+    # fragment tex2Dlod lowers to TXL now; a VP 2-column matrix product is a
+    # gap that still refuses by name.
+    ('vp_matvec_2col', 'vp', 'float4 main(float4 p:POSITION,uniform float2x2 m):POSITION {return float4(mul(m,p.xy),0,1);}',
+     r'^nv40-general: VP matvecmul with 2-column matrices is not implemented'),
 ]
 
 

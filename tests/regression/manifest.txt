@@ -115,3 +115,8 @@ gcm-method-words,tests/regression/gcm-method-words/gcm-method-words.fake.self,20
 # recompiler truncates the bad address and the row passes on a broken
 # compiler.  tests/sdk/ilp32-ivspill-codegen-test.sh is the compile-time guard.
 ilp32-ivspill,tests/regression/ilp32-ivspill/ilp32-ivspill.fake.self,30,RAN-CLEAN,IVSPILL PASS,IVSPILL FAIL
+# ilp32-doloop guards GCC patch 0050: a counted loop whose 32-bit trip count
+# carried bit 32 into the 64-bit CTR (newlib printf %f ran away).  Faults on
+# both PPU decoders.  tests/sdk/ilp32-doloop-codegen-test.sh is the
+# compile-time guard.
+ilp32-doloop,tests/regression/ilp32-doloop/ilp32-doloop.fake.self,30,RAN-CLEAN,DOLOOP PASS,DOLOOP FAIL

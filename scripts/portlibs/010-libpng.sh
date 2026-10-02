@@ -19,6 +19,11 @@ URLS=(
     "https://downloads.sourceforge.net/project/libpng/libpng16/$VER/$TARBALL"
     "https://download.sourceforge.net/libpng/$TARBALL"
     "https://github.com/pnggroup/libpng/releases/download/v$VER/$TARBALL"
+    # Distribution mirrors of the same release tarball (the hash below still
+    # decides): SourceForge's CDN can be down and GitHub carries no 1.6.58
+    # asset.
+    "https://distfiles.macports.org/libpng/$TARBALL"
+    "https://ftp.osuosl.org/pub/blfs/conglomeration/libpng/$TARBALL"
 )
 # sha256 verified against Buildroot package/libpng/libpng.hash (master),
 # which records it as the upstream SourceForge release hash for 1.6.58.
