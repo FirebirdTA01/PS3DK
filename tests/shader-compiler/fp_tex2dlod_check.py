@@ -50,7 +50,9 @@ def judge(blob, units, direct):
         return '%d TXL, want %d' % (len(fetches), len(units))
     if any((w[0] >> 24) & 63 in (0x17, 0x31) for w, _ in rows):
         return 'a TEX/TXB where only TXL was expected'
-    for w, unit in zip(fetches, units):
+    # the schedule may order independent fetches either way: pair by unit
+    fetches.sort(key=lambda w: (w[0] >> 17) & 15)
+    for w, unit in zip(fetches, sorted(units)):
         c, l = source(w, 1), source(w, 2)
         if (w[0] >> 17) & 15 != unit:
             return 'unit %d, want %d' % ((w[0] >> 17) & 15, unit)
