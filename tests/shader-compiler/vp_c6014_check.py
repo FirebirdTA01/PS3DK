@@ -23,16 +23,39 @@ ACCEPT = {
     'partial_write': 'void main(float4 p : POSITION, out float4 o : POSITION) { o.xy = p.xy; }\n',
     'plain': 'float4 main(float4 p : POSITION) : POSITION { return p; }\n',
 }
+# Refused today for a named reason that is NOT C6014 (the reference ACCEPTS
+# it: a position write on one path).  Pinned strictly - exit 1, no
+# container, this exact reason - so a crash or a silent accept cannot pass.
+CONDITIONAL_STORE = 'output store in block'
 NOT_C6014 = {
     'written_on_one_path': 'void main(float4 p : POSITION, out float4 o : POSITION) { if (p.x > 0) o = p; }\n',
 }
+# A position write only on a constant-false path is no write: the reference
+# refuses C6014 (measured: if (false), a false static const bool, a chained
+# constant condition).  We refuse them too, earlier, with the conditional
+# store reason; either name is accepted, a container is not (review: codex).
+DEAD_WRITE = {
+    'dead_if_false': 'void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { c = p; if (false) o = p; }\n',
+    'dead_static_bool': 'static const bool B = false; void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { c = p; if (B) o = p; }\n',
+    'dead_chained': 'void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { c = p; bool b = true ? false : (p.x > 0); if (b) o = p; }\n',
+}
+
+
+STATUS_FAILURES = []
 
 
 def run(compiler, work, name, text):
     src, dst = work / (name + '.cg'), work / (name + '.vpo')
     src.write_text(text)
-    p = subprocess.run([compiler, '-p', 'sce_vp_rsx', '--emit-container', str(dst), str(src)],
-                       capture_output=True, text=True, timeout=60)
+    try:
+        p = subprocess.run([compiler, '-p', 'sce_vp_rsx', '--emit-container', str(dst), str(src)],
+                           capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        STATUS_FAILURES.append('%s: timed out' % name)
+        return 124, False, ''
+    # a refusal is exit 1 exactly; anything else (signal, crash, 124) is not one
+    if p.returncode not in (0, 1):
+        STATUS_FAILURES.append('%s: exit %d is neither success nor a refusal' % (name, p.returncode))
     return p.returncode, dst.exists() and dst.stat().st_size > 0, p.stderr
 
 
@@ -55,10 +78,17 @@ def main():
                 failures.append('%s refused' % name)
         for name, text in NOT_C6014.items():
             rc, out, err = run(compiler, work, name, text)
-            ok = 'C6014' not in err
-            print('  %-20s %s' % (name, 'not C6014 (rc %d)' % rc if ok else 'WRONGLY C6014'))
+            ok = rc == 1 and not out and CONDITIONAL_STORE in err and 'C6014' not in err
+            print('  %-20s %s' % (name, 'refused by the conditional-store gap, not C6014' if ok else 'NOT as pinned (rc %d)' % rc))
             if not ok:
-                failures.append('%s: refused as C6014 though it writes position on a path' % name)
+                failures.append('%s: want exit 1, no container, the conditional-store reason, not C6014' % name)
+        for name, text in DEAD_WRITE.items():
+            rc, out, err = run(compiler, work, name, text)
+            ok = rc == 1 and not out and ('C6014' in err or CONDITIONAL_STORE in err)
+            print('  %-20s %s' % (name, 'refused' if ok else 'NOT refused (rc %d)' % rc))
+            if not ok:
+                failures.append('%s: a position write only on a dead path must refuse' % name)
+    failures += STATUS_FAILURES
     for f in failures:
         print('FAIL:', f)
     print('vp-c6014: %s' % ('PASS' if not failures else 'FAIL (%d)' % len(failures)))
