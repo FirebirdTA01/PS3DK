@@ -55,6 +55,12 @@ float4 main(float2 uv : TEXCOORD0, p P) : COLOR { return float4(uv * P.size, P.t
 float4 main(float2 uv : TEXCOORD0, in d v, float2 z) : COLOR { return float4(uv + v.a, v.b, z.x); }
 """, {('uv', VAR, TC(0), 0, 1), ('v.a', VAR, TC(1), 1, 1), ('v.b', VAR, TC(2), 1, 1), ('z', VAR, TC(3), 2, 1)},
         [1.25, 0.375, -1, 2], {'v.a', 'v.b', 'z'}),
+    # a sampler member is a uniform without the qualifier (scalefx's struct prev);
+    # the tuples are the reference's own container's, unread tex_coord included
+    'unqualified_sampler_member': ("""struct prev { float2 tex_coord; sampler2D texture; };
+float4 main(float4 uv : TEXCOORD0, uniform sampler2D decal : TEXUNIT0, prev P) : COLOR { return tex2D(P.texture, uv.xy) + tex2D(decal, uv.zw); }
+""", {('uv', VAR, TC(0), 0, 1), ('decal', UNI, TEXUNIT0, 1, 1), ('P.tex_coord', VAR, UNDEF, 2, 0),
+        ('P.texture', UNI, TEXUNIT0 + 1, 2, 1)}, None, set()),
     'uniform_sampler_member': ("""struct p { uniform float2 size; uniform sampler2D tex; };
 float4 main(float2 uv : TEXCOORD0, p P) : COLOR { return tex2D(P.tex, uv * P.size); }
 """, {('uv', VAR, TC(0), 0, 1), ('P.size', UNI, UNDEF, 1, 1), ('P.tex', UNI, TEXUNIT0, 1, 1)},

@@ -1500,7 +1500,10 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                 bool stashed = false;
                 for (const auto& field : *fields)
                 {
-                    if (field.storage != StorageQualifier::Uniform) continue;
+                    // a sampler member is a uniform whether or not it says so
+                    // (measured: an unqualified sampler2D member binds a unit)
+                    if (field.storage != StorageQualifier::Uniform &&
+                        !(field.type && field.type->isSampler())) continue;
                     const std::string qualified = param->name + "." + field.name;
                     if (!field.type || field.type->baseType == BaseType::Struct || field.type->isArray())
                     {

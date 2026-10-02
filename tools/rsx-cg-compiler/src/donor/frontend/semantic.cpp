@@ -2286,6 +2286,15 @@ void SemanticAnalyzer::validateEntryPoint()
     collectShaderIO(shaderInfo_.entryPoint);
 }
 
+// A struct member is a uniform when declared `uniform`, and always when it
+// is a sampler: a sampler cannot be a varying (measured: struct prev {
+// float2 tex_coord; sampler2D texture; } passed as a plain fragment
+// parameter lists P.texture as a sampler on the next free texture unit).
+static bool uniformMember(const StructField& field)
+{
+    return field.storage == StorageQualifier::Uniform || (field.type && field.type->isSampler());
+}
+
 void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
 {
     // Counter for assigning default semantics to undecorated parameters
@@ -2306,7 +2315,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
         auto reserveMembers = [&](auto& self, const CgType& sType) -> void {
             for (const auto& field : sType.structFields())
             {
-                if (field.storage == StorageQualifier::Uniform) continue;
+                if (uniformMember(field)) continue;
                 CgType fieldType = resolveType(field.type.get());
                 if (field.semantic.isEmpty())
                 {
@@ -2356,7 +2365,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             // uv; }; main(S a, S b): a.uv TEX0, b.uv TEX1 - review: codex);
             // refused by name until bindings are per instance.
             if (field.semantic.inferred && !isOut && !flatteningUniformParam &&
-                shaderInfo_.stage == ShaderStage::Fragment && field.storage != StorageQualifier::Uniform)
+                shaderInfo_.stage == ShaderStage::Fragment && !uniformMember(field))
             {
                 error(entryPoint->loc, "a struct with semantic-less members is used by two "
                       "fragment inputs: '" + fullName + "' (implicit-varying-struct-reuse)");
@@ -2391,7 +2400,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
                     self(self, fullName, fieldType, isOut);
                 }
                 else if (!isOut && !flatteningUniformParam && shaderInfo_.stage == ShaderStage::Fragment &&
-                         field.storage != StorageQualifier::Uniform)
+                         !uniformMember(field))
                 {
                     // A fragment input member with no semantic takes the
                     // lowest TEXCOORD<N> no explicit input claims, in
