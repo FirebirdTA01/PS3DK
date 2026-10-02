@@ -35,21 +35,40 @@ namespace rsx_cg {
 // such a select survives into the backend here (review: codex), keeping
 // the dead load alive.  Fold it before deciding what is read; returns
 // whether anything changed (the caller re-runs dead-code elimination).
-inline bool foldConstantSelects(IRFunction& entry)
+enum class SelectFold { Unchanged, Changed, Failed };
+
+inline SelectFold foldConstantSelects(IRFunction& entry)
 {
+    // SSA is acyclic, so the number of selects bounds both a replacement
+    // chain and the rounds to a fixed point.  Reaching that bound means a
+    // cycle or a bug: report it (the caller refuses by name) rather than
+    // return an intermediate value whose dead arm stays live and shifts an
+    // implicit TEXCOORD (review: codex - fixed caps of 64/16 did exactly
+    // that on a 65-deep chain).
+    size_t selects = 0;
+    for (const auto& block : entry.blocks)
+        if (block)
+            for (const auto& inst : block->instructions)
+                if (inst && inst->op == IROp::Select) ++selects;
+    if (selects == 0) return SelectFold::Unchanged;
+    const size_t bound = selects + 1;
+
     std::map<IRValueID, IRValueID> chosen;
+    bool failed = false;
     const auto resolve = [&](IRValueID v) {
-        for (int guard = 0; guard < 64; ++guard) {
+        for (size_t step = 0; step <= bound; ++step) {
             const auto it = chosen.find(v);
-            if (it == chosen.end()) break;
+            if (it == chosen.end()) return v;
             v = it->second;
         }
+        failed = true;   // longer than the number of selects: a cycle
         return v;
     };
-    // To a fixed point (bounded): a condition may itself be a select that an
-    // earlier round folded to a constant - `bool b = true ? false : (u.x > 0);
+    // To a fixed point: a condition may itself be a select that an earlier
+    // round folded to a constant - `bool b = true ? false : (u.x > 0);
     // b ? u : k` (review: codex; measured u UNREAD on the reference).
-    for (int round = 0; round < 16; ++round) {
+    bool converged = false;
+    for (size_t round = 0; round <= bound && !failed; ++round) {
         bool grew = false;
         for (const auto& block : entry.blocks) {
             if (!block) continue;
@@ -68,17 +87,25 @@ inline bool foldConstantSelects(IRFunction& entry)
                 grew = true;
             }
         }
-        if (!grew) break;
+        if (!grew) { converged = true; break; }
     }
-    if (chosen.empty()) return false;
+    if (failed || !converged) return SelectFold::Failed;
+    if (chosen.empty()) return SelectFold::Unchanged;
+    // Path-compress every replacement to its final value, then rewrite.
+    std::map<IRValueID, IRValueID> finalOf;
+    for (const auto& kv : chosen) finalOf[kv.first] = resolve(kv.first);
+    if (failed) return SelectFold::Failed;
     for (auto& block : entry.blocks) {
         if (!block) continue;
         for (auto& inst : block->instructions) {
             if (!inst) continue;
-            for (IRValueID& op : inst->operands) op = resolve(op);
+            for (IRValueID& op : inst->operands) {
+                const auto it = finalOf.find(op);
+                if (it != finalOf.end()) op = it->second;
+            }
         }
     }
-    return true;
+    return SelectFold::Changed;
 }
 
 inline void bindImplicitTexCoords(IRFunction& entry,

@@ -464,10 +464,18 @@ int main(int argc, char** argv)
         for (auto& fn : irModule->functions)
         {
             if (!fn->isEntryPoint) continue;
-            if (rsx_cg::foldConstantSelects(*fn))
+            const rsx_cg::SelectFold fold = rsx_cg::foldConstantSelects(*fn);
+            if (fold == rsx_cg::SelectFold::Failed)
+            {
+                std::fprintf(stderr, "nv40-general: constant select folding did not converge "
+                             "(a select cycle); refusing rather than binding implicit "
+                             "TEXCOORDs to inputs a dead path keeps alive\n");
+                return 1;
+            }
+            if (fold == rsx_cg::SelectFold::Changed)
             {
                 DeadCodeElimination dce(!ctx.alphakillSamplers.empty());
-                for (int i = 0; i < 8 && dce.runOnFunction(*fn); ++i) {}
+                while (dce.runOnFunction(*fn)) {}
             }
             rsx_cg::bindImplicitTexCoords(*fn, semantic.shaderInfo().implicitTexCoordOrder,
                                           semantic.shaderInfo().explicitTexCoords);
