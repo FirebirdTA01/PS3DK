@@ -2132,11 +2132,20 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
     // the merge so the join selects against it.  A key every arm only READ
     // is left alone: both sides are the same input, and the join below
     // takes the load as it is.
-    auto isLoad = [&](IRValueID id) {
+    // True only for the load OF THIS KEY's input - the same parameter and
+    // member - not any input load: `v.x = v.y` binds v.x to v.y's load,
+    // and treating that as a read of v.x took y on the untouched side too
+    // (review: codex, join-other-input-write).
+    auto isLoadOf = [&](IRValueID id, const std::string& key) {
+        const size_t dot = key.find('.');
+        if (dot == std::string::npos) return false;
         for (const auto& bp : currentFunction_->blocks)
             if (bp)
                 for (const auto& ip : bp->instructions)
-                    if (ip && ip->result == id) return ip->op == IROp::LoadAttribute;
+                    if (ip && ip->result == id)
+                        return ip->op == IROp::LoadAttribute &&
+                               ip->structParamName == key.substr(0, dot) &&
+                               ip->fieldName == key.substr(dot + 1);
         return false;
     };
     std::vector<std::string> untouchedInputs;
@@ -2145,7 +2154,7 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
             for (const auto& kv : *post)
             {
                 const std::string& key = kv.first;
-                if (preIfMap.count(key) || isLoad(kv.second)) continue;
+                if (preIfMap.count(key) || isLoadOf(kv.second, key)) continue;
                 const size_t dot = key.find('.');
                 if (dot == std::string::npos || key.find_first_of(".[@", dot + 1) != std::string::npos)
                     continue;
@@ -2363,7 +2372,7 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
         // Anything else keeps the Select and its refusal.
         {
             const auto takesOther = [&](IRValueID self, IRValueID other) {
-                if (self == InvalidIRValue) return isLoad(other);
+                if (self == InvalidIRValue) return isLoadOf(other, name);
                 return isUndefinedValue(self) && !isUndefinedValue(other);
             };
             if (takesOther(thenVal, elseVal)) { nameToValue_[name] = elseVal; continue; }

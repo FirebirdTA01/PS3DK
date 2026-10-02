@@ -88,9 +88,51 @@ INPUT_WRITE_INPUTS = [
     {'TEX0': [0.25, 0.0, 0.0, 0.0], 'TEX1': [0.125, 0.0, 0.0, 0.0]},
 ]
 
+# A copy of ANOTHER input into the member is an assignment too, not a read
+# of the member (review: codex, join-other-input-write): the untouched side
+# is still the member's own input.  Same-instance then/else copies and a
+# copy across two struct parameters.
+COPY_STRUCT = "struct D { float c : TEXCOORD0; float x : TEXCOORD1; float y : TEXCOORD2; };\n"
+OTHER_COPY_THEN = COPY_STRUCT + """float4 main(D v) : COLOR
+{
+    if (v.c > 0.5) v.x = v.y;
+    return float4(v.x, 0.0, 0.0, 1.0);
+}
+"""
+OTHER_COPY_ELSE = COPY_STRUCT + """float4 main(D v) : COLOR
+{
+    if (v.c > 0.5) { } else v.x = v.y;
+    return float4(v.x, 0.0, 0.0, 1.0);
+}
+"""
+CROSS_INSTANCE = """struct A { float c : TEXCOORD0; float x : TEXCOORD1; };
+struct B { float x : TEXCOORD2; };
+float4 main(A a, B b) : COLOR
+{
+    if (a.c > 0.5) a.x = b.x;
+    return float4(a.x, 0.0, 0.0, 1.0);
+}
+"""
+
+
+def other_copy(on_true):
+    def formula(env):
+        taken = env['TEX0'][0] > 0.5
+        return [env['TEX2'][0] if taken == on_true else env['TEX1'][0], 0.0, 0.0, 1.0]
+    return formula
+
+
+COPY_INPUTS = [
+    {'TEX0': [0.75, 0.0, 0.0, 0.0], 'TEX1': [0.125, 0.0, 0.0, 0.0], 'TEX2': [0.75, 0.0, 0.0, 0.0]},
+    {'TEX0': [0.25, 0.0, 0.0, 0.0], 'TEX1': [0.125, 0.0, 0.0, 0.0], 'TEX2': [0.75, 0.0, 0.0, 0.0]},
+]
+
 ROWS = [
     ('input_write_then', INPUT_WRITE_THEN, input_write(True), INPUT_WRITE_INPUTS),
     ('input_write_else', INPUT_WRITE_ELSE, input_write(False), INPUT_WRITE_INPUTS),
+    ('other_copy_then', OTHER_COPY_THEN, other_copy(True), COPY_INPUTS),
+    ('other_copy_else', OTHER_COPY_ELSE, other_copy(False), COPY_INPUTS),
+    ('cross_instance', CROSS_INSTANCE, other_copy(True), COPY_INPUTS),
     ('lazy_member', LAZY_MEMBER, lazy_member, [
         {'TEX0': [0.25, 0.75, 0.0, 0.0], 'TEX1': [0.5, 0.0, 0.0, 0.0]},
         {'TEX0': [0.25, 0.25, 0.0, 0.0], 'TEX1': [0.5, 0.0, 0.0, 0.0]},
