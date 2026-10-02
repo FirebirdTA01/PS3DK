@@ -1927,13 +1927,26 @@ void IRBuilder::ScopeState::unfold(std::unordered_map<std::string, IRValueID>& j
 
 void IRBuilder::buildIfStmt(IfStmt* stmt)
 {
+    const std::function<void()> thenArm = [&] { buildStmt(stmt->thenBranch.get()); };
+    const std::function<void()> elseArm = [&] { buildStmt(stmt->elseBranch.get()); };
+    buildConditional(stmt->condition.get(), stmt->loc, thenArm, stmt->elseBranch ? &elseArm : nullptr);
+}
+
+// The if/else join, with its arms supplied by the caller: buildIfStmt passes
+// the two branch statements; an inlined helper whose return sits under a
+// run-time condition passes "this arm, then the rest of the body"
+// (runInlineStatements), so the same Select join merges its result.
+void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
+                                 const std::function<void()>& thenArm,
+                                 const std::function<void()>* elseArm)
+{
     // Evaluate condition
-    IRValueID condValue = buildExpr(stmt->condition.get());
-    condValue = normalizeCondition(stmt->condition.get(), condValue);
+    IRValueID condValue = buildExpr(condition);
+    condValue = normalizeCondition(condition, condValue);
 
     // Create blocks
     IRBasicBlock* thenBlock = currentFunction_->createBlock(makeLabel("if.then"));
-    IRBasicBlock* elseBlock = stmt->elseBranch
+    IRBasicBlock* elseBlock = elseArm
         ? currentFunction_->createBlock(makeLabel("if.else"))
         : nullptr;
     IRBasicBlock* mergeBlock = currentFunction_->createBlock(makeLabel("if.end"));
@@ -1958,7 +1971,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
 
     // Build then block
     currentBlock_ = thenBlock;
-    buildStmt(stmt->thenBranch.get());
+    thenArm();
     const bool thenTerminated = currentBlock_->hasTerminator();
     if (!thenTerminated)
     {
@@ -1969,11 +1982,11 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     // Build else block
     bool elseTerminated = false;
     std::unordered_map<std::string, IRValueID> postElseMap;
-    if (stmt->elseBranch)
+    if (elseArm)
     {
         scope_ = preIf;  // restore before processing else
         currentBlock_ = elseBlock;
-        buildStmt(stmt->elseBranch.get());
+        (*elseArm)();
         elseTerminated = currentBlock_->hasTerminator();
         if (!elseTerminated)
         {
@@ -2035,7 +2048,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
             load->componentIndex = static_cast<int>(index);
             load->arrayIndexKind = IRInstruction::ArrayIndexKind::Constant;
         }
-        load->loc = stmt->loc;
+        load->loc = loc;
         currentBlock_->addInstruction(std::move(load));
         preIfMap[key] = loadId;
         nameToValue_[key] = loadId;
@@ -2135,7 +2148,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
 
         IRValueID thenVal = thenTerminated ? preVal : valueOrPre(postThenMap, name);
         IRValueID elseVal;
-        if (stmt->elseBranch)
+        if (elseArm)
             elseVal = elseTerminated ? preVal : valueOrPre(postElseMap, name);
         else
             elseVal = preVal;
@@ -4858,7 +4871,15 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
         getIRType(callee->returnType.get()).baseType == IRType::Void;
     std::vector<StmtNode*> statements;
     for (const auto& s : callee->body->statements) statements.push_back(s.get());
-    if (!runInlineStatements(callee, statements, result, sawReturn))
+    // A helper called from inside another helper's arm has its OWN
+    // continuation: the caller's tail is not part of this body.
+    const std::vector<StmtNode*> outerContinuation = std::move(inlineContinuation_);
+    const bool outerRan = inlineContinuationRun_;
+    inlineContinuation_.clear();
+    const bool ran = runInlineStatements(callee, statements, result, sawReturn);
+    inlineContinuation_ = outerContinuation;
+    inlineContinuationRun_ = outerRan;
+    if (!ran)
         return false;
 
     if (!sawReturn && !returnsVoid)
@@ -4870,13 +4891,47 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
     return returnsVoid || result != InvalidIRValue;
 }
 
+// An if whose arms reach a return through nothing but blocks and nested ifs
+// (no loop, switch, break or continue around the return): the shape
+// runInlineStatements lowers by running each arm with the rest of the body.
+static bool returnOnlyShape(const StmtNode* stmt, bool& hasReturn)
+{
+    if (!stmt) return true;
+    switch (stmt->kind)
+    {
+    case StmtKind::Return: hasReturn = true; return true;
+    case StmtKind::Block:
+        for (const auto& inner : static_cast<const BlockStmt*>(stmt)->statements)
+            if (!returnOnlyShape(inner.get(), hasReturn)) return false;
+        return true;
+    case StmtKind::If:
+    {
+        const auto* ifs = static_cast<const IfStmt*>(stmt);
+        return returnOnlyShape(ifs->thenBranch.get(), hasReturn) &&
+               returnOnlyShape(ifs->elseBranch.get(), hasReturn);
+    }
+    case StmtKind::For:
+    {
+        bool inner = false;
+        return returnOnlyShape(static_cast<const ForStmt*>(stmt)->body.get(), inner) && !inner;
+    }
+    case StmtKind::While: case StmtKind::DoWhile: case StmtKind::Switch:
+    case StmtKind::Case: case StmtKind::Default:
+    case StmtKind::Break: case StmtKind::Continue:
+        return false;
+    default:
+        return true;
+    }
+}
+
 bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
                                     IRValueID& result, bool& sawReturn)
 {
     const bool returnsVoid =
         getIRType(callee->returnType.get()).baseType == IRType::Void;
-    for (StmtNode* stmt : statements)
+    for (size_t index = 0; index < statements.size(); ++index)
     {
+        StmtNode* stmt = statements[index];
         if (!stmt) continue;
 
         if (sawReturn)
@@ -4932,7 +4987,15 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 // declarations end with it, as buildBlockStmt ends them.
                 const ScopeState pre = scope_;
                 if (block) blockDeclared_.emplace_back();
+                const std::vector<StmtNode*> inherited = inlineContinuation_;
+                std::vector<StmtNode*> tail(statements.begin() + static_cast<std::ptrdiff_t>(index) + 1,
+                                            statements.end());
+                tail.insert(tail.end(), inherited.begin(), inherited.end());
+                inlineContinuation_ = tail;
+                inlineContinuationRun_ = false;
                 const bool ok = runInlineStatements(callee, inner, result, sawReturn);
+                inlineContinuation_ = inherited;
+                const bool tailRan = inlineContinuationRun_;
                 if (block)
                 {
                     const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
@@ -4942,7 +5005,107 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 }
                 if (!ok)
                     return false;
+                if (tailRan)
+                    return true;   // a run-time return inside ran this list's tail already
                 continue;
+            }
+        }
+
+        // A return under a RUN-TIME condition.  Each arm runs as its own
+        // statements followed - when the arm does not itself return - by the
+        // rest of the body, and the if-join merges the two arms' results
+        // (and every local and global they wrote) with Select, the
+        // straight-line predicated program the reference emits.  The
+        // result travels through a reserved scope key no source name can
+        // spell.  An arm's braces are still a block: its own declarations
+        // end before the rest of the body runs.
+        if (stmt->kind == StmtKind::If)
+        {
+            auto* ifs = static_cast<IfStmt*>(stmt);
+            bool hasReturn = false;
+            if (returnOnlyShape(ifs, hasReturn) && hasReturn)
+            {
+                // A constant part of the condition that the guard declines to
+                // fold (mixed int/float or half comparisons, aliases of them)
+                // would be folded here by the evaluator anyway, at our
+                // precision rather than the reference's: refuse it by name.
+                if (conditionFoldHazard(ifs->condition.get()))
+                {
+                    error(ifs->loc, "cannot inline user function '" + callee->name +
+                                    "': a return inside control flow under a constant comparison "
+                                    "this compiler cannot fold at the reference's precision");
+                    return false;
+                }
+                // Each level copies the rest of the body into both arms, so
+                // n sequential early returns build 2^n tails: bounded.
+                if (inlineReturnDepth_ >= 8)
+                {
+                    error(ifs->loc, "cannot inline user function '" + callee->name +
+                                    "': more than 8 nested run-time returns");
+                    return false;
+                }
+                struct DepthGuard { int& d; explicit DepthGuard(int& x) : d(x) { ++d; } ~DepthGuard() { --d; } } guard(inlineReturnDepth_);
+                static const std::string kReturnKey = "#inline-return";
+                // The rest of the body: this list's tail, then whatever an
+                // enclosing arm or constant branch still has to run after it.
+                std::vector<StmtNode*> rest(statements.begin() + static_cast<std::ptrdiff_t>(index) + 1,
+                                            statements.end());
+                rest.insert(rest.end(), inlineContinuation_.begin(), inlineContinuation_.end());
+                const std::vector<StmtNode*> inherited = inlineContinuation_;
+                bool armsOk = true;
+                auto runArm = [&](StmtNode* branch) {
+                    if (!armsOk) return;
+                    IRValueID armResult = InvalidIRValue;
+                    bool armReturned = false;
+                    std::vector<StmtNode*> own;
+                    const bool block = branch && branch->kind == StmtKind::Block;
+                    if (block)
+                        for (const auto& s : static_cast<BlockStmt*>(branch)->statements) own.push_back(s.get());
+                    else if (branch)
+                        own.push_back(branch);
+                    const ScopeState pre = scope_;
+                    if (block) blockDeclared_.emplace_back();
+                    inlineContinuation_ = rest;   // a nested run-time return runs it
+                    bool ok = runInlineStatements(callee, own, armResult, armReturned);
+                    inlineContinuation_.clear();  // `rest` already carries it
+                    if (block)
+                    {
+                        const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
+                        blockDeclared_.pop_back();
+                        for (const auto& name : declared)
+                            exitBlockBinding(name, pre);
+                    }
+                    if (ok && !armReturned)
+                        ok = runInlineStatements(callee, rest, armResult, armReturned);
+                    inlineContinuation_ = inherited;
+                    if (ok && !armReturned && !returnsVoid)
+                    {
+                        error(ifs->loc, "cannot inline user function '" + callee->name +
+                                        "': a path through it has no return expression");
+                        ok = false;
+                    }
+                    if (ok && !returnsVoid && armResult == InvalidIRValue)
+                        ok = false;
+                    armsOk = armsOk && ok;
+                    if (ok && !returnsVoid)
+                        nameToValue_[kReturnKey] = armResult;
+                };
+                const std::function<void()> thenArm = [&] { runArm(ifs->thenBranch.get()); };
+                const std::function<void()> elseArm = [&] { runArm(ifs->elseBranch.get()); };
+                buildConditional(ifs->condition.get(), ifs->loc, thenArm, &elseArm);
+                if (!armsOk)
+                    return false;
+                if (!returnsVoid)
+                {
+                    auto it = nameToValue_.find(kReturnKey);
+                    if (it == nameToValue_.end() || it->second == InvalidIRValue)
+                        return false;
+                    result = it->second;
+                    nameToValue_.erase(it);
+                }
+                sawReturn = true;
+                inlineContinuationRun_ = true;   // the enclosing lists' tails ran in the arms
+                return true;
             }
         }
 
@@ -5093,6 +5256,46 @@ std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
     if (!evaluateConstValue(e, lanes, shape, module_.get()) || lanes.size() != 1 || !shape.isScalar())
         return std::nullopt;
     return lanes[0].isTruthy();
+}
+
+bool IRBuilder::conditionFoldHazard(const ExprNode* e)
+{
+    if (!e) return false;
+    ConstLanes lanes;
+    ConstShape shape;
+    if (evaluateConstValue(e, lanes, shape, module_.get()) && lanes.size() == 1 && shape.isScalar() &&
+        !constCondition(e))
+        return true;
+    switch (e->kind)
+    {
+    case ExprKind::Unary:
+        return conditionFoldHazard(static_cast<const UnaryExpr*>(e)->operand.get());
+    case ExprKind::Binary:
+    {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        return conditionFoldHazard(b->left.get()) || conditionFoldHazard(b->right.get());
+    }
+    case ExprKind::Ternary:
+    {
+        const auto* t = static_cast<const TernaryExpr*>(e);
+        return conditionFoldHazard(t->condition.get()) || conditionFoldHazard(t->thenExpr.get()) ||
+               conditionFoldHazard(t->elseExpr.get());
+    }
+    case ExprKind::Cast:
+        return conditionFoldHazard(static_cast<const CastExpr*>(e)->operand.get());
+    case ExprKind::MemberAccess:
+        return conditionFoldHazard(static_cast<const MemberAccessExpr*>(e)->object.get());
+    case ExprKind::Constructor:
+        for (const auto& arg : static_cast<const ConstructorExpr*>(e)->arguments)
+            if (conditionFoldHazard(arg.get())) return true;
+        return false;
+    case ExprKind::Call:
+        for (const auto& arg : static_cast<const CallExpr*>(e)->arguments)
+            if (conditionFoldHazard(arg.get())) return true;
+        return false;
+    default:
+        return false;
+    }
 }
 
 IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
