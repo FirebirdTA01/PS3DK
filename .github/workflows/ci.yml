@@ -653,6 +653,8 @@ jobs:
         run: bash tests/shader-compiler/tex1d-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test CSE reuses only dominating values
         run: bash tests/shader-compiler/cse-dominance-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: rsx-cg-compiler if-join with an undefined side
+        run: bash tests/shader-compiler/join-undefined-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test fragment tex2Dlod lowers to TXL
         run: bash tests/shader-compiler/fp-tex2dlod-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test file-scope const matrices fold to literal rows

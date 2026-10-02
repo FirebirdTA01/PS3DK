@@ -2164,6 +2164,26 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
         return IRTypeInfo::Void();
     };
 
+    // A value nothing defines: no id at all, or a function-local id that is
+    // not a constant, not a parameter and not an instruction's result (an
+    // uninitialised local's declaration binds such an id).  File-scope ids
+    // live above kGlobalIdBase and are always defined.
+    auto isUndefinedValue = [&](IRValueID id) -> bool
+    {
+        if (id == InvalidIRValue) return true;
+        if (id >= IRModule::kGlobalIdBase) return false;
+        if (currentFunction_->getValue(id)) return false;
+        for (const IRParameter& param : currentFunction_->parameters)
+            if (param.valueId == id) return false;
+        for (const auto& bp : currentFunction_->blocks)
+        {
+            if (!bp) continue;
+            for (const auto& ip : bp->instructions)
+                if (ip && ip->result == id) return false;
+        }
+        return true;
+    };
+
     // Collect every name that appears in either post-map.
     //
     // THE ORDER OF THIS LOOP IS PART OF THE COMPILER'S OUTPUT.  It decides the
@@ -2273,6 +2293,27 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
             // the final value — no Select needed.
             if (thenVal != InvalidIRValue)
                 nameToValue_[name] = thenVal;
+            continue;
+        }
+
+        // One side with NO DEFINITION takes the other side, no Select.  Two
+        // shapes reach here: a varying struct member bound lazily at its
+        // first read, inside one arm only (lanczos_horiz reads `vertex.one`
+        // only under an if - the other side is InvalidIRValue), and a local
+        // declared without an initialiser that a path never writes (the xbr
+        // family's `pix1`/`blend1` chains - the other side is the
+        // declaration's id, which nothing defines).  A Select against either
+        // left an operand the lowering could not resolve.  The first is a
+        // read of the same input wherever it sits; the second is undefined
+        // in Cg, and the reference reads whatever its register holds on that
+        // path (measured: an if / else-if writing `p` with no final else
+        // reads an unwritten r2 where neither arm ran).  Taking the written
+        // arm is the existing rule for local elements above.
+        const bool thenUndef = isUndefinedValue(thenVal);
+        const bool elseUndef = isUndefinedValue(elseVal);
+        if (thenUndef != elseUndef)
+        {
+            nameToValue_[name] = thenUndef ? elseVal : thenVal;
             continue;
         }
 
