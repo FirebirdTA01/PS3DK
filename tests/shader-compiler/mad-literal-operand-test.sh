@@ -6,10 +6,9 @@
 # `v * 0 + 0.5` and painted a flat colour.  Exit 0, no diagnostic.
 #
 # The assertions are on the emitted ucode, since the exit status was never
-# the problem.  The retired matcher is pinned to the reference compiler's
-# compact shape; the shipping general path is pinned to the visible property
-# that the literal multiplier reaches the container as 0.5 instead of as an
-# unpatched zero placeholder.
+# the problem.  The general path is pinned to the visible property that the
+# literal multiplier reaches the container as 0.5 instead of as an unpatched
+# zero placeholder.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -44,13 +43,10 @@ mixed="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_mad_literal_uniform_f.c
 [[ -f "$both" ]]  || fail "fixture missing: $both"
 [[ -f "$mixed" ]] || fail "fixture missing: $mixed"
 
-compile "$both" both_legacy --legacy-lowering
-compile "$mixed" mixed_legacy --legacy-lowering
 compile "$both" both_general
 compile "$mixed" mixed_general
 
-python3 - "$work/both_legacy.log" "$work/mixed_legacy.log" \
-        "$work/both_general.log" "$work/mixed_general.log" <<'PY'
+python3 - "$work/both_general.log" "$work/mixed_general.log" <<'PY'
 import re
 import sys
 
@@ -65,7 +61,6 @@ def rows(path):
 
 
 HALF = 0x00003F00        # 0.5f, in the byte order the container carries
-CONST_XXXX = 0x00020000  # a source reading c[0] with an .xxxx swizzle
 ZEROS = [0, 0, 0, 0]
 # The verbatim four-lane block the shipping path emitted BEFORE the dedup
 # rule (literal-vector-dedup-swizzle).  Nothing asserts it any more; it stays in the filter
@@ -74,60 +69,6 @@ ZEROS = [0, 0, 0, 0]
 HALF4 = [HALF, HALF, HALF, HALF]
 # The dedup rule's shape: distinct values first, zero-filled (literal-vector-dedup-swizzle).
 HALF_PACKED = [HALF, 0, 0, 0]
-
-# --- both operands literal -------------------------------------------
-# MOVR R0, f[TEX0] ; MADR R0, R0, c.xxxx, c.xxxx ; {0.5, 0, 0, 0}
-both_legacy = rows(sys.argv[1])
-if len(both_legacy) != 3:
-    raise SystemExit(
-        "FAIL: fp_mad_literal_f must emit the varying MOV, one MAD and one "
-        "shared const block - three ucode rows, not %d.  Six rows is the "
-        "pre-fix preload shape, whose R1 held the zero placeholder nothing "
-        "ever patched (mad-literal-data)." % len(both_legacy)
-    )
-if both_legacy[2] != [HALF, 0, 0, 0]:
-    raise SystemExit(
-        "FAIL: the MAD's shared const block must hold 0.5 once, packed and "
-        "zero-filled; got [%s]"
-        % ", ".join("0x%08x" % w for w in both_legacy[2])
-    )
-if both_legacy[1][2] != CONST_XXXX or both_legacy[1][3] != CONST_XXXX:
-    raise SystemExit(
-        "FAIL: both MAD operands must read the shared const block with an "
-        ".xxxx swizzle (0x%08x); got SRC1 0x%08x SRC2 0x%08x.  A multiplier "
-        "that does not read the block is the defect: it multiplied by the "
-        "zero placeholder."
-        % (CONST_XXXX, both_legacy[1][2], both_legacy[1][3])
-    )
-
-# --- literal multiplier, uniform addend -------------------------------
-# MOVR R0 ; MOVR R1, k + zero block ; FENCBR ; MADR R0, R0, c.xxxx, R1 + {0.5}
-mixed_legacy = rows(sys.argv[2])
-if len(mixed_legacy) != 6:
-    raise SystemExit(
-        "FAIL: fp_mad_literal_uniform_f must emit six ucode rows (two MOVs "
-        "with their blocks, the fence and the MAD with its block), not %d"
-        % len(mixed_legacy)
-    )
-if mixed_legacy[2] != ZEROS:
-    raise SystemExit(
-        "FAIL: the preloaded UNIFORM's block must stay zero for the host to "
-        "patch; got [%s]"
-        % ", ".join("0x%08x" % w for w in mixed_legacy[2])
-    )
-if mixed_legacy[5] != [HALF, 0, 0, 0]:
-    raise SystemExit(
-        "FAIL: the literal multiplier must reach the MAD's own const block "
-        "as 0.5; got [%s].  All zeros there is the defect - the output "
-        "becomes the uniform addend alone."
-        % ", ".join("0x%08x" % w for w in mixed_legacy[5])
-    )
-if mixed_legacy[4][2] != CONST_XXXX:
-    raise SystemExit(
-        "FAIL: the MAD's multiplier operand must read the const block with "
-        "an .xxxx swizzle (0x%08x); got 0x%08x"
-        % (CONST_XXXX, mixed_legacy[4][2])
-    )
 
 
 def const_blocks(rs):
@@ -206,7 +147,7 @@ def mad_multiplier_is_half(rs, label):
     )
 
 
-# Shipping general lowering preloads literals into temps and still emits one
+# General lowering preloads literals into temps and still emits one
 # block per literal source where the reference shares a single block between
 # the MAD's two operands - that gap is mad-literal-block-sharing's fp_mad_literal_f row and
 # it is not this assertion's subject.  What IS asserted is that the 0.5
@@ -215,11 +156,11 @@ def mad_multiplier_is_half(rs, label):
 #
 # THE PACKED SHAPE, not the verbatim one: the block is {0.5, 0, 0, 0} read
 # .xxxx, which is what the reference emits for this fixture (see the
-# fixture's own header) and what the legacy arm above already expects.  It
+# fixture's own header).  It
 # used to be {0.5, 0.5, 0.5, 0.5} here, because the shipping path wrote
 # every lane verbatim; literal-vector-dedup-swizzle's dedup landed and this expectation moved
 # with it rather than pinning the shape the compiler no longer has.
-both_general = rows(sys.argv[3])
+both_general = rows(sys.argv[1])
 blocks = const_blocks(both_general)
 if HALF_PACKED not in blocks:
     raise SystemExit(
@@ -237,7 +178,7 @@ if ZEROS in blocks:
     )
 mad_multiplier_is_half(both_general, "fp_mad_literal_f")
 
-mixed_general = rows(sys.argv[4])
+mixed_general = rows(sys.argv[2])
 blocks = const_blocks(mixed_general)
 if ZEROS not in blocks or HALF_PACKED not in blocks:
     raise SystemExit(

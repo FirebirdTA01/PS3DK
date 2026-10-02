@@ -75,7 +75,6 @@ void usage()
         "  --no-stdlib            Skip the embedded Cg standard-library header\n"
         "  --emit-container <p>   Write the .vpo/.fpo container to <p> (binary)\n"
         "  --emit-cgb-container <p> Write the compact CGB\\0 container to <p> (binary)\n"
-        "  --legacy-lowering      Use the retired NV40 shape matcher instead\n"
         "  --general-lowering     Accepted and ignored: the general path is\n"
         "                         the default (removed after one release)\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
@@ -149,22 +148,20 @@ int main(int argc, char** argv)
     CompilerContext ctx;
     bool dumpAst = false;
     bool dumpIr  = false;
-    // Both path flags on one command line is a CONTRADICTION, refused
-    // below rather than resolved: last-wins would compile one path while
-    // the caller's own command line says the other, and a container is
-    // not labelled with the path that produced it.  A rig stage that
-    // adds --legacy-lowering to a row already carrying --general-lowering
-    // would have compiled general and filed it as legacy.
-    bool sawGeneralFlag = false;
-    bool sawLegacyFlag = false;
-
-    // RSXCG_GENERAL kept its meaning across the flip rather than its
-    // effect: =0 now selects the matcher, anything else the general
-    // path.  A script that set it to 1 sees no change; one that set it
-    // to 0 to stay on the matcher still does.
+    // The NV40 shape matcher that --legacy-lowering and RSXCG_GENERAL=0
+    // used to select has been removed; the general lowering is the only
+    // back end.  Asking for the matcher is refused by name rather than
+    // ignored, so a script that relied on it learns why its output
+    // changed instead of silently getting the other path.
     const char* generalEnv = std::getenv("RSXCG_GENERAL");
-    if (generalEnv && generalEnv[0])
-        ctx.compileOpts.generalLowering = std::strcmp(generalEnv, "0") != 0;
+    if (generalEnv && std::strcmp(generalEnv, "0") == 0)
+    {
+        std::fprintf(stderr,
+            "rsx-cg-compiler: RSXCG_GENERAL=0 selected the legacy NV40 shape "
+            "matcher, which has been removed; the general lowering is the "
+            "only back end.  Unset RSXCG_GENERAL.\n");
+        return 1;
+    }
 
     int i = 1;
     while (i < argc)
@@ -226,13 +223,14 @@ int main(int argc, char** argv)
             // A no-op alias for one release, so every script, CI line
             // and rig column that names the path it wanted keeps
             // working.
-            sawGeneralFlag = true;
-            ctx.compileOpts.generalLowering = true;
         }
         else if (arg == "--legacy-lowering")
         {
-            sawLegacyFlag = true;
-            ctx.compileOpts.generalLowering = false;
+            std::fprintf(stderr,
+                "rsx-cg-compiler: --legacy-lowering selected the NV40 shape "
+                "matcher, which has been removed; the general lowering is "
+                "the only back end.  Drop the flag.\n");
+            return 1;
         }
         else if (arg == "-O0" || arg == "--O0")
         {
@@ -312,16 +310,6 @@ int main(int argc, char** argv)
             ctx.inputFile = arg;
         }
         ++i;
-    }
-
-    if (sawGeneralFlag && sawLegacyFlag)
-    {
-        std::fprintf(stderr,
-            "rsx-cg-compiler: --general-lowering and --legacy-lowering name "
-            "different lowerings; refusing rather than picking one.\n"
-            "  --general-lowering is the default and accepted as a no-op for "
-            "one release; drop it, or drop --legacy-lowering.\n");
-        return 1;
     }
 
     if (ctx.inputFile.empty())
@@ -450,10 +438,7 @@ int main(int argc, char** argv)
     // precede convertSimpleIfElse - that pass's shape 5 hoists a then-arm
     // discard into the entry block and deletes the CondBranch, after
     // which the guard is recoverable only by position, which is the
-    // fragility this removes.  General path only: the default path's
-    // matcher is unchanged by design, and a shader that newly compiled
-    // because of this pass would be a verdict change no fence asked for.
-    if (ctx.compileOpts.generalLowering)
+    // fragility this removes.
     {
         nv40::DiscardGuardResult dg = nv40::materialiseDiscardGuards(*irModule);
         for (const auto& diag : dg.diagnostics)

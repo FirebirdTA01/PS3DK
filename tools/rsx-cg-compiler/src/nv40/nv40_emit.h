@@ -46,7 +46,7 @@ struct FpEmbeddedUniform
 };
 
 // Fields needed to populate the CgBinaryFragmentProgram subtype of a
-// .fpo container.  Filled by lowerFragmentProgram alongside ucode
+// .fpo container.  Filled by the general FP lowering alongside ucode
 // emission and surfaced via emitFragmentProgramEx.
 struct FpAttributes
 {
@@ -91,7 +91,7 @@ struct VpLiteralPoolSlot
 };
 
 // Fields needed to populate the CgBinaryVertexProgram subtype of a
-// .vpo container.  Filled by lowerVertexProgram alongside ucode
+// .vpo container.  Filled by the general VP lowering alongside ucode
 // emission and surfaced via emitVertexProgramEx.
 struct VpAttributes
 {

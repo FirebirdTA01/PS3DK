@@ -25,12 +25,12 @@ def record(typ,reg,sem,used=True,parent=False):
     return (typ,2178 if used and not parent else 3256,reg if used and not parent else 0xffffffff,sem,int(used),int(used))
 with tempfile.TemporaryDirectory(prefix='ps3dk-fp-binding-') as td:
     root=Path(td)
-    def run(name,source,expected,defaults=None,legacy=False,refusal=False,compact=False):
+    def run(name,source,expected,defaults=None,refusal=False,compact=False):
         parsed=[]
         for bound in (True,False):
             src=root/(name+str(bound)+'.cg');out=src.with_suffix('.bin')
             src.write_text(source if bound else source.replace(':register(C9)','').replace(':C9','').replace(':C009','').replace(':C256','').replace(':C255',''))
-            result=subprocess.run([compiler,'-p','sce_fp_rsx','--legacy-lowering' if legacy else '--general-lowering','--emit-container',str(out),str(src)],capture_output=True,text=True,timeout=20)
+            result=subprocess.run([compiler,'-p','sce_fp_rsx','--emit-container',str(out),str(src)],capture_output=True,text=True,timeout=20)
             if refusal:
                 require(result.returncode==1 and 'overlapping used FP constant bindings' in result.stderr and 'shared-embedded-patch-ownership' in result.stderr,
                         name+': expected named interim alias refusal, got '+str(result.returncode)+' '+result.stderr)
@@ -69,7 +69,6 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-fp-binding-') as td:
         decl='uniform float4 u:'+spelling
         source=decl+'; float4 main(float4 p:TEXCOORD0):COLOR{return p*u;}' if scope=='global' else 'float4 main(float4 p:TEXCOORD0,'+decl+'):COLOR{return p*u;}'
         run(scope+spelling,source,{('u',pno):record(1048,9,'C9')})
-        if scope=='global':run(scope+spelling+'-legacy',source,{('u',pno):record(1048,9,'C9')},legacy=True)
         for width,typ in [(3,1059),(4,1064)]:
             decl=f'uniform float{width}x{width} u:'+spelling
             expr='mul(u,p)' if width==4 else 'float4(mul(u,p.xyz),p.w)'
@@ -93,5 +92,5 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-fp-binding-') as td:
 if failures:
     for message in failures:print('FAIL: '+message,file=sys.stderr)
     sys.exit(1)
-print('PASS: fp-explicit-binding (exact records, unchanged ucode/relocations/defaults, legacy, FP C256)')
+print('PASS: fp-explicit-binding (exact records, unchanged ucode/relocations/defaults, FP C256)')
 PY

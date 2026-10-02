@@ -5,8 +5,7 @@
 # backend then invented a different wrong value -- fragment default compiled
 # K as 0.0, fragment general read it as vertex attribute 0, vertex refused
 # with "LoadUniform for unknown global 'K'".  Byte-equality against an inline
-# literal is checked on BOTH lowering paths, because the two paths failed
-# differently and a fix that only corrected one would pass a single-path test.
+# literal is checked on the general lowering, the compiler's only back end.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -47,15 +46,10 @@ compile() {
     [[ -s "$work/$tag.fpo" ]] || fail "$stem ($tag) produced no container"
 }
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-for path in general legacy; do
-    flags=()
-    [[ "$path" == legacy ]] && flags=(--legacy-lowering)
-
-    compile fp_file_scope_const_f   "const_$path"  "${flags[@]}"
-    compile fp_inline_literal_f     "lit_$path"    "${flags[@]}"
-    compile fp_inline_literal_alt_f "alt_$path"    "${flags[@]}"
+for path in general; do
+    compile fp_file_scope_const_f   "const_$path"
+    compile fp_inline_literal_f     "lit_$path"
+    compile fp_inline_literal_alt_f "alt_$path"
 
     # The fold carries the value: same value, same bytes.
     if ! cmp -s "$work/const_$path.fpo" "$work/lit_$path.fpo"; then
@@ -76,7 +70,7 @@ done
 
 # The value itself is in the ucode, not merely agreement between two files.
 # 7.5f is 0x40F00000, stored halfword-swapped in the ucode blob as 0000 40F0.
-python3 - "$work/const_general.fpo" "$work/const_legacy.fpo" <<'PY'
+python3 - "$work/const_general.fpo" <<'PY'
 import sys
 
 needle = bytes((0x00, 0x00, 0x40, 0xF0))   # 7.5f, halfword-swapped

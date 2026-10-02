@@ -31,10 +31,6 @@
  *   - shape 5 in turn declines any discard that already carries a guard,
  *     because it erases the discard's block and would take the guard
  *     instructions with it.
- *
- * General path only, for now: the default path's matcher is unchanged by
- * design, so a shader that newly compiled because of this pass would be a
- * verdict change no fence asked for.
  */
 
 #include <string>
@@ -65,29 +61,6 @@ struct GuardLiteral
     IRValueID cond = InvalidIRValue;
     bool taken = true;      // true: the THEN arm
 };
-
-// What guards the block containing `inst`, computed READ-ONLY.
-//
-// The same intersection-over-predecessors with the complementary-pair
-// verification the pass above uses, exposed because the DEFAULT path needs
-// the same answer for the opposite purpose: it recovers a discard's guard
-// as a single comparison, so it has to know whether that comparison IS the
-// whole guard before it emits a kill (discard-guard-completeness, nested-discard-reachability).  One rule,
-// one implementation - the first attempt wrote the walk a second time in
-// the emitter and the copy was wrong at merges.
-//
-// `proven` false means the shape is one this computation cannot verify: a
-// back-edge, more than two predecessors, or a merge whose predecessors do
-// not differ by exactly one complementary pair.  A caller deciding whether
-// to REFUSE must treat that as "cannot prove", never as "no guard".
-struct BlockGuard
-{
-    bool proven = false;
-    std::vector<GuardLiteral> literals;
-};
-
-BlockGuard guardForBlockContaining(const IRFunction& entry,
-                                   const IRInstruction& inst);
 
 }  // namespace nv40
 

@@ -6,7 +6,7 @@
 # diagnostic, and a container whose ucode never writes the output register.
 #
 # The assertion is the twin: the same shader with `: COLOR` written out
-# must compile to the same PROGRAM, on both paths.  It cannot pass by
+# must compile to the same PROGRAM.  It cannot pass by
 # accident - if the omitted semantic changed what the shader computes, the
 # two would differ.
 #
@@ -68,9 +68,7 @@ binds to COLOR; refusing or dropping it is implicit-colour-output."
     ) >"$work/$3.dump" 2>&1 || fail "$3 compiled with a container but not without"
 }
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-for path_flags in ":general" "--legacy-lowering:legacy"; do
+for path_flags in ":general"; do
     flags="${path_flags%%:*}"
     tag="${path_flags##*:}"
     compile fp_out_no_semantic_f   "$flags" "none_$tag"
@@ -134,4 +132,4 @@ for path in paths:
         )
 PY
 
-printf 'out-no-semantic-test: ok (both paths, ucode identity + output written)\n'
+printf 'out-no-semantic-test: ok (general path, ucode identity + output written)\n'

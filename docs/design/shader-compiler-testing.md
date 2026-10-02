@@ -153,8 +153,8 @@ as they land.
 Measured against real community shaders (2026-08-31): the shape matcher
 compiled a narrow subset of them, while the general lowering path
 compiled nearly all.  That gap is why the general path is the default
-since 2026-09-02; the matcher is `--legacy-lowering` for one release, so
-a divergence can be bisected against it rather than argued about.  Tier c
+since 2026-09-02, and the matcher was removed on 2026-10-01 (director's
+ruling: one lowering path, no fallback).  Tier c
 readback remains the instrument that decides whether the general path's
 output is correct and not merely different — the flip did not settle
 that question, it moved which answer ships.

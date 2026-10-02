@@ -416,7 +416,7 @@ VpContainerResult emitVertexContainerImpl(
                     [](const IRGlobal& g) { return g.name == "gBlendMatrices"; });
 
     // Mirror VP allocator: matrices grow from c[256] upward, scalars
-    // from c[467] downward.  Same algorithm runs inside lowerVertexProgram.
+    // from c[467] downward, as the general VP lowering allocates them.
     int nextMatrixReg = 256;
     int nextVectorReg = 467;
     const auto explicitBindings = attrs.resolvedExplicitBindings

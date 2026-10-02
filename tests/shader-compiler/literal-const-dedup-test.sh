@@ -2,9 +2,8 @@
 # A literal vec4 store packs the DISTINCT values and selects with the source
 # swizzle, the way the reference compiler does (literal-vector-dedup-swizzle).
 #
-# THE RULE, derived from the oracle over the thirteen shapes below and
-# independently already present in the legacy emitter (FpConstBlockPacker,
-# nv40_fp_emit.cpp): the block holds the distinct values in FIRST-APPEARANCE
+# THE RULE, derived from the oracle over the thirteen shapes below: the
+# block holds the distinct values in FIRST-APPEARANCE
 # order, zero-filled, and swizzle[lane] is the index of that lane's value.
 # Equality is `==`, NOT the bit pattern, and the representative is whichever
 # value appeared first - measured BOTH ways round, which is the only way to
@@ -13,15 +12,10 @@
 #   float4(0.0, -0.0, 0.0, -0.0)   packs +0   read .xxxx
 #   float4(-0.0, 0.0, -0.0, 0.0)   packs -0   read .xxxx
 #
-# THIS SCRIPT USED TO RUN THE LEGACY PATH.  The property is reference parity,
-# and it was asserted only under --legacy-lowering while the SHIPPING path
-# silently failed it - general-path-literal-dedup's finding, one of nine.  The subject is now
-# the shipping path; ONE legacy invocation survives as a differential control.
-#
-# TOMBSTONE FOR THAT CONTROL: the legacy matcher is retired.  When it goes,
-# delete the differential row - do not "fix" it, and do not let it become the
-# subject again.  Its only job today is to show that two independently
-# written implementations of one rule agree.
+# THIS SCRIPT USED TO RUN THE RETIRED SHAPE MATCHER.  The property is
+# reference parity, and it was asserted only there while the SHIPPING path
+# silently failed it - general-path-literal-dedup's finding, one of nine.  The
+# subject is the general lowering, the compiler's only back end.
 #
 # THE ARTIFACT IS THE CONTAINER, and it is the ONLY artifact: the packing,
 # the swizzle and the predication below are all read from the same bytes.
@@ -131,8 +125,8 @@ done
 #   float4(1,inf,inf,3)   ref {1,3,0,0} .xxyy    paints (1,1,3,3)
 #   float4(-inf,1,-inf,3) ref {-inf,1,3,0} .xyzz paints (-inf,1,3,3)
 #
-# We do not chase that.  This row asserts OUR output, which the legacy
-# packer produces identically, and which paints what the source says.
+# We do not chase that.  This row asserts OUR output, which paints what the
+# source says.
 printf 'float4 main(float4 p : TEXCOORD0) : COLOR\n{\n    return float4(3.0e38 * 3.0e38, 1.0, 3.0e38 * 3.0e38, 2.0);\n}\n' \
     > "$work/repeated_inf.cg"
 compile "$work/repeated_inf.cg" repeated_inf
@@ -147,9 +141,7 @@ repeat="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_literal_repeat_f.cg"
 compile "$broadcast" broadcast
 compile "$repeat" repeat
 
-# THE DIFFERENTIAL CONTROL: one shape, the legacy path, same expectation.
-# See the tombstone at the top of this file.
-compile "$work/quarters.cg" quarters_legacy --legacy-lowering
+# legacy-path control removed with the shape matcher (chore/rsxcg-remove-legacy-lowering); it proved the matcher's independent packer agreed with the general path on the quarters shape.
 
 # PREDICATION, read from the same containers the packing rows read.  A block
 # only reaches a pixel through a write that actually executes; see the
@@ -163,7 +155,7 @@ for shape in "${SHAPES[@]}"; do
     IFS='|' read -r tag _rest <<<"$shape"
     check_unpredicated "$tag"
 done
-for tag in repeated_inf broadcast repeat quarters_legacy; do
+for tag in repeated_inf broadcast repeat; do
     check_unpredicated "$tag"
 done
 
@@ -200,8 +192,6 @@ SHAPES = [
     ("repeat", "3f800000 3f000000 00000000 00000000", "xyxy"),
     # OURS, not the reference's - see the named divergence above.
     ("repeated_inf", "7f800000 3f800000 40000000 00000000", "xyxz"),
-    # The legacy path, on the shape the shipping path already asserted.
-    ("quarters_legacy", "3f000000 3e800000 3e000000 00000000", "xyxz"),
 ]
 
 
@@ -273,10 +263,8 @@ if not why or "first-appearance order" not in why:
         "same three values, packed last-first - was not rejected: %r" % why)
 
 print("  %d containers - the shapes, the tracked pair and the non-finite "
-      "divergence - plus the legacy differential all match, none "
-      "predicated; three packing controls and one COND_FL container "
-      "control rejected"
-      % len([s for s in SHAPES if not s[0].endswith("_legacy")]))
+      "divergence - all match, none predicated; three packing controls and "
+      "one COND_FL container control rejected" % len(SHAPES))
 PY
 
 printf 'literal-const-dedup-test: ok\n'

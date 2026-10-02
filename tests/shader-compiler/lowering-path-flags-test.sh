@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
-# The lowering-path flag contract, for the release in which both spellings
-# exist (the flip, 2026-09-02).
+# The lowering-path flag contract after the retired shape matcher was
+# removed (chore/rsxcg-remove-legacy-lowering).
 #
-#   unflagged            the general lowering - the compiler
-#   --legacy-lowering    the retired shape matcher
-#   --general-lowering   accepted and IGNORED, one release, so the scripts
-#                        and rig columns written before the flip keep working
-#   both flags at once   REFUSED, either order
+#   unflagged            the general lowering - the only back end
+#   --general-lowering   accepted and IGNORED, so the scripts and rig columns
+#                        written before the flip keep working
+#   RSXCG_GENERAL=1      accepted and IGNORED, same reason
+#   --legacy-lowering    REFUSED: exit 1, no container, "has been removed"
+#   RSXCG_GENERAL=0      REFUSED the same way
 #
-# The last one is the reason this file exists.  Last-wins would compile one
-# lowering while the caller's own command line asks for the other, and a
-# container carries no label saying which path produced it - so a rig stage
-# that adds --legacy-lowering to a row already carrying --general-lowering
-# would file a general container as legacy evidence and nothing downstream
-# could tell.  A refusal costs one aborted stage; last-wins costs a verdict.
+# The refusals are the reason this file exists.  A caller still asking for
+# the matcher must not silently get a general container filed as legacy
+# evidence: a container carries no label saying which path produced it.
 #
-# The no-op alias is asserted on BYTES, not on exit status: an alias that
-# quietly selected something else would still exit 0.
+# The no-op spellings are asserted on BYTES, not on exit status: an alias
+# that quietly selected something else would still exit 0.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -47,12 +45,16 @@ work="${TMPDIR:-/tmp}/ps3dk-lowering-path-flags.$$"
 mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
-# A shape only the general path lowers, so "which path ran" is answerable
-# from the verdict rather than from a comment (half-precision-lowering).
+# Rows 1, 2 and 4 must not inherit a caller's RSXCG_GENERAL.
+unset RSXCG_GENERAL
+
+# A shape only the general path ever lowered (half-precision-lowering).
 src="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_half_cast_f.cg"
 [[ -f "$src" ]] || fail "fixture missing: $src"
 
-run() {   # $1 tag, then flags -> rc in $rc, log at $work/$1.log, container $work/$1.bin
+# $1 tag, then flags -> rc in $rc, stdout $work/$1.log, stderr $work/$1.err,
+# container $work/$1.bin
+run() {
     local tag="$1"; shift
     rc=0
     rm -f "$work/$tag.bin"
@@ -60,47 +62,60 @@ run() {   # $1 tag, then flags -> rc in $rc, log at $work/$1.log, container $wor
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
         timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
             -p sce_fp_rsx "$@" --emit-container "$work/$tag.bin" "$src"
-    ) >"$work/$tag.log" 2>&1 || rc=$?
+    ) >"$work/$tag.log" 2>"$work/$tag.err" || rc=$?
     refusal_status "$rc" "$tag"
     return 0
+}
+
+same_as_plain() {   # $1 tag, $2 spelling
+    [[ "$rc" -eq 0 ]] || {
+        tail -n 5 "$work/$1.log" "$work/$1.err" >&2
+        fail "$2 must stay accepted as a no-op"
+    }
+    cmp -s "$work/plain.bin" "$work/$1.bin" || fail "$2 produced a different
+container from an unflagged run: it is meant to be accepted and IGNORED, not
+to select anything."
+}
+
+removed() {   # $1 tag, $2 spelling
+    [[ "$rc" -eq 1 ]] || {
+        tail -n 5 "$work/$1.log" "$work/$1.err" >&2
+        fail "$2 exited $rc; it must refuse with exit 1 now the shape matcher
+is gone."
+    }
+    # the refusal is a DIAGNOSTIC, so it is read from stderr
+    grep -q "has been removed" "$work/$1.err" || {
+        tail -n 5 "$work/$1.err" >&2
+        fail "$2 refused for some OTHER reason; the removal must be named, or
+the caller cannot tell it from a compile failure."
+    }
+    [[ ! -e "$work/$1.bin" ]] || fail "$2 refused but left a container
+behind, which a stage would pick up as evidence."
 }
 
 # 1. Unflagged is the general lowering.
 run plain
 [[ "$rc" -eq 0 ]] || {
-    tail -n 5 "$work/plain.log" >&2
+    tail -n 5 "$work/plain.log" "$work/plain.err" >&2
     fail "an unflagged run must be the GENERAL lowering, and this fixture
-compiles there.  A refusal here means the default did not flip."
+compiles there."
 }
+[[ -s "$work/plain.bin" ]] || fail "an unflagged run wrote no container"
 
-# 2. --legacy-lowering is the matcher, which refuses this shape.
-run legacy --legacy-lowering
-[[ "$rc" -eq 1 ]] || fail "--legacy-lowering compiled a shape only the general
-path lowers: the flag did not select the matcher."
-
-# 3. --general-lowering is a no-op alias: same BYTES as unflagged.
+# 2. --general-lowering is a no-op alias: same BYTES as unflagged.
 run alias --general-lowering
-[[ "$rc" -eq 0 ]] || {
-    tail -n 5 "$work/alias.log" >&2
-    fail "--general-lowering must stay accepted for one release"
-}
-cmp -s "$work/plain.bin" "$work/alias.bin" || fail "--general-lowering produced
-a different container from an unflagged run: it is meant to be accepted and
-IGNORED, not to select anything."
+same_as_plain alias --general-lowering
 
-# 4. Both flags, either order, refuse - and write nothing.
-for order in "--general-lowering --legacy-lowering" "--legacy-lowering --general-lowering"; do
-    # shellcheck disable=SC2086
-    run both $order
-    [[ "$rc" -eq 1 ]] || fail "'$order' compiled instead of refusing.  The two
-flags name different lowerings and the container would not say which one ran."
-    grep -q "refusing rather than picking one" "$work/both.log" || {
-        tail -n 5 "$work/both.log" >&2
-        fail "'$order' refused for some OTHER reason; the contradiction must be
-named, or the caller cannot tell it from a compile failure."
-    }
-    [[ ! -s "$work/both.bin" ]] || fail "'$order' refused but left a container
-behind, which a stage would pick up as evidence."
-done
+# 3. RSXCG_GENERAL=1 is a no-op too.
+RSXCG_GENERAL=1 run env_general
+same_as_plain env_general RSXCG_GENERAL=1
+
+# 4. --legacy-lowering asks for the removed matcher and refuses.
+run legacy --legacy-lowering
+removed legacy --legacy-lowering
+
+# 5. RSXCG_GENERAL=0 asks for it through the environment and refuses.
+RSXCG_GENERAL=0 run env_legacy
+removed env_legacy RSXCG_GENERAL=0
 
 printf 'PASS: lowering-path-flags-test\n'

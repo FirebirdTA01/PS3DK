@@ -171,16 +171,12 @@ fi
 for profile in sce_fp_rsx sce_vp_rsx; do
     src="$work/constant_bitwise_fp.fcg"
     [[ "$profile" == sce_vp_rsx ]] && src="$work/constant_bitwise_vp.vcg"
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-    for mode in general legacy; do
-        args=()
-        [[ "$mode" == legacy ]] && args+=(--legacy-lowering)
+    for mode in general; do
         rc=0
         (
             ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
             timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-                -p "$profile" "${args[@]}" \
+                -p "$profile" \
                 --emit-container "$work/constant_bitwise_${profile}_${mode}.bin" "$src"
         ) >"$work/constant_bitwise_${profile}_${mode}.log" 2>&1 || rc=$?
         [[ "$rc" -eq 0 ]] || { tail -n 10 "$work/constant_bitwise_${profile}_${mode}.log" >&2; fail "constant_bitwise refused on $profile/$mode"; }
@@ -245,18 +241,14 @@ SHADER
     for profile in sce_fp_rsx sce_vp_rsx; do
         src="$fp_src"
         [[ "$profile" == sce_vp_rsx ]] && src="$vp_src"
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-        for mode in general legacy; do
-            args=()
-            [[ "$mode" == legacy ]] && args+=(--legacy-lowering)
+        for mode in general; do
             out="$work/${name}_${profile}_${mode}.bin"
             log="$work/${name}_${profile}_${mode}.log"
             rc=0
             (
                 ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
                 timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-                    -p "$profile" "${args[@]}" \
+                    -p "$profile" \
                     --emit-container "$out" "$src"
             ) >"$log" 2>&1 || rc=$?
 

@@ -14,11 +14,7 @@
 # mask.  In this fixture the only MOVs that read an input are the two
 # arm moves (the comparison is an SGT, not a MOV), so the rule is exact
 # here and NOT a general one - a shader that legitimately moves one lane
-# of an input would violate it.  The DEFAULT path refuses this shape
-# outright ("Select: two varying branches not yet supported", measured on
-# f021170 and after the fix alike) - an honest refusal, accepted here by
-# its message; should the matcher ever learn the shape, its words are
-# held to the same full-mask rule.
+# of an input would violate it.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
@@ -65,24 +61,7 @@ compile() {   # $1 flags, $2 tag
 }
 compile "" "${stem}_general"
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-# Legacy path: a refusal is accepted only with the measured message; a
-# compile is held to the same rule as the general path.
 logs=("$work/${stem}_general.log")
-rc=0
-(
-    ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
-    timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-        -p sce_fp_rsx --legacy-lowering "$shaders/$stem.cg"
-) >"$work/${stem}_legacy.log" 2>&1 || rc=$?
-refusal_status "$rc" "${stem}_legacy"
-if [[ "$rc" -eq 0 ]]; then
-    logs+=("$work/${stem}_legacy.log")
-elif ! grep -q "Select: two varying branches not yet supported" "$work/${stem}_legacy.log"; then
-    tail -n 20 "$work/${stem}_legacy.log" >&2
-    fail "${stem}_legacy failed for a reason other than the measured refusal"
-fi
 
 python3 - "${logs[@]}" <<'PY'
 import re
@@ -148,8 +127,4 @@ if bad:
         "to one lane (vector-input-select-lanes).  Offending instructions:\n" + lines
     )
 PY
-if [[ ${#logs[@]} -eq 2 ]]; then
-    printf 'select-merge-inputs-test: ok (full-width merge on both paths)\n'
-else
-    printf 'select-merge-inputs-test: ok (full-width merge on the general path; the legacy path refuses the shape as measured)\n'
-fi
+printf 'select-merge-inputs-test: ok (full-width merge on the general path)\n'

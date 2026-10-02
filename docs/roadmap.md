@@ -34,8 +34,8 @@ Release mechanics and version-string rules live in `docs/VERSIONING.md`.
 `tools/rsx-cg-compiler` compiles Cg to NV40 microcode for the `sce_fp_rsx` and
 `sce_vp_rsx` profiles, and is the largest active workstream in the project. It
 replaced its own predecessor in September 2026: the general lowering path is now
-the compiler, and the retired shape matcher survives only behind
-`--legacy-lowering` for differential testing.
+the compiler, and the retired shape matcher was removed on 2026-10-01;
+`--legacy-lowering` now fails with a message saying so.
 
 Progress is measured on three independent axes, because a compiler can pass any
 one of them while failing the other two.

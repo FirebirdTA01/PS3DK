@@ -28,17 +28,13 @@ void main(float4 v : TEXCOORD$n, out float4 color : COLOR) {
 }
 CG
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-    for path in general legacy; do
-        flags=()
-        [[ "$path" == legacy ]] && flags=(--legacy-lowering)
+    for path in general; do
         out="$work/tc${n}_$path.fpo"
         rc=0
         (
             ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
             timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler" \
-                -p sce_fp_rsx "${flags[@]}" --emit-container "$out" "$src"
+                -p sce_fp_rsx --emit-container "$out" "$src"
         ) >"$work/tc${n}_$path.log" 2>&1 || rc=$?
         [[ "$rc" -eq 124 ]] && fail "TEXCOORD$n ($path) timed out"
         if [[ "$rc" -ne 0 ]]; then

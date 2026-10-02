@@ -1,9 +1,9 @@
 /*
  * NV40 back-end top-level dispatch.
  *
- * Routes the IRModule to the vertex- or fragment-program emitter.  The
- * per-profile emitters live in nv40_vp_emit.cpp / nv40_fp_emit.cpp.  This
- * file exists so main.cpp only has to include one header.
+ * Routes the IRModule to the general lowering for its profile
+ * (nv40_general_lowering.cpp).  This file exists so main.cpp only has to
+ * include one header.
  */
 
 #include "nv40_emit.h"
@@ -24,16 +24,6 @@ static const IRFunction* findEntryPoint(const IRModule& module, const std::strin
     return nullptr;
 }
 
-namespace detail
-{
-UcodeOutput lowerVertexProgram  (const IRModule& module, const IRFunction& entry,
-                                 const rsx_cg::CompileOptions& opts,
-                                 VpAttributes* attrsOut);
-UcodeOutput lowerFragmentProgram(const IRModule& module, const IRFunction& entry,
-                                 const rsx_cg::CompileOptions& opts,
-                                 FpAttributes* attrsOut);
-}  // namespace detail
-
 UcodeOutput emitVertexProgram(const IRModule& module, const std::string& entry,
                               const rsx_cg::CompileOptions& opts)
 {
@@ -44,9 +34,7 @@ UcodeOutput emitVertexProgram(const IRModule& module, const std::string& entry,
         out.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    return opts.generalLowering
-        ? detail::lowerVertexProgramGeneral(module, *fn, opts, nullptr)
-        : detail::lowerVertexProgram(module, *fn, opts, nullptr);
+    return detail::lowerVertexProgramGeneral(module, *fn, opts, nullptr);
 }
 
 VpEmitResult emitVertexProgramEx(const IRModule& module, const std::string& entry,
@@ -59,9 +47,7 @@ VpEmitResult emitVertexProgramEx(const IRModule& module, const std::string& entr
         out.ucode.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    out.ucode = opts.generalLowering
-        ? detail::lowerVertexProgramGeneral(module, *fn, opts, &out.attrs)
-        : detail::lowerVertexProgram(module, *fn, opts, &out.attrs);
+    out.ucode = detail::lowerVertexProgramGeneral(module, *fn, opts, &out.attrs);
     return out;
 }
 
@@ -75,9 +61,7 @@ UcodeOutput emitFragmentProgram(const IRModule& module, const std::string& entry
         out.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    return opts.generalLowering
-        ? detail::lowerFragmentProgramGeneral(module, *fn, opts, nullptr)
-        : detail::lowerFragmentProgram(module, *fn, opts, nullptr);
+    return detail::lowerFragmentProgramGeneral(module, *fn, opts, nullptr);
 }
 
 FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& entry,
@@ -90,9 +74,7 @@ FpEmitResult emitFragmentProgramEx(const IRModule& module, const std::string& en
         out.ucode.diagnostics.push_back("nv40: entry point '" + entry + "' not found in IR module");
         return out;
     }
-    out.ucode = opts.generalLowering
-        ? detail::lowerFragmentProgramGeneral(module, *fn, opts, &out.attrs)
-        : detail::lowerFragmentProgram(module, *fn, opts, &out.attrs);
+    out.ucode = detail::lowerFragmentProgramGeneral(module, *fn, opts, &out.attrs);
     return out;
 }
 
