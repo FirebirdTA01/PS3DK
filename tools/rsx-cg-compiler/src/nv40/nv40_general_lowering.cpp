@@ -1,9 +1,7 @@
 /*
- * The general NV40 lowering pipeline - the default since D1.
- *
- * The shape matcher this replaced is still reachable for one release
- * as `--legacy-lowering` (RSXCG_GENERAL=0), so a divergence can be
- * bisected against it rather than argued about.
+ * The general NV40 lowering pipeline - the only back end.  The shape
+ * matcher it replaced (--legacy-lowering / RSXCG_GENERAL=0) has been
+ * removed; asking for it is refused by name in main.cpp.
  *
  * Confirmed pieces implemented here:
  *   - profile-neutral virtual NV40 instruction records;

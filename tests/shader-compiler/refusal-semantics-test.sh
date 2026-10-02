@@ -3,7 +3,8 @@
 #
 # Pins the contract that a shader the compiler cannot lower honestly
 # produces (a) a nonzero exit code, (b) NO container file, and (c) a
-# printed refusal line — on BOTH lowering paths.  The shipped v0.12.21
+# printed refusal line — on the general lowering, the only back end.
+# The shipped v0.12.21
 # --general-lowering violated (a) and (b): it printed "unsupported IR
 # op frac" twice, then wrote a 416-byte container and exited 0.  A
 # diagnostic nobody's exit code honours is not a refusal, and a
@@ -59,9 +60,7 @@ run_compile() {
     return "$rc"
 }
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
-for path_flag in "" "--legacy-lowering"; do
+for path_flag in ""; do
     label="path[${path_flag:-general}]"
     # shellcheck disable=SC2086 — an empty flag must expand to nothing
     extra=($path_flag)

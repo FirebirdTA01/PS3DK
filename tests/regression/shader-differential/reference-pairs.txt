@@ -4,13 +4,10 @@
 #   separated, on top of the path flag.  A row with flags is named
 #   <shader>__<flag-slug>__set<uniform_set>, so one shader can be staged
 #   under several flags or sets as distinct rows (general-lowering-default).
-#   path = general | legacy | both (default both): the lowering the row is
-#   compiled on - general is the DEFAULT since the flip (2026-09-02), legacy is
-#   the retired matcher under --legacy-lowering ('default' is accepted as an
-#   alias of legacy for one release).  Historically 'the lowering path the
-#   row is compiled on.  A row for the other path is skipped by the
-#   stager, not compiled, so a fixture that only compiles under
-#   --general-lowering cannot abort a default-path stage.
+#   path = general | both (default both); both is retained list syntax for
+#   the sole remaining general lowering. legacy/default rows are rejected,
+#   never silently skipped. The former path-pairs.txt witnesses are already
+#   included here under the same shader paths and uniform sets.
 #
 # Staged by stage-differential.ps1 only when a reference compiler is
 # given; the reference containers are runtime input under dev_hdd0 and
@@ -25,10 +22,7 @@
 # present and green; any other sampler kind, or a unit outside
 # TEXUNIT0..15, refuses in-guest as samplers-unvalidated.
 #
-# The stager's -GeneralLowering flows into OUR side only; the reference
-# side has no lowering switch.  A pair can therefore be byte-identical
-# (skipped) in one mode and staged in the other -- a changed row count
-# between modes is that, not a regression.
+# -GeneralLowering is an accepted no-op; the reference has no path switch.
 #
 # First three: the Class A oracle divergences (constant-colour outputs
 # where we spell the literal out and the reference reuses one constant

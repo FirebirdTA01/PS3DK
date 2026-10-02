@@ -19,7 +19,7 @@
 # input mask are not evidence about what the program does - distinct-varying-sources was
 # a mask naming a varying no instruction read.
 #
-# Three fixtures assert a REFUSAL, and each refusal is checked for its own
+# Two fixtures assert a REFUSAL, and each refusal is checked for its own
 # reason so it cannot pass because something else broke first:
 #
 #   fp_discard_loop_f      - a back-edge, on the general path.  A
@@ -29,10 +29,6 @@
 #                            dynamic; our frontend fully unrolls a
 #                            constant one, so the refusal would never be
 #                            reached.
-#   fp_discard_else_f      - on the LEGACY path (the matcher), discard-guard-completeness.  EXPIRES
-#                            when the matcher is retired; the general path
-#                            compiles this shape correctly and is checked
-#                            for it above (case else_arm).
 #   fp_store_skippable_f   - on the general path: a store the control flow
 #                            can SKIP with nothing killing the path that
 #                            misses it.  In a flattened program every
@@ -142,83 +138,7 @@ grep -q "back-edge" "$work/loop.log" || {
 back-edge; a refusal that fires for the wrong reason is not a guard."
 }
 
-run fp_discard_else_f "--legacy-lowering" else_legacy
-[[ "$rc" -eq 1 ]] || fail "fp_discard_else_f compiled on the LEGACY path (the matcher).
-That path recovers a discard's guard from the last comparison it walked
-past, so on the false arm of a branch it kills exactly the fragments that
-must survive (discard-guard-completeness).  It must refuse until the matcher is retired."
-grep -q "FALSE arm" "$work/else_legacy.log" || {
-    tail -n 5 "$work/else_legacy.log" >&2
-    fail "fp_discard_else_f refused on the legacy path for some OTHER
-reason than the false-arm discard."
-}
-
-run fp_discard_and_f "--legacy-lowering" and_legacy
-[[ "$rc" -eq 1 ]] || fail "fp_discard_and_f compiled on the LEGACY path (the matcher).
-Its guard compares a varying against a uniform: the pre-pass puts the
-uniform in R1 and the varying's preload writes H2 with a full mask, and
-H2's four fp16 lanes cover all of R1.x and R1.y - so the uniform is gone
-before the second comparison reads it (half-preload-register-alias)."
-grep -q "half-register preload" "$work/and_legacy.log" || {
-    tail -n 5 "$work/and_legacy.log" >&2
-    fail "fp_discard_and_f refused on the legacy path for some OTHER
-reason than the half-preload aliasing."
-}
-
-run fp_discard_two_f "--legacy-lowering" two_legacy
-[[ "$rc" -eq 1 ]] || fail "fp_discard_two_f compiled on the LEGACY path (the matcher).
-That path emits the FIRST store to an output and drops the rest, so every
-surviving fragment is painted the first value (post-discard-output-restores).  The
-completeness check cannot see it - both varyings are read by the kills -
-so the re-store itself is what must refuse."
-grep -q "is stored" "$work/two_legacy.log" || {
-    tail -n 5 "$work/two_legacy.log" >&2
-    fail "fp_discard_two_f refused on the legacy path for some OTHER
-reason than the re-stored output."
-}
-
-run fp_discard_merge_guard_f "--legacy-lowering" merge_guard_legacy
-[[ "$rc" -eq 1 ]] || fail "fp_discard_merge_guard_f compiled on the DEFAULT
-path.  The discard sits in a two-predecessor merge INSIDE an outer guarded
-block: the inner branch cancels at the merge and the outer one does not, so
-the guard is the outer condition and the kill would use the inner one.  The
-first form of this refusal walked up, saw two predecessors and treated that
-as 'nothing more guards this' - it stopped at the merge and passed on the
-shape it was written for (codex's counterexample to 5bee678)."
-grep -qE "cannot prove what guards|enclosing condition" "$work/merge_guard_legacy.log" || {
-    tail -n 5 "$work/merge_guard_legacy.log" >&2
-    fail "fp_discard_merge_guard_f refused on the legacy path for some
-OTHER reason than an unproven or unaccounted guard."
-}
-
-run fp_discard_nested_f "--legacy-lowering" nested_legacy
-[[ "$rc" -eq 1 ]] || fail "fp_discard_nested_f compiled on the LEGACY path (the matcher).
-That path's guard is a single comparison, so an ENCLOSING branch is not
-accounted for: if_convert collapses the inner if and leaves the discard in
-the outer arm, and the kill then fires wherever the INNER condition holds,
-including on fragments the outer branch never reached (nested-discard-reachability).  The
-reference emits both comparisons and a multiply."
-grep -q "enclosing condition" "$work/nested_legacy.log" || {
-    tail -n 5 "$work/nested_legacy.log" >&2
-    fail "fp_discard_nested_f refused on the legacy path for some OTHER
-reason than the unaccounted enclosing branch."
-}
-
-# The two shapes the matcher gets RIGHT must keep compiling: a plain
-# guard, and an `&&`.  if_convert hoists both and deletes the branch, so
-# their whole condition IS the comparison the kill uses - and the
-# discard-blend sample ships the `&&` shape byte-identical to the
-# reference, so a rule that refused it would be a regression on a shipped
-# sample rather than a guard.
-for stem in fp_discard_lt_f fp_discard_ge_f fp_discard_then_work_f; do
-    run "$stem" "--legacy-lowering" "${stem}_legacy_ok"
-    [[ "$rc" -eq 0 ]] || {
-        tail -n 5 "$work/${stem}_legacy_ok.log" >&2
-        fail "$stem no longer compiles on the LEGACY path (the matcher).  The
-enclosing-branch refusal is meant to catch a guard the path cannot
-express, not the two it expresses correctly."
-    }
-done
+# legacy-path control removed with the shape matcher (chore/rsxcg-remove-legacy-lowering); it proved the matcher refused else/and/two/merge_guard/nested discards for their own reasons (discard-guard-completeness, half-preload-register-alias, post-discard-output-restores, nested-discard-reachability) and kept compiling lt/ge/then_work.
 
 run fp_store_skippable_f "" skippable
 if [[ "$rc" -eq 0 ]]; then

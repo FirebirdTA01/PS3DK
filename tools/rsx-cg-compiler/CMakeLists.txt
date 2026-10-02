@@ -115,9 +115,7 @@ set(SRC_NV40
     ${NV40_DIR}/nv40_emit.cpp
     ${NV40_DIR}/nv40_general_lowering.cpp
     ${NV40_DIR}/nv40_vp_assembler.cpp
-    ${NV40_DIR}/nv40_vp_emit.cpp
     ${NV40_DIR}/nv40_fp_assembler.cpp
-    ${NV40_DIR}/nv40_fp_emit.cpp
     ${NV40_DIR}/nv40_discard_guards.cpp
     ${NV40_DIR}/nv40_if_convert.cpp
 )

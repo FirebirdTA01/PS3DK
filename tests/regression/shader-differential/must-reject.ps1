@@ -4,7 +4,7 @@
 # REFUSE has none: this gate lives beside the stager instead of in it,
 # and never touches the manifest a boot reads.  For every row of
 # must-reject.txt it compiles the case with the reference compiler and
-# with ours on BOTH lowering paths, classifies each outcome, and holds
+# with ours on the general lowering, classifies each outcome, and holds
 # it to the listed value:
 #
 #   accept           a non-empty container was written
@@ -94,37 +94,46 @@ function Matches([string]$got, [string]$listed) {
     return $false
 }
 
+function Parse-MustRejectRow([string]$row) {
+    $f = $row.Split('|')
+    if ($f.Count -gt 4) { throw "must-reject retired five-column schema: migrate to case|reference|ours-general|note: $row" }
+    if ($f.Count -lt 3) { throw "must-reject row malformed: $row" }
+    # The old note was optional: four fields may still mean legacy/general.
+    # Refuse that ambiguous spelling instead of weakening a general verdict.
+    $fourthAlternatives = if ($f.Count -eq 4) { @($f[3].Split('/') | ForEach-Object { $_.Trim() }) } else { @() }
+    if ($fourthAlternatives.Count -gt 0 -and @($fourthAlternatives | Where-Object { $_ -notmatch '^(accept|frontend-reject|backend-refuse)$' }).Count -eq 0) {
+        throw "must-reject retired or ambiguous four-column schema: use a descriptive note, not a verdict: $row"
+    }
+    return @{ Case=$f[0].Trim(); WantReference=$f[1].Trim(); WantGeneral=$f[2].Trim()
+              Note=$(if ($f.Count -eq 4) { $f[3].Trim() } else { '' }) }
+}
+
 $rows = @(Get-Content $List | Where-Object { $_ -and -not $_.StartsWith("#") })
 if ($rows.Count -eq 0) { throw "must-reject list is empty: $List" }
 $fail = 0; $pass = 0
 Write-Host "must-reject: $($rows.Count) cases, ours = wsl:$WslCompiler, reference present"
 foreach ($row in $rows) {
-    # Alternatives in the ours columns are written "a/b" so '|' stays the
-    # column separator; the note is the fifth field.
-    $f = $row.Split("|", 5)
-    if ($f.Count -lt 4) { throw "must-reject row malformed: $row" }
-    $case = $f[0].Trim(); $wantRef = $f[1].Trim(); $wantDef = $f[2].Trim(); $wantGen = $f[3].Trim()
-    $note = if ($f.Count -ge 5) { $f[4].Trim() } else { "" }
+    # Alternatives in the ours column are written "a/b" so '|' stays the
+    # column separator; the note is the fourth field.
+    $parsed = Parse-MustRejectRow $row
+    $case = $parsed.Case; $wantRef = $parsed.WantReference; $wantGen = $parsed.WantGeneral
+    $note = $parsed.Note
     $src = Join-Path $cases "$case.fcg"
     if (-not (Test-Path -LiteralPath $src)) { throw "must-reject case missing: $src" }
     $ref = Compile-Ref $src (Join-Path $scratch "$case.ref.fpo")
     $gotRef = Classify $ref.text $ref.rc (Join-Path $scratch "$case.ref.fpo") $case
-    $def = Compile-Ours $src (Join-Path $scratch "$case.def.fpo") @("--legacy-lowering")
-    $gotDef = Classify $def.text $def.rc (Join-Path $scratch "$case.def.fpo") $case
     $gen = Compile-Ours $src (Join-Path $scratch "$case.gen.fpo") @()
     $gotGen = Classify $gen.text $gen.rc (Join-Path $scratch "$case.gen.fpo") $case
     # The reference column lists accept | reject: a reject is satisfied by
     # either refusal kind (its diagnostic text is printed, not asserted).
     $okRef = if ($wantRef -eq "reject") { $gotRef -ne "accept" } else { $gotRef -eq $wantRef }
-    $okDef = Matches $gotDef $wantDef
     $okGen = Matches $gotGen $wantGen
-    $verdict = if ($okRef -and $okDef -and $okGen) { "PASS" } else { "FAIL" }
+    $verdict = if ($okRef -and $okGen) { "PASS" } else { "FAIL" }
     if ($verdict -eq "PASS") { $pass++ } else { $fail++ }
     $refLine = (($ref.text -split "`r?`n") | Where-Object { $_ -match "error" } | Select-Object -First 1)
-    Write-Host ("MUSTREJECT|case={0}|reference={1}(want {2})|legacy={3}(want {4})|general={5}(want {6})|{7}{8}" -f `
-        $case, $gotRef, $wantRef, $gotDef, $wantDef, $gotGen, $wantGen, $verdict, $(if ($note) { "|note=$note" } else { "" }))
+    Write-Host ("MUSTREJECT|case={0}|reference={1}(want {2})|general={3}(want {4})|{5}{6}" -f `
+        $case, $gotRef, $wantRef, $gotGen, $wantGen, $verdict, $(if ($note) { "|note=$note" } else { "" }))
     if ($refLine) { Write-Host "    reference: $($refLine.Trim())" }
-    if ($gotDef -ne "accept") { Write-Host "    ours[legacy]: $((($def.text -split "`r?`n") | Where-Object { $_ -match 'error|nv40|refus' } | Select-Object -First 1))" }
     if ($gotGen -ne "accept") { Write-Host "    ours[general]: $((($gen.text -split "`r?`n") | Where-Object { $_ -match 'error|nv40|refus' } | Select-Object -First 1))" }
 }
 Write-Host "must-reject: $pass pass, $fail fail of $($rows.Count)"

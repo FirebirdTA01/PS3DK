@@ -43,13 +43,10 @@ swizzle="$repo_root/tools/rsx-cg-compiler/tests/shaders/vp_construct_swizzle_v.c
 [[ -f "$narrow" ]]  || fail "fixture missing: $narrow"
 [[ -f "$swizzle" ]] || fail "fixture missing: $swizzle"
 
-compile "$narrow" narrow_legacy --legacy-lowering
-compile "$swizzle" swizzle_legacy --legacy-lowering
 compile "$narrow" narrow_general
 compile "$swizzle" swizzle_general
 
-python3 - "$work/narrow_legacy.log" "$work/swizzle_legacy.log" \
-        "$work/narrow_general.log" "$work/swizzle_general.log" <<'PY'
+python3 - "$work/narrow_general.log" "$work/swizzle_general.log" <<'PY'
 import re
 import sys
 
@@ -79,36 +76,11 @@ def expect(label, got, want, why):
                          % (label, show(want), show(got), why))
 
 
-# --- float2 operand: out_texcoord = float4(in_texcoord, 0, 1) ---------
-# MOV o[0] (xyzw) ; MOV o[7].xy from the input ; MOV o[7].zw from consts.
-narrow_legacy = masks(sys.argv[1])
-expect(
-    "legacy vp_construct_lanes_v",
-    narrow_legacy,
-    [0xF, 0xC, 0x3],
-    "The pre-fix shape was 0xf, 0x8, 0x6 - one lane for the whole "
-    "float2, the literals shifted down, and w never written (vp-constructor-lane-layout).",
-)
-
-# --- .xyz swizzle operand: out_position = float4(in_position.xyz, 1) --
-# Four writes: position xyz and w, texcoord xy and zw.  Compared as a
-# SET: the reference interleaves the trailing literal write differently
-# from us, which is an ordering difference and not this defect.
-swizzle_legacy = sorted(masks(sys.argv[2]))
-expect(
-    "legacy vp_construct_swizzle_v",
-    swizzle_legacy,
-    [0x1, 0x3, 0xC, 0xE],
-    "The pre-fix shape was 0x4, 0x6, 0x8, 0x8, which leaves position "
-    "with two lanes never written, so the quad does not rasterise "
-    "(vp-constructor-lane-layout).",
-)
-
-# Shipping general lowering is allowed to split the trailing literals into
+# General lowering is allowed to split the trailing literals into
 # scalar writes.  The property is that the vector operand contributes all
 # of its lanes and the literals cover the tail; a missing lane would leave
 # the output partially unwritten while the container still compiles.
-narrow_general = sorted(masks(sys.argv[3]))
+narrow_general = sorted(masks(sys.argv[1]))
 expect(
     "general vp_construct_lanes_v",
     narrow_general,
@@ -117,7 +89,7 @@ expect(
     "the old failure shifted the literals down and never wrote w.",
 )
 
-swizzle_general = sorted(masks(sys.argv[4]))
+swizzle_general = sorted(masks(sys.argv[2]))
 expect(
     "general vp_construct_swizzle_v",
     swizzle_general,

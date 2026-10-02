@@ -46,17 +46,13 @@ trap 'rm -rf "$work"' EXIT
 # BOTH PROFILES.  The two parameter tables are built in different files -
 # cg_container_fp.cpp and cg_container_vp.cpp - so a fix applied to one
 # leaves the other reporting zero, and the fragment fixture cannot see it.
-# Both lowering paths on the fragment side for the same reason one level
-# down: the table is built once, but the two paths reach it with different
-# IR, and a fix that only reached one would leave the other at zero.
 run_case() {
     local profile="$1" src="$2" path="$3" tag="$4"
-    local flags=() rc=0
-    [[ "$path" == legacy ]] && flags=(--legacy-lowering)
+    local rc=0
     [[ -f "$src" ]] || fail "fixture missing: $src"
     (
         ulimit -v "${PS3TC_SHADER_TEST_VMEM_KB:-262144}"
-        timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler"             -p "$profile" "${flags[@]}"             --emit-container "$work/$tag.bin" "$src"
+        timeout "${PS3TC_SHADER_TEST_TIMEOUT:-15s}" "$compiler"             -p "$profile"             --emit-container "$work/$tag.bin" "$src"
     ) >"$work/$tag.log" 2>&1 || rc=$?
     [[ "$rc" -eq 124 ]] && fail "$tag timed out"
     if [[ "$rc" -ne 0 ]]; then
@@ -158,6 +154,5 @@ PY
 }
 
 run_case sce_fp_rsx "$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_uniform_default_f.cg"   general fp-general
-run_case sce_fp_rsx "$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_uniform_default_f.cg"   legacy  fp-legacy
 run_case sce_vp_rsx "$repo_root/tools/rsx-cg-compiler/tests/shaders/vp_uniform_default_v.vcg"  general vp-general
 run_case sce_fp_rsx "$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_uniform_default_align_f.cg" general fp-align

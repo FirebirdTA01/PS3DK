@@ -25,10 +25,10 @@ def rows(name,width,base,semantic,pno=0xffffffff):
     return result
 with tempfile.TemporaryDirectory(prefix='ps3dk-vp-binding-') as directory:
     root=Path(directory)
-    def run(name,source,expected,constants=None,value=None,index=0.75,legacy=False,refusal=False):
+    def run(name,source,expected,constants=None,value=None,index=0.75,refusal=False):
         src,out=root/(name+'.cg'),root/(name+'.bin');src.write_text(source)
         try:
-            result=subprocess.run([compiler,'-p','sce_vp_rsx','--legacy-lowering' if legacy else '--general-lowering',
+            result=subprocess.run([compiler,'-p','sce_vp_rsx',
                 '--emit-container',str(out),str(src)],capture_output=True,text=True,timeout=20)
         except subprocess.TimeoutExpired:
             failures.append(name+': timeout');return
@@ -86,10 +86,6 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-binding-') as directory:
         source=(declaration+'; float4 main(float4 p:POSITION):POSITION{return p*u;}') if scope=='global' else ('float4 main(float4 p:POSITION,'+declaration+'):POSITION{return p*u;}')
         run(tag,source,{'u':(1048,9,'C9',0xffffffff if scope=='global' else 1,1)},
             {9:[2,3,4,5]},[2,-6,12,2.5])
-        if scope=='global':
-            pin=spelling.startswith('register')
-            run(tag+'-legacy',source,{'u':(1048,9 if pin else 467,'C9' if pin else '',0xffffffff,int(pin))},
-                {9 if pin else 467:[2,3,4,5]},[2,-6,12,2.5],legacy=True)
     for width in (3,4):
       for scope in ('global','entry'):
         decl=f'uniform float{width}x{width} M:C9'
@@ -144,5 +140,5 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-binding-') as directory:
 if failures:
     for failure in failures:print('FAIL: '+failure,file=sys.stderr)
     sys.exit(1)
-print('PASS: vp-explicit-binding (record fields, decoded reads, numeric values, legacy contract, use-sensitive bounds)')
+print('PASS: vp-explicit-binding (record fields, decoded reads, numeric values, use-sensitive bounds)')
 PY

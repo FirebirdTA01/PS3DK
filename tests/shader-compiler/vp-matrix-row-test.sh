@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# A matrix uniform's row indexes to a const register, on BOTH paths
-# (uniform-matrix-row-index).  `m[0]` used to refuse everywhere - "StoreOutput source is
-# not a direct Load or matvecmul" on the default path, "operand could not
-# be resolved" on the general one - although the reference compiles it to
-# one instruction, `MOV o[8], c[256]`.
+# A matrix uniform's row indexes to a const register
+# (uniform-matrix-row-index).  `m[0]` used to refuse everywhere -
+# "StoreOutput source is not a direct Load or matvecmul" on the old default
+# path, "operand could not be resolved" on the general one - although the
+# reference compiles it to one instruction, `MOV o[8], c[256]`.
 #
 # Two fixtures that differ only in the row, because the interesting way to
 # get this wrong is not to refuse.  The row arrives as OPERAND 1 of the
@@ -66,14 +66,10 @@ reference reads directly; refusing it is the defect (uniform-matrix-row-index)."
     [[ -s "$work/$3.ucode" ]] || fail "$3 emitted no ucode"
 }
 
-# Shelf-life: when the retired legacy matcher is removed, drop this second
-# --legacy-lowering run and its header claim in the same commit.
 compile vp_matrix_row0_v ""                   row0_general
 compile vp_matrix_row2_v ""                   row2_general
-compile vp_matrix_row0_v --legacy-lowering    row0_legacy
-compile vp_matrix_row2_v --legacy-lowering    row2_legacy
 
-for path in general legacy; do
+for path in general; do
     if cmp -s "$work/row0_$path.ucode" "$work/row2_$path.ucode"; then
         cat "$work/row0_$path.ucode" >&2
         fail "on the $path path m_auto[0] and m_auto[2] compile to the SAME
@@ -86,9 +82,8 @@ done
 # register and one literal.  A constructor that counted operands instead of
 # components would write o[8].x and o[8].y and lose the row's y and z.
 compile vp_matrix_row_small_v ""                 small_general
-compile vp_matrix_row_small_v --legacy-lowering  small_legacy
 
-python3 - "$work/small_general.ucode" "$work/small_legacy.ucode" <<'PY'
+python3 - "$work/small_general.ucode" <<'PY'
 import re
 import sys
 
@@ -107,7 +102,7 @@ def masks(path):
 # Four DP4 lanes into the position (0x1, 0x2, 0x4, 0x8) plus the texcoord's
 # xyz (0xe) and w (0x1).
 want = [0x1, 0x1, 0x2, 0x4, 0x8, 0xE]
-for path, name in zip(sys.argv[1:3], ("general", "legacy")):
+for path, name in zip(sys.argv[1:2], ("general",)):
     got = masks(path)
     if got != want:
         raise SystemExit(
@@ -122,7 +117,7 @@ PY
 
 # Row 3 of a float3x3 is out of bounds - the reference calls it that and
 # refuses.  Compiling it would read a register the matrix does not own.
-for flags_tag in ":oob_general" "--legacy-lowering:oob_legacy"; do
+for flags_tag in ":oob_general"; do
     flags="${flags_tag%%:*}"
     tag="${flags_tag##*:}"
     rc=0

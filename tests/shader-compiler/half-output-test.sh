@@ -16,10 +16,9 @@
 # by the next runtime measurement even though nothing about the compiler
 # changed.  What this test owns is the CONTAINER: the flag and the ucode.
 #
-# The general path (the default) drops all three: it emits MOVR o[COLR] with
-# the flag clear, exit 0, container written, no diagnostic.  The retired
-# --legacy-lowering path gets it right and is byte-identical to the reference
-# on this shader, which is where the expected words below come from.
+# The defect: the general path dropped all three - it emitted MOVR o[COLR]
+# with the flag clear, exit 0, container written, no diagnostic.  The
+# expected words below are the reference's bytes for this shader.
 #
 # CONTROL: fp_float_output_f.cg is the same source with `out float4`.  It must
 # keep MOVR o[COLR] and a clear flag, so a fix that sets the bit
@@ -98,8 +97,7 @@ flt = container(sys.argv[2])
 
 problems = []
 
-# The reference's bytes for this shader, taken from the container the retired
-# path still produces byte-identically: MOVH into the half output carries
+# The reference's bytes for this shader: MOVH into the half output carries
 # OUT_REG_HALF (0x00800000) and fp16 precision (0x00000040) in word 0.
 HALF_WORD0 = 0x9E810140
 FLOAT_WORD0 = 0x9E010100
