@@ -1151,10 +1151,22 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
     // libretro bilateral.cg relies on it to be REFUSED (its `result` becomes
     // float2 and float4(result / norm, 1.0) is C1067 there).
     std::shared_ptr<TypeNode> declaratorType = type;
+    // With --extension=declarator-types the list keeps the declared type,
+    // exactly the separate declarations it abbreviates (which the reference
+    // compiles).  Without it, a declarator whose type the rule CHANGES is
+    // reported with the flag that would keep it: this rule is the detector.
     auto parseOne = [&](SourceLocation at, const std::string& name) {
+        if (declaratorType != type && type && declaratorType &&
+            declaratorType->toString() != type->toString())
+        {
+            warning("'" + name + "' takes type " + declaratorType->toString() +
+                    " from an earlier initializer in its declaration list, as the reference "
+                    "compiler does (declared " + type->toString() + "); " +
+                    "--extension=declarator-types keeps the declared type");
+        }
         const unsigned before = typesParsed_;
         vars.push_back(parseVariableDeclaration(at, declaratorType, name, storage));
-        if (typesParsed_ != before && lastParsedType_)
+        if (!config.standardDeclaratorTypes && typesParsed_ != before && lastParsedType_)
             declaratorType = lastParsedType_;
     };
 
@@ -2491,7 +2503,8 @@ std::unique_ptr<LiteralExpr> Parser::parseNumberLiteral()
 std::unique_ptr<TranslationUnit> parseShaderSource(
     const std::string& source,
     const std::string& filename,
-    std::vector<ParseError>* outErrors)
+    std::vector<ParseError>* outErrors,
+    const ParserConfig& config)
 {
     Lexer lexer(source, filename);
     std::vector<Token> tokens;
@@ -2511,6 +2524,7 @@ std::unique_ptr<TranslationUnit> parseShaderSource(
     }
 
     Parser parser(tokens, filename);
+    parser.setConfig(config);
     auto unit = parser.parse();
 
     if (outErrors)

@@ -22,6 +22,9 @@ struct ParserConfig
     bool verboseErrors = true;
     bool continueOnError = true;  // Try to recover and continue parsing
     int maxErrors = 50;
+    // --extension=declarator-types: a later declarator in a list keeps the
+    // declared type instead of the reference's last-named-type rule.
+    bool standardDeclaratorTypes = false;
 };
 
 // Recursive descent parser for Cg shader language
@@ -207,4 +210,5 @@ private:
 std::unique_ptr<TranslationUnit> parseShaderSource(
     const std::string& source,
     const std::string& filename = "<input>",
-    std::vector<ParseError>* outErrors = nullptr);
+    std::vector<ParseError>* outErrors = nullptr,
+    const ParserConfig& config = ParserConfig{});

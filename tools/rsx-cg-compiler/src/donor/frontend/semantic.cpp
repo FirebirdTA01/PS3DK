@@ -2470,8 +2470,11 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
     // TEXCOORD0) { return x; }` and `float4 f(..., out float4 c : COLOR)`
     // both refuse with C5029; a void program and a struct return do not.
     // (ogre's DualQuaternionSkinning_Shadow.cg helpers compiled as entries.)
-    if (entryPoint->returnType && entryPoint->returnType->baseType != BaseType::Void &&
-        entryPoint->returnSemantic.isEmpty() &&
+    // The RESOLVED type decides both tests: a typedef name parses as a named
+    // type, so `typedef void V; V main(..., out float4 c : COLOR)` is a void
+    // program (accepted by the reference) - review: codex.
+    if (entryPoint->returnType && entryPoint->returnSemantic.isEmpty() &&
+        !resolveType(entryPoint->returnType.get()).isVoid() &&
         !resolveType(entryPoint->returnType.get()).isStruct())
     {
         error(entryPoint->loc, "C5029: program \"" + entryPoint->name +
