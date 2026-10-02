@@ -45,14 +45,11 @@ ROWS = {
     # ...in the COMMON type, not v's (review: codex; measured): a float a
     # keeps full precision against a half vector, and an int vector does not
     # truncate a float a.  1.000244140625 is not an fp16 value (rounds to 1).
-    'compound_float_by_half': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = 1.000244140625; a *= half2(1, 2); return float4(a, 0, 0, 1); }
-',
+    'compound_float_by_half': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = 1.000244140625; a *= half2(1, 2); return float4(a, 0, 0, 1); }\n',
                                [1.000244140625, 0.0, 0.0, 1.0]),
-    'compound_float_by_int': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = .5; a *= int2(3, 9); return float4(a, 0, 0, 1); }
-',
+    'compound_float_by_int': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = .5; a *= int2(3, 9); return float4(a, 0, 0, 1); }\n',
                               [1.5, 0.0, 0.0, 1.0]),
-    'compound_float_by_int_runtime': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = t.x; a *= int2(t.wz * 2.0); return float4(a, 0, 0, 1); }
-',
+    'compound_float_by_int_runtime': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = t.x; a *= int2(t.wz * 2.0); return float4(a, 0, 0, 1); }\n',
                                       [1.5, 0.0, 0.0, 1.0]),
     # a function declared to return a scalar keeps lane x of a vector
     'return_float': ('float f(float4 t) { return t.zyx; }\nfloat4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t), 0, 0, 1); }\n',
