@@ -29,7 +29,23 @@ ROWS = {
                  [0.0, 0.0, 0.0, 1.0]),
     'computed_value': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = t.yxw * 2.0 + 1.0; return float4(a, a, 0, 1); }\n',
                        [0.5, 0.5, 0.0, 1.0]),
-    # control: vector-to-shorter-vector narrowing is unchanged
+    # compound assignment: a op= v is a op v.x (measured)
+    'compound_mul': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = t.w; a *= t.yz; return float4(a, 0, 0, 1); }\n',
+                     [-0.375, 0.0, 0.0, 1.0]),
+    'compound_add': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = t.w; a += t; return float4(a, 0, 0, 1); }\n',
+                     [2.0, 0.0, 0.0, 1.0]),
+    'compound_self': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = t.x; a *= (a * t); return float4(a, 0, 0, 1); }\n',
+                      [0.125, 0.0, 0.0, 1.0]),
+    # a function declared to return a scalar keeps lane x of a vector
+    'return_float': ('float f(float4 t) { return t.zyx; }\nfloat4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t), 0, 0, 1); }\n',
+                     [0.75, 0.0, 0.0, 1.0]),
+    'return_half': ('half f(float4 t) { return t.yz; }\nfloat4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t), 0, 0, 1); }\n',
+                    [-0.25, 0.0, 0.0, 1.0]),
+    # an int vector into a float scalar converts lane x
+    'int_vector_to_float': ('float4 main(float4 t : TEXCOORD0) : COLOR { int2 i = int2(t.xz * 4.0); float a = i; return float4(a, 0, 0, 1); }\n',
+                            [2.0, 0.0, 0.0, 1.0]),
+    # a declaration narrows a vector to a shorter vector too (leading lanes;
+    # the parent refused this as a vec construction of the wrong width)
     'vector_narrowing': ('float4 main(float4 t : TEXCOORD0) : COLOR { float2 a = t.zyx; return float4(a, 0, 1); }\n',
                          [0.75, -0.25, 0.0, 1.0]),
 }

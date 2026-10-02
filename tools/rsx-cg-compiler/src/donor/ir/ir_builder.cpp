@@ -2794,6 +2794,8 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
         }
 
         IRValueID retValue = buildExpr(stmt->value.get());
+        if (currentFunctionDecl_)
+            retValue = narrowToScalar(currentFunctionDecl_->returnType.get(), stmt->value.get(), retValue);
 
         // Non-struct return with a semantic on the return type itself
         // (e.g. `float4 main(...) : COLOR { return color; }`) — emit a
@@ -3226,6 +3228,14 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
                     initValue = emitVectorNarrowing(initType, declaredType, initValue, varDecl->loc);
                 else
                     initValue = emitNumericToBool(initType, declaredType, initValue, varDecl->loc);
+            }
+            else if (declaredType.arraySize == 0 && !declaredType.isMatrix() && declaredType.isVector() &&
+                     initType.isVector() && initType.arraySize == 0 && !initType.isMatrix() &&
+                     initType.componentCount() > declaredType.componentCount())
+            {
+                // float2 a = t.zyx keeps the leading lanes (t.zy), as an
+                // assignment already does (measured).
+                initValue = emitVectorNarrowing(initType, declaredType, initValue, varDecl->loc);
             }
             else if (declaredType.arraySize == 0 && !declaredType.isMatrix() && !declaredType.isVector() &&
                      declaredType.baseType != IRType::Void && getStructFields(varDecl->type.get()) == nullptr &&
@@ -3964,6 +3974,16 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
             case BinaryOp::DivAssign: op = IROp::Div; break;
             case BinaryOp::ModAssign: op = IROp::Mod; break;
             default: op = IROp::Add; break;
+            }
+            // a op= v with a scalar a and a vector v is a op v.x (measured:
+            // the reference computes the vector and keeps lane x).
+            {
+                const IRTypeInfo leftType = getExprType(expr->left.get());
+                const IRTypeInfo rightType = getExprType(expr->right.get());
+                if (!leftType.isVector() && !leftType.isMatrix() && leftType.arraySize == 0 &&
+                    rightType.isVector() && !rightType.isMatrix() && rightType.arraySize == 0 &&
+                    leftType.baseType != IRType::Bool)
+                    rhsValue = emitScalarNarrowing(rightType, leftType, rhsValue, expr->loc);
             }
             rhsValue = emitBinaryOp(op, getExprType(expr->left.get()), lhsValue, rhsValue);
             if (arrayTarget)
@@ -4863,6 +4883,7 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 continue;
             }
             result = buildExpr(ret->value.get());
+            result = narrowToScalar(callee->returnType.get(), ret->value.get(), result);
             sawReturn = true;
             continue;
         }
@@ -7045,7 +7066,25 @@ IRValueID IRBuilder::emitScalarNarrowing(const IRTypeInfo& sourceType, const IRT
         return emitInstruction(IROp::FloatToHalf, targetType, {lane}, loc);
     if (from == IRType::Float16 && to == IRType::Float32)
         return emitInstruction(IROp::HalfToFloat, targetType, {lane}, loc);
+    if ((from == IRType::Int32 || from == IRType::UInt32) &&
+        (to == IRType::Float32 || to == IRType::Float16))
+        return emitInstruction(IROp::IntToFloat, targetType, {lane}, loc);
     return lane;
+}
+
+// A vector returned from a function declared to return a numeric scalar
+// keeps lane x (measured: float f() { return t.zyx; } is t.z).
+IRValueID IRBuilder::narrowToScalar(TypeNode* declared, ExprNode* valueExpr, IRValueID value)
+{
+    if (!declared || !valueExpr || value == InvalidIRValue) return value;
+    const IRTypeInfo to = getIRType(declared);
+    const IRTypeInfo from = getExprType(valueExpr);
+    if (to.isVector() || to.isMatrix() || to.arraySize != 0 || to.baseType == IRType::Void ||
+        to.baseType == IRType::Bool || getStructFields(declared))
+        return value;
+    if (!from.isVector() || from.isMatrix() || from.arraySize != 0)
+        return value;
+    return emitScalarNarrowing(from, to, value, valueExpr->loc);
 }
 
 IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)

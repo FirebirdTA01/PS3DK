@@ -787,7 +787,8 @@ void SemanticAnalyzer::analyzeReturnStmt(ReturnStmt* stmt)
     if (stmt->value)
     {
         CgType valueType = analyzeExpr(stmt->value.get());
-        if (!valueType.isError() && !returnType.isVoid())
+        if (!valueType.isError() && !returnType.isVoid() &&
+            !allowsScalarNarrowing(returnType, valueType))
         {
             checkAssignment(returnType, valueType, stmt->value->loc);
         }
@@ -974,8 +975,7 @@ CgType SemanticAnalyzer::analyzeBinaryExpr(BinaryExpr* expr)
             error(expr->left->loc, "expression is not assignable");
             return CgType::Error();
         }
-        const bool narrowing = expr->op == BinaryOp::Assign &&
-                               allowsScalarNarrowing(leftType, rightType);
+        const bool narrowing = allowsScalarNarrowing(leftType, rightType);
         if (!narrowing && !checkAssignment(leftType, rightType, expr->right->loc))
         {
             return CgType::Error();
@@ -1617,11 +1617,12 @@ CgType SemanticAnalyzer::resolveType(TypeNode* typeNode) const
 }
 
 // A numeric VECTOR stored into a numeric SCALAR - by a declaration's
-// initialiser or a plain `=` - keeps lane x, converted to the scalar's type.
+// initialiser, an assignment (compound included: a op= v is a op v.x) or a
+// return - keeps lane x, converted to the scalar's type.
 // Measured on the reference (C7011 warning, accepted): float a = t.xyz is
 // t.x, a = t.yz is t.y, half a = t.zw is t.z, int a = t.xy truncates t.x.
-// libretro's ddt-waterpaint / 2xbr / oldtv rely on it.  Compound assignment,
-// returns and arguments are not widened by this.
+// libretro's ddt-waterpaint / 2xbr / oldtv and ogre HeatVision rely on it.
+// Function ARGUMENTS are not widened by this (overload resolution).
 bool SemanticAnalyzer::allowsScalarNarrowing(const CgType& target, const CgType& value) const
 {
     return !target.isError() && !value.isError() &&

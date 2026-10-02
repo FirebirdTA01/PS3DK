@@ -224,6 +224,7 @@ private:
     bool copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type);
     IRValueID emitScalarNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
                                   IRValueID value, const SourceLocation& loc);
+    IRValueID narrowToScalar(TypeNode* declared, ExprNode* valueExpr, IRValueID value);
     IRValueID coerceAssignmentValue(ExprNode* target, IRValueID value);
 
     // Helper to get address/location for lvalue expressions
