@@ -22,6 +22,9 @@ struct ParserConfig
     bool verboseErrors = true;
     bool continueOnError = true;  // Try to recover and continue parsing
     int maxErrors = 50;
+    // --extension=declarator-types: a later declarator in a list keeps the
+    // declared type instead of the reference's last-named-type rule.
+    bool standardDeclaratorTypes = false;
 };
 
 // Recursive descent parser for Cg shader language
@@ -137,6 +140,10 @@ private:
     // whether it is legal (a function ignores it, anything else refuses).
     StorageQualifier parseStorageQualifier(bool* sawInline = nullptr);
     bool lastStorageWasStatic_ = false;   // set by parseStorageQualifier, read by parseVariableDeclaration
+    // Every type parseType() produces, counted: a declarator list takes the
+    // LAST type named in an earlier initializer (parseMultipleVariableDeclarations).
+    std::shared_ptr<TypeNode> lastParsedType_;
+    unsigned typesParsed_ = 0;
     Semantic parseSemantic();
     VitaAttributes parseVitaAttributes();
     void skipGccAttributes();  // Skip __attribute__((...)) clauses
@@ -203,4 +210,5 @@ private:
 std::unique_ptr<TranslationUnit> parseShaderSource(
     const std::string& source,
     const std::string& filename = "<input>",
-    std::vector<ParseError>* outErrors = nullptr);
+    std::vector<ParseError>* outErrors = nullptr,
+    const ParserConfig& config = ParserConfig{});

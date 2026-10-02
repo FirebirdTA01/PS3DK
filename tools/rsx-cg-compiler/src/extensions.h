@@ -38,6 +38,12 @@ enum class Extension
     // source and in #include files.  The reference refuses it.
     Bom = 0,
 
+    // A later declarator in a list keeps the DECLARED type.  The reference
+    // gives it the type last named in an earlier declarator's initializer
+    // (float3 a = float2(..).xyy, b = ...; makes b a float2); enabled, the
+    // list compiles as the separate declarations it abbreviates.
+    DeclaratorTypes = 1,
+
     Count
 };
 

@@ -2464,6 +2464,27 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             shaderInfo_.hasColorOutput = true;
     }
 
+    // C5029: a program that returns a value must return a struct or give it a
+    // varying output semantic - whatever out parameters it also has.
+    // Measured on the reference (both profiles): `float4 f(float4 x :
+    // TEXCOORD0) { return x; }` and `float4 f(..., out float4 c : COLOR)`
+    // both refuse with C5029; a void program and a struct return do not.
+    // (ogre's DualQuaternionSkinning_Shadow.cg helpers compiled as entries.)
+    // The RESOLVED type decides both tests: a typedef name parses as a named
+    // type, so `typedef void V; V main(..., out float4 c : COLOR)` is a void
+    // program (accepted by the reference) - review: codex.
+    // A return type this analyzer cannot resolve (`typedef void V` is not
+    // entered as a type here, so V resolves to the error type) is left to the
+    // diagnostics that already handle it, exactly as before this check: only
+    // a type KNOWN to be a non-void non-struct value triggers C5029.
+    const CgType resolvedReturn = resolveType(entryPoint->returnType.get());
+    if (entryPoint->returnType && entryPoint->returnSemantic.isEmpty() &&
+        !resolvedReturn.isError() && !resolvedReturn.isVoid() && !resolvedReturn.isStruct())
+    {
+        error(entryPoint->loc, "C5029: program \"" + entryPoint->name +
+              "\" must return a struct or have a varying output semantic");
+    }
+
     // If return type is a struct, check for semantic annotations on its fields
     if (entryPoint->returnType && entryPoint->returnType->baseType == BaseType::Struct)
     {

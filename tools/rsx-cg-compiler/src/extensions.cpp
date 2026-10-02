@@ -17,6 +17,9 @@ const ExtensionInfo kExtensions[] = {
     { Extension::Bom, "bom",
       "accept one leading UTF-8 byte order mark (EF BB BF) in the main source "
       "and in #include files; the reference refuses it" },
+    { Extension::DeclaratorTypes, "declarator-types",
+      "a later declarator in a list keeps the declared type; the reference gives it "
+      "the type last named in an earlier declarator" },
 };
 
 constexpr std::size_t kExtensionCount = sizeof(kExtensions) / sizeof(kExtensions[0]);

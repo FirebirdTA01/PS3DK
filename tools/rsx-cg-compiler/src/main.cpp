@@ -337,7 +337,10 @@ int main(int argc, char** argv)
     }
 
     std::vector<ParseError> parseErrors;
-    auto ast = parseShaderSource(preprocessed, ctx.inputFile, &parseErrors);
+    ParserConfig parserConfig;
+    parserConfig.standardDeclaratorTypes =
+        ctx.extensions.has(rsx_cg::Extension::DeclaratorTypes);
+    auto ast = parseShaderSource(preprocessed, ctx.inputFile, &parseErrors, parserConfig);
 
     int errorCount = 0;
     for (const auto& err : parseErrors)
