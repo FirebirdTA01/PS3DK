@@ -544,6 +544,11 @@ ContainerResult emitFragmentContainerImpl(
             // stay unresolved, not silently become COLOR0.
             if (isOut && d.res == 0 && p.semanticName.empty())
                 d.res = kCgColor0;
+            // An implicit input the program never reads binds nothing
+            // (bindImplicitTexCoords cleared its TEXCOORD): UNDEFINED, as
+            // the reference records it.
+            if (!isOut && p.inferredSemantic && p.semanticName.empty())
+                d.res = kCgUndefined;
         }
         // isReferenced reflects whether the IR actually consumes the
         // param.  Synthesised inside emitFragmentProgramEx by walking

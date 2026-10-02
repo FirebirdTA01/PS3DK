@@ -21,6 +21,7 @@
 #include "ir.h"
 #include "ir_builder.h"
 #include "ir_passes.h"
+#include "implicit_texcoord.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
 #include "nv40/nv40_discard_guards.h"
@@ -456,6 +457,25 @@ int main(int argc, char** argv)
     // Then: collapse simple if-else diamonds into Select so the
     // existing FP emit path handles them without IF/ELSE/ENDIF.
     nv40::convertSimpleIfElse(*irModule);
+
+    // Implicit TEXCOORDs go to the fragment inputs the program still reads
+    // (t_3289f98f), decided once the if/else diamonds are selects: a select
+    // on a constant condition is folded first and dead code dropped, so an
+    // input read only on a constant-false path counts as unread (measured).
+    if (stage == ShaderStage::Fragment)
+    {
+        for (auto& fn : irModule->functions)
+        {
+            if (!fn->isEntryPoint) continue;
+            if (rsx_cg::foldConstantSelects(*fn))
+            {
+                DeadCodeElimination dce(!ctx.alphakillSamplers.empty());
+                for (int i = 0; i < 8 && dce.runOnFunction(*fn); ++i) {}
+            }
+            rsx_cg::bindImplicitTexCoords(*fn, semantic.shaderInfo().implicitTexCoordOrder,
+                                          semantic.shaderInfo().explicitTexCoords);
+        }
+    }
 
     if (dumpIr)
     {

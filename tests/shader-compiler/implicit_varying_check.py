@@ -28,6 +28,24 @@ from pathlib import Path
 
 import fp_eval
 from uniform_container_check import Container
+from fp_sources import instructions, ucode_words
+
+# The units the TEX instructions actually read (a record can be right while
+# the fetch reads another unit): row -> the set of fetched units, measured.
+TEX_UNITS = {'explicit_unit_member': {0, 3}, 'register_member': {5},
+             'unqualified_sampler_member': {0, 1}}
+# Not flattened yet: a sampler inside a NESTED struct member (the reference
+# accepts it as P.I.tex on TEXUNIT0) must refuse rather than guess a unit.
+# A varying struct NESTED in a varying struct gets no member loads at all
+# (pre-existing; card t_8370d759).  The reference accepts these, so they must
+# at least refuse (exit 1, no container) until it is implemented.
+NESTED_REFUSE_INSTANCES = {
+    'two_nested_same_struct': 'struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.p.uv, o.q.uv); }\n',
+    'nested_unread': 'struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.q.uv, 0, 1); }\n',
+}
+NESTED_REFUSE = {'nested_sampler_member': """struct inner { sampler2D tex; }; struct prev { float2 tc; inner I; };
+float4 main(float4 uv : TEXCOORD0, prev P) : COLOR { return tex2D(P.I.tex, uv.xy); }
+"""}
 
 VAR, UNI = 4101, 4102
 TC = lambda n: 3220 + n
@@ -61,6 +79,14 @@ float4 main(float2 uv : TEXCOORD0, in d v, float2 z) : COLOR { return float4(uv 
 float4 main(float4 uv : TEXCOORD0, uniform sampler2D decal : TEXUNIT0, prev P) : COLOR { return tex2D(P.texture, uv.xy) + tex2D(decal, uv.zw); }
 """, {('uv', VAR, TC(0), 0, 1), ('decal', UNI, TEXUNIT0, 1, 1), ('P.tex_coord', VAR, UNDEF, 2, 0),
         ('P.texture', UNI, TEXUNIT0 + 1, 2, 1)}, None, set()),
+    # an explicit binding on a sampler member is honoured (review: codex; measured)
+    'explicit_unit_member': ("""struct prev { float2 tc; sampler2D tex : TEXUNIT3; };
+float4 main(float4 uv : TEXCOORD0, uniform sampler2D decal : TEXUNIT0, prev P) : COLOR { return tex2D(P.tex, uv.xy) + tex2D(decal, uv.zw); }
+""", {('uv', VAR, TC(0), 0, 1), ('decal', UNI, TEXUNIT0, 1, 1), ('P.tc', VAR, UNDEF, 2, 0),
+        ('P.tex', UNI, TEXUNIT0 + 3, 2, 1)}, None, set()),
+    'register_member': ("""struct prev { float2 tc; sampler2D tex : register(s5); };
+float4 main(float4 uv : TEXCOORD0, prev P) : COLOR { return tex2D(P.tex, uv.xy); }
+""", {('uv', VAR, TC(0), 0, 1), ('P.tc', VAR, UNDEF, 1, 0), ('P.tex', UNI, TEXUNIT0 + 5, 1, 1)}, None, set()),
     'uniform_sampler_member': ("""struct p { uniform float2 size; uniform sampler2D tex; };
 float4 main(float2 uv : TEXCOORD0, p P) : COLOR { return tex2D(P.tex, uv * P.size); }
 """, {('uv', VAR, TC(0), 0, 1), ('P.size', UNI, UNDEF, 1, 1), ('P.tex', UNI, TEXUNIT0, 1, 1)},
@@ -76,11 +102,38 @@ float4 main(in d v, float z) : COLOR { return float4(v.a, v.b, z); }
 # the reference binds each instance separately (a.uv TEX0, b.uv TEX1); here
 # the inferred binding lives on the shared struct type, so it refuses by
 # name rather than binding both to TEX0 (review: codex).
-REUSE = {
-    'two_inputs_same_struct': 'struct S { float2 uv; };' + chr(10) +
-        'float4 main(S a, S b) : COLOR { return float4(a.uv, b.uv); }' + chr(10),
-    'two_nested_same_struct': 'struct S { float2 uv; };' + chr(10) + 'struct O { S p; S q; };' + chr(10) +
-        'float4 main(O o) : COLOR { return float4(o.p.uv, o.q.uv); }' + chr(10),
+# t_3289f98f: an implicit TEXCOORD goes only to an input the program READS
+# (after dead code is gone); an unread one is UNDEFINED and takes no index,
+# and each struct instance is bound on its own.  Records and values are the
+# reference's own (sce-cgc 475 containers, judged with fp_eval on INPUTS).
+# Named gap: we write no record for an unread STRUCT MEMBER (the reference
+# lists it varying/UNDEFINED/unreferenced), so those rows compare the
+# referenced records; a bare parameter's unread record is compared.
+READSET = {
+    'bare_unread': ('float4 main(float2 u, float2 k) : COLOR { return float4(k, 0, 1); }\n',
+                    {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    'member_unread_first': ('struct d { float2 a; float2 b; }; float4 main(d v) : COLOR { return float4(v.b, 0, 1); }\n',
+                            {('v.b', VAR, TC(0), 0, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    'instances_mixed': ('struct S { float2 uv; }; float4 main(S a, S b, S c) : COLOR { return float4(b.uv, c.uv); }\n',
+                        {('b.uv', VAR, TC(0), 1, 1), ('c.uv', VAR, TC(1), 2, 1)}, [0.5, 0.25, 0.75, 0.125]),
+    'two_inputs_same_struct': ('struct S { float2 uv; }; float4 main(S a, S b) : COLOR { return float4(a.uv, b.uv); }\n',
+                               {('a.uv', VAR, TC(0), 0, 1), ('b.uv', VAR, TC(1), 1, 1)}, [0.5, 0.25, 0.75, 0.125]),
+    # read only on a constant-false path = unread (review: codex; measured)
+    'const_false_branch': ('float4 main(float2 u, float2 k) : COLOR { float4 r = float4(k, 0, 1); if (false) r = float4(u, 0, 1); return r; }\n',
+                           {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    'const_false_ternary': ('float4 main(float2 u, float2 k) : COLOR { return false ? float4(u, 0, 1) : float4(k, 0, 1); }\n',
+                            {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    'static_false_branch': ('static const bool B = false; float4 main(float2 u, float2 k) : COLOR { float4 r = float4(k, 0, 1); if (B) r = float4(u, 0, 1); return r; }\n',
+                            {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    # an UNREAD explicit TEXCOORD0 still reserves its index (measured)
+    'unread_explicit_tc0': ('float4 main(float2 e : TEXCOORD0, float2 k) : COLOR { return float4(k, 0, 1); }\n',
+                            {('e', VAR, TC(0), 0, 0), ('k', VAR, TC(1), 1, 1)}, [0.75, 0.125, 0.0, 1.0]),
+    'unread_explicit_member': ('struct d { float2 e : TEXCOORD0; float2 k; }; float4 main(d v) : COLOR { return float4(v.k, 0, 1); }\n',
+                               {('v.k', VAR, TC(1), 0, 1)}, [0.75, 0.125, 0.0, 1.0]),
+    'dead_read': ('float4 main(float2 u, float2 k) : COLOR { float2 t = u * 2; return float4(k, 0, 1); }\n',
+                  {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    'explicit_reserved': ('float4 main(float2 u, float2 k, float2 e : TEXCOORD0) : COLOR { return float4(k, e); }\n',
+                          {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(1), 1, 1), ('e', VAR, TC(0), 2, 1)}, [0.75, 0.125, 0.5, 0.25]),
 }
 
 
@@ -120,6 +173,8 @@ def main():
                 continue
             got = {(r['name'], r['variability'], r['resource'], r['paramno'], r['referenced'])
                    for r in Container(blob).records if r['name'] != 'main' and not r['name'].startswith('main.')}
+            got = {g for g in got if g[4] or '.' not in g[0]}   # unread-member record gap (t_be142e5b)
+            want = {w for w in want if w[4] or '.' not in w[0]}
             notes = []
             if got != want:
                 failures.append('%s records %s, want %s' % (name, sorted(got), sorted(want)))
@@ -132,13 +187,40 @@ def main():
             if value is not None and fp_eval.evaluate(blob, INPUTS) != value:
                 failures.append('%s value %s, want %s' % (name, fp_eval.evaluate(blob, INPUTS), value))
                 notes.append('WRONG VALUE')
+            if name in TEX_UNITS:
+                units = {(w[0] >> 17) & 15 for w, _ in instructions(ucode_words(blob)) if (w[0] >> 24) & 63 == 0x17}
+                if units != TEX_UNITS[name]:
+                    failures.append('%s fetches units %s, want %s' % (name, sorted(units), sorted(TEX_UNITS[name])))
+                    notes.append('WRONG UNIT')
             print('  %-24s %s' % (name, ', '.join(notes) or 'as measured'))
-        for name, text in REUSE.items():
+        for name, text in NESTED_REFUSE_INSTANCES.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
-            ok = rc == 1 and not blob and 'implicit-varying-struct-reuse' in err
-            print('  %-24s %s' % (name, 'refused by name' if ok else 'NOT refused by name (rc %d)' % rc))
+            ok = rc == 1 and not blob
+            print('  %-24s %s' % (name, 'refused (rc 1)' if ok else 'NOT refused (rc %d)' % rc))
             if not ok:
-                failures.append('%s: expected the named reuse refusal, got rc %d' % (name, rc))
+                failures.append('%s: a nested varying struct must refuse until it is implemented' % name)
+        for name, text in NESTED_REFUSE.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text)
+            ok = rc == 1 and not blob
+            print('  %-24s %s' % (name, 'refused (rc 1)' if ok else 'NOT refused (rc %d) - check the unit' % rc))
+            if not ok:
+                failures.append('%s: a nested sampler member must refuse until it is flattened' % name)
+        for name, (text, want, value) in READSET.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text)
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (name, (err.strip().splitlines() or ['?'])[-1]))
+                print('  %-24s REFUSED' % name)
+                continue
+            got = {(r['name'], r['variability'], r['resource'], r['paramno'], r['referenced'])
+                   for r in Container(blob).records if r['name'] != 'main' and not r['name'].startswith('main.')}
+            got = {g for g in got if g[4] or '.' not in g[0]}   # the named unread-member record gap
+            val = fp_eval.evaluate(blob, INPUTS)
+            notes = ([] if got == want else ['RECORDS DIFFER']) + ([] if val == value else ['WRONG VALUE %s' % val])
+            print('  %-24s %s' % (name, ', '.join(notes) or 'as measured'))
+            if got != want:
+                failures.append('%s records %s, want %s' % (name, sorted(got), sorted(want)))
+            if val != value:
+                failures.append('%s value %s, want %s (a wrong TEXCOORD binding)' % (name, val, value))
     for f in failures:
         print('FAIL:', f)
     print('implicit-varying: %s' % ('PASS' if not failures else 'FAIL (%d)' % len(failures)))

@@ -1524,6 +1524,23 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                     member.valueId = currentFunction_->allocateValueId();
                     member.storage = StorageQualifier::Uniform;
                     member.sourceOrdinal = sourceOrdinal;
+                    // The member's own binding carries over (review: codex;
+                    // measured: `sampler2D tex : TEXUNIT3` is unit 3 and
+                    // `: register(s5)` unit 5 - without these the sampler
+                    // took the next free unit and read the wrong texture).
+                    // Only measured for samplers; a numeric member's explicit
+                    // register is not carried (unmeasured).
+                    if (field.type && field.type->isSampler())
+                    {
+                        member.semanticName = field.semantic.name;
+                        member.rawSemanticName = field.semantic.rawName;
+                        member.semanticIndex = field.semantic.index;
+                        if (field.semantic.hasExplicitRegister())
+                        {
+                            member.explicitRegisterBank = field.semantic.explicitRegisterBank;
+                            member.explicitRegisterIndex = field.semantic.explicitRegisterIndex;
+                        }
+                    }
                     currentFunction_->parameters.push_back(member);
                     nameToValue_[qualified] = member.valueId;
                 }

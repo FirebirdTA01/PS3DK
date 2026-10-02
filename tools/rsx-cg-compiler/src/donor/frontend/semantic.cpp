@@ -2359,6 +2359,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
                 usedTexCoordIndices.insert(param->semantic.index);
         }
     }
+    shaderInfo_.explicitTexCoords = usedTexCoordIndices;
     int nextTexCoordIndex = 0;
 
     // DEBUG: Enable to trace parameter collection (keep commented when not debugging)
@@ -2380,12 +2381,17 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             // reference binds each instance separately (struct S { float2
             // uv; }; main(S a, S b): a.uv TEX0, b.uv TEX1 - review: codex);
             // refused by name until bindings are per instance.
+            // Each instance is bound on its own after dead-code elimination
+            // (bindImplicitTexCoords, measured: S a, S b, S c reading b.uv and
+            // c.uv gives a.uv UNDEFINED, b.uv TEX0, c.uv TEX1), so a second
+            // instance only records its qualified name here.
             if (field.semantic.inferred && !isOut && !flatteningUniformParam &&
                 shaderInfo_.stage == ShaderStage::Fragment && !uniformMember(field))
             {
-                error(entryPoint->loc, "a struct with semantic-less members is used by two "
-                      "fragment inputs: '" + fullName + "' (implicit-varying-struct-reuse)");
-                return;
+                shaderInfo_.implicitTexCoordOrder.push_back(fullName);
+                shaderInfo_.inputParams.push_back(
+                    ShaderIOParam(fullName, "TEXCOORD", field.semantic.index, fieldType, false));
+                continue;
             }
             if (!field.semantic.isEmpty())
             {
@@ -2436,6 +2442,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
                     mutableField.semantic.rawName  = "TEXCOORD" + std::to_string(index);
                     mutableField.semantic.index    = index;
                     mutableField.semantic.inferred = true;
+                    shaderInfo_.implicitTexCoordOrder.push_back(fullName);
                     shaderInfo_.inputParams.push_back(
                         ShaderIOParam(fullName, "TEXCOORD", index, fieldType, false));
                 }
@@ -2535,6 +2542,8 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             param->semantic.rawName  = defaultSemantic + std::to_string(defaultIndex);
             param->semantic.index    = defaultIndex;
             param->semantic.inferred = true;
+            if (shaderInfo_.stage == ShaderStage::Fragment)
+                shaderInfo_.implicitTexCoordOrder.push_back(param->name);
 
             ShaderIOParam ioParam(param->name, defaultSemantic, defaultIndex, paramType, false);
             shaderInfo_.inputParams.push_back(ioParam);
