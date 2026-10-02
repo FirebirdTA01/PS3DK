@@ -610,9 +610,11 @@ CgType TypeOperations::binaryOpResultType(BinaryOp op, const CgType& left, const
         return CgType::Bool();
     }
 
-    // Logical operators return bool
+    // Logical operators return bool, component-wise for vectors
     if (isLogicalOp(op))
     {
+        if (left.isVector())
+            return CgType::Vec(ScalarKind::Bool, left.vectorSize());
         return CgType::Bool();
     }
 
@@ -642,7 +644,9 @@ CgType TypeOperations::unaryOpResultType(UnaryOp op, const CgType& operand)
     switch (op)
     {
     case UnaryOp::LogicalNot:
-        // !x returns bool
+        // !x returns bool, component-wise for a vector
+        if (operand.isVector())
+            return CgType::Vec(ScalarKind::Bool, operand.vectorSize());
         return CgType::Bool();
 
     case UnaryOp::Negate:
@@ -698,7 +702,20 @@ bool TypeOperations::isBinaryOpValid(BinaryOp op, const CgType& left, const CgTy
     if (isLogicalOp(op))
     {
         // Any scalar can be used in logical ops
-        return left.isScalar() && right.isScalar();
+        if (left.isScalar() && right.isScalar())
+            return true;
+        // Cg applies && and || component-wise to two vectors of one width
+        // (measured, t_19e8402f: bool4 && bool4, bool3, float4 && float4 all
+        // compile).  A scalar is NOT broadcast: the reference refuses
+        // bool && bool4.  Mixed bool/numeric vectors are unmeasured and stay
+        // refused rather than risk accepting what the reference refuses.
+        if (left.isVector() && right.isVector() && left.vectorSize() == right.vectorSize())
+        {
+            const bool lb = left.scalarKind() == ScalarKind::Bool;
+            const bool rb = right.scalarKind() == ScalarKind::Bool;
+            return (lb && rb) || (left.isNumeric() && right.isNumeric());
+        }
+        return false;
     }
 
     // Bitwise operations require integral types
@@ -728,8 +745,11 @@ bool TypeOperations::isUnaryOpValid(UnaryOp op, const CgType& operand)
         return operand.isNumeric();
 
     case UnaryOp::LogicalNot:
-        // Logical not works on any scalar
-        return operand.isScalar();
+        // Logical not works on any scalar, and component-wise on a bool or
+        // numeric vector (measured, t_19e8402f: !bool4, !float4, float4(!b4))
+        return operand.isScalar() ||
+               (operand.isVector() &&
+                (operand.scalarKind() == ScalarKind::Bool || operand.isNumeric()));
 
     case UnaryOp::BitwiseNot:
         // Bitwise not requires integral type
