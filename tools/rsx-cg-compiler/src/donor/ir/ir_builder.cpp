@@ -4812,10 +4812,27 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
     bool sawReturn = false;
     const bool returnsVoid =
         getIRType(callee->returnType.get()).baseType == IRType::Void;
+    std::vector<StmtNode*> statements;
+    for (const auto& s : callee->body->statements) statements.push_back(s.get());
+    if (!runInlineStatements(callee, statements, result, sawReturn))
+        return false;
 
-    for (size_t i = 0; i < callee->body->statements.size(); ++i)
+    if (!sawReturn && !returnsVoid)
     {
-        StmtNode* stmt = callee->body->statements[i].get();
+        error(callee->loc, "cannot inline user function '" + callee->name +
+                           "': no return expression");
+        return false;
+    }
+    return returnsVoid || result != InvalidIRValue;
+}
+
+bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
+                                    IRValueID& result, bool& sawReturn)
+{
+    const bool returnsVoid =
+        getIRType(callee->returnType.get()).baseType == IRType::Void;
+    for (StmtNode* stmt : statements)
+    {
         if (!stmt) continue;
 
         if (sawReturn)
@@ -4846,6 +4863,44 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
 
         if (stmt->kind == StmtKind::Empty)
             continue;
+
+        // An if whose condition is a compile-time constant runs only its
+        // taken branch, inline, as if its statements were written here: a
+        // return in that branch is then an ordinary top-level return.  The
+        // untaken branch is never built - it is dead code the reference
+        // never emits (libretro decode_input: `if (linearize_input) {
+        // if (assume_opaque_alpha) return ...; else return ...; } else
+        // return color;` over `static const bool`s).
+        if (stmt->kind == StmtKind::If)
+        {
+            auto* ifs = static_cast<IfStmt*>(stmt);
+            if (const std::optional<bool> taken = constCondition(ifs->condition.get()))
+            {
+                StmtNode* branch = *taken ? ifs->thenBranch.get() : ifs->elseBranch.get();
+                const bool block = branch && branch->kind == StmtKind::Block;
+                std::vector<StmtNode*> inner;
+                if (block)
+                    for (const auto& s : static_cast<BlockStmt*>(branch)->statements)
+                        inner.push_back(s.get());
+                else if (branch)
+                    inner.push_back(branch);
+                // The branch's braces are still a block: its own
+                // declarations end with it, as buildBlockStmt ends them.
+                const ScopeState pre = scope_;
+                if (block) blockDeclared_.emplace_back();
+                const bool ok = runInlineStatements(callee, inner, result, sawReturn);
+                if (block)
+                {
+                    const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
+                    blockDeclared_.pop_back();
+                    for (const auto& name : declared)
+                        exitBlockBinding(name, pre);
+                }
+                if (!ok)
+                    return false;
+                continue;
+            }
+        }
 
         // if/else and nested blocks inline through the ordinary statement
         // builder: the if-join merges the callee's locals (and its
@@ -4882,13 +4937,118 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
         return false;
     }
 
-    if (!sawReturn && !returnsVoid)
-    {
-        error(callee->loc, "cannot inline user function '" + callee->name +
-                           "': no return expression");
-        return false;
-    }
-    return returnsVoid || result != InvalidIRValue;
+    return true;
+}
+
+std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
+{
+    // Not folded (nullopt), so the caller refuses by name rather than guess:
+    //  - any name the function binds itself (a local or parameter) shadows
+    //    the file-scope constant of that name;
+    //  - a half or fixed operand: the reference does not compare at the
+    //    reduced precision (static const half H = 0.1; H == 0.1 is TRUE
+    //    there), and its exact rule is unmeasured;
+    //  - a comparison between a float and an integer operand: the reference
+    //    does not round the integer to float (G = 16777217.0, the float
+    //    16777216, against the int 16777217 is UNEQUAL there, while float
+    //    promotion here would make them equal);
+    //  - an expression kind not walked below.
+    const auto category = [](const ExprNode* x) -> int {
+        if (!x || !x->resolvedType) return -1;
+        switch (x->resolvedType->baseType)
+        {
+        case BaseType::Bool:  return 0;
+        case BaseType::Float: return 2;
+        case BaseType::Half:
+        case BaseType::Fixed: return 3;
+        default:              return 1;   // the integer kinds
+        }
+    };
+    int depth = 0;
+    std::function<bool(const ExprNode*)> namesLocal = [&](const ExprNode* x) -> bool {
+        if (!x) return false;
+        if (category(x) == 3) return true;
+        if (x->kind == ExprKind::Binary)
+        {
+            const auto* b = static_cast<const BinaryExpr*>(x);
+            switch (b->op)
+            {
+            case BinaryOp::Equal: case BinaryOp::NotEqual: case BinaryOp::Less:
+            case BinaryOp::LessEqual: case BinaryOp::Greater: case BinaryOp::GreaterEqual:
+            {
+                const int l = category(b->left.get()), r = category(b->right.get());
+                if (l < 0 || r < 0 || l != r) return true;
+                break;
+            }
+            default:
+                break;
+            }
+        }
+        switch (x->kind)
+        {
+        case ExprKind::Literal:
+            return false;
+        case ExprKind::Identifier:
+        {
+            const auto* id = static_cast<const IdentifierExpr*>(x);
+            if (nameToValue_.count(id->name) != 0) return true;
+            // A static const carries its initialiser's precision rules with
+            // it (review: codex - static const bool B = (G == 16777217);
+            // if (B) bypassed the comparison guard, and the reference keeps
+            // static const float Z = 16777217; as 16777217, unequal to the
+            // float 16777217.0).  Walk the initialiser with the same guard,
+            // and decline when its category differs from the declared one.
+            const DeclNode* d = id->resolvedDecl;
+            if (!d || !globalDeclarations_.count(d) || d->kind != DeclKind::Variable)
+                return false;   // not a file-scope variable: the evaluator decides
+            const auto* v = static_cast<const VarDecl*>(d);
+            if (v->type && (v->type->baseType == BaseType::Half || v->type->baseType == BaseType::Fixed))
+                return true;
+            if (!v->initializer) return false;
+            if (++depth > 16) return true;
+            const int declared = !v->type ? -1
+                               : v->type->baseType == BaseType::Bool  ? 0
+                               : v->type->baseType == BaseType::Float ? 2 : 1;
+            const bool bad = category(v->initializer.get()) != declared ||
+                             namesLocal(v->initializer.get());
+            --depth;
+            return bad;
+        }
+        case ExprKind::Unary:
+            return namesLocal(static_cast<const UnaryExpr*>(x)->operand.get());
+        case ExprKind::Binary:
+        {
+            const auto* b = static_cast<const BinaryExpr*>(x);
+            return namesLocal(b->left.get()) || namesLocal(b->right.get());
+        }
+        case ExprKind::Ternary:
+        {
+            const auto* t = static_cast<const TernaryExpr*>(x);
+            return namesLocal(t->condition.get()) || namesLocal(t->thenExpr.get()) ||
+                   namesLocal(t->elseExpr.get());
+        }
+        case ExprKind::Cast:
+            return namesLocal(static_cast<const CastExpr*>(x)->operand.get());
+        case ExprKind::MemberAccess:
+            return namesLocal(static_cast<const MemberAccessExpr*>(x)->object.get());
+        case ExprKind::Constructor:
+            for (const auto& arg : static_cast<const ConstructorExpr*>(x)->arguments)
+                if (namesLocal(arg.get())) return true;
+            return false;
+        default:
+            return true;
+        }
+    };
+    if (!e || namesLocal(e)) return std::nullopt;
+    // The file-scope initialiser evaluator is the one constant semantics:
+    // typed scalar arithmetic and comparisons (1 == 2 is false, not "both
+    // truthy"), and only a STATIC const is a constant - a plain file-scope
+    // const is a uniform with a default in the reference.
+    ConstLanes lanes;
+    ConstShape shape;
+    if (!evaluateConstValue(e, lanes, shape, module_.get()) || lanes.size() != 1 || !shape.isScalar())
+        return std::nullopt;
+    return lanes[0].isTruthy();
 }
 
 IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)

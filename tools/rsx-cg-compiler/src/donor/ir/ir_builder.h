@@ -204,6 +204,13 @@ private:
     bool inlineUserFunctionCall(CallExpr* expr, const std::vector<IRValueID>& args,
                                 IRValueID& result);
     bool buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result);
+    // The truth of an if-condition that is a compile-time constant, by the
+    // file-scope initialiser evaluator (typed values, static consts only),
+    // when no name in it is shadowed by a local or parameter.  nullopt for
+    // anything else.
+    std::optional<bool> constCondition(const ExprNode* e);
+    bool runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
+                             IRValueID& result, bool& sawReturn);
     IRValueID buildMemberAccessExpr(MemberAccessExpr* expr);
     IRValueID buildIndexExpr(IndexExpr* expr);
     IRValueID buildTernaryExpr(TernaryExpr* expr);
