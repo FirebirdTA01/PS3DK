@@ -57,6 +57,9 @@ volatile bool g_done;
 uint64_t g_t0;
 volatile bool g_exit;
 bool g_padOk;
+bool g_started;              /* rows start on X, or after kAutoStartUs */
+uint64_t g_waitStart;
+constexpr uint64_t kAutoStartUs = 30000000;
 
 void on_sysutil(uint64_t status, uint64_t, void *)
 {
@@ -140,6 +143,12 @@ void draw(unsigned frame)
 
     /* header */
     text(0.04f, 0.04f, 1.25f, kCyan, "SPURS STATUS");
+    if (!g_started) {
+        const uint64_t waited = t - g_waitStart;
+        const unsigned left = waited >= kAutoStartUs ? 0u : (unsigned)((kAutoStartUs - waited + 999999u) / 1000000u);
+        text(0.20f, 0.45f, 1.4f, kAmber, g_padOk ? "press X to start the SPURS tests" : "no pad: starting automatically");
+        text(0.20f, 0.52f, 0.9f, kDim, "auto-start in %us   -   START exits", left);
+    }
     text(0.30f, 0.05f, 0.9f, kDim, "PPU <-> SPU runtime check   %c   %4.1fs",
          g_done ? ' ' : spin, (double)(t - g_t0) / 1e6);
     char progress[41];
@@ -310,14 +319,14 @@ int main()
     if (!g_padOk)
         std::printf("spurs-status: ioPadInit failed; START will not exit\n");
     sys_ppu_thread_t t;
-    if (sys_ppu_thread_create(&t, worker, 0, 1500, 0x10000, 0, "spurs-status rows") != 0)
-        return 1;
+    g_waitStart = now_us();
 
     CellGcmContextData *ctx = CELL_GCM_CURRENT;
     unsigned cur = 0;
     bool flipPending = false;   /* only wait for a flip that was issued */
     for (unsigned frame = 0; !g_exit; ++frame) {
         cellSysutilCheckCallback();
+        bool startPressed = false;
         if (g_padOk) {
             padInfo pi = {};
             if (ioPadGetInfo(&pi) == 0)
@@ -326,7 +335,17 @@ int main()
                 padData pd = {};
                 ioPadGetData(i, &pd);
                 if (pd.BTN_START) g_exit = true;
+                if (pd.BTN_CROSS) startPressed = true;
             }
+        }
+        /* On hardware the rows finish before the display comes up, so they
+           wait for X (or start on their own after kAutoStartUs, which keeps
+           unattended RPCS3 sweeps running). */
+        if (!g_started && (startPressed || now_us() - g_waitStart >= kAutoStartUs)) {
+            g_started = true;
+            g_t0 = now_us();
+            if (sys_ppu_thread_create(&t, worker, 0, 1500, 0x10000, 0, "spurs-status rows") != 0)
+                std::printf("spurs-status: could not start the row thread\n");
         }
         set_target(ctx, bufs[cur]);
         cellGcmSetClearColor(ctx, 0xff0b1119);
