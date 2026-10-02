@@ -171,6 +171,16 @@ void SemanticAnalyzer::collectDeclarations(TranslationUnit& unit)
         case DeclKind::Struct:
             collectStructDecl(static_cast<StructDecl*>(decl.get()));
             break;
+        case DeclKind::Typedef:
+        {
+            const auto* alias = static_cast<TypedefDecl*>(decl.get());
+            const CgType underlying = resolveType(alias->aliasedType.get());
+            if (underlying.isError())
+                error(alias->loc, "unknown type in typedef '" + alias->name + "'");
+            else if (!symbols_.addType(alias->name, underlying))
+                error(alias->loc, "the name '" + alias->name + "' is already defined");
+            break;
+        }
         case DeclKind::Function:
             collectFunctionDecl(static_cast<FunctionDecl*>(decl.get()));
             break;
@@ -2473,10 +2483,8 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
     // The RESOLVED type decides both tests: a typedef name parses as a named
     // type, so `typedef void V; V main(..., out float4 c : COLOR)` is a void
     // program (accepted by the reference) - review: codex.
-    // A return type this analyzer cannot resolve (`typedef void V` is not
-    // entered as a type here, so V resolves to the error type) is left to the
-    // diagnostics that already handle it, exactly as before this check: only
-    // a type KNOWN to be a non-void non-struct value triggers C5029.
+    // Typedefs are registered and their uses carry the underlying type, so a
+    // void alias is genuinely void rather than an unresolved error type.
     const CgType resolvedReturn = resolveType(entryPoint->returnType.get());
     if (entryPoint->returnType && entryPoint->returnSemantic.isEmpty() &&
         !resolvedReturn.isError() && !resolvedReturn.isVoid() && !resolvedReturn.isStruct())

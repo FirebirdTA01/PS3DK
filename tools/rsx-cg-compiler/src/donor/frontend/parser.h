@@ -6,6 +6,7 @@
 #include <string>
 #include <memory>
 #include <unordered_set>
+#include <unordered_map>
 #include <functional>
 
 // Parser error information
@@ -59,6 +60,8 @@ private:
 
     // Known type names (built-in + user-defined structs/typedefs)
     std::unordered_set<std::string> typeNames;
+    // Source-order aliases are expanded at each use for all AST/IR consumers.
+    std::unordered_map<std::string, std::shared_ptr<TypeNode>> typeAliases_;
 
     // ========================================================================
     // Token utilities

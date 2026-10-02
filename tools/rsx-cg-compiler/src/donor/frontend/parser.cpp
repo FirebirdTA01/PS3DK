@@ -438,14 +438,17 @@ std::shared_ptr<TypeNode> Parser::parseType()
 std::shared_ptr<TypeNode> Parser::parseBaseType()
 {
     auto type = std::make_shared<TypeNode>();
+    bool explicitMatrixLayout = false;
 
     // Handle matrix layout qualifiers
     if (match(TokenType::KW_ROW_MAJOR))
     {
+        explicitMatrixLayout = true;
         type->isRowMajor = true;
     }
     else if (match(TokenType::KW_COLUMN_MAJOR))
     {
+        explicitMatrixLayout = true;
         type->isRowMajor = false;
     }
 
@@ -456,6 +459,22 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
     }
 
     const Token& tok = peek();
+
+    // Expand an already-declared alias before treating a named type as a
+    // struct. Copy the node: qualifiers on this use must not modify the alias.
+    // parseType still records this type for the reference declarator-list rule.
+    if (tok.type == TokenType::IDENTIFIER)
+    {
+        const auto alias = typeAliases_.find(tok.lexeme);
+        if (alias != typeAliases_.end())
+        {
+            auto expanded = std::make_shared<TypeNode>(*alias->second);
+            if (explicitMatrixLayout) expanded->isRowMajor = type->isRowMajor;
+            expanded->isPacked = expanded->isPacked || type->isPacked;
+            advance();
+            return expanded;
+        }
+    }
 
     // Cg's unsized `matrix` type is a float4x4 alias.
     if (tok.type == TokenType::IDENTIFIER && tok.lexeme == "matrix")
@@ -984,6 +1003,12 @@ std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration()
     std::string name = advance().lexeme;
 
     consume(TokenType::SEMICOLON, "Expected ';' after typedef");
+
+    // The reference refuses a repeated typedef, even of the same type.
+    if (typeNames.count(name))
+        error(loc, "the name '" + name + "' is already defined");
+    else
+        typeAliases_.emplace(name, type);
 
     return std::make_unique<TypedefDecl>(loc, name, type);
 }
@@ -1532,6 +1557,22 @@ void Parser::skipGccAttributes()
 
 std::unique_ptr<StmtNode> Parser::parseStatement()
 {
+    // File-scope aliases must never escape into block scope. Local aliases
+    // need their own scoped type table; refuse them until that is supported.
+    if (check(TokenType::KW_TYPEDEF))
+    {
+        error(currentLocation(), "block-scope typedef is not supported");
+        advance();
+        // parseBlock retries after a failed statement, so make progress and
+        // leave any enclosing brace for its normal parser.
+        while (!isAtEnd() && !check(TokenType::SEMICOLON) &&
+               !check(TokenType::LBRACE) && !check(TokenType::RBRACE))
+            advance();
+        if (check(TokenType::SEMICOLON))
+            advance();
+        return nullptr;
+    }
+
     // Empty statement
     if (match(TokenType::SEMICOLON))
     {
