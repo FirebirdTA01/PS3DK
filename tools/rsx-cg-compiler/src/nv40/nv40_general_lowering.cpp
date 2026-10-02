@@ -5135,9 +5135,34 @@ private:
     bool matrixRows(IRValueID value, MatrixValue& out) const
     {
         const auto it = matrixValues_.find(value);
-        if (it == matrixValues_.end())
+        if (it != matrixValues_.end()) {
+            out = it->second;
+            return true;
+        }
+        // A folded file-scope const matrix (`const static float3x3 W =
+        // float3x3(...)`, the xbr family) reaches here as an IRConstant whose
+        // floats are the initialiser in row order: each row is one literal
+        // source, as a MatConstruct of literals would give.
+        const auto* constant = dynamic_cast<const IRConstant*>(entry_.getValue(value));
+        if (!constant || !constant->type.isMatrix() || constant->type.arraySize != 0 ||
+            !std::holds_alternative<std::vector<float>>(constant->value))
             return false;
-        out = it->second;
+        const auto& floats = std::get<std::vector<float>>(constant->value);
+        const int rows = constant->type.matrixRows, cols = constant->type.matrixCols;
+        if (rows < 1 || rows > 4 || cols < 1 || cols > 4 ||
+            floats.size() != static_cast<size_t>(rows * cols))
+            return false;
+        out = MatrixValue{};
+        out.rows = rows;
+        out.cols = cols;
+        for (int r = 0; r < rows; ++r) {
+            VSrc row;
+            row.kind = VSrcKind::Literal;
+            for (int c = 0; c < cols; ++c)
+                row.literal[c] = floats[static_cast<size_t>(r * cols + c)];
+            row.literalLanes = static_cast<uint8_t>(cols);
+            out.rowSrcs.push_back(row);
+        }
         return true;
     }
 
