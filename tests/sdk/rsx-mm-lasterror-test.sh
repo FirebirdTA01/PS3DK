@@ -91,6 +91,102 @@ EOF
 # build with the atomics removed to plain accesses can pass ASan.  TSAN closes
 # that gap directly.  SKIP cleanly when -fsanitize=thread is unavailable.
 # ---------------------------------------------------------------------------
+tsan_build() {  # <out-binary> <mm_c-source>
+    "$cc" -std=c11 -Wall -Wextra -Werror -pthread -fsanitize=thread \
+        -I "$shim" -I "$inc_rsx/rsx" -I "$inc_rsx" -I "$inc_gcm" \
+        "$2" "$src" -o "$1" -pthread
+}
+
+# The ONE specific FATAL that means "TSAN is unavailable on this host" (high
+# mmap ASLR entropy) is "unexpected memory mapping".  That -- and ONLY that,
+# and only while the test binary never reached its own verdict line ("rsx-mm-
+# lasterror-test: PASS" / ": FAIL") -- is an unavailability SKIP.  Any other
+# "FATAL: ThreadSanitizer", or one printed AFTER the verdict, is a real
+# failure and must never be masked as "TSAN unavailable".
+tsan_unavailable() {   # <log-file>
+    grep -q "FATAL: ThreadSanitizer: unexpected memory mapping" "$1" \
+        && ! grep -q "rsx-mm-lasterror-test: PASS" "$1" \
+        && ! grep -q "rsx-mm-lasterror-test: FAIL" "$1"
+}
+
+# (a) row is a valid CLEAN verdict iff:
+#   rc == 0  AND  the test binary printed its own "PASS" marker  AND
+#   the log contains no "ThreadSanitizer" data-race report.
+# A non-zero rc or a race report rejects the row regardless of any marker.
+tsan_a_ok() {   # <log-file> <rc>
+    [ "$2" -eq 0 ] \
+        && grep -q "rsx-mm-lasterror-test: PASS" "$1" \
+        && ! grep -q "ThreadSanitizer" "$1"
+}
+
+# (b) row is a valid DETECTED verdict iff:
+#   rc == 66 (the TSAN_OPTIONS-pinned "exitcode=66")  AND
+#   the log contains the specific data-race report.
+# A data-race report with the wrong rc, or rc 66 without a report, rejects.
+tsan_b_ok() {   # <log-file> <rc>
+    [ "$2" -eq 66 ] \
+        && grep -q "WARNING: ThreadSanitizer: data race" "$1"
+}
+
+# ---------------------------------------------------------------------------
+# Self-check of the verdict predicates (shell-only, no TSAN/CC needed):
+# exercises the exact grep+rc conditions used by (a) and (b) against synthetic
+# logs, so a regression in the predicate logic is caught by the guard itself
+# even on a host without TSAN.
+# ---------------------------------------------------------------------------
+ctrl_log="$tmp/ctrl.log"
+ctrl_pass=1
+# (a) CONTROL A1: PASS marker + non-zero exit  ->  must be REJECTED.
+printf 'rsx-mm-lasterror-test: PASS\n' > "$ctrl_log"
+tsan_a_ok "$ctrl_log" 42 && ctrl_pass=0   # must NOT return ok
+# (a) CONTROL A2: PASS marker + rc 0 + no report  ->  must be ACCEPTED.
+printf '[UNINIT]\nPASS\nrsx-mm-lasterror-test: PASS\n' > "$ctrl_log"
+tsan_a_ok "$ctrl_log" 0 || ctrl_pass=0    # MUST return ok
+# (a) CONTROL A3 (late FATAL): unexpected-memory FATAL AFTER the test PASS
+# marker -> NOT an unavailability SKIP (tsan_unavailable returns false), and
+# the verdict must still REJECT (rc is the fatal non-zero, not 0).
+printf 'rsx-mm-lasterror-test: PASS\nFATAL: ThreadSanitizer: unexpected memory mapping\n' > "$ctrl_log"
+tsan_unavailable "$ctrl_log" && ctrl_pass=0   # NOT unavailable (verdict reached)
+tsan_a_ok "$ctrl_log" 42 && ctrl_pass=0        # REJECTED (rc!=0; and it has ThreadSanitizer)
+tsan_a_ok "$ctrl_log" 0 && ctrl_pass=0         # REJECTED on the ThreadSanitizer line alone (clean rc)
+# (b) CONTROL B1: data-race report + correct rc 66  ->  must be ACCEPTED.
+printf 'WARNING: ThreadSanitizer: data race\n  at rsxMalloc\n  ... \n' > "$ctrl_log"
+tsan_b_ok "$ctrl_log" 66 || ctrl_pass=0        # MUST return ok
+# (b) CONTROL B2: data-race report + WRONG rc  ->  must be REJECTED.
+printf 'WARNING: ThreadSanitizer: data race\n  at rsxMalloc\n' > "$ctrl_log"
+tsan_b_ok "$ctrl_log" 1 && ctrl_pass=0         # must NOT return ok
+# (b) CONTROL B3: rc 66 WITHOUT a race report  ->  must be REJECTED.
+printf 'test output only\n' > "$ctrl_log"
+tsan_b_ok "$ctrl_log" 66 && ctrl_pass=0        # must NOT return ok
+if [ "$ctrl_pass" -eq 1 ]; then
+    echo "rsx-mm-lasterror-test: ok   TSAN verdict self-check (controls A1, A2, A3-late-FATAL, B1, B2, B3)"
+else
+    echo "FAIL: TSAN verdict self-check failed (a control case behaved unexpectedly -- the guard is itself broken)" >&2
+    exit 1
+fi
+
+# Deterministic TSAN verdict: on the first data race print the report and exit
+# exitcode (66); a clean run returns the program's own exit code (0).  Exported
+# so both the (a) and (b) binaries inherit it (whether or not setarch is used).
+TSAN_OPTIONS="halt_on_error=1:exitcode=66"
+export TSAN_OPTIONS
+
+# Run a TSAN binary and return its REAL exit code (callers capture $?; do not
+# mask with || true).  Prefer setarch -R (disable ASLR for the child): on hosts
+# with high mmap ASLR entropy TSAN's startup dies with
+#   "FATAL: ThreadSanitizer: unexpected memory mapping ..."
+# which setarch -R avoids; a host without setarch runs the binary directly.
+tsan_run() {
+    if command -v setarch >/dev/null 2>&1; then
+        setarch "$(uname -m)" -R "$@"
+    else
+        "$@"
+    fi
+}
+
+# Availability probe: if the host compiler cannot even build with -fsanitize=thread,
+# skip the TSAN rows (the ASan/UBSan parts already ran above).  This runs AFTER
+# the shell-only self-check so that the guard is self-tested on every host.
 tsan_available=0
 if "$cc" -fsanitize=thread -x c /dev/null -c -o "$tmp/probe_tsan.o" >/dev/null 2>&1; then
     tsan_available=1
@@ -101,64 +197,35 @@ if [ "$tsan_available" -eq 0 ]; then
     exit 0
 fi
 
-tsan_build() {  # <out-binary> <mm_c-source>
-    "$cc" -std=c11 -Wall -Wextra -Werror -pthread -fsanitize=thread \
-        -I "$shim" -I "$inc_rsx/rsx" -I "$inc_rsx" -I "$inc_gcm" \
-        "$2" "$src" -o "$1" -pthread
-}
-
-# Run a TSAN binary.  Prefer setarch -R (disable ASLR for the child): TSAN's
-# startup fails on hosts with high mmap ASLR entropy with
-#   "FATAL: ThreadSanitizer: unexpected memory mapping ..."
-# which setarch -R avoids.  A host without setarch runs the binary directly
-# (and a startup FATAL there is handled below as a SKIP, not a verdict).
-tsan_run() {
-    if command -v setarch >/dev/null 2>&1; then
-        setarch "$(uname -m)" -R "$@"
-    else
-        "$@"
-    fi
-}
-
-# A startup FATAL means the TSAN runtime never started, so the row is NOT a
-# verdict (neither clean nor racy) -- SKIP it exactly like the no-TSAN path,
-# quoting the FATAL line.  This must run before any pass/fail decision so a
-# run where TSAN cannot start never prints a PASS/FAIL for either row.
-tsan_skip_on_fatal() {  # <log-file>
-    local fatal
-    if fatal=$(grep -m1 "FATAL: ThreadSanitizer" "$1"); then
-        echo "rsx-mm-lasterror-test: SKIP TSAN rows - TSAN runtime failed to start"
-        echo "  $fatal"
-        echo "rsx-mm-lasterror-test: PASS"
-        exit 0
-    fi
-}
-
-# (a) real __atomic_store_n / __atomic_load_n under TSAN -> must stay clean.
-# Verdict is by CONTENT, not exit code (TSAN exits 66 on a report, 0 clean,
-# and the runtime-FATAL exit is handled as a SKIP above): clean iff the binary
-# ran, printed its own PASS, and produced NO data-race report and NO FATAL.
+# (a) real __atomic_store_n / __atomic_load_n under TSAN -> must be clean.
 tsan_build "$tmp/test_tsan" "$mm_c"
-tsan_run "$tmp/test_tsan" >"$tmp/tsan_a.log" 2>&1 || true
-tsan_skip_on_fatal "$tmp/tsan_a.log"
-if grep -q "rsx-mm-lasterror-test: PASS" "$tmp/tsan_a.log" \
-   && ! grep -q "rsx-mm-lasterror-test: FAIL" "$tmp/tsan_a.log" \
-   && ! grep -q "WARNING: ThreadSanitizer: data race" "$tmp/tsan_a.log"; then
-    echo "rsx-mm-lasterror-test: ok   TSAN (atomics) clean"
+set +e
+tsan_run "$tmp/test_tsan" >"$tmp/tsan_a.log" 2>&1
+rca=$?
+set -e
+if tsan_unavailable "$tmp/tsan_a.log"; then
+    echo "rsx-mm-lasterror-test: SKIP TSAN rows - TSAN runtime failed to start"
+    echo "  $(grep -m1 'FATAL: ThreadSanitizer' "$tmp/tsan_a.log")"
+    echo "rsx-mm-lasterror-test: PASS"
+    exit 0
+fi
+if tsan_a_ok "$tmp/tsan_a.log" "$rca"; then
+    echo "rsx-mm-lasterror-test: ok   TSAN (atomics) clean (rc 0)"
 else
-    tsan_skip_on_fatal "$tmp/tsan_a.log"
-    echo "FAIL: TSAN (atomics) not clean (race report or test failure):" >&2
+    echo "FAIL: TSAN (atomics) not clean (rc=$rca; expected exit 0 and no data-race report):" >&2
     cat "$tmp/tsan_a.log" >&2
     exit 1
 fi
 
 # (b) mutant: the __atomic pair swapped back to a plain (non-atomic,
-# non-volatile) access on the same s32 word.  TSAN must flag the data race
-# the hammer creates, which proves the ASan row is not the whole story and
-# that the guard is sensitive to exactly this regression (losing the atomics).
+# non-volatile) access on the same s32 word.  TSAN must DETECT the data race
+# the hammer creates.  With the pinned TSAN_OPTIONS the mutant (which races)
+# must print a data-race report and exit exactly 66.  Verdict = report present
+# AND rc == 66.  "PASS with a non-zero exit" and "a report with an unexpected
+# exit" are both rejected.
 mm_plain="$tmp/mm_plain.c"
-# Only the two statement lines match (the doc-comment mentions the function
-# names with an ellipsis, not the full call, so it is untouched):
+# Only the two statement lines match (the doc comment quotes the names with an
+# ellipsis, not the full call, so it is untouched):
 #   __atomic_store_n(&__rsx_mm_last_error, code, __ATOMIC_RELAXED);
 #   return __atomic_load_n(&__rsx_mm_last_error, __ATOMIC_RELAXED);
 sed \
@@ -170,14 +237,21 @@ if cmp -s "$mm_plain" "$mm_c"; then
     exit 1
 fi
 tsan_build "$tmp/test_mutant" "$mm_plain"
-echo "rsx-mm-lasterror-test: mutant built (plain-access last_error); running under TSAN (expecting a data-race report)"
-tsan_run "$tmp/test_mutant" >"$tmp/tsan_b.log" 2>&1 || true
-tsan_skip_on_fatal "$tmp/tsan_b.log"
-if grep -q "WARNING: ThreadSanitizer: data race" "$tmp/tsan_b.log"; then
-    echo "rsx-mm-lasterror-test: ok   TSAN flagged the plain-access mutant -> the atomics are what keep it clean"
+echo "rsx-mm-lasterror-test: mutant built (plain-access last_error); running under TSAN (expecting a data-race report, exit 66)"
+set +e
+tsan_run "$tmp/test_mutant" >"$tmp/tsan_b.log" 2>&1
+rcb=$?
+set -e
+if tsan_unavailable "$tmp/tsan_b.log"; then
+    echo "rsx-mm-lasterror-test: SKIP TSAN rows - TSAN runtime failed to start"
+    echo "  $(grep -m1 'FATAL: ThreadSanitizer' "$tmp/tsan_b.log")"
+    echo "rsx-mm-lasterror-test: PASS"
+    exit 0
+fi
+if tsan_b_ok "$tmp/tsan_b.log" "$rcb"; then
+    echo "rsx-mm-lasterror-test: ok   TSAN flagged the plain-access mutant (rc $rcb) -> the atomics are what keep it clean"
 else
-    echo "FAIL: TSAN did NOT flag the plain-access mutant (no 'WARNING: ThreadSanitizer: data race')." >&2
-    echo "       Either the mutant is not a plain access, or the hammer no longer creates a detectable race." >&2
+    echo "FAIL: TSAN mutant verdict unexpected (rc=$rcb; expected rc 66 + a 'WARNING: ThreadSanitizer: data race' report):" >&2
     cat "$tmp/tsan_b.log" >&2
     exit 1
 fi
