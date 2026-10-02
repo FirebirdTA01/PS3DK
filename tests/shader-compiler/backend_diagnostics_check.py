@@ -11,10 +11,12 @@ from pathlib import Path
 
 
 CASES = [
-    ('call_fp', 'fp', 'float4 main(float4 c:TEXCOORD0):COLOR {return fmod(c,2);}',
-     r'unsupported IR op call.*@fmod'),
-    ('call_vp', 'vp', 'void main(float4 p:POSITION,out float4 o:POSITION,out float4 c:COLOR) {o=p;c=fmod(p,2);}',
-     r'unsupported IR op call.*@fmod'),
+    # fmod is lowered now (a scalar operand splats), so these name two VP
+    # gaps that remain: the construct still leads the first line.
+    ('vp_atan2', 'vp', 'void main(float4 p:POSITION,out float4 o:POSITION,out float4 c:COLOR) {o=p;c=atan2(p,p.wzyx);}',
+     r'^nv40-general: VP atan2 lowering deferred'),
+    ('vp_derivative', 'vp', 'void main(float4 p:POSITION,out float4 o:POSITION,out float4 c:COLOR) {o=p;c=ddx(p);}',
+     r'^nv40-general: screen-space derivatives are fragment-only'),
     ('member', 'fp', 'struct Input {float2 uv;}; float4 main(Input data):COLOR {return float4(data.uv,0,1);}',
      r"unsupported input semantic.*<none>.*entry 'main'.*input 'data.uv'.*vec2"),
     ('semantic', 'fp', 'struct Input {float4 shade:TEXUNIT0;}; float4 main(Input data):COLOR {return data.shade;}',
