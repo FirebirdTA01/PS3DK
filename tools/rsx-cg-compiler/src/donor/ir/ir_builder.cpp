@@ -1356,6 +1356,48 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     currentFunction_->returnType = getIRType(decl->returnType.get());
     currentFunction_->isEntryPoint = (decl->name == module_->entryPointName);
 
+    // A mutable file-scope `static` with an initialiser starts the program
+    // at that value.  Bound here, at the entry's start, so a read before any
+    // write is the initialiser and every write - the entry's own or an
+    // inlined helper's, which share these bindings - rebinds it the way an
+    // assigned file-scope name already does.  An array binds per element.
+    // FIRST, before any parameter: a parameter of the same name binds after
+    // it and stashes it, as a local shadowing a global does, so the entry
+    // reads its parameter and an inlined helper the static (review: codex,
+    // static-entry-shadow).
+    if (currentFunction_->isEntryPoint)
+    {
+        for (const IRGlobal& g : module_->globals)
+        {
+            if (g.storage != StorageQualifier::Static) continue;
+            if (g.initialValue.empty() && g.initialIntValues.empty()) continue;
+            if (g.type.arraySize > 0 && !g.type.isMatrix())
+            {
+                IRTypeInfo element = g.type;
+                element.arraySize = 0;
+                const size_t width = static_cast<size_t>(element.componentCount());
+                auto& values = localArrayValues_[g.name];
+                values.clear();
+                for (int i = 0; i < g.type.arraySize; ++i)
+                {
+                    const size_t at = static_cast<size_t>(i) * width;
+                    std::vector<float> lanes;
+                    std::vector<int64_t> intLanes;
+                    if (at + width <= g.initialValue.size())
+                        lanes.assign(g.initialValue.begin() + at, g.initialValue.begin() + at + width);
+                    if (at + width <= g.initialIntValues.size())
+                        intLanes.assign(g.initialIntValues.begin() + at,
+                                        g.initialIntValues.begin() + at + width);
+                    values.push_back(materialiseInitialiser(element, lanes, intLanes));
+                }
+                continue;
+            }
+            const IRValueID value = materialiseInitialiser(g.type, g.initialValue, g.initialIntValues);
+            if (value != InvalidIRValue) nameToValue_[g.name] = value;
+        }
+    }
+
+
     auto collectReturnOutputs = [&](auto& self, TypeNode* sType, const std::string& pathPrefix) -> void {
         const auto* fields = getStructFields(sType);
         if (!fields) return;
@@ -1784,43 +1826,6 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             if (param->storage != StorageQualifier::Uniform &&
                 param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)
                 seedInputs(seedInputs, param->type.get(), param->name, "");
-    }
-
-    // A mutable file-scope `static` with an initialiser starts the program
-    // at that value.  Bound here, at the entry's start, so a read before any
-    // write is the initialiser and every write - the entry's own or an
-    // inlined helper's, which share these bindings - rebinds it the way an
-    // assigned file-scope name already does.  An array binds per element.
-    if (currentFunction_->isEntryPoint)
-    {
-        for (const IRGlobal& g : module_->globals)
-        {
-            if (g.storage != StorageQualifier::Static) continue;
-            if (g.initialValue.empty() && g.initialIntValues.empty()) continue;
-            if (g.type.arraySize > 0 && !g.type.isMatrix())
-            {
-                IRTypeInfo element = g.type;
-                element.arraySize = 0;
-                const size_t width = static_cast<size_t>(element.componentCount());
-                auto& values = localArrayValues_[g.name];
-                values.clear();
-                for (int i = 0; i < g.type.arraySize; ++i)
-                {
-                    const size_t at = static_cast<size_t>(i) * width;
-                    std::vector<float> lanes;
-                    std::vector<int64_t> intLanes;
-                    if (at + width <= g.initialValue.size())
-                        lanes.assign(g.initialValue.begin() + at, g.initialValue.begin() + at + width);
-                    if (at + width <= g.initialIntValues.size())
-                        intLanes.assign(g.initialIntValues.begin() + at,
-                                        g.initialIntValues.begin() + at + width);
-                    values.push_back(materialiseInitialiser(element, lanes, intLanes));
-                }
-                continue;
-            }
-            const IRValueID value = materialiseInitialiser(g.type, g.initialValue, g.initialIntValues);
-            if (value != InvalidIRValue) nameToValue_[g.name] = value;
-        }
     }
 
     // Build function body

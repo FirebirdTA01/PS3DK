@@ -42,6 +42,22 @@ float4 main(float4 t : TEXCOORD0) : COLOR
     return float4(g, 0, 0, 1);
 }
 """, lambda t: [t[1] if t[0] > 0.5 else 0.25, 0.0, 0.0, 1.0]),
+    # An entry parameter named like a static shadows it, and the two stay
+    # independent: the entry reads its parameter, an inlined helper the
+    # static, and a helper's write lands on the static (review: codex,
+    # static-entry-shadow; measured: (t, 0.75, 0, 1) and (t, t + 1, 0, 1)).
+    ('entry_param_shadow', """static float g = 0.75;
+float4 main(float g : TEXCOORD0) : COLOR { return float4(g, 0.0, 0.0, 1.0); }
+""", lambda t: [t[0], 0.0, 0.0, 1.0]),
+    ('helper_reads_shadowed', """static float g = 0.75;
+float rd() { return g; }
+float4 main(float g : TEXCOORD0) : COLOR { return float4(g, rd(), 0.0, 1.0); }
+""", lambda t: [t[0], 0.75, 0.0, 1.0]),
+    ('helper_writes_shadowed', """static float g = 0.75;
+void wr(float v) { g = v + 1.0; }
+float rd() { return g; }
+float4 main(float g : TEXCOORD0) : COLOR { wr(g); return float4(g, rd(), 0.0, 1.0); }
+""", lambda t: [t[0], t[0] + 1.0, 0.0, 1.0]),
 ]
 
 INPUTS = [[0.75, 0.5, 0.25, 1.0], [0.25, 0.125, 0.5, 0.0]]
