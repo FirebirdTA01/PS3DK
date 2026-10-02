@@ -4808,10 +4808,27 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
     bool sawReturn = false;
     const bool returnsVoid =
         getIRType(callee->returnType.get()).baseType == IRType::Void;
+    std::vector<StmtNode*> statements;
+    for (const auto& s : callee->body->statements) statements.push_back(s.get());
+    if (!runInlineStatements(callee, statements, result, sawReturn))
+        return false;
 
-    for (size_t i = 0; i < callee->body->statements.size(); ++i)
+    if (!sawReturn && !returnsVoid)
     {
-        StmtNode* stmt = callee->body->statements[i].get();
+        error(callee->loc, "cannot inline user function '" + callee->name +
+                           "': no return expression");
+        return false;
+    }
+    return returnsVoid || result != InvalidIRValue;
+}
+
+bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
+                                    IRValueID& result, bool& sawReturn)
+{
+    const bool returnsVoid =
+        getIRType(callee->returnType.get()).baseType == IRType::Void;
+    for (StmtNode* stmt : statements)
+    {
         if (!stmt) continue;
 
         if (sawReturn)
@@ -4842,6 +4859,44 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
 
         if (stmt->kind == StmtKind::Empty)
             continue;
+
+        // An if whose condition is a compile-time constant runs only its
+        // taken branch, inline, as if its statements were written here: a
+        // return in that branch is then an ordinary top-level return.  The
+        // untaken branch is never built - it is dead code the reference
+        // never emits (libretro decode_input: `if (linearize_input) {
+        // if (assume_opaque_alpha) return ...; else return ...; } else
+        // return color;` over `static const bool`s).
+        if (stmt->kind == StmtKind::If)
+        {
+            auto* ifs = static_cast<IfStmt*>(stmt);
+            if (const std::optional<bool> taken = constCondition(ifs->condition.get()))
+            {
+                StmtNode* branch = *taken ? ifs->thenBranch.get() : ifs->elseBranch.get();
+                const bool block = branch && branch->kind == StmtKind::Block;
+                std::vector<StmtNode*> inner;
+                if (block)
+                    for (const auto& s : static_cast<BlockStmt*>(branch)->statements)
+                        inner.push_back(s.get());
+                else if (branch)
+                    inner.push_back(branch);
+                // The branch's braces are still a block: its own
+                // declarations end with it, as buildBlockStmt ends them.
+                const ScopeState pre = scope_;
+                if (block) blockDeclared_.emplace_back();
+                const bool ok = runInlineStatements(callee, inner, result, sawReturn);
+                if (block)
+                {
+                    const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
+                    blockDeclared_.pop_back();
+                    for (const auto& name : declared)
+                        exitBlockBinding(name, pre);
+                }
+                if (!ok)
+                    return false;
+                continue;
+            }
+        }
 
         // if/else and nested blocks inline through the ordinary statement
         // builder: the if-join merges the callee's locals (and its
@@ -4878,13 +4933,59 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
         return false;
     }
 
-    if (!sawReturn && !returnsVoid)
+    return true;
+}
+
+std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
+{
+    if (!e) return std::nullopt;
+    switch (e->kind)
     {
-        error(callee->loc, "cannot inline user function '" + callee->name +
-                           "': no return expression");
-        return false;
+    case ExprKind::Literal:
+    {
+        ConstEvalScalar v;
+        if (evaluateConstScalar(e, v)) return v.isTruthy();
+        return std::nullopt;
     }
-    return returnsVoid || result != InvalidIRValue;
+    case ExprKind::Identifier:
+    {
+        const auto* id = static_cast<const IdentifierExpr*>(e);
+        if (nameToValue_.count(id->name)) return std::nullopt;   // a local or parameter shadows it
+        const IRGlobal* g = module_->findGlobal(id->name);
+        if (!g || g->storage != StorageQualifier::Const || g->type.isVector() ||
+            g->type.isMatrix() || g->type.isArray())
+            return std::nullopt;
+        if (g->initialIntValues.size() == 1) return g->initialIntValues[0] != 0;
+        if (g->initialValue.size() == 1) return g->initialValue[0] != 0.0f;
+        return std::nullopt;
+    }
+    case ExprKind::Unary:
+    {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        if (u->op != UnaryOp::LogicalNot) return std::nullopt;
+        if (const auto v = constCondition(u->operand.get())) return !*v;
+        return std::nullopt;
+    }
+    case ExprKind::Binary:
+    {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        if (b->op != BinaryOp::LogicalAnd && b->op != BinaryOp::LogicalOr &&
+            b->op != BinaryOp::Equal && b->op != BinaryOp::NotEqual)
+            return std::nullopt;
+        const auto l = constCondition(b->left.get());
+        const auto r = constCondition(b->right.get());
+        if (!l || !r) return std::nullopt;
+        switch (b->op)
+        {
+        case BinaryOp::LogicalAnd: return *l && *r;
+        case BinaryOp::LogicalOr:  return *l || *r;
+        case BinaryOp::Equal:      return *l == *r;
+        default:                   return *l != *r;
+        }
+    }
+    default:
+        return std::nullopt;
+    }
 }
 
 IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
