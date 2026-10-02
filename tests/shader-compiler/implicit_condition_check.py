@@ -4,8 +4,10 @@ Reference 475: scalar float/half/int if, ternary, !, && and ||; both profiles.
 The two FP float/half ternary spellings have different reference bytes (MOVRC
 versus MOVXC); their listing selects the same nonzero condition. Our paired
 spellings are strict twins, separately from reference container identity.
-VP float->half/int casts remain named inherited gaps. Loop/native-vector
-logical support is not expanded by this slice.
+VP float->half/int casts remain named inherited gaps. Loop support is not
+expanded by this slice. Native-vector !, && and || are accepted by the
+reference on both profiles (t_19e8402f); here their implicit and explicit
+nonzero spellings are strict twins, and the FP rows are judged by value.
 """
 from pathlib import Path
 import subprocess
@@ -48,7 +50,7 @@ def program(profile, body):
 def main(compiler):
     scratch=Path(__file__).resolve().parents[2]/'.local/tmp'
     scratch.mkdir(parents=True,exist_ok=True)
-    twins=gaps=shape_gaps=loop_checks=vector_gaps=0
+    twins=gaps=shape_gaps=loop_checks=vector_twins=0
     with tempfile.TemporaryDirectory(prefix='implicit-condition-',dir=scratch) as temp:
         root=Path(temp)
         for profile in ('sce_fp_rsx','sce_vp_rsx'):
@@ -131,19 +133,29 @@ def main(compiler):
                 normalized=set(re.findall(r'(%\d+) = cmpne bool ',p.stdout))
                 require(conditions and all(v in normalized for v in conditions),name+': branch must consume normalized bool')
                 loop_checks+=1
-            for label,a,b,diagnostic in (
-                ('and','t.xy&&t.zw','(t.xy!=float2(0))&&(t.zw!=float2(0))',"invalid operands to binary '&&'"),
-                ('or','t.xy||t.zw','(t.xy!=float2(0))||(t.zw!=float2(0))',"invalid operands to binary '||'"),
-                ('not','!t.xy','!(t.xy!=float2(0))','invalid argument type')):
-                for i,expr in enumerate((a,b)):
-                    compile_one(compiler,root,profile+'-native-vector-gap-'+label+'-'+str(i),
-                                program(profile,'float4 c=float4('+expr+',0,1);'),profile,
-                                refuse=True,diagnostic=diagnostic)
-                vector_gaps+=1
-    require((twins,gaps,shape_gaps,loop_checks,vector_gaps)==(70,10,4,6,6),
-            f'incomplete table: {twins}/{gaps}/{shape_gaps}/{loop_checks}/{vector_gaps}')
+            for label,a,b,expect in (
+                ('and','t.xy&&t.zw','(t.xy!=float2(0))&&(t.zw!=float2(0))',
+                 lambda t:[float(t[0]!=0 and t[2]!=0),float(t[1]!=0 and t[3]!=0),0.,1.]),
+                ('or','t.xy||t.zw','(t.xy!=float2(0))||(t.zw!=float2(0))',
+                 lambda t:[float(t[0]!=0 or t[2]!=0),float(t[1]!=0 or t[3]!=0),0.,1.]),
+                ('not','!t.xy','!(t.xy!=float2(0))',
+                 lambda t:[float(t[0]==0),float(t[1]==0),0.,1.])):
+                blobs=[compile_one(compiler,root,profile+'-native-vector-'+label+'-'+str(i),
+                                   program(profile,'float4 c=float4('+expr+',0,1);'),profile)
+                       for i,expr in enumerate((a,b))]
+                require(blobs[0]==blobs[1],profile+'-native-vector-'+label+': explicit nonzero twin differs')
+                if profile=='sce_fp_rsx':
+                    import itertools
+                    import fp_eval
+                    for t in itertools.product((-1.5,-0.5,0.0,0.25,1.0),repeat=4):
+                        got=fp_eval.evaluate(blobs[0],{'TEX0':list(t)})
+                        require(got==expect(t),f'{profile}-native-vector-{label}: t={t} got {got}')
+                vector_twins+=1
+    require((twins,gaps,shape_gaps,loop_checks,vector_twins)==(70,10,4,6,6),
+            f'incomplete table: {twins}/{gaps}/{shape_gaps}/{loop_checks}/{vector_twins}')
     print(f'implicit-condition: PASS ({twins} strict twins, 60 decoded values, {gaps} inherited VP cast pairs, '
-          f'{shape_gaps} zero-division shape controls, {loop_checks} loop IR checks, {vector_gaps} vector gap pairs)')
+          f'{shape_gaps} zero-division shape controls, {loop_checks} loop IR checks, '
+          f'{vector_twins} native-vector twins, FP ones judged on 625 inputs)')
 
 
 if __name__=='__main__':

@@ -6,10 +6,12 @@ colour output, so two containers (ours and the reference's) can be compared
 by VALUE when their bytes differ.  It refuses, with a reason, anything it does
 not model rather than stepping over it:
 
+  - reading a register lane that was never written, or a colour output whose
+    four lanes were not all written (no lane defaults to zero);
   - predicated instructions (condition test other than TR), branches, KIL;
-  - reading an R register after one of its H halves was written, or an H
-    register after its R register was written (H2k/H2k+1 alias Rk: the bit
-    layout of that aliasing is not modelled, so a mixed read is refused);
+  - reading an R lane after either of its H halves was written, or an H lane
+    after its R register was written (H2k/H2k+1 alias Rk with an unmodelled
+    lane layout, so every lane of the other bank goes stale until rewritten);
   - an output scale other than 1x;
   - an fp16 or fx12 instruction whose source values are not exactly
     representable at that precision (fx12: multiples of 1/1024 in [-2, 2)).
@@ -55,13 +57,44 @@ def f16(x):
     return struct.unpack('<e', struct.pack('<e', x))[0]
 
 
-def _read(w, slot, regs, inputs, const):
+class _Regs:
+    """Per-lane register file.  A lane is readable only once written and while
+    not stale; H2k/H2k+1 alias Rk with an unmodelled bit layout, so a write to
+    either bank marks EVERY lane of the other bank stale until rewritten."""
+
+    def __init__(self):
+        self.vals, self.defined, self.stale = {}, {}, {}
+
+    def read(self, key, lanes):
+        for lane in lanes:
+            if lane not in self.defined.get(key, ()):
+                raise Unmodelled("%s%d.%s read before it was written" % (key + ("xyzw"[lane],)))
+            if lane in self.stale.get(key, ()):
+                raise Unmodelled("%s%d.%s read after its aliased bank was written" % (key + ("xyzw"[lane],)))
+        return self.vals.get(key, [0.0] * 4)
+
+    def write(self, key, mask, res):
+        cur = self.vals.get(key, [0.0] * 4)
+        lanes = [i for i in range(4) if mask & (1 << i)]
+        self.vals[key] = [res[i] if i in lanes else cur[i] for i in range(4)]
+        self.defined.setdefault(key, set()).update(lanes)
+        self.stale.setdefault(key, set()).difference_update(lanes)
+        if not lanes:
+            return
+        bank, reg = key
+        others = [('R', reg // 2)] if bank == 'H' else [('H', 2 * reg), ('H', 2 * reg + 1)]
+        for other in others:
+            if self.defined.get(other):
+                self.stale.setdefault(other, set()).update(range(4))
+
+
+def _read(w, slot, regs, inputs, const, lanes):
     s = source(w, slot)
+    swz = s["swizzle"]
+    comps = [(swz >> (2 * i)) & 3 for i in range(4)]
     if s["type"] == TEMP:
         key = ('H' if s["half"] else 'R', s["reg"])
-        if key in regs.get('stale', set()):
-            raise Unmodelled("%s%d read after its aliased bank was written" % key)
-        v = regs.get(key, [0.0, 0.0, 0.0, 0.0])
+        v = regs.read(key, sorted({comps[i] for i in lanes}))
     elif s["type"] == INPUT:
         sel = (w[0] >> 13) & 0xF
         name = INPUT_SEL.get(sel)
@@ -74,8 +107,7 @@ def _read(w, slot, regs, inputs, const):
         v = _const_floats(const)
     else:
         raise Unmodelled("source type %d" % s["type"])
-    swz = s["swizzle"]
-    out = [v[(swz >> (2 * i)) & 3] for i in range(4)]
+    out = [v[comps[i]] if i in lanes else 0.0 for i in range(4)]
     if s["abs"]:
         out = [abs(x) for x in out]
     if s["negate"]:
@@ -115,7 +147,7 @@ def _op(opc, a, b, c):
 
 def evaluate(blob, inputs):
     """Run the program; `inputs` maps 'TEX0'.. / 'COL0' to 4-float lists. Returns R0."""
-    regs = {}
+    regs = _Regs()
     ended = False
     for w, const in instructions(ucode_words(blob)):
         opc = (w[0] >> 24) & 0x3F
@@ -132,9 +164,19 @@ def evaluate(blob, inputs):
             if (w[2] >> 28) & 3:
                 raise Unmodelled("output scale %d" % ((w[2] >> 28) & 3))
             n = ARITY.get(opc, 0)
-            srcs = [_read(w, slot, regs, inputs, const) for slot in range(1, n + 1)]
+            out_none = (w[0] >> 30) & 1
+            mask = (w[0] >> 9) & 0xF
+            if out_none:
+                # its only effect would be a condition code, and every
+                # predicated consumer is refused above
+                lanes = []
+            elif opc in (DP2, DP3, DP4):
+                lanes = list(range({DP2: 2, DP3: 3, DP4: 4}[opc]))
+            else:
+                lanes = [i for i in range(4) if mask & (1 << i)]
+            srcs = [_read(w, slot, regs, inputs, const, lanes) for slot in range(1, n + 1)]
             for v in srcs:
-                for x in v:
+                for x in (v[i] for i in lanes):
                     if prec == 1 and f16(x) != x:
                         raise Unmodelled("fp16 instruction on a non-fp16 value %r" % x)
                     if prec == 2 and not (-2.0 <= x < 2.0 and x * 1024 == int(x * 1024)):
@@ -144,21 +186,11 @@ def evaluate(blob, inputs):
             res = _op(opc, *srcs)
             if (w[0] >> 31) & 1:
                 res = [min(1.0, max(0.0, x)) for x in res]
-            if not (w[0] >> 30) & 1:
+            if not out_none:
                 half = (w[0] >> 7) & 1
-                reg = (w[0] >> 1) & 0x3F
-                key = ('H' if half else 'R', reg)
                 if half:
                     res = [f16(x) for x in res]
-                cur = regs.get(key, [0.0, 0.0, 0.0, 0.0])
-                mask = (w[0] >> 9) & 0xF
-                regs[key] = [res[i] if mask & (1 << i) else cur[i] for i in range(4)]
-                stale = regs.setdefault('stale', set())
-                stale.discard(key)
-                if half:
-                    stale.add(('R', reg // 2))
-                else:
-                    stale.update({('H', 2 * reg), ('H', 2 * reg + 1)})
+                regs.write(('H' if half else 'R', (w[0] >> 1) & 0x3F), mask, res)
         if w[0] & 1:
             ended = True
             break
@@ -166,6 +198,67 @@ def evaluate(blob, inputs):
         raise Unmodelled("no PROGRAM_END")
     prog = struct.unpack_from(">8I", blob, 0)[5]
     key = ('H', 0) if blob[prog + 19] else ('R', 0)
-    if key in regs.get('stale', set()):
-        raise Unmodelled("output %s%d was overwritten through its aliased bank" % key)
-    return regs.get(key, [0.0, 0.0, 0.0, 0.0])
+    return list(regs.read(key, [0, 1, 2, 3]))
+
+
+# ---- self-test: encoded controls, no compiler needed -----------------------
+def _src(kind, reg=0, swz=0xE4, half=0, neg=0):
+    return kind | (reg << 2) | (half << 8) | (swz << 9) | (neg << 17)
+
+
+def _ins(opc, dst, mask, srcs, half=0, end=0, out_none=0, sel=0):
+    from fp_sources import TEMP as T
+    s = list(srcs) + [_src(T)] * (3 - len(srcs))
+    w0 = end | (dst << 1) | (half << 7) | (mask << 9) | (sel << 13) | (opc << 24) | (out_none << 30)
+    return [w0, s[0] | (7 << 18), s[1], s[2]]
+
+
+def _container(words, h0=0):
+    from fp_sources import FP_PROFILE, FORMAT_REVISION
+    swap = lambda v: ((v >> 16) | (v << 16)) & 0xffffffff
+    ucode = b''.join(struct.pack('>I', swap(w)) for w in words)
+    total = 64 + len(ucode)
+    head = struct.pack('>8I', FP_PROFILE, FORMAT_REVISION, total, 0, 0, 32, len(ucode), 64)
+    sub = bytearray(22)
+    sub[19] = h0
+    return head + bytes(sub) + bytes(64 - 32 - 22) + ucode
+
+
+def self_test():
+    T, I = TEMP, INPUT
+    tex0 = 0x4
+    a = [0.25, -0.5, 1.0, 1.5]
+    rows = []
+    # GREEN controls
+    rows.append(('green: MOV R0, TEX0', _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1)), a))
+    rows.append(('green: R1=TEX0; R0=R1+R1',
+                 _container(_ins(MOV, 1, 0xF, [_src(I)], sel=tex0) + _ins(ADD, 0, 0xF, [_src(T, 1), _src(T, 1)], end=1)),
+                 [2 * x for x in a]))
+    rows.append(('green: H0 output (outputFromH0)', _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, half=1, end=1), h0=1), a))
+    # RED controls (codex review of fae9ca52): each must be refused, not evaluated
+    rows.append(('red: MOV R0, R5 (undefined source)', _container(_ins(MOV, 0, 0xF, [_src(T, 5)], end=1)), None))
+    rows.append(('red: R0=.., H0.x=.., R0.w=.. (stale xyz output)',
+                 _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0) + _ins(MOV, 0, 0x1, [_src(I)], sel=tex0, half=1)
+                            + _ins(MOV, 0, 0x8, [_src(I)], sel=tex0, end=1)), None))
+    rows.append(('red: OUT_NONE only (output never written)',
+                 _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, out_none=1, end=1)), None))
+    rows.append(('red: R0.xy written, output needs zw',
+                 _container(_ins(MOV, 0, 0x3, [_src(I)], sel=tex0, end=1)), None))
+    fails = 0
+    for name, blob, want in rows:
+        try:
+            got = evaluate(blob, {'TEX0': a})
+            ok = want is not None and got == want
+            detail = 'got %s' % got
+        except Unmodelled as e:
+            ok = want is None
+            detail = 'refused: %s' % e
+        fails += not ok
+        print('  %-50s %s  (%s)' % (name, 'ok' if ok else 'FAIL', detail))
+    print('fp_eval self-test: %s' % ('PASS' if not fails else 'FAIL (%d)' % fails))
+    return fails == 0
+
+
+if __name__ == '__main__':
+    import sys
+    sys.exit(0 if self_test() else 1)
