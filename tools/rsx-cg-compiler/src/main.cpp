@@ -21,6 +21,7 @@
 #include "ir.h"
 #include "ir_builder.h"
 #include "ir_passes.h"
+#include "implicit_texcoord.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
 #include "nv40/nv40_discard_guards.h"
@@ -429,6 +430,16 @@ int main(int argc, char** argv)
             if (dce.runOnFunction(*fn))         changed = true;
         }
         if (!changed) break;
+    }
+
+    // Implicit TEXCOORDs go to the fragment inputs the program still reads
+    // (t_3289f98f): decided here, after dead-code elimination.
+    if (stage == ShaderStage::Fragment)
+    {
+        for (auto& fn : irModule->functions)
+            if (fn->isEntryPoint)
+                rsx_cg::bindImplicitTexCoords(*fn, semantic.shaderInfo().implicitTexCoordOrder,
+                                              semantic.shaderInfo().explicitTexCoords);
     }
 
     // Run NV40-specific IR transforms before back-end lowering.
