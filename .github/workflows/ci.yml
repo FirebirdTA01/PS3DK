@@ -429,6 +429,8 @@ jobs:
 
       - name: Test rsx-cg-compiler static loop unroll
         run: bash tests/shader-compiler/static-loop-unroll-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test empty statements and surrounding control flow
+        run: bash tests/shader-compiler/empty-statement-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Static loop expansion twins
         run: bash tests/shader-compiler/static-loop-expansion-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper static loop expansion twins
@@ -564,6 +566,8 @@ jobs:
         run: bash tests/shader-compiler/bool-vector-logic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Vector ?: conditions judged by value against Cg semantics
         run: bash tests/shader-compiler/vector-select-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Backend refusals lead with the unsupported construct
+        run: bash tests/shader-compiler/backend-diagnostics-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test helper parameter default arguments
         run: bash tests/shader-compiler/helper-default-args-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test a parenthesised object-like macro body

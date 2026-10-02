@@ -2605,6 +2605,16 @@ private:
         program_.instrs.push_back(out);
     }
 
+    std::string unsupportedInstructionDiagnostic(const IRInstruction& inst) const
+    {
+        std::string message = std::string("nv40-general: unsupported IR op ") +
+                              irOpToString(inst.op);
+        if (inst.op == IROp::Call && !inst.targetName.empty())
+            message += " @" + inst.targetName;
+        return message + " (entry '" + entry_.name + "', result " +
+               inst.resultType.toString() + ")";
+    }
+
     void lowerInstruction(const IRInstruction& inst)
     {
         // The entry's value table only holds constants and named
@@ -2900,9 +2910,7 @@ private:
                 lowerVpFetch(inst, VOp::Txl);
                 return;
             }
-            program_.diagnostics.push_back(
-                std::string("nv40-general: unsupported IR op ") +
-                irOpToString(inst.op));
+            program_.diagnostics.push_back(unsupportedInstructionDiagnostic(inst));
             program_.loweringFailed = true;
             return;
         case IROp::StoreOutput:
@@ -2930,9 +2938,7 @@ private:
             // still exited 0 this way after resolve() began refusing, because
             // an unimplemented op whose result nothing reads leaves nothing
             // unresolved downstream - discard has no result at all.
-            program_.diagnostics.push_back(
-                std::string("nv40-general: unsupported IR op ") +
-                irOpToString(inst.op));
+            program_.diagnostics.push_back(unsupportedInstructionDiagnostic(inst));
             program_.loweringFailed = true;
             return;
         }
@@ -2985,9 +2991,21 @@ private:
             ? vertexInputIndex(sem, inst.semanticIndex)
             : fragmentInputSrc(sem, inst.semanticIndex);
         if (idx < 0) {
+            std::string inputName = inst.structParamName;
+            if (!inst.fieldName.empty()) {
+                if (!inputName.empty()) inputName += ".";
+                inputName += inst.fieldName;
+            }
+            if (inputName.empty()) inputName = inst.targetName;
+            if (inputName.empty()) inputName = "%" + std::to_string(inst.result);
+            const std::string semantic = !inst.rawSemanticName.empty()
+                ? inst.rawSemanticName
+                : (inst.semanticName.empty() ? "<none>"
+                   : inst.semanticName + std::to_string(inst.semanticIndex));
             program_.diagnostics.push_back(
-                "nv40-general: unsupported input semantic " +
-                inst.semanticName);
+                "nv40-general: unsupported input semantic '" + semantic +
+                "' for entry '" + entry_.name + "' input '" + inputName +
+                "' (" + inst.resultType.toString() + ")");
             return;
         }
         program_.valueToSource[inst.result] = inputSrc(idx);
@@ -11098,7 +11116,9 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
 
 static void appendBuilderDiagnostics(const VirtualProgram& program, UcodeOutput& out)
 {
-    out.diagnostics.insert(out.diagnostics.end(),
+    // The builder knows the failed construct. Put that reason before the
+    // emitter's generic refusal so one-line clients do not lose the cause.
+    out.diagnostics.insert(out.diagnostics.begin(),
                            program.diagnostics.begin(),
                            program.diagnostics.end());
     if (!out.ok && out.diagnostics.empty())

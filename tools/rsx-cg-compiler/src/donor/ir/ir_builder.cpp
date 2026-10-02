@@ -1660,6 +1660,10 @@ void IRBuilder::buildStmt(StmtNode* stmt)
 
     switch (stmt->kind)
     {
+    case StmtKind::Empty:
+        // The enclosing statement still builds its condition, side effects
+        // and control-flow edges. Only the empty body has no instructions.
+        break;
     case StmtKind::Block:
         buildBlockStmt(static_cast<BlockStmt*>(stmt));
         break;
