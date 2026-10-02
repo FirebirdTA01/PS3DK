@@ -108,13 +108,25 @@ def scan(lines, out=sys.stdout):
             if o in ("bl", "blr"):
                 terminal = o
                 break
-            if o == "b" and a and a[-1].strip("<>") != fn and not re.search(r"\+0x", a[-1]):
-                terminal = "b(tailcall)"    # b to another function: CTR call-clobbered
+            if o == "b":
+                # Real objdump prints a branch target as "<addr> <sym>" (the
+                # address is separate from the operand).  Real form: "b  0
+                # <.f>", "b  1c <.g>".  A local label carries a "+off"
+                # (b  14 <.f+0x14>).  Tail call iff <sym> exists, has no
+                # "+off", and is not this function (a call clobbers CTR);
+                # anything else (local label, own entry, no <sym>) stays a
+                # loop use.
+                m = re.search(r"<([^>]+)>", a[-1]) if a else None
+                sym = m.group(1) if m else None
+                if sym and "+" not in sym and sym != fn:
+                    terminal = "b(tailcall)"      # CTR call-clobbered
+                    break
+                terminal = None                    # local b = loop use
                 break
             if o.startswith("b"):
-                terminal = None            # any other branch (incl. local b) = loop use
+                terminal = None                    # any other branch = loop use
                 break
-            # mfctr / plain instructions: only reads or no CTR effect -> keep walking
+            # mfctr / plain instructions: no CTR effect -> keep walking
         if terminal is not None:
             other.append("%s %s mtctr %s -> %s" % (fn, addr, args[0], terminal))
             continue
@@ -212,22 +224,23 @@ def self_test():
 """, 1),
         # codex P1-b (v2 review): a b to ANOTHER function (target without
         # "+off") is a tail call, which clobbers CTR - a genuine non-loop
-        # terminal.  Must stay green.
+        # terminal.  Must stay green.  Written in real objdump form:
+        # "b  <addr> <sym>" (the address is separate from the symbol).
         "green-b-tailcall": ("""0000000000000000 <.f>:
     0:	81 24 00 00 	lwz     r9,0(r4)
     4:	38 a9 00 02 	addi    r5,r9,2
     8:	7c a9 03 a6 	mtctr   r5
-    c:	48 00 10 00 	b       .g
+    c:	48 00 00 10 	b       1c <.g>
 """, 0),
-        # P2 (v3 review): a b to the CURRENT function's entry is a local
-        # branch, not a call - the target "<.f>" must match fn ".f" once the
-        # angle brackets are stripped, so it is NOT a tail-call terminal.
-        # Guards a[-1].strip("<>") != fn (was a[-1] != fn, always true).
+        # P2 (v3/v4 review): a b to the CURRENT function's entry is a local
+        # branch, not a call - "b <addr> <.f>" must match fn ".f" (the symbol
+        # is extracted from <...>, the address <addr> is ignored), so it is
+        # NOT a tail-call terminal.  Real objdump form, not "b <.f>".
         "red-b-self": ("""0000000000000000 <.f>:
     0:	81 24 00 00 	lwz     r9,0(r4)
     4:	38 a9 00 02 	addi    r5,r9,2
     8:	7c a9 03 a6 	mtctr   r5
-    c:	48 ff ff fc 	b       <.f>
+    c:	48 00 00 00 	b       0 <.f>
 """, 1),
     }
     ok = True
