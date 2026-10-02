@@ -1391,44 +1391,6 @@ private:
         return true;
     }
 
-    // A select arm is provably finite when no execution can make it
-    // inf/NaN: a finite literal, a direct varying/attribute read, or a
-    // select over provably finite arms.  Everything computed (div,
-    // rsq, pow, ...) is not provable and must wait for CF-1b's
-    // predicated write.  Conservative by design: a false negative
-    // refuses a shader, a false positive silently corrupts its joins.
-    bool provablyFinite(IRValueID id, int depth = 0) const
-    {
-        if (depth > 64)
-            return false;
-        if (const auto* c =
-                dynamic_cast<const IRConstant*>(entry_.getValue(id))) {
-            if (std::holds_alternative<float>(c->value))
-                return std::isfinite(std::get<float>(c->value));
-            if (std::holds_alternative<std::vector<float>>(c->value)) {
-                for (float f : std::get<std::vector<float>>(c->value))
-                    if (!std::isfinite(f)) return false;
-                return true;
-            }
-            return true;  // bool / integer literals
-        }
-        const auto it = defMap_.find(id);
-        if (it == defMap_.end())
-            return false;
-        const IRInstruction& def = *it->second;
-        switch (def.op) {
-        case IROp::LoadVarying:
-        case IROp::LoadAttribute:
-            return true;
-        case IROp::Select:
-            return def.operands.size() >= 3 &&
-                   provablyFinite(def.operands[1], depth + 1) &&
-                   provablyFinite(def.operands[2], depth + 1);
-        default:
-            return false;
-        }
-    }
-
     static int componentRankFromMask(int mask)
     {
         switch (mask) {
@@ -7940,15 +7902,20 @@ private:
             // of control-flow flattening: a one-block source-level `?:`
             // can carry the same non-finite untaken arm and must take the
             // same predicated path.
-            if (profile_ == GeneralProfile::Fragment &&
-                (!provablyFinite(inst.operands[1]) ||
-                 !provablyFinite(inst.operands[2]))) {
+            //
+            // FINITE ARMS ARE NOT ENOUGH EITHER: the blend computes
+            // (a - b) + b, which is not a in binary32 - with constant arms
+            // 1 and 2^30 the taken lane reads 0 (codex, review of
+            // c0b6589e; measured wrong on the parent too, scalar condition).
+            // The reference predicates every fragment select, so every
+            // fragment select takes the predicated write; shapes it does
+            // not cover refuse rather than blend.
+            if (profile_ == GeneralProfile::Fragment) {
                 if (lowerSelectPredicated(inst))
                     return;
                 program_.diagnostics.push_back(
-                    "nv40-general: join select arm is not provably finite "
-                    "and predicated lowering does not cover this shape "
-                    "(vector condition or VP profile); refusing");
+                    "nv40-general: select shape not covered by predicated "
+                    "lowering; refusing");
                 program_.loweringFailed = true;
                 return;
             }
