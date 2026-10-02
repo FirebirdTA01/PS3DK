@@ -4938,11 +4938,47 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
 
 std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
 {
-    // Any name the function binds itself (a local or parameter) shadows the
-    // file-scope constant of that name: not a constant here.  An expression
-    // kind not walked below is treated the same way.
+    // Not folded (nullopt), so the caller refuses by name rather than guess:
+    //  - any name the function binds itself (a local or parameter) shadows
+    //    the file-scope constant of that name;
+    //  - a half or fixed operand: the reference does not compare at the
+    //    reduced precision (static const half H = 0.1; H == 0.1 is TRUE
+    //    there), and its exact rule is unmeasured;
+    //  - a comparison between a float and an integer operand: the reference
+    //    does not round the integer to float (G = 16777217.0, the float
+    //    16777216, against the int 16777217 is UNEQUAL there, while float
+    //    promotion here would make them equal);
+    //  - an expression kind not walked below.
+    const auto category = [](const ExprNode* x) -> int {
+        if (!x || !x->resolvedType) return -1;
+        switch (x->resolvedType->baseType)
+        {
+        case BaseType::Bool:  return 0;
+        case BaseType::Float: return 2;
+        case BaseType::Half:
+        case BaseType::Fixed: return 3;
+        default:              return 1;   // the integer kinds
+        }
+    };
     std::function<bool(const ExprNode*)> namesLocal = [&](const ExprNode* x) -> bool {
         if (!x) return false;
+        if (category(x) == 3) return true;
+        if (x->kind == ExprKind::Binary)
+        {
+            const auto* b = static_cast<const BinaryExpr*>(x);
+            switch (b->op)
+            {
+            case BinaryOp::Equal: case BinaryOp::NotEqual: case BinaryOp::Less:
+            case BinaryOp::LessEqual: case BinaryOp::Greater: case BinaryOp::GreaterEqual:
+            {
+                const int l = category(b->left.get()), r = category(b->right.get());
+                if (l < 0 || r < 0 || l != r) return true;
+                break;
+            }
+            default:
+                break;
+            }
+        }
         switch (x->kind)
         {
         case ExprKind::Literal:

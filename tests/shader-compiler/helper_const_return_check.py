@@ -76,6 +76,25 @@ PICK_ROWS = [('1 == 2', False), ('1 != 2', True), ('2 == 2', True), ('K == L', F
              ('K != L', True), ('!(K != L)', False), ('K < L', True), ('(K < L) == false', False),
              ('F == 0.5', True), ('F > 0.75 || K == 3', True), ('K == 3 && L == 3', False),
              ('K * 2 == 6', True), ('-K == 3', False)]
+# Precision edges (review: codex), measured on the reference.  These fold
+# and must pick the reference's arm:
+PREC = """static const float F = 0.1;
+static const float G = 16777217.0;
+static const half H = 0.1;
+float4 pick(const float4 c)
+{{
+    if ({cond}) {{ return c * 2.0; }}
+    else {{ return c * 3.0; }}
+}}
+float4 main(float4 t : TEXCOORD0) : COLOR {{ return pick(t); }}
+"""
+PREC_ROWS = [('F == 0.1', True), ('F == float(0.1)', True), ('F != 0.1', False),
+             ('G == 16777216.0', True), ('G == 16777217.0', True), ('F * 10.0 == 1.0', True),
+             ('F + 0.2 == 0.3', True)]
+# ...and these are not folded (refused by name): the reference keeps an int
+# against a float unrounded (G == 16777217 is FALSE there) and compares a
+# half constant above half precision (H == 0.1 is TRUE there).
+PREC_REFUSED = ['G == 16777217', 'H == 0.1', 'H != 0.25']
 GRID = [-1.0, -0.25, 0.0, 0.5, 0.75, 1.0]
 
 
@@ -142,6 +161,24 @@ def main():
             print('  %-24s %s  %s' % (name, 'values ok' if not bad else 'WRONG on %d' % bad, cond))
             if bad:
                 failures.append('%s (%s) picked the wrong return on %d inputs' % (name, cond, bad))
+        for i, (cond, first) in enumerate(PREC_ROWS):
+            name = 'prec_%d' % i
+            rc, blob, err = compile_one(args.compiler, work, name, PREC.format(cond=cond))
+            if rc != 0 or not blob:
+                failures.append('%s (%s) refused: %s' % (name, cond, (err.strip().splitlines() or ['?'])[-1]))
+                continue
+            k = 2.0 if first else 3.0
+            ok = fp_eval.evaluate(blob, {'TEX0': [1.0, 0.5, 0.25, 1.0]}) == [k, 0.5 * k, 0.25 * k, k]
+            print('  %-24s %s  %s' % (name, 'values ok' if ok else 'WRONG ARM', cond))
+            if not ok:
+                failures.append('%s (%s) picked the wrong return' % (name, cond))
+        for i, cond in enumerate(PREC_REFUSED):
+            name = 'prec_refused_%d' % i
+            rc, blob, err = compile_one(args.compiler, work, name, PREC.format(cond=cond))
+            ok = rc == 1 and not blob and 'a return inside control flow' in err
+            print('  %-24s %s  %s' % (name, 'refused by name' if ok else 'NOT refused (rc %d)' % rc, cond))
+            if not ok:
+                failures.append('%s (%s): expected the named refusal, got rc %d' % (name, cond, rc))
         for name, text in REFUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
             ok = rc == 1 and not blob and 'a return inside control flow' in err
