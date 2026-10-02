@@ -44,11 +44,24 @@ out_vertex main(float4 position : POSITION, float2 texCoord : TEXCOORD0,
 { out_vertex OUT; OUT.position = mul(modelViewProj, position);
   OUT.texCoord = texCoord * IN.texture_size + IN.video_size * post; return OUT; }
 """
-# Names and paramnos only: the reference gives NO register to an unreferenced
-# vertex uniform and we still do, for plain parameters too (separate gap).
+# The reference gives NO register to an unread vertex uniform (t_67b3362b):
+# resource 3256, register -1, unreferenced; read ones are allocated in source
+# order, vectors from c[467] down, matrices from c[256] up.
+UNASSIGNED = 3256
 VP_V1_MEMBERS = [('IN.video_size', FLOAT2, 3), ('IN.texture_size', FLOAT2, 3),
                  ('IN.output_size', FLOAT2, 3), ('IN.frame_count', FLOAT, 3), ('post', FLOAT, 4)]
-VP_V1_REGISTERS = {'IN.video_size': 467, 'IN.texture_size': 466}
+VP_V1_REGISTERS = {'modelViewProj': 256, 'IN.video_size': 467, 'IN.texture_size': 466, 'post': 465,
+                   'IN.output_size': None, 'IN.frame_count': None}
+# Plain parameters and file-scope uniforms, matrices and vectors, read and not.
+VP_UNREAD = """uniform float4x4 g_unused_m;
+uniform float4 g_a;
+uniform float4 g_unused_v;
+float4 main(float4 p : POSITION, uniform float4x4 unused_m, uniform float4 unused_v,
+            uniform float4x4 used_b, uniform float4 post) : POSITION
+{ return mul(used_b, p) + post + g_a; }
+"""
+VP_UNREAD_REGISTERS = {'used_b': 256, 'post': 467, 'g_a': 466,
+                       'unused_m': None, 'unused_v': None, 'g_unused_m': None, 'g_unused_v': None}
 
 # A nested struct member is flattened by its full path (reference: IN.in1.a).
 NESTED = """struct inner { float2 a; };
@@ -161,6 +174,28 @@ def with_uniforms(blob, container, values):
     return bytes(out)
 
 
+def vp_registers(tag, recs, want):
+    """want[name] is a c[] register, or None for the unassigned record."""
+    bad = []
+    for name, reg in want.items():
+        r = recs.get(name)
+        if r is None:
+            bad.append('%s %s: no record' % (tag, name))
+            continue
+        got = (r['resource'], r['register'], r['referenced'])
+        if reg is None:
+            if got != (UNASSIGNED, 0xFFFFFFFF, 0):
+                bad.append('%s %s (resource, register, referenced) %s, want unassigned' % (tag, name, got))
+            rows = [k for k in recs if k.startswith(name + '[')]
+            for k in rows:
+                if recs[k]['register'] != 0xFFFFFFFF or recs[k]['referenced'] != 0:
+                    bad.append('%s %s row still allocated' % (tag, k))
+        elif r['register'] != reg or r['referenced'] != 1:
+            bad.append('%s %s register %d referenced %d, want c[%d] referenced' % (
+                tag, name, r['register'], r['referenced'], reg))
+    return bad
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('compiler')
@@ -216,10 +251,17 @@ def main():
                 if not r or (r['type'], r['paramno']) != (ty, paramno):
                     failures.append('vp_v1 %s: %s, want type %d paramno %d' % (
                         name, r and (r['type'], r['paramno']), ty, paramno))
-            for name, reg in VP_V1_REGISTERS.items():
-                if name in recs and recs[name]['register'] != reg:
-                    failures.append('vp_v1 %s register %d, want c[%d]' % (name, recs[name]['register'], reg))
+            failures += vp_registers('vp_v1', recs, VP_V1_REGISTERS)
             print('  vp_v1 records checked')
+
+        rc, blob, err = compile_one(args.compiler, work, 'vp_unread', VP_UNREAD, 'sce_vp_rsx')
+        if rc != 0 or not blob:
+            failures.append('vp_unread refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            bad = vp_registers('vp_unread', {r['name']: r for r in Container(blob).records},
+                               VP_UNREAD_REGISTERS)
+            failures += bad
+            print('  vp_unread: %s' % ('read uniforms allocated, unread ones unassigned' if not bad else 'WRONG'))
 
         rc, blob, err = compile_one(args.compiler, work, 'nested', NESTED, 'sce_fp_rsx')
         if rc != 0 or not blob:

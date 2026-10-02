@@ -435,6 +435,13 @@ VpContainerResult emitVertexContainerImpl(
     const rsx_cg::ArrayUniformUses arrayUses =
         rsx_cg::classifyArrayUniformUses(*entry);
     constexpr uint32_t kCgUnassignedRes = 3256u;  // 0x0cb8: declared, no register
+    // An unread, unpinned uniform takes no c[] register (the reference
+    // declares it with no resource, register -1, isReferenced 0) and moves
+    // no cursor; the lowering skips it from the same set (vpReadUniforms).
+    // Recorded by (name, paramno) and rewritten after the records are built:
+    // a parameter member and a file-scope uniform can share a name.
+    const std::set<IRValueID> vpRead = rsx_cg::vpReadUniforms(*entry);
+    std::set<std::pair<std::string, uint32_t>> unreadUniforms;
 
     // Samplers take a texture unit and never a c[] register, so no cursor
     // moves for them.  Built from the same layout the general lowering
@@ -592,8 +599,10 @@ VpContainerResult emitVertexContainerImpl(
                 d.res       = kCgConst;
                 if (p.type.isMatrix() && !p.type.isArray())
                 {
-                    const int base = binding ? binding->registers[0] : nextMatrixReg;
-                    if (!binding) nextMatrixReg += p.type.matrixRows;
+                    const bool unread = !binding && !vpRead.count(p.valueId);
+                    if (unread) unreadUniforms.insert({p.name, irParamOrdinal(entry->parameters[i], i)});
+                    const int base = binding ? binding->registers[0] : (unread ? -1 : nextMatrixReg);
+                    if (!binding && !unread) nextMatrixReg += p.type.matrixRows;
                     d.resIndex = static_cast<uint32_t>(base);
                     params.push_back(d);
                     for (int row = 0; row < p.type.matrixRows; ++row)
@@ -623,7 +632,10 @@ VpContainerResult emitVertexContainerImpl(
                     continue;
                 }
 
-                d.resIndex = static_cast<uint32_t>(binding ? binding->registers[0] : nextVectorReg--);
+                const bool unread = !binding && !vpRead.count(p.valueId);
+                if (unread) unreadUniforms.insert({p.name, irParamOrdinal(entry->parameters[i], i)});
+                d.resIndex = static_cast<uint32_t>(binding ? binding->registers[0]
+                                                           : (unread ? -1 : nextVectorReg--));
                 d.defaultValue = uniformDefaultSlice(
                     p, 0u, static_cast<size_t>(p.type.componentCount()));
             }
@@ -698,6 +710,11 @@ VpContainerResult emitVertexContainerImpl(
                 {
                     base = g.explicitRegisterIndex;
                 }
+                else if (!vpRead.count(g.valueId))
+                {
+                    unreadUniforms.insert({g.name, kInvalidIndex});
+                    base = -1;
+                }
                 else
                 {
                     base = nextMatrixReg;
@@ -735,6 +752,11 @@ VpContainerResult emitVertexContainerImpl(
                 else if (hasExplicit)
                 {
                     reg = g.explicitRegisterIndex;
+                }
+                else if (!vpRead.count(g.valueId))
+                {
+                    unreadUniforms.insert({g.name, kInvalidIndex});
+                    reg = -1;
                 }
                 else
                 {
@@ -803,8 +825,10 @@ VpContainerResult emitVertexContainerImpl(
             d.res       = kCgConst;
             if (p.type.isMatrix() && !p.type.isArray())
             {
-                const int base = binding ? binding->registers[0] : nextMatrixReg;
-                if (!binding) nextMatrixReg += p.type.matrixRows;
+                const bool unread = !binding && !vpRead.count(p.valueId);
+                if (unread) unreadUniforms.insert({p.name, irParamOrdinal(entry->parameters[i], i)});
+                const int base = binding ? binding->registers[0] : (unread ? -1 : nextMatrixReg);
+                if (!binding && !unread) nextMatrixReg += p.type.matrixRows;
                 d.resIndex = static_cast<uint32_t>(base);
                 params.push_back(d);
                 // Expand into per-row entries.  Each child shares the
@@ -837,7 +861,9 @@ VpContainerResult emitVertexContainerImpl(
             }
             else
             {
-                const int reg = binding ? binding->registers[0] : nextVectorReg--;
+                const bool unread = !binding && !vpRead.count(p.valueId);
+                if (unread) unreadUniforms.insert({p.name, irParamOrdinal(entry->parameters[i], i)});
+                const int reg = binding ? binding->registers[0] : (unread ? -1 : nextVectorReg--);
                 d.resIndex = static_cast<uint32_t>(reg);
                 d.defaultValue = uniformDefaultSlice(
                     p, 0u, static_cast<size_t>(p.type.componentCount()));
@@ -903,6 +929,11 @@ VpContainerResult emitVertexContainerImpl(
                 base = binding->registers[0];
             else if (hasExplicit)
                 base = g.explicitRegisterIndex;
+            else if (!vpRead.count(g.valueId))
+            {
+                unreadUniforms.insert({g.name, kInvalidIndex});
+                base = -1;
+            }
             else
             {
                 base = nextMatrixReg;
@@ -944,6 +975,11 @@ VpContainerResult emitVertexContainerImpl(
                 reg = binding->registers[0];
             else if (hasExplicit)
                 reg = g.explicitRegisterIndex;
+            else if (!vpRead.count(g.valueId))
+            {
+                unreadUniforms.insert({g.name, kInvalidIndex});
+                reg = -1;
+            }
             else
                 reg = nextVectorReg--;
             d.resIndex = static_cast<uint32_t>(reg);
@@ -1036,6 +1072,24 @@ VpContainerResult emitVertexContainerImpl(
             d.res = resource;
             params.push_back(d);
         }
+
+    // Unread uniforms (and a matrix's rows, named `m[k]`): declared, no
+    // resource, no register, not referenced - the reference's record.
+    for (auto& param : params)
+    {
+        if (param.var != kCgUniform) continue;
+        std::string base = param.name;
+        if (!unreadUniforms.count({base, param.paramno}))
+        {
+            const auto open = base.rfind('[');
+            if (open == std::string::npos || base.back() != ']') continue;
+            base = base.substr(0, open);
+            if (!unreadUniforms.count({base, param.paramno})) continue;
+        }
+        param.res          = kCgUnassignedRes;
+        param.resIndex     = kInvalidIndex;
+        param.isReferenced = 0;
+    }
 
     // The active backend owns the binding contract. Apply general's shared
     // resolver to every synthesized record after both entry-table paths have

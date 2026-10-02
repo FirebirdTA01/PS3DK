@@ -2041,6 +2041,11 @@ private:
     {
         int nextVpMatrixConst = 256;
         int nextVpUniformConst = 467;
+        const std::set<IRValueID> vpRead = rsx_cg::vpReadUniforms(entry_);
+        // An unread, unpinned VP uniform takes no register (see vpReadUniforms).
+        const auto vpUnread = [&](IRValueID id, const void* binding) {
+            return profile_ == GeneralProfile::Vertex && !binding && !vpRead.count(id);
+        };
         // Each profile has its own unit rules (fp_sampler_bindings.h); the
         // container builds the same layout, so units and records agree.
         const auto samplerLayout = profile_ == GeneralProfile::Vertex
@@ -2192,6 +2197,7 @@ private:
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform &&
                        p.type.isMatrix()) {
+                if (vpUnread(p.valueId, binding)) continue;
                 pendingMatrices.push_back(PendingMatrix{p.valueId, p.name,
                                                         p.type.matrixRows,
                                                         p.type.matrixCols, 0,
@@ -2239,6 +2245,7 @@ private:
                 samplerType_[p.valueId] = p.type.baseType;
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform) {
+                if (vpUnread(p.valueId, binding)) continue;
                 program_.valueToSource[p.valueId] =
                     uniformSrc(binding ? binding->registers[0] : nextVpUniformConst--, false);
             } else if (profile_ == GeneralProfile::Fragment &&
@@ -2327,6 +2334,7 @@ private:
                 continue;
             }
             if (profile_ == GeneralProfile::Vertex && g.type.isMatrix()) {
+                if (vpUnread(g.valueId, binding)) continue;
                 pendingMatrices.push_back(PendingMatrix{g.valueId, g.name,
                                                         g.type.matrixRows,
                                                         g.type.matrixCols, 0,
@@ -2371,6 +2379,7 @@ private:
                 samplerUnit_[g.valueId] = samplerLayout.unit(g.valueId);
                 samplerType_[g.valueId] = g.type.baseType;
             } else if (profile_ == GeneralProfile::Vertex) {
+                if (vpUnread(g.valueId, binding)) continue;
                 program_.valueToSource[g.valueId] =
                     uniformSrc(binding ? binding->registers[0] : nextVpUniformConst--, false);
             } else if (profile_ == GeneralProfile::Fragment &&
