@@ -36,6 +36,12 @@ ROWS = {
                      [2.0, 0.0, 0.0, 1.0]),
     'compound_self': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = t.x; a *= (a * t); return float4(a, 0, 0, 1); }\n',
                       [0.125, 0.0, 0.0, 1.0]),
+    # the operation runs in v's element type and only then converts to a's
+    # (review: codex): int a = 3; a *= float2(1.5, 9) is int(4.5) = 4, not 3 * 1
+    'compound_int_mul': ('float4 main(float4 t : TEXCOORD0) : COLOR { int a = 3; a *= float2(1.5, 9); return float4(a, 0, 0, 1); }\n',
+                         [4.0, 0.0, 0.0, 1.0]),
+    'compound_int_div': ('float4 main(float4 t : TEXCOORD0) : COLOR { int a = 3; a /= float2(1.5, 9); return float4(a, 0, 0, 1); }\n',
+                         [2.0, 0.0, 0.0, 1.0]),
     # a function declared to return a scalar keeps lane x of a vector
     'return_float': ('float f(float4 t) { return t.zyx; }\nfloat4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t), 0, 0, 1); }\n',
                      [0.75, 0.0, 0.0, 1.0]),

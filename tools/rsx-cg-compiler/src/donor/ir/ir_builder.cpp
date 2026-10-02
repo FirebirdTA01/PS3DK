@@ -3975,17 +3975,45 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
             case BinaryOp::ModAssign: op = IROp::Mod; break;
             default: op = IROp::Add; break;
             }
-            // a op= v with a scalar a and a vector v is a op v.x (measured:
-            // the reference computes the vector and keeps lane x).
+            // a op= v with a scalar a and a vector v is a op v.x, computed in
+            // v's element type and only THEN converted to a's (measured:
+            // int a = 3; a *= float2(1.5, 9) is 4, a /= float2(1.5, 9) is 2,
+            // as for a = a * 1.5; a half a multiplies at float precision first
+            // - review: codex).  Converting v.x to a's type first gave 3 / 3.
+            bool narrowedCompound = false;
             {
                 const IRTypeInfo leftType = getExprType(expr->left.get());
                 const IRTypeInfo rightType = getExprType(expr->right.get());
                 if (!leftType.isVector() && !leftType.isMatrix() && leftType.arraySize == 0 &&
                     rightType.isVector() && !rightType.isMatrix() && rightType.arraySize == 0 &&
                     leftType.baseType != IRType::Bool)
-                    rhsValue = emitScalarNarrowing(rightType, leftType, rhsValue, expr->loc);
+                {
+                    IRTypeInfo laneType = leftType;
+                    laneType.baseType = rightType.elementType;
+                    const IRValueID lane = emitInstruction(IROp::VecExtract, laneType,
+                        {rhsValue, createConstant(static_cast<int32_t>(0))}, expr->loc);
+                    if (laneType.baseType == leftType.baseType)
+                    {
+                        rhsValue = emitBinaryOp(op, leftType, lhsValue, lane);
+                    }
+                    else
+                    {
+                        // Widen a to v's element type, operate there, narrow back.
+                        IRValueID wideLhs = lhsValue;
+                        const IRType from = leftType.baseType, to = laneType.baseType;
+                        if ((from == IRType::Int32 || from == IRType::UInt32) &&
+                            (to == IRType::Float32 || to == IRType::Float16))
+                            wideLhs = emitInstruction(IROp::IntToFloat, laneType, {lhsValue}, expr->loc);
+                        else if (from == IRType::Float16 && to == IRType::Float32)
+                            wideLhs = emitInstruction(IROp::HalfToFloat, laneType, {lhsValue}, expr->loc);
+                        const IRValueID wide = emitBinaryOp(op, laneType, wideLhs, lane);
+                        rhsValue = emitScalarConversion(laneType, leftType, wide, expr->loc);
+                    }
+                    narrowedCompound = true;
+                }
             }
-            rhsValue = emitBinaryOp(op, getExprType(expr->left.get()), lhsValue, rhsValue);
+            if (!narrowedCompound)
+                rhsValue = emitBinaryOp(op, getExprType(expr->left.get()), lhsValue, rhsValue);
             if (arrayTarget)
             {
                 rhsValue = coerceAssignmentValue(expr->left.get(), rhsValue);
@@ -7048,16 +7076,11 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
     return value;
 }
 
-// A vector stored into a numeric scalar keeps lane x, converted to the
-// scalar's type (measured on the reference; allowsScalarNarrowing).
-IRValueID IRBuilder::emitScalarNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
-                                         IRValueID value, const SourceLocation& loc)
+// Convert one scalar lane between numeric element types.
+IRValueID IRBuilder::emitScalarConversion(const IRTypeInfo& fromType, const IRTypeInfo& targetType,
+                                          IRValueID lane, const SourceLocation& loc)
 {
-    IRTypeInfo laneType = targetType;
-    laneType.baseType = sourceType.elementType;
-    const IRValueID lane = emitInstruction(IROp::VecExtract, laneType,
-        {value, createConstant(static_cast<int32_t>(0))}, loc);
-    const IRType from = sourceType.elementType, to = targetType.baseType;
+    const IRType from = fromType.baseType, to = targetType.baseType;
     if (from == to) return lane;
     if ((from == IRType::Float32 || from == IRType::Float16) &&
         (to == IRType::Int32 || to == IRType::UInt32))
@@ -7070,6 +7093,18 @@ IRValueID IRBuilder::emitScalarNarrowing(const IRTypeInfo& sourceType, const IRT
         (to == IRType::Float32 || to == IRType::Float16))
         return emitInstruction(IROp::IntToFloat, targetType, {lane}, loc);
     return lane;
+}
+
+// A vector stored into a numeric scalar keeps lane x, converted to the
+// scalar's type (measured on the reference; allowsScalarNarrowing).
+IRValueID IRBuilder::emitScalarNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
+                                         IRValueID value, const SourceLocation& loc)
+{
+    IRTypeInfo laneType = targetType;
+    laneType.baseType = sourceType.elementType;
+    const IRValueID lane = emitInstruction(IROp::VecExtract, laneType,
+        {value, createConstant(static_cast<int32_t>(0))}, loc);
+    return emitScalarConversion(laneType, targetType, lane, loc);
 }
 
 // A vector returned from a function declared to return a numeric scalar
