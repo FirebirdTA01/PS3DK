@@ -7,9 +7,10 @@ refused ("a return inside control flow").  The reference accepts every row
 below.  An if whose condition folds to a constant now inlines only its taken
 branch, so each of the four constant combinations is judged by value.
 
-Still a NAMED GAP, refused by name: a return under a run-time condition, and
-one whose condition names a parameter that shadows the file-scope constant -
-the second is also the control that the fold never reads the shadowed global.
+A return under a RUN-TIME condition (including a parameter that shadows the
+file-scope constant - the control that the fold never reads the shadowed
+global) is lowered by running each arm with the rest of the body and joining
+the results; those rows are judged by value too.
 """
 import argparse
 import itertools
@@ -34,20 +35,63 @@ float4 decode(const float4 c)
 float4 main(float4 t : TEXCOORD0) : COLOR {{ return decode(t); }}
 """
 REFUSE = {
-    'runtime_condition': """float4 decode(const float4 c) { if (c.x > 0.5) { return c * 2.0; } else { return c; } }
-float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t); }
+    # A nested run-time return inside a block that declares locals, with
+    # statements after the block: the continuation would run in the block
+    # scope (an inner k returned for the outer `return k`).  Named gap.
+    'scoped_arm_local': """float4 f(float4 c) { float4 k = c * 3.0; if (c.x > 0.0) { float4 k = c * 5.0; if (c.y > 0.0) return k; } return k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
 """,
-    # A file-scope const WITHOUT static is a uniform with a default in the
-    # reference, so its condition is run-time here, never folded.
-    'nonstatic_const': """const bool lin = true;
-float4 decode(const float4 c) { if (lin) { return c * 2.0; } else { return c; } }
-float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t); }
-""",
-    'shadowed_constant': """static const bool lin = true;
-float4 decode(const float4 c, bool lin) { if (lin) { return c * 2.0; } else { return c; } }
-float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t, t.y > 0.5); }
+    # The same leak through a CONSTANT branch (review: codex): the taken
+    # block declares k, and the nested run-time return would run the
+    # outer `return k` inside it.
+    'const_block_shadow': """float4 f(float4 c) { float4 k = 1; if (true) { float4 k = 2; if (c.x > 0) return k; } return k; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
 """,
 }
+# The run-time lowering is fragment-only: a vertex select is still an
+# arithmetic blend (t_ca8f99a6), so a vertex helper keeps the named refusal.
+VP_REFUSE = {
+    'vp_runtime_return': """float4 f(float4 c) { if (c.x > 0.0) return c * 1073741824.0; return c; }
+float4 main(float4 p : POSITION) : POSITION { return f(p); }
+""",
+}
+# A return under a RUN-TIME condition runs each arm with the rest of the body
+# and joins the results with Select.  Expected values are the Cg expression;
+# the reference agrees where its program is evaluable here (the first three
+# rows, measured on every grid input); the others are predicated programs the
+# evaluator does not model.
+RUNTIME = {
+    'runtime_condition': ("""float4 decode(const float4 c) { if (c.x > 0.5) { return c * 2.0; } else { return c; } }
+float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t); }
+""", lambda c: [v * 2.0 for v in c] if c[0] > 0.5 else list(c)),
+    'shadowed_constant': ("""static const bool lin = true;
+float4 decode(const float4 c, bool lin) { if (lin) { return c * 2.0; } else { return c; } }
+float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t, t.y > 0.5); }
+""", lambda c: [v * 2.0 for v in c] if c[1] > 0.5 else list(c)),
+    'nonstatic_const': ("""const bool lin = true;
+float4 decode(const float4 c) { if (lin) { return c * 2.0; } else { return c; } }
+float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t); }
+""", lambda c: [v * 2.0 for v in c]),
+    'early_then_tail': ("""float4 f(float4 c) { if (c.x > 0.25) return c * 2.0; float4 d = c + 1.0; return d * 3.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
+""", lambda c: [v * 2.0 for v in c] if c[0] > 0.25 else [(v + 1.0) * 3.0 for v in c]),
+    'nested_returns': ("""float4 f(float4 c) { if (c.x > 0.0) { if (c.y > 0.0) return c * 2.0; c = c + 1.0; } return c * 3.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
+""", lambda c: ([v * 2.0 for v in c] if c[1] > 0.0 else [(v + 1.0) * 3.0 for v in c]) if c[0] > 0.0
+              else [v * 3.0 for v in c]),
+    'sequential': ("""float4 f(float4 c) { if (c.x > 0.5) return c; if (c.y > 0.5) return c * 2.0; if (c.z > 0.5) return c * 4.0; return c * 8.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
+""", lambda c: [v * (1.0 if c[0] > 0.5 else 2.0 if c[1] > 0.5 else 4.0 if c[2] > 0.5 else 8.0) for v in c]),
+    'void_out_early': ("""void g(float4 c, out float4 o) { o = c; if (c.x > 0.0) { o = c * 2.0; return; } o = o * 3.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { float4 r; g(t, r); return r; }
+""", lambda c: [v * (2.0 if c[0] > 0.0 else 3.0) for v in c]),
+    'global_write': ("""static float4 acc = float4(0, 0, 0, 0);
+float4 f(float4 c) { acc = c; if (c.x > 0.0) return c * 2.0; acc = c * 5.0; return c; }
+float4 main(float4 t : TEXCOORD0) : COLOR { float4 r = f(t); return r + acc; }
+""", lambda c: [v * (3.0 if c[0] > 0.0 else 6.0) for v in c]),
+}
+RUNTIME_GRID = [[0.5, -0.25, 1.0, 0.75], [-1.0, 0.75, 0.25, 2.0], [0.75, 0.75, 0.0, 1.0],
+                [0.0, 0.0, 0.75, 0.5], [0.3125, 0.625, 0.875, 0.0625], [0.125, 0.25, 0.375, 0.5]]
 # A taken constant branch is still a block: its own local ends with it, so
 # the return after it reads the OUTER k (t * 3), never the inner one (t * 5).
 SCOPED = """static const bool on = true;
@@ -204,6 +248,26 @@ def main():
             print('  %-24s %s  %s / %s' % (name, 'refused by name' if ok else 'NOT refused (rc %d)' % rc, decl, cond))
             if not ok:
                 failures.append('%s (%s / %s): expected the named refusal, got rc %d' % (name, decl, cond, rc))
+        for name, (text, want) in RUNTIME.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text)
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (name, (err.strip().splitlines() or ['?'])[-1]))
+                print('  %-24s REFUSED' % name)
+                continue
+            bad = [c for c in RUNTIME_GRID if fp_eval.evaluate(blob, {'TEX0': c}) != want(c)]
+            print('  %-24s %s' % (name, 'values ok' if not bad else 'WRONG on %d inputs' % len(bad)))
+            if bad:
+                failures.append('%s: got %s for %s, want %s' % (
+                    name, fp_eval.evaluate(blob, {'TEX0': bad[0]}), bad[0], want(bad[0])))
+        for name, text in VP_REFUSE.items():
+            src, dst = work / (name + '.cg'), work / (name + '.bin')
+            src.write_text(text)
+            run = subprocess.run([args.compiler, '-p', 'sce_vp_rsx', '--emit-container', str(dst), str(src)],
+                                 capture_output=True, text=True, timeout=60)
+            ok = run.returncode == 1 and not dst.exists() and 'a return inside control flow' in run.stderr
+            print('  %-24s %s' % (name, 'refused by name' if ok else 'NOT refused by name (rc %d)' % run.returncode))
+            if not ok:
+                failures.append('%s: expected the named VP refusal, got rc %d' % (name, run.returncode))
         for name, text in REFUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
             ok = rc == 1 and not blob and 'a return inside control flow' in err

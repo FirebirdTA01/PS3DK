@@ -576,6 +576,8 @@ jobs:
         run: bash tests/shader-compiler/implicit-varying-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns under compile-time-constant conditions judged by value
         run: bash tests/shader-compiler/helper-const-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Helper out and inout parameters are copy-out, judged by value
+        run: bash tests/shader-compiler/inline-out-param-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test helper parameter default arguments
         run: bash tests/shader-compiler/helper-default-args-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test a parenthesised object-like macro body
