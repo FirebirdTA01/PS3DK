@@ -3011,7 +3011,10 @@ void IRBuilder::buildExprStmt(ExprStmt* stmt)
 {
     if (stmt->expr)
     {
+        const ExprNode* outer = statementExpr_;
+        statementExpr_ = stmt->expr.get();
         buildExpr(stmt->expr.get());
+        statementExpr_ = outer;
     }
 }
 
@@ -3385,6 +3388,13 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
         return currentFunction_->nextValueId - 1;
     }
 
+    if (flattenedUniformStructParams_.count(expr->name))
+    {
+        error(expr->loc, "uniform struct entry parameter '" + expr->name +
+              "' is flattened into its members; using it as a whole value (a call "
+              "argument, a return) is not supported (uniform-struct-entry-parameter)");
+        return InvalidIRValue;
+    }
     error(expr->loc, "Unknown identifier: " + expr->name);
     return InvalidIRValue;
 }
@@ -3881,6 +3891,15 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
                 !nameToValue_.count(static_cast<IdentifierExpr*>(source)->name))
             {
                 const std::string from = static_cast<IdentifierExpr*>(source)->name;
+                // The copy produces no value: used as one (f(G = IN), (G = IN).a)
+                // it would read nothing, so it refuses by name instead.
+                if (expr != statementExpr_)
+                {
+                    error(expr->loc, "a copy of uniform struct entry parameter '" + from +
+                          "' is only supported as a statement, not used as a value "
+                          "(uniform-struct-entry-parameter)");
+                    return InvalidIRValue;
+                }
                 std::vector<std::pair<std::string, IRValueID>> members;
                 for (const auto& entry : nameToValue_)
                     if (entry.first.compare(0, from.size() + 1, from + ".") == 0)

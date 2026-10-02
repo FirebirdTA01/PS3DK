@@ -114,6 +114,20 @@ float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { H = (G = IN); ret
 STRUCT_DEFAULT = """struct input { float2 b; float k; };
 float4 main(float2 tc : TEXCOORD0, uniform input IN = { float2(1.0, 2.0), 3.0 }) : COLOR { return float4(tc * IN.b, IN.k, 1); }
 """
+# The flattened parameter has no whole value.  Using it as one - a copy used
+# as a value, or the parameter passed whole to a helper - is a NAMED GAP (the
+# reference accepts both); it must refuse by name, never read nothing.
+VALUE_USES = {
+    'copy_as_value': """struct input { float2 a; float2 b; };
+input G;
+float2 f(input s) { return s.a + s.b; }
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * f(G = IN), 0, 1); }
+""",
+    'param_as_value': """struct input { float2 a; float2 b; };
+float2 f(input s) { return s.a + s.b; }
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * f(IN), 0, 1); }
+""",
+}
 # An ARRAY member is not flattened yet: refused by name (not measured as a
 # reference refusal - a named gap).
 ARRAY_MEMBER = """struct input { float2 a[2]; float2 b; };
@@ -324,6 +338,13 @@ def main():
         print('  struct default: %s' % ('refused' if ok else 'NOT refused (rc %d)' % rc))
         if not ok:
             failures.append('struct parameter default: expected the named refusal, got rc %d' % rc)
+
+        for name, text in VALUE_USES.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_fp_rsx')
+            ok = rc == 1 and not blob and 'uniform-struct-entry-parameter' in err
+            print('  %s: %s' % (name, 'refused by name' if ok else 'NOT refused by name (rc %d)' % rc))
+            if not ok:
+                failures.append('%s: expected the named refusal, got rc %d' % (name, rc))
 
         rc, blob, err = compile_one(args.compiler, work, 'array_member', ARRAY_MEMBER, 'sce_fp_rsx')
         ok = rc == 1 and not blob and 'uniform-struct-entry-parameter' in err

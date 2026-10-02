@@ -110,6 +110,10 @@ private:
     // (uniform-struct-entry-parameter): the name has no whole-struct value,
     // only `name.member...` bindings, so a whole-struct copy copies those.
     std::unordered_set<std::string> flattenedUniformStructParams_;
+    // The expression an expression STATEMENT is evaluating: a whole-struct
+    // copy of a flattened parameter has no value, so it is accepted only
+    // there (or as a link of that statement's assignment chain).
+    const ExprNode* statementExpr_ = nullptr;
     std::unordered_map<std::string, std::vector<IRValueID>>& localArrayValues_ = scope_.arrays;
     std::unordered_map<std::string, IRValueID>& shadowedGlobals_ = scope_.shadowedGlobals;
     std::unordered_map<std::string, std::vector<IRValueID>>& shadowedGlobalArrays_ = scope_.shadowedGlobalArrays;
