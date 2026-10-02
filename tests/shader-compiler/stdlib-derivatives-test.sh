@@ -2,9 +2,10 @@
 # screen-space-derivatives / derivative-lane-width: screen-space derivative slice 1.
 #
 # The shipping path must accept scalar and float2 fragment ddx/ddy and emit
-# NV40's native DDX/DDY opcodes.  Widths 3/4 are deliberately out of scope for
-# slice 1 because the hardware writes only X/Y; they must refuse by name rather
-# than silently truncating.  Vertex derivatives are a profile error.
+# NV40's native DDX/DDY opcodes.  The hardware writes only X/Y, so widths 3/4
+# are two derivatives, the high lanes first through a temp (measured on the
+# reference; wide_derivative_check.py checks the shape lane by lane).  Vertex
+# derivatives are a profile error.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -138,12 +139,14 @@ for path in sys.argv[1:]:
                 raise SystemExit(f"FAIL: {path} derivative opcode writes non-XY mask 0x{mask:x}")
 PY
 
-expect_refusal "fp_deriv_float3" sce_fp_rsx \
-    "derivative width .*not yet supported" \
-    "$shaders/fp_deriv_float3_refuse_f.cg"
-expect_refusal "fp_deriv_float4" sce_fp_rsx \
-    "derivative width .*not yet supported" \
-    "$shaders/fp_deriv_float4_refuse_f.cg"
+python3 "$repo_root/tests/shader-compiler/wide_derivative_check.py" --self-test >/dev/null \
+    || fail "wide_derivative_check self-test"
+compile_fp fp_deriv_float3_f
+compile_fp fp_deriv_float4_f
+python3 "$repo_root/tests/shader-compiler/wide_derivative_check.py" "$work/fp_deriv_float3_f.fpo" ddx 3 \
+    || fail "float3 ddx shape"
+python3 "$repo_root/tests/shader-compiler/wide_derivative_check.py" "$work/fp_deriv_float4_f.fpo" ddy 4 \
+    || fail "float4 ddy shape"
 expect_refusal "vp_deriv" sce_vp_rsx \
     "derivative.*fragment" \
     "$shaders/vp_deriv_refuse_v.cg"

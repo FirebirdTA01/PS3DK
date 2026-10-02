@@ -3735,19 +3735,38 @@ private:
         }
 
         const int mask = componentMask(inst.resultType);
+        const VSrc src = resolve(inst.operands[0]);
+        if (src.kind == VSrcKind::None)
+            return;   // resolve() has refused
+        const int result = define(inst.result);
         if (mask & ~0x3) {
-            program_.diagnostics.push_back(
-                "nv40-general: derivative width not yet supported; "
-                "only float and float2 ddx/ddy lower in this slice");
-            program_.loweringFailed = true;
-            return;
+            // NV40's DDX/DDY produce two lanes.  A float3/float4 derivative
+            // is two of them, measured on the reference:
+            //   DDXR R1.xy, R0.zwzw;  MOVR R1.zw, R1.xyxy;  DDXR R1.xy, R0;
+            // (float3: DDYR R1.x, R0.zwzw; MOVR R1.z, R1.xyxy; DDYR R1.xy, R0).
+            // The high lanes go first, through a temp, into z(w).
+            const bool four = (mask & 0x8) != 0;
+            VInstr hi;
+            hi.op = op;
+            hi.dst.index = newVReg();
+            hi.dst.writemask = four ? 0x3 : 0x1;
+            hi.srcs[0] = src;
+            hi.srcs[0].swizzle = {src.swizzle[2], src.swizzle[3], src.swizzle[2], src.swizzle[3]};
+            program_.instrs.push_back(hi);
+            VInstr mov;
+            mov.op = VOp::Mov;
+            mov.dst.index = result;
+            mov.dst.writemask = four ? 0xC : 0x4;
+            mov.srcs[0] = tempSrc(hi.dst.index);
+            mov.srcs[0].swizzle = {0, 1, 0, 1};
+            program_.instrs.push_back(mov);
         }
 
         VInstr vi;
         vi.op = op;
-        vi.dst.index = define(inst.result);
-        vi.dst.writemask = mask;
-        vi.srcs[0] = resolve(inst.operands[0]);
+        vi.dst.index = result;
+        vi.dst.writemask = mask & 0x3;
+        vi.srcs[0] = src;
         program_.instrs.push_back(vi);
     }
 
