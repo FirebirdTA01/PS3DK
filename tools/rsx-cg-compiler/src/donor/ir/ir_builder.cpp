@@ -3976,10 +3976,11 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
             default: op = IROp::Add; break;
             }
             // a op= v with a scalar a and a vector v is a op v.x, computed in
-            // v's element type and only THEN converted to a's (measured:
-            // int a = 3; a *= float2(1.5, 9) is 4, a /= float2(1.5, 9) is 2,
-            // as for a = a * 1.5; a half a multiplies at float precision first
-            // - review: codex).  Converting v.x to a's type first gave 3 / 3.
+            // the COMMON type of a and v's elements (float over half over int)
+            // and only then converted to a's (measured: int a = 3;
+            // a *= float2(1.5, 9) is 4; float a = .5; a *= int2(3, 9) is 1.5;
+            // float a = 1.000244140625; a *= half2(1, 2) keeps the float a;
+            // half a *= float2 multiplies in float - review: codex).
             bool narrowedCompound = false;
             {
                 const IRTypeInfo leftType = getExprType(expr->left.get());
@@ -3998,16 +3999,16 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
                     }
                     else
                     {
-                        // Widen a to v's element type, operate there, narrow back.
-                        IRValueID wideLhs = lhsValue;
-                        const IRType from = leftType.baseType, to = laneType.baseType;
-                        if ((from == IRType::Int32 || from == IRType::UInt32) &&
-                            (to == IRType::Float32 || to == IRType::Float16))
-                            wideLhs = emitInstruction(IROp::IntToFloat, laneType, {lhsValue}, expr->loc);
-                        else if (from == IRType::Float16 && to == IRType::Float32)
-                            wideLhs = emitInstruction(IROp::HalfToFloat, laneType, {lhsValue}, expr->loc);
-                        const IRValueID wide = emitBinaryOp(op, laneType, wideLhs, lane);
-                        rhsValue = emitScalarConversion(laneType, leftType, wide, expr->loc);
+                        // Raise both to the common type, operate there, convert to a's.
+                        const auto rank = [](IRType t) {
+                            return t == IRType::Float32 ? 2 : t == IRType::Float16 ? 1 : 0;
+                        };
+                        const IRTypeInfo& common =
+                            rank(laneType.baseType) >= rank(leftType.baseType) ? laneType : leftType;
+                        const IRValueID wideLhs = emitScalarConversion(leftType, common, lhsValue, expr->loc);
+                        const IRValueID wideLane = emitScalarConversion(laneType, common, lane, expr->loc);
+                        const IRValueID wide = emitBinaryOp(op, common, wideLhs, wideLane);
+                        rhsValue = emitScalarConversion(common, leftType, wide, expr->loc);
                     }
                     narrowedCompound = true;
                 }
