@@ -390,11 +390,11 @@ expect fp_inline_struct_local_write_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.
 forbid fp_inline_struct_local_write_f '^[0-9]+ MUL '
 
 # ---------------------------------------------------------------- named gaps
-accept fp_inline_return_in_if_f sce_fp_rsx "a return inside a branch of the helper lowers to a select (was refused; the reference accepts it; helper-const-return checks values)"
+accept fp_inline_return_in_if_f sce_fp_rsx "a return inside a branch of the helper lowers to a select (was refused; the reference accepts it; helper-const-return's RUNTIME rows check values)"
 accept fp_inline_loop_f sce_fp_rsx "a proven three-trip helper loop expands"
 accept fp_inline_loop_explicit_f sce_fp_rsx "the reference-identical explicit expansion"
 cmp -s "$work/fp_inline_loop_f.bin" "$work/fp_inline_loop_explicit_f.bin" || fail "helper loop differs from explicit expansion"
-accept vp_inline_void_out_v sce_vp_rsx "out parameters on the helper copy out (was refused; the reference accepts it; inline-out-param checks values)"
+accept vp_inline_void_out_v sce_vp_rsx "out parameters on the helper copy out (was refused; the reference accepts it; inline-out-param's vp_split row checks values)"
 # NESTED shadowing, formerly REFUSED by name (local-array-conditional-store's placeholder): an
 # enclosing helper's parameter now stashes the global at binding and its
 # locals stash at declaration / unstash at block exit, so a nested helper
