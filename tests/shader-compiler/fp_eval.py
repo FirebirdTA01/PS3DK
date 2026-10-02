@@ -193,7 +193,7 @@ def evaluate(blob, inputs):
             read_lanes = [0] if opc == RCP else lanes   # a scalar op reads lane x of its source
             srcs = [_read(w, slot, regs, inputs, const, read_lanes) for slot in range(1, n + 1)]
             for v in srcs:
-                for x in (v[i] for i in lanes):
+                for x in (v[i] for i in read_lanes):   # what the op reads, not what it writes
                     if prec == 1 and f16(x) != x:
                         raise Unmodelled("fp16 instruction on a non-fp16 value %r" % x)
                     if prec == 2 and not (-2.0 <= x < 2.0 and x * 1024 == int(x * 1024)):
@@ -299,6 +299,19 @@ def self_test():
     rows.append(('red: predicated MOV with CC never written',
                  _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex1)
                             + _pred(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1), 5)), None, az, b))
+    # RCP precision is judged on the lane it READS (review: codex): fx12/fp16
+    # RCP R0.y, TEX0.x with TEX0.x = 0.1 must refuse; masked and swizzled
+    # reads of representable lanes stay green
+    def _rcp(dst_mask, swz, prec):
+        words = _ins(RCP, 0, dst_mask, [_src(I, swz=swz)], sel=tex0, end=1)
+        words[0] |= prec << 22
+        return _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0) + words)
+    tenth = [0.1, 0.5, 0.25, 1.0]
+    rows.append(('red: fx12 RCP R0.y, TEX0.x (0.1 not fx12)', _rcp(0x2, 0x00, 2), None, tenth, b))
+    rows.append(('red: fp16 RCP R0.y, TEX0.x (0.1 not fp16)', _rcp(0x2, 0x00, 1), None, tenth, b))
+    rows.append(('green: fx12 RCP R0.y, TEX0.z (masked)', _rcp(0x2, 0xAA, 2), [0.1, 4.0, 0.25, 1.0], tenth, b))
+    rows.append(('green: fp16 RCP R0.xw, TEX0.y (swizzled)', _rcp(0x9, 0x55, 1), [2.0, 0.5, 0.25, 2.0], tenth, b))
+    rows.append(('green: fp32 RCP R0.y, TEX0.x', _rcp(0x2, 0x00, 0), [0.1, f32(1 / 0.1), 0.25, 1.0], tenth, b))
     for scale in (1, 4):  # x2 and the reserved encoding (review: codex)
         words = _ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1)
         words[2] |= scale << 28
