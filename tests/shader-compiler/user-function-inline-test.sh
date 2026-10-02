@@ -113,7 +113,7 @@ void main(float x : TEXCOORD0, out float4 o : COLOR)
 }
 SHADER
 
-cat >"$work/refuse_out_param.fcg" <<'SHADER'
+cat >"$work/inline_out_param.fcg" <<'SHADER'
 void write_value(out float y, float x)
 {
     y = x + 1.0;
@@ -127,7 +127,7 @@ void main(float x : TEXCOORD0, out float4 o : COLOR)
 }
 SHADER
 
-cat >"$work/refuse_inout_param.fcg" <<'SHADER'
+cat >"$work/inline_inout_param.fcg" <<'SHADER'
 void adjust(inout float y)
 {
     y = y + 1.0;
@@ -141,7 +141,7 @@ void main(float x : TEXCOORD0, out float4 o : COLOR)
 }
 SHADER
 
-cat >"$work/refuse_multi_return.fcg" <<'SHADER'
+cat >"$work/inline_multi_return.fcg" <<'SHADER'
 float pick(float x)
 {
     if (x > 0.5)
@@ -236,11 +236,14 @@ expect_refusal() {
     [[ ! -s "$out" ]] || fail "$name emitted a container after refusing"
 }
 
-expect_refusal refuse_multi_return "cannot inline user function 'pick'"
+# A runtime return, out and inout parameters inline now (the reference
+# accepts all three).  Values: helper-const-return's RUNTIME rows (the
+# runtime return), inline-out-param (out and inout).
+expect_compile_without_call inline_multi_return
+expect_compile_without_call inline_out_param
+expect_compile_without_call inline_inout_param
 expect_refusal refuse_self_recursive "recursive user function call involving 'recur'"
 expect_refusal refuse_mutual_recursive "recursive user function call involving 'a'"
-expect_refusal refuse_out_param "cannot inline user function 'write_value'"
-expect_refusal refuse_inout_param "cannot inline user function 'adjust'"
 expect_refusal refuse_nested_past_limit "user function inline depth exceeded at 'f0'"
 
 printf 'user-function-inline-test: ok\n'

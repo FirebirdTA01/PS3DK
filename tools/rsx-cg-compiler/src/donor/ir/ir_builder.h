@@ -9,6 +9,7 @@
 #include <stack>
 #include <vector>
 #include <optional>
+#include <functional>
 
 // ============================================================================
 // IR Builder - Converts AST to IR
@@ -135,6 +136,13 @@ private:
     std::unordered_map<IRValueID, IRValueID> identityPrefixSwizzleBase_;
     std::unordered_map<std::string, std::vector<FunctionDecl*>> functionDefinitionsByName_;
     std::vector<FunctionDecl*> inlineStack_;
+    int inlineReturnDepth_ = 0;   // nested run-time returns being lowered (runInlineStatements)
+    // Statements an enclosing arm / constant branch still runs after the
+    // current list (a nested run-time return runs them inside its arms),
+    // and whether that happened.  Per inlined helper.
+    std::vector<StmtNode*> inlineContinuation_;
+    bool inlineContinuationRun_ = false;
+    size_t inlineContinuationFrame_ = 0;   // blockDeclared_ depth the continuation was captured at
     // Declaration identity prevents a local shadow from using a global's initializer.
     std::unordered_set<const DeclNode*> globalDeclarations_;
     std::vector<std::string> depthDecodeUniforms_;
@@ -204,11 +212,17 @@ private:
     bool inlineUserFunctionCall(CallExpr* expr, const std::vector<IRValueID>& args,
                                 IRValueID& result);
     bool buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result);
+    void buildConditional(ExprNode* condition, SourceLocation loc,
+                          const std::function<void()>& thenArm,
+                          const std::function<void()>* elseArm);
     // The truth of an if-condition that is a compile-time constant, by the
     // file-scope initialiser evaluator (typed values, static consts only),
     // when no name in it is shadowed by a local or parameter.  nullopt for
     // anything else.
     std::optional<bool> constCondition(const ExprNode* e);
+    // True when a constant-evaluable part of a run-time condition is one
+    // constCondition declines to fold (precision the reference does not use).
+    bool conditionFoldHazard(const ExprNode* e);
     bool runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
                              IRValueID& result, bool& sawReturn);
     IRValueID buildMemberAccessExpr(MemberAccessExpr* expr);
@@ -222,6 +236,11 @@ private:
     bool resolveTrackedArrayElement(IndexExpr* expr, std::string& key, int32_t& index);
     IRValueID readTrackedArrayElement(IndexExpr* expr, const std::string& key, int32_t index);
     bool copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type);
+    IRValueID emitScalarNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
+                                  IRValueID value, const SourceLocation& loc);
+    IRValueID narrowToScalar(TypeNode* declared, ExprNode* valueExpr, IRValueID value);
+    IRValueID emitScalarConversion(const IRTypeInfo& fromType, const IRTypeInfo& targetType,
+                                   IRValueID lane, const SourceLocation& loc);
     IRValueID coerceAssignmentValue(ExprNode* target, IRValueID value);
 
     // Helper to get address/location for lvalue expressions

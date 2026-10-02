@@ -629,7 +629,7 @@ void SemanticAnalyzer::analyzeVarDecl(VarDecl* decl)
     if (decl->initializer)
     {
         CgType initType = analyzeExpr(decl->initializer.get());
-        if (!initType.isError())
+        if (!initType.isError() && !allowsScalarNarrowing(varType, initType))
         {
             checkAssignment(varType, initType, decl->initializer->loc);
         }
@@ -797,7 +797,8 @@ void SemanticAnalyzer::analyzeReturnStmt(ReturnStmt* stmt)
     if (stmt->value)
     {
         CgType valueType = analyzeExpr(stmt->value.get());
-        if (!valueType.isError() && !returnType.isVoid())
+        if (!valueType.isError() && !returnType.isVoid() &&
+            !allowsScalarNarrowing(returnType, valueType))
         {
             checkAssignment(returnType, valueType, stmt->value->loc);
         }
@@ -984,7 +985,8 @@ CgType SemanticAnalyzer::analyzeBinaryExpr(BinaryExpr* expr)
             error(expr->left->loc, "expression is not assignable");
             return CgType::Error();
         }
-        if (!checkAssignment(leftType, rightType, expr->right->loc))
+        const bool narrowing = allowsScalarNarrowing(leftType, rightType);
+        if (!narrowing && !checkAssignment(leftType, rightType, expr->right->loc))
         {
             return CgType::Error();
         }
@@ -1622,6 +1624,20 @@ CgType SemanticAnalyzer::resolveType(TypeNode* typeNode) const
     }
 
     return CgType(std::make_shared<TypeNode>(*typeNode));
+}
+
+// A numeric VECTOR stored into a numeric SCALAR - by a declaration's
+// initialiser, an assignment (compound included: a op= v is a op v.x) or a
+// return - keeps lane x, converted to the scalar's type.
+// Measured on the reference (C7011 warning, accepted): float a = t.xyz is
+// t.x, a = t.yz is t.y, half a = t.zw is t.z, int a = t.xy truncates t.x.
+// libretro's ddt-waterpaint / 2xbr / oldtv and ogre HeatVision rely on it.
+// Function ARGUMENTS are not widened by this (overload resolution).
+bool SemanticAnalyzer::allowsScalarNarrowing(const CgType& target, const CgType& value) const
+{
+    return !target.isError() && !value.isError() &&
+           target.isScalar() && value.isVector() &&
+           target.isNumeric() && value.isNumeric();
 }
 
 bool SemanticAnalyzer::checkAssignment(const CgType& target, const CgType& value,
@@ -2296,6 +2312,15 @@ void SemanticAnalyzer::validateEntryPoint()
     collectShaderIO(shaderInfo_.entryPoint);
 }
 
+// A struct member is a uniform when declared `uniform`, and always when it
+// is a sampler: a sampler cannot be a varying (measured: struct prev {
+// float2 tex_coord; sampler2D texture; } passed as a plain fragment
+// parameter lists P.texture as a sampler on the next free texture unit).
+static bool uniformMember(const StructField& field)
+{
+    return field.storage == StorageQualifier::Uniform || (field.type && field.type->isSampler());
+}
+
 void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
 {
     // Counter for assigning default semantics to undecorated parameters
@@ -2310,14 +2335,41 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
     std::set<int> usedTexCoordIndices;
     if (shaderInfo_.stage == ShaderStage::Fragment)
     {
+        // Explicit TEXCOORDs anywhere among the inputs are reserved first,
+        // struct members included and wherever they are declared: measured,
+        // struct { float b; float2 a : TEXCOORD0; } gives b TEX1.
+        auto reserveMembers = [&](auto& self, const CgType& sType) -> void {
+            for (const auto& field : sType.structFields())
+            {
+                if (uniformMember(field)) continue;
+                CgType fieldType = resolveType(field.type.get());
+                if (field.semantic.isEmpty())
+                {
+                    if (fieldType.isStruct()) self(self, fieldType);
+                    continue;
+                }
+                const std::string& sn = field.semantic.name;
+                if (!field.semantic.inferred && (sn == "TEXCOORD" || sn == "texcoord" || sn == "TexCoord"))
+                    usedTexCoordIndices.insert(field.semantic.index);
+            }
+        };
         for (const auto& param : entryPoint->parameters)
         {
-            if (param->semantic.isEmpty()) continue;
+            if (param->storage == StorageQualifier::Uniform ||
+                param->storage == StorageQualifier::Out || param->storage == StorageQualifier::InOut)
+                continue;
+            if (param->semantic.isEmpty())
+            {
+                CgType pt = resolveType(param->type.get());
+                if (pt.isStruct()) reserveMembers(reserveMembers, pt);
+                continue;
+            }
             const std::string& sn = param->semantic.name;
             if (sn == "TEXCOORD" || sn == "texcoord" || sn == "TexCoord")
                 usedTexCoordIndices.insert(param->semantic.index);
         }
     }
+    shaderInfo_.explicitTexCoords = usedTexCoordIndices;
     int nextTexCoordIndex = 0;
 
     // DEBUG: Enable to trace parameter collection (keep commented when not debugging)
@@ -2327,11 +2379,30 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
               << "' has " << entryPoint->parameters.size() << " parameters\n";
     #endif
 
+    bool flatteningUniformParam = false;   // a `uniform` struct parameter's members are never varyings
     auto flattenStructParams = [&](auto& self, const std::string& prefix, const CgType& sType, bool isOut) -> void {
         for (const auto& field : sType.structFields())
         {
             std::string fullName = prefix + "." + field.name;
             CgType fieldType = resolveType(field.type.get());
+            // A member whose TEXCOORD was INFERRED for an earlier input of the
+            // same struct type: the inference lives on the shared struct
+            // field, so this second input would bind the same TEXn.  The
+            // reference binds each instance separately (struct S { float2
+            // uv; }; main(S a, S b): a.uv TEX0, b.uv TEX1 - review: codex);
+            // refused by name until bindings are per instance.
+            // Each instance is bound on its own after dead-code elimination
+            // (bindImplicitTexCoords, measured: S a, S b, S c reading b.uv and
+            // c.uv gives a.uv UNDEFINED, b.uv TEX0, c.uv TEX1), so a second
+            // instance only records its qualified name here.
+            if (field.semantic.inferred && !isOut && !flatteningUniformParam &&
+                shaderInfo_.stage == ShaderStage::Fragment && !uniformMember(field))
+            {
+                shaderInfo_.implicitTexCoordOrder.push_back(fullName);
+                shaderInfo_.inputParams.push_back(
+                    ShaderIOParam(fullName, "TEXCOORD", field.semantic.index, fieldType, false));
+                continue;
+            }
             if (!field.semantic.isEmpty())
             {
                 if (fieldType.isStruct())
@@ -2359,6 +2430,31 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
                 if (fieldType.isStruct())
                 {
                     self(self, fullName, fieldType, isOut);
+                }
+                else if (!isOut && !flatteningUniformParam && shaderInfo_.stage == ShaderStage::Fragment &&
+                         !uniformMember(field))
+                {
+                    // A fragment input member with no semantic takes the
+                    // lowest TEXCOORD<N> no explicit input claims, in
+                    // declaration order across parameters and members, and
+                    // its record carries no semantic string - exactly the
+                    // rule for a bare parameter above (measured: struct {
+                    // float2 a : TEXCOORD1; float b; float c; } binds b TEX0,
+                    // c TEX2; the records read in.UNDEFINED).  Written into
+                    // the struct's own field, so every reader of the member
+                    // sees it; a second input of the same struct type would
+                    // see it already inferred and is refused by name.
+                    while (usedTexCoordIndices.count(nextTexCoordIndex))
+                        ++nextTexCoordIndex;
+                    const int index = nextTexCoordIndex++;
+                    auto& mutableField = const_cast<StructField&>(field);
+                    mutableField.semantic.name     = "TEXCOORD";
+                    mutableField.semantic.rawName  = "TEXCOORD" + std::to_string(index);
+                    mutableField.semantic.index    = index;
+                    mutableField.semantic.inferred = true;
+                    shaderInfo_.implicitTexCoordOrder.push_back(fullName);
+                    shaderInfo_.inputParams.push_back(
+                        ShaderIOParam(fullName, "TEXCOORD", index, fieldType, false));
                 }
             }
         }
@@ -2390,7 +2486,9 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
 
         if (paramType.isStruct())
         {
+            flatteningUniformParam = param->storage == StorageQualifier::Uniform;
             flattenStructParams(flattenStructParams, param->name, paramType, isOutput);
+            flatteningUniformParam = false;
         }
         else if (!param->semantic.isEmpty())
         {
@@ -2454,6 +2552,8 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             param->semantic.rawName  = defaultSemantic + std::to_string(defaultIndex);
             param->semantic.index    = defaultIndex;
             param->semantic.inferred = true;
+            if (shaderInfo_.stage == ShaderStage::Fragment)
+                shaderInfo_.implicitTexCoordOrder.push_back(param->name);
 
             ShaderIOParam ioParam(param->name, defaultSemantic, defaultIndex, paramType, false);
             shaderInfo_.inputParams.push_back(ioParam);

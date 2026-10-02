@@ -129,6 +129,10 @@ enum class VOp
     Tex,
     Txp,    // projective fetch (tex2Dproj), fragment-only
     TexBias, // biased fetch (tex2Dbias), fragment-only
+    // fragment tex2Dlod: TXL reads the coordinate from srcs[0] and the LOD
+    // from lane x of srcs[1] after swizzle (measured: TXLR R0, f[TEX0],
+    // f[TEX0].w, ... - the coordinate's w).
+    TexLod,
     // VP only: the vertex texture fetch.  TXL reads its coordinate and an
     // explicit LOD from ONE source register (srcs[0]); texUnit names the
     // unit.  Every vertex fetch is TXL on the reference - tex2D with LOD 0,
@@ -307,7 +311,7 @@ static int fpScalarSourceIndex(VOp op)
     case VOp::Rcp: case VOp::Rsq: case VOp::Sin:
     case VOp::Cos: case VOp::Lg2: case VOp::Ex2:
         return 0;
-    case VOp::DivR: case VOp::DivSqrt:
+    case VOp::DivR: case VOp::DivSqrt: case VOp::TexLod:
         return 1;
     default:
         return -1;
@@ -1529,6 +1533,7 @@ private:
             case VOp::Tex:
             case VOp::Txp:
             case VOp::TexBias:
+            case VOp::TexLod:
             case VOp::Txl:
             case VOp::Lit:
                 return 4;
@@ -2944,14 +2949,13 @@ private:
             lowerTex(inst, VOp::TexBias);
             return;
         case IROp::TexSampleLod:
-            // tex2Dlod is a vertex fetch here.  The fragment side keeps the
-            // refusal it had: its TXL has not been measured.
+            // A vertex tex2Dlod is the vertex fetch; a fragment one is TXL
+            // with the coordinate's w as the LOD (measured on the reference).
             if (profile_ == GeneralProfile::Vertex) {
                 lowerVpFetch(inst, VOp::Txl);
                 return;
             }
-            program_.diagnostics.push_back(unsupportedInstructionDiagnostic(inst));
-            program_.loweringFailed = true;
+            lowerTex(inst, VOp::TexLod);
             return;
         case IROp::StoreOutput:
             lowerStoreOutput(inst);
@@ -3731,19 +3735,38 @@ private:
         }
 
         const int mask = componentMask(inst.resultType);
+        const VSrc src = resolve(inst.operands[0]);
+        if (src.kind == VSrcKind::None)
+            return;   // resolve() has refused
+        const int result = define(inst.result);
         if (mask & ~0x3) {
-            program_.diagnostics.push_back(
-                "nv40-general: derivative width not yet supported; "
-                "only float and float2 ddx/ddy lower in this slice");
-            program_.loweringFailed = true;
-            return;
+            // NV40's DDX/DDY produce two lanes.  A float3/float4 derivative
+            // is two of them, measured on the reference:
+            //   DDXR R1.xy, R0.zwzw;  MOVR R1.zw, R1.xyxy;  DDXR R1.xy, R0;
+            // (float3: DDYR R1.x, R0.zwzw; MOVR R1.z, R1.xyxy; DDYR R1.xy, R0).
+            // The high lanes go first, through a temp, into z(w).
+            const bool four = (mask & 0x8) != 0;
+            VInstr hi;
+            hi.op = op;
+            hi.dst.index = newVReg();
+            hi.dst.writemask = four ? 0x3 : 0x1;
+            hi.srcs[0] = src;
+            hi.srcs[0].swizzle = {src.swizzle[2], src.swizzle[3], src.swizzle[2], src.swizzle[3]};
+            program_.instrs.push_back(hi);
+            VInstr mov;
+            mov.op = VOp::Mov;
+            mov.dst.index = result;
+            mov.dst.writemask = four ? 0xC : 0x4;
+            mov.srcs[0] = tempSrc(hi.dst.index);
+            mov.srcs[0].swizzle = {0, 1, 0, 1};
+            program_.instrs.push_back(mov);
         }
 
         VInstr vi;
         vi.op = op;
-        vi.dst.index = define(inst.result);
-        vi.dst.writemask = mask;
-        vi.srcs[0] = resolve(inst.operands[0]);
+        vi.dst.index = result;
+        vi.dst.writemask = mask & 0x3;
+        vi.srcs[0] = src;
         program_.instrs.push_back(vi);
     }
 
@@ -4001,7 +4024,8 @@ private:
                 !last.dst.none && !last.dst.output &&
                 last.dst.index == vregIt->second &&
                 last.op != VOp::SelPred && last.op != VOp::Kil &&
-                last.op != VOp::Tex && last.op != VOp::Txp && last.op != VOp::TexBias && last.fpScale == 0 &&
+                last.op != VOp::Tex && last.op != VOp::Txp && last.op != VOp::TexBias &&
+                last.op != VOp::TexLod && last.fpScale == 0 &&
                 !last.stubFenceBefore && !last.stubFenceBrBefore;
             if (fusable && soleConsumer) {
                 kil.killFused = last.op;
@@ -5130,9 +5154,34 @@ private:
     bool matrixRows(IRValueID value, MatrixValue& out) const
     {
         const auto it = matrixValues_.find(value);
-        if (it == matrixValues_.end())
+        if (it != matrixValues_.end()) {
+            out = it->second;
+            return true;
+        }
+        // A folded file-scope const matrix (`const static float3x3 W =
+        // float3x3(...)`, the xbr family) reaches here as an IRConstant whose
+        // floats are the initialiser in row order: each row is one literal
+        // source, as a MatConstruct of literals would give.
+        const auto* constant = dynamic_cast<const IRConstant*>(entry_.getValue(value));
+        if (!constant || !constant->type.isMatrix() || constant->type.arraySize != 0 ||
+            !std::holds_alternative<std::vector<float>>(constant->value))
             return false;
-        out = it->second;
+        const auto& floats = std::get<std::vector<float>>(constant->value);
+        const int rows = constant->type.matrixRows, cols = constant->type.matrixCols;
+        if (rows < 1 || rows > 4 || cols < 1 || cols > 4 ||
+            floats.size() != static_cast<size_t>(rows * cols))
+            return false;
+        out = MatrixValue{};
+        out.rows = rows;
+        out.cols = cols;
+        for (int r = 0; r < rows; ++r) {
+            VSrc row;
+            row.kind = VSrcKind::Literal;
+            for (int c = 0; c < cols; ++c)
+                row.literal[c] = floats[static_cast<size_t>(r * cols + c)];
+            row.literalLanes = static_cast<uint8_t>(cols);
+            out.rowSrcs.push_back(row);
+        }
         return true;
     }
 
@@ -7510,6 +7559,25 @@ private:
             program_.vregToFp16[vi.dst.index] = true;
         }
         vi.srcs[0] = resolve(inst.operands[1]);
+        if (op == VOp::TexLod) {
+            // TXL's second source is the LOD, read from its x lane: the
+            // reference passes the coordinate again swizzled .w (TXLR R0,
+            // f[TEX0], f[TEX0].w).  Only tex2Dlod's float4 coordinate is
+            // measured.
+            if (operandWidth(inst.operands[1]) != 4 ||
+                samplerType_[inst.operands[0]] != IRType::Sampler2D) {
+                program_.diagnostics.push_back(
+                    "nv40-general: fragment tex2Dlod needs a sampler2D and a float4 "
+                    "coordinate; refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+            if (vi.srcs[0].kind == VSrcKind::None)
+                return;   // resolve() has refused
+            vi.srcs[1] = vi.srcs[0];
+            for (int lane = 0; lane < 4; ++lane)
+                vi.srcs[1].swizzle[lane] = vi.srcs[0].swizzle[3];
+        }
         if (op == VOp::Txp && operandWidth(inst.operands[1]) == 3) {
             // TXP divides by source W.  A float3 coordinate in a temp or a
             // constant has no w of its own (the temp's w is unwritten, the
@@ -8472,7 +8540,8 @@ private:
                 [&](const VInstr& vi) {
                     return !vi.dst.none && !vi.dst.output &&
                            vi.dst.index == regIt->second &&
-                           (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias);
+                           (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias ||
+                            vi.op == VOp::TexLod);
                 });
         if (profile_ == GeneralProfile::Vertex && !isFogOutput &&
             regIt != program_.valueToVReg.end()) {
@@ -9926,6 +9995,7 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Tex: return NVFX_FP_OP_OPCODE_TEX;
     case VOp::Txp: return NVFX_FP_OP_OPCODE_TXP;
     case VOp::TexBias: return NVFX_FP_OP_OPCODE_TXB;
+    case VOp::TexLod: return NVFX_FP_OP_OPCODE_TXL_NV40;
     case VOp::Lit: return NVFX_FP_OP_OPCODE_LITEX2_NV40;
     case VOp::Arl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
     case VOp::Txl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
@@ -9979,6 +10049,7 @@ static const char* vOpName(VOp op)
     case VOp::Tex: return "Tex";
     case VOp::Txp: return "Txp";
     case VOp::TexBias: return "TexBias";
+    case VOp::TexLod: return "TexLod";
     case VOp::Txl: return "Txl";
     case VOp::Sfl: return "Sfl";
     case VOp::Lit: return "Lit";
@@ -10057,7 +10128,7 @@ static bool isVpVectorOp(VOp op)
     // are never co-issued in any reference program (the one co-issued SFL
     // measured is tex2Dproj's, which this lowering refuses).
     return !isVpScalarOp(op) && op != VOp::Tex && op != VOp::Txp && op != VOp::TexBias &&
-           op != VOp::Arl && op != VOp::Txl && op != VOp::Sfl;
+           op != VOp::TexLod && op != VOp::Arl && op != VOp::Txl && op != VOp::Sfl;
 }
 
 static bool sameTempRegister(const VSrc& src, const VDst& dst)
@@ -10321,6 +10392,7 @@ static bool fpProducerNeedsFenctr(VOp op)
     case VOp::Tex:
     case VOp::Txp:
     case VOp::TexBias:
+    case VOp::TexLod:
     case VOp::Rcp:
     case VOp::Rsq:
     case VOp::Sin:
@@ -10493,7 +10565,8 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             out.diagnostics.push_back("nv40-general-fp: " + why);
             return out;
         }
-        if (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias)
+        if (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias ||
+            vi.op == VOp::TexLod)
             attrs.partialTexType &= ~(3u << (vi.texUnit * 2));
         for (const VSrc& src : vi.srcs) {
             if (src.kind == VSrcKind::Input) {
@@ -11079,7 +11152,8 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
             out.diagnostics.push_back("nv40-general-vp: " + why);
             return out;
         }
-        if (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias) {
+        if (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias ||
+            vi.op == VOp::TexLod) {
             out.diagnostics.push_back("nv40-general-vp: texture fetch unsupported in VP");
             return out;
         }

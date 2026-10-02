@@ -579,8 +579,16 @@ jobs:
         run: bash tests/shader-compiler/wrong-accept-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Typedef aliases preserve direct-type values and bindings
         run: bash tests/shader-compiler/typedef-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Fragment inputs with no semantic and uniform members of a varying struct
+        run: bash tests/shader-compiler/implicit-varying-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: fmod and all are lowered, judged by value
+        run: bash tests/shader-compiler/fmod-all-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A vector stored into a scalar keeps lane x, judged by value
+        run: bash tests/shader-compiler/scalar-narrowing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns under compile-time-constant conditions judged by value
         run: bash tests/shader-compiler/helper-const-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Helper out and inout parameters are copy-out, judged by value
+        run: bash tests/shader-compiler/inline-out-param-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test helper parameter default arguments
         run: bash tests/shader-compiler/helper-default-args-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test a parenthesised object-like macro body
@@ -643,6 +651,12 @@ jobs:
         run: bash tests/shader-compiler/tex2dproj-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test tex1D coordinate packing and sampler metadata
         run: bash tests/shader-compiler/tex1d-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test fragment tex2Dlod lowers to TXL
+        run: bash tests/shader-compiler/fp-tex2dlod-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test file-scope const matrices fold to literal rows
+        run: bash tests/shader-compiler/static-const-matrix-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test a vertex program must write POSITION (C6014)
+        run: bash tests/shader-compiler/vp-c6014-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test explicit sampler units and reflection agree
         run: bash tests/shader-compiler/sampler-binding-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test dead texture removal preserves live fetches and discard

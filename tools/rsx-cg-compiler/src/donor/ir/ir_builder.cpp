@@ -1328,7 +1328,12 @@ bool IRBuilder::isDefaultedFragmentOutput(const ParamDecl* param) const
     if (!module_ || module_->shaderStage != ShaderStage::Fragment) return false;
     if (!currentFunctionDecl_ ||
         currentFunctionDecl_->name != module_->entryPointName) return false;
-    return true;
+    // Only the ENTRY's own parameter: while a helper is inlined the current
+    // function is still the entry, and a helper's `out float4 o` assigned in
+    // its body was taken for the entry's default COLOR and stored there.
+    for (const auto& own : currentFunctionDecl_->parameters)
+        if (own.get() == param) return true;
+    return false;
 }
 
 // ============================================================================
@@ -1478,6 +1483,67 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                 flatten(flatten, *fields, param->name);
                 flattenedUniformStructParams_.insert(param->name);
                 continue;
+            }
+        }
+        // A VARYING struct entry parameter may declare some members
+        // `uniform` (libretro's `struct prev { uniform float2 video_size;
+        // uniform sampler2D texture; float2 tex_coord; }` passed as a plain
+        // parameter).  The reference lists each such member as a uniform
+        // named `param.member` at the parameter's paramno, a sampler on its
+        // own texture unit, and keeps the other members as varyings
+        // (measured: P.size uniform, P.tc TEX1).  Bind the uniform members
+        // here as uniform parameters; a member read finds them by qualified
+        // name before any attribute load is made.  The parameter itself
+        // continues as the varying struct it is.
+        if (currentFunction_->isEntryPoint &&
+            param->storage != StorageQualifier::Uniform &&
+            param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
+            param->type && param->type->baseType == BaseType::Struct && !param->type->isArray())
+        {
+            if (const std::vector<StructField>* fields = getStructFields(param->type.get()))
+            {
+                bool stashed = false;
+                for (const auto& field : *fields)
+                {
+                    // a sampler member is a uniform whether or not it says so
+                    // (measured: an unqualified sampler2D member binds a unit)
+                    if (field.storage != StorageQualifier::Uniform &&
+                        !(field.type && field.type->isSampler())) continue;
+                    const std::string qualified = param->name + "." + field.name;
+                    if (!field.type || field.type->baseType == BaseType::Struct || field.type->isArray())
+                    {
+                        error(param->loc, "uniform member '" + qualified + "' of a varying struct "
+                              "parameter is a struct or an array; only scalar, vector, matrix and "
+                              "sampler members are supported (varying-struct-uniform-member), refusing");
+                        continue;
+                    }
+                    if (!stashed) { stashShadowedGlobal(param->name); stashed = true; }
+                    IRParameter member;
+                    member.name = qualified;
+                    member.type = getIRType(field.type.get());
+                    member.valueId = currentFunction_->allocateValueId();
+                    member.storage = StorageQualifier::Uniform;
+                    member.sourceOrdinal = sourceOrdinal;
+                    // The member's own binding carries over (review: codex;
+                    // measured: `sampler2D tex : TEXUNIT3` is unit 3 and
+                    // `: register(s5)` unit 5 - without these the sampler
+                    // took the next free unit and read the wrong texture).
+                    // Only measured for samplers; a numeric member's explicit
+                    // register is not carried (unmeasured).
+                    if (field.type && field.type->isSampler())
+                    {
+                        member.semanticName = field.semantic.name;
+                        member.rawSemanticName = field.semantic.rawName;
+                        member.semanticIndex = field.semantic.index;
+                        if (field.semantic.hasExplicitRegister())
+                        {
+                            member.explicitRegisterBank = field.semantic.explicitRegisterBank;
+                            member.explicitRegisterIndex = field.semantic.explicitRegisterIndex;
+                        }
+                    }
+                    currentFunction_->parameters.push_back(member);
+                    nameToValue_[qualified] = member.valueId;
+                }
             }
         }
         IRParameter irParam;
@@ -1696,6 +1762,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                     auto load = std::make_unique<IRInstruction>(IROp::LoadAttribute, value, elementType);
                     load->semanticName = semantic;
                     load->rawSemanticName = field.semantic.rawName;
+                    load->inferredSemantic = field.semantic.inferred;
                     load->semanticIndex = base + (repeated ? 0 : i);
                     load->structParamName = root;
                     load->fieldName = path + "[" + std::to_string(i) + "]";
@@ -1931,13 +1998,26 @@ void IRBuilder::ScopeState::unfold(std::unordered_map<std::string, IRValueID>& j
 
 void IRBuilder::buildIfStmt(IfStmt* stmt)
 {
+    const std::function<void()> thenArm = [&] { buildStmt(stmt->thenBranch.get()); };
+    const std::function<void()> elseArm = [&] { buildStmt(stmt->elseBranch.get()); };
+    buildConditional(stmt->condition.get(), stmt->loc, thenArm, stmt->elseBranch ? &elseArm : nullptr);
+}
+
+// The if/else join, with its arms supplied by the caller: buildIfStmt passes
+// the two branch statements; an inlined helper whose return sits under a
+// run-time condition passes "this arm, then the rest of the body"
+// (runInlineStatements), so the same Select join merges its result.
+void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
+                                 const std::function<void()>& thenArm,
+                                 const std::function<void()>* elseArm)
+{
     // Evaluate condition
-    IRValueID condValue = buildExpr(stmt->condition.get());
-    condValue = normalizeCondition(stmt->condition.get(), condValue);
+    IRValueID condValue = buildExpr(condition);
+    condValue = normalizeCondition(condition, condValue);
 
     // Create blocks
     IRBasicBlock* thenBlock = currentFunction_->createBlock(makeLabel("if.then"));
-    IRBasicBlock* elseBlock = stmt->elseBranch
+    IRBasicBlock* elseBlock = elseArm
         ? currentFunction_->createBlock(makeLabel("if.else"))
         : nullptr;
     IRBasicBlock* mergeBlock = currentFunction_->createBlock(makeLabel("if.end"));
@@ -1962,7 +2042,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
 
     // Build then block
     currentBlock_ = thenBlock;
-    buildStmt(stmt->thenBranch.get());
+    thenArm();
     const bool thenTerminated = currentBlock_->hasTerminator();
     if (!thenTerminated)
     {
@@ -1973,11 +2053,11 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
     // Build else block
     bool elseTerminated = false;
     std::unordered_map<std::string, IRValueID> postElseMap;
-    if (stmt->elseBranch)
+    if (elseArm)
     {
         scope_ = preIf;  // restore before processing else
         currentBlock_ = elseBlock;
-        buildStmt(stmt->elseBranch.get());
+        (*elseArm)();
         elseTerminated = currentBlock_->hasTerminator();
         if (!elseTerminated)
         {
@@ -2039,7 +2119,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
             load->componentIndex = static_cast<int>(index);
             load->arrayIndexKind = IRInstruction::ArrayIndexKind::Constant;
         }
-        load->loc = stmt->loc;
+        load->loc = loc;
         currentBlock_->addInstruction(std::move(load));
         preIfMap[key] = loadId;
         nameToValue_[key] = loadId;
@@ -2139,7 +2219,7 @@ void IRBuilder::buildIfStmt(IfStmt* stmt)
 
         IRValueID thenVal = thenTerminated ? preVal : valueOrPre(postThenMap, name);
         IRValueID elseVal;
-        if (stmt->elseBranch)
+        if (elseArm)
             elseVal = elseTerminated ? preVal : valueOrPre(postElseMap, name);
         else
             elseVal = preVal;
@@ -2794,6 +2874,8 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
         }
 
         IRValueID retValue = buildExpr(stmt->value.get());
+        if (currentFunctionDecl_)
+            retValue = narrowToScalar(currentFunctionDecl_->returnType.get(), stmt->value.get(), retValue);
 
         // Non-struct return with a semantic on the return type itself
         // (e.g. `float4 main(...) : COLOR { return color; }`) — emit a
@@ -2864,6 +2946,7 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                             output->addOperand(elements[i]);
                             output->semanticName = field.semantic.name;
                             output->rawSemanticName = field.semantic.rawName;
+                            output->inferredSemantic = field.semantic.inferred;
                             output->semanticIndex = field.semantic.index + static_cast<int>(i);
                             output->fieldName = fieldPath + "[" + std::to_string(i) + "]";
                             currentBlock_->addInstruction(std::move(output));
@@ -2949,6 +3032,7 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                     inst->addOperand(fieldValue);
                     inst->semanticName    = field.semantic.name;
                     inst->rawSemanticName = field.semantic.rawName;
+                    inst->inferredSemantic = field.semantic.inferred;
                     inst->semanticIndex   = field.semantic.index;
                     inst->fieldName       = fieldPath;
                     currentBlock_->addInstruction(std::move(inst));
@@ -3226,6 +3310,20 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
                     initValue = emitVectorNarrowing(initType, declaredType, initValue, varDecl->loc);
                 else
                     initValue = emitNumericToBool(initType, declaredType, initValue, varDecl->loc);
+            }
+            else if (declaredType.arraySize == 0 && !declaredType.isMatrix() && declaredType.isVector() &&
+                     initType.isVector() && initType.arraySize == 0 && !initType.isMatrix() &&
+                     initType.componentCount() > declaredType.componentCount())
+            {
+                // float2 a = t.zyx keeps the leading lanes (t.zy), as an
+                // assignment already does (measured).
+                initValue = emitVectorNarrowing(initType, declaredType, initValue, varDecl->loc);
+            }
+            else if (declaredType.arraySize == 0 && !declaredType.isMatrix() && !declaredType.isVector() &&
+                     declaredType.baseType != IRType::Void && getStructFields(varDecl->type.get()) == nullptr &&
+                     initType.isVector() && initType.arraySize == 0 && !initType.isMatrix())
+            {
+                initValue = emitScalarNarrowing(initType, declaredType, initValue, varDecl->loc);
             }
             // For now, just use the initializer value as the variable value
             nameToValue_[varDecl->name] = initValue;
@@ -3959,7 +4057,46 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
             case BinaryOp::ModAssign: op = IROp::Mod; break;
             default: op = IROp::Add; break;
             }
-            rhsValue = emitBinaryOp(op, getExprType(expr->left.get()), lhsValue, rhsValue);
+            // a op= v with a scalar a and a vector v is a op v.x, computed in
+            // the COMMON type of a and v's elements (float over half over int)
+            // and only then converted to a's (measured: int a = 3;
+            // a *= float2(1.5, 9) is 4; float a = .5; a *= int2(3, 9) is 1.5;
+            // float a = 1.000244140625; a *= half2(1, 2) keeps the float a;
+            // half a *= float2 multiplies in float - review: codex).
+            bool narrowedCompound = false;
+            {
+                const IRTypeInfo leftType = getExprType(expr->left.get());
+                const IRTypeInfo rightType = getExprType(expr->right.get());
+                if (!leftType.isVector() && !leftType.isMatrix() && leftType.arraySize == 0 &&
+                    rightType.isVector() && !rightType.isMatrix() && rightType.arraySize == 0 &&
+                    leftType.baseType != IRType::Bool)
+                {
+                    IRTypeInfo laneType = leftType;
+                    laneType.baseType = rightType.elementType;
+                    const IRValueID lane = emitInstruction(IROp::VecExtract, laneType,
+                        {rhsValue, createConstant(static_cast<int32_t>(0))}, expr->loc);
+                    if (laneType.baseType == leftType.baseType)
+                    {
+                        rhsValue = emitBinaryOp(op, leftType, lhsValue, lane);
+                    }
+                    else
+                    {
+                        // Raise both to the common type, operate there, convert to a's.
+                        const auto rank = [](IRType t) {
+                            return t == IRType::Float32 ? 2 : t == IRType::Float16 ? 1 : 0;
+                        };
+                        const IRTypeInfo& common =
+                            rank(laneType.baseType) >= rank(leftType.baseType) ? laneType : leftType;
+                        const IRValueID wideLhs = emitScalarConversion(leftType, common, lhsValue, expr->loc);
+                        const IRValueID wideLane = emitScalarConversion(laneType, common, lane, expr->loc);
+                        const IRValueID wide = emitBinaryOp(op, common, wideLhs, wideLane);
+                        rhsValue = emitScalarConversion(common, leftType, wide, expr->loc);
+                    }
+                    narrowedCompound = true;
+                }
+            }
+            if (!narrowedCompound)
+                rhsValue = emitBinaryOp(op, getExprType(expr->left.get()), lhsValue, rhsValue);
             if (arrayTarget)
             {
                 rhsValue = coerceAssignmentValue(expr->left.get(), rhsValue);
@@ -4064,11 +4201,23 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
     // Check for built-in function
     auto builtinOp = builtinToIROp(expr->functionName);
 
-    // Build arguments
+    // Build arguments.  An argument bound to a user function's `out`
+    // parameter is a destination only: it is never read (the caller's
+    // `float4 adjx;` is typically uninitialised), so no value is built for
+    // it; the inliner assigns the helper's final value back to it.
+    const auto* calleeDecl =
+        (expr->resolvedFunction && expr->resolvedFunction->kind == DeclKind::Function)
+            ? static_cast<const FunctionDecl*>(expr->resolvedFunction) : nullptr;
     std::vector<IRValueID> argValues;
-    for (auto& arg : expr->arguments)
+    for (size_t i = 0; i < expr->arguments.size(); ++i)
     {
-        argValues.push_back(buildExpr(arg.get()));
+        if (calleeDecl && i < calleeDecl->parameters.size() &&
+            calleeDecl->parameters[i]->storage == StorageQualifier::Out)
+        {
+            argValues.push_back(InvalidIRValue);
+            continue;
+        }
+        argValues.push_back(buildExpr(expr->arguments[i].get()));
     }
 
     // AN OMITTED ARGUMENT IS THE DEFAULT EXPRESSION, BUILT HERE AT THE CALL
@@ -4200,7 +4349,11 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 
     IRTypeInfo resultType = getExprType(expr);
 
-    if (expr->functionName == "any" && expr->resolvedFunction == nullptr &&
+    // any(v) ORs and all(v) ANDs the lanes' truth (a numeric lane is true
+    // for either sign of nonzero).  Measured on the reference: all(t.xy)
+    // is SNE per lane then a product into the condition register.
+    const bool reduceAll = expr->functionName == "all";
+    if ((expr->functionName == "any" || reduceAll) && expr->resolvedFunction == nullptr &&
         argValues.size() == 1)
     {
         // Arguments were evaluated once above. Reduce that value, never the
@@ -4255,9 +4408,51 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
                 value = emitBinaryOp(IROp::CmpNe, IRTypeInfo::Bool(), value, zero, expr->loc);
             }
             reduced = reduced == InvalidIRValue ? value
-                : emitBinaryOp(IROp::LogicalOr, IRTypeInfo::Bool(), reduced, value, expr->loc);
+                : emitBinaryOp(reduceAll ? IROp::LogicalAnd : IROp::LogicalOr,
+                               IRTypeInfo::Bool(), reduced, value, expr->loc);
         }
         return reduced;
+    }
+
+    // fmod(a, b): the remainder with the sign of a.  The reference lowers it
+    // as r = frac(|a / b|) * |b|, then -r where a < 0 (measured, both
+    // profiles: RCP+MUL or DIV, FRC |q|, MUL by |b|, a predicated negate on
+    // a's sign).  Expanded here into those operations, lane by lane through
+    // the ordinary vector paths.  Operands of differing width keep the call
+    // (refused by name downstream) rather than guessing a promotion.
+    if (expr->functionName == "fmod" && expr->resolvedFunction == nullptr &&
+        argValues.size() == 2)
+    {
+        const IRTypeInfo ta = getExprType(expr->arguments[0].get());
+        const IRTypeInfo tb = getExprType(expr->arguments[1].get());
+        const bool floating = (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float32 ||
+                              (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float16;
+        // A scalar operand broadcasts (measured: fmod(a, b.x) and fmod(a.x, b)
+        // are accepted); two vectors of different widths keep the call.
+        const auto fits = [&](const IRTypeInfo& t) {
+            return t.vectorSize == resultType.vectorSize || (t.vectorSize == 1 && !t.isMatrix());
+        };
+        if (floating && !resultType.isMatrix() && !resultType.isArray() && fits(ta) && fits(tb))
+        {
+            const auto splat = [&](IRValueID v, const IRTypeInfo& t) {
+                if (!resultType.isVector() || t.vectorSize == resultType.vectorSize) return v;
+                std::vector<IRValueID> lanes(static_cast<size_t>(resultType.vectorSize), v);
+                return emitInstruction(IROp::VecConstruct, resultType, lanes, expr->loc);
+            };
+            const IRValueID a = splat(argValues[0], ta), b = splat(argValues[1], tb);
+            const IRValueID q = emitBinaryOp(IROp::Div, resultType, a, b, expr->loc);
+            const IRValueID aq = emitInstruction(IROp::Abs, resultType, {q}, expr->loc);
+            const IRValueID f = emitInstruction(IROp::Frac, resultType, {aq}, expr->loc);
+            const IRValueID ab = emitInstruction(IROp::Abs, resultType, {b}, expr->loc);
+            const IRValueID r = emitBinaryOp(IROp::Mul, resultType, f, ab, expr->loc);
+            const IRValueID nr = emitInstruction(IROp::Neg, resultType, {r}, expr->loc);
+            IRTypeInfo boolType = resultType;
+            if (resultType.isVector()) boolType.elementType = IRType::Bool;
+            else boolType = IRTypeInfo::Bool();
+            const IRValueID negative = emitBinaryOp(IROp::CmpLt, boolType, a,
+                                                    createConstant(resultType, 0.0f), expr->loc);
+            return emitInstruction(IROp::Select, resultType, {negative, nr, r}, expr->loc);
+        }
     }
 
     if (auto scale = angleConversionScale(expr->functionName);
@@ -4502,15 +4697,32 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         error(expr->loc, "cannot inline user function '" + name + "': argument count mismatch");
         return false;
     }
-    for (const auto& param : callee->parameters)
+    // out / inout parameters are copy-out: after the body the parameter's
+    // final value is assigned to the caller's argument (Cg copy-in/copy-out).
+    // When two arguments name the same variable the LEFTMOST parameter's
+    // value is the one that remains (measured: two(x, x) with a = 1, b = 2
+    // leaves x = 1), so the copies are made right to left.  Supported for a scalar/vector/matrix parameter whose
+    // argument is a plain caller lvalue; anything else is refused by name.
+    std::vector<size_t> copyOut;
+    for (size_t i = 0; i < callee->parameters.size(); ++i)
     {
-        if (param->storage == StorageQualifier::Out ||
-            param->storage == StorageQualifier::InOut)
+        const ParamDecl* param = callee->parameters[i].get();
+        if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)
+            continue;
+        const IRTypeInfo pt = getIRType(param->type.get());
+        const ExprNode* arg = i < expr->arguments.size() ? expr->arguments[i].get() : nullptr;
+        const bool lvalue = arg && (arg->kind == ExprKind::Identifier ||
+                                    (arg->kind == ExprKind::MemberAccess &&
+                                     static_cast<const MemberAccessExpr*>(arg)->object &&
+                                     static_cast<const MemberAccessExpr*>(arg)->object->kind == ExprKind::Identifier));
+        if (pt.isArray() || getStructFields(param->type.get()) || param->name.empty() || !lvalue)
         {
             error(expr->loc, "cannot inline user function '" + name +
-                             "': out/inout parameters are not supported");
+                             "': out/inout parameter '" + param->name +
+                             "' needs a scalar, vector or matrix type and a plain variable argument");
             return false;
         }
+        copyOut.push_back(i);
     }
 
     auto savedDecls = declToValue_;
@@ -4681,6 +4893,12 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     for (auto it = shadowedGlobalArrays_.begin(); it != shadowedGlobalArrays_.end(); )
         if (!savedStashArrays.count(it->first)) { createdStashArrays[it->first] = it->second; it = shadowedGlobalArrays_.erase(it); } else ++it;
 
+    std::vector<IRValueID> copyOutValues;
+    for (size_t i : copyOut)
+    {
+        auto it = nameToValue_.find(callee->parameters[i]->name);
+        copyOutValues.push_back(it == nameToValue_.end() ? InvalidIRValue : it->second);
+    }
     auto inlineSwizzles = identityPrefixSwizzleBase_;
     const auto bodyNames = nameToValue_;
     const auto bodyArrays = localArrayValues_;
@@ -4762,6 +4980,19 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     }
     for (const auto& kv : inlineSwizzles)
         identityPrefixSwizzleBase_.try_emplace(kv.first, kv.second);
+    // Copy-out into the caller's own scope (restored above), so the
+    // argument names the CALLER's variable; right to left, see above.
+    for (size_t k = copyOut.size(); ok && k-- > 0; )
+    {
+        const ParamDecl* param = callee->parameters[copyOut[k]].get();
+        if (copyOutValues[k] == InvalidIRValue)
+        {
+            error(expr->loc, "cannot inline user function '" + callee->name +
+                             "': out parameter '" + param->name + "' is never assigned");
+            return false;
+        }
+        buildAssignment(expr->arguments[copyOut[k]].get(), copyOutValues[k]);
+    }
     // A void helper (a statement-position call that writes globals or
     // nothing) has no result value; its inlined body is the whole effect.
     const bool returnsVoid =
@@ -4814,7 +5045,15 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
         getIRType(callee->returnType.get()).baseType == IRType::Void;
     std::vector<StmtNode*> statements;
     for (const auto& s : callee->body->statements) statements.push_back(s.get());
-    if (!runInlineStatements(callee, statements, result, sawReturn))
+    // A helper called from inside another helper's arm has its OWN
+    // continuation: the caller's tail is not part of this body.
+    const std::vector<StmtNode*> outerContinuation = std::move(inlineContinuation_);
+    const bool outerRan = inlineContinuationRun_;
+    inlineContinuation_.clear();
+    const bool ran = runInlineStatements(callee, statements, result, sawReturn);
+    inlineContinuation_ = outerContinuation;
+    inlineContinuationRun_ = outerRan;
+    if (!ran)
         return false;
 
     if (!sawReturn && !returnsVoid)
@@ -4826,13 +5065,47 @@ bool IRBuilder::buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result)
     return returnsVoid || result != InvalidIRValue;
 }
 
+// An if whose arms reach a return through nothing but blocks and nested ifs
+// (no loop, switch, break or continue around the return): the shape
+// runInlineStatements lowers by running each arm with the rest of the body.
+static bool returnOnlyShape(const StmtNode* stmt, bool& hasReturn)
+{
+    if (!stmt) return true;
+    switch (stmt->kind)
+    {
+    case StmtKind::Return: hasReturn = true; return true;
+    case StmtKind::Block:
+        for (const auto& inner : static_cast<const BlockStmt*>(stmt)->statements)
+            if (!returnOnlyShape(inner.get(), hasReturn)) return false;
+        return true;
+    case StmtKind::If:
+    {
+        const auto* ifs = static_cast<const IfStmt*>(stmt);
+        return returnOnlyShape(ifs->thenBranch.get(), hasReturn) &&
+               returnOnlyShape(ifs->elseBranch.get(), hasReturn);
+    }
+    case StmtKind::For:
+    {
+        bool inner = false;
+        return returnOnlyShape(static_cast<const ForStmt*>(stmt)->body.get(), inner) && !inner;
+    }
+    case StmtKind::While: case StmtKind::DoWhile: case StmtKind::Switch:
+    case StmtKind::Case: case StmtKind::Default:
+    case StmtKind::Break: case StmtKind::Continue:
+        return false;
+    default:
+        return true;
+    }
+}
+
 bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
                                     IRValueID& result, bool& sawReturn)
 {
     const bool returnsVoid =
         getIRType(callee->returnType.get()).baseType == IRType::Void;
-    for (StmtNode* stmt : statements)
+    for (size_t index = 0; index < statements.size(); ++index)
     {
+        StmtNode* stmt = statements[index];
         if (!stmt) continue;
 
         if (sawReturn)
@@ -4857,6 +5130,7 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 continue;
             }
             result = buildExpr(ret->value.get());
+            result = narrowToScalar(callee->returnType.get(), ret->value.get(), result);
             sawReturn = true;
             continue;
         }
@@ -4888,7 +5162,18 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 // declarations end with it, as buildBlockStmt ends them.
                 const ScopeState pre = scope_;
                 if (block) blockDeclared_.emplace_back();
+                const std::vector<StmtNode*> inherited = inlineContinuation_;
+                std::vector<StmtNode*> tail(statements.begin() + static_cast<std::ptrdiff_t>(index) + 1,
+                                            statements.end());
+                tail.insert(tail.end(), inherited.begin(), inherited.end());
+                inlineContinuation_ = tail;
+                inlineContinuationRun_ = false;
+                const size_t savedFrame = inlineContinuationFrame_;
+                inlineContinuationFrame_ = block ? blockDeclared_.size() - 1 : blockDeclared_.size();
                 const bool ok = runInlineStatements(callee, inner, result, sawReturn);
+                inlineContinuationFrame_ = savedFrame;
+                inlineContinuation_ = inherited;
+                const bool tailRan = inlineContinuationRun_;
                 if (block)
                 {
                     const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
@@ -4898,7 +5183,125 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 }
                 if (!ok)
                     return false;
+                if (tailRan)
+                    return true;   // a run-time return inside ran this list's tail already
                 continue;
+            }
+        }
+
+        // A return under a RUN-TIME condition.  Each arm runs as its own
+        // statements followed - when the arm does not itself return - by the
+        // rest of the body, and the if-join merges the two arms' results
+        // (and every local and global they wrote) with Select, the
+        // straight-line predicated program the reference emits.  The
+        // result travels through a reserved scope key no source name can
+        // spell.  An arm's braces are still a block: its own declarations
+        // end before the rest of the body runs.
+        if (stmt->kind == StmtKind::If)
+        {
+            auto* ifs = static_cast<IfStmt*>(stmt);
+            bool hasReturn = false;
+            if (returnOnlyShape(ifs, hasReturn) && hasReturn &&
+                module_->shaderStage == ShaderStage::Fragment)
+            {
+                // A constant part of the condition that the guard declines to
+                // fold (mixed int/float or half comparisons, aliases of them)
+                // would be folded here by the evaluator anyway, at our
+                // precision rather than the reference's: refuse it by name.
+                if (conditionFoldHazard(ifs->condition.get()))
+                {
+                    error(ifs->loc, "cannot inline user function '" + callee->name +
+                                    "': a return inside control flow under a constant comparison "
+                                    "this compiler cannot fold at the reference's precision");
+                    return false;
+                }
+                // Each level copies the rest of the body into both arms, so
+                // n sequential early returns build 2^n tails: bounded.
+                if (inlineReturnDepth_ >= 8)
+                {
+                    error(ifs->loc, "cannot inline user function '" + callee->name +
+                                    "': more than 8 nested run-time returns");
+                    return false;
+                }
+                struct DepthGuard { int& d; explicit DepthGuard(int& x) : d(x) { ++d; } ~DepthGuard() { --d; } } guard(inlineReturnDepth_);
+                static const std::string kReturnKey = "#inline-return";
+                // The rest of the body: this list's tail, then whatever an
+                // enclosing arm or constant branch still has to run after it.
+                // The inherited continuation belongs OUTSIDE the enclosing
+                // arm's block; running it in here would let a local that
+                // block declared shadow the outer name it reads (an inner
+                // `float4 k` returned for the outer `return k`).  Refused by
+                // name until block bindings are unwound for it.
+                if (!inlineContinuation_.empty())
+                    for (size_t f = inlineContinuationFrame_; f < blockDeclared_.size(); ++f)
+                        if (!blockDeclared_[f].empty())
+                        {
+                            error(ifs->loc, "cannot inline user function '" + callee->name +
+                                            "': a return inside control flow inside a block that "
+                                            "declares locals, with statements after the block");
+                            return false;
+                        }
+                std::vector<StmtNode*> rest(statements.begin() + static_cast<std::ptrdiff_t>(index) + 1,
+                                            statements.end());
+                rest.insert(rest.end(), inlineContinuation_.begin(), inlineContinuation_.end());
+                const std::vector<StmtNode*> inherited = inlineContinuation_;
+                bool armsOk = true;
+                auto runArm = [&](StmtNode* branch) {
+                    if (!armsOk) return;
+                    IRValueID armResult = InvalidIRValue;
+                    bool armReturned = false;
+                    std::vector<StmtNode*> own;
+                    const bool block = branch && branch->kind == StmtKind::Block;
+                    if (block)
+                        for (const auto& s : static_cast<BlockStmt*>(branch)->statements) own.push_back(s.get());
+                    else if (branch)
+                        own.push_back(branch);
+                    const ScopeState pre = scope_;
+                    if (block) blockDeclared_.emplace_back();
+                    inlineContinuation_ = rest;   // a nested run-time return runs it
+                    const size_t savedFrame = inlineContinuationFrame_;
+                    inlineContinuationFrame_ = block ? blockDeclared_.size() - 1 : blockDeclared_.size();
+                    bool ok = runInlineStatements(callee, own, armResult, armReturned);
+                    inlineContinuationFrame_ = savedFrame;
+                    inlineContinuation_.clear();  // `rest` already carries it
+                    if (block)
+                    {
+                        const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
+                        blockDeclared_.pop_back();
+                        for (const auto& name : declared)
+                            exitBlockBinding(name, pre);
+                    }
+                    if (ok && !armReturned)
+                        ok = runInlineStatements(callee, rest, armResult, armReturned);
+                    inlineContinuation_ = inherited;
+                    if (ok && !armReturned && !returnsVoid)
+                    {
+                        error(ifs->loc, "cannot inline user function '" + callee->name +
+                                        "': a path through it has no return expression");
+                        ok = false;
+                    }
+                    if (ok && !returnsVoid && armResult == InvalidIRValue)
+                        ok = false;
+                    armsOk = armsOk && ok;
+                    if (ok && !returnsVoid)
+                        nameToValue_[kReturnKey] = armResult;
+                };
+                const std::function<void()> thenArm = [&] { runArm(ifs->thenBranch.get()); };
+                const std::function<void()> elseArm = [&] { runArm(ifs->elseBranch.get()); };
+                buildConditional(ifs->condition.get(), ifs->loc, thenArm, &elseArm);
+                if (!armsOk)
+                    return false;
+                if (!returnsVoid)
+                {
+                    auto it = nameToValue_.find(kReturnKey);
+                    if (it == nameToValue_.end() || it->second == InvalidIRValue)
+                        return false;
+                    result = it->second;
+                    nameToValue_.erase(it);
+                }
+                sawReturn = true;
+                inlineContinuationRun_ = true;   // the enclosing lists' tails ran in the arms
+                return true;
             }
         }
 
@@ -5051,6 +5454,65 @@ std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
     return lanes[0].isTruthy();
 }
 
+bool IRBuilder::conditionFoldHazard(const ExprNode* e)
+{
+    if (!e) return false;
+    // A name the function binds itself is a run-time value here, whatever a
+    // file-scope constant of that name would evaluate to.
+    std::function<bool(const ExprNode*)> mentionsLocal = [&](const ExprNode* x) -> bool {
+        if (!x) return false;
+        switch (x->kind)
+        {
+        case ExprKind::Identifier: return nameToValue_.count(static_cast<const IdentifierExpr*>(x)->name) != 0;
+        case ExprKind::Unary: return mentionsLocal(static_cast<const UnaryExpr*>(x)->operand.get());
+        case ExprKind::Binary: { const auto* b = static_cast<const BinaryExpr*>(x);
+                                 return mentionsLocal(b->left.get()) || mentionsLocal(b->right.get()); }
+        case ExprKind::Ternary: { const auto* t = static_cast<const TernaryExpr*>(x);
+                                  return mentionsLocal(t->condition.get()) || mentionsLocal(t->thenExpr.get()) ||
+                                         mentionsLocal(t->elseExpr.get()); }
+        case ExprKind::Cast: return mentionsLocal(static_cast<const CastExpr*>(x)->operand.get());
+        case ExprKind::MemberAccess: return mentionsLocal(static_cast<const MemberAccessExpr*>(x)->object.get());
+        default: return false;
+        }
+    };
+    ConstLanes lanes;
+    ConstShape shape;
+    if (!mentionsLocal(e) &&
+        evaluateConstValue(e, lanes, shape, module_.get()) && lanes.size() == 1 && shape.isScalar() &&
+        !constCondition(e))
+        return true;
+    switch (e->kind)
+    {
+    case ExprKind::Unary:
+        return conditionFoldHazard(static_cast<const UnaryExpr*>(e)->operand.get());
+    case ExprKind::Binary:
+    {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        return conditionFoldHazard(b->left.get()) || conditionFoldHazard(b->right.get());
+    }
+    case ExprKind::Ternary:
+    {
+        const auto* t = static_cast<const TernaryExpr*>(e);
+        return conditionFoldHazard(t->condition.get()) || conditionFoldHazard(t->thenExpr.get()) ||
+               conditionFoldHazard(t->elseExpr.get());
+    }
+    case ExprKind::Cast:
+        return conditionFoldHazard(static_cast<const CastExpr*>(e)->operand.get());
+    case ExprKind::MemberAccess:
+        return conditionFoldHazard(static_cast<const MemberAccessExpr*>(e)->object.get());
+    case ExprKind::Constructor:
+        for (const auto& arg : static_cast<const ConstructorExpr*>(e)->arguments)
+            if (conditionFoldHazard(arg.get())) return true;
+        return false;
+    case ExprKind::Call:
+        for (const auto& arg : static_cast<const CallExpr*>(e)->arguments)
+            if (conditionFoldHazard(arg.get())) return true;
+        return false;
+    default:
+        return false;
+    }
+}
+
 IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
 {
     // Check for swizzle first
@@ -5184,6 +5646,7 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
                                 valueId, fieldType);
                             inst->semanticName     = field.semantic.name;
                             inst->rawSemanticName  = field.semantic.rawName;
+                            inst->inferredSemantic = field.semantic.inferred;
                             inst->semanticIndex    = field.semantic.isEmpty()
                                 ? static_cast<int>(fieldIdx)
                                 : field.semantic.index;
@@ -6948,6 +7411,7 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                                 inst->addOperand(value);
                                 inst->semanticName    = field.semantic.name;
                                 inst->rawSemanticName = field.semantic.rawName;
+                                inst->inferredSemantic = field.semantic.inferred;
                                 inst->semanticIndex   = field.semantic.index;
                                 inst->fieldName       = memberExpr->member;
                                 currentBlock_->addInstruction(std::move(inst));
@@ -7021,6 +7485,52 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
     return value;
 }
 
+// Convert one scalar lane between numeric element types.
+IRValueID IRBuilder::emitScalarConversion(const IRTypeInfo& fromType, const IRTypeInfo& targetType,
+                                          IRValueID lane, const SourceLocation& loc)
+{
+    const IRType from = fromType.baseType, to = targetType.baseType;
+    if (from == to) return lane;
+    if ((from == IRType::Float32 || from == IRType::Float16) &&
+        (to == IRType::Int32 || to == IRType::UInt32))
+        return emitInstruction(IROp::FloatToInt, targetType, {lane}, loc);
+    if (from == IRType::Float32 && to == IRType::Float16)
+        return emitInstruction(IROp::FloatToHalf, targetType, {lane}, loc);
+    if (from == IRType::Float16 && to == IRType::Float32)
+        return emitInstruction(IROp::HalfToFloat, targetType, {lane}, loc);
+    if ((from == IRType::Int32 || from == IRType::UInt32) &&
+        (to == IRType::Float32 || to == IRType::Float16))
+        return emitInstruction(IROp::IntToFloat, targetType, {lane}, loc);
+    return lane;
+}
+
+// A vector stored into a numeric scalar keeps lane x, converted to the
+// scalar's type (measured on the reference; allowsScalarNarrowing).
+IRValueID IRBuilder::emitScalarNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
+                                         IRValueID value, const SourceLocation& loc)
+{
+    IRTypeInfo laneType = targetType;
+    laneType.baseType = sourceType.elementType;
+    const IRValueID lane = emitInstruction(IROp::VecExtract, laneType,
+        {value, createConstant(static_cast<int32_t>(0))}, loc);
+    return emitScalarConversion(laneType, targetType, lane, loc);
+}
+
+// A vector returned from a function declared to return a numeric scalar
+// keeps lane x (measured: float f() { return t.zyx; } is t.z).
+IRValueID IRBuilder::narrowToScalar(TypeNode* declared, ExprNode* valueExpr, IRValueID value)
+{
+    if (!declared || !valueExpr || value == InvalidIRValue) return value;
+    const IRTypeInfo to = getIRType(declared);
+    const IRTypeInfo from = getExprType(valueExpr);
+    if (to.isVector() || to.isMatrix() || to.arraySize != 0 || to.baseType == IRType::Void ||
+        to.baseType == IRType::Bool || getStructFields(declared))
+        return value;
+    if (!from.isVector() || from.isMatrix() || from.arraySize != 0)
+        return value;
+    return emitScalarNarrowing(from, to, value, valueExpr->loc);
+}
+
 IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
 {
     if (value == InvalidIRValue || !target || !currentFunction_)
@@ -7045,6 +7555,21 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
                 return emitVectorNarrowing(sourceType, targetType, value, target->loc);
             return emitNumericToBool(sourceType, targetType, value, target->loc);
         }
+    }
+    // A vector into a numeric scalar keeps lane x, converted to the scalar's
+    // type (allowsScalarNarrowing in the semantic pass; measured).  The
+    // source's type is found the way the bool path above finds it: the value
+    // map holds constants only.
+    if (targetType.arraySize == 0 && !targetType.isMatrix() && !targetType.isVector())
+    {
+        IRTypeInfo sourceType = srcValue ? srcValue->type : IRTypeInfo::Void();
+        for (const auto& parameter : currentFunction_->parameters)
+            if (parameter.valueId == value) sourceType = parameter.type;
+        for (const auto& block : currentFunction_->blocks)
+            for (const auto& instruction : block->instructions)
+                if (instruction->result == value) sourceType = instruction->resultType;
+        if (sourceType.isVector() && sourceType.arraySize == 0 && !sourceType.isMatrix())
+            return emitScalarNarrowing(sourceType, targetType, value, target->loc);
     }
     if (!srcValue) return value;
 
@@ -7329,6 +7854,7 @@ void IRBuilder::emitStructOutputs(ExprNode* structExpr, const std::vector<Struct
             inst->addOperand(fieldValue);
             inst->semanticName    = field.semantic.name;
             inst->rawSemanticName = field.semantic.rawName;
+            inst->inferredSemantic = field.semantic.inferred;
             inst->semanticIndex   = field.semantic.index;
             inst->fieldName       = field.name;
             currentBlock_->addInstruction(std::move(inst));

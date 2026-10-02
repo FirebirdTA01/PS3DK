@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "types.h"
 #include "symbol_table.h"
+#include <set>
 #include <vector>
 #include <string>
 #include <memory>
@@ -68,6 +69,13 @@ struct ShaderInfo
     // Collected shader inputs/outputs (flattened, with semantics)
     std::vector<ShaderIOParam> inputParams;    // Vertex attributes / Fragment varyings
     std::vector<ShaderIOParam> outputParams;   // Vertex varyings / Fragment outputs
+    // Fragment inputs bound by the implicit-TEXCOORD rule, qualified per
+    // instance ("uv", "P.tc"), in declaration order, and the TEXCOORD
+    // indices explicit inputs claim.  The final index is assigned after
+    // dead-code elimination from the inputs actually read
+    // (bindImplicitTexCoords): an unread one takes no index.
+    std::vector<std::string> implicitTexCoordOrder;
+    std::set<int> explicitTexCoords;
 
     // Global uniforms
     std::vector<VarDecl*> uniforms;            // Uniform variables
@@ -268,6 +276,8 @@ private:
 
     // Helper methods
     bool checkAssignment(const CgType& target, const CgType& value, const SourceLocation& loc);
+    // A vector stored into a scalar keeps lane x (reference: C7011 warning).
+    bool allowsScalarNarrowing(const CgType& target, const CgType& value) const;
     bool checkCondition(ExprNode* expr);
     bool isLvalue(ExprNode* expr);
     void validateSwizzle(MemberAccessExpr* expr, const CgType& objectType);
