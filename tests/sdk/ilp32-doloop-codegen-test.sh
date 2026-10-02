@@ -26,11 +26,11 @@
 #
 # Controls (embedded below): the v0.19.0 candidate's listing of doloop.c and
 # an lwz+addi count must be reported; the fixed compiler's clrldi+addi must
-# not.  The scanner's own 10-case self-test (red-add, red-load-addi,
+# not.  The scanner's own 11-case self-test (red-add, red-load-addi,
 # green-extended, green-scratch, red-branchy, green-indirect-call,
-# red-read-then-loop, red-b-into-loop, red-truncated, green-b-tailcall)
-# runs first, without a compiler, so the guard fails closed if the logic
-# regresses even on a build host with no PPU toolchain.
+# red-read-then-loop, red-b-into-loop, red-truncated, green-b-tailcall,
+# red-b-self) runs first, without a compiler, so the guard fails closed if
+# the logic regresses even on a build host with no PPU toolchain.
 #
 # Skips the compiles without PS3DEV (CI has no PPU compiler); the self-test
 # and the controls still run and are the fast CI-facing coverage.
@@ -43,23 +43,24 @@ trap 'rm -rf "$work"' EXIT
 scanner="$root/tests/sdk/ctr-loop-scan.py"
 [ -f "$scanner" ] || { echo "ilp32-doloop-codegen: FAIL: missing $scanner"; exit 1; }
 
-# First run the scanner's own self-test: 10 synthetic cases covering the
+# First run the scanner's own self-test: 11 synthetic cases covering the
 # loop-usage rules (which instructions make a count clean/dirty), the
 # non-loop terminals (mfocrf-scratch with a blr, bctrl indirect call, b
 # tail-call), and the loop-use cases (read-then-loop via mfctr, a plain b
-# into a local label, and a listing truncated at the mtctr).  The exit code
-# is 0 only if all ten pass (2 otherwise), so pass/fail is authoritative;
-# the per-case line counts below make the "10/10" requirement explicit.
+# into a local label, a listing truncated at the mtctr, and a b to the
+# function's own entry).  The exit code is 0 only if all eleven pass (2
+# otherwise), so pass/fail is authoritative; the per-case line counts below
+# make the "11/11" requirement explicit.
 python3 "$scanner" --self-test > "$work/self-test.out" 2>&1
 rctest=$?
 n_ok=$(grep -c ' ok (findings' "$work/self-test.out")
 n_fail=$(grep -c 'FAIL (findings' "$work/self-test.out")
-if [ $rctest -ne 0 ] || [ "$n_ok" -ne 10 ] || [ "$n_fail" -ne 0 ]; then
-    echo "ilp32-doloop-codegen: FAIL self-test (exit $rctest, ${n_ok}/10 ok, ${n_fail} fail)"
+if [ $rctest -ne 0 ] || [ "$n_ok" -ne 11 ] || [ "$n_fail" -ne 0 ]; then
+    echo "ilp32-doloop-codegen: FAIL self-test (exit $rctest, ${n_ok}/11 ok, ${n_fail} fail)"
     cat "$work/self-test.out"
     exit 1
 fi
-echo "ilp32-doloop-codegen: ok   self-test: 10/10 synthetic cases"
+echo "ilp32-doloop-codegen: ok   self-test: 11/11 synthetic cases"
 
 # The v0.19.0 candidate (c13ee74f) at -O2: CTR loaded from add r5,r9,r5 where
 # r9 is a zero-extended lwz of a negative int.

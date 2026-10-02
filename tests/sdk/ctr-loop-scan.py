@@ -108,7 +108,7 @@ def scan(lines, out=sys.stdout):
             if o in ("bl", "blr"):
                 terminal = o
                 break
-            if o == "b" and a and not re.search(r"\+0x", a[-1]) and a[-1] != fn:
+            if o == "b" and a and a[-1].strip("<>") != fn and not re.search(r"\+0x", a[-1]):
                 terminal = "b(tailcall)"    # b to another function: CTR call-clobbered
                 break
             if o.startswith("b"):
@@ -219,6 +219,16 @@ def self_test():
     8:	7c a9 03 a6 	mtctr   r5
     c:	48 00 10 00 	b       .g
 """, 0),
+        # P2 (v3 review): a b to the CURRENT function's entry is a local
+        # branch, not a call - the target "<.f>" must match fn ".f" once the
+        # angle brackets are stripped, so it is NOT a tail-call terminal.
+        # Guards a[-1].strip("<>") != fn (was a[-1] != fn, always true).
+        "red-b-self": ("""0000000000000000 <.f>:
+    0:	81 24 00 00 	lwz     r9,0(r4)
+    4:	38 a9 00 02 	addi    r5,r9,2
+    8:	7c a9 03 a6 	mtctr   r5
+    c:	48 ff ff fc 	b       <.f>
+""", 1),
     }
     ok = True
     for name, (text, want) in cases.items():
