@@ -56,6 +56,33 @@ struct input { inner in1; float2 b; };
 float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * IN.b + IN.in1.a, 0, 1); }
 """
 NESTED_UNIFORMS = [('IN.in1.a', FLOAT2, 1, 1), ('IN.b', FLOAT2, 1, 1)]
+# A parameter SHADOWS a file-scope uniform struct of the same name: main reads
+# the parameter, a helper reads the global, and a helper's default argument
+# names the global too (all measured: the reference lists both sets, the
+# parameter's at paramno 1 and the global's at -1).
+GLOBAL = 0xFFFFFFFF
+SHADOW_HELPER = """struct inner { float2 a; };
+struct input { inner in1; float2 b; };
+uniform input IN;
+float2 helper_global() { return IN.b + IN.in1.a; }
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * IN.b + IN.in1.a, helper_global()); }
+"""
+SHADOW_DEFAULT = """struct inner { float2 a; };
+struct input { inner in1; float2 b; };
+uniform input IN;
+float2 helper_def(float2 x = IN.b) { return x * 2.0; }
+float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * IN.b, helper_def()); }
+"""
+GLOBAL_NESTED = """struct inner { float2 a; };
+struct input { inner in1; float2 b; };
+uniform input G;
+float4 main(float2 tc : TEXCOORD0) : COLOR { return float4(tc * G.b + G.in1.a, 0, 1); }
+"""
+# The reference records per-member defaults (IN.b = 1 2); not emitted yet,
+# so a struct parameter default refuses by name rather than being dropped.
+STRUCT_DEFAULT = """struct input { float2 b; float k; };
+float4 main(float2 tc : TEXCOORD0, uniform input IN = { float2(1.0, 2.0), 3.0 }) : COLOR { return float4(tc * IN.b, IN.k, 1); }
+"""
 # An ARRAY member is not flattened yet: refused by name (not measured as a
 # reference refusal - a named gap).
 ARRAY_MEMBER = """struct input { float2 a[2]; float2 b; };
@@ -72,11 +99,15 @@ def compile_one(compiler, work, name, text, profile):
 
 
 def with_uniforms(blob, container, values):
+    """values: name -> lanes, or (name, paramno) -> lanes when a parameter
+    and a file-scope uniform share the name (paramno 0xFFFFFFFF = global)."""
     out = bytearray(blob)
     for record in container.records:
-        if record['name'] not in values:
+        key = (record['name'], record['paramno'])
+        lanes = values.get(key, values.get(record['name']))
+        if lanes is None:
             continue
-        lanes = list(values[record['name']]) + [0.0] * 4
+        lanes = list(lanes) + [0.0] * 4
         for offset in record['offsets']:
             for k in range(4):
                 word = struct.unpack('>I', struct.pack('>f', lanes[k]))[0]
@@ -163,6 +194,60 @@ def main():
             print('  nested values: %s' % ('ok' if not bad else 'WRONG on %d' % bad))
             if bad:
                 failures.append('nested member values wrong on %d inputs' % bad)
+
+        shadow_values = {('IN.in1.a', 1): [0.25, -0.5], ('IN.b', 1): [2.0, 0.5],
+                         ('IN.in1.a', GLOBAL): [0.75, 0.125], ('IN.b', GLOBAL): [-1.0, 1.5]}
+        P_a, P_b = [0.25, -0.5], [2.0, 0.5]
+        G_a, G_b = [0.75, 0.125], [-1.0, 1.5]
+        for name, text, want in (
+                ('shadow_helper', SHADOW_HELPER,
+                 lambda tc: [tc[0] * P_b[0] + P_a[0], tc[1] * P_b[1] + P_a[1], G_b[0] + G_a[0], G_b[1] + G_a[1]]),
+                ('shadow_default', SHADOW_DEFAULT,
+                 lambda tc: [tc[0] * P_b[0], tc[1] * P_b[1], G_b[0] * 2.0, G_b[1] * 2.0])):
+            rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_fp_rsx')
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (name, (err.strip().splitlines() or ['?'])[-1]))
+                continue
+            c = Container(blob)
+            # leaf records only: a file-scope struct also emits a record for
+            # the struct itself (a pre-existing metadata difference, not
+            # this check's concern)
+            params = sorted((r['name'], r['paramno']) for r in c.records
+                            if r['variability'] == UNIFORM and r['name'] in ('IN.in1.a', 'IN.b'))
+            want_params = sorted([('IN.in1.a', 1), ('IN.b', 1), ('IN.in1.a', GLOBAL), ('IN.b', GLOBAL)])
+            if params != want_params:
+                failures.append('%s uniform records %s, want %s' % (name, params, want_params))
+            bad = 0
+            for tc in itertools.product([-1.0, 0.0, 0.5, 1.0], repeat=2):
+                got = fp_eval.evaluate(with_uniforms(blob, c, shadow_values), {'TEX0': [tc[0], tc[1], 0, 0]})
+                if got != want(tc):
+                    bad += 1
+                    if bad == 1:
+                        failures.append('%s tc=%s got %s want %s' % (name, tc, got, want(tc)))
+            print('  %s: %s' % (name, 'parameter and global kept apart' if not bad else 'WRONG on %d' % bad))
+
+        # a FILE-SCOPE nested uniform struct alone (was refused: the inner
+        # struct became one unusable struct-typed global)
+        rc, blob, err = compile_one(args.compiler, work, 'global_nested', GLOBAL_NESTED, 'sce_fp_rsx')
+        if rc != 0 or not blob:
+            failures.append('global_nested refused: ' + (err.strip().splitlines() or ['?'])[-1])
+        else:
+            c = Container(blob)
+            u = {'G.in1.a': [0.25, -0.5], 'G.b': [2.0, 0.5]}
+            bad = sum(fp_eval.evaluate(with_uniforms(blob, c, u), {'TEX0': [tc[0], tc[1], 0, 0]})
+                      != [tc[0] * 2.0 + 0.25, tc[1] * 0.5 - 0.5, 0.0, 1.0]
+                      for tc in itertools.product([-1.0, 0.0, 0.5, 1.0], repeat=2))
+            print('  global_nested: %s' % ('values ok' if not bad else 'WRONG on %d' % bad))
+            if bad:
+                failures.append('global_nested values wrong on %d inputs' % bad)
+
+        rc, blob, err = compile_one(args.compiler, work, 'struct_default', STRUCT_DEFAULT, 'sce_fp_rsx')
+        # semantic analysis refuses it before the IR builder does; either
+        # refusal is acceptable, a dropped default is not
+        ok = rc == 1 and not blob
+        print('  struct default: %s' % ('refused' if ok else 'NOT refused (rc %d)' % rc))
+        if not ok:
+            failures.append('struct parameter default: expected the named refusal, got rc %d' % rc)
 
         rc, blob, err = compile_one(args.compiler, work, 'array_member', ARRAY_MEMBER, 'sce_fp_rsx')
         ok = rc == 1 and not blob and 'uniform-struct-entry-parameter' in err

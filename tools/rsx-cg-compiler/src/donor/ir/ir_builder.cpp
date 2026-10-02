@@ -1235,21 +1235,37 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                 const std::vector<StructField>* fields = getStructFields(varDecl->type.get());
                 if (fields)
                 {
-                    std::string prefix = varDecl->name;
-                    for (const auto& field : *fields)
-                    {
-                        std::string qualifiedName = prefix + "." + field.name;
-                        IRTypeInfo fieldIRType = getIRType(field.type.get());
+                    // A NESTED struct member flattens by its full path
+                    // ("u.in1.a"), the way the reference lists it; before
+                    // this the inner struct became one struct-typed global no
+                    // read could use, and the program was refused.
+                    const auto flatten = [&](const auto& self, const std::vector<StructField>& members,
+                                             const std::string& prefix) -> void {
+                        for (const auto& field : members)
+                        {
+                            std::string qualifiedName = prefix + "." + field.name;
+                            if (field.type && field.type->baseType == BaseType::Struct &&
+                                !field.type->isArray())
+                            {
+                                if (const auto* inner = getStructFields(field.type.get()))
+                                {
+                                    self(self, *inner, qualifiedName);
+                                    continue;
+                                }
+                            }
+                            IRTypeInfo fieldIRType = getIRType(field.type.get());
 
-                        IRGlobal memberGlobal;
-                        memberGlobal.name = qualifiedName;
-                        memberGlobal.type = fieldIRType;
-                        memberGlobal.valueId = module_->allocateGlobalId();
-                        memberGlobal.storage = StorageQualifier::Uniform;
+                            IRGlobal memberGlobal;
+                            memberGlobal.name = qualifiedName;
+                            memberGlobal.type = fieldIRType;
+                            memberGlobal.valueId = module_->allocateGlobalId();
+                            memberGlobal.storage = StorageQualifier::Uniform;
 
-                        module_->addGlobal(memberGlobal);
-                        nameToValue_[qualifiedName] = memberGlobal.valueId;
-                    }
+                            module_->addGlobal(memberGlobal);
+                            nameToValue_[qualifiedName] = memberGlobal.valueId;
+                        }
+                    };
+                    flatten(flatten, *fields, varDecl->name);
                 }
             }
         }
@@ -1408,6 +1424,22 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             const std::vector<StructField>* fields = getStructFields(param->type.get());
             if (fields && !fields->empty())
             {
+                // The reference gives each member its own default record
+                // (`IN.b = 1 2`); per-member defaults are not evaluated here
+                // yet, so a default refuses by name rather than being dropped.
+                if (param->defaultValue)
+                {
+                    error(param->loc, "uniform struct entry parameter '" + param->name +
+                          "' has a default value; per-member defaults are not emitted yet "
+                          "(uniform-struct-entry-parameter), refusing rather than dropping it");
+                }
+                // Stash the file-scope bindings this parameter shadows BEFORE
+                // binding the members: the stash records each global key's
+                // current binding, so stashing after would save the
+                // parameter's members as the global's (review: codex), and a
+                // helper reading the file-scope `IN.b` would read the
+                // parameter.  The ordinary parameter path stashes first too.
+                stashShadowedGlobal(param->name);
                 // Nested struct members flatten the same way, named by their
                 // full path (the reference lists `IN.in1.a`).  Array members
                 // are not flattened yet and refuse by name.
@@ -1444,7 +1476,6 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                     }
                 };
                 flatten(flatten, *fields, param->name);
-                stashShadowedGlobal(param->name);
                 continue;
             }
         }
@@ -4992,6 +5023,21 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
 
         IRValueID valueId = currentFunction_->allocateValueId();
         nameToValue_[compositeName] = valueId;
+        // A nested member of a FILE-SCOPE uniform struct ("u.in1.a") is a
+        // flattened uniform global of that full name: load it, the way the
+        // single-level path above loads "u.b".  Without this the value was
+        // allocated with no instruction behind it and lowering refused an
+        // unresolved operand - the shape a helper reading the global hits
+        // when an entry parameter of the same name shadows it.
+        if (const IRGlobal* member = module_->findGlobal(compositeName);
+            member && member->storage == StorageQualifier::Uniform)
+        {
+            auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
+                valueId, getExprType(expr));
+            inst->targetName = compositeName;
+            inst->uniformSource = member->valueId;
+            currentBlock_->addInstruction(std::move(inst));
+        }
         return valueId;
     }
 
