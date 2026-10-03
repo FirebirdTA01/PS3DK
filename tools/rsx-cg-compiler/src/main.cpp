@@ -424,7 +424,7 @@ int main(int argc, char** argv)
             if (!fn->isEntryPoint) continue;
             AlgebraicSimplification algsimp;
             if (algsimp.runOnFunction(*fn))     changed = true;
-            CommonSubexprElimination cse;
+            CommonSubexprElimination cse(stage == ShaderStage::Fragment);
             if (cse.runOnFunction(*fn))         changed = true;
             // Alpha-kill sampling can discard a fragment even if nobody
             // consumes the sampled value. Until sampler provenance is on

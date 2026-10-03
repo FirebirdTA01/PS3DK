@@ -805,6 +805,70 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
         if (!changed) break;
     }
 
+    // The fragment general path FLATTENS the program: every block executes,
+    // in reverse post-order of the CFG (iterative DFS from the entry,
+    // successors in branch-target order, then before else).  There a pure
+    // value defined in a block EARLIER in that order is computed before -
+    // and regardless of - a later block, so it may be reused even where its
+    // block does not dominate (an if's two arms computing the same
+    // expression, main's sharing that the dominance rule alone gave up:
+    // xbrz-freescale-pass1 went over the temp budget).  Replicates the
+    // lowering's order exactly; only with one return block and no back-edge,
+    // the shapes that order is defined for.  The ddt shape - the arm LATER
+    // in that order defining the value - still does not share.
+    std::vector<size_t> rpo(n, n);
+    if (m_straightLine && n)
+    {
+        size_t returns = 0;
+        for (const auto& b : func.blocks)
+            for (const auto& ip : b->instructions)
+                if (ip && ip->op == IROp::Return) ++returns;
+        // Successors in TARGET order, as the lowering walks them.
+        std::vector<std::vector<size_t>> succs(n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto& insts = func.blocks[i]->instructions;
+            if (insts.empty()) continue;
+            const IRInstruction* term = insts.back().get();
+            if (term->op != IROp::Branch && term->op != IROp::CondBranch) continue;
+            const std::string& t = term->targetName;
+            size_t start = 0;
+            while (true)
+            {
+                const size_t comma = t.find(',', start);
+                const auto f = index.find(t.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+                if (f != index.end()) succs[i].push_back(f->second);
+                if (comma == std::string::npos) break;
+                start = comma + 1;
+            }
+        }
+        std::vector<int> color(n, 0);
+        std::vector<size_t> post;
+        std::vector<std::pair<size_t, size_t>> stack{{0, 0}};
+        color[0] = 1;
+        bool backEdge = false;
+        while (!stack.empty() && !backEdge)
+        {
+            auto [b, next] = stack.back();
+            if (next < succs[b].size())
+            {
+                stack.back().second = next + 1;
+                const size_t nb = succs[b][next];
+                if (color[nb] == 1) backEdge = true;
+                else if (color[nb] == 0) { color[nb] = 1; stack.push_back({nb, 0}); }
+            }
+            else
+            {
+                color[b] = 2;
+                post.push_back(b);
+                stack.pop_back();
+            }
+        }
+        if (returns == 1 && !backEdge)
+            for (size_t k = 0; k < post.size(); ++k)
+                rpo[post[post.size() - 1 - k]] = k;
+    }
+
     for (size_t bi = 0; bi < n; ++bi)
     {
         for (auto& inst : func.blocks[bi]->instructions)
@@ -819,7 +883,8 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
             auto& candidates = m_exprMap[inst.get()];
             IRValueID reuse = InvalidIRValue;
             for (const auto& c : candidates)
-                if (dom[bi][c.second]) { reuse = c.first; break; }
+                if (dom[bi][c.second] || (rpo[c.second] < n && rpo[bi] < n && rpo[c.second] < rpo[bi]))
+                { reuse = c.first; break; }
             if (reuse != InvalidIRValue)
             {
                 replacements[inst->result] = reuse;
