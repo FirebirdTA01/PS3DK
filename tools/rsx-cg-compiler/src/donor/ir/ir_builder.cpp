@@ -7673,6 +7673,11 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
     // Matrix cast handling
     if (sourceType.isMatrix() || targetType.isMatrix())
     {
+        if (sourceType.isMatrix() && sourceType.matrixRows == 1 && sourceType.matrixCols == 1 &&
+            sourceType.elementType == IRType::Float32 && sourceType.arraySize == 0 &&
+            targetType.isScalar() && targetType.baseType == IRType::Float32 && targetType.arraySize == 0)
+            return emitInstruction(IROp::VecExtract, targetType,
+                {operandValue, createConstant(int32_t{0})}, expr->loc);
         if (targetType.isMatrix() && targetType.elementType == IRType::Float32 && sourceType.isScalar() &&
             (sourceType.baseType == IRType::Float32 || sourceType.baseType == IRType::Int32))
             return emitScalarMatrixBroadcast(sourceType, targetType, operandValue, expr->loc);
@@ -7830,6 +7835,11 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
         // Matrix single argument constructor
         if (resultType.isMatrix() || argType.isMatrix())
         {
+            if (argType.isMatrix() && argType.matrixRows == 1 && argType.matrixCols == 1 &&
+                argType.elementType == IRType::Float32 && argType.arraySize == 0 &&
+                resultType.isScalar() && resultType.baseType == IRType::Float32 && resultType.arraySize == 0)
+                return emitInstruction(IROp::VecExtract, resultType,
+                    {argValues[0], createConstant(int32_t{0})}, expr->loc);
             if (resultType.isMatrix() && resultType.elementType == IRType::Float32 && argType.isScalar() &&
                 (argType.baseType == IRType::Float32 || argType.baseType == IRType::Int32))
                 return emitScalarMatrixBroadcast(argType, resultType, argValues[0], expr->loc);
@@ -8539,8 +8549,8 @@ IRValueID IRBuilder::emitScalarMatrixBroadcast(const IRTypeInfo& sourceType,
     if (value == InvalidIRValue) return value;
     if (!sourceType.isScalar() || sourceType.arraySize != 0 || targetType.arraySize != 0 ||
         !targetType.isMatrix() || targetType.elementType != IRType::Float32 ||
-        targetType.matrixRows < 2 || targetType.matrixRows > 4 ||
-        targetType.matrixCols < 2 || targetType.matrixCols > 4 ||
+        targetType.matrixRows < 1 || targetType.matrixRows > 4 ||
+        targetType.matrixCols < 1 || targetType.matrixCols > 4 ||
         (sourceType.baseType != IRType::Float32 && sourceType.baseType != IRType::Int32))
     {
         error(loc, "scalar-to-matrix conversion requires a float/int scalar and float matrix (scalar-matrix-broadcast)");

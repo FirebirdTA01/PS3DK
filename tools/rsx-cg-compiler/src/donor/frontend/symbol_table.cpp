@@ -495,6 +495,13 @@ void SymbolTable::registerBuiltinTypes()
     addType("float3x3", CgType::Float3x3());
     addType("float4x4", CgType::Float4x4());
     addType("matrix", CgType::Float4x4());
+    // One-wide float matrices keep matrix identity, including float1x1.
+    for (int n = 1; n <= 4; ++n)
+    {
+        addType("float1x" + std::to_string(n), CgType::Mat(ScalarKind::Float, 1, n));
+        if (n != 1)
+            addType("float" + std::to_string(n) + "x1", CgType::Mat(ScalarKind::Float, n, 1));
+    }
     // Non-square matrices are real types on the reference: RxC = R rows of
     // C-wide vectors (rectangular-matrices / rectangular-matrix-row-access).
     for (int r = 2; r <= 4; ++r)
@@ -785,9 +792,9 @@ void SymbolTable::registerVectorFunctions()
         }
     }
     // Matrix * matrix
-    for (int r = 2; r <= 4; ++r)
-        for (int k = 2; k <= 4; ++k)
-            for (int c = 2; c <= 4; ++c)
+    for (int r = 1; r <= 4; ++r)
+        for (int k = 1; k <= 4; ++k)
+            for (int c = 1; c <= 4; ++c)
                 addFunction("mul", CgType::Mat(ScalarKind::Float, r, c),
                             {CgType::Mat(ScalarKind::Float, r, k), CgType::Mat(ScalarKind::Float, k, c)},
                             {"a", "b"}, nullptr, true);

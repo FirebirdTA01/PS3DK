@@ -5116,9 +5116,10 @@ private:
 
     bool matrixDimsSupported(const IRTypeInfo& type) const
     {
+        const int minDimension = type.elementType == IRType::Float32 ? 1 : 2;
         return type.isMatrix() &&
-               type.matrixRows >= 2 && type.matrixRows <= 4 &&
-               type.matrixCols >= 2 && type.matrixCols <= 4;
+               type.matrixRows >= minDimension && type.matrixRows <= 4 &&
+               type.matrixCols >= minDimension && type.matrixCols <= 4;
     }
 
     void lowerMatConstruct(const IRInstruction& inst)

@@ -34,6 +34,7 @@ void Parser::initBuiltinTypes()
         "short2", "short3", "short4",
         "ushort2", "ushort3", "ushort4",
         "float2x2", "float3x3", "float4x4",
+        "float1x1", "float1x2", "float1x3", "float1x4", "float2x1", "float3x1", "float4x1",
         "float2x3", "float2x4", "float3x2", "float3x4", "float4x2", "float4x3",
         "matrix",
         "half2x2", "half3x3", "half4x4",
@@ -505,9 +506,10 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
                              (n.compare(0, 6, "double") == 0 && len == 9);   // double-alias
         const bool isHalf = n.compare(0, 4, "half") == 0 && len == 7;
         const bool isBool = n.compare(0, 4, "bool") == 0 && len == 7;
+        const char minDimension = n.compare(0, 5, "float") == 0 ? '1' : '2';
         if ((isFloat || isHalf || isBool) && n[len - 2] == 'x' &&
-            n[len - 3] >= '2' && n[len - 3] <= '4' &&
-            n[len - 1] >= '2' && n[len - 1] <= '4')
+            n[len - 3] >= minDimension && n[len - 3] <= '4' &&
+            n[len - 1] >= minDimension && n[len - 1] <= '4')
         {
             advance();
             type->baseType = isBool ? BaseType::Bool : (isFloat ? BaseType::Float : BaseType::Half);

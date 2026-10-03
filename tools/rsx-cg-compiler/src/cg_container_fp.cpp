@@ -88,6 +88,7 @@ constexpr uint32_t kCgFloat       = 1045u;
 constexpr uint32_t kCgFloat2      = 1046u;
 constexpr uint32_t kCgFloat3      = 1047u;
 constexpr uint32_t kCgFloat4      = 1048u;
+constexpr uint32_t kCgFloat1      = 1091u;  // one-column matrix row, not scalar CG_FLOAT
 constexpr uint32_t kCgFloat2x2    = 1054u;
 constexpr uint32_t kCgFloat3x3    = 1059u;
 constexpr uint32_t kCgFloat4x4    = 1064u;
@@ -411,7 +412,7 @@ ContainerResult emitFragmentContainerImpl(
                 ParamDesc e;
                 e.name = rsx_cg::arrayElementName(p.name, k);
                 e.semantic = std::string{};
-                e.type = cgTypeForIRType(rowType);
+                e.type = cols == 1 ? kCgFloat1 : cgTypeForIRType(rowType);
                 e.paramno = irParamOrdinal(entry->parameters[i], i);
                 e.res = kCgUndefined;
                 e.var = kCgUniform;
@@ -631,7 +632,7 @@ ContainerResult emitFragmentContainerImpl(
                     ParamDesc e;
                     e.name      = rsx_cg::arrayElementName(g.name, static_cast<int>(k));
                     e.semantic  = std::string{};
-                    e.type      = cgTypeForIRType(rowType);
+                    e.type      = cols == 1 ? kCgFloat1 : cgTypeForIRType(rowType);
                     e.paramno   = kInvalidIndex;
                     e.res       = kCgUndefined;
                     e.var       = kCgUniform;

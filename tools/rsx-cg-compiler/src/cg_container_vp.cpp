@@ -160,6 +160,7 @@ uint32_t cgMatrixType(int rows, int cols)
 uint32_t cgMatrixRowType(int cols)
 {
     if (cols < 1 || cols > 4) return kCgFloat4;
+    if (cols == 1) return kCgFloat1;
     return kCgFloat + static_cast<uint32_t>(cols - 1);
 }
 
