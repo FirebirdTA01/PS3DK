@@ -3545,6 +3545,55 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             {
                 IRTypeInfo elementType = declaredType;
                 elementType.arraySize = 0;
+                // A FLATTENED list fills the elements lane by lane: `float2
+                // o[4] = {x0, y0, x1, y1, ...}`, or mixed `{float2(1,2), 3, 4}`
+                // (measured: the reference accepts both with warning C1058).
+                // Every argument splits into scalar lanes, each converted to
+                // the element's scalar type; the lanes regroup into elements.
+                const int width = elementType.isVector() ? elementType.vectorSize : 1;
+                if (ctor->arguments.size() != static_cast<size_t>(declaredType.arraySize) &&
+                    !elementType.isMatrix())
+                {
+                    IRTypeInfo laneTarget = elementType;
+                    laneTarget.baseType = elementType.isVector() ? elementType.elementType : elementType.baseType;
+                    laneTarget.elementType = laneTarget.baseType;
+                    laneTarget.vectorSize = 1;
+                    std::vector<IRValueID> lanes;
+                    bool flat = true;
+                    for (const auto& arg : ctor->arguments)
+                    {
+                        const IRTypeInfo argType = getExprType(arg.get());
+                        if (argType.isMatrix() || argType.arraySize != 0) { flat = false; break; }
+                        const IRValueID v = buildExpr(arg.get());
+                        if (v == InvalidIRValue) { flat = false; break; }
+                        if (argType.isVector())
+                        {
+                            IRTypeInfo laneType = argType;
+                            laneType.baseType = argType.elementType;
+                            laneType.vectorSize = 1;
+                            for (int j = 0; j < argType.vectorSize; ++j)
+                            {
+                                const IRValueID lane = emitInstruction(IROp::VecExtract, laneType,
+                                    {v, createConstant(static_cast<int32_t>(j))}, arg->loc);
+                                lanes.push_back(emitScalarConversion(laneType, laneTarget, lane, arg->loc));
+                            }
+                        }
+                        else
+                            lanes.push_back(emitScalarConversion(argType, laneTarget, v, arg->loc));
+                    }
+                    if (flat && lanes.size() == static_cast<size_t>(declaredType.arraySize * width))
+                    {
+                        auto& slots = localArrayValues_[varDecl->name];
+                        slots.assign(static_cast<size_t>(declaredType.arraySize), InvalidIRValue);
+                        for (int e = 0; e < declaredType.arraySize; ++e)
+                        {
+                            if (width == 1) { slots[static_cast<size_t>(e)] = lanes[static_cast<size_t>(e)]; continue; }
+                            std::vector<IRValueID> parts(lanes.begin() + e * width, lanes.begin() + (e + 1) * width);
+                            slots[static_cast<size_t>(e)] = emitInstruction(IROp::VecConstruct, elementType, parts, varDecl->loc);
+                        }
+                        continue;
+                    }
+                }
                 if (ctor->arguments.size() != static_cast<size_t>(declaredType.arraySize))
                 {
                     error(varDecl->loc, "array initialiser for '" + varDecl->name + "' has " +
