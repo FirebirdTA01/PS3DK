@@ -1793,7 +1793,27 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             if (built.baseType != declared.baseType || built.vectorSize != declared.vectorSize ||
                 built.matrixRows != declared.matrixRows || built.isArray() || declared.isArray())
                 continue;
+            // The initialiser is FILE-SCOPE code: build it with the file-scope
+            // bindings, not the entry's parameters that have since shadowed
+            // some of them (review: codex - `static float y = f(x);` under
+            // `main(float x : TEXCOORD0)` reads the static x, measured 0.5).
+            // The stash holds each shadowed name's file-scope binding;
+            // restore the entry's view afterwards.
+            const auto entryNames = nameToValue_;
+            const auto entryArrays = localArrayValues_;
+            for (const auto& kv : shadowedGlobals_)
+            {
+                if (kv.second != InvalidIRValue) nameToValue_[kv.first] = kv.second;
+                else nameToValue_.erase(kv.first);
+            }
+            for (const auto& kv : shadowedGlobalArrays_)
+            {
+                if (!kv.second.empty()) localArrayValues_[kv.first] = kv.second;
+                else localArrayValues_.erase(kv.first);
+            }
             const IRValueID value = buildExpr(decl->initializer.get());
+            nameToValue_ = entryNames;
+            localArrayValues_ = entryArrays;
             if (value == InvalidIRValue) continue;
             if (auto st = shadowedGlobals_.find(decl->name); st != shadowedGlobals_.end())
                 st->second = value;

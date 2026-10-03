@@ -72,6 +72,21 @@ static float g = f(0.25);
 float rd() { return g; }
 float4 main(float g : TEXCOORD0) : COLOR { return float4(g, rd(), 0, 1); }
 """, lambda t: [t[0], 0.5, 0.0, 1.0]),
+    # The initialiser is file-scope code: under an entry parameter named like
+    # a static it reads, it still reads the STATIC (review: codex; measured
+    # (0.5, t.x, 0, 1)), and a later static sees an earlier one (measured
+    # z = f(y) + x = 1.25).
+    ('initialiser_reads_file_scope', """static float x = 0.25;
+float f(float a) { return a * 2.0; }
+static float y = f(x);
+float4 main(float x : TEXCOORD0) : COLOR { return float4(y, x, 0, 1); }
+""", lambda t: [0.5, t[0], 0.0, 1.0]),
+    ('chained_initialisers', """static float x = 0.25;
+float f(float a) { return a * 2.0; }
+static float y = f(x);
+static float z = f(y) + x;
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(y, z, t.x, 1); }
+""", lambda t: [0.5, 1.25, t[0], 1.0]),
 ]
 
 INPUTS = [[0.75, 0.5, 0.25, 1.0], [0.25, 0.125, 0.5, 0.0]]
