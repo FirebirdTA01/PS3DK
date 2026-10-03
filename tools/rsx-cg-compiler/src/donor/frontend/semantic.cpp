@@ -657,8 +657,11 @@ void SemanticAnalyzer::analyzeVarDecl(VarDecl* decl)
         // An unsized array declaration takes its length from the
         // initialiser: `const float c[] = float[](1.0, ...)` and
         // `float c[] = {...}` (lcd-grid-v2; the reference accepts both).
+        // Keyed on the type RESOLVED BEFORE the initialiser: a brace list
+        // shares the declaration's TypeNode, and analysing it has already
+        // written the length there.
         if (decl->type && decl->type->baseType == BaseType::Array &&
-            decl->type->arraySize == 0 && initType.isArray())
+            varType.arraySize() == 0 && initType.isArray())
         {
             decl->type->arraySize = initType.arraySize();
             varType = resolveType(decl->type.get());
