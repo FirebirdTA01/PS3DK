@@ -542,6 +542,8 @@ jobs:
         run: bash tests/shader-compiler/fp-global-matrix-load-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test fragment matrix addition and subtraction
         run: bash tests/shader-compiler/fp-matrix-addsub-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test bool matrix construction and static row use
+        run: bash tests/shader-compiler/bool-matrix-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler two-varying operands
         run: bash tests/shader-compiler/two-varying-operands-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

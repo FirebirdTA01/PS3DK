@@ -126,6 +126,7 @@ CgType CgType::Mat(ScalarKind scalar, int rows, int cols)
     BaseType bt;
     switch (scalar)
     {
+    case ScalarKind::Bool:  bt = BaseType::Bool; break;
     case ScalarKind::Float: bt = BaseType::Float; break;
     case ScalarKind::Half:  bt = BaseType::Half; break;
     case ScalarKind::Fixed: bt = BaseType::Fixed; break;
@@ -684,6 +685,8 @@ bool TypeOperations::isBinaryOpValid(BinaryOp op, const CgType& left, const CgTy
     // Comparison operations
     if (isComparisonOp(op))
     {
+        // Cg comparisons operate on scalar/vector components, not whole matrices.
+        if (left.isMatrix() || right.isMatrix()) return false;
         // Can compare numerics
         if (left.isNumeric() && right.isNumeric())
         {
@@ -835,6 +838,10 @@ bool canImplicitlyConvert(const CgType& from, const CgType& to)
         // Matrix to matrix: same dimensions required
         if (from.isMatrix() && to.isMatrix())
         {
+            // Bool matrix conversion is implemented by explicit row-wise
+            // constructors/casts; assignment must not bypass normalization.
+            if (to.scalarKind() == ScalarKind::Bool && from.scalarKind() != ScalarKind::Bool)
+                return false;
             return from.matrixRows() == to.matrixRows() &&
                    from.matrixCols() == to.matrixCols();
         }

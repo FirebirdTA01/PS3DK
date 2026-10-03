@@ -22,6 +22,8 @@ void Parser::initBuiltinTypes()
         "void", "bool", "int", "uint", "float", "half", "fixed",
         "char", "uchar", "short", "ushort",
         "bool2", "bool3", "bool4",
+        "bool2x2", "bool2x3", "bool2x4", "bool3x2", "bool3x3", "bool3x4",
+        "bool4x2", "bool4x3", "bool4x4",
         "int2", "int3", "int4",
         "uint2", "uint3", "uint4",
         "float2", "float3", "float4",
@@ -488,7 +490,7 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
         return type;
     }
 
-    // NON-SQUARE matrix type names (float3x4, half4x3 ...) are not lexer
+    // Identifier matrix type names (float3x4, half4x3, bool3x3 ...) are not lexer
     // keywords; they arrive as identifiers listed in typeNames.  Build the
     // matrix node from the name so they do not fall through to the struct
     // path below as an unknown struct (rectangular-matrix-row-access / rectangular-matrices).  The
@@ -501,12 +503,13 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
         const bool isFloat = (n.compare(0, 5, "float") == 0 && len == 8) ||
                              (n.compare(0, 6, "double") == 0 && len == 9);   // double-alias
         const bool isHalf = n.compare(0, 4, "half") == 0 && len == 7;
-        if ((isFloat || isHalf) && n[len - 2] == 'x' &&
+        const bool isBool = n.compare(0, 4, "bool") == 0 && len == 7;
+        if ((isFloat || isHalf || isBool) && n[len - 2] == 'x' &&
             n[len - 3] >= '2' && n[len - 3] <= '4' &&
             n[len - 1] >= '2' && n[len - 1] <= '4')
         {
             advance();
-            type->baseType = isFloat ? BaseType::Float : BaseType::Half;
+            type->baseType = isBool ? BaseType::Bool : (isFloat ? BaseType::Float : BaseType::Half);
             type->matrixRows = n[len - 3] - '0';
             type->matrixCols = n[len - 1] - '0';
             return type;

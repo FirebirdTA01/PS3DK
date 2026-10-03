@@ -1052,6 +1052,16 @@ std::unique_ptr<IRModule> IRBuilder::build(TranslationUnit& unit, const Semantic
     // Set entry point
     module_->entryPoint = module_->getFunction(module_->entryPointName);
 
+    // Bool matrices currently have local value semantics only. Container
+    // reflection still describes matrix parameters/globals as float matrices.
+    for (const auto& global : module_->globals)
+        if (global.type.isMatrix() && global.type.elementType == IRType::Bool)
+            error(SourceLocation{}, "bool matrix globals are not implemented: '" + global.name + "'");
+    if (module_->entryPoint)
+        for (const auto& parameter : module_->entryPoint->parameters)
+            if (parameter.type.isMatrix() && parameter.type.elementType == IRType::Bool)
+                error(SourceLocation{}, "bool matrix entry parameters are not implemented: '" + parameter.name + "'");
+
     return std::move(module_);
 }
 
@@ -7435,6 +7445,19 @@ IRValueID IRBuilder::emitMatrixNarrowing(const IRTypeInfo& sourceType,
             default: dstRowType.baseType = IRType::Vec4; break;
             }
 
+            if (targetType.elementType == IRType::Bool)
+            {
+                // A numeric bool cast tests nonzero, including fractional values.
+                // Describe the narrowed row rather than its original width.
+                IRTypeInfo sourceRowType = dstRowType;
+                sourceRowType.elementType = sourceType.elementType;
+                if (c == 1) sourceRowType.baseType = sourceType.elementType;
+                rowVal = emitNumericToBool(sourceRowType, dstRowType, rowVal, loc);
+                if (rowVal == InvalidIRValue) return InvalidIRValue;
+                rowValues.push_back(rowVal);
+                continue;
+            }
+
             IROp convOp = IROp::Bitcast;
             if (sourceType.elementType == IRType::Float32 && targetType.elementType == IRType::Float16)
                 convOp = IROp::FloatToHalf;
@@ -7444,7 +7467,7 @@ IRValueID IRBuilder::emitMatrixNarrowing(const IRTypeInfo& sourceType,
                      (targetType.elementType == IRType::Float32 || targetType.elementType == IRType::Float16))
                 convOp = IROp::IntToFloat;
             else if ((sourceType.elementType == IRType::Float32 || sourceType.elementType == IRType::Float16) &&
-                     (targetType.elementType == IRType::Int32 || targetType.elementType == IRType::UInt32 || targetType.elementType == IRType::Bool))
+                     (targetType.elementType == IRType::Int32 || targetType.elementType == IRType::UInt32))
                 convOp = IROp::FloatToInt;
 
             if (convOp != IROp::Bitcast)
@@ -7498,6 +7521,11 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
     // Matrix cast handling
     if (sourceType.isMatrix() || targetType.isMatrix())
     {
+        if (targetType.isMatrix() && targetType.elementType == IRType::Bool && sourceType.isScalar())
+        {
+            error(expr->loc, "scalar-to-bool-matrix casts are not implemented; use a bool matrix constructor");
+            return InvalidIRValue;
+        }
         if (sourceType.isMatrix() && targetType.isMatrix())
         {
             if (targetType.matrixRows > sourceType.matrixRows ||
@@ -7666,6 +7694,14 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
                 return emitMatrixNarrowing(argType, resultType, argValues[0], expr->loc);
             }
 
+            if (resultType.isMatrix() && resultType.elementType == IRType::Bool && argType.isScalar())
+            {
+                const IRValueID value = emitNumericToBool(argType, IRTypeInfo::Bool(), argValues[0], expr->loc);
+                if (value == InvalidIRValue) return InvalidIRValue;
+                return emitInstruction(IROp::MatConstruct, resultType,
+                    std::vector<IRValueID>(resultType.matrixRows * resultType.matrixCols, value), expr->loc);
+            }
+
             // A vector whose lanes exactly fill the matrix constructs it
             // row-major (measured: float2x2(float4) is accepted, rows a.xy and
             // a.zw).  Only a cast of a different shape is C1033.
@@ -7674,6 +7710,14 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
             {
                 IRTypeInfo laneType = IRTypeInfo::Float();
                 laneType.baseType = argType.elementType;
+                if (resultType.elementType == IRType::Bool)
+                {
+                    IRTypeInfo boolType = argType;
+                    boolType.elementType = IRType::Bool;
+                    argValues[0] = emitNumericToBool(argType, boolType, argValues[0], expr->loc);
+                    if (argValues[0] == InvalidIRValue) return InvalidIRValue;
+                    laneType = IRTypeInfo::Bool();
+                }
                 std::vector<IRValueID> lanes;
                 for (int k = 0; k < argType.vectorSize; ++k)
                     lanes.push_back(emitInstruction(IROp::VecExtract, laneType,
@@ -7795,6 +7839,18 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
     // Matrix construction from vectors (e.g., half3x3(v1, v2, v3))
     if (resultType.isMatrix())
     {
+        if (resultType.elementType == IRType::Bool)
+        {
+            for (size_t i = 0; i < argValues.size(); ++i)
+            {
+                const IRTypeInfo sourceType = getExprType(expr->arguments[i].get());
+                IRTypeInfo boolType = sourceType;
+                if (sourceType.isVector()) boolType.elementType = IRType::Bool;
+                else boolType = IRTypeInfo::Bool();
+                argValues[i] = emitNumericToBool(sourceType, boolType, argValues[i], expr->loc);
+                if (argValues[i] == InvalidIRValue) return InvalidIRValue;
+            }
+        }
         // Component widths of the arguments (a matrix argument is not
         // flattened here).
         std::vector<int> widths;
@@ -7824,6 +7880,7 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
                 const IRTypeInfo t = getExprType(expr->arguments[i].get());
                 IRTypeInfo laneType = IRTypeInfo::Float();
                 laneType.baseType = t.elementType;
+                if (resultType.elementType == IRType::Bool) laneType = IRTypeInfo::Bool();
                 for (int k = 0; k < widths[i]; ++k)
                     lanes.push_back(emitInstruction(IROp::VecExtract, laneType,
                         {argValues[i], createConstant(static_cast<int32_t>(k))}, expr->loc));
