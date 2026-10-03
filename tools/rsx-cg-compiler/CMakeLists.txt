@@ -161,6 +161,9 @@ add_executable(cgnv2elf
     ${SRC_DIR}/cgnv2elf/cgnv2elf.cpp
 )
 
+add_executable(fp-register-remap-test EXCLUDE_FROM_ALL tests/fp_register_remap_test.cpp)
+target_include_directories(fp-register-remap-test PRIVATE ${SRC_DIR})
+
 target_include_directories(cgnv2elf PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}    # generated version.h
 )

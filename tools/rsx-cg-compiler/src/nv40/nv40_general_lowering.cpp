@@ -33,6 +33,7 @@
 #include "array_uniforms.h"
 #include "uniform_bindings.h"
 #include "fp_sampler_bindings.h"
+#include "fp_register_remap.h"
 
 #include <algorithm>
 #include <array>
@@ -10463,6 +10464,63 @@ static bool fpEntryHasNoEffect(const IRFunction& entry)
     return true;
 }
 
+// Allocation owns whole R slots, including both H aliases. A permutation
+// of those slots preserves every interference and format-transition edge.
+// Try it only for an otherwise out-of-range allocation: existing accepted
+// programs retain their exact instruction bytes and register numbers.
+static void renumberFragmentTemps(VirtualProgram& program)
+{
+    std::set<int> used, half, fixed;
+    bool needsRemap = false;
+    const auto record = [&](int raw, bool fp16) {
+        if (raw < 0) return;
+        const int slot = fp16 ? raw >> 1 : raw;
+        used.insert(slot);
+        if (fp16) half.insert(slot);
+        if (raw >= 48 || slot >= 47) needsRemap = true;
+    };
+    for (const VInstr& vi : program.instrs) {
+        if (!vi.dst.none) {
+            if (vi.dst.output) {
+                // Output indices still name full slots at this point.
+                fixed.insert(vi.dst.index);
+                record(vi.dst.fp16 ? vi.dst.index * 2 : vi.dst.index, vi.dst.fp16);
+            } else {
+                record(vi.dst.phys, vi.dst.fp16);
+            }
+            if (vi.dst.outputPin && vi.dst.preferredPhys >= 0) {
+                fixed.insert(vi.dst.fp16 ? vi.dst.preferredPhys >> 1 : vi.dst.preferredPhys);
+                record(vi.dst.preferredPhys, vi.dst.fp16);
+            }
+        }
+        for (const VSrc& src : vi.srcs)
+            if (src.kind == VSrcKind::Temp) record(src.phys, src.fp16);
+    }
+    if (!needsRemap) return;
+    // Include the final allocator cache, even when a value has no later
+    // encoded use, so no stale physical index survives the permutation.
+    for (const auto& kv : program.vregToPhys) {
+        const auto h = program.vregToFp16.find(kv.first);
+        record(kv.second, h != program.vregToFp16.end() && h->second);
+    }
+    const auto plan = planFpRegisterRemap(used, half, fixed);
+    if (!plan) return; // Keep the original allocation and its named refusal.
+    const auto remap = [&](int raw, bool fp16) {
+        if (raw < 0) return raw;
+        const int slot = plan->at(fp16 ? raw >> 1 : raw);
+        return fp16 ? (slot << 1) | (raw & 1) : slot;
+    };
+    for (VInstr& vi : program.instrs) {
+        if (!vi.dst.none && !vi.dst.output) vi.dst.phys = remap(vi.dst.phys, vi.dst.fp16);
+        for (VSrc& src : vi.srcs)
+            if (src.kind == VSrcKind::Temp) src.phys = remap(src.phys, src.fp16);
+    }
+    for (auto& kv : program.vregToPhys) {
+        const auto h = program.vregToFp16.find(kv.first);
+        kv.second = remap(kv.second, h != program.vregToFp16.end() && h->second);
+    }
+}
+
 static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                                        const IRFunction& entry,
                                        FpAttributes* attrsOut)
@@ -10470,6 +10528,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     UcodeOutput out;
     FpAssembler asm_;
     FpAttributes attrs;
+    renumberFragmentTemps(program);
     // COLOR1+ is refused, so an emitted output-1 write is a DEPTH export.
     attrs.depthReplace = std::any_of(program.instrs.begin(), program.instrs.end(),
         [](const VInstr& vi) {
