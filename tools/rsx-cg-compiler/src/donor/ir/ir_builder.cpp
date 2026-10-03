@@ -4372,6 +4372,40 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
     // Handle assignment specially
     if (TypeOperations::isAssignmentOp(expr->op))
     {
+        if (expr->op == BinaryOp::Assign && expr->right->kind == ExprKind::Constructor &&
+            getStructFields(expr->left->resolvedType.get()))
+        {
+            // A constructor supplies leaf bindings, not a whole-struct SSA value.
+            // Collect its complete RHS before replacing any destination leaf.
+            std::string destination;
+            ExprNode* root = expr->left.get();
+            while (root && root->kind == ExprKind::MemberAccess)
+                root = static_cast<MemberAccessExpr*>(root)->object.get();
+            auto* identifier = root && root->kind == ExprKind::Identifier
+                ? static_cast<IdentifierExpr*>(root) : nullptr;
+            const DeclNode* declaration = identifier ? identifier->resolvedDecl : nullptr;
+            bool supportedDestination = declaration && declaration->kind == DeclKind::Variable &&
+                                        !globalDeclarations_.count(declaration);
+            if (declaration && declaration->kind == DeclKind::Parameter &&
+                currentFunction_->isEntryPoint && currentFunctionDecl_ && inlineStack_.empty())
+            {
+                const auto* parameter = static_cast<const ParamDecl*>(declaration);
+                supportedDestination = (parameter->storage == StorageQualifier::Out ||
+                                        parameter->storage == StorageQualifier::InOut) &&
+                    std::any_of(currentFunctionDecl_->parameters.begin(), currentFunctionDecl_->parameters.end(),
+                        [&](const auto& own) { return own.get() == parameter; });
+            }
+            if (module_->shaderStage != ShaderStage::Vertex || expr != statementExpr_ ||
+                !supportedDestination || !arrayStorageKey(expr->left.get(), destination))
+            {
+                error(expr->loc, "struct constructor assignment requires a named local or entry output "
+                                 "and a standalone vertex statement (struct-constructor-assignment)");
+                return InvalidIRValue;
+            }
+            if (buildLocalStructInitializer(destination, expr->left->resolvedType.get(), expr->right.get(), true))
+                emitEntryStructOutputs(expr->left.get());
+            return InvalidIRValue;
+        }
         // `G = IN` where IN is a flattened uniform struct entry parameter:
         // IN has no whole-struct value, so copy its member bindings onto
         // G's member keys (libretro: `IN_global = IN;` and helpers that
@@ -6569,7 +6603,8 @@ bool arrayStorageKey(ExprNode* expr, std::string& key)
 }
 }
 
-bool IRBuilder::buildLocalStructInitializer(const std::string& destination, TypeNode* type, ExprNode* source)
+bool IRBuilder::buildLocalStructInitializer(const std::string& destination, TypeNode* type, ExprNode* source,
+                                           bool replaceExisting)
 {
     // A struct has qualified leaf bindings, not a scalar IR value. Snapshot
     // every source leaf in source order before installing any destination.
@@ -6677,8 +6712,95 @@ bool IRBuilder::buildLocalStructInitializer(const std::string& destination, Type
         return true;
     };
     if (!collect(collect, destination, type, source)) return false;
+    if (replaceExisting)
+    {
+        // A former partial write must not survive replacement of its parent.
+        // All source values, including overlapping paths, are already captured.
+        for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+            if (it->first == destination || it->first.compare(0, destination.size() + 1, destination + ".") == 0)
+                it = nameToValue_.erase(it);
+            else ++it;
+    }
     for (const auto& leaf : leaves) nameToValue_[leaf.first] = leaf.second;
     return true;
+}
+
+void IRBuilder::emitEntryStructOutputs(ExprNode* target)
+{
+    if (!target || !currentFunction_->isEntryPoint || !currentFunctionDecl_ ||
+        !inlineStack_.empty() || module_->shaderStage != ShaderStage::Vertex) return;
+    std::vector<std::string> members;
+    ExprNode* root = target;
+    while (root->kind == ExprKind::MemberAccess)
+    {
+        auto* member = static_cast<MemberAccessExpr*>(root);
+        if (member->isSwizzle) return;
+        members.push_back(member->member);
+        root = member->object.get();
+    }
+    if (root->kind != ExprKind::Identifier) return;
+    const auto* identifier = static_cast<IdentifierExpr*>(root);
+    if (!identifier->resolvedDecl || identifier->resolvedDecl->kind != DeclKind::Parameter) return;
+    const auto* parameter = static_cast<ParamDecl*>(identifier->resolvedDecl);
+    if ((parameter->storage != StorageQualifier::Out && parameter->storage != StorageQualifier::InOut) ||
+        !std::any_of(currentFunctionDecl_->parameters.begin(), currentFunctionDecl_->parameters.end(),
+            [&](const auto& own) { return own.get() == parameter; })) return;
+    TypeNode* type = parameter->type.get();
+    if (!getStructFields(type)) return;
+    std::string path;
+    const StructField* selected = nullptr;
+    for (auto it = members.rbegin(); it != members.rend(); ++it)
+    {
+        const auto* fields = getStructFields(type);
+        if (!fields) return;
+        selected = nullptr;
+        for (const auto& field : *fields)
+            if (field.name == *it) { selected = &field; break; }
+        if (!selected) return;
+        path += (path.empty() ? "" : ".") + *it;
+        type = selected->type.get();
+    }
+    const auto emit = [&](auto& self, TypeNode* leafType, const std::string& fieldPath,
+                          const StructField* field) -> void {
+        if (const auto* fields = getStructFields(leafType))
+        {
+            for (const auto& child : *fields)
+                self(self, child.type.get(), fieldPath.empty() ? child.name : fieldPath + "." + child.name, &child);
+            return;
+        }
+        if (!field || field->semantic.isEmpty()) return;
+        const IRTypeInfo irType = getIRType(leafType);
+        if (!leafType || leafType->baseType != BaseType::Float || irType.isArray() || irType.isMatrix())
+        {
+            error(target->loc, "entry struct output assignment requires float scalar/vector leaves "
+                               "(struct-constructor-assignment)");
+            return;
+        }
+        const auto value = nameToValue_.find(identifier->name + "." + fieldPath);
+        if (value == nameToValue_.end())
+        {
+            error(target->loc, "entry struct output has no assigned leaf '" + fieldPath + "'");
+            return;
+        }
+        // Only a later write in this same block supersedes the earlier output.
+        // A predecessor's store may still be needed on another control-flow path.
+        auto& instructions = currentBlock_->instructions;
+        for (auto it = instructions.begin(); it != instructions.end(); )
+            if ((*it)->op == IROp::StoreOutput && (*it)->semanticName == field->semantic.name &&
+                (*it)->semanticIndex == field->semantic.index)
+                it = instructions.erase(it);
+            else ++it;
+        auto store = std::make_unique<IRInstruction>(IROp::StoreOutput, InvalidIRValue, irType);
+        store->addOperand(value->second);
+        store->semanticName = field->semantic.name;
+        store->rawSemanticName = field->semantic.rawName;
+        store->inferredSemantic = field->semantic.inferred;
+        store->semanticIndex = field->semantic.index;
+        store->fieldName = fieldPath;
+        store->loc = target->loc;
+        currentBlock_->addInstruction(std::move(store));
+    };
+    emit(emit, type, path, selected);
 }
 
 bool IRBuilder::copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type)
@@ -8195,6 +8317,7 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                 }
                 // The lvalue now holds the updated vector, but the value
                 // of an assignment expression is its coerced RHS.
+                if (!fields.empty()) emitEntryStructOutputs(memberExpr->object.get());
                 return value;
             }
         }
@@ -8208,50 +8331,9 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                                        : memberExpr->member);
             nameToValue_[compositeName] = value;
 
-            // Check if this is an output struct - emit StoreOutput.
-            // For local struct vars that get returned (`OUT.field = ...;
-            // return OUT;`), the StoreOutput emit is deferred to
-            // buildReturnStmt so the output param table follows the
-            // struct's *field declaration order* rather than the
-            // source statement order — that's what the reference
-            // compiler emits.  For `out` parameter struct fields we
-            // still emit inline (no return statement to anchor).
-            if (ident->resolvedDecl)
-            {
-                const bool isLocalVar =
-                    (ident->resolvedDecl->kind == DeclKind::Variable);
-
-                // Look up struct type info for the target
-                TypeNode* typeNode = nullptr;
-                if (ident->resolvedDecl->kind == DeclKind::Variable)
-                {
-                    typeNode = static_cast<VarDecl*>(ident->resolvedDecl)->type.get();
-                }
-
-                if (!isLocalVar)
-                {
-                    const std::vector<StructField>* fields = getStructFields(typeNode);
-                    if (fields)
-                    {
-                        for (const auto& field : *fields)
-                        {
-                            if (field.name == memberExpr->member && !field.semantic.isEmpty())
-                            {
-                                auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
-                                    InvalidIRValue, IRTypeInfo::Void());
-                                inst->addOperand(value);
-                                inst->semanticName    = field.semantic.name;
-                                inst->rawSemanticName = field.semantic.rawName;
-                                inst->inferredSemantic = field.semantic.inferred;
-                                inst->semanticIndex   = field.semantic.index;
-                                inst->fieldName       = memberExpr->member;
-                                currentBlock_->addInstruction(std::move(inst));
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
+            // Entry parameter leaves need immediate stores. Local struct
+            // returns keep their existing deferred, declaration-order stores.
+            emitEntryStructOutputs(target);
 
             return value;
         }
@@ -8288,6 +8370,7 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
             }
 
             nameToValue_[compositeName] = value;
+            emitEntryStructOutputs(target);
             return value;
         }
     }

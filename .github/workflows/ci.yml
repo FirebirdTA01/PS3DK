@@ -546,6 +546,8 @@ jobs:
         run: bash tests/shader-compiler/bool-matrix-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test scalar matrix broadcast and single evaluation
         run: bash tests/shader-compiler/scalar-matrix-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test vertex struct assignment snapshots and semantic outputs
+        run: bash tests/shader-compiler/struct-assignment-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler two-varying operands
         run: bash tests/shader-compiler/two-varying-operands-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
