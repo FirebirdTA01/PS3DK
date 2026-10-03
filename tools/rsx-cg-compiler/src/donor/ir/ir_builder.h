@@ -52,7 +52,8 @@ private:
                                               const TypeNode* declType,
                                               std::vector<float>& floatOut,
                                               std::vector<int64_t>& intOut,
-                                              IRModule* module = nullptr);
+                                              IRModule* module = nullptr,
+                                              bool allowBuiltinCalls = true);
 
     // Value mapping from AST to IR
     std::unordered_map<DeclNode*, IRValueID> declToValue_;

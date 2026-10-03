@@ -728,9 +728,27 @@ int componentCountOf(const TypeNode* t)
     return t->vectorSize > 0 ? t->vectorSize : 1;
 }
 
-bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, IRModule* module);
+struct ConstEvalContext
+{
+    bool allowBuiltinCalls;
+    std::unordered_set<const DeclNode*> validated;
+    std::unordered_set<const DeclNode*> active;
+};
 
-bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, IRModule* module)
+bool evaluateConstValueImpl(const ExprNode* e, ConstLanes& out, ConstShape& shape,
+                            IRModule* module, ConstEvalContext& context);
+
+// Builtin folding is opt-in for initializer callers. Runtime condition analysis
+// uses this evaluator too, with its own scope and control-flow restrictions.
+bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape,
+                        IRModule* module, bool allowBuiltinCalls = false)
+{
+    ConstEvalContext context{allowBuiltinCalls, {}, {}};
+    return evaluateConstValueImpl(e, out, shape, module, context);
+}
+
+bool evaluateConstValueImpl(const ExprNode* e, ConstLanes& out, ConstShape& shape,
+                            IRModule* module, ConstEvalContext& context)
 {
     out.clear();
     shape = ConstShape();
@@ -744,11 +762,69 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
         out.push_back(v);
         return true;
     }
+    case ExprKind::Call:
+    {
+        const auto* call = static_cast<const CallExpr*>(e);
+        // Source functions may shadow these names. A successfully resolved
+        // builtin has no source declaration; an unresolved call has no valid
+        // result type. Neither a source function nor a dormant bad call folds.
+        const TypeNode* type = call->resolvedType.get();
+        if (!context.allowBuiltinCalls || call->resolvedFunction || !type || type->baseType != BaseType::Float)
+            return false;
+        shape = shapeOfType(type);
+        if (shape.rows || shape.elems || shape.width < 1 || shape.width > 4)
+            return false;
+        const std::string& name = call->functionName;
+        const size_t arity = (name == "ceil" || name == "abs") ? 1
+                           : (name == "min" || name == "max") ? 2
+                           : name == "clamp" ? 3 : 0;
+        if (!arity || call->arguments.size() != arity) return false;
+        std::vector<ConstLanes> args(arity);
+        for (size_t i = 0; i < arity; ++i)
+        {
+            const ExprNode* arg = call->arguments[i].get();
+            // Low precision and integer overload conversions are separate
+            // measured debts, not permission to evaluate them as float.
+            if (!arg || !arg->resolvedType || arg->resolvedType->baseType != BaseType::Float)
+                return false;
+            ConstShape sh;
+            if (!evaluateConstValueImpl(arg, args[i], sh, module, context) || sh.rows || sh.elems ||
+                (sh.width != 1 && sh.width != shape.width) ||
+                args[i].size() != static_cast<size_t>(sh.width)) return false;
+            for (const auto& lane : args[i])
+                if (!std::isfinite(static_cast<float>(lane.asDouble()))) return false;
+        }
+        for (int lane = 0; lane < shape.width; ++lane)
+        {
+            float v[3] = {};
+            for (size_t i = 0; i < arity; ++i)
+                v[i] = static_cast<float>(args[i][args[i].size() == 1 ? 0 : lane].asDouble());
+            // Equal signed zeros have an ordering-dependent result in min/max.
+            // Keep that unmeasured boundary refused; ceil preserves -0 and
+            // abs clears it, as the ordinary floating-point operations do.
+            for (size_t i = 0; i < arity; ++i)
+                for (size_t j = i + 1; j < arity; ++j)
+                    if (v[i] == 0 && v[j] == 0 && std::signbit(v[i]) != std::signbit(v[j]))
+                        return false;
+            float result = 0;
+            if (name == "ceil") result = std::ceil(v[0]);
+            else if (name == "abs") result = std::fabs(v[0]);
+            else if (name == "min") result = std::min(v[0], v[1]);
+            else if (name == "max") result = std::max(v[0], v[1]);
+            else
+            {
+                if (v[1] > v[2]) return false; // reversed bounds are unmeasured
+                result = std::min(std::max(v[0], v[1]), v[2]);
+            }
+            out.push_back(ConstEvalScalar::fromFloat(static_cast<double>(result)));
+        }
+        return true;
+    }
     case ExprKind::Unary:
     {
         const auto* u = static_cast<const UnaryExpr*>(e);
         ConstLanes v; ConstShape sh;
-        if (!evaluateConstValue(u->operand.get(), v, sh, module)) return false;
+        if (!evaluateConstValueImpl(u->operand.get(), v, sh, module, context)) return false;
         for (const auto& lane : v)
         {
             ConstEvalScalar r;
@@ -762,8 +838,8 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
     {
         const auto* b = static_cast<const BinaryExpr*>(e);
         ConstLanes l, r; ConstShape ls, rs;
-        if (!evaluateConstValue(b->left.get(), l, ls, module)) return false;
-        if (!evaluateConstValue(b->right.get(), r, rs, module)) return false;
+        if (!evaluateConstValueImpl(b->left.get(), l, ls, module, context)) return false;
+        if (!evaluateConstValueImpl(b->right.get(), r, rs, module, context)) return false;
         if (l.empty() || r.empty()) return false;
         if (!combineShapes(ls, rs, shape)) return false;
         const size_t n = std::max(l.size(), r.size());
@@ -781,11 +857,11 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
     {
         const auto* t = static_cast<const TernaryExpr*>(e);
         ConstLanes cond, a, c; ConstShape cs, as, bs;
-        if (!evaluateConstValue(t->condition.get(), cond, cs, module) || cond.size() != 1) return false;
+        if (!evaluateConstValueImpl(t->condition.get(), cond, cs, module, context) || cond.size() != 1) return false;
         // Both branches are evaluated: the result takes their COMMON type and
         // the common shape, whichever branch is selected.
-        if (!evaluateConstValue(t->thenExpr.get(), a, as, module)) return false;
-        if (!evaluateConstValue(t->elseExpr.get(), c, bs, module)) return false;
+        if (!evaluateConstValueImpl(t->thenExpr.get(), a, as, module, context)) return false;
+        if (!evaluateConstValueImpl(t->elseExpr.get(), c, bs, module, context)) return false;
         if (a.empty() || c.empty() || !combineShapes(as, bs, shape)) return false;
         const BaseType common = commonBaseType(a[0], c[0]);
         const ConstLanes& chosen = cond[0].isTruthy() ? a : c;
@@ -803,7 +879,7 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
         const auto* cast = static_cast<const CastExpr*>(e);
         if (!cast->targetType) return false;
         ConstLanes v; ConstShape sh;
-        if (!evaluateConstValue(cast->operand.get(), v, sh, module)) return false;
+        if (!evaluateConstValueImpl(cast->operand.get(), v, sh, module, context)) return false;
         shape = shapeOfType(cast->targetType.get());
         const int n = shape.laneCount();
         if (v.size() == 1 && n > 1) broadcastFirst(v, static_cast<size_t>(n));
@@ -826,7 +902,7 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
         for (const auto& a : ctor->arguments)
         {
             ConstLanes v; ConstShape sh;
-            if (!evaluateConstValue(a.get(), v, sh, module)) return false;
+            if (!evaluateConstValueImpl(a.get(), v, sh, module, context)) return false;
             for (const auto& lane : v)
             {
                 ConstEvalScalar c;
@@ -856,6 +932,25 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
         // .local/probe-init), so it must not fold.
         if (!g || g->storage != StorageQualifier::Const || !g->declaredStatic) return false;
         if (g->initialValue.empty() && g->initialIntValues.empty()) return false;
+        if (!context.allowBuiltinCalls)
+        {
+            // Checking only the immediate Call node misses transitive forms:
+            // static const A=ceil(...); const K=A also loses K's binding.
+            // Recheck the already evaluated declaration's dependency chain
+            // under this caller's policy before consuming its saved value.
+            const DeclNode* decl = id->resolvedDecl;
+            if (!decl || decl->kind != DeclKind::Variable) return false;
+            if (!context.validated.count(decl))
+            {
+                if (!context.active.insert(decl).second) return false;
+                const auto* var = static_cast<const VarDecl*>(decl);
+                ConstLanes dependency; ConstShape dependencyShape;
+                if (!evaluateConstValueImpl(var->initializer.get(), dependency, dependencyShape,
+                                            module, context)) return false;
+                context.active.erase(decl);
+                context.validated.insert(decl);
+            }
+        }
         const IRType bt = g->type.baseType;
         const bool useInts = !g->initialIntValues.empty() &&
                              (bt == IRType::Int32 || bt == IRType::UInt32 || bt == IRType::Bool);
@@ -880,7 +975,7 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
         const auto* m = static_cast<const MemberAccessExpr*>(e);
         if (!m->isSwizzle || m->member.empty() || m->member.size() > 4) return false;
         ConstLanes v; ConstShape sh;
-        if (!evaluateConstValue(m->object.get(), v, sh, module)) return false;
+        if (!evaluateConstValueImpl(m->object.get(), v, sh, module, context)) return false;
         if (sh.rows > 0 || sh.elems > 0) return false;   // a swizzle reads a vector
         for (char ch : m->member)
         {
@@ -895,8 +990,8 @@ bool evaluateConstValue(const ExprNode* e, ConstLanes& out, ConstShape& shape, I
     {
         const auto* ix = static_cast<const IndexExpr*>(e);
         ConstLanes v, idx; ConstShape sh, is;
-        if (!evaluateConstValue(ix->array.get(), v, sh, module)) return false;
-        if (!evaluateConstValue(ix->index.get(), idx, is, module) || idx.size() != 1) return false;
+        if (!evaluateConstValueImpl(ix->array.get(), v, sh, module, context)) return false;
+        if (!evaluateConstValueImpl(ix->index.get(), idx, is, module, context) || idx.size() != 1) return false;
         if (idx[0].kind == ConstEvalScalar::Kind::Float) return false;   // float selectors are the IR path's rule, not this one's
         const int64_t i = idx[0].asInt64();
         int count = 0, stride = 0;
@@ -932,7 +1027,7 @@ bool IRBuilder::evaluateConstInitializerTyped(const ExprNode* init,
                                              const TypeNode* declType,
                                              std::vector<float>& floatOut,
                                              std::vector<int64_t>& intOut,
-                                             IRModule* module)
+                                             IRModule* module, bool allowBuiltinCalls)
 {
     floatOut.clear();
     intOut.clear();
@@ -941,7 +1036,7 @@ bool IRBuilder::evaluateConstInitializerTyped(const ExprNode* init,
 
     ConstLanes lanes;
     ConstShape shape;
-    if (!evaluateConstValue(init, lanes, shape, module) || lanes.empty())
+    if (!evaluateConstValue(init, lanes, shape, module, allowBuiltinCalls) || lanes.empty())
         return false;
 
     if (declType)
@@ -1112,13 +1207,18 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             const bool isInitialisedStatic =
                 varDecl->storage == StorageQualifier::Static &&
                 varDecl->initializer != nullptr;
+            // Non-static const reflection is an existing separate debt: it
+            // currently materializes literals instead of a patchable default.
+            // Do not newly accept builtin expressions in that context until
+            // the binding path is corrected. Explicit uniforms remain allowed.
             if (isFileScopeConst || isInitialisedUniform || isInitialisedStatic)
             {
                 if (!evaluateConstInitializerTyped(varDecl->initializer.get(),
                                                    varDecl->type.get(),
                                                    constInit,
                                                    constIntInit,
-                                                   module_.get()))
+                                                   module_.get(),
+                                                   !isFileScopeConst || varDecl->isStatic))
                 {
                     // REFUSE rather than drop it.  Silently emitting zero for
                     // a value we could not evaluate is the defect this fix
