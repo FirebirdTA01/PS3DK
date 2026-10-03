@@ -7449,6 +7449,39 @@ IRValueID IRBuilder::buildTernaryExpr(TernaryExpr* expr)
 
     IRTypeInfo resultType = getExprType(expr);
 
+    // Match the fragment if-join's no-write path for a local declaration,
+    // e.g. `float4 q; q = c ? value : q`. The reference emits the same
+    // program as `if (c) q = value`. Do not turn arbitrary unresolved ids,
+    // globals, parameters, or two undefined arms into initialized values.
+    // Vertex no-write behavior remains unmeasured and keeps its refusal.
+    if (module_->shaderStage == ShaderStage::Fragment &&
+        (resultType.isScalar() || resultType.isVector()))
+    {
+        const auto isUnwrittenLocal = [&](IRValueID id) {
+            if (id == InvalidIRValue || id >= IRModule::kGlobalIdBase)
+                return false;
+            for (const auto& binding : declToValue_)
+            {
+                if (binding.second != id || binding.first->kind != DeclKind::Variable)
+                    continue;
+                const auto* declaration = static_cast<const VarDecl*>(binding.first);
+                if (!declaration->initializer) return true;
+            }
+            return false;
+        };
+        const bool thenUnwritten = isUnwrittenLocal(thenValue);
+        const bool elseUnwritten = isUnwrittenLocal(elseValue);
+        if (thenUnwritten != elseUnwritten &&
+            thenValue != InvalidIRValue && elseValue != InvalidIRValue)
+        {
+            const int count = std::max(1, resultType.componentCount());
+            const auto zero = createConstant(resultType,
+                std::vector<float>(static_cast<size_t>(count), 0.0f),
+                std::vector<int64_t>(static_cast<size_t>(count), 0));
+            (thenUnwritten ? thenValue : elseValue) = zero;
+        }
+    }
+
     auto inst = std::make_unique<IRInstruction>(IROp::Select,
         currentFunction_->allocateValueId(), resultType);
     inst->addOperand(condValue);

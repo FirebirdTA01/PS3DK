@@ -1,4 +1,4 @@
-"""An if-join where one side has no definition takes the other side.
+"""Fragment joins preserve inputs and zero a local's unwritten path.
 
 Two shapes refused with an unresolved operand: a varying struct member read
 first inside one arm and again after the join (crt glow lanczos_horiz reads
@@ -7,10 +7,11 @@ that an if / else-if chain writes with no final else (the xbr family's
 `pix1`/`blend1`).  The join built Select(cond, value, <nothing>).  A member
 an arm ASSIGNS before any read is the third shape, and the one that must not
 take the assigned side: elsewhere it is the input.  Rows are judged by value
-with fp_eval against the C formula.  The undefined path of
-the second program (neither arm runs) is not judged: the value is undefined
-in Cg; the reference reads an unwritten register there, which is zero at
-run time, and so is ours (judged on the no-write path too).
+with fp_eval against the stated formula. An unwritten local is undefined
+in Cg; our fragment policy explicitly supplies zero, matching the observed
+reference pixel cases. This is not a physical-register initialization
+guarantee. Equivalent ternary joins follow that policy; vertex behavior is
+still a named refusal.
 """
 import subprocess
 import sys
@@ -149,6 +150,29 @@ ROWS = [
     ]),
 ]
 
+# A ternary self-retain is the expression form of the fragment no-write
+# join above. The reference emits byte-identical containers for these two
+# forms; selecting the written arm on both paths is not equivalent.
+TERNARY_INPUTS = [{'TEX0': t} for t in (
+    [0.75, 0.25, 0.5, 0.125], [0.25, 0.75, 0.5, 0.125],
+    [0.25, 0.25, 0.5, 0.125])]
+for name, body, formula in [
+    ('ternary_unwritten_else', 'float4 q; q=t.x>0.5?t:q; return q;',
+     lambda t: t if t[0] > 0.5 else [0.0]*4),
+    ('ternary_unwritten_then', 'float4 q; q=t.x>0.5?q:t; return q;',
+     lambda t: [0.0]*4 if t[0] > 0.5 else t),
+    ('ternary_scalar', 'float q; q=t.x>0.5?t.y:q; return float4(q,0,0,1);',
+     lambda t: [t[1] if t[0] > 0.5 else 0.0, 0.0, 0.0, 1.0]),
+    ('ternary_retain_prior', 'float4 q; q=t.x>0.5?t:q; q=t.y>0.5?t.yxzw:q; return q;',
+     lambda t: [t[1],t[0],t[2],t[3]] if t[1] > 0.5 else (t if t[0] > 0.5 else [0.0]*4)),
+    ('ternary_initialized', 'float4 q=0.125; q=t.x>0.5?t:q; return q;',
+     lambda t: t if t[0] > 0.5 else [0.125]*4),
+    ('ternary_parameter', 'float4 q=t.yxzw; return t.x>0.5?t:q;',
+     lambda t: t if t[0] > 0.5 else [t[1],t[0],t[2],t[3]]),
+]:
+    ROWS.append((name, 'float4 main(float4 t:TEXCOORD0):COLOR {'+body+'}',
+                 lambda env, f=formula: f(env['TEX0']), TERNARY_INPUTS))
+
 
 def main():
     compiler = sys.argv[1]
@@ -185,6 +209,18 @@ def main():
                               'NOT refused (rc %d)' % run.returncode))
         if not ok:
             failures.append('uninit_vp: a vertex no-write join must keep refusing, rc %d' % run.returncode)
+        for name, stage, body in [
+            ('ternary_unwritten_vp', 'sce_vp_rsx', 'float4 q; return p.x>0.5?p:q;'),
+            ('ternary_both_unwritten', 'sce_fp_rsx', 'float4 q,r; return p.x>0.5?q:r;'),
+            ('unwritten_direct', 'sce_fp_rsx', 'float4 q; return q;'),
+        ]:
+            src, dst = Path(tmp)/(name+'.cg'), Path(tmp)/(name+'.bin')
+            src.write_text('float4 main(float4 p:'+('POSITION' if stage=='sce_vp_rsx' else 'TEXCOORD0')+'):'+
+                           ('POSITION' if stage=='sce_vp_rsx' else 'COLOR')+'{'+body+'}')
+            run = subprocess.run([compiler,'-p',stage,'--emit-container',str(dst),str(src)],
+                                 capture_output=True,text=True,timeout=60)
+            if run.returncode != 1 or dst.exists():
+                failures.append(name+': expected refusal without artifact')
     for f in failures:
         print('FAIL:', f)
     print('join-undefined: %s' % ('PASS' if not failures else 'FAIL (%d)' % len(failures)))
