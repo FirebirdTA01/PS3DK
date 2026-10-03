@@ -55,6 +55,7 @@ ROWS = {
     'vector_lane_store': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { int4 r = int4(0, 0, 0, 0); r[2] = 3; float4 v = a; v[1] = b.x; return float4(v.x, v.y, float(r.z), 1.0); }' + '\\n', [0.5, 1.0, 3.0, 1.0]),
     'matrix_row_store': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { float2x2 m = float2x2(1, 2, 3, 4); m[1] = a.xy; return float4(m[0], m[1]); }' + '\\n', [1.0, 2.0, 0.5, -0.25]),
     'struct_identical_redefinition': ('struct S { float2 a; float b; }; float g(S s) { return s.b; } struct S { float2 a; float b; }; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { S s; s.a = a.xy; s.b = a.z; return float4(s.a, g(s), 1); }' + '\\n', [0.5, -0.25, 0.75, 1.0]),
+    'uniform_swizzle_write': ('float4 K; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { K.xyz = 4; return float4(K.x * a.x, K.y, K.z, 1); }' + '\\n', [2.0, 4.0, 4.0, 1.0]),
     'flattened_array_initialisers': ('static const float2 s[2] = {0.25, 0.5, 0.75, 1.0}; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { const float2 o[3] = {0.5, 1.0, -0.25, 2.0, 0.125, -1.0}; float2 p[2] = {float2(1.0, 2.0), 3.0, 4.0}; return float4(o[1] + o[2] * a.x, p[1] + p[0]) + float4(s[1], s[0]); }' + '\\n', [0.5625, 2.5, 4.25, 6.5]),
     'inferred_array_to_sized_param': ('static const float cx[] = {1.0, 2.0, 3.0}; float g(float v[3]) { return v[2] + v[0]; } float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return float4(g(cx), a.x, 0, 1); }' + '\\n', [4.0, 0.5, 0.0, 1.0]),
 }
