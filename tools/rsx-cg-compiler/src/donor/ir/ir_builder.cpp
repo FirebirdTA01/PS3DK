@@ -2120,6 +2120,12 @@ void IRBuilder::buildBlockStmt(BlockStmt* stmt)
     blockDeclared_.emplace_back();
     for (auto& s : stmt->statements)
     {
+        // A selected literal arm can return directly in the entry block.
+        // Its suffix is unreachable, but block bindings still unwind below.
+        if (module_->shaderStage == ShaderStage::Fragment &&
+            currentFunction_->isEntryPoint && currentBlock_->hasTerminator() &&
+            currentBlock_->instructions.back()->op == IROp::Return)
+            break;
         buildStmt(s.get());
     }
     const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
@@ -2242,6 +2248,20 @@ void IRBuilder::ScopeState::unfold(std::unordered_map<std::string, IRValueID>& j
 
 void IRBuilder::buildIfStmt(IfStmt* stmt)
 {
+    // Macro debug switches commonly arrive as literal 0/1. Semantic analysis
+    // has already checked both arms; building a dead return would leave a
+    // spurious multi-exit CFG. Keep this slice to FP entry literals: no local,
+    // uniform, side-effecting expression or reduced-precision guess is folded.
+    if (module_->shaderStage == ShaderStage::Fragment &&
+        currentFunction_->isEntryPoint && stmt->condition &&
+        stmt->condition->kind == ExprKind::Literal)
+    {
+        if (const std::optional<bool> taken = constCondition(stmt->condition.get()))
+        {
+            buildStmt(*taken ? stmt->thenBranch.get() : stmt->elseBranch.get());
+            return;
+        }
+    }
     const std::function<void()> thenArm = [&] { buildStmt(stmt->thenBranch.get()); };
     const std::function<void()> elseArm = [&] { buildStmt(stmt->elseBranch.get()); };
     buildConditional(stmt->condition.get(), stmt->loc, thenArm, stmt->elseBranch ? &elseArm : nullptr);

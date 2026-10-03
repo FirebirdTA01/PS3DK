@@ -621,6 +621,8 @@ jobs:
         run: bash tests/shader-compiler/discard-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Unreachable missing-return stubs preserve both live return values
         run: bash tests/shader-compiler/dead-return-stub-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Literal fragment entry branches preserve scope and return values
+        run: bash tests/shader-compiler/entry-literal-branch-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test C-style narrowing casts on vectors and matrices
         run: bash tests/shader-compiler/cast-narrowing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test half subnormal flush to zero in constant evaluation
