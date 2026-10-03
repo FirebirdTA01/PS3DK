@@ -53,7 +53,37 @@ void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { 
 VP_TWIN = """void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { o = p * 0.5 + float4(0.5, 0.25, 0.125, 1); c = float4(1, 2, 3, 4) * 0.125; }
 """
 
+# A static const array passed whole to a helper (review: codex): a parameter
+# named like the global, two calls of a helper that writes its copy, and the
+# global read after - each call starts from the initialiser and the global
+# is untouched (measured: (2, 12, 12, 1)).
+PASSED_WHOLE = """static const float cx[3] = {1.0, 2.0, 3.0};
+float g(float cx[3]) { return cx[2] - cx[0]; }
+float h(float v[3]) { v[0] = 10.0; return v[0] + v[1]; }
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    float a = g(cx);
+    float b = h(cx);
+    float c = h(cx);
+    return float4(a, b, c, cx[0]);
+}
+"""
+# int and half element arrays into a float[3] parameter: the reference
+# requires the exact element type (C1102), so ours must refuse - never pass
+# unconverted lanes.
+TYPE_MISMATCH = {
+    'int_into_float_param': """static const int ci[3] = {1, 2, 3};
+float g(float v[3]) { return v[2] + v[0]; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(g(ci), t.x, 0, 1); }
+""",
+    'half_into_float_param': """static const half ch[3] = {0.5, 0.25, 0.125};
+float g(float v[3]) { return v[2] + v[0]; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(g(ch), t.x, 0, 1); }
+""",
+}
+
 ROWS = [  # measured on the reference: (0.5 t.x + 4, 3.75, 6, 3) and (t.y, 0.125, t.y, 1)
+    ('passed_whole', PASSED_WHOLE, lambda t: [2.0, 12.0, 12.0, 1.0]),
     ('element_types', ELEMENT_TYPES, lambda t: [0.5 * t[0] + 4.0, 3.75, 6.0, 3.0]),
     ('shadowed', SHADOWED, lambda t: [t[1], 0.125, t[1], 1.0]),
 ]
@@ -95,6 +125,12 @@ def main():
                               'DIFFERS or refused (rc %d / %d)' % (fold.returncode, twin.returncode)))
         if not same:
             failures.append('vp_fold: not byte-identical to its literal twin')
+        for name, source in TYPE_MISMATCH.items():
+            run, dst = compile_one(compiler, tmp, name, source)
+            ok = run.returncode == 1 and not dst.exists()
+            print('  %-22s %s' % (name, 'refused (reference C1102)' if ok else 'NOT refused (rc %d)' % run.returncode))
+            if not ok:
+                failures.append('%s must refuse like the reference (C1102), rc %d' % (name, run.returncode))
         run, dst = compile_one(compiler, tmp, 'non_static', NON_STATIC)
         ok = run.returncode == 1 and not dst.exists()
         print('  %-14s %s' % ('non_static', 'refused (t_528b9869)' if ok else 'NOT refused (rc %d)' % run.returncode))

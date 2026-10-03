@@ -58,6 +58,20 @@ void wr(float v) { g = v + 1.0; }
 float rd() { return g; }
 float4 main(float g : TEXCOORD0) : COLOR { wr(g); return float4(g, rd(), 0.0, 1.0); }
 """, lambda t: [t[0], t[0] + 1.0, 0.0, 1.0]),
+    # An initialiser the constant evaluator cannot fold - a helper call - is
+    # built at program start (measured: a read is 0.5); an entry parameter of
+    # the same name still shadows it, and an inlined helper reads the static
+    # (measured: (t, 0.5, 0, 1)).  The UNREAD form stays accepted
+    # (call-visibility fp_reach_init_root_valid_f).
+    ('call_initialiser_read', """float f(float t) { return t * 2.0; }
+static float g = f(0.25);
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(g, t.x, 0, 1); }
+""", lambda t: [0.5, t[0], 0.0, 1.0]),
+    ('call_initialiser_shadowed', """float f(float t) { return t * 2.0; }
+static float g = f(0.25);
+float rd() { return g; }
+float4 main(float g : TEXCOORD0) : COLOR { return float4(g, rd(), 0, 1); }
+""", lambda t: [t[0], 0.5, 0.0, 1.0]),
 ]
 
 INPUTS = [[0.75, 0.5, 0.25, 1.0], [0.25, 0.125, 0.5, 0.0]]
