@@ -207,7 +207,32 @@ void SemanticAnalyzer::collectStructDecl(StructDecl* decl)
     // Add to type table
     if (!symbols_.addType(decl->name, structType))
     {
-        error(decl->loc, "redefinition of struct '" + decl->name + "'");
+        // An IDENTICAL redefinition is accepted - same members, in order,
+        // with the same types and semantics (crt-lottes horz3 declares
+        // `struct input` twice, word for word); any difference is C1047
+        // (measured: a renamed member and a changed member list both
+        // refuse, "struct previously defined").  The first definition stays.
+        const auto sameType = [](const auto& self, const TypeNode* a, const TypeNode* b) -> bool {
+            if (!a || !b) return a == b;
+            if (a->baseType != b->baseType || a->vectorSize != b->vectorSize ||
+                a->matrixRows != b->matrixRows || a->matrixCols != b->matrixCols ||
+                a->arraySize != b->arraySize || a->structName != b->structName)
+                return false;
+            return self(self, a->elementType.get(), b->elementType.get());
+        };
+        const std::optional<CgType> prior = symbols_.lookupType(decl->name);
+        bool identical = prior && prior->isStruct() &&
+                         prior->structFields().size() == decl->fields.size();
+        for (size_t i = 0; identical && i < decl->fields.size(); ++i)
+        {
+            const StructField& a = prior->structFields()[i];
+            const StructField& b = decl->fields[i];
+            identical = a.name == b.name && a.storage == b.storage &&
+                        a.semantic.rawName == b.semantic.rawName &&
+                        sameType(sameType, a.type.get(), b.type.get());
+        }
+        if (!identical)
+            error(decl->loc, "C1047: redefinition of struct '" + decl->name + "'");
         return;
     }
 
@@ -629,6 +654,24 @@ void SemanticAnalyzer::analyzeVarDecl(VarDecl* decl)
     if (decl->initializer)
     {
         CgType initType = analyzeExpr(decl->initializer.get());
+        // An unsized array declaration takes its length from the
+        // initialiser: `const float c[] = float[](1.0, ...)` and
+        // `float c[] = {...}` (lcd-grid-v2; the reference accepts both).
+        // Keyed on the type RESOLVED BEFORE the initialiser: a brace list
+        // shares the declaration's TypeNode, and analysing it has already
+        // written the length there.
+        if (decl->type && decl->type->baseType == BaseType::Array &&
+            varType.arraySize() == 0 && initType.isArray())
+        {
+            decl->type->arraySize = initType.arraySize();
+            varType = resolveType(decl->type.get());
+            // The symbol was bound with the unsized type before this ran
+            // (collectVarDecl for a global, analyzeDeclStmt for a local), so
+            // every later use - indexing, bounds, a helper's sized-array
+            // parameter - would see `array` with no length (review: codex).
+            if (Symbol* bound = symbols_.lookup(decl->name); bound && bound->declaration == decl)
+                bound->type = varType;
+        }
         if (!initType.isError() && !allowsScalarNarrowing(varType, initType))
         {
             checkAssignment(varType, initType, decl->initializer->loc);
@@ -977,6 +1020,10 @@ CgType SemanticAnalyzer::analyzeBinaryExpr(BinaryExpr* expr)
         return CgType::Error();
     }
 
+    // `a, b` is b; a is evaluated for its effects only.
+    if (expr->op == BinaryOp::Comma)
+        return rightType;
+
     // Check for assignment operators
     if (TypeOperations::isAssignmentOp(expr->op))
     {
@@ -1042,6 +1089,20 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     {
         CgType argType = analyzeExpr(arg.get());
         argTypes.push_back(argType);
+    }
+
+    // modf's second argument is an OUT parameter: an assignable expression
+    // of exactly x's type (measured: an int variable for a float x is
+    // C1113, "actual parameter #2 must be same type as formal out
+    // parameter").  Overload conversion would otherwise accept it.
+    if (expr->functionName == "modf" && argTypes.size() == 2 &&
+        !argTypes[0].isError() && !argTypes[1].isError())
+    {
+        if (!isLvalue(expr->arguments[1].get()) || !(argTypes[0] == argTypes[1]))
+        {
+            error(expr->loc, "C1113: actual parameter #2 must be same type as formal out parameter (\"ip\")");
+            return CgType::Error();
+        }
     }
 
     // RECORD THE UNRESOLVED CALLEE NAME BEFORE THE ERROR-ARGUMENT RETURN.
@@ -1462,6 +1523,11 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
 
 CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
 {
+    // `float[](...)` has no extent of its own: it takes the argument count,
+    // before the type is resolved (an extent of 0 is not an array type).
+    if (expr->constructedType && expr->constructedType->baseType == BaseType::Array &&
+        expr->constructedType->arraySize == 0)
+        expr->constructedType->arraySize = static_cast<int>(expr->arguments.size());
     CgType constructedType = resolveType(expr->constructedType.get());
 
     if (constructedType.isError())
@@ -1501,6 +1567,35 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
     }
 
     if (hasError) return CgType::Error();
+
+    // An ARRAY constructor - `float[](0.0, 1.0, ...)`, `float[5](...)` - or a
+    // brace list for an array: one argument per element, each convertible
+    // to the element type; an empty extent takes the argument count
+    // (measured: libretro gb-pass-2's float offsets[5] = float[](...)).
+    if (constructedType.isArray())
+    {
+        const CgType element = constructedType.elementType();
+        const int declared = constructedType.arraySize();
+        const int count = static_cast<int>(argTypes.size());
+        if (declared > 0 && declared != count)
+        {
+            error(expr->loc, "array constructor has " + std::to_string(count) +
+                  " elements for an array of " + std::to_string(declared));
+            return CgType::Error();
+        }
+        for (size_t k = 0; k < argTypes.size(); ++k)
+        {
+            if (!(argTypes[k] == element) && !argTypes[k].isImplicitlyConvertibleTo(element))
+            {
+                error(expr->arguments[k]->loc, "array constructor element " + std::to_string(k) +
+                      " does not convert to the element type");
+                return CgType::Error();
+            }
+        }
+        if (declared == 0 && expr->constructedType)
+            expr->constructedType->arraySize = count;   // `float[](...)` takes its length here
+        return CgType::Array(element, count);
+    }
 
     // Check component count.  A brace list initialising an ARRAY constructs
     // arraySize elements of the element type: `static const float2 taps[2] =

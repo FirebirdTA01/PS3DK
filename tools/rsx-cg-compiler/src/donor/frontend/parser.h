@@ -7,6 +7,7 @@
 #include <memory>
 #include <unordered_set>
 #include <unordered_map>
+#include <optional>
 #include <functional>
 
 // Parser error information
@@ -142,7 +143,15 @@ private:
     // swallowed; `inline` has no storage meaning, so the caller rules on
     // whether it is legal (a function ignores it, anything else refuses).
     StorageQualifier parseStorageQualifier(bool* sawInline = nullptr);
-    bool lastStorageWasStatic_ = false;   // set by parseStorageQualifier, read by parseVariableDeclaration
+    bool lastStorageWasStatic_ = false;
+    // Integral compile-time constants visible to array extents, innermost
+    // scope last: a `static const int` with a constant initialiser maps to
+    // its value; any other declaration of the name maps to nullopt so it
+    // shadows an outer constant.
+    std::vector<std::unordered_map<std::string, std::optional<long long>>> constScopes_{1};
+    enum class ConstEval { Ok, NotConstant, NotIntegral };
+    ConstEval evalConstInt(const ExprNode* e, long long& out) const;
+   // set by parseStorageQualifier, read by parseVariableDeclaration
     // Every type parseType() produces, counted: a declarator list takes the
     // LAST type named in an earlier initializer (parseMultipleVariableDeclarations).
     std::shared_ptr<TypeNode> lastParsedType_;

@@ -206,6 +206,8 @@ private:
     IRValueID buildExpr(ExprNode* expr);
     IRValueID buildLiteralExpr(LiteralExpr* expr);
     IRValueID buildIdentifierExpr(IdentifierExpr* expr);
+    IRValueID materialiseInitialiser(const IRTypeInfo& type, const std::vector<float>& values,
+                                     const std::vector<int64_t>& intValues);
     IRValueID buildBinaryExpr(BinaryExpr* expr);
     IRValueID buildUnaryExpr(UnaryExpr* expr);
     IRValueID buildCallExpr(CallExpr* expr);

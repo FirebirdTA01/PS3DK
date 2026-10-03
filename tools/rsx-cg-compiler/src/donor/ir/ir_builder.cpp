@@ -1093,7 +1093,16 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             const bool isInitialisedUniform =
                 varDecl->storage == StorageQualifier::Uniform &&
                 varDecl->initializer != nullptr;
-            if (isFileScopeConst || isInitialisedUniform)
+            // A mutable `static` starts each invocation at its initialiser
+            // (measured: `static float k = 0.5;` read before any write folds
+            // to 0.5, `static float2 aspect = float2(1.0, 0.5)` to the pair,
+            // a brace-initialised static array to its elements).  The value
+            // is bound at the entry's start, and writes rebind it like any
+            // other file-scope name.
+            const bool isInitialisedStatic =
+                varDecl->storage == StorageQualifier::Static &&
+                varDecl->initializer != nullptr;
+            if (isFileScopeConst || isInitialisedUniform || isInitialisedStatic)
             {
                 if (!evaluateConstInitializerTyped(varDecl->initializer.get(),
                                                    varDecl->type.get(),
@@ -1110,7 +1119,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                     // until something patches it.
                     error(varDecl->loc,
                           std::string("file-scope ") +
-                          (isFileScopeConst ? "const '" : "uniform '") +
+                          (isFileScopeConst ? "const '" : isInitialisedStatic ? "static '" : "uniform '") +
                           varDecl->name +
                           "' has an initialiser this compiler cannot evaluate; "
                           "refusing rather than compiling it as zero");
@@ -1346,6 +1355,48 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     currentFunctionDecl_ = decl;
     currentFunction_->returnType = getIRType(decl->returnType.get());
     currentFunction_->isEntryPoint = (decl->name == module_->entryPointName);
+
+    // A mutable file-scope `static` with an initialiser starts the program
+    // at that value.  Bound here, at the entry's start, so a read before any
+    // write is the initialiser and every write - the entry's own or an
+    // inlined helper's, which share these bindings - rebinds it the way an
+    // assigned file-scope name already does.  An array binds per element.
+    // FIRST, before any parameter: a parameter of the same name binds after
+    // it and stashes it, as a local shadowing a global does, so the entry
+    // reads its parameter and an inlined helper the static (review: codex,
+    // static-entry-shadow).
+    if (currentFunction_->isEntryPoint)
+    {
+        for (const IRGlobal& g : module_->globals)
+        {
+            if (g.storage != StorageQualifier::Static) continue;
+            if (g.initialValue.empty() && g.initialIntValues.empty()) continue;
+            if (g.type.arraySize > 0 && !g.type.isMatrix())
+            {
+                IRTypeInfo element = g.type;
+                element.arraySize = 0;
+                const size_t width = static_cast<size_t>(element.componentCount());
+                auto& values = localArrayValues_[g.name];
+                values.clear();
+                for (int i = 0; i < g.type.arraySize; ++i)
+                {
+                    const size_t at = static_cast<size_t>(i) * width;
+                    std::vector<float> lanes;
+                    std::vector<int64_t> intLanes;
+                    if (at + width <= g.initialValue.size())
+                        lanes.assign(g.initialValue.begin() + at, g.initialValue.begin() + at + width);
+                    if (at + width <= g.initialIntValues.size())
+                        intLanes.assign(g.initialIntValues.begin() + at,
+                                        g.initialIntValues.begin() + at + width);
+                    values.push_back(materialiseInitialiser(element, lanes, intLanes));
+                }
+                continue;
+            }
+            const IRValueID value = materialiseInitialiser(g.type, g.initialValue, g.initialIntValues);
+            if (value != InvalidIRValue) nameToValue_[g.name] = value;
+        }
+    }
+
 
     auto collectReturnOutputs = [&](auto& self, TypeNode* sType, const std::string& pathPrefix) -> void {
         const auto* fields = getStructFields(sType);
@@ -3398,6 +3449,50 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             }
         }
 
+        // A local ARRAY from a brace list or an array constructor - `float
+        // m[9] = {0, ...}`, `float o[5] = float[](0.0, 1.0, ...)` - fills its
+        // elements in order (measured: both accepted by the reference).  Each
+        // element is built and converted to the element type; a shape that
+        // does not match the element refuses by name.
+        if (varDecl->initializer && varDecl->initializer->kind == ExprKind::Constructor)
+        {
+            const IRTypeInfo declaredType = getIRType(varDecl->type.get());
+            auto* ctor = static_cast<ConstructorExpr*>(varDecl->initializer.get());
+            if (declaredType.isArray() && declaredType.arraySize > 0 && !getStructFields(varDecl->type->elementType.get()))
+            {
+                IRTypeInfo elementType = declaredType;
+                elementType.arraySize = 0;
+                if (ctor->arguments.size() != static_cast<size_t>(declaredType.arraySize))
+                {
+                    error(varDecl->loc, "array initialiser for '" + varDecl->name + "' has " +
+                          std::to_string(ctor->arguments.size()) + " elements for " +
+                          std::to_string(declaredType.arraySize) + " (local-array-initialiser)");
+                    continue;
+                }
+                auto& slots = localArrayValues_[varDecl->name];
+                slots.assign(static_cast<size_t>(declaredType.arraySize), InvalidIRValue);
+                bool ok = true;
+                for (size_t i = 0; i < ctor->arguments.size() && ok; ++i)
+                {
+                    const IRTypeInfo argType = getExprType(ctor->arguments[i].get());
+                    IRValueID v = buildExpr(ctor->arguments[i].get());
+                    const bool scalars = !elementType.isVector() && !elementType.isMatrix() &&
+                                         !argType.isVector() && !argType.isMatrix() && argType.arraySize == 0;
+                    if (scalars)
+                        v = emitScalarConversion(argType, elementType, v, ctor->arguments[i]->loc);
+                    else if (argType.vectorSize != elementType.vectorSize || argType.isMatrix() ||
+                             elementType.isMatrix() || argType.arraySize != 0)
+                    {
+                        error(ctor->arguments[i]->loc, "array initialiser element " + std::to_string(i) +
+                              " of '" + varDecl->name + "' does not match the element type (local-array-initialiser)");
+                        ok = false;
+                    }
+                    slots[i] = v;
+                }
+                continue;
+            }
+        }
+
         // If there's an initializer, evaluate it
         if (varDecl->initializer)
         {
@@ -3525,6 +3620,47 @@ IRValueID IRBuilder::buildLiteralExpr(LiteralExpr* expr)
     }
 }
 
+// A file-scope initialiser recorded on a global, as a typed IRConstant in
+// the current function: a const's every read, and a mutable static's value
+// at entry.  InvalidIRValue when there is nothing to build.
+IRValueID IRBuilder::materialiseInitialiser(const IRTypeInfo& type,
+                                            const std::vector<float>& values,
+                                            const std::vector<int64_t>& intValues)
+{
+    if (intValues.size() == 1)
+    {
+        const int64_t raw = intValues[0];
+        switch (type.baseType)
+        {
+        case IRType::Bool:
+            return createConstant(raw != 0);
+        case IRType::Int32:
+            return createConstant(static_cast<int32_t>(raw));
+        case IRType::UInt32:
+            return createConstant(static_cast<uint32_t>(raw));
+        default:
+            break;
+        }
+    }
+    if (values.empty()) return InvalidIRValue;
+    if (values.size() == 1)
+    {
+        const float raw = values[0];
+        switch (type.baseType)
+        {
+        case IRType::Bool:
+            return createConstant(raw != 0.0f);
+        case IRType::Int32:
+            return createConstant(static_cast<int32_t>(raw));
+        case IRType::UInt32:
+            return createConstant(static_cast<uint32_t>(raw));
+        default:
+            return createConstant(type, raw);
+        }
+    }
+    return createConstant(type, values, intValues);
+}
+
 IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
 {
     // Look up in local names first
@@ -3545,43 +3681,9 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
         if (global->storage == StorageQualifier::Const &&
             (!global->initialValue.empty() || !global->initialIntValues.empty()))
         {
-            if (!global->initialIntValues.empty())
-            {
-                if (global->initialIntValues.size() == 1)
-                {
-                    const int64_t raw = global->initialIntValues[0];
-                    switch (global->type.baseType)
-                    {
-                    case IRType::Bool:
-                        return createConstant(raw != 0);
-                    case IRType::Int32:
-                        return createConstant(static_cast<int32_t>(raw));
-                    case IRType::UInt32:
-                        return createConstant(static_cast<uint32_t>(raw));
-                    default:
-                        break;
-                    }
-                }
-            }
-            if (!global->initialValue.empty())
-            {
-                if (global->initialValue.size() == 1)
-                {
-                    const float raw = global->initialValue[0];
-                    switch (global->type.baseType)
-                    {
-                    case IRType::Bool:
-                        return createConstant(raw != 0.0f);
-                    case IRType::Int32:
-                        return createConstant(static_cast<int32_t>(raw));
-                    case IRType::UInt32:
-                        return createConstant(static_cast<uint32_t>(raw));
-                    default:
-                        return createConstant(global->type, raw);
-                    }
-                }
-                return createConstant(global->type, global->initialValue, global->initialIntValues);
-            }
+            const IRValueID folded = materialiseInitialiser(global->type, global->initialValue,
+                                                            global->initialIntValues);
+            if (folded != InvalidIRValue) return folded;
         }
 
         // Emit load from global
@@ -4069,6 +4171,13 @@ IRValueID IRBuilder::tryFoldVecConstruct(const IRTypeInfo& resultType,
 
 IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
 {
+    // `a, b`: evaluate a for its effects, then the value is b.
+    if (expr->op == BinaryOp::Comma)
+    {
+        buildExpr(expr->left.get());
+        return buildExpr(expr->right.get());
+    }
+
     // Handle assignment specially
     if (TypeOperations::isAssignmentOp(expr->op))
     {
@@ -4301,6 +4410,36 @@ IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
 
 IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 {
+    // modf(x, out ip), measured on the reference (FLR, then a predicated
+    // correction on x < 0): fl = floor(x); f = x - fl; ip = fl - and where
+    // x < 0, ip = fl + 1 and f = f - 1.  That is the usual split for every
+    // negative non-integer, and the reference's own result at a negative
+    // integer: modf(-2) is f = -1, ip = -1.  The second argument is a
+    // destination, never read (the semantic pass checked it is an lvalue of
+    // x's type).
+    if (expr->functionName == "modf" && expr->resolvedFunction == nullptr &&
+        expr->arguments.size() == 2)
+    {
+        const IRTypeInfo resultType = getExprType(expr);
+        const IRValueID x = buildExpr(expr->arguments[0].get());
+        const IRValueID fl = emitInstruction(IROp::Floor, resultType, {x}, expr->loc);
+        const IRValueID fr = emitBinaryOp(IROp::Sub, resultType, x, fl, expr->loc);
+        // createConstant(type, scalar) fills lane x only; build every lane.
+        const size_t lanes = static_cast<size_t>(std::max(1, resultType.vectorSize));
+        const IRValueID one = createConstant(resultType, std::vector<float>(lanes, 1.0f));
+        IRTypeInfo boolType = resultType;
+        if (resultType.isVector()) boolType.elementType = IRType::Bool;
+        else boolType = IRTypeInfo::Bool();
+        const IRValueID negative = emitBinaryOp(IROp::CmpLt, boolType, x,
+                                                createConstant(resultType, std::vector<float>(lanes, 0.0f)), expr->loc);
+        const IRValueID ip = emitInstruction(IROp::Select, resultType,
+            {negative, emitBinaryOp(IROp::Add, resultType, fl, one, expr->loc), fl}, expr->loc);
+        const IRValueID f = emitInstruction(IROp::Select, resultType,
+            {negative, emitBinaryOp(IROp::Sub, resultType, fr, one, expr->loc), fr}, expr->loc);
+        buildAssignment(expr->arguments[1].get(), ip);
+        return f;
+    }
+
     // Check for built-in function
     auto builtinOp = builtinToIROp(expr->functionName);
 
@@ -6450,6 +6589,36 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                     return InvalidIRValue;
                 }
                 elementIndex = static_cast<int>(index);
+
+                // A file-scope CONST array read at a constant index is its
+                // element, folded here like a const scalar's read: there is
+                // no uniform record behind a const, so a LoadUniform of it
+                // refused in the lowering ("array index 0 out of bounds for
+                // array uniform", `static const float k[3] = {...}`).
+                // STATIC const only: a non-static `const` array is a uniform
+                // with a default on the reference (it lists k[0..2] as
+                // parameters), the separate t_528b9869 gap, and folding it
+                // would drop those parameters silently.
+                if (global && global->storage == StorageQualifier::Const && global->declaredStatic)
+                {
+                    IRTypeInfo element = global->type;
+                    element.arraySize = 0;
+                    const size_t width = static_cast<size_t>(element.componentCount());
+                    const size_t at = static_cast<size_t>(elementIndex) * width;
+                    std::vector<float> lanes;
+                    std::vector<int64_t> intLanes;
+                    if (at + width <= global->initialValue.size())
+                        lanes.assign(global->initialValue.begin() + at,
+                                     global->initialValue.begin() + at + width);
+                    if (at + width <= global->initialIntValues.size())
+                        intLanes.assign(global->initialIntValues.begin() + at,
+                                        global->initialIntValues.begin() + at + width);
+                    if (!lanes.empty() || !intLanes.empty())
+                    {
+                        const IRValueID folded = materialiseInitialiser(element, lanes, intLanes);
+                        if (folded != InvalidIRValue) return folded;
+                    }
+                }
             }
             else
             {
@@ -7152,6 +7321,20 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
                 return emitMatrixNarrowing(argType, resultType, argValues[0], expr->loc);
             }
 
+            // A vector whose lanes exactly fill the matrix constructs it
+            // row-major (measured: float2x2(float4) is accepted, rows a.xy and
+            // a.zw).  Only a cast of a different shape is C1033.
+            if (!argType.isMatrix() && resultType.isMatrix() && argType.isVector() &&
+                argType.vectorSize == resultType.matrixRows * resultType.matrixCols)
+            {
+                IRTypeInfo laneType = IRTypeInfo::Float();
+                laneType.baseType = argType.elementType;
+                std::vector<IRValueID> lanes;
+                for (int k = 0; k < argType.vectorSize; ++k)
+                    lanes.push_back(emitInstruction(IROp::VecExtract, laneType,
+                        {argValues[0], createConstant(static_cast<int32_t>(k))}, expr->loc));
+                return emitInstruction(IROp::MatConstruct, resultType, lanes, expr->loc);
+            }
             if ((argType.isMatrix() && !resultType.isMatrix()) ||
                 (!argType.isMatrix() && resultType.isMatrix() && !argType.isScalar()))
             {
@@ -7267,9 +7450,44 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
     // Matrix construction from vectors (e.g., half3x3(v1, v2, v3))
     if (resultType.isMatrix())
     {
+        // Component widths of the arguments (a matrix argument is not
+        // flattened here).
+        std::vector<int> widths;
+        bool anyMatrixArg = false;
+        for (size_t i = 0; i < argValues.size() && i < expr->arguments.size(); ++i)
+        {
+            const IRTypeInfo t = getExprType(expr->arguments[i].get());
+            anyMatrixArg = anyMatrixArg || t.isMatrix();
+            widths.push_back(t.isMatrix() ? 0 : std::max(1, t.vectorSize));
+        }
+        const bool rowVectors = widths.size() == static_cast<size_t>(resultType.matrixRows) &&
+            std::all_of(widths.begin(), widths.end(), [&](int w) { return w == resultType.matrixCols; });
+        int total = 0;
+        for (int w : widths) total += w;
+        // Mixed vector/scalar arguments fill the matrix in row-major order
+        // (measured: float4x4(a, b, a.x .. a.w, b.x .. b.w) has rows a, b,
+        // a, b; float4x4 from eight float2s; float2x2(float4)).  Flatten to
+        // scalar lanes when the arguments are not exactly the row vectors.
+        if (!rowVectors && !anyMatrixArg && widths.size() == argValues.size() &&
+            total == resultType.matrixRows * resultType.matrixCols &&
+            argValues.size() != static_cast<size_t>(total))
+        {
+            std::vector<IRValueID> lanes;
+            for (size_t i = 0; i < argValues.size(); ++i)
+            {
+                if (widths[i] == 1) { lanes.push_back(argValues[i]); continue; }
+                const IRTypeInfo t = getExprType(expr->arguments[i].get());
+                IRTypeInfo laneType = IRTypeInfo::Float();
+                laneType.baseType = t.elementType;
+                for (int k = 0; k < widths[i]; ++k)
+                    lanes.push_back(emitInstruction(IROp::VecExtract, laneType,
+                        {argValues[i], createConstant(static_cast<int32_t>(k))}, expr->loc));
+            }
+            argValues = std::move(lanes);
+        }
         // Verify we have the right number of row/column vectors
         int expectedVectors = resultType.matrixRows; // Assume row-major: N rows of M-component vectors
-        if (argValues.size() == (size_t)expectedVectors)
+        if (argValues.size() == (size_t)expectedVectors && rowVectors)
         {
             auto inst = std::make_unique<IRInstruction>(IROp::MatConstruct,
                 currentFunction_->allocateValueId(), resultType);
@@ -7303,6 +7521,57 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
 
     error(expr->loc, "Complex constructor not yet implemented");
     return InvalidIRValue;
+}
+
+// True when building `e` could change state: ++/--, any assignment, or a
+// call (a user function may write a global or an out argument).  Used where
+// an lvalue's subexpressions would otherwise be built more than once.
+static bool exprHasSideEffects(const ExprNode* e)
+{
+    if (!e) return false;
+    switch (e->kind)
+    {
+    case ExprKind::Unary: {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        if (u->op == UnaryOp::PreIncrement || u->op == UnaryOp::PreDecrement ||
+            u->op == UnaryOp::PostIncrement || u->op == UnaryOp::PostDecrement)
+            return true;
+        return exprHasSideEffects(u->operand.get());
+    }
+    case ExprKind::Binary: {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        switch (b->op)
+        {
+        case BinaryOp::Assign: case BinaryOp::AddAssign: case BinaryOp::SubAssign:
+        case BinaryOp::MulAssign: case BinaryOp::DivAssign: case BinaryOp::ModAssign:
+            return true;
+        default:
+            return exprHasSideEffects(b->left.get()) || exprHasSideEffects(b->right.get());
+        }
+    }
+    case ExprKind::Call:
+        return true;
+    case ExprKind::MemberAccess:
+        return exprHasSideEffects(static_cast<const MemberAccessExpr*>(e)->object.get());
+    case ExprKind::Index: {
+        const auto* i = static_cast<const IndexExpr*>(e);
+        return exprHasSideEffects(i->array.get()) || exprHasSideEffects(i->index.get());
+    }
+    case ExprKind::Ternary: {
+        const auto* t = static_cast<const TernaryExpr*>(e);
+        return exprHasSideEffects(t->condition.get()) || exprHasSideEffects(t->thenExpr.get()) ||
+               exprHasSideEffects(t->elseExpr.get());
+    }
+    case ExprKind::Cast:
+        return exprHasSideEffects(static_cast<const CastExpr*>(e)->operand.get());
+    case ExprKind::Constructor: {
+        for (const auto& a : static_cast<const ConstructorExpr*>(e)->arguments)
+            if (exprHasSideEffects(a.get())) return true;
+        return false;
+    }
+    default:
+        return false;
+    }
 }
 
 IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
@@ -7579,6 +7848,88 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
             if (!resolveTrackedArrayElement(indexExpr, key, index)) return InvalidIRValue;
             localArrayValues_.at(key)[static_cast<size_t>(index)] = value;
             return value;
+        }
+        // A CONSTANT index into a vector or a matrix is a lane or a row:
+        // `int4 b; b[2] = x;` is `b.z = x` (4xbrz) and `float4x4 w; w[0] =
+        // r;` replaces row 0 (jinc2, lanczos, biquad).  Rebuild the whole
+        // value with that part replaced and assign it through the same
+        // lvalue path as the aggregate itself, so locals, struct members and
+        // outputs all keep their own handling.  The index follows the read
+        // rule: an integer exactly, a float constant truncated once; out of
+        // range refuses.
+        const IRTypeInfo aggregateType = getExprType(indexExpr->array.get());
+        if (!aggregateType.isArray() && (aggregateType.isVector() || aggregateType.isMatrix()) &&
+            (exprHasSideEffects(indexExpr->array.get()) || exprHasSideEffects(indexExpr->index.get())))
+        {
+            // This path reads the aggregate and then assigns it through its
+            // own lvalue, so the lvalue's subexpressions build TWICE: `a[i++][1]
+            // = x` would step i twice (review: codex).  Refuse the
+            // side-effecting shapes rather than build them twice.
+            error(target->loc, "lane or row store through an lvalue with side effects "
+                               "(++, --, an assignment or a call) is not supported; refusing");
+            return value;
+        }
+        if (!aggregateType.isArray() && (aggregateType.isVector() || aggregateType.isMatrix()))
+        {
+            const IRValueID indexValue = buildExpr(indexExpr->index.get());
+            int32_t k = 0;
+            bool constant = extractIntScalar(*currentFunction_, indexValue, k);
+            if (!constant)
+            {
+                std::vector<float> components;
+                auto* idx = dynamic_cast<IRConstant*>(currentFunction_->getValue(indexValue));
+                if (idx && idx->type.isScalar() &&
+                    extractFloatComponents(*currentFunction_, indexValue, components) &&
+                    components.size() == 1 && std::isfinite(components[0]))
+                {
+                    const double t = std::trunc(static_cast<double>(components[0]));
+                    if (t >= -1.0 && t <= 64.0)
+                    {
+                        k = static_cast<int32_t>(t);
+                        constant = true;
+                    }
+                }
+            }
+            if (constant)
+            {
+                const bool matrix = aggregateType.isMatrix();
+                const int count = matrix ? aggregateType.matrixRows : aggregateType.vectorSize;
+                if (k < 0 || k >= count)
+                {
+                    error(indexExpr->index->loc, matrix ? "matrix row index out of bounds"
+                                                        : "vector index out of bounds");
+                    return value;
+                }
+                IRTypeInfo partType;
+                partType.elementType = aggregateType.elementType;
+                partType.matrixRows = 0;
+                partType.matrixCols = 0;
+                partType.arraySize = 0;
+                const int width = matrix ? aggregateType.matrixCols : 1;
+                partType.vectorSize = width;
+                switch (width)
+                {
+                case 2: partType.baseType = IRType::Vec2; break;
+                case 3: partType.baseType = IRType::Vec3; break;
+                case 4: partType.baseType = IRType::Vec4; break;
+                default: partType.baseType = aggregateType.elementType; break;
+                }
+                // The caller hands over the RHS already coerced to the
+                // element's type (the value of an assignment expression).
+                const IRValueID current = buildExpr(indexExpr->array.get());
+                std::vector<IRValueID> parts;
+                for (int i = 0; i < count; ++i)
+                {
+                    if (i == k) { parts.push_back(value); continue; }
+                    parts.push_back(emitInstruction(IROp::VecExtract, partType,
+                                                    {current, createConstant(static_cast<int32_t>(i))},
+                                                    target->loc));
+                }
+                const IRValueID rebuilt = emitInstruction(matrix ? IROp::MatConstruct : IROp::VecConstruct,
+                                                          aggregateType, parts, target->loc);
+                buildAssignment(indexExpr->array.get(), rebuilt);
+                return value;
+            }
         }
         // Any other element store used to fall out of this function with
         // the value discarded and no diagnostic - the program compiled
