@@ -90,6 +90,8 @@ void SemanticAnalyzer::setEntryPoint(const std::string& name)
 bool SemanticAnalyzer::analyze(TranslationUnit& unit)
 {
     diagnostics_.clear();
+    deferredDiscardFindings_.clear();
+    shaderInfo_.usesDiscard = false;
 
     // Pass 1: Collect all declarations into symbol table
     collectDeclarations(unit);
@@ -734,11 +736,10 @@ void SemanticAnalyzer::analyzeStmt(StmtNode* stmt)
         }
         break;
     case StmtKind::Discard:
-        if (shaderInfo_.stage != ShaderStage::Fragment)
-        {
-            error(stmt->loc, "'discard' can only be used in fragment shaders");
-        }
-        shaderInfo_.usesDiscard = true;
+        // A source can contain both vertex and fragment entry points. Keep
+        // checking every body, but judge this stage restriction only after
+        // calls have resolved and the selected entry's reachable set is known.
+        deferredDiscardFindings_.push_back({currentFunction_, stmt->loc});
         break;
     case StmtKind::Empty:
     case StmtKind::Case:
@@ -1990,6 +1991,7 @@ void SemanticAnalyzer::validateShader()
     // name error inside a function reads before that function's semantic
     // error, which is the reference's order.
     emitDeferredNameFindings();
+    emitDeferredDiscardFindings();
 
     checkNonEntrySemantics();
 
@@ -2145,6 +2147,30 @@ void SemanticAnalyzer::emitDeferredNameFindings()
         error(finding.loc, finding.message);
     }
     deferredNameFindings_.clear();
+}
+
+void SemanticAnalyzer::emitDeferredDiscardFindings()
+{
+    if (deferredDiscardFindings_.empty()) return;
+    if (!shaderInfo_.entryPoint)
+    {
+        deferredDiscardFindings_.clear();
+        return;
+    }
+
+    const auto reached = reachedFunctions();
+    for (const DeferredDiscardFinding& finding : deferredDiscardFindings_)
+    {
+        // Calls may resolve to a prototype. Match its definition through
+        // the same signature-aware identity used by deferred name findings.
+        FunctionDecl* first = firstDeclarationOf(finding.function);
+        if (!first) first = finding.function;
+        if (reached.find(first) == reached.end()) continue;
+        shaderInfo_.usesDiscard = true;
+        if (shaderInfo_.stage != ShaderStage::Fragment)
+            error(finding.loc, "'discard' can only be used in fragment shaders");
+    }
+    deferredDiscardFindings_.clear();
 }
 
 std::unordered_set<const FunctionDecl*>

@@ -213,8 +213,8 @@ public:
     std::unordered_set<const FunctionDecl*> entryReachableDefinitions() const;
 private:
     // The entry-reachable function set: transitive, syntactic, no branch
-    // pruning.  One walk, shared by checkNonEntrySemantics (prototype-default-merging) and
-    // the deferred name findings, so there is a single notion of reachable
+    // pruning.  One walk, shared by checkNonEntrySemantics (prototype-default-merging),
+    // deferred name findings and discard validation, so there is a single notion of reachable
     // and a single place it can be wrong.
     std::unordered_set<const FunctionDecl*> reachedFunctions() const;
     // A NAME-NOT-FOUND diagnostic held back until reachability is known.  The
@@ -234,6 +234,15 @@ private:
     void deferOrEmitNameError(const SourceLocation& loc, const std::string& message,
                               const std::string& name = std::string());
     void emitDeferredNameFindings();
+    // Stage legality belongs to the selected entry's reachable functions.
+    // Record discard locations while still type-checking every function body.
+    struct DeferredDiscardFinding
+    {
+        FunctionDecl* function;
+        SourceLocation loc;
+    };
+    std::vector<DeferredDiscardFinding> deferredDiscardFindings_;
+    void emitDeferredDiscardFindings();
     void collectCallEdges(const StmtNode* stmt, std::vector<FunctionDecl*>& out) const;
     void collectCallEdges(const ExprNode* expr, std::vector<FunctionDecl*>& out) const;
     // Same name AND same parameter signature - never name alone, overloads.
