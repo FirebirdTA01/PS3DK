@@ -7081,6 +7081,11 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
     }
     if (constantIndex)
     {
+        if (aggregateType.isMatrix())
+        {
+            const IRValueID row = constructedMatrixRow(arrayValue, constIdx, resultType);
+            if (row != InvalidIRValue) return row;
+        }
         if (constantAggregate && constantAggregate->type.isMatrix())
         {
             // Matrix constants are flat row-major payloads. M[r] selects a
@@ -8278,6 +8283,11 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
                 for (int i = 0; i < count; ++i)
                 {
                     if (i == k) { parts.push_back(value); continue; }
+                    if (matrix)
+                    {
+                        const IRValueID row = constructedMatrixRow(current, i, partType);
+                        if (row != InvalidIRValue) { parts.push_back(row); continue; }
+                    }
                     parts.push_back(emitInstruction(IROp::VecExtract, partType,
                                                     {current, createConstant(static_cast<int32_t>(i))},
                                                     target->loc));
@@ -8501,6 +8511,45 @@ IRValueID IRBuilder::emitNumericToBool(const IRTypeInfo& sourceType,
     if (width == targetWidth) return value;
     return emitInstruction(IROp::VecConstruct, targetType,
                            std::vector<IRValueID>(targetWidth, value), loc);
+}
+
+IRValueID IRBuilder::constructedMatrixRow(IRValueID matrix, int row,
+                                          const IRTypeInfo& rowType) const
+{
+    // Rebuilding a matrix after w[k]=value must not keep an artificial read
+    // of an overwritten row. Forward the already-evaluated row operand of a
+    // row-form constructor; DCE can then remove the obsolete constructions.
+    // An actually unwritten row is still its unresolved original extract,
+    // never an invented zero. Scalar-form constructors use the normal path.
+    if (row < 0 || !rowType.isVector() || rowType.arraySize != 0 ||
+        rowType.elementType != IRType::Float32)
+        return InvalidIRValue;
+    for (const auto& block : currentFunction_->blocks)
+        for (const auto& instruction : block->instructions)
+        {
+            if (instruction->result != matrix) continue;
+            const IRTypeInfo& type = instruction->resultType;
+            if (instruction->op != IROp::MatConstruct || !type.isMatrix() ||
+                type.arraySize != 0 || type.elementType != IRType::Float32 ||
+                type.matrixCols != rowType.vectorSize || row >= type.matrixRows ||
+                instruction->operands.size() != static_cast<size_t>(type.matrixRows))
+                return InvalidIRValue;
+            const IRValueID selected = instruction->operands[static_cast<size_t>(row)];
+            IRTypeInfo selectedType = IRTypeInfo::Void();
+            if (const IRValue* value = currentFunction_->getValue(selected))
+                selectedType = value->type;
+            for (const IRParameter& parameter : currentFunction_->parameters)
+                if (parameter.valueId == selected) selectedType = parameter.type;
+            for (const auto& sourceBlock : currentFunction_->blocks)
+                for (const auto& source : sourceBlock->instructions)
+                    if (source->result == selected) selectedType = source->resultType;
+            if (!selectedType.isVector() || selectedType.arraySize != 0 ||
+                selectedType.vectorSize != rowType.vectorSize ||
+                selectedType.elementType != rowType.elementType)
+                return InvalidIRValue;
+            return selected;
+        }
+    return InvalidIRValue;
 }
 
 IRValueID IRBuilder::emitInstruction(IROp op, const IRTypeInfo& resultType,

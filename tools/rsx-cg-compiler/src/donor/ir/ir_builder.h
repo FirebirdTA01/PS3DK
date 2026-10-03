@@ -264,6 +264,8 @@ private:
     LValueInfo getLValueInfo(ExprNode* expr);
 
     // Instruction emission helpers
+    IRValueID constructedMatrixRow(IRValueID matrix, int row,
+                                    const IRTypeInfo& rowType) const;
     IRValueID emitInstruction(IROp op, const IRTypeInfo& resultType,
                               const std::vector<IRValueID>& operands = {},
                               const SourceLocation& loc = {});

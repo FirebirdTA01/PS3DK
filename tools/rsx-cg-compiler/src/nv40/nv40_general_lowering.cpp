@@ -3327,9 +3327,9 @@ private:
         // Fast path, preserved from the original lowering: float4(vec3
         // already in a vreg, scalar) aliases the base register and writes
         // only .w - one instruction, at the cost of mutating the base
-        // vreg in place (pre-existing behavior; safe while the IR never
-        // reads the vec3 after widening it, which is the shape's only
-        // known use).  The scalar-partner check is PROOF the shape fits:
+        // vreg in place. Only a single-use vec3 can be consumed this way:
+        // two float4 constructions must retain their separate .w values.
+        // The scalar-partner check is PROOF the shape fits:
         // an unresolved value's component mask defaults to Float4, so a
         // wide reading proves nothing, but a scalar reading proves a
         // narrow partner.  Everything else takes the general packer
@@ -3341,7 +3341,9 @@ private:
             const bool tailIsScalar =
                 tailMask != 0 && (tailMask & (tailMask - 1)) == 0;
             const auto baseIt = program_.valueToVReg.find(inst.operands[0]);
-            if (tailIsScalar && baseIt != program_.valueToVReg.end()) {
+            if (tailIsScalar && valueWidthOf(inst.operands[0]) == 3 &&
+                useCount_[inst.operands[0]] == 1 &&
+                baseIt != program_.valueToVReg.end()) {
                 program_.valueToVReg[inst.result] = baseIt->second;
                 VInstr vi;
                 vi.op = VOp::Mov;
