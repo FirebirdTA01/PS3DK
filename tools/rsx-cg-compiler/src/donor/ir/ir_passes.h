@@ -142,10 +142,16 @@ private:
 class CommonSubexprElimination : public IRPass
 {
 public:
+    // straightLine: the target lowers every block's pure instructions
+    // unconditionally, in block order (the fragment general path), so a
+    // value defined in an EARLIER block is available to a later one even
+    // when that block does not dominate it.
+    explicit CommonSubexprElimination(bool straightLine = false) : m_straightLine(straightLine) {}
     const char* getName() const override { return "CommonSubexprElimination"; }
     bool runOnFunction(IRFunction& func) override;
 
 private:
+    bool m_straightLine = false;
     // Hash an instruction for comparison
     struct InstrHash
     {
