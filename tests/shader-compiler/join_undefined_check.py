@@ -9,7 +9,8 @@ an arm ASSIGNS before any read is the third shape, and the one that must not
 take the assigned side: elsewhere it is the input.  Rows are judged by value
 with fp_eval against the C formula.  The undefined path of
 the second program (neither arm runs) is not judged: the value is undefined
-in Cg, and the reference reads an unwritten register there.
+in Cg; the reference reads an unwritten register there, which is zero at
+run time, and so is ours (judged on the no-write path too).
 """
 import subprocess
 import sys
@@ -48,11 +49,15 @@ UNINIT_LOCAL = """float4 main(float4 t : TEXCOORD0) : COLOR
 
 
 def uninit_local(env):
+    # Where no arm writes p and b, they read ZERO: the reference's unwritten
+    # register is 0 at run time (pixel judge, xbr family), and so is ours.
     t = env['TEX0']
     if t[0] > 0.5:
         p, b = [t[1], t[2], t[3]], t[1]
-    else:
+    elif t[1] > 0.5:
         p, b = [t[2], t[3], t[0]], t[2]
+    else:
+        p, b = [0.0, 0.0, 0.0], 0.0
     return [x * b for x in p] + [1.0]
 
 
@@ -140,6 +145,7 @@ ROWS = [
     ('uninit_local', UNINIT_LOCAL, uninit_local, [
         {'TEX0': [0.75, 0.25, 0.5, 0.125]},
         {'TEX0': [0.25, 0.75, 0.5, 0.125]},
+        {'TEX0': [0.25, 0.25, 0.5, 0.125]},
     ]),
 ]
 
