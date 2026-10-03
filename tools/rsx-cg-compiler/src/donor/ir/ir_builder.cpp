@@ -7935,6 +7935,23 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
             std::string objectName = ident ? ident->name : std::string();
             for (auto it = fields.rbegin(); it != fields.rend(); ++it)
                 objectName += "." + *it;
+            // A FILE-SCOPE vector (implicitly uniform) written through a
+            // swizzle - `ToonConfig.xyz = 4;` in mudlord toon - has no binding
+            // yet: its current value IS the uniform.  Load it and bind the
+            // name, so the read/modify/write below rebinds it and later
+            // reads see the written lanes (the reference uses the written 4
+            // and leaves ToonConfig unread; we kept reading the uniform -
+            // wrong pixels, found by the pixel judge).
+            if (ident && fields.empty() && !nameToValue_.count(objectName))
+            {
+                const IRGlobal* global = module_->findGlobal(objectName);
+                if (global && global->storage == StorageQualifier::Uniform &&
+                    !global->type.isArray() && global->type.isVector())
+                {
+                    const IRValueID loaded = buildExpr(memberExpr->object.get());
+                    if (loaded != InvalidIRValue) nameToValue_[objectName] = loaded;
+                }
+            }
             auto nvIt = nameToValue_.find(objectName);
             if (nvIt != nameToValue_.end())
             {
