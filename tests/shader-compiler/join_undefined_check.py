@@ -172,6 +172,19 @@ def main():
                 print('  %-14s %-40s %s' % (name, env, 'value ok' if ok else 'WRONG %s want %s' % (got, want)))
                 if not ok:
                     failures.append('%s: got %s for %s, want %s' % (name, got, env, want))
+        # The zero rule is measured for fragment programs only.  A VERTEX
+        # program with the same no-write path keeps refusing (named debt):
+        # nothing has measured what an unwritten vertex temp reads.
+        vp_src, vp_dst = Path(tmp) / 'uninit_vp.cg', Path(tmp) / 'uninit_vp.bin'
+        vp_src.write_text('void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) '
+                          '{ float4 q; if (p.x > 0.5) q = p; else if (p.y > 0.5) q = p.yxzw; o = p; c = q; }')
+        run = subprocess.run([compiler, '-p', 'sce_vp_rsx', '--emit-container', str(vp_dst), str(vp_src)],
+                             capture_output=True, text=True, timeout=60)
+        ok = run.returncode == 1 and not vp_dst.exists()
+        print('  %-14s %s' % ('uninit_vp', 'refused (vertex no-write path unmeasured)' if ok else
+                              'NOT refused (rc %d)' % run.returncode))
+        if not ok:
+            failures.append('uninit_vp: a vertex no-write join must keep refusing, rc %d' % run.returncode)
     for f in failures:
         print('FAIL:', f)
     print('join-undefined: %s' % ('PASS' if not failures else 'FAIL (%d)' % len(failures)))

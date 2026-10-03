@@ -2389,8 +2389,12 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
                 return createConstant(t, std::vector<float>(static_cast<size_t>(n), 0.0f),
                                       std::vector<int64_t>(static_cast<size_t>(n), 0));
             };
-            const bool thenUndef = thenVal != InvalidIRValue && isUndefinedValue(thenVal);
-            const bool elseUndef = elseVal != InvalidIRValue && isUndefinedValue(elseVal);
+            // Measured for FRAGMENT programs only (pixel judge).  A vertex
+            // program keeps main's behaviour: the Select against nothing
+            // stays, and the lowering refuses the unresolved operand.
+            const bool fragment = module_->shaderStage == ShaderStage::Fragment;
+            const bool thenUndef = fragment && thenVal != InvalidIRValue && isUndefinedValue(thenVal);
+            const bool elseUndef = fragment && elseVal != InvalidIRValue && isUndefinedValue(elseVal);
             if (thenUndef && !isUndefinedValue(elseVal)) joinThen = zeroOf(elseVal);
             else if (elseUndef && !isUndefinedValue(thenVal)) joinElse = zeroOf(thenVal);
         }

@@ -6660,12 +6660,24 @@ private:
             return;
         }
 
-        // clamp(x, 0, 1) SATURATES, as the reference emits it (EX2R_sat in
-        // crt-ddt's GAMMA_OUT): a NaN lane becomes 0.  Min-then-max sends a
-        // NaN lane to 1 on the GPU (min(NaN, 1) = 1), and the pixel judge
-        // saw exactly those lanes paint full white where the reference
-        // paints black.
-        if (isLiteralZero(inst.operands[1]) && isLiteralOne(inst.operands[2])) {
+        // clamp(x, 0, 1) of a COMPUTED value SATURATES, as the reference
+        // emits it: it folds the clamp into the producing instruction
+        // (EX2R_sat in crt-ddt's GAMMA_OUT, DIVR_SAT for clamp(a / b, 0, 1)),
+        // so a NaN lane becomes 0.  Min-then-max sends a NaN lane to 1 on the
+        // GPU (min(NaN, 1) = 1), and the pixel judge saw exactly those lanes
+        // paint full white where the reference paints black.  A clamp of a
+        // plain input, uniform or constant keeps min-then-max: the reference
+        // does that too there (MINR then MAXR for clamp(t.z, 0, 1)), and a NaN
+        // input lane gives 1 on both.
+        const IRInstruction* clampSource = definitionOf(inst.operands[0]);
+        // A swizzle or lane pick of an input is still the input.
+        for (int hop = 0; clampSource && hop < 8 &&
+             (clampSource->op == IROp::VecShuffle || clampSource->op == IROp::VecExtract) &&
+             !clampSource->operands.empty(); ++hop)
+            clampSource = definitionOf(clampSource->operands[0]);
+        const bool computedSource = clampSource &&
+            clampSource->op != IROp::LoadAttribute && clampSource->op != IROp::LoadUniform;
+        if (computedSource && isLiteralZero(inst.operands[1]) && isLiteralOne(inst.operands[2])) {
             lowerUnary(inst, VOp::Mov, true);
             return;
         }
