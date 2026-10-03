@@ -579,6 +579,8 @@ jobs:
         run: bash tests/shader-compiler/wrong-accept-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Typedef aliases preserve direct-type values and bindings
         run: bash tests/shader-compiler/typedef-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Local struct initializers preserve fields and evaluate arguments once
+        run: bash tests/shader-compiler/local-struct-init-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Fragment inputs with no semantic and uniform members of a varying struct
         run: bash tests/shader-compiler/implicit-varying-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: fmod and all are lowered, judged by value

@@ -2454,7 +2454,9 @@ std::unique_ptr<ExprNode> Parser::parseBracedInitializerExpression(std::shared_p
     {
         do
         {
-            ctor->arguments.push_back(parseAssignmentExpression());
+            ctor->arguments.push_back(check(TokenType::LBRACE)
+                ? parseBracedInitializerExpression(nullptr)
+                : parseAssignmentExpression());
         } while (match(TokenType::COMMA) && !check(TokenType::RBRACE));
     }
 
