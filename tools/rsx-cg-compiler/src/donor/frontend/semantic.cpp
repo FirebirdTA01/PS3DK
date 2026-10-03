@@ -341,6 +341,11 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
 void SemanticAnalyzer::checkParameterDefaultShape(ParamDecl* p)
 {
     if (!p || !p->defaultValue || !p->type) return;
+    if (resolveType(p->type.get()).isStruct())
+    {
+        error(p->loc, "struct parameter defaults are not supported (local-struct-initializer)");
+        return;
+    }
     // ARRAYS have their own initialiser rules - one ELEMENT per array slot -
     // and componentCount() describes the ELEMENT.  The reference ACCEPTS
     // `uniform float4 a[2] = { float4(1,2,3,4), float4(5,6,7,8) }`; an
@@ -1523,6 +1528,11 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
 
 CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
 {
+    if (!expr->constructedType)
+    {
+        error(expr->loc, "nested braces require a struct field context (local-struct-initializer)");
+        return CgType::Error();
+    }
     // `float[](...)` has no extent of its own: it takes the argument count,
     // before the type is resolved (an extent of 0 is not an array type).
     if (expr->constructedType && expr->constructedType->baseType == BaseType::Array &&
@@ -1533,6 +1543,58 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
     if (constructedType.isError())
     {
         return CgType::Error();
+    }
+
+    // Struct initializers supply one argument per field, with exact aggregate
+    // shape. Unlike ordinary assignment, a scalar does not splat and a vector
+    // does not narrow here (measured against the reference).
+    if (constructedType.isStruct())
+    {
+        const auto& fields = constructedType.structFields();
+        if (!currentFunction_)
+        {
+            error(expr->loc, "file-scope struct constructors are not supported (local-struct-initializer)");
+            return CgType::Error();
+        }
+        if (expr->arguments.size() != fields.size())
+        {
+            error(expr->loc, "struct initializer requires one argument per field (local-struct-initializer)");
+            return CgType::Error();
+        }
+        bool failed = false;
+        for (size_t i = 0; i < fields.size(); ++i)
+        {
+            const CgType fieldType = resolveType(fields[i].type.get());
+            auto* arg = expr->arguments[i].get();
+            if (fieldType.isArray() || fieldType.isSampler())
+            {
+                error(expr->loc, "array or sampler struct initializer field is not supported (local-struct-initializer)");
+                failed = true;
+                continue;
+            }
+            if (arg && arg->kind == ExprKind::Constructor)
+            {
+                auto* nested = static_cast<ConstructorExpr*>(arg);
+                if (nested->bracedInitializer && !nested->constructedType)
+                    nested->constructedType = std::make_shared<TypeNode>(*fields[i].type);
+            }
+            const CgType argType = analyzeExpr(arg);
+            if (argType.isError()) { failed = true; continue; }
+            const bool sameStruct = fieldType.isStruct() && argType.isStruct() &&
+                                    fieldType.structName() == argType.structName();
+            const bool sameNumericShape = fieldType.isNumeric() && argType.isNumeric() &&
+                !fieldType.isArray() && !argType.isArray() &&
+                fieldType.vectorSize() == argType.vectorSize() &&
+                fieldType.matrixRows() == argType.matrixRows() &&
+                fieldType.matrixCols() == argType.matrixCols();
+            if (!sameStruct && !sameNumericShape)
+            {
+                error(arg->loc, "unsupported or mismatched struct field '" + fields[i].name +
+                      "' (local-struct-initializer)");
+                failed = true;
+            }
+        }
+        return failed ? CgType::Error() : constructedType;
     }
 
     // Analyze all arguments

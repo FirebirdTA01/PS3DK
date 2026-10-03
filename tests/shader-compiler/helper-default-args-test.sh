@@ -350,7 +350,7 @@ same    fp_helper_default_proto_f fp_helper_default_proto_twin_f \
 # ---- GAPS.  Each pins a refusal the reference does NOT make, by diagnostic,
 # ---- so the row goes red the day its card lands and forces a rewrite here.
 refuse_saying fp_helper_default_braced_struct_gap_f \
-    "too much data|Complex constructor|constructor requires" \
+    "too much data|Complex constructor|constructor requires|struct parameter defaults are not supported" \
     "braced-parameter-defaults: braced struct default (reference ACCEPTS)"
 refuse_saying fp_helper_default_braced_array_gap_f \
     "constructor requires|too much data|Complex constructor" \

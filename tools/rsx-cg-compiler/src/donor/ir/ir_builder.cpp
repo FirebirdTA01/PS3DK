@@ -3500,6 +3500,13 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             }
         }
 
+        if (varDecl->initializer && getStructFields(varDecl->type.get()) &&
+            varDecl->initializer->kind == ExprKind::Constructor)
+        {
+            buildLocalStructInitializer(varDecl->name, varDecl->type.get(), varDecl->initializer.get());
+            continue;
+        }
+
         // If there's an initializer, evaluate it
         if (varDecl->initializer)
         {
@@ -5835,6 +5842,17 @@ bool IRBuilder::emitInputMemberLoad(const ParamDecl* param, const std::string& m
 
 IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
 {
+    // A temporary aggregate has no qualified name to bind. Do not allocate
+    // an undefined scalar value for a field of S(...), including nested fields.
+    ExprNode* root = expr->object.get();
+    while (root && root->kind == ExprKind::MemberAccess)
+        root = static_cast<MemberAccessExpr*>(root)->object.get();
+    if (root && root->kind == ExprKind::Constructor &&
+        getStructFields(static_cast<ConstructorExpr*>(root)->constructedType.get()))
+    {
+        error(expr->loc, "struct constructor member access is not supported (local-struct-initializer)");
+        return InvalidIRValue;
+    }
     // Check for swizzle first
     if (expr->swizzleLength > 0)
     {
@@ -6381,6 +6399,118 @@ bool arrayStorageKey(ExprNode* expr, std::string& key)
     key += "." + member->member;
     return true;
 }
+}
+
+bool IRBuilder::buildLocalStructInitializer(const std::string& destination, TypeNode* type, ExprNode* source)
+{
+    // A struct has qualified leaf bindings, not a scalar IR value. Snapshot
+    // every source leaf in source order before installing any destination.
+    // Clone only side-effect-free member paths; calls returning a whole struct
+    // and indexed aggregate paths remain named gaps, never evaluated per leaf.
+    const auto clonePath = [&](const auto& self, ExprNode* expr) -> std::unique_ptr<ExprNode> {
+        if (!expr) return nullptr;
+        std::unique_ptr<ExprNode> result;
+        if (expr->kind == ExprKind::Identifier)
+        {
+            auto* id = static_cast<IdentifierExpr*>(expr);
+            auto copy = std::make_unique<IdentifierExpr>(id->loc, id->name);
+            copy->resolvedDecl = id->resolvedDecl;
+            result = std::move(copy);
+        }
+        else if (expr->kind == ExprKind::MemberAccess)
+        {
+            auto* member = static_cast<MemberAccessExpr*>(expr);
+            if (member->isSwizzle) return nullptr;
+            auto object = self(self, member->object.get());
+            if (!object) return nullptr;
+            result = std::make_unique<MemberAccessExpr>(member->loc, std::move(object), member->member);
+        }
+        if (result) result->resolvedType = expr->resolvedType;
+        return result;
+    };
+    std::vector<std::pair<std::string, IRValueID>> leaves;
+    const auto collect = [&](const auto& self, const std::string& key,
+                             TypeNode* target, ExprNode* value) -> bool {
+        if (!target || !value) return false;
+        if (target->isArray() || target->isSampler())
+        {
+            error(value->loc, "array or sampler struct initializer field is not supported (local-struct-initializer)");
+            return false;
+        }
+        if (const auto* fields = getStructFields(target))
+        {
+            ConstructorExpr* ctor = value->kind == ExprKind::Constructor
+                ? static_cast<ConstructorExpr*>(value) : nullptr;
+            if (ctor && ctor->arguments.size() != fields->size())
+            {
+                error(value->loc, "struct initializer field count mismatch (local-struct-initializer)");
+                return false;
+            }
+            for (size_t i = 0; i < fields->size(); ++i)
+            {
+                const auto& field = (*fields)[i];
+                if (ctor)
+                {
+                    if (!self(self, key + "." + field.name, field.type.get(), ctor->arguments[i].get()))
+                        return false;
+                }
+                else
+                {
+                    auto object = clonePath(clonePath, value);
+                    if (!object)
+                    {
+                        error(value->loc, "struct initializer source is not a named member path (local-struct-initializer)");
+                        return false;
+                    }
+                    auto member = std::make_unique<MemberAccessExpr>(value->loc, std::move(object), field.name);
+                    member->resolvedType = field.type;
+                    if (!self(self, key + "." + field.name, field.type.get(), member.get()))
+                        return false;
+                }
+            }
+            return true;
+        }
+        // This is a lowering limitation, not an invalid constructor type.
+        // Keep it here so a valid fixed/short constructor in an unreachable
+        // helper cannot reject an otherwise supported entry point. Check the
+        // AST kinds before IRTypeInfo erases fixed/narrow-integer semantics.
+        const auto supportedKind = [](const TypeNode* type) {
+            return type && (type->baseType == BaseType::Float ||
+                            type->baseType == BaseType::Half ||
+                            type->baseType == BaseType::Int);
+        };
+        if (!supportedKind(target) || !supportedKind(value->resolvedType.get()))
+        {
+            error(value->loc, "struct initializer numeric kind is not supported (local-struct-initializer)");
+            return false;
+        }
+        IRValueID v = buildExpr(value);
+        if (v == InvalidIRValue) return false;
+        const auto from = getExprType(value), to = getIRType(target);
+        const auto f = from.isVector() || from.isMatrix() ? from.elementType : from.baseType;
+        const auto t = to.isVector() || to.isMatrix() ? to.elementType : to.baseType;
+        if (f != t)
+        {
+            IROp op;
+            if (f == IRType::Float32 && t == IRType::Float16) op = IROp::FloatToHalf;
+            else if (f == IRType::Float16 && t == IRType::Float32) op = IROp::HalfToFloat;
+            else if ((f == IRType::Float32 || f == IRType::Float16) &&
+                     (t == IRType::Int32 || t == IRType::UInt32)) op = IROp::FloatToInt;
+            else if ((f == IRType::Int32 || f == IRType::UInt32) &&
+                     (t == IRType::Float32 || t == IRType::Float16)) op = IROp::IntToFloat;
+            else
+            {
+                error(value->loc, "struct initializer field conversion is not supported (local-struct-initializer)");
+                return false;
+            }
+            v = emitInstruction(op, to, {v}, value->loc);
+        }
+        leaves.emplace_back(key, v);
+        return true;
+    };
+    if (!collect(collect, destination, type, source)) return false;
+    for (const auto& leaf : leaves) nameToValue_[leaf.first] = leaf.second;
+    return true;
 }
 
 bool IRBuilder::copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type)
@@ -7315,6 +7445,11 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
 
 IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
 {
+    if (getStructFields(expr->constructedType.get()))
+    {
+        error(expr->loc, "struct constructor used as a value is not supported (local-struct-initializer)");
+        return InvalidIRValue;
+    }
     IRTypeInfo resultType = getIRType(expr->constructedType.get());
 
     // Build argument values

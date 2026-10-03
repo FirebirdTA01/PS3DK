@@ -240,6 +240,7 @@ private:
     bool resolveTrackedArrayElement(IndexExpr* expr, std::string& key, int32_t& index);
     IRValueID readTrackedArrayElement(IndexExpr* expr, const std::string& key, int32_t index);
     bool copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type);
+    bool buildLocalStructInitializer(const std::string& destination, TypeNode* type, ExprNode* source);
     IRValueID emitScalarNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
                                   IRValueID value, const SourceLocation& loc);
     IRValueID narrowToScalar(TypeNode* declared, ExprNode* valueExpr, IRValueID value);
