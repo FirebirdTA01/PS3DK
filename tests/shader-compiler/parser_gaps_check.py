@@ -50,6 +50,8 @@ ROWS = {
     'array_ctor_sized': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { float o[3] = float[3](a.x, b.y, a.w); return float4(o[2], o[0], o[1], 1); }' + '\\n', [1.5, 0.5, 2.0, 1.0]),
     'array_brace_int_to_float': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { float m[3] = {1, 2, 3}; return float4(m[0] * a.x, m[1], m[2], 1); }' + '\\n', [0.5, 2.0, 3.0, 1.0]),
     'struct_multi_member': ('struct D { float2 UL, UR, M; }; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { D d; d.UL = a.xy; d.UR = b.xy; d.M = a.zw; return float4(d.UL + d.M, d.UR); }' + '\\n', [1.25, 1.25, 1.0, 2.0]),
+    'double_alias': ('static const double K = 0.25; double2 dbl(double2 v) { return v * 2.0; } float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { double x = a.x * K; return float4(x, dbl(a.yz), 1.0); }' + '\\n', [0.125, -0.5, 1.5, 1.0]),
+    'unsized_file_scope_array': ('static const float cx[] = float[](1.0, -0.5, 0.25); static const float cb[] = {0.5, 0.25}; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return float4(cx[0] * a.x, cx[1], cx[2], cb[0] + cb[1]); }' + '\\n', [0.5, -0.5, 0.25, 0.75]),
 }
 # Named debt: commas in for clauses parse, but the static-loop unroller does
 # not recognise the induction (the reference accepts; value 0.75); it must

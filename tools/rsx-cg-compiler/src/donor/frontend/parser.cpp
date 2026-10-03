@@ -36,6 +36,8 @@ void Parser::initBuiltinTypes()
         "matrix",
         "half2x2", "half3x3", "half4x4",
         "half2x3", "half2x4", "half3x2", "half3x4", "half4x2", "half4x3",
+        "double", "double2", "double3", "double4", "double2x2", "double3x3", "double4x4",
+        "double2x3", "double2x4", "double3x2", "double3x4", "double4x2", "double4x3",
         "sampler", "sampler1D", "sampler2D", "sampler3D", "samplerCUBE", "samplerRECT",
         "isampler1D", "isampler2D", "isampler3D", "isamplerCUBE", "isamplerRECT",
         "usampler1D", "usampler2D", "usampler3D", "usamplerCUBE", "usamplerRECT",
@@ -492,11 +494,12 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
     // path below as an unknown struct (rectangular-matrix-row-access / rectangular-matrices).  The
     // reference lays an RxC matrix out as R rows of C-wide vectors.
     if (tok.type == TokenType::IDENTIFIER && tok.lexeme.size() >= 7 &&
-        tok.lexeme.size() <= 8 && typeNames.count(tok.lexeme) > 0)
+        tok.lexeme.size() <= 9 && typeNames.count(tok.lexeme) > 0)
     {
         const std::string& n = tok.lexeme;
         const size_t len = n.size();
-        const bool isFloat = n.compare(0, 5, "float") == 0 && len == 8;
+        const bool isFloat = (n.compare(0, 5, "float") == 0 && len == 8) ||
+                             (n.compare(0, 6, "double") == 0 && len == 9);   // double-alias
         const bool isHalf = n.compare(0, 4, "half") == 0 && len == 7;
         if ((isFloat || isHalf) && n[len - 2] == 'x' &&
             n[len - 3] >= '2' && n[len - 3] <= '4' &&

@@ -68,6 +68,18 @@ void Lexer::initKeywords() {
     keywords["float3x3"] = TokenType::KW_FLOAT3X3;
     keywords["float4x4"] = TokenType::KW_FLOAT4X4;
 
+    // `double` is `float` on this target: an alias, the same token
+    // (double-alias; measured: `static const double K = 1.0/3.0` folds to
+    // the fp32 0.33333334, and double1..4, double2x2 and double4x4 are all
+    // accepted).  The rectangular doubleRxC names alias in the parser.
+    keywords["double"] = TokenType::KW_FLOAT;
+    keywords["double2"] = TokenType::KW_FLOAT2;
+    keywords["double3"] = TokenType::KW_FLOAT3;
+    keywords["double4"] = TokenType::KW_FLOAT4;
+    keywords["double2x2"] = TokenType::KW_FLOAT2X2;
+    keywords["double3x3"] = TokenType::KW_FLOAT3X3;
+    keywords["double4x4"] = TokenType::KW_FLOAT4X4;
+
     keywords["half"] = TokenType::KW_HALF;
     keywords["half2"] = TokenType::KW_HALF2;
     keywords["half3"] = TokenType::KW_HALF3;

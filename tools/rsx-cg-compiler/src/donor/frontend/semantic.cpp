@@ -629,6 +629,15 @@ void SemanticAnalyzer::analyzeVarDecl(VarDecl* decl)
     if (decl->initializer)
     {
         CgType initType = analyzeExpr(decl->initializer.get());
+        // An unsized array declaration takes its length from the
+        // initialiser: `const float c[] = float[](1.0, ...)` and
+        // `float c[] = {...}` (lcd-grid-v2; the reference accepts both).
+        if (decl->type && decl->type->baseType == BaseType::Array &&
+            decl->type->arraySize == 0 && initType.isArray())
+        {
+            decl->type->arraySize = initType.arraySize();
+            varType = resolveType(decl->type.get());
+        }
         if (!initType.isError() && !allowsScalarNarrowing(varType, initType))
         {
             checkAssignment(varType, initType, decl->initializer->loc);
