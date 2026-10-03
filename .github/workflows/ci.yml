@@ -589,6 +589,8 @@ jobs:
         run: bash tests/shader-compiler/scalar-narrowing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns under compile-time-constant conditions judged by value
         run: bash tests/shader-compiler/helper-const-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Helper returns skip unreachable tails and preserve live writes
+        run: bash tests/shader-compiler/inline-dead-tail-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value
         run: bash tests/shader-compiler/inline-out-param-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test helper parameter default arguments

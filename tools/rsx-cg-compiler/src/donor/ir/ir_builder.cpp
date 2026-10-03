@@ -5152,7 +5152,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     auto savedSwizzles = identityPrefixSwizzleBase_;
 
     // calleeDirect is the parameters plus the body's own top-level
-    // declarations only: a name declared inside a nested block ends with
+    // declarations actually reached: a name declared inside a nested block ends with
     // that block (buildBlockStmt), so a write to the FILE-SCOPE name after
     // the block is the global's and must reach the caller - a walked set
     // used to mark it callee-scoped and drop it (`{ float4 G = q*3; }
@@ -5160,10 +5160,8 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     std::unordered_set<std::string> calleeDirect;
     for (const auto& param : callee->parameters)
         if (!param->name.empty()) calleeDirect.insert(param->name);
-    for (const auto& st : callee->body->statements)
-        if (st && st->kind == StmtKind::Decl)
-            for (const auto& d : static_cast<const DeclStmt*>(st.get())->declarations)
-                if (d) calleeDirect.insert(d->name);
+    // Locals are added from the executed body's declaration frame below.
+    // A declaration after return never shadows an earlier global write.
     // Ownership, not equality: a callee that binds `s` owns "s.f" too (review:
     // codex - the callee's own struct field write must not be routed to the
     // caller's stash as a write to the global struct of the same name).
@@ -5320,6 +5318,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     inlineStack_.push_back(callee);
     blockDeclared_.emplace_back();   // the callee's top-level locals are its own, never the caller's block's
     const bool ok = buildInlineFunctionBody(callee, result);
+    calleeDirect.insert(blockDeclared_.back().begin(), blockDeclared_.back().end());
     blockDeclared_.pop_back();       // discarded: scope_ = savedScope below drops them
     inlineStack_.pop_back();
     // A stash entry the callee CREATED (its own parameter or local shadowing
@@ -5550,12 +5549,11 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
         StmtNode* stmt = statements[index];
         if (!stmt) continue;
 
+        // This path has returned (including a taken constant branch).
+        // Its suffix is unreachable; callers still unwind scopes and copy
+        // out parameters normally. Runtime joins handle their own tails.
         if (sawReturn)
-        {
-            error(stmt->loc, "cannot inline user function '" + callee->name +
-                             "': statements after return are not supported");
-            return false;
-        }
+            break;
 
         if (stmt->kind == StmtKind::Return)
         {
