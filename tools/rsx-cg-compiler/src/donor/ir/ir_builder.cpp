@@ -1123,7 +1123,9 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                     // `static float g = f(0.25);` - stays accepted, as it was
                     // before statics were seeded (fp_reach_init_root_valid_f),
                     // and a READ of it still refuses at the read.
-                    if (!isInitialisedStatic)
+                    if (isInitialisedStatic)
+                        runtimeStaticInits_.push_back(varDecl);
+                    else
                         error(varDecl->loc,
                               std::string("file-scope ") +
                               (isFileScopeConst ? "const '" : "uniform '") +
@@ -1773,6 +1775,32 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
 
     // Create entry block
     currentBlock_ = currentFunction_->createBlock("entry");
+
+    // A mutable static whose initialiser the constant evaluator cannot fold
+    // (`static float g = f(0.25);`) starts at that initialiser BUILT here,
+    // at program start: the reference folds the call (measured: a read of g
+    // is 0.5).  Only when the built value's type is the declared type - no
+    // conversion is invented - otherwise the static stays unseeded and a
+    // read refuses as before.  A same-named entry parameter has already
+    // stashed the name, so the value goes to the stash, not over the
+    // parameter.  An unread static's build is dead and removed.
+    if (currentFunction_->isEntryPoint)
+    {
+        for (VarDecl* decl : runtimeStaticInits_)
+        {
+            const IRTypeInfo declared = getIRType(decl->type.get());
+            const IRTypeInfo built = getExprType(decl->initializer.get());
+            if (built.baseType != declared.baseType || built.vectorSize != declared.vectorSize ||
+                built.matrixRows != declared.matrixRows || built.isArray() || declared.isArray())
+                continue;
+            const IRValueID value = buildExpr(decl->initializer.get());
+            if (value == InvalidIRValue) continue;
+            if (auto st = shadowedGlobals_.find(decl->name); st != shadowedGlobals_.end())
+                st->second = value;
+            else
+                nameToValue_[decl->name] = value;
+        }
+    }
 
     // A semantic array is an array of input values, not a vector whose
     // lanes are its elements. Seed the same array state used by locals and

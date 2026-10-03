@@ -145,6 +145,9 @@ private:
     size_t inlineContinuationFrame_ = 0;   // blockDeclared_ depth the continuation was captured at
     // Declaration identity prevents a local shadow from using a global's initializer.
     std::unordered_set<const DeclNode*> globalDeclarations_;
+    // Mutable statics whose initialiser the constant evaluator could not
+    // fold; built at the entry's start instead (buildFunction).
+    std::vector<VarDecl*> runtimeStaticInits_;
     std::vector<std::string> depthDecodeUniforms_;
     // Source text is the wrong boundary for short-circuit hazards:
     // a precomputed sqrt predicate is already eager, while an inlined
