@@ -7661,6 +7661,77 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
             localArrayValues_.at(key)[static_cast<size_t>(index)] = value;
             return value;
         }
+        // A CONSTANT index into a vector or a matrix is a lane or a row:
+        // `int4 b; b[2] = x;` is `b.z = x` (4xbrz) and `float4x4 w; w[0] =
+        // r;` replaces row 0 (jinc2, lanczos, biquad).  Rebuild the whole
+        // value with that part replaced and assign it through the same
+        // lvalue path as the aggregate itself, so locals, struct members and
+        // outputs all keep their own handling.  The index follows the read
+        // rule: an integer exactly, a float constant truncated once; out of
+        // range refuses.
+        const IRTypeInfo aggregateType = getExprType(indexExpr->array.get());
+        if (!aggregateType.isArray() && (aggregateType.isVector() || aggregateType.isMatrix()))
+        {
+            const IRValueID indexValue = buildExpr(indexExpr->index.get());
+            int32_t k = 0;
+            bool constant = extractIntScalar(*currentFunction_, indexValue, k);
+            if (!constant)
+            {
+                std::vector<float> components;
+                auto* idx = dynamic_cast<IRConstant*>(currentFunction_->getValue(indexValue));
+                if (idx && idx->type.isScalar() &&
+                    extractFloatComponents(*currentFunction_, indexValue, components) &&
+                    components.size() == 1 && std::isfinite(components[0]))
+                {
+                    const double t = std::trunc(static_cast<double>(components[0]));
+                    if (t >= -1.0 && t <= 64.0)
+                    {
+                        k = static_cast<int32_t>(t);
+                        constant = true;
+                    }
+                }
+            }
+            if (constant)
+            {
+                const bool matrix = aggregateType.isMatrix();
+                const int count = matrix ? aggregateType.matrixRows : aggregateType.vectorSize;
+                if (k < 0 || k >= count)
+                {
+                    error(indexExpr->index->loc, matrix ? "matrix row index out of bounds"
+                                                        : "vector index out of bounds");
+                    return value;
+                }
+                IRTypeInfo partType;
+                partType.elementType = aggregateType.elementType;
+                partType.matrixRows = 0;
+                partType.matrixCols = 0;
+                partType.arraySize = 0;
+                const int width = matrix ? aggregateType.matrixCols : 1;
+                partType.vectorSize = width;
+                switch (width)
+                {
+                case 2: partType.baseType = IRType::Vec2; break;
+                case 3: partType.baseType = IRType::Vec3; break;
+                case 4: partType.baseType = IRType::Vec4; break;
+                default: partType.baseType = aggregateType.elementType; break;
+                }
+                // The caller hands over the RHS already coerced to the
+                // element's type (the value of an assignment expression).
+                const IRValueID current = buildExpr(indexExpr->array.get());
+                std::vector<IRValueID> parts;
+                for (int i = 0; i < count; ++i)
+                {
+                    if (i == k) { parts.push_back(value); continue; }
+                    parts.push_back(emitInstruction(IROp::VecExtract, partType,
+                                                    {current, createConstant(static_cast<int32_t>(i))},
+                                                    target->loc));
+                }
+                const IRValueID rebuilt = emitInstruction(matrix ? IROp::MatConstruct : IROp::VecConstruct,
+                                                          aggregateType, parts, target->loc);
+                buildAssignment(indexExpr->array.get(), rebuilt);
+                return value;
+            }
+        }
         // Any other element store used to fall out of this function with
         // the value discarded and no diagnostic - the program compiled
         // and read whatever the array held before.  Refuse by name.
