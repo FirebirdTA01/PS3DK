@@ -6488,7 +6488,11 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 // no uniform record behind a const, so a LoadUniform of it
                 // refused in the lowering ("array index 0 out of bounds for
                 // array uniform", `static const float k[3] = {...}`).
-                if (global && global->storage == StorageQualifier::Const)
+                // STATIC const only: a non-static `const` array is a uniform
+                // with a default on the reference (it lists k[0..2] as
+                // parameters), the separate t_528b9869 gap, and folding it
+                // would drop those parameters silently.
+                if (global && global->storage == StorageQualifier::Const && global->declaredStatic)
                 {
                     IRTypeInfo element = global->type;
                     element.arraySize = 0;
