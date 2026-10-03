@@ -6940,6 +6940,28 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 indexValue = buildExpr(expr->index.get());
                 if (indexValue == InvalidIRValue)
                     return InvalidIRValue;
+                // A proven unrolled loop binds its induction variable to an
+                // IR constant, although the AST still contains an identifier.
+                // Evaluate the selector once (including any increment), then
+                // use that bound integer for a static const array's element.
+                // Non-static arrays retain their uniform records and loads.
+                int32_t boundIndex = 0;
+                if (global && global->storage == StorageQualifier::Const &&
+                    global->declaredStatic &&
+                    extractIntScalar(*currentFunction_, indexValue, boundIndex))
+                {
+                    if (boundIndex < 0 || boundIndex >= arrayCount)
+                    {
+                        error(expr->loc, "array index " + std::to_string(boundIndex) +
+                              " out of bounds for '" + arrayName + "[" +
+                              std::to_string(arrayCount) + "]'");
+                        return InvalidIRValue;
+                    }
+                    const IRValueID folded = foldStaticConstArrayElement(*global, boundIndex);
+                    if (folded != InvalidIRValue) return folded;
+                    error(expr->loc, "cannot fold static const array element (static-array-loop)");
+                    return InvalidIRValue;
+                }
                 // A FLOAT or HALF index is int(index): the reference emits
                 // the same address-register load for u[idx] and u[int(idx)]
                 // with a float idx (float-array-index-conversion).  The cast is what the

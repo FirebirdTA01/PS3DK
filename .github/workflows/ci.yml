@@ -661,6 +661,8 @@ jobs:
         run: bash tests/shader-compiler/parser-gaps-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test nested numeric array and matrix brace initializers
         run: bash tests/shader-compiler/nested-array-braces-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test static const array reads through bound loop indices
+        run: bash tests/shader-compiler/static-array-loop-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: rsx-cg-compiler mutable file-scope statics
         run: bash tests/shader-compiler/mutable-static-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: rsx-cg-compiler static const array element fold
