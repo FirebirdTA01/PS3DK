@@ -6669,14 +6669,20 @@ private:
         // plain input, uniform or constant keeps min-then-max: the reference
         // does that too there (MINR then MAXR for clamp(t.z, 0, 1)), and a NaN
         // input lane gives 1 on both.
+        // The reference's rule, measured: it folds the saturate into the
+        // instruction that PRODUCES the clamped value when that value has no
+        // other use - MULR_SAT for clamp(t.z * 2, 0, 1), MOVR_SAT for
+        // clamp(float2(t.x, t.y), 0, 1), DIVR_SAT, EX2R_sat - and keeps MIN
+        // then MAX when the value is shared (clamp(t.z, 0, 1) beside other
+        // reads of t).  So saturate only when the clamp operand's own
+        // definition is a single-use producer (not a load, swizzle or lane
+        // pick, which is a shared input); anything unresolved keeps min/max.
         const IRInstruction* clampSource = definitionOf(inst.operands[0]);
-        // A swizzle or lane pick of an input is still the input.
-        for (int hop = 0; clampSource && hop < 8 &&
-             (clampSource->op == IROp::VecShuffle || clampSource->op == IROp::VecExtract) &&
-             !clampSource->operands.empty(); ++hop)
-            clampSource = definitionOf(clampSource->operands[0]);
-        const bool computedSource = clampSource &&
-            clampSource->op != IROp::LoadAttribute && clampSource->op != IROp::LoadUniform;
+        const auto uses = useCount_.find(inst.operands[0]);
+        const bool computedSource = clampSource && clampSource->result == inst.operands[0] &&
+            clampSource->op != IROp::LoadAttribute && clampSource->op != IROp::LoadUniform &&
+            clampSource->op != IROp::VecShuffle && clampSource->op != IROp::VecExtract &&
+            uses != useCount_.end() && uses->second == 1;
         if (computedSource && isLiteralZero(inst.operands[1]) && isLiteralOne(inst.operands[2])) {
             lowerUnary(inst, VOp::Mov, true);
             return;
