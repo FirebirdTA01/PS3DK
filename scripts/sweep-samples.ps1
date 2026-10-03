@@ -14,8 +14,13 @@ param([Parameter(Mandatory=$true)][string]$root)
 # intermittent build failure be diagnosed from what cmake actually printed
 # rather than from "exit code was non-zero" with no stderr.
 #
+# <out>\logs is CLEARED at start of each sweep (same as results.csv is
+# rewritten) so that two successive sweeps do not end up appending to the
+# same bNNN-... file and producing a mixed output that the log column then
+# points to -- the ambiguity this task exists to remove.
+#
 # The build dir itself is still removed at the end of each iteration to keep
-# $out small; only the log persists.
+# $out small; only the log persists for the current sweep.
 
 $env:PS3DK = $root; $env:PS3DEV = $root; $env:PSL1GHT = $root
 $env:PATH  = "$root\bin;$env:PATH"
@@ -26,6 +31,12 @@ $csv   = "$out\results.csv"
 $logdir = "$out\logs"
 New-Item -ItemType Directory -Force $out    | Out-Null
 New-Item -ItemType Directory -Force $logdir | Out-Null
+# Fresh-logs-per-sweep: drop any logs a previous sweep left here so this run's
+# bNNN-*.log files contain exactly one run's output (claude BLOCKER on v2 --
+# previously two sweeps would append to the same file and the CSV's log column
+# would point at a mixed one). results.csv is already rewritten each run.
+Get-ChildItem -LiteralPath $logdir -Force -EA SilentlyContinue |
+    Remove-Item -Recurse -Force -EA SilentlyContinue
 "family,sample,configure,build,self,log" | Out-File -Encoding ascii $csv
 
 $samples = Get-ChildItem "$root\samples" -Recurse -Filter CMakeLists.txt |
