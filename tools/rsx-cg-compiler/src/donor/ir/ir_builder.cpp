@@ -6421,7 +6421,14 @@ bool IRBuilder::resolveTrackedArrayElement(IndexExpr* expr, std::string& key, in
         // Preserve file-scope promotion. A scoped declaration initializes
         // its own array map, so it cannot inherit a global's element values.
         const auto* global = module_->findGlobal(key);
-        if (global && global->type.isArray() && !nameToValue_.count(key))
+        // The global's own id as the name's binding is the module-level
+        // placeholder a mutable static carries into the first function
+        // built, not a scoped shadow: a helper writing `g[0]` of a static
+        // array must still reach the global (initialiser_side_effect_array).
+        const auto bound = nameToValue_.find(key);
+        const bool shadowed = bound != nameToValue_.end() && global &&
+                              bound->second != global->valueId;
+        if (global && global->type.isArray() && !shadowed)
             found = localArrayValues_.emplace(key,
                 std::vector<IRValueID>(static_cast<size_t>(type.arraySize), InvalidIRValue)).first;
     }
