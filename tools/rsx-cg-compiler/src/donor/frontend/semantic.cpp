@@ -2555,6 +2555,20 @@ static bool uniformMember(const StructField& field)
 
 void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
 {
+    // A selected entry's direct sampler inputs have uniform domain even
+    // without `uniform` (including `in` and `const`, measured on the reference).
+    // Normalize before reserving or assigning varying slots, so the sampler
+    // consumes only a texture unit and IR/reflection agree on its storage.
+    // Helper parameters and output/inout samplers keep their declared storage.
+    for (const auto& param : entryPoint->parameters)
+    {
+        if ((param->storage == StorageQualifier::None ||
+             param->storage == StorageQualifier::In ||
+             param->storage == StorageQualifier::Const) &&
+            resolveType(param->type.get()).isSampler())
+            param->storage = StorageQualifier::Uniform;
+    }
+
     // Counter for assigning default semantics to undecorated parameters
     int defaultAttrIndex = 0;
 
