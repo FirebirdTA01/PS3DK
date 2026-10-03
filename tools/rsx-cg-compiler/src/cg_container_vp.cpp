@@ -247,6 +247,7 @@ uint32_t cgSamplerType(IRType t)
 {
     switch (t)
     {
+    case IRType::SamplerGeneric: return 1066u; // native generic declaration reflection
     case IRType::Sampler1D:   return 1065u;
     case IRType::Sampler2D:   return 1066u;
     case IRType::Sampler3D:   return 1067u;

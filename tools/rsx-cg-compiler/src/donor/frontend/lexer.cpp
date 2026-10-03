@@ -130,6 +130,7 @@ void Lexer::initKeywords() {
     keywords["uint4"] = TokenType::KW_UINT4;
 
     // Samplers
+    keywords["sampler"] = TokenType::KW_SAMPLER;
     keywords["sampler1D"] = TokenType::KW_SAMPLER1D;
     keywords["sampler2D"] = TokenType::KW_SAMPLER2D;
     keywords["sampler3D"] = TokenType::KW_SAMPLER3D;

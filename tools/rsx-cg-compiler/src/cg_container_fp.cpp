@@ -138,6 +138,9 @@ void padTo(std::vector<uint8_t>& out, size_t alignment)
 // them.
 uint32_t cgTypeForIRType(const IRTypeInfo& t)
 {
+    // Native reflection keeps generic sampler declarations as CG_SAMPLER2D;
+    // overload identity and the supported fetch dimension remain separate.
+    if (t.baseType == IRType::SamplerGeneric) return kCgSampler2D;
     if (t.baseType == IRType::Sampler1D)   return kCgSampler1D;
     if (t.baseType == IRType::Sampler2D)   return kCgSampler2D;
     if (t.baseType == IRType::Sampler3D)   return kCgSampler3D;

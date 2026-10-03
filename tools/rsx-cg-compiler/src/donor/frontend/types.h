@@ -84,6 +84,7 @@ public:
     static CgType Float4x4();
 
     // Sampler factory methods
+    static CgType SamplerGeneric();
     static CgType Sampler1D();
     static CgType Sampler2D();
     static CgType Sampler3D();

@@ -45,6 +45,7 @@ enum class IRType
     Mat4x4,
 
     // Sampler types
+    SamplerGeneric,
     Sampler1D,
     Sampler2D,
     Sampler3D,
@@ -64,7 +65,8 @@ enum class IRType
 // four sites that need it (fragment-global-uniform-order).
 inline bool isSamplerIRType(IRType t)
 {
-    return t == IRType::Sampler1D ||
+    return t == IRType::SamplerGeneric ||
+           t == IRType::Sampler1D ||
            t == IRType::Sampler2D ||
            t == IRType::Sampler3D ||
            t == IRType::SamplerRect ||

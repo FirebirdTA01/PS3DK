@@ -1222,6 +1222,17 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
                                  expr->functionName);
             return CgType::Error();
         }
+        // Generic samplers have native overloads beyond 2D, but those need
+        // dimension inference and consistency per resource. Refuse by name
+        // instead of treating a failed generic call as a sampler2D fetch.
+        // Keep the ordinary visibility/reachability policy for the failure.
+        std::string samplerScope;
+        for (const CgType& type : argTypes)
+            if (type.isSampler() && type.getNode()->baseType == BaseType::SamplerGeneric)
+            {
+                samplerScope = "; only 2D generic sampler uses are supported (generic-sampler-dimension)";
+                break;
+            }
         // ONLY BUILTINS ARE VISIBLE AND NONE FITS.  The reference holds this
         // like the C1008 class and reports it only in entry-reachable bodies:
         // an unused helper calling tex1D(s, p, 0), tex1Dfetch(sampler1D, int4)
@@ -1232,11 +1243,11 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         if (!symbols_.hasVisibleSourceFunction(expr->functionName, visibleThrough_))
         {
             deferOrEmitNameError(expr->loc,
-                                 "no matching function for call to '" + sig + "'",
+                                 "no matching function for call to '" + sig + "'" + samplerScope,
                                  std::string());
             return CgType::Error();
         }
-        error(expr->loc, "no matching function for call to '" + sig + "'");
+        error(expr->loc, "no matching function for call to '" + sig + "'" + samplerScope);
         return CgType::Error();
     }
 

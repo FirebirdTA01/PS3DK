@@ -506,6 +506,7 @@ void SymbolTable::registerBuiltinTypes()
         }
 
     // Sampler types
+    addType("sampler", CgType::SamplerGeneric());
     addType("sampler1D", CgType::Sampler1D());
     addType("sampler2D", CgType::Sampler2D());
     addType("sampler3D", CgType::Sampler3D());

@@ -140,6 +140,7 @@ CgType CgType::Float3x3() { return Mat(ScalarKind::Float, 3, 3); }
 CgType CgType::Float4x4() { return Mat(ScalarKind::Float, 4, 4); }
 
 // Sampler factory methods
+CgType CgType::SamplerGeneric() { return CgType(makeScalarNode(BaseType::SamplerGeneric)); }
 CgType CgType::Sampler1D() { return CgType(makeScalarNode(BaseType::Sampler1D)); }
 CgType CgType::Sampler2D() { return CgType(makeScalarNode(BaseType::Sampler2D)); }
 CgType CgType::Sampler3D() { return CgType(makeScalarNode(BaseType::Sampler3D)); }
@@ -814,6 +815,18 @@ bool canImplicitlyConvert(const CgType& from, const CgType& to)
     if (from.equals(to)) return true;
     if (from.isError() || to.isError()) return false;
 
+    // Generic samplers are distinct overload types. The measured 2D slice
+    // permits both directions across helper parameters, while other sampler
+    // dimensions remain incompatible here until their resource-use rules
+    // and lowering are implemented (generic-sampler-dimension).
+    if (from.isSampler() && to.isSampler())
+    {
+        const BaseType a = from.getNode()->baseType;
+        const BaseType b = to.getNode()->baseType;
+        return (a == BaseType::SamplerGeneric && b == BaseType::Sampler2D) ||
+               (a == BaseType::Sampler2D && b == BaseType::SamplerGeneric);
+    }
+
     // Numeric conversions
     if (from.isNumeric() && to.isNumeric())
     {
@@ -965,6 +978,9 @@ int conversionCost(const CgType& from, const CgType& to)
 {
     if (from.equals(to)) return 0;
     if (!canImplicitlyConvert(from, to)) return -1;
+
+    // Do not tie a generic/2D conversion with an exact sampler overload.
+    if (from.isSampler() && to.isSampler()) return 1;
 
     int cost = 0;
 

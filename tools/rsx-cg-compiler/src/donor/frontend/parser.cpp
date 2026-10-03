@@ -370,6 +370,7 @@ bool Parser::isTypeName() const
     case TokenType::KW_USHORT2:
     case TokenType::KW_USHORT3:
     case TokenType::KW_USHORT4:
+    case TokenType::KW_SAMPLER:
     case TokenType::KW_SAMPLER1D:
     case TokenType::KW_SAMPLER2D:
     case TokenType::KW_SAMPLER3D:
@@ -867,6 +868,8 @@ BaseType Parser::tokenToBaseType(TokenType type) const
     case TokenType::KW_USHORT3:
     case TokenType::KW_USHORT4:
         return BaseType::UShort;
+    case TokenType::KW_SAMPLER:
+        return BaseType::SamplerGeneric;
     case TokenType::KW_SAMPLER1D:
         return BaseType::Sampler1D;
     case TokenType::KW_SAMPLER2D:
@@ -2712,6 +2715,7 @@ bool TypeNode::isSampler() const
 {
     switch (baseType)
     {
+    case BaseType::SamplerGeneric:
     case BaseType::Sampler1D:
     case BaseType::Sampler2D:
     case BaseType::Sampler3D:
@@ -3026,6 +3030,8 @@ std::string baseTypeToString(BaseType bt)
         return "short";
     case BaseType::UShort:
         return "ushort";
+    case BaseType::SamplerGeneric:
+        return "sampler";
     case BaseType::Sampler1D:
         return "sampler1D";
     case BaseType::Sampler2D:

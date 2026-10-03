@@ -7621,7 +7621,8 @@ private:
             // f[TEX0], f[TEX0].w).  Only tex2Dlod's float4 coordinate is
             // measured.
             if (operandWidth(inst.operands[1]) != 4 ||
-                samplerType_[inst.operands[0]] != IRType::Sampler2D) {
+                (samplerType_[inst.operands[0]] != IRType::Sampler2D &&
+                 samplerType_[inst.operands[0]] != IRType::SamplerGeneric)) {
                 program_.diagnostics.push_back(
                     "nv40-general: fragment tex2Dlod needs a sampler2D and a float4 "
                     "coordinate; refusing");
@@ -7787,6 +7788,9 @@ private:
             lanes = 1;
             shape = {0, 0, 0, 1};
             break;
+        // Semantic conversion restricts generic resources to measured 2D
+        // fetches; retain their declared generic type for reflection.
+        case IRType::SamplerGeneric:
         case IRType::Sampler2D:
         case IRType::SamplerRect:
             lanes = 2;

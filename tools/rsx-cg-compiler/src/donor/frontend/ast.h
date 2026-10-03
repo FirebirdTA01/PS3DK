@@ -91,6 +91,7 @@ enum class BaseType
     Short,
     UShort,
     // Sampler types
+    SamplerGeneric,
     Sampler1D,
     Sampler2D,
     Sampler3D,
