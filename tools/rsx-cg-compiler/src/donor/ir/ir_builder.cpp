@@ -1117,12 +1117,19 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                     // is no safer: a compiled default of zero where the
                     // source says otherwise is a shader that renders wrong
                     // until something patches it.
-                    error(varDecl->loc,
-                          std::string("file-scope ") +
-                          (isFileScopeConst ? "const '" : isInitialisedStatic ? "static '" : "uniform '") +
-                          varDecl->name +
-                          "' has an initialiser this compiler cannot evaluate; "
-                          "refusing rather than compiling it as zero");
+                    // A mutable STATIC is the exception: it is not seeded
+                    // (no value is invented), so an UNREAD static with an
+                    // initialiser this evaluator cannot fold - a helper call,
+                    // `static float g = f(0.25);` - stays accepted, as it was
+                    // before statics were seeded (fp_reach_init_root_valid_f),
+                    // and a READ of it still refuses at the read.
+                    if (!isInitialisedStatic)
+                        error(varDecl->loc,
+                              std::string("file-scope ") +
+                              (isFileScopeConst ? "const '" : "uniform '") +
+                              varDecl->name +
+                              "' has an initialiser this compiler cannot evaluate; "
+                              "refusing rather than compiling it as zero");
                     constInit.clear();
                     constIntInit.clear();
                 }
