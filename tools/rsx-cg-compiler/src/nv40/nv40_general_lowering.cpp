@@ -4550,8 +4550,32 @@ private:
                 leftMatrix != rightMatrix &&
                 matchesResult(leftMatrix ? left : right) &&
                 valueWidthOf(inst.operands[leftMatrix ? 1 : 0]) == 1;
-            if (profile_ == GeneralProfile::Vertex &&
-                matrixDimsSupported(inst.resultType) && (addRows || scaleRows)) {
+            const auto floatMatrixOperand = [&](IRValueID id) {
+                const IRTypeInfo* type = nullptr;
+                if (const IRInstruction* def = definitionOf(id))
+                    type = &def->resultType;
+                else if (const IRValue* value = entry_.getValue(id))
+                    type = &value->type;
+                else {
+                    for (const auto& p : entry_.parameters)
+                        if (p.valueId == id) type = &p.type;
+                    for (const auto& g : module_.globals)
+                        if (g.valueId == id) type = &g.type;
+                }
+                return type && type->isMatrix() && !type->isArray() &&
+                       type->elementType == IRType::Float32;
+            };
+            // Fragment Add/Sub operates on corresponding float rows. Half
+            // conversion and scalar/matrix arithmetic remain separate paths.
+            const bool fpAddRows = profile_ == GeneralProfile::Fragment &&
+                op == VOp::Add && leftMatrix && rightMatrix &&
+                matchesResult(left) && matchesResult(right) &&
+                inst.resultType.elementType == IRType::Float32 &&
+                floatMatrixOperand(inst.operands[0]) &&
+                floatMatrixOperand(inst.operands[1]);
+            if (matrixDimsSupported(inst.resultType) &&
+                ((profile_ == GeneralProfile::Vertex && (addRows || scaleRows)) ||
+                 fpAddRows)) {
                 VSrc scalar;
                 if (scaleRows) {
                     scalar = resolve(inst.operands[leftMatrix ? 1 : 0]);
@@ -4570,6 +4594,7 @@ private:
                     vi.dst.writemask = componentMaskForWidth(result.cols);
                     vi.srcs[0] = leftMatrix ? left.rowSrcs[row] : scalar;
                     vi.srcs[1] = rightMatrix ? right.rowSrcs[row] : scalar;
+                    vi.srcs[1].neg = vi.srcs[1].neg != negateRhs;
                     program_.instrs.push_back(vi);
                     result.rowSrcs.push_back(tempSrc(vi.dst.index));
                 }
