@@ -6482,6 +6482,32 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                     return InvalidIRValue;
                 }
                 elementIndex = static_cast<int>(index);
+
+                // A file-scope CONST array read at a constant index is its
+                // element, folded here like a const scalar's read: there is
+                // no uniform record behind a const, so a LoadUniform of it
+                // refused in the lowering ("array index 0 out of bounds for
+                // array uniform", `static const float k[3] = {...}`).
+                if (global && global->storage == StorageQualifier::Const)
+                {
+                    IRTypeInfo element = global->type;
+                    element.arraySize = 0;
+                    const size_t width = static_cast<size_t>(element.componentCount());
+                    const size_t at = static_cast<size_t>(elementIndex) * width;
+                    std::vector<float> lanes;
+                    std::vector<int64_t> intLanes;
+                    if (at + width <= global->initialValue.size())
+                        lanes.assign(global->initialValue.begin() + at,
+                                     global->initialValue.begin() + at + width);
+                    if (at + width <= global->initialIntValues.size())
+                        intLanes.assign(global->initialIntValues.begin() + at,
+                                        global->initialIntValues.begin() + at + width);
+                    if (!lanes.empty() || !intLanes.empty())
+                    {
+                        const IRValueID folded = materialiseInitialiser(element, lanes, intLanes);
+                        if (folded != InvalidIRValue) return folded;
+                    }
+                }
             }
             else
             {
