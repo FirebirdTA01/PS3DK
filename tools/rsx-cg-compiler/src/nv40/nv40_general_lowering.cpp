@@ -682,6 +682,7 @@ public:
         for (const IRBasicBlock* block : order) {
             for (const auto& instPtr : block->instructions) {
                 if (!instPtr) continue;
+                if (killedReturnUndefs_.count(instPtr.get())) continue;
                 if (mergedReturnSelect_ &&
                     (instPtr.get() == mergedReturnSelect_->trueStore ||
                      instPtr.get() == mergedReturnSelect_->falseStore))
@@ -804,6 +805,7 @@ private:
         const IRInstruction* falseStore = nullptr;
     };
     std::optional<MergedReturnSelect> mergedReturnSelect_;
+    std::unordered_set<const IRInstruction*> killedReturnUndefs_;
 
     bool validateFragmentOutputs()
     {
@@ -1045,12 +1047,10 @@ private:
         if (!exitBlock)
             return refuse("control flow has no return block; refusing");
 
-        if (returnBlocks.size() > 1) {
-            if (!tryPrepareMergedReturnSelect(blocks, succs, returnBlocks,
-                                              order))
-                return refuse("more than one return block; refusing");
+        const bool multipleReturns = returnBlocks.size() > 1;
+        if (multipleReturns &&
+            tryPrepareMergedReturnSelect(blocks, succs, returnBlocks, order))
             return true;
-        }
 
         // Off-exit stores.  In a flattened program every block executes,
         // so a store that the original control flow could SKIP commits a
@@ -1083,6 +1083,51 @@ private:
                 if (instPtr && instPtr->op == IROp::Discard)
                     discardBlocks.insert(b);
 
+        const std::unordered_set<const IRBasicBlock*> exits(
+            returnBlocks.begin(), returnBlocks.end());
+        if (multipleReturns) {
+            // A return on a killed path need not write an output. Retain
+            // precisely one surviving exit; this does not select values
+            // between several live returns. Guard materialisation precedes
+            // if-conversion, which keeps guarded Discard in its own block.
+            if (profile_ != GeneralProfile::Fragment || discardBlocks.empty())
+                return refuse("more than one return block; refusing");
+            std::unordered_set<const IRBasicBlock*> seen;
+            std::vector<const IRBasicBlock*> work{blocks.front()};
+            size_t survivingReturns = 0;
+            const IRBasicBlock* survivingExit = nullptr;
+            while (!work.empty()) {
+                const IRBasicBlock* cur = work.back();
+                work.pop_back();
+                if (!seen.insert(cur).second || discardBlocks.count(cur))
+                    continue;
+                if (exits.count(cur)) {
+                    ++survivingReturns;
+                    survivingExit = cur;
+                }
+                for (const IRBasicBlock* nb : succs[cur]) work.push_back(nb);
+            }
+            if (survivingReturns != 1)
+                return refuse("multiple returns require exactly one surviving "
+                              "fragment exit; refusing");
+            // A missing return after discard is represented as Undef/Return.
+            // Ignore only this unobservable placeholder, never an undefined
+            // value feeding an output or any other computation.
+            for (const IRBasicBlock* b : returnBlocks) {
+                if (b == survivingExit || b->instructions.empty()) continue;
+                const IRInstruction* ret = b->instructions.back().get();
+                if (!ret || ret->op != IROp::Return || ret->operands.size() != 1)
+                    continue;
+                for (const auto& inst : b->instructions) {
+                    if (inst && inst->op == IROp::Undef &&
+                        inst->result != InvalidIRValue &&
+                        inst->result == ret->operands[0] &&
+                        useCount_[inst->result] == 1)
+                        killedReturnUndefs_.insert(inst.get());
+                }
+            }
+        }
+
         const auto reachesExitWithout =
             [&](const IRBasicBlock* removed, bool alsoSkipKills) {
                 std::unordered_set<const IRBasicBlock*> seen;
@@ -1098,7 +1143,7 @@ private:
                 while (!work.empty()) {
                     const IRBasicBlock* cur = work.back();
                     work.pop_back();
-                    if (cur == exitBlock) return true;
+                    if (exits.count(cur)) return true;
                     for (const IRBasicBlock* nb : succs[cur]) {
                         if (blocked(nb)) continue;
                         if (seen.insert(nb).second) work.push_back(nb);
@@ -1108,7 +1153,7 @@ private:
             };
 
         for (const IRBasicBlock* b : blocks) {
-            if (b == exitBlock) continue;
+            if (!multipleReturns && b == exitBlock) continue;
             bool stores = false;
             for (const auto& instPtr : b->instructions) {
                 if (!instPtr) continue;
@@ -1180,7 +1225,10 @@ private:
                                   "' has instructions; refusing");
         }
         order.assign(post.rbegin(), post.rend());
-        if (order.back() != exitBlock)
+        // Return emits nothing. With kill-covered terminal arms the final
+        // scheduled block may be a killed exit; all survivors still visited
+        // every output store, as proved above. Keep the old single-exit check.
+        if (!multipleReturns && order.back() != exitBlock)
             return refuse(
                 "return block is not the control-flow sink; refusing");
         return true;

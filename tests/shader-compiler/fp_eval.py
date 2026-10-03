@@ -166,7 +166,7 @@ _CC_TEST = {0: lambda x: False, 1: lambda x: x < 0, 2: lambda x: x == 0, 3: lamb
             4: lambda x: x > 0, 5: lambda x: x != 0, 6: lambda x: x >= 0, 7: lambda x: True}
 
 
-def evaluate(blob, inputs):
+def evaluate(blob, inputs, *, scalar_kill=False):
     """Run the program; `inputs` maps 'TEX0'.. / 'COL0' to 4-float lists. Returns R0."""
     regs = _Regs()
     cc = [None] * 4
@@ -175,6 +175,22 @@ def evaluate(blob, inputs):
         opc = (w[0] >> 24) & 0x3F
         if (w[2] >> 31) & 1:
             raise Unmodelled("branch instruction")
+        if opc == 0x12 and scalar_kill:
+            # Opt-in for the scalar-broadcast CC form. Other KIL encodings
+            # remain unjudged; None means this fragment was discarded.
+            cond = (w[1] >> 18) & 7
+            swz = [(w[1] >> (21 + 2 * i)) & 3 for i in range(4)]
+            if len(set(swz)) != 1:
+                raise Unmodelled("non-scalar KIL predicate")
+            value = cc[swz[0]]
+            if cond not in (0, 7) and value is None:
+                raise Unmodelled("KIL tests unwritten CC")
+            if cond == 7 or (cond != 0 and _CC_TEST[cond](value)):
+                return None
+            if w[0] & 1:
+                ended = True
+                break
+            continue
         if opc not in MODELLED:
             raise Unmodelled("opcode %#x" % opc)
         if opc not in (FENCBR, FENCTR):
