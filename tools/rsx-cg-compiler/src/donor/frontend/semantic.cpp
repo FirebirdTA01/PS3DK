@@ -1596,6 +1596,24 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
         const CgType element = constructedType.elementType();
         const int declared = constructedType.arraySize();
         const int count = static_cast<int>(argTypes.size());
+        // A FLATTENED list fills the elements lane by lane: `const float2
+        // o[4] = {x0, y0, x1, y1, ...}` and mixes like `{float2(1,2), 3, 4}`
+        // (measured: accepted with warning C1058; ogre HeatVision, mudlord
+        // blur).  Only numeric scalar/vector arguments, and their lanes
+        // must exactly fill the declared elements.
+        if (declared > 0 && declared != count && element.isNumeric() &&
+            !element.isArray() && !element.isStruct() && !element.isMatrix())
+        {
+            int lanes = 0;
+            bool flat = true;
+            for (const auto& a : argTypes)
+            {
+                if (!a.isNumeric() || a.isArray() || a.isMatrix() || a.isStruct()) { flat = false; break; }
+                lanes += a.componentCount();
+            }
+            if (flat && lanes == declared * element.componentCount())
+                return CgType::Array(element, declared);
+        }
         if (declared > 0 && declared != count)
         {
             error(expr->loc, "array constructor has " + std::to_string(count) +
