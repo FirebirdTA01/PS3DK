@@ -65,6 +65,10 @@ DEBT = {
     # The reference accepts these and steps i / k ONCE ((0.75, t.y, 1, 1) and
     # (1, 7, 3, 2)); the lane/row store builds its lvalue twice, so it
     # refuses side-effecting shapes until the lvalue is resolved once.
+    # Pre-existing (refused identically by a main-based build, measured
+    # 2026-10-02): a helper writing its own array PARAMETER.  The reference
+    # accepts it (h(cx) twice = 12, 12); it must refuse, never miscompile.
+    'helper_writes_array_param': ('float h(float v[3]) { v[0] = 10.0; return v[0] + v[1]; } float4 main(float4 t : TEXCOORD0) : COLOR { float a[3] = {1.0, 2.0, 3.0}; return float4(h(a), a[0], t.x, 1); }' + '\\n', 'member-array-storage'),
     'lane_store_side_effect_index': ('float4 main(float4 t : TEXCOORD0) : COLOR { float4 a[2]; a[0] = t; a[1] = t; int i = 0; a[i++][1] = 0.75; return float4(a[0].y, a[1].y, float(i), 1); }' + '\\n', 'side effects'),
     'lane_compound_side_effect_index': ('float4 main(float4 t : TEXCOORD0) : COLOR { int4 r = int4(1, 2, 3, 4); int k = 1; r[k++] += 5; return float4(r.x, r.y, r.z, k); }' + '\\n', 'side effects'),
 }
