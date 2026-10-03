@@ -7386,6 +7386,57 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
     return InvalidIRValue;
 }
 
+// True when building `e` could change state: ++/--, any assignment, or a
+// call (a user function may write a global or an out argument).  Used where
+// an lvalue's subexpressions would otherwise be built more than once.
+static bool exprHasSideEffects(const ExprNode* e)
+{
+    if (!e) return false;
+    switch (e->kind)
+    {
+    case ExprKind::Unary: {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        if (u->op == UnaryOp::PreIncrement || u->op == UnaryOp::PreDecrement ||
+            u->op == UnaryOp::PostIncrement || u->op == UnaryOp::PostDecrement)
+            return true;
+        return exprHasSideEffects(u->operand.get());
+    }
+    case ExprKind::Binary: {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        switch (b->op)
+        {
+        case BinaryOp::Assign: case BinaryOp::AddAssign: case BinaryOp::SubAssign:
+        case BinaryOp::MulAssign: case BinaryOp::DivAssign: case BinaryOp::ModAssign:
+            return true;
+        default:
+            return exprHasSideEffects(b->left.get()) || exprHasSideEffects(b->right.get());
+        }
+    }
+    case ExprKind::Call:
+        return true;
+    case ExprKind::MemberAccess:
+        return exprHasSideEffects(static_cast<const MemberAccessExpr*>(e)->object.get());
+    case ExprKind::Index: {
+        const auto* i = static_cast<const IndexExpr*>(e);
+        return exprHasSideEffects(i->array.get()) || exprHasSideEffects(i->index.get());
+    }
+    case ExprKind::Ternary: {
+        const auto* t = static_cast<const TernaryExpr*>(e);
+        return exprHasSideEffects(t->condition.get()) || exprHasSideEffects(t->thenExpr.get()) ||
+               exprHasSideEffects(t->elseExpr.get());
+    }
+    case ExprKind::Cast:
+        return exprHasSideEffects(static_cast<const CastExpr*>(e)->operand.get());
+    case ExprKind::Constructor: {
+        for (const auto& a : static_cast<const ConstructorExpr*>(e)->arguments)
+            if (exprHasSideEffects(a.get())) return true;
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
 IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
 {
     value = coerceAssignmentValue(target, value);
@@ -7670,6 +7721,17 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
         // rule: an integer exactly, a float constant truncated once; out of
         // range refuses.
         const IRTypeInfo aggregateType = getExprType(indexExpr->array.get());
+        if (!aggregateType.isArray() && (aggregateType.isVector() || aggregateType.isMatrix()) &&
+            (exprHasSideEffects(indexExpr->array.get()) || exprHasSideEffects(indexExpr->index.get())))
+        {
+            // This path reads the aggregate and then assigns it through its
+            // own lvalue, so the lvalue's subexpressions build TWICE: `a[i++][1]
+            // = x` would step i twice (review: codex).  Refuse the
+            // side-effecting shapes rather than build them twice.
+            error(target->loc, "lane or row store through an lvalue with side effects "
+                               "(++, --, an assignment or a call) is not supported; refusing");
+            return value;
+        }
         if (!aggregateType.isArray() && (aggregateType.isVector() || aggregateType.isMatrix()))
         {
             const IRValueID indexValue = buildExpr(indexExpr->index.get());

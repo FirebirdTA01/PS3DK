@@ -55,16 +55,23 @@ ROWS = {
     'vector_lane_store': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { int4 r = int4(0, 0, 0, 0); r[2] = 3; float4 v = a; v[1] = b.x; return float4(v.x, v.y, float(r.z), 1.0); }' + '\\n', [0.5, 1.0, 3.0, 1.0]),
     'matrix_row_store': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { float2x2 m = float2x2(1, 2, 3, 4); m[1] = a.xy; return float4(m[0], m[1]); }' + '\\n', [1.0, 2.0, 0.5, -0.25]),
     'struct_identical_redefinition': ('struct S { float2 a; float b; }; float g(S s) { return s.b; } struct S { float2 a; float b; }; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { S s; s.a = a.xy; s.b = a.z; return float4(s.a, g(s), 1); }' + '\\n', [0.5, -0.25, 0.75, 1.0]),
+    'inferred_array_to_sized_param': ('static const float cx[] = {1.0, 2.0, 3.0}; float g(float v[3]) { return v[2] + v[0]; } float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return float4(g(cx), a.x, 0, 1); }' + '\\n', [4.0, 0.5, 0.0, 1.0]),
 }
 # Named debt: commas in for clauses parse, but the static-loop unroller does
 # not recognise the induction (the reference accepts; value 0.75); it must
 # refuse, not miscompile.
 DEBT = {
     'comma_for_clauses': ('float4 main(float4 t : TEXCOORD0) : COLOR { float s = 0; int i, j; for (i = 0, j = 2; i < 2; i++, j--) s += t[i] * j; return float4(s, 0, 0, 1); }' + '\\n', 'back-edge'),
+    # The reference accepts these and steps i / k ONCE ((0.75, t.y, 1, 1) and
+    # (1, 7, 3, 2)); the lane/row store builds its lvalue twice, so it
+    # refuses side-effecting shapes until the lvalue is resolved once.
+    'lane_store_side_effect_index': ('float4 main(float4 t : TEXCOORD0) : COLOR { float4 a[2]; a[0] = t; a[1] = t; int i = 0; a[i++][1] = 0.75; return float4(a[0].y, a[1].y, float(i), 1); }' + '\\n', 'side effects'),
+    'lane_compound_side_effect_index': ('float4 main(float4 t : TEXCOORD0) : COLOR { int4 r = int4(1, 2, 3, 4); int k = 1; r[k++] += 5; return float4(r.x, r.y, r.z, k); }' + '\\n', 'side effects'),
 }
 REFUSE = {
     'array_count_mismatch': ('float4 main(float4 a : TEXCOORD0) : COLOR { float o[3] = float[](1.0, 2.0); return float4(o[0], 0, 0, 1); }' + '\\n', ''),
     'struct_different_redefinition_C1047': ('struct S { float2 a; float b; }; struct S { float2 a; float c; }; float4 main(float4 a : TEXCOORD0) : COLOR { S s; s.a = a.xy; return float4(s.a, 0, 1); }' + '\\n', 'C1047'),
+    'inferred_array_out_of_bounds': ('static const float cx[] = {1.0, 2.0, 3.0}; float4 main(float4 t : TEXCOORD0) : COLOR { return float4(cx[3], t.x, 0, 1); }' + '\\n', 'out of bounds'),
     'modf_int_out_C1113': ('float4 main(float4 t : TEXCOORD0) : COLOR { int i = 3; float r = modf(i / 2.0f, i); return float4(r, i, 0, 1); }' + '\\n', 'C1113'),
     'extent_float_C1309': ('float4 main(float4 t : TEXCOORD0) : COLOR { static const float g = 2.0; float a[g * g]; a[0] = t.x; return float4(a[0], 0, 0, 1); }' + '\\n', 'C1309'),
     'extent_uniform_C1307': ('uniform int n; float4 main(float4 t : TEXCOORD0) : COLOR { float a[n]; a[0] = t.x; return float4(a[0], 0, 0, 1); }' + '\\n', 'C1307'),

@@ -662,6 +662,12 @@ void SemanticAnalyzer::analyzeVarDecl(VarDecl* decl)
         {
             decl->type->arraySize = initType.arraySize();
             varType = resolveType(decl->type.get());
+            // The symbol was bound with the unsized type before this ran
+            // (collectVarDecl for a global, analyzeDeclStmt for a local), so
+            // every later use - indexing, bounds, a helper's sized-array
+            // parameter - would see `array` with no length (review: codex).
+            if (Symbol* bound = symbols_.lookup(decl->name); bound && bound->declaration == decl)
+                bound->type = varType;
         }
         if (!initType.isError() && !allowsScalarNarrowing(varType, initType))
         {
