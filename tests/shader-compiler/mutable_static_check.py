@@ -87,6 +87,24 @@ static float y = f(x);
 static float z = f(y) + x;
 float4 main(float4 t : TEXCOORD0) : COLOR { return float4(y, z, t.x, 1); }
 """, lambda t: [0.5, 1.25, t[0], 1.0]),
+    # A helper the initialiser calls may write file-scope state, and the
+    # write persists (review: codex's static-init-side-effect witnesses, all
+    # four measured on the reference): a scalar, the same under an entry
+    # parameter shadowing g, an array element, and a later initialiser.
+    ('initialiser_side_effect', """static float g = .25; float f() { g = .75; return 1.0; } static float y = f();
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(g, y, t.x, 1); }
+""", lambda t: [0.75, 1.0, t[0], 1.0]),
+    ('initialiser_side_effect_shadowed', """static float g = .25; float f() { g = .75; return 1.0; } static float y = f();
+float rd() { return g; }
+float4 main(float4 g : TEXCOORD0) : COLOR { return float4(rd(), y, g.x, 1); }
+""", lambda t: [0.75, 1.0, t[0], 1.0]),
+    ('initialiser_side_effect_array', """static float g[2] = {.25, .5}; float f() { g[0] = .75; return 1.0; } static float y = f();
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(g[0], g[1], y, t.x); }
+""", lambda t: [0.75, 0.5, 1.0, t[0]]),
+    ('initialiser_side_effect_later', """static float g = .25; float f() { g = .75; return 1.0; } static float y = f();
+float rd() { return g; } static float z = rd();
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(g, y, z, t.x); }
+""", lambda t: [0.75, 1.0, 0.75, t[0]]),
 ]
 
 INPUTS = [[0.75, 0.5, 0.25, 1.0], [0.25, 0.125, 0.5, 0.0]]

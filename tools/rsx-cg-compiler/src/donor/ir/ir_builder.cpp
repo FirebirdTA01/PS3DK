@@ -1811,9 +1811,37 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                 if (!kv.second.empty()) localArrayValues_[kv.first] = kv.second;
                 else localArrayValues_.erase(kv.first);
             }
+            const auto fileNames = nameToValue_;
+            const auto fileArrays = localArrayValues_;
             const IRValueID value = buildExpr(decl->initializer.get());
+            // A helper the initialiser calls may WRITE file-scope state, and
+            // the write persists (review: codex; measured: `g = .75` inside
+            // f() of `static float y = f();` reads 0.75 afterwards - scalar,
+            // array element, a shadowed g, and a later initialiser all
+            // see it).  Every binding the build changed is such a write:
+            // carry it back, into the stash where the entry shadows it.
+            const auto changedNames = nameToValue_;
+            const auto changedArrays = localArrayValues_;
             nameToValue_ = entryNames;
             localArrayValues_ = entryArrays;
+            for (const auto& kv : changedNames)
+            {
+                auto before = fileNames.find(kv.first);
+                if (before != fileNames.end() && before->second == kv.second) continue;
+                if (auto st = shadowedGlobals_.find(kv.first); st != shadowedGlobals_.end())
+                    st->second = kv.second;
+                else
+                    nameToValue_[kv.first] = kv.second;
+            }
+            for (const auto& kv : changedArrays)
+            {
+                auto before = fileArrays.find(kv.first);
+                if (before != fileArrays.end() && before->second == kv.second) continue;
+                if (auto st = shadowedGlobalArrays_.find(kv.first); st != shadowedGlobalArrays_.end())
+                    st->second = kv.second;
+                else
+                    localArrayValues_[kv.first] = kv.second;
+            }
             if (value == InvalidIRValue) continue;
             if (auto st = shadowedGlobals_.find(decl->name); st != shadowedGlobals_.end())
                 st->second = value;

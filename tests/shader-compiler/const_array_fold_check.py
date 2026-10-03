@@ -54,12 +54,13 @@ VP_TWIN = """void main(float4 p : POSITION, out float4 o : POSITION, out float4 
 """
 
 # A static const array passed whole to a helper (review: codex): a parameter
-# named like the global, two calls of a helper that writes its copy, and the
-# global read after - each call starts from the initialiser and the global
-# is untouched (measured: (2, 12, 12, 1)).
+# named like the global, two calls of a helper that copies the array and
+# writes its copy, and the global read after - each call starts from the
+# initialiser and the global is untouched (measured: (2, 13, 13, 1)).  A
+# helper writing its array PARAMETER itself is a separate, pre-existing gap.
 PASSED_WHOLE = """static const float cx[3] = {1.0, 2.0, 3.0};
 float g(float cx[3]) { return cx[2] - cx[0]; }
-float h(float v[3]) { v[0] = 10.0; return v[0] + v[1]; }
+float h(float v[3]) { float w[3] = v; w[0] = 10.0; return w[0] + v[0] + v[1]; }
 float4 main(float4 t : TEXCOORD0) : COLOR
 {
     float a = g(cx);
@@ -83,7 +84,7 @@ float4 main(float4 t : TEXCOORD0) : COLOR { return float4(g(ch), t.x, 0, 1); }
 }
 
 ROWS = [  # measured on the reference: (0.5 t.x + 4, 3.75, 6, 3) and (t.y, 0.125, t.y, 1)
-    ('passed_whole', PASSED_WHOLE, lambda t: [2.0, 12.0, 12.0, 1.0]),
+    ('passed_whole', PASSED_WHOLE, lambda t: [2.0, 13.0, 13.0, 1.0]),
     ('element_types', ELEMENT_TYPES, lambda t: [0.5 * t[0] + 4.0, 3.75, 6.0, 3.0]),
     ('shadowed', SHADOWED, lambda t: [t[1], 0.125, t[1], 1.0]),
 ]
