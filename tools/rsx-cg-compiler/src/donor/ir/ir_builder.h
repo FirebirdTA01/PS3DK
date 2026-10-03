@@ -208,6 +208,7 @@ private:
     IRValueID buildIdentifierExpr(IdentifierExpr* expr);
     IRValueID materialiseInitialiser(const IRTypeInfo& type, const std::vector<float>& values,
                                      const std::vector<int64_t>& intValues);
+    IRValueID foldStaticConstArrayElement(const IRGlobal& global, int index);
     IRValueID buildBinaryExpr(BinaryExpr* expr);
     IRValueID buildUnaryExpr(UnaryExpr* expr);
     IRValueID buildCallExpr(CallExpr* expr);
