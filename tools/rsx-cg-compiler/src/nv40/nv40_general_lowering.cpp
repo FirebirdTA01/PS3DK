@@ -6660,6 +6660,16 @@ private:
             return;
         }
 
+        // clamp(x, 0, 1) SATURATES, as the reference emits it (EX2R_sat in
+        // crt-ddt's GAMMA_OUT): a NaN lane becomes 0.  Min-then-max sends a
+        // NaN lane to 1 on the GPU (min(NaN, 1) = 1), and the pixel judge
+        // saw exactly those lanes paint full white where the reference
+        // paints black.
+        if (isLiteralZero(inst.operands[1]) && isLiteralOne(inst.operands[2])) {
+            lowerUnary(inst, VOp::Mov, true);
+            return;
+        }
+
         const int result = define(inst.result);
         VInstr load;
         load.op = VOp::Mov;
