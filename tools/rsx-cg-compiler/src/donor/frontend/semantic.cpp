@@ -1624,12 +1624,50 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
 
     for (auto& arg : expr->arguments)
     {
+        // The parser leaves inner brace lists untyped. Their type comes from
+        // the destination array element or matrix row, not from a numeric
+        // constructor spelling in the source. Preserve the grouping: unlike
+        // an explicit constructor, {x} must not splat and {xyzw} must not
+        // narrow to fill a float2 element.
+        ConstructorExpr* nested = arg->kind == ExprKind::Constructor
+            ? static_cast<ConstructorExpr*>(arg.get()) : nullptr;
+        const bool contextualBrace = nested && nested->bracedInitializer;
+        if (contextualBrace)
+        {
+            CgType context = CgType::Error();
+            if (constructedType.isArray())
+                context = constructedType.elementType();
+            else if (constructedType.isMatrix())
+                context = CgType::Vec(constructedType.scalarKind(), constructedType.matrixCols());
+            if (!context.isVector() && !context.isMatrix())
+            {
+                error(arg->loc, "nested braces require a numeric vector element or matrix row (aggregate-brace-initializer)");
+                hasError = true;
+                continue;
+            }
+            if (!nested->constructedType)
+                nested->constructedType = std::make_shared<TypeNode>(*context.getNode());
+        }
         CgType argType = analyzeExpr(arg.get());
         argTypes.push_back(argType);
         if (argType.isError())
         {
             hasError = true;
             continue;
+        }
+
+        if (contextualBrace)
+        {
+            int components = 0;
+            for (const auto& part : nested->arguments)
+                components += CgType(part->resolvedType).componentCount();
+            if (components != argType.componentCount())
+            {
+                error(arg->loc, "nested brace initializer requires exactly " +
+                      std::to_string(argType.componentCount()) + " components, but " +
+                      std::to_string(components) + " were provided (aggregate-brace-initializer)");
+                hasError = true;
+            }
         }
 
         if (!argType.isNumeric())
