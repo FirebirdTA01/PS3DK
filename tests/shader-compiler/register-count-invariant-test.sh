@@ -123,7 +123,8 @@ compile "$work/n16.fcg" n16
     fail "fp16_promote_sparse did not compile"
 }
 
-# Raw fp16 H indices share the same six-bit FP temp field as full R indices.
+# Raw fp16 H indices share the FP temp index field with full R indices, and an
+# encoded index of 48 or more refuses (H54/H56 measured poisoning the RSX).
 # Keep every step value live across the first sum by reading it again with
 # that sum as a multiplier. Immediate accumulation can now compile the old
 # single-use sum, but cannot discard these shared terms before the second sum.
@@ -159,7 +160,7 @@ rc=0
 refusal_status "$rc" "fp16_raw_limit"
 [[ "$rc" -eq 1 ]] || fail "fp16_raw_limit compiled despite reaching raw H64"
 [[ ! -e "$work/fp16_raw_limit.fpo" ]] || fail "fp16_raw_limit left a container behind after refusal"
-grep -q "six-bit FP temp field" "$work/fp16_raw_limit.log" || {
+grep -q "usable FP temp index limit of 47" "$work/fp16_raw_limit.log" || {
     tail -n 20 "$work/fp16_raw_limit.log" >&2
     fail "fp16_raw_limit refused for a reason other than raw encoded temp overflow"
 }
