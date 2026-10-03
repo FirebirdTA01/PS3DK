@@ -2370,25 +2370,41 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
         //    where neither arm ran).  Taking the written arm is the existing
         //    rule for local elements above.
         // Anything else keeps the Select and its refusal.
+        //
+        // The uninitialised local does NOT take the written arm, though: the
+        // pixel judge showed the xbr family (2xbr-lv3-pass0, xbr-lv3-pass0,
+        // 2xbr-hybrid-v4-gamma) rendering wrong that way.  The reference's
+        // unwritten register reads ZERO at run time (fragment temps start at
+        // 0), so `blend1` on the no-branch path is 0 and `lerp(E, pix1, 0)`
+        // is E; taking another arm's blend painted a blend the reference
+        // never paints.  That side becomes a zero of the joined type, and the
+        // Select below picks it.
+        IRValueID joinThen = thenVal, joinElse = elseVal;
         {
-            const auto takesOther = [&](IRValueID self, IRValueID other) {
-                if (self == InvalidIRValue) return isLoadOf(other, name);
-                return isUndefinedValue(self) && !isUndefinedValue(other);
+            if (thenVal == InvalidIRValue && isLoadOf(elseVal, name)) { nameToValue_[name] = elseVal; continue; }
+            if (elseVal == InvalidIRValue && isLoadOf(thenVal, name)) { nameToValue_[name] = thenVal; continue; }
+            const auto zeroOf = [&](IRValueID like) {
+                const IRTypeInfo t = getValueType(like);
+                const int n = std::max(1, t.componentCount());
+                return createConstant(t, std::vector<float>(static_cast<size_t>(n), 0.0f),
+                                      std::vector<int64_t>(static_cast<size_t>(n), 0));
             };
-            if (takesOther(thenVal, elseVal)) { nameToValue_[name] = elseVal; continue; }
-            if (takesOther(elseVal, thenVal)) { nameToValue_[name] = thenVal; continue; }
+            const bool thenUndef = thenVal != InvalidIRValue && isUndefinedValue(thenVal);
+            const bool elseUndef = elseVal != InvalidIRValue && isUndefinedValue(elseVal);
+            if (thenUndef && !isUndefinedValue(elseVal)) joinThen = zeroOf(elseVal);
+            else if (elseUndef && !isUndefinedValue(thenVal)) joinElse = zeroOf(thenVal);
         }
 
-        IRTypeInfo selType = getValueType(thenVal);
+        IRTypeInfo selType = getValueType(joinThen);
         if (selType.baseType == IRType::Void)
-            selType = getValueType(elseVal);
+            selType = getValueType(joinElse);
 
         IRValueID selId = currentFunction_->allocateValueId();
         auto sel = std::make_unique<IRInstruction>(
             IROp::Select, selId, selType);
         sel->addOperand(condValue);
-        sel->addOperand(thenVal);
-        sel->addOperand(elseVal);
+        sel->addOperand(joinThen);
+        sel->addOperand(joinElse);
         currentBlock_->addInstruction(std::move(sel));
         nameToValue_[name] = selId;
     }
