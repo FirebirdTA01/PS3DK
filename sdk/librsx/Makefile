@@ -68,6 +68,8 @@ install: $(ARCHIVE) $(LP64_ARCHIVE)
 	@install -d $(INSTALL_LIB)/lp64
 	install -m 0644 $(LP64_ARCHIVE) $(INSTALL_LIB)/lp64/librsx.a
 	@echo "installed librsx.a (ILP32 + LP64) under $(PS3DK)/ppu/lib"
+	@echo "REPLACING ppu/lib/librsx.a with sdk/librsx (vendored copy at ppu/lib/librsx.a is NOT installed)"
+	@echo "REPLACING ppu/lib/lp64/librsx.a with sdk/librsx (vendored copy at ppu/lib/lp64/librsx.a is NOT installed)"
 
 clean:
 	rm -rf $(OBJ_DIR) $(LP64_OBJ_DIR)

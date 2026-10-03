@@ -104,6 +104,8 @@ install: $(ARCHIVE) $(LP64_ARCHIVE)
 	install -m 0644 include/cell/gcm/gcm_cg_func.h    $(INSTALL_INC)/cell/gcm/gcm_cg_func.h
 	install -m 0644 include/cell/gcm/ps3tc_fifo_wrap.h $(INSTALL_INC)/cell/gcm/ps3tc_fifo_wrap.h
 	@echo "installed libgcm_cmd.a + headers under $(PS3DK)/ppu/"
+	@echo "REPLACING ppu/lib/libgcm_cmd.a with sdk/libgcm_cmd (vendored copy at ppu/lib/libgcm_cmd.a is NOT installed)"
+	@echo "REPLACING ppu/lib/lp64/libgcm_cmd.a with sdk/libgcm_cmd (vendored copy at ppu/lib/lp64/libgcm_cmd.a is NOT installed)"
 
 clean:
 	rm -rf $(OBJ_DIR) $(LP64_OBJ_DIR)

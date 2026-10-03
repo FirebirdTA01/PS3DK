@@ -77,6 +77,40 @@ if [[ "${MSYSTEM:-}" == "MINGW64" || "${MSYSTEM:-}" == "UCRT64" ]]; then
     esac
 fi
 
+# ---------------------------------------------------------------------------
+# ps3tc_replacing  (t_cab4a49d)
+#
+# Emit one greppable log line for an artifact that REPLACES a vendored PSL1GHT
+# copy at install time.  Call it immediately after each `install` / `cp` / `ln`
+# site that lands an SDK-built artifact over (or as an alias of) a path the
+# vendored PSL1GHT would also provide, so a full build log greps to the
+# complete list.
+#
+#   ps3tc_replacing <installed_rel_path> <source_desc>
+#
+#     <installed_rel_path>  path inside the install prefix, relative, e.g.
+#                           "ppu/lib/librt.a" or "bin/sprxlinker".  The SAME
+#                           string appears in scripts/installed-copy-map.tsv
+#                           and docs/installed-copy-map.md.
+#     <source_desc>         where OUR copy came from, e.g. "runtime/lv2/librt"
+#                           or "libsysutil_stub.a (symlink)".
+#
+# Output (fixed, stable format -- grep for ^REPLACING):
+#   REPLACING ppu/lib/librt.a with runtime/lv2/librt (vendored copy at ppu/lib/librt.a is NOT installed)
+#
+# The builder that emits each installed path is recorded in
+# scripts/installed-copy-map.tsv and printed by scripts/which-copy.sh; it is
+# intentionally NOT part of the log line (the card fixes the format).
+#
+# The three places an <installed_rel_path> must agree -- the per-site call,
+# the TSV manifest, and the docs page -- are cross-checked by
+# tests/sdk/installed-copy-map-consistency-test.sh.
+# ---------------------------------------------------------------------------
+ps3tc_replacing() {
+    local installed="$1" src="$2"
+    printf 'REPLACING %s with %s (vendored copy at %s is NOT installed)\n' "$installed" "$src" "$installed"
+}
+
 # Informational banner only when sourced interactively.
 if [[ $- == *i* ]]; then
     echo "ps3 toolchain env loaded"

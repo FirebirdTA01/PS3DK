@@ -208,6 +208,17 @@ for abi_flag in "" "-mlp64"; do
             "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" rcs \
                 "$install_gcc/librt.a" $librt_objs
             cp -f "$install_gcc/librt.a" "$install_ps3dk/librt.a"
+            # librt.a (this ABI) replaced the vendored PSL1GHT copy at this
+            # path — log it for the installed-copy map (t_cab4a49d).  Emitted
+            # here, once per ABI and only now that the archive actually landed
+            # (guarded by -n librt_objs), so a skipped build never claims a
+            # replacement.  The two literal paths below match
+            # scripts/installed-copy-map.tsv and docs/installed-copy-map.md.
+            if [[ -n "$abi_subdir" ]]; then
+                ps3tc_replacing "ppu/lib/lp64/librt.a" "runtime/lv2/librt"
+            else
+                ps3tc_replacing "ppu/lib/librt.a" "runtime/lv2/librt"
+            fi
         fi
         say "installed librt.a ($abi_label, $(echo $librt_objs | wc -w) objects)"
 

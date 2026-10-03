@@ -1,0 +1,9 @@
+ppu/lib/librt.a	runtime/lv2/librt	scripts/build-runtime-lv2.sh
+ppu/lib/lp64/librt.a	runtime/lv2/librt	scripts/build-runtime-lv2.sh
+ppu/lib/librsx.a	sdk/librsx	sdk/librsx/Makefile
+ppu/lib/lp64/librsx.a	sdk/librsx	sdk/librsx/Makefile
+ppu/lib/libgcm_cmd.a	sdk/libgcm_cmd	sdk/libgcm_cmd/Makefile
+ppu/lib/lp64/libgcm_cmd.a	sdk/libgcm_cmd	sdk/libgcm_cmd/Makefile
+ppu/include/rsx/rsx_function_macros.h	sdk/include/rsx	sdk/Makefile
+ppu/include/rsx/gcm_sys.h	sdk/include/rsx	sdk/Makefile
+ppu/include/net/socket.h	sdk/include/net	sdk/Makefile

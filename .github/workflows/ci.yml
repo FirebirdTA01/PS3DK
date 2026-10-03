@@ -251,6 +251,20 @@ jobs:
       - name: Test sdk_version.h reaches PPU and SPU with CELL_SDK_VERSION
         run: bash tests/sdk/sdk-version-header-test.sh
 
+      # t_cab4a49d: the installed-copy map (which artifacts replace a vendored
+      # PSL1GHT copy) must stay consistent across the manifest, the per-site
+      # REPLACING log lines, the docs page, and which-copy.sh.  Host-only; the
+      # live "full build log greps to the list" half is exercised on a built
+      # tree by scripts/build-*.sh emitting those same REPLACING lines.
+      - name: Test the installed-copy map stays consistent across manifest/log/docs
+        run: bash tests/sdk/installed-copy-map-consistency-test.sh
+
+      # t_cab4a49d: the verify-installed-copy-map.sh helper's misuse guards --
+      # refuse shared-SDK collisions, a toolchain escape of the scratch prefix
+      # ('..' or a scratch-local symlink), and TCHAIN==SCRATCH.  Host-only.
+      - name: Test the installed-copy-map verify helper's shared-SDK and escape guards
+        run: bash tests/sdk/verify-installed-copy-map-guard-test.sh
+
       # A render target's type field takes the SURFACE family, never the
       # texture-filter family. The mixup compiled, passed RPCS3, and hung a
       # real PS3 on a black screen; 23 samples and our own PSGL carried it.

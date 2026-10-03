@@ -698,6 +698,9 @@ install-headers:
 	    install -m 0644 "$$h" "$$dst"; \
 	    echo "  header  $$rel"; \
 	done
+	@echo "REPLACING ppu/include/rsx/rsx_function_macros.h with sdk/include/rsx (vendored copy at ppu/include/rsx/rsx_function_macros.h is NOT installed)"
+	@echo "REPLACING ppu/include/rsx/gcm_sys.h with sdk/include/rsx (vendored copy at ppu/include/rsx/gcm_sys.h is NOT installed)"
+	@echo "REPLACING ppu/include/net/socket.h with sdk/include/net (vendored copy at ppu/include/net/socket.h is NOT installed)"
 
 install-spu-headers:
 	@for h in $(SPU_HEADERS); do \
