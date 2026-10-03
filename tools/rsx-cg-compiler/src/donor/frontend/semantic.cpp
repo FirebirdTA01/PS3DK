@@ -1242,6 +1242,25 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     // Link to resolved function
     expr->resolvedFunction = candidate->symbol->declaration;
 
+    // An ARRAY argument takes no element conversion: an int[3] or half[3]
+    // into a float[3] parameter is C1102 on the reference (measured, both),
+    // and accepting it passed the elements over unconverted (review: codex).
+    {
+        const auto& paramTypes = candidate->symbol->parameterTypes;
+        for (size_t i = 0; i < argTypes.size() && i < paramTypes.size(); ++i)
+        {
+            const CgType& arg = argTypes[i];
+            const CgType& param = paramTypes[i];
+            if (arg.isArray() && param.isArray() &&
+                arg.elementType().scalarKind() != param.elementType().scalarKind())
+            {
+                error(expr->arguments[i]->loc, "C1102: incompatible type for parameter #" +
+                      std::to_string(i + 1) + " (an array argument takes no element conversion)");
+                return CgType::Error();
+            }
+        }
+    }
+
     // AN OMITTED out/inout ARGUMENT IS REFUSED AFTER RANKING, NOT BEFORE IT.
     //
     // Measured on sce-cgc 475 (codex's six cells; Fable retracted the
