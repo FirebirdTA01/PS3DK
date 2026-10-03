@@ -619,6 +619,8 @@ jobs:
         run: bash tests/shader-compiler/reachable-discard-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Fragment killed return paths preserve survivor colors and kill predicates
         run: bash tests/shader-compiler/discard-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Unreachable missing-return stubs preserve both live return values
+        run: bash tests/shader-compiler/dead-return-stub-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test C-style narrowing casts on vectors and matrices
         run: bash tests/shader-compiler/cast-narrowing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test half subnormal flush to zero in constant evaluation

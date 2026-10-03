@@ -8,6 +8,7 @@ import tempfile
 from fp_eval import evaluate, Unmodelled, _container, _ins, _src, MOV, INPUT
 
 CASES = {
+    'kill_else_return': ('if(p.x<=0)discard;else return p;', lambda p: p if p[0]>0 else None),
     'return_else_kill': ('if(p.x>0)return p;else discard;', lambda p: p if p[0]>0 else None),
     'nested_kills': ('if(p.x>0){if(p.y>0)return p;else discard;}else discard;',
                      lambda p: p if p[0]>0 and p[1]>0 else None),
@@ -19,8 +20,6 @@ DEBTS = {
     'live_undefined_output': 'float4 q;if(p.x>0)return q;else discard;',
     # Guard construction rejects a terminal discard without a successor.
     'terminal_discard_without_successor': 'if(p.x>0)return p;discard;',
-    # This front-end shape retains an unreachable nonempty merge block.
-    'kill_else_return_unreachable_merge': 'if(p.x<=0)discard;else return p;',
     'store_on_killed_arm': 'if(p.x>0){discard;return p;}return p*2;',
     'multiple_survivors': 'if(p.x>0)return p;else if(p.y>0)return p*2;else return p*3;',
     'two_survivors_and_kill': 'if(p.x>0)return p;else if(p.y>0)return p*2;else discard;',

@@ -1044,6 +1044,36 @@ private:
                 return refuse("block '" + b->name +
                               "' has no terminator; refusing");
         }
+        if (profile_ == GeneralProfile::Fragment) {
+            // Both arms returning can leave a synthetic missing-return
+            // merge: Undef, Return undef. It is not a third live return.
+            // Validate all terminators above first, and drop only this exact
+            // unreachable placeholder, never meaningful unreachable work.
+            std::unordered_set<const IRBasicBlock*> reachable;
+            std::vector<const IRBasicBlock*> work{blocks.front()};
+            while (!work.empty()) {
+                const IRBasicBlock* b = work.back();
+                work.pop_back();
+                if (!reachable.insert(b).second) continue;
+                for (const IRBasicBlock* nb : succs[b]) work.push_back(nb);
+            }
+            std::unordered_set<const IRBasicBlock*> stubs;
+            for (const IRBasicBlock* b : blocks) {
+                if (reachable.count(b) || b->instructions.size() != 2) continue;
+                const IRInstruction* undef = b->instructions[0].get();
+                const IRInstruction* ret = b->instructions[1].get();
+                if (undef && ret && undef->op == IROp::Undef &&
+                    undef->operands.empty() && undef->result != InvalidIRValue &&
+                    ret->op == IROp::Return && ret->operands.size() == 1 &&
+                    ret->operands[0] == undef->result &&
+                    useCount_[undef->result] == 1)
+                    stubs.insert(b);
+            }
+            const auto isStub = [&](const IRBasicBlock* b) { return stubs.count(b) != 0; };
+            blocks.erase(std::remove_if(blocks.begin(), blocks.end(), isStub), blocks.end());
+            returnBlocks.erase(std::remove_if(returnBlocks.begin(), returnBlocks.end(), isStub), returnBlocks.end());
+            exitBlock = returnBlocks.empty() ? nullptr : returnBlocks.front();
+        }
         if (!exitBlock)
             return refuse("control flow has no return block; refusing");
 
