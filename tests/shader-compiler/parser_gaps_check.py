@@ -54,6 +54,7 @@ ROWS = {
     'unsized_file_scope_array': ('static const float cx[] = float[](1.0, -0.5, 0.25); static const float cb[] = {0.5, 0.25}; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return float4(cx[0] * a.x, cx[1], cx[2], cb[0] + cb[1]); }' + '\\n', [0.5, -0.5, 0.25, 0.75]),
     'vector_lane_store': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { int4 r = int4(0, 0, 0, 0); r[2] = 3; float4 v = a; v[1] = b.x; return float4(v.x, v.y, float(r.z), 1.0); }' + '\\n', [0.5, 1.0, 3.0, 1.0]),
     'matrix_row_store': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { float2x2 m = float2x2(1, 2, 3, 4); m[1] = a.xy; return float4(m[0], m[1]); }' + '\\n', [1.0, 2.0, 0.5, -0.25]),
+    'struct_identical_redefinition': ('struct S { float2 a; float b; }; float g(S s) { return s.b; } struct S { float2 a; float b; }; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { S s; s.a = a.xy; s.b = a.z; return float4(s.a, g(s), 1); }' + '\\n', [0.5, -0.25, 0.75, 1.0]),
 }
 # Named debt: commas in for clauses parse, but the static-loop unroller does
 # not recognise the induction (the reference accepts; value 0.75); it must
@@ -63,6 +64,7 @@ DEBT = {
 }
 REFUSE = {
     'array_count_mismatch': ('float4 main(float4 a : TEXCOORD0) : COLOR { float o[3] = float[](1.0, 2.0); return float4(o[0], 0, 0, 1); }' + '\\n', ''),
+    'struct_different_redefinition_C1047': ('struct S { float2 a; float b; }; struct S { float2 a; float c; }; float4 main(float4 a : TEXCOORD0) : COLOR { S s; s.a = a.xy; return float4(s.a, 0, 1); }' + '\\n', 'C1047'),
     'modf_int_out_C1113': ('float4 main(float4 t : TEXCOORD0) : COLOR { int i = 3; float r = modf(i / 2.0f, i); return float4(r, i, 0, 1); }' + '\\n', 'C1113'),
     'extent_float_C1309': ('float4 main(float4 t : TEXCOORD0) : COLOR { static const float g = 2.0; float a[g * g]; a[0] = t.x; return float4(a[0], 0, 0, 1); }' + '\\n', 'C1309'),
     'extent_uniform_C1307': ('uniform int n; float4 main(float4 t : TEXCOORD0) : COLOR { float a[n]; a[0] = t.x; return float4(a[0], 0, 0, 1); }' + '\\n', 'C1307'),

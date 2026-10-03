@@ -207,7 +207,32 @@ void SemanticAnalyzer::collectStructDecl(StructDecl* decl)
     // Add to type table
     if (!symbols_.addType(decl->name, structType))
     {
-        error(decl->loc, "redefinition of struct '" + decl->name + "'");
+        // An IDENTICAL redefinition is accepted - same members, in order,
+        // with the same types and semantics (crt-lottes horz3 declares
+        // `struct input` twice, word for word); any difference is C1047
+        // (measured: a renamed member and a changed member list both
+        // refuse, "struct previously defined").  The first definition stays.
+        const auto sameType = [](const auto& self, const TypeNode* a, const TypeNode* b) -> bool {
+            if (!a || !b) return a == b;
+            if (a->baseType != b->baseType || a->vectorSize != b->vectorSize ||
+                a->matrixRows != b->matrixRows || a->matrixCols != b->matrixCols ||
+                a->arraySize != b->arraySize || a->structName != b->structName)
+                return false;
+            return self(self, a->elementType.get(), b->elementType.get());
+        };
+        const std::optional<CgType> prior = symbols_.lookupType(decl->name);
+        bool identical = prior && prior->isStruct() &&
+                         prior->structFields().size() == decl->fields.size();
+        for (size_t i = 0; identical && i < decl->fields.size(); ++i)
+        {
+            const StructField& a = prior->structFields()[i];
+            const StructField& b = decl->fields[i];
+            identical = a.name == b.name && a.storage == b.storage &&
+                        a.semantic.rawName == b.semantic.rawName &&
+                        sameType(sameType, a.type.get(), b.type.get());
+        }
+        if (!identical)
+            error(decl->loc, "C1047: redefinition of struct '" + decl->name + "'");
         return;
     }
 
