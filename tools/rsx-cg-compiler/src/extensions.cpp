@@ -20,6 +20,9 @@ const ExtensionInfo kExtensions[] = {
     { Extension::DeclaratorTypes, "declarator-types",
       "a later declarator in a list keeps the declared type; the reference gives it "
       "the type last named in an earlier declarator" },
+    { Extension::StaticParameters, "static-parameters",
+      "accept helper static, static const, and const static parameters; "
+      "preserve const and refuse static parameters on the selected entry" },
 };
 
 constexpr std::size_t kExtensionCount = sizeof(kExtensions) / sizeof(kExtensions[0]);

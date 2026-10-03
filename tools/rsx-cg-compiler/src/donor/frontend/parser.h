@@ -27,6 +27,11 @@ struct ParserConfig
     // --extension=declarator-types: a later declarator in a list keeps the
     // declared type instead of the reference's last-named-type rule.
     bool standardDeclaratorTypes = false;
+    // Driver-owned dialect policy. The hint is composed from its extension
+    // registry; other users of this frontend need not expose that extension.
+    bool helperStaticParameters = false;
+    std::string staticParameterEnableFlag;
+    std::string entryPointName = "main";
 };
 
 // Recursive descent parser for Cg shader language
@@ -135,8 +140,8 @@ private:
         std::shared_ptr<TypeNode> type,
         const std::string& firstName,
         StorageQualifier storage);
-    std::unique_ptr<ParamDecl> parseParameter();
-    std::vector<std::unique_ptr<ParamDecl>> parseParameterList();
+    std::unique_ptr<ParamDecl> parseParameter(bool selectedEntry);
+    std::vector<std::unique_ptr<ParamDecl>> parseParameterList(bool selectedEntry);
 
     // Storage qualifiers and attributes
     // `sawInline`, when given, reports whether an `inline` keyword was

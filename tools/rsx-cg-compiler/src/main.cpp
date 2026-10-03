@@ -341,6 +341,11 @@ int main(int argc, char** argv)
     ParserConfig parserConfig;
     parserConfig.standardDeclaratorTypes =
         ctx.extensions.has(rsx_cg::Extension::DeclaratorTypes);
+    parserConfig.helperStaticParameters =
+        ctx.extensions.has(rsx_cg::Extension::StaticParameters);
+    parserConfig.staticParameterEnableFlag =
+        rsx_cg::enableFlag(rsx_cg::Extension::StaticParameters);
+    parserConfig.entryPointName = ctx.entryName;
     auto ast = parseShaderSource(preprocessed, ctx.inputFile, &parseErrors, parserConfig);
 
     int errorCount = 0;

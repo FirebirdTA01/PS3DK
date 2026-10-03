@@ -180,6 +180,7 @@ private:
     // on the same CallExpr forever.
     mutable std::unordered_set<const ExprNode*> defaultsBeingWalked_;
     void checkDuplicateDefinition(FunctionDecl* decl);
+    bool checkParameterQualifierConsistency(FunctionDecl* decl);
     bool inLoop_ = false;
     bool inSwitch_ = false;
 

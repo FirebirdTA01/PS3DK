@@ -44,6 +44,10 @@ enum class Extension
     // list compiles as the separate declarations it abbreviates.
     DeclaratorTypes = 1,
 
+    // Helper parameter static storage is ignored, while const remains
+    // read-only. Selected-entry static parameters are outside this slice.
+    StaticParameters = 2,
+
     Count
 };
 

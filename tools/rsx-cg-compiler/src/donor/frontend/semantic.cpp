@@ -553,6 +553,10 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
 {
     if (decl->isIntrinsic) return;
 
+    // A prototype and its definition share a type-only overload identity,
+    // but must agree about whether each input parameter is const.
+    if (!checkParameterQualifierConsistency(decl)) return;
+
     // A DECLARATION RULE, so it applies to a prototype as much as a body.
     checkDefaultNamesBindAtDeclaration(decl);
 
@@ -2327,6 +2331,36 @@ void SemanticAnalyzer::checkDuplicateDefinition(FunctionDecl* decl)
     if (!first || first == decl) return;
     error(first->loc, "error C1106: overloaded function declaration \"" +
                       decl->name + "\" differs only in parameter qualifiers");
+}
+
+bool SemanticAnalyzer::checkParameterQualifierConsistency(FunctionDecl* decl)
+{
+    if (!decl) return true;
+    const auto isInput = [](StorageQualifier q) {
+        return q == StorageQualifier::None || q == StorageQualifier::In ||
+               q == StorageQualifier::Const;
+    };
+    for (FunctionDecl* previous : allFunctions_)
+    {
+        if (previous == decl) break;
+        if (!previous || previous->isIntrinsic || !sameSignature(previous, decl)) continue;
+        for (size_t i = 0; i < decl->parameters.size(); ++i)
+        {
+            const auto before = previous->parameters[i]->storage;
+            const auto after = decl->parameters[i]->storage;
+            if (isInput(before) && isInput(after) &&
+                (before == StorageQualifier::Const) != (after == StorageQualifier::Const))
+            {
+                // Applies to repeated prototypes and unused helpers too. Do
+                // not make qualifiers part of overload identity: that would
+                // change definition lookup and visible default arguments.
+                error(decl->loc, "error C1106: overloaded function declaration \"" +
+                                 decl->name + "\" differs only in parameter qualifiers");
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 // A DEFAULT'S NAMES BIND AT THE HELPER'S DECLARATION, not at the call and not

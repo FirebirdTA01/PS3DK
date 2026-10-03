@@ -1189,7 +1189,7 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDeclaration(
     auto func = std::make_unique<FunctionDecl>(loc, name, returnType);
 
     // Parse parameters
-    func->parameters = parseParameterList();
+    func->parameters = parseParameterList(name == config.entryPointName);
 
     // Check for return semantic
     if (match(TokenType::COLON))
@@ -1320,7 +1320,7 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
     return vars;
 }
 
-std::unique_ptr<ParamDecl> Parser::parseParameter()
+std::unique_ptr<ParamDecl> Parser::parseParameter(bool selectedEntry)
 {
     SourceLocation loc = currentLocation();
 
@@ -1330,7 +1330,14 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
     // storage word.
     while (match(TokenType::KW_INLINE)) {}
     StorageQualifier storage = StorageQualifier::In;  // default
-    if (match(TokenType::KW_IN))
+    bool declaredStatic = false;
+    if (match(TokenType::KW_STATIC))
+    {
+        declaredStatic = true;
+        if (match(TokenType::KW_CONST))
+            storage = StorageQualifier::Const;
+    }
+    else if (match(TokenType::KW_IN))
         storage = StorageQualifier::In;
     else if (match(TokenType::KW_OUT))
         storage = StorageQualifier::Out;
@@ -1339,8 +1346,38 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
     else if (match(TokenType::KW_UNIFORM))
         storage = StorageQualifier::Uniform;
     else if (match(TokenType::KW_CONST))
+    {
         storage = StorageQualifier::Const;
+        declaredStatic = match(TokenType::KW_STATIC);
+    }
     while (match(TokenType::KW_INLINE)) {}
+
+    if (declaredStatic)
+    {
+        // This is parameter grammar, not the file/local static storage rule.
+        // Bundled NVIDIA helpers emit the static-free parameter's bytes;
+        // const still participates in declaration consistency and write checks.
+        // Entry parameters need a separate binding contract, so never offer
+        // an enable hint for that unsupported construct.
+        // Further qualifiers are outside the measured forms in both modes;
+        // offering the flag here would promise syntax it cannot admit.
+        const bool unsupportedQualifier = check(TokenType::KW_STATIC) ||
+            check(TokenType::KW_CONST) || check(TokenType::KW_UNIFORM) ||
+            check(TokenType::KW_IN) || check(TokenType::KW_OUT) ||
+            check(TokenType::KW_INOUT) || check(TokenType::KW_EXTERN);
+        if (unsupportedQualifier)
+            error(loc, "unsupported static parameter qualifier combination");
+        else if (selectedEntry)
+            error(loc, "static parameter storage is supported for helper parameters only; "
+                       "the selected entry cannot declare static parameters");
+        else if (!config.helperStaticParameters)
+        {
+            std::string message = "C1064: static storage class is not allowed for parameters";
+            if (!config.staticParameterEnableFlag.empty())
+                message += "; enable helper static parameters with " + config.staticParameterEnableFlag;
+            error(loc, message);
+        }
+    }
 
     // Parse type
     auto type = parseType();
@@ -1390,7 +1427,7 @@ std::unique_ptr<ParamDecl> Parser::parseParameter()
     return param;
 }
 
-std::vector<std::unique_ptr<ParamDecl>> Parser::parseParameterList()
+std::vector<std::unique_ptr<ParamDecl>> Parser::parseParameterList(bool selectedEntry)
 {
     std::vector<std::unique_ptr<ParamDecl>> params;
 
@@ -1407,7 +1444,7 @@ std::vector<std::unique_ptr<ParamDecl>> Parser::parseParameterList()
         {
             do
             {
-                auto param = parseParameter();
+                auto param = parseParameter(selectedEntry);
                 if (param)
                 {
                     params.push_back(std::move(param));
