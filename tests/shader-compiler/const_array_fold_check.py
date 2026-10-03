@@ -43,6 +43,16 @@ NON_STATIC = """const float k[3] = {0.25, 0.5, 0.125};
 float4 main(float4 t : TEXCOORD0) : COLOR { return float4(k[1] * t.x, k[2], 0, 1); }
 """
 
+# The vertex path shares buildIndexExpr (review: codex): an ordinary scalar
+# and vector read must compile byte-identically to the same program with the
+# literals written in - the reference's two listings are identical.
+VP_FOLD = """static const float  kf[3] = {0.25, 0.5, 0.125};
+static const float4 kv[2] = {float4(1, 2, 3, 4), float4(0.5, 0.25, 0.125, 1)};
+void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { o = p * kf[1] + kv[1]; c = kv[0] * kf[2]; }
+"""
+VP_TWIN = """void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { o = p * 0.5 + float4(0.5, 0.25, 0.125, 1); c = float4(1, 2, 3, 4) * 0.125; }
+"""
+
 ROWS = [  # measured on the reference: (0.5 t.x + 4, 3.75, 6, 3) and (t.y, 0.125, t.y, 1)
     ('element_types', ELEMENT_TYPES, lambda t: [0.5 * t[0] + 4.0, 3.75, 6.0, 3.0]),
     ('shadowed', SHADOWED, lambda t: [t[1], 0.125, t[1], 1.0]),
@@ -50,10 +60,10 @@ ROWS = [  # measured on the reference: (0.5 t.x + 4, 3.75, 6, 3) and (t.y, 0.125
 INPUTS = [[0.75, 0.5, 0.25, 1.0], [0.25, -0.125, 0.5, 0.0]]
 
 
-def compile_one(compiler, tmp, name, source):
+def compile_one(compiler, tmp, name, source, profile='sce_fp_rsx'):
     src, dst = Path(tmp) / (name + '.cg'), Path(tmp) / (name + '.bin')
     src.write_text(source)
-    run = subprocess.run([compiler, '-p', 'sce_fp_rsx', '--emit-container', str(dst), str(src)],
+    run = subprocess.run([compiler, '-p', profile, '--emit-container', str(dst), str(src)],
                          capture_output=True, text=True, timeout=60)
     return run, dst
 
@@ -77,6 +87,14 @@ def main():
                 print('  %-14s %-26s %s' % (name, t, 'value ok' if ok else 'WRONG %s want %s' % (got, want)))
                 if not ok:
                     failures.append('%s: got %s for %s, want %s' % (name, got, t, want))
+        fold, fold_bin = compile_one(compiler, tmp, 'vp_fold', VP_FOLD, 'sce_vp_rsx')
+        twin, twin_bin = compile_one(compiler, tmp, 'vp_twin', VP_TWIN, 'sce_vp_rsx')
+        same = (fold.returncode == 0 and twin.returncode == 0 and fold_bin.exists() and twin_bin.exists()
+                and fold_bin.read_bytes() == twin_bin.read_bytes())
+        print('  %-14s %s' % ('vp_fold', 'identical to literal twin' if same else
+                              'DIFFERS or refused (rc %d / %d)' % (fold.returncode, twin.returncode)))
+        if not same:
+            failures.append('vp_fold: not byte-identical to its literal twin')
         run, dst = compile_one(compiler, tmp, 'non_static', NON_STATIC)
         ok = run.returncode == 1 and not dst.exists()
         print('  %-14s %s' % ('non_static', 'refused (t_528b9869)' if ok else 'NOT refused (rc %d)' % run.returncode))
