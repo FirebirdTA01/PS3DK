@@ -6807,12 +6807,27 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
 {
     std::string trackedKey;
     if (getExprType(expr->array.get()).isArray() &&
-        arrayStorageKey(expr->array.get(), trackedKey) && localArrayValues_.count(trackedKey) &&
-        (nameToValue_.count(trackedKey) || !module_->findGlobal(trackedKey)))
+        arrayStorageKey(expr->array.get(), trackedKey) && localArrayValues_.count(trackedKey))
     {
-        int32_t index = 0;
-        if (!resolveTrackedArrayElement(expr, trackedKey, index)) return InvalidIRValue;
-        return readTrackedArrayElement(expr, trackedKey, index);
+        const IRGlobal* global = module_->findGlobal(trackedKey);
+        // Entry setup seeds initialized mutable static arrays by element,
+        // even after a preceding function has cleared their name bindings.
+        // Read that tracked state using the once-built IR selector: an
+        // unrolled induction variable is constant here, though its AST is
+        // still an identifier. Preserve writes instead of refolding the
+        // initializer, and require global declaration provenance so a local
+        // shadow cannot acquire this path through its spelling alone.
+        const bool initializedStatic = global && global->declaredStatic &&
+            global->storage == StorageQualifier::Static && !global->type.isMatrix() &&
+            (!global->initialValue.empty() || !global->initialIntValues.empty()) &&
+            expr->array->kind == ExprKind::Identifier &&
+            globalDeclarations_.count(static_cast<IdentifierExpr*>(expr->array.get())->resolvedDecl);
+        if (nameToValue_.count(trackedKey) || !global || initializedStatic)
+        {
+            int32_t index = 0;
+            if (!resolveTrackedArrayElement(expr, trackedKey, index)) return InvalidIRValue;
+            return readTrackedArrayElement(expr, trackedKey, index);
+        }
     }
     // A UNIFORM ARRAY element is a LoadUniform that names how the element
     // was chosen (IRInstruction::arrayIndexKind), never a VecExtract: the

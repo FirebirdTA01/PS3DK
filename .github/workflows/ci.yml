@@ -680,6 +680,8 @@ jobs:
           bash tests/shader-compiler/fp-register-renumber-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: rsx-cg-compiler mutable file-scope statics
         run: bash tests/shader-compiler/mutable-static-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Mutable static array indices retain values across helper scopes
+        run: bash tests/shader-compiler/mutable-static-array-index-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: rsx-cg-compiler static const array element fold
         run: bash tests/shader-compiler/const-array-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: rsx-cg-compiler fragment clamp(x, 0, 1) saturation
