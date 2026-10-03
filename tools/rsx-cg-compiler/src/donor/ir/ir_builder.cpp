@@ -3669,7 +3669,10 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             copyArrayAggregate(varDecl->name, varDecl->initializer.get(), varDecl->type.get());
             const IRTypeInfo declaredType = getIRType(varDecl->type.get());
             const IRTypeInfo initType = getExprType(varDecl->initializer.get());
-            if (declaredType.arraySize == 0 && !declaredType.isMatrix() &&
+            if (declaredType.isMatrix() && declaredType.elementType == IRType::Float32 &&
+                initType.isScalar() && initType.arraySize == 0)
+                initValue = emitScalarMatrixBroadcast(initType, declaredType, initValue, varDecl->loc);
+            else if (declaredType.arraySize == 0 && !declaredType.isMatrix() &&
                 initType.arraySize == 0 && !initType.isMatrix() &&
                 (declaredType.isVector() ? declaredType.elementType : declaredType.baseType) == IRType::Bool)
             {
@@ -4505,6 +4508,18 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
             }
         }
 
+        if (expr->op == BinaryOp::Assign)
+        {
+            const IRTypeInfo targetType = getExprType(expr->left.get());
+            const IRTypeInfo sourceType = getExprType(expr->right.get());
+            if (targetType.isMatrix() && targetType.elementType == IRType::Float32 && sourceType.isScalar())
+            {
+                // Preserve the RHS declared type: inferring it from the
+                // current binding alone can hide an untruncated int local.
+                rhsValue = emitScalarMatrixBroadcast(sourceType, targetType, rhsValue, expr->loc);
+                if (rhsValue == InvalidIRValue) return rhsValue;
+            }
+        }
         return buildAssignment(expr->left.get(), rhsValue);
     }
 
@@ -7536,6 +7551,9 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
     // Matrix cast handling
     if (sourceType.isMatrix() || targetType.isMatrix())
     {
+        if (targetType.isMatrix() && targetType.elementType == IRType::Float32 && sourceType.isScalar() &&
+            (sourceType.baseType == IRType::Float32 || sourceType.baseType == IRType::Int32))
+            return emitScalarMatrixBroadcast(sourceType, targetType, operandValue, expr->loc);
         if (targetType.isMatrix() && targetType.elementType == IRType::Bool && sourceType.isScalar())
         {
             error(expr->loc, "scalar-to-bool-matrix casts are not implemented; use a bool matrix constructor");
@@ -7690,6 +7708,9 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
         // Matrix single argument constructor
         if (resultType.isMatrix() || argType.isMatrix())
         {
+            if (resultType.isMatrix() && resultType.elementType == IRType::Float32 && argType.isScalar() &&
+                (argType.baseType == IRType::Float32 || argType.baseType == IRType::Int32))
+                return emitScalarMatrixBroadcast(argType, resultType, argValues[0], expr->loc);
             if (resultType.isMatrix() && argType.isMatrix())
             {
                 if (resultType.matrixRows > argType.matrixRows ||
@@ -8426,6 +8447,48 @@ IRValueID IRBuilder::narrowToScalar(TypeNode* declared, ExprNode* valueExpr, IRV
     if (!from.isVector() || from.isMatrix() || from.arraySize != 0)
         return value;
     return emitScalarNarrowing(from, to, value, valueExpr->loc);
+}
+
+IRValueID IRBuilder::emitScalarMatrixBroadcast(const IRTypeInfo& sourceType,
+                                               const IRTypeInfo& targetType,
+                                               IRValueID value, const SourceLocation& loc)
+{
+    if (value == InvalidIRValue) return value;
+    if (!sourceType.isScalar() || sourceType.arraySize != 0 || targetType.arraySize != 0 ||
+        !targetType.isMatrix() || targetType.elementType != IRType::Float32 ||
+        targetType.matrixRows < 2 || targetType.matrixRows > 4 ||
+        targetType.matrixCols < 2 || targetType.matrixCols > 4 ||
+        (sourceType.baseType != IRType::Float32 && sourceType.baseType != IRType::Int32))
+    {
+        error(loc, "scalar-to-matrix conversion requires a float/int scalar and float matrix (scalar-matrix-broadcast)");
+        return InvalidIRValue;
+    }
+    // Convert once, then repeat that SSA value. A postincrement argument
+    // must not run again for each lane, and a scalar id is not a matrix.
+    if (sourceType.baseType == IRType::Int32)
+    {
+        // Existing implicit scalar integer bindings can retain an
+        // untruncated float, even behind an int-typed arithmetic result.
+        // Admit proven integer constants and explicit truncation results;
+        // do not turn that upstream debt into a newly accepted wrong matrix.
+        const auto* constant = dynamic_cast<IRConstant*>(currentFunction_->getValue(value));
+        bool provenInteger = constant && constant->type.baseType == IRType::Int32;
+        for (const auto& block : currentFunction_->blocks)
+            for (const auto& instruction : block->instructions)
+                if (instruction->result == value && instruction->op == IROp::FloatToInt &&
+                    instruction->resultType.baseType == IRType::Int32)
+                    provenInteger = true;
+        if (!provenInteger)
+        {
+            error(loc, "integer matrix broadcast needs an explicit int conversion or integer constant (scalar-matrix-source-type)");
+            return InvalidIRValue;
+        }
+        const IRValueID folded = tryFoldUnaryOp(IROp::IntToFloat, IRTypeInfo::Float(), value);
+        value = folded != InvalidIRValue ? folded :
+            emitScalarConversion(sourceType, IRTypeInfo::Float(), value, loc);
+    }
+    return emitInstruction(IROp::MatConstruct, targetType,
+        std::vector<IRValueID>(targetType.matrixRows * targetType.matrixCols, value), loc);
 }
 
 IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)

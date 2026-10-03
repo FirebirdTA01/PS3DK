@@ -250,6 +250,8 @@ private:
     IRValueID emitScalarConversion(const IRTypeInfo& fromType, const IRTypeInfo& targetType,
                                    IRValueID lane, const SourceLocation& loc);
     IRValueID coerceAssignmentValue(ExprNode* target, IRValueID value);
+    IRValueID emitScalarMatrixBroadcast(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
+                                        IRValueID value, const SourceLocation& loc);
 
     // Helper to get address/location for lvalue expressions
     struct LValueInfo

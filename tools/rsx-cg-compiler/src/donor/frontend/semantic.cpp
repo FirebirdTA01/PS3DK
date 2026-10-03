@@ -11,6 +11,13 @@
 
 namespace
 {
+bool scalarFloatMatrixBroadcast(const CgType& target, const CgType& source)
+{
+    return target.isMatrix() && target.scalarKind() == ScalarKind::Float &&
+        source.isScalar() && (source.scalarKind() == ScalarKind::Float ||
+                              source.scalarKind() == ScalarKind::Int);
+}
+
 std::optional<int64_t> constantIntegerIndex(const ExprNode* expr)
 {
     if (!expr)
@@ -679,7 +686,11 @@ void SemanticAnalyzer::analyzeVarDecl(VarDecl* decl)
             if (Symbol* bound = symbols_.lookup(decl->name); bound && bound->declaration == decl)
                 bound->type = varType;
         }
-        if (!initType.isError() && !allowsScalarNarrowing(varType, initType))
+        // A local scalar initializer fills every matrix component. Keep
+        // this contextual: broad conversion ranking would also admit
+        // unimplemented argument/return/default and global conversions.
+        const bool broadcast = currentFunction_ && scalarFloatMatrixBroadcast(varType, initType);
+        if (!initType.isError() && !allowsScalarNarrowing(varType, initType) && !broadcast)
         {
             checkAssignment(varType, initType, decl->initializer->loc);
         }
@@ -1039,7 +1050,17 @@ CgType SemanticAnalyzer::analyzeBinaryExpr(BinaryExpr* expr)
             return CgType::Error();
         }
         const bool narrowing = allowsScalarNarrowing(leftType, rightType);
-        if (!narrowing && !checkAssignment(leftType, rightType, expr->right->loc))
+        bool broadcast = false;
+        if (expr->op == BinaryOp::Assign && currentFunction_ &&
+            scalarFloatMatrixBroadcast(leftType, rightType) &&
+            expr->left->kind == ExprKind::Identifier)
+        {
+            const auto* id = static_cast<IdentifierExpr*>(expr->left.get());
+            const Symbol* global = symbols_.globalScope()->lookupLocal(id->name);
+            broadcast = id->resolvedDecl && id->resolvedDecl->kind == DeclKind::Variable &&
+                (!global || global->declaration != id->resolvedDecl);
+        }
+        if (!narrowing && !broadcast && !checkAssignment(leftType, rightType, expr->right->loc))
         {
             return CgType::Error();
         }
