@@ -289,6 +289,7 @@ private:
     bool allowsScalarNarrowing(const CgType& target, const CgType& value) const;
     bool checkCondition(ExprNode* expr);
     bool isLvalue(ExprNode* expr);
+    bool isConstLvalue(ExprNode* expr);
     void validateSwizzle(MemberAccessExpr* expr, const CgType& objectType);
 
     // Shader-specific validation

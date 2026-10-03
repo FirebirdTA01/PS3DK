@@ -532,6 +532,7 @@ void SemanticAnalyzer::analyzePrototypeDefaults(FunctionDecl* decl)
         sym->loc = param->loc;
         sym->storage = param->storage;
         sym->semantic = param->semantic;
+        sym->isConst = (param->storage == StorageQualifier::Const);
         symbols_.addSymbol(std::move(sym));
     }
     for (const auto& param : decl->parameters)
@@ -590,6 +591,7 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         sym->loc = param->loc;
         sym->storage = param->storage;
         sym->semantic = param->semantic;
+        sym->isConst = (param->storage == StorageQualifier::Const);
 
         if (!param->semantic.isEmpty() && resolvedType.isStruct())
         {
@@ -1320,6 +1322,23 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         expr->resolvedFunction->kind == DeclKind::Function)
     {
         auto* resolved = static_cast<FunctionDecl*>(expr->resolvedFunction);
+        // Copy-out writes the caller's actual argument. A const parameter
+        // (including a member or indexed lane) cannot be its destination,
+        // even in an uncalled helper. Query the bound declaration so a
+        // nested mutable shadow of that name remains writable.
+        for (size_t i = 0; i < expr->arguments.size() && i < resolved->parameters.size(); ++i)
+        {
+            const auto& param = resolved->parameters[i];
+            if (param && (param->storage == StorageQualifier::Out ||
+                          param->storage == StorageQualifier::InOut) &&
+                isConstLvalue(expr->arguments[i].get()))
+            {
+                error(expr->arguments[i]->loc,
+                      "C1112: const qualified actual parameter #" + std::to_string(i + 1) +
+                      " cannot be out parameter (\"" + param->name + "\")");
+                return CgType::Error();
+            }
+        }
         for (size_t i = argTypes.size(); i < resolved->parameters.size(); ++i)
         {
             const auto& param = resolved->parameters[i];
@@ -1948,6 +1967,26 @@ bool SemanticAnalyzer::checkCondition(ExprNode* expr)
     }
 
     return true;
+}
+
+bool SemanticAnalyzer::isConstLvalue(ExprNode* expr)
+{
+    if (!expr) return false;
+    switch (expr->kind)
+    {
+    case ExprKind::Identifier:
+    {
+        const auto* id = static_cast<IdentifierExpr*>(expr);
+        const Symbol* sym = symbols_.lookup(id->name);
+        return sym && sym->isConst;
+    }
+    case ExprKind::MemberAccess:
+        return isConstLvalue(static_cast<MemberAccessExpr*>(expr)->object.get());
+    case ExprKind::Index:
+        return isConstLvalue(static_cast<IndexExpr*>(expr)->array.get());
+    default:
+        return false;
+    }
 }
 
 bool SemanticAnalyzer::isLvalue(ExprNode* expr)

@@ -950,6 +950,7 @@ std::unique_ptr<Symbol> symbolFromParamDecl(ParamDecl* decl)
     sym->loc = decl->loc;
     sym->storage = decl->storage;
     sym->semantic = decl->semantic;
+    sym->isConst = (decl->storage == StorageQualifier::Const);
 
     return sym;
 }
