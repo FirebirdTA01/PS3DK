@@ -458,6 +458,8 @@ jobs:
         run: bash tests/shader-compiler/vp-matrix-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: VP matrix arithmetic
         run: bash tests/shader-compiler/vp-matrix-arithmetic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test two-column vertex matrix-vector reductions
+        run: bash tests/shader-compiler/vp-matvec2-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test explicit vertex bindings match decoded register reads
         run: bash tests/shader-compiler/vp-explicit-binding-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test fragment binding metadata preserves inline constants and relocations

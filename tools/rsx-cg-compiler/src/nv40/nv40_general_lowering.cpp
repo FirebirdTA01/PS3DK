@@ -5318,16 +5318,25 @@ private:
             program_.loweringFailed = true;
             return;
         }
-        if (profile_ == GeneralProfile::Vertex && mat.cols == 2) {
-            program_.diagnostics.push_back(
-                "nv40-general: VP matvecmul with 2-column matrices is not "
-                "implemented; refusing before reaching unsupported DP2 emission");
-            program_.loweringFailed = true;
-            return;
-        }
-
         const int result = define(inst.result);
         VSrc vec = resolve(inst.operands[1]);
+        if (profile_ == GeneralProfile::Vertex && mat.cols == 2) {
+            for (int row = mat.rows - 1; row >= 0; --row) {
+                // VP has no DP2. Keep the two-lane product separate from
+                // the result so it cannot overwrite an earlier row or a
+                // source that is still live for subsequent row reductions.
+                const int dot = newVReg();
+                emitVertexDot2(vec, mat.rowSrcs[static_cast<size_t>(row)], dot);
+                VInstr mov;
+                mov.op = VOp::Mov;
+                mov.dst.index = result;
+                mov.dst.writemask = 1 << row;
+                mov.srcs[0] = tempSrc(dot);
+                mov.srcs[0].swizzle = {0, 0, 0, 0};
+                program_.instrs.push_back(mov);
+            }
+            return;
+        }
         for (int row = mat.rows - 1; row >= 0; --row) {
             VInstr dp;
             dp.op = dotReductionOp(mat.cols);
