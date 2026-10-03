@@ -1117,12 +1117,19 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                     // is no safer: a compiled default of zero where the
                     // source says otherwise is a shader that renders wrong
                     // until something patches it.
-                    error(varDecl->loc,
-                          std::string("file-scope ") +
-                          (isFileScopeConst ? "const '" : isInitialisedStatic ? "static '" : "uniform '") +
-                          varDecl->name +
-                          "' has an initialiser this compiler cannot evaluate; "
-                          "refusing rather than compiling it as zero");
+                    // A mutable STATIC is the exception: it is not seeded
+                    // (no value is invented), so an UNREAD static with an
+                    // initialiser this evaluator cannot fold - a helper call,
+                    // `static float g = f(0.25);` - stays accepted, as it was
+                    // before statics were seeded (fp_reach_init_root_valid_f),
+                    // and a READ of it still refuses at the read.
+                    if (!isInitialisedStatic)
+                        error(varDecl->loc,
+                              std::string("file-scope ") +
+                              (isFileScopeConst ? "const '" : "uniform '") +
+                              varDecl->name +
+                              "' has an initialiser this compiler cannot evaluate; "
+                              "refusing rather than compiling it as zero");
                     constInit.clear();
                     constIntInit.clear();
                 }
@@ -3661,6 +3668,25 @@ IRValueID IRBuilder::materialiseInitialiser(const IRTypeInfo& type,
     return createConstant(type, values, intValues);
 }
 
+// Element `index` of a static const file-scope array, folded from the
+// initialiser recorded on the global; InvalidIRValue when the initialiser
+// does not cover it.
+IRValueID IRBuilder::foldStaticConstArrayElement(const IRGlobal& global, int index)
+{
+    IRTypeInfo element = global.type;
+    element.arraySize = 0;
+    const size_t width = static_cast<size_t>(element.componentCount());
+    const size_t at = static_cast<size_t>(index) * width;
+    std::vector<float> lanes;
+    std::vector<int64_t> intLanes;
+    if (at + width <= global.initialValue.size())
+        lanes.assign(global.initialValue.begin() + at, global.initialValue.begin() + at + width);
+    if (at + width <= global.initialIntValues.size())
+        intLanes.assign(global.initialIntValues.begin() + at, global.initialIntValues.begin() + at + width);
+    if (lanes.empty() && intLanes.empty()) return InvalidIRValue;
+    return materialiseInitialiser(element, lanes, intLanes);
+}
+
 IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
 {
     // Look up in local names first
@@ -5071,6 +5097,28 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                 for (const auto& entry : savedNames)
                     if (entry.first != source && belongs(entry.first))
                         nameToValue_[param->name + entry.first.substr(source.size())] = entry.second;
+            }
+
+            // A static const file-scope array passed whole has no tracked
+            // elements to copy - its value is its initialiser - so the
+            // parameter's elements are its folded elements (inferred-array-
+            // to-sized-param: `g(cx)` with `float g(float v[3])` read v[2]
+            // as undefined and emit refused).  Only when no caller binding
+            // of the name (a local array) shadows the global.
+            if (i < expr->arguments.size() && expr->arguments[i] &&
+                expr->arguments[i]->kind == ExprKind::Identifier)
+            {
+                const std::string& name = static_cast<IdentifierExpr*>(expr->arguments[i].get())->name;
+                IRGlobal* g = savedArrays.count(name) || savedNames.count(name)
+                    ? nullptr : module_->findGlobal(name);
+                auto slot = localArrayValues_.find(param->name);
+                if (g && g->storage == StorageQualifier::Const && g->declaredStatic &&
+                    g->type.isArray() && slot != localArrayValues_.end() &&
+                    slot->second.size() == static_cast<size_t>(g->type.arraySize))
+                {
+                    for (int e = 0; e < g->type.arraySize; ++e)
+                        slot->second[static_cast<size_t>(e)] = foldStaticConstArrayElement(*g, e);
+                }
             }
         }
     }
@@ -6601,23 +6649,8 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 // would drop those parameters silently.
                 if (global && global->storage == StorageQualifier::Const && global->declaredStatic)
                 {
-                    IRTypeInfo element = global->type;
-                    element.arraySize = 0;
-                    const size_t width = static_cast<size_t>(element.componentCount());
-                    const size_t at = static_cast<size_t>(elementIndex) * width;
-                    std::vector<float> lanes;
-                    std::vector<int64_t> intLanes;
-                    if (at + width <= global->initialValue.size())
-                        lanes.assign(global->initialValue.begin() + at,
-                                     global->initialValue.begin() + at + width);
-                    if (at + width <= global->initialIntValues.size())
-                        intLanes.assign(global->initialIntValues.begin() + at,
-                                        global->initialIntValues.begin() + at + width);
-                    if (!lanes.empty() || !intLanes.empty())
-                    {
-                        const IRValueID folded = materialiseInitialiser(element, lanes, intLanes);
-                        if (folded != InvalidIRValue) return folded;
-                    }
+                    const IRValueID folded = foldStaticConstArrayElement(*global, elementIndex);
+                    if (folded != InvalidIRValue) return folded;
                 }
             }
             else
