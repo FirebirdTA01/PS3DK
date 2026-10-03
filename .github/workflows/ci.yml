@@ -663,6 +663,8 @@ jobs:
         run: bash tests/shader-compiler/mutable-static-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: rsx-cg-compiler static const array element fold
         run: bash tests/shader-compiler/const-array-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: rsx-cg-compiler fragment clamp(x, 0, 1) saturation
+        run: bash tests/shader-compiler/clamp-saturate-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test fragment tex2Dlod lowers to TXL
         run: bash tests/shader-compiler/fp-tex2dlod-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test file-scope const matrices fold to literal rows

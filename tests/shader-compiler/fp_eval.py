@@ -41,9 +41,10 @@ from fp_sources import CONST, INPUT, TEMP, ARITY, instructions, source, ucode_wo
 MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX = 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09
 SLT, SGE, SLE, SGT, SNE, SEQ = 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
 FRC, FLR, FENCBR, DP2 = 0x10, 0x11, 0x3E, 0x38
+FENCTR = 0x3D   # texture fence: like FENCBR, no value effect
 RCP = 0x1A   # nvfx_shader.h NVFX_FP_OP_OPCODE_RCP: scalar, reads the source's x lane
 DIV = 0x3A   # NVFX_FP_OP_OPCODE_DIV (NV_fragment_program2 DIV): vector src0 / scalar src1.x
-MODELLED = {MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX, SLT, SGE, SLE, SGT, SNE, SEQ, FRC, FLR, FENCBR, DP2, RCP, DIV}
+MODELLED = {MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX, SLT, SGE, SLE, SGT, SNE, SEQ, FRC, FLR, FENCBR, FENCTR, DP2, RCP, DIV}
 
 INPUT_SEL = {0x1: "COL0", 0x2: "COL1", 0x4: "TEX0", 0x5: "TEX1", 0x6: "TEX2", 0x7: "TEX3",
              0x8: "TEX4", 0x9: "TEX5", 0xA: "TEX6", 0xB: "TEX7"}
@@ -176,7 +177,7 @@ def evaluate(blob, inputs):
             raise Unmodelled("branch instruction")
         if opc not in MODELLED:
             raise Unmodelled("opcode %#x" % opc)
-        if opc != FENCBR:
+        if opc not in (FENCBR, FENCTR):
             cond = (w[1] >> 18) & 7
             ccswz = [(w[1] >> (21 + 2 * i)) & 3 for i in range(4)]
             cc_write = (w[0] >> 8) & 1
