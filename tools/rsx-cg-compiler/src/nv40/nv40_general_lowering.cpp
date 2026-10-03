@@ -11020,12 +11020,21 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // above can therefore sit under the 48-slot R budget while still
     // producing a malformed program; test_79 and test_85 were measured
     // this way after the allocator sparsity fix.
-    static constexpr int kFpEncodedTempRegisterLimit = 64;
+    //
+    // The bound is 48, not 64: the pixel judge of 2026-10-02 isolated two
+    // candidate programs with their highest H index at H56 and H54
+    // (libretro ddt-crosshd, ddt-cxscale; registerCount 30, so in range by
+    // aliasing) - each painted nothing alone and poisoned the RSX, while
+    // the reference-compiled programs of the same sources were clean, and
+    // the reference never encoded above H42 across that whole set.
+    // H48..H53 are unmeasured; refusing them too keeps the encoded index
+    // under the same 48 the R-slot budget below uses.
+    static constexpr int kFpEncodedTempRegisterLimit = 48;
     if (maxEncodedTemp >= kFpEncodedTempRegisterLimit) {
         out.diagnostics.push_back(
             "nv40-general-fp: program encodes temp register index " +
             std::to_string(maxEncodedTemp) +
-            ", past the six-bit FP temp field limit of " +
+            ", past the usable FP temp index limit of " +
             std::to_string(kFpEncodedTempRegisterLimit - 1) +
             "; declared R slots would be " +
             std::to_string(std::max(2, maxTempSlot + 1)) +
