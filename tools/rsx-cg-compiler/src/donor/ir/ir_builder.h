@@ -253,7 +253,7 @@ private:
     IRValueID emitScalarConversion(const IRTypeInfo& fromType, const IRTypeInfo& targetType,
                                    IRValueID lane, const SourceLocation& loc);
     IRValueID coerceAssignmentValue(ExprNode* target, IRValueID value);
-    IRValueID foldFixedScalarConversion(TypeNode* target, IRValueID value);
+    IRValueID foldFixedConstantConversion(TypeNode* target, IRValueID value);
     IRValueID emitScalarVectorBroadcast(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
                                         IRValueID value, const SourceLocation& loc,
                                         std::optional<BaseType> targetBase = std::nullopt);

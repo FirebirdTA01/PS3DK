@@ -3845,7 +3845,7 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             {
                 initValue = emitScalarNarrowing(initType, declaredType, initValue, varDecl->loc);
             }
-            initValue = foldFixedScalarConversion(varDecl->type.get(), initValue);
+            initValue = foldFixedConstantConversion(varDecl->type.get(), initValue);
             // For now, just use the initializer value as the variable value
             nameToValue_[varDecl->name] = initValue;
             declToValue_[varDecl] = initValue;
@@ -5564,7 +5564,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
             }
         }
         if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)
-            boundValue = foldFixedScalarConversion(param->type.get(), boundValue);
+            boundValue = foldFixedConstantConversion(param->type.get(), boundValue);
         declToValue_[param] = boundValue;
         // A parameter that shadows a file-scope name moves the global's
         // binding into the stash, exactly as the entry function's does
@@ -8037,7 +8037,7 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
 
     IRTypeInfo targetType = getIRType(expr->targetType.get());
     IRTypeInfo sourceType = getExprType(expr->operand.get());
-    if (const IRValueID folded = foldFixedScalarConversion(expr->targetType.get(), operandValue);
+    if (const IRValueID folded = foldFixedConstantConversion(expr->targetType.get(), operandValue);
         folded != operandValue)
         return folded;
 
@@ -8188,7 +8188,7 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
             return InvalidIRValue;
 
         IRTypeInfo argType = getExprType(expr->arguments[0].get());
-        if (const IRValueID folded = foldFixedScalarConversion(expr->constructedType.get(), argValues[0]);
+        if (const IRValueID folded = foldFixedConstantConversion(expr->constructedType.get(), argValues[0]);
             folded != argValues[0])
             return folded;
 
@@ -8952,7 +8952,7 @@ IRValueID IRBuilder::emitScalarNarrowing(const IRTypeInfo& sourceType, const IRT
 IRValueID IRBuilder::narrowToScalar(TypeNode* declared, ExprNode* valueExpr, IRValueID value)
 {
     if (!declared || !valueExpr || value == InvalidIRValue) return value;
-    value = foldFixedScalarConversion(declared, value);
+    value = foldFixedConstantConversion(declared, value);
     const IRTypeInfo to = getIRType(declared);
     const IRTypeInfo from = getExprType(valueExpr);
     if (from.isMatrix() && (to.isScalar() || to.isVector()))
@@ -9065,7 +9065,7 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
     if (value == InvalidIRValue || !target || !currentFunction_)
         return value;
 
-    value = foldFixedScalarConversion(target->resolvedType.get(), value);
+    value = foldFixedConstantConversion(target->resolvedType.get(), value);
 
     const IRTypeInfo targetType = getExprType(target);
     IRValue* srcValue = currentFunction_->getValue(value);
@@ -9143,17 +9143,32 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
 // Instruction Emission
 // ============================================================================
 
-IRValueID IRBuilder::foldFixedScalarConversion(TypeNode* target, IRValueID value)
+IRValueID IRBuilder::foldFixedConstantConversion(TypeNode* target, IRValueID value)
 {
     // Fixed becomes Float32 in IR. Preserve the source conversion before a
     // same-IR-type shortcut can discard it, using the constant quantization
     // already used by fixed vector constructors. Never rebuild the expression:
     // a constant result can still have come from an evaluated postincrement.
-    if (!target || target->baseType != BaseType::Fixed || value == InvalidIRValue ||
-        !currentFunction_ || !getIRType(target).isScalar() || getIRType(target).isArray())
+    if (!target || target->baseType != BaseType::Fixed || value == InvalidIRValue || !currentFunction_)
         return value;
+    const auto targetType = getIRType(target);
+    if (targetType.isArray() || targetType.isMatrix() ||
+        (!targetType.isScalar() && !targetType.isVector())) return value;
     const auto* constant = dynamic_cast<IRConstant*>(currentFunction_->getValue(value));
-    if (!constant || !constant->type.isScalar() || constant->type.isArray()) return value;
+    if (!constant || constant->type.isArray()) return value;
+    if (targetType.isVector())
+    {
+        // Same-width float vectors have the same IR type as fixed vectors.
+        // Reuse the per-component constructor conversion before that identity
+        // shortcut. Shape changes and other source element kinds stay on their
+        // existing paths; this must not become a scalar-parameter splat fix.
+        if (!constant->type.isVector() || constant->type.isMatrix() ||
+            constant->type.elementType != IRType::Float32 ||
+            constant->type.vectorSize != targetType.vectorSize) return value;
+        const IRValueID folded = tryFoldVecConstruct(targetType, {value}, BaseType::Fixed);
+        return folded != InvalidIRValue ? folded : value;
+    }
+    if (!constant->type.isScalar()) return value;
     ConstEvalScalar scalar;
     if (const auto* v = std::get_if<float>(&constant->value)) scalar = ConstEvalScalar::fromFloat(*v);
     else if (const auto* v = std::get_if<int32_t>(&constant->value)) scalar = ConstEvalScalar::fromInt(*v);
