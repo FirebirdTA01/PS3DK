@@ -564,6 +564,8 @@ jobs:
         run: bash tests/shader-compiler/glsl-functions-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Scalar vector conversion and assignment shape
         run: bash tests/shader-compiler/scalar-vector-conversion-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Scalar fixed constant conversion and once evaluation
+        run: bash tests/shader-compiler/fixed-scalar-constant-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: GLSL type names and source binding
         run: bash tests/shader-compiler/glsl-types-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test bool matrix construction and static row use
