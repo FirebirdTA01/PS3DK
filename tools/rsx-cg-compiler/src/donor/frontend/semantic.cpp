@@ -1296,8 +1296,11 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
                     hint = "; enable GLSL function names with " + glslEnableFlag_;
             }
             deferOrEmitNameError(expr->loc,
-                                 "use of undeclared identifier '" +
-                                 expr->functionName + "'" + hint,
+                                 !expr->optionalTypeEnableFlag.empty() &&
+                                 !symbols_.hasVisibleSourceFunction(expr->functionName, SIZE_MAX)
+                                     ? "optional GLSL type name '" + expr->functionName +
+                                       "'; enable GLSL type names with " + expr->optionalTypeEnableFlag
+                                     : "use of undeclared identifier '" + expr->functionName + "'" + hint,
                                  expr->functionName);
             return CgType::Error();
         }
@@ -1565,8 +1568,25 @@ CgType SemanticAnalyzer::analyzeTernaryExpr(TernaryExpr* expr)
     return *commonType;
 }
 
+bool SemanticAnalyzer::checkOptionalTypeUse(const TypeNode* type, const SourceLocation& loc)
+{
+    while (type && type->baseType == BaseType::Array) type = type->elementType.get();
+    if (!type || type->optionalTypeName.empty()) return true;
+    // Source-order parser bindings handle ordinary shadowing. Pass 1 also
+    // knows late file-scope values: never reinterpret one as an optional cast.
+    const auto* named = symbols_.lookup(type->optionalTypeName);
+    if ((named && named->kind != SymbolKind::Function && named->kind != SymbolKind::Builtin) ||
+        symbols_.hasVisibleSourceFunction(type->optionalTypeName, visibleThrough_))
+    {
+        error(loc, "source binding hides optional type name '" + type->optionalTypeName + "'");
+        return false;
+    }
+    return true;
+}
+
 CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
 {
+    if (!checkOptionalTypeUse(expr->targetType.get(), expr->loc)) return CgType::Error();
     CgType targetType = resolveType(expr->targetType.get());
     CgType operandType = analyzeExpr(expr->operand.get());
 
@@ -1662,6 +1682,10 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
 
 CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
 {
+    // Braces inherit the declaration/field type resolved earlier; they do not
+    // look up a type spelling at the initializer's point of declaration.
+    if (!expr->bracedInitializer && !checkOptionalTypeUse(expr->constructedType.get(), expr->loc))
+        return CgType::Error();
     if (!expr->constructedType)
     {
         error(expr->loc, "nested braces require a struct field context (local-struct-initializer)");

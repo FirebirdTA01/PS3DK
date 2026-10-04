@@ -5,6 +5,23 @@
 #include <cstdint>
 #include <cstdlib>
 
+namespace {
+// Restore optional-name visibility even when error recovery unwinds a scope.
+struct OptionalNameScope {
+    std::vector<std::unordered_set<std::string>>& scopes;
+    explicit OptionalNameScope(decltype(scopes) s) : scopes(s) { scopes.emplace_back(); }
+    ~OptionalNameScope() { scopes.pop_back(); }
+};
+std::shared_ptr<TypeNode> frozenSourceAlias(const std::shared_ptr<TypeNode>& source)
+{
+    auto copy = std::make_shared<TypeNode>(*source);
+    copy->optionalTypeName.clear();
+    if (copy->baseType == BaseType::Array && copy->elementType)
+        copy->elementType = frozenSourceAlias(copy->elementType);
+    return copy;
+}
+}
+
 // ============================================================================
 // Constructor and initialization
 // ============================================================================
@@ -57,6 +74,7 @@ void Parser::initBuiltinTypes()
 
 std::unique_ptr<TranslationUnit> Parser::parse()
 {
+    collectGlobalValueNames();
     auto unit = std::make_unique<TranslationUnit>();
     unit->filename = filename;
 
@@ -314,7 +332,93 @@ void Parser::synchronize()
 // Type parsing
 // ============================================================================
 
-bool Parser::isTypeName() const
+void Parser::collectGlobalValueNames()
+{
+    if (config.glslTypeEnableFlag.empty()) return;
+    // Semantic pass 1 already makes file-scope values visible to expressions.
+    // Index declarator names before disambiguating optional type spellings,
+    // without registering types or functions. Balanced delimiters exclude
+    // members, parameters, initializer elements and all function bodies.
+    int braces = 0, parens = 0, brackets = 0;
+    bool inTypedef = false;
+    for (size_t i = 0; i < tokens.size(); ++i)
+    {
+        const auto t = tokens[i].type;
+        if (!braces && !parens && !brackets)
+        {
+            if (t == TokenType::KW_TYPEDEF) inTypedef = true;
+            if (t == TokenType::SEMICOLON) inTypedef = false;
+            if (!inTypedef && t == TokenType::IDENTIFIER && i && i + 1 < tokens.size())
+            {
+                const auto& previous = tokens[i - 1];
+                const auto next = tokens[i + 1].type;
+                const bool afterType = typeNames.count(previous.lexeme) ||
+                    previous.type == TokenType::KW_INT || previous.type == TokenType::KW_UINT ||
+                    previous.type == TokenType::IDENTIFIER || previous.type == TokenType::RBRACKET ||
+                    previous.type == TokenType::RBRACE || previous.type == TokenType::COMMA;
+                const bool declarator = next == TokenType::OP_ASSIGN || next == TokenType::COLON ||
+                    next == TokenType::LBRACKET || next == TokenType::COMMA || next == TokenType::SEMICOLON;
+                if (afterType && declarator) globalValueNames_.insert(tokens[i].lexeme);
+            }
+        }
+        if (t == TokenType::LBRACE) ++braces;
+        else if (t == TokenType::RBRACE && braces) --braces;
+        else if (t == TokenType::LPAREN) ++parens;
+        else if (t == TokenType::RPAREN && parens) --parens;
+        else if (t == TokenType::LBRACKET) ++brackets;
+        else if (t == TokenType::RBRACKET && brackets) --brackets;
+    }
+}
+
+int Parser::afterOptionalTypeSuffix() const
+{
+    int offset = 1;
+    while (peek(offset).type == TokenType::LBRACKET)
+    {
+        int depth = 0;
+        do {
+            if (peek(offset).type == TokenType::LBRACKET) ++depth;
+            else if (peek(offset).type == TokenType::RBRACKET) --depth;
+            ++offset;
+        } while (current + offset < tokens.size() && depth);
+        if (depth) return offset;
+    }
+    return offset;
+}
+
+std::shared_ptr<TypeNode> Parser::optionalType(const std::string& name) const
+{
+    if (config.glslTypeEnableFlag.empty() || typeNames.count(name)) return nullptr;
+    for (auto scope = optionalTypeShadows_.rbegin(); scope != optionalTypeShadows_.rend(); ++scope)
+        if (scope->count(name)) return nullptr;
+    auto type = std::make_shared<TypeNode>();
+    const auto dimension = [](char c) { return c >= '2' && c <= '4'; };
+    if (name.size() >= 4 && dimension(name.back()))
+    {
+        const std::string prefix = name.substr(0, name.size() - 1);
+        if (prefix == "vec" || prefix == "dvec" || prefix == "ivec" || prefix == "bvec")
+        {
+            type->baseType = prefix == "ivec" ? BaseType::Int :
+                             prefix == "bvec" ? BaseType::Bool : BaseType::Float;
+            type->vectorSize = name.back() - '0';
+            type->optionalTypeName = name;
+            return type;
+        }
+    }
+    if (name.compare(0, 3, "mat") == 0 &&
+        ((name.size() == 4 && dimension(name[3])) ||
+         (name.size() == 6 && dimension(name[3]) && name[4] == 'x' && dimension(name[5]))))
+    {
+        type->baseType = BaseType::Float;
+        type->matrixRows = name[3] - '0';
+        type->matrixCols = name.size() == 4 ? type->matrixRows : name[5] - '0';
+        type->optionalTypeName = name;
+        return type;
+    }
+    return nullptr;
+}
+
+bool Parser::isTypeName(bool expressionContext) const
 {
     if (isAtEnd())
         return false;
@@ -395,7 +499,8 @@ bool Parser::isTypeName() const
     // Check if it's a known type name (struct/typedef)
     if (tok.type == TokenType::IDENTIFIER)
     {
-        return typeNames.count(tok.lexeme) > 0;
+        return typeNames.count(tok.lexeme) > 0 ||
+            (!(expressionContext && globalValueNames_.count(tok.lexeme)) && optionalType(tok.lexeme) != nullptr);
     }
 
     return false;
@@ -474,11 +579,27 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
         const auto alias = typeAliases_.find(tok.lexeme);
         if (alias != typeAliases_.end())
         {
-            auto expanded = std::make_shared<TypeNode>(*alias->second);
+            // Copy array elements too: a typedef freezes its complete type,
+            // and must not mutate metadata in the original declaration.
+            auto expanded = frozenSourceAlias(alias->second);
             if (explicitMatrixLayout) expanded->isRowMajor = type->isRowMajor;
             expanded->isPacked = expanded->isPacked || type->isPacked;
             advance();
             return expanded;
+        }
+    }
+
+    if (tok.type == TokenType::IDENTIFIER)
+    {
+        if (auto optional = optionalType(tok.lexeme))
+        {
+            if (!config.glslTypes)
+                error(tokenLocation(tok), "optional GLSL type name '" + tok.lexeme +
+                      "'; enable GLSL type names with " + config.glslTypeEnableFlag);
+            optional->isRowMajor = type->isRowMajor;
+            optional->isPacked = type->isPacked;
+            advance();
+            return optional;
         }
     }
 
@@ -1189,6 +1310,8 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDeclaration(
     StorageQualifier storage)
 {
     auto func = std::make_unique<FunctionDecl>(loc, name, returnType);
+    optionalTypeShadows_.back().insert(name);
+    OptionalNameScope parameterScope(optionalTypeShadows_);
 
     // Parse parameters
     func->parameters = parseParameterList(name == config.entryPointName);
@@ -1230,6 +1353,7 @@ std::unique_ptr<VarDecl> Parser::parseVariableDeclaration(
     {
         var->type = parseArrayType(var->type);
     }
+    optionalTypeShadows_.back().insert(name);
 
     // Check for semantic annotation
     if (match(TokenType::COLON))
@@ -1404,6 +1528,7 @@ std::unique_ptr<ParamDecl> Parser::parseParameter(bool selectedEntry)
     {
         param->type = parseArrayType(param->type);
     }
+    if (!name.empty()) optionalTypeShadows_.back().insert(name);
 
     // Check for semantic
     if (match(TokenType::COLON))
@@ -1812,6 +1937,7 @@ std::unique_ptr<BlockStmt> Parser::parseBlock()
     consume(TokenType::LBRACE, "Expected '{'");
 
     auto block = std::make_unique<BlockStmt>(loc);
+    OptionalNameScope blockNames(optionalTypeShadows_);
     constScopes_.emplace_back();   // a block's names end with it (array extents)
 
     while (!check(TokenType::RBRACE) && !isAtEnd())
@@ -1856,6 +1982,7 @@ std::unique_ptr<StmtNode> Parser::parseForStatement()
     consume(TokenType::LPAREN, "Expected '(' after 'for'");
 
     auto forStmt = std::make_unique<ForStmt>(loc);
+    OptionalNameScope forNames(optionalTypeShadows_);
 
     // Init
     if (!check(TokenType::SEMICOLON))
@@ -2002,7 +2129,9 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
     bool hasMatrixLayoutQualifier = check(TokenType::KW_ROW_MAJOR) || check(TokenType::KW_COLUMN_MAJOR);
 
     // Now check if this is a type name
-    if (isTypeName() || hasMatrixLayoutQualifier)
+    const bool optionalExpression = optionalType(peek().lexeme) &&
+        peek(afterOptionalTypeSuffix()).type != TokenType::IDENTIFIER;
+    if ((!optionalExpression && isTypeName()) || hasMatrixLayoutQualifier)
     {
         // This looks like a declaration
         auto type = parseType();
@@ -2409,7 +2538,7 @@ std::unique_ptr<ExprNode> Parser::parseUnaryExpression()
         consume(TokenType::LPAREN, "Expected '(' after 'sizeof'");
 
         // Could be sizeof(type) or sizeof(expr)
-        if (isTypeName())
+        if (isTypeName(true) && (config.glslTypes || !optionalType(peek().lexeme)))
         {
             auto type = parseType();
             consume(TokenType::RPAREN, "Expected ')' after sizeof type");
@@ -2430,7 +2559,19 @@ std::unique_ptr<ExprNode> Parser::parseUnaryExpression()
         size_t savedPos = current;
         advance();  // consume '('
 
-        if (isTypeName())
+        const int optionalSuffixEnd = afterOptionalTypeSuffix();
+        const auto afterGroup = peek(optionalSuffixEnd + 1).type;
+        const bool castOperand = afterGroup == TokenType::IDENTIFIER ||
+            afterGroup == TokenType::NUMBER || afterGroup == TokenType::LPAREN ||
+            typeNames.count(peek(optionalSuffixEnd + 1).lexeme) ||
+            afterGroup == TokenType::KW_INT || afterGroup == TokenType::KW_UINT ||
+            afterGroup == TokenType::OP_LOGICAL_NOT || afterGroup == TokenType::OP_BITWISE_NOT ||
+            afterGroup == TokenType::KW_SIZEOF;
+        // Do not leak diagnostics from tentative type parsing into ordinary
+        // grouped calls/values, including indexed values such as (vec2[0]).
+        const bool ordinaryGroupedValue = !config.glslTypes && optionalType(peek().lexeme) &&
+            (peek(optionalSuffixEnd).type != TokenType::RPAREN || !castOperand);
+        if (isTypeName(true) && !ordinaryGroupedValue)
         {
             auto type = parseType();
             if (check(TokenType::RPAREN))
@@ -2535,14 +2676,28 @@ std::unique_ptr<ExprNode> Parser::parsePrimaryExpression()
     // that shadows the type in this scope: measured, the reference accepts
     // `struct input {...}; ... float4 input = t; input += 1;` (libretro's
     // phosphor-trails, gb-pass-1).  Read it as an identifier.
-    if (check(TokenType::IDENTIFIER) && isTypeName() && peek(1).type != TokenType::LPAREN)
+    if (check(TokenType::IDENTIFIER) && isTypeName(true) && peek(1).type != TokenType::LPAREN &&
+        !(peek(1).type == TokenType::LBRACKET && optionalType(peek().lexeme) &&
+          peek(afterOptionalTypeSuffix()).type == TokenType::LPAREN))
     {
         const Token& tok = advance();
         return std::make_unique<IdentifierExpr>(loc, tok.lexeme);
     }
 
+    // With the extension disabled, constructor-shaped optional names are
+    // ordinary unresolved calls. Keep their existing reachability and source
+    // binding policy instead of emitting an unconditional parser diagnostic.
+    if (!config.glslTypes && check(TokenType::IDENTIFIER) &&
+        peek(1).type == TokenType::LPAREN && isTypeName(true) && optionalType(peek().lexeme))
+    {
+        const std::string name = advance().lexeme;
+        auto call = parseCallExpression(loc, name);
+        static_cast<CallExpr*>(call.get())->optionalTypeEnableFlag = config.glslTypeEnableFlag;
+        return call;
+    }
+
     // Type constructor: float4(1, 2, 3, 4)
-    if (isTypeName())
+    if (isTypeName(true))
     {
         auto type = parseType();
         if (check(TokenType::LPAREN))

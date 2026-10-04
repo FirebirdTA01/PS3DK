@@ -51,6 +51,9 @@ enum class Extension
     // GLSL-compatible function names; source declarations still take priority.
     GlslFunctions = 3,
 
+    // Optional type spellings retain Cg vector/matrix construction semantics.
+    GlslTypes = 4,
+
     Count
 };
 

@@ -284,6 +284,7 @@ private:
     CgType analyzeIndexExpr(IndexExpr* expr);
     CgType analyzeTernaryExpr(TernaryExpr* expr);
     CgType analyzeCastExpr(CastExpr* expr);
+    bool checkOptionalTypeUse(const TypeNode* type, const SourceLocation& loc);
     CgType analyzeConstructorExpr(ConstructorExpr* expr);
     CgType analyzeSizeofExpr(SizeofExpr* expr);
 

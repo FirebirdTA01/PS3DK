@@ -26,6 +26,9 @@ const ExtensionInfo kExtensions[] = {
     { Extension::GlslFunctions, "glsl-functions",
       "accept fract, mix, and floor-remainder mod on numeric scalars/vectors; "
       "preserve source functions and boolean mix selection" },
+    { Extension::GlslTypes, "glsl-types",
+      "accept vec/ivec/bvec/dvec2..4 and mat2..4/matRxC type names; "
+      "retain Cg row-major matrix shapes, scalar splats, and conversion limits" },
 };
 
 constexpr std::size_t kExtensionCount = sizeof(kExtensions) / sizeof(kExtensions[0]);

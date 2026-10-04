@@ -32,6 +32,8 @@ struct ParserConfig
     bool helperStaticParameters = false;
     std::string staticParameterEnableFlag;
     std::string entryPointName = "main";
+    bool glslTypes = false;
+    std::string glslTypeEnableFlag;
 };
 
 // Recursive descent parser for Cg shader language
@@ -68,6 +70,13 @@ private:
     std::unordered_set<std::string> typeNames;
     // Source-order aliases are expanded at each use for all AST/IR consumers.
     std::unordered_map<std::string, std::shared_ptr<TypeNode>> typeAliases_;
+    // Optional spellings are fallback names, never injected into typeNames.
+    // Track lexical value/function bindings separately from constant extents.
+    std::vector<std::unordered_set<std::string>> optionalTypeShadows_{1};
+    std::unordered_set<std::string> globalValueNames_;
+    void collectGlobalValueNames();
+    int afterOptionalTypeSuffix() const;
+    std::shared_ptr<TypeNode> optionalType(const std::string& name) const;
 
     // ========================================================================
     // Token utilities
@@ -97,7 +106,7 @@ private:
     // Type parsing
     // ========================================================================
 
-    bool isTypeName() const;
+    bool isTypeName(bool expressionContext = false) const;
     bool isTypeStart() const;
     std::shared_ptr<TypeNode> parseType();
     std::shared_ptr<TypeNode> parseBaseType();

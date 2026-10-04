@@ -135,6 +135,9 @@ struct TypeNode
     int arraySize = 0;         // 0 for non-array, >0 for fixed-size arrays
     bool isRowMajor = false;   // Matrix layout
     bool isPacked = false;     // Cg packed arrays
+    // Preserve an optional spelling for source-binding validation on casts and
+    // constructors; it does not change the canonical type or its storage.
+    std::string optionalTypeName;
 
     // For struct types
     std::string structName;
@@ -275,6 +278,9 @@ struct UnaryExpr : ExprNode
 struct CallExpr : ExprNode
 {
     std::string functionName;
+    // Disabled optional constructor spellings remain ordinary calls. The
+    // driver-owned hint follows existing name-resolution/reachability rules.
+    std::string optionalTypeEnableFlag;
     std::vector<std::unique_ptr<ExprNode>> arguments;
     DeclNode* resolvedFunction = nullptr;  // Filled during semantic analysis
 
