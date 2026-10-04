@@ -558,6 +558,8 @@ jobs:
         run: bash tests/shader-compiler/determinant-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Matrix array initializer
         run: bash tests/shader-compiler/matrix-array-initializer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Matrix folded constant rows
+        run: bash tests/shader-compiler/matrix-folded-constant-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test bool matrix construction and static row use
         run: bash tests/shader-compiler/bool-matrix-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test scalar matrix broadcast and single evaluation

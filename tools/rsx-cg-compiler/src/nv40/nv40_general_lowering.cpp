@@ -5322,13 +5322,19 @@ private:
         // floats are the initialiser in row order: each row is one literal
         // source, as a MatConstruct of literals would give.
         const auto* constant = dynamic_cast<const IRConstant*>(entry_.getValue(value));
-        if (!constant || !constant->type.isMatrix() || constant->type.arraySize != 0 ||
-            !std::holds_alternative<std::vector<float>>(constant->value))
+        if (!constant || !constant->type.isMatrix() || constant->type.arraySize != 0)
             return false;
-        const auto& floats = std::get<std::vector<float>>(constant->value);
         const int rows = constant->type.matrixRows, cols = constant->type.matrixCols;
-        if (rows < 1 || rows > 4 || cols < 1 || cols > 4 ||
-            floats.size() != static_cast<size_t>(rows * cols))
+        if (rows < 1 || rows > 4 || cols < 1 || cols > 4)
+            return false;
+        // Algebraic simplification represents a folded matrix zero/one as
+        // a matrix-typed scalar float. Materialize that splat in every cell,
+        // just as the unfolded matrix constructor does. This is a storage
+        // representation rule, not a new arithmetic simplification.
+        const bool splat = constant->type.elementType == IRType::Float32 &&
+            std::holds_alternative<float>(constant->value);
+        const auto* floats = std::get_if<std::vector<float>>(&constant->value);
+        if (!splat && (!floats || floats->size() != static_cast<size_t>(rows * cols)))
             return false;
         out = MatrixValue{};
         out.rows = rows;
@@ -5337,7 +5343,8 @@ private:
             VSrc row;
             row.kind = VSrcKind::Literal;
             for (int c = 0; c < cols; ++c)
-                row.literal[c] = floats[static_cast<size_t>(r * cols + c)];
+                row.literal[c] = splat ? std::get<float>(constant->value) :
+                    (*floats)[static_cast<size_t>(r * cols + c)];
             row.literalLanes = static_cast<uint8_t>(cols);
             out.rowSrcs.push_back(row);
         }
