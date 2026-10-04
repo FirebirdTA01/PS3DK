@@ -4985,6 +4985,70 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 
     IRTypeInfo resultType = getExprType(expr);
 
+    if (expr->functionName == "determinant" && expr->resolvedFunction == nullptr &&
+        argValues.size() == 1)
+    {
+        const IRTypeInfo inputType = getExprType(expr->arguments[0].get());
+        const TypeNode* sourceType = expr->arguments[0]->resolvedType.get();
+        const IRType element = inputType.isMatrix() || inputType.isVector()
+            ? inputType.elementType : inputType.baseType;
+        // Do not silently promote half/fixed/integer matrices to float. Their
+        // precision/conversion policy is separate from this float intrinsic.
+        if (!sourceType || sourceType->baseType != BaseType::Float ||
+            inputType.isArray() || element != IRType::Float32 ||
+            (!inputType.isScalar() && !inputType.isVector() && !inputType.isMatrix()))
+        {
+            error(expr->loc, "determinant requires a float scalar, vector or matrix (determinant-source-type)");
+            return InvalidIRValue;
+        }
+        const IRTypeInfo scalar = IRTypeInfo::Float();
+        if (inputType.isScalar()) return argValues[0];
+        if (inputType.isVector())
+            return emitInstruction(IROp::VecExtract, scalar,
+                {argValues[0], createConstant(int32_t{0})}, expr->loc);
+
+        const int n = std::min(inputType.matrixRows, inputType.matrixCols);
+        if (n < 1 || n > 4)
+        {
+            error(expr->loc, "determinant matrix dimensions must be in 1..4");
+            return InvalidIRValue;
+        }
+        const IRTypeInfo rowType = inputType.matrixCols == 1 ? scalar :
+            inputType.matrixCols == 2 ? IRTypeInfo::Float2() :
+            inputType.matrixCols == 3 ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
+        std::vector<std::vector<IRValueID>> cells(n, std::vector<IRValueID>(n));
+        for (int row = 0; row < n; ++row)
+        {
+            const IRValueID rowValue = emitInstruction(IROp::VecExtract, rowType,
+                {argValues[0], createConstant(static_cast<int32_t>(row))}, expr->loc);
+            for (int col = 0; col < n; ++col)
+                cells[row][col] = inputType.matrixCols == 1 ? rowValue :
+                    emitInstruction(IROp::VecExtract, scalar,
+                        {rowValue, createConstant(static_cast<int32_t>(col))}, expr->loc);
+        }
+        // Laplace expansion over already evaluated components. The scalar
+        // operations use the ordinary FP/VP arithmetic lowering and register
+        // allocator; no matrix operand is re-evaluated for a minor.
+        std::function<IRValueID(int, const std::vector<int>&)> minor;
+        minor = [&](int row, const std::vector<int>& cols) -> IRValueID {
+            if (cols.size() == 1) return cells[row][cols.front()];
+            IRValueID sum = InvalidIRValue;
+            for (size_t i = 0; i < cols.size(); ++i)
+            {
+                std::vector<int> rest = cols;
+                rest.erase(rest.begin() + i);
+                const IRValueID product = emitBinaryOp(IROp::Mul, scalar,
+                    cells[row][cols[i]], minor(row + 1, rest), expr->loc);
+                sum = sum == InvalidIRValue ? product :
+                    emitBinaryOp(i % 2 ? IROp::Sub : IROp::Add, scalar, sum, product, expr->loc);
+            }
+            return sum;
+        };
+        std::vector<int> cols;
+        for (int col = 0; col < n; ++col) cols.push_back(col);
+        return minor(0, cols);
+    }
+
     // any(v) ORs and all(v) ANDs the lanes' truth (a numeric lane is true
     // for either sign of nonzero).  Measured on the reference: all(t.xy)
     // is SNE per lane then a product into the condition register.

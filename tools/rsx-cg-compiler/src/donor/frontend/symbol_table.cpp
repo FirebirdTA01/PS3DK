@@ -825,9 +825,15 @@ void SymbolTable::registerVectorFunctions()
         }
     }
 
-    // determinant (3x3, 4x4)
-    addFunction("determinant", CgType::Float(), {CgType::Float3x3()}, {"m"}, nullptr, true);
-    addFunction("determinant", CgType::Float(), {CgType::Float4x4()}, {"m"}, nullptr, true);
+    // determinant: a rectangular input uses its leading min(r,c) square;
+    // scalar/vector inputs select their first component. Register the shapes
+    // explicitly instead of broadening general matrix assignment conversion.
+    addFunction("determinant", CgType::Float(), {CgType::Float()}, {"m"}, nullptr, true);
+    for (int width = 2; width <= 4; ++width)
+        addFunction("determinant", CgType::Float(), {CgType::Vec(ScalarKind::Float, width)}, {"m"}, nullptr, true);
+    for (int rows = 1; rows <= 4; ++rows)
+        for (int cols = 1; cols <= 4; ++cols)
+            addFunction("determinant", CgType::Float(), {CgType::Mat(ScalarKind::Float, rows, cols)}, {"m"}, nullptr, true);
 
     // any accepts a scalar too; register it explicitly rather than relying
     // on scalar-to-vector broadcasting during overload resolution.
