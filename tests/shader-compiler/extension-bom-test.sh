@@ -69,13 +69,17 @@ for f in bom_control_f.cg bom_include_control_f.cg bom_comment_f.cg bom_inactive
 done
 [[ "$(size_of "$fx/bom_only_f.cg")" == 3 && "$(size_of "$fx/inc_bom_only.h")" == 3 ]] || fail "the BOM-only fixtures must be exactly three bytes"
 [[ "$(size_of "$fx/empty_control_f.cg")" == 0 && "$(size_of "$fx/inc_empty.h")" == 0 ]] || fail "the empty controls must be zero bytes"
-# Near-misses: prefixes of the mark, a UTF-16 mark, and files that are only
-# a partial mark.  Each must still carry exactly the bytes it is named for.
+# Near-misses: prefixes of the mark, and files that are only a partial mark.
+# Each must still carry exactly the bytes it is named for.
+#
+# (lead_utf16be / lead_utf16le are NOT near-misses here: they begin with a
+# UTF-16 byte order mark, which the separate UTF-16 extension's detector
+# names --extension=utf16 for.  They are covered by extension-utf16-test.sh,
+# which is the test that pins the UTF-16-mark refusal message and the
+# strict-transcode refusal for them, so they are not tested here.)
 [[ "$(first_bytes "$fx/lead_ef_f.cg" 2)" == ef66 ]] || fail "lead_ef_f.cg must begin EF then source"
 [[ "$(first_bytes "$fx/lead_efbb_f.cg" 3)" == efbb66 ]] || fail "lead_efbb_f.cg must begin EF BB then source"
 [[ "$(first_bytes "$fx/lead_efbb41_f.cg" 3)" == efbb41 ]] || fail "lead_efbb41_f.cg must begin EF BB 41"
-[[ "$(first_bytes "$fx/lead_utf16be_f.cg" 2)" == feff ]] || fail "lead_utf16be_f.cg must begin FE FF"
-[[ "$(first_bytes "$fx/lead_utf16le_f.cg" 2)" == fffe ]] || fail "lead_utf16le_f.cg must begin FF FE"
 [[ "$(size_of "$fx/only_ef_f.cg")" == 1 && "$(first_bytes "$fx/only_ef_f.cg" 1)" == ef ]] || fail "only_ef_f.cg must be exactly the byte EF"
 [[ "$(size_of "$fx/only_efbb_f.cg")" == 2 && "$(first_bytes "$fx/only_efbb_f.cg" 2)" == efbb ]] || fail "only_efbb_f.cg must be exactly EF BB"
 printf '  %-40s ok\n' "fixture bytes intact"
@@ -157,12 +161,16 @@ refuse "off: leading U+00A9, no hint" cp_off off sce_fp_rsx lead_copyright_f.cg 
 refuse "on:  leading U+00A9, no hint" cp_on  on  sce_fp_rsx lead_copyright_f.cg no 'lead_copyright_f.cg:1:1: error:' "$UNK_BODY"
 
 # Near-misses that a WRONG DETECTOR passes and U+00A9 does not catch: the
-# first one and two bytes of the mark, the mark with a wrong third byte, a
-# UTF-16 mark (out of scope: no detector, no hint), and files that are
-# nothing but one or two bytes of the mark - a three-byte compare against a
-# shorter buffer is the classic read past the end.  All refuse in both
-# modes with the generic error and no hint.
-for near in lead_ef lead_efbb lead_efbb41 lead_utf16be lead_utf16le only_ef only_efbb; do
+# first one and two bytes of the mark, the mark with a wrong third byte,
+# and files that are nothing but one or two bytes of the mark - a three-byte
+# compare against a shorter buffer is the classic read past the end.  All
+# refuse in both modes with the generic error and no hint.
+#
+# lead_utf16be / lead_utf16le are NOT near-misses here: they begin with a
+# UTF-16 byte order mark (FE FF / FF FE), which the separate UTF-16
+# extension's detector names --extension=utf16 for.  They are covered by
+# extension-utf16-test.sh, not by this BOM test.
+for near in lead_ef lead_efbb lead_efbb41 only_ef only_efbb; do
     refuse "off: $near, no hint" "${near}_off" off sce_fp_rsx "${near}_f.cg" no "${near}_f.cg:1:1: error:" "$UNK_BODY"
     refuse "on:  $near, no hint" "${near}_on"  on  sce_fp_rsx "${near}_f.cg" no "${near}_f.cg:1:1: error:" "$UNK_BODY"
 done

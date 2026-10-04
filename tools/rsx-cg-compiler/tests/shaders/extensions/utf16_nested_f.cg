@@ -1,0 +1,2 @@
+#include "inc_utf16le_outer.h"
+float4 main(float4 c : COLOR0) : COLOR { return c * N_INNER * N_OUTER; }

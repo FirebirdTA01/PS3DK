@@ -98,7 +98,11 @@ void usage()
 
 std::string slurpFile(const std::string& path)
 {
-    std::ifstream in(path);
+    // ios::binary: this file may be UTF-16 and the source-text hook
+    // (admitSourceText) must see the NUL bytes it uses to tell a UTF-16
+    // file apart from a C file.  Text mode would translate NUL/LF and
+    // corrupt that distinction on a Windows host.
+    std::ifstream in(path, std::ios::binary);
     if (!in)
     {
         std::fprintf(stderr, "rsx-cg-compiler: cannot open %s\n", path.c_str());
@@ -326,8 +330,9 @@ int main(int argc, char** argv)
         // Admission runs on the main file's own bytes, before the stdlib
         // and #line text are composed in front of them, and inside this
         // try so a refusal is the same exit-1-no-artifact as any other
-        // preprocessor error.  slurpFile itself is unchanged: text mode,
-        // exit on open failure, as before this existed.
+        // preprocessor error.  slurpFile reads in ios::binary (no NUL/LF
+        // translation) so the UTF-16 marks and NUL code units reach the
+        // detector exactly as stored.
         rsx_cg::admitSourceText(sourceCode, ctx.inputFile, ctx.extensions);
         preprocessed = runPreprocessor(sourceCode, ctx);
     }

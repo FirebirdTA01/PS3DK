@@ -66,6 +66,7 @@ printf 'declarator-types\ta later declarator in a list keeps the declared type; 
 printf 'static-parameters\taccept helper static, static const, and const static parameters; preserve const and refuse static parameters on the selected entry\n' >> "$expected_list"
 printf 'glsl-functions\taccept fract, mix, and floor-remainder mod on numeric scalars/vectors; preserve source functions and boolean mix selection\n' >> "$expected_list"
 printf 'glsl-types\taccept vec/ivec/bvec/dvec2..4 and mat2..4/matRxC type names; retain Cg row-major matrix shapes, scalar splats, and conversion limits\n' >> "$expected_list"
+printf 'utf16\taccept a source file whose first two bytes are a UTF-16 byte order mark (FF FE = UTF-16LE, FE FF = UTF-16BE).  Disabled by default, a UTF-16-marked file is refused.  Enabled, the whole file is transcoded to UTF-8 before the lexer sees it.  Odd byte count, an unpaired surrogate, or a NUL after the BOM still refuses.\n' >> "$expected_list"
 # A Windows-hosted build writes stdout with CRLF; the table is pinned on
 # its text, not its line ending.
 tr -d '\r' < "$work/list.out" > "$work/list.out.lf" && mv "$work/list.out.lf" "$work/list.out"

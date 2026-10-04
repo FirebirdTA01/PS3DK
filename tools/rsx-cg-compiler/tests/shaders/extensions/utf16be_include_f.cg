@@ -1,0 +1,2 @@
+#include "inc_utf16be.h"
+float4 main(float4 c : COLOR0) : COLOR { return c * UTF16_K; }

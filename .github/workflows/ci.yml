@@ -778,6 +778,8 @@ jobs:
         run: bash tests/shader-compiler/extension-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the leading UTF-8 BOM extension in both modes
         run: bash tests/shader-compiler/extension-bom-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test the leading UTF-16 BOM extension in both modes (strict transcode: odd / NUL / surrogate refuse)
+        run: bash tests/shader-compiler/extension-utf16-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Census every fixture in both extension modes (the flag moves only what it names)
         run: bash tests/shader-compiler/extension-mode-census-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler fragment registerCount invariant

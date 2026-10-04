@@ -2,7 +2,7 @@
 #define RSX_CG_COMPILER_EXTENSIONS_H
 
 /*
- * rsx-cg-compiler — named extensions (named-extensions).
+ * rsx-cg-compiler â€” named extensions (named-extensions).
  *
  * An extension is a deliberate departure from the reference compiler.  Every
  * one is OFF by default, so an unflagged compile is reference-compatible in
@@ -53,6 +53,16 @@ enum class Extension
 
     // Optional type spellings retain Cg vector/matrix construction semantics.
     GlslTypes = 4,
+    // Accept a source file whose FIRST two bytes are a UTF-16 byte order
+    // mark (FF FE for UTF-16LE, FE FF for UTF-16BE).  The reference
+    // refuses it.  Enabled, the whole file is transcoded to UTF-8 before
+    // the lexer sees it (paired surrogates, no NULs, even length).  The
+    // transcode is STRICT: a bad file -- odd byte count after the BOM,
+    // an unpaired surrogate, or a U+0000 after the BOM -- still refuses,
+    // with an actionable diagnostic that names the defect.  A file whose
+    // only contents are its leading BOM (i.e. empty after strip) is the
+    // empty-file case, which behaves exactly as a zero-byte source does.
+    Utf16 = 5,
 
     Count
 };

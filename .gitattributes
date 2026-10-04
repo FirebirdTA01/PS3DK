@@ -46,3 +46,12 @@ patches/** -text
 # extension tests pass while proving nothing. The test checks
 # their first bytes before it judges anything.
 tools/rsx-cg-compiler/tests/shaders/extensions/** -text
+
+# NUL-free raw UTF-16/32 fixtures (utf16_invalid_odd, utf16_only, inc_utf16only,
+# and the .fcg/.h marker fixtures) carry meaningful non-text leading bytes and
+# must travel as binary in every diff/clone operation.
+tools/rsx-cg-compiler/tests/shaders/extensions/utf16_invalid_odd.fcg  binary
+tools/rsx-cg-compiler/tests/shaders/extensions/utf16_only.fcg         binary
+tools/rsx-cg-compiler/tests/shaders/extensions/inc_utf16only.h        binary
+tools/rsx-cg-compiler/tests/shaders/extensions/lead_utf16le_f.cg      binary
+tools/rsx-cg-compiler/tests/shaders/extensions/lead_utf16be_f.cg      binary
