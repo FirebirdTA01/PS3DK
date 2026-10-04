@@ -609,3 +609,34 @@ affected.
 when the size does not fit `off_t` (above `INT32_MAX`), as POSIX requires.
 `off_t` itself stays 32-bit: widening it is a libc ABI break for every archive
 and portlib built against it.
+
+---
+
+## Shader compiler accepts mismatched float actuals for fixed out parameters
+
+**Status:** open semantic defect, reproduced in both fragment and vertex
+profiles on integration commit `703f6ced`. This is not a claim about the
+shipped v0.19.0 compiler.
+
+A helper with an `out fixed` or `inout fixed` parameter currently accepts a
+`float` variable as its actual argument. Output parameters require matching
+types; this acceptance is invalid and is not intended to become an extension.
+The reference compiler refuses these calls with C1113.
+
+```cg
+float get(inout fixed x) { x = 0.13; return x; }
+// In the caller:
+float a = 3.125;
+float v = get(a); // Currently accepted; should be refused.
+```
+
+The six named witnesses are `fp_inout_float_0`, `fp_inout_float_1`,
+`fp_out_float_1`, `vp_inout_float_0`, `vp_inout_float_1`, and
+`vp_out_float_1`. The `_0` form reads the parameter; `_1` writes it first.
+These predate the fixed scalar/vector constant corrections, which do not
+repair output-parameter compatibility.
+
+**Planned fix:** enforce output-parameter type compatibility during semantic
+analysis, with refusal controls for these witnesses and acceptance controls
+for matching `fixed` actuals. Runtime reduced-precision behavior remains a
+separate issue.
