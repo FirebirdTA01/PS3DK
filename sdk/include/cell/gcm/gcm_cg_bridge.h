@@ -66,82 +66,19 @@ extern "C" {
 #define PS3TC_GCM_SUBCHANNEL_METHOD(ch, m, n) \
     (((uint32_t)(n) << 18) | ((uint32_t)(ch) << 13) | (uint32_t)(m))
 
-/* Reserve `count` u32 slots in the command buffer, invoking the
- * gcm callback (which grows the buffer or flushes upstream) when we
- * run up against the current end.  Returns the starting write pointer
- * or NULL on callback failure. */
-/* Invoke the FIFO-refill callback through the PSL1GHT / the reference SDK PRX
- * calling convention.  The `callback` field is stored as an
- * `ATTRIBUTE_PRXPTR` (a 32-bit handle pointing to an 8-byte
- * [entry, toc] descriptor) rather than a full PPC64 ELFv1 OPD.
- * A direct C function-pointer call on that field lands on garbage.
- *
- * Mirrors PSL1GHT's rsxContextCallback (rsx_function_macros.h).
- * Must be noinline — the asm relies on r3=ctx and r4=count on entry
- * (standard PPC64 arg convention); inlining would let GCC reorder the
- * callers' register allocation and break that invariant. */
-/* Invoke the FIFO-wrap callback via the PSL1GHT / the reference SDK PRX calling
- * convention, explicitly arranging the call frame so GCC can't
- * silently break the ABI.
- *
- * The `callback` field stores a 32-bit handle to an 8-byte PRX OPD
- * [entry_32, toc_32] — NOT a full PPC64 ELFv1 OPD.  We load entry
- * into CTR and the TOC into r2 (saving the current TOC in r31),
- * then `bctrl`.  The firmware callback expects
- *   r3 = gcmContextData *ctx
- *   r4 = u32          count
- * as per the standard PPC64 ELFv1 argument registers.
- *
- * Explicit `mr` into r3/r4 from the constraints ensures the ABI-
- * required arg registers are populated no matter what GCC did with
- * ctx/count before this asm.  r3 and r4 are in the clobber list
- * because bctrl replaces r3 with the return value and r4 is
- * destroyed by the callback; without the clobber GCC assumes they
- * keep our input values and reads struct fields through a stale
- * register post-asm (2026-04-18 cube crash).  The mirror copy of
- * this trampoline in PSL1GHT's rsx_function_macros.h doesn't do
- * this and only "works" because it happens to have no code before
- * the asm — adding anything (a printf, a counter write) shifts
- * GCC's register allocation enough to crash.
- *
- * TOC save / restore goes through the PPC64 ELFv1 TOC slot at
- * +24(r1) inside the 128-byte frame we allocate, rather than via
- * r31.  An earlier revision used `mr 31,2` / `mr 2,31` and listed
- * r31 in the clobber list — that forced every consuming TU to
- * compile with -fomit-frame-pointer, because GCC at -O0 pins r31
- * as the frame pointer and rejects the clobber with the diagnostic
- * "31 cannot be used in 'asm' here".  Optimised builds (-O1+)
- * auto-enabled omit-frame-pointer and skated past the issue, but
- * debug builds broke at the include site of <cell/gcm.h>.  Stack-
- * save costs one extra std/ld on the slow callback path, has no
- * register-pressure side effects, and lets debug builds compile
- * cleanly without any per-TU pragma. */
+/* The target compiler implements the compact [entry32, toc32] callback
+ * descriptor ABI. Keep this a compiler-visible call so it owns the outgoing
+ * argument homes, register clobbers, LR and TOC preservation. A hidden bctrl
+ * in inline assembly can overlap compiler saves with the callee's homes.
+ */
 __attribute__((noinline))
 static int32_t ps3tc_gcm_invoke_callback(CellGcmContextData *ctx, uint32_t count)
 {
-    int32_t result;
-
-    __asm__ __volatile__ (
-        "mr    3,%1\n"         /* r3 = ctx */
-        "mr    4,%2\n"         /* r4 = count */
-        "stdu  1,-128(1)\n"
-        "std   2,24(1)\n"      /* save caller TOC to our frame */
-        "lwz   0,0(%3)\n"      /* r0 = callback entry */
-        "lwz   2,4(%3)\n"      /* r2 = callback TOC   */
-        "mtctr 0\n"
-        "bctrl\n"
-        "mr    %0,3\n"         /* result = r3 (callback return) */
-        "ld    2,24(1)\n"      /* restore caller TOC */
-        "addi  1,1,128\n"
-        : "=&r"(result)
-        : "r"(ctx), "r"(count), "b"(ctx->callback)
-        : "r0","r3","r4","r5","r6","r7","r8","r9","r10","r11","r12",
-          "lr","ctr","cr0","cr1","cr5","cr6","cr7","xer","memory"
-    );
-
-    return result;
+    return ctx->callback(ctx, count);
 }
 
+/* Reserve count u32 slots. The callback may rewrite the context fields;
+ * read current again after the compiler-visible call. */
 static inline uint32_t *ps3tc_gcm_reserve(CellGcmContextData *ctx, uint32_t count)
 {
     if ((ctx->current + count) > ctx->end)

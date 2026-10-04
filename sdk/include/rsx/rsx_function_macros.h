@@ -14,42 +14,10 @@
 #else
 	s32 __attribute__((noinline)) rsxContextCallback(gcmContextData *context,u32 count)
 	{
-		s32 result;
-
-		/* Invoke the FIFO-wrap callback via the PSL1GHT / reference SDK PRX
-		 * calling convention, explicitly arranging the call frame so GCC can't
-		 * silently break the ABI.
-		 *
-		 * The callback field stores a 32-bit handle to an 8-byte PRX OPD
-		 * [entry_32, toc_32], not a full PPC64 ELFv1 OPD.  We load entry into
-		 * CTR and the TOC into r2, then bctrl.  The callback expects
-		 *   r3 = gcmContextData *context
-		 *   r4 = u32            count
-		 * as per the standard PPC64 ELFv1 argument registers.
-		 *
-		 * The memory clobber is required: the callback may rewrite
-		 * context->begin/current/end.  Without it, GCC 11+ can keep those fields
-		 * cached across this call and continue writing through a stale command
-		 * pointer after the callback rebases the FIFO. */
-		__asm__ __volatile__ (
-			"mr    3,%1\n"
-			"mr    4,%2\n"
-			"stdu  1,-128(1)\n"
-			"std   2,24(1)\n"
-			"lwz   0,0(%3)\n"
-			"lwz   2,4(%3)\n"
-			"mtctr 0\n"
-			"bctrl\n"
-			"mr    %0,3\n"
-			"ld    2,24(1)\n"
-			"addi  1,1,128\n"
-			: "=&r"(result)
-			: "r"(context), "r"(count), "b"(context->callback)
-			: "r0","r3","r4","r5","r6","r7","r8","r9","r10","r11","r12",
-			  "lr","ctr","cr0","cr1","cr5","cr6","cr7","xer","memory"
-		);
-
-		return result;
+		/* The Cell target compiler calls compact [entry32, toc32] descriptors.
+		 * A real call gives it ownership of argument homes and saved state,
+		 * and exposes the callback's context updates to the optimizer. */
+		return context->callback(context, count);
 	}
 	
 	#define RSX_FUNC_INTERNAL(func)		__rsx##func
