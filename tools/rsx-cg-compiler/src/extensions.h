@@ -2,7 +2,7 @@
 #define RSX_CG_COMPILER_EXTENSIONS_H
 
 /*
- * rsx-cg-compiler â€” named extensions (named-extensions).
+ * rsx-cg-compiler — named extensions (named-extensions).
  *
  * An extension is a deliberate departure from the reference compiler.  Every
  * one is OFF by default, so an unflagged compile is reference-compatible in

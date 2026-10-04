@@ -1,5 +1,5 @@
 /*
- * rsx-cg-compiler â€” named extensions: the registry and the one detector.
+ * rsx-cg-compiler — named extensions: the registry and the one detector.
  */
 
 #include "extensions.h"
