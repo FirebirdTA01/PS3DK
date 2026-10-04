@@ -3789,7 +3789,10 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             copyArrayAggregate(varDecl->name, varDecl->initializer.get(), varDecl->type.get());
             const IRTypeInfo declaredType = getIRType(varDecl->type.get());
             const IRTypeInfo initType = getExprType(varDecl->initializer.get());
-            if (declaredType.isMatrix() && declaredType.elementType == IRType::Float32 &&
+            if (initType.isMatrix() && !declaredType.isMatrix() &&
+                (declaredType.isScalar() || declaredType.isVector()))
+                initValue = emitMatrixComponents(initType, declaredType, initValue, varDecl->loc);
+            else if (declaredType.isMatrix() && declaredType.elementType == IRType::Float32 &&
                 initType.isScalar() && initType.arraySize == 0)
                 initValue = emitScalarMatrixBroadcast(initType, declaredType, initValue, varDecl->loc);
             else if (declaredType.arraySize == 0 && !declaredType.isMatrix() &&
@@ -5344,6 +5347,11 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
             continue;
         const IRTypeInfo pt = getIRType(param->type.get());
         const ExprNode* arg = i < expr->arguments.size() ? expr->arguments[i].get() : nullptr;
+        if (arg && getExprType(expr->arguments[i].get()).isMatrix() && !pt.isMatrix())
+        {
+            error(arg->loc, "matrix component conversion for out/inout parameters is not supported");
+            return false;
+        }
         const bool lvalue = arg && (arg->kind == ExprKind::Identifier ||
                                     (arg->kind == ExprKind::MemberAccess &&
                                      static_cast<const MemberAccessExpr*>(arg)->object &&
@@ -5389,7 +5397,19 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     for (size_t i = 0; i < callee->parameters.size(); ++i)
     {
         ParamDecl* param = callee->parameters[i].get();
-        declToValue_[param] = args[i];
+        IRValueID boundValue = args[i];
+        ExprNode* argument = i < expr->arguments.size() ? expr->arguments[i].get() : param->defaultValue.get();
+        if (argument)
+        {
+            const IRTypeInfo sourceType = getExprType(argument);
+            const IRTypeInfo targetType = getIRType(param->type.get());
+            if (sourceType.isMatrix() && !targetType.isMatrix() &&
+                (targetType.isScalar() || targetType.isVector()))
+            {
+                boundValue = emitMatrixComponents(sourceType, targetType, boundValue, argument->loc);
+            }
+        }
+        declToValue_[param] = boundValue;
         // A parameter that shadows a file-scope name moves the global's
         // binding into the stash, exactly as the entry function's does
         // (inline-entry-parameter-scope): a helper called from this body then reads the
@@ -5397,7 +5417,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         // comes back out below (inline-global-stash - this used to be REFUSED).
         stashShadowedGlobal(param->name);
         if (!param->name.empty())
-            nameToValue_[param->name] = args[i];
+            nameToValue_[param->name] = boundValue;
 
         // Array-bearing arguments are values, not caller spelling aliases.
         // Take the call's completed argument state (the reference's measured
@@ -7879,11 +7899,8 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
     // Matrix cast handling
     if (sourceType.isMatrix() || targetType.isMatrix())
     {
-        if (sourceType.isMatrix() && sourceType.matrixRows == 1 && sourceType.matrixCols == 1 &&
-            sourceType.elementType == IRType::Float32 && sourceType.arraySize == 0 &&
-            targetType.isScalar() && targetType.baseType == IRType::Float32 && targetType.arraySize == 0)
-            return emitInstruction(IROp::VecExtract, targetType,
-                {operandValue, createConstant(int32_t{0})}, expr->loc);
+        if (sourceType.isMatrix() && (targetType.isScalar() || targetType.isVector()))
+            return emitMatrixComponents(sourceType, targetType, operandValue, expr->loc);
         if (targetType.isMatrix() && targetType.elementType == IRType::Float32 && sourceType.isScalar() &&
             (sourceType.baseType == IRType::Float32 || sourceType.baseType == IRType::Int32))
             return emitScalarMatrixBroadcast(sourceType, targetType, operandValue, expr->loc);
@@ -8041,11 +8058,8 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
         // Matrix single argument constructor
         if (resultType.isMatrix() || argType.isMatrix())
         {
-            if (argType.isMatrix() && argType.matrixRows == 1 && argType.matrixCols == 1 &&
-                argType.elementType == IRType::Float32 && argType.arraySize == 0 &&
-                resultType.isScalar() && resultType.baseType == IRType::Float32 && resultType.arraySize == 0)
-                return emitInstruction(IROp::VecExtract, resultType,
-                    {argValues[0], createConstant(int32_t{0})}, expr->loc);
+            if (argType.isMatrix() && (resultType.isScalar() || resultType.isVector()))
+                return emitMatrixComponents(argType, resultType, argValues[0], expr->loc);
             if (resultType.isMatrix() && resultType.elementType == IRType::Float32 && argType.isScalar() &&
                 (argType.baseType == IRType::Float32 || argType.baseType == IRType::Int32))
                 return emitScalarMatrixBroadcast(argType, resultType, argValues[0], expr->loc);
@@ -8740,12 +8754,52 @@ IRValueID IRBuilder::narrowToScalar(TypeNode* declared, ExprNode* valueExpr, IRV
     if (!declared || !valueExpr || value == InvalidIRValue) return value;
     const IRTypeInfo to = getIRType(declared);
     const IRTypeInfo from = getExprType(valueExpr);
+    if (from.isMatrix() && (to.isScalar() || to.isVector()))
+        return emitMatrixComponents(from, to, value, valueExpr->loc);
     if (to.isVector() || to.isMatrix() || to.arraySize != 0 || to.baseType == IRType::Void ||
         to.baseType == IRType::Bool || getStructFields(declared))
         return value;
     if (!from.isVector() || from.isMatrix() || from.arraySize != 0)
         return value;
     return emitScalarNarrowing(from, to, value, valueExpr->loc);
+}
+
+IRValueID IRBuilder::emitMatrixComponents(const IRTypeInfo& sourceType,
+                                         const IRTypeInfo& targetType,
+                                         IRValueID value, const SourceLocation& loc)
+{
+    if (value == InvalidIRValue) return value;
+    const int width = targetType.isVector() ? targetType.vectorSize : 1;
+    const bool scalar = targetType.isScalar();
+    if (sourceType.arraySize != 0 || targetType.arraySize != 0 ||
+        !sourceType.isMatrix() || sourceType.elementType != IRType::Float32 ||
+        (!scalar && !targetType.isVector()) ||
+        (scalar ? targetType.baseType : targetType.elementType) != IRType::Float32 ||
+        sourceType.matrixRows < 1 || sourceType.matrixRows > 4 ||
+        sourceType.matrixCols < 1 || sourceType.matrixCols > 4 || width < 1 || width > 4 ||
+        (!scalar && ((sourceType.matrixRows != 1 && sourceType.matrixCols != 1) ||
+                     width > std::max(sourceType.matrixRows, sourceType.matrixCols))))
+    {
+        error(loc, "matrix component conversion requires a float scalar or a non-widening float vector from a one-dimensional float matrix");
+        return InvalidIRValue;
+    }
+    const IRTypeInfo rowType = sourceType.matrixCols == 1 ? IRTypeInfo::Float() :
+        sourceType.matrixCols == 2 ? IRTypeInfo::Float2() :
+        sourceType.matrixCols == 3 ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
+    std::vector<IRValueID> lanes;
+    for (int i = 0; i < width; ++i)
+    {
+        // Extract rows first: a matrix's VecExtract index denotes a row,
+        // while a vector's denotes a lane. Reuse the already evaluated value.
+        const int row = sourceType.matrixCols == 1 ? i : 0;
+        IRValueID lane = emitInstruction(IROp::VecExtract, rowType,
+            {value, createConstant(static_cast<int32_t>(row))}, loc);
+        if (sourceType.matrixCols != 1)
+            lane = emitInstruction(IROp::VecExtract, IRTypeInfo::Float(),
+                {lane, createConstant(static_cast<int32_t>(i))}, loc);
+        lanes.push_back(lane);
+    }
+    return scalar ? lanes.front() : emitInstruction(IROp::VecConstruct, targetType, lanes, loc);
 }
 
 IRValueID IRBuilder::emitScalarMatrixBroadcast(const IRTypeInfo& sourceType,
@@ -8812,6 +8866,17 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
 
     const IRTypeInfo targetType = getExprType(target);
     IRValue* srcValue = currentFunction_->getValue(value);
+    if (targetType.arraySize == 0 && (targetType.isScalar() || targetType.isVector()))
+    {
+        IRTypeInfo sourceType = srcValue ? srcValue->type : IRTypeInfo::Void();
+        for (const auto& parameter : currentFunction_->parameters)
+            if (parameter.valueId == value) sourceType = parameter.type;
+        for (const auto& block : currentFunction_->blocks)
+            for (const auto& instruction : block->instructions)
+                if (instruction->result == value) sourceType = instruction->resultType;
+        if (sourceType.isMatrix())
+            return emitMatrixComponents(sourceType, targetType, value, target->loc);
+    }
     if (targetType.arraySize == 0 && !targetType.isMatrix() &&
         (targetType.isVector() ? targetType.elementType : targetType.baseType) == IRType::Bool)
     {

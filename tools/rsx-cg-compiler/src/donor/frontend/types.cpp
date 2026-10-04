@@ -848,6 +848,17 @@ bool canImplicitlyConvert(const CgType& from, const CgType& to)
             return from.vectorSize() == to.vectorSize();
         }
 
+        // A float matrix narrows to its first scalar, or a leading vector
+        // when it has only one row/column. General 2D matrices do not flatten.
+        if (from.isMatrix() && from.scalarKind() == ScalarKind::Float &&
+            to.scalarKind() == ScalarKind::Float)
+        {
+            if (to.isScalar()) return true;
+            if (to.isVector())
+                return (from.matrixRows() == 1 || from.matrixCols() == 1) &&
+                       to.vectorSize() <= std::max(from.matrixRows(), from.matrixCols());
+        }
+
         // Matrix to matrix: same dimensions required
         if (from.isMatrix() && to.isMatrix())
         {
@@ -863,6 +874,9 @@ bool canImplicitlyConvert(const CgType& from, const CgType& to)
     // Array conversions: only if element types are compatible
     if (from.isArray() && to.isArray())
     {
+        // Element-wise matrix component conversion is not an array copy.
+        if (from.elementType().isMatrix() && !to.elementType().isMatrix())
+            return false;
         return from.arraySize() == to.arraySize() &&
                canImplicitlyConvert(from.elementType(), to.elementType());
     }
@@ -1012,6 +1026,9 @@ int conversionCost(const CgType& from, const CgType& to)
     {
         cost += 1;
     }
+
+    // An exact matrix overload must win over component conversion.
+    if (from.isMatrix() && !to.isMatrix()) cost += 1;
 
     return cost;
 }

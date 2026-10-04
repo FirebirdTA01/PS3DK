@@ -255,6 +255,8 @@ private:
     IRValueID coerceAssignmentValue(ExprNode* target, IRValueID value);
     IRValueID emitScalarMatrixBroadcast(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
                                         IRValueID value, const SourceLocation& loc);
+    IRValueID emitMatrixComponents(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
+                                   IRValueID value, const SourceLocation& loc);
     IRValueID prepareFloatMatrixScalar(const IRTypeInfo& sourceType, IRValueID value,
                                       const SourceLocation& loc);
 

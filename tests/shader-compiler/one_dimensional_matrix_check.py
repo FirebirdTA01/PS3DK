@@ -28,9 +28,7 @@ REFUSALS = {
     'row_runtime': 'float4x1 m=float4x1(p);return float4(m[int(q.x)],0,0,1);',
     'ambiguous_scalar_mul': 'float4x1 m=float4x1(p);return mul(m,q.x);',
     # Measured reference accepts; these conversions remain explicit debts.
-    'debt_implicit_scalar': 'float1x1 m=float1x1(p.x);float x=m;return float4(x,p.y,p.z,1);',
     'debt_vector_assignment': 'float4x1 m=p;return float4(m[0],m[1],m[2],m[3]);',
-    'debt_column_assignment': 'float4x1 m=float4x1(p);float4 x=m;return x;',
 }
 
 
@@ -63,6 +61,8 @@ def mv(p):
 
 def cases():
     result = [
+        ('implicit_scalar', '', 'float1x1 m=float1x1(p.x);float x=m;return float4(x,p.y,p.z,1);', lambda p,q:[p[0],p[1],p[2],1]),
+        ('column_assignment', '', 'float4x1 m=float4x1(p);float4 x=m;return x;', lambda p,q:p),
         ('matrix_column', '', MDECL+COL+'float4x1 z=mul(M,c);return float4(z[0],z[1],z[2],z[3]);', lambda p,q: mv(p)),
         ('row_matrix', '', MDECL+ROW+'float1x4 z=mul(r,M);return z[0];', lambda p,q: [sum(q[i]*M[i][j] for i in range(4)) for j in range(4)]),
         ('outer_product', '', COL+ROW+'float4x4 z=mul(c,r);return float4(z[1][2],z[2][1],z[3][3],z[0][1]);', lambda p,q: [p[1]*q[2],p[2]*q[1],p[3]*q[3],p[0]*q[1]]),
