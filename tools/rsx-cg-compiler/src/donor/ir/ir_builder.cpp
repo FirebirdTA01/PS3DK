@@ -5003,6 +5003,79 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 
     IRTypeInfo resultType = getExprType(expr);
 
+    if (expr->resolvedFunction == nullptr &&
+        (expr->functionName == "fract" || expr->functionName == "mod" || expr->functionName == "mix"))
+    {
+        // Only semantic-admitted extension builtins reach this path. Arguments
+        // have already been evaluated once; no AST expression is rebuilt here.
+        const IRType element = resultType.isVector() ? resultType.elementType : resultType.baseType;
+        const int width = resultType.isVector() ? resultType.vectorSize : 1;
+        const auto scalarType = [](IRType element) {
+            IRTypeInfo type = element == IRType::Float16 ? IRTypeInfo::Half() : IRTypeInfo::Float();
+            // Match fromCgType: precision marking also reads elementType for
+            // scalar values, while the convenience Half() defaults it to float.
+            type.elementType = element;
+            return type;
+        };
+        const auto converted = [&](size_t index) {
+            IRValueID value = argValues[index];
+            const IRTypeInfo from = getExprType(expr->arguments[index].get());
+            const IRType fromElement = from.isVector() ? from.elementType : from.baseType;
+            IRTypeInfo target = from.isVector() ? resultType : scalarType(element);
+            if (fromElement != element)
+            {
+                IROp op = IROp::Bitcast;
+                if (fromElement == IRType::Int32 || fromElement == IRType::UInt32 || fromElement == IRType::Bool)
+                    op = IROp::IntToFloat;
+                else if (fromElement == IRType::Float16 && element == IRType::Float32)
+                    op = IROp::HalfToFloat;
+                else if (fromElement == IRType::Float32 && element == IRType::Float16)
+                    op = IROp::FloatToHalf;
+                IRValueID folded = tryFoldUnaryOp(op, target, value);
+                value = folded != InvalidIRValue ? folded : emitInstruction(op, target, {value}, expr->loc);
+            }
+            if (!from.isVector() && width > 1)
+            {
+                std::vector<IRValueID> lanes(static_cast<size_t>(width), value);
+                IRValueID folded = tryFoldVecConstruct(resultType, lanes);
+                value = folded != InvalidIRValue ? folded : emitInstruction(IROp::VecConstruct, resultType, lanes, expr->loc);
+            }
+            return value;
+        };
+        const IRValueID a = converted(0);
+        if (expr->functionName == "fract")
+            return emitInstruction(IROp::Frac, resultType, {a}, expr->loc);
+        const IRValueID b = converted(1);
+        if (expr->functionName == "mod")
+        {
+            const IRValueID q = emitBinaryOp(IROp::Div, resultType, a, b, expr->loc);
+            const IRValueID floor = emitInstruction(IROp::Floor, resultType, {q}, expr->loc);
+            const IRValueID product = emitBinaryOp(IROp::Mul, resultType, b, floor, expr->loc);
+            return emitBinaryOp(IROp::Sub, resultType, a, product, expr->loc);
+        }
+        const IRTypeInfo selector = getExprType(expr->arguments[2].get());
+        const IRType selectorElement = selector.isVector() ? selector.elementType : selector.baseType;
+        if (selectorElement != IRType::Bool)
+            return emitInstruction(IROp::Lerp, resultType, {a, b, converted(2)}, expr->loc);
+        if (!selector.isVector())
+            return emitInstruction(IROp::Select, resultType, {argValues[2], b, a}, expr->loc);
+
+        // A bool vector selects each lane, including inactive non-finite
+        // operands. Scalar selects use the existing atomic VP predication
+        // path; arithmetic blending would evaluate 0*Inf and change results.
+        const IRTypeInfo laneType = scalarType(element);
+        std::vector<IRValueID> lanes;
+        for (int lane = 0; lane < width; ++lane)
+        {
+            const IRValueID k = createConstant(static_cast<int32_t>(lane));
+            const IRValueID cond = emitInstruction(IROp::VecExtract, IRTypeInfo::Bool(), {argValues[2], k}, expr->loc);
+            const IRValueID x = emitInstruction(IROp::VecExtract, laneType, {a, k}, expr->loc);
+            const IRValueID y = emitInstruction(IROp::VecExtract, laneType, {b, k}, expr->loc);
+            lanes.push_back(emitInstruction(IROp::Select, laneType, {cond, y, x}, expr->loc));
+        }
+        return emitInstruction(IROp::VecConstruct, resultType, lanes, expr->loc);
+    }
+
     if (expr->functionName == "determinant" && expr->resolvedFunction == nullptr &&
         argValues.size() == 1)
     {

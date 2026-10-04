@@ -48,6 +48,9 @@ enum class Extension
     // read-only. Selected-entry static parameters are outside this slice.
     StaticParameters = 2,
 
+    // GLSL-compatible function names; source declarations still take priority.
+    GlslFunctions = 3,
+
     Count
 };
 

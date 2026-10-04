@@ -23,6 +23,9 @@ const ExtensionInfo kExtensions[] = {
     { Extension::StaticParameters, "static-parameters",
       "accept helper static, static const, and const static parameters; "
       "preserve const and refuse static parameters on the selected entry" },
+    { Extension::GlslFunctions, "glsl-functions",
+      "accept fract, mix, and floor-remainder mod on numeric scalars/vectors; "
+      "preserve source functions and boolean mix selection" },
 };
 
 constexpr std::size_t kExtensionCount = sizeof(kExtensions) / sizeof(kExtensions[0]);

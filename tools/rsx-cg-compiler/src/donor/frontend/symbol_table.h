@@ -213,6 +213,7 @@ public:
 
     // Register built-in functions and types
     void registerBuiltins();
+    void registerGlslFunctions();
 
     // Get scope depth
     size_t depth() const { return scopeStack.size(); }

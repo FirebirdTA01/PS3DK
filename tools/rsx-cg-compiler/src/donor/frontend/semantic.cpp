@@ -11,6 +11,30 @@
 
 namespace
 {
+bool glslFunctionName(const std::string& name)
+{
+    return name == "fract" || name == "mix" || name == "mod";
+}
+
+bool glslArgumentShape(const std::string& name, const std::vector<CgType>& args)
+{
+    if (!glslFunctionName(name) || args.size() != (name == "fract" ? 1u : name == "mod" ? 2u : 3u))
+        return false;
+    int width = 1;
+    bool floating = false;
+    for (const auto& type : args)
+    {
+        if (type.isArray() || (!type.isScalar() && !type.isVector())) return false;
+        const int n = type.isVector() ? type.getNode()->vectorSize : 1;
+        if (n < 1 || n > 4 || (width > 1 && n > 1 && n != width)) return false;
+        width = std::max(width, n);
+        floating |= type.scalarKind() == ScalarKind::Float ||
+                    type.scalarKind() == ScalarKind::Half || type.scalarKind() == ScalarKind::Fixed;
+    }
+    // With only integer/bool operands mix has no unique floating overload.
+    return name != "mix" || floating;
+}
+
 bool scalarFloatMatrixBroadcast(const CgType& target, const CgType& source)
 {
     return target.isMatrix() && target.scalarKind() == ScalarKind::Float &&
@@ -76,10 +100,12 @@ std::string SemanticDiagnostic::toString() const
 // SemanticAnalyzer Implementation
 // ============================================================================
 
-SemanticAnalyzer::SemanticAnalyzer()
+SemanticAnalyzer::SemanticAnalyzer(bool glslFunctions, std::string glslEnableFlag)
+    : glslFunctionsEnabled_(glslFunctions), glslEnableFlag_(std::move(glslEnableFlag))
 {
     // Register builtin types and functions
     symbols_.registerBuiltins();
+    glslSymbols_.registerGlslFunctions();
 }
 
 SemanticAnalyzer::~SemanticAnalyzer() = default;
@@ -1173,6 +1199,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         Symbol* bound = symbols_.lookup(expr->functionName);
         const bool visibleHere =
             symbols_.hasVisibleFunction(expr->functionName, visibleThrough_) ||
+            (glslFunctionsEnabled_ && glslSymbols_.hasVisibleFunction(expr->functionName, SIZE_MAX)) ||
             (bound && bound->kind != SymbolKind::Function &&
                       bound->kind != SymbolKind::Builtin);
         if (!visibleHere) symbols_.noteUnresolvedUse(expr->functionName);
@@ -1211,6 +1238,14 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     bool ambiguousOverload = false;
     auto candidate = symbols_.resolveOverload(expr->functionName, argTypes,
                                               &ambiguousOverload, visibleThrough_);
+    // Keep optional builtins outside the source global namespace. Globals and
+    // structs named mod/mix/fract remain legal; a visible source function hides
+    // the entire builtin overload set, including when its arity does not fit.
+    const bool glslVisible = glslFunctionsEnabled_ &&
+        glslSymbols_.hasVisibleFunction(expr->functionName, SIZE_MAX);
+    if (!candidate && !ambiguousOverload && glslVisible &&
+        !symbols_.hasVisibleSourceFunction(expr->functionName, visibleThrough_))
+        candidate = glslSymbols_.resolveOverload(expr->functionName, argTypes, &ambiguousOverload);
     if (!candidate)
     {
         // THE THREE FAILURES ARE DIFFERENT THINGS AND THE ORDER MATTERS.
@@ -1234,7 +1269,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
             return CgType::Error();
         }
         std::string sig = SymbolUtils::formatFunctionSignature(expr->functionName, argTypes);
-        if (!symbols_.hasVisibleFunction(expr->functionName, visibleThrough_))
+        if (!symbols_.hasVisibleFunction(expr->functionName, visibleThrough_) && !glslVisible)
         {
             // THE NAME MAY EXIST AND SIMPLY NOT BE A FUNCTION.  `float missing
             // = 1; return missing(t);` is C1105 "cannot call a non-function"
@@ -1251,9 +1286,18 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
                                  "': it is not a function");
                 return CgType::Error();
             }
+            std::string hint;
+            if (!glslFunctionsEnabled_ && !glslEnableFlag_.empty() &&
+                glslArgumentShape(expr->functionName, argTypes))
+            {
+                bool ambiguous = false;
+                const auto admitted = glslSymbols_.resolveOverload(expr->functionName, argTypes, &ambiguous);
+                if (admitted && !ambiguous)
+                    hint = "; enable GLSL function names with " + glslEnableFlag_;
+            }
             deferOrEmitNameError(expr->loc,
                                  "use of undeclared identifier '" +
-                                 expr->functionName + "'",
+                                 expr->functionName + "'" + hint,
                                  expr->functionName);
             return CgType::Error();
         }
@@ -1288,6 +1332,13 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
 
     // Link to resolved function
     expr->resolvedFunction = candidate->symbol->declaration;
+    if (glslFunctionsEnabled_ && !expr->resolvedFunction &&
+        glslFunctionName(expr->functionName) && !glslArgumentShape(expr->functionName, argTypes))
+    {
+        deferOrEmitNameError(expr->loc, "no matching GLSL scalar/vector function for '" +
+                            SymbolUtils::formatFunctionSignature(expr->functionName, argTypes) + "'", std::string());
+        return CgType::Error();
+    }
 
     // An ARRAY argument takes no element conversion: an int[3] or half[3]
     // into a float[3] parameter is C1102 on the reference (measured, both),

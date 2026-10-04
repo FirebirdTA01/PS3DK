@@ -553,6 +553,35 @@ void SymbolTable::registerBuiltinFunctions()
     registerTextureSymbols();
 }
 
+void SymbolTable::registerGlslFunctions()
+{
+    // NVIDIA's fract and mod return float even for half/fixed/integer
+    // arguments. mix retains the floating operand kind and also has true
+    // boolean-selection overloads. Source declarations use normal precedence.
+    addScalarVectorOverloads("fract", CgType::Float(), CgType::Float());
+    for (int width = 1; width <= 4; ++width)
+    {
+        const auto shaped = [width](ScalarKind kind) {
+            return width == 1 ? CgType::Scalar(kind) : CgType::Vec(kind, width);
+        };
+        const CgType f = shaped(ScalarKind::Float);
+        addFunction("mod", f, {f, f}, {"x", "y"}, nullptr, true);
+        if (width > 1)
+            addFunction("mod", f, {f, CgType::Float()}, {"x", "y"}, nullptr, true);
+        for (ScalarKind kind : {ScalarKind::Float, ScalarKind::Half, ScalarKind::Fixed})
+        {
+            const CgType value = shaped(kind), scalar = CgType::Scalar(kind);
+            addFunction("mix", value, {value, value, value}, {"x", "y", "a"}, nullptr, true);
+            addFunction("mix", value, {value, value, shaped(ScalarKind::Bool)}, {"x", "y", "a"}, nullptr, true);
+            if (width > 1)
+            {
+                addFunction("mix", value, {value, value, scalar}, {"x", "y", "a"}, nullptr, true);
+                addFunction("mix", value, {value, value, CgType::Bool()}, {"x", "y", "a"}, nullptr, true);
+            }
+        }
+    }
+}
+
 void SymbolTable::registerMathFunctions()
 {
     // Trigonometric functions

@@ -99,7 +99,7 @@ struct ShaderInfo
 class SemanticAnalyzer
 {
 public:
-    SemanticAnalyzer();
+    SemanticAnalyzer(bool glslFunctions = false, std::string glslEnableFlag = {});
     ~SemanticAnalyzer();
 
     // Configure the analyzer
@@ -127,6 +127,9 @@ public:
 
 private:
     SymbolTable symbols_;
+    SymbolTable glslSymbols_; // Detector signatures never enter the disabled namespace.
+    bool glslFunctionsEnabled_ = false;
+    std::string glslEnableFlag_;
     // The top-level declaration pass 2 is currently inside.  Calls resolve
     // only against declarations with declIndex <= this, which is how "visible
     // at the call" survives a two-pass frontend (function-visibility).

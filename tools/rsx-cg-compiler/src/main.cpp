@@ -377,7 +377,8 @@ int main(int argc, char** argv)
         std::cout << "----------------------------------------------------------------\n";
     }
 
-    SemanticAnalyzer semantic;
+    SemanticAnalyzer semantic(ctx.extensions.has(rsx_cg::Extension::GlslFunctions),
+                              rsx_cg::enableFlag(rsx_cg::Extension::GlslFunctions));
     const ShaderStage stage =
         (ctx.profile == CompilerContext::Profile::FragmentRsx)
             ? ShaderStage::Fragment
