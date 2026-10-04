@@ -597,7 +597,11 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         sym->semantic = param->semantic;
         sym->isConst = (param->storage == StorageQualifier::Const);
 
-        if (!param->semantic.isEmpty() && resolvedType.isStruct())
+        // A helper parameter annotation does not bind shader inputs, even
+        // when the helper is called. Aggregate entry bindings are a separate
+        // unsupported case; use the selected entry, not the spelling "main".
+        if (decl == shaderInfo_.entryPoint &&
+            !param->semantic.isEmpty() && resolvedType.isStruct())
         {
             error(param->loc, "semantics on struct-typed parameters are not supported: '" + param->name + "'");
         }
