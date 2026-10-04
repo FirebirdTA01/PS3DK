@@ -47,3 +47,4 @@
 0048-libstdcxx-containers-bring-in-string.patch
 0049-cell64lv2-ilp32-no-ivopts-default.patch
 0050-rs6000-cell64lv2-doloop-gpr-width-ctr.patch
+0055-rs6000-relative-tablejump-hybrid-canonicalize.patch

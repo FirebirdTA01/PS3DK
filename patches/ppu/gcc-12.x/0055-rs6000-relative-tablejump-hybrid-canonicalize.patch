@@ -1,0 +1,53 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: canonicalize hybrid relative tablejump targets
+
+The Cell ELF64/ILP32 ABI has TARGET_64BIT with Pmode == SImode.
+Relative tablejump expansion therefore skips the DI sign extension and
+adds a zero-extended 32-bit table word to its base with a physical 64-bit
+add. A negative displacement can leave bit 32 set before mtctr/bctr.
+
+Canonicalize the completed SI target through the existing patch-0032
+ps3_ptr_canonicalize_si UNSPEC. This preserves the ABI's modulo-32
+pointer result even when the physical branch consumer observes 64 bits.
+Apply to both ordinary and speculation-barrier relative tablejumps.
+LP64, true 32-bit targets and absolute jump tables remain unchanged.
+No Pmode, pointer layout, calling convention or SDK library changes.
+
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -13377,6 +13377,17 @@
+   rtx addr = gen_reg_rtx (Pmode);
+ 
+   emit_insn (gen_add<mode>3 (addr, off, lab));
++  /* Pmode is SI in the Cell ELF64/ILP32 ABI, but add and mtctr use
++     all 64 GPR bits.  A negative relative offset loaded with lwz can
++     carry bit 32 into addr.  Preserve modulo-32 pointer arithmetic at
++     this control-flow consumer, using the same opaque canonicalization
++     as POINTER_PLUS_EXPR so combine cannot delete the truncation.  */
++  if (TARGET_64BIT && Pmode == SImode)
++    {
++      rtx canon = gen_reg_rtx (SImode);
++      emit_insn (gen_ps3_ptr_canonicalize_si (canon, addr));
++      addr = canon;
++    }
+   emit_jump_insn (gen_tablejump_insn_normal (Pmode, addr, operands[1]));
+   DONE;
+ })
+@@ -13411,6 +13422,17 @@
+   rtx addr = gen_reg_rtx (Pmode);
+ 
+   emit_insn (gen_add<mode>3 (addr, off, lab));
++  /* Pmode is SI in the Cell ELF64/ILP32 ABI, but add and mtctr use
++     all 64 GPR bits.  A negative relative offset loaded with lwz can
++     carry bit 32 into addr.  Preserve modulo-32 pointer arithmetic at
++     this control-flow consumer, using the same opaque canonicalization
++     as POINTER_PLUS_EXPR so combine cannot delete the truncation.  */
++  if (TARGET_64BIT && Pmode == SImode)
++    {
++      rtx canon = gen_reg_rtx (SImode);
++      emit_insn (gen_ps3_ptr_canonicalize_si (canon, addr));
++      addr = canon;
++    }
+   emit_jump_insn (gen_tablejump_insn_nospec (Pmode, addr, operands[1],
+ 					     operands[2]));
+   DONE;
