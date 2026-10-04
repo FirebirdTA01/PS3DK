@@ -147,9 +147,21 @@ def _is_pid_alive(pid: int) -> bool:
     else:
         try:
             os.kill(pid, 0)
-            return True
         except (OSError, ProcessLookupError):
             return False
+        if sys.platform.startswith("linux"):
+            try:
+                # kill(pid, 0) also succeeds for exited, unreaped children.
+                # The command name may contain spaces or parentheses; state
+                # follows the LAST closing parenthesis in /proc/PID/stat.
+                stat = Path(f"/proc/{pid}/stat").read_text()
+                state = stat.rsplit(")", 1)[1].split()[0]
+                return state not in ("Z", "X")
+            except FileNotFoundError:
+                return False  # Reaped between kill(0) and the state read.
+            except (OSError, IndexError):
+                return True  # An unreadable state does not prove exit.
+        return True
 
 
 TEST_PATH_RE = re.compile(r"^[A-Za-z0-9_/-]+-test\.(?:sh|ps1)$")
@@ -789,9 +801,31 @@ def run_suite(invocations: list[TestInvocation], repo_root: Path,
     return 0
 
 
+def _check_linux_pid_liveness() -> None:
+    """A killed but unreaped child cannot execute, even while its PID exists."""
+    if not sys.platform.startswith("linux"):
+        return
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        assert _is_pid_alive(child.pid), "Live child reported inactive"
+        child.kill()
+        # WNOWAIT holds the zombie deterministically until our explicit reap.
+        exited = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
+        assert exited.si_pid == child.pid
+        assert not _is_pid_alive(child.pid), "Exited unreaped child reported active"
+        child.wait()
+        assert not _is_pid_alive(child.pid), "Reaped child reported active"
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait()
+
+
 def run_self_check() -> int:
     """Built-in self-checks verifying parser, classification, execution, and idle behavior."""
     print("Executing suite-runner self-checks...")
+    _check_linux_pid_liveness()
 
     # 1. Test ci.yml extraction
     mock_workflow = """
