@@ -198,6 +198,9 @@ jobs:
       - name: Test the GCM FIFO wrap never loses an unpublished lap
         run: bash tests/sdk/fifo-wrap-protocol-test.sh
 
+      - name: Test checked initial GCM FIFO extent admission
+        run: python3 tests/sdk/fifo-init-extent-test.py
+
       # The SPU libsheap core is portable C: the host build checks the heap
       # layout the firmware shares, the tree bits, the allocation rules, the
       # key-table state machine and a random run against a bitmap model.

@@ -17,11 +17,14 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ps3tc_fifo_wrap_protocol.h"
 
+#ifndef WORDS
 #define WORDS 64u
+#endif
 #define BASE  0x1000u              /* IO offset of word 0 = begin */
 
 typedef struct {
@@ -53,7 +56,7 @@ static void pause_fn(void *arg, uint32_t want, uint32_t spins)
 {
     model *m = arg;
     (void)want;
-    if (spins > 100000u) { fprintf(stderr, "model: wait never finished\n"); _Exit(3); }
+    if (spins > WORDS + 100000u) { fprintf(stderr, "model: wait never finished\n"); _Exit(3); }
     if (m->stalls) { m->stalls--; return; }
     fetch(m, m->step);
 }
@@ -80,7 +83,7 @@ static int failures;
 static void scenario(const char *name, unsigned lap, unsigned published,
                      unsigned consumed, unsigned step, unsigned stalls)
 {
-    model m;
+    static model m;
     memset(&m, 0, sizeof m);
     for (unsigned i = 0; i < lap; ++i) m.fifo[i] = 0x00040000u | i;  /* distinct */
     m.put = BASE + 4u * published;
@@ -119,6 +122,29 @@ int main(void)
     scenario("whole lap flushed, GPU not started",         40, 40, 0, 8, 2);
     scenario("one-word lap",                               1, 0, 0, 1, 0);
     scenario("lap ends at the last word of the ring",      WORDS - 1, 0, 0, 3, 0);
+    /* Multiple laps through the same storage, with no explicit flush and
+     * a stalled consumer each time. Reuse is permitted only after wrap. */
+    {
+        static model m;
+        memset(&m, 0, sizeof m);
+        m.get = m.put = BASE;
+        m.step = 19;
+        const ps3tc_fifo_port port = { &m.put, &m.get, barrier, pause_fn, &m };
+        int ok = 1;
+        for (unsigned lap = 0; lap < 5; ++lap) {
+            m.nfetched = 0;
+            m.stalls = 7;
+            for (unsigned i = 0; i < WORDS - 1; ++i)
+                m.fifo[i] = 0x10000000u | (lap << 20) | i;
+            wrap(&m.fifo[WORDS-1], BASE+4u*(WORDS-1), BASE, &port);
+            if (m.get != BASE || m.put != BASE || m.nfetched != WORDS) ok = 0;
+            for (unsigned i = 0; i < WORDS - 1; ++i)
+                if (m.fetched[i] != (0x10000000u | (lap << 20) | i)) ok = 0;
+            if (m.fetched[WORDS-1] != (BASE | PS3TC_NV40_JUMP_FLAG)) ok = 0;
+        }
+        printf("  repeated lagged laps: %s (%u words)\n", ok?"ok":"FAIL", WORDS);
+        if (!ok) ++failures;
+    }
     if (failures) { printf("fifo-wrap-protocol: %d scenario(s) FAILED\n", failures); return 1; }
     printf("fifo-wrap-protocol: all scenarios passed\n");
     return 0;

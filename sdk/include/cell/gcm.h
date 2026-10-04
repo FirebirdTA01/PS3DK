@@ -380,6 +380,8 @@ static inline int32_t cellGcmInit(uint32_t cmdSize, uint32_t ioSize, void *ioAdd
 	gcmContextData *tmp = NULL;
 	s32 rc = rsxInit(&tmp, cmdSize, ioSize, ioAddress);
 	if (rc == 0) {
+		rc = ps3tc_fifo_init_extent(tmp, cmdSize, ioSize, ioAddress);
+		if (rc != 0) return (int32_t)rc;
 		gGcmContext = (gcmContextData *)(uintptr_t)tmp;
 		ps3tc_fifo_wrap_install(tmp);
 	}

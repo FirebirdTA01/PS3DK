@@ -37,3 +37,10 @@ grep -q 'idle, never-flushed lap (EMP E5)  *FAIL' "$tmp/control.log" \
     || fail "one-phase control failed, but not on the idle never-flushed lap"
 
 echo "fifo-wrap-protocol-test: PASS"
+
+# Usable words including the reserved JUMP, after the firmware 4 KiB prefix.
+for words in 261120 1047552; do
+    "$cc" -std=c11 -Wall -Wextra -Werror "${san[@]}" -I "$inc" \
+        -DWORDS="$words" "$src" -o "$tmp/extent"
+    "$tmp/extent"
+done
