@@ -21,6 +21,10 @@ CASES = {
  'existing': ('float2x4 w=float2x4(t,t.wzyx);w[1]=t*2;return w[0]+w[1];','return t+t*2;',lambda t:[3*x for x in t]),
  'widen_snapshot': ('float3 a=t.xyz*2;float2x3 m=float2x3(a,a);float4 first=float4(m[0],1);float4 second=float4(m[0],2);return first+second;',
                     'return float4(t.xyz*4,3);',lambda t:[4*x for x in t[:3]]+[3]),
+ 'scalar_row': ('float2x2 w;w[0]=t.x;return float4(w[0],9,8);',
+                'float2x2 w;w[0]=float2(t.x);return float4(w[0],9,8);',lambda t:[t[0],t[0],9,8]),
+ 'scalar_row_once': ('float x=t.x;float2x2 w;w[0]=x++;return float4(w[0],x,8);',
+                     'float x=t.x;float2x2 w;w[0]=float2(x++);return float4(w[0],x,8);',lambda t:[t[0],t[0],t[0]+1,8]),
 }
 INPUTS = [[.125,-.25,.5,-.75],[-1,.5,.25,2],[2,-3,4,-5]]
 
@@ -50,7 +54,6 @@ def main():
      ('missing','float4x4 w;w[2]=t;return w[1];'),
      ('bounds','float4x4 w;w[4]=t;return t;'),
      ('wide_row','float2x2 w;w[0]=t;return float4(w[0],9,8);'),
-     ('scalar_row','float2x2 w;w[0]=t.x;return float4(w[0],9,8);'),
      ('side_effect','float4x4 w;int k=0;w[k++]=t;return t;')):
     run,dst=compile(name,stage,body)
     if run.returncode!=1 or dst.exists():failures.append(name+'-'+stage+': expected refusal without container')

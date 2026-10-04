@@ -3828,10 +3828,8 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
                 // A scalar initializer broadcasts to the declared vector just
                 // like its explicit constructor. Build the initializer once;
                 // all lanes share that value, including side effects.
-                const IRValueID folded = tryFoldVecConstruct(
-                    declaredType, {initValue}, varDecl->type->baseType);
-                initValue = folded != InvalidIRValue ? folded :
-                    emitInstruction(IROp::VecConstruct, declaredType, {initValue}, varDecl->loc);
+                initValue = emitScalarVectorBroadcast(initType, declaredType, initValue,
+                    varDecl->loc, varDecl->type->baseType);
             }
             else if (declaredType.arraySize == 0 && !declaredType.isMatrix() && declaredType.isVector() &&
                      initType.isVector() && initType.arraySize == 0 && !initType.isMatrix() &&
@@ -5968,10 +5966,8 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
             if (result != InvalidIRValue && returnType.isVector() && returnType.arraySize == 0 &&
                 valueType.isScalar() && valueType.arraySize == 0)
             {
-                const IRValueID folded = tryFoldVecConstruct(returnType, {result},
-                    callee->returnType->baseType);
-                result = folded != InvalidIRValue ? folded :
-                    emitInstruction(IROp::VecConstruct, returnType, {result}, ret->loc);
+                result = emitScalarVectorBroadcast(valueType, returnType, result,
+                    ret->loc, callee->returnType->baseType);
             }
             result = narrowToScalar(callee->returnType.get(), ret->value.get(), result);
             sawReturn = true;
@@ -8106,6 +8102,17 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
         }
     }
 
+    // Keep mixed signed/unsigned casts on their existing unsupported Bitcast
+    // path. Reusing integer register storage in a constructor does not establish
+    // the full signedness-cast contract.
+    const bool mixedIntegerCast =
+        (sourceType.baseType == IRType::Int32 && targetType.elementType == IRType::UInt32) ||
+        (sourceType.baseType == IRType::UInt32 && targetType.elementType == IRType::Int32);
+    if (sourceType.isScalar() && sourceType.arraySize == 0 &&
+        targetType.isVector() && targetType.arraySize == 0 && !mixedIntegerCast)
+        return emitScalarVectorBroadcast(sourceType, targetType, operandValue, expr->loc,
+            expr->targetType ? std::optional<BaseType>(expr->targetType->baseType) : std::nullopt);
+
     if (targetType.arraySize == 0 && !targetType.isMatrix() &&
         (targetType.isVector() ? targetType.elementType : targetType.baseType) == IRType::Bool)
         return emitNumericToBool(sourceType, targetType, operandValue, expr->loc);
@@ -8118,40 +8125,6 @@ IRValueID IRBuilder::buildCastExpr(CastExpr* expr)
         {
             return folded;
         }
-    }
-
-    // A CAST FROM A SCALAR TO A VECTOR IS A BROADCAST.  `(float4)d` and
-    // `(half4)d` are the cast spelling of `float4(d,d,d,d)`, and the
-    // reference lowers all three of these to ONE instruction:
-    //
-    //   float d = a.x; return (float4)d;        MOV R0.xyzw, TEX0.xxxx
-    //   half  d = a.x; return (half4)d;         MOV H0.xyzw, TEX0.xxxx  prec=1
-    //   half  d = a.x; return half4(d,d,d,d);   MOV H0.xyzw, TEX0.xxxx  prec=1
-    //
-    // Only the constructor spelling reached VecConstruct here; the cast fell
-    // through to the default Bitcast below, which the NV40 lowering refuses
-    // outright ("unsupported IR op bitcast").  It is not a half-only gap -
-    // the float row above refused too - and it is 22 rows of the
-    // reference-SDK sweep (half-temporary-allocation).
-    //
-    // The broadcast is built in the SOURCE's element type and any precision
-    // conversion is left to the vector path below, so `(float4)h` is one
-    // splat plus the ordinary hvec4 -> vec4 conversion rather than a second
-    // scalar-conversion path to keep in step with this one.
-    if (targetType.isVector() && sourceType.isScalar() &&
-        targetType.componentCount() > 1)
-    {
-        IRTypeInfo splatType = targetType;
-        splatType.elementType = sourceType.baseType;
-        auto splat = std::make_unique<IRInstruction>(IROp::VecConstruct,
-            currentFunction_->allocateValueId(), splatType);
-        for (int i = 0; i < targetType.componentCount(); ++i)
-            splat->addOperand(operandValue);
-        currentBlock_->addInstruction(std::move(splat));
-        operandValue = currentFunction_->nextValueId - 1;
-        sourceType = splatType;
-        if (sourceType.elementType == targetType.elementType)
-            return operandValue;
     }
 
     // Determine conversion operation
@@ -8209,6 +8182,11 @@ IRValueID IRBuilder::buildConstructorExpr(ConstructorExpr* expr)
             return InvalidIRValue;
 
         IRTypeInfo argType = getExprType(expr->arguments[0].get());
+
+        if (argType.isScalar() && argType.arraySize == 0 &&
+            resultType.isVector() && resultType.arraySize == 0)
+            return emitScalarVectorBroadcast(argType, resultType, argValues[0], expr->loc,
+                expr->constructedType ? std::optional<BaseType>(expr->constructedType->baseType) : std::nullopt);
 
         // Matrix single argument constructor
         if (resultType.isMatrix() || argType.isMatrix())
@@ -8871,6 +8849,64 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
     return value;
 }
 
+// Keep the scalar's conversion separate from its shape: VecConstruct only
+// packs lanes and cannot truncate a float just because its result is intN.
+IRValueID IRBuilder::emitScalarVectorBroadcast(const IRTypeInfo& sourceType,
+                                               const IRTypeInfo& targetType,
+                                               IRValueID value, const SourceLocation& loc,
+                                               std::optional<BaseType> targetBase)
+{
+    if (value == InvalidIRValue) return value;
+    if (!sourceType.isScalar() || sourceType.arraySize != 0 ||
+        !targetType.isVector() || targetType.arraySize != 0)
+    {
+        error(loc, "scalar-vector broadcast requires a scalar and a non-array vector");
+        return InvalidIRValue;
+    }
+    if (IRValueID folded = tryFoldVecConstruct(targetType, {value}, targetBase);
+        folded != InvalidIRValue)
+        return folded;
+    if (targetType.elementType == IRType::Bool)
+        return emitNumericToBool(sourceType, targetType, value, loc);
+
+    IRTypeInfo elementType = sourceType;
+    elementType.baseType = targetType.elementType;
+    elementType.elementType = targetType.elementType;
+    const IRType from = sourceType.baseType, to = targetType.elementType;
+    const auto integer = [](IRType type) {
+        return type == IRType::Int32 || type == IRType::UInt32 || type == IRType::Bool;
+    };
+    const auto numeric = [&](IRType type) {
+        return integer(type) || type == IRType::Float32 || type == IRType::Float16;
+    };
+    if (!numeric(from) || !numeric(to))
+    {
+        error(loc, "scalar-vector broadcast requires numeric element types");
+        return InvalidIRValue;
+    }
+    // Preserve existing integer-family constructor/storage behavior. A bool
+    // lane is already canonical 0/1; no unsupported Bitcast is needed to pack
+    // it into an integer vector. This does not add signedness-cast semantics.
+    if (from != to && !(integer(from) && integer(to)))
+    {
+        IROp conversion = IROp::Bitcast;
+        if ((from == IRType::Float32 || from == IRType::Float16) &&
+            (to == IRType::Int32 || to == IRType::UInt32))
+            conversion = IROp::FloatToInt;
+        else if ((from == IRType::Int32 || from == IRType::UInt32 || from == IRType::Bool) &&
+                 (to == IRType::Float32 || to == IRType::Float16))
+            conversion = IROp::IntToFloat;
+        else if (from == IRType::Float32 && to == IRType::Float16)
+            conversion = IROp::FloatToHalf;
+        else if (from == IRType::Float16 && to == IRType::Float32)
+            conversion = IROp::HalfToFloat;
+        value = emitInstruction(conversion, elementType, {value}, loc);
+    }
+    // The expression was already evaluated by the caller. Every lane reuses
+    // this one converted SSA value, including for postincrement arguments.
+    return emitInstruction(IROp::VecConstruct, targetType, {value}, loc);
+}
+
 // Convert one scalar lane between numeric element types.
 IRValueID IRBuilder::emitScalarConversion(const IRTypeInfo& fromType, const IRTypeInfo& targetType,
                                           IRValueID lane, const SourceLocation& loc)
@@ -9031,6 +9067,9 @@ IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)
                 if (instruction->result == value) sourceType = instruction->resultType;
         if (sourceType.isMatrix())
             return emitMatrixComponents(sourceType, targetType, value, target->loc);
+        if (sourceType.isScalar() && sourceType.arraySize == 0 && targetType.isVector())
+            return emitScalarVectorBroadcast(sourceType, targetType, value, target->loc,
+                target->resolvedType ? std::optional<BaseType>(target->resolvedType->baseType) : std::nullopt);
     }
     if (targetType.arraySize == 0 && !targetType.isMatrix() &&
         (targetType.isVector() ? targetType.elementType : targetType.baseType) == IRType::Bool)
