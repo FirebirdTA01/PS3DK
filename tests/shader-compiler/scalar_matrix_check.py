@@ -33,6 +33,7 @@ def cases():
         result.append(('once-'+form, 'float s=p.x;'+stmt+'return float4(m[0][0],m[1][1],s,1);',
                        lambda p:[p[0],p[0],p[0]+1.,1.],('fp','vp')))
     result.append(('signed-variable','int s=int(p.x);float2x2 m=s;return float4(m[0],m[1]);',lambda p:[float(int(p[0]))]*4,('fp',)))
+    result.append(('compound-add','float2x2 m=float2x2(1,2,3,4);m+=p.x;return float4(m[0],m[1]);',lambda p:[x+p[0] for x in [1.,2.,3.,4.]],('fp','vp')))
     return result
 
 REFUSALS = {
@@ -40,7 +41,6 @@ REFUSALS = {
     'half-target':'half2x2 m=p.x;return float4(m[0],m[1]);',
     'bool-target':'bool2x2 m=p.x;return float4(m[0],m[1]);',
     'int-target':'int2x2 m=p.x;return float4(m[0],m[1]);',
-    'compound-add':'float2x2 m=float2x2(1,2,3,4);m+=p.x;return float4(m[0],m[1]);',
     'implicit-int-binding':'int s=p.x;float2x2 m=s;return float4(m[0],m[1]);',
     'implicit-int-arithmetic':'int s=p.x;int j=s+1;float2x2 m=j;return float4(m[0],m[1]);',
     'implicit-int-increment':'int s=p.x;float2x2 m=++s;return float4(m[0],m[1]);',

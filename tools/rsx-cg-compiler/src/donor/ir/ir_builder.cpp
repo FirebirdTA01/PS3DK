@@ -4663,6 +4663,15 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
                     narrowedCompound = true;
                 }
             }
+            const IRTypeInfo compoundType = getExprType(expr->left.get());
+            const IRTypeInfo rhsType = getExprType(expr->right.get());
+            if (compoundType.isMatrix() && !compoundType.isArray() &&
+                compoundType.elementType == IRType::Float32 && rhsType.isScalar() &&
+                (op == IROp::Add || op == IROp::Sub || op == IROp::Mul || op == IROp::Div))
+            {
+                rhsValue = prepareFloatMatrixScalar(rhsType, rhsValue, expr->loc);
+                if (rhsValue == InvalidIRValue) return rhsValue;
+            }
             if (!narrowedCompound)
                 rhsValue = emitBinaryOp(op, getExprType(expr->left.get()), lhsValue, rhsValue);
             if (arrayTarget)
@@ -4707,6 +4716,20 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
 
     IROp op = binaryOpToIROp(expr->op);
     IRTypeInfo resultType = getExprType(expr);
+
+    if (resultType.isMatrix() && !resultType.isArray() &&
+        resultType.elementType == IRType::Float32 &&
+        (op == IROp::Add || op == IROp::Sub || op == IROp::Mul || op == IROp::Div))
+    {
+        const IRTypeInfo leftType = getExprType(expr->left.get());
+        const IRTypeInfo rightType = getExprType(expr->right.get());
+        if (leftType.isScalar())
+            leftValue = prepareFloatMatrixScalar(leftType, leftValue, expr->loc);
+        if (rightType.isScalar())
+            rightValue = prepareFloatMatrixScalar(rightType, rightValue, expr->loc);
+        if (leftValue == InvalidIRValue || rightValue == InvalidIRValue)
+            return InvalidIRValue;
+    }
 
     if (IRValueID folded = tryFoldBinaryOp(op, resultType, leftValue, rightValue);
         folded != InvalidIRValue)
@@ -8739,7 +8762,23 @@ IRValueID IRBuilder::emitScalarMatrixBroadcast(const IRTypeInfo& sourceType,
         error(loc, "scalar-to-matrix conversion requires a float/int scalar and float matrix (scalar-matrix-broadcast)");
         return InvalidIRValue;
     }
-    // Convert once, then repeat that SSA value. A postincrement argument
+    value = prepareFloatMatrixScalar(sourceType, value, loc);
+    if (value == InvalidIRValue) return value;
+    return emitInstruction(IROp::MatConstruct, targetType,
+        std::vector<IRValueID>(targetType.matrixRows * targetType.matrixCols, value), loc);
+}
+
+IRValueID IRBuilder::prepareFloatMatrixScalar(const IRTypeInfo& sourceType,
+                                              IRValueID value, const SourceLocation& loc)
+{
+    if (value == InvalidIRValue) return value;
+    if (!sourceType.isScalar() || sourceType.isArray() ||
+        (sourceType.baseType != IRType::Float32 && sourceType.baseType != IRType::Int32))
+    {
+        error(loc, "float matrix arithmetic requires a float/int scalar (scalar-matrix-source-type)");
+        return InvalidIRValue;
+    }
+    // Convert once, then reuse that SSA value. A postincrement argument
     // must not run again for each lane, and a scalar id is not a matrix.
     if (sourceType.baseType == IRType::Int32)
     {
@@ -8763,8 +8802,7 @@ IRValueID IRBuilder::emitScalarMatrixBroadcast(const IRTypeInfo& sourceType,
         value = folded != InvalidIRValue ? folded :
             emitScalarConversion(sourceType, IRTypeInfo::Float(), value, loc);
     }
-    return emitInstruction(IROp::MatConstruct, targetType,
-        std::vector<IRValueID>(targetType.matrixRows * targetType.matrixCols, value), loc);
+    return value;
 }
 
 IRValueID IRBuilder::coerceAssignmentValue(ExprNode* target, IRValueID value)

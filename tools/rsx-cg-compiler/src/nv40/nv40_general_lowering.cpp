@@ -4515,6 +4515,10 @@ private:
     void lowerDiv(const IRInstruction& inst)
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue) return;
+        if (inst.resultType.isMatrix()) {
+            lowerBinary(inst, VOp::DivR);
+            return;
+        }
         // 1/x keeps its single-instruction form - for a SCALAR.  On a
         // vector it is one RCP per lane like every other scalar-unit op
         // (scalar-unit-lane-selection).  General x/y division below uses DIVR for scalars,
@@ -4644,19 +4648,23 @@ private:
                 return type && type->isMatrix() && !type->isArray() &&
                        type->elementType == IRType::Float32;
             };
-            // Fragment Add/Sub operates on corresponding float rows. Half
-            // conversion and scalar/matrix arithmetic remain separate paths.
-            const bool fpAddRows = profile_ == GeneralProfile::Fragment &&
-                op == VOp::Add && leftMatrix && rightMatrix &&
-                matchesResult(left) && matchesResult(right) &&
+            // Cg arithmetic is component-wise; mul() remains the separate
+            // matrix-product operation. Only float matrices gain these forms.
+            // Keep the existing vertex half-matrix add/scale paths unchanged.
+            const bool scalarRows = leftMatrix != rightMatrix &&
+                matchesResult(leftMatrix ? left : right) &&
+                valueWidthOf(inst.operands[leftMatrix ? 1 : 0]) == 1;
+            const bool floatRows = (op == VOp::Add || op == VOp::Mul || op == VOp::DivR) &&
+                (scalarRows || (leftMatrix && rightMatrix &&
+                               matchesResult(left) && matchesResult(right))) &&
                 inst.resultType.elementType == IRType::Float32 &&
-                floatMatrixOperand(inst.operands[0]) &&
-                floatMatrixOperand(inst.operands[1]);
+                (!leftMatrix || floatMatrixOperand(inst.operands[0])) &&
+                (!rightMatrix || floatMatrixOperand(inst.operands[1]));
             if (matrixDimsSupported(inst.resultType) &&
                 ((profile_ == GeneralProfile::Vertex && (addRows || scaleRows)) ||
-                 fpAddRows)) {
+                 floatRows)) {
                 VSrc scalar;
-                if (scaleRows) {
+                if (scalarRows) {
                     scalar = resolve(inst.operands[leftMatrix ? 1 : 0]);
                     const uint8_t component = scalar.swizzle[0];
                     scalar.swizzle = {component, component, component, component};
@@ -4674,7 +4682,15 @@ private:
                     vi.srcs[0] = leftMatrix ? left.rowSrcs[row] : scalar;
                     vi.srcs[1] = rightMatrix ? right.rowSrcs[row] : scalar;
                     vi.srcs[1].neg = vi.srcs[1].neg != negateRhs;
-                    program_.instrs.push_back(vi);
+                    if (op == VOp::DivR) {
+                        // Apply the same scalar/vector division policy to each
+                        // row without pretending the matrix is one register.
+                        emitMatrixRowDivision(vi, rightMatrix ? result.cols : 1,
+                            rightMatrix ? std::nullopt : scalarFloatLiteral(inst.operands[1]),
+                            !leftMatrix && isLiteralOne(inst.operands[0]));
+                    } else {
+                        program_.instrs.push_back(vi);
+                    }
                     result.rowSrcs.push_back(tempSrc(vi.dst.index));
                 }
                 matrixValues_[inst.result] = result;
@@ -4703,6 +4719,43 @@ private:
         vi.srcs[1] = resolve(inst.operands[1]);
         vi.srcs[1].neg = vi.srcs[1].neg != negateRhs;
         program_.instrs.push_back(vi);
+    }
+
+    void emitMatrixRowDivision(VInstr row, int divisorWidth,
+                               std::optional<float> divisorLiteral, bool numeratorOne)
+    {
+        if (numeratorOne) {
+            emitScalarUnitPerLane(VOp::Rcp, row.dst.index, row.dst.writemask,
+                                  row.srcs[1], false);
+            return;
+        }
+        if (divisorLiteral && *divisorLiteral != 0.0f && std::isfinite(*divisorLiteral)) {
+            row.op = VOp::Mul;
+            row.srcs[1] = floatLit(static_cast<float>(1.0 / static_cast<double>(*divisorLiteral)));
+            program_.instrs.push_back(row);
+            return;
+        }
+        if (profile_ == GeneralProfile::Fragment &&
+            (laneCount(row.dst.writemask) == 1 || divisorWidth == 1)) {
+            row.op = VOp::DivR;
+            program_.instrs.push_back(row);
+            return;
+        }
+        const int reciprocal = newVReg();
+        for (int lane = 0; lane < divisorWidth; ++lane) {
+            VInstr rcp;
+            rcp.op = VOp::Rcp;
+            rcp.dst.index = reciprocal;
+            rcp.dst.writemask = 1 << lane;
+            rcp.srcs[0] = row.srcs[1];
+            const uint8_t component = rcp.srcs[0].swizzle[lane];
+            rcp.srcs[0].swizzle = {component, component, component, component};
+            program_.instrs.push_back(rcp);
+        }
+        row.op = VOp::Mul;
+        row.srcs[1] = tempSrc(reciprocal);
+        if (divisorWidth == 1) row.srcs[1].swizzle = {0, 0, 0, 0};
+        program_.instrs.push_back(row);
     }
 
     bool tryFoldDotMax(const IRInstruction& inst)

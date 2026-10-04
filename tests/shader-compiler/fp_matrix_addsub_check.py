@@ -85,13 +85,21 @@ def prepare(root):
             (root/(name+suffix+'.cg')).write_text(text)
         cases.append(case)
 
-    # The patch must not broaden scalar/matrix arithmetic or VP subtraction.
+    # Former scalar-arithmetic refusals now have independent row/value controls.
+    for name, expression, row, expected in (
+        ('scalar-left-multiply', '.5*A', '.5*A[0]', [.125,-.25,.5,1.]),
+        ('scalar-right-multiply', 'A*.5', 'A[0]*.5', [.125,-.25,.5,1.]),
+        ('scalar-add', 'A+.5', 'A[0]+.5', [.75,0.,1.5,1.]),
+    ):
+        for suffix, result in (('', f'({expression})[0]'), ('-twin', row)):
+            (root/(name+suffix+'.cg')).write_text(
+                f'uniform float3x3 A;float4 main():COLOR{{return float4({result},1);}}\n')
+        cases.append(dict(name=name, profile='sce_fp_rsx', uniforms={'A[0]':[.25,-.5,1.]},
+                          inputs=[{}], expected=[expected]))
+    # Incompatible shapes and unmodelled half-matrix precision still refuse.
+    # VP subtraction has its own value witness in vp-matrix-arithmetic-test.
     refusal_sources = {
-        'scalar-left-multiply': ('sce_fp_rsx', 'uniform float3x3 A;float4 main():COLOR{return float4((.5*A)[0],1);}', 'matrix arithmetic'),
-        'scalar-right-multiply': ('sce_fp_rsx', 'uniform float3x3 A;float4 main():COLOR{return float4((A*.5)[0],1);}', 'matrix arithmetic'),
-        'scalar-add': ('sce_fp_rsx', 'uniform float3x3 A;float4 main():COLOR{return float4((A+.5)[0],1);}', 'matrix arithmetic'),
         'different-shapes': ('sce_fp_rsx', 'uniform float4x3 A;uniform float3x4 B;float4 main():COLOR{return float4((A-B)[0],1);}', None),
-        'vp-subtract': ('sce_vp_rsx', 'uniform float4x4 A;uniform float4x4 B;float4 main(float4 p:POSITION):POSITION{return mul(A-B,p);}', 'matrix arithmetic'),
         'half-add': ('sce_fp_rsx', 'uniform half3x3 A;uniform half3x3 B;float4 main():COLOR{return float4((A+B)[0],1);}', 'matrix arithmetic'),
         'mixed-half-add': ('sce_fp_rsx', 'uniform half3x3 A;uniform float3x3 B;float4 main():COLOR{return float4((A+B)[0],1);}', 'matrix arithmetic'),
     }
@@ -149,7 +157,7 @@ def run(compiler, root, cases):
                 failures.append(tag+': '+str(error))
     (root/'RESULT.json').write_text(json.dumps(dict(reports=reports, failures=failures), indent=2)+'\n')
     require(not failures, '\n'.join(failures))
-    print('PASS: fp-matrix-addsub (6 matrix/vector pairs, 36 numeric checks, 7 refusal controls)')
+    print('PASS: fp-matrix-addsub (9 matrix/vector pairs, 42 numeric checks, 3 refusal controls)')
 
 
 def main():

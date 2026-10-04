@@ -1070,7 +1070,11 @@ CgType SemanticAnalyzer::analyzeBinaryExpr(BinaryExpr* expr)
             broadcast = id->resolvedDecl && id->resolvedDecl->kind == DeclKind::Variable &&
                 (!global || global->declaration != id->resolvedDecl);
         }
-        if (!narrowing && !broadcast && !checkAssignment(leftType, rightType, expr->right->loc))
+        const bool matrixCompound = scalarFloatMatrixBroadcast(leftType, rightType) &&
+            (expr->op == BinaryOp::AddAssign || expr->op == BinaryOp::SubAssign ||
+             expr->op == BinaryOp::MulAssign || expr->op == BinaryOp::DivAssign);
+        if (!narrowing && !broadcast && !matrixCompound &&
+            !checkAssignment(leftType, rightType, expr->right->loc))
         {
             return CgType::Error();
         }
