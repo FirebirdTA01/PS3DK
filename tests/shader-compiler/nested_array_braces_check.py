@@ -7,6 +7,7 @@ import sys
 import tempfile
 
 import fp_eval
+import vp_pow_vector_check as vp
 
 INPUTS = [[0.125, 0.25, 0.5, 0.75], [-0.5, 0.25, 1.5, 2.0], [2.0, 1.5, 0.25, -0.5]]
 
@@ -20,6 +21,8 @@ def source(body, prefix="", vertex=False):
 # Every brace spelling has an explicit constructor twin. Expected values are
 # independent of either compiler; the byte check also covers VP without a VP evaluator.
 CASES = {
+    "matrix_array": ("float2x2 a[1]={{{t.x,t.y},{t.z,t.w}}}; return float4(a[0][0],a[0][1]);",
+                     "float2x2 a[1];a[0]=float2x2(t); return float4(a[0][0],a[0][1]);", "", None),
     "local_vector": ("float2 a[2]={{t.x,t.y},{t.z,t.w}}; return float4(a[0],a[1]);",
                      "float2 a[2]={float2(t.x,t.y),float2(t.z,t.w)}; return float4(a[0],a[1]);", "", None),
     "unsized_vector": ("float2 a[]={{t.x,t.y},{t.z,t.w}}; return float4(a[0],a[1]);",
@@ -53,9 +56,6 @@ REFUSE = {
     "matrix_row_underfilled": "float2x3 a={{t.x,t.y},{t.z,t.w,2}}; return float4(a[0].xy,a[1].xy);",
     "matrix_row_overfilled": "float2x3 a={{t.x,t.y,1,2},{t.z,t.w,2}}; return float4(a[0].xy,a[1].xy);",
 }
-# Supported syntax can still hit an explicit lowering boundary. Do not silently
-# accept a matrix array without storage that can represent its elements.
-DEBT = {"matrix_array": "float2x2 a[1]={{{t.x,t.y},{t.z,t.w}}}; return float4(a[0][0],a[0][1]);"}
 
 
 def main():
@@ -63,6 +63,7 @@ def main():
     failures = []
     with contextlib.redirect_stdout(io.StringIO()):
         assert fp_eval.self_test()
+        vp.predication_selftest()
     with tempfile.TemporaryDirectory(prefix="nested-array-braces-") as tmp:
         work = Path(tmp)
         def compile_row(name, text, vertex=False):
@@ -83,20 +84,19 @@ def main():
                     for p, dst in pair:
                         assert p.returncode == 0 and dst.is_file(), p.stderr
                     assert pair[0][1].read_bytes() == pair[1][1].read_bytes(), "brace/constructor bytes differ"
-                    if not vertex:
+                    if not vertex or name == "matrix_array":
                         for t in INPUTS:
-                            got = fp_eval.evaluate(pair[0][1].read_bytes(), {"TEX0":t})
+                            blob = pair[0][1].read_bytes()
+                            got = vp.evaluate(blob, {}, inputs={0:t}, binary32=True, predication=True).get(0) if vertex else fp_eval.evaluate(blob, {"TEX0":t})
                             assert got == (t if expected is None else expected), (t, got, expected)
                     print("PASS", label)
                 except (AssertionError, RuntimeError, ValueError) as e:
                     failures.append(label); print("FAIL", label, str(e))
         for vertex in (False, True):
-            for name, body in {**REFUSE, **DEBT}.items():
+            for name, body in REFUSE.items():
                 label = name + ("_vp" if vertex else "_fp")
                 p, dst = compile_row(label, source(body, vertex=vertex), vertex)
                 ok = p.returncode == 1 and not dst.exists()
-                if name in DEBT:
-                    ok = ok and "local-array-initialiser" in p.stderr
                 print("PASS" if ok else "FAIL", label)
                 if not ok: failures.append(label)
     print("nested-array-braces:", len(failures), "failures")

@@ -3760,8 +3760,26 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
                     IRValueID v = buildExpr(ctor->arguments[i].get());
                     const bool scalars = !elementType.isVector() && !elementType.isMatrix() &&
                                          !argType.isVector() && !argType.isMatrix() && argType.arraySize == 0;
+                    // Matrix elements already have ordinary by-value IR storage
+                    // (as for a[0] = m). Preserve the built value and its shape;
+                    // do not flatten rows or re-evaluate a brace constructor.
+                    // Check source types too: fixed is erased to Float32 in IR.
+                    const auto& sourceType = ctor->arguments[i]->resolvedType;
+                    const auto& targetType = varDecl->type->elementType;
+                    const bool floatMatrix = sourceType && targetType &&
+                        sourceType->baseType == BaseType::Float &&
+                        targetType->baseType == BaseType::Float &&
+                        elementType.isMatrix() && argType.isMatrix() &&
+                        elementType.elementType == IRType::Float32 &&
+                        argType.elementType == IRType::Float32 && argType.arraySize == 0 &&
+                        argType.matrixRows == elementType.matrixRows &&
+                        argType.matrixCols == elementType.matrixCols;
                     if (scalars)
                         v = emitScalarConversion(argType, elementType, v, ctor->arguments[i]->loc);
+                    else if (floatMatrix)
+                    {
+                        // No conversion: retain the same-shape matrix snapshot.
+                    }
                     else if (argType.vectorSize != elementType.vectorSize || argType.isMatrix() ||
                              elementType.isMatrix() || argType.arraySize != 0)
                     {

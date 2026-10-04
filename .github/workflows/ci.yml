@@ -556,6 +556,8 @@ jobs:
         run: bash tests/shader-compiler/matrix-vector-conversion-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test float determinant shapes and single evaluation
         run: bash tests/shader-compiler/determinant-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Matrix array initializer
+        run: bash tests/shader-compiler/matrix-array-initializer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test bool matrix construction and static row use
         run: bash tests/shader-compiler/bool-matrix-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test scalar matrix broadcast and single evaluation
