@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 import fp_eval
+import vp_pow_vector_check as vp_eval
 
 DECODE = """static const bool lin = {lin};
 static const bool opaque = {opaque};
@@ -48,9 +49,9 @@ float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
 float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
 """,
 }
-# The run-time lowering is fragment-only: a vertex select is still an
-# arithmetic blend (t_ca8f99a6), so a vertex helper keeps the named refusal.
-VP_REFUSE = {
+# Vertex run-time returns use predicated selection. Keep the large unused
+# arm to expose cancellation if selection regresses to arithmetic blending.
+VP_RUNTIME = {
     'vp_runtime_return': """float4 f(float4 c) { if (c.x > 0.0) return c * 1073741824.0; return c; }
 float4 main(float4 p : POSITION) : POSITION { return f(p); }
 """,
@@ -259,15 +260,22 @@ def main():
             if bad:
                 failures.append('%s: got %s for %s, want %s' % (
                     name, fp_eval.evaluate(blob, {'TEX0': bad[0]}), bad[0], want(bad[0])))
-        for name, text in VP_REFUSE.items():
+        vp_eval.predication_selftest()
+        for name, text in VP_RUNTIME.items():
             src, dst = work / (name + '.cg'), work / (name + '.bin')
             src.write_text(text)
             run = subprocess.run([args.compiler, '-p', 'sce_vp_rsx', '--emit-container', str(dst), str(src)],
                                  capture_output=True, text=True, timeout=60)
-            ok = run.returncode == 1 and not dst.exists() and 'a return inside control flow' in run.stderr
-            print('  %-24s %s' % (name, 'refused by name' if ok else 'NOT refused by name (rc %d)' % run.returncode))
-            if not ok:
-                failures.append('%s: expected the named VP refusal, got rc %d' % (name, run.returncode))
+            if run.returncode != 0 or not dst.exists():
+                failures.append('%s: expected VP acceptance, got rc %d: %s' % (name, run.returncode, run.stderr))
+                continue
+            blob = dst.read_bytes()
+            for c in RUNTIME_GRID:
+                want = [v * (1073741824.0 if c[0] > 0.0 else 1.0) for v in c]
+                got = vp_eval.evaluate(blob, {}, inputs={0: c}, binary32=True, predication=True).get(0)
+                if got != want:
+                    failures.append('%s: input %s got %s, want %s' % (name, c, got, want))
+            print('  %-24s value checks complete' % name)
         for name, text in REFUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
             ok = rc == 1 and not blob and 'a return inside control flow' in err

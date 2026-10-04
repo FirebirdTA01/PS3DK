@@ -105,11 +105,18 @@ mat2_rc=0
         -p sce_vp_rsx --emit-container "$mat2_out" "$work/vp_mat2_matvec.cg"
 ) >"$mat2_log" 2>&1 || mat2_rc=$?
 refusal_status "$mat2_rc" "vp_mat2_matvec"
-[[ "$mat2_rc" -eq 1 ]] ||
-    fail "vp_mat2_matvec compiled, but VP has no DP2 lowering in this slice"
-[[ ! -e "$mat2_out" ]] ||
-    fail "vp_mat2_matvec left a container behind after refusing"
-grep -q "VP matvecmul with 2-column matrices is not implemented" "$mat2_log" ||
-    { tail -n 20 "$mat2_log" >&2; fail "vp_mat2_matvec refused without the matrix-specific VP DP2 diagnostic"; }
+[[ "$mat2_rc" -eq 0 && -s "$mat2_out" ]] ||
+    { tail -n 20 "$mat2_log" >&2; fail "vp_mat2_matvec did not emit a container"; }
+python3 - "$repo_root/tests/shader-compiler" "$mat2_out" <<'PY'
+import itertools,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from vp_pow_vector_check import evaluate
+blob=Path(sys.argv[2]).read_bytes()
+for x,y in itertools.product((-2.,-.5,0.,.25,1.5,4.),repeat=2):
+    got=evaluate(blob,{},inputs={0:[x,y,7.,-3.]},binary32=True)[0]
+    assert got==[x,y,0.,1.],(x,y,got)
+print('vp_mat2_matvec: 36 exact values')
+PY
 
 printf 'matrix-value-test: ok\n'

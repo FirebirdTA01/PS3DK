@@ -24,8 +24,7 @@ DEBTS = {'array_braces', 'array_member', 'sampler_field',
          'constructor_as_argument', 'constructor_member',
          'global_const_nested', 'uniform_default_nested',
          'fixed_field', 'short_field', 'bool_field', 'fixed_source'}
-VP_DEBTS = {'matrix_field': 'VP matvecmul with 2-column matrices',
-            'int_field': 'VP float-to-int lowering deferred',
+VP_DEBTS = {'int_field': 'VP float-to-int lowering deferred',
             'numeric_half': 'half precision is fragment-only',
             'implicit_member': 'VP int-to-float lowering deferred'}
 

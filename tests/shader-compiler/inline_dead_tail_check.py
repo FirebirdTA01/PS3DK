@@ -2,8 +2,8 @@
 """A returned helper path must not execute or reject its unreachable suffix.
 
 Each accepted source has an independently reduced control with the dead suffix
-removed. Complete containers must match in FP and, for non-runtime-return cases,
-VP. FP programs additionally run through the established instruction evaluator
+removed. Complete containers must match in FP and VP.
+Both stages additionally run through the established instruction evaluators
 on inputs that exercise both sides of runtime conditions. No reference SDK is
 required by this regression test.
 """
@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 import fp_eval
+import vp_pow_vector_check as vp_eval
 
 
 # name, source, dead-tail-free control, expected FP result, supports VP.
@@ -72,25 +73,72 @@ float4 invoke(float4 c) { float4 r = f(c); return r + G; }""",
     ("runtime_arm_dead_tail",
      "float4 f(float4 c) { if (c.x > 0.0) { return c * 2.0; c *= 9.0; } return c * 3.0; }",
      "float4 f(float4 c) { if (c.x > 0.0) { return c * 2.0; } return c * 3.0; }",
-     lambda c: [v * (2.0 if c[0] > 0.0 else 3.0) for v in c], False),
+     lambda c: [v * (2.0 if c[0] > 0.0 else 3.0) for v in c], True),
     ("runtime_fallthrough_still_runs",
      "float4 f(float4 c) { if (c.x > 0.0) return c * 2.0; c *= 3.0; return c; c *= 9.0; }",
      "float4 f(float4 c) { if (c.x > 0.0) return c * 2.0; c *= 3.0; return c; }",
-     lambda c: [v * (2.0 if c[0] > 0.0 else 3.0) for v in c], False),
+     lambda c: [v * (2.0 if c[0] > 0.0 else 3.0) for v in c], True),
     ("nested_helper_keeps_own_continuation",
      """float4 g(float4 c) { return c * 2.0; return c * 9.0; }
 float4 f(float4 c) { if (c.x > 0.0) return g(c); return c * 3.0; }""",
      """float4 g(float4 c) { return c * 2.0; }
 float4 f(float4 c) { if (c.x > 0.0) return g(c); return c * 3.0; }""",
-     lambda c: [v * (2.0 if c[0] > 0.0 else 3.0) for v in c], False),
+     lambda c: [v * (2.0 if c[0] > 0.0 else 3.0) for v in c], True),
+    ("scalar_both_arms",
+     "float minimum(float2 v) { if(v.x>v.y) return v.y; else return v.x; return 7; } float4 f(float4 c) { return float4(minimum(c.xy),minimum(c.zw),c.zw); }",
+     "float minimum(float2 v) { if(v.x>v.y) return v.y; else return v.x; } float4 f(float4 c) { return float4(minimum(c.xy),minimum(c.zw),c.zw); }",
+     lambda c: [min(c[0],c[1]),min(c[2],c[3]),c[2],c[3]], True),
+    ("conditional_out_copyback",
+     "void h(float4 c,out float4 o) { if(c.x>0) { o=c*2; return; o=c*9; } o=c*3; } float4 f(float4 c) { float4 r; h(c,r); return r; }",
+     "void h(float4 c,out float4 o) { if(c.x>0) { o=c*2; return; } o=c*3; } float4 f(float4 c) { float4 r; h(c,r); return r; }",
+     lambda c: [v*(2.0 if c[0]>0 else 3.0) for v in c], True),
+    ("conditional_global_write",
+     "static float4 G=0; float4 f(float4 c) { if(c.x>0) { G=c*2; return c; G=c*9; } G=c*3; return c; } float4 invoke(float4 c) { float4 r=f(c); return r+G; }",
+     "static float4 G=0; float4 f(float4 c) { if(c.x>0) { G=c*2; return c; } G=c*3; return c; } float4 invoke(float4 c) { float4 r=f(c); return r+G; }",
+     lambda c: [v*(3.0 if c[0]>0 else 4.0) for v in c], True),
+    ("nested_runtime_branches",
+     "float4 f(float4 c) { if(c.x>0) { if(c.y>0) return c*2; return c*3; c*=9; } return c*4; }",
+     "float4 f(float4 c) { if(c.x>0) { if(c.y>0) return c*2; return c*3; } return c*4; }",
+     lambda c: [v*(2.0 if c[1]>0 else 3.0) if c[0]>0 else v*4.0 for v in c], True),
+    ("large_finite_return",
+     "float4 f(float4 c) { if(c.x>0) return float4(1,2,3,4); return float4(1073741824,1073741824,1073741824,1073741824); c*=9; }",
+     "float4 f(float4 c) { if(c.x>0) return float4(1,2,3,4); return float4(1073741824,1073741824,1073741824,1073741824); }",
+     lambda c: [1.0,2.0,3.0,4.0] if c[0]>0 else [1073741824.0]*4, True),
+    ("zero_then_vector_return",
+     "float4 f(float4 c) { if(c.x<=0) return 0; return c.wzyx; return c; }",
+     "float4 f(float4 c) { if(c.x<=0) return 0; return c.wzyx; }",
+     lambda c: [0.0]*4 if c[0]<=0 else list(reversed(c)), True),
+    ("zero_else_vector_return",
+     "float4 f(float4 c) { if(c.x>0) return c.wzyx; return 0; return c; }",
+     "float4 f(float4 c) { if(c.x>0) return c.wzyx; return 0; }",
+     lambda c: list(reversed(c)) if c[0]>0 else [0.0]*4, True),
+    ("scalar_lane_vector_return",
+     "float4 f(float4 c) { if(c.x>0) return c.y; return c.wzyx; return c; }",
+     "float4 f(float4 c) { if(c.x>0) return c.y; return c.wzyx; }",
+     lambda c: [c[1]]*4 if c[0]>0 else list(reversed(c)), True),
+    ("zero_then_scalar_lane_return",
+     "float pick(float4 c) { if(c.y<=0) return 0; return c.w; return c.x; } float4 f(float4 c) { return float4(pick(c),c.xyz); }",
+     "float pick(float4 c) { if(c.y<=0) return 0; return c.w; } float4 f(float4 c) { return float4(pick(c),c.xyz); }",
+     lambda c: [0.0 if c[1]<=0 else c[3],*c[:3]], True),
+    ("scalar_return_evaluated_once",
+     "static float G; float4 h(float4 c) { if(c.x>0) return G++; return c.wzyx; return c; } float4 f(float4 c) { G=c.y; float4 r=h(c); return r+G; }",
+     "static float G; float4 h(float4 c) { if(c.x>0) return G++; return c.wzyx; } float4 f(float4 c) { G=c.y; float4 r=h(c); return r+G; }",
+     lambda c: [2*c[1]+1]*4 if c[0]>0 else [v+c[1] for v in reversed(c)], True),
+    ("partial_output_postincrement",
+     "float4 f(float4 c) { float x=c.x; float4 r=c; if(x++) r*=2; r.y=x; return r; r*=9; }",
+     "float4 f(float4 c) { float x=c.x; float4 r=c; if(x++) r*=2; r.y=x; return r; }",
+     lambda c: [c[0]*(2 if c[0]!=0 else 1),c[0]+1,c[2]*(2 if c[0]!=0 else 1),c[3]*(2 if c[0]!=0 else 1)], True),
 ]
 
 REFUSALS = [
     ("missing_runtime_return", "fp",
      "float4 f(float4 c) { if (c.x > 0.0) return c * 2.0; c *= 3.0; }",
      "a path through it has no return expression"),
-    ("vp_runtime_return_stays_guarded", "vp",
-     "float4 f(float4 c) { if (c.x > 0.0) return c * 2.0; return c * 3.0; }",
+    ("vp_missing_runtime_return", "vp",
+     "float4 f(float4 c) { if(c.x>0) return c*2; c*=3; }",
+     "a path through it has no return expression"),
+    ("vp_loop_return", "vp",
+     "float4 f(float4 c) { for(int i=0;i<2;i++) { if(c.x>i) return c; } return c*2; }",
      "a return inside control flow"),
     ("bare_nested_block_stays_guarded", "fp",
      "float4 f(float4 c) { { return c * 2.0; } return c * 3.0; }",
@@ -100,6 +148,7 @@ INPUTS = [
     [-1.0, 0.5, 0.25, 1.0],
     [0.0, -0.25, 0.75, 0.5],
     [0.25, 0.5, -1.0, 0.125],
+    [0.25, -0.5, 0.125, -1.0],
 ]
 
 
@@ -127,6 +176,33 @@ def run_checks(compiler, work):
     failures = []
     if not fp_eval.self_test():
         raise RuntimeError("FP evaluator self-test failed")
+    vp_eval.predication_selftest()
+    # Output assignment can route the conditional write directly to COLOR,
+    # while a later masked write updates only y. Check both output registers
+    # and the postincrement, not merely acceptance of an output destination.
+    source = work / 'direct_output_postincrement.cg'
+    output = source.with_suffix('.bin')
+    output.unlink(missing_ok=True)
+    source.write_text('''void main(float4 p:POSITION, float4 t:TEXCOORD0,
+        out float4 pos:POSITION, out float4 colour:COLOR) {
+        float x=t.x; float4 c=t; if(x++) c*=2; c.y=x;
+        pos=p; colour=c;
+    }''')
+    result = subprocess.run([compiler, '-p', 'sce_vp_rsx', '--emit-container',
+                             str(output), str(source)], capture_output=True, text=True, timeout=30)
+    (work / 'direct_output_postincrement.log').write_text(result.stdout + result.stderr)
+    if result.returncode != 0 or not output.exists():
+        failures.append('direct_output_postincrement: refused: '+result.stderr)
+    else:
+        position = [.125, -.25, .5, 1.]
+        for t in INPUTS:
+            want = [v*(2 if t[0] != 0 else 1) for v in t]
+            want[1] = t[0]+1
+            got = vp_eval.evaluate(output.read_bytes(), {}, inputs={0: position, 8: t},
+                                   binary32=True, predication=True)
+            if got.get(0) != position or got.get(1) != want:
+                failures.append('direct_output_postincrement: input %s got %s, want position=%s colour=%s' % (
+                    t, got, position, want))
     for name, body, control, expected, vertex in CASES:
         for stage in (("fp", "vp") if vertex else ("fp",)):
             try:
@@ -143,11 +219,12 @@ def run_checks(compiler, work):
                 continue
             if blob != cblob:
                 failures.append("%s/%s: dead suffix changed container bytes" % (name, stage))
-            if stage == "fp":
+            if stage in ("fp", "vp"):
                 for inputs in INPUTS:
                     want = expected(inputs)
                     for label, program in (("source", blob), ("control", cblob)):
-                        actual = fp_eval.evaluate(program, {"TEX0": inputs})
+                        actual = (fp_eval.evaluate(program, {"TEX0": inputs}) if stage == "fp" else
+                                  vp_eval.evaluate(program, {}, inputs={0: inputs}, binary32=True, predication=True).get(0))
                         if actual != want:
                             failures.append("%s/%s %s: input %s returned %s, want %s" % (
                                 name, stage, label, inputs, actual, want))

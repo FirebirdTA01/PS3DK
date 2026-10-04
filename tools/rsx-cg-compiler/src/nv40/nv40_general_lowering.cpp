@@ -785,7 +785,6 @@ private:
         size_t   arlAt = 0;     // position in program_.instrs
     };
     std::vector<AddressLane> addressLanes_;
-    std::unordered_map<IRValueID, VSrc> conditionToSource_;
     std::unordered_map<IRValueID, int> valueWidth_;
     // CF-1a flatten state (general-path-discard).  Set only when the entry
     // function has more than one basic block; single-block programs
@@ -8196,20 +8195,9 @@ private:
     {
         if (inst.operands.size() < 2 || inst.result == InvalidIRValue)
             return;
-        // VP cmple(x, 0) keeps its predicate-source path: lowerSelect's
-        // VP special case consumes conditionToSource_, and that pairing
-        // is pinned by its fixture.
-        if (profile_ == GeneralProfile::Vertex && isLiteralZero(inst.operands[1])) {
-            VSrc src = resolve(inst.operands[0]);
-            src.swizzle = {0, 0, 0, 0};
-            conditionToSource_[inst.result] = src;
-            return;
-        }
-        // Everything else is an ordinary comparison: SLE is native in
-        // both units.  (This retires a diagnose-and-continue bail that
-        // printed on dead cmple instructions in otherwise-clean
-        // compiles and would have left a consumed one to the resolve()
-        // refusal.)
+        // Materialize the comparison, including x <= 0. Select consumes
+        // this boolean through the same allocation-safe pseudo-op in both
+        // stages; a raw-source shortcut discarded component swizzles.
         lowerBinary(inst, VOp::Sle);
     }
 
@@ -8223,9 +8211,9 @@ private:
     // SGTRC RC.x then RCPR R0.x(NE.x); ours sets CC with a separate
     // MOV rather than folding it into the comparison, a known
     // instruction-count divergence to revisit when branch shaders
-    // become byte-comparable).  Fragment-only: the VP virtual scheduler
-    // reorders on temp dependencies and has no CC model, and no VP
-    // witness exists in the corpus.  A vector condition as wide as the
+    // become byte-comparable). Keep the condition-code write and use
+    // inside one pseudo-op until after scheduling and allocation. VP
+    // currently supports scalar conditions only. A vector condition as wide as the
     // result selects per lane - the reference's shape for a vector ?:
     // (measured: SGTRC HC.xyz, then a MOV gated on NE.xyz) - so CC is
     // written through the result's mask and each lane tests its own CC
@@ -8233,11 +8221,11 @@ private:
     // refuses loudly.
     bool lowerSelectPredicated(const IRInstruction& inst)
     {
-        if (profile_ != GeneralProfile::Fragment)
-            return false;
         if (inst.operands.size() < 3)
             return false;
         const int condWidth = valueWidthOf(inst.operands[0]);
+        if (profile_ == GeneralProfile::Vertex && condWidth != 1)
+            return false;
         const bool perLane = condWidth > 1;
         if (perLane && condWidth != inst.resultType.componentCount())
             return false;
@@ -8305,12 +8293,6 @@ private:
     {
         if (inst.operands.size() < 3 || inst.result == InvalidIRValue)
             return;
-        // A vector condition on VP would reach the arithmetic blend
-        // (lowerSelectGeneral) or the scalar cmple special case.  The
-        // blend is not a conditional move: an untaken inf/NaN arm
-        // poisons the lane and (a - b) + b is not exactly a.  The
-        // reference predicates it (SGTC HC then MOV o(NE0)); until the
-        // VP scheduler has a CC model, refuse rather than blend.
         if (profile_ == GeneralProfile::Vertex &&
             valueWidthOf(inst.operands[0]) > 1) {
             program_.diagnostics.push_back(
@@ -8319,79 +8301,17 @@ private:
             program_.loweringFailed = true;
             return;
         }
-        if (profile_ != GeneralProfile::Vertex ||
-            !isLiteralZero(inst.operands[1]) ||
-            conditionToSource_.find(inst.operands[0]) == conditionToSource_.end()) {
-            // CF-1a/1b: in a flattened program every select executes
-            // with both arms unconditionally live, and the arithmetic
-            // blend below is NOT a conditional move — if the untaken
-            // arm yields inf/NaN, 0 * NaN poisons the join even though
-            // the arm "was not taken".  Arms that are not provably
-            // finite take CF-1b's predicated write instead (MOV
-            // default, CC-set from cond, CC-gated commit — a true
-            // conditional move); shapes predication does not cover yet
-            // refuse.  This is a property of the select itself, not only
-            // of control-flow flattening: a one-block source-level `?:`
-            // can carry the same non-finite untaken arm and must take the
-            // same predicated path.
-            //
-            // FINITE ARMS ARE NOT ENOUGH EITHER: the blend computes
-            // (a - b) + b, which is not a in binary32 - with constant arms
-            // 1 and 2^30 the taken lane reads 0 (codex, review of
-            // c0b6589e; measured wrong on the parent too, scalar condition).
-            // The reference predicates every fragment select, so every
-            // fragment select takes the predicated write; shapes it does
-            // not cover refuse rather than blend.
-            if (profile_ == GeneralProfile::Fragment) {
-                if (lowerSelectPredicated(inst))
-                    return;
-                program_.diagnostics.push_back(
-                    "nv40-general: select shape not covered by predicated "
-                    "lowering; refusing");
-                program_.loweringFailed = true;
-                return;
-            }
-            // General select(c, a, b) with a 0/1 condition (which is what
-            // the comparison lowerings produce): d = a - b, then
-            // dst = c * d + b.  Component-wise, so vector conditions work.
-            // The VP predicate special case above stays for the shape its
-            // fixture pins.
-            if (lowerSelectGeneral(inst))
-                return;
-            program_.diagnostics.push_back(
-                "nv40-general: select condition could not be lowered; refusing");
-            program_.loweringFailed = true;
+        // A select must preserve the chosen arm exactly. Arithmetic blends
+        // fail for non-finite untaken arms and for finite cancellation (1
+        // versus 2^30). Keep default write, CC update, and conditional write
+        // inside one pseudo-op until scheduling/allocation have completed.
+        // This also preserves source swizzles for the old x <= 0 / zero-arm
+        // case, whose separate MOVs forced all source lanes to x.
+        if (lowerSelectPredicated(inst))
             return;
-        }
-
-        const int result = define(inst.result);
-        const int mask = componentMask(inst.resultType);
-
-        VInstr zero;
-        zero.op = VOp::Mov;
-        zero.dst.index = result;
-        zero.dst.writemask = mask;
-        zero.srcs[0] = resolve(inst.operands[1]);
-        zero.srcs[0].swizzle = {0, 0, 0, 0};
-        program_.instrs.push_back(zero);
-
-        VInstr movc;
-        movc.op = VOp::Mov;
-        movc.dst.none = true;
-        movc.dst.writemask = 0x1;
-        movc.srcs[0] = conditionToSource_[inst.operands[0]];
-        movc.srcs[0].swizzle = {0, 0, 0, 0};
-        movc.ccUpdate = true;
-        program_.instrs.push_back(movc);
-
-        VInstr pred;
-        pred.op = VOp::Mov;
-        pred.dst.index = result;
-        pred.dst.writemask = mask;
-        pred.srcs[0] = resolve(inst.operands[2]);
-        pred.srcs[0].swizzle = {0, 0, 0, 0};
-        pred.predicate = NVFX_COND_GT;
-        program_.instrs.push_back(pred);
+        program_.diagnostics.push_back(
+            "nv40-general: select shape not covered by predicated lowering; refusing");
+        program_.loweringFailed = true;
     }
 
     // In the half bank COLOR0 occupies H0, the low half of R0,
@@ -11366,6 +11286,44 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         if (hasUnsupportedSource(vi, why)) {
             out.diagnostics.push_back("nv40-general-vp: " + why);
             return out;
+        }
+        if (vi.op == VOp::SelPred) {
+            // Keep the three writes atomic until after scheduling/allocation.
+            // The allocator already reserves condition/true-arm sources until
+            // after the default write, as for the fragment SelPred pseudo-op.
+            // Output registers have their own namespace and no allocated
+            // temporary index. Output assignment may fold a masked select
+            // directly into an output, just as it folds an ordinary MOV.
+            if (vi.selPerLane || vi.dst.none || vi.dst.address ||
+                (!vi.dst.output && vi.dst.phys < 0)) {
+                out.diagnostics.push_back("nv40-general-vp: invalid scalar SelPred destination; refusing");
+                return out;
+            }
+            for (int s = 0; s < 2; ++s) {
+                const auto& src = vi.srcs[s];
+                if (src.kind == VSrcKind::Temp &&
+                    (src.phys < 0 || (!vi.dst.output && src.phys == vi.dst.phys))) {
+                    out.diagnostics.push_back("nv40-general-vp: SelPred aliases an early-read source; refusing");
+                    return out;
+                }
+            }
+            VInstr mov;
+            mov.op = VOp::Mov;
+            mov.dst = vi.dst;
+            mov.srcs[0] = vi.srcs[2];
+            asm_.emit(makeInsn(mov), VP_OP(MOV));
+            VInstr cc;
+            cc.op = VOp::Mov;
+            cc.dst.none = true;
+            cc.dst.writemask = 1;
+            cc.ccUpdate = true;
+            cc.srcs[0] = vi.srcs[0];
+            asm_.emit(makeInsn(cc), VP_OP(MOV));
+            mov.srcs[0] = vi.srcs[1];
+            mov.predicate = NVFX_COND_NE;
+            mov.predicateSwizzle = {0, 0, 0, 0};
+            asm_.emit(makeInsn(mov), VP_OP(MOV));
+            continue;
         }
         if (vi.op == VOp::Tex || vi.op == VOp::Txp || vi.op == VOp::TexBias ||
             vi.op == VOp::TexLod) {

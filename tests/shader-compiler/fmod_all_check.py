@@ -133,6 +133,7 @@ def main():
     if not fp_eval.self_test():
         failures.append('fp_eval self-test failed')
     failures += vp_controls()
+    vp_eval.predication_selftest()
     grid = []
     for i, (x, y) in enumerate(itertools.product(A, B)):
         a = [x, A[(i + 1) % len(A)], A[(i + 2) % len(A)], A[(i + 3) % len(A)]]
@@ -163,11 +164,11 @@ def main():
                 print('  %-14s REFUSED' % name)
                 continue
             bad = [p for p in VP_GRID
-                   if vp_eval.evaluate(blob, {'d': [0.5, 0.0, 0.0, 0.0]}, inputs={0: p}, binary32=True).get(0) != want(p)]
+                   if vp_eval.evaluate(blob, {'d': [0.5, 0.0, 0.0, 0.0]}, inputs={0: p}, binary32=True, predication=True).get(0) != want(p)]
             print('  %-14s %s' % (name, 'values ok (%d inputs)' % len(VP_GRID) if not bad else 'WRONG on %d' % len(bad)))
             if bad:
                 failures.append('%s: got %s for %s, want %s' % (
-                    name, vp_eval.evaluate(blob, {'d': [0.5, 0.0, 0.0, 0.0]}, inputs={0: bad[0]}, binary32=True).get(0),
+                    name, vp_eval.evaluate(blob, {'d': [0.5, 0.0, 0.0, 0.0]}, inputs={0: bad[0]}, binary32=True, predication=True).get(0),
                     bad[0], want(bad[0])))
         for name, text in VP_REFUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_vp_rsx')

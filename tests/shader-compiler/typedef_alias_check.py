@@ -162,23 +162,6 @@ def main():
                         else:
                             known_debt.append(profile+'/'+name+'/alias (block-scope typedef)')
                         continue
-                    # t_58016518: the oracle accepts and values this VP twin;
-                    # the parent also refuses the DIRECT float2x2 matvecmul.
-                    # Alias parsing must reach the same named backend gap.
-                    # This is an explicit refusal debt, never a value pass.
-                    if profile=='sce_vp_rsx' and name=='alias_matrix':
-                        first_nv40=next((line for line in run.stderr.splitlines()
-                                         if line.startswith('nv40')), '')
-                        if (run.returncode!=1 or dst.exists() or
-                            first_nv40 != ('nv40-general: VP matvecmul with 2-column matrices '
-                                           'is not implemented; refusing before reaching '
-                                           'unsupported DP2 emission') or
-                            'could not be resolved' not in run.stderr or
-                            'matvecmul vec2' not in run.stderr):
-                            failures.append(profile+'/'+name+'/'+kind+': expected existing matvecmul refusal')
-                        else:
-                            known_debt.append(profile+'/'+name+'/'+kind)
-                        continue
                     if name in REFUSE and (kind=='alias' or name=='vector_no_semantic'):
                         if run.returncode!=1 or dst.exists() or REFUSE[name] not in run.stderr:
                             failures.append(profile+'/'+name+': expected strict named refusal '+REFUSE[name])
@@ -191,8 +174,7 @@ def main():
                 if name not in REFUSE and set(outputs)=={'alias','direct'} and outputs['alias']!=outputs['direct']:
                     failures.append(profile+'/'+name+': alias/direct container differs')
         for failure in failures:print('FAIL:',failure)
-        for debt in known_debt:print('KNOWN-DEBT:',debt,
-                                    '(t_58016518)' if 'alias_matrix' in debt else '(block-scope typedef)')
+        for debt in known_debt:print('KNOWN-DEBT:',debt,'(block-scope typedef)')
     print('typedef-alias:', 'PASS' if not failures else 'FAIL',len(failures),
           'failures;',len(known_debt),'KNOWN-DEBT containers (not value passes)')
     return int(bool(failures))

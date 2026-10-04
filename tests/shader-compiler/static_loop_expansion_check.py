@@ -14,6 +14,9 @@ import subprocess
 import sys
 import tempfile
 
+import fp_eval
+import vp_pow_vector_check as vp_eval
+
 
 def main():
     compiler = str(Path(sys.argv[1]).resolve())
@@ -22,6 +25,7 @@ def main():
     scratch.mkdir(parents=True, exist_ok=True)
     count = 0
     refusals = 0
+    value_checks = 0
     with tempfile.TemporaryDirectory(prefix='static-loop-', dir=scratch) as tmp:
         work = Path(tmp)
 
@@ -51,12 +55,24 @@ def main():
             assert header[7] + header[6] <= len(data), name + ': invalid ucode extent'
             return data
 
-        def twin(label, body, explicit, profile, prefix=''):
-            nonlocal count
+        def twin(label, body, explicit, profile, prefix='', expected_value=None):
+            nonlocal count, value_checks
             name = profile + '-' + label
             actual = compile_one(name, body, profile, prefix=prefix)
             expected = compile_one(name + '-explicit', explicit, profile, prefix=prefix)
             assert actual == expected, name + ': strict explicit-expansion twin differs'
+            if expected_value is not None:
+                for t in ([-.5, .25, 1.5, 2.], [0., -.5, .25, 1.], [.25, 1.5, -.5, .5]):
+                    if profile == 'sce_fp_rsx':
+                        got = fp_eval.evaluate(actual, {'TEX0': t})
+                    else:
+                        position = [.25, -.5, .75, 1.]
+                        outputs = vp_eval.evaluate(actual, {}, inputs={0: position, 8: t},
+                                                   binary32=True, predication=True)
+                        assert outputs.get(0) == position, name + ': POSITION changed'
+                        got = outputs.get(7)
+                    assert got == expected_value(t), (name, t, got, expected_value(t))
+                    value_checks += 1
             count += 1
 
         for profile in ('sce_fp_rsx', 'sce_vp_rsx'):
@@ -74,14 +90,17 @@ def main():
                 ('zero-trip', 'float i=4.0;i<0.0;i+=1.0', ())):
                 explicit = ''.join('{float i=' + str(i) + '.0;' + arithmetic + '}' for i in values)
                 twin(label, 'for(' + header + '){' + arithmetic + '}', explicit, profile)
-            for label, body, explicit in (
+            # A literal expansion preserves the initial addition to a=0. Omitting
+            # it would also demand an unrelated zero-add optimization. Pin values
+            # independently so identical mistakes in both forms cannot pass.
+            for label, body, explicit, expected_value in (
                 ('external-final', 'float i;for(i=-4.0;i<0.0;i+=1.0){a+=t*(i+5.0);}a+=i;',
-                 'float i=0;a=t*1.0;a+=t*2.0;a+=t*3.0;a+=t*4.0;a+=i;'),
+                 'float i=0;a+=t*1.0;a+=t*2.0;a+=t*3.0;a+=t*4.0;a+=i;', lambda t: [10*x for x in t]),
                 ('declared-shadow', 'float i=.75;for(float i=0.0;i<4.0;i+=1.0){a+=t*(i+1.0);}a+=i;',
-                 'float i=.75;a=t*1.0;a+=t*2.0;a+=t*3.0;a+=t*4.0;a+=i;'),
+                 'float i=.75;a+=t*1.0;a+=t*2.0;a+=t*3.0;a+=t*4.0;a+=i;', lambda t: [10*x+.75 for x in t]),
                 ('inner-shadow', 'for(float i=0.0;i<4.0;i+=1.0){{float i=10.0;a+=t*i;}}',
-                 'a=t*10.0;a+=t*10.0;a+=t*10.0;a+=t*10.0;')):
-                twin(label, body, explicit, profile)
+                 'a+=t*10.0;a+=t*10.0;a+=t*10.0;a+=t*10.0;', lambda t: [40*x for x in t])):
+                twin(label, body, explicit, profile, expected_value=expected_value)
             # Existing integer path remains accepted, including reference-looping VP8.
             explicit = ''.join('{int i=' + str(i) + ';' + arithmetic + '}' for i in range(8))
             twin('int8-shape-divergence', 'for(int i=0;i<8;i+=1){' + arithmetic + '}', explicit, profile)
@@ -96,7 +115,7 @@ def main():
             twin('uint-local-bounds', uint_locals + 'for(unsigned int i=start;i<bound;i+=step){' + uint_body + '}',
                  uint_locals + ''.join('{int i=' + str(i) + ';' + uint_body + '}' for i in range(3)), profile)
             twin('uint-high-boundary', 'for(unsigned int i=4294967293;i<4294967295;i++){a+=t*(i-4294967292);}',
-                 'a=t;a+=t*2.0;', profile)
+                 'a+=t;a+=t*2.0;', profile, expected_value=lambda t: [3*x for x in t])
             for label, body, diagnostic in (
                 ('induction-write', 'for(float i=0.0;i<4.0;i+=1.0){a+=t*(i+1.0);i+=1.0;}', 'back-edge'),
                 ('bound-write', 'int bound=4;for(float i=0.0;i<bound;i+=1.0){a+=t*(i+1.0);bound=2;}', 'back-edge'),
@@ -121,7 +140,8 @@ def main():
             explicit = ''.join('{' + ty + ' i=' + str(i) + ('.0;' if ty == 'float' else ';') + fetch + '}' for i in values)
             twin('texture-local-' + ty, body, explicit, 'sce_fp_rsx', prefix='uniform sampler2D tex;')
     assert (count, refusals) == (36, 22), (count, refusals)
-    print(f'static-loop-expansion: PASS ({count} strict twins, {refusals} named refusals)')
+    assert value_checks == 24, value_checks
+    print(f'static-loop-expansion: PASS ({count} strict twins, {refusals} named refusals, {value_checks} exact values)')
 
 
 if __name__ == '__main__':

@@ -150,6 +150,38 @@ count() {    # <stem> <regex> <expected count>
     [[ "$n" -eq "$3" ]] || { cat "$work/$1.dec" >&2; fail "$1: $n lines match /$2/, expected $3"; }
 }
 
+# Judge conditional array joins by their source values, independent of
+# whether the backend emits arithmetic blends or predicated moves.
+array_join_values() {
+    python3 - "$here" "$work/$1.bin" "$1" <<'PYEOF' || fail "$1: array join values differ"
+import itertools, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from vp_pow_vector_check import evaluate, predication_selftest
+predication_selftest()
+blob, name = Path(sys.argv[2]).read_bytes(), sys.argv[3]
+uniforms = {'G': [-2., 4., .25, 8.], 'B[1]': [2., -1., .5, 4.], 'P[0]': [.5, 2., -1., 4.],
+            'P[1]': [4., 1., 2., -.5], 'Q[0]': [-1., .5, 4., 2.],
+            'Q[1]': [1., -2., .5, 8.]}
+for p in itertools.product((-.5, 0., .25, 1.5), repeat=4):
+    if name == 'vp_global_array_if_multi_v':
+        want = [x * (15 if p[0] > 0 else 6) for x in p]
+    elif name == 'vp_global_array_if_unwritten_v':
+        want = [2*x for x in p] if p[0] > 0 else uniforms['B[1]']
+    elif name == 'vp_inline_conditional_call_unassigned_v':
+        want = [2*x for x in p] if p[0] > 0 else uniforms['G']
+    elif name == 'vp_global_two_arrays_if_v':
+        a = [3*x for x in p] if p[0] > 0 else uniforms['P[0]']
+        b = [2*x for x in p] if p[0] > 0 else uniforms['Q[1]']
+        want = [a[i]+b[i]+uniforms['P[1]'][i]+uniforms['Q[0]'][i] for i in range(4)]
+    else:
+        raise AssertionError('unknown array witness: '+name)
+    got = evaluate(blob, uniforms, inputs={0: list(p)}, binary32=True, predication=True).get(0)
+    assert got == want, (name, p, got, want)
+print(name+': 256 array-join value cases passed')
+PYEOF
+}
+
 refuse() {   # <description> <stem> <profile> <message fragment>
     refuse_with "$compiler" "$@"
 }
@@ -198,15 +230,15 @@ accept vp_inline_void_global_if_v sce_vp_rsx "the conditional store to B[0] insi
 joined vp_inline_void_global_if_v 'SGT|SLT|SGE|SLE'
 accept vp_global_array_if_multi_v sce_vp_rsx "three elements written in one branch: three selects, one compare"
 count  vp_global_array_if_multi_v '^[0-9]+ (SGT|SLT|SGE|SLE) ' 1
-count  vp_global_array_if_multi_v '^[0-9]+ MAD .* src0=R[0-9]+\.xxxx' 3
+array_join_values vp_global_array_if_multi_v
 accept vp_global_array_if_unwritten_v sce_vp_rsx "an element never written before the if selects against its UNIFORM element"
 joined vp_global_array_if_unwritten_v 'SGT|SLT|SGE|SLE'
-expect vp_global_array_if_unwritten_v '^[0-9]+ MAD .* src2=C4[0-9][0-9]\.xyzw'
+array_join_values vp_global_array_if_unwritten_v
 accept fp_global_two_arrays_if_f sce_fp_rsx "TWO promoted arrays, one element of each written in one branch: both never-written elements select against their uniform (the merge loads are numbered by sorted (name, index), never by hash order - review: claude)"
 joined fp_global_two_arrays_if_f 'SGT|SLT|SGE|SLE'
 accept vp_global_two_arrays_if_v sce_vp_rsx "two promoted arrays in a vertex program, two never-written elements"
 joined vp_global_two_arrays_if_v 'SGT|SLT|SGE|SLE'
-count  vp_global_two_arrays_if_v '^[0-9]+ MAD .* src0=R[0-9]+\.xxxx' 2
+array_join_values vp_global_two_arrays_if_v
 accept vp_inline_global_write_v sce_vp_rsx "gen(p) writes file-scope G = p*2; main returns G: the write reaches the caller"
 has_float vp_inline_global_write_v 40000000 "the 2.0 of gen's write"
 forbid vp_inline_global_write_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
@@ -247,7 +279,7 @@ accept vp_inline_conditional_call_array_v sce_vp_rsx "the same through a shadowe
 joined vp_inline_conditional_call_array_v 'SGT|SLT|SGE|SLE'
 accept vp_inline_conditional_call_unassigned_v sce_vp_rsx "a never-assigned shadowed global written in a branch selects against its uniform"
 joined vp_inline_conditional_call_unassigned_v 'SGT|SLT|SGE|SLE'
-expect vp_inline_conditional_call_unassigned_v '^[0-9]+ MAD .* src2=C4[0-9][0-9]\.xyzw'
+array_join_values vp_inline_conditional_call_unassigned_v
 # The parameter exemption decides only whether to REFUSE; the binding itself
 # still resolves through the name map, so an inner local shadowing a
 # PARAMETER reads the inner local (reference: the {9,8,7,6} constant).

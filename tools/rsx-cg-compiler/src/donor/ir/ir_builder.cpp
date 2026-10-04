@@ -3801,6 +3801,17 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
                 else
                     initValue = emitNumericToBool(initType, declaredType, initValue, varDecl->loc);
             }
+            else if (initValue != InvalidIRValue && declaredType.arraySize == 0 && declaredType.isVector() &&
+                     initType.arraySize == 0 && initType.isScalar())
+            {
+                // A scalar initializer broadcasts to the declared vector just
+                // like its explicit constructor. Build the initializer once;
+                // all lanes share that value, including side effects.
+                const IRValueID folded = tryFoldVecConstruct(
+                    declaredType, {initValue}, varDecl->type->baseType);
+                initValue = folded != InvalidIRValue ? folded :
+                    emitInstruction(IROp::VecConstruct, declaredType, {initValue}, varDecl->loc);
+            }
             else if (declaredType.arraySize == 0 && !declaredType.isMatrix() && declaredType.isVector() &&
                      initType.isVector() && initType.arraySize == 0 && !initType.isMatrix() &&
                      initType.componentCount() > declaredType.componentCount())
@@ -5749,6 +5760,21 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 continue;
             }
             result = buildExpr(ret->value.get());
+            // Normalize a scalar return to the declared vector type before
+            // branch results are joined. Otherwise `return 0` gives the
+            // Select an int type and truncates the other vector arm to x.
+            // Reuse constructor conversion/folding and evaluate the returned
+            // expression once, just as an explicit float4(expression) does.
+            const IRTypeInfo returnType = getIRType(callee->returnType.get());
+            const IRTypeInfo valueType = getExprType(ret->value.get());
+            if (result != InvalidIRValue && returnType.isVector() && returnType.arraySize == 0 &&
+                valueType.isScalar() && valueType.arraySize == 0)
+            {
+                const IRValueID folded = tryFoldVecConstruct(returnType, {result},
+                    callee->returnType->baseType);
+                result = folded != InvalidIRValue ? folded :
+                    emitInstruction(IROp::VecConstruct, returnType, {result}, ret->loc);
+            }
             result = narrowToScalar(callee->returnType.get(), ret->value.get(), result);
             sawReturn = true;
             continue;
@@ -5821,8 +5847,12 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
             auto* ifs = static_cast<IfStmt*>(stmt);
             bool hasReturn = false;
             if (returnOnlyShape(ifs, hasReturn) && hasReturn &&
-                module_->shaderStage == ShaderStage::Fragment)
+                (module_->shaderStage == ShaderStage::Fragment ||
+                 module_->shaderStage == ShaderStage::Vertex))
             {
+                // Both backends lower the joined result and side effects
+                // through Select. Vertex helpers need the same continuation
+                // handling as fragment helpers; no entry Return is emitted.
                 // A constant part of the condition that the guard declines to
                 // fold (mixed int/float or half comparisons, aliases of them)
                 // would be folded here by the evaluator anyway, at our

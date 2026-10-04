@@ -9,6 +9,8 @@ pairs included, with the uniforms set to distinct per-lane values, and compares
 COLOR0 against pow() computed here.  Anything the decoder does not model -
 saturation, predication, condition-code updates, indexed inputs, a missing or
 early END - is REFUSED, never ignored.
+Helper-return checks explicitly opt into bank-0 vector condition-code updates
+and predicates; the default pow checks retain their strict instruction subset.
 
 The table follows sce-cgc 475 (measured 2026-09-25): 2 and 3 are multiplies,
 -1 / -0.5 / 0.5 use RCP / RSQ per lane, anything else is LG2 / MUL / EX2 per
@@ -49,7 +51,7 @@ INDEX_CONST = 1 << 1                    # word 3: address-register-relative cons
 COL0 = 1
 
 
-def evaluate(blob, uniforms, inputs=None, binary32=False):
+def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False):
     """Run a VP container; return {output register: [x, y, z, w]}."""
     u = lambda off: struct.unpack_from('>I', blob, off)[0]
     assert len(blob) >= 32 and u(0) == 7003, 'not a VP container'
@@ -66,16 +68,36 @@ def evaluate(blob, uniforms, inputs=None, binary32=False):
         if name in uniforms:
             consts[u(base + 12)] = list(uniforms[name])
     regs, outputs = {}, {}
+    cc = [None] * 4
     inputs = {0: [0.0, 0.0, 0.0, 1.0]} if inputs is None else inputs
     count = size // 16
     for n, pos in enumerate(range(off, off + size, 16)):
         w = struct.unpack_from('>4I', blob, pos)
         for bit, what in ((SAT, 'saturation'), (COND_TEST, 'predication'),
                           (COND_UPDATE, 'condition-code update'), (INDEX_INPUT, 'indexed input')):
+            if predication and bit in (COND_TEST, COND_UPDATE):
+                continue
             assert not (w[0] & bit), 'unsupported control in instruction %d: %s' % (n, what)
         assert not (w[3] & INDEX_CONST), 'unsupported control in instruction %d: indexed constant' % n
         assert bool(w[3] & 1) == (n == count - 1), 'END flag not on exactly the last instruction'
         vop, sop = (w[1] >> 22) & 31, (w[1] >> 27) & 31
+        enabled = [True] * 4
+        if predication and w[0] & (COND_TEST | COND_UPDATE):
+            assert not w[0] & (1 << 25), 'condition bank 1 is not modeled'
+            assert not (w[0] & COND_UPDATE) or (vop and not sop), 'co-issued/scalar CC update is not modeled'
+            if w[0] & COND_TEST:
+                mode = (w[0] >> 10) & 7
+                # A masked-off lane does not consume its condition code.
+                # Reference programs commonly initialize only CC.x before
+                # a predicated scalar-lane write with identity CC swizzles.
+                active_mask = (((w[3] >> 13) & 15) if vop else 0) | (((w[3] >> 17) & 15) if sop else 0)
+                for lane in range(4):
+                    if not active_mask & (8 >> lane):
+                        continue
+                    value = cc[(w[0] >> (8-2*lane)) & 3]
+                    assert value is not None and math.isfinite(value), 'predicate reads undefined/nonfinite CC'
+                    relation = 1 if value < 0 else 2 if value == 0 else 4
+                    enabled[lane] = bool(mode & relation)
         fields = [((w[1] & 255) << 9) | (w[2] >> 23), (w[2] >> 6) & 0x1ffff,
                   ((w[2] & 63) << 11) | (w[3] >> 21)]
 
@@ -93,7 +115,7 @@ def evaluate(blob, uniforms, inputs=None, binary32=False):
         if vop:
             a, b, c = source(fields[0], 0), source(fields[1], 1), source(fields[2], 2)
             mask = (w[3] >> 13) & 15
-            lanes = [j for j in range(4) if mask & (8 >> j)]
+            lanes = [j for j in range(4) if mask & (8 >> j) and enabled[j]]
             res = [None] * 4
             for j in lanes:
                 args = (a[j], b[j], c[j])
@@ -103,12 +125,12 @@ def evaluate(blob, uniforms, inputs=None, binary32=False):
                     width = 3 if vop == 5 else 4
                     assert all(a[k] is not None and b[k] is not None for k in range(width)), 'dot reads an undefined lane'
                     res[j] = sum(a[k] * b[k] for k in range(width))
-                elif vop in (2, 3, 4, 9, 10, 11, 12, 14, 15, 18, 20):
+                elif vop in (2, 3, 4, 9, 10, 11, 12, 14, 15, 16, 18, 19, 20):
                     # opcode numbers from nvfx_shader.h NVFX_VP_INST_VEC_OP_*:
                     # MIN 0x09, SLT 0x0B, FRC 0x0E, FLR 0x0F, SNE 0x14
                     need = {2: (0, 1), 3: (0, 2), 4: (0, 1, 2), 9: (0, 1), 10: (0, 1),
-                            11: (0, 1), 12: (0, 1), 14: (0,), 15: (0,), 18: (0, 1),
-                            20: (0, 1)}[vop]
+                            11: (0, 1), 12: (0, 1), 14: (0,), 15: (0,), 16: (0, 1), 18: (0, 1),
+                            19: (0, 1), 20: (0, 1)}[vop]
                     assert all(args[k] is not None for k in need), 'vector op reads an undefined lane'
                     res[j] = {2: lambda: a[j] * b[j], 3: lambda: a[j] + c[j],
                               4: lambda: a[j] * b[j] + c[j], 9: lambda: min(a[j], b[j]),
@@ -117,7 +139,9 @@ def evaluate(blob, uniforms, inputs=None, binary32=False):
                               12: lambda: float(a[j] >= b[j]),
                               14: lambda: a[j] - math.floor(a[j]),
                               15: lambda: float(math.floor(a[j])),
+                              16: lambda: float(a[j] == b[j]),
                               18: lambda: float(a[j] > b[j]),
+                              19: lambda: float(a[j] <= b[j]),
                               20: lambda: float(a[j] != b[j])}[vop]()
                 else:
                     raise AssertionError('unsupported vector opcode %d' % vop)
@@ -133,7 +157,7 @@ def evaluate(blob, uniforms, inputs=None, binary32=False):
                  14: lambda t: 2.0 ** t}.get(sop)
             assert v, 'unsupported scalar opcode %d' % sop
             mask = (w[3] >> 17) & 15
-            lanes = [j for j in range(4) if mask & (8 >> j)]
+            lanes = [j for j in range(4) if mask & (8 >> j) and enabled[j]]
             out = bool(w[3] & (1 << 12))
             dst = (w[3] >> 2) & 31 if out else (w[3] >> 7) & 31
             writes.append((out, dst, lanes, [v(x)] * 4))
@@ -143,9 +167,67 @@ def evaluate(blob, uniforms, inputs=None, binary32=False):
                 # Opt-in for rounding-sensitive probes. Legacy transcendental
                 # tests retain their wider host model. MAD rounds once here;
                 # separate MUL/ADD instructions each round at their own write.
-                target[j] = (struct.unpack('>f', struct.pack('>f', res[j]))[0]
-                             if binary32 and res[j] is not None else res[j])
+                value = (struct.unpack('>f', struct.pack('>f', res[j]))[0]
+                         if binary32 and res[j] is not None else res[j])
+                if predication and w[0] & COND_UPDATE:
+                    cc[j] = value
+                if out or dst != 63:  # vector destination sentinel: CC-only write
+                    target[j] = value
     return outputs
+
+
+def predication_selftest():
+    """Independent MOV-only instrument controls, without invoking a compiler."""
+    def mov(*, output=False, update=False, test=False, negate=False, mask=15):
+        # Input register 0, identity source swizzle; output 0 or CC-only.
+        src = 2 | (1 << 12) | (2 << 10) | (3 << 8) | (0x10000 if negate else 0)
+        w0 = (63 << 15) | ((5 if test else 7) << 10)
+        if output:
+            w0 |= 1 << 30
+        if update:
+            w0 |= COND_UPDATE
+        if test:
+            w0 |= COND_TEST  # all predicate lanes read CC.x
+        return [w0, (1 << 22) | (src >> 9), (src & 511) << 23, (mask << 13) | (31 << 7)]
+
+    words = [mov(output=True), mov(update=True, mask=8), mov(output=True, test=True, negate=True)]
+    words[-1][3] |= 1
+
+    def container(instructions):
+        code = b''.join(struct.pack('>4I', *w) for w in instructions)
+        return struct.pack('>8I', 7003, 6, 80 + len(code), 0, 32, 32, len(code), 80) + bytes(48) + code
+
+    for x in (-0.25, 0.0, 0.25):
+        value = [x, 0.5, -1.0, 2.0]
+        want = [-v for v in value] if x else value
+        assert evaluate(container(words), {}, {0: value}, predication=True)[0] == want
+
+    missing_cc = [w.copy() for w in words]
+    missing_cc[1][0] &= ~COND_UPDATE
+    try:
+        evaluate(container(missing_cc), {}, {0: [1.0] * 4}, predication=True)
+    except AssertionError as error:
+        assert 'undefined/nonfinite CC' in str(error)
+    else:
+        raise AssertionError('VP instrument accepted an uninitialized predicate')
+
+    reversed_cc = [w.copy() for w in words]
+    reversed_cc[2][0] = (reversed_cc[2][0] & ~(7 << 10)) | (2 << 10)  # EQ instead of NE
+    assert evaluate(container(reversed_cc), {}, {0: [1.0] * 4}, predication=True)[0] == [1.0] * 4
+    # Independently encode SLE input.xyzw, input.wwww: cover less/equal/
+    # greater and make an SGT opcode mutant observably disagree.
+    sle = mov(output=True)
+    sle[1] = (sle[1] & ~(31 << 22)) | (19 << 22)
+    rhs = 2 | sum(3 << (14-2*j) for j in range(4))
+    sle[2] = (sle[2] & ~(0x1ffff << 6)) | (rhs << 6)
+    sle[3] |= 1
+    value = [0.25, 0.5, 0.75, 0.5]
+    assert evaluate(container([sle]), {}, {0: value})[0] == [1, 1, 0, 1]
+    sle[1] = (sle[1] & ~(31 << 22)) | (18 << 22)
+    assert evaluate(container([sle]), {}, {0: value})[0] == [0, 0, 1, 0]
+    sle[1] = (sle[1] & ~(31 << 22)) | (16 << 22)
+    assert evaluate(container([sle]), {}, {0: value})[0] == [0, 1, 0, 1]
+    print('VP instrument: predication and SLE/SEQ boundary controls PASS')
 
 
 def scalar_sources_to_x(blob):
