@@ -132,6 +132,9 @@ jobs:
       - name: Test uppercase swizzles are refused like the reference
         run: bash tests/shader-compiler/uppercase-swizzle-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test a missing entry point is refused cleanly on both profiles
+        run: bash tests/shader-compiler/missing-entry-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Check every tracked test has a CI invocation
         run: python3 tests/ci-test-list-test.py
 

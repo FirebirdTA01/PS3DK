@@ -2173,6 +2173,9 @@ void SemanticAnalyzer::validateShader()
 
     checkNonEntrySemantics();
 
+    if (!shaderInfo_.entryPoint)   // validateEntryPoint already reported it
+        return;
+
     if (shaderInfo_.stage == ShaderStage::Vertex)
     {
         validateVertexShader();
