@@ -624,7 +624,7 @@ jobs:
 
       - name: Vector !, && and || judged by value against Cg semantics
         run: bash tests/shader-compiler/bool-vector-logic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Vector ?: conditions judged by value against Cg semantics
+      - name: "Vector ?: conditions judged by value against Cg semantics"
         run: bash tests/shader-compiler/vector-select-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Backend refusals lead with the unsupported construct
         run: bash tests/shader-compiler/backend-diagnostics-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -795,7 +795,7 @@ jobs:
         run: bash tests/shader-compiler/extension-flags-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the leading UTF-8 BOM extension in both modes
         run: bash tests/shader-compiler/extension-bom-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Test the leading UTF-16 BOM extension in both modes (strict transcode: odd / NUL / surrogate refuse)
+      - name: "Test the leading UTF-16 BOM extension in both modes (strict transcode: odd / NUL / surrogate refuse)"
         run: bash tests/shader-compiler/extension-utf16-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Census every fixture in both extension modes (the flag moves only what it names)
         run: bash tests/shader-compiler/extension-mode-census-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
