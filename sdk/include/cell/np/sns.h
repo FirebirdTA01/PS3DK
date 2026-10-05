@@ -3,8 +3,12 @@
 
 #include <stdint.h>
 
+#ifdef __PPU__
+#include <ppu-types.h>   /* ATTRIBUTE_PRXPTR */
+#else
 #ifndef ATTRIBUTE_PRXPTR
 #define ATTRIBUTE_PRXPTR
+#endif
 #endif
 
 #ifdef __cplusplus

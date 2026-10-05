@@ -16,6 +16,21 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- **LP64 ABI correction: `<cell/np/sns.h>`.**  The header now includes
+  `<ppu-types.h>` on PPU, so the pointer fields of
+  `SceNpSnsFbInitParams` (`pool`) and `SceNpSnsFbStreamPublishParam`
+  (`message`, `name`, `caption`, `description`, `link`, `picture`,
+  `data`) are 32-bit under `-mlp64` whatever the include order.  Before,
+  including the header ahead of `<ppu-types.h>` gave 64-bit fields that
+  do not match the firmware layout.  ILP32 (the default) is unchanged.
+- `<cell/np/commerce.h>`, `<cell/np/commerce2.h>`,
+  `<cell/np/custom_menu.h>`, `<cell/np/matching.h>`, `<cell/np/score.h>`,
+  `<cell/np/tus.h>` and `<cell/np2/matching2.h>` now include
+  `<ppu-types.h>` themselves on PPU instead of relying on
+  `<cell/np/common.h>`.  No layout change.
+
 ## [v0.20.0] — 2026-10-05
 
 ### Added
