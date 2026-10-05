@@ -87,8 +87,8 @@ typedef void sys_raw_spu_attribute_t;
 #endif
 
 /* Effective address of a problem-state register / a local store byte. */
-#define get_reg_addr(id, offset) ((volatile uintptr_t)(PROB_BASE_ADDR(id) + (offset)))
-#define get_ls_addr(id, offset)  ((volatile uintptr_t)(LS_BASE_ADDR(id) + (offset)))
+#define get_reg_addr(id, offset) ((uintptr_t)(PROB_BASE_ADDR(id) + (offset)))
+#define get_ls_addr(id, offset)  ((uintptr_t)(LS_BASE_ADDR(id) + (offset)))
 
 static inline void sys_raw_spu_mmio_write(int id, int offset, uint32_t value)
 {

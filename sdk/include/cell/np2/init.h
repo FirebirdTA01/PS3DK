@@ -4,8 +4,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef __PPU__
+#include <ppu-types.h>   /* ATTRIBUTE_PRXPTR, as cell/np2/matching2.h gets it */
+#else
 #ifndef ATTRIBUTE_PRXPTR
 #define ATTRIBUTE_PRXPTR
+#endif
 #endif
 
 #ifdef __cplusplus

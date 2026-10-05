@@ -6,6 +6,15 @@
 #include <stdbool.h>
 #include <cell/sail/common.h>
 #include <cell/sail/descriptor.h>
+/* the component types the cellSailPlayerAdd* calls take */
+#include <cell/sail/source.h>
+#include <cell/sail/sound_adapter.h>
+#include <cell/sail/graphics_adapter.h>
+#include <cell/sail/au_receiver.h>
+#include <cell/sail/renderer_audio.h>
+#include <cell/sail/renderer_video.h>
+#include <cell/sail/feeder_audio.h>
+#include <cell/sail/feeder_video.h>
 #ifdef __PPU__
 #include <ppu-types.h>
 #else

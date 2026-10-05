@@ -17,3 +17,4 @@
 0018-psl1ght-compat-oskdialog-wrappers.patch
 0020-psl1ght-compat-gcm-sysmodule-aliases.patch
 0021-librsx-callback-abi-clobbers.patch
+0022-ppu-header-hygiene-pointer-casts.patch

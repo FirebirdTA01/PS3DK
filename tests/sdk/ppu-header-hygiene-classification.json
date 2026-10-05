@@ -107,6 +107,83 @@
       "c++17"
     ]
   },
+  "cell/daisy.h": {
+    "owner": "cell/daisy.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/ato_qctl.h": {
+    "owner": "cell/daisy/ato_qctl.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/buffer.h": {
+    "owner": "cell/daisy/buffer.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/daisy_defs.h": {
+    "owner": "cell/daisy/daisy_defs.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/lfqueue2_types.h": {
+    "owner": "cell/daisy/lfqueue2_types.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/local_buffer.h": {
+    "owner": "cell/daisy/local_buffer.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/lock.h": {
+    "owner": "cell/daisy/lock.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/lqctl.h": {
+    "owner": "cell/daisy/lqctl.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/pipe.h": {
+    "owner": "cell/daisy/pipe.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/qctl.h": {
+    "owner": "cell/daisy/qctl.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
+  "cell/daisy/return_code.h": {
+    "owner": "cell/daisy/return_code.h",
+    "reason": "libdaisy is a C++-only library (namespace cell::Daisy class templates); it has no C interface.",
+    "standards": [
+      "c++17"
+    ]
+  },
   "cell/gcm/gcm_cg_bridge.h": {
     "owner": "cell/gcm.h",
     "reason": "Command implementation layer included by cell/gcm.h after CellGcmContextData and public command types are declared.",
@@ -134,6 +211,15 @@
       "c++17"
     ]
   },
+  "cell/gcm/gcm_command_cpp_explicit.h": {
+    "owner": "cell/gcm.h",
+    "reason": "Generated cell::Gcm::CellGcmContext member layer included at the end of cell/gcm.h, after CellGcmContextData and every cellGcm* command it forwards to are declared.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
   "cell/gcm/gcm_tex_bridge.h": {
     "owner": "cell/gcm.h",
     "reason": "Command implementation layer included by cell/gcm.h after CellGcmContextData and public command types are declared.",
@@ -143,9 +229,423 @@
       "c++17"
     ]
   },
+  "cell/spurs/job_queue_cpp_types.h": {
+    "owner": "cell/spurs/job_queue.h",
+    "reason": "C++ wrapper layer included at the end of cell/spurs/job_queue.h, after the job-queue namespace macros (cell/spurs/job_queue_define.h) and the C entry points it wraps are declared.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "cell/spurs/job_queue_port2_cpp_types.h": {
+    "owner": "cell/spurs/job_queue_port2.h",
+    "reason": "C++ wrapper layer included at the end of cell/spurs/job_queue_port2.h, after the job-queue namespace macros (cell/spurs/job_queue_define.h) and the C entry points it wraps are declared.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "cell/spurs/job_queue_port_cpp_types.h": {
+    "owner": "cell/spurs/job_queue_port.h",
+    "reason": "C++ wrapper layer included at the end of cell/spurs/job_queue_port.h, after the job-queue namespace macros (cell/spurs/job_queue_define.h) and the C entry points it wraps are declared.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
   "rsx/commands_inc.h": {
     "owner": "rsx/commands.h",
     "reason": "Command declaration fragment instantiated by commands.h with RSX_FUNC and RSX_CONTEXT defined.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_absi4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_acosf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_asinf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_atan2f4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_atanf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_cbrtf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_ceilf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_copysignf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_cosf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_divf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_divi4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_exp2f4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_expf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_expm1f4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_fabsf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_fdimf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_floorf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_fmaf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_fmaxf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_fminf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_fmodf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_frexpf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_hypotf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_ilogbf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_ldexpf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_log10f4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_log1pf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_log2f4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_logbf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_logf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_modff4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_negatef4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_negatei4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_powf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_recipf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_remainderf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_rsqrtf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_sincosf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_sinf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_sqrtf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_tanf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/_truncf4.h": {
+    "owner": "simdmath.h",
+    "reason": "Per-function inline body (_name) included by simdmath.h, which declares the public names it calls and then defines each public name over it; its own #include <simdmath.h> re-enters the umbrella before the body exists.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
+  "simdmath/fastf4.h": {
+    "owner": "simdmath.h",
+    "reason": "f4fast forms written over the __fm_* vector layer that simdmath.h (or a host test) defines for the target before including it.",
     "standards": [
       "gnu99",
       "c11",

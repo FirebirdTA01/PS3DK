@@ -1,0 +1,289 @@
+Subject: [PATCH] ppu headers: ILP32-clean syscall pointer casts, missing stdint
+
+Each of these headers fails a standalone -Wall -Wextra -Werror compile on
+the PPU, which every user of them inherits:
+
+- sys/file.h, sys/interrupt.h, sys/tty.h cast pointer arguments straight
+  to u64.  Under ILP32 that is a pointer-to-integer cast of a different
+  size (-Wpointer-to-int-cast).  Cast through uintptr_t first, as the
+  rest of the SDK's lv2 wrappers do.  The value is unchanged: the target
+  extends pointers unsigned (POINTERS_EXTEND_UNSIGNED 1), which is what
+  the uintptr_t step spells out.
+- sys/usbd.h passed pointers to the syscall register variables with no
+  cast at all (-Wint-conversion in C, an error in C++), and two wrappers
+  passed an undeclared `unk1` where their deviceNumber parameter was
+  meant, so the header could not be included.
+- mars/base.h cast to `const uintptr_t`; a qualifier on a cast result is
+  ignored (-Wignored-qualifiers in C++).
+- ssl/ssl.h used uint32_t and friends without including <stdint.h>.
+
+No declaration, type or layout changes.
+
+diff --git a/common/libspumars/include/ppu/mars/base.h b/common/libspumars/include/ppu/mars/base.h
+index 2084060..b37d7aa 100644
+--- a/common/libspumars/include/ppu/mars/base.h
++++ b/common/libspumars/include/ppu/mars/base.h
+@@ -240,7 +240,7 @@ static inline void *mars_ea_to_ptr(uint64_t ea)
+  */
+ static inline uint64_t mars_ptr_to_ea(const void *ptr)
+ {
+-	return (uint64_t)(const uintptr_t)ptr;
++	return (uint64_t)(uintptr_t)ptr;
+ }
+ 
+ /**
+diff --git a/ppu/include/ssl/ssl.h b/ppu/include/ssl/ssl.h
+index d4d8084..9bb824b 100644
+--- a/ppu/include/ssl/ssl.h
++++ b/ppu/include/ssl/ssl.h
+@@ -1,6 +1,8 @@
+ #ifndef __SSL_H__
+ #define __SSL_H__
+ 
++#include <stdint.h>
++
+ 
+ #define SSL_CIPHER_UNKNOWN                         (-1)
+ #define SSL_CIPHER_RSA_WITH_3DES_EDE_CBC_SHA       (0)
+diff --git a/ppu/include/sys/file.h b/ppu/include/sys/file.h
+index e88fa8f..5065f99 100644
+--- a/ppu/include/sys/file.h
++++ b/ppu/include/sys/file.h
+@@ -14,7 +14,7 @@
+ 
+ LV2_SYSCALL sysLv2FsOpen(const char *path,s32 oflags,s32 *fd,u32 mode,const void *arg,u64 argsize)
+ {
+-	lv2syscall6(801,(u64)path,oflags,(u64)fd,mode,(u64)arg,argsize);
++	lv2syscall6(801,(u64)(uintptr_t)path,oflags,(u64)(uintptr_t)fd,mode,(u64)(uintptr_t)arg,argsize);
+ 	return_to_user_prog(s32);
+ }
+ 
+@@ -26,43 +26,43 @@ LV2_SYSCALL sysLv2FsClose(s32 fd)
+ 
+ LV2_SYSCALL sysLv2FsRead(s32 fd,void *ptr,u64 len,u64 *read)
+ {
+-	lv2syscall4(802,fd,(u64)ptr,len,(u64)read);
++	lv2syscall4(802,fd,(u64)(uintptr_t)ptr,len,(u64)(uintptr_t)read);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsWrite(s32 fd,const void *ptr,u64 len,u64 *written)
+ {
+-	lv2syscall4(803,fd,(u64)ptr,len,(u64)written);
++	lv2syscall4(803,fd,(u64)(uintptr_t)ptr,len,(u64)(uintptr_t)written);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsStat(const char *path,sysFSStat *stat)
+ {
+-	lv2syscall2(808,(u64)path,(u64)stat);
++	lv2syscall2(808,(u64)(uintptr_t)path,(u64)(uintptr_t)stat);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsFStat(s32 fd,sysFSStat *stat)
+ {
+-	lv2syscall2(809,fd,(u64)stat);
++	lv2syscall2(809,fd,(u64)(uintptr_t)stat);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsChmod(const char *path,s32 mode)
+ {
+-	lv2syscall2(834,(u64)path,mode);
++	lv2syscall2(834,(u64)(uintptr_t)path,mode);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsOpenDir(const char *path,s32 *fd)
+ {
+-	lv2syscall2(805,(u64)path,(u64)fd);
++	lv2syscall2(805,(u64)(uintptr_t)path,(u64)(uintptr_t)fd);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsReadDir(s32 fd,sysFSDirent *entry,u64 *read)
+ {
+-	lv2syscall3(806,fd,(u64)entry,(u64)read);
++	lv2syscall3(806,fd,(u64)(uintptr_t)entry,(u64)(uintptr_t)read);
+ 	return_to_user_prog(s32);
+ }
+ 
+@@ -74,31 +74,31 @@ LV2_SYSCALL sysLv2FsCloseDir(s32 fd)
+ 
+ LV2_SYSCALL sysLv2FsMkdir(const char *path,s32 mode)
+ {
+-	lv2syscall2(811,(u64)path,mode);
++	lv2syscall2(811,(u64)(uintptr_t)path,mode);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsRename(const char *path,const char *newpath)
+ {
+-	lv2syscall2(812,(u64)path,(u64)newpath);
++	lv2syscall2(812,(u64)(uintptr_t)path,(u64)(uintptr_t)newpath);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsRmdir(const char *path)
+ {
+-	lv2syscall1(813,(u64)path);
++	lv2syscall1(813,(u64)(uintptr_t)path);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsLSeek64(s32 fd,u64 offset,s32 dir,u64 *pos)
+ {
+-	lv2syscall4(818,fd,offset,dir,(u64)pos);
++	lv2syscall4(818,fd,offset,dir,(u64)(uintptr_t)pos);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsUnlink(const char *path)
+ {
+-	lv2syscall1(814,(u64)path);
++	lv2syscall1(814,(u64)(uintptr_t)path);
+ 	return_to_user_prog(s32);
+ }
+ 
+@@ -110,7 +110,7 @@ LV2_SYSCALL sysLv2FsFsync(s32 fd)
+ 
+ LV2_SYSCALL sysLv2FsTruncate(const char *path,u64 size)
+ {
+-	lv2syscall2(831,(u64)path,size);
++	lv2syscall2(831,(u64)(uintptr_t)path,size);
+ 	return_to_user_prog(s32);
+ }
+ 
+@@ -122,31 +122,31 @@ LV2_SYSCALL sysLv2FsFtruncate(s32 fd,u64 size)
+ 
+ LV2_SYSCALL sysLv2FsUtime(const char *path,const sysFSUtimbuf *times)
+ {
+-	lv2syscall2(815,(u64)path,(u64)times);
++	lv2syscall2(815,(u64)(uintptr_t)path,(u64)(uintptr_t)times);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysLv2FsLink(const char *oldpath,const char *newpath)
+ {
+-	lv2syscall2(810,(u64)oldpath,(u64)newpath);
++	lv2syscall2(810,(u64)(uintptr_t)oldpath,(u64)(uintptr_t)newpath);
+ 	return_to_user_prog(s32);
+ }
+ 	
+ LV2_SYSCALL sysLv2FsMount(const char *deviceName, const char *deviceFileSystem, const char *devicePath, int writeProt) 
+ {
+-	lv2syscall8(837, (u64) deviceName, (u64) deviceFileSystem, (u64) devicePath, 0, (u64) writeProt, 0, 0, 0);
++	lv2syscall8(837, (u64)(uintptr_t)deviceName, (u64)(uintptr_t)deviceFileSystem, (u64)(uintptr_t)devicePath, 0, (u64) writeProt, 0, 0, 0);
+ 	return_to_user_prog(int);
+ }
+ 
+ LV2_SYSCALL sysLv2FsUnmount(const char *devicePath) 
+ {
+-	lv2syscall3(838, (u64) devicePath, 0, 0);
++	lv2syscall3(838, (u64)(uintptr_t)devicePath, 0, 0);
+ 	return_to_user_prog(int);
+ }
+ 
+ LV2_SYSCALL sysLv2FsChown(const char *path, s32 uid, s32 gid)
+ {
+-	lv2syscall3(835, (u64) path, (u64) uid, (u64) gid);
++	lv2syscall3(835, (u64)(uintptr_t)path, (u64) uid, (u64) gid);
+ 	return_to_user_prog(int);
+ }
+ 
+diff --git a/ppu/include/sys/interrupt.h b/ppu/include/sys/interrupt.h
+index 4e6529b..8637176 100644
+--- a/ppu/include/sys/interrupt.h
++++ b/ppu/include/sys/interrupt.h
+@@ -18,7 +18,7 @@ extern "C" {
+ 
+ LV2_SYSCALL sysInterruptTagCreate(sys_interrupt_tag_t *intrTag,sys_irqoutlet_id_t irq,sys_hw_thread_t hwThread)
+ {
+-	lv2syscall3(80, (u64)intrTag, irq, hwThread);
++	lv2syscall3(80, (u64)(uintptr_t)intrTag, irq, hwThread);
+ 	return_to_user_prog(s32);
+ }
+ 
+@@ -30,13 +30,13 @@ LV2_SYSCALL sysInterruptTagDestroy(sys_interrupt_tag_t intrTag)
+ 
+ LV2_SYSCALL sysInterruptThreadEstablish(sys_interrupt_thread_handle_t *ih,sys_interrupt_tag_t intrTag,sys_ppu_thread_t intrThread,u64 arg)
+ {
+-	lv2syscall5(84, (u64)ih, intrTag, intrThread, arg, 0);
++	lv2syscall5(84, (u64)(uintptr_t)ih, intrTag, intrThread, arg, 0);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL _sysInterruptThreadDisestablish(sys_interrupt_thread_handle_t ih,u64 * tlsMem)
+ {
+-	lv2syscall2(89, ih, (u64)tlsMem);
++	lv2syscall2(89, ih, (u64)(uintptr_t)tlsMem);
+ 	return_to_user_prog(s32);
+ }
+ 
+diff --git a/ppu/include/sys/tty.h b/ppu/include/sys/tty.h
+index d8e640b..d78b0cf 100644
+--- a/ppu/include/sys/tty.h
++++ b/ppu/include/sys/tty.h
+@@ -13,13 +13,13 @@
+ 
+ LV2_SYSCALL sysTtyWrite(s32 channel,const void *ptr,u32 len,u32 *written)
+ {
+-	lv2syscall4(403,channel,(u64)ptr,len,(u64)written);
++	lv2syscall4(403,channel,(u64)(uintptr_t)ptr,len,(u64)(uintptr_t)written);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysTtyRead(s32 channel,void *ptr,u32 len,u32 *read)
+ {
+-	lv2syscall4(402,channel,(u64)ptr,len,(u64)read);
++	lv2syscall4(402,channel,(u64)(uintptr_t)ptr,len,(u64)(uintptr_t)read);
+ 	return_to_user_prog(s32);
+ }
+ 
+diff --git a/ppu/include/sys/usbd.h b/ppu/include/sys/usbd.h
+index 69cfd81..9f3380d 100644
+--- a/ppu/include/sys/usbd.h
++++ b/ppu/include/sys/usbd.h
+@@ -9,35 +9,35 @@
+ 
+ LV2_SYSCALL sysUsbdInitialize(u32 *initVal)
+ {
+-	lv2syscall1(530, initVal);
++	lv2syscall1(530, (u64)(uintptr_t)initVal);
+ 	return_to_user_prog(s32);
+ }
+ LV2_SYSCALL sysUsbdGetDeviceList(u32 handle, void *device_list, char unknown)
+ {
+-	lv2syscall3(532, handle, device_list, unknown);
++	lv2syscall3(532, handle, (u64)(uintptr_t)device_list, unknown);
+ 	return_to_user_prog(s32);
+ }
+ LV2_SYSCALL sysUsbdGetDescriptorSize(u32 handle, u8 deviceNumber)
+ {
+-	lv2syscall2(533, handle, unk1);
++	lv2syscall2(533, handle, deviceNumber);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysUsbdGetDescriptor(u32 handle, u8 deviceNumber, void *descriptor, s64 descSize)
+ {
+-	lv2syscall4(534, handle, unk1, descriptor, descSize);
++	lv2syscall4(534, handle, deviceNumber, (u64)(uintptr_t)descriptor, descSize);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysUsbdReceiveEvent(u32 handle, u64 *unk1, u64 *unk2, u64 *unk3)
+ {
+-	lv2syscall4(540, handle, unk1, unk2, unk3);
++	lv2syscall4(540, handle, (u64)(uintptr_t)unk1, (u64)(uintptr_t)unk2, (u64)(uintptr_t)unk3);
+ 	return_to_user_prog(s32);
+ }
+ 
+ LV2_SYSCALL sysUsbdRegisterExtraLdd(u32 handle, void *lddOps, u16 strLen, u16 vendorID, u16 productID, u16 unk1)
+ {
+-	lv2syscall6(559, handle, lddOps, strLen, vendorID, productID, unk1);
++	lv2syscall6(559, handle, (u64)(uintptr_t)lddOps, strLen, vendorID, productID, unk1);
+ 	return_to_user_prog(s32);
+ }
+ 

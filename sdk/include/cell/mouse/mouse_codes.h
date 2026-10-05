@@ -4,6 +4,8 @@
 #ifndef PS3TC_CELL_MOUSE_MOUSE_CODES_H
 #define PS3TC_CELL_MOUSE_MOUSE_CODES_H
 
+#include <stdint.h>   /* CellMouseInfoTablet */
+
 #define CELL_MAX_MICE                                127
 #define CELL_MOUSE_INFO_INTERCEPTED                  (1 << 0)
 /* cellMouseInfoTabletMode: whether the device can act as a tablet, and the

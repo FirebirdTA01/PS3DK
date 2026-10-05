@@ -4,6 +4,14 @@
  * Used by job-chain + workload + global exception handlers.  The 24-byte
  * CellSpursExceptionInfo layout matches the SPRX wire shape.
  */
+
+/* Outside the guard: in C++, cell/spurs/types.h ends with class wrappers
+ * that include this header (through cell/spurs/exception.h) and use its
+ * handler types.  Entering types.h first lets that inner include define
+ * them before the wrappers need them; this file's own pass is then a
+ * no-op. */
+#include <cell/spurs/types.h>
+
 #ifndef __PS3DK_CELL_SPURS_EXCEPTION_TYPES_H__
 #define __PS3DK_CELL_SPURS_EXCEPTION_TYPES_H__
 
@@ -12,7 +20,6 @@
 #include <sys/types.h>
 #include <sys/spu_thread.h>
 #endif
-#include <cell/spurs/types.h>
 
 #ifdef __cplusplus
 extern "C" {
