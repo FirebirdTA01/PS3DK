@@ -16,20 +16,178 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-### Removed
+## [v0.20.0] — 2026-10-05
 
-- **rsx-cg-compiler: the legacy NV40 shape matcher.**  The general
-  lowering is the only back end.  `--legacy-lowering` and
-  `RSXCG_GENERAL=0` now fail with a message saying the matcher was
-  removed; `--general-lowering` is still accepted and does nothing.
+### Added
+
+- **rsx-cg-compiler: named extensions.**  `--extension=<name>`
+  (repeatable) enables one opt-in language extension and
+  `--list-extensions` prints the table.  Every extension is off by
+  default, an unknown name is refused, and a source that needs one is
+  refused with a diagnostic naming the exact flag.  The extensions:
+  `bom` (a leading UTF-8 byte order mark, in the main source and in
+  `#include` files), `utf16` (a source starting with a UTF-16LE or
+  UTF-16BE byte order mark, transcoded strictly; an odd length, an
+  unpaired surrogate or a NUL is still refused), `declarator-types`
+  (`float3 a = ..., b = ...;` gives `b` the declared type),
+  `static-parameters` (`static` on helper parameters), `glsl-functions`
+  (`fract`, `mix` and floor-remainder `mod`) and `glsl-types` (`vec2..4`,
+  `ivec`, `bvec`, `dvec`, `mat2..4` and `matRxC`, with Cg row-major
+  shapes and conversions).
+- **rsx-cg-compiler: matrices.**  Non-square `float3x4` / `float4x3`;
+  matrix constructors from scalars, vectors and mixed arguments (packed
+  row-major), local `bool` matrices and arrays of matrices; vector-times-
+  matrix and matrix-times-vector products in both profiles, including
+  two-column and one-dimensional forms; scalar-times-matrix,
+  component-wise matrix arithmetic, `determinant` and `transpose`;
+  constant-index stores into a matrix row; matrix uniforms in fragment
+  programs (with a relocation entry per row), indexed vertex-program
+  matrix uniforms, and file-scope `const` matrices folded to literal
+  rows.
+- **rsx-cg-compiler: arrays, structs, statics and initialisers.**
+  Array uniforms (constant indices in both profiles, run-time indices in
+  vertex programs); local, file-scope and nested brace initialisers,
+  flattened initialiser lists and unsized arrays that take the
+  initialiser's length; `static` and `static const` file-scope values,
+  including mutable statics and statics whose initialiser is computed at
+  program start; uniform struct entry parameters (one uniform per
+  member, nested and shadowed structs included), struct initialisation
+  from a scalar, nested local struct initialisers and identical struct
+  redefinitions; file-scope `typedef` aliases, multi-declarator
+  declarations, the comma operator, constant-expression array sizes,
+  `inline`, the `texobj` sampler spellings, and `double` (as `float`).
+- **rsx-cg-compiler: control flow and helpers.**  Static `for` loops with
+  a provable trip count are expanded (up to 64 iterations), in the entry
+  and in helpers.  Helpers may contain `if`/`else`, return early under a
+  constant or run-time condition, call other helpers, and take `out` and
+  `inout` parameters.  A fragment program whose other exits all
+  `discard` may return normally.  `!`, `&&`, `||` and `?:` work
+  component-wise on vectors, and an empty statement is accepted.
+- **rsx-cg-compiler: standard library.**  `fmod`, `modf`, `any`, `all`,
+  `lit`, the pack/unpack family, `tex1D`, `tex2Dproj`, `tex2Dlod`,
+  `tex2Dbias`, `tex3D`, the precision-prefixed texture overloads
+  (`f4tex2D`, `h2tex2D`, `h3texCUBE` and the rest), `tex2D` with a
+  `float3` coordinate, packed depth texture fetches, `float3`/`float4`
+  `ddx`/`ddy`, and vertex texture fetch.  Vertex programs gain `pow` on
+  vectors, `reflect`, `refract`, `lerp`, `normalize` on `float2`,
+  division and the scalar intrinsics.
+- **rsx-cg-compiler: inputs, outputs and reflection.**  Vertex inputs
+  `TANGENT`, `BINORMAL`, `BLENDWEIGHT` and `BLENDINDICES`; fragment
+  inputs with no semantic (bare or as struct members) take the lowest
+  free `TEXCOORD` the program reads; sampler members of a varying struct
+  and samplers among the entry's inputs become uniforms; explicit
+  sampler units (`TEXUNITn`, `register(sN)`) are honoured; multiple
+  render target outputs keep their declared precision; vertex point-size
+  and clip-distance outputs are kept.  Fragment reflection records
+  `WPOS`, `COLOR0`..`COLOR3` and `samplerRECT`, and an initialised
+  uniform's default value reaches the parameter table.  `__CGC__` is
+  predefined, so headers written for Cg take their Cg branch.  A
+  fragment program with no effect (`void main() {}`) compiles to a
+  one-instruction program.
+- **`scripts/which-copy.sh` and the installed-copy map.**  Some sources
+  exist in two copies and only one is built into the installed SDK.
+  `scripts/installed-copy-map.tsv` and `docs/installed-copy-map.md`
+  name the installed copy of each, `scripts/which-copy.sh` answers which
+  copy an installed artefact comes from, and
+  `scripts/verify-installed-copy-map.sh` checks an install against the
+  map.  The SDK and runtime builds log a `REPLACING` line whenever they
+  overwrite a PSL1GHT artefact.
+
+### Changed
+
+- **`cellGcmInit` uses the whole command buffer it is given.**  The
+  requested command-buffer size is validated against the IO mapping and
+  becomes the FIFO's extent, keeping the reserved prefix and the tail
+  jump; a larger admitted buffer means fewer wraps.  A size that is not
+  word-aligned, smaller than 12 bytes, larger than the IO size, or not
+  contiguously mapped makes `cellGcmInit` return an error.
+- **rsx-cg-compiler refuses shapes it used to accept wrongly.**  A
+  vertex program that never writes `POSITION` (C6014); a run-time index
+  into a vector (C1011; it used to read lane `x` whatever the index); a
+  fragment program that would encode a temporary register index of 48 or
+  more; a write through a `const` helper parameter; a semantic on a
+  struct-typed member or selected-entry parameter (helper annotations
+  are accepted without input binding); a return semantic on a called
+  function; a struct redefined with a difference (C1047); one
+  semantic-less struct type used by two fragment inputs; a flattened
+  uniform struct used as a whole value; and conflicting explicit
+  constant bindings.
+- **rsx-cg-compiler register layout.**  A vertex uniform that is never
+  read and has no explicit binding takes no `c[]` register, so the
+  registers of the uniforms after it and of the literal pool move.  A
+  vector stored into a scalar keeps lane `x`, and in a declarator list
+  a later declarator takes the type named in an earlier initialiser
+  (default mode; `--extension=declarator-types` keeps the declared
+  type, and the default mode warns where the rule changes a type).
+- **rsx-cg-compiler diagnostics.**  Errors report the file and line the
+  author wrote, not a position in the composed unit; an unknown local
+  type is reported once; and an unsupported construct is named (the
+  operation, callee, or input with its type and semantic) instead of a
+  generic emitter failure.
+
 ### Fixed
 
+- **Switch statements could jump to the wrong address (PPU compiler,
+  ILP32).**  A relative jump-table target was formed with a 64-bit add,
+  so a negative table offset could set bit 32 of the branch address.
+  The target is now truncated to 32 bits before the branch.  LP64 and
+  absolute jump tables are unchanged.
+- **gcm callback calls are plain C calls.**  The FIFO wrap callback was
+  invoked through inline assembly whose register saves could overlap
+  the callee's argument save area, corrupting registers around the
+  callback.  `cellGcm*` and `rsx*` now call it as an ordinary C
+  function in both ABIs, and the context fields the callback rewrites
+  are re-read after it.
 - **`cellGcmSetTransferData` / `rsxSetTransferData` no longer overrun the
   command buffer.**  Every call with an ordinary pitch took the
   row-by-row path and never stopped emitting commands.  Pitches are now
   signed, a pitch outside -32768..32767 is copied one row per command
   with both offsets advanced, and a pitch of 32768 is treated as out of
   range.  Fixed in both `libgcm_cmd` and `librsx`.
+- **rsx-cg-compiler wrong code.**  Fixed: swizzles of swizzles and
+  constant vector indices; struct field updates and partial vector
+  fields in struct outputs; a scalar-to-vector cast (a broadcast, not a
+  bitcast); `half` values computed at full precision; a texture fetch's
+  precision; a uniform `pow` exponent read from lane `x`; a value reused
+  from a block that does not dominate its use; an uninitialised local
+  joined at an `if` taking the other arm's value; numeric values used as
+  conditions; `clamp(x, 0, 1)` in fragment programs; fog computed before
+  an alpha kill; `normalize` of a `float4` ignoring `w`; a fragment
+  instruction reading two different `COLOR` inputs; two inline constant
+  blocks on one fragment instruction; a swizzled write to a file-scope
+  uniform; `half` temporaries assigned unusable or out-of-range register
+  numbers (allocation now renumbers whole slots, preserving aliases, and
+  keeps conservative register limits); `fixed` constant conversions; and
+  denormal `half` constants (now flushed to zero).  A fragment entry's
+  return type is honoured at the colour output, and a declared `half`
+  colour output is written in `half`.
+- **rsx-cg-compiler preprocessor.**  Macros expand with hide sets,
+  `defined` is resolved during expansion, a macro is function-like only
+  when `(` touches its name, arguments the body never names are still
+  scanned, and a suppressed `#line` marker changes nothing.
+- **rsx-cg-compiler output no longer depends on the C++ toolchain it is
+  built with.**  A compiler built with clang and libc++ wrote stack
+  contents into uniform default constant blocks and refused
+  `uniform float4 c = 0.5;`.  The output is also deterministic where an
+  `if`/`else` join used to be emitted in hash order.
+
+### Removed
+
+- **rsx-cg-compiler: the legacy NV40 shape matcher.**  The general
+  lowering is the only back end.  `--legacy-lowering` and
+  `RSXCG_GENERAL=0` now fail with a message saying the matcher was
+  removed; `--general-lowering` is still accepted and does nothing.
+
+### Known issues
+
+- An LP64 program packaged through the Make rules needs an explicit
+  `sprxlinker --lp64` on the ELF before `make_self`; the CMake
+  functions run it.
+- The FIFO wrap callback prints a `PS3TC-FIFO-WRAP waiting for GET`
+  line from its wait loop while the RSX has not consumed the commands
+  it needs, which can flood the TTY under a stalled or slow GPU.
+- rsx-cg-compiler accepts a `float` variable passed to an `out fixed`
+  or `inout fixed` helper parameter; it should be refused.
 
 ## [v0.19.0] — 2026-09-30
 
