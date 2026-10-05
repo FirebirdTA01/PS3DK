@@ -2118,6 +2118,26 @@ void SemanticAnalyzer::validateSwizzle(MemberAccessExpr* expr, const CgType& obj
     int maxComponents = objectType.vectorSize();
     if (maxComponents == 1) maxComponents = 1;  // Scalar has 1 component
 
+    // The reference (sce-cgc 475) refuses ANY uppercase letter among the
+    // swizzle alphabet (XYZW/RGBA/STPQ), in both read and write positions,
+    // with C1048 naming the FIRST offending letter and the swizzle exactly as
+    // written:  invalid character 'X' in swizzle "XYZ"
+    // A mixed spelling like "xYxx" is refused on its first uppercase ('Y');
+    // lowercase xyz/rgb/stp all compile.  Reported here at the semantic layer,
+    // not downstream at IR reconstruction where it used to surface by accident.
+    for (char c : expr->member)
+    {
+        if (c == 'X' || c == 'Y' || c == 'Z' || c == 'W' ||
+            c == 'R' || c == 'G' || c == 'B' || c == 'A' ||
+            c == 'S' || c == 'T' || c == 'P' || c == 'Q')
+        {
+            error(expr->loc, std::string("invalid character '") + c +
+                  "' in swizzle \"" + expr->member + "\"");
+            expr->swizzleLength = 0;
+            return;
+        }
+    }
+
     if (!SemanticUtils::isValidSwizzle(expr->member, maxComponents))
     {
         error(expr->loc, "invalid swizzle '" + expr->member +
@@ -3144,18 +3164,18 @@ bool isValidSwizzle(const std::string& swizzle, int maxComponents)
         int index = -1;
         switch (c)
         {
-        case 'x': case 'X': index = 0; usesXYZW = true; break;
-        case 'y': case 'Y': index = 1; usesXYZW = true; break;
-        case 'z': case 'Z': index = 2; usesXYZW = true; break;
-        case 'w': case 'W': index = 3; usesXYZW = true; break;
-        case 'r': case 'R': index = 0; usesRGBA = true; break;
-        case 'g': case 'G': index = 1; usesRGBA = true; break;
-        case 'b': case 'B': index = 2; usesRGBA = true; break;
-        case 'a': case 'A': index = 3; usesRGBA = true; break;
-        case 's': case 'S': index = 0; usesSTPQ = true; break;
-        case 't': case 'T': index = 1; usesSTPQ = true; break;
-        case 'p': case 'P': index = 2; usesSTPQ = true; break;
-        case 'q': case 'Q': index = 3; usesSTPQ = true; break;
+        case 'x': index = 0; usesXYZW = true; break;
+        case 'y': index = 1; usesXYZW = true; break;
+        case 'z': index = 2; usesXYZW = true; break;
+        case 'w': index = 3; usesXYZW = true; break;
+        case 'r': index = 0; usesRGBA = true; break;
+        case 'g': index = 1; usesRGBA = true; break;
+        case 'b': index = 2; usesRGBA = true; break;
+        case 'a': index = 3; usesRGBA = true; break;
+        case 's': index = 0; usesSTPQ = true; break;
+        case 't': index = 1; usesSTPQ = true; break;
+        case 'p': index = 2; usesSTPQ = true; break;
+        case 'q': index = 3; usesSTPQ = true; break;
         default:
             return false;
         }
