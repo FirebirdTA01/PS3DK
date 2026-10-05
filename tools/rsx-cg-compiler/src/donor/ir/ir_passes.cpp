@@ -960,6 +960,7 @@ bool AlgebraicSimplification::trySimplify(IRFunction& func, IRInstruction* inst)
     case IROp::Mul: return simplifyMul(func, inst);
     case IROp::Sub: return simplifySub(func, inst);
     case IROp::Div: return simplifyDiv(func, inst);
+    case IROp::Pow: return simplifyPow(func, inst);
     default: return false;
     }
 }
@@ -1057,6 +1058,22 @@ bool AlgebraicSimplification::simplifyDiv(IRFunction& func, IRInstruction* inst)
 
     // x / x = 1 (same value, assume non-zero)
     if (inst->operands[0] == inst->operands[1])
+    {
+        IRConstant* one = func.createConstant(inst->resultType, 1.0f);
+        m_replacements[inst->result] = one->id;
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    return false;
+}
+
+bool AlgebraicSimplification::simplifyPow(IRFunction& func, IRInstruction* inst)
+{
+    if (inst->operands.size() != 2) return false;
+
+    // x ^ 0 = 1
+    if (isZero(func, inst->operands[1]))
     {
         IRConstant* one = func.createConstant(inst->resultType, 1.0f);
         m_replacements[inst->result] = one->id;

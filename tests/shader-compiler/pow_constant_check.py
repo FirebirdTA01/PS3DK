@@ -149,6 +149,8 @@ def check_values(work):
             f'control: the LG2/MUL/EX2 spelling on a negative base must decode as NaN, got {nan_chain}')
     blob = (work / 'fp_pow_zero_exponent_f.fpo').read_bytes()
     same(execute_fp(blob, T), [1.0, f32(-2.0), 0.0, 1.0], 'fp_pow_zero_exponent_f')
+    blob = (work / 'fp_pow_zero_dead_base_f.fpo').read_bytes()
+    same(execute_fp(blob, T), [1.0, f32(-2.0), 0.0, 1.0], 'fp_pow_zero_dead_base_f')
     blob = (work / 'fp_pow_vec_two_f.fpo').read_bytes()
     same(execute_fp(blob, T), [f32(2.25), f32(4.0), f32(0.0625), 1.0], 'fp_pow_vec_two_f')
     blob = (work / 'fp_pow_roots_f.fpo').read_bytes()
@@ -210,9 +212,15 @@ def check_shapes(work):
             break
     require(reads >= 2, f'fp_pow_uniform_exponent_f: expected the scalar and per-lane chains to read u, found {reads}')
     # the value rows must contain no LG2 at all: that is the whole fix
-    for tag in ('fp_pow_int_exponents_f', 'fp_pow_vec_two_f', 'fp_pow_roots_f', 'fp_pow_zero_exponent_f'):
+    for tag in ('fp_pow_int_exponents_f', 'fp_pow_vec_two_f', 'fp_pow_roots_f', 'fp_pow_zero_exponent_f', 'fp_pow_zero_dead_base_f'):
         ins = decode_fp((work / f'{tag}.fpo').read_bytes())
         require(all(i['op'] not in (OP_LG2, OP_EX2) for i in ins), f'{tag}: LG2/EX2 present; a constant 0/1/2/3/-1/+-0.5 exponent must not go through the log')
+    # fp_pow_zero_dead_base_f must drop the dead base (t.x - 0.5):
+    # identical instruction count to twin, no OP_ADD
+    ins = decode_fp((work / 'fp_pow_zero_dead_base_f.fpo').read_bytes())
+    twin_ins = decode_fp((work / 'fp_pow_zero_dead_base_twin_f.fpo').read_bytes())
+    require(len(ins) == len(twin_ins), f'fp_pow_zero_dead_base_f: instruction count {len(ins)} != twin {len(twin_ins)}')
+    require(all(i['op'] != OP_ADD for i in ins), 'fp_pow_zero_dead_base_f: dead base t.x - 0.5 was not eliminated')
 
 
 def execute_vp(blob, u):

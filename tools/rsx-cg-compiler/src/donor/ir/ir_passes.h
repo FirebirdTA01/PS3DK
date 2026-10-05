@@ -190,6 +190,7 @@ private:
     bool simplifyMul(IRFunction& func, IRInstruction* inst);
     bool simplifySub(IRFunction& func, IRInstruction* inst);
     bool simplifyDiv(IRFunction& func, IRInstruction* inst);
+    bool simplifyPow(IRFunction& func, IRInstruction* inst);
 
     // Check if a value is a specific constant
     bool isZero(IRFunction& func, IRValueID id) const;
