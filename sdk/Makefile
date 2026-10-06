@@ -143,6 +143,7 @@ HEADERS := \
     include/cell/gcm/gcm_fp_control.h \
     include/cell/gcm/gcm_tex_bridge.h \
     include/cell/gcm/gcm_command_c.h \
+    include/cell/gcm/gcm_command_link.h \
     include/cell/gcm/gcm_command_cpp_explicit.h \
     include/cell/cell_video_out.h \
     include/cell/cell_audio_out.h \

@@ -706,6 +706,7 @@ static inline uint32_t cellGcmGetReportDataLocation(uint32_t index, uint32_t loc
  * command-emitter family transitively through <cell/gcm.h>; we
  * preserve that. */
 #include <cell/gcm/gcm_command_c.h>
+#include <cell/gcm/gcm_command_link.h>
 
 /* The reference SDK wraps the public libgcm API in the cell::Gcm C++
  * namespace; our C-side surface already lives at global scope, so an

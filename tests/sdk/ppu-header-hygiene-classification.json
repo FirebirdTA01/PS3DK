@@ -220,6 +220,15 @@
       "c++17"
     ]
   },
+  "cell/gcm/gcm_command_link.h": {
+    "owner": "cell/gcm.h",
+    "reason": "Link-time command prototypes included by cell/gcm.h after gcm_command_c.h, once CellGcmContextData and the transfer types are declared.",
+    "standards": [
+      "gnu99",
+      "c11",
+      "c++17"
+    ]
+  },
   "cell/gcm/gcm_tex_bridge.h": {
     "owner": "cell/gcm.h",
     "reason": "Command implementation layer included by cell/gcm.h after CellGcmContextData and public command types are declared.",

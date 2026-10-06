@@ -449,6 +449,11 @@ jobs:
       - name: Test the GCM headers define each macro once
         run: bash tests/sdk/gcm-redefinition-test.sh
 
+      # Skips without PS3DEV; the link-time Cell GCM commands compile through
+      # <cell/gcm.h> and libgcm_cmd.a defines each one once, in both ABIs.
+      - name: Test the link-time GCM command surface
+        run: bash tests/sdk/gcm-link-surface-test.sh
+
       # Always executes the real header's value assertions in C11 and C++17.
       - name: Test the sysmodule ids on the host
         run: bash tests/sdk/sysmodule-ids-test.sh --host
