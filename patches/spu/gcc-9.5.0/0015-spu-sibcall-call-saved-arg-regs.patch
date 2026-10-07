@@ -1,0 +1,93 @@
+spu: no sibling call when -fcall-saved-N makes an argument register call-saved
+
+A sibling call loads the outgoing arguments into $3.. and then runs the
+epilogue, which restores every call-saved register the function wrote
+before the branch.  With -fcall-saved-N naming an argument register, the
+register is "written" only by the argument setup, so the epilogue reloads
+the caller's value over the outgoing argument, and the setup instruction
+is then deleted as dead: the callee receives the wrong argument.  Example,
+-O2 -fcall-saved-4, int f3(int a, int b, int c) { return g3(a+1, b+2, c+3); }
+
+    ai    $5,$5,3
+    stqd  $4,-16($sp)        save $4
+    ai    $3,$3,1            (b+2 into $4 is gone)
+    ...
+    lqd   $4,-16($sp)        restore $4
+    br    g3                 g3 gets b, not b+2
+
+Even with the restore removed, the callee would return straight to our
+caller with the argument still in a register that the caller expects to
+be preserved.  The sibcall is therefore refused whenever an argument
+register the call may load is call-saved; the call becomes an ordinary
+brsl that saves and restores the register around it.  The registers a
+call can load are a prefix of $3..$74 no longer than its argument
+quadwords (plus one for a hidden aggregate-return pointer), so the
+check covers that prefix.
+
+With the default register sets every argument register is call-clobbered
+and the predicate is unchanged.
+--- a/gcc/config/spu/spu.c
++++ b/gcc/config/spu/spu.c
+@@ -5356,13 +5356,60 @@
+   return SImode;
+ }
+ 
++/* Return true if an argument register that the call EXP may load is
++   not call-clobbered.  This only happens when -fcall-saved-N names an
++   argument register.  A sibling call loads its arguments and then runs
++   the epilogue, which restores every call-saved register the function
++   wrote, so a restore of an argument register discards the outgoing
++   argument.  Even with the restore removed, the callee would return
++   straight to our caller with the argument left in a register that the
++   caller expects to be preserved.  The registers a call can use are a
++   prefix of $3..$74 no longer than the argument quadwords it passes, so
++   check that prefix.  */
++static bool
++spu_sibcall_arg_reg_call_saved_p (tree exp)
++{
++  call_expr_arg_iterator iter;
++  tree arg, fntype;
++  int words = 0, regno;
++
++  for (regno = FIRST_ARG_REGNUM; regno <= LAST_ARG_REGNUM; regno++)
++    if (!call_used_regs[regno])
++      break;
++  if (regno > LAST_ARG_REGNUM)
++    return false;
++
++  fntype = TREE_TYPE (TREE_TYPE (CALL_EXPR_FN (exp)));
++  if (aggregate_value_p (exp, fntype))
++    words++;
++  FOR_EACH_CALL_EXPR_ARG (arg, iter, exp)
++    {
++      tree type = TREE_TYPE (arg);
++      HOST_WIDE_INT size = int_size_in_bytes (type);
++      if (size <= 0)
++	words++;
++      else
++	words += (size + 15) / 16;
++      if (words >= MAX_REGISTER_ARGS)
++	break;
++    }
++  if (words > MAX_REGISTER_ARGS)
++    words = MAX_REGISTER_ARGS;
++
++  for (regno = FIRST_ARG_REGNUM; regno < FIRST_ARG_REGNUM + words; regno++)
++    if (!call_used_regs[regno])
++      return true;
++  return false;
++}
++
+ /* Decide whether we can make a sibling call to a function.  DECL is the
+    declaration of the function being targeted by the call and EXP is the
+    CALL_EXPR representing the call.  */
+ static bool
+-spu_function_ok_for_sibcall (tree decl, tree exp ATTRIBUTE_UNUSED)
++spu_function_ok_for_sibcall (tree decl, tree exp)
+ {
+-  return decl && !TARGET_LARGE_MEM;
++  return (decl && !TARGET_LARGE_MEM
++	  && !spu_sibcall_arg_reg_call_saved_p (exp));
+ }
+ 
+ /* We need to correctly update the back chain pointer and the Available

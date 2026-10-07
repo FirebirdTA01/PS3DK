@@ -397,6 +397,10 @@ jobs:
       - name: Test SPU C++ parenthesised vector literals and casts
         run: bash tests/sdk/spu-paren-vector-cpp-test.sh
 
+      # Skips without PS3DEV; runs against an installed or candidate compiler.
+      - name: Test SPU sibling calls avoid call-saved argument registers
+        run: bash tests/sdk/spu-sibcall-call-saved-test.sh
+
       # Skips without PS3DEV; compiles this tree's SPU atomic header in C/C++.
       - name: Test SPU atomic alignment predicates select integer intrinsics
         run: bash tests/sdk/spu-atomic-overload-test.sh
