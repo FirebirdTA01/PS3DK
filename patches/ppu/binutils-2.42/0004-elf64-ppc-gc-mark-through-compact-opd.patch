@@ -1,0 +1,110 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] elf64-ppc: --gc-sections marks functions through compact .opd
+
+A function that is only reached through its descriptor - a static
+function whose address is taken, or one called with `bl' against the
+descriptor - is referenced by a relocation against .opd, usually the
+section symbol plus the descriptor's offset.  GC does not mark the
+.opd relocations themselves (that would keep every function), so
+ppc64_elf_check_relocs records, per local descriptor, the code section
+its entry relocation names, and ppc64_elf_gc_mark_hook marks that
+section when a reference lands on the descriptor.
+
+The map is built only from ELFv1 (R_PPC64_ADDR64, R_PPC64_TOC) pairs
+and indexed per 16 bytes.  Cell OS Lv-2 compact descriptors are
+8 bytes, [entry_ea_32, toc_ea_32], each word R_PPC64_ADDR32, so the
+map stayed empty and two descriptors would share a slot anyway.  With
+--gc-sections the function sections were discarded, the descriptor's
+entry word was written as 0, and a `bl' to the descriptor became a
+branch into .opd.
+
+Fix: for a compact .opd (alignment below 8, the same test
+ppc64_elf_edit_opd and opd_entry_value use) record the R_PPC64_ADDR32
+at each 8-byte descriptor boundary against a local symbol, index the
+map per 8 bytes, and look it up per 8 bytes in the mark hook.  The
+ELFv1 path is unchanged.  Global descriptors were already followed
+through opd_entry_value.
+
+Technique observed in SCE's published GCC 4.1.1 toolchain sources.
+
+--- a/bfd/elf64-ppc.c
++++ b/bfd/elf64-ppc.c
+@@ -1999,6 +1999,14 @@
+     /* An array with one entry for each opd function descriptor,
+        and some spares since opd entries may be either 16 or 24 bytes.  */
+ #define OPD_NDX(OFF) ((OFF) >> 4)
++/* Cell OS Lv-2 compact descriptors are 8 bytes, [entry_ea_32,
++   toc_ea_32], in an .opd aligned to 4 rather than 8 (the same test
++   ppc64_elf_edit_opd and opd_entry_value use).  Two of them share an
++   OPD_NDX slot, so their function-section map is indexed per 8 bytes.  */
++#define OPD_COMPACT_SIZE 8
++#define OPD_COMPACT_P(SEC) ((SEC)->alignment_power < 3)
++#define OPD_MAP_NDX(SEC, OFF) \
++  (OPD_COMPACT_P (SEC) ? (OFF) / OPD_COMPACT_SIZE : OPD_NDX (OFF))
+     struct _opd_sec_data
+     {
+       /* Points to the function code section for local opd entries.  */
+@@ -4532,7 +4540,9 @@
+       Elf_Internal_Shdr *symtab_hdr;
+       Elf_Internal_Rela *relocs, *rel_end, *rel;
+ 
+-      amt = OPD_NDX (opd->size) * sizeof (*opd_sym_map);
++      bool compact = OPD_COMPACT_P (opd);
++
++      amt = OPD_MAP_NDX (opd, opd->size) * sizeof (*opd_sym_map);
+       opd_sym_map = bfd_zalloc (ibfd, amt);
+       if (opd_sym_map == NULL)
+ 	return false;
+@@ -4542,14 +4552,21 @@
+       if (relocs == NULL)
+ 	return false;
+       symtab_hdr = &elf_symtab_hdr (ibfd);
+-      rel_end = relocs + opd->reloc_count - 1;
++      /* An ELFv1 entry is recognised by its (ADDR64, TOC) pair, so the
++	 last reloc never starts one.  A compact entry is a single
++	 ADDR32 at a descriptor boundary, so every reloc is looked at.  */
++      rel_end = relocs + opd->reloc_count - (compact ? 0 : 1);
+       for (rel = relocs; rel < rel_end; rel++)
+ 	{
+ 	  enum elf_ppc64_reloc_type r_type = ELF64_R_TYPE (rel->r_info);
+ 	  unsigned long r_symndx = ELF64_R_SYM (rel->r_info);
+ 
+-	  if (r_type == R_PPC64_ADDR64
+-	      && ELF64_R_TYPE ((rel + 1)->r_info) == R_PPC64_TOC
++	  if ((compact
++	       ? (r_type == R_PPC64_ADDR32
++		  && (rel->r_offset & (OPD_COMPACT_SIZE - 1)) == 0
++		  && rel->r_offset + OPD_COMPACT_SIZE <= opd->size)
++	       : (r_type == R_PPC64_ADDR64
++		  && ELF64_R_TYPE ((rel + 1)->r_info) == R_PPC64_TOC))
+ 	      && r_symndx < symtab_hdr->sh_info)
+ 	    {
+ 	      Elf_Internal_Sym *isym;
+@@ -4566,7 +4583,7 @@
+ 
+ 	      s = bfd_section_from_elf_index (ibfd, isym->st_shndx);
+ 	      if (s != NULL && s != opd)
+-		opd_sym_map[OPD_NDX (rel->r_offset)] = s;
++		opd_sym_map[OPD_MAP_NDX (opd, rel->r_offset)] = s;
+ 	    }
+ 	}
+       if (elf_section_data (opd)->relocs != relocs)
+@@ -6089,9 +6106,17 @@
+       opd = get_opd_info (rsec);
+       if (opd != NULL && opd->func_sec != NULL)
+ 	{
++	  bfd_vma off = sym->st_value + rel->r_addend;
++
+ 	  rsec->gc_mark = 1;
+ 
+-	  rsec = opd->func_sec[OPD_NDX (sym->st_value + rel->r_addend)];
++	  if (OPD_COMPACT_P (rsec))
++	    /* A compact map has one slot per 8-byte descriptor; an
++	       offset with no whole descriptor left names none.  */
++	    rsec = (off < rsec->size && rsec->size - off >= OPD_COMPACT_SIZE
++		    ? opd->func_sec[OPD_MAP_NDX (rsec, off)] : NULL);
++	  else
++	    rsec = opd->func_sec[OPD_NDX (off)];
+ 	}
+     }
+ 

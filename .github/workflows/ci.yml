@@ -351,6 +351,11 @@ jobs:
       - name: Test ILP32 counted-loop CTR counts
         run: bash tests/sdk/ilp32-doloop-codegen-test.sh
 
+      # Skips without PS3DEV; with a PPU toolchain, --gc-sections must keep
+      # functions reached only through compact .opd descriptors (binutils 0004).
+      - name: Test --gc-sections keeps descriptor-only PPU functions
+        run: bash tests/sdk/opd-gc-sections-test.sh
+
       # Skips without PS3DEV; runs against an installed or candidate compiler.
       - name: Test -mminimal-toc in both PPU ABIs
         run: bash tests/sdk/minimal-toc-ilp32-test.sh
