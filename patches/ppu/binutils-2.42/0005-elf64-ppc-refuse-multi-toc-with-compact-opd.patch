@@ -1,0 +1,72 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] elf64-ppc: refuse multiple TOC groups in a compact-.opd link
+
+When the TOC reached by small-model TOC references (R_PPC64_TOC16,
+-mcmodel=small or hand-written @toc) passes 64 KiB, ld splits the input
+objects into several TOC groups and enters a function in another group
+through a TOC-adjusting stub:
+
+    std  r2,40(r1)          # stub
+    addis r2,r2,adj ; addi r2,r2,adj ; b target
+    ...
+    ld   r2,40(r1)          # the nop after the bl, rewritten
+
+The compact descriptors themselves come out right (each .opd's .TOC.
+word resolves to its own object's group), but the hybrid ILP32 ABI keeps
+the saved TOC in the WORD at 40(r1): GCC saves it with stw and restores
+it with lwz after every indirect call, and often hoists the save into the
+prologue.  The stub's std writes the zero high half of r2 over that word,
+so the next lwz restore loads r2 = 0 and the following TOC access faults.
+Measured on a two-group link (24 objects x 1000 TOC entries, ILP32,
+-mcmodel=small): main saves r2 once with stw in its prologue, calls
+f_16..f_23 through TOC-adjusting stubs, restores with lwz after its first
+indirect call and gets r2 = 0; its next TOC load faults (RPCS3 PPU
+interpreter: EA 0xffffffffffff80e4 = 0 - 0x7f1c).  The same objects in
+one TOC group run clean.  LP64 code saves r2 with std/ld and
+is not known to break, but it is refused too: Lv-2 links never needed
+multiple TOC groups (the default medium code model reaches 2 GiB of TOC
+from one base) and the multi-group path has no runtime coverage there.
+
+Fix: when the multi-TOC layout decides more than one group is needed and
+any input has a compact .opd (alignment below 8, the test patches 0002
+and 0004 use), fail the link with a diagnostic naming the remedy.
+ELFv1 links are unchanged.
+
+--- a/bfd/elf64-ppc.c
++++ b/bfd/elf64-ppc.c
+@@ -12879,6 +12879,35 @@
+ 
+   htab->multi_toc_needed = htab->toc_curr != elf_gp (info->output_bfd);
+ 
++  /* Cell OS Lv-2: a link-time TOC-adjusting stub saves r2 with std and
++     the nop after the call becomes ld, but hybrid ILP32 code keeps its
++     saved TOC in the word at 40(r1) (stw/lwz around indirect calls,
++     often hoisted to the prologue).  The stub's std writes the zero high
++     word over it and the next lwz loads r2 = 0.  Refuse any link with a
++     compact .opd that would need more than one TOC group.  */
++  if (htab->multi_toc_needed)
++    for (ibfd = info->input_bfds; ibfd != NULL; ibfd = ibfd->link.next)
++      {
++	asection *opd;
++
++	if (!is_ppc64_elf (ibfd))
++	  continue;
++	opd = bfd_get_section_by_name (ibfd, ".opd");
++	if (opd != NULL
++	    && opd->size != 0
++	    && (opd->flags & SEC_EXCLUDE) == 0
++	    && OPD_COMPACT_P (opd))
++	  {
++	    info->callbacks->einfo
++	      (_("%X%P: error: Cell OS Lv-2 compact .opd link needs multiple "
++		 "TOC groups (over 64 KiB of TOC reached by small-model TOC "
++		 "references; first compact .opd in %pB), which is not "
++		 "supported; compile with -mcmodel=medium (the default) or "
++		 "-mminimal-toc\n"), ibfd);
++	    break;
++	  }
++      }
++
+   if (!htab->do_multi_toc)
+     return false;
+ 

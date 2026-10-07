@@ -356,6 +356,11 @@ jobs:
       - name: Test --gc-sections keeps descriptor-only PPU functions
         run: bash tests/sdk/opd-gc-sections-test.sh
 
+      # Skips without PS3DEV; with a PPU toolchain, a compact-.opd link that
+      # needs more than one TOC group must be refused (binutils 0005).
+      - name: Test compact-.opd links refuse multiple TOC groups
+        run: bash tests/sdk/large-toc-test.sh
+
       # The red control always runs; with a PPU compiler, every virtual
       # thunk must sign-extend its vcall offset before the add (GCC patch 0056).
       - name: Test ILP32 virtual-thunk vcall offsets
