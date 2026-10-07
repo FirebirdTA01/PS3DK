@@ -425,6 +425,12 @@ jobs:
       - name: Test the SPU SPURS headers declare the EA API and keep the PPU API
         run: bash tests/sdk/spurs-spu-header-surface-test.sh
 
+      # Skips without PS3DEV/cmake; builds the spurs sample at two equal-length,
+      # different build dirs and pins the PPU ELF and embedded SPU image to be byte-identical
+      # and its .note.spu_name to carry the bare file name (not a build path).
+      - name: Test the embedded SPU image is build-path independent
+        run: bash tests/sdk/spu-name-note-path-test.sh
+
       # Skips without PS3DEV; compiles this tree's GCM headers under -Werror.
       - name: Test the GCM headers define each macro once
         run: bash tests/sdk/gcm-redefinition-test.sh

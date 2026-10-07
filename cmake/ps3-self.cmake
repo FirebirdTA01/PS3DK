@@ -902,6 +902,12 @@ function(ps3_add_spu_image target)
     # PPU code that does `#include "<NAME>_bin.h"` keeps working
     # without source edits.
     set(_spu_elf "${_spu_dir}/${_PSI_NAME}.bin")
+    # The SPU linker records the -o name in the image's .note.spu_name
+    # (docs/abi/spurs-job-entry-point.md section 2.1), and the image is
+    # embedded byte for byte, so the link runs in ${_spu_dir} with -o the bare
+    # file name: an absolute -o put the build directory into every PPU
+    # executable that carries the image.
+    get_filename_component(_spu_elf_name "${_spu_elf}" NAME)
 
     # SPU compile flags.  Defaults match PSL1GHT spu_rules MACHDEP
     # (code-size, position-independent, no C++ EH/RTTI).  Caller can
@@ -1071,19 +1077,22 @@ function(ps3_add_spu_image target)
         endforeach()
     endif()
 
-    # An image embedded as raw bytes cannot carry PPU references: link to a
-    # temporary name and only publish the ELF once the check passed, so a
-    # refused image is not picked up by the next build.
+    # An image embedded as raw bytes cannot carry PPU references.  It is
+    # linked under its final name (a scratch name would be recorded in
+    # .note.spu_name), so the check script removes a refused image: the next
+    # build then re-links it instead of picking up an image that failed.
     if(NOT _PSI_PPU_OBJECT AND NOT _PSI_JOBBIN_WRAP AND PS3_TOOL_spu_elf_to_ppu_obj)
         add_custom_command(
             OUTPUT "${_spu_elf}"
             COMMAND "${PS3_SPU_GCC}"
                     ${_spu_link_flags}
                     ${_spu_link_objs} ${_spu_libs}
-                    -o "${_spu_elf}.tmp"
-            COMMAND "${PS3_TOOL_spu_elf_to_ppu_obj}" no-ppu-refs --spu-elf "${_spu_elf}.tmp"
-            COMMAND ${CMAKE_COMMAND} -E rename "${_spu_elf}.tmp" "${_spu_elf}"
-            DEPENDS ${_link_deps}
+                    -o "${_spu_elf_name}"
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DPS3_SPU_CHECK_TOOL=${PS3_TOOL_spu_elf_to_ppu_obj}"
+                    "-DPS3_SPU_ELF=${_spu_elf}"
+                    -P "${_PS3_SELF_CMAKE_DIR}/ps3-spu-image-check.cmake"
+            DEPENDS ${_link_deps} "${_PS3_SELF_CMAKE_DIR}/ps3-spu-image-check.cmake"
             WORKING_DIRECTORY "${_spu_dir}"
             COMMENT "ps3-spu: link ${_PSI_NAME}.elf"
             VERBATIM)
@@ -1093,7 +1102,7 @@ function(ps3_add_spu_image target)
             COMMAND "${PS3_SPU_GCC}"
                     ${_spu_link_flags}
                     ${_spu_link_objs} ${_spu_libs}
-                    -o "${_spu_elf}"
+                    -o "${_spu_elf_name}"
             DEPENDS ${_link_deps}
             WORKING_DIRECTORY "${_spu_dir}"
             COMMENT "ps3-spu: link ${_PSI_NAME}.elf"
