@@ -100,6 +100,10 @@ public:
 	const std::vector<std::string>& alphakillSamplers() const { return alphakillSamplers_; }
 
 private:
+	// Set once ensureDateAndTimeMacros has filled the two bindings; the
+	// value then stays fixed for the rest of this run.
+	bool dateAndTimeEnsured_ = false;
+
 	std::vector<std::string> includePaths;
 	std::unordered_map<std::string, MacroDefinition> macros;
 	std::stack<ConditionalState> conditionalStack;
@@ -116,6 +120,11 @@ private:
 	std::set<std::string>    alphakillSeen_;     // dedup helper
 
 	void initBuiltinMacros();
+
+	// Computes __DATE__/__TIME__ from SOURCE_DATE_EPOCH (or the clock) the
+	// first time the expander substitutes either one, so an invalid value
+	// refuses only a shader that really expands them.
+	void ensureDateAndTimeMacros();
 
 	// Directive processing
 	void processDirective(const std::string& directive, std::string& output, const std::string& currentFile, int lineNum);

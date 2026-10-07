@@ -80,6 +80,10 @@ void usage()
         "                         the default (removed after one release)\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
+        "  --dump-preprocess     Emit the preprocessed (macro-expanded) text\n"
+        "                         to stdout and stop (like C -E); tests use\n"
+        "                         this to observe __DATE__/__TIME__/__LINE__/\n"
+        "                         __FILE__ expansions without the full pipeline\n"
         "  --extension=<name>     Enable a named extension to the reference\n"
         "                         compiler's language (repeatable; none by\n"
         "                         default, so an unflagged compile accepts and\n"
@@ -153,6 +157,7 @@ int main(int argc, char** argv)
     CompilerContext ctx;
     bool dumpAst = false;
     bool dumpIr  = false;
+    bool dumpPreprocess = false;
     // The NV40 shape matcher that --legacy-lowering and RSXCG_GENERAL=0
     // used to select has been removed; the general lowering is the only
     // back end.  Asking for the matcher is refused by name rather than
@@ -214,6 +219,10 @@ int main(int argc, char** argv)
         else if (arg == "--dump-ir")
         {
             dumpIr = true;
+        }
+        else if (arg == "--dump-preprocess")
+        {
+            dumpPreprocess = true;
         }
         else if (arg == "--emit-container" && i + 1 < argc)
         {
@@ -340,6 +349,14 @@ int main(int argc, char** argv)
     {
         std::fprintf(stderr, "%s\n", err.what());
         return 1;
+    }
+
+    if (dumpPreprocess)
+    {
+        std::cout << preprocessed;
+        if (preprocessed.empty() || preprocessed.back() != '\n')
+            std::cout << '\n';
+        return 0;
     }
 
     std::vector<ParseError> parseErrors;

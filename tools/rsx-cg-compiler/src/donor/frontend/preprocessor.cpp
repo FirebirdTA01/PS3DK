@@ -1,7 +1,12 @@
 #include "preprocessor.h"
 #include <cstring>
+#include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <cctype>
+#include <cerrno>
+#include <stdexcept>
+#include <functional>
 #include <sstream>
 #include <filesystem>
 #include <regex>
@@ -248,9 +253,13 @@ void Preprocessor::initBuiltinMacros()
 	defineMacro("__LINE__", "");
 	defineMacro("__FILE__", "");
 
-	// Define __DATE__ and __TIME__
-	defineMacro("__DATE__", "\"" __DATE__ "\"");
-	defineMacro("__TIME__", "\"" __TIME__ "\"");
+	// __DATE__ and __TIME__ are LAZY: an empty binding is installed now, and
+	// ensureDateAndTimeMacros() fills it in the first time the expander
+	// substitutes one of the two (directly or from inside another macro's
+	// body).  Like GCC, SOURCE_DATE_EPOCH is read only then, so a shader that
+	// never expands the date compiles even when the variable is invalid.
+	defineMacro("__DATE__", "");
+	defineMacro("__TIME__", "");
 
 	// These four EXPAND but do not count as defined - see countsAsDefined.
 	// __CGC__ and __SCE_CGC__ below are ordinary macros and keep the default.
@@ -268,6 +277,98 @@ void Preprocessor::initBuiltinMacros()
 	// branch without it (preprocessor-predefined-macros).
 	defineMacro("__CGC__", "20000");
 	defineMacro("__SCE_CGC__", "20000");
+}
+
+void Preprocessor::ensureDateAndTimeMacros()
+{
+	if (dateAndTimeEnsured_)
+		return;
+
+	// Read SOURCE_DATE_EPOCH (or, unset, the clock) once per Preprocessor
+	// run.  Invalid forms are refused here, when a shader actually expands
+	// the date or time, not in the constructor where they would break every
+	// compile.
+	//
+	// Format: a non-negative base-10 integer, like GCC, up to GCC's bound
+	// 253402300799 (the end of year 9999).
+	//
+	// The UTC calendar fields are computed here rather than with gmtime_r /
+	// gmtime_s: MSVC's gmtime_s refuses any time past year 3000, so the same
+	// SOURCE_DATE_EPOCH would expand on a Linux host and fail on a Windows one.
+	long long epoch = 0;
+	const char* env = std::getenv("SOURCE_DATE_EPOCH");
+	if (env != nullptr)
+	{
+		char* end = nullptr;
+		errno = 0;
+		const long long v = std::strtoll(env, &end, 10);
+		if (end == env || *end != '\0' || errno == ERANGE || v < 0)
+			throw std::runtime_error(
+				"rsx-cg-compiler: SOURCE_DATE_EPOCH is set but not a "
+				"valid non-negative integer: \"" + std::string(env) + "\"");
+		if (v > 253402300799LL)
+			throw std::runtime_error(
+				"rsx-cg-compiler: SOURCE_DATE_EPOCH \"" + std::string(env) +
+				"\" is past the end of year 9999 (maximum 253402300799)");
+		epoch = v;
+	}
+	else
+	{
+		const time_t now = time(nullptr);
+		if (now < 0)
+			throw std::runtime_error("rsx-cg-compiler: the system clock is unavailable; cannot expand __DATE__/__TIME__");
+		epoch = static_cast<long long>(now);
+	}
+
+	// Days since 1970-01-01 to a proleptic Gregorian date, counting in
+	// 400-year eras that start on March 1 (so the leap day ends each year).
+	// epoch is non-negative here, so plain division and remainder suffice.
+	const long long days = epoch / 86400;
+	const int secOfDay = static_cast<int>(epoch % 86400);
+	const long long z = days + 719468;                   // days since 0000-03-01
+	const long long era = z / 146097;
+	const long long doe = z - era * 146097;              // [0, 146096]
+	const long long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;  // [0, 399]
+	const long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);  // [0, 365]
+	const long long mp = (5 * doy + 2) / 153;            // March = 0
+	const int mday = static_cast<int>(doy - (153 * mp + 2) / 5 + 1);
+	const int mon = static_cast<int>(mp < 10 ? mp + 2 : mp - 10);  // January = 0
+	const int year = static_cast<int>(yoe + era * 400 + (mon <= 1 ? 1 : 0));
+
+	static const char* monthNames[] = {
+		"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+		"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+	};
+
+	// The day is space-padded (" %2d" gives the leading-space field) in the
+	// C standard __DATE__ format "Mmm dd yyyy": day 1 is "Jan  1 1970"
+	// (a single separator space plus the pad space, not "Jan 01 1970").
+	// 32 bytes, so no format-truncation warning can fire.
+	char dateStr[32];
+	snprintf(dateStr, sizeof dateStr, "%s %2d %04d",
+	         monthNames[mon], mday, year);
+
+	char timeStr[32];
+	snprintf(timeStr, sizeof timeStr, "%02d:%02d:%02d",
+	         secOfDay / 3600, secOfDay / 60 % 60, secOfDay % 60);
+
+	// Fill only the bindings that are still the driver's.  A source #define
+	// of either name keeps its own binding, and a name the source #undef'd
+	// stays gone: no binding is inserted here, which also keeps the
+	// expander's reference to the binding it is substituting valid.
+	const std::pair<const char*, std::string> values[] = {
+		{ "__DATE__", std::string("\"") + dateStr + "\"" },
+		{ "__TIME__", std::string("\"") + timeStr + "\"" },
+	};
+	for (const auto& [name, value] : values)
+	{
+		auto it = macros.find(name);
+		if (it == macros.end() || it->second.countsAsDefined)
+			continue;
+		it->second.replacementList.assign(1, Token{ TokenType::STRING, value, 0, 0, "" });
+	}
+
+	dateAndTimeEnsured_ = true;
 }
 
 // ONE predicate for both spellings, because the reference has #ifdef and
@@ -1297,8 +1398,11 @@ std::string spell(const HsTokens& toks)
 class HideSetExpander
 {
 public:
-	explicit HideSetExpander(const std::unordered_map<std::string, MacroDefinition>& macros)
-		: macros_(macros) {}
+	// `onDateTime` runs before the driver's __DATE__ or __TIME__ binding is
+	// substituted, so the value is computed only when it is really expanded.
+	HideSetExpander(const std::unordered_map<std::string, MacroDefinition>& macros,
+	                std::function<void()> onDateTime)
+		: macros_(macros), onDateTime_(std::move(onDateTime)) {}
 
 	// `conditional`: #if / #elif expression text.  See takeDefinedOperand.
 	HsTokens expand(std::deque<HsToken> in, bool conditional = false)
@@ -1346,6 +1450,12 @@ public:
 
 			if (!macro.isFunctionLike)
 			{
+				// A dry scan never reaches the output, so a date inside an
+				// argument the callee drops is never read: DROP(__DATE__)
+				// compiles with an invalid SOURCE_DATE_EPOCH.
+				if (!macro.countsAsDefined && dryScanDepth_ == 0 &&
+				    (macro.name == "__DATE__" || macro.name == "__TIME__"))
+					onDateTime_();
 				std::set<std::string> hs = t.hs;
 				hs.insert(macro.name);
 				HsTokens rep = substitute(macro, {}, {}, hs);
@@ -1540,6 +1650,7 @@ public:
 
 private:
 	const std::unordered_map<std::string, MacroDefinition>& macros_;
+	std::function<void()> onDateTime_;
 	// > 0 while scanning an argument whose expansion is discarded; see the
 	// argument loop in expand().
 	mutable int dryScanDepth_ = 0;
@@ -1716,10 +1827,10 @@ std::string Preprocessor::expandMacros(
 	// than any macro.  `#if defined(NEVER)`, `#if defined(__LINE__)` and every
 	// malformed `defined(` line contain no macro name at all, so this return
 	// would hand them straight to the expression parser and the operator would
-	// never be seen (codex - found by reading the function, not by a cell).
+	// never be seen.
 	if (!anyMacroName && !conditional)
 		return text;
-	HideSetExpander expander(macros);
+	HideSetExpander expander(macros, [this] { ensureDateAndTimeMacros(); });
 	return spell(expander.expand(std::move(in), conditional));
 }
 

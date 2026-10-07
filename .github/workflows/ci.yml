@@ -703,6 +703,8 @@ jobs:
         run: bash tests/shader-compiler/paren-macro-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the defined operator and what counts as defined
         run: bash tests/shader-compiler/defined-operator-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test __DATE__/__TIME__ expand from SOURCE_DATE_EPOCH (not the build date)
+        run: bash tests/shader-compiler/shader-date-time-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test a fragment program with no effect is the one-NOP program
         run: bash tests/shader-compiler/empty-entry-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Discard stage checks follow entry reachability without hiding type errors
