@@ -867,6 +867,14 @@ void SymbolTable::registerVectorFunctions()
     // any accepts a scalar too; register it explicitly rather than relying
     // on scalar-to-vector broadcasting during overload resolution.
     addFunction("any", CgType::Bool(), {CgType::Bool()}, {"v"}, nullptr, true);
+    // any, all also take a single scalar bool / a single numeric scalar.
+    // Without exact scalar candidates every call falls back to three
+    // overloads that all tie, which C1101 then refuses as "ambiguous".
+    // all(bool) is the identity (a single lane is trivially all-or-none of
+    // itself); all/any of a numeric scalar is its truth (nonzero, either
+    // sign) - the IR builder's reduction already lowers that to CmpNe.
+    addFunction("all", CgType::Bool(), {CgType::Bool()}, {"v"}, nullptr, true);
+    addFunction("all", CgType::Bool(), {CgType::Float()}, {"v"}, nullptr, true);
     // any, all (for bool vectors)
     for (int size = 2; size <= 4; ++size)
     {

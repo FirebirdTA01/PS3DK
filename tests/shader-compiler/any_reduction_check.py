@@ -3,7 +3,12 @@
 Reference475: widths 1..4, float/half/int/bool, FP/VP, zero and signed live
 lanes all equal the explicit reduction on the reference. Bool operands use
 direct OR (the reference rejects bool != 0). Our twins compare entire
-containers. Source-defined any remains a source call; all() is outside scope.
+containers. Source-defined any remains a source call.
+Scalar all() (reported C1101 "ambiguous"): reference475 accepts all() and any()
+on a scalar float/half/int/bool and on float/int/bool literals in both
+profiles, and every scalar all(x) is byte-identical to any(x) and to the
+nonzero twin there; the scalar rows below pin that. The VP half/int
+conversion gaps refuse all() exactly as they refuse any().
 The spatial rig pair is strict on ours; the reference emits different legal
 instruction sequences for those spellings. Both match on pixels, with two
 output levels in R/B and a last-lane mutant differing on half the image.
@@ -47,6 +52,9 @@ def cases():
                     a=a.replace('float4 t:',base+'4 t:')
                     b=b.replace('float4 t:',base+'4 t:')
                 yield profile,typ,a,b
+                if width==1:
+                    # Scalar all() is the same reduction as scalar any().
+                    yield profile,'all-'+typ,a.replace('any(v)','all(v)'),b
         for name,values in [('zero','0.0,-0.0,0.0,-0.0'),('negative','0.0,0.0,0.0,-2.0'),('positive','0.0,3.0,0.0,0.0')]:
             setup='float4 v=float4('+values+');'
             yield profile,name,program(profile,setup,'any(v)'),program(profile,setup,'v.x!=0 || v.y!=0 || v.z!=0 || v.w!=0')
@@ -58,6 +66,23 @@ def cases():
         # is equivalent for them; replacing this lane with false is not.
         setup='bool2 v=bool2(true,false);'
         yield profile,'bool-constant-lane',program(profile,setup,'any(v)'),program(profile,setup,'v.x || v.y')
+        # (t_dff44c8e) the reported failure was all(float x) / all(bool b) on a
+        # SCALAR argument, which C1101 refused as "ambiguous".  The vector
+        # overload (above) is unchanged; these two scalar overloads are the fix.
+        # all(t.x) is the same value as the nonzero comparison twin and is
+        # byte-identical to it on the FP path (both lower to CmpNe).
+        # all(v) on an already-normalized bool is the identity, hence byte-
+        # identical to (v).  Both are pinned by the strict byte-twin rule that
+        # this file already applies to every other row.
+        yield profile,'scalar-all-float',program(profile,'','all(t.x)'),program(profile,'','t.x != 0')
+        setup='bool v = t.x != 0;'
+        yield profile,'scalar-all-bool',program(profile,setup,'all(v)'),program(profile,setup,'v')
+        # Literal arguments: the reference folds all(2.0) and any(2.0) to the
+        # same constant as true; ours emits a runtime reduction for the float
+        # literal (constant-any-fold above), so pin all == any and the bool
+        # literal against its value.
+        yield profile,'scalar-all-literal',program(profile,'','all(2.0)'),program(profile,'','any(2.0)')
+        yield profile,'scalar-all-true',program(profile,'','all(true)'),program(profile,'','true')
         prefix='float any(float x){return x+2.0;}\n'
         yield profile,'source-any',program(profile,'','any(t.x)',prefix),program(profile,'','t.x+2.0',prefix)
         # Observe t after the call, so a repeated argument evaluation changes
@@ -134,8 +159,14 @@ def main(compiler):
                             program('sce_vp_rsx',setup,'any(v)'), 'sce_vp_rsx',
                             refuse=True,diagnostic=diagnostic)
                 refusals+=1
-    require((twins,refusals)==(51,12),f'incomplete table: {twins}/{refusals}')
-    print(f'any-reduction: PASS ({twins} strict twins, 4 arity refusals, 8 inherited VP conversion gaps, bool-cast nonzero control)')
+                if width==1:
+                    # Same inherited gap through scalar all() (the reference accepts).
+                    compile_one(compiler,root,'vp-conversion-gap-all-'+typ,
+                                program('sce_vp_rsx',setup,'all(v)'), 'sce_vp_rsx',
+                                refuse=True,diagnostic=diagnostic)
+                    refusals+=1
+    require((twins,refusals)==(67,14),f'incomplete table: {twins}/{refusals}')
+    print(f'any-reduction: PASS ({twins} strict twins incl. 16 scalar all(), 4 arity refusals, 10 inherited VP conversion gaps, bool-cast nonzero control)')
 
 
 if __name__=='__main__':
