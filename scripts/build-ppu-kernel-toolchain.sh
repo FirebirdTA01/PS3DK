@@ -161,6 +161,8 @@ build_binutils() {
     mkdir -p "$obj"
     say "Configuring binutils -> $PREFIX (target=$TARGET)"
 
+    # --enable-deterministic-archives: ar and ranlib default to D mode, as in
+    # build-ppu-toolchain.sh.
     (cd "$obj" && \
         "$src/configure" \
         --prefix="$PREFIX" \
@@ -174,6 +176,7 @@ build_binutils() {
         --disable-gdbserver \
         --disable-sim \
         --enable-64-bit-bfd \
+        --enable-deterministic-archives \
         --enable-lto \
         --enable-plugins \
         --with-gcc \

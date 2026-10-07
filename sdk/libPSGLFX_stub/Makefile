@@ -12,6 +12,9 @@
 #
 # When a real libPSGLFX implementation ships, drop this stub directory
 # and replace with the full sdk/libPSGLFX tree.
+#
+# No `u` modifier: the SDK's ar defaults to deterministic (D) mode, which
+# ignores `u` with a warning, and an empty archive has nothing to update.
 
 CROSS    ?= powerpc64-ps3-elf-
 AR       := $(CROSS)ar
@@ -26,7 +29,7 @@ all: $(INSTALL_DIR)/$(TARGET)
 
 $(INSTALL_DIR)/$(TARGET):
 	@mkdir -p $(INSTALL_DIR)
-	$(AR) crus $@
+	$(AR) crs $@
 
 .PHONY: install
 install: $(INSTALL_DIR)/$(TARGET)

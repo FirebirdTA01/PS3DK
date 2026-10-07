@@ -222,6 +222,12 @@ build_binutils() {
         cross_args+=(--host="$HOST_TRIPLE" --build="$BUILD_TRIPLE")
     fi
 
+    # --enable-deterministic-archives: ar and ranlib default to D mode
+    # (member mtime, uid and gid 0, mode 644; symbol table dated 0), so two
+    # builds of the same commit give byte-identical .a files.  Every archive
+    # the SDK installs is written by this ar (GCC/newlib target libraries,
+    # the sdk/ Makefiles, nidgen, CMake, portlibs), so none needs its own D.
+    # tests/sdk/deterministic-archives-test.sh judges the installed tree.
     (cd "$obj" && \
         env "${CROSS_LDFLAGS_ARGS[@]}" \
         "$src/configure" \
@@ -237,6 +243,7 @@ build_binutils() {
         --disable-gdbserver \
         --disable-sim \
         --enable-64-bit-bfd \
+        --enable-deterministic-archives \
         --enable-lto \
         --enable-plugins \
         --with-gcc \

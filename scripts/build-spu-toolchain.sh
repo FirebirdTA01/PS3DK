@@ -172,6 +172,8 @@ build_binutils() {
         cross_args+=(--host="$HOST_TRIPLE" --build="$BUILD_TRIPLE")
     fi
 
+    # --enable-deterministic-archives: ar and ranlib default to D mode, so
+    # rebuilds give byte-identical .a files (see build-ppu-toolchain.sh).
     (cd "$obj" && \
         env "${CROSS_LDFLAGS_ARGS[@]}" \
         "$src/configure" \
@@ -185,6 +187,7 @@ build_binutils() {
         --disable-gdb \
         --disable-gdbserver \
         --disable-sim \
+        --enable-deterministic-archives \
         --with-gcc \
         --with-gnu-as \
         --with-gnu-ld)

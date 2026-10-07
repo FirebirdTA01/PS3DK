@@ -366,6 +366,13 @@ jobs:
       - name: Test compact-.opd links refuse multiple TOC groups
         run: bash tests/sdk/large-toc-test.sh
 
+      # The header-checker self-test always runs; with PS3DEV, a plain
+      # `ar rcs` must be byte-reproducible and every installed archive must
+      # carry zero member mtime/uid/gid and mode 644 (binutils is built with
+      # --enable-deterministic-archives).
+      - name: Test ar writes deterministic archives and the SDK installs only those
+        run: bash tests/sdk/deterministic-archives-test.sh
+
       # The red control always runs; with a PPU compiler, every virtual
       # thunk must sign-extend its vcall offset before the add (GCC patch 0056).
       - name: Test ILP32 virtual-thunk vcall offsets

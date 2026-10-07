@@ -690,6 +690,14 @@ jobs:
           source scripts/env.sh
           ./scripts/build-sdk.sh
 
+      # Every target archive installed so far (toolchain, PSL1GHT, stubs,
+      # portlibs, SDK) must be deterministic, so a rebuild of the same
+      # commit ships byte-identical .a files.
+      - name: Stage 0 — deterministic archives
+        run: |
+          source scripts/env.sh
+          bash tests/sdk/deterministic-archives-test.sh --ps3dev "$PS3DEV"
+
       - name: Stage 1 — cross-build PPU toolchain (mingw-w64)
         run: |
           source scripts/env.sh
