@@ -120,3 +120,9 @@ ilp32-ivspill,tests/regression/ilp32-ivspill/ilp32-ivspill.fake.self,30,RAN-CLEA
 # both PPU decoders.  tests/sdk/ilp32-doloop-codegen-test.sh is the
 # compile-time guard.
 ilp32-doloop,tests/regression/ilp32-doloop/ilp32-doloop.fake.self,30,RAN-CLEAN,DOLOOP PASS,DOLOOP FAIL
+# ilp32-thunk-vcall guards GCC patch 0056: a virtual-base thunk on the
+# assembly-thunk path added the negative vcall offset zero-extended, so
+# `this' reached the target as this + 2^32 - k.  probe() returns its
+# incoming register, so the row reads the leak without a memory access.
+# tests/sdk/ilp32-thunk-vcall-codegen-test.sh is the compile-time guard.
+ilp32-thunk-vcall,tests/regression/ilp32-thunk-vcall/ilp32-thunk-vcall.fake.self,30,RAN-CLEAN,THUNK_VCALL_OK,THUNK_VCALL_FAIL

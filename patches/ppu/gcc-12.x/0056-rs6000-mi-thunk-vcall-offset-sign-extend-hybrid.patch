@@ -1,0 +1,39 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: sign-extend the MI thunk vcall offset in the hybrid ABI
+
+The Cell ELF64/ILP32 ABI has TARGET_64BIT with Pmode == SImode.
+rs6000_output_mi_thunk loads the vtable pointer and then the vcall offset
+in Pmode, which is lwz (zero-extending), and adds the offset to `this'
+with a full-width add.  A virtual-base thunk's vcall offset is a signed
+displacement and normally negative, so `this' reaches the target function
+as this + 2^32 - k.  Seen at -O0 and at -O2 -fno-inline, where thunks take
+this assembly path; -O2 and -Os otherwise expand the thunk through the
+generic path, which already sign-extends (lwa) and canonicalizes.
+
+Sign-extend the loaded offset (extsw) before the add.  The vtable pointer
+stays zero-extended: it is an address.  extsw rather than lwa because the
+rs6000 cell_micro attribute marks sign-extending loads as always
+microcoded on Cell.  LP64 (ld), true 32-bit targets and the generic thunk
+path are unchanged.
+
+Technique observed in SCE's published GCC 4.1.1 toolchain sources.
+
+--- a/gcc/config/rs6000/rs6000-call.cc
++++ b/gcc/config/rs6000/rs6000-call.cc
+@@ -2959,6 +2959,16 @@
+ 
+ 	  emit_move_insn (tmp, gen_rtx_MEM (Pmode, loc));
+ 	}
++      /* In the Cell ELF64/ILP32 ABI (TARGET_64BIT, Pmode == SImode) the
++	 SImode loads above are lwz, which zero-extends, and the add below
++	 uses all 64 GPR bits.  That is right for the vtable pointer, an
++	 address, but the vcall offset is a signed displacement and is
++	 usually negative: added zero-extended, it carries into bit 32 of
++	 the adjusted `this'.  Sign-extend it first.  A separate extsw
++	 rather than lwa, which is microcoded on Cell.  */
++      if (TARGET_64BIT && Pmode == SImode)
++	emit_insn (gen_rtx_SET (gen_rtx_REG (DImode, REGNO (tmp)),
++				gen_rtx_SIGN_EXTEND (DImode, tmp)));
+       emit_insn (gen_add3_insn (this_rtx, this_rtx, tmp));
+     }
+ 
