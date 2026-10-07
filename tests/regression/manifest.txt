@@ -126,3 +126,9 @@ ilp32-doloop,tests/regression/ilp32-doloop/ilp32-doloop.fake.self,30,RAN-CLEAN,D
 # incoming register, so the row reads the leak without a memory access.
 # tests/sdk/ilp32-thunk-vcall-codegen-test.sh is the compile-time guard.
 ilp32-thunk-vcall,tests/regression/ilp32-thunk-vcall/ilp32-thunk-vcall.fake.self,30,RAN-CLEAN,THUNK_VCALL_OK,THUNK_VCALL_FAIL
+# tls-ie guards GCC patch 0057: main.c reaches def.c's thread-locals
+# initial-exec (ld of the 8-byte GOT TP-offset slot, add of r13), linked
+# with --no-tls-optimize so the slot load runs; the addresses must equal
+# def.c's local-exec ones.  tests/sdk/ilp32-tls-models-codegen-test.sh is
+# the compile-time guard.
+tls-ie,tests/regression/tls-ie/tls-ie.fake.self,30,RAN-CLEAN,TLS_IE_OK,TLS_IE_FAIL

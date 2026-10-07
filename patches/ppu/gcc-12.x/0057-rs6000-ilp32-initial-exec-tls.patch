@@ -1,0 +1,197 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: initial-exec TLS in the hybrid ABI
+
+The Cell ELF64/ILP32 ABI has TARGET_64BIT with Pmode == SImode.  Patch
+0015 moved the TLS patterns to the Pptr iterator, so only the SImode
+variant of each exists there, but rs6000_legitimize_tls_address still
+picked several gen_tls_*_64 variants on TARGET_64BIT.  An extern
+__thread variable referenced from non-PIC code (initial-exec, also what
+global- and local-dynamic become without -fPIC) built
+(set (reg:SI) (unspec:DI [(reg:SI) (symbol_ref:SI)] UNSPEC_TLSTLS)),
+which no pattern matches: "unrecognizable insn" / ICE in extract_insn
+during vregs, at every optimisation level.  Local-dynamic under -fPIC
+(tls_dtprel_ha/lo) and local-exec under -mtls-size=16 (tls_tprel) had
+the same wrong-variant selection.
+
+Choosing the SImode variant is not enough for initial-exec: its load is
+lwz, but the linker-built GOT slot is an 8-byte TPREL64 entry, so lwz
+reads the high word whenever the linker leaves the GOT load in place.
+Initial-exec under the hybrid ABI now loads the slot with ld, adds r13
+at DImode with the @tls marker (so ld still relaxes IE to LE), and takes
+the low word: new tls_got_tprel_hybrid (with medium-model high/low
+halves) and tls_tls_hybrid patterns.  Relocations are the LP64 ones,
+R_PPC64_GOT_TPREL16_HA/_LO_DS and R_PPC64_TLS.
+
+Local-dynamic with -mtls-size=64 would have the same high-word problem
+on its DTPREL64 GOT slot; it is now a sorry.  dtprel_ha/lo and tprel
+select their variant by Pmode, and the medium-model split temporaries
+of tls_got_tprel/tls_got_dtprel take the pattern's own mode.  LP64 and
+true 32-bit targets are unchanged.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -9538,18 +9538,14 @@
+   if (model == TLS_MODEL_LOCAL_EXEC
+       && (rs6000_tls_size == 16 || rs6000_pcrel_p ()))
+     {
+-      rtx tlsreg;
++      /* As below: the thread pointer register follows the ELF class,
++	 the RTL template variant follows Pmode.  */
++      rtx tlsreg = gen_rtx_REG (Pmode, TARGET_64BIT ? 13 : 2);
+ 
+-      if (TARGET_64BIT)
+-	{
+-	  tlsreg = gen_rtx_REG (Pmode, 13);
+-	  insn = gen_tls_tprel_64 (dest, tlsreg, addr);
+-	}
++      if (Pmode == DImode)
++	insn = gen_tls_tprel_64 (dest, tlsreg, addr);
+       else
+-	{
+-	  tlsreg = gen_rtx_REG (Pmode, 2);
+-	  insn = gen_tls_tprel_32 (dest, tlsreg, addr);
+-	}
++	insn = gen_tls_tprel_32 (dest, tlsreg, addr);
+       emit_insn (insn);
+     }
+   else if (model == TLS_MODEL_LOCAL_EXEC && rs6000_tls_size == 32)
+@@ -9657,20 +9653,29 @@
+ 	  else if (rs6000_tls_size == 32)
+ 	    {
+ 	      tmp2 = gen_reg_rtx (Pmode);
+-	      if (TARGET_64BIT)
++	      if (Pmode == DImode)
+ 		insn = gen_tls_dtprel_ha_64 (tmp2, tmp1, addr);
+ 	      else
+ 		insn = gen_tls_dtprel_ha_32 (tmp2, tmp1, addr);
+ 	      emit_insn (insn);
+-	      if (TARGET_64BIT)
++	      if (Pmode == DImode)
+ 		insn = gen_tls_dtprel_lo_64 (dest, tmp2, addr);
+ 	      else
+ 		insn = gen_tls_dtprel_lo_32 (dest, tmp2, addr);
+ 	    }
++	  else if (TARGET_64BIT && Pmode == SImode)
++	    {
++	      /* The GOT slot is an 8-byte DTPREL64 entry; the Pmode load
++		 (lwz) would read its high word.  No 32-bit DTP-relative
++		 GOT relocation exists for ELF64.  */
++	      sorry ("%<-mtls-size=64%> local-dynamic TLS with 32-bit "
++		     "pointers");
++	      insn = gen_rtx_SET (dest, tmp1);
++	    }
+ 	  else
+ 	    {
+ 	      tmp2 = gen_reg_rtx (Pmode);
+-	      if (TARGET_64BIT)
++	      if (Pmode == DImode)
+ 		insn = gen_tls_got_dtprel_64 (tmp2, got, addr);
+ 	      else
+ 		insn = gen_tls_got_dtprel_32 (tmp2, got, addr);
+@@ -9682,6 +9687,24 @@
+       else
+ 	{
+ 	  /* IE, or 64-bit offset LE.  */
++	  if (TARGET_64BIT && Pmode == SImode && !rs6000_pcrel_p ())
++	    {
++	      /* ELF64 with 32-bit pointers (the Cell ILP32 default).  The
++		 linker-built GOT slot is an 8-byte TPREL64 entry and the
++		 thread pointer r13 is a full register, so load the slot
++		 with ld, add r13 at DImode (keeping the @tls marker the
++		 linker uses to relax IE to LE), and take the low word.
++		 The Pmode patterns would use lwz, which reads the high
++		 word of the slot.  r2 rather than the -mminimal-toc register,
++		 as for "got" above.  */
++	      rtx toc = gen_rtx_REG (DImode, 2);
++	      rtx off = gen_reg_rtx (DImode);
++	      rtx sum = gen_reg_rtx (DImode);
++	      emit_insn (gen_tls_got_tprel_hybrid (off, toc, addr));
++	      emit_insn (gen_tls_tls_hybrid (sum, off, addr));
++	      emit_move_insn (dest, gen_lowpart (SImode, sum));
++	      return dest;
++	    }
+ 	  tmp2 = gen_reg_rtx (Pmode);
+ 	  if (Pmode == DImode)
+ 	    insn = gen_tls_got_tprel_64 (tmp2, got, addr);
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -10448,7 +10448,7 @@
+ 	(lo_sum:Pptr (match_dup 3)
+ 	    (unspec:Pptr [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTDTPREL)))]
+ {
+-  operands[3] = gen_reg_rtx (TARGET_64BIT ? DImode : SImode);
++  operands[3] = gen_reg_rtx (<MODE>mode);
+ }
+   [(set (attr "length")
+      (if_then_else (ne (symbol_ref "TARGET_CMODEL") (symbol_ref "CMODEL_SMALL"))
+@@ -10528,7 +10528,7 @@
+ 	(lo_sum:Pptr (match_dup 3)
+ 	    (unspec:Pptr [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTTPREL)))]
+ {
+-  operands[3] = gen_reg_rtx (TARGET_64BIT ? DImode : SImode);
++  operands[3] = gen_reg_rtx (<MODE>mode);
+ }
+   [(set (attr "length")
+      (if_then_else (ne (symbol_ref "TARGET_CMODEL") (symbol_ref "CMODEL_SMALL"))
+@@ -10569,6 +10569,61 @@
+   "TARGET_ELF && HAVE_AS_TLS"
+   "add %0,%1,%2@tls")
+ 
++;; Initial-exec for ELF64 with 32-bit pointers (TARGET_64BIT, Pmode ==
++;; SImode).  The GOT slot holds an 8-byte TP offset and r13 is a full
++;; register, so the load and the @tls add are DImode while the symbol is
++;; a Pmode (SImode) SYMBOL_REF.  rs6000_legitimize_tls_address takes the
++;; low word of the sum.
++(define_insn_and_split "tls_got_tprel_hybrid"
++  [(set (match_operand:DI 0 "gpc_reg_operand" "=b")
++	(unspec:DI [(match_operand:DI 1 "gpc_reg_operand" "b")
++		    (match_operand:SI 2 "rs6000_tls_symbol_ref" "")]
++		   UNSPEC_TLSGOTTPREL))]
++  "HAVE_AS_TLS && TARGET_ELF && TARGET_64BIT && Pmode == SImode"
++  "ld %0,%2@got@tprel(%1)"
++  "&& TARGET_CMODEL != CMODEL_SMALL"
++  [(set (match_dup 3)
++	(high:DI
++	    (unspec:DI [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTTPREL)))
++   (set (match_dup 0)
++	(lo_sum:DI (match_dup 3)
++	    (unspec:DI [(match_dup 1) (match_dup 2)] UNSPEC_TLSGOTTPREL)))]
++{
++  operands[3] = gen_reg_rtx (DImode);
++}
++  [(set (attr "length")
++     (if_then_else (ne (symbol_ref "TARGET_CMODEL") (symbol_ref "CMODEL_SMALL"))
++		   (const_int 8)
++		   (const_int 4)))])
++
++(define_insn "*tls_got_tprel_high_hybrid"
++  [(set (match_operand:DI 0 "gpc_reg_operand" "=b")
++     (high:DI
++       (unspec:DI [(match_operand:DI 1 "gpc_reg_operand" "b")
++		   (match_operand:SI 2 "rs6000_tls_symbol_ref" "")]
++		  UNSPEC_TLSGOTTPREL)))]
++  "HAVE_AS_TLS && TARGET_ELF && TARGET_64BIT && Pmode == SImode
++   && TARGET_CMODEL != CMODEL_SMALL"
++  "addis %0,%1,%2@got@tprel@ha")
++
++(define_insn "*tls_got_tprel_low_hybrid"
++  [(set (match_operand:DI 0 "gpc_reg_operand" "=r")
++     (lo_sum:DI (match_operand:DI 1 "gpc_reg_operand" "b")
++	 (unspec:DI [(match_operand:DI 3 "gpc_reg_operand" "b")
++		     (match_operand:SI 2 "rs6000_tls_symbol_ref" "")]
++		    UNSPEC_TLSGOTTPREL)))]
++  "HAVE_AS_TLS && TARGET_ELF && TARGET_64BIT && Pmode == SImode
++   && TARGET_CMODEL != CMODEL_SMALL"
++  "ld %0,%2@got@tprel@l(%1)")
++
++(define_insn "tls_tls_hybrid"
++  [(set (match_operand:DI 0 "gpc_reg_operand" "=r")
++	(unspec:DI [(match_operand:DI 1 "gpc_reg_operand" "b")
++		    (match_operand:SI 2 "rs6000_tls_symbol_ref" "")]
++		   UNSPEC_TLSTLS))]
++  "HAVE_AS_TLS && TARGET_ELF && TARGET_64BIT && Pmode == SImode"
++  "add %0,%1,%2@tls")
++
+ (define_expand "tls_get_tpointer"
+   [(set (match_operand:SI 0 "gpc_reg_operand")
+ 	(unspec:SI [(const_int 0)] UNSPEC_TLSTLS))]

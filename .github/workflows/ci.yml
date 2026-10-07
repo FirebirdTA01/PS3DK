@@ -366,6 +366,12 @@ jobs:
       - name: Test ILP32 virtual-thunk vcall offsets
         run: bash tests/sdk/ilp32-thunk-vcall-codegen-test.sh
 
+      # The controls always run; with a PPU compiler, every TLS access model
+      # compiles to its relocations or a clean sorry, never an ICE, and no
+      # 8-byte GOT TP/DTP slot is read by lwz (GCC patch 0057).
+      - name: Test PPU TLS access models in both data models
+        run: bash tests/sdk/ilp32-tls-models-codegen-test.sh
+
       # Skips without PS3DEV; runs against an installed or candidate compiler.
       - name: Test -mminimal-toc in both PPU ABIs
         run: bash tests/sdk/minimal-toc-ilp32-test.sh
