@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.20.6] — 2026-10-06
+
 ### Fixed
 
 - **LP64 ABI correction: `<cell/np/sns.h>`.**  The header now includes
@@ -30,6 +32,28 @@ The version stamped into builds is generated from the most recent
   `<cell/np/tus.h>` and `<cell/np2/matching2.h>` now include
   `<ppu-types.h>` themselves on PPU instead of relying on
   `<cell/np/common.h>`.  No layout change.
+- **PPU headers compile on their own.**  Each of these now builds as the
+  first and only include of a C or C++ translation unit:
+  - `<cell/mouse/mouse_codes.h>` includes `<stdint.h>`;
+  - `<cell/np2/init.h>` takes `ATTRIBUTE_PRXPTR` from `<ppu-types.h>`;
+  - `<cell/sail/player.h>` includes the component headers its
+    `cellSailPlayerAdd*` calls take;
+  - `<cell/spurs/exception.h>` and `<cell/spurs/exception_types.h>` no
+    longer fail in C++ when included before `<cell/spurs/types.h>`;
+  - `<sys/raw_spu.h>`: `get_reg_addr()` and `get_ls_addr()` return a
+    plain `uintptr_t`, dropping a `volatile` qualifier on the value;
+  - the legacy `<sys/file.h>`, `<sys/interrupt.h>`, `<sys/tty.h>`,
+    `<sys/usbd.h>`, `<ssl/ssl.h>` and `<mars/base.h>` headers no longer
+    warn about integer-to-pointer casts.
+- **rsx-cg-compiler: `pow(x, 0)` folds to 1.**  The base expression is no
+  longer evaluated, so its instructions and any input it alone read are
+  dropped from the program.
+- **rsx-cg-compiler: uppercase swizzles are refused.**  A swizzle written
+  in uppercase (`v.XYZ`, `v.RGBA`) now fails with error C1048 instead of
+  compiling to code that differs from the lowercase spelling.
+- **rsx-cg-compiler: a missing vertex entry point is an error, not a
+  crash.**  Naming an entry function that does not exist on the vertex
+  profile now reports a diagnostic and exits non-zero.
 
 ## [v0.20.0] — 2026-10-05
 
