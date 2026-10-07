@@ -15,6 +15,8 @@
 # Controls: three doctored copies of the GC link (entry word zeroed, two
 # entries swapped, main's bl retargeted at a descriptor) must each be
 # rejected with exit 1 naming the doctored function.
+# Malformed objects: an .opd entry relocation moved to 2^64-8 or to the end
+# of .opd must be ignored - exit 0, no diagnostic, no crash.
 #
 # Skips without PS3DEV (CI has no PPU compiler); run it in the release gate.
 # usage: opd-gc-sections-test.sh [--ps3dev DIR] [-B DIR]
@@ -87,7 +89,7 @@ class Elf:
         for i in range(shnum):
             f = struct.unpack_from(">IIQQQQIIQQ", d, shoff + i * shentsize)
             self.secs.append(dict(name=f[0], type=f[1], flags=f[2], addr=f[3],
-                                  off=f[4], size=f[5], link=f[6], align=f[8], ent=f[9]))
+                                  off=f[4], size=f[5], link=f[6], info=f[7], align=f[8], ent=f[9]))
         strs = self.secs[shstrndx]
         for s in self.secs:
             s["name"] = self.cstr(strs["off"] + s["name"])
@@ -129,7 +131,7 @@ def descriptor(elf, opd, name):
     entry, toc = struct.unpack(">II", words)
     return value, size, entry, toc
 
-def check(gc_path, ref_path):
+def check(gc_path, ref_path, skip=()):
     gc, ref = Elf(gc_path), Elf(ref_path)
     findings = []
     opds = {}
@@ -138,7 +140,7 @@ def check(gc_path, ref_path):
         if opd is None or opd["align"] != 4 or opd["size"] % 8:
             refuse("REFUSE: no compact .opd (4-aligned, 8-byte entries)")
         opds[id(e)] = opd
-    for name in FUNCS:
+    for name in [f for f in FUNCS if f not in skip]:
         addr, size, entry, toc = descriptor(gc, opds[id(gc)], name)
         _, _, rentry, _ = descriptor(ref, opds[id(ref)], name)
         if entry == 0:
@@ -206,8 +208,39 @@ def doctor(src, dst, how):
         refuse("CONTROL-UNBUILDABLE: %s doctoring changed nothing" % how)
     open(dst, "wb").write(bytes(data))
 
+def objdoctor(src, dst, how):
+    # Malformed object: move opd_tab_b's entry relocation (.rela.opd,
+    # R_PPC64_ADDR32 at the descriptor's offset) to an offset with no
+    # whole descriptor in .opd - just below 2^64 ("wrap", where an
+    # added bound overflows) or exactly at the end of .opd ("end").
+    elf = Elf(src)
+    data = bytearray(elf.data)
+    opd = elf.sec(".opd")
+    if opd is None or opd["type"] != 1 or opd["align"] != 4:
+        refuse("CONTROL-UNBUILDABLE: object has no compact .opd")
+    opd_ndx = elf.secs.index(opd)
+    rela = [s for s in elf.secs if s["type"] == 4 and s["info"] == opd_ndx]
+    found = [v for v, _, n in elf.syms.get("opd_tab_b", []) if n == opd_ndx]
+    if len(rela) != 1 or len(found) != 1:
+        refuse("CONTROL-UNBUILDABLE: no unique .rela.opd / opd_tab_b")
+    target = {"wrap": 0xfffffffffffffff8, "end": opd["size"]}[how]
+    hits = 0
+    for k in range(rela[0]["size"] // 24):
+        off = rela[0]["off"] + k * 24
+        r_offset, r_info = struct.unpack_from(">QQ", data, off)
+        if r_offset == found[0] and r_info & 0xffffffff == 1:  # R_PPC64_ADDR32
+            struct.pack_into(">Q", data, off, target); hits += 1
+    if hits != 1:
+        refuse("CONTROL-UNBUILDABLE: %d entry relocations for opd_tab_b" % hits)
+    open(dst, "wb").write(bytes(data))
+
 if sys.argv[1] == "check":
-    sys.exit(check(sys.argv[2], sys.argv[3]))
+    sys.exit(check(sys.argv[2], sys.argv[3], sys.argv[4:]))
+if sys.argv[1] == "entry":
+    elf = Elf(sys.argv[2])
+    print("entry 0x%x" % descriptor(elf, elf.sec(".opd"), sys.argv[3])[2]); sys.exit(0)
+if sys.argv[1] == "objdoctor":
+    objdoctor(sys.argv[2], sys.argv[3], sys.argv[4]); sys.exit(0)
 doctor(sys.argv[2], sys.argv[3], sys.argv[4])
 EOF
 
@@ -218,11 +251,17 @@ fail() { echo "opd-gc-sections: FAIL $*"; status=1; }
 for abi in ilp32 lp64; do
     flag=(); [ "$abi" = lp64 ] && flag=(-mlp64)
     built=1
+    for src in fixture other; do
+        if ! "$cc" "${flag[@]}" -O2 -ffunction-sections -fdata-sections -c "$work/$src.c" \
+                -o "$work/$abi-$src.o" > "$work/$abi-$src.log" 2>&1; then
+            fail "$abi: $src.c does not compile"; cat "$work/$abi-$src.log"; built=0
+        fi
+    done
+    [ $built -eq 1 ] || continue
     for mode in nogc gc; do
         gcflag=(); [ "$mode" = gc ] && gcflag=(-Wl,--gc-sections)
-        if ! "$cc" "${B[@]}" "${flag[@]}" -O2 -ffunction-sections -fdata-sections \
-                "$work/fixture.c" "$work/other.c" "${gcflag[@]}" \
-                -o "$work/$abi-$mode.elf" > "$work/$abi-$mode.log" 2>&1; then
+        if ! "$cc" "${B[@]}" "${flag[@]}" -O2 "$work/$abi-fixture.o" "$work/$abi-other.o" \
+                "${gcflag[@]}" -o "$work/$abi-$mode.elf" > "$work/$abi-$mode.log" 2>&1; then
             fail "$abi $mode: link failed"; cat "$work/$abi-$mode.log"; built=0
         fi
     done
@@ -252,6 +291,37 @@ for abi in ilp32 lp64; do
             ok "$abi $mode: every descriptor-only function kept with its code"
         else
             fail "$abi $mode: exit $rc"; cat "$work/$abi-$mode.out"
+        fi
+    done
+
+    # Malformed object: opd_tab_b's entry relocation moved to an offset
+    # with no whole descriptor in .opd - just below 2^64, where a bound
+    # computed as offset + 8 wraps (the first 0004 wrote outside its map
+    # there and then misreported a .TOC. relocation), and exactly at the
+    # end of .opd.  The fixed ld ignores the relocation: the GC link
+    # succeeds with no diagnostic, opd_tab_b's entry word stays 0 (nothing
+    # relocated it) and every other descriptor-only function is intact.
+    for how in wrap end; do
+        if ! python3 "$work/check.py" objdoctor "$work/$abi-fixture.o" "$work/$abi-bad-$how.o" "$how" > "$work/$abi-bad-$how.dlog" 2>&1; then
+            fail "$abi malformed $how: object could not be built"; cat "$work/$abi-bad-$how.dlog"; continue
+        fi
+        "$cc" "${B[@]}" "${flag[@]}" -O2 "$work/$abi-bad-$how.o" "$work/$abi-other.o" \
+            -Wl,--gc-sections -o "$work/$abi-bad-$how.elf" > "$work/$abi-bad-$how.log" 2>&1
+        rc=$?
+        if [ $rc -ne 0 ] || [ -s "$work/$abi-bad-$how.log" ] || [ ! -s "$work/$abi-bad-$how.elf" ]; then
+            fail "$abi malformed $how: link exit $rc, expected 0 with no diagnostic"; cat "$work/$abi-bad-$how.log"
+            continue
+        fi
+        python3 "$work/check.py" entry "$work/$abi-bad-$how.elf" opd_tab_b > "$work/$abi-bad-$how.entry" 2>&1
+        rc=$?
+        python3 "$work/check.py" check "$work/$abi-bad-$how.elf" "$work/$abi-nogc.elf" opd_tab_b > "$work/$abi-bad-$how.out" 2>&1
+        rc2=$?
+        if [ $rc -eq 0 ] && grep -q "^entry 0x0$" "$work/$abi-bad-$how.entry" \
+                && [ $rc2 -eq 0 ] && grep -q ": 0 findings$" "$work/$abi-bad-$how.out"; then
+            ok "$abi malformed $how: relocation ignored, link clean"
+        else
+            fail "$abi malformed $how: entry exit $rc, check exit $rc2"
+            cat "$work/$abi-bad-$how.entry" "$work/$abi-bad-$how.out"
         fi
     done
 done

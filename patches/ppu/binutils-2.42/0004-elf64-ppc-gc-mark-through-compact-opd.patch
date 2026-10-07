@@ -21,8 +21,11 @@ branch into .opd.
 Fix: for a compact .opd (alignment below 8, the same test
 ppc64_elf_edit_opd and opd_entry_value use) record the R_PPC64_ADDR32
 at each 8-byte descriptor boundary against a local symbol, index the
-map per 8 bytes, and look it up per 8 bytes in the mark hook.  The
-ELFv1 path is unchanged.  Global descriptors were already followed
+map per 8 bytes, and look it up per 8 bytes in the mark hook.  Both
+bounds are written without addition, so a malformed relocation offset
+near 2^64 cannot wrap past them; a descriptor offset with no whole
+8-byte entry inside .opd is simply not mapped.  The ELFv1 path is
+unchanged.  Global descriptors were already followed
 through opd_entry_value.
 
 Technique observed in SCE's published GCC 4.1.1 toolchain sources.
@@ -55,7 +58,7 @@ Technique observed in SCE's published GCC 4.1.1 toolchain sources.
        opd_sym_map = bfd_zalloc (ibfd, amt);
        if (opd_sym_map == NULL)
  	return false;
-@@ -4542,14 +4552,21 @@
+@@ -4542,14 +4552,24 @@
        if (relocs == NULL)
  	return false;
        symtab_hdr = &elf_symtab_hdr (ibfd);
@@ -74,13 +77,16 @@ Technique observed in SCE's published GCC 4.1.1 toolchain sources.
 +	  if ((compact
 +	       ? (r_type == R_PPC64_ADDR32
 +		  && (rel->r_offset & (OPD_COMPACT_SIZE - 1)) == 0
-+		  && rel->r_offset + OPD_COMPACT_SIZE <= opd->size)
++		  /* No addition: a malformed offset near 2^64 must not
++		     wrap past the bound and index outside the map.  */
++		  && opd->size >= OPD_COMPACT_SIZE
++		  && rel->r_offset <= opd->size - OPD_COMPACT_SIZE)
 +	       : (r_type == R_PPC64_ADDR64
 +		  && ELF64_R_TYPE ((rel + 1)->r_info) == R_PPC64_TOC))
  	      && r_symndx < symtab_hdr->sh_info)
  	    {
  	      Elf_Internal_Sym *isym;
-@@ -4566,7 +4583,7 @@
+@@ -4566,7 +4586,7 @@
  
  	      s = bfd_section_from_elf_index (ibfd, isym->st_shndx);
  	      if (s != NULL && s != opd)
@@ -89,7 +95,7 @@ Technique observed in SCE's published GCC 4.1.1 toolchain sources.
  	    }
  	}
        if (elf_section_data (opd)->relocs != relocs)
-@@ -6089,9 +6106,17 @@
+@@ -6089,9 +6109,18 @@
        opd = get_opd_info (rsec);
        if (opd != NULL && opd->func_sec != NULL)
  	{
@@ -101,7 +107,8 @@ Technique observed in SCE's published GCC 4.1.1 toolchain sources.
 +	  if (OPD_COMPACT_P (rsec))
 +	    /* A compact map has one slot per 8-byte descriptor; an
 +	       offset with no whole descriptor left names none.  */
-+	    rsec = (off < rsec->size && rsec->size - off >= OPD_COMPACT_SIZE
++	    rsec = (rsec->size >= OPD_COMPACT_SIZE
++		    && off <= rsec->size - OPD_COMPACT_SIZE
 +		    ? opd->func_sec[OPD_MAP_NDX (rsec, off)] : NULL);
 +	  else
 +	    rsec = opd->func_sec[OPD_NDX (off)];
