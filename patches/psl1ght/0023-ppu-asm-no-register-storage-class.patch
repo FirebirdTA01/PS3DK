@@ -1,0 +1,58 @@
+Subject: [PATCH] ppu-asm.h: drop 'register' from the statement-expression temporaries
+
+ISO C++17 removed the 'register' storage class, so every C++17 expansion
+of __build_opd32, __read8/16/32/64 or __gettime warns (-Wregister), and
+fails under -Werror.  The temporaries are plain asm outputs with no
+register binding, so the keyword never had an effect; dropping it leaves
+the generated code unchanged.
+
+After this patch the file is byte-identical to the SDK-owned
+sdk/include/ppu-asm.h, which is the copy installed in its place.
+
+diff --git a/ppu/include/ppu-asm.h b/ppu/include/ppu-asm.h
+index 60f70f7..3a93071 100644
+--- a/ppu/include/ppu-asm.h
++++ b/ppu/include/ppu-asm.h
+@@ -18,28 +18,28 @@
+ #define __get_addr32(addr)		(unsigned int)((unsigned long long)(addr))
+ 
+ #define __build_opd32(opd64,opd32) __extension__ \
+-	({register unsigned long long func,rtoc; \
++	({unsigned long long func,rtoc; \
+ 	__asm__ __volatile__("ld %0,0(%2); stw %0,0(%3); ld %1,8(%2); stw %1,4(%3)" : "=&r"(func),"=&r"(rtoc) : "b"((opd64)), "b"((opd32)) : "memory"); \
+ 	(u32)((u64)(opd32)); \
+ 	})
+ 
+ #define __read8(addr) __extension__ \
+-	({register unsigned char result; \
++	({unsigned char result; \
+ 	__asm__ __volatile__ ("lbz %0,0(%1); sync" : "=r"(result) : "b"((addr))); \
+ 	result;})
+ 
+ #define __read16(addr) __extension__ \
+-	({register unsigned short result; \
++	({unsigned short result; \
+ 	__asm__ __volatile__ ("lhz %0,0(%1); sync" : "=r"(result) : "b"((addr))); \
+ 	result;})
+ 
+ #define __read32(addr) __extension__ \
+-	({register unsigned int result; \
++	({unsigned int result; \
+ 	__asm__ __volatile__ ("lwz %0,0(%1); sync" : "=r"(result) : "b"((addr))); \
+ 	result;})
+ 
+ #define __read64(addr) __extension__ \
+-	({register unsigned long long result; \
++	({unsigned long long result; \
+ 	__asm__ __volatile__ ("ld %0,0(%1); sync" : "=r"(result) : "b"((addr))); \
+ 	result;})
+ 
+@@ -56,7 +56,7 @@
+ 	__asm__ __volatile__("std %0,0(%1); eieio" : : "r"((val)), "b"((addr)) : "memory")
+ 
+ #define __gettime() __extension__ \
+-	({register unsigned long long tb; \
++	({unsigned long long tb; \
+ 	__asm__ __volatile__("1: mftb %[current_tb]; cmpwi 7,%[current_tb],0; beq- 7,1b" : [current_tb] "=r"(tb) : : "cr7"); \
+ 	tb;})
+ 

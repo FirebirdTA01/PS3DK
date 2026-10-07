@@ -187,6 +187,11 @@ jobs:
       - name: Test the sys_ synchronisation surface
         run: bash tests/sdk/sys-sync-surface-test.sh
 
+      # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
+      # expand in C++17 without -Wregister (t_8d28bc61).
+      - name: Test ppu-asm.h macros carry no register storage class
+        run: bash tests/sdk/ppu-asm-cxx17-register-test.sh
+
       # Skips without PS3DK; with an installed SDK, ps3_add_spu_image must
       # refuse a SPURS job image that has no _start.
       - name: Test the SPURS job image entry guard

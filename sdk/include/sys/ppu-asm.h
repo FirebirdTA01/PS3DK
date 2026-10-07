@@ -109,7 +109,7 @@
 #ifndef __build_opd32
 #define __build_opd32(opd_in, opd_out) __extension__                    \
     ({                                                                  \
-        register unsigned long long __opd_func, __opd_toc;              \
+        unsigned long long __opd_func, __opd_toc;                       \
         __asm__ __volatile__(                                           \
             "ld  %0,0(%2)\n\t"                                          \
             "stw %0,0(%3)\n\t"                                          \
@@ -131,7 +131,7 @@
  */
 #ifndef __read8
 #define __read8(addr) __extension__                                     \
-    ({  register unsigned char  __r;                                    \
+    ({  unsigned char  __r;                                             \
         __asm__ __volatile__("lbz %0,0(%1)\n\tsync"                      \
             : "=r"(__r) : "b"((addr)));                                  \
         __r; })
@@ -139,7 +139,7 @@
 
 #ifndef __read16
 #define __read16(addr) __extension__                                    \
-    ({  register unsigned short __r;                                    \
+    ({  unsigned short __r;                                             \
         __asm__ __volatile__("lhz %0,0(%1)\n\tsync"                      \
             : "=r"(__r) : "b"((addr)));                                  \
         __r; })
@@ -147,7 +147,7 @@
 
 #ifndef __read32
 #define __read32(addr) __extension__                                    \
-    ({  register unsigned int   __r;                                    \
+    ({  unsigned int   __r;                                             \
         __asm__ __volatile__("lwz %0,0(%1)\n\tsync"                      \
             : "=r"(__r) : "b"((addr)));                                  \
         __r; })
@@ -155,7 +155,7 @@
 
 #ifndef __read64
 #define __read64(addr) __extension__                                    \
-    ({  register unsigned long long __r;                                \
+    ({  unsigned long long __r;                                         \
         __asm__ __volatile__("ld %0,0(%1)\n\tsync"                       \
             : "=r"(__r) : "b"((addr)));                                  \
         __r; })
@@ -193,7 +193,7 @@
  */
 #ifndef __gettime
 #define __gettime() __extension__                                       \
-    ({  register unsigned long long __tb;                               \
+    ({  unsigned long long __tb;                                        \
         __asm__ __volatile__(                                           \
             "1:\n\t"                                                    \
             "mftb  %[tb]\n\t"                                            \
