@@ -141,8 +141,9 @@ historical evidence, not as a firmware-retirement diagnosis.
 ## Compact `.opd` emission: achieved (retired from issues list)
 
 **Status:** complete.  GCC `-mps3-opd-compact` flag emits native 8-byte
-`.opd` entries; binutils resolves `R_PPC64_TLSGD *ABS*` at link time to
-write the module TOC base into offset +4. The transitional 24-byte-with-
+`.opd` entries; the TOC word (offset +4) is `R_PPC64_ADDR32 against .TOC.`
+(GCC 0007 emits `.long .TOC.`) and binutils writes the module TOC base into
+offset +4 at link time. No relocation 107 appears in PS3DK `.opd`. The transitional 24-byte-with-
 compat-packing form (GCC stock backend + sprx-linker post-link) has been
 retired; all call sites now use the native 2-word read sequence.
 

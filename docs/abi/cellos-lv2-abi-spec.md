@@ -44,11 +44,16 @@ Every `.opd` entry is exactly 8 bytes and is laid out as:
 offset  size  contents
 ------  ----  -----------------------------------------------
 0x00    4     Function entry-point EA (32-bit) - R_PPC64_ADDR32
-0x04    4     Module TOC base EA (32-bit) - R_PPC64_TLSGD *ABS* marker
+0x04    4     Module TOC base EA (32-bit) - R_PPC64_ADDR32 against .TOC.
 ```
 
-The `R_PPC64_TLSGD *ABS*` relocation at offset +4 is a binutils hook that
-resolves at link time to the module's TOC base EA. Every descriptor in a
+The offset +4 word is a `R_PPC64_ADDR32` against `.TOC.` (addend 0);
+binutils writes the module's TOC base EA into the 32-bit slot at link time.
+PS3DK never puts relocation 107 on this word. Another CellOS toolchain uses
+number 107 for the same word (its "TOC32"); upstream binutils numbers 107 as
+`R_PPC64_TLSGD`, which PS3DK objects do carry, but only as the genuine
+general-dynamic TLS call marker in code sections (beside the call to
+`__tls_get_addr`), never in `.opd`. Every descriptor in a
 given module carries the same TOC value (module-level constant, not per-function).
 
 Normative rules:
@@ -60,8 +65,11 @@ Normative rules:
    or external function symbol (by convention prefixed `.funcname` in the
    reference tree; our toolchain may emit with or without the dot prefix as
    long as the symbol resolves).
-4. Each descriptor's tail reloc is `R_PPC64_TLSGD` with no symbol and addend 0
-   - a link-time directive that writes the module TOC base EA into the slot.
+4. Each descriptor's tail word (offset +4) is `R_PPC64_ADDR32` against
+   `.TOC.` with addend 0, resolved to the module TOC base EA at link time.
+   PS3DK objects never carry relocation 107 on this word; another CellOS
+   toolchain's "TOC32" (also numbered 107) is a separate encoding for the
+   same 32-bit TOC base word.
 5. No entry uses `R_PPC64_ADDR64`. Any 64-bit descriptor reloc is a conformance
    error and indicates upstream-ELFv1 leakage.
 
@@ -70,8 +78,10 @@ Normative rules:
 - The PSL1GHT `__get_opd32` helper can be retired; native code MUST emit
   8-byte descriptors directly.
 - GCC's `-mps3-opd-compact` flag (or default on `powerpc64-ps3-elf`) emits
-  the compact form natively. The binutils linker resolves `R_PPC64_TLSGD`
-  by writing the module TOC base EA at link time.
+  the compact form natively; GCC 0007 emits `.long .TOC.` for the TOC word
+  and the binutils linker resolves `R_PPC64_ADDR32 against .TOC.` to the
+  module TOC base EA at link time (verified 14/14 rows on v0.20.6
+  liblv2.a, both ABIs). No relocation 107 appears in PS3DK `.opd`.
 - `lv2_fn_to_callback_ea(fn)` is now a bare cast - the `+16` offset is
   obsolete and should be removed from `<sys/lv2_types.h>`.
 
@@ -260,11 +270,10 @@ CellOS Lv-2 objects. `abi-verify` flags any relocation outside this set.
 
 | Type                   | Use                                          |
 |------------------------|----------------------------------------------|
-| `R_PPC64_ADDR32`       | `.opd` entry EA, `.sys_proc_prx_param` fields, call/ref within 32-bit EA range |
+| `R_PPC64_ADDR32`       | `.opd` entry EA **and TOC word** (offset +4, against `.TOC.`), `.sys_proc_prx_param` fields, call/ref within 32-bit EA range |
 | `R_PPC64_ADDR16_*`     | Short displacements in code                   |
 | `R_PPC64_REL24`        | Branch relocations                            |
 | `R_PPC64_TOC16*`       | TOC-relative references                       |
-| `R_PPC64_TLSGD`        | `.opd` descriptor token marker (size 0)       |
 | `R_PPC64_REL32`        | PC-relative 32-bit references                 |
 
 `R_PPC64_ADDR64` is permitted in `.data` / `.toc` payload only when the

@@ -73,11 +73,17 @@ zero-extends into the 64-bit register.
 
 The descriptor tail must resolve to the module TOC base EA in final output.
 
-Object files may reach that final value through either of these encodings:
+PS3DK object files reach that final value through one encoding:
 
-- a direct 32-bit relocation against `.TOC.` or the linker-provided TOC base;
-- the CellOS-specific `R_PPC64_TLSGD *ABS*` marker described in the normative
-  ABI spec.
+- a direct 32-bit `R_PPC64_ADDR32` against `.TOC.` (addend 0), as PS3DK
+  objects carry (GCC 0007 emits `.long .TOC.`; binutils writes the TOC
+  base EA at link time).
+
+PS3DK never puts relocation 107 on this word. Another CellOS toolchain
+uses relocation 107 (its "TOC32") for the same 32-bit TOC base word;
+upstream binutils numbers 107 as `R_PPC64_TLSGD`. PS3DK objects do carry
+`R_PPC64_TLSGD`, but only as the general-dynamic TLS call marker in code
+sections, never in `.opd`.
 
 The linked binary contract is the same either way: bytes `0x04..0x07` contain
 the 32-bit TOC base EA. `R_PPC64_ADDR64` is not valid for `.opd`.
@@ -298,12 +304,11 @@ Relocation types that appear in conforming Lv-2 user-mode ELF outputs:
 
 | Type | Used for |
 |---|---|
-| `R_PPC64_ADDR32` | 32-bit EA fields, process-param pointers, descriptor entry fields, stub slots |
+| `R_PPC64_ADDR32` | 32-bit EA fields, process-param pointers, descriptor entry fields, **compact `.opd` TOC word** (against `.TOC.`), stub slots |
 | `R_PPC64_ADDR16_*` | split immediate materialization in code |
 | `R_PPC64_REL24` | branch-with-link targets |
 | `R_PPC64_TOC16*` | TOC-relative accesses |
 | `R_PPC64_REL32` | PC-relative 32-bit references, including some EH data |
-| `R_PPC64_TLSGD` | CellOS compact-`.opd` TOC marker where emitted |
 
 `R_PPC64_ADDR64` may appear in ordinary data only when a real 64-bit absolute
 value is intended. It must not appear in `.opd` or `.sys_proc_prx_param`.
