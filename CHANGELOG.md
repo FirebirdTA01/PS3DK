@@ -103,9 +103,13 @@ The version stamped into builds is generated from the most recent
   man pages take their date from the commit, and rsx-cg-compiler no
   longer embeds the date it was built.  Some build paths remain: assembler-source
   debug info in `libc.a`/`libg.a` and the SPU `init_fixups.o`, OpenSSL's
-  built-in directories in the packaging tools, and the configured install
-  prefix in the toolchain executables.  The Rust tools print the version
-  from `tools/VERSION`, so a version bump no longer changes their code.
+  built-in directories in the packaging tools, the configured install
+  prefix in the toolchain executables, the configure command line in the
+  GCC drivers and `cc1`/`cc1plus`, the GCC plugin headers, the SPU
+  libstdc++ libtool files, and the native Linux binutils copies under
+  `ppu/powerpc64-ps3-elf/bin` and `spu/spu-elf/bin`.  The Rust tools print
+  the version from `tools/VERSION`, so a version bump no longer changes
+  their code.
 - **An SPU image's `.note.spu_name` holds the image's file name**, not
   the build directory's path, both for `ps3_add_spu_image` and for the
   `libspumars` modules.
