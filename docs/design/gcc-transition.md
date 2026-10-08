@@ -97,16 +97,18 @@ Checks beyond the release gate:
   boundary, TOC calls, TLS, varargs, struct passing.  The data-model tag
   (attribute 16) must agree.  An existing v0.21.x archive must not need a
   rebuild.
-- **The known 12.4 miscompile.**  `x != 0xff102030u` counted wrong in loops
-  (both data models, -O1 and above).  Run it on 16: fixed upstream, or ours to
-  find.
+- **Carry patterns.**  `count += (x != 0xff102030u)` once counted wrong in
+  loops in both data models, because our patches let 32-bit carry patterns
+  run on 64-bit registers (fixed in v0.16.4).  No carry pattern is widened in
+  the 16 port, and the `ppu-compare-carry` rows pass in both data models at
+  -O1 to -O3.
 - **DWARF.**  GCC 11 and later default to DWARF 5.  GDB 14 reads it; RPCS3 and
   other consumers need checking, or the specs pin `-gdwarf-4`.
 
 Rollout: the first release with the new compiler ships it as the default, and
 the previous release stays the documented fallback.  No release ships both.
 
-Exit: full release gate on the 16-based package, plus the three checks above,
+Exit: full release gate on the 16-based package, plus the four checks above,
 plus EMP acceptance.
 
 ## Stage 3: SPU on GCC 16
