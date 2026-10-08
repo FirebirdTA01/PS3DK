@@ -16,6 +16,102 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.21.0] — 2026-10-08
+
+### Added
+
+- **Link-time Cell GCM commands.**  `<cell/gcm/gcm_command_link.h>`,
+  included by `<cell/gcm.h>`, declares 137 `cellGcm*` commands (18 base
+  commands and 119 `*Unsafe` variants), and `libgcm_cmd.a` defines them
+  for both data models.  Code that calls them as functions, or takes their
+  address, now links.  `cellGcmFlushUnsafe` and `cellGcmFinishUnsafe`
+  remain static inline only.
+- **ILP32 and LP64 objects can no longer be linked together.**  The PPU
+  compiler tags every object with its data model (GNU attribute 16,
+  `Tag_GNU_Power_CellOS_Data_Model`), and `ld` refuses a link whose
+  inputs disagree, naming the archive member:
+  `libfoo.a(foo.o) uses the ILP32 data model, main.o uses LP64`.  Such a
+  link used to succeed and crash where the two sides disagreed on a
+  structure layout.  Untagged objects (hand-written assembler, or objects
+  built by an earlier release) still link with either model.
+  `readelf -A` prints the tag by name.
+- **rsx-cg-compiler `--dump-preprocess`** prints the macro-expanded
+  source and stops, like `cc -E`.
+- `scripts/leakscan.py` checks an installed package for link timestamps,
+  build paths and baked-in dates; `scripts/compare-builds.py` compares two
+  packages file by file.
+
+### Fixed
+
+- **`ld --gc-sections` and compact `.opd`.**  A static function reached
+  only through its descriptor (its address taken, or called through the
+  descriptor) lost its section under `--gc-sections`: its descriptor's
+  entry word was written as 0 and calls branched into `.opd`.  The
+  `--gc-sections` links of several samples crashed `ld` outright.
+- **LP64 programs no longer fault after their first import call.**
+  sprxlinker now restores the TOC after every call into an LP64 import
+  stub, whether or not `--lp64` is passed (the SDK's Make rules never
+  passed it).  Without it, an LP64 program returned from its first
+  firmware call with the wrong TOC.  `--lp64` is still accepted and has
+  no effect; it no longer rewrites calls in an ILP32 program.
+- **ILP32 virtual-base thunks.**  The vcall offset a virtual-base thunk
+  adds to `this` is now sign-extended, so `this` no longer comes out
+  2^32 too high at `-O0` and `-O2 -fno-inline`.
+- **ILP32 thread-local storage.**  An `extern __thread` variable in
+  non-PIC code made the compiler crash ("unrecognizable insn") at every
+  optimisation level; so did `-fPIC` local-dynamic at `-O2` and local-exec
+  with `-mtls-size=16`.  Initial-exec and local-exec TLS now compile and
+  link in both data models.  Global-dynamic and local-dynamic (`-fPIC`)
+  compile, and link only where `ld` relaxes the `__tls_get_addr` call
+  away: the SDK has no `__tls_get_addr`, so unrelaxed dynamic TLS remains
+  unsupported.  Local-dynamic with `-mtls-size=64` under ILP32 is
+  reported as unsupported.
+- **More than 64 KiB of small-model TOC is refused.**  A link that needs
+  more than one TOC group (only possible with `-mcmodel=small` or
+  hand-written `@toc` references) used to link and then crash; it now
+  fails with a diagnostic that names `-mcmodel=medium` (the default) or
+  `-mminimal-toc` as the remedy.
+- **SPU sibling calls with `-fcall-saved-N`.**  When `-fcall-saved-N`
+  named an argument register, a tail call passed the caller's old value
+  in it.  Such calls are now ordinary calls.  Default builds are
+  unchanged.
+- **`<sys/ppu-asm.h>` and `<ppu-asm.h>` in C++17.**  The `__read8/16/32/64`,
+  `__gettime` and `__build_opd32` macros no longer use the `register`
+  storage class, which C++17 removed, so they compile under
+  `-Werror=register`.
+- **`cellGcmSetupContextData` and `rsxSetupContextData`.**  The size is
+  in bytes, and the context's end pointer is now computed in bytes; it
+  used to point about four times past the end of the buffer.
+- **rsx-cg-compiler: `all()` on a scalar** (`float`, `half`, `int`,
+  `bool`) is accepted, matching `any()`, instead of failing with C1101.
+- **rsx-cg-compiler: `__DATE__` and `__TIME__`** give the time of the
+  shader compile, or `SOURCE_DATE_EPOCH` when it is set, instead of the
+  time the compiler itself was built.  An invalid `SOURCE_DATE_EPOCH` is
+  refused only when a shader expands one of the two macros.
+
+### Changed
+
+- **Archives are deterministic.**  `ar` and `ranlib` now write every
+  member header with mtime, uid and gid 0 and mode 644, so a rebuild of
+  identical members gives a byte-identical archive.  Nearly every
+  installed `.a` therefore has a new whole-file sha256 in this release,
+  including those whose members are unchanged; a project that pins an
+  archive's whole-file hash must update its pin once.
+- **Fewer build-time values in the release.**  The Windows release's
+  executables no longer carry link timestamps, the build directory is
+  mapped out of C and C++ debug info and `__FILE__` strings, the binutils
+  man pages take their date from the commit, and rsx-cg-compiler no
+  longer embeds the date it was built.  Some build paths remain: assembler-source
+  debug info in `libc.a`/`libg.a` and the SPU `init_fixups.o`, OpenSSL's
+  built-in directories in the packaging tools, and the configured install
+  prefix in the toolchain executables.  The Rust tools print the version
+  from `tools/VERSION`, so a version bump no longer changes their code.
+- **An SPU image's `.note.spu_name` holds the image's file name**, not
+  the build directory's path, both for `ps3_add_spu_image` and for the
+  `libspumars` modules.
+- The ABI specification describes the compact `.opd` TOC word as
+  `R_PPC64_ADDR32` against `.TOC.`, which is what the toolchain emits.
+
 ## [v0.20.6] — 2026-10-06
 
 ### Fixed
