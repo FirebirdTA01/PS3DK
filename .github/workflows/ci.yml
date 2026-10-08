@@ -33,6 +33,12 @@ jobs:
       - name: Test sync-versions.sh keeps tools/VERSION canonical
         run: bash tests/sdk/sync-versions-test.sh
 
+      # The pre-release gate's scripts check their parsers on built-in fixtures.
+      - name: Self-test leakscan.py and compare-builds.py
+        run: |
+          python3 scripts/leakscan.py --self-test
+          python3 scripts/compare-builds.py --self-test
+
   rust-tools:
     name: Rust tools build + tests
     runs-on: ubuntu-latest

@@ -93,28 +93,45 @@ def pe_time_date_stamp(data):
         return None, str(ex)
 
 
-def pe_debug_dir_timestamps(data):
-    """Diagnostic: TimeDateStamp values from the PE debug directory (data dir
-    [6] -> section -> IMAGE_DEBUG_DIRECTORY entries).  Not a gate on its own
-    (the COFF header stamp is), but reported for context.  No crash.
+PE_COFF_STAMP = "COFF TimeDateStamp"
+PE_CHECKSUM = "CheckSum"
+PE_DEBUG_STAMP = "debug-directory TimeDateStamp"
+
+
+def pe_stamp_fields(data):
+    """Locate the PE header fields a link writes from the build rather than
+    from the code: the COFF TimeDateStamp, the optional-header CheckSum and
+    each debug-directory entry's TimeDateStamp.  Returns a list of
+    (offset, size, label) for every field that lies inside data, in that
+    order; a header too short or malformed to read further ends the list
+    early.  Never raises.
 
     The data-directory table sits at opt+96 in PE32 (magic 0x10b) but opt+112
     in PE32+ (magic 0x20b, whose standard fields are 16 bytes longer); shipped
-    .exe are PE32+, so the magic is read and the offset chosen.  The COFF
-    SizeOfOptionalHeader is at coff+16 (after Machine 2, NumberOfSections 2,
-    TimeDateStamp 4, PointerToSymbolTable 4, NumberOfSymbols 4).  Returns the
-    list of non-zero per-entry TimeDateStamp values (zero-stamp entries are
-    dropped)."""
+    .exe are PE32+, so the magic is read and the offset chosen.  CheckSum is
+    at opt+64 in both.  The COFF SizeOfOptionalHeader is at coff+16 (after
+    Machine 2, NumberOfSections 2, TimeDateStamp 4, PointerToSymbolTable 4,
+    NumberOfSymbols 4)."""
     out = []
+
+    def field(off, size, label):
+        if off + size > len(data):
+            raise IndexError(label)
+        out.append((off, size, label))
+
     try:
         if data[:2] != b"MZ":
             return out
         e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
+        if data[e_lfanew:e_lfanew + 4] != b"PE\0\0":
+            return out
         coff = e_lfanew + 4
+        field(coff + 4, 4, PE_COFF_STAMP)
         nsec    = struct.unpack_from("<H", data, coff + 2)[0]
         sizeopt = struct.unpack_from("<H", data, coff + 16)[0]
         opt = coff + 20
         magic = struct.unpack_from("<H", data, opt)[0]
+        field(opt + 64, 4, PE_CHECKSUM)
         dd = opt + (112 if magic == 0x20b else 96)
         rva, size = struct.unpack_from("<II", data, dd + 6*8)
         if rva == 0 or size == 0:
@@ -131,11 +148,24 @@ def pe_debug_dir_timestamps(data):
         if off is None:
             return out
         for k in range(size // 28):
-            tds = struct.unpack_from("<I", data, off + k*28 + 4)[0]
-            if tds:
-                out.append(tds)
+            field(off + k*28 + 4, 4, PE_DEBUG_STAMP)
     except Exception:
         pass
+    return out
+
+
+def pe_debug_dir_timestamps(data):
+    """Diagnostic: TimeDateStamp values from the PE debug directory (data dir
+    [6] -> section -> IMAGE_DEBUG_DIRECTORY entries).  Not a gate on its own
+    (the COFF header stamp is), but reported for context.  No crash.  Returns
+    the list of non-zero per-entry TimeDateStamp values (zero-stamp entries
+    are dropped)."""
+    out = []
+    for off, _size, label in pe_stamp_fields(data):
+        if label == PE_DEBUG_STAMP:
+            tds = struct.unpack_from("<I", data, off)[0]
+            if tds:
+                out.append(tds)
     return out
 
 
@@ -429,6 +459,17 @@ def self_test():
         zgot = pe_debug_dir_timestamps(make_pe(magic, ddoff, dt_tds=0))
         check(0 not in zgot,
               f"PE{magic:#x} zero-stamp debug entry was kept: {zgot!r}")
+        # the stamp fields, by offset: COFF at e_lfanew+8, CheckSum at
+        # opt+64 in both magics, the one debug entry at the fixture's body
+        sech = 0x44 + 20 + ddoff + 16*8
+        fields = pe_stamp_fields(d)
+        want = [(0x48, 4, PE_COFF_STAMP), (0x44 + 20 + 64, 4, PE_CHECKSUM),
+                (sech + 40 + 4, 4, PE_DEBUG_STAMP)]
+        check(fields == want, f"PE{magic:#x} stamp fields wrong: {fields!r}")
+        # a debug entry cut off by the end of the file is not a field
+        cut = d[:sech + 40 + 6]
+        check(pe_stamp_fields(cut) == want[:2],
+              f"PE{magic:#x} truncated debug entry kept: {pe_stamp_fields(cut)!r}")
         h, de = scan_bytes(d)
         check("/home/runner/ps3tc/build" in h,
               f"PE{magic:#x} path miss: {sorted(h)}")
@@ -499,7 +540,7 @@ def self_test():
             print(f"  - {m}")
         return 1
     print("leakscan --self-test: OK "
-          "(PE32+ and PE32 COFF TDS, PE32+ and PE32 debug-dir TDS, "
+          "(PE32+ and PE32 COFF TDS, PE32+ and PE32 debug-dir TDS, stamp fields, "
           "date regex, AR iterate, prefix dedup, producer_of all verified)")
     return 0
 

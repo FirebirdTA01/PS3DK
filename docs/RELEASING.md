@@ -25,10 +25,12 @@ library can change behaviour through a header it did not own.
   since some files are not scanned.  Exit 3 means the scan was incomplete
   and is a failure.
 - Two builds of one commit, with the same version inputs, are
-  byte-identical, with no exceptions.
+  byte-identical, with no exceptions: `scripts/compare-builds.py <A> <B>`
+  on the two zips exits 0.
 - Separately, a deliberate version-only comparison (the same tree with only
   the version changed) shows the expected stamp differences and nothing
-  else.  For the Rust tools those are the version bytes and the PE
+  else: `scripts/compare-builds.py <A> <B> --version-string <old>=<new>`
+  exits 0.  For the Rust tools those are the version bytes and the PE
   checksum.
 
 ## 3. SDK, samples and RPCS3
