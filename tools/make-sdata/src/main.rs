@@ -30,7 +30,7 @@ options:
   -i, --info     : print file information";
 
 fn version_line() -> String {
-    format!("make_sdata: version {} (PS3 Custom Toolchain)", env!("CARGO_PKG_VERSION"))
+    format!("make_sdata: version {} (PS3 Custom Toolchain)", ps3dk_version::VERSION)
 }
 
 fn usage() -> ExitCode {

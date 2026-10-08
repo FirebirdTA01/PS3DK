@@ -66,10 +66,10 @@ jobs:
 
       - name: Check Rust workspace version is in sync
         # Same rationale as the tag/version check above — the sync test
-        # gates that tools/Cargo.toml has been bumped to the upcoming
+        # gates that tools/VERSION has been bumped to the upcoming
         # tag's version before the tag was pushed.  On
         # workflow_dispatch the working tree's version is whatever
-        # version.sh derives from "tag + commits-since" and Cargo.toml
+        # version.sh derives from "tag + commits-since" and tools/VERSION
         # legitimately lags.  The dispatch never publishes, so we just
         # log the gap and move on.
         run: |

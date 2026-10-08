@@ -29,7 +29,7 @@ fn main() -> ExitCode {
             wrapper = Some(v.to_string());
         } else if arg.starts_with("--nm=") {
         } else if arg == "--version" || arg == "-v" {
-            println!("cellOvisConfigAuto {}", env!("CARGO_PKG_VERSION"));
+            println!("cellOvisConfigAuto {}", ps3dk_version::VERSION);
             return ExitCode::SUCCESS;
         } else if arg == "--help" || arg == "-h" {
             return usage();

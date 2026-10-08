@@ -29,6 +29,10 @@ jobs:
       - name: scripts/sync-versions.sh --dry-run
         run: ./scripts/sync-versions.sh --dry-run
 
+      # tools/VERSION must be exactly X.Y.Z and a newline: the Rust tools embed it.
+      - name: Test sync-versions.sh keeps tools/VERSION canonical
+        run: bash tests/sdk/sync-versions-test.sh
+
   rust-tools:
     name: Rust tools build + tests
     runs-on: ubuntu-latest

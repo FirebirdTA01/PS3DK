@@ -72,7 +72,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     if cli.version {
-        println!("sfo-gui {}", env!("CARGO_PKG_VERSION"));
+        println!("sfo-gui {}", ps3dk_version::VERSION);
         return Ok(());
     }
     gui::run(gui::LaunchOptions {

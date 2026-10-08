@@ -20,4 +20,5 @@ name = "cellOvisConfigAuto"
 path = "src/bin/config_auto.rs"
 
 [dependencies]
+ps3dk-version.workspace = true
 object.workspace = true

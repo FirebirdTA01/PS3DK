@@ -21,7 +21,7 @@ use spu_elf_to_ppu_obj::JOBBIN2_PREFIX_SIZE;
 #[derive(Parser)]
 #[command(
     name = "spu-elf-to-ppu-obj",
-    version,
+    version = ps3dk_version::VERSION,
     about = "Independent SPU ELF to PPU object wrapper and inspection tool"
 )]
 struct Cli {

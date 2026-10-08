@@ -33,7 +33,7 @@ fn main() -> ExitCode {
         } else if arg == "--spurs" {
             eprintln!("cellOvisMkLdscript: --spurs is not needed; link the task with -mspurs-task and this script");
         } else if arg == "--version" || arg == "-v" {
-            println!("cellOvisMkLdscript {}", env!("CARGO_PKG_VERSION"));
+            println!("cellOvisMkLdscript {}", ps3dk_version::VERSION);
             return ExitCode::SUCCESS;
         } else if arg == "--help" || arg == "-h" {
             return usage();

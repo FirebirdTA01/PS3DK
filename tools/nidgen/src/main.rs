@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use nidgen::{archive, db, entgen, extract, nid, stubgen, verify, AbiMode};
 
 #[derive(Parser)]
-#[command(name = "nidgen", version, about = "PS3 NID/FNID tooling", long_about = None)]
+#[command(name = "nidgen", version = ps3dk_version::VERSION, about = "PS3 NID/FNID tooling", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

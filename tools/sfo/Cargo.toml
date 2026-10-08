@@ -20,6 +20,7 @@ name = "sfo-gui"
 path = "src/gui_main.rs"
 
 [dependencies]
+ps3dk-version.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 eframe = { version = "0.29.1", default-features = false, features = ["glow", "default_fonts"] }

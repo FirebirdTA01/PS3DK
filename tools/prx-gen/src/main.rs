@@ -28,7 +28,7 @@ use std::path::PathBuf;
 #[command(
     name = "prx-gen",
     about = "Turn a -Wl,-q linked Lv-2 ELF into a loadable PRX module",
-    version
+    version = ps3dk_version::VERSION
 )]
 struct Cli {
     #[command(subcommand)]

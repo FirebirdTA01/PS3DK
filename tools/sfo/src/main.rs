@@ -132,7 +132,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     if cli.version {
-        println!("sfo {}", env!("CARGO_PKG_VERSION"));
+        println!("sfo {}", ps3dk_version::VERSION);
         return Ok(());
     }
 

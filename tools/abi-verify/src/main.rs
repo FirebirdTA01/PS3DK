@@ -11,7 +11,7 @@ use abi_verify::{check_invariants, parse_elf_file};
 #[derive(Parser)]
 #[command(
     name = "abi-verify",
-    version,
+    version = ps3dk_version::VERSION,
     about = "PS3 CellOS Lv-2 ABI conformance verifier"
 )]
 struct Cli {

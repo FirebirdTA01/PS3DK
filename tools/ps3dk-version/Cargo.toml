@@ -1,0 +1,11 @@
+[package]
+name = "ps3dk-version"
+description = "The SDK release version every tool reports (from tools/VERSION)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]

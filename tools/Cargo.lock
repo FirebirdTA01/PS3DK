@@ -20,12 +20,13 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
 name = "abi-verify"
-version = "0.20.6"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "ar",
  "clap",
  "object",
+ "ps3dk-version",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -637,13 +638,14 @@ dependencies = [
 
 [[package]]
 name = "coverage-report"
-version = "0.20.6"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "ar",
  "clap",
  "nidgen",
  "object",
+ "ps3dk-version",
  "serde",
  "serde_yaml",
  "walkdir",
@@ -1547,8 +1549,9 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "make-sdata"
-version = "0.20.6"
+version = "0.0.0"
 dependencies = [
+ "ps3dk-version",
  "thiserror 1.0.69",
 ]
 
@@ -1638,13 +1641,14 @@ dependencies = [
 
 [[package]]
 name = "nidgen"
-version = "0.20.6"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "ar",
  "clap",
  "hex",
  "object",
+ "ps3dk-version",
  "serde",
  "serde_yaml",
  "sha1",
@@ -2007,9 +2011,10 @@ dependencies = [
 
 [[package]]
 name = "ovis"
-version = "0.20.6"
+version = "0.0.0"
 dependencies = [
  "object",
+ "ps3dk-version",
 ]
 
 [[package]]
@@ -2176,11 +2181,16 @@ dependencies = [
 
 [[package]]
 name = "prx-gen"
-version = "0.20.6"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "ps3dk-version",
 ]
+
+[[package]]
+name = "ps3dk-version"
+version = "0.0.0"
 
 [[package]]
 name = "pxfm"
@@ -2447,11 +2457,12 @@ dependencies = [
 
 [[package]]
 name = "sfo"
-version = "0.20.6"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
  "eframe",
+ "ps3dk-version",
  "rfd",
  "serde",
  "serde_json",
@@ -2603,11 +2614,12 @@ dependencies = [
 
 [[package]]
 name = "spu-elf-to-ppu-obj"
-version = "0.20.6"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
  "object",
+ "ps3dk-version",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

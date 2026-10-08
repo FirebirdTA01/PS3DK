@@ -28,7 +28,7 @@ use walkdir::WalkDir;
 #[derive(Parser)]
 #[command(
     name = "coverage-report",
-    version,
+    version = ps3dk_version::VERSION,
     about = "Reference the reference SDK vs our install tree coverage matrix"
 )]
 struct Cli {

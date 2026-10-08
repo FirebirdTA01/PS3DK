@@ -10,9 +10,15 @@ members = [
     "make-sdata",
     "ovis",
 ]
+# ps3dk-version (the version string every tool prints) is a library and is
+# not listed here: it joins the workspace as a path dependency, and the list
+# above names only crates that ship binaries (scripts/list-rust-bins.sh).
 
 [workspace.package]
-version = "0.20.6"
+# Fixed on purpose: Cargo hashes the crate version into every symbol, so a
+# per-release bump changed the code layout of every tool.  The version the
+# tools print is tools/VERSION (see ps3dk-version and scripts/sync-versions.sh).
+version = "0.0.0"
 edition = "2021"
 authors = ["PS3 Custom Toolchain contributors"]
 license = "MIT"
@@ -24,6 +30,7 @@ anyhow = "1.0"
 ar = "0.9"
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
+ps3dk-version = { path = "ps3dk-version" }
 object = { version = "0.36", default-features = false, features = ["read", "write", "elf", "std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

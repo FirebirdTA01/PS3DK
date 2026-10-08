@@ -12,5 +12,6 @@ name = "prx-gen"
 path = "src/main.rs"
 
 [dependencies]
+ps3dk-version.workspace = true
 anyhow.workspace = true
 clap.workspace = true
