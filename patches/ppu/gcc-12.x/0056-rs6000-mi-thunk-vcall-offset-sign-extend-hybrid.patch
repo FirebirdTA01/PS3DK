@@ -16,24 +16,50 @@ rs6000 cell_micro attribute marks sign-extending loads as always
 microcoded on Cell.  LP64 (ld), true 32-bit targets and the generic thunk
 path are unchanged.
 
+With Pmode DImode under ILP32 (0059), the same loads would be ld, reading
+the 4-byte vtable pointer or offset together with the word after it.  Load
+both in ptr_mode instead: that is lwz under ILP32 in either Pmode, and the
+same Pmode load everywhere else.  The sign extension keys on ptr_mode for
+the same reason.
+
 Technique observed in SCE's published GCC 4.1.1 toolchain sources.
 
 --- a/gcc/config/rs6000/rs6000-call.cc
 +++ b/gcc/config/rs6000/rs6000-call.cc
-@@ -2959,6 +2959,16 @@
- 
- 	  emit_move_insn (tmp, gen_rtx_MEM (Pmode, loc));
- 	}
-+      /* In the Cell ELF64/ILP32 ABI (TARGET_64BIT, Pmode == SImode) the
-+	 SImode loads above are lwz, which zero-extends, and the add below
-+	 uses all 64 GPR bits.  That is right for the vtable pointer, an
+@@ -2946,19 +2946,32 @@ rs6000_output_mi_thunk (FILE *file, tree thunk_fndecl ATTRIBUTE_UNUSED,
+     {
+       rtx vcall_offset_rtx = GEN_INT (vcall_offset);
+       rtx tmp = gen_rtx_REG (Pmode, 12);
+-
+-      emit_move_insn (tmp, gen_rtx_MEM (Pmode, this_rtx));
++      /* The vtable pointer and the vcall offset are pointer-sized words.
++	 In the Cell ELF64/ILP32 ABI (TARGET_64BIT, ptr_mode SImode) they are
++	 4 bytes whichever mode addresses are formed in, so load them in
++	 ptr_mode: with Pmode DImode a Pmode load would also read the next
++	 word.  lwz zero-extends, which is right for the vtable pointer, an
 +	 address, but the vcall offset is a signed displacement and is
 +	 usually negative: added zero-extended, it carries into bit 32 of
 +	 the adjusted `this'.  Sign-extend it first.  A separate extsw
 +	 rather than lwa, which is microcoded on Cell.  */
-+      if (TARGET_64BIT && Pmode == SImode)
++      rtx tmp_word = gen_rtx_REG (ptr_mode, 12);
++
++      emit_move_insn (tmp_word, gen_rtx_MEM (ptr_mode, this_rtx));
+       if (((unsigned HOST_WIDE_INT) vcall_offset) + 0x8000 >= 0x10000)
+ 	{
+ 	  emit_insn (gen_add3_insn (tmp, tmp, vcall_offset_rtx));
+-	  emit_move_insn (tmp, gen_rtx_MEM (Pmode, tmp));
++	  emit_move_insn (tmp_word, gen_rtx_MEM (ptr_mode, tmp));
+ 	}
+       else
+ 	{
+ 	  rtx loc = gen_rtx_PLUS (Pmode, tmp, vcall_offset_rtx);
+ 
+-	  emit_move_insn (tmp, gen_rtx_MEM (Pmode, loc));
++	  emit_move_insn (tmp_word, gen_rtx_MEM (ptr_mode, loc));
+ 	}
++      if (TARGET_64BIT && ptr_mode == SImode)
 +	emit_insn (gen_rtx_SET (gen_rtx_REG (DImode, REGNO (tmp)),
-+				gen_rtx_SIGN_EXTEND (DImode, tmp)));
++				gen_rtx_SIGN_EXTEND (DImode, tmp_word)));
        emit_insn (gen_add3_insn (this_rtx, this_rtx, tmp));
      }
  

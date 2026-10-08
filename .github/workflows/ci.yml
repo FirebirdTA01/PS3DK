@@ -437,6 +437,17 @@ jobs:
       - name: Test PPU TLS access models in both data models
         run: bash tests/sdk/ilp32-tls-models-codegen-test.sh
 
+      # Skips without PS3DEV; with a PPU compiler, AltiVec memory builtins that
+      # take a pointer must compile under the ILP32 address model (GCC 0059).
+      - name: Test AltiVec pointer builtins under ILP32
+        run: bash tests/sdk/altivec-builtin-address-test.sh
+
+      # An indirect call must save the TOC after any PRX stub call before it:
+      # stubs store it with a 4-byte stw, Pmode DImode restores it with ld
+      # (GCC 0060).
+      - name: Test the TOC is saved at each indirect call
+        run: bash tests/sdk/toc-save-indirect-test.sh
+
       # Skips without PS3DEV; runs against an installed or candidate compiler.
       - name: Test -mminimal-toc in both PPU ABIs
         run: bash tests/sdk/minimal-toc-ilp32-test.sh

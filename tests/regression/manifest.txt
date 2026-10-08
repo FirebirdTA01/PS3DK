@@ -132,3 +132,9 @@ ilp32-thunk-vcall,tests/regression/ilp32-thunk-vcall/ilp32-thunk-vcall.fake.self
 # def.c's local-exec ones.  tests/sdk/ilp32-tls-models-codegen-test.sh is
 # the compile-time guard.
 tls-ie,tests/regression/tls-ie/tls-ie.fake.self,30,RAN-CLEAN,TLS_IE_OK,TLS_IE_FAIL
+# ilp32-pointers guards GCC patch 0059 (Pmode DImode under ILP32): symbols via
+# TOC entry and TOC-relative, symbol+offset, function and label addresses, TLS,
+# label addresses from a static table and at run time, and an IV-optimised
+# negative-offset loop.
+# Judge it under the PPU INTERPRETER (LLVM truncates bad addresses).
+ilp32-pointers,tests/regression/ilp32-pointers/ilp32-pointers.fake.self,30,RAN-CLEAN,POINTERS PASS,POINTERS FAIL
