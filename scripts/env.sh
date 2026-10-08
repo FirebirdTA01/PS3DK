@@ -23,6 +23,7 @@
 #                                               as PS3DK now that build-psl1ght.sh
 #                                               installs into the unified tree)
 #   PS3_BUILD_ROOT       short path used for intermediate builds to avoid MAX_PATH
+#   SOURCE_DATE_EPOCH    commit time of the checkout, unless already set
 #
 # Adds $PS3DEV/bin, $PPU_PREFIX/bin, and $SPU_PREFIX/bin to PATH.
 
@@ -55,6 +56,21 @@ export ICON0="$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG"
 # Short build root avoids MAX_PATH blow-ups when GCC nests autotools output.
 # Override in your shell if C:/ps3tc is unsuitable.
 export PS3_BUILD_ROOT="${PS3_BUILD_ROOT:-$HOME/ps3tc/build}"
+
+# Build timestamps come from the checked-out commit, not the clock, so two
+# builds of one commit embed the same date: pod2man dates the binutils man
+# pages from it, GCC's __DATE__/__TIME__ and rsx-cg-compiler's follow it.
+# A value already in the environment wins; outside a git checkout it stays
+# unset and the tools fall back to the current time.
+if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+    # The || keeps a failed query (no git, not a checkout) from aborting a
+    # caller that sources this file under set -e.
+    _env_sde="$(git -C "$PS3_TOOLCHAIN_ROOT" log -1 --format=%ct 2>/dev/null)" || _env_sde=""
+    if [[ -n "$_env_sde" ]]; then
+        export SOURCE_DATE_EPOCH="$_env_sde"
+    fi
+    unset _env_sde
+fi
 
 # Prepend toolchain bin dirs so powerpc64-ps3-elf-* / spu-elf-* / ppu-* /
 # spu-* shadow any system copies.  Target-specific prefixes first (that's
