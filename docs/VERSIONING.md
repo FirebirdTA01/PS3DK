@@ -54,6 +54,10 @@ Logic:
 
 ## Cutting a release
 
+Before the tag is pushed, the candidate passes the pre-release gate in
+[RELEASING.md](RELEASING.md): archive diff, reproducibility, SDK, samples
+and RPCS3, and the EMP acceptance pass.
+
 1. **Update the changelog.**  Move items from `## [Unreleased]` into a
    new `## [vX.Y.Z] — YYYY-MM-DD` section in `CHANGELOG.md`.  Follow
    [Keep a Changelog](https://keepachangelog.com/) conventions.
