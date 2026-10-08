@@ -91,3 +91,54 @@ vec_store_back (int back, float value)
 {
   vec_stl (vec_splats (value), -back, &vec_table[8]);
 }
+
+/* A pointer member of a small aggregate passed by value: the caller packs
+   len into the high word and p into the low word of one GPR, so the callee
+   must not dereference the whole register.  */
+struct sv { unsigned len; const char *p; };
+char sv_first (struct sv s) { return s.p[0]; }
+char sv_last (struct sv s) { return s.p[s.len - 1]; }
+
+/* A pointer converted to a wider unsigned integer zero-extends: an address
+   with bit 31 set (the stack, 0xd00xxxxx) must not become 0xffffffff....  */
+unsigned long long ptr_to_u64 (const void *p) { return (unsigned long long) p; }
+
+/* A dense switch compiled to a relative jump table.  Case bodies placed
+   before the table give negative displacements, which must not carry into
+   bit 32 of the branch target.  */
+int
+dense_switch (int k)
+{
+  switch (k)
+    {
+    case 0: return 31;
+    case 1: return ext_table[1] + 1;
+    case 2: return 37;
+    case 3: return ext_table[3] * 2;
+    case 4: return 41;
+    case 5: return local_table[5] - 5;
+    case 6: return 47;
+    case 7: return 53;
+    default: return -1;
+    }
+}
+
+/* A PRX import called through a function pointer.  The import stub saves
+   and restores the TOC itself with a 4-byte store at 40(r1), in the slot the
+   caller saved the TOC to before its bctrl; the caller's reload must still
+   give a valid TOC for the TOC-relative accesses that follow.  */
+extern void *_sys_memset (void *, int, unsigned int);
+void *(*volatile import_fn) (void *, int, unsigned int) = _sys_memset;
+
+__attribute__ ((noinline)) int
+toc_reader (void)
+{
+  return local_table[2] + ext_table[2];
+}
+
+int
+import_via_pointer (char *buf)
+{
+  import_fn (buf, 0x5a, 8);
+  return toc_reader () + buf[7];
+}

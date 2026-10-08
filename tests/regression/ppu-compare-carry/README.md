@@ -9,8 +9,8 @@ checks: four type/constant families, seven comparison expressions and four
 data sets, followed by three register-operand controls. Empty input is included.
 Configure with the ILP32 toolchain; CMake refuses an LP64 base configuration.
 Both translation units assert their target's pointer, long and int sizes.
-Packaged outputs go into the private build's `packaged` directory; an in-source
-build is refused. Retain the emitted ABI-width line in each guest log.
+Packaged outputs go next to the sources, where the release manifest finds
+them; an in-source build is refused. Retain the emitted ABI-width line in each guest log.
 
 Candidate acceptance requires process exit 0, exactly one summary with 115
 checks and zero failures, the OK marker, and no mismatch lines. Parent RED
@@ -35,9 +35,5 @@ The 64-bit family controls source semantics but returns an int count; disassembl
 must establish which backend patterns it actually exercises. Passing host builds
 would validate the fixture only, not PPU code generation.
 
-This row is not yet added to the release regression manifest. Independent source
-review, the private corrected compiler build and matched six-configuration
-runtime validation are complete. The earlier Windows-parent runtime runner
-failed during lease release after all six guests exited normally; canonical
-recovery released that lease. Its original harness failure remains in the
-local evidence packet, separately from the later clean matched sessions.
+The release regression manifest runs all six executables as rows
+`ppu-compare-carry-<abi>-O<n>`.

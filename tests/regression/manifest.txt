@@ -138,3 +138,12 @@ tls-ie,tests/regression/tls-ie/tls-ie.fake.self,30,RAN-CLEAN,TLS_IE_OK,TLS_IE_FA
 # negative-offset loop.
 # Judge it under the PPU INTERPRETER (LLVM truncates bad addresses).
 ilp32-pointers,tests/regression/ilp32-pointers/ilp32-pointers.fake.self,30,RAN-CLEAN,POINTERS PASS,POINTERS FAIL
+# ppu-compare-carry guards 32-bit equality and inequality carry idioms
+# (count += (x != K) with a high-bit K miscounted before v0.16.4): 115 checks
+# per executable, both ABIs at O1, O2 and O3, judged against a literal table.
+ppu-compare-carry-ilp32-O1,tests/regression/ppu-compare-carry/ppu-compare-carry-ilp32-O1.fake.self,30,RAN-CLEAN,PPU_COMPARE_CARRY_OK,PPU_COMPARE_CARRY_FAIL|PPU_COMPARE_CARRY mismatch
+ppu-compare-carry-ilp32-O2,tests/regression/ppu-compare-carry/ppu-compare-carry-ilp32-O2.fake.self,30,RAN-CLEAN,PPU_COMPARE_CARRY_OK,PPU_COMPARE_CARRY_FAIL|PPU_COMPARE_CARRY mismatch
+ppu-compare-carry-ilp32-O3,tests/regression/ppu-compare-carry/ppu-compare-carry-ilp32-O3.fake.self,30,RAN-CLEAN,PPU_COMPARE_CARRY_OK,PPU_COMPARE_CARRY_FAIL|PPU_COMPARE_CARRY mismatch
+ppu-compare-carry-lp64-O1,tests/regression/ppu-compare-carry/ppu-compare-carry-lp64-O1.fake.self,30,RAN-CLEAN,PPU_COMPARE_CARRY_OK,PPU_COMPARE_CARRY_FAIL|PPU_COMPARE_CARRY mismatch
+ppu-compare-carry-lp64-O2,tests/regression/ppu-compare-carry/ppu-compare-carry-lp64-O2.fake.self,30,RAN-CLEAN,PPU_COMPARE_CARRY_OK,PPU_COMPARE_CARRY_FAIL|PPU_COMPARE_CARRY mismatch
+ppu-compare-carry-lp64-O3,tests/regression/ppu-compare-carry/ppu-compare-carry-lp64-O3.fake.self,30,RAN-CLEAN,PPU_COMPARE_CARRY_OK,PPU_COMPARE_CARRY_FAIL|PPU_COMPARE_CARRY mismatch

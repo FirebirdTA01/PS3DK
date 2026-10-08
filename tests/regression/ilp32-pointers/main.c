@@ -19,6 +19,12 @@ int label_runtime (int which);
 extern float vec_table[16];
 float vec_load_back (int back);
 void vec_store_back (int back, float value);
+struct sv { unsigned len; const char *p; };
+char sv_first (struct sv s);
+char sv_last (struct sv s);
+unsigned long long ptr_to_u64 (const void *p);
+int dense_switch (int k);
+int import_via_pointer (char *buf);
 
 static int failures;
 
@@ -63,6 +69,28 @@ main (void)
   check ("tls counter second", bump_tls (4), 7);
   *tls_slot (5) = 77;
   check ("tls array", *tls_slot (5), 77);
+
+  /* len 0xffffffff fills the high word of the packed register.  */
+  static const char text[] = "pointer";
+  struct sv s = { 0xffffffffu, text };
+  check ("aggregate pointer member", sv_first (s), 'p');
+  s.len = 7;
+  check ("aggregate pointer and length", sv_last (s), 'r');
+
+  char on_stack = 0;
+  volatile uintptr_t high = 0x80000000u;
+  check ("pointer to u64, bit 31 set",
+	 ptr_to_u64 ((const void *) high) == 0x80000000ull, 1);
+  check ("stack pointer to u64",
+	 ptr_to_u64 (&on_stack) == (unsigned long long) (uintptr_t) &on_stack, 1);
+
+  static const int switch_want[9] = { 31, 102, 37, 206, 41, 1000, 47, 53, -1 };
+  for (int k = 0; k < 9; k++)
+    check ("dense switch", dense_switch (k), switch_want[k]);
+
+  char buf[8] = { 0 };
+  check ("PRX import through a function pointer", import_via_pointer (buf),
+	 1002 + 102 + 0x5a);
 
   printf ("POINTERS %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
   return failures ? 1 : 0;
