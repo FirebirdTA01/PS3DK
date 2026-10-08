@@ -27,6 +27,13 @@ if(NOT MSVC)
         -Wno-sign-compare
         -Wno-reorder
         -Wno-switch)
+else()
+    # /Brepro: cl and link write a hash of the output where they would write
+    # the time (the PE TimeDateStamp and the debug-directory stamp), so two
+    # builds of one commit give the same .exe.  Not in Debug, where it would
+    # turn off incremental linking.
+    add_compile_options($<$<NOT:$<CONFIG:Debug>>:/Brepro>)
+    add_link_options($<$<NOT:$<CONFIG:Debug>>:/Brepro>)
 endif()
 
 set(SRC_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/src)
