@@ -49,6 +49,15 @@ SRC_ROOT="$PS3_BUILD_ROOT/host-tools-windows/src"
 STAGE_ROOT="$PS3_TOOLCHAIN_ROOT/stage/host-tools-windows"
 STAGE_BIN="$STAGE_ROOT/bin"
 
+# Reproducible Windows host tools.
+#   REPRO_LD : zero the PE TimeDateStamp in every shipped .exe/.dll via
+#              --no-insert-timestamp, so builds are byte-identical run to run.
+#   REPRO_CC : strip the CI build tree and the repo check-out path out of the
+#              DWARF (__FILE__ / debug info) in the C/C++ host tools.
+# The Rust host tools get their own equivalent RUSTFLAGS inline below.
+REPRO_LD="-Wl,--no-insert-timestamp"
+REPRO_CC="-ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build -ffile-prefix-map=$PS3_TOOLCHAIN_ROOT=."
+
 CLEAN=0
 for arg in "$@"; do
     case "$arg" in
@@ -444,6 +453,17 @@ build_rust_tools() {
     # dashes -> underscores).
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$HOST_TRIPLE-gcc"
 
+    # Reproducible Rust host tools:
+    #   -Clink-arg=-Wl,--no-insert-timestamp zeroes the PE TimeDateStamp.
+    #   --remap-path-prefix strips the CARGO_HOME registry tree and the repo
+    #   check-out path out of the .exe debug info (panic! locations, std paths).
+    #   /rustc/<hash> is the rustc commit of std's precompiled sources — fixed
+    #   for a pinned toolchain, so it is left alone.
+    # strip=true (set in tools/Cargo.toml release profile) removes the local
+    # debug sections.  panic is deliberately left at its default — abort
+    # changes runtime behaviour and nothing reproducible requires it.
+    export RUSTFLAGS="-Clink-arg=-Wl,--no-insert-timestamp --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}/registry=/cargo --remap-path-prefix=$PS3_TOOLCHAIN_ROOT=."
+
     (cd "$PS3_TOOLCHAIN_ROOT/tools" && \
         cargo build --release --workspace --target x86_64-pc-windows-gnu)
 
@@ -516,7 +536,11 @@ set(CMAKE_FIND_ROOT_PATH /usr/$HOST_TRIPLE $DEPS_ROOT)
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -static-libgcc -static-libstdc++")
+# Reproducible CMake cross build: zero the PE TimeDateStamp and strip the CI
+# tree / repo path from DWARF.  Keep -static as-is.
+set(CMAKE_C_FLAGS_INIT "$REPRO_CC")
+set(CMAKE_CXX_FLAGS_INIT "$REPRO_CC")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -static-libgcc -static-libstdc++ $REPRO_LD")
 EOF
 
     cmake -S "$src" -B "$obj" -G Ninja \
@@ -550,10 +574,10 @@ build_sprx_linker() {
     local src="$PS3_TOOLCHAIN_ROOT/tools/sprx-linker/sprx-linker.c"
     [[ -f "$src" ]] || die "sprx-linker source missing: $src"
 
-    "$HOST_TRIPLE-gcc" -O2 -Wall -static -static-libgcc \
+    "$HOST_TRIPLE-gcc" -O2 -Wall -static -static-libgcc $REPRO_CC \
         -I"$DEPS_ROOT/include" \
         "$src" \
-        -L"$DEPS_ROOT/lib" -lelf \
+        -L"$DEPS_ROOT/lib" -lelf $REPRO_LD \
         -o "$STAGE_BIN/sprxlinker.exe"
     say "  staged sprxlinker.exe"
 }
@@ -602,8 +626,8 @@ build_sfo_pkg() {
     # No -Wall on pkg.c: upstream's fixed-size path buffers trip
     # -Wstringop-truncation and -Wformat-truncation, and that noise would
     # train everyone to skim past this build's output. Listed in PROVENANCE.md.
-    "$HOST_TRIPLE-gcc" -O2 -static -static-libgcc \
-        "$src/pkg.c" "$src/sha1.c" \
+    "$HOST_TRIPLE-gcc" -O2 -static -static-libgcc $REPRO_CC \
+        "$src/pkg.c" "$src/sha1.c" $REPRO_LD \
         -o "$STAGE_BIN/pkg.exe"
     say "  staged pkg.exe"
 
@@ -633,11 +657,11 @@ build_psl1ght_tools() {
     [[ -d "$fself_src/source" ]] \
         || die "PSL1GHT fself source missing after ensure_psl1ght_source — upstream layout changed?"
 
-    local cflags="-O2 -I$DEPS_ROOT/include"
+    local cflags="-O2 -I$DEPS_ROOT/include $REPRO_CC"
     # -static-libgcc keeps libgcc_s_seh-1.dll out of the dependency list.
     # -lws2_32 is a Windows networking lib that openssl's older libs reference
     # via getaddrinfo etc.; harmless to add unconditionally.
-    local ldflags="-static -static-libgcc -L$DEPS_ROOT/lib -lgmp -lcrypto -lz -lws2_32 -lcrypt32"
+    local ldflags="-static -static-libgcc -L$DEPS_ROOT/lib -lgmp -lcrypto -lz -lws2_32 -lcrypt32 $REPRO_LD"
 
     local cc="$HOST_TRIPLE-gcc"
     "$cc" $cflags "$geohot_src/make_self.c"         $ldflags -o "$STAGE_BIN/make_self.exe"
@@ -657,8 +681,8 @@ build_psl1ght_tools() {
     # fself is a small fself.elf builder; ships under tools/fself/source/.
     # It only needs zlib.  Build the .c sources directly — its own Makefile
     # is heavily indirected and isn't worth re-using cross.
-    local fself_cflags="-O2 -I$fself_src/include -I$DEPS_ROOT/include"
-    local fself_ldflags="-static -static-libgcc -L$DEPS_ROOT/lib -lz"
+    local fself_cflags="-O2 -I$fself_src/include -I$DEPS_ROOT/include $REPRO_CC"
+    local fself_ldflags="-static -static-libgcc -L$DEPS_ROOT/lib -lz $REPRO_LD"
     local fself_srcs=()
     mapfile -t fself_srcs < <(find "$fself_src/source" -maxdepth 1 -name '*.c' -print)
     [[ ${#fself_srcs[@]} -gt 0 ]] || die "no .c sources under $fself_src/source"
@@ -683,17 +707,17 @@ build_psl1ght_legacy_tools() {
     local cgcomp_srcs=()
 
     [[ -f "$bin2s_src" ]] || die "bin2s source missing: $bin2s_src"
-    "$HOST_TRIPLE-gcc" -O2 -Wall -static -static-libgcc \
-        "$bin2s_src" -o "$STAGE_BIN/bin2s.exe"
+    "$HOST_TRIPLE-gcc" -O2 -Wall -static -static-libgcc $REPRO_CC \
+        "$bin2s_src" $REPRO_LD -o "$STAGE_BIN/bin2s.exe"
     say "  staged bin2s.exe"
 
     mapfile -t cgcomp_srcs < <(find "$cgcomp_src/source" -maxdepth 1 -name '*.cpp' -print | sort)
     [[ ${#cgcomp_srcs[@]} -gt 0 ]] || die "no cgcomp .cpp sources under $cgcomp_src/source"
-    "$HOST_TRIPLE-g++" -std=c++11 -O2 -Wall -DWIN32 \
+    "$HOST_TRIPLE-g++" -std=c++11 -O2 -Wall -DWIN32 $REPRO_CC \
         -static -static-libgcc -static-libstdc++ \
         -I"$cgcomp_src/include" \
         "${cgcomp_srcs[@]}" \
-        -o "$STAGE_BIN/cgcomp.exe"
+        $REPRO_LD -o "$STAGE_BIN/cgcomp.exe"
     say "  staged cgcomp.exe"
 
     if [[ -f "$cgcomp_src/cg.dll" ]]; then

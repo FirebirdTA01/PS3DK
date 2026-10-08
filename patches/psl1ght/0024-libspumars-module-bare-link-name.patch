@@ -1,0 +1,49 @@
+Subject: [PATCH] libspumars: strip the absolute output path from the SPU modules
+
+The SPU toolchain writes the link output's path into each module ELF's
+.note.spu_name.  The three mars modules link with an absolute -o target
+($(KERNELMODULE)/$(TASKMODULE)/$(JQMODULE) = $(BASEDIR)/../spu/lib/<name>.elf),
+and -Wl,-s keeps the note, so libspumars.a, libspumarstask.a and
+libspumarsjq.a all carry the build tree's absolute checkout path in their
+embedded module ELF.  leakscan flags those paths in every released package.
+
+Link each module to its bare name in the current (spu/) build dir, then
+mv it to the real target.  The note now holds only the bare filename
+(e.g. mars_kernel.elf), so the three archives are path-clean.  The objects,
+-L paths and map path are unchanged; the three names are distinct, so they
+cannot collide in the build dir.
+
+This is the same bug cmake/ps3-self.cmake fixed for ps3_add_spu_image.
+
+--- a/common/libspumars/spu/Makefile
++++ b/common/libspumars/spu/Makefile
+@@ -121,7 +121,8 @@
+ 			   -Wl,--cref \
+ 			   -Wl,-N \
+ 			   -Wl,-s \
+-			   $(LIBPATHS) $(LIBS) -o $@
++			   $(LIBPATHS) $(LIBS) -o $(notdir $@)
++	$(VERB) mv -f $(notdir $@) $@
+ 
+ $(TASKMODULE).elf: CFLAGS += -mfixed-range=80-127 -funroll-loops -fschedule-insns
+ $(TASKMODULE).elf: $(OBJS_TASK)
+@@ -136,7 +137,8 @@
+ 			   -Wl,--sort-section=alignment \
+ 			   -Wl,--cref \
+ 			   -Wl,-s \
+-			   $(LIBPATHS) $(LIBS) -L$(LIBDIR) -lspumars -o $@
++			   $(LIBPATHS) $(LIBS) -L$(LIBDIR) -lspumars -o $(notdir $@)
++	$(VERB) mv -f $(notdir $@) $@
+ 
+ $(JQMODULE).elf: CFLAGS += -mfixed-range=80-127 -funroll-loops -fschedule-insns
+ $(JQMODULE).elf: $(OBJS_JQ)
+@@ -151,7 +153,8 @@
+ 			   -Wl,--sort-section=alignment \
+ 			   -Wl,--cref \
+ 			   -Wl,-s \
+-			   $(LIBPATHS) $(LIBS) -L$(LIBDIR) -lspumars -o $@
++			   $(LIBPATHS) $(LIBS) -L$(LIBDIR) -lspumars -o $(notdir $@)
++	$(VERB) mv -f $(notdir $@) $@
+ 
+ #---------------------------------------------------------------------------------
+ 

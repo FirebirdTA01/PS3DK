@@ -113,7 +113,17 @@ if [[ -n "$HOST_TRIPLE" ]]; then
         "CXX=${_ccache}${HOST_TRIPLE}-g++"
         "CC_FOR_BUILD=${_ccache}gcc"
         "CXX_FOR_BUILD=${_ccache}g++"
-        "LDFLAGS=-static -static-libgcc -static-libstdc++"
+        # -Wl,--no-insert-timestamp zeroes the PE TimeDateStamp so the .exe/.dll
+        # we ship are byte-identical run to run.  -ffile-prefix-map strips the CI
+        # build tree out of the host binaries' DWARF (__FILE__ / debug info);
+        # -g -O2 are kept because setting the flags otherwise replaces the
+        # build's default flags.  CXX carries no -std here: only -std=gnu++11
+        # (the libcody guard) must stay out of this shared array, since binutils
+        # and GDB build their C++ without it.  This reaches the binutils, GCC
+        # and GDB host links alike.
+        "CFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+        "CXXFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+        "LDFLAGS=-static -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp"
     )
     unset _ccache
 fi
@@ -360,6 +370,10 @@ build_gcc_newlib() {
         CXXFLAGS=-std=gnu++11
         CXXFLAGS_FOR_BUILD=-std=gnu++11
     )
+    # Extra host flags for the Windows cross build only.  Set LAST on the
+    # configure env line so it wins over target_env's CXXFLAGS and the shared
+    # CROSS_LDFLAGS_ARGS CFLAGS, without disturbing their order.
+    local gcc_host_cxx=()
 
     if [[ -n "$HOST_TRIPLE" ]]; then
         # Cross-build: host binaries only, no target libs.  --disable-bootstrap
@@ -378,6 +392,12 @@ build_gcc_newlib() {
             CC_FOR_BUILD=gcc
             CXX_FOR_BUILD=g++
         )
+        # -std=gnu++11 keeps libcody's C++11 guard while adding the prefix map.
+        # Appended LAST on the env line so it wins over both target_env's
+        # CXXFLAGS and CROSS_LDFLAGS_ARGS' CXXFLAGS, without touching their order.
+        gcc_host_cxx=(
+            "CXXFLAGS=-std=gnu++11 -g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+        )
     else
         conf_args+=(--with-system-zlib)
         # Native combined-tree: build libgcc, newlib, libstdc++ in one pass.
@@ -390,10 +410,18 @@ build_gcc_newlib() {
             --enable-newlib-io-long-long
             --enable-newlib-io-c99-formats
         )
+        # The in-tree target libs (libgcc / libstdc++ / newlib) bake the CI
+        # host build tree into their DWARF, so map it out.  Setting FOR_TARGET
+        # otherwise drops GCC's default -g -O2 target flags, so reset them and
+        # append the prefix map.
+        target_env+=(
+            "CFLAGS_FOR_TARGET=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+            "CXXFLAGS_FOR_TARGET=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+        )
     fi
 
     (cd "$obj" && \
-        env "${target_env[@]}" "${CROSS_LDFLAGS_ARGS[@]}" \
+        env "${target_env[@]}" "${CROSS_LDFLAGS_ARGS[@]}" "${gcc_host_cxx[@]}" \
         "$gcc_src/configure" "${conf_args[@]}")
 
     if [[ -n "$HOST_TRIPLE" ]]; then

@@ -35,3 +35,7 @@ walkdir = "2.5"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Strip the local debug sections before the final .exe ships; the RUSTFLAGS
+# --remap-path-prefix handles the *paths* that remain.  panic stays at its
+# default (abort would change runtime behaviour and is not needed here).
+strip = true

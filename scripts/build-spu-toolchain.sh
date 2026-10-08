@@ -88,7 +88,14 @@ if [[ -n "$HOST_TRIPLE" ]]; then
         "CXX=${_ccache}${HOST_TRIPLE}-g++"
         "CC_FOR_BUILD=${_ccache}gcc"
         "CXX_FOR_BUILD=${_ccache}g++"
-        "LDFLAGS=-static -static-libgcc -static-libstdc++"
+        # -Wl,--no-insert-timestamp zeroes the PE TimeDateStamp so the .exe/.dll
+        # we ship are byte-identical run to run.  -ffile-prefix-map strips the CI
+        # build tree out of the host binaries' DWARF (__FILE__ / debug info);
+        # -g -O2 are kept because setting the flags otherwise replaces the
+        # build's defaults.  This reaches the SPU host (mingw) toolchain links.
+        "CFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+        "CXXFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+        "LDFLAGS=-static -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp"
     )
     unset _ccache
 fi
@@ -294,9 +301,11 @@ build_gcc_newlib() {
         # enough that without -mno-branch-hints the hbrr instruction's 16-bit
         # displacement overflows in functexcept.cc / system_error.cc and
         # binutils aborts.
+        # Append the host-build prefix map so libgcc/newlib/libstdc++ DWARF
+        # drops the CI tree.  Keeps $cflags_target and $target_includes verbatim.
         target_env=(
-            CFLAGS_FOR_TARGET="$cflags_target $target_includes"
-            CXXFLAGS_FOR_TARGET="$cflags_target $target_includes"
+            CFLAGS_FOR_TARGET="$cflags_target $target_includes -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+            CXXFLAGS_FOR_TARGET="$cflags_target $target_includes -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
         )
     fi
 
