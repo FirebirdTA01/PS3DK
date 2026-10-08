@@ -371,6 +371,11 @@ jobs:
       - name: Test compact-.opd links refuse multiple TOC groups
         run: bash tests/sdk/large-toc-test.sh
 
+      # Skips without PS3DEV; with a PPU toolchain, a link that mixes ILP32
+      # and LP64 objects must be refused (GCC 0058, binutils 0006).
+      - name: Test links refuse mixed ILP32 and LP64 objects
+        run: bash tests/sdk/data-model-link-test.sh
+
       # The header-checker self-test always runs; with PS3DEV, a plain
       # `ar rcs` must be byte-reproducible and every installed archive must
       # carry zero member mtime/uid/gid and mode 644 (binutils is built with

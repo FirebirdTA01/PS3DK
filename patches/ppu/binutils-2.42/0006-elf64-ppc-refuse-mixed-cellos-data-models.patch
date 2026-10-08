@@ -1,0 +1,152 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] elf64-ppc: refuse a link that mixes ILP32 and LP64 objects
+
+CellOS Lv-2 has two data models on one ELF target: ILP32 (4-byte
+pointers and longs) and LP64.  Both are ELFCLASS64 with the same
+e_flags, so ld had no way to tell them apart.  An -mlp64 link that found
+an ILP32 archive (a library with no LP64 build, picked up from the flat
+SDK library directory) linked it silently, and the program crashed at
+run time where the two sides disagreed on a structure layout.
+
+GCC now tags every object with Tag_GNU_Power_CellOS_Data_Model (GNU
+attribute 16: 1 for ILP32, 2 for LP64; GCC patch 0058).  The tag is
+merged like the Power FP tags, but a mismatch is an error for every
+input, archives included:
+
+    ld: libfoo.a(foo.o) uses the ILP32 data model, main.o uses LP64;
+        ILP32 and LP64 objects cannot be linked together
+
+An untagged object (assembler source, objects from an older compiler)
+links with either model.  readelf -A prints the tag by name.
+
+--- a/include/elf/ppc.h
++++ b/include/elf/ppc.h
+@@ -249,7 +249,11 @@
+   /* Value 1 for ABIs using r3/r4 for returning structures <= 8 bytes,
+      2 for ABIs using memory; 0 for not tagged or not using any ABIs
+      affected by the differences.  */
+-  Tag_GNU_Power_ABI_Struct_Return = 12
++  Tag_GNU_Power_ABI_Struct_Return = 12,
++
++  /* CellOS Lv-2: value 1 for the ILP32 data model, 2 for LP64; 0 for
++     not tagged.  Both models are ELFCLASS64 with the same e_flags.  */
++  Tag_GNU_Power_CellOS_Data_Model = 16
+ };
+ 
+ #endif /* _ELF_PPC_H */
+--- a/bfd/elf-bfd.h
++++ b/bfd/elf-bfd.h
+@@ -2862,6 +2862,8 @@
+ /* PowerPC .gnu.attributes handling common to both 32-bit and 64-bit.  */
+ extern bool _bfd_elf_ppc_merge_fp_attributes
+   (bfd *, struct bfd_link_info *);
++extern bool _bfd_elf_ppc_merge_cellos_data_model
++  (bfd *, struct bfd_link_info *);
+ 
+ /* Return an upper bound on the number of bytes required to store a
+    copy of ABFD's program header table entries.  Return -1 if an error
+--- a/bfd/elf32-ppc.c
++++ b/bfd/elf32-ppc.c
+@@ -3653,6 +3653,53 @@
+   return ret;
+ }
+ 
++static const char *
++ppc_cellos_data_model_name (int model)
++{
++  return model == 1 ? "ILP32" : model == 2 ? "LP64" : "an unknown";
++}
++
++/* Refuse a link that mixes CellOS Lv-2 data models.  ILP32 and LP64
++   objects are both ELFCLASS64 with the same e_flags, so
++   Tag_GNU_Power_CellOS_Data_Model is the only thing that tells them
++   apart; an untagged object (assembler source, an older compiler) is
++   accepted with either.  Unlike the FP tags this is an error for every
++   input: an ILP32 archive member in an LP64 link lays out pointers and
++   longs in 4 bytes where its callers use 8.  */
++bool
++_bfd_elf_ppc_merge_cellos_data_model (bfd *ibfd, struct bfd_link_info *info)
++{
++  bfd *obfd = info->output_bfd;
++  obj_attribute *in_attr, *out_attr;
++  static bfd *last_model;
++
++  in_attr = &elf_known_obj_attributes (ibfd)[OBJ_ATTR_GNU]
++	      [Tag_GNU_Power_CellOS_Data_Model];
++  out_attr = &elf_known_obj_attributes (obfd)[OBJ_ATTR_GNU]
++	       [Tag_GNU_Power_CellOS_Data_Model];
++
++  if (in_attr->i == 0 || in_attr->i == out_attr->i)
++    return true;
++
++  if (out_attr->i == 0)
++    {
++      out_attr->type = ATTR_TYPE_FLAG_INT_VAL;
++      out_attr->i = in_attr->i;
++      last_model = ibfd;
++      return true;
++    }
++
++  _bfd_error_handler
++    /* xgettext:c-format */
++    (_("%pB uses the %s data model, %pB uses %s; "
++       "ILP32 and LP64 objects cannot be linked together"),
++     ibfd, ppc_cellos_data_model_name (in_attr->i),
++     last_model, ppc_cellos_data_model_name (out_attr->i));
++  out_attr->type = ATTR_TYPE_FLAG_INT_VAL | ATTR_TYPE_FLAG_ERROR;
++  bfd_set_error (bfd_error_bad_value);
++  return false;
++}
++
+ /* Merge object attributes from IBFD into OBFD.  Warn if
+    there are conflicting attributes.  */
+ static bool
+--- a/bfd/elf64-ppc.c
++++ b/bfd/elf64-ppc.c
+@@ -5531,6 +5531,9 @@
+   if (!_bfd_elf_ppc_merge_fp_attributes (ibfd, info))
+     return false;
+ 
++  if (!_bfd_elf_ppc_merge_cellos_data_model (ibfd, info))
++    return false;
++
+   /* Merge Tag_compatibility attributes and any common GNU ones.  */
+   return _bfd_elf_merge_object_attributes (ibfd, info);
+ }
+--- a/binutils/readelf.c
++++ b/binutils/readelf.c
+@@ -17818,6 +17818,34 @@
+       return p;
+     }
+ 
++  if (tag == Tag_GNU_Power_CellOS_Data_Model)
++    {
++      printf ("  Tag_GNU_Power_CellOS_Data_Model: ");
++      if (p == end)
++	{
++	  printf (_("<corrupt>\n"));
++	  return p;
++	}
++      READ_ULEB (val, p, end);
++
++      switch (val)
++	{
++	case 0:
++	  printf (_("unspecified\n"));
++	  break;
++	case 1:
++	  printf ("ILP32\n");
++	  break;
++	case 2:
++	  printf ("LP64\n");
++	  break;
++	default:
++	  printf ("(%#x)\n", val);
++	  break;
++	}
++      return p;
++    }
++
+   return display_tag_value (tag & 1, p, end);
+ }
+ 

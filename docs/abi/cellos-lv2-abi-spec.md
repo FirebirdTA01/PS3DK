@@ -34,6 +34,25 @@ Our fork of binutils (when added) SHOULD render it as `CellOS Lv-2`.
 The `e_flags` field is zero for conforming CellOS Lv-2 PPU user-mode
 outputs. The CellOS identity is carried by `EI_OSABI = 0x66`.
 
+### 1.1 Data-model tag
+
+ILP32 and LP64 objects share the identity above, so the data model is
+recorded as a GNU object attribute in `.gnu.attributes`:
+
+| Tag | Name                              | Values                             |
+|-----|-----------------------------------|------------------------------------|
+| 16  | `Tag_GNU_Power_CellOS_Data_Model` | 0 untagged, 1 ILP32, 2 LP64        |
+
+GCC writes `.gnu_attribute 16, 1` or `.gnu_attribute 16, 2` at the end of
+every cell64lv2 assembly file.  `ld` refuses a link whose tagged inputs
+disagree, archive members included, and names the offending member and
+the earlier object it conflicts with.  An untagged object (hand-written
+assembler, an object from a toolchain older than v0.21.0) links with
+either model.  `readelf -A` prints the tag by name.  The tag lives in
+`.gnu.attributes`, a non-allocated section that is never loaded; programs
+that pass floating-point values already carried it for the Power FP tag,
+and an integer-only program now gains it too.
+
 ---
 
 ## 2. Compact function-descriptor format (`.opd`)

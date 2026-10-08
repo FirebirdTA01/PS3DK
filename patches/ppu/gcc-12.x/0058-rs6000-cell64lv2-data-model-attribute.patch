@@ -1,0 +1,31 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: tag cell64lv2 objects with their data model
+
+ILP32 and LP64 objects for CellOS Lv-2 are both ELFCLASS64 with the same
+e_flags, so nothing in an object said which data model it was built
+for, and an -mlp64 link that picked up an ILP32 library linked it
+silently and crashed at run time.
+
+Emit ".gnu_attribute 16, 1" (ILP32) or ".gnu_attribute 16, 2" (LP64) at
+the end of every cell64lv2 assembly file.  binutils patch 0006 names the
+tag Tag_GNU_Power_CellOS_Data_Model and makes ld refuse a link whose
+tagged inputs disagree.  .gnu.attributes is a non-allocated section that
+programs passing floating-point values already carried (the Power FP
+tag); an integer-only program now gains it too.  It is never loaded.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -21039,6 +21039,13 @@
+ 		 aix_struct_return ? 2 : 1);
+     }
+ #endif
++#ifdef POWERPC_CELL64LV2
++  /* Tag_GNU_Power_CellOS_Data_Model: 1 for ILP32, 2 for LP64.  The two
++     data models share one ELF class and e_flags, so this tag is how ld
++     tells an ILP32 object in an LP64 link (or the reverse) and refuses
++     the link instead of producing an executable that crashes.  */
++  fprintf (asm_out_file, "\t.gnu_attribute 16, %d\n", TARGET_LP64 ? 2 : 1);
++#endif
+ #if defined (POWERPC_LINUX) || defined (POWERPC_FREEBSD)
+   if (TARGET_32BIT || DEFAULT_ABI == ABI_ELFv2)
+     file_end_indicate_exec_stack ();

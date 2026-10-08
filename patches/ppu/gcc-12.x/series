@@ -50,3 +50,4 @@
 0055-rs6000-relative-tablejump-hybrid-canonicalize.patch
 0056-rs6000-mi-thunk-vcall-offset-sign-extend-hybrid.patch
 0057-rs6000-ilp32-initial-exec-tls.patch
+0058-rs6000-cell64lv2-data-model-attribute.patch
