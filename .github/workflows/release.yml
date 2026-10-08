@@ -316,8 +316,9 @@ jobs:
           stage="ps3-sdk-tools-${version}-windows-x86_64"
           mkdir -p "$stage/bin"
           cp -a stage/host-tools-windows/bin/. "$stage/bin/"
-          # Strip best-effort.
-          x86_64-w64-mingw32-strip "$stage/bin/"*.exe || true
+          # Strip best-effort.  -p keeps each exe's PE link timestamp (0 from
+          # --no-insert-timestamp); without it strip stamps the current time.
+          x86_64-w64-mingw32-strip -p "$stage/bin/"*.exe || true
           # Bundled README.
           cat > "$stage/README.txt" <<EOF
           PS3 Custom Toolchain — host tools, ${version}, windows x86_64.
