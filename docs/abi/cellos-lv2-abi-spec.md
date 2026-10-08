@@ -294,7 +294,11 @@ The trampoline shape is data-model aware. ILP32 uses a frame-less
 wrapping `bctrl` form so SPRX exports with more than eight arguments
 see the caller's original stack-argument area. LP64 uses a bare
 `bctr` tail-call form that defers TOC restoration to the call-site
-nop slot rewritten by `sprxlinker --lp64`.
+nop slot, which `sprxlinker` rewrites to `ld r2,40(r1)`.  sprxlinker
+picks the calls from the stub shape (a stub that starts with
+`std r2,40(r1)` and ends in `bctr`), so `--lp64` is not needed; it is
+still accepted and changes nothing.  A call to such a stub followed by
+anything other than a nop or `ld r2,40(r1)` is refused.
 
 Normative trampoline body (per export, ILP32 hybrid):
 

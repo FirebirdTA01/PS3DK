@@ -77,6 +77,9 @@ typedef struct _opd64
 static const unsigned char PRX_MAGIC[4] = { 0x1b, 0x43, 0x4c, 0xec };
 static const uint32_t PPC_NOP = 0x60000000;
 static const uint32_t PPC_LD_R2_40_R1 = 0xe8410028;
+static const uint32_t PPC_STD_R2_40_R1 = 0xf8410028;
+static const uint32_t PPC_BCTR = 0x4e800420;
+static const uint32_t PPC_BCTRL = 0x4e800421;
 
 static Elf_Scn *getSection(Elf *elf, const char *name)
 {
@@ -121,6 +124,34 @@ static bool section_contains(const Elf64_Shdr *shdr, uint64_t addr)
 	return addr >= shdr->sh_addr && addr < shdr->sh_addr + shdr->sh_size;
 }
 
+/* Does the import stub at `addr` leave the TOC restore to its caller?
+   An LP64 stub saves r2 and tail-calls the export (std r2,40(r1) ...
+   bctr), so r2 holds the export's TOC when control returns to the
+   caller.  An ILP32 stub calls the export itself (bctrl) and restores r2
+   before it returns. */
+static bool stub_is_tail_call(const Elf_Data *data, const Elf64_Shdr *shdr, uint64_t addr)
+{
+	const unsigned char *buf = (const unsigned char *)data->d_buf;
+	size_t first = (size_t)(addr - shdr->sh_addr) / sizeof(uint32_t);
+	size_t count = data->d_size / sizeof(uint32_t);
+	for(size_t i = first; i < count && i < first + 16; i++) {
+		uint32_t insn;
+		memcpy(&insn, buf + i * sizeof(uint32_t), sizeof(insn));
+		insn = BE32(insn);
+		if(i == first && insn != PPC_STD_R2_40_R1)
+			return false;
+		if(insn == PPC_BCTRL)
+			return false;
+		if(insn == PPC_BCTR)
+			return true;
+	}
+	return false;
+}
+
+/* Give every call to a tail-call import stub its TOC restore: the nop
+   GCC leaves after the bl becomes ld r2,40(r1).  Which calls need it is
+   read from the stubs, so an LP64 ELF is fixed whether or not --lp64 was
+   passed, and an ILP32 ELF is never touched. */
 static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
 {
 	Elf_Scn *text = getSection(elf, ".text");
@@ -130,15 +161,16 @@ static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
 
 	Elf_Data *textdata = elf_getdata(text, NULL);
 	Elf64_Shdr *textshdr = elf64_getshdr(text);
+	Elf_Data *sce_stub_data = elf_getdata(sce_stub_text, NULL);
 	Elf64_Shdr *sce_stub_shdr = elf64_getshdr(sce_stub_text);
-	if(!textdata || !textshdr || !sce_stub_shdr)
+	if(!textdata || !textshdr || !sce_stub_data || !sce_stub_shdr)
 		return 0;
 
 	unsigned char *buf = (unsigned char *)textdata->d_buf;
 	size_t count = textdata->d_size / sizeof(uint32_t);
 	int rewrites = 0;
 
-	for(size_t i = 0; i + 1 < count; i++) {
+	for(size_t i = 0; i < count; i++) {
 		uint32_t insn;
 		memcpy(&insn, buf + i * sizeof(uint32_t), sizeof(insn));
 		insn = BE32(insn);
@@ -148,12 +180,31 @@ static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
 			continue;
 		if(!section_contains(sce_stub_shdr, target))
 			continue;
+		if(!stub_is_tail_call(sce_stub_data, sce_stub_shdr, target))
+			continue;
+
+		if(i + 1 == count) {
+			fprintf(stderr,
+			    "sprx-linker: the import call at 0x%llx is the last word "
+			    "of .text, so its TOC cannot be restored.\n",
+			    (unsigned long long)(textshdr->sh_addr + i * sizeof(uint32_t)));
+			return -1;
+		}
 
 		uint32_t next;
 		memcpy(&next, buf + (i + 1) * sizeof(uint32_t), sizeof(next));
 		next = BE32(next);
-		if(next != PPC_NOP)
+		if(next == PPC_LD_R2_40_R1)
 			continue;
+		if(next != PPC_NOP) {
+			/* No slot for the restore: r2 would stay the export's TOC. */
+			fprintf(stderr,
+			    "sprx-linker: the import call at 0x%llx is followed by "
+			    "0x%08x, not a nop, so its TOC cannot be restored.\n",
+			    (unsigned long long)(textshdr->sh_addr + i * sizeof(uint32_t)),
+			    next);
+			return -1;
+		}
 
 		uint32_t replacement = BE32(PPC_LD_R2_40_R1);
 		off_t off = (off_t)(textshdr->sh_offset + (i + 1) * sizeof(uint32_t));
@@ -172,11 +223,12 @@ static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
 
 int main(int argc, char *argv[])
 {
-	bool lp64 = false;
 	const char *elf_path = NULL;
 	for(int i = 1; i < argc; i++) {
+		/* --lp64 is accepted for old build rules and changes nothing:
+		   the stubs say which calls need a TOC restore. */
 		if(!strcmp(argv[i], "--lp64")) {
-			lp64 = true;
+			continue;
 		} else if(!elf_path) {
 			elf_path = argv[i];
 		} else {
@@ -206,7 +258,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if(lp64 && rewrite_lp64_sce_stub_toc_restores(fd, elf) < 0) {
+	if(rewrite_lp64_sce_stub_toc_restores(fd, elf) < 0) {
 		elf_end(elf);
 		close(fd);
 		return 1;

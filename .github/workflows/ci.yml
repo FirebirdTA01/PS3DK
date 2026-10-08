@@ -81,6 +81,11 @@ jobs:
       - name: Build sprx-linker
         run: make -C tools/sprx-linker
 
+      # Calls to LP64 import stubs get their TOC restore with or without
+      # --lp64; calls to ILP32 stubs are never touched.
+      - name: Test sprxlinker TOC restores
+        run: bash tests/sdk/sprxlinker-toc-restore-test.sh
+
       - name: Build rsx-cg-compiler
         run: |
           cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
