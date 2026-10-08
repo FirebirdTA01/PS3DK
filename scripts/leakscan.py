@@ -33,7 +33,10 @@ Exit codes:
   ( --self-test exits 0 on success, non-zero on a parser bug )
 
 Usage:
-  leakscan.py <pkg-root>          # report (markdown, stdout) + check exit code
+  leakscan.py <pkg-root> [--prefix PATH]...
+                                  # report (markdown, stdout) + check exit code;
+                                  # each --prefix adds a build path to look for
+                                  # (e.g. a local build root or checkout)
   leakscan.py --self-test         # verify each parser against synthetic fixtures
 Read-only: only open(path, "rb").  Never writes.  Never execs a compiler/linker.
 """
@@ -504,10 +507,20 @@ def self_test():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
         sys.exit(self_test())
-    if len(sys.argv) < 2:
+    args = sys.argv[1:]
+    extra = []
+    while "--prefix" in args:
+        i = args.index("--prefix")
+        if i + 1 >= len(args) or not args[i + 1]:
+            print("error: --prefix needs a path", file=sys.stderr)
+            sys.exit(2)
+        extra.append(args[i + 1].encode("utf-8"))
+        del args[i:i + 2]
+    if len(args) != 1:
         print(__doc__)
         sys.exit(2)
-    root = sys.argv[1]
+    PATH_PREFIXES.extend(extra)
+    root = args[0]
     if not os.path.isdir(root):
         print(f"error: not a directory: {root}", file=sys.stderr)
         sys.exit(2)
