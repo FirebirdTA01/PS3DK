@@ -16,7 +16,7 @@ float f; memcpy (&f, p, 4) compiled to a single lfs from p, and a packed
 struct's float member could compile to lfs at a misaligned offset even at
 -O0.
 
-New memory constraint "eF": on cell64lv2 a MEM whose MEM_ALIGN is at least
+New special memory constraint "eF": on cell64lv2 a MEM whose MEM_ALIGN is at least
 its mode's natural alignment (32 bits for SFmode, 64 for DFmode and
 DImode); on every other target it is "m".  It replaces "m" in the
 FPR-memory alternatives of movsf_hardfloat, *mov<mode>_hardfloat32/64,
@@ -25,6 +25,13 @@ before.  An under-aligned one has no FPR-memory alternative, so register
 allocation moves it through the GPR alternatives (integer loads/stores and
 an aligned stack slot), as -mstrict-align does, but for FP data only.
 Integer accesses are not affected.
+
+It is a special memory constraint (define_special_memory_constraint, as
+i386 does for its aligned vector memory): reload may not assume that
+putting the address in a register satisfies it.  As a plain memory
+constraint, LRA picked the stfd alternative for a DImode store of a double
+held in an FPR (memcpy (p, &d, 8) at -O2), reloaded the address, and the
+result still failed "eF": an ICE in extract_constrain_insn.
 
 Two more pieces keep the constraint from costing a compiler crash:
 - rs6000_legitimate_combined_insn refuses the combined insn, so combine
@@ -43,16 +50,19 @@ and without this rule the first build of libgcc's unwinder ICEd in
 extract_constrain_insn.
 --- a/gcc/config/rs6000/constraints.md
 +++ b/gcc/config/rs6000/constraints.md
-@@ -257,6 +257,15 @@
+@@ -257,6 +257,18 @@
    (and (match_code "mem")
         (match_test "GET_RTX_CLASS (GET_CODE (XEXP (op, 0))) != RTX_AUTOINC")))
  
-+(define_memory_constraint "eF"
++(define_special_memory_constraint "eF"
 +  "@internal
 +   A memory operand that a floating-point load or store may use.  On
 +   CellOS Lv-2 an lfs/lfd/stfs/stfd whose address is not aligned to the
 +   access size raises an alignment interrupt that ends the PPU thread, so
-+   there it must be naturally aligned; everywhere else this is @code{m}."
++   there it must be naturally aligned; everywhere else this is @code{m}.
++   A special memory constraint: reloading the address into a register
++   does not make a misaligned operand aligned, so reload must pick
++   another alternative instead."
 +  (and (match_code "mem")
 +       (match_test "rs6000_fp_mem_aligned_p (op)")))
 +
