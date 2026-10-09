@@ -23,7 +23,10 @@ edition = "2021"
 authors = ["PS3 Custom Toolchain contributors"]
 license = "MIT"
 repository = "https://github.com/FirebirdTA01/PS3_Custom_Toolchain"
-rust-version = "1.75"
+# The highest rust-version among the locked dependencies (icu_* and image).
+# Kept true so an older cargo stops with "requires rustc 1.88" instead of a
+# manifest parse error deep in the dependency graph.
+rust-version = "1.88"
 
 [workspace.dependencies]
 anyhow = "1.0"

@@ -34,7 +34,7 @@ Toolchain-version rationale is in [docs/toolchain-design.md](docs/toolchain-desi
 
 ## Build host
 
-**Native Linux** is the primary build host. Any reasonably current distribution (`glibc` >= 2.31, GCC >= 11 on the host, Python 3, Rust 1.85+) works. Linux gives the cleanest GCC cross-build experience and matches CI. **Windows users should build inside WSL2** (Ubuntu 24.04 recommended; see [Windows (via WSL2)](#windows-via-wsl2) below); native MSYS2 is not a supported bootstrap path. macOS is untested.
+**Native Linux** is the primary build host. Any reasonably current distribution (`glibc` >= 2.31, GCC >= 11 on the host, Python 3, Rust 1.88+) works. Linux gives the cleanest GCC cross-build experience and matches CI. **Windows users should build inside WSL2** (Ubuntu 24.04 recommended; see [Windows (via WSL2)](#windows-via-wsl2) below); native MSYS2 is not a supported bootstrap path. macOS is untested.
 
 The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are produced by cross-building from Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 toolchain.  This is a follow-up infra deliverable; the initial shipment is Linux-hosted only.
 
@@ -421,12 +421,12 @@ sudo apt install -y build-essential gcc-12 g++-12 cmake ninja-build texinfo \
     zip unzip
 ```
 
-Ubuntu 24.04 ships `rustc` 1.75 in apt, which can't build the Rust workspace under `tools/` (`clap_lex` 1.1+ requires Rust 1.85+).  Install Rust via `rustup` instead:
+Ubuntu 24.04 ships `rustc` 1.75 in apt, which can't build the Rust workspace under `tools/` (its locked dependencies need Rust 1.88+).  Install Rust via `rustup` instead:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 . "$HOME/.cargo/env"
-rustc --version    # should report 1.85+
+rustc --version    # should report 1.88+
 ```
 
 (CI uses `dtolnay/rust-toolchain@stable` and CachyOS / Fedora / Arch already ship a recent enough `rustc` — this only matters when bootstrapping on a stale Debian/Ubuntu host.)
