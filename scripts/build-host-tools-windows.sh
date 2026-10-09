@@ -808,7 +808,9 @@ stage_python_and_assets() {
 # per toolchain program; see tools/tool-alias/tool-alias.c.
 # -----------------------------------------------------------------------------
 build_gnu_make() {
-    local stamp="$DEPS_ROOT/.make-${MAKE_VER}-stamp"
+    # The stamp names the prefix too: a make built with the old build-tree
+    # prefix must not be reused.
+    local stamp="$DEPS_ROOT/.make-${MAKE_VER}-prefix-usr-local-stamp"
     if [[ ! -f "$stamp" ]]; then
         fetch "make-${MAKE_VER}.tar.gz" "$MAKE_SHA256" "${MAKE_URLS[@]}"
         verify_sha256 "make-${MAKE_VER}.tar.gz" "$MAKE_SHA256"
@@ -818,7 +820,7 @@ build_gnu_make() {
         mkdir -p "$SRC_ROOT/make-build"
         (cd "$SRC_ROOT/make-build" && \
             "$SRC_ROOT/make-${MAKE_VER}/configure" --host="$HOST_TRIPLE" \
-                --prefix="$DEPS_ROOT" --disable-nls --without-guile \
+                --prefix=/usr/local --disable-nls --without-guile \
                 CFLAGS="-O2 $REPRO_CC" LDFLAGS="-static -static-libgcc $REPRO_LD" && \
             make -j"$JOBS")
         touch "$stamp"
