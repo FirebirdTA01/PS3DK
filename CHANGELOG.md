@@ -69,6 +69,12 @@ The version stamped into builds is generated from the most recent
 - **FreeType is built without libpng.**  libpng is only used for colour
   bitmap (emoji) glyphs, and with it `-lfreetype` also needed `-lpng`, which
   Makefiles written for the old portlibs do not list.
+- **`scripts/bootstrap.sh` downloads only what the build uses.**  GCC,
+  binutils-gdb and newlib are fetched as their pinned release tags at depth
+  1, without the default branch's tip, and a tag already present is not
+  fetched again.  PSL1GHT is fetched at its pinned commit, depth 1.  The
+  ps3dev and community repositories that no build step reads are cloned only
+  with `--with-reference-repos`.
 
 ### Fixed
 
@@ -92,6 +98,11 @@ The version stamped into builds is generated from the most recent
   `tools/Cargo.toml` and the README said 1.75 and 1.85.
 - **Windows host tools are built from the pinned PSL1GHT commit**, not
   PSL1GHT's latest master.
+- **The Windows package carried Linux copies of the binutils tools** in
+  `ppu/powerpc64-ps3-elf/bin` and `spu/spu-elf/bin` (`ld`, `as`, `ar`, ...
+  beside `ld.exe`, `as.exe`, ...).  Extracting with MSYS or Git Bash
+  `unzip` and accepting its replace prompt put the Linux linker in place of
+  the Windows one.  They are gone, and packaging fails on any Linux binary.
 
 ## [v0.21.0] — 2026-10-08
 
