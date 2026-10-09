@@ -22,7 +22,14 @@ out = a.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
 root = Path(__file__).resolve().parents[2]
 lib = a.prefix.resolve()/'spu/spu-elf/lib'
-sdk = a.ps3dev.resolve()/'ps3dk'
+# SDK header root, as in the shell tests: a source build installs the SDK in
+# $PS3DEV/ps3dk (PS3DK), the installed package has PS3DK == PS3DEV.
+if os.environ.get('PS3DK'):
+    sdk = Path(os.environ['PS3DK']).resolve()
+elif (a.ps3dev/'ps3dk'/'spu'/'include').is_dir():
+    sdk = a.ps3dev.resolve()/'ps3dk'
+else:
+    sdk = a.ps3dev.resolve()
 rows = []
 
 
@@ -94,11 +101,16 @@ for lang, driver in [('c', 'gcc'), ('c++', 'g++')]:
         entry = '__spurs_task_start' if mode=='task' else '_start'
         row['owners'] = {s:owner(s) for s in [entry, 'cellSpursMain', 'cellSpursJobMain2']}
         expected_start = {'task':'spurs_task.o', 'job':'job_start.o', 'initialized':'job_start_w_crt.o'}[mode]
-        row['ok'] &= owner(entry)==str(lib/expected_start)
+        # The map spells paths its own way (on Windows "C:/x/lib\\y.a"), so
+        # compare normalised paths, not strings.
+        def same(got, want):
+            norm = lambda s: os.path.normcase(os.path.normpath(str(s)))
+            return norm(got) == norm(want)
+        row['ok'] &= same(owner(entry), lib/expected_start)
         if mode=='task':
-            row['ok'] &= owner('cellSpursMain')==(str(lib/'libspurs_task_runtime.a')+'(spurs_task_main.o)' if case=='canonical' else str(obj))
+            row['ok'] &= same(owner('cellSpursMain'), str(lib/'libspurs_task_runtime.a')+'(spurs_task_main.o)' if case=='canonical' else obj)
         else:
-            row['ok'] &= owner('cellSpursJobMain2')==(str(lib/'libspurs_jq_runtime.a')+'(job_queue_main.o)' if case=='queue' else str(obj))
+            row['ok'] &= same(owner('cellSpursJobMain2'), str(lib/'libspurs_jq_runtime.a')+'(job_queue_main.o)' if case=='queue' else obj)
         if mode=='task' and case=='canonical':
             # User scripts must win whether passed to gcc or forwarded to ld.
             custom = out/(lang+'-custom-task.ld')
