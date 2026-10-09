@@ -471,6 +471,7 @@ build_rust_tools() {
     # changes runtime behaviour and nothing reproducible requires it.
     export RUSTFLAGS="-Clink-arg=-Wl,--no-insert-timestamp --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}/registry=/cargo --remap-path-prefix=$PS3_TOOLCHAIN_ROOT=."
 
+    bash "$PS3_TOOLCHAIN_ROOT/scripts/check-rust-version.sh"
     (cd "$PS3_TOOLCHAIN_ROOT/tools" && \
         cargo build --release --workspace --target x86_64-pc-windows-gnu)
 

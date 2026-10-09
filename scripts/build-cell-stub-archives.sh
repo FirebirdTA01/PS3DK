@@ -65,6 +65,7 @@ install_with_legacy() {
 
 NIDGEN_BIN="$PS3_TOOLCHAIN_ROOT/tools/target/release/nidgen"
 say "building nidgen (release)"
+bash "$PS3_TOOLCHAIN_ROOT/scripts/check-rust-version.sh"
 cargo build --release --manifest-path "$PS3_TOOLCHAIN_ROOT/tools/nidgen/Cargo.toml"
 [[ -x "$NIDGEN_BIN" ]] || die "release nidgen missing after cargo build: $NIDGEN_BIN"
 

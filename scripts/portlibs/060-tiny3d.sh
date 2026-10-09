@@ -31,8 +31,11 @@ SRC="$PKG-$COMMIT"
 
 portlib_fetch "$TARBALL" "$SHA256" "${URLS[@]}" || exit 1
 
+# GitHub names the top directory after the repository as it is spelt there
+# ("tiny3D-<commit>"), so extract into our own directory instead of guessing.
 rm -rf "$SRC"
-tar xf "$TARBALL"
+mkdir -p "$SRC"
+tar xf "$TARBALL" -C "$SRC" --strip-components=1
 
 # Its Makefiles read PS3DEV / PSL1GHT / PORTLIBS the PSL1GHT way and call
 # the ppu-* tools; nothing else from the driver's CC/CFLAGS applies.
