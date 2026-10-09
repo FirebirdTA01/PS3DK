@@ -93,7 +93,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-              libelf-dev cmake ninja-build python3
+              libelf-dev cmake ninja-build python3               libgmp-dev libssl-dev zlib1g-dev
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -166,8 +166,24 @@ jobs:
           cp tools/rsx-cg-compiler/build/rsx-cg-compiler "$stage/bin/"
           cp tools/rsx-cg-compiler/build/cgnv2elf "$stage/bin/"
           cp build/host-tools-linux/sfo-pkg/pkg "$stage/bin/"
+          # PSL1GHT-derived tools and data files, the same set the Windows
+          # zip ships (bin2s, cgcomp, fself, make_self, make_self_npdrm,
+          # make_sprx, package_finalize, fself.py, Struct.py, sfo.xml,
+          # ICON0.PNG).
+          bash scripts/build-psl1ght-host-tools-linux.sh "$stage/bin"
+          # Same promise as the Windows package: every host_bin / host_file
+          # row of the artifact manifest, without .exe, is in bin/.
+          missing=0
+          while read -r cat path; do
+            case "$cat" in host_bin|host_file) ;; *) continue ;; esac
+            f="$stage/${path%.exe}"
+            [ -e "$f" ] || { echo "::error::Linux tools tarball lacks ${path%.exe} (manifest row: $cat $path)"; missing=1; }
+          done < <(grep -v '^#' cmake/ps3-required-artifacts.txt)
+          [ "$missing" -eq 0 ]
           # Strip everything (best-effort).
-          strip "$stage/bin/"* || true
+          for f in "$stage/bin/"*; do
+            case "$f" in *.py|*.xml|*.PNG) ;; *) strip "$f" || true ;; esac
+          done
           # Bundle a tiny README that lists runtime deps.
           #
           # The heredoc is unquoted on purpose: the glibc/libgcc_s bullet
@@ -190,6 +206,11 @@ jobs:
             * rsx-cg-compiler    — libstdc++ (system)
             * cgnv2elf           — libstdc++ (system)
             * pkg                - glibc
+            * make_self, make_self_npdrm, make_sprx, package_finalize
+                                 - libgmp, libcrypto (OpenSSL 3), libz
+            * fself              - libz
+            * bin2s, cgcomp      - glibc (cgcomp also needs NVIDIA's libCg.so
+                                   at run time for legacy Cg shaders)
             * sfo-gui            - Linux desktop OpenGL/display libraries
                                    loaded by the user's GUI session (for
                                    example libX11/libxcb/libxkbcommon/
