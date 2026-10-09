@@ -332,9 +332,11 @@ build_gcc_newlib() {
 copy_target_libs_from_native() {
     [[ -n "$HOST_TRIPLE" ]] || return 0
     say "Copying target libraries: $NATIVE_PREFIX -> $PREFIX"
+    # Not $TARGET/bin: binutils installs the native (Linux) as/ld/ar/...
+    # there, and the cross build installs its own .exe files beside them.
     if [[ -d "$NATIVE_PREFIX/$TARGET" ]]; then
         mkdir -p "$PREFIX/$TARGET"
-        cp -a "$NATIVE_PREFIX/$TARGET/." "$PREFIX/$TARGET/"
+        tar -C "$NATIVE_PREFIX/$TARGET" --exclude=./bin -cf - . | tar -C "$PREFIX/$TARGET" -xf -
     fi
     if [[ -d "$NATIVE_PREFIX/lib/gcc/$TARGET" ]]; then
         mkdir -p "$PREFIX/lib/gcc/$TARGET"
