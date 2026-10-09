@@ -57,3 +57,15 @@ export LDFLAGS="-L$PORTLIBS/lib${LDFLAGS:+ $LDFLAGS}"
 
 make -j"$(nproc 2>/dev/null || echo 4)"
 make install
+
+# Legacy header layout.  FreeType 2.5.1 and older installed ft2build.h and
+# freetype/ directly in include/; 2.5.2 and later put both under
+# include/freetype2/.  PS3 homebrew written against the old ps3libraries
+# portlibs (tiny3d's libfont3d users, AcidSampleV2, ...) includes
+# <ft2build.h> with only -I$(PORTLIBS)/include and fails with "ft2build.h:
+# No such file or directory".  Install the old layout as well, as copies:
+# the Windows package cannot carry symlinks.  The modern layout stays the
+# primary one (pkg-config's freetype2.pc points there).
+cp -f "$PORTLIBS/include/freetype2/ft2build.h" "$PORTLIBS/include/ft2build.h"
+rm -rf "$PORTLIBS/include/freetype"
+cp -R "$PORTLIBS/include/freetype2/freetype" "$PORTLIBS/include/freetype"
