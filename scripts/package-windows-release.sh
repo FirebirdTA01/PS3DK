@@ -115,13 +115,17 @@ cp -a "$WIN_PREFIX/spu" "$STAGE_DIR/spu"
 # that landed afterwards (lv2-crt*.o, lv2.ld, additional .a's) live only
 # in the native tree.  Overlay them onto the Windows package so the
 # resulting toolchain sees the latest target-side artefacts.  Target libs
-# are PowerPC / SPU ELF — host-agnostic.
+# are PowerPC / SPU ELF — host-agnostic.  Its bin/ is not: binutils
+# installs the native (Linux) as/ld/ar/... there, and copying it put a
+# Linux ELF beside every Windows .exe of the same name.
 for arch_pair in "ppu:powerpc64-ps3-elf" "spu:spu-elf"; do
     arch="${arch_pair%%:*}"
     target="${arch_pair##*:}"
     if [[ -d "$PS3DEV/$arch/$target" ]]; then
         say "Refreshing $arch/$target sysroot from native install"
-        cp -a "$PS3DEV/$arch/$target/." "$STAGE_DIR/$arch/$target/"
+        mkdir -p "$STAGE_DIR/$arch/$target"
+        tar -C "$PS3DEV/$arch/$target" --exclude=./bin -cf - . \
+            | tar -C "$STAGE_DIR/$arch/$target" -xf -
     fi
 done
 
@@ -443,6 +447,15 @@ validate_windows_release_payload() {
                 missing=1
             fi
         done
+        # No host ELF anywhere: target code (PowerPC / SPU ELF) is fine,
+        # an x86-64 ELF is a Linux tool that leaked into the Windows tree.
+        while IFS= read -r f; do
+            [[ -n "$f" ]] || continue
+            if file -b "$f" | grep -q '^ELF .*x86-64'; then
+                warn "Windows release contains a Linux x86-64 ELF: ${f#"$STAGE_DIR/"}"
+                missing=1
+            fi
+        done < <(find "$STAGE_DIR" -type f -size +1k)
     fi
 
 
