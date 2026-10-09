@@ -16,6 +16,45 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **The same host tools on Linux and Windows.**  The Linux tools tarball now
+  carries `bin2s`, `cgcomp`, `fself`, `fself.py`, `make_self`,
+  `make_self_npdrm`, `make_sprx`, `package_finalize`, `Struct.py`, `sfo.xml`
+  and `ICON0.PNG`, which only the Windows package had.  The release checks
+  both packages against the same list of required files.
+- **`ppu-*` and `spu-*` tool names on Windows.**  `ppu-gcc.exe`,
+  `ppu-ld.exe`, `spu-gcc.exe` and the rest, as on Linux, so PSL1GHT-style
+  Makefiles (`ppu_rules`) and third-party Makefiles that call them work.
+- **GNU make on Windows, when none is installed.**  The package ships GNU make
+  4.4.1 in `make\bin`; `setup.cmd` uses a `make` already on `PATH` (or the
+  one from Git for Windows) and adds the bundled one only when there is none.
+- **`setup.cmd` checks what the build paths need.**  It requires Git for
+  Windows (for `sh`, `sed`, `rm` and friends) and stops with the `winget`
+  command to install it when it is missing, and it lists `make`, `ppu-gcc`,
+  `spu-gcc`, `sh`, `sed`, `cmake` and `ninja` as OK or MISSING.
+- **tiny3d and libfont3d in portlibs** (wargio/tiny3d), for PSL1GHT homebrew
+  that links `-ltiny3d -lfont3d`.
+- **FreeType's legacy header layout.**  `ft2build.h` and `freetype/` are also
+  installed directly under `portlibs/ppu/include`, where homebrew written
+  for the old portlibs looks for them.
+
+### Fixed
+
+- **`setup.cmd && make` did nothing when cmake or ninja was missing**:
+  `setup.cmd` ended with a non-zero exit status.  It now fails only when
+  Git for Windows is missing.
+- **`make pkg` on Windows** read `C:wt...` paths: `PS3DEV` and `PSL1GHT` were
+  exported with backslashes, which `sh` strips inside `ppu_rules` recipes.
+  `setup.cmd` now exports them with forward slashes.
+- **The release source tarball builds the SDK.**  `scripts/version.sh`
+  required a git checkout; the tarball now carries a version stamp it reads
+  instead.
+- **The declared Rust version.**  The host tools need Rust 1.88 or later;
+  `tools/Cargo.toml` and the README said 1.75 and 1.85.
+- **Windows host tools are built from the pinned PSL1GHT commit**, not
+  PSL1GHT's latest master.
+
 ## [v0.21.0] — 2026-10-08
 
 ### Added

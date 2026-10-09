@@ -827,7 +827,7 @@ build_gnu_make() {
 }
 
 build_tool_alias() {
-    "$HOST_TRIPLE-gcc" -O2 -Wall -municode -static -static-libgcc $REPRO_CC \
+    "$HOST_TRIPLE-gcc" -O2 -Wall -municode -s -static -static-libgcc $REPRO_CC \
         "$PS3_TOOLCHAIN_ROOT/tools/tool-alias/tool-alias.c" $REPRO_LD \
         -o "$STAGE_BIN/tool-alias.exe"
     say "  staged tool-alias.exe"
