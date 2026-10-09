@@ -24,6 +24,9 @@ if [ -z "$ps3dev" ]; then
 fi
 cc="$ps3dev/ppu/bin/powerpc64-ps3-elf-gcc"
 { [ -x "$cc" ] || [ -x "$cc.exe" ]; } || { echo "sys-sync-surface: FAIL: no PPU compiler under $ps3dev"; exit 1; }
+# SDK header root: source build ($PS3DK=$ps3dev/ps3dk) and installed package
+# (PS3DK==PS3DEV, headers directly under $ps3dev/ppu/include) differ; resolve once.
+sdk="${PS3DK:-}"; [ -n "$sdk" ] || { [ -d "$ps3dev/ps3dk/ppu/include" ] && sdk="$ps3dev/ps3dk" || sdk="$ps3dev"; }
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/ov/sys" "$work/ov/lv2"
 for h in sys/synchronization.h sys/event.h sys/event_queue.h sys/dbg.h lv2/mutex.h lv2/cond.h; do
@@ -38,7 +41,7 @@ for lang in c c++; do
             for order in "" -DDBG_FIRST; do
                 label="$lang $std ${abi:-ilp32} ${order:-dbg-last}"
                 if out=$("$cc" -x "$lang" "$std" $abi $order -Wall -Wextra -Werror \
-                        -I"$work/ov" -I"$ps3dev/ppu/include" -c "$src" -o "$work/p.o" 2>&1); then
+                        -I"$work/ov" -I"$sdk/ppu/include" -c "$src" -o "$work/p.o" 2>&1); then
                     echo "sys-sync-surface: ok   $label"
                 else
                     echo "sys-sync-surface: FAIL $label"

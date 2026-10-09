@@ -31,6 +31,11 @@ def run(name, cmd, failure=None):
     (out/(name+'.log')).write_text(r.stdout+r.stderr)
     ok = r.returncode != 0 and failure in r.stderr if failure else r.returncode == 0
     row = dict(name=name, rc=r.returncode, ok=ok, command=[str(x) for x in cmd])
+    if not ok:
+        lines = [l for l in r.stderr.splitlines() if l.strip()]
+        if not lines:
+            lines = [l for l in r.stdout.splitlines() if l.strip()]
+        row['reason'] = ' ; '.join(lines[-6:])
     rows.append(row)
     return row
 
@@ -118,6 +123,11 @@ for lang, driver in [('c', 'gcc'), ('c++', 'g++')]:
     run(lang+'-ordinary-link', common+['-x',lang,ordinary,'-o',out/(lang+'-ordinary.elf')])
 
 for row in rows:
-    print(row['name'], 'PASS' if row['ok'] else 'FAIL')
+    if row['ok']:
+        print(row['name'], 'PASS')
+    else:
+        reason = row.get('reason') or row.get('guid_error') \
+            or 'post-link check failed (see %s.log and %s.map)' % (row['name'], str(row['name']))
+        print(row['name'], 'FAIL -', reason)
 (out/'results.json').write_text(json.dumps(rows, indent=2)+'\n')
 raise SystemExit(0 if all(r['ok'] for r in rows) else 1)

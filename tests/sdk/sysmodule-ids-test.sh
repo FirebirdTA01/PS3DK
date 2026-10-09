@@ -38,10 +38,13 @@ includes=(-I"$work")
 if [ "$host" -eq 1 ]; then
     # Value checks only: do not pull PPU syscall assembly into a host TU.
     # This does not validate the target memory-container ABI or module loads.
-    mkdir -p "$work/sys" || exit 1
-    printf '#include <stdint.h>\ntypedef uint32_t sys_mem_container_t;\n' > "$work/sys/memory.h" || exit 1
+    mkdir -p "$work/sys" || { echo "sysmodule-ids: FAIL: cannot create $work/sys"; exit 1; }
+    printf '#include <stdint.h>\ntypedef uint32_t sys_mem_container_t;\n' > "$work/sys/memory.h" || { echo "sysmodule-ids: FAIL: cannot write $work/sys/memory.h"; exit 1; }
 else
-    includes+=(-I"$ps3dev/ppu/include")
+    # SDK header root: source build ($PS3DK=$ps3dev/ps3dk) and installed package
+    # (PS3DK==PS3DEV, headers directly under $ps3dev/ppu/include) differ; resolve once.
+    sdk="${PS3DK:-}"; [ -n "$sdk" ] || { [ -d "$ps3dev/ps3dk/ppu/include" ] && sdk="$ps3dev/ps3dk" || sdk="$ps3dev"; }
+    includes+=(-I"$sdk/ppu/include")
 fi
 status=0
 for lang in c c++; do

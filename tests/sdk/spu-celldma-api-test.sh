@@ -24,6 +24,9 @@ if [ -z "$ps3dev" ]; then
 fi
 cc="$ps3dev/spu/bin/spu-elf-gcc"; ar="$ps3dev/spu/bin/spu-elf-ar"
 { [ -x "$cc" ] || [ -x "$cc.exe" ]; } || { echo "spu-celldma-api: FAIL: no SPU compiler under $ps3dev"; exit 1; }
+# SDK header root: source build ($PS3DK=$ps3dev/ps3dk) and installed package
+# (PS3DK==PS3DEV, headers directly under $ps3dev/spu/include) differ; resolve once.
+sdk="${PS3DK:-}"; [ -n "$sdk" ] || { [ -d "$ps3dev/ps3dk/spu/include" ] && sdk="$ps3dev/ps3dk" || sdk="$ps3dev"; }
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 # only the header under test goes ahead of the installed SPU headers
 mkdir -p "$work/inc/cell" && cp "$inc/cell/dma.h" "$work/inc/cell/" || { echo "spu-celldma-api: FAIL: no cell/dma.h under $inc"; exit 1; }
@@ -41,6 +44,7 @@ for lang in c c++; do
             def=; [ "$mode" != default ] && def="-D$mode"
             label="$lang $opt $mode"
             if out=$("$cc" -x "$lang" "$std" "$opt" $def -Wall -Wextra -Werror -I"$work/inc" \
+                    -I"$sdk/spu/include" \
                     "$probe" -x none -L"$work" -ldma -o "$work/probe.elf" 2>&1); then
                 echo "spu-celldma-api: ok   $label"
             else

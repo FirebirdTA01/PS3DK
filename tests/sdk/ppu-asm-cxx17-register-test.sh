@@ -35,6 +35,9 @@ if [ -z "$ps3dev" ]; then
 fi
 cc="$ps3dev/ppu/bin/powerpc64-ps3-elf-gcc"
 { [ -x "$cc" ] || [ -x "$cc.exe" ]; } || { echo "ppu-asm-register: FAIL: no PPU compiler under $ps3dev"; exit 1; }
+# SDK header root: source build ($PS3DK=$ps3dev/ps3dk) and installed package
+# (PS3DK==PS3DEV, headers directly under $ps3dev/ppu/include) differ; resolve once.
+sdk="${PS3DK:-}"; [ -n "$sdk" ] || { [ -d "$ps3dev/ps3dk/ppu/include" ] && sdk="$ps3dev/ps3dk" || sdk="$ps3dev"; }
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 src="$root/tests/sdk/ppu-asm-cxx17-register-test.c"
 
@@ -61,7 +64,7 @@ for row in "${rows[@]}"; do
         for abi in "" -mlp64; do
             label="$name $1 $2 ${abi:-ilp32}"
             if out=$("$cc" -x "$1" "$2" ${3:-} $abi $def -Wall -Werror \
-                    -I"$ov" -I"$ps3dev/ppu/include" -c "$src" -o "$work/t.o" 2>&1); then
+                    -I"$ov" -I"$sdk/ppu/include" -c "$src" -o "$work/t.o" 2>&1); then
                 echo "ppu-asm-register: ok   $label"
             else
                 echo "ppu-asm-register: FAIL $label"
