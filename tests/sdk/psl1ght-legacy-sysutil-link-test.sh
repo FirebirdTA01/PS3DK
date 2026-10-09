@@ -65,7 +65,18 @@ oskSetSeparateWindowOption|cellOskDialogSetSeparateWindowOption
 oskAddSupportLanguage|cellOskDialogAddSupportLanguage
 oskLoadAsync|cellOskDialogLoadAsync
 oskSetInitialKeyLayout|cellOskDialogSetInitialKeyLayout
-oskSetLayoutMode|cellOskDialogSetLayoutMode'
+oskSetLayoutMode|cellOskDialogSetLayoutMode
+sysSaveListLoad2|cellSaveDataListLoad2
+sysSaveListSave2|cellSaveDataListSave2
+sysSaveListAutoLoad|cellSaveDataListAutoLoad
+sysSaveListAutoSave|cellSaveDataListAutoSave
+sysSaveFixedLoad2|cellSaveDataFixedLoad2
+sysSaveFixedSave2|cellSaveDataFixedSave2
+sysSaveAutoLoad2|cellSaveDataAutoLoad2
+sysSaveAutoSave2|cellSaveDataAutoSave2
+sysSaveDelete2|cellSaveDataDelete2
+sysGameRegisterDiscChangeCallback|cellGameRegisterDiscChangeCallback
+sysGameUnregisterDiscChangeCallback|cellGameUnregisterDiscChangeCallback'
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 {

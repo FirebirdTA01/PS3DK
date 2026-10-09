@@ -46,6 +46,14 @@ The version stamped into builds is generated from the most recent
   their `cell*` imports.  The headers already provided them as inline
   forwarders, but code that calls them without those headers, such as tiny3d
   or a library prebuilt against PSL1GHT, failed to link.
+- **PSL1GHT save-data and game disc-callback functions link.**  The nine
+  `sysSave*` functions (`sysSaveListLoad2`, `sysSaveDelete2`, ...) and
+  `sysGameRegisterDiscChangeCallback` / `sysGameUnregisterDiscChangeCallback`
+  were declared in the headers but defined nowhere, so any use failed to
+  link.  They are now aliases of their `cellSaveData*` / `cellGame*` imports:
+  each takes the same arguments in the same order, and each of the sixteen
+  PSL1GHT save-data structs has the same size as its `cell*` counterpart in
+  both data models.
 
 ### Changed
 
