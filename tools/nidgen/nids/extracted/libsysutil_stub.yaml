@@ -49,10 +49,14 @@ exports:
   notes: extracted from _cellSysutil_0001_130.o
 - name: cellDiscGameRegisterDiscChangeCallback
   nid: '0xdfdd302e'
+  aliases:
+    - sysDiscRegisterDiscChangeCallback
   signature: ''
   notes: extracted from _cellSysutil_0001_147.o
 - name: cellDiscGameUnregisterDiscChangeCallback
   nid: '0xedc34e1a'
+  aliases:
+    - sysDiscUnregisterDiscChangeCallback
   signature: ''
   notes: extracted from _cellSysutil_0001_158.o
 - name: cellGameDataCheckCreate

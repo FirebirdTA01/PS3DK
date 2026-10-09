@@ -76,7 +76,24 @@ sysSaveAutoLoad2|cellSaveDataAutoLoad2
 sysSaveAutoSave2|cellSaveDataAutoSave2
 sysSaveDelete2|cellSaveDataDelete2
 sysGameRegisterDiscChangeCallback|cellGameRegisterDiscChangeCallback
-sysGameUnregisterDiscChangeCallback|cellGameUnregisterDiscChangeCallback'
+sysGameUnregisterDiscChangeCallback|cellGameUnregisterDiscChangeCallback
+sysDiscRegisterDiscChangeCallback|cellDiscGameRegisterDiscChangeCallback
+sysDiscUnregisterDiscChangeCallback|cellDiscGameUnregisterDiscChangeCallback
+sysGameBootCheck|cellGameBootCheck
+sysGameContentErrorDialog|cellGameContentErrorDialog
+sysGameContentPermit|cellGameContentPermit
+sysGameCreateGameData|cellGameCreateGameData
+sysGameDataCheck|cellGameDataCheck
+sysGameDeleteGameData|cellGameDeleteGameData
+sysGameGetDiscContentInfoUpdatePath|cellGameGetDiscContentInfoUpdatePath
+sysGameGetLocalWebContentPath|cellGameGetLocalWebContentPath
+sysGameGetParamInt|cellGameGetParamInt
+sysGameGetParamString|cellGameGetParamString
+sysGameGetSizeKB|cellGameGetSizeKB
+sysGamePatchCheck|cellGamePatchCheck
+sysGameSetParamString|cellGameSetParamString
+sysGameThemeInstall|cellGameThemeInstall
+sysGameThemeInstallFromBuffer|cellGameThemeInstallFromBuffer'
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 {
@@ -94,7 +111,7 @@ work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 status=0
 for abi in "" -mlp64; do
     label="${abi:-ilp32}"
-    if ! out=$("$cc" $abi -O2 "$work/legacy.c" -lsysutil -o "$work/legacy.elf" 2>&1); then
+    if ! out=$("$cc" $abi -O2 "$work/legacy.c" -lsysutil -lsysutil_game_stub -o "$work/legacy.elf" 2>&1); then
         echo "psl1ght-legacy-sysutil-link: FAIL $label: link"
         printf '%s\n' "$out" | grep -E 'undefined reference|error' | head -n 30 | sed 's/^/    /'
         status=1; continue

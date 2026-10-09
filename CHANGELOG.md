@@ -93,6 +93,14 @@ The version stamped into builds is generated from the most recent
   `std::string_view`) whole as an address, which faults on hardware.  It
   exits 1 on a hit, so a build can fail on it.  See `docs/known-issues.md`.
 
+- **PSL1GHT game and disc names link.**  The fifteen `sysGame*` functions
+  of `<sysutil/game.h>` (`sysGameBootCheck`, `sysGameDataCheck`,
+  `sysGameCreateGameData`, `sysGameGetParamString`, ...) and
+  `sysDiscRegisterDiscChangeCallback` / `sysDiscUnregisterDiscChangeCallback`
+  are declared without a definition, so calls to them failed to link.  They
+  are now aliases of the `cellGame*` imports in `libsysutil_game_stub.a`
+  and of the `cellDiscGame*` imports in `libsysutil.a`.
+
 ### Changed
 
 - **The PSL1GHT Makefile path builds with `-fcommon`.**  GCC 10 and later
