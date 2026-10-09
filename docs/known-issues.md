@@ -591,6 +591,39 @@ The SDK ships the OpenGL-ES-flavoured PSGL runtime sitting on top of GCM:
 
 ---
 
+## A misaligned float or double load silently kills the PPU thread on hardware
+
+**Status:** open; compiler fix planned.
+
+**Symptom.**  On a real PS3, a floating-point load from an address that is
+not 4-byte aligned (`lfs` at an address that is 2 mod 4, for example) ends
+the PPU thread that executes it.  There is no crash report and no message.
+The rest of the process keeps running, and `sysThreadGetPriority` on the
+dead thread returns `ESRCH` (`0x80010005`).  RPCS3 does not model the
+fault, so the same program runs correctly there.  The lv2dbg PPU exception
+handler is refused on retail firmware (`0x8001042c`), so it cannot report
+the fault either.
+
+The PPU compiler emits such loads in two common shapes:
+- `float f; memcpy(&f, p, 4);` from a pointer of unknown alignment, at -O2,
+  compiles to a single `lfs` from `p`;
+- a `float` or `double` member of a packed struct (`#pragma pack(1)`,
+  `__attribute__((packed))`) at a misaligned offset can compile to a plain
+  `lfs` / `lfd` from the misaligned address, even at -O0.
+
+Reading binary file formats is the usual way to hit it.
+
+**Workaround.**  Compile with `-mstrict-align`, or read floating-point
+fields from byte buffers as integers (assemble a `uint32_t` from the four
+bytes, then copy it into a `float` local).  To detect a worker that died,
+check `sysThreadGetPriority(tid, &prio)` for `ESRCH`.
+
+**Planned fix.**  The compiler stops emitting floating-point loads and
+stores through memory it cannot prove aligned, with a regression test that
+runs on hardware.
+
+---
+
 ## POSIX file sizes are 32-bit in the default PPU ABI
 
 **Status:** documented limitation; see `docs/abi/large-file-off-t.md`.
