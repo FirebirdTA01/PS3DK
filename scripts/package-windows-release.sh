@@ -592,7 +592,11 @@ REM them sees the same install root.  We export at the parent shell
 REM scope only for this session; permanent setx is optional.  Windows
 REM tolerates double-separator paths (...\\ppu\\bin) so we don't bother
 REM trimming a trailing backslash off PS3DK.
-endlocal & set "PS3DK=%PS3DK%" & set "PATH=%PS3DK%\bin;%PS3DK%\ppu\bin;%PS3DK%\spu\bin;%PATH%%_addpath%" & set "PS3DEV=%PS3DK%" & set "PSL1GHT=%PS3DK%"
+REM PS3DEV and PSL1GHT get FORWARD slashes: ppu_rules puts them in recipe
+REM lines that run through sh (e.g. sfo -f $(PS3DEV)/bin/sfo.xml), and sh
+REM strips backslashes, turning C:\x\y into C:xy.  Windows programs accept
+REM C:/x/y.  PS3DK keeps its native form for the GCC link spec.
+endlocal & set "PS3DK=%PS3DK%" & set "PATH=%PS3DK%\bin;%PS3DK%\ppu\bin;%PS3DK%\spu\bin;%PATH%%_addpath%" & set "PS3DEV=%PS3DK:\=/%" & set "PSL1GHT=%PS3DK:\=/%"
 echo PS3DK:   %PS3DK%
 echo PS3DEV:  %PS3DEV%   ^(in-session alias^)
 echo PSL1GHT: %PSL1GHT%   ^(in-session alias^)
@@ -612,6 +616,11 @@ for %%T in (make ppu-gcc spu-gcc sh sed cmake ninja) do (
 )
 where cmake.exe 1>nul 2>nul || echo   CMake projects need cmake:  winget install --id Kitware.CMake -e
 where ninja.exe 1>nul 2>nul || echo   CMake projects need ninja:  winget install --id Ninja-build.Ninja -e
+
+REM The checks above leave ERRORLEVEL at 1 when an optional tool (cmake,
+REM ninja) is missing; that is a report, not a failure, so `setup.cmd && ...`
+REM must still go on.  Only a missing Git for Windows fails (exit /b 1 above).
+exit /b 0
 
 EOF
 # cmd.exe parses .cmd/.bat files line by line and is line-ending-sensitive

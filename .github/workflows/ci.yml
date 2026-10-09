@@ -202,6 +202,12 @@ jobs:
       - name: Test the sys_ synchronisation surface
         run: bash tests/sdk/sys-sync-surface-test.sh
 
+      # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
+      # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
+      # the package ships plus make.
+      - name: Test the PSL1GHT-style Makefile build path
+        run: bash tests/sdk/makefile-path-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class
