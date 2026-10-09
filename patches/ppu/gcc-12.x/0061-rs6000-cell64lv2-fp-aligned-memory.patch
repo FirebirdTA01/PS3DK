@@ -48,6 +48,18 @@ frame pointer (r31 only when the function has one), the arg pointer or a
 virtual register.  The prologue's FPR saves (stfd f14,3568(r1)) are A8,
 and without this rule the first build of libgcc's unwinder ICEd in
 extract_constrain_insn.
+
+Cost, A/B of the packaged libraries against the previous build of the same
+branch without this patch, default (ILP32) archives: libstdc++.a has the
+same instructions; libm.a and libpixman-1.a have the same instruction count, and
+the only differences are in __ieee754_jn (libm) and linear_get_scanline
+(pixman).  There, a 64-bit integer constant that feeds fcfid is now built
+in a GPR and moved through a stack slot (li/std/lfd) instead of lfd from the
+constant pool: reload does not put a constant in memory for a special memory
+constraint.  Float and double constants still load from the constant pool
+directly.  Archive sizes over the whole package: -480 bytes, in five
+archives (libm and libstdc++ in both data models, libpixman-1).
+
 --- a/gcc/config/rs6000/constraints.md
 +++ b/gcc/config/rs6000/constraints.md
 @@ -257,6 +257,18 @@
