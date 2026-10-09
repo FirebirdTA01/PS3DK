@@ -215,32 +215,29 @@ ensure_psl1ght_source() {
     # geohot/make_self.c + fself/source/ (build_psl1ght_tools), and
     # generic/bin2s.c + cgcomp/source (build_psl1ght_legacy_tools), and
     # tools/ps3py helpers we still stage (fself.py + Struct.py).
-    # If any are missing we re-fetch — a partial / stale checkout would
-    # otherwise pass the old narrower probe and fail mid-build.
-    if [[ -f "$psl1ght_src/tools/generic/bin2s.c" \
-       && -d "$psl1ght_src/tools/cgcomp/source" \
-       && -f "$psl1ght_src/tools/geohot/make_self.c" \
-       && -d "$psl1ght_src/tools/fself/source" \
-       && -f "$psl1ght_src/tools/ps3py/fself.py" \
-       && -f "$psl1ght_src/tools/ps3py/Struct.py" ]]; then
-        return 0
-    fi
-
+    # The checkout is moved to the pinned commit on every run, so a stale
+    # or partial checkout cannot pass; the probe after it catches a layout change.
     if [[ -e "$psl1ght_src" && ! -d "$psl1ght_src/.git" ]]; then
         die "PSL1GHT source at $psl1ght_src is incomplete and is not a git checkout. Run scripts/bootstrap.sh or remove that directory and re-run."
     fi
 
     command -v git >/dev/null \
-        || die "git not on PATH and PSL1GHT source is missing. Run scripts/bootstrap.sh first."
+        || die "git not on PATH (needed to check out the pinned PSL1GHT). Run scripts/bootstrap.sh first."
 
+    # The commit bootstrap.sh pins, never upstream's latest master: these
+    # tools must come from the same source as the PSL1GHT runtime, and the
+    # Linux tools tarball (build-psl1ght-host-tools-linux.sh) uses the pin too.
+    local pin
+    pin="$(sed -n 's/^PSL1GHT_COMMIT="\([0-9a-f]*\)".*/\1/p' "$script_dir/bootstrap.sh")"
+    [[ ${#pin} -eq 40 ]] || die "could not read PSL1GHT_COMMIT from scripts/bootstrap.sh"
     mkdir -p "$(dirname "$psl1ght_src")"
-    if [[ -d "$psl1ght_src/.git" ]]; then
-        say "Updating PSL1GHT source for host tools"
-        git -C "$psl1ght_src" pull --ff-only --depth 1
-    else
+    if [[ ! -d "$psl1ght_src/.git" ]]; then
         say "Fetching PSL1GHT source for host tools"
-        git clone --depth 1 https://github.com/ps3dev/PSL1GHT.git "$psl1ght_src"
+        git clone -q https://github.com/ps3dev/PSL1GHT.git "$psl1ght_src"
     fi
+    git -C "$psl1ght_src" checkout -q "$pin" 2>/dev/null \
+        || { git -C "$psl1ght_src" fetch -q origin "$pin" && git -C "$psl1ght_src" checkout -q "$pin"; } \
+        || die "cannot check out PSL1GHT $pin"
 
     [[ -f "$psl1ght_src/tools/generic/bin2s.c" \
     && -d "$psl1ght_src/tools/cgcomp/source" \
