@@ -9,6 +9,9 @@
 # (Windows), without the ppu-* names (Windows) or without most of those
 # tools (the Linux tools tarball), and nothing noticed.
 #
+# The fixture also defines a variable in a header included by two files, as
+# GCC 7-era homebrew does; that links only with ppu_rules' -fcommon.
+#
 # Usage: tests/sdk/makefile-path-test.sh [SDK_ROOT]
 #   SDK_ROOT defaults to $PS3DK.  On Windows run it from Git Bash in a shell
 #   where %PS3DK%\setup.cmd has set PATH (so make and the tools resolve the
