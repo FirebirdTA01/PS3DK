@@ -15,7 +15,9 @@
 #   LE    R_PPC64_TPREL16_HA/_LO, the addis based on r13
 #   LE16  R_PPC64_TPREL16, the addi based on r13
 #   SORRY exit 1 with "sorry, unimplemented: '-mtls-size=64' local-dynamic"
-#         (ILP32 only: the DTPREL64 GOT slot has no 32-bit load)
+#         (no row uses it since patch 0059: with Pmode DImode, ILP32
+#         -mtls-size=64 local-dynamic loads its DTPREL64 GOT slot with ld,
+#         the LD64 shape, instead of needing the 0057 refusal)
 # In every row, a GOT TP- or DTP-offset slot is 8 bytes (TPREL64/DTPREL64),
 # so the instruction carrying its _LO_DS/_DS relocation must be ld: an lwz
 # reads the high word whenever the linker keeps the GOT load (the silent
@@ -194,7 +196,7 @@ ie-ld-nopic|ext.c|-ftls-model=local-dynamic|IE|IE
 gd|ext.c|-fPIC|GD|GD
 ld|def.c|-fPIC -ftls-model=local-dynamic|LD|LD
 ld16|def.c|-fPIC -ftls-model=local-dynamic -mtls-size=16|LD16|LD16
-ld64|def.c|-fPIC -ftls-model=local-dynamic -mtls-size=64|SORRY|LD64
+ld64|def.c|-fPIC -ftls-model=local-dynamic -mtls-size=64|LD64|LD64
 le|def.c||LE|LE
 le16|def.c|-mtls-size=16|LE16|LE16
 le64|def.c|-mtls-size=64|IE|IE'
