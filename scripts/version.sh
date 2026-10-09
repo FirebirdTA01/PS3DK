@@ -50,15 +50,36 @@ done
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
+# A release source tarball is not a git checkout.  The release job stamps
+# .ps3sdk-version into it (version=vX.Y.Z and commit=<sha> lines), and that
+# stamp stands in for the tag: the tarball is exactly the tagged tree.
+stamp=""
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
-    echo "version.sh: not inside a git repository" >&2
-    exit 1
+    if [ -f "$repo_root/.ps3sdk-version" ]; then
+        stamp="$repo_root/.ps3sdk-version"
+    else
+        echo "version.sh: not inside a git repository, and no .ps3sdk-version stamp" >&2
+        exit 1
+    fi
 fi
 
-# Most recent v-prefixed tag, or empty if none.
-latest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
+if [ -n "$stamp" ]; then
+    latest_tag="$(sed -n 's/^version=//p' "$stamp")"
+else
+    # Most recent v-prefixed tag, or empty if none.
+    latest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
+fi
 
-if [ -z "$latest_tag" ]; then
+if [ -n "$stamp" ]; then
+    if ! [[ "$latest_tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+        echo "version.sh: $stamp has no valid version=vMAJOR.MINOR.PATCH line" >&2
+        exit 1
+    fi
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[3]}"
+    on_tag=1
+elif [ -z "$latest_tag" ]; then
     major=0
     minor=0
     patch=0
@@ -89,12 +110,16 @@ else
     fi
 fi
 
-commit_full="$(git rev-parse HEAD 2>/dev/null || echo "")"
-commit_short="$(git rev-parse --short=7 HEAD 2>/dev/null || echo "")"
-
 dirty=0
-if ! git diff --quiet --ignore-submodules HEAD 2>/dev/null; then
-    dirty=1
+if [ -n "$stamp" ]; then
+    commit_full="$(sed -n 's/^commit=//p' "$stamp")"
+    commit_short="${commit_full:0:7}"
+else
+    commit_full="$(git rev-parse HEAD 2>/dev/null || echo "")"
+    commit_short="$(git rev-parse --short=7 HEAD 2>/dev/null || echo "")"
+    if ! git diff --quiet --ignore-submodules HEAD 2>/dev/null; then
+        dirty=1
+    fi
 fi
 # Untracked files do not count as dirty for build identity.
 

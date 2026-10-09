@@ -386,8 +386,14 @@ jobs:
           # Curated archive: the parts actually authored in this repo.
           # Excludes vendored upstream (src/ via .gitignore) and the
           # private reference mount (reference/ via .gitignore).
-          git archive --format=tar --prefix="${stage}/" HEAD \
+          # .ps3sdk-version lets scripts/version.sh name the release in a
+          # tree with no .git (the SDK build calls it); without it the
+          # tarball could not build the SDK at all.
+          printf 'version=%s\ncommit=%s\n' "$version" "$(git rev-parse HEAD)" > .ps3sdk-version
+          git archive --format=tar --prefix="${stage}/" \
+              --add-file=.ps3sdk-version HEAD \
               | xz -T0 > "${stage}.tar.xz"
+          rm -f .ps3sdk-version
           sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
           ls -l "${stage}".*
 
