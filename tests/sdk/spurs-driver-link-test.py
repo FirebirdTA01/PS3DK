@@ -76,7 +76,10 @@ for lang, driver in [('c', 'gcc'), ('c++', 'g++')]:
             continue
         data = elf.read_bytes()
         row['entry'], row['flags'] = struct.unpack_from('>I', data, 24)[0], struct.unpack_from('>I', data, 36)[0]
-        row['ok'] &= data[:6]==b'\x7fELF\x01\x02' and row['entry']==(0x3000 if mode=='task' else 0x10)
+        # Tasks link at LS 0x3000.  Job-chain jobs (-mspurs-job) link at LS 0x4c00,
+        # where the firmware job manager runs them (b40d76c1), so _start is 0x4c10;
+        # job-queue jobs (-mspurs-job-initialize) link at 0 and relocate themselves.
+        row['ok'] &= data[:6]==b'\x7fELF\x01\x02' and row['entry']=={'task':0x3000,'job':0x4c10,'initialized':0x10}[mode]
         row['ok'] &= row['flags']=={'task':3,'job':1,'initialized':2}[mode]
         if mode != 'task':
             try:
