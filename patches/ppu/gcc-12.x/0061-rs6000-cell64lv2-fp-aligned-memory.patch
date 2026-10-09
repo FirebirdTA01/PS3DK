@@ -26,6 +26,15 @@ allocation moves it through the GPR alternatives (integer loads/stores and
 an aligned stack slot), as -mstrict-align does, but for FP data only.
 Integer accesses are not affected.
 
+Two more pieces keep the constraint from costing a compiler crash:
+- rs6000_legitimate_combined_insn refuses the combined insn, so combine
+  keeps expand's integer access + register-file move instead of folding
+  it into a float move of the under-aligned memory;
+- rs6000_secondary_reload routes any remaining FPR <-> under-aligned
+  memory move through a GPR, so register allocation always has a legal
+  way (without it, a combined (set (reg:SF f1) (mem:SF A8)) for a return
+  value was an ICE in extract_constrain_insn).
+
 Frame slots count as aligned when their MEM carries no alignment: an
 offset that is a multiple of the access size from the stack pointer, the
 frame pointer (r31 only when the function has one), the arg pointer or a
@@ -62,7 +71,56 @@ extract_constrain_insn.
  extern void rs6000_output_symbol_ref (FILE*, rtx);
 --- a/gcc/config/rs6000/rs6000.cc
 +++ b/gcc/config/rs6000/rs6000.cc
-@@ -29013,6 +29013,58 @@ rs6000_opaque_type_invalid_use_p (gimple *stmt)
+@@ -9411,6 +9411,30 @@ rs6000_legitimate_combined_insn (rtx_insn *insn)
+ 	  || icode == CODE_FOR_bdnztf_di))
+     return false;
+ 
++#ifdef POWERPC_CELL64LV2
++  /* Expand loads and stores an under-aligned float or double as an
++     integer access and moves the value between register files; combine
++     would fold that pair back into a float move of the under-aligned
++     memory, which an FPR cannot do here (constraint "eF").  Keep the
++     pair.  */
++  rtx set = single_set (insn);
++  if (set)
++    {
++      rtx src = SET_SRC (set);
++      rtx dest = SET_DEST (set);
++      if (GET_CODE (src) == FLOAT_EXTEND)
++	src = XEXP (src, 0);
++      if (MEM_P (src)
++	  && (GET_MODE (src) == SFmode || GET_MODE (src) == DFmode)
++	  && !rs6000_fp_mem_aligned_p (src))
++	return false;
++      if (MEM_P (dest)
++	  && (GET_MODE (dest) == SFmode || GET_MODE (dest) == DFmode)
++	  && !rs6000_fp_mem_aligned_p (dest))
++	return false;
++    }
++#endif
++
+   return true;
+ }
+ 
+@@ -12444,6 +12468,17 @@ rs6000_secondary_reload (bool in_p,
+ 	   ? reg_addr[mode].reload_load
+ 	   : reg_addr[mode].reload_store);
+ 
++#ifdef POWERPC_CELL64LV2
++  /* An FPR may not load or store under-aligned memory here (constraint
++     "eF"; a misaligned lfs/lfd ends the thread on hardware).  Go through a
++     GPR: memory <-> GPR is an integer access, and GPR <-> FPR uses an
++     aligned stack slot.  */
++  if (MEM_P (x)
++      && reg_class_subset_p (rclass, FLOAT_REGS)
++      && !rs6000_fp_mem_aligned_p (x))
++    return GENERAL_REGS;
++#endif
++
+   if (REG_P (x) || register_operand (x, mode))
+     {
+       enum rs6000_reg_type to_type = reg_class_to_reg_type[(int)rclass];
+@@ -29013,6 +29048,58 @@ rs6000_opaque_type_invalid_use_p (gimple *stmt)
    return false;
  }
  
