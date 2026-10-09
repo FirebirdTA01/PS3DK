@@ -815,7 +815,11 @@ build_gnu_make() {
         say "Building GNU make ${MAKE_VER} for $HOST_TRIPLE"
         rm -rf "$SRC_ROOT/make-build"
         mkdir -p "$SRC_ROOT/make-build"
-        (cd "$SRC_ROOT/make-build" &&             "$SRC_ROOT/make-${MAKE_VER}/configure" --host="$HOST_TRIPLE"                 --prefix="$DEPS_ROOT" --disable-nls --without-guile                 CFLAGS="-O2 $REPRO_CC" LDFLAGS="-static -static-libgcc $REPRO_LD" &&             make -j"$JOBS")
+        (cd "$SRC_ROOT/make-build" && \
+            "$SRC_ROOT/make-${MAKE_VER}/configure" --host="$HOST_TRIPLE" \
+                --prefix="$DEPS_ROOT" --disable-nls --without-guile \
+                CFLAGS="-O2 $REPRO_CC" LDFLAGS="-static -static-libgcc $REPRO_LD" && \
+            make -j"$JOBS")
         touch "$stamp"
     fi
     install -m 0755 "$SRC_ROOT/make-build/make.exe" "$STAGE_BIN/make.exe"
@@ -823,7 +827,9 @@ build_gnu_make() {
 }
 
 build_tool_alias() {
-    "$HOST_TRIPLE-gcc" -O2 -Wall -municode -static -static-libgcc $REPRO_CC         "$PS3_TOOLCHAIN_ROOT/tools/tool-alias/tool-alias.c" $REPRO_LD         -o "$STAGE_BIN/tool-alias.exe"
+    "$HOST_TRIPLE-gcc" -O2 -Wall -municode -static -static-libgcc $REPRO_CC \
+        "$PS3_TOOLCHAIN_ROOT/tools/tool-alias/tool-alias.c" $REPRO_LD \
+        -o "$STAGE_BIN/tool-alias.exe"
     say "  staged tool-alias.exe"
 }
 

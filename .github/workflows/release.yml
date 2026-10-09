@@ -93,7 +93,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-              libelf-dev cmake ninja-build python3               libgmp-dev libssl-dev zlib1g-dev
+              libelf-dev cmake ninja-build python3 \
+              libgmp-dev libssl-dev zlib1g-dev
 
       - uses: dtolnay/rust-toolchain@stable
 
