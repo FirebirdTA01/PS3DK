@@ -72,6 +72,13 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **A misaligned float or double no longer kills the PPU thread.**  On a
+  PS3 an `lfs`/`lfd`/`stfs`/`stfd` at a misaligned address ends the thread
+  silently (RPCS3 does not model it).  The compiler emitted them for
+  `memcpy` into a `float`/`double` from a byte buffer and for some packed
+  struct members.  It now loads and stores floating-point data from
+  memory it cannot prove aligned through integer registers and an aligned
+  stack slot; aligned accesses are unchanged.
 - **`setup.cmd && make` did nothing when cmake or ninja was missing**:
   `setup.cmd` ended with a non-zero exit status.  It now fails only when
   Git for Windows is missing.

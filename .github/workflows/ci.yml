@@ -213,6 +213,12 @@ jobs:
       - name: Test the PSL1GHT sysutil names link
         run: bash tests/sdk/psl1ght-legacy-sysutil-link-test.sh
 
+      # Skips without PS3DEV; with a PPU compiler, no lfs/lfd/stfs/stfd through
+      # under-aligned memory (GCC patch 0061: misaligned FP access kills the
+      # thread on hardware).
+      - name: Test FP loads and stores stay off under-aligned memory
+        run: bash tests/sdk/ppu-fp-alignment-codegen-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class

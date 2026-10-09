@@ -1,0 +1,174 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: no FP loads or stores through under-aligned memory on cell64lv2
+
+On a PS3, an lfs/lfd/stfs/stfd whose address is not aligned to the access
+size raises an alignment interrupt and the kernel ends the PPU thread.
+Nothing is reported, and the rest of the process keeps running.  RPCS3 does
+not model the fault.  Measured on hardware: lfs from an address 2 mod 4
+stops the thread; the same load 4-aligned does not.
+
+GCC already treats such accesses as slow (rs6000_slow_unaligned_access),
+and the middle end expands them as integer loads: memcpy (&f, p, 4) from a
+char pointer becomes an SImode load with MEM_ALIGN 8.  But combine then
+folds "integer load + move to an FPR" back into an FPR load from the same
+address, and the SF/DF move patterns accepted any memory operand.  At -O2,
+float f; memcpy (&f, p, 4) compiled to a single lfs from p, and a packed
+struct's float member could compile to lfs at a misaligned offset even at
+-O0.
+
+New memory constraint "eF": on cell64lv2 a MEM whose MEM_ALIGN is at least
+its mode's natural alignment (32 bits for SFmode, 64 for DFmode and
+DImode); on every other target it is "m".  It replaces "m" in the
+FPR-memory alternatives of movsf_hardfloat, *mov<mode>_hardfloat32/64,
+*extendsfdf2_fpr and *movdi_internal32/64.  Aligned accesses match as
+before.  An under-aligned one has no FPR-memory alternative, so register
+allocation moves it through the GPR alternatives (integer loads/stores and
+an aligned stack slot), as -mstrict-align does, but for FP data only.
+Integer accesses are not affected.
+
+--- a/gcc/config/rs6000/constraints.md
++++ b/gcc/config/rs6000/constraints.md
+@@ -257,6 +257,15 @@
+   (and (match_code "mem")
+        (match_test "GET_RTX_CLASS (GET_CODE (XEXP (op, 0))) != RTX_AUTOINC")))
+ 
++(define_memory_constraint "eF"
++  "@internal
++   A memory operand that a floating-point load or store may use.  On
++   CellOS Lv-2 an lfs/lfd/stfs/stfd whose address is not aligned to the
++   access size raises an alignment interrupt that ends the PPU thread, so
++   there it must be naturally aligned; everywhere else this is @code{m}."
++  (and (match_code "mem")
++       (match_test "rs6000_fp_mem_aligned_p (op)")))
++
+ (define_memory_constraint "Q"
+   "A memory operand addressed by just a base register."
+   (and (match_code "mem")
+--- a/gcc/config/rs6000/rs6000-protos.h
++++ b/gcc/config/rs6000/rs6000-protos.h
+@@ -141,6 +141,7 @@ extern bool valid_sf_si_move (rtx, rtx, machine_mode);
+ extern void rs6000_emit_move (rtx, rtx, machine_mode);
+ extern bool rs6000_legitimate_offset_address_p (machine_mode, rtx,
+ 						bool, bool);
++extern bool rs6000_fp_mem_aligned_p (rtx);
+ extern rtx rs6000_find_base_term (rtx);
+ extern rtx rs6000_return_addr (int, rtx);
+ extern void rs6000_output_symbol_ref (FILE*, rtx);
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -29013,6 +29013,28 @@ rs6000_opaque_type_invalid_use_p (gimple *stmt)
+   return false;
+ }
+ 
++/* Whether MEM may be the memory operand of a floating-point load or
++   store (constraint "eF").  On CellOS Lv-2 a misaligned lfs/lfd/stfs/stfd
++   raises an alignment interrupt and the kernel ends the thread, silently:
++   the rest of the process keeps running.  RPCS3 does not model it.  The
++   middle end already treats such accesses as slow and expands them as
++   integer loads (a memcpy into a float becomes an SImode load), but
++   combine then folds "integer load + move to an FPR" back into an FPR
++   load from the same address, and the move patterns accepted any memory.
++   Requiring the mode's natural alignment for the FPR alternatives leaves
++   aligned code unchanged and sends the rest through the GPR alternatives.  */
++
++bool
++rs6000_fp_mem_aligned_p (rtx mem)
++{
++#ifdef POWERPC_CELL64LV2
++  return MEM_ALIGN (mem) >= GET_MODE_ALIGNMENT (GET_MODE (mem));
++#else
++  (void) mem;
++  return true;
++#endif
++}
++
+ #ifdef POWERPC_CELL64LV2
+ /* PS3 / Cell64 LV2: allow SImode pointers on a 64-bit target so that
+    32-bit effective-address code works correctly.  */
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -5159,7 +5159,7 @@
+ 
+ (define_insn_and_split "*extendsfdf2_fpr"
+   [(set (match_operand:DF 0 "gpc_reg_operand" "=d,?d,d,wa,?wa,wa,v")
+-	(float_extend:DF (match_operand:SF 1 "reg_or_mem_operand" "0,f,m,0,wa,Z,wY")))]
++	(float_extend:DF (match_operand:SF 1 "reg_or_mem_operand" "0,f,eF,0,wa,Z,wY")))]
+   "TARGET_HARD_FLOAT && !HONOR_SNANS (SFmode)"
+   "@
+    #
+@@ -7990,11 +7990,11 @@
+ 
+ (define_insn "movsf_hardfloat"
+   [(set (match_operand:SF 0 "nonimmediate_operand"
+-	 "=!r,       f,         v,          wa,        m,         wY,
++	 "=!r,       f,         v,          wa,        eF,        wY,
+ 	  Z,         m,         wa,         !r,        f,         wa,
+ 	  !r,        *c*l,      !r,         *h,        wa")
+ 	(match_operand:SF 1 "input_operand"
+-	 "m,         m,         wY,         Z,         f,         v,
++	 "m,         eF,        wY,         Z,         f,         v,
+ 	  wa,        r,         j,          j,         f,         wa,
+ 	  r,         r,         *h,         0,         eP"))]
+   "(register_operand (operands[0], SFmode)
+@@ -8296,11 +8296,11 @@
+ 
+ (define_insn "*mov<mode>_hardfloat32"
+   [(set (match_operand:FMOVE64 0 "nonimmediate_operand"
+-            "=m,          d,          d,          <f64_p9>,   wY,
++            "=eF,         d,          d,          <f64_p9>,   wY,
+               <f64_av>,   Z,          <f64_vsx>,  <f64_vsx>,  !r,
+               Y,          r,          !r,         wa")
+ 	(match_operand:FMOVE64 1 "input_operand"
+-             "d,          m,          d,          wY,         <f64_p9>,
++             "d,          eF,         d,          wY,         <f64_p9>,
+               Z,          <f64_av>,   <f64_vsx>,  <zero_fp>,  <zero_fp>,
+               r,          Y,          r,          eP"))]
+   "! TARGET_POWERPC64 && TARGET_HARD_FLOAT
+@@ -8368,12 +8368,12 @@
+ 
+ (define_insn "*mov<mode>_hardfloat64"
+   [(set (match_operand:FMOVE64 0 "nonimmediate_operand"
+-           "=m,           d,          d,          <f64_p9>,   wY,
++           "=eF,          d,          d,          <f64_p9>,   wY,
+              <f64_av>,    Z,          <f64_vsx>,  <f64_vsx>,  !r,
+              YZ,          r,          !r,         *c*l,       !r,
+             *h,           r,          <f64_dm>,   wa")
+ 	(match_operand:FMOVE64 1 "input_operand"
+-            "d,           m,          d,          wY,         <f64_p9>,
++            "d,           eF,         d,          wY,         <f64_p9>,
+              Z,           <f64_av>,   <f64_vsx>,  <zero_fp>,  <zero_fp>,
+              r,           YZ,         r,          r,          *h,
+              0,           <f64_dm>,   r,          eP"))]
+@@ -9525,12 +9525,12 @@
+ 
+ (define_insn "*movdi_internal32"
+   [(set (match_operand:DI 0 "nonimmediate_operand"
+-         "=Y,        r,         r,         m,         ^d,        ^d,
++         "=Y,        r,         r,         eF,        ^d,        ^d,
+           r,         wY,        Z,         ^v,        $v,        ^wa,
+           wa,        wa,        v,         wa,        *i,        v,
+           v")
+ 	(match_operand:DI 1 "input_operand"
+-         "r,         Y,         r,         ^d,        m,         ^d,
++         "r,         Y,         r,         ^d,        eF,        ^d,
+           IJKnF,     ^v,        $v,        wY,        Z,         ^wa,
+           Oj,        wM,        OjwM,      Oj,        wM,        wS,
+           wB"))]
+@@ -9616,7 +9616,7 @@
+   [(set (match_operand:DI 0 "nonimmediate_operand"
+ 	  "=YZ,        r,          r,
+ 	   r,          r,          r,          r,
+-	   m,          ^d,         ^d,
++	   eF,         ^d,         ^d,
+ 	   wY,         Z,          $v,         $v,         ^wa,
+ 	   wa,         wa,         v,          wa,         wa,
+ 	   v,          v,
+@@ -9625,7 +9625,7 @@
+ 	(match_operand:DI 1 "input_operand"
+ 	  "r,          YZ,         r,
+ 	   I,          L,          eI,         nF,
+-	   ^d,         m,          ^d,
++	   ^d,         eF,         ^d,
+ 	   ^v,         $v,         wY,         Z,          ^wa,
+ 	   Oj,         wM,         OjwM,       Oj,         wM,
+ 	   wS,         wB,
