@@ -40,6 +40,12 @@ Recipes run with `set -euo pipefail`. Current dir is `$PS3_BUILD_ROOT/portlibs`.
    widens `off_t`: the SDK's libc, libstdc++ and other portlibs are built with
    a 4-byte `off_t`, and the library would no longer match them.
 
+## Third-party PSL1GHT libraries
+
+`060-tiny3d.sh` builds tiny3d and libfont3d (wargio/tiny3d, pinned commit)
+with their own PSL1GHT-style Makefiles and the SDK's make.  They need
+`PSL1GHT`/`PS3DEV` set the PSL1GHT way, which `scripts/env.sh` does.
+
 ## Planned recipes (phase 4 scope)
 
 | Order | Name | Version | Notes |
