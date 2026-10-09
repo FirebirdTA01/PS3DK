@@ -1,0 +1,25 @@
+Subject: [PATCH] ppu_rules: build with -fcommon, as the GCC 7 era did
+
+GCC 10 changed the default from -fcommon to -fno-common.  Homebrew written
+against the old PSL1GHT toolchain (GCC 7) often defines variables in headers
+without extern (`Sprite spritesheet;` in a header included by three files).
+GCC 7 merged those tentative definitions; GCC 12 reports "multiple
+definition of `spritesheet'" at the link.  AcidSampleV2 stops there.
+
+ppu_rules is the Makefile path such code uses, so it gets -fcommon in
+MACHDEP.  CMake projects (cmake/ps3-ppu-toolchain.cmake) keep GCC's default.
+
+--- a/ppu_rules
++++ b/ppu_rules
+@@ -18,7 +18,10 @@
+ 
+ PREFIX			:=	ppu-
+ 
+-MACHDEP			=	-mhard-float -fmodulo-sched -ffunction-sections -fdata-sections
++# -fcommon: GCC 10 and later default to -fno-common.  PSL1GHT-era code,
++# written for GCC 7, often defines variables in headers without extern;
++# those merged then and are "multiple definition" link errors now.
++MACHDEP			=	-mhard-float -fmodulo-sched -ffunction-sections -fdata-sections -fcommon
+ 
+ include $(PSL1GHT)/base_rules
+ include $(PSL1GHT)/data_rules

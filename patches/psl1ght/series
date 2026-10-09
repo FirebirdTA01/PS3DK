@@ -20,3 +20,4 @@
 0022-ppu-header-hygiene-pointer-casts.patch
 0023-ppu-asm-no-register-storage-class.patch
 0024-libspumars-module-bare-link-name.patch
+0025-ppu-rules-fcommon.patch

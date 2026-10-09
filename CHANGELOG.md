@@ -49,6 +49,11 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **The PSL1GHT Makefile path builds with `-fcommon`.**  GCC 10 and later
+  default to `-fno-common`, so variables defined in headers without `extern`,
+  common in homebrew written for the old GCC 7 toolchain, failed to link with
+  "multiple definition".  `ppu_rules` now passes `-fcommon`; CMake projects
+  keep GCC's default.
 - **FreeType is built without libpng.**  libpng is only used for colour
   bitmap (emoji) glyphs, and with it `-lfreetype` also needed `-lpng`, which
   Makefiles written for the old portlibs do not list.

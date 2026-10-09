@@ -12,7 +12,7 @@
 #
 # This links one object that declares the legacy names itself (no SDK
 # header), in both data models, and requires each name to resolve to the
-# same address as its cell* counterpart.  Skips without PS3DEV.
+# same import descriptor as its cell* counterpart.  Skips without PS3DEV.
 #
 # Usage: tests/sdk/psl1ght-legacy-sysutil-link-test.sh [--ps3dev DIR]
 set -u
@@ -25,6 +25,7 @@ if [ -z "$ps3dev" ]; then
 fi
 cc="$ps3dev/ppu/bin/powerpc64-ps3-elf-gcc"
 nm="$ps3dev/ppu/bin/powerpc64-ps3-elf-nm"
+objdump="$ps3dev/ppu/bin/powerpc64-ps3-elf-objdump"
 { [ -x "$cc" ] || [ -x "$cc.exe" ]; } || { echo "psl1ght-legacy-sysutil-link: FAIL: no PPU compiler under $ps3dev"; exit 1; }
 
 # legacy name|cell name
@@ -75,12 +76,25 @@ for abi in "" -mlp64; do
         status=1; continue
     fi
     syms="$("$nm" "$work/legacy.elf")"
+    # An alias is its own 8-byte .opd descriptor (compact OPD, both data
+    # models) whose words equal the canonical one's: same import trampoline,
+    # same TOC.  So compare the descriptor BYTES, not the symbol addresses.
+    desc() {  # <hex address> -> the 8 descriptor bytes as hex
+        local start=$((16#$1))
+        "$objdump" -s --start-address=$start --stop-address=$((start + 8)) "$work/legacy.elf" \
+            | awk '/^ [0-9a-f]+ /{print $2 $3}' | head -n 1
+    }
     bad=0
     while IFS='|' read -r legacy cell; do
         a=$(printf '%s\n' "$syms" | awk -v s="$legacy" '$3==s{print $1; exit}')
         b=$(printf '%s\n' "$syms" | awk -v s="$cell" '$3==s{print $1; exit}')
-        if [ -z "$a" ] || [ "$a" != "$b" ]; then
+        if [ -z "$a" ] || [ -z "$b" ]; then
             echo "psl1ght-legacy-sysutil-link: FAIL $label: $legacy=${a:-missing} $cell=${b:-missing}"
+            bad=1; continue
+        fi
+        da=$(desc "$a"); db=$(desc "$b")
+        if [ -z "$da" ] || [ "$da" != "$db" ]; then
+            echo "psl1ght-legacy-sysutil-link: FAIL $label: $legacy descriptor ${da:-unreadable} != $cell descriptor ${db:-unreadable}"
             bad=1
         fi
     done <<< "$pairs"
