@@ -52,7 +52,20 @@ msgDialogProgressBarInc|cellMsgDialogProgressBarInc
 msgDialogAbort|cellMsgDialogAbort
 msgDialogOpen2|cellMsgDialogOpen2
 msgDialogProgressBarReset|cellMsgDialogProgressBarReset
-msgDialogProgressBarSetMsg|cellMsgDialogProgressBarSetMsg'
+msgDialogProgressBarSetMsg|cellMsgDialogProgressBarSetMsg
+oskGetInputText|cellOskDialogGetInputText
+oskSetInitialInputDevice|cellOskDialogSetInitialInputDevice
+oskGetSize|cellOskDialogGetSize
+oskUnloadAsync|cellOskDialogUnloadAsync
+oskDisableDimmer|cellOskDialogDisableDimmer
+oskSetKeyLayoutOption|cellOskDialogSetKeyLayoutOption
+oskAbort|cellOskDialogAbort
+oskSetDeviceMask|cellOskDialogSetDeviceMask
+oskSetSeparateWindowOption|cellOskDialogSetSeparateWindowOption
+oskAddSupportLanguage|cellOskDialogAddSupportLanguage
+oskLoadAsync|cellOskDialogLoadAsync
+oskSetInitialKeyLayout|cellOskDialogSetInitialKeyLayout
+oskSetLayoutMode|cellOskDialogSetLayoutMode'
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 {
@@ -98,7 +111,7 @@ for abi in "" -mlp64; do
             bad=1
         fi
     done <<< "$pairs"
-    [ $bad -eq 0 ] && echo "psl1ght-legacy-sysutil-link: ok   $label: 24 legacy names link to their cell* imports" || status=1
+    [ $bad -eq 0 ] && echo "psl1ght-legacy-sysutil-link: ok   $label: $(grep -c . <<< "$pairs") legacy names link to their cell* imports" || status=1
 done
 [ $status -eq 0 ] && echo "psl1ght-legacy-sysutil-link: PASS"
 exit $status

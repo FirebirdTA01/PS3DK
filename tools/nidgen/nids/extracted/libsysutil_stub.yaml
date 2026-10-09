@@ -149,54 +149,80 @@ exports:
   notes: extracted from _cellSysutil_0001_107.o
 - name: cellOskDialogAbort
   nid: '0xb6d84526'
+  aliases:
+    - oskAbort
   signature: ''
   notes: extracted from _cellSysutil_0001_129.o
 - name: cellOskDialogAddSupportLanguage
   nid: '0x7f21c918'
+  aliases:
+    - oskAddSupportLanguage
   signature: ''
   notes: extracted from _cellSysutil_0001_86.o
 - name: cellOskDialogDisableDimmer
   nid: '0x41f20828'
+  aliases:
+    - oskDisableDimmer
   signature: ''
   notes: extracted from _cellSysutil_0001_47.o
 - name: cellOskDialogGetInputText
   nid: '0x1d99c3ee'
+  aliases:
+    - oskGetInputText
   signature: ''
   notes: extracted from _cellSysutil_0001_17.o
 - name: cellOskDialogGetSize
   nid: '0x35beade0'
+  aliases:
+    - oskGetSize
   signature: ''
   notes: extracted from _cellSysutil_0001_38.o
 - name: cellOskDialogLoadAsync
   nid: '0x7fcfc915'
+  aliases:
+    - oskLoadAsync
   signature: ''
   notes: extracted from _cellSysutil_0001_90.o
 - name: cellOskDialogSetDeviceMask
   nid: '0xd3790a86'
+  aliases:
+    - oskSetDeviceMask
   signature: ''
   notes: extracted from _cellSysutil_0001_143.o
 - name: cellOskDialogSetInitialInputDevice
   nid: '0xf3b4b43e'
+  aliases:
+    - oskSetInitialInputDevice
   signature: ''
   notes: extracted from _cellSysutil_0001_164.o
 - name: cellOskDialogSetInitialKeyLayout
   nid: '0xc427890c'
+  aliases:
+    - oskSetInitialKeyLayout
   signature: ''
   notes: extracted from _cellSysutil_0001_135.o
 - name: cellOskDialogSetKeyLayoutOption
   nid: '0xb53c54fa'
+  aliases:
+    - oskSetKeyLayoutOption
   signature: ''
   notes: extracted from _cellSysutil_0001_128.o
 - name: cellOskDialogSetLayoutMode
   nid: '0xf0ec3ccc'
+  aliases:
+    - oskSetLayoutMode
   signature: ''
   notes: extracted from _cellSysutil_0001_161.o
 - name: cellOskDialogSetSeparateWindowOption
   nid: '0x53e39df3'
+  aliases:
+    - oskSetSeparateWindowOption
   signature: ''
   notes: extracted from _cellSysutil_0001_57.o
 - name: cellOskDialogUnloadAsync
   nid: '0x3d1e1931'
+  aliases:
+    - oskUnloadAsync
   signature: ''
   notes: extracted from _cellSysutil_0001_40.o
 - name: cellSaveDataAutoLoad

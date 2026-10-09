@@ -41,8 +41,8 @@ The version stamped into builds is generated from the most recent
 
 - **PSL1GHT sysutil names link.**  `sysUtilRegisterCallback`,
   `sysUtilCheckCallback`, `sysUtilUnregisterCallback`,
-  `sysUtilGetSystemParamInt`/`String`, the eleven `video*` and the eight
-  `msgDialog*` functions are now exported by `libsysutil.a` as aliases of
+  `sysUtilGetSystemParamInt`/`String`, the eleven `video*`, the eight
+  `msgDialog*` and the thirteen `osk*` functions are now exported by `libsysutil.a` as aliases of
   their `cell*` imports.  The headers already provided them as inline
   forwarders, but code that calls them without those headers, such as tiny3d
   or a library prebuilt against PSL1GHT, failed to link.
