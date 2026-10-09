@@ -46,6 +46,18 @@ Recipes run with `set -euo pipefail`. Current dir is `$PS3_BUILD_ROOT/portlibs`.
 with their own PSL1GHT-style Makefiles and the SDK's make.  They need
 `PSL1GHT`/`PS3DEV` set the PSL1GHT way, which `scripts/env.sh` does.
 
+## Opt-in recipes
+
+`optional/*.sh` never run in the default build and their libraries are not
+in the SDK packages.  Build one by naming it:
+
+    scripts/build-portlibs.sh ps3soundlib
+
+`optional/ps3soundlib.sh` (wargio/ps3soundlib, pinned commit) installs the
+SPU sound library, audioplayer/oggplayer, mpg123, ogg 1.2.1, modplay and
+`spu_soundmodule.bin`.  It is GPLv3: homebrew that links it must be
+distributed under the GPLv3, which is why it is opt-in.
+
 ## Planned recipes (phase 4 scope)
 
 | Order | Name | Version | Notes |

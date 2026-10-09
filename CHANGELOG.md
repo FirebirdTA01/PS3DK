@@ -35,6 +35,10 @@ The version stamped into builds is generated from the most recent
   `spu-gcc`, `sh`, `sed`, `cmake` and `ninja` as OK or MISSING.
 - **tiny3d and libfont3d in portlibs** (wargio/tiny3d), for PSL1GHT homebrew
   that links `-ltiny3d -lfont3d`.
+- **ps3soundlib as an opt-in portlibs recipe.**  `scripts/build-portlibs.sh
+  ps3soundlib` builds the SPU sound library, audioplayer, mpg123, ogg and
+  modplay into portlibs.  It is GPLv3, so it is never built by default and
+  is not in the packages.
 - **FreeType's legacy header layout.**  `ft2build.h` and `freetype/` are also
   installed directly under `portlibs/ppu/include`, where homebrew written
   for the old portlibs looks for them.

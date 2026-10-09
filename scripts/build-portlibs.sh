@@ -118,7 +118,10 @@ discover_recipes() {
     else
         for name in "$@"; do
             local file="$RECIPES_DIR/$name.sh"
-            [[ -f "$file" ]] || die "No recipe: $file"
+            # Opt-in recipes (scripts/portlibs/optional/, e.g. GPL libraries)
+            # never run in the default build, only when named here.
+            [[ -f "$file" ]] || file="$RECIPES_DIR/optional/$name.sh"
+            [[ -f "$file" ]] || die "No recipe: $name (looked in $RECIPES_DIR and $RECIPES_DIR/optional)"
             echo "$file"
         done
     fi
