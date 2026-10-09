@@ -128,6 +128,16 @@ LIBELF_URLS=(
     "https://sources.openwrt.org/libelf-${LIBELF_VER}.tar.gz"
 )
 
+# GNU make, shipped as bin/make.exe: the PSL1GHT-style Makefile path
+# (ppu_rules and friends) needs a make, and neither Windows nor Git for
+# Windows has one.
+MAKE_VER="4.4.1"
+MAKE_SHA256="dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3"
+MAKE_URLS=(
+    "https://ftp.gnu.org/gnu/make/make-${MAKE_VER}.tar.gz"
+    "https://ftpmirror.gnu.org/make/make-${MAKE_VER}.tar.gz"
+)
+
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
@@ -795,6 +805,32 @@ stage_python_and_assets() {
 }
 
 # -----------------------------------------------------------------------------
+# GNU make (make.exe) and the ppu-*/spu-* name forwarder (tool-alias.exe).
+# The packager copies tool-alias.exe to one ppu-<tool>.exe / spu-<tool>.exe
+# per toolchain program; see tools/tool-alias/tool-alias.c.
+# -----------------------------------------------------------------------------
+build_gnu_make() {
+    local stamp="$DEPS_ROOT/.make-${MAKE_VER}-stamp"
+    if [[ ! -f "$stamp" ]]; then
+        fetch "make-${MAKE_VER}.tar.gz" "$MAKE_SHA256" "${MAKE_URLS[@]}"
+        verify_sha256 "make-${MAKE_VER}.tar.gz" "$MAKE_SHA256"
+        extract_once "make-${MAKE_VER}.tar.gz" "make-${MAKE_VER}"
+        say "Building GNU make ${MAKE_VER} for $HOST_TRIPLE"
+        rm -rf "$SRC_ROOT/make-build"
+        mkdir -p "$SRC_ROOT/make-build"
+        (cd "$SRC_ROOT/make-build" &&             "$SRC_ROOT/make-${MAKE_VER}/configure" --host="$HOST_TRIPLE"                 --prefix="$DEPS_ROOT" --disable-nls --without-guile                 CFLAGS="-O2 $REPRO_CC" LDFLAGS="-static -static-libgcc $REPRO_LD" &&             make -j"$JOBS")
+        touch "$stamp"
+    fi
+    install -m 0755 "$SRC_ROOT/make-build/make.exe" "$STAGE_BIN/make.exe"
+    say "  staged make.exe"
+}
+
+build_tool_alias() {
+    "$HOST_TRIPLE-gcc" -O2 -Wall -municode -static -static-libgcc $REPRO_CC         "$PS3_TOOLCHAIN_ROOT/tools/tool-alias/tool-alias.c" $REPRO_LD         -o "$STAGE_BIN/tool-alias.exe"
+    say "  staged tool-alias.exe"
+}
+
+# -----------------------------------------------------------------------------
 # Run.
 # -----------------------------------------------------------------------------
 say "=== Windows host-tools cross-build ==="
@@ -811,6 +847,8 @@ build_sprx_linker
 build_sfo_pkg
 build_psl1ght_tools
 build_psl1ght_legacy_tools
+build_gnu_make
+build_tool_alias
 stage_python_and_assets
 
 say "=== Done ==="

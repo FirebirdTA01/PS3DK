@@ -266,6 +266,41 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Short tool names: ppu-gcc.exe, ppu-ld.exe, spu-gcc.exe, ...
+# ---------------------------------------------------------------------------
+# ppu_rules, spu_rules and third-party PSL1GHT Makefiles call the toolchain
+# by these names; on Linux they are symlinks.  Each one here is a copy of
+# tool-alias.exe, which starts the powerpc64-ps3-elf-* / spu-elf-* program
+# of the same tool beside it.  tool-alias.exe itself does not ship in bin/.
+stage_tool_aliases() {
+    local alias_exe="$STAGE_DIR/bin/tool-alias.exe"
+    [[ -f "$alias_exe" ]] || die "bin/tool-alias.exe missing: run scripts/build-host-tools-windows.sh (or use a tools zip that has it)"
+    local n=0 dir long short tool
+    for dir in ppu spu; do
+        if [[ "$dir" == ppu ]]; then long="powerpc64-ps3-elf-"; else long="spu-elf-"; fi
+        for tool in "$STAGE_DIR/$dir/bin/$long"*.exe; do
+            [[ -f "$tool" ]] || continue
+            short="$STAGE_DIR/$dir/bin/$dir-$(basename "$tool" | sed "s/^$long//")"
+            rm -f "$short"
+            cp "$alias_exe" "$short"
+            n=$((n + 1))
+        done
+    done
+    rm -f "$alias_exe"
+
+    # GNU make is a FALLBACK: it lives in make/bin, outside the directories
+    # setup.cmd always puts on PATH, and setup.cmd adds it only when no make
+    # is found already.
+    [[ -f "$STAGE_DIR/bin/make.exe" ]] || die "bin/make.exe missing: run scripts/build-host-tools-windows.sh (or use a tools zip that has it)"
+    mkdir -p "$STAGE_DIR/make/bin"
+    mv -f "$STAGE_DIR/bin/make.exe" "$STAGE_DIR/make/bin/make.exe"
+    [[ -f "$STAGE_DIR/ppu/bin/ppu-gcc.exe" && -f "$STAGE_DIR/spu/bin/spu-gcc.exe" ]] \
+        || die "short tool names were not staged (ppu-gcc.exe / spu-gcc.exe missing)"
+    say "Staged $n ppu-*/spu-* short tool names"
+}
+stage_tool_aliases
+
+# ---------------------------------------------------------------------------
 # Symlink materialization (Windows releases must contain ZERO symlink entries)
 # ---------------------------------------------------------------------------
 # sdk/Makefile and scripts/build-cell-stub-archives.sh install several stub
@@ -517,19 +552,66 @@ if /I not "%_here%"=="%_cfg%" (
 )
 set "PS3DK=%_here%"
 
+REM The PSL1GHT-style Makefile path (ppu_rules, base_rules) runs its recipes
+REM through a POSIX sh with sed, mkdir -p, rm, cp and uname.  The package
+REM ships a fallback make (see below); sh and those tools come from Git for Windows,
+REM whose usr\bin is APPENDED to PATH (after everything else, so its find
+REM and sort do not shadow the Windows ones).  Without it, stop here and
+REM say how to get it.
+set "_gitusr="
+where sh.exe 1>nul 2>nul && where sed.exe 1>nul 2>nul && set "_gitusr=present"
+if not defined _gitusr for /f "delims=" %%G in ('where git.exe 2^>nul') do (
+    if not defined _gitusr if exist "%%~dpG..\usr\bin\sh.exe" set "_gitusr=%%~dpG..\usr\bin"
+    if not defined _gitusr if exist "%%~dpG..\..\usr\bin\sh.exe" set "_gitusr=%%~dpG..\..\usr\bin"
+)
+if not defined _gitusr if exist "%ProgramFiles%\Git\usr\bin\sh.exe" set "_gitusr=%ProgramFiles%\Git\usr\bin"
+if not defined _gitusr if exist "%LOCALAPPDATA%\Programs\Git\usr\bin\sh.exe" set "_gitusr=%LOCALAPPDATA%\Programs\Git\usr\bin"
+if not defined _gitusr (
+    echo.
+    echo MISSING: Git for Windows.  The Makefile build path needs its sh, sed,
+    echo mkdir, rm, cp and uname.  Install it, open a new terminal and re-run
+    echo setup.cmd:
+    echo.
+    echo     winget install --id Git.Git -e
+    echo.
+    exit /b 1
+)
+set "_addpath="
+if not "%_gitusr%"=="present" set "_addpath=;%_gitusr%"
+
+REM make: use the one already on PATH (or in Git for Windows' usr\bin) when
+REM there is one; only otherwise append the GNU make this package ships in
+REM make\bin.
+set "_make=bundled"
+where make.exe 1>nul 2>nul && set "_make=existing"
+if "%_make%"=="bundled" if not "%_gitusr%"=="present" if exist "%_gitusr%\make.exe" set "_make=existing"
+if "%_make%"=="bundled" set "_addpath=%_addpath%;%PS3DK%\make\bin"
+
 REM PS3DEV and PSL1GHT are back-compat aliases — code that still reads
 REM them sees the same install root.  We export at the parent shell
 REM scope only for this session; permanent setx is optional.  Windows
 REM tolerates double-separator paths (...\\ppu\\bin) so we don't bother
 REM trimming a trailing backslash off PS3DK.
-endlocal & set "PS3DK=%PS3DK%" & set "PATH=%PS3DK%\bin;%PS3DK%\ppu\bin;%PS3DK%\spu\bin;%PATH%" & set "PS3DEV=%PS3DK%" & set "PSL1GHT=%PS3DK%"
+endlocal & set "PS3DK=%PS3DK%" & set "PATH=%PS3DK%\bin;%PS3DK%\ppu\bin;%PS3DK%\spu\bin;%PATH%%_addpath%" & set "PS3DEV=%PS3DK%" & set "PSL1GHT=%PS3DK%"
 echo PS3DK:   %PS3DK%
 echo PS3DEV:  %PS3DEV%   ^(in-session alias^)
 echo PSL1GHT: %PSL1GHT%   ^(in-session alias^)
 echo Toolchain bin dirs prepended to PATH for this session.
+for /f "delims=" %%M in ('where make.exe 2^>nul') do if not defined _makeshown set "_makeshown=1" & echo make:    %%M
+set "_makeshown="
 echo.
 where powerpc64-ps3-elf-gcc.exe 1>nul 2>nul && powerpc64-ps3-elf-gcc.exe --version
 where spu-elf-gcc.exe            1>nul 2>nul && spu-elf-gcc.exe            --version
+
+REM One line per tool either build path needs.  make and the ppu-/spu- names
+REM ship in the package, sh and sed come from Git for Windows (checked
+REM above); cmake and ninja are needed only for CMake projects and samples.
+echo Build tools:
+for %%T in (make ppu-gcc spu-gcc sh sed cmake ninja) do (
+    where %%T.exe 1>nul 2>nul && (echo     %%T OK) || (echo     %%T MISSING)
+)
+where cmake.exe 1>nul 2>nul || echo   CMake projects need cmake:  winget install --id Kitware.CMake -e
+where ninja.exe 1>nul 2>nul || echo   CMake projects need ninja:  winget install --id Ninja-build.Ninja -e
 
 EOF
 # cmd.exe parses .cmd/.bat files line by line and is line-ending-sensitive
@@ -547,7 +629,9 @@ cross-built from Linux to ${HOST_TRIPLE}.
 Layout (everything below is anchored at %PS3DK% once installed):
   bin\\               Host tools (rsx-cg-compiler.exe, sprxlinker.exe,
                       nidgen.exe, ...) + ICON0.PNG
-  ppu\\bin\\          powerpc64-ps3-elf-{gcc,g++,as,ld,...}.exe
+  ppu\\bin\\          powerpc64-ps3-elf-{gcc,g++,as,ld,...}.exe, and the
+                      short names ppu-gcc.exe, ppu-ld.exe, ... that
+                      PSL1GHT-style Makefiles call (spu\\bin\\ likewise)
   ppu\\lib\\          libsysbase, libc, librt, liblv2, libgcm, libio,
                       libsysutil*, libfont, ... (PSL1GHT + SDK runtime)
                       + libgcc.a (toolchain) under lib\\gcc\\powerpc64-ps3-elf\\
@@ -559,10 +643,13 @@ Layout (everything below is anchored at %PS3DK% once installed):
   cmake\\             CMake toolchain files + helpers
                       (ps3-ppu-toolchain.cmake, ps3-spu-toolchain.cmake,
                       ps3-self.cmake, ps3-bin2s-impl.cmake, templates\\)
-  ppu_rules           PSL1GHT-style Makefile fragments (legacy build path)
+  ppu_rules           PSL1GHT-style Makefile fragments (Makefile build path;
+                      needs Git for Windows for sh, sed, rm, ...)
   spu_rules
   base_rules
   data_rules
+  make\\bin\\         GNU make, put on PATH by setup.cmd only when no make
+                      is installed already
   portlibs\\          zlib, libpng, SDL2, libcurl, mbedTLS, ...
   samples\\           Source for hello-ppu, hello-spu, cellGcm,
                       Spurs, sysutil, etc.  Build with CMake — see below.
