@@ -26,6 +26,12 @@ allocation moves it through the GPR alternatives (integer loads/stores and
 an aligned stack slot), as -mstrict-align does, but for FP data only.
 Integer accesses are not affected.
 
+Frame slots count as aligned when their MEM carries no alignment: an
+offset that is a multiple of the access size from the stack pointer, the
+frame pointer (r31 only when the function has one), the arg pointer or a
+virtual register.  The prologue's FPR saves (stfd f14,3568(r1)) are A8,
+and without this rule the first build of libgcc's unwinder ICEd in
+extract_constrain_insn.
 --- a/gcc/config/rs6000/constraints.md
 +++ b/gcc/config/rs6000/constraints.md
 @@ -257,6 +257,15 @@
@@ -56,7 +62,7 @@ Integer accesses are not affected.
  extern void rs6000_output_symbol_ref (FILE*, rtx);
 --- a/gcc/config/rs6000/rs6000.cc
 +++ b/gcc/config/rs6000/rs6000.cc
-@@ -29013,6 +29013,28 @@ rs6000_opaque_type_invalid_use_p (gimple *stmt)
+@@ -29013,6 +29013,58 @@ rs6000_opaque_type_invalid_use_p (gimple *stmt)
    return false;
  }
  
@@ -75,7 +81,37 @@ Integer accesses are not affected.
 +rs6000_fp_mem_aligned_p (rtx mem)
 +{
 +#ifdef POWERPC_CELL64LV2
-+  return MEM_ALIGN (mem) >= GET_MODE_ALIGNMENT (GET_MODE (mem));
++  unsigned int align = GET_MODE_ALIGNMENT (GET_MODE (mem));
++  if (MEM_ALIGN (mem) >= align)
++    return true;
++
++  /* Register saves, spills and other frame slots are addressed from the
++     stack, frame or argument pointer, which the ABI keeps aligned, but
++     their MEMs often carry no alignment (the prologue's FPR saves are
++     A8).  An offset that is a multiple of the access size from one of
++     those registers is aligned.  */
++  rtx addr = XEXP (mem, 0);
++  HOST_WIDE_INT offset = 0;
++  if (GET_CODE (addr) == PLUS && CONST_INT_P (XEXP (addr, 1)))
++    {
++      offset = INTVAL (XEXP (addr, 1));
++      addr = XEXP (addr, 0);
++    }
++  if (REG_P (addr)
++      && (REGNO (addr) == STACK_POINTER_REGNUM
++	  /* r31 is the frame pointer only when the function has one;
++	     otherwise it is an ordinary register that may hold any
++	     pointer.  */
++	  || (REGNO (addr) == HARD_FRAME_POINTER_REGNUM
++	      && frame_pointer_needed)
++	  || REGNO (addr) == FRAME_POINTER_REGNUM
++	  || REGNO (addr) == ARG_POINTER_REGNUM
++	  || (REGNO (addr) >= FIRST_VIRTUAL_REGISTER
++	      && REGNO (addr) <= LAST_VIRTUAL_REGISTER))
++      && offset % (align / BITS_PER_UNIT) == 0)
++    return true;
++
++  return false;
 +#else
 +  (void) mem;
 +  return true;
