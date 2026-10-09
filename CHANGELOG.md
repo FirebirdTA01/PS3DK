@@ -59,6 +59,11 @@ The version stamped into builds is generated from the most recent
   PSL1GHT save-data structs has the same size as its `cell*` counterpart in
   both data models.
 
+- **`bin/ppu-packed-arg-scan.py`**, a post-link check for PPU code that
+  uses a struct passed by value in one register (such as
+  `std::string_view`) whole as an address, which faults on hardware.  It
+  exits 1 on a hit, so a build can fail on it.  See `docs/known-issues.md`.
+
 ### Changed
 
 - **The PSL1GHT Makefile path builds with `-fcommon`.**  GCC 10 and later

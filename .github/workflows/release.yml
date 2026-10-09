@@ -172,6 +172,7 @@ jobs:
           # make_sprx, package_finalize, fself.py, Struct.py, sfo.xml,
           # ICON0.PNG).
           bash scripts/build-psl1ght-host-tools-linux.sh "$stage/bin"
+          install -m 0755 scripts/ppu-packed-arg-scan.py "$stage/bin/"
           # Same promise as the Windows package: every host_bin / host_file
           # row of the artifact manifest, without .exe, is in bin/.
           missing=0

@@ -82,6 +82,9 @@ host_bin  bin/spu-elf-to-ppu-obj.exe
 host_file bin/Struct.py
 host_file bin/fself.py
 host_file bin/sfo.xml
+# Post-link check: PPU code that addresses memory through a packed by-value
+# argument register (scripts/ppu-packed-arg-scan.py).
+host_file bin/ppu-packed-arg-scan.py
 
 # ICON0.PNG is the default icon ps3_add_pkg() stamps into every .pkg, and the
 # function FATAL_ERRORs when it is absent -- so a release that lost it would

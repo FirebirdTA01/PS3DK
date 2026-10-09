@@ -219,6 +219,12 @@ jobs:
       - name: Test FP loads and stores stay off under-aligned memory
         run: bash tests/sdk/ppu-fp-alignment-codegen-test.sh
 
+      # Skips without PS3DEV; the packed by-value argument scanner (a
+      # std::string_view register used whole as an address) flags its red
+      # fixtures and passes its green ones.
+      - name: Test the packed-argument address scanner
+        run: bash tests/sdk/ppu-packed-arg-scan-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class

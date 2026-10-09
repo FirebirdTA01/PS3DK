@@ -788,6 +788,8 @@ stage_python_and_assets() {
     [[ -f "$icon_src" ]] || die "sdk/assets/ICON0.PNG missing — bin/ICON0.PNG is a required artifact"
     install -m 0644 "$icon_src" "$STAGE_BIN/ICON0.PNG"
     say "  staged ICON0.PNG"
+    install -m 0755 "$PS3_TOOLCHAIN_ROOT/scripts/ppu-packed-arg-scan.py" "$STAGE_BIN/ppu-packed-arg-scan.py"
+    say "  staged ppu-packed-arg-scan.py"
     # Make the Python entry point executable so it can be invoked directly when
     # Python is on PATH (Windows still respects the +x bit).
     chmod +x "$STAGE_BIN/fself.py"

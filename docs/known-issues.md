@@ -593,7 +593,9 @@ The SDK ships the OpenGL-ES-flavoured PSGL runtime sitting on top of GCM:
 
 ## A misaligned float or double load silently kills the PPU thread on hardware
 
-**Status:** open; compiler fix planned.
+**Status:** fixed in the compiler for accesses it can see are under-aligned
+(next release); a misaligned `float *` / `double *` is still undefined
+behaviour and still faults.
 
 **Symptom.**  On a real PS3, a floating-point load from an address that is
 not 4-byte aligned (`lfs` at an address that is 2 mod 4, for example) ends
@@ -618,9 +620,43 @@ fields from byte buffers as integers (assemble a `uint32_t` from the four
 bytes, then copy it into a `float` local).  To detect a worker that died,
 check `sysThreadGetPriority(tid, &prio)` for `ESRCH`.
 
-**Planned fix.**  The compiler stops emitting floating-point loads and
-stores through memory it cannot prove aligned, with a regression test that
-runs on hardware.
+**Fix.**  The compiler no longer emits floating-point loads or stores
+through memory it cannot prove aligned (the memcpy and packed-member shapes
+above); those values travel through integer registers instead.  It cannot
+help when a `float *` or `double *` itself holds a misaligned address, for
+example a byte buffer cast to `float *`: C assumes the pointer is aligned.
+Copy such fields out with `memcpy`.
+
+---
+
+## A small struct passed by value can be used whole as an address
+
+**Status:** open; compiler fix planned.  A check ships with the SDK.
+
+**Symptom.**  In the default PPU ABI (32-bit pointers in 64-bit registers),
+a struct of 8 bytes or less passed by value, such as `std::string_view`,
+arrives packed in one register: one member in the high 32 bits, the other in
+the low 32.  The compiler extracts both members correctly, but it can also
+use a plain copy of the whole register as a pointer, for example to start a
+loop over the characters.  The address then has the other member in its
+upper 32 bits (`0x9_4170d038` for a 9-character string at `0x4170d038`).
+On a PS3 the load faults and the thread stops.  RPCS3's default PPU
+recompiler either truncates the address and runs on or crashes; its PPU
+interpreter stops with `Narrowing error (object: 0x...)`.
+
+**Workaround.**  On the PS3 path, pass such structs by const reference
+(`const std::string_view&`), not by value.  To find affected functions in a
+build, run the check that ships in `bin/`:
+
+    python bin/ppu-packed-arg-scan.py <your.elf>
+
+It exits 1 and lists each function that addresses memory through a packed
+argument register.  A clean result is not a proof: it only sees functions
+that read the register's high half with a 32-bit shift.  For a definitive
+run, boot in RPCS3 with `PPU Decoder: Interpreter (static)`.
+
+**Planned fix.**  The compiler zero-extends 32-bit pointers wherever they
+are used as addresses.
 
 ---
 
