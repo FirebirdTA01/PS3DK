@@ -6,10 +6,15 @@
 # Current working directory is $PS3_BUILD_ROOT/portlibs.
 #
 # Build system: autotools (configure + make).
-# Depends on: zlib (001) and libpng (010) — both already in $PORTLIBS,
-# found via the zlib.pc / libpng16.pc that those recipes installed into
+# Depends on: zlib (001), already in $PORTLIBS (libpng is not used, see below),
+# found via the zlib.pc that recipe installed into
 # $PORTLIBS/lib/pkgconfig (PKG_CONFIG_PATH is exported by the driver).
 #
+# --without-png: FreeType uses libpng only for colour bitmap glyphs (emoji
+# fonts).  With it, -lfreetype also needs -lpng, which Makefiles written for
+# the old ps3libraries portlibs do not list (AcidSampleV2 stopped on
+# png_error / png_get_error_ptr from sfnt.c).  Linking -lpng as well still
+# works.
 # --without-harfbuzz / --without-brotli / --without-bzip2 keep the
 # dependency graph acyclic (harfbuzz itself depends on freetype) and avoid
 # pulling extra unported codecs.
@@ -50,7 +55,7 @@ export LDFLAGS="-L$PORTLIBS/lib${LDFLAGS:+ $LDFLAGS}"
     --disable-shared \
     --enable-static \
     --with-zlib=yes \
-    --with-png=yes \
+    --without-png \
     --without-harfbuzz \
     --without-brotli \
     --without-bzip2

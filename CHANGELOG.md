@@ -39,6 +39,20 @@ The version stamped into builds is generated from the most recent
   installed directly under `portlibs/ppu/include`, where homebrew written
   for the old portlibs looks for them.
 
+- **PSL1GHT sysutil names link.**  `sysUtilRegisterCallback`,
+  `sysUtilCheckCallback`, `sysUtilUnregisterCallback`,
+  `sysUtilGetSystemParamInt`/`String`, the eleven `video*` and the eight
+  `msgDialog*` functions are now exported by `libsysutil.a` as aliases of
+  their `cell*` imports.  The headers already provided them as inline
+  forwarders, but code that calls them without those headers, such as tiny3d
+  or a library prebuilt against PSL1GHT, failed to link.
+
+### Changed
+
+- **FreeType is built without libpng.**  libpng is only used for colour
+  bitmap (emoji) glyphs, and with it `-lfreetype` also needed `-lpng`, which
+  Makefiles written for the old portlibs do not list.
+
 ### Fixed
 
 - **`setup.cmd && make` did nothing when cmake or ninja was missing**:

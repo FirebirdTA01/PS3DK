@@ -208,6 +208,11 @@ jobs:
       - name: Test the PSL1GHT-style Makefile build path
         run: bash tests/sdk/makefile-path-test.sh
 
+      # Skips without PS3DEV; PSL1GHT sysutil names (sysUtilRegisterCallback,
+      # videoGetState, msgDialogOpen2, ...) link without the SDK headers.
+      - name: Test the PSL1GHT sysutil names link
+        run: bash tests/sdk/psl1ght-legacy-sysutil-link-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class

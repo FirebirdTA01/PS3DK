@@ -97,22 +97,32 @@ exports:
   notes: extracted from _cellSysutil_0001_171.o
 - name: cellMsgDialogAbort
   nid: '0x62b0f803'
+  aliases:
+    - msgDialogAbort
   signature: ''
   notes: extracted from _cellSysutil_0001_66.o
 - name: cellMsgDialogClose
   nid: '0x20543730'
+  aliases:
+    - msgDialogClose
   signature: ''
   notes: extracted from _cellSysutil_0001_23.o
 - name: cellMsgDialogOpen
   nid: '0xf81eca25'
+  aliases:
+    - msgDialogOpen
   signature: ''
   notes: extracted from _cellSysutil_0001_170.o
 - name: cellMsgDialogOpen2
   nid: '0x7603d3db'
+  aliases:
+    - msgDialogOpen2
   signature: ''
   notes: extracted from _cellSysutil_0001_79.o
 - name: cellMsgDialogOpenErrorCode
   nid: '0x3e22cb4b'
+  aliases:
+    - msgDialogOpenErrorCode
   signature: ''
   notes: extracted from _cellSysutil_0001_42.o
 - name: cellMsgDialogOpenSimulViewWarning
@@ -121,14 +131,20 @@ exports:
   notes: extracted from _cellSysutil_0001_60.o
 - name: cellMsgDialogProgressBarInc
   nid: '0x94862702'
+  aliases:
+    - msgDialogProgressBarInc
   signature: ''
   notes: extracted from _cellSysutil_0001_103.o
 - name: cellMsgDialogProgressBarReset
   nid: '0x7bc2c8a8'
+  aliases:
+    - msgDialogProgressBarReset
   signature: ''
   notes: extracted from _cellSysutil_0001_84.o
 - name: cellMsgDialogProgressBarSetMsg
   nid: '0x9d6af72a'
+  aliases:
+    - msgDialogProgressBarSetMsg
   signature: ''
   notes: extracted from _cellSysutil_0001_107.o
 - name: cellOskDialogAbort
@@ -401,6 +417,8 @@ exports:
   notes: extracted from _cellSysutil_0001_69.o
 - name: cellSysutilCheckCallback
   nid: '0x189a74da'
+  aliases:
+    - sysUtilCheckCallback
   signature: ''
   notes: extracted from _cellSysutil_0001_15.o
 - name: cellSysutilDisableBgmPlayback
@@ -449,14 +467,20 @@ exports:
   notes: extracted from _cellSysutil_0001_70.o
 - name: cellSysutilGetSystemParamInt
   nid: '0x40e895d3'
+  aliases:
+    - sysUtilGetSystemParamInt
   signature: ''
   notes: extracted from _cellSysutil_0001_45.o
 - name: cellSysutilGetSystemParamString
   nid: '0x938013a0'
+  aliases:
+    - sysUtilGetSystemParamString
   signature: ''
   notes: extracted from _cellSysutil_0001_100.o
 - name: cellSysutilRegisterCallback
   nid: '0x9d98afa0'
+  aliases:
+    - sysUtilRegisterCallback
   signature: ''
   notes: extracted from _cellSysutil_0001_108.o
 - name: cellSysutilSetBgmPlaybackExtraParam
@@ -465,50 +489,74 @@ exports:
   notes: extracted from _cellSysutil_0001_165.o
 - name: cellSysutilUnregisterCallback
   nid: '0x02ff3c1b'
+  aliases:
+    - sysUtilUnregisterCallback
   signature: ''
   notes: extracted from _cellSysutil_0001_3.o
 - name: cellVideoOutConfigure
   nid: '0x0bae8772'
+  aliases:
+    - videoConfigure
   signature: ''
   notes: extracted from _cellSysutil_0001_6.o
 - name: cellVideoOutDebugSetMonitorType
   nid: '0xcfdf24bb'
+  aliases:
+    - videoDebugSetMonitorType
   signature: ''
   notes: extracted from _cellSysutil_0001_142.o
 - name: cellVideoOutGetConfiguration
   nid: '0x15b0b0cd'
+  aliases:
+    - videoGetConfiguration
   signature: ''
   notes: extracted from _cellSysutil_0001_12.o
 - name: cellVideoOutGetConvertCursorColorInfo
   nid: '0x55e425c3'
+  aliases:
+    - videoGetConvertCursorColorInfo
   signature: ''
   notes: extracted from _cellSysutil_0001_58.o
 - name: cellVideoOutGetDeviceInfo
   nid: '0x1e930eef'
+  aliases:
+    - videoGetDeviceInfo
   signature: ''
   notes: extracted from _cellSysutil_0001_21.o
 - name: cellVideoOutGetNumberOfDevice
   nid: '0x75bbb672'
+  aliases:
+    - videoGetNumberOfDevice
   signature: ''
   notes: extracted from _cellSysutil_0001_78.o
 - name: cellVideoOutGetResolution
   nid: '0xe558748d'
+  aliases:
+    - videoGetResolution
   signature: ''
   notes: extracted from _cellSysutil_0001_149.o
 - name: cellVideoOutGetResolutionAvailability
   nid: '0xa322db75'
+  aliases:
+    - videoGetResolutionAvailability
   signature: ''
   notes: extracted from _cellSysutil_0001_112.o
 - name: cellVideoOutGetState
   nid: '0x887572d5'
+  aliases:
+    - videoGetState
   signature: ''
   notes: extracted from _cellSysutil_0001_92.o
 - name: cellVideoOutRegisterCallback
   nid: '0x8e8bc444'
+  aliases:
+    - videoRegisterCallback
   signature: ''
   notes: extracted from _cellSysutil_0001_97.o
 - name: cellVideoOutUnregisterCallback
   nid: '0x7871bed4'
+  aliases:
+    - videoUnregisterCallback
   signature: ''
   notes: extracted from _cellSysutil_0001_83.o
 - name: cellWebBrowserActivate
