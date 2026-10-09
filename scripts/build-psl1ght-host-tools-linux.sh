@@ -31,13 +31,15 @@ mkdir -p "$out"
 pin="$(sed -n 's/^PSL1GHT_COMMIT="\([0-9a-f]*\)".*/\1/p' "$script_dir/bootstrap.sh")"
 [[ ${#pin} -eq 40 ]] || die "could not read PSL1GHT_COMMIT from scripts/bootstrap.sh"
 src="$root/src/ps3dev/PSL1GHT"
+# Depth 1 at the pin: nothing reads the history.
 if [[ ! -d "$src/.git" ]]; then
     say "fetching PSL1GHT $pin"
-    mkdir -p "$(dirname "$src")"
-    git clone -q https://github.com/ps3dev/PSL1GHT.git "$src"
+    mkdir -p "$src"
+    git -C "$src" init -q
+    git -C "$src" remote add origin https://github.com/ps3dev/PSL1GHT.git
 fi
 git -C "$src" checkout -q "$pin" 2>/dev/null \
-    || { git -C "$src" fetch -q origin "$pin" && git -C "$src" checkout -q "$pin"; } \
+    || { git -C "$src" fetch -q --depth 1 origin "$pin" && git -C "$src" checkout -q "$pin"; } \
     || die "cannot check out PSL1GHT $pin"
 say "PSL1GHT at $(git -C "$src" rev-parse HEAD)"
 

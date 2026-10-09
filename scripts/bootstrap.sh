@@ -3,14 +3,28 @@
 #
 # Reproducibly sets up the workspace:
 #   1. Verify MSYS2 MinGW64 (Windows) or APT (Linux) build deps are installed.
-#   2. Clone upstream GCC/binutils-gdb/newlib mirrors into src/upstream (shallow,
-#      pinned release tags).
-#   3. Clone ps3dev repos into src/ps3dev.
-#   4. Clone community forks into src/forks for patch provenance.
+#   2. Fetch the pinned release tags of GCC/binutils-gdb/newlib into
+#      src/upstream, depth 1, and nothing else (no default-branch tip).
+#   3. Fetch PSL1GHT at its pinned commit, depth 1, into src/ps3dev.
+#   4. With --with-reference-repos only: the other ps3dev repos and the
+#      community forks (src/ps3dev, src/forks), kept for patch provenance.
+#      No build step reads them.
 #
-# Idempotent: safe to re-run. Existing clones are fast-forwarded or skipped.
+# Every fetch is pinned and depth 1.  Idempotent: a tag or commit already
+# present is not fetched again.
 
 set -euo pipefail
+
+WITH_REFERENCE_REPOS=0
+for arg in "$@"; do
+    case "$arg" in
+        --with-reference-repos) WITH_REFERENCE_REPOS=1 ;;
+        -h|--help)
+            echo "usage: $0 [--with-reference-repos]"
+            exit 0 ;;
+        *) echo "[bootstrap] ERROR: unknown argument: $arg" >&2; exit 2 ;;
+    esac
+done
 
 # Source env.sh to get PS3_TOOLCHAIN_ROOT.
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -121,65 +135,60 @@ retry_git() {
     return 1
 }
 
-clone_shallow() {
+init_remote() {
+    # An empty repository with origin set; content arrives only through the
+    # pinned depth-1 fetches below.
     local url="$1" dir="$2"
-    if [[ -d "$dir/.git" ]]; then
-        say "Updating $dir"
-        retry_git "git fetch in $dir" -C "$dir" fetch --depth 1 --all --tags --prune
-    else
-        say "Cloning $url -> $dir"
-        retry_git "git clone of $url" clone --depth 1 "$url" "$dir"
+    if [[ ! -d "$dir/.git" ]]; then
+        say "Initialising $dir ($url)"
+        mkdir -p "$dir"
+        git -C "$dir" init -q
+        git -C "$dir" remote add origin "$url"
     fi
 }
 
 pin_commit() {
-    # Check out an exact commit in a shallow clone (fetches it if the
-    # shallow history does not already contain it).
+    # Check out an exact commit, fetching it at depth 1 if it is not
+    # already present.
     local dir="$1" commit="$2"
     if [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$commit" ]]; then
         say "$dir already at $commit"
         return 0
     fi
-    say "Pinning $dir to $commit"
-    retry_git "git fetch of $commit in $dir" -C "$dir" fetch --depth 1 origin "$commit"
-    git -C "$dir" checkout -q --detach "$commit"         || die "could not check out $commit in $dir"
-}
-
-clone_partial() {
-    # Shallow + all-blobs clone of large upstreams (gcc, binutils-gdb,
-    # newlib-cygwin).  --depth 1 keeps the initial clone bandwidth low
-    # by skipping history; we then layer specific tags on via
-    # fetch_tag's `git fetch --depth 1 origin refs/tags/<tag>:...`.
-    #
-    # Crucially we DO NOT use --filter=blob:none here.  An earlier
-    # revision did, on the theory that we'd save bandwidth by fetching
-    # blobs lazily — but `git archive` (called by extract_source in
-    # build-{ppu,spu}-toolchain.sh) needs the full blob set for the
-    # tagged tree, and fetching those on-demand from the promisor
-    # remote (sourceware.org / gcc.gnu.org) is fragile: a single curl
-    # blip mid-archive corrupts the tar pipe.  Symptom in CI:
-    #   error: RPC failed; curl 18 transfer closed
-    #   fatal: could not fetch <oid> from promisor remote
-    #   tar: This does not look like a tar archive
-    # Bandwidth penalty for full-blob shallow clone is ~5-10x larger
-    # than partial, but stays well under the actions/cache 10 GB limit
-    # (gcc.git ~1.5 GB shallow, binutils-gdb ~250 MB, newlib-cygwin
-    # ~80 MB) and CI cache amortises it across runs.
-    local url="$1" dir="$2"
-    if [[ -d "$dir/.git" ]]; then
-        say "Updating $dir"
-        retry_git "git fetch in $dir" -C "$dir" fetch --depth 1 --all --tags --prune
-    else
-        say "Cloning (shallow) $url -> $dir"
-        retry_git "git clone of $url" clone --depth 1 "$url" "$dir"
+    if ! git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null; then
+        say "Fetching $commit into $dir"
+        retry_git "git fetch of $commit in $dir" -C "$dir" fetch --depth 1 origin "$commit" \
+            || die "could not fetch $commit in $dir"
     fi
+    git -C "$dir" checkout -q --detach "$commit" \
+        || die "could not check out $commit in $dir"
 }
 
 fetch_tag() {
+    # One release tag at depth 1.  The build scripts `git archive` the tag,
+    # so the tagged tree's blobs must all be local: no --filter here (a lazy
+    # blob fetch from the promisor remote mid-archive corrupted the tar pipe
+    # in CI: "fatal: could not fetch <oid> from promisor remote").
     local dir="$1" tag="$2"
-    (cd "$dir" && retry_git "git fetch tag $tag in $dir" \
-        fetch --depth 1 origin "refs/tags/$tag:refs/tags/$tag") \
-        || warn "Failed to fetch tag $tag in $dir (may already be present)"
+    if git -C "$dir" rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+        say "$dir already has $tag"
+        return 0
+    fi
+    say "Fetching $tag into $dir"
+    retry_git "git fetch tag $tag in $dir" -C "$dir" \
+        fetch --depth 1 --no-tags origin "refs/tags/$tag:refs/tags/$tag" \
+        || die "could not fetch tag $tag in $dir"
+}
+
+clone_shallow() {
+    # Unpinned depth-1 clone: --with-reference-repos only.
+    local url="$1" dir="$2"
+    if [[ -d "$dir/.git" ]]; then
+        say "$dir present; not updated"
+    else
+        say "Cloning $url -> $dir"
+        retry_git "git clone of $url" clone --depth 1 "$url" "$dir"
+    fi
 }
 
 # -----------------------------------------------------------------------------
@@ -197,17 +206,17 @@ mkdir -p "$UPSTREAM_DIR"
 # returning RPC-failed 502s mid-clone.  github.com/gcc-mirror/gcc
 # is the official mirror maintained by the GCC team and answers
 # in ~250 ms; tag names match (releases/gcc-12.4.0 etc.).
-clone_partial "https://github.com/gcc-mirror/gcc.git" "$UPSTREAM_DIR/gcc"
+init_remote "https://github.com/gcc-mirror/gcc.git" "$UPSTREAM_DIR/gcc"
 fetch_tag "$UPSTREAM_DIR/gcc" "releases/gcc-12.4.0"
 fetch_tag "$UPSTREAM_DIR/gcc" "releases/gcc-9.5.0"
 
 # Binutils + GDB share one repo.
-clone_partial "https://sourceware.org/git/binutils-gdb.git" "$UPSTREAM_DIR/binutils-gdb"
+init_remote "https://sourceware.org/git/binutils-gdb.git" "$UPSTREAM_DIR/binutils-gdb"
 fetch_tag "$UPSTREAM_DIR/binutils-gdb" "binutils-2_42"
 fetch_tag "$UPSTREAM_DIR/binutils-gdb" "gdb-14.2-release"
 
 # Newlib.
-clone_partial "https://sourceware.org/git/newlib-cygwin.git" "$UPSTREAM_DIR/newlib-cygwin"
+init_remote "https://sourceware.org/git/newlib-cygwin.git" "$UPSTREAM_DIR/newlib-cygwin"
 fetch_tag "$UPSTREAM_DIR/newlib-cygwin" "newlib-4.4.0"
 
 # -----------------------------------------------------------------------------
@@ -218,8 +227,7 @@ say "=== ps3dev repos ==="
 PS3DEV_DIR="$PS3_TOOLCHAIN_ROOT/src/ps3dev"
 mkdir -p "$PS3DEV_DIR"
 
-clone_shallow "https://github.com/ps3dev/ps3toolchain.git"   "$PS3DEV_DIR/ps3toolchain"
-clone_shallow "https://github.com/ps3dev/PSL1GHT.git"        "$PS3DEV_DIR/PSL1GHT"
+init_remote "https://github.com/ps3dev/PSL1GHT.git" "$PS3DEV_DIR/PSL1GHT"
 # PSL1GHT is PINNED: patches/psl1ght/ is written against this exact commit and
 # build-psl1ght.sh now fails on a hunk that does not apply.  Before this pin a
 # fresh bootstrap (and therefore every CI run) took whatever master was that
@@ -228,21 +236,24 @@ clone_shallow "https://github.com/ps3dev/PSL1GHT.git"        "$PS3DEV_DIR/PSL1GH
 # other.
 PSL1GHT_COMMIT="f649a08fd536a9e27c08c7db2d93a2d7ee4c3bbe"   # master 2026-06-29
 pin_commit "$PS3DEV_DIR/PSL1GHT" "$PSL1GHT_COMMIT"
-clone_shallow "https://github.com/ps3dev/ps3libraries.git"   "$PS3DEV_DIR/ps3libraries"
 
 # -----------------------------------------------------------------------------
-# 3. Fork repos (patch provenance).
+# 3. Reference repos (patch provenance only; no build step reads them).
 # -----------------------------------------------------------------------------
-say "=== fork repos ==="
-
-FORKS_DIR="$PS3_TOOLCHAIN_ROOT/src/forks"
-mkdir -p "$FORKS_DIR"
-
-clone_shallow "https://github.com/bucanero/ps3toolchain.git"       "$FORKS_DIR/bucanero-ps3toolchain"
-clone_shallow "https://github.com/bucanero/PSL1GHT.git"            "$FORKS_DIR/bucanero-PSL1GHT"
-clone_shallow "https://github.com/jevinskie/ps3-gcc.git"           "$FORKS_DIR/jevinskie-ps3-gcc"
-clone_shallow "https://github.com/Estwald/PSDK3v2.git"             "$FORKS_DIR/Estwald-PSDK3v2"
-clone_shallow "https://github.com/StrawFox64/PS3Toolchain.git"     "$FORKS_DIR/StrawFox64-PS3Toolchain"
+if (( WITH_REFERENCE_REPOS )); then
+    say "=== reference repos ==="
+    FORKS_DIR="$PS3_TOOLCHAIN_ROOT/src/forks"
+    mkdir -p "$FORKS_DIR"
+    clone_shallow "https://github.com/ps3dev/ps3toolchain.git"         "$PS3DEV_DIR/ps3toolchain"
+    clone_shallow "https://github.com/ps3dev/ps3libraries.git"         "$PS3DEV_DIR/ps3libraries"
+    clone_shallow "https://github.com/bucanero/ps3toolchain.git"       "$FORKS_DIR/bucanero-ps3toolchain"
+    clone_shallow "https://github.com/bucanero/PSL1GHT.git"            "$FORKS_DIR/bucanero-PSL1GHT"
+    clone_shallow "https://github.com/jevinskie/ps3-gcc.git"           "$FORKS_DIR/jevinskie-ps3-gcc"
+    clone_shallow "https://github.com/Estwald/PSDK3v2.git"             "$FORKS_DIR/Estwald-PSDK3v2"
+    clone_shallow "https://github.com/StrawFox64/PS3Toolchain.git"     "$FORKS_DIR/StrawFox64-PS3Toolchain"
+else
+    say "Skipping reference repos (pass --with-reference-repos to clone them)"
+fi
 
 # -----------------------------------------------------------------------------
 # 4. Build root.

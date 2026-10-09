@@ -231,12 +231,15 @@ ensure_psl1ght_source() {
     pin="$(sed -n 's/^PSL1GHT_COMMIT="\([0-9a-f]*\)".*/\1/p' "$script_dir/bootstrap.sh")"
     [[ ${#pin} -eq 40 ]] || die "could not read PSL1GHT_COMMIT from scripts/bootstrap.sh"
     mkdir -p "$(dirname "$psl1ght_src")"
+    # Depth 1 at the pin: nothing reads the history.
     if [[ ! -d "$psl1ght_src/.git" ]]; then
         say "Fetching PSL1GHT source for host tools"
-        git clone -q https://github.com/ps3dev/PSL1GHT.git "$psl1ght_src"
+        mkdir -p "$psl1ght_src"
+        git -C "$psl1ght_src" init -q
+        git -C "$psl1ght_src" remote add origin https://github.com/ps3dev/PSL1GHT.git
     fi
     git -C "$psl1ght_src" checkout -q "$pin" 2>/dev/null \
-        || { git -C "$psl1ght_src" fetch -q origin "$pin" && git -C "$psl1ght_src" checkout -q "$pin"; } \
+        || { git -C "$psl1ght_src" fetch -q --depth 1 origin "$pin" && git -C "$psl1ght_src" checkout -q "$pin"; } \
         || die "cannot check out PSL1GHT $pin"
 
     [[ -f "$psl1ght_src/tools/generic/bin2s.c" \
