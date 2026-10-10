@@ -286,6 +286,28 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
      * timeout, programs using 33+ get the longer one. */
     *w++ = PS3TC_GCM_METHOD(NV40TCL_TRANSFORM_TIMEOUT, 1);
     *w++ = (vp->registerCount <= 32u) ? 0x0020FFFFu : 0x0030FFFFu;
+
+    /* Constant registers the program expects preloaded: the compiler's
+     * literal pool ("internal-constant-N", var CG_CONSTANT) and uniforms
+     * declared with a default (var CG_UNIFORM).  Each such record carries
+     * a 16-byte default block and names its register in resIndex (a
+     * matrix gives every row its own record).  Binding the program loads
+     * them, so a shader such as float4(pos, 1.0) works without an extra
+     * call; the application's own parameter writes come after and win. */
+    const CgBinaryParameter *params =
+        (const CgBinaryParameter *)((const uint8_t *)p + p->parameterArray);
+    for (uint32_t i = 0; i < p->parameterCount; ++i)
+    {
+        const CgBinaryParameter *pp = &params[i];
+        if (pp->defaultValue == 0u || pp->resIndex < 0) continue;
+        if (pp->var != CG_UNIFORM && pp->var != CG_CONSTANT) continue;
+
+        uint32_t *cw = ps3tc_gcm_reserve(ctx, 6u);
+        if (!cw) return;
+        cw[0] = PS3TC_GCM_METHOD(NV40TCL_VP_UPLOAD_CONST_ID, 5);
+        cw[1] = (uint32_t)pp->resIndex;
+        memcpy(&cw[2], (const uint8_t *)p + pp->defaultValue, 16);
+    }
 }
 
 /* -------------------------------------------------------------------- *
@@ -296,10 +318,9 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
  * writes garbage (e.g. `out_position = float4(x, y, 0, 1)` reads the
  * 0/1 from a literal-pool slot).
  *
- * Designed to be called once per program load (after
- * cellGcmCgInitProgram), not once per frame.  Internal-constants are
- * immutable shader literals — uploading them every frame is pure
- * overhead and can blow the FIFO budget on tight render loops.
+ * cellGcmSetVertexProgram now loads these itself, so this call is only
+ * kept for code written against earlier releases; calling it is
+ * harmless (the same values are written again).
  *
  * Param-table convention: paramno == 0xFFFFFFFE flags an internal
  * constant; defaultValue offsets a 16-byte float[4] block; resIndex

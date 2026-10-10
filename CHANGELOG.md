@@ -16,6 +16,18 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- **Vertex programs with literals draw.**  `cellGcmSetVertexProgram` now
+  loads the constants a vertex program expects preloaded: the compiler's
+  literal pool (`internal-constant-N`) and uniforms declared with a
+  default value.  Before, a shader such as
+  `mul(modelViewProj, float4(in_position, 1.0f))` read whatever the
+  constant register held and drew no geometry: `hello-ppu-cellgcm-textured-cube`
+  showed only its background on a PS3, and `-triangle` and `-alpha-mask`
+  drew nothing in RPCS3.  `cellGcmCgUploadInternalConsts` is no longer
+  needed; calling it is harmless.
+
 ## [v0.22.0] — 2026-10-09
 
 ### Added
