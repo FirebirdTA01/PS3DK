@@ -72,23 +72,70 @@ for line in text.splitlines():
         cur = None; continue
     if cur:
         funcs[cur].append(line)
-fp = re.compile(r"^\s+(lfs|lfd|stfs|stfd)(u?x?)\s+\d+,\s*(-?\d+)?\((\d+)\)")
+# Every floating-point load or store: lfs lfd lfsu lfdu lfsx lfdx lfsux lfdux
+# stfs stfd stfsu stfdu stfsx stfdx stfsux stfdux stfiwx.
+fpop = re.compile(r"^\s+((?:lf|stf)(?:s|d|iw)u?x?)\s+(.*?)\s*(?:#.*)?$")
+dform = re.compile(r"^\d+,\s*(-?\d+)\((\d+)\)$")
+def size(op):
+    return 8 if "fd" in op else 4
+def unsafe(op, operands):
+    """Why this FP access is not a naturally aligned stack access, or None."""
+    m = dform.match(operands)
+    if op.endswith("x") or not m:
+        return "indexed or unrecognised operands"
+    disp, base = int(m.group(1)), m.group(2)
+    if base not in stack:
+        return "not through the stack"
+    if disp % size(op):
+        return f"stack offset {disp} is not a multiple of {size(op)}"
+    return None
 bad = 0
 for name in sorted(under):
     if name not in funcs:
         print(f"  missing function {name}"); bad = 1; continue
     for l in funcs[name]:
-        m = fp.match(l)
-        if m and m.group(4) not in stack:
-            print(f"  {name}: FP access not through the stack: {l.strip()}"); bad = 1
+        m = fpop.match(l)
+        if m and (why := unsafe(m.group(1), m.group(2))):
+            print(f"  {name}: FP access {why}: {l.strip()}"); bad = 1
 for name, op in aligned.items():
-    hits = [l for l in funcs.get(name, []) if (m := fp.match(l)) and m.group(1) == op and m.group(4) not in stack]
+    hits = [l for l in funcs.get(name, [])
+            if (m := fpop.match(l)) and m.group(1) == op
+            and (d := dform.match(m.group(2))) and d.group(2) not in stack]
     if not hits:
         print(f"  {name}: expected a direct {op} from the pointer (control)"); bad = 1
 sys.exit(bad)
 EOF
 
 status=0
+
+# The checker itself, on synthetic assembly.  Each red body (put into all
+# nine under-aligned functions) must be refused; the green body must pass;
+# the aligned controls are direct lfs/lfd from r3 in every variant.
+synth() {  # <body line> -> assembly with every checked function
+    local f
+    for f in memcpy_f memcpy_d memcpy_fstore memcpy_dstore packed_f packed_d \
+             packed_fstore packed_dstore offset_f; do
+        printf '.L.%s:\n\t%s\n\tblr\n\t.size %s, .-%s\n' "$f" "$1" "$f" "$f"
+    done
+    printf '.L.aligned_f:\n\tlfs 1,0(3)\n\tblr\n\t.size aligned_f, .-aligned_f\n'
+    printf '.L.aligned_d:\n\tlfd 1,0(3)\n\tblr\n\t.size aligned_d, .-aligned_d\n'
+}
+for red in "lfs 1,0(3)" "lfsx 1,3,4" "lfdx 1,3,4" "stfsx 1,3,4" "stfdx 1,3,4" \
+           "lfsux 1,3,4" "stfiwx 1,3,4" "lfs 1,2(1)" "lfd 1,4(1)" "stfd 1,12(1)" \
+           "lfsu 1,-2(1)"; do
+    synth "$red" > "$work/red.s"
+    if python3 "$work/scan.py" "$work/red.s" -O2 >/dev/null 2>&1; then
+        echo "ppu-fp-alignment-codegen: FAIL checker accepts '$red'"; status=1
+    fi
+done
+synth "lfs 1,8(1)" > "$work/green.s"
+printf '.L.memcpy_d:\n\tlfd 1,16(1)\n\tstfd 1,-8(1)\n\tblr\n\t.size memcpy_d, .-memcpy_d\n' >> "$work/green.s"
+if python3 "$work/scan.py" "$work/green.s" -O2 >/dev/null 2>&1; then
+    echo "ppu-fp-alignment-codegen: ok   checker controls (11 refused, aligned stack accepted)"
+else
+    echo "ppu-fp-alignment-codegen: FAIL checker refuses an aligned stack access"; status=1
+fi
+
 for abi in "" -mlp64; do
     for opt in -O0 -O2 -Os; do
         label="${abi:-ilp32} $opt"
