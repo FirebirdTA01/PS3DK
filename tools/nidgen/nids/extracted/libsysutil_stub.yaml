@@ -51,6 +51,7 @@ exports:
   nid: '0xdfdd302e'
   aliases:
     - sysDiscRegisterDiscChangeCallback
+    - sysDiscRegisterDiscChangeCallbackEx
   signature: ''
   notes: extracted from _cellSysutil_0001_147.o
 - name: cellDiscGameUnregisterDiscChangeCallback
@@ -79,6 +80,7 @@ exports:
   nid: '0xf8115d69'
   aliases:
     - sysGameRegisterDiscChangeCallback
+    - sysGameRegisterDiscChangeCallbackEx
   signature: ''
   notes: extracted from _cellSysutil_0001_169.o
 - name: cellGameUnregisterDiscChangeCallback

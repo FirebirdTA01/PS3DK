@@ -11,8 +11,14 @@
 # cell* imports (same NID, same trampoline).
 #
 # This links one object that declares the legacy names itself (no SDK
-# header), in both data models, and requires each name to resolve to the
-# same import descriptor as its cell* counterpart.  Skips without PS3DEV.
+# header), in both data models, with -lsysutil ALONE, as a PSL1GHT Makefile
+# does: libsysutil.a is a linker script over the cell-named stub
+# archives (sysutil, game, trophy), so every legacy name - sysutil, sysGame*,
+# sysDisc*, sysTrophy* and PSL1GHT's *Ex import names - must resolve to the
+# same import descriptor as its cell*/sceNpTrophy* counterpart.  Two more
+# links per data model check the split-archive line (each _stub archive by
+# name, no -lsysutil) and both lines together (each import descriptor once).
+# Skips without PS3DEV.
 #
 # Usage: tests/sdk/psl1ght-legacy-sysutil-link-test.sh [--ps3dev DIR]
 set -u
@@ -93,7 +99,27 @@ sysGameGetSizeKB|cellGameGetSizeKB
 sysGamePatchCheck|cellGamePatchCheck
 sysGameSetParamString|cellGameSetParamString
 sysGameThemeInstall|cellGameThemeInstall
-sysGameThemeInstallFromBuffer|cellGameThemeInstallFromBuffer'
+sysGameThemeInstallFromBuffer|cellGameThemeInstallFromBuffer
+sysGameThemeInstallFromBufferEx|cellGameThemeInstallFromBuffer
+sysGameRegisterDiscChangeCallbackEx|cellGameRegisterDiscChangeCallback
+sysDiscRegisterDiscChangeCallbackEx|cellDiscGameRegisterDiscChangeCallback
+sysTrophyInit|sceNpTrophyInit
+sysTrophyAbortHandle|sceNpTrophyAbortHandle
+sysTrophyCreateContext|sceNpTrophyCreateContext
+sysTrophyCreateHandle|sceNpTrophyCreateHandle
+sysTrophyDestroyContext|sceNpTrophyDestroyContext
+sysTrophyDestroyHandle|sceNpTrophyDestroyHandle
+sysTrophyGetGameIcon|sceNpTrophyGetGameIcon
+sysTrophyGetGameInfo|sceNpTrophyGetGameInfo
+sysTrophyGetGameProgress|sceNpTrophyGetGameProgress
+sysTrophyGetRequiredDiskSpace|sceNpTrophyGetRequiredDiskSpace
+sysTrophyGetTrophyIcon|sceNpTrophyGetTrophyIcon
+sysTrophyGetTrophyInfo|sceNpTrophyGetTrophyInfo
+sysTrophyGetTrophyUnlockState|sceNpTrophyGetTrophyUnlockState
+sysTrophyRegisterContextEx|sceNpTrophyRegisterContext
+sysTrophySetSoundLevel|sceNpTrophySetSoundLevel
+sysTrophyTerm|sceNpTrophyTerm
+sysTrophyUnlockTrophy|sceNpTrophyUnlockTrophy'
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 {
@@ -107,11 +133,21 @@ work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
     echo '};'
     echo 'int main(void) { return keep[0] == 0; }'
 } > "$work/legacy.c"
+{
+    echo '/* The cell and sce names only, linked through the stub archives by name. */'
+    cut -d'|' -f2 <<< "$pairs" | sort -u | while read -r cell; do
+        echo "extern void $cell(void);"
+    done
+    echo 'void (*volatile keep[])(void) = {'
+    cut -d'|' -f2 <<< "$pairs" | sort -u | while read -r cell; do echo "    $cell,"; done
+    echo '};'
+    echo 'int main(void) { return keep[0] == 0; }'
+} > "$work/cell.c"
 
 status=0
 for abi in "" -mlp64; do
     label="${abi:-ilp32}"
-    if ! out=$("$cc" $abi -O2 "$work/legacy.c" -lsysutil -lsysutil_game_stub -o "$work/legacy.elf" 2>&1); then
+    if ! out=$("$cc" $abi -O2 "$work/legacy.c" -lsysutil -o "$work/legacy.elf" 2>&1); then
         echo "psl1ght-legacy-sysutil-link: FAIL $label: link"
         printf '%s\n' "$out" | grep -E 'undefined reference|error' | head -n 30 | sed 's/^/    /'
         status=1; continue
@@ -140,6 +176,31 @@ for abi in "" -mlp64; do
         fi
     done <<< "$pairs"
     [ $bad -eq 0 ] && echo "psl1ght-legacy-sysutil-link: ok   $label: $(grep -c . <<< "$pairs") legacy names link to their cell* imports" || status=1
+
+    # Split-archive link line: each _stub archive by name, no -lsysutil.
+    refs="-lsysutil_stub -lsysutil_game_stub -lsysutil_np_trophy_stub"
+    if out=$("$cc" $abi -O2 "$work/cell.c" $refs -o "$work/cell.elf" 2>&1); then
+        echo "psl1ght-legacy-sysutil-link: ok   $label: split-archive link ($refs)"
+    else
+        echo "psl1ght-legacy-sysutil-link: FAIL $label: split-archive link"
+        printf '%s\n' "$out" | grep -E 'undefined reference|error' | head -n 10 | sed 's/^/    /'
+        status=1
+    fi
+    # Both lines together: every import descriptor still defined once.
+    if out=$("$cc" $abi -O2 "$work/cell.c" -lsysutil $refs -o "$work/both.elf" 2>&1); then
+        dup=$("$nm" "$work/both.elf" | awk '$2 ~ /^[DdTt]$/ {print $3}' | sort | uniq -d \
+              | grep -xF -f <(cut -d'|' -f2 <<< "$pairs" | sort -u) || true)
+        if [ -z "$dup" ]; then
+            echo "psl1ght-legacy-sysutil-link: ok   $label: -lsysutil plus the _stub archives, each import once"
+        else
+            echo "psl1ght-legacy-sysutil-link: FAIL $label: defined more than once: $(echo $dup)"
+            status=1
+        fi
+    else
+        echo "psl1ght-legacy-sysutil-link: FAIL $label: -lsysutil plus the _stub archives"
+        printf '%s\n' "$out" | grep -E 'multiple definition|undefined reference|error' | head -n 10 | sed 's/^/    /'
+        status=1
+    fi
 done
 [ $status -eq 0 ] && echo "psl1ght-legacy-sysutil-link: PASS"
 exit $status

@@ -91,6 +91,7 @@ exports:
   nid: '0x87406734'
   aliases:
     - sysGameThemeInstallFromBuffer
+    - sysGameThemeInstallFromBufferEx
   signature: ''
   notes: extracted from _cellGame_0001_5.o
 imports: []

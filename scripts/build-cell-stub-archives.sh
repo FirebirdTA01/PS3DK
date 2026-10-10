@@ -184,7 +184,7 @@ declare -A PREVIOUS_ARCHIVE_NAME=(
 # trampolines, no C code) are replaced by the nidgen archive: the
 # PSL1GHT names are nidgen aliases (matched by FNID) of the reference
 # exports, and the PSL1GHT archive name is installed as an alias of the
-# _stub archive, as libusb.a / libsysutil.a already are.
+# _stub archive, as libusb.a already is.
 declare -A PSL1GHT_IMPORT_ALIAS=(
     [libaudio_stub]=libaudio.a
     [libcamera_stub]=libcamera.a

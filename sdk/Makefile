@@ -781,11 +781,16 @@ install-native-aliases:
 	@install -d "$(INSTALL_LIB)" "$(INSTALL_LIB_LP64)"
 	@test -f "$(INSTALL_LIB)/libsysutil_stub.a" || { echo "missing $(INSTALL_LIB)/libsysutil_stub.a"; exit 1; }
 	@test -f "$(INSTALL_LIB_LP64)/libsysutil_stub.a" || { echo "missing $(INSTALL_LIB_LP64)/libsysutil_stub.a"; exit 1; }
-	@ln -sfn libsysutil_stub.a "$(INSTALL_LIB)/libsysutil.a"
-	@ln -sfn libsysutil_stub.a "$(INSTALL_LIB_LP64)/libsysutil.a"
+	@for d in "$(INSTALL_LIB)" "$(INSTALL_LIB_LP64)"; do \
+	  for s in libsysutil_game_stub.a libsysutil_np_trophy_stub.a; do \
+	    test -f "$$d/$$s" || { echo "missing $$d/$$s"; exit 1; }; \
+	  done; \
+	  rm -f "$$d/libsysutil.a"; \
+	  printf '/* PSL1GHT name: everything PSL1GHT shipped in libsysutil, from the\n   cell-named stub archives (each function defined once). */\nINPUT ( -lsysutil_stub -lsysutil_game_stub -lsysutil_np_trophy_stub )\n' > "$$d/libsysutil.a"; \
+	done
 	@test -f "$(INSTALL_LIB)/liblv2.a" || { echo "missing $(INSTALL_LIB)/liblv2.a"; exit 1; }
 	@test -f "$(INSTALL_LIB_LP64)/liblv2.a" || { echo "missing $(INSTALL_LIB_LP64)/liblv2.a"; exit 1; }
-	@echo "  alias   libsysutil.a -> libsysutil_stub.a (ILP32 + LP64)"
+	@echo "  script  libsysutil.a -> sysutil + sysutil_game + sysutil_np_trophy stubs (ILP32 + LP64)"
 	@test -f "$(INSTALL_LIB)/libdbgfont.a" || { echo "missing $(INSTALL_LIB)/libdbgfont.a"; exit 1; }
 	@test -f "$(INSTALL_LIB_LP64)/libdbgfont.a" || { echo "missing $(INSTALL_LIB_LP64)/libdbgfont.a"; exit 1; }
 	@ln -sfn libdbgfont.a "$(INSTALL_LIB)/libdbgfont_gcm.a"
@@ -797,8 +802,8 @@ install-manifest:
 	@src_sha="$$(sha256sum include/sysutil/video.h | awk '{print $$1}')"; \
 	  dst_sha="$$(sha256sum "$(INSTALL_INC)/sysutil/video.h" | awk '{print $$1}')"; \
 	  test "$$src_sha" = "$$dst_sha" || { echo "installed sysutil/video.h sha mismatch"; exit 1; }; \
-	  test "$$(readlink "$(INSTALL_LIB)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad ILP32 libsysutil.a alias"; exit 1; }; \
-	  test "$$(readlink "$(INSTALL_LIB_LP64)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad LP64 libsysutil.a alias"; exit 1; }; \
+	  grep -qxF 'INPUT ( -lsysutil_stub -lsysutil_game_stub -lsysutil_np_trophy_stub )' "$(INSTALL_LIB)/libsysutil.a" || { echo "bad ILP32 libsysutil.a script"; exit 1; }; \
+	  grep -qxF 'INPUT ( -lsysutil_stub -lsysutil_game_stub -lsysutil_np_trophy_stub )' "$(INSTALL_LIB_LP64)/libsysutil.a" || { echo "bad LP64 libsysutil.a script"; exit 1; }; \
 	  test -f "$(INSTALL_LIB)/liblv2.a" || { echo "missing $(INSTALL_LIB)/liblv2.a"; exit 1; }; \
 	  test -f "$(INSTALL_LIB_LP64)/liblv2.a" || { echo "missing $(INSTALL_LIB_LP64)/liblv2.a"; exit 1; }; \
 	  test -f "$(INSTALL_LIB)/librsx.a" || { echo "missing $(INSTALL_LIB)/librsx.a"; exit 1; }; \
@@ -809,8 +814,8 @@ install-manifest:
 	    printf "version="; "$(VERSION_SH)" --format=plain; \
 	    echo "sysutil_video_sha256=$$src_sha"; \
 	    echo "installed_sysutil_video_sha256=$$dst_sha"; \
-	    echo "libsysutil_ilp32=symlink:libsysutil_stub.a"; \
-	    echo "libsysutil_lp64=symlink:libsysutil_stub.a"; \
+	    echo "libsysutil_ilp32=script:sysutil,sysutil_game,sysutil_np_trophy"; \
+	    echo "libsysutil_lp64=script:sysutil,sysutil_game,sysutil_np_trophy"; \
 	    echo "liblv2_ilp32=present"; \
 	    echo "liblv2_lp64=present"; \
 	    echo "librsx_ilp32=present"; \
@@ -821,10 +826,8 @@ install-manifest:
 
 verify-install:
 	@test -f "$(INSTALL_MANIFEST)" || { echo "missing $(INSTALL_MANIFEST)"; exit 1; }
-	@test -L "$(INSTALL_LIB)/libsysutil.a" || { echo "bad ILP32 libsysutil.a"; exit 1; }
-	@test -L "$(INSTALL_LIB_LP64)/libsysutil.a" || { echo "bad LP64 libsysutil.a"; exit 1; }
-	@test "$$(readlink "$(INSTALL_LIB)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad ILP32 libsysutil.a target"; exit 1; }
-	@test "$$(readlink "$(INSTALL_LIB_LP64)/libsysutil.a")" = "libsysutil_stub.a" || { echo "bad LP64 libsysutil.a target"; exit 1; }
+	@grep -qxF 'INPUT ( -lsysutil_stub -lsysutil_game_stub -lsysutil_np_trophy_stub )' "$(INSTALL_LIB)/libsysutil.a" || { echo "bad ILP32 libsysutil.a"; exit 1; }
+	@grep -qxF 'INPUT ( -lsysutil_stub -lsysutil_game_stub -lsysutil_np_trophy_stub )' "$(INSTALL_LIB_LP64)/libsysutil.a" || { echo "bad LP64 libsysutil.a"; exit 1; }
 	@test -f "$(INSTALL_LIB)/liblv2.a" || { echo "missing $(INSTALL_LIB)/liblv2.a"; exit 1; }
 	@test -f "$(INSTALL_LIB_LP64)/liblv2.a" || { echo "missing $(INSTALL_LIB_LP64)/liblv2.a"; exit 1; }
 	@test -f "$(INSTALL_LIB)/librsx.a" || { echo "missing $(INSTALL_LIB)/librsx.a"; exit 1; }

@@ -308,7 +308,7 @@ stage_tool_aliases
 # Symlink materialization (Windows releases must contain ZERO symlink entries)
 # ---------------------------------------------------------------------------
 # sdk/Makefile and scripts/build-cell-stub-archives.sh install several stub
-# aliases as symlinks (libsysutil.a, libdbgfont_gcm.a in both ilp32 and lp64,
+# aliases as symlinks (libdbgfont_gcm.a in both ilp32 and lp64,
 # plus libgcm_sys.a, libio.a, libusb.a).  cp -a above preserves them into the
 # stage tree.  That is correct for a Linux source-tree install and wrong for a
 # Windows release: Explorer's built-in extractor and stock 7-Zip do not create

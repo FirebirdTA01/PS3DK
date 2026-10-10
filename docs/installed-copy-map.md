@@ -9,7 +9,7 @@ exclusion list to skip the vendored version in the first place.
 > **Scope note.**  The original card names five categories: `librt.a`,
 > `librsx.a`, `libgcm_cmd.a`, the overriding headers, and sprxlinker.  This
 > page is the canonical map for the four artifact-class rows above; the
-> remaining categories (stub symlinks like `libsysutil.a → libsysutil_stub.a`,
+> remaining categories (stub symlinks like `libgcm_sys.a → libgcm_sys_stub.a`,
 > `libnet.a → libnet_stub.a`, and `bin/sprxlinker`) have their own per-site
 > `say "(replaces PSL1GHT's)"` logs and can be extended into this table as
 > `ps3tc_replacing` call sites are added for them.

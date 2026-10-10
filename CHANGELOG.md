@@ -24,7 +24,13 @@ The version stamped into builds is generated from the most recent
   `sysDiscRegisterDiscChangeCallback` / `sysDiscUnregisterDiscChangeCallback`
   are declared without a definition, so calls to them failed to link.  They
   are now aliases of the `cellGame*` imports in `libsysutil_game_stub.a`
-  and of the `cellDiscGame*` imports in `libsysutil.a`.
+  and of the `cellDiscGame*` imports in `libsysutil_stub.a`.
+- **PSL1GHT trophy names link.**  The seventeen `sysTrophy*` functions of
+  `<sysutil/trophy.h>` (`sysTrophyInit`, `sysTrophyCreateContext`,
+  `sysTrophyRegisterContextEx`, `sysTrophyUnlockTrophy`, ...) are aliases of
+  the `sceNpTrophy*` imports in `libsysutil_np_trophy_stub.a`, and
+  `sysGameThemeInstallFromBufferEx`, `sysGameRegisterDiscChangeCallbackEx`
+  and `sysDiscRegisterDiscChangeCallbackEx` of their `cell*` imports.
 
 - **FIFO wrap statistics.**  `ps3tc_fifo_wrap_stats(&wraps, &stall_us,
   &max_stall_us)` in `<cell/gcm/ps3tc_fifo_wrap.h>` reports how many times
@@ -32,6 +38,15 @@ The version stamped into builds is generated from the most recent
   for the RSX to catch up, in total and at most once
   (`ps3tc_fifo_wrap_stats_reset()` starts over).  A large stall total in a
   frame means the frame is waiting for the GPU, not for PPU work.
+
+### Changed
+
+- **`libsysutil.a` is a linker script.**  It reads
+  `INPUT ( -lsysutil_stub -lsysutil_game_stub -lsysutil_np_trophy_stub )`,
+  so PSL1GHT projects that link only `-lsysutil` get the game, disc and
+  trophy imports too, while projects that link the three stub archives by
+  name link exactly as before.  Linking both
+  ways at once does not define anything twice.
 
 ## [v0.22.4] — 2026-10-10
 

@@ -239,12 +239,20 @@ sdk_core  ppu/lib/lp64/librt.a
 sdk_core  ppu/include/pthread.h
 sdk_core  ppu/lib/libpthread.a
 sdk_core  ppu/lib/lp64/libpthread.a
+# libsysutil.a is the PSL1GHT name for everything PSL1GHT shipped in one
+# sysutil library (sysutil, game data, trophies).  It is an INPUT LINKER
+# SCRIPT over the reference-named archives libsysutil_stub.a,
+# libsysutil_game_stub.a and libsysutil_np_trophy_stub.a, so -lsysutil links
+# a PSL1GHT project unchanged while each function exists once.  Presence
+# rows, like libpthread.a; the script text is checked by sdk/Makefile's
+# verify-install.
+sdk_core  ppu/lib/libsysutil.a
+sdk_core  ppu/lib/lp64/libsysutil.a
 
 # --- Stub aliases (must exist as symlink->target or byte-identical copy) --
 alias     ppu/lib/libdbgfont_gcm.a         libdbgfont.a
 alias     ppu/lib/libgcm_sys.a             libgcm_sys_stub.a
 alias     ppu/lib/libio.a                  libio_stub.a
-alias     ppu/lib/libsysutil.a             libsysutil_stub.a
 alias     ppu/lib/libusb.a                 libusbd_stub.a
 alias     ppu/lib/libaudio.a               libaudio_stub.a
 alias     ppu/lib/libcamera.a              libcamera_stub.a
@@ -273,7 +281,6 @@ alias     ppu/lib/libcellGameExec_stub.a   libsysutil_game_exec_stub.a
 alias     ppu/lib/lp64/libdbgfont_gcm.a    libdbgfont.a
 alias     ppu/lib/lp64/libgcm_sys.a        libgcm_sys_stub.a
 alias     ppu/lib/lp64/libio.a             libio_stub.a
-alias     ppu/lib/lp64/libsysutil.a        libsysutil_stub.a
 alias     ppu/lib/lp64/libusb.a            libusbd_stub.a
 alias     ppu/lib/lp64/libaudio.a          libaudio_stub.a
 alias     ppu/lib/lp64/libcamera.a         libcamera_stub.a
