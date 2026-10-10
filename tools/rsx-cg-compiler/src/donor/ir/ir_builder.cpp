@@ -1845,6 +1845,80 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             }
         }
 
+        // A varying struct parameter's members, in struct order, for the
+        // parameter table: the reference declares each one whether the
+        // shader reads it or not (measured: an unread `float4 Color : COLOR`
+        // member is recorded with its resource and isReferenced 0).  Array
+        // members number their elements as the input seeding below does.
+        // Matrix members and arrays of structs are not modelled; the list
+        // is left empty for them and only loaded members are recorded.
+        if (currentFunction_->isEntryPoint &&
+            param->storage != StorageQualifier::Uniform &&
+            param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
+            param->type && param->type->baseType == BaseType::Struct && !param->type->isArray())
+        {
+            const bool vertex = module_->shaderStage == ShaderStage::Vertex;
+            bool modelled = true;
+            auto collect = [&](auto& self, const std::vector<StructField>& fields,
+                               const std::string& prefix) -> void {
+                for (const auto& field : fields)
+                {
+                    const std::string path = prefix.empty() ? field.name : prefix + "." + field.name;
+                    if (!field.type) { modelled = false; return; }
+                    if (field.storage == StorageQualifier::Uniform || field.type->isSampler())
+                    {
+                        IRInputMember m;
+                        m.path = path;
+                        m.uniform = true;
+                        irParam.inputMembers.push_back(m);
+                        continue;
+                    }
+                    if (const auto* inner = getStructFields(field.type.get()))
+                    {
+                        if (field.type->isArray()) { modelled = false; return; }
+                        self(self, *inner, path);
+                        continue;
+                    }
+                    IRTypeInfo type = getIRType(field.type.get());
+                    if (type.isMatrix()) { modelled = false; return; }
+                    IRInputMember m;
+                    m.semanticName     = field.semantic.name;
+                    m.rawSemanticName  = field.semantic.rawName;
+                    m.semanticIndex    = field.semantic.index;
+                    m.inferredSemantic = field.semantic.inferred || field.semantic.isEmpty();
+                    if (!type.isArray())
+                    {
+                        m.path = path;
+                        m.type = type;
+                        irParam.inputMembers.push_back(m);
+                        continue;
+                    }
+                    const int count = type.arraySize;
+                    type.arraySize = 0;
+                    std::string semantic = field.semantic.name;
+                    std::transform(semantic.begin(), semantic.end(), semantic.begin(),
+                        [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                    const bool repeated =
+                        (vertex && (semantic == "POSITION" || semantic == "NORMAL" ||
+                                    semantic == "TANGENT" || semantic == "BINORMAL" ||
+                                    semantic == "DIFFUSE" || semantic == "SPECULAR")) ||
+                        (!vertex && (semantic == "FOG" || semantic == "FOGC"));
+                    for (int i = 0; i < count; ++i)
+                    {
+                        IRInputMember e = m;
+                        e.path = path + "[" + std::to_string(i) + "]";
+                        e.type = type;
+                        e.semanticName = semantic;
+                        e.semanticIndex = field.semantic.index + (repeated ? 0 : i);
+                        irParam.inputMembers.push_back(e);
+                    }
+                }
+            };
+            if (const auto* fields = getStructFields(param->type.get()))
+                collect(collect, *fields, "");
+            if (!modelled) irParam.inputMembers.clear();
+        }
+
         currentFunction_->parameters.push_back(irParam);
 
         // A parameter that shadows a file-scope variable is a scope like a
@@ -1968,6 +2042,45 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     if (currentFunction_->isEntryPoint)
     {
         const bool vertex = module_->shaderStage == ShaderStage::Vertex;
+        // One element-typed load per element of a varying array input:
+        // `root` names the struct parameter (empty for a bare parameter),
+        // `path` the array within it, `key` the array state it seeds.
+        auto seedArray = [&](TypeNode* type, const Semantic& sem, const std::string& root,
+                             const std::string& path, const std::string& key) -> void {
+            IRTypeInfo elementType = getIRType(type);
+            if (!elementType.isArray() || elementType.isMatrix()) return;
+            const int count = elementType.arraySize;
+            elementType.arraySize = 0;
+            std::string semantic = sem.name;
+            std::transform(semantic.begin(), semantic.end(), semantic.begin(),
+                [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            int base = sem.index;
+            bool repeated = false;
+            if (vertex && (semantic == "POSITION" || semantic == "NORMAL" ||
+                     semantic == "TANGENT" || semantic == "BINORMAL" ||
+                     semantic == "DIFFUSE" || semantic == "SPECULAR"))
+                repeated = true;
+            else if (!vertex && (semantic == "FOG" || semantic == "FOGC"))
+                repeated = true;
+            // Diagnose unmodelled semantics and range overflow only for
+            // loads that survive DCE. The reference accepts an unused
+            // overflowing tail, and a read of its valid first element.
+            auto& values = localArrayValues_[key];
+            values.clear();
+            for (int i = 0; i < count; ++i)
+            {
+                const IRValueID value = currentFunction_->allocateValueId();
+                auto load = std::make_unique<IRInstruction>(IROp::LoadAttribute, value, elementType);
+                load->semanticName = semantic;
+                load->rawSemanticName = sem.rawName;
+                load->inferredSemantic = sem.inferred;
+                load->semanticIndex = base + (repeated ? 0 : i);
+                load->structParamName = root;
+                load->fieldName = path + "[" + std::to_string(i) + "]";
+                currentBlock_->addInstruction(std::move(load));
+                values.push_back(value);
+            }
+        };
         auto seedInputs = [&](auto& self, TypeNode* type, const std::string& root,
                               const std::string& prefix) -> void {
             const auto* fields = getStructFields(type);
@@ -1980,45 +2093,23 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                     self(self, field.type.get(), root, path);
                     continue;
                 }
-                IRTypeInfo elementType = getIRType(field.type.get());
-                if (!elementType.isArray() || elementType.isMatrix()) continue;
-                const int count = elementType.arraySize;
-                elementType.arraySize = 0;
-                std::string semantic = field.semantic.name;
-                std::transform(semantic.begin(), semantic.end(), semantic.begin(),
-                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-                int base = field.semantic.index;
-                bool repeated = false;
-                if (vertex && (semantic == "POSITION" || semantic == "NORMAL" ||
-                         semantic == "TANGENT" || semantic == "BINORMAL" ||
-                         semantic == "DIFFUSE" || semantic == "SPECULAR"))
-                    repeated = true;
-                else if (!vertex && (semantic == "FOG" || semantic == "FOGC"))
-                    repeated = true;
-                // Diagnose unmodelled semantics and range overflow only for
-                // loads that survive DCE. The reference accepts an unused
-                // overflowing tail, and a read of its valid first element.
-                auto& values = localArrayValues_[root + "." + path];
-                values.clear();
-                for (int i = 0; i < count; ++i)
-                {
-                    const IRValueID value = currentFunction_->allocateValueId();
-                    auto load = std::make_unique<IRInstruction>(IROp::LoadAttribute, value, elementType);
-                    load->semanticName = semantic;
-                    load->rawSemanticName = field.semantic.rawName;
-                    load->inferredSemantic = field.semantic.inferred;
-                    load->semanticIndex = base + (repeated ? 0 : i);
-                    load->structParamName = root;
-                    load->fieldName = path + "[" + std::to_string(i) + "]";
-                    currentBlock_->addInstruction(std::move(load));
-                    values.push_back(value);
-                }
+                seedArray(field.type.get(), field.semantic, root, path, root + "." + path);
             }
         };
+        // A bare array parameter (`float4 t[2] : TEXCOORD4`) is seeded the
+        // same way, element k on semantic index base + k.  It used to be
+        // typed as ONE element, so `t[1]` read TEXCOORD4 instead of
+        // TEXCOORD5: a silent wrong input (measured against the reference,
+        // which reads TEXCOORD5 and declares t[0] and t[1]).
         for (const auto& param : decl->parameters)
             if (param->storage != StorageQualifier::Uniform &&
                 param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)
-                seedInputs(seedInputs, param->type.get(), param->name, "");
+            {
+                if (param->type && !getStructFields(param->type.get()))
+                    seedArray(param->type.get(), param->semantic, "", param->name, param->name);
+                else
+                    seedInputs(seedInputs, param->type.get(), param->name, "");
+            }
     }
 
     // Build function body
@@ -6480,7 +6571,9 @@ bool IRBuilder::conditionFoldHazard(const ExprNode* e)
 
 // The load of a varying struct parameter's member, as `valueId`, into the
 // current block: the lazy first read, and an if-join's untouched side of a
-// member one arm assigned before any read.  False when `param` is not a
+// member one arm assigned before any read.  `member` may be a path through
+// nested struct members ("in1.n"); the load carries the whole path, the
+// name the reference records ("v.in1.n").  False when `param` is not a
 // struct parameter with that member (nothing is emitted).
 bool IRBuilder::emitInputMemberLoad(const ParamDecl* param, const std::string& member,
                                     IRValueID valueId)
@@ -6488,10 +6581,23 @@ bool IRBuilder::emitInputMemberLoad(const ParamDecl* param, const std::string& m
     if (!param || !param->type || param->type->baseType != BaseType::Struct) return false;
     const std::vector<StructField>* fields = getStructFields(param->type.get());
     if (!fields) return false;
+    std::string leaf = member;
+    for (size_t dot; (dot = leaf.find('.')) != std::string::npos; )
+    {
+        const std::string head = leaf.substr(0, dot);
+        const std::vector<StructField>* inner = nullptr;
+        for (const auto& field : *fields)
+            if (field.name == head && field.type && !field.type->isArray())
+                inner = getStructFields(field.type.get());
+        if (!inner) return false;
+        fields = inner;
+        leaf = leaf.substr(dot + 1);
+    }
     for (size_t fieldIdx = 0; fieldIdx < fields->size(); ++fieldIdx)
     {
         const auto& field = (*fields)[fieldIdx];
-        if (field.name != member) continue;
+        if (field.name != leaf) continue;
+        if (getStructFields(field.type.get())) return false;
         IRTypeInfo fieldType = getIRType(field.type.get());
         auto inst = std::make_unique<IRInstruction>(IROp::LoadAttribute, valueId, fieldType);
         inst->semanticName     = field.semantic.name;
@@ -6696,6 +6802,18 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
 
         IRValueID valueId = currentFunction_->allocateValueId();
         nameToValue_[compositeName] = valueId;
+        // A nested member of a varying struct parameter ("v.in1.n") is an
+        // input of its own, loaded on first read like a direct member.
+        // Without this the value was allocated with nothing behind it and
+        // lowering refused the program (the reference accepts it).
+        if (current->kind == ExprKind::Identifier)
+        {
+            const auto* ident = static_cast<IdentifierExpr*>(current);
+            if (ident->resolvedDecl && ident->resolvedDecl->kind == DeclKind::Parameter &&
+                emitInputMemberLoad(static_cast<ParamDecl*>(ident->resolvedDecl),
+                                    compositeName.substr(baseName.size() + 1), valueId))
+                return valueId;
+        }
         // A nested member of a FILE-SCOPE uniform struct ("u.in1.a") is a
         // flattened uniform global of that full name: load it, the way the
         // single-level path above loads "u.b".  Without this the value was

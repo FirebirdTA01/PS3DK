@@ -215,6 +215,13 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
     // Index 0 only (WPOS is unindexed).
     if (semUpper == "WPOS" && semIndex == 0)
         return kCgWPos;
+    // Fragment FOG and FACE inputs, measured on unread struct members:
+    // FOG records CG_FOGCOORD (3156) and FACE records 2199 (the SSA bind
+    // location in cg_bindlocations.h).
+    if ((semUpper == "FOG" || semUpper == "FOGC") && semIndex == 0)
+        return 3156u;
+    if (semUpper == "FACE" && semIndex == 0)
+        return 2199u;
     return 0;
 }
 
@@ -287,6 +294,19 @@ ContainerResult emitFragmentContainerImpl(
     std::vector<ParamDesc> params;
     params.reserve(entry->parameters.size());
 
+    // A matrix uniform is referenced as a whole: when the program reads any
+    // row, the reference marks the parent record and every row referenced,
+    // and none of them when it reads no row (measured: `M[1] * t` marks M and
+    // M[0..3]; an unread float4x4 is all 0).  Applied to the parent and the
+    // `rows` row records just pushed.
+    const auto markMatrixReferenced = [](std::vector<ParamDesc>& ps, size_t rows) {
+        const auto first = ps.end() - static_cast<std::ptrdiff_t>(rows + 1);
+        const bool any = std::any_of(first + 1, ps.end(),
+                                     [](const ParamDesc& d) { return d.isReferenced != 0; });
+        for (auto it = first; it != ps.end(); ++it)
+            it->isReferenced = any ? 1u : 0u;
+    };
+
     const auto samplerLayout = rsx_cg::buildFpSamplerLayout(module, *entry);
     if (!samplerLayout.diagnostics.empty()) {
         result.diagnostics = samplerLayout.diagnostics;
@@ -303,12 +323,16 @@ ContainerResult emitFragmentContainerImpl(
         // the placeholder raw produced '???: input: in.UNDEFINED: ???'
         // rows - 43 of the 51 metadata defects the split instrument
         // found.  Synthesize one entry per distinct loaded field
-        // instead.  (Walk order is IR emission order, i.e. first-use
-        // order; the reference declares fields in struct order - a
-        // possible ordering divergence the harness will grade, but
-        // never a '???'.)
+        // instead, then lay them out in STRUCT order with the unread
+        // members between them (p.inputMembers): the reference declares
+        // every member, an unread one with isReferenced 0, its semantic's
+        // resource, or 0xcb8 and no semantic string when it has none
+        // (measured).  An unread POSITION member is not declared at all in
+        // a fragment program.  Without a member list the loaded members
+        // stay in first-use order.
         if (p.type.baseType == IRType::Void)
         {
+            const size_t firstLoaded = params.size();
             std::set<std::string> seenFields;
             for (const auto& blockPtr : entry->blocks)
             {
@@ -350,6 +374,55 @@ ContainerResult emitFragmentContainerImpl(
                     params.push_back(fd);
                 }
             }
+            if (p.inputMembers.empty()) continue;
+
+            std::vector<ParamDesc> loaded(params.begin() + static_cast<std::ptrdiff_t>(firstLoaded),
+                                          params.end());
+            params.resize(firstLoaded);
+            const uint32_t paramno = irParamOrdinal(entry->parameters[i], i);
+            for (const auto& m : p.inputMembers)
+            {
+                const std::string name = p.name + "." + m.path;
+                if (m.uniform)
+                {
+                    // Bound as its own parameter ahead of this placeholder;
+                    // move its record into the member's place.
+                    for (size_t k = 0; k < params.size(); ++k)
+                    {
+                        if (params[k].name != name || params[k].paramno != paramno) continue;
+                        ParamDesc moved = params[k];
+                        params.erase(params.begin() + static_cast<std::ptrdiff_t>(k));
+                        params.push_back(moved);
+                        break;
+                    }
+                    continue;
+                }
+                const auto hit = std::find_if(loaded.begin(), loaded.end(),
+                    [&](const ParamDesc& d) { return d.name == name; });
+                if (hit != loaded.end())
+                {
+                    params.push_back(*hit);
+                    loaded.erase(hit);
+                    continue;
+                }
+                if (!m.inferredSemantic && toUpper(m.semanticName) == "POSITION")
+                    continue;
+                ParamDesc fd;
+                fd.name      = name;
+                fd.semantic  = m.inferredSemantic ? std::string{}
+                             : m.rawSemanticName.empty() ? m.semanticName : m.rawSemanticName;
+                fd.type      = cgTypeForIRType(m.type);
+                fd.var       = kCgVarying;
+                fd.direction = kCgIn;
+                fd.paramno   = paramno;
+                fd.res       = m.inferredSemantic
+                                   ? kCgUndefined
+                                   : fpResourceFor(toUpper(m.semanticName), m.semanticIndex);
+                fd.isReferenced = 0;
+                params.push_back(fd);
+            }
+            // A load the member list does not name keeps its record.
+            params.insert(params.end(), loaded.begin(), loaded.end());
             continue;
         }
 
@@ -383,6 +456,45 @@ ContainerResult emitFragmentContainerImpl(
                     }
                 }
                 e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                params.push_back(e);
+            }
+            continue;
+        }
+
+        // A varying ARRAY input is one record per element, `name[k]`, each
+        // on its own semantic slot with the declared semantic string,
+        // referenced when its element is loaded (measured: `float4 arr[2] :
+        // TEXCOORD4` declares arr[0] on TEXCOORD4 and arr[1] on TEXCOORD5).
+        if (p.storage != StorageQualifier::Uniform && p.storage != StorageQualifier::Out &&
+            p.storage != StorageQualifier::InOut && p.type.isArray() && !p.type.isMatrix() &&
+            !isSamplerIRType(p.type.baseType))
+        {
+            IRTypeInfo elementType = p.type;
+            elementType.arraySize = 0;
+            for (int k = 0; k < p.type.arraySize; ++k)
+            {
+                const std::string name = rsx_cg::arrayElementName(p.name, k);
+                bool loaded = false;
+                for (const auto& blockPtr : entry->blocks)
+                {
+                    if (!blockPtr) continue;
+                    for (const auto& instPtr : blockPtr->instructions)
+                        if (instPtr && instPtr->op == IROp::LoadAttribute &&
+                            instPtr->structParamName.empty() && instPtr->fieldName == name)
+                            loaded = true;
+                }
+                ParamDesc e;
+                e.name      = name;
+                e.semantic  = p.inferredSemantic ? std::string{}
+                            : p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
+                e.type      = cgTypeForIRType(elementType);
+                e.var       = kCgVarying;
+                e.direction = kCgIn;
+                e.paramno   = irParamOrdinal(entry->parameters[i], i);
+                const std::string semUpper = toUpper(p.semanticName);
+                const bool repeated = semUpper == "FOG" || semUpper == "FOGC";
+                e.res       = fpResourceFor(semUpper, p.semanticIndex + (repeated ? 0 : k));
+                e.isReferenced = loaded ? 1u : 0u;
                 params.push_back(e);
             }
             continue;
@@ -447,6 +559,7 @@ ContainerResult emitFragmentContainerImpl(
                 }
                 params.push_back(e);
             }
+            markMatrixReferenced(params, static_cast<size_t>(rows));
             continue;
         }
 
@@ -668,6 +781,7 @@ ContainerResult emitFragmentContainerImpl(
                     }
                     params.push_back(e);
                 }
+                markMatrixReferenced(params, static_cast<size_t>(rows));
                 continue;
             }
 

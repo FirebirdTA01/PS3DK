@@ -416,6 +416,21 @@ public:
 // IR Function
 // ============================================================================
 
+// One member of a varying entry-point STRUCT parameter, flattened: nested
+// struct members by their path ("in1.t"), array members one per element
+// ("arr[1]").  The reference declares every member in struct order, read or
+// not, so the containers need the whole list, not just the loads.
+struct IRInputMember
+{
+    std::string path;
+    IRTypeInfo type;
+    std::string semanticName;
+    std::string rawSemanticName;  // empty if absent
+    int semanticIndex = 0;
+    bool inferredSemantic = false;
+    bool uniform = false;  // a uniform or sampler member: its own IRParameter carries the record
+};
+
 struct IRParameter
 {
     std::string name;
@@ -444,6 +459,10 @@ struct IRParameter
     // (uniform-struct-entry-parameter), and every flattened member keeps its
     // struct's ordinal, as the reference records them.  -1: use the index.
     int sourceOrdinal = -1;
+    // A varying struct entry parameter's members in struct order (see
+    // IRInputMember).  Empty when the struct holds a member shape this list
+    // does not model; the containers then list only the loaded members.
+    std::vector<IRInputMember> inputMembers;
 };
 
 // The Cg paramno of entry parameter `index` (see IRParameter::sourceOrdinal).

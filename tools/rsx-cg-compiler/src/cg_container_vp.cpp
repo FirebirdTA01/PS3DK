@@ -528,6 +528,46 @@ VpContainerResult emitVertexContainerImpl(
         }
     };
 
+    // A varying ARRAY input is one record per element, `name[k]`, each on
+    // its own attribute with the declared semantic string, referenced when
+    // its element is loaded (measured: `float4 w[3] : TEXCOORD2` declares
+    // w[0..2] on TEXCOORD2..4).  The IR builder seeds one load per element.
+    const auto appendVaryingArray = [&](const IRParameter& p, uint32_t paramno) {
+        IRTypeInfo elementType = p.type;
+        elementType.arraySize = 0;
+        const std::string semUpper = toUpper(p.semanticName);
+        const bool repeated = semUpper == "POSITION" || semUpper == "NORMAL" ||
+                              semUpper == "TANGENT" || semUpper == "BINORMAL" ||
+                              semUpper == "DIFFUSE" || semUpper == "SPECULAR";
+        for (int k = 0; k < p.type.arraySize; ++k)
+        {
+            const std::string name = rsx_cg::arrayElementName(p.name, k);
+            bool loaded = false;
+            for (const auto& blockPtr : entry->blocks)
+            {
+                if (!blockPtr) continue;
+                for (const auto& instPtr : blockPtr->instructions)
+                    if (instPtr && instPtr->op == IROp::LoadAttribute &&
+                        instPtr->structParamName.empty() && instPtr->fieldName == name)
+                        loaded = true;
+            }
+            ParamDesc e;
+            e.name      = name;
+            e.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
+            e.type      = cgTypeForIRType(elementType);
+            e.var       = kCgVarying;
+            e.direction = kCgIn;
+            e.paramno   = paramno;
+            e.res       = vpInputResource(semUpper, p.semanticIndex + (repeated ? 0 : k));
+            e.isReferenced = loaded ? 1u : 0u;
+            params.push_back(e);
+        }
+    };
+    const auto isVaryingArrayInput = [](const IRParameter& p) {
+        return (p.storage == StorageQualifier::In || p.storage == StorageQualifier::None) &&
+               p.type.isArray() && !p.type.isMatrix() && !isSamplerIRType(p.type.baseType);
+    };
+
     // ----- Struct-flattened path: synthesize params from
     // LdAttr / StOut walk.  Per the reference compiler:
     //   - all input struct fields share the same paramno = 0 (they
@@ -555,7 +595,7 @@ VpContainerResult emitVertexContainerImpl(
             {
                 if (!instPtr) continue;
                 const IRInstruction& in = *instPtr;
-                if (in.op == IROp::LoadAttribute)
+                if (in.op == IROp::LoadAttribute && !in.structParamName.empty())
                 {
                     ParamDesc d;
                     d.name      = (!in.structParamName.empty() ? in.structParamName + "." : std::string{})
@@ -571,6 +611,50 @@ VpContainerResult emitVertexContainerImpl(
             }
         }
 
+        // The reference declares every member of a varying struct
+        // parameter in struct order, read or not: an unread member with
+        // isReferenced 0 and its semantic's resource, or 0xcb8 and no
+        // semantic string when it has none (measured).  Lay the loaded
+        // records out in that order with the unread members between them;
+        // a load the member list does not name keeps its record after.
+        // Uniform members are left where the uniform parameters put them.
+        std::vector<ParamDesc> loaded = std::move(params);
+        params.clear();
+        for (size_t i = 0; i < entry->parameters.size(); ++i)
+        {
+            const auto& sp = entry->parameters[i];
+            if (sp.type.baseType != IRType::Void || sp.inputMembers.empty()) continue;
+            const std::string prefix = sp.name + ".";
+            for (const auto& m : sp.inputMembers)
+            {
+                if (m.uniform) continue;
+                const std::string name = prefix + m.path;
+                const auto hit = std::find_if(loaded.begin(), loaded.end(),
+                    [&](const ParamDesc& d) { return d.name == name; });
+                if (hit != loaded.end())
+                {
+                    params.push_back(*hit);
+                    loaded.erase(std::remove_if(loaded.begin(), loaded.end(),
+                        [&](const ParamDesc& d) { return d.name == name; }), loaded.end());
+                    continue;
+                }
+                ParamDesc d;
+                d.name      = name;
+                d.semantic  = m.inferredSemantic ? std::string{}
+                            : m.rawSemanticName.empty() ? m.semanticName : m.rawSemanticName;
+                d.type      = cgTypeForIRType(m.type);
+                d.var       = kCgVarying;
+                d.direction = kCgIn;
+                d.paramno   = inputStructParamNo;
+                d.res       = m.inferredSemantic
+                                  ? kCgUnassignedRes
+                                  : vpInputResource(toUpper(m.semanticName), m.semanticIndex);
+                d.isReferenced = 0;
+                params.push_back(d);
+            }
+        }
+        params.insert(params.end(), loaded.begin(), loaded.end());
+
         // Non-struct entry parameters (typically uniforms) remain real
         // function parameters and must be emitted between flattened
         // struct inputs and synthetic struct outputs.
@@ -580,6 +664,11 @@ VpContainerResult emitVertexContainerImpl(
             const auto* binding = explicitBindings.find(p.valueId);
             if (p.type.baseType == IRType::Void)
                 continue;
+            if (isVaryingArrayInput(p))
+            {
+                appendVaryingArray(p, irParamOrdinal(entry->parameters[i], i));
+                continue;
+            }
             if (vpSamplers && p.storage == StorageQualifier::Uniform &&
                 isSamplerIRType(p.type.baseType))
             {
@@ -650,6 +739,11 @@ VpContainerResult emitVertexContainerImpl(
                 d.res = isOut ? vpOutputResource(semUpper, p.semanticIndex,
                                                  p.rawSemanticName)
                               : vpInputResource(semUpper, p.semanticIndex);
+                // An input the program never reads is declared unreferenced
+                // (measured: an unused `float2 t1 : TEXCOORD1` parameter is
+                // isReferenced 0).  It is read through its value id.
+                if (p.storage == StorageQualifier::In || p.storage == StorageQualifier::None)
+                    if (!p.type.isArray() && !vpRead.count(p.valueId)) d.isReferenced = 0;
             }
             params.push_back(d);
         }
@@ -813,6 +907,11 @@ VpContainerResult emitVertexContainerImpl(
             params.push_back(samplerRecord(p, irParamOrdinal(entry->parameters[i], i)));
             continue;
         }
+        if (isVaryingArrayInput(p))
+        {
+            appendVaryingArray(p, irParamOrdinal(entry->parameters[i], i));
+            continue;
+        }
         ParamDesc d;
         d.name      = p.name;
         d.semantic  = p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName;
@@ -880,6 +979,11 @@ VpContainerResult emitVertexContainerImpl(
             d.res = isOut ? vpOutputResource(semUpper, p.semanticIndex,
                                              p.rawSemanticName)
                           : vpInputResource (semUpper, p.semanticIndex);
+            // An input the program never reads is declared unreferenced
+            // (measured: an unused `float2 t1 : TEXCOORD1` parameter is
+            // isReferenced 0).  It is read through its value id.
+            if (p.storage == StorageQualifier::In || p.storage == StorageQualifier::None)
+                if (!p.type.isArray() && !vpRead.count(p.valueId)) d.isReferenced = 0;
         }
         params.push_back(d);
     }
