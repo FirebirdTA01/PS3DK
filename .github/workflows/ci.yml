@@ -225,6 +225,11 @@ jobs:
       - name: Test the packed-argument address scanner
         run: bash tests/sdk/ppu-packed-arg-scan-test.sh
 
+      # Skips without a Windows C compiler that can run its output; tool-alias's
+      # error message stays inside its buffer when the text does not fit.
+      - name: Test the tool-alias error message on truncation
+        run: bash tests/host/tool-alias-fail-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class

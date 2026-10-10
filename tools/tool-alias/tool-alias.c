@@ -24,11 +24,18 @@ fail (const wchar_t *what, const wchar_t *detail)
   HANDLE err = GetStdHandle (STD_ERROR_HANDLE);
   DWORD n;
   wchar_t msg[2 * MAX_PATH + 64];
-  int len = _snwprintf (msg, sizeof msg / sizeof msg[0] - 1,
-			L"tool-alias: %ls: %ls\r\n", what, detail);
-  if (len < 0)
-    len = (int) wcslen (msg);
-  msg[sizeof msg / sizeof msg[0] - 1] = 0;
+  const int cap = (int) (sizeof msg / sizeof msg[0]) - 1;
+  int len = _snwprintf (msg, cap, L"tool-alias: %ls: %ls\r\n", what, detail);
+  /* On truncation _snwprintf returns -1 and writes exactly cap characters
+     with no terminator, so terminate before taking any length, and end the
+     cut message with a line break of its own.  */
+  msg[cap] = 0;
+  if (len < 0 || len > cap)
+    {
+      len = cap;
+      msg[cap - 2] = L'\r';
+      msg[cap - 1] = L'\n';
+    }
   if (GetConsoleMode (err, &n))
     WriteConsoleW (err, msg, (DWORD) len, &n, NULL);
   else
@@ -63,6 +70,7 @@ arguments_after_program_name (const wchar_t *cmd)
   return cmd;
 }
 
+#ifndef TOOL_ALIAS_NO_WMAIN	/* tests/host/tool-alias-fail-test.c */
 int
 wmain (void)
 {
@@ -144,3 +152,4 @@ wmain (void)
   CloseHandle (pi.hProcess);
   return (int) code;
 }
+#endif /* TOOL_ALIAS_NO_WMAIN */
