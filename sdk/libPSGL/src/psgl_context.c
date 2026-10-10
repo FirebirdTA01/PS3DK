@@ -2236,7 +2236,6 @@ static void psgl_emit_vertex_program(PSGLcontext *context,
     if (!ucode) return;
     cellGcmSetVertexProgram(context->gcm, (CGprogram)program->binary,
                             (void *)ucode);
-    cellGcmCgUploadInternalConsts(context->gcm, (CGprogram)program->binary);
     for (uint32_t i = 0; i < program->parameter_count; i++) {
         PSGLcgParameter *parameter = &program->parameters[i];
         if (parameter->resource != CG_C || parameter->vertex_register == 0xffffu)
