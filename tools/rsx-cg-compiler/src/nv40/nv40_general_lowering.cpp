@@ -2049,7 +2049,64 @@ private:
             ++curCycle;
         }
 
+        // The schedule above is latency-driven and knows nothing about
+        // register pressure: it pulls independent work early and keeps its
+        // results live.  On a long predicated fragment program that can need
+        // more temps than the hardware has (a five-layer skybox: 114 live at
+        // once in the scheduled order, 17 in the order it was lowered in).
+        // The lowered order is a valid order by construction, so when the
+        // schedule would not fit the encodable temp range and the lowered
+        // order would, keep the lowered order.  Programs whose schedule fits
+        // are untouched.
+        if (profile_ == GeneralProfile::Fragment &&
+            peakLiveCount(ordered) >= kFpEncodableTemps &&
+            peakLiveCount(program_.instrs) < kFpEncodableTemps)
+        {
+            if (dumpOrder)
+                std::fprintf(stderr, "ordering: schedule needs %d live temps, lowered order %d; keeping the lowered order\n",
+                             peakLiveCount(ordered), peakLiveCount(program_.instrs));
+            return;
+        }
+
         program_.instrs = std::move(ordered);
+    }
+
+    // FP temp registers the encoding can address (the bound
+    // emitFragmentVirtual enforces on the finished program as
+    // kFpEncodedTempRegisterLimit).
+    static constexpr int kFpEncodableTemps = 48;
+
+    // Peak number of virtual temps live at once in `instrs`, counted the way
+    // allocatePhysicalTemps counts it: a value lives from its first
+    // definition to its last read, a value never read lives for its own
+    // instruction.
+    static int peakLiveCount(const std::vector<VInstr>& instrs)
+    {
+        const size_t n = instrs.size();
+        std::unordered_map<int, size_t> firstDef, lastUse;
+        for (size_t i = 0; i < n; ++i) {
+            const VInstr& vi = instrs[i];
+            if (!vi.dst.none && !vi.dst.output && !vi.dst.address &&
+                !firstDef.count(vi.dst.index))
+                firstDef[vi.dst.index] = i;
+            for (const VSrc& src : vi.srcs)
+                if (src.kind == VSrcKind::Temp)
+                    lastUse[src.index] = i;
+        }
+        std::vector<int> defsAt(n + 1, 0), diesAt(n + 1, 0);
+        for (const auto& [v, d] : firstDef) {
+            const auto l = lastUse.find(v);
+            const size_t end = (l == lastUse.end() || l->second < d) ? d : l->second;
+            ++defsAt[d];
+            ++diesAt[end];
+        }
+        int occ = 0, peak = 0;
+        for (size_t i = 0; i < n; ++i) {
+            occ += defsAt[i];
+            peak = std::max(peak, occ);
+            occ -= diesAt[i];
+        }
+        return peak;
     }
 
     void countUses()
