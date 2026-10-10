@@ -279,5 +279,24 @@ struct F { float4 x; float4 c : COLOR0; float4 y; float4 z : COLOR1; float4 w; }
 F main_fragment(float2 t : TEXCOORD0) { F f; f.c = float4(t, 0, 1); f.x = 1; f.z = 0.5; f.w = 0.25; return f; }'
 [ -s "$work/fp_implicit_outputs.bin" ] && outputs fp_implicit_outputs 'main_fragment.x 418 ac7 -; main_fragment.c 418 ac5 COLOR0; main_fragment.y 418 cb8 -; main_fragment.z 418 ac6 COLOR1; main_fragment.w 418 ac8 -'
 
+# A uniform struct entry parameter passed whole to a helper (libretro's
+# texel(IN)) is the helper's parameter member by member; it was refused.
+check uniform_struct_argument sce_fp_rsx main_fragment \
+'tc 416 c94 TEXCOORD0 0 1; IN.video_size 416 cb8 - 1 1; IN.texture_size 416 cb8 - 1 1; IN.output_size 416 cb8 - 1 0' '
+struct input { float2 video_size; float2 texture_size; float2 output_size; };
+float2 texel(input I) { return 1.0 / I.texture_size; }
+float4 scale(input J, float2 t) { return float4(t * texel(J), J.video_size); }
+float4 main_fragment(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return scale(IN, tc); }'
+
+# A fixed member of a struct constructor converts as a fixed declaration does
+# (the handheld shaders build fixed2 members this way); it was refused.
+check fixed_struct_initializer sce_vp_rsx main_vertex \
+'p 418 841 POSITION 0 1; t 416 849 TEXCOORD0 1 1; ts 416 882 - 4 1' '
+struct md { fixed2 a : TEXCOORD1; fixed2 b : TEXCOORD2; };
+void main_vertex(float4 p : POSITION, float2 t : TEXCOORD0, out float4 op : POSITION, out md o, uniform float2 ts)
+{ op = p; o = md(ts.yx, t * ts); }'
+[ -s "$work/fixed_struct_initializer.bin" ] && outputs fixed_struct_initializer \
+'op 418 8c3 POSITION; o.a 416 c95 TEXCOORD1; o.b 416 c96 TEXCOORD2'
+
 [ $fail -eq 0 ] && echo "param-records: PASS" || echo "param-records: FAIL"
 exit $fail

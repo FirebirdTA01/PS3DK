@@ -39,10 +39,6 @@ TEX_UNITS = {'explicit_unit_member': {0, 3}, 'register_member': {5},
 # A varying struct NESTED in a varying struct gets no member loads at all
 # (pre-existing; card t_8370d759).  The reference accepts these, so they must
 # at least refuse (exit 1, no container) until it is implemented.
-NESTED_REFUSE_INSTANCES = {
-    'two_nested_same_struct': 'struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.p.uv, o.q.uv); }\n',
-    'nested_unread': 'struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.q.uv, 0, 1); }\n',
-}
 NESTED_REFUSE = {'nested_sampler_member': """struct inner { sampler2D tex; }; struct prev { float2 tc; inner I; };
 float4 main(float4 uv : TEXCOORD0, prev P) : COLOR { return tex2D(P.I.tex, uv.xy); }
 """}
@@ -110,6 +106,12 @@ float4 main(in d v, float z) : COLOR { return float4(v.a, v.b, z); }
 # lists it varying/UNDEFINED/unreferenced), so those rows compare the
 # referenced records; a bare parameter's unread record is compared.
 READSET = {
+    # Nested varying struct members are inputs of their own (they refused):
+    # bound by the same read-set rule, measured on the reference.
+    'two_nested_same_struct': ('struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.p.uv, o.q.uv); }\n',
+                               {('o.p.uv', VAR, TC(0), 0, 1), ('o.q.uv', VAR, TC(1), 0, 1)}, [0.5, 0.25, 0.75, 0.125]),
+    'nested_unread': ('struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.q.uv, 0, 1); }\n',
+                      {('o.q.uv', VAR, TC(0), 0, 1)}, [0.5, 0.25, 0.0, 1.0]),
     'bare_unread': ('float4 main(float2 u, float2 k) : COLOR { return float4(k, 0, 1); }\n',
                     {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     'member_unread_first': ('struct d { float2 a; float2 b; }; float4 main(d v) : COLOR { return float4(v.b, 0, 1); }\n',
@@ -205,12 +207,6 @@ def main():
                     failures.append('%s fetches units %s, want %s' % (name, sorted(units), sorted(TEX_UNITS[name])))
                     notes.append('WRONG UNIT')
             print('  %-24s %s' % (name, ', '.join(notes) or 'as measured'))
-        for name, text in NESTED_REFUSE_INSTANCES.items():
-            rc, blob, err = compile_one(args.compiler, work, name, text)
-            ok = rc == 1 and not blob
-            print('  %-24s %s' % (name, 'refused (rc 1)' if ok else 'NOT refused (rc %d)' % rc))
-            if not ok:
-                failures.append('%s: a nested varying struct must refuse until it is implemented' % name)
         for name, text in NESTED_REFUSE.items():
             rc, blob, err = compile_one(args.compiler, work, name, text)
             ok = rc == 1 and not blob

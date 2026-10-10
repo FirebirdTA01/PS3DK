@@ -329,7 +329,7 @@
     "records": {
       "i.a[0]": [
         1045,
-        0,
+        3156,
         "FOG"
       ]
     },
@@ -339,8 +339,7 @@
         3156,
         "FOG"
       ]
-    },
-    "gap": "fragment-fog-reflection: inherited FP FOG reflection resource is 0; reference is 3156. Value and physical input are measured separately."
+    }
   },
   {
     "name": "sce_fp_rsx-FOG-float-both-helper",
@@ -372,7 +371,7 @@
     "records": {
       "i.a[0]": [
         1045,
-        0,
+        3156,
         "FOG"
       ]
     },
@@ -382,8 +381,7 @@
         3156,
         "FOG"
       ]
-    },
-    "gap": "fragment-fog-reflection: inherited FP FOG reflection resource is 0; reference is 3156. Value and physical input are measured separately."
+    }
   },
   {
     "name": "sce_fp_rsx-TEXCOORD0-float2-both",

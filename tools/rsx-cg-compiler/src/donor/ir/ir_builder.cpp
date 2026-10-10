@@ -3451,6 +3451,10 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                         }
                         if (!written)
                         {
+                            // Declared only as a direct member of the returned
+                            // struct; an unwritten one inside a nested struct
+                            // has no record (measured: main.i.untouched_leaf).
+                            if (!pathPrefix.empty()) continue;
                             const bool known = std::any_of(
                                 currentFunction_->unwrittenImplicitOutputs.begin(),
                                 currentFunction_->unwrittenImplicitOutputs.end(),
@@ -5060,6 +5064,13 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
             argValues.push_back(InvalidIRValue);
             continue;
         }
+        // A flattened uniform struct parameter passed whole has no value:
+        // the inliner binds the callee's parameter to its members instead.
+        if (flattenedStructArgument(expr, i))
+        {
+            argValues.push_back(InvalidIRValue);
+            continue;
+        }
         argValues.push_back(buildExpr(expr->arguments[i].get()));
     }
 
@@ -5626,6 +5637,22 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
 }
 
 
+
+bool IRBuilder::flattenedStructArgument(const CallExpr* call, size_t i)
+{
+    if (!call->resolvedFunction || call->resolvedFunction->kind != DeclKind::Function) return false;
+    const auto* callee = static_cast<const FunctionDecl*>(call->resolvedFunction);
+    if (i >= callee->parameters.size() || i >= call->arguments.size()) return false;
+    const ParamDecl* param = callee->parameters[i].get();
+    if (!param || param->storage == StorageQualifier::Out ||
+        param->storage == StorageQualifier::InOut || !getStructFields(param->type.get()))
+        return false;
+    const ExprNode* argument = call->arguments[i].get();
+    if (!argument || argument->kind != ExprKind::Identifier) return false;
+    const std::string& name = static_cast<const IdentifierExpr*>(argument)->name;
+    return flattenedUniformStructParams_.count(name) && !nameToValue_.count(name);
+}
+
 namespace { bool arrayStorageKey(ExprNode* expr, std::string& key); }
 
 bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
@@ -5712,6 +5739,15 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
 
     auto savedDecls = declToValue_;
     const ScopeState savedScope = scope_;   // the whole per-scope state, once
+    // Names this call marks flattened (a helper parameter bound to a
+    // flattened uniform struct argument), unmarked however the call ends.
+    std::vector<std::string> flattenedForCall;
+    struct FlattenedRestore
+    {
+        std::unordered_set<std::string>& set;
+        std::vector<std::string>& names;
+        ~FlattenedRestore() { for (const auto& n : names) set.erase(n); }
+    } flattenedRestore{flattenedUniformStructParams_, flattenedForCall};
     const auto& savedNames = savedScope.names;
     const auto& savedArrays = savedScope.arrays;
     auto savedSwizzles = identityPrefixSwizzleBase_;
@@ -5738,6 +5774,10 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         return false;
     };
 
+    // Decided before any parameter is bound: binding marks names flattened.
+    std::vector<bool> flattenedArgument(callee->parameters.size(), false);
+    for (size_t i = 0; i < callee->parameters.size(); ++i)
+        flattenedArgument[i] = flattenedStructArgument(expr, i);
     for (size_t i = 0; i < callee->parameters.size(); ++i)
     {
         ParamDecl* param = callee->parameters[i].get();
@@ -5762,6 +5802,26 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         // global, and its write to the global lands in the stash and
         // comes back out below (inline-global-stash - this used to be REFUSED).
         stashShadowedGlobal(param->name);
+        // `helper(IN)` with IN a flattened uniform struct parameter: the
+        // parameter is IN's members under the parameter's name (libretro
+        // passes its `uniform input IN` to helpers this way; it was
+        // refused).  It stays flattened inside the helper, so passing it on
+        // works the same way.
+        if (flattenedArgument[i])
+        {
+            const std::string from =
+                static_cast<IdentifierExpr*>(expr->arguments[i].get())->name + ".";
+            const std::string to = param->name + ".";
+            for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+                if (it->first.compare(0, to.size(), to) == 0) it = nameToValue_.erase(it);
+                else ++it;
+            for (const auto& entry : savedNames)
+                if (entry.first.compare(0, from.size(), from) == 0)
+                    nameToValue_[to + entry.first.substr(from.size())] = entry.second;
+            if (flattenedUniformStructParams_.insert(param->name).second)
+                flattenedForCall.push_back(param->name);
+            continue;
+        }
         if (!param->name.empty())
             nameToValue_[param->name] = boundValue;
 
@@ -7360,9 +7420,13 @@ bool IRBuilder::buildLocalStructInitializer(const std::string& destination, Type
         // Keep it here so a valid fixed/short constructor in an unreachable
         // helper cannot reject an otherwise supported entry point. Check the
         // AST kinds before IRTypeInfo erases fixed/narrow-integer semantics.
+        // A fixed member converts as it does in a declaration or an
+        // assignment: Float32 in IR, a constant quantized to fixed below
+        // (the libretro handheld shaders build `fixed2` members this way).
         const auto supportedKind = [](const TypeNode* type) {
             return type && (type->baseType == BaseType::Float ||
                             type->baseType == BaseType::Half ||
+                            type->baseType == BaseType::Fixed ||
                             type->baseType == BaseType::Int);
         };
         if (!supportedKind(target) || !supportedKind(value->resolvedType.get()))
@@ -7391,6 +7455,7 @@ bool IRBuilder::buildLocalStructInitializer(const std::string& destination, Type
             }
             v = emitInstruction(op, to, {v}, value->loc);
         }
+        v = foldFixedConstantConversion(target, v);
         leaves.emplace_back(key, v);
         return true;
     };
@@ -7453,7 +7518,9 @@ void IRBuilder::emitEntryStructOutputs(ExprNode* target)
         }
         if (!field || field->semantic.isEmpty()) return;
         const IRTypeInfo irType = getIRType(leafType);
-        if (!leafType || leafType->baseType != BaseType::Float || irType.isArray() || irType.isMatrix())
+        // A fixed leaf is Float32 in IR, as in any other fixed assignment.
+        if (!leafType || (leafType->baseType != BaseType::Float && leafType->baseType != BaseType::Fixed) ||
+            irType.isArray() || irType.isMatrix())
         {
             error(target->loc, "entry struct output assignment requires float scalar/vector leaves "
                                "(struct-constructor-assignment)");
@@ -7480,6 +7547,9 @@ void IRBuilder::emitEntryStructOutputs(ExprNode* target)
         store->inferredSemantic = field->semantic.inferred;
         store->semanticIndex = field->semantic.index;
         store->fieldName = fieldPath;
+        // The record is the out parameter's member (`o.a`, at the
+        // parameter's ordinal), not a return field (measured).
+        store->structParamName = identifier->name;
         store->loc = target->loc;
         currentBlock_->addInstruction(std::move(store));
     };

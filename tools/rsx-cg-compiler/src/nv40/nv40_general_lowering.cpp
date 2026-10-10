@@ -5651,13 +5651,52 @@ private:
     void lowerLength(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
-        if (profile_ != GeneralProfile::Fragment) {
-            program_.diagnostics.push_back(
-                "nv40-general: VP length lowering deferred");
-            return;
-        }
 
         const int width = valueWidthOf(inst.operands[0]);
+        // Vertex: the squared length the way the vertex normalize reduces it
+        // (DP3/DP4, or MUL+ADD for two lanes: the vertex unit has no DP2),
+        // then sqrt as RCP(RSQ), as the vertex sqrt is lowered.  It was
+        // left undefined, and the program refused on the missing operand.
+        if (profile_ != GeneralProfile::Fragment && width > 1) {
+            VSrc src = resolve(inst.operands[0]);
+            const int lenSq = newVReg();
+            if (width == 2) {
+                emitVertexDot2(src, src, lenSq);
+            } else {
+                if (width != 4) applyDp3Swizzle(src);
+                VInstr dp;
+                dp.op = width == 4 ? VOp::Dp4 : VOp::Dp3;
+                dp.dst.index = lenSq;
+                dp.dst.writemask = 0x1;
+                dp.srcs[0] = src;
+                dp.srcs[1] = src;
+                program_.instrs.push_back(dp);
+            }
+            const int rsqTemp = newVReg();
+            VInstr rsq;
+            rsq.op = VOp::Rsq;
+            rsq.dst.index = rsqTemp;
+            rsq.dst.writemask = 0x1;
+            rsq.srcs[0] = tempSrc(lenSq);
+            rsq.srcs[0].swizzle = {0, 0, 0, 0};
+            program_.instrs.push_back(rsq);
+            const int root = newVReg();
+            VInstr rcp;
+            rcp.op = VOp::Rcp;
+            rcp.dst.index = root;
+            rcp.dst.writemask = 0x1;
+            rcp.srcs[0] = tempSrc(rsqTemp);
+            rcp.srcs[0].swizzle = {0, 0, 0, 0};
+            program_.instrs.push_back(rcp);
+            VInstr broadcast;
+            broadcast.op = VOp::Mov;
+            broadcast.dst.index = define(inst.result);
+            broadcast.dst.writemask = componentMask(inst.resultType);
+            broadcast.srcs[0] = tempSrc(root);
+            broadcast.srcs[0].swizzle = {0, 0, 0, 0};
+            program_.instrs.push_back(broadcast);
+            return;
+        }
         if (width == 1) {
             VInstr absValue;
             absValue.op = VOp::Mov;
@@ -6515,16 +6554,150 @@ private:
     void lowerAsinAcos(const IRInstruction& inst, bool acos)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
-        if (profile_ != GeneralProfile::Fragment) {
-            program_.diagnostics.push_back(
-                acos ? "nv40-general: VP acos lowering deferred"
-                     : "nv40-general: VP asin lowering deferred");
-            program_.loweringFailed = true;
-            return;
-        }
 
         static constexpr uint32_t kPiOver2Bits = 0x3fc90fdbu;
         static constexpr uint32_t kPiBits = 0x40490fdbu;
+
+        // The vertex unit has no DIV/DIVSQR and no output scale: the same
+        // fitted polynomial, sqrt(1-|x|) as RCP(RSQ) per lane the way the
+        // vertex sqrt is lowered (exact at 1-|x| = 0: RCP(+inf) = 0), and the
+        // sign doubled with an ADD.  Numerically the fragment sequence;
+        // not byte-compared with the reference's vertex code.
+        if (profile_ != GeneralProfile::Fragment) {
+            const int mask = componentMask(inst.resultType);
+            const int result = define(inst.result);
+            const int xReg = newVReg();
+            VInstr load;
+            load.op = VOp::Mov;
+            load.dst.index = xReg;
+            load.dst.writemask = mask;
+            load.srcs[0] = resolve(inst.operands[0]);
+            program_.instrs.push_back(load);
+
+            static constexpr uint32_t kCoeffBits[] = {
+                0xbc996e30u, 0x3d981627u, 0xbe593484u, 0x3fc90da4u,
+            };
+            VSrc absX = tempSrc(xReg);
+            absX.abs = true;
+            const int delta = newVReg();
+            VInstr sub;
+            sub.op = VOp::Add;
+            sub.dst.index = delta;
+            sub.dst.writemask = mask;
+            sub.srcs[0] = absX;
+            sub.srcs[0].neg = true;
+            sub.srcs[1] = floatLit(1.0f);
+            program_.instrs.push_back(sub);
+
+            const int poly = newVReg();
+            VInstr seed;
+            seed.op = VOp::Mad;
+            seed.dst.index = poly;
+            seed.dst.writemask = mask;
+            seed.srcs[0] = absX;
+            seed.srcs[1] = floatLit(floatFromBits(kCoeffBits[0]));
+            seed.srcs[2] = floatLit(floatFromBits(kCoeffBits[1]));
+            program_.instrs.push_back(seed);
+            for (size_t i = 2; i < std::size(kCoeffBits); ++i) {
+                VInstr mad;
+                mad.op = VOp::Mad;
+                mad.dst.index = poly;
+                mad.dst.writemask = mask;
+                mad.srcs[0] = absX;
+                mad.srcs[1] = tempSrc(poly);
+                mad.srcs[2] = floatLit(floatFromBits(kCoeffBits[i]));
+                program_.instrs.push_back(mad);
+            }
+
+            const int rsqTemp = newVReg();
+            const int root = newVReg();
+            for (int lane = 0; lane < 4; ++lane) {
+                if (!(mask & (1 << lane))) continue;
+                const uint8_t l = static_cast<uint8_t>(lane);
+                VInstr rsq;
+                rsq.op = VOp::Rsq;
+                rsq.dst.index = rsqTemp;
+                rsq.dst.writemask = 1 << lane;
+                rsq.srcs[0] = tempSrc(delta);
+                rsq.srcs[0].swizzle = {l, l, l, l};
+                program_.instrs.push_back(rsq);
+                VInstr rcp;
+                rcp.op = VOp::Rcp;
+                rcp.dst.index = root;
+                rcp.dst.writemask = 1 << lane;
+                rcp.srcs[0] = tempSrc(rsqTemp);
+                rcp.srcs[0].swizzle = {l, l, l, l};
+                program_.instrs.push_back(rcp);
+            }
+            const int base = newVReg();
+            VInstr mul;
+            mul.op = VOp::Mul;
+            mul.dst.index = base;
+            mul.dst.writemask = mask;
+            mul.srcs[0] = tempSrc(poly);
+            mul.srcs[1] = tempSrc(root);
+            program_.instrs.push_back(mul);
+
+            const int sign = newVReg();
+            VInstr slt;
+            slt.op = VOp::Slt;
+            slt.dst.index = sign;
+            slt.dst.writemask = mask;
+            slt.srcs[0] = tempSrc(xReg);
+            slt.srcs[1] = floatLit(0.0f);
+            program_.instrs.push_back(slt);
+            const int doubledSign = newVReg();
+            VInstr twice;
+            twice.op = VOp::Add;
+            twice.dst.index = doubledSign;
+            twice.dst.writemask = mask;
+            twice.srcs[0] = tempSrc(sign);
+            twice.srcs[1] = tempSrc(sign);
+            program_.instrs.push_back(twice);
+
+            if (acos) {
+                // acos = (base - 2s*base) + s*pi
+                const int signedBase = newVReg();
+                VInstr repair;
+                repair.op = VOp::Mad;
+                repair.dst.index = signedBase;
+                repair.dst.writemask = mask;
+                repair.srcs[0] = tempSrc(doubledSign);
+                repair.srcs[0].neg = true;
+                repair.srcs[1] = tempSrc(base);
+                repair.srcs[2] = tempSrc(base);
+                program_.instrs.push_back(repair);
+                VInstr out;
+                out.op = VOp::Mad;
+                out.dst.index = result;
+                out.dst.writemask = mask;
+                out.srcs[0] = tempSrc(sign);
+                out.srcs[1] = floatLit(floatFromBits(kPiBits));
+                out.srcs[2] = tempSrc(signedBase);
+                program_.instrs.push_back(out);
+                return;
+            }
+            // asin = p - 2s*p with p = pi/2 - base
+            const int positive = newVReg();
+            VInstr pos;
+            pos.op = VOp::Add;
+            pos.dst.index = positive;
+            pos.dst.writemask = mask;
+            pos.srcs[0] = tempSrc(base);
+            pos.srcs[0].neg = true;
+            pos.srcs[1] = floatLit(floatFromBits(kPiOver2Bits));
+            program_.instrs.push_back(pos);
+            VInstr out;
+            out.op = VOp::Mad;
+            out.dst.index = result;
+            out.dst.writemask = mask;
+            out.srcs[0] = tempSrc(doubledSign);
+            out.srcs[0].neg = true;
+            out.srcs[1] = tempSrc(positive);
+            out.srcs[2] = tempSrc(positive);
+            program_.instrs.push_back(out);
+            return;
+        }
 
         const int mask = componentMask(inst.resultType);
         const int result = define(inst.result);

@@ -943,6 +943,31 @@ ContainerResult emitFragmentContainerImpl(
                 members.erase(hit);
                 continue;
             }
+            // A member with a semantic the program never writes is
+            // declared too, on its resource, isReferenced 0 (measured:
+            // an unwritten `float4 unused : COLOR1` in a nested struct).
+            for (const auto& declared : entry->returnOutputs)
+            {
+                if (declared.name != path) continue;
+                // A fragment program declares only its own outputs: an
+                // unwritten TEXCOORD member is not one (measured).
+                {
+                    const std::string semUpper = toUpper(declared.semanticName);
+                    if (semUpper != "COLOR" && semUpper != "COL" &&
+                        semUpper != "DEPTH" && semUpper != "DEPR") continue;
+                }
+                ParamDesc d;
+                d.name      = name;
+                d.semantic  = declared.rawSemanticName.empty() ? declared.semanticName
+                                                               : declared.rawSemanticName;
+                d.type      = cgTypeForIRType(declared.type);
+                d.var       = kCgVarying;
+                d.direction = kCgOut;
+                d.paramno   = kInvalidIndex;
+                d.res       = fpResourceFor(toUpper(declared.semanticName), declared.semanticIndex);
+                d.isReferenced = 0;
+                params.push_back(d);
+            }
             for (const auto& unwritten : entry->unwrittenImplicitOutputs)
             {
                 if (unwritten.name != path) continue;

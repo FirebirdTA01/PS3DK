@@ -578,6 +578,17 @@ VpContainerResult emitVertexContainerImpl(
                    o.name.compare(0, prefix.size(), prefix) == 0; });
     };
 
+    // A struct member stored through an OUT struct parameter is that
+    // parameter's record: `o.a` at the parameter's ordinal (measured), where
+    // a returned struct's member is `<entry>.a` with no ordinal.
+    const auto nameOutputMember = [&](const IRInstruction& in, std::string& name, uint32_t& paramno) {
+        if (in.structParamName.empty()) return;
+        name = in.structParamName + "." + in.fieldName;
+        for (size_t k = 0; k < entry->parameters.size(); ++k)
+            if (entry->parameters[k].name == in.structParamName)
+                paramno = irParamOrdinal(entry->parameters[k], k);
+    };
+
     // ----- Struct-flattened path: synthesize params from
     // LdAttr / StOut walk.  Per the reference compiler:
     //   - all input struct fields share the same paramno = 0 (they
@@ -898,6 +909,7 @@ VpContainerResult emitVertexContainerImpl(
                     d.var       = kCgVarying;
                     d.direction = kCgOut;
                     d.paramno   = kInvalidIndex;   // synthetic — no user param number
+                    nameOutputMember(in, d.name, d.paramno);
                     d.res       = vpOutputResource(toUpper(in.semanticName),
                                                    in.semanticIndex,
                                                    "TEXCOORD");
@@ -1139,6 +1151,7 @@ VpContainerResult emitVertexContainerImpl(
             d.res       = vpOutputResource(toUpper(in.semanticName),
                                            in.semanticIndex,
                                            in.rawSemanticName);
+            nameOutputMember(in, d.name, d.paramno);
             params.push_back(d);
         }
     }
@@ -1172,6 +1185,24 @@ VpContainerResult emitVertexContainerImpl(
                 params.push_back(*hit);
                 members.erase(hit);
                 continue;
+            }
+            // A member with a semantic the program never writes is
+            // declared too, on its resource, isReferenced 0 (measured:
+            // an unwritten `float4 unused : COLOR1` in a nested struct).
+            for (const auto& declared : entry->returnOutputs)
+            {
+                if (declared.name != path) continue;
+                ParamDesc d;
+                d.name      = name;
+                d.semantic  = declared.rawSemanticName.empty() ? declared.semanticName
+                                                               : declared.rawSemanticName;
+                d.type      = cgTypeForIRType(declared.type);
+                d.var       = kCgVarying;
+                d.direction = kCgOut;
+                d.paramno   = kInvalidIndex;
+                d.res       = vpOutputResource(toUpper(declared.semanticName), declared.semanticIndex, declared.rawSemanticName);
+                d.isReferenced = 0;
+                params.push_back(d);
             }
             for (const auto& unwritten : entry->unwrittenImplicitOutputs)
             {
@@ -1317,6 +1348,21 @@ VpContainerResult emitVertexContainerImpl(
                                 (static_cast<size_t>(element) * rows + row) * cols, cols);
                 }
         }
+    }
+
+    // An out struct parameter's member records sit at the parameter's place
+    // in source order, before later parameters and the file-scope uniforms
+    // (measured: op, o.a, o.b, ts for `out float4 op, out S o, uniform ts`).
+    for (size_t k = 0; k < params.size(); ++k)
+    {
+        const ParamDesc d = params[k];
+        if (d.direction != kCgOut || d.paramno == kInvalidIndex ||
+            d.name.find('.') == std::string::npos) continue;
+        size_t to = 0;
+        while (to < k && (params[to].paramno <= d.paramno)) ++to;
+        if (to == k) continue;
+        params.erase(params.begin() + static_cast<std::ptrdiff_t>(k));
+        params.insert(params.begin() + static_cast<std::ptrdiff_t>(to), d);
     }
 
     // ----- Append literal-pool params (one per c[N] reg the back-end

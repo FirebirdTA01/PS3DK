@@ -116,6 +116,9 @@ private:
     // (uniform-struct-entry-parameter): the name has no whole-struct value,
     // only `name.member...` bindings, so a whole-struct copy copies those.
     std::unordered_set<std::string> flattenedUniformStructParams_;
+    // Argument i of the call is a flattened uniform struct parameter passed
+    // whole to a struct-typed in parameter: bound member by member.
+    bool flattenedStructArgument(const CallExpr* call, size_t i);
     // The expression an expression STATEMENT is evaluating: a whole-struct
     // copy of a flattened parameter has no value, so it is accepted only
     // there (or as a link of that statement's assignment chain).
