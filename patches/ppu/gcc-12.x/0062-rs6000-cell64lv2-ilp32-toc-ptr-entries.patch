@@ -1,0 +1,60 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: hybrid ILP32 TOC entries for addresses stay 4 bytes at Pmode
+
+With Pmode DImode (0059), a symbol address needed in Pmode (the base of a
+load or store of a global) fell through to force_const_mem (Pmode, ...):
+an 8-byte .quad TOC entry read with ld.  Only the ptr_mode path (taking
+the address as a pointer value) used the 4-byte .long entry and lwz.  Every
+-mcmodel=small program's TOC doubled, two entries were kept per symbol
+(one of each size), and tests/sdk/large-toc-test.sh's ILP32 control (two
+objects, under 64 KiB of TOC before) needed several TOC groups and was
+refused by ld.
+
+A Pmode move of a symbolic address that comes from a TOC entry now loads
+it in ptr_mode (the same 4-byte entry, lwz) and zero-extends it; pointers
+are zero-extended in this ABI, so lwz alone forms the 64-bit address and
+combine folds the extension into the load.  Symbols reached TOC-relative
+(addis/addi) are formed directly as before: the ptr_mode move sends them
+back at Pmode, so they are excluded to keep the two moves from recursing.
+TLS references and integer constants are unchanged.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -11014,6 +11014,37 @@ rs6000_emit_move (rtx dest, rtx source, machine_mode mode)
+ 	    }
+ #endif
+ 
++	  /* Hybrid ILP32 (Pmode DImode, ptr_mode SImode): an address that
++	     comes from a TOC entry lives in a pointer-sized (4-byte) entry.
++	     Load it in ptr_mode (lwz from the 4-byte slot, the same entry the
++	     ptr_mode move above uses) and zero-extend, rather than giving it
++	     an 8-byte entry read with ld: that doubled the TOC of every
++	     -mcmodel=small program and kept two entries per symbol.  */
++	  rtx toc_base = operands[1];
++	  if (GET_CODE (toc_base) == CONST
++	      && GET_CODE (XEXP (toc_base, 0)) == PLUS)
++	    toc_base = XEXP (XEXP (toc_base, 0), 0);
++	  if (mode == Pmode && ptr_mode != Pmode && TARGET_TOC
++	      && can_create_pseudo_p ()
++	      && (SYMBOL_REF_P (operands[1])
++		  || GET_CODE (operands[1]) == LABEL_REF
++		  || (GET_CODE (operands[1]) == CONST
++		      && !CONST_INT_P (XEXP (operands[1], 0))))
++	      && !tls_referenced_p (operands[1])
++	      /* A TOC-relative base is formed directly (the ptr_mode move
++		 would send it back here at Pmode).  */
++	      && !(SYMBOL_REF_P (toc_base)
++		   && use_toc_relative_ref (toc_base, Pmode)))
++	    {
++	      rtx narrow = gen_reg_rtx (ptr_mode);
++	      rs6000_emit_move (narrow,
++				convert_memory_address (ptr_mode, operands[1]),
++				ptr_mode);
++	      emit_insn (gen_rtx_SET (operands[0],
++				      gen_rtx_ZERO_EXTEND (Pmode, narrow)));
++	      return;
++	    }
++
+ 	  /* If we are to limit the number of things we put in the TOC and
+ 	     this is a symbol plus a constant we can add in one insn,
+ 	     just put the symbol in the TOC and add the constant.  */
