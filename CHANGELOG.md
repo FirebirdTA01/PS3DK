@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.22.0] — 2026-10-09
+
 ### Added
 
 - **The same host tools on Linux and Windows.**  The Linux tools tarball now
