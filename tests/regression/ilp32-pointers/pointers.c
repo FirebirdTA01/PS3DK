@@ -142,3 +142,22 @@ import_via_pointer (char *buf)
   import_fn (buf, 0x5a, 8);
   return toc_reader () + buf[7];
 }
+
+/* A negative int read from a table and added into an array index: the
+   table entry is loaded zero-extended (lwz), so before the address-model
+   change the 64-bit sum carried into bit 32.  Same shape as a game's
+   neighbour-cell flood fill.  */
+static const int sides[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+
+int
+flood_mark (int i, int j, int first)
+{
+  unsigned char seen[15][15] = { { 0 } };
+  seen[j + sides[first][1]][i + sides[first][0]] = 1;
+  int n = 0, at = -1;
+  for (int y = 0; y < 15; y++)
+    for (int x = 0; x < 15; x++)
+      if (seen[y][x])
+        n++, at = y * 15 + x;
+  return n == 1 ? at : -1;
+}

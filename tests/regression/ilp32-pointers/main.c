@@ -25,6 +25,8 @@ char sv_last (struct sv s);
 unsigned long long ptr_to_u64 (const void *p);
 int dense_switch (int k);
 int import_via_pointer (char *buf);
+int flood_mark (int i, int j, int first);
+int class_measure (void);
 
 static int failures;
 
@@ -91,6 +93,13 @@ main (void)
   char buf[8] = { 0 };
   check ("PRX import through a function pointer", import_via_pointer (buf),
 	 1002 + 102 + 0x5a);
+
+  /* Negative table offsets into an index: each marks one neighbour.  */
+  check ("negative table offset x-1", flood_mark (13, 5, 1), 5 * 15 + 12);
+  check ("negative table offset y-1", flood_mark (13, 5, 3), 4 * 15 + 13);
+  check ("positive table offset x+1", flood_mark (13, 5, 0), 5 * 15 + 14);
+  /* A by-value std::string_view walked character by character.  */
+  check ("string_view by value", class_measure (), 18);
 
   printf ("POINTERS %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
   return failures ? 1 : 0;
