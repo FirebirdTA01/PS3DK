@@ -13,12 +13,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/timer.h>
+#include <sys/systime.h>
 #include <sys/lv2_types.h>
 #include <ppu-asm.h>
 #include <rsx/gcm_sys.h>
 #include <cell/gcm/ps3tc_fifo_wrap.h>
 
 #include "ps3tc_fifo_wrap_protocol.h"
+
+/* Wrap statistics (ps3tc_fifo_wrap_stats).  The callback runs on the thread
+ * that emits into the context, so plain counters suffice; ticks are
+ * timebase ticks, converted when read. */
+static uint64_t wrap_count, wrap_ticks, wrap_max_ticks;
 
 static void ps3tc_fifo_sync(void *arg)
 {
@@ -73,11 +79,35 @@ int32_t ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count)
     const ps3tc_fifo_port port = {
         &ctrl->put, &ctrl->get, ps3tc_fifo_sync, ps3tc_fifo_pause, (void *)ctrl
     };
+    const uint64_t t0 = __builtin_ppc_get_timebase();
     ps3tc_fifo_wrap_protocol((volatile uint32_t *)ctx->current,
                              tail_off, begin_off, &port);
+    const uint64_t ticks = __builtin_ppc_get_timebase() - t0;
+    wrap_count++;
+    wrap_ticks += ticks;
+    if (ticks > wrap_max_ticks)
+        wrap_max_ticks = ticks;
 
     ctx->current = ctx->begin;
     return 0;
+}
+
+void ps3tc_fifo_wrap_stats(uint64_t *wraps, uint64_t *stall_us, uint64_t *max_stall_us)
+{
+    const uint64_t hz = sysGetTimebaseFrequency();
+    if (wraps)
+        *wraps = wrap_count;
+    if (stall_us)
+        *stall_us = hz ? wrap_ticks * 1000000ull / hz : 0;
+    if (max_stall_us)
+        *max_stall_us = hz ? wrap_max_ticks * 1000000ull / hz : 0;
+}
+
+void ps3tc_fifo_wrap_stats_reset(void)
+{
+    wrap_count = 0;
+    wrap_ticks = 0;
+    wrap_max_ticks = 0;
 }
 
 void ps3tc_fifo_wrap_install(gcmContextData *ctx)

@@ -28,6 +28,15 @@ int32_t  ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count);
  * cellGcmInit / rsxInit has populated gGcmContext. */
 void     ps3tc_fifo_wrap_install(gcmContextData *ctx);
 
+/* Wrap statistics since start (or the last reset): the number of wraps,
+ * the total time the PPU spent inside the callback waiting for the RSX to
+ * consume the lap, and the longest single wait, in microseconds.  A large
+ * stall total means the PPU is waiting for the GPU (GPU-bound), not doing
+ * its own work.  Any pointer may be NULL. */
+void     ps3tc_fifo_wrap_stats(uint64_t *wraps, uint64_t *stall_us,
+                               uint64_t *max_stall_us);
+void     ps3tc_fifo_wrap_stats_reset(void);
+
 /* Internal cellGcmInit step, before installing the callback/returning success.
  * Validates the requested byte extent and its IO mapping,
  * then expands end only. Returns -1 without mutation on failed validation.
