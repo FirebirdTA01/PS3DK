@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.22.4] — 2026-10-10
+
 ### Fixed
 
 - **Vertex programs with literals draw.**  `cellGcmSetVertexProgram` now
@@ -26,7 +28,20 @@ The version stamped into builds is generated from the most recent
   constant register held and drew no geometry: `hello-ppu-cellgcm-textured-cube`
   showed only its background on a PS3, and `-triangle` and `-alpha-mask`
   drew nothing in RPCS3.  `cellGcmCgUploadInternalConsts` is no longer
-  needed; calling it is harmless.
+  needed after `cellGcmSetVertexProgram`, and PSGL no longer calls it
+  there; it still uploads the literals for code that binds another way.
+
+### Known issues
+
+- Intermittent stalls at a FIFO wrap: in two RPCS3 runs during release
+  testing, a large GCM program stopped with the RSX's read position
+  frozen and the PPU waiting in the wrap callback. Ten later runs of the
+  release build did not stall. The cause is not known yet; a dependency
+  between the wrap callback's wait for the RSX to reach the end of the
+  command buffer and RSX work still outstanding is being investigated.
+- Samples that pass a 64 KB command buffer to `cellGcmInit`
+  (`hello-ppu-cellgcm-triangle`, `-alpha-mask` and others) show a black
+  screen on a PS3; they run in RPCS3.
 
 ## [v0.22.0] — 2026-10-09
 
