@@ -63,13 +63,32 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
             shutil.copy2(source, repo / 'scripts' / script)
             (repo / 'scripts' / script).chmod(0o755)
     shutil.copytree(ROOT / 'tools/sfo-pkg', repo / 'tools/sfo-pkg')
-    # Keep real workspace binary discovery, with one inert fixture binary.
+    # The release staging step installs the scanner and checks the tarball
+    # against the real artifact manifest.
+    shutil.copy2(ROOT / 'scripts/ppu-packed-arg-scan.py', repo / 'scripts/ppu-packed-arg-scan.py')
+    (repo / 'cmake').mkdir()
+    shutil.copy2(ROOT / 'cmake/ps3-required-artifacts.txt', repo / 'cmake/ps3-required-artifacts.txt')
+    # The PSL1GHT host tools are built from a PSL1GHT clone in the real step;
+    # here an inert stand-in writes the same files.
+    (repo / 'scripts/build-psl1ght-host-tools-linux.sh').write_text(
+        '#!/usr/bin/env bash\nset -eu\nout="$1"\nmkdir -p "$out"\n'
+        'for t in bin2s cgcomp fself make_self make_self_npdrm make_sprx package_finalize; do\n'
+        '  cp /bin/true "$out/$t"\ndone\n'
+        'for f in fself.py Struct.py sfo.xml ICON0.PNG; do : > "$out/$f"; done\n')
+    (repo / 'scripts/build-psl1ght-host-tools-linux.sh').chmod(0o755)
+    # Keep real workspace binary discovery: the fixture workspace declares the
+    # real workspace's binary names, each an inert file.
+    rust_bins = subprocess.run(['bash', str(ROOT / 'scripts/list-rust-bins.sh')], capture_output=True,
+                               text=True, check=True).stdout.split()
+    assert rust_bins, 'list-rust-bins.sh found no binaries in the real workspace'
     (repo / 'tools/Cargo.toml').write_text('[workspace]\nmembers = ["fixture"]\n'
                                        '[workspace.package]\nrust-version = "1.88"\n')
     (repo / 'tools/fixture').mkdir()
-    (repo / 'tools/fixture/Cargo.toml').write_text('[[bin]]\nname = "fixture-tool"\n')
-    for name in ('tools/target/release/fixture-tool', 'tools/sprx-linker/sprxlinker',
-                 'tools/rsx-cg-compiler/build/rsx-cg-compiler', 'tools/rsx-cg-compiler/build/cgnv2elf'):
+    (repo / 'tools/fixture/Cargo.toml').write_text(
+        ''.join('[[bin]]\nname = "%s"\n' % b for b in rust_bins))
+    for name in ['tools/target/release/' + b for b in rust_bins] + [
+                 'tools/sprx-linker/sprxlinker',
+                 'tools/rsx-cg-compiler/build/rsx-cg-compiler', 'tools/rsx-cg-compiler/build/cgnv2elf']:
         destination = repo / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2('/bin/true', destination)
