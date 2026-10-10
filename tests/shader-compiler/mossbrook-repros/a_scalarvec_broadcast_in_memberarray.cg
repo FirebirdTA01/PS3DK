@@ -1,0 +1,46 @@
+// Mossbrook shader (repro a): scalar->vector broadcast into a struct member-array
+// element under a dynamic loop index, struct returned by value.
+//
+// Stands for:  standard_f:169, standardHDR_f:170, standardEnvmap_f:154,
+//              terrain_f:160, terrainSimple_f:160, terrainHDR_f:162
+//              (all 6 failing PBR/terrain fragment shaders)
+//
+// Fires:  "scalar-vector broadcast requires numeric element types"
+//         (also fires "array-bearing struct copy" — the two refusals share
+//          this code path in the real shaders; see repro b for the
+//          member-array-storage half in isolation)
+struct Plan
+{
+    float2   uv[3];
+    float2x2 rot[3];
+    float2   mirror[3];
+    float    weight[3];
+};
+void cellTransform(float2 cell, float flags, out float2x2 rot, out float2 mirror, out float2 offset)
+{
+    rot = float2x2(1.0, 0.0, 0.0, 1.0);
+    mirror = float2(1.0, 1.0);
+    if (flags > 0.5) mirror.x = -1.0;
+    offset = float2(0.0, 0.0);
+}
+Plan computePlan(float2 baseUV, float flagsF)
+{
+    Plan p;
+    p.uv[0] = baseUV; p.rot[0] = float2x2(1.0, 0.0, 0.0, 1.0); p.mirror[0] = float2(1.0, 1.0); p.weight[0] = 1.0;
+    float2 cellArr[3];
+    cellArr[0] = baseUV; cellArr[1] = baseUV + float2(1.0, 0.0); cellArr[2] = baseUV + float2(1.0, 1.0);
+    for (int i = 0; i < 3; i++)
+    {
+        float2x2 rot; float2 mir; float2 off;
+        cellTransform(cellArr[i], flagsF, rot, mir, off);
+        p.rot[i] = rot;
+        p.mirror[i] = mir;
+        p.uv[i] = mul(rot, (baseUV * mir)) + off;   // <-- (a): scalar-broadcast into member-array[i]
+    }
+    return p;                                        // <-- struct returned by value
+}
+void main(float2 b, float f, out float2 o : COLOR)
+{
+    Plan q = computePlan(b, f);
+    o = q.mirror[0];
+}

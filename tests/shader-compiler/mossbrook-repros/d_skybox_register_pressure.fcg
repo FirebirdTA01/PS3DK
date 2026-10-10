@@ -1,0 +1,206 @@
+// SKYBOX_SHADER fragment program (PS3 / RSX).
+//
+// Port of shaders/PSVitaCG/skyBox_f.cg / OpenGL/skyBox.frag (multi-layer
+// equirectangular sky) adapted to the fp40-class RSX profile:
+//
+//  * No integer bitwise ops: cgcomp's fp40 profile rejects the `&` flag
+//    extraction the GXM compiler accepts. The 32-bit material flag mask is
+//    split CPU-side into two float uniforms — u_materialFlagsLo (bits 0-15)
+//    and u_materialFlagsHi (bits 16-31). Each half stays below 2^16 so it is
+//    exactly representable in fp32, and bits are tested with exact float
+//    math: fmod(floor(flags / bit), 2.0).
+//  * The 5-layer loop is fully unrolled (RSX samplers must be statically
+//    referenced; no dynamic sampler selection).
+//  * Seam fix: UVs are computed per-fragment with atan2, which wraps from ~1
+//    to ~0 at one longitude. Mip LOD comes from screen-space derivatives per
+//    pixel quad, so quads straddling the wrap see du ~= 1.0, select the
+//    smallest mip, and draw a thin pole-to-pole line. U is periodic mod 1:
+//    fold the derivatives the short way around and sample with explicit
+//    gradients (4-arg tex2D). Requires REPEAT addressing on U.
+//
+// Flag bit assignments (matching the GL/Vita shaders):
+//   Lo: 1=blendMap, 2=defaultDiffuse, 128=defaultEmissive,
+//       256=rDiffuse, 8192=rEmissive, 16384=gDiffuse
+//   Hi: 8=gEmissive, 16=bDiffuse, 512=bEmissive, 1024=aDiffuse, 32768=aEmissive
+
+// 1.0 when the (power-of-two) bit is set in the integer-valued float mask
+float hasBit(float flags, float bit)
+{
+    return fmod(floor(flags / bit), 2.0);
+}
+
+// Rotate a direction around Y then X (radians), matching the GL shader
+float3 applyRotation(float3 pos, float2 rotation)
+{
+    float sy = sin(rotation.y), cy = cos(rotation.y);
+    float sx = sin(rotation.x), cx = cos(rotation.x);
+    float3x3 rotY = float3x3(
+        cy, 0.0, sy,
+        0.0, 1.0, 0.0,
+        -sy, 0.0, cy);
+    float3x3 rotX = float3x3(
+        1.0, 0.0, 0.0,
+        0.0, cx, -sx,
+        0.0, sx, cx);
+    return normalize(mul(rotX, mul(rotY, pos)));
+}
+
+// Equirectangular UV from a 3D direction
+float2 sphericalUV(float3 pos)
+{
+    float3 p = normalize(pos);
+    float u = 0.5 + atan2(p.z, p.x) / (2.0 * 3.14159265);
+    float v = 0.5 - asin(clamp(p.y, -1.0, 1.0)) / 3.14159265;
+    // No textureSize() in Cg: clamp V just inside [0,1] so bilinear filtering
+    // can't wrap vertically at the poles (engine sets T addressing to clamp)
+    return float2(u, clamp(v, 0.002, 0.998));
+}
+
+// Sample one sky layer and blend it over the accumulators.
+// blendWeight: layer opacity for the default layer, blend-map channel for R/G/B/A.
+void skyLayer(sampler2D diffuseMap, sampler2D emissiveMap,
+              float hasDiffuse, float hasEmissive,
+              float3 emissiveOverride, float layerOpacity, float blendWeight,
+              float3 normPos, float2 rotation, float2 uvOffset,
+              inout float4 diffuseColor, inout float4 emissiveColor)
+{
+    float3 refPos = normPos;
+    if (dot(rotation, rotation) > 0.000001)
+    {
+        refPos = applyRotation(normPos, rotation);
+    }
+    float2 uv = sphericalUV(refPos) + uvOffset;
+
+    // Seam-safe gradients: U is periodic mod 1, so fold the screen-space
+    // derivatives the short way around. Without this, pixel quads straddling
+    // the atan2 wrap see du ~= 1.0, select the smallest mip, and draw a thin
+    // pole-to-pole line (the long-standing skysphere seam bug fixed on GL/Vita).
+    // Harmless while PS3_loader uploads textures with mipmap = 1; required the
+    // moment PS3 textures gain mip chains.
+    float2 dx = ddx(uv);
+    float2 dy = ddy(uv);
+    dx.x -= floor(dx.x + 0.5);
+    dy.x -= floor(dy.x + 0.5);
+
+    if (hasDiffuse > 0.5)
+    {
+        float3 c = tex2D(diffuseMap, uv, dx, dy).rgb;
+        diffuseColor = lerp(diffuseColor, float4(c, layerOpacity), blendWeight);
+    }
+    if (hasEmissive > 0.5)
+    {
+        float4 e = tex2D(emissiveMap, uv, dx, dy);
+        if (dot(emissiveOverride, emissiveOverride) > 0.0)
+        {
+            emissiveColor = lerp(emissiveColor, float4(emissiveOverride * e.r, layerOpacity), blendWeight);
+        }
+        else
+        {
+            emissiveColor = lerp(emissiveColor, e * layerOpacity, blendWeight);
+        }
+    }
+}
+
+void main(
+    float2 pass_texCoord : TEXCOORD0,
+    float3 pass_vPosition : TEXCOORD1,
+
+    // Material flag mask split into two exact 16-bit float halves (see header)
+    uniform float u_materialFlagsLo,
+    uniform float u_materialFlagsHi,
+
+    // Per-layer UV rotation (radians) and scroll offset
+    uniform float2 u_layer0Rotation,
+    uniform float2 u_layer1Rotation,
+    uniform float2 u_layer2Rotation,
+    uniform float2 u_layer3Rotation,
+    uniform float2 u_layer4Rotation,
+    uniform float2 u_layer0UvOffset,
+    uniform float2 u_layer1UvOffset,
+    uniform float2 u_layer2UvOffset,
+    uniform float2 u_layer3UvOffset,
+    uniform float2 u_layer4UvOffset,
+
+    uniform float u_defaultLayerOpacity,
+    uniform float u_rLayerOpacity,
+    uniform float u_gLayerOpacity,
+    uniform float u_bLayerOpacity,
+    uniform float u_aLayerOpacity,
+
+    uniform sampler2D u_blendMap : TEXUNIT0,
+
+    uniform sampler2D u_diffuseMap : TEXUNIT1,
+    uniform sampler2D u_emissiveMap : TEXUNIT2,
+    uniform float3 u_emissiveOverride,
+
+    uniform sampler2D u_rDiffuseMap : TEXUNIT3,
+    uniform sampler2D u_rEmissiveMap : TEXUNIT4,
+    uniform float3 u_rEmissiveOverride,
+
+    uniform sampler2D u_gDiffuseMap : TEXUNIT5,
+    uniform sampler2D u_gEmissiveMap : TEXUNIT6,
+    uniform float3 u_gEmissiveOverride,
+
+    uniform sampler2D u_bDiffuseMap : TEXUNIT7,
+    uniform sampler2D u_bEmissiveMap : TEXUNIT8,
+    uniform float3 u_bEmissiveOverride,
+
+    uniform sampler2D u_aDiffuseMap : TEXUNIT9,
+    uniform sampler2D u_aEmissiveMap : TEXUNIT10,
+    uniform float3 u_aEmissiveOverride,
+
+    out float4 out_color : COLOR)
+{
+    float3 normPos = normalize(pass_vPosition);
+
+    float4 diffuseColor = float4(0.0, 0.0, 0.0, 1.0);
+    float4 emissiveColor = float4(0.0, 0.0, 0.0, 1.0);
+
+    float rChannel = 1.0;
+    float gChannel = 1.0;
+    float bChannel = 1.0;
+    float aChannel = 1.0;
+
+    if (hasBit(u_materialFlagsLo, 1.0) > 0.5)
+    {
+        float4 blendMap = tex2D(u_blendMap, pass_texCoord);
+        rChannel = blendMap.r;
+        gChannel = blendMap.g;
+        bChannel = blendMap.b;
+        aChannel = 1.0 - blendMap.a;
+    }
+
+    // Layers blend back-to-front: A is the base, then B, G, R, default on top
+    skyLayer(u_aDiffuseMap, u_aEmissiveMap,
+             hasBit(u_materialFlagsHi, 1024.0), hasBit(u_materialFlagsHi, 32768.0),
+             u_aEmissiveOverride, u_aLayerOpacity, aChannel,
+             normPos, u_layer4Rotation, u_layer4UvOffset,
+             diffuseColor, emissiveColor);
+
+    skyLayer(u_bDiffuseMap, u_bEmissiveMap,
+             hasBit(u_materialFlagsHi, 16.0), hasBit(u_materialFlagsHi, 512.0),
+             u_bEmissiveOverride, u_bLayerOpacity, bChannel,
+             normPos, u_layer3Rotation, u_layer3UvOffset,
+             diffuseColor, emissiveColor);
+
+    skyLayer(u_gDiffuseMap, u_gEmissiveMap,
+             hasBit(u_materialFlagsLo, 16384.0), hasBit(u_materialFlagsHi, 8.0),
+             u_gEmissiveOverride, u_gLayerOpacity, gChannel,
+             normPos, u_layer2Rotation, u_layer2UvOffset,
+             diffuseColor, emissiveColor);
+
+    skyLayer(u_rDiffuseMap, u_rEmissiveMap,
+             hasBit(u_materialFlagsLo, 256.0), hasBit(u_materialFlagsLo, 8192.0),
+             u_rEmissiveOverride, u_rLayerOpacity, rChannel,
+             normPos, u_layer1Rotation, u_layer1UvOffset,
+             diffuseColor, emissiveColor);
+
+    skyLayer(u_diffuseMap, u_emissiveMap,
+             hasBit(u_materialFlagsLo, 2.0), hasBit(u_materialFlagsLo, 128.0),
+             u_emissiveOverride, u_defaultLayerOpacity, u_defaultLayerOpacity,
+             normPos, u_layer0Rotation, u_layer0UvOffset,
+             diffuseColor, emissiveColor);
+
+    float4 color = diffuseColor + emissiveColor;
+    out_color = float4(color.rgb, 1.0);
+}

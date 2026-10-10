@@ -1,0 +1,26 @@
+// Mossbrook shader (repro b): array-bearing struct copy — a struct with array
+// members is returned by value.  Tracked-source requirement.
+//
+// Stands for:  same 6 PBR/terrain shaders  (standard_f / standardHDR_f /
+//              standardEnvmap_f / terrain_f / terrainSimple_f / terrainHDR_f)
+//              as repro (a); fires the "array-bearing struct copy requires a
+//              tracked source (member-array-storage)" refusal in isolation.
+//
+// Fires:  "array-bearing struct copy requires a tracked source (member-array-storage)"
+struct Plan
+{
+    float2 mirror[3];
+};
+Plan compute(float2 base)
+{
+    Plan p;
+    p.mirror[0] = base;
+    p.mirror[1] = base;
+    p.mirror[2] = base;
+    return p;
+}
+void main(float2 base, out float2 o : COLOR)
+{
+    Plan q = compute(base);
+    o = q.mirror[0];
+}

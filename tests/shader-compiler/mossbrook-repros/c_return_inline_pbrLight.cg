@@ -1,0 +1,42 @@
+// Mossbrook shader (repro c): user function inlined by the compiler; body
+// has a `return` inside `if/else` where the inner block declares locals
+// (e.g. `float3 s = …; float d = length(s); if (d >= r) return …; L = …;`),
+// with statements after.  Inline not possible; refusal.
+//
+// Stands for:  standard_f:299, standardHDR_f:300, standardEnvmap_f:288
+//              (the `pbrLight` inline in the 6-shader set)
+//
+// Fires:  "cannot inline user function 'helper': a return inside control flow
+//         inside a block that declares locals, with statements after the block"
+float3 helper(float t, float r, float3 base)
+{
+    float a = 0.0;
+    float3 L = float3(0.0);
+
+    if (t < 0.5)
+    {
+        L = float3(t, t, t);
+        a = t;
+    }
+    else
+    {
+        float3 s = base * t;                 // local declared in THIS block
+        float d  = length(s);                 // local declared in THIS block
+
+        if (d >= r)
+        {
+            return float3(0.0, 0.0, 0.0);     // RETURN inside the block that declared s, d
+        }
+
+        L = normalize(s);                     // statements after the inner if-block
+        a = d;
+    }
+
+    float3 res = L * a;
+    if (res.x <= 0.0)
+    {
+        return float3(0.0, 0.0, 0.0);         // return after a local-declaring block
+    }
+    return res;
+}
+void main(float t, float r, out float3 o : COLOR) { o = helper(t, r, float3(1.0)); }
