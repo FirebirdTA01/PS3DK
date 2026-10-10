@@ -16,6 +16,23 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **PSL1GHT game and disc names link.**  The fifteen `sysGame*` functions
+  of `<sysutil/game.h>` (`sysGameBootCheck`, `sysGameDataCheck`,
+  `sysGameCreateGameData`, `sysGameGetParamString`, ...) and
+  `sysDiscRegisterDiscChangeCallback` / `sysDiscUnregisterDiscChangeCallback`
+  are declared without a definition, so calls to them failed to link.  They
+  are now aliases of the `cellGame*` imports in `libsysutil_game_stub.a`
+  and of the `cellDiscGame*` imports in `libsysutil.a`.
+
+- **FIFO wrap statistics.**  `ps3tc_fifo_wrap_stats(&wraps, &stall_us,
+  &max_stall_us)` in `<cell/gcm/ps3tc_fifo_wrap.h>` reports how many times
+  the command buffer wrapped and how long the PPU waited inside the wrap
+  for the RSX to catch up, in total and at most once
+  (`ps3tc_fifo_wrap_stats_reset()` starts over).  A large stall total in a
+  frame means the frame is waiting for the GPU, not for PPU work.
+
 ## [v0.22.4] — 2026-10-10
 
 ### Fixed
@@ -92,21 +109,6 @@ The version stamped into builds is generated from the most recent
   uses a struct passed by value in one register (such as
   `std::string_view`) whole as an address, which faults on hardware.  It
   exits 1 on a hit, so a build can fail on it.  See `docs/known-issues.md`.
-
-- **PSL1GHT game and disc names link.**  The fifteen `sysGame*` functions
-  of `<sysutil/game.h>` (`sysGameBootCheck`, `sysGameDataCheck`,
-  `sysGameCreateGameData`, `sysGameGetParamString`, ...) and
-  `sysDiscRegisterDiscChangeCallback` / `sysDiscUnregisterDiscChangeCallback`
-  are declared without a definition, so calls to them failed to link.  They
-  are now aliases of the `cellGame*` imports in `libsysutil_game_stub.a`
-  and of the `cellDiscGame*` imports in `libsysutil.a`.
-
-- **FIFO wrap statistics.**  `ps3tc_fifo_wrap_stats(&wraps, &stall_us,
-  &max_stall_us)` in `<cell/gcm/ps3tc_fifo_wrap.h>` reports how many times
-  the command buffer wrapped and how long the PPU waited inside the wrap
-  for the RSX to catch up, in total and at most once
-  (`ps3tc_fifo_wrap_stats_reset()` starts over).  A large stall total in a
-  frame means the frame is waiting for the GPU, not for PPU work.
 
 ### Changed
 
