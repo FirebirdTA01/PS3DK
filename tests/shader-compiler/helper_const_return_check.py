@@ -48,6 +48,14 @@ float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
     'const_block_shadow': """float4 f(float4 c) { float4 k = 1; if (true) { float4 k = 2; if (c.x > 0) return k; } return k; }
 float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
 """,
+    # The rest of the body reaches the block's local name through a callee:
+    # g reads the file-scope k, and inlining g inside the block would see
+    # the block's k instead.
+    'callee_reads_block_name': """float4 k;
+float4 g(float4 c) { return c + k; }
+float4 f(float4 c) { if (c.x > 0.0) { float4 k = c * 5.0; if (c.y > 0.0) return k; } return g(c); }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
+""",
 }
 # Vertex run-time returns use predicated selection. Keep the large unused
 # arm to expose cancellation if selection regresses to arithmetic blending.
@@ -73,6 +81,13 @@ float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t, t.y > 0.5); }
 float4 decode(const float4 c) { if (lin) { return c * 2.0; } else { return c; } }
 float4 main(float4 t : TEXCOORD0) : COLOR { return decode(t); }
 """, lambda c: [v * 2.0 for v in c]),
+    # A nested return inside a block that declares a local, with statements
+    # after the block that never name it (the Mossbrook pbrLight shape): the
+    # rest of the body runs through the block safely.
+    'block_local_unnamed_after': ("""float4 f(float4 c) { float4 r = c; if (c.x > 0.0) { float4 k = c * 5.0; if (c.y > 0.0) return k; r = k + 1.0; } return r * 2.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
+""", lambda c: ([v * 5.0 for v in c] if c[1] > 0.0 else [(v * 5.0 + 1.0) * 2.0 for v in c])
+               if c[0] > 0.0 else [v * 2.0 for v in c]),
     'early_then_tail': ("""float4 f(float4 c) { if (c.x > 0.25) return c * 2.0; float4 d = c + 1.0; return d * 3.0; }
 float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
 """, lambda c: [v * 2.0 for v in c] if c[0] > 0.25 else [(v + 1.0) * 3.0 for v in c]),

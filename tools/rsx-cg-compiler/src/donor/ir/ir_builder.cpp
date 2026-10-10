@@ -5928,6 +5928,118 @@ static bool returnOnlyShape(const StmtNode* stmt, bool& hasReturn)
     }
 }
 
+// Whether any of `stmts` may read or write a variable spelled as one of
+// `names`.  The inliner resolves a name through its scope by spelling, so a
+// statement that mentions a name a still-open block declared would see that
+// block's local instead of the outer variable.  A called source function
+// is inlined through the same scope, so its body is walked too (once per
+// function); a prototype with no body, and any construct this walk does not
+// model, counts as a mention.  Conservative: a callee's own parameter or
+// local that happens to share a name also counts.
+static bool mentionsAnyName(const std::vector<StmtNode*>& stmts,
+                            const std::unordered_set<std::string>& names)
+{
+    if (names.empty()) return false;
+    std::unordered_set<const FunctionDecl*> walked;
+    std::function<bool(const StmtNode*)> stmt;
+    std::function<bool(const ExprNode*)> expr;
+    expr = [&](const ExprNode* e) -> bool {
+        if (!e) return false;
+        switch (e->kind)
+        {
+        case ExprKind::Literal:
+        case ExprKind::Sizeof:
+            return false;
+        case ExprKind::Identifier:
+            return names.count(static_cast<const IdentifierExpr*>(e)->name) != 0;
+        case ExprKind::Binary: {
+            const auto* b = static_cast<const BinaryExpr*>(e);
+            return expr(b->left.get()) || expr(b->right.get());
+        }
+        case ExprKind::Unary:
+            return expr(static_cast<const UnaryExpr*>(e)->operand.get());
+        case ExprKind::Call: {
+            const auto* c = static_cast<const CallExpr*>(e);
+            for (const auto& a : c->arguments) if (expr(a.get())) return true;
+            if (c->resolvedFunction && c->resolvedFunction->kind == DeclKind::Function)
+            {
+                const auto* f = static_cast<const FunctionDecl*>(c->resolvedFunction);
+                if (f->isIntrinsic) return false;
+                if (!f->body) return true;
+                if (!walked.insert(f).second) return false;
+                return stmt(f->body.get());
+            }
+            return false;
+        }
+        case ExprKind::Constructor:
+            for (const auto& a : static_cast<const ConstructorExpr*>(e)->arguments)
+                if (expr(a.get())) return true;
+            return false;
+        case ExprKind::Cast:
+            return expr(static_cast<const CastExpr*>(e)->operand.get());
+        case ExprKind::MemberAccess:
+            return expr(static_cast<const MemberAccessExpr*>(e)->object.get());
+        case ExprKind::Index: {
+            const auto* i = static_cast<const IndexExpr*>(e);
+            return expr(i->array.get()) || expr(i->index.get());
+        }
+        case ExprKind::Ternary: {
+            const auto* t = static_cast<const TernaryExpr*>(e);
+            return expr(t->condition.get()) || expr(t->thenExpr.get()) || expr(t->elseExpr.get());
+        }
+        default:
+            return true;
+        }
+    };
+    stmt = [&](const StmtNode* node) -> bool {
+        if (!node) return false;
+        switch (node->kind)
+        {
+        case StmtKind::Expr:
+            return expr(static_cast<const ExprStmt*>(node)->expr.get());
+        case StmtKind::Decl:
+            for (const auto& d : static_cast<const DeclStmt*>(node)->declarations)
+            {
+                if (!d || d->kind != DeclKind::Variable) return true;
+                const auto* v = static_cast<const VarDecl*>(d.get());
+                if (names.count(v->name) || expr(v->initializer.get())) return true;
+            }
+            return false;
+        case StmtKind::Block:
+            for (const auto& child : static_cast<const BlockStmt*>(node)->statements)
+                if (stmt(child.get())) return true;
+            return false;
+        case StmtKind::If: {
+            const auto* i = static_cast<const IfStmt*>(node);
+            return expr(i->condition.get()) || stmt(i->thenBranch.get()) || stmt(i->elseBranch.get());
+        }
+        case StmtKind::For: {
+            const auto* f = static_cast<const ForStmt*>(node);
+            return stmt(f->init.get()) || expr(f->condition.get()) ||
+                   expr(f->increment.get()) || stmt(f->body.get());
+        }
+        case StmtKind::While: {
+            const auto* w = static_cast<const WhileStmt*>(node);
+            return expr(w->condition.get()) || stmt(w->body.get());
+        }
+        case StmtKind::DoWhile: {
+            const auto* w = static_cast<const DoWhileStmt*>(node);
+            return stmt(w->body.get()) || expr(w->condition.get());
+        }
+        case StmtKind::Return:
+            return expr(static_cast<const ReturnStmt*>(node)->value.get());
+        case StmtKind::Break: case StmtKind::Continue:
+        case StmtKind::Discard: case StmtKind::Empty:
+            return false;
+        default:
+            return true;
+        }
+    };
+    for (const StmtNode* s : stmts)
+        if (stmt(s)) return true;
+    return false;
+}
+
 bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
                                     IRValueID& result, bool& sawReturn)
 {
@@ -6076,17 +6188,24 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 // The inherited continuation belongs OUTSIDE the enclosing
                 // arm's block; running it in here would let a local that
                 // block declared shadow the outer name it reads (an inner
-                // `float4 k` returned for the outer `return k`).  Refused by
-                // name until block bindings are unwound for it.
+                // `float4 k` returned for the outer `return k`).  That only
+                // happens when the continuation mentions a name one of those
+                // blocks declared, so only that case is refused; a block whose
+                // locals the rest of the body never names is safe to run
+                // through.
                 if (!inlineContinuation_.empty())
+                {
+                    std::unordered_set<std::string> openLocals;
                     for (size_t f = inlineContinuationFrame_; f < blockDeclared_.size(); ++f)
-                        if (!blockDeclared_[f].empty())
-                        {
-                            error(ifs->loc, "cannot inline user function '" + callee->name +
-                                            "': a return inside control flow inside a block that "
-                                            "declares locals, with statements after the block");
-                            return false;
-                        }
+                        openLocals.insert(blockDeclared_[f].begin(), blockDeclared_[f].end());
+                    if (mentionsAnyName(inlineContinuation_, openLocals))
+                    {
+                        error(ifs->loc, "cannot inline user function '" + callee->name +
+                                        "': a return inside control flow inside a block that "
+                                        "declares a local the statements after the block also name");
+                        return false;
+                    }
+                }
                 std::vector<StmtNode*> rest(statements.begin() + static_cast<std::ptrdiff_t>(index) + 1,
                                             statements.end());
                 rest.insert(rest.end(), inlineContinuation_.begin(), inlineContinuation_.end());
