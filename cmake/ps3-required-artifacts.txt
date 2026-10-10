@@ -171,6 +171,7 @@ ppu_stub  ppu/lib/libsync2_stub.a
 ppu_stub  ppu/lib/libsync_stub.a
 ppu_stub  ppu/lib/libcrashdump_stub.a
 ppu_stub  ppu/lib/libsysmodule_stub.a
+ppu_stub  ppu/lib/libsysutil.a
 ppu_stub  ppu/lib/libsysutil_ap_stub.a
 ppu_stub  ppu/lib/libsysutil_audio_out_stub.a
 ppu_stub  ppu/lib/libsysutil_avc2_stub.a
