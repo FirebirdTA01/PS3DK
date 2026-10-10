@@ -219,6 +219,11 @@ jobs:
       - name: Test FP loads and stores stay off under-aligned memory
         run: bash tests/sdk/ppu-fp-alignment-codegen-test.sh
 
+      # Skips without PS3DEV; binding a vertex program and the standalone
+      # cellGcmCgUploadInternalConsts helper both upload the literal pool.
+      - name: Test vertex-program literal uploads
+        run: bash tests/sdk/gcm-vp-literal-upload-test.sh
+
       # Skips without PS3DEV; the packed by-value argument scanner (a
       # std::string_view register used whole as an address) flags its red
       # fixtures and passes its green ones.
