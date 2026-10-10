@@ -480,6 +480,13 @@ public:
     // Declared struct return fields, including those never stored. The
     // fragment colour bank depends on all declarations, not just writes.
     std::vector<IRParameter> returnOutputs;
+    // Every member of the returned struct by path, in declaration order:
+    // the order the output records are declared in.
+    std::vector<std::string> returnMemberOrder;
+    // Semantic-less members of the returned struct the program never
+    // writes.  The reference declares them with no resource and binds no
+    // implicit index to them; a written one is stored like any output.
+    std::vector<IRParameter> unwrittenImplicitOutputs;
     std::vector<IRParameter> parameters;
     std::vector<std::unique_ptr<IRBasicBlock>> blocks;
 

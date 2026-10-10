@@ -563,6 +563,15 @@ ContainerResult emitFragmentContainerImpl(
             continue;
         }
 
+        // A POSITION input is not visible to a fragment program: the
+        // reference does not declare it, and the parameters after it keep
+        // their source ordinals (measured: `float4 pos : POSITION, float2
+        // tc : TEXCOORD0` declares only tc, paramno 1).
+        if (p.storage != StorageQualifier::Uniform && p.storage != StorageQualifier::Out &&
+            p.storage != StorageQualifier::InOut && !p.inferredSemantic &&
+            toUpper(p.semanticName) == "POSITION")
+            continue;
+
         ParamDesc d;
         d.name      = p.name;
         // Preserve original source spelling — the reference compiler stores "TEXCOORD0"
@@ -851,7 +860,20 @@ ContainerResult emitFragmentContainerImpl(
                         break;
                     }
                 }
+                // Referenced only when the program reads it: every read of
+                // a fragment uniform is an inline constant with a patch
+                // offset (measured: an unread `float tau` and an unread
+                // struct member are isReferenced 0).
+                d.isReferenced = d.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
             }
+            // A struct-typed uniform is declared through its flattened
+            // members (`IN_global.video_size`, ...); the reference writes no
+            // record for the struct itself.  Its slot still counted above.
+            const std::string memberPrefix = g.name + ".";
+            if (std::any_of(module.globals.begin(), module.globals.end(), [&](const IRGlobal& o) {
+                    return o.storage == StorageQualifier::Uniform &&
+                           o.name.compare(0, memberPrefix.size(), memberPrefix) == 0; }))
+                continue;
             params.push_back(d);
         }
     }
@@ -872,7 +894,7 @@ ContainerResult emitFragmentContainerImpl(
 
             ParamDesc d;
             d.name      = entry->name + "." + in.fieldName;
-            d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+            d.semantic  = in.inferredSemantic ? std::string{} : in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
             d.type      = cgTypeForIRType(in.resultType);
             if (d.type == 0) d.type = kCgFloat4;
             if (isFpDepthOutput(toUpper(in.semanticName), in.semanticIndex))
@@ -882,8 +904,62 @@ ContainerResult emitFragmentContainerImpl(
             d.paramno   = kInvalidIndex;
             d.res       = fpResourceFor(toUpper(in.semanticName), in.semanticIndex);
             d.isReferenced = 1;
+            // A program with more than one return stores each output once per
+            // return; the output is still one record (a second `main_fragment`
+            // record was emitted for an early return).
+            if (std::any_of(params.begin(), params.end(), [&](const ParamDesc& o) {
+                    return o.direction == kCgOut && o.name == d.name; }))
+                continue;
             params.push_back(d);
         }
+    }
+
+    // The returned struct's records in declaration order, with each
+    // semantic-less member it never writes declared between them: no
+    // resource, no semantic string, isReferenced 0 (measured; they were
+    // missing).  A record the order does not name keeps its place after.
+    if (!entry->returnMemberOrder.empty())
+    {
+        const std::string prefix = entry->name + ".";
+        const auto isMember = [&](const ParamDesc& d) {
+            return d.direction == kCgOut && d.paramno == kInvalidIndex &&
+                   d.name.compare(0, prefix.size(), prefix) == 0;
+        };
+        const auto first = std::find_if(params.begin(), params.end(), isMember);
+        const size_t at = static_cast<size_t>(first - params.begin());
+        std::vector<ParamDesc> members;
+        std::vector<ParamDesc> rest;
+        for (size_t k = at; k < params.size(); ++k)
+            (isMember(params[k]) ? members : rest).push_back(params[k]);
+        params.resize(at);
+        for (const std::string& path : entry->returnMemberOrder)
+        {
+            const std::string name = prefix + path;
+            const auto hit = std::find_if(members.begin(), members.end(),
+                [&](const ParamDesc& d) { return d.name == name; });
+            if (hit != members.end())
+            {
+                params.push_back(*hit);
+                members.erase(hit);
+                continue;
+            }
+            for (const auto& unwritten : entry->unwrittenImplicitOutputs)
+            {
+                if (unwritten.name != path) continue;
+                ParamDesc d;
+                d.name      = name;
+                d.semantic  = std::string{};
+                d.type      = cgTypeForIRType(unwritten.type);
+                d.var       = kCgVarying;
+                d.direction = kCgOut;
+                d.paramno   = kInvalidIndex;
+                d.res       = kCgUndefined;
+                d.isReferenced = 0;
+                params.push_back(d);
+            }
+        }
+        params.insert(params.end(), members.begin(), members.end());
+        params.insert(params.end(), rest.begin(), rest.end());
     }
 
     // Synthetic return-value output — the entry point's return type
@@ -941,6 +1017,12 @@ ContainerResult emitFragmentContainerImpl(
                     d.paramno   = kInvalidIndex;
                     d.res       = fpResourceFor(toUpper(in.semanticName), in.semanticIndex);
                     d.isReferenced = 1;
+                    // A program with more than one return stores each output once per
+                    // return; the output is still one record (a second `main_fragment`
+                    // record was emitted for an early return).
+                    if (std::any_of(params.begin(), params.end(), [&](const ParamDesc& o) {
+                            return o.direction == kCgOut && o.name == d.name; }))
+                        continue;
                     params.push_back(d);
                 }
             }

@@ -19,6 +19,14 @@
 # parent always and the rows one by one); a plain vertex input the program
 # never reads is 0 (ours said 1).
 #
+# Also: a fragment POSITION input is not declared; a uniform struct's
+# sampler member keeps its TEXUNIT binding; a struct-typed file-scope
+# uniform is declared through its members only; an output is one record
+# however many returns store it; a vertex scalar return is declared; and a
+# returned struct member without a semantic is an output bound to the
+# lowest free TEXCOORD (vertex) or COLOR (fragment) index - those writes
+# were dropped, so the next stage read a varying nothing wrote.
+#
 # Checks the input records (direction in) of each case below, in order:
 # name, CGtype, resource, semantic, paramno, isReferenced.
 #
@@ -177,6 +185,99 @@ EOF
 }
 [ -s "$work/fp_array_param.bin" ] && input_mask fp_array_param fp 80000
 [ -s "$work/vp_array_param.bin" ] && input_mask vp_array_param vp 1001
+
+# A POSITION input is not visible to a fragment program and is not
+# declared; the next parameter keeps its source ordinal.
+check fp_position_param sce_fp_rsx main_fragment \
+'tc 416 c94 TEXCOORD0 1 1' '
+float4 main_fragment(float4 pos : POSITION, float2 tc : TEXCOORD0) : COLOR { return float4(tc, 0, 1); }'
+
+# A sampler member of a uniform struct parameter keeps its TEXUNIT binding
+# (libretro passes its texture this way), in a fragment program that samples
+# it and in a vertex program that never does.
+check fp_struct_sampler sce_fp_rsx main_fragment \
+'IN.video_size 416 cb8 - 0 0; IN.texture 42a 800 TEXUNIT0 0 1; tc 416 c94 TEXCOORD0 1 1' '
+struct input { float2 video_size; sampler2D texture : TEXUNIT0; };
+float4 main_fragment(uniform input IN, float2 tc : TEXCOORD0) : COLOR { return tex2D(IN.texture, tc); }'
+
+check vp_struct_sampler sce_vp_rsx main_vertex \
+'IN.video_size 416 882 - 0 1; IN.texture 42a 800 TEXUNIT0 0 0; p 418 841 POSITION 1 1' '
+struct input { float2 video_size; sampler2D texture : TEXUNIT0; };
+float4 main_vertex(uniform input IN, float4 p : POSITION) : POSITION { return p * IN.video_size.x; }'
+
+# A struct-typed file-scope uniform is declared through its members only;
+# an unread member (and an unread plain uniform) is isReferenced 0.
+check fp_struct_global sce_fp_rsx main_fragment \
+'t 416 c94 TEXCOORD0 0 1; IN_global.video_size 416 cb8 - -1 0; IN_global.texture_size 416 cb8 - -1 1; IN_global.frame_count 415 cb8 - -1 0; tau 415 cb8 - -1 0' '
+struct input { float2 video_size; float2 texture_size; float frame_count; };
+uniform input IN_global;
+uniform float tau;
+float4 main_fragment(float2 t : TEXCOORD0) : COLOR { return float4(t * IN_global.texture_size, 0, 1); }'
+
+check vp_struct_global sce_vp_rsx main_vertex \
+'p 418 841 POSITION 0 1; IN_global.video_size 416 cb8 - -1 0; IN_global.texture_size 416 882 - -1 1; IN_global.frame_count 415 cb8 - -1 0' '
+struct input { float2 video_size; float2 texture_size; float frame_count; };
+uniform input IN_global;
+float4 main_vertex(float4 p : POSITION) : POSITION { return p * IN_global.texture_size.x; }'
+
+# Output records (direction out): one per output however many returns
+# store it, and a vertex program's scalar return is declared.
+outputs() {   # <case> <expected>
+    python3 - "$work/$1.bin" "$2" <<'EOF'
+import struct, sys
+b = open(sys.argv[1], 'rb').read()
+count, table = struct.unpack_from('>2I', b, 12)
+cstr = lambda o: b[o:b.index(0, o)].decode() if o else ''
+got = []
+for i in range(count):
+    t, res, var, ri, nm, dv, ec, sem, d, pn, ref = struct.unpack_from('>11I', b, table + 48 * i)
+    if d == 0x1002:
+        got.append('%s %x %x %s' % (cstr(nm), t, res, cstr(sem) or '-'))
+want = [r.strip() for r in sys.argv[2].split(';') if r.strip()]
+if got != want:
+    print('    want: ' + ' ; '.join(want))
+    print('    got:  ' + ' ; '.join(got))
+    sys.exit(1)
+EOF
+    if [ $? -eq 0 ]; then echo "param-records: ok   $1 outputs"
+    else echo "param-records: FAIL $1 outputs"; fail=1
+    fi
+}
+check fp_early_return sce_fp_rsx main_fragment \
+'t 416 c94 TEXCOORD0 0 1' '
+float4 main_fragment(float2 t : TEXCOORD0) : COLOR { if (t.x > 0.5) return float4(t, 0, 1); return float4(0, 0, 0, 1); }'
+[ -s "$work/fp_early_return.bin" ] && outputs fp_early_return 'main_fragment 418 ac5 COLOR'
+
+check vp_scalar_return sce_vp_rsx main_vertex \
+'p 418 841 POSITION 0 1' '
+float4 main_vertex(float4 p : POSITION) : POSITION { return p; }'
+[ -s "$work/vp_scalar_return.bin" ] && outputs vp_scalar_return 'main_vertex 418 8c3 POSITION'
+
+# A returned struct member without a semantic is still an output: a written
+# one takes the lowest TEXCOORD (vertex) or COLOR (fragment) index no member
+# claims explicitly, in declaration order; an unwritten one is declared with
+# no resource.  These writes were dropped, so the next stage read a varying
+# nothing wrote.  The vertex output mask pins the written registers.
+check vp_implicit_outputs sce_vp_rsx main_vertex \
+'p 418 841 POSITION 0 1; t 416 849 TEXCOORD0 1 1' '
+struct O { float4 pos : POSITION; float2 a; float2 b : TEXCOORD1; float2 c; float2 d; float2 e; };
+O main_vertex(float4 p : POSITION, float2 t : TEXCOORD0) { O o; o.pos = p; o.a = t; o.b = t.yx; o.c = t + t; o.e = t * t; return o; }'
+[ -s "$work/vp_implicit_outputs.bin" ] && outputs vp_implicit_outputs \
+'main_vertex.pos 418 8c3 POSITION; main_vertex.a 416 c94 -; main_vertex.b 416 c95 TEXCOORD1; main_vertex.c 416 c96 -; main_vertex.d 416 cb8 -; main_vertex.e 416 c97 -'
+if [ -s "$work/vp_implicit_outputs.bin" ]; then
+    mask=$(python3 -c 'import struct, sys
+b = open(sys.argv[1], "rb").read()
+prog = struct.unpack_from(">I", b, 20)[0]
+print("%x" % struct.unpack_from(">I", b, prog + 16)[0])' "$work/vp_implicit_outputs.bin")
+    if [ "$mask" = "3c000" ]; then echo "param-records: ok   vp_implicit_outputs writes output mask 3c000"
+    else echo "param-records: FAIL vp_implicit_outputs output mask $mask, want 3c000"; fail=1
+    fi
+fi
+
+check fp_implicit_outputs sce_fp_rsx main_fragment 't 416 c94 TEXCOORD0 0 1' '
+struct F { float4 x; float4 c : COLOR0; float4 y; float4 z : COLOR1; float4 w; };
+F main_fragment(float2 t : TEXCOORD0) { F f; f.c = float4(t, 0, 1); f.x = 1; f.z = 0.5; f.w = 0.25; return f; }'
+[ -s "$work/fp_implicit_outputs.bin" ] && outputs fp_implicit_outputs 'main_fragment.x 418 ac7 -; main_fragment.c 418 ac5 COLOR0; main_fragment.y 418 cb8 -; main_fragment.z 418 ac6 COLOR1; main_fragment.w 418 ac8 -'
 
 [ $fail -eq 0 ] && echo "param-records: PASS" || echo "param-records: FAIL"
 exit $fail

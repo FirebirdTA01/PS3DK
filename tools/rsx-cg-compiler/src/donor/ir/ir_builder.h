@@ -108,6 +108,10 @@ private:
     // Immutable, function-local identities of unwritten vector-field bases.
     // Assignments replace nameToValue_ bindings; this set needs no branch snapshot.
     std::unordered_set<IRValueID> undefinedFieldBases_;
+    // Implicit index of each semantic-less member of the entry's returned
+    // struct that a return writes (TEXCOORD in a vertex program, COLOR in a
+    // fragment program), fixed at its first return so every return agrees.
+    std::unordered_map<std::string, int> implicitOutputIndex_;
     // Uniform struct ENTRY parameters flattened into one uniform per member
     // (uniform-struct-entry-parameter): the name has no whole-struct value,
     // only `name.member...` bindings, so a whole-struct copy copies those.

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <sstream>
+#include <set>
 #include <unordered_set>
 #include <functional>
 
@@ -1522,6 +1523,14 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         if (!fields) return;
         for (const auto& field : *fields) {
             const std::string fieldPath = pathPrefix.empty() ? field.name : (pathPrefix + "." + field.name);
+            if (!getStructFields(field.type.get())) {
+                const IRTypeInfo memberType = getIRType(field.type.get());
+                if (memberType.isArray() && !memberType.isMatrix())
+                    for (int i = 0; i < memberType.arraySize; ++i)
+                        currentFunction_->returnMemberOrder.push_back(fieldPath + "[" + std::to_string(i) + "]");
+                else
+                    currentFunction_->returnMemberOrder.push_back(fieldPath);
+            }
             if (!field.semantic.isEmpty()) {
                 if (getStructFields(field.type.get())) {
                     continue;
@@ -1646,6 +1655,22 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                         member.valueId = currentFunction_->allocateValueId();
                         member.storage = StorageQualifier::Uniform;
                         member.sourceOrdinal = sourceOrdinal;
+                        // A sampler member's binding carries over, as it does
+                        // for a uniform member of a varying struct (measured:
+                        // libretro's `sampler2D texture : TEXUNIT0` member is
+                        // recorded with semantic TEXUNIT0, and on unit 0 in a
+                        // vertex program that never samples it).
+                        if (field.type->isSampler())
+                        {
+                            member.semanticName = field.semantic.name;
+                            member.rawSemanticName = field.semantic.rawName;
+                            member.semanticIndex = field.semantic.index;
+                            if (field.semantic.hasExplicitRegister())
+                            {
+                                member.explicitRegisterBank = field.semantic.explicitRegisterBank;
+                                member.explicitRegisterIndex = field.semantic.explicitRegisterIndex;
+                            }
+                        }
                         currentFunction_->parameters.push_back(member);
                         nameToValue_[qualified] = member.valueId;
                     }
@@ -2139,6 +2164,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     declToValue_.clear();
     nameToValue_.clear();
     undefinedFieldBases_.clear();
+    implicitOutputIndex_.clear();
     flattenedUniformStructParams_.clear();
     scope_.clear();   // every per-scope map, in one place (ScopeState)
     currentFunction_ = nullptr;
@@ -3388,13 +3414,86 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                     const std::string fieldKey = keyPrefix + "." + field.name;
                     const std::string fieldPath = pathPrefix.empty() ? field.name : (pathPrefix + "." + field.name);
 
-                    if (field.semantic.isEmpty())
+                    Semantic sem = field.semantic;
+                    if (sem.isEmpty())
                     {
                         if (field.type && field.type->baseType == BaseType::Struct)
                         {
                             self(self, fieldKey, fieldPath, field.type.get());
+                            continue;
                         }
-                        continue;
+                        if (!currentFunction_->isEntryPoint || !field.type) continue;
+                        // A semantic-less member is still an output: a
+                        // written one takes the lowest TEXCOORD (vertex) or
+                        // COLOR (fragment) index no member claims explicitly,
+                        // in declaration order; an unwritten one is declared
+                        // with no resource and takes no index (measured: a,
+                        // b:TEXCOORD1, c, d unwritten, e -> TEXCOORD0, 1, 2,
+                        // none, 3; x, c:COLOR0, y unwritten, z:COLOR1, w ->
+                        // COLOR2, 0, none, 1, 3).  These stores were dropped,
+                        // so the program never wrote the varying the next
+                        // stage reads.
+                        const bool vertex = module_->shaderStage == ShaderStage::Vertex;
+                        const IRTypeInfo memberType = getIRType(field.type.get());
+                        bool written = false;
+                        if (auto w = nameToValue_.find(fieldKey); w != nameToValue_.end())
+                            written = !undefinedFieldBases_.count(w->second);
+                        const std::string partPrefix = fieldKey + ".";
+                        for (const auto& kv : nameToValue_)
+                            if (kv.first.compare(0, partPrefix.size(), partPrefix) == 0) written = true;
+                        if (memberType.isArray() || memberType.isMatrix())
+                        {
+                            if (written)
+                                error(stmt->loc, "output member '" + fieldPath + "' has no semantic and is an "
+                                      "array or matrix; implicit output binding is not implemented for it "
+                                      "(implicit-output-binding), refusing rather than dropping the write");
+                            continue;
+                        }
+                        if (!written)
+                        {
+                            const bool known = std::any_of(
+                                currentFunction_->unwrittenImplicitOutputs.begin(),
+                                currentFunction_->unwrittenImplicitOutputs.end(),
+                                [&](const IRParameter& o) { return o.name == fieldPath; });
+                            if (!known)
+                            {
+                                IRParameter declared{};
+                                declared.name = fieldPath;
+                                declared.type = memberType;
+                                declared.storage = StorageQualifier::Out;
+                                currentFunction_->unwrittenImplicitOutputs.push_back(declared);
+                            }
+                            continue;
+                        }
+                        const char* family = vertex ? "TEXCOORD" : "COLOR";
+                        auto slot = implicitOutputIndex_.find(fieldPath);
+                        if (slot == implicitOutputIndex_.end())
+                        {
+                            std::set<int> claimed;
+                            for (const auto& output : currentFunction_->returnOutputs)
+                            {
+                                std::string s = output.semanticName;
+                                std::transform(s.begin(), s.end(), s.begin(),
+                                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                                if (vertex ? (s == "TEXCOORD" || s == "TEX") : (s == "COLOR" || s == "COL"))
+                                    claimed.insert(output.semanticIndex);
+                            }
+                            for (const auto& kv : implicitOutputIndex_) claimed.insert(kv.second);
+                            int next = 0;
+                            while (claimed.count(next)) ++next;
+                            if (next > (vertex ? 9 : 3))
+                            {
+                                error(stmt->loc, std::string("output member '") + fieldPath +
+                                      "' has no semantic and no free " + family +
+                                      " index is left for it; refusing rather than dropping the write");
+                                continue;
+                            }
+                            slot = implicitOutputIndex_.emplace(fieldPath, next).first;
+                        }
+                        sem.name = family;
+                        sem.index = slot->second;
+                        sem.rawName = family + std::to_string(slot->second);
+                        sem.inferred = true;
                     }
 
                     if (field.type && field.type->baseType == BaseType::Struct)
@@ -3508,10 +3607,10 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                     auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
                         InvalidIRValue, fieldTy);
                     inst->addOperand(fieldValue);
-                    inst->semanticName    = field.semantic.name;
-                    inst->rawSemanticName = field.semantic.rawName;
-                    inst->inferredSemantic = field.semantic.inferred;
-                    inst->semanticIndex   = field.semantic.index;
+                    inst->semanticName    = sem.name;
+                    inst->rawSemanticName = sem.rawName;
+                    inst->inferredSemantic = sem.inferred;
+                    inst->semanticIndex   = sem.index;
                     inst->fieldName       = fieldPath;
                     currentBlock_->addInstruction(std::move(inst));
                 }

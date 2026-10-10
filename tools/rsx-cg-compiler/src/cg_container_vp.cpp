@@ -568,6 +568,16 @@ VpContainerResult emitVertexContainerImpl(
                p.type.isArray() && !p.type.isMatrix() && !isSamplerIRType(p.type.baseType);
     };
 
+    // A struct-typed file-scope uniform is declared through its flattened
+    // members (`IN_global.video_size`, ...); the reference writes no record
+    // for the struct itself, and it takes no register.
+    const auto isStructUniformParent = [&](const IRGlobal& g) {
+        const std::string prefix = g.name + ".";
+        return std::any_of(module.globals.begin(), module.globals.end(), [&](const IRGlobal& o) {
+            return o.storage == StorageQualifier::Uniform &&
+                   o.name.compare(0, prefix.size(), prefix) == 0; });
+    };
+
     // ----- Struct-flattened path: synthesize params from
     // LdAttr / StOut walk.  Per the reference compiler:
     //   - all input struct fields share the same paramno = 0 (they
@@ -760,6 +770,7 @@ VpContainerResult emitVertexContainerImpl(
         for (const auto& g : module.globals)
         {
             if (g.storage != StorageQualifier::Uniform) continue;
+            if (isStructUniformParent(g)) continue;
             if (vpSamplers && isSamplerIRType(g.type.baseType))
             {
                 params.push_back(samplerRecord(g, kInvalidIndex));
@@ -877,7 +888,7 @@ VpContainerResult emitVertexContainerImpl(
                     if (in.fieldName.empty()) continue;  // non-struct out; not in scope here
                     ParamDesc d;
                     d.name      = entry->name + "." + in.fieldName;   // the reference compiler convention
-                    d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+                    d.semantic  = in.inferredSemantic ? std::string{} : in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
                     // The IR builder stashes the source-level field
                     // type on StoreOutput so narrowed struct outputs
                     // (`float2 texcoord : TEX0`) size their parameter
@@ -997,6 +1008,7 @@ VpContainerResult emitVertexContainerImpl(
     for (const auto& g : module.globals)
     {
         if (g.storage != StorageQualifier::Uniform) continue;
+        if (isStructUniformParent(g)) continue;
         if (vpSamplers && isSamplerIRType(g.type.baseType))
         {
             params.push_back(samplerRecord(g, kInvalidIndex));
@@ -1115,7 +1127,7 @@ VpContainerResult emitVertexContainerImpl(
             if (in.fieldName.empty()) continue;
             ParamDesc d;
             d.name      = entry->name + "." + in.fieldName;
-            d.semantic  = in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
+            d.semantic  = in.inferredSemantic ? std::string{} : in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
             // The IR builder stashes the source-level field type on
             // the StoreOutput's resultType so we can size the param
             // entry to match the source (`float2 texCoord` -> float2).
@@ -1130,6 +1142,54 @@ VpContainerResult emitVertexContainerImpl(
             params.push_back(d);
         }
     }
+    }
+
+    // The returned struct's records in declaration order, with each
+    // semantic-less member it never writes declared between them: no
+    // resource, no semantic string, isReferenced 0 (measured; they were
+    // missing).  A record the order does not name keeps its place after.
+    if (!entry->returnMemberOrder.empty())
+    {
+        const std::string prefix = entry->name + ".";
+        const auto isMember = [&](const ParamDesc& d) {
+            return d.direction == kCgOut && d.paramno == kInvalidIndex &&
+                   d.name.compare(0, prefix.size(), prefix) == 0;
+        };
+        const auto first = std::find_if(params.begin(), params.end(), isMember);
+        const size_t at = static_cast<size_t>(first - params.begin());
+        std::vector<ParamDesc> members;
+        std::vector<ParamDesc> rest;
+        for (size_t k = at; k < params.size(); ++k)
+            (isMember(params[k]) ? members : rest).push_back(params[k]);
+        params.resize(at);
+        for (const std::string& path : entry->returnMemberOrder)
+        {
+            const std::string name = prefix + path;
+            const auto hit = std::find_if(members.begin(), members.end(),
+                [&](const ParamDesc& d) { return d.name == name; });
+            if (hit != members.end())
+            {
+                params.push_back(*hit);
+                members.erase(hit);
+                continue;
+            }
+            for (const auto& unwritten : entry->unwrittenImplicitOutputs)
+            {
+                if (unwritten.name != path) continue;
+                ParamDesc d;
+                d.name      = name;
+                d.semantic  = std::string{};
+                d.type      = cgTypeForIRType(unwritten.type);
+                d.var       = kCgVarying;
+                d.direction = kCgOut;
+                d.paramno   = kInvalidIndex;
+                d.res       = kCgUnassignedRes;
+                d.isReferenced = 0;
+                params.push_back(d);
+            }
+        }
+        params.insert(params.end(), members.begin(), members.end());
+        params.insert(params.end(), rest.begin(), rest.end());
     }
 
     // Declared array outputs keep every element record, including unwritten
@@ -1154,15 +1214,19 @@ VpContainerResult emitVertexContainerImpl(
         params.push_back(d);
     }
 
-    // Direct scalar returns have no fieldName. Keep their special-output
-    // reflection alongside explicit out parameters, without duplicating them.
+    // Direct scalar returns have no fieldName.  The return value is one
+    // record named after the entry (measured: `float4 main_vertex(...) :
+    // POSITION` declares main_vertex, POSITION, after the file-scope
+    // uniforms); it used to be written only for PSIZE and CLP.  Kept
+    // alongside explicit out parameters without duplicating them.
     for (const auto& block : entry->blocks)
         for (const auto& instruction : block->instructions)
         {
             const auto& in = *instruction;
             if (in.op != IROp::StoreOutput || !in.fieldName.empty()) continue;
             const auto sem = toUpper(in.semanticName);
-            if (sem != "PSIZE" && sem != "CLP") continue;
+            if (sem != "PSIZE" && sem != "CLP" && entry->returnType.baseType == IRType::Void)
+                continue;
             const auto resource = vpOutputResource(sem, in.semanticIndex, in.rawSemanticName);
             bool present = false;
             for (const auto& param : params)
