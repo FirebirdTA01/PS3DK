@@ -8,9 +8,11 @@
 #   red_copy   splits r4 (sradi 32), then loads through `mr r10,r4`   -> hit
 #   red_index  splits r4, then indexes with the raw r4 (lbzx)          -> hit
 #   green      splits r4, loads through `clrldi r10,r4,32`             -> clean
+#   red_cond   splits r4, then blt / bnl (ordinary branches), raw load -> hit
 #   green_call raw r4 after a call (r4 is clobbered there)             -> clean
+#   green_condcall raw r4 after bltl, a conditional call               -> clean
 # Rows: the object alone and inside an archive must both report exactly the
-# two red functions and exit 1; a green-only object must exit 0.
+# three red functions and exit 1; a green-only object must exit 0.
 # Skips without PS3DEV.
 #
 # Usage: tests/sdk/ppu-packed-arg-scan-test.sh [--ps3dev DIR]
@@ -50,6 +52,16 @@ red_index:
 	lbzx 3,4,10
 	add 3,3,9
 	blr
+	.section .text.red_cond,"ax",@progbits
+	.globl red_cond
+red_cond:
+	sradi 9,4,32
+	cmpwi 9,0
+	blt 1f
+	nop
+1:	bnl 2f
+2:	lbz 3,0(4)
+	blr
 EOF
 cat > "$work/green.s" <<'EOF'
 	.section .text.green,"ax",@progbits
@@ -65,6 +77,14 @@ green:
 green_call:
 	sradi 9,4,32
 	bl green
+	lbz 3,0(4)
+	blr
+	.section .text.green_condcall,"ax",@progbits
+	.globl green_condcall
+green_condcall:
+	sradi 9,4,32
+	cmpwi 9,0
+	bltl green
 	lbz 3,0(4)
 	blr
 EOF
@@ -88,8 +108,8 @@ row() { # name expected_rc expected_hits files...
     || { echo "ppu-packed-arg-scan: FAIL: assembling fixtures"; exit 1; }
 "$ar" rc "$work/both.a" "$work/red.o" "$work/green.o" || { echo "ppu-packed-arg-scan: FAIL: ar"; exit 1; }
 
-row "object, red + green" 1 "red_copy red_index " "$work/red.o" "$work/green.o"
-row "archive"             1 "red_copy red_index " "$work/both.a"
+row "object, red + green" 1 "red_cond red_copy red_index " "$work/red.o" "$work/green.o"
+row "archive"             1 "red_cond red_copy red_index " "$work/both.a"
 row "green only"          0 ""                    "$work/green.o"
 
 [ "$fail" -eq 0 ] && echo "ppu-packed-arg-scan: PASS"

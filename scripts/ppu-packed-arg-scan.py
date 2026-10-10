@@ -38,6 +38,17 @@ HEADER = re.compile(r"^([0-9a-f]+) <(.+)>:$")
 MEMBER = re.compile(r"^(\S+\.o):\s+file format")
 D_FORM = re.compile(r"^(\S+),\s*(-?\w+)\((r\d+)\)$")
 X_FORM = re.compile(r"^(l|st)\w*x$")
+# Branch mnemonics: b, an optional condition (or the bc/bd* forms), an
+# optional lr/ctr target, then l when the branch links (a call) and a when it
+# is absolute; objdump appends +/- for a prediction hint.  Only the l bit
+# makes a call: blt, ble and bnl (branch if not less) are ordinary branches.
+BRANCH = re.compile(r"^b(lt|le|eq|ge|gt|nl|ne|ng|so|ns|un|nu|dnzt|dnzf|dzt|dzf|dnz|dz|c)?"
+                    r"(lr|ctr|tar)?(l)?(a)?[+-]?$")
+
+
+def is_call(op):
+    m = BRANCH.match(op)
+    return bool(m and m.group(3))
 
 
 def find_objdump(explicit):
@@ -156,7 +167,7 @@ def scan(objdump, path):
                 tainted.pop(ops[0], None)
         elif ops and not NO_WRITE.match(op) and re.match(r"^r\d+$", ops[0]):
             tainted.pop(ops[0], None)
-        if op.startswith("bl") and op not in ("blr", "blrl"):
+        if is_call(op):
             for r in CALL_CLOBBERED:
                 tainted.pop(r, None)
     return hits
