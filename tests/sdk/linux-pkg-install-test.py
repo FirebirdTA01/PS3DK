@@ -56,14 +56,16 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
     scratch = Path(directory)
     repo = scratch / 'repo'
     (repo / 'scripts').mkdir(parents=True)
-    for script in ('env.sh', 'install-host-tools.sh', 'list-rust-bins.sh', 'build-pkg-host.sh'):
+    for script in ('env.sh', 'install-host-tools.sh', 'list-rust-bins.sh', 'build-pkg-host.sh',
+                   'check-rust-version.sh'):
         source = ROOT / 'scripts' / script
         if source.exists():
             shutil.copy2(source, repo / 'scripts' / script)
             (repo / 'scripts' / script).chmod(0o755)
     shutil.copytree(ROOT / 'tools/sfo-pkg', repo / 'tools/sfo-pkg')
     # Keep real workspace binary discovery, with one inert fixture binary.
-    (repo / 'tools/Cargo.toml').write_text('[workspace]\nmembers = ["fixture"]\n')
+    (repo / 'tools/Cargo.toml').write_text('[workspace]\nmembers = ["fixture"]\n'
+                                       '[workspace.package]\nrust-version = "1.88"\n')
     (repo / 'tools/fixture').mkdir()
     (repo / 'tools/fixture/Cargo.toml').write_text('[[bin]]\nname = "fixture-tool"\n')
     for name in ('tools/target/release/fixture-tool', 'tools/sprx-linker/sprxlinker',
@@ -78,6 +80,9 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
         command = stubs / name
         command.write_text('#!/bin/sh\nexit 0\n')
         command.chmod(0o755)
+    # install-host-tools.sh checks the Rust version first (check-rust-version.sh).
+    (stubs / 'rustc').write_text('#!/bin/sh\necho "rustc 1.95.0 (stub)"\n')
+    (stubs / 'rustc').chmod(0o755)
     prefix = scratch / 'prefix'
     prefix.mkdir()
     build = scratch / 'build'
