@@ -5026,20 +5026,24 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
 
     // Regular binary expression
     const bool logical = expr->op == BinaryOp::LogicalAnd || expr->op == BinaryOp::LogicalOr;
+    // Only a SCALAR && / || short-circuits; on vectors Cg evaluates both
+    // operands component-wise, so the right side is not a short-circuit RHS
+    // (measured: the reference accepts (t > 0.1) && (sqrt(t) < 0.8) on float4).
+    const bool shortCircuit = logical && getExprType(expr).isScalar();
     IRValueID leftValue = buildExpr(expr->left.get());
     if (logical)
-    {
         leftValue = normalizeCondition(expr->left.get(), leftValue);
+    if (shortCircuit)
         ++shortCircuitRhsDepth_;
-    }
     IRValueID rightValue = buildExpr(expr->right.get());
     if (logical)
     {
         // The comparison belongs to the RHS as well. Preserve its existing
         // short-circuit provenance and never evaluate either expression twice.
         rightValue = normalizeCondition(expr->right.get(), rightValue);
-        --shortCircuitRhsDepth_;
     }
+    if (shortCircuit)
+        --shortCircuitRhsDepth_;
 
     IROp op = binaryOpToIROp(expr->op);
     IRTypeInfo resultType = getExprType(expr);
