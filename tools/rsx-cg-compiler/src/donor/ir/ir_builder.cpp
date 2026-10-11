@@ -7012,6 +7012,42 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
         error(expr->loc, "struct constructor member access is not supported (local-struct-initializer)");
         return InvalidIRValue;
     }
+    // A matrix element selector reads row r then lane c of each element:
+    // a matrix's VecExtract index denotes a row, a vector's a lane.
+    if (expr->isMatrixSwizzle)
+    {
+        const IRValueID matrix = buildExpr(expr->object.get());
+        if (matrix == InvalidIRValue) return InvalidIRValue;
+        const IRTypeInfo matrixType = getExprType(expr->object.get());
+        const IRTypeInfo resultType = getExprType(expr);
+        if (!matrixType.isMatrix() || matrixType.arraySize != 0)
+        {
+            error(expr->loc, "matrix element selector on a value that is not a matrix");
+            return InvalidIRValue;
+        }
+        IRTypeInfo rowType = resultType.isScalar() ? resultType : resultType;
+        const IRType element = matrixType.elementType;
+        rowType = matrixType.matrixCols == 1 ? IRTypeInfo::Float() :
+                  matrixType.matrixCols == 2 ? IRTypeInfo::Float2() :
+                  matrixType.matrixCols == 3 ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
+        if (element != IRType::Float32)
+        {
+            error(expr->loc, "matrix element selector on a non-float matrix is not lowered (matrix-swizzle)");
+            return InvalidIRValue;
+        }
+        std::vector<IRValueID> lanes;
+        for (const auto& rc : expr->matrixSwizzle)
+        {
+            IRValueID row = emitInstruction(IROp::VecExtract, rowType,
+                {matrix, createConstant(static_cast<int32_t>(rc.first))}, expr->loc);
+            if (matrixType.matrixCols != 1)
+                row = emitInstruction(IROp::VecExtract, IRTypeInfo::Float(),
+                    {row, createConstant(static_cast<int32_t>(rc.second))}, expr->loc);
+            lanes.push_back(row);
+        }
+        return lanes.size() == 1 ? lanes.front()
+                                 : emitInstruction(IROp::VecConstruct, resultType, lanes, expr->loc);
+    }
     // Check for swizzle first
     if (expr->swizzleLength > 0)
     {
@@ -9610,8 +9646,10 @@ IRValueID IRBuilder::emitMatrixComponents(const IRTypeInfo& sourceType,
         (scalar ? targetType.baseType : targetType.elementType) != IRType::Float32 ||
         sourceType.matrixRows < 1 || sourceType.matrixRows > 4 ||
         sourceType.matrixCols < 1 || sourceType.matrixCols > 4 || width < 1 || width > 4 ||
-        (!scalar && ((sourceType.matrixRows != 1 && sourceType.matrixCols != 1) ||
-                     width > std::max(sourceType.matrixRows, sourceType.matrixCols))))
+        (!scalar && ((sourceType.matrixRows != 1 && sourceType.matrixCols != 1 &&
+                      width != sourceType.matrixRows * sourceType.matrixCols) ||
+                     ((sourceType.matrixRows == 1 || sourceType.matrixCols == 1) &&
+                      width > std::max(sourceType.matrixRows, sourceType.matrixCols)))))
     {
         error(loc, "matrix component conversion requires a float scalar or a non-widening float vector from a one-dimensional float matrix");
         return InvalidIRValue;
@@ -9620,16 +9658,21 @@ IRValueID IRBuilder::emitMatrixComponents(const IRTypeInfo& sourceType,
         sourceType.matrixCols == 2 ? IRTypeInfo::Float2() :
         sourceType.matrixCols == 3 ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
     std::vector<IRValueID> lanes;
+    // A two-dimensional matrix converts only when the vector holds exactly
+    // its components (measured: float4(float2x2) is m00 m01 m10 m11, row-major;
+    // float3(float2x3) and float4(float3x3) are C1033).
+    const bool flat2d = sourceType.matrixRows != 1 && sourceType.matrixCols != 1;
     for (int i = 0; i < width; ++i)
     {
         // Extract rows first: a matrix's VecExtract index denotes a row,
         // while a vector's denotes a lane. Reuse the already evaluated value.
-        const int row = sourceType.matrixCols == 1 ? i : 0;
+        const int row = flat2d ? i / sourceType.matrixCols : (sourceType.matrixCols == 1 ? i : 0);
+        const int col = flat2d ? i % sourceType.matrixCols : i;
         IRValueID lane = emitInstruction(IROp::VecExtract, rowType,
             {value, createConstant(static_cast<int32_t>(row))}, loc);
         if (sourceType.matrixCols != 1)
             lane = emitInstruction(IROp::VecExtract, IRTypeInfo::Float(),
-                {lane, createConstant(static_cast<int32_t>(i))}, loc);
+                {lane, createConstant(static_cast<int32_t>(col))}, loc);
         lanes.push_back(lane);
     }
     return scalar ? lanes.front() : emitInstruction(IROp::VecConstruct, targetType, lanes, loc);
