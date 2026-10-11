@@ -644,7 +644,17 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
                 if (f.type->baseType == BaseType::Struct || f.type->isArray()) hasNested = true;
                 else if (!f.type->isSampler()) hasNumeric = true;
             }
-            if (sem != "TEXUNIT" || hasNested)
+            // An out/inout struct with a semantic WRITES its members to
+            // varying outputs on the reference (measured: `out S p :
+            // TEXUNIT2` puts p.c on COLOR1 / TEXCOORD0); only the input side
+            // is lowered here, so the output side stays refused rather than
+            // compiled with the member dropped (review: codex, SP7-OUT).
+            if (param->storage == StorageQualifier::Out || param->storage == StorageQualifier::InOut)
+            {
+                error(param->loc, "semantics on out/inout struct-typed parameters are not supported: '" +
+                      param->name + "'");
+            }
+            else if (sem != "TEXUNIT" || hasNested)
             {
                 error(param->loc, "semantics on struct-typed parameters are not supported: '" + param->name +
                       "' (only TEXUNITn on a struct without struct members is lowered)");

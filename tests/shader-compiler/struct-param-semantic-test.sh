@@ -74,9 +74,21 @@ REFUSE = [
      'float4 main(S5 p : TEXCOORD1) : COLOR { return float4(p.a, p.b); }\n', 'struct-typed parameters'),
     ('fp_nested_struct', 'struct I { float2 a; sampler2D s; };\nstruct O { float3 b; I inner; };\n' +
      FP % ('O', 'return tex2D(p.inner.s, uv);'), 'struct-typed parameters'),
+    # The reference WRITES an out/inout struct's members to varying outputs;
+    # not lowered here, so refused rather than compiled with them dropped.
+    ('fp_out_struct', 'struct S { float4 c; };' + chr(10) + 'void main(float2 uv : TEXCOORD0, out S p : TEXUNIT2, '
+     'out float4 col : COLOR) { p.c = float4(uv, 0, 1); col = float4(uv, 1, 1); }' + chr(10), 'out/inout struct'),
+    ('fp_inout_struct', 'struct S { float4 c; };' + chr(10) + 'void main(float2 uv : TEXCOORD0, inout S p : TEXUNIT2, '
+     'out float4 col : COLOR) { p.c = float4(uv, 0, 1); col = float4(uv, 1, 1); }' + chr(10), 'out/inout struct'),
 ]
-for name, source, text in REFUSE:
-    p, blob = compile_one(name, 'sce_fp_rsx', source)
+VP_REFUSE = [
+    ('vp_out_struct', 'struct S { float4 c; };' + chr(10) + 'void main(float4 pos : POSITION, out S p : TEXUNIT2, '
+     'out float4 opos : POSITION) { p.c = pos * 2; opos = pos; }' + chr(10), 'out/inout struct'),
+    ('vp_inout_struct', 'struct S { float4 c; };' + chr(10) + 'void main(float4 pos : POSITION, inout S p : TEXUNIT2, '
+     'out float4 opos : POSITION) { p.c = pos * 2; opos = pos; }' + chr(10), 'out/inout struct'),
+]
+for name, source, text, profile in [r + ('sce_fp_rsx',) for r in REFUSE] + [r + ('sce_vp_rsx',) for r in VP_REFUSE]:
+    p, blob = compile_one(name, profile, source)
     ok = p.returncode == 1 and blob is None and text in (p.stderr + p.stdout)
     print('  %-26s %s' % (name, 'refused' if ok else 'NOT a named refusal (rc %d)' % p.returncode))
     if not ok: fails.append('%s: expected exit 1 naming %r, got rc %d' % (name, text, p.returncode))
