@@ -782,6 +782,8 @@ jobs:
         run: bash tests/shader-compiler/matrix-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A uniform array passed to a helper's array parameter is read from the global
         run: bash tests/shader-compiler/helper-uniform-array-arg-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A run-time-bound fragment for loop is a hardware loop, judged by value
+        run: bash tests/shader-compiler/fp-hardware-loop-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
         run: bash tests/shader-compiler/inline-dead-tail-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value

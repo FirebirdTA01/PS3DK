@@ -2473,15 +2473,21 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
     IRValueID condValue = buildExpr(condition);
     condValue = normalizeCondition(condition, condValue);
 
+    // Inside a hardware loop region (FP-LOOP) the arms are built FLAT, one
+    // after the other in the region's own block, and joined by the same
+    // Selects as below: a region is straight-line, and the region's own
+    // checks refuse an arm with an effect (a store, a discard, a return).
+    const bool flat = hardwareLoopDepth_ > 0;
+
     // Create blocks
-    IRBasicBlock* thenBlock = currentFunction_->createBlock(makeLabel("if.then"));
-    IRBasicBlock* elseBlock = elseArm
-        ? currentFunction_->createBlock(makeLabel("if.else"))
-        : nullptr;
-    IRBasicBlock* mergeBlock = currentFunction_->createBlock(makeLabel("if.end"));
+    IRBasicBlock* thenBlock = flat ? currentBlock_ : currentFunction_->createBlock(makeLabel("if.then"));
+    IRBasicBlock* elseBlock = !elseArm ? nullptr : flat ? currentBlock_
+        : currentFunction_->createBlock(makeLabel("if.else"));
+    IRBasicBlock* mergeBlock = flat ? currentBlock_ : currentFunction_->createBlock(makeLabel("if.end"));
 
     // Emit conditional branch
-    emitCondBranch(condValue, thenBlock, elseBlock ? elseBlock : mergeBlock);
+    if (!flat)
+        emitCondBranch(condValue, thenBlock, elseBlock ? elseBlock : mergeBlock);
 
     // Snapshot nameToValue_ before either branch runs so we can detect
     // which variables get redefined in then/else and insert merge-time
@@ -2502,7 +2508,7 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
     currentBlock_ = thenBlock;
     thenArm();
     const bool thenTerminated = currentBlock_->hasTerminator();
-    if (!thenTerminated)
+    if (!thenTerminated && !flat)
     {
         emitBranch(mergeBlock);
     }
@@ -2517,7 +2523,7 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
         currentBlock_ = elseBlock;
         (*elseArm)();
         elseTerminated = currentBlock_->hasTerminator();
-        if (!elseTerminated)
+        if (!elseTerminated && !flat)
         {
             emitBranch(mergeBlock);
         }
@@ -2850,7 +2856,10 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
             // Measured for FRAGMENT programs only (pixel judge).  A vertex
             // program keeps main's behaviour: the Select against nothing
             // stays, and the lowering refuses the unresolved operand.
-            const bool fragment = module_->shaderStage == ShaderStage::Fragment;
+            // Not inside a hardware loop: there the register holds the
+            // PREVIOUS iteration's value, not zero, so the undefined side
+            // stays undefined and the region refuses it by name.
+            const bool fragment = module_->shaderStage == ShaderStage::Fragment && !flat;
             const bool thenUndef = fragment && thenVal != InvalidIRValue && isUndefinedValue(thenVal);
             const bool elseUndef = fragment && elseVal != InvalidIRValue && isUndefinedValue(elseVal);
             if (thenUndef && !isUndefinedValue(elseVal)) joinThen = zeroOf(elseVal);
@@ -3221,12 +3230,299 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
     return true;
 }
 
+// FP-LOOP slice 1 (fp-loop-design.md R2, codex R1/R2): a fragment `for` the
+// expansion above could not prove becomes a hardware loop REGION in the
+// current block - LOOP {255, 0, 1} with the source's condition tested at
+// the head of every iteration and a BRK when it fails, the shape the
+// reference emits for a run-time bound (measured).  Admitted only in the
+// canonical shape: `for (i = a | T i = a; i <op> b; ++i | i++ | --i | i--
+// | i += c | i -= c)` whose body is straight-line (no if, no nested
+// unexpanded loop, no break / continue / return / discard) and writes no
+// output, global, out parameter or array element.  Everything else keeps
+// the refusal it had.  Every variable the body writes and reads before
+// writing in an iteration is carried (LoopCarry .. LoopLatch .. LoopOut);
+// one the body writes but never reads first is local to the iteration, and
+// reading it after the loop is refused rather than guessed.
+bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
+{
+    // Only into the entry (an inlined helper builds there too); a helper's
+    // own standalone IR function is never lowered and keeps its old path.
+    if (module_->shaderStage != ShaderStage::Fragment || hardwareLoopDepth_ > 0 ||
+        !currentFunction_ || !currentFunction_->isEntryPoint ||
+        !stmt->init || !stmt->condition || !stmt->increment || !stmt->body ||
+        stmtContainsBreakOrContinue(stmt->body.get()))
+        return false;
+
+    // The induction variable, from the init.
+    std::string varName;
+    DeclNode* induction = nullptr;
+    const bool declares = stmt->init->kind == StmtKind::Decl;
+    if (declares) {
+        auto* d = static_cast<DeclStmt*>(stmt->init.get());
+        if (d->declarations.size() != 1 || !d->declarations[0] ||
+            d->declarations[0]->kind != DeclKind::Variable) return false;
+        auto* v = static_cast<VarDecl*>(d->declarations[0].get());
+        if (!v->initializer) return false;
+        varName = v->name; induction = v;
+    } else if (stmt->init->kind == StmtKind::Expr) {
+        auto* e = static_cast<ExprStmt*>(stmt->init.get())->expr.get();
+        if (!e || e->kind != ExprKind::Binary) return false;
+        auto* b = static_cast<BinaryExpr*>(e);
+        if (b->op != BinaryOp::Assign || b->left->kind != ExprKind::Identifier) return false;
+        auto* id = static_cast<IdentifierExpr*>(b->left.get());
+        varName = id->name; induction = id->resolvedDecl;
+    } else return false;
+    if (!induction) return false;
+    auto isInduction = [&](ExprNode* e) {
+        return e && e->kind == ExprKind::Identifier &&
+            static_cast<IdentifierExpr*>(e)->resolvedDecl == induction;
+    };
+    if (stmt->condition->kind != ExprKind::Binary) return false;
+    {
+        auto* cond = static_cast<BinaryExpr*>(stmt->condition.get());
+        if ((cond->op != BinaryOp::Less && cond->op != BinaryOp::LessEqual &&
+             cond->op != BinaryOp::Greater && cond->op != BinaryOp::GreaterEqual) ||
+            !isInduction(cond->left.get()))
+            return false;
+        const IRTypeInfo t = getExprType(cond->left.get());
+        if (!t.isScalar() || (t.baseType != IRType::Float32 && t.baseType != IRType::Int32))
+            return false;
+    }
+    {
+        auto* inc = stmt->increment.get();
+        if (inc->kind == ExprKind::Unary) {
+            auto* u = static_cast<UnaryExpr*>(inc);
+            if (!isInduction(u->operand.get()) ||
+                (u->op != UnaryOp::PreIncrement && u->op != UnaryOp::PostIncrement &&
+                 u->op != UnaryOp::PreDecrement && u->op != UnaryOp::PostDecrement))
+                return false;
+        } else if (inc->kind == ExprKind::Binary) {
+            auto* b = static_cast<BinaryExpr*>(inc);
+            if (!isInduction(b->left.get()) ||
+                (b->op != BinaryOp::AddAssign && b->op != BinaryOp::SubAssign) ||
+                !b->right || b->right->kind != ExprKind::Literal)
+                return false;
+        } else return false;
+    }
+
+    auto refuse = [&](const std::string& why) {
+        error(stmt->loc, "hardware loop: " + why + "; refusing (fp-loop slice 1)");
+        return true;
+    };
+
+    // What a value is: its type, or nothing when nothing defines it (an
+    // uninitialised local's declaration id).
+    auto valueType = [&](IRValueID id, IRTypeInfo& out) -> bool {
+        if (id == InvalidIRValue) return false;
+        if (IRValue* v = currentFunction_->getValue(id)) { out = v->type; return true; }
+        for (const IRParameter& param : currentFunction_->parameters)
+            if (param.valueId == id) { out = param.type; return true; }
+        if (id >= IRModule::kGlobalIdBase) return false;
+        for (const auto& bp : currentFunction_->blocks)
+            if (bp)
+                for (const auto& ip : bp->instructions)
+                    if (ip && ip->result == id) { out = ip->resultType; return true; }
+        return false;
+    };
+    auto carryable = [](const IRTypeInfo& t) {
+        return !t.isMatrix() && !t.isArray() && !isSamplerIRType(t.baseType) &&
+               t.baseType != IRType::Void && t.baseType != IRType::Ptr &&
+               t.componentCount() >= 1 && t.componentCount() <= 4;
+    };
+
+    blockDeclared_.emplace_back();
+    const ScopeState outer = scope_;
+    buildStmt(stmt->init.get());
+    if (hasErrors()) { blockDeclared_.pop_back(); return true; }
+
+    IRBasicBlock* const block = currentBlock_;
+    const size_t blockCount = currentFunction_->blocks.size();
+    const ScopeState pre = scope_;
+
+    // Provisional carries: every carryable bound name.  The ones the body
+    // never writes are folded back to their value below.
+    struct Carry { std::string name; IRValueID init; IRValueID carry; IRTypeInfo type; };
+    std::vector<Carry> carries;
+    std::vector<std::string> names;
+    for (const auto& kv : nameToValue_) names.push_back(kv.first);
+    std::sort(names.begin(), names.end());
+    for (const std::string& name : names) {
+        const IRValueID v = nameToValue_[name];
+        IRTypeInfo t;
+        if (loopPoison_.count(v) || !valueType(v, t) || !carryable(t)) continue;
+        const IRValueID c = currentFunction_->allocateValueId();
+        auto inst = std::make_unique<IRInstruction>(IROp::LoopCarry, c, t);
+        inst->addOperand(v);
+        block->addInstruction(std::move(inst));
+        carries.push_back({name, v, c, t});
+        nameToValue_[name] = c;
+    }
+    const size_t beginIndex = block->instructions.size();
+    {
+        auto begin = std::make_unique<IRInstruction>(IROp::LoopBegin, InvalidIRValue, IRTypeInfo::Void());
+        begin->componentIndex = 255;
+        block->addInstruction(std::move(begin));
+    }
+    ++hardwareLoopDepth_;
+    {
+        IRValueID cond = buildExpr(stmt->condition.get());
+        cond = normalizeCondition(stmt->condition.get(), cond);
+        auto brk = std::make_unique<IRInstruction>(IROp::LoopBreakIf, InvalidIRValue, IRTypeInfo::Void());
+        brk->addOperand(cond);
+        brk->guardIsNegated = true;   // break where the source condition is FALSE
+        block->addInstruction(std::move(brk));
+    }
+    buildStmt(stmt->body.get());
+    if (!hasErrors() && currentBlock_ == block && !block->hasTerminator())
+        buildExpr(stmt->increment.get());
+    --hardwareLoopDepth_;
+    if (hasErrors()) { blockDeclared_.pop_back(); return true; }
+    if (currentBlock_ != block || currentFunction_->blocks.size() != blockCount ||
+        block->hasTerminator()) {
+        blockDeclared_.pop_back();
+        return refuse("the loop body has control flow (an if, a return or a call that branches)");
+    }
+
+    // Effects the region may not have.
+    for (size_t i = beginIndex; i < block->instructions.size(); ++i) {
+        const IRInstruction* inst = block->instructions[i].get();
+        switch (inst->op) {
+        case IROp::StoreOutput: case IROp::StoreVarying: case IROp::Store:
+        case IROp::Discard: case IROp::Return: case IROp::Call: case IROp::Phi:
+        case IROp::Branch: case IROp::CondBranch: case IROp::LoopCarry:
+        case IROp::LoopBegin: case IROp::LoopLatch: case IROp::LoopEnd: case IROp::LoopOut:
+            if (i == beginIndex && inst->op == IROp::LoopBegin) break;
+            blockDeclared_.pop_back();
+            return refuse(std::string("the loop body contains '") + irOpToString(inst->op) +
+                          (inst->targetName.empty() ? "" : " " + inst->targetName) + "'");
+        default: break;
+        }
+    }
+    if (scope_.arrays != pre.arrays || scope_.shadowedGlobals != pre.shadowedGlobals ||
+        scope_.shadowedGlobalArrays != pre.shadowedGlobalArrays) {
+        blockDeclared_.pop_back();
+        return refuse("the loop body writes an array element or a file-scope variable");
+    }
+    auto usedInRegion = [&](IRValueID v) {
+        for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+            for (IRValueID op : block->instructions[i]->operands)
+                if (op == v) return true;
+        return false;
+    };
+    auto replaceInRegion = [&](IRValueID from, IRValueID to) {
+        for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+            for (IRValueID& op : block->instructions[i]->operands)
+                if (op == from) op = to;
+    };
+    auto writable = [&](const std::string& name) -> std::string {
+        const std::string base = name.substr(0, name.find_first_of(".["));
+        if (module_->findGlobal(base)) return "a file-scope variable";
+        const FunctionDecl* fn = !inlineStack_.empty() ? inlineStack_.back() : currentFunctionDecl_;
+        if (fn)
+            for (const auto& param : fn->parameters)
+                if (param && param->name == base &&
+                    (param->storage == StorageQualifier::Out || param->storage == StorageQualifier::InOut))
+                    return "an out parameter";
+        return "";
+    };
+
+    // Names the body bound that were not carried: new names, and names whose
+    // pre-loop value nothing defines.  Local to an iteration when the region
+    // never reads the pre-loop value; else refused.
+    std::vector<std::string> iterationLocal;
+    for (const auto& kv : nameToValue_) {
+        const auto preIt = pre.names.find(kv.first);
+        const bool carried = std::any_of(carries.begin(), carries.end(),
+            [&](const Carry& c) { return c.name == kv.first; });
+        if (carried || (preIt != pre.names.end() && preIt->second == kv.second)) continue;
+        const std::string what = writable(kv.first);
+        if (!what.empty()) {
+            blockDeclared_.pop_back();
+            return refuse("the loop body writes " + what + " ('" + kv.first + "')");
+        }
+        if (preIt != pre.names.end() && usedInRegion(preIt->second)) {
+            blockDeclared_.pop_back();
+            return refuse("'" + kv.first + "' is read in the loop before it is assigned and has no initialiser");
+        }
+        iterationLocal.push_back(kv.first);
+    }
+
+    // A carry another carry takes as its next value (`t = a; a = b; b = t;`)
+    // is read by the latch even when no body instruction reads it.
+    std::unordered_set<IRValueID> latchReads;
+    for (const Carry& c : carries) {
+        const auto it = nameToValue_.find(c.name);
+        if (it != nameToValue_.end() && it->second != c.carry) latchReads.insert(it->second);
+    }
+
+    // Fold the carries the body leaves alone; keep the rest.
+    std::vector<IRValueID> latch;
+    std::vector<Carry> kept;
+    for (const Carry& c : carries) {
+        const auto it = nameToValue_.find(c.name);
+        const IRValueID next = it == nameToValue_.end() ? InvalidIRValue : it->second;
+        if (next == c.carry || next == InvalidIRValue) {
+            replaceInRegion(c.carry, c.init);
+            if (next == c.carry) nameToValue_[c.name] = c.init;
+            continue;
+        }
+        const std::string what = writable(c.name);
+        if (!what.empty()) {
+            blockDeclared_.pop_back();
+            return refuse("the loop body writes " + what + " ('" + c.name + "')");
+        }
+        if (!usedInRegion(c.carry) && !latchReads.count(c.carry)) { iterationLocal.push_back(c.name); continue; }
+        if (c.type.baseType == IRType::Float16 || c.type.elementType == IRType::Float16) {
+            blockDeclared_.pop_back();
+            return refuse("'" + c.name + "' is a half-precision loop-carried variable");
+        }
+        IRTypeInfo nt;
+        if (!valueType(next, nt) || nt.componentCount() != c.type.componentCount()) {
+            blockDeclared_.pop_back();
+            return refuse("'" + c.name + "' changes width inside the loop");
+        }
+        latch.push_back(c.carry);
+        latch.push_back(next);
+        kept.push_back(c);
+    }
+    // Drop the folded carries' definitions (they precede the region).
+    {
+        std::unordered_set<IRValueID> live;
+        for (const Carry& c : kept) live.insert(c.carry);
+        auto& insts = block->instructions;
+        insts.erase(std::remove_if(insts.begin(), insts.end(),
+            [&](const std::unique_ptr<IRInstruction>& ip) {
+                return ip->op == IROp::LoopCarry && !live.count(ip->result);
+            }), insts.end());
+    }
+    auto latchInst = std::make_unique<IRInstruction>(IROp::LoopLatch, InvalidIRValue, IRTypeInfo::Void());
+    latchInst->operands = latch;
+    block->addInstruction(std::move(latchInst));
+    block->addInstruction(std::make_unique<IRInstruction>(IROp::LoopEnd, InvalidIRValue, IRTypeInfo::Void()));
+    for (const Carry& c : kept) {
+        const IRValueID out = currentFunction_->allocateValueId();
+        auto o = std::make_unique<IRInstruction>(IROp::LoopOut, out, c.type);
+        o->addOperand(c.carry);
+        block->addInstruction(std::move(o));
+        nameToValue_[c.name] = out;
+    }
+    for (const std::string& name : iterationLocal) {
+        const IRValueID poison = currentFunction_->allocateValueId();
+        loopPoison_.insert(poison);
+        nameToValue_[name] = poison;
+    }
+    blockDeclared_.pop_back();
+    if (declares) exitBlockBinding(varName, outer);
+    return true;
+}
+
 void IRBuilder::buildForStmt(ForStmt* stmt)
 {
     // Proven static loops expand within our resource bound. The reference's
     // choice between expansion and a hardware loop also depends on body cost;
     // we preserve values without claiming the same instruction shape.
     if (tryUnrollStaticFor(stmt)) return;
+    if (tryBuildHardwareLoop(stmt)) return;
 
     // Inlining supports proven expansion only. Falling through to a CFG here
     // would admit loop-carried bindings the inliner cannot yet preserve.
@@ -4316,6 +4612,12 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
     auto it = nameToValue_.find(expr->name);
     if (it != nameToValue_.end())
     {
+        if (loopPoison_.count(it->second))
+        {
+            error(expr->loc, "'" + expr->name + "' was assigned inside a hardware loop and is not "
+                  "carried out of it; reading it after the loop is refused (fp-loop slice 1)");
+            return InvalidIRValue;
+        }
         return it->second;
     }
 

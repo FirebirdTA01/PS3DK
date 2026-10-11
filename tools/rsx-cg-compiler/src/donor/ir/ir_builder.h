@@ -212,6 +212,14 @@ private:
     // Static-count for-loop unroll. Returns true if the loop was fully
     // unrolled into straight-line IR — caller skips the real-branch path.
     bool tryUnrollStaticFor(ForStmt* stmt);
+    // A fragment `for` that cannot be expanded becomes a hardware loop
+    // region (IROp::LoopCarry .. LoopOut, ir.h).  Returns false, having
+    // built nothing, when the loop is outside the admitted shape.
+    bool tryBuildHardwareLoop(ForStmt* stmt);
+    // Values bound to names a hardware loop's body assigned without
+    // carrying them: reading one after the loop is refused by name.
+    std::unordered_set<IRValueID> loopPoison_;
+    int hardwareLoopDepth_ = 0;
     void buildWhileStmt(WhileStmt* stmt);
     void buildDoWhileStmt(DoWhileStmt* stmt);
     void buildSwitchStmt(SwitchStmt* stmt);

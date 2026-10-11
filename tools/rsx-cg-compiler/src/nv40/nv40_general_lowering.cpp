@@ -174,7 +174,15 @@ enum class VOp
     // tracked temp reads and knew nothing about the condition register when
     // this was written, so a separate CC writer and KIL could be torn apart,
     // or another CC writer scheduled between them.
-    Kil
+    Kil,
+    // FP-LOOP slice 1 (ir.h LoopBegin..LoopEnd).  LoopBegin emits LOOP
+    // {loopCount, 0, 1} whose target is patched at LoopEnd (which emits
+    // nothing); Brk is Kil's shape - the guard's producer retargeted to the
+    // condition register, then BRK testing it.  All three are scheduling
+    // barriers: nothing moves into, out of or across a region boundary.
+    LoopBegin,
+    Brk,
+    LoopEnd
 };
 
 enum class VSrcKind
@@ -259,6 +267,8 @@ struct VInstr
     // rather than inverting the comparison.
     VOp  killFused = VOp::Mov;
     bool killTestEq = false;
+    // VOp::LoopBegin only: the LOOP's trip count.
+    int  loopCount = 0;
     // VOp::SelPred only: the condition is as wide as the result and
     // selects per lane (CC written and tested lane by lane) instead of
     // one scalar condition broadcast through CC.x.
@@ -1756,12 +1766,26 @@ private:
 
         const auto readsConditionRegister = [](const VInstr& vi) {
             return vi.predicate != 0 || vi.op == VOp::Kil ||
-                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred;
+                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred || vi.op == VOp::Brk;
         };
         const auto writesConditionRegister = [](const VInstr& vi) {
             return vi.ccUpdate || vi.op == VOp::Kil ||
-                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred;
+                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred || vi.op == VOp::Brk;
         };
+        // Loop region markers are full barriers: every instruction before one
+        // stays before it, every instruction after stays after.
+        {
+            size_t lastBarrier = n;
+            for (size_t i = 0; i < n; ++i) {
+                const VOp op = program_.instrs[i].op;
+                const bool barrier = op == VOp::LoopBegin || op == VOp::Brk || op == VOp::LoopEnd;
+                if (lastBarrier != n) link(lastBarrier, i);
+                if (barrier) {
+                    for (size_t j = (lastBarrier == n ? 0 : lastBarrier); j < i; ++j) link(j, i);
+                    lastBarrier = i;
+                }
+            }
+        }
 
         for (size_t i = 0; i < n; ++i) {
             const VInstr& vi = program_.instrs[i];
@@ -2193,6 +2217,24 @@ private:
                     if (!terminator)
                         ++nonTermUseCount_[id];
                 }
+            }
+        }
+
+        // FP-LOOP: a value defined BEFORE a loop region and read inside it is
+        // read again by the next iteration, so no lowering may consume it in
+        // place (a single-use fold that rewrites its register): one more use.
+        for (const auto& block : entry_.blocks) {
+            if (!block) continue;
+            bool inRegion = false;
+            std::unordered_set<IRValueID> regionDefs;
+            for (const auto& instPtr : block->instructions) {
+                if (!instPtr) continue;
+                if (instPtr->op == IROp::LoopBegin) { inRegion = true; regionDefs.clear(); continue; }
+                if (instPtr->op == IROp::LoopEnd) { inRegion = false; continue; }
+                if (!inRegion) continue;
+                for (IRValueID id : instPtr->operands)
+                    if (!regionDefs.count(id)) { ++useCount_[id]; ++nonTermUseCount_[id]; }
+                if (instPtr->result != InvalidIRValue) regionDefs.insert(instPtr->result);
             }
         }
 
@@ -3140,6 +3182,36 @@ private:
         case IROp::Discard:
             lowerDiscard(inst);
             return;
+        case IROp::LoopCarry:
+            lowerLoopCarry(inst);
+            return;
+        case IROp::LoopBegin:
+        case IROp::LoopEnd: {
+            VInstr marker;
+            marker.op = inst.op == IROp::LoopBegin ? VOp::LoopBegin : VOp::LoopEnd;
+            marker.dst.none = true;
+            marker.dst.index = -1;
+            marker.dst.writemask = 0;
+            marker.loopCount = inst.componentIndex;
+            program_.instrs.push_back(marker);
+            return;
+        }
+        case IROp::LoopBreakIf:
+            lowerLoopBreak(inst);
+            return;
+        case IROp::LoopLatch:
+            lowerLoopLatch(inst);
+            return;
+        case IROp::LoopOut: {
+            const auto it = program_.valueToVReg.find(inst.operands.empty() ? InvalidIRValue : inst.operands[0]);
+            if (it == program_.valueToVReg.end()) {
+                program_.diagnostics.push_back("nv40-general: loop-out of a value that is not a carry; refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+            program_.valueToVReg[inst.result] = it->second;
+            return;
+        }
         case IROp::Return:
         case IROp::Comment:
         case IROp::Nop:
@@ -4241,6 +4313,136 @@ private:
         }
 
         program_.instrs.push_back(kil);
+    }
+
+    // FP-LOOP slice 1.  A carry is one register for the whole region: its
+    // initial value is copied in ONCE, before the LOOP; the body reads it;
+    // the latch writes the next value back.
+    void lowerLoopCarry(const IRInstruction& inst)
+    {
+        if (profile_ != GeneralProfile::Fragment || inst.operands.size() != 1) {
+            program_.diagnostics.push_back("nv40-general: a hardware loop is fragment-only");
+            program_.loweringFailed = true;
+            return;
+        }
+        const int width = inst.resultType.componentCount();
+        const int vreg = define(inst.result);
+        VInstr mov;
+        mov.op = VOp::Mov;
+        mov.dst.index = vreg;
+        mov.dst.writemask = (1 << width) - 1;
+        mov.srcs[0] = resolve(inst.operands[0]);
+        program_.instrs.push_back(mov);
+    }
+
+    // The exit test.  The guard's producer is fused into the condition-
+    // register write when it is the instruction just emitted and nothing
+    // else reads it (the reference's SLTRC + BRK); otherwise a MOV of the
+    // guard sets the condition register.  The break fires where the guard
+    // is zero (guardIsNegated: the source condition failed) or non-zero.
+    void lowerLoopBreak(const IRInstruction& inst)
+    {
+        VInstr brk;
+        brk.op = VOp::Brk;
+        brk.dst.none = true;
+        brk.dst.index = -1;
+        brk.dst.writemask = 0x1;
+        brk.killTestEq = inst.guardIsNegated;
+        if (inst.operands.size() != 1) {
+            program_.diagnostics.push_back("nv40-general: loop break without a guard; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        const IRValueID guard = inst.operands[0];
+        const auto vregIt = program_.valueToVReg.find(guard);
+        const auto useIt = nonTermUseCount_.find(guard);
+        const bool soleConsumer = useIt == nonTermUseCount_.end() || useIt->second <= 1;
+        bool fused = false;
+        if (!program_.instrs.empty() && vregIt != program_.valueToVReg.end() && soleConsumer) {
+            const VInstr& last = program_.instrs.back();
+            const bool comparison =
+                last.op == VOp::Slt || last.op == VOp::Sgt || last.op == VOp::Sle ||
+                last.op == VOp::Sge || last.op == VOp::Seq || last.op == VOp::Sne;
+            if (comparison && !last.dst.none && !last.dst.output &&
+                last.dst.index == vregIt->second && last.predicate == 0 &&
+                !last.ccUpdate && last.fpScale == 0 && !last.sat &&
+                !last.stubFenceBefore && !last.stubFenceBrBefore &&
+                last.fpPrecisionOverride < 0) {
+                brk.killFused = last.op;
+                brk.srcs = last.srcs;
+                program_.instrs.pop_back();
+                fused = true;
+            }
+        }
+        if (!fused) {
+            VSrc src = resolve(guard);
+            if (src.kind == VSrcKind::None) {
+                program_.diagnostics.push_back("nv40-general: loop break guard is unresolved");
+                program_.loweringFailed = true;
+                return;
+            }
+            brk.killFused = VOp::Mov;
+            brk.srcs[0] = src;
+        }
+        program_.instrs.push_back(brk);
+    }
+
+    // Every carry takes its next value IN PARALLEL: a next value that is
+    // another carry's register is copied aside first, so a swap (a <- b,
+    // b <- a) does not collapse.  A self-copy with the identity swizzle is
+    // dropped.
+    void lowerLoopLatch(const IRInstruction& inst)
+    {
+        if (inst.operands.size() % 2 != 0) {
+            program_.diagnostics.push_back("nv40-general: malformed loop latch; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        struct Copy { int dst; int width; VSrc src; };
+        std::vector<Copy> copies;
+        std::unordered_set<int> carryRegs;
+        for (size_t i = 0; i < inst.operands.size(); i += 2) {
+            const auto it = program_.valueToVReg.find(inst.operands[i]);
+            if (it == program_.valueToVReg.end()) {
+                program_.diagnostics.push_back("nv40-general: loop latch names a carry with no register; refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+            carryRegs.insert(it->second);
+        }
+        for (size_t i = 0; i < inst.operands.size(); i += 2) {
+            const int dst = program_.valueToVReg[inst.operands[i]];
+            const int width = std::max(1, valueWidthOf(inst.operands[i]));
+            VSrc src = resolve(inst.operands[i + 1]);
+            if (src.kind == VSrcKind::None) return;   // resolve() has refused
+            copies.push_back({dst, width, src});
+        }
+        for (Copy& c : copies) {
+            if (c.src.kind != VSrcKind::Temp || !carryRegs.count(c.src.index) || c.src.index == c.dst)
+                continue;
+            const int staged = newVReg();
+            VInstr mov;
+            mov.op = VOp::Mov;
+            mov.dst.index = staged;
+            mov.dst.writemask = (1 << c.width) - 1;
+            mov.srcs[0] = c.src;
+            program_.instrs.push_back(mov);
+            c.src = tempSrc(staged);
+            if (c.width == 1) broadcastScalar(c.src);
+        }
+        for (const Copy& c : copies) {
+            if (c.src.kind == VSrcKind::Temp && c.src.index == c.dst && !c.src.neg && !c.src.abs) {
+                bool identity = true;
+                for (int l = 0; l < c.width; ++l) identity = identity && c.src.swizzle[l] == l;
+                if (identity) continue;
+            }
+            VInstr mov;
+            mov.op = VOp::Mov;
+            mov.dst.index = c.dst;
+            mov.dst.writemask = (1 << c.width) - 1;
+            mov.srcs[0] = c.src;
+            program_.instrs.push_back(mov);
+        }
     }
 
     // Precision of the instruction fused into a kill, as MEASURED - not
@@ -9760,6 +9962,31 @@ private:
             }
         }
 
+        // FP-LOOP: a register written before a loop region and read inside it
+        // (a carry, a loop invariant) is read again by the next iteration, so
+        // it lives until the region ends; it is freed there.  A register
+        // defined inside the region lives as usual - every iteration writes it
+        // before reading it.
+        std::unordered_map<size_t, std::vector<int>> regionEndFrees;
+        {
+            size_t begin = program_.instrs.size();
+            for (size_t i = 0; i < program_.instrs.size(); ++i) {
+                const VOp op = program_.instrs[i].op;
+                if (op == VOp::LoopBegin) { begin = i; continue; }
+                if (op != VOp::LoopEnd || begin == program_.instrs.size()) continue;
+                std::set<int> extended;
+                for (size_t k = begin + 1; k < i; ++k)
+                    for (const VSrc& src : program_.instrs[k].srcs) {
+                        if (src.kind != VSrcKind::Temp) continue;
+                        const auto d = firstDef.find(src.index);
+                        if (d == firstDef.end() || d->second > begin) continue;
+                        if (lastUse[src.index] < i) { lastUse[src.index] = i; extended.insert(src.index); }
+                    }
+                regionEndFrees[i].assign(extended.begin(), extended.end());
+                begin = program_.instrs.size();
+            }
+        }
+
         // PEAK LIVE COUNT - how many virtual temps are in flight at once.
         //
         // This is the number of registers the program actually needs, and
@@ -10283,6 +10510,15 @@ private:
                         freeList.push_back(freedSlot);
                 }
             }
+            const auto ends = regionEndFrees.find(i);
+            if (ends != regionEndFrees.end()) {
+                for (int vreg : ends->second) {
+                    const auto physIt = program_.vregToPhys.find(vreg);
+                    if (physIt == program_.vregToPhys.end()) continue;
+                    const bool fp16 = program_.vregToFp16.count(vreg) && program_.vregToFp16[vreg];
+                    freeList.push_back(fp16 ? (physIt->second >> 1) : physIt->second);
+                }
+            }
         }
     }
 };
@@ -10431,6 +10667,9 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Txl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
     case VOp::Sfl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
     case VOp::Ftoi: return NVFX_FP_OP_OPCODE_MOV;
+    case VOp::LoopBegin:
+    case VOp::Brk:
+    case VOp::LoopEnd: return NVFX_FP_OP_OPCODE_MOV;   // emitted raw, never through here
     }
     return NVFX_FP_OP_OPCODE_MOV;
 }
@@ -10487,6 +10726,9 @@ static const char* vOpName(VOp op)
     case VOp::Ftoi: return "Ftoi";
     case VOp::SelPred: return "SelPred";
     case VOp::Kil: return "Kil";
+    case VOp::LoopBegin: return "LoopBegin";
+    case VOp::Brk: return "Brk";
+    case VOp::LoopEnd: return "LoopEnd";
     }
     return "unknown";
 }
@@ -11043,7 +11285,36 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     };
 
     bool emittedInstruction = false;
+    std::vector<size_t> openLoops;
+    size_t lastLoopTarget = 0;
     for (const VInstr& vi : program.instrs) {
+        // FP-LOOP slice 1 (measured encodings, fp-loop-encoding.md): LOOP is
+        // op 0x03 with OUT_NONE, fp32, the identity condition swizzle and TR;
+        // hw2 = IS_BRANCH | step << 19 | init << 10 | count << 2; hw3 = the
+        // dword index of the first instruction after the body, patched at
+        // the region end, after every literal block of the body is placed.
+        if (vi.op == VOp::LoopBegin) {
+            if (vi.loopCount < 1 || vi.loopCount > 255 || !openLoops.empty()) {
+                out.diagnostics.push_back("nv40-general-fp: unsupported hardware loop shape; refusing");
+                return out;
+            }
+            openLoops.push_back(asm_.emitRaw(
+                0x43400000u, 0x1c9dc800u,
+                0x80000000u | (1u << 19) | (0u << 10) | (static_cast<uint32_t>(vi.loopCount) << 2),
+                0u));
+            emittedInstruction = true;
+            continue;
+        }
+        if (vi.op == VOp::LoopEnd) {
+            if (openLoops.empty()) {
+                out.diagnostics.push_back("nv40-general-fp: loop end without a loop; refusing");
+                return out;
+            }
+            lastLoopTarget = asm_.wordCount();
+            asm_.patchWord(openLoops.back() + 3, static_cast<uint32_t>(lastLoopTarget));
+            openLoops.pop_back();
+            continue;
+        }
         std::string why;
         if (scalarSourceLaneConflict(vi)) {
             out.diagnostics.push_back(scalarSourceDiagnostic(vi));
@@ -11128,6 +11399,43 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             asm_.emit(kil, NVFX_FP_OP_OPCODE_KIL);
             // One $kill_NNNN container parameter per discard STATEMENT.
             attrs.pixelKillCount += 1;
+            emittedInstruction = true;
+            continue;
+        }
+        if (vi.op == VOp::Brk) {
+            // Kil's shape: the guard's producer (or a MOV of the guard)
+            // writes the condition register, then BRK tests lane x - EQ where
+            // the loop condition failed (killTestEq), NE where it holds.
+            struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+            std::array<VSrc, 3> brkSrcs = vi.srcs;
+            for (VSrc& src : brkSrcs)
+                packLiteralBlock(src);
+            struct nvfx_insn set = nvfx_insn(
+                0, 0, -1, -1, ccDst, NVFX_FP_MASK_X,
+                nvfxSource(brkSrcs[0]), nvfxSource(brkSrcs[1]), nvfxSource(brkSrcs[2]));
+            set.cc_update = 1;
+            asm_.emit(set, fpOpcode(vi.killFused));
+            bool blockAppended = false;
+            for (const VSrc& src : brkSrcs) {
+                if (src.kind != VSrcKind::Uniform && src.kind != VSrcKind::Literal)
+                    continue;
+                if (blockAppended) {
+                    out.diagnostics.push_back(
+                        "nv40-general-fp: a loop exit test reads two inline constants; refusing");
+                    return out;
+                }
+                const uint32_t offset = asm_.currentByteSize();
+                if (src.kind == VSrcKind::Uniform) {
+                    recordFpUniformOffset(attrs, static_cast<unsigned>(src.index), offset);
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
+                } else {
+                    asm_.appendConstBlock(src.literal.data());
+                }
+                blockAppended = true;
+            }
+            const uint32_t cond = vi.killTestEq ? NVFX_COND_EQ : NVFX_COND_NE;
+            asm_.emitRaw(0x40400000u, cond << 18, 0x80000000u, 0u);
             emittedInstruction = true;
             continue;
         }
@@ -11438,6 +11746,11 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // NOP carrying PROGRAM_END (SDK fnop.cg: 'void main() {}').  Its
     // parameters are still recorded, unreferenced.  Anything else that
     // reaches here empty lost its code somewhere and stays refused.
+    if (!openLoops.empty() || (lastLoopTarget != 0 && lastLoopTarget >= asm_.wordCount())) {
+        out.diagnostics.push_back(
+            "nv40-general-fp: a hardware loop is not followed by an instruction; refusing");
+        return out;
+    }
     const bool noEffectProgram = asm_.empty() && fpEntryHasNoEffect(entry);
     if (noEffectProgram)
         asm_.emitNop();

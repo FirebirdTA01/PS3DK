@@ -273,8 +273,35 @@ enum class IROp
     // Operand layout: [cond, defaultVal, op_arg0, op_arg1, ...].
     // `predOp` carries the inner op (Add / Mul / Mad / etc.) that
     // would have run unconditionally inside the THEN block.
-    PredCarry
+    PredCarry,
+
+    // A hardware loop region (fragment only), built by the IR builder for a
+    // `for` it cannot expand.  The region is a contiguous run of one
+    // block's instructions, straight-line inside:
+    //   %c = loopcarry %init      one per loop-carried variable, before
+    //   loopbegin                 componentIndex = trip count (LOOP count)
+    //   loopbreakif %cond         break when %cond is false (guardIsNegated)
+    //                             or true; no carry has been written before it
+    //   <body>
+    //   looplatch %c1, %n1, ...   every carry takes its next value, in PARALLEL
+    //   loopend
+    //   %o = loopout %c           a carry's value after the loop
+    // A value defined inside the region is not visible after it; every
+    // pass treats these as barriers (not pure, never merged or moved over).
+    LoopCarry,
+    LoopBegin,
+    LoopBreakIf,
+    LoopLatch,
+    LoopEnd,
+    LoopOut
 };
+
+inline bool isLoopRegionOp(IROp op)
+{
+    return op == IROp::LoopCarry || op == IROp::LoopBegin ||
+           op == IROp::LoopBreakIf || op == IROp::LoopLatch ||
+           op == IROp::LoopEnd || op == IROp::LoopOut;
+}
 
 const char* irOpToString(IROp op);
 

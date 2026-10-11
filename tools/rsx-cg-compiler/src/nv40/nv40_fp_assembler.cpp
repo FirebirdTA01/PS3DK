@@ -326,6 +326,18 @@ void FpAssembler::emitSrc(const struct nvfx_insn& insn, int pos, uint32_t* hw)
     hw[pos + 1] |= sr;
 }
 
+size_t FpAssembler::emitRaw(uint32_t hw0, uint32_t hw1, uint32_t hw2, uint32_t hw3)
+{
+    const size_t base = logicalWords_.size();
+    logicalWords_.push_back(hw0);
+    logicalWords_.push_back(hw1);
+    logicalWords_.push_back(hw2);
+    logicalWords_.push_back(hw3);
+    lastInstrOffset_ = base;
+    hasInstruction_  = true;
+    return base;
+}
+
 void FpAssembler::markEnd()
 {
     if (!hasInstruction_) return;

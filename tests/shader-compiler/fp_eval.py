@@ -72,12 +72,13 @@ class _Regs:
     not stale; H2k/H2k+1 alias Rk with an unmodelled bit layout, so a write to
     either bank marks EVERY lane of the other bank stale until rewritten."""
 
-    def __init__(self):
+    def __init__(self, zero_temps=False):
         self.vals, self.defined, self.stale = {}, {}, {}
+        self.zero_temps = zero_temps
 
     def read(self, key, lanes):
         for lane in lanes:
-            if lane not in self.defined.get(key, ()):
+            if lane not in self.defined.get(key, ()) and not (self.zero_temps and key[0] == 'R'):
                 raise Unmodelled("%s%d.%s read before it was written" % (key + ("xyzw"[lane],)))
             if lane in self.stale.get(key, ()):
                 raise Unmodelled("%s%d.%s read after its aliased bank was written" % (key + ("xyzw"[lane],)))
@@ -166,15 +167,90 @@ _CC_TEST = {0: lambda x: False, 1: lambda x: x < 0, 2: lambda x: x == 0, 3: lamb
             4: lambda x: x > 0, 5: lambda x: x != 0, 6: lambda x: x >= 0, 7: lambda x: True}
 
 
-def evaluate(blob, inputs, *, scalar_kill=False):
+def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False):
     """Run the program; `inputs` maps 'TEX0'.. / 'COL0' to 4-float lists. Returns R0."""
-    regs = _Regs()
+    # zero_temps: an R temp never written reads 0 (measured on the hardware
+    # model the reference relies on: a loop's induction variable and
+    # accumulators start unwritten).  Off by default, so a read of an unwritten
+    # temp stays a finding everywhere else.
+    regs = _Regs(zero_temps)
     cc = [None] * 4
     ended = False
+    # The program with each instruction's slot (16 bytes, constants included):
+    # a LOOP's target is the dword index of the first instruction after its
+    # body, i.e. slot * 4.
+    prog, slot = [], 0
     for w, const in instructions(ucode_words(blob)):
+        prog.append((w, const, slot))
+        slot += 2 if const is not None else 1
+    at_slot = {s: i for i, (_, _, s) in enumerate(prog)}
+
+    def run():
+        # LOOP {count, init, step} repeats the instructions up to its target
+        # `count` times; BRK (EQ0.x etc.) leaves the innermost loop when its
+        # CC test passes.  No ENDLOOP instruction exists; the target closes
+        # the body.  The loop counter is not readable, so init/step only
+        # matter through the count.
+        pc, loops, steps = 0, [], 0
+        def close():
+            nonlocal pc
+            while loops and pc == loops[-1][1]:
+                if loops[-1][2] > 0:
+                    loops[-1][2] -= 1
+                    pc = loops[-1][0]
+                    return
+                loops.pop()
+        while pc < len(prog):
+            steps += 1
+            if steps > 2000000:
+                raise Unmodelled("loop did not terminate within the step budget")
+            w, const, _ = prog[pc]
+            if (w[2] >> 31) & 1:
+                bop = (w[0] >> 24) & 0x3F
+                if bop == 0x03:
+                    count = (w[2] >> 2) & 0xFF
+                    init, step = (w[2] >> 10) & 0xFF, (w[2] >> 19) & 0xFF
+                    # Only the measured form is modelled: init 0, step 1.  A
+                    # step-0 loop (the outer loop of the reference's 256-trip
+                    # nest) or another init is refused until its counter
+                    # semantics are measured (review: codex, FP-LOOP-DESIGN-R1).
+                    if init != 0 or step != 1:
+                        raise Unmodelled("LOOP {%d, %d, %d}: only init 0 / step 1 is modelled" % (count, init, step))
+                    target = (w[3] & 0x7FFFFFFF)
+                    if target % 4 or target // 4 not in at_slot:
+                        raise Unmodelled("LOOP target %d is not an instruction" % target)
+                    end = at_slot[target // 4]
+                    if end <= pc:
+                        raise Unmodelled("LOOP target before the LOOP")
+                    if count == 0:
+                        pc = end
+                    else:
+                        loops.append([pc + 1, end, count - 1])
+                        pc += 1
+                elif bop == 0x00:
+                    if not loops:
+                        raise Unmodelled("BRK outside a loop")
+                    cond = (w[1] >> 18) & 7
+                    swz = [(w[1] >> (21 + 2 * i)) & 3 for i in range(4)]
+                    if len(set(swz)) != 1:
+                        raise Unmodelled("non-scalar BRK condition")
+                    v = cc[swz[0]]
+                    if cond not in (0, 7) and v is None:
+                        raise Unmodelled("BRK tests unwritten CC")
+                    if cond == 7 or (cond != 0 and _CC_TEST[cond](v)):
+                        pc = loops.pop()[1]
+                    else:
+                        pc += 1
+                else:
+                    raise Unmodelled("branch instruction %#x" % bop)
+                close()
+                continue
+            yield w, const
+            pc += 1
+            close()
+
+    for w, const in run():
         opc = (w[0] >> 24) & 0x3F
-        if (w[2] >> 31) & 1:
-            raise Unmodelled("branch instruction")
         if opc == 0x12 and scalar_kill:
             # Opt-in for the scalar-broadcast CC form. Other KIL encodings
             # remain unjudged; None means this fragment was discarded.

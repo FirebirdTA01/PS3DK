@@ -43,6 +43,13 @@ bool isPure(IROp op)
     case IROp::TexSampleProj:
     case IROp::TexSampleBias:
     case IROp::TexFetch:
+    // Loop region markers and carries: barriers, never merged or dropped.
+    case IROp::LoopCarry:
+    case IROp::LoopBegin:
+    case IROp::LoopBreakIf:
+    case IROp::LoopLatch:
+    case IROp::LoopEnd:
+    case IROp::LoopOut:
         return false;
     default:
         return true;
@@ -869,10 +876,29 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
                 rpo[post[post.size() - 1 - k]] = k;
     }
 
+    // A value defined inside a hardware loop region (loopbegin..loopend) is
+    // not computed when the loop exits before reaching it, and holds only the
+    // last iteration's value after it: it may be reused inside the region,
+    // never after it.  Candidates entered inside a region are withdrawn at
+    // its loopend.  A region expression may still reuse one from before the
+    // loop (that value is live across the whole region).
+    std::vector<std::pair<IRInstruction*, IRValueID>> regionCandidates;
+    int regionDepth = 0;
     for (size_t bi = 0; bi < n; ++bi)
     {
         for (auto& inst : func.blocks[bi]->instructions)
         {
+            if (inst->op == IROp::LoopBegin) ++regionDepth;
+            if (inst->op == IROp::LoopEnd && regionDepth > 0 && --regionDepth == 0)
+            {
+                for (const auto& [key, value] : regionCandidates)
+                {
+                    auto& list = m_exprMap[key];
+                    list.erase(std::remove_if(list.begin(), list.end(),
+                        [&](const auto& c) { return c.first == value; }), list.end());
+                }
+                regionCandidates.clear();
+            }
             // Only consider pure operations
             if (!IRPassUtils::isPure(inst->op) || inst->result == InvalidIRValue)
             {
@@ -893,6 +919,7 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
             else
             {
                 candidates.emplace_back(inst->result, bi);
+                if (regionDepth > 0) regionCandidates.emplace_back(inst.get(), inst->result);
             }
         }
     }
