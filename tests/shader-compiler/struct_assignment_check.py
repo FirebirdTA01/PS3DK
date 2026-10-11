@@ -1,7 +1,7 @@
 """VP struct constructor assignment: snapshots and every semantic output.
 
 Independently authored source/vector twins; expected values use scalar formulas.
-Fixed/bool/narrow types, arrays, assignment values and helper copy-out retain
+Bool/narrow types, arrays, assignment values and helper copy-out retain
 explicit refusals. Reference uint crashes are not classified as refusals.
 """
 import argparse
@@ -132,7 +132,8 @@ CASES = [{'name': 'initializer-control',
   'source': 'struct Typed{int2 a;int2 b;};float4 main(float4 p:TEXCOORD0,float4 q:TEXCOORD1):POSITION{Typed '
             's;s=Typed(int2(3,-3),int2(p.xy));return float4(s.a,s.b);}'},
  {'name': 'kind-fixed',
-  'refusal': True,
+  'refusal': False,
+  'twin': 'float4 main(float4 p:TEXCOORD0,float4 q:TEXCOORD1):POSITION{return float4(1.9990234375,-2,p.xy);}',
   'source': 'struct Typed{fixed2 a;fixed2 b;};float4 main(float4 p:TEXCOORD0,float4 '
             'q:TEXCOORD1):POSITION{Typed s;s=Typed(fixed2(3,-3),fixed2(p.xy));return float4(s.a,s.b);}'},
  {'name': 'kind-bool',
@@ -144,7 +145,9 @@ CASES = [{'name': 'initializer-control',
   'source': 'struct Typed{short2 a;short2 b;};float4 main(float4 p:TEXCOORD0,float4 '
             'q:TEXCOORD1):POSITION{Typed s;s=Typed(short2(3,-3),short2(p.xy));return float4(s.a,s.b);}'},
  {'name': 'fixed-output-boundary',
-  'refusal': True,
+  'refusal': False,
+  'twin': 'void main(float4 p:TEXCOORD0,float4 q:TEXCOORD1,out float4 pos:POSITION,out float2 a:TEXCOORD2,'
+          'out float2 b:TEXCOORD3){a=float2(1.9990234375,-2);b=p.xy;pos=float4(a,b);}',
   'source': 'struct Typed{fixed2 a:TEXCOORD2;fixed2 b:TEXCOORD3;};void main(float4 p:TEXCOORD0,float4 '
             'q:TEXCOORD1,out float4 pos:POSITION,out Typed '
             'o){o=Typed(fixed2(3,-3),fixed2(p.xy));pos=float4(o.a,o.b);}'},
@@ -190,6 +193,10 @@ def expected(name, inputs):
         'nested-source-alias':q[2:]+p[:2],
         'evaluation-once':[p[0],p[0]+1,p[0]+2,1],
         'inout-read-before-write':ib[:2]+ia[:2],
+        # fixed members convert as fixed declarations do: the constant
+        # fixed2(3,-3) saturates to the fixed range (measured on the reference).
+        'kind-fixed':[1.9990234375,-2.0]+p[:2],
+        'fixed-output-boundary':[1.9990234375,-2.0]+p[:2],
     }
     position=values.get(name,normal)
     result={0:position}

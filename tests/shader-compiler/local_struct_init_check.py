@@ -23,7 +23,7 @@ REFUSED = {'few', 'many', 'wrong_struct', 'numeric_splat', 'numeric_narrow',
 DEBTS = {'array_braces', 'array_member', 'sampler_field',
          'constructor_as_argument', 'constructor_member',
          'global_const_nested', 'uniform_default_nested',
-         'fixed_field', 'short_field', 'bool_field', 'fixed_source'}
+         'short_field', 'bool_field'}
 VP_DEBTS = {'int_field': 'VP float-to-int lowering deferred',
             'numeric_half': 'half precision is fragment-only',
             'implicit_member': 'VP int-to-float lowering deferred'}
@@ -39,6 +39,12 @@ def expected(name, t, u):
     if name == 'global_side_effect':
         return [t[0] * t[2], t[1] * t[2], 1., 1.]
     if name in ('implicit_member', 'typedef_field', 'typedef_struct'):
+        return [t[0], t[1], 0., 1.]
+    # fixed members convert as a fixed declaration does; these inputs are
+    # exact in fixed, and the reference's containers give these values.
+    if name == 'fixed_field':
+        return [t[0], 0., 0., 1.]
+    if name == 'fixed_source':
         return [t[0], t[1], 0., 1.]
     if name == 'int_field':
         return [float(math.trunc(t[0])), 0., 0., 1.]
