@@ -22,7 +22,8 @@
 # Two fixtures assert a REFUSAL, and each refusal is checked for its own
 # reason so it cannot pass because something else broke first:
 #
-#   fp_discard_loop_f      - a back-edge, on the general path.  A
+#   fp_discard_loop_f      - a discard in a run-time loop: the hardware-
+#                            loop region refuses it by name.  A
 #                            DIVERGENCE, not a shared limit: the reference
 #                            compiles a dynamic loop with real hardware
 #                            loop instructions.  The bound must be
@@ -129,13 +130,16 @@ n="$(kills_in_container fp_discard_two_f)"
 
 run fp_discard_loop_f "" loop
 [[ "$rc" -eq 1 ]] || fail "fp_discard_loop_f compiled on the general path.
-A discard inside a dynamic loop needs the back-edge CF-1a refuses.  If the
+A discard inside a dynamic loop is refused (the hardware-loop region admits
+no discard in its body).  If the
 loop is being unrolled instead, the fixture's bound stopped being dynamic
 and the refusal is no longer exercised."
-grep -q "back-edge" "$work/loop.log" || {
+grep -qE "back-edge|the loop body contains 'discard'" "$work/loop.log" || {
     tail -n 5 "$work/loop.log" >&2
-    fail "fp_discard_loop_f refused for some OTHER reason than the
-back-edge; a refusal that fires for the wrong reason is not a guard."
+    fail "fp_discard_loop_f refused for some OTHER reason than the loop
+(the hardware-loop region refuses a discard in its body; a back-edge
+refusal is the older spelling); a refusal that fires for the wrong reason
+is not a guard."
 }
 
 # legacy-path control removed with the shape matcher (chore/rsxcg-remove-legacy-lowering); it proved the matcher refused else/and/two/merge_guard/nested discards for their own reasons (discard-guard-completeness, half-preload-register-alias, post-discard-output-restores, nested-discard-reachability) and kept compiling lt/ge/then_work.

@@ -3377,13 +3377,28 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         buildExpr(stmt->increment.get());
     --hardwareLoopDepth_;
     if (hasErrors()) { blockDeclared_.pop_back(); return true; }
+    // Effects the region may not have - named first, also in any block the
+    // body created, so a discard under an if is refused as a discard.
+    std::vector<const IRInstruction*> regionInsts;
+    for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+        regionInsts.push_back(block->instructions[i].get());
+    for (size_t b = blockCount; b < currentFunction_->blocks.size(); ++b)
+        if (currentFunction_->blocks[b])
+            for (const auto& ip : currentFunction_->blocks[b]->instructions)
+                regionInsts.push_back(ip.get());
+    for (const IRInstruction* inst : regionInsts) {
+        if (inst->op == IROp::Discard || inst->op == IROp::Return ||
+            inst->op == IROp::StoreOutput || inst->op == IROp::StoreVarying || inst->op == IROp::Store) {
+            blockDeclared_.pop_back();
+            return refuse(std::string("the loop body contains '") + irOpToString(inst->op) + "'");
+        }
+    }
     if (currentBlock_ != block || currentFunction_->blocks.size() != blockCount ||
         block->hasTerminator()) {
         blockDeclared_.pop_back();
         return refuse("the loop body has control flow (an if, a return or a call that branches)");
     }
 
-    // Effects the region may not have.
     for (size_t i = beginIndex; i < block->instructions.size(); ++i) {
         const IRInstruction* inst = block->instructions[i].get();
         switch (inst->op) {
@@ -3471,7 +3486,10 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             blockDeclared_.pop_back();
             return refuse("the loop body writes " + what + " ('" + c.name + "')");
         }
-        if (!usedInRegion(c.carry) && !latchReads.count(c.carry)) { iterationLocal.push_back(c.name); continue; }
+        // A variable with a value before the loop stays carried even when
+        // every iteration writes it before reading it: after the loop it
+        // holds the last iteration's value, or its old value when the loop
+        // ran no iteration (`a = t / i;` then `return a;`).
         if (c.type.baseType == IRType::Float16 || c.type.elementType == IRType::Float16) {
             blockDeclared_.pop_back();
             return refuse("'" + c.name + "' is a half-precision loop-carried variable");

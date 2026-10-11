@@ -6,7 +6,13 @@ on body and induction type (hardware-loop-selection). The VP integer-eight arith
 is a named instruction-shape divergence: reference BRA, our explicit expansion.
 No reference byte-identity claim is made for that form. VP texture samplelod is
 a separate gap, vp-texture-fetch; arithmetic twins exercise this change in both profiles.
+The run-time-shaped FRAGMENT rows below (a written induction or bound, a
+non-integral step, an unsigned negation, a negative-zero start) are no longer
+gaps there: a hardware loop compiles them (FP-LOOP slice 1), judged by value
+including the NaN and signed infinities of a division by -0.  Their vertex
+twins stay named refusals.
 """
+import math
 import os
 from pathlib import Path
 import struct
@@ -25,6 +31,7 @@ def main():
     scratch.mkdir(parents=True, exist_ok=True)
     count = 0
     refusals = 0
+    hardware_loops = 0
     value_checks = 0
     with tempfile.TemporaryDirectory(prefix='static-loop-', dir=scratch) as tmp:
         work = Path(tmp)
@@ -116,6 +123,17 @@ def main():
                  uint_locals + ''.join('{int i=' + str(i) + ';' + uint_body + '}' for i in range(3)), profile)
             twin('uint-high-boundary', 'for(unsigned int i=4294967293;i<4294967295;i++){a+=t*(i-4294967292);}',
                  'a+=t;a+=t*2.0;', profile, expected_value=lambda t: [3*x for x in t])
+            def over_neg_zero(t):
+                return [math.nan if x == 0 else math.copysign(math.inf, x) * -1.0 for x in t]
+            hardware_loop_values = {
+                'induction-write': lambda t: [4 * x for x in t],
+                'bound-write': lambda t: [3 * x for x in t],
+                'nonintegral-gap': lambda t: [7 * x for x in t],
+                'unsigned-bound-gap': lambda t: [0.0] * 4,   # -1u wraps: no iteration
+                'negative-zero-gap': over_neg_zero,
+                'negative-zero-local-gap': over_neg_zero,
+            }
+            same = lambda a, b: all((x != x and y != y) or x == y for x, y in zip(a, b))
             for label, body, diagnostic in (
                 ('induction-write', 'for(float i=0.0;i<4.0;i+=1.0){a+=t*(i+1.0);i+=1.0;}', 'back-edge'),
                 ('bound-write', 'int bound=4;for(float i=0.0;i<bound;i+=1.0){a+=t*(i+1.0);bound=2;}', 'back-edge'),
@@ -129,6 +147,15 @@ def main():
                 ('negative-zero-local-gap', 'float start=-0.0;for(float i=start;i<1;i+=1.0){a=t/i;}', 'back-edge'),
                 ('resource-cap', 'for(float i=0.0;i<65.0;i+=1.0){a+=t;}', 'hardware-loop'),
             ):
+                if profile == 'sce_fp_rsx' and label in hardware_loop_values:
+                    data = compile_one(profile + '-' + label, body, profile)
+                    for t in ([-.5, .25, 1.5, 2.], [0., -.5, .25, 1.], [.25, 1.5, -.5, .5]):
+                        got = fp_eval.evaluate(data, {'TEX0': t})
+                        want = hardware_loop_values[label](t)
+                        assert same(got, want), (profile + '-' + label, t, got, want)
+                        value_checks += 1
+                    hardware_loops += 1
+                    continue
                 # These reference-accepted forms remain named gaps, not reference refusals.
                 compile_one(profile + '-' + label, body, profile, refusal=diagnostic)
                 refusals += 1
@@ -139,9 +166,10 @@ def main():
             body = f'{ty} size=4;{ty} i;for(i=-size;i<=size;i+=2){{{fetch}}}'
             explicit = ''.join('{' + ty + ' i=' + str(i) + ('.0;' if ty == 'float' else ';') + fetch + '}' for i in values)
             twin('texture-local-' + ty, body, explicit, 'sce_fp_rsx', prefix='uniform sampler2D tex;')
-    assert (count, refusals) == (36, 22), (count, refusals)
-    assert value_checks == 24, value_checks
-    print(f'static-loop-expansion: PASS ({count} strict twins, {refusals} named refusals, {value_checks} exact values)')
+    assert (count, refusals, hardware_loops) == (36, 16, 6), (count, refusals, hardware_loops)
+    assert value_checks == 42, value_checks
+    print(f'static-loop-expansion: PASS ({count} strict twins, {hardware_loops} hardware loops, '
+          f'{refusals} named refusals, {value_checks} exact values)')
 
 
 if __name__ == '__main__':

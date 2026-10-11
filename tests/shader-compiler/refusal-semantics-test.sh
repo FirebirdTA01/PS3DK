@@ -11,9 +11,10 @@
 # container written past one is a plausible artifact where there
 # should have been nothing.
 #
-# The fixture's refusal is PERMANENT by construction (data-dependent
-# loop bound: NV40 FP has no flow control and the bound defeats
-# unrolling), so this test does not expire as lowering coverage grows.
+# The fixture is a data-dependent WHILE loop, which the general path
+# still refuses (its CFG back-edge; FP-LOOP slice 1 lowers `for` only).
+# When `while` is lowered the fixture must move to another refused shape;
+# the fixture's own header says so.
 #
 # The success control compiles a known-good shader through the same
 # harness first: a test that cannot see success cannot be trusted to

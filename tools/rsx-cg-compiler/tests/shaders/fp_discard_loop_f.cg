@@ -3,8 +3,9 @@
 //
 // The reference compiles this with real hardware loop instructions -
 // LOOPH / BRKH / ENDLOOP around the comparison and the kill.  Our general
-// path refuses the back-edge (CF-1a) and the default path has no shape
-// for it.  The fixture exists so that refusal is SEEN to fire on a
+// path lowers a run-time `for` to a hardware loop (FP-LOOP slice 1) but
+// refuses a discard in its body by name ("the loop body contains
+// 'discard'").  The fixture exists so that refusal is SEEN to fire on a
 // discard-carrying loop, not merely believed.
 //
 // The loop bound must be dynamic.  A constant-trip loop is not a
