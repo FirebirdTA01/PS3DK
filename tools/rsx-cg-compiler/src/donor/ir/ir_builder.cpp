@@ -6208,6 +6208,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // leaves x = 1), so the copies are made right to left.  Supported for a scalar/vector/matrix parameter whose
     // argument is a plain caller lvalue; anything else is refused by name.
     std::vector<size_t> copyOut;
+    std::vector<std::pair<size_t, std::string>> arrayCopyOut;   // (parameter, caller array key)
     for (size_t i = 0; i < callee->parameters.size(); ++i)
     {
         const ParamDecl* param = callee->parameters[i].get();
@@ -6224,6 +6225,28 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                                     (arg->kind == ExprKind::MemberAccess &&
                                      static_cast<const MemberAccessExpr*>(arg)->object &&
                                      static_cast<const MemberAccessExpr*>(arg)->object->kind == ExprKind::Identifier));
+        // An INOUT ARRAY whose argument is a caller-local array (2xbrz's
+        // `ScalePixel(blend, k, dst)` with `inout float3 dst[4]`): the
+        // elements were copied in by the parameter binding below; the
+        // helper's final elements are copied back after the body.  An OUT
+        // array, a struct-held or file-scope array stays refused.
+        std::string arrayKey;
+        if (pt.isArray() && param->storage == StorageQualifier::InOut && !param->name.empty() &&
+            arg && arg->kind == ExprKind::Identifier && !getStructFields(param->type.get()) &&
+            storageKey(const_cast<ExprNode*>(arg), arrayKey) && localArrayValues_.count(arrayKey) &&
+            !module_->findGlobal(arrayKey) &&
+            static_cast<int>(localArrayValues_.at(arrayKey).size()) == pt.arraySize)
+        {
+            if (std::any_of(arrayCopyOut.begin(), arrayCopyOut.end(),
+                            [&](const auto& c) { return c.second == arrayKey; }))
+            {
+                error(expr->loc, "cannot inline user function '" + name +
+                                 "': the same array is passed to two inout array parameters");
+                return false;
+            }
+            arrayCopyOut.emplace_back(i, arrayKey);
+            continue;
+        }
         if (pt.isArray() || getStructFields(param->type.get()) || param->name.empty() || !lvalue)
         {
             error(expr->loc, "cannot inline user function '" + name +
@@ -6620,6 +6643,21 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     }
     for (const auto& kv : inlineSwizzles)
         identityPrefixSwizzleBase_.try_emplace(kv.first, kv.second);
+    // Inout arrays first, element by element into the caller's array.
+    for (size_t k = arrayCopyOut.size(); ok && k-- > 0; )
+    {
+        const auto body = bodyArrays.find(callee->parameters[arrayCopyOut[k].first]->name);
+        auto caller = localArrayValues_.find(arrayCopyOut[k].second);
+        if (body == bodyArrays.end() || caller == localArrayValues_.end() ||
+            body->second.size() != caller->second.size())
+        {
+            error(expr->loc, "cannot inline user function '" + callee->name +
+                             "': inout array parameter '" + callee->parameters[arrayCopyOut[k].first]->name +
+                             "' lost its elements");
+            return false;
+        }
+        caller->second = body->second;
+    }
     // Copy-out into the caller's own scope (restored above), so the
     // argument names the CALLER's variable; right to left, see above.
     for (size_t k = copyOut.size(); ok && k-- > 0; )
@@ -9631,6 +9669,44 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
         // assignment (`c.rgb = vec3;`) is split into per-lane VecInserts
         // — one per swizzle index — so the back-end sees a sequence of
         // single-lane overrides.
+        // A swizzle write into an ARRAY ELEMENT (`d[0].y = 7;`, 2xbrz's
+        // helpers): read the element, insert the lanes, store the element
+        // back through the ordinary element assignment.  The index is read
+        // twice, so only a literal or a plain name is accepted here.
+        if (memberExpr->isSwizzle && memberExpr->swizzleLength >= 1 && memberExpr->object &&
+            memberExpr->object->kind == ExprKind::Index)
+        {
+            auto* element = static_cast<IndexExpr*>(memberExpr->object.get());
+            if (element->array && getExprType(element->array.get()).isArray() && element->index &&
+                (element->index->kind == ExprKind::Literal || element->index->kind == ExprKind::Identifier))
+            {
+                IRValueID currentVec = buildExpr(element);
+                if (currentVec == InvalidIRValue) return InvalidIRValue;
+                const IRTypeInfo vecType = getExprType(element);
+                for (int s = 0; s < memberExpr->swizzleLength; ++s)
+                {
+                    IRValueID scalar = value;
+                    if (memberExpr->swizzleLength > 1)
+                    {
+                        auto extractInst = std::make_unique<IRInstruction>(
+                            IROp::VecExtract, currentFunction_->allocateValueId(), IRTypeInfo::Float());
+                        extractInst->addOperand(value);
+                        extractInst->componentIndex = s;
+                        scalar = extractInst->result;
+                        currentBlock_->addInstruction(std::move(extractInst));
+                    }
+                    auto insertInst = std::make_unique<IRInstruction>(
+                        IROp::VecInsert, currentFunction_->allocateValueId(), vecType);
+                    insertInst->addOperand(currentVec);
+                    insertInst->addOperand(scalar);
+                    insertInst->componentIndex = memberExpr->swizzleIndices[s];
+                    currentVec = insertInst->result;
+                    currentBlock_->addInstruction(std::move(insertInst));
+                }
+                if (buildAssignment(element, currentVec) == InvalidIRValue) return InvalidIRValue;
+                return value;
+            }
+        }
         if (memberExpr->isSwizzle && memberExpr->swizzleLength >= 1)
         {
             // A field that already has a whole value needs the same
@@ -9836,6 +9912,17 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
         auto* indexExpr = static_cast<IndexExpr*>(target);
         if (getExprType(indexExpr->array.get()).isArray())
         {
+            // A helper's standalone IR (never lowered; rebuilt at each
+            // inline call with the caller's elements bound) has no element
+            // storage for an array PARAMETER: nothing to record.
+            if (!currentFunction_->isEntryPoint && inlineStack_.empty() &&
+                indexExpr->array && indexExpr->array->kind == ExprKind::Identifier &&
+                currentFunctionDecl_ &&
+                std::any_of(currentFunctionDecl_->parameters.begin(), currentFunctionDecl_->parameters.end(),
+                    [&](const auto& param) {
+                        return param && param->name == static_cast<IdentifierExpr*>(indexExpr->array.get())->name;
+                    }))
+                return value;
             std::string key;
             int32_t index = 0;
             if (!resolveTrackedArrayElement(indexExpr, key, index)) return InvalidIRValue;

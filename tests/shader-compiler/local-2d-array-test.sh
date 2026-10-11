@@ -30,6 +30,9 @@ VALUE = [
      M + 'float2 c[3][2]; c[0][0] = t.xy; c[1][0] = c[0][0] + t.zw; c[2][1] = c[1][0] * 2.0; '
          'return float4(c[1][0], c[2][1]); }',
      lambda t: [f32(t[0] + t[2]), f32(t[1] + t[3]), f32(f32(t[0] + t[2]) * 2.0), f32(f32(t[1] + t[3]) * 2.0)]),
+    ('lane_write',
+     M + 'float3 c[2][2]; c[1][0] = t.xyz; c[1][0].y = 9.0; return float4(c[1][0], 1); }',
+     lambda t: [t[0], 9.0, t[2], 1.0]),
     # A static loop over both indices (expanded, so the indices are literal).
     ('static_loops',
      M + 'float c[2][3]; for (int i = 0; i < 2; i++) for (int j = 0; j < 3; j++) c[i][j] = t.x * i + t.y * j; '

@@ -784,6 +784,8 @@ jobs:
         run: bash tests/shader-compiler/helper-uniform-array-arg-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A run-time-bound fragment for loop is a hardware loop, judged by value
         run: bash tests/shader-compiler/fp-hardware-loop-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: An inout array parameter of a helper is copied in and back
+        run: bash tests/shader-compiler/inout-array-param-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A two-dimensional local array, first bracket outermost
         run: bash tests/shader-compiler/local-2d-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
