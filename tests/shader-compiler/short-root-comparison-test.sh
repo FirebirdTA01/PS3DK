@@ -9,9 +9,11 @@ python3 - "$compiler" "$root" <<'PY'
 import pathlib,re,subprocess,sys
 compiler,root=sys.argv[1:]; errors=[]
 sys.path.insert(0,str(pathlib.Path(root)/'tests/shader-compiler'))
-for tag in ('sqrt_and','sqrt_or','sqrt_zero','rsqrt_and','sqrt_discard'):
+# tree_not / tree_or: the right operand is a boolean tree over comparisons
+# (!near(a,b), near(a,b) || d), evaluated eagerly as the reference does.
+for tag in ('sqrt_and','sqrt_or','sqrt_zero','rsqrt_and','sqrt_discard','tree_not','tree_or'):
     p=pathlib.Path(root)/'tools/rsx-cg-compiler/tests/shaders'/('fp_short_'+tag+'_f.cg')
-    r=subprocess.run([compiler,'-p','sce_fp_rsx',str(p)],capture_output=True,text=True,timeout=30)
+    r=subprocess.run([compiler,'-p','sce_fp_rsx','-e','main',str(p)],capture_output=True,text=True,timeout=30)
     if r.returncode:
         errors.append(tag+': did not compile: '+r.stderr.strip()); continue
     rows=[]

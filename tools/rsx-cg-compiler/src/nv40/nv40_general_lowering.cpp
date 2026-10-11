@@ -895,6 +895,29 @@ private:
         }
     }
 
+    // A scalar boolean built only from comparisons: a comparison, or NOT,
+    // AND, OR of such trees.  Every value in it is 0 or 1, never a raw root
+    // value, so eager evaluation is the short-circuit's value.  Measured: the
+    // reference evaluates `c && !near(a, b)` and `c && (near(a, b) || d)`
+    // eagerly (SLTR into a half, SEQX for the NOT, MULXC for the AND).
+    bool isComparisonTree(IRValueID value, int depth = 0) const
+    {
+        if (depth > 64) return false;
+        if (isComparisonValue(value)) return true;
+        const auto it = defMap_.find(value);
+        if (it == defMap_.end() || !it->second) return false;
+        const IRInstruction& def = *it->second;
+        if (def.resultType.componentCount() != 1) return false;
+        switch (def.op) {
+        case IROp::LogicalNot:
+            return def.operands.size() == 1 && isComparisonTree(def.operands[0], depth + 1);
+        case IROp::LogicalAnd: case IROp::LogicalOr:
+            return def.operands.size() == 2 && isComparisonTree(def.operands[0], depth + 1) &&
+                   isComparisonTree(def.operands[1], depth + 1);
+        default: return false;
+        }
+    }
+
     // Admits comparison-only roots for lowering; this is not a speculative
     // predicate. Returns true when a remaining unsafe root requires refusal.
     bool classifyShortCircuitRoots(
@@ -913,8 +936,8 @@ private:
                 // The measured eager shape combines COMPARISONS, never a
                 // potentially non-finite root value multiplied by zero.
                 if (profile_ != GeneralProfile::Fragment ||
-                    !isComparisonValue(instPtr->operands[0]) ||
-                    !isComparisonValue(instPtr->operands[1]))
+                    !isComparisonTree(instPtr->operands[0]) ||
+                    !isComparisonTree(instPtr->operands[1]))
                     return true;
                 std::vector<IRValueID> pending{instPtr->operands[1]};
                 seen.clear();
@@ -3102,6 +3125,11 @@ private:
         case IROp::Comment:
         case IROp::Nop:
             return;
+        case IROp::Bitcast:
+            // Only a fragment bool source is lowered; every other bitcast
+            // keeps the named refusal below (signedness, uint casts).
+            if (lowerBoolBitcast(inst)) return;
+            [[fallthrough]];
         default:
             if (std::string msg = profileUnsupportedDiagnostic(inst);
                 !msg.empty())
@@ -4449,6 +4477,31 @@ private:
             vi.preservePartialOutputMask = laneCount(mask) > 1;
             program_.instrs.push_back(vi);
         }
+    }
+
+    // int(b) of a comparison result: a fragment boolean is already 0 or 1,
+    // so the conversion is a move (lcd-pass-0's `int(fmod(y, h) > t)` was
+    // refused on the unresolved bitcast).  Returns false for any other
+    // bitcast, which falls through to the default named refusal.
+    bool lowerBoolBitcast(const IRInstruction& inst)
+    {
+        if (inst.operands.empty() || inst.result == InvalidIRValue) return false;
+        const IRValue* source = entry_.getValue(inst.operands[0]);
+        const IRTypeInfo* from = nullptr;
+        if (const auto it = defMap_.find(inst.operands[0]); it != defMap_.end() && it->second)
+            from = &it->second->resultType;
+        else if (source)
+            from = &source->type;
+        const IRType element = !from ? IRType::Void
+            : (from->isVector() ? from->elementType : from->baseType);
+        if (profile_ != GeneralProfile::Fragment || element != IRType::Bool) return false;
+        VInstr mov;
+        mov.op = VOp::Mov;
+        mov.dst.index = define(inst.result);
+        mov.dst.writemask = componentMask(inst.resultType);
+        mov.srcs[0] = resolve(inst.operands[0]);
+        program_.instrs.push_back(mov);
+        return true;
     }
 
     void lowerIntToFloat(const IRInstruction& inst)

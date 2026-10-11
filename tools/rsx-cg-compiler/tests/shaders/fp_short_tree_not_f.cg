@@ -1,0 +1,2 @@
+bool near(float3 a, float3 b) { return sqrt(dot(a - b, a - b)) < 0.1; }
+float4 main(float4 t : TEXCOORD0, float4 u : TEXCOORD1) : COLOR { return (t.x > 0.5 && !near(t.xyz, u.xyz)) ? float4(1,0,0,1) : float4(0,0,1,1); }
