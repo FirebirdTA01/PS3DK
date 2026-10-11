@@ -216,6 +216,8 @@ private:
     // region (IROp::LoopCarry .. LoopOut, ir.h).  Returns false, having
     // built nothing, when the loop is outside the admitted shape.
     bool tryBuildHardwareLoop(ForStmt* stmt);
+    // arrayStorageKey resolving a row index bound to an integer constant.
+    bool storageKey(ExprNode* expr, std::string& key);
     // Values bound to names a hardware loop's body assigned without
     // carrying them: reading one after the loop is refused by name.
     std::unordered_set<IRValueID> loopPoison_;

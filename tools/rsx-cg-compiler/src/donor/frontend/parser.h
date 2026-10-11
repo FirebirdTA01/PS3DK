@@ -111,6 +111,7 @@ private:
     std::shared_ptr<TypeNode> parseType();
     std::shared_ptr<TypeNode> parseBaseType();
     std::shared_ptr<TypeNode> parseArrayType(std::shared_ptr<TypeNode> elementType);
+    std::shared_ptr<TypeNode> parseArraySuffixes(std::shared_ptr<TypeNode> type);
     BaseType tokenToBaseType(TokenType type) const;
 
     // ========================================================================

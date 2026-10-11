@@ -536,10 +536,7 @@ std::shared_ptr<TypeNode> Parser::parseType()
         return nullptr;
 
     // Check for array brackets
-    while (check(TokenType::LBRACKET))
-    {
-        type = parseArrayType(type);
-    }
+    type = parseArraySuffixes(type);
 
     lastParsedType_ = type;
     ++typesParsed_;
@@ -883,6 +880,24 @@ Parser::ConstEval Parser::evalConstInt(const ExprNode* e, long long& out) const
     }
 }
 
+// `T a[2][3]` is an array of 2 arrays of 3 T: the FIRST bracket is the
+// outermost dimension, so `a[1]` is a `T[3]` and `a[1][2]` a T.  The
+// brackets used to nest the other way round (the LAST outermost), which
+// gave `a[1]` the wrong size; nothing lowered a multi-dimensional array
+// then, so nothing read the difference.
+std::shared_ptr<TypeNode> Parser::parseArraySuffixes(std::shared_ptr<TypeNode> type)
+{
+    std::vector<std::shared_ptr<TypeNode>> dims;
+    while (check(TokenType::LBRACKET))
+        dims.push_back(parseArrayType(nullptr));
+    for (auto it = dims.rbegin(); it != dims.rend(); ++it)
+    {
+        (*it)->elementType = type;
+        type = *it;
+    }
+    return type;
+}
+
 std::shared_ptr<TypeNode> Parser::parseArrayType(std::shared_ptr<TypeNode> elementType)
 {
     consume(TokenType::LBRACKET, "Expected '['");
@@ -1116,10 +1131,7 @@ std::unique_ptr<StructDecl> Parser::parseStructBody()
             field.storage = memberStorage;
 
             // Check for array brackets after field name (e.g., float4 positions[8])
-            while (check(TokenType::LBRACKET))
-            {
-                field.type = parseArrayType(field.type);
-            }
+            field.type = parseArraySuffixes(field.type);
 
             // Check for semantic
             if (match(TokenType::COLON))
@@ -1349,10 +1361,7 @@ std::unique_ptr<VarDecl> Parser::parseVariableDeclaration(
     var->isStatic = lastStorageWasStatic_;
 
     // Check for array brackets after name
-    while (check(TokenType::LBRACKET))
-    {
-        var->type = parseArrayType(var->type);
-    }
+    var->type = parseArraySuffixes(var->type);
     optionalTypeShadows_.back().insert(name);
 
     // Check for semantic annotation
@@ -1524,10 +1533,7 @@ std::unique_ptr<ParamDecl> Parser::parseParameter(bool selectedEntry)
     param->storage = storage;
 
     // Check for array brackets
-    while (check(TokenType::LBRACKET))
-    {
-        param->type = parseArrayType(param->type);
-    }
+    param->type = parseArraySuffixes(param->type);
     if (!name.empty()) optionalTypeShadows_.back().insert(name);
 
     // Check for semantic

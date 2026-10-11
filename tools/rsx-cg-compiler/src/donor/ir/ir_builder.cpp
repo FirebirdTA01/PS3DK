@@ -11,7 +11,8 @@
 
 namespace
 {
-bool arrayStorageKey(ExprNode* expr, std::string& key);
+bool arrayStorageKey(ExprNode* expr, std::string& key,
+                     const std::function<bool(ExprNode*, int64_t&)>* rowIndex = nullptr);
 constexpr float kPiDiv180 = 0.017453292519943295769f;
 constexpr float k180DivPi = 57.295779513082320876f;
 
@@ -2342,9 +2343,10 @@ void IRBuilder::exitBlockBinding(const std::string& name, const ScopeState& pre)
     // so they end with the declaration exactly as the bare name does
     // (review: codex - an inner `S s` left its s.f visible after the block,
     // and the return read 3p where the reference reads the outer p).
-    const std::string prefix = name + ".";
+    const std::string prefix = name + ".", rows = name + "[";
     auto owned = [&](const std::string& key) {
-        return key == name || key.compare(0, prefix.size(), prefix) == 0;
+        return key == name || key.compare(0, prefix.size(), prefix) == 0 ||
+               key.compare(0, rows.size(), rows) == 0;
     };
     std::vector<std::string> keys;
     for (const auto& kv : nameToValue_) if (owned(kv.first)) keys.push_back(kv.first);
@@ -2409,7 +2411,9 @@ void IRBuilder::ScopeState::unfold(std::unordered_map<std::string, IRValueID>& j
     {
         const std::string& key = it->first;
         const size_t at = key.find('@');
-        const size_t br = key.find('[');
+        // The LAST bracket: a two-dimensional array's row is itself named
+        // with one ("crd[1]", arrayStorageKey), so "crd[1][2]" is element 2.
+        const size_t br = key.rfind('[');
         if (at != std::string::npos)
         {
             const std::string name = key.substr(0, at);
@@ -4175,6 +4179,21 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         if (varType.isArray() && varType.arraySize > 0)
             localArrayValues_[varDecl->name].assign(
                 static_cast<size_t>(varType.arraySize), InvalidIRValue);
+        // A two-dimensional local array: one tracked row per outer index,
+        // "name[i]" (arrayStorageKey).  Deeper nesting stays a named gap.
+        if (varDecl->type && varDecl->type->isArray() && varDecl->type->elementType &&
+            varDecl->type->elementType->isArray())
+        {
+            const TypeNode* row = varDecl->type->elementType.get();
+            if (row->elementType && row->elementType->isArray())
+            {
+                error(varDecl->loc, "an array of more than two dimensions is not supported (member-array-storage)");
+                continue;
+            }
+            for (int i = 0; i < varDecl->type->arraySize; ++i)
+                localArrayValues_[varDecl->name + "[" + std::to_string(i) + "]"].assign(
+                    static_cast<size_t>(row->arraySize), InvalidIRValue);
+        }
 
         // A STRUCT INITIALISED FROM A SCALAR - `OUT o = (OUT)0;` - fills
         // every leaf with that scalar.  It is how the reference SDK's own
@@ -5174,7 +5193,7 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
                         [&](const auto& own) { return own.get() == parameter; });
             }
             if (module_->shaderStage != ShaderStage::Vertex || expr != statementExpr_ ||
-                !supportedDestination || !arrayStorageKey(expr->left.get(), destination))
+                !supportedDestination || !storageKey(expr->left.get(), destination))
             {
                 error(expr->loc, "struct constructor assignment requires a named local or entry output "
                                  "and a standalone vertex statement (struct-constructor-assignment)");
@@ -5224,7 +5243,7 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
                 for (ExprNode* destination : destinations)
                 {
                     std::string to;
-                    if (!arrayStorageKey(destination, to))
+                    if (!storageKey(destination, to))
                     {
                         error(expr->loc, "a uniform struct entry parameter can only be copied into a "
                                          "named struct variable (uniform-struct-entry-parameter)");
@@ -5243,7 +5262,7 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
         if (expr->op == BinaryOp::Assign)
         {
             std::string destination;
-            if (arrayStorageKey(expr->left.get(), destination))
+            if (storageKey(expr->left.get(), destination))
                 copyArrayAggregate(destination, expr->right.get(), expr->left->resolvedType.get());
         }
 
@@ -6130,7 +6149,8 @@ bool IRBuilder::flattenedStructArgument(const CallExpr* call, size_t i)
     return flattenedUniformStructParams_.count(name) && !nameToValue_.count(name);
 }
 
-namespace { bool arrayStorageKey(ExprNode* expr, std::string& key); }
+namespace { bool arrayStorageKey(ExprNode* expr, std::string& key,
+                             const std::function<bool(ExprNode*, int64_t&)>* rowIndex); }
 
 bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                                        const std::vector<IRValueID>& args,
@@ -6414,7 +6434,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                 else localArrayValues_[field.first].assign(static_cast<size_t>(field.second), InvalidIRValue);
 
             std::string source;
-            if (i < expr->arguments.size() && arrayStorageKey(expr->arguments[i].get(), source))
+            if (i < expr->arguments.size() && storageKey(expr->arguments[i].get(), source))
             {
                 const std::string prefix = source + ".";
                 auto belongs = [&](const std::string& key) {
@@ -7942,7 +7962,8 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
 } // namespace
 
 namespace {
-bool arrayStorageKey(ExprNode* expr, std::string& key)
+bool arrayStorageKey(ExprNode* expr, std::string& key,
+                     const std::function<bool(ExprNode*, int64_t&)>* rowIndex)
 {
     if (expr->kind == ExprKind::Identifier)
     {
@@ -7951,9 +7972,26 @@ bool arrayStorageKey(ExprNode* expr, std::string& key)
         key = id->name;
         return true;
     }
+    // A ROW of a multi-dimensional local array by a literal index:
+    // `crd[1]` of `float2 crd[4][4]` is tracked as its own array "crd[1]".
+    if (expr->kind == ExprKind::Index)
+    {
+        auto* index = static_cast<IndexExpr*>(expr);
+        if (!expr->resolvedType || !expr->resolvedType->isArray() || !index->index) return false;
+        int64_t row = -1;
+        if (index->index->kind == ExprKind::Literal &&
+            static_cast<LiteralExpr*>(index->index.get())->literalKind == LiteralExpr::LiteralKind::Int)
+            row = std::get<int64_t>(static_cast<LiteralExpr*>(index->index.get())->value);
+        // A name bound to an integer constant (an expanded loop's induction)
+        // when the builder supplies its bindings.
+        else if (!rowIndex || !(*rowIndex)(index->index.get(), row)) return false;
+        if (row < 0 || !arrayStorageKey(index->array.get(), key, rowIndex)) return false;
+        key += "[" + std::to_string(row) + "]";
+        return true;
+    }
     if (expr->kind != ExprKind::MemberAccess) return false;
     auto* member = static_cast<MemberAccessExpr*>(expr);
-    if (member->isSwizzle || !arrayStorageKey(member->object.get(), key)) return false;
+    if (member->isSwizzle || !arrayStorageKey(member->object.get(), key, rowIndex)) return false;
     key += "." + member->member;
     return true;
 }
@@ -8188,7 +8226,7 @@ bool IRBuilder::copyArrayAggregate(const std::string& destination, ExprNode* sou
     while (source && source->kind == ExprKind::Binary &&
            static_cast<BinaryExpr*>(source)->op == BinaryOp::Assign)
         source = static_cast<BinaryExpr*>(source)->left.get();
-    if (!source || !arrayStorageKey(source, origin))
+    if (!source || !storageKey(source, origin))
     {
         error("array-bearing struct copy requires a tracked source (member-array-storage)");
         return true;
@@ -8227,7 +8265,7 @@ bool IRBuilder::copyArrayAggregate(const std::string& destination, ExprNode* sou
 bool IRBuilder::resolveTrackedArrayElement(IndexExpr* expr, std::string& key, int32_t& index)
 {
     const auto type = getExprType(expr->array.get());
-    if (!type.isArray() || !arrayStorageKey(expr->array.get(), key))
+    if (!type.isArray() || !storageKey(expr->array.get(), key))
     {
         error(expr->loc, "member-array storage path is not supported (member-array-storage)");
         return false;
@@ -8322,7 +8360,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
     }
     std::string trackedKey;
     if (!uniformAlias && getExprType(expr->array.get()).isArray() &&
-        arrayStorageKey(expr->array.get(), trackedKey) && localArrayValues_.count(trackedKey))
+        storageKey(expr->array.get(), trackedKey) && localArrayValues_.count(trackedKey))
     {
         const IRGlobal* global = module_->findGlobal(trackedKey);
         // Entry setup seeds initialized mutable static arrays by element,
@@ -10697,4 +10735,19 @@ IRValueID IRBuilder::createConstant(const IRTypeInfo& type, const std::vector<fl
 {
     auto* constant = currentFunction_->createConstant(type, values, intValues);
     return constant->id;
+}
+
+// arrayStorageKey with this builder's bindings: a row index may be a name
+// bound to an integer constant (`c[i][j]` inside an expanded loop).
+bool IRBuilder::storageKey(ExprNode* expr, std::string& key)
+{
+    const std::function<bool(ExprNode*, int64_t&)> rowIndex = [&](ExprNode* e, int64_t& row) {
+        if (!e || e->kind != ExprKind::Identifier) return false;
+        const auto it = nameToValue_.find(static_cast<IdentifierExpr*>(e)->name);
+        int32_t v = 0;
+        if (it == nameToValue_.end() || !extractIntScalar(*currentFunction_, it->second, v)) return false;
+        row = v;
+        return true;
+    };
+    return arrayStorageKey(expr, key, &rowIndex);
 }
