@@ -728,7 +728,12 @@ ContainerResult emitFragmentContainerImpl(
                     // An initialised array carries one default per element,
                     // referenced or not (measured: `const float3 L[2] =
                     // {1,2,3, 4,5,6}` -> L[0] [1,2,3,0], L[1] [4,5,6,0]).
-                    const size_t cols = static_cast<size_t>(g.type.componentCount());
+                    // One slot is one ROW of a matrix element (the slot
+                    // count is fpUniformSlotCount), so a matrix slices by
+                    // its column count; the lowering refuses FP matrix
+                    // arrays today, this keeps the writer right if it stops.
+                    const size_t cols = static_cast<size_t>(g.type.isMatrix()
+                        ? g.type.matrixCols : g.type.componentCount());
                     const size_t first = static_cast<size_t>(k) * cols;
                     if (g.initialValue.size() >= first + cols)
                         e.defaultValue.assign(
