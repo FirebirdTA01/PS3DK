@@ -16,8 +16,49 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- **Pointers are formed in 64-bit registers (PPU, 32-bit pointer model).**
+  A 32-bit value used in an address (an `int` index, a difference converted
+  to `size_t`, a by-value `std::string_view`, a spilled loop counter) could
+  reach the load with junk in the upper 32 bits, giving an effective
+  address above 4 GiB.  On a PS3 the program faults or freezes; RPCS3's
+  default recompiler hides it.  Addresses are now computed in 64-bit
+  registers and every pointer is zero-extended before use, so the whole
+  class is gone rather than one shape at a time.  A game that froze in its
+  world-generation code on a PS3 now runs.
+- **The TOC is saved and restored around indirect calls with the width the
+  PRX import stubs use.**  A function pointer that reached an imported
+  function could return with the TOC in both halves of a register.
+- **Float loads and stores keep a displacement that is a multiple of 4.**
+  Vectorised loops could emit `stfs 0,1(r10)` to an aligned address through
+  a base 15 bytes past the array.  The access was aligned, but a post-link
+  check of the binary could not tell it from a misaligned one, which ends
+  the PPU thread on a PS3.
+- **Shader compiler:**
+  - a `bool` parameter given a number now receives `number != 0`; `!x`
+    used to read `1 - x`;
+  - initialised array uniforms record their default value for every
+    element, in vertex and fragment programs; an unpatched vertex program
+    read zeros;
+  - an `out` or `inout` parameter given a wider vector is refused instead
+    of writing the wrong lanes.
+
 ### Added
 
+- **Shader compiler:**
+  - a file-scope `const` without `static` is a patchable uniform with its
+    initialiser as the default, scalar, vector or array, as Cg defines it;
+    `static const` still folds;
+  - a source function accepts a wider vector argument, keeping its leading
+    lanes, and `dot` of two scalars is their product;
+  - `&&` and `||` over trees of comparisons, and `int()` of a fragment
+    comparison;
+  - `: TEXUNITn` on a struct-typed entry parameter binds its sampler
+    members to unit n.
+- **Candidate builds are labelled.**  A test build of an unreleased branch
+  reads `vX.Y.Z-cand.<commit>` (set `PS3SDK_CANDIDATE=1`), never a number a
+  release could carry.
 - **PSL1GHT game and disc names link.**  The fifteen `sysGame*` functions
   of `<sysutil/game.h>` (`sysGameBootCheck`, `sysGameDataCheck`,
   `sysGameCreateGameData`, `sysGameGetParamString`, ...) and
