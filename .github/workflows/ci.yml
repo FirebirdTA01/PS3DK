@@ -218,6 +218,8 @@ jobs:
       # thread on hardware).
       - name: Test FP loads and stores stay off under-aligned memory
         run: bash tests/sdk/ppu-fp-alignment-codegen-test.sh
+      - name: Float loads and stores keep a displacement that is a multiple of 4 (patch 0064)
+        run: bash tests/sdk/ppu-fp-displacement-codegen-test.sh
 
       # Skips without PS3DEV; binding a vertex program and the standalone
       # cellGcmCgUploadInternalConsts helper both upload the literal pool.
