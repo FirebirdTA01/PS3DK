@@ -625,11 +625,13 @@ Once `nidgen` is built, `scripts/build-cell-stub-archives.sh` produces the stub 
 ./scripts/build-cell-stub-archives.sh
 ```
 
-### Optional: rsx-cg-compiler (experimental)
+### rsx-cg-compiler (recommended shader compiler)
 
-`tools/rsx-cg-compiler/` is an independent Cg → RSX (NV40) shader compiler we're growing as an eventual drop-in replacement for PSL1GHT's `cgcomp`.
+`tools/rsx-cg-compiler/` is our independent Cg → RSX (NV40) shader compiler, and it is now the **recommended** compiler for vertex and fragment programs. It compiles more of the shader corpus we test against than the bundled PSL1GHT `cgcomp`, including run-time-bound fragment loops (hardware `LOOP`/`BRK`), and every sample in `samples/` builds its shaders with it (`ps3_add_cg_shader_rsxcgc`).
 
-**It is experimental and growing.** The byte-diff harness covers vertex passthrough, MVP transforms, struct-flattened VP inputs, file-scope `: register(CN)` uniforms, FP arithmetic and MAD fusion, precision modifiers, texture ops, select/if-conversion, SFU unary intrinsics, constant folding, and FP tex-LHS write-back. Open gaps include loop lowering. For production shader builds the recommendation is still PSL1GHT's `cgcomp` until the loop work lands; the `hello-ppu-cellgcm-triangle` sample can opt into our compiler with `make USE_RSX_CG_COMPILER=1`.
+PSL1GHT's NVIDIA-based `cgcomp` is still bundled **for now**, so older PSL1GHT project Makefiles that call it keep building unchanged (`ps3_add_cg_shader` in CMake still uses it too). In a future release it will no longer be installed by default: keeping it will take an explicit build flag, and without that flag it is left out.
+
+Known gaps are refused by name rather than compiled wrongly: `while`/`do`-`while` loops and `break` inside a run-time loop, run-time loops nested in run-time loops, constant-bound loops longer than 64 iterations, and a handful of very large community shaders that run out of fragment registers.
 
 To build it:
 
