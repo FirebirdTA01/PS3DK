@@ -177,6 +177,16 @@ def main():
              'uniform float3 U[2] = { 1,2,3, 4,5,6 };' + chr(10) +
              'float4 main(float4 t : TEXCOORD0) : COLOR { return float4(t.xyz * U[1], 1); }' + chr(10),
              {'U[0]': (None, (1.0, 2.0, 3.0, 0.0)), 'U[1]': (None, (4.0, 5.0, 6.0, 0.0))}),
+            # A non-static const SCALAR or vector is a patchable uniform too,
+            # never folded (the reference multiplies k * 2.0 at run time).
+            ('vp_const_vector', 'sce_vp_rsx',
+             'const float4 k = float4(1, 2, 3, 4);' + chr(10) +
+             'float4 main(float4 p : POSITION) : POSITION { return p * k * 2.0; }' + chr(10),
+             {'k': (467, (1.0, 2.0, 3.0, 4.0))}),
+            ('fp_const_scalar', 'sce_fp_rsx',
+             'const float k = 0.5;' + chr(10) +
+             'float4 main(float4 t : TEXCOORD0) : COLOR { return float4(k * 2.0, t.y, 0, 1); }' + chr(10),
+             {'k': (None, (0.5, 0.0, 0.0, 0.0))}),
         )
         for name, profile, source, want in record_rows:
             run, dst = compile_one(compiler, tmp, name, source, profile)

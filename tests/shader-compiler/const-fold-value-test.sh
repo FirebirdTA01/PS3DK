@@ -4,8 +4,12 @@
 # The defect this pins: the initialiser was parsed and dropped, and each
 # backend then invented a different wrong value -- fragment default compiled
 # K as 0.0, fragment general read it as vertex attribute 0, vertex refused
-# with "LoadUniform for unknown global 'K'".  Byte-equality against an inline
-# literal is checked on the general lowering, the compiler's only back end.
+# with "LoadUniform for unknown global 'K'".
+#
+# A NON-static file-scope const is a patchable uniform on the reference
+# (t_528b9869): record K, float, referenced, default 7.5, read from an inline
+# constant holding 7.5 - so it is NOT byte-equal to the inline literal.  What
+# must hold is the value: the program computes what the literal does.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -51,22 +55,47 @@ for path in general; do
     compile fp_inline_literal_f     "lit_$path"
     compile fp_inline_literal_alt_f "alt_$path"
 
-    # The fold carries the value: same value, same bytes.
-    if ! cmp -s "$work/const_$path.fpo" "$work/lit_$path.fpo"; then
-        printf 'first differing bytes (%s path):\n' "$path" >&2
-        cmp -l "$work/const_$path.fpo" "$work/lit_$path.fpo" | head -n 8 >&2
-        fail "file-scope const does not compile to the same container as the" \
-             "inline literal on the $path path"
-    fi
+    # The const and the inline literal compute the same value.
+    python3 - "$repo_root/tests/shader-compiler" "$work/const_$path.fpo" "$work/lit_$path.fpo" <<'PY' || fail "file-scope const and the inline literal compute different values on the $path path"
+import sys
+sys.path.insert(0, sys.argv[1])
+import fp_eval
+a, b = (open(p, 'rb').read() for p in sys.argv[2:4])
+for uv in ([0.25, 0.5, 0, 0], [-1.5, 2.0, 0, 0]):
+    x, y = fp_eval.evaluate(a, {'TEX0': uv}), fp_eval.evaluate(b, {'TEX0': uv})
+    if x != y:
+        raise SystemExit('const %s vs literal %s at %s' % (x, y, uv))
+PY
 
-    # Negative control: a different value must NOT produce the same container.
-    # Without this, a compiler that dropped the multiply would pass above.
-    if cmp -s "$work/const_$path.fpo" "$work/alt_$path.fpo"; then
-        fail "a different constant produced an identical container on the" \
-             "$path path - the test cannot tell values apart, so the equality" \
-             "above proves nothing"
-    fi
+    # Negative control: a different constant must compute a different value.
+    # Without this, an evaluator that ignored the constant would pass above.
+    python3 - "$repo_root/tests/shader-compiler" "$work/const_$path.fpo" "$work/alt_$path.fpo" <<'PY' || fail "a different constant computed the same value on the $path path - the check above cannot tell values apart"
+import sys
+sys.path.insert(0, sys.argv[1])
+import fp_eval
+a, b = (open(p, 'rb').read() for p in sys.argv[2:4])
+if fp_eval.evaluate(a, {'TEX0': [0.25, 0.5, 0, 0]}) == fp_eval.evaluate(b, {'TEX0': [0.25, 0.5, 0, 0]}):
+    raise SystemExit(1)
+PY
 done
+
+# The record, as measured on the reference: K, float (1045), referenced,
+# default 7.5 in its raw 16-byte block.
+python3 - "$work/const_general.fpo" <<'PY'
+import struct, sys
+blob = open(sys.argv[1], 'rb').read()
+count, table = struct.unpack_from('>2I', blob, 12)
+records = {}
+for i in range(count):
+    w = struct.unpack_from('>12I', blob, table + 48 * i)
+    records[blob[w[4]:blob.index(0, w[4])].decode()] = w
+k = records.get('K')
+if k is None:
+    raise SystemExit('FAIL: no record for the non-static const K')
+default = blob[k[5]:k[5] + 16] if k[5] else None
+if (k[0], k[10], default) != (1045, 1, struct.pack('>4f', 7.5, 0, 0, 0)):
+    raise SystemExit('FAIL: record K is type %d ref %d default %r; want 1045, 1, 7.5' % (k[0], k[10], default))
+PY
 
 # The value itself is in the ucode, not merely agreement between two files.
 # 7.5f is 0x40F00000, stored halfword-swapped in the ucode blob as 0000 40F0.

@@ -1255,15 +1255,16 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             global.valueId = module_->allocateGlobalId();
             global.storage = varDecl->storage;
             global.declaredStatic = varDecl->isStatic;
-            // A non-static file-scope const ARRAY is an implicit uniform
-            // array on the reference: one record per element carrying its
-            // initialiser as the default, read from the patchable inline
-            // const block (`const float3 lines[12] = {...}` in xbr-lv3).
-            // It takes the initialised-uniform-array path; the declaration
-            // keeps its const qualifier, so writes are still refused.
-            // A const scalar or vector keeps folding to its literal.
-            if (global.storage == StorageQualifier::Const && !varDecl->isStatic &&
-                global.type.isArray())
+            // A non-static file-scope const is an implicit uniform on the
+            // reference: its record carries the initialiser as the default
+            // and it is read from the patchable inline const block (VP: a
+            // constant register), never folded - `const float k = 0.5;
+            // ... k * 2.0` multiplies at run time.  Arrays take one record
+            // per element (`const float3 lines[12] = {...}` in xbr-lv3).
+            // It takes the initialised-uniform path; the declaration keeps
+            // its const qualifier, so writes are still refused.  A static
+            // const still folds to its literal.
+            if (global.storage == StorageQualifier::Const && !varDecl->isStatic)
                 global.storage = StorageQualifier::Uniform;
 
             if (!varDecl->semantic.isEmpty())
