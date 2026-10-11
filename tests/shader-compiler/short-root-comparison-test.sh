@@ -34,6 +34,23 @@ for tag in ('sqrt_and','sqrt_or','sqrt_zero','rsqrt_and','sqrt_discard','tree_no
     if not combines: errors.append(tag+': missing CC-writing boolean combiner')
     if tag=='sqrt_or' and not any(w[0]&(1<<31) for w in combines):
         errors.append(tag+': boolean OR add must saturate')
+# A shared boolean DAG (b1 = b0 && b0; b2 = b1 && b1; ... 40 deep, and the
+# alternating &&/|| form) is decided once per node: the first tree walk
+# revisited both edges of every shared node and did not finish in 60 s.
+# Bounded here at 20 s; each must compile.
+import tempfile
+for alt in (False, True):
+    lines=['float4 main(float4 t : TEXCOORD0) : COLOR {','  bool b0 = (t.x > 0.0);']
+    for i in range(1,41):
+        lines.append('  bool b%d = b%d %s b%d;'%(i,i-1,'||' if alt and i%2==0 else '&&',i-1))
+    lines += ['  return (b40 && sqrt(t.y) < 0.1) ? float4(1,1,1,1) : float4(0,0,0,0);','}']
+    src=pathlib.Path(tempfile.mkdtemp())/'dag.cg'; src.write_text(chr(10).join(lines)+chr(10))
+    name='shared_dag_'+('alt' if alt else 'and')
+    try:
+        r=subprocess.run([compiler,'-p','sce_fp_rsx','-e','main',str(src)],capture_output=True,text=True,timeout=20)
+        if r.returncode!=0: errors.append(name+': did not compile (exit %d)'%r.returncode)
+    except subprocess.TimeoutExpired:
+        errors.append(name+': did not finish within 20 s (exponential walk over a shared boolean DAG)')
 p=pathlib.Path(root)/'tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_shared_refuse_f.cg'
 r=subprocess.run([compiler,'-p','sce_fp_rsx',str(p)],capture_output=True,text=True,timeout=30)
 # Exit 1 EXACTLY: a timeout or a crash also has a non-zero status, and both

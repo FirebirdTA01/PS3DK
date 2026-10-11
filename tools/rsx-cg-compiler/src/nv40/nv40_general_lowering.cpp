@@ -792,6 +792,7 @@ private:
     bool flattened_ = false;
     std::unordered_map<IRValueID, const IRInstruction*> defMap_;
     std::unordered_set<IRValueID> comparisonLogicalValues_;
+    mutable std::unordered_map<IRValueID, bool> comparisonTreeMemo_;  // isComparisonTree, per classification
     // VP only: float4 constructions whose one consumer is a tex2Dbias /
     // tex2Dlod coordinate.  lowerVecConstruct leaves them unlowered and
     // lowerVpFetch packs the lanes TXL reads (x, y and the LOD) itself.
@@ -900,22 +901,39 @@ private:
     // value, so eager evaluation is the short-circuit's value.  Measured: the
     // reference evaluates `c && !near(a, b)` and `c && (near(a, b) || d)`
     // eagerly (SLTR into a half, SEQX for the NOT, MULXC for the AND).
-    bool isComparisonTree(IRValueID value, int depth = 0) const
+    // Each value is decided ONCE (memo, cleared per classification): a shared
+    // boolean DAG (b1 = b0 && b0; b2 = b1 && b1; ...) is linear work here.
+    // A plain recursion revisited both edges of every shared node, which is
+    // exponential - a 40-deep chain did not finish (review: codex).
+    // Post-order with an explicit stack, so a deep chain cannot overflow the
+    // native stack either.
+    bool isComparisonTree(IRValueID root) const
     {
-        if (depth > 64) return false;
-        if (isComparisonValue(value)) return true;
-        const auto it = defMap_.find(value);
-        if (it == defMap_.end() || !it->second) return false;
-        const IRInstruction& def = *it->second;
-        if (def.resultType.componentCount() != 1) return false;
-        switch (def.op) {
-        case IROp::LogicalNot:
-            return def.operands.size() == 1 && isComparisonTree(def.operands[0], depth + 1);
-        case IROp::LogicalAnd: case IROp::LogicalOr:
-            return def.operands.size() == 2 && isComparisonTree(def.operands[0], depth + 1) &&
-                   isComparisonTree(def.operands[1], depth + 1);
-        default: return false;
+        auto& memo = comparisonTreeMemo_;
+        std::vector<std::pair<IRValueID, bool>> stack{{root, false}};
+        while (!stack.empty()) {
+            const auto [value, expanded] = stack.back();
+            if (memo.count(value)) { stack.pop_back(); continue; }
+            if (isComparisonValue(value)) { memo[value] = true; stack.pop_back(); continue; }
+            const auto it = defMap_.find(value);
+            const IRInstruction* def = it == defMap_.end() ? nullptr : it->second;
+            const bool combiner = def && def->resultType.componentCount() == 1 &&
+                ((def->op == IROp::LogicalNot && def->operands.size() == 1) ||
+                 ((def->op == IROp::LogicalAnd || def->op == IROp::LogicalOr) &&
+                  def->operands.size() == 2));
+            if (!combiner) { memo[value] = false; stack.pop_back(); continue; }
+            if (!expanded) {
+                stack.back().second = true;
+                for (IRValueID operand : def->operands)
+                    if (!memo.count(operand)) stack.push_back({operand, false});
+                continue;
+            }
+            bool all = true;
+            for (IRValueID operand : def->operands) all = all && memo[operand];
+            memo[value] = all;
+            stack.pop_back();
         }
+        return memo[root];
     }
 
     // Admits comparison-only roots for lowering; this is not a speculative
@@ -923,6 +941,7 @@ private:
     bool classifyShortCircuitRoots(
         const std::vector<const IRBasicBlock*>& blocks)
     {
+        comparisonTreeMemo_.clear();
         for (const IRBasicBlock* b : blocks) {
             for (const auto& instPtr : b->instructions) {
                 if (!instPtr ||
