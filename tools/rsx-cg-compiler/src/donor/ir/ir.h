@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <set>
 #include <string>
 #include <vector>
 #include <memory>
@@ -505,6 +506,16 @@ public:
 
     IRModule* parentModule = nullptr;
     bool isEntryPoint = false;
+    // Implicit (semantic-less) inputs that CLAIM a TEXCOORD although the
+    // program may never read them (t_8c4a982e).  Measured on the reference:
+    // an input that flows into the return value of an inlined call - a user
+    // helper, or a standard-library function implemented as one (sin, lerp,
+    // mul, ...; not the hardware primitives dot, abs, pow, tex2D, ...) -
+    // takes its slot even when that call's result is dead; dead code inside
+    // the entry itself does not.  Names as bindImplicitTexCoords keys them:
+    // a bare parameter by name, a struct member as "param.field".  Filled
+    // before any dead-code elimination, by the IR builder.
+    std::set<std::string> claimedImplicitInputs;
 
     explicit IRFunction(const std::string& n) : name(n) {}
 

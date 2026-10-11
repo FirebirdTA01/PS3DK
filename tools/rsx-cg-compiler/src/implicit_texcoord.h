@@ -131,6 +131,10 @@ inline void bindImplicitTexCoords(IRFunction& entry,
     for (const auto& p : entry.parameters)
         if (p.inferredSemantic && used.count(p.valueId))
             read.insert(p.name);
+    // An input that flows into an inlined call's return value claims its
+    // slot even when nothing reads it any more (t_8c4a982e, measured); its
+    // record stays unreferenced.
+    read.insert(entry.claimedImplicitInputs.begin(), entry.claimedImplicitInputs.end());
 
     // Lowest free index, declaration order, explicit TEXCOORDs reserved.
     std::map<std::string, int> index;

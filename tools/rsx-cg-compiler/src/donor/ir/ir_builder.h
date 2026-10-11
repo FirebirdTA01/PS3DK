@@ -116,6 +116,9 @@ private:
     // (uniform-struct-entry-parameter): the name has no whole-struct value,
     // only `name.member...` bindings, so a whole-struct copy copies those.
     std::unordered_set<std::string> flattenedUniformStructParams_;
+    // Values an inlined call returns (t_8c4a982e): the inputs they depend
+    // on claim an implicit TEXCOORD even when the call's result is dead.
+    std::vector<IRValueID> implicitClaimRoots_;
     // Argument i of the call is a flattened uniform struct parameter passed
     // whole to a struct-typed in parameter: bound member by member.
     bool flattenedStructArgument(const CallExpr* call, size_t i);
@@ -223,6 +226,8 @@ private:
     IRValueID buildBinaryExpr(BinaryExpr* expr);
     IRValueID buildUnaryExpr(UnaryExpr* expr);
     IRValueID buildCallExpr(CallExpr* expr);
+    IRValueID buildCallExprImpl(CallExpr* expr);
+    void computeClaimedImplicitInputs();
     bool inlineUserFunctionCall(CallExpr* expr, const std::vector<IRValueID>& args,
                                 IRValueID& result);
     bool buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result);

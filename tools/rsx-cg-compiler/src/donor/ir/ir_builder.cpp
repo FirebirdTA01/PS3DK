@@ -2201,6 +2201,9 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         }
     }
 
+    if (currentFunction_->isEntryPoint) computeClaimedImplicitInputs();
+    implicitClaimRoots_.clear();
+
     // Clean up
     declToValue_.clear();
     nameToValue_.clear();
@@ -2211,6 +2214,39 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     currentFunction_ = nullptr;
     currentFunctionDecl_ = nullptr;
     currentBlock_ = nullptr;
+}
+
+// t_8c4a982e: the implicit inputs the recorded claim roots depend on, found
+// by walking operands backwards through the still-complete IR (no dead-code
+// elimination has run yet).  A bare parameter is reached as its value id; a
+// struct member as its inferred-semantic load.
+void IRBuilder::computeClaimedImplicitInputs()
+{
+    if (implicitClaimRoots_.empty()) return;
+    std::unordered_map<IRValueID, const IRInstruction*> def;
+    for (const auto& block : currentFunction_->blocks)
+        if (block)
+            for (const auto& inst : block->instructions)
+                if (inst && inst->result != InvalidIRValue) def[inst->result] = inst.get();
+    std::unordered_map<IRValueID, std::string> params;
+    for (const auto& p : currentFunction_->parameters)
+        if (p.inferredSemantic) params[p.valueId] = p.name;
+    std::unordered_set<IRValueID> seen;
+    std::vector<IRValueID> work(implicitClaimRoots_.begin(), implicitClaimRoots_.end());
+    while (!work.empty())
+    {
+        const IRValueID v = work.back(); work.pop_back();
+        if (v == InvalidIRValue || !seen.insert(v).second) continue;
+        const auto param = params.find(v);
+        if (param != params.end()) currentFunction_->claimedImplicitInputs.insert(param->second);
+        const auto it = def.find(v);
+        if (it == def.end()) continue;
+        const IRInstruction* inst = it->second;
+        if ((inst->op == IROp::LoadAttribute || inst->op == IROp::LoadVarying) &&
+            inst->inferredSemantic && !inst->structParamName.empty())
+            currentFunction_->claimedImplicitInputs.insert(inst->structParamName + "." + inst->fieldName);
+        for (IRValueID op : inst->operands) work.push_back(op);
+    }
 }
 
 // ============================================================================
@@ -5090,7 +5126,41 @@ IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
     return emitUnaryOp(op, resultType, operandValue, expr->loc);
 }
 
+// Standard-library functions the reference implements as inlined source
+// (measured, t_8c4a982e: an input flowing into one claims an implicit
+// TEXCOORD even when the result is dead).  The hardware primitives - abs,
+// dot, floor, frac, saturate, min, max, pow, ddx, ddy, the tex* fetches,
+// sincos and the pack functions - do NOT claim and are absent here.
+static bool claimsLikeInlinedCall(const std::string& name)
+{
+    static const std::unordered_set<std::string> names = {
+        "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh",
+        "exp", "exp2", "log", "log2", "log10",
+        "sqrt", "rsqrt", "length", "distance", "normalize", "cross", "reflect", "refract",
+        "faceforward",
+        "clamp", "lerp", "step", "smoothstep", "ceil", "round", "sign", "degrees", "radians",
+        "fmod", "modf", "frexp", "ldexp", "isfinite", "isinf", "isnan",
+        "mul", "determinant", "transpose", "all", "any",
+        "lit", "unpack_2half", "unpack_4byte", "unpack_4ubyte",
+    };
+    return names.count(name) != 0;
+}
+
 IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
+{
+    const IRValueID result = buildCallExprImpl(expr);
+    // A builtin call by a claiming name: its result is a claim root.  User
+    // functions record their roots at each return (runInlineStatements).
+    const bool userFunction = expr->resolvedFunction &&
+                              expr->resolvedFunction->kind == DeclKind::Function &&
+                              !static_cast<const FunctionDecl*>(expr->resolvedFunction)->isIntrinsic;
+    if (result != InvalidIRValue && !userFunction && currentFunction_ &&
+        currentFunction_->isEntryPoint && claimsLikeInlinedCall(expr->functionName))
+        implicitClaimRoots_.push_back(result);
+    return result;
+}
+
+IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
 {
     // modf(x, out ip), measured on the reference (FLR, then a predicated
     // correction on x < 0): fl = floor(x); f = x - fl; ip = fl - and where
@@ -6454,6 +6524,21 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                     ret->loc, callee->returnType->baseType);
             }
             result = narrowToScalar(callee->returnType.get(), ret->value.get(), result);
+            // t_8c4a982e: whatever this return carries claims its inputs'
+            // implicit TEXCOORDs, used or not - the value, and for a struct
+            // local every member value it holds at this return.
+            if (currentFunction_ && currentFunction_->isEntryPoint)
+            {
+                if (result != InvalidIRValue) implicitClaimRoots_.push_back(result);
+                if (ret->value->kind == ExprKind::Identifier)
+                {
+                    const std::string prefix = static_cast<IdentifierExpr*>(ret->value.get())->name + ".";
+                    for (const auto& entry : nameToValue_)
+                        if (entry.first.compare(0, prefix.size(), prefix) == 0 &&
+                            entry.second != InvalidIRValue)
+                            implicitClaimRoots_.push_back(entry.second);
+                }
+            }
             sawReturn = true;
             continue;
         }
