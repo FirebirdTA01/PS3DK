@@ -3528,12 +3528,71 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // the count unknowable from the header, refused too when the bound is
     // constant (review: codex, constant fractional 300 / .5).
     {
-        auto constantOf = [&](IRValueID id, double& out) {
-            const auto* k = dynamic_cast<const IRConstant*>(currentFunction_->getValue(id));
-            if (!k) return false;
-            if (std::holds_alternative<float>(k->value)) { out = std::get<float>(k->value); return true; }
-            if (std::holds_alternative<int32_t>(k->value)) { out = std::get<int32_t>(k->value); return true; }
-            return false;
+        // Each of start and bound is CONSTANT (evaluated here), RUN-TIME (it
+        // reads an input, a uniform, a texture, a carry: the measured
+        // LOOP {255} shape) or UNKNOWN (built only from constants through an
+        // operation this evaluator does not model).  UNKNOWN is refused: a
+        // constant expression the guard cannot evaluate must not reach
+        // LOOP {255} unchecked (`i < abs(-300.0)`, review: codex LOOP4).
+        enum class Kind { Constant, Runtime, Unknown };
+        std::unordered_map<IRValueID, const IRInstruction*> defs;
+        for (const auto& bp : currentFunction_->blocks)
+            if (bp)
+                for (const auto& ip : bp->instructions)
+                    if (ip && ip->result != InvalidIRValue) defs[ip->result] = ip.get();
+        std::function<Kind(IRValueID, double&, int)> classify;
+        classify = [&](IRValueID id, double& out, int depth) -> Kind {
+            if (depth > 64) return Kind::Unknown;
+            if (const auto* k = dynamic_cast<const IRConstant*>(currentFunction_->getValue(id))) {
+                if (std::holds_alternative<float>(k->value)) { out = std::get<float>(k->value); return Kind::Constant; }
+                if (std::holds_alternative<int32_t>(k->value)) { out = std::get<int32_t>(k->value); return Kind::Constant; }
+                // Unsigned values wrap (`-1u`); not modelled here, so unknown.
+                return Kind::Unknown;
+            }
+            if (id >= IRModule::kGlobalIdBase) return Kind::Runtime;
+            for (const IRParameter& param : currentFunction_->parameters)
+                if (param.valueId == id) return Kind::Runtime;
+            const auto d = defs.find(id);
+            if (d == defs.end()) return Kind::Unknown;
+            const IRInstruction* inst = d->second;
+            switch (inst->op) {
+            case IROp::LoadAttribute: case IROp::LoadUniform: case IROp::LoadVarying:
+            case IROp::LoopCarry: case IROp::LoopOut:
+            case IROp::TexSample: case IROp::TexSampleLod: case IROp::TexSampleGrad:
+            case IROp::TexSampleProj: case IROp::TexSampleBias: case IROp::TexFetch:
+                return Kind::Runtime;
+            default: break;
+            }
+            std::vector<double> v(inst->operands.size());
+            bool unknown = false;
+            for (size_t i = 0; i < inst->operands.size(); ++i) {
+                const Kind k = classify(inst->operands[i], v[i], depth + 1);
+                if (k == Kind::Runtime) return Kind::Runtime;
+                if (k == Kind::Unknown) unknown = true;
+            }
+            if (unknown || !inst->resultType.isScalar() || inst->resultType.baseType == IRType::UInt32)
+                return Kind::Unknown;
+            const bool f = inst->resultType.baseType == IRType::Float32;
+            auto round = [&](double x) { return f ? static_cast<double>(static_cast<float>(x)) : x; };
+            const size_t n = v.size();
+            switch (inst->op) {
+            case IROp::Neg: if (n != 1) return Kind::Unknown; out = round(-v[0]); return Kind::Constant;
+            case IROp::Abs: if (n != 1) return Kind::Unknown; out = round(std::fabs(v[0])); return Kind::Constant;
+            case IROp::Floor: if (n != 1) return Kind::Unknown; out = round(std::floor(v[0])); return Kind::Constant;
+            case IROp::Ceil: if (n != 1) return Kind::Unknown; out = round(std::ceil(v[0])); return Kind::Constant;
+            case IROp::IntToFloat: if (n != 1) return Kind::Unknown; out = round(v[0]); return Kind::Constant;
+            case IROp::FloatToInt: if (n != 1) return Kind::Unknown; out = std::trunc(v[0]); return Kind::Constant;
+            case IROp::Add: if (n != 2) return Kind::Unknown; out = round(v[0] + v[1]); return Kind::Constant;
+            case IROp::Sub: if (n != 2) return Kind::Unknown; out = round(v[0] - v[1]); return Kind::Constant;
+            case IROp::Mul: if (n != 2) return Kind::Unknown; out = round(v[0] * v[1]); return Kind::Constant;
+            case IROp::Min: if (n != 2) return Kind::Unknown; out = round(std::min(v[0], v[1])); return Kind::Constant;
+            case IROp::Max: if (n != 2) return Kind::Unknown; out = round(std::max(v[0], v[1])); return Kind::Constant;
+            case IROp::Div:
+                if (n != 2 || v[1] == 0) return Kind::Unknown;
+                out = f ? round(v[0] / v[1]) : std::trunc(v[0] / v[1]);
+                return Kind::Constant;
+            default: return Kind::Unknown;
+            }
         };
         const Carry* ind = nullptr;
         for (const Carry& c : kept) if (c.name == varName) ind = &c;
@@ -3541,12 +3600,33 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         for (size_t i = beginIndex; i < block->instructions.size(); ++i)
             if (block->instructions[i]->op == IROp::LoopBreakIf) { test = block->instructions[i].get(); break; }
         const IRInstruction* cmp = nullptr;
-        if (test && !test->operands.empty())
-            for (size_t i = beginIndex; i < block->instructions.size(); ++i)
-                if (block->instructions[i]->result == test->operands[0]) { cmp = block->instructions[i].get(); break; }
+        if (test && !test->operands.empty()) {
+            const auto d = defs.find(test->operands[0]);
+            if (d != defs.end()) cmp = d->second;
+        }
+        // The test must read the induction carry, directly or through one
+        // type conversion; anything else is not the admitted header.
+        auto readsCarry = [&](IRValueID id) {
+            if (!ind) return false;
+            if (id == ind->carry) return true;
+            const auto d = defs.find(id);
+            return d != defs.end() && (d->second->op == IROp::IntToFloat || d->second->op == IROp::FloatToInt) &&
+                   d->second->operands.size() == 1 && d->second->operands[0] == ind->carry;
+        };
+        const bool knownCompare = cmp && cmp->operands.size() == 2 &&
+            (cmp->op == IROp::CmpLt || cmp->op == IROp::CmpLe || cmp->op == IROp::CmpGt || cmp->op == IROp::CmpGe);
+        if (!ind || !knownCompare || !readsCarry(cmp->operands[0])) {
+            blockDeclared_.pop_back();
+            return refuse("the loop test is not the induction compared with its bound");
+        }
         double start = 0, bound = 0;
-        if (ind && cmp && cmp->operands.size() == 2 && cmp->operands[0] == ind->carry &&
-            constantOf(ind->init, start) && constantOf(cmp->operands[1], bound))
+        const Kind startKind = classify(ind->init, start, 0);
+        const Kind boundKind = classify(cmp->operands[1], bound, 0);
+        if (startKind == Kind::Unknown || boundKind == Kind::Unknown) {
+            blockDeclared_.pop_back();
+            return refuse("a loop start or bound built from constants that is not evaluated");
+        }
+        if (startKind == Kind::Constant && boundKind == Kind::Constant)
         {
             double step = 1;
             auto* inc = stmt->increment.get();
@@ -3563,9 +3643,8 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             }
             // The induction's next value must be exactly carry +/- step.
             const IRValueID next = nameToValue_.at(ind->name);
-            const IRInstruction* nextDef = nullptr;
-            for (size_t i = beginIndex; i < block->instructions.size(); ++i)
-                if (block->instructions[i]->result == next) { nextDef = block->instructions[i].get(); break; }
+            const auto nd = defs.find(next);
+            const IRInstruction* nextDef = nd == defs.end() ? nullptr : nd->second;
             const bool plainStep = nextDef && (nextDef->op == IROp::Add || nextDef->op == IROp::Sub) &&
                 nextDef->operands.size() == 2 && nextDef->operands[0] == ind->carry;
             if (!plainStep) {
@@ -3573,13 +3652,12 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
                 return refuse("a constant-bound loop whose body writes its induction variable");
             }
             const bool floating = ind->type.baseType == IRType::Float32;
-            auto holds = [&](double v) {
+            auto holds = [&](double x) {
                 switch (cmp->op) {
-                case IROp::CmpLt: return v < bound;
-                case IROp::CmpLe: return v <= bound;
-                case IROp::CmpGt: return v > bound;
-                case IROp::CmpGe: return v >= bound;
-                default: return true;   // unknown: treated as unbounded
+                case IROp::CmpLt: return x < bound;
+                case IROp::CmpLe: return x <= bound;
+                case IROp::CmpGt: return x > bound;
+                default: return x >= bound;
                 }
             };
             double v = floating ? static_cast<float>(start) : start;

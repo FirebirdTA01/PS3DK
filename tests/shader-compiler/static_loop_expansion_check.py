@@ -7,7 +7,7 @@ is a named instruction-shape divergence: reference BRA, our explicit expansion.
 No reference byte-identity claim is made for that form. VP texture samplelod is
 a separate gap, vp-texture-fetch; arithmetic twins exercise this change in both profiles.
 The run-time-shaped FRAGMENT rows below (a written induction or bound, a
-non-integral step, an unsigned negation, a negative-zero start) are no longer
+non-integral step, a negative-zero start) are no longer
 gaps there: a hardware loop compiles them (FP-LOOP slice 1), judged by value
 including the NaN and signed infinities of a division by -0.  Their vertex
 twins stay named refusals.
@@ -128,7 +128,6 @@ def main():
             hardware_loop_values = {
                 'bound-write': lambda t: [3 * x for x in t],
                 'nonintegral-gap': lambda t: [7 * x for x in t],
-                'unsigned-bound-gap': lambda t: [0.0] * 4,   # -1u wraps: no iteration
                 'negative-zero-gap': over_neg_zero,
                 'negative-zero-local-gap': over_neg_zero,
             }
@@ -160,6 +159,10 @@ def main():
                 # is refused by the hardware-loop region by name.
                 if profile == 'sce_fp_rsx' and label == 'induction-write':
                     diagnostic = 'writes its induction variable'
+                # An unsigned constant start (-1u wraps) is not evaluated by
+                # the region's trip-count guard, so it is refused by name.
+                if profile == 'sce_fp_rsx' and label == 'unsigned-bound-gap':
+                    diagnostic = 'not evaluated'
                 compile_one(profile + '-' + label, body, profile, refusal=diagnostic)
                 refusals += 1
         # FP texture path: actual sampled work, rather than a constant-only loop.
@@ -169,8 +172,8 @@ def main():
             body = f'{ty} size=4;{ty} i;for(i=-size;i<=size;i+=2){{{fetch}}}'
             explicit = ''.join('{' + ty + ' i=' + str(i) + ('.0;' if ty == 'float' else ';') + fetch + '}' for i in values)
             twin('texture-local-' + ty, body, explicit, 'sce_fp_rsx', prefix='uniform sampler2D tex;')
-    assert (count, refusals, hardware_loops) == (36, 17, 5), (count, refusals, hardware_loops)
-    assert value_checks == 39, value_checks
+    assert (count, refusals, hardware_loops) == (36, 18, 4), (count, refusals, hardware_loops)
+    assert value_checks == 36, value_checks
     print(f'static-loop-expansion: PASS ({count} strict twins, {hardware_loops} hardware loops, '
           f'{refusals} named refusals, {value_checks} exact values)')
 

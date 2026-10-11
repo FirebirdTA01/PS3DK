@@ -163,6 +163,10 @@ REFUSE = [
     # LOOP {255} would cut it short.
     ('constant_over_255', H + 'float s = 0; for (float i = 0; i < 300; i += 0.5) s += t.y; return float4(s, 0, 0, 1); }',
      'more than 255 iterations'),
+    # A constant bound the guard must evaluate, not a literal (review:
+    # codex LOOP4): abs(-300.0) with step 0.5 is 600 iterations.
+    ('constant_expression_over_255', H + 'float s = 0; for (float i = 0; i < abs(-300.0); i += 0.5) s += t.y; '
+                                     'return float4(s, 0, 0, 1); }', 'more than 255 iterations'),
     ('constant_bound_induction_write', H + 'float s = 0; for (float i = 0.0; i < 4.0; i += 0.5) { s += t.y; i += 0.5; } '
                                        'return float4(s, 0, 0, 1); }', 'writes its induction variable'),
     ('out_parameter', 'void f(float4 t, out float r) { r = 0; for (float i = 0; i < t.x; i++) r += 1; }' + chr(10) +
