@@ -160,6 +160,17 @@ private:
     std::vector<StmtNode*> inlineContinuation_;
     bool inlineContinuationRun_ = false;
     size_t inlineContinuationFrame_ = 0;   // blockDeclared_ depth the continuation was captured at
+    // A helper that RETURNED A STRUCT BY VALUE carries its tracked fields
+    // (the per-element arrays and leaf bindings of `return p;`) back to the
+    // caller instead of losing them at the scope restore below the call.
+    // `inlineStructReturnBase_` is the callee's struct local returned by the
+    // body (`p` in `return p;`), `inlineStructReturnDest_` is the caller's
+    // destination (`q` in `Plan q = compute(...)`); the inliner installs the
+    // base's fields under the destination before scope_ is restored and sets
+    // `inlineInstalledStructReturn_` so the caller's copy can be skipped.
+    std::string inlineStructReturnBase_;
+    std::string inlineStructReturnDest_;
+    bool inlineInstalledStructReturn_ = false;
     // Declaration identity prevents a local shadow from using a global's initializer.
     std::unordered_set<const DeclNode*> globalDeclarations_;
     // Mutable statics whose initialiser the constant evaluator could not

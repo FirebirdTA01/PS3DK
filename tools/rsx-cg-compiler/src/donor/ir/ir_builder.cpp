@@ -5090,8 +5090,26 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         // If there's an initializer, evaluate it
         if (varDecl->initializer)
         {
+            // A struct local initialised from a user-function call
+            // (`Plan q = compute(...)`) is populated by the inliner: the
+            // returned value is a whole-struct base with no tracked
+            // elements, so name the destination for the call and let the
+            // inliner carry the callee's tracked fields back under it.
+            // When the inliner carries the fields back, the caller-side
+            // copy has nothing to do (the source is a CallExpr, and the
+            // remap has already installed the tracked storage under the
+            // destination); skip the copy.  For a non-call initialiser
+            // (e.g. `float4(0, 0, 0, 0)` for a struct), the inliner was
+            // never entered for this name and the install flag stays
+            // false; run the copy as before.
+            const bool structInit = getStructFields(varDecl->type.get()) != nullptr;
+            if (structInit) inlineStructReturnDest_ = varDecl->name;
             IRValueID initValue = buildExpr(varDecl->initializer.get());
-            copyArrayAggregate(varDecl->name, varDecl->initializer.get(), varDecl->type.get());
+            const bool installedStructReturn = inlineInstalledStructReturn_;
+            inlineStructReturnDest_.clear();
+            inlineInstalledStructReturn_ = false;
+            if (!installedStructReturn)
+                copyArrayAggregate(varDecl->name, varDecl->initializer.get(), varDecl->type.get());
             const IRTypeInfo declaredType = getIRType(varDecl->type.get());
             const IRTypeInfo initType = getExprType(varDecl->initializer.get());
             if (initType.isMatrix() && !declaredType.isMatrix() &&
@@ -7141,7 +7159,32 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         return InvalidIRValue;
     }
 
-    // User function call
+    // User function call.  A non-inlined call can only occur in a standalone
+    // helper body (not built as an entry, and not inlined into one): such a
+    // body is never executed, so its out/inout arguments are destinations
+    // that receive no value from the real call.  Bind each such argument
+    // to a typed undefined value so the body stays well-typed - reading one
+    // must not hand a dangling, untyped value id to an assignment whose type
+    // lookup would come back Void (member-array-storage).  This mirrors
+    // copyArrayAggregate, which already bails early for a standalone helper
+    // body; the guard in the back-end is left intact.
+    if (calleeDecl)
+    {
+        for (size_t i = 0; i < calleeDecl->parameters.size() && i < expr->arguments.size(); ++i)
+        {
+            const ParamDecl* param = calleeDecl->parameters[i].get();
+            if (!param ||
+                (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut))
+                continue;
+            ExprNode* arg = expr->arguments[i].get();
+            if (!arg || arg->kind != ExprKind::Identifier) continue;
+            const std::string name = static_cast<IdentifierExpr*>(arg)->name;
+            const auto paramType = getIRType(param->type.get());
+            const IRValueID undef = emitInstruction(IROp::Undef, paramType, {}, arg->loc);
+            nameToValue_[name] = undef;
+        }
+    }
+
     return emitCall(expr->functionName, resultType, argValues);
 }
 
@@ -7574,6 +7617,14 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // name through the stash like any other caller shadow.
     const auto& savedStash = savedScope.shadowedGlobals;
     const auto& savedStashArrays = savedScope.shadowedGlobalArrays;
+    // The destination the callee's struct return lands in, held by THIS
+    // inline frame.  buildDeclStmt sets it right before evaluating the
+    // decl's initializer (the call), so the ONLY frame that sees it set is
+    // the one inlining that call; consume it here so nested helpers called
+    // from the body never see a stale destination and cannot remap their
+    // own returned struct's tracked storage on top of the caller's.
+    const std::string structReturnDest = inlineStructReturnDest_;
+    inlineStructReturnDest_.clear();
     inlineStack_.push_back(callee);
     blockDeclared_.emplace_back();   // the callee's top-level locals are its own, never the caller's block's
     const bool ok = buildInlineFunctionBody(callee, result);
@@ -7610,6 +7661,42 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     for (const auto& kv : bodyStash) if (savedStash.count(kv.first)) shadowedGlobals_[kv.first] = kv.second;
     for (const auto& kv : bodyStashArrays) if (savedStashArrays.count(kv.first)) shadowedGlobalArrays_[kv.first] = kv.second;
     identityPrefixSwizzleBase_ = std::move(savedSwizzles);
+    // A struct returned BY VALUE (`Plan q = compute(...)`): the return
+    // statement bound the callee's whole-struct base plus its tracked array
+    // and leaf fields under the callee's local name (the `inlineStructReturnBase_`
+    // captured at the return site).  The scope restore below dropped the
+    // callee's scope, including those fields, so they would be lost to the
+    // caller - and the caller's copy could not find a tracked source (it was
+    // a CallExpr, unresolvable by name).  Remap the base's tracked fields
+    // and leaf bindings under the caller's destination; then mark the
+    // install so the caller's copy can be skipped (nothing left to do).
+    const std::string structReturnBase = inlineStructReturnBase_;
+    if (!structReturnBase.empty() && !structReturnDest.empty())
+    {
+        const std::string& base = structReturnBase;
+        const std::string& dest = structReturnDest;
+        const std::string basePrefix = base + ".";
+        const std::string destPrefix = dest + ".";
+        auto remapKey = [&](const std::string& key) -> std::string
+        {
+            if (key == base) return dest;
+            if (key.compare(0, basePrefix.size(), basePrefix) == 0)
+                return destPrefix + key.substr(basePrefix.size());
+            return std::string();
+        };
+        for (const auto& kv : bodyArrays)
+        {
+            const std::string to = remapKey(kv.first);
+            if (!to.empty()) localArrayValues_[to] = kv.second;
+        }
+        for (const auto& kv : bodyNames)
+        {
+            const std::string to = remapKey(kv.first);
+            if (!to.empty()) nameToValue_[to] = kv.second;
+        }
+        inlineInstalledStructReturn_ = true;
+    }
+    inlineStructReturnBase_.clear();
     // Carry the callee's writes to file-scope names back to the caller.
     // A CALLER-LOCAL (or the caller's PARAMETER) that shadows a global of
     // the same name is the caller's binding: the callee wrote the global,
@@ -7707,6 +7794,15 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
             return false;
         }
         buildAssignment(expr->arguments[copyOut[k]].get(), copyOutValues[k]);
+    }
+    // A nested inlining inside the callee's body may have flipped the "the
+    // caller-side copy can be skipped" flag when it copied out its own
+    // struct-return destination.  That flag was already consumed by that
+    // buildDeclStmt; resetting it here keeps the caller's copy on the
+    // RETURN-struct case from being skipped by a nested helper's flag
+    // (review: nested helpers must not leak their install state up).
+    if (structReturnDest.empty()) {
+        inlineInstalledStructReturn_ = false;
     }
     // A void helper (a statement-position call that writes globals or
     // nothing) has no result value; its inlined body is the whole effect.
@@ -7954,6 +8050,26 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 }
                 sawReturn = true;   // `return;` ends a void body
                 continue;
+            }
+            // A struct return (return P;) needs the caller to see the
+            // returned local's tracked array fields and leaf bindings,
+            // not just its whole-struct base value.  Remember the local's
+            // name so inlineUserFunctionCall can carry the storage back
+            // to the caller's destination under those keys.  Only set
+            // for a plain identifier return of a local struct variable -
+            // anything else (a value return, or an expression) has no
+            // tracked elements.
+            inlineStructReturnBase_.clear();
+            if (ret->value->kind == ExprKind::Identifier)
+            {
+                auto* retId = static_cast<IdentifierExpr*>(ret->value.get());
+                if (retId->resolvedDecl && retId->resolvedDecl->kind == DeclKind::Variable)
+                {
+                    auto* vd = static_cast<VarDecl*>(retId->resolvedDecl);
+                    if (vd->type && vd->type->baseType == BaseType::Struct &&
+                        getStructFields(vd->type.get()))
+                        inlineStructReturnBase_ = retId->name;
+                }
             }
             result = buildExpr(ret->value.get());
             // Normalize a scalar return to the declared vector type before

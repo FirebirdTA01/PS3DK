@@ -1117,6 +1117,8 @@ jobs:
         run: bash tests/shader-compiler/multi-declarator-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test struct-return .rgb/.a swizzles emit their store like .xyz/.w
         run: bash tests/shader-compiler/struct-return-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test Mossbrook member-array broadcast and struct-copy compile (t_c773d446)
+        run: bash tests/shader-compiler/mossbrook-memberarray-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test swizzle updates preserve a struct field's current value
         run: bash tests/shader-compiler/struct-field-update-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test partial struct outputs preserve lane assignment order
