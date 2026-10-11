@@ -126,8 +126,15 @@ fi
 version_bare="${major}.${minor}.${patch}"
 version="v${version_bare}"
 version_display="$version"
+# A candidate build (a branch built for testing, not a release) must not
+# present a number a release could carry: PS3SDK_CANDIDATE=1 marks it as a
+# SemVer pre-release, vX.Y.Z-cand.<sha7>, which orders BELOW vX.Y.Z and
+# names the exact commit.  Release and main builds never set it.
+if [ -n "${PS3SDK_CANDIDATE:-}" ] && [ "$on_tag" = "0" ]; then
+    version_display="${version_display}-cand.${commit_short}"
+fi
 if [ "$dirty" = "1" ]; then
-    version_display="${version}+dirty"
+    version_display="${version_display}+dirty"
 fi
 
 case "$format" in
