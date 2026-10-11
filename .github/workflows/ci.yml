@@ -755,6 +755,8 @@ jobs:
         run: bash tests/shader-compiler/fp-schedule-pressure-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Parameter records declare every input struct member and the reference isReferenced
         run: bash tests/shader-compiler/param-records-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Array out parameters refuse by name until their output slots are witnessed
+        run: bash tests/shader-compiler/array-out-param-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
         run: bash tests/shader-compiler/inline-dead-tail-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value

@@ -3487,19 +3487,26 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                             // (measured: `out float4 explicitTc : TEXCOORD0`
                             // moves a semantic-less returned member to TEXCOORD1;
                             // they collided on TEXCOORD0 - review: codex).
-                            const auto claimSemantic = [&](const Semantic& s) {
+                            // An array claims every element's index (measured:
+                            // out float4 t[2] : TEXCOORD0 holds 0 and 1, and the
+                            // member goes to TEXCOORD2 - review: codex).
+                            const auto claimSemantic = [&](const Semantic& s, TypeNode* t) {
                                 if (s.isEmpty()) return;
                                 std::string u = s.name;
                                 std::transform(u.begin(), u.end(), u.begin(),
                                     [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-                                if (vertex ? (u == "TEXCOORD" || u == "TEX") : (u == "COLOR" || u == "COL"))
-                                    claimed.insert(s.index);
+                                if (!(vertex ? (u == "TEXCOORD" || u == "TEX") : (u == "COLOR" || u == "COL")))
+                                    return;
+                                const IRTypeInfo claimedType = t ? getIRType(t) : IRTypeInfo{};
+                                const int count = claimedType.isArray() && !claimedType.isMatrix()
+                                    ? claimedType.arraySize : 1;
+                                for (int k = 0; k < count; ++k) claimed.insert(s.index + k);
                             };
                             const auto claimMembers = [&](auto& self, TypeNode* t) -> void {
                                 if (const auto* members = getStructFields(t))
                                     for (const auto& m : *members)
                                     {
-                                        claimSemantic(m.semantic);
+                                        claimSemantic(m.semantic, m.type.get());
                                         if (m.semantic.isEmpty()) self(self, m.type.get());
                                     }
                             };
@@ -3508,7 +3515,7 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                                 {
                                     if (!param || (param->storage != StorageQualifier::Out &&
                                                    param->storage != StorageQualifier::InOut)) continue;
-                                    claimSemantic(param->semantic);
+                                    claimSemantic(param->semantic, param->type.get());
                                     if (param->semantic.isEmpty()) claimMembers(claimMembers, param->type.get());
                                 }
                             for (const auto& kv : implicitOutputIndex_) claimed.insert(kv.second);

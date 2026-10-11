@@ -324,5 +324,15 @@ struct V { float4 pos : POSITION; float4 vu : TEXCOORD0; };
 struct W { float4 c : COLOR0; float4 wu : TEXCOORD1; };
 float4 main(float4 pre : TEXCOORD5, V v, W w) : POSITION { return v.pos + w.c + pre; }'
 
+# An ARRAY member of the returned struct holds every element's index; the
+# semantic-less member takes the next free one (measured: e[2] : TEXCOORD0
+# holds 0 and 1, a goes to TEXCOORD2).
+check implicit_after_array_member sce_vp_rsx main \
+'v 418 841 POSITION 0 1; t 418 84a TEXCOORD1 1 1' '
+struct R { float4 p : POSITION; float4 a; float4 e[2] : TEXCOORD0; };
+R main(float4 v : POSITION, float4 t : TEXCOORD1) { R r; r.p = v; r.a = t * t; r.e[0] = t; r.e[1] = t.yxzw; return r; }'
+[ -s "$work/implicit_after_array_member.bin" ] && outputs implicit_after_array_member \
+'main.p 418 8c3 POSITION; main.a 418 c96 -; main.e[0] 418 c94 TEXCOORD0; main.e[1] 418 c95 TEXCOORD0'
+
 [ $fail -eq 0 ] && echo "param-records: PASS" || echo "param-records: FAIL"
 exit $fail
