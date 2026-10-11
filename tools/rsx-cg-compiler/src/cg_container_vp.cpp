@@ -1345,23 +1345,27 @@ VpContainerResult emitVertexContainerImpl(
             param.res = reg >= 0 ? kCgConst : kCgUnassignedRes;
             param.isReferenced = param.isShared = reg >= 0 ? 1u : 0u;
         }
-        // Newly supported pinned arrays must retain their compiled defaults
-        // too. Ordinary scalar/matrix records already carry A2/A3's slices.
-        for (const auto& global : module.globals) {
-            if (!global.type.isArray() || !explicitBindings.find(global.valueId)) continue;
-            const size_t cols = static_cast<size_t>(global.type.isMatrix()
-                ? global.type.matrixCols : global.type.componentCount());
-            const int rows = global.type.isMatrix() ? global.type.matrixRows : 1;
-            for (int element = 0; element < global.type.arraySize; ++element)
-                for (int row = 0; row < rows; ++row) {
-                    std::string name = rsx_cg::arrayElementName(global.name, element);
-                    if (global.type.isMatrix()) name += "[" + std::to_string(row) + "]";
-                    for (auto& param : params)
-                        if (param.name == name && param.paramno == kInvalidIndex)
-                            param.defaultValue = uniformDefaultSlice(global,
-                                (static_cast<size_t>(element) * rows + row) * cols, cols);
-                }
-        }
+    }
+
+    // Array uniforms, pinned or not, retain their compiled defaults
+    // too: one slice per element (per row for a matrix element).  The
+    // runtime uploads these when it binds the program, so an unpatched
+    // `uniform float4 L[2] = {...}` read zeros without them.
+    // Ordinary scalar/matrix records already carry A2/A3's slices.
+    for (const auto& global : module.globals) {
+        if (!global.type.isArray() || global.storage != StorageQualifier::Uniform) continue;
+        const size_t cols = static_cast<size_t>(global.type.isMatrix()
+            ? global.type.matrixCols : global.type.componentCount());
+        const int rows = global.type.isMatrix() ? global.type.matrixRows : 1;
+        for (int element = 0; element < global.type.arraySize; ++element)
+            for (int row = 0; row < rows; ++row) {
+                std::string name = rsx_cg::arrayElementName(global.name, element);
+                if (global.type.isMatrix()) name += "[" + std::to_string(row) + "]";
+                for (auto& param : params)
+                    if (param.name == name && param.paramno == kInvalidIndex)
+                        param.defaultValue = uniformDefaultSlice(global,
+                            (static_cast<size_t>(element) * rows + row) * cols, cols);
+            }
     }
 
     // An out struct parameter's member records sit at the parameter's place

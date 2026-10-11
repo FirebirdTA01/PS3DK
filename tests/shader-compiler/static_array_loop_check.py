@@ -46,8 +46,9 @@ def main():
                     ok=q.returncode==0 and twinbin.read_bytes()==dst.read_bytes()
                 print('PASS' if ok else 'FAIL',label)
                 if not ok: failures.append(label);print(p.stderr)
-            # A non-static const retains its existing refusal. A true uniform
-            # must keep its parameter records and match the literal-index load.
+            # A non-static const array is a uniform with defaults on the
+            # reference (t_528b9869), so both it and a true uniform must keep
+            # their parameter records and match the literal-index load.
             for storage in ('const','uniform'):
                 label=storage+('_vp' if vertex else '_fp')
                 pair=[]
@@ -57,11 +58,8 @@ def main():
                     src=tmp/(label+str(n)+'.cg');dst=tmp/(label+str(n)+'.bin');src.write_text(text)
                     p=subprocess.run([sys.argv[1],'-p','sce_vp_rsx' if vertex else 'sce_fp_rsx','--emit-container',str(dst),str(src)],capture_output=True,text=True,timeout=30)
                     pair.append((p.returncode,dst))
-                if storage=='uniform':
-                    ok=all(rc==0 and dst.exists() for rc,dst in pair)
-                    if ok:ok=pair[0][1].read_bytes()==pair[1][1].read_bytes() and b'k[1]\0' in pair[0][1].read_bytes()
-                else:
-                    ok=all(rc==1 and not dst.exists() for rc,dst in pair)
+                ok=all(rc==0 and dst.exists() for rc,dst in pair)
+                if ok:ok=pair[0][1].read_bytes()==pair[1][1].read_bytes() and b'k[1]\0' in pair[0][1].read_bytes()
                 print('PASS' if ok else 'FAIL',label)
                 if not ok:failures.append(label)
     print('static-array-loop:',len(failures),'failures')

@@ -725,6 +725,19 @@ ContainerResult emitFragmentContainerImpl(
                         }
                     }
                     e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
+                    // An initialised array carries one default per element,
+                    // referenced or not (measured: `const float3 L[2] =
+                    // {1,2,3, 4,5,6}` -> L[0] [1,2,3,0], L[1] [4,5,6,0]).
+                    const size_t cols = static_cast<size_t>(g.type.componentCount());
+                    const size_t first = static_cast<size_t>(k) * cols;
+                    if (g.initialValue.size() >= first + cols)
+                        e.defaultValue.assign(
+                            g.initialValue.begin() + static_cast<std::ptrdiff_t>(first),
+                            g.initialValue.begin() + static_cast<std::ptrdiff_t>(first + cols));
+                    else if (g.initialIntValues.size() >= first + cols)
+                        for (size_t c = 0; c < cols; ++c)
+                            e.defaultValue.push_back(
+                                static_cast<float>(g.initialIntValues[first + c]));
                     params.push_back(e);
                 }
                 continue;

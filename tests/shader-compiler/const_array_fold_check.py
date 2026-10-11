@@ -6,9 +6,11 @@ The reference emits the element inline.  Rows (review: codex): scalar,
 vector, int, half and matrix element types, and shadowing (a local array
 and a helper parameter named like the global), judged by value with fp_eval
 against the reference-measured formula.  A NON-static `const` array is a
-uniform with a default on the reference (it lists k[0..2] as parameters) -
-the separate t_528b9869 gap - so it must keep refusing rather than fold.
+uniform with a default on the reference (it lists k[0..2] as parameters,
+each carrying its initialiser, read from the patchable inline constants), so
+it does NOT fold: it compiles as that uniform array (t_528b9869, arrays).
 """
+import struct
 import subprocess
 import sys
 import tempfile
@@ -133,10 +135,65 @@ def main():
             if not ok:
                 failures.append('%s must refuse like the reference (C1102), rc %d' % (name, run.returncode))
         run, dst = compile_one(compiler, tmp, 'non_static', NON_STATIC)
-        ok = run.returncode == 1 and not dst.exists()
-        print('  %-14s %s' % ('non_static', 'refused (t_528b9869)' if ok else 'NOT refused (rc %d)' % run.returncode))
-        if not ok:
-            failures.append('non_static const array must keep refusing (t_528b9869), rc %d' % run.returncode)
+        if run.returncode != 0 or not dst.exists():
+            failures.append('non_static const array must compile as a uniform array, rc %d' % run.returncode)
+        else:
+            blob = dst.read_bytes()
+            for t in ([0.25, -0.5, 1.0, 1.5], [-2.0, 0.0, 0.5, 4.0]):
+                got, want = fp_eval.evaluate(blob, {'TEX0': t}), [0.5 * t[0], 0.125, 0.0, 1.0]
+                ok = got == want
+                print('  %-14s %-26s %s' % ('non_static', t, 'value ok' if ok else 'WRONG %s want %s' % (got, want)))
+                if not ok:
+                    failures.append('non_static: got %s for %s, want %s' % (got, t, want))
+            # Records as measured on the reference: k[0] unreferenced, k[1]
+            # and k[2] referenced, float (1045), each with its own default.
+            want_records = {'k[0]': (1045, 0, 0.25), 'k[1]': (1045, 1, 0.5), 'k[2]': (1045, 1, 0.125)}
+            got_records = {}
+            count, table = struct.unpack_from('>2I', blob, 12)
+            for i in range(count):
+                w = struct.unpack_from('>12I', blob, table + 48 * i)
+                name = blob[w[4]:blob.index(0, w[4])].decode()
+                if name in want_records:
+                    default = struct.unpack_from('>4f', blob, w[5])[0] if w[5] else None
+                    got_records[name] = (w[0], w[10], default)
+            ok = got_records == want_records
+            print('  %-14s %s' % ('non_static', 'records ok' if ok else 'RECORDS %s want %s' % (got_records, want_records)))
+            if not ok:
+                failures.append('non_static records: %s, want %s' % (got_records, want_records))
+        # Array element records carry their defaults in BOTH profiles, for a
+        # non-static const array and an initialised uniform array alike
+        # (measured on the reference; ours wrote none, so a VP bound
+        # unpatched read zeros).  name -> (resIndex or None, default).
+        record_rows = (
+            ('vp_const_array', 'sce_vp_rsx',
+             'const float4 L[2] = { 1,2,3,4, 5,6,7,8 };' + chr(10) +
+             'float4 main(float4 p : POSITION) : POSITION { return p * L[0] + L[1]; }' + chr(10),
+             {'L[0]': (467, (1.0, 2.0, 3.0, 4.0)), 'L[1]': (466, (5.0, 6.0, 7.0, 8.0))}),
+            ('vp_uniform_array', 'sce_vp_rsx',
+             'uniform float4 U[2] = { 1,2,3,4, 5,6,7,8 };' + chr(10) +
+             'float4 main(float4 p : POSITION) : POSITION { return p * U[0] + U[1]; }' + chr(10),
+             {'U[0]': (467, (1.0, 2.0, 3.0, 4.0)), 'U[1]': (466, (5.0, 6.0, 7.0, 8.0))}),
+            ('fp_uniform_array', 'sce_fp_rsx',
+             'uniform float3 U[2] = { 1,2,3, 4,5,6 };' + chr(10) +
+             'float4 main(float4 t : TEXCOORD0) : COLOR { return float4(t.xyz * U[1], 1); }' + chr(10),
+             {'U[0]': (None, (1.0, 2.0, 3.0, 0.0)), 'U[1]': (None, (4.0, 5.0, 6.0, 0.0))}),
+        )
+        for name, profile, source, want in record_rows:
+            run, dst = compile_one(compiler, tmp, name, source, profile)
+            if run.returncode != 0 or not dst.exists():
+                failures.append('%s must compile, rc %d' % (name, run.returncode)); continue
+            blob = dst.read_bytes(); got = {}
+            count, table = struct.unpack_from('>2I', blob, 12)
+            for i in range(count):
+                w = struct.unpack_from('>12I', blob, table + 48 * i)
+                rec = blob[w[4]:blob.index(0, w[4])].decode()
+                if rec in want:
+                    reg = w[3] if profile == 'sce_vp_rsx' else None
+                    got[rec] = (reg, struct.unpack_from('>4f', blob, w[5]) if w[5] else None)
+            ok = got == want
+            print('  %-16s %s' % (name, 'records ok' if ok else 'RECORDS %s want %s' % (got, want)))
+            if not ok:
+                failures.append('%s records: %s, want %s' % (name, got, want))
     for f in failures:
         print('FAIL:', f)
     print('const-array-fold: %s' % ('PASS' if not failures else 'FAIL (%d)' % len(failures)))
