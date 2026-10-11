@@ -99,6 +99,13 @@ def swap_if(t):
         return (a, b)
     i, (a, b) = run_loop(0.0, t[0], body, (t[1], t[3]))
     return [a, b, 0.0, 1.0]
+def sequential(t):
+    _, (a,) = run_loop(0.0, t[0], lambda i, c: (f32(c[0] + t[1]),), (0.0,))
+    _, (b,) = run_loop(0.0, t[2], lambda i, c: (f32(c[0] + t[3]),), (0.0,))
+    return [a, b, 0.0, 1.0]
+def assign_invariant(t):
+    _, (a,) = run_loop(0.0, t[0], lambda i, c: (t[1],), (7.0,))
+    return [a, t[1], 0.0, 1.0]
 def helper_body(t):
     i, (s,) = run_loop(0.0, t[0], lambda i, c: (f32(c[0] + f32(i * t[2])),), (0.0,))
     return [s, 0.0, 0.0, 1.0]
@@ -126,6 +133,13 @@ VALUE = [
                 'return float4(a, b, i, 1); }', if_else),
     ('else_if', H + 'float s = 0; for (float i = 0; i < t.x; i++) { if (i < 1) s += 1; else if (i < 3) s += 10; '
                 'else s += 100; } return float4(s, 0, 0, 1); }', else_if),
+    # Two loops in one block: each keeps its own carries (review: codex, LOOP2).
+    ('sequential', H + 'float a = 0, b = 0; for (float i = 0; i < t.x; i++) a += t.y; '
+                   'for (float j = 0; j < t.z; j++) b += t.w; return float4(a, b, 0, 1); }', sequential),
+    # A carried variable takes an unchanged one's value: the latch reads the
+    # unchanged value, not a dropped carry (review: codex, LOOP3).
+    ('assign_invariant', H + 'float a = 7, b = t.y; for (float i = 0; i < t.x; i++) a = b; '
+                         'return float4(a, b, 0, 1); }', assign_invariant),
     # A swap under a condition: the select join, then the parallel latch.
     ('swap_if', H + 'float a = t.y, b = t.w; for (float i = 0; i < t.x; i++) { if (i > t.z) { float k = a; a = b; b = k; } } '
                 'return float4(a, b, 0, 1); }', swap_if),
@@ -141,6 +155,16 @@ REFUSE = [
      'no initialiser'),
     ('nested_runtime_loop', H + 'float s = 0; for (float i = 0; i < t.x; i++) { for (float j = 0; j < t.y; j++) s += 1; } '
                             'return float4(s, 0, 0, 1); }', 'error'),
+    # The exit test runs before the latch: a condition that assigns would
+    # lose that write at the exit (review: codex, LOOP1).
+    ('condition_assigns', H + 'float n = t.x; float s = 0; for (float i = 0; i < (n = n - 1); i++) s += 1; '
+                          'return float4(s, n, 0, 1); }', 'the loop condition assigns a variable'),
+    # A constant trip count over 255 needs the nested loop (not implemented):
+    # LOOP {255} would cut it short.
+    ('constant_over_255', H + 'float s = 0; for (float i = 0; i < 300; i += 0.5) s += t.y; return float4(s, 0, 0, 1); }',
+     'more than 255 iterations'),
+    ('constant_bound_induction_write', H + 'float s = 0; for (float i = 0.0; i < 4.0; i += 0.5) { s += t.y; i += 0.5; } '
+                                       'return float4(s, 0, 0, 1); }', 'writes its induction variable'),
     ('out_parameter', 'void f(float4 t, out float r) { r = 0; for (float i = 0; i < t.x; i++) r += 1; }' + chr(10) +
                       H + 'float r; f(t, r); return float4(r, 0, 0, 1); }', 'out parameter'),
     ('file_scope_variable', 'static float g = 0;' + chr(10) +
@@ -161,7 +185,7 @@ for name, src, want_fn in VALUE:
     if p.returncode != 0 or not o.exists():
         fails.append('%s: refused (rc %d)' % (name, p.returncode)); print('  %-22s REFUSED' % name); continue
     blob = o.read_bytes()
-    # The shape: exactly one LOOP {255, 0, 1} and one BRK.
+    # The shape: one LOOP {255, 0, 1} and one BRK per source loop.
     loops = brks = 0
     for w, _ in instructions(ucode_words(blob)):
         if (w[2] >> 31) & 1:
@@ -170,8 +194,9 @@ for name, src, want_fn in VALUE:
                 loops += 1
             elif op == 0x00:
                 brks += 1
-    if (loops, brks) != (1, 1):
-        fails.append('%s: %d LOOP {255,0,1} and %d BRK, want 1 and 1' % (name, loops, brks))
+    want_loops = 2 if name == 'sequential' else 1
+    if (loops, brks) != (want_loops, want_loops):
+        fails.append('%s: %d LOOP {255,0,1} and %d BRK, want %d of each' % (name, loops, brks, want_loops))
     wrong = 0
     for t in TS:
         t = [f32(x) for x in t]

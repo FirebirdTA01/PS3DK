@@ -3347,6 +3347,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // never writes are folded back to their value below.
     struct Carry { std::string name; IRValueID init; IRValueID carry; IRTypeInfo type; };
     std::vector<Carry> carries;
+    const size_t carryStart = block->instructions.size();
     std::vector<std::string> names;
     for (const auto& kv : nameToValue_) names.push_back(kv.first);
     std::sort(names.begin(), names.end());
@@ -3369,8 +3370,17 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     }
     ++hardwareLoopDepth_;
     {
+        const auto beforeCondition = scope_.fold();
         IRValueID cond = buildExpr(stmt->condition.get());
         cond = normalizeCondition(stmt->condition.get(), cond);
+        // The exit test runs before any carry is written back, so a
+        // condition that assigns (`i < (n = n - 1)`) would leave the exit
+        // without that write: refused (review: codex, LOOP1).
+        if (scope_.fold() != beforeCondition) {
+            --hardwareLoopDepth_;
+            blockDeclared_.pop_back();
+            return refuse("the loop condition assigns a variable");
+        }
         auto brk = std::make_unique<IRInstruction>(IROp::LoopBreakIf, InvalidIRValue, IRTypeInfo::Void());
         brk->addOperand(cond);
         brk->guardIsNegated = true;   // break where the source condition is FALSE
@@ -3466,25 +3476,29 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         iterationLocal.push_back(kv.first);
     }
 
-    // A carry another carry takes as its next value (`t = a; a = b; b = t;`)
-    // is read by the latch even when no body instruction reads it.
-    std::unordered_set<IRValueID> latchReads;
-    for (const Carry& c : carries) {
-        const auto it = nameToValue_.find(c.name);
-        if (it != nameToValue_.end() && it->second != c.carry) latchReads.insert(it->second);
-    }
-
-    // Fold the carries the body leaves alone; keep the rest.
-    std::vector<IRValueID> latch;
-    std::vector<Carry> kept;
+    // Pass 1: the carries the body leaves alone fold back to their value.
+    // Every reference to a folded carry - region operands, every name bound
+    // to it (`a = b;` binds a to b's carry), every other carry's next value -
+    // is canonicalised to that value BEFORE any definition is removed
+    // (review: codex, LOOP3).
+    std::unordered_map<IRValueID, IRValueID> folded;
     for (const Carry& c : carries) {
         const auto it = nameToValue_.find(c.name);
         const IRValueID next = it == nameToValue_.end() ? InvalidIRValue : it->second;
-        if (next == c.carry || next == InvalidIRValue) {
-            replaceInRegion(c.carry, c.init);
-            if (next == c.carry) nameToValue_[c.name] = c.init;
-            continue;
-        }
+        if (next == c.carry || next == InvalidIRValue) folded[c.carry] = c.init;
+    }
+    for (const auto& [carry, init] : folded) replaceInRegion(carry, init);
+    for (auto& kv : nameToValue_) {
+        const auto f = folded.find(kv.second);
+        if (f != folded.end()) kv.second = f->second;
+    }
+
+    // Pass 2: keep the rest.
+    std::vector<IRValueID> latch;
+    std::vector<Carry> kept;
+    for (const Carry& c : carries) {
+        if (folded.count(c.carry)) continue;
+        const IRValueID next = nameToValue_.at(c.name);
         const std::string what = writable(c.name);
         if (!what.empty()) {
             blockDeclared_.pop_back();
@@ -3507,15 +3521,90 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         latch.push_back(next);
         kept.push_back(c);
     }
-    // Drop the folded carries' definitions (they precede the region).
+    // A CONSTANT trip count is known here: a constant start and a constant
+    // bound with the literal step.  LOOP {255} cuts a longer loop short (the
+    // reference nests a second LOOP for it, not implemented), so more than
+    // 255 iterations is refused; a body that also writes the induction makes
+    // the count unknowable from the header, refused too when the bound is
+    // constant (review: codex, constant fractional 300 / .5).
     {
-        std::unordered_set<IRValueID> live;
-        for (const Carry& c : kept) live.insert(c.carry);
+        auto constantOf = [&](IRValueID id, double& out) {
+            const auto* k = dynamic_cast<const IRConstant*>(currentFunction_->getValue(id));
+            if (!k) return false;
+            if (std::holds_alternative<float>(k->value)) { out = std::get<float>(k->value); return true; }
+            if (std::holds_alternative<int32_t>(k->value)) { out = std::get<int32_t>(k->value); return true; }
+            return false;
+        };
+        const Carry* ind = nullptr;
+        for (const Carry& c : kept) if (c.name == varName) ind = &c;
+        const IRInstruction* test = nullptr;
+        for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+            if (block->instructions[i]->op == IROp::LoopBreakIf) { test = block->instructions[i].get(); break; }
+        const IRInstruction* cmp = nullptr;
+        if (test && !test->operands.empty())
+            for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+                if (block->instructions[i]->result == test->operands[0]) { cmp = block->instructions[i].get(); break; }
+        double start = 0, bound = 0;
+        if (ind && cmp && cmp->operands.size() == 2 && cmp->operands[0] == ind->carry &&
+            constantOf(ind->init, start) && constantOf(cmp->operands[1], bound))
+        {
+            double step = 1;
+            auto* inc = stmt->increment.get();
+            if (inc->kind == ExprKind::Unary) {
+                const auto op = static_cast<UnaryExpr*>(inc)->op;
+                step = (op == UnaryOp::PreDecrement || op == UnaryOp::PostDecrement) ? -1 : 1;
+            } else {
+                auto* b = static_cast<BinaryExpr*>(inc);
+                auto* lit = static_cast<LiteralExpr*>(b->right.get());
+                step = lit->literalKind == LiteralExpr::LiteralKind::Int
+                    ? static_cast<double>(std::get<int64_t>(lit->value))
+                    : lit->literalKind == LiteralExpr::LiteralKind::Float ? std::get<double>(lit->value) : 0.0;
+                if (b->op == BinaryOp::SubAssign) step = -step;
+            }
+            // The induction's next value must be exactly carry +/- step.
+            const IRValueID next = nameToValue_.at(ind->name);
+            const IRInstruction* nextDef = nullptr;
+            for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+                if (block->instructions[i]->result == next) { nextDef = block->instructions[i].get(); break; }
+            const bool plainStep = nextDef && (nextDef->op == IROp::Add || nextDef->op == IROp::Sub) &&
+                nextDef->operands.size() == 2 && nextDef->operands[0] == ind->carry;
+            if (!plainStep) {
+                blockDeclared_.pop_back();
+                return refuse("a constant-bound loop whose body writes its induction variable");
+            }
+            const bool floating = ind->type.baseType == IRType::Float32;
+            auto holds = [&](double v) {
+                switch (cmp->op) {
+                case IROp::CmpLt: return v < bound;
+                case IROp::CmpLe: return v <= bound;
+                case IROp::CmpGt: return v > bound;
+                case IROp::CmpGe: return v >= bound;
+                default: return true;   // unknown: treated as unbounded
+                }
+            };
+            double v = floating ? static_cast<float>(start) : start;
+            int trips = 0;
+            while (trips <= 255 && holds(v)) {
+                v = floating ? static_cast<double>(static_cast<float>(v + step)) : v + step;
+                ++trips;
+            }
+            if (trips > 255) {
+                blockDeclared_.pop_back();
+                return refuse("a constant-bound loop of more than 255 iterations (the nested hardware loop is not implemented)");
+            }
+        }
+    }
+    // Drop THIS loop's folded carry definitions - only its own provisional
+    // ids, never an earlier loop's carries in the same block (review:
+    // codex, LOOP2).
+    {
         auto& insts = block->instructions;
-        insts.erase(std::remove_if(insts.begin(), insts.end(),
-            [&](const std::unique_ptr<IRInstruction>& ip) {
-                return ip->op == IROp::LoopCarry && !live.count(ip->result);
-            }), insts.end());
+        const auto first = insts.begin() + static_cast<std::ptrdiff_t>(carryStart);
+        const auto last = insts.begin() + static_cast<std::ptrdiff_t>(beginIndex);
+        const auto keepEnd = std::remove_if(first, last, [&](const std::unique_ptr<IRInstruction>& ip) {
+            return ip->op == IROp::LoopCarry && folded.count(ip->result);
+        });
+        insts.erase(keepEnd, last);
     }
     auto latchInst = std::make_unique<IRInstruction>(IROp::LoopLatch, InvalidIRValue, IRTypeInfo::Void());
     latchInst->operands = latch;
@@ -6207,6 +6296,17 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // value is the one that remains (measured: two(x, x) with a = 1, b = 2
     // leaves x = 1), so the copies are made right to left.  Supported for a scalar/vector/matrix parameter whose
     // argument is a plain caller lvalue; anything else is refused by name.
+    // A two-dimensional array PARAMETER: its rows ("a[i]", storageKey) are
+    // not bound by the parameter binding below, so a caller row of the same
+    // name would stay in scope (review: codex, array2d_param_shadow).  Refused.
+    for (const auto& param : callee->parameters)
+        if (param && param->type && param->type->isArray() && param->type->elementType &&
+            param->type->elementType->isArray())
+        {
+            error(expr->loc, "cannot inline user function '" + name + "': the two-dimensional array parameter '" +
+                             param->name + "' is not supported (member-array-storage)");
+            return false;
+        }
     std::vector<size_t> copyOut;
     std::vector<std::pair<size_t, std::string>> arrayCopyOut;   // (parameter, caller array key)
     for (size_t i = 0; i < callee->parameters.size(); ++i)

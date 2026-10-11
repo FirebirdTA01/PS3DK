@@ -126,7 +126,6 @@ def main():
             def over_neg_zero(t):
                 return [math.nan if x == 0 else math.copysign(math.inf, x) * -1.0 for x in t]
             hardware_loop_values = {
-                'induction-write': lambda t: [4 * x for x in t],
                 'bound-write': lambda t: [3 * x for x in t],
                 'nonintegral-gap': lambda t: [7 * x for x in t],
                 'unsigned-bound-gap': lambda t: [0.0] * 4,   # -1u wraps: no iteration
@@ -157,6 +156,10 @@ def main():
                     hardware_loops += 1
                     continue
                 # These reference-accepted forms remain named gaps, not reference refusals.
+                # A FRAGMENT constant-bound loop whose body writes its induction
+                # is refused by the hardware-loop region by name.
+                if profile == 'sce_fp_rsx' and label == 'induction-write':
+                    diagnostic = 'writes its induction variable'
                 compile_one(profile + '-' + label, body, profile, refusal=diagnostic)
                 refusals += 1
         # FP texture path: actual sampled work, rather than a constant-only loop.
@@ -166,8 +169,8 @@ def main():
             body = f'{ty} size=4;{ty} i;for(i=-size;i<=size;i+=2){{{fetch}}}'
             explicit = ''.join('{' + ty + ' i=' + str(i) + ('.0;' if ty == 'float' else ';') + fetch + '}' for i in values)
             twin('texture-local-' + ty, body, explicit, 'sce_fp_rsx', prefix='uniform sampler2D tex;')
-    assert (count, refusals, hardware_loops) == (36, 16, 6), (count, refusals, hardware_loops)
-    assert value_checks == 42, value_checks
+    assert (count, refusals, hardware_loops) == (36, 17, 5), (count, refusals, hardware_loops)
+    assert value_checks == 39, value_checks
     print(f'static-loop-expansion: PASS ({count} strict twins, {hardware_loops} hardware loops, '
           f'{refusals} named refusals, {value_checks} exact values)')
 
