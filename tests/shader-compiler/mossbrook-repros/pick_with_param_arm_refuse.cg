@@ -1,0 +1,24 @@
+// MOSSBROOK member-array storage, case (b): a struct return that NAMES A PARAMETER.
+//
+// Twin of the call-arm case.  The frame has ONE struct local (r) in the else
+// arm, but the THEN arm returns a PARAMETER, `return x;`.  A parameter is not
+// a local the inliner tracks (its storage lives on the caller's stack and is
+// not in this body's localArrayValues_/nameToValue_), so it is a non-local
+// struct return: the remap is not installed, and the caller's copy refuses
+// rather than silently install r's mirror[] on top of the x arm.
+//
+// With t = (0.75, 0.25, -0.5, 0.125), c is true, so the reference value is
+// the x arm = t.xy = 0.75 0.25 0.75 0.25, not r's t.zw.
+struct Plan { float2 mirror[2]; };
+Plan pick(float2 a, float2 b, bool c, Plan x)
+{
+    Plan r; r.mirror[0] = b; r.mirror[1] = b;
+    if (c) return x;
+    return r;
+}
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    Plan x; x.mirror[0] = t.xy; x.mirror[1] = t.xy;
+    Plan q = pick(t.xy, t.zw, t.x > 0.5, x);
+    return float4(q.mirror[0], q.mirror[1]);
+}

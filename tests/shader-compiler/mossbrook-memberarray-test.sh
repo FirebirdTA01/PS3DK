@@ -17,11 +17,14 @@
  #        argument, cannot claim the caller's destination (see the lead's
  #        `wrap(compute(...))` case).  buildDeclStmt then skips the
  #        caller-side copy for exactly that call (`structReturnInstalled_`).
- #        The remap is installed only when the callee returns EXACTLY ONE
- #        struct local (`inlineStructReturnBaseSet_.size() == 1`); more than
- #        one (a per-arm choice at runtime) is left to the member-array-
- #        storage refusal.  This is what stops a "lift" that quietly picks
- #        one arm of a two-arm helper from installing a silent wrong value.
+  #        The remap is installed only when the callee returns EXACTLY ONE
+  #        struct local (`inlineStructReturnBaseSet_.size() == 1`) AND builds
+  #        ZERO non-local returns (no call / parameter / constructor / member
+  #        / ternary arm: `inlineStructReturnNonlocalCount_ == 0`); a per-arm
+  #        choice (two locals, or one local + one non-local) is left to the
+  #        member-array-storage refusal.  This is what stops a "lift" that
+  #        quietly picks one arm of a helper from installing a silent wrong
+  #        value.
  #
  # This test rows:
  #   (b)  byte-pinned against the reference (1 insn: MOVR o[COLR].xy, f[TEX0].xy),
@@ -43,10 +46,17 @@
  #   single_struct_return            VALUE: a helper that returns EXACTLY ONE
  #                                   struct local compiles and copies the tracked
  #                                   storage (mirror[0]=mirror[1]=t.zw here).
- #   compute_wrap_refuse             REFUSAL: a helper whose ARGUMENT is itself a
- #                                   struct-returning call (Plan q = wrap(compute()))
- #                                   must refuse — the argument-inliner must not claim
- #                                   the caller's destination.
+  #   compute_wrap_refuse             REFUSAL: a helper whose ARGUMENT is itself a
+  #                                   struct-returning call (Plan q = wrap(compute()))
+  #                                   must refuse — the argument-inliner must not claim
+  #                                   the caller's destination.
+  #   pick_with_call_arm_refuse       REFUSAL: a helper whose arm returns a CALL
+  #                                   (`if (c) return mk(a); return r;`) is a non-local
+  #                                   return; the frame has one base-name (r) AND a
+  #                                   non-local, so the install is not done — refuse.
+  #   pick_with_param_arm_refuse      REFUSAL: a helper whose arm returns a PARAMETER
+  #                                   (`if (c) return x; return r;`) is likewise
+  #                                   non-local; refuse.
  set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -205,6 +215,21 @@ echo "  value ok: single-return helper's tracked storage is copied (mirror[0]=mi
 # (c) the argument to wrap is itself a struct-returning call: the argument
 #     inliner must not claim the caller's `q`; the copy is refused.
 refuse_row compute_wrap_refuse \
-       "wrap(compute(...)) with compute returning a struct is refused (argument inliner must not claim the caller's destination)"
+        "wrap(compute(...)) with compute returning a struct is refused (argument inliner must not claim the caller's destination)"
+
+# (d) a struct return that NAMES A CALL: `if (c) return mk(a); return r;`.
+#     The frame built one base-name return (r) AND one non-local (the mk(a)
+#     arm).  Remapping r onto `q` would silently install r's mirror[] on top
+#     of the mk(a) arm.  The remap is not installed; the copy refuses.
+refuse_saying pick_with_call_arm_refuse \
+    "member-array-storage|tracked source" \
+    "a helper whose arm returns a CALL (return mk(a)) is refused, not resolved to the other local arm"
+
+# (e) a struct return that NAMES A PARAMETER: `if (c) return x; return r;`.
+#     Twin of (d): a parameter is not a trackable local, so it is a non-local
+#     return; the frame built one base-name (r) AND one non-local (x); refuse.
+refuse_saying pick_with_param_arm_refuse \
+    "member-array-storage|tracked source" \
+    "a helper whose arm returns a PARAMETER (return x) is refused, not resolved to the other local arm"
 
 echo "mossbrook-memberarray: PASS"

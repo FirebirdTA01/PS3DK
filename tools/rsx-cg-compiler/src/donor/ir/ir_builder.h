@@ -174,8 +174,10 @@ private:
     // and never leaks into the outer callee's base set.
     //
     // The remap under the caller's destination is installed ONLY when this
-    // body's base set has exactly ONE name - the callee returns exactly one
-    // struct local, and all reads of that local's storage are coherent.
+    // body's base set has exactly ONE name AND the frame built ZERO non-local
+    // returns (see inlineStructReturnNonlocalCount_) - the callee returns
+    // exactly one struct local, and no other arm (a call, a constructor, a
+    // member, a ternary, or a parameter) is being picked at run time.
     // When the set has MORE THAN ONE name (a per-arm choice the runtime
     // makes), each arm names a DIFFERENT local and the caller cannot know
     // which arm the inliner's `result` corresponds to; in that case the
@@ -198,9 +200,19 @@ private:
     // `structReturnInstalled_` records which CallExprs had their struct
     // return installed, so buildDeclStmt skips the caller-side copy for
     // exactly that call.
+    // `inlineStructReturnNonlocalCount_` counts every struct return a frame
+    // builds that does NOT name a local (a call, a constructor, a member, a
+    // ternary, or a parameter).  Such a return adds no base name, yet it is
+    // one of "the struct returns this frame builds" - the arm the caller
+    // cannot see.  The remap is installed only when the frame built exactly
+    // ONE base-name return AND ZERO non-locals (inlineStructReturnBaseSet
+    // size one, this counter zero).  A mixed frame like `if (c) return mk(a);
+    // return r;` (one base name, one non-local) refuses instead of installing
+    // r on top of the mk(a) arm.
     std::unordered_set<std::string> inlineStructReturnBaseSet_;
     std::unordered_map<const CallExpr*, std::string> structReturnDest_;
     std::unordered_set<const CallExpr*> structReturnInstalled_;
+    size_t inlineStructReturnNonlocalCount_ = 0;
     // Declaration identity prevents a local shadow from using a global's initializer.
     std::unordered_set<const DeclNode*> globalDeclarations_;
     // Mutable statics whose initialiser the constant evaluator could not

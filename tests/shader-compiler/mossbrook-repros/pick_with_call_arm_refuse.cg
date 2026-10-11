@@ -1,0 +1,26 @@
+// MOSSBROOK member-array storage, case (b): a struct return that NAMES A CALL.
+//
+// The frame has ONE struct local (r) in the else arm, but the THEN arm
+// returns a CALL, `return mk(a);`.  That arm is not a name the inliner can
+// track (it is built by another helper, `mk`), yet it is still one of the
+// struct returns this frame builds.  The remap is therefore not installed:
+// only `r`'s storage is coherent, and the caller's copy must refuse rather
+// than silently install r's mirror[] on top of the mk(a) arm.
+//
+// This is the lead's exact failing shape: a base-set of {r} (size 1) used to
+// remap r onto `q` and return whichever arm `r` held (t.zw), ignoring the
+// mk(a) arm (t.xy).  With t = (0.75, 0.25, -0.5, 0.125), c is true, so the
+// reference value is the mk(a) arm = t.xy = 0.75 0.25 0.75 0.25.
+struct Plan { float2 mirror[2]; };
+Plan mk(float2 v) { Plan m; m.mirror[0] = v; m.mirror[1] = v; return m; }
+Plan pick(float2 a, float2 b, bool c)
+{
+    Plan r; r.mirror[0] = b; r.mirror[1] = b;
+    if (c) return mk(a);
+    return r;
+}
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    Plan q = pick(t.xy, t.zw, t.x > 0.5);
+    return float4(q.mirror[0], q.mirror[1]);
+}

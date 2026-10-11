@@ -7653,6 +7653,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // so a nested helper's own struct returns never leak into this
     // callee's set.
     const std::unordered_set<std::string> priorBaseSet = inlineStructReturnBaseSet_;
+    const size_t priorNonlocal = inlineStructReturnNonlocalCount_;
     inlineStack_.push_back(callee);
     blockDeclared_.emplace_back();   // the callee's top-level locals are its own, never the caller's block's
     const bool ok = buildInlineFunctionBody(callee, result);
@@ -7665,8 +7666,10 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // helpers that returned structs by value.
     std::unordered_set<std::string> thisFrameBaseSet;
     for (const auto& n : inlineStructReturnBaseSet_) if (priorBaseSet.count(n) == 0) thisFrameBaseSet.insert(n);
+    const size_t thisFrameNonlocal = inlineStructReturnNonlocalCount_ - priorNonlocal;
     inlineStructReturnBaseSet_.clear();
     for (const auto& n : priorBaseSet) inlineStructReturnBaseSet_.insert(n);
+    inlineStructReturnNonlocalCount_ = priorNonlocal;
     // A stash entry the callee CREATED (its own parameter or local shadowing
     // a global) is the callee's scope and ends with it - but the VALUE it
     // holds is the global's, as a nested helper left it, and that write
@@ -7704,17 +7707,21 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // The scope restore below dropped the callee's scope, including those
     // fields, so they would be lost to the caller - and the caller's copy
     // could not find a tracked source (it was a CallExpr, unresolvable by
-    // name).  When the callee returned EXACTLY ONE struct local, remap
-    // that local's tracked fields and leaf bindings under the caller's
-    // destination and mark the install so the caller's copy can be
-    // skipped (nothing left to do).  When the callee returned MORE THAN
-    // ONE (a run-time-conditioned choice, `if (c) return p; return r;`),
-    // the two locals hold different values and the inliner's `result`
-    // (a Select over the two arms' base values) does not tell us which
-    // arm's tracked storage the caller reads; remapping either one on top
-    // of the other is a silent wrong value, so do NOT install and let the
-    // caller's copy fire the correct member-array-storage refusal.
-    if (thisFrameBaseSet.size() == 1 && !structReturnDest.empty())
+    // name).  When the callee returned EXACTLY ONE struct local AND built
+    // NO non-local return (no `return mk(a);`, no `return x;` parameter, no
+    // constructor / member / ternary arm), remap that local's tracked
+    // fields and leaf bindings under the caller's destination and mark the
+    // install so the caller's copy can be skipped (nothing left to do).
+    // When the callee returned MORE THAN ONE (a run-time-conditioned choice,
+    // `if (c) return p; return r;`) OR returned a non-local on any arm
+    // (e.g. `if (c) return mk(a); return r;`, or `if (c) return x;
+    // return r;` where x is a parameter), there is another arm the caller
+    // cannot select: the inliner's `result` (a Select over the arms' base
+    // values) does not tell us which arm's tracked storage the caller
+    // reads, and installing our one local on top of it is a silent wrong
+    // value.  So do NOT install, and let the caller's copy fire the
+    // correct member-array-storage refusal.
+    if (thisFrameBaseSet.size() == 1 && thisFrameNonlocal == 0 && !structReturnDest.empty())
     {
         const std::string& base = *thisFrameBaseSet.begin();
         const std::string& dest = structReturnDest;
@@ -8092,28 +8099,43 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
             // when the whole helper returns exactly ONE struct local by
             // value: the inliner then carries that local's tracked array
             // fields and leaf bindings back to the caller's destination
-            // (see inlineUserFunctionCall).  If the helper RETURNS MORE
-            // THAN ONE struct local (a per-arm choice the runtime makes),
-            // each return names a DIFFERENT local, and the caller cannot
-            // know which arm ran at compile time.  In that case the
-            // tracked storage lives under the callee's locals that the
-            // scope restore drops, and the caller's copy must refuse rather
-            // than silently install one arm's storage on top of the
-            // other's.  So record EACH struct local the callee returns in
-            // inlineStructReturnBaseSet_; the inlining frame sees only the
-            // entries THIS frame added (it snapshots before the body and
-            // takes the set-difference after), and only remaps when the
-            // set has exactly one name.
-            if (ret->value->kind == ExprKind::Identifier)
+            // (see inlineUserFunctionCall).  If the helper returns by value
+            // in a way the caller cannot see - MORE THAN ONE struct local, a
+            // CALL (`return mk(a);`), a constructor, a member, a ternary, or
+            // a PARAMETER (`return x;`) - the arm the caller cannot select
+            // is the one the runtime picks at call time, and the caller's
+            // copy must refuse rather than silently install one arm's
+            // storage on top of another's.  So count EVERY struct return the
+            // frame builds: a return naming a struct local contributes that
+            // local's base name to inlineStructReturnBaseSet_; a return
+            // naming NO single tracked local (call / constructor / member /
+            // ternary / parameter) increments
+            // inlineStructReturnNonlocalCount_.  The frame refuses to
+            // remap unless it built exactly one base-name return and zero
+            // non-locals.
+            const bool isStructReturn =
+                callee->returnType &&
+                callee->returnType->baseType == BaseType::Struct &&
+                getStructFields(callee->returnType.get()) != nullptr;
+            if (isStructReturn)
             {
-                auto* retId = static_cast<IdentifierExpr*>(ret->value.get());
-                if (retId->resolvedDecl && retId->resolvedDecl->kind == DeclKind::Variable)
+                bool namedStructLocal = false;
+                if (ret->value->kind == ExprKind::Identifier)
                 {
-                    auto* vd = static_cast<VarDecl*>(retId->resolvedDecl);
-                    if (vd->type && vd->type->baseType == BaseType::Struct &&
-                        getStructFields(vd->type.get()))
-                        inlineStructReturnBaseSet_.insert(retId->name);
+                    auto* retId = static_cast<IdentifierExpr*>(ret->value.get());
+                    if (retId->resolvedDecl && retId->resolvedDecl->kind == DeclKind::Variable)
+                    {
+                        auto* vd = static_cast<VarDecl*>(retId->resolvedDecl);
+                        if (vd->type && vd->type->baseType == BaseType::Struct &&
+                            getStructFields(vd->type.get()))
+                        {
+                            inlineStructReturnBaseSet_.insert(retId->name);
+                            namedStructLocal = true;
+                        }
+                    }
                 }
+                if (!namedStructLocal)
+                    inlineStructReturnNonlocalCount_++;
             }
             result = buildExpr(ret->value.get());
             // Normalize a scalar return to the declared vector type before
