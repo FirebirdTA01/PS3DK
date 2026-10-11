@@ -26,7 +26,7 @@ def compile_one(name, profile, source):
     p = subprocess.run([compiler, '-p', profile, '-e', 'main', '--emit-container', str(out), str(src)],
                        capture_output=True, text=True, timeout=60)
     ok = p.returncode == 0 and out.is_file() and out.stat().st_size > 0
-    return p, (out.read_bytes() if ok else None)
+    return p, (out.read_bytes() if ok else None), out.exists()
 
 def records(blob):
     count, table = struct.unpack_from('>2I', blob, 12); out = {}
@@ -60,7 +60,7 @@ ACCEPT = [
      {'p.a': (1046, 0xcb8, VARYING, 'TEXUNIT2', 0), 'p.s': (1066, 0x802, UNIFORM, 'TEXUNIT2', 1)}),
 ]
 for name, profile, source, want in ACCEPT:
-    p, blob = compile_one(name, profile, source)
+    p, blob, _ = compile_one(name, profile, source)
     if blob is None:
         fails.append('%s: refused (rc %d): %s' % (name, p.returncode, (p.stderr + p.stdout).strip()[-160:])); continue
     got = {k: v for k, v in records(blob).items() if k in want}
@@ -88,10 +88,11 @@ VP_REFUSE = [
      'out float4 opos : POSITION) { p.c = pos * 2; opos = pos; }' + chr(10), 'out/inout struct'),
 ]
 for name, source, text, profile in [r + ('sce_fp_rsx',) for r in REFUSE] + [r + ('sce_vp_rsx',) for r in VP_REFUSE]:
-    p, blob = compile_one(name, profile, source)
-    ok = p.returncode == 1 and blob is None and text in (p.stderr + p.stdout)
-    print('  %-26s %s' % (name, 'refused' if ok else 'NOT a named refusal (rc %d)' % p.returncode))
-    if not ok: fails.append('%s: expected exit 1 naming %r, got rc %d' % (name, text, p.returncode))
+    p, blob, exists = compile_one(name, profile, source)
+    # A refusal is exit 1, the named reason, and NO container on disk.
+    ok = p.returncode == 1 and not exists and text in (p.stderr + p.stdout)
+    print('  %-26s %s' % (name, 'refused' if ok else 'NOT a named refusal (rc %d, container %s)' % (p.returncode, 'left' if exists else 'absent')))
+    if not ok: fails.append('%s: expected exit 1 naming %r and no container, got rc %d, container %s' % (name, text, p.returncode, 'left' if exists else 'absent'))
 
 for f in fails: print('struct-param-semantic: FAIL', f)
 print('struct-param-semantic: %s' % ('PASS' if not fails else 'FAIL (%d)' % len(fails)))
