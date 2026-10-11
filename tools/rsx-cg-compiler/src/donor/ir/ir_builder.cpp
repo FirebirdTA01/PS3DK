@@ -6014,6 +6014,33 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         if (!param->name.empty())
             nameToValue_[param->name] = boundValue;
 
+        // An array parameter given a file-scope uniform array by name (or a
+        // parameter that is itself such an alias) reads that global's
+        // elements: `float h(float c[7]) ... h(coeffs_x)` with `const float
+        // coeffs_x[] = {...}` (lcd-grid-v2).  The argument's own value is not
+        // an array the body can index.  Entry-parameter arrays and globals
+        // the program assigns stay on the existing path.
+        if (!param->name.empty() && param->type && param->type->isArray() &&
+            param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
+            argument && argument->kind == ExprKind::Identifier)
+        {
+            const std::string& argName = static_cast<IdentifierExpr*>(argument)->name;
+            std::string target;
+            const auto prior = savedScope.uniformArrayAliases.find(argName);
+            const auto priorBound = savedNames.find(argName);
+            if (prior != savedScope.uniformArrayAliases.end() && priorBound != savedNames.end() &&
+                priorBound->second == prior->second.second)
+                target = prior->second.first;
+            else if (priorBound == savedNames.end() && !localArrayValues_.count(argName))
+            {
+                const IRGlobal* g = module_->findGlobal(argName);
+                if (g && g->type.isArray() && g->storage == StorageQualifier::Uniform)
+                    target = argName;
+            }
+            if (!target.empty())
+                scope_.uniformArrayAliases[param->name] = {target, boundValue};
+        }
+
         // Array-bearing arguments are values, not caller spelling aliases.
         // Take the call's completed argument state (the reference's measured
         // g(s, s.a[0]=...) cell sees that write), then rename its qualified
@@ -7957,8 +7984,20 @@ IRValueID IRBuilder::readTrackedArrayElement(IndexExpr* expr, const std::string&
 
 IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
 {
+    // A helper parameter that aliases a file-scope uniform array is read
+    // from the global below, never from the element values the inliner
+    // copied for array arguments (a uniform array has none to copy).
+    bool uniformAlias = false;
+    if (expr->array->kind == ExprKind::Identifier)
+    {
+        const std::string& n = static_cast<IdentifierExpr*>(expr->array.get())->name;
+        const auto alias = scope_.uniformArrayAliases.find(n);
+        const auto bound = nameToValue_.find(n);
+        uniformAlias = alias != scope_.uniformArrayAliases.end() && bound != nameToValue_.end() &&
+                       bound->second == alias->second.second;
+    }
     std::string trackedKey;
-    if (getExprType(expr->array.get()).isArray() &&
+    if (!uniformAlias && getExprType(expr->array.get()).isArray() &&
         arrayStorageKey(expr->array.get(), trackedKey) && localArrayValues_.count(trackedKey))
     {
         const IRGlobal* global = module_->findGlobal(trackedKey);
@@ -8004,8 +8043,22 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
         // back to findGlobal, so `float4 u = p; return u[2];` under a
         // global `u[4]` read the GLOBAL's element (found in review: the
         // parent refused that shape, the draft accepted it wrongly).
+        // A helper parameter aliasing a file-scope uniform array (see the
+        // inliner's parameter binding) indexes that global.
+        std::string lookupName = ident->name;
+        bool aliased = false;
+        {
+            const auto alias = scope_.uniformArrayAliases.find(ident->name);
+            const auto bound = nameToValue_.find(ident->name);
+            if (alias != scope_.uniformArrayAliases.end() && bound != nameToValue_.end() &&
+                bound->second == alias->second.second)
+            {
+                lookupName = alias->second.first;
+                aliased = true;
+            }
+        }
         const IRParameter* arrayParam = nullptr;
-        const bool nameIsBound = nameToValue_.count(ident->name) != 0;
+        const bool nameIsBound = !aliased && nameToValue_.count(ident->name) != 0;
         if (nameIsBound && currentFunction_)
         {
             const IRValueID boundId = nameToValue_[ident->name];
@@ -8019,7 +8072,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 }
             }
         }
-        IRGlobal* global = nameIsBound ? nullptr : module_->findGlobal(ident->name);
+        IRGlobal* global = nameIsBound ? nullptr : module_->findGlobal(lookupName);
         if (global && !global->type.isArray())
             global = nullptr;
 
@@ -8034,7 +8087,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
         // a run-time index over a written array is refused by name.
         if (global && !arrayParam)
         {
-            auto promoted = localArrayValues_.find(ident->name);
+            auto promoted = localArrayValues_.find(lookupName);
             if (promoted != localArrayValues_.end())
             {
                 int64_t index = 0;

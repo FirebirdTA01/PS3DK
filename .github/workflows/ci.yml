@@ -780,6 +780,8 @@ jobs:
         run: bash tests/shader-compiler/implicit-varying-claim-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Matrix element selectors and matrix-to-vector conversion
         run: bash tests/shader-compiler/matrix-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A uniform array passed to a helper's array parameter is read from the global
+        run: bash tests/shader-compiler/helper-uniform-array-arg-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
         run: bash tests/shader-compiler/inline-dead-tail-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value

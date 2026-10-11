@@ -90,11 +90,17 @@ private:
         // - the helper's read must then fall through to the global load.
         std::unordered_map<std::string, IRValueID> shadowedGlobals;
         std::unordered_map<std::string, std::vector<IRValueID>> shadowedGlobalArrays;
+        // An inlined helper's array PARAMETER bound to a file-scope uniform
+        // array by name: indexing the parameter reads the global's element.
+        // Valid only while the parameter still holds the value it was bound
+        // to (a write or a shadowing local ends it).  param -> (global, value).
+        std::unordered_map<std::string, std::pair<std::string, IRValueID>> uniformArrayAliases;
 
         void clear()
         {
             names.clear(); arrays.clear();
             shadowedGlobals.clear(); shadowedGlobalArrays.clear();
+            uniformArrayAliases.clear();
         }
         // The if-join works over ONE flat map of join keys: a name is its
         // own key, an array element is "a[i]", a stashed global "G@" and a
