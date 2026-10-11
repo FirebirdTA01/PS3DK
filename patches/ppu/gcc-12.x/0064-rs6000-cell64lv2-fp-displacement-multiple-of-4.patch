@@ -1,0 +1,37 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: a float load or store keeps a displacement that is a multiple of 4 (cell64lv2)
+
+Under the 64-bit address model (0059) the vectoriser's realignment IV is
+base+15, and GCC folds the +1 that reaches an aligned element back into the
+displacement: `stfs 0,1(r10)` writes base+16.  The access is aligned, but
+the displacement is not, and a post-link check of the binary (applications
+use one: a misaligned lfs/stfs ends the PPU thread silently on a PS3) cannot
+tell the two apart without tracing the base register.  Before 0059 every
+address was materialised separately (addi; clrldi; stfs 0(rX)), so the
+displacement was always 0.
+
+On cell64lv2 an SFmode or DFmode offset address whose displacement is not a
+multiple of 4 is no longer a legitimate offset address, so the odd part is
+added into the base: one addi.  Integer accesses are not affected.
+
+---
+diff --git a/gcc/config/rs6000/rs6000.cc b/gcc/config/rs6000/rs6000.cc
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -8847,6 +8847,16 @@ rs6000_legitimate_offset_address_p (machine_mode mode, rtx x,
+ 
+   offset = INTVAL (XEXP (x, 1));
+   extra = 0;
++#ifdef POWERPC_CELL64LV2
++  /* A float load or store keeps a displacement that is a multiple of 4.
++     The effective address may still be aligned with an odd displacement
++     (the vectoriser's realignment IV is base+15, and stfs 1(base+15)
++     writes base+16), but a post-link check cannot tell that from a
++     misaligned access, which ends the PPU thread on this target.  Moving
++     the odd part into the base costs one addi.  */
++  if ((mode == SFmode || mode == DFmode) && (offset & 3) != 0)
++    return false;
++#endif
+   switch (mode)
+     {
+     case E_DFmode:
