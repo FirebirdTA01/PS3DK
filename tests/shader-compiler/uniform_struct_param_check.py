@@ -159,6 +159,13 @@ PARAM_AS_VALUE = """struct input { float2 a; float2 b; };
 float2 f(input s) { return s.a + s.b; }
 float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * f(IN), 0, 1); }
 """
+# Forwarded on through a helper whose parameter shadows a caller name (main's
+# x): the helper's x is the flattened u, not main's input (review: codex).
+FORWARD_SHADOW = """struct U { float4 a; };
+float4 h(U q) { return q.a; }
+float4 g(U x) { return h(x); }
+float4 main(float4 x : TEXCOORD0, uniform U u) : COLOR { return g(u); }
+"""
 # An ARRAY member is not flattened yet: refused by name (not measured as a
 # reference refusal - a named gap).
 ARRAY_MEMBER = """struct input { float2 a[2]; float2 b; };
@@ -427,6 +434,19 @@ def main():
             print('  param_as_value: %s' % ('helper reads IN' if not bad else 'WRONG on %d' % bad))
             if bad:
                 failures.append('param_as_value values wrong on %d inputs' % bad)
+
+        for name, text in (('forward_shadow', FORWARD_SHADOW),
+                           ('forward_renamed', FORWARD_SHADOW.replace('float4 main(float4 x', 'float4 main(float4 z'))):
+            rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_fp_rsx')
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (name, (err.strip().splitlines() or ['?'])[-1]))
+                continue
+            got = fp_eval.evaluate(with_uniforms(blob, Container(blob), {'u.a': [0.25, 0.5, 0.75, 1.0]}),
+                                   {'TEX0': [-1.0, -2.0, -3.0, -4.0]})
+            ok = got == [0.25, 0.5, 0.75, 1.0]
+            print('  %s: %s' % (name, 'reads u' if ok else 'WRONG %s' % got))
+            if not ok:
+                failures.append('%s read %s, want u.a' % (name, got))
 
         rc, blob, err = compile_one(args.compiler, work, 'array_member', ARRAY_MEMBER, 'sce_fp_rsx')
         ok = rc == 1 and not blob and 'uniform-struct-entry-parameter' in err

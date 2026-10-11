@@ -625,7 +625,14 @@ VpContainerResult emitVertexContainerImpl(
                     d.type      = cgTypeForIRType(in.resultType);
                     d.var       = kCgVarying;
                     d.direction = kCgIn;
+                    // The member belongs to ITS struct parameter: a second
+                    // struct's members carry that parameter's ordinal (measured:
+                    // V v, W w -> w.c paramno 1; all were 0 - review: codex).
                     d.paramno   = inputStructParamNo;
+                    for (size_t k = 0; k < entry->parameters.size(); ++k)
+                        if (entry->parameters[k].name == in.structParamName &&
+                            entry->parameters[k].type.baseType == IRType::Void)
+                            d.paramno = irParamOrdinal(entry->parameters[k], k);
                     d.res       = vpInputResource(toUpper(in.semanticName), in.semanticIndex);
                     params.push_back(d);
                 }
@@ -666,7 +673,7 @@ VpContainerResult emitVertexContainerImpl(
                 d.type      = cgTypeForIRType(m.type);
                 d.var       = kCgVarying;
                 d.direction = kCgIn;
-                d.paramno   = inputStructParamNo;
+                d.paramno   = irParamOrdinal(sp, i);
                 d.res       = m.inferredSemantic
                                   ? kCgUnassignedRes
                                   : vpInputResource(toUpper(m.semanticName), m.semanticIndex);
@@ -768,6 +775,13 @@ VpContainerResult emitVertexContainerImpl(
             }
             params.push_back(d);
         }
+
+        // Every record so far belongs to an entry parameter and carries its
+        // source ordinal; the reference lists them in that order, struct
+        // inputs at their parameter's place (measured: `float4 pre, V v,
+        // W w` lists pre, v.*, w.*; the struct inputs used to come first).
+        std::stable_sort(params.begin(), params.end(),
+                         [](const ParamDesc& a, const ParamDesc& b) { return a.paramno < b.paramno; });
 
         // File-scope uniforms — the reference compiler emits these between the
         // struct-flat inputs and outputs.  They're treated as

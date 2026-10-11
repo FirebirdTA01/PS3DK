@@ -298,5 +298,31 @@ void main_vertex(float4 p : POSITION, float2 t : TEXCOORD0, out float4 op : POSI
 [ -s "$work/fixed_struct_initializer.bin" ] && outputs fixed_struct_initializer \
 'op 418 8c3 POSITION; o.a 416 c95 TEXCOORD1; o.b 416 c96 TEXCOORD2'
 
+# Review rows (codex, slice 2).  A semantic-less returned member does not take
+# an index an explicit out PARAMETER claims (it collided on TEXCOORD0).
+check implicit_vs_out_param sce_vp_rsx main \
+'v 418 841 POSITION 0 1; t 418 84a TEXCOORD1 1 1' '
+struct R { float4 p : POSITION; float4 a; };
+R main(float4 v : POSITION, float4 t : TEXCOORD1, out float4 explicitTc : TEXCOORD0) { R r; r.p = v; r.a = t * t; explicitTc = t; return r; }'
+[ -s "$work/implicit_vs_out_param.bin" ] && outputs implicit_vs_out_param \
+'explicitTc 418 c94 TEXCOORD0; main.p 418 8c3 POSITION; main.a 418 c95 -'
+if [ -s "$work/implicit_vs_out_param.bin" ]; then
+    mask=$(python3 -c 'import struct, sys
+b = open(sys.argv[1], "rb").read()
+prog = struct.unpack_from(">I", b, 20)[0]
+print("%x" % struct.unpack_from(">I", b, prog + 16)[0])' "$work/implicit_vs_out_param.bin")
+    if [ "$mask" = "c000" ]; then echo "param-records: ok   implicit_vs_out_param writes output mask c000"
+    else echo "param-records: FAIL implicit_vs_out_param output mask $mask, want c000"; fail=1
+    fi
+fi
+
+# Each vertex input struct's members carry their OWN parameter's ordinal, read
+# or not, and sit at that parameter's place after a preceding parameter.
+check vp_two_structs_after_param sce_vp_rsx main \
+'pre 418 84e TEXCOORD5 0 1; v.pos 418 841 POSITION 1 1; v.vu 418 849 TEXCOORD0 1 0; w.c 418 844 COLOR0 2 1; w.wu 418 84a TEXCOORD1 2 0' '
+struct V { float4 pos : POSITION; float4 vu : TEXCOORD0; };
+struct W { float4 c : COLOR0; float4 wu : TEXCOORD1; };
+float4 main(float4 pre : TEXCOORD5, V v, W w) : POSITION { return v.pos + w.c + pre; }'
+
 [ $fail -eq 0 ] && echo "param-records: PASS" || echo "param-records: FAIL"
 exit $fail

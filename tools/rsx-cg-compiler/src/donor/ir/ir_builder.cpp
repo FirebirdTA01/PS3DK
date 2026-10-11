@@ -3482,6 +3482,35 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                                 if (vertex ? (s == "TEXCOORD" || s == "TEX") : (s == "COLOR" || s == "COL"))
                                     claimed.insert(output.semanticIndex);
                             }
+                            // An explicit out/inout ENTRY PARAMETER claims its
+                            // index too, members of an out struct included
+                            // (measured: `out float4 explicitTc : TEXCOORD0`
+                            // moves a semantic-less returned member to TEXCOORD1;
+                            // they collided on TEXCOORD0 - review: codex).
+                            const auto claimSemantic = [&](const Semantic& s) {
+                                if (s.isEmpty()) return;
+                                std::string u = s.name;
+                                std::transform(u.begin(), u.end(), u.begin(),
+                                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                                if (vertex ? (u == "TEXCOORD" || u == "TEX") : (u == "COLOR" || u == "COL"))
+                                    claimed.insert(s.index);
+                            };
+                            const auto claimMembers = [&](auto& self, TypeNode* t) -> void {
+                                if (const auto* members = getStructFields(t))
+                                    for (const auto& m : *members)
+                                    {
+                                        claimSemantic(m.semantic);
+                                        if (m.semantic.isEmpty()) self(self, m.type.get());
+                                    }
+                            };
+                            if (currentFunctionDecl_)
+                                for (const auto& param : currentFunctionDecl_->parameters)
+                                {
+                                    if (!param || (param->storage != StorageQualifier::Out &&
+                                                   param->storage != StorageQualifier::InOut)) continue;
+                                    claimSemantic(param->semantic);
+                                    if (param->semantic.isEmpty()) claimMembers(claimMembers, param->type.get());
+                                }
                             for (const auto& kv : implicitOutputIndex_) claimed.insert(kv.second);
                             int next = 0;
                             while (claimed.count(next)) ++next;
@@ -5818,6 +5847,11 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
             for (const auto& entry : savedNames)
                 if (entry.first.compare(0, from.size(), from) == 0)
                     nameToValue_[to + entry.first.substr(from.size())] = entry.second;
+            // The parameter shadows a caller name it shares (main's `x`):
+            // inside the helper the name has no whole value, so forwarding
+            // it on (h(x)) is again a flattened argument (review: codex).
+            // The scope restore after the call brings the caller's back.
+            nameToValue_.erase(param->name);
             if (flattenedUniformStructParams_.insert(param->name).second)
                 flattenedForCall.push_back(param->name);
             continue;
