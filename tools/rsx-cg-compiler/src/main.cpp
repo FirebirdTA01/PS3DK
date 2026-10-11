@@ -22,6 +22,7 @@
 #include "ir_builder.h"
 #include "ir_passes.h"
 #include "implicit_texcoord.h"
+#include "matrix_select.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
 #include "nv40/nv40_discard_guards.h"
@@ -518,6 +519,10 @@ int main(int argc, char** argv)
     // Then: collapse simple if-else diamonds into Select so the
     // existing FP emit path handles them without IF/ELSE/ENDIF.
     nv40::convertSimpleIfElse(*irModule);
+
+    // A select between two matrices becomes per-row selects (matrix_select.h).
+    for (auto& fn : irModule->functions)
+        if (fn) rsx_cg::splitMatrixSelects(*fn);
 
     // Implicit TEXCOORDs go to the fragment inputs the program still reads
     // (t_3289f98f), decided once the if/else diamonds are selects: a select

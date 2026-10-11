@@ -7,6 +7,8 @@
 #   float4(float2x2) is the components row-major (m00 m01 m10 m11);
 #   a vector that does not hold exactly the matrix's components (float3 of a
 #   float2x3, float4 of a float3x3) is refused.
+# A select between two matrices (if/else assigning a matrix on both arms)
+# is per-row selects.
 # A write through a matrix selector is accepted by the reference but not
 # lowered here yet, so it stays a named refusal.
 #
@@ -33,6 +35,12 @@ VALUE = [
     ('reorder_3',    H + M3 + 'return float4(m._m22_m02_m11, 1); }', lambda t: [t[0], t[2], t[2], 1]),
     ('flatten_2x2',  H + 'float2x2 m = float2x2(t.x, t.y, t.z, t.w); return float4(m) * float4(1, 2, 3, 4); }',
                      lambda t: [t[0], f32(t[1] * 2), f32(t[2] * 3), f32(t[3] * 4)]),
+    # An if/else that assigns a matrix on both arms selects the whole matrix
+    # (lowered as per-row selects; measured identical to the reference).
+    ('select_2x2', H + 'float2x2 m; if (t.x > 0.5) m = float2x2(t.x, t.y, t.z, t.w); '
+                   'else m = float2x2(t.w, -t.z, 2, t.y); float2 v = mul(m, float2(1, 0.5)); return float4(v, m[1]); }',
+     lambda t: (lambda m: [f32(m[0] + f32(0.5 * m[1])), f32(m[2] + f32(0.5 * m[3])), m[2], m[3]])(
+         [t[0], t[1], t[2], t[3]] if t[0] > 0.5 else [t[3], -t[2], 2.0, t[1]])),
     ('row_4x4',      H + 'float4x4 q = float4x4(t, t.yzwx, t.zwxy, t.wxyz); return q._m30_m31_m32_m33; }',
                      lambda t: [t[3], t[0], t[1], t[2]]),
 ]
