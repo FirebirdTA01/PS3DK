@@ -5844,9 +5844,26 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                      (targetType.isScalar() || targetType.isVector()) &&
                      sourceType.componentCount() > targetType.componentCount())
             {
-                boundValue = targetType.isScalar()
+                // A bool parameter normalises the kept lane (x != 0); the
+                // scalar narrowing would hand over the raw lane value.
+                const bool boolTarget = (targetType.isVector() ? targetType.elementType
+                                                               : targetType.baseType) == IRType::Bool;
+                boundValue = targetType.isScalar() && !boolTarget
                     ? emitScalarNarrowing(sourceType, targetType, boundValue, argument->loc)
                     : emitVectorNarrowing(sourceType, targetType, boundValue, argument->loc);
+            }
+            // A numeric in-argument to a bool parameter of the same width is
+            // normalised too: f(bool x) given t.x binds (t.x != 0), as the
+            // reference's SNE does - binding the raw float made !x read 1-x.
+            else if (param->storage != StorageQualifier::Out &&
+                     param->storage != StorageQualifier::InOut &&
+                     sourceType.arraySize == 0 && targetType.arraySize == 0 &&
+                     !sourceType.isMatrix() && !targetType.isMatrix() &&
+                     (targetType.isScalar() || targetType.isVector()) &&
+                     (targetType.isVector() ? targetType.elementType : targetType.baseType) == IRType::Bool &&
+                     (sourceType.isVector() ? sourceType.elementType : sourceType.baseType) != IRType::Bool)
+            {
+                boundValue = emitNumericToBool(sourceType, targetType, boundValue, argument->loc);
             }
         }
         if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)

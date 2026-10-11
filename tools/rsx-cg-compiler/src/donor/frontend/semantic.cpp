@@ -1404,6 +1404,26 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
                       " cannot be out parameter (\"" + param->name + "\")");
                 return CgType::Error();
             }
+            // Truncation is ranked like any conversion, but an out/inout
+            // parameter cannot take a wider vector: the reference picks the
+            // candidate and then refuses it (C1113), it does not copy back
+            // into the leading lanes.
+            if (param && (param->storage == StorageQualifier::Out ||
+                          param->storage == StorageQualifier::InOut) &&
+                i < argTypes.size() && i < candidate->symbol->parameterTypes.size())
+            {
+                const CgType& argType = argTypes[i];
+                const CgType& paramType = candidate->symbol->parameterTypes[i];
+                if (argType.isVector() && !argType.isArray() && !paramType.isArray() &&
+                    !paramType.isMatrix() && (paramType.isScalar() || paramType.isVector()) &&
+                    argType.vectorSize() > paramType.vectorSize())
+                {
+                    error(expr->arguments[i]->loc,
+                          "C1113: actual parameter #" + std::to_string(i + 1) +
+                          " must be same type as formal out parameter (\"" + param->name + "\")");
+                    return CgType::Error();
+                }
+            }
         }
         for (size_t i = argTypes.size(); i < resolved->parameters.size(); ++i)
         {
