@@ -163,14 +163,44 @@ private:
     // A helper that RETURNED A STRUCT BY VALUE carries its tracked fields
     // (the per-element arrays and leaf bindings of `return p;`) back to the
     // caller instead of losing them at the scope restore below the call.
-    // `inlineStructReturnBase_` is the callee's struct local returned by the
-    // body (`p` in `return p;`), `inlineStructReturnDest_` is the caller's
-    // destination (`q` in `Plan q = compute(...)`); the inliner installs the
-    // base's fields under the destination before scope_ is restored and sets
-    // `inlineInstalledStructReturn_` so the caller's copy can be skipped.
-    std::string inlineStructReturnBase_;
-    std::string inlineStructReturnDest_;
-    bool inlineInstalledStructReturn_ = false;
+    //
+    // `inlineStructReturnBaseSet_` is the CUMULATIVE set of struct-local
+    // names this inliner body RETURNS BY VALUE across every return statement
+    // it builds (single-`return p;` shape: one name; `if (c) return p;
+    // return r;` shape: two).  Each inlining frame snapshots the set before
+    // building its body, and takes the difference with the set after, to
+    // scope this body's base names.  A nested helper called from a body
+    // (e.g. `compute` inside `computePlan`) has its own snapshot boundary
+    // and never leaks into the outer callee's base set.
+    //
+    // The remap under the caller's destination is installed ONLY when this
+    // body's base set has exactly ONE name - the callee returns exactly one
+    // struct local, and all reads of that local's storage are coherent.
+    // When the set has MORE THAN ONE name (a per-arm choice the runtime
+    // makes), each arm names a DIFFERENT local and the caller cannot know
+    // which arm the inliner's `result` corresponds to; in that case the
+    // inliner must NOT remap (leaving the caller's copy to fire the correct
+    // member-array-storage refusal), never installing one arm's storage on
+    // top of the other's.
+    //
+    // `structReturnDest_` binds the caller's destination local (`q` in
+    // `Plan q = compute(...)`) to the EXACT CallExpr being initialised.
+    // buildDeclStmt records it, keyed by the CallExpr it is evaluating; an
+    // inlining frame reads it only for its own `expr`.  A nested inliner -
+    // a helper called from a body, or a call that is an ARGUMENT (e.g.
+    // compute in `Plan q = wrap(compute(t))`, inlined while wrap's argument
+    // is being built, ahead of wrap's own frame) - looks its own CallExpr
+    // up and finds nothing, so it can never claim the caller's
+    // destination.  A single global name (the earlier design) would let
+    // that nested inliner run first, consume the name, and install ITS
+    // returned struct's storage onto the caller's `q` - a silent wrong
+    // value.
+    // `structReturnInstalled_` records which CallExprs had their struct
+    // return installed, so buildDeclStmt skips the caller-side copy for
+    // exactly that call.
+    std::unordered_set<std::string> inlineStructReturnBaseSet_;
+    std::unordered_map<const CallExpr*, std::string> structReturnDest_;
+    std::unordered_set<const CallExpr*> structReturnInstalled_;
     // Declaration identity prevents a local shadow from using a global's initializer.
     std::unordered_set<const DeclNode*> globalDeclarations_;
     // Mutable statics whose initialiser the constant evaluator could not

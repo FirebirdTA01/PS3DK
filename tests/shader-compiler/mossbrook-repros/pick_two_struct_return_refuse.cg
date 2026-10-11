@@ -1,0 +1,28 @@
+// MOSSBROOK member-array storage, case (a): multi-arm struct return is refused.
+//
+// The helper has TWO struct locals (p, r) and a runtime-conditioned choice
+// (if (c) return p; return r;).  Each arm names a DIFFERENT local, so the
+// inliner's `result` (a Select over the two arms' base values) does not
+// tell the caller which arm's tracked storage to copy.  Carrying one arm's
+// mirror[] into `q` on top of the other's is a silent wrong value; the
+// correct behavior is to refuse the member-array-storage copy.
+//
+// The reference (sce-cgc 475) accepts this shape; our compiler refuses it
+// by name on the tracked-source guard (array-bearing struct copy requires
+// a tracked source (member-array-storage)).
+//
+// With t = (0.75, 0.25, -0.5, 0.125) the reference would give
+// 0.75, 0.25, 0.75, 0.25 (c=t.x>0.5 is true, so p).
+struct Plan { float2 mirror[2]; };
+Plan pick_two(float2 a, float2 b, bool c)
+{
+    Plan p; p.mirror[0] = a; p.mirror[1] = a;
+    Plan r; r.mirror[0] = b; r.mirror[1] = b;
+    if (c) return p;
+    return r;
+}
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    Plan q = pick_two(t.xy, t.zw, t.x > 0.5);
+    return float4(q.mirror[0], q.mirror[1]);
+}

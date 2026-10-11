@@ -6,28 +6,48 @@
 #   (a) "scalar-vector broadcast requires numeric element types"
 #   (b) "array-bearing struct copy requires a tracked source (member-array-storage)"
 #
-# BOTH are now lifted by targeted fixes in ir_builder.cpp (see commit):
-#   (a)  buildCallExpr non-inlined path binds each entry-reachable out/inout
-#        parameter to a typed IROp::Undef in the standalone helper body so a
-#        `mirror[i] = s * 2.0` broadcast no longer sees an un-typed source.
-#   (b)  inlineUserFunctionCall scope-restore remap carries the callee's
-#        tracked array/leaf fields back under the caller's destination
-#        (captured BEFORE the body runs, so a nested helper cannot clobber it);
-#        buildDeclStmt then sets the install flag so the caller-side copy is
-#        skipped for the RETURN-struct case and does not refuse on an empty
-#        source.
-#
-# This test rows:
-#   (b)  byte-pinned against the reference (1 insn: MOVR o[COLR].xy, f[TEX0].xy),
-#        which our emitter already produces.
-#   (a)  shape-assertion (>=2 and <=9 insns, presence of the SGT 0.5 test and
-#        the -1.0 constant store) — the reference emits 4 predicated
-#        instructions; we emit 9 (SLE-based select, equivalent result).
-#        Tightening to the reference's predication shape is a separate
-#        codegen concern (dead-store elimination + predicated-store pass
-#        not in scope of this card); a lead with sce-cgc 475 can pin that
-#        shape here the moment parity is lifted.
-set -euo pipefail
+ # BOTH are now lifted by targeted fixes in ir_builder.cpp (see commit):
+ #   (a)  buildCallExpr non-inlined path binds each entry-reachable out/inout
+ #        parameter to a typed IROp::Undef in the standalone helper body so a
+ #        `mirror[i] = s * 2.0` broadcast no longer sees an un-typed source.
+ #   (b)  inlineUserFunctionCall scope-restore remap carries the callee's
+ #        tracked array/leaf fields back under the caller's destination
+ #        (`structReturnDest_`, keyed by the EXACT CallExpr being initialised)
+ #        so a nested helper called from a body, or a call acting as an
+ #        argument, cannot claim the caller's destination (see the lead's
+ #        `wrap(compute(...))` case).  buildDeclStmt then skips the
+ #        caller-side copy for exactly that call (`structReturnInstalled_`).
+ #        The remap is installed only when the callee returns EXACTLY ONE
+ #        struct local (`inlineStructReturnBaseSet_.size() == 1`); more than
+ #        one (a per-arm choice at runtime) is left to the member-array-
+ #        storage refusal.  This is what stops a "lift" that quietly picks
+ #        one arm of a two-arm helper from installing a silent wrong value.
+ #
+ # This test rows:
+ #   (b)  byte-pinned against the reference (1 insn: MOVR o[COLR].xy, f[TEX0].xy),
+ #        which our emitter already produces.
+ #   (a)  shape-assertion (>=2 and <=9 insns, presence of the SGT 0.5 test and
+ #        the -1.0 constant store) — the reference emits 4 predicated
+ #        instructions; we emit 9 (SLE-based select, equivalent result).
+ #        Tightening to the reference's predication shape is a separate
+ #        codegen concern (dead-store elimination + predicated-store pass
+ #        not in scope of this card); a lead with sce-cgc 475 can pin that
+ #        shape here the moment parity is lifted.
+ #
+ # And three SHAPE SAFETY rows the lead required after review, all pinned
+ # so a compiler that "lifts" (b) by quietly picking one arm is caught:
+ #   pick_two_struct_return_refuse   REFUSAL: a helper that returns TWO struct
+ #                                   locals (if (c) return p; return r;) must
+ #                                   refuse, never install one arm's storage over
+ #                                   the other's.
+ #   single_struct_return            VALUE: a helper that returns EXACTLY ONE
+ #                                   struct local compiles and copies the tracked
+ #                                   storage (mirror[0]=mirror[1]=t.zw here).
+ #   compute_wrap_refuse             REFUSAL: a helper whose ARGUMENT is itself a
+ #                                   struct-returning call (Plan q = wrap(compute()))
+ #                                   must refuse — the argument-inliner must not claim
+ #                                   the caller's destination.
+ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
@@ -133,5 +153,58 @@ grep -qE '^[0-9]+ .* s0=TEX0' "$work/a.u" \
 grep -qE '^[0-9]+ .* s[01]=c[0-9]+' "$work/a.u" \
     || fail "repro a: no inline constant (0.5 test or 1.0/-1.0 store) is used"
 echo "  shape ok: repro a ucode has $insns_a insns (SGT test + R0 terminal + TEX0 input + c0 const source); parity to the 4-insn reference is tracked separately"
+
+# ---------------------------------------------------------------------------
+# SHAPE SAFETY rows (required after review).  A compiler that "lifts" (b) by
+# quietly picking ONE of the callee's returned arms would pass the two
+# single-return rows above and the byte pin, yet emit a silent wrong value
+# on a multi-arm helper.  These three pin that the install only happens when
+# there is exactly one struct local the callee returns, and never when the
+# destination is claimed by an inliner other than the one initialising it.
+# ---------------------------------------------------------------------------
+
+refuse_row() {  # <stem> <what>
+    local stem="$1"; shift
+    set +e
+    "$compiler" -p sce_fp_rsx --emit-container "$work/$stem.fpo" \
+        "$shaders/$stem.cg" > "$work/$stem.log" 2>&1
+    local rc=$?
+    set -e
+    [[ "$rc" -ne 0 ]] || fail "$*: expected refusal (non-zero exit), got 0"
+    [[ ! -s "$work/$stem.fpo" ]] || fail "$*: refused but still wrote a container"
+    echo "  refuse ok: $*"
+}
+
+refuse_saying() {  # <stem> <reason-regex> <what>
+    refuse_row "$1" "$3"
+    local stem="$1"
+    grep -qE "$2" <(tr -d '\r' < "$work/$stem.log") \
+        || fail "$3: refused, but not for named reason - wanted /$2/; log: $(tr -d '\r' < "$work/$stem.log" | grep -mi1 -E 'error|refus|nv40|bail' | cut -c1-90)"
+    echo "  refuse-saying ok: $3"
+}
+
+# (a) two struct locals returned, one per arm: must refuse, never pick an arm.
+refuse_saying pick_two_struct_return_refuse \
+    "member-array-storage|tracked source" \
+    "a helper that returns TWO struct locals (one per arm) is refused, not resolved to one arm"
+
+# (b) exactly one struct local returned: the tracked storage is installed and
+#     the copy is skipped; the ucode carries both array elements from `b`.
+accept single_struct_return \
+       "a helper that returns EXACTLY ONE struct local copies its tracked storage"
+"$python" "$decoder" "$work/single_struct_return.fpo" > "$work/s.u" 2>/dev/null
+# Two MOVs: mirror[0] = mirror[1] = b = t.zw (the `b` argument).  Both
+# write R0 (o[COLR]) and read TEXCOORD0's zw lanes.  Pinning .zw (not .xy)
+# is what separates the correct value (b) from a wrong arm (a = t.xy): a
+# compiler that silently picked the other arm would emit the .xy lanes and
+# be caught.
+grep -qE '^[0-9]+ MOV dst=R0 .* s0=TEX0\.zw' "$work/s.u" \
+    || fail "single return: expected the tracked storage to be copied from b (t.zw), got the wrong lanes: $(sed -n '2,3p' "$work/s.u" | cut -c1-120)"
+echo "  value ok: single-return helper's tracked storage is copied (mirror[0]=mirror[1]=t.zw)"
+
+# (c) the argument to wrap is itself a struct-returning call: the argument
+#     inliner must not claim the caller's `q`; the copy is refused.
+refuse_row compute_wrap_refuse \
+       "wrap(compute(...)) with compute returning a struct is refused (argument inliner must not claim the caller's destination)"
 
 echo "mossbrook-memberarray: PASS"
