@@ -1561,6 +1561,22 @@ VpContainerResult emitVertexContainerImpl(
         return result;
     }
 
+    // `: TEXUNITn` on a struct entry parameter: every member record shows
+    // the struct's spelling unless it carries one of its own (measured:
+    // mdapt's PASSPREV4.video_size ... .texture all read TEXUNIT1).
+    if (entry)
+        for (size_t i = 0; i < entry->parameters.size(); ++i)
+        {
+            const auto& sp = entry->parameters[i];
+            if (sp.structRecordSemantic.empty()) continue;
+            const std::string prefix = sp.name + ".";
+            const uint32_t ordinal = irParamOrdinal(sp, i);
+            for (auto& d : params)
+                if (d.paramno == ordinal && d.semantic.empty() &&
+                    d.name.compare(0, prefix.size(), prefix) == 0)
+                    d.semantic = sp.structRecordSemantic;
+        }
+
     // ----- Strings region: per-param, semantic\0 then name\0.
     // Literal-pool params interleave a 16-byte float[4] block between
     // the prior strings and the param's own name string (the reference compiler lays

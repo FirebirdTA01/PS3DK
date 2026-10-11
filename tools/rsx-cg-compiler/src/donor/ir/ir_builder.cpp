@@ -1601,6 +1601,25 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     for (auto& param : decl->parameters)
     {
         ++sourceOrdinal;
+        // `: TEXUNITn` on a struct entry parameter binds each sampler member
+        // that names no unit of its own to unit n (measured: two samplers in
+        // one struct both take unit n), and every member's record shows the
+        // struct's spelling.  Semantic analysis admits only TEXUNIT here.
+        const auto bindStructTexUnit = [&](IRParameter& member, const StructField& field) {
+            if (!currentFunction_->isEntryPoint || param->semantic.isEmpty() ||
+                !param->type || param->type->baseType != BaseType::Struct)
+                return;
+            const std::string raw = param->semantic.rawName.empty()
+                ? param->semantic.name + std::to_string(param->semantic.index)
+                : param->semantic.rawName;
+            if (!field.semantic.isEmpty()) return;   // a member's own binding wins (unmeasured mix)
+            if (field.type && field.type->isSampler())
+            {
+                member.semanticName = param->semantic.name;
+                member.semanticIndex = param->semantic.index;
+            }
+            member.rawSemanticName = raw;
+        };
         // A UNIFORM STRUCT ENTRY PARAMETER is a set of uniforms, one per
         // member, named `param.member` and sharing the parameter's paramno
         // (measured on the reference: `uniform input IN` lists IN.video_size,
@@ -1682,6 +1701,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                                 member.explicitRegisterIndex = field.semantic.explicitRegisterIndex;
                             }
                         }
+                        bindStructTexUnit(member, field);
                         currentFunction_->parameters.push_back(member);
                         nameToValue_[qualified] = member.valueId;
                     }
@@ -1747,6 +1767,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                             member.explicitRegisterIndex = field.semantic.explicitRegisterIndex;
                         }
                     }
+                    bindStructTexUnit(member, field);
                     currentFunction_->parameters.push_back(member);
                     nameToValue_[qualified] = member.valueId;
                 }
@@ -1761,7 +1782,16 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         irParam.explicitRegisterBank = param->semantic.explicitRegisterBank;
         irParam.explicitRegisterIndex = param->semantic.explicitRegisterIndex;
 
-        if (!param->semantic.isEmpty())
+        if (!param->semantic.isEmpty() && param->type &&
+            param->type->baseType == BaseType::Struct && !param->type->isArray())
+        {
+            // `: TEXUNITn` on a struct (semantic analysis admits only that):
+            // record text for every member; the samplers bound above.
+            irParam.structRecordSemantic = param->semantic.rawName.empty()
+                ? param->semantic.name + std::to_string(param->semantic.index)
+                : param->semantic.rawName;
+        }
+        else if (!param->semantic.isEmpty())
         {
             irParam.semanticName    = param->semantic.name;
             irParam.rawSemanticName = param->semantic.rawName;

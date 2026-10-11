@@ -463,6 +463,12 @@ struct IRParameter
     // IRInputMember).  Empty when the struct holds a member shape this list
     // does not model; the containers then list only the loaded members.
     std::vector<IRInputMember> inputMembers;
+    // A `: TEXUNITn` on a struct entry parameter (measured: mdapt's
+    // `prev PASSPREV4 : TEXUNIT1`): every member's record carries this
+    // spelling as its semantic, its sampler members bind to unit n, and its
+    // numeric members are ordinary unbound varyings.  Record text only; the
+    // binding itself is on the sampler members' own parameters.
+    std::string structRecordSemantic;
 };
 
 // The Cg paramno of entry parameter `index` (see IRParameter::sourceOrdinal).

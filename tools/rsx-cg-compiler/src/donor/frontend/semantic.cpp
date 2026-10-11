@@ -629,7 +629,31 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         if (decl == shaderInfo_.entryPoint &&
             !param->semantic.isEmpty() && resolvedType.isStruct())
         {
-            error(param->loc, "semantics on struct-typed parameters are not supported: '" + param->name + "'");
+            // `: TEXUNITn` on a struct (measured on the reference): every
+            // member record carries the semantic, a sampler member binds to
+            // unit n, numeric members of a VARYING struct stay ordinary
+            // varyings.  A UNIFORM struct with a numeric member is refused
+            // as the reference refuses it (C5118).  Other semantics on a
+            // struct - TEXCOORDn and the rest - are not lowered yet.
+            std::string sem = param->semantic.name;
+            for (char& c : sem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            bool hasNumeric = false, hasNested = false;
+            for (const auto& f : resolvedType.structFields())
+            {
+                if (!f.type) { hasNested = true; continue; }
+                if (f.type->baseType == BaseType::Struct || f.type->isArray()) hasNested = true;
+                else if (!f.type->isSampler()) hasNumeric = true;
+            }
+            if (sem != "TEXUNIT" || hasNested)
+            {
+                error(param->loc, "semantics on struct-typed parameters are not supported: '" + param->name +
+                      "' (only TEXUNITn on a struct without struct members is lowered)");
+            }
+            else if (param->storage == StorageQualifier::Uniform && hasNumeric)
+            {
+                error(param->loc, "C5118: variable \"" + param->name +
+                      "\" type conflicts with semantics \"TEXUNIT\"");
+            }
         }
 
         if (!symbols_.addSymbol(std::move(sym)))

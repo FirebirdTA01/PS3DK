@@ -761,6 +761,8 @@ jobs:
         run: bash tests/shader-compiler/bool-int-cast-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Source functions accept truncated vector arguments; dot of scalars
         run: bash tests/shader-compiler/overload-truncation-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A TEXUNIT semantic on a struct parameter binds its samplers and labels its records
+        run: bash tests/shader-compiler/struct-param-semantic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
         run: bash tests/shader-compiler/inline-dead-tail-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value
