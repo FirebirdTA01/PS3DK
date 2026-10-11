@@ -17,6 +17,8 @@ int bump_tls (int n);
 int *tls_slot (int i);
 int label_runtime (int which);
 extern float vec_table[16];
+struct grid { long long seed; int x0, z0, cols, rows; const unsigned char *cells; };
+int grid_at (const struct grid *g, int x, int z);
 float vec_load_back (int back);
 void vec_store_back (int back, float value);
 struct sv { unsigned len; const char *p; };
@@ -98,6 +100,13 @@ main (void)
   check ("negative table offset x-1", flood_mark (13, 5, 1), 5 * 15 + 12);
   check ("negative table offset y-1", flood_mark (13, 5, 3), 4 * 15 + 13);
   check ("positive table offset x+1", flood_mark (13, 5, 0), 5 * 15 + 14);
+  /* An int difference used as a size_t index from a negative origin. */
+  {
+    static const unsigned char cells[6] = { 10, 11, 12, 13, 14, 15 };
+    struct grid g = { 0x1234, -37, -2, 3, 2, cells };
+    check ("index from a negative origin, x == x0", grid_at (&g, -37, -2), 10);
+    check ("index from a negative origin, last cell", grid_at (&g, -35, -1), 15);
+  }
   /* A by-value std::string_view walked character by character.  */
   check ("string_view by value", class_measure (), 18);
 

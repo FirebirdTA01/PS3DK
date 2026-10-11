@@ -4,6 +4,7 @@
    descriptors, label addresses (static table and run-time), thread-local
    data, and negative offsets in an IV-optimised loop.  Kept in
    its own unit so the caller's constants do not fold the addresses.  */
+#include <stddef.h>
 #include <stdint.h>
 #include <altivec.h>
 
@@ -160,4 +161,19 @@ flood_mark (int i, int j, int first)
       if (seen[y][x])
         n++, at = y * 15 + x;
   return n == 1 ? at : -1;
+}
+
+/* An int difference converted to size_t and used as an index, with a
+   negative origin (t_fe2ebc58, an engine's grid lookup): x arrives
+   sign-extended and x0 is loaded zero-extended, so before the address-model
+   change x - x0 kept 0xffffffff in the upper word and the load's effective
+   address was above 4 GiB.  */
+struct grid { long long seed; int x0, z0, cols, rows; const unsigned char *cells; };
+
+__attribute__((noinline)) int
+grid_at (const struct grid *g, int x, int z)
+{
+  if (!(x >= g->x0 && z >= g->z0 && x < g->x0 + g->cols && z < g->z0 + g->rows))
+    return -1;
+  return g->cells[(size_t) (z - g->z0) * (size_t) g->cols + (size_t) (x - g->x0)];
 }
