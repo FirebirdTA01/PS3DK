@@ -5654,6 +5654,12 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
             }
         }
 
+        // dot of two scalars is their product (measured: dot(x - .5, x - .5)
+        // at x = .1 is .16); the DP lowerings take vector operands only.
+        if (*builtinOp == IROp::Dot && argValues.size() == 2 && expr->arguments.size() == 2 &&
+            getExprType(expr->arguments[0].get()).isScalar() &&
+            getExprType(expr->arguments[1].get()).isScalar())
+            return emitBinaryOp(IROp::Mul, resultType, argValues[0], argValues[1], expr->loc);
         // Emit built-in operation
         return emitInstruction(*builtinOp, resultType, argValues);
     }
@@ -5827,6 +5833,20 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                 (targetType.isScalar() || targetType.isVector()))
             {
                 boundValue = emitMatrixComponents(sourceType, targetType, boundValue, argument->loc);
+            }
+            // A wider vector argument to a narrower in parameter keeps its
+            // leading lanes (overload resolution admits the truncation for
+            // source functions; measured: f(float a) given t.xy reads t.x).
+            else if (param->storage != StorageQualifier::Out &&
+                     param->storage != StorageQualifier::InOut &&
+                     sourceType.isVector() && sourceType.arraySize == 0 &&
+                     !targetType.isMatrix() && targetType.arraySize == 0 &&
+                     (targetType.isScalar() || targetType.isVector()) &&
+                     sourceType.componentCount() > targetType.componentCount())
+            {
+                boundValue = targetType.isScalar()
+                    ? emitScalarNarrowing(sourceType, targetType, boundValue, argument->loc)
+                    : emitVectorNarrowing(sourceType, targetType, boundValue, argument->loc);
             }
         }
         if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)

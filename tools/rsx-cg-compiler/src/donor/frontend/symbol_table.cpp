@@ -263,6 +263,7 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
 {
     if (ambiguous) *ambiguous = false;
     int bestNarrowing = 0;
+    int bestDropped = 0;
     auto it = functionOverloads.find(name);
     if (it == functionOverloads.end())
     {
@@ -388,6 +389,7 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
         // candidates that narrow equally.
         int totalCost = 0;
         int totalNarrowing = 0;
+        int totalDropped = 0;
         bool viable = true;
 
         for (size_t i = 0; i < argumentTypes.size(); ++i)
@@ -401,6 +403,31 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
             }
 
             int cost = TypeConversion::conversionCost(argType, paramType);
+            // A SOURCE function's numeric vector parameter accepts a wider
+            // vector argument, truncated to its leading lanes (warning C7011
+            // on the reference: f(float a) called with t.xy reads t.x).
+            // Measured ranking: dropped lanes compare FIRST, before type
+            // narrowing - f(float3) beats f(float) for a float4 argument,
+            // f(int4) beats f(float2), f(float2, int) beats f(float, float).
+            // Builtins keep their exact overload sets.
+            if (cost < 0 && sym->declaration != nullptr &&
+                argType.isVector() && !argType.isArray() && !paramType.isArray() &&
+                !paramType.isMatrix() && (paramType.isScalar() || paramType.isVector()) &&
+                argType.isNumeric() && paramType.isNumeric() &&
+                argType.vectorSize() > paramType.vectorSize())
+            {
+                const CgType leading = argType.swizzleType(paramType.vectorSize());
+                const int leadingCost = leading.equals(paramType)
+                    ? 0 : TypeConversion::conversionCost(leading, paramType);
+                if (leadingCost >= 0)
+                {
+                    totalDropped += argType.vectorSize() - paramType.vectorSize();
+                    totalCost += leadingCost;
+                    if (!leading.equals(paramType))
+                        totalNarrowing += TypeConversion::narrowingSteps(leading, paramType);
+                    continue;
+                }
+            }
             if (cost < 0)
             {
                 // No conversion possible
@@ -415,9 +442,11 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
         if (!viable) continue;
 
         const bool better = !best.symbol ||
-            totalNarrowing < bestNarrowing ||
-            (totalNarrowing == bestNarrowing && totalCost < best.conversionCost);
-        const bool equal = best.symbol &&
+            totalDropped < bestDropped ||
+            (totalDropped == bestDropped && totalNarrowing < bestNarrowing) ||
+            (totalDropped == bestDropped && totalNarrowing == bestNarrowing &&
+             totalCost < best.conversionCost);
+        const bool equal = best.symbol && totalDropped == bestDropped &&
             totalNarrowing == bestNarrowing && totalCost == best.conversionCost;
 
         if (better)
@@ -425,6 +454,7 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
             best.symbol = sym;
             best.conversionCost = totalCost;
             bestNarrowing = totalNarrowing;
+            bestDropped = totalDropped;
             best.exactMatch = (totalCost == 0);
             tied = false;
         }
@@ -751,6 +781,10 @@ void SymbolTable::registerMathFunctions()
 
 void SymbolTable::registerVectorFunctions()
 {
+    // dot product.  The scalar forms are accepted by the reference and are
+    // the product (dot(float, float) was ambiguous among the vector forms).
+    addFunction("dot", CgType::Float(), {CgType::Float(), CgType::Float()}, {"a", "b"}, nullptr, true);
+    addFunction("dot", CgType::Half(), {CgType::Half(), CgType::Half()}, {"a", "b"}, nullptr, true);
     // dot product
     for (int size = 2; size <= 4; ++size)
     {

@@ -1,0 +1,4 @@
+// function-visibility, helper-vector-argument-conversion twin: the float4
+// argument written out as the float3 its parameter keeps (t.xyz).
+float4 f(float3 v) { return float4(v, 1) * 2.0; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return f(t.xyz); }

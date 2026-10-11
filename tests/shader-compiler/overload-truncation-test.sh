@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# A source function accepts a wider vector argument, truncated to its leading
+# lanes (the reference warns C7011 and accepts), and dot() of two scalars is
+# their product.  Ranking, measured on the reference: dropped lanes compare
+# FIRST, before type narrowing and cost.  Each row's value (at TEX0 =
+# 0.1 0.2 0.3 0.4) is what the reference's own container gives.
+#
+# Usage: tests/shader-compiler/overload-truncation-test.sh <compiler>
+set -u
+compiler="${1:-${RSX_CG_COMPILER:-}}"
+[ -n "$compiler" ] || { echo "overload-truncation: FAIL: compiler required"; exit 1; }
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
+fail=0
+row() {   # <name> <expected x> <source>
+    printf '%s\n' "$3" > "$work/$1.cg"
+    "$compiler" -p sce_fp_rsx -e main --emit-container "$work/$1.bin" "$work/$1.cg" > "$work/$1.log" 2>&1
+    local rc=$?
+    if [ $rc -ne 0 ] || [ ! -s "$work/$1.bin" ]; then
+        echo "overload-truncation: FAIL $1: refused (rc $rc)"; fail=1; return
+    fi
+    if python3 - "$here" "$work/$1.bin" "$2" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import fp_eval
+import struct
+f32 = lambda v: struct.unpack('>f', struct.pack('>f', v))[0]   # compare as binary32
+got = [f32(v) for v in fp_eval.evaluate(open(sys.argv[2], 'rb').read(), {'TEX0': [0.1, 0.2, 0.3, 0.4]})]
+want = [f32(float(sys.argv[3])), 0.0, 0.0, 1.0]
+sys.exit(0 if got == want else (print('    got %s want %s' % (got, want)) or 1))
+EOF
+    then echo "overload-truncation: ok   $1"; else echo "overload-truncation: FAIL $1"; fail=1; fi
+}
+row trunc_scalar_args 1.2999999523162842 '
+float f(float a, float b) { return a * 10 + b; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t.xy, t.zw), 0, 0, 1); }'
+row scalar_dot 0.1600000113248825 '
+float4 main(float4 t : TEXCOORD0) : COLOR { float d = dot(t.x - 0.5, t.x - 0.5); return float4(d, 0, 0, 1); }'
+row arity_then_truncate 0.10000000149011612 '
+float f(float a) { return a; }
+float2 f(float2 a, float2 b) { return a + b; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t.xy), 0, 0, 1); }'
+row fewer_dropped_lanes_win 2.0 '
+float f(float a) { return 1; }
+float f(float3 a) { return 2; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t), 0, 0, 1); }'
+row type_narrowing_beats_truncation 2.0 '
+float f(float2 a) { return 1; }
+float f(int4 a) { return 2; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t), 0, 0, 1); }'
+row truncation_ranked_before_narrowing 2.0 '
+float f(float a, float b) { return 1; }
+float f(float2 a, int b) { return 2; }
+float4 main(float4 t : TEXCOORD0) : COLOR { return float4(f(t.xy, t.z), 0, 0, 1); }'
+[ $fail -eq 0 ] && echo "overload-truncation: PASS" || echo "overload-truncation: FAIL"
+exit $fail

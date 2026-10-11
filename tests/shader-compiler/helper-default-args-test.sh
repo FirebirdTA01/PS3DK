@@ -28,6 +28,9 @@
 #               declares only the chosen overload, because acceptance alone
 #               cannot say which body ran.
 #
+#               Since helper-vector-argument-conversion landed, f(float3) is
+#               viable for us too (a truncation), so this IS the ranking test:
+#               dropped lanes compare first.  The history below is kept.
 #               READ THIS ROW'S STRENGTH HONESTLY.  On the REFERENCE this is a
 #               genuine preference: it accepts a float4 argument for a float3
 #               parameter with "warning C7011: implicit cast", so both
@@ -206,7 +209,7 @@ accept fp_helper_default_midparam_f "a default on a NON-trailing parameter"
 accept fp_helper_default_prefer_f      "exact match with a default fill vs a conversion"
 accept fp_helper_default_prefer_twin_f "only the overload the reference chooses"
 same    fp_helper_default_prefer_f fp_helper_default_prefer_twin_f \
-        "the DEFAULTED float4 overload is chosen, not f(float3) (by elimination for us - see the header and helper-vector-argument-conversion)"
+        "the DEFAULTED float4 overload is chosen over f(float3), which is viable through truncation: dropping no lane beats dropping one"
 
 refuse fp_helper_default_crossparam_refuse_f "a default naming another parameter"
 refuse fp_helper_default_ambiguous_refuse_f  "exact arity beside a defaulted overload"
@@ -358,9 +361,13 @@ refuse_saying fp_helper_default_braced_array_gap_f \
 refuse_saying fp_helper_default_entrycall_gap_f \
     "cannot evaluate" \
     "entry-default-call-fold: a call in an ENTRY uniform default (reference ACCEPTS)"
-refuse_saying fp_helper_default_narrow_gap_f \
-    "no matching function" \
-    "helper-vector-argument-conversion: a float4 argument for a float3 parameter (reference warns C7011 and ACCEPTS)"
+# helper-vector-argument-conversion LANDED: a float4 argument for a float3
+# parameter is accepted and keeps xyz, as on the reference (warning C7011).
+# Byte-equal to the call written with t.xyz.
+accept fp_helper_default_narrow_gap_f  "a float4 argument for a float3 parameter"
+accept fp_helper_default_narrow_twin_f "that argument written as t.xyz"
+same   fp_helper_default_narrow_gap_f fp_helper_default_narrow_twin_f \
+       "a wider vector argument keeps its leading lanes"
 
 # SELF-CHECK: this guard's own refusal contract.  Sixteen rows above are
 # refuse_saying / refuse_not_saying, and the failure they are most exposed to
