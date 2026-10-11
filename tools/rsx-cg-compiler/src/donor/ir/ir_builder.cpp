@@ -6530,13 +6530,35 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
             if (currentFunction_ && currentFunction_->isEntryPoint)
             {
                 if (result != InvalidIRValue) implicitClaimRoots_.push_back(result);
-                if (ret->value->kind == ExprKind::Identifier)
+                // A returned struct LOCAL's members, by the declared return
+                // type's own field paths only: a scalar return named like a
+                // caller's struct, or a caller struct of another type that
+                // shares the name, must not contribute (review: codex).
+                const std::vector<StructField>* fields =
+                    ret->value->kind == ExprKind::Identifier ? getStructFields(callee->returnType.get())
+                                                             : nullptr;
+                if (fields)
                 {
-                    const std::string prefix = static_cast<IdentifierExpr*>(ret->value.get())->name + ".";
-                    for (const auto& entry : nameToValue_)
-                        if (entry.first.compare(0, prefix.size(), prefix) == 0 &&
-                            entry.second != InvalidIRValue)
-                            implicitClaimRoots_.push_back(entry.second);
+                    std::vector<std::string> paths;
+                    const auto walk = [&](const auto& self, const std::vector<StructField>& fs,
+                                          const std::string& prefix) -> void {
+                        for (const auto& f : fs)
+                        {
+                            const std::string path = prefix + "." + f.name;
+                            if (const auto* inner = f.type ? getStructFields(f.type.get()) : nullptr)
+                                self(self, *inner, path);
+                            else
+                                paths.push_back(path);
+                        }
+                    };
+                    walk(walk, *fields, static_cast<IdentifierExpr*>(ret->value.get())->name);
+                    for (const auto& path : paths)
+                        for (const auto& entry : nameToValue_)
+                            if (entry.second != InvalidIRValue &&
+                                (entry.first == path ||
+                                 (entry.first.size() > path.size() && entry.first[path.size()] == '[' &&
+                                  entry.first.compare(0, path.size(), path) == 0)))
+                                implicitClaimRoots_.push_back(entry.second);
                 }
             }
             sawReturn = true;

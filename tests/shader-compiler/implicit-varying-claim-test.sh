@@ -38,6 +38,20 @@ ROWS = [
     ('pow_dead',           MAIN % 'float2 d = pow(b, float2(2.0, 2.0));', NO_CLAIM),
     ('frac_dead',          MAIN % 'float2 d = frac(b);', NO_CLAIM),
     ('saturate_dead',      MAIN % 'float2 d = saturate(b);', NO_CLAIM),
+    # A ternary return: the condition's input claims too (measured).
+    ('ternary_return',     'float t(float x) { return x > 0 ? 1 : 2; }' + chr(10) +
+                           'float4 main(float b, float f) : COLOR { float d = t(b); return float4(f, 0, 0, 1); }' + chr(10),
+                           {'b': (TEX0, 0), 'f': (TEX1, 1)}),
+    # A scalar return named like a caller's struct must not claim the
+    # caller's members (review: codex, SP8-SCOPE): b stays unbound.
+    ('scalar_named_like_struct', 'struct S { float v; };' + chr(10) + 'float s1(float s) { return s; }' + chr(10) +
+                           'float4 main(float b, float f) : COLOR { S s; s.v = b; float d = s1(1); return float4(f, 0, 0, 1); }' + chr(10),
+                           {'b': (UNDEF, 0), 'f': (TEX0, 1)}),
+    # A lane-selecting return still claims every input of the vector
+    # argument (measured: a TEX0, b TEX1, f TEX2).
+    ('lane_select_claims_all', 'float l(float2 x) { return x.x; }' + chr(10) +
+                           'float4 main(float a, float b, float f) : COLOR { float d = l(float2(a, b)); return float4(f, 0, 0, 1); }' + chr(10),
+                           {'a': (TEX0, 0), 'b': (TEX1, 0), 'f': (0xc96, 1)}),
     ('read_both',          MAIN % 'f = f + b.x;', {'b': (TEX0, 1), 'f': (TEX1, 1)}),
 ]
 fails = []
