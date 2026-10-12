@@ -56,3 +56,4 @@
 0062-rs6000-cell64lv2-ilp32-toc-ptr-entries.patch
 0063-rs6000-cell64lv2-toc-slot-ptr-mode.patch
 0064-rs6000-cell64lv2-fp-displacement-multiple-of-4.patch
+0065-rs6000-cell64lv2-toc-int-entry-ptr-mode.patch

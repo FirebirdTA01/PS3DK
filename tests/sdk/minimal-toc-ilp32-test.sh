@@ -90,8 +90,26 @@ done
 # -mcmodel=small).  Since 0059 (ILP32 Pmode is DImode) a DImode constant was
 # taken for a TOC entry, but an ILP32 TOC slot is 4 bytes, and -O0 died with
 # an internal compiler error in output_toc.  Every cell compiles, and the
-# whole value is still in the assembly: built inline from its four
-# halfwords, or one 8-byte constant.
+# whole value is still there: one 8-byte constant (.quad, hex or decimal),
+# or built inline in ONE register in order (lis 0x1234, ori 0x5678, sldi 32,
+# oris 0x9abc, ori 0xdef0).  A 4-byte .long of the value, or an inline
+# sequence missing a step, does not count (negative controls below).  A
+# Windows-hosted compiler writes CRLF assembly; the check strips CR.
+whole_value() {
+    grep -Eq '^[[:space:]]*\.quad[[:space:]]+(0x123456789abcdef0|1311768467463790320)[[:space:]]*$' "$1" && return 0
+    tr -d '\r' < "$1" | tr '\n' ';' | grep -Eq 'lis ([0-9]+),0x1234;([^;]*;)*[[:space:]]*ori \1,\1,0x5678;([^;]*;)*[[:space:]]*sldi \1,\1,32;([^;]*;)*[[:space:]]*oris \1,\1,0x9abc;([^;]*;)*[[:space:]]*ori \1,\1,0xdef0;'
+}
+printf '\t.long\t0x123456789abcdef0\n' > "$work/neg-long.s"
+printf '\tlis 3,0x1234\n\tori 3,3,0x5678\n\toris 3,3,0x9abc\n\tori 3,3,0xdef0\n' > "$work/neg-nosldi.s"
+printf '\tlis 3,0x1234\n\tori 4,4,0x5678\n\tsldi 3,3,32\n\toris 3,3,0x9abc\n\tori 3,3,0xdef0\n' > "$work/neg-tworegs.s"
+printf '\tlis 3,0x1234\r\n\tori 3,3,0x5678\r\n\tsldi 3,3,32\r\n\toris 3,3,0x9abc\r\n\tori 3,3,0xdef0\r\n' > "$work/pos-inline.s"
+printf '.LC0:\n\t.quad\t1311768467463790320\n' > "$work/pos-quad.s"
+if whole_value "$work/pos-inline.s" && whole_value "$work/pos-quad.s" && ! whole_value "$work/neg-long.s" &&
+   ! whole_value "$work/neg-nosldi.s" && ! whole_value "$work/neg-tworegs.s"; then
+    ok "64-bit value checker: inline and .quad accepted; .long, a missing sldi and a register change refused"
+else
+    fail "64-bit value checker does not separate its controls"
+fi
 cat > "$work/k.c" <<'EOF'
 unsigned long long k1(void) { return 0x123456789abcdef0ULL; }
 unsigned long long k2(unsigned long long x) { return x ^ 0x0fedcba987654321ULL; }
@@ -104,8 +122,7 @@ for abi in ilp32 lp64; do
             if ! "$bin-gcc" "${B[@]}" "${flag[@]}" "$model" "$opt" -S "$work/k.c" -o "$s" 2>"$work/err"; then
                 fail "64-bit constant, $abi $model $opt: $(grep -m1 -E 'error|internal' "$work/err")"; continue
             fi
-            if grep -q '0x123456789abcdef0' "$s" ||
-               { grep -q '0x1234' "$s" && grep -q '0x5678' "$s" && grep -q '0x9abc' "$s" && grep -q '0xdef0' "$s"; }; then
+            if whole_value "$s"; then
                 ok "64-bit constant, $abi $model $opt compiles with its whole value"
             else
                 fail "64-bit constant, $abi $model $opt: 0x123456789abcdef0 is not in the assembly"
