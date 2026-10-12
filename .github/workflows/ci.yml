@@ -809,6 +809,8 @@ jobs:
         run: bash tests/shader-compiler/vp-struct-matrix-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test VP uniform struct argument provenance
         run: bash tests/shader-compiler/vp-uniform-struct-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler --loops
+      - name: A vertex program past 544 instructions is refused
+        run: bash tests/shader-compiler/vp-instruction-budget-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
         run: bash tests/shader-compiler/inline-dead-tail-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value

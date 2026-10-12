@@ -12251,6 +12251,17 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         out.ok = false;
         return out;
     }
+    // The vertex engine holds 544 instructions: measured, the reference
+    // compiles 544 and refuses 545 ("C9999: too many instruction words
+    // generated").  Nothing checked it - ours emitted a 1091-instruction
+    // program with a success exit.  Refused by resource.
+    if (asm_.instructionCount() > 544) {
+        out.diagnostics.push_back(
+            "nv40-general-vp: the program is " + std::to_string(asm_.instructionCount()) +
+            " instructions; the vertex engine holds 544 (vp-instruction-budget); refusing");
+        out.ok = false;
+        return out;
+    }
     out.words = asm_.words();
     out.ok = true;
     attrs.registerCount = static_cast<uint32_t>(std::max(1, asm_.numTempRegs()));
