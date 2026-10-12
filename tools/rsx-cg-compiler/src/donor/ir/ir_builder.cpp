@@ -2185,15 +2185,17 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         buildBlockStmt(decl->body.get());
     }
 
-    // An `out` parameter of a fragment entry written under a branch
-    // (strip_branch fs_multi: `color = ...` in every arm of nested ifs)
+    // An `out` parameter of an entry written under a branch (strip_branch
+    // fs_multi: `color = ...` in every arm of nested ifs; the vertex
+    // TangentNormalMapVp: `if (tangent.w) oNormal *= -1;`)
     // emitted its store inside each arm, and the flatten refuses an output
     // store a path can skip.  The parameter's name is joined at every merge
     // like a local's, so its final binding IS the output: when the body
     // ends in one block, with no return or discard anywhere, every store of
     // such an output that sits outside that block is replaced by one store
     // of the final value there.
-    if (currentFunction_->isEntryPoint && module_->shaderStage == ShaderStage::Fragment &&
+    if (currentFunction_->isEntryPoint &&
+        (module_->shaderStage == ShaderStage::Fragment || module_->shaderStage == ShaderStage::Vertex) &&
         !currentBlock_->hasTerminator())
     {
         bool returnsOrKills = false;

@@ -4,7 +4,8 @@
 # `color.w = ...`): the parameter is joined at every merge like a local, and
 # its final value is stored once at the end of the body.  It used to store in
 # each arm, and the flatten refused an output store a path can skip.
-# Judged by value; a body with a discard or a return keeps its old path.
+# The same for a vertex program's out parameter.  Judged by value; a body
+# with a discard or a return keeps its old path.
 #
 # Usage: tests/shader-compiler/out-param-branch-store-test.sh <compiler>
 set -u
@@ -18,6 +19,7 @@ from pathlib import Path
 compiler, work = sys.argv[1], Path(sys.argv[2])
 sys.path.insert(0, sys.argv[3])
 import fp_eval
+import vp_pow_vector_check as vp_eval
 f32 = lambda v: struct.unpack('>f', struct.pack('>f', v))[0]
 NL = chr(10)
 M = 'void main(float4 t : TEXCOORD0, out float4 c : COLOR) { '
@@ -57,6 +59,26 @@ for name, src, want_fn in VALUE:
         if got != want:
             fails.append('%s at t=%s: got %s want %s' % (name, t, got, want)); wrong += 1
     print('  %-32s %s' % (name, 'ok' if not wrong else '%d WRONG' % wrong))
+# The same in a vertex program (the SDK TangentNormalMapVp:
+# `if (tangent.w) oNormal *= -1;`).
+VP = ('void main(float4 p : POSITION, float4 t : TEXCOORD0, out float4 op : POSITION, out float4 o : TEXCOORD0) '
+      '{ op = p; o = t; if (t.w > 0) o = o * -1.0; }')
+s, o = work / 'vp.cg', work / 'vp.bin'
+s.write_text(VP + NL)
+p = subprocess.run([compiler, '-p', 'sce_vp_rsx', '-e', 'main', '--emit-container', str(o), str(s)],
+                   capture_output=True, text=True, timeout=60)
+if p.returncode != 0 or not o.exists():
+    fails.append('vertex_if: refused (rc %d)' % p.returncode); print('  %-32s REFUSED' % 'vertex_if')
+else:
+    wrong = 0
+    for t in TS:
+        t = [f32(x) for x in t]
+        pos = [.25, -.5, .75, 1.]
+        out = vp_eval.evaluate(o.read_bytes(), {}, inputs={0: pos, 8: t}, binary32=True, predication=True)
+        want = [f32(-x) for x in t] if t[3] > 0 else list(t)
+        if out.get(0) != pos or out.get(7) != want:
+            fails.append('vertex_if at t=%s: got %s want %s' % (t, out.get(7), want)); wrong += 1
+    print('  %-32s %s' % ('vertex_if', 'ok' if not wrong else '%d WRONG' % wrong))
 for f in fails: print('out-param-branch-store: FAIL', f)
 print('out-param-branch-store: %s' % ('PASS' if not fails else 'FAIL (%d)' % len(fails)))
 sys.exit(1 if fails else 0)
