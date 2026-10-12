@@ -92,7 +92,7 @@ function Get-ControlManifestProblems([string[]]$Manifest) {
 # checks actual execution before granting a kind its verdict gate.
 function Get-BinderManifestProblems([string[]]$Manifest) {
     $expected = @{}
-    foreach ($spec in @(@('rect',2),@('cube',6),@('volume',8),@('matrix',4))) {
+    foreach ($spec in @(@('rect',2),@('cube',6),@('volume',10),@('matrix',4))) {
         for ($i=0; $i -lt $spec[1]; $i++) { $expected["binder_$($spec[0])_$i"] = "control-binder-$($spec[0])" }
     }
     $problems = New-Object 'System.Collections.Generic.List[string]'

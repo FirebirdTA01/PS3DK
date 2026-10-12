@@ -42,6 +42,14 @@ function New-BinderControls([string]$Scratch, [string]$Controls, [scriptblock]$C
         $v = Permuted 'u_volume' @('4*x','4*(63-y)',[string](16+28*$i),'4*y')
         Add-BinderPair "binder_volume_$i" 'control-binder-volume' (Shader "color=tex3D(u_volume,float3(t.xy,$z));" 'uniform sampler3D u_volume') (Shader "float x=floor(t.x*64),y=floor(t.y*64);color=float4($v)/255.0;")
     }
+    # Vary depth across pixels and across both wrap boundaries. Fixed-slice
+    # controls alone cannot catch a depth coordinate accidentally held constant.
+    $v = Permuted 'u_volume' @('4*x','4*(63-y)','16+28*z','4*y')
+    Add-BinderPair 'binder_volume_8' 'control-binder-volume' (Shader 'color=tex3D(u_volume,float3(t.xy,2*t.x-0.5));' 'uniform sampler3D u_volume') (Shader "float x=floor(t.x*64),y=floor(t.y*64),z=floor(frac(2*t.x-0.5)*8);color=float4($v)/255.0;")
+    # Deliberately wrong slice: exactly one permuted channel differs by 28
+    # at every pixel. The guest requires mismatch, max_delta=28, 4096 pixels.
+    $v = Permuted 'u_volume' @('4*x','4*(63-y)','72','4*y')
+    Add-BinderPair 'binder_volume_9' 'control-binder-volume' (Shader 'color=tex3D(u_volume,float3(t.xy,0.4375));' 'uniform sampler3D u_volume') (Shader "float x=floor(t.x*64),y=floor(t.y*64);color=float4($v)/255.0;")
     # Square and both rectangular orientations: every component contributes.
     $shapes = @(@(3,3),@(4,4),@(3,4),@(4,3))
     foreach ($i in 0..3) {

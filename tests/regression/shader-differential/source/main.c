@@ -2299,7 +2299,7 @@ static long now_ms(void)
  * is a distinct, named proving row; duplicates cannot fill missing rows. */
 static const char *const k_binder_roles[4]={"control-binder-rect","control-binder-cube","control-binder-volume","control-binder-matrix"};
 static const char *const k_binder_prefix[4]={"binder_rect_","binder_cube_","binder_volume_","binder_matrix_"};
-static const unsigned k_binder_expected[4]={3u,63u,255u,15u};
+static const unsigned k_binder_expected[4]={3u,63u,1023u,15u};
 static unsigned g_binder_pass[4],g_binder_failed;
 static int binder_group(const char *role)
 {
@@ -2327,17 +2327,24 @@ static unsigned binder_needed(CGprogram fp,int automatic)
 	}
 	return mask;
 }
-static int binder_control_result(const sd_pair *p,const char *status)
+static int binder_control_result(const sd_pair *p,const sd_result *result)
 {
 	int group=binder_group(p->role);
 	if (group<0) return 0;
 	unsigned row=32;char tail;
 	size_t len=strlen(k_binder_prefix[group]);
 	if (strncmp(p->name,k_binder_prefix[group],len)!=0 ||
-	    sscanf(p->name+len,"%u%c",&row,&tail)!=1 || row>=8 ||
-	    !(k_binder_expected[group]&(1u<<row)) || strcmp(status,"identical")!=0) {
+	    sscanf(p->name+len,"%u%c",&row,&tail)!=1 || row>=32 ||
+	    !(k_binder_expected[group]&(1u<<row))) {
 		g_binder_failed|=1u<<group;return -1;
 	}
+	/* The wrong-slice witness must see the known depth difference,
+	 * not merely any error or mismatch. All other rows are exact twins. */
+	int valid = group==2 && row==9
+		? strcmp(result->status,"mismatch")==0 && result->max_delta==28 &&
+		  result->diff_pixels==RT_W*RT_H && result->total_pixels==RT_W*RT_H
+		: strcmp(result->status,"identical")==0;
+	if (!valid) { g_binder_failed|=1u<<group;return -1; }
 	g_binder_pass[group]|=1u<<row;
 	return 1;
 }
@@ -3718,7 +3725,7 @@ int main(int argc, const char **argv)
 		}
 
 		if (binder_group(p->role)>=0) {
-			if (binder_control_result(p,r.status)<0) failures++;
+			if (binder_control_result(p,&r)<0) failures++;
 			printf("shader-differential: binder gate ready=0x%x failed=0x%x after %s\n",
 			       binder_ready(),g_binder_failed,p->name);
 			goto post_row;

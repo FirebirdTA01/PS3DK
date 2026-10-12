@@ -90,7 +90,7 @@ Check "stager throws on Get-ControlManifestProblems" ($stager -match 'Get-Contro
 
 # Every individual missing/duplicate binder witness closes the host gate.
 $binder = @()
-foreach ($shape in @(@('rect',2),@('cube',6),@('volume',8),@('matrix',4))) {
+foreach ($shape in @(@('rect',2),@('cube',6),@('volume',10),@('matrix',4))) {
     foreach ($n in 0..($shape[1]-1)) { $binder += "B|control-binder-$($shape[0])|binder_$($shape[0])_$n|controls/a|controls/b|0" }
 }
 $complete = $head + $binder + $corpus
