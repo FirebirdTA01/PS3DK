@@ -29,10 +29,12 @@ int32_t  ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count);
 void     ps3tc_fifo_wrap_install(gcmContextData *ctx);
 
 /* Wrap statistics since start (or the last reset): the number of wraps,
- * the total time the PPU spent inside the callback waiting for the RSX to
- * consume the lap, and the longest single wait, in microseconds.  A large
- * stall total means the PPU is waiting for the GPU (GPU-bound), not doing
- * its own work.  Any pointer may be NULL. */
+ * the total elapsed time spent inside the wrap callback, and the longest
+ * single callback, in microseconds.  The time is wall-clock: it includes
+ * waiting for the RSX to consume the lap, the callback's sleeps and thread
+ * scheduling.  A large total says the PPU ran ahead of the command stream's
+ * consumption; it is not by itself proof of a GPU bottleneck.  Any pointer
+ * may be NULL. */
 void     ps3tc_fifo_wrap_stats(uint64_t *wraps, uint64_t *stall_us,
                                uint64_t *max_stall_us);
 void     ps3tc_fifo_wrap_stats_reset(void);

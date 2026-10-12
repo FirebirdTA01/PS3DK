@@ -75,10 +75,12 @@ The version stamped into builds is generated from the most recent
 
 - **FIFO wrap statistics.**  `ps3tc_fifo_wrap_stats(&wraps, &stall_us,
   &max_stall_us)` in `<cell/gcm/ps3tc_fifo_wrap.h>` reports how many times
-  the command buffer wrapped and how long the PPU waited inside the wrap
-  for the RSX to catch up, in total and at most once
-  (`ps3tc_fifo_wrap_stats_reset()` starts over).  A large stall total in a
-  frame means the frame is waiting for the GPU, not for PPU work.
+  the command buffer wrapped and the elapsed wall-clock time spent inside
+  the wrap callback, in total and at most once
+  (`ps3tc_fifo_wrap_stats_reset()` starts over).  The time includes waiting
+  for the RSX to consume the lap, the callback's sleeps and scheduling, so
+  a large total shows the PPU ran ahead of the command stream rather than
+  proving a GPU bottleneck.
 
 ### Changed
 

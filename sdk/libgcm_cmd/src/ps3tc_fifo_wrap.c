@@ -26,6 +26,14 @@
  * timebase ticks, converted when read. */
 static uint64_t wrap_count, wrap_ticks, wrap_max_ticks;
 
+/* Timebase ticks to microseconds without overflowing: ticks * 1000000
+ * alone wraps past about 1.8e13 ticks (some 64 hours of accumulated wait at
+ * 79.8 MHz). */
+static uint64_t ticks_to_us(uint64_t ticks, uint64_t hz)
+{
+    return (ticks / hz) * 1000000ull + (ticks % hz) * 1000000ull / hz;
+}
+
 static void ps3tc_fifo_sync(void *arg)
 {
     (void)arg;
@@ -98,9 +106,9 @@ void ps3tc_fifo_wrap_stats(uint64_t *wraps, uint64_t *stall_us, uint64_t *max_st
     if (wraps)
         *wraps = wrap_count;
     if (stall_us)
-        *stall_us = hz ? wrap_ticks * 1000000ull / hz : 0;
+        *stall_us = hz ? ticks_to_us(wrap_ticks, hz) : 0;
     if (max_stall_us)
-        *max_stall_us = hz ? wrap_max_ticks * 1000000ull / hz : 0;
+        *max_stall_us = hz ? ticks_to_us(wrap_max_ticks, hz) : 0;
 }
 
 void ps3tc_fifo_wrap_stats_reset(void)
