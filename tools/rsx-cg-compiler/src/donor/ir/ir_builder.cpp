@@ -3674,11 +3674,27 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // pre-loop value nothing defines.  Local to an iteration when the region
     // never reads the pre-loop value; else refused.
     std::vector<std::string> iterationLocal;
+    // A uniform member READ in the body (`material.Ks` as a helper argument)
+    // leaves a cached binding of its own load: not a write.  Such names are
+    // dropped after the loop, so a later read loads the uniform again.
+    auto isUniformReadCache = [&](const std::string& name, IRValueID v) {
+        for (size_t i = beginIndex; i < block->instructions.size(); ++i) {
+            const IRInstruction* ip = block->instructions[i].get();
+            if (ip->result == v)
+                return ip->op == IROp::LoadUniform && ip->targetName == name;
+        }
+        return false;
+    };
+    std::vector<std::string> uniformReadCaches;
     for (const auto& kv : nameToValue_) {
         const auto preIt = pre.names.find(kv.first);
         const bool carried = std::any_of(carries.begin(), carries.end(),
             [&](const Carry& c) { return c.name == kv.first; });
         if (carried || (preIt != pre.names.end() && preIt->second == kv.second)) continue;
+        if (preIt == pre.names.end() && isUniformReadCache(kv.first, kv.second)) {
+            uniformReadCaches.push_back(kv.first);
+            continue;
+        }
         const std::string what = writable(kv.first);
         if (!what.empty()) {
             blockDeclared_.pop_back();
@@ -3978,6 +3994,8 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         loopPoison_.insert(poison);
         nameToValue_[name] = poison;
     }
+    for (const std::string& name : uniformReadCaches)
+        nameToValue_.erase(name);
     blockDeclared_.pop_back();
     if (declares) exitBlockBinding(varName, outer);
     return true;

@@ -28,7 +28,8 @@ ev.branches_selftest()
 ev.indexed_constants_selftest()
 f32 = lambda v: struct.unpack('>f', struct.pack('>f', v))[0]
 NL = chr(10)
-H = 'uniform float n; uniform float4 k[8]; uniform float4 j[8]; uniform float4 u[4]; uniform float m; uniform float4 f; uniform float g;' + NL
+H = ('uniform float n; uniform float4 k[8]; uniform float4 j[8]; uniform float4 u[4]; uniform float m; uniform float4 f; uniform float g;' + NL +
+     'struct Mat { float4 Ks; float sh; }; uniform Mat material;' + NL)
 M = 'float4 main(float4 p : POSITION) : POSITION { '
 add = lambda a, b: [x + y for x, y in zip(a, b)]
 sub = lambda a, b: [x - y for x, y in zip(a, b)]
@@ -79,6 +80,14 @@ def e_arms(n, p, U):
     if U['g'][0] > 0:
         return e_sum(n, p, U)
     return [x - 1 for x in p]
+def e_member_arg(n, p, U):
+    s = p
+    for i in trips(n): s = add(s, add(sc(U['Ks'], U['sh'][0]), U['k'][i]))
+    return s
+def e_member_read(n, p, U):
+    s = p
+    for i in trips(n): s = add(s, sc(U['k'][i], U['sh'][0]))
+    return s
 def e_float(n, p, U):
     s = p
     for i in trips(n): s = add(sc(s, 0.5), U['k'][i])
@@ -104,6 +113,13 @@ ROWS = [
     # Else arm, nested if, and the loop inside an inlined helper.
     ('arms_and_helper', 'float4 h(float4 s) { for (int i = 0; i < n; ++i) s += k[i]; return s; }' + NL + M +
      'float4 s = p; if (f.x != 0) { s = s * 2; } else { if (g > 0) s = h(s); else s = s - 1; } return s; }', e_arms),
+    # A uniform struct member read in the body through an inlined helper,
+    # as an argument or inside the helper (PSGL's fixed pipeline passes
+    # material.Ks): a read, not a write of the uniform.
+    ('uniform_member_arg', 'float4 hm(float4 Ks, float t) { return Ks * t; }' + NL + M +
+     'float4 s = p; for (int i = 0; i < n; ++i) s += hm(material.Ks, material.sh) + k[i]; return s; }', e_member_arg),
+    ('uniform_member_read', 'float4 hr(float4 v) { return v * material.sh; }' + NL + M +
+     'float4 s = p; for (int i = 0; i < n; ++i) s += hr(k[i]); return s; }', e_member_read),
     ('float_induction', M + 'float4 s = p; for (float i = 0; i < n; i += 1) s = s * 0.5 + k[int(i)]; return s; }', e_float),
 ]
 NS = [0, 1, 2, 2.5, 3, 5, 7.9, 8, -1]
@@ -138,12 +154,15 @@ def judge(blob, fn, seed):
              'u': [[f32(rnd.uniform(-2, 2)) for _ in range(4)] for _ in range(4)],
              'm': [f32(rnd.choice([0, 1, 2]) + 0.25), 0, 0, 0],
              'f': [float(rnd.choice([0, 1])), 0, 0, 0],
-             'g': [float(rnd.choice([-1, 1])), 0, 0, 0]}
+             'g': [float(rnd.choice([-1, 1])), 0, 0, 0],
+             'Ks': [f32(rnd.uniform(-2, 2)) for _ in range(4)],
+             'sh': [f32(rnd.uniform(-2, 2)), 0, 0, 0]}
         if fn is e_untaken:
             # Only states that do not enter the divergent loop.
             U['f'] = [0.0 if n > 0 else float(rnd.choice([0, 1])), 0, 0, 0]
         p = [f32(rnd.uniform(-1, 1)) for _ in range(4)]
-        uni = {'n': [n, 0, 0, 0], 'm': U['m'], 'f': U['f'], 'g': U['g']}
+        uni = {'n': [n, 0, 0, 0], 'm': U['m'], 'f': U['f'], 'g': U['g'],
+               'material.Ks': U['Ks'], 'material.sh': U['sh']}
         for a in ('k', 'j', 'u'):
             uni.update({'%s[%d]' % (a, i): v for i, v in enumerate(U[a])})
         got = ev.evaluate(blob, uni, inputs={0: p}, binary32=True, predication=True,
