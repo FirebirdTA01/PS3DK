@@ -3253,8 +3253,32 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // own standalone IR function is never lowered and keeps its old path.
     if (module_->shaderStage != ShaderStage::Fragment || hardwareLoopDepth_ > 0 ||
         !currentFunction_ || !currentFunction_->isEntryPoint ||
-        !stmt->init || !stmt->condition || !stmt->increment || !stmt->body ||
-        stmtContainsBreakOrContinue(stmt->body.get()))
+        !stmt->init || !stmt->condition || !stmt->increment || !stmt->body)
+        return false;
+    // One `if (c) break;` may close the body (VolumeTextureShaderFp): at that
+    // point every carry already holds this iteration's final value, so the
+    // exit state IS the latch state - the carries (all but the induction)
+    // are written back, then BRK, then the increment.  Any other break or
+    // continue keeps the refusal (no predicated exit snapshot yet).
+    IfStmt* tailBreak = nullptr;
+    if (stmt->body->kind == StmtKind::Block) {
+        auto* blk = static_cast<BlockStmt*>(stmt->body.get());
+        if (!blk->statements.empty() && blk->statements.back() &&
+            blk->statements.back()->kind == StmtKind::If) {
+            auto* last = static_cast<IfStmt*>(blk->statements.back().get());
+            StmtNode* then = last->thenBranch.get();
+            if (then && then->kind == StmtKind::Block) {
+                auto* tb = static_cast<BlockStmt*>(then);
+                then = tb->statements.size() == 1 ? tb->statements[0].get() : nullptr;
+            }
+            if (!last->elseBranch && then && then->kind == StmtKind::Break && last->condition)
+                tailBreak = last;
+        }
+        if (tailBreak)
+            for (size_t k = 0; k + 1 < blk->statements.size(); ++k)
+                if (stmtContainsBreakOrContinue(blk->statements[k].get())) return false;
+    }
+    if (!tailBreak && stmtContainsBreakOrContinue(stmt->body.get()))
         return false;
 
     // The induction variable, from the init.
@@ -3386,7 +3410,34 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         brk->guardIsNegated = true;   // break where the source condition is FALSE
         block->addInstruction(std::move(brk));
     }
-    buildStmt(stmt->body.get());
+    IRValueID tailBreakCond = InvalidIRValue;
+    size_t tailBreakIndex = 0;
+    if (!tailBreak) {
+        buildStmt(stmt->body.get());
+    } else {
+        auto* blk = static_cast<BlockStmt*>(stmt->body.get());
+        const ScopeState preBody = scope_;
+        blockDeclared_.emplace_back();
+        for (size_t k = 0; k + 1 < blk->statements.size() && !hasErrors(); ++k)
+            buildStmt(blk->statements[k].get());
+        bool assigns = false;
+        if (!hasErrors() && currentBlock_ == block) {
+            const auto beforeBreak = scope_.fold();
+            tailBreakCond = buildExpr(tailBreak->condition.get());
+            tailBreakCond = normalizeCondition(tailBreak->condition.get(), tailBreakCond);
+            assigns = scope_.fold() != beforeBreak;
+            tailBreakIndex = block->instructions.size();
+        }
+        const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
+        blockDeclared_.pop_back();
+        for (const auto& n : declared)
+            exitBlockBinding(n, preBody);
+        if (assigns) {
+            --hardwareLoopDepth_;
+            blockDeclared_.pop_back();
+            return refuse("the break condition assigns a variable");
+        }
+    }
     if (!hasErrors() && currentBlock_ == block && !block->hasTerminator())
         buildExpr(stmt->increment.get());
     --hardwareLoopDepth_;
@@ -3695,7 +3746,31 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         const auto keepEnd = std::remove_if(first, last, [&](const std::unique_ptr<IRInstruction>& ip) {
             return ip->op == IROp::LoopCarry && folded.count(ip->result);
         });
+        const size_t removed = static_cast<size_t>(last - keepEnd);
         insts.erase(keepEnd, last);
+        if (tailBreak) tailBreakIndex -= removed;
+    }
+    // The tail break: every carry but the induction is written back, then
+    // BRK where the condition holds; the induction alone is written back by
+    // the final latch, after the increment.
+    if (tailBreak) {
+        std::vector<IRValueID> beforeBreak, induction;
+        for (size_t k = 0; k + 1 < latch.size(); k += 2) {
+            const Carry* c = nullptr;
+            for (const Carry& kc : kept) if (kc.carry == latch[k]) c = &kc;
+            auto& dst = (c && c->name == varName) ? induction : beforeBreak;
+            dst.push_back(latch[k]);
+            dst.push_back(latch[k + 1]);
+        }
+        latch = induction;
+        auto first = std::make_unique<IRInstruction>(IROp::LoopLatch, InvalidIRValue, IRTypeInfo::Void());
+        first->operands = beforeBreak;
+        auto brk = std::make_unique<IRInstruction>(IROp::LoopBreakIf, InvalidIRValue, IRTypeInfo::Void());
+        brk->addOperand(tailBreakCond);
+        brk->guardIsNegated = false;   // break where the source condition is TRUE
+        auto& insts = block->instructions;
+        insts.insert(insts.begin() + static_cast<std::ptrdiff_t>(tailBreakIndex), std::move(brk));
+        insts.insert(insts.begin() + static_cast<std::ptrdiff_t>(tailBreakIndex), std::move(first));
     }
     auto latchInst = std::make_unique<IRInstruction>(IROp::LoopLatch, InvalidIRValue, IRTypeInfo::Void());
     latchInst->operands = latch;

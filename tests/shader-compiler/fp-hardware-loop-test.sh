@@ -7,6 +7,11 @@
 # 255-trip cap the measured shape implies (bounds 254, 255, 256 and 300 are
 # the boundary controls) and zero-trip loops.
 #
+# One `if (c) break;` may close the body: every carry but the induction is
+# written back, BRK fires where c holds, then the induction steps - so after a
+# break the carries hold the breaking iteration's values and the induction is
+# not stepped (the taken / untaken rows, including a swap).
+#
 # Carried variables keep their value across iterations and after the loop;
 # the latch is a parallel assignment (the swap row); a variable the body
 # writes before reading is local to an iteration; loop invariants stay live.
@@ -16,7 +21,8 @@
 # variable only one arm assigns that had no value before the loop is refused
 # (the register holds the previous iteration's value, not the zero a
 # straight-line program reads).  Outside the admitted shape the program is
-# refused by name: a break or a nested unexpanded loop in the body, a variable
+# refused by name: a break anywhere but as the body's last statement, a
+# nested unexpanded loop in the body, a variable
 # read in the body before it has a value, an iteration-local variable read
 # after the loop, and writes to an out parameter or a file-scope variable.
 #
@@ -36,12 +42,15 @@ from fp_sources import instructions, ucode_words
 f32 = lambda v: struct.unpack('>f', struct.pack('>f', v))[0]
 H = 'float4 main(float4 t : TEXCOORD0) : COLOR { '
 
-def run_loop(start, bound, body, carries, cmp='<', step=1.0, cap=255):
+def run_loop(start, bound, body, carries, cmp='<', step=1.0, cap=255, tail_break=None):
     i = f32(start); trips = 0
     while trips < cap:
         if not {'<': i < bound, '<=': i <= bound, '>': i > bound, '>=': i >= bound}[cmp]:
             break
-        carries = body(i, carries); i = f32(i + step); trips += 1
+        carries = body(i, carries)
+        if tail_break is not None and tail_break(i, carries):
+            break                     # the induction is not stepped
+        i = f32(i + step); trips += 1
     return i, carries
 
 def sum_(t):
@@ -106,6 +115,21 @@ def sequential(t):
 def assign_invariant(t):
     _, (a,) = run_loop(0.0, t[0], lambda i, c: (t[1],), (7.0,))
     return [a, t[1], 0.0, 1.0]
+def tail_break_sum(t):
+    i, (s,) = run_loop(0.0, t[0], lambda i, c: (f32(c[0] + t[1]),), (0.0,),
+                       tail_break=lambda i, c: c[0] > t[2])
+    return [s, i, 0.0, 1.0]
+def tail_break_swap(t):
+    i, (a, b) = run_loop(0.0, t[0], lambda i, c: (c[1], c[0]), (t[1], t[3]),
+                         tail_break=lambda i, c: i >= t[2])
+    return [a, b, i, 1.0]
+def tail_break_constant(t):
+    def body(i, c):
+        acc, aacc = c
+        smp = f32(f32(t[1] + f32(i * 0.0625)) * t[3])
+        return (f32(acc + f32(f32(1.0 - aacc) * smp)), f32(aacc + smp))
+    i, (acc, aacc) = run_loop(0.0, 50.0, body, (0.0, 0.0), tail_break=lambda i, c: c[1] > t[2])
+    return [acc, aacc, i, 1.0]
 def helper_body(t):
     i, (s,) = run_loop(0.0, t[0], lambda i, c: (f32(c[0] + f32(i * t[2])),), (0.0,))
     return [s, 0.0, 0.0, 1.0]
@@ -140,6 +164,18 @@ VALUE = [
     # unchanged value, not a dropped carry (review: codex, LOOP3).
     ('assign_invariant', H + 'float a = 7, b = t.y; for (float i = 0; i < t.x; i++) a = b; '
                          'return float4(a, b, 0, 1); }', assign_invariant),
+    # A tail break, taken (s > t.z inside the trip count) and untaken.
+    ('tail_break', H + 'float s = 0; float i; for (i = 0; i < t.x; i++) { s += t.y; if (s > t.z) break; } '
+                   'return float4(s, i, 0, 1); }', tail_break_sum),
+    # A swap with a tail break: the breaking iteration's swap is kept and the
+    # induction is not stepped (review: codex R2, swap-at-break control).
+    ('tail_break_swap', H + 'float a = t.y, b = t.w; float i; for (i = 0; i < t.x; i++) { float k = a; a = b; b = k; '
+                        'if (i >= t.z) break; } return float4(a, b, i, 1); }', tail_break_swap),
+    # The SDK SmokeEffect shape: a constant bound (50) and an accumulation that
+    # stops early (texture-free here).
+    ('tail_break_constant', H + 'float acc = 0, aacc = 0; int k; for (k = 0; k < 50; k++) { '
+                            'float smp = (t.y + k * 0.0625) * t.w; acc += (1.0 - aacc) * smp; aacc += smp; '
+                            'if (aacc > t.z) break; } return float4(acc, aacc, k, 1); }', tail_break_constant),
     # A swap under a condition: the select join, then the parallel latch.
     ('swap_if', H + 'float a = t.y, b = t.w; for (float i = 0; i < t.x; i++) { if (i > t.z) { float k = a; a = b; b = k; } } '
                 'return float4(a, b, 0, 1); }', swap_if),
@@ -174,6 +210,11 @@ REFUSE = [
                               ''.join('float k%d = min(k%d, k%d); ' % (n, n - 1, n - 1) for n in range(1, 41))) +
                               'float s = 0; for (float i = 0; i < k40; i += 0.5) s += t.y; return float4(s, 0, 0, 1); }',
      'more than 255 iterations'),
+    ('break_not_last', H + 'float s = 0; for (float i = 0; i < t.x; i++) { if (s > t.z) break; s += t.y; } '
+                       'return float4(s, 0, 0, 1); }', 'back-edge'),
+    ('break_condition_assigns', H + 'float n = t.x; float s = 0; for (float i = 0; i < 4; i++) { s += 1; '
+                                'if ((n = n - 1) < 0) break; } return float4(s, n, 0, 1); }',
+     'the break condition assigns a variable'),
     ('constant_bound_induction_write', H + 'float s = 0; for (float i = 0.0; i < 4.0; i += 0.5) { s += t.y; i += 0.5; } '
                                        'return float4(s, 0, 0, 1); }', 'writes its induction variable'),
     ('out_parameter', 'void f(float4 t, out float r) { r = 0; for (float i = 0; i < t.x; i++) r += 1; }' + chr(10) +
@@ -209,8 +250,9 @@ for name, src, want_fn in VALUE:
             elif op == 0x00:
                 brks += 1
     want_loops = 2 if name == 'sequential' else 1
-    if (loops, brks) != (want_loops, want_loops):
-        fails.append('%s: %d LOOP {255,0,1} and %d BRK, want %d of each' % (name, loops, brks, want_loops))
+    want_brks = want_loops + (1 if name.startswith('tail_break') else 0)
+    if (loops, brks) != (want_loops, want_brks):
+        fails.append('%s: %d LOOP {255,0,1} and %d BRK, want %d and %d' % (name, loops, brks, want_loops, want_brks))
     wrong = 0
     for t in TS:
         t = [f32(x) for x in t]
