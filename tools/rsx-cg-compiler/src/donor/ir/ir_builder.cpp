@@ -23,13 +23,6 @@ std::optional<float> angleConversionScale(const std::string& name)
     return std::nullopt;
 }
 
-// Broadcast a one-element vector to n copies of that element.  Written as
-// v.assign(n, v[0]) this is undefined behaviour - assign's value may not be a
-// reference into the container - and the result depends on the standard
-// library: libstdc++ copies the value first, libc++ reads it after clearing
-// the storage and broadcasts garbage, which made a libc++-built compiler
-// refuse `uniform float4 c = 0.5;` (tests/shader-compiler/
-// cross-stl-determinism-test.sh).  Copy the element first.
 // A sampler member of a file-scope uniform struct keeps its binding
 // (`struct S { sampler2D tex : TEXUNIT3; }; uniform S s[2];`): measured, the
 // reference records "s[k].tex" with semantic TEXUNIT3 on unit 3, read or not.
@@ -47,6 +40,13 @@ void carrySamplerFieldBinding(IRGlobal& member, const StructField& field)
     }
 }
 
+// Broadcast a one-element vector to n copies of that element.  Written as
+// v.assign(n, v[0]) this is undefined behaviour - assign's value may not be a
+// reference into the container - and the result depends on the standard
+// library: libstdc++ copies the value first, libc++ reads it after clearing
+// the storage and broadcasts garbage, which made a libc++-built compiler
+// refuse `uniform float4 c = 0.5;` (tests/shader-compiler/
+// cross-stl-determinism-test.sh).  Copy the element first.
 template <class V>
 void broadcastFirst(V& v, size_t n)
 {
