@@ -167,6 +167,13 @@ REFUSE = [
     # codex LOOP4): abs(-300.0) with step 0.5 is 600 iterations.
     ('constant_expression_over_255', H + 'float s = 0; for (float i = 0; i < abs(-300.0); i += 0.5) s += t.y; '
                                      'return float4(s, 0, 0, 1); }', 'more than 255 iterations'),
+    # A constant bound behind a 40-level shared DAG (k[n] = min(k[n-1], k[n-1]))
+    # is classified once per value, not once per path (review: codex,
+    # LOOP5-DAG): a named refusal well inside the subprocess timeout.
+    ('constant_dag_over_255', H.replace(' { ', ' { float k0 = abs(-300.0); ' +
+                              ''.join('float k%d = min(k%d, k%d); ' % (n, n - 1, n - 1) for n in range(1, 41))) +
+                              'float s = 0; for (float i = 0; i < k40; i += 0.5) s += t.y; return float4(s, 0, 0, 1); }',
+     'more than 255 iterations'),
     ('constant_bound_induction_write', H + 'float s = 0; for (float i = 0.0; i < 4.0; i += 0.5) { s += t.y; i += 0.5; } '
                                        'return float4(s, 0, 0, 1); }', 'writes its induction variable'),
     ('out_parameter', 'void f(float4 t, out float r) { r = 0; for (float i = 0; i < t.x; i++) r += 1; }' + chr(10) +
@@ -181,8 +188,11 @@ fails = []
 def compile_one(name, src):
     s, o = work / (name + '.cg'), work / (name + '.bin')
     s.write_text(src + chr(10))
-    p = subprocess.run([compiler, '-p', 'sce_fp_rsx', '-e', 'main', '--emit-container', str(o), str(s)],
-                       capture_output=True, text=True, timeout=60)
+    try:
+        p = subprocess.run([compiler, '-p', 'sce_fp_rsx', '-e', 'main', '--emit-container', str(o), str(s)],
+                           capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        p = subprocess.CompletedProcess([], 124, '', 'TIMEOUT after 60 s')
     return p, o
 for name, src, want_fn in VALUE:
     p, o = compile_one(name, src)

@@ -3540,8 +3540,21 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             if (bp)
                 for (const auto& ip : bp->instructions)
                     if (ip && ip->result != InvalidIRValue) defs[ip->result] = ip.get();
-        std::function<Kind(IRValueID, double&, int)> classify;
-        classify = [&](IRValueID id, double& out, int depth) -> Kind {
+        // Memoised per IR id: a shared constant DAG (`min(k, k)` repeated)
+        // would otherwise be walked once per path - exponential work
+        // (review: codex LOOP5-DAG).  Each id is classified once.
+        std::unordered_map<IRValueID, std::pair<Kind, double>> memo;
+        std::function<Kind(IRValueID, double&, int)> classifyOnce;
+        auto classify = [&](IRValueID id, double& out, int depth) -> Kind {
+            const auto hit = memo.find(id);
+            if (hit != memo.end()) { out = hit->second.second; return hit->second.first; }
+            double v = 0;
+            const Kind k = classifyOnce(id, v, depth);
+            memo.emplace(id, std::make_pair(k, v));
+            out = v;
+            return k;
+        };
+        classifyOnce = [&](IRValueID id, double& out, int depth) -> Kind {
             if (depth > 64) return Kind::Unknown;
             if (const auto* k = dynamic_cast<const IRConstant*>(currentFunction_->getValue(id))) {
                 if (std::holds_alternative<float>(k->value)) { out = std::get<float>(k->value); return Kind::Constant; }
