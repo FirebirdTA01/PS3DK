@@ -572,10 +572,12 @@ VpContainerResult emitVertexContainerImpl(
     // members (`IN_global.video_size`, ...); the reference writes no record
     // for the struct itself, and it takes no register.
     const auto isStructUniformParent = [&](const IRGlobal& g) {
-        const std::string prefix = g.name + ".";
+        // An array of structs likewise ("light[0].position", ...).
+        const std::string prefix = g.name + ".", element = g.name + "[0].";
         return std::any_of(module.globals.begin(), module.globals.end(), [&](const IRGlobal& o) {
             return o.storage == StorageQualifier::Uniform &&
-                   o.name.compare(0, prefix.size(), prefix) == 0; });
+                   (o.name.compare(0, prefix.size(), prefix) == 0 ||
+                    o.name.compare(0, element.size(), element) == 0); });
     };
 
     // A struct member stored through an OUT struct parameter is that

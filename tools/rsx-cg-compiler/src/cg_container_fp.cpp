@@ -709,6 +709,18 @@ ContainerResult emitFragmentContainerImpl(
             if (g.type.isArray() && !isSamplerIRType(g.type.baseType))
             {
                 const unsigned count = rsx_cg::fpUniformSlotCount(g.type);
+                // An array of STRUCTS is declared through its flattened
+                // element members ("s[0].a", ...); the reference writes no
+                // "s[k]" record.  Its slots still count, as the lowering
+                // numbered them.
+                const std::string elementPrefix = g.name + "[0].";
+                if (std::any_of(module.globals.begin(), module.globals.end(), [&](const IRGlobal& o) {
+                        return o.storage == StorageQualifier::Uniform &&
+                               o.name.compare(0, elementPrefix.size(), elementPrefix) == 0; }))
+                {
+                    globalSlotCursor += count;
+                    continue;
+                }
                 for (unsigned k = 0; k < count; ++k)
                 {
                     const unsigned slot = globalSlotCursor++;
@@ -891,10 +903,12 @@ ContainerResult emitFragmentContainerImpl(
             // A struct-typed uniform is declared through its flattened
             // members (`IN_global.video_size`, ...); the reference writes no
             // record for the struct itself.  Its slot still counted above.
-            const std::string memberPrefix = g.name + ".";
+            // An array of structs likewise ("light[0].position", ...).
+            const std::string memberPrefix = g.name + ".", elementPrefix = g.name + "[0].";
             if (std::any_of(module.globals.begin(), module.globals.end(), [&](const IRGlobal& o) {
                     return o.storage == StorageQualifier::Uniform &&
-                           o.name.compare(0, memberPrefix.size(), memberPrefix) == 0; }))
+                           (o.name.compare(0, memberPrefix.size(), memberPrefix) == 0 ||
+                            o.name.compare(0, elementPrefix.size(), elementPrefix) == 0); }))
                 continue;
             params.push_back(d);
         }

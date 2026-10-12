@@ -1409,6 +1409,40 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                     flatten(flatten, *fields, varDecl->name);
                 }
             }
+            // A uniform ARRAY of structs flattens per element and member,
+            // "light[3].position", the names and order the reference lists
+            // (element-major, then field order).  An element member read by
+            // a constant index is then an ordinary uniform.
+            if (varDecl->storage == StorageQualifier::Uniform && varDecl->type &&
+                varDecl->type->arraySize > 0 && varDecl->type->elementType &&
+                varDecl->type->elementType->baseType == BaseType::Struct &&
+                !varDecl->type->elementType->isArray())
+            {
+                if (const std::vector<StructField>* fields = getStructFields(varDecl->type->elementType.get()))
+                {
+                    const auto flatten = [&](const auto& self, const std::vector<StructField>& members,
+                                             const std::string& prefix) -> void {
+                        for (const auto& field : members)
+                        {
+                            const std::string qualifiedName = prefix + "." + field.name;
+                            if (field.type && field.type->baseType == BaseType::Struct && !field.type->isArray())
+                                if (const auto* inner = getStructFields(field.type.get()))
+                                {
+                                    self(self, *inner, qualifiedName);
+                                    continue;
+                                }
+                            IRGlobal memberGlobal;
+                            memberGlobal.name = qualifiedName;
+                            memberGlobal.type = getIRType(field.type.get());
+                            memberGlobal.valueId = module_->allocateGlobalId();
+                            memberGlobal.storage = StorageQualifier::Uniform;
+                            module_->addGlobal(memberGlobal);
+                        }
+                    };
+                    for (int k = 0; k < varDecl->type->arraySize; ++k)
+                        flatten(flatten, *fields, varDecl->name + "[" + std::to_string(k) + "]");
+                }
+            }
         }
         else if (decl->kind == DeclKind::Buffer)
         {
@@ -7888,6 +7922,51 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
             identityPrefixSwizzleBase_[currentFunction_->nextValueId - 1] = objectValue;
 
         return currentFunction_->nextValueId - 1;
+    }
+
+    // A member of an ELEMENT of a uniform struct array by a constant index
+    // (`texunit[2].matrix`, `light[1].a.b`): the flattened uniform
+    // "texunit[2].matrix".  A run-time index is not lowered yet.
+    {
+        std::vector<std::string> members{expr->member};
+        ExprNode* cur = expr->object.get();
+        while (cur->kind == ExprKind::MemberAccess && !static_cast<MemberAccessExpr*>(cur)->isSwizzle)
+        {
+            members.push_back(static_cast<MemberAccessExpr*>(cur)->member);
+            cur = static_cast<MemberAccessExpr*>(cur)->object.get();
+        }
+        auto* index = cur->kind == ExprKind::Index ? static_cast<IndexExpr*>(cur) : nullptr;
+        auto* base = index && index->array->kind == ExprKind::Identifier
+                         ? static_cast<IdentifierExpr*>(index->array.get()) : nullptr;
+        const IRGlobal* array = base && !nameToValue_.count(base->name) ? module_->findGlobal(base->name) : nullptr;
+        std::string path;
+        for (auto it = members.rbegin(); it != members.rend(); ++it) path += "." + *it;
+        if (array && array->storage == StorageQualifier::Uniform &&
+            module_->findGlobal(base->name + "[0]" + path))
+        {
+            const IRValueID indexValue = buildExpr(index->index.get());
+            int32_t k = 0;
+            if (indexValue == InvalidIRValue || !extractIntScalar(*currentFunction_, indexValue, k))
+            {
+                error(expr->loc, "a run-time index into the uniform struct array '" + base->name +
+                      "' is not lowered yet (struct-array-dynamic-index)");
+                return InvalidIRValue;
+            }
+            const std::string name = base->name + "[" + std::to_string(k) + "]" + path;
+            const IRGlobal* member = module_->findGlobal(name);
+            if (!member)
+            {
+                error(expr->loc, "'" + name + "' is out of range or not a uniform leaf (struct-array-member)");
+                return InvalidIRValue;
+            }
+            auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
+                currentFunction_->allocateValueId(), getExprType(expr));
+            inst->targetName = name;
+            inst->uniformSource = member->valueId;
+            const IRValueID id = inst->result;
+            currentBlock_->addInstruction(std::move(inst));
+            return id;
+        }
     }
 
     // Struct member access - build a composite name
