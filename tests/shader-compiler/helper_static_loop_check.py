@@ -4,7 +4,8 @@
 Mutable/dynamic bounds, dependency writes and control-flow exits are reference
 accepts but intentionally refused here - except the FRAGMENT rows a hardware
 loop now compiles (FP-LOOP slice 1), which are judged by value ("accept": TEX0
-inputs and the colour each must produce, on fp_eval). The existing 64-trip
+inputs and the colour each must produce, on fp_eval), and the VERTEX rows a
+branch loop compiles (VP-CF; "accept_vp": POSITION.x, uniform N, COL0). The existing 64-trip
 bound is OUR resource limit, not a reference unroll heuristic. All sources are
 independent.
 """
@@ -55,9 +56,21 @@ def main():
                     got=fp_eval.evaluate(data,{'TEX0':[float(v) for v in inputs]})
                     assert got==[float(v) for v in want],f'{name}: TEX0={inputs} gave {got}, want {want}'
                 accepts+=1
+            elif 'accept_vp' in row:
+                # A VERTEX helper loop with a run-time bound is a branch loop
+                # (VP-CF): judged by value - POSITION.x, the uniform N, COL0.
+                sys.path.insert(0,str(Path(__file__).resolve().parent))
+                import vp_pow_vector_check as vp_check
+                data=compile_one(name,row['source'],row['profile'])
+                for x,n,want in row['accept_vp']:
+                    out=vp_check.evaluate(data,{'N':[float(n),0.,0.,0.]},inputs={0:[float(x),.3,-.2,1.]},binary32=True,
+                                          predication=True,indexed_constants=True,branches=True,max_steps=20000)
+                    got=out.get(1)
+                    assert got is not None and all(abs(a-b)<=1e-6*max(1.,abs(b)) for a,b in zip(got,want)),f'{name}: x={x} N={n} gave {got}, want {want}'
+                accepts+=1
             else:
                 compile_one(name,row['source'],row['profile'],row['refusal']);refusals+=1
-    assert (twins,refusals,accepts)==(32,11,3),(twins,refusals,accepts)
+    assert (twins,refusals,accepts)==(32,9,5),(twins,refusals,accepts)
     print(f'PASS ({twins} strict twins, {accepts} hardware-loop rows by value, {refusals} named helper-loop gaps)')
 
 if __name__=='__main__':

@@ -145,23 +145,30 @@ def main():
                 ('negative-zero-local-gap', 'float start=-0.0;for(float i=start;i<1;i+=1.0){a=t/i;}', 'back-edge'),
                 ('resource-cap', 'for(float i=0.0;i<65.0;i+=1.0){a+=t;}', 'hardware-loop'),
             ):
-                if profile == 'sce_fp_rsx' and label in hardware_loop_values:
+                if label in hardware_loop_values:
+                    # The fragment hardware loop, and (VP-CF) the vertex
+                    # branch loop: the same rows, judged by the same values.
                     data = compile_one(profile + '-' + label, body, profile)
                     for t in ([-.5, .25, 1.5, 2.], [0., -.5, .25, 1.], [.25, 1.5, -.5, .5]):
-                        got = fp_eval.evaluate(data, {'TEX0': t})
+                        if profile == 'sce_fp_rsx':
+                            got = fp_eval.evaluate(data, {'TEX0': t})
+                        else:
+                            got = vp_eval.evaluate(data, {}, inputs={0: [0., 0., 0., 1.], 8: t}, binary32=True,
+                                                    predication=True, indexed_constants=True,
+                                                    branches=True, max_steps=20000).get(7)
                         want = hardware_loop_values[label](t)
-                        assert same(got, want), (profile + '-' + label, t, got, want)
+                        assert got is not None and same(got, want), (profile + '-' + label, t, got, want)
                         value_checks += 1
                     hardware_loops += 1
                     continue
                 # These reference-accepted forms remain named gaps, not reference refusals.
                 # A FRAGMENT constant-bound loop whose body writes its induction
                 # is refused by the hardware-loop region by name.
-                if profile == 'sce_fp_rsx' and label == 'induction-write':
+                if label == 'induction-write':
                     diagnostic = 'writes its induction variable'
                 # An unsigned constant start (-1u wraps) is not evaluated by
                 # the region's trip-count guard, so it is refused by name.
-                if profile == 'sce_fp_rsx' and label == 'unsigned-bound-gap':
+                if label == 'unsigned-bound-gap':
                     diagnostic = 'not evaluated'
                 compile_one(profile + '-' + label, body, profile, refusal=diagnostic)
                 refusals += 1
@@ -172,8 +179,8 @@ def main():
             body = f'{ty} size=4;{ty} i;for(i=-size;i<=size;i+=2){{{fetch}}}'
             explicit = ''.join('{' + ty + ' i=' + str(i) + ('.0;' if ty == 'float' else ';') + fetch + '}' for i in values)
             twin('texture-local-' + ty, body, explicit, 'sce_fp_rsx', prefix='uniform sampler2D tex;')
-    assert (count, refusals, hardware_loops) == (36, 18, 4), (count, refusals, hardware_loops)
-    assert value_checks == 36, value_checks
+    assert (count, refusals, hardware_loops) == (36, 14, 8), (count, refusals, hardware_loops)
+    assert value_checks == 48, value_checks
     print(f'static-loop-expansion: PASS ({count} strict twins, {hardware_loops} hardware loops, '
           f'{refusals} named refusals, {value_checks} exact values)')
 

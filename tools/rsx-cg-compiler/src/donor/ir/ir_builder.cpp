@@ -3356,7 +3356,11 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
 {
     // Only into the entry (an inlined helper builds there too); a helper's
     // own standalone IR function is never lowered and keeps its old path.
-    if (module_->shaderStage != ShaderStage::Fragment || hardwareLoopDepth_ > 0 ||
+    // VP-CF S3 (VP-CF-DESIGN.md R2): a vertex program takes the same region,
+    // lowered to a branch loop (BRA to the exit when the test fails, BRA back
+    // at the end) instead of LOOP/BRK.  Its bound has no trip cap.
+    const bool vertexLoop = module_->shaderStage == ShaderStage::Vertex;
+    if ((module_->shaderStage != ShaderStage::Fragment && !vertexLoop) || hardwareLoopDepth_ > 0 ||
         !currentFunction_ || !currentFunction_->isEntryPoint ||
         !stmt->init || !stmt->condition || !stmt->increment || !stmt->body)
         return false;
@@ -3384,6 +3388,8 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
                 if (stmtContainsBreakOrContinue(blk->statements[k].get())) return false;
     }
     if (!tailBreak && stmtContainsBreakOrContinue(stmt->body.get()))
+        return false;
+    if (vertexLoop && tailBreak)
         return false;
 
     // The induction variable, from the init.
@@ -3796,11 +3802,16 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         double start = 0, bound = 0;
         const Kind startKind = classify(ind->init, start, 0);
         const Kind boundKind = classify(cmp->operands[1], bound, 0);
+        // UNKNOWN stays refused for a vertex loop too: a start or bound this
+        // evaluator cannot model (an unsigned wrap, `-1u`) is not lowered
+        // on a guess, whatever the trip cap.
         if (startKind == Kind::Unknown || boundKind == Kind::Unknown) {
             blockDeclared_.pop_back();
             return refuse("a loop start or bound built from constants that is not evaluated");
         }
-        if (startKind == Kind::Constant && boundKind == Kind::Constant)
+        // A vertex branch loop has no trip cap, but its induction must still
+        // advance only by the header's step (VP1: no other write to it).
+        if ((startKind == Kind::Constant && boundKind == Kind::Constant) || vertexLoop)
         {
             double step = 1;
             auto* inc = stmt->increment.get();
@@ -3823,7 +3834,8 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
                 nextDef->operands.size() == 2 && nextDef->operands[0] == ind->carry;
             if (!plainStep) {
                 blockDeclared_.pop_back();
-                return refuse("a constant-bound loop whose body writes its induction variable");
+                return refuse(vertexLoop ? "a vertex loop whose body writes its induction variable"
+                                         : "a constant-bound loop whose body writes its induction variable");
             }
             const bool floating = ind->type.baseType == IRType::Float32;
             auto holds = [&](double x) {
@@ -3836,7 +3848,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             };
             double v = floating ? static_cast<float>(start) : start;
             int trips = 0;
-            while (trips <= 255 && holds(v)) {
+            while (!vertexLoop && trips <= 255 && holds(v)) {
                 v = floating ? static_cast<double>(static_cast<float>(v + step)) : v + step;
                 ++trips;
             }

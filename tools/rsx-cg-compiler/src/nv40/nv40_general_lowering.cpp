@@ -810,7 +810,13 @@ private:
         unsigned version = 0;
         int stride = 1;       // the same index into vectors and matrices differs
         size_t   arlAt = 0;     // position in program_.instrs
+        // The loop-region generation the ARL was emitted in (VP-CF VP2): a
+        // carry's vreg has the same static write count before and inside a
+        // loop, but a different value every iteration, so an ARL is never
+        // reused or joined across a LoopBegin / LoopEnd.
+        unsigned region = 0;
     };
+    unsigned addressRegion_ = 0;
     std::vector<AddressLane> addressLanes_;
     std::unordered_map<IRValueID, int> valueWidth_;
     // CF-1a flatten state (general-path-discard).  Set only when the entry
@@ -3211,6 +3217,7 @@ private:
             marker.dst.writemask = 0;
             marker.loopCount = inst.componentIndex;
             program_.instrs.push_back(marker);
+            ++addressRegion_;
             return;
         }
         case IROp::LoopBreakIf:
@@ -4338,8 +4345,8 @@ private:
     // the latch writes the next value back.
     void lowerLoopCarry(const IRInstruction& inst)
     {
-        if (profile_ != GeneralProfile::Fragment || inst.operands.size() != 1) {
-            program_.diagnostics.push_back("nv40-general: a hardware loop is fragment-only");
+        if (inst.operands.size() != 1) {
+            program_.diagnostics.push_back("nv40-general: a loop carry without its initial value; refusing");
             program_.loweringFailed = true;
             return;
         }
@@ -4746,18 +4753,20 @@ private:
     void lowerIntToFloat(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
-        if (profile_ != GeneralProfile::Fragment) {
-            program_.diagnostics.push_back(
-                "nv40-general: VP int-to-float lowering deferred");
-            program_.loweringFailed = true;
-            return;
-        }
 
         VInstr mov;
         mov.op = VOp::Mov;
         mov.dst.index = define(inst.result);
         mov.dst.writemask = componentMask(inst.resultType);
         mov.srcs[0] = resolve(inst.operands[0]);
+        // A vertex program holds an int as an integral float (its ops are
+        // float ops on integral values), so the conversion is the value:
+        // `float(i + 1)` of a loop induction (VP-CF).  No fence: that is the
+        // fragment ftoi/itof pairing below.
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.instrs.push_back(mov);
+            return;
+        }
         // Measured itof probes contain the preceding ftoi and therefore
         // cannot distinguish "itof needs a fence" from "ftoi then read
         // needs one".  Keep the reference's conservative FENCBR until a
@@ -5505,7 +5514,8 @@ private:
             const AddressLane& al = addressLanes_[i];
             if (al.kind == index.kind && al.index == index.index &&
                 al.component == component && al.neg == index.neg &&
-                al.abs == index.abs && al.version == version && al.stride == stride) {
+                al.abs == index.abs && al.version == version && al.stride == stride &&
+                al.region == addressRegion_) {
                 lane = static_cast<int>(i);
                 break;
             }
@@ -5531,6 +5541,7 @@ private:
             al.abs = index.abs;
             al.version = version;
             al.stride = stride;
+            al.region = addressRegion_;
             // Join the ARL already loading this register, if there is one
             // and it targets the same address register.
             size_t joinAt = program_.instrs.size();
@@ -5538,6 +5549,7 @@ private:
                 for (const AddressLane& prev : addressLanes_) {
                     if (prev.stride == 1 && prev.kind == index.kind && prev.index == index.index &&
                         prev.neg == index.neg && prev.abs == index.abs &&
+                        prev.region == addressRegion_ &&
                         prev.arlAt < program_.instrs.size() &&
                         program_.instrs[prev.arlAt].op == VOp::Arl &&
                         program_.instrs[prev.arlAt].dst.index == addrReg) {
@@ -11973,12 +11985,67 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         return insn;
     };
 
+    // VP-CF S3: a loop region becomes branches.  LoopBegin is the head
+    // label; Brk writes the exit test into CC0.x (the fused comparison, or
+    // a MOV of the guard) and branches to the exit where the loop condition
+    // fails - the compare sits immediately before its BRA, so no other CC
+    // write can reach the branch (VP2); LoopEnd branches back to the head and
+    // the exit is the next instruction.  Targets are final instruction
+    // indices: this runs after scheduling and allocation, and a marker is
+    // never paired (VP5).
+    struct LoopFrame { size_t head; std::vector<size_t> exits; };
+    std::vector<LoopFrame> loops;
+    std::vector<size_t> exitTargets;
+
     for (size_t i = 0; i < program.instrs.size(); ++i) {
         const VInstr& vi = program.instrs[i];
         std::string why;
         if (hasUnsupportedSource(vi, why)) {
             out.diagnostics.push_back("nv40-general-vp: " + why);
             return out;
+        }
+        if (vi.op == VOp::LoopBegin) {
+            if (!loops.empty()) {
+                out.diagnostics.push_back("nv40-general-vp: a nested loop is not lowered; refusing");
+                return out;
+            }
+            loops.push_back({asm_.instructionCount(), {}});
+            continue;
+        }
+        if (vi.op == VOp::Brk) {
+            uint8_t testOpcode = 0;
+            if (loops.empty() || !tryVpOpcode(vi.killFused, testOpcode)) {
+                out.diagnostics.push_back("nv40-general-vp: a loop exit test outside a loop or with an unencodable compare; refusing");
+                return out;
+            }
+            VInstr test;
+            test.op = vi.killFused;
+            test.dst.none = true;
+            test.dst.writemask = 1;
+            test.ccUpdate = true;
+            test.srcs = vi.srcs;
+            asm_.emit(makeInsn(test), testOpcode);
+            loops.back().exits.push_back(
+                asm_.emitBranch(vi.killTestEq ? NVFX_COND_EQ : NVFX_COND_NE, 0, 0));
+            continue;
+        }
+        if (vi.op == VOp::LoopEnd) {
+            if (loops.empty()) {
+                out.diagnostics.push_back("nv40-general-vp: a loop end without a loop; refusing");
+                return out;
+            }
+            const size_t back = asm_.emitBranch(NVFX_COND_TR, 0, 0);
+            const size_t exit = asm_.instructionCount();
+            bool ok = asm_.setBranchTarget(back, static_cast<uint32_t>(loops.back().head));
+            for (size_t e : loops.back().exits)
+                ok = ok && asm_.setBranchTarget(e, static_cast<uint32_t>(exit));
+            if (!ok) {
+                out.diagnostics.push_back("nv40-general-vp: a loop branch target does not fit the 9-bit field; refusing");
+                return out;
+            }
+            exitTargets.push_back(exit);
+            loops.pop_back();
+            continue;
         }
         if (vi.op == VOp::SelPred) {
             // Keep the three writes atomic until after scheduling/allocation.
@@ -12046,6 +12113,17 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         out.diagnostics.push_back("nv40-general-vp: no instructions emitted");
         return out;
     }
+    if (!loops.empty()) {
+        out.diagnostics.push_back("nv40-general-vp: a loop without its end; refusing");
+        return out;
+    }
+    // A loop exit must land on an instruction: the LAST bit may not sit on a
+    // branch, and a target past the program is undefined.
+    for (size_t exit : exitTargets)
+        if (exit >= asm_.instructionCount()) {
+            out.diagnostics.push_back("nv40-general-vp: a loop ends the program, leaving its exit no instruction; refusing");
+            return out;
+        }
     asm_.markLast();
     if (asm_.inputConflict()) {
         out.diagnostics.push_back(

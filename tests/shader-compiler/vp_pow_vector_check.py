@@ -54,7 +54,7 @@ COL0 = 1
 
 
 def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False,
-             indexed_constants=False):
+             indexed_constants=False, branches=False, max_steps=100000):
     """Run a VP container; ARL and relative constants require an explicit opt-in."""
     u = lambda off: struct.unpack_from('>I', blob, off)[0]
     assert len(blob) >= 32 and u(0) == 7003, 'not a VP container'
@@ -75,8 +75,18 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False,
     cc = [None] * 4
     inputs = {0: [0.0, 0.0, 0.0, 1.0]} if inputs is None else inputs
     count = size // 16
-    for n, pos in enumerate(range(off, off + size, 16)):
-        w = struct.unpack_from('>4I', blob, pos)
+    # A program counter, for BRA (opt-in).  The target is an instruction
+    # index, IADDRH (word 2 bits 0..5) << 3 | IADDRL (word 3 bits 29..31);
+    # the condition reads one replicated CC lane BEFORE this instruction's
+    # writes; a co-issued vector op executes.  Running past max_steps is an
+    # error, never a verdict.
+    pc, steps = 0, 0
+    while pc < count:
+        steps += 1
+        assert steps <= max_steps, 'more than %d instructions executed' % max_steps
+        n = pc
+        pc += 1
+        w = struct.unpack_from('>4I', blob, off + 16 * n)
         for bit, what in ((SAT, 'saturation'), (COND_TEST, 'predication'),
                           (COND_UPDATE, 'condition-code update'), (INDEX_INPUT, 'indexed input')):
             if predication and bit in (COND_TEST, COND_UPDATE):
@@ -85,6 +95,28 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False,
         assert indexed_constants or not (w[3] & INDEX_CONST), 'unsupported control in instruction %d: indexed constant' % n
         assert bool(w[3] & 1) == (n == count - 1), 'END flag not on exactly the last instruction'
         vop, sop = (w[1] >> 22) & 31, (w[1] >> 27) & 31
+        branch_to = None
+        if sop == 9:
+            assert branches, 'unsupported scalar opcode BRA (opt-in required)'
+            assert not w[0] & (COND_TEST | COND_UPDATE | (1 << 25)), 'unsupported BRA control'
+            assert vop != 4, 'BRA co-issued with a three-source op'
+            assert not w[3] & 1, 'BRA carries the END flag'
+            mode = (w[0] >> 10) & 7
+            target = ((w[2] & 63) << 3) | (w[3] >> 29)
+            assert target < count, 'BRA target outside the program'
+            if mode in (0, 7):
+                # TR / FL do not read the condition (the reference writes an
+                # unconditional BRA TR with an xyzw swizzle).
+                relation = 7
+            else:
+                swz = [(w[0] >> (8 - 2 * j)) & 3 for j in range(4)]
+                assert len(set(swz)) == 1, 'BRA on a non-replicated condition swizzle'
+                value = cc[swz[0]]
+                assert value is not None and math.isfinite(value), 'BRA reads undefined/nonfinite CC'
+                relation = 1 if value < 0 else 2 if value == 0 else 4
+            if mode & relation:
+                branch_to = target
+            sop = 0   # the scalar slot was the branch
         enabled = [True] * 4
         if predication and w[0] & (COND_TEST | COND_UPDATE):
             assert not w[0] & (1 << 25), 'condition bank 1 is not modeled'
@@ -180,9 +212,12 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False,
         if sop:
             x = source(fields[2], 2)[0]
             assert x is not None, 'scalar op reads an undefined lane'
-            v = {1: lambda t: t, 2: lambda t: 1.0 / t,
-                 4: lambda t: 1.0 / math.sqrt(abs(t)),
-                 13: lambda t: math.log2(abs(t)),
+            # IEEE at zero (a loop may divide by its -0.0 induction):
+            # RCP(+-0) = +-inf, RSQ(0) = +inf, LG2(0) = -inf.
+            v = {1: lambda t: t,
+                 2: lambda t: 1.0 / t if t != 0 else math.copysign(math.inf, t),
+                 4: lambda t: 1.0 / math.sqrt(abs(t)) if t != 0 else math.inf,
+                 13: lambda t: math.log2(abs(t)) if t != 0 else -math.inf,
                  14: lambda t: 2.0 ** t}.get(sop)
             assert v, 'unsupported scalar opcode %d' % sop
             mask = (w[3] >> 17) & 15
@@ -206,6 +241,8 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False,
                     cc[j] = value
                 if out or dst != 63:  # vector destination sentinel: CC-only write
                     target[j] = value
+        if branch_to is not None:
+            pc = branch_to
     return outputs
 
 
@@ -436,7 +473,76 @@ def judge(blob, name, uniforms=None):
                                       '' if not bad else '  WRONG lanes %s' % bad)
 
 
+def branches_selftest():
+    """Independent encoded BRA controls; no compiler required."""
+    ident = (1 << 12) | (2 << 10) | (3 << 8)
+
+    def mov(inp, *, out=None, cc=False):
+        # MOV from input register `inp` (identity swizzle) to o[out], or a
+        # CC-only write of lane x (COND_UPDATE, vector destination 63).
+        src = 2 | ident
+        w0 = (63 << 15) | (7 << 10)
+        if out is not None:
+            w0 |= 1 << 30
+        if cc:
+            w0 |= COND_UPDATE
+        mask = 8 if cc else 15
+        w3 = (mask << 13) | (31 << 7) | ((out or 0) << 2 if out is not None else 31 << 2)
+        return [w0, (1 << 22) | (inp << 8) | (src >> 9), (src & 511) << 23, w3]
+
+    def bra(cond, target, lanes=(0, 0, 0, 0)):
+        swz = sum(l << (8 - 2 * j) for j, l in enumerate(lanes))
+        return [0x001f8000 | (cond << 10) | swz, 0x4800000d,
+                0x8106c080 | (target >> 3), 0x00401ffc | ((target & 7) << 29)]
+
+    def container(words):
+        words = [w.copy() for w in words]
+        words[-1][3] |= 1
+        code = b''.join(struct.pack('>4I', *w) for w in words)
+        start = 80
+        return struct.pack('>8I', 7003, 6, start + len(code), 0, start, 32, len(code), start) + bytes(48) + code
+
+    def run(words, ins, **kw):
+        return evaluate(container(words), {}, ins, predication=True, **kw)
+
+    def refused(words, ins, message, **kw):
+        try:
+            run(words, ins, **kw)
+        except AssertionError as error:
+            assert message in str(error), str(error)
+        else:
+            raise AssertionError('branch instrument accepted ' + message)
+
+    EQ, NE, TR = 2, 5, 7
+    # 0: CC.x <- v0.x; 1: BRA EQ -> 3; 2: o[1] <- v1; 3: o[0] <- v2 (END)
+    prog = [mov(0, cc=True), bra(EQ, 3), mov(1, out=1), mov(2, out=0)]
+    ins = lambda x: {0: [x, 0, 0, 0], 1: [5, 6, 7, 8], 2: [1, 2, 3, 4]}
+    assert run(prog, ins(0.0), branches=True) == {0: [1, 2, 3, 4]}, 'EQ taken'
+    assert run(prog, ins(1.5), branches=True) == {0: [1, 2, 3, 4], 1: [5, 6, 7, 8]}, 'EQ not taken'
+    prog_ne = [mov(0, cc=True), bra(NE, 3), mov(1, out=1), mov(2, out=0)]
+    assert 1 not in run(prog_ne, ins(-2.0), branches=True), 'NE taken on a negative value'
+    # The condition lane is honoured: CC.y is undefined here.
+    refused([mov(0, cc=True), bra(EQ, 3, (1, 1, 1, 1)), mov(1, out=1), mov(2, out=0)], ins(0.0),
+            'undefined/nonfinite CC', branches=True)
+    refused([mov(0, cc=True), bra(EQ, 3, (0, 1, 0, 0)), mov(1, out=1), mov(2, out=0)], ins(0.0),
+            'non-replicated', branches=True)
+    # An unconditional BRA reads no condition (any swizzle, CC undefined).
+    assert run([bra(TR, 2, (0, 1, 2, 3)), mov(1, out=1), mov(2, out=0)], ins(0.0), branches=True) == {0: [1, 2, 3, 4]}
+    refused(prog, ins(0.0), 'BRA (opt-in required)')
+    refused([mov(0, cc=True), bra(EQ, 9), mov(1, out=1), mov(2, out=0)], ins(0.0),
+            'outside the program', branches=True)
+    # A backward branch that never exits is an error, never a result.
+    refused([mov(0, cc=True), bra(TR, 0), mov(2, out=0)], ins(1.0), 'instructions executed',
+            branches=True, max_steps=1000)
+    # A backward branch that is not taken falls through exactly once.
+    assert run([mov(0, cc=True), bra(EQ, 0), mov(2, out=0)], ins(1.0), branches=True) == {0: [1, 2, 3, 4]}
+    print('VP instrument: branch controls PASS')
+
+
 def main():
+    if '--self-test-branches' in sys.argv:
+        branches_selftest()
+        return 0
     if '--self-test-indexed-constants' in sys.argv:
         indexed_constants_selftest()
         return 0

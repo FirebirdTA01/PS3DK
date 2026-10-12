@@ -796,6 +796,8 @@ jobs:
         run: bash tests/shader-compiler/type-name-variable-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A uniform array of structs read by a constant index is per-element member uniforms
         run: bash tests/shader-compiler/uniform-struct-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A vertex loop with a run-time trip count lowers to branches
+        run: bash tests/shader-compiler/vp-runtime-loop-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
         run: bash tests/shader-compiler/inline-dead-tail-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value

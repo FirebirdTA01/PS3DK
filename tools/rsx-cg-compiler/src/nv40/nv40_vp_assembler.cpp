@@ -23,6 +23,28 @@
 namespace nv40
 {
 
+size_t VpAssembler::emitBranch(uint8_t cond, uint8_t ccReg, uint8_t ccLane)
+{
+    const size_t index = words_.size() / 4;
+    const uint32_t lane = ccLane & 3u;
+    const uint32_t swz = (lane << 8) | (lane << 6) | (lane << 4) | (lane << 2);
+    words_.push_back(0x001f8000u | ((cond & 7u) << 10) | swz | ((ccReg & 1u) << 25));
+    words_.push_back(0x4800000du);
+    words_.push_back(0x8106c080u);
+    words_.push_back(0x00401ffcu);
+    return index;
+}
+
+bool VpAssembler::setBranchTarget(size_t insnIndex, uint32_t target)
+{
+    if (target > 511 || insnIndex >= words_.size() / 4) return false;
+    uint32_t* hw = &words_[insnIndex * 4];
+    if (((hw[1] >> 27) & 0x1f) != 0x09) return false;
+    hw[2] = (hw[2] & ~0x3fu) | (target >> 3);
+    hw[3] = (hw[3] & 0x1fffffffu) | ((target & 7u) << 29);
+    return true;
+}
+
 void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
 {
     const uint32_t slot = static_cast<uint32_t>(opcode) >> 7;
