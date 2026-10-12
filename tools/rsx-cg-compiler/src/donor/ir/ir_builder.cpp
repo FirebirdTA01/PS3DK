@@ -6670,6 +6670,43 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             }
         }
 
+        // VP literal rsqrt / exp2 / log2 / frac, measured on 64 random inputs
+        // each plus edges: the double-precision result rounded once to
+        // binary32 (subnormal results kept).  rsqrt and log2 of x <= 0 and an
+        // exp2 that overflows stay run-time instructions, as the reference
+        // leaves them; then nothing in the vector is folded here.
+        if (module_->shaderStage == ShaderStage::Vertex && argValues.size() == 1 &&
+            (*builtinOp == IROp::RSqrt || *builtinOp == IROp::Exp2 ||
+             *builtinOp == IROp::Log2 || *builtinOp == IROp::Frac) &&
+            (resultType.isScalar() || resultType.isVector()))
+        {
+            std::vector<float> values;
+            if (extractFloatComponents(*currentFunction_, argValues[0], values) && !values.empty())
+            {
+                std::vector<float> folded;
+                for (float value : values)
+                {
+                    if (!std::isfinite(value)) break;
+                    const double x = static_cast<double>(value);
+                    double r = 0.0;
+                    if (*builtinOp == IROp::RSqrt) { if (x <= 0.0) break; r = 1.0 / std::sqrt(x); }
+                    else if (*builtinOp == IROp::Log2) { if (x <= 0.0) break; r = std::log2(x); }
+                    else if (*builtinOp == IROp::Exp2) r = std::exp2(x);
+                    else r = x - std::floor(x);
+                    const float result = static_cast<float>(r);
+                    if (!std::isfinite(result)) break;
+                    folded.push_back(result);
+                }
+                if (folded.size() == values.size())
+                {
+                    const IRType element = resultType.isVector() ? resultType.elementType : resultType.baseType;
+                    if (element != IRType::Float16)
+                        return folded.size() == 1 ? createConstant(resultType, folded[0])
+                                                  : createConstant(resultType, folded);
+                }
+            }
+        }
+
         // dot of two scalars is their product (measured: dot(x - .5, x - .5)
         // at x = .1 is .16); the DP lowerings take vector operands only.
         if (*builtinOp == IROp::Dot && argValues.size() == 2 && expr->arguments.size() == 2 &&
