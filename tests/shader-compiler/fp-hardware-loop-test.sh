@@ -130,6 +130,16 @@ def tail_break_constant(t):
         return (f32(acc + f32(f32(1.0 - aacc) * smp)), f32(aacc + smp))
     i, (acc, aacc) = run_loop(0.0, 50.0, body, (0.0, 0.0), tail_break=lambda i, c: c[1] > t[2])
     return [acc, aacc, i, 1.0]
+def tail_bool_swap(t):
+    def body(i, c):
+        return (c[1], c[0])
+    i, (a, b) = run_loop(0.0, t[0], body, (1.0 if t[1] > 0 else 0.0, 1.0 if t[2] > 0 else 0.0),
+                         tail_break=lambda i, c: c[0] != 0.0)
+    return [a, b, i, 1.0]
+def tail_invariant_bool(t):
+    stop = t[1] > 0
+    i, (s,) = run_loop(0.0, t[0], lambda i, c: (f32(c[0] + 1.0),), (0.0,), tail_break=lambda i, c: stop)
+    return [s, i, 0.0, 1.0]
 def helper_body(t):
     i, (s,) = run_loop(0.0, t[0], lambda i, c: (f32(c[0] + f32(i * t[2])),), (0.0,))
     return [s, 0.0, 0.0, 1.0]
@@ -171,6 +181,13 @@ VALUE = [
     # induction is not stepped (review: codex R2, swap-at-break control).
     ('tail_break_swap', H + 'float a = t.y, b = t.w; float i; for (i = 0; i < t.x; i++) { float k = a; a = b; b = k; '
                         'if (i >= t.z) break; } return float4(a, b, i, 1); }', tail_break_swap),
+    # The break guard IS a carry the latch swaps (review: codex TAIL1): the
+    # guard is frozen before the latch writes the carries back.
+    ('tail_break_bool_swap', H + 'bool a = t.y > 0; bool b = t.z > 0; float i; for (i = 0; i < t.x; i++) { '
+                             'bool k = a; a = b; b = k; if (a) break; } return float4(a, b, i, 1); }', tail_bool_swap),
+    # The guard is a carry the body leaves alone, folded away (review: codex TAIL3).
+    ('tail_break_invariant_bool', H + 'bool stop = t.y > 0; float s = 0; float i; for (i = 0; i < t.x; i++) { '
+                                  's += 1; if (stop) break; } return float4(s, i, 0, 1); }', tail_invariant_bool),
     # The SDK SmokeEffect shape: a constant bound (50) and an accumulation that
     # stops early (texture-free here).
     ('tail_break_constant', H + 'float acc = 0, aacc = 0; int k; for (k = 0; k < 50; k++) { '
@@ -212,6 +229,12 @@ REFUSE = [
      'more than 255 iterations'),
     ('break_not_last', H + 'float s = 0; for (float i = 0; i < t.x; i++) { if (s > t.z) break; s += t.y; } '
                        'return float4(s, 0, 0, 1); }', 'back-edge'),
+    # A closing break with a body write to the induction (review: codex TAIL2).
+    ('tail_break_induction_write', H + 'float s = 0; float i; for (i = 0; i < t.x; i++) { s += 1; i += 1; '
+                                   'if (s > t.y) break; } return float4(s, i, 0, 1); }', 'writes its induction variable'),
+    ('tail_break_induction_alias', H + 'float i; float b = t.y; float s = 0; for (i = 0; i < t.x; i++) { float k = i; '
+                                   'i = b; b = k; s += 1; if (s > t.z) break; } return float4(s, i, b, 1); }',
+     'writes its induction variable'),
     ('break_condition_assigns', H + 'float n = t.x; float s = 0; for (float i = 0; i < 4; i++) { s += 1; '
                                 'if ((n = n - 1) < 0) break; } return float4(s, n, 0, 1); }',
      'the break condition assigns a variable'),

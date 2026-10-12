@@ -3411,6 +3411,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         block->addInstruction(std::move(brk));
     }
     IRValueID tailBreakCond = InvalidIRValue;
+    IRValueID inductionAtBreak = InvalidIRValue;
     size_t tailBreakIndex = 0;
     if (!tailBreak) {
         buildStmt(stmt->body.get());
@@ -3432,6 +3433,8 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         blockDeclared_.pop_back();
         for (const auto& n : declared)
             exitBlockBinding(n, preBody);
+        const auto ib = nameToValue_.find(varName);
+        inductionAtBreak = ib == nameToValue_.end() ? InvalidIRValue : ib->second;
         if (assigns) {
             --hardwareLoopDepth_;
             blockDeclared_.pop_back();
@@ -3539,6 +3542,8 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         if (next == c.carry || next == InvalidIRValue) folded[c.carry] = c.init;
     }
     for (const auto& [carry, init] : folded) replaceInRegion(carry, init);
+    if (const auto f = folded.find(tailBreakCond); f != folded.end())
+        tailBreakCond = f->second;   // review: codex TAIL3
     for (auto& kv : nameToValue_) {
         const auto f = folded.find(kv.second);
         if (f != folded.end()) kv.second = f->second;
@@ -3754,6 +3759,15 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // BRK where the condition holds; the induction alone is written back by
     // the final latch, after the increment.
     if (tailBreak) {
+        // TAIL2 (review: codex): a body that writes the induction would need
+        // that write in the break snapshot and an increment that reads it
+        // past the latch.  Refused for this slice.
+        const Carry* indCarry = nullptr;
+        for (const Carry& kc : kept) if (kc.name == varName) indCarry = &kc;
+        if (!indCarry || inductionAtBreak != indCarry->carry) {
+            blockDeclared_.pop_back();
+            return refuse("a loop with a closing break whose body writes its induction variable");
+        }
         std::vector<IRValueID> beforeBreak, induction;
         for (size_t k = 0; k + 1 < latch.size(); k += 2) {
             const Carry* c = nullptr;
@@ -3765,12 +3779,21 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         latch = induction;
         auto first = std::make_unique<IRInstruction>(IROp::LoopLatch, InvalidIRValue, IRTypeInfo::Void());
         first->operands = beforeBreak;
+        // TAIL1 (review: codex): the guard is FROZEN into a fresh value before
+        // the latch.  The condition may BE a carry (`if (a) break;` after
+        // `a = b`) or read one through a lane alias, and the latch rewrites
+        // carry registers before the BRK reads its guard.
+        const IRValueID frozen = currentFunction_->allocateValueId();
+        auto freeze = std::make_unique<IRInstruction>(IROp::CmpNe, frozen, IRTypeInfo::Bool());
+        freeze->addOperand(tailBreakCond);
+        freeze->addOperand(createConstant(0.0f));
         auto brk = std::make_unique<IRInstruction>(IROp::LoopBreakIf, InvalidIRValue, IRTypeInfo::Void());
-        brk->addOperand(tailBreakCond);
+        brk->addOperand(frozen);
         brk->guardIsNegated = false;   // break where the source condition is TRUE
         auto& insts = block->instructions;
         insts.insert(insts.begin() + static_cast<std::ptrdiff_t>(tailBreakIndex), std::move(brk));
         insts.insert(insts.begin() + static_cast<std::ptrdiff_t>(tailBreakIndex), std::move(first));
+        insts.insert(insts.begin() + static_cast<std::ptrdiff_t>(tailBreakIndex), std::move(freeze));
     }
     auto latchInst = std::make_unique<IRInstruction>(IROp::LoopLatch, InvalidIRValue, IRTypeInfo::Void());
     latchInst->operands = latch;
