@@ -2085,6 +2085,19 @@ CgType SemanticAnalyzer::resolveType(TypeNode* typeNode) const
         return *type;
     }
 
+    // An array of structs (`uniform TexUnit u[8]; u[i].matrix`): the parser's
+    // element node names the struct but carries no fields, so resolve the
+    // element too, or every member access on an element is refused.
+    if (typeNode->arraySize > 0 && typeNode->elementType)
+    {
+        CgType element = resolveType(typeNode->elementType.get());
+        if (element.isError())
+            return CgType::Error();
+        auto copy = std::make_shared<TypeNode>(*typeNode);
+        copy->elementType = element.getNode();
+        return CgType(copy);
+    }
+
     return CgType(std::make_shared<TypeNode>(*typeNode));
 }
 

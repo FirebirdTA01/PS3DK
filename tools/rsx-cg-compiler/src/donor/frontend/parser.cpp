@@ -72,8 +72,79 @@ void Parser::initBuiltinTypes()
 // Main parsing entry point
 // ============================================================================
 
+// A BUILT-IN TYPE NAME DECLARED AS A VARIABLE (PSGL's vpFixedPipeline:
+// `float3 half = float3(0,0,0); ... dot(normal, half)`).  Measured on the
+// reference: every built-in type spelling except the reserved words float,
+// int and bool may name a variable - half, fixed, the floatN / halfN /
+// fixedN / intN / boolN vectors and matrices, the sampler types - and from
+// its declaration to the end of its scope that spelling is the variable
+// (`float4 float4 = ...; float4(1)` is "cannot call a non-function").  Only
+// the measured spellings are admitted.  The declaring token and every later
+// token with that spelling in the scope become identifiers, and isTypeName
+// refuses them (shadowedTypeTokens_); everything else parses as before.
+void Parser::retypeShadowedTypeNames()
+{
+    static const std::set<TokenType> shadowable = {
+        TokenType::KW_HALF, TokenType::KW_HALF2, TokenType::KW_HALF3, TokenType::KW_HALF4,
+        TokenType::KW_HALF2X2, TokenType::KW_HALF3X3, TokenType::KW_HALF4X4,
+        TokenType::KW_FIXED, TokenType::KW_FIXED2, TokenType::KW_FIXED3, TokenType::KW_FIXED4,
+        TokenType::KW_FLOAT2, TokenType::KW_FLOAT3, TokenType::KW_FLOAT4,
+        TokenType::KW_FLOAT2X2, TokenType::KW_FLOAT3X3, TokenType::KW_FLOAT4X4,
+        TokenType::KW_INT2, TokenType::KW_INT3, TokenType::KW_INT4,
+        TokenType::KW_BOOL2, TokenType::KW_BOOL3, TokenType::KW_BOOL4,
+        TokenType::KW_SAMPLER, TokenType::KW_SAMPLER1D, TokenType::KW_SAMPLER2D,
+        TokenType::KW_SAMPLER3D, TokenType::KW_SAMPLERCUBE, TokenType::KW_SAMPLERRECT,
+    };
+    auto isTypeToken = [&](const Token& t) {
+        if (t.type == TokenType::IDENTIFIER) return typeNames.count(t.lexeme) > 0;
+        return t.type >= TokenType::KW_VOID && typeNames.count(t.lexeme) > 0;
+    };
+    std::vector<int> braceDepth(tokens.size(), 0), parenDepth(tokens.size(), 0);
+    for (size_t i = 0, b = 0, q = 0; i < tokens.size(); ++i) {
+        if (tokens[i].type == TokenType::RBRACE && b) --b;
+        if (tokens[i].type == TokenType::RPAREN && q) --q;
+        braceDepth[i] = static_cast<int>(b); parenDepth[i] = static_cast<int>(q);
+        if (tokens[i].type == TokenType::LBRACE) ++b;
+        if (tokens[i].type == TokenType::LPAREN) ++q;
+    }
+    for (size_t i = 1; i + 1 < tokens.size(); ++i) {
+        if (!shadowable.count(tokens[i].type) || shadowedTypeTokens_.count(i)) continue;
+        const TokenType next = tokens[i + 1].type;
+        const bool declarator = next == TokenType::OP_ASSIGN || next == TokenType::SEMICOLON ||
+            next == TokenType::COMMA || next == TokenType::LBRACKET || next == TokenType::COLON ||
+            next == TokenType::RPAREN;
+        if (!declarator || !isTypeToken(tokens[i - 1]) || shadowedTypeTokens_.count(i - 1)) continue;
+        // The scope: a parameter's is the function body that follows its
+        // list; any other declaration's runs to the end of its block.
+        const int depth = braceDepth[i];
+        size_t end = tokens.size();
+        if (parenDepth[i] > 0) {
+            size_t k = i;
+            while (k < tokens.size() && !(tokens[k].type == TokenType::LBRACE && braceDepth[k] == depth)) {
+                if (tokens[k].type == TokenType::SEMICOLON && braceDepth[k] == depth && parenDepth[k] == 0) break;
+                ++k;
+            }
+            if (k < tokens.size() && tokens[k].type == TokenType::LBRACE) {
+                size_t m = k + 1;
+                while (m < tokens.size() && !(tokens[m].type == TokenType::RBRACE && braceDepth[m] == depth)) ++m;
+                end = m;
+            } else end = k;
+        } else {
+            for (size_t m = i; m < tokens.size(); ++m)
+                if (braceDepth[m] < depth) { end = m; break; }
+        }
+        const std::string name = tokens[i].lexeme;
+        for (size_t m = i; m < end; ++m)
+            if (tokens[m].lexeme == name && shadowable.count(tokens[m].type)) {
+                tokens[m].type = TokenType::IDENTIFIER;
+                shadowedTypeTokens_.insert(m);
+            }
+    }
+}
+
 std::unique_ptr<TranslationUnit> Parser::parse()
 {
+    retypeShadowedTypeNames();
     collectGlobalValueNames();
     auto unit = std::make_unique<TranslationUnit>();
     unit->filename = filename;
@@ -421,6 +492,9 @@ std::shared_ptr<TypeNode> Parser::optionalType(const std::string& name) const
 bool Parser::isTypeName(bool expressionContext) const
 {
     if (isAtEnd())
+        return false;
+    // A built-in type spelling a variable shadows here (retypeShadowedTypeNames).
+    if (shadowedTypeTokens_.count(current))
         return false;
 
     const Token& tok = peek();
