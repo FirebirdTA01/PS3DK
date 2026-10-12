@@ -353,6 +353,10 @@ private:
     // Struct field resolution helper (looks up struct fields from semantic analyzer)
     const std::vector<StructField>* getStructFields(TypeNode* typeNode);
     bool containsMatrixField(TypeNode* typeNode);
+    const IRGlobal* uniformStructSourceRoot(ExprNode* source);
+    bool hasBoundStructLeaves(TypeNode* type, ExprNode* source);
+    bool captureUniformStructElement(TypeNode* type, IndexExpr* source,
+                                     IRValueID index, StructLeafBindings& leaves);
 
     // Emit StoreOutput instructions for all output struct fields
     void emitStructOutputs(ExprNode* structExpr, const std::vector<StructField>& fields);

@@ -9,6 +9,67 @@
 #include <unordered_set>
 #include <functional>
 
+static bool exprHasSideEffects(const ExprNode* e);
+
+// Selection of a uniform struct argument observes completed argument state,
+// except when the index itself changes state. Unknown calls cannot safely be
+// assigned either evaluation time.
+enum class StructIndexEffect { Pure, Writes, Unknown };
+static StructIndexEffect structIndexEffect(const ExprNode* e)
+{
+    using E = StructIndexEffect;
+    if (!e) return E::Unknown;
+    auto merge = [](E a, E b) { return std::max(a, b); };
+    switch (e->kind) {
+    case ExprKind::Identifier: case ExprKind::Literal: case ExprKind::Sizeof:
+        return E::Pure;
+    case ExprKind::Unary: {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        const bool writes = u->op == UnaryOp::PreIncrement || u->op == UnaryOp::PostIncrement ||
+            u->op == UnaryOp::PreDecrement || u->op == UnaryOp::PostDecrement;
+        return merge(writes ? E::Writes : E::Pure, structIndexEffect(u->operand.get()));
+    }
+    case ExprKind::Binary: {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        const bool writes = b->op == BinaryOp::Assign || b->op == BinaryOp::AddAssign ||
+            b->op == BinaryOp::SubAssign || b->op == BinaryOp::MulAssign ||
+            b->op == BinaryOp::DivAssign || b->op == BinaryOp::ModAssign;
+        return merge(writes ? E::Writes : E::Pure,
+            merge(structIndexEffect(b->left.get()), structIndexEffect(b->right.get())));
+    }
+    case ExprKind::Call: {
+        const auto* c = static_cast<const CallExpr*>(e);
+        static const std::unordered_set<std::string> pure = {
+            "abs", "floor", "ceil", "round", "trunc", "min", "max", "clamp",
+            "sign", "frac", "saturate", "sqrt", "rsqrt", "pow", "exp", "exp2",
+            "log", "log2", "sin", "cos", "tan", "asin", "acos", "atan", "atan2"
+        };
+        if (c->resolvedFunction || !pure.count(c->functionName)) return E::Unknown;
+        E effect = E::Pure;
+        for (const auto& a : c->arguments) effect = merge(effect, structIndexEffect(a.get()));
+        return effect;
+    }
+    case ExprKind::Constructor: {
+        E effect = E::Pure;
+        for (const auto& a : static_cast<const ConstructorExpr*>(e)->arguments)
+            effect = merge(effect, structIndexEffect(a.get()));
+        return effect;
+    }
+    case ExprKind::Cast: return structIndexEffect(static_cast<const CastExpr*>(e)->operand.get());
+    case ExprKind::MemberAccess: return structIndexEffect(static_cast<const MemberAccessExpr*>(e)->object.get());
+    case ExprKind::Index: {
+        const auto* i = static_cast<const IndexExpr*>(e);
+        return merge(structIndexEffect(i->array.get()), structIndexEffect(i->index.get()));
+    }
+    case ExprKind::Ternary: {
+        const auto* t = static_cast<const TernaryExpr*>(e);
+        return merge(structIndexEffect(t->condition.get()),
+            merge(structIndexEffect(t->thenExpr.get()), structIndexEffect(t->elseExpr.get())));
+    }
+    default: return E::Unknown;
+    }
+}
+
 namespace
 {
 bool arrayStorageKey(ExprNode* expr, std::string& key,
@@ -4898,7 +4959,8 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
 
         if (varDecl->initializer && getStructFields(varDecl->type.get()) &&
             (varDecl->initializer->kind == ExprKind::Constructor ||
-             (module_->shaderStage == ShaderStage::Vertex && containsMatrixField(varDecl->type.get()))))
+             (module_->shaderStage == ShaderStage::Vertex &&
+              (containsMatrixField(varDecl->type.get()) || uniformStructSourceRoot(varDecl->initializer.get())))))
         {
             buildLocalStructInitializer(varDecl->name, varDecl->type.get(), varDecl->initializer.get());
             continue;
@@ -6012,6 +6074,7 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
     std::vector<IRValueID> argValues;
     std::vector<StructLeafBindings> structArguments(expr->arguments.size());
     std::vector<bool> captureStructArgument(expr->arguments.size(), false);
+    std::vector<IRValueID> savedStructIndex(expr->arguments.size(), InvalidIRValue);
     for (size_t i = 0; i < expr->arguments.size(); ++i)
     {
         if (calleeDecl && i < calleeDecl->parameters.size() &&
@@ -6027,16 +6090,35 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             argValues.push_back(InvalidIRValue);
             continue;
         }
-        // A matrix-bearing struct has leaf values, not a whole-struct SSA
+        // A uniform struct has leaf values, not a whole-struct SSA
         // operand. Defer named leaf capture until every argument has been
         // evaluated, but before any callee parameter is installed.
         if (module_->shaderStage == ShaderStage::Vertex && calleeDecl &&
             (currentFunction_->isEntryPoint || !inlineStack_.empty()) &&
             i < calleeDecl->parameters.size()) {
             const auto* param = calleeDecl->parameters[i].get();
+            auto* argument = expr->arguments[i].get();
             if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
-                getStructFields(param->type.get()) && containsMatrixField(param->type.get())) {
+                getStructFields(param->type.get()) &&
+                (containsMatrixField(param->type.get()) || uniformStructSourceRoot(argument) ||
+                 hasBoundStructLeaves(param->type.get(), argument))) {
                 captureStructArgument[i] = true;
+                // Side-effect-free selections see completed-argument state.
+                // An effectful index instead executes once, in argument order,
+                // and every leaf must retain its returned index value.
+                if (!containsMatrixField(param->type.get()) && argument->kind == ExprKind::Index &&
+                    uniformStructSourceRoot(argument)) {
+                    auto* indexed = static_cast<IndexExpr*>(argument);
+                    const auto effect = structIndexEffect(indexed->index.get());
+                    if (effect == StructIndexEffect::Unknown) {
+                        error(argument->loc, "uniform struct argument index has unclassified effects (struct-argument-index-effects)");
+                        return InvalidIRValue;
+                    }
+                    if (effect == StructIndexEffect::Writes) {
+                        savedStructIndex[i] = buildExpr(indexed->index.get());
+                        if (savedStructIndex[i] == InvalidIRValue) return InvalidIRValue;
+                    }
+                }
                 argValues.push_back(InvalidIRValue);
                 continue;
             }
@@ -6608,11 +6690,26 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         for (size_t i = 0; i < captureStructArgument.size(); ++i) {
             if (!captureStructArgument[i]) continue;
             auto* source = expr->arguments[i].get();
+            auto* type = calleeDecl->parameters[i]->type.get();
+            if (!containsMatrixField(type) && source->kind == ExprKind::Index &&
+                uniformStructSourceRoot(source)) {
+                auto* indexed = static_cast<IndexExpr*>(source);
+                const auto index = savedStructIndex[i] == InvalidIRValue
+                    ? buildExpr(indexed->index.get()) : savedStructIndex[i];
+                if (index == InvalidIRValue ||
+                    !captureUniformStructElement(type, indexed, index, structArguments[i])) {
+                    error(source->loc, "unsupported uniform struct element argument (struct-uniform-argument)");
+                    return InvalidIRValue;
+                }
+                continue;
+            }
             if ((source->kind != ExprKind::Identifier && source->kind != ExprKind::MemberAccess &&
                  source->kind != ExprKind::Index) ||
                 !buildLocalStructInitializer("", calleeDecl->parameters[i]->type.get(), source,
                                              false, &structArguments[i])) {
-                error(source->loc, "unsupported by-value matrix struct argument (struct-matrix-argument)");
+                error(source->loc, containsMatrixField(type)
+                    ? "unsupported by-value matrix struct argument (struct-matrix-argument)"
+                    : "unsupported by-value uniform struct argument (struct-uniform-argument)");
                 return InvalidIRValue;
             }
         }
@@ -6867,6 +6964,8 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                 else ++it;
             for (const auto& [suffix, value] : structArguments[i])
                 nameToValue_[param->name + suffix] = value;
+            if (flattenedUniformStructParams_.insert(param->name).second)
+                flattenedForCall.push_back(param->name);
             continue;
         }
         // `helper(IN)` with IN a flattened uniform struct parameter: the
@@ -7889,6 +7988,13 @@ bool IRBuilder::emitInputMemberLoad(const ParamDecl* param, const std::string& m
                                     IRValueID valueId)
 {
     if (!param || !param->type || param->type->baseType != BaseType::Struct) return false;
+    if (module_->shaderStage == ShaderStage::Vertex && !inlineStack_.empty() &&
+        currentFunctionDecl_ && std::none_of(currentFunctionDecl_->parameters.begin(),
+            currentFunctionDecl_->parameters.end(), [param](const auto& p) { return p.get() == param; })) {
+        error(param->loc, "uncaptured by-value struct member '" + param->name + "." + member +
+              "' cannot be loaded as a vertex attribute (struct-argument-binding)");
+        return true;
+    }
     const std::vector<StructField>* fields = getStructFields(param->type.get());
     if (!fields) return false;
     std::string leaf = member;
@@ -11218,6 +11324,92 @@ IRTypeInfo IRBuilder::getExprType(ExprNode* expr)
 {
     if (!expr || !expr->resolvedType) return IRTypeInfo::Void();
     return getIRType(expr->resolvedType.get());
+}
+
+const IRGlobal* IRBuilder::uniformStructSourceRoot(ExprNode* source)
+{
+    while (source && source->kind == ExprKind::MemberAccess) {
+        auto* member = static_cast<MemberAccessExpr*>(source);
+        if (member->isSwizzle) return nullptr;
+        source = member->object.get();
+    }
+    if (source && source->kind == ExprKind::Index)
+        source = static_cast<IndexExpr*>(source)->array.get();
+    if (!source || source->kind != ExprKind::Identifier) return nullptr;
+    const auto& name = static_cast<IdentifierExpr*>(source)->name;
+    if (nameToValue_.count(name) || localArrayValues_.count(name)) return nullptr;
+    const auto* global = module_->findGlobal(name);
+    return global && global->storage == StorageQualifier::Uniform ? global : nullptr;
+}
+
+bool IRBuilder::hasBoundStructLeaves(TypeNode* type, ExprNode* source)
+{
+    std::string key;
+    if (!storageKey(source, key)) return false;
+    const auto bound = [&](const auto& self, TypeNode* t, const std::string& name) -> bool {
+        if (!t || t->isArray() || t->isSampler()) return false;
+        if (const auto* fields = getStructFields(t)) {
+            if (fields->empty()) return false;
+            for (const auto& field : *fields)
+                if (!self(self, field.type.get(), name + "." + field.name)) return false;
+            return true;
+        }
+        const auto found = nameToValue_.find(name);
+        return found != nameToValue_.end() && found->second != InvalidIRValue;
+    };
+    return bound(bound, type, key);
+}
+
+bool IRBuilder::captureUniformStructElement(TypeNode* type, IndexExpr* source,
+                                            IRValueID index, StructLeafBindings& leaves)
+{
+    if (!source || !source->array || source->array->kind != ExprKind::Identifier) return false;
+    const auto* root = uniformStructSourceRoot(source);
+    if (!root || !root->type.isArray()) return false;
+    int32_t element = 0;
+    bool constant = extractIntScalar(*currentFunction_, index, element);
+    if (!constant && !exprHasSideEffects(source->index.get())) {
+        ConstLanes values;
+        ConstShape shape;
+        ConstEvalScalar integer;
+        if (evaluateConstValue(source->index.get(), values, shape, nullptr, true) &&
+            values.size() == 1 && !shape.rows && !shape.elems &&
+            convertScalar(values[0], BaseType::Int, integer)) {
+            element = static_cast<int32_t>(integer.i);
+            constant = true;
+        }
+    }
+    if (constant && (element < 0 || element >= root->type.arraySize)) return false;
+    if (!constant && (!root->uniformStructRoot ||
+                      !root->uniformStructRoot->dynamicRefusalReason.empty())) return false;
+    const auto collect = [&](const auto& self, TypeNode* t, const std::string& suffix) -> bool {
+        if (!t || t->isArray() || t->isSampler() || getIRType(t).isMatrix()) return false;
+        if (const auto* fields = getStructFields(t)) {
+            for (const auto& field : *fields)
+                if (!self(self, field.type.get(), suffix + "." + field.name)) return false;
+            return true;
+        }
+        const auto* leaf = module_->findGlobal(root->name + "[" +
+            std::to_string(constant ? element : 0) + "]" + suffix);
+        if (!leaf || (!constant && !leaf->uniformStructMember)) return false;
+        auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
+            currentFunction_->allocateValueId(), getIRType(t));
+        inst->loc = source->loc;
+        if (constant) {
+            inst->targetName = leaf->name;
+            inst->uniformSource = leaf->valueId;
+        } else {
+            inst->targetName = root->name + "." + leaf->uniformStructMember->path;
+            inst->uniformSource = root->valueId;
+            inst->uniformStructRead = UniformStructRead{leaf->uniformStructMember->leaf, 0};
+            inst->arrayIndexKind = IRInstruction::ArrayIndexKind::Dynamic;
+            inst->addOperand(index);
+        }
+        leaves.emplace_back(suffix, inst->result);
+        currentBlock_->addInstruction(std::move(inst));
+        return true;
+    };
+    return collect(collect, type, "") && !leaves.empty();
 }
 
 bool IRBuilder::containsMatrixField(TypeNode* typeNode)
