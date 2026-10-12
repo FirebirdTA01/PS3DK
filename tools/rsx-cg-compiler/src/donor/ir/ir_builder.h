@@ -250,8 +250,10 @@ private:
     IRValueID buildCallExpr(CallExpr* expr);
     IRValueID buildCallExprImpl(CallExpr* expr);
     void computeClaimedImplicitInputs();
+    using StructLeafBindings = std::vector<std::pair<std::string, IRValueID>>;
     bool inlineUserFunctionCall(CallExpr* expr, const std::vector<IRValueID>& args,
-                                IRValueID& result);
+                                IRValueID& result,
+                                const std::vector<StructLeafBindings>& structArguments);
     bool buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result);
     void buildConditional(ExprNode* condition, SourceLocation loc,
                           const std::function<void()>& thenArm,
@@ -279,7 +281,8 @@ private:
     IRValueID readTrackedArrayElement(IndexExpr* expr, const std::string& key, int32_t index);
     bool copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type);
     bool buildLocalStructInitializer(const std::string& destination, TypeNode* type, ExprNode* source,
-                                     bool replaceExisting = false);
+                                     bool replaceExisting = false,
+                                     StructLeafBindings* captured = nullptr);
     void emitEntryStructOutputs(ExprNode* target);
     IRValueID emitScalarNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
                                   IRValueID value, const SourceLocation& loc);
@@ -349,6 +352,7 @@ private:
 
     // Struct field resolution helper (looks up struct fields from semantic analyzer)
     const std::vector<StructField>* getStructFields(TypeNode* typeNode);
+    bool containsMatrixField(TypeNode* typeNode);
 
     // Emit StoreOutput instructions for all output struct fields
     void emitStructOutputs(ExprNode* structExpr, const std::vector<StructField>& fields);

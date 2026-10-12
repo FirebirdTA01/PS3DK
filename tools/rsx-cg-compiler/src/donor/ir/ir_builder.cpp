@@ -4897,7 +4897,8 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         }
 
         if (varDecl->initializer && getStructFields(varDecl->type.get()) &&
-            varDecl->initializer->kind == ExprKind::Constructor)
+            (varDecl->initializer->kind == ExprKind::Constructor ||
+             (module_->shaderStage == ShaderStage::Vertex && containsMatrixField(varDecl->type.get()))))
         {
             buildLocalStructInitializer(varDecl->name, varDecl->type.get(), varDecl->initializer.get());
             continue;
@@ -6009,6 +6010,8 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         (expr->resolvedFunction && expr->resolvedFunction->kind == DeclKind::Function)
             ? static_cast<const FunctionDecl*>(expr->resolvedFunction) : nullptr;
     std::vector<IRValueID> argValues;
+    std::vector<StructLeafBindings> structArguments(expr->arguments.size());
+    std::vector<bool> captureStructArgument(expr->arguments.size(), false);
     for (size_t i = 0; i < expr->arguments.size(); ++i)
     {
         if (calleeDecl && i < calleeDecl->parameters.size() &&
@@ -6023,6 +6026,20 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         {
             argValues.push_back(InvalidIRValue);
             continue;
+        }
+        // A matrix-bearing struct has leaf values, not a whole-struct SSA
+        // operand. Defer named leaf capture until every argument has been
+        // evaluated, but before any callee parameter is installed.
+        if (module_->shaderStage == ShaderStage::Vertex && calleeDecl &&
+            (currentFunction_->isEntryPoint || !inlineStack_.empty()) &&
+            i < calleeDecl->parameters.size()) {
+            const auto* param = calleeDecl->parameters[i].get();
+            if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
+                getStructFields(param->type.get()) && containsMatrixField(param->type.get())) {
+                captureStructArgument[i] = true;
+                argValues.push_back(InvalidIRValue);
+                continue;
+            }
         }
         argValues.push_back(buildExpr(expr->arguments[i].get()));
     }
@@ -6585,8 +6602,22 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         (currentFunction_->isEntryPoint || !inlineStack_.empty()) &&
         expr->resolvedFunction->kind == DeclKind::Function)
     {
+        // A later argument may write a member of an earlier named struct.
+        // Copy the completed-argument state, as for by-value arrays. Only
+        // side-effect-free member paths are admitted by this capture path.
+        for (size_t i = 0; i < captureStructArgument.size(); ++i) {
+            if (!captureStructArgument[i]) continue;
+            auto* source = expr->arguments[i].get();
+            if ((source->kind != ExprKind::Identifier && source->kind != ExprKind::MemberAccess &&
+                 source->kind != ExprKind::Index) ||
+                !buildLocalStructInitializer("", calleeDecl->parameters[i]->type.get(), source,
+                                             false, &structArguments[i])) {
+                error(source->loc, "unsupported by-value matrix struct argument (struct-matrix-argument)");
+                return InvalidIRValue;
+            }
+        }
         IRValueID inlined = InvalidIRValue;
-        if (inlineUserFunctionCall(expr, argValues, inlined))
+        if (inlineUserFunctionCall(expr, argValues, inlined, structArguments))
             return inlined;
         return InvalidIRValue;
     }
@@ -6617,7 +6648,8 @@ namespace { bool arrayStorageKey(ExprNode* expr, std::string& key,
 
 bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                                        const std::vector<IRValueID>& args,
-                                       IRValueID& result)
+                                       IRValueID& result,
+                                       const std::vector<StructLeafBindings>& structArguments)
 {
     result = InvalidIRValue;
 
@@ -6827,6 +6859,16 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         // global, and its write to the global lands in the stash and
         // comes back out below (inline-global-stash - this used to be REFUSED).
         stashShadowedGlobal(param->name);
+        if (i < structArguments.size() && !structArguments[i].empty()) {
+            const std::string prefix = param->name + ".";
+            for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+                if (it->first == param->name || it->first.compare(0, prefix.size(), prefix) == 0)
+                    it = nameToValue_.erase(it);
+                else ++it;
+            for (const auto& [suffix, value] : structArguments[i])
+                nameToValue_[param->name + suffix] = value;
+            continue;
+        }
         // `helper(IN)` with IN a flattened uniform struct parameter: the
         // parameter is IN's members under the parameter's name (libretro
         // passes its `uniform input IN` to helpers this way; it was
@@ -8589,7 +8631,7 @@ bool arrayStorageKey(ExprNode* expr, std::string& key,
 }
 
 bool IRBuilder::buildLocalStructInitializer(const std::string& destination, TypeNode* type, ExprNode* source,
-                                           bool replaceExisting)
+                                           bool replaceExisting, StructLeafBindings* captured)
 {
     // A struct has qualified leaf bindings, not a scalar IR value. Snapshot
     // every source leaf in source order before installing any destination.
@@ -8612,6 +8654,25 @@ bool IRBuilder::buildLocalStructInitializer(const std::string& destination, Type
             auto object = self(self, member->object.get());
             if (!object) return nullptr;
             result = std::make_unique<MemberAccessExpr>(member->loc, std::move(object), member->member);
+        }
+        else if (captured && expr->kind == ExprKind::Index) {
+            // Only a literal-selected file-scope uniform element is in this
+            // slice. Cloning a runtime or effectful index per leaf would read
+            // different elements; dynamic aggregate arguments need a saved
+            // index and the shared layout descriptor instead.
+            auto* index = static_cast<IndexExpr*>(expr);
+            if (!index->array || index->array->kind != ExprKind::Identifier ||
+                !index->index || index->index->kind != ExprKind::Literal) return nullptr;
+            auto* id = static_cast<IdentifierExpr*>(index->array.get());
+            auto* literal = static_cast<LiteralExpr*>(index->index.get());
+            const auto* global = module_->findGlobal(id->name);
+            if (literal->literalKind != LiteralExpr::LiteralKind::Int || nameToValue_.count(id->name) ||
+                localArrayValues_.count(id->name) || !global || !global->type.isArray() ||
+                global->storage != StorageQualifier::Uniform) return nullptr;
+            auto array = self(self, index->array.get());
+            auto subscript = std::make_unique<LiteralExpr>(literal->loc, std::get<int64_t>(literal->value));
+            subscript->resolvedType = literal->resolvedType;
+            result = std::make_unique<IndexExpr>(index->loc, std::move(array), std::move(subscript));
         }
         if (result) result->resolvedType = expr->resolvedType;
         return result;
@@ -8702,6 +8763,10 @@ bool IRBuilder::buildLocalStructInitializer(const std::string& destination, Type
         return true;
     };
     if (!collect(collect, destination, type, source)) return false;
+    if (captured) {
+        *captured = std::move(leaves);
+        return true;
+    }
     if (replaceExisting)
     {
         // A former partial write must not survive replacement of its parent.
@@ -11153,6 +11218,16 @@ IRTypeInfo IRBuilder::getExprType(ExprNode* expr)
 {
     if (!expr || !expr->resolvedType) return IRTypeInfo::Void();
     return getIRType(expr->resolvedType.get());
+}
+
+bool IRBuilder::containsMatrixField(TypeNode* typeNode)
+{
+    if (!typeNode || typeNode->isArray()) return false;
+    if (getIRType(typeNode).isMatrix()) return true;
+    if (const auto* fields = getStructFields(typeNode))
+        for (const auto& field : *fields)
+            if (containsMatrixField(field.type.get())) return true;
+    return false;
 }
 
 const std::vector<StructField>* IRBuilder::getStructFields(TypeNode* typeNode)
