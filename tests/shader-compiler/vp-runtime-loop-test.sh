@@ -18,7 +18,7 @@ compiler="${1:-${RSX_CG_COMPILER:-}}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 python3 - "$compiler" "$work" "$here" <<'PY'
-import random, struct, subprocess, sys
+import math, random, struct, subprocess, sys
 from pathlib import Path
 compiler, work = sys.argv[1], Path(sys.argv[2])
 sys.path.insert(0, sys.argv[3])
@@ -28,7 +28,7 @@ ev.branches_selftest()
 ev.indexed_constants_selftest()
 f32 = lambda v: struct.unpack('>f', struct.pack('>f', v))[0]
 NL = chr(10)
-H = 'uniform float n; uniform float4 k[8]; uniform float4 j[8]; uniform float4 u[4]; uniform float m; uniform float4 f;' + NL
+H = 'uniform float n; uniform float4 k[8]; uniform float4 j[8]; uniform float4 u[4]; uniform float m; uniform float4 f; uniform float g;' + NL
 M = 'float4 main(float4 p : POSITION) : POSITION { '
 add = lambda a, b: [x + y for x, y in zip(a, b)]
 sub = lambda a, b: [x - y for x, y in zip(a, b)]
@@ -68,6 +68,17 @@ def e_in_if(n, p, U):
     if U['f'][0] != 0:
         return sc(e_sum(n, p, U), 2.0)
     return [x - 1 for x in p]
+def e_untaken(n, p, U):
+    # `if (f.x != 0) for (i = 0; i < n; --i) s += 1;` - the loop never ends
+    # once entered, so only rows where it is NOT entered are judged: the
+    # arm untaken (f.x == 0), or taken with a bound it does not pass.
+    return p
+def e_arms(n, p, U):
+    if U['f'][0] != 0:
+        return sc(p, 2.0)
+    if U['g'][0] > 0:
+        return e_sum(n, p, U)
+    return [x - 1 for x in p]
 def e_float(n, p, U):
     s = p
     for i in trips(n): s = add(sc(s, 0.5), U['k'][i])
@@ -85,6 +96,14 @@ ROWS = [
     # Inside a flattened if: the loop runs, the join selects (both arms judged).
     ('loop_in_if', M + 'float4 s = p; if (f.x != 0) { for (int i = 0; i < n; ++i) s += k[i]; s = s * 2; } '
                    'else { s = s - 1; } return s; }', e_in_if),
+    # A loop in an UNTAKEN arm must not run: a flattened if executes both arms,
+    # so the arm's condition joins the loop's exit test (codex S3-CONTROL).
+    # This loop diverges once entered; judged only where it is not.
+    ('untaken_arm_loop', M + 'float4 s = p; if (f.x != 0) { for (int i = 0; i < n; --i) s += 1; } return s; }',
+     e_untaken),
+    # Else arm, nested if, and the loop inside an inlined helper.
+    ('arms_and_helper', 'float4 h(float4 s) { for (int i = 0; i < n; ++i) s += k[i]; return s; }' + NL + M +
+     'float4 s = p; if (f.x != 0) { s = s * 2; } else { if (g > 0) s = h(s); else s = s - 1; } return s; }', e_arms),
     ('float_induction', M + 'float4 s = p; for (float i = 0; i < n; i += 1) s = s * 0.5 + k[int(i)]; return s; }', e_float),
 ]
 NS = [0, 1, 2, 2.5, 3, 5, 7.9, 8, -1]
@@ -97,6 +116,20 @@ def compile_one(name, src):
                        capture_output=True, text=True, timeout=120)
     return p, o
 
+def agrees(got, want):
+    # Exactly four finite lanes, each within tolerance: a NaN lane or a
+    # short / empty output is WRONG, never vacuously right (codex S3-TEST).
+    if got is None or len(got) != 4 or len(want) != 4:
+        return False
+    if not all(isinstance(a, float) and math.isfinite(a) for a in got):
+        return False
+    return all(abs(a - b) <= 1e-5 * max(1.0, abs(b)) for a, b in zip(got, want))
+
+assert not agrees([math.nan] * 4, [0.0] * 4), 'instrument control: a NaN output was accepted'
+assert not agrees([], [0.0] * 4), 'instrument control: an empty output was accepted'
+assert not agrees([0.0] * 3, [0.0] * 4), 'instrument control: a three-lane output was accepted'
+assert agrees([1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0]), 'instrument control: an exact output was refused'
+
 def judge(blob, fn, seed):
     rnd = random.Random(seed); wrong = 0
     for n in NS:
@@ -104,15 +137,19 @@ def judge(blob, fn, seed):
              'j': [[f32(rnd.uniform(-2, 2)) for _ in range(4)] for _ in range(8)],
              'u': [[f32(rnd.uniform(-2, 2)) for _ in range(4)] for _ in range(4)],
              'm': [f32(rnd.choice([0, 1, 2]) + 0.25), 0, 0, 0],
-             'f': [float(rnd.choice([0, 1])), 0, 0, 0]}
+             'f': [float(rnd.choice([0, 1])), 0, 0, 0],
+             'g': [float(rnd.choice([-1, 1])), 0, 0, 0]}
+        if fn is e_untaken:
+            # Only states that do not enter the divergent loop.
+            U['f'] = [0.0 if n > 0 else float(rnd.choice([0, 1])), 0, 0, 0]
         p = [f32(rnd.uniform(-1, 1)) for _ in range(4)]
-        uni = {'n': [n, 0, 0, 0], 'm': U['m'], 'f': U['f']}
+        uni = {'n': [n, 0, 0, 0], 'm': U['m'], 'f': U['f'], 'g': U['g']}
         for a in ('k', 'j', 'u'):
             uni.update({'%s[%d]' % (a, i): v for i, v in enumerate(U[a])})
         got = ev.evaluate(blob, uni, inputs={0: p}, binary32=True, predication=True,
                           indexed_constants=True, branches=True).get(0)
         want = fn(n, p, U)
-        if got is None or any(abs(a - b) > 1e-5 * max(1.0, abs(b)) for a, b in zip(got, want)):
+        if not agrees(got, want):
             wrong += 1
             if wrong == 1: fails_detail.append('n=%s got %s want %s' % (n, got, want))
     return wrong

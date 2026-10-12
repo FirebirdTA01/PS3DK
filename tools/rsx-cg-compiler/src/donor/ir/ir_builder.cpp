@@ -2615,7 +2615,9 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
 
     // Build then block
     currentBlock_ = thenBlock;
+    armConditions_.emplace_back(condValue, true);
     thenArm();
+    armConditions_.pop_back();
     const bool thenTerminated = currentBlock_->hasTerminator();
     if (!thenTerminated && !flat)
     {
@@ -2630,7 +2632,9 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
     {
         scope_ = preIf;  // restore before processing else
         currentBlock_ = elseBlock;
+        armConditions_.emplace_back(condValue, false);
         (*elseArm)();
+        armConditions_.pop_back();
         elseTerminated = currentBlock_->hasTerminator();
         if (!elseTerminated && !flat)
         {
@@ -3504,6 +3508,9 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         block->addInstruction(std::move(begin));
     }
     ++hardwareLoopDepth_;
+    // The source's own test, before any arm guard joins it: the header
+    // checks below judge this compare.
+    IRValueID sourceTest = InvalidIRValue;
     {
         const auto beforeCondition = scope_.fold();
         IRValueID cond = buildExpr(stmt->condition.get());
@@ -3515,6 +3522,19 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             --hardwareLoopDepth_;
             blockDeclared_.pop_back();
             return refuse("the loop condition assigns a variable");
+        }
+        // A vertex loop under a run-time if runs only where its arms are
+        // taken: the arm conditions (defined before the loop) join the test.
+        sourceTest = cond;
+        if (vertexLoop && !armConditions_.empty()) {
+            IRValueID taken = InvalidIRValue;
+            for (const auto& [armCond, polarity] : armConditions_) {
+                IRValueID term = polarity ? armCond
+                    : emitInstruction(IROp::LogicalNot, IRTypeInfo::Bool(), {armCond}, stmt->loc);
+                taken = taken == InvalidIRValue ? term
+                    : emitInstruction(IROp::LogicalAnd, IRTypeInfo::Bool(), {taken, term}, stmt->loc);
+            }
+            cond = emitInstruction(IROp::LogicalAnd, IRTypeInfo::Bool(), {cond, taken}, stmt->loc);
         }
         auto brk = std::make_unique<IRInstruction>(IROp::LoopBreakIf, InvalidIRValue, IRTypeInfo::Void());
         brk->addOperand(cond);
@@ -3781,7 +3801,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             if (block->instructions[i]->op == IROp::LoopBreakIf) { test = block->instructions[i].get(); break; }
         const IRInstruction* cmp = nullptr;
         if (test && !test->operands.empty()) {
-            const auto d = defs.find(test->operands[0]);
+            const auto d = defs.find(sourceTest != InvalidIRValue ? sourceTest : test->operands[0]);
             if (d != defs.end()) cmp = d->second;
         }
         // The test must read the induction carry, directly or through one

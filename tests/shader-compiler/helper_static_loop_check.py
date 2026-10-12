@@ -66,7 +66,7 @@ def main():
                     out=vp_check.evaluate(data,{'N':[float(n),0.,0.,0.]},inputs={0:[float(x),.3,-.2,1.]},binary32=True,
                                           predication=True,indexed_constants=True,branches=True,max_steps=20000)
                     got=out.get(1)
-                    assert got is not None and all(abs(a-b)<=1e-6*max(1.,abs(b)) for a,b in zip(got,want)),f'{name}: x={x} N={n} gave {got}, want {want}'
+                    assert got is not None and len(got)==4 and len(want)==4 and all(abs(a-b)<=1e-6*max(1.,abs(b)) for a,b in zip(got,want)),f'{name}: x={x} N={n} gave {got}, want {want}'
                 accepts+=1
             else:
                 compile_one(name,row['source'],row['profile'],row['refusal']);refusals+=1
