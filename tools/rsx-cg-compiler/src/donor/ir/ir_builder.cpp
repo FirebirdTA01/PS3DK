@@ -30,6 +30,23 @@ std::optional<float> angleConversionScale(const std::string& name)
 // the storage and broadcasts garbage, which made a libc++-built compiler
 // refuse `uniform float4 c = 0.5;` (tests/shader-compiler/
 // cross-stl-determinism-test.sh).  Copy the element first.
+// A sampler member of a file-scope uniform struct keeps its binding
+// (`struct S { sampler2D tex : TEXUNIT3; }; uniform S s[2];`): measured, the
+// reference records "s[k].tex" with semantic TEXUNIT3 on unit 3, read or not.
+// The member globals used to carry no semantic and sampled unit 0.
+void carrySamplerFieldBinding(IRGlobal& member, const StructField& field)
+{
+    if (!field.type || !field.type->isSampler() || field.semantic.isEmpty()) return;
+    member.semanticName = field.semantic.name;
+    member.rawSemanticName = field.semantic.rawName;
+    member.semanticIndex = field.semantic.index;
+    if (field.semantic.hasExplicitRegister())
+    {
+        member.explicitRegisterBank = field.semantic.explicitRegisterBank;
+        member.explicitRegisterIndex = field.semantic.explicitRegisterIndex;
+    }
+}
+
 template <class V>
 void broadcastFirst(V& v, size_t n)
 {
@@ -1401,6 +1418,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                             memberGlobal.type = fieldIRType;
                             memberGlobal.valueId = module_->allocateGlobalId();
                             memberGlobal.storage = StorageQualifier::Uniform;
+                            carrySamplerFieldBinding(memberGlobal, field);
 
                             module_->addGlobal(memberGlobal);
                             nameToValue_[qualifiedName] = memberGlobal.valueId;
@@ -1436,6 +1454,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                             memberGlobal.type = getIRType(field.type.get());
                             memberGlobal.valueId = module_->allocateGlobalId();
                             memberGlobal.storage = StorageQualifier::Uniform;
+                            carrySamplerFieldBinding(memberGlobal, field);
                             module_->addGlobal(memberGlobal);
                         }
                     };

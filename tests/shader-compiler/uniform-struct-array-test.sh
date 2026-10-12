@@ -82,6 +82,33 @@ else:
     if names != want: fails.append('fp records: got %s want %s' % (names, want))
     print('  %-28s %s' % ('fp records', 'ok' if names == want else 'WRONG'))
 
+# A sampler member's binding (`sampler2D tex : TEXUNIT3`) carries to every
+# element, read or not, and the TEX samples unit 3; the same for a plain
+# uniform struct (codex's probe; both used to sample unit 0).
+def sampler_info(b):
+    h = struct.unpack_from('>8I', b, 0); recs = []
+    for i in range(h[3]):
+        x = struct.unpack_from('>11I', b, h[4] + 48 * i)
+        nm = b[x[4]:b.index(0, x[4])].decode()
+        if nm.startswith('s'):
+            recs.append((nm, x[1], b[x[7]:b.index(0, x[7])].decode() if x[7] else '', x[10]))
+    w = struct.unpack_from('>%dI' % (h[6] // 4), b, h[7])
+    return recs, [(w[i] >> 1) & 0xf for i in range(0, len(w), 4) if (w[i] & 0xff00) == 0x1700]
+for name, src, want in [
+    ('sampler_member_array', 'struct S { sampler2D tex : TEXUNIT3; };' + NL + 'uniform S s[2];' + NL +
+     'float4 main(float2 uv : TEXCOORD0) : COLOR { return tex2D(s[1].tex, uv); }',
+     ([('s[0].tex', 0x803, 'TEXUNIT3', 0), ('s[1].tex', 0x803, 'TEXUNIT3', 1)], [3])),
+    ('sampler_member_struct', 'struct S { sampler2D tex : TEXUNIT3; };' + NL + 'uniform S s;' + NL +
+     'float4 main(float2 uv : TEXCOORD0) : COLOR { return tex2D(s.tex, uv); }',
+     ([('s.tex', 0x803, 'TEXUNIT3', 1)], [3])),
+]:
+    p, o = compile_one(name, src, 'sce_fp_rsx')
+    if p.returncode != 0 or not o.exists():
+        fails.append('%s: refused (rc %d)' % (name, p.returncode)); print('  %-28s REFUSED' % name); continue
+    got = sampler_info(o.read_bytes())
+    if got != want: fails.append('%s: got %s want %s' % (name, got, want))
+    print('  %-28s %s' % (name, 'ok' if got == want else 'WRONG'))
+
 # A run-time index is refused by name, with no container.
 p, o = compile_one('dyn', 'struct S { float4 a; };' + NL + 'uniform S s[4]; uniform float i;' + NL +
                    'float4 main(float4 p : POSITION) : POSITION { return s[int(i)].a + p; }')
