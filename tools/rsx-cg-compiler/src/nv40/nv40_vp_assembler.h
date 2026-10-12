@@ -17,6 +17,7 @@
  */
 
 #include <cstddef>
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -75,6 +76,10 @@ public:
     bool inputConflict() const { return inputConflict_; }
     uint32_t outputMask() const { return outputMask_; }
     int      numTempRegs() const { return numTempRegs_; }
+    // The highest temp index the program names, as a destination OR a
+    // source (-1 when none): a source past the register file is as invalid
+    // as a destination there.
+    int      maxTempIndex() const { return std::max(numTempRegs_ - 1, maxTempSource_); }
 
     bool empty() const { return words_.empty(); }
 
@@ -83,6 +88,7 @@ private:
     uint32_t              inputMask_   = 0;
     uint32_t              outputMask_  = 0;
     int                   numTempRegs_ = 0;
+    int                   maxTempSource_ = -1;
     bool                  inputConflict_ = false;
 
     // Returns the base offset of the current instruction inside words_.

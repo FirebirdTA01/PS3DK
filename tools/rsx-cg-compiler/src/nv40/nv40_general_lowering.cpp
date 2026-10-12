@@ -12238,9 +12238,9 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     // bits, so an allocation past R31 used to
     // encode silently - an invalid program, compiled "successfully" (found
     // compiling PSGL's fixed pipeline: R61).  Refuse instead, by resource.
-    if (asm_.numTempRegs() > 32) {
+    if (asm_.maxTempIndex() > 31) {
         out.diagnostics.push_back(
-            "nv40-general-vp: the program needs " + std::to_string(asm_.numTempRegs()) +
+            "nv40-general-vp: the program needs " + std::to_string(asm_.maxTempIndex() + 1) +
             " temporary registers; the vertex engine has 32 (vp-register-budget); refusing");
         out.ok = false;
         return out;

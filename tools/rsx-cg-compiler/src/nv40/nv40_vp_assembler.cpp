@@ -145,6 +145,7 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
         case NVFXSR_TEMP:
             sr |= (NVFX_VP(SRC_REG_TYPE_TEMP) << NVFX_VP(SRC_REG_TYPE_SHIFT));
             sr |= (src.reg.index << NVFX_VP(SRC_TEMP_SRC_SHIFT));
+            if (src.reg.index > maxTempSource_) maxTempSource_ = src.reg.index;
             break;
         case NVFXSR_INPUT:
             sr |= (NVFX_VP(SRC_REG_TYPE_INPUT) << NVFX_VP(SRC_REG_TYPE_SHIFT));
@@ -327,6 +328,7 @@ void VpAssembler::emitCoIssued(const struct nvfx_insn& vecInsn,
         case NVFXSR_TEMP:
             sr |= (NVFX_VP(SRC_REG_TYPE_TEMP) << NVFX_VP(SRC_REG_TYPE_SHIFT));
             sr |= (src.reg.index << NVFX_VP(SRC_TEMP_SRC_SHIFT));
+            if (src.reg.index > maxTempSource_) maxTempSource_ = src.reg.index;
             break;
         case NVFXSR_INPUT:
             sr |= (NVFX_VP(SRC_REG_TYPE_INPUT) << NVFX_VP(SRC_REG_TYPE_SHIFT));
