@@ -2152,9 +2152,13 @@ private:
         // schedule would not fit the encodable temp range and the lowered
         // order would, keep the lowered order.  Programs whose schedule fits
         // are untouched.
-        if (profile_ == GeneralProfile::Fragment &&
-            peakLiveCount(ordered) >= kFpEncodableTemps &&
-            peakLiveCount(program_.instrs) < kFpEncodableTemps)
+        // The same holds for a vertex program against its 32 temporaries
+        // (vp-register-budget): a schedule past R31 is refused, the lowered
+        // order may fit.
+        const int encodableTemps = profile_ == GeneralProfile::Fragment ? kFpEncodableTemps
+                                                                       : kVpEncodableTemps;
+        if (peakLiveCount(ordered) >= encodableTemps &&
+            peakLiveCount(program_.instrs) < encodableTemps)
         {
             if (dumpOrder)
                 std::fprintf(stderr, "ordering: schedule needs %d live temps, lowered order %d; keeping the lowered order\n",
@@ -2169,6 +2173,8 @@ private:
     // emitFragmentVirtual enforces on the finished program as
     // kFpEncodedTempRegisterLimit).
     static constexpr int kFpEncodableTemps = 48;
+    // The vertex engine's temporaries (R0-R31); the emitter refuses past R31.
+    static constexpr int kVpEncodableTemps = 33;
 
     // Peak number of virtual temps live at once in `instrs`, counted the way
     // allocatePhysicalTemps counts it: a value lives from its first
