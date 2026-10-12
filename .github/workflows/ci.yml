@@ -801,7 +801,7 @@ jobs:
       - name: Test VP struct-array blocks and indexed constant values
         run: bash tests/shader-compiler/vp-struct-array-dynamic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test VP by-value matrix struct arguments
-        run: bash tests/shader-compiler/vp-struct-matrix-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+        run: bash tests/shader-compiler/vp-struct-matrix-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler --loops
       - name: A vertex select with a vector condition selects per lane
         run: bash tests/shader-compiler/vp-vector-select-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
