@@ -2185,6 +2185,56 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         buildBlockStmt(decl->body.get());
     }
 
+    // An `out` parameter of a fragment entry written under a branch
+    // (strip_branch fs_multi: `color = ...` in every arm of nested ifs)
+    // emitted its store inside each arm, and the flatten refuses an output
+    // store a path can skip.  The parameter's name is joined at every merge
+    // like a local's, so its final binding IS the output: when the body
+    // ends in one block, with no return or discard anywhere, every store of
+    // such an output that sits outside that block is replaced by one store
+    // of the final value there.
+    if (currentFunction_->isEntryPoint && module_->shaderStage == ShaderStage::Fragment &&
+        !currentBlock_->hasTerminator())
+    {
+        bool returnsOrKills = false;
+        for (const auto& bp : currentFunction_->blocks)
+            if (bp)
+                for (const auto& ip : bp->instructions)
+                    if (ip && (ip->op == IROp::Return || ip->op == IROp::Discard)) returnsOrKills = true;
+        if (!returnsOrKills)
+            for (const auto& param : decl->parameters)
+            {
+                if (!param || (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut))
+                    continue;
+                const bool defaultedOut = isDefaultedFragmentOutput(param.get());
+                if (param->semantic.isEmpty() && !defaultedOut) continue;
+                if (getStructFields(param->type.get()) || getIRType(param->type.get()).isArray()) continue;
+                const std::string sem = defaultedOut ? std::string("COLOR") : param->semantic.name;
+                const int semIndex = defaultedOut ? 0 : param->semantic.index;
+                auto isStore = [&](const std::unique_ptr<IRInstruction>& ip) {
+                    return ip && ip->op == IROp::StoreOutput && ip->semanticName == sem &&
+                           ip->semanticIndex == semIndex && ip->fieldName.empty();
+                };
+                bool offBlock = false;
+                for (const auto& bp : currentFunction_->blocks)
+                    if (bp && bp.get() != currentBlock_)
+                        for (const auto& ip : bp->instructions)
+                            if (isStore(ip)) offBlock = true;
+                const auto bound = nameToValue_.find(param->name);
+                if (!offBlock || bound == nameToValue_.end()) continue;
+                for (const auto& bp : currentFunction_->blocks)
+                    if (bp)
+                        bp->instructions.erase(std::remove_if(bp->instructions.begin(), bp->instructions.end(), isStore),
+                                               bp->instructions.end());
+                auto store = std::make_unique<IRInstruction>(IROp::StoreOutput, InvalidIRValue, IRTypeInfo::Void());
+                store->addOperand(bound->second);
+                store->semanticName = sem;
+                store->rawSemanticName = defaultedOut ? std::string("COLOR") : param->semantic.rawName;
+                store->semanticIndex = semIndex;
+                currentBlock_->addInstruction(std::move(store));
+            }
+    }
+
     // Ensure function has a terminator
     if (!currentBlock_->hasTerminator())
     {
