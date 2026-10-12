@@ -86,5 +86,33 @@ for abi in ilp32 lp64; do
     fi
 done
 
+# A 64-bit integer constant under a TOC that holds constants (-mminimal-toc,
+# -mcmodel=small).  Since 0059 (ILP32 Pmode is DImode) a DImode constant was
+# taken for a TOC entry, but an ILP32 TOC slot is 4 bytes, and -O0 died with
+# an internal compiler error in output_toc.  Every cell compiles, and the
+# whole value is still in the assembly: built inline from its four
+# halfwords, or one 8-byte constant.
+cat > "$work/k.c" <<'EOF'
+unsigned long long k1(void) { return 0x123456789abcdef0ULL; }
+unsigned long long k2(unsigned long long x) { return x ^ 0x0fedcba987654321ULL; }
+EOF
+for abi in ilp32 lp64; do
+    flag=(); [ "$abi" = lp64 ] && flag=(-mlp64)
+    for model in -mminimal-toc -mcmodel=small; do
+        for opt in -O0 -O2 -Os; do
+            s="$work/k$abi$model$opt.s"
+            if ! "$bin-gcc" "${B[@]}" "${flag[@]}" "$model" "$opt" -S "$work/k.c" -o "$s" 2>"$work/err"; then
+                fail "64-bit constant, $abi $model $opt: $(grep -m1 -E 'error|internal' "$work/err")"; continue
+            fi
+            if grep -q '0x123456789abcdef0' "$s" ||
+               { grep -q '0x1234' "$s" && grep -q '0x5678' "$s" && grep -q '0x9abc' "$s" && grep -q '0xdef0' "$s"; }; then
+                ok "64-bit constant, $abi $model $opt compiles with its whole value"
+            else
+                fail "64-bit constant, $abi $model $opt: 0x123456789abcdef0 is not in the assembly"
+            fi
+        done
+    done
+done
+
 [ "$status" -eq 0 ] && echo "minimal-toc: PASS"
 exit $status

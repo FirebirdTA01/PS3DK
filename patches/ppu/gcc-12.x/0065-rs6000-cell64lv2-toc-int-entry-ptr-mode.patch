@@ -1,0 +1,27 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: an integer TOC entry fits a TOC slot, not Pmode (cell64lv2)
+
+The cell64lv2 ASM_OUTPUT_SPECIAL_POOL_ENTRY_P admitted an integer constant
+into the TOC when its mode fit Pmode.  It was written when Pmode was SImode
+under ILP32; since 0059 Pmode is DImode there, so with -mminimal-toc or
+-mcmodel=small a DImode constant (unsigned long long f(void) { return
+0x123456789abcdef0ULL; }) became a TOC entry.  An ILP32 TOC slot is
+ptr_mode, 4 bytes, and output_toc asserts the constant fits it: -O0 died
+with an internal compiler error.
+
+Compare against ptr_mode, the slot's width.  ILP32 then keeps a DImode
+constant out of the TOC and builds it inline as before 0059; LP64, where
+ptr_mode is Pmode, is unchanged.
+
+---
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -485,7 +485,7 @@
+        || GET_CODE (X) == LABEL_REF					\
+        || (CONST_INT_P (X)						\
+ 	   && TARGET_CMODEL != CMODEL_MEDIUM				\
+-	   && GET_MODE_BITSIZE (MODE) <= GET_MODE_BITSIZE (Pmode))	\
++	   && GET_MODE_BITSIZE (MODE) <= GET_MODE_BITSIZE (ptr_mode)) \
+        || (CONST_DOUBLE_P (X)						\
+ 	   && ((TARGET_64BIT						\
+ 		&& (TARGET_MINIMAL_TOC					\
