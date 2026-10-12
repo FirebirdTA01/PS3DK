@@ -107,18 +107,82 @@ void Parser::retypeShadowedTypeNames()
         if (tokens[i].type == TokenType::LBRACE) ++b;
         if (tokens[i].type == TokenType::LPAREN) ++q;
     }
-    for (size_t i = 1; i + 1 < tokens.size(); ++i) {
+    const size_t n = tokens.size();
+    // One past the end of the parenthesised group opening at p.
+    const auto skipParens = [&](size_t p) {
+        if (p >= n || tokens[p].type != TokenType::LPAREN) return p;
+        for (size_t m = p + 1; m < n; ++m)
+            if (tokens[m].type == TokenType::RPAREN && parenDepth[m] == parenDepth[p]) return m + 1;
+        return n;
+    };
+    // One past the end of the statement starting at k.
+    const std::function<size_t(size_t)> skipStatement = [&](size_t k) -> size_t {
+        if (k >= n) return n;
+        switch (tokens[k].type) {
+        case TokenType::LBRACE:
+            for (size_t m = k + 1; m < n; ++m)
+                if (tokens[m].type == TokenType::RBRACE && braceDepth[m] == braceDepth[k]) return m + 1;
+            return n;
+        case TokenType::KW_IF: {
+            const size_t e = skipStatement(skipParens(k + 1));
+            return e < n && tokens[e].type == TokenType::KW_ELSE ? skipStatement(e + 1) : e;
+        }
+        case TokenType::KW_FOR:
+        case TokenType::KW_WHILE:
+            return skipStatement(skipParens(k + 1));
+        case TokenType::KW_DO: {
+            size_t e = skipStatement(k + 1);
+            if (e < n && tokens[e].type == TokenType::KW_WHILE) e = skipParens(e + 1);
+            return e < n && tokens[e].type == TokenType::SEMICOLON ? e + 1 : e;
+        }
+        default:
+            for (size_t m = k; m < n; ++m)
+                if (tokens[m].type == TokenType::SEMICOLON && braceDepth[m] == braceDepth[k] &&
+                    parenDepth[m] == parenDepth[k]) return m + 1;
+            return n;
+        }
+    };
+    // `float s = 0, half = t.x;`: a later declarator of a statement-level
+    // declaration whose type is a built-in type.
+    const auto commaDeclarator = [&](size_t i) {
+        if (tokens[i - 1].type != TokenType::COMMA || parenDepth[i] != 0) return false;
+        size_t k = i - 1;
+        while (k > 0) {
+            // A '{' records the depth outside it.
+            const TokenType t = tokens[k - 1].type;
+            if (parenDepth[k - 1] == 0 &&
+                (((t == TokenType::SEMICOLON || t == TokenType::RBRACE) && braceDepth[k - 1] == braceDepth[i]) ||
+                 (t == TokenType::LBRACE && braceDepth[k - 1] + 1 == braceDepth[i]))) break;
+            --k;
+        }
+        while (k < i && (tokens[k].type == TokenType::KW_CONST || tokens[k].type == TokenType::KW_STATIC ||
+                         tokens[k].type == TokenType::KW_UNIFORM || tokens[k].type == TokenType::KW_EXTERN))
+            ++k;
+        return k + 1 < i && isTypeToken(tokens[k]) && !shadowedTypeTokens_.count(k) &&
+               (tokens[k + 1].type == TokenType::IDENTIFIER || shadowedTypeTokens_.count(k + 1));
+    };
+    for (size_t i = 1; i + 1 < n; ++i) {
         if (!shadowable.count(tokens[i].type) || shadowedTypeTokens_.count(i)) continue;
         const TokenType next = tokens[i + 1].type;
         const bool declarator = next == TokenType::OP_ASSIGN || next == TokenType::SEMICOLON ||
             next == TokenType::COMMA || next == TokenType::LBRACKET || next == TokenType::COLON ||
             next == TokenType::RPAREN;
-        if (!declarator || !isTypeToken(tokens[i - 1]) || shadowedTypeTokens_.count(i - 1)) continue;
-        // The scope: a parameter's is the function body that follows its
-        // list; any other declaration's runs to the end of its block.
+        if (!declarator) continue;
+        if (!(isTypeToken(tokens[i - 1]) && !shadowedTypeTokens_.count(i - 1)) && !commaDeclarator(i)) continue;
+        // The scope: a for statement's initialiser's is that whole
+        // statement (`for (float half = 0; ...) if (..) {..} else {..}`); a
+        // parameter's is the function body that follows its list; any other
+        // declaration's runs to the end of its block.
         const int depth = braceDepth[i];
-        size_t end = tokens.size();
-        if (parenDepth[i] > 0) {
+        size_t end = n;
+        size_t open = i;
+        if (parenDepth[i] > 0)
+            while (open > 0 && !(tokens[open].type == TokenType::LPAREN && parenDepth[open] == parenDepth[i] - 1))
+                --open;
+        if (parenDepth[i] > 0 && open > 0 && tokens[open].type == TokenType::LPAREN &&
+            tokens[open - 1].type == TokenType::KW_FOR) {
+            end = skipStatement(open - 1);
+        } else if (parenDepth[i] > 0) {
             size_t k = i;
             while (k < tokens.size() && !(tokens[k].type == TokenType::LBRACE && braceDepth[k] == depth)) {
                 if (tokens[k].type == TokenType::SEMICOLON && braceDepth[k] == depth && parenDepth[k] == 0) break;

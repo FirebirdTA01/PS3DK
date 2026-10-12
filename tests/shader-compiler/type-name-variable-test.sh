@@ -4,8 +4,9 @@
 # reference: every built-in type name except the reserved words float, int
 # and bool may name a variable (half, fixed, the floatN / halfN / fixedN /
 # intN / boolN vectors and matrices, the samplers), and from its declaration
-# to the end of its scope the spelling is that variable.  Judged by value; the
-# reserved words stay refused.
+# to the end of its scope (a for initialiser's: the whole for statement) the
+# spelling is that variable, a later declarator of a list included.  Judged
+# by value; the reserved words stay refused.
 #
 # Usage: tests/shader-compiler/type-name-variable-test.sh <compiler>
 set -u
@@ -34,6 +35,14 @@ VALUE = [
     # Only the declaring scope: after the block, half is the type again.
     ('block_scope', M + 'float s = 0; { float half = t.x; s = half; } half h = half(t.y); return float4(s, h, 0, 1); }',
      lambda t: [t[0], t[1], 0.0, 1.0]),
+    # A for statement's initialiser: its scope is the whole statement, an
+    # if/else body included; after the loop the spelling is the type again.
+    ('for_init_if_else', M + 'float s = 0; for (float half = 0; half < 2; half += 1) '
+                         'if (t.x > 0) { s += half; } else { s += 2 * half; } half q = half(t.y); return float4(s, q, 0, 1); }',
+     lambda t: [1.0 if t[0] > 0 else 2.0, t[1], 0.0, 1.0]),
+    # A later declarator of a declaration list.
+    ('comma_declarator', M + 'float s = t.y, half = t.x; return float4(s, half, 0, 1); }',
+     lambda t: [t[1], t[0], 0.0, 1.0]),
 ]
 REFUSE = [
     ('float_reserved', M + 'float float = t.x; return float4(float, 0, 0, 1); }'),
