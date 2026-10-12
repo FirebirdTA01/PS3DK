@@ -4,8 +4,8 @@
 # on the reference: every element member is a uniform record of its own,
 # "s[2].m", listed element-major in field order, with no record for "s" or
 # "s[k]", and each is allocated like an ordinary uniform (an unread member
-# takes no register).  Judged by records, registers and value; a run-time
-# index is refused by name until it is lowered.
+# takes no register). Judged by records, registers and value; the fragment
+# run-time index still refuses. VP dynamic blocks have a separate value test.
 #
 # Usage: tests/shader-compiler/uniform-struct-array-test.sh <compiler>
 set -u
@@ -109,10 +109,10 @@ for name, src, want in [
     if got != want: fails.append('%s: got %s want %s' % (name, got, want))
     print('  %-28s %s' % (name, 'ok' if got == want else 'WRONG'))
 
-# A run-time index is refused by name, with no container.
+# A fragment run-time index is refused by name, with no container.
 p, o = compile_one('dyn', 'struct S { float4 a; };' + NL + 'uniform S s[4]; uniform float i;' + NL +
-                   'float4 main(float4 p : POSITION) : POSITION { return s[int(i)].a + p; }')
-ok = p.returncode != 0 and not o.exists() and 'struct-array-dynamic-index' in p.stdout + p.stderr
+                   'float4 main(float4 p : TEXCOORD0) : COLOR { return s[int(i)].a + p; }', 'sce_fp_rsx')
+ok = p.returncode == 1 and not o.exists() and 'struct-array-dynamic-index' in p.stdout + p.stderr
 print('  %-28s %s' % ('run-time index refused', 'ok' if ok else 'NOT refused (rc %d)' % p.returncode))
 if not ok: fails.append('run-time index: expected the struct-array-dynamic-index refusal')
 

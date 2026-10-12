@@ -1348,6 +1348,29 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             global.initialIntValues = constIntInit;
             global.initialValue = constInit;
 
+            if (global.storage == StorageQualifier::Uniform && varDecl->type &&
+                varDecl->type->arraySize > 0 && varDecl->type->elementType &&
+                varDecl->type->elementType->baseType == BaseType::Struct &&
+                !varDecl->type->elementType->isArray()) {
+                if (const auto* fields = getStructFields(varDecl->type->elementType.get())) {
+                    IRUniformStructRootInfo info;
+                    info.extent = static_cast<uint32_t>(varDecl->type->arraySize);
+                    info.leafCount = static_cast<uint32_t>(fields->size());
+                    if (!varDecl->semantic.isEmpty())
+                        info.dynamicRefusalReason = "an aggregate binding";
+                    for (const auto& field : *fields) {
+                        const auto type = getIRType(field.type.get());
+                        if (!field.type || field.type->isArray() || type.isMatrix() ||
+                            field.type->baseType == BaseType::Struct ||
+                            (field.type->baseType != BaseType::Float && field.type->baseType != BaseType::Half))
+                            info.dynamicRefusalReason = "a non-flat float/half scalar/vector field";
+                        if (!field.semantic.isEmpty())
+                            info.dynamicRefusalReason = "a member binding";
+                    }
+                    global.uniformStructRoot = std::move(info);
+                }
+            }
+
             module_->addGlobal(global);
 
             // Record the global's value id against its declaration so
@@ -1438,6 +1461,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             {
                 if (const std::vector<StructField>* fields = getStructFields(varDecl->type->elementType.get()))
                 {
+                    uint32_t element = 0, leaf = 0;
                     const auto flatten = [&](const auto& self, const std::vector<StructField>& members,
                                              const std::string& prefix) -> void {
                         for (const auto& field : members)
@@ -1455,11 +1479,17 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                             memberGlobal.valueId = module_->allocateGlobalId();
                             memberGlobal.storage = StorageQualifier::Uniform;
                             carrySamplerFieldBinding(memberGlobal, field);
+                            memberGlobal.uniformStructMember = IRUniformStructMemberOrigin{
+                                global.valueId, element, leaf++,
+                                qualifiedName.substr((varDecl->name + "[" + std::to_string(element) + "].").size())};
                             module_->addGlobal(memberGlobal);
                         }
                     };
-                    for (int k = 0; k < varDecl->type->arraySize; ++k)
+                    for (int k = 0; k < varDecl->type->arraySize; ++k) {
+                        element = static_cast<uint32_t>(k);
+                        leaf = 0;
                         flatten(flatten, *fields, varDecl->name + "[" + std::to_string(k) + "]");
+                    }
                 }
             }
         }
@@ -7975,9 +8005,9 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
         return currentFunction_->nextValueId - 1;
     }
 
-    // A member of an ELEMENT of a uniform struct array by a constant index
-    // (`texunit[2].matrix`, `light[1].a.b`): the flattened uniform
-    // "texunit[2].matrix".  A run-time index is not lowered yet.
+    // A uniform struct-array member keeps its declaration identity. Constant
+    // reads remain ordinary flattened loads; dynamic VP reads name the root
+    // and leaf, for a shared element-major allocation after inlining.
     {
         std::vector<std::string> members{expr->member};
         ExprNode* cur = expr->object.get();
@@ -7997,11 +8027,45 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
         {
             const IRValueID indexValue = buildExpr(index->index.get());
             int32_t k = 0;
-            if (indexValue == InvalidIRValue || !extractIntScalar(*currentFunction_, indexValue, k))
+            if (indexValue == InvalidIRValue) return InvalidIRValue;
+            bool constantIndex = extractIntScalar(*currentFunction_, indexValue, k);
+            if (!constantIndex && module_->shaderStage == ShaderStage::Vertex) {
+                // Literal builtin expressions can still be instructions here
+                // (for example int(abs(-1.0))). Use the existing typed
+                // evaluator before choosing a whole dynamic block. No module
+                // means no identifier/default may be mistaken for a constant;
+                // the evaluator also excludes source-function calls/effects.
+                ConstLanes values;
+                ConstShape shape;
+                ConstEvalScalar integer;
+                if (evaluateConstValue(index->index.get(), values, shape, nullptr, true) &&
+                    values.size() == 1 && !shape.rows && !shape.elems &&
+                    convertScalar(values[0], BaseType::Int, integer)) {
+                    k = static_cast<int32_t>(integer.i);
+                    constantIndex = true;
+                }
+            }
+            if (!constantIndex)
             {
-                error(expr->loc, "a run-time index into the uniform struct array '" + base->name +
-                      "' is not lowered yet (struct-array-dynamic-index)");
-                return InvalidIRValue;
+                const auto* first = module_->findGlobal(base->name + "[0]" + path);
+                if (module_->shaderStage != ShaderStage::Vertex || !array->uniformStructRoot ||
+                    !first || !first->uniformStructMember ||
+                    !array->uniformStructRoot->dynamicRefusalReason.empty()) {
+                    error(expr->loc, "run-time index into uniform struct array '" + base->name +
+                          "' has an unsupported profile or shape (struct-array-dynamic-index)");
+                    return InvalidIRValue;
+                }
+                auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
+                    currentFunction_->allocateValueId(), getExprType(expr));
+                inst->targetName = array->name + "." + first->uniformStructMember->path;
+                inst->uniformSource = array->valueId;
+                inst->uniformStructRead = UniformStructRead{first->uniformStructMember->leaf, 0};
+                inst->arrayIndexKind = IRInstruction::ArrayIndexKind::Dynamic;
+                inst->addOperand(indexValue);
+                inst->loc = expr->loc;
+                const auto id = inst->result;
+                currentBlock_->addInstruction(std::move(inst));
+                return id;
             }
             const std::string name = base->name + "[" + std::to_string(k) + "]" + path;
             const IRGlobal* member = module_->findGlobal(name);

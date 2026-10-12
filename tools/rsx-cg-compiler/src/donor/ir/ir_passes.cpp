@@ -706,6 +706,11 @@ size_t CommonSubexprElimination::InstrHash::operator()(const IRInstruction* inst
             0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= std::hash<int>()(inst->componentIndex) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= std::hash<IRValueID>()(inst->uniformSource) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<int>()(static_cast<int>(inst->arrayIndexKind));
+    if (inst->uniformStructRead) {
+        hash ^= std::hash<uint32_t>()(inst->uniformStructRead->leaf + 1) + (hash << 6);
+        hash ^= std::hash<uint32_t>()(inst->uniformStructRead->row) + (hash << 6);
+    }
 
     // Include targetName in hash for LoadUniform/Call instructions
     if (!inst->targetName.empty())
@@ -737,6 +742,10 @@ bool CommonSubexprElimination::InstrEqual::operator()(const IRInstruction* a,
     // A helper may read the global hidden by an entry parameter of the
     // same name. Equal element indices do not make those loads equal.
     if (a->uniformSource != b->uniformSource) return false;
+    if (a->arrayIndexKind != b->arrayIndexKind) return false;
+    if (a->uniformStructRead.has_value() != b->uniformStructRead.has_value()) return false;
+    if (a->uniformStructRead && (a->uniformStructRead->leaf != b->uniformStructRead->leaf ||
+                                a->uniformStructRead->row != b->uniformStructRead->row)) return false;
 
     // Compare targetName for LoadUniform/Call instructions
     if (a->targetName != b->targetName) return false;

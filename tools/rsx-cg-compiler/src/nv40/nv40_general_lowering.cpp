@@ -304,6 +304,7 @@ struct VirtualProgram
     // does not see the uniform walk (vp-literal-vector-pool made vector literals take
     // a register each, which is what made this reachable).
     int vpConstFloor = 256;
+    rsx_cg::VpUniformStructLayouts uniformStructLayouts;
     std::vector<std::string> diagnostics;
     // Set when ANY lowering could not complete: an unresolved operand, or an
     // IR op this path does not implement.  Emission must not succeed after
@@ -2288,7 +2289,18 @@ private:
     {
         int nextVpMatrixConst = 256;
         int nextVpUniformConst = 467;
-        const std::set<IRValueID> vpRead = rsx_cg::vpReadUniforms(entry_);
+        std::map<IRValueID, rsx_cg::VpUniformStructShape> structShapes;
+        if (profile_ == GeneralProfile::Vertex) {
+            std::string diagnostic;
+            auto shapes = rsx_cg::classifyVpUniformStructShapes(module_, entry_, diagnostic);
+            if (!shapes) {
+                program_.diagnostics.push_back(diagnostic);
+                program_.loweringFailed = true;
+                return;
+            }
+            structShapes = std::move(*shapes);
+        }
+        const std::set<IRValueID> vpRead = rsx_cg::vpStructReadGlobals(module_, entry_);
         // An unread, unpinned VP uniform takes no register (see vpReadUniforms).
         const auto vpUnread = [&](IRValueID id, const void* binding) {
             return profile_ == GeneralProfile::Vertex && !binding && !vpRead.count(id);
@@ -2526,6 +2538,38 @@ private:
         for (const auto& g : module_.globals) {
             if (g.storage != StorageQualifier::Uniform)
                 continue;
+            const auto shape = structShapes.find(g.valueId);
+            if (shape != structShapes.end()) {
+                const uint64_t count = uint64_t(shape->second.extent) * shape->second.stride;
+                const int64_t first = int64_t(nextVpUniformConst) + 1 - static_cast<int64_t>(count);
+                std::string diagnostic;
+                auto layout = first >= 256
+                    ? rsx_cg::bindVpUniformStructLayout(shape->second, static_cast<uint32_t>(first), diagnostic)
+                    : std::optional<rsx_cg::VpUniformStructLayout>{};
+                if (!layout) {
+                    program_.diagnostics.push_back("vp-struct-array-layout: exhausted automatic constant registers");
+                    program_.loweringFailed = true;
+                    return;
+                }
+                nextVpUniformConst = static_cast<int>(first) - 1;
+                program_.uniformStructLayouts.emplace(g.valueId, std::move(*layout));
+                continue;
+            }
+            if (g.uniformStructMember) {
+                const auto& origin = *g.uniformStructMember;
+                auto layout = program_.uniformStructLayouts.find(origin.root);
+                if (layout != program_.uniformStructLayouts.end()) {
+                    std::string diagnostic;
+                    auto reg = rsx_cg::vpUniformStructRegister(layout->second, origin.element, origin.leaf, 0, diagnostic);
+                    if (!reg) {
+                        program_.diagnostics.push_back(diagnostic);
+                        program_.loweringFailed = true;
+                        return;
+                    }
+                    program_.valueToSource[g.valueId] = uniformSrc(static_cast<int>(*reg), false);
+                    continue;
+                }
+            }
             const auto* binding = explicitBindings.find(g.valueId);
             // A pinned global can still be read by an inlined helper when
             // an entry uniform shadows its name. It owns a separate source.
@@ -5306,6 +5350,49 @@ private:
     {
         if (inst.result == InvalidIRValue)
             return;
+        if (inst.uniformStructRead) {
+            const auto& read = *inst.uniformStructRead;
+            const auto layout = program_.uniformStructLayouts.find(inst.uniformSource);
+            int element = inst.componentIndex;
+            const bool constant = inst.arrayIndexKind == IRInstruction::ArrayIndexKind::Constant ||
+                (!inst.operands.empty() && rsx_cg::foldConstantIndex(entry_, inst.operands[0], element));
+            if (layout != program_.uniformStructLayouts.end()) {
+                std::string diagnostic;
+                auto reg = rsx_cg::vpUniformStructRegister(layout->second,
+                    constant ? static_cast<uint32_t>(element) : 0u, read.leaf, read.row, diagnostic);
+                if (!reg) {
+                    program_.diagnostics.push_back(diagnostic);
+                    program_.loweringFailed = true;
+                    return;
+                }
+                const auto base = uniformSrc(static_cast<int>(*reg), false);
+                if (constant) bindArrayElement(inst, base);
+                else lowerDynamicArrayReadAt(inst, base, static_cast<int>(layout->second.shape.stride));
+                return;
+            }
+            // Optimisation may fold the only dynamic index. Then the root
+            // stays on the old per-member allocation, like a literal index.
+            if (constant && element >= 0 && read.row == 0) {
+                for (const auto& g : module_.globals) {
+                    if (!g.uniformStructMember) continue;
+                    const auto& origin = *g.uniformStructMember;
+                    if (origin.root == inst.uniformSource && origin.element == uint32_t(element) && origin.leaf == read.leaf) {
+                        IRInstruction folded = inst;
+                        folded.uniformStructRead.reset();
+                        folded.arrayIndexKind = IRInstruction::ArrayIndexKind::None;
+                        folded.uniformSource = g.valueId;
+                        folded.targetName = g.name;
+                        folded.componentIndex = 0;
+                        folded.operands.clear();
+                        lowerLoadUniform(folded);
+                        return;
+                    }
+                }
+            }
+            program_.diagnostics.push_back("vp-struct-array-layout: missing layout or invalid folded element");
+            program_.loweringFailed = true;
+            return;
+        }
         // An ARRAY element, parameter or file-scope alike: the builder
         // named how it was chosen, the constructor laid the elements out
         // (or failed the program for a run-time index), and this reads
@@ -5469,7 +5556,13 @@ private:
         }
         const VSrc base = arrIt->second.at(0);
         const int stride = inst.resultType.isMatrix() ? inst.resultType.matrixRows : 1;
+        lowerDynamicArrayReadAt(inst, base, stride);
+    }
 
+    // Shared address emitter: struct fields supply an element-major base and
+    // stride; ordinary arrays retain the same conversion and lane policy.
+    void lowerDynamicArrayReadAt(const IRInstruction& inst, const VSrc& base, int stride)
+    {
         // The index: through a cast the index alone consumed, to the
         // float the reference feeds the ARL.
         IRValueID indexValue = inst.operands[0];
@@ -11922,6 +12015,7 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     UcodeOutput out;
     VpAssembler asm_;
     VpAttributes attrs;
+    attrs.uniformStructLayouts = program.uniformStructLayouts;
     int nextLiteralReg = program.nextVpLiteralConst;
     VpLiteralAlloc literalAlloc;
     for (VInstr& vi : program.instrs) {

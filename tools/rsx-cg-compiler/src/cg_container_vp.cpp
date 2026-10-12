@@ -442,7 +442,19 @@ VpContainerResult emitVertexContainerImpl(
     // no cursor; the lowering skips it from the same set (vpReadUniforms).
     // Recorded by (name, paramno) and rewritten after the records are built:
     // a parameter member and a file-scope uniform can share a name.
-    const std::set<IRValueID> vpRead = rsx_cg::vpReadUniforms(*entry);
+    const std::set<IRValueID> vpRead = rsx_cg::vpStructReadGlobals(module, *entry);
+    std::string structDiagnostic;
+    const auto structShapes = rsx_cg::classifyVpUniformStructShapes(module, *entry, structDiagnostic);
+    if (!structShapes) {
+        result.diagnostics.push_back(structDiagnostic);
+        return result;
+    }
+    for (const auto& shape : *structShapes) {
+        if (!attrs.uniformStructLayouts.count(shape.first)) {
+            result.diagnostics.push_back("cg-container-vp: dynamic struct array has no backend layout");
+            return result;
+        }
+    }
     std::set<std::pair<std::string, uint32_t>> unreadUniforms;
 
     // Samplers take a texture unit and never a c[] register, so no cursor
@@ -1036,6 +1048,12 @@ VpContainerResult emitVertexContainerImpl(
     for (const auto& g : module.globals)
     {
         if (g.storage != StorageQualifier::Uniform) continue;
+        const auto structRoot = attrs.uniformStructLayouts.find(g.valueId);
+        if (structRoot != attrs.uniformStructLayouts.end()) {
+            // Use the backend's reservation, not a second allocation walk.
+            nextVectorReg = static_cast<int>(structRoot->second.firstRegister) - 1;
+            continue;
+        }
         if (isStructUniformParent(g)) continue;
         if (vpSamplers && isSamplerIRType(g.type.baseType))
         {
@@ -1117,7 +1135,22 @@ VpContainerResult emitVertexContainerImpl(
         else
         {
             int reg;
-            if (binding)
+            const auto structLayout = g.uniformStructMember
+                ? attrs.uniformStructLayouts.find(g.uniformStructMember->root)
+                : attrs.uniformStructLayouts.end();
+            if (structLayout != attrs.uniformStructLayouts.end()) {
+                const auto& origin = *g.uniformStructMember;
+                auto physical = rsx_cg::vpUniformStructRegister(structLayout->second,
+                    origin.element, origin.leaf, 0, structDiagnostic);
+                if (!physical) {
+                    result.diagnostics.push_back(structDiagnostic);
+                    return result;
+                }
+                const bool used = structLayout->second.shape.leaves[origin.leaf].referencedElements.count(origin.element) != 0;
+                reg = used ? static_cast<int>(*physical) : -1;
+                if (!used) unreadUniforms.insert({g.name, kInvalidIndex});
+            }
+            else if (binding)
                 reg = binding->registers[0];
             else if (hasExplicit)
                 reg = g.explicitRegisterIndex;

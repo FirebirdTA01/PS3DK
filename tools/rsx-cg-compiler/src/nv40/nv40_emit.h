@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "compile_options.h"
+#include "vp_uniform_struct_layout.h"
 
 class IRModule;
 
@@ -95,6 +96,7 @@ struct VpLiteralPoolSlot
 // emission and surfaced via emitVertexProgramEx.
 struct VpAttributes
 {
+    rsx_cg::VpUniformStructLayouts uniformStructLayouts;
     // General lowering implements both explicit C binding spellings, including
     // entry parameters/arrays. Legacy uses its older allocation contract. The
     // shared container must describe the contract used by the emitted ucode.

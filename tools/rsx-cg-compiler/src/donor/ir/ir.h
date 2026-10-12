@@ -355,6 +355,26 @@ public:
 // IR Instructions
 // ============================================================================
 
+// Uniform struct-array reads retain their declaration and leaf identity across
+// inlining. Physical registers are assigned only by the vertex backend.
+struct UniformStructRead {
+    uint32_t leaf = 0;
+    uint32_t row = 0;
+};
+
+struct IRUniformStructMemberOrigin {
+    IRValueID root = InvalidIRValue;
+    uint32_t element = 0;
+    uint32_t leaf = 0;
+    std::string path;
+};
+
+struct IRUniformStructRootInfo {
+    uint32_t extent = 0;
+    uint32_t leafCount = 0;
+    std::string dynamicRefusalReason;
+};
+
 class IRInstruction
 {
 public:
@@ -381,6 +401,7 @@ public:
     // Owner of a uniform load. A global and an entry parameter may have the
     // same name; binding/use classification must not merge those declarations.
     IRValueID uniformSource = InvalidIRValue;
+    std::optional<UniformStructRead> uniformStructRead;
     IROp predOp = IROp::Nop;         // For PredCarry: the inner op (Add/Mul/Mad/...)
     // For Discard: the guard operand is the condition on the path that
     // REACHES the discard, and this flag says the kill fires where that
@@ -572,6 +593,8 @@ struct IRGlobal
     std::string name;
     IRTypeInfo type;
     IRValueID valueId;
+    std::optional<IRUniformStructMemberOrigin> uniformStructMember;
+    std::optional<IRUniformStructRootInfo> uniformStructRoot;
 
     StorageQualifier storage = StorageQualifier::None;
     bool declaredStatic = false;   // `static` was written: a true constant, not a defaulted uniform
