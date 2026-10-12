@@ -8911,8 +8911,6 @@ private:
         if (inst.operands.size() < 3)
             return false;
         const int condWidth = valueWidthOf(inst.operands[0]);
-        if (profile_ == GeneralProfile::Vertex && condWidth != 1)
-            return false;
         const bool perLane = condWidth > 1;
         if (perLane && condWidth != inst.resultType.componentCount())
             return false;
@@ -8980,14 +8978,6 @@ private:
     {
         if (inst.operands.size() < 3 || inst.result == InvalidIRValue)
             return;
-        if (profile_ == GeneralProfile::Vertex &&
-            valueWidthOf(inst.operands[0]) > 1) {
-            program_.diagnostics.push_back(
-                "nv40-general: vertex select with a vector condition needs "
-                "predicated lowering, which the VP path does not have; refusing");
-            program_.loweringFailed = true;
-            return;
-        }
         // A select must preserve the chosen arm exactly. Arithmetic blends
         // fail for non-finite untaken arms and for finite cancellation (1
         // versus 2^30). Keep default write, CC update, and conditional write
@@ -12148,9 +12138,13 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
             // Output registers have their own namespace and no allocated
             // temporary index. Output assignment may fold a masked select
             // directly into an output, just as it folds an ordinary MOV.
-            if (vi.selPerLane || vi.dst.none || vi.dst.address ||
+            // A VECTOR condition (`genMode == float4(1,1,1,1) ? x : y`,
+            // PSGL's fixed pipeline) selects per lane: measured on the
+            // reference, SEQC writes all four CC lanes and the true arm is
+            // written under (NE0) with an identity condition swizzle.
+            if (vi.dst.none || vi.dst.address ||
                 (!vi.dst.output && vi.dst.phys < 0)) {
-                out.diagnostics.push_back("nv40-general-vp: invalid scalar SelPred destination; refusing");
+                out.diagnostics.push_back("nv40-general-vp: invalid SelPred destination; refusing");
                 return out;
             }
             for (int s = 0; s < 2; ++s) {
@@ -12169,13 +12163,16 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
             VInstr cc;
             cc.op = VOp::Mov;
             cc.dst.none = true;
-            cc.dst.writemask = 1;
+            cc.dst.writemask = vi.selPerLane ? vi.dst.writemask : 1;
             cc.ccUpdate = true;
             cc.srcs[0] = vi.srcs[0];
             asm_.emit(makeInsn(cc), VP_OP(MOV));
             mov.srcs[0] = vi.srcs[1];
             mov.predicate = NVFX_COND_NE;
-            mov.predicateSwizzle = {0, 0, 0, 0};
+            if (vi.selPerLane)
+                mov.predicateSwizzle = {0, 1, 2, 3};
+            else
+                mov.predicateSwizzle = {0, 0, 0, 0};
             asm_.emit(makeInsn(mov), VP_OP(MOV));
             continue;
         }

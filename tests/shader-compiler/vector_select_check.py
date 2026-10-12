@@ -9,9 +9,10 @@ the accepted rows matched the values below on 400 inputs with fp_eval's
 condition-code model.  This test pins ours against values computed here from
 Cg semantics, so it needs no reference output in the repository.
 
-Fragment only.  The reference also accepts these shapes on sce_vp_rsx, where
-ours refuses: the VP path has no predicated lowering, and its arithmetic blend
-is not a conditional move.  Those rows are pinned as a named gap.
+The reference also accepts the first two shapes on sce_vp_rsx; ours now
+lowers them there too (per-lane predicated select, as the reference does) and
+they are judged by value on the VP instrument.  A scalar-armed VP select is
+still a named gap.
 """
 import argparse
 import random
@@ -79,10 +80,12 @@ REFUSE_FP = {
     'cond3_arms4': M + ' { return float4((a.xyz > b.xyz) ? a : b); }',
     'if_bool4': M + ' { float4 c = b; if (a > b) c = a; return c; }',
 }
-# The reference accepts the first two; ours refuses them (named gap).
+# The reference accepts these two on the vertex profile; judged by value.
+ACCEPT_VP = {
+    'vp_bool4': (V + 'colour = (a > b) ? a : b; }', per_lane(4, lambda x, y, i: sel(x > y, x, y))),
+    'vp_float4_cond': (V + 'colour = a ? a : b; }', per_lane(4, lambda x, y, i: sel(x != 0, x, y))),
+}
 REFUSE_VP = {
-    'vp_bool4': (V + 'colour = (a > b) ? a : b; }', 'vertex select with a vector condition'),
-    'vp_float4_cond': (V + 'colour = a ? a : b; }', 'vertex select with a vector condition'),
     'vp_scalar_arms': (V + 'colour = (a > b) ? 1.0 : 0.0; }', 'needs 4-component operands'),
 }
 GRID = [-1.5, -1.0, -0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5]
@@ -168,6 +171,28 @@ def main():
             print('  %-20s %s' % (name, 'refused like the reference' if ok else 'NOT refused (rc %d)' % rc))
             if not ok:
                 failures.append('%s: expected exit 1 and no container, got rc %d' % (name, rc))
+        import vp_pow_vector_check as vp_check
+        for name, (text, expect) in ACCEPT_VP.items():
+            rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_vp_rsx')
+            if rc != 0 or not blob:
+                failures.append('%s: refused (rc %d)' % (name, rc)); print('  %-20s REFUSED' % name); continue
+            bad = 0
+            f32 = lambda v: struct.unpack('>f', struct.pack('>f', v))[0]
+            for a, b in vecs:
+                # The VP instrument writes binary32: feed it binary32 inputs, so
+                # a selected arm is compared bit for bit with its own input.
+                a, b = [f32(x) for x in a], [f32(x) for x in b]
+                try:
+                    got = vp_check.evaluate(blob, {}, inputs={0: [0., 0., 0., 1.], 8: a, 9: b},
+                                            binary32=True, predication=True).get(1)
+                except AssertionError as e:
+                    failures.append('%s: unjudged (%s)' % (name, e)); bad = -1; break
+                if got is None or len(got) != 4 or got != expect(a, b):
+                    bad += 1
+                    if bad == 1:
+                        failures.append('%s: a=%s b=%s got %s want %s' % (name, a, b, got, expect(a, b)))
+            print('  %-20s %s' % (name, 'values ok (%d inputs)' % len(vecs) if bad == 0
+                                  else 'UNJUDGED' if bad < 0 else 'WRONG on %d inputs' % bad))
         for name, (text, why) in REFUSE_VP.items():
             rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_vp_rsx')
             ok = rc == 1 and not blob and why in err
