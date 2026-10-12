@@ -736,10 +736,13 @@ public:
         if (mergedReturnSelect_)
             lowerMergedReturnSelect(*mergedReturnSelect_);
         fencePackedReads();
+        propagateVertexCopies();
+        fuseVertexMulAdd();
         legalizeInputOperands();
         renumberSourceIndices();
         applyOrderingPass();
         allocatePhysicalTemps();
+        dropVertexSelfMoves();
         return program_;
     }
 
@@ -9457,7 +9460,11 @@ private:
                  // A compacted insert MOV needs no extra export for the
                  // entry Return, which reads the already-exported value.
                  (producer.op == VOp::Mov && producer.preservePartialOutputMask &&
-                  outputValueUses == 1))) {
+                  outputValueUses == 1) ||
+                 // Nor does a vertex entry's returned value: the Return
+                 // lowers to nothing, so the store is its only reader
+                 // (measured: `return a + b * 3` ends MAD o[HPOS]).
+                 (profile_ == GeneralProfile::Vertex && outputValueUses == 1))) {
                 if (profile_ == GeneralProfile::Fragment &&
                     isScalarUnitOp(producer.op) && valueWidthOf(value) == 1)
                     producer.scalarSourceDemandMask = 0x1;
@@ -9469,6 +9476,39 @@ private:
                     ? producer.dst.writemask & outMask : outMask;
                 producer.dst.userClipOutput = isClipOutput;
                 producer.dst.userClipIndex = inst.semanticIndex;
+                return;
+            }
+        }
+        // VP: a value whose ONE producer is earlier in the program (a
+        // struct member stored at the return) is computed straight into
+        // the output, as the reference does, instead of a temp and a MOV.
+        // Only when nothing has read the temp, no other value names it,
+        // and the store is the value's only reader.
+        if (profile_ == GeneralProfile::Vertex && !isFogOutput &&
+            regIt != program_.valueToVReg.end() && outputValueUses == 1) {
+            const int reg = regIt->second;
+            int defs = 0, reads = 0;
+            VInstr* def = nullptr;
+            for (VInstr& vi : program_.instrs) {
+                for (const VSrc& src : vi.srcs)
+                    if (src.kind == VSrcKind::Temp && src.index == reg) ++reads;
+                if (!vi.dst.none && !vi.dst.output && !vi.dst.address && vi.dst.index == reg) {
+                    ++defs;
+                    def = &vi;
+                }
+            }
+            bool aliased = false;
+            for (const auto& [other, otherReg] : program_.valueToVReg)
+                if (otherReg == reg && other != value) aliased = true;
+            if (defs == 1 && reads == 0 && !aliased && def->op != VOp::Txl &&
+                def->op != VOp::SelPred && def->predicate == 0 && !def->ccUpdate &&
+                (def->dst.writemask & outMask) == outMask) {
+                def->dst.output = true;
+                def->dst.index = outIndex;
+                def->dst.phys = -1;
+                def->dst.writemask = outMask;
+                def->dst.userClipOutput = isClipOutput;
+                def->dst.userClipIndex = inst.semanticIndex;
                 return;
             }
         }
@@ -9759,6 +9799,152 @@ private:
         if (src.kind == VSrcKind::None) return;
         const auto s = src.swizzle;
         src.swizzle = {s[0], s[1], s[2], s[0]};
+    }
+
+    // VP: a temp-to-temp MOV whose destination is written by nothing else
+    // is read through its source (`MOV R4.x, -R1.y; MOV R0.y, R4.x` is
+    // `MOV R0.y, -R1.y`), and the copy is dropped.  Every reader is after
+    // the copy with no loop node between, the source is not rewritten
+    // before a reader, and each reader's lanes fall inside the copy's
+    // mask.  Temp sources only: the readers' input and constant counts do
+    // not change.
+    void propagateVertexCopies()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        const auto writesTemp = [](const VInstr& vi, int reg) {
+            return !vi.dst.none && !vi.dst.output && !vi.dst.address && vi.dst.index == reg;
+        };
+        const auto barrier = [](const VInstr& vi) {
+            return vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (size_t i = 0; i < code.size() && !changed; ++i) {
+                const VInstr& mov = code[i];
+                if (mov.op != VOp::Mov || mov.dst.none || mov.dst.output || mov.dst.address ||
+                    mov.sat || mov.ccUpdate || mov.predicate != 0)
+                    continue;
+                const VSrc s = mov.srcs[0];
+                const int d = mov.dst.index;
+                if (s.kind != VSrcKind::Temp || s.abs || s.relative || s.index == d) continue;
+                bool ok = true;
+                std::vector<std::pair<size_t, size_t>> uses;
+                for (size_t k = 0; k < code.size() && ok; ++k) {
+                    if (k != i && writesTemp(code[k], d)) ok = false;
+                    for (size_t n = 0; n < code[k].srcs.size(); ++n) {
+                        const VSrc& r = code[k].srcs[n];
+                        if (r.kind != VSrcKind::Temp || r.index != d) continue;
+                        if (k <= i) { ok = false; break; }
+                        int lanes = 0;
+                        const int req = requiredSourceMask(code[k], n);
+                        for (int l = 0; l < 4; ++l)
+                            if (req & (1 << l)) lanes |= 1 << r.swizzle[l];
+                        if ((lanes & mov.dst.writemask) != lanes) { ok = false; break; }
+                        uses.push_back({k, n});
+                    }
+                }
+                if (!ok || uses.empty()) continue;
+                for (const auto& [k, n] : uses)
+                    for (size_t m = i + 1; m < k && ok; ++m)
+                        if (barrier(code[m]) || writesTemp(code[m], s.index)) ok = false;
+                if (!ok) continue;
+                for (const auto& [k, n] : uses) {
+                    VSrc& r = code[k].srcs[n];
+                    const auto swz = r.swizzle;
+                    r.index = s.index;
+                    r.phys = s.phys;
+                    for (int l = 0; l < 4; ++l) r.swizzle[l] = s.swizzle[swz[l]];
+                    if (!r.abs) r.neg = r.neg != s.neg;
+                }
+                code.erase(code.begin() + static_cast<std::ptrdiff_t>(i));
+                changed = true;
+            }
+        }
+    }
+
+    // VP: a single-use product feeding an add is one MAD (measured: the
+    // reference computes `a + b*2 + c*3 + ...` as MUL, ADD, then a MAD per
+    // term; we emitted a MUL per term and an ADD per term).  Only when the
+    // MAD reads at most one input register and one constant, as the
+    // reference does: `b*2 + a` on two inputs stays MUL + ADD rather than
+    // staging an input through a MOV.  The product is not moved across a
+    // control-flow node, an address write it reads through, or a rewrite of
+    // a temp it reads.  The VP MAD rounds the product before the add, so
+    // the value is the MUL + ADD value.
+    void fuseVertexMulAdd()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        const auto barrier = [](const VInstr& vi) {
+            return vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd ||
+                   vi.op == VOp::Kil;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            std::unordered_map<int, int> reads, writes;
+            for (const VInstr& vi : code) {
+                for (const VSrc& s : vi.srcs)
+                    if (s.kind == VSrcKind::Temp) ++reads[s.index];
+                if (!vi.dst.none && !vi.dst.output && !vi.dst.address) ++writes[vi.dst.index];
+            }
+            for (size_t i = 0; i < code.size() && !changed; ++i) {
+                VInstr& add = code[i];
+                if (add.op != VOp::Add) continue;
+                for (int k = 0; k < 2 && !changed; ++k) {
+                    const VSrc& p = add.srcs[k];
+                    if (p.kind != VSrcKind::Temp || p.abs || reads[p.index] != 1 ||
+                        writes[p.index] != 1)
+                        continue;
+                    const int mask = add.dst.writemask;
+                    bool identity = true;
+                    for (int l = 0; l < 4; ++l)
+                        if ((mask & (1 << l)) && p.swizzle[l] != l) identity = false;
+                    if (!identity) continue;
+                    size_t j = i;
+                    while (j-- > 0)
+                        if (!code[j].dst.none && !code[j].dst.output && !code[j].dst.address &&
+                            code[j].dst.index == p.index)
+                            break;
+                    if (j >= i) continue;
+                    const VInstr& mul = code[j];
+                    if (mul.op != VOp::Mul || mul.sat || mul.predicate != 0 || mul.ccUpdate ||
+                        (mul.dst.writemask & mask) != mask)
+                        continue;
+                    bool blocked = false;
+                    for (size_t m = j + 1; m < i && !blocked; ++m) {
+                        const VInstr& mid = code[m];
+                        if (barrier(mid)) blocked = true;
+                        for (const VSrc& s : mul.srcs) {
+                            if (s.kind == VSrcKind::Temp && !mid.dst.none && !mid.dst.output &&
+                                !mid.dst.address && mid.dst.index == s.index)
+                                blocked = true;
+                            if (s.relative && mid.dst.address) blocked = true;
+                        }
+                    }
+                    if (blocked) continue;
+                    const VSrc& other = add.srcs[1 - k];
+                    std::set<int> inputs;
+                    int constants = 0;
+                    for (const VSrc* s : {&mul.srcs[0], &mul.srcs[1], &other}) {
+                        if (s->kind == VSrcKind::Input) inputs.insert(s->index);
+                        if (s->kind == VSrcKind::Uniform || s->kind == VSrcKind::Literal) ++constants;
+                    }
+                    if (inputs.size() > 1 || constants > 1) continue;
+                    VInstr mad = add;
+                    mad.op = VOp::Mad;
+                    mad.srcs[0] = mul.srcs[0];
+                    mad.srcs[1] = mul.srcs[1];
+                    mad.srcs[2] = other;
+                    if (p.neg) mad.srcs[0].neg = !mad.srcs[0].neg;
+                    add = mad;
+                    code.erase(code.begin() + static_cast<std::ptrdiff_t>(j));
+                    changed = true;
+                }
+            }
+        }
     }
 
     void legalizeInputOperands()
@@ -10066,6 +10252,28 @@ private:
         }
 
         program_.instrs = std::move(shaped);
+    }
+
+    // VP: a MOV the allocator coalesced onto its own source register
+    // (`MOV R1.x, R1.xxxx`) copies every lane it writes onto itself, so it
+    // is dropped (measured: 2xbrz carried three, the reference none).
+    void dropVertexSelfMoves()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        code.erase(std::remove_if(code.begin(), code.end(), [](const VInstr& vi) {
+            if (vi.op != VOp::Mov || vi.dst.none || vi.dst.output || vi.dst.address ||
+                vi.sat || vi.ccUpdate || vi.predicate != 0 || vi.stubCoIssuePartner ||
+                vi.stubFenceBefore || vi.stubFenceBrBefore)
+                return false;
+            const VSrc& s = vi.srcs[0];
+            if (s.kind != VSrcKind::Temp || s.neg || s.abs || s.relative ||
+                vi.dst.phys < 0 || s.phys != vi.dst.phys)
+                return false;
+            for (int l = 0; l < 4; ++l)
+                if ((vi.dst.writemask & (1 << l)) && s.swizzle[l] != l) return false;
+            return true;
+        }), code.end());
     }
 
     void allocatePhysicalTemps()
