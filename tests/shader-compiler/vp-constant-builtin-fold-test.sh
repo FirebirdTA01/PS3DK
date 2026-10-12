@@ -2,7 +2,10 @@
 # A vertex program's rsqrt / exp2 / log2 / frac of a literal is folded to
 # a constant, bit for bit what the reference folds (each expected word
 # below was measured with sce-cgc 475: the double-precision result rounded
-# once to binary32, subnormal results kept).  rsqrt and log2 of x <= 0 and
+# once to binary32, subnormal results kept); so are dot (binary32 sum of
+# the rounded products, left to right), length (the RSQ-then-RCP rule of
+# sqrt), normalize (each lane times the rounded rsqrt) and lerp
+# (a + t * (b - a), each step rounded).  rsqrt and log2 of x <= 0 and
 # an exp2 that overflows are left to run time, as the reference leaves
 # them.  Ours emitted every one of these as run-time instructions.
 #
@@ -35,6 +38,21 @@ FOLDED = {
              (-72.64484405517578, 0x3eb5d700), (1e9, 0x00000000), (-0.0, 0x00000000), (-1e-9, 0x3f800000),
              (10.122249603271484, 0x3dfa5e00)],
 }
+# dot / length / normalize / lerp of literals, four lanes a compile.
+EXPR_GROUPS = [
+    [('dot(float3(1e8, 1, -1e8), float3(1, 1, 1))', 0x00000000),
+     ('dot(float4(1.5, -2.25, 3.125, 0.1), float4(0.3, 0.7, -1.9, 4.4))', 0xc0d3eb85),
+     ('dot(float2(12.7, -3.3), float2(0.11, 9.8))', 0xc1f78b44),
+     ('length(float3(1, 2, 3))', 0x406f7751)],
+    [('length(float4(0.3, -7.1, 2.2, 5.5))', 0x41140616),
+     ('normalize(float3(1, 2, 3)).x', 0x3e88d677),
+     ('normalize(float3(-4.4, 0.25, 9.1)).z', 0x3f666700),
+     ('lerp(0.1, 0.7, 0.3)', 0x3e8f5c29)],
+    [('lerp(-12.5, 33.3, 0.77)', 0x41b620c4),
+     ('lerp(float3(1.1, 2.2, 3.3), float3(-5.5, 6.6, 0.01), 0.45).y', 0x4085c28f),
+     ('length(float2(3e-3, 4e-3))', 0x3ba3d70a),
+     ('dot(float3(0.1, 0.2, 0.3), float3(0.1, 0.2, 0.3))', 0x3e0f5c2a)],
+]
 RUNTIME = ['rsqrt(0.0)', 'rsqrt(-4.0)', 'log2(0.0)', 'log2(-1.0)', 'exp2(200.0)']
 
 def compile_(name, exprs):
@@ -62,6 +80,18 @@ for fn, cases in FOLDED.items():
         if words != want:
             fails.append('%s group %d: %s, want %s' % (fn, g, ['%08x' % w for w in words], ['%08x' % w for w in want]))
         print('  %-6s %d..%d  %s' % (fn, g, g + len(group) - 1, 'ok' if count == 1 and words == want else 'FAIL'))
+for g, group in enumerate(EXPR_GROUPS):
+    count, blob = compile_('expr%d' % g, [e for e, _ in group])
+    if blob is None:
+        fails.append('expression group %d refused' % g); continue
+    got = ev.evaluate(blob, {}, inputs={0: [0.0] * 4}, binary32=True).get(0)
+    words = [bits(x) for x in got] if got else []
+    want = [w for _, w in group]
+    if count != 1:
+        fails.append('expression group %d: %d instructions, want the folded constant (1)' % (g, count))
+    if words != want:
+        fails.append('expression group %d: %s, want %s' % (g, ['%08x' % w for w in words], ['%08x' % w for w in want]))
+    print('  exprs  %d      %s' % (g, 'ok' if count == 1 and words == want else 'FAIL'))
 for e in RUNTIME:
     count, blob = compile_('rt', [e, '0', '0', '0'])
     if blob is None or count < 2:

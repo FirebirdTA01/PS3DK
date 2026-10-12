@@ -6707,6 +6707,73 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             }
         }
 
+        // VP dot / length / normalize / lerp of literals, measured on 48-64
+        // random inputs each (every other order or precision misses some):
+        //   dot       binary32 sum of the rounded products, left to right;
+        //   length    1 / f32(1 / sqrt(dot)), the RSQ-then-RCP rule of sqrt;
+        //   normalize each lane times f32(1 / sqrt(dot));
+        //   lerp      a + f32(t * f32(b - a)).
+        // A zero or negative dot (length, normalize) is left to run time.
+        if (module_->shaderStage == ShaderStage::Vertex &&
+            (*builtinOp == IROp::Dot || *builtinOp == IROp::Length ||
+             *builtinOp == IROp::Normalize || *builtinOp == IROp::Lerp) &&
+            (resultType.isScalar() || resultType.isVector()) &&
+            (resultType.isVector() ? resultType.elementType : resultType.baseType) != IRType::Float16)
+        {
+            // Each product and sum is rounded on its own: a host compiler may
+            // otherwise contract `s + a * b` into a fused multiply-add (GCC's
+            // default on an FMA target), a different binary32 result.
+            const auto r32 = [](double v) { volatile float r = static_cast<float>(v); return static_cast<float>(r); };
+            const auto vpDot = [&](const std::vector<float>& x, const std::vector<float>& y) {
+                float sum = r32(static_cast<double>(x[0]) * y[0]);
+                for (size_t i = 1; i < x.size(); ++i)
+                    sum = r32(static_cast<double>(sum) + r32(static_cast<double>(x[i]) * y[i]));
+                return sum;
+            };
+            std::vector<std::vector<float>> args(argValues.size());
+            bool constant = !argValues.empty();
+            for (size_t i = 0; i < argValues.size() && constant; ++i)
+                constant = extractFloatComponents(*currentFunction_, argValues[i], args[i]) &&
+                           !args[i].empty() && args[i].size() <= 4;
+            std::vector<float> folded;
+            if (constant && *builtinOp == IROp::Dot && args.size() == 2 &&
+                args[0].size() == args[1].size() && args[0].size() >= 2)
+                folded = {vpDot(args[0], args[1])};
+            else if (constant && (*builtinOp == IROp::Length || *builtinOp == IROp::Normalize) &&
+                     args.size() == 1 && args[0].size() >= 2)
+            {
+                const float d = vpDot(args[0], args[0]);
+                if (std::isfinite(d) && d > 0.0f)
+                {
+                    const float rsq = r32(1.0 / std::sqrt(static_cast<double>(d)));
+                    if (*builtinOp == IROp::Length)
+                        folded = {r32(1.0 / static_cast<double>(rsq))};
+                    else
+                        for (float x : args[0]) folded.push_back(r32(static_cast<double>(x) * rsq));
+                }
+            }
+            else if (constant && *builtinOp == IROp::Lerp && args.size() == 3)
+            {
+                const size_t n = std::max({args[0].size(), args[1].size(), args[2].size()});
+                const auto lane = [&](const std::vector<float>& v, size_t i) { return v.size() == 1 ? v[0] : v[i]; };
+                bool shapes = true;
+                for (const auto& v : args) shapes = shapes && (v.size() == 1 || v.size() == n);
+                for (size_t i = 0; shapes && i < n; ++i)
+                {
+                    const float a0 = lane(args[0], i), b0 = lane(args[1], i), t = lane(args[2], i);
+                    const float diff = r32(static_cast<double>(b0) - a0);
+                    const float scaled = r32(static_cast<double>(t) * diff);
+                    folded.push_back(r32(static_cast<double>(a0) + scaled));
+                }
+            }
+            const size_t width = resultType.isVector() ? static_cast<size_t>(resultType.vectorSize) : 1;
+            bool finite = !folded.empty() && folded.size() == width;
+            for (float v : folded) finite = finite && std::isfinite(v);
+            if (finite)
+                return folded.size() == 1 ? createConstant(resultType, folded[0])
+                                          : createConstant(resultType, folded);
+        }
+
         // dot of two scalars is their product (measured: dot(x - .5, x - .5)
         // at x = .1 is .16); the DP lowerings take vector operands only.
         if (*builtinOp == IROp::Dot && argValues.size() == 2 && expr->arguments.size() == 2 &&
