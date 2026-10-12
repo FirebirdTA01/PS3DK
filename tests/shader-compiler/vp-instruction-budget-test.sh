@@ -5,12 +5,16 @@
 # 1091-instruction program with a success exit.  Now refused by resource
 # (vp-instruction-budget).
 #
-# Rows (`s = s * k[i] + s.yzwx;` repeated): our code generation takes two
-# instructions per line where the reference takes one MAD, so the boundary is
-# pinned on OUR count - 271 lines (543 instructions) compile and are judged
-# by value, 272 lines (545) are refused although the reference fits them in
-# 272 (a named gap: re-derive when the MAD is fused); 545 lines are refused
-# by both.
+# Rows use `s = s * k[i] + p.yzwx;` with |k| <= 0.5, so every value stays
+# bounded (|s| <= 2|p|) and is judged in binary32 against independent float32
+# arithmetic.  Our code generation takes two instructions per line where the
+# reference takes one MAD, so the boundary is pinned on OUR count:
+#   271 lines                     543 instructions   accepted, by value
+#   271 lines + one multiply      544 instructions   accepted, by value (the limit)
+#   272 lines                     545 instructions   refused (the reference fits
+#                                                    it: a named gap)
+#   545 lines                                        refused by both
+# Re-derive the 543/544/545 rows when the MAD is fused.
 #
 # Usage: tests/shader-compiler/vp-instruction-budget-test.sh <compiler>
 set -u
@@ -24,43 +28,52 @@ from pathlib import Path
 compiler, work = sys.argv[1], Path(sys.argv[2])
 sys.path.insert(0, sys.argv[3])
 import vp_pow_vector_check as ev
+f32 = lambda v: struct.unpack('>f', struct.pack('>f', v))[0]
 NL = chr(10)
+TAIL = 's = s * k[199];'
 
-def source(n):
+def source(n, tail=''):
     lines = ['uniform float4 k[200];', 'float4 main(float4 p : POSITION) : POSITION { float4 s = p;']
-    lines += ['s = s * k[%d] + s.yzwx;' % (i % 200) for i in range(n)]
-    return NL.join(lines + ['return s; }']) + NL
+    lines += ['s = s * k[%d] + p.yzwx;' % (i % 200) for i in range(n)]
+    return NL.join(lines + [tail + 'return s; }']) + NL
 
-def compile_one(n):
-    s, o = work / ('n%d.cg' % n), work / ('n%d.vpo' % n)
-    s.write_text(source(n))
+def expect(n, tail, p, k):
+    s = list(p); y = p[1:] + p[:1]
+    for i in range(n):
+        s = [f32(f32(s[c] * k[i % 200][c]) + y[c]) for c in range(4)]
+    if tail:
+        s = [f32(s[c] * k[199][c]) for c in range(4)]
+    return s
+
+def compile_one(name, text):
+    s, o = work / (name + '.cg'), work / (name + '.vpo')
+    s.write_text(text)
     p = subprocess.run([compiler, '-p', 'sce_vp_rsx', '-e', 'main', '--emit-container', str(o), str(s)],
                        capture_output=True, text=True, timeout=300)
     return p, o
 
 fails = []
-p, o = compile_one(271)
-if p.returncode != 0 or not o.exists():
-    fails.append('271 lines: refused (rc %d)' % p.returncode); print('  %-30s REFUSED' % '271 lines accepted')
-else:
+for label, n, tail, want_count in (('543 instructions accepted', 271, '', 543),
+                                   ('544 instructions accepted', 271, TAIL, 544)):
+    p, o = compile_one('n%d%s' % (n, 't' if tail else ''), source(n, tail))
+    if p.returncode != 0 or not o.exists():
+        fails.append('%s: refused (rc %d)' % (label, p.returncode)); print('  %-30s REFUSED' % label); continue
     blob = o.read_bytes(); count = struct.unpack_from('>8I', blob, 0)[6] // 16
-    rnd = random.Random(271); wrong = 0
+    rnd = random.Random(n + len(tail)); wrong = 0
     for _ in range(3):
-        pos = [rnd.uniform(-1, 1) for _ in range(4)]
-        k = [[rnd.uniform(0.2, 0.6) for _ in range(4)] for _ in range(200)]
-        s = list(pos)
-        for i in range(271):
-            y = s[1:] + s[:1]
-            s = [s[c] * k[i % 200][c] + y[c] for c in range(4)]
-        got = ev.evaluate(blob, {'k[%d]' % i: k[i] for i in range(200)}, inputs={0: pos}).get(0)
-        if got is None or len(got) != 4 or not all(math.isfinite(x) and abs(x - y) <= 1e-3 * max(1.0, abs(y))
-                                                  for x, y in zip(got, s)):
+        pos = [f32(rnd.uniform(-1, 1)) for _ in range(4)]
+        k = [[f32(rnd.uniform(-0.5, 0.5)) for _ in range(4)] for _ in range(200)]
+        want = expect(n, tail, pos, k)
+        assert all(math.isfinite(x) for x in want), 'expectation not finite'
+        got = ev.evaluate(blob, {'k[%d]' % i: k[i] for i in range(200)}, inputs={0: pos}, binary32=True).get(0)
+        if got is None or len(got) != 4 or not all(math.isfinite(x) and abs(x - y) <= 1e-5 * max(1.0, abs(y))
+                                                  for x, y in zip(got, want)):
             wrong += 1
-    ok = count <= 544 and wrong == 0
-    print('  %-30s %s' % ('271 lines accepted', 'ok (%d instructions)' % count if ok else '%d instructions, %d wrong' % (count, wrong)))
-    if not ok: fails.append('271 lines: %d instructions, %d wrong' % (count, wrong))
-for n, label in ((272, '272 lines refused (named gap)'), (545, '545 lines refused like the reference')):
-    p, o = compile_one(n)
+    ok = count == want_count and wrong == 0
+    print('  %-30s %s' % (label, 'ok' if ok else '%d instructions, %d wrong' % (count, wrong)))
+    if not ok: fails.append('%s: %d instructions, %d wrong' % (label, count, wrong))
+for label, n in (('545 instructions refused', 272), ('545 lines refused (both)', 545)):
+    p, o = compile_one('n%d' % n, source(n))
     ok = p.returncode == 1 and not o.exists() and 'vp-instruction-budget' in p.stdout + p.stderr
     print('  %-30s %s' % (label, 'refused' if ok else 'NOT refused (rc %d)' % p.returncode))
     if not ok: fails.append('%s: expected exit 1, no container and vp-instruction-budget' % label)

@@ -2173,7 +2173,9 @@ private:
     // emitFragmentVirtual enforces on the finished program as
     // kFpEncodedTempRegisterLimit).
     static constexpr int kFpEncodableTemps = 48;
-    // The vertex engine's temporaries (R0-R31); the emitter refuses past R31.
+    // An EXCLUSIVE threshold, like kFpEncodableTemps above: the first peak
+    // live count that does not fit the vertex engine's 32 temporaries
+    // (R0-R31; the emitter refuses past R31).
     static constexpr int kVpEncodableTemps = 33;
 
     // Peak number of virtual temps live at once in `instrs`, counted the way
