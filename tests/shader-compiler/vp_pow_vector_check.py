@@ -11,6 +11,8 @@ saturation, predication, condition-code updates, indexed inputs, a missing or
 early END - is REFUSED, never ignored.
 Helper-return checks explicitly opt into bank-0 vector condition-code updates
 and predicates; the default pow checks retain their strict instruction subset.
+Indexed-array checks opt into ARL plus address-register-relative constants;
+undefined address lanes and out-of-range constant addresses are refused.
 
 The table follows sce-cgc 475 (measured 2026-09-25): 2 and 3 are multiplies,
 -1 / -0.5 / 0.5 use RCP / RSQ per lane, anything else is LG2 / MUL / EX2 per
@@ -51,8 +53,9 @@ INDEX_CONST = 1 << 1                    # word 3: address-register-relative cons
 COL0 = 1
 
 
-def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False):
-    """Run a VP container; return {output register: [x, y, z, w]}."""
+def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False,
+             indexed_constants=False):
+    """Run a VP container; ARL and relative constants require an explicit opt-in."""
     u = lambda off: struct.unpack_from('>I', blob, off)[0]
     assert len(blob) >= 32 and u(0) == 7003, 'not a VP container'
     size, off = u(24), u(28)
@@ -68,6 +71,7 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False):
         if name in uniforms:
             consts[u(base + 12)] = list(uniforms[name])
     regs, outputs = {}, {}
+    addresses = [[None]*4 for _ in range(2)]
     cc = [None] * 4
     inputs = {0: [0.0, 0.0, 0.0, 1.0]} if inputs is None else inputs
     count = size // 16
@@ -78,7 +82,7 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False):
             if predication and bit in (COND_TEST, COND_UPDATE):
                 continue
             assert not (w[0] & bit), 'unsupported control in instruction %d: %s' % (n, what)
-        assert not (w[3] & INDEX_CONST), 'unsupported control in instruction %d: indexed constant' % n
+        assert indexed_constants or not (w[3] & INDEX_CONST), 'unsupported control in instruction %d: indexed constant' % n
         assert bool(w[3] & 1) == (n == count - 1), 'END flag not on exactly the last instruction'
         vop, sop = (w[1] >> 22) & 31, (w[1] >> 27) & 31
         enabled = [True] * 4
@@ -103,17 +107,36 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False):
 
         def source(field, which):
             kind, reg = field & 3, (field >> 2) & 63
+            assert kind in (1, 2, 3), 'unsupported source kind'
+            constant = (w[1] >> 12) & 511
+            if kind == 3 and w[3] & INDEX_CONST:
+                address = addresses[(w[0] >> 24) & 1][w[0] & 3]
+                assert address is not None, 'relative constant reads undefined address'
+                constant += address
+                assert 0 <= constant < 512, 'constant address out of range'
             values = (regs.get(reg, [None] * 4) if kind == 1
                       else inputs.get((w[1] >> 8) & 15, [None] * 4) if kind == 2
-                      else consts.get((w[1] >> 12) & 511, [None] * 4))
+                      else consts.get(constant, [None] * 4))
             sign = -1.0 if field & 0x10000 else 1.0
             absolute = bool(w[0] & SRC_ABS[which])   # |x| first, then negate
             picked = [values[(field >> (14 - 2 * j)) & 3] for j in range(4)]
             return [None if x is None else sign * (abs(x) if absolute else x) for x in picked]
 
         writes = []
+        address_writes = []
         if vop:
-            a, b, c = source(fields[0], 0), source(fields[1], 1), source(fields[2], 2)
+            if vop == 13:
+                assert indexed_constants, 'unsupported vector opcode ARL (opt-in required)'
+                assert not w[0] & (COND_TEST | COND_UPDATE | (1 << 30)), 'unsupported ARL control'
+                assert ((w[0] >> 15) & 63) < 2, 'invalid ARL destination'
+            # Decode only consumed source slots. Unused slots may contain
+            # arbitrary fields, including a relative source before the ARL.
+            sources = {1: (0,), 2: (0, 1), 3: (0, 2), 4: (0, 1, 2),
+                       5: (0, 1), 7: (0, 1), 9: (0, 1), 10: (0, 1),
+                       11: (0, 1), 12: (0, 1), 13: (0,), 14: (0,),
+                       15: (0,), 16: (0, 1), 18: (0, 1), 19: (0, 1), 20: (0, 1)}
+            assert vop in sources, 'unsupported vector opcode %d' % vop
+            a, b, c = [source(fields[k], k) if k in sources[vop] else [None]*4 for k in range(3)]
             mask = (w[3] >> 13) & 15
             lanes = [j for j in range(4) if mask & (8 >> j) and enabled[j]]
             res = [None] * 4
@@ -121,6 +144,9 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False):
                 args = (a[j], b[j], c[j])
                 if vop == 1:
                     res[j] = a[j]
+                elif vop == 13:
+                    assert a[j] is not None and math.isfinite(a[j]), 'undefined/nonfinite ARL source'
+                    res[j] = math.floor(a[j])
                 elif vop in (5, 7):  # VP DP3 / DP4 (FP DP4 has a different opcode)
                     width = 3 if vop == 5 else 4
                     assert all(a[k] is not None and b[k] is not None for k in range(width)), 'dot reads an undefined lane'
@@ -147,7 +173,10 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False):
                     raise AssertionError('unsupported vector opcode %d' % vop)
             out = bool(w[0] & (1 << 30))
             dst = (w[3] >> 2) & 31 if out else (w[0] >> 15) & 63
-            writes.append((out, dst, lanes, res))
+            if vop == 13:
+                address_writes.append((dst, lanes, res))
+            else:
+                writes.append((out, dst, lanes, res))
         if sop:
             x = source(fields[2], 2)[0]
             assert x is not None, 'scalar op reads an undefined lane'
@@ -161,6 +190,10 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False):
             out = bool(w[3] & (1 << 12))
             dst = (w[3] >> 2) & 31 if out else (w[3] >> 7) & 31
             writes.append((out, dst, lanes, [v(x)] * 4))
+        # Co-issued sources see the address state from before this instruction.
+        for dst, lanes, res in address_writes:
+            for j in lanes:
+                addresses[dst][j] = res[j]
         for out, dst, lanes, res in writes:
             target = (outputs if out else regs).setdefault(dst, [None] * 4)
             for j in lanes:
@@ -228,6 +261,103 @@ def predication_selftest():
     sle[1] = (sle[1] & ~(31 << 22)) | (16 << 22)
     assert evaluate(container([sle]), {}, {0: value})[0] == [0, 1, 0, 1]
     print('VP instrument: predication and SLE/SEQ boundary controls PASS')
+
+
+def indexed_constants_selftest():
+    """Independent encoded ARL/relative MOV controls; no compiler required."""
+    def instruction(op, *, bank=0, mask=8, output=False, relative=False,
+                    lane=0, base=100, const=False):
+        src = (3 if const else 2) | (1 << 12) | (2 << 10) | (3 << 8)
+        w0 = (bank << 15) | (7 << 10)
+        if output:
+            w0 |= 1 << 30
+        if relative:
+            w0 |= (bank << 24) | lane
+        return [w0, (op << 22) | (base << 12) | (src >> 9),
+                (src & 511) << 23, (mask << 13) | (31 << 7) | (2 if relative else 0)]
+
+    def container(words):
+        # Three explicitly initialized, distinct registers c[100..102].
+        record_start, defaults = 80, 80 + 3*48
+        code_start = defaults + 3*16
+        words = [w.copy() for w in words]
+        words[-1][3] |= 1
+        code = b''.join(struct.pack('>4I', *w) for w in words)
+        records = b''.join(struct.pack('>12I', 1048, 2178, 0x1006, 100+i,
+                                      0, defaults+i*16, 0, 0, 0, 0xffffffff, 1, 0)
+                           for i in range(3))
+        values = b''.join(struct.pack('>4f', *[10*i+j+1 for j in range(4)]) for i in range(3))
+        return (struct.pack('>8I', 7003, 6, code_start+len(code), 3,
+                            record_start, 32, len(code), code_start)
+                + bytes(48) + records + values + code)
+
+    def run(words, value, **kwargs):
+        return evaluate(container(words), {}, {0: value}, **kwargs)
+
+    def refused(words, value, message, **kwargs):
+        try:
+            run(words, value, **kwargs)
+        except AssertionError as error:
+            assert message in str(error), str(error)
+        else:
+            raise AssertionError('indexed-constant instrument accepted ' + message)
+
+    arl = instruction(13)
+    read = instruction(1, output=True, mask=15, relative=True, const=True)
+    # The feature is opt-in, including ARL in a program with no relative read.
+    refused([arl, read], [1, 0, 0, 0], 'ARL')
+    refused([read], [1, 0, 0, 0], 'indexed constant')
+    for bank in (0, 1):
+        for lane in range(4):
+            a = instruction(13, bank=bank, mask=8 >> lane)
+            r = instruction(1, bank=bank, lane=lane, output=True,
+                            mask=15, relative=True, const=True)
+            for index in (0, 1.75, 2):
+                value = [999]*4
+                value[lane] = index
+                want = [10*math.floor(index)+j+1 for j in range(4)]
+                assert run([a, r], value, indexed_constants=True)[0] == want
+    # Negative fractions floor towards -infinity, not towards zero.
+    shifted = instruction(1, output=True, mask=15, relative=True, const=True, base=101)
+    assert run([arl, shifted], [-0.25, 0, 0, 0], indexed_constants=True)[0] == [1, 2, 3, 4]
+    # Wrong base is judged wrong, not silently corrected to the allocated block.
+    assert run([arl, shifted], [0, 0, 0, 0], indexed_constants=True)[0] != [1, 2, 3, 4]
+    refused([read], [0]*4, 'undefined address', indexed_constants=True)
+    wrong_lane = instruction(1, lane=1, output=True, mask=15, relative=True, const=True)
+    refused([arl, wrong_lane], [0]*4, 'undefined address', indexed_constants=True)
+    wrong_bank = instruction(1, bank=1, output=True, mask=15, relative=True, const=True)
+    refused([arl, wrong_bank], [0]*4, 'undefined address', indexed_constants=True)
+    for index in (-101, 412):
+        refused([arl, read], [index, 0, 0, 0], 'constant address out of range', indexed_constants=True)
+    for value in (float('nan'), float('inf'), -float('inf')):
+        refused([arl, read], [value, 0, 0, 0], 'nonfinite ARL', indexed_constants=True)
+    # A masked ARL keeps the other address lanes, independently of R0.
+    arl_y = instruction(13, mask=4)
+    assert run([arl, arl_y, read], [1, 2, 0, 0], indexed_constants=True)[0] == [11, 12, 13, 14]
+    bad_dst = instruction(13, bank=2)
+    refused([bad_dst, read], [0]*4, 'ARL destination', indexed_constants=True)
+    # Co-issued scalar MOV reads the OLD A0.x while ARL writes the new one.
+    coissued = instruction(13)
+    coissued[1] |= 1 << 27  # scalar MOV
+    scalar_src = 3  # c[100].xxxx
+    coissued[2] |= scalar_src >> 11
+    coissued[3] |= ((scalar_src & 2047) << 21) | (8 << 17) | (1 << 12) | INDEX_CONST
+    # Prime A0.x from input.y (2), then update it from input.x (1).
+    prime = arl.copy()
+    prime_src = 2 | sum(1 << (14-2*j) for j in range(4))
+    prime[1] = (prime[1] & ~255) | (prime_src >> 9)
+    prime[2] = (prime_src & 511) << 23
+    assert run([prime, coissued], [1, 2, 0, 0], indexed_constants=True)[0][0] == 21
+    refused([coissued], [1, 2, 0, 0], 'undefined address', indexed_constants=True)
+    # A later ARL must replace the prior address, rather than cache it forever.
+    assert run([prime, arl, read], [1, 2, 0, 0], indexed_constants=True)[0] == [11, 12, 13, 14]
+    # An unused source must not read a relative constant / an uninitialized A0.
+    input_mov = instruction(1, output=True, mask=15, relative=True)
+    assert run([input_mov], [1, 2, 3, 4], indexed_constants=True)[0] == [1, 2, 3, 4]
+    # Preserve old strictness outside this opt-in: indexed input is not ARL.
+    input_mov[0] |= INDEX_INPUT
+    refused([input_mov], [0]*4, 'indexed input', indexed_constants=True)
+    print('VP instrument: indexed-constant controls PASS')
 
 
 def scalar_sources_to_x(blob):
@@ -307,12 +437,16 @@ def judge(blob, name, uniforms=None):
 
 
 def main():
+    if '--self-test-indexed-constants' in sys.argv:
+        indexed_constants_selftest()
+        return 0
     if '--write-sources' in sys.argv:
         d = Path(sys.argv[sys.argv.index('--write-sources') + 1])
         d.mkdir(parents=True, exist_ok=True)
         for name, (decl, expr, _, _) in CASES.items():
             (d / (name + '.cg')).write_text(HEADER % (decl, expr))
         return 0
+    indexed_constants_selftest()
     compiler = sys.argv[1]
     refdir = sys.argv[sys.argv.index('--reference-dir') + 1] if '--reference-dir' in sys.argv else None
     ok = True
