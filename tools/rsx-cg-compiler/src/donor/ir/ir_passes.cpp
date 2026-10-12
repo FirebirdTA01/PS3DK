@@ -757,7 +757,12 @@ bool CommonSubexprElimination::InstrEqual::operator()(const IRInstruction* a,
     // on the struct field) but are different varyings (t_3289f98f), so an
     // implicit load is equal only to a load of the same instance and member.
     if (a->inferredSemantic != b->inferredSemantic) return false;
-    if (a->inferredSemantic &&
+    // A vertex member with no semantic likewise: its index is the member's
+    // position until bindImplicitAttributes runs, so s.b and t.d (both
+    // second members) looked like one load and t.d was never read.
+    const bool provisional = a->inferredSemantic ||
+        (a->op == IROp::LoadAttribute && a->semanticName.empty() && !a->structParamName.empty());
+    if (provisional &&
         (a->structParamName != b->structParamName || a->fieldName != b->fieldName)) return false;
 
     for (size_t i = 0; i < a->operands.size(); ++i)

@@ -804,6 +804,8 @@ jobs:
         run: bash tests/shader-compiler/vp-struct-matrix-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler --loops
       - name: A vertex select with a vector condition selects per lane
         run: bash tests/shader-compiler/vp-vector-select-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A vertex input with no semantic takes the lowest unclaimed attribute
+        run: bash tests/shader-compiler/vp-implicit-attribute-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A vertex program past 32 temporary registers is refused
         run: bash tests/shader-compiler/vp-register-budget-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
         run: bash tests/shader-compiler/vp-struct-matrix-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

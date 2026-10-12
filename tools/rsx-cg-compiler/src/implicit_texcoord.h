@@ -53,6 +53,39 @@ inline SelectFold foldConstantSelects(IRFunction& entry)
     if (selects == 0) return SelectFold::Unchanged;
     const size_t bound = selects + 1;
 
+    // A comparison of two scalar constants is a constant condition too:
+    // `if (0 > 1)` leaves an input as unread as `if (false)` on the
+    // reference (measured, VP and FP), but nothing folds the compare here.
+    const auto number = [](const IRConstant* c, double& out) {
+        if (!c || !c->type.isScalar()) return false;
+        if (std::holds_alternative<float>(c->value)) out = std::get<float>(c->value);
+        else if (std::holds_alternative<int32_t>(c->value)) out = std::get<int32_t>(c->value);
+        else if (std::holds_alternative<uint32_t>(c->value)) out = std::get<uint32_t>(c->value);
+        else if (std::holds_alternative<bool>(c->value)) out = std::get<bool>(c->value) ? 1.0 : 0.0;
+        else return false;
+        return true;
+    };
+    std::map<IRValueID, bool> constCompare;
+    for (const auto& block : entry.blocks) {
+        if (!block) continue;
+        for (const auto& inst : block->instructions) {
+            if (!inst || inst->operands.size() != 2) continue;
+            double x, y;
+            if (!number(dynamic_cast<const IRConstant*>(entry.getValue(inst->operands[0])), x) ||
+                !number(dynamic_cast<const IRConstant*>(entry.getValue(inst->operands[1])), y))
+                continue;
+            switch (inst->op) {
+            case IROp::CmpEq: constCompare[inst->result] = x == y; break;
+            case IROp::CmpNe: constCompare[inst->result] = x != y; break;
+            case IROp::CmpLt: constCompare[inst->result] = x <  y; break;
+            case IROp::CmpLe: constCompare[inst->result] = x <= y; break;
+            case IROp::CmpGt: constCompare[inst->result] = x >  y; break;
+            case IROp::CmpGe: constCompare[inst->result] = x >= y; break;
+            default: break;
+            }
+        }
+    }
+
     std::map<IRValueID, IRValueID> chosen;
     bool failed = false;
     const auto resolve = [&](IRValueID v) {
@@ -75,10 +108,14 @@ inline SelectFold foldConstantSelects(IRFunction& entry)
             for (const auto& inst : block->instructions) {
                 if (!inst || inst->op != IROp::Select || inst->operands.size() != 3) continue;
                 if (chosen.count(inst->result)) continue;
-                const auto* c = dynamic_cast<const IRConstant*>(entry.getValue(resolve(inst->operands[0])));
-                if (!c || !c->type.isScalar()) continue;   // a vector condition selects per lane
+                const IRValueID cond = resolve(inst->operands[0]);
+                const auto cmp = constCompare.find(cond);
+                const auto* c = dynamic_cast<const IRConstant*>(entry.getValue(cond));
+                if (cmp == constCompare.end() && (!c || !c->type.isScalar()))
+                    continue;   // a vector condition selects per lane
                 bool truth;
-                if (std::holds_alternative<bool>(c->value)) truth = std::get<bool>(c->value);
+                if (cmp != constCompare.end()) truth = cmp->second;
+                else if (std::holds_alternative<bool>(c->value)) truth = std::get<bool>(c->value);
                 else if (std::holds_alternative<int32_t>(c->value)) truth = std::get<int32_t>(c->value) != 0;
                 else if (std::holds_alternative<uint32_t>(c->value)) truth = std::get<uint32_t>(c->value) != 0;
                 else if (std::holds_alternative<float>(c->value)) truth = std::get<float>(c->value) != 0.0f;

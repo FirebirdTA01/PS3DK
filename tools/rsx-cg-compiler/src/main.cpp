@@ -22,6 +22,7 @@
 #include "ir_builder.h"
 #include "ir_passes.h"
 #include "implicit_texcoord.h"
+#include "implicit_attribute.h"
 #include "matrix_select.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
@@ -548,6 +549,30 @@ int main(int argc, char** argv)
             }
             rsx_cg::bindImplicitTexCoords(*fn, semantic.shaderInfo().implicitTexCoordOrder,
                                           semantic.shaderInfo().explicitTexCoords);
+        }
+    }
+
+    // Implicit vertex attributes likewise go to the inputs the program
+    // still reads, lowest ATTR no explicit semantic claims (measured).
+    if (stage == ShaderStage::Vertex)
+    {
+        for (auto& fn : irModule->functions)
+        {
+            if (!fn->isEntryPoint) continue;
+            const rsx_cg::SelectFold fold = rsx_cg::foldConstantSelects(*fn);
+            if (fold == rsx_cg::SelectFold::Failed)
+            {
+                std::fprintf(stderr, "nv40-general: constant select folding did not converge "
+                             "(a select cycle); refusing rather than binding implicit "
+                             "attributes to inputs a dead path keeps alive\n");
+                return 1;
+            }
+            if (fold == rsx_cg::SelectFold::Changed)
+            {
+                DeadCodeElimination dce(false);
+                while (dce.runOnFunction(*fn)) {}
+            }
+            rsx_cg::bindImplicitAttributes(*fn);
         }
     }
 
