@@ -419,6 +419,10 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
         return semanticIndex == 1 ? NV40_VP_INST_DEST_COL1
                                   : NV40_VP_INST_DEST_COL0;
+    // The back-face colours (PSGL's fixed pipeline writes BCOL0 for two-sided
+    // lighting; the reference records it $vout.BCOL0 on the BFC0 register).
+    if (semanticUpper == "BCOL" && (semanticIndex == 0 || semanticIndex == 1))
+        return semanticIndex == 1 ? NV40_VP_INST_DEST_BFC1 : NV40_VP_INST_DEST_BFC0;
     if (semanticUpper == "DIFFUSE"  && semanticIndex == 0) return NV40_VP_INST_DEST_COL0;
     if (semanticUpper == "SPECULAR" && semanticIndex == 0) return NV40_VP_INST_DEST_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")

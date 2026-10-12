@@ -306,6 +306,9 @@ uint32_t vpOutputResource(const std::string& semUpper, int semIndex,
         return kCgHpos;
     if (semUpper == "COLOR" || semUpper == "COL")
         return kCgCol0 + (semIndex == 1 ? 1 : 0);
+    // Back-face colours: measured, the reference records BCOL0 as 0x8c7.
+    if (semUpper == "BCOL" && (semIndex == 0 || semIndex == 1))
+        return kCgCol0 + 2 + (semIndex == 1 ? 1 : 0);
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
     {
         // Source spelling decides the bank: "TEXCOORD<N>" → CG_TEXCOORD0,
