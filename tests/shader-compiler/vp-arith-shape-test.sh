@@ -3,7 +3,10 @@
 # (when the MAD reads at most one input and one constant), the last
 # producer of a returned value or a struct output member writes the output
 # register itself, a temp-to-temp copy is read through its source, and a
-# MOV the allocator coalesced onto its own register is dropped.  Each row's
+# MOV the allocator coalesced onto its own register is dropped.  Equal
+# constants share one value, so a repeated `1.0 / k.x` is one RCP, and a
+# lane copy out of a temp has the temp's producer write the lane itself
+# (`RCP R0.xz` builds two lanes of a vector at once).  Each row's
 # instruction count is held to a budget; where the budget is the
 # reference's count (measured with sce-cgc 475) the row says so.  Every row
 # is also judged by value against independent binary32 arithmetic.
@@ -32,13 +35,15 @@ ROWS = [
  ('shared_product', 'float4 main(float4 p : POSITION, uniform float4 k, uniform float4 m) : POSITION { float4 t = p * k; return (t + m) * t; }'),
  ('copy_chain', 'struct O { float4 p : POSITION; float4 t : TEXCOORD0; };' + NL +
   'O main(float4 p : POSITION, uniform float4 k) { O o; float d = 1.0 / k.x; o.p = p; o.t = p.xxxy + float4(-d, 0, d, -2.0 * d); return o; }'),
+ ('shared_reciprocal', 'float4 main(float4 p : POSITION, uniform float4 k) : POSITION { float a = 1.0 / k.x; float b = 1.0 / k.x; return p * a + float4(b, 2.0 * b, b, 1.0); }'),
  ('loop_mad', 'float4 main(float4 p : POSITION, uniform float4 k, uniform int n) : POSITION { float4 a = p; for (int i = 0; i < n; i++) a = a * k + p; return a; }'),
 
 ]
 # name -> (instruction budget, the reference's count)
 BUDGET = {
     'two_inputs': (2, 2), 'weighted_chain': (7, 7), 'uniform_mad': (2, 2),
-    'struct_out': (6, 5), 'shared_product': (3, 3), 'copy_chain': (7, 6), 'loop_mad': (10, 10),
+    'struct_out': (5, 5), 'shared_product': (3, 3), 'copy_chain': (5, 6), 'loop_mad': (10, 10),
+    'shared_reciprocal': (4, 4),
 }
 HPOS, TEX0, TEX1 = 0, 7, 8
 
@@ -66,6 +71,9 @@ def expect(name, v, u):
     if name == 'copy_chain':
         d = f32(1.0 / k[0]); p = v[0]
         return {HPOS: p, TEX0: vadd([p[0], p[0], p[0], p[1]], [-d, 0.0, d, f32(-2.0 * d)])}
+    if name == 'shared_reciprocal':
+        r = f32(1.0 / k[0])
+        return {HPOS: vadd(vs(v[0], r), [r, f32(2.0 * r), r, 1.0])}
     if name == 'loop_mad':
         a = v[0]
         for _ in range(n):

@@ -23,6 +23,7 @@
 #include "ir_passes.h"
 #include "implicit_texcoord.h"
 #include "implicit_attribute.h"
+#include "constant_canon.h"
 #include "matrix_select.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
@@ -98,6 +99,7 @@ void usage()
         "\n"
         "Optimization (fragment profile only; VP output is insensitive):\n"
         "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O1)\n"
+        "  -O4                    -O3 plus optimisations past the reference (ours)\n"
         "  --fastmath             Enable fast-math optimizations (default)\n"
         "  --nofastmath           Disable fast-math optimizations\n");
 }
@@ -263,6 +265,10 @@ int main(int argc, char** argv)
         else if (arg == "-O3" || arg == "--O3")
         {
             ctx.compileOpts.opt = rsx_cg::OptLevel::O3;
+        }
+        else if (arg == "-O4" || arg == "--O4")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O4;
         }
         else if (arg == "--fastmath")
         {
@@ -454,6 +460,11 @@ int main(int argc, char** argv)
         for (auto& fn : irModule->functions)
         {
             if (!fn->isEntryPoint) continue;
+            // Vertex only for now: in a fragment program the extra sharing
+            // trips the short-circuit-root refusal (2xbrz, 3xbrz main_fragment
+            // went from accepted to refused), which has to learn it first.
+            if (stage == ShaderStage::Vertex && rsx_cg::canonicalizeConstants(*fn))
+                changed = true;
             AlgebraicSimplification algsimp;
             if (algsimp.runOnFunction(*fn))     changed = true;
             CommonSubexprElimination cse(stage == ShaderStage::Fragment);

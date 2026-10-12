@@ -738,6 +738,7 @@ public:
         fencePackedReads();
         propagateVertexCopies();
         fuseVertexMulAdd();
+        packVertexLaneCopies();
         legalizeInputOperands();
         renumberSourceIndices();
         applyOrderingPass();
@@ -9806,8 +9807,8 @@ private:
     // `MOV R0.y, -R1.y`), and the copy is dropped.  Every reader is after
     // the copy with no loop node between, the source is not rewritten
     // before a reader, and each reader's lanes fall inside the copy's
-    // mask.  Temp sources only: the readers' input and constant counts do
-    // not change.
+    // mask.  An input or constant source is propagated only where the
+    // reader keeps one input register and one constant.
     void propagateVertexCopies()
     {
         if (profile_ != GeneralProfile::Vertex) return;
@@ -9828,7 +9829,9 @@ private:
                     continue;
                 const VSrc s = mov.srcs[0];
                 const int d = mov.dst.index;
-                if (s.kind != VSrcKind::Temp || s.abs || s.relative || s.index == d) continue;
+                const bool temp = s.kind == VSrcKind::Temp;
+                if (s.kind == VSrcKind::None || s.abs || s.relative || (temp && s.index == d))
+                    continue;
                 bool ok = true;
                 std::vector<std::pair<size_t, size_t>> uses;
                 for (size_t k = 0; k < code.size() && ok; ++k) {
@@ -9848,17 +9851,218 @@ private:
                 if (!ok || uses.empty()) continue;
                 for (const auto& [k, n] : uses)
                     for (size_t m = i + 1; m < k && ok; ++m)
-                        if (barrier(code[m]) || writesTemp(code[m], s.index)) ok = false;
+                        if (barrier(code[m]) || (temp && writesTemp(code[m], s.index))) ok = false;
+                // An input or constant source must leave every reader with at
+                // most one input register and one constant, or legalization
+                // would stage it back through a MOV.
+                if (ok && !temp)
+                    for (const auto& [k, n] : uses) {
+                        std::set<int> inputs;
+                        int constants = 0;
+                        for (size_t q = 0; q < code[k].srcs.size(); ++q) {
+                            const VSrc& r = (q == n) ? s : code[k].srcs[q];
+                            if (q != n && r.kind == VSrcKind::Temp && r.index == d) { ok = false; break; }
+                            if (r.kind == VSrcKind::Input) inputs.insert(r.index);
+                            if (r.kind == VSrcKind::Uniform || r.kind == VSrcKind::Literal) ++constants;
+                        }
+                        if (inputs.size() > 1 || constants > 1) ok = false;
+                    }
                 if (!ok) continue;
                 for (const auto& [k, n] : uses) {
                     VSrc& r = code[k].srcs[n];
                     const auto swz = r.swizzle;
-                    r.index = s.index;
-                    r.phys = s.phys;
+                    const bool neg = r.abs ? r.neg : (r.neg != s.neg);
+                    const bool abs = r.abs;
+                    r = s;
                     for (int l = 0; l < 4; ++l) r.swizzle[l] = s.swizzle[swz[l]];
-                    if (!r.abs) r.neg = r.neg != s.neg;
+                    r.neg = neg;
+                    r.abs = abs;
                 }
                 code.erase(code.begin() + static_cast<std::ptrdiff_t>(i));
+                changed = true;
+            }
+        }
+    }
+
+    // VP: a lane copy out of a temp with one producer (`RCP R2.x, c;
+    // MOV R1.z, R2.xxxx`) has the producer write the copy's lanes itself
+    // (`RCP R1.z, c`), as the reference builds a vector: other readers of
+    // the temp read those lanes instead.  A broadcast producer (scalar unit,
+    // dot product) fills any lanes; a componentwise one has its source
+    // swizzles moved with the lanes.  The copy's lanes have no other writer
+    // and nothing reads them before the copy; no loop node lies between the
+    // producer and any reader.
+    static bool broadcastOp(VOp op)
+    {
+        return op == VOp::Rcp || op == VOp::Rsq || op == VOp::Ex2 || op == VOp::Lg2 ||
+               op == VOp::Dp2 || op == VOp::Dp3 || op == VOp::Dp4;
+    }
+    static bool componentwiseOp(VOp op)
+    {
+        return op == VOp::Mov || op == VOp::Add || op == VOp::Mul || op == VOp::Mad ||
+               op == VOp::Min || op == VOp::Max || op == VOp::Sge || op == VOp::Slt ||
+               op == VOp::Sgt || op == VOp::Sle || op == VOp::Seq || op == VOp::Sne ||
+               op == VOp::Frc || op == VOp::Flr;
+    }
+    // `RCP R0.x, c; ...; MOV R0.z, R0.xxxx` is `RCP R0.xz, c`: the copy's
+    // lanes join the producer of the lanes it reads, when that producer is
+    // their only writer, the copied lanes have no other writer, and nothing
+    // reads the copied lanes or crosses a loop node in between.
+    bool widenSameRegisterCopy(size_t mi)
+    {
+        auto& code = program_.instrs;
+        const VInstr m = code[mi];
+        const int D = m.dst.index, mask = m.dst.writemask;
+        int read = 0;
+        for (int l = 0; l < 4; ++l)
+            if (mask & (1 << l)) read |= 1 << m.srcs[0].swizzle[l];
+        if (read & mask) return false;
+        size_t pi = code.size();
+        for (size_t k = 0; k < code.size(); ++k) {
+            const VInstr& vi = code[k];
+            if (vi.dst.none || vi.dst.output || vi.dst.address || vi.dst.index != D) continue;
+            if (k != mi && (vi.dst.writemask & mask)) return false;
+            if (vi.dst.writemask & read) {
+                if (pi != code.size() || k > mi) return false;
+                if ((vi.dst.writemask & read) != read) return false;
+                pi = k;
+            }
+        }
+        if (pi >= mi) return false;
+        VInstr& p = code[pi];
+        if (p.predicate != 0 || p.ccUpdate) return false;
+        const bool bcast = broadcastOp(p.op);
+        if (!bcast && !componentwiseOp(p.op)) return false;
+        for (size_t k = pi + 1; k < mi; ++k) {
+            const VInstr& vi = code[k];
+            if (vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd ||
+                vi.op == VOp::Kil)
+                return false;
+            for (size_t n = 0; n < vi.srcs.size(); ++n) {
+                const VSrc& r = vi.srcs[n];
+                if (r.kind != VSrcKind::Temp || r.index != D) continue;
+                const int req = requiredSourceMask(vi, n);
+                for (int l = 0; l < 4; ++l)
+                    if ((req & (1 << l)) && (mask & (1 << r.swizzle[l]))) return false;
+            }
+        }
+        // A producer reading its own register would see the widened lanes.
+        for (const VSrc& src : p.srcs)
+            if (src.kind == VSrcKind::Temp && src.index == D) return false;
+        if (!bcast)
+            for (VSrc& src : p.srcs) {
+                if (src.kind == VSrcKind::None) continue;
+                for (int l = 0; l < 4; ++l)
+                    if (mask & (1 << l)) src.swizzle[l] = src.swizzle[m.srcs[0].swizzle[l]];
+            }
+        p.dst.writemask |= mask;
+        code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
+        return true;
+    }
+
+    void packVertexLaneCopies()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        const auto tempDst = [](const VDst& d) {
+            return !d.none && !d.output && !d.address;
+        };
+        const auto barrier = [](const VInstr& vi) {
+            return vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd ||
+                   vi.op == VOp::Kil;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (size_t mi = 0; mi < code.size() && !changed; ++mi) {
+                const VInstr m = code[mi];
+                if (m.op != VOp::Mov || !tempDst(m.dst) || m.sat || m.ccUpdate || m.predicate != 0)
+                    continue;
+                const VSrc& s = m.srcs[0];
+                if (s.kind != VSrcKind::Temp || s.neg || s.abs || s.relative) continue;
+                if (s.index == m.dst.index) {
+                    if (widenSameRegisterCopy(mi)) changed = true;
+                    continue;
+                }
+                const int T = s.index, D = m.dst.index, mask = m.dst.writemask;
+                size_t pi = code.size();
+                int writersT = 0;
+                bool otherWriterD = false;
+                for (size_t k = 0; k < code.size(); ++k) {
+                    if (!tempDst(code[k].dst)) continue;
+                    if (code[k].dst.index == T) { ++writersT; pi = k; }
+                    if (k != mi && code[k].dst.index == D && (code[k].dst.writemask & mask))
+                        otherWriterD = true;
+                }
+                if (writersT != 1 || pi >= mi || otherWriterD) continue;
+                const VInstr& p = code[pi];
+                if (p.predicate != 0 || p.ccUpdate) continue;
+                const bool bcast = broadcastOp(p.op);
+                if (!bcast && !componentwiseOp(p.op)) continue;
+                // Which T lane each D lane takes; every one must be computed.
+                std::array<int, 4> from = {-1, -1, -1, -1};
+                bool lanesOk = true;
+                for (int l = 0; l < 4; ++l) {
+                    if (!(mask & (1 << l))) continue;
+                    from[l] = s.swizzle[l];
+                    if (!bcast && !(p.dst.writemask & (1 << from[l]))) lanesOk = false;
+                }
+                if (!lanesOk) continue;
+                // Other readers of T: each lane they need must be in D.
+                std::vector<std::pair<size_t, size_t>> readers;
+                bool ok = true;
+                size_t last = mi;
+                for (size_t k = 0; k < code.size() && ok; ++k) {
+                    if (k == mi) continue;
+                    for (size_t n = 0; n < code[k].srcs.size(); ++n) {
+                        const VSrc& r = code[k].srcs[n];
+                        if (r.kind != VSrcKind::Temp || r.index != T) continue;
+                        if (k < pi) { ok = false; break; }
+                        const int req = requiredSourceMask(code[k], n);
+                        for (int l = 0; l < 4 && ok; ++l) {
+                            if (!(req & (1 << l))) continue;
+                            bool found = false;
+                            for (int d = 0; d < 4; ++d)
+                                if (from[d] >= 0 && (bcast || from[d] == r.swizzle[l])) found = true;
+                            if (!found) ok = false;
+                        }
+                        readers.push_back({k, n});
+                        last = std::max(last, k);
+                    }
+                }
+                if (!ok) continue;
+                for (size_t k = pi + 1; k <= last && ok; ++k) {
+                    if (barrier(code[k])) ok = false;
+                    if (k < mi)
+                        for (size_t n = 0; n < code[k].srcs.size(); ++n) {
+                            const VSrc& r = code[k].srcs[n];
+                            if (r.kind != VSrcKind::Temp || r.index != D) continue;
+                            const int req = requiredSourceMask(code[k], n);
+                            for (int l = 0; l < 4; ++l)
+                                if ((req & (1 << l)) && (mask & (1 << r.swizzle[l]))) ok = false;
+                        }
+                }
+                if (!ok) continue;
+                VInstr& np = code[pi];
+                if (!bcast)
+                    for (VSrc& src : np.srcs) {
+                        if (src.kind == VSrcKind::None) continue;
+                        const auto old = src.swizzle;
+                        for (int l = 0; l < 4; ++l)
+                            if (from[l] >= 0) src.swizzle[l] = old[from[l]];
+                    }
+                np.dst.index = D;
+                np.dst.writemask = mask;
+                for (const auto& [k, n] : readers) {
+                    VSrc& r = code[k].srcs[n];
+                    const auto old = r.swizzle;
+                    for (int l = 0; l < 4; ++l) {
+                        for (int d = 0; d < 4; ++d)
+                            if (from[d] >= 0 && (bcast || from[d] == old[l])) { r.swizzle[l] = d; break; }
+                    }
+                    r.index = D;
+                }
+                code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
                 changed = true;
             }
         }
