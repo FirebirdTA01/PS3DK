@@ -12234,6 +12234,17 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         out.ok = false;
         return out;
     }
+    // The vertex engine has 32 temporaries (R0-R31).  The temp field is 6
+    // bits, so an allocation past R31 used to
+    // encode silently - an invalid program, compiled "successfully" (found
+    // compiling PSGL's fixed pipeline: R61).  Refuse instead, by resource.
+    if (asm_.numTempRegs() > 32) {
+        out.diagnostics.push_back(
+            "nv40-general-vp: the program needs " + std::to_string(asm_.numTempRegs()) +
+            " temporary registers; the vertex engine has 32 (vp-register-budget); refusing");
+        out.ok = false;
+        return out;
+    }
     out.words = asm_.words();
     out.ok = true;
     attrs.registerCount = static_cast<uint32_t>(std::max(1, asm_.numTempRegs()));
