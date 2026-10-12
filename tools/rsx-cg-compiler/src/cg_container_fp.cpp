@@ -220,6 +220,10 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
     // location in cg_bindlocations.h).
     if ((semUpper == "FOG" || semUpper == "FOGC") && semIndex == 0)
         return 3156u;
+    // FOGFRAC (the fog register's Y lane) records the same CG_FOGCOORD
+    // (measured: the SDK fw_fog's `float fogparam : FOGFRAC`).
+    if (semUpper == "FOGFRAC" && semIndex == 0)
+        return 3156u;
     if (semUpper == "FACE" && semIndex == 0)
         return 2199u;
     return 0;

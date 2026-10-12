@@ -464,9 +464,26 @@ static int fragmentInputSrc(const std::string& semanticUpper, int semanticIndex)
         return NVFX_FP_OP_INPUT_SRC_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
         return NVFX_FP_OP_INPUT_SRC_FOGC;
+    // FOGFRAC is the fog input register's Y lane (measured on the
+    // reference: `float fogparam : FOGFRAC` reads f[FOGC].y; the SDK's
+    // fw_fog).  The lane is selected where the source is built
+    // (fogFracSource).
+    if (semanticUpper == "FOGFRAC" && semanticIndex == 0)
+        return NVFX_FP_OP_INPUT_SRC_FOGC;
     if (semanticUpper == "FACE" && semanticIndex == 0)
         return NV40_FP_OP_INPUT_SRC_FACING;
     return -1;
+}
+
+static VSrc inputSrc(int index);
+
+// The input source for a fragment input: FOGFRAC reads lane Y of FOGC.
+static VSrc fragmentInputSource(int idx, const std::string& semanticUpper)
+{
+    VSrc src = inputSrc(idx);
+    if (semanticUpper == "FOGFRAC")
+        src.swizzle = {1, 1, 1, 1};
+    return src;
 }
 
 static uint32_t fpAttrMaskBitForInputSrc(int inputSrc)
@@ -2416,7 +2433,7 @@ private:
                         p.storage == StorageQualifier::None)) {
                 const int idx = fragmentInputSrc(sem, p.semanticIndex);
                 if (idx >= 0)
-                    program_.valueToSource[p.valueId] = inputSrc(idx);
+                    program_.valueToSource[p.valueId] = fragmentInputSource(idx, sem);
                 noteTexcoordWidth(idx, p.type.componentCount());
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform &&
@@ -3306,7 +3323,8 @@ private:
                 "' (" + inst.resultType.toString() + ")");
             return;
         }
-        program_.valueToSource[inst.result] = inputSrc(idx);
+        program_.valueToSource[inst.result] = profile_ == GeneralProfile::Fragment
+            ? fragmentInputSource(idx, sem) : inputSrc(idx);
         if (profile_ == GeneralProfile::Fragment)
             noteTexcoordWidth(idx, inst.resultType.componentCount());
         // Inputs have no IRValue in the entry table, so their width is

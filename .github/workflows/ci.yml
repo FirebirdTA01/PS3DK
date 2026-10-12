@@ -790,6 +790,8 @@ jobs:
         run: bash tests/shader-compiler/local-2d-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A fragment out parameter written under a branch is stored once, at the end
         run: bash tests/shader-compiler/out-param-branch-store-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A FOGFRAC fragment input reads the fog register's Y lane
+        run: bash tests/shader-compiler/fogfrac-input-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
         run: bash tests/shader-compiler/inline-dead-tail-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value

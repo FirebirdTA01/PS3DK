@@ -46,7 +46,7 @@ RCP = 0x1A   # nvfx_shader.h NVFX_FP_OP_OPCODE_RCP: scalar, reads the source's x
 DIV = 0x3A   # NVFX_FP_OP_OPCODE_DIV (NV_fragment_program2 DIV): vector src0 / scalar src1.x
 MODELLED = {MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX, SLT, SGE, SLE, SGT, SNE, SEQ, FRC, FLR, FENCBR, FENCTR, DP2, RCP, DIV}
 
-INPUT_SEL = {0x1: "COL0", 0x2: "COL1", 0x4: "TEX0", 0x5: "TEX1", 0x6: "TEX2", 0x7: "TEX3",
+INPUT_SEL = {0x3: "FOGC", 0x1: "COL0", 0x2: "COL1", 0x4: "TEX0", 0x5: "TEX1", 0x6: "TEX2", 0x7: "TEX3",
              0x8: "TEX4", 0x9: "TEX5", 0xA: "TEX6", 0xB: "TEX7"}
 
 
