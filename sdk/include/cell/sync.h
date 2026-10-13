@@ -54,6 +54,25 @@ extern "C" {
 #define CELL_SYNC_ERROR_SHOTAGE       0x80410112  /* sic — reference spelling */
 #define CELL_SYNC_ERROR_UNKNOWNKEY    0x80410113
 
+/* Error-code constructor, on top of the helpers in <cell/error.h>.
+ * CELL_ERROR_MAKE_SYNC_ERROR(id) == CELL_SYNC_ERROR_AGAIN for id 0x01. */
+#ifndef CELL_ERROR_MINOR_FACILITY_SYNC
+#define CELL_ERROR_MINOR_FACILITY_SYNC 0x1
+#endif
+#ifndef CELL_ERROR_MAKE_SYNC_ERROR
+#define CELL_ERROR_MAKE_SYNC_ERROR(id) \
+	CELL_ERROR_MAKE_ERROR(CELL_ERROR_FACILITY_SPU, \
+			    (CELL_ERROR_MINOR_FACILITY_SYNC << 8) | (id))
+#endif
+
+/* lock-free-queue internal state values */
+#ifndef __CELL_SYNC_FALSE
+#define __CELL_SYNC_FALSE 0
+#endif
+#ifndef __CELL_SYNC_TRUE
+#define __CELL_SYNC_TRUE 3
+#endif
+
 #define CELL_SYNC_LFQUEUE_TERMINATED  2
 
 /* ---- CellSyncMutex (ticket-fair mutex) ------------------------------- */

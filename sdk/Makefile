@@ -174,6 +174,7 @@ HEADERS := \
     include/cell/ssl.h \
     include/cell/ssl/ssl.h \
     include/cell/ssl/cert.h \
+    include/cell/ssl/error.h \
     include/cell/http.h \
     include/cell/http/error.h \
     include/cell/http/util.h \
@@ -235,6 +236,8 @@ HEADERS := \
     include/cell/sysutil_avc.h \
     include/cell/sysutil_game_internal.h \
     include/cell/rtc.h \
+    include/cell/rtc/error.h \
+    include/cell/rtc/rtcsvc.h \
     include/cell/face.h \
     include/cell/face/error.h \
     include/cell/face/face.h \
@@ -242,6 +245,11 @@ HEADERS := \
     include/cell/rudp.h \
     include/cell/sync.h \
     include/cell/sync/barrier.h \
+    include/cell/sync/error.h \
+    include/cell/sync/lfqueue.h \
+    include/cell/sync/mutex.h \
+    include/cell/sync/queue.h \
+    include/cell/sync/rwm.h \
     include/cell/sync2.h \
     include/cell/sync2/types.h \
     include/cell/sync2/version.h \
@@ -464,8 +472,10 @@ HEADERS := \
     include/sysutil/sysutil_common.h \
     include/cell/keyboard.h \
     include/cell/keyboard/kb_codes.h \
+    include/cell/keyboard/libkb.h \
     include/cell/mouse.h \
     include/cell/mouse/mouse_codes.h \
+    include/cell/mouse/libmouse.h \
     include/cell/padfilter.h \
     include/rsx/commands.h \
     include/rsx/commands_inc.h \

@@ -223,6 +223,15 @@ jobs:
       - name: Test the LV2 helper (random-number, spinlock, mempool) surface
         run: bash tests/sdk/sys-helpers-surface-test.sh
 
+      # Skips without PS3DEV; the ten cell/* forwarder headers each bridge an
+      # include path to the header that carries the surface.  Each forwarder
+      # alone, and a TU touching one symbol from every target, compiles in
+      # C/C++17 ILP32 and LP64; the CELL_ERROR_MAKE_SYNC_ERROR / RTC / SSL
+      # error constructors equal their named codes, and a forwarder pointed
+      # at an unrelated header is caught.
+      - name: Test the cell header-path forwarders
+        run: bash tests/sdk/header-path-forwarders-test.sh
+
       # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
       # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
       # the package ships plus make.

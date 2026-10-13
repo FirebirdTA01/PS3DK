@@ -32,6 +32,13 @@ The version stamped into builds is generated from the most recent
   `trylock`, `unlock`).  The new sample `hello-ppu-lv2-mempool` fills a
   buffer with random bytes, exhausts and refills a block pool, and counts
   to 200000 from two threads under a spinlock.
+- **Per-type include paths.**  `<cell/sync/error.h>`, `lfqueue.h`,
+  `mutex.h`, `queue.h`, `rwm.h`, `<cell/rtc/error.h>`, `rtcsvc.h`,
+  `<cell/ssl/error.h>`, `<cell/keyboard/libkb.h>` and
+  `<cell/mouse/libmouse.h>` now exist, so code that includes those paths
+  compiles unchanged.  Added `CELL_ERROR_MAKE_SYNC_ERROR`,
+  `CELL_RTC_MAKE_ERROR`, `CELL_SSL_MAKE_ERROR` and
+  `CELL_SSL_ERROR_READ_FAILED`.
 - **LV2 kernel timers.**  `<sys/timer.h>` now has `sys_timer_create`,
   `sys_timer_destroy`, `sys_timer_get_information`, `_sys_timer_start`,
   `sys_timer_stop`, `sys_timer_connect_event_queue` and
