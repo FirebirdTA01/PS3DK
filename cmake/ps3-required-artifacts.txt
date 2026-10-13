@@ -181,7 +181,9 @@ ppu_stub  ppu/lib/libsysutil.a
 ppu_stub  ppu/lib/libsysutil_ap_stub.a
 ppu_stub  ppu/lib/libsysutil_audio_out_stub.a
 ppu_stub  ppu/lib/libsysutil_avc2_stub.a
+ppu_stub  ppu/lib/libsysutil_game_exec_stub.a
 ppu_stub  ppu/lib/libsysutil_imejp_stub.a
+ppu_stub  ppu/lib/libsysutil_licensearea_stub.a
 ppu_stub  ppu/lib/libsysutil_music_decode_stub.a
 ppu_stub  ppu/lib/libsysutil_music_export_stub.a
 ppu_stub  ppu/lib/libsysutil_music_stub.a
@@ -194,12 +196,14 @@ ppu_stub  ppu/lib/libsysutil_np_trophy_stub.a
 ppu_stub  ppu/lib/libsysutil_np_tus_stub.a
 ppu_stub  ppu/lib/libsysutil_np_util_stub.a
 ppu_stub  ppu/lib/libsysutil_oskdialog_ext_stub.a
+ppu_stub  ppu/lib/libsysutil_remoteplay_stub.a
 ppu_stub  ppu/lib/libsysutil_savedata_extra_stub.a
 ppu_stub  ppu/lib/libsysutil_savedata_stub.a
 ppu_stub  ppu/lib/libsysutil_screenshot_stub.a
 ppu_stub  ppu/lib/libsysutil_search_stub.a
 ppu_stub  ppu/lib/libsysutil_stub.a
 ppu_stub  ppu/lib/libsysutil_subdisplay_stub.a
+ppu_stub  ppu/lib/libsysutil_sysconf_ext_stub.a
 ppu_stub  ppu/lib/libusbd_stub.a
 ppu_stub  ppu/lib/libvoice_stub.a
 ppu_stub  ppu/lib/libvpost_stub.a
