@@ -3,7 +3,9 @@
 # power-of-two literal becomes that result's output scale, as the reference
 # emits it (sce-cgc 475, measured): x2 / x4 / x8 / /4 fold into MUL, ADD,
 # MAD and DP3, and (t * 2) * 2 is one x4.  A factor of 3, a fetch result and
-# a saturated producer keep their multiply.  Each row pins the last
+# a saturated producer keep their multiply.  A producer that multiplies by a
+# literal takes the factor into that literal instead, any factor: (a * 3) * 5
+# is one MUL by 15, as the reference emits it.  Each row pins the last
 # instruction's opcode and scale code and is judged by value against
 # independent binary32 arithmetic with fp_eval (which models the scale).
 #
@@ -37,7 +39,15 @@ ROWS = {
     'mul_x3':  ('float4 t = a * b; return t * 3.0; }', 'MUL', 0, lambda a, b, c: [f32(f32(x * y) * 3) for x, y in zip(a, b)]),
     'tex_x2':  ('float4 t = tex2D(s, a.xy); return t * 2.0; }', 'MUL', 0, None),
     'sat_x2':  ('float4 t = saturate(a * b); return t * 2.0; }', None, 0, lambda a, b, c: [f32(min(1.0, max(0.0, f32(x * y))) * 2) for x, y in zip(a, b)]),
+    # A multiply by a literal takes the factor into its literal instead,
+    # any factor, rounded once (the reference's words below).
+    'lit_x2':  ('float4 t = a * 3.0; return t * 2.0; }', 'MUL', 0, lambda a, b, c: [f32(x * 6) for x in a]),
+    'lit_x5':  ('float4 t = a * 3.0; return t * 5.0; }', 'MUL', 0, lambda a, b, c: [f32(x * 15) for x in a]),
+    'lit_q':   ('float4 t = a * 0.1; return t * 0.1; }', 'MUL', 0, None),
+    'lit_h':   ('float4 t = a * 3.0; return t * 0.5; }', 'MUL', 0, lambda a, b, c: [f32(x * 1.5) for x in a]),
 }
+# The folded literal word of the last instruction, measured on the reference.
+LITS = {'lit_x2': 0x40c00000, 'lit_x5': 0x41700000, 'lit_q': 0x3c23d70b, 'lit_h': 0x3fc00000}
 fails = 0
 rng = random.Random(1013)
 for name, (body, last_op, want_scale, expect) in ROWS.items():
@@ -47,12 +57,15 @@ for name, (body, last_op, want_scale, expect) in ROWS.items():
     if p.returncode != 0 or not out.exists():
         fails += 1; print('fp-output-scale: FAIL %s: compile rc %d' % (name, p.returncode)); continue
     blob = out.read_bytes()
-    ins = [w for w, c in fs.instructions(fs.ucode_words(blob))]
+    pairs = list(fs.instructions(fs.ucode_words(blob)))
+    ins = [w for w, c in pairs]
     ops = [fs.render(w, i).split()[1] for i, w in enumerate(ins)]
     scales = [(w[2] >> 28) & 7 for w in ins]
     ok = (last_op is None or ops[-1] == last_op) and scales[-1] == want_scale
     if want_scale == 0:
         ok = ok and not any(scales)        # nothing anywhere picked up a scale
+    if name in LITS:
+        ok = ok and len(ins) == 1 and pairs[-1][1] is not None and pairs[-1][1][0] == LITS[name]
     judged = 0
     if expect is not None and ok:
         for _ in range(12):

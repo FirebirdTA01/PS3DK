@@ -10124,7 +10124,6 @@ private:
                     else if (*v != x) uniformLit = false;
                 }
                 if (!uniformLit || !v) continue;
-                if (!scaleCodeFor(*v)) continue;
                 size_t pi = code.size();
                 bool ok = true;
                 for (size_t j = 0; j < code.size() && ok; ++j) {
@@ -10144,9 +10143,34 @@ private:
                 // ADD / MUL / MAD are componentwise.
                 const bool bcast = p.op == VOp::Dp2 || p.op == VOp::Dp3 || p.op == VOp::Dp4;
                 const bool arith = bcast || p.op == VOp::Add || p.op == VOp::Mul || p.op == VOp::Mad;
-                // An already scaled producer takes the product of the two
-                // factors when that is still a scale: (t * 2) * 2 is x4.
-                const std::optional<int> scale = scaleCodeFor(scaleFactorOf(p.fpScale) * *v);
+                // A producer that is itself a multiply by one literal value
+                // takes the factor into that literal, any factor, rounded
+                // once to binary32: the reference emits (a * 3) * 5 as
+                // a * 15 and (a * 0.1) * 0.1 as a * 0.010000001 (measured).
+                int litSrc = -1;
+                float litVal = 0.0f;
+                if (p.op == VOp::Mul)
+                    for (int s = 0; s < 2 && litSrc < 0; ++s) {
+                        const VSrc& c = p.srcs[static_cast<size_t>(s)];
+                        const VSrc& o = p.srcs[static_cast<size_t>(1 - s)];
+                        if (c.kind != VSrcKind::Literal || c.abs || c.neg || o.kind == VSrcKind::Literal)
+                            continue;
+                        std::optional<float> cv;
+                        bool same = true;
+                        for (int l = 0; l < 4; ++l) {
+                            if (!(p.dst.writemask & (1 << l))) continue;
+                            const float x = c.literal[c.swizzle[l] & 3];
+                            if (!cv) cv = x;
+                            else if (*cv != x) same = false;
+                        }
+                        if (same && cv && std::isfinite(*cv * *v)) { litSrc = s; litVal = *cv; }
+                    }
+                // Otherwise the factor must be a scale; an already scaled
+                // producer takes the product of the two factors when that is
+                // still a scale: (t * 2) * 2 is x4.
+                const std::optional<int> scale = litSrc >= 0
+                    ? std::optional<int>(p.fpScale)
+                    : scaleCodeFor(scaleFactorOf(p.fpScale) * *v);
                 if (!arith || !scale || p.sat || p.predicate != 0 || p.ccUpdate ||
                     p.fpPrecisionOverride != -1 || p.dst.fp16 != m.dst.fp16 ||
                     p.dst.outputPin || p.dst.preferredPhys >= 0 || p.preservePartialOutputMask ||
@@ -10167,6 +10191,15 @@ private:
                             if (s.kind == VSrcKind::Temp && s.index == m.dst.index) ok = false;
                 }
                 if (!ok) continue;
+                if (litSrc >= 0) {
+                    VSrc& c = p.srcs[static_cast<size_t>(litSrc)];
+                    const float folded = static_cast<float>(
+                        static_cast<double>(litVal) * static_cast<double>(*v));
+                    for (int l = 0; l < 4; ++l) {
+                        c.literal[l] = folded;
+                        c.swizzle[l] = static_cast<uint8_t>(l);
+                    }
+                }
                 if (!bcast)
                     for (VSrc& s : p.srcs) {
                         if (s.kind == VSrcKind::None) continue;

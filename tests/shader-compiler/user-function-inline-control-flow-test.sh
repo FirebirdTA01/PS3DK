@@ -340,7 +340,7 @@ forbid fp_inline_entry_param_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9
 # const block's zero lane, or negating the factor, passed it (review: codex).
 accept fp_inline_local_rebound_f sce_fp_rsx "a caller LOCAL G reassigned (G = G*2) before set() writes the global: main returns 6*TEXCOORD0"
 expect fp_inline_local_rebound_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
-count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 2
+count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 1   # (p*3)*2 is one MUL by 6, as the reference emits
 factor fp_inline_local_rebound_f fp 6
 forbid fp_inline_local_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
 accept vp_inline_entry_param_rebound_v sce_vp_rsx "vertex twin: main's PARAMETER G reassigned before set() writes the global: o0 = 2*IN0"
