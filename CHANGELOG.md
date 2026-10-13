@@ -57,6 +57,15 @@ The version stamped into builds is generated from the most recent
   compiles unchanged.  Added `CELL_ERROR_MAKE_SYNC_ERROR`,
   `CELL_RTC_MAKE_ERROR`, `CELL_SSL_MAKE_ERROR` and
   `CELL_SSL_ERROR_READ_FAILED`.
+- **`sysutil/` include-path forwarders.** Thirteen new headers bridge the
+  `sysutil/` include path to the existing `cell/` surface:
+  `sysutil/sysutil_ap.h`, `sysutil/sysutil_avc2.h`,
+  `sysutil/sysutil_avc2_video.h`, `sysutil/sysutil_bgmplayback.h`,
+  `sysutil/sysutil_gameupdate.h`, `sysutil/sysutil_music.h`,
+  `sysutil/sysutil_music2.h`, `sysutil/sysutil_music_decode.h`,
+  `sysutil/sysutil_music_export.h`, `sysutil/sysutil_oskdialog_ext.h`,
+  `sysutil/sysutil_search_types.h`, `sysutil/sysutil_storagedata.h` and
+  `sysutil/sysutil_sysconf.h`.
 - **LV2 kernel timers.**  `<sys/timer.h>` now has `sys_timer_create`,
   `sys_timer_destroy`, `sys_timer_get_information`, `_sys_timer_start`,
   `sys_timer_stop`, `sys_timer_connect_event_queue` and

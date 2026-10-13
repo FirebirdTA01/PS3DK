@@ -260,6 +260,17 @@ jobs:
       - name: Test the PSL1GHT sysutil names link
         run: bash tests/sdk/psl1ght-legacy-sysutil-link-test.sh
 
+      # Skips without PS3DEV; each of the thirteen new sysutil-tree
+      # forwarders (sysutil/sysutil_ap.h through sysutil/sysutil_sysconf.h)
+      # bridges to the cell/ header that carries the surface; the reference
+      # TU, which pins one function per target, compiles in C/C++17 in both
+      # data models; a lone-forwarder TU for each; a control TU that uses
+      # the real music2 forwarder; and a self-check pointing music2 at an
+      # unrelated header and requiring the control to fail while a
+      # different forwarder keeps building.
+      - name: Test the sysutil header-path forwarders
+        run: bash tests/sdk/sysutil-path-forwarders-test.sh
+
       # Skips without PS3DEV; with a PPU compiler, no lfs/lfd/stfs/stfd through
       # under-aligned memory (GCC patch 0061: misaligned FP access kills the
       # thread on hardware).

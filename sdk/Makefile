@@ -131,6 +131,19 @@ HEADERS := \
     include/sysutil/sysutil_syscache.h \
     include/sysutil/sysutil_music_decode2.h \
     include/sysutil/sysutil_music_playback_common.h \
+    include/sysutil/sysutil_ap.h \
+    include/sysutil/sysutil_avc2.h \
+    include/sysutil/sysutil_avc2_video.h \
+    include/sysutil/sysutil_bgmplayback.h \
+    include/sysutil/sysutil_gameupdate.h \
+    include/sysutil/sysutil_music.h \
+    include/sysutil/sysutil_music2.h \
+    include/sysutil/sysutil_music_decode.h \
+    include/sysutil/sysutil_music_export.h \
+    include/sysutil/sysutil_oskdialog_ext.h \
+    include/sysutil/sysutil_search_types.h \
+    include/sysutil/sysutil_storagedata.h \
+    include/sysutil/sysutil_sysconf.h \
     include/sysutil/video.h \
     include/arpa/inet.h \
     include/netdb.h \
