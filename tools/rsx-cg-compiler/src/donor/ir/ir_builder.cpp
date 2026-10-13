@@ -6900,8 +6900,9 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         // Component-wise builtins of literals, folded in both profiles as the
         // reference folds them (fragment measured 2026-10-13: every one of
         // these is a constant there, ours were run-time instructions):
-        //   max / min / clamp / saturate / floor / ceil / trunc / sign / step
-        //             exact;
+        //   abs / max / min / clamp / saturate / floor / ceil / trunc / sign /
+        //   step      exact (an abs of a literal was a |c| source modifier,
+        //             which stopped every fold after it: abs(k) + 2.0);
         //   round     floor(f32(x + 0.5)) (64/64 lanes: -2.5 -> -2, 2.5 -> 3);
         //   smoothstep t = saturate(f32(f32(x - e0) / f32(e1 - e0))), then
         //             f32(f32(t * t) * f32(3 - f32(2 * t))) (64/64 lanes).
@@ -6912,7 +6913,7 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             (*builtinOp == IROp::Max || *builtinOp == IROp::Min || *builtinOp == IROp::Clamp ||
              *builtinOp == IROp::Saturate || *builtinOp == IROp::Floor || *builtinOp == IROp::Ceil ||
              *builtinOp == IROp::Trunc || *builtinOp == IROp::Sign || *builtinOp == IROp::Round ||
-             *builtinOp == IROp::Step || *builtinOp == IROp::SmoothStep) &&
+             *builtinOp == IROp::Step || *builtinOp == IROp::SmoothStep || *builtinOp == IROp::Abs) &&
             (resultType.isScalar() || resultType.isVector()) &&
             (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float32)
         {
@@ -6946,6 +6947,7 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
                     const float x = args[0][l];
                     switch (*builtinOp)
                     {
+                    case IROp::Abs:      folded[l] = std::fabs(x); break;
                     case IROp::Max:      folded[l] = std::fmax(x, args[1][l]); break;
                     case IROp::Min:      folded[l] = std::fmin(x, args[1][l]); break;
                     case IROp::Clamp:    folded[l] = std::fmin(std::fmax(x, args[1][l]), args[2][l]); break;
