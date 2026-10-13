@@ -9,9 +9,71 @@
 #include <unordered_set>
 #include <functional>
 
+static bool exprHasSideEffects(const ExprNode* e);
+
+// Selection of a uniform struct argument observes completed argument state,
+// except when the index itself changes state. Unknown calls cannot safely be
+// assigned either evaluation time.
+enum class StructIndexEffect { Pure, Writes, Unknown };
+static StructIndexEffect structIndexEffect(const ExprNode* e)
+{
+    using E = StructIndexEffect;
+    if (!e) return E::Unknown;
+    auto merge = [](E a, E b) { return std::max(a, b); };
+    switch (e->kind) {
+    case ExprKind::Identifier: case ExprKind::Literal: case ExprKind::Sizeof:
+        return E::Pure;
+    case ExprKind::Unary: {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        const bool writes = u->op == UnaryOp::PreIncrement || u->op == UnaryOp::PostIncrement ||
+            u->op == UnaryOp::PreDecrement || u->op == UnaryOp::PostDecrement;
+        return merge(writes ? E::Writes : E::Pure, structIndexEffect(u->operand.get()));
+    }
+    case ExprKind::Binary: {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        const bool writes = b->op == BinaryOp::Assign || b->op == BinaryOp::AddAssign ||
+            b->op == BinaryOp::SubAssign || b->op == BinaryOp::MulAssign ||
+            b->op == BinaryOp::DivAssign || b->op == BinaryOp::ModAssign;
+        return merge(writes ? E::Writes : E::Pure,
+            merge(structIndexEffect(b->left.get()), structIndexEffect(b->right.get())));
+    }
+    case ExprKind::Call: {
+        const auto* c = static_cast<const CallExpr*>(e);
+        static const std::unordered_set<std::string> pure = {
+            "abs", "floor", "ceil", "round", "trunc", "min", "max", "clamp",
+            "sign", "frac", "saturate", "sqrt", "rsqrt", "pow", "exp", "exp2",
+            "log", "log2", "sin", "cos", "tan", "asin", "acos", "atan", "atan2"
+        };
+        if (c->resolvedFunction || !pure.count(c->functionName)) return E::Unknown;
+        E effect = E::Pure;
+        for (const auto& a : c->arguments) effect = merge(effect, structIndexEffect(a.get()));
+        return effect;
+    }
+    case ExprKind::Constructor: {
+        E effect = E::Pure;
+        for (const auto& a : static_cast<const ConstructorExpr*>(e)->arguments)
+            effect = merge(effect, structIndexEffect(a.get()));
+        return effect;
+    }
+    case ExprKind::Cast: return structIndexEffect(static_cast<const CastExpr*>(e)->operand.get());
+    case ExprKind::MemberAccess: return structIndexEffect(static_cast<const MemberAccessExpr*>(e)->object.get());
+    case ExprKind::Index: {
+        const auto* i = static_cast<const IndexExpr*>(e);
+        return merge(structIndexEffect(i->array.get()), structIndexEffect(i->index.get()));
+    }
+    case ExprKind::Ternary: {
+        const auto* t = static_cast<const TernaryExpr*>(e);
+        return merge(structIndexEffect(t->condition.get()),
+            merge(structIndexEffect(t->thenExpr.get()), structIndexEffect(t->elseExpr.get())));
+    }
+    default: return E::Unknown;
+    }
+}
+
 namespace
 {
-bool arrayStorageKey(ExprNode* expr, std::string& key);
+bool arrayStorageKey(ExprNode* expr, std::string& key,
+                     const std::function<bool(ExprNode*, int64_t&)>* rowIndex = nullptr);
 constexpr float kPiDiv180 = 0.017453292519943295769f;
 constexpr float k180DivPi = 57.295779513082320876f;
 
@@ -20,6 +82,23 @@ std::optional<float> angleConversionScale(const std::string& name)
     if (name == "radians") return kPiDiv180;
     if (name == "degrees") return k180DivPi;
     return std::nullopt;
+}
+
+// A sampler member of a file-scope uniform struct keeps its binding
+// (`struct S { sampler2D tex : TEXUNIT3; }; uniform S s[2];`): measured, the
+// reference records "s[k].tex" with semantic TEXUNIT3 on unit 3, read or not.
+// The member globals used to carry no semantic and sampled unit 0.
+void carrySamplerFieldBinding(IRGlobal& member, const StructField& field)
+{
+    if (!field.type || !field.type->isSampler() || field.semantic.isEmpty()) return;
+    member.semanticName = field.semantic.name;
+    member.rawSemanticName = field.semantic.rawName;
+    member.semanticIndex = field.semantic.index;
+    if (field.semantic.hasExplicitRegister())
+    {
+        member.explicitRegisterBank = field.semantic.explicitRegisterBank;
+        member.explicitRegisterIndex = field.semantic.explicitRegisterIndex;
+    }
 }
 
 // Broadcast a one-element vector to n copies of that element.  Written as
@@ -1330,6 +1409,29 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             global.initialIntValues = constIntInit;
             global.initialValue = constInit;
 
+            if (global.storage == StorageQualifier::Uniform && varDecl->type &&
+                varDecl->type->arraySize > 0 && varDecl->type->elementType &&
+                varDecl->type->elementType->baseType == BaseType::Struct &&
+                !varDecl->type->elementType->isArray()) {
+                if (const auto* fields = getStructFields(varDecl->type->elementType.get())) {
+                    IRUniformStructRootInfo info;
+                    info.extent = static_cast<uint32_t>(varDecl->type->arraySize);
+                    info.leafCount = static_cast<uint32_t>(fields->size());
+                    if (!varDecl->semantic.isEmpty())
+                        info.dynamicRefusalReason = "an aggregate binding";
+                    for (const auto& field : *fields) {
+                        const auto type = getIRType(field.type.get());
+                        if (!field.type || field.type->isArray() || type.isMatrix() ||
+                            field.type->baseType == BaseType::Struct ||
+                            (field.type->baseType != BaseType::Float && field.type->baseType != BaseType::Half))
+                            info.dynamicRefusalReason = "a non-flat float/half scalar/vector field";
+                        if (!field.semantic.isEmpty())
+                            info.dynamicRefusalReason = "a member binding";
+                    }
+                    global.uniformStructRoot = std::move(info);
+                }
+            }
+
             module_->addGlobal(global);
 
             // Record the global's value id against its declaration so
@@ -1400,12 +1502,55 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
                             memberGlobal.type = fieldIRType;
                             memberGlobal.valueId = module_->allocateGlobalId();
                             memberGlobal.storage = StorageQualifier::Uniform;
+                            carrySamplerFieldBinding(memberGlobal, field);
 
                             module_->addGlobal(memberGlobal);
                             nameToValue_[qualifiedName] = memberGlobal.valueId;
                         }
                     };
                     flatten(flatten, *fields, varDecl->name);
+                }
+            }
+            // A uniform ARRAY of structs flattens per element and member,
+            // "light[3].position", the names and order the reference lists
+            // (element-major, then field order).  An element member read by
+            // a constant index is then an ordinary uniform.
+            if (varDecl->storage == StorageQualifier::Uniform && varDecl->type &&
+                varDecl->type->arraySize > 0 && varDecl->type->elementType &&
+                varDecl->type->elementType->baseType == BaseType::Struct &&
+                !varDecl->type->elementType->isArray())
+            {
+                if (const std::vector<StructField>* fields = getStructFields(varDecl->type->elementType.get()))
+                {
+                    uint32_t element = 0, leaf = 0;
+                    const auto flatten = [&](const auto& self, const std::vector<StructField>& members,
+                                             const std::string& prefix) -> void {
+                        for (const auto& field : members)
+                        {
+                            const std::string qualifiedName = prefix + "." + field.name;
+                            if (field.type && field.type->baseType == BaseType::Struct && !field.type->isArray())
+                                if (const auto* inner = getStructFields(field.type.get()))
+                                {
+                                    self(self, *inner, qualifiedName);
+                                    continue;
+                                }
+                            IRGlobal memberGlobal;
+                            memberGlobal.name = qualifiedName;
+                            memberGlobal.type = getIRType(field.type.get());
+                            memberGlobal.valueId = module_->allocateGlobalId();
+                            memberGlobal.storage = StorageQualifier::Uniform;
+                            carrySamplerFieldBinding(memberGlobal, field);
+                            memberGlobal.uniformStructMember = IRUniformStructMemberOrigin{
+                                global.valueId, element, leaf++,
+                                qualifiedName.substr((varDecl->name + "[" + std::to_string(element) + "].").size())};
+                            module_->addGlobal(memberGlobal);
+                        }
+                    };
+                    for (int k = 0; k < varDecl->type->arraySize; ++k) {
+                        element = static_cast<uint32_t>(k);
+                        leaf = 0;
+                        flatten(flatten, *fields, varDecl->name + "[" + std::to_string(k) + "]");
+                    }
                 }
             }
         }
@@ -2184,6 +2329,58 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         buildBlockStmt(decl->body.get());
     }
 
+    // An `out` parameter of an entry written under a branch (strip_branch
+    // fs_multi: `color = ...` in every arm of nested ifs; the vertex
+    // TangentNormalMapVp: `if (tangent.w) oNormal *= -1;`)
+    // emitted its store inside each arm, and the flatten refuses an output
+    // store a path can skip.  The parameter's name is joined at every merge
+    // like a local's, so its final binding IS the output: when the body
+    // ends in one block, with no return or discard anywhere, every store of
+    // such an output that sits outside that block is replaced by one store
+    // of the final value there.
+    if (currentFunction_->isEntryPoint &&
+        (module_->shaderStage == ShaderStage::Fragment || module_->shaderStage == ShaderStage::Vertex) &&
+        !currentBlock_->hasTerminator())
+    {
+        bool returnsOrKills = false;
+        for (const auto& bp : currentFunction_->blocks)
+            if (bp)
+                for (const auto& ip : bp->instructions)
+                    if (ip && (ip->op == IROp::Return || ip->op == IROp::Discard)) returnsOrKills = true;
+        if (!returnsOrKills)
+            for (const auto& param : decl->parameters)
+            {
+                if (!param || (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut))
+                    continue;
+                const bool defaultedOut = isDefaultedFragmentOutput(param.get());
+                if (param->semantic.isEmpty() && !defaultedOut) continue;
+                if (getStructFields(param->type.get()) || getIRType(param->type.get()).isArray()) continue;
+                const std::string sem = defaultedOut ? std::string("COLOR") : param->semantic.name;
+                const int semIndex = defaultedOut ? 0 : param->semantic.index;
+                auto isStore = [&](const std::unique_ptr<IRInstruction>& ip) {
+                    return ip && ip->op == IROp::StoreOutput && ip->semanticName == sem &&
+                           ip->semanticIndex == semIndex && ip->fieldName.empty();
+                };
+                bool offBlock = false;
+                for (const auto& bp : currentFunction_->blocks)
+                    if (bp && bp.get() != currentBlock_)
+                        for (const auto& ip : bp->instructions)
+                            if (isStore(ip)) offBlock = true;
+                const auto bound = nameToValue_.find(param->name);
+                if (!offBlock || bound == nameToValue_.end()) continue;
+                for (const auto& bp : currentFunction_->blocks)
+                    if (bp)
+                        bp->instructions.erase(std::remove_if(bp->instructions.begin(), bp->instructions.end(), isStore),
+                                               bp->instructions.end());
+                auto store = std::make_unique<IRInstruction>(IROp::StoreOutput, InvalidIRValue, IRTypeInfo::Void());
+                store->addOperand(bound->second);
+                store->semanticName = sem;
+                store->rawSemanticName = defaultedOut ? std::string("COLOR") : param->semantic.rawName;
+                store->semanticIndex = semIndex;
+                currentBlock_->addInstruction(std::move(store));
+            }
+    }
+
     // Ensure function has a terminator
     if (!currentBlock_->hasTerminator())
     {
@@ -2201,6 +2398,9 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
         }
     }
 
+    if (currentFunction_->isEntryPoint) computeClaimedImplicitInputs();
+    implicitClaimRoots_.clear();
+
     // Clean up
     declToValue_.clear();
     nameToValue_.clear();
@@ -2211,6 +2411,39 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     currentFunction_ = nullptr;
     currentFunctionDecl_ = nullptr;
     currentBlock_ = nullptr;
+}
+
+// t_8c4a982e: the implicit inputs the recorded claim roots depend on, found
+// by walking operands backwards through the still-complete IR (no dead-code
+// elimination has run yet).  A bare parameter is reached as its value id; a
+// struct member as its inferred-semantic load.
+void IRBuilder::computeClaimedImplicitInputs()
+{
+    if (implicitClaimRoots_.empty()) return;
+    std::unordered_map<IRValueID, const IRInstruction*> def;
+    for (const auto& block : currentFunction_->blocks)
+        if (block)
+            for (const auto& inst : block->instructions)
+                if (inst && inst->result != InvalidIRValue) def[inst->result] = inst.get();
+    std::unordered_map<IRValueID, std::string> params;
+    for (const auto& p : currentFunction_->parameters)
+        if (p.inferredSemantic) params[p.valueId] = p.name;
+    std::unordered_set<IRValueID> seen;
+    std::vector<IRValueID> work(implicitClaimRoots_.begin(), implicitClaimRoots_.end());
+    while (!work.empty())
+    {
+        const IRValueID v = work.back(); work.pop_back();
+        if (v == InvalidIRValue || !seen.insert(v).second) continue;
+        const auto param = params.find(v);
+        if (param != params.end()) currentFunction_->claimedImplicitInputs.insert(param->second);
+        const auto it = def.find(v);
+        if (it == def.end()) continue;
+        const IRInstruction* inst = it->second;
+        if ((inst->op == IROp::LoadAttribute || inst->op == IROp::LoadVarying) &&
+            inst->inferredSemantic && !inst->structParamName.empty())
+            currentFunction_->claimedImplicitInputs.insert(inst->structParamName + "." + inst->fieldName);
+        for (IRValueID op : inst->operands) work.push_back(op);
+    }
 }
 
 // ============================================================================
@@ -2306,9 +2539,10 @@ void IRBuilder::exitBlockBinding(const std::string& name, const ScopeState& pre)
     // so they end with the declaration exactly as the bare name does
     // (review: codex - an inner `S s` left its s.f visible after the block,
     // and the return read 3p where the reference reads the outer p).
-    const std::string prefix = name + ".";
+    const std::string prefix = name + ".", rows = name + "[";
     auto owned = [&](const std::string& key) {
-        return key == name || key.compare(0, prefix.size(), prefix) == 0;
+        return key == name || key.compare(0, prefix.size(), prefix) == 0 ||
+               key.compare(0, rows.size(), rows) == 0;
     };
     std::vector<std::string> keys;
     for (const auto& kv : nameToValue_) if (owned(kv.first)) keys.push_back(kv.first);
@@ -2373,7 +2607,9 @@ void IRBuilder::ScopeState::unfold(std::unordered_map<std::string, IRValueID>& j
     {
         const std::string& key = it->first;
         const size_t at = key.find('@');
-        const size_t br = key.find('[');
+        // The LAST bracket: a two-dimensional array's row is itself named
+        // with one ("crd[1]", arrayStorageKey), so "crd[1][2]" is element 2.
+        const size_t br = key.rfind('[');
         if (at != std::string::npos)
         {
             const std::string name = key.substr(0, at);
@@ -2402,6 +2638,11 @@ void IRBuilder::ScopeState::unfold(std::unordered_map<std::string, IRValueID>& j
         names[key] = it->second;
         ++it;
     }
+}
+
+namespace {
+bool extractFloatComponents(IRFunction& fn, IRValueID id, std::vector<float>& out);
+bool extractIntegerScalar(IRFunction& fn, IRValueID id, uint32_t& rawBits, bool& isUnsigned);
 }
 
 void IRBuilder::buildIfStmt(IfStmt* stmt)
@@ -2437,15 +2678,99 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
     IRValueID condValue = buildExpr(condition);
     condValue = normalizeCondition(condition, condValue);
 
+    // A condition the builder has reduced to a constant takes one arm at
+    // compile time, as the reference does: `static const float mode = 1;
+    // if (mode > 0.5) ...` and `if (i == 1)` in an unrolled loop leave no
+    // comparison and no predicated other arm there (measured), where ours
+    // compared literals at run time and selected.  Folded here: a constant
+    // bool, or one comparison of two scalar constants of the same kind
+    // (float32 with float32, integer with integer), the cases constCondition
+    // already treats as exact; a half operand or an int/float mix is left to
+    // run time.  The condition's own instructions are then dead.
+    const auto foldedCondition = [&](ExprNode* expr, IRValueID id) -> std::optional<bool> {
+        IRValue* v = currentFunction_->getValue(id);
+        if (auto* c = dynamic_cast<IRConstant*>(v))
+        {
+            if (c->type.isVector() || c->type.isMatrix()) return std::nullopt;
+            if (std::holds_alternative<bool>(c->value)) return std::get<bool>(c->value);
+            return std::nullopt;
+        }
+        // The comparison that produced the value, emitted into this block.
+        const IRInstruction* cmp = nullptr;
+        for (const auto& inst : currentBlock_->instructions)
+            if (inst->result == id) cmp = inst.get();
+        if (!cmp || cmp->operands.size() != 2 || cmp->resultType.isVector()) return std::nullopt;
+        if (cmp->op != IROp::CmpEq && cmp->op != IROp::CmpNe && cmp->op != IROp::CmpLt &&
+            cmp->op != IROp::CmpLe && cmp->op != IROp::CmpGt && cmp->op != IROp::CmpGe)
+            return std::nullopt;
+        // The source comparison's operand types: same category, not half or
+        // fixed (constCondition's exactness rules).
+        auto* bin = expr && expr->kind == ExprKind::Binary ? static_cast<BinaryExpr*>(expr) : nullptr;
+        if (!bin || !bin->left || !bin->right || !bin->left->resolvedType || !bin->right->resolvedType)
+            return std::nullopt;
+        const auto category = [](BaseType t) {
+            switch (t) {
+            case BaseType::Float: return 2;
+            case BaseType::Half: case BaseType::Fixed: return 3;
+            case BaseType::Bool: return 0;
+            default: return 1;
+            }
+        };
+        const int lc = category(bin->left->resolvedType->baseType);
+        const int rc = category(bin->right->resolvedType->baseType);
+        if (lc != rc || lc == 3 || lc == 0) return std::nullopt;
+        double a = 0.0, b = 0.0;
+        if (lc == 2)
+        {
+            std::vector<float> x, y;
+            if (!extractFloatComponents(*currentFunction_, cmp->operands[0], x) || x.size() != 1 ||
+                !extractFloatComponents(*currentFunction_, cmp->operands[1], y) || y.size() != 1)
+                return std::nullopt;
+            a = x[0]; b = y[0];
+        }
+        else
+        {
+            uint32_t x = 0, y = 0;
+            bool ux = false, uy = false;
+            if (!extractIntegerScalar(*currentFunction_, cmp->operands[0], x, ux) ||
+                !extractIntegerScalar(*currentFunction_, cmp->operands[1], y, uy) || ux != uy)
+                return std::nullopt;
+            a = ux ? static_cast<double>(x) : static_cast<double>(static_cast<int32_t>(x));
+            b = uy ? static_cast<double>(y) : static_cast<double>(static_cast<int32_t>(y));
+        }
+        if (a != a || b != b) return std::nullopt;
+        switch (cmp->op)
+        {
+        case IROp::CmpEq: return a == b;
+        case IROp::CmpNe: return a != b;
+        case IROp::CmpLt: return a < b;
+        case IROp::CmpLe: return a <= b;
+        case IROp::CmpGt: return a > b;
+        default:          return a >= b;
+        }
+    };
+    if (const std::optional<bool> taken = foldedCondition(condition, condValue))
+    {
+        if (*taken) thenArm();
+        else if (elseArm) (*elseArm)();
+        return;
+    }
+
+    // Inside a hardware loop region (FP-LOOP) the arms are built FLAT, one
+    // after the other in the region's own block, and joined by the same
+    // Selects as below: a region is straight-line, and the region's own
+    // checks refuse an arm with an effect (a store, a discard, a return).
+    const bool flat = hardwareLoopDepth_ > 0;
+
     // Create blocks
-    IRBasicBlock* thenBlock = currentFunction_->createBlock(makeLabel("if.then"));
-    IRBasicBlock* elseBlock = elseArm
-        ? currentFunction_->createBlock(makeLabel("if.else"))
-        : nullptr;
-    IRBasicBlock* mergeBlock = currentFunction_->createBlock(makeLabel("if.end"));
+    IRBasicBlock* thenBlock = flat ? currentBlock_ : currentFunction_->createBlock(makeLabel("if.then"));
+    IRBasicBlock* elseBlock = !elseArm ? nullptr : flat ? currentBlock_
+        : currentFunction_->createBlock(makeLabel("if.else"));
+    IRBasicBlock* mergeBlock = flat ? currentBlock_ : currentFunction_->createBlock(makeLabel("if.end"));
 
     // Emit conditional branch
-    emitCondBranch(condValue, thenBlock, elseBlock ? elseBlock : mergeBlock);
+    if (!flat)
+        emitCondBranch(condValue, thenBlock, elseBlock ? elseBlock : mergeBlock);
 
     // Snapshot nameToValue_ before either branch runs so we can detect
     // which variables get redefined in then/else and insert merge-time
@@ -2464,9 +2789,11 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
 
     // Build then block
     currentBlock_ = thenBlock;
+    armConditions_.emplace_back(condValue, true);
     thenArm();
+    armConditions_.pop_back();
     const bool thenTerminated = currentBlock_->hasTerminator();
-    if (!thenTerminated)
+    if (!thenTerminated && !flat)
     {
         emitBranch(mergeBlock);
     }
@@ -2479,9 +2806,11 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
     {
         scope_ = preIf;  // restore before processing else
         currentBlock_ = elseBlock;
+        armConditions_.emplace_back(condValue, false);
         (*elseArm)();
+        armConditions_.pop_back();
         elseTerminated = currentBlock_->hasTerminator();
-        if (!elseTerminated)
+        if (!elseTerminated && !flat)
         {
             emitBranch(mergeBlock);
         }
@@ -2814,7 +3143,10 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
             // Measured for FRAGMENT programs only (pixel judge).  A vertex
             // program keeps main's behaviour: the Select against nothing
             // stays, and the lowering refuses the unresolved operand.
-            const bool fragment = module_->shaderStage == ShaderStage::Fragment;
+            // Not inside a hardware loop: there the register holds the
+            // PREVIOUS iteration's value, not zero, so the undefined side
+            // stays undefined and the region refuses it by name.
+            const bool fragment = module_->shaderStage == ShaderStage::Fragment && !flat;
             const bool thenUndef = fragment && thenVal != InvalidIRValue && isUndefinedValue(thenVal);
             const bool elseUndef = fragment && elseVal != InvalidIRValue && isUndefinedValue(elseVal);
             if (thenUndef && !isUndefinedValue(elseVal)) joinThen = zeroOf(elseVal);
@@ -3185,12 +3517,641 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
     return true;
 }
 
+// FP-LOOP slice 1 (fp-loop-design.md R2, codex R1/R2): a fragment `for` the
+// expansion above could not prove becomes a hardware loop REGION in the
+// current block - LOOP {255, 0, 1} with the source's condition tested at
+// the head of every iteration and a BRK when it fails, the shape the
+// reference emits for a run-time bound (measured).  Admitted only in the
+// canonical shape: `for (i = a | T i = a; i <op> b; ++i | i++ | --i | i--
+// | i += c | i -= c)` whose body is straight-line (no if, no nested
+// unexpanded loop, no break / continue / return / discard) and writes no
+// output, global, out parameter or array element.  Everything else keeps
+// the refusal it had.  Every variable the body writes and reads before
+// writing in an iteration is carried (LoopCarry .. LoopLatch .. LoopOut);
+// one the body writes but never reads first is local to the iteration, and
+// reading it after the loop is refused rather than guessed.
+bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
+{
+    // Only into the entry (an inlined helper builds there too); a helper's
+    // own standalone IR function is never lowered and keeps its old path.
+    // VP-CF S3 (VP-CF-DESIGN.md R2): a vertex program takes the same region,
+    // lowered to a branch loop (BRA to the exit when the test fails, BRA back
+    // at the end) instead of LOOP/BRK.  Its bound has no trip cap.
+    const bool vertexLoop = module_->shaderStage == ShaderStage::Vertex;
+    if ((module_->shaderStage != ShaderStage::Fragment && !vertexLoop) || hardwareLoopDepth_ > 0 ||
+        !currentFunction_ || !currentFunction_->isEntryPoint ||
+        !stmt->init || !stmt->condition || !stmt->increment || !stmt->body)
+        return false;
+    // One `if (c) break;` may close the body (VolumeTextureShaderFp): at that
+    // point every carry already holds this iteration's final value, so the
+    // exit state IS the latch state - the carries (all but the induction)
+    // are written back, then BRK, then the increment.  Any other break or
+    // continue keeps the refusal (no predicated exit snapshot yet).
+    IfStmt* tailBreak = nullptr;
+    if (stmt->body->kind == StmtKind::Block) {
+        auto* blk = static_cast<BlockStmt*>(stmt->body.get());
+        if (!blk->statements.empty() && blk->statements.back() &&
+            blk->statements.back()->kind == StmtKind::If) {
+            auto* last = static_cast<IfStmt*>(blk->statements.back().get());
+            StmtNode* then = last->thenBranch.get();
+            if (then && then->kind == StmtKind::Block) {
+                auto* tb = static_cast<BlockStmt*>(then);
+                then = tb->statements.size() == 1 ? tb->statements[0].get() : nullptr;
+            }
+            if (!last->elseBranch && then && then->kind == StmtKind::Break && last->condition)
+                tailBreak = last;
+        }
+        if (tailBreak)
+            for (size_t k = 0; k + 1 < blk->statements.size(); ++k)
+                if (stmtContainsBreakOrContinue(blk->statements[k].get())) return false;
+    }
+    if (!tailBreak && stmtContainsBreakOrContinue(stmt->body.get()))
+        return false;
+    if (vertexLoop && tailBreak)
+        return false;
+
+    // The induction variable, from the init.
+    std::string varName;
+    DeclNode* induction = nullptr;
+    const bool declares = stmt->init->kind == StmtKind::Decl;
+    if (declares) {
+        auto* d = static_cast<DeclStmt*>(stmt->init.get());
+        if (d->declarations.size() != 1 || !d->declarations[0] ||
+            d->declarations[0]->kind != DeclKind::Variable) return false;
+        auto* v = static_cast<VarDecl*>(d->declarations[0].get());
+        if (!v->initializer) return false;
+        varName = v->name; induction = v;
+    } else if (stmt->init->kind == StmtKind::Expr) {
+        auto* e = static_cast<ExprStmt*>(stmt->init.get())->expr.get();
+        if (!e || e->kind != ExprKind::Binary) return false;
+        auto* b = static_cast<BinaryExpr*>(e);
+        if (b->op != BinaryOp::Assign || b->left->kind != ExprKind::Identifier) return false;
+        auto* id = static_cast<IdentifierExpr*>(b->left.get());
+        varName = id->name; induction = id->resolvedDecl;
+    } else return false;
+    if (!induction) return false;
+    auto isInduction = [&](ExprNode* e) {
+        return e && e->kind == ExprKind::Identifier &&
+            static_cast<IdentifierExpr*>(e)->resolvedDecl == induction;
+    };
+    if (stmt->condition->kind != ExprKind::Binary) return false;
+    {
+        auto* cond = static_cast<BinaryExpr*>(stmt->condition.get());
+        if ((cond->op != BinaryOp::Less && cond->op != BinaryOp::LessEqual &&
+             cond->op != BinaryOp::Greater && cond->op != BinaryOp::GreaterEqual) ||
+            !isInduction(cond->left.get()))
+            return false;
+        const IRTypeInfo t = getExprType(cond->left.get());
+        if (!t.isScalar() || (t.baseType != IRType::Float32 && t.baseType != IRType::Int32))
+            return false;
+    }
+    {
+        auto* inc = stmt->increment.get();
+        if (inc->kind == ExprKind::Unary) {
+            auto* u = static_cast<UnaryExpr*>(inc);
+            if (!isInduction(u->operand.get()) ||
+                (u->op != UnaryOp::PreIncrement && u->op != UnaryOp::PostIncrement &&
+                 u->op != UnaryOp::PreDecrement && u->op != UnaryOp::PostDecrement))
+                return false;
+        } else if (inc->kind == ExprKind::Binary) {
+            auto* b = static_cast<BinaryExpr*>(inc);
+            if (!isInduction(b->left.get()) ||
+                (b->op != BinaryOp::AddAssign && b->op != BinaryOp::SubAssign) ||
+                !b->right || b->right->kind != ExprKind::Literal)
+                return false;
+        } else return false;
+    }
+
+    auto refuse = [&](const std::string& why) {
+        error(stmt->loc, "hardware loop: " + why + "; refusing (fp-loop slice 1)");
+        return true;
+    };
+
+    // What a value is: its type, or nothing when nothing defines it (an
+    // uninitialised local's declaration id).
+    auto valueType = [&](IRValueID id, IRTypeInfo& out) -> bool {
+        if (id == InvalidIRValue) return false;
+        if (IRValue* v = currentFunction_->getValue(id)) { out = v->type; return true; }
+        for (const IRParameter& param : currentFunction_->parameters)
+            if (param.valueId == id) { out = param.type; return true; }
+        if (id >= IRModule::kGlobalIdBase) return false;
+        for (const auto& bp : currentFunction_->blocks)
+            if (bp)
+                for (const auto& ip : bp->instructions)
+                    if (ip && ip->result == id) { out = ip->resultType; return true; }
+        return false;
+    };
+    auto carryable = [](const IRTypeInfo& t) {
+        return !t.isMatrix() && !t.isArray() && !isSamplerIRType(t.baseType) &&
+               t.baseType != IRType::Void && t.baseType != IRType::Ptr &&
+               t.componentCount() >= 1 && t.componentCount() <= 4;
+    };
+
+    blockDeclared_.emplace_back();
+    const ScopeState outer = scope_;
+    buildStmt(stmt->init.get());
+    if (hasErrors()) { blockDeclared_.pop_back(); return true; }
+
+    IRBasicBlock* const block = currentBlock_;
+    const size_t blockCount = currentFunction_->blocks.size();
+    const ScopeState pre = scope_;
+
+    // Provisional carries: every carryable bound name.  The ones the body
+    // never writes are folded back to their value below.
+    struct Carry { std::string name; IRValueID init; IRValueID carry; IRTypeInfo type; };
+    std::vector<Carry> carries;
+    const size_t carryStart = block->instructions.size();
+    std::vector<std::string> names;
+    for (const auto& kv : nameToValue_) names.push_back(kv.first);
+    std::sort(names.begin(), names.end());
+    for (const std::string& name : names) {
+        const IRValueID v = nameToValue_[name];
+        IRTypeInfo t;
+        if (loopPoison_.count(v) || !valueType(v, t) || !carryable(t)) continue;
+        const IRValueID c = currentFunction_->allocateValueId();
+        auto inst = std::make_unique<IRInstruction>(IROp::LoopCarry, c, t);
+        inst->addOperand(v);
+        block->addInstruction(std::move(inst));
+        carries.push_back({name, v, c, t});
+        nameToValue_[name] = c;
+    }
+    const size_t beginIndex = block->instructions.size();
+    {
+        auto begin = std::make_unique<IRInstruction>(IROp::LoopBegin, InvalidIRValue, IRTypeInfo::Void());
+        begin->componentIndex = 255;
+        block->addInstruction(std::move(begin));
+    }
+    ++hardwareLoopDepth_;
+    // The source's own test, before any arm guard joins it: the header
+    // checks below judge this compare.
+    IRValueID sourceTest = InvalidIRValue;
+    {
+        const auto beforeCondition = scope_.fold();
+        IRValueID cond = buildExpr(stmt->condition.get());
+        cond = normalizeCondition(stmt->condition.get(), cond);
+        // The exit test runs before any carry is written back, so a
+        // condition that assigns (`i < (n = n - 1)`) would leave the exit
+        // without that write: refused (review: codex, LOOP1).
+        if (scope_.fold() != beforeCondition) {
+            --hardwareLoopDepth_;
+            blockDeclared_.pop_back();
+            return refuse("the loop condition assigns a variable");
+        }
+        // A vertex loop under a run-time if runs only where its arms are
+        // taken: the arm conditions (defined before the loop) join the test.
+        sourceTest = cond;
+        if (vertexLoop && !armConditions_.empty()) {
+            IRValueID taken = InvalidIRValue;
+            for (const auto& [armCond, polarity] : armConditions_) {
+                IRValueID term = polarity ? armCond
+                    : emitInstruction(IROp::LogicalNot, IRTypeInfo::Bool(), {armCond}, stmt->loc);
+                taken = taken == InvalidIRValue ? term
+                    : emitInstruction(IROp::LogicalAnd, IRTypeInfo::Bool(), {taken, term}, stmt->loc);
+            }
+            cond = emitInstruction(IROp::LogicalAnd, IRTypeInfo::Bool(), {cond, taken}, stmt->loc);
+        }
+        auto brk = std::make_unique<IRInstruction>(IROp::LoopBreakIf, InvalidIRValue, IRTypeInfo::Void());
+        brk->addOperand(cond);
+        brk->guardIsNegated = true;   // break where the source condition is FALSE
+        block->addInstruction(std::move(brk));
+    }
+    IRValueID tailBreakCond = InvalidIRValue;
+    IRValueID inductionAtBreak = InvalidIRValue;
+    size_t tailBreakIndex = 0;
+    if (!tailBreak) {
+        buildStmt(stmt->body.get());
+    } else {
+        auto* blk = static_cast<BlockStmt*>(stmt->body.get());
+        const ScopeState preBody = scope_;
+        blockDeclared_.emplace_back();
+        for (size_t k = 0; k + 1 < blk->statements.size() && !hasErrors(); ++k)
+            buildStmt(blk->statements[k].get());
+        bool assigns = false;
+        if (!hasErrors() && currentBlock_ == block) {
+            const auto beforeBreak = scope_.fold();
+            tailBreakCond = buildExpr(tailBreak->condition.get());
+            tailBreakCond = normalizeCondition(tailBreak->condition.get(), tailBreakCond);
+            assigns = scope_.fold() != beforeBreak;
+            tailBreakIndex = block->instructions.size();
+        }
+        const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
+        blockDeclared_.pop_back();
+        for (const auto& n : declared)
+            exitBlockBinding(n, preBody);
+        const auto ib = nameToValue_.find(varName);
+        inductionAtBreak = ib == nameToValue_.end() ? InvalidIRValue : ib->second;
+        if (assigns) {
+            --hardwareLoopDepth_;
+            blockDeclared_.pop_back();
+            return refuse("the break condition assigns a variable");
+        }
+    }
+    if (!hasErrors() && currentBlock_ == block && !block->hasTerminator())
+        buildExpr(stmt->increment.get());
+    --hardwareLoopDepth_;
+    if (hasErrors()) { blockDeclared_.pop_back(); return true; }
+    // Effects the region may not have - named first, also in any block the
+    // body created, so a discard under an if is refused as a discard.
+    std::vector<const IRInstruction*> regionInsts;
+    for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+        regionInsts.push_back(block->instructions[i].get());
+    for (size_t b = blockCount; b < currentFunction_->blocks.size(); ++b)
+        if (currentFunction_->blocks[b])
+            for (const auto& ip : currentFunction_->blocks[b]->instructions)
+                regionInsts.push_back(ip.get());
+    for (const IRInstruction* inst : regionInsts) {
+        if (inst->op == IROp::Discard || inst->op == IROp::Return ||
+            inst->op == IROp::StoreOutput || inst->op == IROp::StoreVarying || inst->op == IROp::Store) {
+            blockDeclared_.pop_back();
+            return refuse(std::string("the loop body contains '") + irOpToString(inst->op) + "'");
+        }
+    }
+    if (currentBlock_ != block || currentFunction_->blocks.size() != blockCount ||
+        block->hasTerminator()) {
+        blockDeclared_.pop_back();
+        return refuse("the loop body has control flow (an if, a return or a call that branches)");
+    }
+
+    for (size_t i = beginIndex; i < block->instructions.size(); ++i) {
+        const IRInstruction* inst = block->instructions[i].get();
+        switch (inst->op) {
+        case IROp::StoreOutput: case IROp::StoreVarying: case IROp::Store:
+        case IROp::Discard: case IROp::Return: case IROp::Call: case IROp::Phi:
+        case IROp::Branch: case IROp::CondBranch: case IROp::LoopCarry:
+        case IROp::LoopBegin: case IROp::LoopLatch: case IROp::LoopEnd: case IROp::LoopOut:
+            if (i == beginIndex && inst->op == IROp::LoopBegin) break;
+            blockDeclared_.pop_back();
+            return refuse(std::string("the loop body contains '") + irOpToString(inst->op) +
+                          (inst->targetName.empty() ? "" : " " + inst->targetName) + "'");
+        default: break;
+        }
+    }
+    if (scope_.arrays != pre.arrays || scope_.shadowedGlobals != pre.shadowedGlobals ||
+        scope_.shadowedGlobalArrays != pre.shadowedGlobalArrays) {
+        blockDeclared_.pop_back();
+        return refuse("the loop body writes an array element or a file-scope variable");
+    }
+    auto usedInRegion = [&](IRValueID v) {
+        for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+            for (IRValueID op : block->instructions[i]->operands)
+                if (op == v) return true;
+        return false;
+    };
+    auto replaceInRegion = [&](IRValueID from, IRValueID to) {
+        for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+            for (IRValueID& op : block->instructions[i]->operands)
+                if (op == from) op = to;
+    };
+    auto writable = [&](const std::string& name) -> std::string {
+        const std::string base = name.substr(0, name.find_first_of(".["));
+        if (module_->findGlobal(base)) return "a file-scope variable";
+        const FunctionDecl* fn = !inlineStack_.empty() ? inlineStack_.back() : currentFunctionDecl_;
+        if (fn)
+            for (const auto& param : fn->parameters)
+                if (param && param->name == base &&
+                    (param->storage == StorageQualifier::Out || param->storage == StorageQualifier::InOut))
+                    return "an out parameter";
+        return "";
+    };
+
+    // Names the body bound that were not carried: new names, and names whose
+    // pre-loop value nothing defines.  Local to an iteration when the region
+    // never reads the pre-loop value; else refused.
+    std::vector<std::string> iterationLocal;
+    // A uniform member READ in the body (`material.Ks` as a helper argument)
+    // leaves a cached binding of its own load: not a write.  Such names are
+    // dropped after the loop, so a later read loads the uniform again.
+    auto isUniformReadCache = [&](const std::string& name, IRValueID v) {
+        for (size_t i = beginIndex; i < block->instructions.size(); ++i) {
+            const IRInstruction* ip = block->instructions[i].get();
+            if (ip->result == v)
+                return ip->op == IROp::LoadUniform && ip->targetName == name;
+        }
+        return false;
+    };
+    std::vector<std::string> uniformReadCaches;
+    for (const auto& kv : nameToValue_) {
+        const auto preIt = pre.names.find(kv.first);
+        const bool carried = std::any_of(carries.begin(), carries.end(),
+            [&](const Carry& c) { return c.name == kv.first; });
+        if (carried || (preIt != pre.names.end() && preIt->second == kv.second)) continue;
+        if (preIt == pre.names.end() && isUniformReadCache(kv.first, kv.second)) {
+            uniformReadCaches.push_back(kv.first);
+            continue;
+        }
+        const std::string what = writable(kv.first);
+        if (!what.empty()) {
+            blockDeclared_.pop_back();
+            return refuse("the loop body writes " + what + " ('" + kv.first + "')");
+        }
+        if (preIt != pre.names.end() && usedInRegion(preIt->second)) {
+            blockDeclared_.pop_back();
+            return refuse("'" + kv.first + "' is read in the loop before it is assigned and has no initialiser");
+        }
+        iterationLocal.push_back(kv.first);
+    }
+
+    // Pass 1: the carries the body leaves alone fold back to their value.
+    // Every reference to a folded carry - region operands, every name bound
+    // to it (`a = b;` binds a to b's carry), every other carry's next value -
+    // is canonicalised to that value BEFORE any definition is removed
+    // (review: codex, LOOP3).
+    std::unordered_map<IRValueID, IRValueID> folded;
+    for (const Carry& c : carries) {
+        const auto it = nameToValue_.find(c.name);
+        const IRValueID next = it == nameToValue_.end() ? InvalidIRValue : it->second;
+        if (next == c.carry || next == InvalidIRValue) folded[c.carry] = c.init;
+    }
+    for (const auto& [carry, init] : folded) replaceInRegion(carry, init);
+    if (const auto f = folded.find(tailBreakCond); f != folded.end())
+        tailBreakCond = f->second;   // review: codex TAIL3
+    for (auto& kv : nameToValue_) {
+        const auto f = folded.find(kv.second);
+        if (f != folded.end()) kv.second = f->second;
+    }
+
+    // Pass 2: keep the rest.
+    std::vector<IRValueID> latch;
+    std::vector<Carry> kept;
+    for (const Carry& c : carries) {
+        if (folded.count(c.carry)) continue;
+        const IRValueID next = nameToValue_.at(c.name);
+        const std::string what = writable(c.name);
+        if (!what.empty()) {
+            blockDeclared_.pop_back();
+            return refuse("the loop body writes " + what + " ('" + c.name + "')");
+        }
+        // A variable with a value before the loop stays carried even when
+        // every iteration writes it before reading it: after the loop it
+        // holds the last iteration's value, or its old value when the loop
+        // ran no iteration (`a = t / i;` then `return a;`).
+        if (c.type.baseType == IRType::Float16 || c.type.elementType == IRType::Float16) {
+            blockDeclared_.pop_back();
+            return refuse("'" + c.name + "' is a half-precision loop-carried variable");
+        }
+        IRTypeInfo nt;
+        if (!valueType(next, nt) || nt.componentCount() != c.type.componentCount()) {
+            blockDeclared_.pop_back();
+            return refuse("'" + c.name + "' changes width inside the loop");
+        }
+        latch.push_back(c.carry);
+        latch.push_back(next);
+        kept.push_back(c);
+    }
+    // A CONSTANT trip count is known here: a constant start and a constant
+    // bound with the literal step.  LOOP {255} cuts a longer loop short (the
+    // reference nests a second LOOP for it, not implemented), so more than
+    // 255 iterations is refused; a body that also writes the induction makes
+    // the count unknowable from the header, refused too when the bound is
+    // constant (review: codex, constant fractional 300 / .5).
+    {
+        // Each of start and bound is CONSTANT (evaluated here), RUN-TIME (it
+        // reads an input, a uniform, a texture, a carry: the measured
+        // LOOP {255} shape) or UNKNOWN (built only from constants through an
+        // operation this evaluator does not model).  UNKNOWN is refused: a
+        // constant expression the guard cannot evaluate must not reach
+        // LOOP {255} unchecked (`i < abs(-300.0)`, review: codex LOOP4).
+        enum class Kind { Constant, Runtime, Unknown };
+        std::unordered_map<IRValueID, const IRInstruction*> defs;
+        for (const auto& bp : currentFunction_->blocks)
+            if (bp)
+                for (const auto& ip : bp->instructions)
+                    if (ip && ip->result != InvalidIRValue) defs[ip->result] = ip.get();
+        // Memoised per IR id: a shared constant DAG (`min(k, k)` repeated)
+        // would otherwise be walked once per path - exponential work
+        // (review: codex LOOP5-DAG).  Each id is classified once.
+        std::unordered_map<IRValueID, std::pair<Kind, double>> memo;
+        std::function<Kind(IRValueID, double&, int)> classifyOnce;
+        auto classify = [&](IRValueID id, double& out, int depth) -> Kind {
+            const auto hit = memo.find(id);
+            if (hit != memo.end()) { out = hit->second.second; return hit->second.first; }
+            double v = 0;
+            const Kind k = classifyOnce(id, v, depth);
+            memo.emplace(id, std::make_pair(k, v));
+            out = v;
+            return k;
+        };
+        classifyOnce = [&](IRValueID id, double& out, int depth) -> Kind {
+            if (depth > 64) return Kind::Unknown;
+            if (const auto* k = dynamic_cast<const IRConstant*>(currentFunction_->getValue(id))) {
+                if (std::holds_alternative<float>(k->value)) { out = std::get<float>(k->value); return Kind::Constant; }
+                if (std::holds_alternative<int32_t>(k->value)) { out = std::get<int32_t>(k->value); return Kind::Constant; }
+                // Unsigned values wrap (`-1u`); not modelled here, so unknown.
+                return Kind::Unknown;
+            }
+            if (id >= IRModule::kGlobalIdBase) return Kind::Runtime;
+            for (const IRParameter& param : currentFunction_->parameters)
+                if (param.valueId == id) return Kind::Runtime;
+            const auto d = defs.find(id);
+            if (d == defs.end()) return Kind::Unknown;
+            const IRInstruction* inst = d->second;
+            switch (inst->op) {
+            case IROp::LoadAttribute: case IROp::LoadUniform: case IROp::LoadVarying:
+            case IROp::LoopCarry: case IROp::LoopOut:
+            case IROp::TexSample: case IROp::TexSampleLod: case IROp::TexSampleGrad:
+            case IROp::TexSampleProj: case IROp::TexSampleBias: case IROp::TexFetch:
+                return Kind::Runtime;
+            default: break;
+            }
+            std::vector<double> v(inst->operands.size());
+            bool unknown = false;
+            for (size_t i = 0; i < inst->operands.size(); ++i) {
+                const Kind k = classify(inst->operands[i], v[i], depth + 1);
+                if (k == Kind::Runtime) return Kind::Runtime;
+                if (k == Kind::Unknown) unknown = true;
+            }
+            if (unknown || !inst->resultType.isScalar() || inst->resultType.baseType == IRType::UInt32)
+                return Kind::Unknown;
+            const bool f = inst->resultType.baseType == IRType::Float32;
+            auto round = [&](double x) { return f ? static_cast<double>(static_cast<float>(x)) : x; };
+            const size_t n = v.size();
+            switch (inst->op) {
+            case IROp::Neg: if (n != 1) return Kind::Unknown; out = round(-v[0]); return Kind::Constant;
+            case IROp::Abs: if (n != 1) return Kind::Unknown; out = round(std::fabs(v[0])); return Kind::Constant;
+            case IROp::Floor: if (n != 1) return Kind::Unknown; out = round(std::floor(v[0])); return Kind::Constant;
+            case IROp::Ceil: if (n != 1) return Kind::Unknown; out = round(std::ceil(v[0])); return Kind::Constant;
+            case IROp::IntToFloat: if (n != 1) return Kind::Unknown; out = round(v[0]); return Kind::Constant;
+            case IROp::FloatToInt: if (n != 1) return Kind::Unknown; out = std::trunc(v[0]); return Kind::Constant;
+            case IROp::Add: if (n != 2) return Kind::Unknown; out = round(v[0] + v[1]); return Kind::Constant;
+            case IROp::Sub: if (n != 2) return Kind::Unknown; out = round(v[0] - v[1]); return Kind::Constant;
+            case IROp::Mul: if (n != 2) return Kind::Unknown; out = round(v[0] * v[1]); return Kind::Constant;
+            case IROp::Min: if (n != 2) return Kind::Unknown; out = round(std::min(v[0], v[1])); return Kind::Constant;
+            case IROp::Max: if (n != 2) return Kind::Unknown; out = round(std::max(v[0], v[1])); return Kind::Constant;
+            case IROp::Div:
+                if (n != 2 || v[1] == 0) return Kind::Unknown;
+                out = f ? round(v[0] / v[1]) : std::trunc(v[0] / v[1]);
+                return Kind::Constant;
+            default: return Kind::Unknown;
+            }
+        };
+        const Carry* ind = nullptr;
+        for (const Carry& c : kept) if (c.name == varName) ind = &c;
+        const IRInstruction* test = nullptr;
+        for (size_t i = beginIndex; i < block->instructions.size(); ++i)
+            if (block->instructions[i]->op == IROp::LoopBreakIf) { test = block->instructions[i].get(); break; }
+        const IRInstruction* cmp = nullptr;
+        if (test && !test->operands.empty()) {
+            const auto d = defs.find(sourceTest != InvalidIRValue ? sourceTest : test->operands[0]);
+            if (d != defs.end()) cmp = d->second;
+        }
+        // The test must read the induction carry, directly or through one
+        // type conversion; anything else is not the admitted header.
+        auto readsCarry = [&](IRValueID id) {
+            if (!ind) return false;
+            if (id == ind->carry) return true;
+            const auto d = defs.find(id);
+            return d != defs.end() && (d->second->op == IROp::IntToFloat || d->second->op == IROp::FloatToInt) &&
+                   d->second->operands.size() == 1 && d->second->operands[0] == ind->carry;
+        };
+        const bool knownCompare = cmp && cmp->operands.size() == 2 &&
+            (cmp->op == IROp::CmpLt || cmp->op == IROp::CmpLe || cmp->op == IROp::CmpGt || cmp->op == IROp::CmpGe);
+        if (!ind || !knownCompare || !readsCarry(cmp->operands[0])) {
+            blockDeclared_.pop_back();
+            return refuse("the loop test is not the induction compared with its bound");
+        }
+        double start = 0, bound = 0;
+        const Kind startKind = classify(ind->init, start, 0);
+        const Kind boundKind = classify(cmp->operands[1], bound, 0);
+        // UNKNOWN stays refused for a vertex loop too: a start or bound this
+        // evaluator cannot model (an unsigned wrap, `-1u`) is not lowered
+        // on a guess, whatever the trip cap.
+        if (startKind == Kind::Unknown || boundKind == Kind::Unknown) {
+            blockDeclared_.pop_back();
+            return refuse("a loop start or bound built from constants that is not evaluated");
+        }
+        // A vertex branch loop has no trip cap, but its induction must still
+        // advance only by the header's step (VP1: no other write to it).
+        if ((startKind == Kind::Constant && boundKind == Kind::Constant) || vertexLoop)
+        {
+            double step = 1;
+            auto* inc = stmt->increment.get();
+            if (inc->kind == ExprKind::Unary) {
+                const auto op = static_cast<UnaryExpr*>(inc)->op;
+                step = (op == UnaryOp::PreDecrement || op == UnaryOp::PostDecrement) ? -1 : 1;
+            } else {
+                auto* b = static_cast<BinaryExpr*>(inc);
+                auto* lit = static_cast<LiteralExpr*>(b->right.get());
+                step = lit->literalKind == LiteralExpr::LiteralKind::Int
+                    ? static_cast<double>(std::get<int64_t>(lit->value))
+                    : lit->literalKind == LiteralExpr::LiteralKind::Float ? std::get<double>(lit->value) : 0.0;
+                if (b->op == BinaryOp::SubAssign) step = -step;
+            }
+            // The induction's next value must be exactly carry +/- step.
+            const IRValueID next = nameToValue_.at(ind->name);
+            const auto nd = defs.find(next);
+            const IRInstruction* nextDef = nd == defs.end() ? nullptr : nd->second;
+            const bool plainStep = nextDef && (nextDef->op == IROp::Add || nextDef->op == IROp::Sub) &&
+                nextDef->operands.size() == 2 && nextDef->operands[0] == ind->carry;
+            if (!plainStep) {
+                blockDeclared_.pop_back();
+                return refuse(vertexLoop ? "a vertex loop whose body writes its induction variable"
+                                         : "a constant-bound loop whose body writes its induction variable");
+            }
+            const bool floating = ind->type.baseType == IRType::Float32;
+            auto holds = [&](double x) {
+                switch (cmp->op) {
+                case IROp::CmpLt: return x < bound;
+                case IROp::CmpLe: return x <= bound;
+                case IROp::CmpGt: return x > bound;
+                default: return x >= bound;
+                }
+            };
+            double v = floating ? static_cast<float>(start) : start;
+            int trips = 0;
+            while (!vertexLoop && trips <= 255 && holds(v)) {
+                v = floating ? static_cast<double>(static_cast<float>(v + step)) : v + step;
+                ++trips;
+            }
+            if (trips > 255) {
+                blockDeclared_.pop_back();
+                return refuse("a constant-bound loop of more than 255 iterations (the nested hardware loop is not implemented)");
+            }
+        }
+    }
+    // Drop THIS loop's folded carry definitions - only its own provisional
+    // ids, never an earlier loop's carries in the same block (review:
+    // codex, LOOP2).
+    {
+        auto& insts = block->instructions;
+        const auto first = insts.begin() + static_cast<std::ptrdiff_t>(carryStart);
+        const auto last = insts.begin() + static_cast<std::ptrdiff_t>(beginIndex);
+        const auto keepEnd = std::remove_if(first, last, [&](const std::unique_ptr<IRInstruction>& ip) {
+            return ip->op == IROp::LoopCarry && folded.count(ip->result);
+        });
+        const size_t removed = static_cast<size_t>(last - keepEnd);
+        insts.erase(keepEnd, last);
+        if (tailBreak) tailBreakIndex -= removed;
+    }
+    // The tail break: every carry but the induction is written back, then
+    // BRK where the condition holds; the induction alone is written back by
+    // the final latch, after the increment.
+    if (tailBreak) {
+        // TAIL2 (review: codex): a body that writes the induction would need
+        // that write in the break snapshot and an increment that reads it
+        // past the latch.  Refused for this slice.
+        const Carry* indCarry = nullptr;
+        for (const Carry& kc : kept) if (kc.name == varName) indCarry = &kc;
+        if (!indCarry || inductionAtBreak != indCarry->carry) {
+            blockDeclared_.pop_back();
+            return refuse("a loop with a closing break whose body writes its induction variable");
+        }
+        std::vector<IRValueID> beforeBreak, induction;
+        for (size_t k = 0; k + 1 < latch.size(); k += 2) {
+            const Carry* c = nullptr;
+            for (const Carry& kc : kept) if (kc.carry == latch[k]) c = &kc;
+            auto& dst = (c && c->name == varName) ? induction : beforeBreak;
+            dst.push_back(latch[k]);
+            dst.push_back(latch[k + 1]);
+        }
+        latch = induction;
+        auto first = std::make_unique<IRInstruction>(IROp::LoopLatch, InvalidIRValue, IRTypeInfo::Void());
+        first->operands = beforeBreak;
+        // TAIL1 (review: codex): the guard is FROZEN into a fresh value before
+        // the latch.  The condition may BE a carry (`if (a) break;` after
+        // `a = b`) or read one through a lane alias, and the latch rewrites
+        // carry registers before the BRK reads its guard.
+        const IRValueID frozen = currentFunction_->allocateValueId();
+        auto freeze = std::make_unique<IRInstruction>(IROp::CmpNe, frozen, IRTypeInfo::Bool());
+        freeze->addOperand(tailBreakCond);
+        freeze->addOperand(createConstant(0.0f));
+        auto brk = std::make_unique<IRInstruction>(IROp::LoopBreakIf, InvalidIRValue, IRTypeInfo::Void());
+        brk->addOperand(frozen);
+        brk->guardIsNegated = false;   // break where the source condition is TRUE
+        auto& insts = block->instructions;
+        insts.insert(insts.begin() + static_cast<std::ptrdiff_t>(tailBreakIndex), std::move(brk));
+        insts.insert(insts.begin() + static_cast<std::ptrdiff_t>(tailBreakIndex), std::move(first));
+        insts.insert(insts.begin() + static_cast<std::ptrdiff_t>(tailBreakIndex), std::move(freeze));
+    }
+    auto latchInst = std::make_unique<IRInstruction>(IROp::LoopLatch, InvalidIRValue, IRTypeInfo::Void());
+    latchInst->operands = latch;
+    block->addInstruction(std::move(latchInst));
+    block->addInstruction(std::make_unique<IRInstruction>(IROp::LoopEnd, InvalidIRValue, IRTypeInfo::Void()));
+    for (const Carry& c : kept) {
+        const IRValueID out = currentFunction_->allocateValueId();
+        auto o = std::make_unique<IRInstruction>(IROp::LoopOut, out, c.type);
+        o->addOperand(c.carry);
+        block->addInstruction(std::move(o));
+        nameToValue_[c.name] = out;
+    }
+    for (const std::string& name : iterationLocal) {
+        const IRValueID poison = currentFunction_->allocateValueId();
+        loopPoison_.insert(poison);
+        nameToValue_[name] = poison;
+    }
+    for (const std::string& name : uniformReadCaches)
+        nameToValue_.erase(name);
+    blockDeclared_.pop_back();
+    if (declares) exitBlockBinding(varName, outer);
+    return true;
+}
+
 void IRBuilder::buildForStmt(ForStmt* stmt)
 {
     // Proven static loops expand within our resource bound. The reference's
     // choice between expansion and a hardware loop also depends on body cost;
     // we preserve values without claiming the same instruction shape.
     if (tryUnrollStaticFor(stmt)) return;
+    if (tryBuildHardwareLoop(stmt)) return;
 
     // Inlining supports proven expansion only. Falling through to a CFG here
     // would admit loop-carried bindings the inliner cannot yet preserve.
@@ -3825,6 +4786,21 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         if (varType.isArray() && varType.arraySize > 0)
             localArrayValues_[varDecl->name].assign(
                 static_cast<size_t>(varType.arraySize), InvalidIRValue);
+        // A two-dimensional local array: one tracked row per outer index,
+        // "name[i]" (arrayStorageKey).  Deeper nesting stays a named gap.
+        if (varDecl->type && varDecl->type->isArray() && varDecl->type->elementType &&
+            varDecl->type->elementType->isArray())
+        {
+            const TypeNode* row = varDecl->type->elementType.get();
+            if (row->elementType && row->elementType->isArray())
+            {
+                error(varDecl->loc, "an array of more than two dimensions is not supported (member-array-storage)");
+                continue;
+            }
+            for (int i = 0; i < varDecl->type->arraySize; ++i)
+                localArrayValues_[varDecl->name + "[" + std::to_string(i) + "]"].assign(
+                    static_cast<size_t>(row->arraySize), InvalidIRValue);
+        }
 
         // A STRUCT INITIALISED FROM A SCALAR - `OUT o = (OUT)0;` - fills
         // every leaf with that scalar.  It is how the reference SDK's own
@@ -4065,7 +5041,9 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         }
 
         if (varDecl->initializer && getStructFields(varDecl->type.get()) &&
-            varDecl->initializer->kind == ExprKind::Constructor)
+            (varDecl->initializer->kind == ExprKind::Constructor ||
+             (module_->shaderStage == ShaderStage::Vertex &&
+              (containsMatrixField(varDecl->type.get()) || uniformStructSourceRoot(varDecl->initializer.get())))))
         {
             buildLocalStructInitializer(varDecl->name, varDecl->type.get(), varDecl->initializer.get());
             continue;
@@ -4280,6 +5258,12 @@ IRValueID IRBuilder::buildIdentifierExpr(IdentifierExpr* expr)
     auto it = nameToValue_.find(expr->name);
     if (it != nameToValue_.end())
     {
+        if (loopPoison_.count(it->second))
+        {
+            error(expr->loc, "'" + expr->name + "' was assigned inside a hardware loop and is not "
+                  "carried out of it; reading it after the loop is refused (fp-loop slice 1)");
+            return InvalidIRValue;
+        }
         return it->second;
     }
 
@@ -4818,7 +5802,7 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
                         [&](const auto& own) { return own.get() == parameter; });
             }
             if (module_->shaderStage != ShaderStage::Vertex || expr != statementExpr_ ||
-                !supportedDestination || !arrayStorageKey(expr->left.get(), destination))
+                !supportedDestination || !storageKey(expr->left.get(), destination))
             {
                 error(expr->loc, "struct constructor assignment requires a named local or entry output "
                                  "and a standalone vertex statement (struct-constructor-assignment)");
@@ -4868,7 +5852,7 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
                 for (ExprNode* destination : destinations)
                 {
                     std::string to;
-                    if (!arrayStorageKey(destination, to))
+                    if (!storageKey(destination, to))
                     {
                         error(expr->loc, "a uniform struct entry parameter can only be copied into a "
                                          "named struct variable (uniform-struct-entry-parameter)");
@@ -4887,7 +5871,7 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
         if (expr->op == BinaryOp::Assign)
         {
             std::string destination;
-            if (arrayStorageKey(expr->left.get(), destination))
+            if (storageKey(expr->left.get(), destination))
                 copyArrayAggregate(destination, expr->right.get(), expr->left->resolvedType.get());
         }
 
@@ -4990,20 +5974,24 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
 
     // Regular binary expression
     const bool logical = expr->op == BinaryOp::LogicalAnd || expr->op == BinaryOp::LogicalOr;
+    // Only a SCALAR && / || short-circuits; on vectors Cg evaluates both
+    // operands component-wise, so the right side is not a short-circuit RHS
+    // (measured: the reference accepts (t > 0.1) && (sqrt(t) < 0.8) on float4).
+    const bool shortCircuit = logical && getExprType(expr).isScalar();
     IRValueID leftValue = buildExpr(expr->left.get());
     if (logical)
-    {
         leftValue = normalizeCondition(expr->left.get(), leftValue);
+    if (shortCircuit)
         ++shortCircuitRhsDepth_;
-    }
     IRValueID rightValue = buildExpr(expr->right.get());
     if (logical)
     {
         // The comparison belongs to the RHS as well. Preserve its existing
         // short-circuit provenance and never evaluate either expression twice.
         rightValue = normalizeCondition(expr->right.get(), rightValue);
-        --shortCircuitRhsDepth_;
     }
+    if (shortCircuit)
+        --shortCircuitRhsDepth_;
 
     IROp op = binaryOpToIROp(expr->op);
     IRTypeInfo resultType = getExprType(expr);
@@ -5090,7 +6078,41 @@ IRValueID IRBuilder::buildUnaryExpr(UnaryExpr* expr)
     return emitUnaryOp(op, resultType, operandValue, expr->loc);
 }
 
+// Standard-library functions the reference implements as inlined source
+// (measured, t_8c4a982e: an input flowing into one claims an implicit
+// TEXCOORD even when the result is dead).  The hardware primitives - abs,
+// dot, floor, frac, saturate, min, max, pow, ddx, ddy, the tex* fetches,
+// sincos and the pack functions - do NOT claim and are absent here.
+static bool claimsLikeInlinedCall(const std::string& name)
+{
+    static const std::unordered_set<std::string> names = {
+        "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh",
+        "exp", "exp2", "log", "log2", "log10",
+        "sqrt", "rsqrt", "length", "distance", "normalize", "cross", "reflect", "refract",
+        "faceforward",
+        "clamp", "lerp", "step", "smoothstep", "ceil", "round", "sign", "degrees", "radians",
+        "fmod", "modf", "frexp", "ldexp", "isfinite", "isinf", "isnan",
+        "mul", "determinant", "transpose", "all", "any",
+        "lit", "unpack_2half", "unpack_4byte", "unpack_4ubyte",
+    };
+    return names.count(name) != 0;
+}
+
 IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
+{
+    const IRValueID result = buildCallExprImpl(expr);
+    // A builtin call by a claiming name: its result is a claim root.  User
+    // functions record their roots at each return (runInlineStatements).
+    const bool userFunction = expr->resolvedFunction &&
+                              expr->resolvedFunction->kind == DeclKind::Function &&
+                              !static_cast<const FunctionDecl*>(expr->resolvedFunction)->isIntrinsic;
+    if (result != InvalidIRValue && !userFunction && currentFunction_ &&
+        currentFunction_->isEntryPoint && claimsLikeInlinedCall(expr->functionName))
+        implicitClaimRoots_.push_back(result);
+    return result;
+}
+
+IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
 {
     // modf(x, out ip), measured on the reference (FLR, then a predicated
     // correction on x < 0): fl = floor(x); f = x - fl; ip = fl - and where
@@ -5133,6 +6155,9 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         (expr->resolvedFunction && expr->resolvedFunction->kind == DeclKind::Function)
             ? static_cast<const FunctionDecl*>(expr->resolvedFunction) : nullptr;
     std::vector<IRValueID> argValues;
+    std::vector<StructLeafBindings> structArguments(expr->arguments.size());
+    std::vector<bool> captureStructArgument(expr->arguments.size(), false);
+    std::vector<IRValueID> savedStructIndex(expr->arguments.size(), InvalidIRValue);
     for (size_t i = 0; i < expr->arguments.size(); ++i)
     {
         if (calleeDecl && i < calleeDecl->parameters.size() &&
@@ -5147,6 +6172,39 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         {
             argValues.push_back(InvalidIRValue);
             continue;
+        }
+        // A uniform struct has leaf values, not a whole-struct SSA
+        // operand. Defer named leaf capture until every argument has been
+        // evaluated, but before any callee parameter is installed.
+        if (module_->shaderStage == ShaderStage::Vertex && calleeDecl &&
+            (currentFunction_->isEntryPoint || !inlineStack_.empty()) &&
+            i < calleeDecl->parameters.size()) {
+            const auto* param = calleeDecl->parameters[i].get();
+            auto* argument = expr->arguments[i].get();
+            if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
+                getStructFields(param->type.get()) &&
+                (containsMatrixField(param->type.get()) || uniformStructSourceRoot(argument) ||
+                 hasBoundStructLeaves(param->type.get(), argument))) {
+                captureStructArgument[i] = true;
+                // Side-effect-free selections see completed-argument state.
+                // An effectful index instead executes once, in argument order,
+                // and every leaf must retain its returned index value.
+                if (!containsMatrixField(param->type.get()) && argument->kind == ExprKind::Index &&
+                    uniformStructSourceRoot(argument)) {
+                    auto* indexed = static_cast<IndexExpr*>(argument);
+                    const auto effect = structIndexEffect(indexed->index.get());
+                    if (effect == StructIndexEffect::Unknown) {
+                        error(argument->loc, "uniform struct argument index has unclassified effects (struct-argument-index-effects)");
+                        return InvalidIRValue;
+                    }
+                    if (effect == StructIndexEffect::Writes) {
+                        savedStructIndex[i] = buildExpr(indexed->index.get());
+                        if (savedStructIndex[i] == InvalidIRValue) return InvalidIRValue;
+                    }
+                }
+                argValues.push_back(InvalidIRValue);
+                continue;
+            }
         }
         argValues.push_back(buildExpr(expr->arguments[i].get()));
     }
@@ -5502,6 +6560,35 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         };
         if (floating && !resultType.isMatrix() && !resultType.isArray() && fits(ta) && fits(tb))
         {
+            // Literal operands fold, as the reference folds them (fragment,
+            // 64/64 random lanes): q = f32(x / y), then frac(|q|) * |y| with
+            // the sign of x - the same steps as the run-time expansion below.
+            if (module_->shaderStage == ShaderStage::Fragment &&
+                (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float32)
+            {
+                const size_t width = resultType.isVector() ? static_cast<size_t>(resultType.vectorSize) : 1;
+                std::vector<float> xa, ya;
+                if (extractFloatComponents(*currentFunction_, argValues[0], xa) &&
+                    extractFloatComponents(*currentFunction_, argValues[1], ya) &&
+                    (xa.size() == width || xa.size() == 1) && (ya.size() == width || ya.size() == 1))
+                {
+                    if (xa.size() == 1) xa.assign(width, xa[0]);
+                    if (ya.size() == 1) ya.assign(width, ya[0]);
+                    std::vector<float> folded(width);
+                    bool ok = true;
+                    for (size_t l = 0; l < width && ok; ++l)
+                    {
+                        if (ya[l] == 0.0f || !std::isfinite(xa[l]) || !std::isfinite(ya[l])) { ok = false; break; }
+                        volatile float q = xa[l] / ya[l];
+                        const float aq = std::fabs(q);
+                        const float f = aq - std::floor(aq);
+                        volatile float r = f * std::fabs(ya[l]);
+                        folded[l] = xa[l] < 0.0f ? -r : r;
+                    }
+                    if (ok)
+                        return width == 1 ? createConstant(resultType, folded[0]) : createConstant(resultType, folded);
+                }
+            }
             const auto splat = [&](IRValueID v, const IRTypeInfo& t) {
                 if (!resultType.isVector() || t.vectorSize == resultType.vectorSize) return v;
                 std::vector<IRValueID> lanes(static_cast<size_t>(resultType.vectorSize), v);
@@ -5618,11 +6705,28 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
             return emitInstruction(mulOp, resultType, argValues);
         }
 
-        // VP literal math has profile-specific rounding. Keep this hook confined
-        // to the four measured operations; other builtins and FP are unchanged.
+        // Literal sqrt / sin / cos / tan, the same rounding in both profiles
+        // (FP measured 2026-10-13 on 64 random lanes each: sqrt is
+        // 1 / f32(1 / sqrt(x)), tan is f32(sin) / f32(cos)).  The fragment
+        // reference folds trig arguments of any finite size and leaves a
+        // sqrt of x <= 0 at run time (RSQ + DIV), so a fragment vector with
+        // such a lane, or a non-finite argument, is not folded here.
         const bool trig = *builtinOp == IROp::Sin || *builtinOp == IROp::Cos ||
                           *builtinOp == IROp::Tan;
-        if (module_->shaderStage == ShaderStage::Vertex && argValues.size() == 1 &&
+        const bool fragmentStage = module_->shaderStage == ShaderStage::Fragment;
+        bool fragmentFoldable = fragmentStage;
+        if (fragmentStage && argValues.size() == 1 && (trig || *builtinOp == IROp::Sqrt))
+        {
+            std::vector<float> probe;
+            if (!extractFloatComponents(*currentFunction_, argValues[0], probe) || probe.empty())
+                fragmentFoldable = false;
+            for (float value : probe)
+                if (!std::isfinite(value) || (*builtinOp == IROp::Sqrt && value <= 0.0f))
+                    fragmentFoldable = false;
+            if (fragmentFoldable && (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float16)
+                fragmentFoldable = false;
+        }
+        if ((module_->shaderStage == ShaderStage::Vertex || fragmentFoldable) && argValues.size() == 1 &&
             (trig || *builtinOp == IROp::Sqrt) &&
             (resultType.isScalar() || resultType.isVector()))
         {
@@ -5645,7 +6749,7 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
             {
                 for (float value : values)
                 {
-                    if (!std::isfinite(value) || (trig && std::fabs(value) > 65536.0f))
+                    if (!fragmentStage && (!std::isfinite(value) || (trig && std::fabs(value) > 65536.0f)))
                     {
                         error(expr->loc, "our VP constant trig reduction bound is finite |x| <= 65536; "
                             "nonfinite constant math is also unsupported (constant-math-range)");
@@ -5695,6 +6799,261 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
             }
         }
 
+        // Literal rsqrt / exp2 / log2 / frac, measured on 64 random inputs
+        // each plus edges in BOTH profiles (VP first, FP 2026-10-12): the
+        // double-precision result rounded once to binary32 (subnormal results
+        // kept).  rsqrt and log2 of x <= 0 and an exp2 that overflows stay
+        // run-time instructions, as the reference leaves them; then nothing
+        // in the vector is folded here.
+        if ((module_->shaderStage == ShaderStage::Vertex ||
+             module_->shaderStage == ShaderStage::Fragment) && argValues.size() == 1 &&
+            (*builtinOp == IROp::RSqrt || *builtinOp == IROp::Exp2 ||
+             *builtinOp == IROp::Log2 || *builtinOp == IROp::Frac) &&
+            (resultType.isScalar() || resultType.isVector()))
+        {
+            std::vector<float> values;
+            if (extractFloatComponents(*currentFunction_, argValues[0], values) && !values.empty())
+            {
+                std::vector<float> folded;
+                for (float value : values)
+                {
+                    if (!std::isfinite(value)) break;
+                    const double x = static_cast<double>(value);
+                    double r = 0.0;
+                    if (*builtinOp == IROp::RSqrt) { if (x <= 0.0) break; r = 1.0 / std::sqrt(x); }
+                    else if (*builtinOp == IROp::Log2) { if (x <= 0.0) break; r = std::log2(x); }
+                    else if (*builtinOp == IROp::Exp2) r = std::exp2(x);
+                    else r = x - std::floor(x);
+                    const float result = static_cast<float>(r);
+                    if (!std::isfinite(result)) break;
+                    folded.push_back(result);
+                }
+                if (folded.size() == values.size())
+                {
+                    const IRType element = resultType.isVector() ? resultType.elementType : resultType.baseType;
+                    if (element != IRType::Float16)
+                        return folded.size() == 1 ? createConstant(resultType, folded[0])
+                                                  : createConstant(resultType, folded);
+                }
+            }
+        }
+
+        // Literal exp / log / log10 fold exactly as their run-time lowerings
+        // compute (lowerExpLog): measured on 64 random lanes each in BOTH
+        // profiles, every lane bit-identical to
+        //   exp(x)   = exp2 fold of f32(x * 0x3fb8aa3a)
+        //   log(x)   = f32(f32(log2(x)) * 0x3f317218)
+        //   log10(x) = f32(f32(log2(x)) * 0x3e9a209b)
+        // where the exp2 / log2 folds are the ones above (the double result
+        // rounded once; subnormal results kept, exp(-90) is 0x0008ec2c).
+        // Correctly rounded exp misses by 1-35 ulp: the reference's log2(e)
+        // is one ulp below float32's.  An exp whose exp2 overflows keeps the
+        // folded product and leaves EX2 to run time, as the reference does
+        // (exp(89.0) is EX2 of 128.4); log of x <= 0 stays fully run time.
+        if ((module_->shaderStage == ShaderStage::Vertex ||
+             module_->shaderStage == ShaderStage::Fragment) && argValues.size() == 1 &&
+            (*builtinOp == IROp::Exp || *builtinOp == IROp::Log || *builtinOp == IROp::Log10) &&
+            (resultType.isScalar() || resultType.isVector()) &&
+            (resultType.isVector() ? resultType.elementType : resultType.baseType) != IRType::Float16)
+        {
+            constexpr double kLog2E = 1.4426949024200439453125;      // 0x3fb8aa3a
+            constexpr double kLn2 = 0.693147182464599609375;         // 0x3f317218
+            constexpr double kInvLog2Of10 = 0.3010300099849700927734375;  // 0x3e9a209b
+            std::vector<float> values;
+            if (extractFloatComponents(*currentFunction_, argValues[0], values) && !values.empty())
+            {
+                std::vector<float> scaled, folded;
+                bool allFinite = true;
+                for (float value : values)
+                {
+                    if (!std::isfinite(value)) { allFinite = false; break; }
+                    if (*builtinOp == IROp::Exp)
+                    {
+                        // One rounding each: the product of two binary32
+                        // values is exact in double.
+                        const float y = static_cast<float>(static_cast<double>(value) * kLog2E);
+                        if (!std::isfinite(y)) { allFinite = false; break; }
+                        scaled.push_back(y);
+                        const float r = static_cast<float>(std::exp2(static_cast<double>(y)));
+                        if (std::isfinite(r)) folded.push_back(r);
+                    }
+                    else
+                    {
+                        if (value <= 0.0f) { allFinite = false; break; }
+                        const float l2 = static_cast<float>(std::log2(static_cast<double>(value)));
+                        const double k = *builtinOp == IROp::Log ? kLn2 : kInvLog2Of10;
+                        folded.push_back(static_cast<float>(static_cast<double>(l2) * k));
+                    }
+                }
+                if (allFinite && folded.size() == values.size())
+                    return folded.size() == 1 ? createConstant(resultType, folded[0])
+                                              : createConstant(resultType, folded);
+                if (allFinite && *builtinOp == IROp::Exp && scaled.size() == values.size())
+                {
+                    const IRValueID y = scaled.size() == 1 ? createConstant(resultType, scaled[0])
+                                                           : createConstant(resultType, scaled);
+                    return emitInstruction(IROp::Exp2, resultType, {y});
+                }
+            }
+        }
+
+        // Component-wise builtins of literals, folded in both profiles as the
+        // reference folds them (fragment measured 2026-10-13: every one of
+        // these is a constant there, ours were run-time instructions):
+        //   abs / max / min / clamp / saturate / floor / ceil / trunc / sign /
+        //   step      exact (an abs of a literal was a |c| source modifier,
+        //             which stopped every fold after it: abs(k) + 2.0);
+        //   round     floor(f32(x + 0.5)) (64/64 lanes: -2.5 -> -2, 2.5 -> 3);
+        //   smoothstep t = saturate(f32(f32(x - e0) / f32(e1 - e0))), then
+        //             f32(f32(t * t) * f32(3 - f32(2 * t))) (64/64 lanes).
+        // A scalar argument broadcasts.  pow is not folded: no binary32 model
+        // measured matches the reference's folded pow on more than 46/64.
+        if ((module_->shaderStage == ShaderStage::Vertex ||
+             module_->shaderStage == ShaderStage::Fragment) &&
+            (*builtinOp == IROp::Max || *builtinOp == IROp::Min || *builtinOp == IROp::Clamp ||
+             *builtinOp == IROp::Saturate || *builtinOp == IROp::Floor || *builtinOp == IROp::Ceil ||
+             *builtinOp == IROp::Trunc || *builtinOp == IROp::Sign || *builtinOp == IROp::Round ||
+             *builtinOp == IROp::Step || *builtinOp == IROp::SmoothStep || *builtinOp == IROp::Abs) &&
+            (resultType.isScalar() || resultType.isVector()) &&
+            (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float32)
+        {
+            const size_t width = resultType.isVector() ? static_cast<size_t>(resultType.vectorSize) : 1;
+            std::vector<std::vector<float>> args(argValues.size());
+            bool constant = !argValues.empty();
+            for (size_t i = 0; i < argValues.size() && constant; ++i)
+            {
+                // An integer literal argument of the float overload
+                // (clamp(0, 0.5, 1.5)) converts as IntToFloat folds it.
+                uint32_t rawBits = 0;
+                bool isUnsigned = false;
+                if (!extractFloatComponents(*currentFunction_, argValues[i], args[i]) &&
+                    extractIntegerScalar(*currentFunction_, argValues[i], rawBits, isUnsigned))
+                    args[i] = { isUnsigned ? static_cast<float>(rawBits)
+                                           : static_cast<float>(static_cast<int32_t>(rawBits)) };
+                constant = !args[i].empty() &&
+                           (args[i].size() == width || args[i].size() == 1);
+                if (constant && args[i].size() == 1 && width > 1)
+                    args[i].assign(width, args[i][0]);
+                for (float x : args[i])
+                    if (!std::isfinite(x)) constant = false;
+            }
+            const size_t arity = (*builtinOp == IROp::Max || *builtinOp == IROp::Min ||
+                                  *builtinOp == IROp::Step) ? 2
+                               : (*builtinOp == IROp::Clamp || *builtinOp == IROp::SmoothStep) ? 3 : 1;
+            // round and smoothstep round per step; only the fragment rule is
+            // measured, so a vertex program keeps them at run time.
+            if (module_->shaderStage == ShaderStage::Vertex &&
+                (*builtinOp == IROp::Round || *builtinOp == IROp::SmoothStep))
+                constant = false;
+            if (constant && args.size() == arity)
+            {
+                const auto r32 = [](double v) { volatile float r = static_cast<float>(v); return static_cast<float>(r); };
+                std::vector<float> folded(width);
+                bool ok = true;
+                for (size_t l = 0; l < width && ok; ++l)
+                {
+                    const float x = args[0][l];
+                    switch (*builtinOp)
+                    {
+                    case IROp::Abs:      folded[l] = std::fabs(x); break;
+                    case IROp::Max:      folded[l] = std::fmax(x, args[1][l]); break;
+                    case IROp::Min:      folded[l] = std::fmin(x, args[1][l]); break;
+                    case IROp::Clamp:    folded[l] = std::fmin(std::fmax(x, args[1][l]), args[2][l]); break;
+                    case IROp::Saturate: folded[l] = std::fmin(std::fmax(x, 0.0f), 1.0f); break;
+                    case IROp::Floor:    folded[l] = std::floor(x); break;
+                    case IROp::Ceil:     folded[l] = std::ceil(x); break;
+                    case IROp::Trunc:    folded[l] = std::trunc(x); break;
+                    case IROp::Sign:     folded[l] = x > 0.0f ? 1.0f : x < 0.0f ? -1.0f : 0.0f; break;
+                    case IROp::Round:    folded[l] = std::floor(r32(static_cast<double>(x) + 0.5)); break;
+                    case IROp::Step:     folded[l] = args[1][l] >= x ? 1.0f : 0.0f; break;
+                    case IROp::SmoothStep:
+                    {
+                        const float span = r32(static_cast<double>(args[1][l]) - x);
+                        if (span == 0.0f) { ok = false; break; }
+                        float t = r32(static_cast<double>(r32(static_cast<double>(args[2][l]) - x)) / span);
+                        t = std::fmin(std::fmax(t, 0.0f), 1.0f);
+                        const float tt = r32(static_cast<double>(t) * t);
+                        const float k = r32(3.0 - static_cast<double>(r32(2.0 * static_cast<double>(t))));
+                        folded[l] = r32(static_cast<double>(tt) * k);
+                        break;
+                    }
+                    default: ok = false; break;
+                    }
+                }
+                if (ok)
+                    return width == 1 ? createConstant(resultType, folded[0]) : createConstant(resultType, folded);
+            }
+        }
+
+        // Dot / length / normalize / lerp of literals, measured on 48-64
+        // random inputs each in BOTH profiles (VP first, FP 2026-10-12; every
+        // other order or precision misses some):
+        //   dot       binary32 sum of the rounded products, left to right;
+        //   length    1 / f32(1 / sqrt(dot)), the RSQ-then-RCP rule of sqrt;
+        //   normalize each lane times f32(1 / sqrt(dot));
+        //   lerp      a + f32(t * f32(b - a)).
+        // A zero or negative dot (length, normalize) is left to run time.
+        if ((module_->shaderStage == ShaderStage::Vertex ||
+             module_->shaderStage == ShaderStage::Fragment) &&
+            (*builtinOp == IROp::Dot || *builtinOp == IROp::Length ||
+             *builtinOp == IROp::Normalize || *builtinOp == IROp::Lerp) &&
+            (resultType.isScalar() || resultType.isVector()) &&
+            (resultType.isVector() ? resultType.elementType : resultType.baseType) != IRType::Float16)
+        {
+            // Each product and sum is rounded on its own: a host compiler may
+            // otherwise contract `s + a * b` into a fused multiply-add (GCC's
+            // default on an FMA target), a different binary32 result.
+            const auto r32 = [](double v) { volatile float r = static_cast<float>(v); return static_cast<float>(r); };
+            const auto vpDot = [&](const std::vector<float>& x, const std::vector<float>& y) {
+                float sum = r32(static_cast<double>(x[0]) * y[0]);
+                for (size_t i = 1; i < x.size(); ++i)
+                    sum = r32(static_cast<double>(sum) + r32(static_cast<double>(x[i]) * y[i]));
+                return sum;
+            };
+            std::vector<std::vector<float>> args(argValues.size());
+            bool constant = !argValues.empty();
+            for (size_t i = 0; i < argValues.size() && constant; ++i)
+                constant = extractFloatComponents(*currentFunction_, argValues[i], args[i]) &&
+                           !args[i].empty() && args[i].size() <= 4;
+            std::vector<float> folded;
+            if (constant && *builtinOp == IROp::Dot && args.size() == 2 &&
+                args[0].size() == args[1].size() && args[0].size() >= 2)
+                folded = {vpDot(args[0], args[1])};
+            else if (constant && (*builtinOp == IROp::Length || *builtinOp == IROp::Normalize) &&
+                     args.size() == 1 && args[0].size() >= 2)
+            {
+                const float d = vpDot(args[0], args[0]);
+                if (std::isfinite(d) && d > 0.0f)
+                {
+                    const float rsq = r32(1.0 / std::sqrt(static_cast<double>(d)));
+                    if (*builtinOp == IROp::Length)
+                        folded = {r32(1.0 / static_cast<double>(rsq))};
+                    else
+                        for (float x : args[0]) folded.push_back(r32(static_cast<double>(x) * rsq));
+                }
+            }
+            else if (constant && *builtinOp == IROp::Lerp && args.size() == 3)
+            {
+                const size_t n = std::max({args[0].size(), args[1].size(), args[2].size()});
+                const auto lane = [&](const std::vector<float>& v, size_t i) { return v.size() == 1 ? v[0] : v[i]; };
+                bool shapes = true;
+                for (const auto& v : args) shapes = shapes && (v.size() == 1 || v.size() == n);
+                for (size_t i = 0; shapes && i < n; ++i)
+                {
+                    const float a0 = lane(args[0], i), b0 = lane(args[1], i), t = lane(args[2], i);
+                    const float diff = r32(static_cast<double>(b0) - a0);
+                    const float scaled = r32(static_cast<double>(t) * diff);
+                    folded.push_back(r32(static_cast<double>(a0) + scaled));
+                }
+            }
+            const size_t width = resultType.isVector() ? static_cast<size_t>(resultType.vectorSize) : 1;
+            bool finite = !folded.empty() && folded.size() == width;
+            for (float v : folded) finite = finite && std::isfinite(v);
+            if (finite)
+                return folded.size() == 1 ? createConstant(resultType, folded[0])
+                                          : createConstant(resultType, folded);
+        }
+
         // dot of two scalars is their product (measured: dot(x - .5, x - .5)
         // at x = .1 is .16); the DP lowerings take vector operands only.
         if (*builtinOp == IROp::Dot && argValues.size() == 2 && expr->arguments.size() == 2 &&
@@ -5709,8 +7068,37 @@ IRValueID IRBuilder::buildCallExpr(CallExpr* expr)
         (currentFunction_->isEntryPoint || !inlineStack_.empty()) &&
         expr->resolvedFunction->kind == DeclKind::Function)
     {
+        // A later argument may write a member of an earlier named struct.
+        // Copy the completed-argument state, as for by-value arrays. Only
+        // side-effect-free member paths are admitted by this capture path.
+        for (size_t i = 0; i < captureStructArgument.size(); ++i) {
+            if (!captureStructArgument[i]) continue;
+            auto* source = expr->arguments[i].get();
+            auto* type = calleeDecl->parameters[i]->type.get();
+            if (!containsMatrixField(type) && source->kind == ExprKind::Index &&
+                uniformStructSourceRoot(source)) {
+                auto* indexed = static_cast<IndexExpr*>(source);
+                const auto index = savedStructIndex[i] == InvalidIRValue
+                    ? buildExpr(indexed->index.get()) : savedStructIndex[i];
+                if (index == InvalidIRValue ||
+                    !captureUniformStructElement(type, indexed, index, structArguments[i])) {
+                    error(source->loc, "unsupported uniform struct element argument (struct-uniform-argument)");
+                    return InvalidIRValue;
+                }
+                continue;
+            }
+            if ((source->kind != ExprKind::Identifier && source->kind != ExprKind::MemberAccess &&
+                 source->kind != ExprKind::Index) ||
+                !buildLocalStructInitializer("", calleeDecl->parameters[i]->type.get(), source,
+                                             false, &structArguments[i])) {
+                error(source->loc, containsMatrixField(type)
+                    ? "unsupported by-value matrix struct argument (struct-matrix-argument)"
+                    : "unsupported by-value uniform struct argument (struct-uniform-argument)");
+                return InvalidIRValue;
+            }
+        }
         IRValueID inlined = InvalidIRValue;
-        if (inlineUserFunctionCall(expr, argValues, inlined))
+        if (inlineUserFunctionCall(expr, argValues, inlined, structArguments))
             return inlined;
         return InvalidIRValue;
     }
@@ -5736,11 +7124,13 @@ bool IRBuilder::flattenedStructArgument(const CallExpr* call, size_t i)
     return flattenedUniformStructParams_.count(name) && !nameToValue_.count(name);
 }
 
-namespace { bool arrayStorageKey(ExprNode* expr, std::string& key); }
+namespace { bool arrayStorageKey(ExprNode* expr, std::string& key,
+                             const std::function<bool(ExprNode*, int64_t&)>* rowIndex); }
 
 bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                                        const std::vector<IRValueID>& args,
-                                       IRValueID& result)
+                                       IRValueID& result,
+                                       const std::vector<StructLeafBindings>& structArguments)
 {
     result = InvalidIRValue;
 
@@ -5793,7 +7183,19 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // value is the one that remains (measured: two(x, x) with a = 1, b = 2
     // leaves x = 1), so the copies are made right to left.  Supported for a scalar/vector/matrix parameter whose
     // argument is a plain caller lvalue; anything else is refused by name.
+    // A two-dimensional array PARAMETER: its rows ("a[i]", storageKey) are
+    // not bound by the parameter binding below, so a caller row of the same
+    // name would stay in scope (review: codex, array2d_param_shadow).  Refused.
+    for (const auto& param : callee->parameters)
+        if (param && param->type && param->type->isArray() && param->type->elementType &&
+            param->type->elementType->isArray())
+        {
+            error(expr->loc, "cannot inline user function '" + name + "': the two-dimensional array parameter '" +
+                             param->name + "' is not supported (member-array-storage)");
+            return false;
+        }
     std::vector<size_t> copyOut;
+    std::vector<std::pair<size_t, std::string>> arrayCopyOut;   // (parameter, caller array key)
     for (size_t i = 0; i < callee->parameters.size(); ++i)
     {
         const ParamDecl* param = callee->parameters[i].get();
@@ -5810,6 +7212,28 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                                     (arg->kind == ExprKind::MemberAccess &&
                                      static_cast<const MemberAccessExpr*>(arg)->object &&
                                      static_cast<const MemberAccessExpr*>(arg)->object->kind == ExprKind::Identifier));
+        // An INOUT ARRAY whose argument is a caller-local array (2xbrz's
+        // `ScalePixel(blend, k, dst)` with `inout float3 dst[4]`): the
+        // elements were copied in by the parameter binding below; the
+        // helper's final elements are copied back after the body.  An OUT
+        // array, a struct-held or file-scope array stays refused.
+        std::string arrayKey;
+        if (pt.isArray() && param->storage == StorageQualifier::InOut && !param->name.empty() &&
+            arg && arg->kind == ExprKind::Identifier && !getStructFields(param->type.get()) &&
+            storageKey(const_cast<ExprNode*>(arg), arrayKey) && localArrayValues_.count(arrayKey) &&
+            !module_->findGlobal(arrayKey) &&
+            static_cast<int>(localArrayValues_.at(arrayKey).size()) == pt.arraySize)
+        {
+            if (std::any_of(arrayCopyOut.begin(), arrayCopyOut.end(),
+                            [&](const auto& c) { return c.second == arrayKey; }))
+            {
+                error(expr->loc, "cannot inline user function '" + name +
+                                 "': the same array is passed to two inout array parameters");
+                return false;
+            }
+            arrayCopyOut.emplace_back(i, arrayKey);
+            continue;
+        }
         if (pt.isArray() || getStructFields(param->type.get()) || param->name.empty() || !lvalue)
         {
             error(expr->loc, "cannot inline user function '" + name +
@@ -5916,6 +7340,18 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         // global, and its write to the global lands in the stash and
         // comes back out below (inline-global-stash - this used to be REFUSED).
         stashShadowedGlobal(param->name);
+        if (i < structArguments.size() && !structArguments[i].empty()) {
+            const std::string prefix = param->name + ".";
+            for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+                if (it->first == param->name || it->first.compare(0, prefix.size(), prefix) == 0)
+                    it = nameToValue_.erase(it);
+                else ++it;
+            for (const auto& [suffix, value] : structArguments[i])
+                nameToValue_[param->name + suffix] = value;
+            if (flattenedUniformStructParams_.insert(param->name).second)
+                flattenedForCall.push_back(param->name);
+            continue;
+        }
         // `helper(IN)` with IN a flattened uniform struct parameter: the
         // parameter is IN's members under the parameter's name (libretro
         // passes its `uniform input IN` to helpers this way; it was
@@ -5943,6 +7379,33 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
         }
         if (!param->name.empty())
             nameToValue_[param->name] = boundValue;
+
+        // An array parameter given a file-scope uniform array by name (or a
+        // parameter that is itself such an alias) reads that global's
+        // elements: `float h(float c[7]) ... h(coeffs_x)` with `const float
+        // coeffs_x[] = {...}` (lcd-grid-v2).  The argument's own value is not
+        // an array the body can index.  Entry-parameter arrays and globals
+        // the program assigns stay on the existing path.
+        if (!param->name.empty() && param->type && param->type->isArray() &&
+            param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
+            argument && argument->kind == ExprKind::Identifier)
+        {
+            const std::string& argName = static_cast<IdentifierExpr*>(argument)->name;
+            std::string target;
+            const auto prior = savedScope.uniformArrayAliases.find(argName);
+            const auto priorBound = savedNames.find(argName);
+            if (prior != savedScope.uniformArrayAliases.end() && priorBound != savedNames.end() &&
+                priorBound->second == prior->second.second)
+                target = prior->second.first;
+            else if (priorBound == savedNames.end() && !localArrayValues_.count(argName))
+            {
+                const IRGlobal* g = module_->findGlobal(argName);
+                if (g && g->type.isArray() && g->storage == StorageQualifier::Uniform)
+                    target = argName;
+            }
+            if (!target.empty())
+                scope_.uniformArrayAliases[param->name] = {target, boundValue};
+        }
 
         // Array-bearing arguments are values, not caller spelling aliases.
         // Take the call's completed argument state (the reference's measured
@@ -5993,7 +7456,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                 else localArrayValues_[field.first].assign(static_cast<size_t>(field.second), InvalidIRValue);
 
             std::string source;
-            if (i < expr->arguments.size() && arrayStorageKey(expr->arguments[i].get(), source))
+            if (i < expr->arguments.size() && storageKey(expr->arguments[i].get(), source))
             {
                 const std::string prefix = source + ".";
                 auto belongs = [&](const std::string& key) {
@@ -6179,6 +7642,21 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     }
     for (const auto& kv : inlineSwizzles)
         identityPrefixSwizzleBase_.try_emplace(kv.first, kv.second);
+    // Inout arrays first, element by element into the caller's array.
+    for (size_t k = arrayCopyOut.size(); ok && k-- > 0; )
+    {
+        const auto body = bodyArrays.find(callee->parameters[arrayCopyOut[k].first]->name);
+        auto caller = localArrayValues_.find(arrayCopyOut[k].second);
+        if (body == bodyArrays.end() || caller == localArrayValues_.end() ||
+            body->second.size() != caller->second.size())
+        {
+            error(expr->loc, "cannot inline user function '" + callee->name +
+                             "': inout array parameter '" + callee->parameters[arrayCopyOut[k].first]->name +
+                             "' lost its elements");
+            return false;
+        }
+        caller->second = body->second;
+    }
     // Copy-out into the caller's own scope (restored above), so the
     // argument names the CALLER's variable; right to left, see above.
     for (size_t k = copyOut.size(); ok && k-- > 0; )
@@ -6454,6 +7932,43 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                     ret->loc, callee->returnType->baseType);
             }
             result = narrowToScalar(callee->returnType.get(), ret->value.get(), result);
+            // t_8c4a982e: whatever this return carries claims its inputs'
+            // implicit TEXCOORDs, used or not - the value, and for a struct
+            // local every member value it holds at this return.
+            if (currentFunction_ && currentFunction_->isEntryPoint)
+            {
+                if (result != InvalidIRValue) implicitClaimRoots_.push_back(result);
+                // A returned struct LOCAL's members, by the declared return
+                // type's own field paths only: a scalar return named like a
+                // caller's struct, or a caller struct of another type that
+                // shares the name, must not contribute (review: codex).
+                const std::vector<StructField>* fields =
+                    ret->value->kind == ExprKind::Identifier ? getStructFields(callee->returnType.get())
+                                                             : nullptr;
+                if (fields)
+                {
+                    std::vector<std::string> paths;
+                    const auto walk = [&](const auto& self, const std::vector<StructField>& fs,
+                                          const std::string& prefix) -> void {
+                        for (const auto& f : fs)
+                        {
+                            const std::string path = prefix + "." + f.name;
+                            if (const auto* inner = f.type ? getStructFields(f.type.get()) : nullptr)
+                                self(self, *inner, path);
+                            else
+                                paths.push_back(path);
+                        }
+                    };
+                    walk(walk, *fields, static_cast<IdentifierExpr*>(ret->value.get())->name);
+                    for (const auto& path : paths)
+                        for (const auto& entry : nameToValue_)
+                            if (entry.second != InvalidIRValue &&
+                                (entry.first == path ||
+                                 (entry.first.size() > path.size() && entry.first[path.size()] == '[' &&
+                                  entry.first.compare(0, path.size(), path) == 0)))
+                                implicitClaimRoots_.push_back(entry.second);
+                }
+            }
             sawReturn = true;
             continue;
         }
@@ -6857,6 +8372,13 @@ bool IRBuilder::emitInputMemberLoad(const ParamDecl* param, const std::string& m
                                     IRValueID valueId)
 {
     if (!param || !param->type || param->type->baseType != BaseType::Struct) return false;
+    if (module_->shaderStage == ShaderStage::Vertex && !inlineStack_.empty() &&
+        currentFunctionDecl_ && std::none_of(currentFunctionDecl_->parameters.begin(),
+            currentFunctionDecl_->parameters.end(), [param](const auto& p) { return p.get() == param; })) {
+        error(param->loc, "uncaptured by-value struct member '" + param->name + "." + member +
+              "' cannot be loaded as a vertex attribute (struct-argument-binding)");
+        return true;
+    }
     const std::vector<StructField>* fields = getStructFields(param->type.get());
     if (!fields) return false;
     std::string leaf = member;
@@ -6904,6 +8426,42 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
     {
         error(expr->loc, "struct constructor member access is not supported (local-struct-initializer)");
         return InvalidIRValue;
+    }
+    // A matrix element selector reads row r then lane c of each element:
+    // a matrix's VecExtract index denotes a row, a vector's a lane.
+    if (expr->isMatrixSwizzle)
+    {
+        const IRValueID matrix = buildExpr(expr->object.get());
+        if (matrix == InvalidIRValue) return InvalidIRValue;
+        const IRTypeInfo matrixType = getExprType(expr->object.get());
+        const IRTypeInfo resultType = getExprType(expr);
+        if (!matrixType.isMatrix() || matrixType.arraySize != 0)
+        {
+            error(expr->loc, "matrix element selector on a value that is not a matrix");
+            return InvalidIRValue;
+        }
+        IRTypeInfo rowType = resultType.isScalar() ? resultType : resultType;
+        const IRType element = matrixType.elementType;
+        rowType = matrixType.matrixCols == 1 ? IRTypeInfo::Float() :
+                  matrixType.matrixCols == 2 ? IRTypeInfo::Float2() :
+                  matrixType.matrixCols == 3 ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
+        if (element != IRType::Float32)
+        {
+            error(expr->loc, "matrix element selector on a non-float matrix is not lowered (matrix-swizzle)");
+            return InvalidIRValue;
+        }
+        std::vector<IRValueID> lanes;
+        for (const auto& rc : expr->matrixSwizzle)
+        {
+            IRValueID row = emitInstruction(IROp::VecExtract, rowType,
+                {matrix, createConstant(static_cast<int32_t>(rc.first))}, expr->loc);
+            if (matrixType.matrixCols != 1)
+                row = emitInstruction(IROp::VecExtract, IRTypeInfo::Float(),
+                    {row, createConstant(static_cast<int32_t>(rc.second))}, expr->loc);
+            lanes.push_back(row);
+        }
+        return lanes.size() == 1 ? lanes.front()
+                                 : emitInstruction(IROp::VecConstruct, resultType, lanes, expr->loc);
     }
     // Check for swizzle first
     if (expr->swizzleLength > 0)
@@ -6995,6 +8553,85 @@ IRValueID IRBuilder::buildMemberAccessExpr(MemberAccessExpr* expr)
             identityPrefixSwizzleBase_[currentFunction_->nextValueId - 1] = objectValue;
 
         return currentFunction_->nextValueId - 1;
+    }
+
+    // A uniform struct-array member keeps its declaration identity. Constant
+    // reads remain ordinary flattened loads; dynamic VP reads name the root
+    // and leaf, for a shared element-major allocation after inlining.
+    {
+        std::vector<std::string> members{expr->member};
+        ExprNode* cur = expr->object.get();
+        while (cur->kind == ExprKind::MemberAccess && !static_cast<MemberAccessExpr*>(cur)->isSwizzle)
+        {
+            members.push_back(static_cast<MemberAccessExpr*>(cur)->member);
+            cur = static_cast<MemberAccessExpr*>(cur)->object.get();
+        }
+        auto* index = cur->kind == ExprKind::Index ? static_cast<IndexExpr*>(cur) : nullptr;
+        auto* base = index && index->array->kind == ExprKind::Identifier
+                         ? static_cast<IdentifierExpr*>(index->array.get()) : nullptr;
+        const IRGlobal* array = base && !nameToValue_.count(base->name) ? module_->findGlobal(base->name) : nullptr;
+        std::string path;
+        for (auto it = members.rbegin(); it != members.rend(); ++it) path += "." + *it;
+        if (array && array->storage == StorageQualifier::Uniform &&
+            module_->findGlobal(base->name + "[0]" + path))
+        {
+            const IRValueID indexValue = buildExpr(index->index.get());
+            int32_t k = 0;
+            if (indexValue == InvalidIRValue) return InvalidIRValue;
+            bool constantIndex = extractIntScalar(*currentFunction_, indexValue, k);
+            if (!constantIndex && module_->shaderStage == ShaderStage::Vertex) {
+                // Literal builtin expressions can still be instructions here
+                // (for example int(abs(-1.0))). Use the existing typed
+                // evaluator before choosing a whole dynamic block. No module
+                // means no identifier/default may be mistaken for a constant;
+                // the evaluator also excludes source-function calls/effects.
+                ConstLanes values;
+                ConstShape shape;
+                ConstEvalScalar integer;
+                if (evaluateConstValue(index->index.get(), values, shape, nullptr, true) &&
+                    values.size() == 1 && !shape.rows && !shape.elems &&
+                    convertScalar(values[0], BaseType::Int, integer)) {
+                    k = static_cast<int32_t>(integer.i);
+                    constantIndex = true;
+                }
+            }
+            if (!constantIndex)
+            {
+                const auto* first = module_->findGlobal(base->name + "[0]" + path);
+                if (module_->shaderStage != ShaderStage::Vertex || !array->uniformStructRoot ||
+                    !first || !first->uniformStructMember ||
+                    !array->uniformStructRoot->dynamicRefusalReason.empty()) {
+                    error(expr->loc, "run-time index into uniform struct array '" + base->name +
+                          "' has an unsupported profile or shape (struct-array-dynamic-index)");
+                    return InvalidIRValue;
+                }
+                auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
+                    currentFunction_->allocateValueId(), getExprType(expr));
+                inst->targetName = array->name + "." + first->uniformStructMember->path;
+                inst->uniformSource = array->valueId;
+                inst->uniformStructRead = UniformStructRead{first->uniformStructMember->leaf, 0};
+                inst->arrayIndexKind = IRInstruction::ArrayIndexKind::Dynamic;
+                inst->addOperand(indexValue);
+                inst->loc = expr->loc;
+                const auto id = inst->result;
+                currentBlock_->addInstruction(std::move(inst));
+                return id;
+            }
+            const std::string name = base->name + "[" + std::to_string(k) + "]" + path;
+            const IRGlobal* member = module_->findGlobal(name);
+            if (!member)
+            {
+                error(expr->loc, "'" + name + "' is out of range or not a uniform leaf (struct-array-member)");
+                return InvalidIRValue;
+            }
+            auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
+                currentFunction_->allocateValueId(), getExprType(expr));
+            inst->targetName = name;
+            inst->uniformSource = member->valueId;
+            const IRValueID id = inst->result;
+            currentBlock_->addInstruction(std::move(inst));
+            return id;
+        }
     }
 
     // Struct member access - build a composite name
@@ -7448,7 +9085,8 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
 } // namespace
 
 namespace {
-bool arrayStorageKey(ExprNode* expr, std::string& key)
+bool arrayStorageKey(ExprNode* expr, std::string& key,
+                     const std::function<bool(ExprNode*, int64_t&)>* rowIndex)
 {
     if (expr->kind == ExprKind::Identifier)
     {
@@ -7457,16 +9095,33 @@ bool arrayStorageKey(ExprNode* expr, std::string& key)
         key = id->name;
         return true;
     }
+    // A ROW of a multi-dimensional local array by a literal index:
+    // `crd[1]` of `float2 crd[4][4]` is tracked as its own array "crd[1]".
+    if (expr->kind == ExprKind::Index)
+    {
+        auto* index = static_cast<IndexExpr*>(expr);
+        if (!expr->resolvedType || !expr->resolvedType->isArray() || !index->index) return false;
+        int64_t row = -1;
+        if (index->index->kind == ExprKind::Literal &&
+            static_cast<LiteralExpr*>(index->index.get())->literalKind == LiteralExpr::LiteralKind::Int)
+            row = std::get<int64_t>(static_cast<LiteralExpr*>(index->index.get())->value);
+        // A name bound to an integer constant (an expanded loop's induction)
+        // when the builder supplies its bindings.
+        else if (!rowIndex || !(*rowIndex)(index->index.get(), row)) return false;
+        if (row < 0 || !arrayStorageKey(index->array.get(), key, rowIndex)) return false;
+        key += "[" + std::to_string(row) + "]";
+        return true;
+    }
     if (expr->kind != ExprKind::MemberAccess) return false;
     auto* member = static_cast<MemberAccessExpr*>(expr);
-    if (member->isSwizzle || !arrayStorageKey(member->object.get(), key)) return false;
+    if (member->isSwizzle || !arrayStorageKey(member->object.get(), key, rowIndex)) return false;
     key += "." + member->member;
     return true;
 }
 }
 
 bool IRBuilder::buildLocalStructInitializer(const std::string& destination, TypeNode* type, ExprNode* source,
-                                           bool replaceExisting)
+                                           bool replaceExisting, StructLeafBindings* captured)
 {
     // A struct has qualified leaf bindings, not a scalar IR value. Snapshot
     // every source leaf in source order before installing any destination.
@@ -7489,6 +9144,25 @@ bool IRBuilder::buildLocalStructInitializer(const std::string& destination, Type
             auto object = self(self, member->object.get());
             if (!object) return nullptr;
             result = std::make_unique<MemberAccessExpr>(member->loc, std::move(object), member->member);
+        }
+        else if (captured && expr->kind == ExprKind::Index) {
+            // Only a literal-selected file-scope uniform element is in this
+            // slice. Cloning a runtime or effectful index per leaf would read
+            // different elements; dynamic aggregate arguments need a saved
+            // index and the shared layout descriptor instead.
+            auto* index = static_cast<IndexExpr*>(expr);
+            if (!index->array || index->array->kind != ExprKind::Identifier ||
+                !index->index || index->index->kind != ExprKind::Literal) return nullptr;
+            auto* id = static_cast<IdentifierExpr*>(index->array.get());
+            auto* literal = static_cast<LiteralExpr*>(index->index.get());
+            const auto* global = module_->findGlobal(id->name);
+            if (literal->literalKind != LiteralExpr::LiteralKind::Int || nameToValue_.count(id->name) ||
+                localArrayValues_.count(id->name) || !global || !global->type.isArray() ||
+                global->storage != StorageQualifier::Uniform) return nullptr;
+            auto array = self(self, index->array.get());
+            auto subscript = std::make_unique<LiteralExpr>(literal->loc, std::get<int64_t>(literal->value));
+            subscript->resolvedType = literal->resolvedType;
+            result = std::make_unique<IndexExpr>(index->loc, std::move(array), std::move(subscript));
         }
         if (result) result->resolvedType = expr->resolvedType;
         return result;
@@ -7579,6 +9253,10 @@ bool IRBuilder::buildLocalStructInitializer(const std::string& destination, Type
         return true;
     };
     if (!collect(collect, destination, type, source)) return false;
+    if (captured) {
+        *captured = std::move(leaves);
+        return true;
+    }
     if (replaceExisting)
     {
         // A former partial write must not survive replacement of its parent.
@@ -7694,7 +9372,7 @@ bool IRBuilder::copyArrayAggregate(const std::string& destination, ExprNode* sou
     while (source && source->kind == ExprKind::Binary &&
            static_cast<BinaryExpr*>(source)->op == BinaryOp::Assign)
         source = static_cast<BinaryExpr*>(source)->left.get();
-    if (!source || !arrayStorageKey(source, origin))
+    if (!source || !storageKey(source, origin))
     {
         error("array-bearing struct copy requires a tracked source (member-array-storage)");
         return true;
@@ -7733,7 +9411,7 @@ bool IRBuilder::copyArrayAggregate(const std::string& destination, ExprNode* sou
 bool IRBuilder::resolveTrackedArrayElement(IndexExpr* expr, std::string& key, int32_t& index)
 {
     const auto type = getExprType(expr->array.get());
-    if (!type.isArray() || !arrayStorageKey(expr->array.get(), key))
+    if (!type.isArray() || !storageKey(expr->array.get(), key))
     {
         error(expr->loc, "member-array storage path is not supported (member-array-storage)");
         return false;
@@ -7814,9 +9492,21 @@ IRValueID IRBuilder::readTrackedArrayElement(IndexExpr* expr, const std::string&
 
 IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
 {
+    // A helper parameter that aliases a file-scope uniform array is read
+    // from the global below, never from the element values the inliner
+    // copied for array arguments (a uniform array has none to copy).
+    bool uniformAlias = false;
+    if (expr->array->kind == ExprKind::Identifier)
+    {
+        const std::string& n = static_cast<IdentifierExpr*>(expr->array.get())->name;
+        const auto alias = scope_.uniformArrayAliases.find(n);
+        const auto bound = nameToValue_.find(n);
+        uniformAlias = alias != scope_.uniformArrayAliases.end() && bound != nameToValue_.end() &&
+                       bound->second == alias->second.second;
+    }
     std::string trackedKey;
-    if (getExprType(expr->array.get()).isArray() &&
-        arrayStorageKey(expr->array.get(), trackedKey) && localArrayValues_.count(trackedKey))
+    if (!uniformAlias && getExprType(expr->array.get()).isArray() &&
+        storageKey(expr->array.get(), trackedKey) && localArrayValues_.count(trackedKey))
     {
         const IRGlobal* global = module_->findGlobal(trackedKey);
         // Entry setup seeds initialized mutable static arrays by element,
@@ -7861,8 +9551,22 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
         // back to findGlobal, so `float4 u = p; return u[2];` under a
         // global `u[4]` read the GLOBAL's element (found in review: the
         // parent refused that shape, the draft accepted it wrongly).
+        // A helper parameter aliasing a file-scope uniform array (see the
+        // inliner's parameter binding) indexes that global.
+        std::string lookupName = ident->name;
+        bool aliased = false;
+        {
+            const auto alias = scope_.uniformArrayAliases.find(ident->name);
+            const auto bound = nameToValue_.find(ident->name);
+            if (alias != scope_.uniformArrayAliases.end() && bound != nameToValue_.end() &&
+                bound->second == alias->second.second)
+            {
+                lookupName = alias->second.first;
+                aliased = true;
+            }
+        }
         const IRParameter* arrayParam = nullptr;
-        const bool nameIsBound = nameToValue_.count(ident->name) != 0;
+        const bool nameIsBound = !aliased && nameToValue_.count(ident->name) != 0;
         if (nameIsBound && currentFunction_)
         {
             const IRValueID boundId = nameToValue_[ident->name];
@@ -7876,7 +9580,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
                 }
             }
         }
-        IRGlobal* global = nameIsBound ? nullptr : module_->findGlobal(ident->name);
+        IRGlobal* global = nameIsBound ? nullptr : module_->findGlobal(lookupName);
         if (global && !global->type.isArray())
             global = nullptr;
 
@@ -7891,7 +9595,7 @@ IRValueID IRBuilder::buildIndexExpr(IndexExpr* expr)
         // a run-time index over a written array is refused by name.
         if (global && !arrayParam)
         {
-            auto promoted = localArrayValues_.find(ident->name);
+            auto promoted = localArrayValues_.find(lookupName);
             if (promoted != localArrayValues_.end())
             {
                 int64_t index = 0;
@@ -9073,6 +10777,44 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
         // assignment (`c.rgb = vec3;`) is split into per-lane VecInserts
         // — one per swizzle index — so the back-end sees a sequence of
         // single-lane overrides.
+        // A swizzle write into an ARRAY ELEMENT (`d[0].y = 7;`, 2xbrz's
+        // helpers): read the element, insert the lanes, store the element
+        // back through the ordinary element assignment.  The index is read
+        // twice, so only a literal or a plain name is accepted here.
+        if (memberExpr->isSwizzle && memberExpr->swizzleLength >= 1 && memberExpr->object &&
+            memberExpr->object->kind == ExprKind::Index)
+        {
+            auto* element = static_cast<IndexExpr*>(memberExpr->object.get());
+            if (element->array && getExprType(element->array.get()).isArray() && element->index &&
+                (element->index->kind == ExprKind::Literal || element->index->kind == ExprKind::Identifier))
+            {
+                IRValueID currentVec = buildExpr(element);
+                if (currentVec == InvalidIRValue) return InvalidIRValue;
+                const IRTypeInfo vecType = getExprType(element);
+                for (int s = 0; s < memberExpr->swizzleLength; ++s)
+                {
+                    IRValueID scalar = value;
+                    if (memberExpr->swizzleLength > 1)
+                    {
+                        auto extractInst = std::make_unique<IRInstruction>(
+                            IROp::VecExtract, currentFunction_->allocateValueId(), IRTypeInfo::Float());
+                        extractInst->addOperand(value);
+                        extractInst->componentIndex = s;
+                        scalar = extractInst->result;
+                        currentBlock_->addInstruction(std::move(extractInst));
+                    }
+                    auto insertInst = std::make_unique<IRInstruction>(
+                        IROp::VecInsert, currentFunction_->allocateValueId(), vecType);
+                    insertInst->addOperand(currentVec);
+                    insertInst->addOperand(scalar);
+                    insertInst->componentIndex = memberExpr->swizzleIndices[s];
+                    currentVec = insertInst->result;
+                    currentBlock_->addInstruction(std::move(insertInst));
+                }
+                if (buildAssignment(element, currentVec) == InvalidIRValue) return InvalidIRValue;
+                return value;
+            }
+        }
         if (memberExpr->isSwizzle && memberExpr->swizzleLength >= 1)
         {
             // A field that already has a whole value needs the same
@@ -9278,6 +11020,17 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
         auto* indexExpr = static_cast<IndexExpr*>(target);
         if (getExprType(indexExpr->array.get()).isArray())
         {
+            // A helper's standalone IR (never lowered; rebuilt at each
+            // inline call with the caller's elements bound) has no element
+            // storage for an array PARAMETER: nothing to record.
+            if (!currentFunction_->isEntryPoint && inlineStack_.empty() &&
+                indexExpr->array && indexExpr->array->kind == ExprKind::Identifier &&
+                currentFunctionDecl_ &&
+                std::any_of(currentFunctionDecl_->parameters.begin(), currentFunctionDecl_->parameters.end(),
+                    [&](const auto& param) {
+                        return param && param->name == static_cast<IdentifierExpr*>(indexExpr->array.get())->name;
+                    }))
+                return value;
             std::string key;
             int32_t index = 0;
             if (!resolveTrackedArrayElement(indexExpr, key, index)) return InvalidIRValue;
@@ -9503,8 +11256,10 @@ IRValueID IRBuilder::emitMatrixComponents(const IRTypeInfo& sourceType,
         (scalar ? targetType.baseType : targetType.elementType) != IRType::Float32 ||
         sourceType.matrixRows < 1 || sourceType.matrixRows > 4 ||
         sourceType.matrixCols < 1 || sourceType.matrixCols > 4 || width < 1 || width > 4 ||
-        (!scalar && ((sourceType.matrixRows != 1 && sourceType.matrixCols != 1) ||
-                     width > std::max(sourceType.matrixRows, sourceType.matrixCols))))
+        (!scalar && ((sourceType.matrixRows != 1 && sourceType.matrixCols != 1 &&
+                      width != sourceType.matrixRows * sourceType.matrixCols) ||
+                     ((sourceType.matrixRows == 1 || sourceType.matrixCols == 1) &&
+                      width > std::max(sourceType.matrixRows, sourceType.matrixCols)))))
     {
         error(loc, "matrix component conversion requires a float scalar or a non-widening float vector from a one-dimensional float matrix");
         return InvalidIRValue;
@@ -9513,16 +11268,21 @@ IRValueID IRBuilder::emitMatrixComponents(const IRTypeInfo& sourceType,
         sourceType.matrixCols == 2 ? IRTypeInfo::Float2() :
         sourceType.matrixCols == 3 ? IRTypeInfo::Float3() : IRTypeInfo::Float4();
     std::vector<IRValueID> lanes;
+    // A two-dimensional matrix converts only when the vector holds exactly
+    // its components (measured: float4(float2x2) is m00 m01 m10 m11, row-major;
+    // float3(float2x3) and float4(float3x3) are C1033).
+    const bool flat2d = sourceType.matrixRows != 1 && sourceType.matrixCols != 1;
     for (int i = 0; i < width; ++i)
     {
         // Extract rows first: a matrix's VecExtract index denotes a row,
         // while a vector's denotes a lane. Reuse the already evaluated value.
-        const int row = sourceType.matrixCols == 1 ? i : 0;
+        const int row = flat2d ? i / sourceType.matrixCols : (sourceType.matrixCols == 1 ? i : 0);
+        const int col = flat2d ? i % sourceType.matrixCols : i;
         IRValueID lane = emitInstruction(IROp::VecExtract, rowType,
             {value, createConstant(static_cast<int32_t>(row))}, loc);
         if (sourceType.matrixCols != 1)
             lane = emitInstruction(IROp::VecExtract, IRTypeInfo::Float(),
-                {lane, createConstant(static_cast<int32_t>(i))}, loc);
+                {lane, createConstant(static_cast<int32_t>(col))}, loc);
         lanes.push_back(lane);
     }
     return scalar ? lanes.front() : emitInstruction(IROp::VecConstruct, targetType, lanes, loc);
@@ -9950,6 +11710,102 @@ IRTypeInfo IRBuilder::getExprType(ExprNode* expr)
     return getIRType(expr->resolvedType.get());
 }
 
+const IRGlobal* IRBuilder::uniformStructSourceRoot(ExprNode* source)
+{
+    while (source && source->kind == ExprKind::MemberAccess) {
+        auto* member = static_cast<MemberAccessExpr*>(source);
+        if (member->isSwizzle) return nullptr;
+        source = member->object.get();
+    }
+    if (source && source->kind == ExprKind::Index)
+        source = static_cast<IndexExpr*>(source)->array.get();
+    if (!source || source->kind != ExprKind::Identifier) return nullptr;
+    const auto& name = static_cast<IdentifierExpr*>(source)->name;
+    if (nameToValue_.count(name) || localArrayValues_.count(name)) return nullptr;
+    const auto* global = module_->findGlobal(name);
+    return global && global->storage == StorageQualifier::Uniform ? global : nullptr;
+}
+
+bool IRBuilder::hasBoundStructLeaves(TypeNode* type, ExprNode* source)
+{
+    std::string key;
+    if (!storageKey(source, key)) return false;
+    const auto bound = [&](const auto& self, TypeNode* t, const std::string& name) -> bool {
+        if (!t || t->isArray() || t->isSampler()) return false;
+        if (const auto* fields = getStructFields(t)) {
+            if (fields->empty()) return false;
+            for (const auto& field : *fields)
+                if (!self(self, field.type.get(), name + "." + field.name)) return false;
+            return true;
+        }
+        const auto found = nameToValue_.find(name);
+        return found != nameToValue_.end() && found->second != InvalidIRValue;
+    };
+    return bound(bound, type, key);
+}
+
+bool IRBuilder::captureUniformStructElement(TypeNode* type, IndexExpr* source,
+                                            IRValueID index, StructLeafBindings& leaves)
+{
+    if (!source || !source->array || source->array->kind != ExprKind::Identifier) return false;
+    const auto* root = uniformStructSourceRoot(source);
+    if (!root || !root->type.isArray()) return false;
+    int32_t element = 0;
+    bool constant = extractIntScalar(*currentFunction_, index, element);
+    if (!constant && !exprHasSideEffects(source->index.get())) {
+        ConstLanes values;
+        ConstShape shape;
+        ConstEvalScalar integer;
+        if (evaluateConstValue(source->index.get(), values, shape, nullptr, true) &&
+            values.size() == 1 && !shape.rows && !shape.elems &&
+            convertScalar(values[0], BaseType::Int, integer)) {
+            element = static_cast<int32_t>(integer.i);
+            constant = true;
+        }
+    }
+    if (constant && (element < 0 || element >= root->type.arraySize)) return false;
+    if (!constant && (!root->uniformStructRoot ||
+                      !root->uniformStructRoot->dynamicRefusalReason.empty())) return false;
+    const auto collect = [&](const auto& self, TypeNode* t, const std::string& suffix) -> bool {
+        if (!t || t->isArray() || t->isSampler() || getIRType(t).isMatrix()) return false;
+        if (const auto* fields = getStructFields(t)) {
+            for (const auto& field : *fields)
+                if (!self(self, field.type.get(), suffix + "." + field.name)) return false;
+            return true;
+        }
+        const auto* leaf = module_->findGlobal(root->name + "[" +
+            std::to_string(constant ? element : 0) + "]" + suffix);
+        if (!leaf || (!constant && !leaf->uniformStructMember)) return false;
+        auto inst = std::make_unique<IRInstruction>(IROp::LoadUniform,
+            currentFunction_->allocateValueId(), getIRType(t));
+        inst->loc = source->loc;
+        if (constant) {
+            inst->targetName = leaf->name;
+            inst->uniformSource = leaf->valueId;
+        } else {
+            inst->targetName = root->name + "." + leaf->uniformStructMember->path;
+            inst->uniformSource = root->valueId;
+            inst->uniformStructRead = UniformStructRead{leaf->uniformStructMember->leaf, 0};
+            inst->arrayIndexKind = IRInstruction::ArrayIndexKind::Dynamic;
+            inst->addOperand(index);
+        }
+        leaves.emplace_back(suffix, inst->result);
+        currentBlock_->addInstruction(std::move(inst));
+        return true;
+    };
+    return collect(collect, type, "") && !leaves.empty();
+}
+
+bool IRBuilder::containsMatrixField(TypeNode* typeNode)
+{
+    if (!typeNode || typeNode->isArray()) return false;
+    if (getIRType(typeNode).isMatrix()) return true;
+    if (const auto* fields = getStructFields(typeNode))
+        for (const auto& field : *fields)
+            if (containsMatrixField(field.type.get())) return true;
+    return false;
+}
+
 const std::vector<StructField>* IRBuilder::getStructFields(TypeNode* typeNode)
 {
     if (!typeNode || typeNode->baseType != BaseType::Struct)
@@ -10170,4 +12026,19 @@ IRValueID IRBuilder::createConstant(const IRTypeInfo& type, const std::vector<fl
 {
     auto* constant = currentFunction_->createConstant(type, values, intValues);
     return constant->id;
+}
+
+// arrayStorageKey with this builder's bindings: a row index may be a name
+// bound to an integer constant (`c[i][j]` inside an expanded loop).
+bool IRBuilder::storageKey(ExprNode* expr, std::string& key)
+{
+    const std::function<bool(ExprNode*, int64_t&)> rowIndex = [&](ExprNode* e, int64_t& row) {
+        if (!e || e->kind != ExprKind::Identifier) return false;
+        const auto it = nameToValue_.find(static_cast<IdentifierExpr*>(e)->name);
+        int32_t v = 0;
+        if (it == nameToValue_.end() || !extractIntScalar(*currentFunction_, it->second, v)) return false;
+        row = v;
+        return true;
+    };
+    return arrayStorageKey(expr, key, &rowIndex);
 }

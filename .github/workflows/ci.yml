@@ -602,6 +602,9 @@ jobs:
       - name: Test rsx-cg-compiler operator lexing
         run: bash tests/shader-compiler/operator-lexer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler register lane remapping
+        run: bash tests/shader-compiler/lane-remap-test.sh
+
       - name: Test rsx-cg-compiler angle stdlib
         run: bash tests/shader-compiler/stdlib-angle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler log10 stdlib
@@ -841,6 +844,65 @@ jobs:
         run: bash tests/shader-compiler/overload-truncation-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A TEXUNIT semantic on a struct parameter binds its samplers and labels its records
         run: bash tests/shader-compiler/struct-param-semantic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: An input flowing into an inlined call's return claims its implicit TEXCOORD
+        run: bash tests/shader-compiler/implicit-varying-claim-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Matrix element selectors and matrix-to-vector conversion
+        run: bash tests/shader-compiler/matrix-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A uniform array passed to a helper's array parameter is read from the global
+        run: bash tests/shader-compiler/helper-uniform-array-arg-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A run-time-bound fragment for loop is a hardware loop, judged by value
+        run: bash tests/shader-compiler/fp-hardware-loop-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: An inout array parameter of a helper is copied in and back
+        run: bash tests/shader-compiler/inout-array-param-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A two-dimensional local array, first bracket outermost
+        run: bash tests/shader-compiler/local-2d-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A fragment out parameter written under a branch is stored once, at the end
+        run: bash tests/shader-compiler/out-param-branch-store-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A FOGFRAC fragment input reads the fog register's Y lane
+        run: bash tests/shader-compiler/fogfrac-input-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A built-in type name other than float, int or bool may name a variable
+        run: bash tests/shader-compiler/type-name-variable-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A uniform array of structs read by a constant index is per-element member uniforms
+        run: bash tests/shader-compiler/uniform-struct-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A vertex loop with a run-time trip count lowers to branches
+        run: bash tests/shader-compiler/vp-runtime-loop-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test VP struct-array blocks and indexed constant values
+        run: bash tests/shader-compiler/vp-struct-array-dynamic-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test VP by-value matrix struct arguments
+        run: bash tests/shader-compiler/vp-struct-matrix-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler --loops
+      - name: A vertex select with a vector condition selects per lane
+        run: bash tests/shader-compiler/vp-vector-select-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A vertex input with no semantic takes the lowest unclaimed attribute
+        run: bash tests/shader-compiler/vp-implicit-attribute-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Vertex arithmetic fuses products, writes outputs directly and drops copies
+        run: bash tests/shader-compiler/vp-arith-shape-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      # Fragment abs/negate copies fold into their arithmetic readers, and the
+      # colour is written by the instruction that computes it; value-judged.
+      - name: Fragment modifier copies and direct output writes
+        run: bash tests/shader-compiler/fp-modifier-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      # Fragment literal rsqrt/exp2/log2/frac and dot/length/normalize/lerp fold
+      # to the reference's const blocks bit for bit; the measured edges stay run time.
+      - name: Fragment literal builtins fold like the reference
+        run: bash tests/shader-compiler/fp-constant-builtin-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      # A product with a power-of-two literal is its producer's output scale
+      # (x2/x4/x8 and /2../8 on MUL, ADD, MAD, DP3), as the reference emits it.
+      - name: Fragment output scale folds like the reference
+        run: bash tests/shader-compiler/fp-output-scale-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test rsx-cg-compiler constant if-conditions
+        run: bash tests/shader-compiler/fp-constant-branch-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A vertex rsqrt, exp2, log2 or frac of a literal folds to the reference's constant
+        run: bash tests/shader-compiler/vp-constant-builtin-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A vertex program past 32 temporary registers is refused
+        run: bash tests/shader-compiler/vp-register-budget-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+        run: bash tests/shader-compiler/vp-struct-matrix-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test VP uniform struct argument provenance
+        run: bash tests/shader-compiler/vp-uniform-struct-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler --loops
+      - name: A vertex program past 544 instructions is refused
+        run: bash tests/shader-compiler/vp-instruction-budget-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper returns skip unreachable tails and preserve live writes
         run: bash tests/shader-compiler/inline-dead-tail-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper out and inout parameters are copy-out, judged by value

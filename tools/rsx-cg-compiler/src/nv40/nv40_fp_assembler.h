@@ -94,6 +94,12 @@ public:
     // once after the whole program is emitted.
     void markEnd();
 
+    // A raw 128-bit instruction in LOGICAL form (the FP loop / break
+    // encodings have no nvfx_insn spelling).  Returns its first word index.
+    size_t emitRaw(uint32_t hw0, uint32_t hw1, uint32_t hw2, uint32_t hw3);
+    void   patchWord(size_t index, uint32_t value) { logicalWords_[index] = value; }
+    size_t wordCount() const { return logicalWords_.size(); }
+
     // Returns the ucode in on-disk halfword-swapped form (matches
     // the reference compiler output and what RSX expects in the .fpo blob).
     std::vector<uint32_t> words() const;

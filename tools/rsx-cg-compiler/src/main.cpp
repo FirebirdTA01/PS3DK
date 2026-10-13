@@ -22,6 +22,9 @@
 #include "ir_builder.h"
 #include "ir_passes.h"
 #include "implicit_texcoord.h"
+#include "implicit_attribute.h"
+#include "constant_canon.h"
+#include "matrix_select.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
 #include "nv40/nv40_discard_guards.h"
@@ -96,6 +99,7 @@ void usage()
         "\n"
         "Optimization (fragment profile only; VP output is insensitive):\n"
         "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O1)\n"
+        "  -O4                    -O3 plus optimisations past the reference (ours)\n"
         "  --fastmath             Enable fast-math optimizations (default)\n"
         "  --nofastmath           Disable fast-math optimizations\n");
 }
@@ -261,6 +265,10 @@ int main(int argc, char** argv)
         else if (arg == "-O3" || arg == "--O3")
         {
             ctx.compileOpts.opt = rsx_cg::OptLevel::O3;
+        }
+        else if (arg == "-O4" || arg == "--O4")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O4;
         }
         else if (arg == "--fastmath")
         {
@@ -452,6 +460,11 @@ int main(int argc, char** argv)
         for (auto& fn : irModule->functions)
         {
             if (!fn->isEntryPoint) continue;
+            // Vertex only for now: in a fragment program the extra sharing
+            // trips the short-circuit-root refusal (2xbrz, 3xbrz main_fragment
+            // went from accepted to refused), which has to learn it first.
+            if (stage == ShaderStage::Vertex && rsx_cg::canonicalizeConstants(*fn))
+                changed = true;
             AlgebraicSimplification algsimp;
             if (algsimp.runOnFunction(*fn))     changed = true;
             CommonSubexprElimination cse(stage == ShaderStage::Fragment);
@@ -519,6 +532,10 @@ int main(int argc, char** argv)
     // existing FP emit path handles them without IF/ELSE/ENDIF.
     nv40::convertSimpleIfElse(*irModule);
 
+    // A select between two matrices becomes per-row selects (matrix_select.h).
+    for (auto& fn : irModule->functions)
+        if (fn) rsx_cg::splitMatrixSelects(*fn);
+
     // Implicit TEXCOORDs go to the fragment inputs the program still reads
     // (t_3289f98f), decided once the if/else diamonds are selects: a select
     // on a constant condition is folded first and dead code dropped, so an
@@ -543,6 +560,30 @@ int main(int argc, char** argv)
             }
             rsx_cg::bindImplicitTexCoords(*fn, semantic.shaderInfo().implicitTexCoordOrder,
                                           semantic.shaderInfo().explicitTexCoords);
+        }
+    }
+
+    // Implicit vertex attributes likewise go to the inputs the program
+    // still reads, lowest ATTR no explicit semantic claims (measured).
+    if (stage == ShaderStage::Vertex)
+    {
+        for (auto& fn : irModule->functions)
+        {
+            if (!fn->isEntryPoint) continue;
+            const rsx_cg::SelectFold fold = rsx_cg::foldConstantSelects(*fn);
+            if (fold == rsx_cg::SelectFold::Failed)
+            {
+                std::fprintf(stderr, "nv40-general: constant select folding did not converge "
+                             "(a select cycle); refusing rather than binding implicit "
+                             "attributes to inputs a dead path keeps alive\n");
+                return 1;
+            }
+            if (fold == rsx_cg::SelectFold::Changed)
+            {
+                DeadCodeElimination dce(false);
+                while (dce.runOnFunction(*fn)) {}
+            }
+            rsx_cg::bindImplicitAttributes(*fn);
         }
     }
 

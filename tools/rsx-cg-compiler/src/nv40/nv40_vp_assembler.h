@@ -17,6 +17,7 @@
  */
 
 #include <cstddef>
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -40,6 +41,23 @@ public:
     void emitCoIssued(const struct nvfx_insn& vecInsn, uint8_t vecOpcode,
                       const struct nvfx_insn& scaInsn, uint8_t scaOpcode);
 
+    // A conditional branch (BRA), standalone: taken when condition `cond`
+    // (NVFX_COND_*) holds for lane `ccLane` (0..3 = x..w) of condition
+    // register `ccReg`.  The target is set later by setBranchTarget, once
+    // the final instruction indices are known.  Returns the instruction
+    // index.  Measured on the reference: every standalone BRA is
+    // h0 = 0x001f8000 | cond << 10 | lane swizzle | ccReg << 25,
+    // h1 = 0x4800000d, h2 = 0x8106c080 | IADDRH, h3 = 0x00401ffc | IADDRL << 29
+    // (target = IADDRH << 3 | IADDRL; nouveau's nv40_vertprog.h agrees).
+    size_t emitBranch(uint8_t cond, uint8_t ccReg, uint8_t ccLane);
+
+    // Point branch `insnIndex` at instruction `target`.  False (and no
+    // change) when the target does not fit the 9-bit field or the index is
+    // not a branch.
+    bool setBranchTarget(size_t insnIndex, uint32_t target);
+
+    size_t instructionCount() const { return words_.size() / 4; }
+
     // Stamp the NVFX_VP_INST_LAST bit on the most recent instruction.
     // Must be called exactly once after the whole program is emitted.
     void markLast();
@@ -58,6 +76,10 @@ public:
     bool inputConflict() const { return inputConflict_; }
     uint32_t outputMask() const { return outputMask_; }
     int      numTempRegs() const { return numTempRegs_; }
+    // The highest temp index the program names, as a destination OR a
+    // source (-1 when none): a source past the register file is as invalid
+    // as a destination there.
+    int      maxTempIndex() const { return std::max(numTempRegs_ - 1, maxTempSource_); }
 
     bool empty() const { return words_.empty(); }
 
@@ -66,6 +88,7 @@ private:
     uint32_t              inputMask_   = 0;
     uint32_t              outputMask_  = 0;
     int                   numTempRegs_ = 0;
+    int                   maxTempSource_ = -1;
     bool                  inputConflict_ = false;
 
     // Returns the base offset of the current instruction inside words_.

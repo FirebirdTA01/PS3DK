@@ -270,6 +270,12 @@ def main(argv):
         if len(argv) == 6:
             control = argv[5]
             mutant = (fp_mutate if profile == "fp" else vp_mutate)(blob, control)
+            if mutant == blob:
+                # early-end on a one-instruction program: the first row IS the
+                # last, so there is no earlier row to end.  Not applicable -
+                # reported as such (exit 2), never counted as a rejection.
+                print("control %s not applicable: the mutant is the program itself" % control)
+                return 2
             open(path + "." + control, "wb").write(mutant)
             # A mutant the walk REFUSES is rejected too - refusal is the
             # fail-closed half of the predicate, and the END controls land there.

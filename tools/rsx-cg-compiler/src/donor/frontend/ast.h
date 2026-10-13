@@ -296,6 +296,11 @@ struct MemberAccessExpr : ExprNode
     bool isSwizzle = false;
     int swizzleIndices[4] = {0, 0, 0, 0};  // Filled during semantic analysis
     int swizzleLength = 0;
+    // A matrix element selector (`m._m00_m11`, zero-based, or `m._11_22`,
+    // one-based): the (row, column) of each selected element, in order.
+    // Kept apart from the vector swizzle fields, which store paths key on.
+    bool isMatrixSwizzle = false;
+    std::vector<std::pair<int, int>> matrixSwizzle;
 
     MemberAccessExpr(SourceLocation loc, std::unique_ptr<ExprNode> obj, const std::string& mem)
         : ExprNode(ExprKind::MemberAccess, loc), object(std::move(obj)), member(mem) {}

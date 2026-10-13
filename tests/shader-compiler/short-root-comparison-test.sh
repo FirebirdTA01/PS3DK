@@ -51,6 +51,16 @@ for alt in (False, True):
         if r.returncode!=0: errors.append(name+': did not compile (exit %d)'%r.returncode)
     except subprocess.TimeoutExpired:
         errors.append(name+': did not finish within 20 s (exponential walk over a shared boolean DAG)')
+# On VECTORS && and || are component-wise and evaluate both operands (no
+# short-circuit), so a sqrt/rsqrt on the right is ordinary eager code: the
+# reference accepts these (judged identical on the pixel rig).
+for name, body in (('vector_and_sqrt', 'bool4 b = (t > 0.1) && (sqrt(t) < 0.8); return b ? float4(1,1,1,1) : float4(0,0,0,0);'),
+                   ('vector_or_rsqrt', 'bool4 b = (t > -1.0) || (rsqrt(t) > 1.5); return b ? float4(1,1,1,1) : float4(0,0,0,0);')):
+    src=pathlib.Path(tempfile.mkdtemp())/(name+'.cg')
+    src.write_text('float4 main(float4 t : TEXCOORD0) : COLOR { '+body+' }'+chr(10))
+    r=subprocess.run([compiler,'-p','sce_fp_rsx','-e','main',str(src)],capture_output=True,text=True,timeout=30)
+    if r.returncode!=0:
+        errors.append(name+': vector logical with a sqrt/rsqrt operand must compile (no short-circuit on vectors), exit %d'%r.returncode)
 p=pathlib.Path(root)/'tools/rsx-cg-compiler/tests/shaders/fp_short_sqrt_shared_refuse_f.cg'
 r=subprocess.run([compiler,'-p','sce_fp_rsx',str(p)],capture_output=True,text=True,timeout=30)
 # Exit 1 EXACTLY: a timeout or a crash also has a non-zero status, and both

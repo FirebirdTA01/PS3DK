@@ -41,7 +41,9 @@ def cases():
                     x=1. if f=='constant' else t[0]
                     x=float(int(x)) if b=='int' else (float(bool(x)) if b=='bool' else x)
                     return [x]*w+[2.]*(4-w)
-                debt='VP int-to-float lowering deferred' if base in ('int','bool') and form=='runtime' else None
+                # VP int vectors from a float stay a named gap (float-to-int);
+                # bool vectors are value rows since per-lane VP selects (VP-CF).
+                debt='VP float-to-int lowering deferred' if base=='int' and form=='runtime' else None
                 yield f'{prefix}{width}_{form}',body(prefix+str(width)),body(base+str(width)),want,debt
     yield 'once','float x=t.x;vec3 v=vec3(x++);return float4(v,x);','float x=t.x;float3 v=float3(x++);return float4(v,x);',lambda t:[t[0]]*3+[t[0]+1],None
     yield 'snapshot','vec2 v=vec2(t.xy);vec2 q=v;v=7;return float4(q,v);','float2 v=float2(t.xy);float2 q=v;v=7;return float4(q,v);',lambda t:t[:2]+[7.,7.],None
@@ -214,7 +216,7 @@ def check(compiler,work):
                 language_error=diagnostic in log
                 if p.returncode==1 and not d.exists() and '--extension=' not in log and language_error:negatives+=1
                 else:failures.append(f'negative {name}/{stage}/{enabled}')
-    expected=(204,1224,208,68,28,12,204,2)
+    expected=(207,1242,208,68,28,6,207,2)
     actual=(pairs,values,hints,bindings,negatives,debt,controls,off_bindings)
     if not failures and actual!=expected:failures.append(f'incomplete coverage {actual} != {expected}')
     (work/'RESULT.json').write_text(json.dumps(dict(pairs=pairs,values=values,hints=hints,bindings=bindings,negatives=negatives,debt=debt,controls=controls,off_bindings=off_bindings,expected=expected,failures=failures),indent=2)+'\n')

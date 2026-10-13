@@ -1,17 +1,19 @@
-// Refusal fixture: a loop whose trip count depends on a varying.
+// Refusal fixture: a WHILE loop whose trip count depends on a varying.
 //
-// NV40 fragment hardware has no flow control; a data-dependent bound
-// cannot be unrolled at compile time, so NO honest lowering path can
-// ever compile this shader — which is exactly why it pins the refusal
-// CONTRACT rather than a today's-gap: unlike a branch or an
-// unimplemented op, this fixture does not expire when coverage grows.
+// The general path lowers a run-time-bound `for` to a hardware loop
+// (LOOP / BRK, FP-LOOP slice 1) but not a `while`: that keeps the CFG
+// back-edge, which the flatten refuses (CF-1a).  The fixture pins the
+// refusal CONTRACT (nonzero exit, no container, a printed refusal) on a
+// shape that still refuses; when `while` loops are lowered it has to move
+// to another still-refused shape.  It used to be the `for` form of this
+// loop, which now compiles (tests/shader-compiler/fp-hardware-loop-test.sh).
 //
 // Used by tests/shader-compiler/refusal-semantics-test.sh, which
 // asserts the full refusal, not just the diagnostic: nonzero exit AND
-// no container file, on BOTH lowering paths.  Shipped v0.12.21's
-// general path printed "unsupported IR op" and then wrote a container
-// and exited 0 — a plausible artifact where there should have been a
-// refusal; this test exists so that hole cannot silently reopen.
+// no container file.  Shipped v0.12.21's general path printed
+// "unsupported IR op" and then wrote a container and exited 0 - a
+// plausible artifact where there should have been a refusal; this test
+// exists so that hole cannot silently reopen.
 
 void main(
     float4 in_texcoord   : TEXCOORD0,
@@ -19,8 +21,10 @@ void main(
 {
     float acc = 0.0f;
     int n = (int)(in_texcoord.x * 10.0f);
-    for (int i = 0; i < n; i++) {
+    int i = 0;
+    while (i < n) {
         acc = acc + 0.1f;
+        i++;
     }
     out_color = float4(acc, 0.0f, 0.0f, 1.0f);
 }

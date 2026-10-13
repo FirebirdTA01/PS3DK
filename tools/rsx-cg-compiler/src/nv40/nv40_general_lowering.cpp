@@ -174,7 +174,15 @@ enum class VOp
     // tracked temp reads and knew nothing about the condition register when
     // this was written, so a separate CC writer and KIL could be torn apart,
     // or another CC writer scheduled between them.
-    Kil
+    Kil,
+    // FP-LOOP slice 1 (ir.h LoopBegin..LoopEnd).  LoopBegin emits LOOP
+    // {loopCount, 0, 1} whose target is patched at LoopEnd (which emits
+    // nothing); Brk is Kil's shape - the guard's producer retargeted to the
+    // condition register, then BRK testing it.  All three are scheduling
+    // barriers: nothing moves into, out of or across a region boundary.
+    LoopBegin,
+    Brk,
+    LoopEnd
 };
 
 enum class VSrcKind
@@ -259,10 +267,23 @@ struct VInstr
     // rather than inverting the comparison.
     VOp  killFused = VOp::Mov;
     bool killTestEq = false;
+    // VOp::LoopBegin only: the LOOP's trip count.
+    int  loopCount = 0;
     // VOp::SelPred only: the condition is as wide as the result and
     // selects per lane (CC written and tested lane by lane) instead of
     // one scalar condition broadcast through CC.x.
     bool selPerLane = false;
+};
+
+// Lane-packing slice 1 (infrastructure): a value's physical home in one R slot.
+// slot is the R-slot number; laneMask is the 4-bit set of physical lanes this
+// vreg owns, bit0 = x, bit1 = y, bit2 = z, bit3 = w.  Until the slot-sharing
+// slice every value owns the whole slot (laneMask 0xF), so this is descriptive
+// only and does not change allocation or output.
+struct LaneAllocation
+{
+    int     slot = 0;
+    uint8_t laneMask = 0xF;
 };
 
 struct VirtualProgram
@@ -286,6 +307,10 @@ struct VirtualProgram
     std::unordered_map<int, int> texcoordDeclaredWidth;
     std::unordered_map<int, int> vregToPhys;
     std::unordered_map<int, bool> vregToFp16;
+    // Lane-packing slice 1: parallel to vregToPhys; the 4-bit lane mask each
+    // vreg owns in its slot (0xF = whole slot, the only value until the
+    // slot-sharing slice).  Set at every vregToPhys assignment.
+    std::unordered_map<int, uint8_t> vregLaneMask;
     int nextVpLiteralConst = 467;
     // Lowest const register the literal pool may take.  Uniforms grow DOWN
     // from 467 and matrices grow UP from 256, and the literal pool
@@ -294,6 +319,7 @@ struct VirtualProgram
     // does not see the uniform walk (vp-literal-vector-pool made vector literals take
     // a register each, which is what made this reachable).
     int vpConstFloor = 256;
+    rsx_cg::VpUniformStructLayouts uniformStructLayouts;
     std::vector<std::string> diagnostics;
     // Set when ANY lowering could not complete: an unresolved operand, or an
     // IR op this path does not implement.  Emission must not succeed after
@@ -408,6 +434,10 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
     if (semanticUpper == "COLOR" || semanticUpper == "COL")
         return semanticIndex == 1 ? NV40_VP_INST_DEST_COL1
                                   : NV40_VP_INST_DEST_COL0;
+    // The back-face colours (PSGL's fixed pipeline writes BCOL0 for two-sided
+    // lighting; the reference records it $vout.BCOL0 on the BFC0 register).
+    if (semanticUpper == "BCOL" && (semanticIndex == 0 || semanticIndex == 1))
+        return semanticIndex == 1 ? NV40_VP_INST_DEST_BFC1 : NV40_VP_INST_DEST_BFC0;
     if (semanticUpper == "DIFFUSE"  && semanticIndex == 0) return NV40_VP_INST_DEST_COL0;
     if (semanticUpper == "SPECULAR" && semanticIndex == 0) return NV40_VP_INST_DEST_COL1;
     if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
@@ -454,9 +484,26 @@ static int fragmentInputSrc(const std::string& semanticUpper, int semanticIndex)
         return NVFX_FP_OP_INPUT_SRC_TC(semanticIndex);
     if (semanticUpper == "FOG" || semanticUpper == "FOGC")
         return NVFX_FP_OP_INPUT_SRC_FOGC;
+    // FOGFRAC is the fog input register's Y lane (measured on the
+    // reference: `float fogparam : FOGFRAC` reads f[FOGC].y; the SDK's
+    // fw_fog).  The lane is selected where the source is built
+    // (fogFracSource).
+    if (semanticUpper == "FOGFRAC" && semanticIndex == 0)
+        return NVFX_FP_OP_INPUT_SRC_FOGC;
     if (semanticUpper == "FACE" && semanticIndex == 0)
         return NV40_FP_OP_INPUT_SRC_FACING;
     return -1;
+}
+
+static VSrc inputSrc(int index);
+
+// The input source for a fragment input: FOGFRAC reads lane Y of FOGC.
+static VSrc fragmentInputSource(int idx, const std::string& semanticUpper)
+{
+    VSrc src = inputSrc(idx);
+    if (semanticUpper == "FOGFRAC")
+        src.swizzle = {1, 1, 1, 1};
+    return src;
 }
 
 static uint32_t fpAttrMaskBitForInputSrc(int inputSrc)
@@ -704,10 +751,17 @@ public:
         if (mergedReturnSelect_)
             lowerMergedReturnSelect(*mergedReturnSelect_);
         fencePackedReads();
+        propagateVertexCopies();
+        foldFragmentModifierCopies();
+        foldFragmentOutputScale();
+        writeFragmentOutputsDirectly();
+        fuseVertexMulAdd();
+        packVertexLaneCopies();
         legalizeInputOperands();
         renumberSourceIndices();
         applyOrderingPass();
         allocatePhysicalTemps();
+        dropVertexSelfMoves();
         return program_;
     }
 
@@ -783,7 +837,13 @@ private:
         unsigned version = 0;
         int stride = 1;       // the same index into vectors and matrices differs
         size_t   arlAt = 0;     // position in program_.instrs
+        // The loop-region generation the ARL was emitted in (VP-CF VP2): a
+        // carry's vreg has the same static write count before and inside a
+        // loop, but a different value every iteration, so an ARL is never
+        // reused or joined across a LoopBegin / LoopEnd.
+        unsigned region = 0;
     };
+    unsigned addressRegion_ = 0;
     std::vector<AddressLane> addressLanes_;
     std::unordered_map<IRValueID, int> valueWidth_;
     // CF-1a flatten state (general-path-discard).  Set only when the entry
@@ -1756,12 +1816,26 @@ private:
 
         const auto readsConditionRegister = [](const VInstr& vi) {
             return vi.predicate != 0 || vi.op == VOp::Kil ||
-                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred;
+                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred || vi.op == VOp::Brk;
         };
         const auto writesConditionRegister = [](const VInstr& vi) {
             return vi.ccUpdate || vi.op == VOp::Kil ||
-                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred;
+                   vi.op == VOp::Ftoi || vi.op == VOp::SelPred || vi.op == VOp::Brk;
         };
+        // Loop region markers are full barriers: every instruction before one
+        // stays before it, every instruction after stays after.
+        {
+            size_t lastBarrier = n;
+            for (size_t i = 0; i < n; ++i) {
+                const VOp op = program_.instrs[i].op;
+                const bool barrier = op == VOp::LoopBegin || op == VOp::Brk || op == VOp::LoopEnd;
+                if (lastBarrier != n) link(lastBarrier, i);
+                if (barrier) {
+                    for (size_t j = (lastBarrier == n ? 0 : lastBarrier); j < i; ++j) link(j, i);
+                    lastBarrier = i;
+                }
+            }
+        }
 
         for (size_t i = 0; i < n; ++i) {
             const VInstr& vi = program_.instrs[i];
@@ -2100,9 +2174,13 @@ private:
         // schedule would not fit the encodable temp range and the lowered
         // order would, keep the lowered order.  Programs whose schedule fits
         // are untouched.
-        if (profile_ == GeneralProfile::Fragment &&
-            peakLiveCount(ordered) >= kFpEncodableTemps &&
-            peakLiveCount(program_.instrs) < kFpEncodableTemps)
+        // The same holds for a vertex program against its 32 temporaries
+        // (vp-register-budget): a schedule past R31 is refused, the lowered
+        // order may fit.
+        const int encodableTemps = profile_ == GeneralProfile::Fragment ? kFpEncodableTemps
+                                                                       : kVpEncodableTemps;
+        if (peakLiveCount(ordered) >= encodableTemps &&
+            peakLiveCount(program_.instrs) < encodableTemps)
         {
             if (dumpOrder)
                 std::fprintf(stderr, "ordering: schedule needs %d live temps, lowered order %d; keeping the lowered order\n",
@@ -2117,6 +2195,10 @@ private:
     // emitFragmentVirtual enforces on the finished program as
     // kFpEncodedTempRegisterLimit).
     static constexpr int kFpEncodableTemps = 48;
+    // An EXCLUSIVE threshold, like kFpEncodableTemps above: the first peak
+    // live count that does not fit the vertex engine's 32 temporaries
+    // (R0-R31; the emitter refuses past R31).
+    static constexpr int kVpEncodableTemps = 33;
 
     // Peak number of virtual temps live at once in `instrs`, counted the way
     // allocatePhysicalTemps counts it: a value lives from its first
@@ -2196,6 +2278,24 @@ private:
             }
         }
 
+        // FP-LOOP: a value defined BEFORE a loop region and read inside it is
+        // read again by the next iteration, so no lowering may consume it in
+        // place (a single-use fold that rewrites its register): one more use.
+        for (const auto& block : entry_.blocks) {
+            if (!block) continue;
+            bool inRegion = false;
+            std::unordered_set<IRValueID> regionDefs;
+            for (const auto& instPtr : block->instructions) {
+                if (!instPtr) continue;
+                if (instPtr->op == IROp::LoopBegin) { inRegion = true; regionDefs.clear(); continue; }
+                if (instPtr->op == IROp::LoopEnd) { inRegion = false; continue; }
+                if (!inRegion) continue;
+                for (IRValueID id : instPtr->operands)
+                    if (!regionDefs.count(id)) { ++useCount_[id]; ++nonTermUseCount_[id]; }
+                if (instPtr->result != InvalidIRValue) regionDefs.insert(instPtr->result);
+            }
+        }
+
         // Credit a selection's source only after EVERY use of its result
         // has been proven index-only. The worklist visits each qualifying
         // selection once; a mixed value/index consumer stops propagation.
@@ -2223,7 +2323,18 @@ private:
     {
         int nextVpMatrixConst = 256;
         int nextVpUniformConst = 467;
-        const std::set<IRValueID> vpRead = rsx_cg::vpReadUniforms(entry_);
+        std::map<IRValueID, rsx_cg::VpUniformStructShape> structShapes;
+        if (profile_ == GeneralProfile::Vertex) {
+            std::string diagnostic;
+            auto shapes = rsx_cg::classifyVpUniformStructShapes(module_, entry_, diagnostic);
+            if (!shapes) {
+                program_.diagnostics.push_back(diagnostic);
+                program_.loweringFailed = true;
+                return;
+            }
+            structShapes = std::move(*shapes);
+        }
+        const std::set<IRValueID> vpRead = rsx_cg::vpStructReadGlobals(module_, entry_);
         // An unread, unpinned VP uniform takes no register (see vpReadUniforms).
         const auto vpUnread = [&](IRValueID id, const void* binding) {
             return profile_ == GeneralProfile::Vertex && !binding && !vpRead.count(id);
@@ -2374,7 +2485,7 @@ private:
                         p.storage == StorageQualifier::None)) {
                 const int idx = fragmentInputSrc(sem, p.semanticIndex);
                 if (idx >= 0)
-                    program_.valueToSource[p.valueId] = inputSrc(idx);
+                    program_.valueToSource[p.valueId] = fragmentInputSource(idx, sem);
                 noteTexcoordWidth(idx, p.type.componentCount());
             } else if (profile_ == GeneralProfile::Vertex &&
                        p.storage == StorageQualifier::Uniform &&
@@ -2461,6 +2572,38 @@ private:
         for (const auto& g : module_.globals) {
             if (g.storage != StorageQualifier::Uniform)
                 continue;
+            const auto shape = structShapes.find(g.valueId);
+            if (shape != structShapes.end()) {
+                const uint64_t count = uint64_t(shape->second.extent) * shape->second.stride;
+                const int64_t first = int64_t(nextVpUniformConst) + 1 - static_cast<int64_t>(count);
+                std::string diagnostic;
+                auto layout = first >= 256
+                    ? rsx_cg::bindVpUniformStructLayout(shape->second, static_cast<uint32_t>(first), diagnostic)
+                    : std::optional<rsx_cg::VpUniformStructLayout>{};
+                if (!layout) {
+                    program_.diagnostics.push_back("vp-struct-array-layout: exhausted automatic constant registers");
+                    program_.loweringFailed = true;
+                    return;
+                }
+                nextVpUniformConst = static_cast<int>(first) - 1;
+                program_.uniformStructLayouts.emplace(g.valueId, std::move(*layout));
+                continue;
+            }
+            if (g.uniformStructMember) {
+                const auto& origin = *g.uniformStructMember;
+                auto layout = program_.uniformStructLayouts.find(origin.root);
+                if (layout != program_.uniformStructLayouts.end()) {
+                    std::string diagnostic;
+                    auto reg = rsx_cg::vpUniformStructRegister(layout->second, origin.element, origin.leaf, 0, diagnostic);
+                    if (!reg) {
+                        program_.diagnostics.push_back(diagnostic);
+                        program_.loweringFailed = true;
+                        return;
+                    }
+                    program_.valueToSource[g.valueId] = uniformSrc(static_cast<int>(*reg), false);
+                    continue;
+                }
+            }
             const auto* binding = explicitBindings.find(g.valueId);
             // A pinned global can still be read by an inlined helper when
             // an entry uniform shadows its name. It owns a separate source.
@@ -3140,6 +3283,37 @@ private:
         case IROp::Discard:
             lowerDiscard(inst);
             return;
+        case IROp::LoopCarry:
+            lowerLoopCarry(inst);
+            return;
+        case IROp::LoopBegin:
+        case IROp::LoopEnd: {
+            VInstr marker;
+            marker.op = inst.op == IROp::LoopBegin ? VOp::LoopBegin : VOp::LoopEnd;
+            marker.dst.none = true;
+            marker.dst.index = -1;
+            marker.dst.writemask = 0;
+            marker.loopCount = inst.componentIndex;
+            program_.instrs.push_back(marker);
+            ++addressRegion_;
+            return;
+        }
+        case IROp::LoopBreakIf:
+            lowerLoopBreak(inst);
+            return;
+        case IROp::LoopLatch:
+            lowerLoopLatch(inst);
+            return;
+        case IROp::LoopOut: {
+            const auto it = program_.valueToVReg.find(inst.operands.empty() ? InvalidIRValue : inst.operands[0]);
+            if (it == program_.valueToVReg.end()) {
+                program_.diagnostics.push_back("nv40-general: loop-out of a value that is not a carry; refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+            program_.valueToVReg[inst.result] = it->second;
+            return;
+        }
         case IROp::Return:
         case IROp::Comment:
         case IROp::Nop:
@@ -3234,7 +3408,8 @@ private:
                 "' (" + inst.resultType.toString() + ")");
             return;
         }
-        program_.valueToSource[inst.result] = inputSrc(idx);
+        program_.valueToSource[inst.result] = profile_ == GeneralProfile::Fragment
+            ? fragmentInputSource(idx, sem) : inputSrc(idx);
         if (profile_ == GeneralProfile::Fragment)
             noteTexcoordWidth(idx, inst.resultType.componentCount());
         // Inputs have no IRValue in the entry table, so their width is
@@ -4243,6 +4418,136 @@ private:
         program_.instrs.push_back(kil);
     }
 
+    // FP-LOOP slice 1.  A carry is one register for the whole region: its
+    // initial value is copied in ONCE, before the LOOP; the body reads it;
+    // the latch writes the next value back.
+    void lowerLoopCarry(const IRInstruction& inst)
+    {
+        if (inst.operands.size() != 1) {
+            program_.diagnostics.push_back("nv40-general: a loop carry without its initial value; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        const int width = inst.resultType.componentCount();
+        const int vreg = define(inst.result);
+        VInstr mov;
+        mov.op = VOp::Mov;
+        mov.dst.index = vreg;
+        mov.dst.writemask = (1 << width) - 1;
+        mov.srcs[0] = resolve(inst.operands[0]);
+        program_.instrs.push_back(mov);
+    }
+
+    // The exit test.  The guard's producer is fused into the condition-
+    // register write when it is the instruction just emitted and nothing
+    // else reads it (the reference's SLTRC + BRK); otherwise a MOV of the
+    // guard sets the condition register.  The break fires where the guard
+    // is zero (guardIsNegated: the source condition failed) or non-zero.
+    void lowerLoopBreak(const IRInstruction& inst)
+    {
+        VInstr brk;
+        brk.op = VOp::Brk;
+        brk.dst.none = true;
+        brk.dst.index = -1;
+        brk.dst.writemask = 0x1;
+        brk.killTestEq = inst.guardIsNegated;
+        if (inst.operands.size() != 1) {
+            program_.diagnostics.push_back("nv40-general: loop break without a guard; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        const IRValueID guard = inst.operands[0];
+        const auto vregIt = program_.valueToVReg.find(guard);
+        const auto useIt = nonTermUseCount_.find(guard);
+        const bool soleConsumer = useIt == nonTermUseCount_.end() || useIt->second <= 1;
+        bool fused = false;
+        if (!program_.instrs.empty() && vregIt != program_.valueToVReg.end() && soleConsumer) {
+            const VInstr& last = program_.instrs.back();
+            const bool comparison =
+                last.op == VOp::Slt || last.op == VOp::Sgt || last.op == VOp::Sle ||
+                last.op == VOp::Sge || last.op == VOp::Seq || last.op == VOp::Sne;
+            if (comparison && !last.dst.none && !last.dst.output &&
+                last.dst.index == vregIt->second && last.predicate == 0 &&
+                !last.ccUpdate && last.fpScale == 0 && !last.sat &&
+                !last.stubFenceBefore && !last.stubFenceBrBefore &&
+                last.fpPrecisionOverride < 0) {
+                brk.killFused = last.op;
+                brk.srcs = last.srcs;
+                program_.instrs.pop_back();
+                fused = true;
+            }
+        }
+        if (!fused) {
+            VSrc src = resolve(guard);
+            if (src.kind == VSrcKind::None) {
+                program_.diagnostics.push_back("nv40-general: loop break guard is unresolved");
+                program_.loweringFailed = true;
+                return;
+            }
+            brk.killFused = VOp::Mov;
+            brk.srcs[0] = src;
+        }
+        program_.instrs.push_back(brk);
+    }
+
+    // Every carry takes its next value IN PARALLEL: a next value that is
+    // another carry's register is copied aside first, so a swap (a <- b,
+    // b <- a) does not collapse.  A self-copy with the identity swizzle is
+    // dropped.
+    void lowerLoopLatch(const IRInstruction& inst)
+    {
+        if (inst.operands.size() % 2 != 0) {
+            program_.diagnostics.push_back("nv40-general: malformed loop latch; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        struct Copy { int dst; int width; VSrc src; };
+        std::vector<Copy> copies;
+        std::unordered_set<int> carryRegs;
+        for (size_t i = 0; i < inst.operands.size(); i += 2) {
+            const auto it = program_.valueToVReg.find(inst.operands[i]);
+            if (it == program_.valueToVReg.end()) {
+                program_.diagnostics.push_back("nv40-general: loop latch names a carry with no register; refusing");
+                program_.loweringFailed = true;
+                return;
+            }
+            carryRegs.insert(it->second);
+        }
+        for (size_t i = 0; i < inst.operands.size(); i += 2) {
+            const int dst = program_.valueToVReg[inst.operands[i]];
+            const int width = std::max(1, valueWidthOf(inst.operands[i]));
+            VSrc src = resolve(inst.operands[i + 1]);
+            if (src.kind == VSrcKind::None) return;   // resolve() has refused
+            copies.push_back({dst, width, src});
+        }
+        for (Copy& c : copies) {
+            if (c.src.kind != VSrcKind::Temp || !carryRegs.count(c.src.index) || c.src.index == c.dst)
+                continue;
+            const int staged = newVReg();
+            VInstr mov;
+            mov.op = VOp::Mov;
+            mov.dst.index = staged;
+            mov.dst.writemask = (1 << c.width) - 1;
+            mov.srcs[0] = c.src;
+            program_.instrs.push_back(mov);
+            c.src = tempSrc(staged);
+            if (c.width == 1) broadcastScalar(c.src);
+        }
+        for (const Copy& c : copies) {
+            if (c.src.kind == VSrcKind::Temp && c.src.index == c.dst && !c.src.neg && !c.src.abs) {
+                bool identity = true;
+                for (int l = 0; l < c.width; ++l) identity = identity && c.src.swizzle[l] == l;
+                if (identity) continue;
+            }
+            VInstr mov;
+            mov.op = VOp::Mov;
+            mov.dst.index = c.dst;
+            mov.dst.writemask = (1 << c.width) - 1;
+            mov.srcs[0] = c.src;
+            program_.instrs.push_back(mov);
+        }
+    }
+
     // Precision of the instruction fused into a kill, as MEASURED - not
     // as derived, because nobody in this room has a mechanism for the
     // SGE case and a tidy rule would be a rule the reference does not
@@ -4526,18 +4831,20 @@ private:
     void lowerIntToFloat(const IRInstruction& inst)
     {
         if (inst.operands.empty() || inst.result == InvalidIRValue) return;
-        if (profile_ != GeneralProfile::Fragment) {
-            program_.diagnostics.push_back(
-                "nv40-general: VP int-to-float lowering deferred");
-            program_.loweringFailed = true;
-            return;
-        }
 
         VInstr mov;
         mov.op = VOp::Mov;
         mov.dst.index = define(inst.result);
         mov.dst.writemask = componentMask(inst.resultType);
         mov.srcs[0] = resolve(inst.operands[0]);
+        // A vertex program holds an int as an integral float (its ops are
+        // float ops on integral values), so the conversion is the value:
+        // `float(i + 1)` of a loop induction (VP-CF).  No fence: that is the
+        // fragment ftoi/itof pairing below.
+        if (profile_ != GeneralProfile::Fragment) {
+            program_.instrs.push_back(mov);
+            return;
+        }
         // Measured itof probes contain the preceding ftoi and therefore
         // cannot distinguish "itof needs a fence" from "ftoi then read
         // needs one".  Keep the reference's conservative FENCBR until a
@@ -4689,6 +4996,38 @@ private:
                 static_cast<float>(1.0 / static_cast<double>(*divisorLiteral)));
             program_.instrs.push_back(mul);
             return;
+        }
+        // A literal VECTOR divisor folds the same way, lane by lane: the
+        // reference emits a / float4(2, 3, 4, 5) as one MUL by {0.5,
+        // 0.33333334, 0.25, 0.2} in both profiles (measured).  A zero lane
+        // keeps the per-lane reciprocal path below (the reference keeps
+        // that one lane's RCP).
+        {
+            VSrc d = resolve(inst.operands[1]);
+            bool foldable = d.kind == VSrcKind::Literal && !d.abs && !d.neg && !d.relative;
+            for (int lane = 0; lane < 4 && foldable; ++lane) {
+                if (!(mask & (1 << lane))) continue;
+                const float v = d.literal[d.swizzle[lane] & 3];
+                if (v == 0.0f || !std::isfinite(v)) foldable = false;
+            }
+            if (foldable) {
+                bool done[4] = {false, false, false, false};
+                for (int lane = 0; lane < 4; ++lane) {
+                    if (!(mask & (1 << lane))) continue;
+                    const int c = d.swizzle[lane] & 3;
+                    if (done[c]) continue;
+                    done[c] = true;
+                    d.literal[c] = static_cast<float>(1.0 / static_cast<double>(d.literal[c]));
+                }
+                VInstr mul;
+                mul.op = VOp::Mul;
+                mul.dst.index = define(inst.result);
+                mul.dst.writemask = mask;
+                mul.srcs[0] = resolve(inst.operands[0]);
+                mul.srcs[1] = d;
+                program_.instrs.push_back(mul);
+                return;
+            }
         }
         // A dynamic SCALAR divisor uses DIVR (0x3A) at every numerator
         // width.  The numerator is vector-valued; only the denominator's
@@ -5077,6 +5416,49 @@ private:
     {
         if (inst.result == InvalidIRValue)
             return;
+        if (inst.uniformStructRead) {
+            const auto& read = *inst.uniformStructRead;
+            const auto layout = program_.uniformStructLayouts.find(inst.uniformSource);
+            int element = inst.componentIndex;
+            const bool constant = inst.arrayIndexKind == IRInstruction::ArrayIndexKind::Constant ||
+                (!inst.operands.empty() && rsx_cg::foldConstantIndex(entry_, inst.operands[0], element));
+            if (layout != program_.uniformStructLayouts.end()) {
+                std::string diagnostic;
+                auto reg = rsx_cg::vpUniformStructRegister(layout->second,
+                    constant ? static_cast<uint32_t>(element) : 0u, read.leaf, read.row, diagnostic);
+                if (!reg) {
+                    program_.diagnostics.push_back(diagnostic);
+                    program_.loweringFailed = true;
+                    return;
+                }
+                const auto base = uniformSrc(static_cast<int>(*reg), false);
+                if (constant) bindArrayElement(inst, base);
+                else lowerDynamicArrayReadAt(inst, base, static_cast<int>(layout->second.shape.stride));
+                return;
+            }
+            // Optimisation may fold the only dynamic index. Then the root
+            // stays on the old per-member allocation, like a literal index.
+            if (constant && element >= 0 && read.row == 0) {
+                for (const auto& g : module_.globals) {
+                    if (!g.uniformStructMember) continue;
+                    const auto& origin = *g.uniformStructMember;
+                    if (origin.root == inst.uniformSource && origin.element == uint32_t(element) && origin.leaf == read.leaf) {
+                        IRInstruction folded = inst;
+                        folded.uniformStructRead.reset();
+                        folded.arrayIndexKind = IRInstruction::ArrayIndexKind::None;
+                        folded.uniformSource = g.valueId;
+                        folded.targetName = g.name;
+                        folded.componentIndex = 0;
+                        folded.operands.clear();
+                        lowerLoadUniform(folded);
+                        return;
+                    }
+                }
+            }
+            program_.diagnostics.push_back("vp-struct-array-layout: missing layout or invalid folded element");
+            program_.loweringFailed = true;
+            return;
+        }
         // An ARRAY element, parameter or file-scope alike: the builder
         // named how it was chosen, the constructor laid the elements out
         // (or failed the program for a run-time index), and this reads
@@ -5240,7 +5622,13 @@ private:
         }
         const VSrc base = arrIt->second.at(0);
         const int stride = inst.resultType.isMatrix() ? inst.resultType.matrixRows : 1;
+        lowerDynamicArrayReadAt(inst, base, stride);
+    }
 
+    // Shared address emitter: struct fields supply an element-major base and
+    // stride; ordinary arrays retain the same conversion and lane policy.
+    void lowerDynamicArrayReadAt(const IRInstruction& inst, const VSrc& base, int stride)
+    {
         // The index: through a cast the index alone consumed, to the
         // float the reference feeds the ARL.
         IRValueID indexValue = inst.operands[0];
@@ -5285,7 +5673,8 @@ private:
             const AddressLane& al = addressLanes_[i];
             if (al.kind == index.kind && al.index == index.index &&
                 al.component == component && al.neg == index.neg &&
-                al.abs == index.abs && al.version == version && al.stride == stride) {
+                al.abs == index.abs && al.version == version && al.stride == stride &&
+                al.region == addressRegion_) {
                 lane = static_cast<int>(i);
                 break;
             }
@@ -5311,6 +5700,7 @@ private:
             al.abs = index.abs;
             al.version = version;
             al.stride = stride;
+            al.region = addressRegion_;
             // Join the ARL already loading this register, if there is one
             // and it targets the same address register.
             size_t joinAt = program_.instrs.size();
@@ -5318,6 +5708,7 @@ private:
                 for (const AddressLane& prev : addressLanes_) {
                     if (prev.stride == 1 && prev.kind == index.kind && prev.index == index.index &&
                         prev.neg == index.neg && prev.abs == index.abs &&
+                        prev.region == addressRegion_ &&
                         prev.arlAt < program_.instrs.size() &&
                         program_.instrs[prev.arlAt].op == VOp::Arl &&
                         program_.instrs[prev.arlAt].dst.index == addrReg) {
@@ -8586,8 +8977,6 @@ private:
         if (inst.operands.size() < 3)
             return false;
         const int condWidth = valueWidthOf(inst.operands[0]);
-        if (profile_ == GeneralProfile::Vertex && condWidth != 1)
-            return false;
         const bool perLane = condWidth > 1;
         if (perLane && condWidth != inst.resultType.componentCount())
             return false;
@@ -8655,14 +9044,6 @@ private:
     {
         if (inst.operands.size() < 3 || inst.result == InvalidIRValue)
             return;
-        if (profile_ == GeneralProfile::Vertex &&
-            valueWidthOf(inst.operands[0]) > 1) {
-            program_.diagnostics.push_back(
-                "nv40-general: vertex select with a vector condition needs "
-                "predicated lowering, which the VP path does not have; refusing");
-            program_.loweringFailed = true;
-            return;
-        }
         // A select must preserve the chosen arm exactly. Arithmetic blends
         // fail for non-finite untaken arms and for finite cancellation (1
         // versus 2^30). Keep default write, CC update, and conditional write
@@ -9130,7 +9511,11 @@ private:
                  // A compacted insert MOV needs no extra export for the
                  // entry Return, which reads the already-exported value.
                  (producer.op == VOp::Mov && producer.preservePartialOutputMask &&
-                  outputValueUses == 1))) {
+                  outputValueUses == 1) ||
+                 // Nor does a vertex entry's returned value: the Return
+                 // lowers to nothing, so the store is its only reader
+                 // (measured: `return a + b * 3` ends MAD o[HPOS]).
+                 (profile_ == GeneralProfile::Vertex && outputValueUses == 1))) {
                 if (profile_ == GeneralProfile::Fragment &&
                     isScalarUnitOp(producer.op) && valueWidthOf(value) == 1)
                     producer.scalarSourceDemandMask = 0x1;
@@ -9142,6 +9527,39 @@ private:
                     ? producer.dst.writemask & outMask : outMask;
                 producer.dst.userClipOutput = isClipOutput;
                 producer.dst.userClipIndex = inst.semanticIndex;
+                return;
+            }
+        }
+        // VP: a value whose ONE producer is earlier in the program (a
+        // struct member stored at the return) is computed straight into
+        // the output, as the reference does, instead of a temp and a MOV.
+        // Only when nothing has read the temp, no other value names it,
+        // and the store is the value's only reader.
+        if (profile_ == GeneralProfile::Vertex && !isFogOutput &&
+            regIt != program_.valueToVReg.end() && outputValueUses == 1) {
+            const int reg = regIt->second;
+            int defs = 0, reads = 0;
+            VInstr* def = nullptr;
+            for (VInstr& vi : program_.instrs) {
+                for (const VSrc& src : vi.srcs)
+                    if (src.kind == VSrcKind::Temp && src.index == reg) ++reads;
+                if (!vi.dst.none && !vi.dst.output && !vi.dst.address && vi.dst.index == reg) {
+                    ++defs;
+                    def = &vi;
+                }
+            }
+            bool aliased = false;
+            for (const auto& [other, otherReg] : program_.valueToVReg)
+                if (otherReg == reg && other != value) aliased = true;
+            if (defs == 1 && reads == 0 && !aliased && def->op != VOp::Txl &&
+                def->op != VOp::SelPred && def->predicate == 0 && !def->ccUpdate &&
+                (def->dst.writemask & outMask) == outMask) {
+                def->dst.output = true;
+                def->dst.index = outIndex;
+                def->dst.phys = -1;
+                def->dst.writemask = outMask;
+                def->dst.userClipOutput = isClipOutput;
+                def->dst.userClipIndex = inst.semanticIndex;
                 return;
             }
         }
@@ -9434,6 +9852,797 @@ private:
         src.swizzle = {s[0], s[1], s[2], s[0]};
     }
 
+    // VP: a temp-to-temp MOV whose destination is written by nothing else
+    // is read through its source (`MOV R4.x, -R1.y; MOV R0.y, R4.x` is
+    // `MOV R0.y, -R1.y`), and the copy is dropped.  Every reader is after
+    // the copy with no loop node between, the source is not rewritten
+    // before a reader, and each reader's lanes fall inside the copy's
+    // mask.  An input or constant source is propagated only where the
+    // reader keeps one input register and one constant.  An abs copy folds
+    // too: the reference reads |c[n]| in place (lerp's MUL r0, r0, |c[465]|),
+    // which also keeps a later MAD to its one-constant rule.
+    void propagateVertexCopies()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        const auto writesTemp = [](const VInstr& vi, int reg) {
+            return !vi.dst.none && !vi.dst.output && !vi.dst.address && vi.dst.index == reg;
+        };
+        const auto barrier = [](const VInstr& vi) {
+            return vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (size_t i = 0; i < code.size() && !changed; ++i) {
+                const VInstr& mov = code[i];
+                if (mov.op != VOp::Mov || mov.dst.none || mov.dst.output || mov.dst.address ||
+                    mov.sat || mov.ccUpdate || mov.predicate != 0)
+                    continue;
+                const VSrc s = mov.srcs[0];
+                const int d = mov.dst.index;
+                const bool temp = s.kind == VSrcKind::Temp;
+                if (s.kind == VSrcKind::None || s.relative || (temp && s.index == d))
+                    continue;
+                bool ok = true;
+                std::vector<std::pair<size_t, size_t>> uses;
+                for (size_t k = 0; k < code.size() && ok; ++k) {
+                    if (k != i && writesTemp(code[k], d)) ok = false;
+                    for (size_t n = 0; n < code[k].srcs.size(); ++n) {
+                        const VSrc& r = code[k].srcs[n];
+                        if (r.kind != VSrcKind::Temp || r.index != d) continue;
+                        if (k <= i) { ok = false; break; }
+                        int lanes = 0;
+                        const int req = requiredSourceMask(code[k], n);
+                        for (int l = 0; l < 4; ++l)
+                            if (req & (1 << l)) lanes |= 1 << r.swizzle[l];
+                        if ((lanes & mov.dst.writemask) != lanes) { ok = false; break; }
+                        uses.push_back({k, n});
+                    }
+                }
+                if (!ok || uses.empty()) continue;
+                for (const auto& [k, n] : uses)
+                    for (size_t m = i + 1; m < k && ok; ++m)
+                        if (barrier(code[m]) || (temp && writesTemp(code[m], s.index))) ok = false;
+                // An input or constant source must leave every reader with at
+                // most one input register and one constant, or legalization
+                // would stage it back through a MOV.
+                if (ok && !temp)
+                    for (const auto& [k, n] : uses) {
+                        std::set<int> inputs;
+                        int constants = 0;
+                        for (size_t q = 0; q < code[k].srcs.size(); ++q) {
+                            const VSrc& r = (q == n) ? s : code[k].srcs[q];
+                            if (q != n && r.kind == VSrcKind::Temp && r.index == d) { ok = false; break; }
+                            if (r.kind == VSrcKind::Input) inputs.insert(r.index);
+                            if (r.kind == VSrcKind::Uniform || r.kind == VSrcKind::Literal) ++constants;
+                        }
+                        if (inputs.size() > 1 || constants > 1) ok = false;
+                    }
+                if (!ok) continue;
+                for (const auto& [k, n] : uses) {
+                    VSrc& r = code[k].srcs[n];
+                    const auto swz = r.swizzle;
+                    const bool neg = r.abs ? r.neg : (r.neg != s.neg);
+                    const bool abs = r.abs || s.abs;
+                    r = s;
+                    for (int l = 0; l < 4; ++l) r.swizzle[l] = s.swizzle[swz[l]];
+                    r.neg = neg;
+                    r.abs = abs;
+                }
+                code.erase(code.begin() + static_cast<std::ptrdiff_t>(i));
+                changed = true;
+            }
+        }
+    }
+
+    // A MOV that only exists to carry no state of its own: no saturate,
+    // condition code, predicate, scale, precision override or stub flag,
+    // and no register pin.
+    static bool plainFragmentMov(const VInstr& vi)
+    {
+        return vi.op == VOp::Mov && !vi.sat && !vi.ccUpdate && vi.predicate == 0 &&
+               vi.fpScale == 0 && vi.fpPrecisionOverride == -1 &&
+               !vi.preservePartialOutputMask && vi.scalarSourceDemandMask == 0 &&
+               !vi.stubCoIssuePartner && !vi.stubFenceBefore && !vi.stubFenceBrBefore;
+    }
+
+    // FP readers that take a modified source as freely as a MOV does:
+    // arithmetic, comparisons and the scalar unit.  Texture fetches, kills,
+    // pack/unpack, selects and loop nodes keep the copy.
+    static bool fragmentModifierReader(VOp op)
+    {
+        switch (op) {
+        case VOp::Mov: case VOp::Add: case VOp::Mul: case VOp::Mad:
+        case VOp::Dp2: case VOp::Dp3: case VOp::Dp4: case VOp::Min: case VOp::Max:
+        case VOp::Rcp: case VOp::Rsq: case VOp::Sin: case VOp::Cos:
+        case VOp::Lg2: case VOp::Ex2: case VOp::Frc: case VOp::Flr:
+        case VOp::Sge: case VOp::Slt: case VOp::Sgt: case VOp::Sle:
+        case VOp::Seq: case VOp::Sne:
+        // The reference reads |r0| and -f[TEX0] as a fetch's coordinate.
+        case VOp::Tex: case VOp::Txp:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    static bool fragmentFetch(VOp op) { return op == VOp::Tex || op == VOp::Txp; }
+
+    // FP: abs() and negation are source modifiers.  `MOV R2.x, |R1.x|;
+    // MUL R0, R3, R2.xxxx` is `MUL R0, R3, |R1.xxxx|` (the reference reads
+    // |r0.w| in the consumer), and the copy is dropped.  Only a temp copied
+    // to a temp of the same precision, written by nothing else, every reader
+    // after it with no loop node between, the source not rewritten before a
+    // reader, and each reader's lanes inside the copy's mask.  The hardware
+    // applies negate after abs: a reader's own abs absorbs the copy's
+    // modifiers, otherwise the negations combine.
+    void foldFragmentModifierCopies()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        auto& code = program_.instrs;
+        const auto writesTemp = [](const VInstr& vi, int reg) {
+            return !vi.dst.none && !vi.dst.output && !vi.dst.address && vi.dst.index == reg;
+        };
+        const auto barrier = [](const VInstr& vi) {
+            return vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd ||
+                   vi.op == VOp::Kil;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (size_t i = 0; i < code.size() && !changed; ++i) {
+                const VInstr& mov = code[i];
+                if (!plainFragmentMov(mov) || mov.dst.none || mov.dst.output ||
+                    mov.dst.outputPin || mov.dst.preferredPhys >= 0)
+                    continue;
+                const VSrc s = mov.srcs[0];
+                const int d = mov.dst.index;
+                const bool input = s.kind == VSrcKind::Input;
+                const bool literal = s.kind == VSrcKind::Literal;
+                // A temp copy is read through its source with or without a
+                // modifier; an input copy only when it carries one (a plain
+                // input copy is the staging legalizeInputOperands builds); a
+                // literal copy by its one arithmetic reader, below.
+                if ((s.kind != VSrcKind::Temp && !input && !literal) || s.relative ||
+                    (s.kind == VSrcKind::Temp && s.index == d) ||
+                    (input && !s.abs && !s.neg))
+                    continue;
+                // Same precision on both sides: the source's writers decide it
+                // (an input register and an inline constant are binary32; an
+                // H copy of a literal rounds it, so that copy stays).
+                const bool fixedSource = input || literal;
+                bool ok = true, sourceWritten = fixedSource;
+                if (fixedSource && mov.dst.fp16) ok = false;
+                for (size_t k = 0; k < i && ok && !fixedSource; ++k)
+                    if (writesTemp(code[k], s.index)) {
+                        sourceWritten = true;
+                        if (code[k].dst.fp16 != mov.dst.fp16) ok = false;
+                    }
+                if (!ok || !sourceWritten) continue;
+                // A fetch reads the coordinate value this copy defines: the
+                // copy's lanes are a prefix (x, xy, xyz, xyzw) and the fetch
+                // names them in place.  Lanes past the value's width are not
+                // consumed, so they need not be written.
+                const int wm = mov.dst.writemask;
+                const bool prefixMask = wm == 0x1 || wm == 0x3 || wm == 0x7 || wm == 0xf;
+                std::vector<std::pair<size_t, size_t>> uses;
+                for (size_t k = 0; k < code.size() && ok; ++k) {
+                    if (k != i && writesTemp(code[k], d)) ok = false;
+                    for (size_t n = 0; n < code[k].srcs.size() && ok; ++n) {
+                        const VSrc& r = code[k].srcs[n];
+                        if (r.kind != VSrcKind::Temp || r.index != d) continue;
+                        if (k <= i || !fragmentModifierReader(code[k].op)) { ok = false; break; }
+                        if (fragmentFetch(code[k].op)) {
+                            bool inPlace = n == 0 && prefixMask;
+                            for (int l = 0; l < 4 && inPlace; ++l)
+                                if ((wm & (1 << l)) && r.swizzle[l] != l) inPlace = false;
+                            if (!inPlace) ok = false;
+                            else uses.push_back({k, n});
+                            continue;
+                        }
+                        int lanes = 0;
+                        const int req = requiredSourceMask(code[k], n);
+                        for (int l = 0; l < 4; ++l)
+                            if (req & (1 << l)) lanes |= 1 << r.swizzle[l];
+                        if ((lanes & wm) != lanes) ok = false;
+                        else uses.push_back({k, n});
+                    }
+                }
+                // A literal joins its single reader as that reader's one
+                // inline constant: each inline constant takes an instruction
+                // slot of its own, so a shared literal keeps its copy.
+                if (ok && literal) {
+                    if (uses.size() != 1 || fragmentFetch(code[uses[0].first].op)) ok = false;
+                    else
+                        for (size_t q = 0; q < code[uses[0].first].srcs.size() && ok; ++q) {
+                            const VSrc& o = code[uses[0].first].srcs[q];
+                            if (q == uses[0].second) continue;
+                            if (o.kind == VSrcKind::Literal || o.kind == VSrcKind::Uniform ||
+                                (o.kind == VSrcKind::Temp && o.index == d))
+                                ok = false;
+                        }
+                }
+                // One input register per instruction: an input source may
+                // only join a reader whose other sources name no other input.
+                for (size_t u = 0; u < uses.size() && ok && input; ++u) {
+                    const VInstr& reader = code[uses[u].first];
+                    for (size_t q = 0; q < reader.srcs.size(); ++q) {
+                        const VSrc& o = reader.srcs[q];
+                        if (q == uses[u].second) continue;
+                        if (o.kind == VSrcKind::Temp && o.index == d) { ok = false; break; }
+                        if (o.kind == VSrcKind::Input && o.index != s.index) { ok = false; break; }
+                    }
+                }
+                if (!ok || uses.empty()) continue;
+                for (const auto& [k, n] : uses)
+                    for (size_t m = i + 1; m < k && ok; ++m)
+                        if (barrier(code[m]) || (!fixedSource && writesTemp(code[m], s.index))) ok = false;
+                if (!ok) continue;
+                for (const auto& [k, n] : uses) {
+                    VSrc& r = code[k].srcs[n];
+                    const auto swz = r.swizzle;
+                    const bool abs = r.abs || s.abs;
+                    const bool neg = r.abs ? r.neg : (r.neg != s.neg);
+                    r = s;
+                    for (int l = 0; l < 4; ++l) r.swizzle[l] = s.swizzle[swz[l]];
+                    r.abs = abs;
+                    r.neg = neg;
+                }
+                code.erase(code.begin() + static_cast<std::ptrdiff_t>(i));
+                changed = true;
+            }
+        }
+    }
+
+    // FP: a product of one arithmetic result with a power-of-two literal is
+    // that result's output scale.  `MUL R1, a, b; MUL R0, R1, {2}` is
+    // `MUL_x2 R0, a, b` (measured on the reference: x2 / x4 / x8 / /4 fold
+    // into MUL, ADD, MAD and DP3; a factor of 3, a fetch, a saturated
+    // producer and a result with another reader do not).  The producer is
+    // the temp's one writer, the temp's one reader is the multiply, and
+    // nothing in between touches the multiply's destination; the multiply's
+    // saturate moves to the producer (scale is applied before saturation).
+    static float scaleFactorOf(int code)
+    {
+        switch (code) {
+        case NVFX_FP_OP_DST_SCALE_2X: return 2.0f;
+        case NVFX_FP_OP_DST_SCALE_4X: return 4.0f;
+        case NVFX_FP_OP_DST_SCALE_8X: return 8.0f;
+        case NVFX_FP_OP_DST_SCALE_INV_2X: return 0.5f;
+        case NVFX_FP_OP_DST_SCALE_INV_4X: return 0.25f;
+        case NVFX_FP_OP_DST_SCALE_INV_8X: return 0.125f;
+        default: return 1.0f;
+        }
+    }
+    static std::optional<int> scaleCodeFor(float factor)
+    {
+        if (factor == 1.0f) return NVFX_FP_OP_DST_SCALE_1X;
+        if (factor == 2.0f) return NVFX_FP_OP_DST_SCALE_2X;
+        if (factor == 4.0f) return NVFX_FP_OP_DST_SCALE_4X;
+        if (factor == 8.0f) return NVFX_FP_OP_DST_SCALE_8X;
+        if (factor == 0.5f) return NVFX_FP_OP_DST_SCALE_INV_2X;
+        if (factor == 0.25f) return NVFX_FP_OP_DST_SCALE_INV_4X;
+        if (factor == 0.125f) return NVFX_FP_OP_DST_SCALE_INV_8X;
+        return std::nullopt;
+    }
+
+    void foldFragmentOutputScale()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        auto& code = program_.instrs;
+        const auto sameDst = [](const VDst& a, const VDst& b) {
+            return !a.none && !b.none && a.output == b.output && a.address == b.address &&
+                   a.index == b.index;
+        };
+        for (size_t mi = 0; mi < code.size(); ++mi) {
+            VInstr& m = code[mi];
+            if (m.op != VOp::Mul || m.predicate != 0 || m.ccUpdate || m.fpScale != 0 ||
+                m.fpPrecisionOverride != -1 || m.dst.none || m.dst.address)
+                continue;
+            for (int n = 0; n < 2; ++n) {
+                const VSrc& t = m.srcs[static_cast<size_t>(n)];
+                const VSrc& k = m.srcs[static_cast<size_t>(1 - n)];
+                if (t.kind != VSrcKind::Temp || t.abs || t.neg || t.relative ||
+                    k.kind != VSrcKind::Literal || k.abs || k.neg)
+                    continue;
+                // The literal reads one value on every lane the multiply uses.
+                std::optional<float> v;
+                bool uniformLit = true;
+                for (int l = 0; l < 4; ++l) {
+                    if (!(m.dst.writemask & (1 << l))) continue;
+                    const float x = k.literal[k.swizzle[l] & 3];
+                    if (!v) v = x;
+                    else if (*v != x) uniformLit = false;
+                }
+                if (!uniformLit || !v) continue;
+                size_t pi = code.size();
+                bool ok = true;
+                for (size_t j = 0; j < code.size() && ok; ++j) {
+                    const VInstr& w = code[j];
+                    if (!w.dst.none && !w.dst.output && !w.dst.address && w.dst.index == t.index) {
+                        if (pi != code.size() || j >= mi) ok = false;
+                        else pi = j;
+                    }
+                    for (size_t q = 0; q < w.srcs.size() && ok; ++q)
+                        if (w.srcs[q].kind == VSrcKind::Temp && w.srcs[q].index == t.index &&
+                            !(j == mi && q == static_cast<size_t>(n)))
+                            ok = false;
+                }
+                if (!ok || pi == code.size()) continue;
+                VInstr& p = code[pi];
+                // Measured producers only: the dot products fill any lanes, and
+                // ADD / MUL / MAD are componentwise.
+                const bool bcast = p.op == VOp::Dp2 || p.op == VOp::Dp3 || p.op == VOp::Dp4;
+                const bool arith = bcast || p.op == VOp::Add || p.op == VOp::Mul || p.op == VOp::Mad;
+                // A producer that is itself a multiply by one literal value
+                // takes the factor into that literal, any factor, rounded
+                // once to binary32: the reference emits (a * 3) * 5 as
+                // a * 15 and (a * 0.1) * 0.1 as a * 0.010000001 (measured).
+                int litSrc = -1;
+                float litVal = 0.0f;
+                if (p.op == VOp::Mul)
+                    for (int s = 0; s < 2 && litSrc < 0; ++s) {
+                        const VSrc& c = p.srcs[static_cast<size_t>(s)];
+                        const VSrc& o = p.srcs[static_cast<size_t>(1 - s)];
+                        if (c.kind != VSrcKind::Literal || c.abs || c.neg || o.kind == VSrcKind::Literal)
+                            continue;
+                        std::optional<float> cv;
+                        bool same = true;
+                        for (int l = 0; l < 4; ++l) {
+                            if (!(p.dst.writemask & (1 << l))) continue;
+                            const float x = c.literal[c.swizzle[l] & 3];
+                            if (!cv) cv = x;
+                            else if (*cv != x) same = false;
+                        }
+                        if (same && cv && std::isfinite(*cv * *v)) { litSrc = s; litVal = *cv; }
+                    }
+                // Otherwise the factor must be a scale; an already scaled
+                // producer takes the product of the two factors when that is
+                // still a scale: (t * 2) * 2 is x4.
+                const std::optional<int> scale = litSrc >= 0
+                    ? std::optional<int>(p.fpScale)
+                    : scaleCodeFor(scaleFactorOf(p.fpScale) * *v);
+                if (!arith || !scale || p.sat || p.predicate != 0 || p.ccUpdate ||
+                    p.fpPrecisionOverride != -1 || p.dst.fp16 != m.dst.fp16 ||
+                    p.dst.outputPin || p.dst.preferredPhys >= 0 || p.preservePartialOutputMask ||
+                    p.scalarSourceDemandMask != 0)
+                    continue;
+                for (int l = 0; l < 4 && ok; ++l)
+                    if ((m.dst.writemask & (1 << l)) && !(p.dst.writemask & (1 << t.swizzle[l])))
+                        ok = false;
+                // Nothing between reads or writes the multiply's destination
+                // (the producer now writes it earlier), and no loop or kill.
+                for (size_t j = pi + 1; j < mi && ok; ++j) {
+                    const VInstr& w = code[j];
+                    if (w.op == VOp::LoopBegin || w.op == VOp::Brk || w.op == VOp::LoopEnd ||
+                        w.op == VOp::Kil || sameDst(w.dst, m.dst))
+                        ok = false;
+                    if (!m.dst.output)
+                        for (const VSrc& s : w.srcs)
+                            if (s.kind == VSrcKind::Temp && s.index == m.dst.index) ok = false;
+                }
+                if (!ok) continue;
+                if (litSrc >= 0) {
+                    VSrc& c = p.srcs[static_cast<size_t>(litSrc)];
+                    const float folded = static_cast<float>(
+                        static_cast<double>(litVal) * static_cast<double>(*v));
+                    for (int l = 0; l < 4; ++l) {
+                        c.literal[l] = folded;
+                        c.swizzle[l] = static_cast<uint8_t>(l);
+                    }
+                    // A product of exactly 1 is the other operand: the
+                    // reference emits (c / 0.01) * 0.01 as a MOV of c.
+                    if (folded == 1.0f && p.fpScale == 0) {
+                        p.op = VOp::Mov;
+                        p.srcs[0] = p.srcs[static_cast<size_t>(1 - litSrc)];
+                        p.srcs[1] = VSrc{};
+                    }
+                }
+                if (!bcast)
+                    for (VSrc& s : p.srcs) {
+                        if (s.kind == VSrcKind::None) continue;
+                        const auto old = s.swizzle;
+                        for (int l = 0; l < 4; ++l) s.swizzle[l] = old[t.swizzle[l]];
+                    }
+                p.fpScale = *scale;
+                p.sat = m.sat;
+                p.dst = m.dst;
+                code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
+                --mi;
+                break;
+            }
+        }
+    }
+
+    // FP: `MUL R1.xyz, a, b; MOV o0, R1.xyzz` is `MUL o0, a.xyzz, b.xyzz`
+    // when R1 has that one writer and that one reader, the MUL comes right
+    // before the store, and the two agree on precision: the reference
+    // writes the colour from the instruction that computes it.  A
+    // componentwise producer has its source swizzles moved with the store's
+    // lanes; a broadcast producer fills any lanes as it is.
+    void writeFragmentOutputsDirectly()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        auto& code = program_.instrs;
+        for (size_t mi = 1; mi < code.size(); ++mi) {
+            VInstr& m = code[mi];
+            if (!plainFragmentMov(m) || !m.dst.output) continue;
+            const VSrc t = m.srcs[0];
+            if (t.kind != VSrcKind::Temp || t.relative || t.abs || t.neg) continue;
+            VInstr& p = code[mi - 1];
+            // Every fragment fetch carries an explicit fp32 precision override
+            // (its encoding, not its destination's), so that one is kept.
+            const bool fetch = fragmentFetch(p.op);
+            if (p.dst.none || p.dst.output || p.dst.address || p.dst.index != t.index ||
+                p.dst.outputPin || p.dst.preferredPhys >= 0 || p.dst.fp16 != m.dst.fp16 ||
+                p.predicate != 0 || p.ccUpdate || p.preservePartialOutputMask ||
+                p.scalarSourceDemandMask != 0 ||
+                (p.fpPrecisionOverride != -1 && !fetch))
+                continue;
+            const bool bcast = broadcastOp(p.op) || p.op == VOp::Sin || p.op == VOp::Cos;
+            // A fetch cannot move its result lanes: it writes the colour only
+            // when the store reads it in place (TEX R0 for `return tex2D(..)`;
+            // `.zyxw` keeps the MOV, as in the reference).
+            if (fetch) {
+                bool inPlace = true;
+                for (int l = 0; l < 4 && inPlace; ++l)
+                    if ((m.dst.writemask & (1 << l)) && t.swizzle[l] != l) inPlace = false;
+                if (!inPlace) continue;
+            } else if (!bcast && !componentwiseOp(p.op)) {
+                continue;
+            }
+            bool ok = true;
+            for (int l = 0; l < 4 && ok; ++l)
+                if ((m.dst.writemask & (1 << l)) && !(p.dst.writemask & (1 << t.swizzle[l])))
+                    ok = false;
+            // One writer and one reader of the temp, and the producer does
+            // not read its own result.
+            for (size_t k = 0; k < code.size() && ok; ++k) {
+                if (k != mi - 1 && !code[k].dst.none && !code[k].dst.output &&
+                    !code[k].dst.address && code[k].dst.index == t.index)
+                    ok = false;
+                for (size_t n = 0; n < code[k].srcs.size() && ok; ++n)
+                    if (code[k].srcs[n].kind == VSrcKind::Temp &&
+                        code[k].srcs[n].index == t.index && k != mi)
+                        ok = false;
+            }
+            if (!ok) continue;
+            if (!bcast && !fetch)
+                for (VSrc& src : p.srcs) {
+                    if (src.kind == VSrcKind::None) continue;
+                    const auto old = src.swizzle;
+                    for (int l = 0; l < 4; ++l)
+                        src.swizzle[l] = old[t.swizzle[l]];
+                }
+            const bool sat = p.sat;
+            p.dst = m.dst;
+            p.sat = sat;
+            code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
+            --mi;
+        }
+    }
+
+    // VP: a lane copy out of a temp with one producer (`RCP R2.x, c;
+    // MOV R1.z, R2.xxxx`) has the producer write the copy's lanes itself
+    // (`RCP R1.z, c`), as the reference builds a vector: other readers of
+    // the temp read those lanes instead.  A broadcast producer (scalar unit,
+    // dot product) fills any lanes; a componentwise one has its source
+    // swizzles moved with the lanes.  The copy's lanes have no other writer
+    // and nothing reads them before the copy; no loop node lies between the
+    // producer and any reader.
+    static bool broadcastOp(VOp op)
+    {
+        return op == VOp::Rcp || op == VOp::Rsq || op == VOp::Ex2 || op == VOp::Lg2 ||
+               op == VOp::Dp2 || op == VOp::Dp3 || op == VOp::Dp4;
+    }
+    static bool componentwiseOp(VOp op)
+    {
+        return op == VOp::Mov || op == VOp::Add || op == VOp::Mul || op == VOp::Mad ||
+               op == VOp::Min || op == VOp::Max || op == VOp::Sge || op == VOp::Slt ||
+               op == VOp::Sgt || op == VOp::Sle || op == VOp::Seq || op == VOp::Sne ||
+               op == VOp::Frc || op == VOp::Flr;
+    }
+    // `RCP R0.x, c; ...; MOV R0.z, R0.xxxx` is `RCP R0.xz, c`: the copy's
+    // lanes join the producer of the lanes it reads, when that producer is
+    // their only writer, the copied lanes have no other writer, and nothing
+    // reads the copied lanes or crosses a loop node in between.
+    bool widenSameRegisterCopy(size_t mi)
+    {
+        auto& code = program_.instrs;
+        const VInstr m = code[mi];
+        const int D = m.dst.index, mask = m.dst.writemask;
+        int read = 0;
+        for (int l = 0; l < 4; ++l)
+            if (mask & (1 << l)) read |= 1 << m.srcs[0].swizzle[l];
+        if (read & mask) return false;
+        size_t pi = code.size();
+        for (size_t k = 0; k < code.size(); ++k) {
+            const VInstr& vi = code[k];
+            if (vi.dst.none || vi.dst.output || vi.dst.address || vi.dst.index != D) continue;
+            if (k != mi && (vi.dst.writemask & mask)) return false;
+            if (vi.dst.writemask & read) {
+                if (pi != code.size() || k > mi) return false;
+                if ((vi.dst.writemask & read) != read) return false;
+                pi = k;
+            }
+        }
+        if (pi >= mi) return false;
+        VInstr& p = code[pi];
+        if (p.predicate != 0 || p.ccUpdate) return false;
+        const bool bcast = broadcastOp(p.op);
+        if (!bcast && !componentwiseOp(p.op)) return false;
+        for (size_t k = pi + 1; k < mi; ++k) {
+            const VInstr& vi = code[k];
+            if (vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd ||
+                vi.op == VOp::Kil)
+                return false;
+            for (size_t n = 0; n < vi.srcs.size(); ++n) {
+                const VSrc& r = vi.srcs[n];
+                if (r.kind != VSrcKind::Temp || r.index != D) continue;
+                const int req = requiredSourceMask(vi, n);
+                for (int l = 0; l < 4; ++l)
+                    if ((req & (1 << l)) && (mask & (1 << r.swizzle[l]))) return false;
+            }
+        }
+        // A producer reading its own register would see the widened lanes.
+        for (const VSrc& src : p.srcs)
+            if (src.kind == VSrcKind::Temp && src.index == D) return false;
+        if (!bcast)
+            for (VSrc& src : p.srcs) {
+                if (src.kind == VSrcKind::None) continue;
+                for (int l = 0; l < 4; ++l)
+                    if (mask & (1 << l)) src.swizzle[l] = src.swizzle[m.srcs[0].swizzle[l]];
+            }
+        p.dst.writemask |= mask;
+        code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
+        return true;
+    }
+
+    void packVertexLaneCopies()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        const auto tempDst = [](const VDst& d) {
+            return !d.none && !d.output && !d.address;
+        };
+        const auto barrier = [](const VInstr& vi) {
+            return vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd ||
+                   vi.op == VOp::Kil;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (size_t mi = 0; mi < code.size() && !changed; ++mi) {
+                const VInstr m = code[mi];
+                if (m.op != VOp::Mov || !tempDst(m.dst) || m.sat || m.ccUpdate || m.predicate != 0)
+                    continue;
+                const VSrc& s = m.srcs[0];
+                if (s.kind != VSrcKind::Temp || s.neg || s.abs || s.relative) continue;
+                if (s.index == m.dst.index) {
+                    if (widenSameRegisterCopy(mi)) changed = true;
+                    continue;
+                }
+                const int T = s.index, D = m.dst.index, mask = m.dst.writemask;
+                size_t pi = code.size();
+                int writersT = 0;
+                bool otherWriterD = false;
+                for (size_t k = 0; k < code.size(); ++k) {
+                    if (!tempDst(code[k].dst)) continue;
+                    if (code[k].dst.index == T) { ++writersT; pi = k; }
+                    if (k != mi && code[k].dst.index == D && (code[k].dst.writemask & mask))
+                        otherWriterD = true;
+                }
+                if (writersT != 1 || pi >= mi || otherWriterD) continue;
+                const VInstr& p = code[pi];
+                if (p.predicate != 0 || p.ccUpdate) continue;
+                const bool bcast = broadcastOp(p.op);
+                if (!bcast && !componentwiseOp(p.op)) continue;
+                // Which T lane each D lane takes; every one must be computed.
+                std::array<int, 4> from = {-1, -1, -1, -1};
+                bool lanesOk = true;
+                for (int l = 0; l < 4; ++l) {
+                    if (!(mask & (1 << l))) continue;
+                    from[l] = s.swizzle[l];
+                    if (!bcast && !(p.dst.writemask & (1 << from[l]))) lanesOk = false;
+                }
+                if (!lanesOk) continue;
+                // Other readers of T: each lane they need must be in D.
+                std::vector<std::pair<size_t, size_t>> readers;
+                bool ok = true;
+                size_t last = mi;
+                for (size_t k = 0; k < code.size() && ok; ++k) {
+                    if (k == mi) continue;
+                    for (size_t n = 0; n < code[k].srcs.size(); ++n) {
+                        const VSrc& r = code[k].srcs[n];
+                        if (r.kind != VSrcKind::Temp || r.index != T) continue;
+                        if (k < pi) { ok = false; break; }
+                        const int req = requiredSourceMask(code[k], n);
+                        for (int l = 0; l < 4 && ok; ++l) {
+                            if (!(req & (1 << l))) continue;
+                            bool found = false;
+                            for (int d = 0; d < 4; ++d)
+                                if (from[d] >= 0 && (bcast || from[d] == r.swizzle[l])) found = true;
+                            if (!found) ok = false;
+                        }
+                        readers.push_back({k, n});
+                        last = std::max(last, k);
+                    }
+                }
+                if (!ok) continue;
+                for (size_t k = pi + 1; k <= last && ok; ++k) {
+                    if (barrier(code[k])) ok = false;
+                    if (k < mi)
+                        for (size_t n = 0; n < code[k].srcs.size(); ++n) {
+                            const VSrc& r = code[k].srcs[n];
+                            if (r.kind != VSrcKind::Temp || r.index != D) continue;
+                            const int req = requiredSourceMask(code[k], n);
+                            for (int l = 0; l < 4; ++l)
+                                if ((req & (1 << l)) && (mask & (1 << r.swizzle[l]))) ok = false;
+                        }
+                }
+                if (!ok) continue;
+                VInstr& np = code[pi];
+                if (!bcast)
+                    for (VSrc& src : np.srcs) {
+                        if (src.kind == VSrcKind::None) continue;
+                        const auto old = src.swizzle;
+                        for (int l = 0; l < 4; ++l)
+                            if (from[l] >= 0) src.swizzle[l] = old[from[l]];
+                    }
+                np.dst.index = D;
+                np.dst.writemask = mask;
+                for (const auto& [k, n] : readers) {
+                    VSrc& r = code[k].srcs[n];
+                    const auto old = r.swizzle;
+                    for (int l = 0; l < 4; ++l) {
+                        for (int d = 0; d < 4; ++d)
+                            if (from[d] >= 0 && (bcast || from[d] == old[l])) { r.swizzle[l] = d; break; }
+                    }
+                    r.index = D;
+                }
+                code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
+                changed = true;
+            }
+        }
+    }
+
+    // VP: a single-use product feeding an add is one MAD (measured: the
+    // reference computes `a + b*2 + c*3 + ...` as MUL, ADD, then a MAD per
+    // term; we emitted a MUL per term and an ADD per term).  Only when the
+    // MAD reads at most one input register and one constant, as the
+    // reference does: `b*2 + a` on two inputs stays MUL + ADD rather than
+    // staging an input through a MOV.  The product is not moved across a
+    // control-flow node, an address write it reads through, or a rewrite of
+    // a temp it reads.  The VP MAD rounds the product before the add, so
+    // the value is the MUL + ADD value.
+    //
+    // FP (measured 2026-10-13): the fragment reference fuses too - `a * 1.5
+    // - 2.5` is one MADR with both literals in the instruction's one const
+    // block ({1.5, -2.5}.x / .y).  A fragment MAD may read one input register
+    // and one constant block: one uniform or literal operand, or two literal
+    // operands whose values fit one block (merged here).  The product is not
+    // saturated, scaled or precision-overridden, so the MAD rounds it before
+    // the add exactly as the MUL did.
+    void fuseVertexMulAdd()
+    {
+        const bool fragment = profile_ == GeneralProfile::Fragment;
+        if (profile_ != GeneralProfile::Vertex && !fragment) return;
+        auto& code = program_.instrs;
+        const auto barrier = [](const VInstr& vi) {
+            return vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd ||
+                   vi.op == VOp::Kil;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            std::unordered_map<int, int> reads, writes;
+            for (const VInstr& vi : code) {
+                for (const VSrc& s : vi.srcs)
+                    if (s.kind == VSrcKind::Temp) ++reads[s.index];
+                if (!vi.dst.none && !vi.dst.output && !vi.dst.address) ++writes[vi.dst.index];
+            }
+            for (size_t i = 0; i < code.size() && !changed; ++i) {
+                VInstr& add = code[i];
+                if (add.op != VOp::Add) continue;
+                for (int k = 0; k < 2 && !changed; ++k) {
+                    const VSrc& p = add.srcs[k];
+                    if (p.kind != VSrcKind::Temp || p.abs || reads[p.index] != 1 ||
+                        writes[p.index] != 1)
+                        continue;
+                    const int mask = add.dst.writemask;
+                    bool identity = true;
+                    for (int l = 0; l < 4; ++l)
+                        if ((mask & (1 << l)) && p.swizzle[l] != l) identity = false;
+                    if (!identity) continue;
+                    size_t j = i;
+                    while (j-- > 0)
+                        if (!code[j].dst.none && !code[j].dst.output && !code[j].dst.address &&
+                            code[j].dst.index == p.index)
+                            break;
+                    if (j >= i) continue;
+                    const VInstr& mul = code[j];
+                    if (mul.op != VOp::Mul || mul.sat || mul.predicate != 0 || mul.ccUpdate ||
+                        (mul.dst.writemask & mask) != mask)
+                        continue;
+                    if (fragment && (mul.fpScale != 0 || mul.fpPrecisionOverride != -1 ||
+                                     add.fpPrecisionOverride != -1 || add.predicate != 0 ||
+                                     add.ccUpdate || mul.dst.fp16 != add.dst.fp16 ||
+                                     mul.scalarSourceDemandMask != 0))
+                        continue;
+                    bool blocked = false;
+                    for (size_t m = j + 1; m < i && !blocked; ++m) {
+                        const VInstr& mid = code[m];
+                        if (barrier(mid)) blocked = true;
+                        for (const VSrc& s : mul.srcs) {
+                            if (s.kind == VSrcKind::Temp && !mid.dst.none && !mid.dst.output &&
+                                !mid.dst.address && mid.dst.index == s.index)
+                                blocked = true;
+                            if (s.relative && mid.dst.address) blocked = true;
+                        }
+                    }
+                    if (blocked) continue;
+                    const VSrc& other = add.srcs[1 - k];
+                    std::set<int> inputs;
+                    int constants = 0;
+                    for (const VSrc* s : {&mul.srcs[0], &mul.srcs[1], &other}) {
+                        if (s->kind == VSrcKind::Input) inputs.insert(s->index);
+                        if (s->kind == VSrcKind::Uniform || s->kind == VSrcKind::Literal) ++constants;
+                    }
+                    if (inputs.size() > 1) continue;
+                    VInstr mad = add;
+                    mad.op = VOp::Mad;
+                    mad.srcs[0] = mul.srcs[0];
+                    mad.srcs[1] = mul.srcs[1];
+                    mad.srcs[2] = other;
+                    if (p.neg) mad.srcs[0].neg = !mad.srcs[0].neg;
+                    if (constants > 1) {
+                        // Fragment only: two literals share the one block.
+                        if (!fragment || constants != 2) continue;
+                        std::vector<VSrc*> lits;
+                        for (VSrc& s : mad.srcs)
+                            if (s.kind == VSrcKind::Literal) lits.push_back(&s);
+                        if (lits.size() != 2) continue;
+                        // The reference stores -2.5 in the block, not 2.5
+                        // under a negate: modifiers go into the values.
+                        for (VSrc* l : lits) {
+                            for (float& v : l->literal) {
+                                if (l->abs) v = std::fabs(v);
+                                if (l->neg) v = -v;
+                            }
+                            l->abs = false;
+                            l->neg = false;
+                        }
+                        std::vector<float> vals;
+                        const auto slot = [&](float v) -> int {
+                            for (size_t q = 0; q < vals.size(); ++q)
+                                if (std::memcmp(&vals[q], &v, sizeof v) == 0) return static_cast<int>(q);
+                            vals.push_back(v);
+                            return static_cast<int>(vals.size()) - 1;
+                        };
+                        std::array<std::array<int, 4>, 2> sw{};
+                        for (int n = 0; n < 2; ++n)
+                            for (int l = 0; l < 4; ++l)
+                                sw[n][l] = (mask & (1 << l)) ? slot(lits[n]->literal[lits[n]->swizzle[l] & 3]) : -1;
+                        if (vals.size() > 4) continue;
+                        std::array<float, 4> block = {0.0f, 0.0f, 0.0f, 0.0f};
+                        for (size_t q = 0; q < vals.size(); ++q) block[q] = vals[q];
+                        for (int n = 0; n < 2; ++n) {
+                            int first = 0;
+                            for (int l = 0; l < 4; ++l) if (sw[n][l] >= 0) { first = sw[n][l]; break; }
+                            lits[n]->literal = block;
+                            for (int l = 0; l < 4; ++l)
+                                lits[n]->swizzle[l] = static_cast<uint8_t>(sw[n][l] >= 0 ? sw[n][l] : first);
+                        }
+                    }
+                    add = mad;
+                    code.erase(code.begin() + static_cast<std::ptrdiff_t>(j));
+                    changed = true;
+                }
+            }
+        }
+    }
+
     void legalizeInputOperands()
     {
         std::vector<VInstr> shaped;
@@ -9505,7 +10714,27 @@ private:
             // MOV R0 <- IN2; MUL o7 <- IN0, R0; n*p stages the position).
             const bool forceVpInputPreload =
                 profile_ == GeneralProfile::Vertex && inputs.size() > 1;
-            const bool needsInlineConstPreload = inlineConstPositions.size() > 1;
+            // Fragment: constant sources that read the same block (one uniform, or
+            // literals already merged into one 4-value block) are one block,
+            // not a conflict: a fused MAD reads {1.5, -2.5}.x and .y.
+            size_t distinctConstBlocks = 0;
+            for (size_t q = 0; q < inlineConstPositions.size(); ++q) {
+                const VSrc& c = vi.srcs[inlineConstPositions[q]];
+                bool seen = false;
+                for (size_t r = 0; r < q && !seen; ++r) {
+                    const VSrc& d = vi.srcs[inlineConstPositions[r]];
+                    if (c.kind == VSrcKind::Uniform && d.kind == VSrcKind::Uniform)
+                        seen = c.index == d.index;
+                    else if (c.kind == VSrcKind::Literal && d.kind == VSrcKind::Literal)
+                        seen = std::memcmp(c.literal.data(), d.literal.data(), sizeof(c.literal)) == 0;
+                }
+                if (!seen) ++distinctConstBlocks;
+            }
+            // Vertex: the reference stages the second read even of one same
+            // constant (MOV r0, c[A0.x + 464]; MAD ..., r0, c[A0.x + 464]),
+            // so a vertex program counts positions as before.
+            const bool needsInlineConstPreload = profile_ == GeneralProfile::Vertex
+                ? inlineConstPositions.size() > 1 : distinctConstBlocks > 1;
             if (!forceFpInputPreload && !forceVpInputPreload && !needsInlineConstPreload) {
                 shaped.push_back(vi);
                 continue;
@@ -9513,6 +10742,15 @@ private:
 
             std::set<int> directInputs;
             if (profile_ == GeneralProfile::Vertex && !inputs.empty())
+                directInputs.insert(inputs.front());
+            // FP: an instruction writing a TEMP keeps its first operand's
+            // input direct and stages the others (measured: `t = a * b` then
+            // used is MOV R0, f[TEX1]; MUL R0, f[TEX0], R0).  One writing the
+            // colour stages every input (MOV R0, f[TEX0]; MOV R1, f[TEX1];
+            // MUL o0, R0, R1).  MAD keeps its own preload rules.
+            if (profile_ == GeneralProfile::Fragment && effOp != VOp::Mad &&
+                inputs.size() > 1 && !vi.dst.output && !vi.dst.outputPin &&
+                !vi.dst.none)
                 directInputs.insert(inputs.front());
             keepPreloadSwizzle.clear();
 
@@ -9714,7 +10952,7 @@ private:
                 if (src.kind != VSrcKind::Uniform &&
                     src.kind != VSrcKind::Literal)
                     continue;
-                if (static_cast<int>(srcIndex) == keepInlinePosition)
+                if (static_cast<int>(srcIndex) == keepInlinePosition || !needsInlineConstPreload)
                     continue;
 
                 VInstr mov;
@@ -9741,6 +10979,28 @@ private:
         program_.instrs = std::move(shaped);
     }
 
+    // VP: a MOV the allocator coalesced onto its own source register
+    // (`MOV R1.x, R1.xxxx`) copies every lane it writes onto itself, so it
+    // is dropped (measured: 2xbrz carried three, the reference none).
+    void dropVertexSelfMoves()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        code.erase(std::remove_if(code.begin(), code.end(), [](const VInstr& vi) {
+            if (vi.op != VOp::Mov || vi.dst.none || vi.dst.output || vi.dst.address ||
+                vi.sat || vi.ccUpdate || vi.predicate != 0 || vi.stubCoIssuePartner ||
+                vi.stubFenceBefore || vi.stubFenceBrBefore)
+                return false;
+            const VSrc& s = vi.srcs[0];
+            if (s.kind != VSrcKind::Temp || s.neg || s.abs || s.relative ||
+                vi.dst.phys < 0 || s.phys != vi.dst.phys)
+                return false;
+            for (int l = 0; l < 4; ++l)
+                if ((vi.dst.writemask & (1 << l)) && s.swizzle[l] != l) return false;
+            return true;
+        }), code.end());
+    }
+
     void allocatePhysicalTemps()
     {
         std::unordered_map<int, size_t> lastUse;
@@ -9757,6 +11017,31 @@ private:
             for (const VSrc& src : vi.srcs) {
                 if (src.kind == VSrcKind::Temp)
                     lastUse[src.index] = i;
+            }
+        }
+
+        // FP-LOOP: a register written before a loop region and read inside it
+        // (a carry, a loop invariant) is read again by the next iteration, so
+        // it lives until the region ends; it is freed there.  A register
+        // defined inside the region lives as usual - every iteration writes it
+        // before reading it.
+        std::unordered_map<size_t, std::vector<int>> regionEndFrees;
+        {
+            size_t begin = program_.instrs.size();
+            for (size_t i = 0; i < program_.instrs.size(); ++i) {
+                const VOp op = program_.instrs[i].op;
+                if (op == VOp::LoopBegin) { begin = i; continue; }
+                if (op != VOp::LoopEnd || begin == program_.instrs.size()) continue;
+                std::set<int> extended;
+                for (size_t k = begin + 1; k < i; ++k)
+                    for (const VSrc& src : program_.instrs[k].srcs) {
+                        if (src.kind != VSrcKind::Temp) continue;
+                        const auto d = firstDef.find(src.index);
+                        if (d == firstDef.end() || d->second > begin) continue;
+                        if (lastUse[src.index] < i) { lastUse[src.index] = i; extended.insert(src.index); }
+                    }
+                regionEndFrees[i].assign(extended.begin(), extended.end());
+                begin = program_.instrs.size();
             }
         }
 
@@ -10225,6 +11510,10 @@ private:
                     }
                 }
                 program_.vregToPhys[vi.dst.index] = phys;
+                // Lane-packing slice 1: every value currently owns its whole
+                // R slot (fresh handout, free-list reuse, or an output pin all
+                // land here).  0xF until the slot-sharing slice narrows it.
+                program_.vregLaneMask[vi.dst.index] = 0xF;
             }
             if (!vi.dst.none && !vi.dst.output && !vi.dst.address) {
                 auto physIt = program_.vregToPhys.find(vi.dst.index);
@@ -10283,7 +11572,41 @@ private:
                         freeList.push_back(freedSlot);
                 }
             }
+            const auto ends = regionEndFrees.find(i);
+            if (ends != regionEndFrees.end()) {
+                for (int vreg : ends->second) {
+                    const auto physIt = program_.vregToPhys.find(vreg);
+                    if (physIt == program_.vregToPhys.end()) continue;
+                    const bool fp16 = program_.vregToFp16.count(vreg) && program_.vregToFp16[vreg];
+                    freeList.push_back(fp16 ? (physIt->second >> 1) : physIt->second);
+                }
+            }
         }
+        // Lane-packing slice 1 invariant: until the slot-sharing slice lands,
+        // every vreg owns its whole R slot.  Assert the map agrees so we don't
+        // silently drift between the two tables in a later refactor.
+#ifdef NDEBUG
+        (void)program_.vregLaneMask;
+#else
+        for (const auto& [vreg, phys] : program_.vregToPhys)
+        {
+            const auto it = program_.vregLaneMask.find(vreg);
+            if (it == program_.vregLaneMask.end())
+            {
+                std::fprintf(stderr,
+                             "lane-packing: vreg %d in vregToPhys but not in vregLaneMask (phys=%d)\n",
+                             vreg, phys);
+                std::abort();
+            }
+            if (it->second != 0xF)
+            {
+                std::fprintf(stderr,
+                             "lane-packing: vreg %d laneMask = 0x%X, expected 0xF (phys=%d)\n",
+                             vreg, it->second, phys);
+                std::abort();
+            }
+        }
+#endif
     }
 };
 
@@ -10431,6 +11754,9 @@ static uint8_t fpOpcode(VOp op)
     case VOp::Txl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
     case VOp::Sfl: return NVFX_FP_OP_OPCODE_MOV;   // VP only; never reaches the FP emitter
     case VOp::Ftoi: return NVFX_FP_OP_OPCODE_MOV;
+    case VOp::LoopBegin:
+    case VOp::Brk:
+    case VOp::LoopEnd: return NVFX_FP_OP_OPCODE_MOV;   // emitted raw, never through here
     }
     return NVFX_FP_OP_OPCODE_MOV;
 }
@@ -10487,6 +11813,9 @@ static const char* vOpName(VOp op)
     case VOp::Ftoi: return "Ftoi";
     case VOp::SelPred: return "SelPred";
     case VOp::Kil: return "Kil";
+    case VOp::LoopBegin: return "LoopBegin";
+    case VOp::Brk: return "Brk";
+    case VOp::LoopEnd: return "LoopEnd";
     }
     return "unknown";
 }
@@ -11042,8 +12371,35 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             asm_.emitFencbr();
     };
 
-    bool emittedInstruction = false;
+    std::vector<size_t> openLoops;
+    size_t lastLoopTarget = 0;
     for (const VInstr& vi : program.instrs) {
+        // FP-LOOP slice 1 (measured encodings, fp-loop-encoding.md): LOOP is
+        // op 0x03 with OUT_NONE, fp32, the identity condition swizzle and TR;
+        // hw2 = IS_BRANCH | step << 19 | init << 10 | count << 2; hw3 = the
+        // dword index of the first instruction after the body, patched at
+        // the region end, after every literal block of the body is placed.
+        if (vi.op == VOp::LoopBegin) {
+            if (vi.loopCount < 1 || vi.loopCount > 255 || !openLoops.empty()) {
+                out.diagnostics.push_back("nv40-general-fp: unsupported hardware loop shape; refusing");
+                return out;
+            }
+            openLoops.push_back(asm_.emitRaw(
+                0x43400000u, 0x1c9dc800u,
+                0x80000000u | (1u << 19) | (0u << 10) | (static_cast<uint32_t>(vi.loopCount) << 2),
+                0u));
+            continue;
+        }
+        if (vi.op == VOp::LoopEnd) {
+            if (openLoops.empty()) {
+                out.diagnostics.push_back("nv40-general-fp: loop end without a loop; refusing");
+                return out;
+            }
+            lastLoopTarget = asm_.wordCount();
+            asm_.patchWord(openLoops.back() + 3, static_cast<uint32_t>(lastLoopTarget));
+            openLoops.pop_back();
+            continue;
+        }
         std::string why;
         if (scalarSourceLaneConflict(vi)) {
             out.diagnostics.push_back(scalarSourceDiagnostic(vi));
@@ -11128,7 +12484,42 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             asm_.emit(kil, NVFX_FP_OP_OPCODE_KIL);
             // One $kill_NNNN container parameter per discard STATEMENT.
             attrs.pixelKillCount += 1;
-            emittedInstruction = true;
+            continue;
+        }
+        if (vi.op == VOp::Brk) {
+            // Kil's shape: the guard's producer (or a MOV of the guard)
+            // writes the condition register, then BRK tests lane x - EQ where
+            // the loop condition failed (killTestEq), NE where it holds.
+            struct nvfx_reg ccDst = nvfx_reg(NVFXSR_NONE, 0x3F);
+            std::array<VSrc, 3> brkSrcs = vi.srcs;
+            for (VSrc& src : brkSrcs)
+                packLiteralBlock(src);
+            struct nvfx_insn set = nvfx_insn(
+                0, 0, -1, -1, ccDst, NVFX_FP_MASK_X,
+                nvfxSource(brkSrcs[0]), nvfxSource(brkSrcs[1]), nvfxSource(brkSrcs[2]));
+            set.cc_update = 1;
+            asm_.emit(set, fpOpcode(vi.killFused));
+            bool blockAppended = false;
+            for (const VSrc& src : brkSrcs) {
+                if (src.kind != VSrcKind::Uniform && src.kind != VSrcKind::Literal)
+                    continue;
+                if (blockAppended) {
+                    out.diagnostics.push_back(
+                        "nv40-general-fp: a loop exit test reads two inline constants; refusing");
+                    return out;
+                }
+                const uint32_t offset = asm_.currentByteSize();
+                if (src.kind == VSrcKind::Uniform) {
+                    recordFpUniformOffset(attrs, static_cast<unsigned>(src.index), offset);
+                    static const float zeros[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    asm_.appendConstBlock(zeros);
+                } else {
+                    asm_.appendConstBlock(src.literal.data());
+                }
+                blockAppended = true;
+            }
+            const uint32_t cond = vi.killTestEq ? NVFX_COND_EQ : NVFX_COND_NE;
+            asm_.emitRaw(0x40400000u, cond << 18, 0x80000000u, 0u);
             continue;
         }
         if (vi.op == VOp::Ftoi) {
@@ -11200,7 +12591,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                 restore.cc_swz[2] = restore.cc_swz[3] = 0;
             asm_.emit(restore, NVFX_FP_OP_OPCODE_MOV);
 
-            emittedInstruction = true;
             continue;
         }
         if (vi.op == VOp::SelPred) {
@@ -11312,7 +12702,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             emitOne(ccDst, vi.selPerLane ? vi.dst.writemask : 0x1,
                     vi.srcs[0], true, false);
             emitOne(selDst, vi.dst.writemask, vi.srcs[1], false, true);
-            emittedInstruction = true;
             continue;
         }
         struct nvfx_reg dst = vi.dst.none
@@ -11346,6 +12735,39 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         // after it, so the two would drift apart.
         for (VSrc& src : srcs)
             packLiteralBlock(src);
+        // Two literal operands of one instruction share its one block when
+        // their values fit four slots (a fused MAD's {1.5, -2.5}.x / .y, as
+        // the reference packs it): repack them jointly, first operand's
+        // values first.  More than four stays as it is and is refused below.
+        {
+            std::vector<VSrc*> lits;
+            for (VSrc& src : srcs)
+                if (src.kind == VSrcKind::Literal) lits.push_back(&src);
+            if (lits.size() > 1) {
+                std::array<float, 4> packed = {0.0f, 0.0f, 0.0f, 0.0f};
+                unsigned distinct = 0;
+                bool fits = true;
+                std::vector<std::array<uint8_t, 4>> sw(lits.size());
+                for (size_t n = 0; n < lits.size() && fits; ++n)
+                    for (int lane = 0; lane < 4 && fits; ++lane) {
+                        const float v = lits[n]->literal[lits[n]->swizzle[lane] & 3];
+                        unsigned slot = distinct;
+                        for (unsigned k = 0; k < distinct; ++k)
+                            if (packed[k] == v) { slot = k; break; }
+                        if (slot == distinct) {
+                            if (distinct == 4) { fits = false; break; }
+                            packed[distinct++] = v;
+                        }
+                        sw[n][lane] = static_cast<uint8_t>(slot);
+                    }
+                if (fits)
+                    for (size_t n = 0; n < lits.size(); ++n) {
+                        lits[n]->literal = packed;
+                        lits[n]->swizzle = sw[n];
+                        lits[n]->literalLanes = static_cast<uint8_t>(distinct);
+                    }
+            }
+        }
         auto isInlineConst = [](const VSrc& src) {
             return src.kind == VSrcKind::Uniform ||
                    src.kind == VSrcKind::Literal;
@@ -11356,9 +12778,10 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         if (vi.op == VOp::Mov && vi.dst.output &&
             std::any_of(srcs.begin(), srcs.end(), isInlineConst))
             emitFenceForSources(srcs);
-        if (emittedInstruction && vi.op == VOp::Mad &&
-            std::any_of(srcs.begin(), srcs.end(), isInlineConst))
-            emitFenceForSources(srcs);
+        // No fence before a MAD that reads an inline constant: the
+        // reference fences 7 of 3303 such MADs across the community and SDK
+        // corpus (and two identical shapes, one fenced and one not), so it
+        // is not a hazard rule; ours fenced every one after the first.
         if (vi.stubFenceBefore)
             asm_.emitFenctr();
         if (vi.stubFenceBrBefore)
@@ -11387,7 +12810,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                 insn.cc_swz[lane] = vi.predicateSwizzle[lane];
         }
         asm_.emit(insn, fpOpcode(vi.op));
-        emittedInstruction = true;
         // ONE inline constant block per instruction: every CONST-kind source
         // of an NV40 fragment instruction reads the same 16 bytes that
         // follow it.  Appending a block per source put a SECOND block after
@@ -11438,6 +12860,11 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     // NOP carrying PROGRAM_END (SDK fnop.cg: 'void main() {}').  Its
     // parameters are still recorded, unreferenced.  Anything else that
     // reaches here empty lost its code somewhere and stays refused.
+    if (!openLoops.empty() || (lastLoopTarget != 0 && lastLoopTarget >= asm_.wordCount())) {
+        out.diagnostics.push_back(
+            "nv40-general-fp: a hardware loop is not followed by an instruction; refusing");
+        return out;
+    }
     const bool noEffectProgram = asm_.empty() && fpEntryHasNoEffect(entry);
     if (noEffectProgram)
         asm_.emitNop();
@@ -11579,6 +13006,7 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     UcodeOutput out;
     VpAssembler asm_;
     VpAttributes attrs;
+    attrs.uniformStructLayouts = program.uniformStructLayouts;
     int nextLiteralReg = program.nextVpLiteralConst;
     VpLiteralAlloc literalAlloc;
     for (VInstr& vi : program.instrs) {
@@ -11642,12 +13070,67 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         return insn;
     };
 
+    // VP-CF S3: a loop region becomes branches.  LoopBegin is the head
+    // label; Brk writes the exit test into CC0.x (the fused comparison, or
+    // a MOV of the guard) and branches to the exit where the loop condition
+    // fails - the compare sits immediately before its BRA, so no other CC
+    // write can reach the branch (VP2); LoopEnd branches back to the head and
+    // the exit is the next instruction.  Targets are final instruction
+    // indices: this runs after scheduling and allocation, and a marker is
+    // never paired (VP5).
+    struct LoopFrame { size_t head; std::vector<size_t> exits; };
+    std::vector<LoopFrame> loops;
+    std::vector<size_t> exitTargets;
+
     for (size_t i = 0; i < program.instrs.size(); ++i) {
         const VInstr& vi = program.instrs[i];
         std::string why;
         if (hasUnsupportedSource(vi, why)) {
             out.diagnostics.push_back("nv40-general-vp: " + why);
             return out;
+        }
+        if (vi.op == VOp::LoopBegin) {
+            if (!loops.empty()) {
+                out.diagnostics.push_back("nv40-general-vp: a nested loop is not lowered; refusing");
+                return out;
+            }
+            loops.push_back({asm_.instructionCount(), {}});
+            continue;
+        }
+        if (vi.op == VOp::Brk) {
+            uint8_t testOpcode = 0;
+            if (loops.empty() || !tryVpOpcode(vi.killFused, testOpcode)) {
+                out.diagnostics.push_back("nv40-general-vp: a loop exit test outside a loop or with an unencodable compare; refusing");
+                return out;
+            }
+            VInstr test;
+            test.op = vi.killFused;
+            test.dst.none = true;
+            test.dst.writemask = 1;
+            test.ccUpdate = true;
+            test.srcs = vi.srcs;
+            asm_.emit(makeInsn(test), testOpcode);
+            loops.back().exits.push_back(
+                asm_.emitBranch(vi.killTestEq ? NVFX_COND_EQ : NVFX_COND_NE, 0, 0));
+            continue;
+        }
+        if (vi.op == VOp::LoopEnd) {
+            if (loops.empty()) {
+                out.diagnostics.push_back("nv40-general-vp: a loop end without a loop; refusing");
+                return out;
+            }
+            const size_t back = asm_.emitBranch(NVFX_COND_TR, 0, 0);
+            const size_t exit = asm_.instructionCount();
+            bool ok = asm_.setBranchTarget(back, static_cast<uint32_t>(loops.back().head));
+            for (size_t e : loops.back().exits)
+                ok = ok && asm_.setBranchTarget(e, static_cast<uint32_t>(exit));
+            if (!ok) {
+                out.diagnostics.push_back("nv40-general-vp: a loop branch target does not fit the 9-bit field; refusing");
+                return out;
+            }
+            exitTargets.push_back(exit);
+            loops.pop_back();
+            continue;
         }
         if (vi.op == VOp::SelPred) {
             // Keep the three writes atomic until after scheduling/allocation.
@@ -11656,9 +13139,13 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
             // Output registers have their own namespace and no allocated
             // temporary index. Output assignment may fold a masked select
             // directly into an output, just as it folds an ordinary MOV.
-            if (vi.selPerLane || vi.dst.none || vi.dst.address ||
+            // A VECTOR condition (`genMode == float4(1,1,1,1) ? x : y`,
+            // PSGL's fixed pipeline) selects per lane: measured on the
+            // reference, SEQC writes all four CC lanes and the true arm is
+            // written under (NE0) with an identity condition swizzle.
+            if (vi.dst.none || vi.dst.address ||
                 (!vi.dst.output && vi.dst.phys < 0)) {
-                out.diagnostics.push_back("nv40-general-vp: invalid scalar SelPred destination; refusing");
+                out.diagnostics.push_back("nv40-general-vp: invalid SelPred destination; refusing");
                 return out;
             }
             for (int s = 0; s < 2; ++s) {
@@ -11677,13 +13164,16 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
             VInstr cc;
             cc.op = VOp::Mov;
             cc.dst.none = true;
-            cc.dst.writemask = 1;
+            cc.dst.writemask = vi.selPerLane ? vi.dst.writemask : 1;
             cc.ccUpdate = true;
             cc.srcs[0] = vi.srcs[0];
             asm_.emit(makeInsn(cc), VP_OP(MOV));
             mov.srcs[0] = vi.srcs[1];
             mov.predicate = NVFX_COND_NE;
-            mov.predicateSwizzle = {0, 0, 0, 0};
+            if (vi.selPerLane)
+                mov.predicateSwizzle = {0, 1, 2, 3};
+            else
+                mov.predicateSwizzle = {0, 0, 0, 0};
             asm_.emit(makeInsn(mov), VP_OP(MOV));
             continue;
         }
@@ -11715,6 +13205,17 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
         out.diagnostics.push_back("nv40-general-vp: no instructions emitted");
         return out;
     }
+    if (!loops.empty()) {
+        out.diagnostics.push_back("nv40-general-vp: a loop without its end; refusing");
+        return out;
+    }
+    // A loop exit must land on an instruction: the LAST bit may not sit on a
+    // branch, and a target past the program is undefined.
+    for (size_t exit : exitTargets)
+        if (exit >= asm_.instructionCount()) {
+            out.diagnostics.push_back("nv40-general-vp: a loop ends the program, leaving its exit no instruction; refusing");
+            return out;
+        }
     asm_.markLast();
     if (asm_.inputConflict()) {
         out.diagnostics.push_back(
@@ -11727,6 +13228,28 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     if (program.loweringFailed) {
         out.diagnostics.push_back(
             "nv40-general: refusing to emit - the program did not lower completely");
+        out.ok = false;
+        return out;
+    }
+    // The vertex engine has 32 temporaries (R0-R31).  The temp field is 6
+    // bits, so an allocation past R31 used to
+    // encode silently - an invalid program, compiled "successfully" (found
+    // compiling PSGL's fixed pipeline: R61).  Refuse instead, by resource.
+    if (asm_.maxTempIndex() > 31) {
+        out.diagnostics.push_back(
+            "nv40-general-vp: the program needs " + std::to_string(asm_.maxTempIndex() + 1) +
+            " temporary registers; the vertex engine has 32 (vp-register-budget); refusing");
+        out.ok = false;
+        return out;
+    }
+    // The vertex engine holds 544 instructions: measured, the reference
+    // compiles 544 and refuses 545 ("C9999: too many instruction words
+    // generated").  Nothing checked it - ours emitted a 1091-instruction
+    // program with a success exit.  Refused by resource.
+    if (asm_.instructionCount() > 544) {
+        out.diagnostics.push_back(
+            "nv40-general-vp: the program is " + std::to_string(asm_.instructionCount()) +
+            " instructions; the vertex engine holds 544 (vp-instruction-budget); refusing");
         out.ok = false;
         return out;
     }

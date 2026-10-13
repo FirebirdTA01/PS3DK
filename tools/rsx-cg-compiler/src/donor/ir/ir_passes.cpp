@@ -43,6 +43,13 @@ bool isPure(IROp op)
     case IROp::TexSampleProj:
     case IROp::TexSampleBias:
     case IROp::TexFetch:
+    // Loop region markers and carries: barriers, never merged or dropped.
+    case IROp::LoopCarry:
+    case IROp::LoopBegin:
+    case IROp::LoopBreakIf:
+    case IROp::LoopLatch:
+    case IROp::LoopEnd:
+    case IROp::LoopOut:
         return false;
     default:
         return true;
@@ -699,6 +706,11 @@ size_t CommonSubexprElimination::InstrHash::operator()(const IRInstruction* inst
             0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= std::hash<int>()(inst->componentIndex) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= std::hash<IRValueID>()(inst->uniformSource) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<int>()(static_cast<int>(inst->arrayIndexKind));
+    if (inst->uniformStructRead) {
+        hash ^= std::hash<uint32_t>()(inst->uniformStructRead->leaf + 1) + (hash << 6);
+        hash ^= std::hash<uint32_t>()(inst->uniformStructRead->row) + (hash << 6);
+    }
 
     // Include targetName in hash for LoadUniform/Call instructions
     if (!inst->targetName.empty())
@@ -730,6 +742,10 @@ bool CommonSubexprElimination::InstrEqual::operator()(const IRInstruction* a,
     // A helper may read the global hidden by an entry parameter of the
     // same name. Equal element indices do not make those loads equal.
     if (a->uniformSource != b->uniformSource) return false;
+    if (a->arrayIndexKind != b->arrayIndexKind) return false;
+    if (a->uniformStructRead.has_value() != b->uniformStructRead.has_value()) return false;
+    if (a->uniformStructRead && (a->uniformStructRead->leaf != b->uniformStructRead->leaf ||
+                                a->uniformStructRead->row != b->uniformStructRead->row)) return false;
 
     // Compare targetName for LoadUniform/Call instructions
     if (a->targetName != b->targetName) return false;
@@ -741,7 +757,12 @@ bool CommonSubexprElimination::InstrEqual::operator()(const IRInstruction* a,
     // on the struct field) but are different varyings (t_3289f98f), so an
     // implicit load is equal only to a load of the same instance and member.
     if (a->inferredSemantic != b->inferredSemantic) return false;
-    if (a->inferredSemantic &&
+    // A vertex member with no semantic likewise: its index is the member's
+    // position until bindImplicitAttributes runs, so s.b and t.d (both
+    // second members) looked like one load and t.d was never read.
+    const bool provisional = a->inferredSemantic ||
+        (a->op == IROp::LoadAttribute && a->semanticName.empty() && !a->structParamName.empty());
+    if (provisional &&
         (a->structParamName != b->structParamName || a->fieldName != b->fieldName)) return false;
 
     for (size_t i = 0; i < a->operands.size(); ++i)
@@ -869,10 +890,29 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
                 rpo[post[post.size() - 1 - k]] = k;
     }
 
+    // A value defined inside a hardware loop region (loopbegin..loopend) is
+    // not computed when the loop exits before reaching it, and holds only the
+    // last iteration's value after it: it may be reused inside the region,
+    // never after it.  Candidates entered inside a region are withdrawn at
+    // its loopend.  A region expression may still reuse one from before the
+    // loop (that value is live across the whole region).
+    std::vector<std::pair<IRInstruction*, IRValueID>> regionCandidates;
+    int regionDepth = 0;
     for (size_t bi = 0; bi < n; ++bi)
     {
         for (auto& inst : func.blocks[bi]->instructions)
         {
+            if (inst->op == IROp::LoopBegin) ++regionDepth;
+            if (inst->op == IROp::LoopEnd && regionDepth > 0 && --regionDepth == 0)
+            {
+                for (const auto& [key, value] : regionCandidates)
+                {
+                    auto& list = m_exprMap[key];
+                    list.erase(std::remove_if(list.begin(), list.end(),
+                        [&](const auto& c) { return c.first == value; }), list.end());
+                }
+                regionCandidates.clear();
+            }
             // Only consider pure operations
             if (!IRPassUtils::isPure(inst->op) || inst->result == InvalidIRValue)
             {
@@ -893,6 +933,7 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
             else
             {
                 candidates.emplace_back(inst->result, bi);
+                if (regionDepth > 0) regionCandidates.emplace_back(inst.get(), inst->result);
             }
         }
     }

@@ -26,7 +26,11 @@ ACCEPT = {
 # Refused today for a named reason that is NOT C6014 (the reference ACCEPTS
 # it: a position write on one path).  Pinned strictly - exit 1, no
 # container, this exact reason - so a crash or a silent accept cannot pass.
-CONDITIONAL_STORE = 'output store in block'
+# The conditional-store gap's two spellings: the block-store refusal, and
+# - since dd61d264 stores an out parameter written under a branch once, at
+# the end - the unresolved not-written side of that merge, which refuses
+# first.  Both are the same gap; neither is C6014.
+CONDITIONAL_STORE = ('output store in block', 'could not be resolved')
 NOT_C6014 = {
     'written_on_one_path': 'void main(float4 p : POSITION, out float4 o : POSITION) { if (p.x > 0) o = p; }\n',
 }
@@ -78,13 +82,13 @@ def main():
                 failures.append('%s refused' % name)
         for name, text in NOT_C6014.items():
             rc, out, err = run(compiler, work, name, text)
-            ok = rc == 1 and not out and CONDITIONAL_STORE in err and 'C6014' not in err
+            ok = rc == 1 and not out and any(m in err for m in CONDITIONAL_STORE) and 'C6014' not in err
             print('  %-20s %s' % (name, 'refused by the conditional-store gap, not C6014' if ok else 'NOT as pinned (rc %d)' % rc))
             if not ok:
                 failures.append('%s: want exit 1, no container, the conditional-store reason, not C6014' % name)
         for name, text in DEAD_WRITE.items():
             rc, out, err = run(compiler, work, name, text)
-            ok = rc == 1 and not out and ('C6014' in err or CONDITIONAL_STORE in err)
+            ok = rc == 1 and not out and ('C6014' in err or any(m in err for m in CONDITIONAL_STORE))
             print('  %-20s %s' % (name, 'refused' if ok else 'NOT refused (rc %d)' % rc))
             if not ok:
                 failures.append('%s: a position write only on a dead path must refuse' % name)

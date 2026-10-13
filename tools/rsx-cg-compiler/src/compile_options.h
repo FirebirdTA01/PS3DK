@@ -85,6 +85,12 @@ enum class OptLevel
     // speculative reg reuse.  Not distinguishable from O2 in our
     // probes today.
     O3 = 3,
+
+    // `-O4` — ours, not the reference's: everything O3 does plus the
+    // optimisations the reference never applies (director 2026-10-12).
+    // -O0..-O3 keep the reference's meaning so the default output stays
+    // reference-identical; past-parity work is opt-in here.
+    O4 = 4,
 };
 
 struct CompileOptions

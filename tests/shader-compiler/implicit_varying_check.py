@@ -125,6 +125,11 @@ READSET = {
                            {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     'const_false_ternary': ('float4 main(float2 u, float2 k) : COLOR { return false ? float4(u, 0, 1) : float4(k, 0, 1); }\n',
                             {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    # a comparison of two constants is a constant condition (measured)
+    'const_compare_branch': ('float4 main(float2 u, float2 k) : COLOR { float4 r = float4(k, 0, 1); if (0 > 1) r = float4(u, 0, 1); return r; }\n',
+                           {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
+    'const_compare_ternary': ('float4 main(float2 u, float2 k) : COLOR { return (2 == 3) ? float4(u, 0, 1) : float4(k, 0, 1); }\n',
+                            {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     'static_false_branch': ('static const bool B = false; float4 main(float2 u, float2 k) : COLOR { float4 r = float4(k, 0, 1); if (B) r = float4(u, 0, 1); return r; }\n',
                             {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     # a constant select whose condition is itself a constant select (review: codex)

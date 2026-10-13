@@ -320,6 +320,12 @@ const char* irOpToString(IROp op)
     case IROp::Nop:          return "nop";
     case IROp::Comment:      return "// ";
     case IROp::PredCarry:    return "predcarry";
+    case IROp::LoopCarry:    return "loopcarry";
+    case IROp::LoopBegin:    return "loopbegin";
+    case IROp::LoopBreakIf:  return "loopbreakif";
+    case IROp::LoopLatch:    return "looplatch";
+    case IROp::LoopEnd:      return "loopend";
+    case IROp::LoopOut:      return "loopout";
     default:                 return "???";
     }
 }
@@ -865,6 +871,7 @@ int getOperandCount(IROp op)
     case IROp::TexSampleGrad:
     case IROp::TexFetch:
     case IROp::PredCarry:    // [cond, default, op_arg0, op_arg1, ...]
+    case IROp::LoopLatch:    // [carry, next, carry, next, ...]
         return -1;  // Variable number of operands
 
     default:

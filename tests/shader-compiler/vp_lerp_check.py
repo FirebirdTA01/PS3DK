@@ -80,10 +80,10 @@ def judge(blob, case, reference=False):
         outputs=evaluate(blob, dict(A=a,B=b,T=t), inputs, binary32=True)
         assert outputs.get(0)==[0.,0.,0.,1.], 'POSITION changed'
         got,want=outputs.get(1),expected(case,values)
-        if case[0]=='attributes' and index==3 and reference:
-            # Measured oracle contracts this case; the current compiler's
-            # existing expanded path does not. Kept as explicitly reported
-            # debt, separate from the bounded builtin lowering.
+        if case[0]=='attributes' and index==3:
+            # Measured oracle contracts this case to one MAD (d * c[t] +
+            # v[a]: one input, one constant) and so does the compiler since
+            # the VP MAD fusion: 2 + 2^-12, not the separately rounded 2.
             want=[2.000244140625]*4
         assert got is not None and all(x is not None and math.isfinite(x) for x in got), 'missing/nonfinite COLOR0'
         assert got==want, (case[0], values, got, want)
@@ -133,10 +133,7 @@ def main():
                             else: raise AssertionError('weighted-order mutant accepted')
                         continue
                     judge(blob,case,reference=bool(args.reference_dir))
-                    if case[0]=='attributes':
-                        debts.append(name)
-                    else:
-                        passed+=1
+                    passed+=1
                     if case[0]=='vec4':
                         mutant=negate_product(blob)
                         assert mutant!=blob, 'product-sign mutant changed nothing'

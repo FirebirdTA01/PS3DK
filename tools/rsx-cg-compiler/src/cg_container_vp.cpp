@@ -45,6 +45,7 @@
 #include "cg_container_vp.h"
 #include "nv40/nv40_emit.h"
 #include "array_uniforms.h"
+#include "implicit_attribute.h"
 #include "fp_sampler_bindings.h"
 #include "uniform_bindings.h"
 
@@ -80,6 +81,7 @@ constexpr uint32_t kLiteralPoolParamno     = 0xFFFFFFFEu;
 
 // CGresource codes (from cg_bindlocations.h).
 constexpr uint32_t kCgAttr0       = 2113u;  // 0x0841 — VP POSITION input
+constexpr uint32_t kCgNoAttribute = 3256u;  // 0x0cb8 — an unread implicit input
 constexpr uint32_t kCgAttr3       = 2116u;  // 0x0844 — VP COLOR input
 constexpr uint32_t kCgAttr8       = 2121u;  // 0x0848 — VP TEXCOORD0 input
 constexpr uint32_t kCgConst       = 2178u;  // 0x0882 — uniform const-bank slot
@@ -262,30 +264,9 @@ uint32_t cgSamplerType(IRType t)
 // vertex-attribute slots per NVIDIA's auto-bind table.
 uint32_t vpInputResource(const std::string& semUpper, int semIndex)
 {
-    if (semUpper.empty() && semIndex >= 0 && semIndex < 16)
-        return kCgAttr0 + static_cast<uint32_t>(semIndex);
-    if (semUpper == "ATTR" && semIndex >= 0 && semIndex < 16)
-        return kCgAttr0 + static_cast<uint32_t>(semIndex);
-    if (semUpper == "POSITION") return kCgAttr0;
-    if (semUpper == "NORMAL")   return kCgAttr0 + 2;        // ATTR2
-    if (semUpper == "COLOR" || semUpper == "COL")
-        return kCgAttr3 + (semIndex == 1 ? 1 : 0);          // ATTR3 / ATTR4
-    // Index-less aliases of COLOR0/COLOR1 in NVIDIA's auto-bind
-    // table (mirrors the lowering's semantic tables; DIFFUSE1 stays
-    // unmapped on purpose).
-    if (semUpper == "DIFFUSE"  && semIndex == 0) return kCgAttr3;      // ATTR3
-    if (semUpper == "SPECULAR" && semIndex == 0) return kCgAttr3 + 1;  // ATTR4
-    if (semUpper == "BLENDWEIGHT" || semUpper == "WEIGHT")
-        return kCgAttr0 + 1;                                 // ATTR1
-    if (semUpper == "BLENDINDICES" || semUpper == "INDICES")
-        return kCgAttr0 + 7;                                  // ATTR7
-    if (semUpper == "TEXCOORD" || semUpper == "TEX")
-        return kCgAttr8 + semIndex;                          // ATTR8..15
-    if (semUpper == "TANGENT" && semIndex == 0)
-        return kCgAttr0 + 14;                                // ATTR14
-    if (semUpper == "BINORMAL" && semIndex == 0)
-        return kCgAttr0 + 15;                                // ATTR15
-    return 0;
+    // One table with the implicit-attribute pass (implicit_attribute.h).
+    const int attr = rsx_cg::vpInputAttrIndex(semUpper, semIndex);
+    return attr < 0 ? 0u : kCgAttr0 + static_cast<uint32_t>(attr);
 }
 
 // CG_TEXCOORD0..7 — VP output binding code emitted when the source
@@ -306,6 +287,9 @@ uint32_t vpOutputResource(const std::string& semUpper, int semIndex,
         return kCgHpos;
     if (semUpper == "COLOR" || semUpper == "COL")
         return kCgCol0 + (semIndex == 1 ? 1 : 0);
+    // Back-face colours: measured, the reference records BCOL0 as 0x8c7.
+    if (semUpper == "BCOL" && (semIndex == 0 || semIndex == 1))
+        return kCgCol0 + 2 + (semIndex == 1 ? 1 : 0);
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
     {
         // Source spelling decides the bank: "TEXCOORD<N>" → CG_TEXCOORD0,
@@ -442,7 +426,19 @@ VpContainerResult emitVertexContainerImpl(
     // no cursor; the lowering skips it from the same set (vpReadUniforms).
     // Recorded by (name, paramno) and rewritten after the records are built:
     // a parameter member and a file-scope uniform can share a name.
-    const std::set<IRValueID> vpRead = rsx_cg::vpReadUniforms(*entry);
+    const std::set<IRValueID> vpRead = rsx_cg::vpStructReadGlobals(module, *entry);
+    std::string structDiagnostic;
+    const auto structShapes = rsx_cg::classifyVpUniformStructShapes(module, *entry, structDiagnostic);
+    if (!structShapes) {
+        result.diagnostics.push_back(structDiagnostic);
+        return result;
+    }
+    for (const auto& shape : *structShapes) {
+        if (!attrs.uniformStructLayouts.count(shape.first)) {
+            result.diagnostics.push_back("cg-container-vp: dynamic struct array has no backend layout");
+            return result;
+        }
+    }
     std::set<std::pair<std::string, uint32_t>> unreadUniforms;
 
     // Samplers take a texture unit and never a c[] register, so no cursor
@@ -572,10 +568,12 @@ VpContainerResult emitVertexContainerImpl(
     // members (`IN_global.video_size`, ...); the reference writes no record
     // for the struct itself, and it takes no register.
     const auto isStructUniformParent = [&](const IRGlobal& g) {
-        const std::string prefix = g.name + ".";
+        // An array of structs likewise ("light[0].position", ...).
+        const std::string prefix = g.name + ".", element = g.name + "[0].";
         return std::any_of(module.globals.begin(), module.globals.end(), [&](const IRGlobal& o) {
             return o.storage == StorageQualifier::Uniform &&
-                   o.name.compare(0, prefix.size(), prefix) == 0; });
+                   (o.name.compare(0, prefix.size(), prefix) == 0 ||
+                    o.name.compare(0, element.size(), element) == 0); });
     };
 
     // A struct member stored through an OUT struct parameter is that
@@ -767,6 +765,10 @@ VpContainerResult emitVertexContainerImpl(
                 d.res = isOut ? vpOutputResource(semUpper, p.semanticIndex,
                                                  p.rawSemanticName)
                               : vpInputResource(semUpper, p.semanticIndex);
+                // An implicit input the program never reads binds nothing
+                // (bindImplicitAttributes cleared its ATTR): no resource.
+                if (!isOut && p.inferredSemantic && p.semanticName.empty())
+                    d.res = kCgNoAttribute;
                 // An input the program never reads is declared unreferenced
                 // (measured: an unused `float2 t1 : TEXCOORD1` parameter is
                 // isReferenced 0).  It is read through its value id.
@@ -1016,6 +1018,8 @@ VpContainerResult emitVertexContainerImpl(
             d.res = isOut ? vpOutputResource(semUpper, p.semanticIndex,
                                              p.rawSemanticName)
                           : vpInputResource (semUpper, p.semanticIndex);
+            if (!isOut && p.inferredSemantic && p.semanticName.empty())
+                d.res = kCgNoAttribute;
             // An input the program never reads is declared unreferenced
             // (measured: an unused `float2 t1 : TEXCOORD1` parameter is
             // isReferenced 0).  It is read through its value id.
@@ -1034,6 +1038,12 @@ VpContainerResult emitVertexContainerImpl(
     for (const auto& g : module.globals)
     {
         if (g.storage != StorageQualifier::Uniform) continue;
+        const auto structRoot = attrs.uniformStructLayouts.find(g.valueId);
+        if (structRoot != attrs.uniformStructLayouts.end()) {
+            // Use the backend's reservation, not a second allocation walk.
+            nextVectorReg = static_cast<int>(structRoot->second.firstRegister) - 1;
+            continue;
+        }
         if (isStructUniformParent(g)) continue;
         if (vpSamplers && isSamplerIRType(g.type.baseType))
         {
@@ -1115,7 +1125,22 @@ VpContainerResult emitVertexContainerImpl(
         else
         {
             int reg;
-            if (binding)
+            const auto structLayout = g.uniformStructMember
+                ? attrs.uniformStructLayouts.find(g.uniformStructMember->root)
+                : attrs.uniformStructLayouts.end();
+            if (structLayout != attrs.uniformStructLayouts.end()) {
+                const auto& origin = *g.uniformStructMember;
+                auto physical = rsx_cg::vpUniformStructRegister(structLayout->second,
+                    origin.element, origin.leaf, 0, structDiagnostic);
+                if (!physical) {
+                    result.diagnostics.push_back(structDiagnostic);
+                    return result;
+                }
+                const bool used = structLayout->second.shape.leaves[origin.leaf].referencedElements.count(origin.element) != 0;
+                reg = used ? static_cast<int>(*physical) : -1;
+                if (!used) unreadUniforms.insert({g.name, kInvalidIndex});
+            }
+            else if (binding)
                 reg = binding->registers[0];
             else if (hasExplicit)
                 reg = g.explicitRegisterIndex;

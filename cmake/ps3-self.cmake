@@ -1275,10 +1275,10 @@ endfunction()
 #                    `fpshader_fpo.h`
 #
 # Profile is auto-detected from the file extension: .vcg → -v
-# (vertex), .fcg → -f (fragment).  rsx-cg-compiler is on the
-# longer-term roadmap as a drop-in replacement for cgcomp; until
-# every test shader is byte-identical between the two, cgcomp stays
-# the default here.
+# (vertex), .fcg → -f (fragment).  This is the LEGACY path, kept for
+# projects written against PSL1GHT's cgcomp: rsx-cg-compiler is the
+# recommended compiler (ps3_add_cg_shader_rsxcgc), and a future release
+# will need an explicit build flag to install cgcomp at all.
 if(NOT _PS3_CG_PROBED)
     set(_PS3_CG_PROBED TRUE)
     set(_ps3_self_exe "")

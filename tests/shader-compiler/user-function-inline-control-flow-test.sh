@@ -110,10 +110,16 @@ factor() {   # <stem> fp|vp <k>: the output is exactly k * the one input, lane b
     local stem="$1" profile="$2" k="$3"
     python3 "$here/inline_factor_check.py" "$work/$stem.bin" "$profile" "$k" \
         || fail "$stem: output is not $k * input (see the value diff above)"
-    local control
+    local control rc
     for control in lane negate no-end early-end; do
-        python3 "$here/inline_factor_check.py" "$work/$stem.bin" "$profile" "$k" --control "$control" \
-            || fail "$stem: the $control control was NOT rejected - the value predicate is too weak"
+        rc=0
+        python3 "$here/inline_factor_check.py" "$work/$stem.bin" "$profile" "$k" --control "$control" || rc=$?
+        # 2: not applicable - a one-instruction program has no earlier row to end
+        if [ "$rc" -eq 2 ] && [ "$control" = early-end ]; then
+            echo "NOTE: $stem: early-END control not applicable (one instruction)"
+        elif [ "$rc" -ne 0 ]; then
+            fail "$stem: the $control control was NOT rejected - the value predicate is too weak"
+        fi
     done
     pass "$stem: output = $k * input; lane, sign, no-END and early-END controls rejected"
 }
@@ -334,11 +340,11 @@ forbid fp_inline_entry_param_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9
 # const block's zero lane, or negating the factor, passed it (review: codex).
 accept fp_inline_local_rebound_f sce_fp_rsx "a caller LOCAL G reassigned (G = G*2) before set() writes the global: main returns 6*TEXCOORD0"
 expect fp_inline_local_rebound_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
-count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 2
+count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 1   # (p*3)*2 is one MUL by 6, as the reference emits
 factor fp_inline_local_rebound_f fp 6
 forbid fp_inline_local_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
 accept vp_inline_entry_param_rebound_v sce_vp_rsx "vertex twin: main's PARAMETER G reassigned before set() writes the global: o0 = 2*IN0"
-expect vp_inline_entry_param_rebound_v '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw src0=IN0\.xyzw'
+expect vp_inline_entry_param_rebound_v '^[0-9]+ MUL dst=(R[0-9]+|o0) mask=xyzw src0=IN0\.xyzw'
 count  vp_inline_entry_param_rebound_v '^[0-9]+ MUL ' 1
 factor vp_inline_entry_param_rebound_v vp 2
 forbid vp_inline_entry_param_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
@@ -393,8 +399,10 @@ expect fp_block_then_only_param_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.xyzw
 forbid fp_block_then_only_param_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
 joined_none fp_block_then_only_param_f
 accept fp_block_use_before_decl_f sce_fp_rsx "a use BEFORE the block-local's declaration names the file-scope G (no pre-scan binding; reference 2*(p+G))"
-expect fp_block_use_before_decl_f '^[0-9]+ ADD dst=R[0-9]+ mask=xyzw .* s0=c[0-9]+\.xyzw s1=R[0-9]+\.xyzw'
-count  fp_block_use_before_decl_f '^[0-9]+ MUL ' 1
+# Both early reads of G are the uniform (an ADD reading it; G + G once the
+# 2p product fuses into a MAD).
+expect fp_block_use_before_decl_f '^[0-9]+ ADD dst=R[0-9]+ mask=xyzw .* s0=c[0-9]+\.xyzw s1=(R|c)[0-9]+\.xyzw'
+count  fp_block_use_before_decl_f '^[0-9]+ (MUL|MAD) ' 1
 accept fp_block_field_write_f sce_fp_rsx "an outer struct FIELD written inside a block survives (a binding site with no DeclStmt)"
 expect fp_block_field_write_f '^[0-9]+ MAD dst=R[0-9]+ mask=xyzw .* s1=c[0-9]+\.xxxx s2=R[0-9]+\.xyzw'
 accept fp_block_loop_local_f sce_fp_rsx "a per-trip loop local does not carry past the loop: the outer t is returned (byte-identical to the reference)"

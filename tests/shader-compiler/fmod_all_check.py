@@ -58,8 +58,11 @@ VP_ROWS = {
     'all_vp': ('float4 main(float4 p : POSITION) : POSITION { return all(p.xyz) ? p : p * 2; }\n',
                lambda p: list(p) if p[0] != 0 and p[1] != 0 and p[2] != 0 else [2 * x for x in p]),
 }
-VP_REFUSE = {
-    'fmod_vector_vp': 'float4 main(float4 p : POSITION, uniform float4 d) : POSITION { return fmod(p, d); }\n',
+# name -> (source, uniform d, expected(p))
+VP_VECTOR_D = [0.5, 0.25, 2.0, -4.0]   # powers of two: every step exact in binary32
+VP_VECTOR_ROWS = {
+    'fmod_vector_vp': ('float4 main(float4 p : POSITION, uniform float4 d) : POSITION { return fmod(p, d); }\n',
+                       VP_VECTOR_D, lambda p: [fmod_ref(p[i], VP_VECTOR_D[i]) for i in range(4)]),
 }
 # The VP evaluator's new vector opcodes (MIN, SLT, FRC, FLR, SNE) are proven
 # on hand-encoded programs here, not only on compiler output (review: codex):
@@ -170,12 +173,17 @@ def main():
                 failures.append('%s: got %s for %s, want %s' % (
                     name, vp_eval.evaluate(blob, {'d': [0.5, 0.0, 0.0, 0.0]}, inputs={0: bad[0]}, binary32=True, predication=True).get(0),
                     bad[0], want(bad[0])))
-        for name, text in VP_REFUSE.items():
+        for name, (text, dval, want) in VP_VECTOR_ROWS.items():
             rc, blob, err = compile_one(args.compiler, work, name, text, 'sce_vp_rsx')
-            ok = rc == 1 and not blob and 'vertex select with a vector condition' in err
-            print('  %-14s %s' % (name, 'refused by name' if ok else 'NOT refused by name (rc %d)' % rc))
-            if not ok:
-                failures.append('%s: expected the named VP select refusal, got rc %d' % (name, rc))
+            if rc != 0 or not blob:
+                failures.append('%s refused: %s' % (name, (err.strip().splitlines() or ['?'])[-1]))
+                print('  %-14s REFUSED' % name)
+                continue
+            got_of = lambda p: vp_eval.evaluate(blob, {'d': dval}, inputs={0: p}, binary32=True, predication=True).get(0)
+            bad = [p for p in VP_GRID if got_of(p) != want(p)]
+            print('  %-14s %s' % (name, 'values ok (%d inputs)' % len(VP_GRID) if not bad else 'WRONG on %d' % len(bad)))
+            if bad:
+                failures.append('%s: got %s for %s, want %s' % (name, got_of(bad[0]), bad[0], want(bad[0])))
     for f in failures:
         print('FAIL:', f)
     print('fmod-all: %s' % ('PASS' if not failures else 'FAIL (%d)' % len(failures)))

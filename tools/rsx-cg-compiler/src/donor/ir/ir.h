@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <set>
 #include <string>
 #include <vector>
 #include <memory>
@@ -272,8 +273,35 @@ enum class IROp
     // Operand layout: [cond, defaultVal, op_arg0, op_arg1, ...].
     // `predOp` carries the inner op (Add / Mul / Mad / etc.) that
     // would have run unconditionally inside the THEN block.
-    PredCarry
+    PredCarry,
+
+    // A hardware loop region (fragment only), built by the IR builder for a
+    // `for` it cannot expand.  The region is a contiguous run of one
+    // block's instructions, straight-line inside:
+    //   %c = loopcarry %init      one per loop-carried variable, before
+    //   loopbegin                 componentIndex = trip count (LOOP count)
+    //   loopbreakif %cond         break when %cond is false (guardIsNegated)
+    //                             or true; no carry has been written before it
+    //   <body>
+    //   looplatch %c1, %n1, ...   every carry takes its next value, in PARALLEL
+    //   loopend
+    //   %o = loopout %c           a carry's value after the loop
+    // A value defined inside the region is not visible after it; every
+    // pass treats these as barriers (not pure, never merged or moved over).
+    LoopCarry,
+    LoopBegin,
+    LoopBreakIf,
+    LoopLatch,
+    LoopEnd,
+    LoopOut
 };
+
+inline bool isLoopRegionOp(IROp op)
+{
+    return op == IROp::LoopCarry || op == IROp::LoopBegin ||
+           op == IROp::LoopBreakIf || op == IROp::LoopLatch ||
+           op == IROp::LoopEnd || op == IROp::LoopOut;
+}
 
 const char* irOpToString(IROp op);
 
@@ -327,6 +355,26 @@ public:
 // IR Instructions
 // ============================================================================
 
+// Uniform struct-array reads retain their declaration and leaf identity across
+// inlining. Physical registers are assigned only by the vertex backend.
+struct UniformStructRead {
+    uint32_t leaf = 0;
+    uint32_t row = 0;
+};
+
+struct IRUniformStructMemberOrigin {
+    IRValueID root = InvalidIRValue;
+    uint32_t element = 0;
+    uint32_t leaf = 0;
+    std::string path;
+};
+
+struct IRUniformStructRootInfo {
+    uint32_t extent = 0;
+    uint32_t leafCount = 0;
+    std::string dynamicRefusalReason;
+};
+
 class IRInstruction
 {
 public:
@@ -353,6 +401,7 @@ public:
     // Owner of a uniform load. A global and an entry parameter may have the
     // same name; binding/use classification must not merge those declarations.
     IRValueID uniformSource = InvalidIRValue;
+    std::optional<UniformStructRead> uniformStructRead;
     IROp predOp = IROp::Nop;         // For PredCarry: the inner op (Add/Mul/Mad/...)
     // For Discard: the guard operand is the condition on the path that
     // REACHES the discard, and this flag says the kill fires where that
@@ -505,6 +554,16 @@ public:
 
     IRModule* parentModule = nullptr;
     bool isEntryPoint = false;
+    // Implicit (semantic-less) inputs that CLAIM a TEXCOORD although the
+    // program may never read them (t_8c4a982e).  Measured on the reference:
+    // an input that flows into the return value of an inlined call - a user
+    // helper, or a standard-library function implemented as one (sin, lerp,
+    // mul, ...; not the hardware primitives dot, abs, pow, tex2D, ...) -
+    // takes its slot even when that call's result is dead; dead code inside
+    // the entry itself does not.  Names as bindImplicitTexCoords keys them:
+    // a bare parameter by name, a struct member as "param.field".  Filled
+    // before any dead-code elimination, by the IR builder.
+    std::set<std::string> claimedImplicitInputs;
 
     explicit IRFunction(const std::string& n) : name(n) {}
 
@@ -534,6 +593,8 @@ struct IRGlobal
     std::string name;
     IRTypeInfo type;
     IRValueID valueId;
+    std::optional<IRUniformStructMemberOrigin> uniformStructMember;
+    std::optional<IRUniformStructRootInfo> uniformStructRoot;
 
     StorageQualifier storage = StorageQualifier::None;
     bool declaredStatic = false;   // `static` was written: a true constant, not a defaulted uniform

@@ -136,8 +136,9 @@ def check(compiler,work):
                     twins+=1
                     if blobs['implicit']!=blobs['explicit']:
                         failures.append(f'{name}/{stage}: explicit-conversion byte twin differs')
-    # Conversion policy in the VP backend is a separate, still-refused debt.
-    # Both spellings must fail normally without an artifact or extension hint.
+    # VP int and half vectors remain refused debt (both spellings fail
+    # normally, no artifact or extension hint); bool vectors are value rows.
+    debt_values=0
     for ty in ('int','bool','half'):
         for width in (2,3,4):
             for mode in ('implicit','explicit'):
@@ -149,7 +150,23 @@ def check(compiler,work):
                 p=subprocess.run([compiler,'-p','sce_vp_rsx','--emit-container',str(dst),str(src)],
                                  capture_output=True,text=True,timeout=30)
                 log=p.stdout+p.stderr;stem.with_suffix('.log').write_text(log)
-                diagnostic='half precision is fragment-only' if ty=='half' else 'VP int-to-float lowering deferred'
+                if ty=='bool':
+                    # The vertex path selects per lane since VP-CF, so a
+                    # bool vector from a float is a value row: v.x is
+                    # t.x != 0, broadcast by float4(float(v.x)).
+                    if p.returncode!=0 or not dst.exists():
+                        failures.append(f'{stem.name}: refused rc={p.returncode}: {log}');continue
+                    blob=dst.read_bytes()
+                    for t in INPUTS:
+                        want=[1. if t[0]!=0 else 0.]*4
+                        try:
+                            got=vp.evaluate(blob,{},inputs={0:t},binary32=True,predication=True).get(0)
+                            debt_values+=1
+                            if got!=want:failures.append(f'{stem.name}: {t} got={got} want={want}')
+                        except Exception as e:failures.append(f'{stem.name}: evaluator {e}')
+                    continue
+                # The int rows name the float-to-int direction they need.
+                diagnostic='half precision is fragment-only' if ty=='half' else 'VP float-to-int lowering deferred'
                 if p.returncode==1 and not dst.exists() and diagnostic in log and '--extension=' not in log:
                     refusals+=1
                 else:failures.append(f'{stem.name}: debt refusal changed rc={p.returncode}: {log}')
@@ -168,7 +185,8 @@ def check(compiler,work):
     expected=sum(len(c[-1]) for c in CASES)
     if (pairs,values)!=(expected,expected*2*len(INPUTS)):
         failures.append(f'count guard: {(pairs,values)} expected {(expected,expected*2*len(INPUTS))}')
-    if refusals!=22:failures.append(f'debt refusal count {refusals} != 22')
+    if refusals!=16:failures.append(f'debt refusal count {refusals} != 16')
+    if debt_values!=6*len(INPUTS):failures.append(f'bool vector value count {debt_values} != {6*len(INPUTS)}')
     if twins!=113:failures.append(f'byte twin count {twins} != 113')
     (work/'RESULT.json').write_text(json.dumps(dict(pairs=pairs,twins=twins,values=values,refusals=refusals,expected_pairs=expected,failures=failures),indent=2)+'\n')
     for failure in failures[:20]:print('FAIL:',failure)

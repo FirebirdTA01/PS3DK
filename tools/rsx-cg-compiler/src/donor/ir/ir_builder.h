@@ -90,11 +90,17 @@ private:
         // - the helper's read must then fall through to the global load.
         std::unordered_map<std::string, IRValueID> shadowedGlobals;
         std::unordered_map<std::string, std::vector<IRValueID>> shadowedGlobalArrays;
+        // An inlined helper's array PARAMETER bound to a file-scope uniform
+        // array by name: indexing the parameter reads the global's element.
+        // Valid only while the parameter still holds the value it was bound
+        // to (a write or a shadowing local ends it).  param -> (global, value).
+        std::unordered_map<std::string, std::pair<std::string, IRValueID>> uniformArrayAliases;
 
         void clear()
         {
             names.clear(); arrays.clear();
             shadowedGlobals.clear(); shadowedGlobalArrays.clear();
+            uniformArrayAliases.clear();
         }
         // The if-join works over ONE flat map of join keys: a name is its
         // own key, an array element is "a[i]", a stashed global "G@" and a
@@ -116,6 +122,9 @@ private:
     // (uniform-struct-entry-parameter): the name has no whole-struct value,
     // only `name.member...` bindings, so a whole-struct copy copies those.
     std::unordered_set<std::string> flattenedUniformStructParams_;
+    // Values an inlined call returns (t_8c4a982e): the inputs they depend
+    // on claim an implicit TEXCOORD even when the call's result is dead.
+    std::vector<IRValueID> implicitClaimRoots_;
     // Argument i of the call is a flattened uniform struct parameter passed
     // whole to a struct-typed in parameter: bound member by member.
     bool flattenedStructArgument(const CallExpr* call, size_t i);
@@ -203,6 +212,22 @@ private:
     // Static-count for-loop unroll. Returns true if the loop was fully
     // unrolled into straight-line IR — caller skips the real-branch path.
     bool tryUnrollStaticFor(ForStmt* stmt);
+    // A fragment `for` that cannot be expanded becomes a hardware loop
+    // region (IROp::LoopCarry .. LoopOut, ir.h).  Returns false, having
+    // built nothing, when the loop is outside the admitted shape.
+    bool tryBuildHardwareLoop(ForStmt* stmt);
+    // arrayStorageKey resolving a row index bound to an integer constant.
+    bool storageKey(ExprNode* expr, std::string& key);
+    // Values bound to names a hardware loop's body assigned without
+    // carrying them: reading one after the loop is refused by name.
+    std::unordered_set<IRValueID> loopPoison_;
+    int hardwareLoopDepth_ = 0;
+    // The run-time conditions of the if-arms being built, innermost last,
+    // with the arm's polarity (then = true).  A flattened if executes both
+    // arms, so a vertex branch loop inside one ANDs these into its exit
+    // test (VP-CF, codex S3-CONTROL): an untaken arm's loop takes zero trips
+    // instead of running - unboundedly - for a result the join discards.
+    std::vector<std::pair<IRValueID, bool>> armConditions_;
     void buildWhileStmt(WhileStmt* stmt);
     void buildDoWhileStmt(DoWhileStmt* stmt);
     void buildSwitchStmt(SwitchStmt* stmt);
@@ -223,8 +248,12 @@ private:
     IRValueID buildBinaryExpr(BinaryExpr* expr);
     IRValueID buildUnaryExpr(UnaryExpr* expr);
     IRValueID buildCallExpr(CallExpr* expr);
+    IRValueID buildCallExprImpl(CallExpr* expr);
+    void computeClaimedImplicitInputs();
+    using StructLeafBindings = std::vector<std::pair<std::string, IRValueID>>;
     bool inlineUserFunctionCall(CallExpr* expr, const std::vector<IRValueID>& args,
-                                IRValueID& result);
+                                IRValueID& result,
+                                const std::vector<StructLeafBindings>& structArguments);
     bool buildInlineFunctionBody(FunctionDecl* callee, IRValueID& result);
     void buildConditional(ExprNode* condition, SourceLocation loc,
                           const std::function<void()>& thenArm,
@@ -252,7 +281,8 @@ private:
     IRValueID readTrackedArrayElement(IndexExpr* expr, const std::string& key, int32_t index);
     bool copyArrayAggregate(const std::string& destination, ExprNode* source, TypeNode* type);
     bool buildLocalStructInitializer(const std::string& destination, TypeNode* type, ExprNode* source,
-                                     bool replaceExisting = false);
+                                     bool replaceExisting = false,
+                                     StructLeafBindings* captured = nullptr);
     void emitEntryStructOutputs(ExprNode* target);
     IRValueID emitScalarNarrowing(const IRTypeInfo& sourceType, const IRTypeInfo& targetType,
                                   IRValueID value, const SourceLocation& loc);
@@ -322,6 +352,11 @@ private:
 
     // Struct field resolution helper (looks up struct fields from semantic analyzer)
     const std::vector<StructField>* getStructFields(TypeNode* typeNode);
+    bool containsMatrixField(TypeNode* typeNode);
+    const IRGlobal* uniformStructSourceRoot(ExprNode* source);
+    bool hasBoundStructLeaves(TypeNode* type, ExprNode* source);
+    bool captureUniformStructElement(TypeNode* type, IndexExpr* source,
+                                     IRValueID index, StructLeafBindings& leaves);
 
     // Emit StoreOutput instructions for all output struct fields
     void emitStructOutputs(ExprNode* structExpr, const std::vector<StructField>& fields);

@@ -1518,6 +1518,43 @@ CgType SemanticAnalyzer::analyzeMemberAccessExpr(MemberAccessExpr* expr)
         return CgType::Error();
     }
 
+    // A matrix element selector: `_mRC` (zero-based) or `_RC` (one-based)
+    // repeated one to four times, one form per selector.  Measured: elements
+    // may repeat; an element outside the matrix is C1031; mixing the forms
+    // is C1048.
+    if (objectType.isMatrix() && !expr->member.empty() && expr->member[0] == '_')
+    {
+        const std::string& m = expr->member;
+        const bool zeroBased = m.size() > 1 && m[1] == 'm';
+        const size_t step = zeroBased ? 4 : 3;
+        const int base = zeroBased ? 0 : 1;
+        std::vector<std::pair<int, int>> picks;
+        bool wellFormed = m.size() % step == 0 && m.size() / step >= 1 && m.size() / step <= 4;
+        for (size_t i = 0; wellFormed && i < m.size(); i += step)
+        {
+            if (m[i] != '_' || (zeroBased && m[i + 1] != 'm')) { wellFormed = false; break; }
+            const char r = m[i + step - 2], c = m[i + step - 1];
+            if (r < '0' || r > '9' || c < '0' || c > '9') { wellFormed = false; break; }
+            picks.emplace_back(r - '0' - base, c - '0' - base);
+        }
+        if (!wellFormed)
+        {
+            error(expr->loc, "C1048: invalid character '_' in swizzle \"" + m + "\"");
+            return CgType::Error();
+        }
+        for (const auto& rc : picks)
+            if (rc.first < 0 || rc.second < 0 ||
+                rc.first >= objectType.matrixRows() || rc.second >= objectType.matrixCols())
+            {
+                error(expr->loc, "C1031: swizzle mask element not present in operand \"" + m + "\"");
+                return CgType::Error();
+            }
+        expr->isMatrixSwizzle = true;
+        expr->matrixSwizzle = picks;
+        return picks.size() == 1 ? CgType::Scalar(objectType.scalarKind())
+                                 : CgType::Vec(objectType.scalarKind(), static_cast<int>(picks.size()));
+    }
+
     error(expr->loc, "member reference base type '" + objectType.toString() +
           "' is not a structure or vector");
     return CgType::Error();
@@ -2048,6 +2085,19 @@ CgType SemanticAnalyzer::resolveType(TypeNode* typeNode) const
         return *type;
     }
 
+    // An array of structs (`uniform TexUnit u[8]; u[i].matrix`): the parser's
+    // element node names the struct but carries no fields, so resolve the
+    // element too, or every member access on an element is refused.
+    if (typeNode->arraySize > 0 && typeNode->elementType)
+    {
+        CgType element = resolveType(typeNode->elementType.get());
+        if (element.isError())
+            return CgType::Error();
+        auto copy = std::make_shared<TypeNode>(*typeNode);
+        copy->elementType = element.getNode();
+        return CgType(copy);
+    }
+
     return CgType(std::make_shared<TypeNode>(*typeNode));
 }
 
@@ -2149,6 +2199,8 @@ bool SemanticAnalyzer::isLvalue(ExprNode* expr)
     case ExprKind::MemberAccess:
         {
             MemberAccessExpr* ma = static_cast<MemberAccessExpr*>(expr);
+            // A write through a matrix element selector is not lowered yet.
+            if (ma->isMatrixSwizzle) return false;
             return isLvalue(ma->object.get());
         }
     case ExprKind::Index:

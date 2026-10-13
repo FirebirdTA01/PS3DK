@@ -72,8 +72,143 @@ void Parser::initBuiltinTypes()
 // Main parsing entry point
 // ============================================================================
 
+// A BUILT-IN TYPE NAME DECLARED AS A VARIABLE (PSGL's vpFixedPipeline:
+// `float3 half = float3(0,0,0); ... dot(normal, half)`).  Measured on the
+// reference: every built-in type spelling except the reserved words float,
+// int and bool may name a variable - half, fixed, the floatN / halfN /
+// fixedN / intN / boolN vectors and matrices, the sampler types - and from
+// its declaration to the end of its scope that spelling is the variable
+// (`float4 float4 = ...; float4(1)` is "cannot call a non-function").  Only
+// the measured spellings are admitted.  The declaring token and every later
+// token with that spelling in the scope become identifiers, and isTypeName
+// refuses them (shadowedTypeTokens_); everything else parses as before.
+void Parser::retypeShadowedTypeNames()
+{
+    static const std::set<TokenType> shadowable = {
+        TokenType::KW_HALF, TokenType::KW_HALF2, TokenType::KW_HALF3, TokenType::KW_HALF4,
+        TokenType::KW_HALF2X2, TokenType::KW_HALF3X3, TokenType::KW_HALF4X4,
+        TokenType::KW_FIXED, TokenType::KW_FIXED2, TokenType::KW_FIXED3, TokenType::KW_FIXED4,
+        TokenType::KW_FLOAT2, TokenType::KW_FLOAT3, TokenType::KW_FLOAT4,
+        TokenType::KW_FLOAT2X2, TokenType::KW_FLOAT3X3, TokenType::KW_FLOAT4X4,
+        TokenType::KW_INT2, TokenType::KW_INT3, TokenType::KW_INT4,
+        TokenType::KW_BOOL2, TokenType::KW_BOOL3, TokenType::KW_BOOL4,
+        TokenType::KW_SAMPLER, TokenType::KW_SAMPLER1D, TokenType::KW_SAMPLER2D,
+        TokenType::KW_SAMPLER3D, TokenType::KW_SAMPLERCUBE, TokenType::KW_SAMPLERRECT,
+    };
+    auto isTypeToken = [&](const Token& t) {
+        if (t.type == TokenType::IDENTIFIER) return typeNames.count(t.lexeme) > 0;
+        return t.type >= TokenType::KW_VOID && typeNames.count(t.lexeme) > 0;
+    };
+    std::vector<int> braceDepth(tokens.size(), 0), parenDepth(tokens.size(), 0);
+    for (size_t i = 0, b = 0, q = 0; i < tokens.size(); ++i) {
+        if (tokens[i].type == TokenType::RBRACE && b) --b;
+        if (tokens[i].type == TokenType::RPAREN && q) --q;
+        braceDepth[i] = static_cast<int>(b); parenDepth[i] = static_cast<int>(q);
+        if (tokens[i].type == TokenType::LBRACE) ++b;
+        if (tokens[i].type == TokenType::LPAREN) ++q;
+    }
+    const size_t n = tokens.size();
+    // One past the end of the parenthesised group opening at p.
+    const auto skipParens = [&](size_t p) {
+        if (p >= n || tokens[p].type != TokenType::LPAREN) return p;
+        for (size_t m = p + 1; m < n; ++m)
+            if (tokens[m].type == TokenType::RPAREN && parenDepth[m] == parenDepth[p]) return m + 1;
+        return n;
+    };
+    // One past the end of the statement starting at k.
+    const std::function<size_t(size_t)> skipStatement = [&](size_t k) -> size_t {
+        if (k >= n) return n;
+        switch (tokens[k].type) {
+        case TokenType::LBRACE:
+            for (size_t m = k + 1; m < n; ++m)
+                if (tokens[m].type == TokenType::RBRACE && braceDepth[m] == braceDepth[k]) return m + 1;
+            return n;
+        case TokenType::KW_IF: {
+            const size_t e = skipStatement(skipParens(k + 1));
+            return e < n && tokens[e].type == TokenType::KW_ELSE ? skipStatement(e + 1) : e;
+        }
+        case TokenType::KW_FOR:
+        case TokenType::KW_WHILE:
+            return skipStatement(skipParens(k + 1));
+        case TokenType::KW_DO: {
+            size_t e = skipStatement(k + 1);
+            if (e < n && tokens[e].type == TokenType::KW_WHILE) e = skipParens(e + 1);
+            return e < n && tokens[e].type == TokenType::SEMICOLON ? e + 1 : e;
+        }
+        default:
+            for (size_t m = k; m < n; ++m)
+                if (tokens[m].type == TokenType::SEMICOLON && braceDepth[m] == braceDepth[k] &&
+                    parenDepth[m] == parenDepth[k]) return m + 1;
+            return n;
+        }
+    };
+    // `float s = 0, half = t.x;`: a later declarator of a statement-level
+    // declaration whose type is a built-in type.
+    const auto commaDeclarator = [&](size_t i) {
+        if (tokens[i - 1].type != TokenType::COMMA || parenDepth[i] != 0) return false;
+        size_t k = i - 1;
+        while (k > 0) {
+            // A '{' records the depth outside it.
+            const TokenType t = tokens[k - 1].type;
+            if (parenDepth[k - 1] == 0 &&
+                (((t == TokenType::SEMICOLON || t == TokenType::RBRACE) && braceDepth[k - 1] == braceDepth[i]) ||
+                 (t == TokenType::LBRACE && braceDepth[k - 1] + 1 == braceDepth[i]))) break;
+            --k;
+        }
+        while (k < i && (tokens[k].type == TokenType::KW_CONST || tokens[k].type == TokenType::KW_STATIC ||
+                         tokens[k].type == TokenType::KW_UNIFORM || tokens[k].type == TokenType::KW_EXTERN))
+            ++k;
+        return k + 1 < i && isTypeToken(tokens[k]) && !shadowedTypeTokens_.count(k) &&
+               (tokens[k + 1].type == TokenType::IDENTIFIER || shadowedTypeTokens_.count(k + 1));
+    };
+    for (size_t i = 1; i + 1 < n; ++i) {
+        if (!shadowable.count(tokens[i].type) || shadowedTypeTokens_.count(i)) continue;
+        const TokenType next = tokens[i + 1].type;
+        const bool declarator = next == TokenType::OP_ASSIGN || next == TokenType::SEMICOLON ||
+            next == TokenType::COMMA || next == TokenType::LBRACKET || next == TokenType::COLON ||
+            next == TokenType::RPAREN;
+        if (!declarator) continue;
+        if (!(isTypeToken(tokens[i - 1]) && !shadowedTypeTokens_.count(i - 1)) && !commaDeclarator(i)) continue;
+        // The scope: a for statement's initialiser's is that whole
+        // statement (`for (float half = 0; ...) if (..) {..} else {..}`); a
+        // parameter's is the function body that follows its list; any other
+        // declaration's runs to the end of its block.
+        const int depth = braceDepth[i];
+        size_t end = n;
+        size_t open = i;
+        if (parenDepth[i] > 0)
+            while (open > 0 && !(tokens[open].type == TokenType::LPAREN && parenDepth[open] == parenDepth[i] - 1))
+                --open;
+        if (parenDepth[i] > 0 && open > 0 && tokens[open].type == TokenType::LPAREN &&
+            tokens[open - 1].type == TokenType::KW_FOR) {
+            end = skipStatement(open - 1);
+        } else if (parenDepth[i] > 0) {
+            size_t k = i;
+            while (k < tokens.size() && !(tokens[k].type == TokenType::LBRACE && braceDepth[k] == depth)) {
+                if (tokens[k].type == TokenType::SEMICOLON && braceDepth[k] == depth && parenDepth[k] == 0) break;
+                ++k;
+            }
+            if (k < tokens.size() && tokens[k].type == TokenType::LBRACE) {
+                size_t m = k + 1;
+                while (m < tokens.size() && !(tokens[m].type == TokenType::RBRACE && braceDepth[m] == depth)) ++m;
+                end = m;
+            } else end = k;
+        } else {
+            for (size_t m = i; m < tokens.size(); ++m)
+                if (braceDepth[m] < depth) { end = m; break; }
+        }
+        const std::string name = tokens[i].lexeme;
+        for (size_t m = i; m < end; ++m)
+            if (tokens[m].lexeme == name && shadowable.count(tokens[m].type)) {
+                tokens[m].type = TokenType::IDENTIFIER;
+                shadowedTypeTokens_.insert(m);
+            }
+    }
+}
+
 std::unique_ptr<TranslationUnit> Parser::parse()
 {
+    retypeShadowedTypeNames();
     collectGlobalValueNames();
     auto unit = std::make_unique<TranslationUnit>();
     unit->filename = filename;
@@ -422,6 +557,9 @@ bool Parser::isTypeName(bool expressionContext) const
 {
     if (isAtEnd())
         return false;
+    // A built-in type spelling a variable shadows here (retypeShadowedTypeNames).
+    if (shadowedTypeTokens_.count(current))
+        return false;
 
     const Token& tok = peek();
 
@@ -536,10 +674,7 @@ std::shared_ptr<TypeNode> Parser::parseType()
         return nullptr;
 
     // Check for array brackets
-    while (check(TokenType::LBRACKET))
-    {
-        type = parseArrayType(type);
-    }
+    type = parseArraySuffixes(type);
 
     lastParsedType_ = type;
     ++typesParsed_;
@@ -883,6 +1018,24 @@ Parser::ConstEval Parser::evalConstInt(const ExprNode* e, long long& out) const
     }
 }
 
+// `T a[2][3]` is an array of 2 arrays of 3 T: the FIRST bracket is the
+// outermost dimension, so `a[1]` is a `T[3]` and `a[1][2]` a T.  The
+// brackets used to nest the other way round (the LAST outermost), which
+// gave `a[1]` the wrong size; nothing lowered a multi-dimensional array
+// then, so nothing read the difference.
+std::shared_ptr<TypeNode> Parser::parseArraySuffixes(std::shared_ptr<TypeNode> type)
+{
+    std::vector<std::shared_ptr<TypeNode>> dims;
+    while (check(TokenType::LBRACKET))
+        dims.push_back(parseArrayType(nullptr));
+    for (auto it = dims.rbegin(); it != dims.rend(); ++it)
+    {
+        (*it)->elementType = type;
+        type = *it;
+    }
+    return type;
+}
+
 std::shared_ptr<TypeNode> Parser::parseArrayType(std::shared_ptr<TypeNode> elementType)
 {
     consume(TokenType::LBRACKET, "Expected '['");
@@ -1116,10 +1269,7 @@ std::unique_ptr<StructDecl> Parser::parseStructBody()
             field.storage = memberStorage;
 
             // Check for array brackets after field name (e.g., float4 positions[8])
-            while (check(TokenType::LBRACKET))
-            {
-                field.type = parseArrayType(field.type);
-            }
+            field.type = parseArraySuffixes(field.type);
 
             // Check for semantic
             if (match(TokenType::COLON))
@@ -1349,10 +1499,7 @@ std::unique_ptr<VarDecl> Parser::parseVariableDeclaration(
     var->isStatic = lastStorageWasStatic_;
 
     // Check for array brackets after name
-    while (check(TokenType::LBRACKET))
-    {
-        var->type = parseArrayType(var->type);
-    }
+    var->type = parseArraySuffixes(var->type);
     optionalTypeShadows_.back().insert(name);
 
     // Check for semantic annotation
@@ -1524,10 +1671,7 @@ std::unique_ptr<ParamDecl> Parser::parseParameter(bool selectedEntry)
     param->storage = storage;
 
     // Check for array brackets
-    while (check(TokenType::LBRACKET))
-    {
-        param->type = parseArrayType(param->type);
-    }
+    param->type = parseArraySuffixes(param->type);
     if (!name.empty()) optionalTypeShadows_.back().insert(name);
 
     // Check for semantic
