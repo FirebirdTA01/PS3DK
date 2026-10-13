@@ -738,6 +738,7 @@ public:
         fencePackedReads();
         propagateVertexCopies();
         foldFragmentModifierCopies();
+        foldFragmentOutputScale();
         writeFragmentOutputsDirectly();
         fuseVertexMulAdd();
         packVertexLaneCopies();
@@ -10043,6 +10044,126 @@ private:
                 }
                 code.erase(code.begin() + static_cast<std::ptrdiff_t>(i));
                 changed = true;
+            }
+        }
+    }
+
+    // FP: a product of one arithmetic result with a power-of-two literal is
+    // that result's output scale.  `MUL R1, a, b; MUL R0, R1, {2}` is
+    // `MUL_x2 R0, a, b` (measured on the reference: x2 / x4 / x8 / /4 fold
+    // into MUL, ADD, MAD and DP3; a factor of 3, a fetch, a saturated
+    // producer and a result with another reader do not).  The producer is
+    // the temp's one writer, the temp's one reader is the multiply, and
+    // nothing in between touches the multiply's destination; the multiply's
+    // saturate moves to the producer (scale is applied before saturation).
+    static float scaleFactorOf(int code)
+    {
+        switch (code) {
+        case NVFX_FP_OP_DST_SCALE_2X: return 2.0f;
+        case NVFX_FP_OP_DST_SCALE_4X: return 4.0f;
+        case NVFX_FP_OP_DST_SCALE_8X: return 8.0f;
+        case NVFX_FP_OP_DST_SCALE_INV_2X: return 0.5f;
+        case NVFX_FP_OP_DST_SCALE_INV_4X: return 0.25f;
+        case NVFX_FP_OP_DST_SCALE_INV_8X: return 0.125f;
+        default: return 1.0f;
+        }
+    }
+    static std::optional<int> scaleCodeFor(float factor)
+    {
+        if (factor == 1.0f) return NVFX_FP_OP_DST_SCALE_1X;
+        if (factor == 2.0f) return NVFX_FP_OP_DST_SCALE_2X;
+        if (factor == 4.0f) return NVFX_FP_OP_DST_SCALE_4X;
+        if (factor == 8.0f) return NVFX_FP_OP_DST_SCALE_8X;
+        if (factor == 0.5f) return NVFX_FP_OP_DST_SCALE_INV_2X;
+        if (factor == 0.25f) return NVFX_FP_OP_DST_SCALE_INV_4X;
+        if (factor == 0.125f) return NVFX_FP_OP_DST_SCALE_INV_8X;
+        return std::nullopt;
+    }
+
+    void foldFragmentOutputScale()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        auto& code = program_.instrs;
+        const auto sameDst = [](const VDst& a, const VDst& b) {
+            return !a.none && !b.none && a.output == b.output && a.address == b.address &&
+                   a.index == b.index;
+        };
+        for (size_t mi = 0; mi < code.size(); ++mi) {
+            VInstr& m = code[mi];
+            if (m.op != VOp::Mul || m.predicate != 0 || m.ccUpdate || m.fpScale != 0 ||
+                m.fpPrecisionOverride != -1 || m.dst.none || m.dst.address)
+                continue;
+            for (int n = 0; n < 2; ++n) {
+                const VSrc& t = m.srcs[static_cast<size_t>(n)];
+                const VSrc& k = m.srcs[static_cast<size_t>(1 - n)];
+                if (t.kind != VSrcKind::Temp || t.abs || t.neg || t.relative ||
+                    k.kind != VSrcKind::Literal || k.abs || k.neg)
+                    continue;
+                // The literal reads one value on every lane the multiply uses.
+                std::optional<float> v;
+                bool uniformLit = true;
+                for (int l = 0; l < 4; ++l) {
+                    if (!(m.dst.writemask & (1 << l))) continue;
+                    const float x = k.literal[k.swizzle[l] & 3];
+                    if (!v) v = x;
+                    else if (*v != x) uniformLit = false;
+                }
+                if (!uniformLit || !v) continue;
+                if (!scaleCodeFor(*v)) continue;
+                size_t pi = code.size();
+                bool ok = true;
+                for (size_t j = 0; j < code.size() && ok; ++j) {
+                    const VInstr& w = code[j];
+                    if (!w.dst.none && !w.dst.output && !w.dst.address && w.dst.index == t.index) {
+                        if (pi != code.size() || j >= mi) ok = false;
+                        else pi = j;
+                    }
+                    for (size_t q = 0; q < w.srcs.size() && ok; ++q)
+                        if (w.srcs[q].kind == VSrcKind::Temp && w.srcs[q].index == t.index &&
+                            !(j == mi && q == static_cast<size_t>(n)))
+                            ok = false;
+                }
+                if (!ok || pi == code.size()) continue;
+                VInstr& p = code[pi];
+                // Measured producers only: the dot products fill any lanes, and
+                // ADD / MUL / MAD are componentwise.
+                const bool bcast = p.op == VOp::Dp2 || p.op == VOp::Dp3 || p.op == VOp::Dp4;
+                const bool arith = bcast || p.op == VOp::Add || p.op == VOp::Mul || p.op == VOp::Mad;
+                // An already scaled producer takes the product of the two
+                // factors when that is still a scale: (t * 2) * 2 is x4.
+                const std::optional<int> scale = scaleCodeFor(scaleFactorOf(p.fpScale) * *v);
+                if (!arith || !scale || p.sat || p.predicate != 0 || p.ccUpdate ||
+                    p.fpPrecisionOverride != -1 || p.dst.fp16 != m.dst.fp16 ||
+                    p.dst.outputPin || p.dst.preferredPhys >= 0 || p.preservePartialOutputMask ||
+                    p.scalarSourceDemandMask != 0)
+                    continue;
+                for (int l = 0; l < 4 && ok; ++l)
+                    if ((m.dst.writemask & (1 << l)) && !(p.dst.writemask & (1 << t.swizzle[l])))
+                        ok = false;
+                // Nothing between reads or writes the multiply's destination
+                // (the producer now writes it earlier), and no loop or kill.
+                for (size_t j = pi + 1; j < mi && ok; ++j) {
+                    const VInstr& w = code[j];
+                    if (w.op == VOp::LoopBegin || w.op == VOp::Brk || w.op == VOp::LoopEnd ||
+                        w.op == VOp::Kil || sameDst(w.dst, m.dst))
+                        ok = false;
+                    if (!m.dst.output)
+                        for (const VSrc& s : w.srcs)
+                            if (s.kind == VSrcKind::Temp && s.index == m.dst.index) ok = false;
+                }
+                if (!ok) continue;
+                if (!bcast)
+                    for (VSrc& s : p.srcs) {
+                        if (s.kind == VSrcKind::None) continue;
+                        const auto old = s.swizzle;
+                        for (int l = 0; l < 4; ++l) s.swizzle[l] = old[t.swizzle[l]];
+                    }
+                p.fpScale = *scale;
+                p.sat = m.sat;
+                p.dst = m.dst;
+                code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
+                --mi;
+                break;
             }
         }
     }

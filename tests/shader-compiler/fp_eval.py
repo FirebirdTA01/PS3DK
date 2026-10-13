@@ -13,7 +13,7 @@ not model rather than stepping over it:
   - reading an R lane after either of its H halves was written, or an H lane
     after its R register was written (H2k/H2k+1 alias Rk with an unmodelled
     lane layout, so every lane of the other bank goes stale until rewritten);
-  - an output scale other than 1x;
+  - a reserved output-scale encoding (4);
   - an fp16 or fx12 instruction whose source values are not exactly
     representable at that precision (fx12: multiples of 1/1024 in [-2, 2)).
     For representable sources the low-precision result equals the binary32
@@ -276,8 +276,11 @@ def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False):
             prec = (w[0] >> 22) & 3
             if prec == 3:
                 raise Unmodelled("precision 3")
-            # the scale field is 3 bits (28-30); 4 is reserved, 5-7 divide
-            if (w[2] >> 28) & 7:
+            # the scale field is 3 bits (28-30): 1-3 multiply by 2/4/8, 5-7
+            # divide by 2/4/8, 4 is reserved.  Applied to the result before
+            # saturation (the compiler folds `x * 2` into the producer).
+            _scale = {0: 1.0, 1: 2.0, 2: 4.0, 3: 8.0, 5: 0.5, 6: 0.25, 7: 0.125}.get((w[2] >> 28) & 7)
+            if _scale is None:
                 raise Unmodelled("output scale %d" % ((w[2] >> 28) & 7))
             n = ARITY.get(opc, 0)
             out_none = (w[0] >> 30) & 1
@@ -301,6 +304,8 @@ def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False):
             while len(srcs) < 3:
                 srcs.append([0.0] * 4)
             res = _op(opc, *srcs)
+            if _scale != 1.0:
+                res = [f32(x * _scale) for x in res]
             if (w[0] >> 31) & 1:
                 res = [min(1.0, max(0.0, x)) for x in res]
             half = (w[0] >> 7) & 1
@@ -423,10 +428,11 @@ def self_test():
     rows.append(('green: DIV R0, TEX0, TEX0.w', _div(0xFF), [f32(x / 1.5) for x in a]))
     rows.append(('red: fx12 DIV, divisor TEX0.x = 0.1 not fx12', _div(0x00, prec=2), None, tenth, b))
     rows.append(('green: fx12 DIV R0, TEX0, TEX0.y (all fx12)', _div(0x55, prec=2), [-0.5, 1.0, -2.0, -3.0]))
-    for scale in (1, 4):  # x2 and the reserved encoding (review: codex)
+    for scale, factor in ((1, 2.0), (6, 0.25), (4, None)):  # x2, /4, reserved (review: codex)
         words = _ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1)
         words[2] |= scale << 28
-        rows.append(('red: output scale encoding %d' % scale, _container(words), None))
+        rows.append(('%s: output scale encoding %d' % ('green' if factor else 'red', scale),
+                     _container(words), [f32(x * factor) for x in a] if factor else None))
     fails = 0
     for row in rows:
         name, blob, want = row[:3]
