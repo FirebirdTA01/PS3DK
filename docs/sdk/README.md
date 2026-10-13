@@ -9,6 +9,9 @@ Tracked ABI documentation for each shipped stub archive.
 | libdmux_stub | PAMF stream demultiplexer | 20 | [libdmux.md](libdmux.md) |
 | libsysutil_oskdialog_ext_stub | Extended OSK dialog | 17 | [libsysutil_oskdialog_ext.md](libsysutil_oskdialog_ext.md) |
 | libsysutil_search_stub | Content-search utility | 21 | [libsysutil_search.md](libsysutil_search.md) |
+| libmd5 / libsha1 / libsha224 / libsha256 / libsha384 / libsha512 | MD5 and SHA-1/2/3 digests | 6 libraries, 4 calls each | [libhash.md](libhash.md) |
+| libsysutil photo_decode / photo_export / photo_import / video_export / video_upload / print / rec / remoteplay / game_exec / licensearea / cross_controller / sysconf_ext stubs | Small-surface sysutil query libraries | 50 across the twelve | [sysutil-queries.md](sysutil-queries.md) |
+| np/common, np/ticket, np/tustorage, np/error, np/drm | NP (PSN) include-path forwarders | 5 forwards | [np-headers.md](np-headers.md) |
 | libsys_crashdump_stub | Crash dump user log | 2 | [libcrashdump.md](libcrashdump.md) |
 | libpamf_stub | PAMF container parser | 23 | [libpamf.md](libpamf.md) |
 | libadec_stub | Audio decoder framework | 9 | [libadec.md](libadec.md) |
