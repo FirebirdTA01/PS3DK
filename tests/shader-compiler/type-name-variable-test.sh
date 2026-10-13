@@ -73,7 +73,7 @@ for name, src, want_fn in VALUE:
     print('  %-26s %s' % (name, 'ok' if not wrong else '%d WRONG' % wrong))
 for name, src in REFUSE:
     p, o = compile_one(name, src)
-    ok = p.returncode != 0 and not o.exists()
+    ok = p.returncode == 1 and not o.exists()   # a refusal exits 1; a crash (134, -6) is not one
     print('  %-26s %s' % (name, 'refused' if ok else 'NOT refused (rc %d)' % p.returncode))
     if not ok: fails.append(name + ': expected a refusal and no container')
 for f in fails: print('type-name-variable: FAIL', f)
