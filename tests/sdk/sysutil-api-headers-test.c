@@ -66,6 +66,18 @@ AT(CellRecSceneMetadata, startTime, 8);
 AT(CellRecSceneMetadata, title, 24);
 AT(CellRecSceneMetadata, tagNum, 28);
 AT(CellRecSceneMetadata, tag, 32);
+/* The module reads the tag array as four-byte pointers: the element type is
+ * four bytes in both data models, so an array of it has the module's stride. */
+STATIC_ASSERT(sizeof(*((CellRecSceneMetadata *)0)->tag) == 4, "tag elements are 4-byte pointers");
+int rec_two_tags(CellRecSceneMetadata *m, ps3tc_rec_tag_t *tags, char *a, char *b);
+int rec_two_tags(CellRecSceneMetadata *m, ps3tc_rec_tag_t *tags, char *a, char *b)
+{
+	tags[0] = a;
+	tags[1] = b;
+	m->tagNum = 2;
+	m->tag = tags;
+	return (int)((char *)&m->tag[1] - (char *)&m->tag[0]);
+}
 
 /* A few values programs compare against. */
 STATIC_ASSERT(CELL_SYSUTIL_LICENSE_AREA_OTHER == 100, "license area other");

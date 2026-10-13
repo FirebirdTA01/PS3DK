@@ -49,3 +49,7 @@ NOINLINE uint64_t v_sys_mempool_get_count(sys_mempool_t p)
 STATIC_ASSERT(sizeof(mempool_header) == 40, "mempool_header is 40 bytes");
 STATIC_ASSERT(offsetof(mempool_header, chunk_size) == 16, "chunk_size at 16");
 STATIC_ASSERT(offsetof(mempool_header, cond_id) == 36, "cond_id at 36");
+/* sys_mempool_create writes a four-byte handle: the handle type is four
+ * bytes in both data models, or an LP64 program would keep the module's
+ * value in the high half of an eight-byte pointer. */
+STATIC_ASSERT(sizeof(sys_mempool_t) == 4, "sys_mempool_t is the module's 4-byte handle");

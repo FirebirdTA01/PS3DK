@@ -11,9 +11,9 @@
 
   The system module reads these structures with 32-bit pointers, so
   pointer members keep that width in LP64 programs (ATTRIBUTE_PRXPTR).
-  CellRecSceneMetadata.tag points to an array of pointers the module also
-  reads as 32-bit addresses: an LP64 program fills that array with 32-bit
-  values.
+  CellRecSceneMetadata.tag points to an array of tag strings the module
+  also reads as 32-bit addresses; its element type, ps3tc_rec_tag_t, is a
+  32-bit pointer in both data models.
 */
 
 #ifndef PS3TC_CELL_SYSUTIL_REC_H
@@ -233,13 +233,18 @@ typedef struct {
 	char *userdata ATTRIBUTE_PRXPTR;
 } CellRecMovieMetadata;
 
+/* One scene tag: a 32-bit string pointer in both data models, because the
+ * system module reads the tag array as four-byte elements.  Build the array
+ * of this type (ps3tc_rec_tag_t tags[] = { "a", "b" };) and point tag at it. */
+typedef char *ps3tc_rec_tag_t ATTRIBUTE_PRXPTR;
+
 typedef struct {
 	uint32_t type;
 	uint64_t startTime;
 	uint64_t endTime;
 	char *title ATTRIBUTE_PRXPTR;
 	uint32_t tagNum;
-	char **tag ATTRIBUTE_PRXPTR;
+	ps3tc_rec_tag_t *tag ATTRIBUTE_PRXPTR;
 } CellRecSceneMetadata;
 
 int32_t cellRecSetInfo(int setInfo, uint64_t value);

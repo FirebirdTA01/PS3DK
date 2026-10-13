@@ -23,7 +23,9 @@
 extern "C" {
 #endif
 
-typedef void *sys_mempool_t;
+/* The handle the system module writes is four bytes: a 32-bit pointer in
+ * both data models, so sys_mempool_create fills all of it under -mlp64. */
+typedef void *sys_mempool_t ATTRIBUTE_PRXPTR;
 
 /* Written by the 32-bit system module; fixed layout across data models. */
 typedef struct mempool_header {
