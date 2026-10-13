@@ -235,6 +235,17 @@ HEADERS := \
     include/np/drm.h \
     include/np/trophy.h \
     include/np/clans.h \
+    include/np/basic.h \
+    include/np/custom_menu.h \
+    include/np/friendlist.h \
+    include/np/lookup.h \
+    include/np/manager.h \
+    include/np/profile.h \
+    include/np/ranking.h \
+    include/np/signaling.h \
+    include/np/sns.h \
+    include/np/util.h \
+    include/np/auth_oauth.h \
     include/cell/np2/init.h \
     include/cell/np2/matching2.h \
     include/cell/np/trophy.h \

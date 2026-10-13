@@ -361,6 +361,18 @@ jobs:
       # just installed, which is the only context where they can execute.
       - name: Test the legacy gcm* surface is fully defined
         run: bash tests/sdk/gcm-legacy-symbol-coverage-test.sh
+      # Skips without a PPU compiler; each of the eleven new np/ forwarders
+      # (np/basic.h through np/util.h, plus np/auth_oauth.h) bridges to the
+      # exact cell/ header that carries its surface (np/ranking.h resolves
+      # to cell/np/score.h and np/auth_oauth.h to cell/np2/init.h).  The
+      # reference TU, which pins one representative function per forwarder,
+      # compiles in C and C++17; a lone-forwarder TU for each; a control TU
+      # that names a symbol only cell/np/score.h declares; and a self-check
+      # pointing np/ranking.h at the wrong header and requiring the control
+      # to fail while a basic-header control keeps building.
+      - name: Test the np header-path forwarders
+        run: bash tests/sdk/np-path-forwarders-test.sh
+
 
       # Every reference stub-archive database is built under its reference
       # name.  Only the host check (A) runs here; the installed-archive check

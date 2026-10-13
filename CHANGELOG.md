@@ -66,6 +66,12 @@ The version stamped into builds is generated from the most recent
   `sysutil/sysutil_music_export.h`, `sysutil/sysutil_oskdialog_ext.h`,
   `sysutil/sysutil_search_types.h`, `sysutil/sysutil_storagedata.h` and
   `sysutil/sysutil_sysconf.h`.
+- **`np/` include-path forwarders.** Eleven new headers bridge the `np/`
+  include path to the exact `cell/` header that carries the surface: `np/basic.h`,
+  `np/custom_menu.h`, `np/friendlist.h`, `np/lookup.h`, `np/manager.h`,
+  `np/profile.h`, `np/ranking.h` (to `cell/np/score.h`), `np/signaling.h`,
+  `np/sns.h`, `np/util.h` (also `cell/np/init.h`) and `np/auth_oauth.h` (to
+  `cell/np2/init.h`).
 - **LV2 kernel timers.**  `<sys/timer.h>` now has `sys_timer_create`,
   `sys_timer_destroy`, `sys_timer_get_information`, `_sys_timer_start`,
   `sys_timer_stop`, `sys_timer_connect_event_queue` and
