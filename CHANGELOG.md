@@ -18,6 +18,17 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **Shader compiler accepts more Cg.**  rsx-cg-compiler now compiles
+  fragment `for` loops with a run-time bound (as hardware loops), vertex
+  loops with a run-time trip count, a loop body ending in `if (c) break;`,
+  `inout` array parameters and swizzle writes into array elements,
+  two-dimensional local arrays, uniform arrays of structs read by a constant
+  index, matrix element selectors, built-in type names used as variable
+  names, a `FOGFRAC` fragment input, and vertex programs that write the
+  back-face colours `BCOL0` / `BCOL1`.  A sampler member of a uniform struct
+  keeps its `TEXUNIT` binding.  It is the recommended shader compiler;
+  `cgcomp` stays for existing Makefiles.
+- **`-O4`.**  Optimisations beyond the default levels go behind `-O4`.
 - **Message digests.**  New `<cell/hash/libmd5.h>`, `libsha1.h`,
   `libsha224.h`, `libsha256.h`, `libsha384.h` and `libsha512.h` with the
   libraries `libmd5.a`, `libsha1.a`, `libsha224.a`, `libsha256.a`,
@@ -99,8 +110,26 @@ The version stamped into builds is generated from the most recent
   `sys_ppu_thread_get_page_fault_context`; `sys_ppu_thread_icontext_t` is
   now the register-context structure instead of a placeholder integer.
 
+### Changed
+
+- **Smaller shader programs.**  Expressions of literals fold at compile time
+  (arithmetic, `exp` / `log`, `sqrt`, trigonometry, `min` / `max` / `clamp`,
+  `round`, `smoothstep`, `fmod`, `abs` and the rest), an `if` whose condition
+  is constant compiles only the taken arm, products fuse with additions into
+  `MAD`, copies are read through their source, and outputs are written
+  directly.  On 617 community fragment programs, the 481 that compile
+  differently use 81,505 instructions instead of 105,792, and 11 that were
+  refused now compile.
+- **Vertex program limits.**  A vertex program longer than 544
+  instructions or needing more than 32 temporaries is refused with a
+  diagnostic instead of producing a program the hardware cannot run.
+
 ### Fixed
 
+- **Shader out parameters written under a branch** are stored once, at the
+  end, in both profiles; `&&` and `||` on vectors no longer short-circuit;
+  uniform struct values survive vertex helper calls; a vertex `select` with
+  a vector condition selects per lane.
 - **`sys_time_get_system_time()` returns system time.**  It returned the
   wall-clock time in microseconds since 1970 instead of the microseconds
   since the system started that kernel timers and event timestamps use, so
