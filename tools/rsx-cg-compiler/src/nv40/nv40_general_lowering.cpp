@@ -9951,8 +9951,11 @@ private:
                 const VSrc s = mov.srcs[0];
                 const int d = mov.dst.index;
                 const bool input = s.kind == VSrcKind::Input;
+                // A temp copy is read through its source with or without a
+                // modifier; an input copy only when it carries one (a plain
+                // input copy is the staging legalizeInputOperands builds).
                 if ((s.kind != VSrcKind::Temp && !input) || s.relative ||
-                    (!input && s.index == d) || (!s.abs && !s.neg))
+                    (!input && s.index == d) || (input && !s.abs && !s.neg))
                     continue;
                 // Same precision on both sides: the source's writers decide it
                 // (an input register is binary32).
