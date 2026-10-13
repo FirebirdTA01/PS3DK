@@ -82,8 +82,36 @@ def exclusions(text):
     return accepted, errors
 
 
-def check(inventory, workflow, exclusion_text, minimum=60):
+def repeated_step_keys(workflow):
+    """A step mapping that names one key twice (two `run:` lines after a lost
+    `- name:`).  YAML loaders differ: some keep the last value silently,
+    GitHub rejects the whole workflow - so no CI job runs at all."""
     errors = []
+    dash = keys = None
+    for number, line in enumerate(workflow.splitlines(), 1):
+        stripped = line.lstrip(" ")
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(stripped)
+        step = re.match(r"- ([A-Za-z_][\w-]*):", stripped)
+        if step:
+            dash, keys = indent, {step.group(1)}
+            continue
+        if dash is None:
+            continue
+        if indent <= dash:
+            dash = keys = None
+            continue
+        key = re.match(r"([A-Za-z_][\w-]*):", stripped)
+        if indent == dash + 2 and key:
+            if key.group(1) in keys:
+                errors.append(f"workflow line {number}: step key '{key.group(1)}' repeated")
+            keys.add(key.group(1))
+    return errors
+
+
+def check(inventory, workflow, exclusion_text, minimum=60):
+    errors = repeated_step_keys(workflow)
     if len(inventory) < minimum:
         errors.append(f"implausibly small test inventory: {len(inventory)} < {minimum}")
     scheduled = invocations(workflow)
@@ -131,6 +159,14 @@ def self_check():
     require(not errors and scheduled == {good} and excluded == {missing}, "complete exclusion")
     errors, _, _ = check({good}, command, record, minimum=1)
     require(errors == [f"exclusion names no existing test: {missing}"], "stale exclusion")
+    nl = chr(10)
+    step = "      - name: one" + nl + command
+    errors, _, _ = check({good}, step, "", minimum=1)
+    require(errors == ["workflow line 3: step key 'run' repeated"], "a step with two run keys")
+    steps = ("      - name: one" + nl + own_command + "      - name: two" + nl +
+             command.splitlines()[1] + nl)
+    errors, _, _ = check({good}, steps, "", minimum=1)
+    require(not errors, "two steps with one run key each")
     errors, _, _ = check({good}, command.replace(own_command, ""), "", minimum=1)
     require(errors == [f"CI checker invocation missing: {SELF}"], "checker must invoke itself")
     ps = "tests/rig/example-test.ps1"

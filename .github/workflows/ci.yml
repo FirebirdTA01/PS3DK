@@ -898,7 +898,6 @@ jobs:
         run: bash tests/shader-compiler/vp-constant-builtin-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A vertex program past 32 temporary registers is refused
         run: bash tests/shader-compiler/vp-register-budget-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-        run: bash tests/shader-compiler/vp-struct-matrix-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test VP uniform struct argument provenance
         run: bash tests/shader-compiler/vp-uniform-struct-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler --loops
       - name: A vertex program past 544 instructions is refused
