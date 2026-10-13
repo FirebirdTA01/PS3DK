@@ -12,6 +12,7 @@
 #include <sys/event.h>
 #include <sys/sys_time.h>
 #include <sys/timer.h>
+#include <sys/ppu_thread.h>
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 
@@ -22,6 +23,10 @@ SYS_PROCESS_PARAM(1001, 0x10000);
 #define TICKS        5
 
 static int checks, failures;
+static int setup_once = SYS_PPU_THREAD_ONCE_INIT;
+static int setup_runs;
+
+static void setup(void) { setup_runs++; }
 
 static void check(int ok, const char *what, unsigned long long got)
 {
@@ -41,6 +46,21 @@ int main(void)
 	int rc;
 
 	printf("hello-ppu-lv2-timer: periodic and one-shot LV2 timers\n");
+
+	/* The event loop runs on the main thread: name it, and set the loop
+	 * up exactly once however often setup is called. */
+	sys_ppu_thread_t self;
+	rc = sys_ppu_thread_get_id(&self);
+	check(rc == 0, "sys_ppu_thread_get_id", (unsigned)rc);
+	rc = sys_ppu_thread_rename(self, "timer-loop");
+	check(rc == 0, "sys_ppu_thread_rename(\"timer-loop\")", (unsigned)rc);
+	int joinable = -1;
+	sys_ppu_thread_get_join_state(&joinable);
+	check(joinable == 0 || joinable == 1, "sys_ppu_thread_get_join_state", (unsigned)joinable);
+	sys_ppu_thread_once(&setup_once, setup);
+	sys_ppu_thread_once(&setup_once, setup);
+	check(setup_runs == 1 && setup_once == SYS_PPU_THREAD_DONE_INIT,
+	      "sys_ppu_thread_once runs setup once", (unsigned)setup_runs);
 
 	sys_event_queue_attribute_initialize(attr);
 	rc = sys_event_queue_create(&queue, &attr, SYS_EVENT_QUEUE_LOCAL, 16);

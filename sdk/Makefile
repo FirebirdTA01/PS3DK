@@ -52,6 +52,7 @@ HEADERS := \
     include/sys/fixed_addr.h \
     include/sys/sys_fixed_addr.h \
     include/sys/timer.h \
+    include/sys/vm.h \
     include/sys/prx_module.h \
     include/sys/lv2_fs_ext.h \
     include/psl1ght/lv2/timer.h \

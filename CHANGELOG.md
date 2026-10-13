@@ -27,6 +27,23 @@ The version stamped into builds is generated from the most recent
   its name, both data words and the expiry time.  The new sample
   `hello-ppu-lv2-timer` runs an event loop from a periodic timer and fires
   a one-shot.
+- **LV2 virtual memory.**  New `<sys/vm.h>`: `sys_vm_memory_map` reserves an
+  address range backed by a smaller amount of physical memory that the
+  kernel pages on demand, with `sys_vm_unmap`, `append_memory`,
+  `return_memory`, `lock`, `unlock`, `touch`, `flush`, `invalidate`,
+  `store`, `sync`, `test` and `get_statistics`.  The new sample
+  `hello-ppu-lv2-vm` writes 4 MB through 1 MB of physical memory and maps
+  one memory object at two addresses.
+- **Mmapper memory objects.**  `<sys/memory.h>` declares
+  `sys_mmapper_allocate_memory`, `sys_mmapper_allocate_memory_from_container`,
+  `sys_mmapper_map_memory`, `sys_mmapper_unmap_memory` and
+  `sys_mmapper_free_memory`, and adds `sys_memory_get_page_attribute`,
+  `sys_memory_container_get_size` and the `SYS_MEMORY_PROT_*`,
+  `SYS_MEMORY_GRANULARITY_*` and remaining `SYS_MEMORY_ACCESS_RIGHT_*` values.
+- **PPU thread calls.**  `sys_ppu_thread_rename`, `sys_ppu_thread_once`,
+  `sys_ppu_thread_get_join_state`, `sys_ppu_thread_recover_page_fault` and
+  `sys_ppu_thread_get_page_fault_context`; `sys_ppu_thread_icontext_t` is
+  now the register-context structure instead of a placeholder integer.
 
 ### Fixed
 

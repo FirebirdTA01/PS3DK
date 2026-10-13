@@ -57,7 +57,17 @@ typedef s64 system_time_t;
 
 /*! \brief PPU thread identifier. */
 typedef u64 sys_ppu_thread_t;
-typedef u64 sys_ppu_thread_icontext_t;
+/*! \brief Register state of a thread stopped by a page fault
+ * (sys_ppu_thread_get_page_fault_context in <sys/ppu_thread.h>). */
+typedef struct sys_ppu_thread_icontext {
+    u64 gpr[32];
+    u32 cr;
+    u32 rsv1;
+    u64 xer;
+    u64 lr;
+    u64 ctr;
+    u64 pc;
+} sys_ppu_thread_icontext_t;
 
 typedef u32 sys_interrupt_tag_t;
 typedef u64 sys_irqoutlet_id_t;
