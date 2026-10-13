@@ -368,6 +368,12 @@ jobs:
       # just installed, which is the only context where they can execute.
       - name: Test the legacy gcm* surface is fully defined
         run: bash tests/sdk/gcm-legacy-symbol-coverage-test.sh
+      # Host-only: a PPU header with the same path as an SPU header shadows
+      # it in the SPU libraries that list sdk/include first; a new pair must
+      # pass SPU compiles on with #include_next (the full SDK build that
+      # would otherwise catch it runs only in the release pipeline).
+      - name: Test no PPU header shadows an SPU header unguarded
+        run: bash tests/sdk/spu-header-shadow-test.sh
 
       # Every reference stub-archive database is built under its reference
       # name.  Only the host check (A) runs here; the installed-archive check
