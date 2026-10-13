@@ -22,3 +22,5 @@ Tracked ABI documentation for each shipped stub archive.
 | libpngenc_stub | PNG encoder | 9 | [libpngenc.md](libpngenc.md) |
 | libjpgenc_stub | JPEG encoder | 10 | [libjpgenc.md](libjpgenc.md) |
 | libgifdec_stub | GIF decoder | 12 | [libgifdec.md](libgifdec.md) |
+| liblv2 | LV2 syscalls 70-76, 141-142 | 9 | [lv2-timers.md](lv2-timers.md) |
+| liblv2 | LV2 syscalls 300-312, 343, 351; 5 mmapper imports | 20 | [lv2-vm.md](lv2-vm.md) |

@@ -27,13 +27,13 @@ area.
 | `sys_vm_unmap` | 301 | Release the reserved area |
 | `sys_vm_append_memory` | 302 | Add physical memory to the range |
 | `sys_vm_return_memory` | 303 | Return physical memory from the range |
-| `sys_vm_lock` | 304 | Lock the pages in the range (keep them physical) |
+| `sys_vm_lock` | 304 | Lock the pages |
 | `sys_vm_unlock` | 305 | Unlock the pages |
-| `sys_vm_touch` | 306 | Page in the range (refer it now) |
-| `sys_vm_flush` | 307 | Write back modified pages in the range |
-| `sys_vm_invalidate` | 308 | Drop the caches for the range |
-| `sys_vm_store` | 309 | Page out the range (free physical backing) |
-| `sys_vm_sync` | 310 | Synchronise the range |
+| `sys_vm_touch` | 306 | Page in |
+| `sys_vm_flush` | 307 | — |
+| `sys_vm_invalidate` | 308 | — |
+| `sys_vm_store` | 309 | Page out |
+| `sys_vm_sync` | 310 | — |
 
 ## sys_vm_test
 
@@ -59,7 +59,7 @@ range as a set of `SYS_VM_STATE_*` bits:
 | `page_out`       | `uint64_t` | pages paged out |
 | `pmem_total`     | `uint32_t` | total physical memory (32-bit, layout-stable) |
 | `pmem_used`      | `uint32_t` | physical memory used (32-bit, layout-stable) |
-| `time`           | `uint64_t` | |
+| `time`           | `uint64_t` | not described by the header |
 
 The two `uint32_t` fields are written as 32 bits by the kernel, so the
 struct has one layout in both ILP32 and LP64 userland.  RPCS3 reports zero
@@ -73,22 +73,27 @@ release it.  Unlike the `sys_vm_*` functions these five are not inline
 syscalls; they are `sysPrxForUser` exports (`liblv2_stub`) and appear in the
 object as a call, not a `sc`.
 
+    sys_mmapper_allocate_address
+    -> sys_mmapper_allocate_memory
+    -> sys_mmapper_map_memory
+    -> sys_mmapper_unmap_memory   (writes the object id back)
+    -> sys_mmapper_free_memory
+    -> sys_mmapper_free_address
+
 | Call | Description |
 |---|---|
+| `sys_mmapper_allocate_address(size, flags, alignment, &addr)` | reserve an address range |
 | `sys_mmapper_allocate_memory(size, flags, &mem_id)` | allocate a memory object |
-| `sys_mmapper_allocate_memory_from_container(size, container, flags, &mem_id)` | allocate from a specific container |
+| `sys_mmapper_allocate_memory_from_container(size, container, flags, &mem_id)` | allocate a memory object from a specific container |
 | `sys_mmapper_map_memory(start_addr, mem_id, flags)` | map the object at `start_addr` |
 | `sys_mmapper_unmap_memory(start_addr, &mem_id)` | unmap; writes the object's id to `mem_id` |
 | `sys_mmapper_free_memory(mem_id)` | free the memory object |
+| `sys_mmapper_free_address(start_addr)` | release the address range |
 
 Protection and granularity flags for the `flags` arguments come from
 `<sys/memory.h>`: `SYS_MEMORY_PROT_READ_ONLY`, `SYS_MEMORY_PROT_READ_WRITE`
 (`SYS_MEMORY_PROT_MASK`), and `SYS_MEMORY_GRANULARITY_1M`,
 `SYS_MEMORY_GRANULARITY_64K` (`SYS_MEMORY_GRANULARITY_MASK`).
-
-`sys_mmapper_allocate_address` (reserves the address range used by
-`sys_mmapper_map_memory`) and `sys_mmapper_free_address` are also in
-`<sys/memory.h>`.
 
 ## Sample
 

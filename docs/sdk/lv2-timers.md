@@ -14,9 +14,8 @@ attached to an event queue, started in one of three modes (oneshot,
 periodic, periodic-absolute), and torn down in reverse order.
 
 Times are **LV2 system time** in microseconds, obtained from
-`sys_time_get_system_time()` — not wall-clock time.  (Prior to v0.24 the
-headers used wall-clock semantics; v0.24 corrected this to match the
-kernel ABI.)
+`sys_time_get_system_time()` — not wall-clock time.  (Before v0.24 these
+headers used wall-clock time.)
 
 ## Call order
 
@@ -64,27 +63,39 @@ Each expiry delivers one event to the connected queue:
 
     int main(void)
     {
-        sys_event_queue_t q;
-        sys_timer_t       t;
+        int                   rc;
+        sys_event_queue_t     q;
+        sys_event_queue_attribute_t attr;
+        sys_timer_t           t;
 
-        sys_event_queueCreate(&q, 16);
-        sys_timer_create(&t);
-        sys_timer_connect_event_queue(t, q, 42 /*name*/, 1 /*data1*/, 2 /*data2*/);
+        sys_event_queue_attribute_initialize(attr);
+        if ((rc = sys_event_queue_create(&q, &attr, SYS_EVENT_QUEUE_LOCAL, 16)) != CELL_OK)
+            return rc;
+        if ((rc = sys_timer_create(&t)) != CELL_OK)
+            return rc;
+        if ((rc = sys_timer_connect_event_queue(t, q, 42 /*name*/, 1 /*data1*/, 2 /*data2*/)) != CELL_OK)
+            return rc;
 
         /* Fire every 1 000 000 µs (1 s), first expiry 1 s from now. */
-        sys_timer_start_periodic(t, 1000000);
+        if ((rc = sys_timer_start_periodic(t, 1000000)) != CELL_OK)
+            return rc;
 
         for (int i = 0; i < 5; i++) {
             sys_event_t ev;
-            sys_eventQueueReceive(q, &ev, 0);   /* block until next expiry */
+            if ((rc = sys_event_queue_receive(q, &ev, 0)) != CELL_OK)   /* 0 = wait forever */
+                return rc;
             /* ev.source == 42, ev.data1 == 1, ev.data2 == 2,
                ev.data3 == expiry time (µs, system clock)            */
         }
 
-        sys_timer_stop(t);
-        sys_timer_disconnect_event_queue(t);
-        sys_timer_destroy(t);
-        sys_event_queueDestroy(q);
+        if ((rc = sys_timer_stop(t)) != CELL_OK)
+            return rc;
+        if ((rc = sys_timer_disconnect_event_queue(t)) != CELL_OK)
+            return rc;
+        if ((rc = sys_timer_destroy(t)) != CELL_OK)
+            return rc;
+        if ((rc = sys_event_queue_destroy(q, 0)) != CELL_OK)
+            return rc;
         return CELL_OK;
     }
 
