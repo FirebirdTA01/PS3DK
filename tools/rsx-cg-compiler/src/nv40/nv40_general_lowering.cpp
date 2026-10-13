@@ -12259,7 +12259,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             asm_.emitFencbr();
     };
 
-    bool emittedInstruction = false;
     std::vector<size_t> openLoops;
     size_t lastLoopTarget = 0;
     for (const VInstr& vi : program.instrs) {
@@ -12277,7 +12276,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                 0x43400000u, 0x1c9dc800u,
                 0x80000000u | (1u << 19) | (0u << 10) | (static_cast<uint32_t>(vi.loopCount) << 2),
                 0u));
-            emittedInstruction = true;
             continue;
         }
         if (vi.op == VOp::LoopEnd) {
@@ -12374,7 +12372,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             asm_.emit(kil, NVFX_FP_OP_OPCODE_KIL);
             // One $kill_NNNN container parameter per discard STATEMENT.
             attrs.pixelKillCount += 1;
-            emittedInstruction = true;
             continue;
         }
         if (vi.op == VOp::Brk) {
@@ -12411,7 +12408,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             }
             const uint32_t cond = vi.killTestEq ? NVFX_COND_EQ : NVFX_COND_NE;
             asm_.emitRaw(0x40400000u, cond << 18, 0x80000000u, 0u);
-            emittedInstruction = true;
             continue;
         }
         if (vi.op == VOp::Ftoi) {
@@ -12483,7 +12479,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                 restore.cc_swz[2] = restore.cc_swz[3] = 0;
             asm_.emit(restore, NVFX_FP_OP_OPCODE_MOV);
 
-            emittedInstruction = true;
             continue;
         }
         if (vi.op == VOp::SelPred) {
@@ -12595,7 +12590,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             emitOne(ccDst, vi.selPerLane ? vi.dst.writemask : 0x1,
                     vi.srcs[0], true, false);
             emitOne(selDst, vi.dst.writemask, vi.srcs[1], false, true);
-            emittedInstruction = true;
             continue;
         }
         struct nvfx_reg dst = vi.dst.none
@@ -12639,9 +12633,10 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         if (vi.op == VOp::Mov && vi.dst.output &&
             std::any_of(srcs.begin(), srcs.end(), isInlineConst))
             emitFenceForSources(srcs);
-        if (emittedInstruction && vi.op == VOp::Mad &&
-            std::any_of(srcs.begin(), srcs.end(), isInlineConst))
-            emitFenceForSources(srcs);
+        // No fence before a MAD that reads an inline constant: the
+        // reference fences 7 of 3303 such MADs across the community and SDK
+        // corpus (and two identical shapes, one fenced and one not), so it
+        // is not a hazard rule; ours fenced every one after the first.
         if (vi.stubFenceBefore)
             asm_.emitFenctr();
         if (vi.stubFenceBrBefore)
@@ -12670,7 +12665,6 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                 insn.cc_swz[lane] = vi.predicateSwizzle[lane];
         }
         asm_.emit(insn, fpOpcode(vi.op));
-        emittedInstruction = true;
         // ONE inline constant block per instruction: every CONST-kind source
         // of an NV40 fragment instruction reads the same 16 bytes that
         // follow it.  Appending a block per source put a SECOND block after
