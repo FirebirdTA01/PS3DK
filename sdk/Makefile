@@ -233,6 +233,7 @@ HEADERS := \
     include/np/matching2.h \
     include/np/commerce2.h \
     include/np/drm.h \
+    include/np/drm_inline.h \
     include/np/trophy.h \
     include/np/clans.h \
     include/np/basic.h \

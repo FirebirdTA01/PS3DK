@@ -394,6 +394,14 @@ jobs:
       - name: Test no PPU header shadows an SPU header unguarded
         run: bash tests/sdk/spu-header-shadow-test.sh
 
+      # Compiles <np/drm_inline.h> (the sceNpDrmOpen shim) in C and C++17,
+      # ILP32 and LP64; links it against the NP and FS stub archives when
+      # they are present; and verifies that a misspelled cellFsOpen inside
+      # the inline header actually breaks the build, so the inline body is
+      # really being compiled.
+      - name: Test the np/drm_inline.h inline shim compiles
+        run: bash tests/sdk/np-drm-inline-test.sh
+
       # Every reference stub-archive database is built under its reference
       # name.  Only the host check (A) runs here; the installed-archive check
       # (B) needs a built tree and runs from build-cell-stub-archives.sh.

@@ -16,6 +16,15 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **`<np/drm_inline.h>` adds `sceNpDrmOpen`.** A `static inline` shim over
+  `<cell/np/drm.h>` that opens a DRM-protected file: it stats the path and
+  bails only on `CELL_FS_ERROR_ENOENT`, asks `sceNpDrmIsAvailable` and
+  returns any non-`CELL_OK` result unchanged, then opens with `cellFsOpen`
+  using an `SceNpDrmOpenArg` that carries `SCE_NP_DRM_OPEN_FLAG`. Its last
+  two parameters are present for call compatibility only.
+
 ### Fixed
 
 - **newlib's per-thread `_reent` setup includes `<string.h>`.**  The
