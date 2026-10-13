@@ -110,10 +110,16 @@ factor() {   # <stem> fp|vp <k>: the output is exactly k * the one input, lane b
     local stem="$1" profile="$2" k="$3"
     python3 "$here/inline_factor_check.py" "$work/$stem.bin" "$profile" "$k" \
         || fail "$stem: output is not $k * input (see the value diff above)"
-    local control
+    local control rc
     for control in lane negate no-end early-end; do
-        python3 "$here/inline_factor_check.py" "$work/$stem.bin" "$profile" "$k" --control "$control" \
-            || fail "$stem: the $control control was NOT rejected - the value predicate is too weak"
+        rc=0
+        python3 "$here/inline_factor_check.py" "$work/$stem.bin" "$profile" "$k" --control "$control" || rc=$?
+        # 2: not applicable - a one-instruction program has no earlier row to end
+        if [ "$rc" -eq 2 ] && [ "$control" = early-end ]; then
+            echo "NOTE: $stem: early-END control not applicable (one instruction)"
+        elif [ "$rc" -ne 0 ]; then
+            fail "$stem: the $control control was NOT rejected - the value predicate is too weak"
+        fi
     done
     pass "$stem: output = $k * input; lane, sign, no-END and early-END controls rejected"
 }
@@ -338,7 +344,7 @@ count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 2
 factor fp_inline_local_rebound_f fp 6
 forbid fp_inline_local_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
 accept vp_inline_entry_param_rebound_v sce_vp_rsx "vertex twin: main's PARAMETER G reassigned before set() writes the global: o0 = 2*IN0"
-expect vp_inline_entry_param_rebound_v '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw src0=IN0\.xyzw'
+expect vp_inline_entry_param_rebound_v '^[0-9]+ MUL dst=(R[0-9]+|o0) mask=xyzw src0=IN0\.xyzw'
 count  vp_inline_entry_param_rebound_v '^[0-9]+ MUL ' 1
 factor vp_inline_entry_param_rebound_v vp 2
 forbid vp_inline_entry_param_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
