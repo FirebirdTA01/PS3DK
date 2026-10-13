@@ -808,6 +808,11 @@ jobs:
         run: bash tests/shader-compiler/vp-implicit-attribute-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Vertex arithmetic fuses products, writes outputs directly and drops copies
         run: bash tests/shader-compiler/vp-arith-shape-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      # Fragment abs/negate copies fold into their arithmetic readers, and the
+      # colour is written by the instruction that computes it; value-judged.
+      - name: Fragment modifier copies and direct output writes
+        run: bash tests/shader-compiler/fp-modifier-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A vertex rsqrt, exp2, log2 or frac of a literal folds to the reference's constant
         run: bash tests/shader-compiler/vp-constant-builtin-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A vertex program past 32 temporary registers is refused

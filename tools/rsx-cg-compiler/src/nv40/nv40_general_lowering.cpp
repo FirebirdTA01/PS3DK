@@ -737,6 +737,8 @@ public:
             lowerMergedReturnSelect(*mergedReturnSelect_);
         fencePackedReads();
         propagateVertexCopies();
+        foldFragmentModifierCopies();
+        writeFragmentOutputsDirectly();
         fuseVertexMulAdd();
         packVertexLaneCopies();
         legalizeInputOperands();
@@ -9883,6 +9885,164 @@ private:
                 code.erase(code.begin() + static_cast<std::ptrdiff_t>(i));
                 changed = true;
             }
+        }
+    }
+
+    // A MOV that only exists to carry no state of its own: no saturate,
+    // condition code, predicate, scale, precision override or stub flag,
+    // and no register pin.
+    static bool plainFragmentMov(const VInstr& vi)
+    {
+        return vi.op == VOp::Mov && !vi.sat && !vi.ccUpdate && vi.predicate == 0 &&
+               vi.fpScale == 0 && vi.fpPrecisionOverride == -1 &&
+               !vi.preservePartialOutputMask && vi.scalarSourceDemandMask == 0 &&
+               !vi.stubCoIssuePartner && !vi.stubFenceBefore && !vi.stubFenceBrBefore;
+    }
+
+    // FP readers that take a modified source as freely as a MOV does:
+    // arithmetic, comparisons and the scalar unit.  Texture fetches, kills,
+    // pack/unpack, selects and loop nodes keep the copy.
+    static bool fragmentModifierReader(VOp op)
+    {
+        switch (op) {
+        case VOp::Mov: case VOp::Add: case VOp::Mul: case VOp::Mad:
+        case VOp::Dp2: case VOp::Dp3: case VOp::Dp4: case VOp::Min: case VOp::Max:
+        case VOp::Rcp: case VOp::Rsq: case VOp::Sin: case VOp::Cos:
+        case VOp::Lg2: case VOp::Ex2: case VOp::Frc: case VOp::Flr:
+        case VOp::Sge: case VOp::Slt: case VOp::Sgt: case VOp::Sle:
+        case VOp::Seq: case VOp::Sne:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    // FP: abs() and negation are source modifiers.  `MOV R2.x, |R1.x|;
+    // MUL R0, R3, R2.xxxx` is `MUL R0, R3, |R1.xxxx|` (the reference reads
+    // |r0.w| in the consumer), and the copy is dropped.  Only a temp copied
+    // to a temp of the same precision, written by nothing else, every reader
+    // after it with no loop node between, the source not rewritten before a
+    // reader, and each reader's lanes inside the copy's mask.  The hardware
+    // applies negate after abs: a reader's own abs absorbs the copy's
+    // modifiers, otherwise the negations combine.
+    void foldFragmentModifierCopies()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        auto& code = program_.instrs;
+        const auto writesTemp = [](const VInstr& vi, int reg) {
+            return !vi.dst.none && !vi.dst.output && !vi.dst.address && vi.dst.index == reg;
+        };
+        const auto barrier = [](const VInstr& vi) {
+            return vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd ||
+                   vi.op == VOp::Kil;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (size_t i = 0; i < code.size() && !changed; ++i) {
+                const VInstr& mov = code[i];
+                if (!plainFragmentMov(mov) || mov.dst.none || mov.dst.output ||
+                    mov.dst.outputPin || mov.dst.preferredPhys >= 0)
+                    continue;
+                const VSrc s = mov.srcs[0];
+                const int d = mov.dst.index;
+                if (s.kind != VSrcKind::Temp || s.relative || s.index == d || (!s.abs && !s.neg))
+                    continue;
+                // Same precision on both sides: the source's writers decide it.
+                bool ok = true, sourceWritten = false;
+                for (size_t k = 0; k < i && ok; ++k)
+                    if (writesTemp(code[k], s.index)) {
+                        sourceWritten = true;
+                        if (code[k].dst.fp16 != mov.dst.fp16) ok = false;
+                    }
+                if (!ok || !sourceWritten) continue;
+                std::vector<std::pair<size_t, size_t>> uses;
+                for (size_t k = 0; k < code.size() && ok; ++k) {
+                    if (k != i && writesTemp(code[k], d)) ok = false;
+                    for (size_t n = 0; n < code[k].srcs.size() && ok; ++n) {
+                        const VSrc& r = code[k].srcs[n];
+                        if (r.kind != VSrcKind::Temp || r.index != d) continue;
+                        if (k <= i || !fragmentModifierReader(code[k].op)) { ok = false; break; }
+                        int lanes = 0;
+                        const int req = requiredSourceMask(code[k], n);
+                        for (int l = 0; l < 4; ++l)
+                            if (req & (1 << l)) lanes |= 1 << r.swizzle[l];
+                        if ((lanes & mov.dst.writemask) != lanes) ok = false;
+                        else uses.push_back({k, n});
+                    }
+                }
+                if (!ok || uses.empty()) continue;
+                for (const auto& [k, n] : uses)
+                    for (size_t m = i + 1; m < k && ok; ++m)
+                        if (barrier(code[m]) || writesTemp(code[m], s.index)) ok = false;
+                if (!ok) continue;
+                for (const auto& [k, n] : uses) {
+                    VSrc& r = code[k].srcs[n];
+                    const auto swz = r.swizzle;
+                    const bool abs = r.abs || s.abs;
+                    const bool neg = r.abs ? r.neg : (r.neg != s.neg);
+                    r = s;
+                    for (int l = 0; l < 4; ++l) r.swizzle[l] = s.swizzle[swz[l]];
+                    r.abs = abs;
+                    r.neg = neg;
+                }
+                code.erase(code.begin() + static_cast<std::ptrdiff_t>(i));
+                changed = true;
+            }
+        }
+    }
+
+    // FP: `MUL R1.xyz, a, b; MOV o0, R1.xyzz` is `MUL o0, a.xyzz, b.xyzz`
+    // when R1 has that one writer and that one reader, the MUL comes right
+    // before the store, and the two agree on precision: the reference
+    // writes the colour from the instruction that computes it.  A
+    // componentwise producer has its source swizzles moved with the store's
+    // lanes; a broadcast producer fills any lanes as it is.
+    void writeFragmentOutputsDirectly()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        auto& code = program_.instrs;
+        for (size_t mi = 1; mi < code.size(); ++mi) {
+            VInstr& m = code[mi];
+            if (!plainFragmentMov(m) || !m.dst.output) continue;
+            const VSrc t = m.srcs[0];
+            if (t.kind != VSrcKind::Temp || t.relative || t.abs || t.neg) continue;
+            VInstr& p = code[mi - 1];
+            if (p.dst.none || p.dst.output || p.dst.address || p.dst.index != t.index ||
+                p.dst.outputPin || p.dst.preferredPhys >= 0 || p.dst.fp16 != m.dst.fp16 ||
+                p.predicate != 0 || p.ccUpdate || p.preservePartialOutputMask ||
+                p.scalarSourceDemandMask != 0 || p.fpPrecisionOverride != -1)
+                continue;
+            const bool bcast = broadcastOp(p.op) || p.op == VOp::Sin || p.op == VOp::Cos;
+            if (!bcast && !componentwiseOp(p.op)) continue;
+            bool ok = true;
+            for (int l = 0; l < 4 && ok; ++l)
+                if ((m.dst.writemask & (1 << l)) && !(p.dst.writemask & (1 << t.swizzle[l])))
+                    ok = false;
+            // One writer and one reader of the temp, and the producer does
+            // not read its own result.
+            for (size_t k = 0; k < code.size() && ok; ++k) {
+                if (k != mi - 1 && !code[k].dst.none && !code[k].dst.output &&
+                    !code[k].dst.address && code[k].dst.index == t.index)
+                    ok = false;
+                for (size_t n = 0; n < code[k].srcs.size() && ok; ++n)
+                    if (code[k].srcs[n].kind == VSrcKind::Temp &&
+                        code[k].srcs[n].index == t.index && k != mi)
+                        ok = false;
+            }
+            if (!ok) continue;
+            if (!bcast)
+                for (VSrc& src : p.srcs) {
+                    if (src.kind == VSrcKind::None) continue;
+                    const auto old = src.swizzle;
+                    for (int l = 0; l < 4; ++l)
+                        src.swizzle[l] = old[t.swizzle[l]];
+                }
+            const bool sat = p.sat;
+            p.dst = m.dst;
+            p.sat = sat;
+            code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
+            --mi;
         }
     }
 
