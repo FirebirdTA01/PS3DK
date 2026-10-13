@@ -7,7 +7,10 @@
 # sqrt), normalize (each lane times the rounded rsqrt) and lerp
 # (a + t * (b - a), each step rounded).  rsqrt and log2 of x <= 0 and
 # an exp2 that overflows are left to run time, as the reference leaves
-# them.  Ours emitted every one of these as run-time instructions.
+# them.  exp / log / log10 fold as their lowerings compute (exp through
+# log2(e) = 0x3fb8aa3a, one ulp below float32's; log and log10 as the
+# log2 fold times 0x3f317218 / 0x3e9a209b); exp(89.0), log(0.0) and
+# log10(-2.0) stay run time.  Ours emitted every one of these as run-time instructions.
 #
 # Usage: tests/shader-compiler/vp-constant-builtin-fold-test.sh <compiler>
 set -u
@@ -37,6 +40,13 @@ FOLDED = {
     'frac': [(94.96155548095703, 0x3f762880), (56.31205368041992, 0x3e9fc580), (-10.163854598999023, 0x3f560da0),
              (-72.64484405517578, 0x3eb5d700), (1e9, 0x00000000), (-0.0, 0x00000000), (-1e-9, 0x3f800000),
              (10.122249603271484, 0x3dfa5e00)],
+    # exp: the exp2 fold of f32(x * 0x3fb8aa3a); log / log10: f32(log2 fold * 0x3f317218 / 0x3e9a209b).
+    'exp': [(-20.0424881, 0x3107bfe8), (-0.0932358503, 0x3f6935e5), (24.2850456, 0x510339e6), (-3.29307532, 0x3d181f8d),
+            (-7.03010273, 0x3a67f4b9), (13.4517422, 0x4929b0b0), (1.24078441, 0x405d5532), (22.7928085, 0x4fec11cd)],
+    'log': [(264707.375, 0x4147c836), (181.379669, 0x40a66b41), (4.93513198e-07, 0xc16858f4), (13.7861481, 0x4027ea1e),
+            (46058432.0, 0x418d29d3), (0.148416862, 0xbff43082), (8.57174385e-08, 0xc1822d7c), (0.00629963819, 0xc0a22705)],
+    'log10': [(4.1437989e-08, 0xc0ec3e46), (23271.9512, 0x408bbd19), (229188.734, 0x40ab86b5), (2.18350465e-07, 0xc0d525a6),
+              (0.0313572884, 0xbfc077fb), (1.81445694, 0x3e847a72), (148157.734, 0x40a57694), (8.89253968e-08, 0xc0e1a195)],
 }
 # dot / length / normalize / lerp of literals, four lanes a compile.
 EXPR_GROUPS = [
@@ -53,7 +63,7 @@ EXPR_GROUPS = [
      ('length(float2(3e-3, 4e-3))', 0x3ba3d70a),
      ('dot(float3(0.1, 0.2, 0.3), float3(0.1, 0.2, 0.3))', 0x3e0f5c2a)],
 ]
-RUNTIME = ['rsqrt(0.0)', 'rsqrt(-4.0)', 'log2(0.0)', 'log2(-1.0)', 'exp2(200.0)']
+RUNTIME = ['rsqrt(0.0)', 'rsqrt(-4.0)', 'log2(0.0)', 'log2(-1.0)', 'exp2(200.0)', 'exp(89.0)', 'log(0.0)', 'log10(-2.0)']
 
 def compile_(name, exprs):
     s, o = work / (name + '.cg'), work / (name + '.vpo')

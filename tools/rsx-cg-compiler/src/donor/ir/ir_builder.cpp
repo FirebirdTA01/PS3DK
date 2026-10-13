@@ -6709,6 +6709,65 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             }
         }
 
+        // Literal exp / log / log10 fold exactly as their run-time lowerings
+        // compute (lowerExpLog): measured on 64 random lanes each in BOTH
+        // profiles, every lane bit-identical to
+        //   exp(x)   = exp2 fold of f32(x * 0x3fb8aa3a)
+        //   log(x)   = f32(f32(log2(x)) * 0x3f317218)
+        //   log10(x) = f32(f32(log2(x)) * 0x3e9a209b)
+        // where the exp2 / log2 folds are the ones above (the double result
+        // rounded once; subnormal results kept, exp(-90) is 0x0008ec2c).
+        // Correctly rounded exp misses by 1-35 ulp: the reference's log2(e)
+        // is one ulp below float32's.  An exp whose exp2 overflows keeps the
+        // folded product and leaves EX2 to run time, as the reference does
+        // (exp(89.0) is EX2 of 128.4); log of x <= 0 stays fully run time.
+        if ((module_->shaderStage == ShaderStage::Vertex ||
+             module_->shaderStage == ShaderStage::Fragment) && argValues.size() == 1 &&
+            (*builtinOp == IROp::Exp || *builtinOp == IROp::Log || *builtinOp == IROp::Log10) &&
+            (resultType.isScalar() || resultType.isVector()) &&
+            (resultType.isVector() ? resultType.elementType : resultType.baseType) != IRType::Float16)
+        {
+            constexpr double kLog2E = 1.4426949024200439453125;      // 0x3fb8aa3a
+            constexpr double kLn2 = 0.693147182464599609375;         // 0x3f317218
+            constexpr double kInvLog2Of10 = 0.3010300099849700927734375;  // 0x3e9a209b
+            std::vector<float> values;
+            if (extractFloatComponents(*currentFunction_, argValues[0], values) && !values.empty())
+            {
+                std::vector<float> scaled, folded;
+                bool allFinite = true;
+                for (float value : values)
+                {
+                    if (!std::isfinite(value)) { allFinite = false; break; }
+                    if (*builtinOp == IROp::Exp)
+                    {
+                        // One rounding each: the product of two binary32
+                        // values is exact in double.
+                        const float y = static_cast<float>(static_cast<double>(value) * kLog2E);
+                        if (!std::isfinite(y)) { allFinite = false; break; }
+                        scaled.push_back(y);
+                        const float r = static_cast<float>(std::exp2(static_cast<double>(y)));
+                        if (std::isfinite(r)) folded.push_back(r);
+                    }
+                    else
+                    {
+                        if (value <= 0.0f) { allFinite = false; break; }
+                        const float l2 = static_cast<float>(std::log2(static_cast<double>(value)));
+                        const double k = *builtinOp == IROp::Log ? kLn2 : kInvLog2Of10;
+                        folded.push_back(static_cast<float>(static_cast<double>(l2) * k));
+                    }
+                }
+                if (allFinite && folded.size() == values.size())
+                    return folded.size() == 1 ? createConstant(resultType, folded[0])
+                                              : createConstant(resultType, folded);
+                if (allFinite && *builtinOp == IROp::Exp && scaled.size() == values.size())
+                {
+                    const IRValueID y = scaled.size() == 1 ? createConstant(resultType, scaled[0])
+                                                           : createConstant(resultType, scaled);
+                    return emitInstruction(IROp::Exp2, resultType, {y});
+                }
+            }
+        }
+
         // Dot / length / normalize / lerp of literals, measured on 48-64
         // random inputs each in BOTH profiles (VP first, FP 2026-10-12; every
         // other order or precision misses some):

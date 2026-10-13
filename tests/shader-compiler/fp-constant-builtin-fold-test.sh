@@ -7,8 +7,11 @@
 # builtin in this profile; the folded program is one MUL reading the input
 # and the constant.  Edge rows - rsqrt and log2 of x <= 0, an exp2 that
 # overflows - stay run-time instructions, as the reference leaves them.
-# exp() is NOT folded: the reference's folded exp is 3-18 ulp from every
-# binary32 model measured, so it stays a run-time EX2 here.
+# exp / log / log10 fold the way their run-time lowerings compute: exp is
+# the exp2 fold of f32(x * 0x3fb8aa3a) (log2(e) one ulp low, as the
+# reference's multiply has it), log and log10 are f32(log2 fold * 0x3f317218
+# / 0x3e9a209b); an exp whose exp2 overflows keeps a run-time EX2, and log
+# of x <= 0 keeps its LG2.
 #
 # Usage: tests/shader-compiler/fp-constant-builtin-fold-test.sh <compiler>
 set -u
@@ -33,6 +36,13 @@ FOLDED = [
     ('log21', 'log2(float4(307.000763, 389.469025, 942.663879, 425.702057))', '4104318e 4109af93 411e16f0 410bbd3c'),
     ('frac0', 'frac(float4(35.8750763, -13.1659651, 0.499495864, -52.2187576))', '3f600500 3f558350 3effbdec 3f47ff80'),
     ('frac1', 'frac(float4(-12.8674288, -75.7769623, -5.9343791, 50.0751419))', '3e07c0c0 3e646400 3d866440 3d99e400'),
+    ('exp0', 'exp(float4(0.265944153, -16.4019413, 12.1587648, -13.7821245))', '3fa6ff2b 33a1ae43 483a499e 358ac64e'),
+    ('exp1', 'exp(float4(-9.52731323, 21.4118423, 22.8888874, 12.1609449))', '3898bf0c 4eed54bb 5001f033 483ab1b3'),
+    ('exp_tiny', 'exp(float4(-90.0, -104.0, 0.5, -87.5))', '0008ec2c 00000000 3fd3094c 006cb303'),
+    ('log0', 'log(float4(0.0022271187, 0.0209956933, 0.155928969, 1.04494688e-06))', 'c0c36ced c0774292 bfedde91 c15c583f'),
+    ('log1', 'log(float4(8889.55957, 691.108032, 0.052557528, 3.25337646e-06))', '41117b6c 40d139ba c03c88c2 c14a2c4f'),
+    ('log100', 'log10(float4(60.3577805, 5.79703885e-09, 11.7771626, 0.0381473042))', '3fe3ef12 c103c9e8 3f8917dc bfb59298'),
+    ('log101', 'log10(float4(748.380188, 133776920, 19.5759239, 135030.703))', '4037f19f 410205a9 3fa55728 40a42c82'),
     ('d0', 'dot(float4(-5.41331816, -1.08807659, -2.62803507, -4.60329819), float4(-3.27712703, 5.04632711, 8.45390129, 8.24506569))', 'c23fb070 00000000 00000000 00000000'),
     ('d1', 'dot(float4(2.44486666, -2.20816875, -4.22067118, 9.86312771), float4(8.58440399, 3.83918285, 7.76364946, -7.92835331))', 'c2c4e97b 00000000 00000000 00000000'),
     ('l0', 'length(float3(4.81628847, 8.21494389, 1.00342691))', '411934f3 00000000 00000000 00000000'),
@@ -43,7 +53,10 @@ FOLDED = [
 # Run-time edges: the opcode that must remain.
 EDGES = [('rsqrt_zero', 'rsqrt(0.0)', {'RSQ', 'DIVSQR', 'DIVSQ'}),
          ('log2_negative', 'log2(-1.0)', {'LG2'}),
-         ('exp2_overflow', 'exp2(200.0)', {'EX2'})]
+         ('exp2_overflow', 'exp2(200.0)', {'EX2'}),
+         ('exp_overflow', 'exp(89.0)', {'EX2'}),
+         ('log_zero', 'log(0.0)', {'LG2'}),
+         ('log10_negative', 'log10(-2.0)', {'LG2'})]
 fails = 0
 def compile_(name, expr):
     cg = work / (name + '.cg'); out = work / (name + '.fpo')
