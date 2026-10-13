@@ -275,6 +275,17 @@ struct VInstr
     bool selPerLane = false;
 };
 
+// Lane-packing slice 1 (infrastructure): a value's physical home in one R slot.
+// slot is the R-slot number; laneMask is the 4-bit set of physical lanes this
+// vreg owns, bit0 = x, bit1 = y, bit2 = z, bit3 = w.  Until the slot-sharing
+// slice every value owns the whole slot (laneMask 0xF), so this is descriptive
+// only and does not change allocation or output.
+struct LaneAllocation
+{
+    int     slot = 0;
+    uint8_t laneMask = 0xF;
+};
+
 struct VirtualProgram
 {
     std::vector<VInstr> instrs;
@@ -296,6 +307,10 @@ struct VirtualProgram
     std::unordered_map<int, int> texcoordDeclaredWidth;
     std::unordered_map<int, int> vregToPhys;
     std::unordered_map<int, bool> vregToFp16;
+    // Lane-packing slice 1: parallel to vregToPhys; the 4-bit lane mask each
+    // vreg owns in its slot (0xF = whole slot, the only value until the
+    // slot-sharing slice).  Set at every vregToPhys assignment.
+    std::unordered_map<int, uint8_t> vregLaneMask;
     int nextVpLiteralConst = 467;
     // Lowest const register the literal pool may take.  Uniforms grow DOWN
     // from 467 and matrices grow UP from 256, and the literal pool
@@ -11350,6 +11365,10 @@ private:
                     }
                 }
                 program_.vregToPhys[vi.dst.index] = phys;
+                // Lane-packing slice 1: every value currently owns its whole
+                // R slot (fresh handout, free-list reuse, or an output pin all
+                // land here).  0xF until the slot-sharing slice narrows it.
+                program_.vregLaneMask[vi.dst.index] = 0xF;
             }
             if (!vi.dst.none && !vi.dst.output && !vi.dst.address) {
                 auto physIt = program_.vregToPhys.find(vi.dst.index);
@@ -11418,6 +11437,31 @@ private:
                 }
             }
         }
+        // Lane-packing slice 1 invariant: until the slot-sharing slice lands,
+        // every vreg owns its whole R slot.  Assert the map agrees so we don't
+        // silently drift between the two tables in a later refactor.
+#ifdef NDEBUG
+        (void)program_.vregLaneMask;
+#else
+        for (const auto& [vreg, phys] : program_.vregToPhys)
+        {
+            const auto it = program_.vregLaneMask.find(vreg);
+            if (it == program_.vregLaneMask.end())
+            {
+                std::fprintf(stderr,
+                             "lane-packing: vreg %d in vregToPhys but not in vregLaneMask (phys=%d)\n",
+                             vreg, phys);
+                std::abort();
+            }
+            if (it->second != 0xF)
+            {
+                std::fprintf(stderr,
+                             "lane-packing: vreg %d laneMask = 0x%X, expected 0xF (phys=%d)\n",
+                             vreg, it->second, phys);
+                std::abort();
+            }
+        }
+#endif
     }
 };
 
