@@ -25,6 +25,13 @@ The version stamped into builds is generated from the most recent
   `cell<Algo>Digest` and `BlockInit` / `BlockUpdate` / `BlockResult` for
   data that arrives in pieces.  The new sample `hello-ppu-hash` checks the
   standard test vectors for all six and reports PPU throughput.
+- **Random numbers, memory pools and spinlocks.**  New `<sys/random_number.h>`
+  (`sys_get_random_number`), `<sys/mempool.h>` (`sys_mempool_create`,
+  `allocate_block`, `try_allocate_block`, `free_block`, `get_count`,
+  `destroy`) and `<sys/spinlock.h>` (`sys_spinlock_initialize`, `lock`,
+  `trylock`, `unlock`).  The new sample `hello-ppu-lv2-mempool` fills a
+  buffer with random bytes, exhausts and refills a block pool, and counts
+  to 200000 from two threads under a spinlock.
 - **LV2 kernel timers.**  `<sys/timer.h>` now has `sys_timer_create`,
   `sys_timer_destroy`, `sys_timer_get_information`, `_sys_timer_start`,
   `sys_timer_stop`, `sys_timer_connect_event_queue` and

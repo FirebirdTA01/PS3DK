@@ -58,12 +58,12 @@ done
 # RANDOM_NUMBER_MAX_SIZE; a token-identical spelling is a legal redundant
 # macro redefinition and compiles clean under -Werror.  If the two do not
 # match, -Werror rejects the redefinition and this row fails.  <lv2/system.h>
-# is a PSL1GHT header, absent from this tree; SKIP when it is not installed.
-if [ -f "$inc/lv2/system.h" ]; then
+# is a PSL1GHT header, installed with the SDK, not in this tree.
+if [ -f "$sdk/ppu/include/lv2/system.h" ]; then
     probe=$(mktemp -d)
     printf '#include <lv2/system.h>\n#include <sys/random_number.h>\n' > "$probe/red.c"
     if out=$("$cc" -x c -std=gnu99 -Wall -Wextra -Werror \
-            -I"$work/ov" -I"$inc" -I"$sdk/ppu/include" \
+            -I"$work/ov" -I"$sdk/ppu/include" \
             -c "$probe/red.c" -o "$probe/red.o" 2>&1); then
         echo "sys-helpers-surface: ok   redefinition (lv2/system.h + sys/random_number.h)"
     else
@@ -73,7 +73,7 @@ if [ -f "$inc/lv2/system.h" ]; then
     fi
     rm -rf "$probe"
 else
-    echo "sys-helpers-surface: SKIP redefinition (no lv2/system.h under $inc)"
+    echo "sys-helpers-surface: FAIL redefinition: no lv2/system.h under $sdk/ppu/include"; status=1
 fi
 
 IMPORTS="sys_get_random_number
