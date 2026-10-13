@@ -7,15 +7,12 @@
 #
 # Rows use `s = s * k[i] + p.yzwx;` with |k| <= 0.5, so every value stays
 # bounded (|s| <= 2|p|) and is judged in binary32 against independent float32
-# arithmetic.  Our code generation takes two instructions per line where the
-# reference takes one MAD, so the boundary is pinned on OUR count:
-#   271 lines                     543 instructions   accepted, by value
-#   271 lines + one multiply      544 instructions   accepted, by value (the limit)
-#   272 lines                     545 instructions   refused (the reference fits
-#                                                    it: a named gap)
-#   545 lines                                        refused by both
-# Re-derive the 543/544/545 rows when the MAD is fused.
-#
+# arithmetic (within 1e-5 relative: the VP MAD's rounding is not pinned
+# here).  Each line is one MAD, as in the reference (one input, one
+# constant), so the boundary is the reference's own count:
+#   543 lines                     543 instructions   accepted, by value
+#   543 lines + one multiply      544 instructions   accepted, by value (the limit)
+#   545 lines                     545 instructions   refused by both
 # Usage: tests/shader-compiler/vp-instruction-budget-test.sh <compiler>
 set -u
 compiler="${1:-${RSX_CG_COMPILER:-}}"
@@ -53,8 +50,8 @@ def compile_one(name, text):
     return p, o
 
 fails = []
-for label, n, tail, want_count in (('543 instructions accepted', 271, '', 543),
-                                   ('544 instructions accepted', 271, TAIL, 544)):
+for label, n, tail, want_count in (('543 instructions accepted', 543, '', 543),
+                                   ('544 instructions accepted', 543, TAIL, 544)):
     p, o = compile_one('n%d%s' % (n, 't' if tail else ''), source(n, tail))
     if p.returncode != 0 or not o.exists():
         fails.append('%s: refused (rc %d)' % (label, p.returncode)); print('  %-30s REFUSED' % label); continue
@@ -72,7 +69,7 @@ for label, n, tail, want_count in (('543 instructions accepted', 271, '', 543),
     ok = count == want_count and wrong == 0
     print('  %-30s %s' % (label, 'ok' if ok else '%d instructions, %d wrong' % (count, wrong)))
     if not ok: fails.append('%s: %d instructions, %d wrong' % (label, count, wrong))
-for label, n in (('545 instructions refused', 272), ('545 lines refused (both)', 545)):
+for label, n in (('545 instructions refused (both)', 545),):
     p, o = compile_one('n%d' % n, source(n))
     ok = p.returncode == 1 and not o.exists() and 'vp-instruction-budget' in p.stdout + p.stderr
     print('  %-30s %s' % (label, 'refused' if ok else 'NOT refused (rc %d)' % p.returncode))
