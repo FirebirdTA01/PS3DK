@@ -202,6 +202,11 @@ jobs:
       - name: Test the sys_ synchronisation surface
         run: bash tests/sdk/sys-sync-surface-test.sh
 
+      # Skips without PS3DEV; LV2 timers 70-76 and the sleeps 141/142 by
+      # syscall number, and sys_time_get_system_time as the import.
+      - name: Test the LV2 timer surface
+        run: bash tests/sdk/sys-timer-surface-test.sh
+
       # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
       # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
       # the package ships plus make.

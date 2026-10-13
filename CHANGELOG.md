@@ -16,6 +16,26 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **LV2 kernel timers.**  `<sys/timer.h>` now has `sys_timer_create`,
+  `sys_timer_destroy`, `sys_timer_get_information`, `_sys_timer_start`,
+  `sys_timer_stop`, `sys_timer_connect_event_queue` and
+  `sys_timer_disconnect_event_queue`, with the `sys_timer_start_oneshot`,
+  `sys_timer_start_periodic` and `sys_timer_start_periodic_absolute`
+  helpers.  Each expiry posts one event to the connected queue carrying
+  its name, both data words and the expiry time.  The new sample
+  `hello-ppu-lv2-timer` runs an event loop from a periodic timer and fires
+  a one-shot.
+
+### Fixed
+
+- **`sys_time_get_system_time()` returns system time.**  It returned the
+  wall-clock time in microseconds since 1970 instead of the microseconds
+  since the system started that kernel timers and event timestamps use, so
+  a timer deadline computed from it never arrived.  Differences between
+  two readings were already correct.
+
 ## [v0.23.0] — 2026-10-12
 
 ### Fixed

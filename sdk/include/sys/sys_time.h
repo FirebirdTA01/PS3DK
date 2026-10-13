@@ -1,11 +1,9 @@
 /*
  * PS3 Custom Toolchain — <sys/sys_time.h> the reference SDK compat shim.
  *
- * reference-SDK samples read a 64-bit microsecond monotonic counter via
- * `sys_time_get_system_time()`.  Our PSL1GHT tree exposes the same
- * underlying LV2 syscall through <sys/systime.h>'s `sysGetCurrentTime`
- * (seconds + nanoseconds), so we compose the microsecond counter from
- * that.  `sys_time_get_timebase_frequency()` forwards to
+ * reference-SDK samples read the 64-bit microsecond LV2 system time via
+ * `sys_time_get_system_time()`, the sysPrxForUser import declared below.
+ * `sys_time_get_timebase_frequency()` forwards to
  * `sysGetTimebaseFrequency()` unchanged.
  */
 
@@ -23,13 +21,13 @@
 extern "C" {
 #endif
 
-static inline system_time_t sys_time_get_system_time(void)
-{
-    uint64_t sec = 0;
-    uint64_t nsec = 0;
-    sysGetCurrentTime(&sec, &nsec);
-    return (system_time_t)(sec * 1000000ull + nsec / 1000ull);
-}
+/* LV2 system time: microseconds since the system started, the clock the
+ * kernel timers (<sys/timer.h>), event-queue timeouts and timer events use.
+ * It is the sysPrxForUser export (liblv2_stub), not wall-clock time: an
+ * earlier inline version here returned sys_time_get_current_time() in
+ * microseconds since 1970, so an absolute timer deadline computed from it
+ * lay decades in the future and never fired. */
+extern system_time_t sys_time_get_system_time(void);
 
 static inline uint64_t sys_time_get_timebase_frequency(void)
 {
