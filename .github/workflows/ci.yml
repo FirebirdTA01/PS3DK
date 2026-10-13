@@ -215,6 +215,14 @@ jobs:
       - name: Test the cell/hash digests against hashlib
         run: bash tests/sdk/hash-vectors-test.sh
 
+      # Skips without PS3DEV; the random-number, spinlock and mempool
+      # helpers (sys/random_number.h, sys/spinlock.h, sys/mempool.h) each of
+      # whose eleven functions is a sysPrxForUser import (a call, not an sc),
+      # compile clean in C/C++17 in both data models, and the RANDOM_NUMBER_MAX_SIZE
+      # redefinition check against <lv2/system.h> compiles under -Werror.
+      - name: Test the LV2 helper (random-number, spinlock, mempool) surface
+        run: bash tests/sdk/sys-helpers-surface-test.sh
+
       # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
       # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
       # the package ships plus make.

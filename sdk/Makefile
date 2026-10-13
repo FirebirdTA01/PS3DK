@@ -91,6 +91,9 @@ HEADERS := \
     include/net/select.h \
     include/sys/stat.h \
     include/sys/synchronization.h \
+    include/sys/random_number.h \
+    include/sys/spinlock.h \
+    include/sys/mempool.h \
     include/sys/mutex.h \
     include/sys/cond.h \
     include/sys/event_queue.h \
