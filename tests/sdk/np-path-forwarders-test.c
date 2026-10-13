@@ -1,6 +1,6 @@
 /* tests/sdk/np-path-forwarders-test.c
  *
- * Reference TU for the np/ tree forwarders. Each forwarder resolves
+ * Test TU for the np/ tree forwarders. Each forwarder resolves
  * <np/X.h> to its cell/ target:
  *   np/basic.h        -> cell/np/basic.h
  *   np/custom_menu.h  -> cell/np/custom_menu.h
