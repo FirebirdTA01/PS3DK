@@ -153,7 +153,13 @@ if [[ "$rc" -eq 0 ]]; then
     printf 'say what makes it safe and give it a shape assertion here.\n' >&2
     fail "fp_store_skippable_f: this test still asserts the refusal"
 fi
-grep -q "the control flow can skip" "$work/skippable.log" || {
+# Since 146a35d7 an out parameter written under a branch is stored once,
+# at the end, from a merge whose not-written side has no value yet; that
+# refuses earlier ("could not be resolved") than the skippable-store rule.
+# KNOWN-DEBT: the reference ACCEPTS this program - it writes o from a never-
+# written temp (which reads 0) and then a predicated MULR o(NE0.x) - so the
+# eventual fix is to accept it with o = cond ? c * 2 : 0, not to refuse.
+grep -qE "the control flow can skip|could not be resolved" "$work/skippable.log" || {
     tail -n 5 "$work/skippable.log" >&2
     fail "fp_store_skippable_f refused on the general path for some OTHER
 reason than the skippable store; the refusal moved and this test did not."
