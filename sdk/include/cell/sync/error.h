@@ -10,6 +10,12 @@
 #ifndef PS3TC_CELL_SYNC_ERROR_H
 #define PS3TC_CELL_SYNC_ERROR_H
 
+/* An SPU compile finds the SPU tree's header of this name next on the
+ * include path (the in-tree SPU libraries list this PPU tree first). */
+#ifdef __SPU__
+#include_next <cell/sync/error.h>
+#else
 #include <cell/sync.h>
+#endif
 
 #endif  /* PS3TC_CELL_SYNC_ERROR_H */
