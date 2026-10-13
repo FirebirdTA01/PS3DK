@@ -46,6 +46,10 @@ The version stamped into builds is generated from the most recent
   (`SCE_NP_SUBJECT_STATUS_GET_AGE` and the rest), the TSS size and the
   `PSHANDLE` names, and `<cell/np/tus.h>` adds the `sceNpTss*` context
   names over the TUS context calls.
+- **NP error codes.**  `<np/error.h>` (and `<cell/np/error.h>`) define every
+  NP error code - matching, clans, trophy, commerce, DRM, authentication,
+  community, core, basic, signaling, SNS and the rest, 931 in all.  It can
+  be included before or after the other NP headers.
 - **Per-type include paths.**  `<cell/sync/error.h>`, `lfqueue.h`,
   `mutex.h`, `queue.h`, `rwm.h`, `<cell/rtc/error.h>`, `rtcsvc.h`,
   `<cell/ssl/error.h>`, `<cell/keyboard/libkb.h>` and

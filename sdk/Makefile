@@ -200,6 +200,7 @@ HEADERS := \
     include/cell/http/response.h \
     include/cell/np.h \
     include/cell/np/common.h \
+    include/cell/np/error.h \
     include/cell/np/init.h \
     include/cell/np/basic.h \
     include/cell/np/friendlist.h \
@@ -290,6 +291,7 @@ HEADERS := \
     include/cell/sheap/key_sheap_semaphore.h \
     include/cell/sysutil_ap.h \
     include/np/common.h \
+    include/np/error.h \
     include/np/ticket.h \
     include/np/tustorage.h \
     include/cell/sysutil_remoteplay.h \

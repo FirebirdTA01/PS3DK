@@ -244,6 +244,11 @@ jobs:
       - name: Test the NP common, ticket and TUS names
         run: bash tests/sdk/np-content-test.sh
 
+      # The NP error header: 931 guarded codes; compiles before and after the
+      # NP headers that define some of them (skips the compile without PS3DEV).
+      - name: Test the NP error codes header
+        run: bash tests/sdk/np-error-codes-test.sh
+
       # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
       # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
       # the package ships plus make.
