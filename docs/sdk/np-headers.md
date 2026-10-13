@@ -14,14 +14,11 @@ guards in the underlying `cell/np` headers do the deduplication.
 
 ## <np/common.h>
 
-Forwarder over the shared NP types and constants: the communication-id,
-npId, online-ID and related length macros, the avatar-size and avatar-url
-types, the ticket versions, ticket parameter id/type, the entitlement and
-language types, and the structure-version constants the utility functions
-expect. In this tree it pulls in `<cell/np/common.h>` (the shared types
-and the `SCE_NP_SUBJECT_*` accessors), `<cell/np/init.h>` (the manager /
-signalling / SNS umbrella for the `cellNp*` call families) and
-`<cell/np2/init.h>` (the `cellNp2*` surface).
+Forwarder over the shared NP types and constants. In this tree it pulls in
+`<cell/np/common.h>` (the shared NP types, sizes and language codes, and the
+`SCE_NP_SUBJECT_*` accessors), `<cell/np/init.h>` (`sceNpInit` /
+`sceNpTerm`, the minimum pool size and the `sceNpUtil*` npId comparisons) and
+`<cell/np2/init.h>` (`sceNp2Init` / `sceNp2Term` and the auth/OAuth types).
 
 ## <np/ticket.h>
 

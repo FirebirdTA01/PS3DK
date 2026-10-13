@@ -23,7 +23,7 @@ at the bottom of this page exercises four of them end-to-end.
 | video_upload  | `<cell/sysutil_video_upload.h>`   | `libsysutil_video_upload_stub.a`   | `CELL_SYSMODULE_SYSUTIL_VIDEO_UPLOAD` 0x0041 | 1 |
 | print         | `<cell/sysutil_print.h>`          | `libsysutil_print_stub.a`          | `CELL_SYSMODULE_PRINT`          0xf02a | 12 |
 | rec           | `<cell/sysutil_rec.h>`            | `libsysutil_rec_stub.a`            | `CELL_SYSMODULE_SYSUTIL_REC`    0x0035 | 7 |
-| remoteplay    | `<cell/sysutil_remoteplay.h>`     | `libsysutil_remoteplay_stub.a`     | (no dedicated constant in `<cell/sysmodule.h>`; use the shared `CELL_SYSMODULE_SYSUTIL` 0x0015) | 4 |
+| remoteplay    | `<cell/sysutil_remoteplay.h>`     | `libsysutil_remoteplay_stub.a`     | (no dedicated constant in `<cell/sysmodule.h>`) | 4 |
 | game_exec     | `<cell/sysutil_game_exec.h>`      | `libsysutil_game_exec_stub.a`      | `CELL_SYSMODULE_SYSUTIL_GAME_EXEC` 0x0037 | 5 |
 | licensearea   | `<cell/sysutil_licensearea.h>`    | `libsysutil_licensearea_stub.a`    | `CELL_SYSMODULE_SYSUTIL_LICENSEAREA` 0x0049 | 1 |
 | cross_controller | `<cell/sysutil_cross_controller.h>` | `libsysutil_cross_controller_stub.a` | `CELL_SYSMODULE_SYSUTIL_CROSS_CONTROLLER` 0x005c | 1 |
@@ -55,10 +55,8 @@ in each library and the return types they return.
 
 ## Error codes
 
-Each of the twelve carries its own `CELL_<LIB>_*` or `CELL_<NAME>_ERROR_*`
-set, defined in its own header. The shared `CELL_SYSUTIL_ERROR_*` family
-in `<sysutil/sysutil_common.h>` applies where a call's contract matches
-that family. The `CELL_SYSUTIL_LICENSE_AREA_*` values (the result of
+Each of the twelve defines its own error codes in its own header.
+The `CELL_SYSUTIL_LICENSE_AREA_*` values (the result of
 `cellSysutilGetLicenseArea`) are also in `<sysutil/sysutil_common.h>`:
 `J 0`, `A 1`, `E 2`, `H 3`, `K 4`, `C 5`, `OTHER 100`.
 
@@ -72,14 +70,14 @@ that family. The `CELL_SYSUTIL_LICENSE_AREA_*` values (the result of
 - **System-written, fixed-layout structs.** A few structs are written back
   by the system module and carry an explicit fixed size in the header —
   `CellPhotoImportFileData` (1608 bytes), `CellVideoUploadParam` (48
-  bytes) and the `CellSysconfBtDevice` list (96 bytes per device, 1536 for
-  the list) — so callers allocate to that exact size on both data models.
+  bytes) and `CellSysconfBtDeviceInfo` (96 bytes per device) in a
+  `CellSysconfBtDeviceList` of 1536 bytes — so callers allocate to that exact size on both data models.
 - **Callback-driven steps.** The photo / video export and import flows, the
-  print `LoadAsync` steps, the rec open/start/stop/close handshake, the
-  cross-controller transfer, and the video-upload finalize report through
-  the user's callback; their synchronous `int` / `int32_t` return just
-  indicates the call was accepted. By contrast, `cellRecGetInfo` and
-  `cellRecSetInfo` are synchronous queries against a running recorder.
+  print `LoadAsync` steps, the rec open/start/stop/close sequence, the
+  cross-controller transfer and the video upload report their results
+  through the user's callback; each header's opening comment says what its
+  callback receives.  `cellRecGetInfo` and `cellRecSetInfo` return their
+  result directly.
 - **rec version-dependent container size.** `CELL_REC_MAX_MEMORY_CONTAINER_SIZE`
   is `(9 * 1024 * 1024)` below SDK 3.0.0 and `(16 * 1024 * 1024)` at or
   above it, per the header's conditional on `CELL_SDK_VERSION`.
