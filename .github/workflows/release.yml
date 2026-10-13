@@ -23,6 +23,10 @@ on:
         description: 'Run build-toolchain-windows (long, ~2-3h)'
         type: boolean
         default: false
+      candidate_tag:
+        description: 'Release candidate: build as if tagged vX.Y.Z (local tag in each job, never pushed; empty = ordinary dispatch)'
+        type: string
+        default: ''
 
 permissions:
   contents: write   # create releases + upload assets
@@ -39,8 +43,17 @@ jobs:
         with:
           fetch-depth: 0   # version.sh needs full tag history
 
+      - name: Candidate tag (dispatch only, never pushed)
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: bash scripts/ci-candidate-tag.sh "$CANDIDATE_TAG"
+
       - id: v
         name: Run scripts/version.sh
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
         run: |
           version="$(./scripts/version.sh --format=plain)"
           bare="$(./scripts/version.sh --format=bare)"
@@ -50,8 +63,15 @@ jobs:
           # (workflow_dispatch) GITHUB_REF is refs/heads/<branch> and we
           # skip the match — the dispatch is for testing the pipeline, not
           # publishing a real release, and the publish job is gated below
-          # so nothing ships.
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+          # so nothing ships.  A release-candidate dispatch (candidate_tag)
+          # tags its checkout locally and is held to the same exact match.
+          if [ -n "${CANDIDATE_TAG}" ]; then
+            echo "Candidate:     $CANDIDATE_TAG"
+            if [ "$version" != "$CANDIDATE_TAG" ]; then
+              echo "::error::version.sh ($version) does not match the candidate tag ($CANDIDATE_TAG)."
+              exit 1
+            fi
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             tag="${GITHUB_REF##*/}"
             echo "Tag:           $tag"
             if [ "$version" != "$tag" ]; then
@@ -71,9 +91,12 @@ jobs:
         # workflow_dispatch the working tree's version is whatever
         # version.sh derives from "tag + commits-since" and tools/VERSION
         # legitimately lags.  The dispatch never publishes, so we just
-        # log the gap and move on.
+        # log the gap and move on.  A candidate dispatch (candidate_tag)
+        # is held to the tag build's rule: tools/VERSION must already match.
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] || [ -n "${CANDIDATE_TAG}" ]; then
             ./scripts/sync-versions.sh --check
           else
             echo "Manual dispatch — running sync-versions.sh in write mode so the build picks up the current version, but not failing on drift."
@@ -88,6 +111,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Candidate tag (dispatch only, never pushed)
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: bash scripts/ci-candidate-tag.sh "$CANDIDATE_TAG"
 
       - name: Install build deps
         run: |
@@ -242,6 +272,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Candidate tag (dispatch only, never pushed)
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: bash scripts/ci-candidate-tag.sh "$CANDIDATE_TAG"
+
       - name: Install build deps + mingw-w64 cross compiler
         run: |
           sudo apt-get update
@@ -380,6 +417,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Candidate tag (dispatch only, never pushed)
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: bash scripts/ci-candidate-tag.sh "$CANDIDATE_TAG"
+
       - name: Stage source bundle
         run: |
           version="${{ needs.verify-version.outputs.version }}"
@@ -433,6 +477,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Candidate tag (dispatch only, never pushed)
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: bash scripts/ci-candidate-tag.sh "$CANDIDATE_TAG"
 
       - name: Install build deps
         run: |
@@ -519,6 +570,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Candidate tag (dispatch only, never pushed)
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: bash scripts/ci-candidate-tag.sh "$CANDIDATE_TAG"
+
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -602,6 +660,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Candidate tag (dispatch only, never pushed)
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: bash scripts/ci-candidate-tag.sh "$CANDIDATE_TAG"
 
       - name: Install build deps + mingw-w64 cross compiler
         run: |
@@ -877,6 +942,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Candidate tag (dispatch only, never pushed)
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_tag != ''
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: bash scripts/ci-candidate-tag.sh "$CANDIDATE_TAG"
 
       - uses: actions/download-artifact@v5
         with:
