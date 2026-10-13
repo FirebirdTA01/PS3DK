@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.23.0] — 2026-10-12
+
 ### Fixed
 
 - **Pointers are formed in 64-bit registers (PPU, 32-bit pointer model).**
@@ -90,6 +92,18 @@ The version stamped into builds is generated from the most recent
   trophy imports too, while projects that link the three stub archives by
   name link exactly as before.  Linking both
   ways at once does not define anything twice.
+
+### Known issues
+
+- Intermittent stalls at a FIFO wrap: in two RPCS3 runs during release
+  testing, a large GCM program stopped with the RSX's read position
+  frozen and the PPU waiting in the wrap callback. Ten later runs of the
+  release build did not stall. The cause is not known yet; a dependency
+  between the wrap callback's wait for the RSX to reach the end of the
+  command buffer and RSX work still outstanding is being investigated.
+- Samples that pass a 64 KB command buffer to `cellGcmInit`
+  (`hello-ppu-cellgcm-triangle`, `-alpha-mask` and others) show a black
+  screen on a PS3; they run in RPCS3.
 
 ## [v0.22.4] — 2026-10-10
 
