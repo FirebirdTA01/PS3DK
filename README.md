@@ -8,7 +8,7 @@ The SDK now has its own runtime, native cell-style headers, NID/FNID-driven stub
 
 - **Toolchain:** PPU GCC 12.4.0, SPU GCC 9.5.0, binutils 2.42, newlib 4.4.0, and PPU GDB 14.2 build and install end-to-end on Linux.
 - **PPU ABI:** default PPU binaries use ELF64 with 32-bit C pointers for CellOS compatibility. `-mlp64` selects the LP64 multilib. See [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md).
-- **SDK export coverage:** 3451 of 4796 tracked exports are covered by the installed SDK tree, or 72.0% across 99 tracked libraries. The full generated matrix is in [docs/coverage.md](docs/coverage.md).
+- **SDK export coverage:** 4336 of 4802 tracked exports (90.3%) across 99 tracked libraries are covered by the v0.24.0 install tree; 96 libraries are complete, and the remaining gaps are in `libm_stub`, `libstdc++_stub` and `libsync2_stub`. The full generated matrix is in [docs/coverage.md](docs/coverage.md).
 - **Network and NP coverage:** the current network-stack wave covers cellNetCtl, sys_net, SSL, HTTP/HTTPUtil, and the NP family (`sysutil_np`, NP2, trophy, TUS, clans, commerce2, SNS, and utility surfaces), adding roughly 700 exports and 12 tracked network validation samples.
 - **Samples:** 122 tracked CMake sample projects: toolchain 10, GCM 21, audio 2, codec 14, sysutil 37, firmware helper 4, LV2 7, SPU 3, SPURS 11, network 12, and dbgfont 1. See [samples/README.md](samples/README.md).
 - **Install contract:** `make -C sdk install` produces the installed headers, native archives, multilib stub archives, and `$PS3DK/.ps3dk-install-manifest`; `cmake/ps3-self.cmake` refuses stale installs at configure time.
