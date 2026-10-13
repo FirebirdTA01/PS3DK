@@ -9911,11 +9911,15 @@ private:
         case VOp::Lg2: case VOp::Ex2: case VOp::Frc: case VOp::Flr:
         case VOp::Sge: case VOp::Slt: case VOp::Sgt: case VOp::Sle:
         case VOp::Seq: case VOp::Sne:
+        // The reference reads |r0| and -f[TEX0] as a fetch's coordinate.
+        case VOp::Tex: case VOp::Txp:
             return true;
         default:
             return false;
         }
     }
+
+    static bool fragmentFetch(VOp op) { return op == VOp::Tex || op == VOp::Txp; }
 
     // FP: abs() and negation are source modifiers.  `MOV R2.x, |R1.x|;
     // MUL R0, R3, R2.xxxx` is `MUL R0, R3, |R1.xxxx|` (the reference reads
@@ -9946,16 +9950,26 @@ private:
                     continue;
                 const VSrc s = mov.srcs[0];
                 const int d = mov.dst.index;
-                if (s.kind != VSrcKind::Temp || s.relative || s.index == d || (!s.abs && !s.neg))
+                const bool input = s.kind == VSrcKind::Input;
+                if ((s.kind != VSrcKind::Temp && !input) || s.relative ||
+                    (!input && s.index == d) || (!s.abs && !s.neg))
                     continue;
-                // Same precision on both sides: the source's writers decide it.
-                bool ok = true, sourceWritten = false;
-                for (size_t k = 0; k < i && ok; ++k)
+                // Same precision on both sides: the source's writers decide it
+                // (an input register is binary32).
+                bool ok = true, sourceWritten = input;
+                if (input && mov.dst.fp16) ok = false;
+                for (size_t k = 0; k < i && ok && !input; ++k)
                     if (writesTemp(code[k], s.index)) {
                         sourceWritten = true;
                         if (code[k].dst.fp16 != mov.dst.fp16) ok = false;
                     }
                 if (!ok || !sourceWritten) continue;
+                // A fetch reads the coordinate value this copy defines: the
+                // copy's lanes are a prefix (x, xy, xyz, xyzw) and the fetch
+                // names them in place.  Lanes past the value's width are not
+                // consumed, so they need not be written.
+                const int wm = mov.dst.writemask;
+                const bool prefixMask = wm == 0x1 || wm == 0x3 || wm == 0x7 || wm == 0xf;
                 std::vector<std::pair<size_t, size_t>> uses;
                 for (size_t k = 0; k < code.size() && ok; ++k) {
                     if (k != i && writesTemp(code[k], d)) ok = false;
@@ -9963,18 +9977,37 @@ private:
                         const VSrc& r = code[k].srcs[n];
                         if (r.kind != VSrcKind::Temp || r.index != d) continue;
                         if (k <= i || !fragmentModifierReader(code[k].op)) { ok = false; break; }
+                        if (fragmentFetch(code[k].op)) {
+                            bool inPlace = n == 0 && prefixMask;
+                            for (int l = 0; l < 4 && inPlace; ++l)
+                                if ((wm & (1 << l)) && r.swizzle[l] != l) inPlace = false;
+                            if (!inPlace) ok = false;
+                            else uses.push_back({k, n});
+                            continue;
+                        }
                         int lanes = 0;
                         const int req = requiredSourceMask(code[k], n);
                         for (int l = 0; l < 4; ++l)
                             if (req & (1 << l)) lanes |= 1 << r.swizzle[l];
-                        if ((lanes & mov.dst.writemask) != lanes) ok = false;
+                        if ((lanes & wm) != lanes) ok = false;
                         else uses.push_back({k, n});
+                    }
+                }
+                // One input register per instruction: an input source may
+                // only join a reader whose other sources name no other input.
+                for (size_t u = 0; u < uses.size() && ok && input; ++u) {
+                    const VInstr& reader = code[uses[u].first];
+                    for (size_t q = 0; q < reader.srcs.size(); ++q) {
+                        const VSrc& o = reader.srcs[q];
+                        if (q == uses[u].second) continue;
+                        if (o.kind == VSrcKind::Temp && o.index == d) { ok = false; break; }
+                        if (o.kind == VSrcKind::Input && o.index != s.index) { ok = false; break; }
                     }
                 }
                 if (!ok || uses.empty()) continue;
                 for (const auto& [k, n] : uses)
                     for (size_t m = i + 1; m < k && ok; ++m)
-                        if (barrier(code[m]) || writesTemp(code[m], s.index)) ok = false;
+                        if (barrier(code[m]) || (!input && writesTemp(code[m], s.index))) ok = false;
                 if (!ok) continue;
                 for (const auto& [k, n] : uses) {
                     VSrc& r = code[k].srcs[n];
@@ -10008,13 +10041,27 @@ private:
             const VSrc t = m.srcs[0];
             if (t.kind != VSrcKind::Temp || t.relative || t.abs || t.neg) continue;
             VInstr& p = code[mi - 1];
+            // Every fragment fetch carries an explicit fp32 precision override
+            // (its encoding, not its destination's), so that one is kept.
+            const bool fetch = fragmentFetch(p.op);
             if (p.dst.none || p.dst.output || p.dst.address || p.dst.index != t.index ||
                 p.dst.outputPin || p.dst.preferredPhys >= 0 || p.dst.fp16 != m.dst.fp16 ||
                 p.predicate != 0 || p.ccUpdate || p.preservePartialOutputMask ||
-                p.scalarSourceDemandMask != 0 || p.fpPrecisionOverride != -1)
+                p.scalarSourceDemandMask != 0 ||
+                (p.fpPrecisionOverride != -1 && !fetch))
                 continue;
             const bool bcast = broadcastOp(p.op) || p.op == VOp::Sin || p.op == VOp::Cos;
-            if (!bcast && !componentwiseOp(p.op)) continue;
+            // A fetch cannot move its result lanes: it writes the colour only
+            // when the store reads it in place (TEX R0 for `return tex2D(..)`;
+            // `.zyxw` keeps the MOV, as in the reference).
+            if (fetch) {
+                bool inPlace = true;
+                for (int l = 0; l < 4 && inPlace; ++l)
+                    if ((m.dst.writemask & (1 << l)) && t.swizzle[l] != l) inPlace = false;
+                if (!inPlace) continue;
+            } else if (!bcast && !componentwiseOp(p.op)) {
+                continue;
+            }
             bool ok = true;
             for (int l = 0; l < 4 && ok; ++l)
                 if ((m.dst.writemask & (1 << l)) && !(p.dst.writemask & (1 << t.swizzle[l])))
@@ -10031,7 +10078,7 @@ private:
                         ok = false;
             }
             if (!ok) continue;
-            if (!bcast)
+            if (!bcast && !fetch)
                 for (VSrc& src : p.srcs) {
                     if (src.kind == VSrcKind::None) continue;
                     const auto old = src.swizzle;
