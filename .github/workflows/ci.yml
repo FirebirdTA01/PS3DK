@@ -207,6 +207,11 @@ jobs:
       - name: Test the LV2 timer surface
         run: bash tests/sdk/sys-timer-surface-test.sh
 
+      # Skips without PS3DEV; sys_vm_* 300-312, page attribute 351, container
+      # size 343 by syscall number, the five mmapper memory calls as imports.
+      - name: Test the LV2 virtual-memory surface
+        run: bash tests/sdk/sys-vm-surface-test.sh
+
       # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
       # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
       # the package ships plus make.
