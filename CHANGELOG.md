@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.24.0] — 2026-10-13
+
 ### Added
 
 - **Shader compiler accepts more Cg.**  rsx-cg-compiler now compiles
