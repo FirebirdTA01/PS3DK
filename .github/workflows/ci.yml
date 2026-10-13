@@ -826,6 +826,9 @@ jobs:
       # (x2/x4/x8 and /2../8 on MUL, ADD, MAD, DP3), as the reference emits it.
       - name: Fragment output scale folds like the reference
         run: bash tests/shader-compiler/fp-output-scale-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test rsx-cg-compiler constant if-conditions
+        run: bash tests/shader-compiler/fp-constant-branch-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A vertex rsqrt, exp2, log2 or frac of a literal folds to the reference's constant
         run: bash tests/shader-compiler/vp-constant-builtin-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A vertex program past 32 temporary registers is refused

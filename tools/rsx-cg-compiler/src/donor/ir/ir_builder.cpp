@@ -2640,6 +2640,11 @@ void IRBuilder::ScopeState::unfold(std::unordered_map<std::string, IRValueID>& j
     }
 }
 
+namespace {
+bool extractFloatComponents(IRFunction& fn, IRValueID id, std::vector<float>& out);
+bool extractIntegerScalar(IRFunction& fn, IRValueID id, uint32_t& rawBits, bool& isUnsigned);
+}
+
 void IRBuilder::buildIfStmt(IfStmt* stmt)
 {
     // Macro debug switches commonly arrive as literal 0/1. Semantic analysis
@@ -2672,6 +2677,84 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
     // Evaluate condition
     IRValueID condValue = buildExpr(condition);
     condValue = normalizeCondition(condition, condValue);
+
+    // A condition the builder has reduced to a constant takes one arm at
+    // compile time, as the reference does: `static const float mode = 1;
+    // if (mode > 0.5) ...` and `if (i == 1)` in an unrolled loop leave no
+    // comparison and no predicated other arm there (measured), where ours
+    // compared literals at run time and selected.  Folded here: a constant
+    // bool, or one comparison of two scalar constants of the same kind
+    // (float32 with float32, integer with integer), the cases constCondition
+    // already treats as exact; a half operand or an int/float mix is left to
+    // run time.  The condition's own instructions are then dead.
+    const auto foldedCondition = [&](ExprNode* expr, IRValueID id) -> std::optional<bool> {
+        IRValue* v = currentFunction_->getValue(id);
+        if (auto* c = dynamic_cast<IRConstant*>(v))
+        {
+            if (c->type.isVector() || c->type.isMatrix()) return std::nullopt;
+            if (std::holds_alternative<bool>(c->value)) return std::get<bool>(c->value);
+            return std::nullopt;
+        }
+        // The comparison that produced the value, emitted into this block.
+        const IRInstruction* cmp = nullptr;
+        for (const auto& inst : currentBlock_->instructions)
+            if (inst->result == id) cmp = inst.get();
+        if (!cmp || cmp->operands.size() != 2 || cmp->resultType.isVector()) return std::nullopt;
+        if (cmp->op != IROp::CmpEq && cmp->op != IROp::CmpNe && cmp->op != IROp::CmpLt &&
+            cmp->op != IROp::CmpLe && cmp->op != IROp::CmpGt && cmp->op != IROp::CmpGe)
+            return std::nullopt;
+        // The source comparison's operand types: same category, not half or
+        // fixed (constCondition's exactness rules).
+        auto* bin = expr && expr->kind == ExprKind::Binary ? static_cast<BinaryExpr*>(expr) : nullptr;
+        if (!bin || !bin->left || !bin->right || !bin->left->resolvedType || !bin->right->resolvedType)
+            return std::nullopt;
+        const auto category = [](BaseType t) {
+            switch (t) {
+            case BaseType::Float: return 2;
+            case BaseType::Half: case BaseType::Fixed: return 3;
+            case BaseType::Bool: return 0;
+            default: return 1;
+            }
+        };
+        const int lc = category(bin->left->resolvedType->baseType);
+        const int rc = category(bin->right->resolvedType->baseType);
+        if (lc != rc || lc == 3 || lc == 0) return std::nullopt;
+        double a = 0.0, b = 0.0;
+        if (lc == 2)
+        {
+            std::vector<float> x, y;
+            if (!extractFloatComponents(*currentFunction_, cmp->operands[0], x) || x.size() != 1 ||
+                !extractFloatComponents(*currentFunction_, cmp->operands[1], y) || y.size() != 1)
+                return std::nullopt;
+            a = x[0]; b = y[0];
+        }
+        else
+        {
+            uint32_t x = 0, y = 0;
+            bool ux = false, uy = false;
+            if (!extractIntegerScalar(*currentFunction_, cmp->operands[0], x, ux) ||
+                !extractIntegerScalar(*currentFunction_, cmp->operands[1], y, uy) || ux != uy)
+                return std::nullopt;
+            a = ux ? static_cast<double>(x) : static_cast<double>(static_cast<int32_t>(x));
+            b = uy ? static_cast<double>(y) : static_cast<double>(static_cast<int32_t>(y));
+        }
+        if (a != a || b != b) return std::nullopt;
+        switch (cmp->op)
+        {
+        case IROp::CmpEq: return a == b;
+        case IROp::CmpNe: return a != b;
+        case IROp::CmpLt: return a < b;
+        case IROp::CmpLe: return a <= b;
+        case IROp::CmpGt: return a > b;
+        default:          return a >= b;
+        }
+    };
+    if (const std::optional<bool> taken = foldedCondition(condition, condValue))
+    {
+        if (*taken) thenArm();
+        else if (elseArm) (*elseArm)();
+        return;
+    }
 
     // Inside a hardware loop region (FP-LOOP) the arms are built FLAT, one
     // after the other in the region's own block, and joined by the same
