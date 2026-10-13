@@ -232,6 +232,12 @@ jobs:
       - name: Test the cell header-path forwarders
         run: bash tests/sdk/header-path-forwarders-test.sh
 
+      # Skips without PS3DEV; the sysutil headers for stub libraries that had
+      # none compile in C/C++17, ILP32/LP64 with their layouts pinned, and link
+      # all 50 functions against the twelve stub archives.
+      - name: Test the sysutil API headers against their stub archives
+        run: bash tests/sdk/sysutil-api-headers-test.sh
+
       # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
       # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
       # the package ships plus make.

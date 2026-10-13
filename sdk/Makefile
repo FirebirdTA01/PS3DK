@@ -109,6 +109,19 @@ HEADERS := \
     include/sysutil/sysutil_sysparam.h \
     include/sysutil/sysutil_savedata.h \
     include/sysutil/sysutil_msgdialog.h \
+    include/sysutil/sysutil_remoteplay.h \
+    include/sysutil/sysutil_licensearea.h \
+    include/sysutil/sysutil_game_exec.h \
+    include/sysutil/sysutil_game_common.h \
+    include/sysutil/sysutil_sysconf_ext.h \
+    include/sysutil/sysutil_cross_controller.h \
+    include/sysutil/sysutil_photo_decode.h \
+    include/sysutil/sysutil_photo_export.h \
+    include/sysutil/sysutil_photo_import.h \
+    include/sysutil/sysutil_video_export.h \
+    include/sysutil/sysutil_video_upload.h \
+    include/sysutil/sysutil_print.h \
+    include/sysutil/sysutil_rec.h \
     include/sysutil/sysutil_userinfo.h \
     include/sysutil/sysutil_bgdl.h \
     include/sysutil/sysutil_subdisplay.h \
@@ -276,6 +289,18 @@ HEADERS := \
     include/cell/sheap/key_sheap_rwm.h \
     include/cell/sheap/key_sheap_semaphore.h \
     include/cell/sysutil_ap.h \
+    include/cell/sysutil_remoteplay.h \
+    include/cell/sysutil_licensearea.h \
+    include/cell/sysutil_game_exec.h \
+    include/cell/sysutil_sysconf_ext.h \
+    include/cell/sysutil_cross_controller.h \
+    include/cell/sysutil_photo_decode.h \
+    include/cell/sysutil_photo_export.h \
+    include/cell/sysutil_photo_import.h \
+    include/cell/sysutil_video_export.h \
+    include/cell/sysutil_video_upload.h \
+    include/cell/sysutil_print.h \
+    include/cell/sysutil_rec.h \
     include/cell/audio.h \
     include/cell/mixer.h \
     include/cell/mixer/define.h \

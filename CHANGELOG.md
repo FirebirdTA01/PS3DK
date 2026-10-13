@@ -32,6 +32,14 @@ The version stamped into builds is generated from the most recent
   `trylock`, `unlock`).  The new sample `hello-ppu-lv2-mempool` fills a
   buffer with random bytes, exhausts and refills a block pool, and counts
   to 200000 from two threads under a spinlock.
+- **Sysutil headers for photo, video, print, recording and more.**  The
+  stub libraries for photo decode / export / import, video export and
+  upload, printing, in-game recording, Remote Play, game exec, license
+  area, Cross-Controller and Bluetooth device lists now have headers
+  (`<sysutil/sysutil_photo_export.h>`, `<cell/sysutil_rec.h>` and so on),
+  usable from LP64 programs too.  The new sample `hello-ppu-sysutil-queries`
+  reads the license area, Remote Play status, boot game information and the
+  paired Bluetooth devices.
 - **Per-type include paths.**  `<cell/sync/error.h>`, `lfqueue.h`,
   `mutex.h`, `queue.h`, `rwm.h`, `<cell/rtc/error.h>`, `rtcsvc.h`,
   `<cell/ssl/error.h>`, `<cell/keyboard/libkb.h>` and
