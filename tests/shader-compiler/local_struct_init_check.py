@@ -24,9 +24,10 @@ DEBTS = {'array_braces', 'array_member', 'sampler_field',
          'constructor_as_argument', 'constructor_member',
          'global_const_nested', 'uniform_default_nested',
          'short_field', 'bool_field'}
+# implicit_member left this list when the vertex path gained int-to-float
+# conversion (VP-CF integration): it is now a value row like the others.
 VP_DEBTS = {'int_field': 'VP float-to-int lowering deferred',
-            'numeric_half': 'half precision is fragment-only',
-            'implicit_member': 'VP int-to-float lowering deferred'}
+            'numeric_half': 'half precision is fragment-only'}
 
 
 def expected(name, t, u):
@@ -69,8 +70,11 @@ def judge(name, blob, profile):
         for t in itertools.product((-.5, 0., .25, 1.5), repeat=4):
             # Distinct unused input catches incorrect read-set allocation.
             inputs = {'TEX0': list(t), 'TEX1': [8., 4., 2., 1.]}
-            got = (evaluate_vp(patched, {'u.uv': u},
-                               {8: list(t), 9: inputs['TEX1']}, binary32=True).get(0)
+            # A struct input with no semantics binds implicitly: v.uv takes
+            # the lowest unclaimed attribute, ATTR0, as in the reference.
+            vp_inputs = ({0: list(t), 9: inputs['TEX1']} if name == 'implicit_member'
+                         else {8: list(t), 9: inputs['TEX1']})
+            got = (evaluate_vp(patched, {'u.uv': u}, vp_inputs, binary32=True).get(0)
                    if vertex else fp_eval.evaluate(patched, inputs))
             want = expected(name, t, u)
             assert got == want, (name, profile, t, u, got, want)
