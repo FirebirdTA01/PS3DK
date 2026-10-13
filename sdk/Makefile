@@ -289,6 +289,9 @@ HEADERS := \
     include/cell/sheap/key_sheap_rwm.h \
     include/cell/sheap/key_sheap_semaphore.h \
     include/cell/sysutil_ap.h \
+    include/np/common.h \
+    include/np/ticket.h \
+    include/np/tustorage.h \
     include/cell/sysutil_remoteplay.h \
     include/cell/sysutil_licensearea.h \
     include/cell/sysutil_game_exec.h \

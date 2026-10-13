@@ -221,6 +221,20 @@ int sceNpTssGetDataAsync(SceNpTusTransactionId transId, SceNpTssSlotId slotId, S
 int sceNpTssGetDataNoLimit(void);
 int sceNpTssGetDataNoLimitAsync(void);
 
+/* The enumerated types, by name; their values are the SCE_NP_TUS_* /
+ * SCE_NP_TSS_* constants above. */
+typedef int SceNpTusOeratorType;
+typedef int SceNpTusVariableSortType;
+typedef int SceNpTusDataStatusSortType;
+typedef int SceNpTssStatusCodeType;
+typedef int SceNpTssIfType;
+
+/* Title small storage shares the TUS title and transaction contexts. */
+#define sceNpTssCreateTitleCtx(commId, passphrase, selfNpId) sceNpTusCreateTitleCtx(commId, passphrase, selfNpId)
+#define sceNpTssCreateTransactionCtx(titleCtxId)  sceNpTusCreateTransactionCtx(titleCtxId)
+#define sceNpTssDestroyTitleCtx(titleCtxId)       sceNpTusDestroyTitleCtx(titleCtxId)
+#define sceNpTssDestroyTransactionCtx(reqId)      sceNpTusDestroyTransactionCtx(reqId)
+
 #ifdef __cplusplus
 }
 #endif

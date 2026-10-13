@@ -40,6 +40,12 @@ The version stamped into builds is generated from the most recent
   usable from LP64 programs too.  The new sample `hello-ppu-sysutil-queries`
   reads the license area, Remote Play status, boot game information and the
   paired Bluetooth devices.
+- **NP common, ticket and TUS names.**  `<np/common.h>`, `<np/ticket.h>`
+  and `<np/tustorage.h>` now exist; `<cell/np/common.h>` adds the NP
+  language codes, the ticket subject accessors
+  (`SCE_NP_SUBJECT_STATUS_GET_AGE` and the rest), the TSS size and the
+  `PSHANDLE` names, and `<cell/np/tus.h>` adds the `sceNpTss*` context
+  names over the TUS context calls.
 - **Per-type include paths.**  `<cell/sync/error.h>`, `lfqueue.h`,
   `mutex.h`, `queue.h`, `rwm.h`, `<cell/rtc/error.h>`, `rtcsvc.h`,
   `<cell/ssl/error.h>`, `<cell/keyboard/libkb.h>` and

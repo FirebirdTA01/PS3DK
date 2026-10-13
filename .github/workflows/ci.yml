@@ -238,6 +238,12 @@ jobs:
       - name: Test the sysutil API headers against their stub archives
         run: bash tests/sdk/sysutil-api-headers-test.sh
 
+      # Skips without PS3DEV; the added NP common/ticket/TUS names compile in
+      # C/C++17, ILP32/LP64 with their values pinned, and the TSS context
+      # names link against the TUS stub archive.
+      - name: Test the NP common, ticket and TUS names
+        run: bash tests/sdk/np-content-test.sh
+
       # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
       # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
       # the package ships plus make.
