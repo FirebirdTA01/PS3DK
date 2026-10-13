@@ -813,6 +813,11 @@ jobs:
       # colour is written by the instruction that computes it; value-judged.
       - name: Fragment modifier copies and direct output writes
         run: bash tests/shader-compiler/fp-modifier-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      # Fragment literal rsqrt/exp2/log2/frac and dot/length/normalize/lerp fold
+      # to the reference's const blocks bit for bit; the measured edges stay run time.
+      - name: Fragment literal builtins fold like the reference
+        run: bash tests/shader-compiler/fp-constant-builtin-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A vertex rsqrt, exp2, log2 or frac of a literal folds to the reference's constant
         run: bash tests/shader-compiler/vp-constant-builtin-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A vertex program past 32 temporary registers is refused

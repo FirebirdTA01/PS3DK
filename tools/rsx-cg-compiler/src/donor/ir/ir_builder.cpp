@@ -6670,12 +6670,14 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             }
         }
 
-        // VP literal rsqrt / exp2 / log2 / frac, measured on 64 random inputs
-        // each plus edges: the double-precision result rounded once to
-        // binary32 (subnormal results kept).  rsqrt and log2 of x <= 0 and an
-        // exp2 that overflows stay run-time instructions, as the reference
-        // leaves them; then nothing in the vector is folded here.
-        if (module_->shaderStage == ShaderStage::Vertex && argValues.size() == 1 &&
+        // Literal rsqrt / exp2 / log2 / frac, measured on 64 random inputs
+        // each plus edges in BOTH profiles (VP first, FP 2026-10-12): the
+        // double-precision result rounded once to binary32 (subnormal results
+        // kept).  rsqrt and log2 of x <= 0 and an exp2 that overflows stay
+        // run-time instructions, as the reference leaves them; then nothing
+        // in the vector is folded here.
+        if ((module_->shaderStage == ShaderStage::Vertex ||
+             module_->shaderStage == ShaderStage::Fragment) && argValues.size() == 1 &&
             (*builtinOp == IROp::RSqrt || *builtinOp == IROp::Exp2 ||
              *builtinOp == IROp::Log2 || *builtinOp == IROp::Frac) &&
             (resultType.isScalar() || resultType.isVector()))
@@ -6707,14 +6709,16 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             }
         }
 
-        // VP dot / length / normalize / lerp of literals, measured on 48-64
-        // random inputs each (every other order or precision misses some):
+        // Dot / length / normalize / lerp of literals, measured on 48-64
+        // random inputs each in BOTH profiles (VP first, FP 2026-10-12; every
+        // other order or precision misses some):
         //   dot       binary32 sum of the rounded products, left to right;
         //   length    1 / f32(1 / sqrt(dot)), the RSQ-then-RCP rule of sqrt;
         //   normalize each lane times f32(1 / sqrt(dot));
         //   lerp      a + f32(t * f32(b - a)).
         // A zero or negative dot (length, normalize) is left to run time.
-        if (module_->shaderStage == ShaderStage::Vertex &&
+        if ((module_->shaderStage == ShaderStage::Vertex ||
+             module_->shaderStage == ShaderStage::Fragment) &&
             (*builtinOp == IROp::Dot || *builtinOp == IROp::Length ||
              *builtinOp == IROp::Normalize || *builtinOp == IROp::Lerp) &&
             (resultType.isScalar() || resultType.isVector()) &&
