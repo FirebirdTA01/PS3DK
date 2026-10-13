@@ -13,7 +13,8 @@
 # / 0x3e9a209b); an exp whose exp2 overflows keeps a run-time EX2, and log
 # of x <= 0 keeps its LG2.  sqrt / sin / cos / tan fold with the vertex
 # rules; sqrt of x <= 0 stays at run time.  A literal vector divisor is one
-# MUL by the per-lane reciprocals.
+# MUL by the per-lane reciprocals.  max / min / clamp / saturate / floor /
+# ceil / sign / round / step / smoothstep / fmod of literals fold too.
 #
 # Usage: tests/shader-compiler/fp-constant-builtin-fold-test.sh <compiler>
 set -u
@@ -97,6 +98,36 @@ for name, expr, keep in EDGES:
     ok = bool(ops & keep)
     fails += not ok
     print('fp-constant-builtin-fold: %s %s keeps a run-time %s (%s)' % ('ok  ' if ok else 'FAIL', name, '/'.join(sorted(keep)), ' '.join(sorted(ops))))
+# Component-wise builtins of literals: one instruction, and the program
+# with a = 1 gives the reference's values (measured as a * (expr + 1.0), so
+# no folded lane is zero and every lane is written).
+COMPWISE = [
+    ('max0', 'max(float4(3.62450814, -0.843062758, -4.71548653, -1.09736204), float4(-1.79011369, -3.15089798, -0.0634935498, 3.13673329))', '4093fbf8 3e20b428 3f6fbee3 4084601e'),
+    ('min0', 'min(float4(-3.42618155, 0.737915933, 1.71920955, -3.80099869), float4(-3.7322309, -3.57927394, -1.63105237, -3.28558993))', 'c02edcdf c02512d3 bf218ca6 c0334390'),
+    ('clamp0', 'clamp(float4(-2.62273622, 1.88550305, 1.68355668, -2.66292644), -1.0, 2.0)', '00000000 4038ac15 402bbf64 00000000'),
+    ('saturate0', 'saturate(float4(-0.217722952, 1.65065837, -0.654165387, -0.724127889))', '3f800000 40000000 3f800000 3f800000'),
+    ('floor0', 'floor(float4(-5.97182274, -2.94785714, -2.60005021, -1.89849973))', 'c0a00000 c0000000 c0000000 bf800000'),
+    ('ceil0', 'ceil(float4(-3.22520542, -3.47325563, -5.98040771, 1.82384026))', 'c0000000 c0000000 c0800000 40400000'),
+    ('sign0', 'sign(float4(-3.5, 0.0, 2.25, -0.0))', '00000000 3f800000 40000000 3f800000'),
+    ('round0', 'round(float4(2.5, -2.5, 0.49999997, -7.3))', '40800000 bf800000 40000000 c0c00000'),
+    ('step0', 'step(float4(-0.0604715273, -0.23739779, 1.23804855, 0.894264579), float4(-0.0870666727, -1.331815, 0.445085645, 1.64311647))', '3f800000 3f800000 3f800000 40000000'),
+    ('smooth0', 'smoothstep(float4(-1.0388875, -0.161248475, -0.23385489, -0.545390129), float4(2.56731343, 2.16478968, 1.66606033, 1.07205665), float4(-0.879646122, 1.10299599, 0.0744238645, 2.33270097))', '3f80ba0a 3fc8559d 3f89042f 40000000'),
+    ('fmod0', 'fmod(float4(-22.2809277, -20.1464653, 17.1287918, 2.2991128), float4(3.0, -2.5, 0.7, -6.1))', 'be8fd5b0 3f5a8140 3faa15e0 405324aa'),
+]
+for name, expr, want in COMPWISE:
+    ins, err = compile_(name, expr, 'return a * (%s + 1.0);')
+    if ins is None:
+        fails += 1; print('fp-constant-builtin-fold: FAIL %s: compile: %s' % (name, err)); continue
+    ops = [fs.render(w, i).split()[1] for i, (w, c) in enumerate(ins)]
+    blob = (work / (name + '.fpo')).read_bytes()
+    try:
+        got = ' '.join(struct.pack('>f', x).hex() for x in ev.evaluate(blob, {'TEX0': [1.0] * 4}))
+    except Exception as e:  # noqa: BLE001
+        got = 'unmodelled: %s' % e
+    ok = len(ops) == 1 and got == want
+    fails += not ok
+    print('fp-constant-builtin-fold: %s %s %s%s' % ('ok  ' if ok else 'FAIL', name, ' '.join(ops),
+          '' if ok else '  values %s, want %s' % (got, want)))
 for name, div, want in DIVISORS:
     ins, err = compile_(name, div, 'return a / %s;')
     if ins is None:

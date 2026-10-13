@@ -6560,6 +6560,35 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         };
         if (floating && !resultType.isMatrix() && !resultType.isArray() && fits(ta) && fits(tb))
         {
+            // Literal operands fold, as the reference folds them (fragment,
+            // 64/64 random lanes): q = f32(x / y), then frac(|q|) * |y| with
+            // the sign of x - the same steps as the run-time expansion below.
+            if (module_->shaderStage == ShaderStage::Fragment &&
+                (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float32)
+            {
+                const size_t width = resultType.isVector() ? static_cast<size_t>(resultType.vectorSize) : 1;
+                std::vector<float> xa, ya;
+                if (extractFloatComponents(*currentFunction_, argValues[0], xa) &&
+                    extractFloatComponents(*currentFunction_, argValues[1], ya) &&
+                    (xa.size() == width || xa.size() == 1) && (ya.size() == width || ya.size() == 1))
+                {
+                    if (xa.size() == 1) xa.assign(width, xa[0]);
+                    if (ya.size() == 1) ya.assign(width, ya[0]);
+                    std::vector<float> folded(width);
+                    bool ok = true;
+                    for (size_t l = 0; l < width && ok; ++l)
+                    {
+                        if (ya[l] == 0.0f || !std::isfinite(xa[l]) || !std::isfinite(ya[l])) { ok = false; break; }
+                        volatile float q = xa[l] / ya[l];
+                        const float aq = std::fabs(q);
+                        const float f = aq - std::floor(aq);
+                        volatile float r = f * std::fabs(ya[l]);
+                        folded[l] = xa[l] < 0.0f ? -r : r;
+                    }
+                    if (ok)
+                        return width == 1 ? createConstant(resultType, folded[0]) : createConstant(resultType, folded);
+                }
+            }
             const auto splat = [&](IRValueID v, const IRTypeInfo& t) {
                 if (!resultType.isVector() || t.vectorSize == resultType.vectorSize) return v;
                 std::vector<IRValueID> lanes(static_cast<size_t>(resultType.vectorSize), v);
@@ -6865,6 +6894,84 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
                                                            : createConstant(resultType, scaled);
                     return emitInstruction(IROp::Exp2, resultType, {y});
                 }
+            }
+        }
+
+        // Component-wise builtins of literals, folded in both profiles as the
+        // reference folds them (fragment measured 2026-10-13: every one of
+        // these is a constant there, ours were run-time instructions):
+        //   max / min / clamp / saturate / floor / ceil / trunc / sign / step
+        //             exact;
+        //   round     floor(f32(x + 0.5)) (64/64 lanes: -2.5 -> -2, 2.5 -> 3);
+        //   smoothstep t = saturate(f32(f32(x - e0) / f32(e1 - e0))), then
+        //             f32(f32(t * t) * f32(3 - f32(2 * t))) (64/64 lanes).
+        // A scalar argument broadcasts.  pow is not folded: no binary32 model
+        // measured matches the reference's folded pow on more than 46/64.
+        if ((module_->shaderStage == ShaderStage::Vertex ||
+             module_->shaderStage == ShaderStage::Fragment) &&
+            (*builtinOp == IROp::Max || *builtinOp == IROp::Min || *builtinOp == IROp::Clamp ||
+             *builtinOp == IROp::Saturate || *builtinOp == IROp::Floor || *builtinOp == IROp::Ceil ||
+             *builtinOp == IROp::Trunc || *builtinOp == IROp::Sign || *builtinOp == IROp::Round ||
+             *builtinOp == IROp::Step || *builtinOp == IROp::SmoothStep) &&
+            (resultType.isScalar() || resultType.isVector()) &&
+            (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float32)
+        {
+            const size_t width = resultType.isVector() ? static_cast<size_t>(resultType.vectorSize) : 1;
+            std::vector<std::vector<float>> args(argValues.size());
+            bool constant = !argValues.empty();
+            for (size_t i = 0; i < argValues.size() && constant; ++i)
+            {
+                constant = extractFloatComponents(*currentFunction_, argValues[i], args[i]) &&
+                           (args[i].size() == width || args[i].size() == 1);
+                if (constant && args[i].size() == 1 && width > 1)
+                    args[i].assign(width, args[i][0]);
+                for (float x : args[i])
+                    if (!std::isfinite(x)) constant = false;
+            }
+            const size_t arity = (*builtinOp == IROp::Max || *builtinOp == IROp::Min ||
+                                  *builtinOp == IROp::Step) ? 2
+                               : (*builtinOp == IROp::Clamp || *builtinOp == IROp::SmoothStep) ? 3 : 1;
+            // round and smoothstep round per step; only the fragment rule is
+            // measured, so a vertex program keeps them at run time.
+            if (module_->shaderStage == ShaderStage::Vertex &&
+                (*builtinOp == IROp::Round || *builtinOp == IROp::SmoothStep))
+                constant = false;
+            if (constant && args.size() == arity)
+            {
+                const auto r32 = [](double v) { volatile float r = static_cast<float>(v); return static_cast<float>(r); };
+                std::vector<float> folded(width);
+                bool ok = true;
+                for (size_t l = 0; l < width && ok; ++l)
+                {
+                    const float x = args[0][l];
+                    switch (*builtinOp)
+                    {
+                    case IROp::Max:      folded[l] = std::fmax(x, args[1][l]); break;
+                    case IROp::Min:      folded[l] = std::fmin(x, args[1][l]); break;
+                    case IROp::Clamp:    folded[l] = std::fmin(std::fmax(x, args[1][l]), args[2][l]); break;
+                    case IROp::Saturate: folded[l] = std::fmin(std::fmax(x, 0.0f), 1.0f); break;
+                    case IROp::Floor:    folded[l] = std::floor(x); break;
+                    case IROp::Ceil:     folded[l] = std::ceil(x); break;
+                    case IROp::Trunc:    folded[l] = std::trunc(x); break;
+                    case IROp::Sign:     folded[l] = x > 0.0f ? 1.0f : x < 0.0f ? -1.0f : 0.0f; break;
+                    case IROp::Round:    folded[l] = std::floor(r32(static_cast<double>(x) + 0.5)); break;
+                    case IROp::Step:     folded[l] = args[1][l] >= x ? 1.0f : 0.0f; break;
+                    case IROp::SmoothStep:
+                    {
+                        const float span = r32(static_cast<double>(args[1][l]) - x);
+                        if (span == 0.0f) { ok = false; break; }
+                        float t = r32(static_cast<double>(r32(static_cast<double>(args[2][l]) - x)) / span);
+                        t = std::fmin(std::fmax(t, 0.0f), 1.0f);
+                        const float tt = r32(static_cast<double>(t) * t);
+                        const float k = r32(3.0 - static_cast<double>(r32(2.0 * static_cast<double>(t))));
+                        folded[l] = r32(static_cast<double>(tt) * k);
+                        break;
+                    }
+                    default: ok = false; break;
+                    }
+                }
+                if (ok)
+                    return width == 1 ? createConstant(resultType, folded[0]) : createConstant(resultType, folded);
             }
         }
 
