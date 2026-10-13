@@ -5,6 +5,7 @@
 #include <ppu-types.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>    /* memcpy, for the subject accessors */
 #include <sys/sys_types.h>
 
 #ifndef ATTRIBUTE_PRXPTR
@@ -252,6 +253,78 @@ typedef enum SceNpAvatarSizeType {
     SCE_NP_AVATAR_SIZE_MIDDLE = 1,
     SCE_NP_AVATAR_SIZE_SMALL = 2
 } SceNpAvatarSizeType;
+
+/* Alternative names for the lengths above. */
+#ifndef SCE_NET_NP_PSHANDLE_MIN_LENGTH
+#define SCE_NET_NP_PSHANDLE_MIN_LENGTH   SCE_NET_NP_ONLINEID_MIN_LENGTH
+#define SCE_NET_NP_PSHANDLE_MAX_LENGTH   SCE_NET_NP_ONLINEID_MAX_LENGTH
+#define SCE_NET_NP_SUBHANDLE_MAX_LENGTH  SCE_NET_NP_ONLINENAME_MAX_LENGTH
+#define SCE_NET_NP_ICON_URL_MAX_LENGTH   SCE_NET_NP_AVATAR_URL_MAX_LENGTH
+#endif
+typedef struct SceNpAvatarUrl SceNpUserIcon;
+
+/* Title small storage sizes. */
+#ifndef SCE_NP_TSS_MAX_SIZE
+#define SCE_NP_TSS_MAX_SIZE              (64 * 1024U)
+#define SCE_NP_TSS_EXTRA_SLOT_MAX_SIZE   (4 * 1024 * 1024U)
+#define SCE_NET_NP_TSS_MAX_SIZE          SCE_NP_TSS_MAX_SIZE
+#endif
+
+/* Structure versions the NP utility functions expect. */
+#ifndef SCE_NP_UTIL_NPID_VERSION
+#define SCE_NP_UTIL_NPID_VERSION         1
+#define SCE_NP_UTIL_NPLOBBYID_VERSION    1
+#define SCE_NP_UTIL_NPROOMID_VERSION     1
+#endif
+
+/* Languages, as NP reports a user's or a ticket's language. */
+#ifndef SCE_NP_LANG_JAPANESE
+#define SCE_NP_LANG_JAPANESE        0
+#define SCE_NP_LANG_ENGLISH_US      1
+#define SCE_NP_LANG_FRENCH          2
+#define SCE_NP_LANG_SPANISH         3
+#define SCE_NP_LANG_GERMAN          4
+#define SCE_NP_LANG_ITALIAN         5
+#define SCE_NP_LANG_DUTCH           6
+#define SCE_NP_LANG_PORTUGUESE_PT   7
+#define SCE_NP_LANG_RUSSIAN         8
+#define SCE_NP_LANG_KOREAN          9
+#define SCE_NP_LANG_CHINESE_T       10   /* traditional */
+#define SCE_NP_LANG_CHINESE_S       11   /* simplified */
+#define SCE_NP_LANG_FINNISH         12
+#define SCE_NP_LANG_SWEDISH         13
+#define SCE_NP_LANG_DANISH          14
+#define SCE_NP_LANG_NORWEGIAN       15
+#define SCE_NP_LANG_POLISH          16
+#define SCE_NP_LANG_PORTUGUESE_BR   17
+#define SCE_NP_LANG_ENGLISH_GB      18
+#define SCE_NP_LANG_TURKISH         19
+#define SCE_NP_LANG_SPANISH_LA      20
+#define SCE_NP_LANG_ARABIC          21
+#define SCE_NP_LANG_FRENCH_CA       22
+#define SCE_NP_LANG_ENGLISH         SCE_NP_LANG_ENGLISH_US    /* older name */
+#define SCE_NP_LANG_PORTUGUESE      SCE_NP_LANG_PORTUGUESE_PT /* older name */
+#endif
+
+#ifndef SCE_NP_FRIEND_MAX_NUM
+#define SCE_NP_FRIEND_MAX_NUM       100
+#endif
+#ifndef SCE_NP_PORT
+#define SCE_NP_PORT                 3658   /* NP's registered port */
+#endif
+
+/* Reading a ticket's subject fields (sceNpManagerGetTicketParam): the
+ * online id, the status word (age, suspension, chat restriction, content
+ * rating) and the region (two-letter country code, language). */
+#ifndef SCE_NP_SUBJECT_STATUS_GET_AGE
+#define SCE_NP_SUBJECT_ONLINE_ID_GET_ONLINE_ID(raw, onlineid) do { memcpy((onlineid)->data, (raw), SCE_NET_NP_ONLINEID_MAX_LENGTH);      (onlineid)->term = '\0'; } while (0)
+#define SCE_NP_SUBJECT_STATUS_GET_AGE(u32)           (((u32) >> 24) & 0x7f)
+#define SCE_NP_SUBJECT_STATUS_IS_SUSPENDED(u32)      ((u32) & 0x80)
+#define SCE_NP_SUBJECT_STATUS_IS_CHAT_DISABLED(u32)  ((u32) & 0x100)
+#define SCE_NP_SUBJECT_STATUS_CONTENT_RATING(u32)    ((u32) & 0x200)
+#define SCE_NP_SUBJECT_REGION_GET_COUNTRY_CODE(raw, cc) do { (cc)->data[0] = ((const char *)(raw))[0];      (cc)->data[1] = ((const char *)(raw))[1];      (cc)->term = '\0'; } while (0)
+#define SCE_NP_SUBJECT_REGION_GET_LANGUAGE_CODE(raw)  (((const uint8_t *)(raw))[3])
+#endif
 
 #ifdef __cplusplus
 }

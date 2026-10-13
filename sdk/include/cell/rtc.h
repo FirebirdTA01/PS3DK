@@ -43,6 +43,13 @@ extern "C" {
 #define CELL_RTC_ERROR_INVALID_SECOND        0x80010626
 #define CELL_RTC_ERROR_INVALID_MICROSECOND    0x80010627
 
+/* Error-code constructor, on top of the helpers in <cell/error.h>.
+ * CELL_RTC_MAKE_ERROR(1) == CELL_RTC_ERROR_NOT_INITIALIZED. */
+#ifndef CELL_RTC_MAKE_ERROR
+#define CELL_RTC_MAKE_ERROR(status) \
+	CELL_ERROR_MAKE_ERROR(CELL_ERROR_FACILITY_SYSTEM_SERVICE, 0x0600 | (status))
+#endif
+
 /* ---- day-of-week codes (returned by cellRtcGetDayOfWeek) ------------ */
 
 #define CELL_RTC_DAYOFWEEK_SUNDAY     0

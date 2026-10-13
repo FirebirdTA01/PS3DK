@@ -16,6 +16,7 @@ samples/
 ├── sysutil/       sysutil callbacks, dialogs, save/game/system data
 ├── network/       networking module load + API validation tests
 ├── lv2/           lv2 syscall primitives (threading, synchronisation)
+├── util/          self-contained PPU utility libraries (hash)
 ├── spu/           SPU toolchain + PPU/SPU interop
 └── spurs/         libspurs sync primitives + Spurs task runtime
 ```
@@ -64,6 +65,7 @@ non-PSL1GHT-backed library pull one of the nidgen-built stub archives.
 | `hello-ppu-gamedata` | `cellGameBootCheck` + `ContentPermit` + `GetParam{Int,String}`; FNIDs 0xf52639ea / 0x70acec67 / 0x3a5d726a / 0xb7a45caf | **green** + RPCS3 runtime-verified |
 | `hello-ppu-screenshot` | `cellScreenShot{Enable,Disable,SetParameter}` backed purely by `libsysutil_screenshot_stub.a`; FNIDs 0x9e33ab8f / 0xfc6f4e74 / 0xd3ad63e4 | **green** + RPCS3 runtime-verified (loader resolved the SPRX cleanly) |
 | `hello-ppu-ap` | `cellSysutilApGetRequiredMemSize` + `Off` over `libsysutil_ap_stub.a`; FNIDs 0x9e67e0dd / 0x3343824c / 0x90c2bb19 | **green** + RPCS3 runtime-verified (returns expected 1 MiB container size) |
+| `hello-ppu-sysutil-queries` | License area, Remote Play status and volume, boot game info, HOME export path and paired Bluetooth devices through the new sysutil headers; loads and unloads each system module | **green** + RPCS3 runtime-verified |
 | `hello-ppu-l10n` | `cellSysmoduleLoadModule(CELL_SYSMODULE_L10N)` + `eucjp2sjis()` — 165-export libl10n scaling test for the nidgen-archive pipeline | **green** + RPCS3 runtime-verified (all four EUC-JP→SJIS conversions match) |
 
 ## lv2/
@@ -93,6 +95,14 @@ cellAudio mixer + cellAudioOut configuration / discovery.
 |---|---|---|
 | `hello-ppu-audio` | cellAudio Init / PortOpen / PortStart / Stop / NotifyEventQueue / AddData chain; plays a chip-tune melody via direct ring fills against `libaudio_stub.a` | **green** + RPCS3 runtime-verified |
 | `hello-ppu-audio-out` | cellAudioOut surface in `<cell/cell_audio_out.h>`: GetNumberOfDevice / GetDeviceInfo / GetState / GetConfiguration via `libsysutil_audio_out_stub.a`, then a 1 s 440 Hz sine tone through cellAudio so both the discovery API and the mixer downstream get exercised in the same boot | **green** + RPCS3 runtime-verified (nDevice=0 is an RPCS3 HLE quirk; FNIDs resolve and tone plays) |
+
+## util/
+
+Self-contained PPU utility libraries.
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-hash` | `<cell/hash/*.h>`: MD5, SHA-1, SHA-224/256/384/512 one-call digests against the published test vectors, the block API fed in uneven pieces, the refusals, and 4 MB throughput per algorithm | **green** + RPCS3 runtime-verified (42/42) |
 
 ## spu/
 

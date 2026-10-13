@@ -38,6 +38,15 @@ extern "C" {
 #define CELL_SYSUTIL_ERROR_BASE_AP                0x8002cd00
 #define CELL_SYSUTIL_ERROR_BASE_BGDL              0x8002ce00
 #define CELL_SYSUTIL_ERROR_BASE_USERINFO          0x8002c300
+
+/* cellSysutilGetLicenseArea results (<cell/sysutil_licensearea.h>). */
+#define CELL_SYSUTIL_LICENSE_AREA_J               0     /* Japan */
+#define CELL_SYSUTIL_LICENSE_AREA_A               1     /* Americas */
+#define CELL_SYSUTIL_LICENSE_AREA_E               2     /* Europe */
+#define CELL_SYSUTIL_LICENSE_AREA_H               3     /* Asia */
+#define CELL_SYSUTIL_LICENSE_AREA_K               4     /* Korea */
+#define CELL_SYSUTIL_LICENSE_AREA_C               5     /* China */
+#define CELL_SYSUTIL_LICENSE_AREA_OTHER           100
 #define CELL_SYSUTIL_ERROR_BASE_SUBDISPLAY        0x80029800
 #define CELL_SYSUTIL_ERROR_BASE_MUSIC            0x8002c100
 

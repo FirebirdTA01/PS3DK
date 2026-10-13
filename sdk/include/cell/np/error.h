@@ -1,0 +1,2885 @@
+/*
+ * NP error codes: every SCE_NP_* error the NP libraries return, in one
+ * header (<np/error.h> forwards here).  Each code is guarded, and a code
+ * another NP header also defines is spelled exactly as that header spells
+ * it, so the headers can be included in any order.
+ */
+#ifndef PS3TC_CELL_NP_ERROR_H
+#define PS3TC_CELL_NP_ERROR_H
+
+/* SCE_NP_MATCHING2 */
+#ifndef SCE_NP_MATCHING2_ERROR_OUT_OF_MEMORY
+#define SCE_NP_MATCHING2_ERROR_OUT_OF_MEMORY                                           0x80022301
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_MATCHING2_ERROR_ALREADY_INITIALIZED                                     0x80022302
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_NOT_INITIALIZED
+#define SCE_NP_MATCHING2_ERROR_NOT_INITIALIZED                                         0x80022303
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CONTEXT_MAX
+#define SCE_NP_MATCHING2_ERROR_CONTEXT_MAX                                             0x80022304
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CONTEXT_ALREADY_EXISTS
+#define SCE_NP_MATCHING2_ERROR_CONTEXT_ALREADY_EXISTS                                  0x80022305
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CONTEXT_NOT_FOUND
+#define SCE_NP_MATCHING2_ERROR_CONTEXT_NOT_FOUND                                       0x80022306
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CONTEXT_ALREADY_STARTED
+#define SCE_NP_MATCHING2_ERROR_CONTEXT_ALREADY_STARTED                                 0x80022307
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CONTEXT_NOT_STARTED
+#define SCE_NP_MATCHING2_ERROR_CONTEXT_NOT_STARTED                                     0x80022308
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_SERVER_NOT_FOUND
+#define SCE_NP_MATCHING2_ERROR_SERVER_NOT_FOUND                                        0x80022309
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_ARGUMENT
+#define SCE_NP_MATCHING2_ERROR_INVALID_ARGUMENT                                        0x8002230a
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID
+#define SCE_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID                                      0x8002230b
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_SERVER_ID
+#define SCE_NP_MATCHING2_ERROR_INVALID_SERVER_ID                                       0x8002230c
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_WORLD_ID
+#define SCE_NP_MATCHING2_ERROR_INVALID_WORLD_ID                                        0x8002230d
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_LOBBY_ID
+#define SCE_NP_MATCHING2_ERROR_INVALID_LOBBY_ID                                        0x8002230e
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_ROOM_ID
+#define SCE_NP_MATCHING2_ERROR_INVALID_ROOM_ID                                         0x8002230f
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_MEMBER_ID
+#define SCE_NP_MATCHING2_ERROR_INVALID_MEMBER_ID                                       0x80022310
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_ATTRIBUTE_ID
+#define SCE_NP_MATCHING2_ERROR_INVALID_ATTRIBUTE_ID                                    0x80022311
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_CASTTYPE
+#define SCE_NP_MATCHING2_ERROR_INVALID_CASTTYPE                                        0x80022312
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_SORT_METHOD
+#define SCE_NP_MATCHING2_ERROR_INVALID_SORT_METHOD                                     0x80022313
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_MAX_SLOT
+#define SCE_NP_MATCHING2_ERROR_INVALID_MAX_SLOT                                        0x80022314
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_OPT_SIZE
+#define SCE_NP_MATCHING2_ERROR_INVALID_OPT_SIZE                                        0x80022315
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_MATCHING_SPACE
+#define SCE_NP_MATCHING2_ERROR_INVALID_MATCHING_SPACE                                  0x80022316
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_PUSH_INDICATION
+#define SCE_NP_MATCHING2_ERROR_INVALID_PUSH_INDICATION                                 0x80022317
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_BLOCK_KICK_FLAG
+#define SCE_NP_MATCHING2_ERROR_INVALID_BLOCK_KICK_FLAG                                 0x80022318
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_MESSAGE_TARGET
+#define SCE_NP_MATCHING2_ERROR_INVALID_MESSAGE_TARGET                                  0x80022319
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_RANGE_FILTER_MAX
+#define SCE_NP_MATCHING2_ERROR_RANGE_FILTER_MAX                                        0x8002231a
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INSUFFICIENT_BUFFER
+#define SCE_NP_MATCHING2_ERROR_INSUFFICIENT_BUFFER                                     0x8002231b
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_DESTINATION_DISAPPEARED
+#define SCE_NP_MATCHING2_ERROR_DESTINATION_DISAPPEARED                                 0x8002231c
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_REQUEST_TIMEOUT
+#define SCE_NP_MATCHING2_ERROR_REQUEST_TIMEOUT                                         0x8002231d
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_ALIGNMENT
+#define SCE_NP_MATCHING2_ERROR_INVALID_ALIGNMENT                                       0x8002231e
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_REQUEST_CB_QUEUE_OVERFLOW
+#define SCE_NP_MATCHING2_ERROR_REQUEST_CB_QUEUE_OVERFLOW                               0x8002231f
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_EVENT_CB_QUEUE_OVERFLOW
+#define SCE_NP_MATCHING2_ERROR_EVENT_CB_QUEUE_OVERFLOW                                 0x80022320
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_MSG_CB_QUEUE_OVERFLOW
+#define SCE_NP_MATCHING2_ERROR_MSG_CB_QUEUE_OVERFLOW                                   0x80022321
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CONNECTION_CLOSED_BY_SERVER
+#define SCE_NP_MATCHING2_ERROR_CONNECTION_CLOSED_BY_SERVER                             0x80022322
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_SSL_VERIFY_FAILED
+#define SCE_NP_MATCHING2_ERROR_SSL_VERIFY_FAILED                                       0x80022323
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_SSL_HANDSHAKE
+#define SCE_NP_MATCHING2_ERROR_SSL_HANDSHAKE                                           0x80022324
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_SSL_SEND
+#define SCE_NP_MATCHING2_ERROR_SSL_SEND                                                0x80022325
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_SSL_RECV
+#define SCE_NP_MATCHING2_ERROR_SSL_RECV                                                0x80022326
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_JOINED_SESSION_MAX
+#define SCE_NP_MATCHING2_ERROR_JOINED_SESSION_MAX                                      0x80022327
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_ALREADY_JOINED
+#define SCE_NP_MATCHING2_ERROR_ALREADY_JOINED                                          0x80022328
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_SESSION_TYPE
+#define SCE_NP_MATCHING2_ERROR_INVALID_SESSION_TYPE                                    0x80022329
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CLAN_LOBBY_NOT_EXIST
+#define SCE_NP_MATCHING2_ERROR_CLAN_LOBBY_NOT_EXIST                                    0x8002232a
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_NP_SIGNED_OUT
+#define SCE_NP_MATCHING2_ERROR_NP_SIGNED_OUT                                           0x8002232b
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CONTEXT_UNAVAILABLE
+#define SCE_NP_MATCHING2_ERROR_CONTEXT_UNAVAILABLE                                     0x8002232c
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_SERVER_NOT_AVAILABLE
+#define SCE_NP_MATCHING2_ERROR_SERVER_NOT_AVAILABLE                                    0x8002232d
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_NOT_ALLOWED
+#define SCE_NP_MATCHING2_ERROR_NOT_ALLOWED                                             0x8002232e
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_ABORTED
+#define SCE_NP_MATCHING2_ERROR_ABORTED                                                 0x8002232f
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_REQUEST_NOT_FOUND
+#define SCE_NP_MATCHING2_ERROR_REQUEST_NOT_FOUND                                       0x80022330
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_SESSION_DESTROYED
+#define SCE_NP_MATCHING2_ERROR_SESSION_DESTROYED                                       0x80022331
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CONTEXT_STOPPED
+#define SCE_NP_MATCHING2_ERROR_CONTEXT_STOPPED                                         0x80022332
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_REQUEST_PARAMETER
+#define SCE_NP_MATCHING2_ERROR_INVALID_REQUEST_PARAMETER                               0x80022333
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_NOT_NP_SIGN_IN
+#define SCE_NP_MATCHING2_ERROR_NOT_NP_SIGN_IN                                          0x80022334
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_ROOM_NOT_FOUND
+#define SCE_NP_MATCHING2_ERROR_ROOM_NOT_FOUND                                          0x80022335
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_ROOM_MEMBER_NOT_FOUND
+#define SCE_NP_MATCHING2_ERROR_ROOM_MEMBER_NOT_FOUND                                   0x80022336
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_LOBBY_NOT_FOUND
+#define SCE_NP_MATCHING2_ERROR_LOBBY_NOT_FOUND                                         0x80022337
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_LOBBY_MEMBER_NOT_FOUND
+#define SCE_NP_MATCHING2_ERROR_LOBBY_MEMBER_NOT_FOUND                                  0x80022338
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_EVENT_DATA_NOT_FOUND
+#define SCE_NP_MATCHING2_ERROR_EVENT_DATA_NOT_FOUND                                    0x80022339
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_KEEPALIVE_TIMEOUT
+#define SCE_NP_MATCHING2_ERROR_KEEPALIVE_TIMEOUT                                       0x8002233a
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_TIMEOUT_TOO_SHORT
+#define SCE_NP_MATCHING2_ERROR_TIMEOUT_TOO_SHORT                                       0x8002233b
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_TIMEDOUT
+#define SCE_NP_MATCHING2_ERROR_TIMEDOUT                                                0x8002233c
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CREATE_HEAP
+#define SCE_NP_MATCHING2_ERROR_CREATE_HEAP                                             0x8002233d
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_INVALID_ATTRIBUTE_SIZE
+#define SCE_NP_MATCHING2_ERROR_INVALID_ATTRIBUTE_SIZE                                  0x8002233e
+#endif
+#ifndef SCE_NP_MATCHING2_ERROR_CANNOT_ABORT
+#define SCE_NP_MATCHING2_ERROR_CANNOT_ABORT                                            0x8002233f
+#endif
+
+/* SCE_NP_MATCHING2_RESOLVER */
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_NO_DNS_SERVER
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_NO_DNS_SERVER                                  0x800223a2
+#endif
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_INVALID_PACKET
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_INVALID_PACKET                                 0x800223ad
+#endif
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_TIMEOUT
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_TIMEOUT                                        0x800223b0
+#endif
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_NO_RECORD
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_NO_RECORD                                      0x800223b1
+#endif
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_RES_PACKET_FORMAT
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_RES_PACKET_FORMAT                              0x800223b2
+#endif
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_RES_SERVER_FAILURE
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_RES_SERVER_FAILURE                             0x800223b3
+#endif
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_NO_HOST
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_NO_HOST                                        0x800223b4
+#endif
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_RES_NOT_IMPLEMENTED
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_RES_NOT_IMPLEMENTED                            0x800223b5
+#endif
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_RES_SERVER_REFUSED
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_RES_SERVER_REFUSED                             0x800223b6
+#endif
+#ifndef SCE_NP_MATCHING2_RESOLVER_ERROR_RESP_TRUNCATED
+#define SCE_NP_MATCHING2_RESOLVER_ERROR_RESP_TRUNCATED                                 0x800223bc
+#endif
+
+/* SCE_NP_CLANS */
+#ifndef SCE_NP_CLANS_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_CLANS_ERROR_ALREADY_INITIALIZED                                         0x80022701
+#endif
+#ifndef SCE_NP_CLANS_ERROR_NOT_INITIALIZED
+#define SCE_NP_CLANS_ERROR_NOT_INITIALIZED                                             0x80022702
+#endif
+#ifndef SCE_NP_CLANS_ERROR_NOT_SUPPORTED
+#define SCE_NP_CLANS_ERROR_NOT_SUPPORTED                                               0x80022703
+#endif
+#ifndef SCE_NP_CLANS_ERROR_OUT_OF_MEMORY
+#define SCE_NP_CLANS_ERROR_OUT_OF_MEMORY                                               0x80022704
+#endif
+#ifndef SCE_NP_CLANS_ERROR_INVALID_ARGUMENT
+#define SCE_NP_CLANS_ERROR_INVALID_ARGUMENT                                            0x80022705
+#endif
+#ifndef SCE_NP_CLANS_ERROR_EXCEEDS_MAX
+#define SCE_NP_CLANS_ERROR_EXCEEDS_MAX                                                 0x80022706
+#endif
+#ifndef SCE_NP_CLANS_ERROR_BAD_RESPONSE
+#define SCE_NP_CLANS_ERROR_BAD_RESPONSE                                                0x80022707
+#endif
+#ifndef SCE_NP_CLANS_ERROR_BAD_DATA
+#define SCE_NP_CLANS_ERROR_BAD_DATA                                                    0x80022708
+#endif
+#ifndef SCE_NP_CLANS_ERROR_BAD_REQUEST
+#define SCE_NP_CLANS_ERROR_BAD_REQUEST                                                 0x80022709
+#endif
+#ifndef SCE_NP_CLANS_ERROR_INVALID_SIGNATURE
+#define SCE_NP_CLANS_ERROR_INVALID_SIGNATURE                                           0x8002270a
+#endif
+#ifndef SCE_NP_CLANS_ERROR_INSUFFICIENT
+#define SCE_NP_CLANS_ERROR_INSUFFICIENT                                                0x8002270b
+#endif
+#ifndef SCE_NP_CLANS_ERROR_INTERNAL_BUFFER
+#define SCE_NP_CLANS_ERROR_INTERNAL_BUFFER                                             0x8002270c
+#endif
+#ifndef SCE_NP_CLANS_ERROR_SERVER_MAINTENANCE
+#define SCE_NP_CLANS_ERROR_SERVER_MAINTENANCE                                          0x8002270d
+#endif
+#ifndef SCE_NP_CLANS_ERROR_SERVER_END_OF_SERVICE
+#define SCE_NP_CLANS_ERROR_SERVER_END_OF_SERVICE                                       0x8002270e
+#endif
+#ifndef SCE_NP_CLANS_ERROR_SERVER_BEFORE_START_OF_SERVICE
+#define SCE_NP_CLANS_ERROR_SERVER_BEFORE_START_OF_SERVICE                              0x8002270f
+#endif
+#ifndef SCE_NP_CLANS_ERROR_ABORTED
+#define SCE_NP_CLANS_ERROR_ABORTED                                                     0x80022710
+#endif
+#ifndef SCE_NP_CLANS_ERROR_SERVICE_UNAVAILABLE
+#define SCE_NP_CLANS_ERROR_SERVICE_UNAVAILABLE                                         0x80022711
+#endif
+
+/* SCE_NP_CLANS_SERVER */
+#ifndef SCE_NP_CLANS_SERVER_ERROR_BAD_REQUEST
+#define SCE_NP_CLANS_SERVER_ERROR_BAD_REQUEST                                          0x80022801
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_INVALID_TICKET
+#define SCE_NP_CLANS_SERVER_ERROR_INVALID_TICKET                                       0x80022802
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_INVALID_SIGNATURE
+#define SCE_NP_CLANS_SERVER_ERROR_INVALID_SIGNATURE                                    0x80022803
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_TICKET_EXPIRED
+#define SCE_NP_CLANS_SERVER_ERROR_TICKET_EXPIRED                                       0x80022804
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_INVALID_NPID
+#define SCE_NP_CLANS_SERVER_ERROR_INVALID_NPID                                         0x80022805
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_FORBIDDEN
+#define SCE_NP_CLANS_SERVER_ERROR_FORBIDDEN                                            0x80022806
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_INTERNAL_SERVER_ERROR
+#define SCE_NP_CLANS_SERVER_ERROR_INTERNAL_SERVER_ERROR                                0x80022807
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_BANNED
+#define SCE_NP_CLANS_SERVER_ERROR_BANNED                                               0x8002280a
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_BLACKLISTED
+#define SCE_NP_CLANS_SERVER_ERROR_BLACKLISTED                                          0x80022811
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_INVALID_ENVIRONMENT
+#define SCE_NP_CLANS_SERVER_ERROR_INVALID_ENVIRONMENT                                  0x8002281d
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_CLAN_SERVICE
+#define SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_CLAN_SERVICE                                 0x8002282f
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_CLAN
+#define SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_CLAN                                         0x80022830
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_CLAN_MEMBER
+#define SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_CLAN_MEMBER                                  0x80022831
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_BEFORE_HOURS
+#define SCE_NP_CLANS_SERVER_ERROR_BEFORE_HOURS                                         0x80022832
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_CLOSED_SERVICE
+#define SCE_NP_CLANS_SERVER_ERROR_CLOSED_SERVICE                                       0x80022833
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_PERMISSION_DENIED
+#define SCE_NP_CLANS_SERVER_ERROR_PERMISSION_DENIED                                    0x80022834
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_CLAN_LIMIT_REACHED
+#define SCE_NP_CLANS_SERVER_ERROR_CLAN_LIMIT_REACHED                                   0x80022835
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_CLAN_LEADER_LIMIT_REACHED
+#define SCE_NP_CLANS_SERVER_ERROR_CLAN_LEADER_LIMIT_REACHED                            0x80022836
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_CLAN_MEMBER_LIMIT_REACHED
+#define SCE_NP_CLANS_SERVER_ERROR_CLAN_MEMBER_LIMIT_REACHED                            0x80022837
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_CLAN_JOINED_LIMIT_REACHED
+#define SCE_NP_CLANS_SERVER_ERROR_CLAN_JOINED_LIMIT_REACHED                            0x80022838
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_MEMBER_STATUS_INVALID
+#define SCE_NP_CLANS_SERVER_ERROR_MEMBER_STATUS_INVALID                                0x80022839
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_DUPLICATED_CLAN_NAME
+#define SCE_NP_CLANS_SERVER_ERROR_DUPLICATED_CLAN_NAME                                 0x8002283a
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_CLAN_LEADER_CANNOT_LEAVE
+#define SCE_NP_CLANS_SERVER_ERROR_CLAN_LEADER_CANNOT_LEAVE                             0x8002283b
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_ANNOUNCEMENT_LIMIT_REACHED
+#define SCE_NP_CLANS_SERVER_ERROR_ANNOUNCEMENT_LIMIT_REACHED                           0x8002283d
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_CLAN_CONFIG_MASTER_NOT_FOUND
+#define SCE_NP_CLANS_SERVER_ERROR_CLAN_CONFIG_MASTER_NOT_FOUND                         0x8002283e
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_DUPLICATED_CLAN_TAG
+#define SCE_NP_CLANS_SERVER_ERROR_DUPLICATED_CLAN_TAG                                  0x8002283f
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_EXCEEDS_CREATE_CLAN_FREQUENCY
+#define SCE_NP_CLANS_SERVER_ERROR_EXCEEDS_CREATE_CLAN_FREQUENCY                        0x80022840
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_CLAN_PASSPHRASE_INCORRECT
+#define SCE_NP_CLANS_SERVER_ERROR_CLAN_PASSPHRASE_INCORRECT                            0x80022841
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_CANNOT_RECORD_BLACKLIST_ENTRY
+#define SCE_NP_CLANS_SERVER_ERROR_CANNOT_RECORD_BLACKLIST_ENTRY                        0x80022842
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_CLAN_ANNOUNCEMENT
+#define SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_CLAN_ANNOUNCEMENT                            0x80022843
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_VULGAR_WORDS_POSTED
+#define SCE_NP_CLANS_SERVER_ERROR_VULGAR_WORDS_POSTED                                  0x80022844
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_BLACKLIST_LIMIT_REACHED
+#define SCE_NP_CLANS_SERVER_ERROR_BLACKLIST_LIMIT_REACHED                              0x80022845
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_BLACKLIST_ENTRY
+#define SCE_NP_CLANS_SERVER_ERROR_NO_SUCH_BLACKLIST_ENTRY                              0x80022846
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_INVALID_NP_MESSAGE_FORMAT
+#define SCE_NP_CLANS_SERVER_ERROR_INVALID_NP_MESSAGE_FORMAT                            0x8002284b
+#endif
+#ifndef SCE_NP_CLANS_SERVER_ERROR_FAILED_TO_SEND_NP_MESSAGE
+#define SCE_NP_CLANS_SERVER_ERROR_FAILED_TO_SEND_NP_MESSAGE                            0x8002284c
+#endif
+
+/* SCE_NP_TROPHY */
+#ifndef SCE_NP_TROPHY_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_TROPHY_ERROR_ALREADY_INITIALIZED                                        0x80022901
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_NOT_INITIALIZED
+#define SCE_NP_TROPHY_ERROR_NOT_INITIALIZED                                            0x80022902
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_NOT_SUPPORTED
+#define SCE_NP_TROPHY_ERROR_NOT_SUPPORTED                                              0x80022903
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_CONTEXT_NOT_REGISTERED
+#define SCE_NP_TROPHY_ERROR_CONTEXT_NOT_REGISTERED                                     0x80022904
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_OUT_OF_MEMORY
+#define SCE_NP_TROPHY_ERROR_OUT_OF_MEMORY                                              0x80022905
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_ARGUMENT
+#define SCE_NP_TROPHY_ERROR_INVALID_ARGUMENT                                           0x80022906
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_EXCEEDS_MAX
+#define SCE_NP_TROPHY_ERROR_EXCEEDS_MAX                                                0x80022907
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_MEMORY_CONTAINER
+#define SCE_NP_TROPHY_ERROR_INVALID_MEMORY_CONTAINER                                   0x80022908
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INSUFFICIENT
+#define SCE_NP_TROPHY_ERROR_INSUFFICIENT                                               0x80022909
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_UNKNOWN_CONTEXT
+#define SCE_NP_TROPHY_ERROR_UNKNOWN_CONTEXT                                            0x8002290a
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_FORMAT
+#define SCE_NP_TROPHY_ERROR_INVALID_FORMAT                                             0x8002290b
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_BAD_RESPONSE
+#define SCE_NP_TROPHY_ERROR_BAD_RESPONSE                                               0x8002290c
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_GRADE
+#define SCE_NP_TROPHY_ERROR_INVALID_GRADE                                              0x8002290d
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_CONTEXT
+#define SCE_NP_TROPHY_ERROR_INVALID_CONTEXT                                            0x8002290e
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_PROCESSING_ABORTED
+#define SCE_NP_TROPHY_ERROR_PROCESSING_ABORTED                                         0x8002290f
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_ABORT
+#define SCE_NP_TROPHY_ERROR_ABORT                                                      0x80022910
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_UNKNOWN_HANDLE
+#define SCE_NP_TROPHY_ERROR_UNKNOWN_HANDLE                                             0x80022911
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_LOCKED
+#define SCE_NP_TROPHY_ERROR_LOCKED                                                     0x80022912
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_HIDDEN
+#define SCE_NP_TROPHY_ERROR_HIDDEN                                                     0x80022913
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_CANNOT_UNLOCK_PLATINUM
+#define SCE_NP_TROPHY_ERROR_CANNOT_UNLOCK_PLATINUM                                     0x80022914
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_ALREADY_UNLOCKED
+#define SCE_NP_TROPHY_ERROR_ALREADY_UNLOCKED                                           0x80022915
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_TYPE
+#define SCE_NP_TROPHY_ERROR_INVALID_TYPE                                               0x80022916
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_HANDLE
+#define SCE_NP_TROPHY_ERROR_INVALID_HANDLE                                             0x80022917
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_NP_COMM_ID
+#define SCE_NP_TROPHY_ERROR_INVALID_NP_COMM_ID                                         0x80022918
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_UNKNOWN_NP_COMM_ID
+#define SCE_NP_TROPHY_ERROR_UNKNOWN_NP_COMM_ID                                         0x80022919
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_DISC_IO
+#define SCE_NP_TROPHY_ERROR_DISC_IO                                                    0x8002291a
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_CONF_DOES_NOT_EXIST
+#define SCE_NP_TROPHY_ERROR_CONF_DOES_NOT_EXIST                                        0x8002291b
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_UNSUPPORTED_FORMAT
+#define SCE_NP_TROPHY_ERROR_UNSUPPORTED_FORMAT                                         0x8002291c
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_ALREADY_INSTALLED
+#define SCE_NP_TROPHY_ERROR_ALREADY_INSTALLED                                          0x8002291d
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_BROKEN_DATA
+#define SCE_NP_TROPHY_ERROR_BROKEN_DATA                                                0x8002291e
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_VERIFICATION_FAILURE
+#define SCE_NP_TROPHY_ERROR_VERIFICATION_FAILURE                                       0x8002291f
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_TROPHY_ID
+#define SCE_NP_TROPHY_ERROR_INVALID_TROPHY_ID                                          0x80022920
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_UNKNOWN_TROPHY_ID
+#define SCE_NP_TROPHY_ERROR_UNKNOWN_TROPHY_ID                                          0x80022921
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_UNKNOWN_TITLE
+#define SCE_NP_TROPHY_ERROR_UNKNOWN_TITLE                                              0x80022922
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_UNKNOWN_FILE
+#define SCE_NP_TROPHY_ERROR_UNKNOWN_FILE                                               0x80022923
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_DISC_NOT_MOUNTED
+#define SCE_NP_TROPHY_ERROR_DISC_NOT_MOUNTED                                           0x80022924
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_SHUTDOWN
+#define SCE_NP_TROPHY_ERROR_SHUTDOWN                                                   0x80022925
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_TITLE_ICON_NOT_FOUND
+#define SCE_NP_TROPHY_ERROR_TITLE_ICON_NOT_FOUND                                       0x80022926
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_TROPHY_ICON_NOT_FOUND
+#define SCE_NP_TROPHY_ERROR_TROPHY_ICON_NOT_FOUND                                      0x80022927
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INSUFFICIENT_DISK_SPACE
+#define SCE_NP_TROPHY_ERROR_INSUFFICIENT_DISK_SPACE                                    0x80022928
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_SIGNATURE
+#define SCE_NP_TROPHY_ERROR_INVALID_SIGNATURE                                          0x80022929
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_ILLEGAL_UPDATE
+#define SCE_NP_TROPHY_ERROR_ILLEGAL_UPDATE                                             0x8002292a
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_SAVEDATA_USER_DOES_NOT_MATCH
+#define SCE_NP_TROPHY_ERROR_SAVEDATA_USER_DOES_NOT_MATCH                               0x8002292b
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_TROPHY_ID_DOES_NOT_EXIST
+#define SCE_NP_TROPHY_ERROR_TROPHY_ID_DOES_NOT_EXIST                                   0x8002292c
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_SERVICE_UNAVAILABLE
+#define SCE_NP_TROPHY_ERROR_SERVICE_UNAVAILABLE                                        0x8002292d
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_INVALID_PLATFORM
+#define SCE_NP_TROPHY_ERROR_INVALID_PLATFORM                                           0x8002292e
+#endif
+#ifndef SCE_NP_TROPHY_ERROR_UNKNOWN
+#define SCE_NP_TROPHY_ERROR_UNKNOWN                                                    0x800229ff
+#endif
+
+/* SCE_NP_MATCHING2_SERVER */
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_BAD_REQUEST
+#define SCE_NP_MATCHING2_SERVER_ERROR_BAD_REQUEST                                      0x80022b01
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_SERVICE_UNAVAILABLE
+#define SCE_NP_MATCHING2_SERVER_ERROR_SERVICE_UNAVAILABLE                              0x80022b02
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_BUSY
+#define SCE_NP_MATCHING2_SERVER_ERROR_BUSY                                             0x80022b03
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_END_OF_SERVICE
+#define SCE_NP_MATCHING2_SERVER_ERROR_END_OF_SERVICE                                   0x80022b04
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_INTERNAL_SERVER_ERROR
+#define SCE_NP_MATCHING2_SERVER_ERROR_INTERNAL_SERVER_ERROR                            0x80022b05
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_PLAYER_BANNED
+#define SCE_NP_MATCHING2_SERVER_ERROR_PLAYER_BANNED                                    0x80022b06
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_FORBIDDEN
+#define SCE_NP_MATCHING2_SERVER_ERROR_FORBIDDEN                                        0x80022b07
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_BLOCKED
+#define SCE_NP_MATCHING2_SERVER_ERROR_BLOCKED                                          0x80022b08
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_UNSUPPORTED_NP_ENV
+#define SCE_NP_MATCHING2_SERVER_ERROR_UNSUPPORTED_NP_ENV                               0x80022b09
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_INVALID_TICKET
+#define SCE_NP_MATCHING2_SERVER_ERROR_INVALID_TICKET                                   0x80022b0a
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNATURE
+#define SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNATURE                                0x80022b0b
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_EXPIRED_TICKET
+#define SCE_NP_MATCHING2_SERVER_ERROR_EXPIRED_TICKET                                   0x80022b0c
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_ENTITLEMENT_REQUIRED
+#define SCE_NP_MATCHING2_SERVER_ERROR_ENTITLEMENT_REQUIRED                             0x80022b0d
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_CONTEXT
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_CONTEXT                                  0x80022b0e
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_CLOSED
+#define SCE_NP_MATCHING2_SERVER_ERROR_CLOSED                                           0x80022b0f
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_TITLE
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_TITLE                                    0x80022b10
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_WORLD
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_WORLD                                    0x80022b11
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_LOBBY
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_LOBBY                                    0x80022b12
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_ROOM
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_ROOM                                     0x80022b13
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_LOBBY_INSTANCE
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_LOBBY_INSTANCE                           0x80022b14
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_ROOM_INSTANCE
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_ROOM_INSTANCE                            0x80022b15
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_PASSWORD_MISMATCH
+#define SCE_NP_MATCHING2_SERVER_ERROR_PASSWORD_MISMATCH                                0x80022b17
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_LOBBY_FULL
+#define SCE_NP_MATCHING2_SERVER_ERROR_LOBBY_FULL                                       0x80022b18
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_ROOM_FULL
+#define SCE_NP_MATCHING2_SERVER_ERROR_ROOM_FULL                                        0x80022b19
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_GROUP_FULL
+#define SCE_NP_MATCHING2_SERVER_ERROR_GROUP_FULL                                       0x80022b1b
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_USER
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_USER                                     0x80022b1c
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_TITLE_PASSPHRASE_MISMATCH
+#define SCE_NP_MATCHING2_SERVER_ERROR_TITLE_PASSPHRASE_MISMATCH                        0x80022b1e
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_USER_INFO
+#define SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_USER_INFO                         0x80022b1f
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_USER_INFO_SIGNATURE
+#define SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_USER_INFO_SIGNATURE               0x80022b20
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_INSTANCE_INFO
+#define SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_INSTANCE_INFO                     0x80022b21
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_INSTANCE_INFO_SIGNATURE
+#define SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_INSTANCE_INFO_SIGNATURE           0x80022b22
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_INSTANCE_CONFIGURATION
+#define SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_INSTANCE_CONFIGURATION            0x80022b23
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_INSTANCE_CONFIGURATION_SIGNATURE
+#define SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNED_INSTANCE_CONFIGURATION_SIGNATURE  0x80022b24
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_DUPLICATE_LOBBY
+#define SCE_NP_MATCHING2_SERVER_ERROR_DUPLICATE_LOBBY                                  0x80022b25
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_DUPLICATE_ROOM
+#define SCE_NP_MATCHING2_SERVER_ERROR_DUPLICATE_ROOM                                   0x80022b26
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_BANNED_CONSOLE
+#define SCE_NP_MATCHING2_SERVER_ERROR_BANNED_CONSOLE                                   0x80022b28
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_JOIN_GROUP_LABEL
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_JOIN_GROUP_LABEL                              0x80022b29
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_GROUP
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_GROUP                                    0x80022b2a
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NO_PASSWORD
+#define SCE_NP_MATCHING2_SERVER_ERROR_NO_PASSWORD                                      0x80022b2b
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_MAX_OVER_SLOT_GROUP
+#define SCE_NP_MATCHING2_SERVER_ERROR_MAX_OVER_SLOT_GROUP                              0x80022b2c
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_MAX_OVER_PASSWORD_MASK
+#define SCE_NP_MATCHING2_SERVER_ERROR_MAX_OVER_PASSWORD_MASK                           0x80022b2d
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_DUPLICATE_GROUP_LABEL
+#define SCE_NP_MATCHING2_SERVER_ERROR_DUPLICATE_GROUP_LABEL                            0x80022b2e
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_REQUEST_OVERFLOW
+#define SCE_NP_MATCHING2_SERVER_ERROR_REQUEST_OVERFLOW                                 0x80022b2f
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_ALREADY_JOINED
+#define SCE_NP_MATCHING2_SERVER_ERROR_ALREADY_JOINED                                   0x80022b30
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_NAT_TYPE_MISMATCH
+#define SCE_NP_MATCHING2_SERVER_ERROR_NAT_TYPE_MISMATCH                                0x80022b31
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_ROOM_INCONSISTENCY
+#define SCE_NP_MATCHING2_SERVER_ERROR_ROOM_INCONSISTENCY                               0x80022b32
+#endif
+#ifndef SCE_NP_MATCHING2_SERVER_ERROR_BLOCKED_USER_IN_ROOM
+#define SCE_NP_MATCHING2_SERVER_ERROR_BLOCKED_USER_IN_ROOM                             0x80022b33
+#endif
+
+/* SCE_NP_COMMERCE2 */
+#ifndef SCE_NP_COMMERCE2_ERROR_NOT_INITIALIZED
+#define SCE_NP_COMMERCE2_ERROR_NOT_INITIALIZED                                         0x80023001
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_COMMERCE2_ERROR_ALREADY_INITIALIZED                                     0x80023002
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INVALID_ARGUMENT
+#define SCE_NP_COMMERCE2_ERROR_INVALID_ARGUMENT                                        0x80023003
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_UNSUPPORTED_VERSION
+#define SCE_NP_COMMERCE2_ERROR_UNSUPPORTED_VERSION                                     0x80023004
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_CTX_MAX
+#define SCE_NP_COMMERCE2_ERROR_CTX_MAX                                                 0x80023005
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INVALID_INDEX
+#define SCE_NP_COMMERCE2_ERROR_INVALID_INDEX                                           0x80023006
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INVALID_SKUID
+#define SCE_NP_COMMERCE2_ERROR_INVALID_SKUID                                           0x80023007
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INVALID_SKU_NUM
+#define SCE_NP_COMMERCE2_ERROR_INVALID_SKU_NUM                                         0x80023008
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INVALID_MEMORY_CONTAINER
+#define SCE_NP_COMMERCE2_ERROR_INVALID_MEMORY_CONTAINER                                0x80023009
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INSUFFICIENT_MEMORY_CONTAINER
+#define SCE_NP_COMMERCE2_ERROR_INSUFFICIENT_MEMORY_CONTAINER                           0x8002300a
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_OUT_OF_MEMORY
+#define SCE_NP_COMMERCE2_ERROR_OUT_OF_MEMORY                                           0x8002300b
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_CTX_NOT_FOUND
+#define SCE_NP_COMMERCE2_ERROR_CTX_NOT_FOUND                                           0x8002300c
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_CTXID_NOT_AVAILABLE
+#define SCE_NP_COMMERCE2_ERROR_CTXID_NOT_AVAILABLE                                     0x8002300d
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_REQ_NOT_FOUND
+#define SCE_NP_COMMERCE2_ERROR_REQ_NOT_FOUND                                           0x8002300e
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_REQID_NOT_AVAILABLE
+#define SCE_NP_COMMERCE2_ERROR_REQID_NOT_AVAILABLE                                     0x8002300f
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_ABORTED
+#define SCE_NP_COMMERCE2_ERROR_ABORTED                                                 0x80023010
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_REQUEST_BUF_TOO_SMALL
+#define SCE_NP_COMMERCE2_ERROR_REQUEST_BUF_TOO_SMALL                                   0x80023011
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_RESPONSE_BUF_TOO_SMALL
+#define SCE_NP_COMMERCE2_ERROR_RESPONSE_BUF_TOO_SMALL                                  0x80023012
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_COULD_NOT_RECV_WHOLE_RESPONSE_DATA
+#define SCE_NP_COMMERCE2_ERROR_COULD_NOT_RECV_WHOLE_RESPONSE_DATA                      0x80023013
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INVALID_RESULT_DATA
+#define SCE_NP_COMMERCE2_ERROR_INVALID_RESULT_DATA                                     0x80023014
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_UNKNOWN
+#define SCE_NP_COMMERCE2_ERROR_UNKNOWN                                                 0x80023015
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_SERVER_MAINTENANCE
+#define SCE_NP_COMMERCE2_ERROR_SERVER_MAINTENANCE                                      0x80023016
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_SERVER_UNKNOWN
+#define SCE_NP_COMMERCE2_ERROR_SERVER_UNKNOWN                                          0x80023017
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INSUFFICIENT_BUF_SIZE
+#define SCE_NP_COMMERCE2_ERROR_INSUFFICIENT_BUF_SIZE                                   0x80023018
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_REQ_MAX
+#define SCE_NP_COMMERCE2_ERROR_REQ_MAX                                                 0x80023019
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INVALID_TARGET_TYPE
+#define SCE_NP_COMMERCE2_ERROR_INVALID_TARGET_TYPE                                     0x8002301a
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INVALID_TARGET_ID
+#define SCE_NP_COMMERCE2_ERROR_INVALID_TARGET_ID                                       0x8002301b
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_INVALID_SIZE
+#define SCE_NP_COMMERCE2_ERROR_INVALID_SIZE                                            0x8002301c
+#endif
+#ifndef SCE_NP_COMMERCE2_ERROR_DATA_NOT_FOUND
+#define SCE_NP_COMMERCE2_ERROR_DATA_NOT_FOUND                                          0x80023087
+#endif
+
+/* SCE_NP_COMMERCE2_SC */
+#ifndef SCE_NP_COMMERCE2_SC_ERROR_INVALID_RESPONSE
+#define SCE_NP_COMMERCE2_SC_ERROR_INVALID_RESPONSE                                     0x800230e1
+#endif
+
+/* SCE_NP_COMMERCE2_SERVER */
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_BAD_REQUEST
+#define SCE_NP_COMMERCE2_SERVER_ERROR_BAD_REQUEST                                      0x80023101
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_UNKNOWN_ERROR
+#define SCE_NP_COMMERCE2_SERVER_ERROR_UNKNOWN_ERROR                                    0x80023102
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_SESSION_EXPIRED
+#define SCE_NP_COMMERCE2_SERVER_ERROR_SESSION_EXPIRED                                  0x80023105
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_ACCESS_PERMISSION_DENIED
+#define SCE_NP_COMMERCE2_SERVER_ERROR_ACCESS_PERMISSION_DENIED                         0x80023107
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_NO_SUCH_CATEGORY
+#define SCE_NP_COMMERCE2_SERVER_ERROR_NO_SUCH_CATEGORY                                 0x80023110
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_NO_SUCH_PRODUCT
+#define SCE_NP_COMMERCE2_SERVER_ERROR_NO_SUCH_PRODUCT                                  0x80023111
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_NOT_ELIGIBILITY
+#define SCE_NP_COMMERCE2_SERVER_ERROR_NOT_ELIGIBILITY                                  0x80023113
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_INVALID_SKU
+#define SCE_NP_COMMERCE2_SERVER_ERROR_INVALID_SKU                                      0x8002311a
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_ACCOUNT_SUSPENDED1
+#define SCE_NP_COMMERCE2_SERVER_ERROR_ACCOUNT_SUSPENDED1                               0x8002311b
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_ACCOUNT_SUSPENDED2
+#define SCE_NP_COMMERCE2_SERVER_ERROR_ACCOUNT_SUSPENDED2                               0x8002311c
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_OVER_SPENDING_LIMIT
+#define SCE_NP_COMMERCE2_SERVER_ERROR_OVER_SPENDING_LIMIT                              0x80023120
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_INVALID_VOUCHER
+#define SCE_NP_COMMERCE2_SERVER_ERROR_INVALID_VOUCHER                                  0x8002312f
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_VOUCHER_ALREADY_CONSUMED
+#define SCE_NP_COMMERCE2_SERVER_ERROR_VOUCHER_ALREADY_CONSUMED                         0x80023130
+#endif
+#ifndef SCE_NP_COMMERCE2_SERVER_ERROR_EXCEEDS_AGE_LIMIT_IN_BROWSING
+#define SCE_NP_COMMERCE2_SERVER_ERROR_EXCEEDS_AGE_LIMIT_IN_BROWSING                    0x80023139
+#endif
+
+/* SCE_NP_CUSTOM_MENU */
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_CUSTOM_MENU_ERROR_ALREADY_INITIALIZED                                   0x80023b01
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_NOT_INITIALIZED
+#define SCE_NP_CUSTOM_MENU_ERROR_NOT_INITIALIZED                                       0x80023b02
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_OUT_OF_MEMORY
+#define SCE_NP_CUSTOM_MENU_ERROR_OUT_OF_MEMORY                                         0x80023b03
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_NOT_SUPPORTED
+#define SCE_NP_CUSTOM_MENU_ERROR_NOT_SUPPORTED                                         0x80023b04
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_INSUFFICIENT
+#define SCE_NP_CUSTOM_MENU_ERROR_INSUFFICIENT                                          0x80023b05
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_CANCEL
+#define SCE_NP_CUSTOM_MENU_ERROR_CANCEL                                                0x80023b06
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_STATUS
+#define SCE_NP_CUSTOM_MENU_ERROR_STATUS                                                0x80023b07
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_BUSY
+#define SCE_NP_CUSTOM_MENU_ERROR_BUSY                                                  0x80023b08
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_INVALID_ARGUMENT
+#define SCE_NP_CUSTOM_MENU_ERROR_INVALID_ARGUMENT                                      0x80023b09
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_ABORT
+#define SCE_NP_CUSTOM_MENU_ERROR_ABORT                                                 0x80023b0a
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_NOT_REGISTERED
+#define SCE_NP_CUSTOM_MENU_ERROR_NOT_REGISTERED                                        0x80023b0b
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_EXCEEDS_MAX
+#define SCE_NP_CUSTOM_MENU_ERROR_EXCEEDS_MAX                                           0x80023b0c
+#endif
+#ifndef SCE_NP_CUSTOM_MENU_ERROR_INVALID_CHARACTER
+#define SCE_NP_CUSTOM_MENU_ERROR_INVALID_CHARACTER                                     0x80023b0d
+#endif
+
+/* SCE_NP_COMMERCE2_SYSTEM_UTIL */
+#ifndef SCE_NP_COMMERCE2_SYSTEM_UTIL_ERROR_INVALID_VOUCHER
+#define SCE_NP_COMMERCE2_SYSTEM_UTIL_ERROR_INVALID_VOUCHER                             0x80024002
+#endif
+
+/* SCE_NP_SNS */
+#ifndef SCE_NP_SNS_ERROR_UNKNOWN
+#define SCE_NP_SNS_ERROR_UNKNOWN                                                       0x80024501
+#endif
+#ifndef SCE_NP_SNS_ERROR_NOT_SIGN_IN
+#define SCE_NP_SNS_ERROR_NOT_SIGN_IN                                                   0x80024502
+#endif
+#ifndef SCE_NP_SNS_ERROR_INVALID_ARGUMENT
+#define SCE_NP_SNS_ERROR_INVALID_ARGUMENT                                              0x80024503
+#endif
+#ifndef SCE_NP_SNS_ERROR_OUT_OF_MEMORY
+#define SCE_NP_SNS_ERROR_OUT_OF_MEMORY                                                 0x80024504
+#endif
+#ifndef SCE_NP_SNS_ERROR_SHUTDOWN
+#define SCE_NP_SNS_ERROR_SHUTDOWN                                                      0x80024505
+#endif
+#ifndef SCE_NP_SNS_ERROR_BUSY
+#define SCE_NP_SNS_ERROR_BUSY                                                          0x80024506
+#endif
+
+/* SCE_NP_SNS_FB */
+#ifndef SCE_NP_SNS_FB_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_SNS_FB_ERROR_ALREADY_INITIALIZED                                        0x80024511
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_NOT_INITIALIZED
+#define SCE_NP_SNS_FB_ERROR_NOT_INITIALIZED                                            0x80024512
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_EXCEEDS_MAX
+#define SCE_NP_SNS_FB_ERROR_EXCEEDS_MAX                                                0x80024513
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_UNKNOWN_HANDLE
+#define SCE_NP_SNS_FB_ERROR_UNKNOWN_HANDLE                                             0x80024514
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_ABORTED
+#define SCE_NP_SNS_FB_ERROR_ABORTED                                                    0x80024515
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_ALREADY_ABORTED
+#define SCE_NP_SNS_FB_ERROR_ALREADY_ABORTED                                            0x80024516
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_CONFIG_DISABLED
+#define SCE_NP_SNS_FB_ERROR_CONFIG_DISABLED                                            0x80024517
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_FBSERVER_ERROR_RESPONSE
+#define SCE_NP_SNS_FB_ERROR_FBSERVER_ERROR_RESPONSE                                    0x80024518
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_THROTTLE_CLOSED
+#define SCE_NP_SNS_FB_ERROR_THROTTLE_CLOSED                                            0x80024519
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_OPERATION_INTERVAL_VIOLATION
+#define SCE_NP_SNS_FB_ERROR_OPERATION_INTERVAL_VIOLATION                               0x8002451a
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_UNLOADED_THROTTLE
+#define SCE_NP_SNS_FB_ERROR_UNLOADED_THROTTLE                                          0x8002451b
+#endif
+#ifndef SCE_NP_SNS_FB_ERROR_ACCESS_NOT_ALLOWED
+#define SCE_NP_SNS_FB_ERROR_ACCESS_NOT_ALLOWED                                         0x8002451c
+#endif
+
+/* SCE_NP_OAUTH_SERVER */
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_BANNED_CONSOLE
+#define SCE_NP_OAUTH_SERVER_ERROR_BANNED_CONSOLE                                       0x80025d14
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_INVALID_LOGIN
+#define SCE_NP_OAUTH_SERVER_ERROR_INVALID_LOGIN                                        0x82e00014
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_INACTIVE_ACCOUNT
+#define SCE_NP_OAUTH_SERVER_ERROR_INACTIVE_ACCOUNT                                     0x82e0001b
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_SUSPENDED_ACCOUNT
+#define SCE_NP_OAUTH_SERVER_ERROR_SUSPENDED_ACCOUNT                                    0x82e0001c
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_SUSPENDED_DEVICE
+#define SCE_NP_OAUTH_SERVER_ERROR_SUSPENDED_DEVICE                                     0x82e0001d
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_PASSWORD_EXPIRED
+#define SCE_NP_OAUTH_SERVER_ERROR_PASSWORD_EXPIRED                                     0x82e00064
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_TOSUA_MUST_BE_RE_ACCEPTED
+#define SCE_NP_OAUTH_SERVER_ERROR_TOSUA_MUST_BE_RE_ACCEPTED                            0x82e00067
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_TOSUA_MUST_BE_RE_ACCEPTED_FOR_SUBACCOUNT
+#define SCE_NP_OAUTH_SERVER_ERROR_TOSUA_MUST_BE_RE_ACCEPTED_FOR_SUBACCOUNT             0x82e01042
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_BANNED_ACCOUNT
+#define SCE_NP_OAUTH_SERVER_ERROR_BANNED_ACCOUNT                                       0x82e01050
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_SERVICE_END
+#define SCE_NP_OAUTH_SERVER_ERROR_SERVICE_END                                          0x82e1019a
+#endif
+#ifndef SCE_NP_OAUTH_SERVER_ERROR_SERVICE_UNAVAILABLE
+#define SCE_NP_OAUTH_SERVER_ERROR_SERVICE_UNAVAILABLE                                  0x82e101f7
+#endif
+
+/* SCE_NP_OAUTH */
+#ifndef SCE_NP_OAUTH_ERROR_UNKNOWN
+#define SCE_NP_OAUTH_ERROR_UNKNOWN                                                     0x80025f01
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_OAUTH_ERROR_ALREADY_INITIALIZED                                         0x80025f02
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_NOT_INITIALIZED
+#define SCE_NP_OAUTH_ERROR_NOT_INITIALIZED                                             0x80025f03
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_INVALID_ARGUMENT
+#define SCE_NP_OAUTH_ERROR_INVALID_ARGUMENT                                            0x80025f04
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_OUT_OF_MEMORY
+#define SCE_NP_OAUTH_ERROR_OUT_OF_MEMORY                                               0x80025f05
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_OUT_OF_BUFFER
+#define SCE_NP_OAUTH_ERROR_OUT_OF_BUFFER                                               0x80025f06
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_BAD_RESPONSE
+#define SCE_NP_OAUTH_ERROR_BAD_RESPONSE                                                0x80025f07
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_ABORTED
+#define SCE_NP_OAUTH_ERROR_ABORTED                                                     0x80025f08
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_SIGNED_OUT
+#define SCE_NP_OAUTH_ERROR_SIGNED_OUT                                                  0x80025f09
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_REQUEST_NOT_FOUND
+#define SCE_NP_OAUTH_ERROR_REQUEST_NOT_FOUND                                           0x80025f0a
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_SSL_ERR_CN_CHECK
+#define SCE_NP_OAUTH_ERROR_SSL_ERR_CN_CHECK                                            0x80025f0b
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_SSL_ERR_UNKNOWN_CA
+#define SCE_NP_OAUTH_ERROR_SSL_ERR_UNKNOWN_CA                                          0x80025f0c
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_SSL_ERR_NOT_AFTER_CHECK
+#define SCE_NP_OAUTH_ERROR_SSL_ERR_NOT_AFTER_CHECK                                     0x80025f0d
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_SSL_ERR_NOT_BEFORE_CHECK
+#define SCE_NP_OAUTH_ERROR_SSL_ERR_NOT_BEFORE_CHECK                                    0x80025f0e
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_SSL_ERR_INVALID_CERT
+#define SCE_NP_OAUTH_ERROR_SSL_ERR_INVALID_CERT                                        0x80025f0f
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_SSL_ERR_INTERNAL
+#define SCE_NP_OAUTH_ERROR_SSL_ERR_INTERNAL                                            0x80025f10
+#endif
+#ifndef SCE_NP_OAUTH_ERROR_REQUEST_MAX
+#define SCE_NP_OAUTH_ERROR_REQUEST_MAX                                                 0x80025f11
+#endif
+
+/* SCE_NP_LS */
+#ifndef SCE_NP_LS_ERROR_INVALID_VERSION
+#define SCE_NP_LS_ERROR_INVALID_VERSION                                                0x80028c0d
+#endif
+
+/* SCE_NP_COMMERCE */
+#ifndef SCE_NP_COMMERCE_ERROR_NOT_INITIALIZED
+#define SCE_NP_COMMERCE_ERROR_NOT_INITIALIZED                                          0x80029401
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_COMMERCE_ERROR_ALREADY_INITIALIZED                                      0x80029402
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_OUT_OF_MEMORY
+#define SCE_NP_COMMERCE_ERROR_OUT_OF_MEMORY                                            0x80029403
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_UNSUPPORTED_VERSION
+#define SCE_NP_COMMERCE_ERROR_UNSUPPORTED_VERSION                                      0x80029404
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CTX_MAX
+#define SCE_NP_COMMERCE_ERROR_CTX_MAX                                                  0x80029405
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CTX_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_CTX_NOT_FOUND                                            0x80029406
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CTXID_NOT_AVAILABLE
+#define SCE_NP_COMMERCE_ERROR_CTXID_NOT_AVAILABLE                                      0x80029407
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_REQ_MAX
+#define SCE_NP_COMMERCE_ERROR_REQ_MAX                                                  0x80029408
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_REQ_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_REQ_NOT_FOUND                                            0x80029409
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_REQID_NOT_AVAILABLE
+#define SCE_NP_COMMERCE_ERROR_REQID_NOT_AVAILABLE                                      0x8002940a
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_CATEGORY_ID
+#define SCE_NP_COMMERCE_ERROR_INVALID_CATEGORY_ID                                      0x8002940b
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_LANG_CODE
+#define SCE_NP_COMMERCE_ERROR_INVALID_LANG_CODE                                        0x8002940c
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_REQ_BUSY
+#define SCE_NP_COMMERCE_ERROR_REQ_BUSY                                                 0x8002940d
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INSUFFICIENT_BUFFER
+#define SCE_NP_COMMERCE_ERROR_INSUFFICIENT_BUFFER                                      0x8002940e
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_REQ_STATE
+#define SCE_NP_COMMERCE_ERROR_INVALID_REQ_STATE                                        0x8002940f
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_CTX_STATE
+#define SCE_NP_COMMERCE_ERROR_INVALID_CTX_STATE                                        0x80029410
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_UNKNOWN
+#define SCE_NP_COMMERCE_ERROR_UNKNOWN                                                  0x80029411
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_REQ_TYPE
+#define SCE_NP_COMMERCE_ERROR_INVALID_REQ_TYPE                                         0x80029412
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_MEMORY_CONTAINER
+#define SCE_NP_COMMERCE_ERROR_INVALID_MEMORY_CONTAINER                                 0x80029413
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INSUFFICIENT_MEMORY_CONTAINER
+#define SCE_NP_COMMERCE_ERROR_INSUFFICIENT_MEMORY_CONTAINER                            0x80029414
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_DATA_FLAG_TYPE
+#define SCE_NP_COMMERCE_ERROR_INVALID_DATA_FLAG_TYPE                                   0x80029415
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_DATA_FLAG_STATE
+#define SCE_NP_COMMERCE_ERROR_INVALID_DATA_FLAG_STATE                                  0x80029416
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_DATA_FLAG_NUM_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_DATA_FLAG_NUM_NOT_FOUND                                  0x80029417
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_DATA_FLAG_INFO_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_DATA_FLAG_INFO_NOT_FOUND                                 0x80029418
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_PROVIDER_ID
+#define SCE_NP_COMMERCE_ERROR_INVALID_PROVIDER_ID                                      0x80029419
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_DATA_FLAG_NUM
+#define SCE_NP_COMMERCE_ERROR_INVALID_DATA_FLAG_NUM                                    0x8002941a
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_SKU_ID
+#define SCE_NP_COMMERCE_ERROR_INVALID_SKU_ID                                           0x8002941b
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_DATA_FLAG_ID
+#define SCE_NP_COMMERCE_ERROR_INVALID_DATA_FLAG_ID                                     0x8002941c
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_GPC_SEND_REQUEST
+#define SCE_NP_COMMERCE_ERROR_GPC_SEND_REQUEST                                         0x8002941d
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_GDF_SEND_REQUEST
+#define SCE_NP_COMMERCE_ERROR_GDF_SEND_REQUEST                                         0x8002941e
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_SDF_SEND_REQUEST
+#define SCE_NP_COMMERCE_ERROR_SDF_SEND_REQUEST                                         0x8002941f
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_PARSE_PRODUCT_CATEGORY
+#define SCE_NP_COMMERCE_ERROR_PARSE_PRODUCT_CATEGORY                                   0x80029421
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CURRENCY_INFO_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_CURRENCY_INFO_NOT_FOUND                                  0x80029422
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CATEGORY_INFO_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_CATEGORY_INFO_NOT_FOUND                                  0x80029423
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHILD_CATEGORY_COUNT_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_CHILD_CATEGORY_COUNT_NOT_FOUND                           0x80029424
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHILD_CATEGORY_INFO_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_CHILD_CATEGORY_INFO_NOT_FOUND                            0x80029425
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_SKU_COUNT_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_SKU_COUNT_NOT_FOUND                                      0x80029426
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_SKU_INFO_NOT_FOUND
+#define SCE_NP_COMMERCE_ERROR_SKU_INFO_NOT_FOUND                                       0x80029427
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_PLUGIN_LOAD_FAILURE
+#define SCE_NP_COMMERCE_ERROR_PLUGIN_LOAD_FAILURE                                      0x80029428
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_SKU_NUM
+#define SCE_NP_COMMERCE_ERROR_INVALID_SKU_NUM                                          0x80029429
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_INVALID_GPC_PROTOCOL_VERSION
+#define SCE_NP_COMMERCE_ERROR_INVALID_GPC_PROTOCOL_VERSION                             0x8002942a
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHECKOUT_UNEXPECTED
+#define SCE_NP_COMMERCE_ERROR_CHECKOUT_UNEXPECTED                                      0x80029430
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHECKOUT_OUT_OF_SERVICE
+#define SCE_NP_COMMERCE_ERROR_CHECKOUT_OUT_OF_SERVICE                                  0x80029431
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHECKOUT_INVALID_SKU
+#define SCE_NP_COMMERCE_ERROR_CHECKOUT_INVALID_SKU                                     0x80029432
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHECKOUT_SERVER_BUSY
+#define SCE_NP_COMMERCE_ERROR_CHECKOUT_SERVER_BUSY                                     0x80029433
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHECKOUT_MAINTENANCE
+#define SCE_NP_COMMERCE_ERROR_CHECKOUT_MAINTENANCE                                     0x80029434
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHECKOUT_ACCOUNT_SUSPENDED
+#define SCE_NP_COMMERCE_ERROR_CHECKOUT_ACCOUNT_SUSPENDED                               0x80029435
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHECKOUT_OVER_SPENDING_LIMIT
+#define SCE_NP_COMMERCE_ERROR_CHECKOUT_OVER_SPENDING_LIMIT                             0x80029436
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHECKOUT_NOT_ENOUGH_MONEY
+#define SCE_NP_COMMERCE_ERROR_CHECKOUT_NOT_ENOUGH_MONEY                                0x80029437
+#endif
+#ifndef SCE_NP_COMMERCE_ERROR_CHECKOUT_UNKNOWN
+#define SCE_NP_COMMERCE_ERROR_CHECKOUT_UNKNOWN                                         0x80029438
+#endif
+
+/* SCE_NP_DRM */
+#ifndef SCE_NP_DRM_ERROR_OUT_OF_MEMORY
+#define SCE_NP_DRM_ERROR_OUT_OF_MEMORY                                                 0x80029501
+#endif
+#ifndef SCE_NP_DRM_ERROR_INVALID_PARAM
+#define SCE_NP_DRM_ERROR_INVALID_PARAM                                                 0x80029502
+#endif
+#ifndef SCE_NP_DRM_ERROR_SERVER_RESPONSE
+#define SCE_NP_DRM_ERROR_SERVER_RESPONSE                                               0x80029509
+#endif
+#ifndef SCE_NP_DRM_ERROR_NO_ENTITLEMENT
+#define SCE_NP_DRM_ERROR_NO_ENTITLEMENT                                                0x80029513
+#endif
+#ifndef SCE_NP_DRM_ERROR_BAD_ACT
+#define SCE_NP_DRM_ERROR_BAD_ACT                                                       0x80029514
+#endif
+#ifndef SCE_NP_DRM_ERROR_BAD_FORMAT
+#define SCE_NP_DRM_ERROR_BAD_FORMAT                                                    0x80029515
+#endif
+#ifndef SCE_NP_DRM_ERROR_NO_LOGIN
+#define SCE_NP_DRM_ERROR_NO_LOGIN                                                      0x80029516
+#endif
+#ifndef SCE_NP_DRM_ERROR_INTERNAL
+#define SCE_NP_DRM_ERROR_INTERNAL                                                      0x80029517
+#endif
+#ifndef SCE_NP_DRM_ERROR_BAD_PERM
+#define SCE_NP_DRM_ERROR_BAD_PERM                                                      0x80029519
+#endif
+#ifndef SCE_NP_DRM_ERROR_UNKNOWN_VERSION
+#define SCE_NP_DRM_ERROR_UNKNOWN_VERSION                                               0x8002951a
+#endif
+#ifndef SCE_NP_DRM_ERROR_TIME_LIMIT
+#define SCE_NP_DRM_ERROR_TIME_LIMIT                                                    0x8002951b
+#endif
+#ifndef SCE_NP_DRM_ERROR_DIFFERENT_ACCOUNT_ID
+#define SCE_NP_DRM_ERROR_DIFFERENT_ACCOUNT_ID                                          0x8002951c
+#endif
+#ifndef SCE_NP_DRM_ERROR_DIFFERENT_DRM_TYPE
+#define SCE_NP_DRM_ERROR_DIFFERENT_DRM_TYPE                                            0x8002951d
+#endif
+#ifndef SCE_NP_DRM_ERROR_SERVICE_NOT_STARTED
+#define SCE_NP_DRM_ERROR_SERVICE_NOT_STARTED                                           0x8002951e
+#endif
+#ifndef SCE_NP_DRM_ERROR_BUSY
+#define SCE_NP_DRM_ERROR_BUSY                                                          0x80029520
+#endif
+#ifndef SCE_NP_DRM_ERROR_LICENSE_NOT_FOUND
+#define SCE_NP_DRM_ERROR_LICENSE_NOT_FOUND                                             0x80029521
+#endif
+#ifndef SCE_NP_DRM_ERROR_IO
+#define SCE_NP_DRM_ERROR_IO                                                            0x80029525
+#endif
+#ifndef SCE_NP_DRM_ERROR_FORMAT
+#define SCE_NP_DRM_ERROR_FORMAT                                                        0x80029530
+#endif
+#ifndef SCE_NP_DRM_ERROR_FILENAME
+#define SCE_NP_DRM_ERROR_FILENAME                                                      0x80029533
+#endif
+#ifndef SCE_NP_DRM_ERROR_K_LICENSEE
+#define SCE_NP_DRM_ERROR_K_LICENSEE                                                    0x80029534
+#endif
+
+/* SCE_NP_COMMERCE_BROWSE_SERVER */
+#ifndef SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_UNKNOWN
+#define SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_UNKNOWN                                    0x80029600
+#endif
+#ifndef SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_INVALID_CREDENTIALS
+#define SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_INVALID_CREDENTIALS                        0x80029601
+#endif
+#ifndef SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_INVALID_CATEGORY_ID
+#define SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_INVALID_CATEGORY_ID                        0x80029602
+#endif
+#ifndef SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_SERVICE_END
+#define SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_SERVICE_END                                0x80029603
+#endif
+#ifndef SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_SERVICE_STOP
+#define SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_SERVICE_STOP                               0x80029604
+#endif
+#ifndef SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_SERVICE_BUSY
+#define SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_SERVICE_BUSY                               0x80029605
+#endif
+#ifndef SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_UNSUPPORTED_VERSION
+#define SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_UNSUPPORTED_VERSION                        0x80029606
+#endif
+#ifndef SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_INTERNAL_SERVER
+#define SCE_NP_COMMERCE_BROWSE_SERVER_ERROR_INTERNAL_SERVER                            0x80029680
+#endif
+
+/* SCE_NP_DRM_SERVER */
+#ifndef SCE_NP_DRM_SERVER_ERROR_SERVICE_IS_END
+#define SCE_NP_DRM_SERVER_ERROR_SERVICE_IS_END                                         0x80029700
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_SERVICE_STOPS_TEMPORARILY
+#define SCE_NP_DRM_SERVER_ERROR_SERVICE_STOPS_TEMPORARILY                              0x80029701
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_SERVICE_IS_BUSY
+#define SCE_NP_DRM_SERVER_ERROR_SERVICE_IS_BUSY                                        0x80029702
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_INVALID_USER_CREDENTIAL
+#define SCE_NP_DRM_SERVER_ERROR_INVALID_USER_CREDENTIAL                                0x80029721
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_INVALID_PRODUCT_ID
+#define SCE_NP_DRM_SERVER_ERROR_INVALID_PRODUCT_ID                                     0x80029722
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_ACCOUNT_IS_CLOSED
+#define SCE_NP_DRM_SERVER_ERROR_ACCOUNT_IS_CLOSED                                      0x80029730
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_ACCOUNT_IS_SUSPENDED
+#define SCE_NP_DRM_SERVER_ERROR_ACCOUNT_IS_SUSPENDED                                   0x80029731
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_ACTIVATED_CONSOLE_IS_FULL
+#define SCE_NP_DRM_SERVER_ERROR_ACTIVATED_CONSOLE_IS_FULL                              0x80029750
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_CONSOLE_NOT_ACTIVATED
+#define SCE_NP_DRM_SERVER_ERROR_CONSOLE_NOT_ACTIVATED                                  0x80029751
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_PRIMARY_CONSOLE_CANNOT_CHANGED
+#define SCE_NP_DRM_SERVER_ERROR_PRIMARY_CONSOLE_CANNOT_CHANGED                         0x80029752
+#endif
+#ifndef SCE_NP_DRM_SERVER_ERROR_UNKNOWN
+#define SCE_NP_DRM_SERVER_ERROR_UNKNOWN                                                0x80029780
+#endif
+
+/* SCE_NP_COMMERCE_GDF_SERVER */
+#ifndef SCE_NP_COMMERCE_GDF_SERVER_ERROR_UNKNOWN
+#define SCE_NP_COMMERCE_GDF_SERVER_ERROR_UNKNOWN                                       0x80029d00
+#endif
+#ifndef SCE_NP_COMMERCE_GDF_SERVER_ERROR_INVALID_CREDENTIALS
+#define SCE_NP_COMMERCE_GDF_SERVER_ERROR_INVALID_CREDENTIALS                           0x80029d01
+#endif
+#ifndef SCE_NP_COMMERCE_GDF_SERVER_ERROR_INVALID_FLAGLIST
+#define SCE_NP_COMMERCE_GDF_SERVER_ERROR_INVALID_FLAGLIST                              0x80029d02
+#endif
+#ifndef SCE_NP_COMMERCE_GDF_SERVER_ERROR_SERVICE_END
+#define SCE_NP_COMMERCE_GDF_SERVER_ERROR_SERVICE_END                                   0x80029d03
+#endif
+#ifndef SCE_NP_COMMERCE_GDF_SERVER_ERROR_SERVICE_STOP
+#define SCE_NP_COMMERCE_GDF_SERVER_ERROR_SERVICE_STOP                                  0x80029d04
+#endif
+#ifndef SCE_NP_COMMERCE_GDF_SERVER_ERROR_SERVICE_BUSY
+#define SCE_NP_COMMERCE_GDF_SERVER_ERROR_SERVICE_BUSY                                  0x80029d05
+#endif
+#ifndef SCE_NP_COMMERCE_GDF_SERVER_ERROR_UNSUPPORTED_VERSION
+#define SCE_NP_COMMERCE_GDF_SERVER_ERROR_UNSUPPORTED_VERSION                           0x80029d06
+#endif
+
+/* SCE_NP_COMMERCE_SDF_SERVER */
+#ifndef SCE_NP_COMMERCE_SDF_SERVER_ERROR_UNKNOWN
+#define SCE_NP_COMMERCE_SDF_SERVER_ERROR_UNKNOWN                                       0x80029e00
+#endif
+#ifndef SCE_NP_COMMERCE_SDF_SERVER_ERROR_INVALID_CREDENTIALS
+#define SCE_NP_COMMERCE_SDF_SERVER_ERROR_INVALID_CREDENTIALS                           0x80029e01
+#endif
+#ifndef SCE_NP_COMMERCE_SDF_SERVER_ERROR_INVALID_FLAGLIST
+#define SCE_NP_COMMERCE_SDF_SERVER_ERROR_INVALID_FLAGLIST                              0x80029e02
+#endif
+#ifndef SCE_NP_COMMERCE_SDF_SERVER_ERROR_SERVICE_END
+#define SCE_NP_COMMERCE_SDF_SERVER_ERROR_SERVICE_END                                   0x80029e03
+#endif
+#ifndef SCE_NP_COMMERCE_SDF_SERVER_ERROR_SERVICE_STOP
+#define SCE_NP_COMMERCE_SDF_SERVER_ERROR_SERVICE_STOP                                  0x80029e04
+#endif
+#ifndef SCE_NP_COMMERCE_SDF_SERVER_ERROR_SERVICE_BUSY
+#define SCE_NP_COMMERCE_SDF_SERVER_ERROR_SERVICE_BUSY                                  0x80029e05
+#endif
+#ifndef SCE_NP_COMMERCE_SDF_SERVER_ERROR_UNSUPPORTED_VERSION
+#define SCE_NP_COMMERCE_SDF_SERVER_ERROR_UNSUPPORTED_VERSION                           0x80029e06
+#endif
+
+/* SCE_NP_AUTH */
+#ifndef SCE_NP_AUTH_EINVAL
+#define SCE_NP_AUTH_EINVAL                                                             0x8002a002
+#endif
+#ifndef SCE_NP_AUTH_ENOMEM
+#define SCE_NP_AUTH_ENOMEM                                                             0x8002a004
+#endif
+#ifndef SCE_NP_AUTH_ESRCH
+#define SCE_NP_AUTH_ESRCH                                                              0x8002a005
+#endif
+#ifndef SCE_NP_AUTH_EBUSY
+#define SCE_NP_AUTH_EBUSY                                                              0x8002a00a
+#endif
+#ifndef SCE_NP_AUTH_EABORT
+#define SCE_NP_AUTH_EABORT                                                             0x8002a00c
+#endif
+#ifndef SCE_NP_AUTH_EEXIST
+#define SCE_NP_AUTH_EEXIST                                                             0x8002a014
+#endif
+#ifndef SCE_NP_AUTH_ERROR_SERVICE_END
+#define SCE_NP_AUTH_ERROR_SERVICE_END                                                  0x8002a200
+#endif
+#ifndef SCE_NP_AUTH_ERROR_SERVICE_DOWN
+#define SCE_NP_AUTH_ERROR_SERVICE_DOWN                                                 0x8002a201
+#endif
+#ifndef SCE_NP_AUTH_ERROR_SERVICE_BUSY
+#define SCE_NP_AUTH_ERROR_SERVICE_BUSY                                                 0x8002a202
+#endif
+#ifndef SCE_NP_AUTH_ERROR_SERVER_MAINTENANCE
+#define SCE_NP_AUTH_ERROR_SERVER_MAINTENANCE                                           0x8002a203
+#endif
+#ifndef SCE_NP_AUTH_ERROR_INVALID_DATA_LENGTH
+#define SCE_NP_AUTH_ERROR_INVALID_DATA_LENGTH                                          0x8002a210
+#endif
+#ifndef SCE_NP_AUTH_ERROR_INVALID_USER_AGENT
+#define SCE_NP_AUTH_ERROR_INVALID_USER_AGENT                                           0x8002a211
+#endif
+#ifndef SCE_NP_AUTH_ERROR_INVALID_VERSION
+#define SCE_NP_AUTH_ERROR_INVALID_VERSION                                              0x8002a212
+#endif
+#ifndef SCE_NP_AUTH_ERROR_INVALID_SERVICE_ID
+#define SCE_NP_AUTH_ERROR_INVALID_SERVICE_ID                                           0x8002a220
+#endif
+#ifndef SCE_NP_AUTH_ERROR_INVALID_CREDENTIAL
+#define SCE_NP_AUTH_ERROR_INVALID_CREDENTIAL                                           0x8002a221
+#endif
+#ifndef SCE_NP_AUTH_ERROR_INVALID_ENTITLEMENT_ID
+#define SCE_NP_AUTH_ERROR_INVALID_ENTITLEMENT_ID                                       0x8002a222
+#endif
+#ifndef SCE_NP_AUTH_ERROR_INVALID_CONSUMED_COUNT
+#define SCE_NP_AUTH_ERROR_INVALID_CONSUMED_COUNT                                       0x8002a223
+#endif
+#ifndef SCE_NP_AUTH_ERROR_INVALID_CONSOLE_ID
+#define SCE_NP_AUTH_ERROR_INVALID_CONSOLE_ID                                           0x8002a224
+#endif
+#ifndef SCE_NP_AUTH_ERROR_CONSOLE_ID_SUSPENDED
+#define SCE_NP_AUTH_ERROR_CONSOLE_ID_SUSPENDED                                         0x8002a227
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_CLOSED
+#define SCE_NP_AUTH_ERROR_ACCOUNT_CLOSED                                               0x8002a230
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_SUSPENDED
+#define SCE_NP_AUTH_ERROR_ACCOUNT_SUSPENDED                                            0x8002a231
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_EULA
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_EULA                                           0x8002a232
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT1
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT1                                       0x8002a240
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT2
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT2                                       0x8002a241
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT3
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT3                                       0x8002a242
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT4
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT4                                       0x8002a243
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT5
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT5                                       0x8002a244
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT6
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT6                                       0x8002a245
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT7
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT7                                       0x8002a246
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT8
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT8                                       0x8002a247
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT9
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT9                                       0x8002a248
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT10
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT10                                      0x8002a249
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT11
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT11                                      0x8002a24a
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT12
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT12                                      0x8002a24b
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT13
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT13                                      0x8002a24c
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT14
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT14                                      0x8002a24d
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT15
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT15                                      0x8002a24e
+#endif
+#ifndef SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT16
+#define SCE_NP_AUTH_ERROR_ACCOUNT_RENEW_ACCOUNT16                                      0x8002a24f
+#endif
+#ifndef SCE_NP_AUTH_ERROR_SUB_ACCOUNT_RENEW_EULA
+#define SCE_NP_AUTH_ERROR_SUB_ACCOUNT_RENEW_EULA                                       0x8002a24f
+#endif
+#ifndef SCE_NP_AUTH_ERROR_UNKNOWN
+#define SCE_NP_AUTH_ERROR_UNKNOWN                                                      0x8002a280
+#endif
+
+/* SCE_NP_AUTH_EINVALID */
+#ifndef SCE_NP_AUTH_EINVALID_ARGUMENT
+#define SCE_NP_AUTH_EINVALID_ARGUMENT                                                  0x8002a015
+#endif
+
+/* SCE_NP_COMMUNITY */
+#ifndef SCE_NP_COMMUNITY_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_COMMUNITY_ERROR_ALREADY_INITIALIZED                                     0x8002a101
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_NOT_INITIALIZED
+#define SCE_NP_COMMUNITY_ERROR_NOT_INITIALIZED                                         0x8002a102
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_OUT_OF_MEMORY
+#define SCE_NP_COMMUNITY_ERROR_OUT_OF_MEMORY                                           0x8002a103
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INVALID_ARGUMENT
+#define SCE_NP_COMMUNITY_ERROR_INVALID_ARGUMENT                                        0x8002a104
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_NO_TITLE_SET
+#define SCE_NP_COMMUNITY_ERROR_NO_TITLE_SET                                            0x8002a105
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_NO_LOGIN
+#define SCE_NP_COMMUNITY_ERROR_NO_LOGIN                                                0x8002a106
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS
+#define SCE_NP_COMMUNITY_ERROR_TOO_MANY_OBJECTS                                        0x8002a107
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_TRANSACTION_STILL_REFERENCED
+#define SCE_NP_COMMUNITY_ERROR_TRANSACTION_STILL_REFERENCED                            0x8002a108
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_ABORTED
+#define SCE_NP_COMMUNITY_ERROR_ABORTED                                                 0x8002a109
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_NO_RESOURCE
+#define SCE_NP_COMMUNITY_ERROR_NO_RESOURCE                                             0x8002a10a
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_BAD_RESPONSE
+#define SCE_NP_COMMUNITY_ERROR_BAD_RESPONSE                                            0x8002a10b
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_BODY_TOO_LARGE
+#define SCE_NP_COMMUNITY_ERROR_BODY_TOO_LARGE                                          0x8002a10c
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_HTTP_SERVER
+#define SCE_NP_COMMUNITY_ERROR_HTTP_SERVER                                             0x8002a10d
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INVALID_SIGNATURE
+#define SCE_NP_COMMUNITY_ERROR_INVALID_SIGNATURE                                       0x8002a10e
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_TIMEOUT
+#define SCE_NP_COMMUNITY_ERROR_TIMEOUT                                                 0x8002a10f
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT
+#define SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT                                   0x8002a1a1
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_UNKNOWN_TYPE
+#define SCE_NP_COMMUNITY_ERROR_UNKNOWN_TYPE                                            0x8002a1a2
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INVALID_ID
+#define SCE_NP_COMMUNITY_ERROR_INVALID_ID                                              0x8002a1a3
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INVALID_ONLINE_ID
+#define SCE_NP_COMMUNITY_ERROR_INVALID_ONLINE_ID                                       0x8002a1a4
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INVALID_PSHANDLE
+#define SCE_NP_COMMUNITY_ERROR_INVALID_PSHANDLE                                        0x8002a1a4
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INVALID_TICKET
+#define SCE_NP_COMMUNITY_ERROR_INVALID_TICKET                                          0x8002a1a5
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_CLIENT_ALREADY_EXISTS
+#define SCE_NP_COMMUNITY_ERROR_CLIENT_ALREADY_EXISTS                                   0x8002a1a6
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_CLIENT_HANDLE_ALREADY_EXISTS
+#define SCE_NP_COMMUNITY_ERROR_CLIENT_HANDLE_ALREADY_EXISTS                            0x8002a1a6
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_BUFFER
+#define SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_BUFFER                                     0x8002a1a7
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INVALID_TYPE
+#define SCE_NP_COMMUNITY_ERROR_INVALID_TYPE                                            0x8002a1a8
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_TRANSACTION_ALREADY_END
+#define SCE_NP_COMMUNITY_ERROR_TRANSACTION_ALREADY_END                                 0x8002a1a9
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_TRANSACTION_BEFORE_END
+#define SCE_NP_COMMUNITY_ERROR_TRANSACTION_BEFORE_END                                  0x8002a1aa
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_BUSY_BY_ANOTEHR_TRANSACTION
+#define SCE_NP_COMMUNITY_ERROR_BUSY_BY_ANOTEHR_TRANSACTION                             0x8002a1ab
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT
+#define SCE_NP_COMMUNITY_ERROR_INVALID_ALIGNMENT                                       0x8002a1ac
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_TOO_MANY_NPID
+#define SCE_NP_COMMUNITY_ERROR_TOO_MANY_NPID                                           0x8002a1ad
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_TOO_LARGE_RANGE
+#define SCE_NP_COMMUNITY_ERROR_TOO_LARGE_RANGE                                         0x8002a1ae
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_INVALID_PARTITION
+#define SCE_NP_COMMUNITY_ERROR_INVALID_PARTITION                                       0x8002a1af
+#endif
+#ifndef SCE_NP_COMMUNITY_ERROR_TOO_MANY_SLOTID
+#define SCE_NP_COMMUNITY_ERROR_TOO_MANY_SLOTID                                         0x8002a1b1
+#endif
+
+/* SCE_NP_CORE_SERVER */
+#ifndef SCE_NP_CORE_SERVER_ERROR_CONFLICT
+#define SCE_NP_CORE_SERVER_ERROR_CONFLICT                                              0x8002a303
+#endif
+#ifndef SCE_NP_CORE_SERVER_ERROR_NOT_AUTHORIZED
+#define SCE_NP_CORE_SERVER_ERROR_NOT_AUTHORIZED                                        0x8002a30d
+#endif
+#ifndef SCE_NP_CORE_SERVER_ERROR_REMOTE_CONNECTION_FAILED
+#define SCE_NP_CORE_SERVER_ERROR_REMOTE_CONNECTION_FAILED                              0x8002a30f
+#endif
+#ifndef SCE_NP_CORE_SERVER_ERROR_RESOURCE_CONSTRAINT
+#define SCE_NP_CORE_SERVER_ERROR_RESOURCE_CONSTRAINT                                   0x8002a310
+#endif
+#ifndef SCE_NP_CORE_SERVER_ERROR_SYSTEM_SHUTDOWN
+#define SCE_NP_CORE_SERVER_ERROR_SYSTEM_SHUTDOWN                                       0x8002a313
+#endif
+#ifndef SCE_NP_CORE_SERVER_ERROR_UNSUPPORTED_CLIENT_VERSION
+#define SCE_NP_CORE_SERVER_ERROR_UNSUPPORTED_CLIENT_VERSION                            0x8002a319
+#endif
+
+/* SCE_NP_COMMUNITY_SERVER */
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_BAD_REQUEST
+#define SCE_NP_COMMUNITY_SERVER_ERROR_BAD_REQUEST                                      0x8002a401
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_TICKET
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_TICKET                                   0x8002a402
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_SIGNATURE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_SIGNATURE                                0x8002a403
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_EXPIRED_TICKET
+#define SCE_NP_COMMUNITY_SERVER_ERROR_EXPIRED_TICKET                                   0x8002a404
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_NPID
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_NPID                                     0x8002a405
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_FORBIDDEN
+#define SCE_NP_COMMUNITY_SERVER_ERROR_FORBIDDEN                                        0x8002a406
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INTERNAL_SERVER_ERROR
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INTERNAL_SERVER_ERROR                            0x8002a407
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_VERSION_NOT_SUPPORTED
+#define SCE_NP_COMMUNITY_SERVER_ERROR_VERSION_NOT_SUPPORTED                            0x8002a408
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_SERVICE_UNAVAILABLE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_SERVICE_UNAVAILABLE                              0x8002a409
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_PLAYER_BANNED
+#define SCE_NP_COMMUNITY_SERVER_ERROR_PLAYER_BANNED                                    0x8002a40a
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_CENSORED
+#define SCE_NP_COMMUNITY_SERVER_ERROR_CENSORED                                         0x8002a40b
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_RECORD_FORBIDDEN
+#define SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_RECORD_FORBIDDEN                         0x8002a40c
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_USER_PROFILE_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_USER_PROFILE_NOT_FOUND                           0x8002a40d
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_UPLOADER_DATA_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_UPLOADER_DATA_NOT_FOUND                          0x8002a40e
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_QUOTA_MASTER_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_QUOTA_MASTER_NOT_FOUND                           0x8002a40f
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_TITLE_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_TITLE_NOT_FOUND                          0x8002a410
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_BLACKLISTED_USER_ID
+#define SCE_NP_COMMUNITY_SERVER_ERROR_BLACKLISTED_USER_ID                              0x8002a411
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_GAME_RANKING_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_GAME_RANKING_NOT_FOUND                           0x8002a412
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_STORE_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_STORE_NOT_FOUND                          0x8002a414
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_NOT_BEST_SCORE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_NOT_BEST_SCORE                                   0x8002a415
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_LATEST_UPDATE_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_LATEST_UPDATE_NOT_FOUND                          0x8002a416
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_BOARD_MASTER_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_BOARD_MASTER_NOT_FOUND                   0x8002a417
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_GAME_DATA_MASTER_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_GAME_DATA_MASTER_NOT_FOUND               0x8002a418
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ANTICHEAT_DATA
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ANTICHEAT_DATA                           0x8002a419
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TOO_LARGE_DATA
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TOO_LARGE_DATA                                   0x8002a41a
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_NO_SUCH_USER_NPID
+#define SCE_NP_COMMUNITY_SERVER_ERROR_NO_SUCH_USER_NPID                                0x8002a41b
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ENVIRONMENT
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ENVIRONMENT                              0x8002a41d
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ONLINE_NAME_CHARACTER
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ONLINE_NAME_CHARACTER                    0x8002a41f
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ONLINE_NAME_LENGTH
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ONLINE_NAME_LENGTH                       0x8002a420
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ABOUT_ME_CHARACTER
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ABOUT_ME_CHARACTER                       0x8002a421
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ABOUT_ME_LENGTH
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_ABOUT_ME_LENGTH                          0x8002a422
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_SCORE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_SCORE                                    0x8002a423
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_OVER_THE_RANKING_LIMIT
+#define SCE_NP_COMMUNITY_SERVER_ERROR_OVER_THE_RANKING_LIMIT                           0x8002a424
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_FAIL_TO_CREATE_SIGNATURE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_FAIL_TO_CREATE_SIGNATURE                         0x8002a426
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_MASTER_INFO_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_MASTER_INFO_NOT_FOUND                    0x8002a427
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_OVER_THE_GAME_DATA_LIMIT
+#define SCE_NP_COMMUNITY_SERVER_ERROR_OVER_THE_GAME_DATA_LIMIT                         0x8002a428
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_SELF_DATA_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_SELF_DATA_NOT_FOUND                              0x8002a42a
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_USER_NOT_ASSIGNED
+#define SCE_NP_COMMUNITY_SERVER_ERROR_USER_NOT_ASSIGNED                                0x8002a42b
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_GAME_DATA_ALREADY_EXISTS
+#define SCE_NP_COMMUNITY_SERVER_ERROR_GAME_DATA_ALREADY_EXISTS                         0x8002a42c
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TOO_MANY_RESULTS
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TOO_MANY_RESULTS                                 0x8002a42d
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_NOT_RECORDABLE_VERSION
+#define SCE_NP_COMMUNITY_SERVER_ERROR_NOT_RECORDABLE_VERSION                           0x8002a42e
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_USER_STORAGE_TITLE_MASTER_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_USER_STORAGE_TITLE_MASTER_NOT_FOUND              0x8002a448
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_VIRTUAL_USER
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_VIRTUAL_USER                             0x8002a449
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_USER_STORAGE_DATA_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_USER_STORAGE_DATA_NOT_FOUND                      0x8002a44a
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_AVATAR_PAP
+#define SCE_NP_COMMUNITY_SERVER_ERROR_INVALID_AVATAR_PAP                               0x8002a457
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_NON_PLUS_MEMBER
+#define SCE_NP_COMMUNITY_SERVER_ERROR_NON_PLUS_MEMBER                                  0x8002a45d
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_UNMATCH_SEQUENCE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_UNMATCH_SEQUENCE                                 0x8002a45e
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_SAVEDATA_NOT_FOUND
+#define SCE_NP_COMMUNITY_SERVER_ERROR_SAVEDATA_NOT_FOUND                               0x8002a45f
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TOO_MANY_SAVEDATA_FILES
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TOO_MANY_SAVEDATA_FILES                          0x8002a460
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TOO_MUCH_TOTAL_SAVEDATA_SIZE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TOO_MUCH_TOTAL_SAVEDATA_SIZE                     0x8002a461
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_NOT_YET_DOWNLOADABLE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_NOT_YET_DOWNLOADABLE                             0x8002a462
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_BLACKLISTED_TITLE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_BLACKLISTED_TITLE                                0x8002a468
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TOO_LARGE_ICONDATA
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TOO_LARGE_ICONDATA                               0x8002a469
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TOO_LARGE_SAVEDATA
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TOO_LARGE_SAVEDATA                               0x8002a46a
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_UNMATCH_SIGNATURE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_UNMATCH_SIGNATURE                                0x8002a46b
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_UNMATCH_MD5SUM
+#define SCE_NP_COMMUNITY_SERVER_ERROR_UNMATCH_MD5SUM                                   0x8002a46c
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TOO_MUCH_SAVEDATA_SIZE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TOO_MUCH_SAVEDATA_SIZE                           0x8002a46d
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_CONDITIONS_NOT_SATISFIED
+#define SCE_NP_COMMUNITY_SERVER_ERROR_CONDITIONS_NOT_SATISFIED                         0x8002a473
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_UNSUPPORTED_PLATFORM
+#define SCE_NP_COMMUNITY_SERVER_ERROR_UNSUPPORTED_PLATFORM                             0x8002a478
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_MATCHING_BEFORE_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_MATCHING_BEFORE_SERVICE                          0x8002a4a0
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_MATCHING_END_OF_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_MATCHING_END_OF_SERVICE                          0x8002a4a1
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_MATCHING_MAINTENANCE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_MATCHING_MAINTENANCE                             0x8002a4a2
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_BEFORE_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_BEFORE_SERVICE                           0x8002a4a3
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_END_OF_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_END_OF_SERVICE                           0x8002a4a4
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_MAINTENANCE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_RANKING_MAINTENANCE                              0x8002a4a5
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_NO_SUCH_TITLE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_NO_SUCH_TITLE                                    0x8002a4a6
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TITLE_USER_STORAGE_BEFORE_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TITLE_USER_STORAGE_BEFORE_SERVICE                0x8002a4aa
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TITLE_USER_STORAGE_END_OF_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TITLE_USER_STORAGE_END_OF_SERVICE                0x8002a4ab
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_TITLE_USER_STORAGE_MAINTENANCE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_TITLE_USER_STORAGE_MAINTENANCE                   0x8002a4ac
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_FSR_BEFORE_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_FSR_BEFORE_SERVICE                               0x8002a4ad
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_FSR_END_OF_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_FSR_END_OF_SERVICE                               0x8002a4ae
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_FSR_MAINTENANCE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_FSR_MAINTENANCE                                  0x8002a4af
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_UBS_BEFORE_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_UBS_BEFORE_SERVICE                               0x8002a4b0
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_UBS_END_OF_SERVICE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_UBS_END_OF_SERVICE                               0x8002a4b1
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_UBS_MAINTENANCE
+#define SCE_NP_COMMUNITY_SERVER_ERROR_UBS_MAINTENANCE                                  0x8002a4b2
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_BASIC_BLACKLISTED_USER_ID
+#define SCE_NP_COMMUNITY_SERVER_ERROR_BASIC_BLACKLISTED_USER_ID                        0x8002a4b3
+#endif
+#ifndef SCE_NP_COMMUNITY_SERVER_ERROR_UNSPECIFIED
+#define SCE_NP_COMMUNITY_SERVER_ERROR_UNSPECIFIED                                      0x8002a4ff
+#endif
+
+/* SCE_NP_CORE_UTIL */
+#ifndef SCE_NP_CORE_UTIL_ERROR_INVALID_ARGUMENT
+#define SCE_NP_CORE_UTIL_ERROR_INVALID_ARGUMENT                                        0x8002a501
+#endif
+#ifndef SCE_NP_CORE_UTIL_ERROR_OUT_OF_MEMORY
+#define SCE_NP_CORE_UTIL_ERROR_OUT_OF_MEMORY                                           0x8002a502
+#endif
+#ifndef SCE_NP_CORE_UTIL_ERROR_INSUFFICIENT
+#define SCE_NP_CORE_UTIL_ERROR_INSUFFICIENT                                            0x8002a503
+#endif
+#ifndef SCE_NP_CORE_UTIL_ERROR_PARSER_FAILED
+#define SCE_NP_CORE_UTIL_ERROR_PARSER_FAILED                                           0x8002a504
+#endif
+#ifndef SCE_NP_CORE_UTIL_ERROR_INVALID_PROTOCOL_ID
+#define SCE_NP_CORE_UTIL_ERROR_INVALID_PROTOCOL_ID                                     0x8002a505
+#endif
+#ifndef SCE_NP_CORE_UTIL_ERROR_INVALID_EXTENSION
+#define SCE_NP_CORE_UTIL_ERROR_INVALID_EXTENSION                                       0x8002a506
+#endif
+#ifndef SCE_NP_CORE_UTIL_ERROR_INVALID_TEXT
+#define SCE_NP_CORE_UTIL_ERROR_INVALID_TEXT                                            0x8002a507
+#endif
+#ifndef SCE_NP_CORE_UTIL_ERROR_UNKNOWN_TYPE
+#define SCE_NP_CORE_UTIL_ERROR_UNKNOWN_TYPE                                            0x8002a508
+#endif
+#ifndef SCE_NP_CORE_UTIL_ERROR_UNKNOWN
+#define SCE_NP_CORE_UTIL_ERROR_UNKNOWN                                                 0x8002a509
+#endif
+
+/* SCE_NP_CORE_PARSER */
+#ifndef SCE_NP_CORE_PARSER_ERROR_NOT_INITIALIZED
+#define SCE_NP_CORE_PARSER_ERROR_NOT_INITIALIZED                                       0x8002a511
+#endif
+#ifndef SCE_NP_CORE_PARSER_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_CORE_PARSER_ERROR_ALREADY_INITIALIZED                                   0x8002a512
+#endif
+#ifndef SCE_NP_CORE_PARSER_ERROR_OUT_OF_MEMORY
+#define SCE_NP_CORE_PARSER_ERROR_OUT_OF_MEMORY                                         0x8002a513
+#endif
+#ifndef SCE_NP_CORE_PARSER_ERROR_INSUFFICIENT
+#define SCE_NP_CORE_PARSER_ERROR_INSUFFICIENT                                          0x8002a514
+#endif
+#ifndef SCE_NP_CORE_PARSER_ERROR_INVALID_FORMAT
+#define SCE_NP_CORE_PARSER_ERROR_INVALID_FORMAT                                        0x8002a515
+#endif
+#ifndef SCE_NP_CORE_PARSER_ERROR_INVALID_ARGUMENT
+#define SCE_NP_CORE_PARSER_ERROR_INVALID_ARGUMENT                                      0x8002a516
+#endif
+#ifndef SCE_NP_CORE_PARSER_ERROR_INVALID_HANDLE
+#define SCE_NP_CORE_PARSER_ERROR_INVALID_HANDLE                                        0x8002a517
+#endif
+#ifndef SCE_NP_CORE_PARSER_ERROR_INVALID_ICON
+#define SCE_NP_CORE_PARSER_ERROR_INVALID_ICON                                          0x8002a518
+#endif
+#ifndef SCE_NP_CORE_PARSER_ERROR_UNKNOWN
+#define SCE_NP_CORE_PARSER_ERROR_UNKNOWN                                               0x8002a519
+#endif
+
+/* SCE_NP_CORE */
+#ifndef SCE_NP_CORE_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_CORE_ERROR_ALREADY_INITIALIZED                                          0x8002a521
+#endif
+#ifndef SCE_NP_CORE_ERROR_NOT_INITIALIZED
+#define SCE_NP_CORE_ERROR_NOT_INITIALIZED                                              0x8002a522
+#endif
+#ifndef SCE_NP_CORE_ERROR_INVALID_ARGUMENT
+#define SCE_NP_CORE_ERROR_INVALID_ARGUMENT                                             0x8002a523
+#endif
+#ifndef SCE_NP_CORE_ERROR_OUT_OF_MEMORY
+#define SCE_NP_CORE_ERROR_OUT_OF_MEMORY                                                0x8002a524
+#endif
+#ifndef SCE_NP_CORE_ERROR_ID_NOT_AVAILABLE
+#define SCE_NP_CORE_ERROR_ID_NOT_AVAILABLE                                             0x8002a525
+#endif
+#ifndef SCE_NP_CORE_ERROR_USER_OFFLINE
+#define SCE_NP_CORE_ERROR_USER_OFFLINE                                                 0x8002a526
+#endif
+#ifndef SCE_NP_CORE_ERROR_SESSION_RUNNING
+#define SCE_NP_CORE_ERROR_SESSION_RUNNING                                              0x8002a527
+#endif
+#ifndef SCE_NP_CORE_ERROR_SESSION_NOT_ESTABLISHED
+#define SCE_NP_CORE_ERROR_SESSION_NOT_ESTABLISHED                                      0x8002a528
+#endif
+#ifndef SCE_NP_CORE_ERROR_SESSION_INVALID_STATE
+#define SCE_NP_CORE_ERROR_SESSION_INVALID_STATE                                        0x8002a529
+#endif
+#ifndef SCE_NP_CORE_ERROR_SESSION_ID_TOO_LONG
+#define SCE_NP_CORE_ERROR_SESSION_ID_TOO_LONG                                          0x8002a52a
+#endif
+#ifndef SCE_NP_CORE_ERROR_SESSION_INVALID_NAMESPACE
+#define SCE_NP_CORE_ERROR_SESSION_INVALID_NAMESPACE                                    0x8002a52b
+#endif
+#ifndef SCE_NP_CORE_ERROR_CONNECTION_TIMEOUT
+#define SCE_NP_CORE_ERROR_CONNECTION_TIMEOUT                                           0x8002a52c
+#endif
+#ifndef SCE_NP_CORE_ERROR_GETSOCKOPT
+#define SCE_NP_CORE_ERROR_GETSOCKOPT                                                   0x8002a52d
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_NOT_INITIALIZED
+#define SCE_NP_CORE_ERROR_SSL_NOT_INITIALIZED                                          0x8002a52e
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_ALREADY_INITIALIZED
+#define SCE_NP_CORE_ERROR_SSL_ALREADY_INITIALIZED                                      0x8002a52f
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_NO_CERT
+#define SCE_NP_CORE_ERROR_SSL_NO_CERT                                                  0x8002a530
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_NO_TRUSTWORTHY_CA
+#define SCE_NP_CORE_ERROR_SSL_NO_TRUSTWORTHY_CA                                        0x8002a531
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_INVALID_CERT
+#define SCE_NP_CORE_ERROR_SSL_INVALID_CERT                                             0x8002a532
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_CERT_VERIFY
+#define SCE_NP_CORE_ERROR_SSL_CERT_VERIFY                                              0x8002a533
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_CN_CHECK
+#define SCE_NP_CORE_ERROR_SSL_CN_CHECK                                                 0x8002a534
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_HANDSHAKE_FAILED
+#define SCE_NP_CORE_ERROR_SSL_HANDSHAKE_FAILED                                         0x8002a535
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_SEND
+#define SCE_NP_CORE_ERROR_SSL_SEND                                                     0x8002a536
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_RECV
+#define SCE_NP_CORE_ERROR_SSL_RECV                                                     0x8002a537
+#endif
+#ifndef SCE_NP_CORE_ERROR_SSL_CREATE_CTX
+#define SCE_NP_CORE_ERROR_SSL_CREATE_CTX                                               0x8002a538
+#endif
+#ifndef SCE_NP_CORE_ERROR_PARSE_PEM
+#define SCE_NP_CORE_ERROR_PARSE_PEM                                                    0x8002a539
+#endif
+#ifndef SCE_NP_CORE_ERROR_INVALID_INITIATE_STREAM
+#define SCE_NP_CORE_ERROR_INVALID_INITIATE_STREAM                                      0x8002a53a
+#endif
+#ifndef SCE_NP_CORE_ERROR_SASL_NOT_SUPPORTED
+#define SCE_NP_CORE_ERROR_SASL_NOT_SUPPORTED                                           0x8002a53b
+#endif
+#ifndef SCE_NP_CORE_ERROR_NAMESPACE_ALREADY_EXISTS
+#define SCE_NP_CORE_ERROR_NAMESPACE_ALREADY_EXISTS                                     0x8002a53c
+#endif
+#ifndef SCE_NP_CORE_ERROR_FROM_ALREADY_EXISTS
+#define SCE_NP_CORE_ERROR_FROM_ALREADY_EXISTS                                          0x8002a53d
+#endif
+#ifndef SCE_NP_CORE_ERROR_MODULE_NOT_REGISTERED
+#define SCE_NP_CORE_ERROR_MODULE_NOT_REGISTERED                                        0x8002a53e
+#endif
+#ifndef SCE_NP_CORE_ERROR_MODULE_FROM_NOT_FOUND
+#define SCE_NP_CORE_ERROR_MODULE_FROM_NOT_FOUND                                        0x8002a53f
+#endif
+#ifndef SCE_NP_CORE_ERROR_UNKNOWN_NAMESPACE
+#define SCE_NP_CORE_ERROR_UNKNOWN_NAMESPACE                                            0x8002a540
+#endif
+#ifndef SCE_NP_CORE_ERROR_INVALID_VERSION
+#define SCE_NP_CORE_ERROR_INVALID_VERSION                                              0x8002a541
+#endif
+#ifndef SCE_NP_CORE_ERROR_LOGIN_TIMEOUT
+#define SCE_NP_CORE_ERROR_LOGIN_TIMEOUT                                                0x8002a542
+#endif
+#ifndef SCE_NP_CORE_ERROR_TOO_MANY_SESSIONS
+#define SCE_NP_CORE_ERROR_TOO_MANY_SESSIONS                                            0x8002a543
+#endif
+#ifndef SCE_NP_CORE_ERROR_SENDLIST_NOT_FOUND
+#define SCE_NP_CORE_ERROR_SENDLIST_NOT_FOUND                                           0x8002a544
+#endif
+#ifndef SCE_NP_CORE_ERROR_NO_ID
+#define SCE_NP_CORE_ERROR_NO_ID                                                        0x8002a545
+#endif
+#ifndef SCE_NP_CORE_ERROR_LOAD_CERTS
+#define SCE_NP_CORE_ERROR_LOAD_CERTS                                                   0x8002a546
+#endif
+#ifndef SCE_NP_CORE_ERROR_NET_SELECT
+#define SCE_NP_CORE_ERROR_NET_SELECT                                                   0x8002a547
+#endif
+#ifndef SCE_NP_CORE_ERROR_DISCONNECTED
+#define SCE_NP_CORE_ERROR_DISCONNECTED                                                 0x8002a548
+#endif
+#ifndef SCE_NP_CORE_ERROR_TICKET_TOO_SMALL
+#define SCE_NP_CORE_ERROR_TICKET_TOO_SMALL                                             0x8002a549
+#endif
+#ifndef SCE_NP_CORE_ERROR_INVALID_TICKET
+#define SCE_NP_CORE_ERROR_INVALID_TICKET                                               0x8002a54a
+#endif
+#ifndef SCE_NP_CORE_ERROR_INVALID_ONLINEID
+#define SCE_NP_CORE_ERROR_INVALID_ONLINEID                                             0x8002a54b
+#endif
+#ifndef SCE_NP_CORE_ERROR_GETHOSTBYNAME
+#define SCE_NP_CORE_ERROR_GETHOSTBYNAME                                                0x8002a54c
+#endif
+#ifndef SCE_NP_CORE_ERROR_UNDEFINED_STREAM_ERROR
+#define SCE_NP_CORE_ERROR_UNDEFINED_STREAM_ERROR                                       0x8002a54d
+#endif
+#ifndef SCE_NP_CORE_ERROR_INTERNAL
+#define SCE_NP_CORE_ERROR_INTERNAL                                                     0x8002a5ff
+#endif
+#ifndef SCE_NP_CORE_ERROR_DNS_HOST_NOT_FOUND
+#define SCE_NP_CORE_ERROR_DNS_HOST_NOT_FOUND                                           0x8002af01
+#endif
+#ifndef SCE_NP_CORE_ERROR_DNS_TRY_AGAIN
+#define SCE_NP_CORE_ERROR_DNS_TRY_AGAIN                                                0x8002af02
+#endif
+#ifndef SCE_NP_CORE_ERROR_DNS_NO_RECOVERY
+#define SCE_NP_CORE_ERROR_DNS_NO_RECOVERY                                              0x8002af03
+#endif
+#ifndef SCE_NP_CORE_ERROR_DNS_NO_DATA
+#define SCE_NP_CORE_ERROR_DNS_NO_DATA                                                  0x8002af04
+#endif
+#ifndef SCE_NP_CORE_ERROR_DNS_NO_ADDRESS
+#define SCE_NP_CORE_ERROR_DNS_NO_ADDRESS                                               0x8002afff
+#endif
+
+/* SCE_NP_BASIC */
+#ifndef SCE_NP_BASIC_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_BASIC_ERROR_ALREADY_INITIALIZED                                         0x8002a661
+#endif
+#ifndef SCE_NP_BASIC_ERROR_NOT_INITIALIZED
+#define SCE_NP_BASIC_ERROR_NOT_INITIALIZED                                             0x8002a662
+#endif
+#ifndef SCE_NP_BASIC_ERROR_NOT_SUPPORTED
+#define SCE_NP_BASIC_ERROR_NOT_SUPPORTED                                               0x8002a663
+#endif
+#ifndef SCE_NP_BASIC_ERROR_OUT_OF_MEMORY
+#define SCE_NP_BASIC_ERROR_OUT_OF_MEMORY                                               0x8002a664
+#endif
+#ifndef SCE_NP_BASIC_ERROR_INVALID_ARGUMENT
+#define SCE_NP_BASIC_ERROR_INVALID_ARGUMENT                                            0x8002a665
+#endif
+#ifndef SCE_NP_BASIC_ERROR_BAD_ID
+#define SCE_NP_BASIC_ERROR_BAD_ID                                                      0x8002a666
+#endif
+#ifndef SCE_NP_BASIC_ERROR_IDS_DIFFER
+#define SCE_NP_BASIC_ERROR_IDS_DIFFER                                                  0x8002a667
+#endif
+#ifndef SCE_NP_BASIC_ERROR_PARSER_FAILED
+#define SCE_NP_BASIC_ERROR_PARSER_FAILED                                               0x8002a668
+#endif
+#ifndef SCE_NP_BASIC_ERROR_TIMEOUT
+#define SCE_NP_BASIC_ERROR_TIMEOUT                                                     0x8002a669
+#endif
+#ifndef SCE_NP_BASIC_ERROR_NO_EVENT
+#define SCE_NP_BASIC_ERROR_NO_EVENT                                                    0x8002a66a
+#endif
+#ifndef SCE_NP_BASIC_ERROR_EXCEEDS_MAX
+#define SCE_NP_BASIC_ERROR_EXCEEDS_MAX                                                 0x8002a66b
+#endif
+#ifndef SCE_NP_BASIC_ERROR_INSUFFICIENT
+#define SCE_NP_BASIC_ERROR_INSUFFICIENT                                                0x8002a66c
+#endif
+#ifndef SCE_NP_BASIC_ERROR_NOT_REGISTERED
+#define SCE_NP_BASIC_ERROR_NOT_REGISTERED                                              0x8002a66d
+#endif
+#ifndef SCE_NP_BASIC_ERROR_DATA_LOST
+#define SCE_NP_BASIC_ERROR_DATA_LOST                                                   0x8002a66e
+#endif
+#ifndef SCE_NP_BASIC_ERROR_BUSY
+#define SCE_NP_BASIC_ERROR_BUSY                                                        0x8002a66f
+#endif
+#ifndef SCE_NP_BASIC_ERROR_STATUS
+#define SCE_NP_BASIC_ERROR_STATUS                                                      0x8002a670
+#endif
+#ifndef SCE_NP_BASIC_ERROR_CANCEL
+#define SCE_NP_BASIC_ERROR_CANCEL                                                      0x8002a671
+#endif
+#ifndef SCE_NP_BASIC_ERROR_INVALID_MEMORY_CONTAINER
+#define SCE_NP_BASIC_ERROR_INVALID_MEMORY_CONTAINER                                    0x8002a672
+#endif
+#ifndef SCE_NP_BASIC_ERROR_INVALID_DATA_ID
+#define SCE_NP_BASIC_ERROR_INVALID_DATA_ID                                             0x8002a673
+#endif
+#ifndef SCE_NP_BASIC_ERROR_BROKEN_DATA
+#define SCE_NP_BASIC_ERROR_BROKEN_DATA                                                 0x8002a674
+#endif
+#ifndef SCE_NP_BASIC_ERROR_BLOCKLIST_ADD_FAILED
+#define SCE_NP_BASIC_ERROR_BLOCKLIST_ADD_FAILED                                        0x8002a675
+#endif
+#ifndef SCE_NP_BASIC_ERROR_BLOCKLIST_IS_FULL
+#define SCE_NP_BASIC_ERROR_BLOCKLIST_IS_FULL                                           0x8002a676
+#endif
+#ifndef SCE_NP_BASIC_ERROR_SEND_FAILED
+#define SCE_NP_BASIC_ERROR_SEND_FAILED                                                 0x8002a677
+#endif
+#ifndef SCE_NP_BASIC_ERROR_NOT_CONNECTED
+#define SCE_NP_BASIC_ERROR_NOT_CONNECTED                                               0x8002a678
+#endif
+#ifndef SCE_NP_BASIC_ERROR_INSUFFICIENT_DISK_SPACE
+#define SCE_NP_BASIC_ERROR_INSUFFICIENT_DISK_SPACE                                     0x8002a679
+#endif
+#ifndef SCE_NP_BASIC_ERROR_INTERNAL_FAILURE
+#define SCE_NP_BASIC_ERROR_INTERNAL_FAILURE                                            0x8002a67a
+#endif
+#ifndef SCE_NP_BASIC_ERROR_DOES_NOT_EXIST
+#define SCE_NP_BASIC_ERROR_DOES_NOT_EXIST                                              0x8002a67b
+#endif
+#ifndef SCE_NP_BASIC_ERROR_INVALID
+#define SCE_NP_BASIC_ERROR_INVALID                                                     0x8002a67c
+#endif
+#ifndef SCE_NP_BASIC_ERROR_ABORT
+#define SCE_NP_BASIC_ERROR_ABORT                                                       0x8002a67d
+#endif
+#ifndef SCE_NP_BASIC_ERROR_UNKNOWN
+#define SCE_NP_BASIC_ERROR_UNKNOWN                                                     0x8002a6bf
+#endif
+
+/* SCE_NP_EXT */
+#ifndef SCE_NP_EXT_ERROR_CONTEXT_DOES_NOT_EXIST
+#define SCE_NP_EXT_ERROR_CONTEXT_DOES_NOT_EXIST                                        0x8002a6a1
+#endif
+#ifndef SCE_NP_EXT_ERROR_CONTEXT_ALREADY_EXISTS
+#define SCE_NP_EXT_ERROR_CONTEXT_ALREADY_EXISTS                                        0x8002a6a2
+#endif
+#ifndef SCE_NP_EXT_ERROR_NO_CONTEXT
+#define SCE_NP_EXT_ERROR_NO_CONTEXT                                                    0x8002a6a3
+#endif
+#ifndef SCE_NP_EXT_ERROR_NO_ORIGIN
+#define SCE_NP_EXT_ERROR_NO_ORIGIN                                                     0x8002a6a4
+#endif
+
+/* SCE_NP_MATCHING */
+#ifndef SCE_NP_MATCHING_ERROR_NOT_INITIALIZED
+#define SCE_NP_MATCHING_ERROR_NOT_INITIALIZED                                          0x8002a701
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_MATCHING_ERROR_ALREADY_INITIALIZED                                      0x8002a702
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_ARG
+#define SCE_NP_MATCHING_ERROR_INVALID_ARG                                              0x8002a703
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_TERMINATED
+#define SCE_NP_MATCHING_ERROR_TERMINATED                                               0x8002a704
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_TIMEOUT
+#define SCE_NP_MATCHING_ERROR_TIMEOUT                                                  0x8002a705
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_OUT_OF_MEMORY
+#define SCE_NP_MATCHING_ERROR_OUT_OF_MEMORY                                            0x8002a706
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_CTXID_NOT_AVAIL
+#define SCE_NP_MATCHING_ERROR_CTXID_NOT_AVAIL                                          0x8002a707
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_CTX_ALREADY_EXIST
+#define SCE_NP_MATCHING_ERROR_CTX_ALREADY_EXIST                                        0x8002a708
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_CTX_NOT_FOUND
+#define SCE_NP_MATCHING_ERROR_CTX_NOT_FOUND                                            0x8002a709
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_LOBBY_NOT_FOUND
+#define SCE_NP_MATCHING_ERROR_LOBBY_NOT_FOUND                                          0x8002a70a
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_ROOM_NOT_FOUND
+#define SCE_NP_MATCHING_ERROR_ROOM_NOT_FOUND                                           0x8002a70b
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_MEMBER_NOT_FOUND
+#define SCE_NP_MATCHING_ERROR_MEMBER_NOT_FOUND                                         0x8002a70c
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_TOO_BIG_VALUE
+#define SCE_NP_MATCHING_ERROR_TOO_BIG_VALUE                                            0x8002a70d
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_ATTR_TYPE
+#define SCE_NP_MATCHING_ERROR_INVALID_ATTR_TYPE                                        0x8002a70e
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_ATTR_ID
+#define SCE_NP_MATCHING_ERROR_INVALID_ATTR_ID                                          0x8002a70f
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_ALREADY_REQUESTED
+#define SCE_NP_MATCHING_ERROR_ALREADY_REQUESTED                                        0x8002a710
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_LIMITTED_SEATING
+#define SCE_NP_MATCHING_ERROR_LIMITTED_SEATING                                         0x8002a711
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_LOCKED
+#define SCE_NP_MATCHING_ERROR_LOCKED                                                   0x8002a712
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_CTX_STILL_RUNNING
+#define SCE_NP_MATCHING_ERROR_CTX_STILL_RUNNING                                        0x8002a713
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INSUFFICIENT_BUFFER
+#define SCE_NP_MATCHING_ERROR_INSUFFICIENT_BUFFER                                      0x8002a714
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_REQUEST_NOT_ALLOWED
+#define SCE_NP_MATCHING_ERROR_REQUEST_NOT_ALLOWED                                      0x8002a715
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_CTX_MAX
+#define SCE_NP_MATCHING_ERROR_CTX_MAX                                                  0x8002a716
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_REQ_ID
+#define SCE_NP_MATCHING_ERROR_INVALID_REQ_ID                                           0x8002a717
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_RESULT_NOT_FOUND
+#define SCE_NP_MATCHING_ERROR_RESULT_NOT_FOUND                                         0x8002a718
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_BUSY
+#define SCE_NP_MATCHING_ERROR_BUSY                                                     0x8002a719
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_ALREADY_JOINED_ROOM
+#define SCE_NP_MATCHING_ERROR_ALREADY_JOINED_ROOM                                      0x8002a71a
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_ROOM_MAX
+#define SCE_NP_MATCHING_ERROR_ROOM_MAX                                                 0x8002a71b
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_QUICK_MATCH_PLAYER_NOT_FOUND
+#define SCE_NP_MATCHING_ERROR_QUICK_MATCH_PLAYER_NOT_FOUND                             0x8002a71c
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_COND_MAX
+#define SCE_NP_MATCHING_ERROR_COND_MAX                                                 0x8002a71d
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_COND
+#define SCE_NP_MATCHING_ERROR_INVALID_COND                                             0x8002a71e
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_ATTR
+#define SCE_NP_MATCHING_ERROR_INVALID_ATTR                                             0x8002a71f
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_COMP_OP_INEQUALITY_MAX
+#define SCE_NP_MATCHING_ERROR_COMP_OP_INEQUALITY_MAX                                   0x8002a720
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_RESULT_OVERFLOWED
+#define SCE_NP_MATCHING_ERROR_RESULT_OVERFLOWED                                        0x8002a721
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_HTTPXML_TIMEOUT
+#define SCE_NP_MATCHING_ERROR_HTTPXML_TIMEOUT                                          0x8002a722
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_CANCELED
+#define SCE_NP_MATCHING_ERROR_CANCELED                                                 0x8002a723
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_SEARCH_JOIN_ROOM_NOT_FOUND
+#define SCE_NP_MATCHING_ERROR_SEARCH_JOIN_ROOM_NOT_FOUND                               0x8002a724
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_COMP_OP
+#define SCE_NP_MATCHING_ERROR_INVALID_COMP_OP                                          0x8002a725
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_COMP_TYPE
+#define SCE_NP_MATCHING_ERROR_INVALID_COMP_TYPE                                        0x8002a726
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_REQUEST_NOT_FOUND
+#define SCE_NP_MATCHING_ERROR_REQUEST_NOT_FOUND                                        0x8002a727
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INTERNAL_ERROR
+#define SCE_NP_MATCHING_ERROR_INTERNAL_ERROR                                           0x8002a728
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_PROTOCOL_ID
+#define SCE_NP_MATCHING_ERROR_INVALID_PROTOCOL_ID                                      0x8002a729
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_ATTR_NOT_SPECIFIED
+#define SCE_NP_MATCHING_ERROR_ATTR_NOT_SPECIFIED                                       0x8002a72a
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_SYSUTIL_INVALID_RESULT
+#define SCE_NP_MATCHING_ERROR_SYSUTIL_INVALID_RESULT                                   0x8002a72b
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_PLUGIN_LOAD_FAILURE
+#define SCE_NP_MATCHING_ERROR_PLUGIN_LOAD_FAILURE                                      0x8002a72c
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_ATTR_VALUE
+#define SCE_NP_MATCHING_ERROR_INVALID_ATTR_VALUE                                       0x8002a72d
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_DUPLICATE
+#define SCE_NP_MATCHING_ERROR_DUPLICATE                                                0x8002a72e
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_INVALID_MEMORY_CONTAINER
+#define SCE_NP_MATCHING_ERROR_INVALID_MEMORY_CONTAINER                                 0x8002a72f
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_SHUTDOWN
+#define SCE_NP_MATCHING_ERROR_SHUTDOWN                                                 0x8002a730
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_SYSUTIL_SERVER_BUSY
+#define SCE_NP_MATCHING_ERROR_SYSUTIL_SERVER_BUSY                                      0x8002a731
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_SEND_INVITATION_PARTIALLY_FAILED
+#define SCE_NP_MATCHING_ERROR_SEND_INVITATION_PARTIALLY_FAILED                         0x8002a732
+#endif
+#ifndef SCE_NP_MATCHING_ERROR_UTILITY_UNAVAILABLE
+#define SCE_NP_MATCHING_ERROR_UTILITY_UNAVAILABLE                                      0x8002a733
+#endif
+
+/* SCE_NP_MATCHING_SERVER */
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_OUT_OF_SERVICE
+#define SCE_NP_MATCHING_SERVER_ERROR_OUT_OF_SERVICE                                    0x8002a740
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_MAINTENANCE
+#define SCE_NP_MATCHING_SERVER_ERROR_MAINTENANCE                                       0x8002a741
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_SERVER_BUSY
+#define SCE_NP_MATCHING_SERVER_ERROR_SERVER_BUSY                                       0x8002a742
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_ACCESS_FORBIDDEN
+#define SCE_NP_MATCHING_SERVER_ERROR_ACCESS_FORBIDDEN                                  0x8002a743
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_NO_SUCH_SERVER
+#define SCE_NP_MATCHING_SERVER_ERROR_NO_SUCH_SERVER                                    0x8002a744
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_NO_SUCH_LOBBY
+#define SCE_NP_MATCHING_SERVER_ERROR_NO_SUCH_LOBBY                                     0x8002a745
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_NO_SUCH_ROOM
+#define SCE_NP_MATCHING_SERVER_ERROR_NO_SUCH_ROOM                                      0x8002a746
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_NO_SUCH_USER
+#define SCE_NP_MATCHING_SERVER_ERROR_NO_SUCH_USER                                      0x8002a747
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_NOT_ALLOWED
+#define SCE_NP_MATCHING_SERVER_ERROR_NOT_ALLOWED                                       0x8002a748
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_UNKNOWN
+#define SCE_NP_MATCHING_SERVER_ERROR_UNKNOWN                                           0x8002a749
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_BAD_REQUEST_STANZA
+#define SCE_NP_MATCHING_SERVER_ERROR_BAD_REQUEST_STANZA                                0x8002a74a
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_REQUEST_FORBIDDEN
+#define SCE_NP_MATCHING_SERVER_ERROR_REQUEST_FORBIDDEN                                 0x8002a74b
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_INTERNAL_ERROR
+#define SCE_NP_MATCHING_SERVER_ERROR_INTERNAL_ERROR                                    0x8002a74c
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_ROOM_OVER
+#define SCE_NP_MATCHING_SERVER_ERROR_ROOM_OVER                                         0x8002a74d
+#endif
+#ifndef SCE_NP_MATCHING_SERVER_ERROR_ROOM_CLOSED
+#define SCE_NP_MATCHING_SERVER_ERROR_ROOM_CLOSED                                       0x8002a74e
+#endif
+
+/* SCE_NP_SIGNALING */
+#ifndef SCE_NP_SIGNALING_ERROR_NOT_INITIALIZED
+#define SCE_NP_SIGNALING_ERROR_NOT_INITIALIZED                                         0x8002a801
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_SIGNALING_ERROR_ALREADY_INITIALIZED                                     0x8002a802
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_OUT_OF_MEMORY
+#define SCE_NP_SIGNALING_ERROR_OUT_OF_MEMORY                                           0x8002a803
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_CTXID_NOT_AVAILABLE
+#define SCE_NP_SIGNALING_ERROR_CTXID_NOT_AVAILABLE                                     0x8002a804
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_CTX_NOT_FOUND
+#define SCE_NP_SIGNALING_ERROR_CTX_NOT_FOUND                                           0x8002a805
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_REQID_NOT_AVAILABLE
+#define SCE_NP_SIGNALING_ERROR_REQID_NOT_AVAILABLE                                     0x8002a806
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_REQ_NOT_FOUND
+#define SCE_NP_SIGNALING_ERROR_REQ_NOT_FOUND                                           0x8002a807
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_PARSER_CREATE_FAILED
+#define SCE_NP_SIGNALING_ERROR_PARSER_CREATE_FAILED                                    0x8002a808
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_PARSER_FAILED
+#define SCE_NP_SIGNALING_ERROR_PARSER_FAILED                                           0x8002a809
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_INVALID_NAMESPACE
+#define SCE_NP_SIGNALING_ERROR_INVALID_NAMESPACE                                       0x8002a80a
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_NETINFO_NOT_AVAILABLE
+#define SCE_NP_SIGNALING_ERROR_NETINFO_NOT_AVAILABLE                                   0x8002a80b
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_PEER_NOT_RESPONDING
+#define SCE_NP_SIGNALING_ERROR_PEER_NOT_RESPONDING                                     0x8002a80c
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_CONNID_NOT_AVAILABLE
+#define SCE_NP_SIGNALING_ERROR_CONNID_NOT_AVAILABLE                                    0x8002a80d
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_CONN_NOT_FOUND
+#define SCE_NP_SIGNALING_ERROR_CONN_NOT_FOUND                                          0x8002a80e
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_PEER_UNREACHABLE
+#define SCE_NP_SIGNALING_ERROR_PEER_UNREACHABLE                                        0x8002a80f
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_TERMINATED_BY_PEER
+#define SCE_NP_SIGNALING_ERROR_TERMINATED_BY_PEER                                      0x8002a810
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_TIMEOUT
+#define SCE_NP_SIGNALING_ERROR_TIMEOUT                                                 0x8002a811
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_CTX_MAX
+#define SCE_NP_SIGNALING_ERROR_CTX_MAX                                                 0x8002a812
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_RESULT_NOT_FOUND
+#define SCE_NP_SIGNALING_ERROR_RESULT_NOT_FOUND                                        0x8002a813
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_CONN_IN_PROGRESS
+#define SCE_NP_SIGNALING_ERROR_CONN_IN_PROGRESS                                        0x8002a814
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_CONN_NOT_ACTIVE
+#define SCE_NP_SIGNALING_ERROR_CONN_NOT_ACTIVE                                         0x8002a814
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_INVALID_ARGUMENT
+#define SCE_NP_SIGNALING_ERROR_INVALID_ARGUMENT                                        0x8002a815
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_OWN_NP_ID
+#define SCE_NP_SIGNALING_ERROR_OWN_NP_ID                                               0x8002a816
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_TOO_MANY_CONN
+#define SCE_NP_SIGNALING_ERROR_TOO_MANY_CONN                                           0x8002a817
+#endif
+#ifndef SCE_NP_SIGNALING_ERROR_TERMINATED_BY_MYSELF
+#define SCE_NP_SIGNALING_ERROR_TERMINATED_BY_MYSELF                                    0x8002a818
+#endif
+
+/* SCE_NP */
+#ifndef SCE_NP_ERROR_NOT_INITIALIZED
+#define SCE_NP_ERROR_NOT_INITIALIZED                                                   0x8002aa01
+#endif
+#ifndef SCE_NP_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_ERROR_ALREADY_INITIALIZED                                               0x8002aa02
+#endif
+#ifndef SCE_NP_ERROR_INVALID_ARGUMENT
+#define SCE_NP_ERROR_INVALID_ARGUMENT                                                  0x8002aa03
+#endif
+#ifndef SCE_NP_ERROR_OUT_OF_MEMORY
+#define SCE_NP_ERROR_OUT_OF_MEMORY                                                     0x8002aa04
+#endif
+#ifndef SCE_NP_ERROR_ID_NO_SPACE
+#define SCE_NP_ERROR_ID_NO_SPACE                                                       0x8002aa05
+#endif
+#ifndef SCE_NP_ERROR_ID_NOT_FOUND
+#define SCE_NP_ERROR_ID_NOT_FOUND                                                      0x8002aa06
+#endif
+#ifndef SCE_NP_ERROR_SESSION_RUNNING
+#define SCE_NP_ERROR_SESSION_RUNNING                                                   0x8002aa07
+#endif
+#ifndef SCE_NP_ERROR_LOGINID_ALREADY_EXISTS
+#define SCE_NP_ERROR_LOGINID_ALREADY_EXISTS                                            0x8002aa08
+#endif
+#ifndef SCE_NP_ERROR_INVALID_TICKET_SIZE
+#define SCE_NP_ERROR_INVALID_TICKET_SIZE                                               0x8002aa09
+#endif
+#ifndef SCE_NP_ERROR_INVALID_STATE
+#define SCE_NP_ERROR_INVALID_STATE                                                     0x8002aa0a
+#endif
+#ifndef SCE_NP_ERROR_ABORTED
+#define SCE_NP_ERROR_ABORTED                                                           0x8002aa0b
+#endif
+#ifndef SCE_NP_ERROR_OFFLINE
+#define SCE_NP_ERROR_OFFLINE                                                           0x8002aa0c
+#endif
+#ifndef SCE_NP_ERROR_VARIANT_ACCOUNT_ID
+#define SCE_NP_ERROR_VARIANT_ACCOUNT_ID                                                0x8002aa0d
+#endif
+#ifndef SCE_NP_ERROR_GET_CLOCK
+#define SCE_NP_ERROR_GET_CLOCK                                                         0x8002aa0e
+#endif
+#ifndef SCE_NP_ERROR_INSUFFICIENT_BUFFER
+#define SCE_NP_ERROR_INSUFFICIENT_BUFFER                                               0x8002aa0f
+#endif
+#ifndef SCE_NP_ERROR_EXPIRED_TICKET
+#define SCE_NP_ERROR_EXPIRED_TICKET                                                    0x8002aa10
+#endif
+#ifndef SCE_NP_ERROR_TICKET_PARAM_NOT_FOUND
+#define SCE_NP_ERROR_TICKET_PARAM_NOT_FOUND                                            0x8002aa11
+#endif
+#ifndef SCE_NP_ERROR_UNSUPPORTED_TICKET_VERSION
+#define SCE_NP_ERROR_UNSUPPORTED_TICKET_VERSION                                        0x8002aa12
+#endif
+#ifndef SCE_NP_ERROR_TICKET_STATUS_CODE_INVALID
+#define SCE_NP_ERROR_TICKET_STATUS_CODE_INVALID                                        0x8002aa13
+#endif
+#ifndef SCE_NP_ERROR_INVALID_TICKET_VERSION
+#define SCE_NP_ERROR_INVALID_TICKET_VERSION                                            0x8002aa14
+#endif
+#ifndef SCE_NP_ERROR_ALREADY_USED
+#define SCE_NP_ERROR_ALREADY_USED                                                      0x8002aa15
+#endif
+#ifndef SCE_NP_ERROR_DIFFERENT_USER
+#define SCE_NP_ERROR_DIFFERENT_USER                                                    0x8002aa16
+#endif
+#ifndef SCE_NP_ERROR_ALREADY_DONE
+#define SCE_NP_ERROR_ALREADY_DONE                                                      0x8002aa17
+#endif
+#ifndef SCE_NP_ERROR_INTERNAL
+#define SCE_NP_ERROR_INTERNAL                                                          0x8002aaff
+#endif
+
+/* SCE_NP_UTIL */
+#ifndef SCE_NP_UTIL_ERROR_INVALID_ARGUMENT
+#define SCE_NP_UTIL_ERROR_INVALID_ARGUMENT                                             0x8002ab01
+#endif
+#ifndef SCE_NP_UTIL_ERROR_OUT_OF_MEMORY
+#define SCE_NP_UTIL_ERROR_OUT_OF_MEMORY                                                0x8002ab02
+#endif
+#ifndef SCE_NP_UTIL_ERROR_INSUFFICIENT
+#define SCE_NP_UTIL_ERROR_INSUFFICIENT                                                 0x8002ab03
+#endif
+#ifndef SCE_NP_UTIL_ERROR_PARSER_FAILED
+#define SCE_NP_UTIL_ERROR_PARSER_FAILED                                                0x8002ab04
+#endif
+#ifndef SCE_NP_UTIL_ERROR_INVALID_PROTOCOL_ID
+#define SCE_NP_UTIL_ERROR_INVALID_PROTOCOL_ID                                          0x8002ab05
+#endif
+#ifndef SCE_NP_UTIL_ERROR_INVALID_NP_ID
+#define SCE_NP_UTIL_ERROR_INVALID_NP_ID                                                0x8002ab06
+#endif
+#ifndef SCE_NP_UTIL_ERROR_INVALID_NP_LOBBY_ID
+#define SCE_NP_UTIL_ERROR_INVALID_NP_LOBBY_ID                                          0x8002ab07
+#endif
+#ifndef SCE_NP_UTIL_ERROR_INVALID_NP_ROOM_ID
+#define SCE_NP_UTIL_ERROR_INVALID_NP_ROOM_ID                                           0x8002ab08
+#endif
+#ifndef SCE_NP_UTIL_ERROR_INVALID_NP_ENV
+#define SCE_NP_UTIL_ERROR_INVALID_NP_ENV                                               0x8002ab09
+#endif
+#ifndef SCE_NP_UTIL_ERROR_INVALID_TITLEID
+#define SCE_NP_UTIL_ERROR_INVALID_TITLEID                                              0x8002ab0a
+#endif
+#ifndef SCE_NP_UTIL_ERROR_INVALID_CHARACTER
+#define SCE_NP_UTIL_ERROR_INVALID_CHARACTER                                            0x8002ab0b
+#endif
+#ifndef SCE_NP_UTIL_ERROR_INVALID_ESCAPE_STRING
+#define SCE_NP_UTIL_ERROR_INVALID_ESCAPE_STRING                                        0x8002ab0c
+#endif
+#ifndef SCE_NP_UTIL_ERROR_UNKNOWN_TYPE
+#define SCE_NP_UTIL_ERROR_UNKNOWN_TYPE                                                 0x8002ab0d
+#endif
+#ifndef SCE_NP_UTIL_ERROR_UNKNOWN
+#define SCE_NP_UTIL_ERROR_UNKNOWN                                                      0x8002ab0e
+#endif
+#ifndef SCE_NP_UTIL_ERROR_NOT_MATCH
+#define SCE_NP_UTIL_ERROR_NOT_MATCH                                                    0x8002ab0f
+#endif
+#ifndef SCE_NP_UTIL_ERROR_UNKNOWN_PLATFORM_TYPE
+#define SCE_NP_UTIL_ERROR_UNKNOWN_PLATFORM_TYPE                                        0x8002ab10
+#endif
+
+/* SCE_NP_FRIENDLIST */
+#ifndef SCE_NP_FRIENDLIST_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_FRIENDLIST_ERROR_ALREADY_INITIALIZED                                    0x8002ab20
+#endif
+#ifndef SCE_NP_FRIENDLIST_ERROR_NOT_INITIALIZED
+#define SCE_NP_FRIENDLIST_ERROR_NOT_INITIALIZED                                        0x8002ab21
+#endif
+#ifndef SCE_NP_FRIENDLIST_ERROR_OUT_OF_MEMORY
+#define SCE_NP_FRIENDLIST_ERROR_OUT_OF_MEMORY                                          0x8002ab22
+#endif
+#ifndef SCE_NP_FRIENDLIST_ERROR_INVALID_MEMORY_CONTAINER
+#define SCE_NP_FRIENDLIST_ERROR_INVALID_MEMORY_CONTAINER                               0x8002ab23
+#endif
+#ifndef SCE_NP_FRIENDLIST_ERROR_INSUFFICIENT
+#define SCE_NP_FRIENDLIST_ERROR_INSUFFICIENT                                           0x8002ab24
+#endif
+#ifndef SCE_NP_FRIENDLIST_ERROR_CANCEL
+#define SCE_NP_FRIENDLIST_ERROR_CANCEL                                                 0x8002ab25
+#endif
+#ifndef SCE_NP_FRIENDLIST_ERROR_STATUS
+#define SCE_NP_FRIENDLIST_ERROR_STATUS                                                 0x8002ab26
+#endif
+#ifndef SCE_NP_FRIENDLIST_ERROR_BUSY
+#define SCE_NP_FRIENDLIST_ERROR_BUSY                                                   0x8002ab27
+#endif
+#ifndef SCE_NP_FRIENDLIST_ERROR_INVALID_ARGUMENT
+#define SCE_NP_FRIENDLIST_ERROR_INVALID_ARGUMENT                                       0x8002ab28
+#endif
+#ifndef SCE_NP_FRIENDLIST_ERROR_ABORT
+#define SCE_NP_FRIENDLIST_ERROR_ABORT                                                  0x8002ab29
+#endif
+
+/* SCE_NP_PROFILE */
+#ifndef SCE_NP_PROFILE_ERROR_ALREADY_INITIALIZED
+#define SCE_NP_PROFILE_ERROR_ALREADY_INITIALIZED                                       0x8002ab40
+#endif
+#ifndef SCE_NP_PROFILE_ERROR_NOT_INITIALIZED
+#define SCE_NP_PROFILE_ERROR_NOT_INITIALIZED                                           0x8002ab41
+#endif
+#ifndef SCE_NP_PROFILE_ERROR_OUT_OF_MEMORY
+#define SCE_NP_PROFILE_ERROR_OUT_OF_MEMORY                                             0x8002ab42
+#endif
+#ifndef SCE_NP_PROFILE_ERROR_NOT_SUPPORTED
+#define SCE_NP_PROFILE_ERROR_NOT_SUPPORTED                                             0x8002ab43
+#endif
+#ifndef SCE_NP_PROFILE_ERROR_INSUFFICIENT
+#define SCE_NP_PROFILE_ERROR_INSUFFICIENT                                              0x8002ab44
+#endif
+#ifndef SCE_NP_PROFILE_ERROR_CANCEL
+#define SCE_NP_PROFILE_ERROR_CANCEL                                                    0x8002ab45
+#endif
+#ifndef SCE_NP_PROFILE_ERROR_STATUS
+#define SCE_NP_PROFILE_ERROR_STATUS                                                    0x8002ab46
+#endif
+#ifndef SCE_NP_PROFILE_ERROR_BUSY
+#define SCE_NP_PROFILE_ERROR_BUSY                                                      0x8002ab47
+#endif
+#ifndef SCE_NP_PROFILE_ERROR_INVALID_ARGUMENT
+#define SCE_NP_PROFILE_ERROR_INVALID_ARGUMENT                                          0x8002ab48
+#endif
+#ifndef SCE_NP_PROFILE_ERROR_ABORT
+#define SCE_NP_PROFILE_ERROR_ABORT                                                     0x8002ab49
+#endif
+
+/* SCE_NP_CORE_NET */
+#ifndef SCE_NP_CORE_NET_ERROR_EPERM
+#define SCE_NP_CORE_NET_ERROR_EPERM                                                    0x8002ad01
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOENT
+#define SCE_NP_CORE_NET_ERROR_ENOENT                                                   0x8002ad02
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ESRCH
+#define SCE_NP_CORE_NET_ERROR_ESRCH                                                    0x8002ad03
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EINTR
+#define SCE_NP_CORE_NET_ERROR_EINTR                                                    0x8002ad04
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EIO
+#define SCE_NP_CORE_NET_ERROR_EIO                                                      0x8002ad05
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENXIO
+#define SCE_NP_CORE_NET_ERROR_ENXIO                                                    0x8002ad06
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_E2BIG
+#define SCE_NP_CORE_NET_ERROR_E2BIG                                                    0x8002ad07
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOEXC
+#define SCE_NP_CORE_NET_ERROR_ENOEXC                                                   0x8002ad08
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EBADF
+#define SCE_NP_CORE_NET_ERROR_EBADF                                                    0x8002ad09
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ECHILD
+#define SCE_NP_CORE_NET_ERROR_ECHILD                                                   0x8002ad0a
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EDEADLK
+#define SCE_NP_CORE_NET_ERROR_EDEADLK                                                  0x8002ad0b
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOMEM
+#define SCE_NP_CORE_NET_ERROR_ENOMEM                                                   0x8002ad0c
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EACCES
+#define SCE_NP_CORE_NET_ERROR_EACCES                                                   0x8002ad0d
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EFAULT
+#define SCE_NP_CORE_NET_ERROR_EFAULT                                                   0x8002ad0e
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOTBLK
+#define SCE_NP_CORE_NET_ERROR_ENOTBLK                                                  0x8002ad0f
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EBUSY
+#define SCE_NP_CORE_NET_ERROR_EBUSY                                                    0x8002ad10
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EEXIST
+#define SCE_NP_CORE_NET_ERROR_EEXIST                                                   0x8002ad11
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EXDEV
+#define SCE_NP_CORE_NET_ERROR_EXDEV                                                    0x8002ad12
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENODEV
+#define SCE_NP_CORE_NET_ERROR_ENODEV                                                   0x8002ad13
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOTDIR
+#define SCE_NP_CORE_NET_ERROR_ENOTDIR                                                  0x8002ad14
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EISDIR
+#define SCE_NP_CORE_NET_ERROR_EISDIR                                                   0x8002ad15
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EINVAL
+#define SCE_NP_CORE_NET_ERROR_EINVAL                                                   0x8002ad16
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENFILE
+#define SCE_NP_CORE_NET_ERROR_ENFILE                                                   0x8002ad17
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EMFILE
+#define SCE_NP_CORE_NET_ERROR_EMFILE                                                   0x8002ad18
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOTTY
+#define SCE_NP_CORE_NET_ERROR_ENOTTY                                                   0x8002ad19
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ETXTBSY
+#define SCE_NP_CORE_NET_ERROR_ETXTBSY                                                  0x8002ad1a
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EFBIG
+#define SCE_NP_CORE_NET_ERROR_EFBIG                                                    0x8002ad1b
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOSPC
+#define SCE_NP_CORE_NET_ERROR_ENOSPC                                                   0x8002ad1c
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ESPIPE
+#define SCE_NP_CORE_NET_ERROR_ESPIPE                                                   0x8002ad1d
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EROFS
+#define SCE_NP_CORE_NET_ERROR_EROFS                                                    0x8002ad1e
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EMLINK
+#define SCE_NP_CORE_NET_ERROR_EMLINK                                                   0x8002ad1f
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EPIPE
+#define SCE_NP_CORE_NET_ERROR_EPIPE                                                    0x8002ad20
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EDOM
+#define SCE_NP_CORE_NET_ERROR_EDOM                                                     0x8002ad21
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ERANGE
+#define SCE_NP_CORE_NET_ERROR_ERANGE                                                   0x8002ad22
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EAGAIN
+#define SCE_NP_CORE_NET_ERROR_EAGAIN                                                   0x8002ad23
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EINPROGRESS
+#define SCE_NP_CORE_NET_ERROR_EINPROGRESS                                              0x8002ad24
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EALREADY
+#define SCE_NP_CORE_NET_ERROR_EALREADY                                                 0x8002ad25
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOTSOCK
+#define SCE_NP_CORE_NET_ERROR_ENOTSOCK                                                 0x8002ad26
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EDESTADDRREQ
+#define SCE_NP_CORE_NET_ERROR_EDESTADDRREQ                                             0x8002ad27
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EMSGSIZE
+#define SCE_NP_CORE_NET_ERROR_EMSGSIZE                                                 0x8002ad28
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EPROTOTYPE
+#define SCE_NP_CORE_NET_ERROR_EPROTOTYPE                                               0x8002ad29
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOPROTOOPT
+#define SCE_NP_CORE_NET_ERROR_ENOPROTOOPT                                              0x8002ad2a
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EPROTONOSUPPORT
+#define SCE_NP_CORE_NET_ERROR_EPROTONOSUPPORT                                          0x8002ad2b
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ESOCKTNOSUPPORT
+#define SCE_NP_CORE_NET_ERROR_ESOCKTNOSUPPORT                                          0x8002ad2c
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EOPNOTSUPP
+#define SCE_NP_CORE_NET_ERROR_EOPNOTSUPP                                               0x8002ad2d
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EPFNOSUPPORT
+#define SCE_NP_CORE_NET_ERROR_EPFNOSUPPORT                                             0x8002ad2e
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EAFNOSUPPORT
+#define SCE_NP_CORE_NET_ERROR_EAFNOSUPPORT                                             0x8002ad2f
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EADDRINUSE
+#define SCE_NP_CORE_NET_ERROR_EADDRINUSE                                               0x8002ad30
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EADDRNOTAVAIL
+#define SCE_NP_CORE_NET_ERROR_EADDRNOTAVAIL                                            0x8002ad31
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENETDOWN
+#define SCE_NP_CORE_NET_ERROR_ENETDOWN                                                 0x8002ad32
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENETUNREACH
+#define SCE_NP_CORE_NET_ERROR_ENETUNREACH                                              0x8002ad33
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENETRESET
+#define SCE_NP_CORE_NET_ERROR_ENETRESET                                                0x8002ad34
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ECONNABORTED
+#define SCE_NP_CORE_NET_ERROR_ECONNABORTED                                             0x8002ad35
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ECONNRESET
+#define SCE_NP_CORE_NET_ERROR_ECONNRESET                                               0x8002ad36
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOBUFS
+#define SCE_NP_CORE_NET_ERROR_ENOBUFS                                                  0x8002ad37
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EISCONN
+#define SCE_NP_CORE_NET_ERROR_EISCONN                                                  0x8002ad38
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOTCONN
+#define SCE_NP_CORE_NET_ERROR_ENOTCONN                                                 0x8002ad39
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ESHUTDOWN
+#define SCE_NP_CORE_NET_ERROR_ESHUTDOWN                                                0x8002ad3a
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ETOOMANYREFS
+#define SCE_NP_CORE_NET_ERROR_ETOOMANYREFS                                             0x8002ad3b
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ETIMEDOUT
+#define SCE_NP_CORE_NET_ERROR_ETIMEDOUT                                                0x8002ad3c
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ECONNREFUSED
+#define SCE_NP_CORE_NET_ERROR_ECONNREFUSED                                             0x8002ad3d
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ELOOP
+#define SCE_NP_CORE_NET_ERROR_ELOOP                                                    0x8002ad3e
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENAMETOOLONG
+#define SCE_NP_CORE_NET_ERROR_ENAMETOOLONG                                             0x8002ad3f
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EHOSTDOWN
+#define SCE_NP_CORE_NET_ERROR_EHOSTDOWN                                                0x8002ad40
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EHOSTUNREACH
+#define SCE_NP_CORE_NET_ERROR_EHOSTUNREACH                                             0x8002ad41
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOTEMPTY
+#define SCE_NP_CORE_NET_ERROR_ENOTEMPTY                                                0x8002ad42
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EPROCLIM
+#define SCE_NP_CORE_NET_ERROR_EPROCLIM                                                 0x8002ad43
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EUSERS
+#define SCE_NP_CORE_NET_ERROR_EUSERS                                                   0x8002ad44
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EDQUOT
+#define SCE_NP_CORE_NET_ERROR_EDQUOT                                                   0x8002ad45
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ESTALE
+#define SCE_NP_CORE_NET_ERROR_ESTALE                                                   0x8002ad46
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EREMOTE
+#define SCE_NP_CORE_NET_ERROR_EREMOTE                                                  0x8002ad47
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EBADRPC
+#define SCE_NP_CORE_NET_ERROR_EBADRPC                                                  0x8002ad48
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ERPCMISMATCH
+#define SCE_NP_CORE_NET_ERROR_ERPCMISMATCH                                             0x8002ad49
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EPROGUNAVAIL
+#define SCE_NP_CORE_NET_ERROR_EPROGUNAVAIL                                             0x8002ad4a
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EPROGMISMATCH
+#define SCE_NP_CORE_NET_ERROR_EPROGMISMATCH                                            0x8002ad4b
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EPROCUNAVAIL
+#define SCE_NP_CORE_NET_ERROR_EPROCUNAVAIL                                             0x8002ad4c
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOLCK
+#define SCE_NP_CORE_NET_ERROR_ENOLCK                                                   0x8002ad4d
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOSYS
+#define SCE_NP_CORE_NET_ERROR_ENOSYS                                                   0x8002ad4e
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EFTYPE
+#define SCE_NP_CORE_NET_ERROR_EFTYPE                                                   0x8002ad4f
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EAUTH
+#define SCE_NP_CORE_NET_ERROR_EAUTH                                                    0x8002ad50
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENEEDAUTH
+#define SCE_NP_CORE_NET_ERROR_ENEEDAUTH                                                0x8002ad51
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EIDRM
+#define SCE_NP_CORE_NET_ERROR_EIDRM                                                    0x8002ad52
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOMSG
+#define SCE_NP_CORE_NET_ERROR_ENOMSG                                                   0x8002ad53
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EOVERFLOW
+#define SCE_NP_CORE_NET_ERROR_EOVERFLOW                                                0x8002ad54
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EILSEQ
+#define SCE_NP_CORE_NET_ERROR_EILSEQ                                                   0x8002ad55
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOTSUP
+#define SCE_NP_CORE_NET_ERROR_ENOTSUP                                                  0x8002ad56
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ECANCELED
+#define SCE_NP_CORE_NET_ERROR_ECANCELED                                                0x8002ad57
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_EBADMSG
+#define SCE_NP_CORE_NET_ERROR_EBADMSG                                                  0x8002ad58
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENODATA
+#define SCE_NP_CORE_NET_ERROR_ENODATA                                                  0x8002ad59
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOSR
+#define SCE_NP_CORE_NET_ERROR_ENOSR                                                    0x8002ad5a
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ENOSTR
+#define SCE_NP_CORE_NET_ERROR_ENOSTR                                                   0x8002ad5b
+#endif
+#ifndef SCE_NP_CORE_NET_ERROR_ETIME
+#define SCE_NP_CORE_NET_ERROR_ETIME                                                    0x8002ad5c
+#endif
+
+/* Older and alternative names. */
+#ifndef SCE_NP_CORE_ERROR_INVALID_PSHANDLE
+#define SCE_NP_CORE_ERROR_INVALID_PSHANDLE                                             SCE_NP_CORE_ERROR_INVALID_ONLINEID
+#endif
+
+#endif /* PS3TC_CELL_NP_ERROR_H */

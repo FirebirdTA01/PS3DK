@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(hello-ppu-hash C)
+include(ps3-self)
+add_executable(hello-ppu-hash source/main.c)
+target_compile_features(hello-ppu-hash PRIVATE c_std_11)
+target_compile_options(hello-ppu-hash PRIVATE -Wall -Wextra)
+target_link_libraries(hello-ppu-hash PRIVATE md5 sha1 sha224 sha256 sha384 sha512 rt lv2)
+ps3_add_self(hello-ppu-hash)

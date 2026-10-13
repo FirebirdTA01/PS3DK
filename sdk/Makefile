@@ -52,6 +52,14 @@ HEADERS := \
     include/sys/fixed_addr.h \
     include/sys/sys_fixed_addr.h \
     include/sys/timer.h \
+    include/sys/vm.h \
+    include/cell/hash/libhash.h \
+    include/cell/hash/libmd5.h \
+    include/cell/hash/libsha1.h \
+    include/cell/hash/libsha224.h \
+    include/cell/hash/libsha256.h \
+    include/cell/hash/libsha384.h \
+    include/cell/hash/libsha512.h \
     include/sys/prx_module.h \
     include/sys/lv2_fs_ext.h \
     include/psl1ght/lv2/timer.h \
@@ -83,6 +91,9 @@ HEADERS := \
     include/net/select.h \
     include/sys/stat.h \
     include/sys/synchronization.h \
+    include/sys/random_number.h \
+    include/sys/spinlock.h \
+    include/sys/mempool.h \
     include/sys/mutex.h \
     include/sys/cond.h \
     include/sys/event_queue.h \
@@ -98,6 +109,19 @@ HEADERS := \
     include/sysutil/sysutil_sysparam.h \
     include/sysutil/sysutil_savedata.h \
     include/sysutil/sysutil_msgdialog.h \
+    include/sysutil/sysutil_remoteplay.h \
+    include/sysutil/sysutil_licensearea.h \
+    include/sysutil/sysutil_game_exec.h \
+    include/sysutil/sysutil_game_common.h \
+    include/sysutil/sysutil_sysconf_ext.h \
+    include/sysutil/sysutil_cross_controller.h \
+    include/sysutil/sysutil_photo_decode.h \
+    include/sysutil/sysutil_photo_export.h \
+    include/sysutil/sysutil_photo_import.h \
+    include/sysutil/sysutil_video_export.h \
+    include/sysutil/sysutil_video_upload.h \
+    include/sysutil/sysutil_print.h \
+    include/sysutil/sysutil_rec.h \
     include/sysutil/sysutil_userinfo.h \
     include/sysutil/sysutil_bgdl.h \
     include/sysutil/sysutil_subdisplay.h \
@@ -107,6 +131,19 @@ HEADERS := \
     include/sysutil/sysutil_syscache.h \
     include/sysutil/sysutil_music_decode2.h \
     include/sysutil/sysutil_music_playback_common.h \
+    include/sysutil/sysutil_ap.h \
+    include/sysutil/sysutil_avc2.h \
+    include/sysutil/sysutil_avc2_video.h \
+    include/sysutil/sysutil_bgmplayback.h \
+    include/sysutil/sysutil_gameupdate.h \
+    include/sysutil/sysutil_music.h \
+    include/sysutil/sysutil_music2.h \
+    include/sysutil/sysutil_music_decode.h \
+    include/sysutil/sysutil_music_export.h \
+    include/sysutil/sysutil_oskdialog_ext.h \
+    include/sysutil/sysutil_search_types.h \
+    include/sysutil/sysutil_storagedata.h \
+    include/sysutil/sysutil_sysconf.h \
     include/sysutil/video.h \
     include/arpa/inet.h \
     include/netdb.h \
@@ -163,6 +200,7 @@ HEADERS := \
     include/cell/ssl.h \
     include/cell/ssl/ssl.h \
     include/cell/ssl/cert.h \
+    include/cell/ssl/error.h \
     include/cell/http.h \
     include/cell/http/error.h \
     include/cell/http/util.h \
@@ -175,6 +213,7 @@ HEADERS := \
     include/cell/http/response.h \
     include/cell/np.h \
     include/cell/np/common.h \
+    include/cell/np/error.h \
     include/cell/np/init.h \
     include/cell/np/basic.h \
     include/cell/np/friendlist.h \
@@ -196,6 +235,17 @@ HEADERS := \
     include/np/drm.h \
     include/np/trophy.h \
     include/np/clans.h \
+    include/np/basic.h \
+    include/np/custom_menu.h \
+    include/np/friendlist.h \
+    include/np/lookup.h \
+    include/np/manager.h \
+    include/np/profile.h \
+    include/np/ranking.h \
+    include/np/signaling.h \
+    include/np/sns.h \
+    include/np/util.h \
+    include/np/auth_oauth.h \
     include/cell/np2/init.h \
     include/cell/np2/matching2.h \
     include/cell/np/trophy.h \
@@ -224,6 +274,8 @@ HEADERS := \
     include/cell/sysutil_avc.h \
     include/cell/sysutil_game_internal.h \
     include/cell/rtc.h \
+    include/cell/rtc/error.h \
+    include/cell/rtc/rtcsvc.h \
     include/cell/face.h \
     include/cell/face/error.h \
     include/cell/face/face.h \
@@ -231,6 +283,11 @@ HEADERS := \
     include/cell/rudp.h \
     include/cell/sync.h \
     include/cell/sync/barrier.h \
+    include/cell/sync/error.h \
+    include/cell/sync/lfqueue.h \
+    include/cell/sync/mutex.h \
+    include/cell/sync/queue.h \
+    include/cell/sync/rwm.h \
     include/cell/sync2.h \
     include/cell/sync2/types.h \
     include/cell/sync2/version.h \
@@ -257,6 +314,22 @@ HEADERS := \
     include/cell/sheap/key_sheap_rwm.h \
     include/cell/sheap/key_sheap_semaphore.h \
     include/cell/sysutil_ap.h \
+    include/np/common.h \
+    include/np/error.h \
+    include/np/ticket.h \
+    include/np/tustorage.h \
+    include/cell/sysutil_remoteplay.h \
+    include/cell/sysutil_licensearea.h \
+    include/cell/sysutil_game_exec.h \
+    include/cell/sysutil_sysconf_ext.h \
+    include/cell/sysutil_cross_controller.h \
+    include/cell/sysutil_photo_decode.h \
+    include/cell/sysutil_photo_export.h \
+    include/cell/sysutil_photo_import.h \
+    include/cell/sysutil_video_export.h \
+    include/cell/sysutil_video_upload.h \
+    include/cell/sysutil_print.h \
+    include/cell/sysutil_rec.h \
     include/cell/audio.h \
     include/cell/mixer.h \
     include/cell/mixer/define.h \
@@ -453,8 +526,10 @@ HEADERS := \
     include/sysutil/sysutil_common.h \
     include/cell/keyboard.h \
     include/cell/keyboard/kb_codes.h \
+    include/cell/keyboard/libkb.h \
     include/cell/mouse.h \
     include/cell/mouse/mouse_codes.h \
+    include/cell/mouse/libmouse.h \
     include/cell/padfilter.h \
     include/rsx/commands.h \
     include/rsx/commands_inc.h \
@@ -509,7 +584,7 @@ HEADERS := \
     include/cell/daisy/ato_qctl.h \
     include/simdmath/fastf4.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libhash libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code

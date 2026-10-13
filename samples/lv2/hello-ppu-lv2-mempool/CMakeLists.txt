@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(hello-ppu-lv2-mempool C)
+include(ps3-self)
+add_executable(hello-ppu-lv2-mempool source/main.c)
+target_compile_features(hello-ppu-lv2-mempool PRIVATE c_std_11)
+set_property(TARGET hello-ppu-lv2-mempool PROPERTY C_EXTENSIONS ON)
+target_link_libraries(hello-ppu-lv2-mempool PRIVATE rt lv2)
+ps3_add_self(hello-ppu-lv2-mempool)

@@ -21,6 +21,7 @@
 #include <sys/thread.h>
 #include <lv2/thread.h>
 #include <sys/return_code.h>
+#include <sys/lv2_syscall.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,6 +95,40 @@ static inline int sys_ppu_thread_yield(void)
 static inline int sys_ppu_thread_detach(sys_ppu_thread_t threadid)
 {
     return (int)sysThreadDetach(threadid);
+}
+
+/* sys_ppu_thread_once: run `init` exactly once per control word, which
+ * starts as SYS_PPU_THREAD_ONCE_INIT.  A sysPrxForUser export. */
+#define SYS_PPU_THREAD_ONCE_INIT    0
+#define SYS_PPU_THREAD_DONE_INIT    1
+extern void sys_ppu_thread_once(int *once_ctrl, void (*init)(void));
+
+/* Whether the calling thread is joinable (syscall 46). */
+static inline void sys_ppu_thread_get_join_state(int *isjoinable)
+{
+    lv2syscall1(46, (u64)(uintptr_t)isjoinable);
+}
+
+/* Rename a thread, as debuggers and the TTY show it (syscall 56). */
+static inline int sys_ppu_thread_rename(sys_ppu_thread_t thread_id, const char *name)
+{
+    lv2syscall2(56, (u64)thread_id, (u64)(uintptr_t)name);
+    return_to_user_prog(int);
+}
+
+/* Resume a thread stopped by a page fault (syscall 57) and read its
+ * registers at the fault (syscall 58). */
+static inline int sys_ppu_thread_recover_page_fault(sys_ppu_thread_t thread_id)
+{
+    lv2syscall1(57, (u64)thread_id);
+    return_to_user_prog(int);
+}
+
+static inline int sys_ppu_thread_get_page_fault_context(sys_ppu_thread_t thread_id,
+                                                        sys_ppu_thread_icontext_t *ctxp)
+{
+    lv2syscall2(58, (u64)thread_id, (u64)(uintptr_t)ctxp);
+    return_to_user_prog(int);
 }
 
 static inline int sys_ppu_thread_get_stack_information(sys_ppu_thread_stack_t *info)

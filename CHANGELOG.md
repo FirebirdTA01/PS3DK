@@ -16,6 +16,97 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **Message digests.**  New `<cell/hash/libmd5.h>`, `libsha1.h`,
+  `libsha224.h`, `libsha256.h`, `libsha384.h` and `libsha512.h` with the
+  libraries `libmd5.a`, `libsha1.a`, `libsha224.a`, `libsha256.a`,
+  `libsha384.a` and `libsha512.a` (ILP32 and LP64).  Each has a one-call
+  `cell<Algo>Digest` and `BlockInit` / `BlockUpdate` / `BlockResult` for
+  data that arrives in pieces.  The new sample `hello-ppu-hash` checks the
+  standard test vectors for all six and reports PPU throughput.
+- **Random numbers, memory pools and spinlocks.**  New `<sys/random_number.h>`
+  (`sys_get_random_number`), `<sys/mempool.h>` (`sys_mempool_create`,
+  `allocate_block`, `try_allocate_block`, `free_block`, `get_count`,
+  `destroy`) and `<sys/spinlock.h>` (`sys_spinlock_initialize`, `lock`,
+  `trylock`, `unlock`).  The new sample `hello-ppu-lv2-mempool` fills a
+  buffer with random bytes, exhausts and refills a block pool, and counts
+  to 200000 from two threads under a spinlock.
+- **Sysutil headers for photo, video, print, recording and more.**  The
+  stub libraries for photo decode / export / import, video export and
+  upload, printing, in-game recording, Remote Play, game exec, license
+  area, Cross-Controller and Bluetooth device lists now have headers
+  (`<sysutil/sysutil_photo_export.h>`, `<cell/sysutil_rec.h>` and so on),
+  usable from LP64 programs too.  The new sample `hello-ppu-sysutil-queries`
+  reads the license area, Remote Play status, boot game information and the
+  paired Bluetooth devices.
+- **NP common, ticket and TUS names.**  `<np/common.h>`, `<np/ticket.h>`
+  and `<np/tustorage.h>` now exist; `<cell/np/common.h>` adds the NP
+  language codes, the ticket subject accessors
+  (`SCE_NP_SUBJECT_STATUS_GET_AGE` and the rest), the TSS size and the
+  `PSHANDLE` names, and `<cell/np/tus.h>` adds the `sceNpTss*` context
+  names over the TUS context calls.
+- **NP error codes.**  `<np/error.h>` (and `<cell/np/error.h>`) define every
+  NP error code - matching, clans, trophy, commerce, DRM, authentication,
+  community, core, basic, signaling, SNS and the rest, 931 in all.  It can
+  be included before or after the other NP headers.
+- **Per-type include paths.**  `<cell/sync/error.h>`, `lfqueue.h`,
+  `mutex.h`, `queue.h`, `rwm.h`, `<cell/rtc/error.h>`, `rtcsvc.h`,
+  `<cell/ssl/error.h>`, `<cell/keyboard/libkb.h>` and
+  `<cell/mouse/libmouse.h>` now exist, so code that includes those paths
+  compiles unchanged.  Added `CELL_ERROR_MAKE_SYNC_ERROR`,
+  `CELL_RTC_MAKE_ERROR`, `CELL_SSL_MAKE_ERROR` and
+  `CELL_SSL_ERROR_READ_FAILED`.
+- **`sysutil/` include-path forwarders.** Thirteen new headers bridge the
+  `sysutil/` include path to the existing `cell/` surface:
+  `sysutil/sysutil_ap.h`, `sysutil/sysutil_avc2.h`,
+  `sysutil/sysutil_avc2_video.h`, `sysutil/sysutil_bgmplayback.h`,
+  `sysutil/sysutil_gameupdate.h`, `sysutil/sysutil_music.h`,
+  `sysutil/sysutil_music2.h`, `sysutil/sysutil_music_decode.h`,
+  `sysutil/sysutil_music_export.h`, `sysutil/sysutil_oskdialog_ext.h`,
+  `sysutil/sysutil_search_types.h`, `sysutil/sysutil_storagedata.h` and
+  `sysutil/sysutil_sysconf.h`.
+- **`np/` include-path forwarders.** Eleven new headers bridge the `np/`
+  include path to the exact `cell/` header that carries the surface: `np/basic.h`,
+  `np/custom_menu.h`, `np/friendlist.h`, `np/lookup.h`, `np/manager.h`,
+  `np/profile.h`, `np/ranking.h` (to `cell/np/score.h`), `np/signaling.h`,
+  `np/sns.h`, `np/util.h` (also `cell/np/init.h`) and `np/auth_oauth.h` (to
+  `cell/np2/init.h`).
+- **LV2 kernel timers.**  `<sys/timer.h>` now has `sys_timer_create`,
+  `sys_timer_destroy`, `sys_timer_get_information`, `_sys_timer_start`,
+  `sys_timer_stop`, `sys_timer_connect_event_queue` and
+  `sys_timer_disconnect_event_queue`, with the `sys_timer_start_oneshot`,
+  `sys_timer_start_periodic` and `sys_timer_start_periodic_absolute`
+  helpers.  Each expiry posts one event to the connected queue carrying
+  its name, both data words and the expiry time.  The new sample
+  `hello-ppu-lv2-timer` runs an event loop from a periodic timer and fires
+  a one-shot.
+- **LV2 virtual memory.**  New `<sys/vm.h>`: `sys_vm_memory_map` reserves an
+  address range backed by a smaller amount of physical memory that the
+  kernel pages on demand, with `sys_vm_unmap`, `append_memory`,
+  `return_memory`, `lock`, `unlock`, `touch`, `flush`, `invalidate`,
+  `store`, `sync`, `test` and `get_statistics`.  The new sample
+  `hello-ppu-lv2-vm` writes 4 MB through 1 MB of physical memory and maps
+  one memory object at two addresses.
+- **Mmapper memory objects.**  `<sys/memory.h>` declares
+  `sys_mmapper_allocate_memory`, `sys_mmapper_allocate_memory_from_container`,
+  `sys_mmapper_map_memory`, `sys_mmapper_unmap_memory` and
+  `sys_mmapper_free_memory`, and adds `sys_memory_get_page_attribute`,
+  `sys_memory_container_get_size` and the `SYS_MEMORY_PROT_*`,
+  `SYS_MEMORY_GRANULARITY_*` and remaining `SYS_MEMORY_ACCESS_RIGHT_*` values.
+- **PPU thread calls.**  `sys_ppu_thread_rename`, `sys_ppu_thread_once`,
+  `sys_ppu_thread_get_join_state`, `sys_ppu_thread_recover_page_fault` and
+  `sys_ppu_thread_get_page_fault_context`; `sys_ppu_thread_icontext_t` is
+  now the register-context structure instead of a placeholder integer.
+
+### Fixed
+
+- **`sys_time_get_system_time()` returns system time.**  It returned the
+  wall-clock time in microseconds since 1970 instead of the microseconds
+  since the system started that kernel timers and event timestamps use, so
+  a timer deadline computed from it never arrived.  Differences between
+  two readings were already correct.
+
 ## [v0.23.0] — 2026-10-12
 
 ### Fixed

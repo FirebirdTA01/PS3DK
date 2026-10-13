@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <cell/error.h>   /* CELL_ERROR_MAKE_ERROR / CELL_ERROR_FACILITY_SSL */
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +24,16 @@ extern "C" {
 #define CELL_SSL_ERROR_NO_MEMORY             0x80740035
 #define CELL_SSL_ERROR_NO_STRING             0x80740036
 #define CELL_SSL_ERROR_UNKNOWN_LOAD_CERT     0x80740037
+
+/* Error-code constructor, on top of the helpers in <cell/error.h>.
+ * CELL_SSL_MAKE_ERROR(1) == CELL_SSL_ERROR_NOT_INITIALIZED. */
+#ifndef CELL_SSL_MAKE_ERROR
+#define CELL_SSL_MAKE_ERROR(status) \
+    CELL_ERROR_MAKE_ERROR(CELL_ERROR_FACILITY_SSL, status)
+#endif
+#ifndef CELL_SSL_ERROR_READ_FAILED
+#define CELL_SSL_ERROR_READ_FAILED CELL_ERROR_CAST(0x80740009)
+#endif
 
 enum {
     CELL_SSL_DEFAULT_POOL_SIZE = 128 * 1024

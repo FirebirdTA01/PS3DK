@@ -202,6 +202,60 @@ jobs:
       - name: Test the sys_ synchronisation surface
         run: bash tests/sdk/sys-sync-surface-test.sh
 
+      # Skips without PS3DEV; LV2 timers 70-76 and the sleeps 141/142 by
+      # syscall number, and sys_time_get_system_time as the import.
+      - name: Test the LV2 timer surface
+        run: bash tests/sdk/sys-timer-surface-test.sh
+
+      # Skips without PS3DEV; sys_vm_* 300-312, page attribute 351, container
+      # size 343 by syscall number, the five mmapper memory calls as imports.
+      - name: Test the LV2 virtual-memory surface
+        run: bash tests/sdk/sys-vm-surface-test.sh
+
+      - name: Test the cell/hash digests against hashlib
+        run: bash tests/sdk/hash-vectors-test.sh
+
+      # Skips without PS3DEV; the random-number, spinlock and mempool
+      # helpers (sys/random_number.h, sys/spinlock.h, sys/mempool.h) each of
+      # whose eleven functions is a sysPrxForUser import (a call, not an sc),
+      # compile clean in C/C++17 in both data models, and the RANDOM_NUMBER_MAX_SIZE
+      # redefinition check against <lv2/system.h> compiles under -Werror.
+      - name: Test the LV2 helper (random-number, spinlock, mempool) surface
+        run: bash tests/sdk/sys-helpers-surface-test.sh
+
+      # Skips without PS3DEV; the ten cell/* forwarder headers each bridge an
+      # include path to the header that carries the surface.  Each forwarder
+      # alone, and a TU touching one symbol from every target, compiles in
+      # C/C++17 ILP32 and LP64; the CELL_ERROR_MAKE_SYNC_ERROR / RTC / SSL
+      # error constructors equal their named codes, and a forwarder pointed
+      # at an unrelated header is caught.
+      - name: Test the cell header-path forwarders
+        run: bash tests/sdk/header-path-forwarders-test.sh
+
+      # Skips without PS3DEV; the sysutil headers for stub libraries that had
+      # none compile in C/C++17, ILP32/LP64 with their layouts pinned, and link
+      # all 50 functions against the twelve stub archives.
+      - name: Test the sysutil API headers against their stub archives
+        run: bash tests/sdk/sysutil-api-headers-test.sh
+
+      # Skips without PS3DEV; the added NP common/ticket/TUS names compile in
+      # C/C++17, ILP32/LP64 with their values pinned, and the TSS context
+      # names link against the TUS stub archive.
+      - name: Test the NP common, ticket and TUS names
+        run: bash tests/sdk/np-content-test.sh
+
+      # The NP error header: 931 guarded codes; compiles before and after the
+      # NP headers that define some of them (skips the compile without PS3DEV).
+      - name: Test the NP error codes header
+        run: bash tests/sdk/np-error-codes-test.sh
+
+      # Skips without PS3DEV; the eleven np/ forwarders (np/ranking.h reaches
+      # cell/np/score.h, np/auth_oauth.h cell/np2/init.h) compile in C/C++17,
+      # ILP32/LP64, one function pinned per forwarder; each alone; a control
+      # and a self-check with np/ranking.h pointed at the wrong header.
+      - name: Test the np header-path forwarders
+        run: bash tests/sdk/np-path-forwarders-test.sh
+
       # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
       # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
       # the package ships plus make.
@@ -212,6 +266,17 @@ jobs:
       # videoGetState, msgDialogOpen2, ...) link without the SDK headers.
       - name: Test the PSL1GHT sysutil names link
         run: bash tests/sdk/psl1ght-legacy-sysutil-link-test.sh
+
+      # Skips without PS3DEV; each of the thirteen new sysutil-tree
+      # forwarders (sysutil/sysutil_ap.h through sysutil/sysutil_sysconf.h)
+      # bridges to the cell/ header that carries the surface; the test TU,
+      # which pins one function per target, compiles in C/C++17 in both
+      # data models; a lone-forwarder TU for each; a control TU that uses
+      # the real music2 forwarder; and a self-check pointing music2 at an
+      # unrelated header and requiring the control to fail while a
+      # different forwarder keeps building.
+      - name: Test the sysutil header-path forwarders
+        run: bash tests/sdk/sysutil-path-forwarders-test.sh
 
       # Skips without PS3DEV; with a PPU compiler, no lfs/lfd/stfs/stfd through
       # under-aligned memory (GCC patch 0061: misaligned FP access kills the
