@@ -53,6 +53,13 @@ HEADERS := \
     include/sys/sys_fixed_addr.h \
     include/sys/timer.h \
     include/sys/vm.h \
+    include/cell/hash/libhash.h \
+    include/cell/hash/libmd5.h \
+    include/cell/hash/libsha1.h \
+    include/cell/hash/libsha224.h \
+    include/cell/hash/libsha256.h \
+    include/cell/hash/libsha384.h \
+    include/cell/hash/libsha512.h \
     include/sys/prx_module.h \
     include/sys/lv2_fs_ext.h \
     include/psl1ght/lv2/timer.h \
@@ -510,7 +517,7 @@ HEADERS := \
     include/cell/daisy/ato_qctl.h \
     include/simdmath/fastf4.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libhash libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code

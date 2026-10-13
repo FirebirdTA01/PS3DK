@@ -212,6 +212,9 @@ jobs:
       - name: Test the LV2 virtual-memory surface
         run: bash tests/sdk/sys-vm-surface-test.sh
 
+      - name: Test the cell/hash digests against hashlib
+        run: bash tests/sdk/hash-vectors-test.sh
+
       # Skips without PS3DK; with an installed SDK, a PSL1GHT-style Makefile
       # project (ppu_rules, bin2o, .self, .pkg) builds with only the tools
       # the package ships plus make.

@@ -144,6 +144,12 @@ ppu_stub  ppu/lib/liblv2_stub.a
 ppu_stub  ppu/lib/liblv2dbg_stub.a
 ppu_stub  ppu/lib/libmic_stub.a
 ppu_stub  ppu/lib/libmt19937.a
+ppu_stub  ppu/lib/libmd5.a
+ppu_stub  ppu/lib/libsha1.a
+ppu_stub  ppu/lib/libsha224.a
+ppu_stub  ppu/lib/libsha256.a
+ppu_stub  ppu/lib/libsha384.a
+ppu_stub  ppu/lib/libsha512.a
 ppu_stub  ppu/lib/libnet_stub.a
 ppu_stub  ppu/lib/libnetctl_stub.a
 ppu_stub  ppu/lib/libovis.a

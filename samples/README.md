@@ -16,6 +16,7 @@ samples/
 ├── sysutil/       sysutil callbacks, dialogs, save/game/system data
 ├── network/       networking module load + API validation tests
 ├── lv2/           lv2 syscall primitives (threading, synchronisation)
+├── util/          self-contained PPU utility libraries (hash)
 ├── spu/           SPU toolchain + PPU/SPU interop
 └── spurs/         libspurs sync primitives + Spurs task runtime
 ```
@@ -93,6 +94,14 @@ cellAudio mixer + cellAudioOut configuration / discovery.
 |---|---|---|
 | `hello-ppu-audio` | cellAudio Init / PortOpen / PortStart / Stop / NotifyEventQueue / AddData chain; plays a chip-tune melody via direct ring fills against `libaudio_stub.a` | **green** + RPCS3 runtime-verified |
 | `hello-ppu-audio-out` | cellAudioOut surface in `<cell/cell_audio_out.h>`: GetNumberOfDevice / GetDeviceInfo / GetState / GetConfiguration via `libsysutil_audio_out_stub.a`, then a 1 s 440 Hz sine tone through cellAudio so both the discovery API and the mixer downstream get exercised in the same boot | **green** + RPCS3 runtime-verified (nDevice=0 is an RPCS3 HLE quirk; FNIDs resolve and tone plays) |
+
+## util/
+
+Self-contained PPU utility libraries.
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-hash` | `<cell/hash/*.h>`: MD5, SHA-1, SHA-224/256/384/512 one-call digests against the published test vectors, the block API fed in uneven pieces, the refusals, and 4 MB throughput per algorithm | **green** + RPCS3 runtime-verified (42/42) |
 
 ## spu/
 

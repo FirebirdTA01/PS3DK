@@ -18,6 +18,13 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **Message digests.**  New `<cell/hash/libmd5.h>`, `libsha1.h`,
+  `libsha224.h`, `libsha256.h`, `libsha384.h` and `libsha512.h` with the
+  libraries `libmd5.a`, `libsha1.a`, `libsha224.a`, `libsha256.a`,
+  `libsha384.a` and `libsha512.a` (ILP32 and LP64).  Each has a one-call
+  `cell<Algo>Digest` and `BlockInit` / `BlockUpdate` / `BlockResult` for
+  data that arrives in pieces.  The new sample `hello-ppu-hash` checks the
+  standard test vectors for all six and reports PPU throughput.
 - **LV2 kernel timers.**  `<sys/timer.h>` now has `sys_timer_create`,
   `sys_timer_destroy`, `sys_timer_get_information`, `_sys_timer_start`,
   `sys_timer_stop`, `sys_timer_connect_event_queue` and
