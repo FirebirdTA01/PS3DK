@@ -537,6 +537,9 @@ jobs:
       - name: Test rsx-cg-compiler operator lexing
         run: bash tests/shader-compiler/operator-lexer-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test rsx-cg-compiler register lane remapping
+        run: bash tests/shader-compiler/lane-remap-test.sh
+
       - name: Test rsx-cg-compiler angle stdlib
         run: bash tests/shader-compiler/stdlib-angle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler log10 stdlib

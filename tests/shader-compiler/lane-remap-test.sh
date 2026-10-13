@@ -13,10 +13,10 @@ src="$repo_root/tools/rsx-cg-compiler/src"
 src_cpp="$repo_root/tests/shader-compiler/lane-remap-test.cpp"
 
 if [[ -n "${RSX_SYSROOT:-}" ]]; then
-    "${CXX:-c++}" -std=c++17 -O0 -w --sysroot="$RSX_SYSROOT" \
+    "${CXX:-c++}" -std=c++17 -O0 -Wall -Wextra -Werror --sysroot="$RSX_SYSROOT" \
         -I"$src" "$src_cpp" -o "$work/lane-remap-test"
 else
-    "${CXX:-c++}" -std=c++17 -O0 -w \
+    "${CXX:-c++}" -std=c++17 -O0 -Wall -Wextra -Werror \
         -I"$src" "$src_cpp" -o "$work/lane-remap-test"
 fi
 
