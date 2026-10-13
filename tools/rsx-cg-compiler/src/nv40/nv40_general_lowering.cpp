@@ -10583,6 +10583,15 @@ private:
             std::set<int> directInputs;
             if (profile_ == GeneralProfile::Vertex && !inputs.empty())
                 directInputs.insert(inputs.front());
+            // FP: an instruction writing a TEMP keeps its first operand's
+            // input direct and stages the others (measured: `t = a * b` then
+            // used is MOV R0, f[TEX1]; MUL R0, f[TEX0], R0).  One writing the
+            // colour stages every input (MOV R0, f[TEX0]; MOV R1, f[TEX1];
+            // MUL o0, R0, R1).  MAD keeps its own preload rules.
+            if (profile_ == GeneralProfile::Fragment && effOp != VOp::Mad &&
+                inputs.size() > 1 && !vi.dst.output && !vi.dst.outputPin &&
+                !vi.dst.none)
+                directInputs.insert(inputs.front());
             keepPreloadSwizzle.clear();
 
             struct PendingPreload

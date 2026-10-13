@@ -10,9 +10,10 @@
 #
 # A fetch reads a modified coordinate in place (TEX R0, |f[TEX0]|) and
 # writes the colour itself unless its result is swizzled; those rows are
-# judged by shape only (fp_eval does not model fetches).  Where we stage
-# both inputs of a two-input instruction the reference stages one
-# (neg_mad, tex_abs_temp, txp_abs_temp): later work, budgets say so.
+# judged by shape only (fp_eval does not model fetches).  A two-input
+# instruction writing a temp keeps its first input direct, as the reference
+# does (tex_abs_temp, txp_abs_temp); a negated input feeding a MAD is still
+# staged (neg_mad): later work, the budget says so.
 #
 # Usage: tests/shader-compiler/fp-modifier-output-test.sh <compiler>
 set -u
@@ -47,9 +48,9 @@ ROWS = {
     'tex_neg': ('float4 main(float4 a : TEXCOORD0, uniform sampler2D s : TEXUNIT0) : COLOR { return tex2D(s, -a.xy); }',
                 1, 1, None),
     'tex_abs_temp': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform sampler2D s : TEXUNIT0) : COLOR { float2 t = a.xy * b.xy; return tex2D(s, abs(t)); }',
-                     4, 3, None),
+                     3, 3, None),
     'txp_abs_temp': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform sampler2D s : TEXUNIT0) : COLOR { float4 t = a * b; return tex2Dproj(s, abs(t)); }',
-                     4, 3, None),
+                     3, 3, None),
     # A swizzled fetch result keeps its MOV, as in the reference.
     'tex_swizzled': ('float4 main(float4 a : TEXCOORD0, uniform sampler2D s : TEXUNIT0) : COLOR { return tex2D(s, a.xy).zyxw; }',
                      2, 2, None),
