@@ -262,8 +262,8 @@ jobs:
 
       # Skips without PS3DEV; each of the thirteen new sysutil-tree
       # forwarders (sysutil/sysutil_ap.h through sysutil/sysutil_sysconf.h)
-      # bridges to the cell/ header that carries the surface; the reference
-      # TU, which pins one function per target, compiles in C/C++17 in both
+      # bridges to the cell/ header that carries the surface; the test TU,
+      # which pins one function per target, compiles in C/C++17 in both
       # data models; a lone-forwarder TU for each; a control TU that uses
       # the real music2 forwarder; and a self-check pointing music2 at an
       # unrelated header and requiring the control to fail while a

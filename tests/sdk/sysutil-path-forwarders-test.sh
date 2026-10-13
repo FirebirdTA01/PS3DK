@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Thirteen sysutil-tree forwarder headers, each bridging an include path to
 # the cell/ header that carries the surface.  The script:
-#   1. compiles the reference TU (tests/sdk/sysutil-path-forwarders-test.c)
+#   1. compiles the test TU (tests/sdk/sysutil-path-forwarders-test.c)
 #      which pins one function per function-carrying target plus one type
 #      per types-only target, across C(gnu99,c11)/C++17 x ILP32/LP64,
 #      under -Wall -Wextra -Werror;
@@ -54,7 +54,7 @@ done
 # Include-order helper: overlay first, then the installed SDK.
 INCFLAGS=(-I"$ov" -I"$sdk/ppu/include")
 
-# 1. reference TU across the full matrix (catches any forwarder pointed at
+# 1. the test TU across the full matrix (catches any forwarder pointed at
 #    the wrong cell/ header - the referenced name is then undeclared).
 for lang in c c++; do
     stds="-std=gnu99 -std=c11"; [ "$lang" = c++ ] && stds="-std=c++17"
@@ -73,7 +73,7 @@ for lang in c c++; do
     done
 done
 
-# 2. each forwarder, in its own translation unit, in the same matrix.
+# 2. each forwarder, in its own translation unit (gnu99, ILP32).
 for fwd in $forwarders; do
     probe="$work/fwd.c"
     printf '#include <sysutil/%s.h>\nint main(void) { return 0; }\n' "$fwd" > "$probe"
@@ -92,10 +92,10 @@ done
 #    Probe style per the PATH1 review: <fn-type> *volatile p, a function
 #    body, no casts, no __ names.
 ctl="$work/ctl.c"
-printf '#include <sysutil/sysutil_music2.h>\n' \
-       'int fn2(int, sys_memory_container_t, int, CellMusicCallback, void *);\n' \
-       'static fn2 * volatile p = &cellMusicInitialize2;\n' \
-       'int main(void) { (void)p; return 0; }\n' > "$ctl"
+printf '%s\n' '#include <sysutil/sysutil_music2.h>' \
+       'typedef int fn2(int, sys_memory_container_t, int, CellMusicCallback, void *);' \
+       'static fn2 * volatile p = &cellMusicInitialize2;' \
+       'int main(void) { (void)p; return 0; }' > "$ctl"
 if out=$("$cc" -x c -std=gnu99 -Wall -Wextra -Werror \
         "${INCFLAGS[@]}" -c "$ctl" -o "$work/ctl.o" 2>&1); then
     echo "sysutil-path-forwarders: ok   control: real sysutil/sysutil_music2.h builds"
@@ -112,21 +112,21 @@ bad="$work/bad"; mkdir -p "$bad/sysutil"
 for fwd in $forwarders; do
     cp "$ov/sysutil/$fwd.h" "$bad/sysutil/$fwd.h"
 done
-printf '#ifndef _PS3DK_SYSUTIL_MUSIC2_H_\n' \
-       '#define _PS3DK_SYSUTIL_MUSIC2_H_\n' \
-       '#include <cell/rtc.h>\n' \
-       '#endif\n' > "$bad/sysutil/sysutil_music2.h"
+printf '%s\n' '#ifndef _PS3DK_SYSUTIL_MUSIC2_H_' \
+       '#define _PS3DK_SYSUTIL_MUSIC2_H_' \
+       '#include <cell/rtc.h>' \
+       '#endif' > "$bad/sysutil/sysutil_music2.h"
 
 badCtl="$work/badCtl.c"
-printf '#include <sysutil/sysutil_music2.h>\n' \
-       'int fn2(int, sys_memory_container_t, int, CellMusicCallback, void *);\n' \
-       'static fn2 * volatile p = &cellMusicInitialize2;\n' \
-       'int main(void) { (void)p; return 0; }\n' > "$badCtl"
+printf '%s\n' '#include <sysutil/sysutil_music2.h>' \
+       'typedef int fn2(int, sys_memory_container_t, int, CellMusicCallback, void *);' \
+       'static fn2 * volatile p = &cellMusicInitialize2;' \
+       'int main(void) { (void)p; return 0; }' > "$badCtl"
 goodCtl="$work/goodCtl.c"
-printf '#include <sysutil/sysutil_ap.h>\n' \
-       'int fnap(CellSysutilApParam *, sys_memory_container_t);\n' \
-       'static fnap * volatile p = &cellSysutilApOn;\n' \
-       'int main(void) { (void)p; return 0; }\n' > "$goodCtl"
+printf '%s\n' '#include <sysutil/sysutil_ap.h>' \
+       'typedef int fnap(CellSysutilApParam *, sys_memory_container_t);' \
+       'static fnap * volatile p = &cellSysutilApOn;' \
+       'int main(void) { (void)p; return 0; }' > "$goodCtl"
 
 badCtl_ok="no"; goodCtl_ok="no"
 "$cc" -x c -std=gnu99 -Wall -Wextra -Werror -I"$bad" -I"$sdk/ppu/include" \

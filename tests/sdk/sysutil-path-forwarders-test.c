@@ -38,32 +38,30 @@
 #include <sysutil/sysutil_storagedata.h>
 #include <sysutil/sysutil_sysconf.h>
 
-/* fn-type per function-carrying target (the bare function type, so the
- * pointer below is <fn-type> *volatile). */
-#define FN_AP      int(CellSysutilApParam *, sys_memory_container_t)
-#define FN_AVC2    int(const CellSysutilAvc2InitParam *, uint32_t *)
-#define FN_VOID    int(void)
-#define FN_MUSIC   int(int, sys_memory_container_t, int, CellMusicCallback, void *)
-#define FN_MDEC    int(int, sys_memory_container_t, int, CellMusicDecodeCallback, void *)
-#define FN_MEXP    int(unsigned int, sys_memory_container_t, CellMusicExportUtilFinishCallback, void *)
-#define FN_OSKE    int(const char **)
-#define FN_SD      int(unsigned int, char *, char *, CellStorageDataSetParam *,
-                      CellStorageDataFinishCallback, sys_memory_container_t, void *)
-#define FN_SYSCONF int(unsigned int, CellSysconfCallback, void *, void *,
-                      sys_memory_container_t)
+/* fn-type per function-carrying target: a typedef of the bare function
+ * type, so the pointer below is <fn-type> *volatile. */
+typedef int fn_ap(CellSysutilApParam *, sys_memory_container_t);
+typedef int fn_avc2(const CellSysutilAvc2InitParam *, uint32_t *);
+typedef int fn_void(void);
+typedef int fn_music(int, sys_memory_container_t, int, CellMusicCallback, void *);
+typedef int fn_mdec(int, sys_memory_container_t, int, CellMusicDecodeCallback, void *);
+typedef int fn_mexp(unsigned int, sys_memory_container_t, CellMusicExportUtilFinishCallback, void *);
+typedef int fn_oske(const char **);
+typedef int fn_sd(unsigned int, char *, char *, CellStorageDataSetParam *, CellStorageDataFinishCallback, sys_memory_container_t, void *);
+typedef int fn_sysconf(unsigned int, CellSysconfCallback, void *, void *, sys_memory_container_t);
 
-static FN_AP      * volatile p_ap         = &cellSysutilApOn;
-static FN_AVC2    * volatile p_avc2       = &cellSysutilAvc2EstimateMemoryContainerSize;
-static FN_VOID    * volatile p_avc2_video = &cellSysutilAvc2ShowScreen;
-static FN_VOID    * volatile p_bgm        = &cellSysutilDisableBgmPlayback;
-static FN_VOID    * volatile p_gameupdate = &cellGameUpdateInit;
-static FN_MUSIC   * volatile p_music      = &cellMusicInitialize;
-static FN_MUSIC   * volatile p_music2     = &cellMusicInitialize2;
-static FN_MDEC    * volatile p_mdec       = &cellMusicDecodeInitialize;
-static FN_MEXP    * volatile p_mexp       = &cellMusicExportInitialize;
-static FN_OSKE    * volatile p_oske       = &cellOskDialogExtAddJapaneseOptionDictionary;
-static FN_SD      * volatile p_sd         = &cellStorageDataExport;
-static FN_SYSCONF * volatile p_sysconf    = &cellSysconfOpen;
+static fn_ap      * volatile p_ap         = &cellSysutilApOn;
+static fn_avc2    * volatile p_avc2       = &cellSysutilAvc2EstimateMemoryContainerSize;
+static fn_void    * volatile p_avc2_video = &cellSysutilAvc2ShowScreen;
+static fn_void    * volatile p_bgm        = &cellSysutilDisableBgmPlayback;
+static fn_void    * volatile p_gameupdate = &cellGameUpdateInit;
+static fn_music   * volatile p_music      = &cellMusicInitialize;
+static fn_music   * volatile p_music2     = &cellMusicInitialize2;
+static fn_mdec    * volatile p_mdec       = &cellMusicDecodeInitialize;
+static fn_mexp    * volatile p_mexp       = &cellMusicExportInitialize;
+static fn_oske    * volatile p_oske       = &cellOskDialogExtAddJapaneseOptionDictionary;
+static fn_sd      * volatile p_sd         = &cellStorageDataExport;
+static fn_sysconf * volatile p_sysconf    = &cellSysconfOpen;
 
 /* Types-only targets: pin a type so the name must resolve. */
 static size_t pin_bgm_type    = sizeof(CellSysutilBgmPlaybackStatus);
