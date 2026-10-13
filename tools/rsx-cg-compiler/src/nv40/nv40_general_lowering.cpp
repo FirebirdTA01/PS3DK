@@ -9951,17 +9951,22 @@ private:
                 const VSrc s = mov.srcs[0];
                 const int d = mov.dst.index;
                 const bool input = s.kind == VSrcKind::Input;
+                const bool literal = s.kind == VSrcKind::Literal;
                 // A temp copy is read through its source with or without a
                 // modifier; an input copy only when it carries one (a plain
-                // input copy is the staging legalizeInputOperands builds).
-                if ((s.kind != VSrcKind::Temp && !input) || s.relative ||
-                    (!input && s.index == d) || (input && !s.abs && !s.neg))
+                // input copy is the staging legalizeInputOperands builds); a
+                // literal copy by its one arithmetic reader, below.
+                if ((s.kind != VSrcKind::Temp && !input && !literal) || s.relative ||
+                    (s.kind == VSrcKind::Temp && s.index == d) ||
+                    (input && !s.abs && !s.neg))
                     continue;
                 // Same precision on both sides: the source's writers decide it
-                // (an input register is binary32).
-                bool ok = true, sourceWritten = input;
-                if (input && mov.dst.fp16) ok = false;
-                for (size_t k = 0; k < i && ok && !input; ++k)
+                // (an input register and an inline constant are binary32; an
+                // H copy of a literal rounds it, so that copy stays).
+                const bool fixedSource = input || literal;
+                bool ok = true, sourceWritten = fixedSource;
+                if (fixedSource && mov.dst.fp16) ok = false;
+                for (size_t k = 0; k < i && ok && !fixedSource; ++k)
                     if (writesTemp(code[k], s.index)) {
                         sourceWritten = true;
                         if (code[k].dst.fp16 != mov.dst.fp16) ok = false;
@@ -9996,6 +10001,20 @@ private:
                         else uses.push_back({k, n});
                     }
                 }
+                // A literal joins its single reader as that reader's one
+                // inline constant: each inline constant takes an instruction
+                // slot of its own, so a shared literal keeps its copy.
+                if (ok && literal) {
+                    if (uses.size() != 1 || fragmentFetch(code[uses[0].first].op)) ok = false;
+                    else
+                        for (size_t q = 0; q < code[uses[0].first].srcs.size() && ok; ++q) {
+                            const VSrc& o = code[uses[0].first].srcs[q];
+                            if (q == uses[0].second) continue;
+                            if (o.kind == VSrcKind::Literal || o.kind == VSrcKind::Uniform ||
+                                (o.kind == VSrcKind::Temp && o.index == d))
+                                ok = false;
+                        }
+                }
                 // One input register per instruction: an input source may
                 // only join a reader whose other sources name no other input.
                 for (size_t u = 0; u < uses.size() && ok && input; ++u) {
@@ -10010,7 +10029,7 @@ private:
                 if (!ok || uses.empty()) continue;
                 for (const auto& [k, n] : uses)
                     for (size_t m = i + 1; m < k && ok; ++m)
-                        if (barrier(code[m]) || (!input && writesTemp(code[m], s.index))) ok = false;
+                        if (barrier(code[m]) || (!fixedSource && writesTemp(code[m], s.index))) ok = false;
                 if (!ok) continue;
                 for (const auto& [k, n] : uses) {
                     VSrc& r = code[k].srcs[n];
