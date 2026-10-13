@@ -6922,7 +6922,15 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             bool constant = !argValues.empty();
             for (size_t i = 0; i < argValues.size() && constant; ++i)
             {
-                constant = extractFloatComponents(*currentFunction_, argValues[i], args[i]) &&
+                // An integer literal argument of the float overload
+                // (clamp(0, 0.5, 1.5)) converts as IntToFloat folds it.
+                uint32_t rawBits = 0;
+                bool isUnsigned = false;
+                if (!extractFloatComponents(*currentFunction_, argValues[i], args[i]) &&
+                    extractIntegerScalar(*currentFunction_, argValues[i], rawBits, isUnsigned))
+                    args[i] = { isUnsigned ? static_cast<float>(rawBits)
+                                           : static_cast<float>(static_cast<int32_t>(rawBits)) };
+                constant = !args[i].empty() &&
                            (args[i].size() == width || args[i].size() == 1);
                 if (constant && args[i].size() == 1 && width > 1)
                     args[i].assign(width, args[i][0]);

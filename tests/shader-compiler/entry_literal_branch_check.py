@@ -28,7 +28,10 @@ def main():
         work=a.keep or Path(tmp);work.mkdir(parents=True,exist_ok=True)
         rows=[(n,b,'fp',expected) for n,(b,expected) in CASES.items()]
         rows += [('unreachable_type_error','if(false){return undeclared;}return p;','fp',None),
-                 ('vp_control',CASES['false_after_join'][0],'vp',None)]
+                 # The vertex profile folds the literal condition too and the
+                 # reference accepts the program; ours must compile it (its
+                 # values were checked against the reference, x = .5, -.5, 0).
+                 ('vp_folded',CASES['false_after_join'][0],'vp','accept')]
         for name,body,stage,expected in rows:
             src=work/(name+'.cg');dst=work/(name+'.bin')
             si,so=('TEXCOORD0','COLOR') if stage=='fp' else ('POSITION','POSITION')
@@ -37,7 +40,10 @@ def main():
             run=subprocess.run([a.compiler,'-p','sce_'+stage+'_rsx','-e','main','--emit-container',str(dst),str(src)],capture_output=True,text=True,timeout=30)
             (work/(name+'.log')).write_text(run.stdout+run.stderr)
             try:
-                if expected is None:
+                if expected=='accept':
+                    assert run.returncode==0 and dst.is_file(),run.stderr
+                    checks+=1
+                elif expected is None:
                     assert run.returncode==1 and not dst.exists(),run.stderr
                     if name=='unreachable_type_error':assert 'undeclared' in run.stderr,run.stderr
                     checks+=1
