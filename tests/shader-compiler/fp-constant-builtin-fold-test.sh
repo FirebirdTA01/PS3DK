@@ -11,7 +11,9 @@
 # the exp2 fold of f32(x * 0x3fb8aa3a) (log2(e) one ulp low, as the
 # reference's multiply has it), log and log10 are f32(log2 fold * 0x3f317218
 # / 0x3e9a209b); an exp whose exp2 overflows keeps a run-time EX2, and log
-# of x <= 0 keeps its LG2.
+# of x <= 0 keeps its LG2.  sqrt / sin / cos / tan fold with the vertex
+# rules; sqrt of x <= 0 stays at run time.  A literal vector divisor is one
+# MUL by the per-lane reciprocals.
 #
 # Usage: tests/shader-compiler/fp-constant-builtin-fold-test.sh <compiler>
 set -u
@@ -43,6 +45,12 @@ FOLDED = [
     ('log1', 'log(float4(8889.55957, 691.108032, 0.052557528, 3.25337646e-06))', '41117b6c 40d139ba c03c88c2 c14a2c4f'),
     ('log100', 'log10(float4(60.3577805, 5.79703885e-09, 11.7771626, 0.0381473042))', '3fe3ef12 c103c9e8 3f8917dc bfb59298'),
     ('log101', 'log10(float4(748.380188, 133776920, 19.5759239, 135030.703))', '4037f19f 410205a9 3fa55728 40a42c82'),
+    # sqrt / sin / cos / tan: the vertex rules (sqrt = 1 / f32(1 / sqrt), tan = f32(sin) / f32(cos)), any finite trig argument.
+    ('sqrt0', 'sqrt(float4(22.9411163, 44.5651627, 36.8661385, 26.9908123))', '40994521 40d59f73 40c24bc5 40a63fa3'),
+    ('sin0', 'sin(float4(-3.27712703, 5.04632711, 8.45390129, 8.24506569))', '3e0a5cd9 bf71dbb8 3f534c2b 3f6cabcb'),
+    ('cos0', 'cos(float4(2.44486666, -2.20816875, -4.22067118, 9.86312771))', 'bf4456a8 bf18578b bef1bc73 bf67cbca'),
+    ('tan0', 'tan(float4(8.58440399, 3.83918285, 7.76364946, -7.92835331))', 'bf8ee88f 3f5692ca 4130a45b 4156bd27'),
+    ('sinbig', 'sin(float4(100000.0, -70000.0, 3.0, 0.5))', '3d126d55 3f52cf32 3e1081c3 3ef57744'),
     ('d0', 'dot(float4(-5.41331816, -1.08807659, -2.62803507, -4.60329819), float4(-3.27712703, 5.04632711, 8.45390129, 8.24506569))', 'c23fb070 00000000 00000000 00000000'),
     ('d1', 'dot(float4(2.44486666, -2.20816875, -4.22067118, 9.86312771), float4(8.58440399, 3.83918285, 7.76364946, -7.92835331))', 'c2c4e97b 00000000 00000000 00000000'),
     ('l0', 'length(float3(4.81628847, 8.21494389, 1.00342691))', '411934f3 00000000 00000000 00000000'),
@@ -56,11 +64,17 @@ EDGES = [('rsqrt_zero', 'rsqrt(0.0)', {'RSQ', 'DIVSQR', 'DIVSQ'}),
          ('exp2_overflow', 'exp2(200.0)', {'EX2'}),
          ('exp_overflow', 'exp(89.0)', {'EX2'}),
          ('log_zero', 'log(0.0)', {'LG2'}),
-         ('log10_negative', 'log10(-2.0)', {'LG2'})]
+         ('log10_negative', 'log10(-2.0)', {'LG2'}),
+         ('sqrt_zero', 'sqrt(0.0)', {'RSQ', 'DIVSQR', 'DIVSQ'}),
+         ('sqrt_negative', 'sqrt(-1.0)', {'RSQ', 'DIVSQR', 'DIVSQ'})]
+# A literal vector divisor is one MUL by the per-lane reciprocals (the
+# reference's const block; a / k for a scalar k already was).
+DIVISORS = [('div0', 'float4(2.0, 3.0, 4.0, 5.0)', '3f000000 3eaaaaab 3e800000 3e4ccccd'),
+            ('div1', 'float4(-0.7, 11.0, 0.1, 1e-3)', 'bfb6db6e 3dba2e8c 41200000 4479ffff')]
 fails = 0
-def compile_(name, expr):
+def compile_(name, expr, body='return a * %s;'):
     cg = work / (name + '.cg'); out = work / (name + '.fpo')
-    cg.write_text('float4 main(float4 a : TEXCOORD0) : COLOR { return a * %s; }' % expr + chr(10))
+    cg.write_text('float4 main(float4 a : TEXCOORD0) : COLOR { ' + body % expr + ' }' + chr(10))
     p = subprocess.run([compiler, '-p', 'sce_fp_rsx', '--emit-container', str(out), str(cg)], capture_output=True, text=True)
     if p.returncode != 0 or not out.exists():
         return None, (p.stderr or '').strip()[:160]
@@ -83,6 +97,16 @@ for name, expr, keep in EDGES:
     ok = bool(ops & keep)
     fails += not ok
     print('fp-constant-builtin-fold: %s %s keeps a run-time %s (%s)' % ('ok  ' if ok else 'FAIL', name, '/'.join(sorted(keep)), ' '.join(sorted(ops))))
+for name, div, want in DIVISORS:
+    ins, err = compile_(name, div, 'return a / %s;')
+    if ins is None:
+        fails += 1; print('fp-constant-builtin-fold: FAIL %s: compile: %s' % (name, err)); continue
+    ops = [fs.render(w, i).split()[1] for i, (w, c) in enumerate(ins)]
+    blocks = [' '.join(struct.pack('>f', x).hex() for x in ev._const_floats(c)) for w, c in ins if c is not None]
+    ok = ops == ['MUL'] and blocks == [want]
+    fails += not ok
+    print('fp-constant-builtin-fold: %s %s a / %s: %s%s' % ('ok  ' if ok else 'FAIL', name, div, ' '.join(ops),
+          '' if ok else '  const %s, want %s' % (blocks, want)))
 if fails:
     print('fp-constant-builtin-fold: %d failure(s)' % fails); sys.exit(1)
 print('PASS: fp-constant-builtin-fold-test')

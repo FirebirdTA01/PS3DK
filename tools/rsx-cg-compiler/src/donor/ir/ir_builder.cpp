@@ -6593,11 +6593,28 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             return emitInstruction(mulOp, resultType, argValues);
         }
 
-        // VP literal math has profile-specific rounding. Keep this hook confined
-        // to the four measured operations; other builtins and FP are unchanged.
+        // Literal sqrt / sin / cos / tan, the same rounding in both profiles
+        // (FP measured 2026-10-13 on 64 random lanes each: sqrt is
+        // 1 / f32(1 / sqrt(x)), tan is f32(sin) / f32(cos)).  The fragment
+        // reference folds trig arguments of any finite size and leaves a
+        // sqrt of x <= 0 at run time (RSQ + DIV), so a fragment vector with
+        // such a lane, or a non-finite argument, is not folded here.
         const bool trig = *builtinOp == IROp::Sin || *builtinOp == IROp::Cos ||
                           *builtinOp == IROp::Tan;
-        if (module_->shaderStage == ShaderStage::Vertex && argValues.size() == 1 &&
+        const bool fragmentStage = module_->shaderStage == ShaderStage::Fragment;
+        bool fragmentFoldable = fragmentStage;
+        if (fragmentStage && argValues.size() == 1 && (trig || *builtinOp == IROp::Sqrt))
+        {
+            std::vector<float> probe;
+            if (!extractFloatComponents(*currentFunction_, argValues[0], probe) || probe.empty())
+                fragmentFoldable = false;
+            for (float value : probe)
+                if (!std::isfinite(value) || (*builtinOp == IROp::Sqrt && value <= 0.0f))
+                    fragmentFoldable = false;
+            if (fragmentFoldable && (resultType.isVector() ? resultType.elementType : resultType.baseType) == IRType::Float16)
+                fragmentFoldable = false;
+        }
+        if ((module_->shaderStage == ShaderStage::Vertex || fragmentFoldable) && argValues.size() == 1 &&
             (trig || *builtinOp == IROp::Sqrt) &&
             (resultType.isScalar() || resultType.isVector()))
         {
@@ -6620,7 +6637,7 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             {
                 for (float value : values)
                 {
-                    if (!std::isfinite(value) || (trig && std::fabs(value) > 65536.0f))
+                    if (!fragmentStage && (!std::isfinite(value) || (trig && std::fabs(value) > 65536.0f)))
                     {
                         error(expr->loc, "our VP constant trig reduction bound is finite |x| <= 65536; "
                             "nonfinite constant math is also unsupported (constant-math-range)");

@@ -107,6 +107,23 @@ for e in RUNTIME:
     if blob is None or count < 2:
         fails.append('%s: folded or refused (%s instructions); the reference leaves it to run time' % (e, count))
     print('  %-12s %s' % (e, 'run time' if blob is not None and count >= 2 else 'FAIL'))
+# A literal vector divisor: p / float4(k) is one MUL by the per-lane
+# reciprocals (measured with p = 1 on the reference).
+for lits, want in [('2.0, 3.0, 4.0, 5.0', [0x3f000000, 0x3eaaaaab, 0x3e800000, 0x3e4ccccd]),
+                   ('-0.7, 11.0, 0.1, 1e-3', [0xbfb6db6e, 0x3dba2e8c, 0x41200000, 0x4479ffff])]:
+    s_, o_ = work / 'div.cg', work / 'div.vpo'
+    s_.write_text('float4 main(float4 p : POSITION) : POSITION { return p / float4(%s); }' % lits + NL)
+    pr = subprocess.run([compiler, '-p', 'sce_vp_rsx', '-e', 'main', '--emit-container', str(o_), str(s_)],
+                        capture_output=True, text=True, timeout=120)
+    if pr.returncode != 0 or not o_.exists():
+        fails.append('p / float4(%s) refused' % lits); continue
+    blob = o_.read_bytes()
+    count = struct.unpack_from('>I', blob, 24)[0] // 16
+    got = ev.evaluate(blob, {}, inputs={0: [1.0] * 4}, binary32=True).get(0)
+    words = [bits(x) for x in got] if got else []
+    if count != 1 or words != want:
+        fails.append('p / float4(%s): %d instructions, %s; want 1, %s' % (lits, count, ['%08x' % w for w in words], ['%08x' % w for w in want]))
+    print('  p / float4(%s)  %s' % (lits, 'ok' if count == 1 and words == want else 'FAIL'))
 for f in fails: print('vp-constant-builtin-fold: FAIL', f)
 print('vp-constant-builtin-fold: %s' % ('PASS' if not fails else 'FAIL (%d)' % len(fails)))
 sys.exit(1 if fails else 0)

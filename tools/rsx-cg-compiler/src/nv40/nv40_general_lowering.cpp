@@ -4997,6 +4997,38 @@ private:
             program_.instrs.push_back(mul);
             return;
         }
+        // A literal VECTOR divisor folds the same way, lane by lane: the
+        // reference emits a / float4(2, 3, 4, 5) as one MUL by {0.5,
+        // 0.33333334, 0.25, 0.2} in both profiles (measured).  A zero lane
+        // keeps the per-lane reciprocal path below (the reference keeps
+        // that one lane's RCP).
+        {
+            VSrc d = resolve(inst.operands[1]);
+            bool foldable = d.kind == VSrcKind::Literal && !d.abs && !d.neg && !d.relative;
+            for (int lane = 0; lane < 4 && foldable; ++lane) {
+                if (!(mask & (1 << lane))) continue;
+                const float v = d.literal[d.swizzle[lane] & 3];
+                if (v == 0.0f || !std::isfinite(v)) foldable = false;
+            }
+            if (foldable) {
+                bool done[4] = {false, false, false, false};
+                for (int lane = 0; lane < 4; ++lane) {
+                    if (!(mask & (1 << lane))) continue;
+                    const int c = d.swizzle[lane] & 3;
+                    if (done[c]) continue;
+                    done[c] = true;
+                    d.literal[c] = static_cast<float>(1.0 / static_cast<double>(d.literal[c]));
+                }
+                VInstr mul;
+                mul.op = VOp::Mul;
+                mul.dst.index = define(inst.result);
+                mul.dst.writemask = mask;
+                mul.srcs[0] = resolve(inst.operands[0]);
+                mul.srcs[1] = d;
+                program_.instrs.push_back(mul);
+                return;
+            }
+        }
         // A dynamic SCALAR divisor uses DIVR (0x3A) at every numerator
         // width.  The numerator is vector-valued; only the denominator's
         // first swizzled component is scalar.  A VECTOR divisor keeps the
