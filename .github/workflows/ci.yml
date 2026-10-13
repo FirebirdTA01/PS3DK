@@ -249,6 +249,12 @@ jobs:
       - name: Test the NP error codes header
         run: bash tests/sdk/np-error-codes-test.sh
 
+      # Skips without PS3DEV; <np/drm_inline.h> (sceNpDrmOpen) compiles in
+      # C/C++17, ILP32/LP64, links against the NP and FS stubs, and a
+      # misspelled call in its body must fail.
+      - name: Test the np/drm_inline.h sceNpDrmOpen shim
+        run: bash tests/sdk/np-drm-inline-test.sh
+
       # Skips without PS3DEV; the eleven np/ forwarders (np/ranking.h reaches
       # cell/np/score.h, np/auth_oauth.h cell/np2/init.h) compile in C/C++17,
       # ILP32/LP64, one function pinned per forwarder; each alone; a control
@@ -393,14 +399,6 @@ jobs:
       # would otherwise catch it runs only in the release pipeline).
       - name: Test no PPU header shadows an SPU header unguarded
         run: bash tests/sdk/spu-header-shadow-test.sh
-
-      # Compiles <np/drm_inline.h> (the sceNpDrmOpen shim) in C and C++17,
-      # ILP32 and LP64; links it against the NP and FS stub archives when
-      # they are present; and verifies that a misspelled cellFsOpen inside
-      # the inline header actually breaks the build, so the inline body is
-      # really being compiled.
-      - name: Test the np/drm_inline.h inline shim compiles
-        run: bash tests/sdk/np-drm-inline-test.sh
 
       # Every reference stub-archive database is built under its reference
       # name.  Only the host check (A) runs here; the installed-archive check

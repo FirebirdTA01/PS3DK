@@ -1,106 +1,83 @@
 #!/usr/bin/env bash
-# tests/sdk/np-drm-inline-test.sh
+# <np/drm_inline.h> (np-drm-inline-test.c): the sceNpDrmOpen inline shim.
+#  1. compile with the PPU compiler as gnu99, c11 and c++17, ILP32 and LP64,
+#     under -Wall -Wextra -Werror; the test TU calls sceNpDrmOpen, so the
+#     inline body is compiled in every mode;
+#  2. with an installed SDK, link the ILP32 object against libsysutil_np_stub
+#     and libfs_stub: cellFsStat, sceNpDrmIsAvailable and cellFsOpen resolve.
+# Self-check: a copy of the header with cellFsOpen misspelled must fail.
 #
-# Compile and (if stub archives exist) link the <np/drm_inline.h> inline
-# shim under the full C / C++17 / ILP32 / LP64 matrix.
-#
-# Skips (exit 0) when no PPU toolchain is available (PS3DEV unset).
-# Uses the INSTALLED SDK include path (overlay in front of $sdk/ppu/include),
-# never puts the source-tree $sdk/include directly on the path.
-#
-# Matrix: gnu99, c11, c++17, each with and without -mlp64.
-# -Wall -Wextra -Werror throughout.
-#
-# Self-check: a bad copy of the forwarder with cellFsOpen misspelled must
-# fail to compile (the inline body really references that symbol).
+# usage: np-drm-inline-test.sh [--ps3dev DIR] [--include DIR]
 set -u
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo="$(cd "$here/../.." && pwd)"
-inc="$repo/sdk/include"
-ref="$here/np-drm-inline-test.c"
-[ -f "$ref" ] || { echo "ref TU $ref not found" >&2; exit 1; }
-
-# --- PS3DEV gate: skip if no toolchain ---
-PS3DEV="${PS3DEV:-}"
-if [ -z "$PS3DEV" ]; then
-    echo "SKIP — PS3DEV not set (no PPU toolchain)"
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
+ps3dev="${PS3DEV:-}"; inc="$root/sdk/include"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --ps3dev) ps3dev="$2"; shift 2 ;;
+        --include) inc="$2"; shift 2 ;;
+        *) echo "usage: $0 [--ps3dev DIR] [--include DIR]" >&2; exit 2 ;;
+    esac
+done
+if [ -z "$ps3dev" ]; then
+    echo "np-drm-inline: SKIP (set PS3DEV or --ps3dev)"
     exit 0
 fi
-sdk="$PS3DEV/ps3dk"
-[ -d "$sdk/ppu/include" ] || { echo "SKIP — $sdk/ppu/include not found"; exit 0; }
+cc="$ps3dev/ppu/bin/powerpc64-ps3-elf-gcc"
+{ [ -x "$cc" ] || [ -x "$cc.exe" ]; } || { echo "np-drm-inline: FAIL: no PPU compiler under $ps3dev"; exit 1; }
+sdk="${PS3DK:-}"; [ -n "$sdk" ] || { [ -d "$ps3dev/ps3dk/ppu/include" ] && sdk="$ps3dev/ps3dk" || sdk="$ps3dev"; }
+work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+src="$root/tests/sdk/np-drm-inline-test.c"
+status=0
 
-CC="${CC:-powerpc64-ps3-elf-gcc}"
-CXX="${CXX:-powerpc64-ps3-elf-g++}"
-for tool in "$CC" "$CXX"; do
-    command -v "$tool" >/dev/null 2>&1 || { echo "SKIP — $tool not on PATH"; exit 0; }
+# Only the new header goes in front of the installed SDK.
+mkdir -p "$work/ov/np"
+cp "$inc/np/drm_inline.h" "$work/ov/np/"
+LIBS="-lsysutil_np_stub -lfs_stub"
+
+for lang in c c++; do
+    stds="-std=gnu99 -std=c11"; [ "$lang" = c++ ] && stds="-std=c++17"
+    for std in $stds; do
+        for abi in "" -mlp64; do
+            label="$lang $std ${abi:-ilp32}"
+            if out=$("$cc" -x "$lang" "$std" $abi -Wall -Wextra -Werror \
+                    -I"$work/ov" -I"$sdk/ppu/include" -c "$src" -o "$work/t.o" 2>&1); then
+                echo "np-drm-inline: ok   compile $label"
+            else
+                echo "np-drm-inline: FAIL compile $label"
+                printf '%s\n' "$out" | grep -E "error" | sed 's/^/    /' | head -8
+                status=1
+            fi
+        done
+    done
 done
 
-ov="$(mktemp -d)"
-ovb="$(mktemp -d)"
-trap 'rm -rf "$ov" "$ovb"' EXIT
-
-fail=0
-run_ok()  { local label="$1"; shift; if "$@" >/dev/null 2>"$ov/e"; then :; else echo "FAIL(ok)  $label"; sed -n '1,14p' "$ov/e" 2>/dev/null; fail=1; fi; }
-run_bad() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then echo "FAIL(bad) $label compiled when it should not"; fail=1; fi; }
-
-# ----------------------------------------------------------------
-# Overlay: the inline header in front of the INSTALLED SDK
-# ----------------------------------------------------------------
-mkdir -p "$ov/np"
-cp "$inc/np/drm_inline.h" "$ov/np/drm_inline.h"
-ovinc="-I$ov -I$sdk/ppu/include"
-
-# ----------------------------------------------------------------
-# 1) Matrix compile: gnu99, c11 (C) — c++17 (C++)
-#    each with and without -mlp64, -Wall -Wextra -Werror
-# ----------------------------------------------------------------
-for std in gnu99 c11; do
-    run_ok "C $std"      "$CC"  -x c   -std="$std" $ovinc -Wall -Wextra -Werror -c "$ref" -o "$ov/ref.o"
-    run_ok "C $std lp64" "$CC"  -x c   -std="$std" $ovinc -mlp64 -Wall -Wextra -Werror -c "$ref" -o "$ov/ref.o"
-done
-run_ok "C++ c++17"      "$CXX" -x c++ -std=c++17 $ovinc -Wall -Wextra -Werror -c "$ref" -o "$ov/ref.o"
-run_ok "C++ c++17 lp64" "$CXX" -x c++ -std=c++17 $ovinc -mlp64 -Wall -Wextra -Werror -c "$ref" -o "$ov/ref.o"
-
-# ----------------------------------------------------------------
-# 2) Link the ILP32 object (only when the stub archives exist)
-#    -lsysutil_np_stub provides sceNpDrmIsAvailable; -lfs_stub provides cellFsStat / cellFsOpen.
-# ----------------------------------------------------------------
-libdir="$sdk/ppu/lib"
-if [ -f "$libdir/sysutil_np_stub.a" ] && [ -f "$libdir/fs_stub.a" ]; then
-    "$CC" -x c -std=gnu99 $ovinc -Wall -Wextra -Werror \
-          -c "$ref" -o "$ov/link.o" 2> "$ov/e"
-    rc=$?
-    if [ $rc -ne 0 ]; then
-        echo "FAIL(ok) compile for link"; sed -n '1,14p' "$ov/e" 2>/dev/null; fail=1
-    else
-        "$CC" "$ov/link.o" -O2 -mcpu=cell -L"$libdir" -lsysutil_np_stub -lfs_stub \
-              -o "$ov/link.bin" 2> "$ov/e"
-        rc=$?
-        if [ $rc -ne 0 ]; then
-            echo "FAIL(link)  link with stubs"; sed -n '1,14p' "$ov/e" 2>/dev/null; fail=1
-        else
-            echo "link OK"
-        fi
-    fi
+# The link needs the stub archives of an installed SDK; a toolchain alone
+# (CI without the SDK build) checks the header only.
+if [ ! -f "$sdk/ppu/lib/libsysutil_np_stub.a" ] || [ ! -f "$sdk/ppu/lib/libfs_stub.a" ]; then
+    echo "np-drm-inline: SKIP link and self-check (no stub archives under $sdk/ppu/lib)"
+    [ $status -eq 0 ] && echo "PASS: np-drm-inline-test"
+    exit $status
+fi
+if "$cc" -std=gnu99 -I"$work/ov" -I"$sdk/ppu/include" -c "$src" -o "$work/l.o" 2>"$work/l.err" &&
+   "$cc" "$work/l.o" -o "$work/l.elf" -L"$sdk/ppu/lib" $LIBS 2>>"$work/l.err"; then
+    echo "np-drm-inline: ok   link: cellFsStat, sceNpDrmIsAvailable and cellFsOpen resolve"
 else
-    echo "SKIP link: sysutil_np_stub.a or fs_stub.a not in $libdir/"
+    echo "np-drm-inline: FAIL link"; grep -E "undefined|error" "$work/l.err" | sed 's/^/    /' | head -10
+    status=1
 fi
 
-# ----------------------------------------------------------------
-# 3) Self-check: a bad copy of the inline header (cellFsOpen misspelled)
-#    must fail to compile. The bad TU CALLS sceNpDrmOpen so the inline body
-#    is really instantiated and the (now misspelled) cellFsOpeX reference is
-#    emitted - an undeclared symbol under -Werror -Wimplicit-function-declaration.
-#    This proves the body is compiled rather than silently dropped.
-# ----------------------------------------------------------------
-mkdir -p "$ovb/np"
-sed 's/cellFsOpen/cellFsOpeX/g' "$inc/np/drm_inline.h" > "$ovb/np/drm_inline.h"
-printf '%s\n' '#include <np/drm_inline.h>' 'int bad_probe(const char *p, int f)' '{' 'int fd; return sceNpDrmOpen(0, p, f, &fd, 0, 0);' '}' > "$ovb/bad.c"
-run_bad  "self-check: misspelled cellFsOpen breaks the build" \
-    "$CC" -x c -std=gnu99 -I"$ovb" -I"$sdk/ppu/include" -Wall -Wextra -Werror -c "$ovb/bad.c" -o "$ovb/bad.o"
-
-if [ "$fail" -ne 0 ]; then
-    echo "FAIL: one or more checks failed" >&2
-    exit 1
+# Self-check: misspell cellFsOpen in a copy of the header; the body then
+# calls an undeclared function, which -Werror refuses.
+mkdir -p "$work/bad"; cp -r "$work/ov/." "$work/bad/"
+sed 's/cellFsOpen(/cellFsOpeX(/' "$inc/np/drm_inline.h" > "$work/bad/np/drm_inline.h"
+if cmp -s "$inc/np/drm_inline.h" "$work/bad/np/drm_inline.h"; then
+    echo "np-drm-inline: FAIL self-check could not plant the misspelling"; status=1
+elif ! "$cc" -std=gnu99 -Wall -Wextra -Werror -I"$work/bad" -I"$sdk/ppu/include" -c "$src" -o "$work/b.o" > "$work/b.err" 2>&1 &&
+     grep -q "cellFsOpeX" "$work/b.err"; then
+    echo "np-drm-inline: ok   self-check: a misspelled call in the body fails the build"
+else
+    echo "np-drm-inline: FAIL self-check: the misspelled call was not caught"; status=1
 fi
-echo "PASS: 6 matrix compiles + link (if stubs) + self-check"
+
+[ $status -eq 0 ] && echo "PASS: np-drm-inline-test"
+exit $status

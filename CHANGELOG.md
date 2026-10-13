@@ -18,12 +18,9 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
-- **`<np/drm_inline.h>` adds `sceNpDrmOpen`.** A `static inline` shim over
-  `<cell/np/drm.h>` that opens a DRM-protected file: it stats the path and
-  bails only on `CELL_FS_ERROR_ENOENT`, asks `sceNpDrmIsAvailable` and
-  returns any non-`CELL_OK` result unchanged, then opens with `cellFsOpen`
-  using an `SceNpDrmOpenArg` that carries `SCE_NP_DRM_OPEN_FLAG`. Its last
-  two parameters are present for call compatibility only.
+- **`sceNpDrmOpen`.**  New `<np/drm_inline.h>` provides `sceNpDrmOpen`,
+  which checks that NP DRM content is available to the licensee key and
+  opens it as DRM content with `cellFsOpen`.
 
 ### Fixed
 
