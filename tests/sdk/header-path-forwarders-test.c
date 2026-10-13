@@ -55,23 +55,23 @@ typedef int32_t cell_kb_read_fp(uint32_t, CellKbData *);
 typedef int32_t cell_mouse_info_fp(CellMouseInfo *);
 
 /* one type reference per sync/rtc/ssl forwarder (sizeof needs no body) */
-static volatile size_t __pin_cell_sync_barrier = sizeof(CellSyncBarrier);
-static volatile size_t __pin_cell_sync_mutex   = sizeof(CellSyncMutex);
-static volatile size_t __pin_cell_sync_rwm     = sizeof(CellSyncRwm);
-static volatile size_t __pin_cell_sync_queue   = sizeof(CellSyncQueue);
-static volatile size_t __pin_cell_sync_lfqueue = sizeof(CellSyncLFQueue);
-static volatile size_t __pin_cell_rtc_tick     = sizeof(CellRtcTick);
+static volatile size_t pin_cell_sync_barrier = sizeof(CellSyncBarrier);
+static volatile size_t pin_cell_sync_mutex   = sizeof(CellSyncMutex);
+static volatile size_t pin_cell_sync_rwm     = sizeof(CellSyncRwm);
+static volatile size_t pin_cell_sync_queue   = sizeof(CellSyncQueue);
+static volatile size_t pin_cell_sync_lfqueue = sizeof(CellSyncLFQueue);
+static volatile size_t pin_cell_rtc_tick     = sizeof(CellRtcTick);
 
 /* one function reference via a function-pointer of the right shape */
-static volatile cell_sync_mutex_fp    *p_cell_sync_mutex   = &cellSyncMutexInitialize;
-static volatile cell_sync_rwm_fp      *p_cell_sync_rwm     = &cellSyncRwmRead;
-static volatile cell_sync_lfqueue_fp  *p_cell_sync_lfqueue = &cellSyncLFQueueClear;
-static volatile cell_rtc_tick_fp      *p_cell_rtc_tick     = &cellRtcGetCurrentTick;
-static volatile cell_ssl_init_fp      *p_cell_ssl_init     = &cellSslInit;
-static volatile cell_kb_read_fp       *p_cell_kb_read      = &cellKbRead;
-static volatile cell_mouse_info_fp    *p_cell_mouse_info   = &cellMouseGetInfo;
-static volatile cell_sync_barrier_fp  *p_cell_sync_barrier = &cellSyncBarrierInitialize;
-static volatile cell_sync_queue_fp    *p_cell_sync_queue   = &cellSyncQueuePush;
+static cell_sync_mutex_fp *volatile p_cell_sync_mutex = &cellSyncMutexInitialize;
+static cell_sync_rwm_fp *volatile p_cell_sync_rwm = &cellSyncRwmRead;
+static cell_sync_lfqueue_fp *volatile p_cell_sync_lfqueue = &cellSyncLFQueueClear;
+static cell_rtc_tick_fp *volatile p_cell_rtc_tick = &cellRtcGetCurrentTick;
+static cell_ssl_init_fp *volatile p_cell_ssl_init = &cellSslInit;
+static cell_kb_read_fp *volatile p_cell_kb_read = &cellKbRead;
+static cell_mouse_info_fp *volatile p_cell_mouse_info = &cellMouseGetInfo;
+static cell_sync_barrier_fp *volatile p_cell_sync_barrier = &cellSyncBarrierInitialize;
+static cell_sync_queue_fp *volatile p_cell_sync_queue = &cellSyncQueuePush;
 
 /* one macro reference: the three error constructors + READ_FAILED */
 static volatile int cell_sync_error_again = (int)CELL_SYNC_ERROR_AGAIN;
@@ -83,9 +83,9 @@ static volatile int cell_ssl_read_failed  = CELL_SSL_ERROR_READ_FAILED;
 int main(void)
 {
     /* Reference the pins so -Werror -Wextra does not drop them. */
-    (void)__pin_cell_sync_barrier; (void)__pin_cell_sync_mutex;
-    (void)__pin_cell_sync_rwm;     (void)__pin_cell_sync_queue;
-    (void)__pin_cell_sync_lfqueue; (void)__pin_cell_rtc_tick;
+    (void)pin_cell_sync_barrier; (void)pin_cell_sync_mutex;
+    (void)pin_cell_sync_rwm;     (void)pin_cell_sync_queue;
+    (void)pin_cell_sync_lfqueue; (void)pin_cell_rtc_tick;
     (void)p_cell_sync_mutex;       (void)p_cell_sync_rwm;
     (void)p_cell_sync_lfqueue;     (void)p_cell_rtc_tick;
     (void)p_cell_ssl_init;         (void)p_cell_kb_read;
@@ -98,11 +98,11 @@ int main(void)
 }
 
 /* The four equalities the brief called out. */
-STATIC_ASSERT(CELL_ERROR_MAKE_SYNC_ERROR(0x01u) == CELL_SYNC_ERROR_AGAIN,
+STATIC_ASSERT(CELL_ERROR_MAKE_SYNC_ERROR(0x01u) == (int)CELL_SYNC_ERROR_AGAIN,
               "CELL_ERROR_MAKE_SYNC_ERROR(0x01) == CELL_SYNC_ERROR_AGAIN (0x80410101)");
-STATIC_ASSERT(CELL_RTC_MAKE_ERROR(1) == CELL_RTC_ERROR_NOT_INITIALIZED,
+STATIC_ASSERT(CELL_RTC_MAKE_ERROR(1) == (int)CELL_RTC_ERROR_NOT_INITIALIZED,
               "CELL_RTC_MAKE_ERROR(1) == CELL_RTC_ERROR_NOT_INITIALIZED (0x80010601)");
-STATIC_ASSERT(CELL_SSL_MAKE_ERROR(1) == CELL_SSL_ERROR_NOT_INITIALIZED,
+STATIC_ASSERT(CELL_SSL_MAKE_ERROR(1) == (int)CELL_SSL_ERROR_NOT_INITIALIZED,
               "CELL_SSL_MAKE_ERROR(1) == CELL_SSL_ERROR_NOT_INITIALIZED (0x80740001)");
-STATIC_ASSERT(CELL_SSL_ERROR_READ_FAILED == 0x80740009,
+STATIC_ASSERT(CELL_SSL_ERROR_READ_FAILED == (int)0x80740009,
               "CELL_SSL_ERROR_READ_FAILED == 0x80740009");

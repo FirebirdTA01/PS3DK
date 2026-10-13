@@ -38,6 +38,15 @@ sdk="${PS3DK:-}"; [ -n "$sdk" ] || { [ -d "$ps3dev/ps3dk/ppu/include" ] && sdk="
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 src="$root/tests/sdk/header-path-forwarders-test.c"
 status=0
+# Only the headers this change adds or edits go in front of the installed
+# SDK; the whole of sdk/include beside it would put two copies of the libc
+# wrapper headers on the path, which they refuse.
+for h in cell/sync.h cell/rtc.h cell/ssl/ssl.h \
+         cell/sync/error.h cell/sync/lfqueue.h cell/sync/mutex.h cell/sync/queue.h cell/sync/rwm.h \
+         cell/rtc/error.h cell/rtc/rtcsvc.h cell/ssl/error.h cell/keyboard/libkb.h cell/mouse/libmouse.h; do
+    mkdir -p "$work/ov/$(dirname "$h")"
+    cp "$inc/$h" "$work/ov/$h"
+done
 
 # matrix: c gnu99 / c c11 / c++ c++17, plain (ILP32) and -mlp64 (LP64)
 for lang in c c++; do
@@ -46,7 +55,7 @@ for lang in c c++; do
         for abi in "" -mlp64; do
             label="$lang $std ${abi:-ilp32}"
             if out=$("$cc" -x "$lang" "$std" $abi -Wall -Wextra -Werror \
-                    -I"$inc" -I"$sdk/ppu/include" -c "$src" -o "$work/p.o" 2>&1); then
+                    -I"$work/ov" -I"$sdk/ppu/include" -c "$src" -o "$work/p.o" 2>&1); then
                 echo "header-path-forwarders: ok   compile $label (all forwarders)"
             else
                 echo "header-path-forwarders: FAIL compile $label (all forwarders)"
@@ -72,7 +81,7 @@ for fwd in $forwarders; do
     probe="$work/fwd.c"
     printf '#include <%s>\nint main(void) { return 0; }\n' "$fwd" > "$probe"
     if out=$("$cc" -x c -std=gnu99 -Wall -Wextra -Werror \
-            -I"$inc" -I"$sdk/ppu/include" -c "$probe" -o "$work/fwd.o" 2>&1); then
+            -I"$work/ov" -I"$sdk/ppu/include" -c "$probe" -o "$work/fwd.o" 2>&1); then
         echo "header-path-forwarders: ok   lone forwarder $fwd"
     else
         echo "header-path-forwarders: FAIL lone forwarder $fwd"
@@ -91,21 +100,27 @@ printf '#ifndef PS3TC_CELL_SYNC_MUTEX_H\n#define PS3TC_CELL_SYNC_MUTEX_H\n#inclu
     > "$bad/cell/sync/mutex.h"
 
 sync_probe="$work/sync_probe.c"
-printf '#include <cell/sync/mutex.h>\nint *p = &cellSyncMutexInitialize; (void)p;\n' > "$sync_probe"
+printf '#include <cell/sync/mutex.h>\nvoid *probe(void) { return (void *)&cellSyncMutexInitialize; }\n' > "$sync_probe"
 rtc_probe="$work/rtc_probe.c"
-printf '#include <cell/sync/mutex.h>\nint *p = &cellRtcGetCurrentTick; (void)p;\n' > "$rtc_probe"
+printf '#include <cell/sync/mutex.h>\nvoid *probe(void) { return (void *)&cellRtcGetCurrentTick; }\n' > "$rtc_probe"
 
 sync_ok="no"; rtc_ok="no"
-"$cc" -x c -std=gnu99 -Wall -Wextra -Werror -I"$bad" -I"$inc" \
+"$cc" -x c -std=gnu99 -Wall -Wextra -Werror -I"$bad" -I"$work/ov" \
       -I"$sdk/ppu/include" -c "$sync_probe" -o "$work/sync.o" 2>/dev/null && sync_ok="yes"
-"$cc" -x c -std=gnu99 -Wall -Wextra -Werror -I"$bad" -I"$inc" \
+"$cc" -x c -std=gnu99 -Wall -Wextra -Werror -I"$bad" -I"$work/ov" \
       -I"$sdk/ppu/include" -c "$rtc_probe" -o "$work/rtc.o" 2>/dev/null && rtc_ok="yes"
 
+# Control: with the real forwarder the sync-surface TU builds, so its
+# failure above is the mis-point and nothing else.
+good_ok="no"
+"$cc" -x c -std=gnu99 -Wall -Wextra -Werror -I"$work/ov" \
+      -I"$sdk/ppu/include" -c "$sync_probe" -o "$work/good.o" 2>/dev/null && good_ok="yes"
+
 # Required split: the sync-surface TU fails to build, the rtc-surface TU builds.
-if [ "$sync_ok" = "no" ] && [ "$rtc_ok" = "yes" ]; then
+if [ "$good_ok" = "yes" ] && [ "$sync_ok" = "no" ] && [ "$rtc_ok" = "yes" ]; then
     echo "header-path-forwarders: ok   self-check: a forwarder pointed at an unrelated header is caught"
 else
-    echo "header-path-forwarders: FAIL self-check: forwarder mis-point (sync=$sync_ok rtc=$rtc_ok), want sync=no rtc=yes"
+    echo "header-path-forwarders: FAIL self-check: forwarder mis-point (control=$good_ok sync=$sync_ok rtc=$rtc_ok), want control=yes sync=no rtc=yes"
     status=1
 fi
 
