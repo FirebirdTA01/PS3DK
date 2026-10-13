@@ -10231,6 +10231,13 @@ private:
                         c.literal[l] = folded;
                         c.swizzle[l] = static_cast<uint8_t>(l);
                     }
+                    // A product of exactly 1 is the other operand: the
+                    // reference emits (c / 0.01) * 0.01 as a MOV of c.
+                    if (folded == 1.0f && p.fpScale == 0) {
+                        p.op = VOp::Mov;
+                        p.srcs[0] = p.srcs[static_cast<size_t>(1 - litSrc)];
+                        p.srcs[1] = VSrc{};
+                    }
                 }
                 if (!bcast)
                     for (VSrc& s : p.srcs) {
@@ -10509,9 +10516,18 @@ private:
     // control-flow node, an address write it reads through, or a rewrite of
     // a temp it reads.  The VP MAD rounds the product before the add, so
     // the value is the MUL + ADD value.
+    //
+    // FP (measured 2026-10-13): the fragment reference fuses too - `a * 1.5
+    // - 2.5` is one MADR with both literals in the instruction's one const
+    // block ({1.5, -2.5}.x / .y).  A fragment MAD may read one input register
+    // and one constant block: one uniform or literal operand, or two literal
+    // operands whose values fit one block (merged here).  The product is not
+    // saturated, scaled or precision-overridden, so the MAD rounds it before
+    // the add exactly as the MUL did.
     void fuseVertexMulAdd()
     {
-        if (profile_ != GeneralProfile::Vertex) return;
+        const bool fragment = profile_ == GeneralProfile::Fragment;
+        if (profile_ != GeneralProfile::Vertex && !fragment) return;
         auto& code = program_.instrs;
         const auto barrier = [](const VInstr& vi) {
             return vi.op == VOp::LoopBegin || vi.op == VOp::Brk || vi.op == VOp::LoopEnd ||
@@ -10549,6 +10565,11 @@ private:
                     if (mul.op != VOp::Mul || mul.sat || mul.predicate != 0 || mul.ccUpdate ||
                         (mul.dst.writemask & mask) != mask)
                         continue;
+                    if (fragment && (mul.fpScale != 0 || mul.fpPrecisionOverride != -1 ||
+                                     add.fpPrecisionOverride != -1 || add.predicate != 0 ||
+                                     add.ccUpdate || mul.dst.fp16 != add.dst.fp16 ||
+                                     mul.scalarSourceDemandMask != 0))
+                        continue;
                     bool blocked = false;
                     for (size_t m = j + 1; m < i && !blocked; ++m) {
                         const VInstr& mid = code[m];
@@ -10568,13 +10589,52 @@ private:
                         if (s->kind == VSrcKind::Input) inputs.insert(s->index);
                         if (s->kind == VSrcKind::Uniform || s->kind == VSrcKind::Literal) ++constants;
                     }
-                    if (inputs.size() > 1 || constants > 1) continue;
+                    if (inputs.size() > 1) continue;
                     VInstr mad = add;
                     mad.op = VOp::Mad;
                     mad.srcs[0] = mul.srcs[0];
                     mad.srcs[1] = mul.srcs[1];
                     mad.srcs[2] = other;
                     if (p.neg) mad.srcs[0].neg = !mad.srcs[0].neg;
+                    if (constants > 1) {
+                        // Fragment only: two literals share the one block.
+                        if (!fragment || constants != 2) continue;
+                        std::vector<VSrc*> lits;
+                        for (VSrc& s : mad.srcs)
+                            if (s.kind == VSrcKind::Literal) lits.push_back(&s);
+                        if (lits.size() != 2) continue;
+                        // The reference stores -2.5 in the block, not 2.5
+                        // under a negate: modifiers go into the values.
+                        for (VSrc* l : lits) {
+                            for (float& v : l->literal) {
+                                if (l->abs) v = std::fabs(v);
+                                if (l->neg) v = -v;
+                            }
+                            l->abs = false;
+                            l->neg = false;
+                        }
+                        std::vector<float> vals;
+                        const auto slot = [&](float v) -> int {
+                            for (size_t q = 0; q < vals.size(); ++q)
+                                if (std::memcmp(&vals[q], &v, sizeof v) == 0) return static_cast<int>(q);
+                            vals.push_back(v);
+                            return static_cast<int>(vals.size()) - 1;
+                        };
+                        std::array<std::array<int, 4>, 2> sw{};
+                        for (int n = 0; n < 2; ++n)
+                            for (int l = 0; l < 4; ++l)
+                                sw[n][l] = (mask & (1 << l)) ? slot(lits[n]->literal[lits[n]->swizzle[l] & 3]) : -1;
+                        if (vals.size() > 4) continue;
+                        std::array<float, 4> block = {0.0f, 0.0f, 0.0f, 0.0f};
+                        for (size_t q = 0; q < vals.size(); ++q) block[q] = vals[q];
+                        for (int n = 0; n < 2; ++n) {
+                            int first = 0;
+                            for (int l = 0; l < 4; ++l) if (sw[n][l] >= 0) { first = sw[n][l]; break; }
+                            lits[n]->literal = block;
+                            for (int l = 0; l < 4; ++l)
+                                lits[n]->swizzle[l] = static_cast<uint8_t>(sw[n][l] >= 0 ? sw[n][l] : first);
+                        }
+                    }
                     add = mad;
                     code.erase(code.begin() + static_cast<std::ptrdiff_t>(j));
                     changed = true;
@@ -10654,7 +10714,27 @@ private:
             // MOV R0 <- IN2; MUL o7 <- IN0, R0; n*p stages the position).
             const bool forceVpInputPreload =
                 profile_ == GeneralProfile::Vertex && inputs.size() > 1;
-            const bool needsInlineConstPreload = inlineConstPositions.size() > 1;
+            // Fragment: constant sources that read the same block (one uniform, or
+            // literals already merged into one 4-value block) are one block,
+            // not a conflict: a fused MAD reads {1.5, -2.5}.x and .y.
+            size_t distinctConstBlocks = 0;
+            for (size_t q = 0; q < inlineConstPositions.size(); ++q) {
+                const VSrc& c = vi.srcs[inlineConstPositions[q]];
+                bool seen = false;
+                for (size_t r = 0; r < q && !seen; ++r) {
+                    const VSrc& d = vi.srcs[inlineConstPositions[r]];
+                    if (c.kind == VSrcKind::Uniform && d.kind == VSrcKind::Uniform)
+                        seen = c.index == d.index;
+                    else if (c.kind == VSrcKind::Literal && d.kind == VSrcKind::Literal)
+                        seen = std::memcmp(c.literal.data(), d.literal.data(), sizeof(c.literal)) == 0;
+                }
+                if (!seen) ++distinctConstBlocks;
+            }
+            // Vertex: the reference stages the second read even of one same
+            // constant (MOV r0, c[A0.x + 464]; MAD ..., r0, c[A0.x + 464]),
+            // so a vertex program counts positions as before.
+            const bool needsInlineConstPreload = profile_ == GeneralProfile::Vertex
+                ? inlineConstPositions.size() > 1 : distinctConstBlocks > 1;
             if (!forceFpInputPreload && !forceVpInputPreload && !needsInlineConstPreload) {
                 shaped.push_back(vi);
                 continue;
@@ -10872,7 +10952,7 @@ private:
                 if (src.kind != VSrcKind::Uniform &&
                     src.kind != VSrcKind::Literal)
                     continue;
-                if (static_cast<int>(srcIndex) == keepInlinePosition)
+                if (static_cast<int>(srcIndex) == keepInlinePosition || !needsInlineConstPreload)
                     continue;
 
                 VInstr mov;
@@ -12655,6 +12735,39 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         // after it, so the two would drift apart.
         for (VSrc& src : srcs)
             packLiteralBlock(src);
+        // Two literal operands of one instruction share its one block when
+        // their values fit four slots (a fused MAD's {1.5, -2.5}.x / .y, as
+        // the reference packs it): repack them jointly, first operand's
+        // values first.  More than four stays as it is and is refused below.
+        {
+            std::vector<VSrc*> lits;
+            for (VSrc& src : srcs)
+                if (src.kind == VSrcKind::Literal) lits.push_back(&src);
+            if (lits.size() > 1) {
+                std::array<float, 4> packed = {0.0f, 0.0f, 0.0f, 0.0f};
+                unsigned distinct = 0;
+                bool fits = true;
+                std::vector<std::array<uint8_t, 4>> sw(lits.size());
+                for (size_t n = 0; n < lits.size() && fits; ++n)
+                    for (int lane = 0; lane < 4 && fits; ++lane) {
+                        const float v = lits[n]->literal[lits[n]->swizzle[lane] & 3];
+                        unsigned slot = distinct;
+                        for (unsigned k = 0; k < distinct; ++k)
+                            if (packed[k] == v) { slot = k; break; }
+                        if (slot == distinct) {
+                            if (distinct == 4) { fits = false; break; }
+                            packed[distinct++] = v;
+                        }
+                        sw[n][lane] = static_cast<uint8_t>(slot);
+                    }
+                if (fits)
+                    for (size_t n = 0; n < lits.size(); ++n) {
+                        lits[n]->literal = packed;
+                        lits[n]->swizzle = sw[n];
+                        lits[n]->literalLanes = static_cast<uint8_t>(distinct);
+                    }
+            }
+        }
         auto isInlineConst = [](const VSrc& src) {
             return src.kind == VSrcKind::Uniform ||
                    src.kind == VSrcKind::Literal;

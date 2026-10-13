@@ -45,6 +45,8 @@ ROWS = {
     'lit_x5':  ('float4 t = a * 3.0; return t * 5.0; }', 'MUL', 0, lambda a, b, c: [f32(x * 15) for x in a]),
     'lit_q':   ('float4 t = a * 0.1; return t * 0.1; }', 'MUL', 0, None),
     'lit_h':   ('float4 t = a * 3.0; return t * 0.5; }', 'MUL', 0, lambda a, b, c: [f32(x * 1.5) for x in a]),
+    # (a / 0.01) * 0.01: the factors fold to exactly 1, so the product is a (the reference's MOV).
+    'lit_one': ('float4 t = a / 0.01; return t * 0.01; }', 'MOV', 0, lambda a, b, c: list(a)),
 }
 # The folded literal word of the last instruction, measured on the reference.
 LITS = {'lit_x2': 0x40c00000, 'lit_x5': 0x41700000, 'lit_q': 0x3c23d70b, 'lit_h': 0x3fc00000}

@@ -399,8 +399,10 @@ expect fp_block_then_only_param_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.xyzw
 forbid fp_block_then_only_param_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
 joined_none fp_block_then_only_param_f
 accept fp_block_use_before_decl_f sce_fp_rsx "a use BEFORE the block-local's declaration names the file-scope G (no pre-scan binding; reference 2*(p+G))"
-expect fp_block_use_before_decl_f '^[0-9]+ ADD dst=R[0-9]+ mask=xyzw .* s0=c[0-9]+\.xyzw s1=R[0-9]+\.xyzw'
-count  fp_block_use_before_decl_f '^[0-9]+ MUL ' 1
+# Both early reads of G are the uniform (an ADD reading it; G + G once the
+# 2p product fuses into a MAD).
+expect fp_block_use_before_decl_f '^[0-9]+ ADD dst=R[0-9]+ mask=xyzw .* s0=c[0-9]+\.xyzw s1=(R|c)[0-9]+\.xyzw'
+count  fp_block_use_before_decl_f '^[0-9]+ (MUL|MAD) ' 1
 accept fp_block_field_write_f sce_fp_rsx "an outer struct FIELD written inside a block survives (a binding site with no DeclStmt)"
 expect fp_block_field_write_f '^[0-9]+ MAD dst=R[0-9]+ mask=xyzw .* s1=c[0-9]+\.xxxx s2=R[0-9]+\.xyzw'
 accept fp_block_loop_local_f sce_fp_rsx "a per-trip loop local does not carry past the loop: the outer t is returned (byte-identical to the reference)"
