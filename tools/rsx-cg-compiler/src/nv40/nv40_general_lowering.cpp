@@ -9808,7 +9808,9 @@ private:
     // the copy with no loop node between, the source is not rewritten
     // before a reader, and each reader's lanes fall inside the copy's
     // mask.  An input or constant source is propagated only where the
-    // reader keeps one input register and one constant.
+    // reader keeps one input register and one constant.  An abs copy folds
+    // too: the reference reads |c[n]| in place (lerp's MUL r0, r0, |c[465]|),
+    // which also keeps a later MAD to its one-constant rule.
     void propagateVertexCopies()
     {
         if (profile_ != GeneralProfile::Vertex) return;
@@ -9830,7 +9832,7 @@ private:
                 const VSrc s = mov.srcs[0];
                 const int d = mov.dst.index;
                 const bool temp = s.kind == VSrcKind::Temp;
-                if (s.kind == VSrcKind::None || s.abs || s.relative || (temp && s.index == d))
+                if (s.kind == VSrcKind::None || s.relative || (temp && s.index == d))
                     continue;
                 bool ok = true;
                 std::vector<std::pair<size_t, size_t>> uses;
@@ -9872,7 +9874,7 @@ private:
                     VSrc& r = code[k].srcs[n];
                     const auto swz = r.swizzle;
                     const bool neg = r.abs ? r.neg : (r.neg != s.neg);
-                    const bool abs = r.abs;
+                    const bool abs = r.abs || s.abs;
                     r = s;
                     for (int l = 0; l < 4; ++l) r.swizzle[l] = s.swizzle[swz[l]];
                     r.neg = neg;
