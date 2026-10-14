@@ -16,6 +16,12 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Changed
+
+- **PPU GCC: patch 0050 retired.**  The DImode pointer model (0059) already
+  gives the counted-loop counter the full register width, so the separate
+  doloop fix is gone.  Generated code is unchanged in ILP32 and LP64.
+
 ## [v0.24.0] — 2026-10-13
 
 ### Added

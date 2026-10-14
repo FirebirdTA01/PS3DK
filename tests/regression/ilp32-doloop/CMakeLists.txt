@@ -13,7 +13,8 @@ endif()
 include(ps3-self)
 
 # doloop.c is its own unit so digits() keeps a trip count the compiler cannot
-# fold, built from a zero-extended load (GCC patch 0050).
+# fold, built from a zero-extended load (GCC patch 0050; the pointer model of
+# 0059 covers it since 0050 was retired).
 add_executable(ilp32-doloop main.c doloop.c)
 target_compile_options(ilp32-doloop PRIVATE -O2 -Wall)
 ps3_add_self(ilp32-doloop)

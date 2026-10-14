@@ -2,7 +2,8 @@
    fault): the trip count is built from a negative int loaded with a
    zero-extending lwz and added at full register width.  Under ILP32 the
    compiler used to move that 32-bit count straight into the 64-bit CTR,
-   bit 32 set, and the loop ran about 4G times (GCC patch 0050).  Kept in
+   bit 32 set, and the loop ran about 4G times (fixed by GCC patch 0050,
+   retired once 0059 made Pmode DImode).  Kept in
    its own unit so the caller's constants do not fold the count.  */
 char *
 digits (char *s, const int *kp, int nd, double d)

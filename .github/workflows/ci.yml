@@ -473,7 +473,8 @@ jobs:
         run: bash tests/sdk/ilp32-ivspill-codegen-test.sh
 
       # The red control always runs; with a PPU compiler, every counted loop's
-      # CTR count must have a defined upper half (GCC patch 0050).
+      # CTR count must have a defined upper half (fixed by GCC patch 0050,
+      # retired once 0059 made Pmode DImode).
       - name: Test ILP32 counted-loop CTR counts
         run: bash tests/sdk/ilp32-doloop-codegen-test.sh
 

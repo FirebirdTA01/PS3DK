@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Codegen guard for GCC patch 0050: CTR is 64 bits wide and bdnz tests all of
+# Codegen guard for the counted-loop fix of GCC patch 0050, carried by 0059's
+# DImode Pmode since 0050 was retired: CTR is 64 bits wide and bdnz tests all of
 # it, so a counted loop must not load CTR from a 32-bit value whose upper half
 # was never cleared.  Under ILP32 the compiler used to move an SImode trip
 # count straight into CTR; a count built from a zero-extended negative int
