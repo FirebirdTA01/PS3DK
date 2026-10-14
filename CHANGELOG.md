@@ -18,6 +18,11 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **The stack protector works in the default data model.**
+  `-fstack-protector`, `-fstack-protector-strong` and `-fstack-protector-all`
+  stopped every protected ILP32 function with "unrecognizable insn"; the
+  guard and canary are now handled at pointer width.  LP64 code is
+  unchanged.
 - **`-mlp64` with `-m32` is refused.**  The PPU compiler accepted the
   combination and produced 8-byte pointers and longs without the 64-bit
   mode (some loops failed to compile).  It now stops with
