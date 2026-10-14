@@ -65,6 +65,7 @@ Port map so far:
 | 0029 | **retained**: without it a direct pointer-to-64-bit conversion sign-extends under ILP32 (a semantic fix in `convert.cc`, not a Pmode workaround); guarded by `tests/sdk/ilp32-pointer-widen-codegen-test.sh` and the `ilp32-ptr-widen` row; a candidate for upstream submission |
 | 0030 | **retained**: without it a signed `int` offset added to an ILP32 pointer is zero-extended (`lwz` where `lwa` belongs), and the vcall offset in virtual-base thunks likewise (the `ilp32-thunk-vcall` guard fails) |
 | 0032, 0055 | retired together: both act only while Pmode is narrower than a word (0055 needs 0032's pattern), which 0059 ended; generated code identical, and `tests/abi/ppu-relative-switch-check.py` now expects the sign-extended dispatch in both data models |
+| 0012, 0015 | retired together: the `Pptr` iterator selects the same modes as `P` once Pmode follows `TARGET_64BIT` (0059); 0057's two `rs6000.md` context lines are refreshed to the upstream `P` spelling |
 | 0033 | retired (0059 canonicalises a pointer taken from a by-value aggregate packed in one GPR); guarded by `tests/sdk/ilp32-packed-arg-codegen-test.sh` |
 
 Exit: full release gate; every ILP32 regression row and codegen test passes

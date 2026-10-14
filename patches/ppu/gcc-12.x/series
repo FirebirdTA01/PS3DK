@@ -10,10 +10,8 @@
 0009-rs6000-ps3-lp64-opt.patch
 0010-rs6000-cell64lv2-opt.patch
 0011-rs6000-t-cell64lv2-multilib.patch
-0012-rs6000-md-pmode-iterator.patch
 0013-rs6000-logue-pmode-stack.patch
 0014-rs6000-md-fused-arith-and-word-mode.patch
-0015-rs6000-md-deferred-tls-mov-save-restore.patch
 0016-rs6000-cc-tls-pmode-driven.patch
 0017-rs6000-allocate-stack-pmode-convert.patch
 0018-rs6000-stack-size-mode-pmode.patch
