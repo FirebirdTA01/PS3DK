@@ -115,13 +115,27 @@ if [[ -n "$HOST_TRIPLE" ]]; then
     say "Cross-build: host=$HOST_TRIPLE build=$BUILD_TRIPLE prefix=$PREFIX"
 fi
 
+# require_gcc_major <prefix> <role>: an installed $TARGET-gcc under <prefix>
+# must report the selected major version.  A compiler that cannot be run or
+# answers with something other than a version is refused too: an existing
+# installation of unknown version is not an empty prefix.
+require_gcc_major() {
+    local gcc="$1/bin/$TARGET-gcc" ver rc
+    [[ -e "$gcc" || -L "$gcc" ]] || return 0
+    rc=0
+    ver="$("$gcc" -dumpfullversion 2>/dev/null)" || rc=$?
+    [[ $rc -eq 0 && "$ver" =~ ^[0-9]+(\.[0-9]+)*$ ]] \
+        || die "$2 $gcc did not report a GCC version (exit $rc, output '$ver'); refusing to build GCC $GCC_VER there."
+    [[ "${ver%%.*}" == "${GCC_VER%%.*}" ]] \
+        || die "$2 $1 holds GCC $ver; refusing to build GCC $GCC_VER with it. Point PS3DEV at a separate prefix."
+}
+
 # Never build one GCC major version over another (stage 2: GCC 16 is built
-# beside 12.4, not over it).
-if [[ -x "$PREFIX/bin/$TARGET-gcc" ]]; then
-    installed_ver="$("$PREFIX/bin/$TARGET-gcc" -dumpfullversion 2>/dev/null || true)"
-    if [[ -n "$installed_ver" && "${installed_ver%%.*}" != "${GCC_VER%%.*}" ]]; then
-        die "$PREFIX holds GCC $installed_ver; refusing to build GCC $GCC_VER over it. Point PS3DEV at a separate prefix."
-    fi
+# beside 12.4, not over it).  A cross build also copies the native prefix's
+# target libraries into its package, so the native compiler must match too.
+require_gcc_major "$PREFIX" "prefix"
+if [[ -n "$HOST_TRIPLE" ]]; then
+    require_gcc_major "$NATIVE_PREFIX" "native prefix"
 fi
 
 if [[ -n "$PRINT_CONFIG" ]]; then
