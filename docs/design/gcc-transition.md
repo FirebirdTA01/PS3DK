@@ -49,8 +49,8 @@ no longer reach the address unit, whichever path produced it.
 Stage 0 landed the model (0059, retiring 0049) with its follow-ups 0060 to 0065:
 TOC entry and slot widths (0060, 0062, 0063, 0065) and FP memory constraints
 (0061, 0064).  It now retires every remaining workaround the new model
-subsumes, one patch at a time, each removal proven by its regression row and a codegen A/B against the
-full series: 0050, 0031, 0037, 0029, 0030, 0032, 0033, 0055, 0012 and 0015.
+subsumes, one patch at a time, each removal proven by its regression row and
+a codegen A/B against the full series: 0050, 0031, 0037, 0029, 0030, 0032, 0033, 0055, 0012 and 0015.
 A patch the model does not subsume stays and is carried into the port.
 Doing this before the version change matters for two reasons: the port carries
 the small model instead of the workaround stack, and the model change is
