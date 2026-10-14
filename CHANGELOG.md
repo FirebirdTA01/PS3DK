@@ -18,6 +18,16 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **The SDK's own build reaches libc through its wrapper headers.**  The
+  `<string.h>`, `<stdio.h>`, `<stdlib.h>`, `<math.h>`, `<time.h>`,
+  `<pthread.h>`, `<sys/types.h>`, `<sys/stat.h>` and `<sys/cdefs.h>` wrappers
+  now forward to libc on every inclusion, so a second copy on the include path
+  (source and installed, as the SDK build has) chains on instead of hiding
+  libc.  libPSGL no longer compiles with implicit declarations of `strncmp`,
+  `memcpy`, `printf` and the float math functions, which GCC 14 rejects, and
+  `-D__PS3DK_SDK_SELFBUILD__` is no longer needed or used.
+- **`closesocket` is declared** in `<sys/socket.h>`, beside `socketclose`;
+  librt already defined it.
 - **The stack protector works in the default data model.**
   `-fstack-protector`, `-fstack-protector-strong` and `-fstack-protector-all`
   stopped every protected ILP32 function with "unrecognizable insn"; the
