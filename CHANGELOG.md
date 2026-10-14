@@ -27,8 +27,9 @@ The version stamped into builds is generated from the most recent
 
 - **PPU GCC: patches 0031 and 0037 retired.**  The DImode pointer model
   (0059) already saves callee-saved registers, the link-register slot and
-  the EH data registers at full width.  Generated code and the libgcc and
-  libstdc++ objects are unchanged.
+  the EH data registers at full width.  Generated code is unchanged in the
+  tested ILP32 and LP64 cases; runtime-object comparisons exclude debug data
+  and account for embedded source-path differences.
 - **PPU GCC: patch 0050 retired.**  The DImode pointer model (0059) already
   gives the counted-loop counter the full register width, so the separate
   doloop fix is gone.  Generated code is unchanged in ILP32 and LP64.
