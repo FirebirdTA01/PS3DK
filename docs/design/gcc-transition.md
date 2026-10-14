@@ -32,9 +32,10 @@ then has one suspect.  Each stage lands only after the full release gate
 
 ## Stage 0: the pointer model on GCC 12.4
 
-Under ILP32, `Pmode` is SImode today (patch 0005), so GCC treats a pointer's
-upper 32 bits as don't-care, while the PPU forms effective addresses from all
-64 bits.  Twenty-three patches work around the consequences one bug at a time:
+Under ILP32, `Pmode` was SImode until v0.23.0 (patch 0005), so GCC treated a
+pointer's upper 32 bits as don't-care, while the PPU forms effective addresses
+from all 64 bits.  Twenty-three patches worked around the consequences one bug
+at a time:
 the `Pptr` iterator rewrites of `rs6000.md` (0012, 0015, about 900 diff lines),
 middle-end canonicalisation in `convert.cc` and `expr.cc` (0029, 0030, 0032,
 0033, 0055), DImode saves of callee-saved, LR and EH registers (0031, 0037),
@@ -45,9 +46,10 @@ v0.23.0) changes the model instead: `Pmode` DImode, `ptr_mode` SImode, `POINTERS
 Pointers are zero-extended where they become addresses, so a set bit 32 can
 no longer reach the address unit, whichever path produced it.
 
-Stage 0 landed the model (0059, with the TOC follow-ups 0060 to 0065, retiring 0049),
-then retires every remaining workaround the new model subsumes, one patch at a
-time, each removal proven by its regression row and a codegen A/B against the
+Stage 0 landed the model (0059, retiring 0049) with its follow-ups 0060 to 0065:
+TOC entry and slot widths (0060, 0062, 0063, 0065) and FP memory constraints
+(0061, 0064).  It now retires every remaining workaround the new model
+subsumes, one patch at a time, each removal proven by its regression row and a codegen A/B against the
 full series: 0050, 0031, 0037, 0029, 0030, 0032, 0033, 0055, 0012 and 0015.
 A patch the model does not subsume stays and is carried into the port.
 Doing this before the version change matters for two reasons: the port carries
@@ -69,10 +71,16 @@ standard, where `bool`, `true` and `false` are keywords and `f()` means
 
 Build the newlib glue, PSL1GHT, the SDK libraries, portlibs and every sample
 on 12.4 with those warnings as errors and with `-std=gnu2x`, and fix what
-fails.  The SDK headers must also compile under `-std=gnu23` in user code.
-This lands as ordinary source fixes in normal releases.
+fails.  This lands as ordinary source fixes in normal releases.
 
-Exit: the full SDK and sample build is clean under the flags above.
+This is preparation only.  GCC 12.4's `-std=gnu2x` predates the C23 changes
+that matter here: `bool`, `true` and `false` became keywords and unprototyped
+`f()` came to mean `f(void)` in GCC 13, and GCC 15 made `gnu23` the default
+(12.4 does not accept `-std=gnu23`).  So `typedef int bool;` and calling an
+`int f();` declaration with arguments still pass this check.  Actual C23
+compatibility is validated in stage 2, with the target compiler.
+
+Exit: the full SDK and sample build is clean under the flags above on 12.4.
 
 ## Stage 2: PPU on GCC 16
 
@@ -85,7 +93,7 @@ unnecessary) or dropped (with the reason).
 |---|---|---|
 | Target recognition, specs, cell64lv2 headers, multilibs | about 20 (most new files) | low.  `dbxelf.h` is gone since GCC 13 and leaves the tm_file lists |
 | libgcc, libstdc++ crossconfig | a few | low to medium |
-| Pointer model (0005, 0051, the survivors of stage 0) | as few as stage 0 leaves | high: rs6000 address legitimisation has been reworked several times since 12 |
+| Pointer model (0005, 0059 and its follow-ups 0060 to 0065, the survivors of stage 0) | as few as stage 0 leaves | high: rs6000 address legitimisation has been reworked several times since 12 |
 | Remaining middle-end changes (`convert.cc`, `expr.cc`) | whatever stage 0 cannot retire | high: shared code, so every one is a candidate for an upstream submission or a target hook instead |
 | Codegen fixes (thunks, TLS models, TOC groups, tablejump) | about 6 | medium: each has its own regression test |
 
@@ -106,6 +114,10 @@ Checks beyond the release gate:
   run on 64-bit registers (fixed in v0.16.4).  No carry pattern is widened in
   the 16 port, and the `ppu-compare-carry` rows pass in both data models at
   -O1 to -O3.
+- **C23 default.**  The SDK libraries, newlib glue, PSL1GHT, portlibs and every
+  sample build with the 16-based compiler at its default `-std=gnu23`, and every
+  public SDK header compiles alone in a `gnu23` C translation unit.  This is
+  the real check of what stage 1 prepared.
 - **DWARF.**  GCC 11 and later default to DWARF 5.  GDB 14 reads it; RPCS3 and
   other consumers need checking, or the specs pin `-gdwarf-4`.
 
