@@ -16,6 +16,13 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- **`-mlp64` with `-m32` is refused.**  The PPU compiler accepted the
+  combination and produced 8-byte pointers and longs without the 64-bit
+  mode (some loops failed to compile).  It now stops with
+  "'-mlp64' requires the 64-bit mode"; a later `-m64` still selects LP64.
+
 ### Changed
 
 - **PPU GCC: patch 0050 retired.**  The DImode pointer model (0059) already

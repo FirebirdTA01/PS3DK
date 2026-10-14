@@ -1,0 +1,27 @@
+rs6000: refuse -mlp64 without the 64-bit mode
+
+-mlp64 selects 8-byte pointers and longs, which the cell64lv2 ABI places
+in 64-bit registers.  The driver accepted -mlp64 together with -m32 (in
+either order): the result kept __LP64__ and 8-byte pointer and long types
+but dropped _ARCH_PPC64 and the 64-bit mode, a state the data-model
+contract does not define.  Check the final options instead of the command
+line, so a later -m64 (e.g. -mlp64 -m32 -m64) still yields valid LP64.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -3691,6 +3691,15 @@
+   if (!OPTION_SET_P (flag_variable_expansion_in_unroller))
+     flag_variable_expansion_in_unroller = 1;
+ 
++  /* The LP64 data model puts 8-byte pointers and longs in 64-bit
++     registers; it has no meaning without the 64-bit mode.  Judge the
++     final options, so -mlp64 -m32 -m64 stays valid while -mlp64 -m32
++     (in either order) is refused instead of compiling with LP64 types
++     and no _ARCH_PPC64.  */
++  if (TARGET_LP64 && !TARGET_64BIT)
++    error ("%qs requires the 64-bit mode; it cannot be combined with %qs",
++	   "-mlp64", "-m32");
++
+   /* Set the pointer size.  */
+   /* Pointer width follows the data model selected by -mlp64; the 64-bit
+      ISA is always available regardless. */
