@@ -12,9 +12,10 @@ endif()
 
 include(ps3-self)
 
-# ie.c and ie-o0.c read def.c's thread-locals initial-exec (GCC patch
-# 0057).  --no-tls-optimize keeps the GOT TP-offset load instead of relaxing
-# it to local-exec, so the row exercises the slot load itself.
+# ie.c and ie-o0.c read def.c's thread-locals initial-exec (formerly
+# GCC patch 0057, now the DImode Pmode of 0059).  --no-tls-optimize keeps
+# the GOT TP-offset load instead of relaxing it to local-exec, so the row
+# exercises the slot load itself.
 add_executable(tls-ie main.c def.c ie.c ie-o0.c)
 target_compile_options(tls-ie PRIVATE -O2 -Wall)
 set_source_files_properties(ie-o0.c PROPERTIES COMPILE_OPTIONS -O0)

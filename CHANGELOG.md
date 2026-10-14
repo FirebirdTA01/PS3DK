@@ -34,6 +34,12 @@ The version stamped into builds is generated from the most recent
   `rs6000.md` selects the same modes as upstream's `P` under the DImode
   pointer model (0059); about 900 lines of pattern rewrites are gone.
   Generated code is unchanged in the tested ILP32 and LP64 cases.
+- **PPU GCC: patches 0013, 0016-0019, 0028 and 0057 retired.**  With the
+  DImode pointer model (0059) and `-mlp64` tied to the 64-bit mode (0066),
+  Pmode is DImode exactly when the 64-bit mode is on, so their
+  pointer-mode tests select the same code as upstream's 64-bit tests, and
+  0057's 32-bit-Pmode TLS sequences can no longer be reached.  Generated
+  code is unchanged in the tested ILP32 and LP64 cases.
 - **PPU GCC: patches 0032 and 0055 retired.**  Both acted only while the
   pointer mode was narrower than a register; the DImode pointer model
   (0059) ended that, and generated code is unchanged in the tested ILP32

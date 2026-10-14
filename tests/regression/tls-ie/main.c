@@ -1,4 +1,5 @@
-/* Runtime half of the initial-exec TLS regression (GCC patch 0057).
+/* Runtime half of the initial-exec TLS regression (formerly GCC patch
+   0057, now the DImode Pmode of 0059).
    ie.c and ie-o0.c reach def.c's thread-locals initial-exec: ld of the
    8-byte GOT TP-offset slot, then add of r13.  The SELF is linked with
    --no-tls-optimize so the slot load runs instead of being relaxed to

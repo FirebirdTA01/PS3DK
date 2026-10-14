@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Codegen guard for GCC patch 0057: every PPU TLS access model compiles to
-# the right relocations, or is refused with a clean diagnostic, in both data
-# models.  Before 0057 the ILP32 (default) compiler hit "unrecognizable insn"
-# / an ICE in extract_insn on initial-exec, the model an extern __thread
-# variable gets in non-PIC code (and what global- and local-dynamic become
-# without -fPIC); also on -fPIC local-dynamic and -mtls-size=16 local-exec.
+# Codegen guard for PPU thread-local storage: every TLS access model compiles
+# to the right relocations, or is refused with a clean diagnostic, in both
+# data models.  GCC patch 0057 fixed the ILP32 shapes while Pmode was SImode;
+# the DImode Pmode of 0059 covers them now (0057 retired).  Before 0057 the
+# ILP32 (default) compiler hit "unrecognizable insn" / an ICE in extract_insn
+# on initial-exec, the model an extern __thread variable gets in non-PIC code
+# (and what global- and local-dynamic become without -fPIC); also on -fPIC
+# local-dynamic and -mtls-size=16 local-exec.
 #
 # Each row compiles a small TU with -c and reads `objdump -dr`:
 #   IE    R_PPC64_GOT_TPREL16_HA/_LO_DS + R_PPC64_TLS (add with r13)
@@ -128,7 +130,7 @@ cat > "$work/le-green.d" <<'EOF'
    8:	80 69 00 00 	lwz     r3,0(r9)
   10:	4e 80 00 20 	blr
 EOF
-# Patch 0028's wrong-code shape: local-exec based on the TOC pointer.
+# Old patch 0028's wrong-code shape: local-exec based on the TOC pointer.
 sed 's/3d 2d 00 00 \taddis   r9,r13,0/3d 22 00 00 \taddis   r9,r2,0/' "$work/le-green.d" > "$work/le-r2.d"
 
 status=0

@@ -66,6 +66,7 @@ Port map so far:
 | 0030 | **retained**: without it a signed `int` offset added to an ILP32 pointer is zero-extended (`lwz` where `lwa` belongs), and the vcall offset in virtual-base thunks likewise (the `ilp32-thunk-vcall` guard fails) |
 | 0032, 0055 | retired together: both act only while Pmode is narrower than a word (0055 needs 0032's pattern), which 0059 ended; generated code identical, and `tests/abi/ppu-relative-switch-check.py` now expects the sign-extended dispatch in both data models |
 | 0012, 0015 | retired together: the `Pptr` iterator selects the same modes as `P` once Pmode follows `TARGET_64BIT` (0059); 0057's two `rs6000.md` context lines are refreshed to the upstream `P` spelling |
+| 0013, 0016-0019, 0028, 0057 | retired together: with 0059 and 0066, Pmode is DImode exactly when `TARGET_64BIT`, so their `Pmode` tests (prologue/epilogue and stack probes, TLS template variants and base register, `allocate_stack` residual, `STACK_SIZE_MODE`, indirect-call `ptrload`) pick upstream's branches, and 0057's `TARGET_64BIT && Pmode == SImode` TLS paths and patterns are unreachable; 0063's context is refreshed to upstream's `ptrload`; `tests/sdk/ilp32-tls-models-codegen-test.sh` and the `tls-ie` row stay as the TLS guards |
 | 0033 | retired (0059 canonicalises a pointer taken from a by-value aggregate packed in one GPR); guarded by `tests/sdk/ilp32-packed-arg-codegen-test.sh` |
 
 Exit: full release gate; every ILP32 regression row and codegen test passes
