@@ -20,8 +20,8 @@ int main(int argc,char *argv[])
 	sys_event_t event;
 	sys_event_queue_attr_t evQAttr = { SYS_EVENT_QUEUE_FIFO, SYS_EVENT_QUEUE_PPU, "myEvQ" };
 	sysSpuThreadArgument arg = { 0, 0, 0, 0 };
-	sysSpuThreadGroupAttribute grpattr = { 7+1, ptr2ea("mygroup"), 0, 0 };
-	sysSpuThreadAttribute attr = { ptr2ea("mythread"), 8+1, SPU_THREAD_ATTR_NONE };
+	sysSpuThreadGroupAttribute grpattr = { 7+1, "mygroup", 0, 0 };
+	sysSpuThreadAttribute attr = { "mythread", 8+1, SPU_THREAD_ATTR_NONE };
 
 	sysSpuInitialize(6,0);
 	sysSpuImageImport(&image,spu_bin,0);

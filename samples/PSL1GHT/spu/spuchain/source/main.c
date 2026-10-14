@@ -38,8 +38,8 @@ int main(int argc,char *argv[])
 	sysSpuImage image;
 	u32 cause,status,i;
 	sysSpuThreadArgument arg[6];
-	sysSpuThreadGroupAttribute grpattr = { 7+1, ptr2ea("mygroup"), 0, 0 };
-	sysSpuThreadAttribute attr = { ptr2ea("mythread"), 8+1, SPU_THREAD_ATTR_NONE };
+	sysSpuThreadGroupAttribute grpattr = { 7+1, "mygroup", 0, 0 };
+	sysSpuThreadAttribute attr = { "mythread", 8+1, SPU_THREAD_ATTR_NONE };
 
 	printf("spuchain starting....\n");
 
