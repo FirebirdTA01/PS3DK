@@ -10,10 +10,18 @@ import argparse
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 
+# The contract both entry points (--assembly and --compiler) apply.  Since GCC
+# patch 0059 (Pmode DImode) both data models dispatch through a sign-extended
+# displacement added at full width; the ILP32 canonical form of retired patch
+# 0055 (rldicl ...,0,32 before mtctr) no longer appears.  check(canonical=True)
+# keeps that legacy form checkable for the self-test controls only.
+CURRENT_CANONICAL = False
 
-def check(text, canonical=True):
+
+def check(text, canonical=CURRENT_CANONICAL):
     insns = []
     for line in text.splitlines():
         match = re.match(r"^\s+([a-z][a-z0-9.]*)\s*(.*?)\s*$", line)
@@ -99,9 +107,11 @@ def selftest():
     prefix = "\tlwzx 9,10,14\n\tadd 9,9,10\n"
     suffix = "\tmtctr 9\n\tbctr\n"
     good = prefix + "\trldicl 9,9,0,32\n" + suffix
-    assert check(good) == 1
-    assert check(prefix.replace("lwzx", "lwax") + suffix, False) == 1
-    assert check(prefix.replace("\tadd", "\textsw 9,9\n\tadd") + suffix, False) == 1
+    # Legacy contract (retired 0055): the canonical rldicl form.
+    assert check(good, canonical=True) == 1
+    # Current contract: a sign-extended displacement.
+    assert check(prefix.replace("lwzx", "lwax") + suffix, CURRENT_CANONICAL) == 1
+    assert check(prefix.replace("\tadd", "\textsw 9,9\n\tadd") + suffix, CURRENT_CANONICAL) == 1
     bad = [prefix + suffix, good.replace("0,32", "0,31"),
            good.replace("rldicl 9,9", "rldicl 8,9"),
            good.replace("rldicl 9,9", "rldicl 9,8"),
@@ -109,18 +119,32 @@ def selftest():
            good.replace("\tmtctr", "\tadd 9,9,10\n\tmtctr"), "\tblr\n"]
     for mutant in bad:
         try:
-            check(mutant)
+            check(mutant, canonical=True)
         except AssertionError:
             continue
-        raise AssertionError("checker accepted a negative control")
+        raise AssertionError("checker accepted a legacy negative control")
     for mutant in (prefix + suffix,
                    prefix.replace("lwzx", "lwax").replace("\tadd", "\tli 9,123\n\tadd") + suffix):
         try:
-            check(mutant, False)
+            check(mutant, CURRENT_CANONICAL)
         except AssertionError:
             continue
-        raise AssertionError("checker accepted an unsigned or overwritten LP64 displacement")
-    print("checker controls: 12/12")
+        raise AssertionError("checker accepted an unsigned or overwritten displacement")
+    # CLI-level controls: --assembly must apply the same contract as --compiler.
+    cli = [(prefix.replace("lwzx", "lwax") + suffix, 0),
+           (prefix.replace("\tadd", "\textsw 9,9\n\tadd") + suffix, 0),
+           (prefix + suffix, 1),
+           (prefix.replace("lwzx", "lwax").replace("\tadd", "\tli 9,123\n\tadd") + suffix, 1),
+           (good, 1)]
+    with tempfile.TemporaryDirectory(prefix="ppu-switch-cli-") as tmp:
+        for n, (text, want) in enumerate(cli):
+            path = pathlib.Path(tmp) / f"case{n}.s"
+            path.write_text(text)
+            rc = subprocess.run([sys.executable, __file__, "--assembly", str(path)],
+                                capture_output=True, timeout=60).returncode
+            if (rc != 0) != bool(want):
+                raise AssertionError(f"--assembly control {n}: exit {rc}, expected {'failure' if want else 'success'}")
+    print("checker controls: 17/17")
 
 
 def main():
@@ -132,7 +156,7 @@ def main():
     if args.selftest:
         selftest()
     if args.assembly:
-        print("relative dispatches:", check(args.assembly.read_text()))
+        print("relative dispatches:", check(args.assembly.read_text(), canonical=CURRENT_CANONICAL))
     if args.compiler:
         source = pathlib.Path(__file__).with_name("ppu-relative-switch.c")
         with tempfile.TemporaryDirectory(prefix="ppu-switch-") as tmp:
@@ -145,11 +169,7 @@ def main():
                             argv.append("-mlp64")
                         argv += ["-S", str(source), "-o", str(out)]
                         subprocess.run(argv, check=True, timeout=60)
-                        # Since GCC patch 0059 (Pmode DImode) both data models
-                        # dispatch through a sign-extended displacement added at
-                        # full width; the ILP32 canonical form of retired 0055
-                        # (rldicl ...,0,32 before mtctr) no longer appears.
-                        count = check(out.read_text(), canonical=False)
+                        count = check(out.read_text(), canonical=CURRENT_CANONICAL)
                         print(opt, barrier, "LP64" if lp64 else "ILP32", count, "PASS")
     if not (args.selftest or args.assembly or args.compiler):
         parser.error("select --selftest, --assembly or --compiler")
