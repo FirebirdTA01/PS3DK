@@ -17,7 +17,7 @@ and _LP64; this patch fills in the symmetric ILP32 case.
 
 --- a/gcc/config/rs6000/cell64lv2.h
 +++ b/gcc/config/rs6000/cell64lv2.h
-@@ -249,11 +249,17 @@
+@@ -249,12 +249,18 @@
        builtin_assert ("cpu=powerpc64");		\
        builtin_assert ("machine=powerpc64");		\
  						\
@@ -36,4 +36,4 @@ and _LP64; this patch fills in the symmetric ILP32 case.
 +	}					\
      }							\
    while (0)
-
+ 

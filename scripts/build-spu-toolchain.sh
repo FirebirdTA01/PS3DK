@@ -150,7 +150,7 @@ apply_patches() {
     [[ ${#patch_list[@]} -eq 0 ]] && { say "No patches in $patches_dir"; return 0; }
     for p in "${patch_list[@]}"; do
         say "Applying $p to $src"
-        (cd "$src" && patch -p1 --forward) < "$patches_dir/$p" \
+        (cd "$src" && patch -p1 --forward --fuzz=0) < "$patches_dir/$p" \
             || die "Patch $p failed (consider --clean to wipe build root and re-extract)"
     done
     touch "$stamp"

@@ -17,10 +17,10 @@ backport.
 
 --- a/gdb/python/py-gdb-readline.c
 +++ b/gdb/python/py-gdb-readline.c
-@@ -56,12 +56,16 @@ gdbpy_readline_wrapper (FILE *sys_stdin, FILE *sys_stdout,
+@@ -56,13 +56,17 @@
        if (except.reason == RETURN_QUIT)
  	return NULL;
-
+ 
 +#if PY_VERSION_HEX < 0x030d0000
        /* The thread state is nulled during gdbpy_readline_wrapper,
  	 with the original value saved in the following undocumented
@@ -34,4 +34,4 @@ backport.
 +#endif
        return NULL;
      }
-
+ 

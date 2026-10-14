@@ -41,6 +41,7 @@ user space).
 
 diff --git a/ppu/crt/crt0.S b/ppu/crt/crt0.S
 index 4f8ccf3..fd49aa1 100644
+
 --- a/ppu/crt/crt0.S
 +++ b/ppu/crt/crt0.S
 @@ -1,25 +1,20 @@
@@ -102,8 +103,6 @@ index 4f8ccf3..fd49aa1 100644
 -	.quad 0
 +	.long ._start
 +	.long .TOC.
-diff --git a/ppu/crt/lv2-crti.S b/ppu/crt/lv2-crti.S
-index 86900f3..cbfe0e2 100644
 --- a/ppu/crt/lv2-crti.S
 +++ b/ppu/crt/lv2-crti.S
 @@ -3,19 +3,19 @@
@@ -130,11 +129,9 @@ index 86900f3..cbfe0e2 100644
  	
  	.section ".fini","ax"
  	.globl ._fini
-diff --git a/ppu/crt/lv2.ld b/ppu/crt/lv2.ld
-index d40801a..a87b2d4 100644
 --- a/ppu/crt/lv2.ld
 +++ b/ppu/crt/lv2.ld
-@@ -177,9 +177,9 @@ SECTIONS
+@@ -177,9 +177,9 @@
  	.data.sceFStub      : { KEEP (*(.data.sceFStub)) KEEP (*(SORT(.data.sceFStub.*))) }
  	
  	.toc1		  : ALIGN(8) { *(.toc1) }
@@ -146,12 +143,10 @@ index d40801a..a87b2d4 100644
  	.toc.sceStub  : { KEEP (*(.toc.sceStub)) KEEP (*(SORT(.toc.sceStub.*))) }
  	
  	/* Thread Local Storage sections  */
-diff --git a/ppu/sprx/common/exports.S b/ppu/sprx/common/exports.S
-index efa42fa..79680ac 100644
 --- a/ppu/sprx/common/exports.S
 +++ b/ppu/sprx/common/exports.S
-@@ -30,11 +30,11 @@ __##name:								\
- 	ld		r0,16(r1);					\
+@@ -33,11 +33,11 @@
+ 	lwz		r0,16(r1);					\
  	mtlr	r0;							\
  	blr;								\
 -	.align 3;							\

@@ -22,10 +22,11 @@ Run-time no LV2 directory read ever produces these values, so the
 case labels are never hit.
 
 diff --git a/newlib/libc/sys/lv2/sys/dirent.h b/newlib/libc/sys/lv2/sys/dirent.h
+
 --- a/newlib/libc/sys/lv2/sys/dirent.h
 +++ b/newlib/libc/sys/lv2/sys/dirent.h
-@@ -8,13 +8,17 @@
-
+@@ -8,14 +8,18 @@
+ 
  #define DT_INVALID			0xff
  #define DT_UNKNOWN			0
 -#define DT_FIFO				DT_INVALID
@@ -45,5 +46,6 @@ diff --git a/newlib/libc/sys/lv2/sys/dirent.h b/newlib/libc/sys/lv2/sys/dirent.h
 +#define DT_BLK				0xf3
 +#define DT_SOCK				0xf4
 +#define DT_WHT				0xf5
-
+ 
  #define dirfd(dp)			((dp)->dd_fd)
+ 

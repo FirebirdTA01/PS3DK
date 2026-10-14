@@ -62,7 +62,7 @@ if [[ -d "$PATCHES" ]]; then
     fi
     for p in "${patch_list[@]}"; do
         say "Applying $p"
-        patch -p1 --forward --silent < "$PATCHES/$p" \
+        patch -p1 --forward --fuzz=0 --silent < "$PATCHES/$p" \
             || die "Patch $p did not apply cleanly: $SRC is not the tree the series expects"
     done
 else
