@@ -114,17 +114,19 @@ Checks beyond the release gate:
   run on 64-bit registers (fixed in v0.16.4).  No carry pattern is widened in
   the 16 port, and the `ppu-compare-carry` rows pass in both data models at
   -O1 to -O3.
-- **C23 default.**  The SDK libraries, newlib glue, PSL1GHT, portlibs and every
-  sample build with the 16-based compiler at its default `-std=gnu23`, and every
-  public SDK header compiles alone in a `gnu23` C translation unit.  This is
-  the real check of what stage 1 prepared.
+- **C23 default.**  The C sources of the SDK libraries, newlib glue, PSL1GHT,
+  portlibs and every sample build with the 16-based compiler at its default
+  `-std=gnu23`, and every C-compatible public PPU header compiles alone in a
+  `gnu23` C translation unit.  This is the real check of what stage 1
+  prepared.  C++-only headers and samples keep their C++17 checks, and the SPU
+  headers and sources are checked in stage 3, with the SPU compiler.
 - **DWARF.**  GCC 11 and later default to DWARF 5.  GDB 14 reads it; RPCS3 and
   other consumers need checking, or the specs pin `-gdwarf-4`.
 
 Rollout: the first release with the new compiler ships it as the default, and
 the previous release stays the documented fallback.  No release ships both.
 
-Exit: full release gate on the 16-based package, plus the four checks above,
+Exit: full release gate on the 16-based package, plus the five checks above,
 plus EMP acceptance.
 
 ## Stage 3: SPU on GCC 16
