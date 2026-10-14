@@ -141,6 +141,18 @@ ilp32-thunk-vcall,tests/regression/ilp32-thunk-vcall/ilp32-thunk-vcall.fake.self
 # def.c's local-exec ones.  tests/sdk/ilp32-tls-models-codegen-test.sh is
 # the compile-time guard.
 tls-ie,tests/regression/tls-ie/tls-ie.fake.self,30,RAN-CLEAN,TLS_IE_OK,TLS_IE_FAIL
+# ssp guards the PPU stack protector (GCC patch 0067; before it every
+# protected ILP32 function failed to compile): per level and data model,
+# protected functions return normally, and a guard changed under a live
+# frame and a one-byte overflow onto the canary each reach the probe's own
+# __stack_chk_fail exactly once (it prints SSP_CHK_FAIL_CALLED).
+# tests/sdk/ppu-stack-protector-codegen-test.sh is the compile-time guard.
+ssp-sp-ilp32,tests/regression/ssp/ssp-sp-ilp32.fake.self,30,RAN-CLEAN,SSP_OK ilp32,SSP_FAIL
+ssp-sp-lp64,tests/regression/ssp/ssp-sp-lp64.fake.self,30,RAN-CLEAN,SSP_OK lp64,SSP_FAIL
+ssp-sp-strong-ilp32,tests/regression/ssp/ssp-sp-strong-ilp32.fake.self,30,RAN-CLEAN,SSP_OK ilp32,SSP_FAIL
+ssp-sp-strong-lp64,tests/regression/ssp/ssp-sp-strong-lp64.fake.self,30,RAN-CLEAN,SSP_OK lp64,SSP_FAIL
+ssp-sp-all-ilp32,tests/regression/ssp/ssp-sp-all-ilp32.fake.self,30,RAN-CLEAN,SSP_OK ilp32,SSP_FAIL
+ssp-sp-all-lp64,tests/regression/ssp/ssp-sp-all-lp64.fake.self,30,RAN-CLEAN,SSP_OK lp64,SSP_FAIL
 # ilp32-pointers guards GCC patch 0059 (Pmode DImode under ILP32): symbols via
 # TOC entry and TOC-relative, symbol+offset, function and label addresses, TLS,
 # label addresses from a static table and at run time, an IV-optimised

@@ -539,6 +539,12 @@ jobs:
       - name: Test PPU TLS access models in both data models
         run: bash tests/sdk/ilp32-tls-models-codegen-test.sh
 
+      # The stack protector compiles in both data models with pointer-width
+      # guard and canary accesses (GCC patch 0067); the checker controls run
+      # here, the compile leg needs PS3DEV (release gate).
+      - name: Test PPU stack protector codegen
+        run: bash tests/sdk/ppu-stack-protector-codegen-test.sh
+
       # Skips without PS3DEV; with a PPU compiler, AltiVec memory builtins that
       # take a pointer must compile under the ILP32 address model (GCC 0059).
       - name: Test AltiVec pointer builtins under ILP32
