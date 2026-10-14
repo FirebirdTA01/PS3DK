@@ -11,9 +11,11 @@
         handler is never called;
      2. the guard changes while a protected frame is live: the epilogue
         check must fail and call the handler exactly once;
-     3. a one-byte overflow past a char[16] lands on the canary (the frame
-        grows downward under the protector, so character arrays sit
-        directly below it): the handler must be called exactly once.
+     3. an 8-byte overflow past a char[16] covers the canary (the frame
+        grows downward under the protector, so character arrays sit just
+        below it: directly in LP64, below 4 bytes of padding in ILP32,
+        where the 4-byte slot is kept 8-byte aligned): the handler must be
+        called exactly once.
    The guard value differs in every byte (and, in LP64, between its two
    words), so a check of the wrong width or the wrong word misses (2).
    Prints SSP_OK or SSP_FAIL <reason>.  */
@@ -126,15 +128,17 @@ guard_changes (void)
   return b[0];
 }
 
-/* (3): one byte past the array, written through a volatile pointer.  The
-   first canary byte is the guard's most significant one (big-endian).  */
+/* (3): eight bytes past the array, written through a volatile pointer.
+   0xa5 differs from every byte of the ILP32 guard and from all but one of
+   the LP64 guard's.  */
 __attribute__ ((noinline)) int
-overflow_one (void)
+overflow_8 (void)
 {
   char b[16];
   volatile char *p = b;
   use (b, sizeof b);
-  p[16] = (char) ~(GUARD_VALUE >> (8 * (sizeof (uintptr_t) - 1)));
+  for (int i = 16; i < 24; i++)
+    p[i] = (char) 0xa5;
   return b[0];
 }
 
@@ -172,8 +176,8 @@ main (void)
 
   if (setjmp (back) == 0)
     {
-      overflow_one ();
-      printf ("SSP_FAIL " ABI ": a one-byte overflow onto the canary was not detected\n");
+      overflow_8 ();
+      printf ("SSP_FAIL " ABI ": an overflow onto the canary was not detected\n");
       bad = 1;
     }
   else if (fail_calls != 2)
