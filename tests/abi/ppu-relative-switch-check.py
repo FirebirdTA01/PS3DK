@@ -87,7 +87,7 @@ def check(text, canonical=True):
         if all(load is None for load in loads):
             raise AssertionError(f"dispatch {dispatches}: add does not consume the table load")
         if not canonical and not any(load is True for load in loads):
-            raise AssertionError(f"dispatch {dispatches}: LP64 displacement is not sign-extended")
+            raise AssertionError(f"dispatch {dispatches}: displacement is not sign-extended")
         if protected != canonical:
             raise AssertionError(f"dispatch {dispatches}: canonical={protected}, expected {canonical}")
     if not dispatches:
@@ -145,7 +145,11 @@ def main():
                             argv.append("-mlp64")
                         argv += ["-S", str(source), "-o", str(out)]
                         subprocess.run(argv, check=True, timeout=60)
-                        count = check(out.read_text(), canonical=not lp64)
+                        # Since GCC patch 0059 (Pmode DImode) both data models
+                        # dispatch through a sign-extended displacement added at
+                        # full width; the ILP32 canonical form of retired 0055
+                        # (rldicl ...,0,32 before mtctr) no longer appears.
+                        count = check(out.read_text(), canonical=False)
                         print(opt, barrier, "LP64" if lp64 else "ILP32", count, "PASS")
     if not (args.selftest or args.assembly or args.compiler):
         parser.error("select --selftest, --assembly or --compiler")

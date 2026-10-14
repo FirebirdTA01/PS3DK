@@ -29,7 +29,6 @@
 0028-rs6000-cc-tls-base-register.patch
 0029-gcc-convert-pointer-cast-unsigned-intermediate.patch
 0030-gcc-expr-canonicalize-pointer-plus-offset-hybrid.patch
-0032-gcc-rs6000-pointer-add-hybrid-canonicalize.patch
 0034-cell64lv2-link-c-stub.patch
 0035-libgcc-t-ps3-crtstuff-no-unwind-tables.patch
 0036-libstdcxx-ps3-filesystem-deps.patch
@@ -42,7 +41,6 @@
 0046-cell64lv2-reference-predefines.patch
 0047-rs6000-ps3-mp32-mp64-aliases.patch
 0048-libstdcxx-containers-bring-in-string.patch
-0055-rs6000-relative-tablejump-hybrid-canonicalize.patch
 0056-rs6000-mi-thunk-vcall-offset-sign-extend-hybrid.patch
 0057-rs6000-ilp32-initial-exec-tls.patch
 0058-rs6000-cell64lv2-data-model-attribute.patch

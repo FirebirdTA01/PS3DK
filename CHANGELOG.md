@@ -25,6 +25,10 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **PPU GCC: patches 0032 and 0055 retired.**  Both acted only while the
+  pointer mode was narrower than a register; the DImode pointer model
+  (0059) ended that, and generated code is unchanged in the tested ILP32
+  and LP64 cases.
 - **PPU GCC: patch 0033 retired.**  The DImode pointer model (0059)
   already canonicalises a pointer taken from a by-value aggregate packed in
   one register.  Generated code is unchanged in the tested ILP32 and LP64
