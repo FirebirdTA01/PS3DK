@@ -1,0 +1,52 @@
+librsx: gcmGetControlRegister takes no arguments
+
+The command-buffer helpers passed their context to gcmGetControlRegister(),
+which takes none (its declaration was the old-style empty list). C23, the
+default from GCC 15, reads an empty list as (void), so the extra argument is
+an error ("too many arguments").  Drop it and give the declaration a
+prototype.
+
+diff --git a/ppu/include/rsx/gcm_sys.h b/ppu/include/rsx/gcm_sys.h
+index 18876f2..f1f719a 100644
+--- a/ppu/include/rsx/gcm_sys.h
++++ b/ppu/include/rsx/gcm_sys.h
+@@ -1257,7 +1257,7 @@ void gcmSetDefaultCommandBuffer();
+ /*! \brief Obtain registers for controlling the command buffer.
+ \return Pointer to a \ref gcmControlRegister structure
+ */
+-gcmControlRegister* gcmGetControlRegister();
++gcmControlRegister* gcmGetControlRegister(void);
+ 
+ s32 gcmInitSystemMode(const u64 mode);
+ u32 gcmGetTiledPitchSize(const u32 size);
+diff --git a/ppu/librsx/buffer_impl.h b/ppu/librsx/buffer_impl.h
+index bb13d0c..319e2b3 100644
+--- a/ppu/librsx/buffer_impl.h
++++ b/ppu/librsx/buffer_impl.h
+@@ -5,7 +5,7 @@ void RSX_FUNC(ResetCommandBuffer)(gcmContextData *context)
+ 
+ 	__sync();
+ 
+-	gcmControlRegister volatile *ctrl = gcmGetControlRegister(context);
++	gcmControlRegister volatile *ctrl = gcmGetControlRegister();
+ 	ctrl->put = offset;
+ 	while(ctrl->get!=offset) usleep(30);
+ }
+@@ -13,7 +13,7 @@ void RSX_FUNC(ResetCommandBuffer)(gcmContextData *context)
+ void RSX_FUNC(FlushBuffer)(gcmContextData *context)
+ {
+ 	u32 offset = 0;
+-	gcmControlRegister volatile *ctrl = gcmGetControlRegister(context);
++	gcmControlRegister volatile *ctrl = gcmGetControlRegister();
+ 	
+ 	__sync();
+ 	gcmAddressToOffset(context->current,&offset);
+@@ -25,7 +25,7 @@ void RSX_FUNC(Finish)(gcmContextData *context,u32 ref_value)
+ 	RSX_FUNC(SetReferenceCommand)(context,ref_value);
+ 	RSX_FUNC(FlushBuffer)(context);
+ 
+-	gcmControlRegister volatile *ctrl = gcmGetControlRegister(context);
++	gcmControlRegister volatile *ctrl = gcmGetControlRegister();
+ 	while(ctrl->ref!=ref_value) usleep(30);
+ }
+ 

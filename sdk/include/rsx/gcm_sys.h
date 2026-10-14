@@ -1270,7 +1270,7 @@ void gcmSetDefaultCommandBuffer();
 /*! \brief Obtain registers for controlling the command buffer.
 \return Pointer to a \ref gcmControlRegister structure
 */
-gcmControlRegister* gcmGetControlRegister();
+gcmControlRegister* gcmGetControlRegister(void);
 
 s32 gcmInitSystemMode(const u64 mode);
 u32 gcmGetTiledPitchSize(const u32 size);
