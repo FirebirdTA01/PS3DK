@@ -1,6 +1,7 @@
 # One modern GCC for PPU and SPU
 
-Status: plan, for approval.  Today the PPU compiler is GCC 12.4.0 and the SPU
+Status: approved by the director on 2026-10-14 (GCC 16, the stage order below, one
+compiler per release).  Today the PPU compiler is GCC 12.4.0 and the SPU
 compiler is GCC 9.5.0, the last release with the SPE backend.  This plan moves
 both to one current GCC release line without changing the ABI, and ships the new
 compiler only after it passes every release gate.
@@ -39,13 +40,16 @@ middle-end canonicalisation in `convert.cc` and `expr.cc` (0029, 0030, 0032,
 0033, 0055), DImode saves of callee-saved, LR and EH registers (0031, 0037),
 the `-fno-ivopts` default (0049) and the doloop counter fix (0050).
 
-Patch 0051 (on `feat/ilp32-pmode-di`, card t_3b6c018a) changes the model
-instead: `Pmode` DImode, `ptr_mode` SImode, `POINTERS_EXTEND_UNSIGNED`.
+Patch 0059 (developed as 0051 on `feat/ilp32-pmode-di`, card t_3b6c018a; shipped in
+v0.23.0) changes the model instead: `Pmode` DImode, `ptr_mode` SImode, `POINTERS_EXTEND_UNSIGNED`.
 Pointers are zero-extended where they become addresses, so a set bit 32 can
 no longer reach the address unit, whichever path produced it.
 
-Stage 0 lands 0051 to 0054 on 12.4, then retires every workaround the new model
-subsumes, one patch at a time, each removal proven by its regression row.
+Stage 0 landed the model (0059, with the TOC follow-ups 0060 to 0065, retiring 0049),
+then retires every remaining workaround the new model subsumes, one patch at a
+time, each removal proven by its regression row and a codegen A/B against the
+full series: 0050, 0031, 0037, 0029, 0030, 0032, 0033, 0055, 0012 and 0015.
+A patch the model does not subsume stays and is carried into the port.
 Doing this before the version change matters for two reasons: the port carries
 the small model instead of the workaround stack, and the model change is
 validated on the compiler whose behaviour we already know.
@@ -156,7 +160,7 @@ they are.  Each can move later, alone, under the same rule.
 | 2 PPU on 16 | 0, 1 | 3 to 6 weeks |
 | 3 SPU on 16 | 1; the LRA spike can start any time | 12 to 24 weeks |
 
-## Decisions asked for
+## Decisions (approved 2026-10-14)
 
 1. GCC 16 as the target line.
 2. The stage order, with the pointer model on 12.4 first.
