@@ -45,7 +45,7 @@ if [[ -d "$PATCHES" ]]; then
     for p in "$PATCHES"/*.patch; do
         [[ -f "$p" ]] || continue
         echo "[$PKG] applying $(basename "$p")"
-        patch -p1 --forward --silent < "$p" \
+        patch -p1 --forward --fuzz=0 --silent < "$p" \
             || { echo "[$PKG] patch $(basename "$p") did not apply cleanly" >&2; exit 1; }
     done
 fi

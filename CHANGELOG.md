@@ -27,8 +27,9 @@ The version stamped into builds is generated from the most recent
 
 - **Patch series apply exactly.**  Nine patches (five PPU GCC, two newlib,
   one GDB, one PSL1GHT) applied only with GNU patch's default fuzz; their
-  context is refreshed (the patched sources are unchanged) and every build
-  script now applies series with `--fuzz=0`, so drift fails the build.
+  context is refreshed (the patched sources are unchanged) and every patch
+  application (the toolchain and PSL1GHT build scripts, the libzip portlib
+  recipe and the newlib-remove test) now uses `--fuzz=0`, so drift fails.
 - **PPU GCC: patches 0012 and 0015 retired.**  Their `Pptr` iterator in
   `rs6000.md` selects the same modes as upstream's `P` under the DImode
   pointer model (0059); about 900 lines of pattern rewrites are gone.

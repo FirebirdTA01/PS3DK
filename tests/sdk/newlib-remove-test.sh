@@ -14,7 +14,7 @@ test "$rc" = 1
 grep -q 'remove-test: 5 failures' "$tmp/parent.log"
 mkdir -p "$tmp/newlib/libc/stdio"
 cp "$fixture/remove.c" "$tmp/newlib/libc/stdio/remove.c"
-patch -d "$tmp" -p1 < "$repo_root/patches/ppu/newlib-4.x/0016-newlib-remove-directories.patch"
+patch -d "$tmp" -p1 --fuzz=0 < "$repo_root/patches/ppu/newlib-4.x/0016-newlib-remove-directories.patch"
 "$cc" "${flags[@]}" "$tmp/newlib/libc/stdio/remove.c" "$repo_root/tests/sdk/newlib-remove-test.c" -o "$tmp/candidate"
 "$tmp/candidate"
 echo 'newlib-remove-test: PASS (parent red, patched source green)'
