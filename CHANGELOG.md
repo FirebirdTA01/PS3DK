@@ -18,6 +18,10 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **newlib's per-thread `_reent` setup includes `<string.h>`.**  The
+  `_REENT_INIT_PTR` macro calls `memset`; GCC 14 and later reject the
+  implicit declaration, which GCC 12 did not report because the call comes
+  from a system-header macro.
 - **`gcmGetControlRegister` is declared with a prototype** (`(void)`), in the
   SDK and in PSL1GHT's `<rsx/gcm_sys.h>`, and PSL1GHT's librsx no longer
   passes it an argument.  C23 (the default from GCC 15) reads the old empty

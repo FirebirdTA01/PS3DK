@@ -58,7 +58,7 @@ new file mode 100644
 index 0000000..a000001
 --- /dev/null
 +++ b/newlib/libc/sys/lv2/getreent.c
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,62 @@
 +/* Per-thread _reent storage for the LV2 hybrid ILP32 ABI.
 + *
 + * Compiler __thread cannot be used here: under the ELF64 + ILP32 data
@@ -74,6 +74,7 @@ index 0000000..a000001
 +
 +#include <reent.h>
 +#include <stdint.h>
++#include <string.h>   /* memset, used by _REENT_INIT_PTR */
 +
 +typedef uint64_t _ps3_thread_id_t;
 +
