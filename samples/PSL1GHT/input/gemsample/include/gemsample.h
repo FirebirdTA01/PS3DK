@@ -15,6 +15,7 @@ int readCamera (void);
 /* source/gem.c */
 int initGem (void);
 int endGem (void);
+void readGem (void);
 void getImageState (void);
 
 /* source/rsxutil.c */
