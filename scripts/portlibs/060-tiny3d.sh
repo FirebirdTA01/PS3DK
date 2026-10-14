@@ -37,6 +37,18 @@ rm -rf "$SRC"
 mkdir -p "$SRC"
 tar xf "$TARBALL" -C "$SRC" --strip-components=1
 
+# Port patches (patches/portlibs/tiny3d/*.patch, -p1), as for libzip: a hunk
+# that does not apply is fatal.
+PATCHES="$PS3_TOOLCHAIN_ROOT/patches/portlibs/$PKG"
+if [[ -d "$PATCHES" ]]; then
+    for p in "$PATCHES"/*.patch; do
+        [[ -f "$p" ]] || continue
+        echo "[$PKG] applying $(basename "$p")"
+        (cd "$SRC" && patch -p1 --forward --fuzz=0 --silent) < "$p" \
+            || { echo "[$PKG] patch $(basename "$p") did not apply cleanly" >&2; exit 1; }
+    done
+fi
+
 # Its Makefiles read PS3DEV / PSL1GHT / PORTLIBS the PSL1GHT way and call
 # the ppu-* tools; nothing else from the driver's CC/CFLAGS applies.
 export PORTLIBS

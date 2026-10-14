@@ -1,0 +1,47 @@
+tiny3d: call gcmGetControlRegister() without an argument
+
+The SDK declares gcmGetControlRegister(void) (it returns the one control
+register block; the context argument was never used), so passing the
+context is a too-many-arguments error with every compiler.  Four call
+sites: rsxtiny_FlushBuffer in glue.c and three in tiny3d.c.
+
+--- a/lib/source/glue.c
++++ b/lib/source/glue.c
+@@ -2,7 +2,7 @@
+ 
+ void rsxtiny_FlushBuffer(tiny_gcmContextData *context) {
+     u32 offset = 0;
+-	gcmControlRegister volatile *control = gcmGetControlRegister(context);
++	gcmControlRegister volatile *control = gcmGetControlRegister();
+ 	__asm __volatile__("sync"); // Sync, to make sure the command was written;
+ 	gcmAddressToOffset((void *) (u64) context->current, &offset);
+ 	control->put = offset;
+--- a/lib/source/tiny3d.c
++++ b/lib/source/tiny3d.c
+@@ -271,7 +271,7 @@
+     rsxtiny_SetReferenceCommand(context, 1);
+ 	rsxtiny_FlushBuffer(context);
+ 
+-	gcmControlRegister volatile *ctrl = gcmGetControlRegister((gcmContextData *) context);
++	gcmControlRegister volatile *ctrl = gcmGetControlRegister();
+ 	while(ctrl->ref != 1) usleep(30);
+ 
+ 
+@@ -343,7 +343,7 @@
+ 
+     init_screen(vertex_buff_size * 2, use_Z32);
+ 
+-    CtrlReg = gcmGetControlRegister((gcmContextData *) context);
++    CtrlReg = gcmGetControlRegister();
+ 
+     n = 0;
+ 
+@@ -1085,7 +1085,7 @@
+     if(!CtrlReg) exit(0);
+ 
+ 	while (CtrlReg->get != CtrlReg->put  && (i < 5000)) {
+-		usleep(200);CtrlReg = gcmGetControlRegister((gcmContextData *) context);
++		usleep(200);CtrlReg = gcmGetControlRegister();
+         __asm __volatile__("sync");
+         if(!CtrlReg) exit(0);
+ 		i++;
