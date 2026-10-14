@@ -62,7 +62,7 @@ int main(void)
     void *ibuf, *vbuf;
     uint32_t holeEA, holeWords;
     PSGLholeParams *params;
-    sysSpuImage spu_img;
+    sys_spu_image_t spu_img;
     sys_spu_thread_group_t group;
     sys_spu_thread_t thread;
     int cause, status, rc;
@@ -214,7 +214,7 @@ int main(void)
     if (rc != 0 && rc != (int)0x80010030) {
         printf("spudraw-triangle: fail spu_init %x\n", rc); psglExit(); return 1;
     }
-    rc = sysSpuImageImport(&spu_img, spu_hole_fill_bin, 0);
+    rc = sys_spu_image_import(&spu_img, spu_hole_fill_bin, 0);
     if (rc != 0) { printf("spudraw-triangle: fail spu_img %x\n", rc); psglExit(); return 1; }
 
     sys_spu_thread_group_attribute_t ga = { .nsize = 8, .name = "spudrawtri", .type = 0 };
@@ -232,7 +232,7 @@ int main(void)
 
     rc = sys_spu_thread_group_join(group, &cause, &status);
     sys_spu_thread_group_destroy(group);
-    sysSpuImageClose(&spu_img);
+    sys_spu_image_close(&spu_img);
     if (rc != 0 || status != 0) {
         printf("spudraw-triangle: fail spu exit rc=%d cause=%d status=%d\n",
             rc, cause, status);
