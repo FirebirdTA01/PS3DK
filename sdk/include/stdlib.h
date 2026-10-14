@@ -2,21 +2,25 @@
  * memalign declaration that binary-compatible samples expect in <stdlib.h>.
  * newlib provides the implementation (malloc.h) but not the stdlib.h
  * declaration.
+ *
+ * The forward runs on every inclusion, outside the include guard (as
+ * stdarg.h does): every copy of this wrapper on the include path then
+ * chains on, and libc's header is always reached.  With the forward inside
+ * the guard, a second copy (the SDK's own build sees the source and the
+ * installed one) was skipped whole and libc's <stdlib.h> never read.
  */
+#include_next <stdlib.h>
+
 #ifndef _PS3DK_STDLIB_WRAPPER_H
 #define _PS3DK_STDLIB_WRAPPER_H
 
-#include_next <stdlib.h>
-
-/* Defense-in-depth: if a duplicate copy of this wrapper sits earlier on the
-   include path, the shared guard above makes this #include_next resolve to the
-   (skipped) duplicate instead of the real <stdlib.h>, silently dropping libc.
+/* Defense-in-depth: the forward above must have reached libc's <stdlib.h>.
    Gated on the PS3 PPU target macro so the check runs only under our (GCC)
    toolchain, where _STDLIB_H_ is newlib's guard; excluded under __clang__ because
    clang-based tooling (clangd) cannot model the -isystem #include_next ordering
    and would false-positive. Inert under host/IDE analysis. */
-#if defined(__lv2ppu__) && !defined(__clang__) && !defined(__PS3DK_SDK_SELFBUILD__) && !defined(_STDLIB_H_)
-# error "PS3DK <stdlib.h> wrapper: real <stdlib.h> not reached (a duplicate wrapper copy shadowed it); keep only one copy of the PS3DK wrapper headers on the include path."
+#if defined(__lv2ppu__) && !defined(__clang__) && !defined(_STDLIB_H_)
+# error "PS3DK <stdlib.h> wrapper: real <stdlib.h> not reached; check the include path for a libc <stdlib.h>."
 #endif
 
 #ifdef __cplusplus

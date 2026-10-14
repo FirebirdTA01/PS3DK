@@ -113,10 +113,6 @@ if(NOT _PS3_SELF_SDK_INSTALL_PROBED)
     # characters backslash-n instead of a line break.
     string(CONCAT _ps3_sdk_install_advice
         "\n  Source tree: run scripts/build-sdk.sh"
-        "\n    (a bare 'make -C sdk install' FAILS -- the SDK sublibs see both"
-        "\n     the source and the installed copy of the wrapper headers, and that"
-        "\n     shadow guard is an #error. build-sdk.sh passes the"
-        "\n     -D__PS3DK_SDK_SELFBUILD__ that suppresses it.)"
         "\n  Extracted release: re-extract the SDK archive -- an installed tree has"
         "\n    no sdk/ sources or build scripts to run this from.")
 

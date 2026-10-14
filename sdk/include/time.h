@@ -1,8 +1,11 @@
 /* PPU time APIs implemented by librt. Do not enable _POSIX_TIMERS: that
- * would advertise unimplemented timers and change newlib header visibility. */
+ * would advertise unimplemented timers and change newlib header visibility.
+ * The forward runs on every inclusion, outside the include guard (as
+ * stdarg.h does), so every copy of this wrapper on the include path chains
+ * on to libc's <time.h>. */
+#include_next <time.h>
 #ifndef PS3DK_TIME_WRAPPER_H
 #define PS3DK_TIME_WRAPPER_H
-#include_next <time.h>
 #if defined(__lv2ppu__)
 #include <sys/types.h>
 #ifndef CLOCK_MONOTONIC

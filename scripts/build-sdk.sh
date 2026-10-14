@@ -44,15 +44,10 @@ fi
 
 say "building + installing SDK"
 # The SDK's own sublibs compile with -I../include AND -I$PS3DK/ppu/include, so
-# two identical copies of the libc wrapper headers (stdlib.h, sys/types.h, ...)
-# sit on the include path — which is exactly what the wrapper shadow-guard
-# (commit 824f853) flags. That guard is meant to catch ACCIDENTAL duplicates in
-# end-user builds; the source-vs-installed duplicate here is benign, so define
-# __PS3DK_SDK_SELFBUILD__ to suppress the guard for this build only (mirrors the
-# guard's existing __clang__ exclusion). End-user builds keep the protection.
-# Command-line CC= overrides the sublibs' `CC := $(CROSS)gcc` and propagates to
-# sub-makes via MAKEFLAGS.
-make -C "$PS3_TOOLCHAIN_ROOT/sdk" install CC="powerpc64-ps3-elf-gcc -D__PS3DK_SDK_SELFBUILD__"
+# two copies of the libc wrapper headers (stdlib.h, sys/types.h, ...) sit on
+# the include path.  The wrappers forward with #include_next outside their
+# include guards, so each copy chains on to libc's header.
+make -C "$PS3_TOOLCHAIN_ROOT/sdk" install
 
 # Replace PSL1GHT's default ICON0.PNG with our PS3DK-branded one.
 # Samples that don't override ICON0 in their Makefile pick up whatever

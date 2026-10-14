@@ -545,6 +545,12 @@ jobs:
       - name: Test PPU stack protector codegen
         run: bash tests/sdk/ppu-stack-protector-codegen-test.sh
 
+      # The libc wrapper headers chain with #include_next outside their
+      # guards, so the SDK's own build (source and installed copies on the
+      # path) still reaches libc; the compile leg needs PS3DEV.
+      - name: Test SDK wrapper header chaining
+        run: bash tests/sdk/sdk-wrapper-chain-test.sh
+
       # Skips without PS3DEV; with a PPU compiler, AltiVec memory builtins that
       # take a pointer must compile under the ILP32 address model (GCC 0059).
       - name: Test AltiVec pointer builtins under ILP32

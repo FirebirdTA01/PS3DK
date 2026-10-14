@@ -28,7 +28,7 @@ if ! command -v "$PPU_CXX" >/dev/null 2>&1; then
     fi
 fi
 
-inc_flags=(-I"$inc" -D__PS3DK_SDK_SELFBUILD__)
+inc_flags=(-I"$inc")
 if [ -d "$stage_inc" ]; then
     inc_flags+=(-isystem "$stage_inc")
 fi

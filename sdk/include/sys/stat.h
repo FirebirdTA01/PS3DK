@@ -22,20 +22,26 @@
     - `sb.st_atime` as a shortcut for `sb.st_atim.tv_sec` NO LONGER
       compiles.  Migrate to the full timespec form.  This matches the
       the reference SDK convention and POSIX.1-2017 guidance.
+
+  The forward runs on every inclusion, outside the include guard (as
+  stdarg.h does): every copy of this wrapper on the include path then
+  chains on, and libc's header is always reached.  With the forward inside
+  the guard, a second copy (the SDK's own build sees the source and the
+  installed one) was skipped whole and libc's <sys/stat.h> never read.
 */
-#ifndef _PSL1GHT_SYS_STAT_H
-#define _PSL1GHT_SYS_STAT_H
 #include <cell/error.h>   /* CELL_OK */
 
 #include_next <sys/stat.h>
 
-/* Defense-in-depth: a duplicate copy of this wrapper earlier on the include path
-   would make this #include_next resolve to the (skipped) duplicate instead of
-   the real <sys/stat.h>, silently dropping libc. Gated on the PS3 PPU target
-   macro (GCC-only build); excluded under __clang__ (clangd cannot model the
-   -isystem #include_next ordering). Inert under host/IDE. */
-#if defined(__lv2ppu__) && !defined(__clang__) && !defined(__PS3DK_SDK_SELFBUILD__) && !defined(_SYS_STAT_H)
-# error "PS3DK <sys/stat.h> wrapper: real <sys/stat.h> not reached (a duplicate wrapper copy shadowed it); keep only one copy of the PS3DK wrapper headers on the include path."
+#ifndef _PSL1GHT_SYS_STAT_H
+#define _PSL1GHT_SYS_STAT_H
+
+/* Defense-in-depth: the forward above must have reached libc's <sys/stat.h>.
+   Gated on the PS3 PPU target macro (GCC-only build); excluded under __clang__
+   (clangd cannot model the -isystem #include_next ordering). Inert under
+   host/IDE. */
+#if defined(__lv2ppu__) && !defined(__clang__) && !defined(_SYS_STAT_H)
+# error "PS3DK <sys/stat.h> wrapper: real <sys/stat.h> not reached; check the include path for a libc <sys/stat.h>."
 #endif
 
 #ifdef st_atime

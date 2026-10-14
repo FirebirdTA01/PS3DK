@@ -32,9 +32,13 @@
  * PTHREAD_MUTEX_* constants and the settype/gettype prototypes are
  * declared here instead; librt stores the type in the `recursive` member,
  * which exists in both layouts.
+ *
+ * Everything up to the forward runs on every inclusion, outside the include
+ * guard (as stdarg.h does): every copy of this wrapper on the include path
+ * then chains on, and newlib's header is always reached.  With the forward
+ * inside the guard, a second copy (the SDK's own build sees the source and
+ * the installed one) was skipped whole and newlib's <pthread.h> never read.
  */
-#ifndef _PS3DK_PTHREAD_WRAPPER_H
-#define _PS3DK_PTHREAD_WRAPPER_H
 #include <cell/error.h>   /* CELL_OK */
 
 /* <sys/_pthreadtypes.h> publishes pthread_mutex_t and friends under
@@ -44,8 +48,11 @@
  * already included in such a translation unit has consumed the header
  * without defining the types, and no later include can recover them.
  * Say so plainly rather than erroring out on a hundred unknown type
- * names.  -std=gnu99 and later are unaffected. */
-#if defined(_SYS__PTHREADTYPES_H_) && !defined(_POSIX_THREADS) \
+ * names.  -std=gnu99 and later are unaffected.  Checked on the first
+ * inclusion only: a repeat inclusion finds the types header consumed and
+ * _POSIX_THREADS off again, legitimately. */
+#if !defined(_PS3DK_PTHREAD_WRAPPER_H) && defined(_SYS__PTHREADTYPES_H_) \
+    && !defined(_POSIX_THREADS) \
     && defined(__POSIX_VISIBLE) && (__POSIX_VISIBLE < 199506)
 # error "PS3DK <pthread.h>: the pthread types were dropped by a strict-ISO <sys/types.h> included earlier in this file; build with -std=gnu99 (or later), or include <pthread.h> before <sys/types.h>."
 #endif
@@ -58,16 +65,17 @@
 # undef _POSIX_THREADS
 #endif
 
-/* Defense-in-depth: if a duplicate copy of this wrapper sits earlier on the
-   include path, the shared guard above makes this #include_next resolve to the
-   (skipped) duplicate instead of the real <pthread.h>, silently dropping every
-   declaration.  Gated on the PS3 PPU target macro so the check runs only under
-   our (GCC) toolchain, where __PTHREAD_h is newlib's guard; excluded under
-   __clang__ because clang-based tooling (clangd) cannot model the -isystem
+#ifndef _PS3DK_PTHREAD_WRAPPER_H
+#define _PS3DK_PTHREAD_WRAPPER_H
+
+/* Defense-in-depth: the forward above must have reached newlib's <pthread.h>.
+   Gated on the PS3 PPU target macro so the check runs only under our (GCC)
+   toolchain, where __PTHREAD_h is newlib's guard; excluded under __clang__
+   because clang-based tooling (clangd) cannot model the -isystem
    #include_next ordering and would false-positive.  Inert under host/IDE
    analysis. */
-#if defined(__lv2ppu__) && !defined(__clang__) && !defined(__PS3DK_SDK_SELFBUILD__) && !defined(__PTHREAD_h)
-# error "PS3DK <pthread.h> wrapper: real <pthread.h> not reached (a duplicate wrapper copy shadowed it); keep only one copy of the PS3DK wrapper headers on the include path."
+#if defined(__lv2ppu__) && !defined(__clang__) && !defined(__PTHREAD_h)
+# error "PS3DK <pthread.h> wrapper: real <pthread.h> not reached; check the include path for newlib's <pthread.h>."
 #endif
 
 #include <sys/types.h>

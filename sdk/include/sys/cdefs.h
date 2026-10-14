@@ -13,20 +13,25 @@
   appears in the include search path (via -I$PS3DK/ppu/include) before
   newlib's $PS3DEV/.../include/sys/cdefs.h, so transitive includes
   resolve here first.
+
+  The forward runs on every inclusion, outside the include guard (as
+  stdarg.h does): every copy of this wrapper on the include path then
+  chains on, and newlib's header is always reached.  With the forward
+  inside the guard, a second copy (the SDK's own build sees the source and
+  the installed one) was skipped whole and newlib's <sys/cdefs.h> never read.
 */
+
+#include_next <sys/cdefs.h>
 
 #ifndef PS3TC_SYS_CDEFS_H
 #define PS3TC_SYS_CDEFS_H
 
-#include_next <sys/cdefs.h>
-
-/* Defense-in-depth: a duplicate copy of this wrapper earlier on the include path
-   would make this #include_next resolve to the (skipped) duplicate instead of
-   the real <sys/cdefs.h>, dropping newlib's _ATTRIBUTE / __BEGIN_DECLS et al.
-   Gated on the PS3 PPU target macro (GCC-only build); excluded under __clang__
-   (clangd cannot model the -isystem #include_next ordering). Inert under host/IDE. */
-#if defined(__lv2ppu__) && !defined(__clang__) && !defined(__PS3DK_SDK_SELFBUILD__) && !defined(_SYS_CDEFS_H_)
-# error "PS3DK <sys/cdefs.h> wrapper: real <sys/cdefs.h> not reached (a duplicate wrapper copy shadowed it); keep only one copy of the PS3DK wrapper headers on the include path."
+/* Defense-in-depth: the forward above must have reached newlib's <sys/cdefs.h>
+   (_ATTRIBUTE, __BEGIN_DECLS et al.).  Gated on the PS3 PPU target macro
+   (GCC-only build); excluded under __clang__ (clangd cannot model the -isystem
+   #include_next ordering). Inert under host/IDE. */
+#if defined(__lv2ppu__) && !defined(__clang__) && !defined(_SYS_CDEFS_H_)
+# error "PS3DK <sys/cdefs.h> wrapper: real <sys/cdefs.h> not reached; check the include path for newlib's <sys/cdefs.h>."
 #endif
 
 #ifdef __cplusplus

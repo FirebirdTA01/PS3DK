@@ -142,6 +142,8 @@ int setsockopt(int s, int level, int optname, const void *optval,
 int shutdown(int s, int how);
 int socket(int domain, int type, int protocol);
 int socketclose(int s);
+/* The same call under its Winsock-style name; librt defines both. */
+int closesocket(int s);
 
 #ifdef __cplusplus
 }
