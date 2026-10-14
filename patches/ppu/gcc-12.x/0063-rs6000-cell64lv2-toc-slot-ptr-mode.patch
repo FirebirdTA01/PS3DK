@@ -77,7 +77,7 @@ index 5435c45..cb47fa2 100644
 @@ -14723,6 +14723,11 @@ rs6000_indirect_call_template_1 (rtx *operands, unsigned int funop,
    static char str[160];  /* 8 spare */
    char *s = str;
-   const char *ptrload = (Pmode == DImode) ? "d" : "wz";
+   const char *ptrload = TARGET_64BIT ? "d" : "wz";
 +  /* The TOC save slot holds a pointer: a word when pointers are 32 bits,
 +     even where Pmode is DImode (cell64lv2 ILP32).  The PRX import stubs
 +     store the TOC there with stw, so the restore after the call must
