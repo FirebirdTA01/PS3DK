@@ -122,6 +122,12 @@ ilp32-ivspill,tests/regression/ilp32-ivspill/ilp32-ivspill.fake.self,30,RAN-CLEA
 # both PPU decoders.  tests/sdk/ilp32-doloop-codegen-test.sh is the
 # compile-time guard.
 ilp32-doloop,tests/regression/ilp32-doloop/ilp32-doloop.fake.self,30,RAN-CLEAN,DOLOOP PASS,DOLOOP FAIL
+# ilp32-ptr-widen guards GCC patch 0029: under ILP32 a direct conversion of a
+# pointer to a 64-bit integer (signed or unsigned) zero-extends the address;
+# via intptr_t it sign-extends.  Inputs 0x7fffffff, 0x80000000, 0x80001000,
+# 0xffffffff from a separate unit; C and C++.  tests/sdk/
+# ilp32-pointer-widen-codegen-test.sh is the compile-time guard.
+ilp32-ptr-widen,tests/regression/ilp32-ptr-widen/ilp32-ptr-widen.fake.self,30,RAN-CLEAN,PTRWIDEN PASS,PTRWIDEN FAIL
 # ilp32-thunk-vcall guards GCC patch 0056: a virtual-base thunk on the
 # assembly-thunk path added the negative vcall offset zero-extended, so
 # `this' reached the target as this + 2^32 - k.  probe() returns its
