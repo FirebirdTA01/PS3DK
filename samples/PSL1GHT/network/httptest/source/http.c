@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <http/https.h>
 #include <ssl/ssl.h>
 #include <net/net.h>
@@ -6,6 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define HTTP_YES		1
 #define HTTP_NO 		0

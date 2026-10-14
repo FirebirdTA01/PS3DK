@@ -20,6 +20,7 @@
 
 #include <net/net.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 static int SocketFD;
 #define DEBUG_IP "192.168.40.201"
