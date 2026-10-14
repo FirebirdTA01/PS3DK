@@ -44,7 +44,8 @@ difference; then add a regression check for kernel-target output.
 
 ## C++ exceptions are not caught on the PPU in the default ILP32 ABI
 
-**Status:** fixed on main (GCC patch 0037 and the matching CRT change);
+**Status:** fixed on main (GCC patch 0037, now carried by 0059's DImode
+Pmode with 0037 retired, and the matching CRT change);
 affects v0.14.0 and earlier releases.
 
 **Symptom (affected releases).** In the default ILP32 ABI, a C++ throw

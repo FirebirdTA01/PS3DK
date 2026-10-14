@@ -63,11 +63,13 @@ Responsibilities:
   directly (8-byte slots under big-endian put the address in the
   low half and the load returns zero — provoked Layer 11 when
   libgloss was built before the patch landed);
-- spill / reload pointer-typed registers at 32-bit width
-  (`stw r0, X(r1)` / `lwz r0, X(r1)`) under Pmode = SImode, except the
-  frame slots the DWARF unwinder reads as 64-bit registers: callee-saved
-  GPRs, the link-register save slot and the EH data registers r3-r6 are
-  saved and restored with `std` / `ld` (patches 0031 and 0037);
+- save and restore the frame slots the DWARF unwinder reads as 64-bit
+  registers (callee-saved GPRs, the link-register save slot and the EH
+  data registers r3-r6) with `std` / `ld`.  Patches 0031 and 0037 forced
+  this while Pmode was SImode; since 0059 made Pmode DImode the prologue
+  and epilogue use full-width saves on their own, and both patches are
+  retired (tests/sdk/ilp32-callee-save-width-codegen-test.sh and the
+  cxx-eh regression row guard it);
 - provide PS3/Lv-2 target predefines used by SDK headers.
 
 The compact descriptor path means GCC output is not stock PPC64 ELFv1 even

@@ -1,7 +1,8 @@
 // C++ exception regression for the PPU, built for both ABIs.
 //
 // Guards the ILP32 link-register / EH-data-register width fix (GCC patch
-// 0037) and per-thread exception state (patch 0038). Each check prints its
+// 0037, carried by 0059's DImode Pmode since 0037 was retired) and
+// per-thread exception state (patch 0038). Each check prints its
 // name; the run ends with CXX_EH_OK, or CXX_EH_FAIL naming the first check
 // that failed. A regression in either patch shows up as a terminate() or a
 // wrong value here rather than as a silent pass.

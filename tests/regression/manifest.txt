@@ -21,7 +21,8 @@ uniform-readback,tests/regression/uniform-readback/uniform-readback.fake.self,30
 
 # cxx-eh guards PPU C++ exception handling in both ABIs: static-constructor
 # throw, typed catch, RAII destructors plus rethrow, and per-thread
-# exception state on two PPU threads (GCC patches 0037 and 0038).
+# exception state on two PPU threads (GCC patch 0038, and the LR / EH-data
+# width fix of 0037, now carried by 0059's DImode Pmode).
 cxx-eh-ilp32,tests/regression/cxx-eh/cxx-eh-ilp32.fake.self,90,RAN-CLEAN,CXX_EH_OK,CXX_EH_FAIL|terminate
 cxx-eh-lp64,tests/regression/cxx-eh/cxx-eh-lp64.fake.self,90,RAN-CLEAN,CXX_EH_OK,CXX_EH_FAIL|terminate
 # abi-types guards the reference toolchain's type choices (int32_t = int,

@@ -483,6 +483,12 @@ jobs:
       - name: Test -mlp64 requires the 64-bit mode
         run: bash tests/sdk/lp64-requires-64bit-test.sh
 
+      # Callee-saved GPRs and the LR slot are saved at full width (the fixes of
+      # retired patches 0031/0037, carried by 0059).  The embedded controls
+      # always run; the compile leg needs a PPU compiler (release gate).
+      - name: Test callee-save and LR-slot width
+        run: bash tests/sdk/ilp32-callee-save-width-codegen-test.sh
+
       # Skips without PS3DEV; with a PPU toolchain, --gc-sections must keep
       # functions reached only through compact .opd descriptors (binutils 0004).
       - name: Test --gc-sections keeps descriptor-only PPU functions
