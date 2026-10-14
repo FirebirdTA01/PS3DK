@@ -485,6 +485,12 @@ jobs:
       - name: Test ILP32 pointer widening
         run: bash tests/sdk/ilp32-pointer-widen-codegen-test.sh
 
+      # A pointer taken from a by-value aggregate packed in one GPR is never used
+      # as an address with the other member in the high word (retired 0033,
+      # carried by 0059).  Needs a PPU compiler (release gate).
+      - name: Test ILP32 packed by-value arguments
+        run: bash tests/sdk/ilp32-packed-arg-codegen-test.sh
+
       # GCC patch 0066: -mlp64 without the 64-bit mode is refused, judged on the
       # final options (skips without a PPU compiler; runs in the release gate).
       - name: Test -mlp64 requires the 64-bit mode

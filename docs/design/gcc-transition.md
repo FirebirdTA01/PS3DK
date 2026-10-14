@@ -63,6 +63,7 @@ Port map so far:
 | 0050 | retired (0059 gives the doloop counter its full width) |
 | 0031, 0037 | retired together (0037 builds on 0031); full-width callee, LR and EH-data saves come from 0059 |
 | 0029 | **retained**: without it a direct pointer-to-64-bit conversion sign-extends under ILP32 (a semantic fix in `convert.cc`, not a Pmode workaround); guarded by `tests/sdk/ilp32-pointer-widen-codegen-test.sh` and the `ilp32-ptr-widen` row; a candidate for upstream submission |
+| 0033 | retired (0059 canonicalises a pointer taken from a by-value aggregate packed in one GPR); guarded by `tests/sdk/ilp32-packed-arg-codegen-test.sh` |
 
 Exit: full release gate; every ILP32 regression row and codegen test passes
 (`tests/regression/ilp32-*`, `cxx-eh`, `tests/sdk/ilp32-*-codegen-test.sh`,
