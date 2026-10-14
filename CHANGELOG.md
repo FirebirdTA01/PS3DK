@@ -18,6 +18,10 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **`gcmGetControlRegister` is declared with a prototype** (`(void)`), in the
+  SDK and in PSL1GHT's `<rsx/gcm_sys.h>`, and PSL1GHT's librsx no longer
+  passes it an argument.  C23 (the default from GCC 15) reads the old empty
+  list as `(void)` and rejected those calls.
 - **The SDK's own build reaches libc through its wrapper headers.**  The
   `<string.h>`, `<stdio.h>`, `<stdlib.h>`, `<math.h>`, `<time.h>`,
   `<pthread.h>`, `<sys/types.h>`, `<sys/stat.h>` and `<sys/cdefs.h>` wrappers
