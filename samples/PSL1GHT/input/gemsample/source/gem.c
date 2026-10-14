@@ -8,8 +8,10 @@
 #include <sys/spu.h>
 #include <sys/thread.h>
 #include <sys/systime.h>
+#include <string.h>
 
 #include "../include/rsxutil.h"
+#include "../include/gemsample.h"
 
 #define SPURS_PREFIX_NAME "gemsample"
 
@@ -65,7 +67,7 @@ proccessGem (int t)
 
     case 0:
 
-      ret = gemUpdateStart (camread.buffer, camread.timestamp);
+      ret = gemUpdateStart ((const void *) (uintptr_t) camread.buffer, camread.timestamp);
 
       if (ret != 0) {
 	printf ("Return from gemUpdateStart %X\n", ret);
@@ -73,7 +75,7 @@ proccessGem (int t)
       break;
     case 1:
 
-      ret = gemConvertVideoStart (camread.buffer);
+      ret = gemConvertVideoStart ((const void *) (uintptr_t) camread.buffer);
 
       if (ret != 0) {
 	printf ("Return from gemConvertVideoStart %X\n", ret);

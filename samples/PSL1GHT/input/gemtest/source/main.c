@@ -563,7 +563,7 @@ initGem ()
 
   gem_attr.version = 2;
   gem_attr.max = 1;
-  gem_attr.spurs = (u32) (u64) & spurs;
+  gem_attr.spurs = &spurs;
   gem_attr.memory = 0;
   for (i = 0; i < 8; ++i)
     gem_attr.spu_priorities[i] = 1;
@@ -586,8 +586,8 @@ initGem ()
   buffer_mem = (void *) memalign (128, 640 * 480);
   video_out = (void *) malloc (640 * 480 * 4);  // TODO always is empty i don't
   // know why
-  gem_video_convert.buffer_memory = (u64) buffer_mem;
-  gem_video_convert.video_data_out = (u64) video_out;
+  gem_video_convert.buffer_memory = buffer_mem;
+  gem_video_convert.video_data_out = video_out;
   gem_video_convert.alpha = 255;
 
   ret = gemPrepareVideoConvert (&gem_video_convert);    // return 0 but it does

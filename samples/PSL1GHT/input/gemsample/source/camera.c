@@ -3,6 +3,7 @@
 #include <io/camera.h>
 #include <ppu-types.h>
 #include <../include/rsxutil.h>
+#include <io/move.h>
 
 sys_mem_container_t container;
 

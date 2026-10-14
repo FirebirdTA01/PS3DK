@@ -35,6 +35,7 @@
 
 #include <io/pad.h>
 #include "rsxutil.h"
+#include "gemsample.h"
 #include <sysmodule/sysmodule.h>
 #include <sysutil/sysutil.h>
 #include <sys/memory.h>
