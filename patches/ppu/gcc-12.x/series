@@ -43,3 +43,4 @@
 0064-rs6000-cell64lv2-fp-displacement-multiple-of-4.patch
 0065-rs6000-cell64lv2-toc-int-entry-ptr-mode.patch
 0066-rs6000-cell64lv2-lp64-requires-64bit.patch
+0067-rs6000-stack-protector-ptr-mode.patch
