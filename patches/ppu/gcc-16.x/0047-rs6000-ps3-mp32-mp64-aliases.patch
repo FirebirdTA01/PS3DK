@@ -1,0 +1,19 @@
+rs6000: accept -mp32 and -mp64 on the PS3 targets
+
+PS3 makefiles select the data model with -mp32 (32-bit pointers, the
+default) and -mp64.  Make them aliases of -mno-lp64 and -mlp64.
+
+--- a/gcc/config/rs6000/ps3-lp64.opt
++++ b/gcc/config/rs6000/ps3-lp64.opt
+@@ -26,3 +26,11 @@
+ mlp64
+ Target Mask(LP64) Var(rs6000_isa_flags)
+ Use LP64 data model (64-bit pointers and longs).
++
++mp32
++Target RejectNegative Alias(mlp64) NegativeAlias
++Use the ILP32 data model (32-bit pointers); the default.  Same as -mno-lp64.
++
++mp64
++Target RejectNegative Alias(mlp64)
++Use the LP64 data model (64-bit pointers).  Same as -mlp64.

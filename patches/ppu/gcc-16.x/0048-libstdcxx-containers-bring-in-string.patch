@@ -1,0 +1,85 @@
+libstdc++: containers and <iterator> also bring in <string>
+
+PS3 code routinely uses std::string after including only <vector>,
+<deque>, <list>, <map>, <set> or <iterator>.  Include <string> at the
+end of those headers.  <string> itself only includes bits/ headers, so
+this adds no cycle.
+
+diff --git a/libstdc++-v3/include/std/deque b/libstdc++-v3/include/std/deque
+index 3899b68..f3123f2 100644
+--- a/libstdc++-v3/include/std/deque
++++ b/libstdc++-v3/include/std/deque
+@@ -116,4 +116,8 @@ _GLIBCXX_END_NAMESPACE_VERSION
+ } // namespace std
+ #endif // __cpp_lib_erase_if
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_DEQUE */
+diff --git a/libstdc++-v3/include/std/iterator b/libstdc++-v3/include/std/iterator
+index 96696cc..3622dba 100644
+--- a/libstdc++-v3/include/std/iterator
++++ b/libstdc++-v3/include/std/iterator
+@@ -83,4 +83,8 @@
+ #include <bits/ranges_base.h> // ranges::distance, ranges::next, ranges::prev
+ #endif
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_ITERATOR */
+diff --git a/libstdc++-v3/include/std/list b/libstdc++-v3/include/std/list
+index a3e7c81..559b285 100644
+--- a/libstdc++-v3/include/std/list
++++ b/libstdc++-v3/include/std/list
+@@ -118,4 +118,8 @@ _GLIBCXX_END_NAMESPACE_VERSION
+ } // namespace std
+ #endif // __cpp_lib_erase_if
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_LIST */
+diff --git a/libstdc++-v3/include/std/map b/libstdc++-v3/include/std/map
+index 66edadb..52a0c57 100644
+--- a/libstdc++-v3/include/std/map
++++ b/libstdc++-v3/include/std/map
+@@ -125,4 +125,8 @@ _GLIBCXX_END_NAMESPACE_VERSION
+ } // namespace std
+ #endif // __cpp_lib_erase_if
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_MAP */
+diff --git a/libstdc++-v3/include/std/set b/libstdc++-v3/include/std/set
+index dc550f1..8c7f036 100644
+--- a/libstdc++-v3/include/std/set
++++ b/libstdc++-v3/include/std/set
+@@ -118,4 +118,8 @@ _GLIBCXX_END_NAMESPACE_VERSION
+ } // namespace std
+ #endif // __cpp_lib_erase_if
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_SET */
+diff --git a/libstdc++-v3/include/std/vector b/libstdc++-v3/include/std/vector
+index 343483e..a03e2f8 100644
+--- a/libstdc++-v3/include/std/vector
++++ b/libstdc++-v3/include/std/vector
+@@ -166,4 +166,8 @@ _GLIBCXX_END_NAMESPACE_VERSION
+ } // namespace std
+ #endif // __glibcxx_format_ranges
+ 
++// PS3 code expects std::string to be available after including any
++// container or <iterator>, so bring it in here.
++#include <string>
++
+ #endif /* _GLIBCXX_VECTOR */

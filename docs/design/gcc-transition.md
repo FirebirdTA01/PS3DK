@@ -142,6 +142,19 @@ the previous release stays the documented fallback.  No release ships both.
 Exit: full release gate on the 16-based package, plus the five checks above,
 plus EMP acceptance.
 
+Port map (`patches/ppu/gcc-16.x/`, against `releases/gcc-16.1.0`; every
+patch applies with `--fuzz=0`):
+
+| Patch | GCC 16 result |
+|---|---|
+| the other 38 | ported unchanged: byte-identical to `gcc-12.x` |
+| 0005, 0048, 0061, 0067 | ported, context refreshed: their hunks needed fuzz against 16.1; the added and removed lines are unchanged |
+| 0001, 0024 | rewritten: `dbxelf.h` (removed in GCC 13 with STABS) and `usegas.h` (removed in 16) leave the `tm_file` lists.  `usegas.h` only defined `USE_GAS`, which is read by the Solaris and HP-UX headers, none of them ours; context refreshed |
+| 0009, 0010 | rewritten: each also adds the `.opt.urls` file that GCC 14 and later require beside every `.opt`.  Our options are not in the GCC manual, so the file holds only the header line that `regenerate-opt-urls.py` would emit |
+
+The series reproduces the tree that built the exploratory compiler and passed
+the stage-2 guards byte for byte (`tests/host/gcc16-series-test.sh`).
+
 ## Stage 3: SPU on GCC 16
 
 GCC 10 removed the SPU backend: about 6,800 lines in `gcc/config/spu`, 3,200

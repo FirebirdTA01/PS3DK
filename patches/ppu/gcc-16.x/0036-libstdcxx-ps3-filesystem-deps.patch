@@ -1,0 +1,56 @@
+PS3: select filesystem fallbacks for interfaces missing from the Lv-2 runtime.
+
+The newlib build skips GLIBCXX_CROSSCONFIG (including patch 0006), so apply
+the cache overrides directly before the filesystem checks. GCC_NO_EXECUTABLES
+can make these checks compile-only, accepting declarations without definitions.
+The generated configure was produced with Autoconf 2.69; unchanged-input
+regeneration first matched the GCC 12.4 configure byte for byte.
+
+diff --git a/libstdc++-v3/configure.ac b/libstdc++-v3/configure.ac
+--- a/libstdc++-v3/configure.ac
++++ b/libstdc++-v3/configure.ac
+@@ -494,6 +494,20 @@
+ # For Filesystem TS.
+ AC_CHECK_HEADERS([fcntl.h dirent.h sys/statvfs.h utime.h])
+ GLIBCXX_ENABLE_FILESYSTEM_TS
++# PS3 newlib declares these interfaces, but the Lv-2 runtime does not
++# implement them. Compile-only cross probes would otherwise enable them.
++# This must also run with --with-newlib, which skips GLIBCXX_CROSSCONFIG.
++case "${host}" in
++  powerpc64-ps3-elf*)
++    glibcxx_cv_openat=no
++    glibcxx_cv_fdopendir=no
++    glibcxx_cv_unlinkat=no
++    glibcxx_cv_fchmodat=no
++    glibcxx_cv_symlink=no
++    glibcxx_cv_readlink=no
++    glibcxx_cv_fchmod=no
++    ;;
++esac
+ GLIBCXX_CHECK_FILESYSTEM_DEPS
+ 
+ GLIBCXX_ENABLE_BACKTRACE
+diff --git a/libstdc++-v3/configure b/libstdc++-v3/configure
+--- a/libstdc++-v3/configure
++++ b/libstdc++-v3/configure
+@@ -76283,6 +76283,20 @@
+ $as_echo "$enable_libstdcxx_filesystem_ts" >&6; }
+ 
+ 
++# PS3 newlib declares these interfaces, but the Lv-2 runtime does not
++# implement them. Compile-only cross probes would otherwise enable them.
++# This must also run with --with-newlib, which skips GLIBCXX_CROSSCONFIG.
++case "${host}" in
++  powerpc64-ps3-elf*)
++    glibcxx_cv_openat=no
++    glibcxx_cv_fdopendir=no
++    glibcxx_cv_unlinkat=no
++    glibcxx_cv_fchmodat=no
++    glibcxx_cv_symlink=no
++    glibcxx_cv_readlink=no
++    glibcxx_cv_fchmod=no
++    ;;
++esac
+ 
+   ac_ext=cpp
+ ac_cpp='$CXXCPP $CPPFLAGS'

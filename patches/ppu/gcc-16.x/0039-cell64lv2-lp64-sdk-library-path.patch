@@ -1,0 +1,35 @@
+cell64lv2: search the LP64 SDK library directory first under -mlp64.
+
+The lib_lv2 link spec adds -L $PS3DK/ppu/lib, where the ILP32 SDK
+archives live.  The LP64 builds of liblv2, liblv2_stub, libc_stub and the
+other SDK libraries are in $PS3DK/ppu/lib/lp64, but the spec never added
+that directory, and a -L supplied by a spec is not adjusted for the
+multilib.  An -mlp64 link that did not add -L .../lp64 itself (a plain
+driver link, or a target that opts into -mlp64 under the ILP32 CMake
+toolchain file) therefore took the ILP32 liblv2/stub archives and
+produced a mixed-ABI executable.  The LP64 CMake toolchain file already
+adds the directory, so whole-LP64 CMake projects were not affected.
+
+Under -mlp64, add -L $PS3DK/ppu/lib/lp64 ahead of the flat directory.
+The flat directory stays as a fallback, and an earlier user -L still takes
+precedence, so a library that has no LP64 build is still found (as the
+ILP32 archive); this fixes the default search, it does not reject every
+mixed-ABI link.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -293,9 +293,12 @@
+    compile time and resolves -L against $PS3DK/ppu/lib (which is where
+    build-psl1ght.sh / build-sdk.sh install libsysbase, librt, liblv2,
+    libc, and the reference SDK stub archives).  --start-group / --end-group
+-   resolve circular deps between newlib, lv2 stubs, and libsysbase.  */
++   resolve circular deps between newlib, lv2 stubs, and libsysbase.
++   Under -mlp64 the LP64 archives live in $PS3DK/ppu/lib/lp64; that
++   directory must be searched first, or an LP64 link silently takes the
++   ILP32 liblv2/stub archives and produces a mixed-ABI executable.  */
+ #define LIB_LV2_SPEC \
+-  "-L %:getenv(PS3DK /ppu/lib) --start-group -lsysbase -lc -lrt -llv2 -llv2_stub -lc_stub --end-group"
++  "%{mlp64:-L %:getenv(PS3DK /ppu/lib/lp64)} -L %:getenv(PS3DK /ppu/lib) --start-group -lsysbase -lc -lrt -llv2 -llv2_stub -lc_stub --end-group"
+ 
+ #define STARTFILE_LV2_SPEC \
+   "lv2-crti.o%s crtbegin.o%s lv2-crt0.o%s lv2-sprx.o%s"

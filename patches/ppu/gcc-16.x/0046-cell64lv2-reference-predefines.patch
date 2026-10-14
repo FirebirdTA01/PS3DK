@@ -1,0 +1,26 @@
+rs6000: predefine the reference PS3 platform macros on cell64lv2
+
+The reference PS3 compiler predefines __CELLOS_LV2__ and __STRICT_ALIGNED,
+and in the default ILP32 model __LP32__, _LP32 and __POINTER_32BIT__.
+Reference headers and samples select their PS3 code paths on them; without
+__CELLOS_LV2__ a sample framework took its host branch and never saw the
+vector math it includes for the PS3.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -314,8 +314,14 @@
+ 
+ #define LINK_START_LV2_SPEC "-T lv2.ld%s"
+ 
++/* The reference PS3 compiler predefines __CELLOS_LV2__ and
++   __STRICT_ALIGNED, and in the default ILP32 model __LP32__, _LP32 and
++   __POINTER_32BIT__; reference headers and samples select their PS3
++   code paths on them.  */
+ #define CPP_OS_LV2_SPEC \
+-  "-D__lv2ppu__ -ffunction-sections -fdata-sections"
++  "-D__lv2ppu__ -D__CELLOS_LV2__ -D__STRICT_ALIGNED " \
++  "%{!mlp64:-D__LP32__ -D_LP32 -D__POINTER_32BIT__} " \
++  "-ffunction-sections -fdata-sections"
+ 
+ /* -----------------------------------------------------------------------
+    Endian / emulation.

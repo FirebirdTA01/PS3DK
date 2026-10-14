@@ -1,0 +1,132 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: the TOC save slot is pointer-sized (cell64lv2 ILP32)
+
+The PRX import stubs save the caller's TOC with a 4-byte stw at 40(r1)
+and restore it with lwz.  With Pmode DImode (0059) the compiler saved the
+TOC around an indirect call with std and restored it with ld, at the same
+40(r1).  When the function pointer points at an imported function, the
+stub runs between the two and stw's the TOC into the high word of the
+caller's doubleword, so the caller's ld returns the TOC in both halves
+(0x00069b00_00069b00) and its next TOC-relative access faults.  0060
+(save at each call) narrows the window but cannot close it, because the
+stub writes into the caller's slot during the call itself.
+
+The slot holds a pointer, so it is now accessed in ptr_mode everywhere:
+the save before an indirect call (rs6000_call_aix), the restore printed
+by the call template, the prologue save (-msave-toc-indirect and the
+shrink-wrapped component), and the eh_return save/restore together with
+its "does the caller restore r2" instruction check.  On every other
+target ptr_mode is Pmode and nothing changes; for ILP32 this is the
+word-sized access v0.22 and earlier already used, so objects built by
+earlier compilers and the existing stubs agree with it.
+
+diff --git a/gcc/config/rs6000/rs6000-logue.cc b/gcc/config/rs6000/rs6000-logue.cc
+index 28a6338..10c4617 100644
+--- a/gcc/config/rs6000/rs6000-logue.cc
++++ b/gcc/config/rs6000/rs6000-logue.cc
+@@ -2827,7 +2827,8 @@ rs6000_emit_prologue_components (sbitmap components)
+   /* Prologue for TOC.  */
+   if (bitmap_bit_p (components, 2))
+     {
+-      rtx reg = gen_rtx_REG (reg_mode, TOC_REGNUM);
++      /* The TOC save slot is pointer-sized (see rs6000_call_aix).  */
++      rtx reg = gen_rtx_REG (ptr_mode, TOC_REGNUM);
+       rtx sp_reg = gen_rtx_REG (Pmode, STACK_POINTER_REGNUM);
+       emit_insn (gen_frame_store (reg, sp_reg, RS6000_TOC_SAVE_SLOT));
+     }
+@@ -3513,7 +3514,7 @@ rs6000_emit_prologue (void)
+ 	 be updated if we arrived at this function via a plt call or
+ 	 toc adjusting stub.  */
+       emit_move_insn (tmp_reg_si, gen_rtx_MEM (SImode, tmp_reg));
+-      toc_restore_insn = ((TARGET_32BIT ? 0x80410000 : 0xE8410000)
++      toc_restore_insn = ((ptr_mode == SImode ? 0x80410000 : 0xE8410000)
+ 			  + RS6000_TOC_SAVE_SLOT);
+       hi = gen_int_mode (toc_restore_insn & ~0xffff, SImode);
+       emit_insn (gen_xorsi3 (tmp_reg_si, tmp_reg_si, hi));
+@@ -3532,7 +3533,7 @@ rs6000_emit_prologue (void)
+       JUMP_LABEL (jump) = toc_save_done;
+       LABEL_NUSES (toc_save_done) += 1;
+ 
+-      save_insn = emit_frame_save (frame_reg_rtx, reg_mode,
++      save_insn = emit_frame_save (frame_reg_rtx, ptr_mode,
+ 				   TOC_REGNUM, frame_off + RS6000_TOC_SAVE_SLOT,
+ 				   sp_off - frame_off);
+ 
+@@ -3934,7 +3935,7 @@ rs6000_emit_prologue (void)
+   if (rs6000_save_toc_in_prologue_p ()
+       && !cfun->machine->toc_is_wrapped_separately)
+     {
+-      rtx reg = gen_rtx_REG (reg_mode, TOC_REGNUM);
++      rtx reg = gen_rtx_REG (ptr_mode, TOC_REGNUM);
+       emit_insn (gen_frame_store (reg, sp_reg_rtx, RS6000_TOC_SAVE_SLOT));
+     }
+ 
+@@ -4869,7 +4870,7 @@ rs6000_emit_epilogue (enum epilogue_type epilogue_type)
+ 
+       if (TARGET_AIX)
+ 	{
+-	  rtx reg = gen_rtx_REG (reg_mode, 2);
++	  rtx reg = gen_rtx_REG (ptr_mode, 2);
+ 	  emit_insn (gen_frame_load (reg, frame_reg_rtx,
+ 				     frame_off + RS6000_TOC_SAVE_SLOT));
+ 	}
+diff --git a/gcc/config/rs6000/rs6000.cc b/gcc/config/rs6000/rs6000.cc
+index 5435c45..cb47fa2 100644
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -14723,6 +14723,11 @@ rs6000_indirect_call_template_1 (rtx *operands, unsigned int funop,
+   static char str[160];  /* 8 spare */
+   char *s = str;
+   const char *ptrload = TARGET_64BIT ? "d" : "wz";
++  /* The TOC save slot holds a pointer: a word when pointers are 32 bits,
++     even where Pmode is DImode (cell64lv2 ILP32).  The PRX import stubs
++     store the TOC there with stw, so the restore after the call must
++     read the same word.  */
++  const char *tocload = (ptr_mode == DImode) ? "d" : "wz";
+ 
+   if (DEFAULT_ABI == ABI_AIX)
+ #ifdef POWERPC_CELL64LV2
+@@ -14789,12 +14794,12 @@ rs6000_indirect_call_template_1 (rtx *operands, unsigned int funop,
+ 	sprintf (s,
+ 		 "b%%T%ul\n\t"
+ 		 "l%s 2,%%%u(1)",
+-		 funop, ptrload, funop + 4);
++		 funop, tocload, funop + 4);
+       else
+ 	sprintf (s,
+ 		 "beq%%T%ul-\n\t"
+ 		 "l%s 2,%%%u(1)",
+-		 funop, ptrload, funop + 4);
++		 funop, tocload, funop + 4);
+     }
+   else if (DEFAULT_ABI == ABI_ELFv2)
+     {
+@@ -25716,9 +25721,9 @@ rs6000_call_aix (rtx value, rtx func_desc, rtx tlsarg, rtx cookie)
+ 	  else
+ 	    {
+ 	      rtx stack_ptr = gen_rtx_REG (Pmode, STACK_POINTER_REGNUM);
+-	      rtx stack_toc_mem = gen_frame_mem (Pmode,
+-						 gen_rtx_PLUS (Pmode, stack_ptr,
+-							       stack_toc_offset));
++	      rtx stack_toc_addr = gen_rtx_PLUS (Pmode, stack_ptr,
++						 stack_toc_offset);
++	      rtx stack_toc_mem = gen_frame_mem (Pmode, stack_toc_addr);
+ 	      MEM_VOLATILE_P (stack_toc_mem) = 1;
+ 	      if (is_pltseq_longcall)
+ 		{
+@@ -25726,6 +25731,15 @@ rs6000_call_aix (rtx value, rtx func_desc, rtx tlsarg, rtx cookie)
+ 		  rtx mark_toc_reg = gen_rtx_UNSPEC (Pmode, v, UNSPEC_PLTSEQ);
+ 		  emit_insn (gen_rtx_SET (stack_toc_mem, mark_toc_reg));
+ 		}
++	      else if (ptr_mode != Pmode)
++		{
++		  /* Save the word the call template restores and the PRX
++		     import stubs store.  */
++		  rtx toc_word_mem = gen_frame_mem (ptr_mode, stack_toc_addr);
++		  MEM_VOLATILE_P (toc_word_mem) = 1;
++		  emit_move_insn (toc_word_mem,
++				  gen_lowpart (ptr_mode, toc_reg));
++		}
+ 	      else
+ 		emit_move_insn (stack_toc_mem, toc_reg);
+ 	    }

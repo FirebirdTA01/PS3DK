@@ -1,0 +1,21 @@
+diff --git a/gcc/config.gcc b/gcc/config.gcc
+index 8fe9961..4017ea6 100644
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -3065,6 +3065,16 @@ powerpc64-*-darwin*)
+ 	tmake_file="${tmake_file} ${cpu_type}/t-darwin64-biarch t-slibgcc"
+ 	tm_file="${tm_file} ${cpu_type}/darwin64-biarch.h"
+ 	;;
++powerpc64-ps3-elf*)
++	tm_file="${tm_file} elfos.h gnu-user.h freebsd-spec.h newlib-stdint.h rs6000/sysv4.h rs6000/default64.h"
++	tm_file="rs6000/biarch64.h ${tm_file} rs6000/cell64lv2.h"
++	if test x${enable_secureplt} = xyes; then
++		tm_file="rs6000/secureplt.h ${tm_file}"
++	fi
++	extra_options="${extra_options} rs6000/sysv4.opt rs6000/linux64.opt rs6000/ps3-lp64.opt"
++	tmake_file="rs6000/t-fprules rs6000/t-ppccomm rs6000/t-cell64lv2"
++	use_gcc_stdint=wrap
++	;;
+ powerpc*-*-freebsd*)
+ 	tm_file="${tm_file} elfos.h gnu-user.h ${fbsd_tm_file} rs6000/sysv4.h"
+ 	extra_options="${extra_options} rs6000/sysv4.opt"

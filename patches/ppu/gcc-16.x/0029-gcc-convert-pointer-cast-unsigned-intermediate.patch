@@ -1,0 +1,39 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] gcc/convert: use unsigned intermediate for pointer-to-int cast
+
+When converting a pointer to an integer type, convert_to_integer_1
+already comments that the intermediate type should be an unsigned
+integer of the pointer's precision.  The code, however, passes 0
+(signed) for the unsignedp flag in the type_for_size call:
+
+    expr = fold_build1 (CONVERT_EXPR,
+                        lang_hooks.types.type_for_size
+                          (TYPE_PRECISION (intype), 0),
+                        expr);
+
+Under the default ILP32 hybrid ABI on powerpc64-ps3-elf, pointers are
+32-bit but live in 64-bit GPRs.  When user code writes (uint64_t)ptr
+or otherwise casts a pointer to a wider unsigned type, the conversion
+flows through this code path.  With the signed intermediate type, GCC
+sign-extends the pointer value to 64 bits; for any pointer whose bit
+31 is set (e.g. user-mode stack addresses in the 0xd0xxxxxx range)
+that produces 0xffffffff_xxxxxxxx, and the upper 0xffffffff bits
+propagate into subsequent arithmetic or memory access.  Concrete
+example surfaced today: the lv2 syscall wrappers' (u64)ptr cast
+landed sign-extended addresses in syscall argument registers.
+
+Change the intermediate to unsigned, matching the comment.  The
+existing 32-bit precision cases keep their two-step convert; the
+behavior is now identical to what the comment promised all along.
+
+--- a/gcc/convert.cc
++++ b/gcc/convert.cc
+@@ -644,7 +644,7 @@
+ 	return build1 (CONVERT_EXPR, type, expr);
+       expr = fold_build1 (CONVERT_EXPR,
+ 			  lang_hooks.types.type_for_size
+-			    (TYPE_PRECISION (intype), 0),
++			    (TYPE_PRECISION (intype), 1),
+ 			  expr);
+       return fold_convert (type, expr);
+ 

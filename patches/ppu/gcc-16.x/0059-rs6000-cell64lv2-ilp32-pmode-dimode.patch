@@ -1,0 +1,263 @@
+rs6000: form ILP32 addresses in 64-bit registers (Pmode DImode, ptr_mode SImode)
+
+The cell64lv2 ILP32 data model kept Pmode at SImode, so the compiler formed
+addresses in 32-bit modes while the PPU uses all 64 bits of a base register.
+Any 32-bit address value whose upper half was not cleared (a spilled IV
+bias reloaded with lwz, a trip count in CTR) reached the hardware with bit
+32 set; 0049 (no ivopts, removed with this patch) and 0050 (doloop width)
+patched two instances.
+
+Make Pmode DImode whenever the 64-bit ISA is on and keep POINTER_SIZE at 32
+under ILP32, so ptr_mode stays SImode: pointers are 32-bit in memory and
+zero-extended (POINTERS_EXTEND_UNSIGNED) into 64-bit registers to address.
+A symbolic address computed from the TOC pointer (local data, constant-pool
+labels) or a TLS address is built at Pmode width and then narrowed.  A symbol
+or label reached through a TOC entry keeps a pointer-sized (4-byte) entry
+loaded with lwz, as the reference toolchain does (ADDR32 relocations in .toc).
+output_toc sizes a symbolic entry by the mode it was created in, so a 4-byte
+slot is always read with lwz and an 8-byte one with ld; the -mminimal-toc
+base slot is 4 bytes and load_toc_aix_di reads it with lwz.  AltiVec memory builtins
+extend a ptr_mode pointer argument to Pmode before forcing it into a register
+(the expanders asserted in copy_to_mode_reg, e.g. on vec_lvsl): the pointer
+zero-extends (a constant one too, so 0x80000000 stays positive, and a symbolic
+one loads through its 4-byte TOC entry), while the byte offset is a signed int
+and sign-extends.
+
+EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -3694,6 +3694,9 @@
+   /* Set the pointer size.  */
+   /* Pointer width follows the data model selected by -mlp64; the 64-bit
+      ISA is always available regardless. */
++  /* EXPERIMENT (t_3b6c018a): addresses are formed in full 64-bit registers
++     whenever the 64-bit ISA is on; only the in-memory pointer (ptr_mode,
++     from POINTER_SIZE) follows the data model.  */
+   if (TARGET_LP64)
+     {
+       rs6000_pmode = DImode;
+@@ -3701,7 +3704,7 @@
+     }
+   else
+     {
+-      rs6000_pmode = SImode;
++      rs6000_pmode = TARGET_64BIT ? DImode : SImode;
+       rs6000_pointer_size = 32;
+     }
+ 
+@@ -10584,6 +10587,48 @@
+       && !gpc_reg_operand (operands[1], mode))
+     operands[1] = force_reg (mode, operands[1]);
+ 
++  /* cell64lv2 ILP32 (t_3b6c018a): pointers are SImode in memory (ptr_mode)
++     but addresses are formed in DImode registers (Pmode).  Build a symbolic
++     address (including a thread-local one) at Pmode width, then narrow it
++     to the pointer.  */
++  if (mode == ptr_mode && ptr_mode != Pmode
++      && can_create_pseudo_p ()
++      && (SYMBOL_REF_P (operands[1]) || GET_CODE (operands[1]) == LABEL_REF
++	  || (GET_CODE (operands[1]) == CONST
++	      && !CONST_INT_P (XEXP (operands[1], 0)))))
++    {
++      rtx base = operands[1];
++      if (GET_CODE (base) == CONST && GET_CODE (XEXP (base, 0)) == PLUS)
++	base = XEXP (XEXP (base, 0), 0);
++      bool direct = (!TARGET_TOC
++		     || tls_referenced_p (operands[1])
++		     || (SYMBOL_REF_P (base)
++			 && use_toc_relative_ref (base, Pmode)));
++      if (direct)
++	{
++	  /* An address computed from the TOC pointer (or a TLS address) is
++	     formed at Pmode width, then narrowed to the pointer.  */
++	  rtx addr = convert_memory_address (Pmode, operands[1]);
++	  rtx tmp = gen_reg_rtx (Pmode);
++	  rs6000_emit_move (tmp, addr, Pmode);
++	  emit_move_insn (operands[0], gen_lowpart (ptr_mode, tmp));
++	  return;
++	}
++      /* Otherwise the address lives in a pointer-sized TOC entry: load it
++	 with lwz from a 4-byte slot, as the reference toolchain does.  */
++      rtx mem = force_const_mem (ptr_mode, operands[1]);
++      if (mem
++	  && SYMBOL_REF_P (XEXP (mem, 0))
++	  && use_toc_relative_ref (XEXP (mem, 0), ptr_mode))
++	{
++	  rtx tocref = create_TOC_reference (XEXP (mem, 0), NULL_RTX);
++	  mem = gen_const_mem (ptr_mode, tocref);
++	  set_mem_alias_set (mem, get_TOC_alias_set ());
++	  emit_move_insn (operands[0], mem);
++	  return;
++	}
++    }
++
+   /* Recognize the case where operand[1] is a reference to thread-local
+      data and load its address to a register.  */
+   if (tls_referenced_p (operands[1]))
+@@ -17310,7 +17355,8 @@
+        even though TARGET_64BIT is set; gate on Pmode rather than
+        TARGET_32BIT so the .toc input section gets 4-byte slots that
+        a `lwz @toc@l(r2)` load can read directly.  */
+-    fputs (Pmode == SImode ? "\t.long " : DOUBLE_INT_ASM_OP, file);
++    fputs ((mode == VOIDmode ? ptr_mode : mode) == SImode
++	   ? "\t.long " : DOUBLE_INT_ASM_OP, file);
+   else
+     {
+       fputs ("\t.tc ", file);
+@@ -20333,7 +20379,7 @@
+ 	  (*targetm.asm_out.internal_label) (asm_out_file, "LCTOC", 0);
+ 	  /* CellOS Lv-2 hybrid ILP32: a TOC slot is one 32-bit address word
+ 	     (see output_toc), and load_toc_aix_si reads it with lwz.  */
+-	  if (TARGET_64BIT && Pmode == SImode)
++	  if (TARGET_64BIT && ptr_mode == SImode)
+ 	    fprintf (asm_out_file, "\t.long ");
+ 	  else
+ 	    {
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -10888,7 +10888,9 @@
+     strcat (buf, "@toc");
+   operands[1] = gen_rtx_SYMBOL_REF (Pmode, ggc_strdup (buf));
+   operands[2] = gen_rtx_REG (Pmode, 2);
+-  return "ld %0,%1(%2)";
++  /* cell64lv2 ILP32: the minimal-TOC base sits in a 4-byte pointer slot;
++     lwz zero-extends it into the 64-bit base register.  */
++  return ptr_mode == SImode ? "lwz %0,%1(%2)" : "ld %0,%1(%2)";
+ }
+   [(set_attr "type" "load")
+    (set_attr "update" "no")
+--- a/gcc/config/rs6000/rs6000-builtin.cc
++++ b/gcc/config/rs6000/rs6000-builtin.cc
+@@ -1078,6 +1078,36 @@
+     }
+ }
+ 
++
++/* cell64lv2 ILP32 (t_3b6c018a): a pointer argument of a builtin can be in
++   ptr_mode (SImode) while addresses are formed in Pmode (DImode).  Extend it
++   to Pmode (POINTERS_EXTEND_UNSIGNED) before forcing it into a register.  */
++static rtx
++rs6000_copy_addr_to_pmode_reg (rtx x)
++{
++  /* A constant pointer is held sign-normalized in ptr_mode, so a high-bit
++     address such as 0x80000000 arrives negative: zero-extend it.  */
++  if (CONST_INT_P (x) && ptr_mode != Pmode)
++    x = GEN_INT (UINTVAL (x) & GET_MODE_MASK (ptr_mode));
++  else if (CONSTANT_P (x) && ptr_mode != Pmode)
++    /* Load a symbolic address through its 4-byte ptr_mode TOC entry, as
++       every other address is, rather than a Pmode one.  */
++    x = convert_memory_address (Pmode, force_reg (ptr_mode, x));
++  else if (GET_MODE (x) != Pmode && GET_MODE (x) != VOIDmode)
++    x = convert_memory_address (Pmode, x);
++  return copy_to_mode_reg (Pmode, x);
++}
++
++/* A byte offset operand of the same builtins is a signed integer: extend it
++   with its sign, not as a pointer, before adding it to the Pmode base.  */
++static rtx
++rs6000_copy_offset_to_pmode_reg (rtx x)
++{
++  if (GET_MODE (x) != Pmode && GET_MODE (x) != VOIDmode)
++    x = convert_to_mode (Pmode, x, 0);
++  return copy_to_mode_reg (Pmode, x);
++}
++
+ /* Expand the MMA built-ins early, so that we can convert the pass-by-reference
+    __vector_quad arguments into pass-by-value arguments, leading to more
+    efficient code generation.  */
+@@ -2780,7 +2810,7 @@
+       || !insn_data[icode].operand[0].predicate (target, tmode))
+     target = gen_reg_rtx (tmode);
+ 
+-  op[1] = copy_to_mode_reg (Pmode, op[1]);
++  op[1] = rs6000_copy_addr_to_pmode_reg (op[1]);
+ 
+   /* These CELL built-ins use BLKmode instead of tmode for historical
+      (i.e., unknown) reasons.  TODO: Is this necessary?  */
+@@ -2808,7 +2838,7 @@
+ 	rawaddr = op[1];
+       else
+ 	{
+-	  op[0] = copy_to_mode_reg (Pmode, op[0]);
++	  op[0] = rs6000_copy_offset_to_pmode_reg (op[0]);
+ 	  rawaddr = gen_rtx_PLUS (Pmode, op[1], op[0]);
+ 	}
+       rtx addr = gen_rtx_AND (Pmode, rawaddr, gen_rtx_CONST_INT (Pmode, -16));
+@@ -2823,7 +2853,7 @@
+ 	addr = gen_rtx_MEM (blk ? BLKmode : tmode, op[1]);
+       else
+ 	{
+-	  op[0] = copy_to_mode_reg (Pmode, op[0]);
++	  op[0] = rs6000_copy_offset_to_pmode_reg (op[0]);
+ 	  addr = gen_rtx_MEM (blk ? BLKmode : tmode,
+ 			      gen_rtx_PLUS (Pmode, op[1], op[0]));
+ 	}
+@@ -2844,13 +2874,13 @@
+ 		       machine_mode tmode, machine_mode smode)
+ {
+   rtx pat, addr;
+-  op[1] = copy_to_mode_reg (Pmode, op[1]);
++  op[1] = rs6000_copy_addr_to_pmode_reg (op[1]);
+ 
+   if (op[0] == const0_rtx)
+     addr = gen_rtx_MEM (tmode, op[1]);
+   else
+     {
+-      op[0] = copy_to_mode_reg (Pmode, op[0]);
++      op[0] = rs6000_copy_offset_to_pmode_reg (op[0]);
+       addr = gen_rtx_MEM (smode,
+ 			  gen_rtx_PLUS (Pmode, op[1], op[0]));
+     }
+@@ -2900,13 +2930,13 @@
+ 		       machine_mode tmode, machine_mode smode)
+ {
+   rtx pat, addr;
+-  op[1] = copy_to_mode_reg (Pmode, op[1]);
++  op[1] = rs6000_copy_addr_to_pmode_reg (op[1]);
+ 
+   if (op[0] == const0_rtx)
+     addr = gen_rtx_MEM (tmode, op[1]);
+   else
+     {
+-      op[0] = copy_to_mode_reg (Pmode, op[0]);
++      op[0] = rs6000_copy_offset_to_pmode_reg (op[0]);
+       addr = gen_rtx_MEM (smode,
+ 			  gen_rtx_PLUS (Pmode, op[1], op[0]));
+     }
+@@ -2923,7 +2953,7 @@
+ stv_expand_builtin (insn_code icode, rtx *op,
+ 		    machine_mode tmode, machine_mode smode)
+ {
+-  op[2] = copy_to_mode_reg (Pmode, op[2]);
++  op[2] = rs6000_copy_addr_to_pmode_reg (op[2]);
+ 
+   /* For STVX, express the RTL accurately by ANDing the address with -16.
+      STVXL and STVE*X expand to use UNSPECs to hide their special behavior,
+@@ -2943,7 +2973,7 @@
+ 	rawaddr = op[2];
+       else
+ 	{
+-	  op[1] = copy_to_mode_reg (Pmode, op[1]);
++	  op[1] = rs6000_copy_offset_to_pmode_reg (op[1]);
+ 	  rawaddr = gen_rtx_PLUS (Pmode, op[2], op[1]);
+ 	}
+ 
+@@ -2965,7 +2995,7 @@
+ 	addr = gen_rtx_MEM (tmode, op[2]);
+       else
+ 	{
+-	  op[1] = copy_to_mode_reg (Pmode, op[1]);
++	  op[1] = rs6000_copy_offset_to_pmode_reg (op[1]);
+ 	  addr = gen_rtx_MEM (tmode, gen_rtx_PLUS (Pmode, op[2], op[1]));
+ 	}
+       rtx pat = GEN_FCN (icode) (addr, op[0]);
+@@ -2982,7 +3012,7 @@
+ 	addr = gen_rtx_MEM (tmode, op[2]);
+       else
+ 	{
+-	  op[1] = copy_to_mode_reg (Pmode, op[1]);
++	  op[1] = rs6000_copy_offset_to_pmode_reg (op[1]);
+ 	  addr = gen_rtx_MEM (tmode, gen_rtx_PLUS (Pmode, op[2], op[1]));
+ 	}
+ 

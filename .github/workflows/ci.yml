@@ -306,6 +306,11 @@ jobs:
       - name: Test patch series apply without fuzz
         run: bash tests/host/patch-fuzz-zero-test.sh
 
+      # Static mode: the GCC 16 series matches its port map against gcc-12.x
+      # (applying it to GCC 16 sources needs --gcc-git, run off CI).
+      - name: Test the GCC 16 patch series against its port map
+        run: bash tests/host/gcc16-series-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class

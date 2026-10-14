@@ -1,0 +1,106 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: stack protector guard in ptr_mode
+
+The stack protector guard (__stack_chk_guard, or the TLS slot) and the
+canary slot in the frame are pointer-sized objects: ptr_type_node, so
+ptr_mode.  stack_protect_set and the UNSPEC_SP_TEST branch of
+rs6000_generate_compare chose the DImode or SImode pattern by
+TARGET_64BIT, and the patterns used the P iterator, whose SImode
+variant needs TARGET_32BIT.  Under cell64lv2 ILP32 (0059:
+TARGET_64BIT, Pmode DImode, ptr_mode SImode) the expander built
+(set (mem:SI slot) (unspec:DI [(mem:SI guard)] UNSPEC_SP_SET)), which
+no pattern matches: "unrecognizable insn" / ICE in extract_insn during
+vregs for every protected function under -fstack-protector, -strong and
+-all.
+
+Select the pattern by ptr_mode, build the TLS guard MEM in ptr_mode,
+and give the set/test patterns an iterator enabled by ptr_mode.  The
+addresses inside the MEMs stay Pmode.  Wherever ptr_mode equals Pmode
+(LP64, and every upstream rs6000 target) the same pattern is chosen as
+before.
+
+diff --git a/gcc/config/rs6000/rs6000.cc b/gcc/config/rs6000/rs6000.cc
+index cb02ac0..49a6cb3 100644
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -15691,7 +15691,8 @@ rs6000_generate_compare (rtx cmp, machine_mode mode)
+ 	  rtx op1b = XVECEXP (op1, 0, 0);
+ 	  comp_mode = CCEQmode;
+ 	  compare_result = gen_reg_rtx (CCEQmode);
+-	  if (TARGET_64BIT)
++	  /* The canary slot and the guard are ptr_mode objects.  */
++	  if (ptr_mode == DImode)
+ 	    emit_insn (gen_stack_protect_testdi (compare_result, op0, op1b));
+ 	  else
+ 	    emit_insn (gen_stack_protect_testsi (compare_result, op0, op1b));
+diff --git a/gcc/config/rs6000/rs6000.md b/gcc/config/rs6000/rs6000.md
+index f7635bc..5ce3023 100644
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -512,6 +512,11 @@
+ (define_mode_iterator P [(SI "TARGET_32BIT") (DI "TARGET_64BIT")])
+ (define_mode_iterator WORD [(SI "!TARGET_POWERPC64") (DI "TARGET_POWERPC64")])
+ 
++;; The stack protector guard and its canary slot are pointer-sized
++;; objects, so their width is ptr_mode, which can be narrower than
++;; Pmode (cell64lv2 ILP32: SImode pointers, DImode addresses).
++(define_mode_iterator SSPP [(SI "ptr_mode == SImode") (DI "ptr_mode == DImode")])
++
+ ; Iterator to add PTImode along with TImode (TImode can go in VSX registers,
+ ; PTImode is GPR only)
+ (define_mode_iterator TI2 [TI PTI])
+@@ -12517,10 +12522,10 @@
+       rtx reg = gen_rtx_REG (Pmode, rs6000_stack_protector_guard_reg);
+       rtx offset = GEN_INT (rs6000_stack_protector_guard_offset);
+       rtx addr = gen_rtx_PLUS (Pmode, reg, offset);
+-      operands[1] = gen_rtx_MEM (Pmode, addr);
++      operands[1] = gen_rtx_MEM (ptr_mode, addr);
+     }
+ 
+-  if (TARGET_64BIT)
++  if (ptr_mode == DImode)
+     emit_insn (gen_stack_protect_setdi (operands[0], operands[1]));
+   else
+     emit_insn (gen_stack_protect_setsi (operands[0], operands[1]));
+@@ -12532,9 +12537,9 @@
+ ;; instructions.  We can't split the insn due to the fact that this operation
+ ;; needs to be done in one piece.
+ (define_insn "stack_protect_set<mode>"
+-  [(set (match_operand:P 0 "memory_operand" "=YZ")
+-	(unspec:P [(match_operand:P 1 "memory_operand" "YZ")] UNSPEC_SP_SET))
+-   (set (match_scratch:P 2 "=&r") (const_int 0))]
++  [(set (match_operand:SSPP 0 "memory_operand" "=YZ")
++	(unspec:SSPP [(match_operand:SSPP 1 "memory_operand" "YZ")] UNSPEC_SP_SET))
++   (set (match_scratch:SSPP 2 "=&r") (const_int 0))]
+   ""
+ {
+   if (prefixed_memory (operands[1], <MODE>mode))
+@@ -12582,10 +12587,10 @@
+       rtx reg = gen_rtx_REG (Pmode, rs6000_stack_protector_guard_reg);
+       rtx offset = GEN_INT (rs6000_stack_protector_guard_offset);
+       rtx addr = gen_rtx_PLUS (Pmode, reg, offset);
+-      guard = gen_rtx_MEM (Pmode, addr);
++      guard = gen_rtx_MEM (ptr_mode, addr);
+     }
+ 
+-  operands[1] = gen_rtx_UNSPEC (Pmode, gen_rtvec (1, guard), UNSPEC_SP_TEST);
++  operands[1] = gen_rtx_UNSPEC (ptr_mode, gen_rtvec (1, guard), UNSPEC_SP_TEST);
+   rtx test = gen_rtx_EQ (VOIDmode, operands[0], operands[1]);
+   rtx jump = gen_cbranchsi4 (test, operands[0], operands[1], operands[2]);
+   emit_jump_insn (jump);
+@@ -12598,11 +12603,11 @@
+ ;; needs to be done in one piece.
+ (define_insn "stack_protect_test<mode>"
+   [(set (match_operand:CCEQ 0 "cc_reg_operand" "=x,?y")
+-        (unspec:CCEQ [(match_operand:P 1 "memory_operand" "YZ,YZ")
+-		      (match_operand:P 2 "memory_operand" "YZ,YZ")]
++        (unspec:CCEQ [(match_operand:SSPP 1 "memory_operand" "YZ,YZ")
++		      (match_operand:SSPP 2 "memory_operand" "YZ,YZ")]
+ 		     UNSPEC_SP_TEST))
+-   (set (match_scratch:P 4 "=r,r") (const_int 0))
+-   (clobber (match_scratch:P 3 "=&r,&r"))]
++   (set (match_scratch:SSPP 4 "=r,r") (const_int 0))
++   (clobber (match_scratch:SSPP 3 "=&r,&r"))]
+   ""
+ {
+   if (prefixed_memory (operands[1], <MODE>mode))

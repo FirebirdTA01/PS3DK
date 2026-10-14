@@ -1,0 +1,26 @@
+diff --git a/gcc/config.gcc b/gcc/config.gcc
+index 4017ea6..f125268 100644
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -3065,6 +3065,13 @@ powerpc64-*-darwin*)
+ 	tmake_file="${tmake_file} ${cpu_type}/t-darwin64-biarch t-slibgcc"
+ 	tm_file="${tm_file} ${cpu_type}/darwin64-biarch.h"
+ 	;;
++powerpc64-ps3-kernel-elf*)
++	tm_file="${tm_file} elfos.h gnu-user.h freebsd-spec.h newlib-stdint.h rs6000/sysv4.h rs6000/default64.h"
++	tm_file="rs6000/biarch64.h ${tm_file} rs6000/ps3kernel64.h"
++	extra_options="${extra_options} rs6000/sysv4.opt rs6000/linux64.opt rs6000/ps3-lp64.opt"
++	tmake_file="rs6000/t-fprules rs6000/t-ppccomm rs6000/t-ps3kernel64"
++	use_gcc_stdint=wrap
++	;;
+ powerpc64-ps3-elf*)
+ 	tm_file="${tm_file} elfos.h gnu-user.h freebsd-spec.h newlib-stdint.h rs6000/sysv4.h rs6000/default64.h"
+ 	tm_file="rs6000/biarch64.h ${tm_file} rs6000/cell64lv2.h"
+diff --git a/gcc/config/rs6000/t-ps3kernel64 b/gcc/config/rs6000/t-ps3kernel64
+new file mode 100644
+index 0000000..472245a
+--- /dev/null
++++ b/gcc/config/rs6000/t-ps3kernel64
+@@ -0,0 +1,2 @@
++# Makefile fragment for powerpc64-ps3-kernel-elf.
++# Intentionally empty; reserved for target-specific build rules.

@@ -1,0 +1,37 @@
+From: PS3 Custom Toolchain <maintainers@example.invalid>
+Subject: [PATCH] gcc/system.h: skip abort() macro override on mingw hosts
+
+When cross-building GCC with --host=x86_64-w64-mingw32, mingw-w64's
+<stdlib.h> and <process.h> declare abort() inside a
+`#pragma push_macro("abort") / #undef abort / void abort(void); / pop_macro`
+block.  Through some include chains (notably gcc/diagnostic-color.cc's
+inclusion of <windows.h> after system.h on MINGW32), the pop_macro does
+not cleanly restore the macro state — and a subsequent declaration of
+`abort(void)` in some Windows header expands the macro into the
+declaration, producing:
+
+  gcc/system.h: error: expected identifier before string constant
+    779 | #define abort() fancy_abort (__FILE__, __LINE__, __FUNCTION__)
+
+We work around this by suppressing the abort()-as-macro override on
+mingw hosts.  Cost: an internal `abort()` call inside GCC on Windows
+won't be annotated with __FILE__:__LINE__ via fancy_abort.  In practice
+this only matters when debugging a panic in a Windows-hosted GCC build,
+and the regular abort() still terminates the process correctly.
+
+This is host-only behaviour: native Linux builds and target-side code
+are unaffected.
+---
+ gcc/system.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+--- a/gcc/system.h
++++ b/gcc/system.h
+@@ -1,5 +1,7 @@
+ extern void fancy_abort (const char *, int, const char *)
+ 					 ATTRIBUTE_NORETURN ATTRIBUTE_COLD;
++#ifndef __MINGW32__
+ #define abort() fancy_abort (__FILE__, __LINE__, __FUNCTION__)
++#endif
+
+ /* Use gcc_assert(EXPR) to test invariants.  */
