@@ -3,7 +3,8 @@
 #
 # Builds:
 #   binutils 2.42  -> $PS3DEV/ppu
-#   GCC 12.4.0     -> $PS3DEV/ppu (stage 1 + newlib + stage 2)
+#   GCC 12.4.0     -> $PS3DEV/ppu (stage 1 + newlib + stage 2);
+#                     --gcc=16 builds GCC 16.1.0 instead (patches/ppu/gcc-16.x)
 #   newlib 4.4.0   -> as part of combined GCC build
 #   GDB 14.2       -> $PS3DEV/ppu
 #
@@ -27,8 +28,12 @@ die() { printf "[ppu] ERROR: %s\n" "$*" >&2; exit 1; }
 # Component versions — bump these if we re-target.
 BINUTILS_TAG="binutils-2_42"
 BINUTILS_VER="2.42"
+# GCC_* default to 12.4; --gcc=16 selects the GCC 16 port below.
 GCC_TAG="releases/gcc-12.4.0"
 GCC_VER="12.4.0"
+GCC_PATCH_DIR="gcc-12.x"
+# Host C++ dialect for GCC's own sources: 12's libcody needs exact C++11.
+GCC_HOST_CXX_STD="gnu++11"
 NEWLIB_TAG="newlib-4.4.0"
 NEWLIB_VER="4.4.0"
 GDB_TAG="gdb-14.2-release"
@@ -47,6 +52,12 @@ say "Using $JOBS parallel jobs."
 # CLI: optional --clean wipes build dir; --only <step> runs only that step.
 # Steps: binutils | gcc-newlib | gdb | symlinks (default: all in order).
 #
+# --gcc=12|16 picks the PPU GCC (default 12, the shipped compiler).  16 builds
+# in its own build directory and must go to its own prefix: a prefix that
+# already holds a different GCC major version is refused, so set PS3DEV to a
+# separate stage for it.  --print-config prints the resolved selection and
+# exits without building.
+#
 # Cross-build mode (Windows-hosted toolchain):
 #   --host=x86_64-w64-mingw32   produce .exe binaries that run on Windows.
 #   --build=<triple>            (optional) override the build triple; default
@@ -58,9 +69,14 @@ say "Using $JOBS parallel jobs."
 ONLY=""
 HOST_TRIPLE=""
 BUILD_TRIPLE=""
+GCC_MAJOR=12
+CLEAN=""
+PRINT_CONFIG=""
 for arg in "$@"; do
     case "$arg" in
-        --clean) say "Cleaning $BUILD"; rm -rf "$BUILD" ;;
+        --clean) CLEAN=1 ;;
+        --gcc=*) GCC_MAJOR="${arg#--gcc=}" ;;
+        --print-config) PRINT_CONFIG=1 ;;
         --only=*) ONLY="${arg#--only=}" ;;
         --only) shift; ONLY="${1:-}" ;;
         --host=*) HOST_TRIPLE="${arg#--host=}" ;;
@@ -68,6 +84,24 @@ for arg in "$@"; do
         binutils|gcc-newlib|gdb|symlinks) ONLY="$arg" ;;
     esac
 done
+
+case "$GCC_MAJOR" in
+    12) ;;
+    16)
+        GCC_TAG="releases/gcc-16.1.0"
+        GCC_VER="16.1.0"
+        GCC_PATCH_DIR="gcc-16.x"
+        # No pin: GCC 16's own code needs C++14 while its libcody still
+        # requires exactly C++11, and each configure adds the -std it needs
+        # unless CXXFLAGS overrides it.
+        GCC_HOST_CXX_STD=""
+        BUILD="$PS3_BUILD_ROOT/ppu-gcc16"
+        if [[ -n "$HOST_TRIPLE" ]]; then
+            die "--gcc=16 is not yet supported with --host (the Windows-hosted build stays on 12.4)"
+        fi
+        ;;
+    *) die "--gcc=$GCC_MAJOR: supported values are 12 and 16" ;;
+esac
 
 # When cross-building, install into a parallel prefix and use a separate
 # build directory so the native install tree is untouched and reusable.
@@ -79,6 +113,28 @@ if [[ -n "$HOST_TRIPLE" ]]; then
     [[ -x "$NATIVE_PREFIX/bin/$TARGET-gcc" ]] \
         || die "Native PPU toolchain not present at $NATIVE_PREFIX/bin/$TARGET-gcc. Run without --host first to produce stage 0."
     say "Cross-build: host=$HOST_TRIPLE build=$BUILD_TRIPLE prefix=$PREFIX"
+fi
+
+# Never build one GCC major version over another (stage 2: GCC 16 is built
+# beside 12.4, not over it).
+if [[ -x "$PREFIX/bin/$TARGET-gcc" ]]; then
+    installed_ver="$("$PREFIX/bin/$TARGET-gcc" -dumpfullversion 2>/dev/null || true)"
+    if [[ -n "$installed_ver" && "${installed_ver%%.*}" != "${GCC_VER%%.*}" ]]; then
+        die "$PREFIX holds GCC $installed_ver; refusing to build GCC $GCC_VER over it. Point PS3DEV at a separate prefix."
+    fi
+fi
+
+if [[ -n "$PRINT_CONFIG" ]]; then
+    for kv in "gcc_tag=$GCC_TAG" "gcc_ver=$GCC_VER" "gcc_patches=$PATCHES/$GCC_PATCH_DIR" \
+              "host_cxx_std=$GCC_HOST_CXX_STD" "prefix=$PREFIX" "build=$BUILD"; do
+        echo "$kv"
+    done
+    exit 0
+fi
+
+if [[ -n "$CLEAN" ]]; then
+    say "Cleaning $BUILD"
+    rm -rf "$BUILD"
 fi
 
 # Cross-build env injection: passed to `env(1)` before configure so each
@@ -269,7 +325,7 @@ build_binutils() {
 }
 
 # -----------------------------------------------------------------------------
-# 2. GCC 12.4.0 + newlib 4.4.0 (combined-tree build)
+# 2. GCC (12.4.0, or 16.1.0 with --gcc=16) + newlib 4.4.0 (combined-tree build)
 #
 #    The combined-tree pattern symlinks newlib/libgloss into the GCC source tree
 #    so a single build produces libgcc, newlib, libstdc++ in one pass. This is
@@ -281,7 +337,7 @@ build_gcc_newlib() {
     local obj="$BUILD/gcc-$GCC_VER-build"
 
     extract_source "$UPSTREAM/gcc" "$GCC_TAG" "$gcc_src"
-    apply_patches "$gcc_src" "$PATCHES/gcc-12.x"
+    apply_patches "$gcc_src" "$PATCHES/$GCC_PATCH_DIR"
 
     # Newlib is only built in the native (stage 0) flow.  Cross-builds reuse
     # the PowerPC ELF target libraries from the already-installed native
@@ -325,7 +381,7 @@ build_gcc_newlib() {
     # stamp so make rebuilds the target libs.
     if [[ -f "$obj/.installed" ]]; then
         local newer_patch
-        newer_patch=$(find "$PATCHES/gcc-12.x" "$PATCHES/newlib-4.x" \
+        newer_patch=$(find "$PATCHES/$GCC_PATCH_DIR" "$PATCHES/newlib-4.x" \
             -name "*.patch" -newer "$obj/.installed" 2>/dev/null | head -1)
         if [[ -n "$newer_patch" ]]; then
             say "Patch newer than .installed — invalidating to rebuild target libs ($newer_patch)"
@@ -365,11 +421,16 @@ build_gcc_newlib() {
 
     # GCC 12's host-side libcody requires exact C++11.  Newer rolling
     # hosts can default g++ to C++20-or-later semantics where u8 literals
-    # become char8_t, which libcody does not accept.
-    local target_env=(
-        CXXFLAGS=-std=gnu++11
-        CXXFLAGS_FOR_BUILD=-std=gnu++11
-    )
+    # become char8_t, which libcody does not accept.  GCC 16 is not pinned
+    # (GCC_HOST_CXX_STD empty): forcing one -std there breaks either libcody
+    # or GCC itself.
+    local target_env=()
+    if [[ -n "$GCC_HOST_CXX_STD" ]]; then
+        target_env+=(
+            CXXFLAGS=-std=$GCC_HOST_CXX_STD
+            CXXFLAGS_FOR_BUILD=-std=$GCC_HOST_CXX_STD
+        )
+    fi
     # Extra host flags for the Windows cross build only.  Set LAST on the
     # configure env line so it wins over target_env's CXXFLAGS and the shared
     # CROSS_LDFLAGS_ARGS CFLAGS, without disturbing their order.

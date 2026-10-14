@@ -311,6 +311,11 @@ jobs:
       - name: Test the GCC 16 patch series against its port map
         run: bash tests/host/gcc16-series-test.sh
 
+      # build-ppu-toolchain.sh --gcc=12|16 selection and the refusal to build
+      # one GCC major version over another (--print-config, no build).
+      - name: Test the PPU GCC version selection
+        run: bash tests/host/ppu-gcc-select-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class
