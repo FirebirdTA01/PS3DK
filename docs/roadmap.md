@@ -1,6 +1,6 @@
 # Roadmap
 
-This project is already usable as a Linux-hosted PS3 toolchain and SDK. The remaining work is about breadth, validation, and release packaging.
+This project is already usable as a PS3 toolchain and SDK on Linux and, through the Windows SDK zip, on Windows. The remaining work is about breadth, validation, the compiler transition, and a Linux SDK tarball to match the Windows zip.
 
 ## SDK surface
 
@@ -15,9 +15,9 @@ Near-term SDK work focuses on:
 
 ## Toolchain
 
-PPU uses GCC 12.4.0 today. Future PPU bumps are routine patch-set rebases across newer GCC target-hook and middle-end API changes.
+PPU uses GCC 12.4.0 today. The approved next step is GCC 16 ([design/gcc-transition.md](design/gcc-transition.md)): the patch series is ported (`patches/ppu/gcc-16.x`) and the work continues on the `feat/gcc16` branch until a switchover release.
 
-SPU uses GCC 9.5.0 today because it is the last upstream GCC release with the Cell SPE backend. The forward-port track resurrects that backend for a newer GCC line, modernizes it against current backend APIs, and eventually gives PPU and SPU a unified compiler version.
+SPU uses GCC 9.5.0 today because it is the last upstream GCC release with the Cell SPE backend. The forward-port track, a later stage of the same plan, resurrects that backend for GCC 16, modernizes it against current backend APIs, and gives PPU and SPU a unified compiler version.
 
 ## Runtime and samples
 
@@ -116,6 +116,6 @@ Upstream's "v3" RFC (ps3dev/PSL1GHT issue #67, 2017, still open) has four items.
 
 - **Duplicated C headers.** The RFC proposes deleting PSL1GHT's copies of standard headers and pushing the implementations into newlib. This project does the opposite: `sdk/include/` overrides the vendored headers and the newlib patch set carries what the PS3 needs, because SDK-API parity (the official `cell/*` surface) will never live in upstream newlib and must be owned here.
 - **Legacy names.** The RFC's position is that renamed symbols need no aliases (old code stays on the old PSL1GHT). This project keeps the legacy PSL1GHT names compiling through deprecated aliases behind a negative gate (`__PS3DK_NO_PSL1GHT_COMPAT__`), so existing homebrew builds and warns instead of breaking.
-- **Vendored PSL1GHT** is pinned at `eca3f99`; upstream's in-flight NID rename (PR #169) is tracked but not chased while it is a draft.
+- **Vendored PSL1GHT** is pinned at `f649a08` (`scripts/bootstrap.sh`); upstream's in-flight NID rename (PR #169) is tracked but not chased while it is a draft.
 
 The remaining v3 must-have, SPRX/PRX module generation, is implemented: `tools/prx-gen` and `tools/sprx-linker` produce the modules, `docs/design/sprx-generation.md` records the format work behind them, and the regression battery boots generated `.sprx` rows.

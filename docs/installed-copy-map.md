@@ -52,7 +52,7 @@ grep  'REPLACING ppu/include/net/socket.h with sdk/include/net ' build.log
 
 # 3.  Cross-check: manifest / per-site call sites / docs all list the same
 #     installed-path strings:
-scripts/installed-copy-map-consistency-test.sh   # (tests/)
+tests/sdk/installed-copy-map-consistency-test.sh
 ```
 
 ## Source of truth

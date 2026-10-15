@@ -151,9 +151,13 @@ Normative rules:
 ## 4. Pointer and addressing model — ELF64 + ILP32 hybrid
 
 The default PPU C data model is **ILP32 with a 64-bit ELF wrapper**
-(Pmode = SImode, ELFCLASS64, EM_PPC64). Pointers are 32-bit on the
-wire, registers are 64-bit, and the ELF header reports ELF64.
-Multilib `-mlp64` opt-in flips Pmode to DImode for LP64 user code.
+(ELFCLASS64, EM_PPC64). Pointers are 32-bit in memory, registers are
+64-bit, and the ELF header reports ELF64. Since v0.23.0 (patch 0059) the
+compiler keeps `ptr_mode` at SImode (4-byte pointers) but forms every
+address in DImode (`Pmode`): a pointer is zero-extended into a 64-bit
+register before it addresses memory (`POINTERS_EXTEND_UNSIGNED`), so a
+stray bit 32 can never reach the address unit. Multilib `-mlp64` opt-in
+selects LP64 user code (8-byte pointers).
 
 The default `powerpc64-ps3-elf-gcc` invocation therefore produces
 ELF64 binaries with `sizeof(void *) == 4`. That is the data model used
@@ -185,13 +189,13 @@ This spec treats addresses in three layers:
   `.data.sceFStub` slots are **4-byte** absolute words with
   `R_PPC64_ADDR32` relocations.
 
-- **C pointers (`void *`, `T *`)**: 4 bytes by default (Pmode =
-  SImode under the ILP32 hybrid).  GCC emits `lwz @toc@l(r2)` to
-  load function pointers from the GOT/TOC and `stw r0, X(r1)` for
-  pointer spills.  No `R_PPC64_ADDR64` should appear in user-mode
-  pointer emission.  Under `-mlp64`, pointers widen to 8 bytes
-  (Pmode = DImode); the multilib variant lives under `lp64/` in the
-  install tree.
+- **C pointers (`void *`, `T *`)**: 4 bytes by default (`ptr_mode`
+  SImode under the ILP32 hybrid; addresses are formed at `Pmode`
+  DImode from the zero-extended pointer).  GCC emits `lwz @toc@l(r2)`
+  to load pointers from the GOT/TOC and `stw r0, X(r1)` for pointer
+  spills.  No `R_PPC64_ADDR64` should appear in user-mode pointer
+  emission.  Under `-mlp64`, pointers widen to 8 bytes; the multilib
+  variant lives under `lp64/` in the install tree.
 
 - **Effective-address typedef (`lv2_ea32_t`)**: an explicit
   `uint32_t` typedef in `sdk/include/sys/lv2_types.h`.  Use this in
@@ -203,15 +207,19 @@ This spec treats addresses in three layers:
 
 Normative rules:
 
-1. `Pmode == SImode` under the default toolchain target.  GCC must
-   emit pointer materialization, indirect calls, TOC slot loads, and
-   pointer-typed argument/return marshaling at 32-bit width.  The
-   `-mlp64` opt-in path flips Pmode to DImode and generates the LP64
-   variant in the same source tree without source-level changes.
-2. **TOC slot width is 4 bytes** under Pmode = SImode.
+1. `ptr_mode == SImode` under the default toolchain target, with
+   `Pmode == DImode` and pointers zero-extended where they become
+   addresses (patch 0059).  Pointer stores, TOC slot loads and
+   pointer-typed argument/return marshaling are 32-bit wide; address
+   arithmetic is 64-bit on the zero-extended value.  The `-mlp64` opt-in
+   path generates the LP64 variant in the same source tree without
+   source-level changes.
+2. **TOC slot width is 4 bytes** under the ILP32 hybrid.
    `output_toc` in `gcc/config/rs6000/rs6000.cc` emits `.long sym`
-   (4 bytes) instead of `DOUBLE_INT_ASM_OP` / `.tc` (8 bytes) when
-   `Pmode == SImode`.  `R_PPC64_ADDR32` instead of `R_PPC64_ADDR64`.
+   (4 bytes) instead of `DOUBLE_INT_ASM_OP` / `.tc` (8 bytes), and a
+   symbol address needed at `Pmode` is loaded from that same 4-byte entry
+   with `lwz` and zero-extended (0062); the TOC save slot and integer TOC
+   entries are `ptr_mode`-sized too (0063, 0065).  `R_PPC64_ADDR32` instead of `R_PPC64_ADDR64`.
    See patches/ppu/gcc-12.x/0021-rs6000-output-toc-pmode.patch.
    *Cause:* an 8-byte slot under big-endian holds the address in the
    low 4 bytes; a `lwz @toc@l(r2)` load reads the high 4 bytes (zero)
@@ -221,15 +229,13 @@ Normative rules:
 3. `lv2_ea32_t` is `uint32_t`.  Width-sensitive integers
    (`size_t`, `ptrdiff_t`, `off_t`) in caller-allocated `cell/*`
    structs that cross the SPRX boundary MUST be declared `uint32_t`
-   explicitly, not the LP64 default.  See
-   `feedback_size_t_in_cell_structs.md` for the prior incident.
+   explicitly, not the LP64 default.
 4. No public API in `cell/*.h` or `sys/*.h` SHALL declare a `void *`
    field with `mode(SI)`.  Any such declaration is a conformance bug.
-5. The legacy GCC target hook override that accepted SImode pointers
-   only on the LP64 path
-   (`patches/ppu/gcc-12.x/0005-rs6000-cell64lv2-pointer-mode.patch`)
-   is now redundant under the default ILP32 hybrid; the new path
-   tracks the pointer-width axis directly via `Pmode`.
+5. The pointer width follows the data model (`-mlp64`), not the ISA:
+   `patches/ppu/gcc-12.x/0005-rs6000-cell64lv2-pointer-mode.patch`
+   selects it by `TARGET_LP64`, and 0066 refuses the inconsistent
+   LP64-without-64-bit-ISA state.
 
 ### 4.1 Kernel-side struct ABI (settled 2026-04-20)
 

@@ -13,7 +13,8 @@ big-endian ELF64/PPC64 environment with:
 - `e_flags = 0x00000000`;
 - native 8-byte compact `.opd` function descriptors;
 - a 64-byte `.sys_proc_prx_param` process metadata block;
-- **ILP32 by default** — Pmode = SImode, 32-bit C pointers, 4-byte
+- **ILP32 by default** — 32-bit C pointers (ptr_mode SImode, addresses formed
+  at Pmode DImode from the zero-extended pointer since 0059), 4-byte
   TOC slots (`R_PPC64_ADDR32`), `lwz @toc@l(r2)` loads — under a
   64-bit ELF wrapper.  `-mlp64` opt-in flips the multilib axis to
   64-bit pointers (legacy LP64 path) for downstream code that
@@ -36,8 +37,9 @@ The compact `.opd` ABI path is implemented: native output uses 8-byte
 descriptors, compact indirect-call reads, and a bare `lv2_fn_to_callback_ea`
 cast. The runtime layer has also replaced several PSL1GHT CRT pieces, including
 `lv2-sprx.o`, `lv2-crti.o`, the `crt0.S` half of `lv2-crt0.o`, and `lv2.ld`.
-However, the toolchain is not fully PSL1GHT-free yet: `lv2-crt0.o` still merges
-in PSL1GHT's `crt1.o`, `sprx-linker` is still used for `.lib.stub` import
+`lv2-crt0.o` now links our own `crt1.c` (PSL1GHT's `crt1.o` is only a fallback if
+that fails to build). However, the toolchain is not fully PSL1GHT-free yet:
+`sprx-linker` is still used for `.lib.stub` import
 counts and legacy `.opd` fallback handling, and some SDK libraries remain
 PSL1GHT-compatibility bridges.
 
@@ -53,13 +55,13 @@ Source: upstream GCC rs6000 backend plus PS3DK patches under
 Responsibilities:
 
 - emit PPU code under the ELF64 + ILP32 hybrid pointer model
-  (Pmode = SImode by default; multilib axis on `-mlp64` for the
+  (ptr_mode SImode with Pmode DImode by default; multilib axis on `-mlp64` for the
   LP64 legacy path);
 - emit native compact `.opd` descriptors for functions;
 - emit the compact indirect-call sequence that reads two 32-bit words from a
   descriptor;
 - emit 4-byte TOC slots (`.long sym` with `R_PPC64_ADDR32`) under
-  Pmode = SImode, so a `lwz @toc@l(r2)` load reads the address
+  the ILP32 hybrid, so a `lwz @toc@l(r2)` load reads the address
   directly (8-byte slots under big-endian put the address in the
   low half and the load returns zero — provoked Layer 11 when
   libgloss was built before the patch landed);
@@ -121,7 +123,7 @@ Current installed pieces:
 | `lv2-sprx.o` | `runtime/lv2/crt/lv2-sprx.S` | native PS3DK; emits 64-byte `.sys_proc_prx_param` and library-range prefixes |
 | `lv2-crti.o` | `runtime/lv2/crt/lv2-crti.S` | native PS3DK compact-OPD init/fini prologue |
 | `crt0.o` | `runtime/lv2/crt/crt0.S` | native PS3DK process entry and compact `__start` descriptor |
-| `lv2-crt0.o` | `crt0.o` merged with PSL1GHT `crt1.o` | hybrid; still reuses PSL1GHT newlib/syscall glue |
+| `lv2-crt0.o` | `crt0.S` merged with our `crt1.c` (PSL1GHT `crt1.o` only as a build fallback) | native |
 | `lv2.ld` | `runtime/lv2/crt/lv2.ld` | native PS3DK linker script; keeps `.opd ALIGN(4)` |
 | `lv2-crtn.o` | PSL1GHT, where still used by startfile specs | not yet replaced |
 
@@ -280,25 +282,21 @@ At runtime, the Lv-2 loader:
 | `.opd` entry size = 8 bytes | implemented | GCC compact `.opd` path + linker script |
 | compact indirect-call sequence | implemented | GCC rs6000 backend patches |
 | callback EA conversion without `+16` | implemented | `sdk/include/sys/lv2_types.h` |
-| ELF64 + ILP32 hybrid (Pmode = SImode default) | implemented (2026-05-07) | GCC patches 0005 + 0021; multilib `-mlp64` opt-in |
+| ELF64 + ILP32 hybrid | implemented (2026-05-07; Pmode DImode / ptr_mode SImode since v0.23.0) | GCC patches 0005, 0021, 0059 and its follow-ups; multilib `-mlp64` opt-in |
 | `__ILP32__` / `_ILP32` macros in default mode | implemented (2026-05-10) | GCC patch 0022 (`cell64lv2.h` `TARGET_OS_CPP_BUILTINS` else branch) |
 | 4-byte TOC slots (`R_PPC64_ADDR32`) | implemented (2026-05-07) | GCC patch 0021 (`output_toc` Pmode gate); libgloss force-rebuild defense in `build-ppu-toolchain.sh` |
 | Frame-less SPRX trampoline (LR @ caller_sp+24, TOC @ caller_sp+40, no frame) | implemented (2026-05-09) | `tools/nidgen/src/stubgen.rs`; required for >8-arg SPRX exports |
 | Single `.lib.stub` per imported library | implemented (2026-05-07) | nidgen alias-fold absorbs PSL1GHT-style names; `liblv2.a/sprx.o` retired |
 | PSL1GHT-name compatibility via aliases | implemented (2026-05-07) | nidgen `aliases:` field per export |
 | legacy 24-byte `.opd` compatibility fallback | retained | `tools/sprx-linker` |
-| full PSL1GHT-free CRT | not complete | `lv2-crt0.o` still merges PSL1GHT `crt1.o` |
+| full PSL1GHT-free CRT | not complete | `crt1.c` is native; `lv2-crtn.o` still comes from PSL1GHT where the startfile specs use it |
 | full PSL1GHT-free SDK surface | not complete | legacy compatibility wrappers still exist |
 | complete NID/API coverage | ongoing | `tools/nidgen` + `sdk/` |
 
-> **Note — -mlp64 multilib in progress (2026-05-09).**  GCC patches
-> 0010–0021 emit LP64 user code and the multilib libc / libstdc++ /
-> libsysbase install correctly under
-> `powerpc64-ps3-elf/lib/lp64/`, but the runtime linkage tree
-> (`lv2-crt0.o`, `lv2-crti.o`, `lv2-crtn.o`, `lv2-sprx.o`, and the
-> nidgen-emitted SPRX stub archives) is not yet built as a multilib
-> variant.  `-mlp64` binaries link against ILP32-shape glue and crash
-> before reaching `main()`.  Default ILP32 is the daily-use shape today.
+> **Note — -mlp64 multilib.**  The runtime linkage tree (`lv2-crt0.o`,
+> `lv2-crti.o`, `lv2-sprx.o`) and the nidgen stub archives are built for both
+> data models (`scripts/build-runtime-lv2.sh`, `lp64/` in the install tree),
+> and LP64 regression rows boot.  Default ILP32 is the daily-use shape.
 
 ---
 

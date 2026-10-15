@@ -1,6 +1,8 @@
 # General-path control flow (`br`/`brc`/`discard`) — design note
 
-Status: SCOPED, not started.  Board task: t_91bbd575.
+Status: landed (control flow, `discard` and run-time loops shipped in v0.23.0
+and v0.24.0; see CHANGELOG.md and docs/roadmap.md).  This note records the
+original scope.  Board task: t_91bbd575.
 Blocks 25 corpus shaders (brc/br) + 9 more (discard) — the largest
 remaining unlock after the slice A/B straight-line work.
 

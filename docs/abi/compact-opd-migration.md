@@ -127,8 +127,9 @@ from legacy 24-byte ELFv1 descriptors.
 
 `build-runtime-lv2.sh` currently installs native `lv2-sprx.o`, native
 `lv2-crti.o`, native `crt0.o` merged into `lv2-crt0.o`, and the native
-`lv2.ld`. The current `lv2-crt0.o` still reuses PSL1GHT's `crt1.o` for the
-unchanged newlib/syscall glue, so the CRT is not yet completely PSL1GHT-free.
+`lv2.ld`. `lv2-crt0.o` links our own `runtime/lv2/crt/crt1.c` (PSL1GHT's
+`crt1.o` is only a fallback if that fails to build); `lv2-crtn.o` still comes
+from PSL1GHT where the startfile specs use it.
 
 ### `tools/sprx-linker`
 
@@ -191,7 +192,7 @@ migration.
 
 Still separate from this document:
 
-- replacing the remaining PSL1GHT `crt1.o` dependency;
+- replacing the remaining PSL1GHT `lv2-crtn.o`;
 - removing all remaining `mode(SI)`-style pointer declarations from legacy
   interfaces in favor of explicit `lv2_ea32_t` kernel-side fields;
 - replacing or retiring PSL1GHT compatibility wrapper libraries where native
