@@ -1,0 +1,205 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] cell64lv2: the SDK include directory on the driver's default path
+
+newlib declares pthread_*, nanosleep, clock_gettime and the sched_*
+priority functions only under _POSIX_THREADS / _POSIX_TIMERS /
+_POSIX_PRIORITY_SCHEDULING, which sys/features.h never sets for this
+target, and setting them globally changes struct sigevent and the
+pthread types.  The SDK's wrappers (pthread.h, time.h, sched.h over
+newlib) declare what librt provides, but they were reachable only when
+a build added -isystem $PS3DK/ppu/include itself.  Since GCC 14 a call
+without a declaration is an error, so C code that included only the
+toolchain's headers (EMP's miniaudio, for one) stopped compiling.  The
+reference compiler searches its SDK include directory by default.
+
+Add %:ps3dk-include() to INCLUDE_EXTRA_SPEC (CPP_OS_DEFAULT_SPEC uses
+it), unless -nostdinc.  It expands to -isystem <SDK>/ppu/include: the
+SDK that PS3DK selects, the one the libraries come from, and no other;
+with PS3DK unset, the SDK installed with the compiler, found from
+GCC_EXEC_PREFIX in both the packaged and the staged layout.  A directory
+counts only if it has sys/lv2_syscall.h.  PS3DK_NO_DEFAULT_INCLUDE (set
+and not "0") turns it off for the toolchain's and the SDK's own builds.
+-isystem is the position the SDK's CMake toolchain already uses, so a
+build that also passes the same directory gets it once.
+
+diff --git a/gcc/config.gcc b/gcc/config.gcc
+index f125268..192b1e0 100644
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -3080,6 +3080,7 @@ powerpc64-ps3-elf*)
+ 	fi
+ 	extra_options="${extra_options} rs6000/sysv4.opt rs6000/linux64.opt rs6000/ps3-lp64.opt"
+ 	tmake_file="rs6000/t-fprules rs6000/t-ppccomm rs6000/t-cell64lv2"
++	extra_gcc_objs="driver-cell64lv2.o"
+ 	use_gcc_stdint=wrap
+ 	;;
+ powerpc*-*-freebsd*)
+diff --git a/gcc/config/rs6000/cell64lv2.h b/gcc/config/rs6000/cell64lv2.h
+index addc86c..7e48529 100644
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -156,8 +156,24 @@ extern int dot_symbols;
+   { "include_extra",		INCLUDE_EXTRA_SPEC },			\
+   { "dynamic_linker_prefix",	DYNAMIC_LINKER_PREFIX },
+ 
+-#ifndef INCLUDE_EXTRA_SPEC
+-#define INCLUDE_EXTRA_SPEC	""
++/* The SDK's POSIX layer (its pthread.h, time.h and sched.h wrappers over
++   newlib) is on the default include path, as the reference compiler's
++   target/ppu/include is: -isystem, in the same place the CMake toolchain
++   puts it, from the SDK PS3DK selects or else the one installed with
++   this compiler (driver-cell64lv2.cc).  -nostdinc drops it, and
++   PS3DK_NO_DEFAULT_INCLUDE=1 turns it off.  */
++extern const char *ps3dk_include_spec_function (int, const char **);
++#undef INCLUDE_EXTRA_SPEC
++#define INCLUDE_EXTRA_SPEC	"%{!nostdinc:%:ps3dk-include()}"
++#undef EXTRA_SPEC_FUNCTIONS
++#ifdef HAVE_LOCAL_CPU_DETECT
++/* rs6000.h's entry for a powerpc-hosted driver, kept.  */
++#define EXTRA_SPEC_FUNCTIONS \
++  { "local_cpu_detect", host_detect_local_cpu }, \
++  { "ps3dk-include", ps3dk_include_spec_function },
++#else
++#define EXTRA_SPEC_FUNCTIONS \
++  { "ps3dk-include", ps3dk_include_spec_function },
+ #endif
+ 
+ #ifndef LINK_OS_NEW_DTAGS_SPEC
+diff --git a/gcc/config/rs6000/driver-cell64lv2.cc b/gcc/config/rs6000/driver-cell64lv2.cc
+new file mode 100755
+index 0000000..bc73d28
+--- /dev/null
++++ b/gcc/config/rs6000/driver-cell64lv2.cc
+@@ -0,0 +1,119 @@
++/* Driver support for powerpc64-ps3-elf: the SDK include directory.
++   Copyright (C) 2026 PS3DK toolchain contributors.
++
++This file is part of GCC.
++
++GCC is free software; you can redistribute it and/or modify it under
++the terms of the GNU General Public License as published by the Free
++Software Foundation; either version 3, or (at your option) any later
++version.
++
++GCC is distributed in the hope that it will be useful, but WITHOUT ANY
++WARRANTY; without even the implied warranty of MERCHANTABILITY or
++FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++for more details.
++
++You should have received a copy of the GNU General Public License
++along with GCC; see the file COPYING3.  If not see
++<http://www.gnu.org/licenses/>.  */
++
++#include "config.h"
++#include "system.h"
++#include "coretypes.h"
++#include "tm.h"
++
++/* A PS3DK SDK include directory, not merely some ppu/include: the
++   toolchain prefix's own ppu/include holds only the GDB headers.  */
++
++static bool
++ps3dk_include_dir_p (const char *dir)
++{
++  char *marker = concat (dir, "/sys/lv2_syscall.h", NULL);
++  bool found = access (marker, R_OK) == 0;
++  free (marker);
++  return found;
++}
++
++/* The spec parser splits a function's result at white space and treats
++   a backslash as "the next character is ordinary", so escape both: a
++   directory with spaces, or a Windows path, stays one argument.  */
++
++static char *
++ps3dk_spec_quote (const char *dir)
++{
++  char *out = XNEWVEC (char, 2 * strlen (dir) + 1);
++  char *p = out;
++  for (; *dir; dir++)
++    {
++      if (*dir == ' ' || *dir == '\t' || *dir == '\\')
++	*p++ = '\\';
++      *p++ = *dir;
++    }
++  *p = '\0';
++  return out;
++}
++
++/* %:ps3dk-include() expands to "-isystem <SDK>/ppu/include", or to
++   nothing.
++
++   The libraries come from $PS3DK (LIB_LV2_SPEC), so when PS3DK is set
++   the headers come from that same SDK, and from no other: an SDK without
++   headers there gets no default directory rather than a different SDK's.
++   With PS3DK unset (compiling only; linking needs PS3DK), use the SDK
++   installed with this compiler.  The driver exports GCC_EXEC_PREFIX as
++   <prefix>/lib/gcc/ wherever the toolchain was moved, so the packaged
++   layout (PS3DK/ppu) has its SDK at ../../include and the staged layout
++   (PS3DEV/ppu beside PS3DEV/ps3dk) at ../../../ps3dk/ppu/include.
++
++   PS3DK_NO_DEFAULT_INCLUDE (set and not "0") turns it off: the
++   toolchain's and the SDK's own builds use it, so an installed SDK can
++   never leak into them.  -nostdinc drops it in the spec.  */
++
++const char *
++ps3dk_include_spec_function (int argc, const char **argv ATTRIBUTE_UNUSED)
++{
++  if (argc != 0)
++    return NULL;
++
++  const char *off = getenv ("PS3DK_NO_DEFAULT_INCLUDE");
++  if (off && *off && strcmp (off, "0") != 0)
++    return NULL;
++
++  char *dir = NULL;
++  const char *sdk = getenv ("PS3DK");
++  if (sdk && *sdk)
++    {
++      dir = concat (sdk, "/ppu/include", NULL);
++      if (!ps3dk_include_dir_p (dir))
++	{
++	  free (dir);
++	  return NULL;
++	}
++    }
++  else
++    {
++      static const char *const relative[] = {
++	"../../include",
++	"../../../ps3dk/ppu/include"
++      };
++      const char *exec_prefix = getenv ("GCC_EXEC_PREFIX");
++      if (!exec_prefix || !*exec_prefix)
++	return NULL;
++      for (size_t i = 0; i < ARRAY_SIZE (relative) && !dir; i++)
++	{
++	  char *candidate = concat (exec_prefix, relative[i], NULL);
++	  if (ps3dk_include_dir_p (candidate))
++	    dir = candidate;
++	  else
++	    free (candidate);
++	}
++      if (!dir)
++	return NULL;
++    }
++
++  char *quoted = ps3dk_spec_quote (dir);
++  free (dir);
++  const char *result = concat ("-isystem ", quoted, NULL);
++  free (quoted);
++  return result;
++}
+diff --git a/gcc/config/rs6000/t-cell64lv2 b/gcc/config/rs6000/t-cell64lv2
+index a66a713..5e55cae 100644
+--- a/gcc/config/rs6000/t-cell64lv2
++++ b/gcc/config/rs6000/t-cell64lv2
+@@ -25,3 +25,8 @@ MULTILIB_OPTIONS    := mlp64
+ MULTILIB_DIRNAMES   := lp64
+ MULTILIB_EXTRA_OPTS :=
+ MULTILIB_OSDIRNAMES :=
++
++# The driver's SDK include-directory spec function (cell64lv2.h).
++driver-cell64lv2.o: $(srcdir)/config/rs6000/driver-cell64lv2.cc
++	$(COMPILE) $<
++	$(POSTCOMPILE)
