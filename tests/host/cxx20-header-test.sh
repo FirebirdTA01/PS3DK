@@ -73,7 +73,7 @@ fi
 probe() {
     printf '#include <%s>\n' "$1" \
         | "$GXX" -fsyntax-only -isystem "$HDR" \
-            ${3+"$3"} "$2" -x c++ - >/dev/null 2>&1
+            ${3:+"$3"} "$2" -x c++ - >/dev/null 2>&1
 }
 
 # first_err <relative-header> <std> <extra-flags...>  -> first diagnostic
@@ -81,7 +81,7 @@ probe() {
 first_err() {
     _fe=$(printf '#include <%s>\n' "$1" \
         | "$GXX" -fsyntax-only -isystem "$HDR" \
-            ${3+"$3"} "$2" -x c++ - 2>&1 \
+            ${3:+"$3"} "$2" -x c++ - 2>&1 \
         | grep -E -m1 'error:|Error')
     _fe=${_fe:-<no first error line captured>}
     printf '%s\n' "$_fe"
