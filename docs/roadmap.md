@@ -112,10 +112,27 @@ Near-term shader work, in order:
 
 ## Relationship to upstream PSL1GHT (deliberate divergences)
 
-Upstream's "v3" RFC (ps3dev/PSL1GHT issue #67, 2017, still open) has four items. Three are already this project's design: the NID/FNID database with generated stub archives (`tools/nidgen`), `cell*`/`Cell*`/`CELL_*` naming for SDK-owned APIs, and `sys_*` snake_case syscalls. The remaining item is a deliberate divergence, recorded here so it is not revisited by accident:
+### Why this was never an upstream branch
 
-- **Duplicated C headers.** The RFC proposes deleting PSL1GHT's copies of standard headers and pushing the implementations into newlib. This project does the opposite: `sdk/include/` overrides the vendored headers and the newlib patch set carries what the PS3 needs, because SDK-API parity (the official `cell/*` surface) will never live in upstream newlib and must be owned here.
-- **Legacy names.** The RFC's position is that renamed symbols need no aliases (old code stays on the old PSL1GHT). This project keeps the legacy PSL1GHT names compiling through deprecated aliases behind a negative gate (`__PS3DK_NO_PSL1GHT_COMPAT__`), so existing homebrew builds and warns instead of breaking.
-- **Vendored PSL1GHT** is pinned at `f649a08` (`scripts/bootstrap.sh`); upstream's in-flight NID rename (PR #169) is tracked but not chased while it is a draft.
+When this project started, PSL1GHT upstream was effectively dead: no maintainer activity, its "v3" RFC (ps3dev/PSL1GHT issue #67, opened in 2017) still unaddressed, and the ps3dev toolchain still on GCC 7.2.0, binutils 2.22 and newlib 1.20.0. There was nobody to review a patch series, and the work that was needed (a modern compiler, a new runtime, a different pointer model) was not something a dormant project could take incrementally. So the SDK was built as its own project, with PSL1GHT vendored as a source of homebrew-compatible APIs rather than as a base to patch.
+
+Upstream has since come back to life: pull requests and discussions are moving again (the NID rename in PR #169, the C port of the `sfo`/`pkg` tools), and ps3toolchain moved its PPU compiler to GCC 13.2 in 2026. By then the two code bases had diverged too far for this project to become an upstream branch, for the reasons below.
+
+### Divergences
+
+Upstream's v3 RFC has four items. Three are already this project's design: the NID/FNID database with generated stub archives (`tools/nidgen`), `cell*`/`Cell*`/`CELL_*` naming for SDK-owned APIs, and `sys_*` snake_case syscalls. Beyond the RFC, these choices separate the projects, each on purpose:
+
+- **Canonical API.** The SDK's API and ABI follow the official PS3 SDK (`cell/*`); PSL1GHT names are kept as thin compatibility aliases over our implementation, behind the negative gate `__PS3DK_NO_PSL1GHT_COMPAT__`, so existing homebrew builds and warns instead of breaking. Upstream's RFC position is the opposite (renamed symbols get no aliases), and PR #169 renames PSL1GHT's own surface in place, which collides with our `cell` layer.
+- **Replace, don't patch.** Where PSL1GHT code is wrong for the official ABI, it is replaced by code this project owns (the native LV2 runtime in `runtime/lv2`, nidgen-generated stubs, `sdk/` libraries) rather than patched. `patches/psl1ght/` only shrinks from here.
+- **Pointer model and object format.** PPU code is ELF64 with 32-bit pointers by default (ILP32, compact 8-byte `.opd` descriptors), with LP64 available through `-mlp64` (`docs/abi/cellos-lv2-abi-spec.md`). PSL1GHT and the ps3dev toolchain produce LP64 objects with classic 24-byte descriptors. Objects and archives are not interchangeable between the two.
+- **Compiler, binutils and C library.** PPU GCC 12.4 with GCC 16 as its approved successor, binutils 2.42 for both PPU and SPU, newlib 4.4 with its own PS3 glue (locks, start-up order, LV2 errno values), and PPU GDB 14. Each carries a patch series written for this project's ABI and runtime; none applies to upstream's GCC 13.2 / binutils 2.22 / newlib 1.20 stack.
+- **Runtime.** The C runtime, `librt` (heap, POSIX layer, pthreads over the LV2 primitives, start-up ladder) and the CRT are this project's own, replacing PSL1GHT's.
+- **Duplicated C headers.** The RFC proposes deleting PSL1GHT's copies of standard headers and pushing the implementations into newlib. This project does the opposite: `sdk/include/` overrides the vendored headers and the newlib patch set carries what the PS3 needs, because SDK-API parity (the `cell/*` surface) will never live in upstream newlib and must be owned here.
+- **Shaders.** `tools/rsx-cg-compiler` is an independent Cg compiler targeting the official output format; PSL1GHT's `cgcomp` is bundled only for old Makefiles.
+- **Vendored PSL1GHT** is pinned at `f649a08` (`scripts/bootstrap.sh`), upstream master of 2026-06-29. Upstream changes are reviewed and adopted selectively; PR #169 is tracked but not chased while it is a draft.
 
 The remaining v3 must-have, SPRX/PRX module generation, is implemented: `tools/prx-gen` and `tools/sprx-linker` produce the modules, `docs/design/sprx-generation.md` records the format work behind them, and the regression battery boots generated `.sprx` rows.
+
+### What can still go upstream
+
+The architecture cannot: the pointer model, the runtime, the toolchain patch series and the API direction are each a different foundation, not a change upstream could merge. Self-contained bug fixes in code both projects still share can be offered back individually, for example the `rsxContextCallback` inline assembly that lacks memory clobbers (a FIFO-wrap hang under GCC 11 and later), `__heap_block_prev` in `librt/heap.inl`, which steps forward to find the previous block, and `sbrk` failures that leave a stale `errno`. Offering them is a separate decision for each fix.
