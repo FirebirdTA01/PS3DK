@@ -135,11 +135,9 @@ pt_err(s32 rc)
  * It is only ever held across syscalls, never across user code, so it can
  * not be held for an unbounded time.
  *
- * pt_once_mutex is separate precisely because pthread_once DOES run user
- * code under it: a once-routine that creates a mutex, or that starts a
- * thread which touches thread-specific data, must not be blocked by (or
- * block) the table lock.  Both are recursive so that a once-routine calling
- * pthread_once, or a destructor calling back in, does not self-deadlock.
+ * It is recursive so that a destructor calling back in does not
+ * self-deadlock.  pthread_once runs user code, so it takes no process-wide
+ * lock at all: each control carries its own state (see pthread_once).
  * ------------------------------------------------------------------ */
 
 #define PT_BOOT_UNSTARTED  0u
@@ -149,7 +147,6 @@ pt_err(s32 rc)
 
 static unsigned int pt_boot_state;
 static sys_mutex_t  pt_table_mutex;
-static sys_mutex_t  pt_once_mutex;
 
 static void
 pt_mutex_attr_init(sys_mutex_attr_t *attr, int recursive)
@@ -162,10 +159,22 @@ pt_mutex_attr_init(sys_mutex_attr_t *attr, int recursive)
 	attr->attr_adaptive  = SYS_MUTEX_ATTR_NOT_ADAPTIVE;
 }
 
-/* Create the two process-wide locks exactly once.  The winner of the
- * compare-and-swap creates them; everyone else spins on a yield until the
- * state settles.  This runs before any other thread can exist in the common
- * case (the main thread reaches it first), so the spin is a formality. */
+/* Create the process-wide table lock exactly once.  The winner of the
+ * compare-and-swap creates it; everyone else sleeps until the state settles.
+ * Sleeping (sysUsleep, a plain syscall that needs nothing from this file),
+ * not yielding: a yield only hands the processor to threads of equal or
+ * higher priority, so higher-priority losers could keep a lower-priority
+ * winner from ever finishing. */
+
+/* Test hooks, empty in the library: PT_TEST_BOOT_CLAIMED runs in the winner
+ * after it wins the claim, PT_TEST_BOOT_WAITING in each pass of a loser's
+ * sleep (the pthread-bootstrap-contested row). */
+#ifndef PT_TEST_BOOT_CLAIMED
+#define PT_TEST_BOOT_CLAIMED() ((void)0)
+#endif
+#ifndef PT_TEST_BOOT_WAITING
+#define PT_TEST_BOOT_WAITING() ((void)0)
+#endif
 static int
 pt_bootstrap(void)
 {
@@ -184,14 +193,9 @@ pt_bootstrap(void)
 		sys_mutex_attr_t attr;
 		s32 rc;
 
+		PT_TEST_BOOT_CLAIMED();
 		pt_mutex_attr_init(&attr, 1);
 		rc = sysMutexCreate(&pt_table_mutex, &attr);
-		if (rc == 0) {
-			pt_mutex_attr_init(&attr, 1);
-			rc = sysMutexCreate(&pt_once_mutex, &attr);
-			if (rc != 0)
-				(void)sysMutexDestroy(pt_table_mutex);
-		}
 		if (rc != 0) {
 			__atomic_store_n(&pt_boot_state, PT_BOOT_FAILED,
 			                 __ATOMIC_RELEASE);
@@ -207,7 +211,8 @@ pt_bootstrap(void)
 			return 0;
 		if (state == PT_BOOT_FAILED)
 			return ENOMEM;
-		(void)sysThreadYield();
+		PT_TEST_BOOT_WAITING();
+		(void)sysUsleep(50);
 	}
 }
 
@@ -1007,31 +1012,72 @@ pthread_condattr_getpshared(const pthread_condattr_t *attr, int *pshared)
  * One-time initialisation
  * ------------------------------------------------------------------ */
 
+/* pthread_once_t.init_executed is the control's state: PT_ONCE_IDLE, then
+ * PT_ONCE_RUNNING while one caller runs the routine, PT_ONCE_DONE once it
+ * has returned.  Each control is independent: unrelated controls never wait
+ * for each other, so a routine may start a thread and wait for it to run a
+ * different control.  Waiters sleep, not yield, so a lower-priority runner
+ * still gets the processor.
+ *
+ * std::call_once reaches here through __gthread_once, and its callable may
+ * throw.  This file is built with -fexceptions, so the cleanup attribute on
+ * `armed` runs while such an exception unwinds through pthread_once: it puts
+ * the control back to idle and the next waiter runs the routine instead.
+ * DONE is published only after the routine returned.  A routine that
+ * re-enters its own control waits for itself, which POSIX leaves undefined. */
+#define PT_ONCE_IDLE     0
+#define PT_ONCE_RUNNING  1
+#define PT_ONCE_DONE     2
+
+/* Test hook, empty in the library: runs in a waiter each time it finds the
+ * control running, before it sleeps (the cxx-call-once row). */
+#ifndef PT_TEST_ONCE_WAITING
+#define PT_TEST_ONCE_WAITING() ((void)0)
+#endif
+
+static void
+pt_once_abandon(pthread_once_t **armed)
+{
+	if (*armed != NULL)
+		__atomic_store_n(&(*armed)->init_executed, PT_ONCE_IDLE,
+		                 __ATOMIC_RELEASE);
+}
+
 int
 pthread_once(pthread_once_t *once_control, void (*init_routine)(void))
 {
-	int err;
+	unsigned int sleep_us = 50;
 
 	if (once_control == NULL || init_routine == NULL)
 		return EINVAL;
 
-	if (__atomic_load_n(&once_control->init_executed, __ATOMIC_ACQUIRE))
-		return 0;
+	for (;;) {
+		int state = __atomic_load_n(&once_control->init_executed,
+		                            __ATOMIC_ACQUIRE);
+		int expected = PT_ONCE_IDLE;
 
-	err = pt_bootstrap();
-	if (err != 0)
-		return err;
-	err = pt_err(sysMutexLock(pt_once_mutex, 0));
-	if (err != 0)
-		return err;
+		if (state == PT_ONCE_DONE)
+			return 0;
+		if (state == PT_ONCE_IDLE &&
+		    __atomic_compare_exchange_n(&once_control->init_executed,
+		                                &expected, PT_ONCE_RUNNING, 0,
+		                                __ATOMIC_ACQUIRE,
+		                                __ATOMIC_RELAXED)) {
+			pthread_once_t *armed
+				__attribute__((cleanup(pt_once_abandon))) =
+				once_control;
 
-	if (!once_control->init_executed) {
-		init_routine();
-		__atomic_store_n(&once_control->init_executed, 1, __ATOMIC_RELEASE);
+			init_routine();
+			armed = NULL;
+			__atomic_store_n(&once_control->init_executed,
+			                 PT_ONCE_DONE, __ATOMIC_RELEASE);
+			return 0;
+		}
+		PT_TEST_ONCE_WAITING();
+		(void)sysUsleep(sleep_us);
+		if (sleep_us < 1000)
+			sleep_us *= 2;
 	}
-
-	(void)sysMutexUnlock(pt_once_mutex);
-	return 0;
 }
 
 /* ------------------------------------------------------------------ *

@@ -199,7 +199,12 @@ for abi_flag in "" "-mlp64"; do
         for src in "$librt_src"/*.c; do
             [[ -f "$src" ]] || continue
             obj="$librt_work/$(basename "${src%.c}.o")"
-            "$CC" -c $abi_flag -mcpu=cell \
+            # pthread.c: std::call_once runs its callable inside pthread_once, and
+            # a throw must unwind through it to reset the once control (the cleanup
+            # attribute there runs only in code built with -fexceptions).
+            eh_flag=""
+            [[ "$(basename "$src")" == pthread.c ]] && eh_flag="-fexceptions"
+            "$CC" -c $abi_flag -mcpu=cell $eh_flag \
                 -Werror=implicit-function-declaration \
                 -Werror=incompatible-pointer-types \
                 -Werror=int-conversion \
