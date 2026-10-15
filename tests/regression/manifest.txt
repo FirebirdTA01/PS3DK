@@ -35,6 +35,13 @@ cxx-eh-lp64,tests/regression/cxx-eh/cxx-eh-lp64.fake.self,90,RAN-CLEAN,CXX_EH_OK
 # Required: the OK line and both teardown markers, in any order.
 cxx-iostream-startup-ilp32,tests/regression/cxx-iostream-startup/cxx-iostream-startup-ilp32.fake.self,60,RAN-CLEAN,(?s)^(?=.*CXX_IOSTREAM_STARTUP_OK)(?=.*STARTUP_TEARDOWN_ATEXIT)(?=.*STARTUP_TEARDOWN_DTOR),CXX_IOSTREAM_STARTUP_FAIL|terminate
 cxx-iostream-startup-lp64,tests/regression/cxx-iostream-startup/cxx-iostream-startup-lp64.fake.self,60,RAN-CLEAN,(?s)^(?=.*CXX_IOSTREAM_STARTUP_OK)(?=.*STARTUP_TEARDOWN_ATEXIT)(?=.*STARTUP_TEARDOWN_DTOR),CXX_IOSTREAM_STARTUP_FAIL|terminate
+
+# metalock-contested runs newlib's lazy lock-creation path (patch 0004's
+# lock_internal.c, extracted verbatim, with its test hooks) under contention:
+# a low-priority creator delayed after winning the claim, and three
+# higher-priority waiters that must sleep, not spin, until it publishes.
+metalock-contested-ilp32,tests/regression/metalock-contested/metalock-contested-ilp32.fake.self,60,RAN-CLEAN,METALOCK_CONTESTED_OK,METALOCK_CONTESTED_FAIL|terminate
+metalock-contested-lp64,tests/regression/metalock-contested/metalock-contested-lp64.fake.self,60,RAN-CLEAN,METALOCK_CONTESTED_OK,METALOCK_CONTESTED_FAIL|terminate
 # abi-types guards the reference toolchain's type choices (int32_t = int,
 # uint32_t = unsigned int, ILP32 wchar_t = 16-bit unsigned short, wint_t
 # = int): static_asserts fail the build, the run checks newlib and

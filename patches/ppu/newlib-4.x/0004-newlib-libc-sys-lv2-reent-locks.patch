@@ -169,7 +169,7 @@ new file mode 100644
 index 0000000..7a07e3e
 --- /dev/null
 +++ b/newlib/libc/sys/lv2/lock_internal.c
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,99 @@
 +#include <stdint.h>
 +#include <stdlib.h>
 +#include <sys/types.h>
@@ -184,11 +184,46 @@ index 0000000..7a07e3e
 +   and 98 in GCC 16) and every user constructor (101 and up).
 +
 +   An implementation constructor below 85 can still take a libc lock first,
-+   so creation on first use stays, made safe for any thread: whoever moves
-+   the state from 0 to 1 creates the lock and publishes it with a release
-+   store of 2; everyone else waits until they acquire-load 2. */
++   so creation on first use stays, safe for any thread: whoever moves the
++   state from 0 to 1 creates the lock and publishes it with a release store
++   of 2.  Everyone else sleeps until they acquire-load 2.  Sleeping (not
++   spinning, not yielding) lets a lower-priority creator run even when
++   higher-priority waiters would otherwise occupy every PPU thread.
++
++   Test hooks, empty in the library: LOCK_INTERNAL_TEST_AFTER_CLAIM runs in
++   the creator between winning the claim and creating the lock, and
++   LOCK_INTERNAL_TEST builds without the constructor, so the
++   metalock-contested regression row can run this exact source with a
++   delayed creator and higher-priority waiters. */
 +static sys_lwmutex_t metaLock;
 +static int metaLockState;	/* 0 none, 1 being created, 2 ready */
++
++#ifndef LOCK_INTERNAL_TEST_AFTER_CLAIM
++#define LOCK_INTERNAL_TEST_AFTER_CLAIM() ((void)0)
++#endif
++
++/* sys_timer_usleep (lv2 syscall 141), issued directly: this runs before
++   libc is usable, so it must not take a libc lock or need the syscall
++   table.  Same registers and clobbers as the SDK's lv2syscall1. */
++static void metalock_sleep(uint64_t usec)
++{
++	register uint64_t p1 __asm__("3") = usec;
++	register uint64_t p2 __asm__("4");
++	register uint64_t p3 __asm__("5");
++	register uint64_t p4 __asm__("6");
++	register uint64_t p5 __asm__("7");
++	register uint64_t p6 __asm__("8");
++	register uint64_t p7 __asm__("9");
++	register uint64_t p8 __asm__("10");
++	register uint64_t scn __asm__("11") = 141;
++	__asm__ __volatile__("sc"
++		: "=r"(p1), "=r"(p2), "=r"(p3), "=r"(p4), "=r"(p5), "=r"(p6),
++		  "=r"(p7), "=r"(p8), "=r"(scn)
++		: "r"(p1), "r"(p2), "r"(p3), "r"(p4), "r"(p5), "r"(p6), "r"(p7),
++		  "r"(p8), "r"(scn)
++		: "r0", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6",
++		  "cr7", "memory");
++}
 +
 +static void create_metalock(void)
 +{
@@ -198,15 +233,17 @@ index 0000000..7a07e3e
 +		return;
 +	if(__atomic_compare_exchange_n(&metaLockState, &expected, 1, 0,
 +	                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
++		LOCK_INTERNAL_TEST_AFTER_CLAIM();
 +		if(sys_lwmutex_create(&metaLock,&__libc_lock_attributes))
 +			abort();
 +		__atomic_store_n(&metaLockState, 2, __ATOMIC_RELEASE);
 +		return;
 +	}
 +	while(__atomic_load_n(&metaLockState, __ATOMIC_ACQUIRE) != 2)
-+		;
++		metalock_sleep(50);
 +}
 +
++#ifndef LOCK_INTERNAL_TEST
 +#pragma GCC diagnostic push
 +#pragma GCC diagnostic ignored "-Wprio-ctor-dtor"
 +static void init_metalock(void) __attribute__((constructor(85)));
@@ -215,6 +252,7 @@ index 0000000..7a07e3e
 +{
 +	create_metalock();
 +}
++#endif
 +
 +void __libc_auto_lock_allocate(sys_lwmutex_t *lwmutex)
 +{
