@@ -52,7 +52,7 @@
  * inclusion only: a repeat inclusion finds the types header consumed and
  * _POSIX_THREADS off again, legitimately. */
 #if !defined(_PS3DK_PTHREAD_WRAPPER_H) && defined(_SYS__PTHREADTYPES_H_) \
-    && !defined(_POSIX_THREADS) \
+    && !defined(_POSIX_THREADS) && !defined(_LV2_PTHREAD_TYPES) \
     && defined(__POSIX_VISIBLE) && (__POSIX_VISIBLE < 199506)
 # error "PS3DK <pthread.h>: the pthread types were dropped by a strict-ISO <sys/types.h> included earlier in this file; build with -std=gnu99 (or later), or include <pthread.h> before <sys/types.h>."
 #endif
@@ -83,6 +83,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Legacy toolchains: newlib patch 0018 (_LV2_PTHREAD_DECLS) declares all of
+ * the below itself.  An older newlib (the GCC 12.4 control) does not, so the
+ * wrapper keeps declaring them there. */
+#if !defined(_LV2_PTHREAD_DECLS)
 
 /* ------------------------------------------------------------------ *
  * Mutex types.
@@ -180,6 +185,8 @@ int pthread_rwlockattr_getpshared (const pthread_rwlockattr_t *__attr,
                                    int *__pshared);
 int pthread_rwlockattr_setpshared (pthread_rwlockattr_t *__attr,
                                    int __pshared);
+
+#endif /* !_LV2_PTHREAD_DECLS */
 
 #ifdef __cplusplus
 }

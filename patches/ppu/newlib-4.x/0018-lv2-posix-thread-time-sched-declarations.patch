@@ -1,0 +1,165 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] lv2: declare the POSIX thread, time and scheduling API librt implements
+
+librt (the PS3 runtime) implements pthreads, read-write locks,
+clock_gettime, nanosleep, sched_yield and the sched priority-range
+queries, but newlib declares them only under _POSIX_THREADS,
+_POSIX_READER_WRITER_LOCKS, _POSIX_TIMERS and _POSIX_PRIORITY_SCHEDULING,
+which this target does not define: defining them changes struct sigevent
+and the pthread attribute layouts.  Until now the SDK's pthread.h, time.h
+and sched.h wrappers supplied the declarations, which the toolchain's own
+build never sees; libstdc++ and libgcc built with --enable-threads=posix
+need them there.
+
+Enable the declarations for __lv2ppu__ directly, with the layouts of the
+macros-off configuration (the ones the SDK wrappers produce today):
+pthread.h's body and rwlock section, the pthread and rwlock types,
+CLOCK_MONOTONIC, sched_yield; and declare for lv2 what the SDK wrappers
+added (mutex type constants and settype/gettype without the UNIX98 member,
+the _NP static initialisers, pthread_mutex_timedlock, setschedpolicy,
+setinheritsched, clock_gettime, nanosleep, sched_get_priority_min/max).
+_LV2_PTHREAD_DECLS, _LV2_TIME_DECLS and _LV2_SCHED_DECLS tell the SDK
+wrappers that these headers already declare the lv2 set.
+
+diff --git a/newlib/libc/include/pthread.h b/newlib/libc/include/pthread.h
+index c99ad39..4b05b61 100644
+--- a/newlib/libc/include/pthread.h
++++ b/newlib/libc/include/pthread.h
+@@ -24,7 +24,11 @@ extern "C" {
+ 
+ #include <unistd.h>
+ 
+-#if defined(_POSIX_THREADS)
++/* lv2 (PS3 PPU): librt implements the POSIX threads API without this target
++   defining the feature macros, which would change struct sigevent and the
++   pthread attribute layouts.  So the declarations are enabled for __lv2ppu__
++   directly; the layouts stay those of the macros-off configuration.  */
++#if defined(_POSIX_THREADS) || defined(__lv2ppu__)
+ 
+ #include <sys/types.h>
+ #include <time.h>
+@@ -376,6 +380,37 @@ int	pthread_getcpuclockid (pthread_t __pthread_id, clockid_t *__clock_id);
+ #endif /* defined(_POSIX_THREAD_CPUTIME) */
+ 
+ 
++#if defined(__lv2ppu__)
++/* Marker for the SDK's legacy wrappers: this header declares the lv2 set.  */
++#define _LV2_PTHREAD_DECLS 1
++
++/* Without _UNIX98_THREAD_MUTEX_ATTRIBUTES (which adds a member to
++   pthread_mutexattr_t): librt keeps the type in the existing member.  */
++#if !defined(_UNIX98_THREAD_MUTEX_ATTRIBUTES)
++#define PTHREAD_MUTEX_NORMAL     0
++#define PTHREAD_MUTEX_RECURSIVE  1
++#define PTHREAD_MUTEX_ERRORCHECK 2
++#define PTHREAD_MUTEX_DEFAULT    3
++int	pthread_mutexattr_settype (pthread_mutexattr_t *__attr, int __kind);
++int	pthread_mutexattr_gettype (const pthread_mutexattr_t *__attr, int *__kind);
++#endif
++
++/* lv2 mutex ids are not compile-time constants: statically initialised
++   mutexes carry a sentinel and are created on first use (0xFFFFFFFF is
++   _PTHREAD_MUTEX_INITIALIZER).  */
++#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP  ((pthread_mutex_t) 0xFFFFFFFEU)
++#define PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP ((pthread_mutex_t) 0xFFFFFFFDU)
++
++#if !defined(_POSIX_TIMEOUTS)
++int	pthread_mutex_timedlock (pthread_mutex_t *__mutex,
++				 const struct timespec *__timeout);
++#endif
++#if !defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
++int	pthread_attr_setschedpolicy (pthread_attr_t *__attr, int __policy);
++int	pthread_attr_setinheritsched (pthread_attr_t *__attr, int __inherit);
++#endif
++#endif /* defined(__lv2ppu__) */
++
+ #endif /* defined(_POSIX_THREADS) */
+ 
+ #if defined(_POSIX_BARRIERS)
+@@ -407,7 +442,7 @@ int	pthread_spin_unlock (pthread_spinlock_t *__spinlock);
+ 
+ #endif /* defined(_POSIX_SPIN_LOCKS) */
+ 
+-#if defined(_POSIX_READER_WRITER_LOCKS)
++#if defined(_POSIX_READER_WRITER_LOCKS) || defined(__lv2ppu__)
+ 
+ /* This is used to statically initialize a pthread_rwlock_t. Example:
+   
+diff --git a/newlib/libc/include/sched.h b/newlib/libc/include/sched.h
+index 31599aa..613ddfe 100644
+--- a/newlib/libc/include/sched.h
++++ b/newlib/libc/include/sched.h
+@@ -81,7 +81,14 @@ int sched_rr_get_interval(
+ );
+ #endif /* _POSIX_PRIORITY_SCHEDULING */
+ 
+-#if defined(_POSIX_THREADS) || defined(_POSIX_PRIORITY_SCHEDULING)
++#if defined(__lv2ppu__) && !defined(_POSIX_PRIORITY_SCHEDULING)
++/* lv2: librt implements the priority-range queries (see pthread.h).  */
++#define _LV2_SCHED_DECLS 1
++int sched_get_priority_max (int __policy);
++int sched_get_priority_min (int __policy);
++#endif
++
++#if defined(_POSIX_THREADS) || defined(_POSIX_PRIORITY_SCHEDULING) || defined(__lv2ppu__)
+ 
+ /*
+  *  XBD 13 - Yield Processor, P1003.1b-2008, p. 1807
+diff --git a/newlib/libc/include/sys/_pthreadtypes.h b/newlib/libc/include/sys/_pthreadtypes.h
+index 75e9e1c..094110f 100644
+--- a/newlib/libc/include/sys/_pthreadtypes.h
++++ b/newlib/libc/include/sys/_pthreadtypes.h
+@@ -18,7 +18,16 @@
+ #ifndef _SYS__PTHREADTYPES_H_
+ #define	_SYS__PTHREADTYPES_H_
+ 
+-#if defined(_POSIX_THREADS) || __POSIX_VISIBLE >= 199506
++/* lv2 (PS3 PPU): librt implements the POSIX threads API without this target
++   defining the feature macros, which would change struct sigevent and the
++   pthread attribute layouts.  So the declarations are enabled for __lv2ppu__
++   directly; the layouts stay those of the macros-off configuration.  */
++#if defined(__lv2ppu__)
++/* Marker for the SDK's legacy wrappers: on lv2 the types below exist in every
++   dialect, strict ISO included.  */
++#define _LV2_PTHREAD_TYPES 1
++#endif
++#if defined(_POSIX_THREADS) || __POSIX_VISIBLE >= 199506 || defined(__lv2ppu__)
+ 
+ #include <sys/sched.h>
+ 
+@@ -217,7 +226,7 @@ typedef __uint32_t pthread_spinlock_t;        /* POSIX Spin Lock Object */
+ 
+ /* POSIX Reader/Writer Lock Types */
+ 
+-#if defined(_POSIX_READER_WRITER_LOCKS)
++#if defined(_POSIX_READER_WRITER_LOCKS) || defined(__lv2ppu__)
+ typedef __uint32_t pthread_rwlock_t;         /* POSIX RWLock Object */
+ 
+ #define _PTHREAD_RWLOCK_INITIALIZER ((pthread_rwlock_t) 0xFFFFFFFF)
+diff --git a/newlib/libc/include/time.h b/newlib/libc/include/time.h
+index ed6cc70..cb9bcb0 100644
+--- a/newlib/libc/include/time.h
++++ b/newlib/libc/include/time.h
+@@ -194,6 +194,13 @@ int nanosleep (const struct timespec  *rqtp, struct timespec *rmtp);
+ #endif
+ #endif /* _POSIX_TIMERS */
+ 
++#if defined(__lv2ppu__) && !defined(_POSIX_TIMERS)
++/* lv2: librt implements these two without _POSIX_TIMERS (see pthread.h).  */
++#define _LV2_TIME_DECLS 1
++int clock_gettime (clockid_t clock_id, struct timespec *tp);
++int nanosleep (const struct timespec  *rqtp, struct timespec *rmtp);
++#endif
++
+ #if defined(_POSIX_CLOCK_SELECTION)
+ 
+ #ifdef __cplusplus
+@@ -264,7 +271,7 @@ extern "C" {
+ 
+ #endif
+ 
+-#if defined(_POSIX_MONOTONIC_CLOCK)
++#if defined(_POSIX_MONOTONIC_CLOCK) || defined(__lv2ppu__)
+ 
+ /*  The identifier for the system-wide monotonic clock, which is defined
+  *  as a clock whose value cannot be set via clock_settime() and which

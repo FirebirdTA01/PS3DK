@@ -6,7 +6,8 @@
 #include_next <time.h>
 #ifndef PS3DK_TIME_WRAPPER_H
 #define PS3DK_TIME_WRAPPER_H
-#if defined(__lv2ppu__)
+/* Newlib patch 0018 declares these itself (_LV2_TIME_DECLS); older newlib does not. */
+#if defined(__lv2ppu__) && !defined(_LV2_TIME_DECLS)
 #include <sys/types.h>
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC ((clockid_t)4)

@@ -15,7 +15,8 @@
 #include_next <sched.h>
 #ifndef PS3DK_SCHED_WRAPPER_H
 #define PS3DK_SCHED_WRAPPER_H
-#if defined(__lv2ppu__)
+/* Newlib patch 0018 declares these itself (_LV2_SCHED_DECLS); older newlib does not. */
+#if defined(__lv2ppu__) && !defined(_LV2_SCHED_DECLS)
 #ifdef __cplusplus
 extern "C" {
 #endif
