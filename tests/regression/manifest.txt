@@ -50,6 +50,14 @@ libnet-ilp32,tests/regression/libnet/libnet-ilp32.fake.self,60,RAN-CLEAN,LIBNET_
 libnet-lp64,tests/regression/libnet/libnet-lp64.fake.self,60,RAN-CLEAN,LIBNET_OK,LIBNET_FAIL
 posix-time-ilp32,tests/regression/posix-time/posix-time-ilp32.fake.self,60,RAN-CLEAN,POSIX_TIME_OK,POSIX_TIME_FAIL
 posix-time-lp64,tests/regression/posix-time/posix-time-lp64.fake.self,60,RAN-CLEAN,POSIX_TIME_OK,POSIX_TIME_FAIL
+# sched-priority: sched_get_priority_min/max for the one policy the shim
+# supports (SCHED_OTHER -> both 0; any other policy -> -1/errno EINVAL,
+# pthread_attr_* return the error number).  The worker reads its real Lv-2
+# priority back: priority 0 runs at the default 1000, and the non-POSIX
+# pass-through sends 1500 to 1500.  cxx_linkage.cpp proves the prototypes
+# work from C++ with C linkage under both include orders.
+sched-priority-ilp32,tests/regression/sched-priority/sched-priority-ilp32.fake.self,60,RAN-CLEAN,SCHED_PRIORITY_OK,SCHED_PRIORITY_FAIL|terminate
+sched-priority-lp64,tests/regression/sched-priority/sched-priority-lp64.fake.self,60,RAN-CLEAN,SCHED_PRIORITY_OK,SCHED_PRIORITY_FAIL|terminate
 # spu-fiber-context: SPU fiber contexts (libfiber.a) - ping-pong, callee-saved
 # registers across switches, Self(), argument errors; SPU exit status 0 = pass.
 spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self,60,RAN-CLEAN,SPU_FIBER_OK,SPU_FIBER_FAIL
