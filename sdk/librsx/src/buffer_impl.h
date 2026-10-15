@@ -8,6 +8,10 @@ void RSX_FUNC(ResetCommandBuffer)(gcmContextData *context)
 	gcmControlRegister volatile *ctrl = gcmGetControlRegister();
 	ctrl->put = offset;
 	while(ctrl->get!=offset) usleep(30);
+
+	/* The RSX now reads from the start of the default buffer; so must we.
+	 * (The reference resets the default FIFO context here as well.) */
+	context->current = context->begin;
 }
 
 void RSX_FUNC(FlushBuffer)(gcmContextData *context)

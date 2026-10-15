@@ -118,6 +118,9 @@ librsx-cmds-rsx-ilp32,tests/regression/librsx-cmds/librsx-cmds-rsx-ilp32.fake.se
 librsx-cmds-rsx-lp64,tests/regression/librsx-cmds/librsx-cmds-rsx-lp64.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
 librsx-cmds-gcm_cmd-ilp32,tests/regression/librsx-cmds/librsx-cmds-gcm_cmd-ilp32.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
 librsx-cmds-gcm_cmd-lp64,tests/regression/librsx-cmds/librsx-cmds-gcm_cmd-lp64.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
+# gcm-reset-buffer: cellGcmResetDefaultCommandBufferUnsafe returns the RSX to the start of the
+# default buffer and rewinds context->current with it; a label written afterwards lands.
+gcm-reset-buffer,tests/regression/gcm-reset-buffer/gcm-reset-buffer.fake.self,20,RAN-CLEAN,GCM_RESET_OK,GCM_RESET_FAIL [0-9]
 # ilp32-ivspill guards GCC patch 0049: an ILP32 loop whose IV bias the
 # optimizer used to spill as 32 bits and reload zero-extended, leaking bit 32
 # into an address.  Judge it under the PPU INTERPRETER: RPCS3's LLVM
