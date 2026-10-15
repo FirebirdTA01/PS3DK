@@ -54,7 +54,7 @@ PS3_Custom_Toolchain/
 source ./scripts/env.sh
 ./scripts/bootstrap.sh                 # upstream mirrors (add --with-reference-repos for ps3dev/forks)
 ./scripts/build-spu-toolchain.sh
-./scripts/build-ppu-toolchain.sh       # feat/gcc16 only: --gcc=16 builds the GCC 16 port; set PS3DEV to a separate prefix first (a prefix holding another GCC major is refused)
+./scripts/build-ppu-toolchain.sh
 ./scripts/build-psl1ght.sh             # PSL1GHT runtime + our LV2 runtime, into $PS3DK
 ./scripts/build-sdk.sh --headers-only
 ./scripts/build-cell-stub-archives.sh
