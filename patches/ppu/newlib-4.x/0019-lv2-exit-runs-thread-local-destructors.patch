@@ -1,0 +1,41 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] lv2: exit() runs the calling thread's thread_local destructors first
+
+With GCC 16's posix thread model, libstdc++ registers each thread_local
+with a non-trivial destructor through __cxa_thread_atexit_impl, which
+librt provides; a worker thread's list runs in librt's thread-exit
+cleanup.  For the thread that calls exit() (normally the main thread,
+returning from main), its thread_locals must die before the atexit
+handlers and static destructors run, as the C++ standard orders them:
+those handlers include libstdc++'s run of the main thread's
+notify_all_at_thread_exit list.  exit() now calls librt's
+__lv2_tls_dtors_run first, through a weak reference, so a program without
+thread_locals links as before.  _exit and abort are unchanged.
+
+diff --git a/newlib/libc/stdlib/exit.c b/newlib/libc/stdlib/exit.c
+index 9b7bd51..1ea7a15 100644
+--- a/newlib/libc/stdlib/exit.c
++++ b/newlib/libc/stdlib/exit.c
+@@ -49,9 +49,22 @@ Supporting OS subroutines required: <<_exit>>.
+  * Exit, flushing stdio buffers if necessary.
+  */
+ 
++#ifdef __lv2ppu__
++/* librt: runs the calling thread's thread_local destructors.  Weak: a program
++   that never registered one need not link it.  */
++extern void __lv2_tls_dtors_run (void) __attribute__((weak));
++#endif
++
+ void
+ exit (int code)
+ {
++#ifdef __lv2ppu__
++  /* The exiting thread's thread_locals die before the atexit handlers and
++     static destructors run, as the C++ standard orders them (glibc does the
++     same).  _exit and abort skip both.  */
++  if (__lv2_tls_dtors_run)
++    __lv2_tls_dtors_run ();
++#endif
+ #ifdef _LITE_EXIT
+   /* Refer to comments in __atexit.c for more details of lite exit.  */
+   void __call_exitprocs (int, void *) __attribute__((weak));

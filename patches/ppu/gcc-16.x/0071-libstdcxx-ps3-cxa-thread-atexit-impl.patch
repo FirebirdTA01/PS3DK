@@ -1,0 +1,46 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] libstdc++: use librt's __cxa_thread_atexit_impl on powerpc64-ps3-elf
+
+libsupc++'s __cxa_thread_atexit (thread_local objects with non-trivial
+destructors) uses the C library's __cxa_thread_atexit_impl when
+configure finds one, and otherwise registers the destructors through a
+pthread key.  A key-based list runs in the key-destructor phase, in an
+order relative to libstdc++'s own at-thread-exit key
+(notify_all_at_thread_exit, promise::set_value_at_thread_exit) that
+depends on registration order, while the standard requires a thread's
+thread_locals to be destroyed before those notify.  librt provides
+__cxa_thread_atexit_impl with a phase of its own that runs before the
+key destructors; the check for it only runs for native builds, so define
+HAVE___CXA_THREAD_ATEXIT_IMPL for the target, beside HAVE_TLS.
+
+diff --git a/libstdc++-v3/configure b/libstdc++-v3/configure
+index 2278c13..0f9ccd6 100755
+--- a/libstdc++-v3/configure
++++ b/libstdc++-v3/configure
+@@ -27538,6 +27538,11 @@ else
+       powerpc64-ps3-elf*)
+         $as_echo "#define HAVE_TLS 1" >>confdefs.h
+ 
++        # librt provides __cxa_thread_atexit_impl (its thread-exit cleanup
++        # runs thread_local destructors before the pthread key destructors);
++        # the check for it never runs in this branch.
++        $as_echo "#define HAVE___CXA_THREAD_ATEXIT_IMPL 1" >>confdefs.h
++
+         ;;
+     esac
+     $as_echo "#define HAVE_HYPOT 1" >>confdefs.h
+diff --git a/libstdc++-v3/configure.ac b/libstdc++-v3/configure.ac
+index 1cb03be..b90ad4f 100644
+--- a/libstdc++-v3/configure.ac
++++ b/libstdc++-v3/configure.ac
+@@ -346,6 +346,10 @@ else
+     case "${host}" in
+       powerpc64-ps3-elf*)
+         AC_DEFINE(HAVE_TLS)
++        # librt provides __cxa_thread_atexit_impl (its thread-exit cleanup
++        # runs thread_local destructors before the pthread key destructors);
++        # the check for it never runs in this branch.
++        AC_DEFINE(HAVE___CXA_THREAD_ATEXIT_IMPL)
+         ;;
+     esac
+     AC_DEFINE(HAVE_HYPOT)

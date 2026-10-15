@@ -31,11 +31,13 @@
  *     cond is recorded, and pthread_mutex_destroy destroys the idle ones
  *     first and returns them to "not created" (see "Cond bindings").
  *
- *   * Lv-2 has no thread-specific-data.  Keys live in a fixed table indexed
- *     by a slot that is found from sys_ppu_thread_get_id().  The table is
- *     bounded (PT_THREADS_MAX x PT_KEYS_MAX); pthread_key_create and
- *     pthread_setspecific report EAGAIN when it is exhausted rather than
- *     corrupting anything.
+ *   * Lv-2 has no thread-specific-data.  Each thread's values live in its
+ *     slot, found through a per-thread TLS cookie (never the Lv-2 thread id,
+ *     which Lv-2 reuses).  Slots come in chunks that grow on demand and
+ *     never move; keys are bounded (PT_KEYS_MAX), and pthread_key_create
+ *     reports EAGAIN when they run out rather than corrupting anything.
+ *     Thread exit runs thread_local destructors, then key destructors (see
+ *     "Thread exit").
  *
  * Deliberately NOT implemented, because Lv-2 offers nothing to build them
  * on: cancellation (pthread_cancel returns ENOSYS; setcancelstate /
@@ -58,6 +60,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <pthread.h>
 #include <sched.h>
@@ -78,11 +81,13 @@
  * Tunables
  * ------------------------------------------------------------------ */
 
-/* Threads that can hold thread-specific data at one time, and keys that can
- * exist at one time.  The table is static: PT_THREADS_MAX * PT_KEYS_MAX
- * pointers of BSS, pulled into the link only when a program actually uses
- * pthreads.  cairo needs no keys at all and pixman needs exactly one. */
-#define PT_THREADS_MAX   32
+/* Thread slots come in chunks of PT_CHUNK_SLOTS: the first chunk is static,
+ * later ones are allocated when needed and never freed or moved, so a slot's
+ * address stays valid for as long as anything holds it (a TLS cookie, a
+ * trampoline argument, a blocked pthread_join).  Keys that can exist at one
+ * time: PT_KEYS_MAX.  cairo needs no keys at all and pixman needs exactly
+ * one. */
+#define PT_CHUNK_SLOTS   32
 #define PT_KEYS_MAX      32
 
 /* POSIX requires at least PTHREAD_DESTRUCTOR_ITERATIONS (4) passes over the
@@ -251,6 +256,8 @@ struct pt_thread {
 	unsigned char    finished;   /* start routine returned / pthread_exit */
 	unsigned char    detached;
 	unsigned char    foreign;    /* not created through pthread_create */
+	unsigned char    cleanup;    /* 0 not started, 1 running, 2 done */
+	pthread_t        handle;     /* fixed for the life of the slot */
 	sys_ppu_thread_t lv2_id;
 	void            *retval;
 	void          *(*start)(void *);
@@ -263,66 +270,125 @@ struct pt_key {
 	void        (*destructor)(void *);
 };
 
-static struct pt_thread pt_threads[PT_THREADS_MAX];
+struct pt_chunk {
+	struct pt_chunk  *next;
+	struct pt_thread  slot[PT_CHUNK_SLOTS];
+};
+
+static struct pt_chunk  pt_chunk0;
+static struct pt_chunk *pt_chunk_last = &pt_chunk0;
+static unsigned int     pt_nchunks;	/* 0 until pt_chunk0 is set up */
 static struct pt_key    pt_keys[PT_KEYS_MAX];
 
-/* A pthread_t is a 1-based index into pt_threads, never a raw Lv-2 id:
- * sys_ppu_thread_t is 64 bits and pthread_t is 32, so the raw id does not
- * fit.  0 is therefore always an invalid pthread_t. */
+/* The calling thread's slot, set when the thread first gets one (in its
+ * pthread_create trampoline, or when a thread not made by pthread_create
+ * first needs one) and cleared by its own cleanup.  Identity comes only from
+ * here, never from the Lv-2 thread id, which Lv-2 reuses. */
+static __thread struct pt_thread *pt_self_cookie;
+
+/* Caller holds the table lock. */
+static void
+pt_chunk_init(struct pt_chunk *c, unsigned int first_handle)
+{
+	unsigned int i;
+
+	for (i = 0; i < PT_CHUNK_SLOTS; i++)
+		c->slot[i].handle = (pthread_t)(first_handle + i);
+}
+
+#define PT_FOR_EACH_SLOT(c, t)                                          \
+	for ((c) = (pt_nchunks ? &pt_chunk0 : NULL); (c) != NULL;       \
+	     (c) = (c)->next)                                           \
+		for ((t) = (c)->slot; (t) < (c)->slot + PT_CHUNK_SLOTS; (t)++)
+
+/* A pthread_t is a 1-based slot number across the chunks, never a raw Lv-2
+ * id: sys_ppu_thread_t is 64 bits and pthread_t is 32, so the raw id does
+ * not fit.  0 is therefore always an invalid pthread_t.  Caller holds the
+ * table lock. */
 static struct pt_thread *
 pt_slot_from_handle(pthread_t handle)
 {
 	unsigned int idx = (unsigned int)handle;
+	struct pt_chunk *c = &pt_chunk0;
+	unsigned int n;
 
-	if (idx == 0 || idx > PT_THREADS_MAX)
+	if (idx == 0 || pt_nchunks == 0)
 		return NULL;
-	if (!pt_threads[idx - 1].used)
+	idx--;
+	for (n = idx / PT_CHUNK_SLOTS; n > 0 && c != NULL; n--)
+		c = c->next;
+	if (c == NULL || !c->slot[idx % PT_CHUNK_SLOTS].used)
 		return NULL;
-	return &pt_threads[idx - 1];
+	return &c->slot[idx % PT_CHUNK_SLOTS];
 }
 
 static pthread_t
 pt_handle_from_slot(const struct pt_thread *slot)
 {
-	return (pthread_t)((slot - pt_threads) + 1);
+	return slot->handle;
 }
 
-/* Caller holds the table lock.  Registers the calling thread on first use;
- * threads that were not started through pthread_create (the main thread, or
- * one from a raw sys_ppu_thread_create) get a detached slot so that nothing
- * ever waits to join them. */
+/* Caller holds the table lock.  A free slot, cleared but keeping its handle;
+ * a new chunk when every slot is taken (EAGAIN if that allocation fails). */
+static int
+pt_slot_alloc_locked(struct pt_thread **out)
+{
+	struct pt_chunk *c;
+	struct pt_thread *t;
+
+	if (pt_nchunks == 0) {
+		pt_chunk_init(&pt_chunk0, 1);
+		pt_nchunks = 1;
+	}
+	PT_FOR_EACH_SLOT(c, t) {
+		if (!t->used) {
+			pthread_t handle = t->handle;
+
+			memset(t, 0, sizeof(*t));
+			t->handle = handle;
+			*out = t;
+			return 0;
+		}
+	}
+	c = calloc(1, sizeof(*c));
+	if (c == NULL)
+		return EAGAIN;
+	pt_chunk_init(c, pt_nchunks * PT_CHUNK_SLOTS + 1);
+	pt_chunk_last->next = c;
+	pt_chunk_last = c;
+	pt_nchunks++;
+	*out = &c->slot[0];
+	return 0;
+}
+
+/* Caller holds the table lock.  The calling thread's slot; a thread not
+ * created through pthread_create (the main thread, or one from a raw
+ * sys_ppu_thread_create) gets a detached slot on first use, so that nothing
+ * ever waits to join it.  Such a slot is released by the thread's cleanup
+ * when it exits through a covered route (pt_thread_cleanup); a thread that
+ * exits any other way leaves it allocated (one slot per such thread). */
 static int
 pt_self_slot_locked(struct pt_thread **out)
 {
+	struct pt_thread *t = pt_self_cookie;
 	sys_ppu_thread_t id = 0;
-	struct pt_thread *free_slot = NULL;
-	int i;
+	int err;
 
+	if (t != NULL && t->used) {
+		*out = t;
+		return 0;
+	}
 	if (sysThreadGetId(&id) != 0)
 		return ESRCH;
-
-	for (i = 0; i < PT_THREADS_MAX; i++) {
-		struct pt_thread *t = &pt_threads[i];
-
-		if (t->used) {
-			if (t->lv2_id == id && !t->finished) {
-				*out = t;
-				return 0;
-			}
-		} else if (free_slot == NULL) {
-			free_slot = t;
-		}
-	}
-
-	if (free_slot == NULL)
-		return EAGAIN;
-
-	memset(free_slot, 0, sizeof(*free_slot));
-	free_slot->used     = 1;
-	free_slot->foreign  = 1;
-	free_slot->detached = 1;
-	free_slot->lv2_id   = id;
-	*out = free_slot;
+	err = pt_slot_alloc_locked(&t);
+	if (err != 0)
+		return err;
+	t->used     = 1;
+	t->foreign  = 1;
+	t->detached = 1;
+	t->lv2_id   = id;
+	pt_self_cookie = t;
+	*out = t;
 	return 0;
 }
 
@@ -364,20 +430,111 @@ pt_run_tsd_destructors(struct pt_thread *self)
 	}
 }
 
-/* Common tail for a thread that is going away.  Returns with the slot
- * either released (detached) or parked for pthread_join. */
-static void
-pt_thread_finish(struct pt_thread *self, void *retval)
-{
-	pt_run_tsd_destructors(self);
+/* ------------------------------------------------------------------ *
+ * Thread exit
+ *
+ * thread_local destructors registered through __cxa_thread_atexit_impl
+ * (libstdc++ uses it for every thread_local with a non-trivial destructor)
+ * run first, then the thread-specific-data destructors, where libstdc++'s
+ * notify_all_at_thread_exit and promise::set_value_at_thread_exit run: so
+ * a thread's thread_locals are destroyed before it notifies anyone, whatever
+ * order the program registered things in.
+ * ------------------------------------------------------------------ */
 
-	if (pt_table_lock() != 0)
-		return;
-	self->retval   = retval;
-	self->finished = 1;
-	if (self->detached)
-		self->used = 0;
-	pt_table_unlock();
+struct pt_tls_dtor {
+	void              (*fn)(void *);
+	void               *obj;
+	struct pt_tls_dtor *next;
+};
+
+static __thread struct pt_tls_dtor *pt_tls_dtors;
+
+/* Test hook, empty in the library: the allocation behind
+ * __cxa_thread_atexit_impl (the thread-atexit-oom row makes it fail). */
+#ifndef PT_TEST_TLS_ALLOC
+#define PT_TEST_TLS_ALLOC(size) malloc(size)
+#endif
+
+/* Registers a thread_local's destructor for the calling thread.  There is no
+ * dynamic loading on Lv-2, so dso_handle is not needed to keep a module
+ * loaded.  Failure is fatal (as in glibc): libstdc++'s __cxa_thread_atexit
+ * returns the result to code that ignores it, and a destructor silently
+ * dropped is worse than stopping.  The message is written without any
+ * allocation. */
+int
+__cxa_thread_atexit_impl(void (*fn)(void *), void *obj, void *dso_handle)
+{
+	struct pt_tls_dtor *d = PT_TEST_TLS_ALLOC(sizeof(*d));
+
+	(void)dso_handle;
+	if (d == NULL) {
+		static const char msg[] =
+			"librt: out of memory registering a thread_local destructor\n";
+		(void)write(2, msg, sizeof(msg) - 1);
+		abort();
+	}
+	d->fn = fn;
+	d->obj = obj;
+	d->next = pt_tls_dtors;
+	pt_tls_dtors = d;
+	return 0;
+}
+
+/* Runs the calling thread's thread_local destructors, last registered first,
+ * until none are left (a destructor may register more).  Called by every
+ * covered thread exit, and by newlib's exit() for the thread that calls it
+ * before the atexit handlers (newlib patch 0019). */
+void
+__lv2_tls_dtors_run(void)
+{
+	struct pt_tls_dtor *d;
+
+	while ((d = pt_tls_dtors) != NULL) {
+		pt_tls_dtors = d->next;
+		d->fn(d->obj);
+		free(d);
+	}
+}
+
+/* The one cleanup routine, run on the exiting thread by every covered exit
+ * route: pthread_create's trampoline, pthread_exit, and the SDK's
+ * sys_ppu_thread_exit / the trampoline behind sys_ppu_thread_create.  SELF
+ * is the thread's slot, or NULL for a thread that never had one (its
+ * thread_locals still die).  A joinable slot keeps its return value and is
+ * released by pthread_join or pthread_detach; a detached one is released
+ * here.  Re-entry (a destructor calling an exit route) does nothing more:
+ * the raw exit that follows abandons the remaining callbacks, which is
+ * outside what this guarantees. */
+static void
+pt_thread_cleanup(struct pt_thread *self, void *retval)
+{
+	if (self != NULL) {
+		int first = 0;
+
+		if (pt_table_lock() == 0) {
+			first = self->cleanup == 0;
+			if (first)
+				self->cleanup = 1;
+			pt_table_unlock();
+		}
+		if (!first)
+			return;
+	}
+
+	__lv2_tls_dtors_run();
+
+	if (self != NULL) {
+		pt_run_tsd_destructors(self);
+		if (pt_table_lock() == 0) {
+			self->retval   = retval;
+			self->finished = 1;
+			self->cleanup  = 2;
+			if (self->detached)
+				self->used = 0;
+			pt_table_unlock();
+		}
+	}
+	pt_self_cookie = NULL;
 }
 
 static void
@@ -386,9 +543,70 @@ pt_trampoline(void *arg)
 	struct pt_thread *self = (struct pt_thread *)arg;
 	void *retval;
 
+	pt_self_cookie = self;
 	retval = self->start(self->arg);
-	pt_thread_finish(self, retval);
+	pt_thread_cleanup(self, retval);
 	sysThreadExit(0);
+}
+
+/* The SDK's Cell-style API (sys/ppu_thread.h) routes here.  The PSL1GHT-level
+ * sysThreadCreate / sysThreadExit stay raw syscall wrappers: pthread_create
+ * uses them with its own trampoline, so nothing is wrapped twice. */
+void
+__lv2_thread_exit(uint64_t exit_code)
+{
+	pt_thread_cleanup(pt_self_cookie, NULL);
+	sysThreadExit(exit_code);
+	__builtin_unreachable();
+}
+
+struct pt_raw_start {
+	void     (*entry)(uint64_t);
+	uint64_t   arg;
+};
+
+static void
+pt_raw_trampoline(void *p)
+{
+	struct pt_raw_start start = *(struct pt_raw_start *)p;
+
+	free(p);
+	start.entry(start.arg);
+	__lv2_thread_exit(0);
+}
+
+#define PT_SYS_PPU_THREAD_CREATE_INTERRUPT 0x2ull
+#define PT_LV2_ENOMEM ((s32)0x80010004)
+
+/* sys_ppu_thread_create: the entry runs inside pt_raw_trampoline, so that a
+ * return from it goes through the thread-exit cleanup (exit code 0, as
+ * before).  Interrupt threads are created as they are: they never exit
+ * through here.  The full 64-bit argument reaches the entry. */
+int
+__lv2_ppu_thread_create(sys_ppu_thread_t *thread_id,
+                        void (*entry)(uint64_t), uint64_t arg, int prio,
+                        size_t stacksize, uint64_t flags,
+                        const char *threadname)
+{
+	struct pt_raw_start *start;
+	s32 rc;
+
+	if (flags & PT_SYS_PPU_THREAD_CREATE_INTERRUPT)
+		return (int)sysThreadCreate(thread_id,
+		                            (void (*)(void *))(void (*)(void))entry,
+		                            (void *)(uintptr_t)arg, (s32)prio,
+		                            (u64)stacksize, flags,
+		                            (char *)threadname);
+	start = malloc(sizeof(*start));
+	if (start == NULL)
+		return (int)PT_LV2_ENOMEM;
+	start->entry = entry;
+	start->arg   = arg;
+	rc = sysThreadCreate(thread_id, pt_raw_trampoline, start, (s32)prio,
+	                     (u64)stacksize, flags, (char *)threadname);
+	if (rc != 0)
+		free(start);
+	return (int)rc;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1320,15 +1538,16 @@ pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
 
 	for (i = 0; i < PT_KEYS_MAX; i++) {
 		if (!pt_keys[i].used) {
-			int t;
+			struct pt_chunk *c;
+			struct pt_thread *t;
 
 			pt_keys[i].used       = 1;
 			pt_keys[i].destructor = destructor;
 			/* A key index can be reused after pthread_key_delete;
 			 * POSIX requires the new key to start out NULL in every
 			 * thread. */
-			for (t = 0; t < PT_THREADS_MAX; t++)
-				pt_threads[t].tsd[i] = NULL;
+			PT_FOR_EACH_SLOT(c, t)
+				t->tsd[i] = NULL;
 			pt_table_unlock();
 			*key = (pthread_key_t)(i + 1);
 			return 0;
@@ -1573,7 +1792,6 @@ pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 	s32 priority = PT_DEFAULT_PRIORITY;
 	int detached = 0;
 	int err;
-	int i;
 	s32 rc;
 
 	if (thread == NULL || start_routine == NULL)
@@ -1591,18 +1809,11 @@ pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 	if (err != 0)
 		return err;
 
-	for (i = 0; i < PT_THREADS_MAX; i++) {
-		if (!pt_threads[i].used) {
-			slot = &pt_threads[i];
-			break;
-		}
-	}
-	if (slot == NULL) {
+	err = pt_slot_alloc_locked(&slot);
+	if (err != 0) {
 		pt_table_unlock();
-		return EAGAIN;
+		return err;
 	}
-
-	memset(slot, 0, sizeof(*slot));
 	slot->used     = 1;
 	slot->detached = (unsigned char)detached;
 	slot->start    = start_routine;
@@ -1704,17 +1915,9 @@ pthread_detach(pthread_t thread)
 void
 pthread_exit(void *value_ptr)
 {
-	struct pt_thread *self = NULL;
-
-	if (pt_table_lock() == 0) {
-		if (pt_self_slot_locked(&self) != 0)
-			self = NULL;
-		pt_table_unlock();
-	}
-
-	if (self != NULL)
-		pt_thread_finish(self, value_ptr);
-
+	/* A thread with no slot has no thread-specific data to clean up, but
+	 * its thread_locals still die. */
+	pt_thread_cleanup(pt_self_cookie, value_ptr);
 	sysThreadExit(0);
 	__builtin_unreachable();
 }

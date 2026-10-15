@@ -36,7 +36,7 @@ index 8dc9e17..77c8a81 100644
  
    elif test x"$enable_libstdcxx_time" != x"no"; then
 diff --git a/libstdc++-v3/configure b/libstdc++-v3/configure
-index d3926a7..9519de1 100755
+index 2c51c16..2278c13 100755
 --- a/libstdc++-v3/configure
 +++ b/libstdc++-v3/configure
 @@ -21566,6 +21566,21 @@ fi

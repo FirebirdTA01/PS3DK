@@ -40,23 +40,29 @@ typedef void (*sys_ppu_thread_entry_t)(uint64_t arg);
  * views of the same bytes — samples written against either spelling
  * compile against the same storage. */
 
+/* librt (runtime/lv2/librt/pthread.c).  A thread created here runs its entry
+ * inside a librt trampoline, so a return from the entry, like
+ * sys_ppu_thread_exit, runs the thread's exit cleanup: thread_local
+ * destructors, then pthread key destructors (where C++
+ * notify_all_at_thread_exit and promise::set_value_at_thread_exit act).
+ * SYS_PPU_THREAD_CREATE_INTERRUPT threads are created as before.  The
+ * PSL1GHT-level sysThreadCreate / sysThreadExit stay raw: code calling them
+ * directly gets no exit cleanup.  Objects compiled against the earlier
+ * inline wrappers keep the old behaviour until rebuilt. */
+extern int __lv2_ppu_thread_create(sys_ppu_thread_t *thread_id,
+                                   sys_ppu_thread_entry_t entry,
+                                   uint64_t arg, int prio, size_t stacksize,
+                                   uint64_t flags, const char *threadname);
+extern void __lv2_thread_exit(uint64_t exit_code) __attribute__((noreturn));
+
 static inline int sys_ppu_thread_create(sys_ppu_thread_t *thread_id,
                                         sys_ppu_thread_entry_t entry,
                                         uint64_t arg, int prio,
                                         size_t stacksize, uint64_t flags,
                                         const char *threadname)
 {
-    /* Reference ABI JOINABLE bit == PSL1GHT THREAD_JOINABLE bit (both 1). */
-    (void)flags;
-    /* The kernel starts the thread with the argument in r3 either way; the
-     * cast through void (*)(void) marks the type pun as intended. */
-    return (int)sysThreadCreate(thread_id,
-                                (void (*)(void *))(void (*)(void))entry,
-                                (void *)(uintptr_t)arg,
-                                (s32)prio,
-                                (u64)stacksize,
-                                flags,
-                                (char *)threadname);
+    return __lv2_ppu_thread_create(thread_id, entry, arg, prio, stacksize,
+                                   flags, threadname);
 }
 
 static inline int sys_ppu_thread_join(sys_ppu_thread_t threadid, uint64_t *retval)
@@ -66,7 +72,7 @@ static inline int sys_ppu_thread_join(sys_ppu_thread_t threadid, uint64_t *retva
 
 static inline void sys_ppu_thread_exit(uint64_t retval)
 {
-    sysThreadExit(retval);
+    __lv2_thread_exit(retval);
 }
 
 static inline int sys_ppu_thread_get_id(sys_ppu_thread_t *threadid)
