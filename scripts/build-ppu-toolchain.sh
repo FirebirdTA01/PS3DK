@@ -353,6 +353,25 @@ build_gcc_newlib() {
     local newlib_src="$BUILD/newlib-$NEWLIB_VER-src"
     local obj="$BUILD/gcc-$GCC_VER-build"
 
+    # Thread model: GCC 16 builds libstdc++/libgcc with the posix gthread
+    # layer over librt's pthreads (newlib patch 0018 declares them for the
+    # toolchain build; gcc-16.x 0069-0071).  12.4 stays single-threaded until
+    # the switchover.  PS3_GCC_THREADS overrides either.  The model changes
+    # libstdc++'s ABI (shared_ptr's lock policy, guards), so a build tree or a
+    # stage made for another model is never reused: the tree is rebuilt from
+    # scratch, and the model is stamped into both.
+    local threads_default=single
+    [[ "$GCC_MAJOR" == 16 ]] && threads_default=posix
+    local threads_mode="${PS3_GCC_THREADS:-$threads_default}"
+    if [[ -d "$obj" ]]; then
+        local built_model
+        built_model=$(cat "$obj/.threads-model" 2>/dev/null || echo unknown)
+        if [[ "$built_model" != "$threads_mode" ]]; then
+            say "GCC build tree is for thread model '$built_model', this build wants '$threads_mode': removing it"
+            rm -rf "$obj"
+        fi
+    fi
+
     extract_source "$UPSTREAM/gcc" "$GCC_TAG" "$gcc_src"
     apply_patches "$gcc_src" "$PATCHES/$GCC_PATCH_DIR"
 
@@ -479,14 +498,8 @@ build_gcc_newlib() {
         )
     else
         conf_args+=(--with-system-zlib)
-        # Native combined-tree: build libgcc, newlib, libstdc++ in one pass.
-        # Thread model: GCC 16 builds libstdc++/libgcc with the posix gthread
-        # layer over librt's pthreads (newlib patch 0018 declares them for the
-        # toolchain build; gcc-16.x 0069/0070).  12.4 stays single-threaded until
-        # the switchover.  PS3_GCC_THREADS overrides either.
-        local threads_default=single
-        [[ "$GCC_MAJOR" == 16 ]] && threads_default=posix
-        local threads_mode="${PS3_GCC_THREADS:-$threads_default}"
+        # Native combined-tree: build libgcc, newlib, libstdc++ in one pass,
+        # with the thread model chosen above.
         conf_args+=(
             --with-newlib
             --enable-threads="$threads_mode"
@@ -527,7 +540,9 @@ build_gcc_newlib() {
         (cd "$obj" && env "${target_make_env[@]}" make -j"$JOBS" all)
         say "Installing GCC+newlib"
         (cd "$obj" && make install)
+        echo "$threads_mode" > "$PREFIX/.ps3dk-thread-model"
     fi
+    echo "$threads_mode" > "$obj/.threads-model"
     touch "$obj/.installed"
 }
 
@@ -538,6 +553,16 @@ build_gcc_newlib() {
 copy_target_libs_from_native() {
     [[ -n "$HOST_TRIPLE" ]] || return 0
     say "Copying target libraries: $NATIVE_PREFIX -> $PREFIX"
+
+    # The target libraries carry the native build's thread model; refuse a
+    # native stage made for a different one (or not stamped at all).
+    local want_model="${PS3_GCC_THREADS:-single}"
+    [[ "$GCC_MAJOR" == 16 && -z "${PS3_GCC_THREADS:-}" ]] && want_model=posix
+    local native_model
+    native_model=$(cat "$NATIVE_PREFIX/.ps3dk-thread-model" 2>/dev/null || echo unknown)
+    [[ "$native_model" == "$want_model" ]] \
+        || die "native stage $NATIVE_PREFIX has thread model '$native_model', this build wants '$want_model': rebuild the native toolchain first"
+    cp "$NATIVE_PREFIX/.ps3dk-thread-model" "$PREFIX/.ps3dk-thread-model"
 
     # Target sysroot ($PREFIX/$TARGET/{lib,include,sys-include,...}), but
     # not $TARGET/bin: binutils installs the native (Linux) as/ld/ar/...
