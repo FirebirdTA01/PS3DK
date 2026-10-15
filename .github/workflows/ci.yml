@@ -202,6 +202,11 @@ jobs:
       - name: Test the sys_ synchronisation surface
         run: bash tests/sdk/sys-sync-surface-test.sh
 
+      # Skips without PS3DEV; every SDK header that compiles as C++ under
+      # gnu++17 must still compile under gnu++20, ILP32 and LP64.
+      - name: Test SDK headers for C++20 readiness
+        run: bash tests/host/cxx20-header-test.sh
+
       # Skips without PS3DEV; LV2 timers 70-76 and the sleeps 141/142 by
       # syscall number, and sys_time_get_system_time as the import.
       - name: Test the LV2 timer surface
