@@ -46,10 +46,9 @@ foreach(_abi ilp32 lp64)
     add_executable(${_t} main.c "${_out}/lock_internal.c")
     target_include_directories(${_t} PRIVATE "${_out}")
     # Test build of the library code: no start-up constructor, a delay hook in
-    # the creator, and its own symbol so libc's copy is untouched.
+    # the creator (hook.h), and its own symbol so libc's copy is untouched.
     target_compile_definitions(${_t} PRIVATE
         LOCK_INTERNAL_TEST=1
-        "LOCK_INTERNAL_TEST_AFTER_CLAIM()=test_after_claim()"
         __libc_auto_lock_allocate=test_auto_lock_allocate)
     target_compile_options(${_t} PRIVATE -O2 -include "${CMAKE_CURRENT_SOURCE_DIR}/hook.h")
     if(_abi STREQUAL "lp64")
