@@ -169,7 +169,7 @@ new file mode 100644
 index 0000000..7a07e3e
 --- /dev/null
 +++ b/newlib/libc/sys/lv2/lock_internal.c
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,61 @@
 +#include <stdint.h>
 +#include <stdlib.h>
 +#include <sys/types.h>
@@ -177,22 +177,40 @@ index 0000000..7a07e3e
 +
 +#include "lock_internal.h"
 +
-+/* The lock that serialises lazy lock creation.  It is created by a start-up
-+   constructor, and also on first use: anything that takes a libc lock in an
-+   earlier constructor (GCC 16's libstdc++ sets up the standard streams at
-+   priority 90; user code may use 101) would otherwise lock a lock that does
-+   not exist yet.  Before main only the main thread runs, so the creation on
-+   first use is not racy unless an earlier constructor starts threads. */
++/* The lock that serialises lazy lock creation.  It is created by the
++   start-up constructor below, at priority 85: the runtime ladder (heap 83,
++   syscall table 84, this lock 85, finalization 86) runs in the
++   implementation-reserved range, ahead of libstdc++'s own constructors (90
++   and 98 in GCC 16) and every user constructor (101 and up).
++
++   An implementation constructor below 85 can still take a libc lock first,
++   so creation on first use stays, made safe for any thread: whoever moves
++   the state from 0 to 1 creates the lock and publishes it with a release
++   store of 2; everyone else waits until they acquire-load 2. */
 +static sys_lwmutex_t metaLock;
++static int metaLockState;	/* 0 none, 1 being created, 2 ready */
 +
 +static void create_metalock(void)
 +{
-+	if(SYS_LWMUTEX_UNINITIALIZED(&metaLock) &&
-+	   sys_lwmutex_create(&metaLock,&__libc_lock_attributes))
-+		abort();
++	int expected = 0;
++
++	if(__atomic_load_n(&metaLockState, __ATOMIC_ACQUIRE) == 2)
++		return;
++	if(__atomic_compare_exchange_n(&metaLockState, &expected, 1, 0,
++	                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
++		if(sys_lwmutex_create(&metaLock,&__libc_lock_attributes))
++			abort();
++		__atomic_store_n(&metaLockState, 2, __ATOMIC_RELEASE);
++		return;
++	}
++	while(__atomic_load_n(&metaLockState, __ATOMIC_ACQUIRE) != 2)
++		;
 +}
 +
-+static void init_metalock(void) __attribute__((constructor(105)));
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wprio-ctor-dtor"
++static void init_metalock(void) __attribute__((constructor(85)));
++#pragma GCC diagnostic pop
 +static void init_metalock(void)
 +{
 +	create_metalock();

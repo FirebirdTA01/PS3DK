@@ -13,7 +13,7 @@
 
 extern void _fini(void);
 
-/* Called by CRT constructor 106, after the heap, syscall table and
+/* Called by CRT constructor 86, after the heap, syscall table and
  * newlib recursive-lock setup. User atexit registrations follow this one,
  * so normal exit runs them before the legacy .fini work. */
 void

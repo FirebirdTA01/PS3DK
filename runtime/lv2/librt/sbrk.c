@@ -88,7 +88,7 @@ heap_startup_failure(uint64_t requested, uint64_t rounded, uint32_t available,
 		heap_message[heap_message_length++] = hex[(error >> shift) & 15];
 	heap_text(" reason="); heap_text(reason);
 	heap_write_message();
-	/* The syscall table is not wired until constructor 104. Exit directly. */
+	/* The syscall table is not wired until constructor 84. Exit directly. */
 	sysProcessExit(1);
 	__builtin_trap();
 }
@@ -114,7 +114,15 @@ static void heap_exhausted(ptrdiff_t increment)
  * Init / deinit
  * ------------------------------------------------------------------ */
 
-static void sbrk_init(void) __attribute__((constructor(103)));
+/* Start-up ladder, all in the implementation-reserved range below libstdc++'s
+   own constructors (90 and 98 in GCC 16): heap 83, syscall table 84 (crt1.c),
+   newlib's lock-creation lock 85 (newlib patch 0004), finalization 86
+   (crt1.c).  User constructors (101 and up) and libstdc++'s therefore see a
+   ready runtime; implementation constructors below 83 do not. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wprio-ctor-dtor"
+static void sbrk_init(void) __attribute__((constructor(83)));
+#pragma GCC diagnostic pop
 static void
 sbrk_init(void)
 {

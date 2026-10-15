@@ -101,10 +101,15 @@ extern int        __librt_sys_lwmutex_unlock_r(struct _reent *r,
 
 extern int main(int argc, const char *argv[]);
 
-/* Constructor priority 104 runs ahead of user constructors so the
- * syscall table is populated before any static-init code touches
- * the filesystem, heap, or threads. */
-static void __syscalls_init(void) __attribute__((constructor(104)));
+/* Constructor priority 84 (implementation range; the ladder is described in
+ * librt/sbrk.c) runs after the heap (83) and ahead of libstdc++'s own
+ * constructors (90, 98) and every user constructor (101 and up), so the
+ * syscall table is populated before any static-init code touches the
+ * filesystem, heap, or threads. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wprio-ctor-dtor"
+static void __syscalls_init(void) __attribute__((constructor(84)));
+#pragma GCC diagnostic pop
 static void __syscalls_init(void)
 {
 	__syscalls.exit        = __librt_exit;
@@ -158,8 +163,12 @@ static void __syscalls_init(void)
 	__syscalls.sys_lwmutex_unlock_r  = __librt_sys_lwmutex_unlock_r;
 }
 
-/* Priority 105 initializes newlib's recursive lock; atexit needs it. */
-static void __finalization_init(void) __attribute__((constructor(106)));
+/* Priority 85 initializes newlib's recursive lock; atexit needs it.  This
+ * runs at 86, still ahead of libstdc++ and user constructors. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wprio-ctor-dtor"
+static void __finalization_init(void) __attribute__((constructor(86)));
+#pragma GCC diagnostic pop
 static void __finalization_init(void)
 {
 	__librt_register_fini();
