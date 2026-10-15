@@ -109,6 +109,7 @@ int main(void)
 				fail("SetTimeStamp", i, buf[i], i < 2 ? want[i] : 0);
 	}
 
+#ifndef LIBRSX_CMDS_SKIP_HEADER_CHECKS	/* lets a harness run the word checks against older headers */
 	if (sizeof(vdecH264Info) != sizeof(CellVdecAvcInfo))
 		fails++, printf("LIBRSX_CMDS_FAIL sizeof vdecH264Info %u, CellVdecAvcInfo %u\n",
 		                (unsigned)sizeof(vdecH264Info), (unsigned)sizeof(CellVdecAvcInfo));
@@ -127,6 +128,7 @@ int main(void)
 
 	if (GCM_TEXTURE_FORMAT_A8L8 != 24)
 		fails++, printf("LIBRSX_CMDS_FAIL GCM_TEXTURE_FORMAT_A8L8\n");
+#endif
 
 	if (fails)
 		printf("LIBRSX_CMDS_FAIL %d\n", fails);
