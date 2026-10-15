@@ -15,7 +15,7 @@
 SYS_PROCESS_PARAM(1001, 0x10000);
 
 #define CB_SIZE     0x100000
-#define HOST_SIZE   (1024 * 1024)
+#define HOST_SIZE   (32 * 1024 * 1024)
 #define LABEL_INDEX 254
 
 static int fails;
@@ -32,7 +32,7 @@ int main(void)
 {
 	void *host = memalign(1024 * 1024, HOST_SIZE);
 	if (!host || cellGcmInit(CB_SIZE, HOST_SIZE, host) != 0) {
-		printf("GCM_RESET_FAIL init\n");
+		printf("GCM_RESET_FAIL 1 (init failed)\n");
 		return 1;
 	}
 	CellGcmContextData *ctx = gCellGcmCurrentContext;
