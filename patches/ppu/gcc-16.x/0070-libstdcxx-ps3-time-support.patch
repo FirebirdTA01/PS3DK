@@ -1,0 +1,63 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] libstdc++: clock_gettime, nanosleep and sched_yield on powerpc64-ps3-elf
+
+GLIBCXX_ENABLE_LIBSTDCXX_TIME's default ("auto") knows nothing of this
+target, so libstdc++ was built without a monotonic clock (steady_clock fell
+back to the real-time clock), without nanosleep (this_thread::sleep_for
+used usleep) and without sched_yield (this_thread::yield did nothing).
+librt provides all three and newlib declares them for __lv2ppu__; link
+tests cannot run while the toolchain is built, so state it for the
+target in acinclude.m4 and the generated configure.
+
+diff --git a/libstdc++-v3/acinclude.m4 b/libstdc++-v3/acinclude.m4
+index 8dc9e17..77c8a81 100644
+--- a/libstdc++-v3/acinclude.m4
++++ b/libstdc++-v3/acinclude.m4
+@@ -1820,6 +1820,21 @@ AC_DEFUN([GLIBCXX_ENABLE_LIBSTDCXX_TIME], [
+       uclinux*)
+         ac_has_nanosleep=yes
+         ac_has_sched_yield=yes
++        ;;
++      elf*)
++        case "${target}" in
++          powerpc64-ps3-elf*)
++            # lv2 (PS3 PPU): librt provides clock_gettime (CLOCK_REALTIME and
++            # CLOCK_MONOTONIC), nanosleep and sched_yield, and newlib declares
++            # them for __lv2ppu__.  Link tests cannot run while the toolchain
++            # is built, so say so here.
++            ac_has_clock_monotonic=yes
++            ac_has_clock_realtime=yes
++            ac_has_nanosleep=yes
++            ac_has_sched_yield=yes
++            ;;
++        esac
++        ;;
+     esac
+ 
+   elif test x"$enable_libstdcxx_time" != x"no"; then
+diff --git a/libstdc++-v3/configure b/libstdc++-v3/configure
+index d3926a7..9519de1 100755
+--- a/libstdc++-v3/configure
++++ b/libstdc++-v3/configure
+@@ -21566,6 +21566,21 @@ fi
+       uclinux*)
+         ac_has_nanosleep=yes
+         ac_has_sched_yield=yes
++        ;;
++      elf*)
++        case "${target}" in
++          powerpc64-ps3-elf*)
++            # lv2 (PS3 PPU): librt provides clock_gettime (CLOCK_REALTIME and
++            # CLOCK_MONOTONIC), nanosleep and sched_yield, and newlib declares
++            # them for __lv2ppu__.  Link tests cannot run while the toolchain
++            # is built, so say so here.
++            ac_has_clock_monotonic=yes
++            ac_has_clock_realtime=yes
++            ac_has_nanosleep=yes
++            ac_has_sched_yield=yes
++            ;;
++        esac
++        ;;
+     esac
+ 
+   elif test x"$enable_libstdcxx_time" != x"no"; then

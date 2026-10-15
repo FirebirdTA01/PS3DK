@@ -442,6 +442,7 @@ build_gcc_newlib() {
     # (GCC_HOST_CXX_STD empty): forcing one -std there breaks either libcody
     # or GCC itself.
     local target_env=()
+    local target_make_env=()
     if [[ -n "$GCC_HOST_CXX_STD" ]]; then
         target_env+=(
             CXXFLAGS=-std=$GCC_HOST_CXX_STD
@@ -479,9 +480,13 @@ build_gcc_newlib() {
     else
         conf_args+=(--with-system-zlib)
         # Native combined-tree: build libgcc, newlib, libstdc++ in one pass.
-        # Threading strategy: start with --enable-threads=single.  A follow-up
-        # swaps in --enable-threads=posix once the libsysbase gthr shim lands.
-        local threads_mode="${PS3_GCC_THREADS:-single}"
+        # Thread model: GCC 16 builds libstdc++/libgcc with the posix gthread
+        # layer over librt's pthreads (newlib patch 0018 declares them for the
+        # toolchain build; gcc-16.x 0069/0070).  12.4 stays single-threaded until
+        # the switchover.  PS3_GCC_THREADS overrides either.
+        local threads_default=single
+        [[ "$GCC_MAJOR" == 16 ]] && threads_default=posix
+        local threads_mode="${PS3_GCC_THREADS:-$threads_default}"
         conf_args+=(
             --with-newlib
             --enable-threads="$threads_mode"
@@ -496,6 +501,15 @@ build_gcc_newlib() {
             "CFLAGS_FOR_TARGET=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
             "CXXFLAGS_FOR_TARGET=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
         )
+        if [[ "$threads_mode" == posix ]]; then
+            # librt has real rwlocks, but std::shared_mutex starts on libstdc++'s
+            # mutex + condition_variable implementation; answering its
+            # pthread_rwlock_t check "no" selects that (switching needs its own
+            # rows).
+            # The target libraries are configured during `make`, so the answer
+            # goes into make's environment, not only the top-level configure's.
+            target_make_env+=("ac_cv_type_pthread_rwlock_t=no")
+        fi
     fi
 
     (cd "$obj" && \
@@ -510,7 +524,7 @@ build_gcc_newlib() {
         copy_target_libs_from_native
     else
         say "Building GCC+newlib (this takes a while — ~30-90 minutes)"
-        (cd "$obj" && make -j"$JOBS" all)
+        (cd "$obj" && env "${target_make_env[@]}" make -j"$JOBS" all)
         say "Installing GCC+newlib"
         (cd "$obj" && make install)
     fi

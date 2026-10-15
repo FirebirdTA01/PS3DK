@@ -1,0 +1,62 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] libgcc: strong gthread references on powerpc64-ps3-elf
+
+With --enable-threads=posix, libgcc's gthr-posix.h refers to the pthread
+functions weakly and treats a linked pthread_cancel as the sign that
+threads are in use.  Weak references do not pull members out of static
+archives, so a program whose only pthread user is libgcc (raw lv2
+threads, no direct pthread call) could run the unwinder's object
+registration without its lock.  librt implements pthreads and is on every
+link (LIB_LV2_SPEC), so build libgcc with GTHREAD_USE_WEAK=0:
+__gthread_active_p is always true, as libstdc++'s os/newlib configuration
+already makes it for C++ code.
+
+diff --git a/libgcc/config.host b/libgcc/config.host
+index 5210576..26d7e1f 100644
+--- a/libgcc/config.host
++++ b/libgcc/config.host
+@@ -1269,7 +1269,7 @@ powerpc-*-rtems*)
+ 	extra_parts="$extra_parts crtbeginS.o crtendS.o crtbeginT.o ecrti.o ecrtn.o ncrti.o ncrtn.o"
+ 	;;
+ powerpc64-ps3-elf*)
+-	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff"
++	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff rs6000/t-ps3-gthreads"
+ 	;;
+ powerpc64-ps3-kernel-elf*)
+ 	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff"
+diff --git a/libgcc/config/rs6000/t-ps3-gthreads b/libgcc/config/rs6000/t-ps3-gthreads
+new file mode 100644
+index 0000000..b4dd3dc
+--- /dev/null
++++ b/libgcc/config/rs6000/t-ps3-gthreads
+@@ -0,0 +1,30 @@
++# libgcc thread-support flags for the PS3 LV2 PPU target.
++#
++# Copyright (C) 2026 PS3DK toolchain contributors.
++#
++# This file is part of GCC.
++#
++# GCC is free software; you can redistribute it and/or modify it under
++# the terms of the GNU General Public License as published by the Free
++# Software Foundation; either version 3, or (at your option) any later
++# version.
++#
++# GCC is distributed in the hope that it will be useful, but WITHOUT
++# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
++# License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with GCC; see the file COPYING3.  If not see
++# <http://www.gnu.org/licenses/>.
++#
++# libgcc's gthr-posix.h refers to the pthread functions weakly and takes
++# pthread_cancel as the sign that a thread library is linked.  Static
++# archives are not searched for weak references, so a program whose only
++# thread library use is libgcc's (raw lv2 threads, no direct pthread
++# call) would run libgcc's unwinder registration unlocked.  librt, which
++# implements pthreads, is on every link (LIB_LV2_SPEC), so refer to it
++# strongly: __gthread_active_p is then always true, as libstdc++'s
++# os/newlib configuration already makes it for C++ code.  Harmless with
++# --enable-threads=single (gthr-single.h ignores it).
++HOST_LIBGCC2_CFLAGS += -DGTHREAD_USE_WEAK=0
