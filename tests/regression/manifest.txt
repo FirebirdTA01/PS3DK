@@ -67,6 +67,32 @@ libnet-ilp32,tests/regression/libnet/libnet-ilp32.fake.self,60,RAN-CLEAN,LIBNET_
 libnet-lp64,tests/regression/libnet/libnet-lp64.fake.self,60,RAN-CLEAN,LIBNET_OK,LIBNET_FAIL
 posix-time-ilp32,tests/regression/posix-time/posix-time-ilp32.fake.self,60,RAN-CLEAN,POSIX_TIME_OK,POSIX_TIME_FAIL
 posix-time-lp64,tests/regression/posix-time/posix-time-lp64.fake.self,60,RAN-CLEAN,POSIX_TIME_OK,POSIX_TIME_FAIL
+# sched-priority: sched_get_priority_min/max for the one policy the shim
+# supports (SCHED_OTHER -> both 0; any other policy -> -1/errno EINVAL,
+# pthread_attr_* return the error number).  The worker reads its real Lv-2
+# priority back: priority 0 runs at the default 1000, and the non-POSIX
+# pass-through sends 1500 to 1500.  cxx_linkage.cpp proves the prototypes
+# work from C++ with C linkage under both include orders.
+sched-priority-ilp32,tests/regression/sched-priority/sched-priority-ilp32.fake.self,60,RAN-CLEAN,SCHED_PRIORITY_OK,SCHED_PRIORITY_FAIL|terminate
+sched-priority-lp64,tests/regression/sched-priority/sched-priority-lp64.fake.self,60,RAN-CLEAN,SCHED_PRIORITY_OK,SCHED_PRIORITY_FAIL|terminate
+# pthread-audio-path: miniaudio ma_thread_create__posix's exact attribute
+# sequence end-to-end: init, 128 KiB stack, SCHED_FIFO attempt -> ENOTSUP
+# fallback to SCHED_OTHER, min/max, setschedparam, setinheritsched
+# (accepted, not claimed inherited), create, 100-turn mutex+cond ping-pong,
+# join, then 1 ms nanosleep + CLOCK_MONOTONIC advance.  Every return value
+# is checked; the first failing step number is printed.
+pthread-audio-path-ilp32,tests/regression/pthread-audio-path/pthread-audio-path-ilp32.fake.self,90,RAN-CLEAN,PTHREAD_AUDIO_PATH_OK,PTHREAD_AUDIO_PATH_FAIL
+pthread-audio-path-lp64,tests/regression/pthread-audio-path/pthread-audio-path-lp64.fake.self,90,RAN-CLEAN,PTHREAD_AUDIO_PATH_OK,PTHREAD_AUDIO_PATH_FAIL
+# pthread-destroy-order: a mutex and its condition variable destroyed in either
+# order (Lv-2 will not destroy a mutex a cond is bound to; the shim unbinds idle
+# conds first), a cond reused with a new mutex, and EBUSY while a waiter blocks.
+pthread-destroy-order-ilp32,tests/regression/pthread-destroy-order/pthread-destroy-order-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_DESTROY_ORDER_OK,PTHREAD_DESTROY_ORDER_FAIL
+pthread-destroy-order-lp64,tests/regression/pthread-destroy-order/pthread-destroy-order-lp64.fake.self,60,RAN-CLEAN,PTHREAD_DESTROY_ORDER_OK,PTHREAD_DESTROY_ORDER_FAIL
+# pthread-signal-unbind: a signal holding an idle cond's id while another thread
+# destroys the cond's old mutex (librt's pthread.c built in with a hook between
+# the id load and the syscall): the destroy waits, the signal returns 0.
+pthread-signal-unbind-ilp32,tests/regression/pthread-signal-unbind/pthread-signal-unbind-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_SIGNAL_UNBIND_OK,PTHREAD_SIGNAL_UNBIND_FAIL
+pthread-signal-unbind-lp64,tests/regression/pthread-signal-unbind/pthread-signal-unbind-lp64.fake.self,60,RAN-CLEAN,PTHREAD_SIGNAL_UNBIND_OK,PTHREAD_SIGNAL_UNBIND_FAIL
 # spu-fiber-context: SPU fiber contexts (libfiber.a) - ping-pong, callee-saved
 # registers across switches, Self(), argument errors; SPU exit status 0 = pass.
 spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self,60,RAN-CLEAN,SPU_FIBER_OK,SPU_FIBER_FAIL
