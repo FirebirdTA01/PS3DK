@@ -169,7 +169,7 @@ new file mode 100644
 index 0000000..7a07e3e
 --- /dev/null
 +++ b/newlib/libc/sys/lv2/lock_internal.c
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,110 @@
 +#include <stdint.h>
 +#include <stdlib.h>
 +#include <sys/types.h>
@@ -191,15 +191,23 @@ index 0000000..7a07e3e
 +   higher-priority waiters would otherwise occupy every PPU thread.
 +
 +   Test hooks, empty in the library: LOCK_INTERNAL_TEST_AFTER_CLAIM runs in
-+   the creator between winning the claim and creating the lock, and
-+   LOCK_INTERNAL_TEST builds without the constructor, so the
-+   metalock-contested regression row can run this exact source with a
-+   delayed creator and higher-priority waiters. */
++   the creator between winning the claim and creating the lock,
++   LOCK_INTERNAL_TEST_PUBLISHED right after the release store, and
++   LOCK_INTERNAL_TEST_WAITING in every pass of a loser's sleeping wait;
++   LOCK_INTERNAL_TEST builds without the constructor.  The
++   metalock-contested regression row runs this exact source with a held
++   creator and higher-priority waiters. */
 +static sys_lwmutex_t metaLock;
 +static int metaLockState;	/* 0 none, 1 being created, 2 ready */
 +
 +#ifndef LOCK_INTERNAL_TEST_AFTER_CLAIM
 +#define LOCK_INTERNAL_TEST_AFTER_CLAIM() ((void)0)
++#endif
++#ifndef LOCK_INTERNAL_TEST_PUBLISHED
++#define LOCK_INTERNAL_TEST_PUBLISHED() ((void)0)
++#endif
++#ifndef LOCK_INTERNAL_TEST_WAITING
++#define LOCK_INTERNAL_TEST_WAITING() ((void)0)
 +#endif
 +
 +/* sys_timer_usleep (lv2 syscall 141), issued directly: this runs before
@@ -237,10 +245,13 @@ index 0000000..7a07e3e
 +		if(sys_lwmutex_create(&metaLock,&__libc_lock_attributes))
 +			abort();
 +		__atomic_store_n(&metaLockState, 2, __ATOMIC_RELEASE);
++		LOCK_INTERNAL_TEST_PUBLISHED();
 +		return;
 +	}
-+	while(__atomic_load_n(&metaLockState, __ATOMIC_ACQUIRE) != 2)
++	while(__atomic_load_n(&metaLockState, __ATOMIC_ACQUIRE) != 2) {
++		LOCK_INTERNAL_TEST_WAITING();
 +		metalock_sleep(50);
++	}
 +}
 +
 +#ifndef LOCK_INTERNAL_TEST
