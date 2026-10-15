@@ -93,6 +93,10 @@ pthread-destroy-order-lp64,tests/regression/pthread-destroy-order/pthread-destro
 # the id load and the syscall): the destroy waits, the signal returns 0.
 pthread-signal-unbind-ilp32,tests/regression/pthread-signal-unbind/pthread-signal-unbind-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_SIGNAL_UNBIND_OK,PTHREAD_SIGNAL_UNBIND_FAIL
 pthread-signal-unbind-lp64,tests/regression/pthread-signal-unbind/pthread-signal-unbind-lp64.fake.self,60,RAN-CLEAN,PTHREAD_SIGNAL_UNBIND_OK,PTHREAD_SIGNAL_UNBIND_FAIL
+# pthread-rwlock: librt's read-write locks over the Lv-2 rwlock: shared readers,
+# writer exclusion, try/timed variants, unlock of either hold, destroy refusal.
+pthread-rwlock-ilp32,tests/regression/pthread-rwlock/pthread-rwlock-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_RWLOCK_OK,PTHREAD_RWLOCK_FAIL
+pthread-rwlock-lp64,tests/regression/pthread-rwlock/pthread-rwlock-lp64.fake.self,60,RAN-CLEAN,PTHREAD_RWLOCK_OK,PTHREAD_RWLOCK_FAIL
 # spu-fiber-context: SPU fiber contexts (libfiber.a) - ping-pong, callee-saved
 # registers across switches, Self(), argument errors; SPU exit status 0 = pass.
 spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self,60,RAN-CLEAN,SPU_FIBER_OK,SPU_FIBER_FAIL

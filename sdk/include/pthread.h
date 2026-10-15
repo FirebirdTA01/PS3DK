@@ -140,6 +140,47 @@ int pthread_attr_setinheritsched (pthread_attr_t *__attr, int __inherit);
 int pthread_mutex_timedlock (pthread_mutex_t *__mutex,
                              const struct timespec *__timeout);
 
+/* ------------------------------------------------------------------ *
+ * Read-write locks (librt, over the Lv-2 rwlock).
+ *
+ * newlib gives the types only under _POSIX_READER_WRITER_LOCKS, inside
+ * <sys/_pthreadtypes.h>, which <sys/types.h> has usually consumed already;
+ * the macro stays off here for the same layout reasons as above.  So the
+ * types are declared here, with newlib's own definitions (an id, and the
+ * attribute struct without the process_shared member that only exists
+ * under _POSIX_THREAD_PROCESS_SHARED, also off here), unless newlib's
+ * header already provided them.
+ * ------------------------------------------------------------------ */
+#ifndef _PTHREAD_RWLOCK_INITIALIZER
+typedef __uint32_t pthread_rwlock_t;
+# define _PTHREAD_RWLOCK_INITIALIZER ((pthread_rwlock_t) 0xFFFFFFFF)
+typedef struct {
+  int   is_initialized;
+} pthread_rwlockattr_t;
+#endif
+#ifndef PTHREAD_RWLOCK_INITIALIZER
+# define PTHREAD_RWLOCK_INITIALIZER _PTHREAD_RWLOCK_INITIALIZER
+#endif
+
+int pthread_rwlock_init (pthread_rwlock_t *__rwlock,
+                         const pthread_rwlockattr_t *__attr);
+int pthread_rwlock_destroy (pthread_rwlock_t *__rwlock);
+int pthread_rwlock_rdlock (pthread_rwlock_t *__rwlock);
+int pthread_rwlock_tryrdlock (pthread_rwlock_t *__rwlock);
+int pthread_rwlock_timedrdlock (pthread_rwlock_t *__rwlock,
+                                const struct timespec *__abstime);
+int pthread_rwlock_wrlock (pthread_rwlock_t *__rwlock);
+int pthread_rwlock_trywrlock (pthread_rwlock_t *__rwlock);
+int pthread_rwlock_timedwrlock (pthread_rwlock_t *__rwlock,
+                                const struct timespec *__abstime);
+int pthread_rwlock_unlock (pthread_rwlock_t *__rwlock);
+int pthread_rwlockattr_init (pthread_rwlockattr_t *__attr);
+int pthread_rwlockattr_destroy (pthread_rwlockattr_t *__attr);
+int pthread_rwlockattr_getpshared (const pthread_rwlockattr_t *__attr,
+                                   int *__pshared);
+int pthread_rwlockattr_setpshared (pthread_rwlockattr_t *__attr,
+                                   int __pshared);
+
 #ifdef __cplusplus
 }
 #endif

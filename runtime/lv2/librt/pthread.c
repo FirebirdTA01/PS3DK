@@ -116,6 +116,16 @@
  * answer differs from the straight lv2error() translation. */
 #define PT_LV2_EDEADLK    ((s32)0x80010008)
 
+/* CELL_EPERM: what sys_rwlock_wunlock returns to a thread that does not hold
+ * the write lock (pthread_rwlock_unlock uses it to tell the two holds apart). */
+#define PT_LV2_EPERM      ((s32)0x80010009)
+
+/* pthread_rwlock_t sentinels: 0xFFFFFFFF is newlib's
+ * _PTHREAD_RWLOCK_INITIALIZER, and a zeroed lock counts as not created, as
+ * for mutexes. */
+#define PT_RW_UNINIT      0x00000000u
+#define PT_RW_STATIC      0xFFFFFFFFu
+
 /* ------------------------------------------------------------------ *
  * Error translation
  * ------------------------------------------------------------------ */
@@ -1001,6 +1011,217 @@ pthread_condattr_setpshared(pthread_condattr_t *attr, int pshared)
 
 int
 pthread_condattr_getpshared(const pthread_condattr_t *attr, int *pshared)
+{
+	if (attr == NULL || pshared == NULL)
+		return EINVAL;
+	*pshared = 0;
+	return 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Read-write locks
+ *
+ * Over the Lv-2 rwlock (syscalls 120-125, 127, 148).  Like a mutex, a
+ * statically initialised lock is created on first use under the table
+ * lock.  Lv-2 releases a read hold and a write hold with different
+ * syscalls, while pthread_rwlock_unlock does not say which one the caller
+ * has: sys_rwlock_wunlock refuses (CELL_EPERM) a thread that is not the
+ * writer, so unlock tries it first and otherwise releases a read hold.
+ * ------------------------------------------------------------------ */
+
+static int
+pt_rw_is_uncreated(unsigned int value)
+{
+	return value == PT_RW_UNINIT || value == PT_RW_STATIC;
+}
+
+static int
+pt_rwlock_create(sys_rwlock_t *id)
+{
+	sys_rwlock_attribute_t attr;
+
+	memset(&attr, 0, sizeof(attr));
+	sys_rwlock_attribute_initialize(attr);
+	return pt_err(sys_rwlock_create(id, &attr));
+}
+
+static int
+pt_rwlock_resolve(pthread_rwlock_t *rwlock, sys_rwlock_t *out)
+{
+	unsigned int value;
+	int err;
+
+	if (rwlock == NULL)
+		return EINVAL;
+
+	value = __atomic_load_n(rwlock, __ATOMIC_ACQUIRE);
+	if (!pt_rw_is_uncreated(value)) {
+		*out = (sys_rwlock_t)value;
+		return 0;
+	}
+
+	err = pt_table_lock();
+	if (err != 0)
+		return err;
+	value = __atomic_load_n(rwlock, __ATOMIC_RELAXED);
+	if (pt_rw_is_uncreated(value)) {
+		sys_rwlock_t id = 0;
+
+		err = pt_rwlock_create(&id);
+		if (err == 0) {
+			value = (unsigned int)id;
+			__atomic_store_n(rwlock, value, __ATOMIC_RELEASE);
+		}
+	}
+	pt_table_unlock();
+	if (err == 0)
+		*out = (sys_rwlock_t)value;
+	return err;
+}
+
+int
+pthread_rwlock_init(pthread_rwlock_t *rwlock, const pthread_rwlockattr_t *attr)
+{
+	sys_rwlock_t id = 0;
+	int err;
+
+	(void)attr;
+	if (rwlock == NULL)
+		return EINVAL;
+	err = pt_rwlock_create(&id);
+	if (err == 0)
+		__atomic_store_n(rwlock, (unsigned int)id, __ATOMIC_RELEASE);
+	return err;
+}
+
+int
+pthread_rwlock_destroy(pthread_rwlock_t *rwlock)
+{
+	unsigned int value;
+	int err;
+
+	if (rwlock == NULL)
+		return EINVAL;
+	value = __atomic_load_n(rwlock, __ATOMIC_ACQUIRE);
+	if (pt_rw_is_uncreated(value)) {
+		__atomic_store_n(rwlock, PT_RW_UNINIT, __ATOMIC_RELEASE);
+		return 0;
+	}
+	err = pt_err(sys_rwlock_destroy((sys_rwlock_t)value));
+	if (err == 0)
+		__atomic_store_n(rwlock, PT_RW_UNINIT, __ATOMIC_RELEASE);
+	return err;
+}
+
+int
+pthread_rwlock_rdlock(pthread_rwlock_t *rwlock)
+{
+	sys_rwlock_t id;
+	int err = pt_rwlock_resolve(rwlock, &id);
+
+	return err ? err : pt_err(sys_rwlock_rlock(id, 0));
+}
+
+int
+pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock)
+{
+	sys_rwlock_t id;
+	int err = pt_rwlock_resolve(rwlock, &id);
+
+	return err ? err : pt_err(sys_rwlock_tryrlock(id));
+}
+
+int
+pthread_rwlock_timedrdlock(pthread_rwlock_t *rwlock,
+                           const struct timespec *abstime)
+{
+	sys_rwlock_t id;
+	int err;
+
+	if (abstime == NULL)
+		return EINVAL;
+	err = pt_rwlock_resolve(rwlock, &id);
+	return err ? err : pt_err(sys_rwlock_rlock(id, pt_timeout_usec(abstime)));
+}
+
+int
+pthread_rwlock_wrlock(pthread_rwlock_t *rwlock)
+{
+	sys_rwlock_t id;
+	int err = pt_rwlock_resolve(rwlock, &id);
+
+	return err ? err : pt_err(sys_rwlock_wlock(id, 0));
+}
+
+int
+pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock)
+{
+	sys_rwlock_t id;
+	int err = pt_rwlock_resolve(rwlock, &id);
+
+	return err ? err : pt_err(sys_rwlock_trywlock(id));
+}
+
+int
+pthread_rwlock_timedwrlock(pthread_rwlock_t *rwlock,
+                           const struct timespec *abstime)
+{
+	sys_rwlock_t id;
+	int err;
+
+	if (abstime == NULL)
+		return EINVAL;
+	err = pt_rwlock_resolve(rwlock, &id);
+	return err ? err : pt_err(sys_rwlock_wlock(id, pt_timeout_usec(abstime)));
+}
+
+int
+pthread_rwlock_unlock(pthread_rwlock_t *rwlock)
+{
+	unsigned int value;
+	s32 rc;
+
+	if (rwlock == NULL)
+		return EINVAL;
+	value = __atomic_load_n(rwlock, __ATOMIC_ACQUIRE);
+	if (pt_rw_is_uncreated(value))
+		return EPERM;	/* never locked, so not held */
+	rc = sys_rwlock_wunlock((sys_rwlock_t)value);
+	if (rc == PT_LV2_EPERM)
+		rc = sys_rwlock_runlock((sys_rwlock_t)value);
+	return pt_err(rc);
+}
+
+int
+pthread_rwlockattr_init(pthread_rwlockattr_t *attr)
+{
+	if (attr == NULL)
+		return EINVAL;
+	memset(attr, 0, sizeof(*attr));
+	attr->is_initialized = 1;
+	return 0;
+}
+
+int
+pthread_rwlockattr_destroy(pthread_rwlockattr_t *attr)
+{
+	if (attr == NULL)
+		return EINVAL;
+	attr->is_initialized = 0;
+	return 0;
+}
+
+int
+pthread_rwlockattr_setpshared(pthread_rwlockattr_t *attr, int pshared)
+{
+	if (attr == NULL)
+		return EINVAL;
+	/* Process-private (0) only, as for mutexes and conds. */
+	return pshared == 0 ? 0 : ENOTSUP;
+}
+
+int
+pthread_rwlockattr_getpshared(const pthread_rwlockattr_t *attr, int *pshared)
 {
 	if (attr == NULL || pshared == NULL)
 		return EINVAL;
