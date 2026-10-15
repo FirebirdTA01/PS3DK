@@ -51,9 +51,10 @@ table row per source):
   `buildr/` output dir are build products, not corpus.  Note the three
   extensions — a corpus glob must match `.cg`, `.vcg` AND `.fcg`.)
 
-  **Repo-hygiene prerequisite:** `.gitignore` currently blanket-ignores
-  `/tools/rsx-cg-compiler/tests/` to keep local-only material out of
-  the tree, even though the 18 shader sources inside are tracked.
+  **Repo-hygiene prerequisite (since resolved):** `.gitignore` used to
+  blanket-ignore `/tools/rsx-cg-compiler/tests/`; it now re-includes
+  `tests/shaders/`, so new corpus shaders there are visible to `git add`.
+  The rest of this paragraph records the original problem:
   Any *new* corpus shader added there today is silently invisible to
   `git add` and to ignore-honouring tools (this produced a false "no
   test corpus exists" reading during enumeration).  Before the MIT

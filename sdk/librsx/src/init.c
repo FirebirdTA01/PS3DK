@@ -56,7 +56,7 @@ void rsxSetupContextData(gcmContextData *context,const u32 *addr,u32 size,gcmCon
 
 	context->begin = (u32*)addr;
 	context->current = (u32*)addr;
-	context->end = (u32*)(addr + alignedSize - 4);
+	context->end = (u32*)((uintptr_t)addr + alignedSize - 4);
 	context->callback = (gcmContextCallback)(uintptr_t)lv2_fn_to_callback_ea(cb);
 	rsxSetInlineTransferDmaImageDestin(context);
 }

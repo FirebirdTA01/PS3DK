@@ -316,7 +316,7 @@ encoding on both targets.
 **Status:** tier-2 shipped.  `sdk/libdbgfont/libdbgfont.a` draws real
 text over the frame via NV40 through the native `cellGcm*` surface
 (128×128 alpha atlas, passthrough VP + alpha-kill FP compiled by
-cgcomp, 8-bit unit remapped to RGBA, QUADS draws).  Header is now
+rsx-cg-compiler, 8-bit unit remapped to RGBA, QUADS draws).  Header is now
 pure declarations; samples link `-ldbgfont`.  Verified in
 `samples/gcm/hello-ppu-dbgfont` with rainbow / pulse / rigid-word-
 spin animations.
@@ -594,8 +594,8 @@ The SDK ships the OpenGL-ES-flavoured PSGL runtime sitting on top of GCM:
 
 ## A misaligned float or double load silently kills the PPU thread on hardware
 
-**Status:** fixed in the compiler for accesses it can see are under-aligned
-(next release); a misaligned `float *` / `double *` is still undefined
+**Status:** fixed in the compiler in v0.22.0 for accesses it can see are
+under-aligned; a misaligned `float *` / `double *` is still undefined
 behaviour and still faults.
 
 **Symptom.**  On a real PS3, a floating-point load from an address that is
@@ -632,7 +632,9 @@ Copy such fields out with `memcpy`.
 
 ## A small struct passed by value can be used whole as an address
 
-**Status:** open; compiler fix planned.  A check ships with the SDK.
+**Status:** fixed in v0.23.0: the compiler forms every address from a zero-extended
+32-bit pointer (GCC patch 0059).  The check below still ships with the SDK
+for binaries built by an older release.
 
 **Symptom.**  In the default PPU ABI (32-bit pointers in 64-bit registers),
 a struct of 8 bytes or less passed by value, such as `std::string_view`,
@@ -656,8 +658,8 @@ argument register.  A clean result is not a proof: it only sees functions
 that read the register's high half with a 32-bit shift.  For a definitive
 run, boot in RPCS3 with `PPU Decoder: Interpreter (static)`.
 
-**Planned fix.**  The compiler zero-extends 32-bit pointers wherever they
-are used as addresses.
+**Fix.**  Since v0.23.0 the compiler zero-extends 32-bit pointers wherever
+they are used as addresses; rebuild with v0.23.0 or later.
 
 ---
 
@@ -667,18 +669,17 @@ are used as addresses.
 
 **Symptom.**  In the default PPU ABI (ILP32), `off_t` is a signed 32-bit
 `long`, so `stat()` / `fstat()` return a 32-bit `st_size`.
-`runtime/lv2/librt/fstat.c` copies LV2's 64-bit size into it without a check:
-a file of 2 to 4 GiB reports a negative `st_size`, a larger one its low 32
-bits, and no error.  `stat64()` / `fstat64()` take the same `struct stat` and
-behave the same.  The LP64 multilib (`-mlp64`) has a 64-bit `off_t` and is not
+Before v0.19.0 `runtime/lv2/librt/fstat.c` copied LV2's 64-bit size into it
+without a check, so a file of 2 GiB or more reported a negative or truncated
+`st_size`.  Since v0.19.0 `stat()` / `fstat()` (and `stat64()` / `fstat64()`,
+which take the same `struct stat`) fail with `-1` and `errno = EOVERFLOW` for
+such a file, as POSIX requires.  The LP64 multilib (`-mlp64`) has a 64-bit `off_t` and is not
 affected.
 
 **Workaround.**  For sizes, use `cellFsStat` / `cellFsFstat` (`st_size` is
 `uint64_t`); for offsets, use `lseek64` (`_off64_t`), not `lseek`.
 
-**Planned fix.**  `fstat` and `stat` fail with `-1` and `errno = EOVERFLOW`
-when the size does not fit `off_t` (above `INT32_MAX`), as POSIX requires.
-`off_t` itself stays 32-bit: widening it is a libc ABI break for every archive
+**Not planned.**  `off_t` itself stays 32-bit: widening it is a libc ABI break for every archive
 and portlib built against it.
 
 ---

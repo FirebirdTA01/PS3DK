@@ -22,3 +22,4 @@
 0024-libspumars-module-bare-link-name.patch
 0025-ppu-rules-fcommon.patch
 0026-librsx-gcm-control-register-void.patch
+0027-codec-vdec-h264-info-layout.patch

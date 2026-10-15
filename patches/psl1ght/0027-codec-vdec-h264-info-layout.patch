@@ -1,0 +1,30 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] codec/vdec.h: vdecH264Info has the decoder's layout
+
+The firmware fills this structure.  pic_order_count is a pair of signed
+16-bit values (the s8 copy read only half of each and shifted every later
+member), and the structure ends with the closed-caption fields and a
+reserved block, so it was too small for what the decoder writes.  Same
+layout as cell/codec/vdec_avc.h CellVdecAvcInfo.
+
+--- a/ppu/include/codec/vdec.h
++++ b/ppu/include/codec/vdec.h
+@@ -159,7 +159,7 @@
+ 	u16 sar_height;
+ 	u16 sar_width;
+ 	u8  pic_struct;
+-	s8  pic_order_count[2];
++	s16 pic_order_count[2];
+ 	bool vui_parameters_present_flag;
+ 	bool frame_mbs_only_flag;
+ 	bool video_signal_type_present_flag;
+@@ -175,6 +175,9 @@
+ 	bool low_delay_hrd_flag;
+ 	bool entropy_coding_mode_flag;
+ 	u16 nalUnitPresentFlags;
++	u8  ccDataLength[2];
++	u8  ccData[2][128];
++	u64 reserved[2];
+ } vdecH264Info;
+ 
+ typedef u32 (*vdecCallback)(u32 handle,u32 msgtype,u32 msgdata,u32 arg);

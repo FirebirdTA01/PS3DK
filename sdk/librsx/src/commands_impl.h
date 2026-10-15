@@ -684,7 +684,7 @@ void RSX_FUNC(LoadFragmentProgramLocation)(gcmContextData *context,const rsxFrag
 	texcoords = program->texcoords;
 	texcoord2D = program->texcoord2D;
 	texcoord3D = program->texcoord3D;
-	for(i=0;texcoords;i++) {
+	for(i=0;i<8 && texcoords;i++) {
 		if(texcoords&1) {
 			RSX_CONTEXT_CURRENT_BEGIN(2);
 			RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_TEX_COORD_CONTROL(i),1);
@@ -839,7 +839,7 @@ void RSX_FUNC(SetVertexProgramConstants)(gcmContextData *context,u32 start,u32 c
 		RSX_CONTEXT_CURRENTP[1] = loadAt;
 
 		RSX_MEMCPY(&RSX_CONTEXT_CURRENTP[2],value,sizeof(f32)*16);
-		RSX_MEMCPY(&RSX_CONTEXT_CURRENTP[18],value,sizeof(f32)*16);
+		RSX_MEMCPY(&RSX_CONTEXT_CURRENTP[18],&value[16],sizeof(f32)*16);
 		RSX_CONTEXT_CURRENTP += 34;
 		value += 32;
 	}
@@ -847,16 +847,12 @@ void RSX_FUNC(SetVertexProgramConstants)(gcmContextData *context,u32 start,u32 c
 	if (rest) {
 		RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_VP_UPLOAD_CONST_ID,rest + 1);
 		RSX_CONTEXT_CURRENTP[1] = start + (loop<<3);
-		RSX_CONTEXT_CURRENTP += 2;
-
-		for(i=0;i < rest;i++) {
-			RSX_CONTEXT_CURRENTP[0] = *value;
-			RSX_CONTEXT_CURRENTP++;
-			value++;
-		}
+		/* The constants are float bit patterns: copy them, do not convert. */
+		RSX_MEMCPY(&RSX_CONTEXT_CURRENTP[2],value,sizeof(f32)*rest);
+		RSX_CONTEXT_CURRENTP += 2 + rest;
 	}
-
-	RSX_CONTEXT_CURRENT_END(reserve);
+	/* The packets above already advanced context->current by reserve words;
+	 * RSX_CONTEXT_CURRENT_END would advance it again over stale buffer words. */
 }
 
 void RSX_FUNC(SetVertexAttribOutputMask)(gcmContextData *context,u32 mask)
@@ -2301,7 +2297,7 @@ void RSX_FUNC(SetTimeStamp)(gcmContextData *context,u32 index)
 	RSX_CONTEXT_CURRENT_BEGIN(2);
 
 	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_QUERY_GET,1);
-	RSX_CONTEXT_CURRENTP[2] = (((index << 4)&0x0fffffff) | 0x10000000);
+	RSX_CONTEXT_CURRENTP[1] = (((index << 4)&0x0fffffff) | 0x10000000);
 
 	RSX_CONTEXT_CURRENT_END(2);
 }

@@ -110,6 +110,17 @@ sheap-key-mutex,tests/regression/spu-sheap/sheap-key-mutex.fake.self,120,RAN-CLE
 # gcm-method-words checks the command words of the gcm texture-state and
 # reserve functions against values computed from the method layouts.
 gcm-method-words,tests/regression/gcm-method-words/gcm-method-words.fake.self,20,RAN-CLEAN,GCM_WORDS_OK,GCM_WORDS_FAIL
+# librsx-cmds checks the words the PSL1GHT-style rsx functions write, against both
+# copies (librsx and the legacy copy in libgcm_cmd) in both ABIs: the context end
+# pointer, vertex-program constants (both 16-float halves, and the remainder as float
+# bits), the SetTimeStamp packet, and PSL1GHT vdecH264Info = CellVdecAvcInfo.
+librsx-cmds-rsx-ilp32,tests/regression/librsx-cmds/librsx-cmds-rsx-ilp32.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
+librsx-cmds-rsx-lp64,tests/regression/librsx-cmds/librsx-cmds-rsx-lp64.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
+librsx-cmds-gcm_cmd-ilp32,tests/regression/librsx-cmds/librsx-cmds-gcm_cmd-ilp32.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
+librsx-cmds-gcm_cmd-lp64,tests/regression/librsx-cmds/librsx-cmds-gcm_cmd-lp64.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
+# gcm-reset-buffer: cellGcmResetDefaultCommandBufferUnsafe returns the RSX to the start of the
+# default buffer and rewinds context->current with it; a label written afterwards lands.
+gcm-reset-buffer,tests/regression/gcm-reset-buffer/gcm-reset-buffer.fake.self,20,RAN-CLEAN,GCM_RESET_OK,GCM_RESET_FAIL [0-9]
 # ilp32-ivspill guards GCC patch 0049: an ILP32 loop whose IV bias the
 # optimizer used to spill as 32 bits and reload zero-extended, leaking bit 32
 # into an address.  Judge it under the PPU INTERPRETER: RPCS3's LLVM

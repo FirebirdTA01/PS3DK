@@ -9,8 +9,9 @@ git tag.
 
 - The canonical version is the most recent annotated tag matching
   `vMAJOR.MINOR.PATCH`.
-- Cutting a release is `git tag vX.Y.Z && git push --tags`.  GitHub
-  Actions does the rest.
+- Cutting a release is the gated procedure below and in
+  [RELEASING.md](RELEASING.md); pushing the tag then lets GitHub Actions
+  build and publish it.
 - A release's patch number is the count of commits after the previous
   minor tag — see "Version number policy" below.
 - For day-to-day builds, untagged commits get monotonically increasing
@@ -50,7 +51,7 @@ Logic:
 | **SDK install marker** | `$PS3DK/VERSION` plain-text file written at install time.  Useful for shell scripts and tarball naming. |
 | **Rust tools** (`tools/VERSION`) | Every Rust tool prints `tools/VERSION` for `--version`; the `ps3dk-version` crate embeds it with `include_str!`.  `scripts/sync-versions.sh` rewrites it from `version.sh --format=bare` idempotently.  The crate version in `tools/Cargo.toml` (`[workspace.package] version`) stays fixed at `0.0.0`: Cargo hashes the crate version into every symbol, so bumping it per release changed the code layout of every tool, not only its version string. |
 | **rsx-cg-compiler** (CMake) | `tools/rsx-cg-compiler/CMakeLists.txt` calls `version.sh --format=cmake` at configure time, includes the result, and `configure_file`s `src/version.h.in` → `<build>/version.h`.  `main.cpp` includes the generated header for `RSX_CG_COMPILER_VERSION`, exposed via `--version` / `-V`. |
-| **Toolchain prefix tarball** (post-v0.3.0) | Will name itself `ps3-sdk-vX.Y.Z-<host>-<arch>.tar.zst` using `version.sh --format=plain`. |
+| **Release assets** | `release.yml` names the source tarball, the host-tools packages and the Windows SDK zip with the tag's version (`ps3-sdk-src-vX.Y.Z.tar.xz`, `ps3-sdk-tools-vX.Y.Z-{linux,windows}-x86_64.*`, `ps3-sdk-vX.Y.Z-windows-x86_64.zip`); the Linux toolchain tarballs are `ps3dev-ppu.tar.xz` and `ps3dev-spu.tar.xz`. |
 
 ## Cutting a release
 
@@ -88,10 +89,13 @@ and RPCS3, and the EMP acceptance pass.
    ```
 
 4. **GitHub Actions takes over.**  `.github/workflows/release.yml`
-   verifies `version.sh` matches the tag, builds Rust tool binaries on
-   Linux x86_64, packages a curated source tarball, extracts the matching
-   CHANGELOG section, and creates a GitHub Release with the assets
-   attached.  Watch the run; if anything fails, fix forward (delete the
+   verifies `version.sh` matches the tag and that CI is green on the
+   tagged commit, builds the host tools for Linux and Windows, the native
+   PPU and SPU toolchains, PSL1GHT, the SDK, portlibs and the Windows
+   toolchain (cross-built with mingw-w64), packages the source tarball and
+   the Windows SDK zip, extracts the matching CHANGELOG section, and
+   creates a GitHub Release with every asset attached (the source,
+   host-tools and Windows SDK assets with a `.sha256` each).  Watch the run; if anything fails, fix forward (delete the
    tag, fix, retag) — releases are cheap.
 
 ## Versioning scheme
@@ -158,60 +162,29 @@ The long-term goal is **out-of-the-box homebrew development** from a
 single tarball: download, extract, write code, build, run.  We get there
 in stages.
 
-### v0.1.x — what's shipping today
+### What ships today
 
-- `ps3-sdk-src-vX.Y.Z.tar.xz` — curated source tree (`git archive`).
-- `ps3-sdk-tools-vX.Y.Z-linux-x86_64.tar.xz` — host tool binaries
-  (`nidgen`, `abi-verify`, `coverage-report`, `sprxlinker`,
-  `rsx-cg-compiler`), dynamic-linked against the system libelf/zlib/zstd.
-- `ps3-sdk-tools-vX.Y.Z-windows-x86_64.zip` — the same binaries built
-  via MSYS2 mingw64 with `-static -static-libgcc -static-libstdc++`,
-  so each `.exe` is self-contained (no DLL runtime dependencies beyond
-  what every Windows install ships).
+- `ps3-sdk-vX.Y.Z-windows-x86_64.zip` — the out-of-the-box Windows SDK:
+  the `.exe` PPU and SPU cross-compilers (cross-built from Linux with
+  mingw-w64), the runtime and SDK under `ps3dk`, portlibs, the CMake
+  toolchain files, host tools and the samples.
+- `ps3-sdk-tools-vX.Y.Z-windows-x86_64.zip` and
+  `ps3-sdk-tools-vX.Y.Z-linux-x86_64.tar.xz` — the host tools
+  (`rsx-cg-compiler`, `sprxlinker`, the Rust tools, `pkg`, the PSL1GHT
+  `fself` / `make_self` family).
+- `ps3dev-ppu.tar.xz` and `ps3dev-spu.tar.xz` — the native Linux PPU and
+  SPU toolchains.
+- `ps3-sdk-src-vX.Y.Z.tar.xz` — the source tree.
 
-The user still runs `scripts/bootstrap.sh` + the four `build-*-toolchain`
-/ `build-sdk` scripts to produce the actual `$PS3DEV` tree.  First
-bootstrap is a multi-hour build; subsequent rebuilds are fast.
+The source, host-tools and Windows SDK assets each have a `.sha256` beside
+them; the `ps3dev-ppu` / `ps3dev-spu` tarballs do not yet.
 
-### v0.2.x — Linux SDK tarball (target)
+### Still to come
 
-Add a third release asset:
-
-- `ps3-sdk-runtime-vX.Y.Z-linux-x86_64.tar.xz` — the contents of
-  `$PS3DK/` (our SDK headers and libs) plus a `setup.sh` that drops them
-  next to an existing `$PS3DEV` install.  Lets a homebrew dev who already
-  has a working PPU/SPU toolchain skip rebuilding our SDK on every
-  release.
-
-Cost: medium.  CI needs a prebuilt PPU+SPU toolchain to compile our
-runtime libs against.  Approach: bootstrap the toolchain once on a
-self-hosted runner (or in a one-shot GitHub Actions job with `ccache` +
-`actions/cache`), upload the resulting `$PS3DEV` tarball as a
-**non-released** workflow artifact, then have the per-release jobs pull
-it as a build cache.
-
-### v0.3.0 — full Linux + Windows toolchain tarballs (target)
-
-Bundle everything under `$PS3DEV` for both Linux x86_64 and Windows
-x86_64 in the same release:
-
-- `ps3-sdk-vX.Y.Z-linux-x86_64.tar.xz` — `$PS3DEV/{ppu,spu,psl1ght,
-  ps3dk,bin,portlibs}` end-to-end, ready to `tar -xf` into `~/ps3sdk`,
-  source `env.sh`, and start writing samples.
-- `ps3-sdk-vX.Y.Z-windows-x86_64.zip` — same shape as the Linux
-  tarball but with `.exe` toolchain binaries and a `setup.cmd` for
-  `%PS3DEV%`.
-
-The host *tools* (rsx-cg-compiler, sprx-linker, the Rust binaries) are
-already shipping for Windows in v0.1.x.  What v0.3.0 adds is the
-PPC/SPU **target compilers** themselves, which require a cross-build
-from Linux to `x86_64-w64-mingw32` — binutils/GCC/newlib are bootstrapped
-twice (once Linux→PPC, once Linux→MinGW), but each only once per release.
-
-Cost: high build minutes (toolchains take hours to build from source,
-and the Windows cross adds another 2-3h on top of the native build).
-Likely needs a self-hosted runner or paid Actions tier.  Worth it once
-the SDK surface is stable enough that releases don't churn weekly.
+- A single Linux SDK tarball shaped like the Windows zip (`ps3dk`,
+  portlibs and host tools next to the toolchains), so Linux users need not
+  build the SDK themselves.
+- macOS host binaries, if reasonable.
 
 ### v1.0.0 — verified out-of-the-box experience
 
