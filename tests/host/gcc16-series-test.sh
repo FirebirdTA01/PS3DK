@@ -17,6 +17,9 @@
 #  6. controls: the checks reject a planted copy whose refreshed patch
 #     changes one added line, and one whose identical patch gains a header
 #     line;
+#  8. GCC-16-only patches (gcc16only, e.g. 0068): listed in the gcc-16.x
+#     series, absent from gcc-12.x, and left out of checks 1-5; 12.4
+#     stays the unchanged control;
 #  7. with --gcc-git <gcc repo>: the series applies with --fuzz=0 to a fresh
 #     archive of releases/gcc-16.1.0, with no reject or backup files, and,
 #     with --expect-tree <dir>, the result equals that tree (ignoring
@@ -41,6 +44,10 @@ refreshed="0005 0048 0061 0067"
 tmfile="0001 0024"
 opturls="0009 0010"
 named="$refreshed $tmfile $opturls"
+# Patches with no gcc-12.x original (check 8).
+gcc16only="0068"
+only16() { local n=${1%%-*}; case " $gcc16only " in *" $n "*) return 0 ;; esac; return 1; }
+ported() { while read -r l; do only16 "$l" || echo "$l"; done; }
 
 header() { awk '/^(diff --git |--- [^ ]|Index: )/{exit} {print}' "$1"; }
 # The added and removed lines of a patch, sorted, without the file headers.
@@ -49,10 +56,16 @@ changes() { grep -E '^[+-]' "$1" | grep -vE '^(\+\+\+|---) ' | sort; }
 # check <old dir> <new dir>: print one line per problem.
 check() {
     local old=$1 new=$2 p n id
-    cmp -s "$old/series" "$new/series" || echo "series lists differ"
-    diff <(cd "$old" && ls) <(cd "$new" && ls) > /dev/null || echo "file sets differ"
+    cmp -s "$old/series" <(ported < "$new/series") || echo "series lists differ"
+    diff <(cd "$old" && ls) <(cd "$new" && ls | ported) > /dev/null || echo "file sets differ"
+    for n in $gcc16only; do
+        ls "$new"/$n-*.patch > /dev/null 2>&1 || echo "GCC-16-only $n missing from gcc-16.x"
+        grep -q "^$n-" "$new/series" || echo "GCC-16-only $n not in the gcc-16.x series"
+        ls "$old"/$n-*.patch > /dev/null 2>&1 && echo "GCC-16-only $n also exists in gcc-12.x"
+    done
     for p in $(grep -v '^#' "$new/series" | grep -v '^[[:space:]]*$'); do
         n=${p%%-*}
+        only16 "$p" && continue
         [ -f "$old/$p" ] && [ -f "$new/$p" ] || { echo "$p missing"; continue; }
         case " $named " in *" $n "*) id=named ;; *) id=same ;; esac
         if cmp -s "$old/$p" "$new/$p"; then
@@ -90,7 +103,7 @@ check "$old" "$new" > "$work/problems"
 if [ -s "$work/problems" ]; then
     fail "the port does not match its map:"; sed 's/^/    /' "$work/problems"
 else
-    echo "gcc16-series: ok   $(grep -vc '^#\|^[[:space:]]*$' "$new/series") patches: $(echo $named | wc -w) named by the port map, the rest byte-identical"
+    echo "gcc16-series: ok   $(grep -vc '^#\|^[[:space:]]*$' "$new/series") patches: $(echo $named | wc -w) named by the port map, $(echo $gcc16only | wc -w) GCC-16-only, the rest byte-identical"
 fi
 
 # Controls: the checks must catch a changed line in a refresh and a stray edit
