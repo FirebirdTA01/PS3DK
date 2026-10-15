@@ -107,6 +107,32 @@ pthread-once-lp64,tests/regression/pthread-once/pthread-once-lp64.fake.self,60,R
 # for it; librt's pthread.c built in with claim/waiting hooks.
 pthread-bootstrap-contested-ilp32,tests/regression/pthread-bootstrap-contested/pthread-bootstrap-contested-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_BOOTSTRAP_CONTESTED_OK,PTHREAD_BOOTSTRAP_CONTESTED_FAIL
 pthread-bootstrap-contested-lp64,tests/regression/pthread-bootstrap-contested/pthread-bootstrap-contested-lp64.fake.self,60,RAN-CLEAN,PTHREAD_BOOTSTRAP_CONTESTED_OK,PTHREAD_BOOTSTRAP_CONTESTED_FAIL
+# pthread-key-reuse: key reuse starts NULL; destructor re-set iterates 4 times; NULL values skip the destructor.
+pthread-key-reuse-ilp32,tests/regression/pthread-key-reuse/pthread-key-reuse-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_KEY_REUSE_OK,PTHREAD_KEY_REUSE_FAIL
+pthread-key-reuse-lp64,tests/regression/pthread-key-reuse/pthread-key-reuse-lp64.fake.self,60,RAN-CLEAN,PTHREAD_KEY_REUSE_OK,PTHREAD_KEY_REUSE_FAIL
+# pthread-raw-threads: (GCC 16) 40 raw sys_ppu_thread threads past one slot chunk, each exit route runs key and
+# thread_local destructors and keeps its exit code; 34 live pthreads with a blocked joiner; raw threads
+# racing a function-local static and a shared_ptr.
+pthread-raw-threads-ilp32,tests/regression/pthread-raw-threads/pthread-raw-threads-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_RAW_THREADS_OK,PTHREAD_RAW_THREADS_FAIL|terminate
+pthread-raw-threads-lp64,tests/regression/pthread-raw-threads/pthread-raw-threads-lp64.fake.self,60,RAN-CLEAN,PTHREAD_RAW_THREADS_OK,PTHREAD_RAW_THREADS_FAIL|terminate
+# cxx-thread-basic: (GCC 16) the C++17 thread library on the posix gthread layer: thread, mutexes, timed waits,
+# condition_variable, throwing call_once, async/future, shared_mutex, shared_ptr, statics, thread_local.
+cxx-thread-basic-ilp32,tests/regression/cxx-thread-basic/cxx-thread-basic-ilp32.fake.self,60,RAN-CLEAN,CXX_THREAD_BASIC_OK,CXX_THREAD_BASIC_FAIL|terminate
+cxx-thread-basic-lp64,tests/regression/cxx-thread-basic/cxx-thread-basic-lp64.fake.self,60,RAN-CLEAN,CXX_THREAD_BASIC_OK,CXX_THREAD_BASIC_FAIL|terminate
+# cxx-thread-cxx20: (GCC 16) jthread/stop_token, latch, barrier, counting_semaphore, atomic wait/notify.
+cxx-thread-cxx20-ilp32,tests/regression/cxx-thread-cxx20/cxx-thread-cxx20-ilp32.fake.self,60,RAN-CLEAN,CXX_THREAD_CXX20_OK,CXX_THREAD_CXX20_FAIL|terminate
+cxx-thread-cxx20-lp64,tests/regression/cxx-thread-cxx20/cxx-thread-cxx20-lp64.fake.self,60,RAN-CLEAN,CXX_THREAD_CXX20_OK,CXX_THREAD_CXX20_FAIL|terminate
+# cxx-thread-exit-order: (GCC 16) thread_locals die before notify_all_at_thread_exit / set_value_at_thread_exit
+# act, in either registration order, including a thread_local made inside a thread_local destructor.
+cxx-thread-exit-order-ilp32,tests/regression/cxx-thread-exit-order/cxx-thread-exit-order-ilp32.fake.self,60,RAN-CLEAN,CXX_THREAD_EXIT_ORDER_OK,CXX_THREAD_EXIT_ORDER_FAIL|terminate
+cxx-thread-exit-order-lp64,tests/regression/cxx-thread-exit-order/cxx-thread-exit-order-lp64.fake.self,60,RAN-CLEAN,CXX_THREAD_EXIT_ORDER_OK,CXX_THREAD_EXIT_ORDER_FAIL|terminate
+# cxx-thread-main-exit: (GCC 16) the main thread's thread_locals die before atexit handlers and static destructors.
+cxx-thread-main-exit-ilp32,tests/regression/cxx-thread-main-exit/cxx-thread-main-exit-ilp32.fake.self,60,RAN-CLEAN,CXX_THREAD_MAIN_EXIT_OK,CXX_THREAD_MAIN_EXIT_FAIL|terminate
+cxx-thread-main-exit-lp64,tests/regression/cxx-thread-main-exit/cxx-thread-main-exit-lp64.fake.self,60,RAN-CLEAN,CXX_THREAD_MAIN_EXIT_OK,CXX_THREAD_MAIN_EXIT_FAIL|terminate
+# thread-atexit-oom: a thread_local destructor whose registration cannot allocate stops the program with a
+# message (librt's pthread.c built in with the allocation forced to fail).
+thread-atexit-oom-ilp32,tests/regression/thread-atexit-oom/thread-atexit-oom-ilp32.fake.self,60,RAN-CLEAN,librt: out of memory registering a thread_local destructor,THREAD_ATEXIT_OOM_RETURNED
+thread-atexit-oom-lp64,tests/regression/thread-atexit-oom/thread-atexit-oom-lp64.fake.self,60,RAN-CLEAN,librt: out of memory registering a thread_local destructor,THREAD_ATEXIT_OOM_RETURNED
 # spu-fiber-context: SPU fiber contexts (libfiber.a) - ping-pong, callee-saved
 # registers across switches, Self(), argument errors; SPU exit status 0 = pass.
 spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self,60,RAN-CLEAN,SPU_FIBER_OK,SPU_FIBER_FAIL
