@@ -83,6 +83,11 @@ sched-priority-lp64,tests/regression/sched-priority/sched-priority-lp64.fake.sel
 # is checked; the first failing step number is printed.
 pthread-audio-path-ilp32,tests/regression/pthread-audio-path/pthread-audio-path-ilp32.fake.self,90,RAN-CLEAN,PTHREAD_AUDIO_PATH_OK,PTHREAD_AUDIO_PATH_FAIL
 pthread-audio-path-lp64,tests/regression/pthread-audio-path/pthread-audio-path-lp64.fake.self,90,RAN-CLEAN,PTHREAD_AUDIO_PATH_OK,PTHREAD_AUDIO_PATH_FAIL
+# pthread-destroy-order: a mutex and its condition variable destroyed in either
+# order (Lv-2 will not destroy a mutex a cond is bound to; the shim unbinds idle
+# conds first), a cond reused with a new mutex, and EBUSY while a waiter blocks.
+pthread-destroy-order-ilp32,tests/regression/pthread-destroy-order/pthread-destroy-order-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_DESTROY_ORDER_OK,PTHREAD_DESTROY_ORDER_FAIL
+pthread-destroy-order-lp64,tests/regression/pthread-destroy-order/pthread-destroy-order-lp64.fake.self,60,RAN-CLEAN,PTHREAD_DESTROY_ORDER_OK,PTHREAD_DESTROY_ORDER_FAIL
 # spu-fiber-context: SPU fiber contexts (libfiber.a) - ping-pong, callee-saved
 # registers across switches, Self(), argument errors; SPU exit status 0 = pass.
 spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self,60,RAN-CLEAN,SPU_FIBER_OK,SPU_FIBER_FAIL

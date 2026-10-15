@@ -25,7 +25,11 @@
  *     time, while POSIX binds at first wait.  So cond creation is deferred
  *     all the way to pthread_cond_wait, which is the first point where the
  *     mutex is known.  Signalling a never-waited-on cond is a no-op, which
- *     is exactly the POSIX semantics (no waiters).
+ *     is exactly the POSIX semantics (no waiters).  Lv-2 also refuses to
+ *     destroy a mutex while a condition variable bound to it exists, while
+ *     POSIX lets a program destroy the two in either order; so every bound
+ *     cond is recorded, and pthread_mutex_destroy destroys the idle ones
+ *     first and returns them to "not created" (see "Cond bindings").
  *
  *   * Lv-2 has no thread-specific-data.  Keys live in a fixed table indexed
  *     by a slot that is found from sys_ppu_thread_get_id().  The table is
@@ -51,6 +55,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -371,6 +376,92 @@ pt_trampoline(void *arg)
  * Mutexes
  * ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ *
+ * Cond bindings
+ *
+ * Every Lv-2 condition variable this file creates, with the pthread_cond_t
+ * that holds its id and the mutex it is bound to.  pthread_mutex_destroy
+ * walks it to destroy the mutex's conds first (Lv-2 will not destroy a
+ * mutex that still has one), and resets each such pthread_cond_t to "not
+ * created", so a later wait creates a new one against whatever mutex it
+ * then names.  The reset is a compare-and-swap against the recorded id:
+ * a cond that was re-initialised in the meantime is left alone.  (A
+ * program that frees a cond's storage without pthread_cond_destroy and
+ * then destroys its mutex still has its old storage compared against the
+ * id, which is the cost of POSIX's either-order destruction.)  Only
+ * touched under pt_table_mutex.
+ * ------------------------------------------------------------------ */
+
+struct pt_cond_binding {
+	pthread_cond_t *cond;
+	sys_cond_t      id;
+	sys_mutex_t     mutex;
+};
+
+static struct pt_cond_binding *pt_bindings;
+static size_t pt_bindings_len, pt_bindings_cap;
+
+static int
+pt_binding_add_locked(pthread_cond_t *cond, sys_cond_t id, sys_mutex_t mutex)
+{
+	if (pt_bindings_len == pt_bindings_cap) {
+		size_t cap = pt_bindings_cap ? 2 * pt_bindings_cap : 16;
+		struct pt_cond_binding *grown =
+			realloc(pt_bindings, cap * sizeof(*grown));
+
+		if (grown == NULL)
+			return ENOMEM;
+		pt_bindings = grown;
+		pt_bindings_cap = cap;
+	}
+	pt_bindings[pt_bindings_len].cond = cond;
+	pt_bindings[pt_bindings_len].id = id;
+	pt_bindings[pt_bindings_len].mutex = mutex;
+	pt_bindings_len++;
+	return 0;
+}
+
+static void
+pt_binding_remove_at_locked(size_t i)
+{
+	pt_bindings[i] = pt_bindings[--pt_bindings_len];
+}
+
+static void
+pt_binding_remove_locked(sys_cond_t id)
+{
+	for (size_t i = 0; i < pt_bindings_len; i++)
+		if (pt_bindings[i].id == id) {
+			pt_binding_remove_at_locked(i);
+			return;
+		}
+}
+
+/* Destroy every cond bound to MUTEX.  EBUSY, with the rest left bound, when
+ * one still has waiters: POSIX makes destroying a mutex that a cond wait
+ * refers to undefined, and EBUSY is the answer it suggests. */
+static int
+pt_unbind_mutex_locked(sys_mutex_t mutex)
+{
+	size_t i = 0;
+
+	while (i < pt_bindings_len) {
+		struct pt_cond_binding b = pt_bindings[i];
+		unsigned int expected = (unsigned int)b.id;
+
+		if (b.mutex != mutex) {
+			i++;
+			continue;
+		}
+		if (sysCondDestroy(b.id) != 0)
+			return EBUSY;
+		__atomic_compare_exchange_n(b.cond, &expected, PT_C_UNINIT, 0,
+		                            __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
+		pt_binding_remove_at_locked(i);
+	}
+	return 0;
+}
+
 static int
 pt_is_uncreated(unsigned int value)
 {
@@ -446,6 +537,7 @@ pthread_mutex_destroy(pthread_mutex_t *mutex)
 {
 	unsigned int value;
 	s32 rc;
+	int err;
 
 	if (mutex == NULL)
 		return EINVAL;
@@ -457,12 +549,18 @@ pthread_mutex_destroy(pthread_mutex_t *mutex)
 		return 0;
 	}
 
-	rc = sysMutexDestroy((sys_mutex_t)value);
-	if (rc != 0)
-		return pt_err(rc);
-
-	__atomic_store_n(mutex, PT_M_UNINIT, __ATOMIC_RELEASE);
-	return 0;
+	err = pt_table_lock();
+	if (err != 0)
+		return err;
+	err = pt_unbind_mutex_locked((sys_mutex_t)value);
+	if (err == 0) {
+		rc = sysMutexDestroy((sys_mutex_t)value);
+		err = pt_err(rc);
+	}
+	if (err == 0)
+		__atomic_store_n(mutex, PT_M_UNINIT, __ATOMIC_RELEASE);
+	pt_table_unlock();
+	return err;
 }
 
 int
@@ -650,6 +748,7 @@ pthread_cond_destroy(pthread_cond_t *cond)
 {
 	unsigned int value;
 	s32 rc;
+	int err;
 
 	if (cond == NULL)
 		return EINVAL;
@@ -660,12 +759,21 @@ pthread_cond_destroy(pthread_cond_t *cond)
 		return 0;
 	}
 
-	rc = sysCondDestroy((sys_cond_t)value);
-	if (rc != 0)
-		return pt_err(rc);
-
-	__atomic_store_n(cond, PT_C_UNINIT, __ATOMIC_RELEASE);
-	return 0;
+	err = pt_table_lock();
+	if (err != 0)
+		return err;
+	/* Re-read: pthread_mutex_destroy may have destroyed it meanwhile. */
+	value = __atomic_load_n(cond, __ATOMIC_RELAXED);
+	if (value != PT_C_UNINIT && value != PT_C_STATIC) {
+		rc = sysCondDestroy((sys_cond_t)value);
+		err = pt_err(rc);
+		if (err == 0)
+			pt_binding_remove_locked((sys_cond_t)value);
+	}
+	if (err == 0)
+		__atomic_store_n(cond, PT_C_UNINIT, __ATOMIC_RELEASE);
+	pt_table_unlock();
+	return err;
 }
 
 /* Resolve a pthread_cond_t against the mutex the caller is waiting with,
@@ -709,6 +817,12 @@ pt_cond_resolve(pthread_cond_t *cond, sys_mutex_t mutex_id, sys_cond_t *out)
 		if (rc != 0) {
 			pt_table_unlock();
 			return pt_err(rc);
+		}
+		err = pt_binding_add_locked(cond, id, mutex_id);
+		if (err != 0) {
+			(void)sysCondDestroy(id);
+			pt_table_unlock();
+			return err;
 		}
 		value = (unsigned int)id;
 		__atomic_store_n(cond, value, __ATOMIC_RELEASE);
