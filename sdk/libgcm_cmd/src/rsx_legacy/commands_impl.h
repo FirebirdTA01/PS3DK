@@ -841,8 +841,8 @@ void RSX_FUNC(SetVertexProgramConstants)(gcmContextData *context,u32 start,u32 c
 		RSX_MEMCPY(&RSX_CONTEXT_CURRENTP[2],value,sizeof(f32)*rest);
 		RSX_CONTEXT_CURRENTP += 2 + rest;
 	}
-
-	RSX_CONTEXT_CURRENT_END(reserve);
+	/* The packets above already advanced context->current by reserve words;
+	 * RSX_CONTEXT_CURRENT_END would advance it again over stale buffer words. */
 }
 
 void RSX_FUNC(SetVertexAttribOutputMask)(gcmContextData *context,u32 mask)
