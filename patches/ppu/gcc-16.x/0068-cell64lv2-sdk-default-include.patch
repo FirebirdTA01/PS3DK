@@ -15,8 +15,9 @@ reference compiler searches its SDK include directory by default.
 Add %:ps3dk-include() to INCLUDE_EXTRA_SPEC (CPP_OS_DEFAULT_SPEC uses
 it), unless -nostdinc.  It expands to -isystem <SDK>/ppu/include: the
 SDK that PS3DK selects, the one the libraries come from, and no other;
-with PS3DK unset, the SDK installed with the compiler, found from
-GCC_EXEC_PREFIX in both the packaged and the staged layout.  A directory
+with PS3DK unset, the SDK installed with the compiler, found from the
+driver's lib/gcc/ (GCC_EXEC_PREFIX once moved, else the configured one)
+in both the packaged and the staged layout.  A directory
 counts only if it has sys/lv2_syscall.h.  PS3DK_NO_DEFAULT_INCLUDE (set
 and not "0") turns it off for the toolchain's and the SDK's own builds.
 -isystem is the position the SDK's CMake toolchain already uses, so a
@@ -67,10 +68,10 @@ index addc86c..7e48529 100644
  #ifndef LINK_OS_NEW_DTAGS_SPEC
 diff --git a/gcc/config/rs6000/driver-cell64lv2.cc b/gcc/config/rs6000/driver-cell64lv2.cc
 new file mode 100755
-index 0000000..bc73d28
+index 0000000..9a7344f
 --- /dev/null
 +++ b/gcc/config/rs6000/driver-cell64lv2.cc
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,122 @@
 +/* Driver support for powerpc64-ps3-elf: the SDK include directory.
 +   Copyright (C) 2026 PS3DK toolchain contributors.
 +
@@ -133,8 +134,8 @@ index 0000000..bc73d28
 +   the headers come from that same SDK, and from no other: an SDK without
 +   headers there gets no default directory rather than a different SDK's.
 +   With PS3DK unset (compiling only; linking needs PS3DK), use the SDK
-+   installed with this compiler.  The driver exports GCC_EXEC_PREFIX as
-+   <prefix>/lib/gcc/ wherever the toolchain was moved, so the packaged
++   installed with this compiler.  Its lib/gcc/ is GCC_EXEC_PREFIX once
++   the toolchain has been moved, else the configured one, so the packaged
 +   layout (PS3DK/ppu) has its SDK at ../../include and the staged layout
 +   (PS3DEV/ppu beside PS3DEV/ps3dk) at ../../../ps3dk/ppu/include.
 +
@@ -169,9 +170,12 @@ index 0000000..bc73d28
 +	"../../include",
 +	"../../../ps3dk/ppu/include"
 +      };
++      /* The driver exports GCC_EXEC_PREFIX only when it runs from
++	 somewhere other than its configured prefix; otherwise it is that
++	 prefix's lib/gcc/.  */
 +      const char *exec_prefix = getenv ("GCC_EXEC_PREFIX");
 +      if (!exec_prefix || !*exec_prefix)
-+	return NULL;
++	exec_prefix = PS3DK_STANDARD_EXEC_PREFIX;
 +      for (size_t i = 0; i < ARRAY_SIZE (relative) && !dir; i++)
 +	{
 +	  char *candidate = concat (exec_prefix, relative[i], NULL);
@@ -191,7 +195,7 @@ index 0000000..bc73d28
 +  return result;
 +}
 diff --git a/gcc/config/rs6000/t-cell64lv2 b/gcc/config/rs6000/t-cell64lv2
-index a66a713..5e55cae 100644
+index a66a713..aa7349f 100644
 --- a/gcc/config/rs6000/t-cell64lv2
 +++ b/gcc/config/rs6000/t-cell64lv2
 @@ -25,3 +25,8 @@ MULTILIB_OPTIONS    := mlp64
@@ -201,5 +205,5 @@ index a66a713..5e55cae 100644
 +
 +# The driver's SDK include-directory spec function (cell64lv2.h).
 +driver-cell64lv2.o: $(srcdir)/config/rs6000/driver-cell64lv2.cc
-+	$(COMPILE) $<
++	$(COMPILE) -DPS3DK_STANDARD_EXEC_PREFIX=\"$(libdir)/gcc/\" $<
 +	$(POSTCOMPILE)

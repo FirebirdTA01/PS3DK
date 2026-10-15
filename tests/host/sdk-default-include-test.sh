@@ -13,18 +13,30 @@
 #  6. an explicit -isystem of the same directory leaves it in the search
 #     list once.
 #
-# usage: sdk-default-include-test.sh --ppu-gcc <powerpc64-ps3-elf-gcc> --sdk <PS3DK root>
+# usage: sdk-default-include-test.sh [--ppu-gcc <powerpc64-ps3-elf-gcc> --sdk <PS3DK root>]
 #   <PS3DK root> holds ppu/include (the packaged $PS3DK, or staged $PS3DEV/ps3dk).
-# Exit 0 pass, 1 fail, 2 usage or missing inputs (never a silent skip).
+#   With no arguments: $PS3DEV's compiler and $PS3DEV/ps3dk; it skips without
+#   PS3DEV or when that compiler has no %:ps3dk-include() (GCC 12.4).  Named
+#   inputs never skip.
+# Exit 0 pass (or skip), 1 fail, 2 usage or missing named inputs.
 set -u
 gcc=""; sdk=""
 while [ $# -gt 0 ]; do
     case $1 in
         --ppu-gcc) gcc=$2; shift 2 ;;
         --sdk) sdk=$2; shift 2 ;;
-        *) echo "usage: $0 --ppu-gcc <gcc> --sdk <PS3DK root>"; exit 2 ;;
+        *) echo "usage: $0 [--ppu-gcc <gcc> --sdk <PS3DK root>]"; exit 2 ;;
     esac
 done
+if [ -z "$gcc" ] && [ -z "$sdk" ]; then
+    gcc="${PS3DEV:-}/ppu/bin/powerpc64-ps3-elf-gcc"; sdk="${PS3DEV:-}/ps3dk"
+    if [ -z "${PS3DEV:-}" ] || [ ! -x "$gcc" ]; then
+        echo "SKIP: sdk-default-include-test (no PS3DEV compiler)"; exit 0
+    fi
+    if ! "$gcc" -dumpspecs | grep -q 'ps3dk-include'; then
+        echo "SKIP: sdk-default-include-test ($gcc has no default SDK include directory)"; exit 0
+    fi
+fi
 [ -x "$gcc" ] || { echo "sdk-default-include: no compiler at '$gcc'"; exit 2; }
 [ -f "$sdk/ppu/include/sys/lv2_syscall.h" ] || { echo "sdk-default-include: no SDK headers under '$sdk/ppu/include'"; exit 2; }
 inc=$(cd "$sdk/ppu/include" && pwd -P)
@@ -64,7 +76,7 @@ compiles() {
         got=fail
     fi
     if [ $got = "$want" ]; then
-        ok "$label: compile ${got}es"
+        ok "$label: compile ${got}ed as expected"
     else
         fail "$label: compile ${got}ed, expected $want"; head -5 "$work/out" | sed 's/^/    /'
     fi

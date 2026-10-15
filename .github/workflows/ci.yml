@@ -316,6 +316,11 @@ jobs:
       - name: Test the PPU GCC version selection
         run: bash tests/host/ppu-gcc-select-test.sh
 
+      # Skips without PS3DEV or on a compiler without gcc-16.x patch 0068; the
+      # driver's default SDK include directory declares pthread/time/sched.
+      - name: Test the default SDK include directory
+        run: bash tests/host/sdk-default-include-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class
