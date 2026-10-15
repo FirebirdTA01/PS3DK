@@ -207,6 +207,11 @@ jobs:
       - name: Test SDK headers for C++20 readiness
         run: bash tests/host/cxx20-header-test.sh
 
+      # The C++20 probe's own guards: stub compilers that reject or accept
+      # everything must be reported as infrastructure failures, not OK.
+      - name: Self-test the C++20 header probe's controls
+        run: sh tests/host/cxx20-header-test.sh --self-test
+
       # Skips without PS3DEV; LV2 timers 70-76 and the sleeps 141/142 by
       # syscall number, and sys_time_get_system_time as the import.
       - name: Test the LV2 timer surface

@@ -15,7 +15,10 @@
 # Infrastructure guards (each exits 1 on its own; they exist because a
 # broken/absent/mis-configured compiler used to produce a FALSE GREEN):
 #   1. Positive controls: an empty TU and `#include <cstddef>` must
-#      compile (exit 0) in all 8 cells.  Any failure = broken harness.
+#      compile (exit 0) in all 8 cells; a negative control, a TU with
+#      `#error`, must FAIL (exit 1) in all 4.  Any other outcome = broken
+#      harness (a compiler that accepts everything is as useless as one
+#      that rejects everything).
 #   2. Baseline: if more than half the headers FAIL under gnu++17 in an
 #      ABI, the toolchain is not working, so the result is not a valid
 #      C++20 measurement.
@@ -32,8 +35,9 @@
 # Usage:
 #   cxx20-header-test.sh [--table FILE] [--self-test]
 #     --table FILE   copy the full (untruncated) table to FILE as well.
-#     --self-test    run with a stub compiler that always exits 1 and
-#                    assert the script exits 1 (infrastructure), not 0.
+#     --self-test    run with stub compilers that always exit 1 and always
+#                    exit 0, and assert the script exits 1 (infrastructure)
+#                    for both, not 0.
 #
 # POSIX sh.  No Python.
 
@@ -177,9 +181,18 @@ run_probe() {
             done
         done
     done
+    echo "  negative control (all 4 cells must FAIL with exit 1):"
+    for _cstd in "-std=gnu++17" "-std=gnu++20"; do
+        for _cmlp in "" "-mlp64"; do
+            compile_cell "#error negative control" "$_cstd" "$_cmlp"
+            if [ "$CC_RESULT" -eq 1 ]; then _lbl="FAIL"; else CTRL_BROKEN=1; _lbl="BAD"; fi
+            _clbl="ilp32"; [ -n "$_cmlp" ] && _clbl="lp64"
+            printf '    %-5s  %-13s  %-5s  #error\n' "$_lbl" "$_cstd" "$_clbl"
+        done
+    done
     if [ "${CTRL_BROKEN}" -ne 0 ]; then
         echo ""
-        echo "  INFRASTRUCTURE FAILURE: a positive control failed to compile."
+        echo "  INFRASTRUCTURE FAILURE: a control did not behave (positive must compile, #error must fail)."
         echo "  The compiler environment is not usable; this is not a valid C++20 result."
         return 1
     fi
@@ -303,28 +316,32 @@ run_probe() {
 # A stub g++ that always exits 1 must drive the probe to exit 1
 # (infrastructure: positive controls fail), NOT a false-green exit 0.
 run_self_test() {
-    _stk="$(mktemp -d)"
-    mkdir -p "$_stk/ppu/bin" "$_stk/ps3dk/ppu/include"
-    _gxx="$_stk/ppu/bin/powerpc64-ps3-elf-g++"
-    printf '#!/bin/sh\nexit 1\n' > "$_gxx"
-    chmod +x "$_gxx" 2>/dev/null
-    printf 'extern int fake_a;\n' > "$_stk/ps3dk/ppu/include/fake_a.h"
-    printf 'extern int fake_b;\n' > "$_stk/ps3dk/ppu/include/fake_b.h"
+    _st_status=0
+    for _stub_rc in 1 0; do
+        _stk="$(mktemp -d)"
+        mkdir -p "$_stk/ppu/bin" "$_stk/ps3dk/ppu/include"
+        _gxx="$_stk/ppu/bin/powerpc64-ps3-elf-g++"
+        printf '#!/bin/sh\nexit %s\n' "$_stub_rc" > "$_gxx"
+        chmod +x "$_gxx" 2>/dev/null
+        printf 'extern int fake_a;\n' > "$_stk/ps3dk/ppu/include/fake_a.h"
+        printf 'extern int fake_b;\n' > "$_stk/ps3dk/ppu/include/fake_b.h"
 
-    GXX="$_gxx"
-    HDR="$_stk/ps3dk/ppu/include"
+        GXX="$_gxx"
+        HDR="$_stk/ps3dk/ppu/include"
 
-    echo "self-test: running probe against an always-exit-1 stub compiler"
-    run_probe
-    _rc=$?
-    rm -rf "$_stk"
+        echo "self-test: running probe against an always-exit-$_stub_rc stub compiler"
+        run_probe
+        _rc=$?
+        rm -rf "$_stk"
 
-    if [ "$_rc" -eq 1 ]; then
-        echo "self-test: PASS (always-fail stub correctly detected as infrastructure, exit=1)"
-        return 0
-    fi
-    echo "self-test: FAIL — always-exit-1 stub produced exit $_rc (a false green would be 0); expected 1" >&2
-    return 2
+        if [ "$_rc" -eq 1 ]; then
+            echo "self-test: PASS (always-exit-$_stub_rc stub detected as infrastructure, exit=1)"
+        else
+            echo "self-test: FAIL - always-exit-$_stub_rc stub produced exit $_rc (a false green would be 0); expected 1" >&2
+            _st_status=2
+        fi
+    done
+    return $_st_status
 }
 
 # ============================================================== main
