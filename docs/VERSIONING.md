@@ -94,7 +94,8 @@ and RPCS3, and the EMP acceptance pass.
    PPU and SPU toolchains, PSL1GHT, the SDK, portlibs and the Windows
    toolchain (cross-built with mingw-w64), packages the source tarball and
    the Windows SDK zip, extracts the matching CHANGELOG section, and
-   creates a GitHub Release with every asset and its `.sha256` attached.  Watch the run; if anything fails, fix forward (delete the
+   creates a GitHub Release with every asset attached (the source,
+   host-tools and Windows SDK assets with a `.sha256` each).  Watch the run; if anything fails, fix forward (delete the
    tag, fix, retag) — releases are cheap.
 
 ## Versioning scheme
@@ -175,7 +176,8 @@ in stages.
   SPU toolchains.
 - `ps3-sdk-src-vX.Y.Z.tar.xz` — the source tree.
 
-Each asset has a `.sha256` beside it.
+The source, host-tools and Windows SDK assets each have a `.sha256` beside
+them; the `ps3dev-ppu` / `ps3dev-spu` tarballs do not yet.
 
 ### Still to come
 

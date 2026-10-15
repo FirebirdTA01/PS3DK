@@ -37,7 +37,7 @@ The compact `.opd` ABI path is implemented: native output uses 8-byte
 descriptors, compact indirect-call reads, and a bare `lv2_fn_to_callback_ea`
 cast. The runtime layer has also replaced several PSL1GHT CRT pieces, including
 `lv2-sprx.o`, `lv2-crti.o`, the `crt0.S` half of `lv2-crt0.o`, and `lv2.ld`.
-`lv2-crt0.o` now links our own `crt1.c` (PSL1GHT's `crt1.o` is only a fallback if
+`lv2-crt0.o` now links our own `crt1.c` (PSL1GHT's `crt1.o` is only an ILP32 fallback if
 that fails to build). However, the toolchain is not fully PSL1GHT-free yet:
 `sprx-linker` is still used for `.lib.stub` import
 counts and legacy `.opd` fallback handling, and some SDK libraries remain
@@ -123,7 +123,7 @@ Current installed pieces:
 | `lv2-sprx.o` | `runtime/lv2/crt/lv2-sprx.S` | native PS3DK; emits 64-byte `.sys_proc_prx_param` and library-range prefixes |
 | `lv2-crti.o` | `runtime/lv2/crt/lv2-crti.S` | native PS3DK compact-OPD init/fini prologue |
 | `crt0.o` | `runtime/lv2/crt/crt0.S` | native PS3DK process entry and compact `__start` descriptor |
-| `lv2-crt0.o` | `crt0.S` merged with our `crt1.c` (PSL1GHT `crt1.o` only as a build fallback) | native |
+| `lv2-crt0.o` | `crt0.S` merged with our `crt1.c` (PSL1GHT `crt1.o` only as an ILP32 build fallback) | native |
 | `lv2.ld` | `runtime/lv2/crt/lv2.ld` | native PS3DK linker script; keeps `.opd ALIGN(4)` |
 | `lv2-crtn.o` | PSL1GHT, where still used by startfile specs | not yet replaced |
 

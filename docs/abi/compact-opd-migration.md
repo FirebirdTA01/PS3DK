@@ -128,7 +128,7 @@ from legacy 24-byte ELFv1 descriptors.
 `build-runtime-lv2.sh` currently installs native `lv2-sprx.o`, native
 `lv2-crti.o`, native `crt0.o` merged into `lv2-crt0.o`, and the native
 `lv2.ld`. `lv2-crt0.o` links our own `runtime/lv2/crt/crt1.c` (PSL1GHT's
-`crt1.o` is only a fallback if that fails to build); `lv2-crtn.o` still comes
+`crt1.o` is only an ILP32 fallback if that fails to build; LP64 has no fallback); `lv2-crtn.o` still comes
 from PSL1GHT where the startfile specs use it.
 
 ### `tools/sprx-linker`

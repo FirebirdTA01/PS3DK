@@ -660,8 +660,8 @@ The SDK ships a single version string sourced from the most recent
 workflow and `CHANGELOG.md` for the release-by-release history.  Tagged
 releases are published on the GitHub Releases page, with the Windows SDK zip,
 the Windows and Linux host-tools packages, the source tarball and the Linux
-`ps3dev-ppu` / `ps3dev-spu` toolchain tarballs (each with a `.sha256`)
-attached by CI.
+`ps3dev-ppu` / `ps3dev-spu` toolchain tarballs attached by CI (the source,
+host-tools and Windows SDK assets each carry a `.sha256`).
 
 ## License
 

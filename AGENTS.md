@@ -25,7 +25,7 @@ A modern, open-source PlayStation 3 toolchain and SDK, **C++17-first on both PPU
 | newlib | 4.4.0 with the PS3 `libsysbase` / lv2 glue (`patches/ppu/newlib-4.x`, `patches/spu/newlib-4.x`). |
 | GDB | 14.2, PPU only. |
 | PSL1GHT | Supported front-end with Cell-style naming; pinned in `scripts/bootstrap.sh` and patched by `patches/psl1ght/series`. |
-| Shader compiler | `rsx-cg-compiler` (independent Cg → NV40); byte-exact with the reference compiler by default, extensions only where advised. |
+| Shader compiler | `rsx-cg-compiler` (independent Cg → NV40); reference-compatible output is the target (differences, including optimisation differences, are tracked; byte identity is not the release bar); extensions only where advised. |
 | Host tooling | Rust workspace in `tools/` (nidgen, coverage-report, abi-verify, prx-gen, sfo, make-sdata, ovis, spu-elf-to-ppu-obj), plus `rsx-cg-compiler` (C++) and `sprx-linker` (C). |
 
 ## Workspace layout
@@ -54,7 +54,7 @@ PS3_Custom_Toolchain/
 source ./scripts/env.sh
 ./scripts/bootstrap.sh                 # upstream mirrors (add --with-reference-repos for ps3dev/forks)
 ./scripts/build-spu-toolchain.sh
-./scripts/build-ppu-toolchain.sh       # --gcc=16 builds the GCC 16 port into its own PS3DEV (feat/gcc16 only)
+./scripts/build-ppu-toolchain.sh       # feat/gcc16 only: --gcc=16 builds the GCC 16 port; set PS3DEV to a separate prefix first (a prefix holding another GCC major is refused)
 ./scripts/build-psl1ght.sh             # PSL1GHT runtime + our LV2 runtime, into $PS3DK
 ./scripts/build-sdk.sh --headers-only
 ./scripts/build-cell-stub-archives.sh

@@ -94,7 +94,8 @@ The version stamped into builds is generated from the most recent
   back-face colours `BCOL0` / `BCOL1`.  A sampler member of a uniform struct
   keeps its `TEXUNIT` binding.  It is the recommended shader compiler;
   `cgcomp` stays for existing Makefiles.
-- **`-O4`.**  Optimisations beyond the default levels go behind `-O4`.
+- **`-O4`.**  Accepted and reserved for optimisations beyond the reference
+  levels; no optimisation is gated on it yet.
 - **Message digests.**  New `<cell/hash/libmd5.h>`, `libsha1.h`,
   `libsha224.h`, `libsha256.h`, `libsha384.h` and `libsha512.h` with the
   libraries `libmd5.a`, `libsha1.a`, `libsha224.a`, `libsha256.a`,
