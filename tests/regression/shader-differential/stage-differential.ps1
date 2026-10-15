@@ -1014,7 +1014,7 @@ if ($ReferenceCompiler) {
             $okRef  = Compile-Reference $f.FullName $ref
             $rcRef  = $script:lastCompileRc
             if ($rel -eq "tests/regression/shader-readback/shaders/rb_refract_k0.fcg") {
-                $rtAttributions += "rb_refract_k0=known-deliberate(reference k==0 boundary diverges; readback row uses PPU-computed expected values)"
+                $rtAttributions += "rb_refract_k0=known(both sides return zero at k==0 since 0d925b66; the reference folds this constant shader to one MOV, ours computes refract at run time; readback row uses PPU-computed expected values)"
             } elseif ($rel -eq "tests/regression/shader-differential/must-reject/accept_array_uniform.fcg") {
                 $rtAttributions += "accept_array_uniform=new-finding(uniform array row compiles on both sides but mismatches pixels under auto binding)"
             }
