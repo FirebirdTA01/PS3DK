@@ -1,16 +1,17 @@
 name: Release
 
 # Triggered on every v-prefixed tag push.  Verifies version metadata is
-# consistent, builds the host tools (Linux + Windows), and publishes a
-# GitHub Release with sources + tool binaries attached.
+# consistent and CI is green on the tagged commit, builds the host tools
+# (Linux + Windows), the native PPU and SPU toolchains, the SDK and the
+# Windows-hosted toolchain, and publishes a GitHub Release with the
+# source, host-tools, toolchain and Windows SDK assets attached.
 #
 # Also exposed via workflow_dispatch so each job can be exercised without
 # burning a tag — useful when first wiring a new job (e.g. the
 # build-toolchain-windows long-pole) into the release pipeline.  Manual
 # dispatch builds and uploads artifacts but skips the publish step.
 #
-# PPU/SPU toolchain binaries and the SDK runtime libraries are deferred
-# to v0.2.x / v0.3.x — see docs/VERSIONING.md "Release-payload roadmap".
+# Release assets are listed in docs/VERSIONING.md "Release-payload roadmap".
 
 on:
   push:
