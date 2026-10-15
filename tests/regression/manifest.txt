@@ -97,6 +97,16 @@ pthread-signal-unbind-lp64,tests/regression/pthread-signal-unbind/pthread-signal
 # writer exclusion, try/timed variants, unlock of either hold, destroy refusal.
 pthread-rwlock-ilp32,tests/regression/pthread-rwlock/pthread-rwlock-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_RWLOCK_OK,PTHREAD_RWLOCK_FAIL
 pthread-rwlock-lp64,tests/regression/pthread-rwlock/pthread-rwlock-lp64.fake.self,60,RAN-CLEAN,PTHREAD_RWLOCK_OK,PTHREAD_RWLOCK_FAIL
+# pthread-once: per-control pthread_once; an init routine that throws (a C++
+# exception unwinding through it) is retried by the next caller; a routine that
+# joins a thread running a different control; plain concurrent once.
+pthread-once-ilp32,tests/regression/pthread-once/pthread-once-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_ONCE_OK,PTHREAD_ONCE_FAIL|terminate
+pthread-once-lp64,tests/regression/pthread-once/pthread-once-lp64.fake.self,60,RAN-CLEAN,PTHREAD_ONCE_OK,PTHREAD_ONCE_FAIL|terminate
+# pthread-bootstrap-contested: librt's pthread bootstrap claimed by a
+# low-priority raw thread while three high-priority raw threads wait (sleeping)
+# for it; librt's pthread.c built in with claim/waiting hooks.
+pthread-bootstrap-contested-ilp32,tests/regression/pthread-bootstrap-contested/pthread-bootstrap-contested-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_BOOTSTRAP_CONTESTED_OK,PTHREAD_BOOTSTRAP_CONTESTED_FAIL
+pthread-bootstrap-contested-lp64,tests/regression/pthread-bootstrap-contested/pthread-bootstrap-contested-lp64.fake.self,60,RAN-CLEAN,PTHREAD_BOOTSTRAP_CONTESTED_OK,PTHREAD_BOOTSTRAP_CONTESTED_FAIL
 # spu-fiber-context: SPU fiber contexts (libfiber.a) - ping-pong, callee-saved
 # registers across switches, Self(), argument errors; SPU exit status 0 = pass.
 spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self,60,RAN-CLEAN,SPU_FIBER_OK,SPU_FIBER_FAIL
