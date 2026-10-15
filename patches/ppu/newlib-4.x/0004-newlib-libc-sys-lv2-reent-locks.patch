@@ -169,7 +169,7 @@ new file mode 100644
 index 0000000..7a07e3e
 --- /dev/null
 +++ b/newlib/libc/sys/lv2/lock_internal.c
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,43 @@
 +#include <stdint.h>
 +#include <stdlib.h>
 +#include <sys/types.h>
@@ -177,17 +177,31 @@ index 0000000..7a07e3e
 +
 +#include "lock_internal.h"
 +
++/* The lock that serialises lazy lock creation.  It is created by a start-up
++   constructor, and also on first use: anything that takes a libc lock in an
++   earlier constructor (GCC 16's libstdc++ sets up the standard streams at
++   priority 90; user code may use 101) would otherwise lock a lock that does
++   not exist yet.  Before main only the main thread runs, so the creation on
++   first use is not racy unless an earlier constructor starts threads. */
 +static sys_lwmutex_t metaLock;
++
++static void create_metalock(void)
++{
++	if(SYS_LWMUTEX_UNINITIALIZED(&metaLock) &&
++	   sys_lwmutex_create(&metaLock,&__libc_lock_attributes))
++		abort();
++}
 +
 +static void init_metalock(void) __attribute__((constructor(105)));
 +static void init_metalock(void)
 +{
-+	if(sys_lwmutex_create(&metaLock,&__libc_lock_attributes))
-+		abort();
++	create_metalock();
 +}
 +
 +void __libc_auto_lock_allocate(sys_lwmutex_t *lwmutex)
 +{
++	create_metalock();
++
 +	if(sys_lwmutex_lock(&metaLock,0))
 +		abort();
 +
