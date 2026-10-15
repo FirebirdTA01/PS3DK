@@ -297,8 +297,6 @@
 #define GCM_TEXTURE_FORMAT_R5G6B5A1					23
 /*! \brief texture color format is two 16-bit unsigned values compressed to two 8-bit values */
 #define GCM_TEXTURE_FORMAT_COMPRESSED_HILO8			24
-/*! \brief texture color format is two 8-bit values, luminance and alpha (same encoding as COMPRESSED_HILO8) */
-#define GCM_TEXTURE_FORMAT_A8L8						24
 /*! \brief texture color format is two 16-bit signed values compressed to two 8-bit values */
 #define GCM_TEXTURE_FORMAT_COMPRESSED_HILO8_S8		25
 /*! \brief texture color format is four 16-bit float values */

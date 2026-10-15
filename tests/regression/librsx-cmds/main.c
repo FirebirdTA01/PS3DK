@@ -9,7 +9,6 @@
  *   as float bit patterns (not converted to integers);
  * - rsxSetTimeStamp: a two-word packet with the report index in word 1;
  * - PSL1GHT's vdecH264Info has CellVdecAvcInfo's size and member offsets;
- * - GCM_TEXTURE_FORMAT_A8L8 is defined.
  *
  * Prints LIBRSX_CMDS_OK, or a LIBRSX_CMDS_FAIL line per mismatch. */
 #include <stddef.h>
@@ -132,8 +131,6 @@ int main(void)
 	if (sizeof(((vdecH264Info *)0)->pic_order_count[0]) != 2)
 		fails++, printf("LIBRSX_CMDS_FAIL pic_order_count is not 16-bit\n");
 
-	if (GCM_TEXTURE_FORMAT_A8L8 != 24)
-		fails++, printf("LIBRSX_CMDS_FAIL GCM_TEXTURE_FORMAT_A8L8\n");
 #endif
 
 	if (fails)

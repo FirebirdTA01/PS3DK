@@ -113,7 +113,7 @@ gcm-method-words,tests/regression/gcm-method-words/gcm-method-words.fake.self,20
 # librsx-cmds checks the words the PSL1GHT-style rsx functions write, against both
 # copies (librsx and the legacy copy in libgcm_cmd) in both ABIs: the context end
 # pointer, vertex-program constants (both 16-float halves, and the remainder as float
-# bits), the SetTimeStamp packet, PSL1GHT vdecH264Info = CellVdecAvcInfo, and A8L8.
+# bits), the SetTimeStamp packet, and PSL1GHT vdecH264Info = CellVdecAvcInfo.
 librsx-cmds-rsx-ilp32,tests/regression/librsx-cmds/librsx-cmds-rsx-ilp32.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
 librsx-cmds-rsx-lp64,tests/regression/librsx-cmds/librsx-cmds-rsx-lp64.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
 librsx-cmds-gcm_cmd-ilp32,tests/regression/librsx-cmds/librsx-cmds-gcm_cmd-ilp32.fake.self,20,RAN-CLEAN,LIBRSX_CMDS_OK,LIBRSX_CMDS_FAIL
