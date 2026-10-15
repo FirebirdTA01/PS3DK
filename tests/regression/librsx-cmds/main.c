@@ -65,10 +65,13 @@ int main(void)
 	printf("librsx-cmds: sizeof(void*)=%u\n", (unsigned)sizeof(void *));
 
 	reset();
-	if ((uintptr_t)ctx.end != (uintptr_t)buf + sizeof buf - 4) {
-		printf("LIBRSX_CMDS_FAIL context end 0x%lx, want 0x%lx\n",
-		       (unsigned long)(uintptr_t)ctx.end, (unsigned long)((uintptr_t)buf + sizeof buf - 4));
-		fails++;
+	/* As a word index: the context's pointer fields are 32-bit under LP64. */
+	{
+		long end = (long)(ctx.end - buf), want = (long)(sizeof buf / 4) - 1;
+		if (end != want) {
+			printf("LIBRSX_CMDS_FAIL context end at word %ld, want %ld\n", end, want);
+			fails++;
+		}
 	}
 	if (ctx.begin != buf || ctx.current != buf)
 		fails++, printf("LIBRSX_CMDS_FAIL context begin/current\n");
