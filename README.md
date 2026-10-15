@@ -9,8 +9,8 @@ The SDK now has its own runtime, native cell-style headers, NID/FNID-driven stub
 - **Toolchain:** PPU GCC 12.4.0, SPU GCC 9.5.0, binutils 2.42, newlib 4.4.0, and PPU GDB 14.2 build and install end-to-end on Linux.
 - **PPU ABI:** default PPU binaries use ELF64 with 32-bit C pointers for CellOS compatibility. `-mlp64` selects the LP64 multilib. See [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md).
 - **SDK export coverage:** 4336 of 4802 tracked exports (90.3%) across 99 tracked libraries are covered by the v0.24.0 install tree; 96 libraries are complete, and the remaining gaps are in `libm_stub`, `libstdc++_stub` and `libsync2_stub`. The full generated matrix is in [docs/coverage.md](docs/coverage.md).
-- **Network and NP coverage:** the current network-stack wave covers cellNetCtl, sys_net, SSL, HTTP/HTTPUtil, and the NP family (`sysutil_np`, NP2, trophy, TUS, clans, commerce2, SNS, and utility surfaces), adding roughly 700 exports and 12 tracked network validation samples.
-- **Samples:** 122 tracked CMake sample projects: toolchain 10, GCM 21, audio 2, codec 14, sysutil 37, firmware helper 4, LV2 7, SPU 3, SPURS 11, network 12, and dbgfont 1. See [samples/README.md](samples/README.md).
+- **Network and NP coverage:** the current network-stack wave covers cellNetCtl, sys_net, SSL, HTTP/HTTPUtil, and the NP family (`sysutil_np`, NP2, trophy, TUS, clans, commerce2, SNS, and utility surfaces), adding roughly 700 exports; 13 network validation samples exercise it.
+- **Samples:** 193 CMake sample projects: toolchain 50, sysutil 40, GCM 24, LV2 18, SPURS 15, codec 14, network 13, SPU 6, audio 4, firmware helper 4, font 2, dbgfont 1, util 1 and vision 1, plus 21 PSL1GHT sample ports. See [samples/README.md](samples/README.md).
 - **Install contract:** `make -C sdk install` produces the installed headers, native archives, multilib stub archives, and `$PS3DK/.ps3dk-install-manifest`; `cmake/ps3-self.cmake` refuses stale installs at configure time.
 
 ## Direction
@@ -23,12 +23,12 @@ The repo is growing from a refreshed ps3dev/PSL1GHT baseline into a fuller SDK u
 |---|---|---|---|
 | GCC (PPU) | **12.4.0** | `powerpc64-ps3-elf` | PowerPC 64 cross-compiler for the PPE |
 | GCC (SPU) | **9.5.0** | `spu-elf` | Cross-compiler for the SPE's SPU cores + `libgcc` cache manager |
-| Binutils | **2.42** | both targets | Assembler, linker, `ar` / `objcopy` / `nm` / `strip` for both PPU and SPU; `spu-elf` ships upstream intact |
+| Binutils | **2.42** | both targets | Assembler, linker, `ar` / `objcopy` / `nm` / `strip` for both PPU and SPU; small PS3 patch series for each target (`patches/ppu/binutils-2.42`, `patches/spu/binutils-2.42`) |
 | Newlib | **4.4.0** | both targets | C standard library + PS3 `libsysbase` / `libgloss` lv2 syscall glue (CRT0, `_write_r` / `_sbrk_r` / `_read_r` etc.) |
 | GDB | **14.2** | PPU | Debugger for RPCS3's gdbstub and (eventually) real-hardware targets |
-| PSL1GHT (v3) | main | PPU + SPU runtime | Homebrew runtime rebased for the reference SDK-style naming; source-compat shim keeps PSL1GHT-targeted homebrew building |
-| portlibs | current stable | PPU | zlib 1.3.1, libpng 1.6.43, SDL2 2.30, libcurl 8.9, mbedTLS 3.6, etc. |
-| Tooling | in-tree | host | Rust CLIs for NID/FNID generation, stub-archive emission, coverage reports |
+| PSL1GHT (v3) | pinned `f649a08` | PPU + SPU runtime | Homebrew runtime rebased for the reference SDK-style naming; source-compat shim keeps PSL1GHT-targeted homebrew building |
+| portlibs | pinned per recipe | PPU | zlib 1.3.1, libpng 1.6.58, pixman 0.42.2, FreeType 2.13.2, cairo 1.16.0, libzip 1.11.4, tiny3d + libfont3d; ps3soundlib opt-in (`scripts/portlibs/`) |
+| Tooling | in-tree | host | `rsx-cg-compiler` (Cg vertex/fragment shader compiler); Rust tools for NID/FNID and stub archives, ABI checks, PRX/SPRX and SFO generation, coverage reports; `sprxlinker` |
 
 Toolchain-version rationale is in [docs/toolchain-design.md](docs/toolchain-design.md). Current upgrade work is tracked in [docs/roadmap.md](docs/roadmap.md). The detailed PPU ABI contract, including the ELF64+ILP32 default and LP64 multilib, is in [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md). POSIX threads (v0.12.0+) come from a pthread shim inside `librt.a` — where its semantics match hosted POSIX and where they deliberately differ is in [docs/sdk/pthreads.md](docs/sdk/pthreads.md).
 
@@ -36,11 +36,11 @@ Toolchain-version rationale is in [docs/toolchain-design.md](docs/toolchain-desi
 
 **Native Linux** is the primary build host. Any reasonably current distribution (`glibc` >= 2.31, GCC >= 11 on the host, Python 3, Rust 1.88+) works. Linux gives the cleanest GCC cross-build experience and matches CI. **Windows users should build inside WSL2** (Ubuntu 24.04 recommended; see [Windows (via WSL2)](#windows-via-wsl2) below); native MSYS2 is not a supported bootstrap path. macOS is untested.
 
-The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are produced by cross-building from Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 toolchain.  This is a follow-up infra deliverable; the initial shipment is Linux-hosted only.
+The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are cross-built from Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 toolchain, and every release ships them in the Windows SDK zip.
 
 ## Using a prebuilt Windows release
 
-End users who don't need to build the toolchain from source can use `ps3-sdk-vX.Y.Z-windows-x86_64.zip` from the GitHub Releases page when a Windows release artifact is published. See [`docs/VERSIONING.md`](docs/VERSIONING.md) for release packaging. The archive is self-contained: it ships the `.exe` cross-compilers, the runtime libraries (PSL1GHT + our SDK), the CMake toolchain files + helper modules under `cmake\`, portlibs, and the `samples/` source tree.
+End users who don't need to build the toolchain from source can use `ps3-sdk-vX.Y.Z-windows-x86_64.zip` from the GitHub Releases page; every release attaches it. See [`docs/VERSIONING.md`](docs/VERSIONING.md) for release packaging. The archive is self-contained: it ships the `.exe` cross-compilers, the runtime libraries (PSL1GHT + our SDK), the CMake toolchain files + helper modules under `cmake\`, portlibs, and the `samples/` source tree.
 
 ### Install
 
@@ -487,7 +487,7 @@ source ./scripts/env.sh
 # stage/release/ps3-sdk-vX.Y.Z-windows-x86_64.zip ready to ship
 ```
 
-`build-host-tools-windows.sh` cross-compiles `make_self.exe`, `make_self_npdrm.exe`, `package_finalize.exe`, `fself.exe`, and `rsx-cg-compiler.exe` plus their static `zlib`/`gmp`/`openssl` deps from upstream tarballs — those land under `stage/host-tools-windows/bin/` and `package-windows-release.sh` picks them up automatically.  The Rust workspace (`nidgen.exe`/`abi-verify.exe`/`coverage-report.exe`) requires a `rustup`-managed Rust because Arch's `rust` package and Ubuntu apt's `rustc` ship only the host's std lib; install rustup (`pacman -S rustup` on Arch, `curl https://sh.rustup.rs | sh` elsewhere) then `rustup default stable && rustup target add x86_64-pc-windows-gnu` before re-running.  Without rustup, `build-host-tools-windows.sh` skips the Rust step gracefully — pull those `.exe`s from the CI `host-tools-windows-x86_64` artifact instead and pass it via `package-windows-release.sh --tools-zip=PATH`.
+`build-host-tools-windows.sh` cross-compiles `make_self.exe`, `make_self_npdrm.exe`, `package_finalize.exe`, `fself.exe`, `bin2s.exe`, `cgcomp.exe`, `sprxlinker.exe` and `rsx-cg-compiler.exe` plus their static `zlib`/`gmp`/`openssl` deps from upstream tarballs — those land under `stage/host-tools-windows/bin/` and `package-windows-release.sh` picks them up automatically.  The Rust workspace (every tool in `tools/Cargo.toml`, e.g. `nidgen.exe`, `abi-verify.exe`, `prx-gen.exe`) requires a `rustup`-managed Rust because Arch's `rust` package and Ubuntu apt's `rustc` ship only the host's std lib; install rustup (`pacman -S rustup` on Arch, `curl https://sh.rustup.rs | sh` elsewhere) then `rustup default stable && rustup target add x86_64-pc-windows-gnu` before re-running.  Without rustup, `build-host-tools-windows.sh` skips the Rust step gracefully — pull those `.exe`s from the CI `host-tools-windows-x86_64` artifact instead and pass it via `package-windows-release.sh --tools-zip=PATH`.
 
 ### Windows (via WSL2)
 
@@ -548,9 +548,9 @@ source ./scripts/env.sh
 ./scripts/build-sdk.sh
 ```
 
-Both toolchain build scripts accept `--only <step>` (binutils | gcc-newlib | gdb | symlinks) and `--clean` to wipe intermediates before rebuilding.
+Both toolchain build scripts accept `--only <step>` and `--clean` to wipe intermediates before rebuilding. The PPU steps are binutils, gcc-newlib, gdb and symlinks; the SPU steps are binutils, gcc-newlib, symlinks and linker-script.
 
-After a successful build, toolchain binaries live under `$PS3DEV/bin/` (aliased as `ppu-gcc`, `spu-gcc`, etc.).  The PSL1GHT runtime lands under `$PS3DEV/psl1ght/ppu/`; our own SDK headers and archives (e.g. `libgcm_cmd.a`, `libdbgfont.a`) land under `$PS3DEV/ps3dk/ppu/` next to it.
+After a successful build, toolchain binaries live under `$PS3DEV/bin/` (aliased as `ppu-gcc`, `spu-gcc`, etc.).  The PSL1GHT runtime and our own SDK headers and archives (e.g. `libgcm_cmd.a`, `libdbgfont.a`) both install into `$PS3DK` (`$PS3DEV/ps3dk/ppu/`).
 
 ### Verify the install
 
@@ -604,19 +604,19 @@ rpcs3 --no-gui hello-ppu-abi-check.self
 
 `samples/README.md` has the full sample index plus per-sample notes on what each one validates.
 
-### Optional: Rust tooling
+### Host tools
 
-The repo ships Rust CLIs under `tools/` that drive the stub-archive pipeline and the coverage report:
+The repo ships host tools under `tools/`; the Rust ones drive the stub-archive pipeline and the coverage report, among others:
 
 - `nidgen` — NID extraction from reference stub archives, stub-archive emission, FNID verification.
 - `coverage-report` — the reference SDK export set vs. our install tree coverage matrix → `docs/coverage.md`.
 
-A normal toolchain + SDK + sample build doesn't need them.  Build them when you want to regenerate stub archives for non-PSL1GHT-backed sysutil libraries, or rerun the coverage report:
+`scripts/build-sdk.sh` builds and installs all of them (the whole Rust workspace and rsx-cg-compiler) through `scripts/install-host-tools.sh` unless you pass `--no-host-tools`. To build the Rust tools on their own:
 
 ```bash
 cd tools
 cargo build --release
-# Binaries land in tools/target/release/{nidgen,coverage-report}
+# Binaries land in tools/target/release/
 ```
 
 Once `nidgen` is built, `scripts/build-cell-stub-archives.sh` produces the stub archives the declaration-only cell headers (libsysutil_screenshot, libsysutil_ap, libsysutil_music*, libl10n, …) need at link time:
@@ -631,7 +631,7 @@ Once `nidgen` is built, `scripts/build-cell-stub-archives.sh` produces the stub 
 
 PSL1GHT's NVIDIA-based `cgcomp` is still bundled **for now**, so older PSL1GHT project Makefiles that call it keep building unchanged (`ps3_add_cg_shader` in CMake still uses it too). In a future release it will no longer be installed by default: keeping it will take an explicit build flag, and without that flag it is left out.
 
-Known gaps are refused by name rather than compiled wrongly: `while`/`do`-`while` loops and `break` inside a run-time loop, run-time loops nested in run-time loops, constant-bound loops longer than 64 iterations, and a handful of very large community shaders that run out of fragment registers.
+Known gaps are refused by name rather than compiled wrongly: `while`/`do`-`while` loops, `break` inside a run-time loop other than a body ending in `if (c) break;`, run-time loops nested in run-time loops, constant-bound loops longer than 64 iterations, and a handful of very large community shaders that run out of fragment registers.
 
 To build it:
 
@@ -646,10 +646,9 @@ cmake --build tools/rsx-cg-compiler/build
 - `scripts/` — build orchestrators and environment setup
 - `src/` — vendored upstream and ps3dev sources (reproducible via `bootstrap.sh`; `.gitignored`)
 - `patches/` — rebased and new patches against upstream sources
-- `tools/` — Rust CLIs: `nidgen` (NID + stub-archive emit), `coverage-report`, `abi-verify`, `sprx-linker`; plus the C++ `rsx-cg-compiler`
-- `stage/ps3dev/` — the `$PS3DEV` install prefix (bin, ppu, spu, psl1ght, ps3dk, portlibs)
+- `tools/` — the Rust workspace (`nidgen`, `coverage-report`, `abi-verify`, `prx-gen`, `sfo`, `make-sdata`, `ovis`, `spu-elf-to-ppu-obj`), the C++ `rsx-cg-compiler` and the C `sprx-linker`
+- `stage/ps3dev/` — the `$PS3DEV` install prefix (bin, ppu, spu, ps3dk, portlibs)
 - `samples/` — tracked CMake sample projects across toolchain, GCM, audio, codec, sysutil, firmware helper, LV2, SPU, SPURS, and network categories
-- `ci/` — Docker images and GitHub Actions
 - `.github/workflows/` — CI (`ci.yml`) + tag-driven release (`release.yml`)
 - `docs/` — coverage matrix, ABI reference, toolchain design notes, roadmap, `VERSIONING.md`
 - `CHANGELOG.md` — release-by-release history (Keep a Changelog format)
@@ -659,8 +658,10 @@ cmake --build tools/rsx-cg-compiler/build
 The SDK ships a single version string sourced from the most recent
 `vMAJOR.MINOR.PATCH` git tag.  See `docs/VERSIONING.md` for the cut-a-release
 workflow and `CHANGELOG.md` for the release-by-release history.  Tagged
-releases are published on the GitHub Releases page; pre-release tarballs of
-the source tree and the Rust tools are attached automatically by CI.
+releases are published on the GitHub Releases page, with the Windows SDK zip,
+the Windows and Linux host-tools packages, the source tarball and the Linux
+`ps3dev-ppu` / `ps3dev-spu` toolchain tarballs (each with a `.sha256`)
+attached by CI.
 
 ## License
 
