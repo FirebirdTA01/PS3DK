@@ -18,7 +18,9 @@ SDK that PS3DK selects, the one the libraries come from, and no other;
 with PS3DK unset, the SDK installed with the compiler, found from the
 driver's lib/gcc/ (GCC_EXEC_PREFIX once moved, else the configured one)
 in both the packaged and the staged layout.  A directory
-counts only if it has sys/lv2_syscall.h.  PS3DK_NO_DEFAULT_INCLUDE (set
+counts only if it has sys/lv2_syscall.h; a PS3DK set to the empty
+string selects none.  The directory is escaped as literal spec text
+(white space, backslash, percent).  PS3DK_NO_DEFAULT_INCLUDE (set
 and not "0") turns it off for the toolchain's and the SDK's own builds.
 -isystem is the position the SDK's CMake toolchain already uses, so a
 build that also passes the same directory gets it once.
@@ -68,10 +70,10 @@ index addc86c..7e48529 100644
  #ifndef LINK_OS_NEW_DTAGS_SPEC
 diff --git a/gcc/config/rs6000/driver-cell64lv2.cc b/gcc/config/rs6000/driver-cell64lv2.cc
 new file mode 100755
-index 0000000..9a7344f
+index 0000000..af58888
 --- /dev/null
 +++ b/gcc/config/rs6000/driver-cell64lv2.cc
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,126 @@
 +/* Driver support for powerpc64-ps3-elf: the SDK include directory.
 +   Copyright (C) 2026 PS3DK toolchain contributors.
 +
@@ -108,9 +110,10 @@ index 0000000..9a7344f
 +  return found;
 +}
 +
-+/* The spec parser splits a function's result at white space and treats
-+   a backslash as "the next character is ordinary", so escape both: a
-+   directory with spaces, or a Windows path, stays one argument.  */
++/* The driver parses a function's result as spec text: white space
++   splits arguments, '%' starts a directive and a backslash makes the next
++   character ordinary.  Escape all three, so any directory (spaces, a
++   Windows path, a '%') comes through as one literal argument.  */
 +
 +static char *
 +ps3dk_spec_quote (const char *dir)
@@ -119,7 +122,7 @@ index 0000000..9a7344f
 +  char *p = out;
 +  for (; *dir; dir++)
 +    {
-+      if (*dir == ' ' || *dir == '\t' || *dir == '\\')
++      if (*dir == ' ' || *dir == '\t' || *dir == '\\' || *dir == '%')
 +	*p++ = '\\';
 +      *p++ = *dir;
 +    }
@@ -132,7 +135,8 @@ index 0000000..9a7344f
 +
 +   The libraries come from $PS3DK (LIB_LV2_SPEC), so when PS3DK is set
 +   the headers come from that same SDK, and from no other: an SDK without
-+   headers there gets no default directory rather than a different SDK's.
++   headers there, or a PS3DK set to the empty string, gets no default
++   directory rather than a different SDK's.
 +   With PS3DK unset (compiling only; linking needs PS3DK), use the SDK
 +   installed with this compiler.  Its lib/gcc/ is GCC_EXEC_PREFIX once
 +   the toolchain has been moved, else the configured one, so the packaged
@@ -155,8 +159,10 @@ index 0000000..9a7344f
 +
 +  char *dir = NULL;
 +  const char *sdk = getenv ("PS3DK");
-+  if (sdk && *sdk)
++  if (sdk)
 +    {
++      if (!*sdk)
++	return NULL;
 +      dir = concat (sdk, "/ppu/include", NULL);
 +      if (!ps3dk_include_dir_p (dir))
 +	{

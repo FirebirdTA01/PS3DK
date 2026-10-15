@@ -5,13 +5,17 @@
 # declarations as errors, as GCC 14+ makes them:
 #
 #  1. PS3DK unset: the SDK installed with the compiler, ILP32 and LP64;
-#  2. PS3DK set: that SDK, and from a directory whose path has a space;
-#  3. PS3DK naming a directory without SDK headers: no fallback to the
-#     installed SDK (the control compile fails);
+#  2. PS3DK set: that SDK, and from directories whose paths hold a space,
+#     "%s" and "% " (the driver parses the directory as spec text);
+#  3. PS3DK naming a directory without SDK headers, or set to the empty
+#     string: no fallback to the installed SDK (the control compile fails);
 #  4. PS3DK_NO_DEFAULT_INCLUDE=1 drops it (fails), =0 keeps it;
 #  5. -nostdinc drops it (the search list does not name it);
 #  6. an explicit -isystem of the same directory leaves it in the search
 #     list once.
+#
+# The sched_* priority functions need the SDK's sched.h wrapper
+# (qwen/t_a2644ed1-sched, 9d622bb0): run against an SDK that has it.
 #
 # usage: sdk-default-include-test.sh [--ppu-gcc <powerpc64-ps3-elf-gcc> --sdk <PS3DK root>]
 #   <PS3DK root> holds ppu/include (the packaged $PS3DK, or staged $PS3DEV/ps3dk).
@@ -103,10 +107,17 @@ mkdir -p "$work/sdk with space/ppu"
 ln -s "$inc" "$work/sdk with space/ppu/include"
 compiles "PS3DK path with a space" pass PS3DK="$work/sdk with space" --
 n=$(times_listed PS3DK="$work/sdk with space" --); [ "$n" = 1 ] && ok "PS3DK with a space: SDK directory listed once" || fail "PS3DK with a space: listed $n times"
+for name in "sdk %s" "sdk % x"; do
+    mkdir -p "$work/$name/ppu"
+    ln -s "$inc" "$work/$name/ppu/include"
+    compiles "PS3DK path with '$name'" pass PS3DK="$work/$name" --
+    n=$(times_listed PS3DK="$work/$name" --); [ "$n" = 1 ] && ok "PS3DK '$name': SDK directory listed once" || fail "PS3DK '$name': listed $n times"
+done
 
 # 3. a PS3DK without headers selects nothing
 mkdir -p "$work/empty/ppu/include"
 compiles "PS3DK without SDK headers (control)" fail PS3DK="$work/empty" --
+compiles "PS3DK set to the empty string (control)" fail PS3DK= --
 
 # 4. the opt-out
 compiles "PS3DK_NO_DEFAULT_INCLUDE=1 (control)" fail PS3DK_NO_DEFAULT_INCLUDE=1 --
