@@ -56,7 +56,25 @@ vector float lde_const (void) { return vec_lde (0, (float *) 0x80000004u); }
 void ste_const (vector float v) { vec_ste (v, 0, (float *) 0x80000004u); }
 EOF
 
+# zext_const <body>: the constant reaching the access is built as li R,<n >= 0> then oris R,R,0x8000.  li of a
+# non-negative immediate leaves bits 63:16 zero and oris does not sign-extend, so the register holds 0x8000xxxx with
+# a zero high word.  (lis R,0x8000 sign-extends to 0xffffffff80000000 and does not count.)
+zext_const() {
+    printf '%s\n' "$1" | tr -d '\r' | tr '\n' ';' |
+        grep -Eq '(^|;)[[:space:]]*li ([0-9]+),[0-9]+;([^;]*;)*[[:space:]]*oris \2,\2,0x8000;'
+}
+
 status=0
+# The checker's own controls: GCC 16's li/oris build is accepted; a sign-extending lis, a negative li, and an oris
+# into another register are not.
+if zext_const $'\tli 9,4\n\toris 9,9,0x8000\n\tlvsl 0,0,9' &&
+   ! zext_const $'\tlis 9,0x8000\n\tori 9,9,4\n\tlvsl 0,0,9' &&
+   ! zext_const $'\tli 9,-4\n\toris 9,9,0x8000\n\tlvsl 0,0,9' &&
+   ! zext_const $'\tli 9,4\n\toris 10,9,0x8000\n\tlvsl 0,0,10'; then
+    echo "altivec-builtin-address: ok   zero-extended-constant checker separates its controls"
+else
+    echo "altivec-builtin-address: FAIL zero-extended-constant checker does not separate its controls"; status=1
+fi
 for model in "" -mlp64; do
     for opt in -O0 -O2; do
         if "$cc" ${EXTRA_CFLAGS:-} -mcpu=cell -maltivec $model $opt -S "$work/vb.c" -o "$work/vb.s" 2> "$work/err.txt"; then
@@ -86,10 +104,12 @@ for model in "" -mlp64; do
             fi
         done
         # A high-bit constant pointer is a 32-bit address: it must be cleared
-        # to 0x80000004, not reach the access as 0xffffffff80000004.
+        # to 0x80000004, not reach the access as 0xffffffff80000004.  Either
+        # an explicit clear, or a build that never sets the high word (GCC 16:
+        # li R,<non-negative> then oris R,R,0x8000; see zext_const).
         for fn in lvsl_const lde_const ste_const; do
             body=$(sed -n "/^\.L\.$fn:/,/blr/p" "$work/vb.s")
-            if echo "$body" | grep -qE 'rldicl [0-9]+,[0-9]+,0,32|clrldi [0-9]+,[0-9]+,32'; then
+            if echo "$body" | grep -qE 'rldicl [0-9]+,[0-9]+,0,32|clrldi [0-9]+,[0-9]+,32' || zext_const "$body"; then
                 echo "altivec-builtin-address: ok   ILP32 $opt $fn constant pointer is zero-extended"
             else
                 echo "altivec-builtin-address: FAIL ILP32 $opt $fn constant pointer not zero-extended"; echo "$body"; status=1

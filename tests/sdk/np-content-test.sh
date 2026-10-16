@@ -73,8 +73,16 @@ mkdir -p "$work/bad"; cp -r "$work/ov/." "$work/bad/"
 sed 's/sceNpTusDestroyTitleCtx(titleCtxId)$/sceNpTusDestroyTitleCtxX(titleCtxId)/' "$inc/cell/np/tus.h" > "$work/bad/cell/np/tus.h"
 if cmp -s "$inc/cell/np/tus.h" "$work/bad/cell/np/tus.h"; then
     echo "np-content: FAIL self-check could not plant the bad alias"; status=1
-elif "$cc" -std=gnu99 -I"$work/bad" -I"$sdk/ppu/include" -c "$src" -o "$work/b.o" 2>/dev/null &&
-     ! "$cc" "$work/b.o" -o "$work/b.elf" -L"$sdk/ppu/lib" $LIBS > "$work/b.err" 2>&1 &&
+elif ! "$cc" -std=gnu99 -I"$work/bad" -I"$sdk/ppu/include" -c "$src" -o "$work/b.o" 2> "$work/b.cerr"; then
+    # GCC 14+ makes the undeclared call an error, so the bad alias is caught when compiling; it must still be the
+    # planted name that is reported.
+    if grep -q "sceNpTusDestroyTitleCtxX" "$work/b.cerr"; then
+        echo "np-content: ok   self-check: an alias to a missing function fails the compile"
+    else
+        echo "np-content: FAIL self-check: the bad-alias compile failed for another reason"
+        head -5 "$work/b.cerr" | sed 's/^/    /'; status=1
+    fi
+elif ! "$cc" "$work/b.o" -o "$work/b.elf" -L"$sdk/ppu/lib" $LIBS > "$work/b.err" 2>&1 &&
      grep -q "sceNpTusDestroyTitleCtxX" "$work/b.err"; then
     echo "np-content: ok   self-check: an alias to a missing export fails the link"
 else

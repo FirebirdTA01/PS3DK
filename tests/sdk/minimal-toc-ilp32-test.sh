@@ -97,16 +97,34 @@ done
 # Windows-hosted compiler writes CRLF assembly; the check strips CR.
 whole_value() {
     grep -Eq '^[[:space:]]*\.quad[[:space:]]+(0x123456789abcdef0|1311768467463790320)[[:space:]]*$' "$1" && return 0
-    tr -d '\r' < "$1" | tr '\n' ';' | grep -Eq 'lis ([0-9]+),0x1234;([^;]*;)*[[:space:]]*ori \1,\1,0x5678;([^;]*;)*[[:space:]]*sldi \1,\1,32;([^;]*;)*[[:space:]]*oris \1,\1,0x9abc;([^;]*;)*[[:space:]]*ori \1,\1,0xdef0;'
+    tr -d '\r' < "$1" | tr '\n' ';' | grep -Eq 'lis ([0-9]+),0x1234;([^;]*;)*[[:space:]]*ori \1,\1,0x5678;([^;]*;)*[[:space:]]*sldi \1,\1,32;([^;]*;)*[[:space:]]*oris \1,\1,0x9abc;([^;]*;)*[[:space:]]*ori \1,\1,0xdef0;' && return 0
+    split_halves "$1"
+}
+# split_halves <file>: GCC 16 builds the two words in two registers and joins them: rldimi A,B,32,0 inserts B's
+# low word as A's high word, keeping A's low word.  A must be lis 0x9abc + ori 0xdef0 (the low word; the sign
+# extension of lis lands in the high word, which rldimi replaces), B lis 0x1234 + ori 0x5678 (the high word).
+split_halves() {
+    local text a b
+    text=$(tr -d '\r' < "$1")
+    while read -r a b; do
+        grep -Eq "^[[:space:]]*lis $a,0x9abc$" <<< "$text" && grep -Eq "^[[:space:]]*ori $a,$a,0xdef0$" <<< "$text" &&
+            grep -Eq "^[[:space:]]*lis $b,0x1234$" <<< "$text" && grep -Eq "^[[:space:]]*ori $b,$b,0x5678$" <<< "$text" &&
+            return 0
+    done < <(sed -nE 's/^[[:space:]]*rldimi ([0-9]+),([0-9]+),32,0$/\1 \2/p' <<< "$text")
+    return 1
 }
 printf '\t.long\t0x123456789abcdef0\n' > "$work/neg-long.s"
 printf '\tlis 3,0x1234\n\tori 3,3,0x5678\n\toris 3,3,0x9abc\n\tori 3,3,0xdef0\n' > "$work/neg-nosldi.s"
 printf '\tlis 3,0x1234\n\tori 4,4,0x5678\n\tsldi 3,3,32\n\toris 3,3,0x9abc\n\tori 3,3,0xdef0\n' > "$work/neg-tworegs.s"
 printf '\tlis 3,0x1234\r\n\tori 3,3,0x5678\r\n\tsldi 3,3,32\r\n\toris 3,3,0x9abc\r\n\tori 3,3,0xdef0\r\n' > "$work/pos-inline.s"
 printf '.LC0:\n\t.quad\t1311768467463790320\n' > "$work/pos-quad.s"
+printf '\tlis 3,0x9abc\n\tlis 9,0x1234\n\tori 3,3,0xdef0\n\tori 9,9,0x5678\n\trldimi 3,9,32,0\n' > "$work/pos-split.s"
+printf '\tlis 3,0x9abc\n\tlis 9,0x1234\n\tori 3,3,0xdef0\n\tori 9,9,0x5678\n\trldimi 3,9,16,0\n' > "$work/neg-split-shift.s"
+printf '\tlis 3,0x1234\n\tlis 9,0x9abc\n\tori 3,3,0x5678\n\tori 9,9,0xdef0\n\trldimi 3,9,32,0\n' > "$work/neg-split-swapped.s"
 if whole_value "$work/pos-inline.s" && whole_value "$work/pos-quad.s" && ! whole_value "$work/neg-long.s" &&
-   ! whole_value "$work/neg-nosldi.s" && ! whole_value "$work/neg-tworegs.s"; then
-    ok "64-bit value checker: inline and .quad accepted; .long, a missing sldi and a register change refused"
+   ! whole_value "$work/neg-nosldi.s" && ! whole_value "$work/neg-tworegs.s" &&
+   whole_value "$work/pos-split.s" && ! whole_value "$work/neg-split-shift.s" && ! whole_value "$work/neg-split-swapped.s"; then
+    ok "64-bit value checker: inline, split-halves (rldimi) and .quad accepted; .long, a missing sldi, a register change, a wrong rldimi shift and swapped halves refused"
 else
     fail "64-bit value checker does not separate its controls"
 fi
