@@ -539,6 +539,7 @@ HEADERS := \
     include/rsx/commands_inc.h \
     include/rsx/gcm_sys.h \
     include/rsx/mm.h \
+    include/rsx/ps3tc_mm_lasterror.h \
     include/rsx/nv40.h \
     include/rsx/resc.h \
     include/rsx/rsx.h \
