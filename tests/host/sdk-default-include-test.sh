@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # The PPU driver puts the SDK include directory on the default path
-# (patches/ppu/gcc-16.x/0068, t_d2b6fe51).  A C file that includes only
-# <pthread.h>, <time.h> and <sched.h> must compile with implicit
-# declarations as errors, as GCC 14+ makes them:
+# (patches/ppu/gcc-16.x/0068, t_d2b6fe51).  A C file that includes
+# <pthread.h>, <time.h>, <sched.h> and the SDK-only <sys/ppu_thread.h> must
+# compile with implicit declarations as errors, as GCC 14+ makes them.
+# <sys/ppu_thread.h> is what makes the controls below fail without the SDK
+# directory: since newlib 0018 (the GCC 16 thread layer) newlib declares the
+# lv2 pthread/time/sched functions itself, so those three alone resolve
+# without it.
 #
 #  1. PS3DK unset: the SDK installed with the compiler, ILP32 and LP64;
 #  2. PS3DK set: that SDK, and from directories whose paths hold a space,
@@ -14,8 +18,8 @@
 #  6. an explicit -isystem of the same directory leaves it in the search
 #     list once.
 #
-# The sched_* priority functions need the SDK's sched.h wrapper
-# (qwen/t_a2644ed1-sched, 9d622bb0): run against an SDK that has it.
+# Run against an SDK that has <sys/ppu_thread.h> and, for a newlib without
+# 0018, the sched.h wrapper (qwen/t_a2644ed1-sched, 9d622bb0).
 #
 # usage: sdk-default-include-test.sh [--ppu-gcc <powerpc64-ps3-elf-gcc> --sdk <PS3DK root>]
 #   <PS3DK root> holds ppu/include (the packaged $PS3DK, or staged $PS3DEV/ps3dk).
@@ -54,15 +58,18 @@ cat > "$work/t.c" <<'EOF'
 #include <pthread.h>
 #include <sched.h>
 #include <time.h>
+#include <sys/ppu_thread.h>
 static void *run(void *a) { return a; }
 int f(void)
 {
     pthread_t t;
+    sys_ppu_thread_t self;
     struct timespec ts = { 0, 1000 };
     if (pthread_create(&t, 0, run, 0) != 0)
         return -1;
     nanosleep(&ts, 0);
     clock_gettime(CLOCK_MONOTONIC, &ts);
+    sys_ppu_thread_get_id(&self);
     return sched_get_priority_min(SCHED_OTHER) + sched_get_priority_max(SCHED_OTHER);
 }
 EOF
