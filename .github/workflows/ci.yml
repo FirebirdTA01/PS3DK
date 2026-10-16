@@ -303,6 +303,17 @@ jobs:
       - name: Test the packed-argument address scanner
         run: bash tests/sdk/ppu-packed-arg-scan-test.sh
 
+      # Skip without PS3DEV; header salvage from the 2026-10-16 branch audit:
+      # libnetctl.h and netinet/in.h in any order, the PRX record types and
+      # SYS_SPU_QUEUE, and the SDK-owned sys/tty.h + sys/interrupt.h (ILP32
+      # pointers reach the system call zero-extended).
+      - name: Test struct in_addr across libnetctl.h and netinet/in.h orders
+        run: bash tests/sdk/in-addr-order-test.sh
+      - name: Test the PRX record types and event queue type constants
+        run: bash tests/sdk/sys-prx-records-test.sh
+      - name: Test the SDK-owned sys/tty.h and sys/interrupt.h
+        run: bash tests/sdk/sys-tty-interrupt-test.sh
+
       # Skips without PS3DEV; ld's TOC edit must write a zero pad word, not
       # heap bytes, after an odd-size ILP32 .toc (binutils patch 0007).
       - name: Test the TOC edit pads an odd-size .toc with zeros
