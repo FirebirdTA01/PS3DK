@@ -324,6 +324,30 @@ else
     find "$ROOT" -type l 2>/dev/null | head -10 | sed 's/^/          /'
 fi
 
+# ---------------------------------------------------------------------------
+# 6. No build outputs among the shipped sources.  samples/ and tests/ ship as
+#    SOURCE: ps3_add_self writes its .elf/.self next to the CMakeLists.txt, so
+#    packaging from a tree in which samples or rows were built carries those
+#    outputs into the zip.  A 2026-10-16 GCC 16 packaging dry run shipped 28
+#    prebuilt .fake.self files that way; a user's build then looks fresh but
+#    may not be.  Release CI packages a clean checkout; this catches a package
+#    cut from anything else.
+# ---------------------------------------------------------------------------
+echo "-- no build outputs under samples/ and tests/ --"
+outputs=()
+for top in samples tests; do
+    [[ -d "$ROOT/$top" ]] || continue
+    while IFS= read -r f; do outputs+=("${f#"$ROOT"/}"); done < <(
+        find "$ROOT/$top" \( -type f \( -name '*.self' -o -name '*.elf' -o -name '*.sprx' -o -name '*.prx' \
+             -o -name 'CMakeCache.txt' -o -name 'build.ninja' \) \) -o \( -type d -name CMakeFiles \) 2>/dev/null | sort)
+done
+if [[ ${#outputs[@]} -eq 0 ]]; then
+    ok "no .self/.elf/.sprx/.prx or CMake build files under samples/ and tests/"
+else
+    bad "${#outputs[@]} build output(s) under samples/ or tests/ -- package from a clean checkout"
+    printf '          %s\n' "${outputs[@]:0:10}"
+fi
+
 echo
 if [[ $fail -eq 0 ]]; then
     echo "RELEASE TREE OK"

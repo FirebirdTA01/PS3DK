@@ -311,6 +311,11 @@ jobs:
       - name: Test the GCC 16 patch series against its port map
         run: bash tests/host/gcc16-series-test.sh
 
+      # check-release-tree.sh refuses .self/.elf/.sprx/.prx and CMake build
+      # files under samples/ and tests/: a package ships them as source.
+      - name: Test the release-tree guard against shipped build outputs
+        run: bash tests/host/release-tree-build-outputs-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class
