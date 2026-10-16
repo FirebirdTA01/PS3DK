@@ -132,12 +132,36 @@ require_gcc_major() {
         || die "$2 $1 holds GCC $ver; refusing to build GCC $GCC_VER with it. Point PS3DEV at a separate prefix."
 }
 
+# require_cross_prefix_major <prefix>: a Windows-hosted (--host) prefix holds
+# .exe files this Linux build host cannot run, so its GCC major comes from the
+# install metadata this script writes there (<prefix>/.ps3dk-gcc-version,
+# before installing the compiler).  Fail closed: a prefix holding a compiler
+# (gcc or gcc.exe) without readable, well-formed metadata is of unknown version
+# and refused, as is one whose metadata names another major.  A prefix with no
+# compiler (empty, or binutils only) is accepted.
+require_cross_prefix_major() {
+    local p=$1 meta="$1/.ps3dk-gcc-version" gcc="$1/bin/$TARGET-gcc" ver=""
+    if [[ ! -e "$gcc" && ! -L "$gcc" && ! -e "$gcc.exe" && ! -L "$gcc.exe" ]]; then
+        return 0
+    fi
+    [[ -e "$meta" ]] \
+        || die "cross prefix $p holds a compiler but no $meta (unknown GCC version); refusing to build GCC $GCC_VER there. Remove that prefix or point PS3DEV elsewhere."
+    { [[ -r "$meta" ]] && ver=$(head -n 1 "$meta"); } 2>/dev/null \
+        || die "cross prefix $p: $meta cannot be read; refusing to build GCC $GCC_VER there."
+    [[ "$ver" =~ ^[0-9]+(\.[0-9]+)*$ ]] \
+        || die "cross prefix $p: $meta holds '$ver', not a GCC version; refusing to build GCC $GCC_VER there."
+    [[ "${ver%%.*}" == "${GCC_VER%%.*}" ]] \
+        || die "cross prefix $p holds GCC $ver (per $meta); refusing to build GCC $GCC_VER with it. Point PS3DEV at a separate prefix."
+}
+
 # Never build one GCC major version over another (stage 2: GCC 16 is built
 # beside 12.4, not over it).  A cross build also copies the native prefix's
 # target libraries into its package, so the native compiler must match too.
-require_gcc_major "$PREFIX" "prefix"
 if [[ -n "$HOST_TRIPLE" ]]; then
+    require_cross_prefix_major "$PREFIX"
     require_gcc_major "$NATIVE_PREFIX" "native prefix"
+else
+    require_gcc_major "$PREFIX" "prefix"
 fi
 
 if [[ -n "$PRINT_CONFIG" ]]; then
@@ -545,6 +569,10 @@ build_gcc_newlib() {
         say "Building GCC host-only (~15-30 minutes)"
         (cd "$obj" && make -j"$JOBS" all-host)
         say "Installing GCC host-only"
+        # The cross prefix's version metadata (require_cross_prefix_major) is
+        # written first, so an interrupted install still names its major.
+        mkdir -p "$PREFIX"
+        echo "$GCC_VER" > "$PREFIX/.ps3dk-gcc-version"
         (cd "$obj" && make install-host)
         copy_target_libs_from_native "$threads_mode"
     else

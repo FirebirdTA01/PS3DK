@@ -6,7 +6,10 @@
 #  2. --gcc=16 selects releases/gcc-16.1.0, gcc-16.x, no host -std pin and its own build
 #     dir ppu-gcc16, with the same prefix rule ($PS3DEV/ppu);
 #  3. --gcc=13 is refused, naming the supported values;
-#  4. --gcc=16 --host=... is refused (the Windows-hosted build stays on 12.4);
+#  4. --gcc=16 --host=... is accepted over a matching native GCC 16 (build dir ppu-gcc16-<host>, no host -std pin),
+#     refused without a native compiler; 12.4's --host keeps ppu-<host> and gnu++11.  The cross prefix's GCC major
+#     comes from its install metadata (.ps3dk-gcc-version), fail closed: another major, missing, malformed or
+#     unreadable metadata beside a gcc or gcc.exe is refused; matching metadata, or no compiler at all, is accepted;
 #  5. a prefix holding GCC 12 refuses --gcc=16, and one holding GCC 16 refuses
 #     the default, both exiting 1; a prefix holding the same major is accepted;
 #  6. --clean with --print-config removes nothing (the clean happens after the
@@ -64,13 +67,6 @@ else
     fail "--gcc=13: exit $rc"; sed 's/^/    /' "$work/out"
 fi
 
-run "$dev" --gcc=16 --host=x86_64-w64-mingw32 --print-config
-if [ $rc -eq 1 ] && grep -q "not yet supported with --host" "$work/out"; then
-    ok "--gcc=16 with --host is refused"
-else
-    fail "--gcc=16 --host: exit $rc"; sed 's/^/    /' "$work/out"
-fi
-
 # A prefix whose gcc reports a given version.
 fake() {
     mkdir -p "$1/ppu/bin"
@@ -79,6 +75,65 @@ fake() {
 }
 fake "$work/p12" 12.4.0
 fake "$work/p16" 16.1.0
+
+# 4. The Windows-hosted (--host) build: GCC 16 is accepted over a matching native GCC 16, in its own build dir
+#    ppu-gcc16-<host>, while 12.4's cross build keeps ppu-<host>; without a native compiler it is still refused.
+run "$dev" --gcc=16 --host=x86_64-w64-mingw32 --print-config
+if [ $rc -eq 1 ] && grep -q "Native PPU toolchain not present" "$work/out"; then
+    ok "--gcc=16 --host with no native compiler is refused"
+else
+    fail "--gcc=16 --host with no native compiler: exit $rc"; sed 's/^/    /' "$work/out"
+fi
+run "$work/p16" --gcc=16 --host=x86_64-w64-mingw32 --print-config
+if [ $rc -eq 0 ] && expect cross16 build "$work/build/ppu-gcc16-x86_64-w64-mingw32" \
+   && expect cross16 prefix "$work/p16.win/ppu" && expect cross16 gcc_ver 16.1.0 && expect cross16 host_cxx_std ""; then
+    ok "--gcc=16 --host over a native GCC 16: accepted, build dir ppu-gcc16-x86_64-w64-mingw32, prefix .win/ppu"
+else
+    [ $rc -eq 0 ] || { fail "--gcc=16 --host over a native GCC 16: exit $rc"; sed 's/^/    /' "$work/out"; }
+fi
+run "$work/p12" --host=x86_64-w64-mingw32 --print-config
+if [ $rc -eq 0 ] && expect cross12 build "$work/build/ppu-x86_64-w64-mingw32" && expect cross12 gcc_ver 12.4.0 \
+   && expect cross12 host_cxx_std gnu++11; then
+    ok "12.4 --host unchanged: build dir ppu-x86_64-w64-mingw32, gnu++11"
+else
+    [ $rc -eq 0 ] || { fail "12.4 --host: exit $rc"; sed 's/^/    /' "$work/out"; }
+fi
+
+# 4b. The cross prefix (<PS3DEV>.win/ppu) holds .exe files the build host cannot run: its GCC major comes from the
+#     install metadata .ps3dk-gcc-version, fail closed.  win <dir> <gcc file name|-> <metadata|-|unreadable>
+win() {
+    local d=$1 name=$2 meta=$3
+    rm -rf "$d.win"; mkdir -p "$d.win/ppu/bin"
+    [ "$name" != - ] && printf 'not runnable here\n' > "$d.win/ppu/bin/$name"
+    case $meta in
+        -) ;;
+        unreadable) echo 16.1.0 > "$d.win/ppu/.ps3dk-gcc-version"; chmod 000 "$d.win/ppu/.ps3dk-gcc-version" ;;
+        *) printf '%s\n' "$meta" > "$d.win/ppu/.ps3dk-gcc-version" ;;
+    esac
+}
+cross() { # <label> <gcc name> <metadata> <want rc> <want message|->
+    win "$work/p16" "$2" "$3"
+    run "$work/p16" --gcc=16 --host=x86_64-w64-mingw32 --print-config
+    if [ $rc -eq "$4" ] && { [ "$5" = - ] || grep -q -- "$5" "$work/out"; }; then
+        ok "cross prefix, $1: exit $rc"
+    else
+        fail "cross prefix, $1: exit $rc, want $4${5:+ with '$5'}"; sed 's/^/    /' "$work/out"
+    fi
+}
+cross "gcc.exe with 12.4.0 metadata, --gcc=16"        powerpc64-ps3-elf-gcc.exe 12.4.0  1 "holds GCC 12.4.0 (per"
+cross "extensionless gcc with 12.4.0 metadata"         powerpc64-ps3-elf-gcc     12.4.0  1 "holds GCC 12.4.0 (per"
+cross "gcc.exe with 16.1.0 metadata (matching)"        powerpc64-ps3-elf-gcc.exe 16.1.0  0 -
+cross "gcc.exe without metadata (unknown)"             powerpc64-ps3-elf-gcc.exe -       1 "unknown GCC version"
+cross "gcc.exe with malformed metadata"                powerpc64-ps3-elf-gcc.exe banana  1 "not a GCC version"
+cross "gcc.exe with empty metadata"                    powerpc64-ps3-elf-gcc.exe ""      1 "not a GCC version"
+cross "no compiler, binutils only, no metadata"        powerpc64-ps3-elf-as.exe  -       0 -
+win "$work/p16" powerpc64-ps3-elf-gcc.exe unreadable
+if [ -r "$work/p16.win/ppu/.ps3dk-gcc-version" ]; then
+    echo "ppu-gcc-select: skip unreadable metadata: chmod 000 still readable here (root, or Git Bash); runs on Linux CI"
+else
+    cross "gcc.exe with unreadable metadata"           powerpc64-ps3-elf-gcc.exe unreadable 1 "cannot be read"
+fi
+chmod 644 "$work/p16.win/ppu/.ps3dk-gcc-version" 2>/dev/null; rm -rf "$work/p16.win"
 run "$work/p12" --gcc=16 --print-config
 if [ $rc -eq 1 ] && grep -q "holds GCC 12.4.0; refusing to build GCC 16.1.0" "$work/out"; then
     ok "a GCC 12 prefix refuses --gcc=16"
