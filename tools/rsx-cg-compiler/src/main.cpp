@@ -583,6 +583,13 @@ int main(int argc, char** argv)
                 DeadCodeElimination dce(false);
                 while (dce.runOnFunction(*fn)) {}
             }
+            const std::string matrixGap = rsx_cg::unsupportedVaryingMatrixInput(*fn);
+            if (!matrixGap.empty())
+            {
+                std::fprintf(stderr, "nv40-general: %s (vp-varying-matrix-input); refusing rather than reading the wrong attributes\n",
+                             matrixGap.c_str());
+                return 1;
+            }
             rsx_cg::bindImplicitAttributes(*fn);
         }
     }

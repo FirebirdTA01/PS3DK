@@ -2056,6 +2056,36 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             }
         }
 
+        // Keep declaration shape independently of the reflection member
+        // list below: one unmodelled member clears that list, but must not
+        // hide matrix rows or an implicit input from the vertex guard.
+        if (currentFunction_->isEntryPoint && module_->shaderStage == ShaderStage::Vertex &&
+            param->storage != StorageQualifier::Uniform && param->storage != StorageQualifier::Out)
+        {
+            auto shape = [&](auto& self, TypeNode* type, const Semantic& sem,
+                             const std::string& path) -> void {
+                if (!type || type->isSampler()) return;
+                if (const auto* fields = getStructFields(type))
+                {
+                    for (const auto& field : *fields)
+                    {
+                        if (field.storage == StorageQualifier::Uniform) continue;
+                        self(self, field.type.get(), field.semantic,
+                             path.empty() ? field.name : path + "." + field.name);
+                    }
+                    return;
+                }
+                const bool implicit = sem.inferred || sem.isEmpty();
+                irParam.hasImplicitVaryingInput |= implicit;
+                if (getIRType(type).isMatrix())
+                {
+                    irParam.varyingMatrixPaths.push_back(path);
+                    irParam.hasImplicitVaryingMatrix |= implicit;
+                }
+            };
+            shape(shape, param->type.get(), param->semantic, "");
+        }
+
         // A varying struct parameter's members, in struct order, for the
         // parameter table: the reference declares each one whether the
         // shader reads it or not (measured: an unread `float4 Color : COLOR`

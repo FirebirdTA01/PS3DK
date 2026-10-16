@@ -512,6 +512,12 @@ struct IRParameter
     // IRInputMember).  Empty when the struct holds a member shape this list
     // does not model; the containers then list only the loaded members.
     std::vector<IRInputMember> inputMembers;
+    // Declaration shape for the vertex-input guard. Unlike inputMembers,
+    // this survives an unmodelled aggregate (notably a matrix member).
+    // Empty path denotes a bare matrix parameter; other paths are members.
+    std::vector<std::string> varyingMatrixPaths;
+    bool hasImplicitVaryingInput = false;
+    bool hasImplicitVaryingMatrix = false;
     // A `: TEXUNITn` on a struct entry parameter (measured: mdapt's
     // `prev PASSPREV4 : TEXUNIT1`): every member's record carries this
     // spelling as its semantic, its sampler members bind to unit n, and its
