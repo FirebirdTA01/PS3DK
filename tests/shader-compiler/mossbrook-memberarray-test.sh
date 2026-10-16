@@ -87,6 +87,37 @@ accept() {  # <stem> <what>
     echo "  accept ok: $*"
 }
 
+# value_rows <stem> <what> <out-lanes> "<IN=v,v,v,v ...> => <v,...>"...
+# Runs our container through fp_eval and requires the reference's values; an
+# instruction the evaluator does not model is UNJUDGED, and that fails too.
+value_rows() {
+    local stem="$1" what="$2" lanes="$3"; shift 3
+    "$python" - "$repo_root/tests/shader-compiler" "$work/$stem.fpo" "$lanes" "$@" <<'EVAL' \
+        || fail "$what: the program does not compute the reference's values (above)"
+import sys
+sys.path.insert(0, sys.argv[1])
+import fp_eval
+blob = open(sys.argv[2], "rb").read()
+lanes = tuple(int(x) for x in sys.argv[3].split(","))
+bad = 0
+for row in sys.argv[4:]:
+    ins, want = row.split("=>")
+    inputs = {k: [float(v) for v in vals.split(",")] for k, vals in (t.split("=") for t in ins.split())}
+    want = [float(v) for v in want.split(",")]
+    try:
+        got = fp_eval.evaluate(blob, inputs, out_lanes=lanes)
+    except fp_eval.Unmodelled as e:
+        print("  UNJUDGED %s: %s" % (ins.strip(), e))
+        bad += 1
+        continue
+    if got != want:
+        print("  WRONG %s: got %s, reference %s" % (ins.strip(), got, want))
+        bad += 1
+sys.exit(1 if bad else 0)
+EVAL
+    echo "  value ok: $what ($# input rows, reference values)"
+}
+
 # ---------------------------------------------------------------------------
 # (b) array-bearing struct copy — byte-pinned against the reference.
 # Reference (measured with sce-cgc 475, sce_fp_rsx):
@@ -110,6 +141,8 @@ insns_b=$(grep -cE '^[0-9]+ ' "$work/b.u" || true)
 grep -qE '^0 MOV dst=R0 mask=xy .* s0=TEX0\.xyxx' "$work/b.u" \
     || fail "repro b: instruction did not match reference MOVR o[COLR].xy f[TEX0].xy — got: $(sed -n '2p' "$work/b.u" | cut -c1-100)"
 echo "  byte-pin ok: repro b ucode matches reference (1 insn, MOVR R0.xy <- TEX0.xy)"
+value_rows b_member_array_storage_copy "repro b" 0,1 \
+    "TEX0=0.25,0.75,-0.5,0.125 => 0.25,0.75"
 
 # ---------------------------------------------------------------------------
 # (a) scalar-vector broadcast into a member-array element — shape assertion.
@@ -164,6 +197,17 @@ grep -qE '^[0-9]+ .* s[01]=c[0-9]+' "$work/a.u" \
     || fail "repro a: no inline constant (0.5 test or 1.0/-1.0 store) is used"
 echo "  shape ok: repro a ucode has $insns_a insns (SGT test + R0 terminal + TEX0 input + c0 const source); parity to the 4-insn reference is tracked separately"
 
+# VALUE, not shape: run our program through fp_eval on inputs either side of the
+# `flags > 0.5` test, the boundary itself included (0.5 must keep +1: SGT, not SGE).
+# Expected values are the reference's: its own container, run through the same
+# evaluator (sce-cgc 475, 2026-10-16), gives exactly these.
+value_rows a_scalarvec_broadcast_in_memberarray "repro a" 0,1 \
+    "TEX0=0.25,0.75,0,0 TEX1=0,0,0,0 => 1,1" \
+    "TEX0=0.25,0.75,0,0 TEX1=-1,0,0,0 => 1,1" \
+    "TEX0=0.25,0.75,0,0 TEX1=0.5,0,0,0 => 1,1" \
+    "TEX0=0.25,0.75,0,0 TEX1=0.5009765625,0,0,0 => -1,1" \
+    "TEX0=0.25,0.75,0,0 TEX1=1,0,0,0 => -1,1"
+
 # ---------------------------------------------------------------------------
 # SHAPE SAFETY rows (required after review).  A compiler that "lifts" (b) by
 # quietly picking ONE of the callee's returned arms would pass the two
@@ -180,7 +224,7 @@ refuse_row() {  # <stem> <what>
         "$shaders/$stem.cg" > "$work/$stem.log" 2>&1
     local rc=$?
     set -e
-    [[ "$rc" -ne 0 ]] || fail "$*: expected refusal (non-zero exit), got 0"
+    [[ "$rc" -eq 1 ]] || fail "$*: expected refusal (exit 1), got $rc - exit 0 accepts, and a crash or timeout is not a refusal"
     [[ ! -s "$work/$stem.fpo" ]] || fail "$*: refused but still wrote a container"
     echo "  refuse ok: $*"
 }
@@ -210,6 +254,9 @@ accept single_struct_return \
 # be caught.
 grep -qE '^[0-9]+ MOV dst=R0 .* s0=TEX0\.zw' "$work/s.u" \
     || fail "single return: expected the tracked storage to be copied from b (t.zw), got the wrong lanes: $(sed -n '2,3p' "$work/s.u" | cut -c1-120)"
+value_rows single_struct_return "single return" 0,1,2,3 \
+    "TEX0=0.25,0.75,-0.5,0.125 => -0.5,0.125,-0.5,0.125" \
+    "TEX0=0.75,0.25,1,-1 => 1,-1,1,-1"
 echo "  value ok: single-return helper's tracked storage is copied (mirror[0]=mirror[1]=t.zw)"
 
 # (c) the argument to wrap is itself a struct-returning call: the argument

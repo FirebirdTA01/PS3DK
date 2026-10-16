@@ -167,8 +167,11 @@ _CC_TEST = {0: lambda x: False, 1: lambda x: x < 0, 2: lambda x: x == 0, 3: lamb
             4: lambda x: x > 0, 5: lambda x: x != 0, 6: lambda x: x >= 0, 7: lambda x: True}
 
 
-def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False):
-    """Run the program; `inputs` maps 'TEX0'.. / 'COL0' to 4-float lists. Returns R0."""
+def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False, out_lanes=(0, 1, 2, 3)):
+    """Run the program; `inputs` maps 'TEX0'.. / 'COL0' to 4-float lists. Returns R0.
+
+    `out_lanes` names the colour lanes the program defines (a float2 output writes
+    only x and y); only those are read, and each must have been written."""
     # zero_temps: an R temp never written reads 0 (measured on the hardware
     # model the reference relies on: a loop's induction variable and
     # accumulators start unwritten).  Off by default, so a read of an unwritten
@@ -337,7 +340,8 @@ def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False):
         raise Unmodelled("no PROGRAM_END")
     prog = struct.unpack_from(">8I", blob, 0)[5]
     key = ('H', 0) if blob[prog + 19] else ('R', 0)
-    return list(regs.read(key, [0, 1, 2, 3]))
+    out = regs.read(key, list(out_lanes))
+    return [out[i] for i in out_lanes]
 
 
 # ---- self-test: encoded controls, no compiler needed -----------------------
