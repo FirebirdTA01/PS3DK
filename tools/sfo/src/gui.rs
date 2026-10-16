@@ -1,7 +1,10 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use eframe::egui;
+use egui::RichText;
+use ps3dk_ui::{self as ui, Tone};
 
 use sfo::psf::{self, Document, Entry, Value};
 use sfo::registry::{Confidence, FormatKind, Key, Registry};
@@ -91,16 +94,25 @@ fn run_headless(options: LaunchOptions) -> Result<()> {
 }
 
 fn run_native(open: Option<PathBuf>, schema: Option<String>) -> Result<()> {
-    let title = "PARAM.SFO Editor";
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([980.0, 680.0])
-            .with_min_inner_size([760.0, 480.0]),
+            .with_title(APP_NAME)
+            .with_app_id("ps3dk-sfo-gui")
+            .with_inner_size([1120.0, 760.0])
+            .with_min_inner_size([820.0, 540.0])
+            .with_drag_and_drop(true),
         ..Default::default()
     };
     let app = GuiApp::new(open, schema)?;
-    eframe::run_native(title, native_options, Box::new(|_cc| Ok(Box::new(app))))
-        .map_err(|err| anyhow::anyhow!("{err}"))
+    eframe::run_native(
+        APP_NAME,
+        native_options,
+        Box::new(|cc| {
+            ui::install(&cc.egui_ctx);
+            Ok(Box::new(app))
+        }),
+    )
+    .map_err(|err| anyhow::anyhow!("{err}"))
 }
 
 pub struct GuiModel {
@@ -306,17 +318,6 @@ impl GuiModel {
         &self.status
     }
 
-    fn path_label(&self) -> String {
-        self.path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "No file open".to_owned())
-    }
-
-    fn can_save(&self) -> bool {
-        self.dirty && self.path.is_some()
-    }
-
     fn flag_context(&self) -> Result<sfo::edit::FlagContext> {
         let document = self
             .document
@@ -324,150 +325,297 @@ impl GuiModel {
             .ok_or_else(|| anyhow::anyhow!("no PARAM.SFO is open"))?;
         sfo::edit::flag_context_for(document, self.schema_override.as_deref())
     }
+}
 
-    fn registry_label(&self, entry: &Entry, context: Option<sfo::edit::FlagContext>) -> String {
-        if let Some(context) = context {
-            if let Some(key) = self
-                .registry
-                .schema(context.schema_id())
-                .and_then(|schema| schema.key_for_name(&entry.key))
-            {
-                return format!("{} / {}", context.name(), confidence_name(key.confidence));
-            }
-        }
-        "unknown to registry".to_owned()
-    }
+// ---------------------------------------------------------------------------
+// The window.  Everything below draws the GuiModel above; the headless
+// script path never reaches it.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Page {
+    Overview,
+    Titles,
+    Flags,
+    Entries,
+    AddKey,
+}
+
+enum Dialog {
+    NewDocument,
+    ConfirmOpen(Option<PathBuf>),
+    ConfirmClose,
+}
+
+/// What a click asked for.  Collected while drawing, applied afterwards so
+/// the rows are not edited while they are being drawn.
+enum Action {
+    Commit(usize),
+    Revert(usize),
+    RevertTitle(usize),
+    AddDefault(usize),
+    CommitTitle(usize),
+    Flag {
+        key: String,
+        flag: String,
+        enabled: bool,
+    },
+    Goto(Page),
+    AddCustom,
 }
 
 struct GuiApp {
     model: GuiModel,
+    page: Page,
     create_title: String,
     create_appid: String,
     schema_choice: String,
     grow: bool,
     rows: Vec<RowState>,
     localized_titles: Vec<LocalizedTitleState>,
-    add_key: String,
-    add_value: String,
+    custom_key: String,
+    custom_value: String,
     show_reserved: bool,
+    search: String,
+    field_errors: HashMap<String, String>,
+    status_tone: Tone,
+    dialog: Option<Dialog>,
+    allow_close: bool,
+    window_title: String,
 }
 
 impl GuiApp {
     fn new(open: Option<PathBuf>, schema: Option<String>) -> Result<Self> {
         let mut model = GuiModel::new()?;
+        let schema_choice = schema.clone().unwrap_or_else(|| "auto".to_owned());
         model.schema_override = schema;
+        let mut status_tone = Tone::Neutral;
         if let Some(path) = open {
             model.open_path(&path)?;
+            let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
+            model.status = format!("Opened {name} ({} entries)", model.entries().len());
+            status_tone = Tone::Success;
+        } else {
+            model.status = "Ready".to_owned();
         }
-        let rows = rows_from_model(&model);
-        let localized_titles = localized_titles_from_model(&model);
-        Ok(Self {
+        let mut app = Self {
             model,
+            page: Page::Overview,
             create_title: "PS3DK Sample".to_owned(),
             create_appid: "PS3DK0001".to_owned(),
-            schema_choice: "auto".to_owned(),
+            schema_choice,
             grow: false,
-            rows,
-            localized_titles,
-            add_key: "TITLE_01".to_owned(),
-            add_value: String::new(),
+            rows: Vec::new(),
+            localized_titles: Vec::new(),
+            custom_key: String::new(),
+            custom_value: String::new(),
             show_reserved: false,
-        })
+            search: String::new(),
+            field_errors: HashMap::new(),
+            status_tone,
+            dialog: None,
+            allow_close: false,
+            window_title: String::new(),
+        };
+        app.reload_rows();
+        Ok(app)
     }
 
+    /// Rebuild the rows from the document.  A field whose edit was refused
+    /// keeps its text, so the user sees what was rejected next to the error.
     fn reload_rows(&mut self) {
+        let refused: HashMap<String, String> = self
+            .rows
+            .iter()
+            .map(|row| (row.key.clone(), row.value.clone()))
+            .chain(
+                self.localized_titles
+                    .iter()
+                    .map(|title| (title.key.to_owned(), title.value.clone())),
+            )
+            .filter(|(key, _)| self.field_errors.contains_key(key))
+            .collect();
         self.rows = rows_from_model(&self.model);
         self.localized_titles = localized_titles_from_model(&self.model);
+        for row in &mut self.rows {
+            if let Some(value) = refused.get(&row.key) {
+                row.value = value.clone();
+            }
+        }
+        for title in &mut self.localized_titles {
+            if let Some(value) = refused.get(title.key) {
+                title.value = value.clone();
+            }
+        }
     }
 
-    fn open_dialog(&mut self) {
-        let Some(path) = sfo_file_dialog().pick_file() else {
+    fn report_ok(&mut self, message: String) {
+        self.model.status = message;
+        self.status_tone = Tone::Success;
+    }
+
+    fn report_err(&mut self, err: impl std::fmt::Display) {
+        self.model.status = err.to_string();
+        self.status_tone = Tone::Danger;
+    }
+
+    fn after_load(&mut self) {
+        self.field_errors.clear();
+        self.search.clear();
+        self.page = Page::Overview;
+        self.status_tone = Tone::Success;
+        self.reload_rows();
+    }
+
+    // -- document commands -------------------------------------------------
+
+    fn request_open(&mut self, path: Option<PathBuf>) {
+        if self.is_dirty() {
+            self.dialog = Some(Dialog::ConfirmOpen(path));
+        } else {
+            self.open(path);
+        }
+    }
+
+    fn open(&mut self, path: Option<PathBuf>) {
+        let Some(path) = path.or_else(|| sfo_file_dialog().pick_file()) else {
             return;
         };
         match self.model.open_path(&path) {
-            Ok(()) => self.reload_rows(),
-            Err(err) => self.model.status = err.to_string(),
-        }
-    }
-
-    fn save(&mut self) {
-        if let Err(err) = self.model.save() {
-            self.model.status = err.to_string();
-        }
-    }
-
-    fn save_as_dialog(&mut self) {
-        let Some(path) = sfo_file_dialog().save_file() else {
-            return;
-        };
-        if let Err(err) = self.model.save_as(&path) {
-            self.model.status = err.to_string();
-        }
-    }
-
-    fn apply_row(&mut self, index: usize) {
-        let Some(row) = self.rows.get(index) else {
-            return;
-        };
-        let assignment = format!("{}={}", row.key, row.value);
-        self.apply_assignment(&assignment);
-    }
-
-    fn apply_assignment(&mut self, assignment: &str) {
-        match self.model.apply_assignment(assignment, self.grow) {
             Ok(()) => {
-                self.model.status = format!("Updated {}", assignment_key(assignment));
-                self.reload_rows();
+                self.after_load();
+                let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
+                let count = self.model.entries().len();
+                self.model.status = format!("Opened {name} ({count} entries)");
             }
-            Err(err) => self.model.status = err.to_string(),
+            Err(err) => self.report_err(format!("{err:#}")),
         }
     }
 
-    fn create_game(&mut self) {
+    fn create_game(&mut self) -> bool {
         match self.model.create_template(
             "game",
             Some(self.create_title.trim()),
             Some(self.create_appid.trim()),
         ) {
-            Ok(()) => self.reload_rows(),
-            Err(err) => self.model.status = err.to_string(),
-        }
-    }
-
-    fn add_entry(&mut self) {
-        let assignment = format!("{}={}", self.add_key.trim(), self.add_value);
-        self.add_assignment(&assignment);
-    }
-
-    fn add_registry_key(&mut self, key: &str) {
-        match self.model.add_registry_key(key) {
             Ok(()) => {
-                self.model.status = format!("Added {key}");
-                self.reload_rows();
+                self.after_load();
+                true
             }
-            Err(err) => self.model.status = err.to_string(),
+            Err(err) => {
+                self.report_err(format!("{err:#}"));
+                false
+            }
         }
     }
 
-    fn add_assignment(&mut self, assignment: &str) {
-        match self.model.add_assignment(&assignment, self.grow) {
+    /// True when the document differs from the file on disk: applied edits,
+    /// text still sitting in a field, or a field whose edit was refused.
+    fn is_dirty(&self) -> bool {
+        self.model.dirty
+            || self
+                .rows
+                .iter()
+                .any(|row| row.present && row.value != row.committed)
+            || self
+                .localized_titles
+                .iter()
+                .any(|title| title.value != title.committed)
+            || self.field_errors.keys().any(|key| key != CUSTOM_KEY_FIELD)
+    }
+
+    /// Apply every field edit that has not been committed yet (the focused
+    /// field when Ctrl+S is pressed, say).  Returns false when any of them
+    /// is refused; the refused fields keep their text and show the error.
+    fn commit_pending(&mut self) -> bool {
+        // commit_row and commit_title reload the rows on success, which
+        // drops the other pending text, so take it all out by key first.
+        let pending_rows: Vec<(String, String)> = self
+            .rows
+            .iter()
+            .filter(|row| row.present && row.value != row.committed)
+            .map(|row| (row.key.clone(), row.value.clone()))
+            .collect();
+        let pending_titles: Vec<(&'static str, String)> = self
+            .localized_titles
+            .iter()
+            .filter(|title| title.value != title.committed)
+            .map(|title| (title.key, title.value.clone()))
+            .collect();
+        for (key, value) in &pending_rows {
+            if let Some(index) = self.rows.iter().position(|row| &row.key == key) {
+                self.rows[index].value = value.clone();
+                self.commit_row(index);
+            }
+        }
+        for (key, value) in &pending_titles {
+            if let Some(index) = self.localized_titles.iter().position(|title| title.key == *key) {
+                self.localized_titles[index].value = value.clone();
+                self.commit_title(index);
+            }
+        }
+        let refused = self
+            .field_errors
+            .keys()
+            .filter(|key| key.as_str() != CUSTOM_KEY_FIELD)
+            .count();
+        if refused > 0 {
+            self.report_err(format!(
+                "Not saved: {refused} field{} could not be applied; fix the highlighted value first",
+                if refused == 1 { "" } else { "s" }
+            ));
+            return false;
+        }
+        true
+    }
+
+    /// Save to the open file, or ask for a name when there is none yet.
+    /// Returns true when the document reached the disk.
+    fn save(&mut self) -> bool {
+        if !self.commit_pending() {
+            return false;
+        }
+        if self.model.path.is_none() {
+            return self.save_as_dialog();
+        }
+        match self.model.save() {
             Ok(()) => {
-                self.model.status = format!("Added {}", assignment_key(assignment));
+                self.status_tone = Tone::Success;
                 self.reload_rows();
+                true
             }
-            Err(err) => self.model.status = err.to_string(),
+            Err(err) => {
+                self.report_err(format!("{err:#}"));
+                false
+            }
         }
     }
 
-    fn apply_localized_title(&mut self, index: usize) {
-        let Some(title) = self.localized_titles.get(index) else {
-            return;
+    fn save_as_dialog(&mut self) -> bool {
+        if !self.commit_pending() {
+            return false;
+        }
+        let mut dialog = sfo_file_dialog();
+        dialog = match &self.model.path {
+            Some(path) => match (path.parent(), path.file_name()) {
+                (Some(dir), Some(name)) => dialog.set_directory(dir).set_file_name(name.to_string_lossy()),
+                _ => dialog,
+            },
+            None => dialog.set_file_name("PARAM.SFO"),
         };
-        let assignment = format!("{}={}", title.key, title.value);
-        if title.present {
-            self.apply_assignment(&assignment);
-        } else {
-            self.add_assignment(&assignment);
+        let Some(path) = dialog.save_file() else {
+            return false;
+        };
+        match self.model.save_as(&path) {
+            Ok(()) => {
+                self.status_tone = Tone::Success;
+                self.reload_rows();
+                true
+            }
+            Err(err) => {
+                self.report_err(format!("{err:#}"));
+                false
+            }
         }
     }
 
@@ -476,215 +624,1247 @@ impl GuiApp {
             "auto" => None,
             other => Some(other.to_owned()),
         };
+        self.field_errors.clear();
         self.reload_rows();
+        self.model.status = format!("Schema set to {}", self.schema_label());
+        self.status_tone = Tone::Neutral;
     }
 
-    fn set_flag(&mut self, key: &str, flag: &str, enabled: bool) {
-        match self.model.set_flag(key, flag, enabled) {
+    fn schema_label(&self) -> String {
+        match self.model.flag_context() {
+            Ok(context) if self.schema_choice == "auto" => format!("{} (auto)", context.name()),
+            Ok(context) => context.name().to_owned(),
+            Err(_) => self.schema_choice.clone(),
+        }
+    }
+
+    // -- edits -------------------------------------------------------------
+
+    fn apply(&mut self, action: Action) {
+        match action {
+            Action::Commit(index) => self.commit_row(index),
+            Action::RevertTitle(index) => {
+                if let Some(title) = self.localized_titles.get_mut(index) {
+                    title.value = title.committed.clone();
+                    self.field_errors.remove(title.key);
+                }
+            }
+            Action::Revert(index) => {
+                if let Some(row) = self.rows.get_mut(index) {
+                    row.value = row.committed.clone();
+                    self.field_errors.remove(&row.key);
+                }
+            }
+            Action::AddDefault(index) => {
+                let Some(key) = self.rows.get(index).map(|row| row.key.clone()) else {
+                    return;
+                };
+                match self.model.add_registry_key(&key) {
+                    Ok(()) => {
+                        self.report_ok(format!("Added {key}"));
+                        self.reload_rows();
+                    }
+                    Err(err) => self.report_err(format!("{key}: {err:#}")),
+                }
+            }
+            Action::CommitTitle(index) => self.commit_title(index),
+            Action::Flag { key, flag, enabled } => {
+                match self.model.set_flag(&key, &flag, enabled) {
+                    Ok(()) => {
+                        let state = if enabled { "on" } else { "off" };
+                        self.report_ok(format!("{key}: turned {flag} {state}"));
+                        self.reload_rows();
+                    }
+                    Err(err) => self.report_err(format!("{key}: {err:#}")),
+                }
+            }
+            Action::Goto(page) => {
+                self.page = page;
+                self.search.clear();
+            }
+            Action::AddCustom => {
+                let key = self.custom_key.trim().to_owned();
+                if key.is_empty() {
+                    self.field_errors
+                        .insert(CUSTOM_KEY_FIELD.to_owned(), "Enter a key name".to_owned());
+                    return;
+                }
+                let assignment = format!("{key}={}", self.custom_value);
+                match self.model.add_assignment(&assignment, self.grow) {
+                    Ok(()) => {
+                        self.field_errors.remove(CUSTOM_KEY_FIELD);
+                        self.custom_key.clear();
+                        self.custom_value.clear();
+                        self.report_ok(format!("Added {key}"));
+                        self.reload_rows();
+                    }
+                    Err(err) => {
+                        let message = format!("{err:#}");
+                        self.field_errors.insert(CUSTOM_KEY_FIELD.to_owned(), message.clone());
+                        self.report_err(format!("{key}: {message}"));
+                    }
+                }
+            }
+        }
+    }
+
+    fn commit_row(&mut self, index: usize) {
+        let Some(row) = self.rows.get(index) else {
+            return;
+        };
+        if row.value == row.committed {
+            self.field_errors.remove(&row.key);
+            return;
+        }
+        let key = row.key.clone();
+        let assignment = format!("{}={}", row.key, row.value);
+        let grow = self.grow;
+        self.apply_edit(&key, |model| model.apply_assignment(&assignment, grow));
+    }
+
+    fn commit_title(&mut self, index: usize) {
+        let Some(title) = self.localized_titles.get(index) else {
+            return;
+        };
+        if title.value == title.committed {
+            self.field_errors.remove(title.key);
+            return;
+        }
+        let key = title.key;
+        let assignment = format!("{}={}", title.key, title.value);
+        let present = title.present;
+        let grow = self.grow;
+        self.apply_edit(key, |model| {
+            if present {
+                model.apply_assignment(&assignment, grow)
+            } else {
+                model.add_assignment(&assignment, grow)
+            }
+        });
+    }
+
+    /// Apply one field edit, and keep it only if the file can still be
+    /// written: the model takes a value longer than its preserved slot and
+    /// only the writer refuses it, which would surface at save time with no
+    /// field to point at.  A refused edit leaves the document as it was and
+    /// puts the error on the field.
+    fn apply_edit(&mut self, key: &str, edit: impl FnOnce(&mut GuiModel) -> Result<()>) {
+        let before = (self.model.document.clone(), self.model.dirty);
+        let result = edit(&mut self.model).and_then(|()| match &self.model.document {
+            Some(document) => psf::write_preserving(&document.entries).map(drop),
+            None => Ok(()),
+        });
+        match result {
             Ok(()) => {
-                self.model.status = format!("Updated {key}");
+                self.field_errors.remove(key);
+                self.report_ok(format!("Updated {key}"));
                 self.reload_rows();
             }
-            Err(err) => self.model.status = err.to_string(),
+            Err(err) => {
+                (self.model.document, self.model.dirty) = before;
+                let mut message = format!("{err:#}");
+                if !self.grow && message.contains("preserved max") {
+                    message.push_str(" (turn on Grow value slots in Settings to enlarge it)");
+                }
+                self.field_errors.insert(key.to_owned(), message.clone());
+                self.report_err(format!("{key}: {message}"));
+            }
         }
+    }
+
+    // -- input -------------------------------------------------------------
+
+    fn handle_input(&mut self, ctx: &egui::Context) {
+        if ctx.input(|input| input.viewport().close_requested())
+            && self.is_dirty()
+            && !self.allow_close
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.dialog = Some(Dialog::ConfirmClose);
+        }
+
+        if self.dialog.is_some() {
+            return;
+        }
+
+        let dropped = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .find_map(|file| file.path.clone())
+        });
+        if let Some(path) = dropped {
+            self.request_open(Some(path));
+        }
+
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        let save_as = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::S);
+        let save = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
+        let open = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
+        let new = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
+        if ctx.input_mut(|input| input.consume_shortcut(&save_as)) && self.model.document.is_some() {
+            self.save_as_dialog();
+        } else if ctx.input_mut(|input| input.consume_shortcut(&save))
+            && self.model.document.is_some()
+        {
+            self.save();
+        }
+        if ctx.input_mut(|input| input.consume_shortcut(&open)) {
+            self.request_open(None);
+        }
+        if ctx.input_mut(|input| input.consume_shortcut(&new)) {
+            self.dialog = Some(Dialog::NewDocument);
+        }
+    }
+
+    fn update_window_title(&mut self, ctx: &egui::Context) {
+        let title = match (&self.model.document, &self.model.path) {
+            (None, _) => APP_NAME.to_owned(),
+            (Some(_), path) => {
+                let name = path
+                    .as_deref()
+                    .and_then(Path::file_name)
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Untitled".to_owned());
+                let dirty = if self.is_dirty() { "\u{25cf} " } else { "" };
+                format!("{dirty}{name} - {APP_NAME}")
+            }
+        };
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
+        }
+    }
+
+    // -- chrome ------------------------------------------------------------
+
+    fn document_line(&self) -> egui::WidgetText {
+        match (&self.model.document, &self.model.path) {
+            (None, _) => RichText::new("No file open").small().into(),
+            (Some(_), path) => {
+                let name = path
+                    .as_deref()
+                    .and_then(Path::file_name)
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Untitled (not saved yet)".to_owned());
+                if self.is_dirty() {
+                    RichText::new(format!("{name}  \u{2022}  unsaved changes")).small().into()
+                } else {
+                    RichText::new(name).small().into()
+                }
+            }
+        }
+    }
+
+    fn app_bar(&mut self, ctx: &egui::Context) {
+        let document_line = self.document_line();
+        let path_hint = self
+            .model
+            .path
+            .as_ref()
+            .map(|path| path.display().to_string());
+        let mut open = false;
+        let mut new = false;
+        let mut save = false;
+        let mut save_as = false;
+        let has_document = self.model.document.is_some();
+        let grow = &mut self.grow;
+        ui::app_bar(
+            ctx,
+            |ui| {
+                let document = ui::app_title(ui, "SF", APP_NAME, Some(document_line));
+                if let (Some(document), Some(path)) = (document, &path_hint) {
+                    document.on_hover_text(path);
+                }
+            },
+            |ui| {
+                let save_enabled = has_document;
+                ui.add_enabled_ui(save_enabled, |ui| {
+                    save |= ui::primary_button(ui, "Save")
+                        .on_hover_text("Save  (Ctrl+S)")
+                        .clicked();
+                });
+                save_as |= ui
+                    .add_enabled(has_document, egui::Button::new("Save As\u{2026}"))
+                    .on_hover_text("Save to a new file  (Ctrl+Shift+S)")
+                    .clicked();
+                open |= ui
+                    .button("Open\u{2026}")
+                    .on_hover_text("Open a PARAM.SFO  (Ctrl+O)")
+                    .clicked();
+                new |= ui
+                    .button("New")
+                    .on_hover_text("Create a new game PARAM.SFO  (Ctrl+N)")
+                    .clicked();
+                ui.add_space(ui::SPACE_SM);
+                let settings = ui::icon_button(ui, "\u{2699}", "Settings");
+                ui::popover(ui, &settings, 300.0, |ui| settings_panel(ui, grow));
+            },
+        );
+        if save {
+            self.save();
+        }
+        if save_as {
+            self.save_as_dialog();
+        }
+        if open {
+            self.request_open(None);
+        }
+        if new {
+            self.dialog = Some(Dialog::NewDocument);
+        }
+    }
+
+    fn sidebar(&mut self, ctx: &egui::Context) {
+        let present = self.rows.iter().filter(|row| row.present).count();
+        let absent = self.rows.iter().filter(|row| !row.present).count();
+        let titles = self
+            .localized_titles
+            .iter()
+            .filter(|title| !title.value.is_empty())
+            .count();
+        let flag_keys = self.rows.iter().filter(|row| !row.flags.is_empty()).count();
+        let mut page = self.page;
+        let mut schema_changed = false;
+        let schema_label = self.schema_label();
+        let schema_choice = &mut self.schema_choice;
+        ui::sidebar(
+            ctx,
+            |ui| {
+                ui::nav_section(ui, "Edit");
+                let items = [
+                    (Page::Overview, "\u{1f3e0}", "Overview", None),
+                    (Page::Titles, "\u{1f310}", "Titles", Some(titles)),
+                    (Page::Flags, "\u{2691}", "Capabilities", Some(flag_keys)),
+                    (Page::Entries, "\u{2630}", "All entries", Some(present)),
+                ];
+                for (target, icon, label, count) in items {
+                    if ui::nav_item(ui, page == target, icon, label, count).clicked() {
+                        page = target;
+                    }
+                }
+                ui::nav_section(ui, "Extend");
+                if ui::nav_item(ui, page == Page::AddKey, "\u{2795}", "Add a key", Some(absent))
+                    .clicked()
+                {
+                    page = Page::AddKey;
+                }
+            },
+            |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(ui::SPACE_SM);
+                    egui::ComboBox::from_id_salt("schema_choice")
+                        .selected_text(&schema_label)
+                        .width(ui::SIDEBAR_WIDTH - 60.0)
+                        .show_ui(ui, |ui| {
+                            for id in SCHEMA_CHOICES {
+                                schema_changed |= ui
+                                    .selectable_value(schema_choice, (*id).to_owned(), *id)
+                                    .changed();
+                            }
+                        });
+                    ui::help_marker(
+                        ui,
+                        "Which PARAM.SFO layout the editor checks against. \
+                         \"auto\" picks it from CATEGORY. The schema decides which \
+                         keys and flags are known.",
+                    );
+                });
+                ui::nav_section(ui, "Schema");
+            },
+        );
+        if page != self.page {
+            self.page = page;
+            self.search.clear();
+        }
+        if schema_changed {
+            self.set_schema_choice();
+        }
+    }
+
+    fn status_bar(&self, ctx: &egui::Context) {
+        let detail = if self.model.document.is_some() {
+            let entries = self.model.entries().len();
+            format!("{entries} entries  \u{00b7}  {} schema", self.schema_label())
+        } else {
+            String::new()
+        };
+        ui::status_bar(ctx, self.status_tone, self.model.status(), &detail);
+    }
+
+    // -- pages -------------------------------------------------------------
+
+    fn welcome(&mut self, ctx: &egui::Context) {
+        let mut open = false;
+        let mut create = false;
+        ui::page(ctx, |ui| {
+            ui.add_space(ui::SPACE_XL);
+            ui.vertical_centered(|ui| {
+                ui::brand_mark(ui, "SF", 56.0);
+                ui.add_space(ui::SPACE_SM);
+                ui.label(RichText::new(APP_NAME).heading().strong());
+                ui.label(
+                    RichText::new(
+                        "Edit the metadata a PS3 title ships in PARAM.SFO: its name, \
+                         ID, version, category and capability flags.",
+                    )
+                    .color(ui::Palette::of(ui).text_muted),
+                );
+            });
+            ui.add_space(ui::SPACE_XL);
+            ui.columns(2, |columns| {
+                ui::card(&mut columns[0], |ui| {
+                    ui::card_header(
+                        ui,
+                        "Open a file",
+                        Some("Edit an existing PARAM.SFO"),
+                        |_| {},
+                    );
+                    ui.horizontal(|ui| {
+                        open |= ui::primary_button(ui, "Open\u{2026}").clicked();
+                        ui::kbd(ui, "Ctrl+O");
+                    });
+                    ui.add_space(ui::SPACE_SM);
+                    ui::field_message(
+                        ui,
+                        Tone::Neutral,
+                        "You can also drop a PARAM.SFO onto this window.",
+                    );
+                });
+                ui::card(&mut columns[1], |ui| {
+                    ui::card_header(
+                        ui,
+                        "Start a new game",
+                        Some("From the PS3DK game template"),
+                        |_| {},
+                    );
+                    create |= new_document_fields(ui, &mut self.create_title, &mut self.create_appid);
+                    ui.add_space(ui::SPACE_SM);
+                    ui.horizontal(|ui| {
+                        create |= ui::primary_button(ui, "Create").clicked();
+                        ui::kbd(ui, "Ctrl+N");
+                    });
+                });
+            });
+        });
+        if open {
+            self.request_open(None);
+        }
+        if create {
+            self.create_game();
+        }
+    }
+
+    fn page(&mut self, ctx: &egui::Context) {
+        let mut actions = Vec::new();
+        ui::page(ctx, |ui| match self.page {
+            Page::Overview => self.overview_page(ui, &mut actions),
+            Page::Titles => self.titles_page(ui, &mut actions),
+            Page::Flags => self.flags_page(ui, &mut actions),
+            Page::Entries => self.entries_page(ui, &mut actions),
+            Page::AddKey => self.add_key_page(ui, &mut actions),
+        });
+        for action in actions {
+            self.apply(action);
+        }
+    }
+
+    fn overview_page(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let p = ui::Palette::of(ui);
+        let value_of = |key: &str| {
+            self.rows
+                .iter()
+                .find(|row| row.present && row.key == key)
+                .map(|row| row.committed.clone())
+        };
+        let title = value_of("TITLE").filter(|title| !title.is_empty());
+        let title_id = value_of("TITLE_ID").unwrap_or_default();
+        let app_ver = value_of("APP_VER").or_else(|| value_of("VERSION"));
+        let category = value_of("CATEGORY").map(|code| {
+            match self.model.registry.category(&code) {
+                Some(category) => format!("{code}  {}", category.label),
+                None => code,
+            }
+        });
+
+        ui::card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    ui.label(
+                        RichText::new(title.as_deref().unwrap_or("Untitled"))
+                            .size(24.0)
+                            .strong()
+                            .color(p.text),
+                    );
+                    let mut facts = Vec::new();
+                    if !title_id.is_empty() {
+                        facts.push(title_id.clone());
+                    }
+                    if let Some(app_ver) = &app_ver {
+                        facts.push(format!("version {app_ver}"));
+                    }
+                    if let Some(category) = &category {
+                        facts.push(category.clone());
+                    }
+                    ui.label(
+                        RichText::new(facts.join("   \u{00b7}   "))
+                            .monospace()
+                            .color(p.text_muted),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    if self.is_dirty() {
+                        ui::badge(ui, "Unsaved", Tone::Warning);
+                    } else if self.model.path.is_some() {
+                        ui::badge(ui, "Saved", Tone::Success);
+                    }
+                    ui::badge(ui, &self.schema_label(), Tone::Accent);
+                });
+            });
+        });
+
+        ui::card(ui, |ui| {
+            ui::card_header(
+                ui,
+                "Identity",
+                Some("Press Enter or click away to apply a change. Esc undoes it."),
+                |_| {},
+            );
+            self.key_grid(ui, "overview_identity", IDENTITY_KEYS, actions);
+        });
+
+        ui::card(ui, |ui| {
+            ui::card_header(
+                ui,
+                "Requirements",
+                Some("What the console checks before it boots the title."),
+                |ui| {
+                    if ui::quiet_button(ui, "Video and audio modes \u{00bb}").clicked() {
+                        actions.push(Action::Goto(Page::Flags));
+                    }
+                },
+            );
+            self.key_grid(ui, "overview_requirements", REQUIREMENT_KEYS, actions);
+        });
+    }
+
+    /// A two-column form of the named keys that the schema knows.
+    fn key_grid(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: &str,
+        keys: &[&str],
+        actions: &mut Vec<Action>,
+    ) {
+        let p = ui::Palette::of(ui);
+        egui::Grid::new(id)
+            .num_columns(2)
+            .spacing([ui::SPACE_XL, ui::SPACE_MD])
+            .min_col_width(180.0)
+            .striped(false)
+            .show(ui, |ui| {
+                for key in keys {
+                    let Some(index) = self.rows.iter().position(|row| row.key == *key) else {
+                        continue;
+                    };
+                    let row = &mut self.rows[index];
+                    ui::field_label(
+                        ui,
+                        row.friendly.unwrap_or(row.key.as_str()),
+                        Some(&row.key),
+                        row.help.as_deref(),
+                    );
+                    ui.vertical(|ui| {
+                        if row.present {
+                            value_editor(ui, row, index, 360.0, &self.field_errors, actions);
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Not set").italics().color(p.text_faint));
+                                if row.addable && ui::quiet_button(ui, "Add").clicked() {
+                                    actions.push(Action::AddDefault(index));
+                                }
+                            });
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
+    }
+
+    fn titles_page(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        ui::page_header(
+            ui,
+            "Titles",
+            "The name shown in each system language. An empty one falls back to the main title.",
+        );
+        let main_title = self
+            .rows
+            .iter()
+            .find(|row| row.present && row.key == "TITLE")
+            .map(|row| row.committed.clone())
+            .unwrap_or_default();
+        ui::card(ui, |ui| {
+            ui::card_header(ui, "Main title", Some("Used for every language without its own title"), |_| {});
+            self.key_grid(ui, "titles_main", &["TITLE"], actions);
+        });
+        ui::card(ui, |ui| {
+            ui::card_header(ui, "Languages", None, |_| {});
+            let hint = if main_title.is_empty() {
+                "Uses the main title".to_owned()
+            } else {
+                format!("{main_title}  (main title)")
+            };
+            egui::Grid::new("localized_titles")
+                .num_columns(2)
+                .spacing([ui::SPACE_XL, ui::SPACE_SM + 2.0])
+                .min_col_width(180.0)
+                .show(ui, |ui| {
+                    for (index, title) in self.localized_titles.iter_mut().enumerate() {
+                        ui::field_label(ui, title.label, Some(title.key), None);
+                        ui.vertical(|ui| {
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut title.value)
+                                    .hint_text(&hint)
+                                    .desired_width(360.0),
+                            );
+                            if response.lost_focus() {
+                                if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                                    actions.push(Action::RevertTitle(index));
+                                } else {
+                                    actions.push(Action::CommitTitle(index));
+                                }
+                            }
+                            if let Some(error) = self.field_errors.get(title.key) {
+                                ui::field_message(ui, Tone::Danger, error);
+                            }
+                        });
+                        ui.end_row();
+                    }
+                });
+        });
+    }
+
+    fn flags_page(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui::page_header(
+                    ui,
+                    "Capabilities",
+                    "Video modes, audio formats and system attributes. Changes apply at once.",
+                );
+            });
+        });
+        ui.horizontal(|ui| {
+            ui::search_box(ui, &mut self.search, "Filter flags", 260.0);
+            ui.add_space(ui::SPACE_LG);
+            ui::toggle_row(ui, &mut self.show_reserved, "Show reserved bits", |_| {});
+        });
+        ui.add_space(ui::SPACE_MD);
+
+        let needle = self.search.trim().to_lowercase();
+        let mut any = false;
+        for row in self.rows.iter().filter(|row| !row.flags.is_empty()) {
+            let visible: Vec<&FlagState> = row
+                .flags
+                .iter()
+                .filter(|flag| self.show_reserved || !is_reserved_flag(flag))
+                .filter(|flag| {
+                    needle.is_empty()
+                        || flag.label.to_lowercase().contains(&needle)
+                        || flag.name.to_lowercase().contains(&needle)
+                })
+                .collect();
+            if visible.is_empty() {
+                continue;
+            }
+            any = true;
+            ui::card(ui, |ui| {
+                let subtitle = if row.present {
+                    format!("{}  =  {}", row.key, hex_value(&row.committed))
+                } else {
+                    format!("{} is not in the file yet; turning a flag on adds it", row.key)
+                };
+                ui::card_header(ui, row.friendly.unwrap_or(row.key.as_str()), Some(&subtitle), |ui| {
+                    if let Some(help) = &row.help {
+                        ui::help_marker(ui, help);
+                    }
+                });
+                for group in flag_groups(&row.key, &visible) {
+                    if let Some(label) = group.label {
+                        ui::section_label(ui, label);
+                    }
+                    let columns = if ui.available_width() > 640.0 { 2 } else { 1 };
+                    ui.columns(columns, |cols| {
+                        for (n, flag) in group.flags.iter().enumerate() {
+                            let ui = &mut cols[n % columns];
+                            flag_toggle(ui, row, flag, actions);
+                        }
+                    });
+                    ui.add_space(ui::SPACE_XS);
+                }
+            });
+        }
+        if !any {
+            ui::empty_state(
+                ui,
+                "No flags match",
+                if needle.is_empty() {
+                    "This schema has no flag keys."
+                } else {
+                    "Try a different filter."
+                },
+            );
+        }
+    }
+
+    fn entries_page(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        ui::page_header(
+            ui,
+            "All entries",
+            "Every key in the file, as stored. Press Enter or click away to apply an edit.",
+        );
+        ui::search_box(ui, &mut self.search, "Filter keys or values", 300.0);
+        ui.add_space(ui::SPACE_MD);
+        let p = ui::Palette::of(ui);
+        let needle = self.search.trim().to_lowercase();
+        ui::card(ui, |ui| {
+            egui::Grid::new("sfo_entries")
+                .num_columns(4)
+                .spacing([ui::SPACE_LG, ui::SPACE_SM + 2.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for header in ["Key", "Type", "Size", "Value"] {
+                        ui.label(
+                            RichText::new(header.to_uppercase())
+                                .text_style(ui::caption_style())
+                                .color(p.text_faint),
+                        );
+                    }
+                    ui.end_row();
+                    for (index, row) in self.rows.iter_mut().enumerate() {
+                        if !row.present {
+                            continue;
+                        }
+                        if !needle.is_empty()
+                            && !row.key.to_lowercase().contains(&needle)
+                            && !row.value.to_lowercase().contains(&needle)
+                            && !row
+                                .friendly
+                                .is_some_and(|name| name.to_lowercase().contains(&needle))
+                        {
+                            continue;
+                        }
+                        ui.vertical(|ui| {
+                            ui.set_min_width(190.0);
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            ui.add(
+                                egui::Label::new(RichText::new(&row.key).monospace().color(p.text))
+                                    .extend(),
+                            );
+                            if let Some(friendly) = row.friendly {
+                                ui.add(
+                                    egui::Label::new(RichText::new(friendly).small().color(p.text_faint))
+                                        .extend(),
+                                );
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui::badge(ui, &row.format, Tone::Neutral);
+                            match row.confidence {
+                                None => {
+                                    ui::badge(ui, "unknown", Tone::Warning)
+                                        .on_hover_text("This key is not in the registry for this schema");
+                                }
+                                Some(Confidence::Confirmed) => {}
+                                Some(confidence) => {
+                                    ui::badge(ui, confidence_name(confidence), confidence_tone(confidence));
+                                }
+                            }
+                        });
+                        let size = if row.format == "integer" {
+                            "4".to_owned()
+                        } else {
+                            format!("{} / {}", row.used_len, row.max_len)
+                        };
+                        ui.label(RichText::new(size).monospace().color(p.text_muted))
+                            .on_hover_text("Bytes used / bytes reserved in the file");
+                        ui.vertical(|ui| {
+                            value_editor(ui, row, index, 380.0, &self.field_errors, actions);
+                            if !row.flags.is_empty() && ui::quiet_button(ui, "Edit flags \u{00bb}").clicked() {
+                                actions.push(Action::Goto(Page::Flags));
+                            }
+                        });
+                        ui.end_row();
+                    }
+                });
+        });
+    }
+
+    fn add_key_page(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        ui::page_header(
+            ui,
+            "Add a key",
+            "Keys the registry knows for this schema that the file does not have yet.",
+        );
+        ui::search_box(ui, &mut self.search, "Filter keys", 260.0);
+        ui.add_space(ui::SPACE_MD);
+        let p = ui::Palette::of(ui);
+        let needle = self.search.trim().to_lowercase();
+        let absent: Vec<usize> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| !row.present)
+            .filter(|(_, row)| {
+                needle.is_empty()
+                    || row.key.to_lowercase().contains(&needle)
+                    || row.friendly.is_some_and(|name| name.to_lowercase().contains(&needle))
+            })
+            .map(|(index, _)| index)
+            .collect();
+
+        ui::card(ui, |ui| {
+            ui::card_header(ui, "From the registry", Some("Added with the registry's default value"), |_| {});
+            if absent.is_empty() {
+                ui::empty_state(ui, "Nothing to add", "Every registry key for this schema is already in the file.");
+            }
+            for (n, index) in absent.iter().enumerate() {
+                let row = &self.rows[*index];
+                if n > 0 {
+                    ui::divider(ui);
+                }
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&row.key).monospace().strong().color(p.text));
+                            if let Some(friendly) = row.friendly {
+                                ui.label(RichText::new(friendly).color(p.text_muted));
+                            }
+                            ui::badge(ui, &row.format, Tone::Neutral);
+                            if row.max_len > 0 && row.format != "integer" {
+                                ui::badge(ui, &format!("max {} B", row.max_len), Tone::Neutral);
+                            }
+                            if let Some(confidence) = row.confidence.filter(|c| *c != Confidence::Confirmed) {
+                                ui::badge(ui, confidence_name(confidence), confidence_tone(confidence));
+                            }
+                        });
+                        if let Some(help) = &row.help {
+                            let first = help.lines().next().unwrap_or_default();
+                            ui.add(egui::Label::new(RichText::new(first).small().color(p.text_muted)).wrap());
+                        }
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let add = ui.add_enabled(row.addable, egui::Button::new("Add"));
+                        let add = if row.addable {
+                            add
+                        } else {
+                            add.on_disabled_hover_text("The registry has no format for this key")
+                        };
+                        if add.clicked() {
+                            actions.push(Action::AddDefault(*index));
+                        }
+                    });
+                });
+            }
+        });
+
+        ui::card(ui, |ui| {
+            ui::card_header(
+                ui,
+                "Custom key",
+                Some("Any key name, stored as text unless the registry says otherwise"),
+                |_| {},
+            );
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.custom_key)
+                        .hint_text("KEY_NAME")
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(180.0),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.custom_value)
+                        .hint_text("value")
+                        .desired_width(280.0),
+                );
+                if ui.button("Add").clicked() {
+                    actions.push(Action::AddCustom);
+                }
+            });
+            if let Some(error) = self.field_errors.get(CUSTOM_KEY_FIELD) {
+                ui::field_message(ui, Tone::Danger, error);
+            }
+        });
+    }
+
+    // -- dialogs -----------------------------------------------------------
+
+    fn dialogs(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = &self.dialog else {
+            return;
+        };
+        let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape));
+        let dirty = self.is_dirty();
+        match dialog {
+            Dialog::NewDocument => {
+                let mut create = false;
+                let mut cancel = escape;
+                ui::modal(
+                    ctx,
+                    "new_document",
+                    "New game PARAM.SFO",
+                    Some("Starts from the PS3DK game template"),
+                    |ui| {
+                        create |= new_document_fields(ui, &mut self.create_title, &mut self.create_appid);
+                        if dirty {
+                            ui.add_space(ui::SPACE_SM);
+                            ui::field_message(
+                                ui,
+                                Tone::Warning,
+                                "The open file has unsaved changes. They will be discarded.",
+                            );
+                        }
+                        ui::dialog_buttons(ui, |ui| {
+                            let label = if dirty { "Discard and create" } else { "Create" };
+                            create |= ui::primary_button(ui, label).clicked();
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    },
+                );
+                if create {
+                    if self.create_game() {
+                        self.dialog = None;
+                    }
+                } else if cancel {
+                    self.dialog = None;
+                }
+            }
+            Dialog::ConfirmOpen(path) => {
+                let path = path.clone();
+                let mut discard = false;
+                let mut cancel = escape;
+                ui::modal(
+                    ctx,
+                    "confirm_open",
+                    "Discard unsaved changes?",
+                    Some("Opening another file throws away the edits you have not saved."),
+                    |ui| {
+                        ui::dialog_buttons(ui, |ui| {
+                            discard |= ui::danger_button(ui, "Discard and open").clicked();
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    },
+                );
+                if discard {
+                    self.dialog = None;
+                    self.open(path);
+                } else if cancel {
+                    self.dialog = None;
+                }
+            }
+            Dialog::ConfirmClose => {
+                let mut save = false;
+                let mut discard = false;
+                let mut cancel = escape;
+                ui::modal(
+                    ctx,
+                    "confirm_close",
+                    "Save changes before closing?",
+                    Some("Your edits are lost if you close without saving."),
+                    |ui| {
+                        ui::dialog_buttons(ui, |ui| {
+                            save |= ui::primary_button(ui, "Save").clicked();
+                            discard |= ui::danger_button(ui, "Don't save").clicked();
+                            cancel |= ui.button("Cancel").clicked();
+                        });
+                    },
+                );
+                if save {
+                    self.dialog = None;
+                    if self.save() {
+                        self.allow_close = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                } else if discard {
+                    self.dialog = None;
+                    self.allow_close = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                } else if cancel {
+                    self.dialog = None;
+                }
+            }
+        }
+    }
+
+    fn drop_overlay(&self, ctx: &egui::Context) {
+        if ctx.input(|input| input.raw.hovered_files.is_empty()) {
+            return;
+        }
+        let p = ui::Palette::of_ctx(ctx);
+        let screen = ctx.screen_rect();
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("drop_overlay"),
+        ));
+        painter.rect_filled(screen, egui::Rounding::ZERO, egui::Color32::from_black_alpha(170));
+        painter.rect_stroke(
+            screen.shrink(16.0),
+            egui::Rounding::same(ui::RADIUS_LG),
+            ui::stroke(2.0, p.accent),
+        );
+        painter.text(
+            screen.center(),
+            egui::Align2::CENTER_CENTER,
+            "Drop to open this PARAM.SFO",
+            egui::FontId::proportional(20.0),
+            egui::Color32::WHITE,
+        );
     }
 }
 
 impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("sfo_top").show(ctx, |ui| {
-            ui.vertical(|ui| {
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("Open...").clicked() {
-                        self.open_dialog();
-                    }
-                    let save_button =
-                        ui.add_enabled(self.model.can_save(), egui::Button::new("Save"));
-                    if save_button.clicked() {
-                        self.save();
-                    }
-                    if ui.button("Save As...").clicked() {
-                        self.save_as_dialog();
-                    }
-                    ui.monospace(self.model.path_label());
-                    ui.checkbox(&mut self.grow, "Grow");
-                    ui.checkbox(&mut self.show_reserved, "Show reserved");
-                    ui.label("Schema");
-                    let mut changed = false;
-                    egui::ComboBox::from_id_salt("schema_choice")
-                        .selected_text(&self.schema_choice)
-                        .show_ui(ui, |ui| {
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.schema_choice,
-                                    "auto".to_owned(),
-                                    "auto",
-                                )
-                                .changed();
-                            for id in ["game", "savedata", "subfolder", "patch", "trophy"] {
-                                changed |= ui
-                                    .selectable_value(&mut self.schema_choice, id.to_owned(), id)
-                                    .changed();
-                            }
-                        });
-                    if changed {
-                        self.set_schema_choice();
-                    }
-                });
-                egui::CollapsingHeader::new("New file template")
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Title");
-                            ui.add_sized(
-                                [220.0, 24.0],
-                                egui::TextEdit::singleline(&mut self.create_title),
-                            );
-                            ui.label("Title ID");
-                            ui.add_sized(
-                                [120.0, 24.0],
-                                egui::TextEdit::singleline(&mut self.create_appid),
-                            );
-                            if ui.button("New game").clicked() {
-                                self.create_game();
-                            }
-                        });
-                    });
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Add entry");
-                    ui.add_sized([110.0, 24.0], egui::TextEdit::singleline(&mut self.add_key));
-                    ui.add_sized(
-                        [180.0, 24.0],
-                        egui::TextEdit::singleline(&mut self.add_value),
-                    );
-                    if ui.button("Add").clicked() {
-                        self.add_entry();
-                    }
-                });
-            });
+        self.handle_input(ctx);
+        self.update_window_title(ctx);
+        self.app_bar(ctx);
+        self.status_bar(ctx);
+        if self.model.document.is_some() {
+            self.sidebar(ctx);
+            self.page(ctx);
+        } else {
+            self.welcome(ctx);
+        }
+        self.dialogs(ctx);
+        self.drop_overlay(ctx);
+    }
+}
+
+const APP_NAME: &str = "PARAM.SFO Editor";
+const CUSTOM_KEY_FIELD: &str = "\u{0}custom";
+const SCHEMA_CHOICES: &[&str] = &["auto", "game", "savedata", "subfolder", "patch", "trophy"];
+const IDENTITY_KEYS: &[&str] = &[
+    "TITLE",
+    "TITLE_ID",
+    "CATEGORY",
+    "APP_VER",
+    "VERSION",
+    "CONTENT_ID",
+    "SUB_TITLE",
+    "DETAIL",
+];
+const REQUIREMENT_KEYS: &[&str] = &["PS3_SYSTEM_VER", "PARENTAL_LEVEL", "BOOTABLE", "LICENSE"];
+
+fn new_document_fields(ui: &mut egui::Ui, title: &mut String, appid: &mut String) -> bool {
+    let mut submitted = false;
+    egui::Grid::new(ui.id().with("new_document"))
+        .num_columns(2)
+        .spacing([ui::SPACE_LG, ui::SPACE_SM])
+        .show(ui, |ui| {
+            ui::field_label(ui, "Title", None, None);
+            let response = ui.add(egui::TextEdit::singleline(title).desired_width(240.0));
+            submitted |= response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            ui.end_row();
+            ui::field_label(
+                ui,
+                "Title ID",
+                None,
+                Some("Nine characters by convention: four letters, five digits (ABCD12345)."),
+            );
+            let response = ui.add(
+                egui::TextEdit::singleline(appid)
+                    .font(egui::TextStyle::Monospace)
+                    .char_limit(16)
+                    .desired_width(240.0),
+            );
+            submitted |= response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            ui.end_row();
         });
+    submitted
+}
 
-        egui::TopBottomPanel::bottom("sfo_status").show(ctx, |ui| {
-            ui.label(self.model.status());
-        });
+fn settings_panel(ui: &mut egui::Ui, grow: &mut bool) {
+    ui::section_label(ui, "Appearance");
+    ui::theme_picker(ui);
+    ui.add_space(ui::SPACE_SM);
+    ui::section_label(ui, "Editing");
+    ui::toggle_row(ui, grow, "Grow value slots", |_| {});
+    ui::field_message(
+        ui,
+        Tone::Neutral,
+        "A PARAM.SFO reserves a fixed number of bytes per value. Turn this on to \
+         let a longer value enlarge its slot instead of being refused.",
+    );
+    ui.add_space(ui::SPACE_SM);
+    ui::section_label(ui, "Shortcuts");
+    egui::Grid::new("shortcuts").num_columns(2).show(ui, |ui| {
+        for (keys, action) in [
+            ("Ctrl+N", "New"),
+            ("Ctrl+O", "Open"),
+            ("Ctrl+S", "Save"),
+            ("Ctrl+Shift+S", "Save as"),
+            ("Esc", "Undo the field being edited"),
+        ] {
+            ui::kbd(ui, keys);
+            ui.label(action);
+            ui.end_row();
+        }
+    });
+}
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("PARAM.SFO");
-            if self.rows.is_empty() {
-                ui.label("Open a PARAM.SFO to edit entries.");
-                return;
-            }
-
-            let mut pending = None;
-            egui::CollapsingHeader::new("Localized titles")
-                .default_open(false)
-                .show(ui, |ui| {
-                    egui::Grid::new("localized_titles")
-                        .striped(true)
-                        .min_col_width(72.0)
-                        .show(ui, |ui| {
-                            for (index, title) in self.localized_titles.iter_mut().enumerate() {
-                                ui.monospace(title.key);
-                                ui.label(title.label);
-                                ui.add_sized(
-                                    [300.0, 22.0],
-                                    egui::TextEdit::singleline(&mut title.value),
-                                );
-                                let label = if title.present { "Apply" } else { "Add" };
-                                if ui.button(label).clicked() {
-                                    pending = Some(PendingAction::LocalizedTitle(index));
-                                }
-                                ui.end_row();
-                            }
-                        });
-                });
-
-            egui::ScrollArea::both().show(ui, |ui| {
-                egui::Grid::new("sfo_entries")
-                    .striped(true)
-                    .min_col_width(72.0)
-                    .show(ui, |ui| {
-                        ui.strong("Key");
-                        ui.strong("Type");
-                        ui.strong("Max");
-                        ui.strong("Registry");
-                        ui.strong("Value");
-                        ui.strong("Apply");
-                        ui.strong("Add");
-                        ui.end_row();
-
-                        let first_absent = self.rows.iter().position(|row| !row.present);
-                        for (index, row) in self.rows.iter_mut().enumerate() {
-                            if Some(index) == first_absent {
-                                ui.strong("Not in file");
-                                ui.label("");
-                                ui.label("");
-                                ui.label("");
-                                ui.label("");
-                                ui.label("");
-                                ui.label("");
-                                ui.end_row();
-                            }
-                            ui.monospace(&row.key);
-                            ui.label(&row.format);
-                            ui.label(row.max_len.to_string());
-                            ui.label(&row.registry);
-                            render_value_and_flags(
-                                ui,
-                                row,
-                                index,
-                                self.show_reserved,
-                                &mut pending,
-                            );
-                            let apply_button =
-                                ui.add_enabled(row.present, egui::Button::new("Apply"));
-                            if apply_button.clicked() {
-                                pending = Some(PendingAction::Apply(index));
-                            }
-                            let add_button = ui
-                                .add_enabled(!row.present && row.addable, egui::Button::new("Add"));
-                            if add_button.clicked() {
-                                pending = Some(PendingAction::AddDefault(index));
-                            }
-                            ui.end_row();
-                        }
-                    });
-            });
-            if let Some(pending) = pending {
-                match pending {
-                    PendingAction::Apply(index) => self.apply_row(index),
-                    PendingAction::AddDefault(index) => {
-                        if let Some(key) = self.rows.get(index).map(|row| row.key.clone()) {
-                            self.add_registry_key(&key);
-                        }
-                    }
-                    PendingAction::LocalizedTitle(index) => self.apply_localized_title(index),
-                    PendingAction::Flag { key, flag, enabled } => {
-                        self.set_flag(&key, &flag, enabled);
-                    }
+/// The editor for one present entry: a dropdown when the registry lists its
+/// values, a text field otherwise.  Edits commit on Enter or focus loss.
+fn value_editor(
+    ui: &mut egui::Ui,
+    row: &mut RowState,
+    index: usize,
+    width: f32,
+    errors: &HashMap<String, String>,
+    actions: &mut Vec<Action>,
+) {
+    if !row.choices.is_empty() {
+        let mut changed = false;
+        egui::ComboBox::from_id_salt(("choice", &row.key))
+            .selected_text(choice_label(row))
+            .width(width)
+            .show_ui(ui, |ui| {
+                for choice in &row.choices {
+                    changed |= ui
+                        .selectable_value(&mut row.value, choice.value.clone(), &choice.label)
+                        .changed();
                 }
+            });
+        if changed {
+            actions.push(Action::Commit(index));
+        }
+    } else {
+        let error = errors.contains_key(&row.key);
+        let mut edit = egui::TextEdit::singleline(&mut row.value)
+            .id(egui::Id::new(("value", &row.key)))
+            .desired_width(width);
+        if row.format == "integer" || row.format.starts_with("raw") {
+            edit = edit.font(egui::TextStyle::Monospace);
+        }
+        let response = ui.add(edit);
+        if error {
+            let p = ui::Palette::of(ui);
+            ui.painter().rect_stroke(
+                response.rect.expand(1.0),
+                egui::Rounding::same(ui::RADIUS_MD),
+                ui::stroke(1.5, p.danger),
+            );
+        }
+        if response.lost_focus() {
+            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                actions.push(Action::Revert(index));
+            } else {
+                actions.push(Action::Commit(index));
             }
+        }
+    }
+    if let Some(error) = errors.get(&row.key) {
+        ui::field_message(ui, Tone::Danger, error);
+    }
+}
+
+fn flag_toggle(ui: &mut egui::Ui, row: &RowState, flag: &FlagState, actions: &mut Vec<Action>) {
+    let mut enabled = flag.enabled;
+    let response = ui::toggle_row(ui, &mut enabled, &flag.label, |ui| {
+        if flag.confidence != Confidence::Confirmed {
+            ui::badge(ui, confidence_name(flag.confidence), confidence_tone(flag.confidence));
+        }
+    });
+    let changed = response.changed();
+    response.on_hover_text(format!(
+        "{}\nsource: {}\nconfidence: {}",
+        flag.name,
+        flag.source,
+        confidence_name(flag.confidence)
+    ));
+    if changed {
+        actions.push(Action::Flag {
+            key: row.key.clone(),
+            flag: flag.name.clone(),
+            enabled,
         });
     }
 }
 
-enum PendingAction {
-    Apply(usize),
-    AddDefault(usize),
-    LocalizedTitle(usize),
-    Flag {
-        key: String,
-        flag: String,
-        enabled: bool,
-    },
+fn confidence_tone(confidence: Confidence) -> Tone {
+    match confidence {
+        Confidence::Confirmed => Tone::Success,
+        Confidence::Observed => Tone::Accent,
+        Confidence::Speculative => Tone::Warning,
+        Confidence::Reserved | Confidence::Gap => Tone::Neutral,
+    }
+}
+
+fn hex_value(value: &str) -> String {
+    match value.parse::<u32>() {
+        Ok(number) => format!("0x{number:08x}"),
+        Err(_) => value.to_owned(),
+    }
+}
+
+/// Plain names for the keys people edit most.  Keys not listed show their
+/// raw name.
+fn friendly_name(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "TITLE" => "Title",
+        "TITLE_ID" => "Title ID",
+        "CATEGORY" => "Category",
+        "APP_VER" => "App version",
+        "VERSION" => "Disc version",
+        "CONTENT_ID" => "Content ID",
+        "PS3_SYSTEM_VER" => "Minimum firmware",
+        "PARENTAL_LEVEL" => "Parental level",
+        "BOOTABLE" => "Bootable",
+        "LICENSE" => "License text",
+        "RESOLUTION" => "Video modes",
+        "SOUND_FORMAT" => "Audio formats",
+        "ATTRIBUTE" => "System attributes",
+        "NP_COMMUNICATION_ID" => "NP communication ID",
+        "REGION_DENY" => "Region deny",
+        "TARGET_APP_VER" => "Target app version",
+        "GAMEDATA_ID" => "Game data ID",
+        "PATCH_FILE_NAME" => "Patch file name",
+        "INSTALL_DIR" => "Install directory",
+        "SUB_TITLE" => "Subtitle",
+        "DETAIL" => "Detail",
+        "SAVEDATA_DIRECTORY" => "Save data directory",
+        "SAVEDATA_LIST_PARAM" => "Save list parameter",
+        "ACCOUNT_ID" => "Account ID",
+        _ => return None,
+    })
+}
+
+/// Hover help for a key, from the registry's behaviour, validation and notes.
+fn key_help(key: &Key) -> Option<String> {
+    let parts: Vec<String> = [
+        key.behavior.clone(),
+        key.validation.as_ref().map(|rule| format!("Expected: {rule}")),
+        key.notes.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
 struct RowState {
     key: String,
+    friendly: Option<&'static str>,
+    help: Option<String>,
     format: String,
     max_len: u32,
-    registry: String,
+    used_len: u32,
+    confidence: Option<Confidence>,
+    /// The text being edited.
     value: String,
+    /// The value the document holds; `value` returns to it on Esc.
+    committed: String,
     present: bool,
     addable: bool,
     choices: Vec<ValueChoice>,
@@ -695,6 +1875,7 @@ struct LocalizedTitleState {
     key: &'static str,
     label: &'static str,
     value: String,
+    committed: String,
     present: bool,
 }
 
@@ -712,21 +1893,40 @@ struct FlagState {
     enabled: bool,
 }
 
+fn registry_key<'a>(
+    model: &'a GuiModel,
+    name: &str,
+    context: Option<sfo::edit::FlagContext>,
+) -> Option<&'a Key> {
+    model
+        .registry
+        .schema(context?.schema_id())
+        .and_then(|schema| schema.key_for_name(name))
+}
+
 fn rows_from_model(model: &GuiModel) -> Vec<RowState> {
     let context = model.flag_context().ok();
     model
         .entries()
         .iter()
-        .map(|entry| RowState {
-            key: entry.key.clone(),
-            format: format_name(entry),
-            max_len: entry.max_len,
-            registry: model.registry_label(entry, context),
-            value: value_text(&entry.value),
-            present: true,
-            addable: false,
-            choices: value_choices(model, entry, context),
-            flags: flag_states(model, entry, context),
+        .map(|entry| {
+            let definition = registry_key(model, &entry.key, context);
+            let value = value_text(&entry.value);
+            RowState {
+                key: entry.key.clone(),
+                friendly: friendly_name(&entry.key),
+                help: definition.and_then(key_help),
+                format: format_name(entry),
+                max_len: entry.max_len,
+                used_len: psf::current_value_len(entry),
+                confidence: definition.map(|key| key.confidence),
+                committed: value.clone(),
+                value,
+                present: true,
+                addable: false,
+                choices: value_choices(model, entry, context),
+                flags: flag_states(model, entry, context),
+            }
         })
         .chain(missing_registry_rows(model, context))
         .collect()
@@ -748,6 +1948,7 @@ fn localized_titles_from_model(model: &GuiModel) -> Vec<LocalizedTitleState> {
                 key,
                 label,
                 present: !value.is_empty() || model.entries().iter().any(|entry| entry.key == *key),
+                committed: value.clone(),
                 value,
             }
         })
@@ -762,11 +1963,7 @@ fn flag_states(
     let (Some(context), Value::Integer(value)) = (context, &entry.value) else {
         return Vec::new();
     };
-    let Some(definition) = model
-        .registry
-        .schema(context.schema_id())
-        .and_then(|schema| schema.key_for_name(&entry.key))
-    else {
+    let Some(definition) = registry_key(model, &entry.key, Some(context)) else {
         return Vec::new();
     };
     sfo::edit::flags_for_context(definition, context)
@@ -810,14 +2007,14 @@ fn missing_registry_rows(
                     let addable = default_entry_value(key).is_some();
                     Some(RowState {
                         key: key.name.clone(),
+                        friendly: friendly_name(&key.name),
+                        help: key_help(key),
                         format: format_kind_label(key.format).to_owned(),
                         max_len: key.max_len.unwrap_or(0),
-                        registry: format!(
-                            "{} / {}",
-                            context.name(),
-                            confidence_name(key.confidence)
-                        ),
-                        value: "absent - Add".to_owned(),
+                        used_len: 0,
+                        confidence: Some(key.confidence),
+                        value: String::new(),
+                        committed: String::new(),
                         present: false,
                         addable,
                         choices: Vec::new(),
@@ -871,21 +2068,27 @@ fn format_kind_label(format: FormatKind) -> &'static str {
     }
 }
 
+/// The dropdown choices for an entry: the registry's listed values, or the
+/// registry's category table for CATEGORY.
 fn value_choices(
     model: &GuiModel,
     entry: &Entry,
     context: Option<sfo::edit::FlagContext>,
 ) -> Vec<ValueChoice> {
-    let Some(context) = context else {
+    let Some(definition) = registry_key(model, &entry.key, context) else {
         return Vec::new();
     };
-    let Some(definition) = model
-        .registry
-        .schema(context.schema_id())
-        .and_then(|schema| schema.key_for_name(&entry.key))
-    else {
-        return Vec::new();
-    };
+    if definition.values.is_empty() && entry.key == "CATEGORY" {
+        return model
+            .registry
+            .categories
+            .iter()
+            .map(|category| ValueChoice {
+                value: category.code.clone(),
+                label: format!("{} - {}", category.code, category.label),
+            })
+            .collect();
+    }
     definition
         .values
         .iter()
@@ -902,98 +2105,6 @@ fn choice_label(row: &RowState) -> String {
         .find(|choice| choice.value == row.value)
         .map(|choice| choice.label.clone())
         .unwrap_or_else(|| row.value.clone())
-}
-
-fn render_value_and_flags(
-    ui: &mut egui::Ui,
-    row: &mut RowState,
-    index: usize,
-    show_reserved: bool,
-    pending: &mut Option<PendingAction>,
-) {
-    ui.vertical(|ui| {
-        if row.choices.is_empty() {
-            if row.present {
-                ui.add_sized([300.0, 22.0], egui::TextEdit::singleline(&mut row.value));
-            } else {
-                ui.add_enabled(false, egui::Label::new(&row.value));
-            }
-        } else {
-            let mut choice_changed = false;
-            egui::ComboBox::from_id_salt(format!("choice_{}", row.key))
-                .selected_text(choice_label(row))
-                .show_ui(ui, |ui| {
-                    for choice in &row.choices {
-                        choice_changed |= ui
-                            .selectable_value(&mut row.value, choice.value.clone(), &choice.label)
-                            .changed();
-                    }
-                });
-            if choice_changed {
-                *pending = Some(PendingAction::Apply(index));
-            }
-        }
-
-        let visible_flags = row
-            .flags
-            .iter()
-            .filter(|flag| show_reserved || !is_reserved_flag(flag))
-            .collect::<Vec<_>>();
-        if visible_flags.is_empty() {
-            return;
-        }
-
-        egui::CollapsingHeader::new(format!("{} flags", row.key))
-            .default_open(true)
-            .show(ui, |ui| {
-                for group in flag_groups(&row.key, &visible_flags) {
-                    if let Some(label) = group.label {
-                        ui.strong(label);
-                    }
-                    egui::Grid::new(format!("flags_{}_{}", row.key, group.id))
-                        .num_columns(2)
-                        .spacing([16.0, 4.0])
-                        .show(ui, |ui| {
-                            for chunk in group.flags.chunks(2) {
-                                for flag in chunk {
-                                    render_flag_checkbox(ui, row, flag, pending);
-                                }
-                                if chunk.len() == 1 {
-                                    ui.label("");
-                                }
-                                ui.end_row();
-                            }
-                        });
-                }
-            });
-    });
-}
-
-fn render_flag_checkbox(
-    ui: &mut egui::Ui,
-    row: &RowState,
-    flag: &FlagState,
-    pending: &mut Option<PendingAction>,
-) {
-    let mut enabled = flag.enabled;
-    let response = ui.checkbox(
-        &mut enabled,
-        format!("{} [{}]", flag.label, confidence_name(flag.confidence)),
-    );
-    let changed = response.changed();
-    response.on_hover_text(format!(
-        "{}\nsource: {}\nconfidence: {}",
-        flag.name,
-        flag.source,
-        confidence_name(flag.confidence)
-    ));
-    if changed {
-        *pending = Some(PendingAction::Flag {
-            key: row.key.clone(),
-            flag: flag.name.clone(),
-            enabled,
-        });
-    }
 }
 
 struct FlagGroup<'a> {
@@ -1039,13 +2150,6 @@ fn group_label(group: &str) -> &'static str {
         "emulator" => "Emulator",
         _ => "Other",
     }
-}
-
-fn assignment_key(assignment: &str) -> &str {
-    assignment
-        .split_once('=')
-        .map(|(key, _)| key)
-        .unwrap_or(assignment)
 }
 
 fn parse_flag_spec(spec: &str) -> Result<(&str, &str)> {
@@ -1115,4 +2219,123 @@ fn hex_bytes(bytes: &[u8]) -> String {
         out.push_str(&format!("{byte:02x}"));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FIXTURE: &[u8] = include_bytes!("../tests/fixtures/ps3dk-template.sfo");
+
+    /// A GuiApp over a private copy of the fixture, with no egui context.
+    fn app_on_copy(name: &str) -> (GuiApp, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "ps3dk-sfo-gui-unit-{}-{name}.sfo",
+            std::process::id()
+        ));
+        std::fs::write(&path, FIXTURE).unwrap();
+        (GuiApp::new(Some(path.clone()), None).unwrap(), path)
+    }
+
+    fn type_into(app: &mut GuiApp, key: &str, value: &str) {
+        let row = app.rows.iter_mut().find(|row| row.key == key).unwrap();
+        row.value = value.to_owned();
+    }
+
+    fn reread(path: &Path) -> Document {
+        psf::parse(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn save_commits_the_field_still_being_edited() {
+        let (mut app, path) = app_on_copy("pending-save");
+        type_into(&mut app, "TITLE", "Typed, not committed");
+        assert!(!app.model.dirty, "nothing committed yet");
+        assert!(app.is_dirty(), "a pending field edit counts as unsaved");
+
+        assert!(app.save());
+        assert_eq!(reread(&path).get_string("TITLE"), Some("Typed, not committed"));
+        assert!(!app.is_dirty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_commits_every_pending_field_and_title() {
+        let (mut app, path) = app_on_copy("pending-many");
+        type_into(&mut app, "TITLE", "Main");
+        type_into(&mut app, "APP_VER", "02.00");
+        let english = app
+            .localized_titles
+            .iter_mut()
+            .find(|title| title.key == "TITLE_01")
+            .unwrap();
+        english.value = "English title".to_owned();
+
+        assert!(app.save());
+        let doc = reread(&path);
+        assert_eq!(doc.get_string("TITLE"), Some("Main"));
+        assert_eq!(doc.get_string("APP_VER"), Some("02.00"));
+        assert_eq!(doc.get_string("TITLE_01"), Some("English title"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn refused_pending_edit_blocks_save_and_stays_dirty() {
+        let (mut app, path) = app_on_copy("pending-refused");
+        type_into(&mut app, "TITLE", "Fine");
+        type_into(&mut app, "APP_VER", "123456789");
+
+        assert!(!app.save(), "an oversize APP_VER without Grow must not save");
+        assert_eq!(std::fs::read(&path).unwrap(), FIXTURE, "the file is untouched");
+        assert!(app.field_errors.contains_key("APP_VER"), "errors: {:?}", app.field_errors);
+        assert!(app.is_dirty(), "a refused edit still counts as unsaved");
+        let app_ver = app.rows.iter().find(|row| row.key == "APP_VER").unwrap();
+        assert_eq!(app_ver.value, "123456789", "the refused text stays in the field");
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn title_index(app: &GuiApp, key: &str) -> usize {
+        app.localized_titles
+            .iter()
+            .position(|title| title.key == key)
+            .unwrap()
+    }
+
+    /// Give TITLE_01 a short value on disk, then refuse an over-slot edit.
+    fn refused_english_title(name: &str) -> (GuiApp, PathBuf, usize) {
+        let (mut app, path) = app_on_copy(name);
+        let index = title_index(&app, "TITLE_01");
+        app.localized_titles[index].value = "Short".to_owned();
+        assert!(app.save());
+
+        app.localized_titles[index].value = "x".repeat(200);
+        app.apply(Action::CommitTitle(index));
+        assert!(app.field_errors.contains_key("TITLE_01"), "the over-slot title is refused");
+        assert!(app.is_dirty());
+        (app, path, index)
+    }
+
+    #[test]
+    fn esc_on_a_refused_title_clears_its_error_and_unblocks_save() {
+        let (mut app, path, index) = refused_english_title("title-esc");
+
+        app.apply(Action::RevertTitle(index));
+        assert_eq!(app.localized_titles[index].value, "Short");
+        assert!(!app.field_errors.contains_key("TITLE_01"));
+        assert!(!app.is_dirty(), "reverting the only edit leaves nothing unsaved");
+        assert!(app.save());
+        assert_eq!(reread(&path).get_string("TITLE_01"), Some("Short"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn retyping_the_stored_title_clears_its_error() {
+        let (mut app, path, index) = refused_english_title("title-retype");
+
+        app.localized_titles[index].value = "Short".to_owned();
+        app.apply(Action::CommitTitle(index));
+        assert!(!app.field_errors.contains_key("TITLE_01"));
+        assert!(app.save());
+        let _ = std::fs::remove_file(path);
+    }
 }

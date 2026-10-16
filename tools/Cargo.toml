@@ -34,6 +34,7 @@ ar = "0.9"
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
 ps3dk-version = { path = "ps3dk-version" }
+ps3dk-ui = { path = "ps3dk-ui" }
 object = { version = "0.36", default-features = false, features = ["read", "write", "elf", "std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
