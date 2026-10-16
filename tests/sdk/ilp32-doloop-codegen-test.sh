@@ -16,8 +16,10 @@
 # is loop-aware: a mtctr is judged as a possible loop count (unproven, so
 # conservative) unless a TERMINAL is reached first.  Terminals (CTR provably
 # not a count): another mtctr (CTR redefined), bctr/bctrl (indirect
-# call/jump), bl/blr (call/return, value dead), or a plain b to ANOTHER
-# function (tail call - clobbers CTR).  NOT terminals: any other branch
+# call/jump), blr (return), or a b/bl whose target is PROVEN another function
+# (a FUNC symbol from objdump -t other than the current one: tail call or call,
+# CTR is volatile).  An objdump "<sym>:" label alone is not that proof: a b or
+# bl to a local label can reach the counted loop, so it is judged.  NOT terminals: any other branch
 # (bdnz, bdz, be, bne, bgt, ...), mfctr (it only READS CTR, so a later bdnz
 # still sees the count), and the end of the function/listing (no straight-
 # line proof of non-use).  So a count that drives a bdnz - including the
@@ -27,10 +29,14 @@
 #
 # Controls (embedded below): the v0.19.0 candidate's listing of doloop.c and
 # an lwz+addi count must be reported; the fixed compiler's clrldi+addi must
-# not.  The scanner's own 11-case self-test (red-add, red-load-addi,
-# green-extended, green-scratch, red-branchy, green-indirect-call,
-# red-read-then-loop, red-b-into-loop, red-truncated, green-b-tailcall,
-# red-b-self) runs first, without a compiler, so the guard fails closed if
+# not.  Each compiled object must show at least one judged counted loop, and
+# objdump's exit status counts (judge's own controls: a loop-free listing and
+# an objdump that prints then exits 1 both fail).  The scanner's own 16-case
+# self-test (red-add, red-load-addi, green-extended, green-scratch,
+# red-branchy, green-indirect-call, red-read-then-loop, red-b-into-loop,
+# red-truncated, green-b-tailcall, red-b-self, red-b-local-label,
+# red-b-local-label-no-funcs, red-bl-local-label, red-b-tailcall-unproven,
+# green-bl-call) runs first, without a compiler, so the guard fails closed if
 # the logic regresses even on a build host with no PPU toolchain.
 #
 # Skips the compiles without PS3DEV (CI has no PPU compiler); the self-test
@@ -44,24 +50,25 @@ trap 'rm -rf "$work"' EXIT
 scanner="$root/tests/sdk/ctr-loop-scan.py"
 [ -f "$scanner" ] || { echo "ilp32-doloop-codegen: FAIL: missing $scanner"; exit 1; }
 
-# First run the scanner's own self-test: 11 synthetic cases covering the
+# First run the scanner's own self-test: 16 synthetic cases covering the
 # loop-usage rules (which instructions make a count clean/dirty), the
-# non-loop terminals (mfocrf-scratch with a blr, bctrl indirect call, b
-# tail-call), and the loop-use cases (read-then-loop via mfctr, a plain b
-# into a local label, a listing truncated at the mtctr, and a b to the
-# function's own entry).  The exit code is 0 only if all eleven pass (2
+# non-loop terminals (mfocrf-scratch with a blr, bctrl indirect call, a b or
+# bl to a proven other function), and the loop-use cases (read-then-loop via
+# mfctr, a plain b into a local label, a listing truncated at the mtctr, a b to
+# the function's own entry, a b or bl to a local label printed as a symbol,
+# an unproven tail call).  The exit code is 0 only if all sixteen pass (2
 # otherwise), so pass/fail is authoritative; the per-case line counts below
-# make the "11/11" requirement explicit.
+# make the "16/16" requirement explicit.
 python3 "$scanner" --self-test > "$work/self-test.out" 2>&1
 rctest=$?
 n_ok=$(grep -c ' ok (findings' "$work/self-test.out")
 n_fail=$(grep -c 'FAIL (findings' "$work/self-test.out")
-if [ $rctest -ne 0 ] || [ "$n_ok" -ne 11 ] || [ "$n_fail" -ne 0 ]; then
-    echo "ilp32-doloop-codegen: FAIL self-test (exit $rctest, ${n_ok}/11 ok, ${n_fail} fail)"
+if [ $rctest -ne 0 ] || [ "$n_ok" -ne 16 ] || [ "$n_fail" -ne 0 ]; then
+    echo "ilp32-doloop-codegen: FAIL self-test (exit $rctest, ${n_ok}/16 ok, ${n_fail} fail)"
     cat "$work/self-test.out"
     exit 1
 fi
-echo "ilp32-doloop-codegen: ok   self-test: 11/11 synthetic cases"
+echo "ilp32-doloop-codegen: ok   self-test: 16/16 synthetic cases"
 
 # The v0.19.0 candidate (c13ee74f) at -O2: CTR loaded from add r5,r9,r5 where
 # r9 is a zero-extended lwz of a negative int.
@@ -121,6 +128,46 @@ control red       3  'finding: .* mtctr r5 <- add .*'              "the v0.19.0 
 control red-addi  3  'finding: .* mtctr r5 <- lwz .* then addi .*' "an offset on a 32-bit load is reported"
 control green     0  'findings: 0'                                 "a zero-extended count is accepted"
 
+# judge <objdump> <object> <name>: the object's listing (objdump -d) and its FUNC symbols (objdump -t), both
+# status-checked, then the scanner with the FUNC list.  Passes only if the scan has no finding AND judged at least
+# one possible loop count: a listing whose mtctr are all non-loop uses tests nothing (codex 15e26177).  The reason
+# for a failure is left in $work/<name>.why.
+judge() {
+    local od=$1 obj=$2 name=$3 rc judged
+    if ! "$od" -d "$obj" > "$work/$name.dis" 2> "$work/$name.err"; then
+        echo "objdump -d failed: $(head -n 1 "$work/$name.err")" > "$work/$name.why"; return 1
+    fi
+    if ! "$od" -t "$obj" > "$work/$name.sym" 2>> "$work/$name.err"; then
+        echo "objdump -t failed: $(head -n 1 "$work/$name.err")" > "$work/$name.why"; return 1
+    fi
+    grep -E ' F ' "$work/$name.sym" | awk '{print $NF}' > "$work/$name.funcs"
+    python3 "$scanner" "$work/$name.dis" --funcs "$work/$name.funcs" > "$work/$name.out"; rc=$?
+    judged=$(sed -n 's/^judged mtctr (possible loop count): \([0-9]*\),.*/\1/p' "$work/$name.out")
+    if [ $rc -ne 0 ] && [ $rc -ne 3 ]; then echo "scanner exit $rc" > "$work/$name.why"; return 1; fi
+    if [ -z "$judged" ] || [ "$judged" -lt 1 ]; then echo "no counted loop judged (judged=${judged:-none})" > "$work/$name.why"; return 1; fi
+    if [ $rc -ne 0 ]; then echo "findings: $(grep '^finding' "$work/$name.out" | head -n 2 | tr '\n' ' ')" > "$work/$name.why"; return 1; fi
+    return 0
+}
+
+# judge's own controls, with a stand-in objdump that prints a fixed listing: a clean counted loop passes; a listing
+# whose only mtctr feeds bctrl (no loop) fails as "no counted loop"; and a good listing from an objdump that then
+# exits 1 fails on the objdump status.
+fake_od() { # <name> <listing file> <exit>
+    printf '#!/bin/sh\nif [ "$1" = -t ]; then echo "0000000000000000 g     F .text\t0000000000000020 .f"; else cat "%s"; fi\nexit %s\n' "$2" "$3" > "$work/$1"
+    chmod +x "$work/$1"
+}
+printf '0000000000000000 <.f>:\n   0:\t79 4a 00 20 \tclrldi  r10,r10,32\n   4:\t7d 49 03 a6 \tmtctr   r10\n   8:\t42 00 00 00 \tbdnz    8 <.f+0x8>\n   c:\t4e 80 00 20 \tblr\n' > "$work/loop.dis"
+printf '0000000000000000 <.f>:\n   0:\t7c a9 2a 14 \tadd     r5,r9,r5\n   4:\t7c a9 03 a6 \tmtctr   r5\n   8:\t4e 80 04 21 \tbctrl\n   c:\t4e 80 00 20 \tblr\n' > "$work/nonloop.dis"
+fake_od od-loop "$work/loop.dis" 0; fake_od od-nonloop "$work/nonloop.dis" 0; fake_od od-fail "$work/loop.dis" 1
+if judge "$work/od-loop" /dev/null c-loop && ! judge "$work/od-nonloop" /dev/null c-nonloop &&
+   grep -q "no counted loop" "$work/c-nonloop.why" && ! judge "$work/od-fail" /dev/null c-fail &&
+   grep -q "objdump -d failed" "$work/c-fail.why"; then
+    echo "ilp32-doloop-codegen: ok   control: judge passes a counted loop, refuses a loop-free listing and a failed objdump"
+else
+    echo "ilp32-doloop-codegen: FAIL control: judge (loop/nonloop/objdump-fail)"
+    for c in c-loop c-nonloop c-fail; do [ -f "$work/$c.why" ] && echo "    $c: $(cat "$work/$c.why")"; done; status=1
+fi
+
 ps3dev="${PS3DEV:-}"
 [ "${1:-}" = "--ps3dev" ] && ps3dev="$2"
 if [ -z "$ps3dev" ]; then
@@ -138,14 +185,10 @@ for model in "" -mlp64; do
         if ! "$cc" ${EXTRA_CFLAGS:-} -mcpu=cell -mhard-float $model $opt -c "$src" -o "$work/$name.o"; then
             echo "ilp32-doloop-codegen: FAIL ${model:-ILP32} $opt: compile failed"; status=1; continue
         fi
-        "$objdump" -d "$work/$name.o" > "$work/$name.dis"
-        if ! grep -q mtctr "$work/$name.dis"; then
-            echo "ilp32-doloop-codegen: FAIL ${model:-ILP32} $opt: no counted loop; the reproducer no longer reaches doloop"
-            status=1
-        elif python3 "$scanner" "$work/$name.dis" > "$work/$name.out"; then
-            echo "ilp32-doloop-codegen: ok   ${model:-ILP32} $opt: every CTR count has a defined upper half"
+        if judge "$objdump" "$work/$name.o" "$name"; then
+            echo "ilp32-doloop-codegen: ok   ${model:-ILP32} $opt: $(sed -n 's/^judged mtctr (possible loop count): \([0-9]*\),.*/\1/p' "$work/$name.out") counted loop(s), every CTR count has a defined upper half"
         else
-            echo "ilp32-doloop-codegen: FAIL ${model:-ILP32} $opt"; cat "$work/$name.out"; status=1
+            echo "ilp32-doloop-codegen: FAIL ${model:-ILP32} $opt: $(cat "$work/$name.why")"; cat "$work/$name.out" 2>/dev/null; status=1
         fi
     done
 done

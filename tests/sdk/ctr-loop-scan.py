@@ -34,11 +34,16 @@ NOWRITE = re.compile(r"^(cmp|fcmp|st|tw|td|dcb|mt|sync|isync|nop|lfs|lfd|stfiwx)
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+(?:[0-9a-f]{2} ){4}\s*(\S+)\s*(.*)$")
 FN = re.compile(r"^([0-9a-f]+) <([^>]*)>:")
 
-def parse(lines):
+def parse(lines, funcs=None):
+    # funcs: the FUNC symbols of the object (objdump -t), or None.  objdump prints every symbol as a
+    # "<sym>:" label, local labels included, so with a FUNC list only a function symbol starts a new
+    # function; without one every label does (and a b/bl target is never proof of another function).
     insns, fn = [], "?"
     for raw in lines:
         m = FN.match(raw)
         if m:
+            if funcs is not None and m.group(2) not in funcs:
+                continue
             fn = m.group(2)
             insns.append(("<fn>", [], fn, m.group(1)))
             continue
@@ -72,8 +77,20 @@ def origin(insns, i, reg):
         j -= 1
     return "clean"
 
-def scan(lines, out=sys.stdout):
-    insns = parse(lines)
+def call_target(a, fn, funcs):
+    """The symbol a b/bl reaches when it is PROVEN another function: a FUNC symbol (objdump -t) other than
+    the current one, with no "+off".  Anything else - a local label, this function, no symbol, no FUNC
+    list - is None: the branch may stay inside the function and reach a counted loop (codex 15e26177)."""
+    if funcs is None:
+        return None
+    m = re.search(r"<([^>]+)>", a[-1]) if a else None
+    sym = m.group(1) if m else None
+    if sym and "+" not in sym and sym != fn and sym in funcs:
+        return sym
+    return None
+
+def scan(lines, out=sys.stdout, funcs=None):
+    insns = parse(lines, funcs)
     findings, loops, other = 0, 0, []
     for i, (op, args, fn, addr) in enumerate(insns):
         if op != "mtctr":
@@ -105,8 +122,13 @@ def scan(lines, out=sys.stdout):
             if o in ("bctr", "bctrl"):
                 terminal = o
                 break
-            if o in ("bl", "blr"):
-                terminal = o
+            if o == "blr":
+                terminal = o                       # return: CTR is dead
+                break
+            if o == "bl":
+                # A call clobbers CTR (volatile) - but only a call to a PROVEN other function.
+                # A bl to a local label is a branch-and-link that can reach the loop.
+                terminal = "bl(call %s)" % call_target(a, fn, funcs) if call_target(a, fn, funcs) else None
                 break
             if o == "b":
                 # Real objdump prints a branch target as "<addr> <sym>" (the
@@ -116,12 +138,10 @@ def scan(lines, out=sys.stdout):
                 # "+off", and is not this function (a call clobbers CTR);
                 # anything else (local label, own entry, no <sym>) stays a
                 # loop use.
-                m = re.search(r"<([^>]+)>", a[-1]) if a else None
-                sym = m.group(1) if m else None
-                if sym and "+" not in sym and sym != fn:
-                    terminal = "b(tailcall)"      # CTR call-clobbered
+                if call_target(a, fn, funcs):
+                    terminal = "b(tailcall %s)" % call_target(a, fn, funcs)   # CTR call-clobbered
                     break
-                terminal = None                    # local b = loop use
+                terminal = None                    # local / unproven b = loop use
                 break
             if o.startswith("b"):
                 terminal = None                    # any other branch = loop use
@@ -231,7 +251,7 @@ def self_test():
     4:	38 a9 00 02 	addi    r5,r9,2
     8:	7c a9 03 a6 	mtctr   r5
     c:	48 00 00 10 	b       1c <.g>
-""", 0),
+""", 0, {".f", ".g"}),
         # P2 (v3/v4 review): a b to the CURRENT function's entry is a local
         # branch, not a call - "b <addr> <.f>" must match fn ".f" (the symbol
         # is extracted from <...>, the address <addr> is ignored), so it is
@@ -242,10 +262,23 @@ def self_test():
     8:	7c a9 03 a6 	mtctr   r5
     c:	48 00 00 00 	b       0 <.f>
 """, 1),
+        # codex 15e26177: a "<sym>:" label in objdump output is not proof of a function.  A b to a local
+        # label printed as its own symbol (hand-written assembly: loop_entry) reaches the counted loop.
+        # With the object's FUNC list (only f) the label is not a boundary; without one the target is
+        # unproven.  Either way the count is judged (finding).
+        "red-b-local-label": ('0000000000000000 <f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 08 \tb       14 <loop_entry>\n   10:\t60 00 00 00 \tnop\n\n0000000000000014 <loop_entry>:\n   14:\t60 00 00 00 \tnop\n   18:\t42 00 ff fc \tbdnz    14 <loop_entry>\n   1c:\t4e 80 00 20 \tblr\n', 1, {"f"}),
+        "red-b-local-label-no-funcs": ('0000000000000000 <f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 08 \tb       14 <loop_entry>\n   10:\t60 00 00 00 \tnop\n\n0000000000000014 <loop_entry>:\n   14:\t60 00 00 00 \tnop\n   18:\t42 00 ff fc \tbdnz    14 <loop_entry>\n   1c:\t4e 80 00 20 \tblr\n', 1, None),
+        # codex 15e26177: bl does not itself clobber CTR; a bl to a local label reaches the loop too.
+        "red-bl-local-label": ('0000000000000000 <f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 09 \tbl      14 <loop_entry>\n   10:\t60 00 00 00 \tnop\n\n0000000000000014 <loop_entry>:\n   14:\t60 00 00 00 \tnop\n   18:\t42 00 ff fc \tbdnz    14 <loop_entry>\n   1c:\t4e 80 00 20 \tblr\n', 1, {"f"}),
+        # A b to another function is a tail call only with proof: no FUNC list -> judged.
+        "red-b-tailcall-unproven": ('0000000000000000 <.f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 10 \tb       1c <.g>\n', 1, None),
+        # A bl to a proven other function is a call (CTR is volatile across it): not a count.
+        "green-bl-call": ('0000000000000000 <.f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 11 \tbl      1c <.g>\n', 0, {".f", ".g"}),
     }
     ok = True
-    for name, (text, want) in cases.items():
-        got = scan(text.splitlines(), out=io.StringIO())
+    for name, case in cases.items():
+        text, want, funcs = case if len(case) == 3 else (case[0], case[1], None)
+        got = scan(text.splitlines(), out=io.StringIO(), funcs=funcs)
         print("self-test %-20s %s (findings %d, want %d)" % (name, "ok" if got == want else "FAIL", got, want))
         ok &= got == want
     return ok
@@ -253,4 +286,7 @@ def self_test():
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(0 if self_test() else 2)
-    sys.exit(0 if scan(open(sys.argv[1], errors="replace")) == 0 else 3)
+    funcs = None
+    if "--funcs" in sys.argv:
+        funcs = set(l.strip() for l in open(sys.argv[sys.argv.index("--funcs") + 1]) if l.strip())
+    sys.exit(0 if scan(open(sys.argv[1], errors="replace"), funcs=funcs) == 0 else 3)
