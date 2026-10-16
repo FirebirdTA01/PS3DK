@@ -45,3 +45,4 @@
 0066-rs6000-cell64lv2-lp64-requires-64bit.patch
 0067-rs6000-stack-protector-ptr-mode.patch
 0068-cell64lv2-sdk-default-include.patch
+0072-rs6000-cell64lv2-ilp32-no-ext-dce.patch

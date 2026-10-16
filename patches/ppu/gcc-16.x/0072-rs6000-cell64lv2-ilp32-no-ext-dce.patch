@@ -1,0 +1,46 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: ext-dce off by default for powerpc64-ps3-elf ILP32
+
+Under the PS3 ILP32 model pointers are 32 bits, held zero-extended in
+64-bit registers (Pmode DImode, POINTERS_EXTEND_UNSIGNED), and the PPU
+forms 64-bit effective addresses from all 64 bits.  With GCC 16, zlib's
+adler32 at -O2 looped forever on any input of 33 bytes: ext-dce turned
+(zero_extend:DI (reg:SI)) of the post-loop buffer pointer -- a 32-bit
+value that had wrapped, formed by final value replacement -- into a
+paradoxical subreg, and combine then folded the address arithmetic into
+a 64-bit subtraction, so the address kept a set upper half.  The
+extension survives every pass up to ext-dce and is gone after combine;
+-fno-ext-dce alone restores correct code.
+
+As containment, keep ext-dce off by default under ILP32 (in
+rs6000_override_options_after_change, so optimize attributes and pragmas
+get the same default).  An explicit -fext-dce is honoured and is known to
+be unsafe for this shape; -fno-ext-dce is honoured.  LP64 is unchanged.
+Whether ext-dce or an earlier RTL expression is at fault is still being
+established.
+
+diff --git a/gcc/config/rs6000/rs6000.cc b/gcc/config/rs6000/rs6000.cc
+index 49a6cb3..678d620 100644
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -3438,6 +3438,20 @@ rs6000_override_options_after_change (void)
+      until the define_insn_and_splits are fixed.  */
+   if (!OPTION_SET_P (flag_late_combine_instructions))
+     flag_late_combine_instructions = 0;
++
++#ifdef POWERPC_CELL64LV2
++  /* PS3 LV2 ILP32: pointers are 32 bits, held zero-extended in 64-bit
++     registers, and the PPU forms 64-bit effective addresses from all 64
++     bits.  ext-dce has been seen to turn the zero-extension of a 32-bit
++     pointer value that wrapped (a post-loop pointer formed by final value
++     replacement) into a paradoxical subreg, after which combine folded the
++     address arithmetic into 64 bits and the address kept a set upper half
++     (zlib's adler32 looped).  Keep the pass off by default under ILP32;
++     an explicit -fext-dce is honoured, and is known unsafe for that
++     shape.  LP64 is unchanged.  */
++  if (!TARGET_LP64 && !OPTION_SET_P (flag_ext_dce))
++    flag_ext_dce = 0;
++#endif
+ }
+ 
+ #ifdef TARGET_USES_LINUX64_OPT
