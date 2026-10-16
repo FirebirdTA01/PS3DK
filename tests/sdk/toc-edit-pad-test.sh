@@ -16,7 +16,7 @@
 # depend on heap luck), and the output .got must hold exactly: entry i = the
 # address of d<i+2>, then a zero pad word.  The checker's own controls: a .got
 # image with a nonzero or missing pad, a wrong entry, or no edit at all is refused,
-# and so is an objcopy or nm that prints its output but exits non-zero.
+# and so is an objcopy, nm, tr or awk that prints its output but exits non-zero.
 #
 # Linux hosts only (MALLOC_PERTURB_ is glibc's); skips without PS3DEV.
 # usage: toc-edit-pad-test.sh [--ps3dev DIR]
@@ -59,7 +59,7 @@ gen() {
 got_ok() {
     local words=$1 n=$2 syms=$3 want="" i a
     for ((i = 2; i < n; i++)); do
-        a=$(awk -v s="d$i" '$3 == s { print $1 }' <<< "$syms")
+        a=$(awk -v s="d$i" '$3 == s { print $1 }' <<< "$syms") || return 1
         [ -n "$a" ] || return 1
         want+=$(printf '%08x' $((16#$a & 0xffffffff)))
     done
@@ -90,7 +90,7 @@ extract() {
     "$oc" -O binary --only-section=.got "$elf" "$work/got.bin" || return 1
     [ -s "$work/got.bin" ] || return 1
     WORDS=$(od -An -v -tx1 "$work/got.bin") || return 1
-    WORDS=$(tr -d ' \n' <<< "$WORDS")
+    WORDS=$(tr -d ' \n' <<< "$WORDS") || return 1
     SYMS=$("$nmt" "$elf") || return 1
     [ -n "$WORDS" ] && [ -n "$SYMS" ]
 }
@@ -109,6 +109,19 @@ if "$p-as" -a64 -mcell "$work/c.s" -o "$work/c.o" && "$p-ld" -e live --gc-sectio
     echo "toc-edit-pad: ok   extraction is exact with the real tools and refuses a tool that exits 1"
 else
     echo "toc-edit-pad: FAIL extraction controls"; status=1
+fi
+
+# tr and awk in the conversion path: wrapped to run the real tool and then exit 1 (first on PATH), each must make
+# extraction or the checker fail on the same real link.
+mkdir -p "$work/badtr" "$work/badawk"
+printf '#!/bin/sh\n"%s" "$@"\nexit 1\n' "$(command -v tr)" > "$work/badtr/tr"
+printf '#!/bin/sh\n"%s" "$@"\nexit 1\n' "$(command -v awk)" > "$work/badawk/awk"
+chmod +x "$work/badtr/tr" "$work/badawk/awk"
+if ! PATH="$work/badtr:$PATH" extract "$p-objcopy" "$p-nm" "$work/c.elf" &&
+   extract "$p-objcopy" "$p-nm" "$work/c.elf" && ! PATH="$work/badawk:$PATH" got_ok "$WORDS" 5 "$SYMS"; then
+    echo "toc-edit-pad: ok   the conversion refuses a tr or an awk that exits 1"
+else
+    echo "toc-edit-pad: FAIL tr/awk status controls"; status=1
 fi
 
 for n in 9 33 69 129; do
