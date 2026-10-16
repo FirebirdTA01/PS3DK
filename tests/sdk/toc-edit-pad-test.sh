@@ -15,7 +15,8 @@
 # perturbed heap makes the over-read bytes nonzero, so the red control does not
 # depend on heap luck), and the output .got must hold exactly: entry i = the
 # address of d<i+2>, then a zero pad word.  The checker's own controls: a .got
-# image with a nonzero or missing pad, a wrong entry, or no edit at all is refused.
+# image with a nonzero or missing pad, a wrong entry, or no edit at all is refused,
+# and so is an objcopy or nm that prints its output but exits non-zero.
 #
 # Linux hosts only (MALLOC_PERTURB_ is glibc's); skips without PS3DEV.
 # usage: toc-edit-pad-test.sh [--ps3dev DIR]
@@ -31,7 +32,12 @@ if [ "$(uname -s)" != Linux ]; then
     exit 0
 fi
 p="$ps3dev/ppu/bin/powerpc64-ps3-elf"
-[ -x "$p-ld" ] && [ -x "$p-as" ] || { echo "toc-edit-pad: FAIL: no assembler/linker at $p-*"; exit 1; }
+for t in as ld objcopy nm; do
+    [ -x "$p-$t" ] || { echo "toc-edit-pad: FAIL: no $p-$t"; exit 1; }
+done
+for t in od tr awk; do
+    command -v $t > /dev/null || { echo "toc-edit-pad: FAIL: no $t on PATH"; exit 1; }
+done
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 status=0
@@ -75,6 +81,36 @@ else
     echo "toc-edit-pad: FAIL the .got checker does not separate its controls"; status=1
 fi
 
+# extract <objcopy> <nm> <elf>: WORDS = the output .got as hex, SYMS = nm's symbol table.  Every step is
+# status-checked (objcopy to a file, then od, then nm); an empty .got or symbol table is a failure too.
+extract() {
+    local oc=$1 nmt=$2 elf=$3
+    WORDS=""; SYMS=""
+    rm -f "$work/got.bin"
+    "$oc" -O binary --only-section=.got "$elf" "$work/got.bin" || return 1
+    [ -s "$work/got.bin" ] || return 1
+    WORDS=$(od -An -v -tx1 "$work/got.bin") || return 1
+    WORDS=$(tr -d ' \n' <<< "$WORDS")
+    SYMS=$("$nmt" "$elf") || return 1
+    [ -n "$WORDS" ] && [ -n "$SYMS" ]
+}
+
+# The extraction's own controls, on a real n=5 link: the real tools give the exact image; an objcopy or an nm
+# that prints its honest output and then exits 1 is refused.
+mkdir -p "$work/bad"
+for t in objcopy nm; do
+    printf '#!/bin/sh\n"%s" "$@"\nexit 1\n' "$p-$t" > "$work/bad/$t"; chmod +x "$work/bad/$t"
+done
+gen 5 > "$work/c.s"
+if "$p-as" -a64 -mcell "$work/c.s" -o "$work/c.o" && "$p-ld" -e live --gc-sections "$work/c.o" -o "$work/c.elf" &&
+   extract "$p-objcopy" "$p-nm" "$work/c.elf" && got_ok "$WORDS" 5 "$SYMS" &&
+   ! extract "$work/bad/objcopy" "$p-nm" "$work/c.elf" &&
+   ! extract "$p-objcopy" "$work/bad/nm" "$work/c.elf"; then
+    echo "toc-edit-pad: ok   extraction is exact with the real tools and refuses a tool that exits 1"
+else
+    echo "toc-edit-pad: FAIL extraction controls"; status=1
+fi
+
 for n in 9 33 69 129; do
     gen $n > "$work/t$n.s"
     if ! "$p-as" -a64 -mcell "$work/t$n.s" -o "$work/t$n.o" 2> "$work/err.txt"; then
@@ -85,12 +121,12 @@ for n in 9 33 69 129; do
         if ! MALLOC_PERTURB_=$perturb "$p-ld" -e live --gc-sections "$work/t$n.o" -o "$work/t.elf" 2> "$work/err.txt"; then
             echo "toc-edit-pad: FAIL $label does not link"; head -3 "$work/err.txt"; status=1; continue
         fi
-        words=$("$p-objcopy" -O binary --only-section=.got "$work/t.elf" /dev/stdout | od -An -v -tx1 | tr -d ' \n')
-        syms=$("$p-nm" "$work/t.elf")
-        if got_ok "$words" $n "$syms"; then
+        if ! extract "$p-objcopy" "$p-nm" "$work/t.elf"; then
+            echo "toc-edit-pad: FAIL $label: could not read .got or symbols"; status=1
+        elif got_ok "$WORDS" $n "$SYMS"; then
             echo "toc-edit-pad: ok   $label .got = $((n - 2)) kept entries + zero pad"
         else
-            echo "toc-edit-pad: FAIL $label .got is $words"; status=1
+            echo "toc-edit-pad: FAIL $label .got is $WORDS"; status=1
         fi
     done
 done
