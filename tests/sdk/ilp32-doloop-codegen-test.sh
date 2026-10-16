@@ -30,7 +30,8 @@
 # Controls (embedded below): the v0.19.0 candidate's listing of doloop.c and
 # an lwz+addi count must be reported; the fixed compiler's clrldi+addi must
 # not.  Each compiled object must show at least one WITNESSED counted loop (a
-# judged mtctr followed by a bd* branch in its function), and
+# bd* branch reachable from a judged mtctr, with CTR intact, whose in-function
+# target leads back to it - a cycle; unresolved shapes fail closed), and
 # objdump's exit status counts (judge's own controls: bctrl-only, conditional-
 # only and truncated listings, and an objdump that prints then exits 1, fail).  The scanner's own 16-case
 # self-test (red-add, red-load-addi, green-extended, green-scratch,
@@ -57,19 +58,21 @@ scanner="$root/tests/sdk/ctr-loop-scan.py"
 # bl to a proven other function), and the loop-use cases (read-then-loop via
 # mfctr, a plain b into a local label, a listing truncated at the mtctr, a b to
 # the function's own entry, a b or bl to a local label printed as a symbol,
-# an unproven tail call).  The exit code is 0 only if all sixteen pass (2
+# an unproven tail call).  The exit code is 0 only if all twenty-one pass (2
 # otherwise), so pass/fail is authoritative; the per-case line counts below
-# make the "16/16" requirement explicit.
+# make the "21/21" requirement explicit (16 hazard cases + 5 loop-witness
+# cases: normal and rotated loops witnessed; a forward-only bdnz, a backward
+# bdnz whose loop body calls, and a bdnz after a return not witnessed).
 python3 "$scanner" --self-test > "$work/self-test.out" 2>&1
 rctest=$?
-n_ok=$(grep -c ' ok (findings' "$work/self-test.out")
-n_fail=$(grep -c 'FAIL (findings' "$work/self-test.out")
-if [ $rctest -ne 0 ] || [ "$n_ok" -ne 16 ] || [ "$n_fail" -ne 0 ]; then
-    echo "ilp32-doloop-codegen: FAIL self-test (exit $rctest, ${n_ok}/16 ok, ${n_fail} fail)"
+n_ok=$(grep -cE ' ok \((findings|witness)' "$work/self-test.out")
+n_fail=$(grep -cE 'FAIL \((findings|witness)' "$work/self-test.out")
+if [ $rctest -ne 0 ] || [ "$n_ok" -ne 21 ] || [ "$n_fail" -ne 0 ]; then
+    echo "ilp32-doloop-codegen: FAIL self-test (exit $rctest, ${n_ok}/21 ok, ${n_fail} fail)"
     cat "$work/self-test.out"
     exit 1
 fi
-echo "ilp32-doloop-codegen: ok   self-test: 16/16 synthetic cases"
+echo "ilp32-doloop-codegen: ok   self-test: 21/21 synthetic cases"
 
 # The v0.19.0 candidate (c13ee74f) at -O2: CTR loaded from add r5,r9,r5 where
 # r9 is a zero-extended lwz of a negative int.
@@ -131,7 +134,7 @@ control green     0  'findings: 0'                                 "a zero-exten
 
 # judge <objdump> <object> <name>: the object's listing (objdump -d) and its FUNC symbols (objdump -t), both
 # status-checked, then the scanner with the FUNC list.  Passes only if the scan has no finding AND witnessed at least
-# one CTR-controlled loop (a judged mtctr followed by a bd* branch): a listing whose mtctr feed no loop branch
+# one CTR-controlled loop (a bd* cycle reachable from a judged mtctr): a listing whose mtctr feed no loop branch
 # tests nothing (codex 15e26177, 67047a74).  Possible counts are still all judged for hazards.  The reason
 # for a failure is left in $work/<name>.why.
 judge() {

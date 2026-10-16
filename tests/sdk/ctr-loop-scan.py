@@ -89,6 +89,69 @@ def call_target(a, fn, funcs):
         return sym
     return None
 
+def fn_range(insns, i):
+    """[start, end) of the instruction indexes of the function holding index i."""
+    a = i
+    while a > 0 and insns[a - 1][0] != "<fn>":
+        a -= 1
+    b = i
+    while b < len(insns) and insns[b][0] != "<fn>":
+        b += 1
+    return a, b
+
+def local_target(insns, a, lo, hi):
+    """Index of a branch's target inside [lo, hi), from objdump's "<addr> <sym...>" operand, or None."""
+    if not a:
+        return None
+    m = re.match(r"\s*([0-9a-f]+)", a[-1])
+    if not m:
+        return None
+    want = int(m.group(1), 16)
+    for k in range(lo, hi):
+        if insns[k][0] != "<fn>" and int(insns[k][3], 16) == want:
+            return k
+    return None
+
+def successors(insns, k, lo, hi, fn, funcs):
+    """Indexes control can reach next from k without leaving the function or losing the CTR value; [] stops
+    the path (CTR redefined, a call, a return, an indirect branch, a tail call, an unresolved target - every
+    shape this walk does not model fails closed)."""
+    o, a = insns[k][0], insns[k][1]
+    nxt = [k + 1] if k + 1 < hi else []
+    if o in ("mtctr", "bl", "bla", "blrl", "bctr", "bctrl", "blr"):
+        return []
+    if not o.startswith("b"):
+        return nxt
+    if o.endswith("lr") or o.endswith("ctr"):
+        return nxt                             # conditional return / indirect: only the fall-through stays
+    if o.endswith("l") or o.endswith("la") or o.endswith("ctrl") or o.endswith("lrl"):
+        return []                              # conditional call: fail closed
+    t = local_target(insns, a, lo, hi)
+    if o == "b":
+        return [t] if t is not None and not call_target(a, fn, funcs) else []
+    return nxt + [t] if t is not None else []   # conditional (beq, bne, blt, bdnz, ...): both edges
+
+def reach(insns, start, lo, hi, fn, funcs):
+    seen, todo = set(), [start]
+    while todo:
+        k = todo.pop()
+        if k in seen or not (lo <= k < hi):
+            continue
+        seen.add(k)
+        todo.extend(successors(insns, k, lo, hi, fn, funcs))
+    return seen
+
+def loop_witness(insns, i, fn, funcs):
+    lo, hi = fn_range(insns, i)
+    for k in sorted(reach(insns, i + 1, lo, hi, fn, funcs)):
+        o, a = insns[k][0], insns[k][1]
+        if not o.startswith("bd") or o.endswith("lr") or o.endswith("ctr"):
+            continue
+        t = local_target(insns, a, lo, hi)
+        if t is not None and k in reach(insns, t, lo, hi, fn, funcs):
+            return True
+    return False
+
 def scan(lines, out=sys.stdout, funcs=None):
     insns = parse(lines, funcs)
     findings, loops, other, witnessed = 0, 0, [], 0
@@ -151,15 +214,12 @@ def scan(lines, out=sys.stdout, funcs=None):
             other.append("%s %s mtctr %s -> %s" % (fn, addr, args[0], terminal))
             continue
         loops += 1
-        # A WITNESSED counted loop: a CTR-decrementing branch (bdnz, bdz, bdnzt, ... - every mnemonic starting
-        # "bd") later in the same function.  A possible count is judged for hazards either way; only a witness
-        # proves the listing still contains a CTR-controlled loop (codex 67047a74).
-        for k in range(i + 1, len(insns)):
-            if insns[k][0] == "<fn>":
-                break
-            if insns[k][0].startswith("bd"):
-                witnessed += 1
-                break
+        # A WITNESSED counted loop (codex 67047a74, c1dcf020): a CTR-decrementing branch reachable from this
+        # mtctr whose in-function target leads back to it - a cycle - with no CTR redefinition, call or return
+        # on the way.  Hazards are judged on every possible count either way; only a witness proves the
+        # listing still has a CTR-controlled loop.  Anything this walk cannot resolve fails the witness.
+        if loop_witness(insns, i, fn, funcs):
+            witnessed += 1
         v = origin(insns, i, args[0])
         if v != "clean":
             findings += 1
@@ -167,7 +227,7 @@ def scan(lines, out=sys.stdout, funcs=None):
     for o in other:
         print("non-loop CTR use (not a hazard): " + o, file=out)
     print("judged mtctr (possible loop count): %d, findings: %d, non-loop mtctr: %d" % (loops, findings, len(other)), file=out)
-    print("witnessed counted loops (judged mtctr followed by a bd* branch in its function): %d" % witnessed, file=out)
+    print("witnessed counted loops (a bd* cycle reachable from a judged mtctr with CTR intact): %d" % witnessed, file=out)
     return findings
 
 def self_test_cases():
@@ -286,6 +346,17 @@ def self_test_cases():
         "green-bl-call": ('0000000000000000 <.f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 11 \tbl      1c <.g>\n', 0, {".f", ".g"}),
     }
 
+def witness_cases():
+    """name -> (listing, FUNC symbols, expected witnessed CTR loops) (codex c1dcf020: a bd* mnemonic later in the
+    function is not a loop; the bd* must close a cycle reachable from the mtctr with CTR intact)."""
+    return {
+        "w-normal-loop": ('0000000000000000 <.f>:\n    0:\t79 4a 00 20 \tclrldi  r10,r10,32\n    4:\t7d 49 03 a6 \tmtctr   r10\n    8:\t60 00 00 00 \tnop\n    c:\t42 00 ff fc \tbdnz    8 <.f+0x8>\n   10:\t4e 80 00 20 \tblr\n', {".f"}, 1),
+        "w-rotated-loop": ('0000000000000000 <.f>:\n    0:\t79 4a 00 20 \tclrldi  r10,r10,32\n    4:\t7d 49 03 a6 \tmtctr   r10\n    8:\t48 00 00 08 \tb       10 <.f+0x10>\n    c:\t60 00 00 00 \tnop\n   10:\t42 00 ff fc \tbdnz    c <.f+0xc>\n   14:\t4e 80 00 20 \tblr\n', {".f"}, 1),
+        "w-forward-bdnz": ('0000000000000000 <.f>:\n    0:\t38 a0 00 02 \tli      r5,2\n    4:\t7c a9 03 a6 \tmtctr   r5\n    8:\t42 00 00 08 \tbdnz    10 <.f+0x10>\n    c:\t60 00 00 00 \tnop\n   10:\t4e 80 00 20 \tblr\n', {".f"}, 0),
+        "w-backward-bdnz-through-call": ('0000000000000000 <.f>:\n    0:\t38 a0 00 02 \tli      r5,2\n    4:\t7c a9 03 a6 \tmtctr   r5\n    8:\t48 00 00 08 \tb       10 <.f+0x10>\n    c:\t48 00 00 15 \tbl      20 <.g>\n   10:\t42 00 ff fc \tbdnz    c <.f+0xc>\n   14:\t4e 80 00 20 \tblr\n', {".f", ".g"}, 0),
+        "w-bdnz-after-return": ('0000000000000000 <.f>:\n    0:\t38 a0 00 02 \tli      r5,2\n    4:\t7c a9 03 a6 \tmtctr   r5\n    8:\t4e 80 00 20 \tblr\n    c:\t60 00 00 00 \tnop\n   10:\t42 00 ff fc \tbdnz    c <.f+0xc>\n', {".f"}, 0),
+    }
+
 def self_test():
     import io
     cases = self_test_cases()
@@ -294,6 +365,13 @@ def self_test():
         text, want, funcs = case if len(case) == 3 else (case[0], case[1], None)
         got = scan(text.splitlines(), out=io.StringIO(), funcs=funcs)
         print("self-test %-20s %s (findings %d, want %d)" % (name, "ok" if got == want else "FAIL", got, want))
+        ok &= got == want
+    for name, (text, funcs, want) in witness_cases().items():
+        buf = io.StringIO()
+        scan(text.splitlines(), out=buf, funcs=funcs)
+        m = re.search(r"witnessed counted loops [^:]*: (\d+)", buf.getvalue())
+        got = int(m.group(1)) if m else -1
+        print("self-test %-20s %s (witness %d, want %d)" % (name, "ok" if got == want else "FAIL", got, want))
         ok &= got == want
     return ok
 
