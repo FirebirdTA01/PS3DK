@@ -1,0 +1,48 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] elf64-ppc: pad an odd-size .toc before the TOC edit
+
+ppc64_elf_edit_toc drops unused TOC entries (those referenced only from
+sections removed by --gc-sections) and shuffles the rest down, stepping
+through a malloc'd copy of the section 8 bytes at a time and setting the
+new size from where the step stopped.  ELFv1 and ELFv2 TOC entries are 8
+bytes, so the size is always a multiple of 8.  CellOS Lv-2 ILP32 entries
+are 4 bytes: a .toc with an odd number of them (a size of 4 mod 8) made
+the last step read 4 bytes past the copy, and the rounded-up size wrote
+those 4 heap bytes into the output .got.  The same objects linked from
+two output paths of different lengths gave ELFs that differed in that
+word ('dlPv', the tail of a freed "_ZdlPv" string, in one and zeros in
+the other); nothing references the word, but links were not
+byte-reproducible.
+
+Fix: when the size is not a multiple of 8, grow the copy to the next
+multiple and zero the pad before the shuffle.  The edited section keeps
+the size it had (rounded up, as before); the pad word is now zero.
+
+--- a/bfd/elf64-ppc.c
++++ b/bfd/elf64-ppc.c
+@@ -9368,6 +9368,25 @@
+ 	  if (!bfd_malloc_and_get_section (ibfd, toc, &contents))
+ 	    goto error_ret;
+ 
++	  /* CellOS Lv-2 ILP32 .toc entries are 4 bytes, so the section
++	     size need not be a multiple of the 8-byte step below.  Pad
++	     the copy to one with zeros: the shuffle would otherwise read
++	     past the buffer, and the rounded-up size below would carry
++	     those heap bytes into the output.  */
++	  if ((toc->size & 7) != 0)
++	    {
++	      bfd_size_type padded = (toc->size + 7) & ~(bfd_size_type) 7;
++	      bfd_byte *grown = bfd_realloc (contents, padded);
++
++	      if (grown == NULL)
++		{
++		  free (contents);
++		  goto error_ret;
++		}
++	      memset (grown + toc->size, 0, padded - toc->size);
++	      contents = grown;
++	    }
++
+ 	  elf_section_data (toc)->this_hdr.contents = contents;
+ 
+ 	  for (src = contents, off = 0, drop = skip;
