@@ -6,6 +6,9 @@
 //  2. Growth while live: 34 pthreads alive at once (more than the first 32-slot chunk) while a joiner thread is
 //     blocked in pthread_join on the first; all are released and each join returns its own value.
 //  3. Raw threads racing one function-local static (constructed once) and sharing one shared_ptr (count exact).
+//  4. 40 raw threads (more than one slot chunk) whose FIRST pthread use is pthread_setspecific inside a thread_local
+//     destructor, ending by return or sys_ppu_thread_exit: every key destructor still runs (the cleanup adopts the
+//     slot that call creates and releases it).
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -95,6 +98,32 @@ static void race_entry(uint64_t)
 	sys_ppu_thread_exit(0);
 }
 
+// --- 4. first pthread use during thread_local destruction ---
+// The thread touches nothing pthread-related until its thread_local's destructor, which makes its first
+// pthread_setspecific: the slot that creates must still get its key destructors and be released.
+static pthread_key_t late_key;
+static std::atomic<int> late_set_ok{0}, late_key_dtors{0};
+
+static void late_key_dtor(void *) { ++late_key_dtors; }
+
+struct LateTl {
+	int x = 0;
+	~LateTl()
+	{
+		if (pthread_setspecific(late_key, (void *)1) == 0)
+			++late_set_ok;
+	}
+};
+static thread_local LateTl late_tl;
+
+static void late_entry(uint64_t arg)
+{
+	late_tl.x = (int)arg;
+	if (arg % 2)
+		sys_ppu_thread_exit(0);
+	// even: return from the entry
+}
+
 int main()
 {
 	// 1
@@ -152,6 +181,21 @@ int main()
 	check("static constructed once by raw threads", ctor_count, 1);
 	check("static value seen by all 8", raw_sum, 24);
 	check("shared_ptr count exact after raw-thread copies", shared.use_count(), 1);
+
+	// 4
+	pthread_key_create(&late_key, late_key_dtor);
+	for (uint64_t i = 0; i < 40; i++) {
+		sys_ppu_thread_t id;
+		uint64_t code;
+		if (sys_ppu_thread_create(&id, late_entry, i, 1000, 0x10000, SYS_PPU_THREAD_CREATE_JOINABLE, "late") != 0) {
+			std::printf("pthread-raw-threads: late create %d FAIL\n", (int)i);
+			fails++;
+			continue;
+		}
+		sys_ppu_thread_join(id, &code);
+	}
+	check("first key use in a thread_local destructor: setspecific ok", late_set_ok, 40);
+	check("first key use in a thread_local destructor: key destructors run", late_key_dtors, 40);
 
 	if (fails)
 		std::printf("PTHREAD_RAW_THREADS_FAIL %d\n", fails);

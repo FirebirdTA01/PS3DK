@@ -181,12 +181,16 @@ int main()
 		for (auto &t : ts)
 			t.join();
 		check("shared_mutex shared holders overlap", peak >= 2);
+		// The exclusive attempts come from another thread: try_lock by a thread that already holds shared
+		// ownership is outside the shared_mutex contract.
 		sm.lock_shared();
-		bool excl = sm.try_lock();
+		bool excl = true;
+		std::thread x([&] { excl = sm.try_lock(); if (excl) sm.unlock(); });
+		x.join();
 		sm.unlock_shared();
-		bool excl2 = sm.try_lock();
-		if (excl2)
-			sm.unlock();
+		bool excl2 = false;
+		std::thread y([&] { excl2 = sm.try_lock(); if (excl2) sm.unlock(); });
+		y.join();
 		check("shared_mutex exclusive excludes readers", !excl && excl2);
 	}
 	// shared_ptr counts across threads

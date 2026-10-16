@@ -336,6 +336,11 @@ jobs:
       - name: Test the lv2 declarations' C++ linkage
         run: bash tests/host/lv2-decls-cxx-linkage-test.sh
 
+      # Pure host test: the PPU GCC build's thread-model stamps and reuse
+      # decisions, and that both host configurations pass --enable-threads.
+      - name: Test the PPU GCC thread-model rules
+        run: bash tests/host/ppu-thread-model-test.sh
+
       # Skips without PS3DEV or on GCC 12; gcc-16.x 0073 keeps the register
       # allocator from parking values in LR on the Cell PPE.
       - name: Test the Cell LR/CTR move cost

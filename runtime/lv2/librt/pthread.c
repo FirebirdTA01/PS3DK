@@ -516,24 +516,44 @@ __lv2_tls_dtors_run(void)
  * released by pthread_join or pthread_detach; a detached one is released
  * here.  Re-entry (a destructor calling an exit route) does nothing more:
  * the raw exit that follows abandons the remaining callbacks, which is
- * outside what this guarantees. */
+ * outside what this guarantees.
+ *
+ * A thread with no slot yet can acquire one DURING the thread_local phase:
+ * a destructor's first pthread_setspecific (or anything else that takes
+ * the calling thread's slot) creates a detached slot.  The cleanup adopts
+ * that slot after the phase, so its key destructors run and it is
+ * released.  pt_in_cleanup guards re-entry on every path, including the
+ * phase that runs before any slot exists. */
+static __thread int pt_in_cleanup;
+
+/* Mark SELF's cleanup as started; false if it already was. */
+static int
+pt_cleanup_claim(struct pt_thread *self)
+{
+	int first = 0;
+
+	if (pt_table_lock() == 0) {
+		first = self->cleanup == 0;
+		if (first)
+			self->cleanup = 1;
+		pt_table_unlock();
+	}
+	return first;
+}
+
 static void
 pt_thread_cleanup(struct pt_thread *self, void *retval)
 {
-	if (self != NULL) {
-		int first = 0;
-
-		if (pt_table_lock() == 0) {
-			first = self->cleanup == 0;
-			if (first)
-				self->cleanup = 1;
-			pt_table_unlock();
-		}
-		if (!first)
-			return;
-	}
+	if (pt_in_cleanup)
+		return;
+	if (self != NULL && !pt_cleanup_claim(self))
+		return;
+	pt_in_cleanup = 1;
 
 	__lv2_tls_dtors_run();
+
+	if (self == NULL && pt_self_cookie != NULL && pt_cleanup_claim(pt_self_cookie))
+		self = pt_self_cookie;
 
 	if (self != NULL) {
 		pt_run_tsd_destructors(self);
@@ -546,6 +566,8 @@ pt_thread_cleanup(struct pt_thread *self, void *retval)
 			pt_table_unlock();
 		}
 	}
+	/* pt_in_cleanup stays set: every caller exits the thread next, and an
+	 * exit route reached after this point has nothing left to run. */
 	pt_self_cookie = NULL;
 }
 
@@ -895,79 +917,108 @@ pthread_mutex_unlock(pthread_mutex_t *mutex)
 	return pt_err(sysMutexUnlock((sys_mutex_t)value));
 }
 
-/* Microseconds from now until an absolute CLOCK_REALTIME deadline.  Lv-2
- * reads a timeout of 0 as "wait forever", so a deadline that has already
- * passed is clamped to the shortest possible wait rather than to 0. */
+/* Lv-2 timeouts are microseconds, and 0 means "wait forever".  A deadline
+ * already past, or less than a microsecond away, becomes the shortest wait
+ * (1); one too far ahead to represent saturates at PT_TIMEOUT_MAX_USEC; the
+ * rest round UP to whole microseconds, so a wait never ends early. */
+#define PT_TIMEOUT_MAX_USEC ((u64)0x7FFFFFFFFFFFFFFFull)
+
 static u64
-pt_timeout_usec(const struct timespec *abstime)
+pt_usec_until(s64 now_sec, s64 now_nsec, const struct timespec *abstime)
 {
-	u64 now_sec = 0, now_nsec = 0;
-	s64 delta_usec;
+	s64 dsec, dnsec = (s64)abstime->tv_nsec - now_nsec, usec;
 
-	if (sysGetCurrentTime(&now_sec, &now_nsec) != 0)
+	if (__builtin_sub_overflow((s64)abstime->tv_sec, now_sec, &dsec))
+		return (s64)abstime->tv_sec < now_sec ? 1 : PT_TIMEOUT_MAX_USEC;
+	if (dsec < 0)
 		return 1;
+	if (dnsec < 0) {
+		if (dsec == 0)
+			return 1;
+		dsec--;
+		dnsec += 1000000000;
+	}
+	if (__builtin_mul_overflow(dsec, (s64)1000000, &usec) ||
+	    __builtin_add_overflow(usec, (dnsec + 999) / 1000, &usec))
+		return PT_TIMEOUT_MAX_USEC;
+	return usec < 1 ? 1 : (u64)usec;
+}
 
-	delta_usec = ((s64)abstime->tv_sec - (s64)now_sec) * 1000000
-	           + ((s64)abstime->tv_nsec - (s64)now_nsec) / 1000;
+static int
+pt_clock_known(clockid_t clock_id)
+{
+	return clock_id == CLOCK_REALTIME || clock_id == CLOCK_MONOTONIC;
+}
 
-	if (delta_usec < 1)
-		return 1;
-	return (u64)delta_usec;
+/* The Lv-2 timeout for ABSTIME on CLOCK_ID: CLOCK_REALTIME, or
+ * CLOCK_MONOTONIC on the counter clock_gettime(CLOCK_MONOTONIC) reads.
+ * EINVAL for another clock, a NULL deadline, or nanoseconds outside
+ * [0, 1000000000).  (libstdc++'s steady_clock waits come through here.)
+ * If the real-time clock cannot be read, the wait is the shortest one. */
+static int
+pt_deadline_usec(clockid_t clock_id, const struct timespec *abstime, u64 *usec)
+{
+	if (!pt_clock_known(clock_id) || abstime == NULL ||
+	    abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000L)
+		return EINVAL;
+	if (clock_id == CLOCK_REALTIME) {
+		u64 sec = 0, nsec = 0;
+
+		if (sysGetCurrentTime(&sec, &nsec) != 0) {
+			*usec = 1;
+			return 0;
+		}
+		*usec = pt_usec_until((s64)sec, (s64)nsec, abstime);
+	} else {
+		u64 now = (u64)sysGetSystemTime();
+
+		*usec = pt_usec_until((s64)(now / 1000000),
+		                      (s64)(now % 1000000) * 1000, abstime);
+	}
+	return 0;
+}
+
+/* A timed lock that can be taken at once succeeds whatever the deadline
+ * (POSIX: its validity need not be checked then), so the lock is tried
+ * first and the deadline is validated only before waiting.  The clock is
+ * checked first: an unknown clock is EINVAL either way. */
+static int
+pt_mutex_timed(pthread_mutex_t *mutex, clockid_t clock_id,
+               const struct timespec *abstime)
+{
+	sys_mutex_t id;
+	u64 usec;
+	s32 rc;
+	int err;
+
+	if (!pt_clock_known(clock_id))
+		return EINVAL;
+	err = pt_mutex_resolve(mutex, &id);
+	if (err != 0)
+		return err;
+	rc = sysMutexTryLock(id);
+	if (rc == 0)
+		return 0;
+	err = pt_err(rc);
+	if (err != EBUSY)
+		return err;   /* EDEADLK: the caller holds this non-recursive mutex */
+	err = pt_deadline_usec(clock_id, abstime, &usec);
+	if (err != 0)
+		return err;
+	return pt_err(sysMutexLock(id, usec));
 }
 
 int
 pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abstime)
 {
-	sys_mutex_t id;
-	int err;
-
-	if (abstime == NULL)
-		return EINVAL;
-	err = pt_mutex_resolve(mutex, &id);
-	if (err != 0)
-		return err;
-	return pt_err(sysMutexLock(id, pt_timeout_usec(abstime)));
-}
-
-/* pt_timeout_usec for a deadline on CLOCK_ID: CLOCK_REALTIME, or
- * CLOCK_MONOTONIC on the counter clock_gettime(CLOCK_MONOTONIC) reads.  Other
- * clocks are EINVAL.  (libstdc++'s steady_clock waits come through here.) */
-static int
-pt_clock_timeout_usec(clockid_t clock_id, const struct timespec *abstime,
-                      u64 *usec)
-{
-	u64 now;
-	s64 delta_usec;
-
-	if (abstime == NULL)
-		return EINVAL;
-	if (clock_id == CLOCK_REALTIME) {
-		*usec = pt_timeout_usec(abstime);
-		return 0;
-	}
-	if (clock_id != CLOCK_MONOTONIC)
-		return EINVAL;
-	now = (u64)sysGetSystemTime();
-	delta_usec = ((s64)abstime->tv_sec - (s64)(now / 1000000)) * 1000000
-	           + ((s64)abstime->tv_nsec / 1000 - (s64)(now % 1000000));
-	*usec = delta_usec < 1 ? 1 : (u64)delta_usec;
-	return 0;
+	return pt_mutex_timed(mutex, CLOCK_REALTIME, abstime);
 }
 
 int
 pthread_mutex_clocklock(pthread_mutex_t *mutex, clockid_t clock_id,
                         const struct timespec *abstime)
 {
-	sys_mutex_t id;
-	u64 usec;
-	int err = pt_clock_timeout_usec(clock_id, abstime, &usec);
-
-	if (err != 0)
-		return err;
-	err = pt_mutex_resolve(mutex, &id);
-	if (err != 0)
-		return err;
-	return pt_err(sysMutexLock(id, usec));
+	return pt_mutex_timed(mutex, clock_id, abstime);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1179,9 +1230,10 @@ int
 pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
                        const struct timespec *abstime)
 {
-	if (abstime == NULL)
-		return EINVAL;
-	return pt_cond_wait_common(cond, mutex, pt_timeout_usec(abstime));
+	u64 usec;
+	int err = pt_deadline_usec(CLOCK_REALTIME, abstime, &usec);
+
+	return err ? err : pt_cond_wait_common(cond, mutex, usec);
 }
 
 int
@@ -1189,7 +1241,7 @@ pthread_cond_clockwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
                        clockid_t clock_id, const struct timespec *abstime)
 {
 	u64 usec;
-	int err = pt_clock_timeout_usec(clock_id, abstime, &usec);
+	int err = pt_deadline_usec(clock_id, abstime, &usec);
 
 	return err ? err : pt_cond_wait_common(cond, mutex, usec);
 }
@@ -1263,7 +1315,7 @@ pthread_condattr_setclock(pthread_condattr_t *attr, clockid_t clock_id)
 {
 	if (attr == NULL)
 		return EINVAL;
-	/* sysCondWait measures a relative timeout, which pt_timeout_usec
+	/* sysCondWait measures a relative timeout, which pt_deadline_usec
 	 * derives from the wall clock; there is no second clock to select. */
 	if (clock_id != CLOCK_REALTIME)
 		return ENOTSUP;
@@ -1412,17 +1464,36 @@ pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock)
 	return err ? err : pt_try_err(sys_rwlock_tryrlock(id));
 }
 
+/* The timed and clock rwlock acquisitions: try first, validate the deadline
+ * only before waiting (as pt_mutex_timed).  A failed try other than EBUSY
+ * (EDEADLK for a writer that already holds the lock) is returned as is. */
+static int
+pt_rwlock_timed(pthread_rwlock_t *rwlock, clockid_t clock_id,
+                const struct timespec *abstime, int write)
+{
+	sys_rwlock_t id;
+	u64 usec;
+	int err;
+
+	if (!pt_clock_known(clock_id))
+		return EINVAL;
+	err = pt_rwlock_resolve(rwlock, &id);
+	if (err != 0)
+		return err;
+	err = pt_err(write ? sys_rwlock_trywlock(id) : sys_rwlock_tryrlock(id));
+	if (err != EBUSY)
+		return err;
+	err = pt_deadline_usec(clock_id, abstime, &usec);
+	if (err != 0)
+		return err;
+	return pt_err(write ? sys_rwlock_wlock(id, usec) : sys_rwlock_rlock(id, usec));
+}
+
 int
 pthread_rwlock_timedrdlock(pthread_rwlock_t *rwlock,
                            const struct timespec *abstime)
 {
-	sys_rwlock_t id;
-	int err;
-
-	if (abstime == NULL)
-		return EINVAL;
-	err = pt_rwlock_resolve(rwlock, &id);
-	return err ? err : pt_err(sys_rwlock_rlock(id, pt_timeout_usec(abstime)));
+	return pt_rwlock_timed(rwlock, CLOCK_REALTIME, abstime, 0);
 }
 
 int
@@ -1447,39 +1518,21 @@ int
 pthread_rwlock_timedwrlock(pthread_rwlock_t *rwlock,
                            const struct timespec *abstime)
 {
-	sys_rwlock_t id;
-	int err;
-
-	if (abstime == NULL)
-		return EINVAL;
-	err = pt_rwlock_resolve(rwlock, &id);
-	return err ? err : pt_err(sys_rwlock_wlock(id, pt_timeout_usec(abstime)));
+	return pt_rwlock_timed(rwlock, CLOCK_REALTIME, abstime, 1);
 }
 
 int
 pthread_rwlock_clockrdlock(pthread_rwlock_t *rwlock, clockid_t clock_id,
                            const struct timespec *abstime)
 {
-	sys_rwlock_t id;
-	u64 usec;
-	int err = pt_clock_timeout_usec(clock_id, abstime, &usec);
-
-	if (err == 0)
-		err = pt_rwlock_resolve(rwlock, &id);
-	return err ? err : pt_err(sys_rwlock_rlock(id, usec));
+	return pt_rwlock_timed(rwlock, clock_id, abstime, 0);
 }
 
 int
 pthread_rwlock_clockwrlock(pthread_rwlock_t *rwlock, clockid_t clock_id,
                            const struct timespec *abstime)
 {
-	sys_rwlock_t id;
-	u64 usec;
-	int err = pt_clock_timeout_usec(clock_id, abstime, &usec);
-
-	if (err == 0)
-		err = pt_rwlock_resolve(rwlock, &id);
-	return err ? err : pt_err(sys_rwlock_wlock(id, usec));
+	return pt_rwlock_timed(rwlock, clock_id, abstime, 1);
 }
 
 int

@@ -42,7 +42,7 @@ status=0
 ok()   { echo "lv2-decls-cxx-linkage: ok   $*"; }
 fail() { echo "lv2-decls-cxx-linkage: FAIL $*"; status=1; }
 export PS3DK_NO_DEFAULT_INCLUDE=1
-[ -n "${PS3DK:-}" ] && inc="-isystem $PS3DK/ppu/include" || inc=""
+inc=(); [ -n "${PS3DK:-}" ] && inc=(-isystem "$PS3DK/ppu/include")
 
 # One group per header: each unit includes ONLY its header, first, so linkage cannot come from another header's
 # extern "C" block (pthread.h includes time.h inside its own block, which hid the round-9 time.h fault).
@@ -77,11 +77,11 @@ check() {
 
 # 0
 unit "$work/a.cpp" time.h "clock_gettime nanosleep"
-if "$gxx" -std=c++17 -fno-such-flag-linkage-selftest $inc -c "$work/a.cpp" -o "$work/bad.o" > /dev/null 2>&1; then
+if "$gxx" -std=c++17 -fno-such-flag-linkage-selftest "${inc[@]}" -c "$work/a.cpp" -o "$work/bad.o" > /dev/null 2>&1; then
     fail "self-test: an invalid flag compiled (the compiler status cannot be trusted)"
 else ok "self-test: a failing compile is reported by its status"; fi
 unit "$work/planted.cpp" time.h "clock_gettime" planted
-if "$gxx" -std=c++17 $inc -c "$work/planted.cpp" -o "$work/planted.o" > "$work/cc.log" 2>&1; then
+if "$gxx" -std=c++17 "${inc[@]}" -c "$work/planted.cpp" -o "$work/planted.o" > "$work/cc.log" 2>&1; then
     out=$(status=0; check "$work/planted.o" planted "clock_gettime lv2_planted_cxx_decl"; echo "rc=$?")
     if grep -q "lv2_planted_cxx_decl is referenced C++-mangled" <<< "$out"; then
         ok "self-test: a planted C++-linkage declaration is reported"
@@ -101,7 +101,7 @@ while IFS=: read -r header list; do
     for abi in "" -mlp64; do
         for std in -std=c++17 -std=gnu++20; do
             if [ -n "$abi" ]; then label="<$header> LP64 $std"; else label="<$header> ILP32 $std"; fi
-            if ! "$gxx" $abi $std $inc -c "$work/u.cpp" -o "$work/u.o" > "$work/cc.log" 2>&1; then
+            if ! "$gxx" $abi $std "${inc[@]}" -c "$work/u.cpp" -o "$work/u.o" > "$work/cc.log" 2>&1; then
                 fail "$label: compile failed"; head -5 "$work/cc.log" | sed 's/^/    /'; continue
             fi
             check "$work/u.o" "$label" "$names" && ok "$label: $(echo $names | wc -w) functions, all C linkage"

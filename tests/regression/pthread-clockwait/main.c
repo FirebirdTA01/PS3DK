@@ -75,6 +75,99 @@ static void *holder(void *arg)
 	return NULL;
 }
 
+static pthread_mutex_t sig_m = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t sig_c = PTHREAD_COND_INITIALIZER;
+static int signalled;
+
+/* Signals sig_c after 100 ms. */
+static void *signaller(void *arg)
+{
+	(void)arg;
+	usleep(100000);
+	pthread_mutex_lock(&sig_m);
+	signalled = 1;
+	pthread_cond_broadcast(&sig_c);
+	pthread_mutex_unlock(&sig_m);
+	return NULL;
+}
+
+/* Deadline edge cases on cond_clockwait / cond_timedwait, both clocks:
+   - invalid nanoseconds (-1, 1000000000): EINVAL with no wait, and the mutex is still held afterwards;
+   - an expired deadline and a sub-microsecond one: ETIMEDOUT, promptly;
+   - a far-future deadline (seconds near 2^62, which overflowed the old microsecond arithmetic into a 1 us wait):
+     the wait lasts until another thread signals, about 100 ms later. */
+static void deadline_cases(pthread_mutex_t *m, pthread_cond_t *c)
+{
+	static const clockid_t clocks[] = { CLOCK_MONOTONIC, CLOCK_REALTIME };
+	static const char *names[] = { "MONOTONIC", "REALTIME" };
+	static const long bad_nsec[] = { -1, 1000000000L };
+	struct timespec t;
+	char what[96];
+	long long start;
+	int i, k, rc;
+
+	for (i = 0; i < 2; i++) {
+		for (k = 0; k < 2; k++) {
+			pthread_mutex_lock(m);
+			t = deadline(clocks[i], WAIT_MS);
+			t.tv_nsec = bad_nsec[k];
+			start = mono_ms();
+			rc = pthread_cond_clockwait(c, m, clocks[i], &t);
+			snprintf(what, sizeof what, "cond_clockwait %s nsec %ld: rc %d, %lld ms", names[i], bad_nsec[k],
+			         rc, mono_ms() - start);
+			check(rc == EINVAL && mono_ms() - start < WAIT_MS, what);
+			snprintf(what, sizeof what, "cond_clockwait %s nsec %ld: mutex still held", names[i], bad_nsec[k]);
+			check(pthread_mutex_trylock(m) == EBUSY, what);
+			if (clocks[i] == CLOCK_REALTIME) {
+				snprintf(what, sizeof what, "cond_timedwait nsec %ld", bad_nsec[k]);
+				check(pthread_cond_timedwait(c, m, &t) == EINVAL, what);
+			}
+			pthread_mutex_unlock(m);
+		}
+
+		/* Expired by a second, and less than a microsecond ahead. */
+		pthread_mutex_lock(m);
+		clock_gettime(clocks[i], &t);
+		t.tv_sec -= 1;
+		start = mono_ms();
+		rc = pthread_cond_clockwait(c, m, clocks[i], &t);
+		snprintf(what, sizeof what, "cond_clockwait %s expired: rc %d, %lld ms", names[i], rc, mono_ms() - start);
+		check(rc == ETIMEDOUT && mono_ms() - start < 500, what);
+		clock_gettime(clocks[i], &t);
+		t.tv_nsec += 500;
+		if (t.tv_nsec >= 1000000000L) {
+			t.tv_nsec -= 1000000000L;
+			t.tv_sec++;
+		}
+		start = mono_ms();
+		rc = pthread_cond_clockwait(c, m, clocks[i], &t);
+		snprintf(what, sizeof what, "cond_clockwait %s 500 ns ahead: rc %d, %lld ms", names[i], rc,
+		         mono_ms() - start);
+		check(rc == ETIMEDOUT && mono_ms() - start < 500, what);
+		pthread_mutex_unlock(m);
+
+		/* Far future: only the signal ends the wait. */
+		{
+			pthread_t th;
+
+			signalled = 0;
+			check(pthread_create(&th, NULL, signaller, NULL) == 0, "pthread_create signaller");
+			pthread_mutex_lock(&sig_m);
+			t.tv_sec = (time_t)1 << 62;
+			t.tv_nsec = 0;
+			start = mono_ms();
+			rc = 0;
+			while (!signalled && rc == 0)
+				rc = pthread_cond_clockwait(&sig_c, &sig_m, clocks[i], &t);
+			pthread_mutex_unlock(&sig_m);
+			snprintf(what, sizeof what, "cond_clockwait %s far future: rc %d, signalled %d, %lld ms", names[i],
+			         rc, signalled, mono_ms() - start);
+			check(rc == 0 && signalled && mono_ms() - start >= 90, what);
+			pthread_join(th, NULL);
+		}
+	}
+}
+
 int main(void)
 {
 	static const clockid_t clocks[] = { CLOCK_MONOTONIC, CLOCK_REALTIME };
@@ -140,6 +233,27 @@ int main(void)
 	check(pthread_rwlock_clockrdlock(&rw, BAD_CLOCK, &t) == EINVAL,
 	      "rwlock_clockrdlock on an unknown clock is not EINVAL");
 
+	/* Invalid nanoseconds on a lock that must be waited for: EINVAL, at once. */
+	for (i = 0; i < 2; i++) {
+		static const long bad_nsec[] = { -1, 1000000000L };
+		int k;
+
+		for (k = 0; k < 2; k++) {
+			t = deadline(clocks[i], WAIT_MS);
+			t.tv_nsec = bad_nsec[k];
+			snprintf(what, sizeof what, "held, nsec %ld, %s: mutex_clocklock", bad_nsec[k], names[i]);
+			check(pthread_mutex_clocklock(&held, clocks[i], &t) == EINVAL, what);
+			snprintf(what, sizeof what, "held, nsec %ld, %s: rwlock_clockrdlock", bad_nsec[k], names[i]);
+			check(pthread_rwlock_clockrdlock(&rw, clocks[i], &t) == EINVAL, what);
+			snprintf(what, sizeof what, "held, nsec %ld, %s: rwlock_clockwrlock", bad_nsec[k], names[i]);
+			check(pthread_rwlock_clockwrlock(&rw, clocks[i], &t) == EINVAL, what);
+			if (clocks[i] == CLOCK_REALTIME) {
+				snprintf(what, sizeof what, "held, nsec %ld: mutex_timedlock", bad_nsec[k]);
+				check(pthread_mutex_timedlock(&held, &t) == EINVAL, what);
+			}
+		}
+	}
+
 	pthread_mutex_lock(&gate_m);
 	release_now = 1;
 	pthread_cond_broadcast(&gate_c);
@@ -156,6 +270,17 @@ int main(void)
 	t = deadline(CLOCK_MONOTONIC, 1000);
 	check(pthread_rwlock_clockwrlock(&rw, CLOCK_MONOTONIC, &t) == 0, "rwlock_clockwrlock on a free lock");
 	pthread_rwlock_unlock(&rw);
+
+	/* A lock that can be taken at once is taken, even with an invalid deadline (POSIX: its validity need not
+	   be checked then). */
+	t = deadline(CLOCK_MONOTONIC, WAIT_MS);
+	t.tv_nsec = -1;
+	check(pthread_mutex_clocklock(&held, CLOCK_MONOTONIC, &t) == 0, "free mutex, invalid nsec: acquired");
+	pthread_mutex_unlock(&held);
+	check(pthread_rwlock_clockwrlock(&rw, CLOCK_MONOTONIC, &t) == 0, "free rwlock, invalid nsec: acquired");
+	pthread_rwlock_unlock(&rw);
+
+	deadline_cases(&m, &c);
 
 	puts(failures ? "PTHREAD_CLOCKWAIT_FAIL" : "PTHREAD_CLOCKWAIT_OK");
 	return failures != 0;

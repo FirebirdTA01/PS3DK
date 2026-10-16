@@ -20,6 +20,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck disable=SC1091
 source "$script_dir/env.sh"
+source "$script_dir/ppu-thread-model.sh"
 # The compiler adds the SDK include directory by default (gcc-16.x patch 0068); building the
 # toolchain, the runtime or the SDK itself must never see an installed SDK's headers.
 export PS3DK_NO_DEFAULT_INCLUDE=1
@@ -360,17 +361,22 @@ build_gcc_newlib() {
     # libstdc++'s ABI (shared_ptr's lock policy, guards), so a build tree or a
     # stage made for another model is never reused: the tree is rebuilt from
     # scratch, and the model is stamped into both.
-    local threads_default=single
-    [[ "$GCC_MAJOR" == 16 ]] && threads_default=posix
-    local threads_mode="${PS3_GCC_THREADS:-$threads_default}"
-    if [[ -d "$obj" ]]; then
-        local built_model
-        built_model=$(cat "$obj/.threads-model" 2>/dev/null || echo unknown)
-        if [[ "$built_model" != "$threads_mode" ]]; then
-            say "GCC build tree is for thread model '$built_model', this build wants '$threads_mode': removing it"
-            rm -rf "$obj"
-        fi
-    fi
+    local threads_mode="${PS3_GCC_THREADS:-$(ppu_threads_default "$GCC_MAJOR")}"
+    local native_for_model=""
+    [[ -n "$HOST_TRIPLE" ]] && native_for_model="$NATIVE_PREFIX"
+    check_gcc_thread_model() {
+        case "$(ppu_stage_model_decision "$threads_mode" "$obj" "$PREFIX" "$native_for_model")" in
+            native)
+                die "native stage $NATIVE_PREFIX has thread model '$(ppu_stamp "$NATIVE_PREFIX/.ps3dk-thread-model")', this build wants '$threads_mode': rebuild the native toolchain first" ;;
+            rebuild)
+                say "GCC build tree is for thread model '$(ppu_stamp "$obj/.threads-model")', this build wants '$threads_mode': removing it"
+                rm -rf "$obj" ;;
+            reinstall)
+                say "installed prefix $PREFIX has thread model '$(ppu_stamp "$PREFIX/.ps3dk-thread-model")', this build wants '$threads_mode': building and installing again"
+                rm -f "$obj/.installed" ;;
+        esac
+    }
+    check_gcc_thread_model
 
     extract_source "$UPSTREAM/gcc" "$GCC_TAG" "$gcc_src"
     apply_patches "$gcc_src" "$PATCHES/$GCC_PATCH_DIR"
@@ -429,6 +435,9 @@ build_gcc_newlib() {
         fi
     fi
 
+    # The skip trusts the build tree only if the installed prefix (and a --host build's native source) still
+    # carries the same thread model: a prefix replaced since must not be skipped over.
+    check_gcc_thread_model
     if [[ -f "$obj/.installed" ]]; then
         say "GCC already built and installed (skipping)"
         return 0
@@ -453,6 +462,7 @@ build_gcc_newlib() {
         --disable-nls
         --disable-shared
         --disable-win32-registry
+        "$(ppu_gcc_threads_arg "$threads_mode")"
     )
 
     # GCC 12's host-side libcody requires exact C++11.  Newer rolling
@@ -502,7 +512,6 @@ build_gcc_newlib() {
         # with the thread model chosen above.
         conf_args+=(
             --with-newlib
-            --enable-threads="$threads_mode"
             --enable-newlib-io-long-long
             --enable-newlib-io-c99-formats
         )
@@ -528,18 +537,22 @@ build_gcc_newlib() {
     (cd "$obj" && \
         env "${target_env[@]}" "${CROSS_LDFLAGS_ARGS[@]}" "${gcc_host_cxx[@]}" \
         "$gcc_src/configure" "${conf_args[@]}")
+    [[ "$(ppu_configured_threads "$obj")" == "$threads_mode" ]]         || die "GCC was configured with thread model '$(ppu_configured_threads "$obj")', this build wants '$threads_mode'"
 
     if [[ -n "$HOST_TRIPLE" ]]; then
         say "Building GCC host-only (~15-30 minutes)"
         (cd "$obj" && make -j"$JOBS" all-host)
         say "Installing GCC host-only"
         (cd "$obj" && make install-host)
-        copy_target_libs_from_native
+        copy_target_libs_from_native "$threads_mode"
     else
         say "Building GCC+newlib (this takes a while — ~30-90 minutes)"
         (cd "$obj" && env "${target_make_env[@]}" make -j"$JOBS" all)
         say "Installing GCC+newlib"
         (cd "$obj" && make install)
+        local driver_model
+        driver_model=$("$PREFIX/bin/$TARGET-gcc" -v 2>&1 | sed -n 's/^Thread model: //p')
+        [[ "$driver_model" == "$threads_mode" ]]             || die "installed driver reports thread model '$driver_model', this build wants '$threads_mode'"
         echo "$threads_mode" > "$PREFIX/.ps3dk-thread-model"
     fi
     echo "$threads_mode" > "$obj/.threads-model"
@@ -556,10 +569,9 @@ copy_target_libs_from_native() {
 
     # The target libraries carry the native build's thread model; refuse a
     # native stage made for a different one (or not stamped at all).
-    local want_model="${PS3_GCC_THREADS:-single}"
-    [[ "$GCC_MAJOR" == 16 && -z "${PS3_GCC_THREADS:-}" ]] && want_model=posix
+    local want_model=$1
     local native_model
-    native_model=$(cat "$NATIVE_PREFIX/.ps3dk-thread-model" 2>/dev/null || echo unknown)
+    native_model=$(ppu_stamp "$NATIVE_PREFIX/.ps3dk-thread-model")
     [[ "$native_model" == "$want_model" ]] \
         || die "native stage $NATIVE_PREFIX has thread model '$native_model', this build wants '$want_model': rebuild the native toolchain first"
     cp "$NATIVE_PREFIX/.ps3dk-thread-model" "$PREFIX/.ps3dk-thread-model"
