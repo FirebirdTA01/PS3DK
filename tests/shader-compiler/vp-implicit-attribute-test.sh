@@ -138,6 +138,10 @@ MATRIX_REFUSALS = {
     'matrix_nested': 'struct T{float4x4 m:ATTR0;}; struct S{T t;float4 x;}; float4 main(S s,float4 y):POSITION{return 2*s.x+3*y;}',
     'matrix_member_read_explicit': 'struct S{float4x4 m:ATTR0;float4 x:ATTR4;}; float4 main(S s):POSITION{return s.m[1]+s.x;}',
     'matrix_bare_array_neighbor': 'float4 main(float4x4 m:ATTR0,float4 x[2]):POSITION{return x[0];}',
+    # A matrix inside an array of structs (a parameter array, or a member array) is still a
+    # declared varying matrix: unread, beside an implicit input, it must refuse too (codex 1fb7e1f9).
+    'matrix_struct_array_unread': 'struct S{float4x4 m:ATTR0;}; float4 main(S s[2],float4 x):POSITION{return x;}',
+    'matrix_nested_array_unread': 'struct T{float4x4 m:ATTR0;};struct S{T a[2];};float4 main(S s,float4 x):POSITION{return x;}',
 }
 for name, src in MATRIX_REFUSALS.items():
     s, o = work / (name + '.cg'), work / (name + '.vpo')
@@ -152,10 +156,14 @@ for name, src in MATRIX_REFUSALS.items():
 # Preserve the correct neighbour: an unread explicit matrix and only
 # explicitly bound numeric inputs. Only x is read; its record and value
 # must keep ATTR4. Also exercise DCE before the matrix-read guard.
-for name, src in [
-    ('matrix_unread_explicit', 'float4 main(float4x4 m:ATTR0,float4 x:ATTR4):POSITION{return x;}'),
-    ('matrix_dead_explicit', 'float4 main(float4x4 m:ATTR0,float4 x:ATTR4):POSITION{float4 v=x;if(false)v=m[1];return v;}'),
-    ('matrix_uniform_unread', 'float4 main(uniform float4x4 m,float4 x:ATTR4):POSITION{return x;}'),
+for name, src, xa in [
+    ('matrix_unread_explicit', 'float4 main(float4x4 m:ATTR0,float4 x:ATTR4):POSITION{return x;}', 4),
+    ('matrix_dead_explicit', 'float4 main(float4x4 m:ATTR0,float4 x:ATTR4):POSITION{float4 v=x;if(false)v=m[1];return v;}', 4),
+    ('matrix_uniform_unread', 'float4 main(uniform float4x4 m,float4 x:ATTR4):POSITION{return x;}', 4),
+    # An all-explicit unread matrix inside an array of structs, and a uniform matrix array beside
+    # an implicit input: neither has a varying matrix read or an implicit varying neighbour.
+    ('matrix_struct_array_explicit', 'struct S{float4x4 m:ATTR0;}; float4 main(S s[2],float4 x:ATTR8):POSITION{return x;}', 8),
+    ('matrix_uniform_array_implicit', 'float4 main(uniform float4x4 m[2],float4 x):POSITION{return x;}', 0),
 ]:
     s, o = work / (name + '.cg'), work / (name + '.vpo')
     s.write_text(src + NL)
@@ -165,10 +173,10 @@ for name, src in [
     ok = p.returncode == 0 and o.is_file() and o.stat().st_size > 0
     if ok:
         blob = o.read_bytes()
-        ok = [r for r in inputs_of(blob) if r[0] == 'x'] == [('x', 4, 1)]
+        ok = [r for r in inputs_of(blob) if r[0] == 'x'] == [('x', xa, 1)]
         vecs = {i: [float(10*i+j+1) for j in range(4)] for i in range(16)}
         ok = ok and agrees(ev.evaluate(blob, {}, inputs=vecs, binary32=True, predication=True,
-                                       branches=True).get(0), vecs[4])
+                                       branches=True).get(0), vecs[xa])
     if not ok: fails.append('%s: explicit unread matrix neighbour failed' % name)
     print('  %-28s %s' % (name, 'ok' if ok else 'FAIL'))
 

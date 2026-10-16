@@ -2065,6 +2065,14 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             auto shape = [&](auto& self, TypeNode* type, const Semantic& sem,
                              const std::string& path) -> void {
                 if (!type || type->isSampler()) return;
+                // An array (a parameter `S s[2]` or a member `T a[2]`) holds
+                // its element's matrices too.  The path stays the array's own,
+                // so a read of any element counts as a read of the matrix.
+                if (type->isArray() && type->elementType)
+                {
+                    self(self, type->elementType.get(), sem, path);
+                    return;
+                }
                 if (const auto* fields = getStructFields(type))
                 {
                     for (const auto& field : *fields)
