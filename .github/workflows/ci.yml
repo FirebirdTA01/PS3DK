@@ -394,6 +394,12 @@ jobs:
       - name: Test the GCC 16 patch series against its port map
         run: bash tests/host/gcc16-series-test.sh
 
+      # The ShellCheck ratchet fails closed at every step (enumeration,
+      # shellcheck status/stderr/unparsed output, baseline parsing); driven
+      # with a stub shellcheck, so no install is needed here.
+      - name: Test the ShellCheck ratchet's failure handling
+        run: bash tests/host/shellcheck-ratchet-test.sh
+
       # check-release-tree.sh refuses .self/.elf/.sprx/.prx and CMake build
       # files under samples/ and tests/: a package ships them as source.
       - name: Test the release-tree guard against shipped build outputs
