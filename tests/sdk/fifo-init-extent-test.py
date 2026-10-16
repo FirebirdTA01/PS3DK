@@ -19,12 +19,13 @@ static gcmContextData context, before;
 gcmContextData *gGcmContext;
 static uintptr_t base;
 static uint32_t mapped, broken_page, discontinuous_page, base_offset;
+static uintptr_t broken_address;
 static int firmware_rc, installs, map_calls, failures;
 static uint32_t prefix = 4096, initial_end = 32768-4, initial_current = 4104;
 int32_t gcmAddressToOffset(const void *ptr, uint32_t *offset) {
     uintptr_t address = (uintptr_t)ptr;
     ++map_calls;
-    if (address < base || address-base >= mapped ||
+    if (address < base || address-base >= mapped || address==broken_address ||
         ((address-base)/4096 == broken_page)) return -1;
     *offset = (uint32_t)(address-base) + base_offset;
     if ((address-base)/4096 == discontinuous_page) *offset += 4096;
@@ -48,6 +49,7 @@ static s32 rsxInit(gcmContextData **out, uint32_t cmd, uint32_t io, void *addr) 
 static void reset(void) {
     base=0x10000000; mapped=8*1024*1024;
     base_offset=0x100000;
+    broken_address=0;
     broken_page=discontinuous_page=UINT32_MAX;
     firmware_rc=installs=map_calls=0;
     prefix=4096; initial_end=32768-4; initial_current=4104;
@@ -88,6 +90,9 @@ int main(void) {
     reset(); mapped=1<<20; check("unmapped latter half",2<<20,8<<20,0);
     reset(); broken_page=17; check("interior mapping hole",1<<20,8<<20,0);
     reset(); discontinuous_page=17; check("interior mapping discontinuity",1<<20,8<<20,0);
+    reset(); broken_address=base+(1<<20)-4; check("final word translation fails",1<<20,8<<20,0);
+    reset(); base=0xfff00000; mapped=1<<20;
+    check("EA exclusive bound exactly 4 GiB",1<<20,1<<20,1);
     reset(); base_offset=0x1ff00000; check("last legal jump word",1<<20,8<<20,1);
     reset(); base_offset=0x1ff00004; check("cross jump address limit",1<<20,8<<20,0);
     reset(); base_offset=0x20000000; check("jump flag in IO base",1<<20,8<<20,0);
