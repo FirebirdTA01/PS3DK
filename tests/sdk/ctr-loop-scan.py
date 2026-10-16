@@ -91,7 +91,7 @@ def call_target(a, fn, funcs):
 
 def scan(lines, out=sys.stdout, funcs=None):
     insns = parse(lines, funcs)
-    findings, loops, other = 0, 0, []
+    findings, loops, other, witnessed = 0, 0, [], 0
     for i, (op, args, fn, addr) in enumerate(insns):
         if op != "mtctr":
             continue
@@ -151,6 +151,15 @@ def scan(lines, out=sys.stdout, funcs=None):
             other.append("%s %s mtctr %s -> %s" % (fn, addr, args[0], terminal))
             continue
         loops += 1
+        # A WITNESSED counted loop: a CTR-decrementing branch (bdnz, bdz, bdnzt, ... - every mnemonic starting
+        # "bd") later in the same function.  A possible count is judged for hazards either way; only a witness
+        # proves the listing still contains a CTR-controlled loop (codex 67047a74).
+        for k in range(i + 1, len(insns)):
+            if insns[k][0] == "<fn>":
+                break
+            if insns[k][0].startswith("bd"):
+                witnessed += 1
+                break
         v = origin(insns, i, args[0])
         if v != "clean":
             findings += 1
@@ -158,6 +167,7 @@ def scan(lines, out=sys.stdout, funcs=None):
     for o in other:
         print("non-loop CTR use (not a hazard): " + o, file=out)
     print("judged mtctr (possible loop count): %d, findings: %d, non-loop mtctr: %d" % (loops, findings, len(other)), file=out)
+    print("witnessed counted loops (judged mtctr followed by a bd* branch in its function): %d" % witnessed, file=out)
     return findings
 
 def self_test_cases():

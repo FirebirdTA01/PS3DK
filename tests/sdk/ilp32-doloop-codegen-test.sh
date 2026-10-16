@@ -29,9 +29,10 @@
 #
 # Controls (embedded below): the v0.19.0 candidate's listing of doloop.c and
 # an lwz+addi count must be reported; the fixed compiler's clrldi+addi must
-# not.  Each compiled object must show at least one judged counted loop, and
-# objdump's exit status counts (judge's own controls: a loop-free listing and
-# an objdump that prints then exits 1 both fail).  The scanner's own 16-case
+# not.  Each compiled object must show at least one WITNESSED counted loop (a
+# judged mtctr followed by a bd* branch in its function), and
+# objdump's exit status counts (judge's own controls: bctrl-only, conditional-
+# only and truncated listings, and an objdump that prints then exits 1, fail).  The scanner's own 16-case
 # self-test (red-add, red-load-addi, green-extended, green-scratch,
 # red-branchy, green-indirect-call, red-read-then-loop, red-b-into-loop,
 # red-truncated, green-b-tailcall, red-b-self, red-b-local-label,
@@ -129,11 +130,12 @@ control red-addi  3  'finding: .* mtctr r5 <- lwz .* then addi .*' "an offset on
 control green     0  'findings: 0'                                 "a zero-extended count is accepted"
 
 # judge <objdump> <object> <name>: the object's listing (objdump -d) and its FUNC symbols (objdump -t), both
-# status-checked, then the scanner with the FUNC list.  Passes only if the scan has no finding AND judged at least
-# one possible loop count: a listing whose mtctr are all non-loop uses tests nothing (codex 15e26177).  The reason
+# status-checked, then the scanner with the FUNC list.  Passes only if the scan has no finding AND witnessed at least
+# one CTR-controlled loop (a judged mtctr followed by a bd* branch): a listing whose mtctr feed no loop branch
+# tests nothing (codex 15e26177, 67047a74).  Possible counts are still all judged for hazards.  The reason
 # for a failure is left in $work/<name>.why.
 judge() {
-    local od=$1 obj=$2 name=$3 rc judged
+    local od=$1 obj=$2 name=$3 rc witnessed
     if ! "$od" -d "$obj" > "$work/$name.dis" 2> "$work/$name.err"; then
         echo "objdump -d failed: $(head -n 1 "$work/$name.err")" > "$work/$name.why"; return 1
     fi
@@ -142,30 +144,35 @@ judge() {
     fi
     grep -E ' F ' "$work/$name.sym" | awk '{print $NF}' > "$work/$name.funcs"
     python3 "$scanner" "$work/$name.dis" --funcs "$work/$name.funcs" > "$work/$name.out"; rc=$?
-    judged=$(sed -n 's/^judged mtctr (possible loop count): \([0-9]*\),.*/\1/p' "$work/$name.out")
+    witnessed=$(sed -n "s/^witnessed counted loops ([^)]*): *//p" "$work/$name.out")
     if [ $rc -ne 0 ] && [ $rc -ne 3 ]; then echo "scanner exit $rc" > "$work/$name.why"; return 1; fi
-    if [ -z "$judged" ] || [ "$judged" -lt 1 ]; then echo "no counted loop judged (judged=${judged:-none})" > "$work/$name.why"; return 1; fi
+    if [ -z "$witnessed" ] || [ "$witnessed" -lt 1 ]; then echo "no CTR-controlled loop (witnessed=${witnessed:-none}): no judged mtctr reaches a bd* branch" > "$work/$name.why"; return 1; fi
     if [ $rc -ne 0 ]; then echo "findings: $(grep '^finding' "$work/$name.out" | head -n 2 | tr '\n' ' ')" > "$work/$name.why"; return 1; fi
     return 0
 }
 
-# judge's own controls, with a stand-in objdump that prints a fixed listing: a clean counted loop passes; a listing
-# whose only mtctr feeds bctrl (no loop) fails as "no counted loop"; and a good listing from an objdump that then
-# exits 1 fails on the objdump status.
+# judge's own controls, with a stand-in objdump that prints a fixed listing: a clean bdnz loop passes; listings
+# whose mtctr reaches no bd* branch - only bctrl, only a conditional beq, or the listing ends - fail as "no
+# CTR-controlled loop"; and a good listing from an objdump that then exits 1 fails on the objdump status.
 fake_od() { # <name> <listing file> <exit>
     printf '#!/bin/sh\nif [ "$1" = -t ]; then echo "0000000000000000 g     F .text\t0000000000000020 .f"; else cat "%s"; fi\nexit %s\n' "$2" "$3" > "$work/$1"
     chmod +x "$work/$1"
 }
 printf '0000000000000000 <.f>:\n   0:\t79 4a 00 20 \tclrldi  r10,r10,32\n   4:\t7d 49 03 a6 \tmtctr   r10\n   8:\t42 00 00 00 \tbdnz    8 <.f+0x8>\n   c:\t4e 80 00 20 \tblr\n' > "$work/loop.dis"
 printf '0000000000000000 <.f>:\n   0:\t7c a9 2a 14 \tadd     r5,r9,r5\n   4:\t7c a9 03 a6 \tmtctr   r5\n   8:\t4e 80 04 21 \tbctrl\n   c:\t4e 80 00 20 \tblr\n' > "$work/nonloop.dis"
+printf '0000000000000000 <.f>:\n    0:\t38 a0 00 01 \tli      r5,1\n    4:\t7c a9 03 a6 \tmtctr   r5\n    8:\t41 82 00 04 \tbeq     c <.f+0xc>\n    c:\t4e 80 00 20 \tblr\n' > "$work/condonly.dis"
+printf '0000000000000000 <.f>:\n    0:\t38 a0 00 01 \tli      r5,1\n    4:\t7c a9 03 a6 \tmtctr   r5\n' > "$work/truncated.dis"
 fake_od od-loop "$work/loop.dis" 0; fake_od od-nonloop "$work/nonloop.dis" 0; fake_od od-fail "$work/loop.dis" 1
+fake_od od-cond "$work/condonly.dis" 0; fake_od od-trunc "$work/truncated.dis" 0
 if judge "$work/od-loop" /dev/null c-loop && ! judge "$work/od-nonloop" /dev/null c-nonloop &&
-   grep -q "no counted loop" "$work/c-nonloop.why" && ! judge "$work/od-fail" /dev/null c-fail &&
+   grep -q "no CTR-controlled loop" "$work/c-nonloop.why" && ! judge "$work/od-cond" /dev/null c-cond &&
+   grep -q "no CTR-controlled loop" "$work/c-cond.why" && ! judge "$work/od-trunc" /dev/null c-trunc &&
+   grep -q "no CTR-controlled loop" "$work/c-trunc.why" && ! judge "$work/od-fail" /dev/null c-fail &&
    grep -q "objdump -d failed" "$work/c-fail.why"; then
-    echo "ilp32-doloop-codegen: ok   control: judge passes a counted loop, refuses a loop-free listing and a failed objdump"
+    echo "ilp32-doloop-codegen: ok   control: judge passes a bdnz loop; refuses bctrl-only, conditional-only (beq) and truncated listings and a failed objdump"
 else
     echo "ilp32-doloop-codegen: FAIL control: judge (loop/nonloop/objdump-fail)"
-    for c in c-loop c-nonloop c-fail; do [ -f "$work/$c.why" ] && echo "    $c: $(cat "$work/$c.why")"; done; status=1
+    for c in c-loop c-nonloop c-cond c-trunc c-fail; do [ -f "$work/$c.why" ] && echo "    $c: $(cat "$work/$c.why")"; done; status=1
 fi
 
 ps3dev="${PS3DEV:-}"
@@ -186,7 +193,7 @@ for model in "" -mlp64; do
             echo "ilp32-doloop-codegen: FAIL ${model:-ILP32} $opt: compile failed"; status=1; continue
         fi
         if judge "$objdump" "$work/$name.o" "$name"; then
-            echo "ilp32-doloop-codegen: ok   ${model:-ILP32} $opt: $(sed -n 's/^judged mtctr (possible loop count): \([0-9]*\),.*/\1/p' "$work/$name.out") counted loop(s), every CTR count has a defined upper half"
+            echo "ilp32-doloop-codegen: ok   ${model:-ILP32} $opt: $(sed -n "s/^witnessed counted loops ([^)]*): *//p" "$work/$name.out") CTR-controlled loop(s), every possible CTR count has a defined upper half"
         else
             echo "ilp32-doloop-codegen: FAIL ${model:-ILP32} $opt: $(cat "$work/$name.why")"; cat "$work/$name.out" 2>/dev/null; status=1
         fi
