@@ -21,6 +21,7 @@ path = "src/gui_main.rs"
 
 [dependencies]
 ps3dk-version.workspace = true
+ps3dk-ui.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 eframe = { version = "0.29.1", default-features = false, features = ["glow", "default_fonts"] }

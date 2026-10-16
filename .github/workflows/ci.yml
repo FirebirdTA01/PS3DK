@@ -259,6 +259,12 @@ jobs:
       - name: Test the NP error codes header
         run: bash tests/sdk/np-error-codes-test.sh
 
+      # Skips without PS3DEV; <np/drm_inline.h> (sceNpDrmOpen) compiles in
+      # C/C++17, ILP32/LP64, links against the NP and FS stubs, and a
+      # misspelled call in its body must fail.
+      - name: Test the np/drm_inline.h sceNpDrmOpen shim
+        run: bash tests/sdk/np-drm-inline-test.sh
+
       # Skips without PS3DEV; the eleven np/ forwarders (np/ranking.h reaches
       # cell/np/score.h, np/auth_oauth.h cell/np2/init.h) compile in C/C++17,
       # ILP32/LP64, one function pinned per forwarder; each alone; a control
@@ -307,6 +313,11 @@ jobs:
       - name: Test the packed-argument address scanner
         run: bash tests/sdk/ppu-packed-arg-scan-test.sh
 
+      # Skips without PS3DEV; ld's TOC edit must write a zero pad word, not
+      # heap bytes, after an odd-size ILP32 .toc (binutils patch 0007).
+      - name: Test the TOC edit pads an odd-size .toc with zeros
+        run: bash tests/sdk/toc-edit-pad-test.sh
+
       # Skips without a Windows C compiler that can run its output; tool-alias's
       # error message stays inside its buffer when the text does not fit.
       - name: Test the tool-alias error message on truncation
@@ -350,6 +361,11 @@ jobs:
       # driver's default SDK include directory declares pthread/time/sched.
       - name: Test the default SDK include directory
         run: bash tests/host/sdk-default-include-test.sh
+
+      # check-release-tree.sh refuses .self/.elf/.sprx/.prx and CMake build
+      # files under samples/ and tests/: a package ships them as source.
+      - name: Test the release-tree guard against shipped build outputs
+        run: bash tests/host/release-tree-build-outputs-test.sh
 
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).

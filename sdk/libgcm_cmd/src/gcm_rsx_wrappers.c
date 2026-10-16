@@ -726,3 +726,8 @@ void cellGcmResetDefaultCommandBufferUnsafe(CellGcmContextData * context)
     rsxResetCommandBufferUnsafe((gcmContextData *)context);
 }
 
+void cellGcmResetDefaultCommandBuffer(void)
+{
+    rsxResetCommandBufferUnsafe(gGcmContext);
+}
+

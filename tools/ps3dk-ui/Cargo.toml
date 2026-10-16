@@ -1,0 +1,14 @@
+[package]
+name = "ps3dk-ui"
+description = "Shared look and widgets for the PS3DK desktop tools (egui)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# egui only: the tools that use this crate already pull eframe 0.29, so the
+# theme adds no new dependency to the Windows cross-build.
+[dependencies]
+egui = { version = "0.29.1", default-features = false }

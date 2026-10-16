@@ -16,6 +16,12 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **`sceNpDrmOpen`.**  New `<np/drm_inline.h>` provides `sceNpDrmOpen`,
+  which checks that NP DRM content is available to the licensee key and
+  opens it as DRM content with `cellFsOpen`.
+
 ### Fixed
 
 - **newlib's per-thread `_reent` setup includes `<string.h>`.**  The

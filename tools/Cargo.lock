@@ -2189,6 +2189,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ps3dk-ui"
+version = "0.0.0"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "ps3dk-version"
 version = "0.0.0"
 
@@ -2462,6 +2469,7 @@ dependencies = [
  "anyhow",
  "clap",
  "eframe",
+ "ps3dk-ui",
  "ps3dk-version",
  "rfd",
  "serde",
