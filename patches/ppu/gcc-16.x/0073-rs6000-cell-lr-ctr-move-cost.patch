@@ -1,0 +1,31 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] rs6000: LR/CTR moves cost more than memory on the Cell PPE
+
+GCC 16 under register pressure keeps loop values in the link register
+(mtlr rX ... mflr rY) instead of saving one more callee-saved GPR or
+spilling to the stack.  Moves to and from LR are slow on the Cell PPE.
+On PS3 hardware a pixman 8888-with-a8-mask composite ran 6.9% slower
+than the GCC 12.4 build; its hot combiner (combine_over_u) carries such
+moves inside the loop.  Across the SDK and portlibs GCC 16 emitted 1039
+LR-as-register moves against GCC 12.4's 205.
+
+rs6000_register_move_cost already prices LR/CTR moves above memory for
+POWER6-POWER9, so the allocator spills to memory there; add the Cell
+tuning (PROCESSOR_CELL, the powerpc64-ps3-elf default) to that list.
+
+diff --git a/gcc/config/rs6000/rs6000.cc b/gcc/config/rs6000/rs6000.cc
+index 678d620..e1619bd 100644
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -23037,7 +23037,10 @@ rs6000_register_move_cost (machine_mode mode,
+       else if ((rs6000_tune == PROCESSOR_POWER6
+ 		|| rs6000_tune == PROCESSOR_POWER7
+ 		|| rs6000_tune == PROCESSOR_POWER8
+-		|| rs6000_tune == PROCESSOR_POWER9)
++		|| rs6000_tune == PROCESSOR_POWER9
++		/* The Cell PPE too: GCC 16 otherwise parks values in LR
++		   (mtlr/mflr pairs, inside loops) where GCC 12 spilled them.  */
++		|| rs6000_tune == PROCESSOR_CELL)
+ 	       && reg_class_subset_p (rclass, SPECIAL_REGS))
+         ret = 6 * hard_regno_nregs (FIRST_GPR_REGNO, mode);
+ 
