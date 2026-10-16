@@ -102,6 +102,11 @@ pthread-signal-unbind-lp64,tests/regression/pthread-signal-unbind/pthread-signal
 # writer exclusion, try/timed variants, unlock of either hold, destroy refusal.
 pthread-rwlock-ilp32,tests/regression/pthread-rwlock/pthread-rwlock-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_RWLOCK_OK,PTHREAD_RWLOCK_FAIL
 pthread-rwlock-lp64,tests/regression/pthread-rwlock/pthread-rwlock-lp64.fake.self,60,RAN-CLEAN,PTHREAD_RWLOCK_OK,PTHREAD_RWLOCK_FAIL
+# pthread-clockwait: the Issue 8 clock-selecting waits libstdc++ uses for steady_clock (cond_clockwait,
+# mutex_clocklock, rwlock_clockrd/wrlock) time out on CLOCK_MONOTONIC and CLOCK_REALTIME, refuse other clocks,
+# succeed when free; sysconf reports the PPE's two hardware threads.
+pthread-clockwait-ilp32,tests/regression/pthread-clockwait/pthread-clockwait-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_CLOCKWAIT_OK,PTHREAD_CLOCKWAIT_FAIL
+pthread-clockwait-lp64,tests/regression/pthread-clockwait/pthread-clockwait-lp64.fake.self,60,RAN-CLEAN,PTHREAD_CLOCKWAIT_OK,PTHREAD_CLOCKWAIT_FAIL
 # pthread-once: per-control pthread_once; an init routine that throws (a C++
 # exception unwinding through it) is retried by the next caller; a routine that
 # joins a thread running a different control; plain concurrent once.

@@ -137,24 +137,31 @@ index 75e9e1c..094110f 100644
  
  #define _PTHREAD_RWLOCK_INITIALIZER ((pthread_rwlock_t) 0xFFFFFFFF)
 diff --git a/newlib/libc/include/time.h b/newlib/libc/include/time.h
-index ed6cc70..cb9bcb0 100644
+index ed6cc70..3d577cf 100644
 --- a/newlib/libc/include/time.h
 +++ b/newlib/libc/include/time.h
-@@ -194,6 +194,13 @@ int nanosleep (const struct timespec  *rqtp, struct timespec *rmtp);
+@@ -194,6 +194,20 @@ int nanosleep (const struct timespec  *rqtp, struct timespec *rmtp);
  #endif
  #endif /* _POSIX_TIMERS */
  
 +#if defined(__lv2ppu__) && !defined(_POSIX_TIMERS)
-+/* lv2: librt implements these two without _POSIX_TIMERS (see pthread.h).  */
++/* lv2: librt implements these two without _POSIX_TIMERS (see pthread.h).
++   This point is between the header's extern "C" blocks.  */
 +#define _LV2_TIME_DECLS 1
++#ifdef __cplusplus
++extern "C" {
++#endif
 +int clock_gettime (clockid_t clock_id, struct timespec *tp);
 +int nanosleep (const struct timespec  *rqtp, struct timespec *rmtp);
++#ifdef __cplusplus
++}
++#endif
 +#endif
 +
  #if defined(_POSIX_CLOCK_SELECTION)
  
  #ifdef __cplusplus
-@@ -264,7 +271,7 @@ extern "C" {
+@@ -264,7 +278,7 @@ extern "C" {
  
  #endif
  
