@@ -100,9 +100,6 @@ case "$GCC_MAJOR" in
         # unless CXXFLAGS overrides it.
         GCC_HOST_CXX_STD=""
         BUILD="$PS3_BUILD_ROOT/ppu-gcc16"
-        if [[ -n "$HOST_TRIPLE" ]]; then
-            die "--gcc=16 is not yet supported with --host (the Windows-hosted build stays on 12.4)"
-        fi
         ;;
     *) die "--gcc=$GCC_MAJOR: supported values are 12 and 16" ;;
 esac
@@ -112,7 +109,8 @@ esac
 NATIVE_PREFIX="$PREFIX"
 if [[ -n "$HOST_TRIPLE" ]]; then
     PREFIX="${PS3DEV}.win/ppu"
-    BUILD="$PS3_BUILD_ROOT/ppu-${HOST_TRIPLE}"
+    # ppu-<host> for 12.4 (as before), ppu-gcc16-<host> for 16: the two never share a tree.
+    BUILD="${BUILD}-${HOST_TRIPLE}"
     BUILD_TRIPLE="${BUILD_TRIPLE:-$(uname -m)-pc-linux-gnu}"
     [[ -x "$NATIVE_PREFIX/bin/$TARGET-gcc" ]] \
         || die "Native PPU toolchain not present at $NATIVE_PREFIX/bin/$TARGET-gcc. Run without --host first to produce stage 0."
@@ -500,11 +498,15 @@ build_gcc_newlib() {
             CC_FOR_BUILD=gcc
             CXX_FOR_BUILD=g++
         )
-        # -std=gnu++11 keeps libcody's C++11 guard while adding the prefix map.
-        # Appended LAST on the env line so it wins over both target_env's
-        # CXXFLAGS and CROSS_LDFLAGS_ARGS' CXXFLAGS, without touching their order.
+        # 12.4: -std=gnu++11 keeps libcody's C++11 guard while adding the prefix
+        # map.  16: no -std (GCC 16 itself needs C++14 and each configure adds
+        # the -std it needs, as in the native build).  Appended LAST on the env
+        # line so it wins over both target_env's CXXFLAGS and
+        # CROSS_LDFLAGS_ARGS' CXXFLAGS, without touching their order.
+        local host_std=""
+        [[ -n "$GCC_HOST_CXX_STD" ]] && host_std="-std=gnu++11 "
         gcc_host_cxx=(
-            "CXXFLAGS=-std=gnu++11 -g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+            "CXXFLAGS=${host_std}-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
         )
     else
         conf_args+=(--with-system-zlib)
