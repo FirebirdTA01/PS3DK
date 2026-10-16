@@ -1,0 +1,5 @@
+// TWO ENTRY INPUTS OF ONE STRUCT TYPE: the helper is given b only.  Reference: b.col is the
+// referenced record, a.col is not - the owner is the argument, not the type's first entry input.
+struct In { float2 uv; float3 col; };
+float3 helper(In t) { return t.col; }
+float4 main(In a, In b) : COLOR { return float4(helper(b) * a.uv.x, 1); }

@@ -1,0 +1,3 @@
+// CONTROL: the direct read.
+struct In { float2 uv : TEXCOORD0; float3 col; };
+float4 main(In i) : COLOR { return float4(i.col * i.uv.x, 1); }

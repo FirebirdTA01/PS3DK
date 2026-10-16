@@ -1,0 +1,4 @@
+// A helper reading an UNSEMANTICKED struct input member binds it as the entry's inferred slot (reference sm26: twin of the direct read; review finding: the helper's own empty map refused).
+struct In { float2 uv : TEXCOORD0; float3 col; };
+float3 helper(In i) { return i.col; }
+float4 main(In i) : COLOR { return float4(helper(i) * i.uv.x, 1); }

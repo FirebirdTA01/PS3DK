@@ -8444,7 +8444,28 @@ bool IRBuilder::emitInputMemberLoad(const ParamDecl* param, const std::string& m
         inst->semanticIndex    = field.semantic.isEmpty()
             ? static_cast<int>(fieldIdx)
             : field.semantic.index;
-        inst->structParamName  = param->name;       // e.g. "input"
+        // THE RECORD IS THE ENTRY'S.  Inside an inlined helper `param` is the
+        // helper's own parameter, bound to an entry struct input's value; a
+        // load stamped with the helper's name is filtered out of the
+        // container's input records ("t" is not an entry parameter), so a
+        // member read only through a helper lost its varying record while
+        // the ucode still read it (measured: on the reference `helper(i)`
+        // reading i.col is byte-identical to the direct read, records
+        // included).  The helper parameter's bound value is the entry
+        // parameter's own, through one helper level or more.
+        std::string owner = param->name;
+        if (!inlineStack_.empty())
+        {
+            const auto bound = declToValue_.find(const_cast<ParamDecl*>(param));
+            if (bound != declToValue_.end())
+                for (const auto& entryParam : currentFunction_->parameters)
+                    if (entryParam.valueId == bound->second && !entryParam.name.empty())
+                    {
+                        owner = entryParam.name;
+                        break;
+                    }
+        }
+        inst->structParamName  = owner;             // e.g. "input"
         inst->fieldName        = member;            // e.g. "pos"
         currentBlock_->addInstruction(std::move(inst));
         return true;

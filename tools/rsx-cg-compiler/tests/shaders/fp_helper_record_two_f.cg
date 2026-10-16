@@ -1,0 +1,7 @@
+// TWO-ENTRY-STRUCT CONTROL: two entry inputs of one struct type; the helper is given b only.
+// Reference: b.col is referenced, a.col is not - stamping must name the owner the helper was
+// bound to, not the first entry parameter of that type.
+struct Tag { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
+struct Tag2 { float2 uv : TEXCOORD2; float3 col : TEXCOORD3; };
+float3 helper(Tag2 t) { return t.col; }
+float4 main(Tag a, Tag2 b) : COLOR { return float4(helper(b) * a.uv.x, 1); }
