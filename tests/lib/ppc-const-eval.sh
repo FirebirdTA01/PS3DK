@@ -5,9 +5,12 @@
 #   first line matching <stop regex> (default: none, i.e. the end).  Tracks general registers as known 64-bit values
 #   or unknown, and 8-byte stack slots addressed off(base) while the base register is unchanged.
 #   Known: li, lis, addi (rA 0 = literal), mr, ori, oris, sldi, rldimi, rldicl/clrldi, std / ld of a tracked slot.
-#   Every other instruction that writes a general register (its first operand) makes it unknown; stores, compares,
-#   branches, vector loads/stores (vector destination) and directives write no general register; an update form
-#   (stdu/stwu) makes its base unknown.  Reading an unknown register makes the result unknown.
+#   Every other instruction that writes a general register (its first operand) makes it unknown; compares, vector
+#   loads (vector destination) and directives write no general register; an update form (stdu/stwu) makes its base
+#   unknown.  Reading an unknown register makes the result unknown.
+#   Fail closed: any branch, call or conditional return before the stop line makes EVERY result unknown
+#   (PPC_UNSUPPORTED holds it); any std forgets every other tracked slot first and any other store forgets them all,
+#   so an aliasing base or an overlapping narrower store can never leave a stale value behind.
 #   Afterwards ppc_reg <n> prints the value in hex (0x%016x) or "unknown", and PPC_STOP_LINE holds the stop line.
 #
 # ppc_ea <instruction line>: for an X-form access "op VR,RA,RB" after ppc_eval stopped on it, prints the effective
@@ -15,6 +18,7 @@
 
 declare -A PPC_R PPC_M
 PPC_STOP_LINE=""
+PPC_UNSUPPORTED=""
 
 ppc_imm() { # <text>: a decimal or 0x hex immediate, or empty if not one
     local v=$1
@@ -36,7 +40,7 @@ ppc_rotl() { # <value> <n>
 
 ppc_eval() {
     local body=$1 stop=${2:-} line op a b c d va vb v m
-    PPC_R=(); PPC_M=(); PPC_STOP_LINE=""
+    PPC_R=(); PPC_M=(); PPC_STOP_LINE=""; PPC_UNSUPPORTED=""
     while IFS= read -r line; do
         line=${line%%#*}; line=${line//$'\r'/}
         line=$(echo "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
@@ -70,25 +74,34 @@ ppc_eval() {
                        local mk; mk=$(ppc_mask "$m" $(( 63 - v )))
                        ppc_set "$a" $(( ($(ppc_rotl "$vb" "$v") & mk) | (va & ~mk) ))
                    else ppc_kill "$a"; fi ;;
-            std)   if [[ $b =~ ^-?[0-9]+\([0-9]+\)$ ]] && va=$(ppc_get "$a"); then PPC_M[$b]=$va
-                   elif [[ $b =~ ^-?[0-9]+\([0-9]+\)$ ]]; then unset 'PPC_M[$b]'; fi ;;
+            # Memory: only an std to off(base) followed by an ld of the very same off(base) is tracked.  Any std first
+            # forgets every slot (another base register may alias it, and offsets may overlap); any other store
+            # (stw, stb, sth, vector, float, update forms) forgets them all.
+            std)   PPC_M=()
+                   if [[ $b =~ ^-?[0-9]+\([0-9]+\)$ ]] && va=$(ppc_get "$a"); then PPC_M[$b]=$va; fi ;;
             ld)    if [[ $b =~ ^-?[0-9]+\([0-9]+\)$ && -n "${PPC_M[$b]+x}" ]]; then ppc_set "$a" "${PPC_M[$b]}"; else ppc_kill "$a"; fi ;;
             stdu|stwu|stbu|sthu|ldu|lwzu|lbzu|lhzu)
+                   PPC_M=()
                    [[ $b =~ \(([0-9]+)\)$ ]] && ppc_kill "${BASH_REMATCH[1]}"
                    [[ $op == l* ]] && ppc_kill "$a" ;;
-            st*|stv*|lv*|cmp*|b|b?|b??|b???|bl|blr|bctr*|bdnz*|mtctr|mtlr|mtcrf|nop|isync|sync|lwsync|eieio|vor|vxor|vand|vperm|vsldoi|xxlor) ;;
+            st*)   PPC_M=() ;;
+            # Control flow and calls are not modelled: a branch, a call or a conditional return before the stop
+            # line makes every result unknown (fail closed).
+            b|b?|b??|b???|b????|bl|bla|blr*|bctr*|bdnz*|bdz*|bc|bca|bcl|bclr*|bcctr*)
+                   PPC_UNSUPPORTED="$line" ;;
+            lv*|cmp*|mtctr|mtlr|mtcrf|nop|isync|sync|lwsync|eieio|vor|vxor|vand|vperm|vsldoi|xxlor) ;;
             *)     [[ $a =~ ^[0-9]+$ ]] && ppc_kill "$a" ;;
         esac
     done <<< "$body"
 }
 
-ppc_reg() { local v; if v=$(ppc_get "$1"); then printf '0x%016x\n' "$v"; else echo unknown; fi; }
+ppc_reg() { local v; if [[ -z $PPC_UNSUPPORTED ]] && v=$(ppc_get "$1"); then printf '0x%016x\n' "$v"; else echo unknown; fi; }
 
 ppc_ea() {
     local line=$1 op a ra rb vra vrb
     op=${line%%[[:space:]]*}
     IFS=, read -r a ra rb <<< "$(echo "${line#"$op"}" | tr -d '[:space:]')"
-    [[ $ra =~ ^[0-9]+$ && $rb =~ ^[0-9]+$ ]] || { echo unknown; return; }
+    [[ -z $PPC_UNSUPPORTED && $ra =~ ^[0-9]+$ && $rb =~ ^[0-9]+$ ]] || { echo unknown; return; }
     if [[ $ra == 0 ]]; then vra=0; else vra=$(ppc_get "$ra") || { echo unknown; return; }; fi
     vrb=$(ppc_get "$rb") || { echo unknown; return; }
     printf '0x%016x\n' $(( vra + vrb ))

@@ -122,11 +122,14 @@ printf '\tlis 3,0x1234\n\tlis 9,0x9abc\n\tori 3,3,0x5678\n\tori 9,9,0xdef0\n\trl
 printf 'lis 3,0x9abc\nlis 9,0x1234\nori 3,3,0xdef0\nori 9,9,0x5678\nli 9,0\nrldimi 3,9,32,0\n' > "$work/neg-split-clobber.s"
 printf 'rldimi 3,9,32,0\nlis 3,0x9abc\nlis 9,0x1234\nori 3,3,0xdef0\nori 9,9,0x5678\n' > "$work/neg-split-early.s"
 printf 'lis 3,0x9abc\nori 3,3,0xdef0\nlis 3,0x1234\nori 3,3,0x5678\nrldimi 3,3,32,0\n' > "$work/neg-split-samereg.s"
+# codex's 902c3f6a counterexample: a call clobbers r3 after the value is built.
+printf 'lis 3,0x1234\nori 3,3,0x5678\nsldi 3,3,32\noris 3,3,0x9abc\nori 3,3,0xdef0\nbl unknown_function\nblr\n' > "$work/neg-postcall.s"
 if whole_value "$work/pos-inline.s" && whole_value "$work/pos-quad.s" && ! whole_value "$work/neg-long.s" &&
    ! whole_value "$work/neg-nosldi.s" && ! whole_value "$work/neg-tworegs.s" &&
    whole_value "$work/pos-split.s" && ! whole_value "$work/neg-split-shift.s" && ! whole_value "$work/neg-split-swapped.s" &&
-   ! whole_value "$work/neg-split-clobber.s" && ! whole_value "$work/neg-split-early.s" && ! whole_value "$work/neg-split-samereg.s"; then
-    ok "64-bit value checker: inline, split-halves (rldimi) and .quad accepted; .long, a missing sldi, a register change, a wrong rldimi shift, swapped halves, a clobber before the join, a join before its inputs and a same-register join refused"
+   ! whole_value "$work/neg-split-clobber.s" && ! whole_value "$work/neg-split-early.s" && ! whole_value "$work/neg-split-samereg.s" &&
+   ! whole_value "$work/neg-postcall.s"; then
+    ok "64-bit value checker: inline, split-halves (rldimi) and .quad accepted; .long, a missing sldi, a register change, a wrong rldimi shift, swapped halves, a clobber before the join, a join before its inputs, a same-register join and a call before the return refused"
 else
     fail "64-bit value checker does not separate its controls"
 fi
