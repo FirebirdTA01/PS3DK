@@ -326,6 +326,11 @@ jobs:
       - name: Test the PPU GCC version selection
         run: bash tests/host/ppu-gcc-select-test.sh
 
+      # Skips without PS3DEV or on GCC 12 (no ext-dce pass); gcc-16.x 0072 keeps
+      # ext-dce off by default under ILP32 (defaults, overrides, attributes, LTO).
+      - name: Test the ILP32 ext-dce default
+        run: bash tests/host/ext-dce-default-test.sh
+
       # Skips without PS3DEV or on a compiler without gcc-16.x patch 0068; the
       # driver's default SDK include directory declares pthread/time/sched.
       - name: Test the default SDK include directory
