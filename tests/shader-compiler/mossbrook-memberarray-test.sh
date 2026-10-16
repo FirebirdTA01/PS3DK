@@ -29,13 +29,11 @@
  # This test rows:
  #   (b)  byte-pinned against the reference (1 insn: MOVR o[COLR].xy, f[TEX0].xy),
  #        which our emitter already produces.
- #   (a)  shape-assertion (>=2 and <=9 insns, presence of the SGT 0.5 test and
- #        the -1.0 constant store) — the reference emits 4 predicated
- #        instructions; we emit 9 (SLE-based select, equivalent result).
- #        Tightening to the reference's predication shape is a separate
- #        codegen concern (dead-store elimination + predicated-store pass
- #        not in scope of this card); a lead with sce-cgc 475 can pin that
- #        shape here the moment parity is lifted.
+ #   (a)  judged by VALUE: our program runs through fp_eval on five flag values
+ #        either side of `flags > 0.5` (the boundary included) and must give the
+ #        reference's outputs; only an instruction-count band (2..9) pins size.
+ #        The reference emits 4 predicated instructions; matching that shape is
+ #        separate codegen work.
  #
  # And three SHAPE SAFETY rows the lead required after review, all pinned
  # so a compiler that "lifts" (b) by quietly picking one arm is caught:
@@ -145,7 +143,7 @@ value_rows b_member_array_storage_copy "repro b" 0,1 \
     "TEX0=0.25,0.75,-0.5,0.125 => 0.25,0.75"
 
 # ---------------------------------------------------------------------------
-# (a) scalar-vector broadcast into a member-array element — shape assertion.
+# (a) scalar-vector broadcast into a member-array element - judged by value.
 # Reference (sce-cgc 475):
 #     SGTRC HC.w, f[TEX1].-x, {0.5}.-x;
 #     MOVR   o[COLR].y, {0, 1, 0, 0}.-y--;
@@ -153,25 +151,11 @@ value_rows b_member_array_storage_copy "repro b" 0,1 \
 #     MOVR   o[COLR].x(NE0.w---), {-1}.x---;
 # i.e. 4 predicated instructions: a compare-to-0.5, an unconditional 0/1
 # store, and a predicated -1 store.
-# Ours (current shape): SGT + MOV pair (uninit/else), SGT+MOV pair (then
-# branch), a dst=none read-modification-free cond store, and a final
-# select-through.  Semantically equivalent (SLE+insert == NE0-predicated
-# MOV), but 9 insns.  Tightening to the reference's shape requires a
-# predicated-store / dead-store pass that is a separate codegen concern
-# (tracked out of this card).
-#
-# NOTE: fp_sources.py's render() does NOT emit the inline-constant literal
-# values — it reports the const SOURCE REGISTER (s1=c0) and its swizzle,
-# not the 4 words of float data that follow.  We assert what IS visible:
-#   - the instruction count stays in the band [2,9] (a refusal regression
-#     emits 0; a "drop the branch" regression emits 1 or worse),
-#   - at least one SGT (SLE) test instruction (the `flags > 0.5` branch),
-#   - at least one MOV that writes R0 (the final o[COLR] store),
-#   - the input (TEX0) is read (the b parameter), and
-#   - a CONST source (s1=c0) is used for one of the tests or stores.
-# A lead with sce-cgc 475 can tighten any of these once we emit the
-# reference's 4-insn predicated shape; pinning the shape here does not
-# preclude that later.
+# The output depends only on `flags` (TEX1): o = (flags > 0.5 ? -1 : 1, 1).  The
+# reference never reads TEX0 (b), so no row may require it.  What our program
+# computes is judged by VALUE below, on both sides of the 0.5 test; the shape
+# is not pinned beyond an instruction-count band (the branch's emitter wrote 9,
+# the reference writes 4; closing that gap is separate codegen work).
 # ---------------------------------------------------------------------------
 accept a_scalarvec_broadcast_in_memberarray \
        "repro a: scalar broadcast into a member-array under a dynamic loop index"
@@ -179,23 +163,8 @@ accept a_scalarvec_broadcast_in_memberarray \
 "$python" "$decoder" "$work/a_scalarvec_broadcast_in_memberarray.fpo" > "$work/a.u" 2>/dev/null
 insns_a=$(grep -cE '^[0-9]+ ' "$work/a.u" || true)
 [[ "$insns_a" -ge 2 ]] || fail "repro a: expected >=2 instructions, got $insns_a (a refusal regression or a dropped branch)"
-[[ "$insns_a" -le 9 ]] || fail "repro a: expected <=9 instructions (current emitter), got $insns_a (emitting MORE code than the current pass)"
-# At least one SGT (conditional store) instruction — the `flags > 0.5`
-# branch test must exist.
-grep -qE '^[0-9]+ SGT dst=R[0-9]' "$work/a.u" \
-    || fail "repro a: missing an SGT (flags > 0.5) branch test"
-# A final store to R0 (o[COLR]); end=1 marks the terminal instruction of the
-# NV40 fragment ucode.
-grep -qE '^[0-9]+ MOV dst=R0 .* end=1 ' "$work/a.u" \
-    || fail "repro a: missing a final MOV to R0 (o[COLR] output)"
-# The input b (TEXCOORD) must be read by at least one instruction.
-grep -qE '^[0-9]+ .* s0=TEX0' "$work/a.u" \
-    || fail "repro a: input (TEXCOORD) is never read"
-# At least one const source — the 0.5 test and 1.0/-1.0 stores use inline
-# constants that surface as s1=c0 or s0=c0 in the render.
-grep -qE '^[0-9]+ .* s[01]=c[0-9]+' "$work/a.u" \
-    || fail "repro a: no inline constant (0.5 test or 1.0/-1.0 store) is used"
-echo "  shape ok: repro a ucode has $insns_a insns (SGT test + R0 terminal + TEX0 input + c0 const source); parity to the 4-insn reference is tracked separately"
+[[ "$insns_a" -le 9 ]] || fail "repro a: expected <=9 instructions, got $insns_a (more code than the emitter this row was written against)"
+echo "  size ok: repro a ucode has $insns_a insns (reference: 4)"
 
 # VALUE, not shape: run our program through fp_eval on inputs either side of the
 # `flags > 0.5` test, the boundary itself included (0.5 must keep +1: SGT, not SGE).
