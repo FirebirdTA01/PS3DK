@@ -143,6 +143,18 @@ pt_err(s32 rc)
 	return (int)lv2error(rc);
 }
 
+/* pt_err for the rwlock try-locks.  POSIX gives them one way to fail on a
+ * held lock, EBUSY, whoever holds it; Lv-2 reports a lock the calling thread
+ * already holds for writing as a self-deadlock (EDEADLK), which a call that
+ * never waits cannot be. */
+static int
+pt_try_err(s32 rc)
+{
+	int err = pt_err(rc);
+
+	return err == EDEADLK ? EBUSY : err;
+}
+
 /* ------------------------------------------------------------------ *
  * Process-wide locks
  *
@@ -1397,7 +1409,7 @@ pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock)
 	sys_rwlock_t id;
 	int err = pt_rwlock_resolve(rwlock, &id);
 
-	return err ? err : pt_err(sys_rwlock_tryrlock(id));
+	return err ? err : pt_try_err(sys_rwlock_tryrlock(id));
 }
 
 int
@@ -1428,7 +1440,7 @@ pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock)
 	sys_rwlock_t id;
 	int err = pt_rwlock_resolve(rwlock, &id);
 
-	return err ? err : pt_err(sys_rwlock_trywlock(id));
+	return err ? err : pt_try_err(sys_rwlock_trywlock(id));
 }
 
 int
