@@ -1,14 +1,13 @@
 /*! \file file.h
  \brief File management functions.
 
- Our copy, derived from the PSL1GHT <sys/file.h> wrapper surface with the
- pointer-cast regression fixed: in the default PPU (ILP32) ABI every pointer
- is 32 bits, so a bare `(u64)ptr` widens a 32-bit value into a 64-bit
- register and the compiler warns `cast from pointer to integer of different
- size` under -Werror.  We instead go through `uintptr_t` first
- (`(u64)(uintptr_t)ptr`): truncate-to-pointer-width, then widen-to-u64,
- which is the value the kernel actually sees.  All signatures are
- otherwise unchanged.
+ The SDK's own copy of the PSL1GHT <sys/file.h> wrapper surface (the SDK replaces
+ PSL1GHT headers rather than patching them), with the lv2fs chown/mount/unmount
+ wrappers folded in from <sys/lv2_fs_ext.h>, which now forwards here.  Pointer
+ arguments are converted explicitly, (u64)(uintptr_t)ptr: the pointer's own width
+ first, then widened.  Measured with GCC 12.4 and 16, the bare (u64)ptr casts produce
+ the same zero-extended values and compile cleanly under -Werror, so this is conversion
+ hygiene, not a behaviour change.  All signatures are unchanged.
  */
 
 #ifndef __SYS_FILE_H__
