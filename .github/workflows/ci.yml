@@ -318,6 +318,8 @@ jobs:
         run: bash tests/sdk/sys-prx-records-test.sh
       - name: Test the SDK-owned sys/tty.h and sys/interrupt.h
         run: bash tests/sdk/sys-tty-interrupt-test.sh
+      - name: Test the SDK-owned sys/file.h (pointer arguments zero-extended)
+        run: bash tests/sdk/sys-file-test.sh
 
       # Skips without PS3DEV; ld's TOC edit must write a zero pad word, not
       # heap bytes, after an odd-size ILP32 .toc (binutils patch 0007).
