@@ -648,6 +648,9 @@ impl GuiApp {
                 let Some(key) = self.rows.get(index).map(|row| row.key.clone()) else {
                     return;
                 };
+                if !self.settle_draft(&key, "adding it") {
+                    return;
+                }
                 match self.model.add_registry_key(&key) {
                     Ok(()) => {
                         self.report_ok(format!("Added {key}"));
@@ -657,6 +660,9 @@ impl GuiApp {
                 }
             }
             Action::Flag { key, flag, enabled } => {
+                if !self.settle_draft(&key, "changing its flags") {
+                    return;
+                }
                 match self.model.set_flag(&key, &flag, enabled) {
                     Ok(()) => {
                         let state = if enabled { "on" } else { "off" };
@@ -677,6 +683,9 @@ impl GuiApp {
                         .insert(CUSTOM_KEY_FIELD.to_owned(), "Enter a key name".to_owned());
                     return;
                 }
+                if !self.settle_draft(&key, "adding it") {
+                    return;
+                }
                 let assignment = format!("{key}={}", self.custom_value);
                 match self.model.add_assignment(&assignment, self.grow) {
                     Ok(()) => {
@@ -694,6 +703,23 @@ impl GuiApp {
                 }
             }
         }
+    }
+
+    /// Before an action other than the key's own field changes the key (a
+    /// flag toggle, an Add), apply the value typed for it, so Save cannot
+    /// later write that older text over the action.  Returns false, and
+    /// leaves the typed text and its error in place, when the value is
+    /// refused; the action must then not run.
+    fn settle_draft(&mut self, key: &str, action: &str) -> bool {
+        if !self.drafts.contains_key(key) {
+            return true;
+        }
+        self.commit_key(key);
+        if self.drafts.contains_key(key) {
+            self.report_err(format!("{key}: fix the typed value before {action}"));
+            return false;
+        }
+        true
     }
 
     /// Apply a key's draft: set the entry, or add it when the file does not
@@ -2476,5 +2502,63 @@ mod tests {
         assert_eq!(app.field_text("APP_VER"), "01.00");
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_file(other);
+    }
+
+    // codex_PS3DK's review counterexample for 7bed249d, verbatim.
+    #[test]
+    fn review_same_key_flag_toggle_survives_save_of_pending_numeric_draft() {
+        let (mut app, path) = app_on_copy("review-flag-same-key");
+        app.apply(Action::Goto(Page::Entries));
+        type_into(&mut app, "ATTRIBUTE", "0x00000001");
+        app.apply(Action::Goto(Page::Flags));
+        app.apply(Action::Flag {
+            key: "ATTRIBUTE".to_owned(),
+            flag: "install_disc".to_owned(),
+            enabled: true,
+        });
+        assert!(app.save());
+        let actual = reread(&path).get_integer("ATTRIBUTE");
+        let _ = std::fs::remove_file(path);
+        assert_eq!(actual, Some(0x10001), "latest flag toggle must not be overwritten by the older numeric draft");
+    }
+
+    #[test]
+    fn flag_toggle_on_a_key_with_a_refused_draft_is_refused() {
+        let (mut app, path) = app_on_copy("flag-refused-draft");
+        type_into(&mut app, "ATTRIBUTE", "not a number");
+        app.apply(Action::Flag {
+            key: "ATTRIBUTE".to_owned(),
+            flag: "install_disc".to_owned(),
+            enabled: true,
+        });
+
+        assert_eq!(app.field_text("ATTRIBUTE"), "not a number", "the typed text is kept");
+        assert!(app.field_errors.contains_key("ATTRIBUTE"), "and shows why it was refused");
+        assert_eq!(
+            app.model.document.as_ref().unwrap().get_integer("ATTRIBUTE"),
+            Some(0),
+            "the toggle did not reach the document"
+        );
+        assert_eq!(app.status_tone, Tone::Danger);
+        assert!(!app.save(), "the refused draft still blocks Save");
+        assert_eq!(std::fs::read(&path).unwrap(), FIXTURE);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn custom_add_of_a_key_with_a_pending_title_draft_settles_the_draft_first() {
+        let (mut app, path) = app_on_copy("custom-add-draft");
+        type_into(&mut app, "TITLE_01", "Typed on Titles");
+        app.custom_key = "TITLE_01".to_owned();
+        app.custom_value = "Added as custom".to_owned();
+        app.apply(Action::AddCustom);
+
+        // The typed title was applied first, so the custom add finds the key
+        // present and is refused on the form; nothing is left to overwrite.
+        assert!(app.drafts.is_empty());
+        assert!(app.field_errors.contains_key(CUSTOM_KEY_FIELD));
+        assert!(app.save());
+        assert_eq!(reread(&path).get_string("TITLE_01"), Some("Typed on Titles"));
+        let _ = std::fs::remove_file(path);
     }
 }
