@@ -5,12 +5,13 @@
 #   first line matching <stop regex> (default: none, i.e. the end).  Tracks general registers as known 64-bit values
 #   or unknown, and 8-byte stack slots addressed off(base) while the base register is unchanged.
 #   Known: li, lis, addi (rA 0 = literal), mr, ori, oris, sldi, rldimi, rldicl/clrldi, std / ld of a tracked slot.
-#   Every other instruction that writes a general register (its first operand) makes it unknown; compares, vector
-#   loads (vector destination) and directives write no general register; an update form (stdu/stwu) makes its base
-#   unknown.  Reading an unknown register makes the result unknown.
-#   Fail closed: any branch, call or conditional return before the stop line makes EVERY result unknown
-#   (PPC_UNSUPPORTED holds it); any std forgets every other tracked slot first and any other store forgets them all,
-#   so an aliasing base or an overlapping narrower store can never leave a stale value behind.
+#   The instruction set is EXPLICIT: listed loads and arithmetic make their first operand unknown; update forms
+#   (stdu, stdux, ldux, ...) also make their base unknown; listed compares, vector loads/stores and barriers write no
+#   general register.  Reading an unknown register makes the result unknown.
+#   Fail closed: any other opcode - a branch, a call, a conditional return, a load/store multiple, anything not
+#   listed - before the stop line makes EVERY result unknown (PPC_UNSUPPORTED holds it).  Any std forgets every
+#   other tracked slot first and any other store forgets them all, so an aliasing base or an overlapping narrower
+#   store can never leave a stale value behind.
 #   Afterwards ppc_reg <n> prints the value in hex (0x%016x) or "unknown", and PPC_STOP_LINE holds the stop line.
 #
 # ppc_ea <instruction line>: for an X-form access "op VR,RA,RB" after ppc_eval stopped on it, prints the effective
@@ -80,17 +81,30 @@ ppc_eval() {
             std)   PPC_M=()
                    if [[ $b =~ ^-?[0-9]+\([0-9]+\)$ ]] && va=$(ppc_get "$a"); then PPC_M[$b]=$va; fi ;;
             ld)    if [[ $b =~ ^-?[0-9]+\([0-9]+\)$ && -n "${PPC_M[$b]+x}" ]]; then ppc_set "$a" "${PPC_M[$b]}"; else ppc_kill "$a"; fi ;;
-            stdu|stwu|stbu|sthu|ldu|lwzu|lbzu|lhzu)
-                   PPC_M=()
-                   [[ $b =~ \(([0-9]+)\)$ ]] && ppc_kill "${BASH_REMATCH[1]}"
-                   [[ $op == l* ]] && ppc_kill "$a" ;;
-            st*)   PPC_M=() ;;
-            # Control flow and calls are not modelled: a branch, a call or a conditional return before the stop
-            # line makes every result unknown (fail closed).
-            b|b?|b??|b???|b????|bl|bla|blr*|bctr*|bdnz*|bdz*|bc|bca|bcl|bclr*|bcctr*)
-                   PPC_UNSUPPORTED="$line" ;;
-            lv*|cmp*|mtctr|mtlr|mtcrf|nop|isync|sync|lwsync|eieio|vor|vxor|vand|vperm|vsldoi|xxlor) ;;
-            *)     [[ $a =~ ^[0-9]+$ ]] && ppc_kill "$a" ;;
+            # Update forms also write their base register: D-form RT/RS,d(RA), X-form RT/RS,RA,RB.
+            stdu|stwu|stbu|sthu|stfdu|stfsu)
+                   PPC_M=(); [[ $b =~ \(([0-9]+)\)$ ]] && ppc_kill "${BASH_REMATCH[1]}" ;;
+            ldu|lwzu|lbzu|lhzu|lhau)
+                   [[ $b =~ \(([0-9]+)\)$ ]] && ppc_kill "${BASH_REMATCH[1]}"; ppc_kill "$a" ;;
+            stdux|stwux|stbux|sthux|stfdux|stfsux)
+                   PPC_M=(); ppc_kill "$b" ;;
+            ldux|lwzux|lbzux|lhzux|lhaux|lwaux)
+                   ppc_kill "$b"; ppc_kill "$a" ;;
+            # Other stores write memory only.
+            stw|stb|sth|stdx|stwx|stbx|sthx|stfd|stfs|stfdx|stfsx|stvx|stvxl|stvebx|stvehx|stvewx)
+                   PPC_M=() ;;
+            # Loads and arithmetic that write exactly one general register, their first operand (not modelled).
+            lwz|lbz|lhz|lha|lwa|ldx|lwzx|lbzx|lhzx|lhax|lwax|add|addc|adde|addze|addis|addic|subf|subfc|subfe|subfic|neg|\
+            and|andc|andi.|andis.|or|orc|nor|nand|eqv|xor|xori|xoris|extsb|extsh|extsw|rlwinm|rlwimi|rldic|rldicr|\
+            slw|srw|sraw|srawi|sld|srd|srad|sradi|srdi|srwi|slwi|clrlwi|clrrwi|clrrdi|mulli|mullw|mulld|mulhw|mulhwu|\
+            mulhd|mulhdu|divw|divwu|divd|divdu|cntlzw|cntlzd|mfcr|mflr|mfctr)
+                   ppc_kill "$a" ;;
+            # Instructions that write no general register.
+            lvsl|lvsr|lvx|lvxl|lvebx|lvehx|lvewx|cmpw|cmpwi|cmplw|cmplwi|cmpd|cmpdi|cmpld|cmpldi|mtctr|mtlr|mtcrf|\
+            nop|isync|sync|lwsync|eieio|vor|vxor|vand|vperm|vsldoi) ;;
+            # Everything else - control flow, calls, conditional returns, load/store multiple, any opcode not listed
+            # above - is not modelled: every result becomes unknown (fail closed).
+            *)     PPC_UNSUPPORTED="$line" ;;
         esac
     done <<< "$body"
 }

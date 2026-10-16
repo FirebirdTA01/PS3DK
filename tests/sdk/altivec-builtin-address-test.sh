@@ -72,7 +72,8 @@ status=0
 # -O0 stvx spill; a sign-extending lis, a negative li, an access through another register, a register clobbered
 # before the oris or before the access (codex's 7bf0e74f counterexamples), and a clobber after a spill are refused;
 # a value spilled and reloaded is accepted, but not after a narrower store overwrote part of the slot, nor past a
-# branch (codex's 902c3f6a counterexamples).
+# branch (codex's 902c3f6a counterexamples); an indexed update form changing the base (stdux, ldux - codex's
+# 03acb1eb counterexamples) and any opcode the evaluator does not list are refused too.
 if ea_is_const $'\tli 9,4\n\toris 9,9,0x8000\n\tlvsl 0,0,9' lvsl &&
    ea_is_const $'\tlis 9,0x8000\n\tori 9,9,4\n\tclrldi 9,9,32\n\tlvsl 0,0,9' lvsl &&
    ea_is_const $'li 9,48\naddi 10,31,64\nstvx 2,10,9\nli 9,4\noris 9,9,0x8000\nstvewx 0,0,9' stvewx &&
@@ -84,7 +85,10 @@ if ea_is_const $'\tli 9,4\n\toris 9,9,0x8000\n\tlvsl 0,0,9' lvsl &&
    ! ea_is_const $'li 9,4\noris 9,9,0x8000\nstvx 2,0,9\nli 9,0\nstvewx 0,0,9' stvewx &&
    ea_is_const $'li 9,4\noris 9,9,0x8000\nstd 9,32(1)\nld 9,32(1)\nlvsl 0,0,9' lvsl &&
    ! ea_is_const $'li 9,4\noris 9,9,0x8000\nstd 9,32(1)\nli 10,-1\nstw 10,32(1)\nld 9,32(1)\nlvsl 0,0,9' lvsl &&
-   ! ea_is_const $'lis 9,0x8000\nori 9,9,4\nb .Laccess\nclrldi 9,9,32\n.Laccess:\nlvsl 0,0,9' lvsl; then
+   ! ea_is_const $'lis 9,0x8000\nori 9,9,4\nb .Laccess\nclrldi 9,9,32\n.Laccess:\nlvsl 0,0,9' lvsl &&
+   ! ea_is_const $'li 9,4\noris 9,9,0x8000\nli 10,0\nli 11,16\nstdux 10,9,11\nlvsl 0,0,9' lvsl &&
+   ! ea_is_const $'li 9,4\noris 9,9,0x8000\nli 10,0\nli 11,16\nldux 10,9,11\nlvsl 0,0,9' lvsl &&
+   ! ea_is_const $'li 9,4\noris 9,9,0x8000\nfrobnicate 12,13\nlvsl 0,0,9' lvsl; then
     echo "altivec-builtin-address: ok   effective-address evaluator separates its controls"
 else
     echo "altivec-builtin-address: FAIL effective-address evaluator does not separate its controls"; status=1
