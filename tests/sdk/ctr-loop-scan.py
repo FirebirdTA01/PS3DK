@@ -160,9 +160,9 @@ def scan(lines, out=sys.stdout, funcs=None):
     print("judged mtctr (possible loop count): %d, findings: %d, non-loop mtctr: %d" % (loops, findings, len(other)), file=out)
     return findings
 
-def self_test():
-    import io
-    cases = {
+def self_test_cases():
+    """name -> (listing, expected findings[, FUNC symbols])."""
+    return {
         "red-add": ("""0000000000000000 <.f>:
    0:	81 24 00 00 	lwz     r9,0(r4)
    4:	7c a9 2a 14 	add     r5,r9,r5
@@ -275,6 +275,10 @@ def self_test():
         # A bl to a proven other function is a call (CTR is volatile across it): not a count.
         "green-bl-call": ('0000000000000000 <.f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 11 \tbl      1c <.g>\n', 0, {".f", ".g"}),
     }
+
+def self_test():
+    import io
+    cases = self_test_cases()
     ok = True
     for name, case in cases.items():
         text, want, funcs = case if len(case) == 3 else (case[0], case[1], None)
