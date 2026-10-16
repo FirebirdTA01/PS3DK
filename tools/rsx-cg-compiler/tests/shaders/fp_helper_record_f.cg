@@ -1,0 +1,5 @@
+// i.col reaches the output only through a helper's parameter.  Reference:
+// byte-identical to the direct read, the TEXCOORD1 record included.
+struct Tag { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
+float3 helper(Tag t) { return t.col; }
+float4 main(Tag i) : COLOR { return float4(helper(i) * i.uv.x, 1); }

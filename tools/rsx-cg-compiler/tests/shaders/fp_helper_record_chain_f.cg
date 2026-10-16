@@ -1,0 +1,5 @@
+// The same through two helper levels.
+struct Tag { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
+float3 inner(Tag t) { return t.col; }
+float3 outer(Tag s) { return inner(s); }
+float4 main(Tag i) : COLOR { return float4(outer(i) * i.uv.x, 1); }
