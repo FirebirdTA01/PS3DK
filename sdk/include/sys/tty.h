@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 #include <ppu-types.h>
-#include <sys/lv2_syscall.h>
+#include <ppu-lv2.h>          /* as PSL1GHT's copy: the LV2_* macros and lv2syscallN */
 
 #define SYS_TTYP_MAX          (0x10)
 

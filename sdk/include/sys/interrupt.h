@@ -4,8 +4,9 @@
  * PPU interrupt tags and interrupt threads: the lv2 system calls 80, 81, 84, 88 and 89 as the reference
  * declares them, with PSL1GHT's sysInterrupt* spellings.  The types (sys_interrupt_tag_t,
  * sys_irqoutlet_id_t, sys_hw_thread_t, sys_interrupt_thread_handle_t) come from <ppu-types.h>.
- * sys_interrupt_thread_disestablish (a library call, not a system call) is not declared: no stub library
- * here exports it.  SDK-owned: this header replaces PSL1GHT's.
+ * sys_interrupt_thread_disestablish is a library call (liblv2_stub, also exported as PSL1GHT's
+ * sysInterruptThreadDisestablish, which <lv2/interrupt.h> declares); it is not the raw system call 89
+ * that _sys_interrupt_thread_disestablish makes.  SDK-owned: this header replaces PSL1GHT's.
  */
 #ifndef __PS3DK_SYS_INTERRUPT_H__
 #define __PS3DK_SYS_INTERRUPT_H__
@@ -13,7 +14,8 @@
 
 #include <stdint.h>
 #include <ppu-types.h>
-#include <sys/lv2_syscall.h>
+#include <ppu-lv2.h>          /* as PSL1GHT's copy: the LV2_* macros and lv2syscallN */
+#include <lv2/interrupt.h>     /* sysInterruptThreadDisestablish, as PSL1GHT's sys/interrupt.h provided */
 
 #define SYS_HW_THREAD_ANY               0xFFFFFFFEU
 #define SYS_HW_THREAD_INVALID           0xFFFFFFFFU
@@ -55,6 +57,10 @@ static inline void sys_interrupt_thread_eoi(void)
     lv2syscall0(88);
 }
 
+/* The library call: tears down the interrupt thread and its resources (liblv2_stub). */
+extern int sys_interrupt_thread_disestablish(sys_interrupt_thread_handle_t ih);
+
+/* The raw system call 89 underneath it. */
 static inline int _sys_interrupt_thread_disestablish(sys_interrupt_thread_handle_t ih, uint64_t *tls_mem)
 {
     lv2syscall2(89, (uint64_t)ih, (uint64_t)(uintptr_t)tls_mem);

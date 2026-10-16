@@ -2,8 +2,15 @@
  * PSL1GHT name is used (compiled under -Wall -Wextra -Werror in C and C++, both ABIs), and two probes pass
  * 32-bit addresses with the high bit set so the driver can check, by value, that ILP32 pointers reach the
  * system call zero-extended (r4 and r6 at the sc instruction). */
+/* -DLV2_FIRST / -DLV2_AFTER: PSL1GHT's <lv2/interrupt.h> before or after ours (both must compile). */
+#if defined(LV2_FIRST)
+# include <lv2/interrupt.h>
+#endif
 #include <sys/tty.h>
 #include <sys/interrupt.h>
+#if defined(LV2_AFTER)
+# include <lv2/interrupt.h>
+#endif
 
 #if defined(__cplusplus)
 # define CHECK(c, m) static_assert(c, m)
@@ -38,5 +45,7 @@ int every_name(unsigned int *n, sys_interrupt_tag_t *tag, sys_interrupt_thread_h
     sysInterruptThreadEOI();
     rc += _sys_interrupt_thread_disestablish(*ih, tls) + _sysInterruptThreadDisestablish(*ih, tls);
     rc += sys_interrupt_tag_destroy(*tag) + sysInterruptTagDestroy(*tag);
+    /* the library call under both names (liblv2_stub), distinct from the raw system call above */
+    rc += sys_interrupt_thread_disestablish(*ih) + sysInterruptThreadDisestablish(*ih);
     return rc;
 }
