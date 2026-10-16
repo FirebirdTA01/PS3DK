@@ -49,3 +49,4 @@
 0070-libstdcxx-ps3-time-support.patch
 0071-libstdcxx-ps3-cxa-thread-atexit-impl.patch
 0072-rs6000-cell64lv2-ilp32-no-ext-dce.patch
+0073-rs6000-cell-lr-ctr-move-cost.patch
