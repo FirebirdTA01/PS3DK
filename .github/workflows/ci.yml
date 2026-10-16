@@ -303,6 +303,11 @@ jobs:
       - name: Test the packed-argument address scanner
         run: bash tests/sdk/ppu-packed-arg-scan-test.sh
 
+      # Skips without PS3DEV; SPU gcc patch 0005: <vmx2spu.h> compiles in C++
+      # (vec_sum2s's compound literal no longer splits the spu_and macro).
+      - name: Test the SPU vmx2spu.h header compiles in C++
+        run: bash tests/sdk/spu-vmx2spu-cxx-test.sh
+
       # Skip without PS3DEV; header salvage from the 2026-10-16 branch audit:
       # libnetctl.h and netinet/in.h in any order, the PRX record types and
       # SYS_SPU_QUEUE, and the SDK-owned sys/tty.h + sys/interrupt.h (ILP32
