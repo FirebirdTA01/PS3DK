@@ -20,6 +20,7 @@
  *           sync  high word = tag mask << 16 | 7
  * Independently written from the published object layouts and semantics.
  */
+#include "jq_dma.h"
 #include <stdint.h>
 #include <spu_intrinsics.h>
 #include <spu_mfcio.h>
@@ -128,8 +129,7 @@ static int submit_single(uint64_t jq, uint64_t cmd, unsigned tag, int blocking, 
 	}
 	slot[index & 1] = cmd | lap;
 	mfc_put(&slot[index & 1], L32(0x10) + index * 8, 8, tag, 0, 0);
-	mfc_write_tag_mask(1u << tag);
-	(void)mfc_read_tag_status_all();
+	jq_dma_wait(tag);
 	return 0;
 }
 
@@ -321,8 +321,7 @@ static int in_pool(uint64_t jq, uint64_t eaJob)
 {
 	static uint32_t pool[4] __attribute__((aligned(16)));
 	mfc_get(pool, jq + JQ_POOL_INFO, 16, 0, 0, 0);
-	mfc_write_tag_mask(1u << 0);
-	(void)mfc_read_tag_status_all();
+	jq_dma_wait(0);
 	return (uint32_t)eaJob >= pool[0] && (uint32_t)eaJob < pool[1];
 }
 

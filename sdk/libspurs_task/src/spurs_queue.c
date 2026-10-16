@@ -31,6 +31,7 @@
  * thread is woken through spuPort.  Independently written from the
  * published object layout and wake protocol.
  */
+#include "spurs_dma.h"
 #include <stdint.h>
 #include <spu_mfcio.h>
 
@@ -149,8 +150,7 @@ static int waiter_taskset(unsigned wkl, uint64_t *taskset)
 	   (16-31); the 64-bit argument is at +0x08. */
 	info = line.spurs + ((wkl & 0x10) ? 0x1000u : 0xb00u) + (wkl & 0xfu) * 0x20u + 0x08u;
 	mfc_get(&arg[(info >> 3) & 1], info, 8, 31, 0, 0);
-	mfc_write_tag_mask(1u << 31);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(31);
 	*taskset = arg[(info >> 3) & 1];
 	return 0;
 }
@@ -174,8 +174,7 @@ static int check_ea(uint64_t ea)
 
 static void wait_tag(unsigned tag)
 {
-	mfc_write_tag_mask(1u << tag);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(tag);
 }
 
 int _cellSpursQueueInitialize(uint64_t ea, uint64_t buffer, unsigned int size,

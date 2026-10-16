@@ -20,6 +20,7 @@
  * releasing side sets bit 1 of an entry it wakes before it is written.
  * Independently written from the published object layouts and semantics.
  */
+#include "jq_dma.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <spu_intrinsics.h>
@@ -66,8 +67,7 @@ static inline int put_line(void *ls, uint64_t ea)
 static void dma_get(void *ls, uint64_t ea, unsigned size, unsigned tag)
 {
 	mfc_get(ls, ea, size, tag, 0, 0);
-	mfc_write_tag_mask(1u << tag);
-	(void)mfc_read_tag_status_all();
+	jq_dma_wait(tag);
 }
 
 static int handle_open(uint64_t jq, int handle)

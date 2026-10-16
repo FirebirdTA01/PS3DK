@@ -16,6 +16,7 @@
  * its layout (below) is private to this file.
  * Independently written from the published object layouts and semantics.
  */
+#include "spurs_dma.h"
 #include <stdint.h>
 #include <spu_intrinsics.h>
 #include <spu_mfcio.h>
@@ -121,20 +122,17 @@ static int create_task(uint64_t eaTaskset, CellSpursTaskId *idTask, uint64_t eaE
 	__builtin_memcpy(&info[4], &lsPattern, 16);
 	record = eaTaskset + TASK_INFO + (uint64_t)id * TASK_INFO_SIZE;
 	mfc_putf(info, record, sizeof info, 31, 0, 0);
-	mfc_write_tag_mask(1u << 31);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(31);
 
 	/* its exit code: attach the container and hand the policy module its
 	   exit record { u64 from Taskset2 +0x1900, u64 container EA } */
 	if (eaExitCode) {
 		(void)_cellSpursTaskExitCodeAttachTask(eaExitCode, eaTaskset, id);
 		mfc_get(&info[0], eaTaskset + TS2_EXIT_DATA, 8, 31, 0, 0);
-		mfc_write_tag_mask(1u << 31);
-		(void)mfc_read_tag_status_all();
+		spurs_dma_wait(31);
 		info[1] = eaExitCode;
 		mfc_putf(info, eaTaskset + EXIT_RECORDS + (uint64_t)id * 16, 16, 31, 0, 0);
-		mfc_write_tag_mask(1u << 31);
-		(void)mfc_read_tag_status_all();
+		spurs_dma_wait(31);
 	}
 
 	/* make it ready */
