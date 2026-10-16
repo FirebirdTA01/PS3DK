@@ -83,6 +83,11 @@ sched-priority-lp64,tests/regression/sched-priority/sched-priority-lp64.fake.sel
 # is checked; the first failing step number is printed.
 pthread-audio-path-ilp32,tests/regression/pthread-audio-path/pthread-audio-path-ilp32.fake.self,90,RAN-CLEAN,PTHREAD_AUDIO_PATH_OK,PTHREAD_AUDIO_PATH_FAIL
 pthread-audio-path-lp64,tests/regression/pthread-audio-path/pthread-audio-path-lp64.fake.self,90,RAN-CLEAN,PTHREAD_AUDIO_PATH_OK,PTHREAD_AUDIO_PATH_FAIL
+# ilp32-ext-dce: a pointer-walking loop at -O2 vs an -O0 reference, lengths 0..200 x 4 alignments.  GCC 16's
+# ext-dce dropped the zero-extension of the wrapped post-loop pointer under ILP32 and the loop ran away
+# (a hang times out); gcc-16.x 0072 keeps the pass off by default.  LP64 is the unaffected control.
+ilp32-ext-dce-ilp32,tests/regression/ilp32-ext-dce/ilp32-ext-dce-ilp32.fake.self,30,RAN-CLEAN,ILP32_EXT_DCE_OK,ILP32_EXT_DCE_FAIL
+ilp32-ext-dce-lp64,tests/regression/ilp32-ext-dce/ilp32-ext-dce-lp64.fake.self,30,RAN-CLEAN,ILP32_EXT_DCE_OK,ILP32_EXT_DCE_FAIL
 # pthread-destroy-order: a mutex and its condition variable destroyed in either
 # order (Lv-2 will not destroy a mutex a cond is bound to; the shim unbinds idle
 # conds first), a cond reused with a new mutex, and EBUSY while a waiter blocks.
