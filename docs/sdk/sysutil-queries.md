@@ -55,7 +55,8 @@ in each library and the return types they return.
 
 ## Error codes
 
-Each of the twelve defines its own error codes in its own header.
+Each library that has error codes defines them in its own header;
+`<cell/sysutil_licensearea.h>` defines none.
 The `CELL_SYSUTIL_LICENSE_AREA_*` values (the result of
 `cellSysutilGetLicenseArea`) are also in `<sysutil/sysutil_common.h>`:
 `J 0`, `A 1`, `E 2`, `H 3`, `K 4`, `C 5`, `OTHER 100`.

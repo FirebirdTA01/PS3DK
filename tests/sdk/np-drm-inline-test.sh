@@ -25,6 +25,9 @@ fi
 cc="$ps3dev/ppu/bin/powerpc64-ps3-elf-gcc"
 { [ -x "$cc" ] || [ -x "$cc.exe" ]; } || { echo "np-drm-inline: FAIL: no PPU compiler under $ps3dev"; exit 1; }
 sdk="${PS3DK:-}"; [ -n "$sdk" ] || { [ -d "$ps3dev/ps3dk/ppu/include" ] && sdk="$ps3dev/ps3dk" || sdk="$ps3dev"; }
+# The PPU driver's link specs read $PS3DK: give it the SDK resolved here, so
+# --ps3dev alone (PS3DK unset) links too.
+export PS3DK="$sdk"
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 src="$root/tests/sdk/np-drm-inline-test.c"
 status=0

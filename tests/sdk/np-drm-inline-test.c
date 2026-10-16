@@ -3,7 +3,7 @@
  * Compile-check for <np/drm_inline.h>.
  *
  * Includes the inline header and calls sceNpDrmOpen from an exported
- * function. Calling it forces the inline body to be inlined — and that
+ * function. Calling it makes the compiler emit the inline body, and that
  * body references the three external symbols (cellFsStat,
  * sceNpDrmIsAvailable, cellFsOpen) — so the linker is left with real
  * undefined references to each of them.
