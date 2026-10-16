@@ -350,11 +350,11 @@ enum Dialog {
 /// What a click asked for.  Collected while drawing, applied afterwards so
 /// the rows are not edited while they are being drawn.
 enum Action {
-    Commit(usize),
-    Revert(usize),
-    RevertTitle(usize),
+    /// Apply the key's draft to the document.
+    Commit(String),
+    /// Drop the key's draft (Esc).
+    Revert(String),
     AddDefault(usize),
-    CommitTitle(usize),
     Flag {
         key: String,
         flag: String,
@@ -377,6 +377,12 @@ struct GuiApp {
     custom_value: String,
     show_reserved: bool,
     search: String,
+    /// Text typed into a field and not yet applied, one entry per key.  The
+    /// only owner of uncommitted text: Overview, Titles and All entries all
+    /// edit through it, so a TITLE_xx has one draft whichever page edits
+    /// it, and rebuilding the rows never touches it.
+    drafts: HashMap<String, String>,
+    /// Why a key's draft was refused.  Lives and dies with the draft.
     field_errors: HashMap<String, String>,
     status_tone: Tone,
     dialog: Option<Dialog>,
@@ -411,6 +417,7 @@ impl GuiApp {
             custom_value: String::new(),
             show_reserved: false,
             search: String::new(),
+            drafts: HashMap::new(),
             field_errors: HashMap::new(),
             status_tone,
             dialog: None,
@@ -421,32 +428,53 @@ impl GuiApp {
         Ok(app)
     }
 
-    /// Rebuild the rows from the document.  A field whose edit was refused
-    /// keeps its text, so the user sees what was rejected next to the error.
+    /// Rebuild the rows from the document's committed values.  Drafts are
+    /// kept; one that now matches its committed value is dropped.
     fn reload_rows(&mut self) {
-        let refused: HashMap<String, String> = self
-            .rows
-            .iter()
-            .map(|row| (row.key.clone(), row.value.clone()))
-            .chain(
-                self.localized_titles
-                    .iter()
-                    .map(|title| (title.key.to_owned(), title.value.clone())),
-            )
-            .filter(|(key, _)| self.field_errors.contains_key(key))
-            .collect();
         self.rows = rows_from_model(&self.model);
         self.localized_titles = localized_titles_from_model(&self.model);
-        for row in &mut self.rows {
-            if let Some(value) = refused.get(&row.key) {
-                row.value = value.clone();
-            }
-        }
-        for title in &mut self.localized_titles {
-            if let Some(value) = refused.get(title.key) {
-                title.value = value.clone();
-            }
-        }
+        self.prune_drafts();
+    }
+
+    /// The committed text of a key as the fields show it: the entry's value,
+    /// or empty for a key the file does not have (a localized title, say).
+    fn committed_text(&self, key: &str) -> String {
+        self.rows
+            .iter()
+            .find(|row| row.present && row.key == key)
+            .map(|row| row.committed.clone())
+            .unwrap_or_default()
+    }
+
+    /// What a field shows: its draft, or the committed value.
+    fn field_text(&self, key: &str) -> String {
+        self.drafts
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| self.committed_text(key))
+    }
+
+    /// Record typing into a field (the UI calls set_draft directly, since it
+    /// holds the rows borrowed while it draws).
+    #[cfg(test)]
+    fn edit(&mut self, key: &str, text: String) {
+        let committed = self.committed_text(key);
+        set_draft(&mut self.drafts, &mut self.field_errors, key, text, &committed);
+    }
+
+    /// Drop drafts that match their committed value, and errors that no
+    /// longer have a draft (the custom-key form keeps its own).
+    fn prune_drafts(&mut self) {
+        let committed: HashMap<String, String> = self
+            .drafts
+            .keys()
+            .map(|key| (key.clone(), self.committed_text(key)))
+            .collect();
+        self.drafts
+            .retain(|key, text| committed.get(key).map(String::as_str) != Some(text.as_str()));
+        let drafts = &self.drafts;
+        self.field_errors
+            .retain(|key, _| key == CUSTOM_KEY_FIELD || drafts.contains_key(key));
     }
 
     fn report_ok(&mut self, message: String) {
@@ -459,7 +487,10 @@ impl GuiApp {
         self.status_tone = Tone::Danger;
     }
 
+    /// A new document replaced the old one (the user confirmed any discard
+    /// first), so nothing typed into the old one carries over.
     fn after_load(&mut self) {
+        self.drafts.clear();
         self.field_errors.clear();
         self.search.clear();
         self.page = Page::Overview;
@@ -510,55 +541,22 @@ impl GuiApp {
     }
 
     /// True when the document differs from the file on disk: applied edits,
-    /// text still sitting in a field, or a field whose edit was refused.
+    /// or text typed into a field and not applied (refused edits included).
     fn is_dirty(&self) -> bool {
-        self.model.dirty
-            || self
-                .rows
-                .iter()
-                .any(|row| row.present && row.value != row.committed)
-            || self
-                .localized_titles
-                .iter()
-                .any(|title| title.value != title.committed)
-            || self.field_errors.keys().any(|key| key != CUSTOM_KEY_FIELD)
+        self.model.dirty || !self.drafts.is_empty()
     }
 
-    /// Apply every field edit that has not been committed yet (the focused
-    /// field when Ctrl+S is pressed, say).  Returns false when any of them
-    /// is refused; the refused fields keep their text and show the error.
+    /// Apply every draft (the focused field when Ctrl+S is pressed, say).
+    /// Returns false when any is refused; refused drafts keep their text and
+    /// show the error.
     fn commit_pending(&mut self) -> bool {
-        // commit_row and commit_title reload the rows on success, which
-        // drops the other pending text, so take it all out by key first.
-        let pending_rows: Vec<(String, String)> = self
-            .rows
-            .iter()
-            .filter(|row| row.present && row.value != row.committed)
-            .map(|row| (row.key.clone(), row.value.clone()))
-            .collect();
-        let pending_titles: Vec<(&'static str, String)> = self
-            .localized_titles
-            .iter()
-            .filter(|title| title.value != title.committed)
-            .map(|title| (title.key, title.value.clone()))
-            .collect();
-        for (key, value) in &pending_rows {
-            if let Some(index) = self.rows.iter().position(|row| &row.key == key) {
-                self.rows[index].value = value.clone();
-                self.commit_row(index);
-            }
+        self.prune_drafts();
+        let mut keys: Vec<String> = self.drafts.keys().cloned().collect();
+        keys.sort();
+        for key in &keys {
+            self.commit_key(key);
         }
-        for (key, value) in &pending_titles {
-            if let Some(index) = self.localized_titles.iter().position(|title| title.key == *key) {
-                self.localized_titles[index].value = value.clone();
-                self.commit_title(index);
-            }
-        }
-        let refused = self
-            .field_errors
-            .keys()
-            .filter(|key| key.as_str() != CUSTOM_KEY_FIELD)
-            .count();
+        let refused = self.drafts.len();
         if refused > 0 {
             self.report_err(format!(
                 "Not saved: {refused} field{} could not be applied; fix the highlighted value first",
@@ -624,7 +622,6 @@ impl GuiApp {
             "auto" => None,
             other => Some(other.to_owned()),
         };
-        self.field_errors.clear();
         self.reload_rows();
         self.model.status = format!("Schema set to {}", self.schema_label());
         self.status_tone = Tone::Neutral;
@@ -642,18 +639,10 @@ impl GuiApp {
 
     fn apply(&mut self, action: Action) {
         match action {
-            Action::Commit(index) => self.commit_row(index),
-            Action::RevertTitle(index) => {
-                if let Some(title) = self.localized_titles.get_mut(index) {
-                    title.value = title.committed.clone();
-                    self.field_errors.remove(title.key);
-                }
-            }
-            Action::Revert(index) => {
-                if let Some(row) = self.rows.get_mut(index) {
-                    row.value = row.committed.clone();
-                    self.field_errors.remove(&row.key);
-                }
+            Action::Commit(key) => self.commit_key(&key),
+            Action::Revert(key) => {
+                self.drafts.remove(&key);
+                self.field_errors.remove(&key);
             }
             Action::AddDefault(index) => {
                 let Some(key) = self.rows.get(index).map(|row| row.key.clone()) else {
@@ -667,7 +656,6 @@ impl GuiApp {
                     Err(err) => self.report_err(format!("{key}: {err:#}")),
                 }
             }
-            Action::CommitTitle(index) => self.commit_title(index),
             Action::Flag { key, flag, enabled } => {
                 match self.model.set_flag(&key, &flag, enabled) {
                     Ok(()) => {
@@ -708,31 +696,20 @@ impl GuiApp {
         }
     }
 
-    fn commit_row(&mut self, index: usize) {
-        let Some(row) = self.rows.get(index) else {
+    /// Apply a key's draft: set the entry, or add it when the file does not
+    /// have it yet (a localized title, say).
+    fn commit_key(&mut self, key: &str) {
+        let Some(text) = self.drafts.get(key).cloned() else {
+            self.field_errors.remove(key);
             return;
         };
-        if row.value == row.committed {
-            self.field_errors.remove(&row.key);
+        if text == self.committed_text(key) {
+            self.drafts.remove(key);
+            self.field_errors.remove(key);
             return;
         }
-        let key = row.key.clone();
-        let assignment = format!("{}={}", row.key, row.value);
-        let grow = self.grow;
-        self.apply_edit(&key, |model| model.apply_assignment(&assignment, grow));
-    }
-
-    fn commit_title(&mut self, index: usize) {
-        let Some(title) = self.localized_titles.get(index) else {
-            return;
-        };
-        if title.value == title.committed {
-            self.field_errors.remove(title.key);
-            return;
-        }
-        let key = title.key;
-        let assignment = format!("{}={}", title.key, title.value);
-        let present = title.present;
+        let assignment = format!("{key}={text}");
+        let present = self.model.entries().iter().any(|entry| entry.key == key);
         let grow = self.grow;
         self.apply_edit(key, |model| {
             if present {
@@ -756,6 +733,7 @@ impl GuiApp {
         });
         match result {
             Ok(()) => {
+                self.drafts.remove(key);
                 self.field_errors.remove(key);
                 self.report_ok(format!("Updated {key}"));
                 self.reload_rows();
@@ -922,7 +900,7 @@ impl GuiApp {
         let titles = self
             .localized_titles
             .iter()
-            .filter(|title| !title.value.is_empty())
+            .filter(|title| !self.field_text(title.key).is_empty())
             .count();
         let flag_keys = self.rows.iter().filter(|row| !row.flags.is_empty()).count();
         let mut page = self.page;
@@ -1169,7 +1147,7 @@ impl GuiApp {
                     let Some(index) = self.rows.iter().position(|row| row.key == *key) else {
                         continue;
                     };
-                    let row = &mut self.rows[index];
+                    let row = &self.rows[index];
                     ui::field_label(
                         ui,
                         row.friendly.unwrap_or(row.key.as_str()),
@@ -1178,7 +1156,14 @@ impl GuiApp {
                     );
                     ui.vertical(|ui| {
                         if row.present {
-                            value_editor(ui, row, index, 360.0, &self.field_errors, actions);
+                            value_editor(
+                                ui,
+                                row,
+                                360.0,
+                                &mut self.drafts,
+                                &mut self.field_errors,
+                                actions,
+                            );
                         } else {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new("Not set").italics().color(p.text_faint));
@@ -1221,19 +1206,35 @@ impl GuiApp {
                 .spacing([ui::SPACE_XL, ui::SPACE_SM + 2.0])
                 .min_col_width(180.0)
                 .show(ui, |ui| {
-                    for (index, title) in self.localized_titles.iter_mut().enumerate() {
+                    for title in &self.localized_titles {
                         ui::field_label(ui, title.label, Some(title.key), None);
                         ui.vertical(|ui| {
+                            let mut text = self
+                                .drafts
+                                .get(title.key)
+                                .cloned()
+                                .unwrap_or_else(|| title.committed.clone());
                             let response = ui.add(
-                                egui::TextEdit::singleline(&mut title.value)
+                                egui::TextEdit::singleline(&mut text)
+                                    .id(egui::Id::new(("value", title.key)))
                                     .hint_text(&hint)
                                     .desired_width(360.0),
                             );
+                            if response.changed() {
+                                set_draft(
+                                    &mut self.drafts,
+                                    &mut self.field_errors,
+                                    title.key,
+                                    text,
+                                    &title.committed,
+                                );
+                            }
                             if response.lost_focus() {
+                                let key = title.key.to_owned();
                                 if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                                    actions.push(Action::RevertTitle(index));
+                                    actions.push(Action::Revert(key));
                                 } else {
-                                    actions.push(Action::CommitTitle(index));
+                                    actions.push(Action::Commit(key));
                                 }
                             }
                             if let Some(error) = self.field_errors.get(title.key) {
@@ -1343,13 +1344,14 @@ impl GuiApp {
                         );
                     }
                     ui.end_row();
-                    for (index, row) in self.rows.iter_mut().enumerate() {
+                    for row in &self.rows {
                         if !row.present {
                             continue;
                         }
+                        let shown = self.drafts.get(&row.key).unwrap_or(&row.committed);
                         if !needle.is_empty()
                             && !row.key.to_lowercase().contains(&needle)
-                            && !row.value.to_lowercase().contains(&needle)
+                            && !shown.to_lowercase().contains(&needle)
                             && !row
                                 .friendly
                                 .is_some_and(|name| name.to_lowercase().contains(&needle))
@@ -1391,7 +1393,14 @@ impl GuiApp {
                         ui.label(RichText::new(size).monospace().color(p.text_muted))
                             .on_hover_text("Bytes used / bytes reserved in the file");
                         ui.vertical(|ui| {
-                            value_editor(ui, row, index, 380.0, &self.field_errors, actions);
+                            value_editor(
+                                ui,
+                                row,
+                                380.0,
+                                &mut self.drafts,
+                                &mut self.field_errors,
+                                actions,
+                            );
                             if !row.flags.is_empty() && ui::quiet_button(ui, "Edit flags \u{00bb}").clicked() {
                                 actions.push(Action::Goto(Page::Flags));
                             }
@@ -1715,40 +1724,45 @@ fn settings_panel(ui: &mut egui::Ui, grow: &mut bool) {
 }
 
 /// The editor for one present entry: a dropdown when the registry lists its
-/// values, a text field otherwise.  Edits commit on Enter or focus loss.
+/// values, a text field otherwise.  Typing goes into `drafts`; the draft is
+/// applied on Enter or focus loss, and Esc drops it.
 fn value_editor(
     ui: &mut egui::Ui,
-    row: &mut RowState,
-    index: usize,
+    row: &RowState,
     width: f32,
-    errors: &HashMap<String, String>,
+    drafts: &mut HashMap<String, String>,
+    errors: &mut HashMap<String, String>,
     actions: &mut Vec<Action>,
 ) {
+    let mut text = drafts
+        .get(&row.key)
+        .cloned()
+        .unwrap_or_else(|| row.committed.clone());
     if !row.choices.is_empty() {
         let mut changed = false;
         egui::ComboBox::from_id_salt(("choice", &row.key))
-            .selected_text(choice_label(row))
+            .selected_text(choice_label(row, &text))
             .width(width)
             .show_ui(ui, |ui| {
                 for choice in &row.choices {
                     changed |= ui
-                        .selectable_value(&mut row.value, choice.value.clone(), &choice.label)
+                        .selectable_value(&mut text, choice.value.clone(), &choice.label)
                         .changed();
                 }
             });
         if changed {
-            actions.push(Action::Commit(index));
+            set_draft(drafts, errors, &row.key, text, &row.committed);
+            actions.push(Action::Commit(row.key.clone()));
         }
     } else {
-        let error = errors.contains_key(&row.key);
-        let mut edit = egui::TextEdit::singleline(&mut row.value)
+        let mut edit = egui::TextEdit::singleline(&mut text)
             .id(egui::Id::new(("value", &row.key)))
             .desired_width(width);
         if row.format == "integer" || row.format.starts_with("raw") {
             edit = edit.font(egui::TextStyle::Monospace);
         }
         let response = ui.add(edit);
-        if error {
+        if errors.contains_key(&row.key) {
             let p = ui::Palette::of(ui);
             ui.painter().rect_stroke(
                 response.rect.expand(1.0),
@@ -1756,16 +1770,36 @@ fn value_editor(
                 ui::stroke(1.5, p.danger),
             );
         }
+        if response.changed() {
+            set_draft(drafts, errors, &row.key, text, &row.committed);
+        }
         if response.lost_focus() {
             if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                actions.push(Action::Revert(index));
+                actions.push(Action::Revert(row.key.clone()));
             } else {
-                actions.push(Action::Commit(index));
+                actions.push(Action::Commit(row.key.clone()));
             }
         }
     }
     if let Some(error) = errors.get(&row.key) {
         ui::field_message(ui, Tone::Danger, error);
+    }
+}
+
+/// Record a field's text as its key's draft.  Text equal to the committed
+/// value is not a draft, and takes the key's error with it.
+fn set_draft(
+    drafts: &mut HashMap<String, String>,
+    errors: &mut HashMap<String, String>,
+    key: &str,
+    text: String,
+    committed: &str,
+) {
+    if text == committed {
+        drafts.remove(key);
+        errors.remove(key);
+    } else {
+        drafts.insert(key.to_owned(), text);
     }
 }
 
@@ -1861,9 +1895,7 @@ struct RowState {
     max_len: u32,
     used_len: u32,
     confidence: Option<Confidence>,
-    /// The text being edited.
-    value: String,
-    /// The value the document holds; `value` returns to it on Esc.
+    /// The value the document holds.  Typed text lives in GuiApp::drafts.
     committed: String,
     present: bool,
     addable: bool,
@@ -1874,9 +1906,8 @@ struct RowState {
 struct LocalizedTitleState {
     key: &'static str,
     label: &'static str,
-    value: String,
+    /// The stored title, or empty when the file does not have the key.
     committed: String,
-    present: bool,
 }
 
 struct ValueChoice {
@@ -1920,8 +1951,7 @@ fn rows_from_model(model: &GuiModel) -> Vec<RowState> {
                 max_len: entry.max_len,
                 used_len: psf::current_value_len(entry),
                 confidence: definition.map(|key| key.confidence),
-                committed: value.clone(),
-                value,
+                committed: value,
                 present: true,
                 addable: false,
                 choices: value_choices(model, entry, context),
@@ -1947,9 +1977,7 @@ fn localized_titles_from_model(model: &GuiModel) -> Vec<LocalizedTitleState> {
             LocalizedTitleState {
                 key,
                 label,
-                present: !value.is_empty() || model.entries().iter().any(|entry| entry.key == *key),
-                committed: value.clone(),
-                value,
+                committed: value,
             }
         })
         .collect()
@@ -2013,7 +2041,6 @@ fn missing_registry_rows(
                         max_len: key.max_len.unwrap_or(0),
                         used_len: 0,
                         confidence: Some(key.confidence),
-                        value: String::new(),
                         committed: String::new(),
                         present: false,
                         addable,
@@ -2099,12 +2126,12 @@ fn value_choices(
         .collect()
 }
 
-fn choice_label(row: &RowState) -> String {
+fn choice_label(row: &RowState, value: &str) -> String {
     row.choices
         .iter()
-        .find(|choice| choice.value == row.value)
+        .find(|choice| choice.value == value)
         .map(|choice| choice.label.clone())
-        .unwrap_or_else(|| row.value.clone())
+        .unwrap_or_else(|| value.to_owned())
 }
 
 struct FlagGroup<'a> {
@@ -2227,19 +2254,24 @@ mod tests {
 
     const FIXTURE: &[u8] = include_bytes!("../tests/fixtures/ps3dk-template.sfo");
 
-    /// A GuiApp over a private copy of the fixture, with no egui context.
-    fn app_on_copy(name: &str) -> (GuiApp, PathBuf) {
+    fn temp_sfo(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
             "ps3dk-sfo-gui-unit-{}-{name}.sfo",
             std::process::id()
         ));
         std::fs::write(&path, FIXTURE).unwrap();
+        path
+    }
+
+    /// A GuiApp over a private copy of the fixture, with no egui context.
+    fn app_on_copy(name: &str) -> (GuiApp, PathBuf) {
+        let path = temp_sfo(name);
         (GuiApp::new(Some(path.clone()), None).unwrap(), path)
     }
 
+    /// Typing into a key's field, on whichever page shows it.
     fn type_into(app: &mut GuiApp, key: &str, value: &str) {
-        let row = app.rows.iter_mut().find(|row| row.key == key).unwrap();
-        row.value = value.to_owned();
+        app.edit(key, value.to_owned());
     }
 
     fn reread(path: &Path) -> Document {
@@ -2264,12 +2296,7 @@ mod tests {
         let (mut app, path) = app_on_copy("pending-many");
         type_into(&mut app, "TITLE", "Main");
         type_into(&mut app, "APP_VER", "02.00");
-        let english = app
-            .localized_titles
-            .iter_mut()
-            .find(|title| title.key == "TITLE_01")
-            .unwrap();
-        english.value = "English title".to_owned();
+        type_into(&mut app, "TITLE_01", "English title");
 
         assert!(app.save());
         let doc = reread(&path);
@@ -2289,38 +2316,29 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), FIXTURE, "the file is untouched");
         assert!(app.field_errors.contains_key("APP_VER"), "errors: {:?}", app.field_errors);
         assert!(app.is_dirty(), "a refused edit still counts as unsaved");
-        let app_ver = app.rows.iter().find(|row| row.key == "APP_VER").unwrap();
-        assert_eq!(app_ver.value, "123456789", "the refused text stays in the field");
+        assert_eq!(app.field_text("APP_VER"), "123456789", "the refused text stays in the field");
         let _ = std::fs::remove_file(path);
     }
 
-    fn title_index(app: &GuiApp, key: &str) -> usize {
-        app.localized_titles
-            .iter()
-            .position(|title| title.key == key)
-            .unwrap()
-    }
-
     /// Give TITLE_01 a short value on disk, then refuse an over-slot edit.
-    fn refused_english_title(name: &str) -> (GuiApp, PathBuf, usize) {
+    fn refused_english_title(name: &str) -> (GuiApp, PathBuf) {
         let (mut app, path) = app_on_copy(name);
-        let index = title_index(&app, "TITLE_01");
-        app.localized_titles[index].value = "Short".to_owned();
+        type_into(&mut app, "TITLE_01", "Short");
         assert!(app.save());
 
-        app.localized_titles[index].value = "x".repeat(200);
-        app.apply(Action::CommitTitle(index));
+        type_into(&mut app, "TITLE_01", &"x".repeat(200));
+        app.apply(Action::Commit("TITLE_01".to_owned()));
         assert!(app.field_errors.contains_key("TITLE_01"), "the over-slot title is refused");
         assert!(app.is_dirty());
-        (app, path, index)
+        (app, path)
     }
 
     #[test]
     fn esc_on_a_refused_title_clears_its_error_and_unblocks_save() {
-        let (mut app, path, index) = refused_english_title("title-esc");
+        let (mut app, path) = refused_english_title("title-esc");
 
-        app.apply(Action::RevertTitle(index));
-        assert_eq!(app.localized_titles[index].value, "Short");
+        app.apply(Action::Revert("TITLE_01".to_owned()));
+        assert_eq!(app.field_text("TITLE_01"), "Short");
         assert!(!app.field_errors.contains_key("TITLE_01"));
         assert!(!app.is_dirty(), "reverting the only edit leaves nothing unsaved");
         assert!(app.save());
@@ -2330,12 +2348,133 @@ mod tests {
 
     #[test]
     fn retyping_the_stored_title_clears_its_error() {
-        let (mut app, path, index) = refused_english_title("title-retype");
+        let (mut app, path) = refused_english_title("title-retype");
 
-        app.localized_titles[index].value = "Short".to_owned();
-        app.apply(Action::CommitTitle(index));
+        type_into(&mut app, "TITLE_01", "Short");
+        app.apply(Action::Commit("TITLE_01".to_owned()));
         assert!(!app.field_errors.contains_key("TITLE_01"));
         assert!(app.save());
         let _ = std::fs::remove_file(path);
+    }
+
+    // codex_PS3DK's review counterexamples for 4eca269a (draft-state-repros
+    // .patch), carried over unchanged in substance: index-based actions
+    // became key-based and field writes go through `edit`.
+
+    #[test]
+    fn review_pending_app_ver_survives_edit_on_another_page() {
+        let (mut app, path) = app_on_copy("review-pending-page");
+        type_into(&mut app, "APP_VER", "02.00");
+        app.apply(Action::Goto(Page::Titles));
+        type_into(&mut app, "TITLE_01", "English");
+        app.apply(Action::Commit("TITLE_01".to_owned()));
+        assert!(app.save());
+        let actual = reread(&path).get_string("APP_VER").map(str::to_owned);
+        let _ = std::fs::remove_file(path);
+        assert_eq!(actual.as_deref(), Some("02.00"));
+    }
+
+    #[test]
+    fn review_schema_change_preserves_pending_text() {
+        let (mut app, path) = app_on_copy("review-schema");
+        type_into(&mut app, "TITLE", "Pending title");
+        app.schema_choice = "game".to_owned();
+        app.set_schema_choice();
+        assert!(app.save());
+        let actual = reread(&path).get_string("TITLE").map(str::to_owned);
+        let _ = std::fs::remove_file(path);
+        assert_eq!(actual.as_deref(), Some("Pending title"));
+    }
+
+    #[test]
+    fn review_refused_title_from_entries_survives_unrelated_commit() {
+        let (mut app, path) = refused_english_title("review-entries");
+        app.apply(Action::Revert("TITLE_01".to_owned()));
+        type_into(&mut app, "TITLE_01", &"x".repeat(200));
+        app.apply(Action::Commit("TITLE_01".to_owned()));
+        assert!(app.field_errors.contains_key("TITLE_01"));
+        type_into(&mut app, "TITLE", "Valid title");
+        app.apply(Action::Commit("TITLE".to_owned()));
+        let actual = app.field_text("TITLE_01");
+        let _ = std::fs::remove_file(path);
+        assert_eq!(actual, "x".repeat(200));
+    }
+
+    #[test]
+    fn review_retype_stored_title_then_ctrl_s_clears_error() {
+        let (mut app, path) = refused_english_title("review-ctrl-s");
+        type_into(&mut app, "TITLE_01", "Short");
+        let saved = app.save();
+        let _ = std::fs::remove_file(path);
+        assert!(saved, "Ctrl+S must clear the stale error after restoring the stored value");
+    }
+
+    #[test]
+    fn retyping_the_stored_value_is_not_an_unsaved_change() {
+        let (mut app, path) = refused_english_title("retype-not-dirty");
+        type_into(&mut app, "TITLE_01", "Short");
+        assert!(app.drafts.is_empty());
+        assert!(app.field_errors.is_empty());
+        assert!(!app.is_dirty(), "the field matches the file again");
+
+        let (mut app2, path2) = app_on_copy("retype-not-dirty-row");
+        type_into(&mut app2, "APP_VER", "02.00");
+        type_into(&mut app2, "APP_VER", "01.00");
+        assert!(!app2.is_dirty());
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(path2);
+    }
+
+    #[test]
+    fn one_draft_per_key_across_titles_and_all_entries() {
+        let (mut app, path) = app_on_copy("one-draft");
+        type_into(&mut app, "TITLE_01", "Short");
+        assert!(app.save());
+
+        // Titles page, no blur; then All entries shows and edits the same text.
+        app.apply(Action::Goto(Page::Titles));
+        type_into(&mut app, "TITLE_01", "From Titles");
+        app.apply(Action::Goto(Page::Entries));
+        assert_eq!(app.field_text("TITLE_01"), "From Titles");
+        type_into(&mut app, "TITLE_01", "From All entries");
+        app.apply(Action::Goto(Page::Titles));
+        assert_eq!(app.field_text("TITLE_01"), "From All entries");
+        assert_eq!(app.drafts.len(), 1);
+
+        assert!(app.save());
+        assert_eq!(reread(&path).get_string("TITLE_01"), Some("From All entries"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn flag_toggle_keeps_a_pending_field() {
+        let (mut app, path) = app_on_copy("flag-keeps-draft");
+        type_into(&mut app, "APP_VER", "03.00");
+        app.apply(Action::Flag {
+            key: "ATTRIBUTE".to_owned(),
+            flag: "install_disc".to_owned(),
+            enabled: true,
+        });
+        assert_eq!(app.field_text("APP_VER"), "03.00");
+        assert!(app.save());
+        let doc = reread(&path);
+        assert_eq!(doc.get_string("APP_VER"), Some("03.00"));
+        assert_eq!(doc.get_integer("ATTRIBUTE"), Some(0x10000));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn opening_another_file_discards_drafts_and_errors() {
+        let (mut app, path) = refused_english_title("open-discards");
+        type_into(&mut app, "APP_VER", "09.00");
+        let other = temp_sfo("open-discards-other");
+
+        app.open(Some(other.clone()));
+        assert!(app.drafts.is_empty());
+        assert!(app.field_errors.is_empty());
+        assert!(!app.is_dirty());
+        assert_eq!(app.field_text("APP_VER"), "01.00");
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(other);
     }
 }
