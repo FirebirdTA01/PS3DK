@@ -334,16 +334,28 @@ fi
 #    cut from anything else.
 # ---------------------------------------------------------------------------
 echo "-- no build outputs under samples/ and tests/ --"
-outputs=()
+outputs=(); scan_err=""
+scan_out=$(mktemp) || { bad "could not create a temp file for the build-output scan"; scan_out=/dev/null; }
 for top in samples tests; do
     [[ -d "$ROOT/$top" ]] || continue
-    while IFS= read -r f; do outputs+=("${f#"$ROOT"/}"); done < <(
-        find "$ROOT/$top" \( -type f \( -name '*.self' -o -name '*.elf' -o -name '*.sprx' -o -name '*.prx' \
-             -o -name 'CMakeCache.txt' -o -name 'build.ninja' \) \) -o \( -type d -name CMakeFiles \) 2>/dev/null | sort)
+    # An unreadable part of the tree must not pass for a clean one: find's exit status and its stderr both count.
+    if found=$(find "$ROOT/$top" \( -type f \( -name '*.self' -o -name '*.elf' -o -name '*.sprx' -o -name '*.prx' \
+                  -o -name 'CMakeCache.txt' -o -name 'build.ninja' \) \) -o \( -type d -name CMakeFiles \) \
+                  2>&1 >"$scan_out"); then
+        [[ -z $found ]] || scan_err+="$top: $found"$'\n'
+    else
+        scan_err+="$top: find exit $? ${found:-(no message)}"$'\n'
+    fi
+    while IFS= read -r f; do [[ -n $f ]] && outputs+=("${f#"$ROOT"/}"); done < <(sort "$scan_out")
 done
-if [[ ${#outputs[@]} -eq 0 ]]; then
+[[ $scan_out == /dev/null ]] || rm -f "$scan_out"
+if [[ -n $scan_err ]]; then
+    bad "could not scan samples/ and tests/ for build outputs"
+    printf '          %s\n' "${scan_err%$'\n'}"
+elif [[ ${#outputs[@]} -eq 0 ]]; then
     ok "no .self/.elf/.sprx/.prx or CMake build files under samples/ and tests/"
-else
+fi
+if [[ ${#outputs[@]} -gt 0 ]]; then
     bad "${#outputs[@]} build output(s) under samples/ or tests/ -- package from a clean checkout"
     printf '          %s\n' "${outputs[@]:0:10}"
 fi

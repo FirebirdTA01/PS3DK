@@ -5,11 +5,11 @@
 #
 # Runs check-release-tree.sh on small synthetic trees and reads only section 6's verdict (the other sections fail on
 # a synthetic tree, as they should):
-#   clean sources                       -> "ok      no .self/.elf/..."
-#   a .fake.self beside a sample        -> FAIL naming it
-#   a .elf / .sprx / .prx under tests/  -> FAIL
-#   CMakeCache.txt, build.ninja, a CMakeFiles/ dir in a sample build dir -> FAIL
-#   no samples/ or tests/ at all        -> ok (nothing shipped, nothing to leak)
+#   clean sources, and a tree with no samples/ or tests/   -> "ok      no .self/.elf/..."
+#   one tree per marker - .self, .fake.self, .elf, .sprx, .prx, CMakeCache.txt, build.ninja, a CMakeFiles/ dir -
+#   each alone                                            -> FAIL naming it
+#   find failing on samples/ (exit 1, or exit 0 with a stderr complaint) with an output planted there
+#                                                         -> FAIL "could not scan", never ok
 #
 # usage: release-tree-build-outputs-test.sh   Exit 0 pass, 1 fail.
 set -u
@@ -48,17 +48,35 @@ tree() {
 }
 
 [ -f "$crt" ] || { echo "release-tree-build-outputs: no $crt"; exit 1; }
-tree "$work/clean";  expect "clean sources" "$work/clean" ok
-tree "$work/self";   : > "$work/self/samples/lv2/hello/hello.fake.self"
-expect "a .fake.self beside a sample" "$work/self" fail "samples/lv2/hello/hello.fake.self"
-tree "$work/elf";    : > "$work/elf/tests/regression/spurs-suite/row/row.elf"
-expect "an .elf under tests/" "$work/elf" fail "tests/regression/spurs-suite/row/row.elf"
-tree "$work/sprx";   : > "$work/sprx/samples/lv2/hello/hello.sprx"; : > "$work/sprx/samples/lv2/hello/hello.prx"
-expect "a .sprx and .prx beside a sample" "$work/sprx" fail "samples/lv2/hello/hello.sprx"
-tree "$work/cmake";  mkdir -p "$work/cmake/samples/lv2/hello/build/CMakeFiles"
-: > "$work/cmake/samples/lv2/hello/build/CMakeCache.txt"; : > "$work/cmake/samples/lv2/hello/build/build.ninja"
-expect "a CMake build dir in a sample" "$work/cmake" fail "samples/lv2/hello/build/CMakeCache.txt"
+tree "$work/clean"; expect "clean sources" "$work/clean" ok
 mkdir -p "$work/none"; expect "no samples/ or tests/" "$work/none" ok
+# One tree per marker, so each predicate is witnessed on its own (codex 8cd38b21: grouped cases let a dropped
+# predicate pass).
+n=0
+for rel in samples/lv2/hello/hello.self samples/lv2/hello/hello.fake.self tests/regression/spurs-suite/row/row.elf \
+           samples/lv2/hello/hello.sprx samples/lv2/hello/hello.prx samples/lv2/hello/build/CMakeCache.txt \
+           samples/lv2/hello/build/build.ninja samples/lv2/hello/build/CMakeFiles; do
+    n=$((n + 1)); t="$work/m$n"; tree "$t"; mkdir -p "$(dirname "$t/$rel")"
+    if [[ $rel == */CMakeFiles ]]; then mkdir -p "$t/$rel"; else : > "$t/$rel"; fi
+    expect "${rel##*/} alone" "$t" fail "$rel"
+done
+# A scan that fails must not read as clean: a find wrapped to fail (or only to complain) on samples/, with a planted
+# output there, has to be refused as a scan failure, not accepted.
+real_find=$(command -v find)
+mkdir -p "$work/bin-exit" "$work/bin-warn"
+printf '#!/usr/bin/env bash\ncase "$1" in */samples) echo "find: %s: Permission denied" "$1/hidden" >&2; exit 1;; esac\nexec "%s" "$@"\n' '%s' "$real_find" > "$work/bin-exit/find"
+printf '#!/usr/bin/env bash\ncase "$1" in */samples) echo "find: %s: Permission denied" "$1/hidden" >&2; "%s" "$@"; exit 0;; esac\nexec "%s" "$@"\n' '%s' "$real_find" "$real_find" > "$work/bin-warn/find"
+chmod +x "$work/bin-exit/find" "$work/bin-warn/find"
+for kind in exit warn; do
+    t="$work/scan-$kind"; tree "$t"; : > "$t/samples/hidden.fake.self"
+    out=$(PATH="$work/bin-$kind:$PATH" section6 "$t")
+    if grep -q '^  FAIL    could not scan samples/ and tests/ for build outputs' <<< "$out" &&
+       ! grep -q '^  ok ' <<< "$out" && grep -q 'Permission denied' <<< "$out"; then
+        ok "find failing on samples/ ($kind): refused as a scan failure"
+    else
+        fail "find failing on samples/ ($kind): not refused as a scan failure"; sed 's/^/    /' <<< "$out"
+    fi
+done
 
 [ $status -eq 0 ] && echo "PASS: release-tree-build-outputs-test" || echo "FAIL: release-tree-build-outputs-test"
 exit $status
