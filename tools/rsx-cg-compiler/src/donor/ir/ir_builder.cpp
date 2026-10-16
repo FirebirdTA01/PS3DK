@@ -7656,7 +7656,10 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     const size_t priorNonlocal = inlineStructReturnNonlocalCount_;
     inlineStack_.push_back(callee);
     blockDeclared_.emplace_back();   // the callee's top-level locals are its own, never the caller's block's
+    const size_t savedFrameTopBlock = inlineFrameTopBlock_;
+    inlineFrameTopBlock_ = blockDeclared_.size() - 1;
     const bool ok = buildInlineFunctionBody(callee, result);
+    inlineFrameTopBlock_ = savedFrameTopBlock;
     calleeDirect.insert(blockDeclared_.back().begin(), blockDeclared_.back().end());
     blockDeclared_.pop_back();       // discarded: scope_ = savedScope below drops them
     inlineStack_.pop_back();
@@ -8126,7 +8129,26 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                     if (retId->resolvedDecl && retId->resolvedDecl->kind == DeclKind::Variable)
                     {
                         auto* vd = static_cast<VarDecl*>(retId->resolvedDecl);
-                        if (vd->type && vd->type->baseType == BaseType::Struct &&
+                        // Only a local declared in the callee's TOP-LEVEL
+                        // block survives to the frame's end, where the
+                        // remap reads its storage.  A local of an inner
+                        // block (`if (c) { Plan r; ...; return r; }`) is
+                        // gone by then - its block's exit restored any
+                        // outer `r` of the same name, whose storage the
+                        // remap would install instead (review: codex,
+                        // shadow_outer / single_constant_inner).  The
+                        // innermost frame block declaring the name is the
+                        // one the identifier resolves to; anything but the
+                        // top level, or no frame block at all, is a
+                        // non-local return and the caller's copy refuses.
+                        bool topLevelLocal = false;
+                        for (size_t i = blockDeclared_.size(); i-- > inlineFrameTopBlock_; )
+                            if (blockDeclared_[i].count(retId->name))
+                            {
+                                topLevelLocal = (i == inlineFrameTopBlock_);
+                                break;
+                            }
+                        if (topLevelLocal && vd->type && vd->type->baseType == BaseType::Struct &&
                             getStructFields(vd->type.get()))
                         {
                             inlineStructReturnBaseSet_.insert(retId->name);

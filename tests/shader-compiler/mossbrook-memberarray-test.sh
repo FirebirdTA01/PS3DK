@@ -248,4 +248,30 @@ refuse_saying pick_with_param_arm_refuse \
     "member-array-storage|tracked source" \
     "a helper whose arm returns a PARAMETER (return x) is refused, not resolved to the other local arm"
 
+# ---------------------------------------------------------------------------
+# SCOPE rows (review: codex, 4f103738).  The install reads the returned local's
+# storage at the END of the helper's body, so only a local of the helper's
+# TOP-LEVEL block qualifies: an inner block's local is gone by then, and its
+# exit restored any outer local of the same name.  Expected values are the
+# reference's (sce-cgc 475 containers through fp_eval), on both arms of t.x > 0.5.
+# ---------------------------------------------------------------------------
+T_HI="TEX0=0.75,0.25,-0.5,0.125"
+T_LO="TEX0=0.25,0.75,-0.5,0.125"
+for stem in shadow_outer_refuse single_constant_inner_refuse shadow_same_refuse single_inner_refuse; do
+    refuse_saying "$stem" "member-array-storage|tracked source" \
+        "$stem: a struct returned from an inner block is refused (reference: the inner local's value), never the outer local's storage"
+done
+accept early_same "one top-level local returned early and again after a rewrite"
+value_rows early_same "early_same" 0,1,2,3 \
+    "$T_HI => 0.75,0.25,0.75,0.25" \
+    "$T_LO => -0.5,0.125,-0.5,0.125"
+accept conditional_write "one top-level local rewritten under a condition"
+value_rows conditional_write "conditional_write" 0,1,2,3 \
+    "$T_HI => -0.5,0.125,-0.5,0.125" \
+    "$T_LO => 0.25,0.75,0.25,0.75"
+accept nested_same "a top-level local initialised from a nested helper's struct return"
+value_rows nested_same "nested_same" 0,1,2,3 \
+    "$T_HI => -0.5,0.125,-0.5,0.125" \
+    "$T_LO => -0.5,0.125,-0.5,0.125"
+
 echo "mossbrook-memberarray: PASS"

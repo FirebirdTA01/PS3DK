@@ -213,6 +213,10 @@ private:
     std::unordered_map<const CallExpr*, std::string> structReturnDest_;
     std::unordered_set<const CallExpr*> structReturnInstalled_;
     size_t inlineStructReturnNonlocalCount_ = 0;
+    // The blockDeclared_ index of the inlining frame being built: its callee's
+    // top-level block.  A struct return counts as returning a LOCAL only when
+    // that local is declared at this level (see the return statement).
+    size_t inlineFrameTopBlock_ = 0;
     // Declaration identity prevents a local shadow from using a global's initializer.
     std::unordered_set<const DeclNode*> globalDeclarations_;
     // Mutable statics whose initialiser the constant evaluator could not
