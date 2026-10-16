@@ -2,7 +2,8 @@
 # gcc-16.x 0072: ext-dce is off by default for powerpc64-ps3-elf under ILP32 and untouched under LP64.
 #
 #  0. self-test: the checks below report a failing compiler, a failing objdump and a missing function as errors,
-#     never as a count of 0;
+#     never as a count of 0; with no argument, a compiler whose optimizer query fails is a failure, and only one that
+#     answers without an ext-dce option (GCC 12) is skipped;
 #  1. effective default (-Q --help=optimizers) at -O2, -O3 and -Os: ILP32 [disabled], LP64 [enabled];
 #  2. an explicit -fext-dce is honoured under ILP32 ([enabled]) and -fno-ext-dce under LP64 ([disabled]);
 #  3. code: the ilp32-ext-dce row's walk.c keeps the zero-extension of its buffer pointer (an rldicl ...,0,32 that
@@ -32,7 +33,13 @@ if [ -z "$gcc" ]; then
     if [ -z "${PS3DEV:-}" ] || [ ! -x "$gcc" ]; then
         echo "SKIP: ext-dce-default-test (no PS3DEV compiler)"; exit 0
     fi
-    if ! "$gcc" -Q --help=optimizers 2>/dev/null | grep -q -- '-fext-dce'; then
+    # Only a compiler that answers the query, without an ext-dce option, is skipped; a failing query fails.
+    if ! q=$(PS3DK_NO_DEFAULT_INCLUDE=1 "$gcc" -Q --help=optimizers 2>&1); then
+        echo "ext-dce-default: FAIL optimizer query failed: $gcc -Q --help=optimizers"
+        printf '%s\n' "$q" | head -5 | sed 's/^/    /'
+        echo "FAIL: ext-dce-default-test"; exit 1
+    fi
+    if ! printf '%s\n' "$q" | grep -q -- '-fext-dce'; then
         echo "SKIP: ext-dce-default-test ($gcc has no ext-dce pass)"; exit 0
     fi
 fi
@@ -119,6 +126,18 @@ if cc "self-test" -O2 -c "$work/other.c" -o "$work/other.o"; then
     zext_count_s walk_sum "$work/open.s" && fail "self-test: an unterminated function counted as $n" \
         || ok "self-test: an assembly function without its .size end is an error"
 fi
+# The no-argument ($PS3DEV) path: a compiler whose query fails is a failure, not a skip; one that answers without an
+# ext-dce option (GCC 12) is the only skip.  Each runs this script against a stand-in compiler.
+mkdir -p "$work/broken/ppu/bin" "$work/old/ppu/bin"
+printf '#!/bin/sh\necho "stand-in: cannot run" >&2\nexit 1\n' > "$work/broken/ppu/bin/powerpc64-ps3-elf-gcc"
+printf '#!/bin/sh\necho "  -fgcse  [enabled]"\nexit 0\n' > "$work/old/ppu/bin/powerpc64-ps3-elf-gcc"
+chmod +x "$work/broken/ppu/bin/powerpc64-ps3-elf-gcc" "$work/old/ppu/bin/powerpc64-ps3-elf-gcc"
+out=$(PS3DEV="$work/broken" bash "${BASH_SOURCE[0]}" 2>&1); rc=$?
+[ $rc -eq 1 ] && ! printf '%s\n' "$out" | grep -q '^SKIP' && ok "self-test: no-argument run with a failing query fails (rc 1)" \
+    || fail "self-test: no-argument run with a failing query gave rc $rc: $(printf '%s' "$out" | tail -n 1)"
+out=$(PS3DEV="$work/old" bash "${BASH_SOURCE[0]}" 2>&1); rc=$?
+[ $rc -eq 0 ] && printf '%s\n' "$out" | grep -q '^SKIP' && ok "self-test: no-argument run with a compiler without ext-dce skips (rc 0)" \
+    || fail "self-test: no-argument run with a compiler without ext-dce gave rc $rc: $(printf '%s' "$out" | tail -n 1)"
 state -O2 -fno-such-flag-ext-dce-selftest && fail "self-test: a failing optimizer query gave '$got'" \
     || ok "self-test: a failing optimizer query is an error"
 
