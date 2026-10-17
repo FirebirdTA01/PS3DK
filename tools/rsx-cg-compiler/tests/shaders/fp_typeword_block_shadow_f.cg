@@ -1,0 +1,3 @@
+// A name declared in an inner block shadows a struct tag only inside it: { float B = uv.x; } B b; declares a B (reference sm25).
+struct B { float2 v; };
+float4 main(float2 uv : TEXCOORD0) : COLOR { { float B = uv.x; } B b; b.v = uv; return float4(b.v, 0, 1); }

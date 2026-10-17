@@ -1,0 +1,2 @@
+// The vertex profile accepts the same shadowing.  Reference: accepted.
+void main(float4 pos : POSITION, out float4 opos : POSITION, out float4 col : COLOR0) { float3 half = float3(0, 0, 1); opos = pos; col = float4(half, 1); }

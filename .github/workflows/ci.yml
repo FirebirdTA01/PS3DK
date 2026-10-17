@@ -981,6 +981,8 @@ jobs:
         run: bash tests/shader-compiler/typedef-alias-fable-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: The comma operator evaluates its left operand and is its right; for-clause commas split when independent
         run: bash tests/shader-compiler/comma-operator-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A type word or user type declared as a name is that name (functions, members, locals)
+        run: bash tests/shader-compiler/type-words-as-names-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Local struct initializers preserve fields and evaluate arguments once
         run: bash tests/shader-compiler/local-struct-init-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Fragment inputs with no semantic and uniform members of a varying struct

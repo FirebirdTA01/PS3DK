@@ -1,0 +1,2 @@
+// CONTROL for the vertex row.
+void main(float4 pos : POSITION, out float4 opos : POSITION, out float4 col : COLOR0) { float3 h = float3(0, 0, 1); opos = pos; col = float4(h, 1); }

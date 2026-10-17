@@ -95,8 +95,38 @@ void Parser::retypeShadowedTypeNames()
         TokenType::KW_SAMPLER, TokenType::KW_SAMPLER1D, TokenType::KW_SAMPLER2D,
         TokenType::KW_SAMPLER3D, TokenType::KW_SAMPLERCUBE, TokenType::KW_SAMPLERRECT,
     };
+    // User type names (struct tags and typedef names) are not in typeNames
+    // until the parser reaches them; collect their spellings from the tokens:
+    // the identifier after `struct`, and a typedef's declarator (the last
+    // top-level identifier before its ';', outside brackets).
+    std::set<std::string> userTypeNames;
+    std::set<size_t> typedefStatementTokens;   // tokens of `typedef ... ;` statements
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i].type == TokenType::KW_STRUCT && i + 1 < tokens.size() &&
+            tokens[i + 1].type == TokenType::IDENTIFIER)
+            userTypeNames.insert(tokens[i + 1].lexeme);
+        if (tokens[i].type != TokenType::KW_TYPEDEF) continue;
+        int braces = 0, brackets = 0;
+        size_t lastName = tokens.size();
+        size_t k = i;
+        for (; k < tokens.size(); ++k) {
+            const TokenType t = tokens[k].type;
+            if (t == TokenType::LBRACE) ++braces;
+            else if (t == TokenType::RBRACE) --braces;
+            else if (t == TokenType::LBRACKET) ++brackets;
+            else if (t == TokenType::RBRACKET) --brackets;
+            else if (t == TokenType::SEMICOLON && braces == 0) break;
+            else if (t == TokenType::IDENTIFIER && braces == 0 && brackets == 0) lastName = k;
+            typedefStatementTokens.insert(k);
+        }
+        if (lastName < tokens.size()) userTypeNames.insert(tokens[lastName].lexeme);
+        i = k;
+    }
+    const auto isUserTypeName = [&](const Token& t) {
+        return t.type == TokenType::IDENTIFIER && userTypeNames.count(t.lexeme) > 0;
+    };
     auto isTypeToken = [&](const Token& t) {
-        if (t.type == TokenType::IDENTIFIER) return typeNames.count(t.lexeme) > 0;
+        if (t.type == TokenType::IDENTIFIER) return typeNames.count(t.lexeme) > 0 || userTypeNames.count(t.lexeme) > 0;
         return t.type >= TokenType::KW_VOID && typeNames.count(t.lexeme) > 0;
     };
     std::vector<int> braceDepth(tokens.size(), 0), parenDepth(tokens.size(), 0);
@@ -162,13 +192,34 @@ void Parser::retypeShadowedTypeNames()
                (tokens[k + 1].type == TokenType::IDENTIFIER || shadowedTypeTokens_.count(k + 1));
     };
     for (size_t i = 1; i + 1 < n; ++i) {
-        if (!shadowable.count(tokens[i].type) || shadowedTypeTokens_.count(i)) continue;
+        // A user type name declared as a variable (`typedef float4 B; ...
+        // float B = 2.0; (B) - x`) shadows it the same way: there `(B)` is a
+        // parenthesised variable, not a cast.  Its tokens stay identifiers;
+        // only shadowedTypeTokens_ records them.  A typedef's own declarator
+        // is the type, not a variable.
+        const bool userName = isUserTypeName(tokens[i]) && !typedefStatementTokens.count(i);
+        if ((!shadowable.count(tokens[i].type) && !userName) || shadowedTypeTokens_.count(i)) continue;
         const TokenType next = tokens[i + 1].type;
         const bool declarator = next == TokenType::OP_ASSIGN || next == TokenType::SEMICOLON ||
             next == TokenType::COMMA || next == TokenType::LBRACKET || next == TokenType::COLON ||
             next == TokenType::RPAREN;
-        if (!declarator) continue;
+        // `float half(float x) { ... }`: a FILE-SCOPE function named after a
+        // type word is called by that name afterwards (the reference compiles
+        // `half(uv.x)` after it as the call), so from its name to the end of
+        // the file the word is that function.
+        const bool function = !userName && next == TokenType::LPAREN && braceDepth[i] == 0 &&
+            parenDepth[i] == 0 && isTypeToken(tokens[i - 1]) && !shadowedTypeTokens_.count(i - 1);
+        if (!declarator && !function) continue;
         if (!(isTypeToken(tokens[i - 1]) && !shadowedTypeTokens_.count(i - 1)) && !commaDeclarator(i)) continue;
+        if (function) {
+            const std::string name = tokens[i].lexeme;
+            for (size_t m = i; m < n; ++m)
+                if (tokens[m].lexeme == name && shadowable.count(tokens[m].type)) {
+                    tokens[m].type = TokenType::IDENTIFIER;
+                    shadowedTypeTokens_.insert(m);
+                }
+            continue;
+        }
         // The scope: a for statement's initialiser's is that whole
         // statement (`for (float half = 0; ...) if (..) {..} else {..}`); a
         // parameter's is the function body that follows its list; any other
@@ -199,11 +250,19 @@ void Parser::retypeShadowedTypeNames()
         }
         const std::string name = tokens[i].lexeme;
         for (size_t m = i; m < end; ++m)
-            if (tokens[m].lexeme == name && shadowable.count(tokens[m].type)) {
+            if (tokens[m].lexeme == name && (shadowable.count(tokens[m].type) ||
+                                             (userName && tokens[m].type == TokenType::IDENTIFIER))) {
                 tokens[m].type = TokenType::IDENTIFIER;
                 shadowedTypeTokens_.insert(m);
             }
     }
+    // A struct member is a name only behind a `.`: `struct S { float3 half; }`
+    // shadows nothing outside the struct, and `s.half` reads the member.
+    for (size_t i = 1; i < n; ++i)
+        if (tokens[i - 1].type == TokenType::DOT && shadowable.count(tokens[i].type)) {
+            tokens[i].type = TokenType::IDENTIFIER;
+            shadowedTypeTokens_.insert(i);
+        }
 }
 
 std::unique_ptr<TranslationUnit> Parser::parse()

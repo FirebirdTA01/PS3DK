@@ -1,0 +1,2 @@
+// `int` is reserved.  Reference: C0000.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float3 int = float3(0, 0, 1); return float4(int.xy + uv, int.z, 1); }

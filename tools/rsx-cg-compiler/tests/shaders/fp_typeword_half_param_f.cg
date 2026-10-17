@@ -1,0 +1,2 @@
+// A PARAMETER named half.  Reference: accepted.
+float4 main(float2 half : TEXCOORD0) : COLOR { return float4(half, 0, 1); }

@@ -1,0 +1,6 @@
+// `(B) - x` under a shadowed builtin alias: a parenthesised variable, not
+// a cast.  Reference: twin of the control (the alias row's spelling
+// without parentheses is measured; this is the spelling that parsed as a
+// cast, review finding).
+typedef float4 B;
+float4 main(float2 uv : TEXCOORD0) : COLOR { float B = 2.0; float x = uv.x; return float4((B) - x, uv.y, 0, 1); }

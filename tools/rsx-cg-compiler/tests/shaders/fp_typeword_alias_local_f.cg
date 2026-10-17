@@ -1,0 +1,5 @@
+// A LOCAL named after a typedef alias shadows the alias in its function:
+// `B` then means the float, and `x * B` multiplies (reference, twin).
+typedef struct { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; } A;
+typedef A B;
+float4 main(B i) : COLOR { float B = 2.0; return float4(i.col * i.uv.x * B, 1); }

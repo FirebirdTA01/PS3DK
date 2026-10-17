@@ -1,0 +1,4 @@
+// `float3 half = ...` - the PSGL jetstream vpFixedPipeline row.  From
+// the declaration on, `half` is the variable.  Reference: byte-identical
+// to the control.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float3 half = float3(0, 0, 1); return float4(half.xy + uv, half.z, 1); }
