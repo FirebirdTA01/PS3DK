@@ -226,6 +226,25 @@ static bool found_with_bases(Synth &s, int off, void *tb, void *db)
 	return f != nullptr && b.func == (void *)s.code && b.tbase == tb && b.dbase == db;
 }
 
+// A route whose removal failed leaves its object (and the image it describes) registered.  Registering the same
+// storage again would build on that stale registration, so every later check on it stops being an independent
+// witness (review: codex).  Such a route is retired: later passes report it skipped and never touch its storage.
+static bool g_retired[7];
+static bool live(int i, const char *route)
+{
+	if (g_retired[i])
+		printf("eh-fde-registry: variant %s: SKIPPED (an earlier removal failed; its storage stays registered)\n", route);
+	return !g_retired[i];
+}
+static void removed(bool ok, int i, int j = -1)
+{
+	if (!ok) {
+		g_retired[i] = true;
+		if (j >= 0)
+			g_retired[j] = true;
+	}
+}
+
 static void variants()
 {
 	bool built = true;
@@ -240,49 +259,69 @@ static void variants()
 		for (int looked = 0; looked <= 1; looked++) {
 			printf("eh-fde-registry: variants round %d, %s\n", round,
 			       looked ? "deregistered after a lookup (sorted)" : "deregistered with no lookup (unsorted)");
+			void *r;
+			bool ok;
 			// a. __register_frame_info_table: a one-image table, removed by the table address
-			t_tab[0] = g_v[0].frame; t_tab[1] = nullptr;
-			__register_frame_info_table(t_tab, g_v[0].ob);
-			if (looked)
-				check(found(g_v[0], 8), "variant table: found");
-			void *r = __deregister_frame_info(t_tab);
-			check(r == (void *)g_v[0].ob, "variant table: deregistration returns its object", (long)(uintptr_t)r);
-			check(absent(g_v[0]), "variant table: removed");
+			if (live(0, "table")) {
+				t_tab[0] = g_v[0].frame; t_tab[1] = nullptr;
+				__register_frame_info_table(t_tab, g_v[0].ob);
+				if (looked)
+					check(found(g_v[0], 8), "variant table: found");
+				r = __deregister_frame_info(t_tab);
+				check(r == (void *)g_v[0].ob, "variant table: deregistration returns its object", (long)(uintptr_t)r);
+				check(ok = absent(g_v[0]), "variant table: removed");
+				removed(ok && r == (void *)g_v[0].ob, 0);
+			}
 			// b. __register_frame_info_table_bases
-			t_tabb[0] = g_v[1].frame; t_tabb[1] = nullptr;
-			__register_frame_info_table_bases(t_tabb, g_v[1].ob, &tb, &db);
-			if (looked)
-				check(found_with_bases(g_v[1], 8, &tb, &db), "variant table_bases: found, with its tbase/dbase");
-			r = __deregister_frame_info_bases(t_tabb);
-			check(r == (void *)g_v[1].ob, "variant table_bases: deregistration returns its object", (long)(uintptr_t)r);
-			check(absent(g_v[1]), "variant table_bases: removed");
+			if (live(1, "table_bases")) {
+				t_tabb[0] = g_v[1].frame; t_tabb[1] = nullptr;
+				__register_frame_info_table_bases(t_tabb, g_v[1].ob, &tb, &db);
+				if (looked)
+					check(found_with_bases(g_v[1], 8, &tb, &db), "variant table_bases: found, with its tbase/dbase");
+				r = __deregister_frame_info_bases(t_tabb);
+				check(r == (void *)g_v[1].ob, "variant table_bases: deregistration returns its object", (long)(uintptr_t)r);
+				check(ok = absent(g_v[1]), "variant table_bases: removed");
+				removed(ok && r == (void *)g_v[1].ob, 1);
+			}
 			// c. __register_frame_table: libgcc allocates the object, __deregister_frame frees it
-			t_alloc[0] = g_v[2].frame; t_alloc[1] = nullptr;
-			__register_frame_table(t_alloc);
-			if (looked)
-				check(found(g_v[2], 8), "variant frame_table: found");
-			__deregister_frame(t_alloc);
-			check(absent(g_v[2]), "variant frame_table: removed by __deregister_frame");
+			if (live(2, "frame_table")) {
+				t_alloc[0] = g_v[2].frame; t_alloc[1] = nullptr;
+				__register_frame_table(t_alloc);
+				if (looked)
+					check(found(g_v[2], 8), "variant frame_table: found");
+				__deregister_frame(t_alloc);
+				check(ok = absent(g_v[2]), "variant frame_table: removed by __deregister_frame");
+				removed(ok, 2);
+			}
 			// d. a two-image table: both images found, both gone after one deregistration
-			t_two[0] = g_v[3].frame; t_two[1] = g_v[4].frame; t_two[2] = nullptr;
-			__register_frame_info_table(t_two, g_v[3].ob);
-			if (looked)
-				check(found(g_v[3], 4) && found(g_v[4], 4), "variant two-image table: both images found");
-			r = __deregister_frame_info(t_two);
-			check(r == (void *)g_v[3].ob, "variant two-image table: deregistration returns its object", (long)(uintptr_t)r);
-			check(absent(g_v[3]) && absent(g_v[4]), "variant two-image table: both images removed");
+			if (live(3, "two-image table")) {
+				t_two[0] = g_v[3].frame; t_two[1] = g_v[4].frame; t_two[2] = nullptr;
+				__register_frame_info_table(t_two, g_v[3].ob);
+				if (looked)
+					check(found(g_v[3], 4) && found(g_v[4], 4), "variant two-image table: both images found");
+				r = __deregister_frame_info(t_two);
+				check(r == (void *)g_v[3].ob, "variant two-image table: deregistration returns its object", (long)(uintptr_t)r);
+				check(ok = absent(g_v[3]) && absent(g_v[4]), "variant two-image table: both images removed");
+				removed(ok && r == (void *)g_v[3].ob, 3, 4);
+			}
 			// e. __register_frame_info_bases: the lookup reports the bases it was given
-			__register_frame_info_bases(g_v[5].frame, g_v[5].ob, &tb, &db);
-			if (looked)
-				check(found_with_bases(g_v[5], 4, &tb, &db), "variant info_bases: found, with its tbase/dbase");
-			r = __deregister_frame_info_bases(g_v[5].frame);
-			check(r == (void *)g_v[5].ob && absent(g_v[5]), "variant info_bases: removed");
+			if (live(5, "info_bases")) {
+				__register_frame_info_bases(g_v[5].frame, g_v[5].ob, &tb, &db);
+				if (looked)
+					check(found_with_bases(g_v[5], 4, &tb, &db), "variant info_bases: found, with its tbase/dbase");
+				r = __deregister_frame_info_bases(g_v[5].frame);
+				check(ok = r == (void *)g_v[5].ob && absent(g_v[5]), "variant info_bases: removed");
+				removed(ok, 5);
+			}
 			// f. __register_frame: libgcc allocates the object, __deregister_frame frees it
-			__register_frame(g_v[6].frame);
-			if (looked)
-				check(found(g_v[6], 4), "variant register_frame: found");
-			__deregister_frame(g_v[6].frame);
-			check(absent(g_v[6]), "variant register_frame: removed by __deregister_frame");
+			if (live(6, "register_frame")) {
+				__register_frame(g_v[6].frame);
+				if (looked)
+					check(found(g_v[6], 4), "variant register_frame: found");
+				__deregister_frame(g_v[6].frame);
+				check(ok = absent(g_v[6]), "variant register_frame: removed by __deregister_frame");
+				removed(ok, 6);
+			}
 		}
 	}
 	// g. genuine empty .eh_frame images: registering is a no-op, deregistering returns NULL without asserting
