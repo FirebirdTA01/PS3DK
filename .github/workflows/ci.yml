@@ -362,6 +362,11 @@ jobs:
       - name: Test the default SDK include directory
         run: bash tests/host/sdk-default-include-test.sh
 
+      # Skips without PS3DEV or on GCC 12; gcc-16.x 0075/0076 give plain char,
+      # wchar_t and wint_t the reference toolchain's types in both data models.
+      - name: Test the PPU plain char, wchar_t and wint_t ABI
+        run: bash tests/host/ppu-abi-char-wchar-test.sh
+
       # check-release-tree.sh refuses .self/.elf/.sprx/.prx and CMake build
       # files under samples/ and tests/: a package ships them as source.
       - name: Test the release-tree guard against shipped build outputs
