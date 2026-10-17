@@ -59,10 +59,13 @@ The version stamped into builds is generated from the most recent
   built by earlier releases must not be linked with this one.
   - Plain `char` is signed in the default PPU data model (ILP32), and
     `__CHAR_SIGNED__` is defined there.  Under `-mlp64` it stays unsigned.
-  - `wchar_t` is a 16-bit `unsigned short` and `wint_t` is `int` under
-    `-mlp64` too, as in ILP32.  Under `-mlp64` they were 32 bits.
+  - In both PPU data models, `wchar_t` has the 16-bit `unsigned short`
+    representation (a distinct built-in type in C++), and `wint_t` is
+    `int`.  Under `-mlp64`, `wchar_t` changes from 32 to 16 bits; `wint_t`
+    changes from `unsigned int` to `int` and remains 32 bits.
   - The SPU compiler (`spu-elf`) also makes plain `char` signed (with
-    `__CHAR_SIGNED__`), `wchar_t` a 16-bit `unsigned short` and `wint_t`
+    `__CHAR_SIGNED__`), gives `wchar_t` the 16-bit `unsigned short`
+    representation (a distinct built-in type in C++), and makes `wint_t`
     `int`.
   - On the PPU, the `E*` names that LV2 defines (`EAGAIN`, `EINVAL`,
     `ENOMEM`, `ENOENT`, `EBUSY`, `ETIMEDOUT` and the rest) take the LV2
