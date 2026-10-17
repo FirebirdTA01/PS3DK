@@ -193,27 +193,38 @@ jobs:
         shell: bash
         run: |
           source scripts/env.sh
-          test -z "$(git ls-files 'tests/regression/*.self' 'tests/regression/**/*.self')" ||
-            { echo "tracked SELFs under tests/regression: outputs would not prove a build"; exit 1; }
-          # gate <manifest> <out>: every manifest row's SELF present and non-empty; hashes to <out>.
+          tracked=$(git ls-files 'tests/regression/*.self' 'tests/regression/**/*.self') ||
+            { echo "git ls-files failed: cannot prove no SELF is tracked"; exit 1; }
+          test -z "$tracked" || { echo "tracked SELFs under tests/regression: outputs would not prove a build"; exit 1; }
+          # gate <manifest> <out> [hasher]: every manifest row's SELF present and non-empty, each hash written
+          # to <out>.  Every status is checked explicitly: a caller's `||` turns errexit off inside the function.
           gate() {
-            local missing=0 rows=0
-            : > "$2"
+            local hasher=${3:-sha256sum} missing=0 rows=0 bad=0
+            : > "$2" || { echo "cannot create $2"; return 2; }
             while IFS=, read -r name self rest; do
               case "$name" in ''|'#'*|name) continue ;; esac
               rows=$((rows+1))
-              if [ -s "$self" ]; then sha256sum "$self" >> "$2"
-              else echo "MISSING $name $self"; missing=$((missing+1)); fi
-            done < "$1"
-            echo "manifest rows: $rows, missing or empty: $missing"
-            [ "$rows" -gt 0 ] && [ "$missing" -eq 0 ]
+              if [ ! -s "$self" ]; then echo "MISSING-OR-EMPTY $name $self"; missing=$((missing+1))
+              elif ! $hasher "$self" >> "$2"; then echo "HASH-FAILED $name $self"; bad=$((bad+1)); fi
+            done < "$1" || { echo "cannot read $1"; return 2; }
+            local hashes; hashes=$(wc -l < "$2") || { echo "cannot count $2"; return 2; }
+            echo "manifest rows: $rows, missing or empty: $missing, hash failures: $bad, hashes recorded: $hashes"
+            [ "$rows" -gt 0 ] && [ "$missing" -eq 0 ] && [ "$bad" -eq 0 ] && [ "$hashes" -eq "$rows" ]
           }
-          # Control: a manifest naming a SELF nothing builds must FAIL the gate.
-          printf 'gate-control,tests/regression/no-such-row/no-such.fake.self,1,RAN-CLEAN,x,y\n' > "$RUNNER_TEMP/control-manifest.txt"
-          if gate "$RUNNER_TEMP/control-manifest.txt" "$RUNNER_TEMP/control-hashes.txt" > "$LOGS/gate-control.log"; then
-            echo "the output gate passed a manifest with no built SELF - the gate is broken"; exit 1
-          fi
-          echo "gate control: fails on a missing SELF, as it must" | tee -a "$LOGS/rows-summary.txt"
+          # Controls, each of which must FAIL the gate: a SELF nothing builds, an empty SELF, and a present
+          # non-empty SELF whose hash cannot be taken.
+          C="$RUNNER_TEMP/gate-controls"; mkdir -p "$C"
+          : > "$C/empty.fake.self"; printf 'x' > "$C/present.fake.self"
+          printf 'missing,%s/no-such.fake.self,1,RAN-CLEAN,x,y\n' "$C" > "$C/missing.txt"
+          printf 'empty,%s/empty.fake.self,1,RAN-CLEAN,x,y\n' "$C" > "$C/empty.txt"
+          printf 'hashfail,%s/present.fake.self,1,RAN-CLEAN,x,y\n' "$C" > "$C/present.txt"
+          for ctl in missing:sha256sum empty:sha256sum present:false; do
+            m=${ctl%%:*}; h=${ctl#*:}
+            if gate "$C/$m.txt" "$C/$m-hashes.txt" "$h" >> "$LOGS/gate-control.log" 2>&1; then
+              echo "the output gate PASSED its '$m' control - the gate is broken"; exit 1
+            fi
+          done
+          echo "gate controls: missing, empty and hash-failure each fail the gate, as they must" | tee -a "$LOGS/rows-summary.txt"
           attempted=0; ok=0; failed=0
           for c in tests/regression/*/CMakeLists.txt; do
             d=$(dirname "$c"); r=$(basename "$d"); b="$RUNNER_TEMP/rows/$r"; attempted=$((attempted+1))
