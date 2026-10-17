@@ -12,3 +12,4 @@
 0013-spu-reference-intptr-types.patch
 0014-spu-paren-vector-literals.patch
 0015-spu-sibcall-call-saved-arg-regs.patch
+0016-spu-char-signed-wchar-16bit.patch

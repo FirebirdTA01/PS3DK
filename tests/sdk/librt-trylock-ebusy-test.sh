@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# librt's pthread_mutex_trylock returns POSIX EBUSY (16), not the Lv-2 code.
+# librt's pthread_mutex_trylock returns EBUSY BY NAME: the value <errno.h> gives EBUSY on the target.
 #
-# pthread.c includes <sys/mutex.h>, which reaches <sys/synchronization.h>;
-# that header redefines EBUSY to the Lv-2 value 0x8001000A.  A trylock on a
-# held mutex then returned 0x8001000A, and POSIX callers comparing the
-# result against EBUSY from <errno.h> saw an unknown error.
+# Since newlib patch 0020 the E* names on the PS3 LV2 target are the Lv-2 status codes, so EBUSY is 0x8001000A
+# and a trylock on a held mutex must return exactly that; before 0020 (or with GCC 12.4's runtime) EBUSY is the
+# POSIX 16.  Either way the function must return the value a caller compares against BY NAME - the bug this test
+# was written for was pthread.c returning one value while <errno.h> gave callers the other.
 #
-# Disassembles pthread_mutex_trylock in an installed librt.a and requires
-# that it never materialises 0x8001000A (lis rN,-32767 then ori rN,rN,10)
-# and does load 16.
+# HEURISTIC, presence only (review: codex): preprocesses EBUSY with the target compiler (the installed headers
+# decide), then disassembles pthread_mutex_trylock in an installed librt.a and requires that it materialises THAT
+# value and never the other one (0x8001000A = lis rN,-32767 then ori rN,rN,10; 16 = li rN,16).  It proves which
+# constants the function builds, not what it returns: the executed evidence is the errno-lv2 regression row (a
+# held mutex's trylock returning the target EBUSY, the EDEADLK fold included, both ABIs).
 # Optional $1: the librt.a to test (default: $PS3DK/ppu/lib/librt.a).
 set -euo pipefail
 
@@ -38,6 +40,16 @@ fi
 tmp=$(mktemp -d)
 [ -n "${KEEP_TMP:-}" ] || trap 'rm -rf "$tmp"' EXIT
 
+# EBUSY as the target's <errno.h> defines it
+printf '#include <errno.h>\nEBUSY_IS EBUSY\n' > "$tmp/e.c"
+pp=$("$bindir/powerpc64-ps3-elf-gcc" -E -P "$tmp/e.c") || fail "preprocessing <errno.h> failed"
+val=$(sed -n 's/^EBUSY_IS *//p' <<<"$pp" | tr -d ' ()')
+case "$val" in
+    16) want=posix ;;
+    -2147418102|0x8001000A|0x8001000a) want=lv2 ;;
+    *) fail "unexpected EBUSY value from <errno.h>: '$val'" ;;
+esac
+
 (cd "$tmp" && "$bindir/powerpc64-ps3-elf-ar" x "$librt" pthread.o) || fail "librt.a has no pthread.o"
 "$bindir/powerpc64-ps3-elf-objdump" -d -j .text.pthread_mutex_trylock "$tmp/pthread.o" > "$tmp/trylock.s" 2> /dev/null \
     || fail "pthread.o has no .text.pthread_mutex_trylock"
@@ -48,8 +60,12 @@ lv2=$(awk '
     $0 ~ /lis[ \t]+r[0-9]+,-32767$/ { split($NF, a, ","); hi[a[1]] = 1 }
     $0 ~ /ori[ \t]+r[0-9]+,r[0-9]+,10$/ { split($NF, a, ","); if (hi[a[2]]) print }
 ' "$tmp/trylock.s")
-[ -z "$lv2" ] || fail "pthread_mutex_trylock returns the Lv-2 EBUSY 0x8001000A: $lv2"
-grep -Eq 'li[[:space:]]+r[0-9]+,16$' "$tmp/trylock.s" \
-    || fail "pthread_mutex_trylock never loads POSIX EBUSY (16)"
-
-note "PASS ($librt)"
+posix=$(grep -E 'li[[:space:]]+r[0-9]+,16$' "$tmp/trylock.s" || true)
+if [ $want = lv2 ]; then
+    [ -n "$lv2" ] || fail "<errno.h> EBUSY is the Lv-2 0x8001000A, but pthread_mutex_trylock never materialises it"
+    [ -z "$posix" ] || fail "<errno.h> EBUSY is the Lv-2 0x8001000A, but pthread_mutex_trylock loads POSIX 16: $posix"
+else
+    [ -n "$posix" ] || fail "<errno.h> EBUSY is POSIX 16, but pthread_mutex_trylock never loads 16"
+    [ -z "$lv2" ] || fail "<errno.h> EBUSY is POSIX 16, but pthread_mutex_trylock returns the Lv-2 0x8001000A: $lv2"
+fi
+note "PASS ($librt: EBUSY by name = $val, $want)"

@@ -362,6 +362,24 @@ jobs:
       - name: Test the default SDK include directory
         run: bash tests/host/sdk-default-include-test.sh
 
+      # Skips without PS3DEV or on GCC 12; gcc-16.x 0075/0076 give plain char,
+      # wchar_t and wint_t the reference toolchain's types in both data models.
+      - name: Test the PPU plain char, wchar_t and wint_t ABI
+        run: bash tests/host/ppu-abi-char-wchar-test.sh
+
+      # Skips without a PS3DEV SPU compiler; spu gcc-9.5.0 0016 gives plain char,
+      # wchar_t and wint_t the reference SPU toolchain's types.
+      - name: Test the SPU plain char, wchar_t and wint_t ABI
+        run: bash tests/host/spu-abi-char-wchar-test.sh
+
+      # Skips without PS3DEV; with a PPU compiler, the E* errno names must be
+      # the LV2 status codes (newlib patch 0020).
+      - name: Test LV2 errno values
+        run: bash tests/sdk/lv2-errno-values-test.sh
+
+      - name: Test librt lv2error maps every LV2 status code to itself
+        run: bash tests/sdk/librt-lv2errno-test.sh
+
       # check-release-tree.sh refuses .self/.elf/.sprx/.prx and CMake build
       # files under samples/ and tests/: a package ships them as source.
       - name: Test the release-tree guard against shipped build outputs

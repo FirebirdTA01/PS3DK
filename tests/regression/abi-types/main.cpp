@@ -6,8 +6,11 @@
  *   wchar_t = 16-bit unsigned short, wint_t = int.
  * Those choices are ABI: they fix C++ mangled names (a function taking
  * uint32_t is ...j) and the size of wchar_t, L"" literals and any struct
- * holding one.  The LP64 data model has no reference counterpart; it keeps
- * the same 32-bit integer types and a 32-bit wchar_t.
+ * holding one.  The reference compiler under -mlp64 keeps the same 32-bit
+ * integer types, the 16-bit wchar_t and the int wint_t, and makes plain char
+ * unsigned (signed under ILP32).  GCC 16 (gcc-16.x 0075/0076) matches that in
+ * both data models; GCC 12.4 keeps its older LP64 32-bit wchar_t and an
+ * unsigned plain char everywhere, and is held to that.
  *
  * Most checks are static_asserts, so a toolchain with the wrong types does
  * not build this probe at all.  The run-time checks cover what only the
@@ -45,21 +48,31 @@ static_assert(std::is_same<int_least32_t, int>::value,
 static_assert(std::is_same<uint_least32_t, unsigned int>::value,
               "uint_least32_t must be unsigned int");
 
-static_assert(lp64 || sizeof(wchar_t) == 2, "ILP32 wchar_t must be 16-bit");
-static_assert(lp64 || std::is_unsigned<wchar_t>::value,
-              "ILP32 wchar_t must be unsigned");
-static_assert(lp64 || std::is_same<wint_t, int>::value,
-              "ILP32 wint_t must be int");
-static_assert(!lp64 || sizeof(wchar_t) == 4, "LP64 keeps a 32-bit wchar_t");
+#if __GNUC__ >= 16
+/* GCC 16: the reference types in both data models. */
+static constexpr bool ref_wchar = true;
+static_assert(std::is_signed<char>::value == !lp64,
+              "plain char is signed under ILP32 and unsigned under LP64");
+#else
+/* GCC 12.4: the reference types under ILP32 only, unsigned plain char. */
+static constexpr bool ref_wchar = !lp64;
+static_assert(!std::is_signed<char>::value, "GCC 12.4 plain char is unsigned");
+static_assert(!lp64 || sizeof(wchar_t) == 4, "GCC 12.4 LP64 keeps a 32-bit wchar_t");
+#endif
+static_assert(!ref_wchar || sizeof(wchar_t) == 2, "wchar_t must be 16-bit");
+static_assert(!ref_wchar || std::is_unsigned<wchar_t>::value,
+              "wchar_t must be unsigned");
+static_assert(!ref_wchar || std::is_same<wint_t, int>::value,
+              "wint_t must be int");
 static_assert(sizeof(L"ab") == 3 * sizeof(wchar_t), "L\"\" literal size");
 
 struct wchar_layout {
     char c;
     wchar_t w;
 };
-static_assert(lp64 || (sizeof(wchar_layout) == 4
-                       && offsetof(wchar_layout, w) == 2),
-              "ILP32 struct holding wchar_t has the reference layout");
+static_assert(!ref_wchar || (sizeof(wchar_layout) == 4
+                             && offsetof(wchar_layout, w) == 2),
+              "a struct holding wchar_t has the reference layout");
 
 /* A uint32_t reference binds to an unsigned int (it cannot to an
  * unsigned long, which is what uint32_t used to be). */
@@ -93,9 +106,11 @@ int main()
              (uint32_t)4000000000u, (int32_t)-5, (uint32_t)12);
     ok &= check(strcmp(buf, "4000000000/-5/12") == 0, "printf of 32-bit types");
 
-    /* Wide characters: unsigned, full 16-bit range under ILP32. */
+    /* Wide characters: unsigned, full 16-bit range wherever wchar_t is the reference one. */
     wchar_t top = (wchar_t)0xFFFF;
-    ok &= check(lp64 || (unsigned long)top == 0xFFFFul, "wchar_t 0xFFFF unsigned");
+    ok &= check(!ref_wchar || (unsigned long)top == 0xFFFFul, "wchar_t 0xFFFF unsigned");
+    wchar_t wrap = (wchar_t)0x10000;
+    ok &= check(!ref_wchar || wrap == 0, "wchar_t wraps at 16 bits");
 
     ok &= check(wcslen(L"hello") == 5, "wcslen");
     ok &= check(wcscmp(L"abc", L"abd") < 0, "wcscmp");
