@@ -54,6 +54,27 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **ABI: plain `char`, `wchar_t`, `wint_t` and `errno` values.**  Rebuild
+  every object and static library, C as well as C++, PPU and SPU; objects
+  built by earlier releases must not be linked with this one.
+  - Plain `char` is signed in the default PPU data model (ILP32), and
+    `__CHAR_SIGNED__` is defined there.  Under `-mlp64` it stays unsigned.
+  - In both PPU data models, `wchar_t` has the 16-bit `unsigned short`
+    representation (a distinct built-in type in C++), and `wint_t` is
+    `int`.  Under `-mlp64`, `wchar_t` changes from 32 to 16 bits; `wint_t`
+    changes from `unsigned int` to `int` and remains 32 bits.
+  - The SPU compiler (`spu-elf`) also makes plain `char` signed (with
+    `__CHAR_SIGNED__`), gives `wchar_t` the 16-bit `unsigned short`
+    representation (a distinct built-in type in C++), and makes `wint_t`
+    `int`.
+  - On the PPU, the `E*` names that LV2 defines (`EAGAIN`, `EINVAL`,
+    `ENOMEM`, `ENOENT`, `EBUSY`, `ETIMEDOUT` and the rest) take the LV2
+    status codes (`0x8001xxxx`, negative as an `int`), so `errno`, the
+    `pthread_*` error returns and LV2 system-call returns all compare equal
+    to the same name.  Names LV2 does not define keep newlib's values.
+    Compare against the names rather than numbers, and do not treat a
+    negative `errno` as invalid.  `pthread_mutex_trylock` on a held mutex
+    still returns `EBUSY`.
 - **Patch series apply exactly.**  Nine patches (five PPU GCC, two newlib,
   one GDB, one PSL1GHT) applied only with GNU patch's default fuzz; their
   context is refreshed (the patched sources are unchanged) and every patch
