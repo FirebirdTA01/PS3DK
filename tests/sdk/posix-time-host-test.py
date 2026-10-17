@@ -7,12 +7,16 @@ import tempfile
 import resource
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 ROOT = Path(__file__).resolve().parents[2]
+import sys
+sys.path.insert(0, str(ROOT / 'tests/sdk'))
+from lv2_errno_fixture import write_fixture  # target errno values (newlib 0018)
 with tempfile.TemporaryDirectory(prefix='ps3dk-time-') as temp:
     work = Path(temp)
     def put(name, text):
         p = work / name
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text)
+    write_fixture(work)
     put('sys/systime.h', '#pragma once\n#include <stdint.h>\ntypedef uint64_t u64; typedef int64_t s64; typedef uint32_t u32; typedef int32_t s32;\ns64 sysGetSystemTime(void); s32 sysGetCurrentTime(u64*,u64*); s32 sysUsleep(u32);\n')
     put('ppu-types.h', '#include <sys/systime.h>\n')
     put('sys/reent.h', '#pragma once\nstruct _reent { int _errno; };\n')

@@ -11,6 +11,9 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+import sys
+sys.path.insert(0, str(ROOT / 'tests/sdk'))
+from lv2_errno_fixture import write_fixture  # target errno values (newlib 0018)
 p = argparse.ArgumentParser()
 p.add_argument('--baseline-include', type=Path)
 args = p.parse_args()
@@ -28,6 +31,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-net-') as temp:
             src = args.baseline_include / name
         if src.exists():
             put(name, src.read_text())
+    write_fixture(inc)
     put('ppu-types.h', '#pragma once\n#include <stdint.h>\ntypedef uint32_t u32; typedef int32_t s32; typedef uint64_t u64; typedef int64_t s64;\n')
     put('sys/_types.h', '#pragma once\ntypedef long _ssize_t;\n')
     put('sys/reent.h', '#pragma once\nstruct _reent { int _errno; };\n')

@@ -7,15 +7,16 @@
  * The wider CELL_E* error-code table is module-specific and lives
  * alongside each subsystem's header (cell/gcm/gcm_error.h, etc.).
  *
- * EBUSY is included here because reference-SDK music-decode samples
- * test against it after container-destroy operations.  Value matches
- * the LV2 kernel error code (0x8001000A).
+ * The E* error names come from <errno.h>, which on this target holds the
+ * LV2 status codes (0x8001xxxx), so a system call's return compares equal
+ * to its E* name (e.g. EBUSY == 0x8001000A).
  */
 
 #ifndef PS3TC_COMPAT_SYS_RETURN_CODE_H
 #define PS3TC_COMPAT_SYS_RETURN_CODE_H
 
 #include <stdint.h>
+#include <errno.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,8 +25,6 @@ extern "C" {
 #ifndef CELL_OK
 #define CELL_OK 0
 #endif
-
-#define EBUSY (-2147418102) /* 0x8001000A */
 
 typedef int32_t CellReturnCode;
 
