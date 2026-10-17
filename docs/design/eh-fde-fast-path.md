@@ -5,10 +5,13 @@ Status: experimental. Nothing here is approved for landing; the open items are a
 ## Why
 
 GCC 16 builds the PPU runtime with the POSIX thread model. With it, libgcc's
-frame registry takes a real mutex: every throw looks up its frames through
-`_Unwind_Find_FDE`, which locks `object_mutex`, and on LV2 that lock is a
-system call. Measured in RPCS3, both ABIs: 9 mutex locks and 9 unlocks per
-throw, every throw. With the single-thread model there were none.
+frame registry takes a real mutex: a throw looks up each frame it unwinds
+through `_Unwind_Find_FDE`, which locks `object_mutex` on every call, and on
+LV2 that lock is a system call. Measured in RPCS3, both ABIs, on a probe that
+repeatedly throws through a two-frame unwind into already-initialized frame
+objects: 9 mutex locks and 9 unlocks per throw. With the single-thread model
+the same probe made none. The count depends on the unwind depth and the
+objects involved.
 
 Upstream GCC already has a lock-free registry: a b-tree with optimistic
 version locks (`ATOMIC_FDE_FAST_PATH`, `unwind-dw2-btree.h`). Upstream enables
@@ -33,9 +36,19 @@ target adaptations:
 - **Trees kept at exit.** `ATOMIC_FDE_KEEP_TREES` drops the destructor that
   releases the registry, so destructors that run late can still deregister and
   throw.
+- **Sorted table registrations.** Once a table registration
+  (`__register_frame_info_table*`, `from_array`) has been looked up and
+  sorted, its `orig_data` is the table of `.eh_frame` images. Upstream's
+  range computation (`get_pc_range`) classifies it as one image instead.
+  Deregistering such a table after its first lookup then left its frames in
+  the tree over freed sort data. 0074 walks the table, within the target
+  block. This is a separate defect from the one 0077 fixes.
 
-Measured with 0074 (RPCS3, both ABIs): the first throw takes the object mutex
-once, to sort the object; later throws take no lock.
+Measured with 0074 on the same probe (RPCS3, both ABIs): the first throw makes
+1 lock and 1 unlock call, and the throws after it make none. That the first
+lock is the lazy sort of a newly looked-up object comes from the source, not
+from attributing the call to its caller. A frame object the program reaches
+for the first time later is sorted then, under the same mutex, once.
 
 gcc-16.x patch 0077 fixes table deregistration under `-mlp64`, independent of
 0074. `__deregister_frame_info_bases` treated a BEGIN whose first 32-bit word
@@ -57,9 +70,16 @@ constructor is outside it. Running out of the reserve traps before `main`.
 **Allocation failure.** After the heap is ready, a failed b-tree node
 allocation is fatal (`abort`). The register functions return `void`, so there
 is no way to report the failure, and a silently dropped registration would
-turn a later throw into `std::terminate` or a wrong unwind. This adds a fatal
-allocation point that the list registry did not have: list registration never
-allocated. There is no fallback to the list registry. How this ends on
+turn a later throw into `std::terminate` or a wrong unwind. The comparison with
+the list registry:
+
+- The list registry needed no registry-node allocation to register an object
+  whose storage the caller supplies.
+- `__register_frame` and `__register_frame_table` already `malloc` their object
+  descriptors on both paths.
+- 0074 adds b-tree node allocation, and makes its failure fatal.
+
+There is no fallback to the list registry. How this ends on
 hardware (trap, hang or a system-level outcome) has not been measured yet, and
 must be recorded before release.
 
