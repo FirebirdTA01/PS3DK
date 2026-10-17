@@ -79,23 +79,28 @@ int main()
 
 	// 2. pthreads, executed
 	pthread_t t;
-	check(pthread_create(&t, nullptr, holder, nullptr) == 0, "holder thread created");
-	pthread_mutex_lock(&g_gate);
-	while (g_state != 1)
-		pthread_cond_wait(&g_cv, &g_gate);
-	pthread_mutex_unlock(&g_gate);
-	int rc = pthread_mutex_trylock(&g_held);
-	check(rc == EBUSY, "trylock on a mutex another thread holds returns EBUSY", rc);
-	struct timespec past;
-	clock_gettime(CLOCK_REALTIME, &past);
-	past.tv_sec -= 1;
-	rc = pthread_mutex_timedlock(&g_held, &past);
-	check(rc == ETIMEDOUT, "timedlock with a passed deadline on a held mutex returns ETIMEDOUT", rc);
-	pthread_mutex_lock(&g_gate);
-	g_state = 2;
-	pthread_cond_broadcast(&g_cv);
-	pthread_mutex_unlock(&g_gate);
-	pthread_join(t, nullptr);
+	int rc = pthread_create(&t, nullptr, holder, nullptr);
+	check(rc == 0, "holder thread created", rc);
+	if (rc == 0) {
+		// Only with a holder thread: waiting for one that was never created would never end.
+		pthread_mutex_lock(&g_gate);
+		while (g_state != 1)
+			pthread_cond_wait(&g_cv, &g_gate);
+		pthread_mutex_unlock(&g_gate);
+		rc = pthread_mutex_trylock(&g_held);
+		check(rc == EBUSY, "trylock on a mutex another thread holds returns EBUSY", rc);
+		struct timespec past;
+		clock_gettime(CLOCK_REALTIME, &past);
+		past.tv_sec -= 1;
+		rc = pthread_mutex_timedlock(&g_held, &past);
+		check(rc == ETIMEDOUT, "timedlock with a passed deadline on a held mutex returns ETIMEDOUT", rc);
+		pthread_mutex_lock(&g_gate);
+		g_state = 2;
+		pthread_cond_broadcast(&g_cv);
+		pthread_mutex_unlock(&g_gate);
+		rc = pthread_join(t, nullptr);
+		check(rc == 0, "holder thread joined", rc);
+	}
 
 	pthread_mutex_t self = PTHREAD_MUTEX_INITIALIZER;
 	pthread_mutex_lock(&self);
