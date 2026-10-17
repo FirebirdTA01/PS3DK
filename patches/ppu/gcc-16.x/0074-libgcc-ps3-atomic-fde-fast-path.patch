@@ -23,9 +23,12 @@ target block (ATOMIC_FDE_KEEP_TREES / ATOMIC_FDE_BOOT_RESERVE):
    constructors that create the heap (83) and the syscall table (84).
    Until the runtime sets __ps3dk_heap_ready (crt1.c, at the end of 84),
    nodes come from a static reserve of 2 (one root leaf per tree: the
-   measured demand of that one registration).  Reserve nodes are never
-   freed.  Exhausting the reserve before the heap is ready traps; it never
-   falls through to a malloc that cannot work yet.
+   PREDICTED demand of that one registration, to be measured by the
+   eh-fde-registry row).  Reserve nodes are never freed.  Exhausting the
+   reserve before the heap is ready traps; it never falls through to a
+   malloc that cannot work yet.  The flag is a hard link-time requirement:
+   with a CRT that does not define it the link fails (a custom CRT defines
+   it and sets it once malloc works).
  - after that, a failed node malloc aborts instead of storing through a
    null node.
  - allocation-free counters for tests: __gcc_ps3_fde_boot_registrations,
@@ -77,7 +80,7 @@ Other targets are unchanged.
 +HOST_LIBGCC2_CFLAGS += -DLIBGCC_PS3_ATOMIC_FDE_FAST_PATH=1
 --- a/libgcc/unwind-dw2-btree.h
 +++ b/libgcc/unwind-dw2-btree.h
-@@ -345,6 +345,76 @@
+@@ -345,6 +345,83 @@
    t->root_lock.version_lock = 0;
  };
  
@@ -89,26 +92,33 @@ Other targets are unchanged.
 +   the reserve before the heap is ready executes a trap: it is never covered
 +   by a malloc that cannot work yet.  After the heap is ready, a failed
 +   malloc aborts instead of storing through a null node.  Both outcomes are
-+   this target's contract, not upstream behaviour.  Without the runtime's
-+   flag (no weak definition) the heap is taken to be ready.  */
-+extern int __ps3dk_heap_ready __attribute__ ((weak));
++   this target's contract, not upstream behaviour.  The flag is a hard
++   link-time requirement, never assumed: a CRT that does not define it
++   (an older runtime, whose crtbegin also registers before the heap) fails
++   to link instead of reaching malloc too early.  A custom CRT opts in by
++   defining it and setting it once malloc works.  */
++extern int __ps3dk_heap_ready;
 +static struct btree_node btree_boot_reserve[ATOMIC_FDE_BOOT_RESERVE];
-+/* Reserve nodes handed out (high-water), and nodes taken from malloc (tests).  */
++/* Reserve nodes handed out (high-water), and nodes taken from malloc.  For
++   tests; updated atomically, so read them with an atomic load.  */
 +unsigned __gcc_ps3_fde_boot_nodes;
 +unsigned __gcc_ps3_fde_heap_nodes;
 +
 +static inline bool
 +btree_heap_ready (void)
 +{
-+  return !&__ps3dk_heap_ready
-+	 || __atomic_load_n (&__ps3dk_heap_ready, __ATOMIC_ACQUIRE);
++  return __atomic_load_n (&__ps3dk_heap_ready, __ATOMIC_ACQUIRE);
 +}
 +
++// Is N one of the reserve's own elements?  Pointer equality only: a
++// malloced node is a different object, not ordered against the array.
 +static inline bool
 +btree_node_is_boot (const struct btree_node *n)
 +{
-+  return n >= btree_boot_reserve
-+	 && n < btree_boot_reserve + ATOMIC_FDE_BOOT_RESERVE;
++  for (unsigned i = 0; i < ATOMIC_FDE_BOOT_RESERVE; ++i)
++    if (n == &btree_boot_reserve[i])
++      return true;
++  return false;
 +}
 +
 +static struct btree_node *
@@ -154,7 +164,7 @@ Other targets are unchanged.
  static void
  btree_release_tree_recursively (struct btree *t, struct btree_node *n);
  
-@@ -362,7 +432,7 @@
+@@ -362,7 +439,7 @@
    while (t->free_list)
      {
        struct btree_node *next = t->free_list->content.children[0].child;
@@ -163,7 +173,7 @@ Other targets are unchanged.
        t->free_list = next;
      }
  }
-@@ -400,8 +470,7 @@
+@@ -400,8 +477,7 @@
  	}
  
        // No free node available, allocate a new one.
@@ -175,7 +185,7 @@ Other targets are unchanged.
        new_node->entry_count = 0;
 --- a/libgcc/unwind-dw2-fde.c
 +++ b/libgcc/unwind-dw2-fde.c
-@@ -35,6 +35,20 @@
+@@ -35,6 +35,21 @@
  #include "unwind-pe.h"
  #include "unwind-dw2-fde.h"
  #include "gthr.h"
@@ -190,13 +200,14 @@ Other targets are unchanged.
 +#define ATOMIC_FDE_FAST_PATH 1
 +#define ATOMIC_FDE_KEEP_TREES 1
 +/* crtbegin registers the program from _init, before the heap exists: its
-+   two root leaves (one per tree) come from a static reserve.  */
++   two root leaves (one per tree, predicted from the tree layout) come from
++   a static reserve.  */
 +#define ATOMIC_FDE_BOOT_RESERVE 2
 +#endif
  #else
  #if (defined(__GTHREAD_MUTEX_INIT) || defined(__GTHREAD_MUTEX_INIT_FUNCTION)) \
      && defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
-@@ -49,6 +63,9 @@
+@@ -49,6 +64,9 @@
  
  static struct btree registered_frames;
  static struct btree registered_objects;
@@ -206,7 +217,7 @@ Other targets are unchanged.
  static bool in_shutdown;
  
  static void
-@@ -62,6 +79,7 @@
+@@ -62,6 +80,7 @@
    btree_destroy (&registered_objects);
    in_shutdown = true;
  }
@@ -214,7 +225,7 @@ Other targets are unchanged.
  
  static void
  get_pc_range (const struct object *ob, uintptr_type *range);
-@@ -106,10 +124,18 @@
+@@ -106,10 +125,18 @@
  #endif
  
  #ifdef ATOMIC_FDE_FAST_PATH

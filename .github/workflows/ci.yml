@@ -397,6 +397,11 @@ jobs:
       - name: Test the libgcc FDE registry is the lock-free b-tree
         run: bash tests/host/libgcc-fde-fast-path-test.sh
 
+      # Skips without PS3DEV or on a libgcc without the 0074 registry; a CRT
+      # without the heap-ready flag must fail to link (fail closed).
+      - name: Test the libgcc registry requires the runtime's heap-ready flag
+        run: bash tests/host/libgcc-heap-ready-link-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class

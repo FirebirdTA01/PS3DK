@@ -192,15 +192,19 @@ int main()
 	bool have_flag = &__ps3dk_heap_ready != nullptr;
 	bool have_counters = &__gcc_ps3_fde_boot_nodes != nullptr && &__gcc_ps3_fde_boot_registrations != nullptr &&
 	                     &__gcc_ps3_fde_heap_nodes != nullptr;
-	unsigned boot_regs = have_counters ? __gcc_ps3_fde_boot_registrations : 0;
-	unsigned boot_nodes = have_counters ? __gcc_ps3_fde_boot_nodes : 0;
-	printf("eh-fde-registry: abi %s, heap-ready flag %s, libgcc reserve counters %s\n",
-	       sizeof(void *) == 8 ? "lp64" : "ilp32", have_flag ? "present" : "absent", have_counters ? "present" : "absent");
+	unsigned boot_regs = have_counters ? __atomic_load_n(&__gcc_ps3_fde_boot_registrations, __ATOMIC_ACQUIRE) : 0;
+	unsigned boot_nodes = have_counters ? __atomic_load_n(&__gcc_ps3_fde_boot_nodes, __ATOMIC_ACQUIRE) : 0;
+	// The mode is the LIBRARY's: a libgcc with the 0074 registry exports its counters and requires the runtime's
+	// flag, so in that mode a missing flag is a failure, never a fallback to the list-registry checks.
+	printf("eh-fde-registry: abi %s, registry mode %s, heap-ready flag %s\n", sizeof(void *) == 8 ? "lp64" : "ilp32",
+	       have_counters ? "0074-btree" : "list (no 0074 counters)", have_flag ? "present" : "absent");
+	if (have_counters)
+		check(have_flag, "0074 mode: the runtime's heap-ready flag is linked");
 	if (have_flag)
 		check(malloc_before_heap == 0, "bootstrap: no malloc call before the heap is ready");
 	if (have_counters) {
 		printf("eh-fde-registry: pre-heap registrations %u, reserve high-water %u, heap nodes %u\n",
-		       boot_regs, boot_nodes, __gcc_ps3_fde_heap_nodes);
+		       boot_regs, boot_nodes, __atomic_load_n(&__gcc_ps3_fde_heap_nodes, __ATOMIC_ACQUIRE));
 		check(boot_regs == 1, "bootstrap: exactly the crtbegin registration happens before the heap");
 		check(boot_nodes == 2, "bootstrap: the reserve high-water is the two root leaves");
 	}
@@ -249,14 +253,14 @@ int main()
 	check(found(g_first, 60), "the persistent object is still found after the churn");
 
 	// 5. growth past the root leaves, release, reuse
-	unsigned heap0 = have_counters ? __gcc_ps3_fde_heap_nodes : 0;
+	unsigned heap0 = have_counters ? __atomic_load_n(&__gcc_ps3_fde_heap_nodes, __ATOMIC_ACQUIRE) : 0;
 	for (auto &s : g_many)
 		__register_frame_info(s.frame, s.ob);
 	bool all = true;
 	for (auto &s : g_many)
 		all = found(s, 12) && all;
 	check(all, "growth: thirty more objects are all found");
-	unsigned heap1 = have_counters ? __gcc_ps3_fde_heap_nodes : 0;
+	unsigned heap1 = have_counters ? __atomic_load_n(&__gcc_ps3_fde_heap_nodes, __ATOMIC_ACQUIRE) : 0;
 	bool gone = true;
 	for (auto &s : g_many)
 		gone = __deregister_frame_info(s.frame) == (void *)s.ob && absent(s) && gone;
@@ -267,7 +271,7 @@ int main()
 	for (auto &s : g_many)
 		all = found(s, 20) && all;
 	check(all, "growth: registered again, all found");
-	unsigned heap2 = have_counters ? __gcc_ps3_fde_heap_nodes : 0;
+	unsigned heap2 = have_counters ? __atomic_load_n(&__gcc_ps3_fde_heap_nodes, __ATOMIC_ACQUIRE) : 0;
 	if (have_counters) {
 		printf("eh-fde-registry: heap nodes before growth %u, after %u, after re-registration %u\n", heap0, heap1, heap2);
 		check(heap1 > heap0, "growth: the trees took nodes from the heap once it was ready");
