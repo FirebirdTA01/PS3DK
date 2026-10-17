@@ -26,6 +26,13 @@ uniform-readback,tests/regression/uniform-readback/uniform-readback.fake.self,30
 cxx-eh-ilp32,tests/regression/cxx-eh/cxx-eh-ilp32.fake.self,90,RAN-CLEAN,CXX_EH_OK,CXX_EH_FAIL|terminate
 cxx-eh-lp64,tests/regression/cxx-eh/cxx-eh-lp64.fake.self,90,RAN-CLEAN,CXX_EH_OK,CXX_EH_FAIL|terminate
 
+# eh-fde-registry guards the unwinder's FDE registry in both ABIs: throws in a priority-101 and a static
+# constructor, concurrent first lookups into a new object, register/look-up/deregister churn of a separate
+# never-executed range while four threads throw, and throws caught in destructors down to the last one
+# (gcc-16.x 0074 moved the registry to libgcc's lock-free b-tree).  The marker prints from the last destructor.
+eh-fde-registry-ilp32,tests/regression/eh-fde-registry/eh-fde-registry-ilp32.fake.self,90,RAN-CLEAN,EH_FDE_REGISTRY_TEARDOWN_OK,EH_FDE_REGISTRY_FAIL|EH_FDE_REGISTRY_MAIN_FAIL|terminate
+eh-fde-registry-lp64,tests/regression/eh-fde-registry/eh-fde-registry-lp64.fake.self,90,RAN-CLEAN,EH_FDE_REGISTRY_TEARDOWN_OK,EH_FDE_REGISTRY_FAIL|EH_FDE_REGISTRY_MAIN_FAIL|terminate
+
 # cxx-iostream-startup guards the runtime start-up ladder (heap 83, syscall
 # table 84, newlib lock-creation lock 85, finalization 86): the standard streams
 # (GCC 16's libstdc++ sets them up at priority 90), malloc and a syscall-hook
