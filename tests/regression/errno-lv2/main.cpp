@@ -117,11 +117,15 @@ int main()
 	long big = strtol("999999999999999999999999", nullptr, 10);
 	e = errno;
 	check(big == LONG_MAX && e == ERANGE, "strtol overflow sets ERANGE", e);
+	// The size and the result go through volatiles: at -O2 GCC may delete a malloc/free pair whose result is only
+	// tested against NULL, and then no allocation (and no errno) happens at all.
+	static volatile size_t huge = (size_t)-1 / 2;
+	static void *volatile sink;
 	errno = 0;
-	void *p = malloc((size_t)-1 / 2);
+	sink = malloc(huge);
 	e = errno;
-	check(p == nullptr && e == ENOMEM, "an impossible malloc sets ENOMEM", e);
-	free(p);
+	check(sink == nullptr && e == ENOMEM, "an impossible malloc sets ENOMEM", e);
+	free(sink);
 	for (int code : {ENOENT, EBUSY, ERANGE, EAGAIN}) {
 		const char *s = strerror(code);
 		bool named = s && *s && !strstr(s, "Unknown") && !strstr(s, "unknown");
