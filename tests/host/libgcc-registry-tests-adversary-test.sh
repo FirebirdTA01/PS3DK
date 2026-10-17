@@ -40,6 +40,23 @@ for t in libgcc-fde-fast-path-test libgcc-heap-ready-link-test; do
         [ "$rc" = 1 ] && echo "libgcc-registry-adversary: ok $t fails (exit 1) when $var prints its output and exits 1" \
                       || fail "$t exited $rc with a lying $var (want 1)"
     done
+    if [ $t = libgcc-heap-ready-link-test ]; then
+        # Selective: nm is truthful for the libgcc archive (so the test gets past its archive inspection) and lies
+        # only for the LINKED program, the stage.elf check (review: codex - the generic liar never reached it).
+        printf '#!/bin/sh\nfor a; do last=$a; done\n"%s" "$@"; rc=$?\ncase $last in *.elf) exit 1 ;; esac\nexit $rc\n' "$P-nm" \
+            > "$work/nm-elf-liar" && chmod +x "$work/nm-elf-liar" || { echo "cannot write nm-elf-liar"; exit 1; }
+        rc=$(run $t "NM=$work/nm-elf-liar")
+        [ "$rc" = 1 ] && echo "libgcc-registry-adversary: ok $t fails when nm lies only for the linked program" \
+                      || fail "$t exited $rc when nm lies only for the linked program (want 1)"
+        # realpath that prints nothing and fails, and one that prints the real path and then fails: the -B route
+        # must never be declared proven by two empty (or unchecked) canonical paths.
+        printf '#!/bin/sh\nexit 1\n' > "$work/realpath-silent" && chmod +x "$work/realpath-silent" || exit 1
+        for rp in "$work/realpath-silent" "$(liar realpath-liar "$(command -v realpath)")"; do
+            rc=$(run $t "REALPATH=$rp")
+            [ "$rc" = 1 ] && echo "libgcc-registry-adversary: ok $t fails when realpath fails (${rp##*/})" \
+                          || fail "$t exited $rc when realpath fails (${rp##*/}, want 1)"
+        done
+    fi
 done
 [ $status -eq 0 ] && echo "PASS: libgcc-registry-tests-adversary-test"
 exit $status
