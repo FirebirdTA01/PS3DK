@@ -309,13 +309,14 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
 
     CgType returnType(decl->returnType);
 
-    // A typedef already owns this name: the reference refuses `typedef A B;`
-    // followed by `float B(float x)` (C1002), as it refuses a global variable
-    // there.  Only a typedef's name is checked; a struct tag keeps C's
-    // separate namespace.
+    // A type already owns this name: the reference refuses `typedef A B;` or
+    // `struct B { ... };` followed by `float B(float x)` (C1002 'the name "B"
+    // is already defined', measured 2026-10-17 for the typedef, the same-tag
+    // `typedef struct S { ... } S;` and the plain struct) - struct tags share
+    // one namespace with functions there, unlike C.
     if (Symbol* prior = symbols_.lookupLocal(decl->name);
         prior && prior->kind == SymbolKind::Type && prior->declaration &&
-        prior->declaration->kind == DeclKind::Typedef)
+        (prior->declaration->kind == DeclKind::Typedef || prior->declaration->kind == DeclKind::Struct))
     {
         error(decl->loc, "the name '" + decl->name + "' is already defined");
         return;

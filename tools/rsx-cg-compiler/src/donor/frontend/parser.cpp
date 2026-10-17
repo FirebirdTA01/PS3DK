@@ -111,6 +111,11 @@ void Parser::retypeShadowedTypeNames()
         size_t k = i;
         for (; k < tokens.size(); ++k) {
             const TokenType t = tokens[k].type;
+            // `typedef struct Tag { ... } Alias;` declares the tag too (review:
+            // codex); it is a type name, never a declarator.
+            if (t == TokenType::KW_STRUCT && k + 1 < tokens.size() &&
+                tokens[k + 1].type == TokenType::IDENTIFIER)
+                userTypeNames.insert(tokens[k + 1].lexeme);
             if (t == TokenType::LBRACE) ++braces;
             else if (t == TokenType::RBRACE) --braces;
             else if (t == TokenType::LBRACKET) ++brackets;
@@ -1444,6 +1449,16 @@ std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration(
                 return skipDeclaration();
             }
             body->name = advance().lexeme;
+            consume(TokenType::SEMICOLON, "Expected ';' after typedef");
+            return body;
+        }
+        // `typedef struct S { ... } S;`: the name IS the tag, so the struct is
+        // the whole declaration (the reference accepts it, byte-identical to
+        // the plain struct); an alias of the same name would redefine it.
+        if (check(TokenType::IDENTIFIER) && peek().lexeme == body->name &&
+            peek(1).type == TokenType::SEMICOLON)
+        {
+            advance();
             consume(TokenType::SEMICOLON, "Expected ';' after typedef");
             return body;
         }
