@@ -1,0 +1,116 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] libgcc: deregister a frame by its registration, not by its first word (powerpc64-ps3-elf)
+
+EXPERIMENTAL CANDIDATE (not for landing; card t_b90d0462).
+__deregister_frame_info treats a BEGIN whose first 32-bit word is zero
+as an empty .eh_frame that was never registered, and returns NULL before
+looking at the registrations.  For a TABLE registration
+(__register_frame_info_table*, __register_frame_table) BEGIN is the
+table, whose first element is a pointer: under -mlp64 on this big-endian
+target, with every address below 4 GB, its first word is zero, so a table
+could never be deregistered - with the list lookup and with the b-tree
+alike.  __deregister_frame applied the same test.
+
+With LIBGCC_PS3_DEREGISTER_BY_REGISTRATION (t-ps3-deregister, this
+target only) only a null BEGIN is ignored outright; the registration is
+searched and removed first under the existing synchronisation.  When
+nothing is registered and BEGIN is an empty .eh_frame, the call stays the
+no-op it was; a missing NON-empty registration still fails the
+assertion.  __deregister_frame frees only the object that comes back.
+
+--- a/libgcc/config.host
++++ b/libgcc/config.host
+@@ -1269,7 +1269,7 @@
+ 	extra_parts="$extra_parts crtbeginS.o crtendS.o crtbeginT.o ecrti.o ecrtn.o ncrti.o ncrtn.o"
+ 	;;
+ powerpc64-ps3-elf*)
+-	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff rs6000/t-ps3-gthreads rs6000/t-ps3-unwind"
++	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff rs6000/t-ps3-gthreads rs6000/t-ps3-unwind rs6000/t-ps3-deregister"
+ 	;;
+ powerpc64-ps3-kernel-elf*)
+ 	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff"
+--- /dev/null
++++ b/libgcc/config/rs6000/t-ps3-deregister
+@@ -0,0 +1,27 @@
++# libgcc frame deregistration for the PS3 LV2 PPU target.
++#
++# Copyright (C) 2026 PS3DK toolchain contributors.
++#
++# This file is part of GCC.
++#
++# GCC is free software; you can redistribute it and/or modify it under
++# the terms of the GNU General Public License as published by the Free
++# Software Foundation; either version 3, or (at your option) any later
++# version.
++#
++# GCC is distributed in the hope that it will be useful, but WITHOUT
++# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
++# License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with GCC; see the file COPYING3.  If not see
++# <http://www.gnu.org/licenses/>.
++#
++# __deregister_frame_info treats a BEGIN whose first 32-bit word is zero
++# as an empty .eh_frame that was never registered.  For a TABLE
++# registration BEGIN is the table, whose first element is a pointer: under
++# -mlp64 on this big-endian target, with every address below 4 GB, that
++# pointer's first word is always zero, so a table registration could never
++# be deregistered.  Look the registration up first (unwind-dw2-fde.c).
++HOST_LIBGCC2_CFLAGS += -DLIBGCC_PS3_DEREGISTER_BY_REGISTRATION=1
+--- a/libgcc/unwind-dw2-fde.c
++++ b/libgcc/unwind-dw2-fde.c
+@@ -258,9 +258,19 @@
+ {
+   struct object *ob = 0;
+ 
++#ifdef LIBGCC_PS3_DEREGISTER_BY_REGISTRATION
++  /* Only a null BEGIN is ignored outright.  Whether BEGIN is "an empty
++     .eh_frame we never registered" is decided by the registration state
++     below: the first word of a TABLE registration is (the start of) a
++     pointer, zero for any address below 4 GB on a 64-bit big-endian
++     target, and the shortcut made such a table impossible to remove.  */
++  if ((const uword *) begin == 0)
++    return ob;
++#else
+   /* If .eh_frame is empty, we haven't registered.  */
+   if ((const uword *) begin == 0 || *(const uword *) begin == 0)
+     return ob;
++#endif
+ 
+ #ifdef ATOMIC_FDE_FAST_PATH
+   // Find the originally registered object to get the base pointer.
+@@ -318,6 +328,15 @@
+   __gthread_mutex_unlock (&object_mutex);
+ #endif
+ 
++#ifdef LIBGCC_PS3_DEREGISTER_BY_REGISTRATION
++  /* Nothing is registered under BEGIN and it is an empty .eh_frame: it
++     was never registered (__register_frame_info skips those), so this is
++     the no-op it always was.  A missing NON-empty registration still
++     fails the assertion below.  */
++  if (!ob && *(const uword *) begin == 0)
++    return ob;
++#endif
++
+   // If we didn't find anything in the lookup data structures then they
+   // were either already destroyed or we tried to remove an empty range.
+   gcc_assert (in_shutdown || ob);
+@@ -333,9 +352,16 @@
+ void
+ __deregister_frame (void *begin)
+ {
++#ifdef LIBGCC_PS3_DEREGISTER_BY_REGISTRATION
++  /* The registration decides (see __deregister_frame_info_bases): only the
++     object __register_frame or __register_frame_table allocated comes
++     back, and an unregistered empty frame returns NULL (free (NULL)).  */
++  free (__deregister_frame_info (begin));
++#else
+   /* If .eh_frame is empty, we haven't registered.  */
+   if (*(uword *) begin != 0)
+     free (__deregister_frame_info (begin));
++#endif
+ }
+ 
+ 
