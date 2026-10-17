@@ -1,0 +1,5 @@
+// The alias on a VERTEX input struct.  Reference: byte-identical.
+typedef struct { float4 pos : POSITION; float3 col : COLOR0; } VIn;
+typedef VIn VAlias;
+typedef struct { float4 pos : POSITION; float3 col : COLOR0; } VOut;
+VOut main(VAlias i, uniform float4x4 mvp) { VOut o; o.pos = mul(mvp, i.pos); o.col = i.col; return o; }

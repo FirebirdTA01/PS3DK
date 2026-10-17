@@ -1,0 +1,5 @@
+// An ARRAY typedef with the C-style extent after the name.  Reference:
+// byte-identical to the direct spelling.
+typedef float2 taps_t[2];
+float4 main(float2 uv : TEXCOORD0) : COLOR
+{ taps_t t; t[0] = uv; t[1] = uv * 2; return float4(t[0] + t[1], 0, 1); }

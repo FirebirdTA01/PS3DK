@@ -1205,7 +1205,7 @@ std::unique_ptr<DeclNode> Parser::parseTopLevelDeclaration(
     // Check for typedef
     if (check(TokenType::KW_TYPEDEF))
     {
-        return parseTypedefDeclaration();
+        return parseTypedefDeclaration(extraDeclarations);
     }
 
     // Otherwise it's a variable or function declaration
@@ -1313,68 +1313,125 @@ std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
     return structDecl;
 }
 
-std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration()
+std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration(
+    std::vector<std::unique_ptr<DeclNode>>* extraDeclarations)
 {
     SourceLocation loc = currentLocation();
     consume(TokenType::KW_TYPEDEF, "Expected 'typedef'");
 
-    // `typedef struct { ... } Name;` - the struct is ANONYMOUS and the
-    // typedef supplies its name.  parseType() cannot see a struct BODY, so
-    // this used to fail at the brace with "Expected type name" followed by
-    // "Expected type in typedef".  It is the shape the reference SDK's own
-    // headers use (DeferredShading/shaders/light_structs.cgh declares both
-    // of its varying structs this way), and the reference compiles it.
-    //
-    // The result is returned as a StructDecl carrying the typedef's name
-    // rather than as a TypedefDecl wrapping an anonymous type: the name
-    // then registers through the DeclKind::Struct arm the same way
-    // `struct Name { ... };` does, so every later lookup of the name
-    // resolves without a second indirection.  A NAMED `typedef struct Tag
-    // { ... } Name;` keeps its tag in the body and takes the same path,
-    // which loses the tag as a separate spelling - no reference-SDK source
-    // uses the tag, and giving it one would need a real alias table.
-    if (check(TokenType::KW_STRUCT))
+    // Every exit that has already reported its fault skips the rest of the
+    // declaration, so the top-level loop does not read the typedef's NAME as
+    // the start of a new declaration and report the same line again.
+    auto skipDeclaration = [this]() {
+        while (!check(TokenType::SEMICOLON) && !isAtEnd())
+            advance();
+        match(TokenType::SEMICOLON);
+        return std::unique_ptr<DeclNode>();
+    };
+
+    // The reference accepts five spellings, each byte-identical to the
+    // direct spelling of the type (fable's typedef rows):
+    //   typedef struct { ... } Name;       the struct IS Name (below)
+    //   typedef struct Tag { ... } Name;   the struct keeps Tag; Name aliases it
+    //   typedef struct Tag Name;           Tag may be FORWARD (defined later,
+    //                                      or never and never used)
+    //   typedef <type> Name;               any type, another alias included
+    //   typedef <type> Name[N]...;         a C-style extent after the name
+    std::shared_ptr<TypeNode> type;
+    std::unique_ptr<StructDecl> body;   // the struct a tagged typedef defines
+
+    if (check(TokenType::KW_STRUCT) && peek(1).type == TokenType::IDENTIFIER &&
+        peek(2).type != TokenType::LBRACE)
     {
-        auto structDecl = parseStructBody();
-        if (!structDecl)
+        // `typedef struct Tag Name;` - with the keyword the tag may be
+        // forward; the keyword-less `typedef Foo Bar;` ahead of Foo is
+        // refused (parseType reports it).  An unseen tag is recorded as a
+        // type name, and a use of a tag that is never defined refuses in
+        // semantic analysis as an unknown type.
+        advance();   // struct
+        const std::string tag = advance().lexeme;
+        const auto alias = typeAliases_.find(tag);
+        if (alias != typeAliases_.end())
+            type = frozenSourceAlias(alias->second);
+        else
+        {
+            typeNames.insert(tag);
+            type = std::make_shared<TypeNode>();
+            type->baseType = BaseType::Struct;
+            type->structName = tag;
+        }
+        if (type->baseType != BaseType::Struct)
+        {
+            error(loc, "'" + tag + "' is not a struct");
+            return skipDeclaration();
+        }
+    }
+    else if (check(TokenType::KW_STRUCT))
+    {
+        body = parseStructBody();
+        if (!body)
         {
             error("Expected struct body in typedef");
-            return nullptr;
+            return skipDeclaration();
         }
-        if (!check(TokenType::IDENTIFIER))
+        if (body->name.empty())
         {
-            error("Expected name for typedef");
-            return nullptr;
+            // Anonymous: the typedef supplies the struct's only name, and the
+            // name registers through the DeclKind::Struct arm the same way
+            // `struct Name { ... };` does.
+            if (!check(TokenType::IDENTIFIER))
+            {
+                error("Expected name for typedef");
+                return skipDeclaration();
+            }
+            body->name = advance().lexeme;
+            consume(TokenType::SEMICOLON, "Expected ';' after typedef");
+            return body;
         }
-        structDecl->name = advance().lexeme;
-        consume(TokenType::SEMICOLON, "Expected ';' after typedef");
-        return structDecl;
+        // Tagged: the struct keeps its tag and the name aliases it.
+        type = std::make_shared<TypeNode>();
+        type->baseType = BaseType::Struct;
+        type->structName = body->name;
     }
-
-    auto type = parseType();
-    if (!type)
+    else
     {
-        error("Expected type in typedef");
-        return nullptr;
+        // parseType has already named the fault when it returns nothing;
+        // a second line here only repeated the position more vaguely.
+        type = parseType();
+        if (!type)
+            return skipDeclaration();
     }
 
     if (!check(TokenType::IDENTIFIER))
     {
         error("Expected name for typedef");
-        return nullptr;
+        return skipDeclaration();
     }
-
     std::string name = advance().lexeme;
-
+    // C puts an array's extent after the declarator: `typedef float2
+    // taps_t[2];` makes taps_t the array type.
+    type = parseArraySuffixes(type);
     consume(TokenType::SEMICOLON, "Expected ';' after typedef");
 
     // The reference refuses a repeated typedef, even of the same type.
     if (typeNames.count(name))
+    {
         error(loc, "the name '" + name + "' is already defined");
-    else
-        typeAliases_.emplace(name, type);
+        return body ? std::unique_ptr<DeclNode>(std::move(body)) : nullptr;
+    }
+    typeNames.insert(name);
+    typeAliases_.emplace(name, type);
 
-    return std::make_unique<TypedefDecl>(loc, name, type);
+    auto aliasDecl = std::make_unique<TypedefDecl>(loc, name, type);
+    if (body)
+    {
+        // The tagged struct is the declaration, so the tag is registered
+        // before anything reads the alias; the alias rides along after it.
+        if (extraDeclarations)
+            extraDeclarations->push_back(std::move(aliasDecl));
+        return body;
+    }
+    return aliasDecl;
 }
 
 std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration(

@@ -135,7 +135,10 @@ private:
     std::unique_ptr<StructDecl> parseStructBody();
     // Returns a StructDecl for `typedef struct { ... } Name;` and a
     // TypedefDecl otherwise, so the return type is the common base.
-    std::unique_ptr<DeclNode> parseTypedefDeclaration();
+    // `extraDeclarations` receives the alias of a tagged `typedef struct Tag
+    // { ... } Name;` (the struct itself is the returned declaration).
+    std::unique_ptr<DeclNode> parseTypedefDeclaration(
+        std::vector<std::unique_ptr<DeclNode>>* extraDeclarations = nullptr);
     std::unique_ptr<DeclNode> parseVariableOrFunctionDeclaration(
         std::vector<std::unique_ptr<DeclNode>>* extraDeclarations = nullptr);
     std::unique_ptr<FunctionDecl> parseFunctionDeclaration(

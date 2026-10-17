@@ -1,0 +1,9 @@
+// CONTROL for fp_typedef_tag_and_name_f: the same helper call under the
+// struct's tag only.  It is a separate control because on this compiler a
+// struct member that reaches the output only through a helper's parameter
+// loses its varying record in the container (the ucode still reads TEX1;
+// the reference keeps the record and emits the same bytes as the direct
+// spelling) - a reflection gap that is not this guard's subject.
+struct Tag { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
+float3 helper(Tag t) { return t.col; }
+float4 main(Tag i) : COLOR { return float4(helper(i) * i.uv.x, 1); }

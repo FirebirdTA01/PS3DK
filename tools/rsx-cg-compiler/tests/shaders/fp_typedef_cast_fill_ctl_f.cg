@@ -1,0 +1,3 @@
+// CONTROL: `O o = (O)0` with the struct's own name on both sides.
+struct O { float4 c : COLOR0; float4 d : COLOR1; };
+O main(float2 uv : TEXCOORD0) { O o = (O)0; o.c.xy = uv; return o; }

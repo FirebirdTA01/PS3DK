@@ -1,0 +1,5 @@
+// A GLOBAL variable already owns the name.  Reference: C1002.
+typedef struct { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; } A;
+float B = 2.0;
+typedef A B;
+float4 main(A i) : COLOR { return float4(i.col * i.uv.x, 1); }

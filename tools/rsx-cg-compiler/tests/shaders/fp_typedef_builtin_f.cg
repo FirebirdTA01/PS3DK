@@ -1,0 +1,7 @@
+// Aliases of BUILTIN types.  A use must become the builtin node itself,
+// not a struct that happens to be named vec4_t.  Reference: byte-identical
+// to the direct spelling, half included.
+typedef float4 vec4_t;
+typedef half3 hvec3_t;
+float4 main(float2 uv : TEXCOORD0, float3 col : TEXCOORD1) : COLOR
+{ hvec3_t c = col; vec4_t r = float4(c * uv.x, 1); return r; }
