@@ -5,12 +5,17 @@ name: GCC 16 build
 # regular CI workflow builds no target toolchain, so its compiler-dependent
 # probes skip; here a skip is a failure.
 #
-# Manual dispatch only for now.  A nightly schedule is added after the first
-# successful, measured run (runtime and runner disk recorded below); it must
-# live on the default branch, which is why this file does - it checks out the
-# requested ref (default feat/gcc16) and records the resolved commit.
+# Manual dispatch, plus a nightly run since the first successful measured run
+# (39029420544: 40.5 min, about +14 GB of the runner's disk).  A schedule only
+# fires from the default branch, which is why this file lives on main: every
+# run checks out the requested ref - feat/gcc16 for the nightly, which has no
+# inputs - and records the resolved commit.
 
 on:
+  schedule:
+    # 08:37 UTC every day (03:37 US Central daylight time, 02:37 standard
+    # time); an off-hour minute, away from the top-of-hour scheduling peak.
+    - cron: "37 8 * * *"
   workflow_dispatch:
     inputs:
       ref:
