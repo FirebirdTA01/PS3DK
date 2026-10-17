@@ -95,16 +95,42 @@ compiles() {
 
 # times_listed <want dir> <env...> -- <flags...>: how often <want dir> is in the <...> search list.  Directories are
 # compared by identity (-ef), not by spelling: a Windows-hosted driver prints C:/... paths that Git Bash spells
-# /tmp/... or /c/..., and Git Bash's ln -s makes a copy rather than a link.  The -E -v run must succeed.
+# /tmp/... or /c/..., and Git Bash's ln -s makes a copy rather than a link.
+# Every step is status-checked, none in a pipeline: the -E -v run must succeed, its output must hold both search-list
+# markers, and the parse into a file must succeed.  Any infrastructure failure prints "x", a non-count, so it fails an
+# expected 1 and an expected 0 alike.
 times_listed() {
-    local want=$1 envs=(); shift
+    local want=$1 envs=() d n=0; shift
     while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
     shift
-    env -u PS3DK -u PS3DK_NO_DEFAULT_INCLUDE "${envs[@]}" "$gcc" -E -v -x c "$@" /dev/null -o /dev/null > "$work/v.txt" 2>&1 ||
-        { echo "x"; return; }
-    awk '/search starts here:/{on=1; next} /^End of search list/{on=0} on {sub(/^ +/, ""); print}' "$work/v.txt" |
-        while IFS= read -r d; do [ -d "$d" ] && [ "$d" -ef "$want" ] && echo hit; done | grep -c hit
+    if ! env -u PS3DK -u PS3DK_NO_DEFAULT_INCLUDE "${envs[@]}" "$gcc" -E -v -x c "$@" /dev/null -o /dev/null > "$work/v.txt" 2>&1; then
+        echo x; return
+    fi
+    if ! grep -q 'search starts here:' "$work/v.txt" || ! grep -q '^End of search list' "$work/v.txt"; then
+        echo x; return
+    fi
+    if ! awk '/search starts here:/{on=1; next} /^End of search list/{on=0} on {sub(/^ +/, ""); print}' "$work/v.txt" > "$work/dirs.txt"; then
+        echo x; return
+    fi
+    while IFS= read -r d; do
+        if [ -d "$d" ] && [ "$d" -ef "$want" ]; then n=$((n + 1)); fi
+    done < "$work/dirs.txt"
+    echo "$n"
 }
+
+# Controls for times_listed itself: a failing -E -v run, and a parser that prints its real output and then fails,
+# must each give the non-count "x" (so neither an expected 1 nor an expected 0 can pass on them).
+real_gcc=$gcc
+mkdir -p "$work/stub" "$work/awkfail"
+printf '#!/bin/sh\necho "stand-in: -E -v fails" >&2\nexit 1\n' > "$work/stub/gcc"; chmod +x "$work/stub/gcc"
+gcc="$work/stub/gcc"; n=$(times_listed "$inc" --); gcc=$real_gcc
+[ "$n" = x ] && ok "self-test: a failing -E -v run is not a count" || fail "self-test: a failing -E -v run counted as '$n'"
+real_awk=$(command -v awk)
+printf '#!/bin/sh\n"%s" "$@"\nexit 1\n' "$real_awk" > "$work/awkfail/awk"; chmod +x "$work/awkfail/awk"
+n=$(PATH="$work/awkfail:$PATH" times_listed "$inc" --)
+[ "$n" = x ] && ok "self-test: a parser that prints and then fails is not a count" || fail "self-test: a failing parser counted as '$n'"
+n=$(times_listed "$inc" --)
+[ "$n" = 1 ] && ok "self-test: the real parser counts the installed SDK once" || fail "self-test: the real parser counted '$n'"
 
 # 1. installed SDK, both ABIs
 compiles "PS3DK unset, ILP32" pass --
