@@ -89,9 +89,11 @@ static void refused_untouched(void)
 static const char *const spawn_args[] = { CHILD_FLAG, "alpha", "", "two words", "gamma", NULL };
 static const char *const spawn_env[] = { "ARGV_ABI_ENV=from spawn", "ARGV_ABI_SECOND=two words", NULL };
 
-/* constructor witness: the environment is published before constructors run */
+/* constructor witness: the environment is published before constructors run.  Default priority: on GCC 12.4 newlib
+ * creates its locks at priority 105, and getenv takes one, so a lower-priority constructor would stop on an
+ * uncreated lwmutex (CELL_ESRCH) before main - a separate, pre-existing limit, not this row's subject. */
 static const char *ctor_env, *ctor_second;
-__attribute__((constructor(101))) static void env_witness(void)
+__attribute__((constructor)) static void env_witness(void)
 {
     ctor_env = getenv("ARGV_ABI_ENV");
     ctor_second = getenv("ARGV_ABI_SECOND");
