@@ -18,6 +18,20 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **C++ threads on the PPU (GCC 16).**  libstdc++ and libgcc are built with
+  the POSIX thread model over librt's pthreads.  What this enables:
+  - `std::thread`, `std::mutex`, `std::condition_variable` and
+    `std::future` work.
+  - Function-local statics are initialised under a guard.
+  - `std::shared_ptr` counts are atomic.
+  - `std::chrono::steady_clock` is monotonic.
+  - `std::this_thread::sleep_for` uses `nanosleep`, and
+    `std::this_thread::yield` yields.
+  - A thread's `thread_local` objects are destroyed before the
+    at-thread-exit notifications that wait on them.
+
+  `std::shared_mutex` is built on a mutex and a condition variable.
+  GCC 12.4 stays single-threaded.
 - **`sceNpDrmOpen`.**  New `<np/drm_inline.h>` provides `sceNpDrmOpen`,
   which checks that NP DRM content is available to the licensee key and
   opens it as DRM content with `cellFsOpen`.
@@ -54,6 +68,35 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **The SDK headers are on the compiler's default include path (GCC 16).**
+  The PPU driver adds `-isystem <SDK>/ppu/include` unless `-nostdinc` is
+  given.
+  - **Which SDK:** the one `PS3DK` selects, or, with `PS3DK` unset, the SDK
+    installed beside the compiler.
+  - **What counts as an SDK:** a directory only counts if it has
+    `sys/lv2_syscall.h`.
+  - **Turning it off:** `PS3DK` set to the empty string selects none, and
+    `PS3DK_NO_DEFAULT_INCLUDE=1` turns the path off.
+
+  C code that includes only the toolchain's headers now finds the pthread,
+  time and scheduling declarations.  GCC 14 and later reject a call to an
+  undeclared function, so such code no longer compiled.  A build that also
+  passes the same directory with `-isystem` gets it once.
+- **newlib declares the POSIX thread, time and scheduling functions (GCC
+  16).**  `pthread_*` (including the read-write locks, the mutex types and
+  `pthread_mutex_timedlock`), `clock_gettime` with `CLOCK_MONOTONIC`,
+  `nanosleep`, `sched_yield` and `sched_get_priority_min`/`max` are declared
+  by `<pthread.h>`, `<time.h>` and `<sched.h>` themselves.  The POSIX
+  feature macros stay unset, so `struct sigevent` and the pthread types
+  keep their layout.  Strict ISO dialects get the pthread types too.  The
+  SDK's wrapper headers add these declarations only for an older newlib.
+- **The runtime starts up at constructor priorities 83 to 86.**  The heap
+  (83), the system-call table (84), the C library's lock creation (85) and
+  finalization (86) run in the implementation-reserved range, ahead of
+  libstdc++'s constructors and every user constructor.  A constructor at
+  priority 101 can allocate and use `std::cout`.  They used to run at
+  103 to 106, after constructors at 101 and 102.  Implementation
+  constructors below 83 still run before the runtime is ready.
 - **ABI: plain `char`, `wchar_t`, `wint_t` and `errno` values.**  Rebuild
   every object and static library, C as well as C++, PPU and SPU; objects
   built by earlier releases must not be linked with this one.
