@@ -93,32 +93,35 @@ compiles() {
     fi
 }
 
-# times_listed <env...> -- <flags...>: how often the SDK directory is in the <...> search list.
+# times_listed <want dir> <env...> -- <flags...>: how often <want dir> is in the <...> search list.  Directories are
+# compared by identity (-ef), not by spelling: a Windows-hosted driver prints C:/... paths that Git Bash spells
+# /tmp/... or /c/..., and Git Bash's ln -s makes a copy rather than a link.  The -E -v run must succeed.
 times_listed() {
-    local envs=()
+    local want=$1 envs=(); shift
     while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
     shift
-    env -u PS3DK -u PS3DK_NO_DEFAULT_INCLUDE "${envs[@]}" "$gcc" -E -v -x c "$@" /dev/null -o /dev/null 2>&1 |
-        awk '/search starts here:/{on=1; next} /^End of search list/{on=0} on {sub(/^ +/, ""); print}' |
-        while read -r d; do [ -d "$d" ] && (cd "$d" && pwd -P); done | grep -cxF "$inc"
+    env -u PS3DK -u PS3DK_NO_DEFAULT_INCLUDE "${envs[@]}" "$gcc" -E -v -x c "$@" /dev/null -o /dev/null > "$work/v.txt" 2>&1 ||
+        { echo "x"; return; }
+    awk '/search starts here:/{on=1; next} /^End of search list/{on=0} on {sub(/^ +/, ""); print}' "$work/v.txt" |
+        while IFS= read -r d; do [ -d "$d" ] && [ "$d" -ef "$want" ] && echo hit; done | grep -c hit
 }
 
 # 1. installed SDK, both ABIs
 compiles "PS3DK unset, ILP32" pass --
 compiles "PS3DK unset, LP64" pass -- -mlp64
-n=$(times_listed --); [ "$n" = 1 ] && ok "PS3DK unset: SDK directory listed once" || fail "PS3DK unset: SDK directory listed $n times"
+n=$(times_listed "$inc" --); [ "$n" = 1 ] && ok "PS3DK unset: SDK directory listed once" || fail "PS3DK unset: SDK directory listed $n times"
 
 # 2. the selected SDK, also through a path with a space
 compiles "PS3DK set" pass PS3DK="$sdk" --
 mkdir -p "$work/sdk with space/ppu"
 ln -s "$inc" "$work/sdk with space/ppu/include"
 compiles "PS3DK path with a space" pass PS3DK="$work/sdk with space" --
-n=$(times_listed PS3DK="$work/sdk with space" --); [ "$n" = 1 ] && ok "PS3DK with a space: SDK directory listed once" || fail "PS3DK with a space: listed $n times"
+n=$(times_listed "$work/sdk with space/ppu/include" PS3DK="$work/sdk with space" --); [ "$n" = 1 ] && ok "PS3DK with a space: SDK directory listed once" || fail "PS3DK with a space: listed $n times"
 for name in "sdk %s" "sdk % x"; do
     mkdir -p "$work/$name/ppu"
     ln -s "$inc" "$work/$name/ppu/include"
     compiles "PS3DK path with '$name'" pass PS3DK="$work/$name" --
-    n=$(times_listed PS3DK="$work/$name" --); [ "$n" = 1 ] && ok "PS3DK '$name': SDK directory listed once" || fail "PS3DK '$name': listed $n times"
+    n=$(times_listed "$work/$name/ppu/include" PS3DK="$work/$name" --); [ "$n" = 1 ] && ok "PS3DK '$name': SDK directory listed once" || fail "PS3DK '$name': listed $n times"
 done
 
 # 3. a PS3DK without headers selects nothing
@@ -131,10 +134,10 @@ compiles "PS3DK_NO_DEFAULT_INCLUDE=1 (control)" fail PS3DK_NO_DEFAULT_INCLUDE=1 
 compiles "PS3DK_NO_DEFAULT_INCLUDE=0" pass PS3DK_NO_DEFAULT_INCLUDE=0 --
 
 # 5. -nostdinc
-n=$(times_listed -- -nostdinc); [ "$n" = 0 ] && ok "-nostdinc: SDK directory not listed" || fail "-nostdinc: SDK directory listed $n times"
+n=$(times_listed "$inc" -- -nostdinc); [ "$n" = 0 ] && ok "-nostdinc: SDK directory not listed" || fail "-nostdinc: SDK directory listed $n times"
 
 # 6. an explicit -isystem of the same directory
-n=$(times_listed -- -isystem "$inc"); [ "$n" = 1 ] && ok "explicit -isystem: SDK directory listed once" || fail "explicit -isystem: listed $n times"
+n=$(times_listed "$inc" -- -isystem "$inc"); [ "$n" = 1 ] && ok "explicit -isystem: SDK directory listed once" || fail "explicit -isystem: listed $n times"
 
 [ $status -eq 0 ] && echo "PASS: sdk-default-include-test"
 exit $status
