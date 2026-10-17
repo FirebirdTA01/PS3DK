@@ -29,6 +29,7 @@
 #include <cstring>
 #include <pthread.h>
 #include <stdexcept>
+#include <unistd.h>
 
 extern "C" {
 struct dwarf_eh_bases { void *tbase; void *dbase; void *func; };
@@ -132,15 +133,33 @@ static bool absent(Synth &s)
 
 // --- 3. concurrent start + 4. churn --------------------------------------------------------------
 enum { THROWERS = 4, ROUNDS = 1500, CHURN = 400 };
-static std::atomic<int> g_go{0}, g_ready{0};
+// Start gate: workers check in and sleep on a condition variable until main releases them all at once.  No
+// busy-wait - spinning threads starve each other on LV2 (and a long spin is endless in an interpreter).
+static pthread_mutex_t g_gate_mx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_gate_cv = PTHREAD_COND_INITIALIZER;
+static int g_go, g_ready;
+static void check_in_and_wait()
+{
+	pthread_mutex_lock(&g_gate_mx);
+	g_ready++;
+	while (!g_go)
+		pthread_cond_wait(&g_gate_cv, &g_gate_mx);
+	pthread_mutex_unlock(&g_gate_mx);
+}
+static int ready_count()
+{
+	pthread_mutex_lock(&g_gate_mx);
+	int r = g_ready;
+	pthread_mutex_unlock(&g_gate_mx);
+	return r;
+}
 static std::atomic<int> g_first_ok{0}, g_throw_bad{0}, g_churn_bad{0};
 static std::atomic<bool> g_churn_done{false};
 
 static void *thrower(void *arg)
 {
 	int id = (int)(intptr_t)arg;
-	g_ready.fetch_add(1);
-	while (!g_go.load()) {}
+	check_in_and_wait();
 	if (found(g_first, 4 * id))
 		g_first_ok.fetch_add(1);
 	int bad = 0;
@@ -152,8 +171,7 @@ static void *thrower(void *arg)
 }
 static void *churner(void *)
 {
-	g_ready.fetch_add(1);
-	while (!g_go.load()) {}
+	check_in_and_wait();
 	int bad = 0;
 	for (int i = 0; i < CHURN; i++) {
 		__register_frame_info(g_churn.frame, g_churn.ob);
@@ -235,9 +253,14 @@ int main()
 	}
 	check(created == THROWERS + 1, "all five threads created");
 	// Bounded wait for the created threads to be ready, then release them together.
-	for (long spin = 0; g_ready.load() != created && spin < 2000000000L; spin++) {}
-	check(g_ready.load() == created, "every created thread reached the start line");
-	g_go.store(1);
+	// Bounded wait (10 s, sleeping) for the created threads to check in, then release them together.
+	for (int ms = 0; ready_count() != created && ms < 10000; ms++)
+		usleep(1000);
+	check(ready_count() == created, "every created thread reached the start line");
+	pthread_mutex_lock(&g_gate_mx);
+	g_go = 1;
+	pthread_cond_broadcast(&g_gate_cv);
+	pthread_mutex_unlock(&g_gate_mx);
 	if (created < THROWERS + 1)
 		g_churn_done.store(true);            // no churner: let the throwers stop after their rounds
 	int joined = 0;
