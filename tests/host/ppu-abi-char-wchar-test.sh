@@ -2,7 +2,7 @@
 # The GCC 16 PPU compiler's plain char, wchar_t and wint_t match the reference toolchain in both data models
 # (gcc-16.x 0075, 0076).  Expected values were measured with the reference compiler's -dM -E (C and C++):
 #   ILP32 (default): __CHAR_SIGNED__ 1 (no __CHAR_UNSIGNED__), __WCHAR_TYPE__ short unsigned int,
-#                    __WCHAR_MAX__ 65535U, __WINT_TYPE__ int
+#                    __WCHAR_MAX__ 65535U (judged by value), __WINT_TYPE__ int
 #   -mlp64:          __CHAR_UNSIGNED__ 1 (no __CHAR_SIGNED__), the same wchar_t and wint_t
 # Each row checks the predefines AND compiles static_asserts on the types themselves (the macros could lie).
 # -fsigned-char / -funsigned-char still override the default.  Skips without PS3DEV or on GCC < 16.
@@ -26,7 +26,8 @@ for abi in ilp32 lp64; do
     else want_char='#define __CHAR_UNSIGNED__ 1'; not_char=__CHAR_SIGNED__; signed=0; fi
     for lang in c c++; do
         dm=$("$G" $flag -x $lang -dM -E "$work/empty.c") || { fail "$abi $lang: -dM -E exited non-zero"; continue; }
-        for m in "$want_char" '#define __WCHAR_TYPE__ short unsigned int' '#define __WCHAR_MAX__ 65535U' '#define __WINT_TYPE__ int'; do
+        # __WCHAR_MAX__ is judged by value below (GCC 16 spells it 0xffff, the reference 65535U)
+        for m in "$want_char" '#define __WCHAR_TYPE__ short unsigned int' '#define __WINT_TYPE__ int'; do
             has "$m" "$dm"; case $? in 0) ;; 1) fail "$abi $lang: missing '$m'" ;; *) fail "$abi $lang: could not judge '$m'" ;; esac
         done
         grep -q -- "^#define $not_char " <<<"$dm"; case $? in 1) ;; 0) fail "$abi $lang: $not_char is predefined" ;; *) fail "$abi $lang: could not judge $not_char" ;; esac
@@ -36,6 +37,7 @@ for abi in ilp32 lp64; do
 #include <stddef.h>
 #include <wchar.h>
 _Static_assert(sizeof(wchar_t) == 2, "wchar_t is 16-bit");
+_Static_assert(__WCHAR_MAX__ == 65535, "__WCHAR_MAX__ is 65535");
 _Static_assert((wchar_t)-1 > 0, "wchar_t is unsigned");
 _Static_assert(sizeof(wint_t) == sizeof(int) && (wint_t)-1 < 0, "wint_t is int");
 _Static_assert(sizeof(L"ab") == 6, "L\"\" literals are 16-bit units");
