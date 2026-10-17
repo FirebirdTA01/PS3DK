@@ -13,9 +13,16 @@
 #  4. C is untouched: gcc on a .c file gets no C++ dialect (no -std=gnu++17 on cc1's line, no warning under
 #     -Werror) and keeps GCC 16's C default (__STDC_VERSION__ 202311L).
 #
+#  5. self-test of the status handling: the same checks run against a stand-in driver that runs the real compiler,
+#     prints its real output and then exits 1 for the C -E -dM query; that run must fail (rc 1) on exactly the two
+#     C-default rows.  Every compiler step's status is checked before its output is read, and a macro must be
+#     defined exactly once.
+#
+# Scope: GCC 16 with gcc-16.x 0078 only.  It asserts 0078's cc1plus option (-###) and GCC 16's C default; other
+# compilers (GCC 12 included) are expected to fail it.
+#
 # usage: cxx-default-dialect-test.sh [--ppu-gcc <powerpc64-ps3-elf-gcc>]
-#   With no argument: $PS3DEV's compiler; it skips without PS3DEV.  A named compiler never skips.  The GCC 12
-#   toolchain passes too (its own default is GNU C++17), except check 4's C default.
+#   With no argument: $PS3DEV's compiler; it skips without PS3DEV.  A named compiler never skips.
 #   Exit 0 pass (or skip), 1 fail, 2 usage or missing input.
 set -u
 gcc=""
@@ -37,18 +44,20 @@ gxx="${gcc%gcc}g++"
 
 status=0
 ok()   { echo "cxx-default-dialect: ok   $*"; }
-fail() { echo "cxx-default-dialect: FAIL $*"; status=1; }
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+fail() { echo "cxx-default-dialect: FAIL $*"; echo "cxx-default-dialect: FAIL $*" >> "$work/fails.txt"; status=1; }
+: > "$work/fails.txt"
 export PS3DK_NO_DEFAULT_INCLUDE=1
 : > "$work/empty.cc"
 
 # probe <driver...> -- <flags...>: sets $got to "<__cplusplus> gnu|strict" from -E -dM; returns 1 (got empty) if the
-# preprocessor fails or defines no __cplusplus.
+# preprocessor fails or does not define __cplusplus exactly once.
 probe() {
     local drv=() a
     while [ "$1" != "--" ]; do drv+=("$1"); shift; done; shift
     got=""
     "${drv[@]}" "$@" -E -dM "$work/empty.cc" > "$work/dm.txt" 2> "$work/dm.err" || return 1
+    [ "$(grep -c '^#define __cplusplus ' "$work/dm.txt")" = 1 ] || return 1
     a=$(awk '$2 == "__cplusplus" {print $3}' "$work/dm.txt")
     [ -n "$a" ] || return 1
     if grep -q '^#define __STRICT_ANSI__ ' "$work/dm.txt"; then got="$a strict"; else got="$a gnu"; fi
@@ -92,8 +101,10 @@ for abi in ilp32 lp64; do
     printf '#if !defined(__STRICT_ANSI__)\nstatic_assert(__cplusplus == 201703L, "gnu++17");\n#else\n#error strict\n#endif\nint f() { return 0; }\n' > "$work/d17.cc"
     "$gxx" "${af[@]}" -c "$work/d17.cc" -o "$work/d17.o" > "$work/c.log" 2>&1 && ok "$abi g++ compile: static_assert gnu++17 holds" \
         || { fail "$abi g++ compile: static_assert gnu++17 failed"; head -3 "$work/c.log" | sed 's/^/    /'; }
-    "$gxx" "${af[@]}" -std=gnu++20 -c "$work/d17.cc" -o "$work/d20.o" > /dev/null 2>&1 && fail "$abi control: the gnu++17 static_assert compiled under -std=gnu++20" \
-        || ok "$abi control: the gnu++17 static_assert fails under -std=gnu++20"
+    # Controls fail for the asserted reason only: the compiler's status is 1 and its diagnostic names it.
+    "$gxx" "${af[@]}" -std=gnu++20 -c "$work/d17.cc" -o "$work/d20.o" > "$work/c.log" 2>&1; rc=$?
+    [ $rc -eq 1 ] && grep -q 'static assertion failed' "$work/c.log" && ok "$abi control: the gnu++17 static_assert fails under -std=gnu++20" \
+        || { fail "$abi control: -std=gnu++20 compile gave status $rc without the static_assert diagnostic"; head -3 "$work/c.log" | sed 's/^/    /'; }
     # cc1plus's own command line (-###): -std=gnu++17 with no option, none added beside an explicit one.
     "$gxx" "${af[@]}" -### -c "$work/d17.cc" > "$work/v.txt" 2>&1 || fail "$abi -### failed"
     grep 'cc1plus' "$work/v.txt" | grep -q '"-std=gnu++17"' && ok "$abi -###: cc1plus gets -std=gnu++17" || fail "$abi -###: no -std=gnu++17 on cc1plus's line"
@@ -108,8 +119,9 @@ for abi in ilp32 lp64; do
         || { fail "$abi .ii no option: did not compile as C++17"; head -3 "$work/c.log" | sed 's/^/    /'; }
     "$gcc" "${af[@]}" -x c++-cpp-output -c "$work/pp.ii" -o "$work/pp2.o" > "$work/c.log" 2>&1 && ok "$abi gcc -x c++-cpp-output no option: GNU C++17" \
         || { fail "$abi gcc -x c++-cpp-output no option: did not compile as C++17"; head -3 "$work/c.log" | sed 's/^/    /'; }
-    "$gxx" "${af[@]}" -std=c++20 -c "$work/pp.ii" -o "$work/pp3.o" > /dev/null 2>&1 && fail "$abi .ii control: -std=c++20 accepted char8_t as an identifier" \
-        || ok "$abi .ii control: -std=c++20 rejects char8_t as an identifier"
+    "$gxx" "${af[@]}" -std=c++20 -c "$work/pp.ii" -o "$work/pp3.o" > "$work/c.log" 2>&1; rc=$?
+    [ $rc -eq 1 ] && grep -q 'char8_t' "$work/c.log" && ok "$abi .ii control: -std=c++20 rejects char8_t as an identifier" \
+        || { fail "$abi .ii control: -std=c++20 compile gave status $rc without a char8_t diagnostic"; head -3 "$work/c.log" | sed 's/^/    /'; }
 
     # 4: C.
     printf 'int c(void) { return 0; }\n' > "$work/c.c"
@@ -117,9 +129,40 @@ for abi in ilp32 lp64; do
         || { fail "$abi C compile"; head -3 "$work/c.log" | sed 's/^/    /'; }
     "$gcc" "${af[@]}" -### -c "$work/c.c" > "$work/v.txt" 2>&1 && ! grep 'cc1"* ' "$work/v.txt" | grep -q 'std=' && grep -q '/cc1"* ' "$work/v.txt" \
         && ok "$abi C: cc1 gets no -std" || fail "$abi C: cc1's line has a -std option (or no cc1 line): $(grep 'cc1' "$work/v.txt")"
-    sv=$("$gcc" "${af[@]}" -E -dM -x c /dev/null 2>/dev/null | awk '$2 == "__STDC_VERSION__" {print $3}')
-    [ "$sv" = "202311L" ] && ok "$abi C default __STDC_VERSION__ $sv" || fail "$abi C default __STDC_VERSION__ '$sv', want 202311L"
+    # The status is checked before the output is read, and __STDC_VERSION__ must be defined exactly once.
+    if "$gcc" "${af[@]}" -E -dM -x c /dev/null > "$work/cdm.txt" 2> "$work/cdm.err"; then
+        n=$(grep -c '^#define __STDC_VERSION__ ' "$work/cdm.txt")
+        sv=$(awk '$2 == "__STDC_VERSION__" {print $3}' "$work/cdm.txt")
+        [ "$n" = 1 ] && [ "$sv" = "202311L" ] && ok "$abi C default __STDC_VERSION__ $sv" \
+            || fail "$abi C default __STDC_VERSION__: $n definition(s), value '$sv', want one 202311L"
+    else
+        fail "$abi C default __STDC_VERSION__: the C preprocessor failed (status $?)"; head -3 "$work/cdm.err" | sed 's/^/    /'
+    fi
 done
+
+# 5: status handling, against a stand-in that runs the real driver, prints its real output, then exits 1 for the C
+# -E -dM query only.  The nested run (no further self-test) must fail with status 1, report the two C-default rows
+# as preprocessor failures, and otherwise fail exactly the rows this run failed (none, on a correct compiler).
+if [ -z "${CXXDD_NESTED:-}" ]; then
+    grep -v 'C default __STDC_VERSION__' "$work/fails.txt" | sed 's/[[:space:]]*$//' | sort > "$work/parent-fails.txt"
+    mkdir -p "$work/exit1"
+    for t in gcc g++; do
+        real="${gcc%gcc}$t"
+        printf '#!/bin/bash\n"%s" "$@"; rc=$?\ncase " $* " in *" -E -dM -x c /dev/null "*) echo "stand-in: exit 1 after real output" >&2; exit 1 ;; esac\nexit $rc\n' \
+            "$real" > "$work/exit1/powerpc64-ps3-elf-$t"
+        chmod +x "$work/exit1/powerpc64-ps3-elf-$t"
+    done
+    out=$(CXXDD_NESTED=1 bash "${BASH_SOURCE[0]}" --ppu-gcc "$work/exit1/powerpc64-ps3-elf-gcc" 2>&1); rc=$?
+    nc=$(printf '%s\n' "$out" | grep -c ': FAIL .*C default __STDC_VERSION__: the C preprocessor failed')
+    # The stand-in's own path differs from the real driver's only in diagnostics; rows are compared by their text.
+    printf '%s\n' "$out" | grep ': FAIL ' | grep -v 'C default __STDC_VERSION__' | sed 's/[[:space:]]*$//' | sort > "$work/nested-fails.txt"
+    if [ $rc -eq 1 ] && [ "$nc" = 2 ] && cmp -s "$work/parent-fails.txt" "$work/nested-fails.txt"; then
+        ok "self-test: real output then exit 1 fails the two C-default rows and nothing else new (rc 1)"
+    else
+        fail "self-test: stand-in exiting 1 after real output gave rc $rc, $nc C-default preprocessor failure(s); other differences:"
+        diff "$work/parent-fails.txt" "$work/nested-fails.txt" | head -5 | sed 's/^/    /'
+    fi
+fi
 
 [ $status -eq 0 ] && echo "PASS: cxx-default-dialect-test" || echo "FAIL: cxx-default-dialect-test"
 exit $status
