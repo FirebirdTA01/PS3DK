@@ -112,7 +112,7 @@ for abi in ilp32 lp64; do
     # left in $work/cc1plus.txt.  Returns 1 otherwise, with the details on indented lines.
     cc1plus_line() {
         if ! "$gxx" "$@" -### -c "$work/d17.cc" > "$work/v.txt" 2>&1; then head -3 "$work/v.txt" | sed 's/^/    /'; return 1; fi
-        grep -E '/cc1plus(\.exe)?" ' "$work/v.txt" > "$work/cc1plus.txt"
+        grep -E '/cc1plus(\.exe)?"? ' "$work/v.txt" > "$work/cc1plus.txt"
         [ "$(wc -l < "$work/cc1plus.txt")" -eq 1 ] || { sed 's/^/    /' "$work/cc1plus.txt"; return 1; }
     }
     if cc1plus_line "${af[@]}"; then
@@ -141,7 +141,7 @@ for abi in ilp32 lp64; do
     # cc1's line in -### (a Windows-hosted driver names it cc1.exe): exactly one, with no -std option.  Failure
     # details go on indented lines, so FAIL lines carry no run-specific paths (the self-test compares them).
     if "$gcc" "${af[@]}" -### -c "$work/c.c" > "$work/v.txt" 2>&1; then
-        grep -E '/cc1(\.exe)?" ' "$work/v.txt" > "$work/cc1.txt"
+        grep -E '/cc1(\.exe)?"? ' "$work/v.txt" > "$work/cc1.txt"
         n=$(wc -l < "$work/cc1.txt")
         if [ "$n" -eq 1 ] && ! grep -q -- '-std=' "$work/cc1.txt"; then ok "$abi C: cc1 gets no -std"
         else fail "$abi C: $n cc1 line(s), want one without -std"; sed 's/^/    /' "$work/cc1.txt"; fi
