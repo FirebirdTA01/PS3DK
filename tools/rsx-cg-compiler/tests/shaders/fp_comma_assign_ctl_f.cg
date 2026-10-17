@@ -1,0 +1,2 @@
+// CONTROL: the assignment and the read as two statements.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float x = uv.y; x = uv.x * 2.0; float y = x + 1.0; return float4(y, x, 0, 1); }

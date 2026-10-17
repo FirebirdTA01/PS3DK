@@ -3363,6 +3363,132 @@ bool loopBodyChanges(StmtNode* body, const std::unordered_set<DeclNode*>& depend
 
 }  // namespace
 
+namespace
+{
+// A left-deep comma chain `(a, b), c`, in evaluation order.
+void flattenComma(ExprNode* e, std::vector<ExprNode*>& out)
+{
+    if (e && e->kind == ExprKind::Binary && static_cast<BinaryExpr*>(e)->op == BinaryOp::Comma)
+    {
+        auto* b = static_cast<BinaryExpr*>(e);
+        flattenComma(b->left.get(), out);
+        flattenComma(b->right.get(), out);
+        return;
+    }
+    out.push_back(e);
+}
+
+// Whether an expression mentions a declaration (by resolved declaration, or by
+// name when unresolved).  A node kind this walker does not know counts as
+// mentioning everything, so an unknown shape is never taken as independent.
+bool exprMentions(const ExprNode* e, const DeclNode* decl, const std::string& name)
+{
+    if (!e) return false;
+    switch (e->kind)
+    {
+    case ExprKind::Literal: return false;
+    case ExprKind::Identifier:
+    {
+        const auto* id = static_cast<const IdentifierExpr*>(e);
+        return (decl && id->resolvedDecl == decl) || id->name == name;
+    }
+    case ExprKind::Binary:
+    {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        return exprMentions(b->left.get(), decl, name) || exprMentions(b->right.get(), decl, name);
+    }
+    case ExprKind::Unary:
+        return exprMentions(static_cast<const UnaryExpr*>(e)->operand.get(), decl, name);
+    case ExprKind::MemberAccess:
+        return exprMentions(static_cast<const MemberAccessExpr*>(e)->object.get(), decl, name);
+    case ExprKind::Index:
+    {
+        const auto* ix = static_cast<const IndexExpr*>(e);
+        return exprMentions(ix->array.get(), decl, name) || exprMentions(ix->index.get(), decl, name);
+    }
+    case ExprKind::Cast:
+        return exprMentions(static_cast<const CastExpr*>(e)->operand.get(), decl, name);
+    case ExprKind::Call:
+        for (const auto& a : static_cast<const CallExpr*>(e)->arguments)
+            if (exprMentions(a.get(), decl, name)) return true;
+        return false;
+    case ExprKind::Constructor:
+        for (const auto& a : static_cast<const ConstructorExpr*>(e)->arguments)
+            if (exprMentions(a.get(), decl, name)) return true;
+        return false;
+    default:
+        return true;
+    }
+}
+
+// The name an extra for-clause part WRITES: `x = ...`, `x += ...`, `x++`.
+// Nothing else is an admitted extra part.
+bool extraPartTarget(ExprNode* op, const IdentifierExpr*& target)
+{
+    if (!op) return false;
+    if (op->kind == ExprKind::Binary)
+    {
+        auto* b = static_cast<BinaryExpr*>(op);
+        if (!TypeOperations::isAssignmentOp(b->op) || b->left->kind != ExprKind::Identifier) return false;
+        target = static_cast<const IdentifierExpr*>(b->left.get());
+        return true;
+    }
+    if (op->kind == ExprKind::Unary)
+    {
+        auto* u = static_cast<UnaryExpr*>(op);
+        if (u->op != UnaryOp::PreIncrement && u->op != UnaryOp::PostIncrement &&
+            u->op != UnaryOp::PreDecrement && u->op != UnaryOp::PostDecrement) return false;
+        if (u->operand->kind != ExprKind::Identifier) return false;
+        target = static_cast<const IdentifierExpr*>(u->operand.get());
+        return true;
+    }
+    return false;
+}
+
+// Writes anywhere inside an expression: an extra part's own assignment counts
+// one; a nested `j = (n = 4)`, `j = n++` or a call hides another the proof
+// cannot see.
+int writesIn(const ExprNode* e)
+{
+    if (!e) return 0;
+    switch (e->kind)
+    {
+    case ExprKind::Binary:
+    {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        return (TypeOperations::isAssignmentOp(b->op) ? 1 : 0) + writesIn(b->left.get()) + writesIn(b->right.get());
+    }
+    case ExprKind::Unary:
+    {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        const bool steps = u->op == UnaryOp::PreIncrement || u->op == UnaryOp::PostIncrement ||
+                           u->op == UnaryOp::PreDecrement || u->op == UnaryOp::PostDecrement;
+        return (steps ? 1 : 0) + writesIn(u->operand.get());
+    }
+    case ExprKind::Call: return 99;
+    case ExprKind::Ternary:
+    {
+        const auto* t = static_cast<const TernaryExpr*>(e);
+        return writesIn(t->condition.get()) + writesIn(t->thenExpr.get()) + writesIn(t->elseExpr.get());
+    }
+    case ExprKind::Index:
+    {
+        const auto* ix = static_cast<const IndexExpr*>(e);
+        return writesIn(ix->array.get()) + writesIn(ix->index.get());
+    }
+    case ExprKind::MemberAccess: return writesIn(static_cast<const MemberAccessExpr*>(e)->object.get());
+    case ExprKind::Cast: return writesIn(static_cast<const CastExpr*>(e)->operand.get());
+    case ExprKind::Constructor:
+    {
+        int n = 0;
+        for (const auto& a : static_cast<const ConstructorExpr*>(e)->arguments) n += writesIn(a.get());
+        return n;
+    }
+    default: return 0;
+    }
+}
+} // namespace
+
 bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
 {
     if (!stmt->init || !stmt->condition || !stmt->increment || !stmt->body)
@@ -3447,6 +3573,7 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
     std::string varName;
     ExprNode* initial = nullptr;
     IRTypeInfo type;
+    std::vector<ExprNode*> extraInits;
     const bool declares = stmt->init->kind == StmtKind::Decl;
     if (declares) {
         auto* d = static_cast<DeclStmt*>(stmt->init.get());
@@ -3456,13 +3583,33 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
         varName = v->name; induction = v; initial = v->initializer.get();
         type = getIRType(v->type.get());
     } else if (stmt->init->kind == StmtKind::Expr) {
+        // `for (i = 0, j = 2; ...)`: in a COMMA list the induction is the
+        // operand the condition tests; the other operands run once with the
+        // init (the reference accepts this, byte-identical to the statements
+        // written out).  buildStmt(init) below builds every operand in order.
         auto* e = static_cast<ExprStmt*>(stmt->init.get())->expr.get();
-        if (!e || e->kind != ExprKind::Binary) return false;
-        auto* b = static_cast<BinaryExpr*>(e);
-        if (b->op != BinaryOp::Assign || b->left->kind != ExprKind::Identifier) return false;
-        auto* id = static_cast<IdentifierExpr*>(b->left.get());
-        varName = id->name; induction = id->resolvedDecl; initial = b->right.get();
+        std::vector<ExprNode*> initOps;
+        flattenComma(e, initOps);
+        DeclNode* tested = nullptr;
+        if (stmt->condition->kind == ExprKind::Binary) {
+            auto* c = static_cast<BinaryExpr*>(stmt->condition.get());
+            if (c->left && c->left->kind == ExprKind::Identifier)
+                tested = static_cast<IdentifierExpr*>(c->left.get())->resolvedDecl;
+        }
+        BinaryExpr* chosen = nullptr;
+        for (ExprNode* op : initOps) {
+            if (!op || op->kind != ExprKind::Binary) continue;
+            auto* b = static_cast<BinaryExpr*>(op);
+            if (b->op != BinaryOp::Assign || b->left->kind != ExprKind::Identifier) continue;
+            auto* id = static_cast<IdentifierExpr*>(b->left.get());
+            if (initOps.size() == 1 || id->resolvedDecl == tested) { chosen = b; break; }
+        }
+        if (!chosen) return false;
+        auto* id = static_cast<IdentifierExpr*>(chosen->left.get());
+        varName = id->name; induction = id->resolvedDecl; initial = chosen->right.get();
         type = getExprType(id);
+        for (ExprNode* op : initOps)
+            if (op != chosen) extraInits.push_back(op);
     } else return false;
     if (!induction || !type.isScalar() ||
         (type.baseType != IRType::Int32 && type.baseType != IRType::Float32 &&
@@ -3481,7 +3628,57 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
     if (cmp != BinaryOp::Less && cmp != BinaryOp::LessEqual && cmp != BinaryOp::Greater &&
         cmp != BinaryOp::GreaterEqual && cmp != BinaryOp::Equal && cmp != BinaryOp::NotEqual) return false;
     if (!isInduction(cond->left.get()) || !constant(cond->right.get(), bound)) return false;
-    auto* inc = stmt->increment.get();
+    // `i++, j--`: the operand stepping the induction is the step; the others
+    // run after every iteration's body.
+    std::vector<ExprNode*> incOps;
+    flattenComma(stmt->increment.get(), incOps);
+    std::vector<ExprNode*> extraIncrements;
+    ExprNode* inc = nullptr;
+    for (ExprNode* op : incOps) {
+        bool steps = false;
+        if (op && op->kind == ExprKind::Unary)
+            steps = isInduction(static_cast<UnaryExpr*>(op)->operand.get());
+        else if (op && op->kind == ExprKind::Binary)
+            steps = isInduction(static_cast<BinaryExpr*>(op)->left.get());
+        if (steps && !inc) inc = op;
+        else extraIncrements.push_back(op);
+    }
+    if (!inc) return false;
+    // THE SPLIT IS TAKEN ONLY WHEN THE EXTRA PARTS ARE INDEPENDENT of the
+    // proof: the trip count is simulated from the induction's start, step and
+    // bound before any extra part runs, and the extra increments run after
+    // each body with the induction still at that iteration's value.  So an
+    // extra part must be a plain write to one other name that neither the
+    // induction, the bound, the start nor the step mentions.  A part that
+    // fails is refused BY NAME: the reference accepts these loops, and the
+    // ordinary path could only refuse them later without saying why.
+    auto independent = [&](ExprNode* op) -> bool {
+        const IdentifierExpr* target = nullptr;
+        const auto refuse = [&](const std::string& why) {
+            error(stmt->loc, "for-clause comma part " + why +
+                             "; static expansion refused (the loop's start, step and bound are "
+                             "read before any extra part runs)");
+            return false;
+        };
+        if (!extraPartTarget(op, target))
+            return refuse("is not a plain write to one name");
+        if (writesIn(op) != 1)
+            return refuse("'" + target->name + " = ...' contains a nested write or a call");
+        if (isInduction(const_cast<IdentifierExpr*>(target)) || exprMentions(op, induction, varName))
+            return refuse("'" + target->name + "' mentions the induction '" + varName + "'");
+        if (exprMentions(cond->right.get(), target->resolvedDecl, target->name))
+            return refuse("writes '" + target->name + "', which the bound reads");
+        if (exprMentions(initial, target->resolvedDecl, target->name))
+            return refuse("writes '" + target->name + "', which the induction's start reads");
+        if (inc->kind == ExprKind::Binary &&
+            exprMentions(static_cast<BinaryExpr*>(inc)->right.get(), target->resolvedDecl, target->name))
+            return refuse("writes '" + target->name + "', which the step reads");
+        return true;
+    };
+    for (ExprNode* op : extraInits)
+        if (!independent(op)) return false;
+    for (ExprNode* op : extraIncrements)
+        if (!independent(op)) return false;
     if (inc->kind == ExprKind::Unary) {
         auto* u = static_cast<UnaryExpr*>(inc);
         if (!isInduction(u->operand.get())) return false;
@@ -3548,6 +3745,8 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
         bind(value);
         buildStmt(stmt->body.get());
         if (currentBlock_->hasTerminator()) break;
+        for (ExprNode* extra : extraIncrements)
+            buildExpr(extra);
     }
     if (!currentBlock_->hasTerminator()) bind(final);
     blockDeclared_.pop_back();

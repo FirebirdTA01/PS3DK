@@ -1,0 +1,4 @@
+// The gcm fw_fog fpshader row: a parenthesised comma list as a const
+// initialiser is its LAST value.  Reference: byte-identical to the
+// constructor of that value.
+float4 main(float2 uv : TEXCOORD0) : COLOR { const float3 c = (0.2, 0.3, 0.4); return float4(c * uv.x, 1); }

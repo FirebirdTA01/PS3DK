@@ -1,0 +1,2 @@
+// CONTROL: the middle operand written directly.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float v = uv.x > 0.5 ? 1.0 : 0.0; return float4(v, 0, 0, 1); }

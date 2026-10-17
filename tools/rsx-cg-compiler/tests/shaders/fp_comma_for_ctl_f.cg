@@ -1,0 +1,3 @@
+// CONTROL: the init part written before the loop and the increment part as
+// the body's last statement.  Reference: byte-identical to the comma form.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float s = 0; int i, j; j = 2; for (i = 0; i < 2; i++) { s += uv.x * j; j--; } return float4(s, 0, 0, 1); }

@@ -1,0 +1,6 @@
+// CONTROL: the last value as a scalar initialiser.  On the reference the
+// comma list, this scalar and float3(0.4, 0.4, 0.4) are one container; on
+// this compiler the constructor spelling packs its constant differently
+// (a pre-existing shape divergence), so the twin is the scalar form, which
+// is what the comma yields.
+float4 main(float2 uv : TEXCOORD0) : COLOR { const float3 c = 0.4; return float4(c * uv.x, 1); }

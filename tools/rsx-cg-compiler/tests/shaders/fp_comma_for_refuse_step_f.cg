@@ -1,0 +1,3 @@
+// An init part that writes the INDUCTION after its assignment.  Legal Cg;
+// refused rather than unrolled from the wrong start.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float s = 0; int i; for (i = 0, i += 2; i < 8; i += 2) s += uv.x; return float4(s, 0, 0, 1); }
