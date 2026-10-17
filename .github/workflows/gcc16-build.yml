@@ -131,7 +131,9 @@ jobs:
             sha256sum "$G" "$PS3DEV/spu/bin/spu-elf-gcc"
             for p in cc1 cc1plus lto1; do f=$("$G" -print-prog-name=$p); test -f "$f"; sha256sum "$f"; done
             for m in "" -mlp64; do
-              for a in libgcc.a libgcc_eh.a libstdc++.a libsupc++.a libc.a libm.a; do
+              # No libgcc_eh.a: this static-only target builds its unwinder
+              # into libgcc.a (run 1, 39027451442, stopped on that name).
+              for a in libgcc.a libstdc++.a libsupc++.a libc.a libm.a; do
                 f=$("$G" $m -print-file-name=$a); test -f "$f"; sha256sum "$f"
               done
             done
@@ -242,7 +244,7 @@ jobs:
         run: |
           date -u +end=%Y-%m-%dT%H:%M:%SZ | tee -a "$LOGS/identity.txt"
           df -h / "$GITHUB_WORKSPACE" | tee "$LOGS/disk-end.txt"
-          du -sh stage src/upstream "$HOME/ps3tc" 2>/dev/null | tee "$LOGS/sizes.txt" || true   # a missing path is not a failure here
+          du -sh "$PS3DEV" src/upstream "$HOME/ps3tc" 2>/dev/null | tee "$LOGS/sizes.txt" || true   # a missing path is not a failure here
 
       - name: Keep logs and identities
         if: always()
