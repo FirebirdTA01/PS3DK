@@ -49,6 +49,11 @@ metalock-contested-lp64,tests/regression/metalock-contested/metalock-contested-l
 # the run checks newlib and libstdc++ wide-character behaviour in both ABIs.
 abi-types-ilp32,tests/regression/abi-types/abi-types-ilp32.fake.self,60,RAN-CLEAN,ABI_TYPES_OK,ABI_TYPES_FAIL
 abi-types-lp64,tests/regression/abi-types/abi-types-lp64.fake.self,60,RAN-CLEAN,ABI_TYPES_OK,ABI_TYPES_FAIL
+# argv-abi: main gets lv2's arguments and environment intact in both ABIs (direct launch, then exitspawn with
+# distinct, empty and spaced arguments and two environment entries seen by a constructor); the ILP32 build also
+# checks the CRT's in-place narrowing of lv2's 64-bit address vectors directly.
+argv-abi-ilp32,tests/regression/argv-abi/argv-abi-ilp32.fake.self,60,RAN-CLEAN,ARGV_ABI_OK,ARGV_ABI_FAIL
+argv-abi-lp64,tests/regression/argv-abi/argv-abi-lp64.fake.self,60,RAN-CLEAN,ARGV_ABI_OK,ARGV_ABI_FAIL
 # altivec-strict-std guards AltiVec vector types, simdmath and vectormath
 # under a strict -std=c++17 (GCC patch 0042), and that std::vector and
 # bool keep their meaning beside the context-sensitive keywords.
