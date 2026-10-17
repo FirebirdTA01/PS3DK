@@ -391,12 +391,18 @@ int __wrap_pthread_mutex_lock(pthread_mutex_t *m)
 		// wrapped pthread call while holding), or release at the deadline and fail coverage.  The other readers
 		// start their lookups only once this is set, so each of their entries happens while the mutex is held.
 		g_ls_owner_holding.store(1);
+		// Wait for BOTH counts: a contender bumps its entry before it samples the holder count, so releasing on
+		// entries alone could let the last one sample after the unlock (review: codex).
+		auto arrived = [] {
+			int want = g_ls_expected.load();
+			return g_ls_entries[1].load() >= want && g_ls_entered_held[1].load() >= want - 1;
+		};
 		int ms = 0;
-		while (g_ls_entries[1].load() < g_ls_expected.load() && ms < 5000) {
+		while (!arrived() && ms < 5000) {
 			sys_timer_usleep(1000);
 			ms++;
 		}
-		if (g_ls_entries[1].load() < g_ls_expected.load())
+		if (!arrived())
 			g_ls_timeout.store(1);
 		// What the owner saw while it still held the mutex: the coverage witness.
 		g_ls_owner_saw_entries.store(g_ls_entries[1].load());
