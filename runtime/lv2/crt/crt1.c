@@ -174,7 +174,10 @@ static void __finalization_init(void)
  * 8i+4 .. 8i+7, big-endian).  Overlap: the copy runs forward and reads all
  * of entry i before writing slot i; slot i lies inside entry 0 for i == 0
  * and below entry i otherwise, so no entry is overwritten before it is
- * read.  Byte copies, so no uint64_t/uint32_t access to the same storage.
+ * read.  Byte copies, so no uint64_t/uint32_t access to the same storage,
+ * through a volatile pointer so that no optimisation level merges or
+ * vectorises them (GCC 16 -O3 otherwise emits 16-byte AltiVec loads that
+ * may read past the counted vector).
  * No heap, no syscalls: this runs before _init.  Entries 0 .. count only;
  * nothing past the counted vector is read.  Entry count must be the zero
  * terminator, or the count does not describe this vector: then nothing is
@@ -182,7 +185,7 @@ static void __finalization_init(void)
  * Not static: tests/regression/argv-abi exercises it directly. */
 int __lv2_narrow_ea_vector(void *vector, unsigned long count)
 {
-	unsigned char *v = vector;
+	volatile unsigned char *v = vector;
 	unsigned long i;
 	int k;
 
