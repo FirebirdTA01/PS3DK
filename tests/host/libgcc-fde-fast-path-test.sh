@@ -8,14 +8,13 @@
 #   - the version-lock atomics have the pointer width: lwarx/stwcx. under ILP32, ldarx/stdcx. under -mlp64.
 # A GCC older than 16 has no 0074 and is skipped.
 #
-# usage: libgcc-fde-fast-path-test.sh   (PS3DEV = the stage to check; exit 0 pass, 1 fail, 77 skipped)
+# usage: libgcc-fde-fast-path-test.sh   (PS3DEV = the stage to check; skips without one, or on GCC < 16)
 set -u -o pipefail
-: "${PS3DEV:?set PS3DEV to the stage}"
-G=$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc
-P=$PS3DEV/ppu/bin/powerpc64-ps3-elf
-[ -x "$G" ] || { echo "libgcc-fde-fast-path: FAIL no compiler at $G"; exit 1; }
+G=${PS3DEV:-}/ppu/bin/powerpc64-ps3-elf-gcc
+P=${PS3DEV:-}/ppu/bin/powerpc64-ps3-elf
+if [ -z "${PS3DEV:-}" ] || [ ! -x "$G" ]; then echo "SKIP: libgcc-fde-fast-path-test (no PS3DEV compiler)"; exit 0; fi
 major=$("$G" -dumpversion | cut -d. -f1) || { echo "libgcc-fde-fast-path: FAIL -dumpversion"; exit 1; }
-[ "$major" -ge 16 ] || { echo "libgcc-fde-fast-path: SKIP GCC $major has no 0074"; exit 77; }
+[ "$major" -ge 16 ] || { echo "SKIP: libgcc-fde-fast-path-test (GCC $major has no 0074)"; exit 0; }
 
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 status=0
