@@ -402,6 +402,11 @@ jobs:
       - name: Test the libgcc registry requires the runtime's heap-ready flag
         run: bash tests/host/libgcc-heap-ready-link-test.sh
 
+      # Skips without a PS3DEV stage carrying 0074; the two registry tests must
+      # fail when a tool prints valid output and then exits non-zero.
+      - name: Test the libgcc registry tests fail closed on lying tools
+        run: bash tests/host/libgcc-registry-tests-adversary-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class
