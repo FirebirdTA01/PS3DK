@@ -11,7 +11,7 @@
 #   3. the same copy with the symbol renamed away (an old CRT), placed and resolved the same way: the link FAILS
 #      naming __ps3dk_heap_ready;
 #   4. with OLD_CRT / OLD_CRT_LP64 = an older runtime's lv2-crt0.o (e.g. the 90c8e669 stage's): likewise.
-# Every tool's exit status is checked; NM / OBJCOPY may name other tools (the adversary test substitutes ones that
+# Every tool's exit status is checked; NM / OBJCOPY / REALPATH may name other tools (the adversary test substitutes ones that
 # print valid output and then fail - the whole test must fail).  Skips without PS3DEV or on a libgcc without 0074.
 set -u -o pipefail
 G=${PS3DEV:-}/ppu/bin/powerpc64-ps3-elf-g++
@@ -19,6 +19,7 @@ P=${PS3DEV:-}/ppu/bin/powerpc64-ps3-elf
 if [ -z "${PS3DEV:-}" ] || [ ! -x "$G" ]; then echo "SKIP: libgcc-heap-ready-link-test (no PS3DEV compiler)"; exit 0; fi
 NM=${NM:-$P-nm}
 OBJCOPY=${OBJCOPY:-$P-objcopy}
+REALPATH=${REALPATH:-realpath}
 # The driver's link spec reads PS3DK (the SDK library directory); default it to the stage's own SDK.
 export PS3DK=${PS3DK:-$PS3DEV/ps3dk}
 work=$(mktemp -d) || { echo "libgcc-heap-ready-link: FAIL mktemp"; exit 1; }
@@ -36,10 +37,14 @@ place() {
     local flag=$1 dir=$2 src=$3 md target resolved
     md=$("$G" $flag -print-multi-directory) || { echo "-print-multi-directory failed"; return 1; }
     if [ "$md" = . ]; then target=$dir/lv2-crt0.o; else target=$dir/$md/lv2-crt0.o; fi
-    mkdir -p "$(dirname "$target")" || { echo "mkdir failed"; return 1; }
+    mkdir -p "${target%/*}" || { echo "mkdir failed"; return 1; }
     cp "$src" "$target" || { echo "cp failed"; return 1; }
     resolved=$("$G" $flag -B"$dir/" -print-file-name=lv2-crt0.o) || { echo "-print-file-name failed"; return 1; }
-    [ "$(realpath "$resolved")" = "$(realpath "$target")" ] || { echo "the driver resolves lv2-crt0.o to $resolved, not $target"; return 1; }
+    local canon_r canon_t
+    canon_r=$("$REALPATH" "$resolved") || { echo "realpath of $resolved failed"; return 1; }
+    canon_t=$("$REALPATH" "$target") || { echo "realpath of $target failed"; return 1; }
+    [ -n "$canon_r" ] && [ -n "$canon_t" ] || { echo "realpath printed nothing"; return 1; }
+    [ "$canon_r" = "$canon_t" ] || { echo "the driver resolves lv2-crt0.o to $resolved, not $target"; return 1; }
 }
 
 for abi in ilp32 lp64; do
