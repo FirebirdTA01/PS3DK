@@ -102,10 +102,13 @@ extern int        __librt_sys_lwmutex_unlock_r(struct _reent *r,
 extern int main(int argc, const char *argv[]);
 
 /* Set once the heap (83) and the syscall table (84) are both ready.  libgcc's
- * unwinder registry (GCC 16, gcc-16.x 0074) reads it through a weak reference:
- * crtbegin registers the program's frames from _init before any prioritized
+ * unwinder registry (GCC 16, gcc-16.x 0074) references it strongly, so a CRT
+ * without it fails to link instead of reaching malloc too early.  crtbegin
+ * registers the program's frames from _init before any prioritized
  * constructor runs, so until this is set its b-tree takes nodes from a static
- * reserve instead of malloc. */
+ * reserve instead of malloc.  Zero until then; set once, with a release store,
+ * after malloc and the syscall/locking services it needs work (the registry
+ * reads it with acquire). */
 int __ps3dk_heap_ready;
 
 /* Constructor priority 84 (implementation range; the ladder is described in
