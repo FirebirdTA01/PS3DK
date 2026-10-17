@@ -19,8 +19,14 @@ liar() {
     echo "$work/$1"
 }
 
-# run <test> <env...>: the test's exit status
-run() { local t=$1; shift; env "$@" bash "$here/$t.sh" > "$work/out" 2>&1; echo $?; }
+# run <test> <env...>: the test's exit status.  Its complete raw output is kept in THIS test's log (indented, framed
+# by the case), so the site each adversary was caught at survives the temporary directory (review: codex).
+run() {
+    local t=$1 rc; shift
+    env "$@" bash "$here/$t.sh" > "$work/out" 2>&1; rc=$?
+    { printf '    --- %s %s (exit %d)\n' "$t" "$*" "$rc"; sed 's/^/    | /' "$work/out"; } >&2
+    echo $rc
+}
 
 for t in libgcc-fde-fast-path-test libgcc-heap-ready-link-test; do
     rc=$(run $t)

@@ -34,9 +34,16 @@ static void put32(unsigned char *p, uint32_t v)
 {
 	p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v;
 }
-static void build_frame(Synth &s)
+// Synthetic objects whose address did not fit the 4-byte encoding (reported by main: nothing prints pre-heap).
+static volatile int g_unrepresentable;
+static bool build_frame(Synth &s)
 {
 	// Same image as eh-fde-registry: CIE "zR" udata4, one FDE over s.code; no library calls (runs pre-heap).
+	// udata4 must describe the whole range, in both ABIs (review: codex): otherwise refuse to build the image.
+	if ((uintptr_t)s.code > 0xffffffffu - sizeof s.code) {
+		g_unrepresentable = g_unrepresentable + 1;
+		return false;
+	}
 	static const unsigned char cie[] = { 0, 0, 0, 0, 1, 'z', 'R', 0, 0x04, 0x78, 0x41, 0x01, 0x03,
 	                                     0x0c, 0x01, 0x00 };
 	unsigned char *f = s.frame;
@@ -50,6 +57,7 @@ static void build_frame(Synth &s)
 	put32(fde + 4, (uint32_t)(fde + 4 - f));
 	put32(fde + 8, (uint32_t)(uintptr_t)s.code);
 	put32(fde + 12, sizeof s.code);
+	return true;
 }
 
 #if defined(EH_FDE_MODE_EXHAUST) || defined(EH_FDE_MODE_EXHAUST_CTL)
@@ -62,14 +70,15 @@ enum { PRE_HEAP = 9 };
 #pragma GCC diagnostic ignored "-Wprio-ctor-dtor"
 __attribute__((constructor(82))) static void pre_heap_registrations()
 {
-	for (int i = 0; i < PRE_HEAP; i++) {
-		build_frame(g_s[i]);
-		__register_frame_info(g_s[i].frame, g_s[i].ob);
-	}
+	for (int i = 0; i < PRE_HEAP; i++)
+		if (build_frame(g_s[i]))
+			__register_frame_info(g_s[i].frame, g_s[i].ob);
 }
 #pragma GCC diagnostic pop
 int main()
 {
+	if (g_unrepresentable)
+		printf("EH_FDE_FAULT_ADDRESS_UNREPRESENTABLE %d\n", (int)g_unrepresentable);
 	printf("eh-fde-fault: %d pre-heap registrations\nEH_FDE_FAULT_SURVIVED\n", (int)PRE_HEAP);
 	fflush(stdout);
 	return 0;
@@ -82,10 +91,11 @@ int main()
 #ifdef EH_FDE_MODE_OOM
 	g_fail_malloc = 1;
 #endif
-	for (int i = 0; i < N; i++) {
-		build_frame(g_s[i]);
-		__register_frame_info(g_s[i].frame, g_s[i].ob);
-	}
+	for (int i = 0; i < N; i++)
+		if (build_frame(g_s[i]))
+			__register_frame_info(g_s[i].frame, g_s[i].ob);
+	if (g_unrepresentable)
+		printf("EH_FDE_FAULT_ADDRESS_UNREPRESENTABLE %d\n", (int)g_unrepresentable);
 	g_fail_malloc = 0;
 	printf("eh-fde-fault: %d registrations after the heap\nEH_FDE_FAULT_SURVIVED\n", (int)N);
 	fflush(stdout);

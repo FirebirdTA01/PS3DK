@@ -16,7 +16,9 @@
 //   5. growth      thirty more objects grow the trees past their root leaves (nodes from malloc once the heap is
 //                  ready), are deregistered, and registered again (reusing the released nodes);
 //   6. teardown    throws caught inside a static object's destructor and inside destructor functions, the last
-//                  of which prints the pass marker.
+//                  of which prints the pass marker;
+//   7. variants    __register_frame_info_bases / _table / _table_bases, __register_frame / __register_frame_table,
+//                  each found (with its bases where given) and removed through its matching deregistration.
 // Code that is still running is never deregistered: unloading live code is the caller's error, not a guarantee.
 //
 // The synthetic objects are hand-built .eh_frame images (one CIE, one FDE, absolute 4-byte pointers, so the
@@ -36,6 +38,13 @@ struct dwarf_eh_bases { void *tbase; void *dbase; void *func; };
 void __register_frame_info(const void *begin, void *ob);
 void *__deregister_frame_info(const void *begin);
 const void *_Unwind_Find_FDE(void *pc, struct dwarf_eh_bases *bases);
+void __register_frame_info_bases(const void *begin, void *ob, void *tbase, void *dbase);
+void *__deregister_frame_info_bases(const void *begin);
+void __register_frame_info_table(void *begin, void *ob);
+void __register_frame_info_table_bases(void *begin, void *ob, void *tbase, void *dbase);
+void __register_frame(void *begin);
+void __deregister_frame(void *begin);
+void __register_frame_table(void *begin);
 // crt1.c (runtime) and libgcc (gcc-16.x 0074) instrumentation; absent on other toolchains.
 extern int __ps3dk_heap_ready __attribute__((weak));
 extern unsigned __gcc_ps3_fde_boot_registrations __attribute__((weak));
@@ -92,7 +101,7 @@ struct Synth {
 	alignas(8) unsigned long long ob[16];    // libgcc's struct object lives here
 };
 enum { MANY = 30 };
-static Synth g_first, g_churn, g_many[MANY];
+static Synth g_first, g_churn, g_many[MANY], g_var[5];
 
 static void put32(unsigned char *p, uint32_t v)
 {
@@ -274,6 +283,50 @@ int main()
 		check(g_churn_bad.load() == 0, "register / look up / deregister churn of a separate range while others unwind");
 	}
 	check(found(g_first, 60), "the persistent object is still found after the churn");
+
+	// 7. registration variants (review: codex): each is found after registering - with the bases it was given -
+	//    and gone after deregistering through its matching route.
+	{
+		static void *table2[2], *table3[2], *table4[2];
+		char tb, db;
+		dwarf_eh_bases b{};
+		bool built = true;
+		for (auto &v : g_var)
+			built = build_frame(v) && built;
+		check(built, "variants: every synthetic range fits the udata4 encoding");
+		// a. _bases: the lookup reports the tbase/dbase the object was registered with
+		__register_frame_info_bases(g_var[0].frame, g_var[0].ob, &tb, &db);
+		bool ok = _Unwind_Find_FDE(g_var[0].code + 4, &b) != nullptr && b.func == (void *)g_var[0].code &&
+		          b.tbase == (void *)&tb && b.dbase == (void *)&db;
+		check(ok, "variant __register_frame_info_bases: found, with its tbase/dbase");
+		check(__deregister_frame_info_bases(g_var[0].frame) == (void *)g_var[0].ob && absent(g_var[0]),
+		      "variant __deregister_frame_info_bases: removed");
+		// b. _table: a null-terminated table of .eh_frame images, deregistered by the table's address
+		table2[0] = g_var[1].frame; table2[1] = nullptr;
+		__register_frame_info_table(table2, g_var[1].ob);
+		check(found(g_var[1], 8), "variant __register_frame_info_table: found");
+		check(__deregister_frame_info(table2) == (void *)g_var[1].ob && absent(g_var[1]),
+		      "variant table: deregistered by the table address, removed");
+		// c. _table_bases
+		table3[0] = g_var[2].frame; table3[1] = nullptr;
+		__register_frame_info_table_bases(table3, g_var[2].ob, &tb, &db);
+		b = dwarf_eh_bases{};
+		ok = _Unwind_Find_FDE(g_var[2].code + 4, &b) != nullptr && b.func == (void *)g_var[2].code && b.tbase == (void *)&tb;
+		check(ok, "variant __register_frame_info_table_bases: found, with its tbase");
+		check(__deregister_frame_info_bases(table3) == (void *)g_var[2].ob && absent(g_var[2]),
+		      "variant table_bases: removed");
+		// d. __register_frame: libgcc allocates the object; __deregister_frame frees it
+		__register_frame(g_var[3].frame);
+		check(found(g_var[3], 16), "variant __register_frame: found");
+		__deregister_frame(g_var[3].frame);
+		check(absent(g_var[3]), "variant __deregister_frame: removed (and its object freed)");
+		// e. __register_frame_table: allocated object over a table
+		table4[0] = g_var[4].frame; table4[1] = nullptr;
+		__register_frame_table(table4);
+		check(found(g_var[4], 20), "variant __register_frame_table: found");
+		__deregister_frame(table4);
+		check(absent(g_var[4]), "variant __register_frame_table + __deregister_frame: removed");
+	}
 
 	// 5. growth past the root leaves, release, reuse
 	unsigned heap0 = have_counters ? __atomic_load_n(&__gcc_ps3_fde_heap_nodes, __ATOMIC_ACQUIRE) : 0;
