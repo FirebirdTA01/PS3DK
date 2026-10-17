@@ -14,6 +14,8 @@ set -u -o pipefail
 G=${PS3DEV:-}/ppu/bin/powerpc64-ps3-elf-g++
 P=${PS3DEV:-}/ppu/bin/powerpc64-ps3-elf
 if [ -z "${PS3DEV:-}" ] || [ ! -x "$G" ]; then echo "SKIP: libgcc-heap-ready-link-test (no PS3DEV compiler)"; exit 0; fi
+# The driver's link spec reads PS3DK (the SDK library directory); default it to the stage's own SDK.
+export PS3DK=${PS3DK:-$PS3DEV/ps3dk}
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 status=0
 fail() { echo "libgcc-heap-ready-link: FAIL $*"; status=1; }
@@ -26,7 +28,9 @@ EOF
 for abi in ilp32 lp64; do
     flag=; [ $abi = lp64 ] && flag=-mlp64
     lib=$("$G" $flag -print-libgcc-file-name) || { fail "$abi: -print-libgcc-file-name"; continue; }
-    if ! "$P-nm" "$lib" 2>/dev/null | grep -q ' U __ps3dk_heap_ready$'; then
+    # nm's whole output first: grep -q under pipefail would SIGPIPE nm and read as "no reference"
+    libsyms=$("$P-nm" "$lib" 2>/dev/null) || { fail "$abi: nm $lib"; continue; }
+    if ! grep -q ' U __ps3dk_heap_ready$' <<<"$libsyms"; then
         echo "SKIP: libgcc-heap-ready-link-test $abi (libgcc does not require __ps3dk_heap_ready: no 0074 registry)"
         continue
     fi
@@ -35,7 +39,8 @@ for abi in ilp32 lp64; do
     d=$work/$abi; mkdir -p "$d/good" "$d/old"
     # 1. stage CRT
     if "$G" $flag -O2 "$work/t.cpp" -o "$d/stage.elf" > "$d/stage.log" 2>&1; then
-        "$P-nm" "$d/stage.elf" | grep -qE ' [BDGS] __ps3dk_heap_ready$' \
+        elfsyms=$("$P-nm" "$d/stage.elf" 2>/dev/null)
+        grep -qE ' [BDGS] __ps3dk_heap_ready$' <<<"$elfsyms" \
             && echo "libgcc-heap-ready-link: ok $abi stage CRT links and defines __ps3dk_heap_ready" \
             || fail "$abi: linked, but __ps3dk_heap_ready is not defined in the program"
     else

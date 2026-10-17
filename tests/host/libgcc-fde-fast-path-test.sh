@@ -30,7 +30,9 @@ for abi in ilp32 lp64; do
     o=$work/$abi/$member
     syms=$("$P-nm" "$o") || { fail "$abi: nm"; continue; }
     dis=$("$P-objdump" -d "$o") || { fail "$abi: objdump"; continue; }
-    has() { awk '{print $NF}' <<<"$syms" | grep -qx "$1"; }
+    names=$(awk '{print $NF}' <<<"$syms")
+    # no pipe into grep -q: under pipefail an early exit would SIGPIPE the writer and read as "absent"
+    has() { grep -qx "$1" <<<"$names"; }
     for s in registered_frames registered_objects; do has $s || fail "$abi: b-tree symbol $s missing (list path still built?)"; done
     for s in seen_objects unseen_objects; do has $s && fail "$abi: list-path symbol $s present"; done
     has release_registered_frames && fail "$abi: release_registered_frames present (trees destroyed at exit)"
