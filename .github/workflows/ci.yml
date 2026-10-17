@@ -367,6 +367,11 @@ jobs:
       - name: Test the PPU plain char, wchar_t and wint_t ABI
         run: bash tests/host/ppu-abi-char-wchar-test.sh
 
+      # Skips without a PS3DEV SPU compiler; spu gcc-9.5.0 0016 gives plain char,
+      # wchar_t and wint_t the reference SPU toolchain's types.
+      - name: Test the SPU plain char, wchar_t and wint_t ABI
+        run: bash tests/host/spu-abi-char-wchar-test.sh
+
       # check-release-tree.sh refuses .self/.elf/.sprx/.prx and CMake build
       # files under samples/ and tests/: a package ships them as source.
       - name: Test the release-tree guard against shipped build outputs
