@@ -1,0 +1,59 @@
+// MOSSBROOK member-array storage, case (c): the argument to wrap is itself a
+// struct-returning call.  The argument-inliner (compute) must NOT claim the
+// caller's destination `q` — the destination is bound to the exact
+// CallExpr that is being initialised, and compute is a DIFFERENT CallExpr
+// than the one in `Plan q = wrap(compute(t.xy));`.
+//
+// Pre-patch (the original v0.22.4): a single global name
+// `inlineStructReturnDest_` was used.  buildDeclStmt set it to `q` and
+// then buildExpr(initializer) was called, which inlines wrap; inside
+// wrap's body (runInlineStatements), the argument `compute(t.xy)` was a
+// call, so buildCallExpr inlined compute FIRST, and compute's frame was
+// the first to consume the global `inlineStructReturnDest_` — so compute
+// claimed `q`, install its own tracked storage on `q`, and set the
+// install flag.  When wrap's frame then tried to install, it found the
+// flag already consumed (cleared by the time it got to remap), so it
+// also installed — a double-install, or a silent wrong value if
+// compute's storage was left alone.
+//
+// Post-patch: structReturnDest_ is keyed by the exact CallExpr pointer.
+// buildDeclStmt records `q` under wrap's expr (the one the caller is
+// initialising).  compute's inlining looks up ITS OWN CallExpr and finds
+// nothing, so it does not claim `q`.  wrap's frame looks up its own
+// expr and finds `q` and installs correctly.
+//
+// The correct outcome for THIS specific shape: compute and wrap BOTH
+// return exactly ONE struct local each (compute returns p, wrap returns
+// r), so both could install.  compute cannot, because it has no claim.
+// wrap's `r` is built from `c.mirror[i]` where c is wrap's parameter;
+// wrap's parameter is a copy of compute's return, so it needs to come
+// FROM the array-storage-tracked storage.  Since there is no tracked
+// storage to copy (compute didn't install its own p into the parameter),
+// the member-array-storage guard fires.  A compiler that LET compute
+// claim q would install p's storage under q (wrong), and then wrap's
+// frame would install r's storage on top — silent wrong value.
+
+struct Plan { float2 mirror[2]; };
+
+Plan compute(float2 base)
+{
+    Plan p;
+    p.mirror[0] = base;
+    p.mirror[1] = base;
+    return p;
+}
+
+Plan wrap(Plan c)
+{
+    Plan r;
+    r.mirror[0] = c.mirror[0];
+    r.mirror[1] = c.mirror[1];
+    return r;
+}
+
+void main(float2 t, out float2 a : COLOR0, out float2 b : COLOR1)
+{
+    Plan q = wrap(compute(t));
+    a = q.mirror[0];
+    b = q.mirror[1];
+}

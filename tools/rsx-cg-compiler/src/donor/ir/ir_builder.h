@@ -160,6 +160,63 @@ private:
     std::vector<StmtNode*> inlineContinuation_;
     bool inlineContinuationRun_ = false;
     size_t inlineContinuationFrame_ = 0;   // blockDeclared_ depth the continuation was captured at
+    // A helper that RETURNED A STRUCT BY VALUE carries its tracked fields
+    // (the per-element arrays and leaf bindings of `return p;`) back to the
+    // caller instead of losing them at the scope restore below the call.
+    //
+    // `inlineStructReturnBaseSet_` is the CUMULATIVE set of struct-local
+    // names this inliner body RETURNS BY VALUE across every return statement
+    // it builds (single-`return p;` shape: one name; `if (c) return p;
+    // return r;` shape: two).  Each inlining frame snapshots the set before
+    // building its body, and takes the difference with the set after, to
+    // scope this body's base names.  A nested helper called from a body
+    // (e.g. `compute` inside `computePlan`) has its own snapshot boundary
+    // and never leaks into the outer callee's base set.
+    //
+    // The remap under the caller's destination is installed ONLY when this
+    // body's base set has exactly ONE name AND the frame built ZERO non-local
+    // returns (see inlineStructReturnNonlocalCount_) - the callee returns
+    // exactly one struct local, and no other arm (a call, a constructor, a
+    // member, a ternary, or a parameter) is being picked at run time.
+    // When the set has MORE THAN ONE name (a per-arm choice the runtime
+    // makes), each arm names a DIFFERENT local and the caller cannot know
+    // which arm the inliner's `result` corresponds to; in that case the
+    // inliner must NOT remap (leaving the caller's copy to fire the correct
+    // member-array-storage refusal), never installing one arm's storage on
+    // top of the other's.
+    //
+    // `structReturnDest_` binds the caller's destination local (`q` in
+    // `Plan q = compute(...)`) to the EXACT CallExpr being initialised.
+    // buildDeclStmt records it, keyed by the CallExpr it is evaluating; an
+    // inlining frame reads it only for its own `expr`.  A nested inliner -
+    // a helper called from a body, or a call that is an ARGUMENT (e.g.
+    // compute in `Plan q = wrap(compute(t))`, inlined while wrap's argument
+    // is being built, ahead of wrap's own frame) - looks its own CallExpr
+    // up and finds nothing, so it can never claim the caller's
+    // destination.  A single global name (the earlier design) would let
+    // that nested inliner run first, consume the name, and install ITS
+    // returned struct's storage onto the caller's `q` - a silent wrong
+    // value.
+    // `structReturnInstalled_` records which CallExprs had their struct
+    // return installed, so buildDeclStmt skips the caller-side copy for
+    // exactly that call.
+    // `inlineStructReturnNonlocalCount_` counts every struct return a frame
+    // builds that does NOT name a local (a call, a constructor, a member, a
+    // ternary, or a parameter).  Such a return adds no base name, yet it is
+    // one of "the struct returns this frame builds" - the arm the caller
+    // cannot see.  The remap is installed only when the frame built exactly
+    // ONE base-name return AND ZERO non-locals (inlineStructReturnBaseSet
+    // size one, this counter zero).  A mixed frame like `if (c) return mk(a);
+    // return r;` (one base name, one non-local) refuses instead of installing
+    // r on top of the mk(a) arm.
+    std::unordered_set<std::string> inlineStructReturnBaseSet_;
+    std::unordered_map<const CallExpr*, std::string> structReturnDest_;
+    std::unordered_set<const CallExpr*> structReturnInstalled_;
+    size_t inlineStructReturnNonlocalCount_ = 0;
+    // The blockDeclared_ index of the inlining frame being built: its callee's
+    // top-level block.  A struct return counts as returning a LOCAL only when
+    // that local is declared at this level (see the return statement).
+    size_t inlineFrameTopBlock_ = 0;
     // Declaration identity prevents a local shadow from using a global's initializer.
     std::unordered_set<const DeclNode*> globalDeclarations_;
     // Mutable statics whose initialiser the constant evaluator could not

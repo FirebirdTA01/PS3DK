@@ -1,0 +1,23 @@
+// MOSSBROOK member-array storage, case (b): single-return is the VALUE row.
+//
+// The helper returns EXACTLY ONE struct local (r).  Every read of that
+// local's tracked storage is coherent — there is no arm choice for the
+// caller to be confused about — so the inliner installs the tracked
+// storage under the caller's destination (`q`) and the caller-side copy
+// is skipped.
+//
+// Expected at t = (0.75, 0.25, -0.5, 0.125):
+//   q.mirror[0] = b = t.zw = (-0.5, 0.125)
+//   q.mirror[1] = b = t.zw = (-0.5, 0.125)
+//   result      = (-0.5, 0.125, -0.5, 0.125)
+struct Plan { float2 mirror[2]; };
+Plan pick_one(float2 a, float2 b, bool c)
+{
+    Plan r; r.mirror[0] = b; r.mirror[1] = b;
+    return r;
+}
+float4 main(float4 t : TEXCOORD0) : COLOR
+{
+    Plan q = pick_one(t.xy, t.zw, t.x > 0.5);
+    return float4(q.mirror[0], q.mirror[1]);
+}

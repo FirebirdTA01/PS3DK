@@ -1,0 +1,5 @@
+// POSITIVE: one top-level r returned early (t.xy) and again after it is rewritten (t.zw).
+// (review: codex, 4f103738)  Reference (sce-cgc 475): t.x=0.75 -> xyxy, t.x=0.25 -> zwzw
+struct Plan { float2 mirror[2]; };
+Plan pick(float4 t) { Plan r; r.mirror[0]=t.xy; r.mirror[1]=t.xy; if(t.x>0.5) return r; r.mirror[0]=t.zw; r.mirror[1]=t.zw; return r; }
+float4 main(float4 t:TEXCOORD0):COLOR { Plan q=pick(t); return float4(q.mirror[0],q.mirror[1]); }
