@@ -2,9 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, cg-compiler-dev]
+    # feat/gcc16 is the GCC 16 integration branch until the switchover
+    # release: its pushes run the same checks as main's.
+    branches: [main, cg-compiler-dev, feat/gcc16]
   pull_request:
-    branches: [main]
+    branches: [main, feat/gcc16]
 
 permissions:
   contents: read
