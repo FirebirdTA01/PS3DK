@@ -165,8 +165,66 @@ static void __finalization_init(void)
 	__librt_register_fini();
 }
 
-void _initialize(int argc, const char *argv[])
+#ifndef __LP64__
+/* lv2 starts a process with its argument vector as 64-bit effective
+ * addresses: entries 0 .. count-1 point at the strings and entry count is
+ * the NULL terminator.  Under ILP32 main's argv is an array of 32-bit
+ * pointers, so the vector is narrowed in place before anything reads it:
+ * slot i (bytes 4i .. 4i+3) receives the low word of entry i (bytes
+ * 8i+4 .. 8i+7, big-endian).  Overlap: the copy runs forward and reads all
+ * of entry i before writing slot i; slot i lies inside entry 0 for i == 0
+ * and below entry i otherwise, so no entry is overwritten before it is
+ * read.  Byte copies, so no uint64_t/uint32_t access to the same storage.
+ * No heap, no syscalls: this runs before _init.  Entries 0 .. count only;
+ * nothing past the counted vector is read.  Entry count must be the zero
+ * terminator, or the count does not describe this vector: then nothing is
+ * changed and -1 is returned (also for a NULL vector); 0 when narrowed.
+ * Not static: tests/regression/argv-abi exercises it directly. */
+int __lv2_narrow_ea_vector(void *vector, unsigned long count)
 {
+	unsigned char *v = vector;
+	unsigned long i;
+	int k;
+
+	if (!v)
+		return -1;
+	for (k = 0; k < 8; k++)
+		if (v[8 * count + k] != 0)
+			return -1;
+	for (i = 0; i <= count; i++) {
+		unsigned char lo0 = v[8 * i + 4], lo1 = v[8 * i + 5];
+		unsigned char lo2 = v[8 * i + 6], lo3 = v[8 * i + 7];
+
+		v[4 * i] = lo0;
+		v[4 * i + 1] = lo1;
+		v[4 * i + 2] = lo2;
+		v[4 * i + 3] = lo3;
+	}
+	return 0;
+}
+#endif
+
+extern char **environ;
+
+/* crt0.S passes lv2's entry registers through unchanged: r3 argc, r4 the
+ * argument vector, r5 the environment vector (64-bit EAs, NULL-terminated)
+ * and r6 its entry count.  Both vectors are narrowed under ILP32, and a
+ * non-NULL environment is published as environ before _init, so
+ * constructors already see it (libsysbase's default is an empty one). */
+void _initialize(int argc, const char *argv[], char *envp[],
+		 unsigned long envc)
+{
+	int env_ok;
+
+#ifndef __LP64__
+	if (argc >= 0)
+		__lv2_narrow_ea_vector(argv, (unsigned long)argc);
+	env_ok = __lv2_narrow_ea_vector(envp, envc) == 0;
+#else
+	env_ok = envp && envp[envc] == NULL;
+#endif
+	if (env_ok)
+		environ = envp;
 	_init();
 	int ret = main(argc, argv);
 	exit(ret);
