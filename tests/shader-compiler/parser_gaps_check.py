@@ -58,12 +58,11 @@ ROWS = {
     'uniform_swizzle_write': ('float4 K; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { K.xyz = 4; return float4(K.x * a.x, K.y, K.z, 1); }' + '\\n', [2.0, 4.0, 4.0, 1.0]),
     'flattened_array_initialisers': ('static const float2 s[2] = {0.25, 0.5, 0.75, 1.0}; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { const float2 o[3] = {0.5, 1.0, -0.25, 2.0, 0.125, -1.0}; float2 p[2] = {float2(1.0, 2.0), 3.0, 4.0}; return float4(o[1] + o[2] * a.x, p[1] + p[0]) + float4(s[1], s[0]); }' + '\\n', [0.5625, 2.5, 4.25, 6.5]),
     'inferred_array_to_sized_param': ('static const float cx[] = {1.0, 2.0, 3.0}; float g(float v[3]) { return v[2] + v[0]; } float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return float4(g(cx), a.x, 0, 1); }' + '\\n', [4.0, 0.5, 0.0, 1.0]),
+    # Commas in for clauses: the static expansion takes the induction from the
+    # operand the condition tests and runs j-- after each body (reference 0.75).
+    'comma_for_clauses': ('float4 main(float4 t : TEXCOORD0) : COLOR { float s = 0; int i, j; for (i = 0, j = 2; i < 2; i++, j--) s += t[i] * j; return float4(s, 0, 0, 1); }' + '\\n', [0.75, 0.0, 0.0, 1.0]),
 }
-# Named debt: commas in for clauses parse, but the static-loop unroller does
-# not recognise the induction (the reference accepts; value 0.75); it must
-# refuse, not miscompile.
 DEBT = {
-    'comma_for_clauses': ('float4 main(float4 t : TEXCOORD0) : COLOR { float s = 0; int i, j; for (i = 0, j = 2; i < 2; i++, j--) s += t[i] * j; return float4(s, 0, 0, 1); }' + '\\n', 'back-edge'),
     # The reference accepts these and steps i / k ONCE ((0.75, t.y, 1, 1) and
     # (1, 7, 3, 2)); the lane/row store builds its lvalue twice, so it
     # refuses side-effecting shapes until the lvalue is resolved once.
