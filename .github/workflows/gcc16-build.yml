@@ -183,6 +183,7 @@ jobs:
           check lv2-decls-cxx-linkage bash tests/host/lv2-decls-cxx-linkage-test.sh
           check cell-lr-spill         bash tests/host/cell-lr-spill-test.sh
           check ext-dce-default       bash tests/host/ext-dce-default-test.sh
+          check cxx-default-dialect   bash tests/host/cxx-default-dialect-test.sh
           check sdk-default-include   bash tests/host/sdk-default-include-test.sh
           check cxx20-header          sh tests/host/cxx20-header-test.sh
           check lv2-errno-values      bash tests/sdk/lv2-errno-values-test.sh --ps3dev "$PS3DEV"
