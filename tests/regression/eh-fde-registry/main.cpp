@@ -305,16 +305,24 @@ int main()
 		table2[0] = g_var[1].frame; table2[1] = nullptr;
 		__register_frame_info_table(table2, g_var[1].ob);
 		check(found(g_var[1], 8), "variant __register_frame_info_table: found");
-		check(__deregister_frame_info(table2) == (void *)g_var[1].ob && absent(g_var[1]),
-		      "variant table: deregistered by the table address, removed");
+		{
+			void *r = __deregister_frame_info(table2);
+			printf("eh-fde-registry: variant table: deregister returned %p, object %p\n", r, (void *)g_var[1].ob);
+			check(r == (void *)g_var[1].ob, "variant table: deregistered by the table address returns its object");
+			check(absent(g_var[1]), "variant table: removed");
+		}
 		// c. _table_bases
 		table3[0] = g_var[2].frame; table3[1] = nullptr;
 		__register_frame_info_table_bases(table3, g_var[2].ob, &tb, &db);
 		b = dwarf_eh_bases{};
 		ok = _Unwind_Find_FDE(g_var[2].code + 4, &b) != nullptr && b.func == (void *)g_var[2].code && b.tbase == (void *)&tb;
 		check(ok, "variant __register_frame_info_table_bases: found, with its tbase");
-		check(__deregister_frame_info_bases(table3) == (void *)g_var[2].ob && absent(g_var[2]),
-		      "variant table_bases: removed");
+		{
+			void *r = __deregister_frame_info_bases(table3);
+			printf("eh-fde-registry: variant table_bases: deregister returned %p, object %p\n", r, (void *)g_var[2].ob);
+			check(r == (void *)g_var[2].ob, "variant table_bases: deregister returns its object");
+			check(absent(g_var[2]), "variant table_bases: removed");
+		}
 		// d. __register_frame: libgcc allocates the object; __deregister_frame frees it
 		__register_frame(g_var[3].frame);
 		check(found(g_var[3], 16), "variant __register_frame: found");
