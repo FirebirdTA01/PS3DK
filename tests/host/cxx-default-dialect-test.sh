@@ -22,7 +22,9 @@
 # compilers (GCC 12 included) are expected to fail it.
 #
 # usage: cxx-default-dialect-test.sh [--ppu-gcc <powerpc64-ps3-elf-gcc>]
-#   With no argument: $PS3DEV's compiler; it skips without PS3DEV.  A named compiler never skips.
+#   With no argument: $PS3DEV's compiler; it skips without PS3DEV.  A named compiler never skips.  A Windows-hosted
+#   toolchain is tested from Git Bash with --ppu-gcc <bin>/powerpc64-ps3-elf-gcc (no .exe; cc1/cc1plus are matched
+#   with or without .exe).
 #   Exit 0 pass (or skip), 1 fail, 2 usage or missing input.
 set -u
 gcc=""
@@ -65,7 +67,7 @@ probe() {
 # expect <label> <want> <driver...> -- <flags...>
 expect() {
     local label=$1 want=$2; shift 2
-    if ! probe "$@"; then fail "$label: preprocessing failed or no __cplusplus: $(head -2 "$work/dm.err" | tr '\n' ' ')"; return; fi
+    if ! probe "$@"; then fail "$label: preprocessing failed or no single __cplusplus"; head -2 "$work/dm.err" | sed 's/^/    /'; return; fi
     [ "$got" = "$want" ] && ok "$label: $got" || fail "$label: got '$got', want '$want'"
 }
 
@@ -106,12 +108,21 @@ for abi in ilp32 lp64; do
     [ $rc -eq 1 ] && grep -q 'static assertion failed' "$work/c.log" && ok "$abi control: the gnu++17 static_assert fails under -std=gnu++20" \
         || { fail "$abi control: -std=gnu++20 compile gave status $rc without the static_assert diagnostic"; head -3 "$work/c.log" | sed 's/^/    /'; }
     # cc1plus's own command line (-###): -std=gnu++17 with no option, none added beside an explicit one.
-    "$gxx" "${af[@]}" -### -c "$work/d17.cc" > "$work/v.txt" 2>&1 || fail "$abi -### failed"
-    grep 'cc1plus' "$work/v.txt" | grep -q '"-std=gnu++17"' && ok "$abi -###: cc1plus gets -std=gnu++17" || fail "$abi -###: no -std=gnu++17 on cc1plus's line"
-    "$gxx" "${af[@]}" -std=c++20 -### -c "$work/d17.cc" > "$work/v.txt" 2>&1 || fail "$abi -### -std=c++20 failed"
-    l=$(grep 'cc1plus' "$work/v.txt")
-    printf '%s' "$l" | grep -q '"-std=c++20"' && ! printf '%s' "$l" | grep -q 'gnu++17' && ok "$abi -### -std=c++20: only the explicit dialect" \
-        || fail "$abi -### -std=c++20: cc1plus line is: $l"
+    # cc1plus_line <flags...>: -### succeeds and names cc1plus (cc1plus.exe on a Windows host) exactly once; the line is
+    # left in $work/cc1plus.txt.  Returns 1 otherwise, with the details on indented lines.
+    cc1plus_line() {
+        if ! "$gxx" "$@" -### -c "$work/d17.cc" > "$work/v.txt" 2>&1; then head -3 "$work/v.txt" | sed 's/^/    /'; return 1; fi
+        grep -E '/cc1plus(\.exe)?" ' "$work/v.txt" > "$work/cc1plus.txt"
+        [ "$(wc -l < "$work/cc1plus.txt")" -eq 1 ] || { sed 's/^/    /' "$work/cc1plus.txt"; return 1; }
+    }
+    if cc1plus_line "${af[@]}"; then
+        grep -q '"-std=gnu++17"' "$work/cc1plus.txt" && ok "$abi -###: cc1plus gets -std=gnu++17" \
+            || { fail "$abi -###: no -std=gnu++17 on cc1plus's line"; sed 's/^/    /' "$work/cc1plus.txt"; }
+    else fail "$abi -###: failed, or not exactly one cc1plus line"; fi
+    if cc1plus_line "${af[@]}" -std=c++20; then
+        grep -q '"-std=c++20"' "$work/cc1plus.txt" && ! grep -q 'gnu++17' "$work/cc1plus.txt" && ok "$abi -### -std=c++20: only the explicit dialect" \
+            || { fail "$abi -### -std=c++20: cc1plus's line is not the explicit dialect alone"; sed 's/^/    /' "$work/cc1plus.txt"; }
+    else fail "$abi -### -std=c++20: failed, or not exactly one cc1plus line"; fi
 
     # 3: preprocessed input.  char8_t is a keyword from C++20: as an identifier it compiles under gnu++17 only.
     printf 'int char8_t = 1;\nint g() { return char8_t; }\n' > "$work/pp.ii"
@@ -127,8 +138,16 @@ for abi in ilp32 lp64; do
     printf 'int c(void) { return 0; }\n' > "$work/c.c"
     "$gcc" "${af[@]}" -Werror -c "$work/c.c" -o "$work/c.o" > "$work/c.log" 2>&1 && ok "$abi C compile clean under -Werror" \
         || { fail "$abi C compile"; head -3 "$work/c.log" | sed 's/^/    /'; }
-    "$gcc" "${af[@]}" -### -c "$work/c.c" > "$work/v.txt" 2>&1 && ! grep 'cc1"* ' "$work/v.txt" | grep -q 'std=' && grep -q '/cc1"* ' "$work/v.txt" \
-        && ok "$abi C: cc1 gets no -std" || fail "$abi C: cc1's line has a -std option (or no cc1 line): $(grep 'cc1' "$work/v.txt")"
+    # cc1's line in -### (a Windows-hosted driver names it cc1.exe): exactly one, with no -std option.  Failure
+    # details go on indented lines, so FAIL lines carry no run-specific paths (the self-test compares them).
+    if "$gcc" "${af[@]}" -### -c "$work/c.c" > "$work/v.txt" 2>&1; then
+        grep -E '/cc1(\.exe)?" ' "$work/v.txt" > "$work/cc1.txt"
+        n=$(wc -l < "$work/cc1.txt")
+        if [ "$n" -eq 1 ] && ! grep -q -- '-std=' "$work/cc1.txt"; then ok "$abi C: cc1 gets no -std"
+        else fail "$abi C: $n cc1 line(s), want one without -std"; sed 's/^/    /' "$work/cc1.txt"; fi
+    else
+        fail "$abi C: -### failed"; head -3 "$work/v.txt" | sed 's/^/    /'
+    fi
     # The status is checked before the output is read, and __STDC_VERSION__ must be defined exactly once.
     if "$gcc" "${af[@]}" -E -dM -x c /dev/null > "$work/cdm.txt" 2> "$work/cdm.err"; then
         n=$(grep -c '^#define __STDC_VERSION__ ' "$work/cdm.txt")
