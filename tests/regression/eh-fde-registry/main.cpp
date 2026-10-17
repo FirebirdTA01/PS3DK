@@ -62,9 +62,12 @@ void *__wrap_malloc(size_t n)
 }
 
 static const char *g_failed = nullptr;
-static void check(bool ok, const char *name)
+static void check(bool ok, const char *name, long got = 0)
 {
-	printf("eh-fde-registry: %s %s\n", name, ok ? "ok" : "FAIL");
+	if (ok)
+		printf("eh-fde-registry: %s ok\n", name);
+	else
+		printf("eh-fde-registry: %s FAIL (got 0x%lx)\n", name, (unsigned long)got);
 	fflush(stdout);
 	if (!ok && !g_failed)
 		g_failed = name;
@@ -101,7 +104,7 @@ struct Synth {
 	alignas(8) unsigned long long ob[16];    // libgcc's struct object lives here
 };
 enum { MANY = 30 };
-static Synth g_first, g_churn, g_many[MANY], g_var[5];
+static Synth g_first, g_churn, g_many[MANY];
 
 static void put32(unsigned char *p, uint32_t v)
 {
@@ -212,6 +215,86 @@ __attribute__((destructor(101))) static void late_dtor_101()
 	fflush(stdout);
 }
 
+// --- 7. registration variants -----------------------------------------------------------------------
+static Synth g_v[7];
+static unsigned char g_empty[16];   // an empty .eh_frame: its first word is the zero terminator
+
+static bool found_with_bases(Synth &s, int off, void *tb, void *db)
+{
+	dwarf_eh_bases b{};
+	const void *f = _Unwind_Find_FDE(s.code + off, &b);
+	return f != nullptr && b.func == (void *)s.code && b.tbase == tb && b.dbase == db;
+}
+
+static void variants()
+{
+	bool built = true;
+	for (auto &v : g_v)
+		built = build_frame(v) && built;
+	check(built, "variants: every synthetic range fits the udata4 encoding");
+	if (!built)
+		return;   // never register an image whose address udata4 cannot hold
+	char tb, db;
+	static void *t_tab[2], *t_tabb[2], *t_alloc[2], *t_two[3];
+	for (int round = 1; round <= 2; round++) {
+		for (int looked = 0; looked <= 1; looked++) {
+			printf("eh-fde-registry: variants round %d, %s\n", round,
+			       looked ? "deregistered after a lookup (sorted)" : "deregistered with no lookup (unsorted)");
+			// a. __register_frame_info_table: a one-image table, removed by the table address
+			t_tab[0] = g_v[0].frame; t_tab[1] = nullptr;
+			__register_frame_info_table(t_tab, g_v[0].ob);
+			if (looked)
+				check(found(g_v[0], 8), "variant table: found");
+			void *r = __deregister_frame_info(t_tab);
+			check(r == (void *)g_v[0].ob, "variant table: deregistration returns its object", (long)(uintptr_t)r);
+			check(absent(g_v[0]), "variant table: removed");
+			// b. __register_frame_info_table_bases
+			t_tabb[0] = g_v[1].frame; t_tabb[1] = nullptr;
+			__register_frame_info_table_bases(t_tabb, g_v[1].ob, &tb, &db);
+			if (looked)
+				check(found_with_bases(g_v[1], 8, &tb, &db), "variant table_bases: found, with its tbase/dbase");
+			r = __deregister_frame_info_bases(t_tabb);
+			check(r == (void *)g_v[1].ob, "variant table_bases: deregistration returns its object", (long)(uintptr_t)r);
+			check(absent(g_v[1]), "variant table_bases: removed");
+			// c. __register_frame_table: libgcc allocates the object, __deregister_frame frees it
+			t_alloc[0] = g_v[2].frame; t_alloc[1] = nullptr;
+			__register_frame_table(t_alloc);
+			if (looked)
+				check(found(g_v[2], 8), "variant frame_table: found");
+			__deregister_frame(t_alloc);
+			check(absent(g_v[2]), "variant frame_table: removed by __deregister_frame");
+			// d. a two-image table: both images found, both gone after one deregistration
+			t_two[0] = g_v[3].frame; t_two[1] = g_v[4].frame; t_two[2] = nullptr;
+			__register_frame_info_table(t_two, g_v[3].ob);
+			if (looked)
+				check(found(g_v[3], 4) && found(g_v[4], 4), "variant two-image table: both images found");
+			r = __deregister_frame_info(t_two);
+			check(r == (void *)g_v[3].ob, "variant two-image table: deregistration returns its object", (long)(uintptr_t)r);
+			check(absent(g_v[3]) && absent(g_v[4]), "variant two-image table: both images removed");
+			// e. __register_frame_info_bases: the lookup reports the bases it was given
+			__register_frame_info_bases(g_v[5].frame, g_v[5].ob, &tb, &db);
+			if (looked)
+				check(found_with_bases(g_v[5], 4, &tb, &db), "variant info_bases: found, with its tbase/dbase");
+			r = __deregister_frame_info_bases(g_v[5].frame);
+			check(r == (void *)g_v[5].ob && absent(g_v[5]), "variant info_bases: removed");
+			// f. __register_frame: libgcc allocates the object, __deregister_frame frees it
+			__register_frame(g_v[6].frame);
+			if (looked)
+				check(found(g_v[6], 4), "variant register_frame: found");
+			__deregister_frame(g_v[6].frame);
+			check(absent(g_v[6]), "variant register_frame: removed by __deregister_frame");
+		}
+	}
+	// g. genuine empty .eh_frame images: registering is a no-op, deregistering returns NULL without asserting
+	memset(g_empty, 0, sizeof g_empty);
+	alignas(8) static unsigned long long empty_ob[16];
+	__register_frame_info(g_empty, empty_ob);
+	check(__deregister_frame_info(g_empty) == nullptr, "empty .eh_frame: register is a no-op, deregister returns NULL");
+	__register_frame(g_empty);
+	__deregister_frame(g_empty);
+	check(true, "empty .eh_frame: __register_frame / __deregister_frame are no-ops (no assertion)");
+}
+
 int main()
 {
 	// 1. bootstrap, read before this program allocates anything itself
@@ -284,57 +367,10 @@ int main()
 	}
 	check(found(g_first, 60), "the persistent object is still found after the churn");
 
-	// 7. registration variants (review: codex): each is found after registering - with the bases it was given -
-	//    and gone after deregistering through its matching route.
-	{
-		static void *table2[2], *table3[2], *table4[2];
-		char tb, db;
-		dwarf_eh_bases b{};
-		bool built = true;
-		for (auto &v : g_var)
-			built = build_frame(v) && built;
-		check(built, "variants: every synthetic range fits the udata4 encoding");
-		// a. _bases: the lookup reports the tbase/dbase the object was registered with
-		__register_frame_info_bases(g_var[0].frame, g_var[0].ob, &tb, &db);
-		bool ok = _Unwind_Find_FDE(g_var[0].code + 4, &b) != nullptr && b.func == (void *)g_var[0].code &&
-		          b.tbase == (void *)&tb && b.dbase == (void *)&db;
-		check(ok, "variant __register_frame_info_bases: found, with its tbase/dbase");
-		check(__deregister_frame_info_bases(g_var[0].frame) == (void *)g_var[0].ob && absent(g_var[0]),
-		      "variant __deregister_frame_info_bases: removed");
-		// b. _table: a null-terminated table of .eh_frame images, deregistered by the table's address
-		table2[0] = g_var[1].frame; table2[1] = nullptr;
-		__register_frame_info_table(table2, g_var[1].ob);
-		check(found(g_var[1], 8), "variant __register_frame_info_table: found");
-		{
-			void *r = __deregister_frame_info(table2);
-			printf("eh-fde-registry: variant table: deregister returned %p, object %p\n", r, (void *)g_var[1].ob);
-			check(r == (void *)g_var[1].ob, "variant table: deregistered by the table address returns its object");
-			check(absent(g_var[1]), "variant table: removed");
-		}
-		// c. _table_bases
-		table3[0] = g_var[2].frame; table3[1] = nullptr;
-		__register_frame_info_table_bases(table3, g_var[2].ob, &tb, &db);
-		b = dwarf_eh_bases{};
-		ok = _Unwind_Find_FDE(g_var[2].code + 4, &b) != nullptr && b.func == (void *)g_var[2].code && b.tbase == (void *)&tb;
-		check(ok, "variant __register_frame_info_table_bases: found, with its tbase");
-		{
-			void *r = __deregister_frame_info_bases(table3);
-			printf("eh-fde-registry: variant table_bases: deregister returned %p, object %p\n", r, (void *)g_var[2].ob);
-			check(r == (void *)g_var[2].ob, "variant table_bases: deregister returns its object");
-			check(absent(g_var[2]), "variant table_bases: removed");
-		}
-		// d. __register_frame: libgcc allocates the object; __deregister_frame frees it
-		__register_frame(g_var[3].frame);
-		check(found(g_var[3], 16), "variant __register_frame: found");
-		__deregister_frame(g_var[3].frame);
-		check(absent(g_var[3]), "variant __deregister_frame: removed (and its object freed)");
-		// e. __register_frame_table: allocated object over a table
-		table4[0] = g_var[4].frame; table4[1] = nullptr;
-		__register_frame_table(table4);
-		check(found(g_var[4], 20), "variant __register_frame_table: found");
-		__deregister_frame(table4);
-		check(absent(g_var[4]), "variant __register_frame_table + __deregister_frame: removed");
-	}
+	// 7. registration variants (review: codex).  Every route is checked twice per round - deregistered with no
+	//    lookup in between, and after a lookup (which sorts the object) - over two rounds (so re-registration after
+	//    removal is checked too), plus a two-image table and genuine empty-frame controls.
+	variants();
 
 	// 5. growth past the root leaves, release, reuse
 	unsigned heap0 = have_counters ? __atomic_load_n(&__gcc_ps3_fde_heap_nodes, __ATOMIC_ACQUIRE) : 0;
