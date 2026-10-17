@@ -273,3 +273,8 @@ ppu-compare-carry-ilp32-O3,tests/regression/ppu-compare-carry/ppu-compare-carry-
 ppu-compare-carry-lp64-O1,tests/regression/ppu-compare-carry/ppu-compare-carry-lp64-O1.fake.self,30,RAN-CLEAN,PPU_COMPARE_CARRY_OK,PPU_COMPARE_CARRY_FAIL|PPU_COMPARE_CARRY mismatch
 ppu-compare-carry-lp64-O2,tests/regression/ppu-compare-carry/ppu-compare-carry-lp64-O2.fake.self,30,RAN-CLEAN,PPU_COMPARE_CARRY_OK,PPU_COMPARE_CARRY_FAIL|PPU_COMPARE_CARRY mismatch
 ppu-compare-carry-lp64-O3,tests/regression/ppu-compare-carry/ppu-compare-carry-lp64-O3.fake.self,30,RAN-CLEAN,PPU_COMPARE_CARRY_OK,PPU_COMPARE_CARRY_FAIL|PPU_COMPARE_CARRY mismatch
+
+# errno-lv2 (GCC 16): the LV2 errno values (newlib 0020) as executed by the rebuilt runtime, both ABIs - pthread
+# trylock/timedlock/rwlock returns, libc errno producers, strerror, std::error_code/system_error, socket errors.
+errno-lv2-ilp32,tests/regression/errno-lv2/errno-lv2-ilp32.fake.self,60,RAN-CLEAN,ERRNO_LV2_OK,ERRNO_LV2_FAIL|terminate
+errno-lv2-lp64,tests/regression/errno-lv2/errno-lv2-lp64.fake.self,60,RAN-CLEAN,ERRNO_LV2_OK,ERRNO_LV2_FAIL|terminate

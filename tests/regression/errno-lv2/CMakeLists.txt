@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.20)
+project(errno_lv2_regression CXX)
+
+option(PS3TC_REGRESSION_HOST_STUB "Build with host stubs for CI syntax/link coverage" OFF)
+if(PS3TC_REGRESSION_HOST_STUB)
+    message(STATUS "errno-lv2: skipped under PS3TC_REGRESSION_HOST_STUB")
+    return()
+endif()
+# The LV2 errno values (newlib 0020) and the C++ thread library ship with GCC 16.
+if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+    message(STATUS "errno-lv2: skipped on GCC ${CMAKE_CXX_COMPILER_VERSION}")
+    return()
+endif()
+
+include(ps3-self)
+
+foreach(abi ilp32 lp64)
+    add_executable(errno-lv2-${abi} main.cpp)
+    target_compile_features(errno-lv2-${abi} PRIVATE cxx_std_17)
+    target_compile_options(errno-lv2-${abi} PRIVATE -O2 -Wall -Wextra)
+    target_link_libraries(errno-lv2-${abi} PRIVATE net_stub sysmodule_stub)
+    if(abi STREQUAL "lp64")
+        target_compile_options(errno-lv2-${abi} PRIVATE -mlp64)
+        target_link_options(errno-lv2-${abi} PRIVATE -mlp64)
+    endif()
+    ps3_add_self(errno-lv2-${abi})
+endforeach()

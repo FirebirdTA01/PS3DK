@@ -6,9 +6,11 @@
 # POSIX 16.  Either way the function must return the value a caller compares against BY NAME - the bug this test
 # was written for was pthread.c returning one value while <errno.h> gave callers the other.
 #
-# Preprocesses EBUSY with the target compiler (the installed headers decide), then disassembles
-# pthread_mutex_trylock in an installed librt.a and requires that it materialises THAT value and never the other
-# one (0x8001000A = lis rN,-32767 then ori rN,rN,10; 16 = li rN,16).
+# HEURISTIC, presence only (review: codex): preprocesses EBUSY with the target compiler (the installed headers
+# decide), then disassembles pthread_mutex_trylock in an installed librt.a and requires that it materialises THAT
+# value and never the other one (0x8001000A = lis rN,-32767 then ori rN,rN,10; 16 = li rN,16).  It proves which
+# constants the function builds, not what it returns: the executed evidence is the errno-lv2 regression row (a
+# held mutex's trylock returning the target EBUSY, the EDEADLK fold included, both ABIs).
 # Optional $1: the librt.a to test (default: $PS3DK/ppu/lib/librt.a).
 set -euo pipefail
 
