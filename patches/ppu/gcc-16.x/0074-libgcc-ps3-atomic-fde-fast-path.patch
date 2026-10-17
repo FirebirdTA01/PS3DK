@@ -1,0 +1,119 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] libgcc: lock-free FDE lookup on powerpc64-ps3-elf
+
+EXPERIMENTAL CANDIDATE (not for landing): the GCC 16 thread layer made
+C++ throw/catch ~1.5x slower on the PS3.  With --enable-threads=posix,
+_Unwind_Find_FDE takes object_mutex on every call, and on this target
+that is pthread_mutex_lock -> sys_mutex_lock: RPCS3 counts 9 lock and 9
+unlock calls per throw in a two-frame unwind, none with
+--enable-threads=single.
+
+unwind-dw2-fde.c already has a lock-free lookup (a b-tree with optimistic
+version locks, ATOMIC_FDE_FAST_PATH), but enables it only when
+unwind-dw2-fde-dip.c includes the file.  This target has no
+dl_iterate_phdr and builds the file directly, so it never got it.
+t-ps3-unwind asks for it here.
+
+Two consequences of using it for a target whose own program frames are
+registered, not found through dl_iterate_phdr:
+ - release_registered_frames, a destructor, destroys the trees; after it
+   a throw in a later destructor finds no FDE.  The trees are kept until
+   the process ends instead (ATOMIC_FDE_KEEP_TREES); deregistration keeps
+   working.
+ - a node allocation failure was stored through a null pointer; it now
+   aborts.  The list path it replaces never allocated at registration.
+
+--- a/libgcc/config.host
++++ b/libgcc/config.host
+@@ -1269,7 +1269,7 @@
+ 	extra_parts="$extra_parts crtbeginS.o crtendS.o crtbeginT.o ecrti.o ecrtn.o ncrti.o ncrtn.o"
+ 	;;
+ powerpc64-ps3-elf*)
+-	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff rs6000/t-ps3-gthreads"
++	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff rs6000/t-ps3-gthreads rs6000/t-ps3-unwind"
+ 	;;
+ powerpc64-ps3-kernel-elf*)
+ 	tmake_file="${tmake_file} rs6000/t-savresfgpr rs6000/t-ps3-crtstuff"
+--- /dev/null
++++ b/libgcc/config/rs6000/t-ps3-unwind
+@@ -0,0 +1,28 @@
++# libgcc unwinder configuration for the PS3 LV2 PPU target.
++#
++# Copyright (C) 2026 PS3DK toolchain contributors.
++#
++# This file is part of GCC.
++#
++# GCC is free software; you can redistribute it and/or modify it under
++# the terms of the GNU General Public License as published by the Free
++# Software Foundation; either version 3, or (at your option) any later
++# version.
++#
++# GCC is distributed in the hope that it will be useful, but WITHOUT
++# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
++# License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with GCC; see the file COPYING3.  If not see
++# <http://www.gnu.org/licenses/>.
++#
++# This target has no dl_iterate_phdr: every object's unwind info is
++# registered (crtbegin.o, __register_frame*) and found through
++# unwind-dw2-fde.c alone.  That file enables its lock-free b-tree lookup
++# (ATOMIC_FDE_FAST_PATH) only when unwind-dw2-fde-dip.c includes it, so
++# here every _Unwind_Find_FDE took object_mutex - with
++# --enable-threads=posix a real lock per frame per unwind phase.  Ask for
++# the b-tree in the direct build too (unwind-dw2-fde.c).
++HOST_LIBGCC2_CFLAGS += -DLIBGCC_PS3_ATOMIC_FDE_FAST_PATH=1
+--- a/libgcc/unwind-dw2-btree.h
++++ b/libgcc/unwind-dw2-btree.h
+@@ -402,6 +402,11 @@
+       // No free node available, allocate a new one.
+       struct btree_node *new_node
+ 	= (struct btree_node *) malloc (sizeof (struct btree_node));
++      // Out of memory: the frames could not be registered, and an
++      // unregistered frame makes every later throw through it terminate.
++      // Stop here rather than store through a null node.
++      if (!new_node)
++	abort ();
+       // Initialize the node in locked state.
+       version_lock_initialize_locked_exclusive (&new_node->version_lock);
+       new_node->entry_count = 0;
+--- a/libgcc/unwind-dw2-fde.c
++++ b/libgcc/unwind-dw2-fde.c
+@@ -35,6 +35,17 @@
+ #include "unwind-pe.h"
+ #include "unwind-dw2-fde.h"
+ #include "gthr.h"
++/* A target with no dl_iterate_phdr registers every object here, so the
++   b-tree lookup is wanted in this direct build as well (t-ps3-unwind).
++   Its trees then hold the program's own frames: they are kept until the
++   process ends instead of being destroyed by a destructor, after which a
++   throw from a later destructor would find no FDE.  */
++#if defined(LIBGCC_PS3_ATOMIC_FDE_FAST_PATH) \
++    && (defined(__GTHREAD_MUTEX_INIT) || defined(__GTHREAD_MUTEX_INIT_FUNCTION)) \
++    && defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
++#define ATOMIC_FDE_FAST_PATH 1
++#define ATOMIC_FDE_KEEP_TREES 1
++#endif
+ #else
+ #if (defined(__GTHREAD_MUTEX_INIT) || defined(__GTHREAD_MUTEX_INIT_FUNCTION)) \
+     && defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
+@@ -49,6 +60,9 @@
+ 
+ static struct btree registered_frames;
+ static struct btree registered_objects;
++#ifdef ATOMIC_FDE_KEEP_TREES
++static const bool in_shutdown = false;
++#else
+ static bool in_shutdown;
+ 
+ static void
+@@ -62,6 +76,7 @@
+   btree_destroy (&registered_objects);
+   in_shutdown = true;
+ }
++#endif
+ 
+ static void
+ get_pc_range (const struct object *ob, uintptr_type *range);
