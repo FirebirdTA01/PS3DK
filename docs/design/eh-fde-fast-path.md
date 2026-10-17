@@ -21,7 +21,7 @@ frames through crtbegin instead, so the fast path is off.
 ## What changes
 
 gcc-16.x patch 0074 turns the fast path on for `powerpc64-ps3-elf`
-(`rs6000/t-ps3-unwind`, `-DLIBGCC_PS3_ATOMIC_FDE_FAST_PATH`), with three
+(`rs6000/t-ps3-unwind`, `-DLIBGCC_PS3_ATOMIC_FDE_FAST_PATH`), with four
 target adaptations:
 
 - **Startup reserve.** crtbegin registers the program's frames from `_init`,
@@ -48,7 +48,9 @@ Measured with 0074 on the same probe (RPCS3, both ABIs): the first throw makes
 1 lock and 1 unlock call, and the throws after it make none. That the first
 lock is the lazy sort of a newly looked-up object comes from the source, not
 from attributing the call to its caller. A frame object the program reaches
-for the first time later is sorted then, under the same mutex, once.
+for the first time later is sorted then, under the same mutex. A successful
+sort is published to later lookups. If the sort cannot allocate its array,
+the object stays unsorted, and a later lookup tries again.
 
 gcc-16.x patch 0077 fixes table deregistration under `-mlp64`, independent of
 0074. `__deregister_frame_info_bases` treated a BEGIN whose first 32-bit word
