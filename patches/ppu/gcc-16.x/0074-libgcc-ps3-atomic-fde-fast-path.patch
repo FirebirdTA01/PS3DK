@@ -14,14 +14,24 @@ unwind-dw2-fde-dip.c includes the file.  This target has no
 dl_iterate_phdr and builds the file directly, so it never got it.
 t-ps3-unwind asks for it here.
 
-Two consequences of using it for a target whose own program frames are
-registered, not found through dl_iterate_phdr:
- - release_registered_frames, a destructor, destroys the trees; after it
-   a throw in a later destructor finds no FDE.  The trees are kept until
-   the process ends instead (ATOMIC_FDE_KEEP_TREES); deregistration keeps
-   working.
- - a node allocation failure was stored through a null pointer; it now
-   aborts.  The list path it replaces never allocated at registration.
+What this target needs on top of the upstream machinery, all inside the
+target block (ATOMIC_FDE_KEEP_TREES / ATOMIC_FDE_BOOT_RESERVE):
+ - the trees hold the program's own frames, so release_registered_frames
+   (a destructor) is dropped and the trees live to process end; a throw
+   in a later destructor still finds its FDE, deregistration still works.
+ - crtbegin registers the program from _init BEFORE the prioritized
+   constructors that create the heap (83) and the syscall table (84).
+   Until the runtime sets __ps3dk_heap_ready (crt1.c, at the end of 84),
+   nodes come from a static reserve of 2 (one root leaf per tree: the
+   measured demand of that one registration).  Reserve nodes are never
+   freed.  Exhausting the reserve before the heap is ready traps; it never
+   falls through to a malloc that cannot work yet.
+ - after that, a failed node malloc aborts instead of storing through a
+   null node.
+ - allocation-free counters for tests: __gcc_ps3_fde_boot_registrations,
+   __gcc_ps3_fde_boot_nodes (reserve high-water), __gcc_ps3_fde_heap_nodes.
+The trap and the abort are this target's contract, open for review.
+Other targets are unchanged.
 
 --- a/libgcc/config.host
 +++ b/libgcc/config.host
@@ -67,21 +77,105 @@ registered, not found through dl_iterate_phdr:
 +HOST_LIBGCC2_CFLAGS += -DLIBGCC_PS3_ATOMIC_FDE_FAST_PATH=1
 --- a/libgcc/unwind-dw2-btree.h
 +++ b/libgcc/unwind-dw2-btree.h
-@@ -402,6 +402,11 @@
+@@ -345,6 +345,76 @@
+   t->root_lock.version_lock = 0;
+ };
+ 
++#ifdef ATOMIC_FDE_BOOT_RESERVE
++/* A target whose startup code registers frames before the heap exists
++   (crtbegin from _init, ahead of the prioritized constructors that create
++   the heap) takes its first nodes from a static reserve until the runtime
++   sets __ps3dk_heap_ready.  Reserve nodes are never freed.  Running out of
++   the reserve before the heap is ready executes a trap: it is never covered
++   by a malloc that cannot work yet.  After the heap is ready, a failed
++   malloc aborts instead of storing through a null node.  Both outcomes are
++   this target's contract, not upstream behaviour.  Without the runtime's
++   flag (no weak definition) the heap is taken to be ready.  */
++extern int __ps3dk_heap_ready __attribute__ ((weak));
++static struct btree_node btree_boot_reserve[ATOMIC_FDE_BOOT_RESERVE];
++/* Reserve nodes handed out (high-water), and nodes taken from malloc (tests).  */
++unsigned __gcc_ps3_fde_boot_nodes;
++unsigned __gcc_ps3_fde_heap_nodes;
++
++static inline bool
++btree_heap_ready (void)
++{
++  return !&__ps3dk_heap_ready
++	 || __atomic_load_n (&__ps3dk_heap_ready, __ATOMIC_ACQUIRE);
++}
++
++static inline bool
++btree_node_is_boot (const struct btree_node *n)
++{
++  return n >= btree_boot_reserve
++	 && n < btree_boot_reserve + ATOMIC_FDE_BOOT_RESERVE;
++}
++
++static struct btree_node *
++btree_new_node (void)
++{
++  if (!btree_heap_ready ())
++    {
++      unsigned i = __atomic_fetch_add (&__gcc_ps3_fde_boot_nodes, 1,
++				       __ATOMIC_RELAXED);
++      if (i >= ATOMIC_FDE_BOOT_RESERVE)
++	__builtin_trap ();
++      return &btree_boot_reserve[i];
++    }
++  struct btree_node *n
++    = (struct btree_node *) malloc (sizeof (struct btree_node));
++  if (!n)
++    abort ();
++  __atomic_fetch_add (&__gcc_ps3_fde_heap_nodes, 1, __ATOMIC_RELAXED);
++  return n;
++}
++
++// Free a node's memory; a reserve node is never freed.
++static inline void
++btree_free_node (struct btree_node *n)
++{
++  if (!btree_node_is_boot (n))
++    free (n);
++}
++#else
++static inline struct btree_node *
++btree_new_node (void)
++{
++  return (struct btree_node *) malloc (sizeof (struct btree_node));
++}
++
++static inline void
++btree_free_node (struct btree_node *n)
++{
++  free (n);
++}
++#endif
++
+ static void
+ btree_release_tree_recursively (struct btree *t, struct btree_node *n);
+ 
+@@ -362,7 +432,7 @@
+   while (t->free_list)
+     {
+       struct btree_node *next = t->free_list->content.children[0].child;
+-      free (t->free_list);
++      btree_free_node (t->free_list);
+       t->free_list = next;
+     }
+ }
+@@ -400,8 +470,7 @@
+ 	}
+ 
        // No free node available, allocate a new one.
-       struct btree_node *new_node
- 	= (struct btree_node *) malloc (sizeof (struct btree_node));
-+      // Out of memory: the frames could not be registered, and an
-+      // unregistered frame makes every later throw through it terminate.
-+      // Stop here rather than store through a null node.
-+      if (!new_node)
-+	abort ();
+-      struct btree_node *new_node
+-	= (struct btree_node *) malloc (sizeof (struct btree_node));
++      struct btree_node *new_node = btree_new_node ();
        // Initialize the node in locked state.
        version_lock_initialize_locked_exclusive (&new_node->version_lock);
        new_node->entry_count = 0;
 --- a/libgcc/unwind-dw2-fde.c
 +++ b/libgcc/unwind-dw2-fde.c
-@@ -35,6 +35,17 @@
+@@ -35,6 +35,20 @@
  #include "unwind-pe.h"
  #include "unwind-dw2-fde.h"
  #include "gthr.h"
@@ -95,11 +189,14 @@ registered, not found through dl_iterate_phdr:
 +    && defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
 +#define ATOMIC_FDE_FAST_PATH 1
 +#define ATOMIC_FDE_KEEP_TREES 1
++/* crtbegin registers the program from _init, before the heap exists: its
++   two root leaves (one per tree) come from a static reserve.  */
++#define ATOMIC_FDE_BOOT_RESERVE 2
 +#endif
  #else
  #if (defined(__GTHREAD_MUTEX_INIT) || defined(__GTHREAD_MUTEX_INIT_FUNCTION)) \
      && defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4)
-@@ -49,6 +60,9 @@
+@@ -49,6 +63,9 @@
  
  static struct btree registered_frames;
  static struct btree registered_objects;
@@ -109,7 +206,7 @@ registered, not found through dl_iterate_phdr:
  static bool in_shutdown;
  
  static void
-@@ -62,6 +76,7 @@
+@@ -62,6 +79,7 @@
    btree_destroy (&registered_objects);
    in_shutdown = true;
  }
@@ -117,3 +214,22 @@ registered, not found through dl_iterate_phdr:
  
  static void
  get_pc_range (const struct object *ob, uintptr_type *range);
+@@ -106,10 +124,18 @@
+ #endif
+ 
+ #ifdef ATOMIC_FDE_FAST_PATH
++#ifdef ATOMIC_FDE_BOOT_RESERVE
++/* Registrations made before the runtime reported the heap ready (tests).  */
++unsigned __gcc_ps3_fde_boot_registrations;
++#endif
+ // Register the pc range for a given object in the lookup structure.
+ static void
+ register_pc_range_for_object (uintptr_type begin, struct object *ob)
+ {
++#ifdef ATOMIC_FDE_BOOT_RESERVE
++  if (!btree_heap_ready ())
++    __atomic_fetch_add (&__gcc_ps3_fde_boot_registrations, 1, __ATOMIC_RELAXED);
++#endif
+   // Register the object itself to know the base pointer on deregistration.
+   btree_insert (&registered_objects, begin, 1, ob);
+ 
