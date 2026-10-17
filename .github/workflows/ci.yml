@@ -344,6 +344,11 @@ jobs:
       - name: Test the ILP32 ext-dce default
         run: bash tests/host/ext-dce-default-test.sh
 
+      # Skips without PS3DEV; gcc-16.x 0078 makes C++ default to GNU C++17
+      # with every explicit dialect authoritative (both ABIs, g++ and gcc).
+      - name: Test the C++ default dialect
+        run: bash tests/host/cxx-default-dialect-test.sh
+
       # Skips without PS3DEV or on a newlib without the lv2 declarations; every
       # lv2 POSIX function the headers declare has C linkage from C++.
       - name: Test the lv2 declarations' C++ linkage

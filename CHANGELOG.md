@@ -72,6 +72,12 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **C++ defaults to GNU C++17 (GCC 16).**  With no `-std=` option and no
+  `-ansi`, the PPU compiler builds C++ as `-std=gnu++17`, so `__cplusplus`
+  is `201703L` as with GCC 12.4.  This holds for plain Makefiles, autotools
+  and CMake alike.  C++20 and C++23 are one option away: any explicit
+  `-std=`, or a CMake `CMAKE_CXX_STANDARD`, is used as given.  C is
+  unchanged.  libstdc++ is built in the dialects it was built in before.
 - **The SDK headers are on the compiler's default include path (GCC 16).**
   The PPU driver adds `-isystem <SDK>/ppu/include` unless `-nostdinc` is
   given, so the SDK's own headers are available without extra flags.

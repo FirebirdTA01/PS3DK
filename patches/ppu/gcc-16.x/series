@@ -52,3 +52,5 @@
 0073-rs6000-cell-lr-ctr-move-cost.patch
 0075-rs6000-cell64lv2-char-signed-ilp32.patch
 0076-cell64lv2-wchar-16bit-lp64.patch
+0078-cell64lv2-cxx-default-gnu17.patch
+0079-libsupcxx-explicit-gnu20.patch
