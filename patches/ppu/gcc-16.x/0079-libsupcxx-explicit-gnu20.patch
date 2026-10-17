@@ -4,14 +4,26 @@ Subject: [PATCH] libsupc++: select GNU C++20 explicitly
 libsupc++ is the one libstdc++ directory whose sources carry no -std
 option: they are built in the compiler's default dialect, GNU C++20 for
 GCC 16.  0078 makes this target's C++ default GNU C++17, which would
-silently move all of libsupc++ (and atomicity.cc) to a dialect GCC 16
-never builds it in.  Select GNU C++20 at the head of AM_CXXFLAGS, as
-src/c++98 does for its standard, so the library is compiled exactly as
-before and any later per-file, CXXFLAGS or EXTRA_CXX_FLAGS -std option
-still wins.
+silently move all of libsupc++ to a dialect GCC 16 never builds it in.
+Select GNU C++20 at the head of AM_CXXFLAGS, as src/c++98 does for its
+standard, so the library is compiled exactly as before and any later
+per-file, CXXFLAGS or EXTRA_CXX_FLAGS -std option still wins.
+
+atomicity.lo is the exception: its rule compiles the C++ source
+atomicity.cc with the C compile command (LTCOMPILE), which has no
+AM_CXXFLAGS, so the rule itself selects GNU C++20.
 
 --- a/libstdc++-v3/libsupc++/Makefile.am
 +++ b/libstdc++-v3/libsupc++/Makefile.am
+@@ -133,7 +133,7 @@
+ 	$(LN_S) ${atomicity_file} ./atomicity.cc || true
+ 
+ atomicity.lo: atomicity.cc
+-	$(LTCOMPILE) -fwrapv -c $<
++	$(LTCOMPILE) -std=gnu++20 -fwrapv -c $<
+ atomicity.o: atomicity.cc
+ 	$(CXXCOMPILE) -fwrapv -c $<
+ 
 @@ -151,6 +151,7 @@
  # OPTIMIZE_CXXFLAGS on the compile line so that -O2 can be overridden
  # as the occasion call for it.
@@ -30,3 +42,12 @@ still wins.
  	$(glibcxx_lt_pic_flag) $(glibcxx_compiler_shared_flag) \
  	$(XTEMPLATE_FLAGS) $(FREESTANDING_FLAGS) $(EH_POOL_FLAGS) \
  	$(WARN_CXXFLAGS) $(OPTIMIZE_CXXFLAGS)  $(CONFIG_CXXFLAGS)
+@@ -977,7 +978,7 @@
+ 	$(LN_S) ${atomicity_file} ./atomicity.cc || true
+ 
+ atomicity.lo: atomicity.cc
+-	$(LTCOMPILE) -fwrapv -c $<
++	$(LTCOMPILE) -std=gnu++20 -fwrapv -c $<
+ atomicity.o: atomicity.cc
+ 	$(CXXCOMPILE) -fwrapv -c $<
+ 
