@@ -402,6 +402,11 @@ jobs:
       - name: Test the release-tree guard against shipped build outputs
         run: bash tests/host/release-tree-build-outputs-test.sh
 
+      # Skips without PS3DEV or on GCC 12; gcc-16.x 0074 gives the installed
+      # libgcc the lock-free FDE registry in both multilibs.
+      - name: Test the libgcc FDE registry is the lock-free b-tree
+        run: bash tests/host/libgcc-fde-fast-path-test.sh
+
       # Skips without PS3DEV; the ppu-asm.h statement-expression macros must
       # expand in C++17 without -Wregister (t_8d28bc61).
       - name: Test ppu-asm.h macros carry no register storage class
