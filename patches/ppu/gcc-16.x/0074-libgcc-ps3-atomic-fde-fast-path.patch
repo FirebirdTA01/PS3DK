@@ -31,6 +31,10 @@ target block (ATOMIC_FDE_KEEP_TREES / ATOMIC_FDE_BOOT_RESERVE):
    it and sets it once malloc works).
  - after that, a failed node malloc aborts instead of storing through a
    null node.
+ - get_pc_range of a sorted TABLE registration walks orig_data as the
+   table of images (upstream classifies it as one image, so deregistering
+   a table after its first lookup left its frames registered over the
+   freed sort data).
  - allocation-free counters for tests: __gcc_ps3_fde_boot_registrations,
    __gcc_ps3_fde_boot_nodes (reserve high-water), __gcc_ps3_fde_heap_nodes.
 The trap and the abort are this target's contract, open for review.
@@ -244,3 +248,24 @@ Other targets are unchanged.
    // Register the object itself to know the base pointer on deregistration.
    btree_insert (&registered_objects, begin, 1, ob);
  
+@@ -951,6 +978,20 @@
+   // classify_object_over_fdes does not modify ob in query mode.
+   struct object *ncob = (struct object *) (uintptr_type) ob;
+   range[0] = range[1] = 0;
++#ifdef ATOMIC_FDE_KEEP_TREES
++  /* A sorted object keeps the address it was registered with in
++     orig_data: for a table registration (from_array) that is the table of
++     .eh_frame images, which must be walked like the unsorted table below,
++     not classified as one image (that range is garbage, so deregistration
++     would leave the frames registered over freed sort data).  */
++  if (ob->s.b.sorted && ob->s.b.from_array)
++    {
++      fde **p = (fde **) (uintptr_type) ob->u.sort->orig_data;
++      for (; *p; ++p)
++	classify_object_over_fdes (ncob, *p, range);
++    }
++  else
++#endif
+   if (ob->s.b.sorted)
+     {
+       classify_object_over_fdes (ncob, ob->u.sort->orig_data, range);
