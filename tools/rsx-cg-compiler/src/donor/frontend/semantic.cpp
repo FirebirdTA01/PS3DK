@@ -208,11 +208,26 @@ void SemanticAnalyzer::collectDeclarations(TranslationUnit& unit)
             break;
         case DeclKind::Typedef:
         {
-            const auto* alias = static_cast<TypedefDecl*>(decl.get());
+            auto* alias = static_cast<TypedefDecl*>(decl.get());
             const CgType underlying = resolveType(alias->aliasedType.get());
-            if (underlying.isError())
+            // A forward `typedef struct Foo Bar;` whose Foo is defined later
+            // (or never, and never used) does not resolve yet: every use was
+            // handed a copy that names Foo, so it resolves at the use, and an
+            // undefined Foo refuses there as an unknown type.
+            const bool forwardTag = underlying.isError() && alias->aliasedType &&
+                                    alias->aliasedType->baseType == BaseType::Struct &&
+                                    !alias->aliasedType->structName.empty();
+            if (underlying.isError() && !forwardTag)
+            {
                 error(alias->loc, "unknown type in typedef '" + alias->name + "'");
-            else if (!symbols_.addType(alias->name, underlying))
+                break;
+            }
+            // The NAME is reserved in the symbol table, so a global variable
+            // or function spelled the same way refuses in either order (the
+            // reference's C1002 'the name "B" is already defined'); a LOCAL
+            // of that name still shadows it through the scoped lookup.
+            if (!symbols_.addSymbol(SymbolKind::Type, alias->name, underlying, alias) ||
+                (!forwardTag && !symbols_.addType(alias->name, underlying)))
                 error(alias->loc, "the name '" + alias->name + "' is already defined");
             break;
         }
@@ -293,6 +308,19 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
     }
 
     CgType returnType(decl->returnType);
+
+    // A type already owns this name: the reference refuses `typedef A B;` or
+    // `struct B { ... };` followed by `float B(float x)` (C1002 'the name "B"
+    // is already defined', measured 2026-10-17 for the typedef, the same-tag
+    // `typedef struct S { ... } S;` and the plain struct) - struct tags share
+    // one namespace with functions there, unlike C.
+    if (Symbol* prior = symbols_.lookupLocal(decl->name);
+        prior && prior->kind == SymbolKind::Type && prior->declaration &&
+        (prior->declaration->kind == DeclKind::Typedef || prior->declaration->kind == DeclKind::Struct))
+    {
+        error(decl->loc, "the name '" + decl->name + "' is already defined");
+        return;
+    }
 
     // Add function to symbol table (handles overloading)
     if (!symbols_.addFunction(decl->name, returnType, paramTypes, paramNames,

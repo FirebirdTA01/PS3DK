@@ -1,0 +1,4 @@
+// A local named after a BUILTIN alias: `B - x` is a subtraction, not a
+// cast (review finding: it parsed as a type).  Reference: twin.
+typedef float4 B;
+float4 main(float2 uv : TEXCOORD0) : COLOR { float B = 2.0; float x = uv.x; return float4(B - x, uv.y, 0, 1); }

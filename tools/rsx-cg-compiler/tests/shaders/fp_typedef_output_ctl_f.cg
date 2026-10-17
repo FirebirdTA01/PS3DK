@@ -1,0 +1,6 @@
+// CONTROL: the input and output structs under their own names, with a
+// helper taking the input struct.
+struct A { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
+struct O { float4 c : COLOR; };
+float3 lit(A i) { return i.col * i.uv.x; }
+O main(A i) { O o; o.c = float4(lit(i), 1); return o; }

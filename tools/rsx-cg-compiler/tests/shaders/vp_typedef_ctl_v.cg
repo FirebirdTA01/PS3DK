@@ -1,0 +1,4 @@
+// CONTROL: the vertex twin's input struct under its own name.
+typedef struct { float4 pos : POSITION; float3 col : COLOR0; } VIn;
+typedef struct { float4 pos : POSITION; float3 col : COLOR0; } VOut;
+VOut main(VIn i, uniform float4x4 mvp) { VOut o; o.pos = mul(mvp, i.pos); o.col = i.col; return o; }

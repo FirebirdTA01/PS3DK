@@ -1,0 +1,2 @@
+// CONTROL for the shadowed type words: an ordinary name.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float3 h = float3(0, 0, 1); return float4(h.xy + uv, h.z, 1); }

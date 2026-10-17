@@ -1,0 +1,4 @@
+// A FILE-SCOPE variable named half: the name persists past its
+// declaration into every later function.  Reference: accepted.
+float3 half = float3(0, 0, 1);
+float4 main(float2 uv : TEXCOORD0) : COLOR { return float4(half.xy + uv, half.z, 1); }

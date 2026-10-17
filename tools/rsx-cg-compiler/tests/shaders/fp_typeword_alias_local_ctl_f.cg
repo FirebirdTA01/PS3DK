@@ -1,0 +1,4 @@
+// CONTROL: the local under another name.
+typedef struct { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; } A;
+typedef A B;
+float4 main(B i) : COLOR { float k = 2.0; return float4(i.col * i.uv.x * k, 1); }

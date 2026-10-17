@@ -1,0 +1,2 @@
+// CONTROL: the argument written directly.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float v = max(uv.y, 0.5); return float4(v, 0, 0, 1); }

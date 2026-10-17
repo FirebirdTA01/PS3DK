@@ -1,0 +1,8 @@
+// The alias as the entry's RETURN type, as a helper's parameter type and as
+// a local's type.  Reference: byte-identical to the direct spelling.
+struct A { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
+typedef A AIn;
+struct O { float4 c : COLOR; };
+typedef O OOut;
+float3 lit(AIn i) { return i.col * i.uv.x; }
+OOut main(AIn i) { OOut o; o.c = float4(lit(i), 1); return o; }

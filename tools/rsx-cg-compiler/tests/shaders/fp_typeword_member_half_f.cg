@@ -1,0 +1,4 @@
+// A struct MEMBER named half shadows nothing: `half(0.5)` is still the
+// constructor after it.  Reference: accepted.
+struct S { float3 half; };
+float4 main(float2 uv : TEXCOORD0, uniform S s) : COLOR { half k = half(0.5); return float4(s.half.xy + uv, k, 1); }

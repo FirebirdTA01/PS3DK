@@ -1,0 +1,4 @@
+// A shadow ends with its function: a helper that names `half` as a
+// local does not stop the entry from using half as a TYPE.
+float k(float2 uv) { float3 half = float3(uv, 1); return half.z; }
+float4 main(float2 uv : TEXCOORD0) : COLOR { half h = half(0.5) * k(uv); return float4(uv, h, 1); }

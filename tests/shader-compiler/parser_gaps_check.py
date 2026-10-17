@@ -58,12 +58,26 @@ ROWS = {
     'uniform_swizzle_write': ('float4 K; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { K.xyz = 4; return float4(K.x * a.x, K.y, K.z, 1); }' + '\\n', [2.0, 4.0, 4.0, 1.0]),
     'flattened_array_initialisers': ('static const float2 s[2] = {0.25, 0.5, 0.75, 1.0}; float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { const float2 o[3] = {0.5, 1.0, -0.25, 2.0, 0.125, -1.0}; float2 p[2] = {float2(1.0, 2.0), 3.0, 4.0}; return float4(o[1] + o[2] * a.x, p[1] + p[0]) + float4(s[1], s[0]); }' + '\\n', [0.5625, 2.5, 4.25, 6.5]),
     'inferred_array_to_sized_param': ('static const float cx[] = {1.0, 2.0, 3.0}; float g(float v[3]) { return v[2] + v[0]; } float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return float4(g(cx), a.x, 0, 1); }' + '\\n', [4.0, 0.5, 0.0, 1.0]),
+    # Commas in for clauses: the static expansion takes the induction from the
+    # operand the condition tests and runs j-- after each body (reference 0.75).
+    'comma_for_clauses': ('float4 main(float4 t : TEXCOORD0) : COLOR { float s = 0; int i, j; for (i = 0, j = 2; i < 2; i++, j--) s += t[i] * j; return float4(s, 0, 0, 1); }' + '\\n', [0.75, 0.0, 0.0, 1.0]),
+    # Review of the typedef/comma port (codex 04:57; measured on sce-cgc 475
+    # 2026-10-17, values = fp_eval of the reference's own containers):
+    # the same tag and name; a tag declared inside a typedef, then shadowed
+    # by a local (byte-identical to the plain-struct spelling); several
+    # extra parts in one for clause; an alias as parameter and return type.
+    'typedef_same_tag_name': ('typedef struct S { float x; } S; float4 main(float4 t : TEXCOORD0) : COLOR { S s; s.x = t.x; return s.x; }' + '\\n', [0.5, 0.5, 0.5, 0.5]),
+    'typedef_tag_shadowed': ('typedef struct Tag { float x; } Alias; float4 main(float4 t : TEXCOORD0) : COLOR { float Tag = 2; return (Tag) - t; }' + '\\n', [1.5, 2.25, 1.25, 0.5]),
+    'struct_tag_shadowed': ('struct Tag { float x; }; float4 main(float4 t : TEXCOORD0) : COLOR { float Tag = 2; return (Tag) - t; }' + '\\n', [1.5, 2.25, 1.25, 0.5]),
+    'comma_for_many_parts': ('float4 main(float4 t : TEXCOORD0) : COLOR { int i; float j = 1, k = 2; for (i = 0, j = 2; i < 3; i++, j += k, k += 1) {} return float4(i, j, k, 1); }' + '\\n', [3.0, 11.0, 5.0, 1.0]),
+    'typedef_param_type': ('typedef float B; float f(B x) { return (B) - x; } float4 main(float4 t : TEXCOORD0) : COLOR { return f(t.x); }' + '\\n', [-0.5, -0.5, -0.5, -0.5]),
+    'typedef_return_type': ('typedef float B; B f(B x) { return (B) - x; } float4 main(float4 t : TEXCOORD0) : COLOR { return f(t.x); }' + '\\n', [-0.5, -0.5, -0.5, -0.5]),
 }
-# Named debt: commas in for clauses parse, but the static-loop unroller does
-# not recognise the induction (the reference accepts; value 0.75); it must
-# refuse, not miscompile.
 DEBT = {
-    'comma_for_clauses': ('float4 main(float4 t : TEXCOORD0) : COLOR { float s = 0; int i, j; for (i = 0, j = 2; i < 2; i++, j--) s += t[i] * j; return float4(s, 0, 0, 1); }' + '\\n', 'back-edge'),
+    # The reference accepts an anonymous struct typedef with an extent
+    # (byte-identical to the same-tag spelling; value 0.5); this compiler
+    # still refuses it at the '[' (parent fae36356 too).
+    'typedef_anon_struct_array': ('typedef struct { float x; } A[2]; float4 main(float4 t : TEXCOORD0) : COLOR { A a; a[0].x = t.x; return a[0].x; }' + '\\n', 'after typedef'),
     # The reference accepts these and steps i / k ONCE ((0.75, t.y, 1, 1) and
     # (1, 7, 3, 2)); the lane/row store builds its lvalue twice, so it
     # refuses side-effecting shapes until the lvalue is resolved once.
@@ -71,6 +85,11 @@ DEBT = {
     'lane_compound_side_effect_index': ('float4 main(float4 t : TEXCOORD0) : COLOR { int4 r = int4(1, 2, 3, 4); int k = 1; r[k++] += 5; return float4(r.x, r.y, r.z, k); }' + '\\n', 'side effects'),
 }
 REFUSE = {
+    # The same-tag typedef owns its name like any other (reference C1002
+    # 'the name "S" is already defined' for each, measured 2026-10-17).
+    'same_tag_then_typedef_C1002': ('typedef struct S { float x; } S; typedef float S; float4 main(float4 t : TEXCOORD0) : COLOR { return t.x; }' + '\\n', 'already defined'),
+    'same_tag_then_global_C1002': ('typedef struct S { float x; } S; float S = 1; float4 main(float4 t : TEXCOORD0) : COLOR { return t.x; }' + '\\n', "variable 'S'"),
+    'same_tag_then_func_C1002': ('typedef struct S { float x; } S; float S(float v) { return v; } float4 main(float4 t : TEXCOORD0) : COLOR { return t.x; }' + '\\n', 'already defined'),
     'array_count_mismatch': ('float4 main(float4 a : TEXCOORD0) : COLOR { float o[3] = float[](1.0, 2.0); return float4(o[0], 0, 0, 1); }' + '\\n', ''),
     'struct_different_redefinition_C1047': ('struct S { float2 a; float b; }; struct S { float2 a; float c; }; float4 main(float4 a : TEXCOORD0) : COLOR { S s; s.a = a.xy; return float4(s.a, 0, 1); }' + '\\n', 'C1047'),
     'inferred_array_out_of_bounds': ('static const float cx[] = {1.0, 2.0, 3.0}; float4 main(float4 t : TEXCOORD0) : COLOR { return float4(cx[3], t.x, 0, 1); }' + '\\n', 'out of bounds'),

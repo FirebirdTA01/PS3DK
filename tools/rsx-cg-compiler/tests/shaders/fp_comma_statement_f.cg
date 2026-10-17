@@ -1,0 +1,3 @@
+// A comma expression as a bare statement, beside a two-declarator
+// declaration that must stay two declarators.  Reference: twin.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float a = uv.x, b = uv.y; a = 1.0, b = 2.0; return float4(a, b, 0, 1); }

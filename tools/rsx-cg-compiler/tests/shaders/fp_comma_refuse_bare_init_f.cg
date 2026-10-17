@@ -1,0 +1,3 @@
+// A comma in a declarator's initialiser WITHOUT parentheses is a second
+// declarator, and `0.7` is not one.  Reference: refused (C0000).
+float4 main(float2 uv : TEXCOORD0) : COLOR { float v = 0.2, 0.7; return float4(v, 0, 0, 1); }

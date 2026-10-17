@@ -1,0 +1,2 @@
+// CONTROL: only the last operand.
+float4 main(float2 uv : TEXCOORD0, float3 n : TEXCOORD1) : COLOR { float3 c = n * 2.0; return float4(c, 1); }

@@ -1,0 +1,3 @@
+// A parenthesised comma INSIDE an argument list is one argument.
+// Reference: twin of passing the last value.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float v = max((uv.x, uv.y), 0.5); return float4(v, 0, 0, 1); }

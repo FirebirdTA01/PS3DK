@@ -1,0 +1,3 @@
+// An increment part that READS the induction: it would see the value
+// before the step.  Legal Cg; refused rather than given the old i.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float s = 0; int i, j = 0; for (i = 0; i < 3; i++, j = i) s += uv.x * j; return float4(s, 0, 0, 1); }

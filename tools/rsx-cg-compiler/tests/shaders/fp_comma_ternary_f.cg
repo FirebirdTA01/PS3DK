@@ -1,0 +1,2 @@
+// A comma as a ternary's middle operand.  Reference: accepted, twin.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float v = uv.x > 0.5 ? (uv.y, 1.0) : 0.0; return float4(v, 0, 0, 1); }

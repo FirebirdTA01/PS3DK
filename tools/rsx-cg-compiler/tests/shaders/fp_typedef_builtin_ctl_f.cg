@@ -1,0 +1,3 @@
+// CONTROL: the builtin types spelled directly.
+float4 main(float2 uv : TEXCOORD0, float3 col : TEXCOORD1) : COLOR
+{ half3 c = col; float4 r = float4(c * uv.x, 1); return r; }

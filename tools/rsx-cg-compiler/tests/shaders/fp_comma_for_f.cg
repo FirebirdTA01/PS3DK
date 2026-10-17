@@ -1,0 +1,3 @@
+// Commas in a for's init and increment.  Reference: twin of the
+// statements written out.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float s = 0; int i, j; for (i = 0, j = 2; i < 2; i++, j--) s += uv.x * j; return float4(s, 0, 0, 1); }

@@ -1,0 +1,2 @@
+// Varying left operands are dropped without a trace.  Reference: twin.
+float4 main(float2 uv : TEXCOORD0, float3 n : TEXCOORD1) : COLOR { float3 c = (n, uv.x, n * 2.0); return float4(c, 1); }

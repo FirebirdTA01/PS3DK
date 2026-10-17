@@ -1,0 +1,3 @@
+// CONTROL.
+struct B { float2 v; };
+float4 main(float2 uv : TEXCOORD0) : COLOR { B b; b.v = uv; return float4(b.v, 0, 1); }

@@ -1,0 +1,6 @@
+// `typedef struct Tag { ... } Name;` with BOTH spellings used: the tag
+// in a helper's signature, the typedef's name on the entry.  A parser
+// that renames the struct to Name loses Tag.  Reference: byte-identical.
+typedef struct Tag { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; } Name;
+float3 helper(Tag t) { return t.col; }
+float4 main(Name i) : COLOR { return float4(helper(i) * i.uv.x, 1); }
