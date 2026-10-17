@@ -1,0 +1,34 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] cell64lv2: C++ defaults to GNU C++17
+
+GCC 16 defaults C++ to GNU C++20.  This toolchain's releases keep GNU C++17
+as the default (director decision 2026-10-15): without a -std= option or
+-ansi, cc1plus now gets -std=gnu++17, so a bare g++, Makefiles, autotools
+and CMake builds all see __cplusplus 201703L.  An explicit -std= or -ansi
+is authoritative, so C++20/23 stay available, and the toolchain's own
+target libraries keep the standards their build rules select.  No header
+in this target's configuration defines CC1PLUS_SPEC; an inherited one is a
+build error rather than silently replaced.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -156,6 +156,19 @@
+   { "include_extra",		INCLUDE_EXTRA_SPEC },			\
+   { "dynamic_linker_prefix",	DYNAMIC_LINKER_PREFIX },
+ 
++/* C++ defaults to GNU C++17 on this target (GCC 16's own default is GNU
++   C++20): with no -std= option and no -ansi, cc1plus is given
++   -std=gnu++17, so __cplusplus is 201703L whichever build system drives
++   the compiler.  Any explicit -std= (or -ansi) is authoritative, and
++   the toolchain's own target libraries select their standards per
++   directory or per file as before.  No target header in this
++   configuration defines CC1PLUS_SPEC; if one ever does, it must be
++   merged here rather than silently replaced.  */
++#ifdef CC1PLUS_SPEC
++#error "cell64lv2.h: an inherited CC1PLUS_SPEC must be merged with the gnu++17 default"
++#endif
++#define CC1PLUS_SPEC "%{!std=*:%{!ansi:-std=gnu++17}}"
++
+ /* The SDK's POSIX layer (its pthread.h, time.h and sched.h wrappers over
+    newlib) is on the default include path, as the reference compiler's
+    target/ppu/include is: -isystem, in the same place the CMake toolchain

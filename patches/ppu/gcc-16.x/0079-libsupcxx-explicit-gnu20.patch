@@ -1,0 +1,32 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] libsupc++: select GNU C++20 explicitly
+
+libsupc++ is the one libstdc++ directory whose sources carry no -std
+option: they are built in the compiler's default dialect, GNU C++20 for
+GCC 16.  0078 makes this target's C++ default GNU C++17, which would
+silently move all of libsupc++ (and atomicity.cc) to a dialect GCC 16
+never builds it in.  Select GNU C++20 at the head of AM_CXXFLAGS, as
+src/c++98 does for its standard, so the library is compiled exactly as
+before and any later per-file, CXXFLAGS or EXTRA_CXX_FLAGS -std option
+still wins.
+
+--- a/libstdc++-v3/libsupc++/Makefile.am
++++ b/libstdc++-v3/libsupc++/Makefile.am
+@@ -151,6 +151,7 @@
+ # OPTIMIZE_CXXFLAGS on the compile line so that -O2 can be overridden
+ # as the occasion call for it.
+ AM_CXXFLAGS = \
++	-std=gnu++20 \
+ 	$(glibcxx_lt_pic_flag) $(glibcxx_compiler_shared_flag) \
+ 	$(XTEMPLATE_FLAGS) $(FREESTANDING_FLAGS) $(EH_POOL_FLAGS) \
+ 	$(WARN_CXXFLAGS) $(OPTIMIZE_CXXFLAGS)  $(CONFIG_CXXFLAGS)
+--- a/libstdc++-v3/libsupc++/Makefile.in
++++ b/libstdc++-v3/libsupc++/Makefile.in
+@@ -589,6 +589,7 @@
+ # OPTIMIZE_CXXFLAGS on the compile line so that -O2 can be overridden
+ # as the occasion call for it.
+ AM_CXXFLAGS = \
++	-std=gnu++20 \
+ 	$(glibcxx_lt_pic_flag) $(glibcxx_compiler_shared_flag) \
+ 	$(XTEMPLATE_FLAGS) $(FREESTANDING_FLAGS) $(EH_POOL_FLAGS) \
+ 	$(WARN_CXXFLAGS) $(OPTIMIZE_CXXFLAGS)  $(CONFIG_CXXFLAGS)

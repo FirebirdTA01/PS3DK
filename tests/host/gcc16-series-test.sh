@@ -45,7 +45,7 @@ tmfile="0001 0024"
 opturls="0009 0010"
 named="$refreshed $tmfile $opturls"
 # Patches with no gcc-12.x original (check 8).
-gcc16only="0068 0069 0070 0071 0072 0073 0075 0076"
+gcc16only="0068 0069 0070 0071 0072 0073 0075 0076 0078 0079"
 only16() { local n=${1%%-*}; case " $gcc16only " in *" $n "*) return 0 ;; esac; return 1; }
 ported() { while read -r l; do only16 "$l" || echo "$l"; done; }
 
