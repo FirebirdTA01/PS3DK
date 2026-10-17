@@ -344,8 +344,9 @@ static void variants()
 // unwind-dw2-fde.c _Unwind_Find_FDE / init_object, not instrumented here).  The witness makes the contention
 // deterministic instead of hoping for it: pthread_mutex_lock/unlock are wrapped, and only calls made by a thread
 // inside an explicit _Unwind_Find_FDE probe (thread-local mark), on the FIRST mutex such a call locks, are
-// observed.  In the cold phase the first thread to own that mutex is held inside the wrapper - after the real
-// lock succeeded, before libgcc gets it back - until every other lookup thread has entered the wrapper for the
+// observed.  In the cold phase reader 0 looks up first and, once it owns that mutex, is held inside the wrapper -
+// after the real lock succeeded, before libgcc gets it back; the other readers start their lookups only then, so
+// every one of their entries happens while the mutex is held - until each has entered the wrapper for the
 // same mutex (contenders reaching the slow path while it is held; not necessarily kernel-blocked), or a 5 s
 // deadline releases it and fails coverage.  A separate warm phase of readers then looks the published object up:
 // the 0074 fast path must take no object-mutex lock at all, the list path takes one per lookup.
@@ -357,7 +358,7 @@ static std::atomic<int> g_ls_phase{0};             // 1 cold, 2 warm
 static std::atomic<int> g_ls_entries[3], g_ls_acquired[3], g_ls_entered_held[3], g_ls_other_mutex[3];
 static std::atomic<int> g_ls_holders{0}, g_ls_max_holders{0}, g_ls_lock_bad{0}, g_ls_unlock_bad{0};
 static std::atomic<int> g_ls_owner_taken{0}, g_ls_timeout{0}, g_ls_expected{0}, g_ls_ok[3], g_ls_bad[3];
-static std::atomic<int> g_ls_owner_saw_entries{-1}, g_ls_owner_saw_acquired{-1};
+static std::atomic<int> g_ls_owner_saw_entries{-1}, g_ls_owner_saw_acquired{-1}, g_ls_owner_holding{0};
 
 extern "C" {
 int __real_pthread_mutex_lock(pthread_mutex_t *m);
@@ -387,7 +388,9 @@ int __wrap_pthread_mutex_lock(pthread_mutex_t *m)
 		;
 	if (ph == 1 && g_ls_owner_taken.exchange(1) == 0) {
 		// Hold the mutex until every other lookup thread has entered this wrapper for it (raw LV2 sleeps: no
-		// wrapped pthread call while holding), or release at the deadline and fail coverage.
+		// wrapped pthread call while holding), or release at the deadline and fail coverage.  The other readers
+		// start their lookups only once this is set, so each of their entries happens while the mutex is held.
+		g_ls_owner_holding.store(1);
 		int ms = 0;
 		while (g_ls_entries[1].load() < g_ls_expected.load() && ms < 5000) {
 			sys_timer_usleep(1000);
@@ -419,12 +422,23 @@ static pthread_cond_t g_ls_gate_cv = PTHREAD_COND_INITIALIZER;
 static int g_ls_go, g_ls_ready;
 static void *ls_reader(void *arg)
 {
-	int ph = (int)(intptr_t)arg;
+	int ph = (int)(intptr_t)arg / 16, idx = (int)(intptr_t)arg % 16;
 	pthread_mutex_lock(&g_ls_gate_mx);          // harness synchronization: unmarked, not counted
 	g_ls_ready++;
 	while (g_ls_go != ph)
 		pthread_cond_wait(&g_ls_gate_cv, &g_ls_gate_mx);
 	pthread_mutex_unlock(&g_ls_gate_mx);
+	if (ph == 1 && idx != 0) {
+		// Cold phase: reader 0 takes the object mutex first; the others start only once it holds it (raw sleeps,
+		// bounded: a missing owner fails coverage, never hangs the row).
+		int ms = 0;
+		while (!g_ls_owner_holding.load() && ms < 5000) {
+			sys_timer_usleep(1000);
+			ms++;
+		}
+		if (!g_ls_owner_holding.load())
+			g_ls_timeout.store(1);
+	}
 	t_probe = 1;
 	dwarf_eh_bases b{};
 	const void *f = _Unwind_Find_FDE(g_ls.code + 8, &b);
@@ -439,7 +453,7 @@ static int ls_phase(int ph)
 	pthread_t t[LS_THREADS];
 	int created = 0;
 	for (int i = 0; i < LS_THREADS; i++) {
-		int rc = pthread_create(&t[i], nullptr, ls_reader, (void *)(intptr_t)ph);
+		int rc = pthread_create(&t[i], nullptr, ls_reader, (void *)(intptr_t)(ph * 16 + i));
 		if (rc != 0) {
 			printf("eh-fde-registry: lazy-sort phase %d pthread_create %d returned %d\n", ph, i, rc);
 			break;
@@ -500,6 +514,11 @@ static void lazy_sort_witness(bool btree_mode)
 	check(!g_ls_timeout.load() && g_ls_owner_saw_entries.load() == cold && g_ls_owner_saw_acquired.load() == 1,
 	      "lazy-sort cold phase: every other reader reached the object mutex while the first held it",
 	      g_ls_owner_saw_entries.load());
+	check(g_ls_entered_held[1].load() == cold - 1,
+	      "lazy-sort cold phase: each of the other readers entered the lock while it was held", g_ls_entered_held[1].load());
+	check(g_ls_other_mutex[1].load() == 0 && g_ls_other_mutex[2].load() == 0,
+	      "lazy-sort: the probe lookups locked no mutex but the object mutex",
+	      g_ls_other_mutex[1].load() + g_ls_other_mutex[2].load());
 	check(g_ls_acquired[1].load() == cold, "lazy-sort cold phase: every reader acquired the object mutex once",
 	      g_ls_acquired[1].load());
 	check(g_ls_ok[1].load() == cold && g_ls_bad[1].load() == 0,
