@@ -13,8 +13,10 @@ foreach(abi ilp32 lp64)
     add_executable(eh-fde-registry-${abi} main.cpp)
     target_compile_features(eh-fde-registry-${abi} PRIVATE cxx_std_17)
     target_compile_options(eh-fde-registry-${abi} PRIVATE -O2 -Wall -Wextra)
-    # malloc is wrapped to count calls made before the runtime reports the heap ready
-    target_link_options(eh-fde-registry-${abi} PRIVATE "-Wl,--wrap=malloc")
+    # malloc is wrapped to count calls made before the runtime reports the heap ready; the pthread mutex calls are
+    # wrapped for the lazy-sort witness (only calls made inside its marked _Unwind_Find_FDE probes are observed)
+    target_link_options(eh-fde-registry-${abi} PRIVATE "-Wl,--wrap=malloc" "-Wl,--wrap=pthread_mutex_lock"
+        "-Wl,--wrap=pthread_mutex_unlock")
     if(abi STREQUAL "lp64")
         target_compile_options(eh-fde-registry-${abi} PRIVATE -mlp64)
         target_link_options(eh-fde-registry-${abi} PRIVATE -mlp64)

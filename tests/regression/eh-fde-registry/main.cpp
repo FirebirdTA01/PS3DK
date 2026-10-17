@@ -19,6 +19,9 @@
 //                  of which prints the pass marker;
 //   7. variants    __register_frame_info_bases / _table / _table_bases, __register_frame / __register_frame_table,
 //                  each found (with its bases where given) and removed through its matching deregistration.
+//   8. lazy sort  four lookup threads contend for the object mutex on a never-looked-up object (one holds it in
+//                  the wrapped lock until the others have entered for the same mutex), then four readers look the
+//                  published object up: no object-mutex lock under 0074, one per lookup on the list path.
 // Code that is still running is never deregistered: unloading live code is the caller's error, not a guarantee.
 //
 // The synthetic objects are hand-built .eh_frame images (one CIE, one FDE, absolute 4-byte pointers, so the
@@ -31,6 +34,7 @@
 #include <cstring>
 #include <pthread.h>
 #include <stdexcept>
+#include <sys/timer.h>
 #include <unistd.h>
 
 extern "C" {
@@ -334,6 +338,182 @@ static void variants()
 	check(true, "empty .eh_frame: __register_frame / __deregister_frame are no-ops (no assertion)");
 }
 
+// --- 8. lazy-sort contention witness ---------------------------------------------------------------------
+// In both registry modes a lookup that finds an unsorted object sorts it under libgcc's object mutex; the fast
+// path re-checks the sorted flag after taking the mutex and publishes it with a release store (source-derived:
+// unwind-dw2-fde.c _Unwind_Find_FDE / init_object, not instrumented here).  The witness makes the contention
+// deterministic instead of hoping for it: pthread_mutex_lock/unlock are wrapped, and only calls made by a thread
+// inside an explicit _Unwind_Find_FDE probe (thread-local mark), on the FIRST mutex such a call locks, are
+// observed.  In the cold phase the first thread to own that mutex is held inside the wrapper - after the real
+// lock succeeded, before libgcc gets it back - until every other lookup thread has entered the wrapper for the
+// same mutex (contenders reaching the slow path while it is held; not necessarily kernel-blocked), or a 5 s
+// deadline releases it and fails coverage.  A separate warm phase of readers then looks the published object up:
+// the 0074 fast path must take no object-mutex lock at all, the list path takes one per lookup.
+enum { LS_THREADS = 4 };
+static Synth g_ls;
+static __thread int t_probe;                       // set only around the explicit probe lookups
+static std::atomic<void *> g_ls_mutex{nullptr};   // the first mutex a probe lookup locked
+static std::atomic<int> g_ls_phase{0};             // 1 cold, 2 warm
+static std::atomic<int> g_ls_entries[3], g_ls_acquired[3], g_ls_entered_held[3], g_ls_other_mutex[3];
+static std::atomic<int> g_ls_holders{0}, g_ls_max_holders{0}, g_ls_lock_bad{0}, g_ls_unlock_bad{0};
+static std::atomic<int> g_ls_owner_taken{0}, g_ls_timeout{0}, g_ls_expected{0}, g_ls_ok[3], g_ls_bad[3];
+static std::atomic<int> g_ls_owner_saw_entries{-1}, g_ls_owner_saw_acquired{-1};
+
+extern "C" {
+int __real_pthread_mutex_lock(pthread_mutex_t *m);
+int __real_pthread_mutex_unlock(pthread_mutex_t *m);
+int __wrap_pthread_mutex_lock(pthread_mutex_t *m)
+{
+	if (!t_probe)
+		return __real_pthread_mutex_lock(m);
+	int ph = g_ls_phase.load();
+	void *want = nullptr;
+	g_ls_mutex.compare_exchange_strong(want, (void *)m);
+	if (g_ls_mutex.load() != (void *)m) {
+		g_ls_other_mutex[ph].fetch_add(1);           // e.g. an allocator lock under init_object: reported only
+		return __real_pthread_mutex_lock(m);
+	}
+	g_ls_entries[ph].fetch_add(1);
+	if (g_ls_holders.load() > 0)
+		g_ls_entered_held[ph].fetch_add(1);
+	int rc = __real_pthread_mutex_lock(m);
+	if (rc != 0) {
+		g_ls_lock_bad.fetch_add(1);
+		return rc;
+	}
+	g_ls_acquired[ph].fetch_add(1);
+	int h = g_ls_holders.fetch_add(1) + 1;
+	for (int seen = g_ls_max_holders.load(); h > seen && !g_ls_max_holders.compare_exchange_weak(seen, h);)
+		;
+	if (ph == 1 && g_ls_owner_taken.exchange(1) == 0) {
+		// Hold the mutex until every other lookup thread has entered this wrapper for it (raw LV2 sleeps: no
+		// wrapped pthread call while holding), or release at the deadline and fail coverage.
+		int ms = 0;
+		while (g_ls_entries[1].load() < g_ls_expected.load() && ms < 5000) {
+			sys_timer_usleep(1000);
+			ms++;
+		}
+		if (g_ls_entries[1].load() < g_ls_expected.load())
+			g_ls_timeout.store(1);
+		// What the owner saw while it still held the mutex: the coverage witness.
+		g_ls_owner_saw_entries.store(g_ls_entries[1].load());
+		g_ls_owner_saw_acquired.store(g_ls_acquired[1].load());
+	}
+	return rc;
+}
+int __wrap_pthread_mutex_unlock(pthread_mutex_t *m)
+{
+	bool mine = t_probe && g_ls_mutex.load() == (void *)m;
+	if (mine)
+		g_ls_holders.fetch_sub(1);                    // cleared before the real unlock: no false overlap
+	int rc = __real_pthread_mutex_unlock(m);
+	if (mine && rc != 0)
+		g_ls_unlock_bad.fetch_add(1);
+	return rc;
+}
+}
+
+static char g_ls_tb, g_ls_db;
+static pthread_mutex_t g_ls_gate_mx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_ls_gate_cv = PTHREAD_COND_INITIALIZER;
+static int g_ls_go, g_ls_ready;
+static void *ls_reader(void *arg)
+{
+	int ph = (int)(intptr_t)arg;
+	pthread_mutex_lock(&g_ls_gate_mx);          // harness synchronization: unmarked, not counted
+	g_ls_ready++;
+	while (g_ls_go != ph)
+		pthread_cond_wait(&g_ls_gate_cv, &g_ls_gate_mx);
+	pthread_mutex_unlock(&g_ls_gate_mx);
+	t_probe = 1;
+	dwarf_eh_bases b{};
+	const void *f = _Unwind_Find_FDE(g_ls.code + 8, &b);
+	t_probe = 0;
+	bool ok = f != nullptr && b.func == (void *)g_ls.code && b.tbase == &g_ls_tb && b.dbase == &g_ls_db;
+	(ok ? g_ls_ok[ph] : g_ls_bad[ph]).fetch_add(1);
+	return nullptr;
+}
+// One phase: create LS_THREADS readers, wait (bounded) until they check in, release them together, join.
+static int ls_phase(int ph)
+{
+	pthread_t t[LS_THREADS];
+	int created = 0;
+	for (int i = 0; i < LS_THREADS; i++) {
+		int rc = pthread_create(&t[i], nullptr, ls_reader, (void *)(intptr_t)ph);
+		if (rc != 0) {
+			printf("eh-fde-registry: lazy-sort phase %d pthread_create %d returned %d\n", ph, i, rc);
+			break;
+		}
+		created++;
+	}
+	g_ls_expected.store(created);
+	int ready = 0;
+	for (int ms = 0; ms < 10000; ms++) {
+		pthread_mutex_lock(&g_ls_gate_mx);
+		ready = g_ls_ready;
+		pthread_mutex_unlock(&g_ls_gate_mx);
+		if (ready == created)
+			break;
+		usleep(1000);
+	}
+	g_ls_phase.store(ph);
+	pthread_mutex_lock(&g_ls_gate_mx);
+	g_ls_go = ph;
+	g_ls_ready = 0;
+	pthread_cond_broadcast(&g_ls_gate_cv);
+	pthread_mutex_unlock(&g_ls_gate_mx);
+	int joined = 0;
+	for (int i = 0; i < created; i++)
+		joined += pthread_join(t[i], nullptr) == 0;
+	check(created == LS_THREADS, ph == 1 ? "lazy-sort cold phase: all reader threads created"
+	                                     : "lazy-sort warm phase: all reader threads created", created);
+	check(ready == created, ph == 1 ? "lazy-sort cold phase: every reader reached the start line"
+	                                : "lazy-sort warm phase: every reader reached the start line", ready);
+	check(joined == created, ph == 1 ? "lazy-sort cold phase: every reader joined"
+	                                 : "lazy-sort warm phase: every reader joined", joined);
+	return created;
+}
+static void lazy_sort_witness(bool btree_mode)
+{
+	if (!build_frame(g_ls)) {
+		check(false, "lazy-sort: the synthetic range fits the udata4 encoding");
+		return;
+	}
+	// Registered once, never looked up before the cold phase, kept registered until every reader has joined.
+	__register_frame_info_bases(g_ls.frame, g_ls.ob, &g_ls_tb, &g_ls_db);
+	int cold = ls_phase(1);
+	g_ls_phase.store(0);
+	int warm = ls_phase(2);
+	g_ls_phase.store(0);
+	void *r = __deregister_frame_info_bases(g_ls.frame);
+	check(r == (void *)g_ls.ob && absent(g_ls), "lazy-sort: the object deregisters after every reader joined",
+	      (long)(uintptr_t)r);
+	printf("eh-fde-registry: lazy-sort cold: %d readers, object-mutex lock entries %d, acquisitions %d, entered "
+	       "while held %d, max holders %d, other mutexes %d; owner, before releasing, saw %d entries and %d "
+	       "acquisition(s)%s\n", cold, g_ls_entries[1].load(), g_ls_acquired[1].load(), g_ls_entered_held[1].load(),
+	       g_ls_max_holders.load(), g_ls_other_mutex[1].load(), g_ls_owner_saw_entries.load(),
+	       g_ls_owner_saw_acquired.load(), g_ls_timeout.load() ? " - DEADLINE" : "");
+	printf("eh-fde-registry: lazy-sort warm: %d readers, object-mutex lock entries %d, acquisitions %d, other "
+	       "mutexes %d\n", warm, g_ls_entries[2].load(), g_ls_acquired[2].load(), g_ls_other_mutex[2].load());
+	check(g_ls_lock_bad.load() == 0 && g_ls_unlock_bad.load() == 0, "lazy-sort: every observed lock/unlock succeeded");
+	check(g_ls_max_holders.load() == 1, "lazy-sort: the object mutex never had two holders", g_ls_max_holders.load());
+	check(!g_ls_timeout.load() && g_ls_owner_saw_entries.load() == cold && g_ls_owner_saw_acquired.load() == 1,
+	      "lazy-sort cold phase: every other reader reached the object mutex while the first held it",
+	      g_ls_owner_saw_entries.load());
+	check(g_ls_acquired[1].load() == cold, "lazy-sort cold phase: every reader acquired the object mutex once",
+	      g_ls_acquired[1].load());
+	check(g_ls_ok[1].load() == cold && g_ls_bad[1].load() == 0,
+	      "lazy-sort cold phase: every contended lookup found the FDE with its tbase/dbase", g_ls_bad[1].load());
+	check(g_ls_ok[2].load() == warm && g_ls_bad[2].load() == 0,
+	      "lazy-sort warm phase: every reader found the FDE with its tbase/dbase", g_ls_bad[2].load());
+	if (btree_mode)
+		check(g_ls_entries[2].load() == 0, "lazy-sort warm phase (0074): no object-mutex lock - the published fast path",
+		      g_ls_entries[2].load());
+	else
+		check(g_ls_entries[2].load() == warm, "lazy-sort warm phase (list): every lookup takes the object mutex",
+		      g_ls_entries[2].load());
+}
+
 int main()
 {
 	// 1. bootstrap, read before this program allocates anything itself
@@ -410,6 +590,10 @@ int main()
 	//    lookup in between, and after a lookup (which sorts the object) - over two rounds (so re-registration after
 	//    removal is checked too), plus a two-image table and genuine empty-frame controls.
 	variants();
+
+	// 8. lazy-sort contention witness (review: codex): deterministic contention on the object mutex, then a
+	//    warm phase that must take the 0074 fast path without the mutex.
+	lazy_sort_witness(have_counters);
 
 	// 5. growth past the root leaves, release, reuse
 	unsigned heap0 = have_counters ? __atomic_load_n(&__gcc_ps3_fde_heap_nodes, __ATOMIC_ACQUIRE) : 0;
