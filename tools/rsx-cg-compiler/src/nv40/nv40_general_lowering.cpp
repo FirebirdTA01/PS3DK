@@ -853,6 +853,40 @@ private:
     std::unordered_map<IRValueID, const IRInstruction*> defMap_;
     std::unordered_set<IRValueID> comparisonLogicalValues_;
     mutable std::unordered_map<IRValueID, bool> comparisonTreeMemo_;  // isComparisonTree, per classification
+    // Per-lane reciprocals of a vector divisor (lowerDiv): the register, the
+    // lane holding each source component's reciprocal, and where each RCP was
+    // emitted.  Reused only while reciprocalsIntact says so.
+    struct Reciprocals {
+        int vreg = -1;
+        int laneOfComp[4] = {-1, -1, -1, -1};
+        std::vector<size_t> at;
+    };
+    std::unordered_map<IRValueID, Reciprocals> reciprocals_;
+
+    // Every recorded RCP is still in place, unpredicated, nothing else has
+    // written the register since the first of them, and no loop instruction
+    // lies in between (a value from inside a loop region is not live after it).
+    bool reciprocalsIntact(const Reciprocals& rec) const
+    {
+        const auto& code = program_.instrs;
+        if (rec.at.empty()) return false;
+        for (size_t idx : rec.at) {
+            if (idx >= code.size()) return false;
+            const VInstr& v = code[idx];
+            if (v.op != VOp::Rcp || v.dst.none || v.dst.output || v.dst.address ||
+                v.dst.index != rec.vreg || v.predicate != 0 || v.fpScale != 0)
+                return false;
+        }
+        for (size_t j = rec.at.front(); j < code.size(); ++j) {
+            const VInstr& w = code[j];
+            if (w.op == VOp::LoopBegin || w.op == VOp::LoopEnd || w.op == VOp::Brk)
+                return false;
+            if (!w.dst.none && !w.dst.output && !w.dst.address && w.dst.index == rec.vreg &&
+                std::find(rec.at.begin(), rec.at.end(), j) == rec.at.end())
+                return false;
+        }
+        return true;
+    }
     // VP only: float4 constructions whose one consumer is a tex2Dbias /
     // tex2Dlod coordinate.  lowerVecConstruct leaves them unlowered and
     // lowerVpFetch packs the lanes TXL reads (x, y and the LOD) itself.
@@ -5101,16 +5135,46 @@ private:
             return;
         }
 
-        const int r = newVReg();
-        for (int lane = 0; lane < divisorWidth; lane++) {
-            VInstr rcp;
-            rcp.op = VOp::Rcp;
-            rcp.dst.index = r;
-            rcp.dst.writemask = 1 << lane;
-            rcp.srcs[0] = resolve(inst.operands[1]);
-            const uint8_t comp = rcp.srcs[0].swizzle[lane];
-            rcp.srcs[0].swizzle = {comp, comp, comp, comp};
-            program_.instrs.push_back(rcp);
+        // One reciprocal per DISTINCT divisor component: a / float4(b.x, b.x,
+        // b.y, b.y) takes two RCPs on the reference, not four (measured); the
+        // multiply reads each lane's reciprocal through its swizzle.
+        // A later divide by the SAME value reuses those reciprocals while they
+        // are still intact (scalefx divides several vectors by one: the
+        // reference computes each reciprocal once).
+        const VSrc divisor = resolve(inst.operands[1]);
+        std::array<uint8_t, 4> rcpLane = {0, 1, 2, 3};
+        int r = -1;
+        if (const auto hit = reciprocals_.find(inst.operands[1]);
+            profile_ == GeneralProfile::Fragment &&
+            hit != reciprocals_.end() && reciprocalsIntact(hit->second)) {
+            bool all = true;
+            for (int lane = 0; lane < divisorWidth && all; lane++) {
+                const int at = hit->second.laneOfComp[divisor.swizzle[lane] & 3];
+                if (at < 0) all = false;
+                else rcpLane[static_cast<size_t>(lane)] = static_cast<uint8_t>(at);
+            }
+            if (all) r = hit->second.vreg;
+        }
+        if (r < 0) {
+            Reciprocals rec;
+            rec.vreg = r = newVReg();
+            for (int lane = 0; lane < divisorWidth; lane++) {
+                const uint8_t comp = divisor.swizzle[lane];
+                if (rec.laneOfComp[comp & 3] >= 0) {
+                    rcpLane[static_cast<size_t>(lane)] = static_cast<uint8_t>(rec.laneOfComp[comp & 3]);
+                    continue;
+                }
+                rec.laneOfComp[comp & 3] = lane;
+                VInstr rcp;
+                rcp.op = VOp::Rcp;
+                rcp.dst.index = r;
+                rcp.dst.writemask = 1 << lane;
+                rcp.srcs[0] = divisor;
+                rcp.srcs[0].swizzle = {comp, comp, comp, comp};
+                rec.at.push_back(program_.instrs.size());
+                program_.instrs.push_back(rcp);
+            }
+            reciprocals_[inst.operands[1]] = rec;
         }
         VInstr mul;
         mul.op = VOp::Mul;
@@ -5120,6 +5184,8 @@ private:
         mul.srcs[1] = tempSrc(r);
         if (divisorWidth == 1)
             mul.srcs[1].swizzle = {0, 0, 0, 0};
+        else
+            mul.srcs[1].swizzle = rcpLane;
         program_.instrs.push_back(mul);
     }
 
