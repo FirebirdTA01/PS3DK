@@ -996,6 +996,18 @@ private:
         return memo[root];
     }
 
+    bool usedOnlyInShortCircuitRhs(IRValueID value,
+                                   const std::vector<const IRBasicBlock*>& blocks) const
+    {
+        for (const IRBasicBlock* b : blocks)
+            for (const auto& use : b->instructions) {
+                if (!use) continue;
+                for (IRValueID operand : use->operands)
+                    if (operand == value && !use->shortCircuitRhs) return false;
+            }
+        return true;
+    }
+
     // Admits comparison-only roots for lowering; this is not a speculative
     // predicate. Returns true when a remaining unsafe root requires refusal.
     bool classifyShortCircuitRoots(
@@ -1030,9 +1042,17 @@ private:
                     std::unordered_set<IRValueID> dependent;
                     // The top comparison may be shared: every consumer gets
                     // its already-normalized boolean, never the raw root.
+                    // A value shared only among short-circuit RHS users is
+                    // not an ordinary use: each of those RHS trees passes
+                    // this same classification (2xbrz/3xbrz: one IsPixEqual
+                    // sqrt in three && RHSs once their literals share ids).
+                    // Nor is a shared COMPARISON anywhere in the tree: like
+                    // the top one, every consumer reads its 0/1 result.
                     if (value != instPtr->operands[1] &&
                         valueDependsOnUnsafeSqrt(value, dependent) &&
-                        useCount_[value] != 1)
+                        useCount_[value] != 1 &&
+                        !isComparisonValue(value) &&
+                        !usedOnlyInShortCircuitRhs(value, blocks))
                         return true; // Do not change an ordinary shared use.
                     if (def.op == IROp::Sqrt && def.shortCircuitRhs) {
                         if (def.resultType.componentCount() != 1) return true;

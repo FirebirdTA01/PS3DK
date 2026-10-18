@@ -898,6 +898,7 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
     // loop (that value is live across the whole region).
     std::vector<std::pair<IRInstruction*, IRValueID>> regionCandidates;
     int regionDepth = 0;
+    std::unordered_map<IRValueID, IRInstruction*> defs;
     for (size_t bi = 0; bi < n; ++bi)
     {
         for (auto& inst : func.blocks[bi]->instructions)
@@ -929,9 +930,21 @@ bool CommonSubexprElimination::runOnFunction(IRFunction& func)
             {
                 replacements[inst->result] = reuse;
                 m_stats.instructionsRemoved++;
+                // A short-circuit RHS value that the program ALSO computes
+                // eagerly is no hazard: source semantics evaluate it anyway.
+                // The survivor keeps the RHS tag only while every merged copy
+                // has it (2xbrz/3xbrz: IsPixEqual's sqrt chain appears in a
+                // && RHS and eagerly; once their literals share one id the
+                // merged value was refused as a shared unsafe sqrt).
+                if (!inst->shortCircuitRhs)
+                {
+                    const auto def = defs.find(reuse);
+                    if (def != defs.end()) def->second->shortCircuitRhs = false;
+                }
             }
             else
             {
+                defs[inst->result] = inst.get();
                 candidates.emplace_back(inst->result, bi);
                 if (regionDepth > 0) regionCandidates.emplace_back(inst.get(), inst->result);
             }
