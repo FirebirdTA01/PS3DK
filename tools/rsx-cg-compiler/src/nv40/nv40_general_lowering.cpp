@@ -4995,6 +4995,26 @@ private:
             return;
         }
         const int mask = componentMask(inst.resultType);
+        // k / y with k = 2, 4, 8, 0.5, 0.25 or 0.125 and a run-time scalar y
+        // is ONE reciprocal carrying k as its destination scale: the reference
+        // emits 0.5 / u.x as RCPR_D2 and 4.0 / u.x as RCPR_M4 (measured, also
+        // for a varying y and under a following ADD).  16, 0.0625, a negative
+        // or any other k has no scale and keeps the DIVR below, as there.
+        if (profile_ == GeneralProfile::Fragment && laneCount(mask) == 1 &&
+            valueWidthOf(inst.operands[1]) == 1 && !scalarFloatLiteral(inst.operands[1])) {
+            const std::optional<float> k = scalarFloatLiteral(inst.operands[0]);
+            const std::optional<int> scale = k ? scaleCodeFor(*k) : std::nullopt;
+            if (scale && *scale != NVFX_FP_OP_DST_SCALE_1X) {
+                VInstr vi;
+                vi.op = VOp::Rcp;
+                vi.dst.index = define(inst.result);
+                vi.dst.writemask = mask;
+                vi.srcs[0] = resolve(inst.operands[1]);
+                vi.fpScale = *scale;
+                program_.instrs.push_back(vi);
+                return;
+            }
+        }
         const std::optional<float> divisorLiteral =
             scalarFloatLiteral(inst.operands[1]);
         if (divisorLiteral && *divisorLiteral != 0.0f &&
