@@ -22,7 +22,7 @@
 #
 #   * lv2-crti.o emits 24-byte ELFv1 .opd descriptors at section flag
 #     "ax".  When that's merged with the compact 8-byte .opd produced
-#     by GCC's CELL64LV2 codepath (gcc-12.x/0007-rs6000-...), the
+#     by GCC's CELL64LV2 codepath (gcc-16.x/0007-rs6000-...), the
 #     binutils edit_opd path leaves a mixed-format .opd whose first
 #     entries decode as NULL-entry-EA when read in compact mode, and
 #     anything walking via bl-redirect / __init_array dispatch lands

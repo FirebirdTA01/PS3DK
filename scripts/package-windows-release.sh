@@ -694,7 +694,7 @@ Quick start:
      This prepends bin\\, ppu\\bin\\ and spu\\bin\\ to PATH and exports
      PS3DEV / PSL1GHT as in-session aliases (some legacy code paths
      still read those names).
-  4. powerpc64-ps3-elf-gcc.exe --version    (-> 12.4.0)
+  4. powerpc64-ps3-elf-gcc.exe --version    (-> 16.1.0)
      spu-elf-gcc.exe            --version    (-> 9.5.0)
 
 Building the samples (CMake — recommended):
