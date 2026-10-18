@@ -18,8 +18,7 @@ set(MINIAUDIO_SHA256 ac7af4de748b7e26b777f37e01cee313a308a7296a3eb080e2906b320cc
 set(_ma_dir "${CMAKE_CURRENT_BINARY_DIR}/miniaudio-${MINIAUDIO_COMMIT}")
 set(_ma_h "${_ma_dir}/miniaudio.h")
 if(DEFINED ENV{PS3TC_MINIAUDIO_H} AND NOT EXISTS "${_ma_h}")
-    file(MAKE_DIRECTORY "${_ma_dir}")
-    file(COPY_FILE "$ENV{PS3TC_MINIAUDIO_H}" "${_ma_h}")
+    configure_file("$ENV{PS3TC_MINIAUDIO_H}" "${_ma_h}" COPYONLY)   # file(COPY_FILE) needs CMake 3.21
 endif()
 if(NOT EXISTS "${_ma_h}")
     file(DOWNLOAD "https://raw.githubusercontent.com/mackron/miniaudio/${MINIAUDIO_COMMIT}/miniaudio.h" "${_ma_h}"

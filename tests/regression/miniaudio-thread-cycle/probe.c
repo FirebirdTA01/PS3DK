@@ -24,23 +24,28 @@
 #include <pthread.h>
 #include <stdio.h>
 
-static volatile ma_uint32 probeCallbacks = 0;
-static volatile ma_uint32 probeFrames = 0;
-static volatile int probeWorkerSeen = 0;
+/* Shared with the worker through __atomic builtins: the counters are atomic, and probeWorker is written once by the
+   worker and published by the release store of probeWorkerSeen (read with acquire), so main reads a complete value. */
+static ma_uint32 probeCallbacks = 0;
+static ma_uint32 probeFrames = 0;
+static int probeWorkerSeen = 0;
 static pthread_t probeWorker;
+#ifndef PROBE_CALLBACKS_WANTED
+#define PROBE_CALLBACKS_WANTED 20   /* a negative-control build raises it past what 2 s can deliver: the row must FAIL */
+#endif
 
 /* Runs on miniaudio's device worker thread: counts the call and records the thread it ran on. */
 static void probeData(ma_device* device, void* output, const void* input, ma_uint32 frameCount)
 {
     (void)input;
     ma_silence_pcm_frames(output, frameCount, device->playback.format, device->playback.channels);
-    if (!probeWorkerSeen)
+    if (!__atomic_load_n(&probeWorkerSeen, __ATOMIC_ACQUIRE))
     {
         probeWorker = pthread_self();
-        probeWorkerSeen = 1;
+        __atomic_store_n(&probeWorkerSeen, 1, __ATOMIC_RELEASE);
     }
-    probeCallbacks += 1;
-    probeFrames += frameCount;
+    __atomic_fetch_add(&probeFrames, frameCount, __ATOMIC_SEQ_CST);
+    __atomic_fetch_add(&probeCallbacks, 1, __ATOMIC_SEQ_CST);
 }
 
 static int probeFail(const char* reason)
@@ -56,13 +61,14 @@ static int probeCycle(ma_context* context, int cycle)
     ma_device_config config;
     ma_device device;
     ma_result result;
-    ma_uint32 atStop;
-    int waitedMilliseconds = 0;
+    ma_uint32 atStop, callbacks, frames, finalCallbacks;
+    int waitedMilliseconds = 0, seen, onMain;
     char reason[96];
 
-    probeCallbacks = 0;
-    probeFrames = 0;
-    probeWorkerSeen = 0;
+    /* no worker exists yet: plain resets, published to the worker by the thread creation in ma_device_init */
+    __atomic_store_n(&probeCallbacks, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&probeFrames, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&probeWorkerSeen, 0, __ATOMIC_SEQ_CST);
     config = ma_device_config_init(ma_device_type_playback);
     config.playback.format = ma_format_f32;
     config.playback.channels = 2;
@@ -85,18 +91,23 @@ static int probeCycle(ma_context* context, int cycle)
         snprintf(reason, sizeof(reason), "cycle %d ma_device_start=%d", cycle, (int)result);
         return probeFail(reason);
     }
-    /* Up to two seconds for twenty callbacks from the worker (the null backend's period is about 10 ms). */
-    while (waitedMilliseconds < 2000 && probeCallbacks < 20)
+    /* Up to two seconds for PROBE_CALLBACKS_WANTED callbacks from the worker (the null backend's period is about
+       10 ms); the same count is required below. */
+    while (waitedMilliseconds < 2000 && __atomic_load_n(&probeCallbacks, __ATOMIC_SEQ_CST) < PROBE_CALLBACKS_WANTED)
     {
         ma_sleep(10);
         waitedMilliseconds += 10;
     }
+    /* one stable snapshot for the report and the checks */
+    callbacks = __atomic_load_n(&probeCallbacks, __ATOMIC_SEQ_CST);
+    frames = __atomic_load_n(&probeFrames, __ATOMIC_SEQ_CST);
+    seen = __atomic_load_n(&probeWorkerSeen, __ATOMIC_ACQUIRE);   /* pairs with the worker's release store */
+    onMain = seen && pthread_equal(probeWorker, pthread_self());
     printf("MAPROBE cycle %d callbacks=%u frames=%u after %d ms; on a thread other than main's: %s\n", cycle,
-           (unsigned)probeCallbacks, (unsigned)probeFrames, waitedMilliseconds,
-           probeWorkerSeen ? (pthread_equal(probeWorker, pthread_self()) ? "no" : "yes") : "none ran");
+           (unsigned)callbacks, (unsigned)frames, waitedMilliseconds, seen ? (onMain ? "no" : "yes") : "none ran");
     fflush(stdout);
     result = ma_device_stop(&device);
-    atStop = probeCallbacks;
+    atStop = __atomic_load_n(&probeCallbacks, __ATOMIC_SEQ_CST);
     printf("MAPROBE cycle %d device_stop=%d\n", cycle, (int)result);
     fflush(stdout);
     if (result != MA_SUCCESS)
@@ -109,22 +120,24 @@ static int probeCycle(ma_context* context, int cycle)
     /* ma_device_uninit returns nothing (miniaudio 0.11): it signals the worker and joins it (ma_thread_wait). A join
        that never returns hangs here, and the run's watchdog reports it. */
     ma_device_uninit(&device);
+    finalCallbacks = __atomic_load_n(&probeCallbacks, __ATOMIC_SEQ_CST);   /* the worker is joined: no more writes */
     printf("MAPROBE cycle %d device_uninit returned (worker joined); callbacks after stop: %u\n", cycle,
-           (unsigned)(probeCallbacks - atStop));
+           (unsigned)(finalCallbacks - atStop));
     fflush(stdout);
-    if (probeCallbacks == 0)
+    if (callbacks < PROBE_CALLBACKS_WANTED)
     {
-        snprintf(reason, sizeof(reason), "cycle %d no data callback in %d ms", cycle, waitedMilliseconds);
+        snprintf(reason, sizeof(reason), "cycle %d only %u of %d data callbacks in %d ms", cycle, (unsigned)callbacks,
+                 PROBE_CALLBACKS_WANTED, waitedMilliseconds);
         return probeFail(reason);
     }
-    if (!probeWorkerSeen || pthread_equal(probeWorker, pthread_self()))
+    if (!seen || onMain)
     {
         snprintf(reason, sizeof(reason), "cycle %d the data callback ran on main's thread", cycle);
         return probeFail(reason);
     }
-    if (probeCallbacks != atStop)
+    if (finalCallbacks != atStop)
     {
-        snprintf(reason, sizeof(reason), "cycle %d %u callbacks after ma_device_stop", cycle, (unsigned)(probeCallbacks - atStop));
+        snprintf(reason, sizeof(reason), "cycle %d %u callbacks after ma_device_stop", cycle, (unsigned)(finalCallbacks - atStop));
         return probeFail(reason);
     }
     return 0;
