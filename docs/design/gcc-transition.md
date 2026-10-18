@@ -138,7 +138,8 @@ Checks beyond the release gate:
   struct passing), with matching data-model tags (attribute 16), so that an
   existing v0.21.x archive needs no rebuild.  C1 changed the `char`,
   `wchar_t`, `wint_t` and `errno` ABI, so mixing is not supported: every
-  object and archive is rebuilt with 16, C and C++, PPU and SPU.
+  object and archive is rebuilt with the new release's toolchain (GCC 16 for
+  PPU, the release's GCC 9.5 for SPU), C and C++.
 - **Carry patterns.**  `count += (x != 0xff102030u)` once counted wrong in
   loops in both data models, because our patches let 32-bit carry patterns
   run on 64-bit registers (fixed in v0.16.4).  No carry pattern is widened in
