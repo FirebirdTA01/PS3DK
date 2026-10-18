@@ -89,6 +89,11 @@ sched-priority-lp64,tests/regression/sched-priority/sched-priority-lp64.fake.sel
 # is checked; the first failing step number is printed.
 pthread-audio-path-ilp32,tests/regression/pthread-audio-path/pthread-audio-path-ilp32.fake.self,90,RAN-CLEAN,PTHREAD_AUDIO_PATH_OK,PTHREAD_AUDIO_PATH_FAIL
 pthread-audio-path-lp64,tests/regression/pthread-audio-path/pthread-audio-path-lp64.fake.self,90,RAN-CLEAN,PTHREAD_AUDIO_PATH_OK,PTHREAD_AUDIO_PATH_FAIL
+# miniaudio-thread-cycle: miniaudio 0.11.25 as released (pinned, hash-checked), its null backend driving a device
+# worker thread through our librt pthreads; two init/start/stop/uninit cycles, callbacks off main's thread and none
+# after stop (t_e87d59d7: a real third-party pthread consumer that runs, not only links).
+miniaudio-thread-cycle-ilp32,tests/regression/miniaudio-thread-cycle/miniaudio-thread-cycle-ilp32.fake.self,60,RAN-CLEAN,MINIAUDIO_THREAD_CYCLE_OK ilp32,MINIAUDIO_THREAD_CYCLE_FAIL|PROBE_FAIL
+miniaudio-thread-cycle-lp64,tests/regression/miniaudio-thread-cycle/miniaudio-thread-cycle-lp64.fake.self,60,RAN-CLEAN,MINIAUDIO_THREAD_CYCLE_OK lp64,MINIAUDIO_THREAD_CYCLE_FAIL|PROBE_FAIL
 # ilp32-ext-dce: a pointer-walking loop at -O2 vs an -O0 reference, lengths 0..200 x 4 alignments.  GCC 16's
 # ext-dce dropped the zero-extension of the wrapped post-loop pointer under ILP32 and the loop ran away
 # (a hang times out); gcc-16.x 0072 keeps the pass off by default.  LP64 is the unaffected control.
