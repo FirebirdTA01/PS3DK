@@ -4,8 +4,11 @@ Status: approved by the director on 2026-10-14 (GCC 16, the stage order below, o
 compiler per release).  With the switchover change the PPU compiler is GCC
 16.1.0 (stage 2, below); the SPU compiler is still GCC 9.5.0, the last release
 with the SPE backend.  This plan moves
-both to one current GCC release line without changing the ABI, and ships the new
-compiler only after it passes every release gate.
+both to one current GCC release line and ships the new compiler only after it
+passes every release gate.  The plan first meant to keep the ABI unchanged; the
+C1 change (signed plain `char` under ILP32, 16-bit `wchar_t`, `int` `wint_t`,
+LV2 `errno` values) changed it, so every object and archive must be rebuilt, C
+and C++, PPU and SPU.
 
 ## Target version: GCC 16
 
@@ -98,12 +101,16 @@ Exit: the full SDK and sample build is clean under the flags above on 12.4.
 
 ## Stage 2: PPU on GCC 16
 
-**Status: done with the switchover change, effective in the release the
-director approves for it.**  `build-ppu-toolchain.sh` builds GCC 16.1.0 only;
-its `--gcc` selector and the GCC 12.4 path are gone from the build and release
-scripts, and `bootstrap.sh` fetches `releases/gcc-16.1.0`.  `patches/ppu/gcc-12.x`
-stays in the tree as the port map's reference.  Until that release is tagged,
-the last published release still ships GCC 12.4.0.
+**Status: the switch is made in the build and release scripts, effective in
+the release the director approves for it.**  `build-ppu-toolchain.sh` builds
+GCC 16.1.0 only; its `--gcc` selector and the GCC 12.4 path are gone from the
+build and release scripts, and `bootstrap.sh` fetches `releases/gcc-16.1.0`.
+`patches/ppu/gcc-12.x` stays in the tree as the port map's reference.  Until
+that release is tagged, the last published release still ships GCC 12.4.0.
+The exit criteria below that have not been measured remain pending; the stage
+is done only when they pass.  The ABI-compatibility check is superseded by C1:
+objects and archives built by a 12.4 release are not compatible and must be
+rebuilt.
 
 A new patch directory `patches/ppu/gcc-16.x/`, ported patch by patch from the
 post-stage-0 series and tracked in a port map: each 12.4 patch is marked
@@ -125,11 +132,13 @@ Checks beyond the release gate:
   method: the same configure line, `make all-gcc`, compared with `-B`).  Report
   static size and loop-instruction deltas per archive, and explain any change
   over 2%, per the performance rule for GCC changes.
-- **ABI compatibility.**  Objects and archives built by 12.4 link with objects
-  built by 16, in both data models, and run: C++ exceptions thrown across the
-  boundary, TOC calls, TLS, varargs, struct passing.  The data-model tag
-  (attribute 16) must agree.  An existing v0.21.x archive must not need a
-  rebuild.
+- **ABI compatibility (superseded by C1).**  The original check: objects and
+  archives built by 12.4 link with objects built by 16, in both data models,
+  and run (C++ exceptions thrown across the boundary, TOC calls, TLS, varargs,
+  struct passing), with matching data-model tags (attribute 16), so that an
+  existing v0.21.x archive needs no rebuild.  C1 changed the `char`,
+  `wchar_t`, `wint_t` and `errno` ABI, so mixing is not supported: every
+  object and archive is rebuilt with 16, C and C++, PPU and SPU.
 - **Carry patterns.**  `count += (x != 0xff102030u)` once counted wrong in
   loops in both data models, because our patches let 32-bit carry patterns
   run on 64-bit registers (fixed in v0.16.4).  No carry pattern is widened in

@@ -11,7 +11,7 @@
 # Patches are applied from patches/ppu/<component>/ in the order listed in
 # patches/ppu/<component>/series (or, if no series file exists, sorted by name).
 #
-# Re-runnable: delete $PS3_BUILD_ROOT/ppu to force a clean rebuild, or run with
+# Re-runnable: delete $PS3_BUILD_ROOT/ppu-gcc16 to force a clean rebuild, or run with
 # --clean to do it for you.
 
 set -euo pipefail
