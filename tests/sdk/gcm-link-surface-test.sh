@@ -5,7 +5,7 @@
 # libgcm_cmd.a, in both data models.
 #
 # Rows:
-#   header   the header declares exactly 137 cellGcm* prototypes, none of
+#   header   the header declares exactly 138 cellGcm* prototypes, none of
 #            them cellGcmFlushUnsafe / cellGcmFinishUnsafe (static inline in
 #            gcm_command_c.h; their link-time form is deferred).
 #   compile  a unit that includes <cell/gcm.h> and takes the address of every
@@ -52,14 +52,14 @@ hdr="$root/sdk/include/cell/gcm/gcm_command_link.h"
 sed -n 's/^[A-Za-z_][A-Za-z0-9_ *]*[ *]\(cellGcm[A-Za-z0-9_]*\)(.*/\1/p' "$hdr" | tr -d '\r' > "$work/names"
 n=$(wc -l < "$work/names")
 dups=$(sort "$work/names" | uniq -d | head -3 | tr '\n' ' ')
-if [ "$n" -ne 137 ]; then
-    fail "header: $n prototypes, expected 137"
+if [ "$n" -ne 138 ]; then
+    fail "header: $n prototypes, expected 138"
 elif [ -n "$dups" ]; then
     fail "header: declared twice: $dups"
 elif grep -qx -E 'cellGcm(Flush|Finish)Unsafe' "$work/names"; then
     fail "header: declares cellGcmFlushUnsafe/cellGcmFinishUnsafe"
 else
-    ok "header: 137 prototypes"
+    ok "header: 138 prototypes"
 fi
 
 # ---- compile --------------------------------------------------------------------
@@ -105,7 +105,7 @@ for a in "$lib/libgcm_cmd.a" "$lib/lp64/libgcm_cmd.a"; do
     elif [ -n "$extra" ]; then
         fail "archive $a: defines $extra"
     else
-        ok "archive $a: all 137 defined once"
+        ok "archive $a: all 138 defined once"
     fi
 done
 
