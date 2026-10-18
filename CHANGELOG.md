@@ -72,9 +72,9 @@ The version stamped into builds is generated from the most recent
 ### Fixed
 
 - **Program arguments and the environment work in the default data model.**
-  Since v0.11.0, under ILP32 (the default), every `argv[i]` read the high
-  word of LV2's 64-bit argument vector, so `main` saw NULL or junk for any
-  argument, and `environ` stayed empty.  The start-up code now narrows
+  Since v0.11.0, under ILP32 (the default), `main` interpreted LV2's 64-bit
+  argument vector as 32-bit pointers, so `argv[0]` was NULL for an address
+  below 4 GiB and later entries were misindexed, and `environ` stayed empty.  The start-up code now narrows
   LV2's argument and environment vectors in place before `main`, and
   publishes a valid environment as `environ` before constructors run, so
   `getenv` works in constructors too.  LP64 programs keep their vectors as
