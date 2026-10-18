@@ -1,0 +1,5 @@
+// a.x * 0.3 written twice is computed once.
+float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform float4 u) : COLOR
+{
+    return (a.x * 0.3) * a + (a.x * 0.3) * b;
+}

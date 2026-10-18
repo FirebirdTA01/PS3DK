@@ -1,0 +1,5 @@
+// 16 has no destination scale: the divide stays a DIVR (control).
+float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform float4 u) : COLOR
+{
+    return (16.0 / u.x).xxxx;
+}

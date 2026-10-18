@@ -1,0 +1,6 @@
+// Two vectors divided by the same vector take one reciprocal per divisor
+// component, not one per divide.
+float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform float4 u) : COLOR
+{
+    return float4(a.xy / u.zw, a.zw / u.zw);
+}

@@ -1,0 +1,5 @@
+// 4.0 / b.x (a varying divisor) is one reciprocal with the x4 scale.
+float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform float4 u) : COLOR
+{
+    return (4.0 / b.x).xxxx;
+}

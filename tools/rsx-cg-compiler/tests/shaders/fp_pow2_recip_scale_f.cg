@@ -1,0 +1,5 @@
+// 0.5 / u.x is one reciprocal with the /2 destination scale (RCPR_D2).
+float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform float4 u) : COLOR
+{
+    return (0.5 / u.x).xxxx + a;
+}

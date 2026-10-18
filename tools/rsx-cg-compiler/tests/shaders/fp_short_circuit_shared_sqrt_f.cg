@@ -1,0 +1,16 @@
+// One sqrt comparison (with literals) in two scalar && right-hand sides.
+// Once the literals share ids, CSE merges the two sqrt chains; the merged
+// value is used only inside short-circuit right-hand sides and must not be
+// refused as an ordinary shared use.
+bool near3(float3 p, float3 q)
+{
+    float3 d = p - q;
+    return sqrt(dot(d, d) * 0.5) < 0.25;
+}
+
+float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform float4 u) : COLOR
+{
+    bool first  = (a.w > 0.5) && near3(a.xyz, b.xyz);
+    bool second = (b.w > 0.5) && near3(a.xyz, b.xyz);
+    return (first || second) ? a : b;
+}

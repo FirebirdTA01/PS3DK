@@ -774,6 +774,8 @@ jobs:
         run: bash tests/shader-compiler/stdlib-derivatives-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler DIVR opcode
         run: bash tests/shader-compiler/divr-opcode-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Fragment programs share literal expressions, reciprocals and pow2 divide scales
+        run: bash tests/shader-compiler/fp-literal-sharing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Scalar local initializers broadcast to vectors once
         run: bash tests/shader-compiler/scalar-vector-decl-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper struct annotations do not bind entry inputs
