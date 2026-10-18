@@ -44,6 +44,10 @@ foreach(abi ilp32 lp64)
     target_compile_features(miniaudio-thread-cycle-${abi} PRIVATE c_std_11)
     target_include_directories(miniaudio-thread-cycle-${abi} PRIVATE "${_ma_dir}")
     target_compile_options(miniaudio-thread-cycle-${abi} PRIVATE -Wall)
+    # miniaudio's filters call sin/pow/sqrt.  Known ILP32 warning, harmless here: ma_uintptr is 64-bit on
+    # __powerpc64__ while our ILP32 pointers are 32-bit, so ma_aligned_malloc's pointer round trip widens and narrows
+    # losslessly (-Wpointer-to-int-cast / -Wint-to-pointer-cast at one site, ILP32 only).
+    target_link_libraries(miniaudio-thread-cycle-${abi} PRIVATE m)
     set_source_files_properties(main.c PROPERTIES COMPILE_OPTIONS "-Wextra;-Werror=implicit-function-declaration")
     if(abi STREQUAL "lp64")
         target_compile_options(miniaudio-thread-cycle-${abi} PRIVATE -mlp64)
