@@ -334,8 +334,8 @@ jobs:
       - name: Test the GCC 16 patch series against its port map
         run: bash tests/host/gcc16-series-test.sh
 
-      # build-ppu-toolchain.sh --gcc=12|16 selection and the refusal to build
-      # one GCC major version over another (--print-config, no build).
+      # build-ppu-toolchain.sh builds GCC 16.1.0 only: other --gcc values and a
+      # prefix holding an earlier GCC 12.4 are refused (--print-config, no build).
       - name: Test the PPU GCC version selection
         run: bash tests/host/ppu-gcc-select-test.sh
 

@@ -4,9 +4,9 @@ This document explains the current compiler-version pins and the rationale behin
 
 ## PPU compiler
 
-The PPU target currently uses GCC 12.4.0 as `powerpc64-ps3-elf`.
+The PPU target uses GCC 16.1.0 as `powerpc64-ps3-elf` (`patches/ppu/gcc-16.x`).
 
-GCC 12.x was the highest line that rebased onto the original PPU patch set without a broader backend rewrite; the move to GCC 16 is planned in [design/gcc-transition.md](design/gcc-transition.md). GCC 12.4 gives full C++17, substantial C++20 coverage, and partial C++23 support through `-std=c++2b`. The shipped libstdc++ includes ranges, concepts, coroutines, most parallel algorithms, and the `<chrono>` calendar types; `<format>` and the `<chrono>` time-zone database are not in the shipped 12.4 library.
+Earlier releases shipped GCC 12.4.0, the highest line that rebased onto the original PPU patch set without a broader backend rewrite. The move to GCC 16 is described in [design/gcc-transition.md](design/gcc-transition.md). The GCC 16 driver builds C++ as GNU C++17 unless a `-std=` option is given, so C++20 and C++23 are opt-in; C builds as GNU C23, where an implicit function declaration is an error. libstdc++ and libgcc are built with the POSIX thread model over the runtime's pthreads.
 
 The PPU side also carries the CellOS-specific pieces needed by this SDK:
 

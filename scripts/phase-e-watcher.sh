@@ -21,7 +21,7 @@ tail -F -n 0 "$LOG" 2>/dev/null | while IFS= read -r line; do
       ;;
   esac
   # MILESTONES (once each)
-  for ms in 'Extracting releases/gcc-12.4.0' 'Configuring GCC' 'Building GCC+newlib' 'Installing GCC+newlib'; do
+  for ms in 'Extracting releases/gcc-16.1.0' 'Configuring GCC' 'Building GCC+newlib' 'Installing GCC+newlib'; do
     case "$line" in
       *"$ms"*)
         if [[ -z "${seen[$ms]:-}" ]]; then

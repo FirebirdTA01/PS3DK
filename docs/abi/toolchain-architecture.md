@@ -50,7 +50,7 @@ PSL1GHT-compatibility bridges.
 ### 1. GCC — PPU target `powerpc64-ps3-elf`
 
 Source: upstream GCC rs6000 backend plus PS3DK patches under
-`patches/ppu/gcc-12.x/`.
+`patches/ppu/gcc-16.x/`.
 
 Responsibilities:
 

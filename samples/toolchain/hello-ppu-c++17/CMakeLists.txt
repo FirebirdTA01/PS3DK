@@ -24,7 +24,7 @@ add_executable(hello-ppu-c++17 source/main.cpp)
 target_compile_features(hello-ppu-c++17 PRIVATE cxx_std_17)
 
 # The PPU GCC driver auto-injects sysbase / c / rt / lv2 via
-# LIB_LV2_SPEC (see patches/ppu/gcc-12.x/0002-add-cell64lv2-target-header).
+# LIB_LV2_SPEC (see patches/ppu/gcc-16.x/0002-add-cell64lv2-target-header).
 # We only need the EXTRA libs that the sample uses on top: libsysutil
 # for sysutil callbacks, libm for libstdc++'s math primitives.
 target_link_libraries(hello-ppu-c++17 PRIVATE sysutil m)

@@ -199,15 +199,15 @@ say "=== Upstream toolchain mirrors ==="
 UPSTREAM_DIR="$PS3_TOOLCHAIN_ROOT/src/upstream"
 mkdir -p "$UPSTREAM_DIR"
 
-# GCC — need both 12.4.0 (PPU) and 9.5.0 (SPU).
+# GCC — need both 16.1.0 (PPU) and 9.5.0 (SPU).
 # Use the GitHub mirror — gcc.gnu.org's git endpoint has answered
 # at 15-30 s/request under load (HTTP 200 but past the GitHub
 # Actions timeout for git's hundreds-of-requests clone path),
 # returning RPC-failed 502s mid-clone.  github.com/gcc-mirror/gcc
 # is the official mirror maintained by the GCC team and answers
-# in ~250 ms; tag names match (releases/gcc-12.4.0 etc.).
+# in ~250 ms; tag names match (releases/gcc-16.1.0 etc.).
 init_remote "https://github.com/gcc-mirror/gcc.git" "$UPSTREAM_DIR/gcc"
-fetch_tag "$UPSTREAM_DIR/gcc" "releases/gcc-12.4.0"
+fetch_tag "$UPSTREAM_DIR/gcc" "releases/gcc-16.1.0"
 fetch_tag "$UPSTREAM_DIR/gcc" "releases/gcc-9.5.0"
 
 # Binutils + GDB share one repo.

@@ -34,8 +34,6 @@ The version stamped into builds is generated from the most recent
     firmware-created threads are not covered.
 
   `std::shared_mutex` is built on a mutex and a condition variable.
-  GCC 12.4 keeps the single thread model for libstdc++ and libgcc; its
-  pthread programs still work.
 - **`sceNpDrmOpen`.**  New `<np/drm_inline.h>` provides `sceNpDrmOpen`,
   which checks that NP DRM content is available to the licensee key and
   opens it as DRM content with `cellFsOpen`.
@@ -72,12 +70,39 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **The PPU compiler is GCC 16.1.0.**  GCC 12.4.0 is no longer built or
+  shipped.
+  - `build-ppu-toolchain.sh` builds 16.1.0 only.  Its `--gcc` option is
+    gone: `--gcc=16` is accepted and changes nothing, any other value is
+    refused.
+  - A `$PS3DEV` that already holds a GCC 12.4 PPU compiler is refused.
+    Install into a fresh prefix.
+  - `bootstrap.sh` fetches `releases/gcc-16.1.0` in place of
+    `releases/gcc-12.4.0`.  Re-run it in an existing checkout.
+  - Rebuild every object and static library, C as well as C++, PPU and SPU:
+    the ABI entry below lists what changed.
+- **C: implicit function declarations are errors.**  A call to an undeclared
+  function no longer compiles.  The same holds for implicit `int`, integer to
+  pointer conversions without a cast, and incompatible pointer types.
+  Include the header that declares the function.  `-fpermissive` turns these
+  back into warnings while code is being fixed.
+- **C builds as GNU C23 by default.**  `bool`, `true`, `false`, `nullptr`,
+  `static_assert` and `thread_local` are keywords, and `int f()` declares a
+  function that takes no arguments.  Code that defines its own `bool`, or
+  calls a function declared with an empty parameter list with arguments,
+  builds with `-std=gnu17`.
 - **C++ defaults to GNU C++17 (GCC 16).**  With no `-std=` option and no
   `-ansi`, the PPU compiler builds C++ as `-std=gnu++17`, so `__cplusplus`
   is `201703L` as with GCC 12.4.  This holds for plain Makefiles, autotools
   and CMake alike.  C++20 and C++23 are one option away: any explicit
-  `-std=`, or a CMake `CMAKE_CXX_STANDARD`, is used as given.  C is
-  unchanged.  libstdc++ is built in the dialects it was built in before.
+  `-std=`, or a CMake `CMAKE_CXX_STANDARD`, is used as given.  libstdc++ is
+  built in the dialects it was built in before.
+  - Under C++20 and later, `<math.h>` brings `std::lerp` into the global
+    namespace, so a program's own global `lerp(float, float, float)`
+    conflicts with it.  Rename it or move it into a namespace.
+- **The runtime start file and librt are new builds.**  `lv2-crt0.o` and
+  `librt.a` are built by GCC 16, so their contents and hashes change.  A
+  project that checks the hashes of those files needs the new values.
 - **The SDK headers are on the compiler's default include path (GCC 16).**
   The PPU driver adds `-isystem <SDK>/ppu/include` unless `-nostdinc` is
   given, so the SDK's own headers are available without extra flags.

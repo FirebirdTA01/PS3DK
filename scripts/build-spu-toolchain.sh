@@ -6,11 +6,11 @@
 #   GCC 9.5.0      -> $PS3DEV/spu  (last GCC with a working SPU backend)
 #   newlib 4.4.0   -> combined build (libgloss/spu upstream + PS3 extras patch)
 #
-# Why GCC 9.5.0 here and 12.4.0 for PPU:
+# Why GCC 9.5.0 here and 16.1.0 for PPU:
 #   - GCC 9 was the last version with an intact config/spu/ backend.
 #   - GCC 9.5.0 is the newest 9.x patch release; includes C++17 complete and
 #     partial C++20.
-#   - GCC 10 removed ~34k lines of SPU backend. Forward-porting to 12.4.0 is
+#   - GCC 10 removed ~34k lines of SPU backend. Forward-porting to GCC 16 is
 #     a long-lead workstream, kept in a separate branch.
 #
 # SPU C++ constraints (256 KB local store budget):

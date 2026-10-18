@@ -3,8 +3,7 @@
 #
 # Builds:
 #   binutils 2.42  -> $PS3DEV/ppu
-#   GCC 12.4.0     -> $PS3DEV/ppu (stage 1 + newlib + stage 2);
-#                     --gcc=16 builds GCC 16.1.0 instead (patches/ppu/gcc-16.x)
+#   GCC 16.1.0     -> $PS3DEV/ppu (stage 1 + newlib + stage 2; patches/ppu/gcc-16.x)
 #   newlib 4.4.0   -> as part of combined GCC build
 #   GDB 14.2       -> $PS3DEV/ppu
 #
@@ -12,7 +11,7 @@
 # Patches are applied from patches/ppu/<component>/ in the order listed in
 # patches/ppu/<component>/series (or, if no series file exists, sorted by name).
 #
-# Re-runnable: delete $PS3_BUILD_ROOT/ppu to force a clean rebuild, or run with
+# Re-runnable: delete $PS3_BUILD_ROOT/ppu-gcc16 to force a clean rebuild, or run with
 # --clean to do it for you.
 
 set -euo pipefail
@@ -32,12 +31,9 @@ die() { printf "[ppu] ERROR: %s\n" "$*" >&2; exit 1; }
 # Component versions — bump these if we re-target.
 BINUTILS_TAG="binutils-2_42"
 BINUTILS_VER="2.42"
-# GCC_* default to 12.4; --gcc=16 selects the GCC 16 port below.
-GCC_TAG="releases/gcc-12.4.0"
-GCC_VER="12.4.0"
-GCC_PATCH_DIR="gcc-12.x"
-# Host C++ dialect for GCC's own sources: 12's libcody needs exact C++11.
-GCC_HOST_CXX_STD="gnu++11"
+GCC_TAG="releases/gcc-16.1.0"
+GCC_VER="16.1.0"
+GCC_PATCH_DIR="gcc-16.x"
 NEWLIB_TAG="newlib-4.4.0"
 NEWLIB_VER="4.4.0"
 GDB_TAG="gdb-14.2-release"
@@ -48,7 +44,8 @@ PREFIX="$PS3DEV/ppu"
 
 UPSTREAM="$PS3_TOOLCHAIN_ROOT/src/upstream"
 PATCHES="$PS3_TOOLCHAIN_ROOT/patches/ppu"
-BUILD="$PS3_BUILD_ROOT/ppu"
+# ppu-gcc16, not ppu: a build tree left by an earlier GCC 12.4 toolchain is never reused.
+BUILD="$PS3_BUILD_ROOT/ppu-gcc16"
 
 JOBS="$(nproc 2>/dev/null || echo 4)"
 say "Using $JOBS parallel jobs."
@@ -56,11 +53,11 @@ say "Using $JOBS parallel jobs."
 # CLI: optional --clean wipes build dir; --only <step> runs only that step.
 # Steps: binutils | gcc-newlib | gdb | symlinks (default: all in order).
 #
-# --gcc=12|16 picks the PPU GCC (default 12, the shipped compiler).  16 builds
-# in its own build directory and must go to its own prefix: a prefix that
-# already holds a different GCC major version is refused, so set PS3DEV to a
-# separate stage for it.  --print-config prints the resolved selection and
-# exits without building.
+# GCC 16.1.0 is the only PPU compiler.  A prefix that already holds another
+# GCC major version (an earlier 12.4 install) is refused, so point PS3DEV at a
+# fresh prefix.  --gcc=16 is still accepted and changes nothing; any other
+# --gcc value is refused.  --print-config prints the resolved configuration
+# and exits without building.
 #
 # Cross-build mode (Windows-hosted toolchain):
 #   --host=x86_64-w64-mingw32   produce .exe binaries that run on Windows.
@@ -73,13 +70,13 @@ say "Using $JOBS parallel jobs."
 ONLY=""
 HOST_TRIPLE=""
 BUILD_TRIPLE=""
-GCC_MAJOR=12
 CLEAN=""
 PRINT_CONFIG=""
 for arg in "$@"; do
     case "$arg" in
         --clean) CLEAN=1 ;;
-        --gcc=*) GCC_MAJOR="${arg#--gcc=}" ;;
+        --gcc=16) ;;
+        --gcc=*) die "$arg: GCC 16.1.0 is the only PPU compiler (the GCC 12.4 path was removed)" ;;
         --print-config) PRINT_CONFIG=1 ;;
         --only=*) ONLY="${arg#--only=}" ;;
         --only) shift; ONLY="${1:-}" ;;
@@ -89,27 +86,11 @@ for arg in "$@"; do
     esac
 done
 
-case "$GCC_MAJOR" in
-    12) ;;
-    16)
-        GCC_TAG="releases/gcc-16.1.0"
-        GCC_VER="16.1.0"
-        GCC_PATCH_DIR="gcc-16.x"
-        # No pin: GCC 16's own code needs C++14 while its libcody still
-        # requires exactly C++11, and each configure adds the -std it needs
-        # unless CXXFLAGS overrides it.
-        GCC_HOST_CXX_STD=""
-        BUILD="$PS3_BUILD_ROOT/ppu-gcc16"
-        ;;
-    *) die "--gcc=$GCC_MAJOR: supported values are 12 and 16" ;;
-esac
-
 # When cross-building, install into a parallel prefix and use a separate
 # build directory so the native install tree is untouched and reusable.
 NATIVE_PREFIX="$PREFIX"
 if [[ -n "$HOST_TRIPLE" ]]; then
     PREFIX="${PS3DEV}.win/ppu"
-    # ppu-<host> for 12.4 (as before), ppu-gcc16-<host> for 16: the two never share a tree.
     BUILD="${BUILD}-${HOST_TRIPLE}"
     BUILD_TRIPLE="${BUILD_TRIPLE:-$(uname -m)-pc-linux-gnu}"
     [[ -x "$NATIVE_PREFIX/bin/$TARGET-gcc" ]] \
@@ -154,8 +135,7 @@ require_cross_prefix_major() {
         || die "cross prefix $p holds GCC $ver (per $meta); refusing to build GCC $GCC_VER with it. Point PS3DEV at a separate prefix."
 }
 
-# Never build one GCC major version over another (stage 2: GCC 16 is built
-# beside 12.4, not over it).  A cross build also copies the native prefix's
+# Never build GCC 16 over another major version (an earlier 12.4 install).  A cross build also copies the native prefix's
 # target libraries into its package, so the native compiler must match too.
 if [[ -n "$HOST_TRIPLE" ]]; then
     require_cross_prefix_major "$PREFIX"
@@ -166,7 +146,7 @@ fi
 
 if [[ -n "$PRINT_CONFIG" ]]; then
     for kv in "gcc_tag=$GCC_TAG" "gcc_ver=$GCC_VER" "gcc_patches=$PATCHES/$GCC_PATCH_DIR" \
-              "host_cxx_std=$GCC_HOST_CXX_STD" "prefix=$PREFIX" "build=$BUILD"; do
+              "prefix=$PREFIX" "build=$BUILD"; do
         echo "$kv"
     done
     exit 0
@@ -365,7 +345,7 @@ build_binutils() {
 }
 
 # -----------------------------------------------------------------------------
-# 2. GCC (12.4.0, or 16.1.0 with --gcc=16) + newlib 4.4.0 (combined-tree build)
+# 2. GCC 16.1.0 + newlib 4.4.0 (combined-tree build)
 #
 #    The combined-tree pattern symlinks newlib/libgloss into the GCC source tree
 #    so a single build produces libgcc, newlib, libstdc++ in one pass. This is
@@ -376,14 +356,14 @@ build_gcc_newlib() {
     local newlib_src="$BUILD/newlib-$NEWLIB_VER-src"
     local obj="$BUILD/gcc-$GCC_VER-build"
 
-    # Thread model: GCC 16 builds libstdc++/libgcc with the posix gthread
-    # layer over librt's pthreads (newlib patch 0018 declares them for the
-    # toolchain build; gcc-16.x 0069-0071).  12.4 stays single-threaded until
-    # the switchover.  PS3_GCC_THREADS overrides either.  The model changes
+    # Thread model: libstdc++/libgcc are built with the posix gthread layer
+    # over librt's pthreads (newlib patch 0018 declares them for the
+    # toolchain build; gcc-16.x 0069-0071).  PS3_GCC_THREADS=single
+    # overrides it.  The model changes
     # libstdc++'s ABI (shared_ptr's lock policy, guards), so a build tree or a
     # stage made for another model is never reused: the tree is rebuilt from
     # scratch, and the model is stamped into both.
-    local threads_mode="${PS3_GCC_THREADS:-$(ppu_threads_default "$GCC_MAJOR")}"
+    local threads_mode="${PS3_GCC_THREADS:-$(ppu_threads_default "${GCC_VER%%.*}")}"
     local native_for_model=""
     [[ -n "$HOST_TRIPLE" ]] && native_for_model="$NATIVE_PREFIX"
     check_gcc_thread_model() {
@@ -487,19 +467,11 @@ build_gcc_newlib() {
         "$(ppu_gcc_threads_arg "$threads_mode")"
     )
 
-    # GCC 12's host-side libcody requires exact C++11.  Newer rolling
-    # hosts can default g++ to C++20-or-later semantics where u8 literals
-    # become char8_t, which libcody does not accept.  GCC 16 is not pinned
-    # (GCC_HOST_CXX_STD empty): forcing one -std there breaks either libcody
-    # or GCC itself.
+    # No host -std pin: GCC 16's own code needs C++14 while its libcody
+    # still requires exactly C++11, and each configure adds the -std it
+    # needs unless CXXFLAGS overrides it, so forcing one breaks either.
     local target_env=()
     local target_make_env=()
-    if [[ -n "$GCC_HOST_CXX_STD" ]]; then
-        target_env+=(
-            CXXFLAGS=-std=$GCC_HOST_CXX_STD
-            CXXFLAGS_FOR_BUILD=-std=$GCC_HOST_CXX_STD
-        )
-    fi
     # Extra host flags for the Windows cross build only.  Set LAST on the
     # configure env line so it wins over target_env's CXXFLAGS and the shared
     # CROSS_LDFLAGS_ARGS CFLAGS, without disturbing their order.
@@ -522,15 +494,11 @@ build_gcc_newlib() {
             CC_FOR_BUILD=gcc
             CXX_FOR_BUILD=g++
         )
-        # 12.4: -std=gnu++11 keeps libcody's C++11 guard while adding the prefix
-        # map.  16: no -std (GCC 16 itself needs C++14 and each configure adds
-        # the -std it needs, as in the native build).  Appended LAST on the env
-        # line so it wins over both target_env's CXXFLAGS and
-        # CROSS_LDFLAGS_ARGS' CXXFLAGS, without touching their order.
-        local host_std=""
-        [[ -n "$GCC_HOST_CXX_STD" ]] && host_std="-std=gnu++11 "
+        # The prefix map without a -std (as in the native build).  Appended
+        # LAST on the env line so it wins over CROSS_LDFLAGS_ARGS' CXXFLAGS,
+        # without touching their order.
         gcc_host_cxx=(
-            "CXXFLAGS=${host_std}-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+            "CXXFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
         )
     else
         conf_args+=(--with-system-zlib)

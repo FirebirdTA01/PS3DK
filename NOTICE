@@ -8,7 +8,7 @@ authoritative license text of each component.
 GCC (GNU Compiler Collection)
 -----------------------------
 Upstream: git://sourceware.org/git/gcc.git
-Versions used: 12.4.0 (PPU), 9.5.0 (SPU)
+Versions used: 16.1.0 (PPU), 9.5.0 (SPU)
 License: GNU General Public License v3 or later, with the GCC Runtime Library
 Exception v3.1. Libgcc, libstdc++, libsupc++, libgomp, etc. are covered under
 the runtime library exception allowing linking with proprietary applications.

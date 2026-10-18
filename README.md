@@ -1,13 +1,14 @@
 # PS3 Custom Toolchain
 
-A modern, open-source toolchain and SDK for the PlayStation 3. It is C++17-first on both the PowerPC 64 PPU and the Synergistic Processing Units (SPU), with GCC 12.4.0 on PPU and GCC 9.5.0 on SPU. The PPU compiler also has substantial C++20 and partial C++23 library support.
+A modern, open-source toolchain and SDK for the PlayStation 3. It is C++17-first on both the PowerPC 64 PPU and the Synergistic Processing Units (SPU), with GCC 16.1.0 on PPU and GCC 9.5.0 on SPU. The PPU compiler builds C++ as GNU C++17 by default; C++20 and C++23 are one `-std=` option away.
 
 The SDK now has its own runtime, native cell-style headers, NID/FNID-driven stub archives, fragment-shader tooling, and CMake sample flow. PSL1GHT remains a supported front-end for existing homebrew, while new code can use either PSL1GHT-style or cell-style APIs against the same installed runtime.
 
 ## Current status
 
-- **Toolchain:** PPU GCC 12.4.0, SPU GCC 9.5.0, binutils 2.42, newlib 4.4.0, and PPU GDB 14.2 build and install end-to-end on Linux.
-- **PPU ABI:** default PPU binaries use ELF64 with 32-bit C pointers for CellOS compatibility. `-mlp64` selects the LP64 multilib. See [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md).
+- **Toolchain:** PPU GCC 16.1.0, SPU GCC 9.5.0, binutils 2.42, newlib 4.4.0, and PPU GDB 14.2 build and install end-to-end on Linux. libstdc++ has the POSIX thread model (`std::thread`, `std::mutex` and friends).
+- **PPU ABI:** default PPU binaries use ELF64 with 32-bit C pointers for CellOS compatibility. `-mlp64` selects the LP64 multilib. Plain `char` is signed in the default data model, `wchar_t` is 16 bits in both, and the `E*` names LV2 defines take its status codes. Objects and archives built by a GCC 12.4 release must be rebuilt. See [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md).
+- **C dialect:** GCC 16 builds C as GNU C23, and an implicit function declaration is an error.
 - **SDK export coverage:** 4336 of 4802 tracked exports (90.3%) across 99 tracked libraries are covered by the v0.24.0 install tree; 96 libraries are complete, and the remaining gaps are in `libm_stub`, `libstdc++_stub` and `libsync2_stub`. The full generated matrix is in [docs/coverage.md](docs/coverage.md).
 - **Network and NP coverage:** the current network-stack wave covers cellNetCtl, sys_net, SSL, HTTP/HTTPUtil, and the NP family (`sysutil_np`, NP2, trophy, TUS, clans, commerce2, SNS, and utility surfaces), adding roughly 700 exports; 13 network validation samples exercise it.
 - **Samples:** 193 CMake sample projects: toolchain 50, sysutil 40, GCM 24, LV2 18, SPURS 15, codec 14, network 13, SPU 6, audio 4, firmware helper 4, font 2, dbgfont 1, util 1 and vision 1, plus 21 PSL1GHT sample ports. See [samples/README.md](samples/README.md).
@@ -21,7 +22,7 @@ The repo is growing from a refreshed ps3dev/PSL1GHT baseline into a fuller SDK u
 
 | Component | Version | Target | Purpose |
 |---|---|---|---|
-| GCC (PPU) | **12.4.0** | `powerpc64-ps3-elf` | PowerPC 64 cross-compiler for the PPE |
+| GCC (PPU) | **16.1.0** | `powerpc64-ps3-elf` | PowerPC 64 cross-compiler for the PPE |
 | GCC (SPU) | **9.5.0** | `spu-elf` | Cross-compiler for the SPE's SPU cores + `libgcc` cache manager |
 | Binutils | **2.42** | both targets | Assembler, linker, `ar` / `objcopy` / `nm` / `strip` for both PPU and SPU; small PS3 patch series for each target (`patches/ppu/binutils-2.42`, `patches/spu/binutils-2.42`) |
 | Newlib | **4.4.0** | both targets | C standard library + PS3 `libsysbase` / `libgloss` lv2 syscall glue (CRT0, `_write_r` / `_sbrk_r` / `_read_r` etc.) |
@@ -69,7 +70,7 @@ End users who don't need to build the toolchain from source can use `ps3-sdk-vX.
    powerpc64-ps3-elf-gcc.exe --version
    spu-elf-gcc.exe --version
    ```
-   You should see `(GCC) 12.4.0` and `(GCC) 9.5.0`.
+   You should see `(GCC) 16.1.0` and `(GCC) 9.5.0`.
 
 ### Building samples from the prebuilt release
 
@@ -550,13 +551,15 @@ source ./scripts/env.sh
 
 Both toolchain build scripts accept `--only <step>` and `--clean` to wipe intermediates before rebuilding. The PPU steps are binutils, gcc-newlib, gdb and symlinks; the SPU steps are binutils, gcc-newlib, symlinks and linker-script.
 
+`build-ppu-toolchain.sh` builds GCC 16.1.0 only and refuses a `$PS3DEV` that already holds a GCC 12.4 PPU compiler: install into a fresh prefix, then rebuild PSL1GHT, the portlibs, the SDK and your own objects against it. Re-run `bootstrap.sh` first in an existing checkout so it fetches `releases/gcc-16.1.0`.
+
 After a successful build, toolchain binaries live under `$PS3DEV/bin/` (aliased as `ppu-gcc`, `spu-gcc`, etc.).  The PSL1GHT runtime and our own SDK headers and archives (e.g. `libgcm_cmd.a`, `libdbgfont.a`) both install into `$PS3DK` (`$PS3DEV/ps3dk/ppu/`).
 
 ### Verify the install
 
 ```bash
 # Toolchain binaries respond with their version banner.
-$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc --version   # -> 12.4.0
+$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc --version   # -> 16.1.0
 $PS3DEV/spu/bin/spu-elf-gcc         --version     # -> 9.5.0
 
 # SDK headers + libraries are in place.

@@ -4,7 +4,7 @@
 // via the SPU argument area, sets the flag to a known value via DMA, and exits.
 //
 // This file builds with spu-elf-gcc (GCC 9.5.0 for now; a future forward-port
-// to GCC 12.x is planned).
+// to GCC 16 is planned).
 
 #include <stdint.h>
 #include <spu_intrinsics.h>
