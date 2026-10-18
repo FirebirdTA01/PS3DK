@@ -21,16 +21,130 @@ The version stamped into builds is generated from the most recent
 - **`sceNpDrmOpen`.**  New `<np/drm_inline.h>` provides `sceNpDrmOpen`,
   which checks that NP DRM content is available to the licensee key and
   opens it as DRM content with `cellFsOpen`.
+- **`<sys/tty.h>` and `<sys/interrupt.h>`.**  The SDK now ships its own
+  headers for the TTY channels (`sys_tty_read`, `sys_tty_write`) and for
+  interrupt tags and threads, under the Cell names, with PSL1GHT's
+  `sysTty*` / `sysInterrupt*` spellings kept as forwarders.
+  `sys_interrupt_thread_disestablish` and `sysInterruptThreadDisestablish`
+  link from `liblv2_stub`.  Pointer arguments reach the kernel
+  zero-extended under ILP32.
+- **PRX record types.**  `<sys/prx.h>` adds the 32-bit export and import
+  records a PRX carries (`sys_prx_link32_t`, `sys_prx_libent32_t`,
+  `sys_prx_libstub32_t`), the library-address types,
+  `sys_prx_module_info_v2_t`, `SYS_PRX_LIB_OPD_IMPORT`, the
+  `SYS_PRX_R_PPC*` / `SYS_PRX_R_PPC64*` relocation types and
+  `SYS_PRX_VARLINK_TERMINATE32`.  `<sys/event.h>` adds `SYS_SPU_QUEUE`
+  beside `SYS_PPU_QUEUE`.
+- **Why an `rsx*` heap call failed.**  New `<rsx/ps3tc_mm_lasterror.h>`:
+  `ps3tc_rsx_mm_last_error()` reports the outcome of the most recent
+  `rsxHeapInit`, `rsxMalloc`, `rsxMemalign` or `rsxFree` from any thread
+  (`PS3TC_RSX_MM_LASTERROR_OK`, `_GCM_CONFIG`, `_UNINIT`, `_ALLOCATION`,
+  `_FREE`), and `ps3tc_rsx_mm_last_error_string()` names it.  The
+  PSL1GHT calls are unchanged.  Build with `-DPS3TC_RSX_MM_DEBUG` for a
+  one-line stderr report at the failure site.
+- **`cellGcmResetDefaultCommandBuffer()`**, the no-argument form that
+  resets the current context's default command buffer, beside the context
+  form.
+- **Shader compiler accepts more Cg.**  rsx-cg-compiler now compiles:
+  - `typedef struct Tag { ... } Name;`, `typedef struct Tag Name;` with a
+    forward (or never defined) tag, `typedef struct S { ... } S;`, and
+    `typedef <type> Name[N];`;
+  - commas in a `for` loop's init and increment
+    (`for (i = 0, j = 2; i < 4; i++, j--)`), when the extra parts are
+    independent writes to other names;
+  - a type word used as a function name or a struct member name
+    (`float half(float x)`, `struct S { float3 half; }`), and a local
+    variable named like a user type, which shadows it to the end of its
+    scope;
+  - a helper that returns a struct with an array member by value and fills
+    it through another helper's `out` parameters.  A helper that can
+    return different struct values on different paths is still refused.
+
+  A typedef named like a global variable or a function, and a struct named
+  like a function, now refuse as a duplicate name ("the name ... is already
+  defined"), in either order; a local of that name still shadows it.
+- **SDK guides** for the message-digest libraries, the NP headers and the
+  sysutil query headers (`docs/sdk/libhash.md`, `np-headers.md`,
+  `sysutil-queries.md`).
 
 ### Fixed
+
+- **Program arguments and the environment work in the default data model.**
+  Since v0.11.0, under ILP32 (the default), every `argv[i]` read the high
+  word of LV2's 64-bit argument vector, so `main` saw NULL or junk for any
+  argument, and `environ` stayed empty.  The start-up code now narrows
+  LV2's argument and environment vectors in place before `main`, and
+  publishes a valid environment as `environ` before constructors run, so
+  `getenv` works in constructors too.  LP64 programs keep their vectors as
+  they were and get `environ` the same way.  Relink against the new
+  `lv2-crt0.o` (C and C++, both data models).
+- **SPURS job-queue and task calls keep the caller's DMA tag mask.**  The
+  SPU job-queue and task functions changed the MFC tag mask of the job or
+  task that called them, so its next `mfc_read_tag_status_all()` waited
+  on the library's tag and could read local store before its own DMA had
+  landed.  On a PS3 this gave wrong results, for example a wrong
+  `cellSpursJobQueueGetSuspendedJobSize`; RPCS3 completes DMA at once and
+  never showed it.  Every internal wait now restores the caller's mask.
+- **librsx command fixes** (in librsx and in libgcm_cmd's legacy copy, and in
+  each call's `Unsafe` form):
+  - `rsxSetVertexProgramConstants` (and `cellGcmSetVertexProgramConstants`,
+    which forwards to it) sent wrong constants for 32 floats or more and
+    for any count not a multiple of 32: the second half of each packet
+    repeated the first half's source, and the remainder was converted to
+    integers instead of copied.  It also advanced the command pointer twice,
+    leaving stale words in the command stream after every call.
+  - `rsxSetupContextData` placed the context end four times too far.
+  - `rsxSetTimeStamp` wrote the report index to the wrong word.
+    (`cellGcmSetTimeStamp` was correct.)
+  - `rsxLoadFragmentProgramLocation` stops after the 8 texture-coordinate
+    units the method exists for.
+  - `rsxResetCommandBuffer` (and `cellGcmResetDefaultCommandBufferUnsafe`)
+    now rewinds the context to the start of the default buffer, so
+    commands written after a reset run.
+  - PSL1GHT's `vdecH264Info` has the decoder's layout (16-bit
+    `pic_order_count`, the closed-caption fields and the reserved block).
+- **Links are byte-reproducible.**  Under ILP32, a `.toc` with an odd
+  number of entries made `ld`'s TOC edit read 4 bytes past its copy of the
+  section and write them into `.got`, so the same objects could link to
+  different files.  The pad word is now zero (binutils patch 0007); section
+  sizes and every other byte are unchanged.
+- **`rsxHeapInit` returns `s32`**, as `<rsx/mm.h>` declares (the library
+  defined it as `s64`).  It returns 1 on success and 0 on failure.
+- **`<cell/libnetctl.h>` takes `struct in_addr` from `<netinet/in.h>`**, so
+  including `<cell/libnetctl.h>` before `<netinet/in.h>` no longer redefines
+  the struct.
+- **`<vmx2spu.h>` compiles in C++.**  `vec_sum2s` passed an unparenthesised
+  compound literal to the `spu_and` macro, so no C++ source could include
+  the header (SPU GCC patch 0005).
+- **Shader compiler:**
+  - A struct input member read through a helper keeps its input record
+    referenced.  It compiled to the right code but wrote the record as
+    unused, so anything binding inputs by record saw the input as unused.
+  - A vertex program with a varying matrix input (`float4x4 m : ATTR0`,
+    also inside a struct or an array) is refused (`vp-varying-matrix-input`)
+    instead of reading the wrong attributes.  A uniform matrix, and an
+    unread matrix beside only explicitly bound inputs, compile as before.
+- **Samples can always be left.**  `spurs-status`,
+  `hello-ppu-dbgfont-console` and the PSL1GHT `blitting` and `threadtest`
+  ports exit on START (Options on a DualShock 4 or DualSense pad, which has
+  no working PS button on a PS3).  `spurs-status` no longer freezes the
+  console when it exits after a failed row (it leaves through
+  `sys_process_exit`), starts its rows when X is pressed (or after 30 s),
+  and keeps its live panel below the last row.
+- **Samples build without implicit declarations or pointer-type mismatches**
+  (GCC 14 rejects them): the network `debugtest` and `httptest`, the input
+  `gemsample` and `gemtest`, the SPU samples' thread attribute names, and
+  `spudraw`, which now uses `sys_spu_image_t` with `sys_spu_image_import` /
+  `sys_spu_image_close` throughout.
 
 - **newlib's per-thread `_reent` setup includes `<string.h>`.**  The
   `_REENT_INIT_PTR` macro calls `memset`; GCC 14 and later reject the
   implicit declaration, which GCC 12 did not report because the call comes
   from a system-header macro.
 - **`gcmGetControlRegister` is declared with a prototype** (`(void)`), in the
-  SDK and in PSL1GHT's `<rsx/gcm_sys.h>`, and PSL1GHT's librsx no longer
-  passes it an argument.  C23 (the default from GCC 15) reads the old empty
+  SDK and in PSL1GHT's `<rsx/gcm_sys.h>`, and PSL1GHT's librsx, the SDK's
+  librsx and legacy libgcm_cmd buffer helpers and the tiny3d portlib no
+  longer pass it an argument.  C23 (the default from GCC 15) reads the old empty
   list as `(void)` and rejected those calls.
 - **The SDK's own build reaches libc through its wrapper headers.**  The
   `<string.h>`, `<stdio.h>`, `<stdlib.h>`, `<math.h>`, `<time.h>`,
@@ -54,6 +168,23 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **`<sys/file.h>` is the SDK's own.**  It keeps every `sysLv2Fs*` wrapper
+  PSL1GHT's header declares and adds `sysLv2FsChown`, `sysLv2FsMount` and
+  `sysLv2FsUnmount`, which were in `<sys/lv2_fs_ext.h>`.
+  `<sys/lv2_fs_ext.h>` now only includes `<sys/file.h>`, so code that
+  includes it still compiles.  Pointer arguments are converted through
+  `uintptr_t`; the values passed are unchanged.
+- **The SFO editor (`sfo-gui`) is redesigned.**  Overview, Titles,
+  Capabilities, All entries and Add a key pages replace the single grid,
+  with a welcome screen (Open, New), drag and drop and Ctrl+N/O/S/Shift+S.
+  A field commits on Enter or when it loses focus, and Esc reverts it.
+  Typed values survive page changes, and Save and Save As apply them first
+  and refuse to save while a field holds a refused value.  Opening or
+  creating a document asks before discarding unsaved changes, and so does
+  closing the window.  The `sfo` command line and its headless paths are
+  unchanged.  The look comes from the new `tools/ps3dk-ui` theme crate
+  (dark and light, following the system theme), which later desktop tools
+  share (`docs/design/gui-theme.md`).
 - **Patch series apply exactly.**  Nine patches (five PPU GCC, two newlib,
   one GDB, one PSL1GHT) applied only with GNU patch's default fuzz; their
   context is refreshed (the patched sources are unchanged) and every patch
@@ -85,6 +216,11 @@ The version stamped into builds is generated from the most recent
 - **PPU GCC: patch 0050 retired.**  The DImode pointer model (0059) already
   gives the counted-loop counter the full register width, so the separate
   doloop fix is gone.  Generated code is unchanged in ILP32 and LP64.
+
+### Known issues
+
+- rsx-cg-compiler still refuses an anonymous struct typedef with an array
+  extent (`typedef struct { ... } Name[N];`).
 
 ## [v0.24.0] — 2026-10-13
 
