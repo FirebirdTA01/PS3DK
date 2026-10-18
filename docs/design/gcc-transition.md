@@ -1,8 +1,9 @@
 # One modern GCC for PPU and SPU
 
 Status: approved by the director on 2026-10-14 (GCC 16, the stage order below, one
-compiler per release).  Today the PPU compiler is GCC 12.4.0 and the SPU
-compiler is GCC 9.5.0, the last release with the SPE backend.  This plan moves
+compiler per release).  With the switchover change the PPU compiler is GCC
+16.1.0 (stage 2, below); the SPU compiler is still GCC 9.5.0, the last release
+with the SPE backend.  This plan moves
 both to one current GCC release line without changing the ABI, and ships the new
 compiler only after it passes every release gate.
 
@@ -96,6 +97,13 @@ compatibility is validated in stage 2, with the target compiler.
 Exit: the full SDK and sample build is clean under the flags above on 12.4.
 
 ## Stage 2: PPU on GCC 16
+
+**Status: done with the switchover change, effective in the release the
+director approves for it.**  `build-ppu-toolchain.sh` builds GCC 16.1.0 only;
+its `--gcc` selector and the GCC 12.4 path are gone from the build and release
+scripts, and `bootstrap.sh` fetches `releases/gcc-16.1.0`.  `patches/ppu/gcc-12.x`
+stays in the tree as the port map's reference.  Until that release is tagged,
+the last published release still ships GCC 12.4.0.
 
 A new patch directory `patches/ppu/gcc-16.x/`, ported patch by patch from the
 post-stage-0 series and tracked in a port map: each 12.4 patch is marked

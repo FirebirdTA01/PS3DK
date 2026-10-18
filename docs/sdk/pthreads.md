@@ -163,7 +163,7 @@ toolchains — including `int main(void){return 0;}` — printed `ld: error in
 .../crtend.o(.eh_frame); no .eh_frame_hdr table will be created` on stderr. The root
 cause was `crtend.o` carrying a real FDE *after* the `.eh_frame` zero terminator, which
 ld's unconditional `.eh_frame` editing parses into and chokes on. Fixed by
-`patches/ppu/gcc-12.x/0035-libgcc-t-ps3-crtstuff-no-unwind-tables.patch` (crtstuff built
+`patches/ppu/gcc-16.x/0035-libgcc-t-ps3-crtstuff-no-unwind-tables.patch` (crtstuff built
 `-fno-asynchronous-unwind-tables`, so crtend's `.eh_frame` is exactly the 4-byte
 terminator); `scripts/check-release-tree.sh` gates the section size so it cannot ship
 malformed again. Links are silent now, and cairo's stderr-sensitive pthread probe passes

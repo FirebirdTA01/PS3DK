@@ -220,7 +220,7 @@ Normative rules:
    symbol address needed at `Pmode` is loaded from that same 4-byte entry
    with `lwz` and zero-extended (0062); the TOC save slot and integer TOC
    entries are `ptr_mode`-sized too (0063, 0065).  `R_PPC64_ADDR32` instead of `R_PPC64_ADDR64`.
-   See patches/ppu/gcc-12.x/0021-rs6000-output-toc-pmode.patch.
+   See patches/ppu/gcc-16.x/0021-rs6000-output-toc-pmode.patch.
    *Cause:* an 8-byte slot under big-endian holds the address in the
    low 4 bytes; a `lwz @toc@l(r2)` load reads the high 4 bytes (zero)
    and the deref faults.  `libgloss/libsysbase` MUST be rebuilt with
@@ -233,7 +233,7 @@ Normative rules:
 4. No public API in `cell/*.h` or `sys/*.h` SHALL declare a `void *`
    field with `mode(SI)`.  Any such declaration is a conformance bug.
 5. The pointer width follows the data model (`-mlp64`), not the ISA:
-   `patches/ppu/gcc-12.x/0005-rs6000-cell64lv2-pointer-mode.patch`
+   `patches/ppu/gcc-16.x/0005-rs6000-cell64lv2-pointer-mode.patch`
    selects it by `TARGET_LP64`, and 0066 refuses the inconsistent
    LP64-without-64-bit-ISA state.
 

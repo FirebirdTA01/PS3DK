@@ -7,7 +7,7 @@ if(PS3TC_REGRESSION_HOST_STUB)
     return()
 endif()
 # The C++ thread library needs libstdc++'s posix thread layer, which only the
-# GCC 16 toolchain has; 12.4 stays single-threaded until the switchover.
+# GCC 16 toolchain has; the earlier GCC 12.4 toolchain was single-threaded.
 if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
     message(STATUS "cxx-thread-main-exit: skipped on GCC ${CMAKE_CXX_COMPILER_VERSION} (no libstdc++ thread layer)")
     return()
