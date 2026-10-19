@@ -472,11 +472,12 @@ int main(int argc, char** argv)
             {
                 if (!fn->isEntryPoint) continue;
                 // Both stages.  In a fragment program the extra sharing merges
-                // short-circuit RHS copies (CSE drops the RHS tag when a copy is
-                // eager; the lowering admits a value shared only by RHS users).
-                // It can also lengthen live ranges past the temp budget, so a
-                // fragment program that then fails to emit is compiled again
-                // without it: sharing never costs acceptance.
+                // short-circuit RHS copies (CSE keeps the RHS tag when an eager
+                // copy merges, so a short-circuit RHS shared with an ordinary use
+                // is still refused; the lowering admits a value shared only by
+                // RHS users).  Sharing can also lengthen live ranges past the
+                // temp budget, so a fragment program that then fails to emit is
+                // compiled again without it: sharing never costs acceptance.
                 if ((stage == ShaderStage::Vertex || fpConstCanon) &&
                     rsx_cg::canonicalizeConstants(*fn))
                 {
