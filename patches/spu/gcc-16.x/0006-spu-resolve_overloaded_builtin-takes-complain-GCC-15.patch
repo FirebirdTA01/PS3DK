@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 14:33:34 -0500
+Subject: [PATCH 06/39] spu: resolve_overloaded_builtin takes complain (GCC 15)
+
+The three overload diagnostics are only emitted when complain is true
+(SFINAE contexts pass false).
+---
+ gcc/config/spu/spu-c.cc     | 12 ++++++++----
+ gcc/config/spu/spu-protos.h |  2 +-
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/gcc/config/spu/spu-c.cc b/gcc/config/spu/spu-c.cc
+index 6a529631559..9009c004ac0 100644
+--- a/gcc/config/spu/spu-c.cc
++++ b/gcc/config/spu/spu-c.cc
+@@ -86,7 +86,8 @@ spu_macro_to_expand (cpp_reader *pfile, const cpp_token *tok)
+ /* target hook for resolve_overloaded_builtin(). Returns a function call
+    RTX if we can resolve the overloaded builtin */
+ tree
+-spu_resolve_overloaded_builtin (location_t loc, tree fndecl, void *passed_args)
++spu_resolve_overloaded_builtin (location_t loc, tree fndecl, void *passed_args,
++				bool complain)
+ {
+ #define SCALAR_TYPE_P(t) (INTEGRAL_TYPE_P (t) \
+ 			  || SCALAR_FLOAT_TYPE_P (t) \
+@@ -130,7 +131,8 @@ spu_resolve_overloaded_builtin (location_t loc, tree fndecl, void *passed_args)
+ 
+ 	  if (p >= nargs)
+ 	    {
+-	      error ("insufficient arguments to overloaded function %s",
++	      if (complain)
++		error ("insufficient arguments to overloaded function %s",
+ 		     desc->name);
+ 	      return error_mark_node;
+ 	    }
+@@ -161,7 +163,8 @@ spu_resolve_overloaded_builtin (location_t loc, tree fndecl, void *passed_args)
+ 	{
+ 	  if (p != nargs)
+ 	    {
+-	      error ("too many arguments to overloaded function %s",
++	      if (complain)
++		error ("too many arguments to overloaded function %s",
+ 		     desc->name);
+ 	      return error_mark_node;
+ 	    }
+@@ -173,7 +176,8 @@ spu_resolve_overloaded_builtin (location_t loc, tree fndecl, void *passed_args)
+ 
+   if (match == NULL_TREE)
+     {
+-      error ("parameter list does not match a valid signature for %s()",
++      if (complain)
++	error ("parameter list does not match a valid signature for %s()",
+ 	     desc->name);
+       return error_mark_node;
+     }
+diff --git a/gcc/config/spu/spu-protos.h b/gcc/config/spu/spu-protos.h
+index 3b18d99c28e..790f675ce77 100644
+--- a/gcc/config/spu/spu-protos.h
++++ b/gcc/config/spu/spu-protos.h
+@@ -86,7 +86,7 @@ extern void spu_function_profiler (FILE *, int);
+ 
+ /* spu-c.c */
+ extern tree spu_resolve_overloaded_builtin (location_t, tree fndecl,
+-    					    void *fnargs);
++    					    void *fnargs, bool complain);
+ extern rtx spu_expand_builtin (tree exp, rtx target, rtx subtarget,
+ 			       machine_mode mode, int ignore);
+ extern rtx spu_expand_builtin (tree, rtx, rtx, machine_mode, int);

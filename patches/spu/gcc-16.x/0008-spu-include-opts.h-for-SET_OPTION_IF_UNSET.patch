@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:00:15 -0500
+Subject: [PATCH 08/39] spu: include opts.h for SET_OPTION_IF_UNSET
+
+---
+ gcc/config/spu/spu.cc | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index 3cddb52c780..a771c7d86fe 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -33,6 +33,7 @@
+ #include "attribs.h"
+ #include "expmed.h"
+ #include "optabs.h"
++#include "opts.h"
+ #include "regs.h"
+ #include "emit-rtl.h"
+ #include "recog.h"

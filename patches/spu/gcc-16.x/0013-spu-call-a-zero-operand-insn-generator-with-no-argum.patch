@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:00:17 -0500
+Subject: [PATCH 13/39] spu: call a zero-operand insn generator with no
+ arguments
+
+---
+ gcc/config/spu/spu.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index fb7613b0864..84626332267 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -6537,7 +6537,7 @@ spu_expand_builtin_1 (struct spu_builtin_description *d,
+   switch (n_operands)
+     {
+     case 0:
+-      pat = GEN_FCN (icode) (0);
++      pat = GEN_FCN (icode) ();
+       break;
+     case 1:
+       pat = GEN_FCN (icode) (ops[0]);

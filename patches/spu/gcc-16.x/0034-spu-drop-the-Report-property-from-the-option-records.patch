@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 18:12:02 -0500
+Subject: [PATCH 34/39] spu: drop the Report property from the option records
+ the patch series adds (removed in GCC 11)
+
+---
+ gcc/config/spu/spu.opt | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/config/spu/spu.opt b/gcc/config/spu/spu.opt
+index 063668cb3b5..64d9091ae08 100644
+--- a/gcc/config/spu/spu.opt
++++ b/gcc/config/spu/spu.opt
+@@ -48,19 +48,19 @@ Target Mask(STD_MAIN)
+ Use standard main function as entry for startup.
+ 
+ mspurs-job
+-Target Report RejectNegative
++Target RejectNegative
+ Build as a SPURS Job 2.0 binary (without job CRT). Sets ELF e_flags=1.
+ 
+ mspurs-job-initialize
+-Target Report RejectNegative
++Target RejectNegative
+ Build as a SPURS Job 2.0 binary with job CRT. Sets ELF e_flags=2.
+ 
+ mspurs-task
+-Target Report RejectNegative
++Target RejectNegative
+ Build as a SPURS Task binary. Sets ELF e_flags=3.
+ 
+ mcustom-module
+-Target Report RejectNegative
++Target RejectNegative
+ Build a position-independent image for a custom SPURS policy module to load: linked at 0 with a fixup table that _init applies.
+ 
+ mbranch-hints

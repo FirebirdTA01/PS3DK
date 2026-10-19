@@ -1,0 +1,166 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 13:56:08 -0500
+Subject: [PATCH 01/39] spu: wire the restored backend into the GCC 16 build
+
+.c -> .cc renames (GCC 12), spu removed from the unsupported-target list,
+config.gcc cpu_type/target/--with-arch stanzas (dbxelf.h dropped: gone in
+GCC 13), spu in the configure nop list, libgcc config.host stanzas.
+---
+ .../spu/{spu-common.c => spu-common.cc}       |  0
+ gcc/config.gcc                                | 30 ++++++++++++++++++-
+ gcc/config/spu/{spu-c.c => spu-c.cc}          |  0
+ gcc/config/spu/{spu.c => spu.cc}              |  0
+ gcc/config/spu/t-spu-elf                      |  4 +--
+ gcc/configure                                 |  2 +-
+ gcc/configure.ac                              |  2 +-
+ libgcc/config.host                            | 10 +++++++
+ 8 files changed, 43 insertions(+), 5 deletions(-)
+ rename gcc/common/config/spu/{spu-common.c => spu-common.cc} (100%)
+ rename gcc/config/spu/{spu-c.c => spu-c.cc} (100%)
+ rename gcc/config/spu/{spu.c => spu.cc} (100%)
+
+diff --git a/gcc/common/config/spu/spu-common.c b/gcc/common/config/spu/spu-common.cc
+similarity index 100%
+rename from gcc/common/config/spu/spu-common.c
+rename to gcc/common/config/spu/spu-common.cc
+diff --git a/gcc/config.gcc b/gcc/config.gcc
+index 8fe99616f82..c45970ca61d 100644
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -329,7 +329,6 @@ case ${target}${target_min} in
+  | powerpc*-*-linux*paired*		\
+  | powerpc*-*-*spe*			\
+  | sparc-hal-solaris2*			\
+- | spu*-*-*				\
+  | thumb-*-*				\
+  | *-*-freebsd[12] | *-*-freebsd[1234].* \
+  | *-*-freebsd*aout*			\
+@@ -593,6 +592,9 @@ sparc*-*-*)
+ 	d_target_objs="sparc-d.o"
+ 	extra_headers="visintrin.h"
+ 	;;
++spu*-*-*)
++	cpu_type=spu
++	;;
+ s390*-*-*)
+ 	cpu_type=s390
+ 	d_target_objs="s390-d.o"
+@@ -3613,6 +3615,15 @@ sparc64-*-openbsd*)
+ 	with_cpu=ultrasparc
+ 	tmake_file="${tmake_file} sparc/t-sparc"
+ 	;;
++spu-*-elf*)
++	tm_file="elfos.h spu/spu-elf.h spu/spu.h newlib-stdint.h"
++	tmake_file="spu/t-spu-elf"
++	native_system_header_dir=/include
++	extra_headers="spu_intrinsics.h spu_internals.h vmx2spu.h spu_mfcio.h vec_types.h spu_cache.h"
++	extra_modes=spu/spu-modes.def
++	c_target_objs="${c_target_objs} spu-c.o"
++	cxx_target_objs="${cxx_target_objs} spu-c.o"
++	;;
+ tic6x-*-elf)
+ 	tm_file="elfos.h ${tm_file} c6x/elf-common.h c6x/elf.h"
+ 	tm_file="${tm_file} tm-dwarf2.h newlib-stdint.h"
+@@ -5913,6 +5924,23 @@ case "${target}" in
+ 		fi
+ 		;;
+ 
++	spu-*-*)
++		supported_defaults="arch tune"
++
++		for which in arch tune; do
++			eval "val=\$with_$which"
++			case ${val} in
++			"" | cell | celledp)
++				# OK
++				;;
++			*)
++				echo "Unknown cpu used in --with-$which=$val." 1>&2
++				exit 1
++				;;
++			esac
++		done
++		;;
++
+ 	s390*-*-*)
+ 		supported_defaults="arch mode tune"
+ 
+diff --git a/gcc/config/spu/spu-c.c b/gcc/config/spu/spu-c.cc
+similarity index 100%
+rename from gcc/config/spu/spu-c.c
+rename to gcc/config/spu/spu-c.cc
+diff --git a/gcc/config/spu/spu.c b/gcc/config/spu/spu.cc
+similarity index 100%
+rename from gcc/config/spu/spu.c
+rename to gcc/config/spu/spu.cc
+diff --git a/gcc/config/spu/t-spu-elf b/gcc/config/spu/t-spu-elf
+index fe9591de8d7..7f2363133a2 100644
+--- a/gcc/config/spu/t-spu-elf
++++ b/gcc/config/spu/t-spu-elf
+@@ -26,9 +26,9 @@ spu.o: $(CONFIG_H) $(SYSTEM_H) coretypes.h $(TM_H) \
+   $(srcdir)/config/spu/spu-protos.h \
+   $(srcdir)/config/spu/spu-builtins.def 
+ 
+-spu-c.o: $(srcdir)/config/spu/spu-c.c \
++spu-c.o: $(srcdir)/config/spu/spu-c.cc \
+     $(srcdir)/config/spu/spu-protos.h \
+     $(CONFIG_H) $(SYSTEM_H) $(TREE_H) $(CPPLIB_H) \
+     $(TM_P_H) $(C_COMMON_H) $(C_PRAGMA_H) coretypes.h $(TM_H) insn-codes.h
+ 	$(COMPILER) -c $(ALL_COMPILERFLAGS) $(ALL_CPPFLAGS) $(INCLUDES) \
+-		$(srcdir)/config/spu/spu-c.c
++		$(srcdir)/config/spu/spu-c.cc
+diff --git a/gcc/configure b/gcc/configure
+index ef780a23c2f..3ba08caf539 100755
+--- a/gcc/configure
++++ b/gcc/configure
+@@ -31854,7 +31854,7 @@ esac
+ case "$cpu_type" in
+   aarch64 | alpha | arc | arm | avr | bfin | cris | csky | i386 | loongarch | m32c \
+   | m68k | microblaze | mips | nds32 | pa | riscv | rs6000 | score | sparc \
+-  | visium | xstormy16 | xtensa | ft32)
++  | spu | visium | xstormy16 | xtensa | ft32)
+     insn="nop"
+     ;;
+   ia64 | s390)
+diff --git a/gcc/configure.ac b/gcc/configure.ac
+index cdf2997cb5f..1c07d854082 100644
+--- a/gcc/configure.ac
++++ b/gcc/configure.ac
+@@ -5631,7 +5631,7 @@ esac
+ case "$cpu_type" in
+   aarch64 | alpha | arc | arm | avr | bfin | cris | csky | i386 | loongarch | m32c \
+   | m68k | microblaze | mips | nds32 | pa | riscv | rs6000 | score | sparc \
+-  | visium | xstormy16 | xtensa | ft32)
++  | spu | visium | xstormy16 | xtensa | ft32)
+     insn="nop"
+     ;;
+   ia64 | s390)
+diff --git a/libgcc/config.host b/libgcc/config.host
+index ac10ccc4340..1c5725c09fa 100644
+--- a/libgcc/config.host
++++ b/libgcc/config.host
+@@ -192,6 +192,9 @@ sparc*-*-*)
+ 	cpu_type=sparc
+ 	tmake_file="${tmake_file} sparc/t-sparc"
+ 	;;
++spu*-*-*)
++	cpu_type=spu
++	;;
+ s390*-*-*)
+ 	cpu_type=s390
+ 	;;
+@@ -1518,6 +1521,13 @@ sparc64-*-linux*)		# 64-bit SPARC's running GNU/Linux
+ 	;;
+ sparc64-*-netbsd*)
+ 	;;
++spu-*-elf*)
++	tmake_file="$tmake_file spu/t-elf t-libgcc-pic t-fdpbit"
++	extra_parts="$extra_parts \
++		libgcc_cachemgr.a libgcc_cachemgr_nonatomic.a \
++		libgcc_cache8k.a libgcc_cache16k.a libgcc_cache32k.a \
++		libgcc_cache64k.a libgcc_cache128k.a"
++	;;
+ tic6x-*-uclinux)
+ 	tmake_file="${tmake_file} t-softfp-sfdf t-softfp-excl t-softfp \
+ 		c6x/t-elf  c6x/t-uclinux t-crtstuff-pic t-libgcc-pic \

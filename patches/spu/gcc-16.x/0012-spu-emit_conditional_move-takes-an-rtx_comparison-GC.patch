@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:00:17 -0500
+Subject: [PATCH 12/39] spu: emit_conditional_move takes an rtx_comparison (GCC
+ 12)
+
+---
+ gcc/config/spu/spu.cc | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index 06b1bbbc607..fb7613b0864 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -6801,8 +6801,8 @@ spu_addr_space_convert (rtx op, tree from_type, tree to_type)
+       result = gen_reg_rtx (Pmode);
+       ls = force_reg (Pmode, convert_modes (Pmode, DImode, ls, 1));
+       op = force_reg (Pmode, convert_modes (Pmode, EAmode, op, 1));
+-      ls = emit_conditional_move (ls, NE, op, const0_rtx, Pmode,
+-					  ls, const0_rtx, Pmode, 1);
++      ls = emit_conditional_move (ls, { NE, op, const0_rtx, Pmode },
++				  ls, const0_rtx, Pmode, 1);
+ 
+       emit_insn (gen_subsi3 (result, op, ls));
+ 
+@@ -6820,8 +6820,8 @@ spu_addr_space_convert (rtx op, tree from_type, tree to_type)
+       result = gen_reg_rtx (EAmode);
+       ls = force_reg (EAmode, convert_modes (EAmode, DImode, ls, 1));
+       op = force_reg (Pmode, op);
+-      ls = emit_conditional_move (ls, NE, op, const0_rtx, Pmode,
+-					  ls, const0_rtx, EAmode, 1);
++      ls = emit_conditional_move (ls, { NE, op, const0_rtx, Pmode },
++				  ls, const0_rtx, EAmode, 1);
+       op = force_reg (EAmode, convert_modes (EAmode, Pmode, op, 1));
+ 
+       if (EAmode == SImode)

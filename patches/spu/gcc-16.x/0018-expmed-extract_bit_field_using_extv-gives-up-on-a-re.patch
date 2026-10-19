@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:34:08 -0500
+Subject: [PATCH 18/39] expmed: extract_bit_field_using_extv gives up on a
+ register it cannot view in the extv mode
+
+The read side of the previous commit: reading an incoming complex-float
+argument (SCmode in a hard register) asserted the same way.
+---
+ gcc/expmed.cc | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/expmed.cc b/gcc/expmed.cc
+index 36911f03e25..42ee17510ba 100644
+--- a/gcc/expmed.cc
++++ b/gcc/expmed.cc
+@@ -1591,7 +1591,15 @@ extract_bit_field_using_extv (const extraction_insn *extv, rtx op0,
+       if (GET_CODE (op0) == SUBREG && op0_mode.require () != ext_mode)
+ 	return NULL_RTX;
+       if (REG_P (op0) && op0_mode.require () != ext_mode)
+-	op0 = gen_lowpart_SUBREG (ext_mode, op0);
++	{
++	  /* Likewise give up when the target cannot view the register in
++	     EXT_MODE (see store_bit_field_using_insv).  */
++	  if (!validate_subreg (ext_mode, GET_MODE (op0), op0,
++				subreg_lowpart_offset (ext_mode,
++						       GET_MODE (op0))))
++	    return NULL_RTX;
++	  op0 = gen_lowpart_SUBREG (ext_mode, op0);
++	}
+     }
+ 
+   /* If BITS_BIG_ENDIAN is zero on a BYTES_BIG_ENDIAN machine, we count

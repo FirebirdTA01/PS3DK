@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:33:15 -0500
+Subject: [PATCH 17/39] expmed: store_bit_field_using_insv gives up on a
+ register it cannot view in the insv mode
+
+The SUBREG case already returns false when validate_subreg refuses; the
+REG case called gen_lowpart_SUBREG unconditionally.  Since validate_subreg
+checks hard registers with simplify_subreg_regno (can_change_mode_class),
+SPU returning a complex float in $3 (SCmode, 8 bytes; insv works in a
+16-byte mode, which SPU cannot change to) asserted in gen_rtx_SUBREG.
+GCC 9.5 accepted it (subreg_offset_representable_p only).
+---
+ gcc/expmed.cc | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/expmed.cc b/gcc/expmed.cc
+index d57ea78d6b1..36911f03e25 100644
+--- a/gcc/expmed.cc
++++ b/gcc/expmed.cc
+@@ -641,7 +641,16 @@ store_bit_field_using_insv (const extraction_insn *insv, rtx op0,
+ 				 SUBREG_BYTE (xop0));
+ 	}
+       if (REG_P (xop0) && GET_MODE (xop0) != op_mode)
+-	xop0 = gen_lowpart_SUBREG (op_mode, xop0);
++	{
++	  /* As for a SUBREG above: give up if the target cannot view the
++	     register in OP_MODE (a hard register whose class cannot change
++	     between the two modes no longer passes validate_subreg).  */
++	  if (!validate_subreg (op_mode, GET_MODE (xop0), xop0,
++				subreg_lowpart_offset (op_mode,
++						       GET_MODE (xop0))))
++	    return false;
++	  xop0 = gen_lowpart_SUBREG (op_mode, xop0);
++	}
+     }
+ 
+   /* If the destination is a paradoxical subreg such that we need a

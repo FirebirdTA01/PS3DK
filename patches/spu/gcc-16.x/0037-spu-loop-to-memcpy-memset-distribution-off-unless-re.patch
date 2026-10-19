@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 19:35:45 -0500
+Subject: [PATCH 37/39] spu: loop-to-memcpy/memset distribution off unless
+ requested (GCC 9.5 behaviour)
+
+GCC 10 enabled -ftree-loop-distribute-patterns at -O2/-Os.  PSL1GHT MARS
+mars_task_module.elf (-Os, linked without libc) failed to link with GCC
+16: task_arg_copy loop became a memcpy call.  An explicit
+-ftree-loop-distribute-patterns still enables it.
+---
+ gcc/config/spu/spu.cc | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index a8c0d90d9d1..cca9a2597b8 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -243,6 +243,15 @@ spu_option_override (void)
+ 
+   flag_omit_frame_pointer = 1;
+ 
++  /* Keep loops that copy or clear memory as loops unless asked: since
++     GCC 10 -ftree-loop-distribute-patterns is on at -O2 and -Os and turns
++     them into memcpy/memset calls.  Much SPU code links without a C
++     library (PSL1GHT MARS kernels and task modules among it) and lives in
++     the 256 KB local store, so an implicit library call is a link failure
++     or a size cost there.  GCC 9.5 had the pass off below -O3.  */
++  if (!OPTION_SET_P (flag_tree_loop_distribute_patterns))
++    flag_tree_loop_distribute_patterns = 0;
++
+   /* Functions must be 8 byte aligned so we correctly handle dual issue */
+   parse_alignment_opts ();
+   if (align_functions.levels[0].get_value () < 8)

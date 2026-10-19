@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:39:24 -0500
+Subject: [PATCH] Add -lsputhread to LIB_SPEC so SPU-side runtime symbols
+
+(sys_spu_thread_exit, sys_spu_thread_group_exit, sys_event_flag_set_bit,
+sys_event_flag_set_bit_impatient, _spu_call_event_va_arg) resolve at
+link time without reference samples needing explicit -lsputhread.
+
+libsputhread.a is symlinked into the SPU default library search path
+(spu-elf/lib/) so no additional -L is required.  The library is placed
+inside the -( ... -) start-group / end-group bracket so circular
+references between newlib and sputhread resolve.
+
+(Ported to GCC 16 from patches/spu/gcc-9.5.0/0004-spu-link-sputhread.patch.)
+---
+ gcc/config/spu/spu-elf.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/config/spu/spu-elf.h b/gcc/config/spu/spu-elf.h
+index de1366d504c..24f76b7089b 100644
+--- a/gcc/config/spu/spu-elf.h
++++ b/gcc/config/spu/spu-elf.h
+@@ -69,7 +69,7 @@
+  %{mspurs-task: --spurs-task}\
+ "
+ 
+-#define LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -) \
++#define LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -lsputhread -) \
+     %{mno-atomic-updates:-lgcc_cachemgr_nonatomic; :-lgcc_cachemgr} \
+     %{mcache-size=128:-lgcc_cache128k; \
+       mcache-size=64 :-lgcc_cache64k; \

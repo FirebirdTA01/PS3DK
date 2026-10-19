@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 19:11:41 -0500
+Subject: [PATCH 35/39] spu: C++ defaults to GNU C++17 (port of PPU gcc-16.x
+ 0078)
+
+---
+ gcc/config/spu/spu-elf.h | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/gcc/config/spu/spu-elf.h b/gcc/config/spu/spu-elf.h
+index 0910ae55ed9..6c0b535156a 100644
+--- a/gcc/config/spu/spu-elf.h
++++ b/gcc/config/spu/spu-elf.h
+@@ -126,3 +126,13 @@
+ #undef CPP_SPEC
+ #define CPP_SPEC "-D__CELLOS_LV2__ -D__LP32__ -D_LP32 -D__STRICT_ALIGNED " \
+   "-D__DOUBLE_ACCURATE__ -D__FLOAT_FAST__"
++
++/* C++ defaults to GNU C++17 on this target, as on the PPU (GCC 16's own
++   default is GNU C++20): with no -std= option and no -ansi, cc1plus is
++   given -std=gnu++17.  Any explicit -std= (or -ansi) is authoritative, and
++   the toolchain's own target libraries select their standards as before.
++   No SPU header defines CC1PLUS_SPEC; if one ever does, merge it here.  */
++#ifdef CC1PLUS_SPEC
++#error "spu-elf.h: an inherited CC1PLUS_SPEC must be merged with the gnu++17 default"
++#endif
++#define CC1PLUS_SPEC "%{!std=*:%{!ansi:-std=gnu++17}}"

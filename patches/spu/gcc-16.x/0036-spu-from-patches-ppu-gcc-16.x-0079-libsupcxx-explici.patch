@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 19:11:42 -0500
+Subject: [PATCH 36/39] spu (from patches/ppu/gcc-16.x
+ 0079-libsupcxx-explicit-gnu20.patch, CLEAN)
+
+---
+ libstdc++-v3/libsupc++/Makefile.am | 3 ++-
+ libstdc++-v3/libsupc++/Makefile.in | 3 ++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/libstdc++-v3/libsupc++/Makefile.am b/libstdc++-v3/libsupc++/Makefile.am
+index a3dc60f3945..76a033815e0 100644
+--- a/libstdc++-v3/libsupc++/Makefile.am
++++ b/libstdc++-v3/libsupc++/Makefile.am
+@@ -133,7 +133,7 @@ atomicity.cc: ${atomicity_file}
+ 	$(LN_S) ${atomicity_file} ./atomicity.cc || true
+ 
+ atomicity.lo: atomicity.cc
+-	$(LTCOMPILE) -fwrapv -c $<
++	$(LTCOMPILE) -std=gnu++20 -fwrapv -c $<
+ atomicity.o: atomicity.cc
+ 	$(CXXCOMPILE) -fwrapv -c $<
+ 
+@@ -151,6 +151,7 @@ endif
+ # OPTIMIZE_CXXFLAGS on the compile line so that -O2 can be overridden
+ # as the occasion call for it.
+ AM_CXXFLAGS = \
++	-std=gnu++20 \
+ 	$(glibcxx_lt_pic_flag) $(glibcxx_compiler_shared_flag) \
+ 	$(XTEMPLATE_FLAGS) $(FREESTANDING_FLAGS) $(EH_POOL_FLAGS) \
+ 	$(WARN_CXXFLAGS) $(OPTIMIZE_CXXFLAGS)  $(CONFIG_CXXFLAGS)
+diff --git a/libstdc++-v3/libsupc++/Makefile.in b/libstdc++-v3/libsupc++/Makefile.in
+index db5e83803d5..5fac3878066 100644
+--- a/libstdc++-v3/libsupc++/Makefile.in
++++ b/libstdc++-v3/libsupc++/Makefile.in
+@@ -589,6 +589,7 @@ atomicity_file = ${glibcxx_srcdir}/$(ATOMICITY_SRCDIR)/atomicity.h
+ # OPTIMIZE_CXXFLAGS on the compile line so that -O2 can be overridden
+ # as the occasion call for it.
+ AM_CXXFLAGS = \
++	-std=gnu++20 \
+ 	$(glibcxx_lt_pic_flag) $(glibcxx_compiler_shared_flag) \
+ 	$(XTEMPLATE_FLAGS) $(FREESTANDING_FLAGS) $(EH_POOL_FLAGS) \
+ 	$(WARN_CXXFLAGS) $(OPTIMIZE_CXXFLAGS)  $(CONFIG_CXXFLAGS)
+@@ -977,7 +978,7 @@ atomicity.cc: ${atomicity_file}
+ 	$(LN_S) ${atomicity_file} ./atomicity.cc || true
+ 
+ atomicity.lo: atomicity.cc
+-	$(LTCOMPILE) -fwrapv -c $<
++	$(LTCOMPILE) -std=gnu++20 -fwrapv -c $<
+ atomicity.o: atomicity.cc
+ 	$(CXXCOMPILE) -fwrapv -c $<
+ 

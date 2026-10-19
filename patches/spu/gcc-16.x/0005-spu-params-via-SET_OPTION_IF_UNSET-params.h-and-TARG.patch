@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 14:33:34 -0500
+Subject: [PATCH 05/39] spu: params via SET_OPTION_IF_UNSET (params.h and
+ TARGET_OPTION_DEFAULT_PARAMS removed in GCC 10)
+
+max-completely-peel-times 4 (when not unrolling/peeling) and
+max-pending-list-length 128 keep their 9.5 defaults.
+---
+ gcc/common/config/spu/spu-common.cc | 13 -------------
+ gcc/config/spu/spu.cc               | 11 +++++++----
+ 2 files changed, 7 insertions(+), 17 deletions(-)
+
+diff --git a/gcc/common/config/spu/spu-common.cc b/gcc/common/config/spu/spu-common.cc
+index a1be3aad88b..000ab753c4a 100644
+--- a/gcc/common/config/spu/spu-common.cc
++++ b/gcc/common/config/spu/spu-common.cc
+@@ -23,7 +23,6 @@
+ #include "common/common-target-def.h"
+ #include "opts.h"
+ #include "flags.h"
+-#include "params.h"
+ 
+ static void
+ spu_option_init_struct (struct gcc_options *opts)
+@@ -32,24 +31,12 @@ spu_option_init_struct (struct gcc_options *opts)
+   opts->x_flag_rename_registers = 1;
+ }
+ 
+-/* Implement TARGET_OPTION_DEFAULT_PARAMS.  */
+-static void
+-spu_option_default_params (void)
+-{
+-  /* Override some of the default param values.  With so many registers
+-     larger values are better for these params.  */
+-  set_default_param_value (PARAM_MAX_PENDING_LIST_LENGTH, 128);
+-}
+-
+ #undef TARGET_DEFAULT_TARGET_FLAGS
+ #define TARGET_DEFAULT_TARGET_FLAGS (TARGET_DEFAULT)
+ 
+ #undef TARGET_OPTION_INIT_STRUCT
+ #define TARGET_OPTION_INIT_STRUCT spu_option_init_struct
+ 
+-#undef TARGET_OPTION_DEFAULT_PARAMS
+-#define TARGET_OPTION_DEFAULT_PARAMS spu_option_default_params
+-
+ #undef TARGET_EXCEPT_UNWIND_INFO
+ #define TARGET_EXCEPT_UNWIND_INFO  sjlj_except_unwind_info
+ 
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index 8d7439e697a..3cddb52c780 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -51,7 +51,6 @@
+ #include "langhooks.h"
+ #include "reload.h"
+ #include "sched-int.h"
+-#include "params.h"
+ #include "gimplify.h"
+ #include "tm-constrs.h"
+ #include "ddg.h"
+@@ -233,9 +232,13 @@ spu_option_override (void)
+   /* Small loops will be unpeeled at -O3.  For SPU it is more important
+      to keep code small by default.  */
+   if (!flag_unroll_loops && !flag_peel_loops)
+-    maybe_set_param_value (PARAM_MAX_COMPLETELY_PEEL_TIMES, 4,
+-			   global_options.x_param_values,
+-			   global_options_set.x_param_values);
++    SET_OPTION_IF_UNSET (&global_options, &global_options_set,
++			 param_max_completely_peel_times, 4);
++
++  /* With so many registers a longer pending list is better (this was
++     TARGET_OPTION_DEFAULT_PARAMS in spu-common before GCC 10).  */
++  SET_OPTION_IF_UNSET (&global_options, &global_options_set,
++		       param_max_pending_list_length, 128);
+ 
+   flag_omit_frame_pointer = 1;
+ 

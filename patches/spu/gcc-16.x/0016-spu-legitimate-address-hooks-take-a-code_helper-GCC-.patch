@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:01:29 -0500
+Subject: [PATCH 16/39] spu: legitimate-address hooks take a code_helper (GCC
+ 14)
+
+---
+ gcc/config/spu/spu.cc | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index 8837510591f..38f0cd2ddcc 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -3517,7 +3517,7 @@ spu_legitimate_constant_p (machine_mode mode, rtx x)
+   references to TImode.  */
+ static bool
+ spu_legitimate_address_p (machine_mode mode,
+-			  rtx x, bool reg_ok_strict)
++			  rtx x, bool reg_ok_strict, code_helper = ERROR_MARK)
+ {
+   int aligned = GET_MODE_SIZE (mode) >= 16;
+   if (aligned
+@@ -3589,7 +3589,8 @@ spu_legitimate_address_p (machine_mode mode,
+ /* Like spu_legitimate_address_p, except with named addresses.  */
+ static bool
+ spu_addr_space_legitimate_address_p (machine_mode mode, rtx x,
+-				     bool reg_ok_strict, addr_space_t as)
++				     bool reg_ok_strict, addr_space_t as,
++				     code_helper = ERROR_MARK)
+ {
+   if (as == ADDR_SPACE_EA)
+     return (REG_P (x) && (GET_MODE (x) == EAmode));

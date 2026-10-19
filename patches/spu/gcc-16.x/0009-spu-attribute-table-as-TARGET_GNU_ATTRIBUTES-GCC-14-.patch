@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:00:15 -0500
+Subject: [PATCH 09/39] spu: attribute table as TARGET_GNU_ATTRIBUTES (GCC 14
+ scoped attribute specs)
+
+---
+ gcc/config/spu/spu.cc | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index a771c7d86fe..805907ae203 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -7224,16 +7224,15 @@ spu_constant_alignment (const_tree, HOST_WIDE_INT align)
+ }
+ 
+ /*  Table of machine attributes.  */
+-static const struct attribute_spec spu_attribute_table[] =
++TARGET_GNU_ATTRIBUTES (spu_attribute_table,
+ {
+   /* { name, min_len, max_len, decl_req, type_req, fn_type_req,
+        affects_type_identity, handler, exclude } */
+   { "naked",          0, 0, true,  false, false, false,
+     spu_handle_fndecl_attribute, NULL },
+   { "spu_vector",     0, 0, false, true,  false, false,
+-    spu_handle_vector_attribute, NULL },
+-  { NULL,             0, 0, false, false, false, false, NULL, NULL }
+-};
++    spu_handle_vector_attribute, NULL }
++});
+ 
+ /*  TARGET overrides.  */
+ 

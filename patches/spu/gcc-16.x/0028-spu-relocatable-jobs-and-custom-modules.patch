@@ -1,0 +1,210 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:39:28 -0500
+Subject: [PATCH] Relocatable SPURS images: fixups for jobs with their CRT, and custom modules.
+
+-mspurs-job-initialize links with --emit-fixups; its job runtime relocates the
+image from the table.  New -mcustom-module builds a position-independent image
+for a custom policy module to load: compiled -fpic (so the pic multilib is
+used), linked at 0 (the default layout) with --emit-fixups and -q, and started
+by crti.o, init_fixups.o and crtbegin.o.  init_fixups.o (libgcc, every
+multilib) adds the load address to the listed words from _init, then runs the
+.init_array constructors (such an image has no crt0); its .fini fragment runs
+.fini_array.  Both modes accept run-time relocations unless -merror-reloc or
+-mwarn-reloc is given.
+
+diff -ruN a/gcc/config/spu/spu-elf.h b/gcc/config/spu/spu-elf.h
+
+(Ported to GCC 16 from patches/spu/gcc-9.5.0/0011-spu-relocatable-jobs-and-custom-modules.patch.)
+---
+ gcc/config/spu/spu-elf.h        | 16 +++++-
+ gcc/config/spu/spu.opt          |  4 ++
+ libgcc/config.host              |  2 +-
+ libgcc/config/spu/init_fixups.S | 94 +++++++++++++++++++++++++++++++++
+ libgcc/config/spu/t-elf         |  4 ++
+ 5 files changed, 117 insertions(+), 3 deletions(-)
+ create mode 100644 libgcc/config/spu/init_fixups.S
+
+diff --git a/gcc/config/spu/spu-elf.h b/gcc/config/spu/spu-elf.h
+index d5f3e1cafb8..3cef9a3a5c3 100644
+--- a/gcc/config/spu/spu-elf.h
++++ b/gcc/config/spu/spu-elf.h
+@@ -53,7 +53,8 @@
+ #define STARTFILE_SPEC \
+   "%{mspurs-task:spurs_task.o%s; " \
+   "mspurs-job:job_start.o%s; " \
+-  "mspurs-job-initialize:job_start_w_crt.o%s job_crt.o%s; :" \
++  "mspurs-job-initialize:job_start_w_crt.o%s job_crt.o%s; " \
++  "mcustom-module:crti.o%s init_fixups.o%s crtbegin.o%s; :" \
+   SPU_ORDINARY_STARTFILE_SPEC "}"
+ 
+ #undef  ENDFILE_SPEC
+@@ -79,13 +80,24 @@
+   "%{shared:%eSPUDLL shared links are not supported by this toolchain} " \
+   "%{mspurs-task:%{mspurs-job|mspurs-job-initialize:%econflicting SPURS modes}} " \
+   "%{mspurs-job:%{mspurs-job-initialize:%econflicting SPURS modes}} " \
++  "%{mcustom-module:%{mspurs-task|mspurs-job|mspurs-job-initialize:%econflicting SPURS modes}} " \
++  "%{mcustom-module:%{shared|r:%ea custom module does not support shared or relocatable links}} " \
+   "%{mspurs-task|mspurs-job|mspurs-job-initialize:" \
+   "%{shared|r:%eSPURS mode does not support shared or relocatable links}} " \
+   "%{mlarge-mem: --defsym __stack=0xfffffff0 } " \
+   "%{mspurs-job: --spurs-job -dT spurs_job.ld%s} " \
+-  "%{mspurs-job-initialize: --spurs-job-initialize -dT spurs_job.ld%s} " \
++  "%{mspurs-job-initialize: --spurs-job-initialize -dT spurs_job.ld%s --emit-fixups} " \
++  "%{mcustom-module:--emit-fixups -q} " \
+   "%{mspurs-task: --spurs-task -dT spurs_task.ld%s}"
+ 
++/* A job linked with its CRT and a custom module are relocated at load time from
++   their fixup tables, so their absolute data words are expected: do not refuse
++   them unless asked to.  A custom module is always position-independent, which
++   also selects the pic multilib.  */
++#define DRIVER_SELF_SPECS \
++  "%{mspurs-job-initialize|mcustom-module:%{!merror-reloc:%{!mwarn-reloc:-mno-error-reloc}}}", \
++  "%{mcustom-module:%{!fpic:%{!fPIC:-fpic}}}"
++
+ #define SPU_ORDINARY_LIB_SPEC "-( %{!shared:%{g*:-lg}} -lc -lgloss -lsputhread -) \
+     %{mno-atomic-updates:-lgcc_cachemgr_nonatomic; :-lgcc_cachemgr} \
+     %{mcache-size=128:-lgcc_cache128k; \
+diff --git a/gcc/config/spu/spu.opt b/gcc/config/spu/spu.opt
+index d87b0583943..69f81197c87 100644
+--- a/gcc/config/spu/spu.opt
++++ b/gcc/config/spu/spu.opt
+@@ -59,6 +59,10 @@ mspurs-task
+ Target Report RejectNegative
+ Build as a SPURS Task binary. Sets ELF e_flags=3.
+ 
++mcustom-module
++Target Report RejectNegative
++Build a position-independent image for a custom SPURS policy module to load: linked at 0 with a fixup table that _init applies.
++
+ mbranch-hints
+ Target Mask(BRANCH_HINTS)
+ Generate branch hints for branches.
+diff --git a/libgcc/config.host b/libgcc/config.host
+index 1c5725c09fa..e491f8276f4 100644
+--- a/libgcc/config.host
++++ b/libgcc/config.host
+@@ -1524,7 +1524,7 @@ sparc64-*-netbsd*)
+ spu-*-elf*)
+ 	tmake_file="$tmake_file spu/t-elf t-libgcc-pic t-fdpbit"
+ 	extra_parts="$extra_parts \
+-		libgcc_cachemgr.a libgcc_cachemgr_nonatomic.a \
++		init_fixups.o libgcc_cachemgr.a libgcc_cachemgr_nonatomic.a \
+ 		libgcc_cache8k.a libgcc_cache16k.a libgcc_cache32k.a \
+ 		libgcc_cache64k.a libgcc_cache128k.a"
+ 	;;
+diff --git a/libgcc/config/spu/init_fixups.S b/libgcc/config/spu/init_fixups.S
+new file mode 100644
+index 00000000000..a4014b500ac
+--- /dev/null
++++ b/libgcc/config/spu/init_fixups.S
+@@ -0,0 +1,94 @@
++/* Start-up and shut-down of a position-independent SPU image
++   (-mcustom-module).
++
++   Such an image is linked at address 0 with --emit-fixups, which lists
++   every word holding an absolute address in .fixup: one word per
++   quadword, the quadword's link address with bit 8 >> n set for each of
++   its words n to relocate, ending with a zero word.  The .init fragment
++   below runs in _init (crti.o's frame) before the .ctors constructors:
++   it adds the image's load address to each listed word, then runs the
++   .init_array constructors (an image of this kind has no crt0 to run
++   them).  The .fini fragment runs the .fini_array destructors.  Call
++   _init once per load of the image.  */
++
++	.section .init,"ax",@progbits
++	brsl	$lr, __spu_init_image
++
++	.section .fini,"ax",@progbits
++	brsl	$lr, __spu_fini_image
++
++	.text
++	.align	3
++	.type	__spu_init_image, @function
++__spu_init_image:
++	stqd	$lr, 16($sp)
++	stqd	$80, -16($sp)
++	stqd	$81, -32($sp)
++	stqd	$sp, -64($sp)
++	ai	$sp, $sp, -64
++	ila	$2, 1f			/* link address of 1: */
++	brsl	$3, 1f			/* run-time address of 1: */
++1:	sf	$80, $2, $3		/* $80 = load delta */
++	brz	$80, 3f			/* loaded where linked: no relocation */
++	ila	$5, 0x10203
++	shufb	$4, $80, $80, $5	/* delta in every word */
++	ila	$6, __fixup_start
++	a	$6, $6, $80		/* run-time address of the table */
++2:	lqd	$7, 0($6)
++	rotqby	$7, $7, $6		/* this record in the preferred word */
++	ai	$6, $6, 4
++	brz	$7, 3f			/* zero record: done */
++	andi	$8, $7, -16
++	a	$8, $8, $80		/* run-time address of the quadword */
++	fsm	$9, $7			/* word select from the record's low bits */
++	and	$9, $9, $4
++	lqd	$10, 0($8)
++	a	$10, $10, $9
++	stqd	$10, 0($8)
++	br	2b
++3:	ila	$81, __init_array_start
++	a	$81, $81, $80
++4:	ila	$2, __init_array_end
++	a	$2, $2, $80
++	clgt	$3, $2, $81		/* more entries? */
++	brz	$3, 5f
++	lqd	$4, 0($81)
++	rotqby	$4, $4, $81
++	ai	$81, $81, 4
++	bisl	$lr, $4
++	br	4b
++5:	ai	$sp, $sp, 64
++	lqd	$lr, 16($sp)
++	lqd	$80, -16($sp)
++	lqd	$81, -32($sp)
++	bi	$lr
++	.size	__spu_init_image, . - __spu_init_image
++
++	.align	3
++	.type	__spu_fini_image, @function
++__spu_fini_image:
++	stqd	$lr, 16($sp)
++	stqd	$80, -16($sp)
++	stqd	$81, -32($sp)
++	stqd	$sp, -64($sp)
++	ai	$sp, $sp, -64
++	ila	$2, 1f
++	brsl	$3, 1f
++1:	sf	$80, $2, $3		/* load delta */
++	ila	$81, __fini_array_end
++	a	$81, $81, $80
++2:	ila	$2, __fini_array_start
++	a	$2, $2, $80
++	clgt	$3, $81, $2		/* more entries (last first)? */
++	brz	$3, 3f
++	ai	$81, $81, -4
++	lqd	$4, 0($81)
++	rotqby	$4, $4, $81
++	bisl	$lr, $4
++	br	2b
++3:	ai	$sp, $sp, 64
++	lqd	$lr, 16($sp)
++	lqd	$80, -16($sp)
++	lqd	$81, -32($sp)
++	bi	$lr
++	.size	__spu_fini_image, . - __spu_fini_image
+diff --git a/libgcc/config/spu/t-elf b/libgcc/config/spu/t-elf
+index 322a52d38ed..9c22ccd8f29 100644
+--- a/libgcc/config/spu/t-elf
++++ b/libgcc/config/spu/t-elf
+@@ -57,6 +57,10 @@ cache64k.o: $(srcdir)/config/spu/cache.S
+ cache128k.o: $(srcdir)/config/spu/cache.S
+ 	$(gcc_compile) -D__CACHE_SIZE__=128 -c $<
+ 
++# Relocation of -mcustom-module images, run from _init.
++init_fixups.o: $(srcdir)/config/spu/init_fixups.S
++	$(gcc_compile) -c $<
++
+ # We provide our own version of __divdf3 that performs better and has
+ # better support for non-default rounding modes.
+ DPBIT_FUNCS := $(filter-out _div_df, $(DPBIT_FUNCS))

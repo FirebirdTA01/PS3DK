@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:00:17 -0500
+Subject: [PATCH 14/39] spu: drop the init/add/finish/destroy vectorizer cost
+ hooks (vector_costs class, GCC 12)
+
+SPU's add_stmt_cost was the pre-GCC-12 default (builtin_vectorization_cost per
+statement, inner-loop body weighted x50); the default vector_costs keeps that.
+spu_builtin_vectorization_cost stays.
+---
+ gcc/config/spu/spu.cc | 70 -------------------------------------------
+ 1 file changed, 70 deletions(-)
+
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index 84626332267..a29053474bd 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -6658,64 +6658,6 @@ spu_builtin_vectorization_cost (enum vect_cost_for_stmt type_of_cost,
+     }
+ }
+ 
+-/* Implement targetm.vectorize.init_cost.  */
+-
+-static void *
+-spu_init_cost (struct loop *loop_info ATTRIBUTE_UNUSED)
+-{
+-  unsigned *cost = XNEWVEC (unsigned, 3);
+-  cost[vect_prologue] = cost[vect_body] = cost[vect_epilogue] = 0;
+-  return cost;
+-}
+-
+-/* Implement targetm.vectorize.add_stmt_cost.  */
+-
+-static unsigned
+-spu_add_stmt_cost (void *data, int count, enum vect_cost_for_stmt kind,
+-		   struct _stmt_vec_info *stmt_info, int misalign,
+-		   enum vect_cost_model_location where)
+-{
+-  unsigned *cost = (unsigned *) data;
+-  unsigned retval = 0;
+-
+-  if (flag_vect_cost_model)
+-    {
+-      tree vectype = stmt_info ? stmt_vectype (stmt_info) : NULL_TREE;
+-      int stmt_cost = spu_builtin_vectorization_cost (kind, vectype, misalign);
+-
+-      /* Statements in an inner loop relative to the loop being
+-	 vectorized are weighted more heavily.  The value here is
+-	 arbitrary and could potentially be improved with analysis.  */
+-      if (where == vect_body && stmt_info && stmt_in_inner_loop_p (stmt_info))
+-	count *= 50;  /* FIXME.  */
+-
+-      retval = (unsigned) (count * stmt_cost);
+-      cost[where] += retval;
+-    }
+-
+-  return retval;
+-}
+-
+-/* Implement targetm.vectorize.finish_cost.  */
+-
+-static void
+-spu_finish_cost (void *data, unsigned *prologue_cost,
+-		 unsigned *body_cost, unsigned *epilogue_cost)
+-{
+-  unsigned *cost = (unsigned *) data;
+-  *prologue_cost = cost[vect_prologue];
+-  *body_cost     = cost[vect_body];
+-  *epilogue_cost = cost[vect_epilogue];
+-}
+-
+-/* Implement targetm.vectorize.destroy_cost_data.  */
+-
+-static void
+-spu_destroy_cost_data (void *data)
+-{
+-  free (data);
+-}
+-
+ /* Return true iff, data reference of TYPE can reach vector alignment (16)
+    after applying N number of iterations.  This routine does not determine
+    how may iterations are required to reach desired alignment.  */
+@@ -7378,18 +7320,6 @@ TARGET_GNU_ATTRIBUTES (spu_attribute_table,
+ #undef TARGET_VECTORIZE_BUILTIN_VECTORIZATION_COST
+ #define TARGET_VECTORIZE_BUILTIN_VECTORIZATION_COST spu_builtin_vectorization_cost
+ 
+-#undef TARGET_VECTORIZE_INIT_COST
+-#define TARGET_VECTORIZE_INIT_COST spu_init_cost
+-
+-#undef TARGET_VECTORIZE_ADD_STMT_COST
+-#define TARGET_VECTORIZE_ADD_STMT_COST spu_add_stmt_cost
+-
+-#undef TARGET_VECTORIZE_FINISH_COST
+-#define TARGET_VECTORIZE_FINISH_COST spu_finish_cost
+-
+-#undef TARGET_VECTORIZE_DESTROY_COST_DATA
+-#define TARGET_VECTORIZE_DESTROY_COST_DATA spu_destroy_cost_data
+-
+ #undef TARGET_VECTORIZE_VECTOR_ALIGNMENT_REACHABLE
+ #define TARGET_VECTORIZE_VECTOR_ALIGNMENT_REACHABLE spu_vector_alignment_reachable
+ 

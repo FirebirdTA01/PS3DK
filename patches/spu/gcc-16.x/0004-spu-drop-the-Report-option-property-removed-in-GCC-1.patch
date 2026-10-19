@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 14:33:33 -0500
+Subject: [PATCH 04/39] spu: drop the Report option property (removed in GCC
+ 11)
+
+14 option records.
+---
+ gcc/config/spu/spu.opt | 28 ++++++++++++++--------------
+ 1 file changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/gcc/config/spu/spu.opt b/gcc/config/spu/spu.opt
+index 9eb18cc2fe1..cf2712291c0 100644
+--- a/gcc/config/spu/spu.opt
++++ b/gcc/config/spu/spu.opt
+@@ -16,11 +16,11 @@
+ ; <http://www.gnu.org/licenses/>.
+ 
+ mwarn-reloc
+-Target Report Mask(WARN_RELOC)
++Target Mask(WARN_RELOC)
+ Emit warnings when run-time relocations are generated.
+ 
+ merror-reloc
+-Target Report Mask(ERROR_RELOC)
++Target Mask(ERROR_RELOC)
+ Emit errors when run-time relocations are generated.
+ 
+ mbranch-cost=
+@@ -28,15 +28,15 @@ Target RejectNegative Joined UInteger Var(spu_branch_cost) Init(20)
+ Specify cost of branches (Default 20).
+ 
+ msafe-dma
+-Target Report RejectNegative Mask(SAFE_DMA)
++Target RejectNegative Mask(SAFE_DMA)
+ Make sure loads and stores are not moved past DMA instructions.
+ 
+ munsafe-dma
+-Target Report RejectNegative InverseMask(SAFE_DMA)
++Target RejectNegative InverseMask(SAFE_DMA)
+ volatile must be specified on any memory that is effected by DMA.
+ 
+ mdual-nops
+-Target Report Var(spu_dual_nops,10) Init(10)
++Target Var(spu_dual_nops,10) Init(10)
+ Insert nops when it might improve performance by allowing dual issue (default).
+ 
+ mdual-nops=
+@@ -44,11 +44,11 @@ Target RejectNegative Joined UInteger Var(spu_dual_nops)
+ Insert nops when it might improve performance by allowing dual issue (default).
+ 
+ mstdmain
+-Target Report Mask(STD_MAIN)
++Target Mask(STD_MAIN)
+ Use standard main function as entry for startup.
+ 
+ mbranch-hints
+-Target Report Mask(BRANCH_HINTS)
++Target Mask(BRANCH_HINTS)
+ Generate branch hints for branches.
+ 
+ mhint-max-nops=
+@@ -60,11 +60,11 @@ Target RejectNegative Joined Var(spu_max_distance_str)
+ Approximate maximum number of instructions to allow between a hint and its branch [125].
+ 
+ msmall-mem
+-Target Report RejectNegative InverseMask(LARGE_MEM)
++Target RejectNegative InverseMask(LARGE_MEM)
+ Generate code for 18 bit addressing.
+ 
+ mlarge-mem
+-Target Report RejectNegative Mask(LARGE_MEM)
++Target RejectNegative Mask(LARGE_MEM)
+ Generate code for 32 bit addressing.
+ 
+ mfixed-range=
+@@ -72,7 +72,7 @@ Target RejectNegative Joined Var(spu_fixed_range_string)
+ Specify range of registers to make fixed.
+ 
+ msafe-hints
+-Target Report Mask(SAFE_HINTS)
++Target Mask(SAFE_HINTS)
+ Insert hbrp instructions after hinted branch targets to avoid the SPU hang issue.
+ 
+ march=
+@@ -84,19 +84,19 @@ Target RejectNegative Joined Var(spu_tune_string)
+ Schedule code for given CPU.
+ 
+ mea32
+-Target Report RejectNegative Var(spu_ea_model,32) Init(32)
++Target RejectNegative Var(spu_ea_model,32) Init(32)
+ Access variables in 32-bit PPU objects (default).
+ 
+ mea64
+-Target Report RejectNegative Var(spu_ea_model,64)
++Target RejectNegative Var(spu_ea_model,64)
+ Access variables in 64-bit PPU objects.
+ 
+ maddress-space-conversion
+-Target Report Mask(ADDRESS_SPACE_CONVERSION)
++Target Mask(ADDRESS_SPACE_CONVERSION)
+ Allow conversions between __ea and generic pointers (default).
+ 
+ mcache-size=
+-Target Report RejectNegative Joined UInteger
++Target RejectNegative Joined UInteger
+ Size (in KB) of software data cache.
+ 
+ matomic-updates

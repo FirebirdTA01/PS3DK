@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:39:25 -0500
+Subject: [PATCH] spu: predefine the reference PS3 platform macros
+
+The reference PS3 SPU compiler predefines __CELLOS_LV2__, __LP32__, _LP32,
+__STRICT_ALIGNED, __DOUBLE_ACCURATE__ and __FLOAT_FAST__.  Reference
+headers and samples select their PS3 code paths on __CELLOS_LV2__; the
+accuracy markers describe this back end: IEEE double arithmetic and the
+hardware fast single precision.
+
+(Ported to GCC 16 from patches/spu/gcc-9.5.0/0008-spu-reference-predefines.patch.)
+---
+ gcc/config/spu/spu-elf.h | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/gcc/config/spu/spu-elf.h b/gcc/config/spu/spu-elf.h
+index 9a5b3585de3..d5f3e1cafb8 100644
+--- a/gcc/config/spu/spu-elf.h
++++ b/gcc/config/spu/spu-elf.h
+@@ -103,3 +103,11 @@
+   "%{mspurs-job:-lspurs_job_runtime} " \
+   "%{mspurs-job-initialize:-lspurs_jq_runtime} " \
+   SPU_ORDINARY_LIB_SPEC " -lspurs -lsync --end-group; :" SPU_ORDINARY_LIB_SPEC "}"
++
++/* The reference PS3 SPU compiler predefines these; reference headers and
++   samples select their PS3 code paths on __CELLOS_LV2__, and the accuracy
++   markers describe this back end's code generation: IEEE double
++   arithmetic and the hardware's fast single precision.  */
++#undef CPP_SPEC
++#define CPP_SPEC "-D__CELLOS_LV2__ -D__LP32__ -D_LP32 -D__STRICT_ALIGNED " \
++  "-D__DOUBLE_ACCURATE__ -D__FLOAT_FAST__"

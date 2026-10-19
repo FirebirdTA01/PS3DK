@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:39:21 -0500
+Subject: [PATCH] 
+
+
+
+(Ported to GCC 16 from patches/spu/gcc-9.5.0/0001-spu-cachemgr-disable-branch-hints.patch.)
+---
+ libgcc/config/spu/t-elf | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/libgcc/config/spu/t-elf b/libgcc/config/spu/t-elf
+index 29536e88132..322a52d38ed 100644
+--- a/libgcc/config/spu/t-elf
++++ b/libgcc/config/spu/t-elf
+@@ -29,12 +29,15 @@ HOST_LIBGCC2_CFLAGS += -mwarn-reloc -D__IN_LIBGCC2
+ # Neither gcc or newlib seem to have a standard way to generate multiple
+ # crt*.o files.  So we don't use the standard crt0.o name anymore.
+ 
++# cachemgr.c is large enough that GCC's hbrr branch-hint instructions
++# overflow the 10-bit I10 offset field with binutils >= 2.42.  Disable
++# branch hints for this file only; runtime impact is negligible.
+ cachemgr.o: $(srcdir)/config/spu/cachemgr.c
+-	$(gcc_compile) -c $<
++	$(gcc_compile) -mno-branch-hints -c $<
+ 
+ # Specialised rule to add a -D flag.
+ cachemgr_nonatomic.o: $(srcdir)/config/spu/cachemgr.c
+-	$(gcc_compile) -DNONATOMIC -c $<
++	$(gcc_compile) -mno-branch-hints -DNONATOMIC -c $<
+ 
+ libgcc_%.a: %.o
+ 	$(AR_FOR_TARGET) -rcs $@ $<

@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 14:03:56 -0500
+Subject: [PATCH 03/39] spu: drop FLOAT/DOUBLE/LONG_DOUBLE_TYPE_SIZE (poisoned
+ in GCC 15)
+
+The default TARGET_C_MODE_FOR_FLOATING_TYPE gives SFmode/DFmode/DFmode,
+which is the SPU 32/64/64 layout.
+---
+ gcc/config/spu/spu.h | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/gcc/config/spu/spu.h b/gcc/config/spu/spu.h
+index 4af55bd9d8d..b13d0a6b4cf 100644
+--- a/gcc/config/spu/spu.h
++++ b/gcc/config/spu/spu.h
+@@ -129,12 +129,6 @@ extern GTY(()) int spu_tune;
+ 
+ #define LONG_LONG_TYPE_SIZE 64
+ 
+-#define FLOAT_TYPE_SIZE 32
+-
+-#define DOUBLE_TYPE_SIZE 64
+-
+-#define LONG_DOUBLE_TYPE_SIZE 64
+-
+ #define DEFAULT_SIGNED_CHAR 0
+ 
+ #define STDINT_LONG32 0

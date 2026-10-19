@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 19:37:02 -0500
+Subject: [PATCH 38/39] spu: keep loop-pattern distribution at -O3, as GCC 9.5
+ did
+
+---
+ gcc/config/spu/spu.cc | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index cca9a2597b8..f84a39d9d6e 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -248,8 +248,8 @@ spu_option_override (void)
+      them into memcpy/memset calls.  Much SPU code links without a C
+      library (PSL1GHT MARS kernels and task modules among it) and lives in
+      the 256 KB local store, so an implicit library call is a link failure
+-     or a size cost there.  GCC 9.5 had the pass off below -O3.  */
+-  if (!OPTION_SET_P (flag_tree_loop_distribute_patterns))
++     or a size cost there.  As in GCC 9.5, it stays on at -O3.  */
++  if (!OPTION_SET_P (flag_tree_loop_distribute_patterns) && optimize < 3)
+     flag_tree_loop_distribute_patterns = 0;
+ 
+   /* Functions must be 8 byte aligned so we correctly handle dual issue */

@@ -10,8 +10,11 @@
 #   - GCC 9 was the last version with an intact config/spu/ backend.
 #   - GCC 9.5.0 is the newest 9.x patch release; includes C++17 complete and
 #     partial C++20.
-#   - GCC 10 removed ~34k lines of SPU backend. Forward-porting to GCC 16 is
-#     a long-lead workstream, kept in a separate branch.
+#   - GCC 10 removed ~34k lines of SPU backend.  --gcc=16 builds the
+#     forward port instead (docs/design/gcc-transition.md): GCC 16.1.0 with
+#     the 9.5.0 backend restored from the releases/gcc-9.5.0 tag and the
+#     patches/spu/gcc-16.x series on top.  9.5.0 stays the default until the
+#     port's gates pass.
 #
 # SPU C++ constraints (256 KB local store budget):
 #   - Default spec file adds -fno-exceptions -fno-rtti -Os for size.
@@ -33,6 +36,9 @@ BINUTILS_TAG="binutils-2_42"
 BINUTILS_VER="2.42"
 GCC_TAG="releases/gcc-9.5.0"
 GCC_VER="9.5.0"
+GCC_PATCH_DIR="gcc-9.5.0"
+# --gcc=16: the forward-ported SPU backend (see the header).
+SPU_BACKEND_TAG="releases/gcc-9.5.0"
 NEWLIB_TAG="newlib-4.4.0"
 NEWLIB_VER="4.4.0"
 
@@ -42,6 +48,7 @@ PREFIX="$PS3DEV/spu"
 UPSTREAM="$PS3_TOOLCHAIN_ROOT/src/upstream"
 PATCHES="$PS3_TOOLCHAIN_ROOT/patches/spu"
 BUILD="$PS3_BUILD_ROOT/spu"
+SPU_GCC=9
 
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 say "Using $JOBS parallel jobs."
@@ -56,12 +63,23 @@ for arg in "$@"; do
         --only) shift; ONLY="${1:-}" ;;
         --host=*) HOST_TRIPLE="${arg#--host=}" ;;
         --build=*) BUILD_TRIPLE="${arg#--build=}" ;;
+        --gcc=16) SPU_GCC=16 ;;
+        --gcc=9|--gcc=9.5) SPU_GCC=9 ;;
+        --gcc=*) die "unsupported ${arg}: the SPU compiler is 9 (9.5.0, default) or 16 (16.1.0 forward port)" ;;
         binutils|gcc-newlib|symlinks|linker-script) ONLY="$arg" ;;
     esac
 done
 
 # Cross-build mode (Windows-hosted toolchain): see build-ppu-toolchain.sh's
 # header comment for the same option semantics.
+if [[ "$SPU_GCC" == 16 ]]; then
+    GCC_TAG="releases/gcc-16.1.0"
+    GCC_VER="16.1.0"
+    GCC_PATCH_DIR="gcc-16.x"
+    # A separate build root, so a 9.5 tree is never reused for 16.
+    BUILD="${BUILD}-gcc16"
+fi
+
 NATIVE_PREFIX="$PREFIX"
 if [[ -n "$HOST_TRIPLE" ]]; then
     PREFIX="${PS3DEV}.win/spu"
@@ -156,6 +174,18 @@ apply_patches() {
     touch "$stamp"
 }
 
+# GCC 10 removed the SPU backend.  --gcc=16 restores it unchanged from the
+# 9.5.0 release tag (the upstream mirror bootstrap.sh fetches) before the
+# patches/spu/gcc-16.x series ports it; the series assumes exactly that tree.
+restore_spu_backend() {
+    local src="$1" stamp="$1/.spu-backend-restored"
+    [[ -f "$stamp" ]] && { say "SPU backend already restored (stamp present)"; return 0; }
+    git -C "$UPSTREAM/gcc" rev-parse -q --verify "$SPU_BACKEND_TAG^{commit}" >/dev/null         || die "$SPU_BACKEND_TAG not in $UPSTREAM/gcc (run scripts/bootstrap.sh)"
+    say "Restoring the SPU backend from $SPU_BACKEND_TAG into $src"
+    git -C "$UPSTREAM/gcc" archive "$SPU_BACKEND_TAG"         gcc/config/spu gcc/common/config/spu libgcc/config/spu | tar -x -C "$src"         || die "could not restore the SPU backend from $SPU_BACKEND_TAG"
+    touch "$stamp"
+}
+
 build_binutils() {
     local src="$BUILD/binutils-$BINUTILS_VER-src"
     local obj="$BUILD/binutils-$BINUTILS_VER-build"
@@ -223,7 +253,10 @@ build_gcc_newlib() {
     local obj="$BUILD/gcc-$GCC_VER-build"
 
     extract_source "$UPSTREAM/gcc" "$GCC_TAG" "$gcc_src"
-    apply_patches "$gcc_src" "$PATCHES/gcc-9.5.0"
+    if [[ "$SPU_GCC" == 16 ]]; then
+        restore_spu_backend "$gcc_src"
+    fi
+    apply_patches "$gcc_src" "$PATCHES/$GCC_PATCH_DIR"
 
     # Newlib only built in the native (stage 0) flow.  Cross-builds reuse
     # the SPU ELF target libs from the native install.
@@ -293,6 +326,14 @@ build_gcc_newlib() {
         # CFLAGS.  -mno-branch-hints: prevents hbrr instruction relocation
         # overflows with binutils 2.42 for large functions (cachemgr, etc.)
         local cflags_target="-Os -ffast-math -ftree-vectorize -funroll-loops -fschedule-insns -mdual-nops -mno-branch-hints"
+        if [[ "$SPU_GCC" == 16 ]]; then
+            # newlib 4.4 still has two implicit function declarations
+            # (signal.c getpid, __dprintf.c write), errors since GCC 14;
+            # keep 9.5's behaviour for building newlib itself (newlib 4.6
+            # removes them).  std::stacktrace needs mmap, which SPU lacks.
+            cflags_target="$cflags_target -Wno-error=implicit-function-declaration"
+            conf_args+=(--disable-libstdcxx-backtrace)
+        fi
         # SPU's libm/machine/spu fenv files use #include "headers/fefpscr.h"
         # relative to their source directory.  libc/machine/spu/memcpy.c pulls
         # vec_literal.h the same way — add -I so the compiler finds them.

@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Sun, 18 Oct 2026 17:00:15 -0500
+Subject: [PATCH 07/39] spu: drop the last Report option property
+
+---
+ gcc/config/spu/spu.opt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/config/spu/spu.opt b/gcc/config/spu/spu.opt
+index cf2712291c0..0d9561203c1 100644
+--- a/gcc/config/spu/spu.opt
++++ b/gcc/config/spu/spu.opt
+@@ -100,6 +100,6 @@ Target RejectNegative Joined UInteger
+ Size (in KB) of software data cache.
+ 
+ matomic-updates
+-Target Report
++Target
+ Atomically write back software data cache lines (default).
+ 
