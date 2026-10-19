@@ -2,8 +2,9 @@
 
 Status: approved by the director on 2026-10-14 (GCC 16, the stage order below, one
 compiler per release).  With the switchover change the PPU compiler is GCC
-16.1.0 (stage 2, below); the SPU compiler is still GCC 9.5.0, the last release
-with the SPE backend.  This plan moves
+16.1.0 (stage 2, below), and the SPU compiler is GCC 16.1.0 too: the SPE backend
+from GCC 9.5.0, the last release that carried it, forward-ported (stage 3,
+`docs/design/spu-gcc16-port.md`).  This plan moves
 both to one current GCC release line and ships the new compiler only after it
 passes every release gate.  The plan first meant to keep the ABI unchanged; the
 C1 change (signed plain `char` under ILP32, 16-bit `wchar_t`, `int` `wint_t`,
@@ -138,8 +139,10 @@ Checks beyond the release gate:
   struct passing), with matching data-model tags (attribute 16), so that an
   existing v0.21.x archive needs no rebuild.  C1 changed the `char`,
   `wchar_t`, `wint_t` and `errno` ABI, so mixing is not supported: every
-  object and archive is rebuilt with the new release's toolchain (GCC 16 for
-  PPU, the release's GCC 9.5 for SPU), C and C++.
+  object and archive is rebuilt with the new release's toolchain (GCC 16.1.0
+  for both PPU and SPU), C and C++.  The SPU ABI defaults the port keeps
+  (signed `char`, 16-bit `wchar_t`) are not a promise that objects built by
+  an older GCC 9 SPU compiler can be mixed in; rebuild those too.
 - **Carry patterns.**  `count += (x != 0xff102030u)` once counted wrong in
   loops in both data models, because our patches let 32-bit carry patterns
   run on 64-bit registers (fixed in v0.16.4).  No carry pattern is widened in
@@ -179,8 +182,8 @@ GCC 10 removed the SPU backend: about 6,800 lines in `gcc/config/spu`, 3,200
 in `libgcc/config/spu`, 2,500 of intrinsic headers and 21,000 lines of tests.
 `patches/spu/FORWARD_PORT_README.md` sketched a port to GCC 12 at 12 to 24
 weeks; to 16 it is the same work against newer APIs.  It lives on its own
-branch, builds into its own prefix, and the 9.5 SPU compiler stays the shipped
-one until it passes.
+branch and builds into its own build root.  It is the default SPU compiler from the
+GCC 16 release on (`build-spu-toolchain.sh --gcc=9` still builds 9.5).
 
 Work, largest first:
 1. **Register allocation.**  The SPU port most likely used the old reload

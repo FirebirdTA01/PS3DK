@@ -90,6 +90,12 @@ if [[ -n "$HOST_TRIPLE" ]]; then
     BUILD_TRIPLE="${BUILD_TRIPLE:-$(uname -m)-pc-linux-gnu}"
     [[ -x "$NATIVE_PREFIX/bin/$TARGET-gcc" ]] \
         || die "Native SPU toolchain not present at $NATIVE_PREFIX/bin/$TARGET-gcc. Run without --host first to produce stage 0."
+    # The cross build reuses the native build's target libraries, so the native
+    # compiler must be the same GCC (a 9.5 prefix under a 16 cross build would
+    # ship 9.5 libraries with a 16 compiler).
+    native_ver=$("$NATIVE_PREFIX/bin/$TARGET-gcc" -dumpversion 2>/dev/null || true)
+    [[ "$native_ver" == "$GCC_VER" ]] ||
+        die "Native SPU compiler at $NATIVE_PREFIX is GCC ${native_ver:-unknown}, this cross build is GCC $GCC_VER: build the native $GCC_VER toolchain first (same --gcc)."
     say "Cross-build: host=$HOST_TRIPLE build=$BUILD_TRIPLE prefix=$PREFIX"
 fi
 

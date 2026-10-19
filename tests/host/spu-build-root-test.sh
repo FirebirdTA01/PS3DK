@@ -21,14 +21,15 @@ bad() { printf 'spu-build-root: FAIL %s\n' "$*"; fail=1; }
 work="$(mktemp -d "${TMPDIR:-/tmp}/spu-build-root.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 export PS3DEV="$work/ps3dev" PS3_BUILD_ROOT="$work/build"
-# Cross mode requires a native SPU compiler; a stub stands in for it.
-mkdir -p "$PS3DEV/spu/bin" && printf '#!/bin/sh\nexit 0\n' > "$PS3DEV/spu/bin/spu-elf-gcc" && chmod +x "$PS3DEV/spu/bin/spu-elf-gcc"
+# Cross mode requires a native SPU compiler of the same GCC release; a stub
+# stands in for it and reports the version in $STUB_VER.
+mkdir -p "$PS3DEV/spu/bin" && printf '#!/bin/sh\necho "$STUB_VER"\n' > "$PS3DEV/spu/bin/spu-elf-gcc" && chmod +x "$PS3DEV/spu/bin/spu-elf-gcc"
 host=x86_64-w64-mingw32
 
 config() { bash "$script" --print-config "$@" 2>/dev/null | tr -d '\r'; }
 expect() { # <want build root suffix> <want clean 0|1> <want gcc_ver> <args...>
     local root=$1 clean=$2 ver=$3; shift 3
-    local out; out=$(config "$@")
+    local out; out=$(STUB_VER=$ver config "$@")
     local b c v
     b=$(sed -n 's/^build=//p' <<<"$out"); c=$(sed -n 's/^clean=//p' <<<"$out"); v=$(sed -n 's/^gcc_ver=//p' <<<"$out")
     if [[ "$b" == "$PS3_BUILD_ROOT/$root" && "$c" == "$clean" && "$v" == "$ver" ]]; then
@@ -53,6 +54,16 @@ expect "spu-$host"         0 9.5.0  --gcc=9 --host=$host
 expect "spu-$host"         0 9.5.0  --host=$host --gcc=9
 expect "spu-$host"         1 9.5.0  --clean --host=$host --gcc=9
 expect "spu-$host"         1 9.5.0  --host=$host --gcc=9 --clean
+
+# A cross build over a native compiler of the other release is refused.
+for pair in "16.1.0 --gcc=9" "9.5.0 --gcc=16" "9.5.0 "; do
+    v=${pair%% *}; a=${pair#* }
+    if STUB_VER=$v bash "$script" --print-config --host=$host $a >/dev/null 2>&1; then
+        bad "cross ${a:-(default)} over a native $v compiler was accepted"
+    else
+        ok "cross ${a:-(default)} over a native $v compiler refused"
+    fi
+done
 
 if bash "$script" --print-config --gcc=12 >/dev/null 2>&1; then
     bad "--gcc=12 was accepted"
