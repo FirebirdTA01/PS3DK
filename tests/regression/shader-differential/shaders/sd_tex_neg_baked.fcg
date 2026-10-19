@@ -1,0 +1,19 @@
+// shader-differential - texture-binding NEGATIVE control twin (float mode,
+// role control-texture-neg).
+//
+// The same arithmetic as sd_tex_baked.fcg, but for the WRONG channel
+// permutation: the un-permuted base texel (4x, 4(63 - y), 4(63 - x), 4y),
+// where u_tex really sees perm 6 (GRBA) with R and G swapped.  Paired with
+// sd_tex_ctrl, the binding predicate must report a DIFFERENCE; if it
+// reported agreement, the texture control could not see a mis-bound or
+// mis-permuted texture and its passes would mean nothing (codex 2026-10-19).
+
+void main(
+    float4 in_texcoord   : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    float x = floor(in_texcoord.x * 64.0f);
+    float y = floor(in_texcoord.y * 64.0f);
+    float s = 4.0f / 255.0f;
+    out_color = float4(x * s, (63.0f - y) * s, (63.0f - x) * s, y * s);
+}

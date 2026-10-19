@@ -3260,6 +3260,8 @@ static void print_row(const sd_pair *p, const sd_result *r)
  *   control-f32-frames  the k container drawn on three successive frames
  *                  with three different word sets, each read back exactly;
  *   control-texture / control-auto, when present: must judge identical. */
+#include "f32_gate.h"
+
 #define F32_PITCH   (RT_W * 16u)
 #define F32_BYTES   (F32_PITCH * RT_H)
 #define F32_WORDS   (F32_BYTES / 4u)
@@ -3571,6 +3573,28 @@ static const char *f32_verdict(const u32 *a, const u32 *b, int *diff, int *pnan,
 	return *diff ? "mismatch" : (*pnan ? "paired-nan" : "identical");
 }
 
+/* The control-texture binding predicate (codex 2026-10-19 17:43): every
+ * lane of both images must be a finite value inside [0, 1] BEFORE any
+ * quantisation - a NaN, an infinity or an out-of-domain value is reported
+ * as -1, never clamped into range - and then both images rounded to 8 bits
+ * (round half up of v * 255) must agree: 1 agree, 0 differ. */
+static int f32_q8_compare(const u32 *a, const u32 *b)
+{
+	int agree = 1;
+	for (u32 w = 0; w < F32_WORDS; w++) {
+		float fa, fb;
+		memcpy(&fa, &a[w], 4);
+		memcpy(&fb, &b[w], 4);
+		if ((a[w] & 0x7F800000u) == 0x7F800000u || (b[w] & 0x7F800000u) == 0x7F800000u)
+			return -1;
+		if (!(fa >= 0.0f && fa <= 1.0f) || !(fb >= 0.0f && fb <= 1.0f))
+			return -1;
+		if ((int)(fa * 255.0f + 0.5f) != (int)(fb * 255.0f + 0.5f))
+			agree = 0;
+	}
+	return agree;
+}
+
 /* control-f32-xy: lane x rises strictly along every row and is equal down
  * every column, lane y the transpose, lane w is exactly 2.5. */
 static int f32_xy_ok(const u32 *img)
@@ -3620,14 +3644,13 @@ static int run_f32(CellGcmContextData *ctx)
 		printf("shader-differential: cannot load the k container %s\nSHADER_DIFF_INVALID\n", g_pairs[0].a_path);
 		return 2;
 	}
-	static const char *k_required[] = { "f32-words", "f32-ulp", "f32-sub8", "f32-nan", "xy", "frames" };
-	int passed[6] = { 0 };
-	/* The uniform and auto gates start CLOSED: only a passing
-	 * control-uniform / control-auto row opens them, so a row using a
-	 * named set or `auto` is never judged against unapplied values. */
-	int controls_ok = 1, textures_ok = 1, have_tex = 0, autos_ok = 0, uniforms_ok = 0;
+	/* Every control is required; any failure latches the run INVALID
+	 * (f32_gate.h).  The uniform and auto gates also start CLOSED: only a
+	 * passing control-uniform / control-auto row opens them. */
+	f32_gate gate;
+	f32_gate_init(&gate);
+	int textures_ok = 1, have_tex = 0, autos_ok = 0, uniforms_ok = 0;
 	int n_ident = 0, n_mismatch = 0, n_pnan = 0, n_refused = 0, n_vacuous = 0, n_other = 0, n_withheld = 0;
-	int gate_checked = 0;
 	for (int i = 0; i < g_npairs; i++) {
 		sd_pair *p = &g_pairs[i];
 		sd_result r;
@@ -3638,22 +3661,16 @@ static int run_f32(CellGcmContextData *ctx)
 		int is_control = strncmp(p->role, "control-", 8) == 0;
 		struct timeval t0, t1;
 		gettimeofday(&t0, NULL);
-		if (!is_control && !gate_checked) {
-			gate_checked = 1;
-			for (int q = 0; q < 6; q++)
-				if (!passed[q]) {
-					printf("shader-differential: required f32 control '%s' did not run and pass before the first row\n",
-					       k_required[q]);
-					controls_ok = 0;
-				}
-		}
-		if (!is_control && !controls_ok) {
+		if (!is_control && !f32_gate_corpus_allowed(&gate)) {
 			r.status = "withheld-controls-invalid";
+			snprintf(r.diagnostic, sizeof(r.diagnostic), "first-failed-control=%s", gate.first_failure);
 			n_withheld++;
 			print_row(p, &r);
 			continue;
 		}
-		if (strcmp(p->role, "control-texture") == 0)
+		const int is_tex_ctl = strcmp(p->role, "control-texture") == 0 ||
+		                       strcmp(p->role, "control-texture-neg") == 0;
+		if (is_tex_ctl)
 			have_tex = 1;
 		u32 sa = 0, sb = 0;
 		void *A = load_container(p->a_path, &sa);
@@ -3715,9 +3732,23 @@ static int run_f32(CellGcmContextData *ctx)
 					r.status = "uniforms-invalid";
 					ok_control = 0;
 				} else {
-					int ra = f32_side(ctx, kcont, A, us, is_k ? p->ka : NULL, tex_ok, use_tex,
+					/* As on the default path: the uniform and auto controls are
+					 * asymmetric (side B has the value baked and no parameter),
+					 * so their set applies to side A only; the texture control
+					 * may bind samplers while its own gate is still closed. */
+					const char *us_b = (strcmp(p->role, "control-uniform") == 0 ||
+					                    strcmp(p->role, "control-uniform-neg") == 0 ||
+					                    strcmp(p->role, "control-auto") == 0) ? "0" : us;
+					/* control-uniform-neg: the set is NOT applied to side A
+					 * either, so A shows its embedded default against B's baked
+					 * value - the pair must differ, proving the uniform control
+					 * can see a missing application. */
+					const char *us_a = strcmp(p->role, "control-uniform-neg") == 0 ? "0" : us;
+					if (is_tex_ctl)
+						tex_ok = 1;
+					int ra = f32_side(ctx, kcont, A, us_a, is_k ? p->ka : NULL, tex_ok, use_tex,
 					                  a_off, z_off, g_f32_save_a, &ta, &pa);
-					int rb = ra ? 0 : f32_side(ctx, kcont, B, us, is_k ? p->kb : NULL, tex_ok, use_tex,
+					int rb = ra ? 0 : f32_side(ctx, kcont, B, us_b, is_k ? p->kb : NULL, tex_ok, use_tex,
 					                           b_off, z_off, g_f32_save_b, &tb, &pb);
 					r.painted_a = pa;
 					r.painted_b = pb;
@@ -3727,7 +3758,7 @@ static int run_f32(CellGcmContextData *ctx)
 							snprintf(diag, sizeof(diag), "%s", g_f32_init_diag);
 						ok_control = 0;
 						if (ra == -7 || ra == -8 || rb == -7 || rb == -8)
-							controls_ok = 0;  /* the instrument itself failed */
+							f32_gate_fail(&gate, p->name);  /* the instrument itself failed */
 					} else if (pa == 0 && pb == 0) {
 						r.status = "vacuous";
 						ok_control = 0;
@@ -3758,6 +3789,30 @@ static int run_f32(CellGcmContextData *ctx)
 								ok_control = 0;
 								strncat(diag, " xy-addressing-failed", sizeof(diag) - strlen(diag) - 1);
 							}
+						} else if (is_tex_ctl) {
+							/* The baked twin writes n/255 literals, and the RSX does
+							 * not expand an 8-bit texel to exactly n/255 (measured on
+							 * hardware 2026-10-19: 0x3f7d0000 against 0x3f7cfcfe), so
+							 * this control cannot be bit-exact.  It proves BINDING
+							 * (the right texture, channels, wrap), judged by a stated
+							 * 8-bit predicate (f32_q8_compare) with the raw status kept;
+							 * this is a binding test, not a proof that it reproduces
+							 * the default target's conversion for every value.  The
+							 * -neg twin (a wrong channel permutation baked) must be
+							 * DETECTED by the same predicate.  Corpus rows stay
+							 * bit-exact. */
+							int q = f32_q8_compare(g_f32_save_a, g_f32_save_b);
+							const int neg = strcmp(p->role, "control-texture-neg") == 0;
+							ok_control = neg ? q == 0 : q == 1;
+							const char *raw = r.status;
+							r.status = q < 0 ? "binding-out-of-domain" :
+							           neg ? (q == 0 ? "binding-neg-detected" : "binding-neg-missed") :
+							                 (q == 1 ? "binding-pass-8bit" : "binding-fail-8bit");
+							snprintf(diag + strlen(diag), sizeof(diag) - strlen(diag), " raw=%s", raw);
+						} else if (strcmp(p->role, "control-uniform-neg") == 0) {
+							/* must SEE the missing application as a difference */
+							ok_control = strcmp(r.status, "mismatch") == 0;
+							r.status = ok_control ? "uniform-neg-detected" : "uniform-neg-missed";
 						} else if (is_control) {
 							ok_control = strcmp(r.status, "identical") == 0;
 						}
@@ -3766,27 +3821,22 @@ static int run_f32(CellGcmContextData *ctx)
 			}
 		}
 		if (is_control) {
+			/* every control is required: a failure latches the run INVALID */
+			f32_gate_control(&gate, p->role, p->name, ok_control);
 			if (!ok_control) {
-				if (strcmp(p->role, "control-texture") == 0) textures_ok = 0;
+				if (is_tex_ctl) textures_ok = 0;
 				else if (strcmp(p->role, "control-auto") == 0) autos_ok = 0;
 				else if (strcmp(p->role, "control-uniform") == 0) uniforms_ok = 0;
-				else controls_ok = 0;
 				if (strcmp(r.status, "identical") == 0 || strcmp(r.status, "mismatch") == 0 ||
 				    strcmp(r.status, "paired-nan") == 0)
 					r.status = "control-failed";
 			} else {
-				if (is_k) {
-					for (int q = 0; q < 4; q++)
-						if (strcmp(p->name, k_required[q]) == 0) passed[q] = 1;
-				}
-				if (is_xy) passed[4] = 1;
-				if (is_frames) passed[5] = 1;
 				if (strcmp(p->role, "control-auto") == 0) autos_ok = 1;
 				if (strcmp(p->role, "control-uniform") == 0) uniforms_ok = 1;
 			}
 		} else {
 			if (strcmp(r.status, "identical") == 0) n_ident++;
-			else if (strcmp(r.status, "mismatch") == 0) n_mismatch++;
+			else if (strcmp(r.status, "mismatch") == 0) { n_mismatch++; f32_gate_corpus_result(&gate, 1); }
 			else if (strcmp(r.status, "paired-nan") == 0) n_pnan++;
 			else if (strcmp(r.status, "vacuous") == 0) n_vacuous++;
 			else if (strcmp(r.status, "f32-outputs-unsupported") != 0) n_other++;
@@ -3810,23 +3860,28 @@ static int run_f32(CellGcmContextData *ctx)
 		free(A);
 		free(B);
 	}
-	if (!gate_checked)
-		for (int q = 0; q < 6; q++)
-			if (!passed[q]) {
-				printf("shader-differential: required f32 control '%s' did not pass\n", k_required[q]);
-				controls_ok = 0;
-			}
+	int rc = f32_gate_exit(&gate);
+	/* the binding controls are required only once a corpus row was judged */
+	for (int q = 0; q < (gate.checked ? F32_GATE_NREQ : F32_GATE_NCORE); q++)
+		if (!gate.passed[q])
+			printf("shader-differential: required f32 control '%s' did not pass\n", f32_gate_required[q]);
+	if (gate.invalid)
+		printf("shader-differential: run INVALID, first failed control: %s\n", gate.first_failure);
 	printf("shader-differential: f32 summary identical=%d mismatch=%d paired_nan=%d vacuous=%d refused=%d other=%d withheld=%d frames=%u\n",
 	       n_ident, n_mismatch, n_pnan, n_vacuous, n_refused, n_other, n_withheld, (unsigned)g_f32_frame);
-	const char *verdict = !controls_ok ? "SHADER_DIFF_INVALID" :
-	                      n_mismatch ? "SHADER_DIFF_FAIL" : "SHADER_DIFF_OK";
-	puts(verdict);
-	return !controls_ok ? 2 : (n_mismatch ? 1 : 0);
+	puts(f32_gate_verdict(rc));
+	return rc;
 }
 
 int main(int argc, const char **argv)
 {
 	(void)argc; (void)argv;
+#ifdef SD_LOG_FILE
+	/* hardware package (SD_HW_PKG): no TTY on a console, so every line goes
+	 * to this file, unbuffered, so a hang keeps everything printed before it */
+	if (freopen(SD_LOG_FILE, "w", stdout))
+		setvbuf(stdout, NULL, _IONBF, 0);
+#endif
 	printf("shader-differential: A/B pixel-differential rig, increment 1\n");
 
 	if (!load_manifest()) {
