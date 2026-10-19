@@ -49,6 +49,8 @@ UPSTREAM="$PS3_TOOLCHAIN_ROOT/src/upstream"
 PATCHES="$PS3_TOOLCHAIN_ROOT/patches/spu"
 BUILD="$PS3_BUILD_ROOT/spu"
 SPU_GCC=9
+CLEAN=0
+PRINT_CONFIG=0
 
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 say "Using $JOBS parallel jobs."
@@ -58,7 +60,8 @@ HOST_TRIPLE=""
 BUILD_TRIPLE=""
 for arg in "$@"; do
     case "$arg" in
-        --clean) say "Cleaning $BUILD"; rm -rf "$BUILD" ;;
+        --clean) CLEAN=1 ;;
+        --print-config) PRINT_CONFIG=1 ;;
         --only=*) ONLY="${arg#--only=}" ;;
         --only) shift; ONLY="${1:-}" ;;
         --host=*) HOST_TRIPLE="${arg#--host=}" ;;
@@ -83,11 +86,30 @@ fi
 NATIVE_PREFIX="$PREFIX"
 if [[ -n "$HOST_TRIPLE" ]]; then
     PREFIX="${PS3DEV}.win/spu"
-    BUILD="$PS3_BUILD_ROOT/spu-${HOST_TRIPLE}"
+    # Keep the compiler identity in the cross root too (spu-gcc16-<host>).
+    BUILD="${BUILD}-${HOST_TRIPLE}"
     BUILD_TRIPLE="${BUILD_TRIPLE:-$(uname -m)-pc-linux-gnu}"
     [[ -x "$NATIVE_PREFIX/bin/$TARGET-gcc" ]] \
         || die "Native SPU toolchain not present at $NATIVE_PREFIX/bin/$TARGET-gcc. Run without --host first to produce stage 0."
     say "Cross-build: host=$HOST_TRIPLE build=$BUILD_TRIPLE prefix=$PREFIX"
+fi
+
+# --clean acts on the build root the compiler and host options selected
+# (spu, spu-gcc16, spu[-gcc16]-<host>), so it runs only after both, whatever
+# the option order.
+# --print-config: the selection only, for tests; nothing is removed or built.
+if [[ "$PRINT_CONFIG" == 1 ]]; then
+    printf 'spu_gcc=%s
+gcc_ver=%s
+patch_dir=%s
+build=%s
+prefix=%s
+clean=%s
+'         "$SPU_GCC" "$GCC_VER" "$GCC_PATCH_DIR" "$BUILD" "$PREFIX" "$CLEAN"
+    exit 0
+fi
+if [[ "$CLEAN" == 1 ]]; then
+    say "Cleaning $BUILD"; rm -rf "$BUILD"
 fi
 
 # See build-ppu-toolchain.sh for the rationale on the env-array form vs.
