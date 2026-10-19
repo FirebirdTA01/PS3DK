@@ -1,7 +1,7 @@
 # rsx-cg-compiler — Cg → NV40 compiler
 #
 # Self-contained build: the Cg front end (from FirebirdTA01's Vita Cg
-# compiler, same author, MIT) lives under tools/rsx-cg-compiler/src/donor/.
+# compiler, same author, MIT) lives under tools/rsx-cg-compiler/src/cg_frontend/.
 
 cmake_minimum_required(VERSION 3.16)
 project(rsx-cg-compiler
@@ -37,7 +37,7 @@ else()
 endif()
 
 set(SRC_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/src)
-set(DONOR_DIR ${SRC_DIR}/donor)
+set(CG_FRONTEND_DIR ${SRC_DIR}/cg_frontend)
 
 # ----------------------------------------------------------------------------
 # Version stamp — sourced from the repo-wide scripts/version.sh so the
@@ -78,9 +78,9 @@ configure_file(
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(EMBED_INPUT  ${DONOR_DIR}/builtin_shader_header.h)
-set(EMBED_OUTPUT ${DONOR_DIR}/builtin_shader_header_embedded.inc)
-set(EMBED_SCRIPT ${DONOR_DIR}/embed_builtin_header.py)
+set(EMBED_INPUT  ${CG_FRONTEND_DIR}/builtin_shader_header.h)
+set(EMBED_OUTPUT ${CG_FRONTEND_DIR}/builtin_shader_header_embedded.inc)
+set(EMBED_SCRIPT ${CG_FRONTEND_DIR}/embed_builtin_header.py)
 
 add_custom_command(
     OUTPUT  ${EMBED_OUTPUT}
@@ -94,25 +94,25 @@ add_custom_command(
 # ----------------------------------------------------------------------------
 
 # Cg front-end sources (from the Vita Cg compiler).
-set(SRC_FRONTEND_DONOR
-    ${DONOR_DIR}/common/errorHandler.cpp
-    ${DONOR_DIR}/common/memoryPool.cpp
-    ${DONOR_DIR}/frontend/preprocessor.cpp
-    ${DONOR_DIR}/frontend/lexer.cpp
-    ${DONOR_DIR}/frontend/parser.cpp
-    ${DONOR_DIR}/frontend/semantic.cpp
-    ${DONOR_DIR}/frontend/symbol_table.cpp
-    ${DONOR_DIR}/frontend/types.cpp
-    ${DONOR_DIR}/builtin_shader_header.cpp
+set(SRC_CG_FRONTEND
+    ${CG_FRONTEND_DIR}/common/errorHandler.cpp
+    ${CG_FRONTEND_DIR}/common/memoryPool.cpp
+    ${CG_FRONTEND_DIR}/frontend/preprocessor.cpp
+    ${CG_FRONTEND_DIR}/frontend/lexer.cpp
+    ${CG_FRONTEND_DIR}/frontend/parser.cpp
+    ${CG_FRONTEND_DIR}/frontend/semantic.cpp
+    ${CG_FRONTEND_DIR}/frontend/symbol_table.cpp
+    ${CG_FRONTEND_DIR}/frontend/types.cpp
+    ${CG_FRONTEND_DIR}/builtin_shader_header.cpp
 )
 
 # Front-end IR layer — hardware-independent IRModule built from AST.
 # The Vita compiler's USSE back-end (src/backend/, src/gxp/) is not used:
 # NV40 lowering lives in the SRC_NV40 list below.
-set(SRC_IR_DONOR
-    ${DONOR_DIR}/ir/ir.cpp
-    ${DONOR_DIR}/ir/ir_builder.cpp
-    ${DONOR_DIR}/ir/ir_passes.cpp
+set(SRC_CG_FRONTEND_IR
+    ${CG_FRONTEND_DIR}/ir/ir.cpp
+    ${CG_FRONTEND_DIR}/ir/ir_builder.cpp
+    ${CG_FRONTEND_DIR}/ir/ir_passes.cpp
 )
 
 # NV40 back-end (this tree).  Register-file / opcode headers are adopted
@@ -141,8 +141,8 @@ set(SRC_MAIN
 )
 
 add_executable(rsx-cg-compiler
-    ${SRC_FRONTEND_DONOR}
-    ${SRC_IR_DONOR}
+    ${SRC_CG_FRONTEND}
+    ${SRC_CG_FRONTEND_IR}
     ${SRC_NV40}
     ${SRC_CONTAINER}
     ${SRC_MAIN}
@@ -150,11 +150,11 @@ add_executable(rsx-cg-compiler
 )
 
 target_include_directories(rsx-cg-compiler PRIVATE
-    ${CMAKE_CURRENT_BINARY_DIR}    # generated version.h — wins over donor/common/version.h
-    ${DONOR_DIR}
-    ${DONOR_DIR}/common
-    ${DONOR_DIR}/frontend
-    ${DONOR_DIR}/ir
+    ${CMAKE_CURRENT_BINARY_DIR}    # generated version.h — wins over cg_frontend/common/version.h
+    ${CG_FRONTEND_DIR}
+    ${CG_FRONTEND_DIR}/common
+    ${CG_FRONTEND_DIR}/frontend
+    ${CG_FRONTEND_DIR}/ir
     ${SRC_DIR}
     ${NV40_DIR}
 )

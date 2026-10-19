@@ -20,7 +20,7 @@ PS3-specific back end written here:
     │
     ▼
 ┌───────────────────────────┐
-│ Front-end (Vita Cg comp.) │   tools/rsx-cg-compiler/src/donor/{frontend,ir,common}/
+│ Front-end (Vita Cg comp.) │   tools/rsx-cg-compiler/src/cg_frontend/{frontend,ir,common}/
 │   preprocessor → lexer →  │   The Vita Cg compiler's lexer, parser,
 │   parser → AST →          │   AST, semantic analysis, IR builder, and IR
 │   semantic → IR builder → │   passes.  Hardware-independent IRModule output.
@@ -51,7 +51,7 @@ PS3-specific back end written here:
 
 The front end comes from **FirebirdTA01's own Vita Cg compiler**: the same
 author wrote both projects, and both are MIT.  It contains no third-party or
-proprietary compiler code.  It lives in this tree (`src/donor/`) rather than
+proprietary compiler code.  It lives in this tree (`src/cg_frontend/`) rather than
 as a separate clone, so the build is self-contained, needs no bootstrap step,
 and the front end can change for RSX without touching the Vita repo.
 
