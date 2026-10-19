@@ -2146,6 +2146,17 @@ private:
             Node bestNode;
             bool found = false;
             int nextCycle = std::numeric_limits<int>::max();
+            // Within a demand-ordered accumulation chain a later node does not
+            // overtake an earlier one that only waits on modelled latency:
+            // with a shared operand (one x for every step(k, x) term) each
+            // next term was ready first and the partial sums fell further
+            // behind, one live term per link (accumulation-order: 3/6/11/16
+            // registers for N = 2/8/24/40).  Unrelated work still fills the
+            // gap; the latency model emits no NOP.
+            int blockedDemand = std::numeric_limits<int>::max();
+            for (const Node& node : ready)
+                if (!scheduled[node.index] && node.readyTime > curCycle)
+                    blockedDemand = std::min(blockedDemand, node.demandOrder);
 
             for (auto it = ready.begin(); it != ready.end(); ++it) {
                 if (scheduled[it->index])
@@ -2154,6 +2165,9 @@ private:
                     nextCycle = std::min(nextCycle, it->readyTime);
                     continue;
                 }
+                if (it->demandOrder != std::numeric_limits<int>::max() &&
+                    it->demandOrder > blockedDemand)
+                    continue;
 
                 Node cand = *it;
                 cand.schedulableNow = true;
