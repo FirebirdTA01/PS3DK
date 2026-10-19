@@ -49,11 +49,11 @@ PS3-specific back end written here:
         .fpo / .vpo
 ```
 
-The front end comes from **FirebirdTA01's own Vita Cg compiler**: the same
-author wrote both projects, and both are MIT.  It contains no third-party or
-proprietary compiler code.  It lives in this tree (`src/cg_frontend/`) rather than
-as a separate clone, so the build is self-contained, needs no bootstrap step,
-and the front end can change for RSX without touching the Vita repo.
+The front end is from **FirebirdTA01's Vita Cg compiler**; both projects
+are MIT.  It contains no third-party or proprietary compiler code.  It lives
+in this tree (`src/cg_frontend/`) rather than as a separate clone, so the
+build is self-contained, needs no bootstrap step, and the front end can change
+for RSX without touching the Vita repo.
 
 ## Why a separate tree from `tools/cgcomp/`
 
@@ -64,5 +64,5 @@ old cgcomp is retired.
 
 ## License
 
-MIT.  The front end from the Vita Cg compiler is also MIT, by the same
-author (copyright 2026 FirebirdTA01).
+MIT.  The front end from the Vita Cg compiler is also MIT (copyright 2026
+FirebirdTA01).

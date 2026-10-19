@@ -1,7 +1,7 @@
 # rsx-cg-compiler — Cg → NV40 compiler
 #
 # Self-contained build: the Cg front end (from FirebirdTA01's Vita Cg
-# compiler, same author, MIT) lives under tools/rsx-cg-compiler/src/cg_frontend/.
+# compiler, MIT) lives under tools/rsx-cg-compiler/src/cg_frontend/.
 
 cmake_minimum_required(VERSION 3.16)
 project(rsx-cg-compiler
