@@ -38,7 +38,7 @@ R"__VSHDR__(/* Fallback Vita builtin header (generation failed).
 // This name is user-visible: main.cpp emits it as the `#line 1 "<name>"`
 // marker ahead of the header text, and since diagnostic-source-location the lexer reads
 // that marker, so a diagnostic raised inside this header is reported
-// against this string.  It was the donor's own file name, which named
+// against this string.  It was the Vita compiler's file name, which named
 // the wrong console in the wrong project's output; a neutral label says
 // what it is without pretending to be a file anyone can open.
 static constexpr char kVirtualHeaderName[] = "<builtin>";

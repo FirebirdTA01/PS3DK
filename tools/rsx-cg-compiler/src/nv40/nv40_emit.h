@@ -5,7 +5,7 @@
  * Public entry points for the NV40 back-end.
  *
  * Each emit routine takes the hardware-agnostic IRModule produced by
- * the donor front-end and returns raw ucode words plus diagnostics.
+ * the Cg front end and returns raw ucode words plus diagnostics.
  * The container format (.fpo/.vpo — CellCgbVertexProgramConfiguration
  * / CellCgbFragmentProgramConfiguration) is produced by a separate
  * cg_container_* layer once emit is stable.

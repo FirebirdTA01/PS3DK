@@ -4,7 +4,7 @@
 # are defined, both 20000; __CG__, _CG_, _CGC_, CGC, __psp2__, __SCE__,
 # __STDC__ and __STDC_VERSION__ are not.
 #
-# The donor compiler predefined the PSVita set (__psp2__, __SCE__, __STDC__,
+# The Vita Cg compiler the front end came from predefined the PSVita set (__psp2__, __SCE__, __STDC__,
 # __STDC_VERSION__) and none of the reference's, so a header written as
 #   #ifdef __CGC__   <Cg declarations>   #else   <C declarations>   #endif
 # took the C branch and died on 'enum' - five SDK shaders (SpuRender).
