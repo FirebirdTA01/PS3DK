@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 17:00:15 -0500
-Subject: [PATCH 08/39] spu: include opts.h for SET_OPTION_IF_UNSET
+Subject: [PATCH 08/38] spu: include opts.h for SET_OPTION_IF_UNSET
 
 ---
  gcc/config/spu/spu.cc | 1 +

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 17:00:17 -0500
-Subject: [PATCH 14/39] spu: drop the init/add/finish/destroy vectorizer cost
+Subject: [PATCH 14/38] spu: drop the init/add/finish/destroy vectorizer cost
  hooks (vector_costs class, GCC 12)
 
 SPU's add_stmt_cost was the pre-GCC-12 default (builtin_vectorization_cost per

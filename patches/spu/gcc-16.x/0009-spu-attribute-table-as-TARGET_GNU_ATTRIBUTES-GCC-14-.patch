@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 17:00:15 -0500
-Subject: [PATCH 09/39] spu: attribute table as TARGET_GNU_ATTRIBUTES (GCC 14
+Subject: [PATCH 09/38] spu: attribute table as TARGET_GNU_ATTRIBUTES (GCC 14
  scoped attribute specs)
 
 ---

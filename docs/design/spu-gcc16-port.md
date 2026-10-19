@@ -91,12 +91,12 @@ Two fixes in shared GCC code (`gcc-16.x` patches 0017 and 0018):
 ## 5. Behaviour kept from 9.5 on purpose
 
 - **`-ftree-loop-distribute-patterns` stays off below `-O3` unless asked for**
-  (patches 0037, 0038).  Since GCC 10 the pass runs at `-O2` / `-Os`, and it
+  (patch 0038).  Since GCC 10 the pass runs at `-O2` / `-Os`, and it
   turns copy and clear loops into `memcpy` / `memset` calls.  Much SPU code
   links without a C library and lives in the 256 KB local store; a PSL1GHT MARS
   task module failed to link on the `memcpy` reference the pass emitted.
 
-- **late-combine stays off unless asked for** (patch 0039).  The late-combine
+- **late-combine stays off unless asked for** (patch 0038).  The late-combine
   pass (new in GCC 15) dropped DImode-to-SImode truncations on SPU:
   `return (int)u64;` returned the high word.  It was found by bisecting a
   failing SDK library object by object, then toggling passes on that object.
@@ -112,7 +112,7 @@ Two fixes in shared GCC code (`gcc-16.x` patches 0017 and 0018):
 
 ## 6. The project patch series on GCC 16
 
-`patches/spu/gcc-16.x/` holds 39 patches:
+`patches/spu/gcc-16.x/` holds 38 patches:
 
 | Patches | Contents |
 |---|---|
@@ -120,7 +120,9 @@ Two fixes in shared GCC code (`gcc-16.x` patches 0017 and 0018):
 | 0017-0018 | the generic `expmed.cc` fixes of section 4 |
 | 0019-0033 | the 15-patch `patches/spu/gcc-9.5.0/` series, in its original order: 14 applied as they were, 0013 (intptr types, now 0033) ported by hand |
 | 0034 | the `Report` property dropped from the option records the 9.5 series adds |
-| 0035-0039 | the defaults of section 5 |
+| 0035-0036 | the GNU C++17 default of section 5 |
+| 0037 | target builtins read `DECL_MD_FUNCTION_CODE` |
+| 0038 | the pass defaults of section 5, set in the target optimization table so that `optimize` attributes and pragmas get them too |
 
 The restored 9.5 backend itself is not in the series: the build script copies
 `gcc/config/spu`, `gcc/common/config/spu` and `libgcc/config/spu` from

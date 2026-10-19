@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 19:11:42 -0500
-Subject: [PATCH 36/39] spu (from patches/ppu/gcc-16.x
+Subject: [PATCH 36/38] spu (from patches/ppu/gcc-16.x
  0079-libsupcxx-explicit-gnu20.patch, CLEAN)
 
 ---

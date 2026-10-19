@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 17:33:15 -0500
-Subject: [PATCH 17/39] expmed: store_bit_field_using_insv gives up on a
+Subject: [PATCH 17/38] expmed: store_bit_field_using_insv gives up on a
  register it cannot view in the insv mode
 
 The SUBREG case already returns false when validate_subreg refuses; the

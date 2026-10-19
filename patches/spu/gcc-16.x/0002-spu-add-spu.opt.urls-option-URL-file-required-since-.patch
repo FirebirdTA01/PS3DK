@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 14:03:21 -0500
-Subject: [PATCH 02/39] spu: add spu.opt.urls (option-URL file, required since
+Subject: [PATCH 02/38] spu: add spu.opt.urls (option-URL file, required since
  GCC 14)
 
 ---

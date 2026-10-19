@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 14:33:34 -0500
-Subject: [PATCH 06/39] spu: resolve_overloaded_builtin takes complain (GCC 15)
+Subject: [PATCH 06/38] spu: resolve_overloaded_builtin takes complain (GCC 15)
 
 The three overload diagnostics are only emitted when complain is true
 (SFINAE contexts pass false).

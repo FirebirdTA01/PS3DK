@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 17:00:16 -0500
-Subject: [PATCH 11/39] spu: va_arg uses pass_va_arg_by_reference
+Subject: [PATCH 11/38] spu: va_arg uses pass_va_arg_by_reference
  (function_arg_info, GCC 10)
 
 ---

@@ -339,6 +339,11 @@ jobs:
       - name: Test the SPU build-root selection and --clean
         run: bash tests/host/spu-build-root-test.sh
 
+      # Static mode: the SPU GCC 16 pass defaults live in the optimization
+      # table (compiler mode, SPU16_GCC=..., runs off CI).
+      - name: Test the SPU GCC 16 pass defaults
+        run: bash tests/host/spu-gcc16-opt-defaults-test.sh
+
       # build-ppu-toolchain.sh builds GCC 16.1.0 only: other --gcc values and a
       # prefix holding an earlier GCC 12.4 are refused (--print-config, no build).
       - name: Test the PPU GCC version selection

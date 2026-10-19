@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 14:33:33 -0500
-Subject: [PATCH 04/39] spu: drop the Report option property (removed in GCC
+Subject: [PATCH 04/38] spu: drop the Report option property (removed in GCC
  11)
 
 14 option records.
