@@ -3,18 +3,17 @@
 #
 # Builds:
 #   binutils 2.42  -> $PS3DEV/spu  (spu-elf target; upstream still intact)
-#   GCC 9.5.0      -> $PS3DEV/spu  (last GCC with a working SPU backend)
+#   GCC 16.1.0     -> $PS3DEV/spu  (the SPU backend forward-ported from 9.5.0;
+#                                   --gcc=9 builds 9.5.0, the last upstream SPU GCC)
 #   newlib 4.4.0   -> combined build (libgloss/spu upstream + PS3 extras patch)
 #
-# Why GCC 9.5.0 here and 16.1.0 for PPU:
-#   - GCC 9 was the last version with an intact config/spu/ backend.
-#   - GCC 9.5.0 is the newest 9.x patch release; includes C++17 complete and
-#     partial C++20.
-#   - GCC 10 removed ~34k lines of SPU backend.  --gcc=16 builds the
-#     forward port instead (docs/design/gcc-transition.md): GCC 16.1.0 with
-#     the 9.5.0 backend restored from the releases/gcc-9.5.0 tag and the
-#     patches/spu/gcc-16.x series on top.  9.5.0 stays the default until the
-#     port's gates pass.
+# Why a forward port:
+#   - GCC 9 was the last version with an intact config/spu/ backend; GCC 10
+#     removed ~34k lines of it.
+#   - The default build (--gcc=16) is GCC 16.1.0 with the 9.5.0 backend
+#     restored from the releases/gcc-9.5.0 tag and the patches/spu/gcc-16.x
+#     series on top (docs/design/spu-gcc16-port.md), the same GCC release as
+#     the PPU compiler.  --gcc=9 still builds GCC 9.5.0 with patches/spu/gcc-9.5.0.
 #
 # SPU C++ constraints (256 KB local store budget):
 #   - Default spec file adds -fno-exceptions -fno-rtti -Os for size.
@@ -48,7 +47,7 @@ PREFIX="$PS3DEV/spu"
 UPSTREAM="$PS3_TOOLCHAIN_ROOT/src/upstream"
 PATCHES="$PS3_TOOLCHAIN_ROOT/patches/spu"
 BUILD="$PS3_BUILD_ROOT/spu"
-SPU_GCC=9
+SPU_GCC=16
 CLEAN=0
 PRINT_CONFIG=0
 
@@ -68,7 +67,7 @@ for arg in "$@"; do
         --build=*) BUILD_TRIPLE="${arg#--build=}" ;;
         --gcc=16) SPU_GCC=16 ;;
         --gcc=9|--gcc=9.5) SPU_GCC=9 ;;
-        --gcc=*) die "unsupported ${arg}: the SPU compiler is 9 (9.5.0, default) or 16 (16.1.0 forward port)" ;;
+        --gcc=*) die "unsupported ${arg}: the SPU compiler is 16 (16.1.0 forward port, default) or 9 (9.5.0)" ;;
         binutils|gcc-newlib|symlinks|linker-script) ONLY="$arg" ;;
     esac
 done

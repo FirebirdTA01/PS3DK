@@ -3,9 +3,9 @@
 This is a design and status document, for contributors, on the forward-port of
 the PS3 SPU (Cell Broadband Engine SPE) GCC backend from GCC 9.5.0 - the last
 release that carried it - onto GCC 16.1.0, so that PPU and SPU share one GCC
-release line.  GCC 9.5 remains the shipped SPU compiler until the gates below
-pass.  The port itself is the series in `patches/spu/gcc-16.x/`, applied by
-`scripts/build-spu-toolchain.sh --gcc=16`.  The companion plan document is `docs/design/gcc-transition.md` (stage 3).
+release line.  The port is the series in `patches/spu/gcc-16.x/`, applied by
+`scripts/build-spu-toolchain.sh`, whose default it is; `--gcc=9` still builds
+GCC 9.5.  The companion plan document is `docs/design/gcc-transition.md` (stage 3).
 
 ## 1. Goal and scope
 
@@ -14,8 +14,7 @@ PS3 SPU ABI.  The upstream SPU backend was removed; this port recovers it by
 restoring the 9.5 backend sources and porting the project's patch series onto
 the 16.1.0 tree, then rebuilding the SDK's SPU objects and re-running the SPU
 regression rows against the 9.5 baseline.  Scope is narrow: the SPU compiler
-and its ABI; the PPU compiler is unchanged.  9.5 stays shipped until the gates
-are met.
+and its ABI; the PPU compiler is unchanged.
 
 ## 2. What was restored, and how
 

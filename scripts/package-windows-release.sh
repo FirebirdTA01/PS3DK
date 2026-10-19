@@ -695,7 +695,7 @@ Quick start:
      PS3DEV / PSL1GHT as in-session aliases (some legacy code paths
      still read those names).
   4. powerpc64-ps3-elf-gcc.exe --version    (-> 16.1.0)
-     spu-elf-gcc.exe            --version    (-> 9.5.0)
+     spu-elf-gcc.exe            --version    (-> 16.1.0)
 
 Building the samples (CMake — recommended):
   Samples build with CMake.  You need cmake (3.20+) and a generator on

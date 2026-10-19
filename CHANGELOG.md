@@ -70,6 +70,15 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **The SPU compiler is GCC 16.1.0.**  GCC removed the SPU backend after
+  9.x; it is forward-ported to 16.1.0 with the SPU patch series, so PPU and
+  SPU use the same GCC release.
+  - The SPU ABI is unchanged: plain `char` signed, 16-bit `wchar_t`,
+    `intptr_t` is `int`.
+  - As with 9.5, loops are not turned into `memcpy`/`memset` calls below
+    `-O3`, and late-combine is off.  An explicit `-f` option still wins.
+  - `build-spu-toolchain.sh --gcc=9` still builds GCC 9.5.0.
+
 - **The PPU compiler is GCC 16.1.0.**  GCC 12.4.0 is no longer built or
   shipped.
   - `build-ppu-toolchain.sh` builds 16.1.0 only.  Its `--gcc` option is
