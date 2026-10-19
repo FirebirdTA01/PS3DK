@@ -483,6 +483,14 @@ int main(int argc, char** argv)
                     changed = true;
                     if (stage == ShaderStage::Fragment) fpCanonChanged = true;
                 }
+                // With shared literals, any(v) and the explicit v.x != 0 || ...
+                // must read lanes the same way to merge the same comparisons.
+                if (stage == ShaderStage::Fragment && fpConstCanon &&
+                    rsx_cg::canonicalizeLaneReads(*fn))
+                {
+                    changed = true;
+                    fpCanonChanged = true;
+                }
                 AlgebraicSimplification algsimp;
                 if (algsimp.runOnFunction(*fn))     changed = true;
                 CommonSubexprElimination cse(stage == ShaderStage::Fragment);
