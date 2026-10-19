@@ -17,7 +17,7 @@
  *
  * The model also asserts two invariants of the current two-phase protocol:
  *
- *   - within a single wrap, the pause calls come in a non-increasing
+ *   - within a single wrap, the pause calls come in a non-decreasing
  *     phase number (i.e. all 1s first, then all 2s; a phase 1 after a
  *     phase 2 would mean the protocol got out of order);
  *   - within a phase, the elapsed_us value the protocol hands to pause is
@@ -40,11 +40,7 @@
 #define WORDS 64u
 #endif
 #define BASE   0x1000u                 /* IO offset of word 0 = begin */
-#define MAX_PAUSES_PER_WRAP 1000000u   /* overflow guard per wrap; 1 s of
-                                         * 30-us sleeps at ~33 spins per pause
-                                         * is 33 * 1e5, so 1e6 is already 30
-                                         * seconds; well above what any wrap
-                                         * should take. */
+#define MAX_PAUSES_PER_WRAP 1000000u   /* a wait that never finishes ends the test */
 
 typedef struct {
     uint32_t fifo[WORDS];

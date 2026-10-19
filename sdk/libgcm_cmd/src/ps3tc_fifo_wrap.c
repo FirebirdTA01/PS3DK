@@ -34,16 +34,17 @@ static uint64_t ticks_to_us(uint64_t ticks, uint64_t hz)
     return (ticks / hz) * 1000000ull + (ticks % hz) * 1000000ull / hz;
 }
 
-/* The protocol's clock, in microseconds, measured from a fixed origin:
- * __builtin_ppc_get_timebase() divided into us by the timebase frequency.
- * The function-pointer form (arg ignored here) lets the host model install
- * its own clock.  We re-read the frequency on each call on purpose: the
- * call is cheap (a cached syscall on a PS3 kernel) and it keeps this
- * function stateless across threads. */
+/* The protocol's clock, in microseconds from the timebase origin.  The
+ * timebase frequency comes from a syscall, so it is read once and kept (a
+ * second thread that races the first read stores the same value).  The
+ * function-pointer form (arg unused here) lets the host model install its
+ * own clock. */
 static uint64_t ps3tc_fifo_now_us(void *arg)
 {
+    static uint64_t hz;
     (void)arg;
-    const uint64_t hz = sysGetTimebaseFrequency();
+    if (hz == 0)
+        hz = sysGetTimebaseFrequency();
     return hz ? ticks_to_us(__builtin_ppc_get_timebase(), hz) : 0;
 }
 
