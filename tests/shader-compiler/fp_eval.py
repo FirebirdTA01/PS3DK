@@ -46,8 +46,11 @@ RCP = 0x1A   # nvfx_shader.h NVFX_FP_OP_OPCODE_RCP: scalar, reads the source's x
 DIV = 0x3A   # NVFX_FP_OP_OPCODE_DIV (NV_fragment_program2 DIV): vector src0 / scalar src1.x
 MODELLED = {MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX, SLT, SGE, SLE, SGT, SNE, SEQ, FRC, FLR, FENCBR, FENCTR, DP2, RCP, DIV}
 
-INPUT_SEL = {0x3: "FOGC", 0x1: "COL0", 0x2: "COL1", 0x4: "TEX0", 0x5: "TEX1", 0x6: "TEX2", 0x7: "TEX3",
-             0x8: "TEX4", 0x9: "TEX5", 0xA: "TEX6", 0xB: "TEX7"}
+# nvfx_shader.h NVFX_FP_OP_INPUT_SRC_*: POSITION 0x0, TC(n) = 0x4 + n for TEXCOORD0..9.
+# A selector is only readable when the caller supplies that input; FACING
+# (0xE) and the unnamed selectors stay unmodelled.
+INPUT_SEL = {0x0: "WPOS", 0x3: "FOGC", 0x1: "COL0", 0x2: "COL1", 0x4: "TEX0", 0x5: "TEX1", 0x6: "TEX2",
+             0x7: "TEX3", 0x8: "TEX4", 0x9: "TEX5", 0xA: "TEX6", 0xB: "TEX7", 0xC: "TEX8", 0xD: "TEX9"}
 
 
 class Unmodelled(Exception):
@@ -437,10 +440,23 @@ def self_test():
         words[2] |= scale << 28
         rows.append(('%s: output scale encoding %d' % ('green' if factor else 'red', scale),
                      _container(words), [f32(x * factor) for x in a] if factor else None))
+    # input selectors: TEXCOORD8/9 (0xC/0xD) and POSITION (0x0) read the
+    # caller's input; a selector the caller does not supply, and FACING
+    # (0xE), are refused
+    for sel_, name_ in ((0xC, 'TEX8'), (0xD, 'TEX9'), (0x0, 'WPOS')):
+        rows.append(('green: MOV R0, %s (selector %#x)' % (name_, sel_),
+                     _container(_ins(MOV, 0, 0xF, [_src(I)], sel=sel_, end=1)), b, {'TEX0': a, name_: b}))
+        rows.append(('red: %s selector, input not supplied' % name_,
+                     _container(_ins(MOV, 0, 0xF, [_src(I)], sel=sel_, end=1)), None, {'TEX0': a}))
+    rows.append(('red: FACING selector 0xe stays unmodelled',
+                 _container(_ins(MOV, 0, 0xF, [_src(I)], sel=0xE, end=1)), None, {'TEX0': a, 'FACING': b}))
     fails = 0
     for row in rows:
         name, blob, want = row[:3]
-        ins = {'TEX0': row[3], 'TEX1': row[4]} if len(row) > 3 else {'TEX0': a}
+        if len(row) > 3 and isinstance(row[3], dict):
+            ins = row[3]
+        else:
+            ins = {'TEX0': row[3], 'TEX1': row[4]} if len(row) > 3 else {'TEX0': a}
         try:
             got = evaluate(blob, ins)
             ok = want is not None and got == want
