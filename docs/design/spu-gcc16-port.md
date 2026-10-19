@@ -48,8 +48,8 @@ re-added.
 Register allocation is unchanged from 9.5: the SPU backend uses the old reload
 pass (`TARGET_LRA_P` false).  GCC 16 still ships reload (about 18 ports use
 it), so no LRA conversion is needed for GCC 16.  The SPU backend never used
-`cc0`.  Converting to LRA remains an open item for later, before GCC 17
-drops reload; see section 9.
+`cc0`.  Converting to LRA is an open item for whichever release removes
+reload; see section 9.
 
 ## 3. API changes ported
 
