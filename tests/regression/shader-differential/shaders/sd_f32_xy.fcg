@@ -1,0 +1,10 @@
+// shader-differential float mode (`@rt f32`) — control-f32-xy.
+//
+// Lane x is the interpolated u (rises along a row, constant down a
+// column), lane y is v (the transpose), lane w is exactly 2.5.  The guest
+// checks every pixel against that shape, so a wrong pitch, a swapped row
+// and column or a lane-order error in the float readback cannot pass.
+void main(float4 v : TEXCOORD0, out float4 color : COLOR)
+{
+    color = float4(v.x, v.y, v.x - v.y, 2.5f);
+}

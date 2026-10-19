@@ -1,0 +1,11 @@
+// shader-differential float mode (`@rt f32`) — the k program.
+//
+// Paints uniform k on every pixel.  The guest sets k from RAW binary32
+// words (manifest ka=/kb=, the init sentinel, the canary), so this one
+// container is the init draw before every row, the control-f32-k rows
+// (words, ulp, sub8, nan) and control-f32-frames: each asserts that the
+// exact words come back, which is what qualifies the float readback.
+void main(uniform float4 k, out float4 color : COLOR)
+{
+    color = k;
+}
