@@ -22,8 +22,8 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/spu-build-root.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 export PS3DEV="$work/ps3dev" PS3_BUILD_ROOT="$work/build"
 # Cross mode requires a native SPU compiler of the same GCC release; a stub
-# stands in for it and reports the version in $STUB_VER.
-mkdir -p "$PS3DEV/spu/bin" && printf '#!/bin/sh\necho "$STUB_VER"\n' > "$PS3DEV/spu/bin/spu-elf-gcc" && chmod +x "$PS3DEV/spu/bin/spu-elf-gcc"
+# stands in for it, reports the version in $STUB_VER and exits $STUB_RC (0).
+mkdir -p "$PS3DEV/spu/bin" && printf '#!/bin/sh\necho "$STUB_VER"\nexit ${STUB_RC:-0}\n' > "$PS3DEV/spu/bin/spu-elf-gcc" && chmod +x "$PS3DEV/spu/bin/spu-elf-gcc"
 host=x86_64-w64-mingw32
 
 config() { bash "$script" --print-config "$@" 2>/dev/null | tr -d '\r'; }
@@ -64,6 +64,12 @@ for pair in "16.1.0 --gcc=9" "9.5.0 --gcc=16" "9.5.0 "; do
         ok "cross ${a:-(default)} over a native $v compiler refused"
     fi
 done
+# The right version printed by a probe that then fails is refused too.
+if STUB_VER=16.1.0 STUB_RC=23 bash "$script" --print-config --host=$host >/dev/null 2>&1; then
+    bad "cross over a native compiler whose version probe exits 23 was accepted"
+else
+    ok "cross over a native compiler whose version probe exits 23 refused"
+fi
 
 if bash "$script" --print-config --gcc=12 >/dev/null 2>&1; then
     bad "--gcc=12 was accepted"
