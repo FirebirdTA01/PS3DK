@@ -4,8 +4,8 @@ This is a design and status document, for contributors, on the forward-port of
 the PS3 SPU (Cell Broadband Engine SPE) GCC backend from GCC 9.5.0 - the last
 release that carried it - onto GCC 16.1.0, so that PPU and SPU share one GCC
 release line.  GCC 9.5 remains the shipped SPU compiler until the gates below
-pass.  The companion plan document is `docs/design/gcc-transition.md` (stage 3).
-Nothing here refers to any proprietary SDK.
+pass.  The port itself is the series in `patches/spu/gcc-16.x/`, applied by
+`scripts/build-spu-toolchain.sh --gcc=16`.  The companion plan document is `docs/design/gcc-transition.md` (stage 3).
 
 ## 1. Goal and scope
 
@@ -75,104 +75,96 @@ the change landed in.
 | legitimate-address hooks take a `code_helper` | 14 | the SPU legitimate-address hooks take a `code_helper` |
 | `dbxelf.h` removed from `tm_file` lists | 13 (removed upstream) | dropped from the SPU `tm_file` |
 
-## 4. Generic GCC fixes the port needed (two)
+## 4. Generic GCC fixes the port needed
 
-Two generic fixes, in shared GCC code, that the port needed.
+Two fixes in shared GCC code (`gcc-16.x` patches 0017 and 0018):
 
 - **Bit-field SUBREGs of hard registers.**  `store_bit_field_using_insv` and
   `extract_bit_field_using_extv` in `gcc/expmed.cc` created a lowpart SUBREG of
   a register without `validate_subreg` in their REG branch (their SUBREG branch
-  already checked).  Since GCC 10+, `validate_subreg` checks hard registers via
-  `simplify_subreg_regno` (using `can_change_mode_class`), and the SPU ABI
-  forbids 8-byte to 16-byte mode changes, so any complex-float argument or
-  return (SCmode in a hard register) asserted in `gen_rtx_SUBREG`.  The fix:
-  give up (return false / NULL_RTX) when the subreg is invalid; the non-insv
-  bit-field paths then handle it.  The `__real__` / `__imag__` code path is
-  identical to 9.5.
-
-- **The `Report` property.**  The `Report:` property was removed in GCC 11
-  (section 3).  The option records this port adds therefore drop `Report:`, so
-  the series applies against a 16.1.0 tree that has no `Report:` column.
+  already checked).  In GCC 16, `validate_subreg` checks hard registers through
+  `can_change_mode_class`, and the SPU forbids 8-byte to 16-byte mode changes,
+  so any complex-float argument or return (SCmode in a hard register) asserted
+  in `gen_rtx_SUBREG`.  The fix gives up (returns false / `NULL_RTX`) when the
+  subreg is invalid; the non-insv bit-field paths then handle it.
 
 ## 5. Behaviour kept from 9.5 on purpose
 
-Three behaviours are deliberately left as they were in 9.5, with an
-explanation for each.
-
-- **`-ftree-loop-distribute-patterns` stays off below `-O3` unless the user
-  requests it.**  Since GCC 10 the pass is on at `-O2` / `-Os`, and it turns
-  copy and clear loops into `memcpy` / `memset` calls.  Much SPU object code
+- **`-ftree-loop-distribute-patterns` stays off below `-O3` unless asked for**
+  (patches 0037, 0038).  Since GCC 10 the pass runs at `-O2` / `-Os`, and it
+  turns copy and clear loops into `memcpy` / `memset` calls.  Much SPU code
   links without a C library and lives in the 256 KB local store; a PSL1GHT MARS
-  task module failed to link when the distributed patterns emitted the
-  `memcpy` reference.  Measured: the 16 port is equal to 9.5 at `-Os`,
-  `-O2` and `-O3`.
+  task module failed to link on the `memcpy` reference the pass emitted.
 
-- **C++ defaults to GNU C++17.**  GCC 16's default is GNU C++20.  The SPU
-  compiler keeps 9.5's behaviour: when neither `-std=` nor `-ansi` is given,
-  the compiler selects `-std=gnu++17`.  `libsupc++` keeps building as GNU
-  C++20 (it is a library, not user code on the SPU target).  This matches the
-  PPU compiler's rule, so PPU and SPU have the same user-facing default.
+- **late-combine stays off unless asked for** (patch 0039).  The late-combine
+  pass (new in GCC 15) dropped DImode-to-SImode truncations on SPU:
+  `return (int)u64;` returned the high word.  It was found by bisecting a
+  failing SDK library object by object, then toggling passes on that object.
+  The underlying fault is OPEN; until it is understood, the pass is off.
+
+- **C++ defaults to GNU C++17** (patches 0035, 0036).  GCC 16's default is GNU
+  C++20.  When neither `-std=` nor `-ansi` is given, the SPU compiler selects
+  `-std=gnu++17`, the same rule as the PPU compiler.  `libsupc++` keeps
+  building as GNU C++20.
 
 - **Decimal float: rejected.**  9.5 predefined the `__DEC32_*` macros but
-  rejected `_Decimal32`; GCC 16 defines neither the macros nor the type.  Both
-  reject the type; this is the SPU ABI behaviour and is kept.
+  rejected `_Decimal32`; GCC 16 defines neither.  Both reject the type.
 
 ## 6. The project patch series on GCC 16
 
-`patches/spu/gcc-9.5.0/` is the 15-patch series against the 9.5 backend.  It
-applies to the 16.1.0 tree in order:
+`patches/spu/gcc-16.x/` holds 39 patches:
 
-| Patch | Result on 16.1.0 |
+| Patches | Contents |
 |---|---|
-| 10 of the 15 | unchanged |
-| 0003, 0011, 0012, 0016 | context offsets only (the hunks are unchanged) |
-| 0013 (intptr types) | hand-ported: the `config.gcc` line moves with the `cpu_type` stanza |
-| the `Report` property | removed from the option records the series adds (the property no longer exists) |
-| 0014 (parenthesised vector literals in the C and C++ parsers) | applies unchanged |
+| 0001-0016 | wiring the restored backend into the build, and the API ports of section 3 |
+| 0017-0018 | the generic `expmed.cc` fixes of section 4 |
+| 0019-0033 | the 15-patch `patches/spu/gcc-9.5.0/` series, in its original order: 14 applied as they were, 0013 (intptr types, now 0033) ported by hand |
+| 0034 | the `Report` property dropped from the option records the 9.5 series adds |
+| 0035-0039 | the defaults of section 5 |
 
-The ABI after the series is checked by static asserts in the port's own test:
-plain `char` signed; `wchar_t` 16-bit; `intptr_t` `int`; `uintptr_t`
-`unsigned int`; `size_t` `unsigned long`; `(vec_int4)(1,2,3,4)` vector-literal
-syntax; `spu_splats((uintptr_t)p)`.
+The restored 9.5 backend itself is not in the series: the build script copies
+`gcc/config/spu`, `gcc/common/config/spu` and `libgcc/config/spu` from
+`releases/gcc-9.5.0` before applying it.
+
+The ABI after the series is checked by static asserts: plain `char` signed;
+`wchar_t` 16-bit; `intptr_t` `int`; `uintptr_t` `unsigned int`; `size_t`
+`unsigned long`; `(vec_int4)(1,2,3,4)` vector-literal syntax;
+`spu_splats((uintptr_t)p)`.
 
 ## 7. Build configuration
 
 - **newlib 4.4.0**, with `patches/spu/newlib-4.x/` (5 patches; 0005 passes the
   fourth thread argument to `main`).  newlib 4.4 has two implicit function
   declarations (`signal.c` `getpid`, `__dprintf.c` `write`); these are errors
-  since GCC 14, so newlib itself is built with
-  `-Wno-error=implicit-function-declaration` until it is rebuilt against a
-  newer newlib (4.6 or later).
+  since GCC 14, so newlib is built with
+  `-Wno-error=implicit-function-declaration`.
 - **libstdc++** needs `--disable-libstdcxx-backtrace`: `std::stacktrace`
   requires `mmap`, which the SPU does not have.
-- **`--with-newlib`** makes libstdc++ use its fixed newlib configuration;
-  the crossconfig SPU block that 16 removed is not needed.
-- **`--enable-multilib`** keeps the pic multilib (series patch 0010).
+- **`--with-newlib`** makes libstdc++ use its fixed newlib configuration.
+- **`--enable-multilib`** keeps the pic multilib (patch 0027).
+- The GCC 16 build uses its own build root (`spu-gcc16`, and
+  `spu-gcc16-<host>` for a cross-hosted build), so it never shares a tree with
+  the 9.5 build; `--clean` removes only the selected root.
 
-## 8. Validation status and gates
+## 8. Validation status
 
 | Stage | Contents | Status |
 |---|---|---|
 | 0 | restore + `configure` | DONE |
 | 1 | `cc1` builds | DONE |
-| 2 | `libgcc`, `libc`, `libm`; a C program links | DONE (text within 1% of 9.5) |
-| 3 | the 15-patch series, ABI, C++ with libstdc++, `gnu++17` default; a C++17 program links | mostly DONE (text 152,072 vs 139,088 bytes with 9.5, +9.3%). OPEN: C/C++17 regression rows, restoring `gcc.target/spu` tests, regenerating the series as `patches/spu/gcc-16.x/` |
-| 4 | SDK rebuilt with the GCC 16 SPU compiler: all SDK SPU objects built by GCC 16; 24 SPU regression rows in RPCS3 against 9.5 | IN PROGRESS. OPEN: the first run had failures traced to a missing newlib patch and a missing pic multilib in the test build; the rerun is pending |
+| 2 | `libgcc`, `libc`, `libm`; a C program links | DONE |
+| 3 | the series, ABI asserts, C++ with libstdc++, `gnu++17` default | DONE |
+| 4 | SDK rebuilt with the GCC 16 SPU compiler (built by the script from a clean tree); the SPU regression rows in RPCS3 | DONE: 25/25 PASS, the same as the 9.5 control |
 
-The size/speed A/B against 9.5 on the 256 KB local store is OPEN; it has not
-been run as of this writing.
+Size against 9.5: SPU images +1.09%, the SDK SPU libraries +2.27%.
 
 ## 9. Open items
 
-- **Stage 3 (table above).**  The C/C++17 regression rows, the
-  `gcc.target/spu` testsuite restore, and regenerating the series as
-  `patches/spu/gcc-16.x/`.
-- **Stage 4 (table above).**  The failed first run (missing newlib patch,
-  missing pic multilib) and the pending rerun.
-- **Size/speed A/B against 9.5**  on the 256 KB local store.
-- **LRA conversion before GCC 17.**  The SPU backend uses the old reload
-  pass, which GCC 16 still ships (about 18 ports use it).  GCC 17 drops
-  reload, so the backend would need `TARGET_LRA_P` with its constraints and
-  secondary reloads reworked before then.  This is optional for the 16 port
-  and is the main open risk for a future 17 port.  The SPU backend never used
-  `cc0`, which simplifies the secondary-reload rework.
+- Restoring the `gcc.target/spu` testsuite.
+- The late-combine fault (section 5).
+- A Windows-hosted SPU GCC 16 cross build, and release packaging.
+- Hardware runs of SPU code built by GCC 16.
+- **LRA.**  The SPU backend uses the old reload pass, which GCC 16 still
+  ships.  When upstream removes reload, the backend needs `TARGET_LRA_P` with
+  its constraints and secondary reloads reworked.  The SPU backend never used
+  `cc0`.
