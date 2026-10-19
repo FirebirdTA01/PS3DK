@@ -156,9 +156,17 @@ The ABI after the series is checked by static asserts: plain `char` signed;
 | 1 | `cc1` builds | DONE |
 | 2 | `libgcc`, `libc`, `libm`; a C program links | DONE |
 | 3 | the series, ABI asserts, C++ with libstdc++, `gnu++17` default | DONE |
-| 4 | SDK rebuilt with the GCC 16 SPU compiler (built by the script from a clean tree); the SPU regression rows in RPCS3 | DONE: 25/25 PASS, the same as the 9.5 control |
+| 4 | SDK rebuilt with the GCC 16 SPU compiler (built by the script from a clean tree); the SPU regression rows in RPCS3 | 25/25 PASS, the same as the 9.5 control, on the compiler built from the first version of the series (39 patches, before the option-table change); not yet rerun on the current series |
 
-Size against 9.5: SPU images +1.09%, the SDK SPU libraries +2.27%.
+Size against 9.5, on that same compiler: SPU images +1.09%, the SDK SPU
+libraries +2.27%.
+
+The current series (38 patches) was checked separately: built by the script
+from a clean tree; the option-default test passes in compiler mode; five probe
+sources give the same assembly as the earlier compiler at `-O0`, `-O2`, `-Os`
+and `-O3`; and `libc`/`libg` code is unchanged, while `libgcc` differs in one
+member (`hardcfr.o`, whose `#pragma GCC optimize` no longer turns the two
+passes back on).  The stage-4 rows have not been rerun on it.
 
 ## 9. Open items
 
