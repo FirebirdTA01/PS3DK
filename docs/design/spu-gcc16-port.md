@@ -158,8 +158,8 @@ The ABI after the series is checked by static asserts: plain `char` signed;
 | 3 | the series, ABI asserts, C++ with libstdc++, `gnu++17` default | DONE |
 | 4 | SDK rebuilt with the GCC 16 SPU compiler (built by the script from a clean tree); the SPU regression rows in RPCS3 | 25/25 PASS, the same as the 9.5 control, on the compiler built from the first version of the series (39 patches), and again on the compiler built from the current series (38 patches): 25/25 PASS both times |
 
-Size against 9.5, on that same compiler: SPU images +1.09%, the SDK SPU
-libraries +2.27%.
+Size against 9.5, measured on the first-series compiler only: SPU images
++1.09%, the SDK SPU libraries +2.27%.
 
 The current series (38 patches) was checked separately: built by the script
 from a clean tree; the option-default test passes in compiler mode; five probe
