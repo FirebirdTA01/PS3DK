@@ -152,9 +152,17 @@ def _op(opc, a, b, c):
         return [max(x, y) for x, y in zip(a, b)]
     if opc in cmp:
         return [1.0 if cmp[opc](x, y) else 0.0 for x, y in zip(a, b)]
-    if opc == FRC:
-        return [f32(x - math.floor(x)) for x in a]
-    if opc == FLR:
+    if opc in (FRC, FLR):
+        # The RSX's FRC/FLR of a NaN or an infinity is not measured, and
+        # math.floor raises on them (ValueError, OverflowError) - so a
+        # non-finite source lane is refused with a reason, never guessed.
+        # Unread lanes are 0.0 (_read), so this sees only lanes the op reads.
+        bad = [x for x in a if not math.isfinite(x)]
+        if bad:
+            raise Unmodelled("%s of a non-finite value %r (RSX result not measured)"
+                             % ("FRC" if opc == FRC else "FLR", bad[0]))
+        if opc == FRC:
+            return [f32(x - math.floor(x)) for x in a]
         return [float(math.floor(x)) for x in a]
     if opc == DIV:
         y = b[0]
@@ -450,6 +458,21 @@ def self_test():
                      _container(_ins(MOV, 0, 0xF, [_src(I)], sel=sel_, end=1)), None, {'TEX0': a}))
     rows.append(('red: FACING selector 0xe stays unmodelled',
                  _container(_ins(MOV, 0, 0xF, [_src(I)], sel=0xE, end=1)), None, {'TEX0': a, 'FACING': b}))
+    # FLR/FRC of a non-finite source: refused with a reason (math.floor raised
+    # ValueError/OverflowError here, aborting a whole census, t_ef23a185); a
+    # finite source still evaluates, and a non-finite value in a lane the
+    # write mask leaves unread does not refuse
+    for opn, opc in (('FLR', FLR), ('FRC', FRC)):
+        for label, v in (('NaN', math.nan), ('+Inf', math.inf), ('-Inf', -math.inf)):
+            rows.append(('red: %s R0, TEX0 with TEX0.y = %s' % (opn, label),
+                         _container(_ins(opc, 0, 0xF, [_src(I)], sel=tex0, end=1)), None, {'TEX0': [1.5, v, 0.25, -2.75]}))
+    rows.append(('green: FLR R0, TEX0 (finite)', _container(_ins(FLR, 0, 0xF, [_src(I)], sel=tex0, end=1)),
+                 [1.0, -3.0, 0.0, -1.0], {'TEX0': [1.5, -2.25, 0.25, -0.5]}))
+    rows.append(('green: FRC R0, TEX0 (finite)', _container(_ins(FRC, 0, 0xF, [_src(I)], sel=tex0, end=1)),
+                 [0.5, 0.75, 0.25, 0.5], {'TEX0': [1.5, -2.25, 0.25, -0.5]}))
+    rows.append(('green: FLR R0.x, TEX0 with a NaN only in an unread lane',
+                 _container(_ins(MOV, 0, 0xF, [_src(I)], sel=0x5) + _ins(FLR, 0, 0x1, [_src(I)], sel=tex0, end=1)),
+                 [1.0, 0.5, 0.75, -1.25], {'TEX0': [1.5, math.nan, math.inf, -math.inf], 'TEX1': [9.0, 0.5, 0.75, -1.25]}))
     fails = 0
     for row in rows:
         name, blob, want = row[:3]
