@@ -90,8 +90,8 @@ static void port(CellSpursJob256 *job)
     mfc_get(desc, job->workArea.userData[6], sizeof desc, 2, 0, 0);
     mfc_write_tag_mask(1u << 2);
     mfc_read_tag_status_all();
-    EXPECT(45, _cellSpursJobQueuePortCopyPushJobBody(p2, desc, 128, 0, 2, 1, 0, 0), 0);
-    EXPECT(46, _cellSpursJobQueuePortCopyPushJobBody(p2, desc, 128, 0, 2, 1, 0, 0), JOB_AGAIN);   /* one entry */
+    EXPECT(45, _cellSpursJobQueuePortCopyPushJobBody(p2, (const CellSpursJobHeader *)desc, 128, 0, 2, 1, 0, 0), 0);
+    EXPECT(46, _cellSpursJobQueuePortCopyPushJobBody(p2, (const CellSpursJobHeader *)desc, 128, 0, 2, 1, 0, 0), JOB_AGAIN);   /* one entry */
     EXPECT(47, _cellSpursJobQueuePortPushFlush(p2, 2, 0), 0);
 }
 
