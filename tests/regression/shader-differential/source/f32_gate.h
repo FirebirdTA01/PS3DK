@@ -11,6 +11,7 @@
 #ifndef F32_GATE_H
 #define F32_GATE_H
 
+#include <stdint.h>
 #include <string.h>
 
 /* Keys 0..5 are the core float controls (by name); 6..10 are the binding
@@ -114,6 +115,53 @@ static int f32_gate_exit(f32_gate *g)
 static const char *f32_gate_verdict(int exit_code)
 {
 	return exit_code == 2 ? "SHADER_DIFF_INVALID" : exit_code == 1 ? "SHADER_DIFF_FAIL" : "SHADER_DIFF_OK";
+}
+
+/* ---- row refusal (codex review of f37d5f41) ----
+ * Float mode judges colour 0 only, through the plain 2D binder and scalar
+ * auto uniforms.  Applied to EVERY row - controls included - before any
+ * special case: a row is refused (never drawn, never silently narrowed)
+ * when either container declares an output other than COLOR0 or replaces
+ * depth, when the row names its own vertex program, when it asks for
+ * extra judged outputs (judge=), or when a container needs a binder kind
+ * float mode has no proving set for (binder mask bits: RECT=1 CUBE=2
+ * 3D=4 matrix=8).  Returns the refusal status, or NULL. */
+static const char *f32_row_refusal(int color_mask_a, int color_mask_b, int depth_a, int depth_b,
+                                   int has_vp, int judge_extra, unsigned binder_mask)
+{
+	if (judge_extra) return "f32-judge-unsupported";
+	if (has_vp) return "f32-vp-unsupported";
+	if (color_mask_a != 1 || color_mask_b != 1 || depth_a || depth_b) return "f32-outputs-unsupported";
+	if (binder_mask) return "f32-binder-unsupported";
+	return 0;
+}
+
+/* ---- pinned core control recipes ----
+ * The four named core k controls carry FIXED words; the manifest's ka/kb
+ * must equal them exactly, so an edited manifest (identical zero words,
+ * no NaN, no ULP step) cannot make them pass without measuring anything.
+ * A k control under any other name is not a core control. */
+typedef struct { const char *name; uint32_t ka[4], kb[4]; } f32_k_recipe;
+static const f32_k_recipe f32_k_recipes[4] = {
+	{ "f32-words", { 0x3f000000u, 0xbfc00000u, 0x40490fdbu, 0x00000000u },
+	               { 0x3f000000u, 0xbfc00000u, 0x40490fdbu, 0x00000000u } },
+	{ "f32-ulp",   { 0x3f000000u, 0x3f000000u, 0x3f000000u, 0x3f000000u },
+	               { 0x3f000001u, 0x3f000000u, 0x3f000000u, 0x3f000000u } },
+	{ "f32-sub8",  { 0x3f000000u, 0x3f000000u, 0x3f000000u, 0x3f000000u },
+	               { 0x3f004000u, 0x3f000000u, 0x3f000000u, 0x3f000000u } },
+	{ "f32-nan",   { 0x7fc00000u, 0x3f800000u, 0x7fc00001u, 0xc0000000u },
+	               { 0x7fc00000u, 0x3f800000u, 0x7fc00001u, 0xc0000000u } },
+};
+
+/* 1 if the row may run as a core control: a named core control must carry
+ * its recipe's words exactly; any other k-control name passes through. */
+static int f32_k_recipe_ok(const char *name, const uint32_t ka[4], const uint32_t kb[4])
+{
+	for (int i = 0; i < 4; i++)
+		if (strcmp(name, f32_k_recipes[i].name) == 0)
+			return memcmp(ka, f32_k_recipes[i].ka, sizeof(f32_k_recipes[i].ka)) == 0 &&
+			       memcmp(kb, f32_k_recipes[i].kb, sizeof(f32_k_recipes[i].kb)) == 0;
+	return 1;
 }
 
 #endif

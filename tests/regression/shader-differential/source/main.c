@@ -1992,6 +1992,13 @@ static int load_manifest(void)
 				p->blind_ok = 1;
 			} else if (strncmp(fields[k], "vp=", 3) == 0 && fields[k][3]) {
 				snprintf(p->vp_path, sizeof(p->vp_path), "%s", fields[k] + 3);
+			} else if (g_rt_f32 && strncmp(fields[k], "judge=", 6) == 0) {
+				/* float mode judges colour 0 only; an extra output it would
+				 * silently ignore is refused (codex review of f37d5f41) */
+				printf("shader-differential: manifest line %d: judge= is not supported in float mode (@rt f32 judges colour 0 only)\n",
+				       lineno);
+				fclose(f);
+				return 0;
 			} else if (strncmp(fields[k], "judge=", 6) == 0 && fields[k][6]) {
 				/* Opt-in judgement of undeclared outputs: instrument rows
 				 * only (see sd_pair.judge_mask_extra for why), and every
@@ -3442,7 +3449,7 @@ static int f32_painted(const u32 *img, const u32 s[4])
  * (the copy never landed), the sentinel, or anything else. */
 static char g_f32_init_diag[200];
 
-static void dump_f32(const char *name, char side, const u32 *img);
+static int dump_f32(const char *name, char side, const u32 *img);
 
 /* Paint the target with this frame's sentinel and prove it came back.
  * Retried against the emulator's asynchronous shader compile (its first
@@ -3481,7 +3488,7 @@ static int f32_init(CellGcmContextData *ctx, void *kcont, u32 rt_off, u32 depth_
 	         fill, sent, other);
 	char nm[32];
 	snprintf(nm, sizeof(nm), "init-fail-%u", (unsigned)g_f32_frame);
-	dump_f32(nm, 'x', scratch);
+	(void)dump_f32(nm, 'x', scratch);
 	return -7;
 }
 
@@ -3510,6 +3517,23 @@ static int f32_side(CellGcmContextData *ctx, void *kcont, void *cont, const char
 		}
 		*painted = f32_painted(save, s);
 		ever |= *painted > 0;
+		/* A pixel still holding THIS frame's sentinel was not painted (a
+		 * discard, or outside the draw).  It is rewritten to one fixed
+		 * "unpainted" word set - frame 0's sentinel, which no init draw
+		 * uses - so the painted MASK plus the painted words decide
+		 * stability across frames, and both sides of a pair (drawn on
+		 * different frames) agree where both left the pixel unpainted
+		 * (codex review of f37d5f41: whole-frame stability made every
+		 * partly discarded image unstable). */
+		{
+			u32 un[4];
+			f32_sentinel(0, un);
+			for (u32 px = 0; px < RT_W * RT_H; px++) {
+				u32 *q = save + px * 4;
+				if (q[0] == s[0] && q[1] == s[1] && q[2] == s[2] && q[3] == s[3])
+					memcpy(q, un, sizeof(un));
+			}
+		}
 		if (*painted > 0 && have_prev && memcmp(g_f32_prev, save, F32_BYTES) == 0)
 			break;
 		memcpy(g_f32_prev, save, F32_BYTES);
@@ -3523,15 +3547,17 @@ static int f32_side(CellGcmContextData *ctx, void *kcont, void *cont, const char
 	return rc;
 }
 
-static void dump_f32(const char *name, char side, const u32 *img)
+/* 1 when the whole image reached the file; a row whose images were not
+ * written cannot be closed from its verdict (the host judges the files). */
+static int dump_f32(const char *name, char side, const u32 *img)
 {
 	char path[sizeof(SD_ROOT) + 96];
 	snprintf(path, sizeof(path), SD_ROOT "artifacts/%s_%c.f32", name, side);
 	FILE *f = fopen(path, "wb");
 	if (!f)
-		return;
-	fwrite(img, 1, F32_BYTES, f);
-	fclose(f);
+		return 0;
+	size_t n = fwrite(img, 1, F32_BYTES, f);
+	return (fclose(f) == 0) && n == F32_BYTES;
 }
 
 static const char *f32_side_status(int rc, char side)
@@ -3680,11 +3706,50 @@ static int run_f32(CellGcmContextData *ctx)
 		const int is_frames = strcmp(p->role, "control-f32-frames") == 0;
 		int ok_control = 1;
 		char diag[320] = "";
+		/* Decided for EVERY row, controls included, before any special case
+		 * (f32_row_refusal): unsupported outputs, vertex program, judge=,
+		 * or binder kinds float mode has no proving set for. */
+		sd_outdecl da, db;
+		unsigned bneed = 0;
+		const char *refuse = NULL;
+		int set_known = 1;
+		if (A && B) {
+			fp_declared_outputs(A, sa, &da);
+			fp_declared_outputs(B, sb, &db);
+			cellGcmCgInitProgram((CGprogram)A);
+			cellGcmCgInitProgram((CGprogram)B);
+			bneed = binder_needed((CGprogram)A, strcmp(p->uniform_set, "auto") == 0) |
+			        binder_needed((CGprogram)B, strcmp(p->uniform_set, "auto") == 0);
+			refuse = f32_row_refusal(da.color_mask, db.color_mask, da.depth_replace, db.depth_replace,
+			                         p->vp_path[0] != 0, p->judge_mask_extra || p->judge_depth_extra, bneed);
+			/* a named set with no entries would apply nothing, silently */
+			if (!uniformSetIsNone(p->uniform_set) && strcmp(p->uniform_set, "auto") != 0) {
+				set_known = 0;
+				for (int u = 0; u < g_nuniforms; u++)
+					if (strcmp(g_uniforms[u].set, p->uniform_set) == 0)
+						set_known = 1;
+			}
+		}
 		if (!A || !B) {
 			r.status = !A ? "load-failed-a" : "load-failed-b";
 			ok_control = 0;
+		} else if (refuse) {
+			r.status = refuse;
+			snprintf(diag, sizeof(diag), "colours a=%x b=%x depth a=%d b=%d vp=%s judge=%d binder=0x%x (RECT=1 CUBE=2 3D=4 matrix=8)",
+			         da.color_mask, db.color_mask, da.depth_replace, db.depth_replace,
+			         p->vp_path[0] ? p->vp_path : "-", p->judge_mask_extra || p->judge_depth_extra, bneed);
+			ok_control = 0;
+			n_refused += !is_control;
+		} else if (!set_known) {
+			r.status = "uniform-set-unknown";
+			ok_control = 0;
 		} else if (is_k && (!p->has_ka || !p->has_kb)) {
 			r.status = "control-f32-k-needs-ka-kb";
+			ok_control = 0;
+		} else if (is_k && !f32_k_recipe_ok(p->name, p->ka, p->kb)) {
+			/* a named core control's words are fixed in f32_gate.h, never
+			 * taken from the manifest alone (codex review of f37d5f41) */
+			r.status = "control-f32-k-recipe-mismatch";
 			ok_control = 0;
 		} else if (is_frames) {
 			/* three frames, three word sets, each read back exactly */
@@ -3709,18 +3774,7 @@ static int run_f32(CellGcmContextData *ctx)
 					snprintf(diag, sizeof(diag), "%s", g_f32_init_diag);
 			}
 		} else {
-			sd_outdecl da, db;
-			fp_declared_outputs(A, sa, &da);
-			fp_declared_outputs(B, sb, &db);
-			if (!is_k && (da.color_mask != 1 || db.color_mask != 1 || da.depth_replace || db.depth_replace ||
-			              p->vp_path[0])) {
-				r.status = "f32-outputs-unsupported";
-				snprintf(diag, sizeof(diag), "colours a=%x b=%x depth a=%d b=%d vp=%s",
-				         da.color_mask, db.color_mask, da.depth_replace, db.depth_replace,
-				         p->vp_path[0] ? p->vp_path : "-");
-				ok_control = 0;
-				n_refused += !is_control;
-			} else {
+			{
 				int ta = 0, tb = 0, pa = 0, pb = 0;
 				const char *us = p->uniform_set;
 				int tex_ok = textures_ok, use_tex = have_tex;
@@ -3768,9 +3822,17 @@ static int run_f32(CellGcmContextData *ctx)
 						r.status = f32_verdict(g_f32_save_a, g_f32_save_b, &r.diff_pixels, &pn, first, sizeof(first));
 						snprintf(diag, sizeof(diag), "tries a=%d b=%d painted a=%d b=%d paired_nan_lanes=%d %s",
 						         ta, tb, pa, pb, pn, first);
-						dump_f32(p->name, 'a', g_f32_save_a);
-						dump_f32(p->name, 'b', g_f32_save_b);
-						snprintf(r.artifact, sizeof(r.artifact), "artifacts/%s_{a,b}.f32", p->name);
+						int wa = dump_f32(p->name, 'a', g_f32_save_a);
+						int wb = dump_f32(p->name, 'b', g_f32_save_b);
+						if (wa && wb) {
+							snprintf(r.artifact, sizeof(r.artifact), "artifacts/%s_{a,b}.f32", p->name);
+						} else {
+							snprintf(r.artifact, sizeof(r.artifact), "WRITE-FAILED a=%d b=%d", wa, wb);
+							if (!is_control)
+								r.status = "artifact-write-failed";  /* not closable */
+							else
+								ok_control = 0;
+						}
 						if (is_k) {
 							int same = memcmp(p->ka, p->kb, sizeof(p->ka)) == 0;
 							int nan = 0;
@@ -3839,7 +3901,7 @@ static int run_f32(CellGcmContextData *ctx)
 			else if (strcmp(r.status, "mismatch") == 0) { n_mismatch++; f32_gate_corpus_result(&gate, 1); }
 			else if (strcmp(r.status, "paired-nan") == 0) n_pnan++;
 			else if (strcmp(r.status, "vacuous") == 0) n_vacuous++;
-			else if (strcmp(r.status, "f32-outputs-unsupported") != 0) n_other++;
+			else if (strncmp(r.status, "f32-", 4) != 0) n_other++;
 			/* poison canary: the k container must still read back exactly */
 			static const u32 canary_w[4] = { 0x3fc00000u, 0xc0200000u, 0x40500000u, 0xc0840000u };
 			int ct = 0, cp = 0;

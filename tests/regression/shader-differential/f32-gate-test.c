@@ -3,6 +3,7 @@
  * way the guest does - control outcomes in manifest order, then corpus
  * rows - and asserts the exit code and the verdict word.  Built and run by
  * f32-gate-test.sh. */
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "source/f32_gate.h"
@@ -92,6 +93,60 @@ int main(void)
 	run_case("f32-words fails first, passes later in the run -> still INVALID", -1, -1, k_bad_then_ok, 1, 1, 3, 0, 2, 3);
 	run_case("no corpus rows, all controls pass -> OK", -1, -1, NULL, 0, 0, 0, 0, 0, 0);
 	run_case("no corpus rows, a required control missing -> INVALID", 2, -1, NULL, 0, 0, 0, 0, 2, 0);
+	/* row refusal: every unsupported shape refused, the plain shape allowed */
+	{
+		struct { const char *what; int ca, cb, da, db, vp, judge; unsigned binder; const char *want; } rc[] = {
+			{ "colour 0 only, plain 2D binder -> judged", 1, 1, 0, 0, 0, 0, 0, NULL },
+			{ "side A declares COLOR1 -> refused", 3, 1, 0, 0, 0, 0, 0, "f32-outputs-unsupported" },
+			{ "side B declares COLOR0..2 (run4 r06) -> refused", 1, 7, 0, 0, 0, 0, 0, "f32-outputs-unsupported" },
+			{ "a side declares no output -> refused", 0, 1, 0, 0, 0, 0, 0, "f32-outputs-unsupported" },
+			{ "side A replaces depth -> refused", 1, 1, 1, 0, 0, 0, 0, "f32-outputs-unsupported" },
+			{ "row names its own vertex program -> refused", 1, 1, 0, 0, 1, 0, 0, "f32-vp-unsupported" },
+			{ "row asks judge= extra outputs -> refused", 1, 1, 0, 0, 0, 1, 0, "f32-judge-unsupported" },
+			{ "needs a RECT sampler -> refused", 1, 1, 0, 0, 0, 0, 1, "f32-binder-unsupported" },
+			{ "needs a CUBE sampler -> refused", 1, 1, 0, 0, 0, 0, 2, "f32-binder-unsupported" },
+			{ "needs a 3D sampler -> refused", 1, 1, 0, 0, 0, 0, 4, "f32-binder-unsupported" },
+			{ "needs an automatic matrix -> refused", 1, 1, 0, 0, 0, 0, 8, "f32-binder-unsupported" },
+		};
+		for (unsigned i = 0; i < sizeof(rc) / sizeof(rc[0]); i++) {
+			const char *got = f32_row_refusal(rc[i].ca, rc[i].cb, rc[i].da, rc[i].db, rc[i].vp, rc[i].judge, rc[i].binder);
+			int ok = (got == NULL && rc[i].want == NULL) || (got && rc[i].want && strcmp(got, rc[i].want) == 0);
+			printf("  %-62s %s (%s)\n", rc[i].what, ok ? "ok" : "FAIL", got ? got : "judged");
+			g_fail += !ok;
+		}
+	}
+	/* pinned core recipes: the exact words pass, every edited form fails */
+	{
+		const uint32_t half[4] = { 0x3f000000u, 0x3f000000u, 0x3f000000u, 0x3f000000u };
+		const uint32_t zero[4] = { 0, 0, 0, 0 };
+		const uint32_t words[4] = { 0x3f000000u, 0xbfc00000u, 0x40490fdbu, 0x00000000u };
+		const uint32_t ulp_b[4] = { 0x3f000001u, 0x3f000000u, 0x3f000000u, 0x3f000000u };
+		const uint32_t sub8_b[4] = { 0x3f004000u, 0x3f000000u, 0x3f000000u, 0x3f000000u };
+		const uint32_t nan_w[4] = { 0x7fc00000u, 0x3f800000u, 0x7fc00001u, 0xc0000000u };
+		const uint32_t nan_gone[4] = { 0x3f800000u, 0x3f800000u, 0x3f800001u, 0xc0000000u };
+		const uint32_t words_lane_swap[4] = { 0xbfc00000u, 0x3f000000u, 0x40490fdbu, 0x00000000u };
+		struct { const char *what, *name; const uint32_t *ka, *kb; int want; } kc[] = {
+			{ "f32-words exact recipe -> accepted", "f32-words", words, words, 1 },
+			{ "f32-ulp exact recipe -> accepted", "f32-ulp", half, ulp_b, 1 },
+			{ "f32-sub8 exact recipe -> accepted", "f32-sub8", half, sub8_b, 1 },
+			{ "f32-nan exact recipe -> accepted", "f32-nan", nan_w, nan_w, 1 },
+			{ "f32-words all-zero words (codex probe) -> rejected", "f32-words", zero, zero, 0 },
+			{ "f32-ulp made an equality test (kb = ka) -> rejected", "f32-ulp", half, half, 0 },
+			{ "f32-ulp all-zero words -> rejected", "f32-ulp", zero, zero, 0 },
+			{ "f32-sub8 made an equality test -> rejected", "f32-sub8", half, half, 0 },
+			{ "f32-sub8 given the ULP step instead -> rejected", "f32-sub8", half, ulp_b, 0 },
+			{ "f32-nan with no NaN in it -> rejected", "f32-nan", nan_gone, nan_gone, 0 },
+			{ "f32-nan all-zero words -> rejected", "f32-nan", zero, zero, 0 },
+			{ "f32-words with two lanes swapped -> rejected", "f32-words", words_lane_swap, words_lane_swap, 0 },
+			{ "f32-words with a and b swapped for the ulp pair -> rejected", "f32-words", half, ulp_b, 0 },
+		};
+		for (unsigned i = 0; i < sizeof(kc) / sizeof(kc[0]); i++) {
+			int got = f32_k_recipe_ok(kc[i].name, kc[i].ka, kc[i].kb);
+			int ok = got == kc[i].want;
+			printf("  %-62s %s\n", kc[i].what, ok ? "ok" : "FAIL");
+			g_fail += !ok;
+		}
+	}
 	printf("f32-gate-test: %s\n", g_fail ? "FAIL" : "PASS");
 	return g_fail ? 1 : 0;
 }

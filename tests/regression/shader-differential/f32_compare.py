@@ -62,6 +62,10 @@ def _ordered(w):
 
 
 def judge(raw_a, raw_b, pitch=RT_W * PIXEL_BYTES, lanes=(0, 1, 2, 3), first_n=8):
+    # an empty selection would judge nothing and report identical (codex review)
+    lanes = tuple(lanes)
+    if not lanes or len(set(lanes)) != len(lanes) or any(l not in (0, 1, 2, 3) for l in lanes):
+        raise ValueError('lanes must be a non-empty set of distinct lanes from 0..3, got %r' % (lanes,))
     try:
         wa, wb = _words(raw_a, pitch), _words(raw_b, pitch)
     except ValueError as e:
@@ -167,6 +171,22 @@ def self_test():
             ok &= got['lanes']['x']['nan_payload_diff'] == want['payload_x']
         fails += not ok
         print('  %-44s %s  (%s)' % (name, 'ok' if ok else 'FAIL', got['status']))
+    # an empty, duplicated or out-of-range lane selection is refused, never
+    # judged as "identical" (codex probe: lanes=() compared differing images equal)
+    D = _image(base, edits=[(0, 0, 0, base(0, 0, 0) + 1)])
+    for bad in ((), (0, 0), (4,), (-1,)):
+        try:
+            judge(A, D, lanes=bad)
+            ok = False
+        except ValueError:
+            ok = True
+        fails += not ok
+        print('  %-44s %s' % ('lanes=%r refused' % (bad,), 'ok' if ok else 'FAIL'))
+    for argv, want in ((['--lanes', ''], 2), (['--lanes', 'xq'], 2), (['--lanes', 'xx'], 2), (['--lanes', 'x'], 1)):
+        rc = _cli(argv, A, D)
+        ok = rc == want
+        fails += not ok
+        print('  %-44s %s  (exit %d)' % ('CLI %s -> exit %d' % (' '.join(argv) or "''", want), 'ok' if ok else 'FAIL', rc))
     # finite min/max exclude non-finites; counts per side
     g = judge(_image(base, edits=[(0, 0, 0, NAN_Q), (1, 0, 0, 0x7F800000)]), A)
     ok = (g['lanes']['x']['a']['nan'] == 1 and g['lanes']['x']['a']['inf'] == 1 and
@@ -177,18 +197,35 @@ def self_test():
     return fails == 0
 
 
+def main(argv, read=lambda p: open(p, 'rb').read(), out=print):
+    """CLI: exit 0 identical, 1 any other verdict, 2 usage error."""
+    args = list(argv)
+    pitch = RT_W * PIXEL_BYTES
+    lanes = (0, 1, 2, 3)
+    try:
+        if '--pitch' in args:
+            i = args.index('--pitch'); pitch = int(args[i + 1]); del args[i:i + 2]
+        if '--lanes' in args:
+            i = args.index('--lanes'); spec = args[i + 1]; del args[i:i + 2]
+            if not spec or any(c not in LANES for c in spec):
+                raise ValueError('--lanes takes letters from xyzw, got %r' % spec)
+            lanes = tuple(LANES.index(c) for c in spec)
+        if len(args) != 2:
+            raise ValueError('expected two readback files')
+        res = judge(read(args[0]), read(args[1]), pitch=pitch, lanes=lanes)
+    except (ValueError, IndexError) as e:
+        out('f32_compare: %s' % e)
+        return 2
+    out(json.dumps(res, indent=1))
+    return 0 if res['status'] == 'identical' else 1
+
+
+def _cli(argv, a, b):
+    blobs = {'A': a, 'B': b}
+    return main(list(argv) + ['A', 'B'], read=lambda p: blobs[p], out=lambda *_: None)
+
+
 if __name__ == '__main__':
     if sys.argv[1:] == ['--self-test']:
         sys.exit(0 if self_test() else 1)
-    args = sys.argv[1:]
-    pitch = RT_W * PIXEL_BYTES
-    lanes = (0, 1, 2, 3)
-    if '--pitch' in args:
-        i = args.index('--pitch'); pitch = int(args[i + 1]); del args[i:i + 2]
-    if '--lanes' in args:
-        i = args.index('--lanes'); lanes = tuple(LANES.index(c) for c in args[i + 1]); del args[i:i + 2]
-    if len(args) != 2:
-        sys.exit(__doc__)
-    res = judge(open(args[0], 'rb').read(), open(args[1], 'rb').read(), pitch=pitch, lanes=lanes)
-    print(json.dumps(res, indent=1))
-    sys.exit(0 if res['status'] == 'identical' else 1)
+    sys.exit(main(sys.argv[1:]))
