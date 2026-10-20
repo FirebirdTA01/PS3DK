@@ -1303,6 +1303,14 @@ jobs:
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      # Float render-target mode: control gate (latches, required/binding/negative
+      # controls, row refusals, pinned recipes, artifact-write fault injection) and
+      # the host float comparator's self-test.  Host cc and python3 only.
+      - name: Test shader-differential float-mode gate and comparator
+        env:
+          CC: cc
+        run: bash tests/regression/shader-differential/f32-gate-test.sh
+
   host-tools-windows:
     name: Host tools build (windows mingw64)
     runs-on: windows-latest
