@@ -238,6 +238,7 @@ int main(void)
 		for (int v = ALL; v < NVAR; v++) {
 			f32_gate g;
 			f32_gate_init(&g);
+			f32_gate_request_matrix(&g);
 			if (v == EARLY)
 				f32_gate_matrix_control(&g, "control-binder-matrix-probe", "mprobe_44_r0", 1);
 			for (int q = 0; q < NALL; q++)
@@ -251,7 +252,7 @@ int main(void)
 				if (v == DUP_FOR_MISSING && i == 2) f32_gate_matrix_control(&g, m->role, m->name, 1);
 			}
 			for (int t = 0; t < F32_MATRIX_NTWINS; t++)
-				f32_gate_matrix_control(&g, "control-binder-matrix", f32_matrix_twins[t], 1);
+				f32_gate_matrix_control(&g, "control-binder-matrix", f32_matrix_twins[t].name, 1);
 			if (v == UNKNOWN)
 				f32_gate_matrix_control(&g, "control-binder-matrix-probe", "mprobe_22_r0", 1);
 			int ready = f32_gate_matrix_ready(&g);
@@ -260,6 +261,185 @@ int main(void)
 			printf("  %-62s %s (ready=%d invalid=%d)\n", what[v], ok ? "ok" : "FAIL", ready, g.invalid);
 			g_fail += !ok;
 		}
+	}
+	{
+		/* end to end (codex review of 4d7576d4): a manifest with matrix controls
+		 * requires the whole set, before the first corpus row and at the end */
+		enum { QUAL_FULL, QUAL_INCOMPLETE, MISSING_BEFORE_CORPUS, CORPUS_THEN_SET, LATE_COMPLETION,
+		       NO_MATRIX_CONTROLS, NSCEN };
+		static const char *what[NSCEN] = {
+			"matrix qualification, complete, controls only -> OK",
+			"matrix qualification, one member missing, controls only -> INVALID",
+			"member missing at the first corpus row -> INVALID, withheld",
+			"matrix corpus row before the set, set added after -> INVALID",
+			"missing member passes after a corpus row -> stays INVALID",
+			"no matrix control: matrix row refused, run stays valid",
+		};
+		for (int v = QUAL_FULL; v < NSCEN; v++) {
+			f32_gate g;
+			f32_gate_init(&g);
+			if (v != NO_MATRIX_CONTROLS)
+				f32_gate_request_matrix(&g);
+			for (int q = 0; q < NALL; q++)
+				f32_gate_control(&g, k_all_required[q].role, k_all_required[q].name, 1);
+			int allowed = -1, withheld = 0;
+			const char *refusal = "-";
+			if (v == CORPUS_THEN_SET) {
+				allowed = f32_gate_corpus_allowed(&g);
+				withheld += !allowed;
+			}
+			for (int m = 0; v != NO_MATRIX_CONTROLS && m < F32_MATRIX_NMEMBERS; m++) {
+				if ((v == QUAL_INCOMPLETE || v == MISSING_BEFORE_CORPUS || v == LATE_COMPLETION) && m == 21)
+					continue;
+				if (m < F32_MATRIX_NRECIPES)
+					f32_gate_matrix_control(&g, f32_matrix_recipes[m].role, f32_matrix_recipes[m].name, 1);
+				else
+					f32_gate_matrix_control(&g, "control-binder-matrix", f32_matrix_twins[m - F32_MATRIX_NRECIPES].name, 1);
+			}
+			if (v == MISSING_BEFORE_CORPUS || v == LATE_COMPLETION || v == NO_MATRIX_CONTROLS) {
+				allowed = f32_gate_corpus_allowed(&g);
+				withheld += !allowed;
+				if (allowed) {
+					const char *rf = f32_row_refusal(1, 1, 0, 0, 0, 0, 8, 1, f32_gate_matrix_ready(&g), 0);
+					refusal = rf ? rf : "judged";
+				}
+			}
+			if (v == LATE_COMPLETION) {
+				f32_gate_matrix_control(&g, "control-binder-matrix", f32_matrix_twins[1].name, 1);
+				withheld += !f32_gate_corpus_allowed(&g);
+			}
+			int rc = f32_gate_exit(&g);
+			int ok;
+			switch (v) {
+			case QUAL_FULL: ok = rc == 0 && f32_gate_matrix_ready(&g); break;
+			case QUAL_INCOMPLETE: ok = rc == 2 && strncmp(g.first_failure, "matrix-member-missing:", 22) == 0; break;
+			case MISSING_BEFORE_CORPUS: ok = rc == 2 && withheld == 1; break;
+			case CORPUS_THEN_SET: ok = rc == 2 && withheld == 1 && !f32_gate_matrix_ready(&g); break;
+			case LATE_COMPLETION: ok = rc == 2 && withheld == 2 && !f32_gate_matrix_ready(&g); break;
+			default: ok = rc == 0 && allowed == 1 && strcmp(refusal, "f32-matrix-unqualified") == 0; break;
+			}
+			printf("  %-62s %s (rc=%d withheld=%d refusal=%s first=%s)\n", what[v], ok ? "ok" : "FAIL", rc, withheld,
+			       refusal, g.invalid ? g.first_failure : "-");
+			g_fail += !ok;
+		}
+	}
+	{
+		/* each member is required on its own: leave any ONE out of a controls-only
+		 * qualification and the run is INVALID, naming that member */
+		int named = 0;
+		for (int miss = 0; miss < F32_MATRIX_NMEMBERS; miss++) {
+			f32_gate g;
+			f32_gate_init(&g);
+			f32_gate_request_matrix(&g);
+			for (int q = 0; q < NALL; q++)
+				f32_gate_control(&g, k_all_required[q].role, k_all_required[q].name, 1);
+			for (int m = 0; m < F32_MATRIX_NMEMBERS; m++)
+				if (m != miss)
+					f32_gate_matrix_control(&g, m < F32_MATRIX_NRECIPES ? f32_matrix_recipes[m].role : "control-binder-matrix",
+					                        m < F32_MATRIX_NRECIPES ? f32_matrix_recipes[m].name
+					                                                : f32_matrix_twins[m - F32_MATRIX_NRECIPES].name, 1);
+			char want[96];
+			snprintf(want, sizeof(want), "matrix-member-missing:%s",
+			         miss < F32_MATRIX_NRECIPES ? f32_matrix_recipes[miss].name
+			                                    : f32_matrix_twins[miss - F32_MATRIX_NRECIPES].name);
+			named += f32_gate_exit(&g) == 2 && strcmp(g.first_failure, want) == 0;
+		}
+		int ok = named == F32_MATRIX_NMEMBERS;
+		printf("  %-62s %s (%d/%d)\n", "any one of the 24 members missing -> INVALID, named", ok ? "ok" : "FAIL",
+		       named, F32_MATRIX_NMEMBERS);
+		g_fail += !ok;
+	}
+	{
+		/* a matrix control may draw only once every prerequisite passed, before any corpus row */
+		enum { ALL_PASSED, TEXTURE_MISSING, UNIFORM_FAILED, AFTER_CORPUS, NOT_REQUESTED, NPRE };
+		static const char *what[NPRE] = {
+			"prerequisites passed -> matrix control may draw",
+			"control-texture never ran -> no matrix draw",
+			"control-uniform failed -> no matrix draw",
+			"after the first corpus row -> no matrix draw",
+			"matrix qualification not requested -> no matrix draw",
+		};
+		for (int v = ALL_PASSED; v < NPRE; v++) {
+			f32_gate g;
+			f32_gate_init(&g);
+			if (v != NOT_REQUESTED)
+				f32_gate_request_matrix(&g);
+			for (int q = 0; q < NALL; q++) {
+				if (v == TEXTURE_MISSING && strcmp(k_all_required[q].role, "control-texture") == 0) continue;
+				f32_gate_control(&g, k_all_required[q].role, k_all_required[q].name,
+				                 !(v == UNIFORM_FAILED && strcmp(k_all_required[q].role, "control-uniform") == 0));
+			}
+			if (v == AFTER_CORPUS) {
+				/* a complete set, a corpus row judged (run still valid), then one more matrix row */
+				for (int m = 0; m < F32_MATRIX_NMEMBERS; m++)
+					f32_gate_matrix_control(&g, m < F32_MATRIX_NRECIPES ? f32_matrix_recipes[m].role : "control-binder-matrix",
+					                        m < F32_MATRIX_NRECIPES ? f32_matrix_recipes[m].name
+					                                                : f32_matrix_twins[m - F32_MATRIX_NRECIPES].name, 1);
+				if (!f32_gate_corpus_allowed(&g) || g.invalid) {
+					printf("  %-62s FAIL (setup: corpus row not allowed)\n", what[v]);
+					g_fail++;
+					continue;
+				}
+			}
+			int may = f32_gate_matrix_prereq_ok(&g);
+			int ok = v == ALL_PASSED ? may : !may;
+			printf("  %-62s %s (may_draw=%d)\n", what[v], ok ? "ok" : "FAIL", may);
+			g_fail += !ok;
+		}
+	}
+	{
+		/* twin recipes: shape, both containers, auto uniforms, A reads u_matrix, B bakes */
+		const f32_twin_facts good = { F32_M33, 1, 0, 0, 0 };
+		f32_twin_facts f;
+		struct { const char *what, *name, *set, *a, *b; int edit; const char *want; } tc[] = {
+			{ "twin with its recipe -> may draw", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 0, NULL },
+			{ "twin A=A (the auto program on both sides) -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_a.fpo", 1, "matrix-twin-path" },
+			{ "twin A=A under the pinned paths -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 1, "matrix-twin-same-container" },
+			{ "twin B=B under the pinned paths -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 2, "matrix-twin-same-container" },
+			{ "twin sides swapped (paths) -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_b.fpo", "controls/binder_matrix_0_a.fpo", 3, "matrix-twin-path" },
+			{ "twin sides swapped (contents) -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 3, "matrix-twin-a-reflection" },
+			{ "twin with the wrong shape (4x4 for binder_matrix_0) -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 4, "matrix-twin-a-reflection" },
+			{ "twin with uniform set 0 -> refused", "binder_matrix_0", "0",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 0, "matrix-twin-uniform-set" },
+			{ "twin whose A never reads a row -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 5, "matrix-twin-a-reflection" },
+			{ "twin whose A has another uniform -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 6, "matrix-twin-a-reflection" },
+			{ "twin whose B declares a uniform -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 7, "matrix-twin-b-not-baked" },
+			{ "another twin's containers -> refused", "binder_matrix_0", "auto",
+			  "controls/binder_matrix_1_a.fpo", "controls/binder_matrix_1_b.fpo", 0, "matrix-twin-path" },
+			{ "unknown twin name -> refused", "binder_matrix_4", "auto",
+			  "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo", 0, "matrix-twin-unknown" },
+		};
+		for (unsigned i = 0; i < sizeof(tc) / sizeof(tc[0]); i++) {
+			f = good;
+			switch (tc[i].edit) {
+			case 1: f.same_bytes = 1; f.b_uniforms = 1; break;                  /* A on both sides */
+			case 2: f.same_bytes = 1; f.a_shape = -1; f.a_rows_referenced = 0; break;   /* B on both sides */
+			case 3: f.a_shape = -1; f.a_rows_referenced = 0; f.b_uniforms = 1; break;  /* swapped */
+			case 4: f.a_shape = F32_M44; break;
+			case 5: f.a_rows_referenced = 0; break;
+			case 6: f.a_other_uniforms = 1; break;
+			case 7: f.b_uniforms = 1; break;
+			}
+			const char *got = f32_matrix_twin_refusal(tc[i].name, tc[i].set, tc[i].a, tc[i].b, &f);
+			int ok = (got == NULL && tc[i].want == NULL) || (got && tc[i].want && strcmp(got, tc[i].want) == 0);
+			printf("  %-62s %s (%s)\n", tc[i].what, ok ? "ok" : "FAIL", got ? got : "may draw");
+			g_fail += !ok;
+		}
+		/* every twin's pinned shape is the one its staged programs declare */
+		int shapes_ok = f32_matrix_twins[0].shape == F32_M33 && f32_matrix_twins[1].shape == F32_M44 &&
+		                f32_matrix_twins[2].shape == F32_M34 && f32_matrix_twins[3].shape == F32_M43;
+		printf("  %-62s %s\n", "twin shapes 3x3, 4x4, 3x4, 4x3", shapes_ok ? "ok" : "FAIL");
+		g_fail += !shapes_ok;
 	}
 	{
 		/* recipe fields: the pinned words pass; any edit is refused */

@@ -72,12 +72,48 @@ static const f32_matrix_recipe f32_matrix_recipes[F32_MATRIX_NRECIPES] = {
 	{ "mneg_33_ulp_1_2", "control-binder-matrix-neg", F32_M33, 1, 3, 1, 2, 1, { 0x3c2e0dc0u, 0x3f5868ccu, 0x3c879899u, 0x40200000u } },
 };
 
-/* the four mul() integration twins (role control-binder-matrix, bit-exact pairs) */
+/* The four mul() integration twins (role control-binder-matrix, judged bit-exact):
+ * side A reads the uniform u_matrix of the pinned shape under the auto set, side B
+ * bakes the same values and declares no uniform at all.  Their containers are
+ * pinned by path, and the guest checks each side's reflection before any draw
+ * (f32_matrix_twin_refusal), so a repeated, swapped or wrong-shape program cannot
+ * stand in for a twin. */
+typedef struct { const char *name; int shape; const char *a_path, *b_path; } f32_matrix_twin;
 #define F32_MATRIX_NTWINS 4
-static const char *const f32_matrix_twins[F32_MATRIX_NTWINS] = {
-	"binder_matrix_0", "binder_matrix_1", "binder_matrix_2", "binder_matrix_3"
+static const f32_matrix_twin f32_matrix_twins[F32_MATRIX_NTWINS] = {
+	{ "binder_matrix_0", F32_M33, "controls/binder_matrix_0_a.fpo", "controls/binder_matrix_0_b.fpo" },
+	{ "binder_matrix_1", F32_M44, "controls/binder_matrix_1_a.fpo", "controls/binder_matrix_1_b.fpo" },
+	{ "binder_matrix_2", F32_M34, "controls/binder_matrix_2_a.fpo", "controls/binder_matrix_2_b.fpo" },
+	{ "binder_matrix_3", F32_M43, "controls/binder_matrix_3_a.fpo", "controls/binder_matrix_3_b.fpo" },
 };
 #define F32_MATRIX_NMEMBERS (F32_MATRIX_NRECIPES + F32_MATRIX_NTWINS)
+
+/* What the guest reads from a twin's two containers before drawing it. */
+typedef struct {
+	int a_shape;            /* shape of A's uniform u_matrix parent with every row leaf of the
+	                         * right vector type, or -1 (none, or another type) */
+	int a_rows_referenced;  /* every row leaf of A has embedded constant slots (the program reads it) */
+	int a_other_uniforms;   /* A declares a uniform other than u_matrix and its rows */
+	int b_uniforms;         /* B declares any uniform */
+	int same_bytes;         /* the two containers are byte-identical */
+} f32_twin_facts;
+
+/* NULL if a twin row may draw, else its refusal status. */
+static const char *f32_matrix_twin_refusal(const char *name, const char *uniform_set, const char *a_path,
+                                           const char *b_path, const f32_twin_facts *f)
+{
+	const f32_matrix_twin *t = 0;
+	for (int i = 0; i < F32_MATRIX_NTWINS; i++)
+		if (strcmp(f32_matrix_twins[i].name, name) == 0)
+			t = &f32_matrix_twins[i];
+	if (!t) return "matrix-twin-unknown";
+	if (strcmp(uniform_set, "auto") != 0) return "matrix-twin-uniform-set";
+	if (strcmp(a_path, t->a_path) != 0 || strcmp(b_path, t->b_path) != 0) return "matrix-twin-path";
+	if (f->same_bytes) return "matrix-twin-same-container";
+	if (f->a_shape != t->shape || !f->a_rows_referenced || f->a_other_uniforms) return "matrix-twin-a-reflection";
+	if (f->b_uniforms) return "matrix-twin-b-not-baked";
+	return 0;
+}
 
 static const f32_matrix_recipe *f32_matrix_recipe_find(const char *role, const char *name)
 {
@@ -131,7 +167,7 @@ static int f32_matrix_member(const char *role, const char *name)
 			return i;
 	if (strcmp(role, "control-binder-matrix") == 0)
 		for (int i = 0; i < F32_MATRIX_NTWINS; i++)
-			if (strcmp(f32_matrix_twins[i], name) == 0)
+			if (strcmp(f32_matrix_twins[i].name, name) == 0)
 				return F32_MATRIX_NRECIPES + i;
 	return -1;
 }
@@ -148,6 +184,8 @@ typedef struct {
 	int checked;                  /* the required set was checked (first corpus row) */
 	int corpus_mismatch;          /* corpus rows that judged mismatch */
 	uint32_t matrix_passed;       /* bit i: matrix member i passed */
+	int matrix_requested;         /* the manifest carries matrix controls: the whole set is then
+	                               * required, before the first corpus row and at the end */
 	char first_failure[96];       /* the first control that invalidated the run */
 } f32_gate;
 
@@ -205,13 +243,40 @@ static void f32_gate_require(f32_gate *g, int n)
 			f32_gate_fail(g, f32_gate_required[q]);
 }
 
+/* Matrix qualification (codex review of 4d7576d4): a manifest that carries ANY matrix
+ * control requests it (the guest scans the manifest before the first row and calls
+ * f32_gate_request_matrix); every named member is then required to have passed
+ * before the first corpus row and at the end of a controls-only run, and a missing
+ * one latches INVALID.  A manifest with no matrix control stays valid; its matrix
+ * rows are refused (f32-matrix-unqualified). */
+static void f32_gate_request_matrix(f32_gate *g)
+{
+	g->matrix_requested = 1;
+}
+
+static void f32_gate_require_matrix(f32_gate *g)
+{
+	if (!g->matrix_requested)
+		return;
+	for (int m = 0; m < F32_MATRIX_NMEMBERS; m++)
+		if (!(g->matrix_passed & (1u << m))) {
+			char what[96];
+			snprintf(what, sizeof(what), "matrix-member-missing:%s",
+			         m < F32_MATRIX_NRECIPES ? f32_matrix_recipes[m].name
+			                                 : f32_matrix_twins[m - F32_MATRIX_NRECIPES].name);
+			f32_gate_fail(g, what);
+		}
+}
+
 /* Called before each corpus row: 1 if it may be judged.  The first call
- * checks that EVERY required control, core and binding, ran and passed. */
+ * checks that EVERY required control, core and binding, ran and passed,
+ * and the complete matrix set when the run requested it. */
 static int f32_gate_corpus_allowed(f32_gate *g)
 {
 	if (!g->checked) {
 		g->checked = 1;
 		f32_gate_require(g, F32_GATE_NREQ);
+		f32_gate_require_matrix(g);
 	}
 	return !g->invalid;
 }
@@ -227,14 +292,16 @@ static void f32_gate_artifact_failed(f32_gate *g, const char *name)
 	f32_gate_fail(g, what);
 }
 
-/* A matrix control may run only after the core and binding controls passed; one
- * that comes earlier, or fails, latches INVALID.  A pass sets only its own member
+/* A matrix control may DRAW only in a run that requested matrix qualification,
+ * after the core and binding controls passed and before any corpus row; the guest
+ * asks before the draw and records a refused one as a failure.  One that comes
+ * earlier or later, or fails, latches INVALID.  A pass sets only its own member
  * bit, so duplicates never fill a missing member. */
 static int f32_gate_matrix_prereq_ok(const f32_gate *g)
 {
 	for (int q = 0; q < F32_GATE_NREQ; q++)
 		if (!g->passed[q]) return 0;
-	return !g->invalid;
+	return !g->invalid && g->matrix_requested && !g->checked;
 }
 
 static void f32_gate_matrix_control(f32_gate *g, const char *role, const char *name, int passed)
@@ -260,12 +327,15 @@ static void f32_gate_corpus_result(f32_gate *g, int mismatch)
 }
 
 /* End of run.  A controls-only manifest (no corpus row: a qualification of
- * the float path itself) needs the six core controls; the binding controls
- * are required once a corpus row is judged (checked above). */
+ * the float path itself) needs the six core controls, and the whole matrix
+ * set when it requested matrix qualification; the binding controls are
+ * required once a corpus row is judged (checked above). */
 static int f32_gate_exit(f32_gate *g)
 {
-	if (!g->checked)
+	if (!g->checked) {
 		f32_gate_require(g, F32_GATE_NCORE);
+		f32_gate_require_matrix(g);
+	}
 	return g->invalid ? 2 : (g->corpus_mismatch ? 1 : 0);
 }
 

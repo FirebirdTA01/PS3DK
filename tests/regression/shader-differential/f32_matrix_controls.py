@@ -14,8 +14,8 @@ from its definition (independent of the guest's code):
 Every value is an exact binary32 (checked), so no rounding is assumed.
 
 usage:
-  f32_matrix_controls.py --recipes            print the C recipe table for f32_gate.h
-  f32_matrix_controls.py --check HEADER       exit 1 unless HEADER's table equals the computed one
+  f32_matrix_controls.py --recipes            print the C recipe and twin tables for f32_gate.h
+  f32_matrix_controls.py --check HEADER       exit 1 unless HEADER's tables equal the computed ones
   f32_matrix_controls.py --stage COMPILER OUT print manifest rows; write sources + containers to OUT/controls
 """
 import struct
@@ -27,6 +27,7 @@ NAME = 'u_matrix'
 PAD = 0x40200000          # 2.5: the literal pad lane of a 3-wide probe row (no element can equal it)
 SHAPES = {'44': (4, 4), '33': (3, 3), '34': (3, 4), '43': (4, 3)}   # rows x columns
 ADMITTED = ('44', '33')   # the shapes whose rows the gate admits; 34/43 are stride coverage only
+TWINS = ('33', '44', '34', '43')   # binder_matrix_0..3: the mul() integration twins, by shape
 
 
 def fnv1a(s):
@@ -90,6 +91,12 @@ def c_table():
             name, role, 'F32_M' + shape, r, fault, fr, fc, 0 if exp is None else 1, e))
     lines.append('};')
     return '\n'.join(lines)
+
+
+def c_twins():
+    """The twin table's rows in f32_gate.h: name, shape and the two pinned container paths."""
+    return '\n'.join('\t{ "binder_matrix_%d", F32_M%s, "controls/binder_matrix_%d_a.fpo", "controls/binder_matrix_%d_b.fpo" },'
+                     % (i, shape, i, i) for i, shape in enumerate(TWINS))
 
 
 def probe_source(shape, r):
@@ -159,7 +166,7 @@ def stage(compiler, out):
             rows.append('B|%s|%s|%s|%s|auto|expect=%s|normal=%s' % (role, name, path, path, hexw(exp), hexw(normal)))
     # the four mul() integration twins of binder-controls.ps1 (binder_matrix_0..3):
     # side A reads the uniform under auto, side B bakes the same exact values
-    for i, (r, c) in enumerate(((3, 3), (4, 4), (3, 4), (4, 3))):
+    for i, (r, c) in enumerate(SHAPES[t] for t in TWINS):
         vec = 'float3(t.xy,.5)' if c == 3 else 'float4(t.xy,.5,1)'
         res = 'mul(%s,%s)' % (NAME, vec)
         if r == 3:
@@ -189,11 +196,12 @@ if __name__ == '__main__':
     a = sys.argv[1:]
     if a == ['--recipes']:
         print(c_table())
+        print(c_twins())
     elif len(a) == 2 and a[0] == '--check':
         text = Path(a[1]).read_text()
         want = c_table()
-        ok = want in text
-        print('f32_matrix_controls: recipe table %s' % ('matches' if ok else 'DIFFERS from the computed one'))
+        ok = want in text and c_twins() in text
+        print('f32_matrix_controls: recipe and twin tables %s' % ('match' if ok else 'DIFFER from the computed ones'))
         sys.exit(0 if ok else 1)
     elif len(a) == 3 and a[0] == '--stage':
         print('\n'.join(stage(a[1], a[2])))

@@ -3762,6 +3762,65 @@ static int f32_matrix_skip_words(const void *container, u32 size, const f32_matr
 	return 0;
 }
 
+/* The number of embedded constant slots of the parameter `name` in a container
+ * (0: it has none, so the program never reads it), or -1 if it is not declared. */
+static int f32_leaf_emb_count(const void *container, u32 size, const char *name)
+{
+	const u8 *b = (const u8 *)container;
+	if (size < 32)
+		return -1;
+	u32 count = be32_at(b, 12), parr = be32_at(b, 16);
+	size_t n = strlen(name) + 1;
+	for (u32 i = 0; i < count; i++) {
+		u32 rec = parr + 48u * i;
+		if (rec + 48u > size)
+			return -1;
+		u32 nmo = be32_at(b, rec + 16), emb = be32_at(b, rec + 24);
+		if (nmo >= size || n > size - nmo || memcmp(b + nmo, name, n) != 0)
+			continue;
+		if (!emb)
+			return 0;
+		if (emb + 4u > size)
+			return -1;
+		return (int)be32_at(b, emb);
+	}
+	return -1;
+}
+
+/* What a matrix twin's two containers declare (judged by f32_matrix_twin_refusal). */
+static const f32_twin_facts *f32_twin_facts_of(void *A, u32 sa, void *B, u32 sb, f32_twin_facts *f)
+{
+	memset(f, 0, sizeof(*f));
+	f->a_shape = -1;
+	f->same_bytes = sa == sb && memcmp(A, B, sa) == 0;
+	for (int s = 0; s < 4; s++) {
+		f32_matrix_recipe shape;
+		memset(&shape, 0, sizeof(shape));
+		shape.shape = s;
+		if (f32_matrix_reflection_ok((CGprogram)A, &shape))
+			f->a_shape = s;
+	}
+	f->a_rows_referenced = f->a_shape >= 0;
+	for (int r = 0; f->a_shape >= 0 && r < f32_matrix_shape_rows[f->a_shape]; r++) {
+		char nm[32];
+		snprintf(nm, sizeof(nm), "u_matrix[%d]", r);
+		if (f32_leaf_emb_count(A, sa, nm) <= 0)
+			f->a_rows_referenced = 0;
+	}
+	for (CGparameter q = cellGcmCgGetFirstLeafParameter((CGprogram)A); q;
+	     q = cellGcmCgGetNextLeafParameter((CGprogram)A, q)) {
+		const char *nm = cellGcmCgGetParameterName((CGprogram)A, q);
+		if (cellGcmCgGetParameterVariability((CGprogram)A, q) == CG_UNIFORM &&
+		    (!nm || (strcmp(nm, "u_matrix") != 0 && strncmp(nm, "u_matrix[", 9) != 0)))
+			f->a_other_uniforms = 1;
+	}
+	for (CGparameter q = cellGcmCgGetFirstLeafParameter((CGprogram)B); q;
+	     q = cellGcmCgGetNextLeafParameter((CGprogram)B, q))
+		if (cellGcmCgGetParameterVariability((CGprogram)B, q) == CG_UNIFORM)
+			f->b_uniforms = 1;
+	return f;
+}
+
 static int run_f32(CellGcmContextData *ctx)
 {
 	printf("shader-differential: float render-target mode (F_W32Z32Y32X32, NV0039 readback, %d rows)\n",
@@ -3792,6 +3851,10 @@ static int run_f32(CellGcmContextData *ctx)
 	 * passing control-uniform / control-auto row opens them. */
 	f32_gate gate;
 	f32_gate_init(&gate);
+	/* a manifest with any matrix control asks for the whole matrix set */
+	for (int i = 0; i < g_npairs; i++)
+		if (f32_is_matrix_role(g_pairs[i].role))
+			f32_gate_request_matrix(&gate);
 	int textures_ok = 1, have_tex = 0, autos_ok = 0, uniforms_ok = 0;
 	int n_ident = 0, n_mismatch = 0, n_pnan = 0, n_refused = 0, n_vacuous = 0, n_other = 0, n_withheld = 0;
 	for (int i = 0; i < g_npairs; i++) {
@@ -3823,6 +3886,9 @@ static int run_f32(CellGcmContextData *ctx)
 		const int is_frames = strcmp(p->role, "control-f32-frames") == 0;
 		const int is_mprobe = strcmp(p->role, "control-binder-matrix-probe") == 0;
 		const int is_mneg = strcmp(p->role, "control-binder-matrix-neg") == 0;
+		const int is_mtwin = strcmp(p->role, "control-binder-matrix") == 0;
+		const char *twin_refuse = NULL;
+		f32_twin_facts tf;
 		int ok_control = 1;
 		char diag[320] = "";
 		/* Decided for EVERY row, controls included, before any special case
@@ -3872,6 +3938,17 @@ static int run_f32(CellGcmContextData *ctx)
 			 * taken from the manifest alone (codex review of f37d5f41) */
 			r.status = "control-f32-k-recipe-mismatch";
 			ok_control = 0;
+		} else if (is_mtwin && (twin_refuse = f32_matrix_twin_refusal(p->name, p->uniform_set, p->a_path, p->b_path,
+		                                                             f32_twin_facts_of(A, sa, B, sb, &tf))) != NULL) {
+			/* a twin's pinned recipe: its shape, its two containers, auto uniforms */
+			r.status = twin_refuse;
+			snprintf(diag, sizeof(diag), "a_shape=%d a_rows_read=%d a_other_uniforms=%d b_uniforms=%d same=%d",
+			         tf.a_shape, tf.a_rows_referenced, tf.a_other_uniforms, tf.b_uniforms, tf.same_bytes);
+			ok_control = 0;
+		} else if (is_mtwin && !f32_gate_matrix_prereq_ok(&gate)) {
+			/* never draw a matrix control before its prerequisites passed */
+			r.status = "matrix-prereq-unmet";
+			ok_control = 0;
 		} else if (is_mprobe || is_mneg) {
 			/* a direct matrix probe or an injected-fault negative: the pinned recipe,
 			 * the parameter table it must exercise, then side A (with the negative's
@@ -3891,6 +3968,9 @@ static int run_f32(CellGcmContextData *ctx)
 				r.status = "matrix-skip-words-unverified";
 				snprintf(diag, sizeof(diag), "container words %08x,%08x,%08x,%08x", (unsigned)skipw[0],
 				         (unsigned)skipw[1], (unsigned)skipw[2], (unsigned)skipw[3]);
+				ok_control = 0;
+			} else if (!f32_gate_matrix_prereq_ok(&gate)) {
+				r.status = "matrix-prereq-unmet";
 				ok_control = 0;
 			} else if (!autos_ok) {
 				r.status = "auto-invalid";
