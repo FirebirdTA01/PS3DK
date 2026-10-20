@@ -8,6 +8,17 @@
 #include <string.h>
 #include "source/f32_gate.h"
 
+/* Fault injection for f32_io.h: each stdio step can be made to fail. */
+static int g_io_mode;   /* 0 ok, 1 open fails, 2 short write, 3 close fails */
+static int g_dummy_file;
+static FILE *inj_fopen(const char *p, const char *m) { (void)p; (void)m; return g_io_mode == 1 ? NULL : (FILE *)&g_dummy_file; }
+static size_t inj_fwrite(const void *b, size_t s, size_t n, FILE *f) { (void)b; (void)f; return g_io_mode == 2 ? (n * s) / 2 : n * s; }
+static int inj_fclose(FILE *f) { (void)f; return g_io_mode == 3 ? EOF : 0; }
+#define F32_FOPEN  inj_fopen
+#define F32_FWRITE inj_fwrite
+#define F32_FCLOSE inj_fclose
+#include "source/f32_io.h"
+
 static int g_fail;
 
 typedef struct { const char *role, *name; int passed; } ctl;
@@ -144,6 +155,53 @@ int main(void)
 			int got = f32_k_recipe_ok(kc[i].name, kc[i].ka, kc[i].kb);
 			int ok = got == kc[i].want;
 			printf("  %-62s %s\n", kc[i].what, ok ? "ok" : "FAIL");
+			g_fail += !ok;
+		}
+	}
+	/* artifact writes: every stdio failure is reported (codex 20:12) */
+	{
+		static const char *what[4] = { "write ok -> 1", "open fails -> 0", "short write -> 0", "close fails -> 0" };
+		char buf[64] = { 0 };
+		for (int m = 0; m < 4; m++) {
+			g_io_mode = m;
+			int got = f32_write_file("x", buf, sizeof(buf));
+			int ok = got == (m == 0);
+			printf("  %-62s %s\n", what[m], ok ? "ok" : "FAIL");
+			g_fail += !ok;
+		}
+		g_io_mode = 0;
+	}
+	/* a failed artifact write latches INVALID: on a control even if the
+	 * control's own check passes afterwards, and on a corpus row whether it
+	 * mismatched (still counted) or not */
+	{
+		struct { const char *what; int on_control, corpus_mismatch; } ac[] = {
+			{ "artifact fails on a control that then passes -> INVALID", 1, 0 },
+			{ "artifact fails on a MISMATCHING corpus row -> INVALID, counted", 0, 1 },
+			{ "artifact fails on an identical corpus row -> INVALID", 0, 0 },
+		};
+		for (unsigned i = 0; i < sizeof(ac) / sizeof(ac[0]); i++) {
+			f32_gate g;
+			f32_gate_init(&g);
+			for (int q = 0; q < NALL; q++) {
+				if (ac[i].on_control && q == 6)
+					f32_gate_artifact_failed(&g, k_all_required[q].name);
+				f32_gate_control(&g, k_all_required[q].role, k_all_required[q].name, 1);
+			}
+			int withheld = 0;
+			if (!ac[i].on_control) {
+				if (f32_gate_corpus_allowed(&g)) {
+					f32_gate_corpus_result(&g, ac[i].corpus_mismatch);
+					f32_gate_artifact_failed(&g, "c001");
+				} else {
+					withheld++;
+				}
+			}
+			int rc = f32_gate_exit(&g);
+			int ok = rc == 2 && withheld == 0 && g.corpus_mismatch == ac[i].corpus_mismatch &&
+			         strncmp(g.first_failure, "artifact-write:", 15) == 0;
+			printf("  %-62s %s (rc=%d first=%s mismatches=%d)\n", ac[i].what, ok ? "ok" : "FAIL", rc,
+			       g.first_failure, g.corpus_mismatch);
 			g_fail += !ok;
 		}
 	}

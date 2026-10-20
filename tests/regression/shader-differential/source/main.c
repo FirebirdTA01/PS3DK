@@ -3268,6 +3268,7 @@ static void print_row(const sd_pair *p, const sd_result *r)
  *                  with three different word sets, each read back exactly;
  *   control-texture / control-auto, when present: must judge identical. */
 #include "f32_gate.h"
+#include "f32_io.h"
 
 #define F32_PITCH   (RT_W * 16u)
 #define F32_BYTES   (F32_PITCH * RT_H)
@@ -3517,23 +3518,13 @@ static int f32_side(CellGcmContextData *ctx, void *kcont, void *cont, const char
 		}
 		*painted = f32_painted(save, s);
 		ever |= *painted > 0;
-		/* A pixel still holding THIS frame's sentinel was not painted (a
-		 * discard, or outside the draw).  It is rewritten to one fixed
-		 * "unpainted" word set - frame 0's sentinel, which no init draw
-		 * uses - so the painted MASK plus the painted words decide
-		 * stability across frames, and both sides of a pair (drawn on
-		 * different frames) agree where both left the pixel unpainted
-		 * (codex review of f37d5f41: whole-frame stability made every
-		 * partly discarded image unstable). */
-		{
-			u32 un[4];
-			f32_sentinel(0, un);
-			for (u32 px = 0; px < RT_W * RT_H; px++) {
-				u32 *q = save + px * 4;
-				if (q[0] == s[0] && q[1] == s[1] && q[2] == s[2] && q[3] == s[3])
-					memcpy(q, un, sizeof(un));
-			}
-		}
+		/* A partly painted image keeps THIS frame's sentinel in its
+		 * unpainted pixels, so it never repeats across frames and the side
+		 * reports unstable: such rows stay OPEN.  Rewriting those pixels to
+		 * a fixed word set was tried and rejected in review (codex
+		 * 2026-10-19 20:12): no ordinary float word can stand in for the
+		 * coverage mask, and it destroyed the raw capture.  Judging partial
+		 * coverage needs a separate mask, which is not built yet. */
 		if (*painted > 0 && have_prev && memcmp(g_f32_prev, save, F32_BYTES) == 0)
 			break;
 		memcpy(g_f32_prev, save, F32_BYTES);
@@ -3553,11 +3544,7 @@ static int dump_f32(const char *name, char side, const u32 *img)
 {
 	char path[sizeof(SD_ROOT) + 96];
 	snprintf(path, sizeof(path), SD_ROOT "artifacts/%s_%c.f32", name, side);
-	FILE *f = fopen(path, "wb");
-	if (!f)
-		return 0;
-	size_t n = fwrite(img, 1, F32_BYTES, f);
-	return (fclose(f) == 0) && n == F32_BYTES;
+	return f32_write_file(path, img, F32_BYTES);
 }
 
 static const char *f32_side_status(int rc, char side)
@@ -3827,11 +3814,11 @@ static int run_f32(CellGcmContextData *ctx)
 						if (wa && wb) {
 							snprintf(r.artifact, sizeof(r.artifact), "artifacts/%s_{a,b}.f32", p->name);
 						} else {
+							/* The verdict stays as compared (and is still counted);
+							 * the run is latched INVALID in the gate, where no later
+							 * control result can clear it (codex 20:12). */
 							snprintf(r.artifact, sizeof(r.artifact), "WRITE-FAILED a=%d b=%d", wa, wb);
-							if (!is_control)
-								r.status = "artifact-write-failed";  /* not closable */
-							else
-								ok_control = 0;
+							f32_gate_artifact_failed(&gate, p->name);
 						}
 						if (is_k) {
 							int same = memcmp(p->ka, p->kb, sizeof(p->ka)) == 0;

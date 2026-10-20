@@ -12,6 +12,7 @@
 #define F32_GATE_H
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 /* Keys 0..5 are the core float controls (by name); 6..10 are the binding
@@ -95,6 +96,17 @@ static int f32_gate_corpus_allowed(f32_gate *g)
 		f32_gate_require(g, F32_GATE_NREQ);
 	}
 	return !g->invalid;
+}
+
+/* A row's raw images did not reach their files (open, short write or
+ * close failed).  The host comparator judges those files, so the run is
+ * latched INVALID - for a control and for a corpus row alike - while the
+ * row's own comparison stays recorded and counted. */
+static void f32_gate_artifact_failed(f32_gate *g, const char *name)
+{
+	char what[96];
+	snprintf(what, sizeof(what), "artifact-write:%s", name);
+	f32_gate_fail(g, what);
 }
 
 static void f32_gate_corpus_result(f32_gate *g, int mismatch)
