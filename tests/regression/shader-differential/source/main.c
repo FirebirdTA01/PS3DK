@@ -190,6 +190,8 @@
 #include <rsx/rsx.h>
 
 #include "sd_pos_allch_vpo.h"
+#include "f32_gate.h"
+#include "f32_io.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
@@ -270,6 +272,9 @@ typedef struct {
 	                          * four 8-digit hex binary32 words each, the raw value
 	                          * of uniform `k` on side A / B of a control-f32-k row */
 	u32  ka[4], kb[4];
+	int  has_expect, has_normal; /* float mode, matrix controls only: expect=/normal=, the
+	                          * pinned words of the row (f32_matrix_fields_ok checks them) */
+	u32  expect[4], normal[4];
 } sd_pair;
 
 typedef struct {
@@ -850,11 +855,19 @@ static int fp_matrix_leaf(CGprogram fp,const char *name)
 	CGparameter parent=cellGcmCgGetNamedParameter(fp,base);
 	return parent && row<matrix_rows(cellGcmCgGetParameterType(fp,parent));
 }
+/* Float-mode matrix negatives only (f32_gate.h recipes): an upload fault armed by
+ * run_f32 around ONE draw of a control-binder-matrix-neg row's side A, and disarmed
+ * right after it on every path.  Zero (no fault) everywhere else, so the default
+ * path, init draws and the canary never see it.  kind 1 transpose (square shapes
+ * only, so (c, r) is always in range), 2 skip row r, 3 element (r, c) +1 ULP. */
+static struct { int kind, r, c; } g_mfault;
+
 static int apply_fp_matrix(CellGcmContextData *ctx,CGprogram fp,CGparameter parent,u32 offset)
 {
 	const char *name=cellGcmCgGetParameterName(fp,parent);
 	u32 type=cellGcmCgGetParameterType(fp,parent);
 	unsigned rows=matrix_rows(type),cols=matrix_cols(type);
+	if (g_mfault.kind == 1 && rows != cols) return -1;   /* transpose is defined for square shapes only */
 	for (unsigned r=0;r<rows;r++) {
 		char rowname[128];
 		int len=snprintf(rowname,sizeof(rowname),"%s[%u]",name,r);
@@ -863,8 +876,16 @@ static int apply_fp_matrix(CellGcmContextData *ctx,CGprogram fp,CGparameter pare
 		if (!leaf || cellGcmCgGetParameterVariability(fp,leaf)!=CG_UNIFORM) return -1;
 		u32 lt=cellGcmCgGetParameterType(fp,leaf);
 		if (lt!=CG_FLOAT+cols-1 && lt!=CG_HALF+cols-1) return -1;
+		if (g_mfault.kind == 2 && (int)r == g_mfault.r) continue;   /* the row is not uploaded */
 		float v[4]={0,0,0,0};
-		for (unsigned c=0;c<cols;c++) v[c]=auto_matrix_element(name,r,c);
+		for (unsigned c=0;c<cols;c++)
+			v[c] = g_mfault.kind == 1 ? auto_matrix_element(name,c,r) : auto_matrix_element(name,r,c);
+		if (g_mfault.kind == 3 && (int)r == g_mfault.r && g_mfault.c >= 0 && (unsigned)g_mfault.c < cols) {
+			u32 w;
+			memcpy(&w, &v[g_mfault.c], 4);
+			w += 1u;
+			memcpy(&v[g_mfault.c], &w, 4);
+		}
 		cellGcmSetFragmentProgramParameter(ctx,fp,leaf,v,offset);
 	}
 	return 0;
@@ -1961,13 +1982,25 @@ static int load_manifest(void)
 		p->judge_mask_extra = 0;
 		p->judge_depth_extra = 0;
 		p->has_ka = p->has_kb = 0;
+		p->has_expect = p->has_normal = 0;
 		for (int k = 6; k < nf; k++) {
-			if (g_rt_f32 && (strncmp(fields[k], "ka=", 3) == 0 || strncmp(fields[k], "kb=", 3) == 0)) {
+			/* expect=/normal= (the pinned words of a matrix control row) exist only in
+			 * float mode and only on the two matrix control roles; anywhere else the
+			 * line is refused, so no other row can carry or redirect them. */
+			const int is_ew = strncmp(fields[k], "expect=", 7) == 0, is_nw = strncmp(fields[k], "normal=", 7) == 0;
+			if ((is_ew || is_nw) && !(g_rt_f32 && (strcmp(fields[1], "control-binder-matrix-probe") == 0 ||
+			                                       strcmp(fields[1], "control-binder-matrix-neg") == 0))) {
+				printf("shader-differential: manifest line %d: '%.7s' belongs only to a float-mode matrix control row\n",
+				       lineno, fields[k]);
+				fclose(f);
+				return 0;
+			}
+			if (g_rt_f32 && (strncmp(fields[k], "ka=", 3) == 0 || strncmp(fields[k], "kb=", 3) == 0 || is_ew || is_nw)) {
 				/* Exactly four 8-digit hex words, comma-separated: a raw
 				 * binary32 value for uniform k, never a decimal that a
 				 * float parser could round.  Anything else is refused. */
-				u32 *dst = fields[k][1] == 'a' ? p->ka : p->kb;
-				const char *s = fields[k] + 3;
+				u32 *dst = is_ew ? p->expect : is_nw ? p->normal : fields[k][1] == 'a' ? p->ka : p->kb;
+				const char *s = fields[k] + ((is_ew || is_nw) ? 7 : 3);
 				int ok = strlen(s) == 35;
 				for (int w = 0; ok && w < 4; w++) {
 					u32 v = 0;
@@ -1982,12 +2015,15 @@ static int load_manifest(void)
 					dst[w] = v;
 				}
 				if (!ok) {
-					printf("shader-differential: manifest line %d: '%s' is not ka=/kb= with four 8-digit lowercase hex words\n",
+					printf("shader-differential: manifest line %d: '%s' is not ka=/kb=/expect=/normal= with four 8-digit lowercase hex words\n",
 					       lineno, fields[k]);
 					fclose(f);
 					return 0;
 				}
-				if (fields[k][1] == 'a') p->has_ka = 1; else p->has_kb = 1;
+				if (is_ew) p->has_expect = 1;
+				else if (is_nw) p->has_normal = 1;
+				else if (fields[k][1] == 'a') p->has_ka = 1;
+				else p->has_kb = 1;
 			} else if (strcmp(fields[k], "blind-ok") == 0) {
 				p->blind_ok = 1;
 			} else if (strncmp(fields[k], "vp=", 3) == 0 && fields[k][3]) {
@@ -3267,8 +3303,6 @@ static void print_row(const sd_pair *p, const sd_result *r)
  *   control-f32-frames  the k container drawn on three successive frames
  *                  with three different word sets, each read back exactly;
  *   control-texture / control-auto, when present: must judge identical. */
-#include "f32_gate.h"
-#include "f32_io.h"
 
 #define F32_PITCH   (RT_W * 16u)
 #define F32_BYTES   (F32_PITCH * RT_H)
@@ -3276,6 +3310,9 @@ static void print_row(const sd_pair *p, const sd_result *r)
 #define F32_WAIT_MS 3000
 
 static u32 g_f32_frame;
+/* the fault a matrix negative's side A asks for (set and cleared by run_f32 around
+ * that one f32_side call; f32_side arms g_mfault only around the row's own draw) */
+static struct { int kind, r, c; } g_mfault_pending;
 static u32 g_f32_prev[F32_WORDS];
 static u32 g_f32_save_a[F32_WORDS], g_f32_save_b[F32_WORDS];
 
@@ -3510,7 +3547,14 @@ static int f32_side(CellGcmContextData *ctx, void *kcont, void *cont, const char
 		u32 s[4];
 		if ((rc = f32_init(ctx, kcont, rt_off, depth_off, s, save)) != 0)
 			break;
-		if ((rc = f32_draw(ctx, cont, uset, kwords, textures_ok, have_tex)) != 0)
+		/* a matrix negative's fault is armed for this draw only (never the init
+		 * draw above), and disarmed before anything else can run */
+		g_mfault.kind = g_mfault_pending.kind;
+		g_mfault.r = g_mfault_pending.r;
+		g_mfault.c = g_mfault_pending.c;
+		rc = f32_draw(ctx, cont, uset, kwords, textures_ok, have_tex);
+		g_mfault.kind = 0;
+		if (rc != 0)
 			break;
 		if (!wait_rsx_idle_bounded(ctx, F32_WAIT_MS) || !f32_readback(ctx, rt_off, save)) {
 			rc = -8;
@@ -3632,6 +3676,92 @@ static int f32_xy_ok(const u32 *img)
 	return 1;
 }
 
+/* ---- matrix binder controls (design r3; recipes in f32_gate.h) ---- */
+
+/* Every uniform matrix the program declares is a plain float4x4 or float3x3:
+ * not a half or other dimension, not an array element, not a struct member. */
+static int f32_matrix_admitted(CGprogram fp)
+{
+	for (CGparameter q = cellGcmCgGetFirstLeafParameter(fp); q; q = cellGcmCgGetNextLeafParameter(fp, q)) {
+		if (cellGcmCgGetParameterVariability(fp, q) != CG_UNIFORM)
+			continue;
+		u32 t = cellGcmCgGetParameterType(fp, q);
+		if (!matrix_rows(t))
+			continue;
+		const char *nm = cellGcmCgGetParameterName(fp, q);
+		if (!nm || strchr(nm, '[') || strchr(nm, '.'))
+			return 0;
+		if (t != CG_FLOAT4x4 && t != CG_FLOAT3x3)
+			return 0;
+	}
+	return 1;
+}
+
+/* The probe container declares u_matrix as a matrix PARENT of the recipe's type
+ * with one uniform row leaf per row of the right vector type: the parameter
+ * table apply_fp_matrix walks, so the probe exercises that path. */
+static int f32_matrix_reflection_ok(CGprogram fp, const f32_matrix_recipe *m)
+{
+	static const u32 want[4] = { CG_FLOAT4x4, CG_FLOAT3x3, CG_FLOAT3x4, CG_FLOAT4x3 };
+	CGparameter parent = cellGcmCgGetNamedParameter(fp, "u_matrix");
+	if (!parent || cellGcmCgGetParameterType(fp, parent) != want[m->shape] ||
+	    cellGcmCgGetParameterVariability(fp, parent) != CG_UNIFORM)
+		return 0;
+	int rows = f32_matrix_shape_rows[m->shape], cols = f32_matrix_shape_cols[m->shape];
+	for (int r = 0; r < rows; r++) {
+		char nm[32];
+		snprintf(nm, sizeof(nm), "u_matrix[%d]", r);
+		CGparameter leaf = cellGcmCgGetNamedParameter(fp, nm);
+		if (!leaf || cellGcmCgGetParameterVariability(fp, leaf) != CG_UNIFORM ||
+		    cellGcmCgGetParameterType(fp, leaf) != (u32)(CG_FLOAT + cols - 1))
+			return 0;
+	}
+	return 1;
+}
+
+/* What a skipped row leaves behind: the words of u_matrix[row]'s embedded
+ * constant slot(s) in the container's own ucode (halfword-swapped there), which
+ * every draw copies fresh, and the literal 2.5 pad in a 3-wide probe's fourth
+ * lane.  0 if the row has no embedded slot or its slots disagree. */
+static int f32_matrix_skip_words(const void *container, u32 size, const f32_matrix_recipe *m, u32 out[4])
+{
+	const u8 *b = (const u8 *)container;
+	if (size < 32)
+		return 0;
+	u32 count = be32_at(b, 12), parr = be32_at(b, 16), ucode = be32_at(b, 28);
+	char want[32];
+	snprintf(want, sizeof(want), "u_matrix[%d]", m->row);
+	for (u32 i = 0; i < count; i++) {
+		u32 rec = parr + 48u * i;
+		if (rec + 48u > size)
+			return 0;
+		u32 nmo = be32_at(b, rec + 16), emb = be32_at(b, rec + 24);
+		if (nmo >= size || strncmp((const char *)b + nmo, want, sizeof(want)) != 0)
+			continue;
+		if (!emb || emb + 4u > size)
+			return 0;
+		u32 n = be32_at(b, emb);
+		if (!n || emb + 4u + 4u * n > size)
+			return 0;
+		int cols = f32_matrix_shape_cols[m->shape];
+		for (u32 j = 0; j < n; j++) {
+			u32 off = ucode + be32_at(b, emb + 4u + 4u * j);
+			if (off + 16u > size)
+				return 0;
+			u32 w[4];
+			for (int l = 0; l < 4; l++) {
+				u32 raw = be32_at(b, off + 4u * (u32)l);
+				w[l] = l < cols ? ((raw << 16) | (raw >> 16)) : 0x40200000u;
+			}
+			if (j && memcmp(w, out, sizeof(w)) != 0)
+				return 0;
+			memcpy(out, w, sizeof(w));
+		}
+		return 1;
+	}
+	return 0;
+}
+
 static int run_f32(CellGcmContextData *ctx)
 {
 	printf("shader-differential: float render-target mode (F_W32Z32Y32X32, NV0039 readback, %d rows)\n",
@@ -3691,6 +3821,8 @@ static int run_f32(CellGcmContextData *ctx)
 		const int is_k = strcmp(p->role, "control-f32-k") == 0;
 		const int is_xy = strcmp(p->role, "control-f32-xy") == 0;
 		const int is_frames = strcmp(p->role, "control-f32-frames") == 0;
+		const int is_mprobe = strcmp(p->role, "control-binder-matrix-probe") == 0;
+		const int is_mneg = strcmp(p->role, "control-binder-matrix-neg") == 0;
 		int ok_control = 1;
 		char diag[320] = "";
 		/* Decided for EVERY row, controls included, before any special case
@@ -3708,7 +3840,9 @@ static int run_f32(CellGcmContextData *ctx)
 			bneed = binder_needed((CGprogram)A, strcmp(p->uniform_set, "auto") == 0) |
 			        binder_needed((CGprogram)B, strcmp(p->uniform_set, "auto") == 0);
 			refuse = f32_row_refusal(da.color_mask, db.color_mask, da.depth_replace, db.depth_replace,
-			                         p->vp_path[0] != 0, p->judge_mask_extra || p->judge_depth_extra, bneed);
+			                         p->vp_path[0] != 0, p->judge_mask_extra || p->judge_depth_extra, bneed,
+			                         f32_matrix_admitted((CGprogram)A) && f32_matrix_admitted((CGprogram)B),
+			                         f32_gate_matrix_ready(&gate), f32_is_matrix_role(p->role));
 			/* a named set with no entries would apply nothing, silently */
 			if (!uniformSetIsNone(p->uniform_set) && strcmp(p->uniform_set, "auto") != 0) {
 				set_known = 0;
@@ -3738,6 +3872,62 @@ static int run_f32(CellGcmContextData *ctx)
 			 * taken from the manifest alone (codex review of f37d5f41) */
 			r.status = "control-f32-k-recipe-mismatch";
 			ok_control = 0;
+		} else if (is_mprobe || is_mneg) {
+			/* a direct matrix probe or an injected-fault negative: the pinned recipe,
+			 * the parameter table it must exercise, then side A (with the negative's
+			 * fault, armed for that draw only) and side B (never faulted) must each
+			 * read back their exact words on every pixel */
+			const f32_matrix_recipe *m = f32_matrix_recipe_find(p->role, p->name);
+			u32 skipw[4] = { 0, 0, 0, 0 };
+			int ta = 0, tb = 0, pa = 0, pb = 0, ra = 0, rb = 0;
+			if (!m || !f32_matrix_fields_ok(p->role, p->name, p->has_expect, p->expect, p->has_normal, p->normal)) {
+				r.status = "matrix-recipe-mismatch";
+				ok_control = 0;
+			} else if (!f32_matrix_reflection_ok((CGprogram)A, m) || !f32_matrix_reflection_ok((CGprogram)B, m)) {
+				r.status = "matrix-probe-reflection-unexpected";
+				ok_control = 0;
+			} else if (m->fault == 2 && (!f32_matrix_skip_words(A, sa, m, skipw) ||
+			                             memcmp(skipw, p->expect, sizeof(skipw)) != 0)) {
+				r.status = "matrix-skip-words-unverified";
+				snprintf(diag, sizeof(diag), "container words %08x,%08x,%08x,%08x", (unsigned)skipw[0],
+				         (unsigned)skipw[1], (unsigned)skipw[2], (unsigned)skipw[3]);
+				ok_control = 0;
+			} else if (!autos_ok) {
+				r.status = "auto-invalid";
+				ok_control = 0;
+			} else {
+				g_mfault_pending.kind = m->fault;
+				g_mfault_pending.r = m->fault_r;
+				g_mfault_pending.c = m->fault_c;
+				ra = f32_side(ctx, kcont, A, "auto", NULL, 1, have_tex, a_off, z_off, g_f32_save_a, &ta, &pa);
+				g_mfault_pending.kind = 0;
+				g_mfault.kind = 0;
+				rb = ra ? 0 : f32_side(ctx, kcont, B, "auto", NULL, 1, have_tex, b_off, z_off, g_f32_save_b, &tb, &pb);
+				if (ra || rb) {
+					r.status = f32_side_status(ra ? ra : rb, ra ? 'a' : 'b');
+					ok_control = 0;
+					if (ra == -7 || ra == -8 || rb == -7 || rb == -8)
+						f32_gate_fail(&gate, p->name);
+				} else {
+					const u32 *want_b = is_mneg ? p->normal : p->expect;
+					int a_ok = f32_all_equal(g_f32_save_a, p->expect), b_ok = f32_all_equal(g_f32_save_b, want_b);
+					ok_control = a_ok && b_ok;
+					r.status = ok_control ? (is_mneg ? "matrix-neg-detected" : "matrix-probe-pass")
+					                      : (is_mneg ? "matrix-neg-missed" : "matrix-probe-fail");
+					snprintf(diag, sizeof(diag), "a=%08x,%08x,%08x,%08x %s b=%08x,%08x,%08x,%08x %s",
+					         (unsigned)g_f32_save_a[0], (unsigned)g_f32_save_a[1], (unsigned)g_f32_save_a[2],
+					         (unsigned)g_f32_save_a[3], a_ok ? "as-pinned" : "NOT-AS-PINNED",
+					         (unsigned)g_f32_save_b[0], (unsigned)g_f32_save_b[1], (unsigned)g_f32_save_b[2],
+					         (unsigned)g_f32_save_b[3], b_ok ? "as-pinned" : "NOT-AS-PINNED");
+					int wa = dump_f32(p->name, 'a', g_f32_save_a), wb = dump_f32(p->name, 'b', g_f32_save_b);
+					if (wa && wb) {
+						snprintf(r.artifact, sizeof(r.artifact), "artifacts/%s_{a,b}.f32", p->name);
+					} else {
+						snprintf(r.artifact, sizeof(r.artifact), "WRITE-FAILED a=%d b=%d", wa, wb);
+						f32_gate_artifact_failed(&gate, p->name);
+					}
+				}
+			}
 		} else if (is_frames) {
 			/* three frames, three word sets, each read back exactly */
 			int tries = 0, painted = 0, rc = 0;
@@ -3871,7 +4061,10 @@ static int run_f32(CellGcmContextData *ctx)
 		}
 		if (is_control) {
 			/* every control is required: a failure latches the run INVALID */
-			f32_gate_control(&gate, p->role, p->name, ok_control);
+			if (f32_is_matrix_role(p->role))
+				f32_gate_matrix_control(&gate, p->role, p->name, ok_control);
+			else
+				f32_gate_control(&gate, p->role, p->name, ok_control);
 			if (!ok_control) {
 				if (is_tex_ctl) textures_ok = 0;
 				else if (strcmp(p->role, "control-auto") == 0) autos_ok = 0;

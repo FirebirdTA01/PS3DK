@@ -120,7 +120,7 @@ int main(void)
 			{ "needs an automatic matrix -> refused", 1, 1, 0, 0, 0, 0, 8, "f32-binder-unsupported" },
 		};
 		for (unsigned i = 0; i < sizeof(rc) / sizeof(rc[0]); i++) {
-			const char *got = f32_row_refusal(rc[i].ca, rc[i].cb, rc[i].da, rc[i].db, rc[i].vp, rc[i].judge, rc[i].binder);
+			const char *got = f32_row_refusal(rc[i].ca, rc[i].cb, rc[i].da, rc[i].db, rc[i].vp, rc[i].judge, rc[i].binder, 0, 0, 0);
 			int ok = (got == NULL && rc[i].want == NULL) || (got && rc[i].want && strcmp(got, rc[i].want) == 0);
 			printf("  %-62s %s (%s)\n", rc[i].what, ok ? "ok" : "FAIL", got ? got : "judged");
 			g_fail += !ok;
@@ -204,6 +204,101 @@ int main(void)
 			       g.first_failure, g.corpus_mismatch);
 			g_fail += !ok;
 		}
+	}
+	/* ---- matrix binder (design r3) ---- */
+	{
+		/* admission: plain float4x4/3x3 only, and only with the matrix set passed */
+		struct { const char *what; unsigned binder; int adm, ready, mctl; const char *want; } mr[] = {
+			{ "matrix row, admitted type, set passed -> judged", 8, 1, 1, 0, NULL },
+			{ "matrix row, admitted type, set NOT passed -> unqualified", 8, 1, 0, 0, "f32-matrix-unqualified" },
+			{ "matrix row, non-admitted type (half, 2xN, array) -> refused", 8, 0, 1, 0, "f32-binder-unsupported" },
+			{ "matrix + RECT, set passed -> still refused", 9, 1, 1, 0, "f32-binder-unsupported" },
+			{ "matrix + CUBE on a MATRIX CONTROL -> still refused", 10, 1, 1, 1, "f32-binder-unsupported" },
+			{ "matrix control waives only its own matrix requirement", 8, 0, 0, 1, NULL },
+		};
+		for (unsigned i = 0; i < sizeof(mr) / sizeof(mr[0]); i++) {
+			const char *got = f32_row_refusal(1, 1, 0, 0, 0, 0, mr[i].binder, mr[i].adm, mr[i].ready, mr[i].mctl);
+			int ok = (got == NULL && mr[i].want == NULL) || (got && mr[i].want && strcmp(got, mr[i].want) == 0);
+			printf("  %-62s %s (%s)\n", mr[i].what, ok ? "ok" : "FAIL", got ? got : "judged");
+			g_fail += !ok;
+		}
+	}
+	{
+		/* membership: core + binding controls first, then the matrix members in variants */
+		enum { ALL, MISSING, DUP_FOR_MISSING, WRONG, FAIL_THEN_PASS, EARLY, UNKNOWN, NVAR };
+		static const char *what[NVAR] = {
+			"complete matrix set -> ready",
+			"one member missing -> not ready",
+			"duplicate in place of a missing member -> not ready",
+			"member under the wrong role -> INVALID",
+			"a member fails, then passes -> INVALID",
+			"matrix control before core/binding prerequisites -> INVALID",
+			"unknown matrix member name -> INVALID",
+		};
+		for (int v = ALL; v < NVAR; v++) {
+			f32_gate g;
+			f32_gate_init(&g);
+			if (v == EARLY)
+				f32_gate_matrix_control(&g, "control-binder-matrix-probe", "mprobe_44_r0", 1);
+			for (int q = 0; q < NALL; q++)
+				f32_gate_control(&g, k_all_required[q].role, k_all_required[q].name, 1);
+			for (int i = 0; i < F32_MATRIX_NRECIPES; i++) {
+				const f32_matrix_recipe *m = &f32_matrix_recipes[i];
+				if ((v == MISSING || v == DUP_FOR_MISSING) && i == 3) continue;
+				if (v == WRONG && i == 0) { f32_gate_matrix_control(&g, "control-binder-matrix-neg", m->name, 1); continue; }
+				if (v == FAIL_THEN_PASS && i == 0) f32_gate_matrix_control(&g, m->role, m->name, 0);
+				f32_gate_matrix_control(&g, m->role, m->name, 1);
+				if (v == DUP_FOR_MISSING && i == 2) f32_gate_matrix_control(&g, m->role, m->name, 1);
+			}
+			for (int t = 0; t < F32_MATRIX_NTWINS; t++)
+				f32_gate_matrix_control(&g, "control-binder-matrix", f32_matrix_twins[t], 1);
+			if (v == UNKNOWN)
+				f32_gate_matrix_control(&g, "control-binder-matrix-probe", "mprobe_22_r0", 1);
+			int ready = f32_gate_matrix_ready(&g);
+			int ok = v == ALL ? (ready && !g.invalid) :
+			         (v == MISSING || v == DUP_FOR_MISSING) ? (!ready && !g.invalid) : (!ready && g.invalid);
+			printf("  %-62s %s (ready=%d invalid=%d)\n", what[v], ok ? "ok" : "FAIL", ready, g.invalid);
+			g_fail += !ok;
+		}
+	}
+	{
+		/* recipe fields: the pinned words pass; any edit is refused */
+		const f32_matrix_recipe *p = f32_matrix_recipe_find("control-binder-matrix-probe", "mprobe_44_r1");
+		const f32_matrix_recipe *u = f32_matrix_recipe_find("control-binder-matrix-neg", "mneg_44_ulp_1_2");
+		const f32_matrix_recipe *k = f32_matrix_recipe_find("control-binder-matrix-neg", "mneg_44_skip_r1");
+		uint32_t e[4], n[4], z[4] = { 0, 0, 0, 0 };
+		struct { const char *what; int got, want; } fc[8];
+		int nf = 0;
+		fc[nf].what = "probe with its pinned words -> accepted";
+		fc[nf].got = f32_matrix_fields_ok(p->role, p->name, 1, p->expect, 0, z); fc[nf++].want = 1;
+		memcpy(e, p->expect, sizeof(e)); e[1] ^= 1;
+		fc[nf].what = "probe with one word altered -> refused";
+		fc[nf].got = f32_matrix_fields_ok(p->role, p->name, 1, e, 0, z); fc[nf++].want = 0;
+		memcpy(n, f32_matrix_normal_words(u), sizeof(n));
+		fc[nf].what = "ULP negative with pinned faulty + normal words -> accepted";
+		fc[nf].got = f32_matrix_fields_ok(u->role, u->name, 1, u->expect, 1, n); fc[nf++].want = 1;
+		fc[nf].what = "ULP negative expecting the NORMAL words -> refused";
+		fc[nf].got = f32_matrix_fields_ok(u->role, u->name, 1, n, 1, n); fc[nf++].want = 0;
+		fc[nf].what = "negative without normal= -> refused";
+		fc[nf].got = f32_matrix_fields_ok(u->role, u->name, 1, u->expect, 0, z); fc[nf++].want = 0;
+		fc[nf].what = "probe name under the negative role -> refused";
+		fc[nf].got = f32_matrix_fields_ok("control-binder-matrix-neg", p->name, 1, p->expect, 1, n); fc[nf++].want = 0;
+		fc[nf].what = "matrix fields on a corpus row -> refused";
+		fc[nf].got = f32_matrix_fields_ok("corpus", p->name, 1, p->expect, 0, z); fc[nf++].want = 0;
+		memcpy(n, f32_matrix_normal_words(k), sizeof(n));
+		fc[nf].what = "skip-row negative expecting the normal words -> refused";
+		fc[nf].got = f32_matrix_fields_ok(k->role, k->name, 1, n, 1, n); fc[nf++].want = 0;
+		for (int i = 0; i < nf; i++) {
+			int ok = fc[i].got == fc[i].want;
+			printf("  %-62s %s\n", fc[i].what, ok ? "ok" : "FAIL");
+			g_fail += !ok;
+		}
+		/* only the three matrix roles may carry matrix fields at all */
+		int roles_ok = f32_is_matrix_role("control-binder-matrix-probe") && f32_is_matrix_role("control-binder-matrix-neg") &&
+		               f32_is_matrix_role("control-binder-matrix") && !f32_is_matrix_role("corpus") &&
+		               !f32_is_matrix_role("control-texture") && !f32_is_matrix_role("control-f32-k");
+		printf("  %-62s %s\n", "matrix roles: the three matrix roles only", roles_ok ? "ok" : "FAIL");
+		g_fail += !roles_ok;
 	}
 	printf("f32-gate-test: %s\n", g_fail ? "FAIL" : "PASS");
 	return g_fail ? 1 : 0;
