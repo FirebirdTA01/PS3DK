@@ -1,0 +1,7 @@
+// shader-differential - RGBA8 counter-control, side A (float-mode design, codex 2026-10-19).
+// 0.5 on every lane.  Side B (sd_counter8_b.fcg) is 0.5 + 2^-10, below one 8-bit step: the
+// DEFAULT (A8R8G8B8) path must judge the pair IDENTICAL, which is why float mode exists.
+void main(out float4 color : COLOR)
+{
+    color = float4(0.5f, 0.5f, 0.5f, 0.5f);
+}
