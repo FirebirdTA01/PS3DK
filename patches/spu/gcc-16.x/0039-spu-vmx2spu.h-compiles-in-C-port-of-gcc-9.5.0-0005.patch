@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Tue, 20 Oct 2026 19:30:00 -0500
+Subject: [PATCH 39/39] spu: vmx2spu.h compiles in C++ (port of gcc-9.5.0 0005)
+
+Fix unparenthesized compound literal in vec_sum2s macro invocation.
+
+In C++ modes, commas inside unparenthesized compound literal braces
+{0, -1, 0, -1} are treated by the preprocessor as macro argument separators,
+causing `spu_and` to receive 5 arguments instead of 2.  Parenthesise the
+compound literal as ((vec_int4){0, -1, 0, -1}), matching line 2262.
+
+The restored backend takes vmx2spu.h unchanged from releases/gcc-9.5.0, so
+the 9.5 fix applies here as is.
+---
+diff --git a/gcc/config/spu/vmx2spu.h b/gcc/config/spu/vmx2spu.h
+--- a/gcc/config/spu/vmx2spu.h
++++ b/gcc/config/spu/vmx2spu.h
+@@ -2215,7 +2215,7 @@
+ 
+   sat = spu_orc(spu_xor(sign1, sign2), (vec_int4)spu_cmpeq(sum_h, sign2));
+ 
+-  d = spu_and(spu_sel(sum_l, sat_val, (vec_uint4)(sat)), (vec_int4){0, -1, 0, -1});
++  d = spu_and(spu_sel(sum_l, sat_val, (vec_uint4)(sat)), ((vec_int4){0, -1, 0, -1}));
+ 
+   return (d);
+ }
