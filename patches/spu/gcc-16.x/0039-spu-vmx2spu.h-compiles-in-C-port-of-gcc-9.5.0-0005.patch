@@ -1,21 +1,45 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Tue, 20 Oct 2026 19:30:00 -0500
-Subject: [PATCH 39/39] spu: vmx2spu.h compiles in C++ (port of gcc-9.5.0 0005)
+Subject: [PATCH 39/39] spu: vmx2spu.h compiles in C++
 
-Fix unparenthesized compound literal in vec_sum2s macro invocation.
+Three spots in the restored 9.5 header stop any C++ source that includes it
+from compiling with GCC 16, in every C++ dialect:
 
-In C++ modes, commas inside unparenthesized compound literal braces
-{0, -1, 0, -1} are treated by the preprocessor as macro argument separators,
-causing `spu_and` to receive 5 arguments instead of 2.  Parenthesise the
-compound literal as ((vec_int4){0, -1, 0, -1}), matching line 2262.
+- vec_sum2s passes an unparenthesised compound literal, (vec_int4){0, -1,
+  0, -1}, to the spu_and macro; the preprocessor splits it at the commas.
+  Parenthesise it, as gcc-9.5.0 0005 does.
+- vec_abss(vec_short8) builds (vec_short8){0x8000, ...}: 0x8000 is an int
+  that does not fit short, a narrowing error in braced initialisation.
+- vec_abss(vec_int4) builds (vec_int4){0x80000000, ...}: an unsigned int
+  that does not fit int, the same error.
 
-The restored backend takes vmx2spu.h unchanged from releases/gcc-9.5.0, so
-the 9.5 fix applies here as is.
+Cast the two constants to (signed short) and (signed int), as the header
+already does elsewhere (vec_adds, vec_subs).  The bit patterns are
+unchanged.  GCC 9.5 accepts the narrowing forms, so only the macro fix is
+needed there (gcc-9.5.0 0005).
 ---
 diff --git a/gcc/config/spu/vmx2spu.h b/gcc/config/spu/vmx2spu.h
 --- a/gcc/config/spu/vmx2spu.h
 +++ b/gcc/config/spu/vmx2spu.h
+@@ -79,7 +79,7 @@
+ {
+   vec_short8 minus_a;
+ 
+-  minus_a = spu_add(spu_sub(0, a), (vec_short8)(spu_cmpeq(a, ((vec_short8){0x8000,0x8000,0x8000,0x8000,0x8000,0x8000,0x8000,0x8000}))));
++  minus_a = spu_add(spu_sub(0, a), (vec_short8)(spu_cmpeq(a, ((vec_short8){(signed short)0x8000,(signed short)0x8000,(signed short)0x8000,(signed short)0x8000,(signed short)0x8000,(signed short)0x8000,(signed short)0x8000,(signed short)0x8000}))));
+   return (spu_sel(minus_a, a, spu_cmpgt(a, -1)));
+ }
+ 
+@@ -87,7 +87,7 @@
+ {
+   vec_int4 minus_a;
+ 
+-  minus_a = spu_add(spu_sub(0, a), (vec_int4)(spu_cmpeq(a, ((vec_int4){0x80000000,0x80000000,0x80000000,0x80000000}))));
++  minus_a = spu_add(spu_sub(0, a), (vec_int4)(spu_cmpeq(a, ((vec_int4){(signed int)0x80000000,(signed int)0x80000000,(signed int)0x80000000,(signed int)0x80000000}))));
+   return (spu_sel(minus_a, a, spu_cmpgt(a, -1)));
+ }
+ 
 @@ -2215,7 +2215,7 @@
  
    sat = spu_orc(spu_xor(sign1, sign2), (vec_int4)spu_cmpeq(sum_h, sign2));
