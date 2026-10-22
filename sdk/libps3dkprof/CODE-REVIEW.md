@@ -71,6 +71,7 @@ All six are in `rt_t_counters.c`. Each asserts:
 |---|---|
 | `sdk/include/ps3dk/prof.h` | The API, the types, the enabled and disabled macros, the C++ guard, the SPU `#error`. Not in `sdk/Makefile` HEADERS or SUBLIBS: it serves the isolated host tests only. |
 | `src/pal/pal.h`, `src/pal/pal_host.c` | The PAL interface and the POSIX implementation. Test faults are injected here. |
+| `src/pal/pal_lv2.c` | The LV2 implementation (TARGET-PLAN-r2 section 1, rulings R1-R8): written for review, NOT built and not in SUBLIBS or any install rule. Hook-free (refuses `PS3DK_PROF_TEST_HOOKS`); needs `-DPS3DK_PROF_PAL_LV2` on every object. |
 | `src/core/prof_internal.h` | Structures, atomics, constants, the `ps3dk_prof__` symbol renames, the hook macros. |
 | `src/core/prof_test_hooks.h` | The `PS3DK_PROF_TEST_HOOKS`-only hook table, presets and statistics. |
 | `src/core/prof_core.c` | Init and the setters, threads, zones, frames, the STOP batch, descriptor registration. |

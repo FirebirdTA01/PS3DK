@@ -1,6 +1,6 @@
 /* The ps3dk-prof platform layer: everything the portable core needs from the OS.  Every call that can fail returns
  * 0 on success or a negative value, and the core checks it.  Two implementations: pal_host.c (POSIX, for the host B
- * tests) and pal_lv2.c (LV2, step 3 target half, not yet written: codex approved the host half only). */
+ * tests) and pal_lv2.c (LV2, the step 3 target half: written for review, not yet built or in any SDK library). */
 #ifndef PS3DK_PROF_PAL_H
 #define PS3DK_PROF_PAL_H
 
@@ -36,8 +36,18 @@ typedef struct pal_owner {
     pthread_t t;   /* opaque: compared only with pthread_equal */
 } pal_owner;
 #define PAL_DEFAULT_SINK_DIR "."   /* the capture directory when no sink is set */
+#elif defined(PS3DK_PROF_PAL_LV2)
+#include <pthread.h>
+/* librt mutexes, always created with a checked pthread_mutex_init (TARGET-PLAN-r2 R5). */
+typedef pthread_mutex_t pal_mutex;
+typedef pthread_t pal_thread;
+typedef struct pal_owner {
+    uint64_t id;   /* a sys_ppu_thread_t, u64 in both ABIs */
+    int valid;     /* set only by a successful pal_owner_get: an unset owner is never the caller */
+} pal_owner;
+#define PAL_DEFAULT_SINK_DIR "/dev_hdd0/tmp"   /* PROPOSED, open question in PAL-PREP-r1 */
 #else
-#error "ps3dk prof: only the host PAL exists in this step (define PS3DK_PROF_PAL_HOST)"
+#error "ps3dk prof: define PS3DK_PROF_PAL_HOST or PS3DK_PROF_PAL_LV2"
 #endif
 
 /* Memory: one 128-byte-aligned block at init; pal_free only unwinds a failed init. */
