@@ -1,0 +1,19 @@
+[package]
+name = "ps3dk-prof"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Read, check and report ps3dk-prof capture files (format v1, docs/design/ps3dk-prof-format.md)"
+
+[lib]
+name = "ps3dk_prof"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ps3dk-prof"
+path = "src/main.rs"
+
+[dependencies]
+ps3dk-version.workspace = true

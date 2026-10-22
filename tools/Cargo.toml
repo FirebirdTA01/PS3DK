@@ -9,6 +9,7 @@ members = [
     "sfo",
     "make-sdata",
     "ovis",
+    "ps3dk-prof",
 ]
 # ps3dk-version (the version string every tool prints) is a library and is
 # not listed here: it joins the workspace as a path dependency, and the list

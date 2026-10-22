@@ -2189,6 +2189,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ps3dk-prof"
+version = "0.0.0"
+dependencies = [
+ "ps3dk-version",
+]
+
+[[package]]
 name = "ps3dk-ui"
 version = "0.0.0"
 dependencies = [
