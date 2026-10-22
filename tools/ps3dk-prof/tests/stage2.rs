@@ -993,3 +993,52 @@ fn read_alone_accepts_a_rule_4_case_that_load_refuses() {
         Outcome::Analysed(a) => panic!("load must refuse it, got {:?}", a.verdict),
     }
 }
+
+// ---- producer effects a file can show (consistency only; producer behaviour itself is stage 3) ------------------------
+
+#[test]
+fn acked_entry_with_seq_limit_and_an_unadmitted_stop_batch_is_consistent() {
+    // produced_count had reached 2^63 with two spans open: the STOP batch of k = 2 ENDs was not admitted, so
+    // refused_count = k, open_spans = k, SEQ_LIMIT is set and no TRUNCATED_AT_STOP END was written.
+    let recs = seqd(0, [vec![gap(0, P63 - 5)], zone(0, 0, 0, 100, 1, 0), zone(0, 1, 1, 150, 2, 1)].concat());
+    let mut l = lane(1, recs);
+    l.limit = true;
+    l.refused = 2;
+    assert_eq!(l.fin().produced, P63);
+    let s = scenario(vec![l]);
+    let mut t = s.trailer_struct();
+    t.fins[0].open = 2;
+    let mut f = s.file();
+    let i = f.find(T_TRAILER);
+    f.chunks[i] = chunk(T_TRAILER, t.payload());
+    let (a, why) = incomplete(&f.bytes());
+    assert_eq!(why, vec![Incomplete::SeqLimit]);
+    let e = a.capture.lanes[&1].final_entry.as_ref().unwrap();
+    assert_eq!((e.state, e.open_spans, e.refused_count), (2, 2, 2));
+    let spans: Vec<_> = a.capture.spans.iter().filter(|s| s.incarnation == 1).collect();
+    assert_eq!(spans.len(), 2);
+    assert!(spans.iter().all(|s| s.is_open() && !s.truncated_at_stop), "{spans:?}");
+}
+
+#[test]
+fn retired_entry_with_open_spans_2_and_two_open_spans_in_the_records() {
+    // thread_end ran with two spans open: it wrote no END, so both stay OPEN (censored) in the file.
+    let recs = seqd(0, [zone(0, 0, 0, 100, 1, 0), zone(0, 1, 1, 150, 2, 1)].concat());
+    let mut l = lane(1, recs);
+    l.state = 1;
+    let mut fin = l.fin();
+    fin.open = 2;
+    let mut f = scenario(vec![l]).file();
+    let i = f.find(T_RETIRED);
+    f.chunks[i] = chunk(T_RETIRED, retired_payload(&[fin]));
+    let a = complete(&f.bytes());
+    assert!(a.lane_valid(1));
+    let e = a.capture.lanes[&1].final_entry.as_ref().unwrap();
+    assert_eq!((e.state, e.open_spans), (1, 2));
+    let spans: Vec<_> = a.capture.spans.iter().filter(|s| s.incarnation == 1).collect();
+    assert_eq!(spans.len(), 2);
+    assert!(spans.iter().all(|s| s.is_open() && s.is_censored()));
+    assert_eq!(a.zone("zoneA").unwrap().label.as_deref(), Some("completed instances only: 1 censored of 1"));
+    let text = report::render(&a);
+    assert_eq!(text.lines().filter(|l| l.contains("duration unknown (censored)") && l.contains("OPEN")).count(), 2);
+}

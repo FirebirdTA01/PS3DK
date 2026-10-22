@@ -115,49 +115,67 @@ B = [
     ("Spans N", "an owner span with a GAP inside it gives N unknown", ["owner_span_with_gap_inside_n_unknown"]),
 ]
 
-# Review additions (codex, 2026-10-21 22:41, 22:42 and 23:00): rules and behaviours the stage-2 reviews found missing.
-R = [
-    ("1 exact counts", "written, dropped, refused and regerr above their 2^63 representation ceiling are MALFORMED",
+# Section 10 stage-2 groups added by the reviews of 2026-10-21 (22:41, 22:42, 23:00, 23:13).
+B += [
+    ("Exact counts and open_spans",
+     "written, dropped, refused and regerr above 2^63 MALFORMED (state-3 UNKNOWN written_count included); "
+     "dropped, refused and regerr at 2^63 accepted",
      ["malformed.rs: written_count_over_2_pow_63", "malformed.rs: dropped_count_over_2_pow_63",
       "malformed.rs: refused_count_over_2_pow_63", "malformed.rs: regerr_count_over_2_pow_63",
-      "malformed.rs: state3_written_count_over_2_pow_63"]),
-    ("1 exact counts", "2^63 is accepted (written_count = 2^63 cannot be built: it must equal the records written)",
-     ["dropped_count_2_pow_63_accepted", "refused_count_2_pow_63_accepted", "regerr_count_2_pow_63_accepted"]),
-    ("1 open_spans", "an active-stack snapshot: 256 accepted, 257 MALFORMED, UNKNOWN accepted in state 3",
+      "malformed.rs: state3_written_count_over_2_pow_63", "dropped_count_2_pow_63_accepted",
+      "refused_count_2_pow_63_accepted", "regerr_count_2_pow_63_accepted"]),
+    ("Exact counts and open_spans", "open_spans = 256 accepted, 257 MALFORMED, UNKNOWN in state 3 accepted",
      ["open_spans_256_accepted", "malformed.rs: open_spans_257_is_malformed", "state3_open_spans_unknown_accepted"]),
-    ("1 REGERR", "regerr_count must cover the REGERR records written; a nonzero count invalidates the lane",
+    ("Exact counts and open_spans",
+     "a REGERR record with regerr_count 0 MALFORMED; with regerr_count 1 accepted and the lane INVALID",
      ["malformed.rs: regerr_record_with_regerr_count_0", "regerr_record_with_nonzero_regerr_count_makes_lane_invalid"]),
-    ("2 FRAME ids", "no saturation: repeated after a GAP, u64::MAX, above its own seq; the maximum legal id",
+    ("FRAME ids and the frame clock",
+     "a frame id repeated after a GAP, of u64::MAX, or above its own seq MALFORMED; id = seq at 2^63 - 1 accepted",
      ["malformed.rs: frame_id_repeated_after_gap", "malformed.rs: frame_id_u64_max_after_gap",
       "malformed.rs: frame_id_one_above_its_seq", "frame_id_equal_to_its_seq_at_the_maximum_is_accepted"]),
-    ("3 no saturated value", "exact totals; unavailable (never 0) durations in analysis and report",
-     ["nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_mean",
-      "clock_anomaly_span_duration_is_unavailable_not_zero",
-      "parent_of_an_anomalous_child_has_an_unavailable_exclusive_duration"]),
-    ("3 frame clock", "decreasing FRAME tb invalidates the owner; frame elapsed refused, no number in the report",
+    ("FRAME ids and the frame clock",
+     "decreasing FRAME tb: owner INVALID, frame elapsed refused owner invalid, no number in the report",
      ["frame_clock_anomaly_invalidates_the_owner_and_refuses_frame_elapsed"]),
-    ("4 A/B policy", "clock, ABI and scope refusals; recorded differences; valid-lane scope; invalid-only versus absent",
+    ("Durations", "nested spans of 2^63 + 2 and 2^63 ticks: exact zone total and mean",
+     ["nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_mean"]),
+    ("Durations", "an END before its BEGIN: unavailable, never 0, in analysis and report; its parent's exclusive "
+     "duration unavailable",
+     ["clock_anomaly_span_duration_is_unavailable_not_zero",
+      "parent_of_an_anomalous_child_has_an_unavailable_exclusive_duration"]),
+    ("Slots", "a slot held by a live incarnation, or reused before the holder's RETIRED entry, MALFORMED; "
+     "reuse after RETIRED accepted",
+     ["malformed.rs: slot_already_live", "malformed.rs: slot_reused_before_its_incarnation_retired",
+      "slot_reuse_after_its_incarnation_retired_is_valid"]),
+    ("Short header", "valid prefixes torn; a bad constrained byte at every cut point MALFORMED; 15 bytes with "
+     "nonzero file_flags MALFORMED, not torn",
+     ["malformed.rs: short_header_valid_prefix_at_every_length_is_torn",
+      "malformed.rs: short_header_bad_byte_at_every_cut_point",
+      "malformed.rs: fifteen_byte_header_with_nonzero_flags_byte_is_not_torn"]),
+    ("A/B", "clock, ABI and scope refused; build/compiler/flags and source line recorded; valid-lane scope; "
+     "invalid-only versus absent",
      ["compare_refuses_a_different_clock_frequency", "compare_refuses_an_abi_mismatch",
       "compare_refuses_a_descriptor_scope_mismatch", "compare_records_build_compiler_and_flags_differences",
       "compare_records_a_source_line_difference", "compare_exposes_the_valid_lane_scope",
       "compare_distinguishes_a_key_only_in_invalid_lanes_from_an_absent_key"]),
-    ("4 A/B workload", "a different workload or app is refused; the explicit override is descriptive, never Compared",
+    ("A/B", "a different workload or app refused; allow_cross_workload gives DescriptiveCrossWorkload, never "
+     "Compared; a same-workload control Compared",
      ["compare_refuses_a_different_workload_on_the_same_build", "compare_refuses_a_different_app",
       "compare_cross_workload_override_is_descriptive_never_compared", "compare_same_workload_control_is_compared"]),
-    ("5 slots", "one live incarnation per slot; reuse after RETIRED is valid",
-     ["malformed.rs: slot_already_live", "malformed.rs: slot_reused_before_its_incarnation_retired",
-      "slot_reuse_after_its_incarnation_retired_is_valid"]),
-    ("6 short header", "every constrained byte of a cut header is checked",
-     ["malformed.rs: short_header_valid_prefix_at_every_length_is_torn",
-      "malformed.rs: short_header_bad_byte_at_every_cut_point",
-      "malformed.rs: fifteen_byte_header_with_nonzero_flags_byte_is_not_torn"]),
-    ("16 read versus load", "read is structural; check, report and A/B use the whole-file verdict",
+    ("Whole-file verdict", "read accepts a rule-4 case that load refuses; check and report exit 2; check exits 0 "
+     "and 1",
      ["read_alone_accepts_a_rule_4_case_that_load_refuses",
       "cli.rs: check_reports_malformed_for_a_rule_4_case_the_structural_pass_accepts",
       "cli.rs: report_also_refuses_the_rule_4_case", "cli.rs: check_exit_status_for_complete_and_incomplete"]),
+    ("Producer effects a file can show",
+     "ACKED with SEQ_LIMIT and an unadmitted STOP batch: refused >= k, open_spans = k, k spans OPEN, no "
+     "TRUNCATED_AT_STOP END; accepted",
+     ["acked_entry_with_seq_limit_and_an_unadmitted_stop_batch_is_consistent"]),
+    ("Producer effects a file can show",
+     "RETIRED with open_spans = 2 and 2 spans OPEN in the records; accepted, reported OPEN (censored)",
+     ["retired_entry_with_open_spans_2_and_two_open_spans_in_the_records"]),
 ]
 
-for g, b, ts in B + R:
+for g, b, ts in B:
     for t in ts or []:
         name = t.split(': ')[-1]
         if name not in st and name not in mt and name not in ct:
@@ -167,7 +185,7 @@ md = [
     "# ps3dk-prof spec traceability map (stage 2, reader)",
     "",
     "A TRACEABILITY MAP, not a proof of coverage: it links each bullet of docs/design/ps3dk-prof-format.md section 10,",
-    "\"Stage 2, reader\", each review addition, and each `Rule` variant to the tests that exercise it.  The bullet",
+    "\"Stage 2, reader\", and each `Rule` variant to the tests that exercise it.  The bullet",
     "lists are written by hand and the rule list is the `Rule` enum, so a normative rule with no `Rule` variant would",
     "not appear here.  Generated by tests/gen_spec_coverage.py, which refuses a `Rule` variant with no asserting test",
     "and a mapped test name that does not exist.  Stage 3 and later bullets are not part of stage 2.",
@@ -182,15 +200,6 @@ for g, b, ts in B:
     md.append('| %s | %s | %s |' % (g, b, cell))
 md += [
     "",
-    "## Review additions (%d) -> tests/stage2.rs unless marked" % len(R),
-    "",
-    "| item | behaviour | tests |",
-    "|---|---|---|",
-]
-for g, b, ts in R:
-    md.append('| %s | %s | %s |' % (g, b, ', '.join('`%s`' % t for t in ts)))
-md += [
-    "",
     "## Rule variants (%d) -> tests (%d in malformed.rs, %d in stage2.rs, %d in cli.rs)"
     % (len(rules), len(mt), len(st), len(ct)),
     "",
@@ -200,4 +209,4 @@ md += [
 for r in rules:
     md.append('| `%s` | %s |' % (r, ', '.join('`%s`' % n for n in cov[r])))
 (C / 'tests/SPEC-COVERAGE.md').write_bytes(('\n'.join(md) + '\n').encode())
-print('%d bullets, %d review additions, %d rules, %d + %d + %d tests' % (len(B), len(R), len(rules), len(mt), len(st), len(ct)))
+print('%d bullets, %d rules, %d + %d + %d tests' % (len(B), len(rules), len(mt), len(st), len(ct)))

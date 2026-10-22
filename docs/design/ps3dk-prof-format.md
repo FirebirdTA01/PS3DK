@@ -218,6 +218,16 @@ These definitions apply to every case below:
     sequence is assigned, `produced_count` stays 2^63 - 1, and SEQ_LIMIT is set.
   - So `produced_count` is at most 2^63, and the reader treats a larger value as MALFORMED.
   - Once SEQ_LIMIT is set, the incarnation records nothing more. Its open spans end OPEN.
+- **STOP batch admission (sequence-admitted WHOLE).** A STOP batch of k ENDs (section 7) is one admission decision:
+  - It is ADMITTED only if k <= 2^63 - `produced_count` and SEQ_LIMIT was not set earlier.
+  - **Not admitted:** no sequence is assigned, and `produced_count` and `dropped_count` stay unchanged. The k logical
+    ENDs are REFUSED (`refused_count` += k), SEQ_LIMIT is set, and the `open_spans` snapshot taken before the batch
+    (k) is kept. The stack is then cleared and the ack stored as usual. The k spans therefore stay OPEN in the
+    records, with no TRUNCATED_AT_STOP END.
+  - **Admitted but the ring lacks space:** all k sequences are assigned, then all k ENDs are DROPPED under the loss
+    rules above (`dropped_count` += k, with the GAP or terminal-tail accounting).
+  - **k = 0:** nothing is emitted, and SEQ_LIMIT is NOT newly set.
+  - There is never a partial sequence assignment or a partial publication of a STOP batch.
 
 ### 5.2 Depth
 
@@ -328,8 +338,8 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   consistency rules below. `refused_count` and `regerr_count` may sit at the ceiling, subject to those rules.
 - **`open_spans` is an ACTIVE-STACK snapshot, not a cumulative counter.** It is the number of spans open on the
   producer's stack at one defined point:
-  - for an ACKED entry (state 2): immediately before its STOP batch, which is the number of spans that batch closes
-    with TRUNCATED_AT_STOP (section 7);
+  - for an ACKED entry (state 2): immediately before its STOP batch, which is the k spans that batch covers, whether
+    the batch is then published, dropped into loss or refused (sections 5.1 and 7);
   - for a RETIRED entry (state 1): when `ps3dk_prof_thread_end()` ran, before it cleared the stack (section 7).
   - Depth is capped at 255 (section 5.2: a BEGIN at depth 256 is REFUSED and not pushed), so at most 256 spans can be
     open: `open_spans` <= 256, or MALFORMED. In state 3 it is UNKNOWN, as every non-exact count there.
@@ -410,9 +420,12 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     every span still open on its stack, innermost first, with END + TRUNCATED_AT_STOP and `tb` = now.
   - This includes the span whose END call observed the latch. A span counts as completed only if its END was emitted
     before the latch was observed.
-  - The batch is reserved and published as a whole, or dropped into loss.
+  - The batch is sequence-admitted WHOLE (section 5.1): either all k ENDs get sequences or none does. An admitted
+    batch is reserved and published as a whole, or dropped as a whole into loss. A batch that is not admitted is
+    refused as a whole (`refused_count` += k, SEQ_LIMIT set). A batch of k = 0 emits nothing.
 - **The ack is the LAST write.** The producer completes the following steps, in this order:
-  1. publish the STOP batch, or drop it into loss;
+  1. take the `open_spans` snapshot (the k spans the batch closes), then admit the STOP batch and publish it, drop it
+     into loss, or refuse it (section 5.1);
   2. update its counters;
   3. clear its stack;
   4. set its thread-local "acked" flag;
@@ -420,12 +433,17 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   - Nothing the incarnation owns changes after that store: not its ring, its control block, its counters or its stack.
   - Its later profiler calls only READ the latch and its own thread-local flag, and return REFUSED silently.
   - A reader that has acquire-loaded the ack therefore sees final values, with no race against a later clear.
-- **Retire follows the same rule.** `ps3dk_prof_thread_end()`, in this order:
-  1. publish any final event;
+- **Retire follows the same last-write rule.** `ps3dk_prof_thread_end()` on an incarnation that has NOT observed STOP,
+  in this order:
+  1. snapshot the active stack: the number of spans open on it is `open_spans`;
   2. update the counters;
-  3. clear the stack;
+  3. clear the stack, WITHOUT synthesizing any END: the outstanding spans stay OPEN (censored) in the records;
   4. set the thread-local "retired" flag;
   5. store the retired word with release, as its last write.
+  - **`thread_end` as the first call to observe STOP:** it follows the STOP batch and ack protocol above instead (its
+    open spans get TRUNCATED_AT_STOP ENDs if the batch is admitted), and the incarnation ends ACKED, not RETIRED.
+  - **`thread_end` on an already-ACKED incarnation:** it is REFUSED silently, like every call after the ack, and changes
+    no final state and no counter. The incarnation stays ACKED.
   - Later calls from that thread are REFUSED silently. The exception is `ps3dk_prof_thread_begin()` before the latch,
     which registers a NEW incarnation.
   - A refused call from a retired thread reads and writes ONLY its thread-local state. It never goes through its old
@@ -595,6 +613,10 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
 
 ## 10. Test obligations added by this spec (assigned to plan stages)
 
+Stage 2 tests are host tests of ENCODED FILES: they show what a reader accepts, refuses and reports for given bytes,
+including files shaped like a producer's output. They cannot prove how a producer behaves. Producer retirement,
+atomic STOP admission and publication, and post-ack immutability are proved only by the stage 3 runtime tests.
+
 - **Stage 2, reader:**
   - every MALFORMED rule, one fixture each;
   - the torn tail, giving INCOMPLETE;
@@ -661,6 +683,44 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     - an owner span crossing two FRAMEs gives "spans 3 frames";
     - a tokened worker span gives "spans N: unknown";
     - an owner span with a GAP inside it gives N unknown.
+  - **Exact counts and `open_spans`:**
+    - `written_count`, `dropped_count`, `refused_count` and `regerr_count` above 2^63, MALFORMED, including a state-3
+      UNKNOWN `written_count`; `dropped_count`, `refused_count` and `regerr_count` at 2^63, accepted;
+    - `open_spans` = 256 accepted, 257 MALFORMED, UNKNOWN in state 3 accepted;
+    - a REGERR record with `regerr_count` 0, MALFORMED; a REGERR record with `regerr_count` 1, accepted and the lane
+      INVALID.
+  - **FRAME ids and the frame clock:**
+    - a frame id repeated after a GAP, a frame id of u64::MAX, and a frame id above its own seq, each MALFORMED;
+    - a frame id equal to its seq at 2^63 - 1, accepted;
+    - two FRAMEs of one owner with decreasing `tb`: the owner is INVALID (CLOCK_ANOMALY), its frame elapsed is refused
+      "owner invalid", and the report prints no number for it.
+  - **Durations:**
+    - two nested spans of one zone, of 2^63 + 2 and 2^63 ticks: the zone total and mean are exact;
+    - an END before its BEGIN: the duration is unavailable, never 0, in the analysis and in the report;
+    - the parent of such a child: its exclusive duration is unavailable.
+  - **Slots:**
+    - a THREADS entry on a slot held by a live incarnation, and a reuse before the holder's RETIRED entry, each
+      MALFORMED;
+    - a reuse after the holder's RETIRED entry, accepted.
+  - **Short header:**
+    - a valid prefix at every length 0 to 15 is a torn tail;
+    - a bad constrained byte at every cut point 1 to 15 is MALFORMED (magic, major or file_flags);
+    - 15 bytes with a nonzero file_flags byte are MALFORMED, not torn.
+  - **A/B:**
+    - a different clock frequency, a different ABI and a different descriptor scope are refused;
+    - build id, compiler and flags differences, and a source-line difference, are recorded;
+    - the valid-lane scope is exposed;
+    - a key only in invalid lanes is told apart from an absent key;
+    - a different workload or app is refused by default; with `allow_cross_workload` the comparison is
+      DescriptiveCrossWorkload and never Compared; a same-workload control is Compared.
+  - **Whole-file verdict:** the structural pass accepts a rule-4 case that the whole-file verdict refuses; `check` and
+    `report` exit 2 on it; `check` exits 0 on a COMPLETE file and 1 on an INCOMPLETE one.
+  - **Producer effects a file can show** (consistency only; producer behaviour itself is stage 3):
+    - an ACKED entry with SEQ_LIMIT whose STOP batch was not admitted: `refused_count` >= k, `open_spans` = k, the k
+      spans OPEN in the records and no TRUNCATED_AT_STOP END. Accepted;
+    - a RETIRED entry with `open_spans` = 2 and 2 spans OPEN in the records. Accepted, with the spans reported OPEN
+      (censored).
+    - Neither fixture cross-checks `open_spans` against the records (section 6).
 - **Stage 3, runtime on the host build:**
   - APP mode: drain from a non-designated thread returns EPERM, and reentrant and concurrent drains return EBUSY;
   - THREAD mode: a second shutdown returns EALREADY;
@@ -698,6 +758,20 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
       - B's ring, counters and control block are unchanged by A's calls (checked under TSan);
       - A's `thread_begin` before the latch gets a NEW incarnation id.
     - **No release symbol:** `nm` of both ABI libraries shows no release symbol.
+  - **STOP admission and retirement** (only these runtime tests can prove the producer's side):
+    - **exact fit:** k = 2^63 - `produced_count`: the batch is admitted, its last END takes seq 2^63 - 1, and
+      `produced_count` becomes 2^63;
+    - **one slot short:** k = 2^63 - `produced_count` + 1: refused whole; no sequence assigned; `produced_count` and
+      `dropped_count` unchanged; `refused_count` += k; SEQ_LIMIT set; `open_spans` = k;
+    - **a prior SEQ_LIMIT:** the batch is refused whole even when k would fit;
+    - **k = 0:** nothing is emitted, and SEQ_LIMIT is not newly set;
+    - **no partial assignment:** a test hook observes the sequence counter and the ring at every step of a STOP batch;
+      either all k sequences are assigned or none is, and either all k ENDs are published or none is;
+    - **admitted with a full ring:** all k sequences are assigned and all k ENDs dropped;
+    - **retire before STOP with open spans:** `thread_end` with n open spans gives `open_spans` = n, writes no END, and
+      the n spans are OPEN in the file;
+    - **`thread_end` observing STOP:** it runs the STOP batch and ack protocol, and the incarnation ends ACKED;
+    - **an acked thread calling `thread_end`:** refused; the final entry and every counter are unchanged.
     - **Frame tokens:** a token taken before the first frame is NONE; a refused FRAME leaves `current_frame` unchanged;
       a dropped FRAME still assigns its id, so a later token resolves as UNRESOLVED-LOSS.
 - **Stage 5, overhead and cross-check:** the barrier and anti-DCE inspection of section 5.5.
