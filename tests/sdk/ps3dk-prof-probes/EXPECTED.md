@@ -7,6 +7,16 @@
 - **What they can establish:** the compiler's lowering of the same builtins under the stated flags. The actual-object
   checks (PROBE-O-actual, PROBE-T-actual) come after pal_lv2 (ordering step 3).
 
+## How to read the expected-lowering tables (codex 2026-10-22 03:21)
+
+- **Shapes, not spellings:** the tables below give expected SHAPES, not one required instruction spelling. A
+  different instruction sequence with the same ordering and atomicity effect (for example `sync` where `lwsync` is
+  listed, or another acquire idiom) is NOT a failure by itself. Equivalent sequences need a semantic review, recorded
+  per function, before they are accepted or reported as findings.
+- **Two kinds of proof, kept separate:** what these STANDALONE fixtures show is a statement about the compiler's
+  lowering of the builtins under the pinned flags. It is not evidence about the actual profiler objects. The
+  actual-object checks (PROBE-O-actual, PROBE-T-actual) are separate, later evidence.
+
 ## Build matrix (to be pinned by the request, not here)
 
 - **Compiler:** GCC 16 `powerpc64-ps3-elf-gcc` only (R6). GCC 12.4 stays NOT RUN.

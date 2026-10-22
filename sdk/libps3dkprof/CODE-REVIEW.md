@@ -28,7 +28,7 @@ Line numbers are for the files as delivered. `core` means `src/core/prof_core.c`
 | refused-begin ids | `zone_begin` core:635 | The begin is counted, the incarnation exhausts, and the handle is INERT. This is F1's "counts nothing" corrected by the boundary rule: the refusal is still counted when that is exact. |
 | frame ids | `ps3dk_prof_frame` core:717 | Exhaust and refuse. Unreachable, because a frame id is at most its own seq. |
 | sequences | `seq_admit` core:237 | Unchanged format 5.1 rule: refused whole, SEQ_LIMIT. |
-| incarnation ids | `thread_begin_impl` core:459 | `next_incarnation = 0` after UINT32_MAX. Later registrations get EFULL and `unregistered_refusals` goes up (5.4). |
+| incarnation ids | `thread_begin_impl` core:468 | `next_incarnation = 0` after UINT32_MAX. Later registrations get EFULL and `unregistered_refusals` goes up (5.4). |
 
 **Why this is never a clean claim.**
 - A refusal or registration error that could not be counted only happens after `limit` is set: it is set in the same call.
@@ -71,7 +71,7 @@ All six are in `rt_t_counters.c`. Each asserts:
 |---|---|
 | `sdk/include/ps3dk/prof.h` | The API, the types, the enabled and disabled macros, the C++ guard, the SPU `#error`. Not in `sdk/Makefile` HEADERS or SUBLIBS: it serves the isolated host tests only. |
 | `src/pal/pal.h`, `src/pal/pal_host.c` | The PAL interface and the POSIX implementation. Test faults are injected here. `pal.h` is the shared header every core, drain and PAL object includes, and it refuses with `#error` both PAL macros together, neither, and `PS3DK_PROF_PAL_LV2` with `PS3DK_PROF_TEST_HOOKS` (codex 03:21). Planned preprocess checks, not run: `tests/sdk/ps3dk-prof-probes/pal-select/`. The guard does not prove that every object of a build used the SAME branch: the frozen build request must bind every core, drain and PAL compile invocation and the installed header and provider identities. |
-| `src/pal/pal_lv2.c` | The LV2 implementation (TARGET-PLAN-r2 section 1, rulings R1-R8): written for review, NOT built and not in SUBLIBS or any install rule. Hook-free (refuses `PS3DK_PROF_TEST_HOOKS`); needs `-DPS3DK_PROF_PAL_LV2` on every object. |
+| `src/pal/pal_lv2.c` | The LV2 implementation (TARGET-PLAN-r2 section 1, rulings R1-R8): written for review, NOT built and not in SUBLIBS or any install rule. Hook-free (refuses `PS3DK_PROF_TEST_HOOKS`); needs `-DPS3DK_PROF_PAL_LV2` on every object. Default sink directory `/dev_hdd0/tmp` (accepted, codex 03:21), with exclusive create and the configurable sink kept. NOT every librt return is checked: `pthread_attr_destroy` in `pal_thread_create` is deliberately unchecked (see the note there). The `uintptr_t` low-bit alignment check in `pal_alloc` is accepted; the provider, link-map, alignment and usable-memory gates stay OPEN until a frozen target request. |
 | `src/core/prof_internal.h` | Structures, atomics, constants, the `ps3dk_prof__` symbol renames, the hook macros. |
 | `src/core/prof_test_hooks.h` | The `PS3DK_PROF_TEST_HOOKS`-only hook table, presets and statistics. |
 | `src/core/prof_core.c` | Init and the setters, threads, zones, frames, the STOP batch, descriptor registration. |
@@ -167,7 +167,7 @@ All six are in `rt_t_counters.c`. Each asserts:
 | r2 4 atomics | `prof_internal.h` macros. GCC `__atomic` builtins only; lock-free is `_Static_assert`ed. |
 | r2 7 / Q9 publication boundaries and caps | `commit` core:285; `drain_ring` drain:296; `take` core:846 |
 | r2 8 / Q8 drain thread | `p_drain_main` drain:642: the start gate, one sleep slice, then the wake check |
-| Q10 auto-registration | `auto_register` core:494 (opt-in; never for acked or retired TLS) |
+| Q10 auto-registration | `auto_register` core:502 (opt-in; never for acked or retired TLS; an OS id-read failure gives an INERT zone and consumes nothing, `rt_auto_register_os_id_failure_then_recovery`) |
 | Hooks (r2 9 + E1) | `HOOK()` sites: core:297, 403, 536, 558, 567; drain:385, 413, 488 |
 
 ### Decisions the contract left open
