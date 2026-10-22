@@ -26,6 +26,10 @@
 # writer_a at its RACE-A line and writer_b at its RACE-B line; the NEGATIVE control (mutex) must exit 0 with no
 # sanitizer report.  A failed control fails the variant and its 97 rows are NOT RUN (detection not proven).
 # Plain and asan launches are unchanged.
+# The TSan launch path (rrun, xrun, the setarch identity check, the sanitizer probes, the detection controls and the
+# variant admission) lives in driver-tsan.sh, sourced below.  It does not rely on errexit: every launch and evidence
+# record is checked, a pre-launch record failure prevents the launch, and any record failure is a FAIL (a recorder
+# failure, counted separately), never a silent success.  driver-tsan-selftest.sh exercises it with fake children.
 # Exits non-zero on any failure.  Never runs a cross compiler, make, cmake or wsl.
 set -euo pipefail
 
@@ -60,6 +64,16 @@ ok() { pass=$((pass + 1)); echo "PASS $*"; }
 bad() { fail=$((fail + 1)); echo "FAIL $*"; }
 skp() { skip=$((skip + 1)); echo "SKIP $*"; }
 
+# The TSan launch path's own self-test (driver-tsan-selftest.sh, fake children only: no compiler, no TSan) runs first,
+# so a recorder that can lose a failure is caught before anything is built.
+dts=0
+bash "$here/driver-tsan-selftest.sh" "$out/driver-tsan-selftest" >"$out/driver-tsan-selftest.out" 2>&1 || dts=$?
+if [ "$dts" = 0 ]; then
+    ok "driver-tsan selftest (driver-tsan-selftest.out)"
+else
+    bad "driver-tsan selftest exit $dts (driver-tsan-selftest.out)"
+fi
+
 # clang warns about side effects inside sizeof (-Wunevaluated-expression); unevaluated side effects are the point here.
 noeval() { local v; v="$("$1" --version 2>&1 || true)"; case "$v" in *[Cc]lang*) echo -Wno-unevaluated-expression ;; esac; }
 cc_noeval="$(noeval "$CC")"
@@ -73,15 +87,19 @@ else
     reader=(cargo run -q --manifest-path "$root/tools/Cargo.toml" -p ps3dk-prof -- check)
 fi
 
-# check_capture <path> <want> <label>
+# check_capture <path> <want> <label>: the reader's streams and exit go through rrun, so a record that cannot be
+# written is a FAIL (never a verdict).
 check_capture() {
-    local got=0 txt="$1.check.txt"
-    "${reader[@]}" "$1" >"$txt" 2>&1 || got=$?
-    echo "$got" >"$1.check.rc"
-    if [ "$got" = "$2" ]; then
+    local r=0 txt="$1.check.txt"
+    rrun "$txt" "$1.check.err" "$1.check.rc" "${reader[@]}" "$1" || r=$?
+    if [ "$r" != 0 ]; then
+        bad "$3: the reader verdict could not be recorded (status $r, $1.check.*)"
+        return 1
+    fi
+    if [ "$rrc" = "$2" ]; then
         return 0
     fi
-    bad "$3: reader exit $got, want $2: $(head -n 1 "$txt")"
+    bad "$3: reader exit $rrc, want $2: $(head -n 1 "$txt") $(head -n 1 "$1.check.err")"
     return 1
 }
 
@@ -91,12 +109,17 @@ declare -A vflags=([plain]="" [asan]="-fsanitize=address,undefined -fno-sanitize
 variants=()
 
 build_variant() {
-    local v="$1" dir="$out/build-$v" s o
+    local v="$1"
+    local dir="$out/build-$v" s o   # a separate local: in one `local`, $v would expand before v is set
     local extra
-    read -r -a extra <<<"${vflags[$v]}"
+    # Called as `build_variant "$v" || rc=$?`, so errexit is off in here: every step is checked explicitly.
+    if ! read -r -a extra <<<"${vflags[$v]}"; then
+        recorder "build $v: cannot read the variant flags"
+        return 1
+    fi
     local cflags=(-std=c11 -O1 -g -pthread -DPS3DK_PROF=1 -DPS3DK_PROF_PAL_HOST -DPS3DK_PROF_TEST_HOOKS "${inc[@]}" "${warn[@]}" "${extra[@]}")
     local objs=()
-    mkdir -p "$dir"
+    mkd "$dir" || return 1
     for s in "${lib_src[@]}" "${test_c[@]}"; do
         o="$dir/$s.o"
         "$CC" "${cflags[@]}" -c "$(src_of "$s")" -o "$o" 2>"$dir/$s.log" || { cat "$dir/$s.log"; return 1; }
@@ -109,80 +132,13 @@ build_variant() {
         { cat "$dir/link.log"; return 1; }
 }
 
-# The TSan launch wrapper.  xrun <prefix> <stdout> <stderr> <rc-file> <timeout-s> <cmd...> runs
-# `timeout <s> <setarch> x86_64 -R <cmd...>` and keeps <prefix>.argv (the argv as executed, one argument per line),
-# <prefix>.env (the environment), the rc and both streams; the rc is also left in xrc.  It is the only way a
-# TSan-instrumented executable is started.
-setarch=""
-xrc=0
-xrun() {
-    local p="$1" so="$2" se="$3" rf="$4" t="$5"
-    shift 5
-    local argv=(timeout "$t" "$setarch" x86_64 -R "$@")
-    printf '%s\n' "${argv[@]}" >"$p.argv"
-    env >"$p.env"
-    xrc=0
-    "${argv[@]}" >"$so" 2>"$se" || xrc=$?
-    echo "$xrc" >"$rf"
-}
-
-# setarch for the TSan wrapper: resolved with `command -v`, its path, realpath, version and digest recorded in
-# setarch/, and the personality call itself checked once (`setarch x86_64 -R true`).  Any failure: no TSan launch.
-tsan_wrapper_ok() {
-    local dir="$out/setarch" rc=0
-    mkdir -p "$dir"
-    setarch="$(command -v setarch || true)"
-    printf '%s\n' "${setarch:-MISSING}" >"$dir/path.txt"
-    [ -n "$setarch" ] || return 1
-    readlink -f "$setarch" >"$dir/realpath.txt" 2>&1 || rc=$?
-    echo "$rc" >"$dir/realpath.rc"
-    rc=0
-    sha256sum "$setarch" >"$dir/sha256.txt" 2>&1 || rc=$?
-    echo "$rc" >"$dir/sha256.rc"
-    rc=0
-    "$setarch" --version >"$dir/version.txt" 2>&1 || rc=$?
-    echo "$rc" >"$dir/version.rc"
-    rc=0
-    "$setarch" x86_64 -R true >"$dir/personality-check.log" 2>&1 || rc=$?
-    echo "$rc" >"$dir/personality-check.rc"
-    [ "$rc" = 0 ]
-}
-
-# The probe keeps its compile and run exit codes and diagnostics in probe-<v>/ (compile.rc/.log, run.rc/.log; the tsan
-# probe runs through xrun: run.argv/.env/.stdout/.stderr/.rc).
-sanitizer_links() {
-    local v="$1" dir="$out/probe-$v" extra rc=0
-    read -r -a extra <<<"${vflags[$v]}"
-    mkdir -p "$dir"
-    printf 'int main(void){return 0;}\n' >"$dir/p.c"
-    "$CC" "${extra[@]}" "$dir/p.c" -o "$dir/p" >"$dir/compile.log" 2>&1 || rc=$?
-    echo "$rc" >"$dir/compile.rc"
-    [ "$rc" = 0 ] || return 1
-    if [ "$v" = tsan ]; then
-        xrun "$dir/run" "$dir/run.stdout" "$dir/run.stderr" "$dir/run.rc" 30 "$dir/p"
-        [ "$xrc" = 0 ]
-        return
-    fi
-    "$dir/p" >"$dir/run.log" 2>&1 || rc=$?
-    echo "$rc" >"$dir/run.rc"
-    [ "$rc" = 0 ]
-}
+# shellcheck source=driver-tsan.sh
+. "$here/driver-tsan.sh"
 
 # Why each variant's tests did not run, when they did not ("" = built).
 declare -A notbuilt=()
 for v in plain asan tsan; do
-    if [ "$v" = tsan ] && ! tsan_wrapper_ok; then
-        bad "build tsan: setarch is missing or the ADDR_NO_RANDOMIZE personality was refused (setarch/)"
-        notbuilt[$v]="setarch wrapper unavailable (setarch/)"
-        continue
-    fi
-    if [ "$v" != plain ] && ! sanitizer_links "$v"; then
-        if [ "${REQUIRE_SANITIZERS:-0}" = 1 ]; then
-            bad "build $v: the compiler cannot build and run $v programs (probe-$v/)"
-        else
-            skp "build $v: the compiler cannot build and run $v programs (probe-$v/)"
-        fi
-        notbuilt[$v]="sanitizer probe failed (probe-$v/)"
+    if ! admit_variant "$v"; then
         continue
     fi
     echo "== building $v"
@@ -202,72 +158,11 @@ done
 
 export ASAN_OPTIONS="halt_on_error=1:abort_on_error=0:detect_leaks=1"
 export UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1"
-# exitcode is declared explicitly: the positive TSan control must exit with exactly this value.
-tsan_exitcode=66
-export TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1:detect_deadlocks=1:exitcode=$tsan_exitcode"
+# TSAN_OPTIONS, with the declared exitcode, was exported by driver-tsan.sh before the sanitizer probes ran.
 
 # controls.tsv: the TSan detection controls (separate from results.tsv): control, result, reason.
 controls="$out/controls.tsv"
 printf 'control\tresult\treason\n' >"$controls"
-control() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$controls"; }
-
-# The racing lines are frozen in tsan_race_ctl.c by their markers: exactly one line each.
-marker_line() {
-    local n
-    n="$(awk -v m="$1" 'index($0, m) {print NR}' "$here/tsan_race_ctl.c")"
-    case "$n" in '' | *[!0-9]*) return 1 ;; esac
-    echo "$n"
-}
-
-# tsan_controls: build both controls with the tsan compiler and flags, run them through xrun, judge them.
-tsan_controls() {
-    local dir="$out/controls-tsan" extra la lb rc=0 n c
-    read -r -a extra <<<"${vflags[tsan]}"
-    mkdir -p "$dir"
-    if ! la="$(marker_line '/* RACE-A */')" || ! lb="$(marker_line '/* RACE-B */')"; then
-        control markers FAIL "tsan_race_ctl.c must hold exactly one RACE-A and one RACE-B line"
-        return 1
-    fi
-    printf 'RACE-A %s\nRACE-B %s\n' "$la" "$lb" >"$dir/race-lines.txt"
-    for c in positive negative; do
-        local defs=()
-        [ "$c" = negative ] && defs=(-DRACE_CTL_LOCKED)
-        rc=0
-        "$CC" -std=c11 -O1 -g -pthread "${warn[@]}" "${extra[@]}" "${defs[@]}" "$here/tsan_race_ctl.c" -o "$dir/$c" \
-            >"$dir/$c.compile.log" 2>&1 || rc=$?
-        echo "$rc" >"$dir/$c.compile.rc"
-        if [ "$rc" != 0 ]; then
-            control "$c" FAIL "compile exit $rc ($dir/$c.compile.log)"
-            return 1
-        fi
-    done
-    xrun "$dir/positive" "$dir/positive.stdout" "$dir/positive.stderr" "$dir/positive.rc" 30 "$dir/positive"
-    n="$(grep -c 'WARNING: ThreadSanitizer' "$dir/positive.stderr" || true)"
-    if [ "$xrc" != "$tsan_exitcode" ]; then
-        control positive FAIL "exit $xrc, want the declared exitcode $tsan_exitcode"
-        return 1
-    elif grep -q 'FATAL: ThreadSanitizer' "$dir/positive.stderr"; then
-        control positive FAIL "ThreadSanitizer FATAL (startup), not a detection"
-        return 1
-    elif [ "$n" != 1 ] || ! grep -q 'WARNING: ThreadSanitizer: data race' "$dir/positive.stderr"; then
-        control positive FAIL "want exactly one ThreadSanitizer report, a data race; got $n reports"
-        return 1
-    elif ! grep -qE " writer_a .*tsan_race_ctl\.c:$la([^0-9]|\$)" "$dir/positive.stderr" ||
-        ! grep -qE " writer_b .*tsan_race_ctl\.c:$lb([^0-9]|\$)" "$dir/positive.stderr"; then
-        control positive FAIL "the race report does not name writer_a at line $la and writer_b at line $lb"
-        return 1
-    fi
-    control positive PASS "exit $xrc, one data race: writer_a line $la, writer_b line $lb"
-    xrun "$dir/negative" "$dir/negative.stdout" "$dir/negative.stderr" "$dir/negative.rc" 30 "$dir/negative"
-    if [ "$xrc" != 0 ]; then
-        control negative FAIL "exit $xrc, want 0"
-        return 1
-    elif grep -qE 'ThreadSanitizer|AddressSanitizer|LeakSanitizer|runtime error' "$dir/negative.stderr"; then
-        control negative FAIL "sanitizer output on stderr"
-        return 1
-    fi
-    control negative PASS "exit 0, no sanitizer report"
-}
 
 # The frozen registry: the 97 test names, sorted, unique.  Each built variant's `rt --list` must equal it exactly.
 registry="$here/rt-registry.txt"
@@ -296,11 +191,8 @@ for v in plain asan tsan; do
         continue
     fi
     if [ "$v" = tsan ]; then
-        if tsan_controls; then
-            ok "tsan detection controls (controls.tsv)"
-        else
-            bad "tsan detection controls ($controls, $out/controls-tsan/)"
-            not_run_all "$v" "TSan detection not proven: a control failed (controls.tsv)"
+        if ! admit_tsan_controls; then
+            not_run_all "$v" "TSan detection not proven: a control failed or could not be recorded (controls.tsv)"
             continue
         fi
     fi
@@ -309,8 +201,14 @@ for v in plain asan tsan; do
     lst="$out/run-$v/list.txt"
     rc=0
     if [ "$v" = tsan ]; then
-        xrun "$out/run-$v/list" "$lst" "$out/run-$v/list.stderr" "$out/run-$v/list.rc" 60 "$bin" --list
+        xr=0
+        xrun "$out/run-$v/list" "$lst" "$out/run-$v/list.stderr" "$out/run-$v/list.rc" 60 "$bin" --list || xr=$?
         rc=$xrc
+        if [ "$xr" != 0 ]; then
+            bad "$v: rt --list launch could not be recorded (xrun status $xr, $out/run-$v/)"
+            not_run_all "$v" "rt --list launch record failed"
+            continue
+        fi
     else
         "$bin" --list >"$lst" 2>"$out/run-$v/list.stderr" || rc=$?
         echo "$rc" >"$out/run-$v/list.rc"
@@ -327,8 +225,14 @@ for v in plain asan tsan; do
         mkdir -p "$d"
         rc=0
         if [ "$v" = tsan ]; then
-            xrun "$d/exec" "$d/stdout" "$d/stderr" "$d/rc" 180 "$bin" "$t" "$d"
+            xr=0
+            xrun "$d/exec" "$d/stdout" "$d/stderr" "$d/rc" 180 "$bin" "$t" "$d" || xr=$?
             rc=$xrc
+            if [ "$xr" != 0 ]; then
+                bad "$v $t: launch could not be recorded (xrun status $xr, $d/)"
+                result "$v" "$t" FAIL "launch record failed"
+                continue
+            fi
         else
             timeout 180 "$bin" "$t" "$d" >"$d/stdout" 2>"$d/stderr" || rc=$?
             echo "$rc" >"$d/rc"
@@ -503,6 +407,6 @@ for p in PROBE_G_COPY PROBE_G_MOVE; do
     fi
 done
 
-echo "== ps3dk-prof runtime host tests: $pass passed, $fail failed, $skip skipped, $notrun registry tests not run"
-{ echo "pass $pass"; echo "fail $fail"; echo "skip $skip"; echo "not_run $notrun"; } >"$out/counts.txt"
-[ "$fail" -eq 0 ]
+echo "== ps3dk-prof runtime host tests: $pass passed, $fail failed, $skip skipped, $notrun registry tests not run, $recfail recorder failures"
+{ echo "pass $pass"; echo "fail $fail"; echo "skip $skip"; echo "not_run $notrun"; echo "recorder_failures $recfail"; } >"$out/counts.txt"
+[ "$fail" -eq 0 ] && [ "$recfail" -eq 0 ]
