@@ -181,7 +181,7 @@ int rt_init_callback_sink_thread_create_failure_retryable(const char *out)
 
 /* ---- concurrency at the gate ---------------------------------------------------------------------------------------- */
 
-static rt_event g_in_init, g_release;
+static rt_event g_in_init, g_release, g_init_done, g_finish;
 static int g_blocked;
 static ps3dk_prof_config g_cfg;
 
@@ -194,23 +194,41 @@ static uint64_t clk_block_once(void)
     return mono_ns();
 }
 
+/* The APP owner is the thread that initialized (plan 5.4), so it stays alive and finishes the capture itself:
+   init, publish the result, wait for main's checks, then register, emit a zone and shut down. */
+typedef struct owner_rc {
+    int init, begin, shutdown, waited;
+} owner_rc;
+
 static void *init_thread(void *a)
 {
-    *(int *)a = ps3dk_prof_init(&g_cfg);
+    owner_rc *r = a;
+    r->init = ps3dk_prof_init(&g_cfg);
+    rt_event_set(&g_init_done);
+    r->waited = rt_event_wait(&g_finish, 10000);
+    if (r->init != PS3DK_PROF_OK || r->waited != 0)
+        return NULL;
+    r->begin = ps3dk_prof_thread_begin("owner");
+    {
+        PS3DK_PROF_ZONE("z");
+    }
+    r->shutdown = ps3dk_prof_shutdown();
     return NULL;
 }
 
 static int blocked_init_case(const char *out, int setters_only)
 {
     rt_thread t;
-    int rc = 99;
+    owner_rc r = {99, 99, 99, 99};
     ps3dk_prof_sink_callbacks cb;
     rt_config(&g_cfg);
     rt_event_init(&g_in_init);
     rt_event_init(&g_release);
+    rt_event_init(&g_init_done);
+    rt_event_init(&g_finish);
     ps3dk_prof_test_hooks.clock = clk_block_once;
     CHECK_EQ(rt_set_dir(out), PS3DK_PROF_OK);
-    rt_spawn(&t, init_thread, &rc);
+    rt_spawn(&t, init_thread, &r);
     CHECK_EQ(rt_event_wait(&g_in_init, 5000), 0);
     CHECK_EQ(gate(), RT_G_INITIALIZING);
     if (!setters_only)
@@ -219,11 +237,22 @@ static int blocked_init_case(const char *out, int setters_only)
     memset(&cb, 0, sizeof cb);
     CHECK_EQ(ps3dk_prof_set_sink_callbacks(&cb), PS3DK_PROF_EBUSY);   /* EBUSY before validation */
     rt_event_set(&g_release);
-    rt_join(&t);
-    CHECK_EQ(rc, PS3DK_PROF_OK);
+    CHECK_EQ(rt_event_wait(&g_init_done, 5000), 0);   /* the owner's init has returned; the owner is still alive */
+    CHECK_EQ(r.init, PS3DK_PROF_OK);
+    CHECK_EQ(gate(), RT_G_READY);
     CHECK_EQ(ps3dk_prof_init(&g_cfg), PS3DK_PROF_EALREADY);
     CHECK_EQ(ps3dk_prof_set_sink_path("/nonexistent-dir"), PS3DK_PROF_EALREADY);
-    return finish_ok(out);   /* the capture is in the pre-race directory */
+    /* Non-owner control: main (never registered) is refused before any state change.  The latch stays clear, and the
+       owner's shutdown below returning OK (not EALREADY) shows shutdown_once was not consumed. */
+    CHECK_EQ(ps3dk_prof_shutdown(), PS3DK_PROF_EPERM);
+    CHECK_EQ(RT_STAT(LATCH), 0);
+    CHECK_EQ(gate(), RT_G_READY);
+    rt_event_set(&g_finish);
+    rt_join(&t);
+    CHECK_EQ(r.waited, 0);
+    CHECK_EQ(r.begin, PS3DK_PROF_OK);
+    CHECK_EQ(r.shutdown, PS3DK_PROF_OK);
+    return rt_expect(out, 0);   /* the capture is in the pre-race directory */
 }
 
 int rt_init_concurrent_ebusy(const char *out) { return blocked_init_case(out, 0); }
