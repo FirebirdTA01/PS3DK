@@ -426,3 +426,185 @@ int rt_retired_drain_then_reuse_generation(const char *out)
     rt_cap_free(&cap);
     return rt_expect(out, 0);
 }
+
+/* ---- ID_COLLISION: SYNTHETIC branch coverage (codex 00:59 / 01:13 / 02:34) -----------------------------------------
+ * No natural FNV-1a-64 collision is searched for or claimed.  The candidate_desc_id test hook replaces ONLY the
+ * candidate id that the production collision comparison uses; the published descriptor, every stored id, the REGERR
+ * record and the reader's id validation are untouched, so the capture is checked by the normal reader. */
+
+static ps3dk_prof_desc g_ca, g_cb, g_ca2;
+static uint64_t g_nat_a, g_nat_b, g_nat_a2;
+static int g_seen_a, g_seen_b, g_seen_a2, g_force;
+
+/* Records each natural id; with g_force, coll_b (and the coll_a twin g_ca2) get coll_a's id as the candidate. */
+static uint64_t cand_hook(const char *name, uint32_t line, uint64_t natural)
+{
+    if (line == g_ca.line && strcmp(name, g_ca.name) == 0 && g_seen_a == 0) {
+        g_seen_a = 1;
+        g_nat_a = natural;
+        return natural;
+    }
+    if (line == g_cb.line && strcmp(name, g_cb.name) == 0) {
+        g_seen_b++;
+        g_nat_b = natural;
+        return g_force ? g_nat_a : natural;
+    }
+    if (line == g_ca.line && strcmp(name, g_ca.name) == 0) {   /* the second static of the same identity */
+        g_seen_a2++;
+        g_nat_a2 = natural;
+        return g_force ? g_nat_a : natural;
+    }
+    return natural;
+}
+
+static uint64_t fnv_key(const char *name, const char *tag)   /* FNV-1a-64(name, 0x00, tag): the REGERR b field */
+{
+    uint64_t h = 0xcbf29ce484222325ull;
+    const unsigned char *p;
+    for (p = (const unsigned char *)name; *p; p++)
+        h = (h ^ *p) * 0x100000001b3ull;
+    h = (h ^ 0u) * 0x100000001b3ull;
+    for (p = (const unsigned char *)tag; *p; p++)
+        h = (h ^ *p) * 0x100000001b3ull;
+    return h;
+}
+
+static ps3dk_prof_zone zb(ps3dk_prof_desc *d) { return ps3dk_prof_zone_begin(d, PS3DK_PROF_TOKEN_NONE); }
+
+static int coll_start(const char *out)
+{
+    ps3dk_prof_config c;
+    rt_config(&c);
+    c.ring_records = 2048;
+    CHECK_OK(rt_start(out, &c, 1));
+    rt_desc(&g_ca, "coll_a", 401);
+    rt_desc(&g_cb, "coll_b", 402);   /* a different name AND line: a different (file, line, name) identity */
+    rt_desc(&g_ca2, "coll_a", 401);  /* a second static with coll_a's identity */
+    return 0;
+}
+
+static int coll_load(const char *out, rt_cap *cap)
+{
+    char path[512];
+    CHECK_EQ(ps3dk_prof_shutdown(), PS3DK_PROF_OK);
+    CHECK_EQ(rt_capture_path(out, path, sizeof path), 0);
+    CHECK_EQ(rt_cap_load(path, cap), 0);
+    return 0;
+}
+
+int rt_id_collision_detected(const char *out)
+{
+    ps3dk_prof_zone a, b, b2, a2;
+    rt_cap cap;
+    const rt_final *f;
+    size_t i, nregerr = 0;
+    CHECK_OK(coll_start(out));
+    ps3dk_prof_test_hooks.candidate_desc_id = cand_hook;
+    a = zb(&g_ca);                    /* registered normally: the hook returns the natural id */
+    CHECK_EQ(a.kind, 1);
+    PS3DK_PROF_ZONE_END(a);
+    CHECK_EQ(g_seen_a, 1);
+    CHECK_EQ(RT_READ(REGERR), 0);
+    g_force = 1;
+    b = zb(&g_cb);                    /* only its candidate id is forced to coll_a's */
+    CHECK_EQ(g_seen_b, 1);
+    CHECK(g_nat_b != g_nat_a);        /* distinct NATURAL ids: the collision is synthetic */
+    CHECK_EQ(b.kind, 2);              /* REFUSED: no BEGIN */
+    PS3DK_PROF_ZONE_END(b);           /* consumed silently */
+    CHECK_EQ(RT_READ(REGERR), 1);
+    CHECK_EQ(RT_READ(REFUSED), 1);
+    b2 = zb(&g_cb);                   /* the cached failure: refused again, no second registration or REGERR */
+    CHECK_EQ(g_seen_b, 1);
+    CHECK_EQ(b2.kind, 2);
+    PS3DK_PROF_ZONE_END(b2);
+    CHECK_EQ(RT_READ(REGERR), 1);
+    CHECK_EQ(RT_READ(REFUSED), 2);
+    ps3dk_prof_test_hooks.candidate_desc_id = NULL;
+    a2 = zb(&g_ca);                   /* the existing entry is unchanged and still in use */
+    CHECK_EQ(a2.kind, 1);
+    PS3DK_PROF_ZONE_END(a2);
+    CHECK_OK(coll_load(out, &cap));
+    CHECK_EQ(cap.ndesc, 1);           /* descriptor count unchanged by the refusal */
+    CHECK_EQ(cap.desc_count, 1);
+    f = rt_final_of(&cap, 1);
+    CHECK(f != NULL);
+    CHECK_EQ(f->refused, 2);
+    CHECK_EQ(f->regerr, 1);
+    CHECK_EQ(rt_count(&cap, 1, RT_BEGIN, -1), 2);   /* coll_a twice; coll_b never */
+    CHECK_EQ(rt_count(&cap, 1, RT_END, -1), 2);
+    for (i = 0; i < cap.nrecs; i++) {
+        const rt_rec *r = &cap.recs[i];
+        if (r->kind == RT_BEGIN || r->kind == RT_END)
+            CHECK_EQ(r->a, 0);        /* every BEGIN/END names coll_a's index */
+        if (r->kind != RT_REGERR)
+            continue;
+        nregerr++;
+        CHECK_EQ(r->a, 2);            /* ID_COLLISION */
+        CHECK_EQ(r->b, fnv_key("coll_b", ""));
+        CHECK_EQ(r->c, g_nat_b);      /* the id it would have had: the natural one */
+    }
+    CHECK_EQ(nregerr, 1);
+    rt_cap_free(&cap);
+    return rt_expect(out, 0);         /* the normal reader */
+}
+
+int rt_id_noncollision_control(const char *out)
+{
+    ps3dk_prof_zone a, b;
+    rt_cap cap;
+    const rt_final *f;
+    CHECK_OK(coll_start(out));        /* the hook stays OFF */
+    a = zb(&g_ca);
+    b = zb(&g_cb);
+    CHECK_EQ(a.kind, 1);
+    CHECK_EQ(b.kind, 1);
+    PS3DK_PROF_ZONE_END(b);
+    PS3DK_PROF_ZONE_END(a);
+    CHECK_EQ(RT_READ(REGERR), 0);
+    CHECK_EQ(RT_READ(REFUSED), 0);
+    CHECK_OK(coll_load(out, &cap));
+    CHECK_EQ(cap.ndesc, 2);
+    CHECK_EQ(cap.desc_count, 2);
+    f = rt_final_of(&cap, 1);
+    CHECK(f != NULL);
+    CHECK_EQ(f->refused, 0);
+    CHECK_EQ(f->regerr, 0);
+    CHECK_EQ(rt_count(&cap, 1, RT_BEGIN, -1), 2);
+    CHECK_EQ(rt_count(&cap, 1, RT_REGERR, -1), 0);
+    rt_cap_free(&cap);
+    return rt_expect(out, 0);
+}
+
+int rt_id_same_name_not_collision(const char *out)
+{
+    ps3dk_prof_zone a, a2;
+    rt_cap cap;
+    const rt_final *f;
+    size_t i;
+    CHECK_OK(coll_start(out));
+    ps3dk_prof_test_hooks.candidate_desc_id = cand_hook;
+    a = zb(&g_ca);
+    CHECK_EQ(a.kind, 1);
+    PS3DK_PROF_ZONE_END(a);
+    g_force = 1;
+    a2 = zb(&g_ca2);                  /* same (file, line, name), candidate = coll_a's id: REUSE, not a collision */
+    CHECK_EQ(g_seen_a2, 1);
+    CHECK_EQ(g_nat_a2, g_nat_a);      /* the same identity has the same natural id */
+    CHECK_EQ(a2.kind, 1);
+    PS3DK_PROF_ZONE_END(a2);
+    CHECK_EQ(RT_READ(REGERR), 0);
+    CHECK_EQ(RT_READ(REFUSED), 0);
+    CHECK_OK(coll_load(out, &cap));
+    CHECK_EQ(cap.ndesc, 1);
+    CHECK_EQ(cap.desc_count, 1);
+    f = rt_final_of(&cap, 1);
+    CHECK(f != NULL);
+    CHECK_EQ(f->regerr, 0);
+    CHECK_EQ(rt_count(&cap, 1, RT_BEGIN, -1), 2);
+    CHECK_EQ(rt_count(&cap, 1, RT_REGERR, -1), 0);
+    for (i = 0; i < cap.nrecs; i++)
+        if (cap.recs[i].kind == RT_BEGIN)
+            CHECK_EQ(cap.recs[i].a, 0);   /* both statics share descriptor 0 */
+    rt_cap_free(&cap);
+    return rt_expect(out, 0);
+}

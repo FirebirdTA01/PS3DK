@@ -71,6 +71,10 @@ typedef struct ps3dk_prof_test_hooks_t {
     int (*write_fault)(unsigned long n, long *ret, int *err);
     int close_fail;                    /* nonzero: close fails with this errno */
     int corrupt_next_pub_len;          /* corrupt the next publication's pub_len */
+    /* SYNTHETIC ID_COLLISION branch coverage: returns the candidate id that registration compares against the
+     * published ids, given the natural id.  Only that comparison uses it; a new entry and its REGERR keep the natural
+     * id, so no descriptor with a forced id is ever written.  NULL (the default): the natural id. */
+    uint64_t (*candidate_desc_id)(const char *name, uint32_t line, uint64_t natural_id);
 } ps3dk_prof_test_hooks_t;
 
 extern ps3dk_prof_test_hooks_t ps3dk_prof_test_hooks;

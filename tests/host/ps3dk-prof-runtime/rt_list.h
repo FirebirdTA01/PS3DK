@@ -110,3 +110,8 @@ RT(rt_counter_regerr_at_ceiling)
 RT(rt_counter_refused_id_exhausted)
 RT(rt_counter_span_id_exhausted) /* (+) the span-id counter of the same rule */
 RT(rt_counter_stop_batch_refused_at_ceiling)
+
+/* codex 00:59 / 01:13 / 02:34: ID_COLLISION as SYNTHETIC branch coverage (test-only candidate-id hook) */
+RT(rt_id_collision_detected)
+RT(rt_id_noncollision_control)
+RT(rt_id_same_name_not_collision)

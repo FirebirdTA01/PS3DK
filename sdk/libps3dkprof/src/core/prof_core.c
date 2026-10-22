@@ -342,7 +342,7 @@ static uint32_t desc_register(prof *p, cblock *cb, ring *rg, ps3dk_prof_desc *d)
     const char *file = d->file ? d->file : "";
     size_t nl = 0, tl, fl;
     uint32_t st, n, i, code = 0;
-    uint64_t id = 0, h;
+    uint64_t id = 0, cand, h;
     uint8_t le[4];
     desc_entry *e;
 
@@ -365,10 +365,16 @@ static uint32_t desc_register(prof *p, cblock *cb, ring *rg, ps3dk_prof_desc *d)
     h = p_fnv(h, "", 1);
     h = p_fnv(h, le, 4);
     id = p_fnv(h, d->name, nl);
+    cand = id;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    /* SYNTHETIC branch coverage only: a test may replace the candidate id of this comparison (never the stored id). */
+    if (ps3dk_prof_test_hooks.candidate_desc_id)
+        cand = ps3dk_prof_test_hooks.candidate_desc_id(d->name, d->line, id);
+#endif
     n = LD_RLX(&p->desc_count);   /* stored only under desc_mutex */
     for (i = 0; i < n; i++) {
         e = &p->descs[i];
-        if (e->id != id)
+        if (e->id != cand)
             continue;
         if (e->line == d->line && e->name_len == nl && e->file_len == fl && memcmp(e->name, d->name, nl) == 0 &&
             memcmp(e->file, file, fl) == 0) {

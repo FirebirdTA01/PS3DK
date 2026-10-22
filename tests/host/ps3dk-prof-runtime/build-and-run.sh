@@ -24,7 +24,7 @@
 # tsan_race_ctl.c, built with the tsan compiler and flags (controls.tsv, controls-tsan/): the POSITIVE control must exit
 # with the declared TSAN_OPTIONS exitcode AND print exactly one ThreadSanitizer report, a data race whose stacks name
 # writer_a at its RACE-A line and writer_b at its RACE-B line; the NEGATIVE control (mutex) must exit 0 with no
-# sanitizer report.  A failed control fails the variant and its 97 rows are NOT RUN (detection not proven).
+# sanitizer report.  A failed control fails the variant and its 100 rows are NOT RUN (detection not proven).
 # Plain and asan launches are unchanged.
 # The TSan launch path (rrun, xrun, the setarch identity check, the sanitizer probes, the detection controls and the
 # variant admission) lives in driver-tsan.sh, sourced below.  It does not rely on errexit: every launch and evidence
@@ -164,7 +164,7 @@ export UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1"
 controls="$out/controls.tsv"
 printf 'control\tresult\treason\n' >"$controls"
 
-# The frozen registry: the 97 test names, sorted, unique.  Each built variant's `rt --list` must equal it exactly.
+# The frozen registry: the 100 test names, sorted, unique.  Each built variant's `rt --list` must equal it exactly.
 registry="$here/rt-registry.txt"
 mapfile -t names <"$registry"
 if [ "${#names[@]}" -eq 0 ] || [ "$(LC_ALL=C sort -u "$registry")" != "$(cat "$registry")" ]; then
@@ -310,6 +310,18 @@ ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
         bad "archive objects contain a ps3dk_prof_test_ symbol"
     else
         ok "archive objects contain no test-hook symbol"
+    fi
+    # The SDK form of the source itself: preprocessed without PS3DK_PROF_TEST_HOOKS, prof_core.c names no test hook
+    # (the ID_COLLISION candidate-id hook included).  File-based grep, not a pipe.
+    if "$CC" -std=c11 -E -DPS3DK_PROF=1 -DPS3DK_PROF_PAL_HOST "${inc[@]}" "$(src_of prof_core)" \
+        >"$ob/prof_core-nohooks.i" 2>"$ob/prof_core-nohooks.log"; then
+        if grep -q -e 'candidate_desc_id' -e 'ps3dk_prof_test_hooks' "$ob/prof_core-nohooks.i"; then
+            bad "hook-free preprocessed prof_core.c names a test hook"
+        else
+            ok "hook-free preprocessed prof_core.c names no test hook"
+        fi
+    else
+        bad "hook-free preprocess of prof_core.c failed"
     fi
 fi
 
