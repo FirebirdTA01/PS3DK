@@ -108,9 +108,14 @@ pub fn render(a: &Analysis) -> String {
         if s.affected {
             notes.push("AFFECTED".to_string());
         }
-        let dur = match (s.inclusive(), s.exclusive()) {
-            (Some(i), Some(x)) if !s.is_censored() => format!("inclusive {i}, exclusive {x}"),
-            _ => "duration unknown (censored)".to_string(),
+        let dur = if s.is_censored() {
+            "duration unknown (censored)".to_string()
+        } else {
+            match (s.inclusive(), s.exclusive()) {
+                (Some(i), Some(x)) => format!("inclusive {i}, exclusive {x}"),
+                (Some(i), None) => format!("inclusive {i}, exclusive unavailable (a child's duration is unavailable)"),
+                (None, _) => "duration unavailable (CLOCK_ANOMALY: END before BEGIN)".to_string(),
+            }
         };
         let _ = writeln!(
             o,

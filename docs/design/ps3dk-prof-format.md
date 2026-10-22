@@ -167,8 +167,7 @@ off 8  u64 seq      off 16 u64 b        off 24 u64 c
     - The owner must have been declared earlier in the file, or the record is MALFORMED.
     - The FRAME record of (owner, f) may appear anywhere in the file, before or after the token, because rings drain
       independently. The reader therefore resolves token references only after reading the whole file (section 9).
-  - Narrowing for review: r4's `ps3dk_prof_frame(owner)` becomes `ps3dk_prof_frame()` on the owner thread, so an owner
-    is one incarnation.
+  - `ps3dk_prof_frame()` is called on the owner thread, so an owner is one incarnation.
 - **depth:** the number of spans open on that thread before this BEGIN, at most 255. A BEGIN that would be at depth 256
   is REFUSED (section 5.2).
 - **tb:** the raw 64-bit timebase.
@@ -283,7 +282,7 @@ These definitions apply to every case below:
   reads must bracket the work, and the work must not have been removed. This is the plan's boundary-code inspection,
   extended to dependency and anti-DCE handling.
 
-### 5.6 Frames and tokens (r3)
+### 5.6 Frames and tokens
 
 - **`ps3dk_prof_frame()`,** called on the owner thread, is one 1-slot event:
   - It assigns the owner's next frame id together with the event's sequence, then publishes the FRAME event or drops
@@ -381,7 +380,7 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   - This includes the span whose END call observed the latch. A span counts as completed only if its END was emitted
     before the latch was observed.
   - The batch is reserved and published as a whole, or dropped into loss.
-- **The ack is the LAST write (r3).** The producer completes the following steps, in this order:
+- **The ack is the LAST write.** The producer completes the following steps, in this order:
   1. publish the STOP batch, or drop it into loss;
   2. update its counters;
   3. clear its stack;
@@ -428,7 +427,7 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   - Self-instrumentation is off from the frontier onwards.
   - The capture is exactly the bytes through the TRAILER. A NOT_QUIESCED producer can still publish into its ring
     after the frontier, but that data is never drained and is not part of the sealed capture.
-- **Storage lifetime (r3): process lifetime, with no release API in slice 1.**
+- **Storage lifetime: process lifetime, with no release API in slice 1.**
   - What is allocated once by `ps3dk_prof_init()` and never freed or reused for the life of the process:
     - the rings, control blocks, descriptor table and thread table;
     - everything that any thread-local profiler pointer can reach.
@@ -506,8 +505,8 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     reason CENSORED, and both captures' counts are shown.
   - Zones with no censored instance are reported normally.
   - Censoring alone does not make an incarnation invalid.
-- **Frame attribution of a span (r3, r4).** Attribution always goes by the frame the span STARTED in.
-  - **"spans N frames" (r4)** is reported only where it is knowable:
+- **Frame attribution of a span.** Attribution always goes by the frame the span STARTED in.
+  - **"spans N frames"** is reported only where it is knowable:
     - For an un-tokened span on its owner, N = 1 + the number of the owner's FRAME records between the span's BEGIN and
       END in the owner's own sequence order.
     - For a tokened span on another incarnation, N is reported as UNKNOWN. A token names only the start frame, and the
@@ -520,7 +519,7 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   - **After a GAP on the owner:** the frame is UNKNOWN(loss) until the next FRAME record, which carries its own id. A
     FRAME may have been lost in the GAP.
   - **Un-tokened span on any other incarnation:** UNKNOWN. Never inferred from timestamps.
-- **Token resolution (r4: ordered and exhaustive).** It is done after the whole file has been read. Each token
+- **Token resolution (ordered and exhaustive).** It is done after the whole file has been read. Each token
   reference (O, f) takes the outcome of the FIRST rule that matches, so every reference gets exactly one:
 
   | Order | Rule | Outcome |
@@ -541,14 +540,14 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     - NOT_QUIESCED (bit0) of an incarnation OTHER than O: O's stream is still complete.
     In all three cases a missing reference is IMPOSSIBLE, not tolerated.
   - An unresolved reference keeps its (O, f) claim for listing, but contributes to no frame value.
-- **Frame values (r4: frame elapsed and per-lane attributed work; nothing is a cross-lane frame total):**
+- **Frame values (frame elapsed and per-lane attributed work; nothing is a cross-lane frame total):**
   - **Frame elapsed of (O, k):** the time from FRAME k to FRAME k + 1 of O, with both records present.
     - It is reported only if O is MEASUREMENT VALID.
     - The last, unclosed frame is censored and is listed as such.
-  - **Exclusive duration of a span (r4):** its inclusive duration (END tb - BEGIN tb) minus the inclusive durations of
+  - **Exclusive duration of a span:** its inclusive duration (END tb - BEGIN tb) minus the inclusive durations of
     its DIRECT children on the same incarnation. Within one incarnation the exclusive durations of all its spans never
     overlap, because nested spans partition their parent.
-  - **Attributed work W(O, k, i) (r4), per incarnation:** the sum of the EXCLUSIVE durations of the spans of
+  - **Attributed work W(O, k, i), per incarnation:** the sum of the EXCLUSIVE durations of the spans of
     incarnation i that are attributed to (O, k).
     - It is reported for each incarnation separately. It is never summed across incarnations, never added to frame
       elapsed, and never called a "frame total".
@@ -577,7 +576,7 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   - RETIRED-then-RECORDS;
   - a decreasing `tb`, which gives CLOCK_ANOMALY;
   - a frame-id hole with and without loss.
-  - **Ancestry under loss (r2):**
+  - **Ancestry under loss:**
     - a parent BEGIN dropped in a GAP, followed by the child's BEGIN, the child's END and the parent's END. It is
       accepted, with the thread INVALID, the spans AFFECTED and no MALFORMED.
     - the partial-stack checks while the base is UNKNOWN: a wrong child depth or parent above a seen span is
@@ -586,18 +585,18 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     - a depth-0 BEGIN while the partial stack is non-empty, MALFORMED;
     - `depth`/parent zero mismatch, MALFORMED in either base state;
     - an END on an empty stack: MALFORMED with base KNOWN, AFFECTED with base UNKNOWN.
-  - **Final entries (r2):**
+  - **Final entries:**
     - a state-3 entry with exactly the UNKNOWN fields and `limit_flags` 0x02, accepted as INCOMPLETE;
     - a state-3 entry with a concrete `produced_count`, MALFORMED;
     - a state-1 or state-2 entry containing UNKNOWN, MALFORMED;
     - a SEQ_LIMIT only in an earlier RETIRED entry: bit1 required, giving INCOMPLETE; bit1 missing, MALFORMED; bit1 with
       no limited entry, MALFORMED.
-  - **Censoring (r2):**
+  - **Censoring:**
     - a zone with one truncated instance: the descriptive output is labelled "completed instances only", and A/B is
       refused CENSORED;
     - a clean zone in the same capture compares normally;
     - the unclosed last frame is censored.
-  - **Frames and tokens (r3):**
+  - **Frames and tokens:**
     - a future-arriving valid frame: the worker's tokened RECORDS chunk comes before the owner's FRAME chunk. It gives
       RESOLVED and no error.
     - a nonexistent frame in a complete capture with a lossless, quiesced owner: IMPOSSIBLE, so MALFORMED;
@@ -607,7 +606,7 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
       invalid", and its W for that owner is refused;
     - an owner's un-tokened span before its first FRAME gives UNKNOWN(pre-frame), and one after a GAP but before the
       next FRAME gives UNKNOWN(loss).
-  - **Token resolution, one fixture per rule and per INCOMPLETE reason (r4).** The missing reference always has a
+  - **Token resolution, one fixture per rule and per INCOMPLETE reason.** The missing reference always has a
     lossless ACKED owner unless stated:
     - present FRAME in an INCOMPLETE (no-trailer) capture: RESOLVED (rule 1);
     - missing, no TRAILER: UNRESOLVED-INCOMPLETE; missing, torn tail: UNRESOLVED-INCOMPLETE; missing, O has no final
@@ -618,7 +617,7 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     - missing, ONLY through a recovered sink error (bit2): MALFORMED;
     - missing, ONLY through another lane's NOT_QUIESCED (bit0): MALFORMED;
     - missing, complete lossless capture: MALFORMED (rule 4).
-  - **Attributed work (r4):**
+  - **Attributed work:**
     - nested parent and child on one lane: their exclusive durations sum to the parent's inclusive duration, and the
       parent is not counted twice;
     - a child in a later frame than its parent: the child's time is in the child's frame, and the parent's W excludes
@@ -627,7 +626,7 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
       labelled "frame total";
     - a clean owner and a clean worker plus a third, invalid lane: frame elapsed is reported, the clean worker's W is
       reported, and only the invalid lane's W is refused.
-  - **"spans N frames" (r4):**
+  - **"spans N frames":**
     - an owner span crossing two FRAMEs gives "spans 3 frames";
     - a tokened worker span gives "spans N: unknown";
     - an owner span with a GAP inside it gives N unknown.
@@ -640,7 +639,7 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   - the sequence-limit pair (a 1-slot event at 2^63 - 1, then a refusal; a 2-slot event refused whole);
   - the descriptor and incarnation drain ordering, with an adversarial interleaving forced by test hooks;
   - the short-write retry limit, a negative callback return, a close failure after the trailer.
-  - **Lifecycle (r2):**
+  - **Lifecycle:**
     - a shutdown caller with open spans self-quiesces: its truncated ENDs are present and there is no timeout;
     - the THREAD-mode drain thread self-acks;
     - shutdown from inside a sink callback returns EBUSY with no state change, in both modes. A later proper shutdown
@@ -650,19 +649,19 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     - a quiescence timeout with a producer forced to publish after the frontier: that data is absent from the file;
       the state-3 entry has UNKNOWN fields; Fd and Ft do not grow;
     - the shutdown result severity order, including ESEQLIMIT from a thread that retired before shutdown.
-  - **Ordering and lifetime (r3):**
+  - **Ordering and lifetime:**
     - **Pause at ack publication:** a test hook stalls a producer just before its ack store. The frontier must not
       classify the producer as ACKED. When the producer is released, a reader that has acquire-loaded the ack sees
       final counters, an empty stack and the published batch. With a timeout during the stall, the producer is
       NOT_QUIESCED and the entry is UNKNOWN.
     - **Pause at retire publication:** the same checks for the retired word.
-    - **Calls after SEALED (r4 wording).** These run on the host build under ASan and TSan, from acked, retired,
+    - **Calls after SEALED.** These run on the host build under ASan and TSan, from acked, retired,
       NOT_QUIESCED and unregistered threads:
       - every call returns safely, and the SEALED FILE bytes never change (they are hashed before and after);
       - a NOT_QUIESCED producer may still make exactly the specified late changes, its STOP batch into its own ring and
         then its ack. After its ack it makes no further change;
       - acked, retired and unregistered threads make no change to any shared state.
-    - **Pre-STOP slot reuse (r4):**
+    - **Pre-STOP slot reuse:**
       - thread A retires and is drained, and its slot goes to a new incarnation B;
       - A then makes zone calls: they are refused and touch only A's thread-local state;
       - B's ring, counters and control block are unchanged by A's calls (checked under TSan);

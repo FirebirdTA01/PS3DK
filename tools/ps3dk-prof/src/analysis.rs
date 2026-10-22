@@ -4,6 +4,12 @@
 //! W(O, k, i) is START-FRAME attributed: a span counts in the frame it started in, for its whole exclusive duration.
 //! It is not clipped to the frame interval, so it can exceed the frame's elapsed time, and it is never summed across
 //! incarnations.
+//!
+//! No value here is ever saturated: totals are accumulated exactly (u128), and a duration that cannot be computed
+//! (a CLOCK_ANOMALY, END before BEGIN) is UNKNOWN, never 0.
+//!
+//! [`load`] is the whole-file verdict: the structural pass [`reader::read`] followed by [`analyze`], which applies token
+//! rule 4.  A successful `read` alone is not a validity verdict.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -120,13 +126,13 @@ pub struct FrameElapsed {
     pub value: Metric<u64>,
 }
 
-/// W(owner, frame, lane): one lane's start-frame-attributed exclusive work for one owner frame.
+/// W(owner, frame, lane): one lane's start-frame-attributed exclusive work for one owner frame (exact, in ticks).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Work {
     pub owner: u32,
     pub frame: u64,
     pub lane: u32,
-    pub value: Metric<u64>,
+    pub value: Metric<u128>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -138,7 +144,10 @@ pub struct ZoneStats {
     pub instances: u64,
     pub completed: u64,
     pub censored: u64,
-    pub total: Metric<u64>,
+    /// Ended instances whose duration is unavailable (END tb before BEGIN tb).  Excluded from every value.
+    pub unavailable: u64,
+    /// Exact sum of the completed instances' inclusive durations, in ticks.
+    pub total: Metric<u128>,
     pub min: Metric<u64>,
     pub max: Metric<u64>,
     pub mean: Metric<f64>,
@@ -169,7 +178,7 @@ impl Analysis {
     pub fn zone(&self, name: &str) -> Option<&ZoneStats> {
         self.zones.iter().find(|z| z.name == name)
     }
-    pub fn work_for(&self, owner: u32, frame: u64, lane: u32) -> Option<&Metric<u64>> {
+    pub fn work_for(&self, owner: u32, frame: u64, lane: u32) -> Option<&Metric<u128>> {
         self.work.iter().find(|w| w.owner == owner && w.frame == frame && w.lane == lane).map(|w| &w.value)
     }
     pub fn elapsed_for(&self, owner: u32, frame: u64) -> Option<&Metric<u64>> {
@@ -283,9 +292,10 @@ pub fn analyze(cap: Capture) -> Result<Analysis, Malformed> {
             SpansN::Unknown
         } else {
             match (s.frames_before_end, s.gaps_before_end) {
-                (Some(fe), Some(ge)) if ge == s.gaps_before_begin => {
-                    SpansN::Known(1 + fe.saturating_sub(s.frames_before_begin))
-                }
+                (Some(fe), Some(ge)) if ge == s.gaps_before_begin => fe
+                    .checked_sub(s.frames_before_begin)
+                    .and_then(|d| d.checked_add(1))
+                    .map_or(SpansN::Unknown, SpansN::Known),
                 _ => SpansN::Unknown,
             }
         };
@@ -300,7 +310,10 @@ pub fn analyze(cap: Capture) -> Result<Analysis, Malformed> {
             let value = if !valid(owner) {
                 Metric::Refused("owner invalid".to_string())
             } else if let Some(n) = next {
-                Metric::Value(n.tb.saturating_sub(fr.tb))
+                match n.tb.checked_sub(fr.tb) {
+                    Some(d) => Metric::Value(d),
+                    None => Metric::Unknown("CLOCK_ANOMALY: the next FRAME is earlier".to_string()),
+                }
             } else {
                 Metric::Unknown("censored: unclosed frame".to_string())
             };
@@ -311,10 +324,13 @@ pub fn analyze(cap: Capture) -> Result<Analysis, Malformed> {
     // W(O, k, i): exclusive durations, per lane, by start frame.
     #[derive(Default)]
     struct Acc {
-        sum: u64,
+        // u128: the exact sum of u64 durations (a capture holds fewer than 2^63 spans, so it cannot overflow).
+        sum: u128,
         censored: bool,
         unresolved: bool,
+        unavailable: bool,
     }
+    // Key order: (owner u32, frame u64, lane u32), the field order of `Work`.
     let mut acc: BTreeMap<(u32, u64, u32), Acc> = BTreeMap::new();
     for (s, view) in cap.spans.iter().zip(&spans) {
         let Some((owner, frame)) = view.attribution.claim() else { continue };
@@ -324,8 +340,11 @@ pub fn analyze(cap: Capture) -> Result<Analysis, Malformed> {
         }
         if s.is_censored() {
             a.censored = true;
-        } else if let Some(x) = s.exclusive() {
-            a.sum = a.sum.saturating_add(x);
+        } else {
+            match s.exclusive() {
+                Some(x) => a.sum += u128::from(x),
+                None => a.unavailable = true,
+            }
         }
     }
     let work: Vec<Work> = acc
@@ -344,6 +363,9 @@ pub fn analyze(cap: Capture) -> Result<Analysis, Malformed> {
             if a.unresolved {
                 why.push("unresolved");
             }
+            if a.unavailable {
+                why.push("duration unavailable");
+            }
             let value = if why.is_empty() { Metric::Value(a.sum) } else { Metric::Refused(why.join(", ")) };
             Work { owner, frame, lane, value }
         })
@@ -358,6 +380,7 @@ fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
     struct Z {
         instances: u64,
         censored: u64,
+        unavailable: u64,
         durations: Vec<u64>,
     }
     let mut keys: BTreeMap<(String, String), usize> = BTreeMap::new();
@@ -376,6 +399,8 @@ fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
             z.censored += 1;
         } else if let Some(x) = s.inclusive() {
             z.durations.push(x);
+        } else {
+            z.unavailable += 1;
         }
     }
     zones
@@ -385,9 +410,15 @@ fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
             let k = z.durations.len() as u64;
             let none = || Metric::Unknown("no completed instances".to_string());
             let (total, min, max, mean) = if k == 0 {
-                (none(), none(), none(), Metric::Unknown("no completed instances".to_string()))
+                (
+                    Metric::Unknown("no completed instances".to_string()),
+                    none(),
+                    none(),
+                    Metric::Unknown("no completed instances".to_string()),
+                )
             } else {
-                let total: u64 = z.durations.iter().fold(0u64, |acc, &x| acc.saturating_add(x));
+                // Exact: the sum of fewer than 2^63 u64 values fits in u128.
+                let total: u128 = z.durations.iter().map(|&x| u128::from(x)).sum();
                 (
                     Metric::Value(total),
                     Metric::Value(z.durations[0]),
@@ -403,8 +434,14 @@ fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
                     Metric::Value(z.durations[(rank - 1) as usize])
                 }
             };
-            let label = (z.censored > 0)
-                .then(|| format!("completed instances only: {} censored of {}", z.censored, z.instances));
+            let label = match (z.censored, z.unavailable) {
+                (0, 0) => None,
+                (c, 0) => Some(format!("completed instances only: {c} censored of {}", z.instances)),
+                (c, u) => Some(format!(
+                    "completed instances only: {c} censored and {u} with an unavailable duration of {}",
+                    z.instances
+                )),
+            };
             ZoneStats {
                 descriptors: keys.get(&(name.clone(), logical_tag.clone())).copied().unwrap_or(0),
                 name,
@@ -412,6 +449,7 @@ fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
                 instances: z.instances,
                 completed: k,
                 censored: z.censored,
+                unavailable: z.unavailable,
                 total,
                 min,
                 max,
@@ -427,11 +465,16 @@ fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AbResult {
-    /// Mean inclusive duration of the completed instances in each capture.
+    /// Mean inclusive duration of the completed instances in each capture, in ticks of [`Comparison::freq_hz`].
     Compared { a_mean: f64, b_mean: f64 },
     Refused(String),
+    /// The key has spans in a valid lane of A and no span at all in B.
     OnlyInA,
+    /// The key has spans in a valid lane of B and no span at all in A.
     OnlyInB,
+    /// The key has spans, but only in INVALID lanes of the capture(s) flagged: present, yet not comparable.  Not the
+    /// same as absent.
+    InvalidLanesOnly { a: bool, b: bool },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -439,32 +482,131 @@ pub struct AbRow {
     pub name: String,
     pub logical_tag: String,
     pub result: AbResult,
+    /// Recorded, intentional differences for this key (source file and line); never a refusal.
+    pub differences: Vec<String>,
 }
 
-/// A/B by logical key, over the MEASUREMENT VALID incarnations of each capture (section 9).
-pub fn compare(a: &Analysis, b: &Analysis) -> Vec<AbRow> {
-    let key = |z: &ZoneStats| (z.name.clone(), z.logical_tag.clone());
-    let mut rows: BTreeMap<(String, String), (Option<&ZoneStats>, Option<&ZoneStats>)> = BTreeMap::new();
-    for z in &a.zones {
-        rows.entry(key(z)).or_default().0 = Some(z);
+/// The result of an A/B comparison, with its compatibility metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Comparison {
+    /// A capture-level refusal (not COMPLETE, ABI or clock mismatch): when set, every row is refused with it.
+    pub refused: Option<String>,
+    /// The clock frequency both captures share; every compared value is in ticks of this clock.
+    pub freq_hz: Option<u64>,
+    /// Recorded, intentional differences between the captures (build id, SDK, compiler, flags, workload, app).
+    pub differences: Vec<String>,
+    /// The MEASUREMENT VALID incarnations each side's statistics come from.
+    pub a_scope: Vec<u32>,
+    pub b_scope: Vec<u32>,
+    pub rows: Vec<AbRow>,
+}
+
+/// Where a logical key appears in one capture.
+#[derive(Clone, Copy)]
+enum Presence<'a> {
+    Valid(&'a ZoneStats),
+    InvalidOnly,
+    Absent,
+}
+
+fn scope_name(scope: u8) -> &'static str {
+    if scope == 1 {
+        "cpu"
+    } else {
+        "gpu-complete"
     }
-    for z in &b.zones {
-        rows.entry(key(z)).or_default().1 = Some(z);
+}
+
+/// (scopes, "file:line" locations) of the descriptors with this logical key.
+fn key_descriptors(cap: &Capture, name: &str, tag: &str) -> (Vec<u8>, Vec<String>) {
+    let mut scopes = Vec::new();
+    let mut places = Vec::new();
+    for d in cap.descriptors.values().filter(|d| d.name == name && d.logical_tag == tag) {
+        if !scopes.contains(&d.scope) {
+            scopes.push(d.scope);
+        }
+        places.push(format!("{}:{}", d.file, d.line));
     }
-    rows.into_iter()
-        .map(|((name, logical_tag), (za, zb))| {
-            let result = if a.verdict != Verdict::Complete {
-                AbResult::Refused("capture A not TRANSPORT COMPLETE".to_string())
-            } else if b.verdict != Verdict::Complete {
-                AbResult::Refused("capture B not TRANSPORT COMPLETE".to_string())
+    scopes.sort_unstable();
+    places.sort();
+    (scopes, places)
+}
+
+/// A/B by logical key, over the MEASUREMENT VALID incarnations of each capture (section 9).  The compatibility
+/// policy (tools/ps3dk-prof/README.md):
+/// - REFUSED for the whole comparison: either capture not TRANSPORT COMPLETE; a different ABI; a different (or
+///   missing) clock frequency.  Values are raw ticks, so captures are compared only on the same timebase.
+/// - REFUSED per key: a duplicate logical key; a different descriptor scope (cpu vs gpu-complete); censored instances;
+///   no completed instances.
+/// - RECORDED, not refused: build id, SDK version, compiler identity, flags, workload tag, app (per capture) and the
+///   source file and line (per key).
+pub fn compare(a: &Analysis, b: &Analysis) -> Comparison {
+    let scope_of = |x: &Analysis| -> Vec<u32> { x.lanes.values().filter(|l| l.valid).map(|l| l.incarnation).collect() };
+    let (ha, hb) = (a.capture.header.as_ref(), b.capture.header.as_ref());
+    let (fa, fb) = (a.capture.clock.as_ref().map(|c| c.freq_hz), b.capture.clock.as_ref().map(|c| c.freq_hz));
+
+    let refused = if a.verdict != Verdict::Complete {
+        Some("capture A not TRANSPORT COMPLETE".to_string())
+    } else if b.verdict != Verdict::Complete {
+        Some("capture B not TRANSPORT COMPLETE".to_string())
+    } else if ha.map(|h| h.abi) != hb.map(|h| h.abi) {
+        Some("ABI differs".to_string())
+    } else if fa.is_none() || fa != fb {
+        Some(format!(
+            "clock frequency differs (A {} Hz, B {} Hz); values are raw ticks",
+            fa.map_or("unknown".to_string(), |f| f.to_string()),
+            fb.map_or("unknown".to_string(), |f| f.to_string())
+        ))
+    } else {
+        None
+    };
+
+    let mut differences = Vec::new();
+    if let (Some(x), Some(y)) = (ha, hb) {
+        let mut note = |what: &str, p: String, q: String| {
+            if p != q {
+                differences.push(format!("{what}: A {p:?}, B {q:?}"));
+            }
+        };
+        note("app", x.app.clone(), y.app.clone());
+        note("build id", hex(&x.build_id), hex(&y.build_id));
+        note("sdk version", x.sdk_version.clone(), y.sdk_version.clone());
+        note("compiler", x.compiler_identity.clone(), y.compiler_identity.clone());
+        note("flags", x.flags.clone(), y.flags.clone());
+        note("workload", x.workload_tag.clone(), y.workload_tag.clone());
+    }
+
+    // Every logical key with a span anywhere (valid or not) in either capture.
+    let span_keys = |x: &Analysis| -> std::collections::BTreeSet<(String, String)> {
+        x.capture
+            .spans
+            .iter()
+            .filter_map(|s| x.capture.descriptors.get(&s.desc))
+            .map(|d| (d.name.clone(), d.logical_tag.clone()))
+            .collect()
+    };
+    let (ka, kb) = (span_keys(a), span_keys(b));
+
+    let rows = ka
+        .union(&kb)
+        .map(|k| {
+            let (name, logical_tag) = k.clone();
+            let (sa, la) = key_descriptors(&a.capture, &name, &logical_tag);
+            let (sb, lb) = key_descriptors(&b.capture, &name, &logical_tag);
+            let mut row_diff = Vec::new();
+            if !la.is_empty() && !lb.is_empty() && la != lb {
+                row_diff.push(format!("source location: A {}, B {}", la.join(" "), lb.join(" ")));
+            }
+            let result = if let Some(why) = &refused {
+                AbResult::Refused(why.clone())
             } else {
-                match (za, zb) {
-                    (Some(_), None) => AbResult::OnlyInA,
-                    (None, Some(_)) => AbResult::OnlyInB,
-                    (None, None) => unreachable!(),
-                    (Some(x), Some(y)) => {
+                match (presence(a, &ka, k), presence(b, &kb, k)) {
+                    (Presence::Valid(x), Presence::Valid(y)) => {
                         if x.descriptors > 1 || y.descriptors > 1 {
                             AbResult::Refused("duplicate logical key".to_string())
+                        } else if sa != sb {
+                            let names = |s: &[u8]| s.iter().map(|&v| scope_name(v)).collect::<Vec<_>>().join("/");
+                            AbResult::Refused(format!("descriptor scope differs (A {}, B {})", names(&sa), names(&sb)))
                         } else if x.censored > 0 || y.censored > 0 {
                             AbResult::Refused(format!(
                                 "CENSORED (A: {} censored of {}, B: {} censored of {})",
@@ -477,9 +619,34 @@ pub fn compare(a: &Analysis, b: &Analysis) -> Vec<AbRow> {
                             }
                         }
                     }
+                    (Presence::Valid(_), Presence::Absent) => AbResult::OnlyInA,
+                    (Presence::Absent, Presence::Valid(_)) => AbResult::OnlyInB,
+                    (pa, pb) => AbResult::InvalidLanesOnly {
+                        a: matches!(pa, Presence::InvalidOnly),
+                        b: matches!(pb, Presence::InvalidOnly),
+                    },
                 }
             };
-            AbRow { name, logical_tag, result }
+            AbRow { name, logical_tag, result, differences: row_diff }
         })
-        .collect()
+        .collect();
+
+    Comparison { refused, freq_hz: fa.filter(|_| fa == fb), differences, a_scope: scope_of(a), b_scope: scope_of(b), rows }
+}
+
+/// Valid statistics for key `k` in `x`; else present only in invalid lanes (a span with that key exists); else absent.
+fn presence<'a>(
+    x: &'a Analysis,
+    keys: &std::collections::BTreeSet<(String, String)>,
+    k: &(String, String),
+) -> Presence<'a> {
+    match x.zones.iter().find(|z| z.name == k.0 && z.logical_tag == k.1) {
+        Some(z) => Presence::Valid(z),
+        None if keys.contains(k) => Presence::InvalidOnly,
+        None => Presence::Absent,
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

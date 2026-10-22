@@ -595,6 +595,40 @@ pub fn base_with(extra: Vec<Chunk>) -> File {
     File::new(chunks)
 }
 
+/// Slot reuse: incarnation 1 (slot 1) records one zone and RETIRES; incarnation 2 is declared on the SAME slot 1, either
+/// after the RETIRED entry (`retire_first`, valid reuse) or before it (two live incarnations on one slot).
+pub fn slot_reuse_file(retire_first: bool) -> Vec<u8> {
+    let one = seqd(0, [zone(0, 0, 0, 100, 1, 0), vec![end(0, 0, 0, 200, 1)]].concat());
+    let mut l1 = lane(1, one);
+    l1.state = 1;
+    let l2 = lane(2, seqd(0, [zone(0, 1, 0, 500, 1, 0), vec![end(0, 1, 0, 600, 1)]].concat()));
+    let t1 = thr(1);
+    let t2 = Thr { slot: t1.slot, ..thr(2) };
+    let trailer = scenario(vec![l1.clone(), l2.clone()]).trailer_struct();
+    let retired = chunk(T_RETIRED, retired_payload(&[l1.fin()]));
+    let threads2 = chunk(T_THREADS, threads_payload(&[t2]));
+    let mut extra = vec![chunk(T_THREADS, threads_payload(&[t1])), chunk(T_RECORDS, records_payload(1, &l1.recs))];
+    if retire_first {
+        extra.push(retired);
+        extra.push(threads2);
+    } else {
+        extra.push(threads2);
+        extra.push(retired);
+    }
+    extra.push(chunk(T_RECORDS, records_payload(2, &l2.recs)));
+    extra.push(chunk(T_TRAILER, trailer.payload()));
+    base_with(extra).bytes()
+}
+
+/// A valid v1 file header with minor version 7 (any minor is readable).
+pub fn v1_header() -> Vec<u8> {
+    let mut h = b"PS3DKPRF".to_vec();
+    h.extend_from_slice(&1u16.to_le_bytes());
+    h.extend_from_slice(&7u16.to_le_bytes());
+    h.extend_from_slice(&0u32.to_le_bytes());
+    h
+}
+
 // ---- assertions -------------------------------------------------------------------------------------------------
 
 pub fn malformed(bytes: &[u8]) -> Malformed {

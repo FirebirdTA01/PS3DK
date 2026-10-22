@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use ps3dk_prof::Rule;
+use ps3dk_prof::{Incomplete, Rule};
 
 /// A valid one-lane capture: one completed zone.
 fn ok_lane() -> Lane {
@@ -645,6 +645,130 @@ fn end_flag_seq_limit_mismatch() {
 #[test]
 fn end_flag_sink_error_mismatch() {
     assert_rule(&with_trailer(|t| t.sink_errors = 1), Rule::EndFlagSinkErrorMismatch);
+}
+
+// ---- review additions: exact count ranges (section 6) and REGERR reconciliation (section 5.3) ----------------------
+
+#[test]
+fn written_count_over_2_pow_63() {
+    assert_rule(&with_trailer(|t| t.fins[0].written = P63 + 1), Rule::ExactCountRange);
+}
+
+#[test]
+fn dropped_count_over_2_pow_63() {
+    // Nothing written, 2^63 + 1 lost at the tail: dropped (and produced) over the bound; dropped is checked first.
+    let mut l = lane(1, Vec::new());
+    l.terminal = P63 + 1;
+    assert_rule(&scenario(vec![l]).bytes(), Rule::ExactCountRange);
+}
+
+#[test]
+fn refused_count_over_2_pow_63() {
+    assert_rule(&with_trailer(|t| t.fins[0].refused = P63 + 1), Rule::ExactCountRange);
+}
+
+#[test]
+fn regerr_count_over_2_pow_63() {
+    assert_rule(&with_trailer(|t| t.fins[0].regerr = P63 + 1), Rule::ExactCountRange);
+}
+
+#[test]
+fn open_spans_over_2_pow_63() {
+    assert_rule(&with_trailer(|t| t.fins[0].open = P63 + 1), Rule::ExactCountRange);
+}
+
+#[test]
+fn state3_written_count_over_2_pow_63() {
+    // written_count is exact even in a NOT_QUIESCED entry, so UNKNOWN there is out of range.
+    assert_rule(
+        &with_trailer(|t| {
+            t.fins[0] = Fin { state: 3, limit: 2, ..t.fins[0] };
+            t.fins[0].produced = UNKNOWN;
+            t.fins[0].dropped = UNKNOWN;
+            t.fins[0].refused = UNKNOWN;
+            t.fins[0].regerr = UNKNOWN;
+            t.fins[0].open = UNKNOWN;
+            t.fins[0].written = UNKNOWN;
+            t.end_flags |= 1;
+        }),
+        Rule::ExactCountRange,
+    );
+}
+
+#[test]
+fn regerr_record_with_regerr_count_0() {
+    // A REGERR record was written, but the unconditional counter says 0.
+    assert_rule(&with_recs(vec![regerr(0, 1)]), Rule::RegerrCountBelowRecords);
+}
+
+// ---- review additions: FRAME ids never saturate (section 4) ---------------------------------------------------------
+
+#[test]
+fn frame_id_repeated_after_gap() {
+    assert_rule(&with_recs(vec![frame(0, 10, 0), gap(1, 1), frame(2, 30, 0)]), Rule::FrameIdSequence);
+}
+
+#[test]
+fn frame_id_u64_max_after_gap() {
+    // Codex's case: u64::MAX after a GAP (previously accepted, then a second u64::MAX passed by saturation).
+    let recs = vec![frame(0, 10, 0), gap(1, 1), frame(2, 30, u64::MAX), frame(3, 40, u64::MAX)];
+    assert_rule(&with_recs(recs), Rule::FrameIdBound);
+}
+
+#[test]
+fn frame_id_one_above_its_seq() {
+    assert_rule(&with_recs(vec![frame(0, 10, 0), gap(1, 1), frame(2, 30, 3)]), Rule::FrameIdBound);
+}
+
+// ---- review additions: one live incarnation per slot (section 3) ----------------------------------------------------
+
+#[test]
+fn slot_already_live() {
+    let t2 = Thr { slot: 1, ..thr(2) };
+    assert_rule(&with_threads_payload(threads_payload(&[thr(1), t2])), Rule::SlotAlreadyLive);
+}
+
+#[test]
+fn slot_reused_before_its_incarnation_retired() {
+    assert_rule(&slot_reuse_file(false), Rule::SlotAlreadyLive);
+}
+
+// ---- review additions: the short-header prefix (section 2) ----------------------------------------------------------
+
+#[test]
+fn short_header_valid_prefix_at_every_length_is_torn() {
+    let h = v1_header();
+    for n in 0..16 {
+        let (_, why) = incomplete(&h[..n]);
+        assert!(why.contains(&Incomplete::TornTail), "{n}-byte prefix: {why:?}");
+    }
+}
+
+#[test]
+fn short_header_bad_byte_at_every_cut_point() {
+    for n in 1..16usize {
+        let mut h = v1_header();
+        h.truncate(n);
+        // The last byte present, unless it is a minor-version byte (10, 11: any value is legal); then byte 9.
+        let pos = if n - 1 == 10 || n - 1 == 11 { 9 } else { n - 1 };
+        h[pos] ^= 0x40;
+        let want = if pos < 8 {
+            Rule::MagicMismatch
+        } else if pos < 10 {
+            Rule::MajorVersion
+        } else {
+            Rule::FileFlagsNonzero
+        };
+        assert_eq!(malformed(&h).rule, want, "cut at {n}, bad byte {pos}");
+    }
+}
+
+#[test]
+fn fifteen_byte_header_with_nonzero_flags_byte_is_not_torn() {
+    let mut h = v1_header();
+    h.truncate(15);
+    h[14] = 1;
+    assert_rule(&h, Rule::FileFlagsNonzero);
 }
 
 // ---- 9. Token rule 4 --------------------------------------------------------------------------------------------

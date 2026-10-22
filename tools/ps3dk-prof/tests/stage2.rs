@@ -4,7 +4,9 @@
 mod common;
 
 use common::*;
-use ps3dk_prof::{compare, report, AbResult, Attribution, Incomplete, Metric, Rule, SpansN, TokenOutcome};
+use ps3dk_prof::{
+    compare, load, reader, report, AbResult, Attribution, Incomplete, Metric, Outcome, Rule, SpansN, TokenOutcome,
+};
 
 /// One completed zone on lane 1.
 fn one_zone() -> Vec<Rec> {
@@ -360,7 +362,7 @@ fn zone_with_one_truncated_instance_is_labelled_and_ab_refused_censored() {
     assert_eq!(za.label.as_deref(), Some("completed instances only: 1 censored of 2"));
     assert!(a.lane_valid(1), "censoring alone does not invalidate the lane");
     let b = complete(&clean_capture());
-    let rows = compare(&a, &b);
+    let rows = compare(&a, &b).rows;
     let row = rows.iter().find(|r| r.name == "zoneA").unwrap();
     match &row.result {
         AbResult::Refused(why) => assert!(why.starts_with("CENSORED (A: 1 censored of 2, B: 0 censored of 1)"), "{why}"),
@@ -372,7 +374,7 @@ fn zone_with_one_truncated_instance_is_labelled_and_ab_refused_censored() {
 fn clean_zone_in_the_same_capture_compares_normally() {
     let a = complete(&censored_capture());
     let b = complete(&clean_capture());
-    let rows = compare(&a, &b);
+    let rows = compare(&a, &b).rows;
     let row = rows.iter().find(|r| r.name == "zoneB").unwrap();
     assert_eq!(row.result, AbResult::Compared { a_mean: 50.0, b_mean: 60.0 });
     assert!(a.zone("zoneB").unwrap().label.is_none());
@@ -629,7 +631,8 @@ fn clean_owner_clean_worker_and_invalid_third_lane() {
     assert!(a.lane_valid(1) && a.lane_valid(2) && !a.lane_valid(3));
     assert_eq!(a.elapsed_for(1, 0), Some(&Metric::Value(200)));
     assert_eq!(a.work_for(1, 0, 2), Some(&Metric::Value(80)));
-    assert_eq!(a.work_for(1, 0, 3), Some(&Metric::Refused("lane invalid".to_string())));
+    // Lane 3's span ends before it begins, so its duration is unavailable as well as its lane invalid.
+    assert_eq!(a.work_for(1, 0, 3), Some(&Metric::Refused("lane invalid, duration unavailable".to_string())));
 }
 
 // ---- "spans N frames" (r4) --------------------------------------------------------------------------------------
@@ -668,4 +671,252 @@ fn owner_span_with_gap_inside_n_unknown() {
     );
     let a = complete(&scenario(vec![lane(1, recs)]).bytes());
     assert_eq!(a.spans[span_of(&a, 1, 1)].spans_n, SpansN::Unknown);
+}
+
+// ---- review additions: exact counts at 2^63 are accepted (section 6) -------------------------------------------------
+// written_count = 2^63 cannot be built: it must equal the records actually written.
+
+#[test]
+fn dropped_count_2_pow_63_accepted() {
+    let mut l = lane(1, Vec::new());
+    l.terminal = P63;
+    assert_eq!((l.fin().produced, l.fin().dropped), (P63, P63));
+    let a = complete(&scenario(vec![l]).bytes());
+    assert!(!a.lane_valid(1));
+}
+
+#[test]
+fn refused_count_2_pow_63_accepted() {
+    let mut l = lane(1, one_zone());
+    l.refused = P63;
+    let a = complete(&scenario(vec![l]).bytes());
+    assert!(lane_reasons(&a, 1).iter().any(|x| x == &format!("refused {P63}")));
+}
+
+#[test]
+fn regerr_count_2_pow_63_accepted() {
+    let mut l = lane(1, one_zone());
+    l.regerr = P63;
+    let a = complete(&scenario(vec![l]).bytes());
+    assert!(!a.lane_valid(1));
+}
+
+#[test]
+fn open_spans_2_pow_63_accepted() {
+    let s = scenario(vec![lane(1, one_zone())]);
+    let mut t = s.trailer_struct();
+    t.fins[0].open = P63;
+    let mut f = s.file();
+    let i = f.find(T_TRAILER);
+    f.chunks[i] = chunk(T_TRAILER, t.payload());
+    complete(&f.bytes());
+}
+
+#[test]
+fn regerr_record_with_nonzero_regerr_count_makes_lane_invalid() {
+    let mut l = lane(1, vec![regerr(0, 1)]);
+    l.regerr = 1;
+    let a = complete(&scenario(vec![l]).bytes());
+    assert!(!a.lane_valid(1));
+    assert!(lane_reasons(&a, 1).iter().any(|x| x == "regerr 1"));
+}
+
+// ---- review additions: FRAME ids at the legal maximum (section 4) ----------------------------------------------------
+
+#[test]
+fn frame_id_equal_to_its_seq_at_the_maximum_is_accepted() {
+    // Every earlier sequence was a dropped FRAME: id = seq = 2^63 - 1 is the largest assignable id.
+    let recs = vec![frame(0, 10, 0), gap(1, P63 - 2), frame(P63 - 1, 30, P63 - 1)];
+    let a = complete(&scenario(vec![lane(1, recs)]).bytes());
+    assert_eq!(a.capture.lanes[&1].frames.last().map(|f| f.id), Some(P63 - 1));
+}
+
+// ---- review additions: no saturated value (section 9) ----------------------------------------------------------------
+
+#[test]
+fn nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_mean() {
+    // zoneA parent 0 .. 2^63 + 2, zoneA child 1 .. 2^63 + 1: durations 2^63 + 2 and 2^63, sum 2^64 + 2.
+    let recs = seqd(
+        0,
+        [
+            zone(0, 0, 0, 0, 1, 0),
+            zone(0, 0, 1, 1, 2, 1),
+            vec![end(0, 0, 1, P63 + 1, 2), end(0, 0, 0, P63 + 2, 1)],
+        ]
+        .concat(),
+    );
+    let a = complete(&scenario(vec![lane(1, recs)]).bytes());
+    let z = a.zone("zoneA").unwrap();
+    let want: u128 = (1u128 << 64) + 2;
+    assert_eq!(z.total, Metric::Value(want));
+    assert_eq!(z.mean, Metric::Value(want as f64 / 2.0));
+    assert_eq!(a.capture.spans[span_of(&a, 1, 1)].exclusive(), Some(2));
+}
+
+#[test]
+fn clock_anomaly_span_duration_is_unavailable_not_zero() {
+    let recs = seqd(0, [zone(0, 0, 0, 200, 1, 0), vec![end(0, 0, 0, 150, 1)]].concat());
+    let a = complete(&scenario(vec![lane(1, recs)]).bytes());
+    let s = &a.capture.spans[span_of(&a, 1, 1)];
+    assert_eq!((s.inclusive(), s.exclusive()), (None, None));
+    assert!(s.duration_unavailable());
+    let text = report::render(&a);
+    assert!(text.contains("duration unavailable (CLOCK_ANOMALY: END before BEGIN)"), "{text}");
+    assert!(!text.contains("inclusive 0"), "{text}");
+}
+
+#[test]
+fn parent_of_an_anomalous_child_has_an_unavailable_exclusive_duration() {
+    // Parent 100 .. 300; child BEGIN 200, END 150 (an anomaly).
+    let recs = seqd(
+        0,
+        [zone(0, 0, 0, 100, 1, 0), zone(0, 1, 1, 200, 2, 1), vec![end(0, 1, 1, 150, 2), end(0, 0, 0, 300, 1)]].concat(),
+    );
+    let a = complete(&scenario(vec![lane(1, recs)]).bytes());
+    let p = &a.capture.spans[span_of(&a, 1, 1)];
+    assert_eq!((p.inclusive(), p.exclusive()), (Some(200), None));
+    let text = report::render(&a);
+    assert!(text.contains("inclusive 200, exclusive unavailable"), "{text}");
+}
+
+// ---- review additions: A/B compatibility policy ------------------------------------------------------------------
+
+/// `clean_capture()` with its HEADER and CLOCKS replaced.
+fn variant(hdr: Hdr, freq: u64, descs: Option<Vec<Desc>>) -> Vec<u8> {
+    let recs = seqd(
+        0,
+        [zone(0, 0, 0, 100, 1, 0), vec![end(0, 0, 0, 210, 1)], zone(0, 1, 0, 300, 2, 0), vec![end(0, 1, 0, 360, 2)]]
+            .concat(),
+    );
+    let mut s = scenario(vec![lane(1, recs)]);
+    if let Some(ds) = descs {
+        s.descs = ds;
+    }
+    let mut f = s.file();
+    f.chunks[0] = chunk(T_HEADER, hdr.payload());
+    f.chunks[1] = chunk(T_CLOCKS, clocks_payload(1, 1, 0, freq, 1000));
+    f.bytes()
+}
+
+const FREQ: u64 = 79_800_000;
+
+#[test]
+fn compare_refuses_a_different_clock_frequency() {
+    let a = complete(&clean_capture());
+    let b = complete(&variant(Hdr::default(), FREQ + 1, None));
+    let c = compare(&a, &b);
+    assert!(c.refused.as_deref().unwrap().starts_with("clock frequency differs"), "{c:?}");
+    assert!(c.rows.iter().all(|r| matches!(r.result, AbResult::Refused(_))));
+    assert_eq!(c.freq_hz, None);
+}
+
+#[test]
+fn compare_refuses_an_abi_mismatch() {
+    let a = complete(&clean_capture());
+    let b = complete(&variant(Hdr { abi: 2, ..Hdr::default() }, FREQ, None));
+    assert_eq!(compare(&a, &b).refused.as_deref(), Some("ABI differs"));
+}
+
+#[test]
+fn compare_refuses_a_descriptor_scope_mismatch() {
+    let mut ds = std_descs();
+    ds[0].scope = 2;
+    let a = complete(&clean_capture());
+    let b = complete(&variant(Hdr::default(), FREQ, Some(ds)));
+    let c = compare(&a, &b);
+    assert_eq!(c.refused, None);
+    let za = c.rows.iter().find(|r| r.name == "zoneA").unwrap();
+    assert_eq!(za.result, AbResult::Refused("descriptor scope differs (A cpu, B gpu-complete)".to_string()));
+    let zb = c.rows.iter().find(|r| r.name == "zoneB").unwrap();
+    assert!(matches!(zb.result, AbResult::Compared { .. }));
+}
+
+#[test]
+fn compare_records_build_compiler_flags_and_workload_differences() {
+    let build = b"test-build-0002".to_vec();
+    let mut ds = std_descs();
+    for d in &mut ds {
+        d.id = Some(desc_id(&build, "main.c", d.line, std::str::from_utf8(&d.name).unwrap()));
+    }
+    let hdr = Hdr {
+        build_id: build,
+        compiler: b"gcc 16.2.0".to_vec(),
+        flags: b"-O3".to_vec(),
+        workload: b"other".to_vec(),
+        ..Hdr::default()
+    };
+    let a = complete(&clean_capture());
+    let b = complete(&variant(hdr, FREQ, Some(ds)));
+    let c = compare(&a, &b);
+    assert_eq!(c.refused, None);
+    assert_eq!(c.freq_hz, Some(FREQ));
+    for what in ["build id", "compiler", "flags", "workload"] {
+        assert!(c.differences.iter().any(|d| d.starts_with(what)), "{what}: {:?}", c.differences);
+    }
+    assert_eq!(c.differences.len(), 4, "{:?}", c.differences);
+    assert!(c.rows.iter().all(|r| matches!(r.result, AbResult::Compared { .. })));
+}
+
+#[test]
+fn compare_records_a_source_line_difference() {
+    let mut ds = std_descs();
+    ds[1].line = 99;
+    let a = complete(&clean_capture());
+    let b = complete(&variant(Hdr::default(), FREQ, Some(ds)));
+    let c = compare(&a, &b);
+    let zb = c.rows.iter().find(|r| r.name == "zoneB").unwrap();
+    assert!(matches!(zb.result, AbResult::Compared { .. }));
+    assert_eq!(zb.differences, vec!["source location: A main.c:11, B main.c:99".to_string()]);
+    assert!(c.rows.iter().find(|r| r.name == "zoneA").unwrap().differences.is_empty());
+}
+
+#[test]
+fn compare_exposes_the_valid_lane_scope() {
+    let mut bad = lane(2, Vec::new());
+    bad.regerr = 1;
+    let a = complete(&scenario(vec![lane(1, one_zone()), bad]).bytes());
+    let b = complete(&clean_capture());
+    let c = compare(&a, &b);
+    assert_eq!((c.a_scope.clone(), c.b_scope.clone()), (vec![1], vec![1]));
+}
+
+#[test]
+fn compare_distinguishes_a_key_only_in_invalid_lanes_from_an_absent_key() {
+    // A: lane 1 (valid) has zoneA and zoneC; lane 2 (invalid: regerr) has zoneB.  B: lane 1 has zoneA only.
+    let l1 = seqd(
+        0,
+        [zone(0, 0, 0, 100, 1, 0), vec![end(0, 0, 0, 200, 1)], zone(0, 2, 0, 300, 2, 0), vec![end(0, 2, 0, 350, 2)]]
+            .concat(),
+    );
+    let mut l2 = lane(2, seqd(0, [zone(0, 1, 0, 120, 1, 0), vec![end(0, 1, 0, 180, 1)]].concat()));
+    l2.regerr = 1;
+    let a = complete(&scenario(vec![lane(1, l1), l2]).bytes());
+    let b = complete(&scenario(vec![lane(1, one_zone())]).bytes());
+    let c = compare(&a, &b);
+    let row = |n: &str| c.rows.iter().find(|r| r.name == n).unwrap().result.clone();
+    assert!(matches!(row("zoneA"), AbResult::Compared { .. }));
+    assert_eq!(row("zoneB"), AbResult::InvalidLanesOnly { a: true, b: false });
+    assert_eq!(row("zoneC"), AbResult::OnlyInA);
+}
+
+// ---- review additions: one live incarnation per slot (section 3) ----------------------------------------------------
+
+#[test]
+fn slot_reuse_after_its_incarnation_retired_is_valid() {
+    let a = complete(&slot_reuse_file(true));
+    assert!(a.lane_valid(1) && a.lane_valid(2));
+    let slots: Vec<u32> = a.capture.lanes.values().map(|l| l.info.as_ref().unwrap().slot).collect();
+    assert_eq!(slots, vec![1, 1]);
+}
+
+// ---- review additions: read is structural, load is the verdict --------------------------------------------------------
+
+#[test]
+fn read_alone_accepts_a_rule_4_case_that_load_refuses() {
+    let bytes = token_scenario(5).bytes();
+    assert!(reader::read(&bytes).is_ok(), "the structural pass accepts it");
+    match load(&bytes) {
+        Outcome::Malformed(m) => assert_eq!(m.rule, Rule::TokenImpossible),
+        Outcome::Analysed(a) => panic!("load must refuse it, got {:?}", a.verdict),
+    }
 }

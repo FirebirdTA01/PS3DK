@@ -146,34 +146,69 @@ fn read_final_entry(cur: &mut Cursor<'_>, from_retired_chunk: bool) -> Result<Fi
             format!("state-{state} entry of {incarnation} carries UNKNOWN or COUNTS_UNKNOWN"),
         );
     }
+    // Section 6: counts are at most 2^63.  Every EXACT count is checked here: written_count in every state (it is
+    // exact even for NOT_QUIESCED), the others in states 1 and 2.  produced_count has its own rule, checked with the
+    // arithmetic in `finish`.
+    let mut exact = vec![("written_count", entry.written_count)];
+    if state != STATE_NOT_QUIESCED {
+        exact.extend([
+            ("dropped_count", entry.dropped_count),
+            ("refused_count", entry.refused_count),
+            ("regerr_count", entry.regerr_count),
+            ("open_spans", entry.open_spans),
+        ]);
+    }
+    for (what, v) in exact {
+        if v > SEQ_LIMIT {
+            return malformed(Rule::ExactCountRange, format!("final entry of {incarnation}: {what} {v} > 2^63"));
+        }
+    }
     Ok(entry)
 }
+
+/// The fixed 16-byte file header with any minor version: magic, major = 1 (LE), minor (any), file_flags = 0.
+const MAJOR_LE: [u8; 2] = [1, 0];
 
 /// Per-file reader state.
 struct Reader {
     cap: Capture,
     declared: BTreeSet<u32>,
-    live: u32,
+    /// Live incarnations by slot.  Invariant (the reader's reading of sections 3 and 5.4, which reuse a slot only
+    /// after its retired incarnation is drained): at most ONE live incarnation per slot.  An incarnation is live from
+    /// its THREADS entry until its RETIRED entry; a TRAILER entry does not free its slot (nothing follows the TRAILER).
+    live_slots: BTreeMap<u32, u32>,
     descriptor_ids: BTreeMap<u64, u32>,
     trailer_seen: bool,
 }
 
-/// Decode `bytes`.  `Err` is a MALFORMED verdict; `Ok` may still be INCOMPLETE.
+/// The STRUCTURAL pass: sections 1-6.  `Err` is a MALFORMED verdict; `Ok` may still be INCOMPLETE.
+///
+/// A successful `read` is NOT a full validity verdict: token rule 4 (section 9) needs the whole file and is applied
+/// by [`crate::analysis::analyze`].  Use [`crate::analysis::load`] for the verdict of a file.
 pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
     let mut r = Reader {
         cap: Capture::default(),
         declared: BTreeSet::new(),
-        live: 0,
+        live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
         trailer_seen: false,
     };
     if bytes.len() < FILE_HEADER_LEN {
-        // A file cut inside its 16-byte header: torn only if what is there matches the start of a v1 header.
-        let mut expect = MAGIC.to_vec();
-        expect.extend_from_slice(&1u16.to_le_bytes());
-        let n = bytes.len().min(expect.len());
-        if bytes[..n] != expect[..n] {
-            return malformed(Rule::MagicMismatch, "file shorter than its header and not a v1 prefix");
+        // A file cut inside its 16-byte header is torn only if EVERY constrained byte present is right: the magic,
+        // major = 1, and file_flags = 0.  The minor version (bytes 10-11) may be anything.
+        let n = bytes.len();
+        let m = n.min(MAGIC.len());
+        if bytes[..m] != MAGIC[..m] {
+            return malformed(Rule::MagicMismatch, format!("{n}-byte file: not a prefix of the v1 magic"));
+        }
+        if n > 8 {
+            let k = n.min(10) - 8;
+            if bytes[8..8 + k] != MAJOR_LE[..k] {
+                return malformed(Rule::MajorVersion, format!("{n}-byte file: major version bytes are not 1"));
+            }
+        }
+        if n > 12 && bytes[12..n].iter().any(|&b| b != 0) {
+            return malformed(Rule::FileFlagsNonzero, format!("{n}-byte file: file_flags bytes are not 0"));
         }
         r.cap.incomplete.push(Incomplete::TornTail);
         r.cap.incomplete.push(Incomplete::NoTrailer);
@@ -404,10 +439,17 @@ impl Reader {
             if !self.declared.insert(incarnation) {
                 return malformed(Rule::IncarnationDuplicate, format!("incarnation {incarnation} declared twice"));
             }
-            self.live += 1;
-            if self.live > max {
-                return malformed(Rule::TooManyLiveIncarnations, format!("{} live incarnations > {max}", self.live));
+            let live = self.live_slots.len() + 1;
+            if live > max as usize {
+                return malformed(Rule::TooManyLiveIncarnations, format!("{live} live incarnations > {max}"));
             }
+            if let Some(&other) = self.live_slots.get(&slot) {
+                return malformed(
+                    Rule::SlotAlreadyLive,
+                    format!("incarnation {incarnation} takes slot {slot}, still held by live incarnation {other}"),
+                );
+            }
+            self.live_slots.insert(slot, incarnation);
             let lane = self.cap.lanes.entry(incarnation).or_default();
             lane.info = Some(ThreadInfo { incarnation, slot, os_thread_id, name });
         }
@@ -422,8 +464,15 @@ impl Reader {
         }
         for _ in 0..count {
             let entry = read_final_entry(&mut c, true)?;
+            let inc = entry.incarnation;
             self.place_final_entry(entry)?;
-            self.live = self.live.saturating_sub(1);
+            // The RETIRED incarnation frees its slot (place_final_entry proved it declared, so it has a lane and info).
+            let slot = self.cap.lanes[&inc].info.as_ref().map(|i| i.slot);
+            if let Some(slot) = slot {
+                if self.live_slots.get(&slot) == Some(&inc) {
+                    self.live_slots.remove(&slot);
+                }
+            }
         }
         c.done()
     }
@@ -552,6 +601,17 @@ impl Reader {
                     ),
                 );
             }
+            // Section 5.3: regerr_count is incremented unconditionally and the REGERR record is best effort, so the
+            // counter covers every REGERR record written.
+            if e.regerr_count < lane.regerr_records {
+                return malformed(
+                    Rule::RegerrCountBelowRecords,
+                    format!(
+                        "incarnation {inc}: regerr_count {} but {} REGERR records",
+                        e.regerr_count, lane.regerr_records
+                    ),
+                );
+            }
         }
 
         if let Some(t) = &self.cap.trailer {
@@ -653,7 +713,8 @@ fn process_records(
             let Some(begin) = lane.pending_begin else {
                 return malformed(Rule::BeginParentPlacement, format!("{}: BEGIN_PARENT without its BEGIN", at()));
             };
-            if r.seq != begin.seq.wrapping_add(1) || r.depth != begin.depth {
+            // begin.seq passed the 2^63 range check, so + 1 cannot overflow.
+            if r.seq != begin.seq + 1 || r.depth != begin.depth {
                 return malformed(
                     Rule::BeginParentPlacement,
                     format!("{}: BEGIN_PARENT does not match BEGIN seq {} depth {}", at(), begin.seq, begin.depth),
@@ -694,13 +755,24 @@ fn process_records(
             KIND_END => end_span(lane, spans, r).map_err(|(rule, d)| Malformed { rule, detail: format!("{}: {d}", at()) })?,
             KIND_FRAME => {
                 let id = r.c;
-                if id != lane.next_frame_id && !(id > lane.next_frame_id && lane.gap_since_frame) {
+                // Strictly increasing by 1, or skipping ahead only across a GAP; never repeated, never after the
+                // last assignable id.
+                let in_sequence = !lane.frame_ids_exhausted
+                    && (id == lane.next_frame_id || (id > lane.next_frame_id && lane.gap_since_frame));
+                if !in_sequence {
                     return malformed(
                         Rule::FrameIdSequence,
                         format!("{}: frame id {id}, expected {}", at(), lane.next_frame_id),
                     );
                 }
-                lane.next_frame_id = id.saturating_add(1);
+                // Ids 0..id were each assigned with a distinct sequence, the last of them this record's own.
+                if id > r.seq {
+                    return malformed(Rule::FrameIdBound, format!("{}: frame id {id} above its seq {}", at(), r.seq));
+                }
+                match id.checked_add(1) {
+                    Some(next) => lane.next_frame_id = next,
+                    None => lane.frame_ids_exhausted = true,
+                }
                 lane.frames.push(FrameRecord { id, seq: r.seq, tb: r.b });
                 lane.current_frame = Some(id);
                 lane.gap_since_frame = false;
@@ -804,7 +876,7 @@ fn begin_span(
     }
     if let Some(&top) = lane.stack.last() {
         let t = &spans[top];
-        if depth != t.depth.wrapping_add(1) || parent != t.span_id {
+        if u16::from(depth) != u16::from(t.depth) + 1 || parent != t.span_id {
             return Err((
                 Rule::StackBeginMismatch,
                 format!("BEGIN depth {depth} parent {parent} above span {} at depth {}", t.span_id, t.depth),
@@ -845,6 +917,7 @@ fn begin_span(
         gaps_before_begin: lane.gap_count,
         gaps_before_end: None,
         children_inclusive: 0,
+        children_unavailable: false,
     });
     let idx = spans.len() - 1;
     lane.stack.push(idx);
@@ -880,9 +953,14 @@ fn end_span(lane: &mut Lane, spans: &mut [Span], r: &RawRecord) -> Result<(), (R
     span.truncated_at_stop = r.flags & FLAG_TRUNCATED_AT_STOP != 0;
     span.frames_before_end = Some(frames);
     span.gaps_before_end = Some(gaps);
-    let inclusive = span.inclusive().unwrap_or(0);
+    let inclusive = span.inclusive();
     if let Some(&parent) = lane.stack.last() {
-        spans[parent].children_inclusive = spans[parent].children_inclusive.saturating_add(inclusive);
+        let p = &mut spans[parent];
+        match inclusive {
+            // u128 holds the sum of any number of u64 durations a capture can carry (fewer than 2^63 spans).
+            Some(d) => p.children_inclusive += u128::from(d),
+            None => p.children_unavailable = true,
+        }
     }
     Ok(())
 }

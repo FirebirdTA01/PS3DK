@@ -94,6 +94,8 @@ pub enum Rule {
     ThreadSlotRange,
     IncarnationDuplicate,
     TooManyLiveIncarnations,
+    /// A THREADS entry names a slot that a live (declared, not yet RETIRED) incarnation still holds.
+    SlotAlreadyLive,
     RecordsCountZero,
     RecordsLength,
     RetiredCountZero,
@@ -122,6 +124,8 @@ pub enum Rule {
     KnownEmptyBeginDepth,
     KnownEmptyEnd,
     FrameIdSequence,
+    /// A FRAME id above its own seq: ids 0..id were each assigned with a distinct earlier sequence (sections 5.1, 5.6).
+    FrameIdBound,
     // 6. TRAILER and final entries
     TrailerEndFlagsReserved,
     TrailerReserved,
@@ -130,10 +134,15 @@ pub enum Rule {
     FinalEntryLimitFlagsReserved,
     ExactEntryUnknown,
     State3Fields,
+    /// An exact count (written, dropped, refused, regerr, open_spans) above 2^63 (section 6: counts are at most 2^63).
+    ExactCountRange,
     WrittenCountMismatch,
     ProducedCountRange,
     ProducedCountArithmetic,
     DroppedCountArithmetic,
+    /// regerr_count below the REGERR records written for the incarnation (section 5.3: the counter is incremented
+    /// unconditionally, the record is best effort).
+    RegerrCountBelowRecords,
     DescriptorCountMismatch,
     EndFlagNotQuiescedMismatch,
     EndFlagSeqLimitMismatch,
@@ -321,8 +330,12 @@ pub struct Span {
     /// GAPs seen on this incarnation before the BEGIN and before the END.
     pub gaps_before_begin: u64,
     pub gaps_before_end: Option<u64>,
-    /// The summed inclusive durations of this span's direct children on the same incarnation.
-    pub children_inclusive: u64,
+    /// The summed inclusive durations of this span's direct children on the same incarnation (u128: exact, no
+    /// saturation).
+    pub children_inclusive: u128,
+    /// A direct child ended but its duration is unavailable (END tb before its BEGIN tb), so this span's exclusive
+    /// duration is unavailable too.
+    pub children_unavailable: bool,
 }
 
 impl Span {
@@ -333,13 +346,23 @@ impl Span {
     pub fn is_censored(&self) -> bool {
         self.is_open() || self.truncated_at_stop
     }
-    /// END tb - BEGIN tb for a span that has an END.
+    /// END tb - BEGIN tb for a span that has an END.  None when OPEN, and None (unavailable, never 0) when the END tb
+    /// is earlier than the BEGIN tb (a CLOCK_ANOMALY).
     pub fn inclusive(&self) -> Option<u64> {
-        self.end_tb.map(|end| end.saturating_sub(self.begin_tb))
+        self.end_tb.and_then(|end| end.checked_sub(self.begin_tb))
     }
-    /// Inclusive minus the direct children's inclusive durations (section 9).
+    /// The span ended, but END tb < BEGIN tb: its duration is unavailable.
+    pub fn duration_unavailable(&self) -> bool {
+        self.end_tb.is_some() && self.inclusive().is_none()
+    }
+    /// Inclusive minus the direct children's inclusive durations (section 9).  None when the inclusive duration, or
+    /// any direct child's, is unavailable, or when the children exceed the parent (only possible with clock anomalies).
     pub fn exclusive(&self) -> Option<u64> {
-        self.inclusive().map(|inc| inc.saturating_sub(self.children_inclusive))
+        if self.children_unavailable {
+            return None;
+        }
+        let inc = self.inclusive()?;
+        u128::from(inc).checked_sub(self.children_inclusive).and_then(|x| u64::try_from(x).ok())
     }
 }
 
@@ -378,6 +401,8 @@ pub struct Lane {
     pub(crate) span_ids: BTreeSet<u64>,
     pub(crate) last_tb: Option<u64>,
     pub(crate) next_frame_id: u64,
+    /// The last FRAME id was u64::MAX, so no further id can be assigned (checked, never saturated).
+    pub(crate) frame_ids_exhausted: bool,
     pub(crate) gap_since_frame: bool,
     pub(crate) current_frame: Option<u64>,
     pub(crate) retired: bool,
