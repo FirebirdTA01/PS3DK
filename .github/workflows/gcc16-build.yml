@@ -22,6 +22,11 @@ on:
         description: "Branch, tag or commit to build (default feat/gcc16)"
         required: false
         default: "feat/gcc16"
+      eh_registry_checks:
+        description: "Also require the three libgcc FDE registry checks (gcc-16.x 0074/0077) with no SKIP"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -49,6 +54,7 @@ jobs:
           mkdir -p "$LOGS"
           {
             echo "requested_ref=${{ inputs.ref || 'feat/gcc16' }}"
+            echo "eh_registry_checks=${{ inputs.eh_registry_checks == true }}"
             echo "resolved_commit=$(git rev-parse HEAD)"
             echo "workflow_commit=${{ github.sha }}"
             echo "runner=$(uname -a)"
@@ -188,6 +194,13 @@ jobs:
           check cxx20-header          sh tests/host/cxx20-header-test.sh
           check lv2-errno-values      bash tests/sdk/lv2-errno-values-test.sh --ps3dev "$PS3DEV"
           check gcc16-series          bash tests/host/gcc16-series-test.sh
+          # Only when asked: a ref without gcc-16.x 0074 skips these, and here a skip is a failure, so the nightly
+          # (feat/gcc16 before the EH landing) must not run them.  Each test covers both multilibs itself.
+          if [ "${{ inputs.eh_registry_checks == true }}" = true ]; then
+            check libgcc-fde-fast-path      bash tests/host/libgcc-fde-fast-path-test.sh
+            check libgcc-heap-ready-link    bash tests/host/libgcc-heap-ready-link-test.sh
+            check libgcc-registry-adversary bash tests/host/libgcc-registry-tests-adversary-test.sh
+          fi
           echo "target-check failures: $fails" | tee "$LOGS/checks-summary.txt"
           [ $fails -eq 0 ]
 
