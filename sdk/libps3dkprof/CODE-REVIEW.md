@@ -69,7 +69,7 @@ All six are in `rt_t_counters.c`. Each asserts:
 
 | File | Role |
 |---|---|
-| `sdk/include/ps3dk/prof.h` | The API, the types, the enabled and disabled macros, the C++ guard, the SPU `#error`. In `sdk/Makefile` HEADERS, not in SUBLIBS. |
+| `sdk/include/ps3dk/prof.h` | The API, the types, the enabled and disabled macros, the C++ guard, the SPU `#error`. Not in `sdk/Makefile` HEADERS or SUBLIBS: it serves the isolated host tests only. |
 | `src/pal/pal.h`, `src/pal/pal_host.c` | The PAL interface and the POSIX implementation. Test faults are injected here. |
 | `src/core/prof_internal.h` | Structures, atomics, constants, the `ps3dk_prof__` symbol renames, the hook macros. |
 | `src/core/prof_test_hooks.h` | The `PS3DK_PROF_TEST_HOOKS`-only hook table, presets and statistics. |
@@ -171,6 +171,8 @@ All six are in `rt_t_counters.c`. Each asserts:
 
 ### Decisions the contract left open
 
+These choices are recorded for review. They are NOT accepted (codex 2026-10-22 00:59).
+
 | Decision | Choice and reason |
 |---|---|
 | `set_sink_path` | Names the capture **directory**, so Q7's snprintf-truncation EINVAL is reachable. The file is `<dir>/<app>-<16 hex of the init timebase>.prof`. Documented in `prof.h`. |
@@ -197,7 +199,7 @@ Every name in the plan and its errata is implemented, apart from `rt_thread_mode
 | Boundary correction | 6 rows | `rt_t_counters.c` |
 | Off-build and probes (host) | OB-E1, OB-E2 (enabled, undefined, =0; RUN), host OB-P, OB-N, PROBE-G (copy and move), archive symbols | `build-and-run.sh` |
 
-`rt_list.h` is the authoritative list: 97 tests, each run under plain, ASan+UBSan and TSan. Every capture is checked by `ps3dk-prof check` against the verdict the test declares.
+`rt_list.h` is the authoritative list, frozen in sorted form as `tests/host/ps3dk-prof-runtime/rt-registry.txt`, which each variant's `rt --list` must equal exactly: 97 tests, each run under plain, ASan+UBSan and TSan. Every capture is checked by `ps3dk-prof check` against the verdict the test declares.
 
 ## 5. Deferred: target-only, needs the cross compiler or LV2
 
@@ -207,9 +209,14 @@ Every name in the plan and its errata is implemented, apart from `rt_thread_mode
 | OB-P and OB-S (cross `-E` and `-S`, ILP32 and LP64), OB-SPU | Need `powerpc64-ps3-elf-gcc` and `spu-elf-gcc`. The host OB-P and OB-N run here instead. |
 | PROBE-A, PROBE-L (both ABIs), PROBE-U, PROBE-O, PROBE-T | Layout, lock-free, libatomic, ordering and timebase codegen on the shipped compilers. PROBE-L's host half is the `_Static_assert` in `prof_internal.h`. |
 | PROBE-H on the installed archives | No target archive exists in this step. Its host equivalent, the archive-symbol check, runs on hook-free host objects. |
-| OB-H (sdk-header-list) | It runs `make install-headers` and is not run here. The HEADERS entry has been added. |
+| OB-H (sdk-header-list) | It runs `make install-headers` and is not run here. `prof.h` is NOT in the sdk/Makefile HEADERS list (codex 00:59): the header serves the isolated host tests only until a library ships. |
 
-**Not covered by any named test:** the ID_COLLISION path (core:376-380). A real FNV-64 collision cannot be constructed, and the hook table has no id override. Its code shares the TABLE_FULL tail, which is tested.
+**COVERAGE GAP, open:** the ID_COLLISION path (core:376-380) has no test. It must be closed BEFORE runtime acceptance. The fix is a test-only hash override or collision hook (or an equivalent controlled injection), with three checks:
+- a positive collision case;
+- a non-collision case;
+- a hook-free production-symbol check.
+
+That the TABLE_FULL tail is tested does not cover this path. The hook is not implemented in this step, and it is not required before the first diagnostic compile.
 
 ## 6. Expected compile risks
 

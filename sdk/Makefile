@@ -591,8 +591,7 @@ HEADERS := \
     include/cell/daisy/pipe.h \
     include/cell/daisy/lfqueue2_types.h \
     include/cell/daisy/ato_qctl.h \
-    include/simdmath/fastf4.h \
-    include/ps3dk/prof.h
+    include/simdmath/fastf4.h
 
 SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libhash libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis
 
