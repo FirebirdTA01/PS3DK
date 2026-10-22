@@ -119,3 +119,4 @@ RT(rt_id_same_name_not_collision)
 /* codex 2026-10-22 02:45 R3: the OS thread id read fails closed (pal_os_thread_id status + out-param) */
 RT(rt_thread_begin_os_id_failure_refused)
 RT(rt_thread_begin_os_id_failure_second_thread)
+RT(rt_auto_register_os_id_failure_then_recovery)

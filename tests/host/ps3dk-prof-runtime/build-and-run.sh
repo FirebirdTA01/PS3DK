@@ -24,7 +24,7 @@
 # tsan_race_ctl.c, built with the tsan compiler and flags (controls.tsv, controls-tsan/): the POSITIVE control must exit
 # with the declared TSAN_OPTIONS exitcode AND print exactly one ThreadSanitizer report, a data race whose stacks name
 # writer_a at its RACE-A line and writer_b at its RACE-B line; the NEGATIVE control (mutex) must exit 0 with no
-# sanitizer report.  A failed control fails the variant and its 102 rows are NOT RUN (detection not proven).
+# sanitizer report.  A failed control fails the variant and its 103 rows are NOT RUN (detection not proven).
 # Plain and asan launches are unchanged.
 # The TSan launch path (rrun, xrun, the setarch identity check, the sanitizer probes, the detection controls and the
 # variant admission) lives in driver-tsan.sh, sourced below.  It does not rely on errexit: every launch and evidence
@@ -215,7 +215,7 @@ export UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1"
 controls="$out/controls.tsv"
 printf 'control\tresult\treason\n' >"$controls"
 
-# The frozen registry: the 102 test names, sorted, unique.  Each built variant's `rt --list` must equal it exactly.
+# The frozen registry: the 103 test names, sorted, unique.  Each built variant's `rt --list` must equal it exactly.
 registry="$here/rt-registry.txt"
 mapfile -t names <"$registry"
 if [ "${#names[@]}" -eq 0 ] || [ "$(LC_ALL=C sort -u "$registry")" != "$(cat "$registry")" ]; then

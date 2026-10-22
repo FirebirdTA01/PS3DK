@@ -119,7 +119,7 @@ int rt_thread_begin_os_id_failure_refused(const char *out)
     CHECK_EQ(cap.nthreads, 1);
     CHECK_EQ(cap.threads_inc[0], 1);
     CHECK_EQ(cap.threads_slot[0], 0);
-    CHECK_EQ(cap.unreg, 0);   /* an ETHREAD refusal is not counted as unregistered (open question in PAL-PREP-r1) */
+    CHECK_EQ(cap.unreg, 0);   /* an ETHREAD refusal is not counted as unregistered (codex 03:21) */
     rt_cap_free(&cap);
     return rt_expect(out, 0);
 }
@@ -163,6 +163,51 @@ int rt_thread_begin_os_id_failure_second_thread(const char *out)
     CHECK_EQ(cap.nthreads, 2);
     CHECK_EQ(cap.threads_inc[0], 1);
     CHECK_EQ(cap.threads_inc[1], 2);
+    rt_cap_free(&cap);
+    return rt_expect(out, 0);
+}
+
+/* auto_register follows the same rule (codex 03:21): an id-read failure on an auto-registering BEGIN returns an INERT
+ * zone and consumes no slot, incarnation id or generation; it is not counted in unregistered_refusals.  A later BEGIN
+ * on the same thread then registers and records normally.  The capture's COMPLETE verdict does not mean every
+ * attempted auto zone was captured: the refused attempt is absent from it, which is asserted below. */
+int rt_auto_register_os_id_failure_then_recovery(const char *out)
+{
+    ps3dk_prof_config c;
+    char path[512];
+    rt_cap cap;
+    rt_config(&c);
+    c.auto_register = 1;
+    CHECK_OK(rt_start(out, &c, 0));   /* main is NOT registered explicitly */
+    ps3dk_prof_test_hooks.os_id_fail = 1;
+    {
+        ps3dk_prof_zone z = PS3DK_PROF_ZONE_BEGIN("refused");
+        CHECK_EQ(z.kind, 0);   /* INERT */
+        PS3DK_PROF_ZONE_END(z);
+    }
+    CHECK_EQ(RT_READ(SLOT), 0);
+    CHECK_EQ(RT_READ(INCARNATION), 0);
+    CHECK_EQ(RT_READ(GENERATION), 0);
+    CHECK_EQ(ps3dk_prof_test_stat(PS3DK_PROF_TEST_STAT_SLOT_STATE_BASE + 0), RT_SLOT_FREE);
+    ps3dk_prof_test_hooks.os_id_fail = 0;
+    {
+        ps3dk_prof_zone z = PS3DK_PROF_ZONE_BEGIN("recovered");
+        CHECK_EQ(z.kind, 1);   /* auto-registered now */
+        PS3DK_PROF_ZONE_END(z);
+    }
+    CHECK_EQ(RT_READ(SLOT), 1);
+    CHECK_EQ(RT_READ(INCARNATION), 1);   /* the refused attempt consumed no incarnation id */
+    CHECK_EQ(RT_READ(GENERATION), 1);    /* nor a slot generation */
+    CHECK_EQ(ps3dk_prof_test_stat(PS3DK_PROF_TEST_STAT_SLOT_STATE_BASE + 0), RT_SLOT_LIVE);
+    CHECK_EQ(ps3dk_prof_shutdown(), PS3DK_PROF_OK);
+    CHECK_EQ(rt_capture_path(out, path, sizeof path), 0);
+    CHECK_EQ(rt_cap_load(path, &cap), 0);
+    CHECK_EQ(cap.nthreads, 1);
+    CHECK_EQ(cap.threads_inc[0], 1);
+    CHECK_EQ(cap.threads_slot[0], 0);
+    CHECK_EQ(cap.unreg, 0);                          /* the ETHREAD refusal is not counted */
+    CHECK_EQ(rt_count(&cap, 1, RT_BEGIN, -1), 1);    /* only the recovered zone; the refused one was never recorded */
+    CHECK_EQ(rt_count(&cap, 1, RT_END, -1), 1);
     rt_cap_free(&cap);
     return rt_expect(out, 0);
 }

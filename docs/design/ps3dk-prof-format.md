@@ -298,6 +298,9 @@ These definitions apply to every case below:
   - Ids are u32, start at 1 and go up by 1 per registration.
   - When the ids are exhausted, registration is REFUSED: the thread is not registered and the global
     `unregistered_refusals` counter goes up.
+  - **The counter's scope:** `unregistered_refusals` counts capacity refusals (no free slot) and id-exhaustion
+    refusals only. It does not count every failed registration (for example a failed OS thread id read) or every zone
+    on a thread that never registered. Wording only: the field and its encoding are unchanged.
 
 ### 5.5 Timestamps
 

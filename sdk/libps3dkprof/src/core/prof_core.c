@@ -450,13 +450,16 @@ static int thread_begin_impl(prof *p, const char *name)
         }
     }
     if (!s || p->next_incarnation == 0) {
+        /* The informational counter's scope: capacity and incarnation-id exhaustion (EFULL) only.  Other refused
+         * registrations (ETHREAD below, ESTOPPED) and zones that are simply never registered are not counted. */
         __atomic_fetch_add(&p->unregistered_refusals, 1, __ATOMIC_RELAXED);
         p_unlock(p, &p->thread_mutex);
         return PS3DK_PROF_EFULL;
     }
     /* R3 (codex 2026-10-22): the OS thread id is read BEFORE anything changes.  A failed read refuses the registration
      * with ETHREAD while the slot is still FREE and the incarnation counter, the slot generation and the TLS state are
-     * untouched, so there is nothing to roll back and no placeholder id is ever recorded. */
+     * untouched, so there is nothing to roll back and no placeholder id is ever recorded.  It is not counted in
+     * unregistered_refusals (codex 03:21).  auto_register goes through here too: the zone or frame is then INERT. */
     if (pal_os_thread_id(&os_id) != 0) {
         p_unlock(p, &p->thread_mutex);
         return PS3DK_PROF_ETHREAD;

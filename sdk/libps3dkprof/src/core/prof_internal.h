@@ -179,7 +179,8 @@ typedef struct prof {
     uint32_t drain_busy;        /* atomic */
     uint32_t wake;              /* atomic: THREAD mode wake flag */
     uint32_t start_gate;        /* atomic */
-    uint64_t unregistered_refusals;   /* atomic */
+    uint64_t unregistered_refusals;   /* atomic, informational: capacity / id-exhaustion refusals (EFULL) only; an
+                                       * ETHREAD refusal (failed OS id read) is not counted (codex 03:21) */
     uint64_t tb_freq, tb_at_init;
     uint32_t next_incarnation;  /* under thread_mutex; 0 means exhausted */
     uint32_t nslots;

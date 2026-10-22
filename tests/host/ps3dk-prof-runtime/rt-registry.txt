@@ -1,5 +1,6 @@
 rt_after_ack_immutable
 rt_app_drain_eperm_ebusy
+rt_auto_register_os_id_failure_then_recovery
 rt_autoreg_default_off
 rt_autoreg_never_revives_acked_or_retired
 rt_blocking_callback_holds_shutdown

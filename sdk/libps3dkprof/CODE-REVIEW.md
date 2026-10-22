@@ -22,13 +22,13 @@ Line numbers are for the files as delivered. `core` means `src/core/prof_core.c`
 | Counter | Where | At the ceiling |
 |---|---|---|
 | `refused_count`, +1 or +k | `count_refused` core:210 | The increment is skipped and the incarnation exhausts. Every refusal and every misuse goes through this function. |
-| `refused_count`, STOP batch not admitted | `p_observe_stop` core:513-517 | `+= k` only if `refused <= 2^63 - k`. Otherwise the count is unchanged and `exhausted` is set. `limit` is set either way. |
+| `refused_count`, STOP batch not admitted | `p_observe_stop` core:516-520 | `+= k` only if `refused <= 2^63 - k`. Otherwise the count is unchanged and `exhausted` is set. `limit` is set either way. |
 | `regerr_count` | `regerr` core:326 | No increment, no REGERR event, exhaust. A REGERR event is attempted only after its increment has been applied, so a REGERR record never outnumbers its counter (format 6). |
-| span ids | `zone_begin` core:608 | `next_span_id >= 2^63` exhausts and refuses the begin, which is counted through `count_refused`. Ids handed out are at most 2^63 - 1. |
-| refused-begin ids | `zone_begin` core:632 | The begin is counted, the incarnation exhausts, and the handle is INERT. This is F1's "counts nothing" corrected by the boundary rule: the refusal is still counted when that is exact. |
-| frame ids | `ps3dk_prof_frame` core:714 | Exhaust and refuse. Unreachable, because a frame id is at most its own seq. |
+| span ids | `zone_begin` core:611 | `next_span_id >= 2^63` exhausts and refuses the begin, which is counted through `count_refused`. Ids handed out are at most 2^63 - 1. |
+| refused-begin ids | `zone_begin` core:635 | The begin is counted, the incarnation exhausts, and the handle is INERT. This is F1's "counts nothing" corrected by the boundary rule: the refusal is still counted when that is exact. |
+| frame ids | `ps3dk_prof_frame` core:717 | Exhaust and refuse. Unreachable, because a frame id is at most its own seq. |
 | sequences | `seq_admit` core:237 | Unchanged format 5.1 rule: refused whole, SEQ_LIMIT. |
-| incarnation ids | `thread_begin_impl` core:457 | `next_incarnation = 0` after UINT32_MAX. Later registrations get EFULL and `unregistered_refusals` goes up (5.4). |
+| incarnation ids | `thread_begin_impl` core:459 | `next_incarnation = 0` after UINT32_MAX. Later registrations get EFULL and `unregistered_refusals` goes up (5.4). |
 
 **Why this is never a clean claim.**
 - A refusal or registration error that could not be counted only happens after `limit` is set: it is set in the same call.
@@ -85,19 +85,19 @@ All six are in `rt_t_counters.c`. Each asserts:
 | Rule | Code |
 |---|---|
 | Sequence assignment, `produced = next_seq` | `seq_assign` core:248 |
-| Admission and the 2^63 boundary; a 2-slot BEGIN is refused whole | `seq_admit` core:237; used by `zone_begin` core:612, `emit1` core:303 and `frame` core:710 |
+| Admission and the 2^63 boundary; a 2-slot BEGIN is refused whole | `seq_admit` core:237; used by `zone_begin` core:615, `emit1` core:303 and `frame` core:713 |
 | Whole-publication space check before any write; drop into the pending range | `reserve` core:259 |
 | GAP + event as one publication with ONE release; `pub_len` marking (r2 7) | `reserve` writes the GAP; `commit` core:285 |
-| Dropping never changes the stack (a dropped BEGIN is pushed and uses its id) | `zone_begin` core:614-625 |
+| Dropping never changes the stack (a dropped BEGIN is pushed and uses its id) | `zone_begin` core:617-628 |
 | Refused events assign no sequence and are counted | `count_refused` callers: core:307, 631, 677, 685, 711 |
-| STOP batch admitted whole: published, dropped whole, or refused whole; k = 0 does nothing | `p_observe_stop` core:500-537 |
+| STOP batch admitted whole: published, dropped whole, or refused whole; k = 0 does nothing | `p_observe_stop` core:503-540 |
 
 ### Format 5.2: depth
 
 | Rule | Code |
 |---|---|
-| Depth cap 256 | core:606 |
-| The END of a refused BEGIN is consumed by the refused-handle LIFO | `zone_end` core:673-678 |
+| Depth cap 256 | core:609 |
+| The END of a refused BEGIN is consumed by the refused-handle LIFO | `zone_end` core:676-681 |
 
 ### Format 5.3: descriptor registration
 
@@ -106,7 +106,7 @@ All six are in `rt_t_counters.c`. Each asserts:
 | Check, lock, re-check (Q5) | `desc_index` core:416; `desc_register` core:339 |
 | The complete entry, then RELEASE of `desc_count`, then RELEASE of the call-site state | core:393-407, with the hook at core:403 |
 | TABLE_FULL / ID_COLLISION: regerr unconditional (ceiling-checked), then a best-effort REGERR, outside the mutex | core:382-390, 411; `regerr` core:322 |
-| The failure is cached at the call site; every zone of the site is refused | `desc_index` returns 0 on a failure code; `zone_begin` core:604 |
+| The failure is cached at the call site; every zone of the site is refused | `desc_index` returns 0 on a failure code; `zone_begin` core:607 |
 
 ### Format 5.4: single consumer and drain order
 
@@ -125,32 +125,32 @@ All six are in `rt_t_counters.c`. Each asserts:
 | Rule | Code |
 |---|---|
 | Timebase read between compiler barriers | `p_tb` core:89 |
-| FRAME takes its id with its sequence, then RELEASE of `current_frame` after the publish or the drop; a refused FRAME takes no id | `ps3dk_prof_frame` core:690 |
-| Token from an ACQUIRE of `current_frame` | `ps3dk_prof_frame_token` core:729 |
+| FRAME takes its id with its sequence, then RELEASE of `current_frame` after the publish or the drop; a refused FRAME takes no id | `ps3dk_prof_frame` core:693 |
+| Token from an ACQUIRE of `current_frame` | `ps3dk_prof_frame_token` core:732 |
 
 ### Format 7: lifecycle
 
 | Rule | Code |
 |---|---|
-| One capture per process; init EALREADY forever | `gate_enter` core:753; `ps3dk_prof_init` core:1001 |
+| One capture per process; init EALREADY forever | `gate_enter` core:756; `ps3dk_prof_init` core:1004 |
 | Latch RELEASE under `thread_mutex`, fixing Ft; ACQUIRE at every entry point | shutdown drain:694-711; ACQUIRE loads at core:441, 552, 590, 663, 703, 739 |
 | Shutdown entry checks in order: in-drain EBUSY, APP non-owner EPERM, once EALREADY | drain:686-691 |
-| STOP batch, then the ack as the LAST write (steps 1-5) | `p_observe_stop` core:509-537 |
-| Retire: snapshot, clear without synthesising ENDs, then the RETIRED word last; LIVE to RETIRING allowed after the latch (E1) | `ps3dk_prof_thread_end` core:540-569 |
-| `thread_end` that observes STOP acks; `thread_end` after the ack is refused | core:548-555 |
+| STOP batch, then the ack as the LAST write (steps 1-5) | `p_observe_stop` core:512-540 |
+| Retire: snapshot, clear without synthesising ENDs, then the RETIRED word last; LIVE to RETIRING allowed after the latch (E1) | `ps3dk_prof_thread_end` core:543-572 |
+| `thread_end` that observes STOP acks; `thread_end` after the ack is refused | core:551-558 |
 | Self-quiescence: the caller's own batch | drain:715; drain thread drain:669 |
 | Quiescence wait: bounded, monotonic deadline; a clock failure ends it at once (Q8) | `quiesce_wait` drain:446 |
 | Frozen frontier, once, in order 1 to 4; the classification is permanent and comes from the publication (E1) | drain:490-518 |
 | No ordinary processing after the frontier (F2) | `p_drain_once` drain:347; nothing frees a slot after `frozen` |
 | Final drain to Ft / Fd / F[i]; frozen-RETIRED entries in a RETIRED chunk (F2); the TRAILER | drain:522-594 |
 | State-3 entries: UNKNOWN fields, `limit_flags` 0x02, exact `written` | drain:578-582 |
-| Storage lifetime: one block, never freed after READY | `init_impl` core:861; `pal_free` only in the init unwind |
+| Storage lifetime: one block, never freed after READY | `init_impl` core:864; `pal_free` only in the init unwind |
 
 ### Format 8: sink and result
 
 | Rule | Code |
 |---|---|
-| Exclusive create; EEXIST; other open errors are ESINKFAIL and retryable (E3) | core:964-973 |
+| Exclusive create; EEXIST; other open errors are ESINKFAIL and retryable (E3) | core:967-976 |
 | Short writes retried; 16 tries without progress; EINTR retried and counted as recovered; a count above n, or a negative return, is a SINK FAILURE | `sink_write` drain:22 |
 | Nothing written after a failure; trailer only without a failure; flush once after the trailer; close once | drain:586-594; `sink_close` drain:64 |
 | Severity order: ESINKFAIL, ECLOSE, ENOTQUIESCED, ESEQLIMIT, ESINKRECOVERED, then ECLOCK, then OK; ETHREAD for a join failure only when otherwise OK | drain:596-608, 737-738 |
@@ -159,15 +159,15 @@ All six are in `rt_t_counters.c`. Each asserts:
 
 | Item | Code |
 |---|---|
-| r2 3.1 slot states, one consumer, reset in FREE under the mutex | core:461-469 (reset); drain:378-383 and 414-425 (transitions) |
-| r2 3.2 + E2 + F1 handle protocol | `zone_end` core:645: step 1 core:654; 2 core:658; 3 core:661; 4 core:663; 5 core:667; REFUSED core:673; PUSHED core:680 |
-| F1 identities | Refused ids core:640-641; `prev_refused_top` and `span_top_at_begin` core:601-602 |
-| r2 3.3 + E3 + F3 init and gate | `init_impl` core:861: caps core:872-880; checked sizes core:898-905; step 5 core:946-957; step 6 core:959-975; step 7 core:978-987 |
-| Setters | core:761, 779 |
+| r2 3.1 slot states, one consumer, reset in FREE under the mutex | core:464-472 (reset); drain:378-383 and 414-425 (transitions) |
+| r2 3.2 + E2 + F1 handle protocol | `zone_end` core:648: step 1 core:657; 2 core:661; 3 core:664; 4 core:666; 5 core:670; REFUSED core:676; PUSHED core:683 |
+| F1 identities | Refused ids core:643-644; `prev_refused_top` and `span_top_at_begin` core:604-605 |
+| r2 3.3 + E3 + F3 init and gate | `init_impl` core:864: caps core:875-883; checked sizes core:901-908; step 5 core:949-960; step 6 core:962-978; step 7 core:981-990 |
+| Setters | core:764, 779 |
 | r2 4 atomics | `prof_internal.h` macros. GCC `__atomic` builtins only; lock-free is `_Static_assert`ed. |
-| r2 7 / Q9 publication boundaries and caps | `commit` core:285; `drain_ring` drain:296; `take` core:843 |
+| r2 7 / Q9 publication boundaries and caps | `commit` core:285; `drain_ring` drain:296; `take` core:846 |
 | r2 8 / Q8 drain thread | `p_drain_main` drain:642: the start gate, one sleep slice, then the wake check |
-| Q10 auto-registration | `auto_register` core:491 (opt-in; never for acked or retired TLS) |
+| Q10 auto-registration | `auto_register` core:494 (opt-in; never for acked or retired TLS) |
 | Hooks (r2 9 + E1) | `HOOK()` sites: core:297, 403, 536, 558, 567; drain:385, 413, 488 |
 
 ### Decisions the contract left open
@@ -181,7 +181,7 @@ These choices are recorded for review. They are NOT accepted (codex 2026-10-22 0
 | The first use of a failing site | Also refused (+1). Format 5.1 lists "every zone of a descriptor whose registration failed". |
 | A PUSHED END refused at the limit | Still pops: the stack follows the calls. Its span stays OPEN in the records. |
 | Zones and frames inside a drain (sink callbacks; the THREAD drain thread) | INERT, with no self-instrumentation. `thread_begin` inside a callback is allowed, which is how the drain thread becomes "registered" (`rt_drain_thread_self_acks`). |
-| `unregistered_refusals` | Counts both id exhaustion and "no free slot" (EFULL). The field is informational. |
+| `unregistered_refusals` | Counts both id exhaustion and "no free slot" (EFULL), and nothing else. The field is informational. An ETHREAD refusal (failed OS thread id read, explicit or auto-registration) is NOT counted, and neither is every zone on a never-registered thread (codex 03:21; format 5.4 wording note). No new wire counter. |
 | Mutex failures | Recorded in `lock_failed`. The capture then fails closed: sealing treats it as a sink failure, ESINKFAIL. |
 | Chunk buffer | The full chunk cap (16 + 1 MiB + 4), not r2 7's records-only size, because DESCRIPTORS chunks also fill to 1 MiB. Checked inside the 256 MiB cap. |
 | Exported names | Exactly the API under `ps3dk_prof_`; every internal is under `ps3dk_prof__`. `build-and-run.sh` checks this with `nm`. |
@@ -199,10 +199,10 @@ Every name in the plan and its errata is implemented, apart from `rt_thread_mode
 | F1, F3 | 5 rows | `rt_t_zones.c`, `rt_t_init.c` |
 | Boundary correction | 6 rows | `rt_t_counters.c` |
 | ID_COLLISION (synthetic) | 3 rows | `rt_t_zones.c` |
-| R3 OS thread id fails closed (codex 02:45) | 2 rows: `rt_thread_begin_os_id_failure_refused`, `rt_thread_begin_os_id_failure_second_thread` | `rt_t_lifecycle.c` |
+| R3 OS thread id fails closed (codex 02:45, 03:21) | 3 rows: `rt_thread_begin_os_id_failure_refused`, `rt_thread_begin_os_id_failure_second_thread`, `rt_auto_register_os_id_failure_then_recovery` | `rt_t_lifecycle.c` |
 | Off-build and probes (host) | OB-E1, OB-E2 (enabled, undefined, =0; RUN), host OB-P, OB-N, PROBE-G (copy and move), archive symbols | `build-and-run.sh` |
 
-`rt_list.h` is the authoritative list, frozen in sorted form as `tests/host/ps3dk-prof-runtime/rt-registry.txt`, which each variant's `rt --list` must equal exactly: 102 tests, each run under plain, ASan+UBSan and TSan. Every capture is checked by `ps3dk-prof check` against the verdict the test declares.
+`rt_list.h` is the authoritative list, frozen in sorted form as `tests/host/ps3dk-prof-runtime/rt-registry.txt`, which each variant's `rt --list` must equal exactly: 103 tests, each run under plain, ASan+UBSan and TSan. Every capture is checked by `ps3dk-prof check` against the verdict the test declares.
 
 ## 5. Deferred: target-only, needs the cross compiler or LV2
 
@@ -258,7 +258,9 @@ collision is searched for or claimed.
 - **Counts:** 100 registry tests x 3 variants = 300 rows; 29 non-row checks (driver-tsan selftest, 3 variant builds,
   TSan controls, the hook-free library build, 4 archive/preprocessor checks, 16 OB-E1/E2 checks, 3 PROBE-G), so a
   fully passing run reports pass 329 (build-m at f01e1bcd: 291 + 28 = 319). With the two R3 rows (PAL work on top of
-  157c42ce) the expectation becomes 102 x 3 = 306 rows and pass 335; expectations, not measurements.
+  157c42ce) the expectation became 102 x 3 = 306 rows and pass 335, and with the auto-registration recovery row (codex
+  03:21) 103 x 3 = 309 rows and pass 338 (build-n measured 300 + 29 = 329 at 157c42ce); expectations, not
+  measurements.
 - **Still open:** the full runtime code review, and these tests' first host run (a separate request).
 
 ## 6. Expected compile risks
@@ -269,7 +271,7 @@ collision is searched for or claimed.
 - **`_Static_assert` and `_Thread_local`** are only in the C core and C tests. The C++ TUs include `rt.h` and `prof.h`, which use neither.
 - **`posix_memalign` and `nanosleep` under `_POSIX_C_SOURCE 200809L`** in `pal_host.c`; `CLOCK_REALTIME` and `pthread_cond_timedwait` in `rt_util.c`. The core files define no feature macro and include `<pthread.h>` under strict `-std=c11`.
 - **`(uint64_t)(uintptr_t)pthread_self()`** works on glibc, where `pthread_t` is an integer. On a libc where `pthread_t` is a struct it would not compile; only Linux CI is the target.
-- **`snprintf` `-Wformat-truncation`** on the sink name (core:964). Its return value is checked, so level 1 should stay quiet.
+- **`snprintf` `-Wformat-truncation`** on the sink name (core:967). Its return value is checked, so level 1 should stay quiet.
 - **TSan.** Tests change hook pointers while other threads run, but only on fields those threads do not read. The memory sink's `in_write` is accessed atomically. Any report fails the test, because `halt_on_error=1`.
 - **ASan/LSan.** Each `rt_cap` is a stack object of about 180 KiB, on the main thread only. The event and buffer allocations are reachable from globals.
 - **`build-and-run.sh` needs bash 4** for `declare -A`, and uses `timeout` and `nm` (GNU binutils output format). It is not marked executable in git: run it with `bash`.
