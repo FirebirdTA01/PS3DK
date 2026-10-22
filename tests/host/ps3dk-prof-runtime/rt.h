@@ -94,6 +94,14 @@ int rt_capture_path(const char *dir, char *buf, size_t n);
 /* Print the CAPTURE line for the single capture in dir. */
 int rt_expect(const char *dir, int code);
 void rt_expect_path(const char *path, int code);
+/* Print a "REPORT <path> <mode> <text>" line: the driver runs the normal `ps3dk-prof report` on the capture and checks
+   its lines, leading spaces removed.  mode HAS / LACKS: an exact line is present / absent; MATCH / NOMATCH: a line
+   matching the whole ERE is present / absent. */
+void rt_report_line(const char *path, const char *mode, const char *fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 3, 4)))
+#endif
+    ;
 uint64_t rt_file_hash(const char *path);   /* FNV-1a-64 of the bytes; 0 if unreadable */
 long rt_file_size(const char *path);
 void rt_sleep_ms(unsigned ms);

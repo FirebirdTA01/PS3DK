@@ -408,7 +408,7 @@ out:
 unlock:
     p_unlock(p, &p->desc_mutex);
     if (code)
-        regerr(cb, rg, code, d->name, nl, tag, tl, id);   /* outside the mutex: the event goes to our own ring */
+        regerr(cb, rg, code, d->name, nl, tag, tl, id);   /* outside the mutex; c = the id it would have had */
     return st;
 }
 

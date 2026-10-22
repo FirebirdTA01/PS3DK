@@ -227,15 +227,34 @@ collision is searched for or claimed.
   - Expected: the zone is REFUSED with no BEGIN; `regerr` is 1 and `refused` is 1, and a second use gives cached refused 2
     with no second REGERR.
   - The descriptor count stays 1, coll_a stays in use, and every BEGIN/END names index 0.
-  - Exactly one REGERR is written: a=2, b=FNV(name, 0, tag), c=the natural id.
-  - The normal reader verdict is 0.
+  - Exactly one REGERR is written: a=2, b=FNV(name, 0, tag), c=coll_b's natural id. Per format section 4 (record 6),
+    c is "the descriptor id it would have had", not a reference to a published descriptor (codex 02:43 Q1).
+  - The normal reader verdict is 0 (TRANSPORT COMPLETE).
+  - Through the normal `ps3dk-prof report` (section 9: MEASUREMENT VALID needs refused_count=0 AND regerr_count=0;
+    `analysis.rs` lane_view): lane 1 is `INVALID (refused 2, regerr 1)`; the statistics scope is `lanes [none]`; no
+    zone row is computed for coll_a or coll_b; the one retained descriptor is coll_a exactly as published
+    (`index 0 id <coll_a natural id> scope 1 rt_runtime.c:401 coll_a`), and coll_b appears nowhere. So a TRANSPORT
+    COMPLETE capture is compatible with this lane being INVALID (codex 02:43 Q2).
+  - Not asserted end to end: comparison exclusion. The binary has no compare subcommand; `compare` uses the same
+    lane validity (`analysis.rs` "lane invalid" / `InvalidLanesOnly`), but no host test drives it on this capture.
 - **`rt_id_noncollision_control`:** the hook stays OFF; both descriptors register (2 descriptors, no REGERR, nothing
-  refused).
+  refused). Report: lane 1 MEASUREMENT VALID, scope `lanes [1]`, descriptors 0 (coll_a :401) and 1 (coll_b :402), one
+  zone instance each.
 - **`rt_id_same_name_not_collision`:**
   - A second static with coll_a's (file, line, name) has its candidate forced to coll_a's id.
   - Expected: REUSE, not a collision. The natural ids are equal, 1 descriptor, no REGERR, and both BEGINs name index 0.
+    Report: lane 1 MEASUREMENT VALID, one descriptor with coll_a's natural id, `coll_a: 2 instances`.
+- **Report checks** (`REPORT <path> HAS|LACKS|MATCH|NOMATCH <text>` lines, `build-and-run.sh` check_report): the
+  normal `ps3dk-prof report` runs once per capture through rrun (exit 0 or 1 required), and its lines with leading
+  spaces removed are matched exactly (grep -Fx) or as a whole-line ERE (grep -Ex). The report now prints a
+  `descriptors (as published):` section (tools/ps3dk-prof report.rs; test
+  `report_lists_every_published_descriptor_with_its_identity`; Cargo.lock unchanged).
 - **Hook-free checks:** the archive check (no ps3dk_prof_test_ symbol), plus an off-build preprocessor check (the
-  hook-free preprocessed prof_core.c names neither candidate_desc_id nor ps3dk_prof_test_hooks).
+  hook-free preprocessed prof_core.c names neither candidate_desc_id nor ps3dk_prof_test_hooks). Both use grep_status:
+  status 0 = found (FAIL), 1 = absent (PASS), >1 = inspection failure (FAIL), never read as absent (codex 02:43).
+- **Counts:** 100 registry tests x 3 variants = 300 rows; 29 non-row checks (driver-tsan selftest, 3 variant builds,
+  TSan controls, the hook-free library build, 4 archive/preprocessor checks, 16 OB-E1/E2 checks, 3 PROBE-G), so a
+  fully passing run reports pass 329 (build-m at f01e1bcd: 291 + 28 = 319).
 - **Still open:** the full runtime code review, and these tests' first host run (a separate request).
 
 ## 6. Expected compile risks

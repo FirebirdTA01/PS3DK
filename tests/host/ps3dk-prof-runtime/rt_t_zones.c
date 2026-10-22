@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "rt.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 /* One registered site and one site that fails registration (max_descriptors = 1, "p" registered first). */
@@ -498,6 +499,7 @@ int rt_id_collision_detected(const char *out)
     rt_cap cap;
     const rt_final *f;
     size_t i, nregerr = 0;
+    char path[512];
     CHECK_OK(coll_start(out));
     ps3dk_prof_test_hooks.candidate_desc_id = cand_hook;
     a = zb(&g_ca);                    /* registered normally: the hook returns the natural id */
@@ -541,11 +543,24 @@ int rt_id_collision_detected(const char *out)
         nregerr++;
         CHECK_EQ(r->a, 2);            /* ID_COLLISION */
         CHECK_EQ(r->b, fnv_key("coll_b", ""));
-        CHECK_EQ(r->c, g_nat_b);      /* the id it would have had: the natural one */
+        /* c is "the descriptor id it would have had" (format section 4, record 6): coll_b's natural id.  It is not a
+           reference to a published descriptor, and none carries it. */
+        CHECK_EQ(r->c, g_nat_b);
     }
     CHECK_EQ(nregerr, 1);
     rt_cap_free(&cap);
-    return rt_expect(out, 0);         /* the normal reader */
+    /* Through the normal `ps3dk-prof report` (section 9): the capture is TRANSPORT COMPLETE, yet the lane is NOT a
+       valid measurement (refused and regerr reasons), so statistics use no lane and no zone row is computed from it.
+       The retained descriptor is coll_a exactly as first published (natural id, file, line, name); coll_b never was. */
+    CHECK_EQ(rt_capture_path(out, path, sizeof path), 0);
+    rt_report_line(path, "HAS", "verdict: COMPLETE (TRANSPORT COMPLETE)");
+    rt_report_line(path, "MATCH", "1 main: INVALID [(]refused 2, regerr 1[)]; [0-9]+ records, [0-9]+ frames");
+    rt_report_line(path, "HAS", "scope: statistics, frame elapsed and W use only lanes [none]");
+    rt_report_line(path, "HAS", "index 0 id 0x%016" PRIx64 " scope 1 rt_runtime.c:401 coll_a", g_nat_a);
+    rt_report_line(path, "NOMATCH", "index [1-9].*");
+    rt_report_line(path, "NOMATCH", "coll_[ab]: .*");
+    rt_report_line(path, "NOMATCH", ".* coll_b( .*)?");
+    return rt_expect(out, 0);         /* and the normal check verdict */
 }
 
 int rt_id_noncollision_control(const char *out)
@@ -553,6 +568,7 @@ int rt_id_noncollision_control(const char *out)
     ps3dk_prof_zone a, b;
     rt_cap cap;
     const rt_final *f;
+    char path[512];
     CHECK_OK(coll_start(out));        /* the hook stays OFF */
     a = zb(&g_ca);
     b = zb(&g_cb);
@@ -572,6 +588,15 @@ int rt_id_noncollision_control(const char *out)
     CHECK_EQ(rt_count(&cap, 1, RT_BEGIN, -1), 2);
     CHECK_EQ(rt_count(&cap, 1, RT_REGERR, -1), 0);
     rt_cap_free(&cap);
+    /* The same report checks, hook off: a valid lane in scope, both descriptors published, both zones counted. */
+    CHECK_EQ(rt_capture_path(out, path, sizeof path), 0);
+    rt_report_line(path, "HAS", "verdict: COMPLETE (TRANSPORT COMPLETE)");
+    rt_report_line(path, "MATCH", "1 main: MEASUREMENT VALID; [0-9]+ records, [0-9]+ frames");
+    rt_report_line(path, "HAS", "scope: statistics, frame elapsed and W use only lanes [1]");
+    rt_report_line(path, "MATCH", "index 0 id 0x[0-9a-f]{16} scope 1 rt_runtime[.]c:401 coll_a");
+    rt_report_line(path, "MATCH", "index 1 id 0x[0-9a-f]{16} scope 1 rt_runtime[.]c:402 coll_b");
+    rt_report_line(path, "HAS", "coll_a: 1 instances");
+    rt_report_line(path, "HAS", "coll_b: 1 instances");
     return rt_expect(out, 0);
 }
 
@@ -581,6 +606,7 @@ int rt_id_same_name_not_collision(const char *out)
     rt_cap cap;
     const rt_final *f;
     size_t i;
+    char path[512];
     CHECK_OK(coll_start(out));
     ps3dk_prof_test_hooks.candidate_desc_id = cand_hook;
     a = zb(&g_ca);
@@ -606,5 +632,12 @@ int rt_id_same_name_not_collision(const char *out)
         if (cap.recs[i].kind == RT_BEGIN)
             CHECK_EQ(cap.recs[i].a, 0);   /* both statics share descriptor 0 */
     rt_cap_free(&cap);
+    /* Reuse, not a collision: a valid lane, one descriptor with coll_a's natural id, both instances counted on it. */
+    CHECK_EQ(rt_capture_path(out, path, sizeof path), 0);
+    rt_report_line(path, "MATCH", "1 main: MEASUREMENT VALID; [0-9]+ records, [0-9]+ frames");
+    rt_report_line(path, "HAS", "scope: statistics, frame elapsed and W use only lanes [1]");
+    rt_report_line(path, "HAS", "index 0 id 0x%016" PRIx64 " scope 1 rt_runtime.c:401 coll_a", g_nat_a);
+    rt_report_line(path, "NOMATCH", "index [1-9].*");
+    rt_report_line(path, "HAS", "coll_a: 2 instances");
     return rt_expect(out, 0);
 }

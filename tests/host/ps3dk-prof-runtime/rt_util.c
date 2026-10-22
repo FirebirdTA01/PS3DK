@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -72,6 +73,17 @@ int rt_capture_path(const char *dir, char *buf, size_t n)
 void rt_expect_path(const char *path, int code)
 {
     printf("CAPTURE %s EXPECT %d\n", path, code);
+    fflush(stdout);
+}
+
+void rt_report_line(const char *path, const char *mode, const char *fmt, ...)
+{
+    va_list ap;
+    printf("REPORT %s %s ", path, mode);
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+    printf("\n");
     fflush(stdout);
 }
 

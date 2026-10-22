@@ -81,10 +81,12 @@ cxx_noeval="$(noeval "$CXX")"
 
 if [ -n "${READER:-}" ]; then
     reader=("$READER" check)
+    reporter=("$READER" report)
 else
     echo "== building the Rust reader"
     cargo build -q --manifest-path "$root/tools/Cargo.toml" -p ps3dk-prof
     reader=(cargo run -q --manifest-path "$root/tools/Cargo.toml" -p ps3dk-prof -- check)
+    reporter=(cargo run -q --manifest-path "$root/tools/Cargo.toml" -p ps3dk-prof -- report)
 fi
 
 # check_capture <path> <want> <label>: the reader's streams and exit go through rrun, so a record that cannot be
@@ -100,6 +102,55 @@ check_capture() {
         return 0
     fi
     bad "$3: reader exit $rrc, want $2: $(head -n 1 "$txt") $(head -n 1 "$1.check.err")"
+    return 1
+}
+
+# check_report <path> <mode> <text> <label>: a test's "REPORT <path> <mode> <text>" line.  The normal
+# `ps3dk-prof report` runs once per capture through rrun (streams and exit recorded, exit 0 or 1 required: a verdict,
+# not MALFORMED or an I/O error); its lines, leading spaces removed, go to <path>.report.trim.  HAS / LACKS: the exact
+# line is present / absent (grep -Fx); MATCH / NOMATCH: a line matching the whole ERE is present / absent (grep -Ex).
+# grep status 0 found, 1 absent, >1 an inspection failure (FAIL, never read as absent).
+check_report() {
+    local cap="$1" mode="$2" want="$3" r=0 rrcv flag
+    if [ ! -f "$cap.report.rc" ]; then
+        rrun "$cap.report.txt" "$cap.report.err" "$cap.report.rc" "${reporter[@]}" "$cap" || r=$?
+        if [ "$r" != 0 ]; then
+            bad "$4: the report could not be recorded (status $r, $cap.report.*)"
+            return 1
+        fi
+        if ! sed 's/^[[:space:]]*//' "$cap.report.txt" >"$cap.report.trim"; then
+            bad "$4: the report could not be trimmed ($cap.report.trim)"
+            return 1
+        fi
+    fi
+    if ! rrcv="$(cat "$cap.report.rc")" || [ ! -f "$cap.report.trim" ]; then
+        bad "$4: the report record is incomplete ($cap.report.*)"
+        return 1
+    fi
+    if [ "$rrcv" != 0 ] && [ "$rrcv" != 1 ]; then
+        bad "$4: report exit $rrcv: $(head -n 1 "$cap.report.err")"
+        return 1
+    fi
+    case "$mode" in
+    HAS | LACKS) flag=-Fxq ;;
+    MATCH | NOMATCH) flag=-Exq ;;
+    *)
+        bad "$4: unknown REPORT mode '$mode'"
+        return 1
+        ;;
+    esac
+    if [ -z "$want" ]; then
+        bad "$4: REPORT $mode with no text"
+        return 1
+    fi
+    if ! grep_status "$flag" -e "$want" "$cap.report.trim"; then
+        bad "$4: report inspection failed (REPORT $mode $want)"
+        return 1
+    fi
+    case "$mode:$gst" in
+    HAS:0 | MATCH:0 | LACKS:1 | NOMATCH:1) return 0 ;;
+    esac
+    bad "$4: report $mode failed: '$want' ($cap.report.txt)"
     return 1
 }
 
@@ -242,15 +293,27 @@ for v in plain asan tsan; do
             result "$v" "$t" FAIL "exit $rc"
             continue
         fi
-        if grep -qE 'WARNING: ThreadSanitizer|ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:' "$d/stderr"; then
+        # grep status 0 = a report, 1 = none, >1 = the stderr record could not be inspected (FAIL, never "none").
+        if ! grep_status -qE 'WARNING: ThreadSanitizer|ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:' \
+            "$d/stderr"; then
+            bad "$v $t: stderr could not be inspected for sanitizer reports ($d/stderr)"
+            result "$v" "$t" FAIL "stderr inspection failed"
+            continue
+        fi
+        if [ "$gst" = 0 ]; then
             bad "$v $t: sanitizer report ($d/stderr)"
             result "$v" "$t" FAIL "sanitizer report"
             continue
         fi
         caps_ok=1
         while read -r tag path tag2 want; do
-            [ "$tag" = CAPTURE ] && [ "$tag2" = EXPECT ] || continue
-            check_capture "$path" "$want" "$v $t" || caps_ok=0
+            case "$tag" in
+            CAPTURE)
+                [ "$tag2" = EXPECT ] || continue
+                check_capture "$path" "$want" "$v $t" || caps_ok=0
+                ;;
+            REPORT) check_report "$path" "$tag2" "$want" "$v $t" || caps_ok=0 ;;
+            esac
         done <"$d/stdout"
         if [ "$caps_ok" = 1 ]; then
             ok "$v $t"
@@ -293,9 +356,13 @@ ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
     # nm output goes to files first: under pipefail a `nm | grep -q` can exit 141 on an early match.
     nm -g --defined-only "${libobjs[@]}" >"$ob/nm-defined.txt" || bad "nm --defined-only failed"
     nm "${libobjs[@]}" >"$ob/nm-all.txt" || bad "nm failed"
-    defined="$(awk 'NF >= 3 {print $3}' "$ob/nm-defined.txt" | sort -u)"
-    public="$(printf '%s\n' "$defined" | grep -E '^ps3dk_prof_[a-z]' | tr '\n' ' ' | sed 's/ $//')"
-    other="$(printf '%s\n' "$defined" | grep -vE '^ps3dk_prof_' || true)"
+    # Symbol lists through files and grep_status (0 match, 1 none, >1 FAIL), never `grep ... || true`.
+    awk 'NF >= 3 {print $3}' "$ob/nm-defined.txt" | sort -u >"$ob/nm-defined-names.txt" || bad "defined-symbol list failed"
+    grep_status -E '^ps3dk_prof_[a-z]' "$ob/nm-defined-names.txt" >"$ob/nm-public.txt" ||
+        bad "public-symbol inspection failed"
+    grep_status -vE '^ps3dk_prof_' "$ob/nm-defined-names.txt" >"$ob/nm-other.txt" || bad "other-symbol inspection failed"
+    public="$(tr '\n' ' ' <"$ob/nm-public.txt" | sed 's/ $//')"
+    other="$(cat "$ob/nm-other.txt")"
     if [ "$public" = "$(echo $api)" ]; then
         ok "archive exports exactly the API (no release function)"
     else
@@ -306,7 +373,9 @@ ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
     else
         bad "archive exports symbols outside ps3dk_prof_: $(echo $other)"
     fi
-    if grep -q 'ps3dk_prof_test_' "$ob/nm-all.txt"; then
+    if ! grep_status -q 'ps3dk_prof_test_' "$ob/nm-all.txt"; then
+        bad "archive symbol list could not be inspected for test-hook symbols"
+    elif [ "$gst" = 0 ]; then
         bad "archive objects contain a ps3dk_prof_test_ symbol"
     else
         ok "archive objects contain no test-hook symbol"
@@ -315,7 +384,10 @@ ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
     # (the ID_COLLISION candidate-id hook included).  File-based grep, not a pipe.
     if "$CC" -std=c11 -E -DPS3DK_PROF=1 -DPS3DK_PROF_PAL_HOST "${inc[@]}" "$(src_of prof_core)" \
         >"$ob/prof_core-nohooks.i" 2>"$ob/prof_core-nohooks.log"; then
-        if grep -q -e 'candidate_desc_id' -e 'ps3dk_prof_test_hooks' "$ob/prof_core-nohooks.i"; then
+        # grep status 0 = a forbidden hook name FOUND (FAIL), 1 = absent (PASS), >1 = inspection failure (FAIL).
+        if ! grep_status -q -e 'candidate_desc_id' -e 'ps3dk_prof_test_hooks' "$ob/prof_core-nohooks.i"; then
+            bad "hook-free preprocessed prof_core.c could not be inspected"
+        elif [ "$gst" = 0 ]; then
             bad "hook-free preprocessed prof_core.c names a test hook"
         else
             ok "hook-free preprocessed prof_core.c names no test hook"
@@ -348,8 +420,10 @@ ob_case() {
     if [ "$mode" != on ]; then
         if ! nm -u "$o.o" >"$o.nm-u.txt"; then
             bad "$tag: OB-N: nm -u failed"
-        elif grep -q 'ps3dk_prof' "$o.nm-u.txt"; then
-            bad "$tag: OB-N: the disabled object references $(grep -m 1 ps3dk_prof "$o.nm-u.txt")"
+        elif ! grep_status -q 'ps3dk_prof' "$o.nm-u.txt"; then
+            bad "$tag: OB-N: the undefined-symbol list could not be inspected"
+        elif [ "$gst" = 0 ]; then
+            bad "$tag: OB-N: the disabled object references $(grep -m 1 ps3dk_prof "$o.nm-u.txt" || true)"
         else
             ok "$tag: OB-N (no profiler symbol referenced)"
         fi

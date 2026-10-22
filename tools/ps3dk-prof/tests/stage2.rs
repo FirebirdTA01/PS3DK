@@ -1043,3 +1043,15 @@ fn retired_entry_with_open_spans_2_and_two_open_spans_in_the_records() {
     let text = report::render(&a);
     assert_eq!(text.lines().filter(|l| l.contains("duration unknown (censored)") && l.contains("OPEN")).count(), 2);
 }
+
+#[test]
+fn report_lists_every_published_descriptor_with_its_identity() {
+    let a = analysed(&clean_capture());
+    let text = report::render(&a);
+    assert!(text.lines().any(|l| l == "descriptors (as published):"), "{text}");
+    assert!(!a.capture.descriptors.is_empty());
+    for d in a.capture.descriptors.values() {
+        let line = format!("  index {} id {:#018x} scope {} {}:{} {}", d.index, d.id, d.scope, d.file, d.line, d.name);
+        assert!(text.lines().any(|l| l.starts_with(&line)), "{line:?} not in\n{text}");
+    }
+}

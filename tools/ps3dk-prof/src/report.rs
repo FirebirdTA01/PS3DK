@@ -116,6 +116,16 @@ pub fn render(a: &Analysis) -> String {
         if valid.is_empty() { "none".to_string() } else { valid.join(", ") }
     );
 
+    let _ = writeln!(o, "\ndescriptors (as published):");
+    for d in cap.descriptors.values() {
+        let tag = if d.logical_tag.is_empty() { String::new() } else { format!(" [{}]", d.logical_tag) };
+        let _ = writeln!(
+            o,
+            "  index {} id {:#018x} scope {} {}:{} {}{tag}",
+            d.index, d.id, d.scope, d.file, d.line, d.name
+        );
+    }
+
     let _ = writeln!(o, "\nframe elapsed (FRAME k to FRAME k+1 of its owner):");
     for f in &a.frames {
         let _ = writeln!(o, "  owner {} frame {}: {}", f.owner, f.frame, f.value);
