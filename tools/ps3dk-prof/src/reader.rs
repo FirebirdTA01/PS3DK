@@ -146,22 +146,28 @@ fn read_final_entry(cur: &mut Cursor<'_>, from_retired_chunk: bool) -> Result<Fi
             format!("state-{state} entry of {incarnation} carries UNKNOWN or COUNTS_UNKNOWN"),
         );
     }
-    // Section 6: counts are at most 2^63.  Every EXACT count is checked here: written_count in every state (it is
-    // exact even for NOT_QUIESCED), the others in states 1 and 2.  produced_count has its own rule, checked with the
-    // arithmetic in `finish`.
+    // Section 6: 2^63 is the inclusive representation ceiling of the exact cumulative counters: written_count in every
+    // state (it is exact even for NOT_QUIESCED), the others in states 1 and 2.  produced_count has its own rule,
+    // checked with the arithmetic in `finish`.
     let mut exact = vec![("written_count", entry.written_count)];
     if state != STATE_NOT_QUIESCED {
         exact.extend([
             ("dropped_count", entry.dropped_count),
             ("refused_count", entry.refused_count),
             ("regerr_count", entry.regerr_count),
-            ("open_spans", entry.open_spans),
         ]);
     }
     for (what, v) in exact {
         if v > SEQ_LIMIT {
             return malformed(Rule::ExactCountRange, format!("final entry of {incarnation}: {what} {v} > 2^63"));
         }
+    }
+    // open_spans is an active-stack snapshot, bounded by the depth cap; UNKNOWN (unchecked) in state 3.
+    if state != STATE_NOT_QUIESCED && entry.open_spans > MAX_OPEN_SPANS {
+        return malformed(
+            Rule::OpenSpansRange,
+            format!("final entry of {incarnation}: open_spans {} > {MAX_OPEN_SPANS}", entry.open_spans),
+        );
     }
     Ok(entry)
 }

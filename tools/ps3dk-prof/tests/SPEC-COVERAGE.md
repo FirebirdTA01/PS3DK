@@ -54,21 +54,24 @@ and a mapped test name that does not exist.  Stage 3 and later bullets are not p
 | Spans N | a tokened worker span gives spans N: unknown | `tokened_worker_span_n_unknown` |
 | Spans N | an owner span with a GAP inside it gives N unknown | `owner_span_with_gap_inside_n_unknown` |
 
-## Review additions (9) -> tests/stage2.rs unless marked
+## Review additions (12) -> tests/stage2.rs unless marked
 
 | item | behaviour | tests |
 |---|---|---|
-| 1 exact counts | written, dropped, refused, regerr and open_spans above 2^63 are MALFORMED | `malformed.rs: written_count_over_2_pow_63`, `malformed.rs: dropped_count_over_2_pow_63`, `malformed.rs: refused_count_over_2_pow_63`, `malformed.rs: regerr_count_over_2_pow_63`, `malformed.rs: open_spans_over_2_pow_63`, `malformed.rs: state3_written_count_over_2_pow_63` |
-| 1 exact counts | 2^63 is accepted (written_count = 2^63 cannot be built: it must equal the records written) | `dropped_count_2_pow_63_accepted`, `refused_count_2_pow_63_accepted`, `regerr_count_2_pow_63_accepted`, `open_spans_2_pow_63_accepted` |
+| 1 exact counts | written, dropped, refused and regerr above their 2^63 representation ceiling are MALFORMED | `malformed.rs: written_count_over_2_pow_63`, `malformed.rs: dropped_count_over_2_pow_63`, `malformed.rs: refused_count_over_2_pow_63`, `malformed.rs: regerr_count_over_2_pow_63`, `malformed.rs: state3_written_count_over_2_pow_63` |
+| 1 exact counts | 2^63 is accepted (written_count = 2^63 cannot be built: it must equal the records written) | `dropped_count_2_pow_63_accepted`, `refused_count_2_pow_63_accepted`, `regerr_count_2_pow_63_accepted` |
+| 1 open_spans | an active-stack snapshot: 256 accepted, 257 MALFORMED, UNKNOWN accepted in state 3 | `open_spans_256_accepted`, `malformed.rs: open_spans_257_is_malformed`, `state3_open_spans_unknown_accepted` |
 | 1 REGERR | regerr_count must cover the REGERR records written; a nonzero count invalidates the lane | `malformed.rs: regerr_record_with_regerr_count_0`, `regerr_record_with_nonzero_regerr_count_makes_lane_invalid` |
 | 2 FRAME ids | no saturation: repeated after a GAP, u64::MAX, above its own seq; the maximum legal id | `malformed.rs: frame_id_repeated_after_gap`, `malformed.rs: frame_id_u64_max_after_gap`, `malformed.rs: frame_id_one_above_its_seq`, `frame_id_equal_to_its_seq_at_the_maximum_is_accepted` |
 | 3 no saturated value | exact totals; unavailable (never 0) durations in analysis and report | `nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_mean`, `clock_anomaly_span_duration_is_unavailable_not_zero`, `parent_of_an_anomalous_child_has_an_unavailable_exclusive_duration` |
-| 4 A/B policy | clock, ABI and scope refusals; recorded differences; valid-lane scope; invalid-only versus absent | `compare_refuses_a_different_clock_frequency`, `compare_refuses_an_abi_mismatch`, `compare_refuses_a_descriptor_scope_mismatch`, `compare_records_build_compiler_flags_and_workload_differences`, `compare_records_a_source_line_difference`, `compare_exposes_the_valid_lane_scope`, `compare_distinguishes_a_key_only_in_invalid_lanes_from_an_absent_key` |
+| 3 frame clock | decreasing FRAME tb invalidates the owner; frame elapsed refused, no number in the report | `frame_clock_anomaly_invalidates_the_owner_and_refuses_frame_elapsed` |
+| 4 A/B policy | clock, ABI and scope refusals; recorded differences; valid-lane scope; invalid-only versus absent | `compare_refuses_a_different_clock_frequency`, `compare_refuses_an_abi_mismatch`, `compare_refuses_a_descriptor_scope_mismatch`, `compare_records_build_compiler_and_flags_differences`, `compare_records_a_source_line_difference`, `compare_exposes_the_valid_lane_scope`, `compare_distinguishes_a_key_only_in_invalid_lanes_from_an_absent_key` |
+| 4 A/B workload | a different workload or app is refused; the explicit override is descriptive, never Compared | `compare_refuses_a_different_workload_on_the_same_build`, `compare_refuses_a_different_app`, `compare_cross_workload_override_is_descriptive_never_compared`, `compare_same_workload_control_is_compared` |
 | 5 slots | one live incarnation per slot; reuse after RETIRED is valid | `malformed.rs: slot_already_live`, `malformed.rs: slot_reused_before_its_incarnation_retired`, `slot_reuse_after_its_incarnation_retired_is_valid` |
 | 6 short header | every constrained byte of a cut header is checked | `malformed.rs: short_header_valid_prefix_at_every_length_is_torn`, `malformed.rs: short_header_bad_byte_at_every_cut_point`, `malformed.rs: fifteen_byte_header_with_nonzero_flags_byte_is_not_torn` |
 | 16 read versus load | read is structural; check, report and A/B use the whole-file verdict | `read_alone_accepts_a_rule_4_case_that_load_refuses`, `cli.rs: check_reports_malformed_for_a_rule_4_case_the_structural_pass_accepts`, `cli.rs: report_also_refuses_the_rule_4_case`, `cli.rs: check_exit_status_for_complete_and_incomplete` |
 
-## Rule variants (85) -> tests (102 in malformed.rs, 77 in stage2.rs, 3 in cli.rs)
+## Rule variants (86) -> tests (102 in malformed.rs, 83 in stage2.rs, 3 in cli.rs)
 
 | rule | tests |
 |---|---|
@@ -146,7 +149,8 @@ and a mapped test name that does not exist.  Stage 3 and later bullets are not p
 | `FinalEntryLimitFlagsReserved` | `final_entry_limit_flags_reserved` |
 | `ExactEntryUnknown` | `exact_entry_unknown`, `state_1_entry_containing_unknown`, `state_2_entry_containing_unknown` |
 | `State3Fields` | `state3_fields`, `state_3_entry_with_concrete_produced_count` |
-| `ExactCountRange` | `written_count_over_2_pow_63`, `dropped_count_over_2_pow_63`, `refused_count_over_2_pow_63`, `regerr_count_over_2_pow_63`, `open_spans_over_2_pow_63`, `state3_written_count_over_2_pow_63` |
+| `ExactCountRange` | `written_count_over_2_pow_63`, `dropped_count_over_2_pow_63`, `refused_count_over_2_pow_63`, `regerr_count_over_2_pow_63`, `state3_written_count_over_2_pow_63` |
+| `OpenSpansRange` | `open_spans_257_is_malformed` |
 | `WrittenCountMismatch` | `written_count_mismatch` |
 | `ProducedCountRange` | `produced_count_range`, `produced_count_2_pow_63_plus_1_refused` |
 | `ProducedCountArithmetic` | `produced_count_arithmetic` |

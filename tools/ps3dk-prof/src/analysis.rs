@@ -465,8 +465,12 @@ fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AbResult {
-    /// Mean inclusive duration of the completed instances in each capture, in ticks of [`Comparison::freq_hz`].
+    /// Mean inclusive duration of the completed instances in each capture, in ticks of [`Comparison::freq_hz`].  Only
+    /// in a [`ComparisonKind::Compatible`] comparison.
     Compared { a_mean: f64, b_mean: f64 },
+    /// The same means, in a [`ComparisonKind::DescriptiveCrossWorkload`] comparison: the captures ran different
+    /// workloads or apps, so this is a description of two runs, NOT an A/B result.
+    Descriptive { a_mean: f64, b_mean: f64 },
     Refused(String),
     /// The key has spans in a valid lane of A and no span at all in B.
     OnlyInA,
@@ -486,14 +490,38 @@ pub struct AbRow {
     pub differences: Vec<String>,
 }
 
+/// Caller policy for [`compare_with`].  The default refuses captures of different workloads or apps.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CompareOptions {
+    /// Compare captures whose workload tag or app differs.  The result is then a
+    /// [`ComparisonKind::DescriptiveCrossWorkload`], never an ordinary A/B result.
+    pub allow_cross_workload: bool,
+}
+
+/// What kind of comparison a [`Comparison`] is.  Reports print it FIRST.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComparisonKind {
+    /// An ordinary A/B: same workload and app, same ABI and clock, both COMPLETE.
+    Compatible,
+    /// The caller allowed different workloads or apps: a description of two runs, not an A/B result.
+    DescriptiveCrossWorkload,
+    /// Refused as a whole; see [`Comparison::refused`].
+    Refused,
+}
+
 /// The result of an A/B comparison, with its compatibility metadata.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Comparison {
-    /// A capture-level refusal (not COMPLETE, ABI or clock mismatch): when set, every row is refused with it.
+    pub kind: ComparisonKind,
+    /// A capture-level refusal (not COMPLETE, ABI, clock, workload or app mismatch): when set, every row is refused
+    /// with it.
     pub refused: Option<String>,
+    /// The workload and app differences that made this a descriptive cross-workload comparison (empty otherwise).
+    pub cross_workload: Vec<String>,
     /// The clock frequency both captures share; every compared value is in ticks of this clock.
     pub freq_hz: Option<u64>,
-    /// Recorded, intentional differences between the captures (build id, SDK, compiler, flags, workload, app).
+    /// Recorded, intentional differences between the captures: the variables under test (build id, SDK version,
+    /// compiler identity, flags).
     pub differences: Vec<String>,
     /// The MEASUREMENT VALID incarnations each side's statistics come from.
     pub a_scope: Vec<u32>,
@@ -532,18 +560,36 @@ fn key_descriptors(cap: &Capture, name: &str, tag: &str) -> (Vec<u8>, Vec<String
     (scopes, places)
 }
 
+/// [`compare_with`] under the default policy: different workloads or apps are REFUSED.
+pub fn compare(a: &Analysis, b: &Analysis) -> Comparison {
+    compare_with(a, b, CompareOptions::default())
+}
+
 /// A/B by logical key, over the MEASUREMENT VALID incarnations of each capture (section 9).  The compatibility
 /// policy (tools/ps3dk-prof/README.md):
 /// - REFUSED for the whole comparison: either capture not TRANSPORT COMPLETE; a different ABI; a different (or
-///   missing) clock frequency.  Values are raw ticks, so captures are compared only on the same timebase.
+///   missing) clock frequency (values are raw ticks, so captures are compared only on the same timebase); a
+///   different workload tag or app, unless `opts.allow_cross_workload`.
+/// - With `allow_cross_workload` and a workload or app difference, the comparison is
+///   [`ComparisonKind::DescriptiveCrossWorkload`] and its rows are [`AbResult::Descriptive`], never `Compared`.
 /// - REFUSED per key: a duplicate logical key; a different descriptor scope (cpu vs gpu-complete); censored instances;
 ///   no completed instances.
-/// - RECORDED, not refused: build id, SDK version, compiler identity, flags, workload tag, app (per capture) and the
-///   source file and line (per key).
-pub fn compare(a: &Analysis, b: &Analysis) -> Comparison {
+/// - RECORDED, not refused, as the intended variables: build id, SDK version, compiler identity and flags (per
+///   capture), and the source file and line (per key).
+pub fn compare_with(a: &Analysis, b: &Analysis, opts: CompareOptions) -> Comparison {
     let scope_of = |x: &Analysis| -> Vec<u32> { x.lanes.values().filter(|l| l.valid).map(|l| l.incarnation).collect() };
     let (ha, hb) = (a.capture.header.as_ref(), b.capture.header.as_ref());
     let (fa, fb) = (a.capture.clock.as_ref().map(|c| c.freq_hz), b.capture.clock.as_ref().map(|c| c.freq_hz));
+
+    let mut cross_workload = Vec::new();
+    if let (Some(x), Some(y)) = (ha, hb) {
+        if x.workload_tag != y.workload_tag {
+            cross_workload.push(format!("workload: A {:?}, B {:?}", x.workload_tag, y.workload_tag));
+        }
+        if x.app != y.app {
+            cross_workload.push(format!("app: A {:?}, B {:?}", x.app, y.app));
+        }
+    }
 
     let refused = if a.verdict != Verdict::Complete {
         Some("capture A not TRANSPORT COMPLETE".to_string())
@@ -557,8 +603,20 @@ pub fn compare(a: &Analysis, b: &Analysis) -> Comparison {
             fa.map_or("unknown".to_string(), |f| f.to_string()),
             fb.map_or("unknown".to_string(), |f| f.to_string())
         ))
+    } else if !cross_workload.is_empty() && !opts.allow_cross_workload {
+        Some(format!(
+            "different workload or app ({}); pass allow_cross_workload for a descriptive comparison",
+            cross_workload.join("; ")
+        ))
     } else {
         None
+    };
+    let kind = if refused.is_some() {
+        ComparisonKind::Refused
+    } else if !cross_workload.is_empty() {
+        ComparisonKind::DescriptiveCrossWorkload
+    } else {
+        ComparisonKind::Compatible
     };
 
     let mut differences = Vec::new();
@@ -568,12 +626,10 @@ pub fn compare(a: &Analysis, b: &Analysis) -> Comparison {
                 differences.push(format!("{what}: A {p:?}, B {q:?}"));
             }
         };
-        note("app", x.app.clone(), y.app.clone());
         note("build id", hex(&x.build_id), hex(&y.build_id));
         note("sdk version", x.sdk_version.clone(), y.sdk_version.clone());
         note("compiler", x.compiler_identity.clone(), y.compiler_identity.clone());
         note("flags", x.flags.clone(), y.flags.clone());
-        note("workload", x.workload_tag.clone(), y.workload_tag.clone());
     }
 
     // Every logical key with a span anywhere (valid or not) in either capture.
@@ -614,7 +670,10 @@ pub fn compare(a: &Analysis, b: &Analysis) -> Comparison {
                             ))
                         } else {
                             match (x.mean.value(), y.mean.value()) {
-                                (Some(&am), Some(&bm)) => AbResult::Compared { a_mean: am, b_mean: bm },
+                                (Some(&am), Some(&bm)) if kind == ComparisonKind::Compatible => {
+                                    AbResult::Compared { a_mean: am, b_mean: bm }
+                                }
+                                (Some(&am), Some(&bm)) => AbResult::Descriptive { a_mean: am, b_mean: bm },
                                 _ => AbResult::Refused("no completed instances".to_string()),
                             }
                         }
@@ -631,7 +690,16 @@ pub fn compare(a: &Analysis, b: &Analysis) -> Comparison {
         })
         .collect();
 
-    Comparison { refused, freq_hz: fa.filter(|_| fa == fb), differences, a_scope: scope_of(a), b_scope: scope_of(b), rows }
+    Comparison {
+        kind,
+        refused,
+        cross_workload,
+        freq_hz: fa.filter(|_| fa == fb),
+        differences,
+        a_scope: scope_of(a),
+        b_scope: scope_of(b),
+        rows,
+    }
 }
 
 /// Valid statistics for key `k` in `x`; else present only in invalid lanes (a span with that key exists); else absent.

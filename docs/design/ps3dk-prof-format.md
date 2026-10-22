@@ -90,6 +90,10 @@ Rules. Every violation in this list is MALFORMED unless it says otherwise:
   - Each incarnation is declared once per file and never reused within a capture.
   - At most `max_threads` incarnations are live at any point of the stream. The count goes up at THREADS and down at
     RETIRED.
+  - **One live incarnation per slot.** An incarnation holds its `slot` from its THREADS entry until its RETIRED entry.
+    A slot is released ONLY by that RETIRED entry; a final entry in the TRAILER releases nothing, because nothing
+    follows the TRAILER. A THREADS entry that names a slot still held by a live incarnation is MALFORMED. Only after
+    the holder's RETIRED entry may a new incarnation take the slot.
 - **Declaration before use:** a RECORDS chunk, or a field that names an incarnation or a descriptor index, may appear
   only after the THREADS or DESCRIPTORS chunk that declares it. Section 5.4 states the drain ordering that guarantees
   this.
@@ -162,7 +166,11 @@ off 8  u64 seq      off 16 u64 b        off 24 u64 c
   - **Frames:**
     - The frame owner is the incarnation that emits FRAME records.
     - Frame ids start at 0 and go up by 1 for each FRAME of that owner.
-    - A hole in the frame ids is MALFORMED unless the owner had loss.
+    - A hole in the frame ids is MALFORMED unless the owner had loss. A hole is allowed only when a GAP came after the
+      previous FRAME, and the ids still strictly increase: a repeated or decreasing id is MALFORMED even after a GAP.
+    - **A frame id is at most its own seq.** Ids 0 to f were each assigned to a FRAME together with a distinct sequence
+      (sections 5.1 and 5.6), the last of them this record's own, so `f` <= the FRAME record's `seq`. A larger id is
+      MALFORMED, with or without loss. It follows that no frame id reaches 2^63, and no id can repeat by overflow.
   - **Tokens:** a token (BEGIN_PARENT `a` != 0) names an owner incarnation and a frame id f.
     - The owner must have been declared earlier in the file, or the record is MALFORMED.
     - The FRAME record of (owner, f) may appear anywhere in the file, before or after the token, because rings drain
@@ -252,6 +260,9 @@ These definitions apply to every case below:
   3. **Records:** emit RECORDS up to the snapshot from step 1, never splitting a published publication across chunks.
   4. **Retirement:** for each incarnation that has retired and is now fully drained, emit its RETIRED entry. Only then
      does its slot become free for a NEW incarnation id.
+     - The RETIRED entry is the ONLY release of a slot, on the wire as in the runtime. The writer must not emit a
+       THREADS entry for a new incarnation on that slot before the old incarnation's RETIRED entry; a reader refuses
+       such a file as MALFORMED (section 3).
   - Every record visible in step 1 was published after its descriptor and its incarnation, so step 2 declares them first.
   - The FINAL drain does not take these snapshots. It uses the frozen frontier of section 7, taken once, so the final
     drain can never grow beyond it.
@@ -311,6 +322,21 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
 ```
 
 - **UNKNOWN** is the u64 value 0xFFFFFFFFFFFFFFFF. It is never a legal count, because counts are at most 2^63.
+- **The 2^63 ceiling.** 2^63 is the inclusive REPRESENTATION ceiling of the exact cumulative counters
+  `produced_count`, `written_count`, `dropped_count`, `refused_count` and `regerr_count`: a value above it is
+  MALFORMED. The ceiling is not a claim that every field can reach it; each field is also bound by its own
+  consistency rules below. `refused_count` and `regerr_count` may sit at the ceiling, subject to those rules.
+- **`open_spans` is an ACTIVE-STACK snapshot, not a cumulative counter.** It is the number of spans open on the
+  producer's stack at one defined point:
+  - for an ACKED entry (state 2): immediately before its STOP batch, which is the number of spans that batch closes
+    with TRUNCATED_AT_STOP (section 7);
+  - for a RETIRED entry (state 1): when `ps3dk_prof_thread_end()` ran, before it cleared the stack (section 7).
+  - Depth is capped at 255 (section 5.2: a BEGIN at depth 256 is REFUSED and not pushed), so at most 256 spans can be
+    open: `open_spans` <= 256, or MALFORMED. In state 3 it is UNKNOWN, as every non-exact count there.
+  - `open_spans` is the PRODUCER's snapshot. It is distinct from the OPEN spans a reader reconstructs from the records
+    (section 4), which loss can hide or leave unmatched. The two are not cross-checked in this version, with or
+    without loss: a STOP batch can be dropped into loss or refused at the sequence limit, so the records alone do not
+    determine the snapshot in every state.
 - **end_flags:** bit0 NOT_QUIESCED, bit1 SEQ_LIMIT, bit2 SINK_ERROR_BEFORE_TRAILER. Every other bit must be 0, or the
   trailer is MALFORMED.
 - **state:**
@@ -345,7 +371,12 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     - `dropped_count` = (the sum of that incarnation's GAP ranges) + the terminal tail. The terminal tail is
       `produced_count` - (last written seq + 1), or `produced_count` if nothing was written.
     - A terminal tail > 0 means the last events were lost with no GAP to follow them. That is terminal loss.
-  - **State 3 entries:** no arithmetic check. Loss and terminal loss for them are UNKNOWN.
+    - `regerr_count` >= the number of REGERR records written for that incarnation. The counter is incremented
+      unconditionally and the REGERR record is best effort (section 5.3), so the counter covers every record; a
+      larger counter is legal, because REGERR records can be lost.
+    - `open_spans` <= 256.
+  - **State 3 entries:** no arithmetic check. Loss and terminal loss for them are UNKNOWN, and so are `regerr_count`
+    and `open_spans`: neither is checked.
   - **`descriptor_count`:** equals the number of descriptors declared.
   - **end_flags bit0:** set if and only if some entry has state 3.
   - **end_flags bit1:** set if and only if some final entry has `limit_flags` bit0. "Some final entry" covers every RETIRED

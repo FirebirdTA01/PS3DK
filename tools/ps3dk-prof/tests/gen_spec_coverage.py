@@ -26,7 +26,8 @@ ct = tests(C / 'tests/cli.rs')
 cov = {r: [] for r in rules}
 for name, rs in list(mt.items()) + list(st.items()) + list(ct.items()):
     for r in rs:
-        cov[r].append(name)
+        if name not in cov[r]:
+            cov[r].append(name)
 missing = [r for r in rules if not cov[r]]
 if missing:
     sys.exit('rules without a test: %s' % missing)
@@ -114,15 +115,16 @@ B = [
     ("Spans N", "an owner span with a GAP inside it gives N unknown", ["owner_span_with_gap_inside_n_unknown"]),
 ]
 
-# Review additions (codex, 2026-10-21 22:41 and 22:42): rules and behaviours the stage-2 review found missing.
+# Review additions (codex, 2026-10-21 22:41, 22:42 and 23:00): rules and behaviours the stage-2 reviews found missing.
 R = [
-    ("1 exact counts", "written, dropped, refused, regerr and open_spans above 2^63 are MALFORMED",
+    ("1 exact counts", "written, dropped, refused and regerr above their 2^63 representation ceiling are MALFORMED",
      ["malformed.rs: written_count_over_2_pow_63", "malformed.rs: dropped_count_over_2_pow_63",
       "malformed.rs: refused_count_over_2_pow_63", "malformed.rs: regerr_count_over_2_pow_63",
-      "malformed.rs: open_spans_over_2_pow_63", "malformed.rs: state3_written_count_over_2_pow_63"]),
+      "malformed.rs: state3_written_count_over_2_pow_63"]),
     ("1 exact counts", "2^63 is accepted (written_count = 2^63 cannot be built: it must equal the records written)",
-     ["dropped_count_2_pow_63_accepted", "refused_count_2_pow_63_accepted", "regerr_count_2_pow_63_accepted",
-      "open_spans_2_pow_63_accepted"]),
+     ["dropped_count_2_pow_63_accepted", "refused_count_2_pow_63_accepted", "regerr_count_2_pow_63_accepted"]),
+    ("1 open_spans", "an active-stack snapshot: 256 accepted, 257 MALFORMED, UNKNOWN accepted in state 3",
+     ["open_spans_256_accepted", "malformed.rs: open_spans_257_is_malformed", "state3_open_spans_unknown_accepted"]),
     ("1 REGERR", "regerr_count must cover the REGERR records written; a nonzero count invalidates the lane",
      ["malformed.rs: regerr_record_with_regerr_count_0", "regerr_record_with_nonzero_regerr_count_makes_lane_invalid"]),
     ("2 FRAME ids", "no saturation: repeated after a GAP, u64::MAX, above its own seq; the maximum legal id",
@@ -132,11 +134,16 @@ R = [
      ["nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_mean",
       "clock_anomaly_span_duration_is_unavailable_not_zero",
       "parent_of_an_anomalous_child_has_an_unavailable_exclusive_duration"]),
+    ("3 frame clock", "decreasing FRAME tb invalidates the owner; frame elapsed refused, no number in the report",
+     ["frame_clock_anomaly_invalidates_the_owner_and_refuses_frame_elapsed"]),
     ("4 A/B policy", "clock, ABI and scope refusals; recorded differences; valid-lane scope; invalid-only versus absent",
      ["compare_refuses_a_different_clock_frequency", "compare_refuses_an_abi_mismatch",
-      "compare_refuses_a_descriptor_scope_mismatch", "compare_records_build_compiler_flags_and_workload_differences",
+      "compare_refuses_a_descriptor_scope_mismatch", "compare_records_build_compiler_and_flags_differences",
       "compare_records_a_source_line_difference", "compare_exposes_the_valid_lane_scope",
       "compare_distinguishes_a_key_only_in_invalid_lanes_from_an_absent_key"]),
+    ("4 A/B workload", "a different workload or app is refused; the explicit override is descriptive, never Compared",
+     ["compare_refuses_a_different_workload_on_the_same_build", "compare_refuses_a_different_app",
+      "compare_cross_workload_override_is_descriptive_never_compared", "compare_same_workload_control_is_compared"]),
     ("5 slots", "one live incarnation per slot; reuse after RETIRED is valid",
      ["malformed.rs: slot_already_live", "malformed.rs: slot_reused_before_its_incarnation_retired",
       "slot_reuse_after_its_incarnation_retired_is_valid"]),

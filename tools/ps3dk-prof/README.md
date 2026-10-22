@@ -27,18 +27,32 @@ Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error.
 
 ## A/B compatibility policy (`compare`)
 
-`compare(a, b)` returns a `Comparison`: a capture-level refusal (if any), the shared clock frequency, the recorded
-differences, the valid-lane scope of each side, and one row per logical key (name plus logical tag).
+`compare(a, b)` is `compare_with(a, b, CompareOptions::default())`. It returns a `Comparison`:
+- its `kind`;
+- a capture-level refusal, if any;
+- the shared clock frequency;
+- the recorded differences;
+- the valid-lane scope of each side;
+- one row per logical key (name plus logical tag).
+
+`report::render_comparison` prints the kind FIRST, before any value.
+
+| Kind | When | Rows |
+|---|---|---|
+| `Compatible` | Same workload and app, same ABI and clock, both COMPLETE | `Compared` |
+| `DescriptiveCrossWorkload` | Different workload tag or app, and the caller passed `CompareOptions { allow_cross_workload: true }` | `Descriptive`: a description of two runs, NOT an A/B result, never `Compared` |
+| `Refused` | Any capture-level refusal below | every row `Refused` |
 
 | Condition | Effect |
 |---|---|
 | Either capture not TRANSPORT COMPLETE | The whole comparison is REFUSED. |
 | Different ABI (ILP32 vs LP64) | The whole comparison is REFUSED. |
 | Different or missing clock frequency | The whole comparison is REFUSED. Values are raw ticks and are not converted between clocks. |
+| Different workload tag or app | REFUSED by default. With `allow_cross_workload`, the comparison is `DescriptiveCrossWorkload` and the differences are listed in `Comparison::cross_workload`. |
 | Duplicate logical key in either capture | That key is REFUSED. |
 | Different descriptor scope (cpu vs gpu-complete) | That key is REFUSED. |
 | Censored instances, or no completed instances | That key is REFUSED. |
-| Different build id, SDK version, compiler identity, flags, workload tag or app | RECORDED in `Comparison::differences`, not refused. |
+| Different build id, SDK version, compiler identity or flags | RECORDED in `Comparison::differences` as the intended variables of the A/B, not refused. |
 | Different source file and line for a key | RECORDED in that row's `differences`, not refused. |
 
 - **Scope:** `a_scope` and `b_scope` list the MEASUREMENT VALID incarnations each side's statistics come from.

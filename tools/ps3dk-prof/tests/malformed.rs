@@ -673,8 +673,10 @@ fn regerr_count_over_2_pow_63() {
 }
 
 #[test]
-fn open_spans_over_2_pow_63() {
-    assert_rule(&with_trailer(|t| t.fins[0].open = P63 + 1), Rule::ExactCountRange);
+fn open_spans_257_is_malformed() {
+    // open_spans is an active-stack snapshot: depth 0..=255 allows at most 256 open spans.
+    assert_rule(&with_trailer(|t| t.fins[0].open = 257), Rule::OpenSpansRange);
+    assert_rule(&with_trailer(|t| t.fins[0].open = P63 + 1), Rule::OpenSpansRange);
 }
 
 #[test]

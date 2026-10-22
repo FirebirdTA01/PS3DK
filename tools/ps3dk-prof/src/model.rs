@@ -14,8 +14,10 @@ pub const MAX_CHUNK_LEN: u32 = 1_048_576;
 pub const MAX_STRING_LEN: usize = 512;
 pub const MAX_THREADS: u32 = 1024;
 pub const MAX_DESCRIPTORS: u32 = 65_536;
-/// 2^63: sequences are below it, `produced_count` is at most it.
+/// 2^63: sequences are below it, and it is the inclusive representation ceiling of the exact cumulative counters.
 pub const SEQ_LIMIT: u64 = 1 << 63;
+/// The most spans that can be open on one stack: depths 0..=255 (section 5.2).
+pub const MAX_OPEN_SPANS: u64 = 256;
 /// The UNKNOWN count of a NOT_QUIESCED final entry (section 6).
 pub const UNKNOWN: u64 = u64::MAX;
 pub const RECORD_LEN: usize = 32;
@@ -134,8 +136,10 @@ pub enum Rule {
     FinalEntryLimitFlagsReserved,
     ExactEntryUnknown,
     State3Fields,
-    /// An exact count (written, dropped, refused, regerr, open_spans) above 2^63 (section 6: counts are at most 2^63).
+    /// An exact cumulative counter (written, dropped, refused, regerr) above its 2^63 representation ceiling (section 6).
     ExactCountRange,
+    /// open_spans, an active-stack snapshot, above 256: depth is capped at 255 (sections 5.2 and 6).
+    OpenSpansRange,
     WrittenCountMismatch,
     ProducedCountRange,
     ProducedCountArithmetic,

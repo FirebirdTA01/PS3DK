@@ -2,8 +2,64 @@
 
 use std::fmt::Write;
 
-use crate::analysis::Analysis;
+use crate::analysis::{AbResult, Analysis, Comparison, ComparisonKind};
 use crate::model::*;
+
+/// The first line of every comparison report: what kind of comparison it is.
+pub fn comparison_kind_line(c: &Comparison) -> String {
+    match c.kind {
+        ComparisonKind::Compatible => "A/B COMPARISON (compatible captures)".to_string(),
+        ComparisonKind::DescriptiveCrossWorkload => format!(
+            "DESCRIPTIVE CROSS-WORKLOAD COMPARISON, NOT AN A/B RESULT ({})",
+            c.cross_workload.join("; ")
+        ),
+        ComparisonKind::Refused => {
+            format!("COMPARISON REFUSED: {}", c.refused.as_deref().unwrap_or("no reason recorded"))
+        }
+    }
+}
+
+/// The text of a comparison.  Its kind is printed FIRST, before any value.
+pub fn render_comparison(c: &Comparison) -> String {
+    let mut o = String::new();
+    let _ = writeln!(o, "{}", comparison_kind_line(c));
+    if let Some(f) = c.freq_hz {
+        let _ = writeln!(o, "clock: {f} Hz; means are in timebase ticks");
+    }
+    let list = |v: &[u32]| -> String {
+        if v.is_empty() {
+            "none".to_string()
+        } else {
+            v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ")
+        }
+    };
+    let _ = writeln!(o, "scope: A lanes [{}], B lanes [{}]", list(c.a_scope.as_slice()), list(c.b_scope.as_slice()));
+    for d in &c.differences {
+        let _ = writeln!(o, "recorded difference: {d}");
+    }
+    for r in &c.rows {
+        let tag = if r.logical_tag.is_empty() { String::new() } else { format!(" [{}]", r.logical_tag) };
+        let what = match &r.result {
+            AbResult::Compared { a_mean, b_mean } => format!("A mean {a_mean}, B mean {b_mean}"),
+            AbResult::Descriptive { a_mean, b_mean } => {
+                format!("descriptive only: A mean {a_mean}, B mean {b_mean}")
+            }
+            AbResult::Refused(why) => format!("refused ({why})"),
+            AbResult::OnlyInA => "only in A".to_string(),
+            AbResult::OnlyInB => "only in B".to_string(),
+            AbResult::InvalidLanesOnly { a, b } => format!(
+                "present only in invalid lanes of{}{}",
+                if *a { " A" } else { "" },
+                if *b { " B" } else { "" }
+            ),
+        };
+        let _ = writeln!(o, "  {}{tag}: {what}", r.name);
+        for d in &r.differences {
+            let _ = writeln!(o, "    recorded difference: {d}");
+        }
+    }
+    o
+}
 
 pub const W_NOTE: &str = "W = start-frame-attributed EXCLUSIVE work of one lane: each span counts in the frame it \
 started in, for its whole exclusive duration. W is not clipped to the frame interval, can exceed the frame's \

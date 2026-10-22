@@ -5,7 +5,8 @@ mod common;
 
 use common::*;
 use ps3dk_prof::{
-    compare, load, reader, report, AbResult, Attribution, Incomplete, Metric, Outcome, Rule, SpansN, TokenOutcome,
+    compare, compare_with, load, reader, report, AbResult, Attribution, CompareOptions, ComparisonKind, Incomplete,
+    Metric, Outcome, Rule, SpansN, TokenOutcome,
 };
 
 /// One completed zone on lane 1.
@@ -702,14 +703,26 @@ fn regerr_count_2_pow_63_accepted() {
 }
 
 #[test]
-fn open_spans_2_pow_63_accepted() {
+fn open_spans_256_accepted() {
+    // The most spans one stack can hold (depths 0..=255).
     let s = scenario(vec![lane(1, one_zone())]);
     let mut t = s.trailer_struct();
-    t.fins[0].open = P63;
+    t.fins[0].open = 256;
     let mut f = s.file();
     let i = f.find(T_TRAILER);
     f.chunks[i] = chunk(T_TRAILER, t.payload());
-    complete(&f.bytes());
+    let a = complete(&f.bytes());
+    assert_eq!(a.capture.lanes[&1].final_entry.as_ref().unwrap().open_spans, 256);
+}
+
+#[test]
+fn state3_open_spans_unknown_accepted() {
+    let mut l = lane(1, one_zone());
+    l.state = 3;
+    assert_eq!(l.fin().open, UNKNOWN);
+    let (a, why) = incomplete(&scenario(vec![l]).bytes());
+    assert_eq!(why, vec![Incomplete::NotQuiesced]);
+    assert_eq!(a.capture.lanes[&1].final_entry.as_ref().unwrap().open_spans, UNKNOWN);
 }
 
 #[test]
@@ -832,29 +845,89 @@ fn compare_refuses_a_descriptor_scope_mismatch() {
 }
 
 #[test]
-fn compare_records_build_compiler_flags_and_workload_differences() {
+fn compare_records_build_compiler_and_flags_differences() {
+    // The intended variables of an A/B: recorded, not refused.
     let build = b"test-build-0002".to_vec();
     let mut ds = std_descs();
     for d in &mut ds {
         d.id = Some(desc_id(&build, "main.c", d.line, std::str::from_utf8(&d.name).unwrap()));
     }
-    let hdr = Hdr {
-        build_id: build,
-        compiler: b"gcc 16.2.0".to_vec(),
-        flags: b"-O3".to_vec(),
-        workload: b"other".to_vec(),
-        ..Hdr::default()
-    };
+    let hdr = Hdr { build_id: build, compiler: b"gcc 16.2.0".to_vec(), flags: b"-O3".to_vec(), ..Hdr::default() };
     let a = complete(&clean_capture());
     let b = complete(&variant(hdr, FREQ, Some(ds)));
     let c = compare(&a, &b);
+    assert_eq!(c.kind, ComparisonKind::Compatible);
     assert_eq!(c.refused, None);
     assert_eq!(c.freq_hz, Some(FREQ));
-    for what in ["build id", "compiler", "flags", "workload"] {
+    for what in ["build id", "compiler", "flags"] {
         assert!(c.differences.iter().any(|d| d.starts_with(what)), "{what}: {:?}", c.differences);
     }
-    assert_eq!(c.differences.len(), 4, "{:?}", c.differences);
+    assert_eq!(c.differences.len(), 3, "{:?}", c.differences);
     assert!(c.rows.iter().all(|r| matches!(r.result, AbResult::Compared { .. })));
+}
+
+#[test]
+fn compare_refuses_a_different_workload_on_the_same_build() {
+    let a = complete(&clean_capture());
+    let b = complete(&variant(Hdr { workload: b"other".to_vec(), ..Hdr::default() }, FREQ, None));
+    let c = compare(&a, &b);
+    assert_eq!(c.kind, ComparisonKind::Refused);
+    assert!(c.refused.as_deref().unwrap().starts_with("different workload or app"), "{c:?}");
+    assert!(c.rows.iter().all(|r| matches!(r.result, AbResult::Refused(_))));
+    assert!(report::render_comparison(&c).starts_with("COMPARISON REFUSED: different workload or app"));
+}
+
+#[test]
+fn compare_refuses_a_different_app() {
+    let a = complete(&clean_capture());
+    let b = complete(&variant(Hdr { app: b"other-app".to_vec(), ..Hdr::default() }, FREQ, None));
+    let c = compare(&a, &b);
+    assert_eq!(c.kind, ComparisonKind::Refused);
+    assert!(c.refused.as_deref().unwrap().contains("app: A \"app\", B \"other-app\""), "{c:?}");
+}
+
+#[test]
+fn compare_cross_workload_override_is_descriptive_never_compared() {
+    let a = complete(&clean_capture());
+    let b = complete(&variant(Hdr { workload: b"other".to_vec(), ..Hdr::default() }, FREQ, None));
+    let c = compare_with(&a, &b, CompareOptions { allow_cross_workload: true });
+    assert_eq!(c.kind, ComparisonKind::DescriptiveCrossWorkload);
+    assert_eq!(c.refused, None);
+    assert_eq!(c.cross_workload, vec!["workload: A \"unit\", B \"other\"".to_string()]);
+    assert!(!c.rows.is_empty());
+    assert!(c.rows.iter().all(|r| matches!(r.result, AbResult::Descriptive { .. })), "{:?}", c.rows);
+    let text = report::render_comparison(&c);
+    let first = text.lines().next().unwrap();
+    assert!(first.starts_with("DESCRIPTIVE CROSS-WORKLOAD COMPARISON, NOT AN A/B RESULT"), "{text}");
+}
+
+#[test]
+fn compare_same_workload_control_is_compared() {
+    let a = complete(&clean_capture());
+    let b = complete(&variant(Hdr::default(), FREQ, None));
+    let c = compare_with(&a, &b, CompareOptions { allow_cross_workload: true });
+    assert_eq!(c.kind, ComparisonKind::Compatible, "the override changes nothing for the same workload");
+    assert!(c.cross_workload.is_empty());
+    let zb = c.rows.iter().find(|r| r.name == "zoneB").unwrap();
+    assert_eq!(zb.result, AbResult::Compared { a_mean: 60.0, b_mean: 60.0 });
+    assert!(report::render_comparison(&c).starts_with("A/B COMPARISON (compatible captures)"));
+}
+
+#[test]
+fn frame_clock_anomaly_invalidates_the_owner_and_refuses_frame_elapsed() {
+    // Owner 1: FRAME 0 at tb 300, FRAME 1 at tb 100 (decreasing), FRAME 2 at tb 400.
+    let recs = vec![frame(0, 300, 0), frame(1, 100, 1), frame(2, 400, 2)];
+    let a = complete(&scenario(vec![lane(1, recs)]).bytes());
+    assert!(!a.lane_valid(1));
+    assert!(lane_reasons(&a, 1).iter().any(|x| x == "CLOCK_ANOMALY"));
+    for k in 0..3 {
+        assert_eq!(a.elapsed_for(1, k), Some(&Metric::Refused("owner invalid".to_string())), "frame {k}");
+    }
+    let text = report::render(&a);
+    for k in 0..3 {
+        let line = format!("  owner 1 frame {k}: refused (owner invalid)");
+        assert!(text.lines().any(|l| l == line), "{line:?} not in\n{text}");
+    }
 }
 
 #[test]
