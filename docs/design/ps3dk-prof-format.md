@@ -453,9 +453,11 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     slot or control-block pointer. That slot may already belong to a new incarnation (section 5.4 frees a slot for
     reuse once the retired incarnation is drained), and the retired thread must not touch it.
   - **The retirement race.** A `thread_end` that observed the latch CLEAR runs the retire path above and may
-    publish its RETIRED word after shutdown has set the latch. That release-published retirement still
-    establishes quiescence: the incarnation counts as RETIRED, not as NOT_QUIESCED. A `thread_end` that observes
-    STOP follows the ACKED path instead.
+    publish its RETIRED word after shutdown has set the latch. That release-published retirement establishes
+    quiescence only if the drainer observes it at the frozen-frontier state snapshot (step 1 below): the incarnation
+    then counts as RETIRED, not as NOT_QUIESCED. A retirement published AFTER that snapshot cannot upgrade the sealed
+    NOT_QUIESCED entry; the one-shot frontier rule governs. A `thread_end` that observes STOP follows the ACKED path
+    instead.
 - **Self-quiescence:**
   - Shutdown first runs the CALLING thread's own STOP batch and ack, if that thread is a registered incarnation. The
     caller never waits for itself.
