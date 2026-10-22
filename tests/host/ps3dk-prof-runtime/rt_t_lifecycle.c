@@ -89,6 +89,84 @@ int rt_owner_identity_failure_is_eperm(const char *out)
     return rt_expect(out, 0);
 }
 
+/* R3 (codex 2026-10-22): a failed OS thread id read refuses the registration with ETHREAD before anything changes.
+ * The slot stays FREE, no incarnation id or slot generation is consumed, and the thread's TLS stays unregistered, so
+ * the retry is the first registration the capture ever sees. */
+int rt_thread_begin_os_id_failure_refused(const char *out)
+{
+    ps3dk_prof_config c;
+    char path[512];
+    rt_cap cap;
+    rt_config(&c);
+    CHECK_OK(rt_start(out, &c, 0));
+    ps3dk_prof_test_hooks.os_id_fail = 1;
+    CHECK_EQ(ps3dk_prof_thread_begin("main"), PS3DK_PROF_ETHREAD);
+    CHECK_EQ(RT_READ(SLOT), 0);
+    CHECK_EQ(RT_READ(INCARNATION), 0);
+    CHECK_EQ(RT_READ(GENERATION), 0);
+    CHECK_EQ(ps3dk_prof_test_stat(PS3DK_PROF_TEST_STAT_SLOT_STATE_BASE + 0), RT_SLOT_FREE);
+    ps3dk_prof_test_hooks.os_id_fail = 0;
+    CHECK_EQ(ps3dk_prof_thread_begin("main"), PS3DK_PROF_OK);
+    CHECK_EQ(RT_READ(SLOT), 1);
+    CHECK_EQ(RT_READ(INCARNATION), 1);   /* the refused attempt consumed no incarnation id */
+    CHECK_EQ(RT_READ(GENERATION), 1);    /* nor a slot generation */
+    {
+        PS3DK_PROF_ZONE("z");
+    }
+    CHECK_EQ(ps3dk_prof_shutdown(), PS3DK_PROF_OK);
+    CHECK_EQ(rt_capture_path(out, path, sizeof path), 0);
+    CHECK_EQ(rt_cap_load(path, &cap), 0);
+    CHECK_EQ(cap.nthreads, 1);
+    CHECK_EQ(cap.threads_inc[0], 1);
+    CHECK_EQ(cap.threads_slot[0], 0);
+    CHECK_EQ(cap.unreg, 0);   /* an ETHREAD refusal is not counted as unregistered (open question in PAL-PREP-r1) */
+    rt_cap_free(&cap);
+    return rt_expect(out, 0);
+}
+
+static void *os_id_fail_then_retry(void *a)
+{
+    (void)a;
+    ps3dk_prof_test_hooks.os_id_fail = 1;   /* main waits in rt_join: only this thread runs the profiler now */
+    WCHECK(ps3dk_prof_thread_begin("w") == PS3DK_PROF_ETHREAD);
+    WCHECK(RT_READ(SLOT) == 0);
+    ps3dk_prof_test_hooks.os_id_fail = 0;
+    WCHECK(ps3dk_prof_thread_begin("w") == PS3DK_PROF_OK);
+    WCHECK(RT_READ(INCARNATION) == 2);
+    {
+        PS3DK_PROF_ZONE("w");
+    }
+    ps3dk_prof_thread_end();
+    return NULL;
+}
+
+/* The same refusal on a second thread while main is registered: main's incarnation is unaffected, and the retry gets
+ * the next incarnation id (2), not one past a consumed id. */
+int rt_thread_begin_os_id_failure_second_thread(const char *out)
+{
+    ps3dk_prof_config c;
+    rt_thread t;
+    char path[512];
+    rt_cap cap;
+    rt_config(&c);
+    CHECK_OK(rt_start(out, &c, 1));
+    {
+        PS3DK_PROF_ZONE("m");
+    }
+    rt_spawn(&t, os_id_fail_then_retry, NULL);
+    rt_join(&t);
+    CHECK(!rt_worker_failed());
+    CHECK_EQ(RT_READ(INCARNATION), 1);
+    CHECK_EQ(ps3dk_prof_shutdown(), PS3DK_PROF_OK);
+    CHECK_EQ(rt_capture_path(out, path, sizeof path), 0);
+    CHECK_EQ(rt_cap_load(path, &cap), 0);
+    CHECK_EQ(cap.nthreads, 2);
+    CHECK_EQ(cap.threads_inc[0], 1);
+    CHECK_EQ(cap.threads_inc[1], 2);
+    rt_cap_free(&cap);
+    return rt_expect(out, 0);
+}
+
 int rt_thread_second_shutdown_ealready(const char *out)
 {
     ps3dk_prof_config c;

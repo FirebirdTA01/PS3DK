@@ -197,9 +197,11 @@ Every name in the plan and its errata is implemented, apart from `rt_thread_mode
 | E1-E3 | 17 rows | `rt_t_stop.c`, `rt_t_zones.c`, `rt_t_init.c` |
 | F1, F3 | 5 rows | `rt_t_zones.c`, `rt_t_init.c` |
 | Boundary correction | 6 rows | `rt_t_counters.c` |
+| ID_COLLISION (synthetic) | 3 rows | `rt_t_zones.c` |
+| R3 OS thread id fails closed (codex 02:45) | 2 rows: `rt_thread_begin_os_id_failure_refused`, `rt_thread_begin_os_id_failure_second_thread` | `rt_t_lifecycle.c` |
 | Off-build and probes (host) | OB-E1, OB-E2 (enabled, undefined, =0; RUN), host OB-P, OB-N, PROBE-G (copy and move), archive symbols | `build-and-run.sh` |
 
-`rt_list.h` is the authoritative list, frozen in sorted form as `tests/host/ps3dk-prof-runtime/rt-registry.txt`, which each variant's `rt --list` must equal exactly: 100 tests, each run under plain, ASan+UBSan and TSan. Every capture is checked by `ps3dk-prof check` against the verdict the test declares.
+`rt_list.h` is the authoritative list, frozen in sorted form as `tests/host/ps3dk-prof-runtime/rt-registry.txt`, which each variant's `rt --list` must equal exactly: 102 tests, each run under plain, ASan+UBSan and TSan. Every capture is checked by `ps3dk-prof check` against the verdict the test declares.
 
 ## 5. Deferred: target-only, needs the cross compiler or LV2
 
@@ -254,7 +256,8 @@ collision is searched for or claimed.
   status 0 = found (FAIL), 1 = absent (PASS), >1 = inspection failure (FAIL), never read as absent (codex 02:43).
 - **Counts:** 100 registry tests x 3 variants = 300 rows; 29 non-row checks (driver-tsan selftest, 3 variant builds,
   TSan controls, the hook-free library build, 4 archive/preprocessor checks, 16 OB-E1/E2 checks, 3 PROBE-G), so a
-  fully passing run reports pass 329 (build-m at f01e1bcd: 291 + 28 = 319).
+  fully passing run reports pass 329 (build-m at f01e1bcd: 291 + 28 = 319). With the two R3 rows (PAL work on top of
+  157c42ce) the expectation becomes 102 x 3 = 306 rows and pass 335; expectations, not measurements.
 - **Still open:** the full runtime code review, and these tests' first host run (a separate request).
 
 ## 6. Expected compile risks
