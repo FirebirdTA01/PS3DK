@@ -28,6 +28,18 @@
 #define pal_write ps3dk_prof__pal_write
 #define pal_close ps3dk_prof__pal_close
 
+/* Exactly one PAL per build, enforced here in the SHARED header so every translation unit (core, drain and PAL) checks
+ * the same contract (codex 2026-10-22 03:21).  The LV2 PAL is hook-free: test hooks are a host-only build. */
+#if defined(PS3DK_PROF_PAL_HOST) && defined(PS3DK_PROF_PAL_LV2)
+#error "ps3dk prof: define exactly one of PS3DK_PROF_PAL_HOST and PS3DK_PROF_PAL_LV2, not both"
+#endif
+#if !defined(PS3DK_PROF_PAL_HOST) && !defined(PS3DK_PROF_PAL_LV2)
+#error "ps3dk prof: define exactly one of PS3DK_PROF_PAL_HOST and PS3DK_PROF_PAL_LV2"
+#endif
+#if defined(PS3DK_PROF_PAL_LV2) && defined(PS3DK_PROF_TEST_HOOKS)
+#error "ps3dk prof: PS3DK_PROF_TEST_HOOKS is host-only; the LV2 PAL build is hook-free"
+#endif
+
 #if defined(PS3DK_PROF_PAL_HOST)
 #include <pthread.h>
 typedef pthread_mutex_t pal_mutex;
@@ -45,9 +57,7 @@ typedef struct pal_owner {
     uint64_t id;   /* a sys_ppu_thread_t, u64 in both ABIs */
     int valid;     /* set only by a successful pal_owner_get: an unset owner is never the caller */
 } pal_owner;
-#define PAL_DEFAULT_SINK_DIR "/dev_hdd0/tmp"   /* PROPOSED, open question in PAL-PREP-r1 */
-#else
-#error "ps3dk prof: define PS3DK_PROF_PAL_HOST or PS3DK_PROF_PAL_LV2"
+#define PAL_DEFAULT_SINK_DIR "/dev_hdd0/tmp"   /* accepted (codex 03:21); exclusive create and the configurable sink kept */
 #endif
 
 /* Memory: one 128-byte-aligned block at init; pal_free only unwinds a failed init. */

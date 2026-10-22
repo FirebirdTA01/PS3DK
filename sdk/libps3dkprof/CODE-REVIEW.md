@@ -70,7 +70,7 @@ All six are in `rt_t_counters.c`. Each asserts:
 | File | Role |
 |---|---|
 | `sdk/include/ps3dk/prof.h` | The API, the types, the enabled and disabled macros, the C++ guard, the SPU `#error`. Not in `sdk/Makefile` HEADERS or SUBLIBS: it serves the isolated host tests only. |
-| `src/pal/pal.h`, `src/pal/pal_host.c` | The PAL interface and the POSIX implementation. Test faults are injected here. |
+| `src/pal/pal.h`, `src/pal/pal_host.c` | The PAL interface and the POSIX implementation. Test faults are injected here. `pal.h` is the shared header every core, drain and PAL object includes, and it refuses with `#error` both PAL macros together, neither, and `PS3DK_PROF_PAL_LV2` with `PS3DK_PROF_TEST_HOOKS` (codex 03:21). Planned preprocess checks, not run: `tests/sdk/ps3dk-prof-probes/pal-select/`. The guard does not prove that every object of a build used the SAME branch: the frozen build request must bind every core, drain and PAL compile invocation and the installed header and provider identities. |
 | `src/pal/pal_lv2.c` | The LV2 implementation (TARGET-PLAN-r2 section 1, rulings R1-R8): written for review, NOT built and not in SUBLIBS or any install rule. Hook-free (refuses `PS3DK_PROF_TEST_HOOKS`); needs `-DPS3DK_PROF_PAL_LV2` on every object. |
 | `src/core/prof_internal.h` | Structures, atomics, constants, the `ps3dk_prof__` symbol renames, the hook macros. |
 | `src/core/prof_test_hooks.h` | The `PS3DK_PROF_TEST_HOOKS`-only hook table, presets and statistics. |
