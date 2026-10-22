@@ -136,8 +136,8 @@ B += [
     ("FRAME ids and the frame clock",
      "decreasing FRAME tb: owner INVALID, frame elapsed refused owner invalid, no number in the report",
      ["frame_clock_anomaly_invalidates_the_owner_and_refuses_frame_elapsed"]),
-    ("Durations", "nested spans of 2^63 + 2 and 2^63 ticks: exact zone total and mean",
-     ["nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_mean"]),
+    ("Durations", "nested spans of 2^63 + 2 and 2^63 ticks: exact zone total, rounded floating-point mean",
+     ["nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_a_rounded_mean"]),
     ("Durations", "an END before its BEGIN: unavailable, never 0, in analysis and report; its parent's exclusive "
      "duration unavailable",
      ["clock_anomaly_span_duration_is_unavailable_not_zero",

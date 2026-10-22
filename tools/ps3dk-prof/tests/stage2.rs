@@ -747,7 +747,7 @@ fn frame_id_equal_to_its_seq_at_the_maximum_is_accepted() {
 // ---- review additions: no saturated value (section 9) ----------------------------------------------------------------
 
 #[test]
-fn nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_mean() {
+fn nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_a_rounded_mean() {
     // zoneA parent 0 .. 2^63 + 2, zoneA child 1 .. 2^63 + 1: durations 2^63 + 2 and 2^63, sum 2^64 + 2.
     let recs = seqd(
         0,
@@ -762,6 +762,7 @@ fn nested_same_zone_spans_of_2_pow_63_have_an_exact_total_and_mean() {
     let z = a.zone("zoneA").unwrap();
     let want: u128 = (1u128 << 64) + 2;
     assert_eq!(z.total, Metric::Value(want));
+    // The exact mean is 2^63 + 1; the mean is f64, so this compares the already-rounded value, not an exact one.
     assert_eq!(z.mean, Metric::Value(want as f64 / 2.0));
     assert_eq!(a.capture.spans[span_of(&a, 1, 1)].exclusive(), Some(2));
 }

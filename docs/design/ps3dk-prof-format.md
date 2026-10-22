@@ -207,7 +207,7 @@ These definitions apply to every case below:
   makes the incarnation INVALID(thread) through the trailer.
 - **Refusal causes:**
   - the depth cap;
-  - the sequence limit;
+  - the sequence limit, which also covers a STOP batch that is not admitted;
   - an event after STOP that is not a STOP-batch END;
   - every zone of a descriptor whose registration failed (section 5.3).
 - **Sequence boundary (pinned):**
@@ -416,15 +416,18 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   2. **APP mode, wrong thread:** the caller is not the designated drain thread. The call returns `PS3DK_PROF_EPERM`.
   3. **Second call:** the shutdown once-flag (compare-and-swap) is already taken. The call returns `PS3DK_PROF_EALREADY`.
 - **The STOP batch:**
-  - At its first profiler entry point after it observes the latch, a producer emits ONE STOP batch. The batch closes
-    every span still open on its stack, innermost first, with END + TRUNCATED_AT_STOP and `tb` = now.
+  - At its first profiler entry point after it observes the latch, a producer emits ONE STOP batch. The batch covers
+    every span still open on its stack, innermost first: one END + TRUNCATED_AT_STOP each, with `tb` = now.
   - This includes the span whose END call observed the latch. A span counts as completed only if its END was emitted
     before the latch was observed.
   - The batch is sequence-admitted WHOLE (section 5.1): either all k ENDs get sequences or none does. An admitted
     batch is reserved and published as a whole, or dropped as a whole into loss. A batch that is not admitted is
     refused as a whole (`refused_count` += k, SEQ_LIMIT set). A batch of k = 0 emits nothing.
+  - Recorded TRUNCATED_AT_STOP ENDs therefore appear in a file ONLY when the batch is admitted AND published.
+    Admission alone does not put them in the file: an admitted batch can still be dropped into loss, and a batch
+    that is not admitted writes none.
 - **The ack is the LAST write.** The producer completes the following steps, in this order:
-  1. take the `open_spans` snapshot (the k spans the batch closes), then admit the STOP batch and publish it, drop it
+  1. take the `open_spans` snapshot (the k spans the batch covers), then admit the STOP batch and publish it, drop it
      into loss, or refuse it (section 5.1);
   2. update its counters;
   3. clear its stack;
@@ -449,7 +452,10 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   - A refused call from a retired thread reads and writes ONLY its thread-local state. It never goes through its old
     slot or control-block pointer. That slot may already belong to a new incarnation (section 5.4 frees a slot for
     reuse once the retired incarnation is drained), and the retired thread must not touch it.
-  - A thread that retires after the latch also counts as quiesced.
+  - **The retirement race.** A `thread_end` that observed the latch CLEAR runs the retire path above and may
+    publish its RETIRED word after shutdown has set the latch. That release-published retirement still
+    establishes quiescence: the incarnation counts as RETIRED, not as NOT_QUIESCED. A `thread_end` that observes
+    STOP follows the ACKED path instead.
 - **Self-quiescence:**
   - Shutdown first runs the CALLING thread's own STOP batch and ack, if that thread is a registered incarnation. The
     caller never waits for itself.
@@ -545,6 +551,8 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
   - no SEQ_LIMIT and no CLOCK_ANOMALY.
 - **Use of validity:** A/B, population statistics, frame elapsed and attributed work use only valid incarnations, and the output states
   that scope.
+- **Totals are exact; means are rounded.** Duration totals and W are exact integers. A mean is a rounded
+  floating-point value (total / count), and an exact total does not imply an exact mean.
 - **Censored spans.** OPEN spans and spans flagged TRUNCATED_AT_STOP are CENSORED observations: the true duration is at
   least the recorded part, and is not known. For a zone (a logical key within the valid incarnations) with any
   censored instance:
@@ -695,7 +703,8 @@ atomic STOP admission and publication, and post-ack immutability are proved only
     - two FRAMEs of one owner with decreasing `tb`: the owner is INVALID (CLOCK_ANOMALY), its frame elapsed is refused
       "owner invalid", and the report prints no number for it.
   - **Durations:**
-    - two nested spans of one zone, of 2^63 + 2 and 2^63 ticks: the zone total and mean are exact;
+    - two nested spans of one zone, of 2^63 + 2 and 2^63 ticks: the zone total is exact, and the mean is the rounded
+      floating-point value of the exact mean 2^63 + 1;
     - an END before its BEGIN: the duration is unavailable, never 0, in the analysis and in the report;
     - the parent of such a child: its exclusive duration is unavailable.
   - **Slots:**

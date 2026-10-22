@@ -20,7 +20,8 @@ Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error.
 ## Values
 
 - Durations are raw PPU timebase ticks at the capture's `freq_hz`.
-- Nothing is saturated. Totals and W are exact (u128). A duration that cannot be computed, such as END before BEGIN
+- Nothing is saturated. Totals and W are exact (u128); means are rounded floating-point values, so an exact total
+  does not imply an exact mean. A duration that cannot be computed, such as END before BEGIN
   (a CLOCK_ANOMALY), is shown as unavailable, never as 0. Refused and unknown values are printed as words.
 - W (attributed work) is per lane, start-frame attributed and exclusive. It is not clipped to the frame interval, so
   it can exceed the frame's elapsed time, and it is never summed across lanes.
