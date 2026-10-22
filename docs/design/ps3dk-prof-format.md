@@ -218,6 +218,18 @@ These definitions apply to every case below:
     sequence is assigned, `produced_count` stays 2^63 - 1, and SEQ_LIMIT is set.
   - So `produced_count` is at most 2^63, and the reader treats a larger value as MALFORMED.
   - Once SEQ_LIMIT is set, the incarnation records nothing more. Its open spans end OPEN.
+- **Counter ceiling (fail-closed).** `refused_count` and `regerr_count` are never wrapped, saturated or allowed past
+  2^63, and neither are the producer's id counters (span ids, refused-begin ids, frame ids).
+  - An increment that would take `refused_count` or `regerr_count` past 2^63 is NOT applied. The incarnation instead
+    sets SEQ_LIMIT (limit_flags bit0), and from then on records nothing more, as for the sequence limit.
+  - So does an id counter that would pass 2^63.
+  - The counters therefore stay exact for every event counted before the limit. A refusal or registration error that
+    could not be counted only ever happens after SEQ_LIMIT is set, so the capture ends INCOMPLETE (end_flags bit1) and
+    never claims a clean measurement.
+  - A STOP batch that is not admitted adds k to `refused_count` only if the sum stays at most 2^63. Otherwise the
+    count is left unchanged, and SEQ_LIMIT (which a non-admitted batch sets anyway) records that the batch's refusals
+    were not counted.
+  - A REGERR event is attempted only after its `regerr_count` increment was applied.
 - **STOP batch admission (sequence-admitted WHOLE).** A STOP batch of k ENDs (section 7) is one admission decision:
   - It is ADMITTED only if k <= 2^63 - `produced_count` and SEQ_LIMIT was not set earlier.
   - **Not admitted:** no sequence is assigned, and `produced_count` and `dropped_count` stay unchanged. The k logical
