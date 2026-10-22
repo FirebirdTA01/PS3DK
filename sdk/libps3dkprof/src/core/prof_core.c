@@ -431,6 +431,7 @@ static int thread_begin_impl(prof *p, const char *name)
     tls_state *t = &g_tls;
     slot *s = NULL;
     uint32_t i, inc;
+    uint64_t os_id;
 
     if (t->slot1 && !t->acked && !t->retired)
         return PS3DK_PROF_EALREADY;
@@ -453,11 +454,18 @@ static int thread_begin_impl(prof *p, const char *name)
         p_unlock(p, &p->thread_mutex);
         return PS3DK_PROF_EFULL;
     }
+    /* R3 (codex 2026-10-22): the OS thread id is read BEFORE anything changes.  A failed read refuses the registration
+     * with ETHREAD while the slot is still FREE and the incarnation counter, the slot generation and the TLS state are
+     * untouched, so there is nothing to roll back and no placeholder id is ever recorded. */
+    if (pal_os_thread_id(&os_id) != 0) {
+        p_unlock(p, &p->thread_mutex);
+        return PS3DK_PROF_ETHREAD;
+    }
     inc = p->next_incarnation;
     p->next_incarnation = (inc == UINT32_MAX) ? 0 : inc + 1;   /* 0: ids exhausted, later registrations refused */
     s->generation++;
     s->incarnation = inc;
-    s->os_id = pal_os_thread_id();
+    s->os_id = os_id;
     copy_name(s->name, name);
     /* Reset in FREE state, under the mutex, before the LIVE publication (r2 3.1).  The drainer's last access to the
      * previous incarnation happened before it freed the slot under this mutex. */

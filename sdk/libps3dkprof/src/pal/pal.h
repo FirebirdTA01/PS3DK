@@ -4,6 +4,7 @@
 #ifndef PS3DK_PROF_PAL_H
 #define PS3DK_PROF_PAL_H
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -63,14 +64,17 @@ uint64_t pal_tb_freq(void);     /* 0 means unavailable */
 int pal_mono_now_us(uint64_t *us);
 void pal_sleep_us(uint64_t us);
 
-/* The OS thread id recorded in THREADS (informational). */
-uint64_t pal_os_thread_id(void);
+/* The OS thread id recorded in THREADS (informational).  0 and *out set on success; a negative value on failure,
+ * with *out untouched: no placeholder id is ever invented, and the core refuses the registration (ETHREAD). */
+int pal_os_thread_id(uint64_t *out);
 
 /* File sink.  Each returns 0 or a negative value and sets *err to the errno-class code on failure. */
 int pal_open_excl(const char *path, int *fd, int *err);
 long pal_write(int fd, const void *buf, unsigned long n, int *err);   /* bytes written, or -1 */
 int pal_close(int fd, int *err);
-#define PAL_EINTR 4
-#define PAL_EEXIST 17
+/* The errno-class codes the core compares *err against come from the platform's own errno.h, in every build, so
+ * the host and LV2 builds each compare against their own values (codex 2026-10-22 02:49, O2). */
+#define PAL_EINTR EINTR
+#define PAL_EEXIST EEXIST
 
 #endif /* PS3DK_PROF_PAL_H */

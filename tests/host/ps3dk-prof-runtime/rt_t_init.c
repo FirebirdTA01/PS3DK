@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "rt.h"
 
+#include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -76,7 +77,7 @@ int rt_init_open_error_retryable(const char *out)
     ps3dk_prof_config c;
     rt_config(&c);
     CHECK_EQ(rt_set_dir(out), PS3DK_PROF_OK);
-    ps3dk_prof_test_hooks.open_errno = 13;   /* EACCES */
+    ps3dk_prof_test_hooks.open_errno = EACCES;
     CHECK_EQ(ps3dk_prof_init(&c), PS3DK_PROF_ESINKFAIL);
     CHECK_EQ(gate(), RT_G_UNINIT);
     ps3dk_prof_test_hooks.open_errno = 0;

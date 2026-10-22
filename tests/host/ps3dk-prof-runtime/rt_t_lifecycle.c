@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "rt.h"
 
+#include <errno.h>
 #include <string.h>
 
 static char g_cb_path[600];
@@ -416,7 +417,7 @@ static int wf_eintr_once(unsigned long n, long *ret, int *err)
         return 0;
     g_eintr_once = 1;
     *ret = -1;
-    *err = 4;   /* EINTR: retried, recovered */
+    *err = EINTR;   /* retried, recovered */
     return 1;
 }
 
@@ -451,7 +452,7 @@ int rt_shutdown_severity_order(const char *out)
     CHECK_EQ(rt_cap_load(path, &cap), 0);
     CHECK_EQ(cap.end_flags, 6u);
     CHECK_EQ(cap.sink_error_count, 1);
-    CHECK_EQ(cap.first_error, 4);
+    CHECK_EQ(cap.first_error, EINTR);
     f = rt_final_of(&cap, 2);
     CHECK(f != NULL);
     CHECK_EQ(f->in_retired, 1);

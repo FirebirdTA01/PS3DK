@@ -124,7 +124,15 @@ void pal_sleep_us(uint64_t us)
     }
 }
 
-uint64_t pal_os_thread_id(void) { return (uint64_t)(uintptr_t)pthread_self(); }
+int pal_os_thread_id(uint64_t *out)
+{
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (T_HOOKS.os_id_fail)
+        return -1;   /* *out untouched */
+#endif
+    *out = (uint64_t)(uintptr_t)pthread_self();
+    return 0;
+}
 
 int pal_open_excl(const char *path, int *fd, int *err)
 {

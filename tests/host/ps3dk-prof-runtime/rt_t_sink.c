@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "rt.h"
 
+#include <errno.h>
 #include <string.h>
 
 static char g_path[600];
@@ -64,7 +65,7 @@ int rt_sink_close_failure_fails_run(const char *out)
     {
         PS3DK_PROF_ZONE("z");
     }
-    ps3dk_prof_test_hooks.close_fail = 5;   /* EIO */
+    ps3dk_prof_test_hooks.close_fail = EIO;
     CHECK_EQ(ps3dk_prof_shutdown(), PS3DK_PROF_ECLOSE);   /* the trailer exists, yet the run FAILS */
     return rt_expect(out, 0);
 }

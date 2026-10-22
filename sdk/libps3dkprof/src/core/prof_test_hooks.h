@@ -61,7 +61,8 @@ typedef struct ps3dk_prof_test_hooks_t {
     void (*step_observer)(int step, uint64_t value);
     uint64_t (*clock)(void);           /* replaces the timebase */
     int mono_clock_fail;
-    int id_fail;
+    int id_fail;                       /* the APP owner identity read fails (pal_owner_get / pal_owner_is_self) */
+    int os_id_fail;                    /* the OS thread id read fails (pal_os_thread_id): registration refused */
     int alloc_fail;
     int thread_create_fail;
     int join_fail;
