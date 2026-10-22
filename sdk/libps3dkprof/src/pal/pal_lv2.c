@@ -20,15 +20,21 @@
 #include <sys/ppu_thread.h>
 #include <sys/sys_time.h>
 
-/* One 128-byte-aligned block at init (R2: posix_memalign / free, pending the link-map proof of the provider).  The
- * core sizes the block with overflow checks before the call (prof_core.c take()); this rejects a zero size and a
- * provider that hands back a block without the requested alignment, which would otherwise go unnoticed. */
+/* One 128-byte-aligned block at init, from memalign / free (PAL-AUDIT-r1; target-c showed posix_memalign is neither
+ * declared under -std=c11 nor provided by the stage's libc).  memalign is declared unconditionally by the SDK
+ * <stdlib.h> wrapper (sdk/include/stdlib.h), which every PAL compile reaches first; libc exports memalign (a-malign.o)
+ * and free (a-malloc.o) in both ABIs.  newlib's dlmalloc memalign returns an ordinary chunk that free() releases, sets
+ * ENOMEM and returns NULL when the padded request would overflow, and needs a power-of-two alignment (128 is).  Which
+ * definition a link selects is still for the link-map proof.  The core sizes the block with overflow checks before the
+ * call (prof_core.c take()); this rejects a zero size and a provider that hands back a block without the requested
+ * alignment, which would otherwise go unnoticed. */
 void *pal_alloc(size_t bytes)
 {
-    void *p = NULL;
+    void *p;
     if (bytes == 0)
         return NULL;
-    if (posix_memalign(&p, 128, bytes) != 0 || !p)
+    p = memalign(128, bytes);
+    if (!p)
         return NULL;
     if (((uintptr_t)p & 127u) != 0) {
         free(p);
