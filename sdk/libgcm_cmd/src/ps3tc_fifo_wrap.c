@@ -34,18 +34,22 @@ static uint64_t ticks_to_us(uint64_t ticks, uint64_t hz)
     return (ticks / hz) * 1000000ull + (ticks % hz) * 1000000ull / hz;
 }
 
+/* What one wrap's waits need: the control register, and the timebase
+ * frequency for the protocol's clock.  The frequency comes from a syscall,
+ * so the callback reads it once per wrap, before the waits, and the wait
+ * loop makes none.  Each wrap fills its own copy on its stack and nothing
+ * is kept between calls. */
+typedef struct {
+    gcmControlRegister volatile *ctrl;
+    uint64_t hz;                    /* 0 if the syscall gave no frequency */
+} ps3tc_fifo_wait;
+
 /* The protocol's clock, in microseconds from the timebase origin.  The
- * timebase frequency comes from a syscall, so it is read once and kept (a
- * second thread that races the first read stores the same value).  The
- * function-pointer form (arg unused here) lets the host model install its
- * own clock. */
+ * function-pointer form lets the host model install its own clock. */
 static uint64_t ps3tc_fifo_now_us(void *arg)
 {
-    static uint64_t hz;
-    (void)arg;
-    if (hz == 0)
-        hz = sysGetTimebaseFrequency();
-    return hz ? ticks_to_us(__builtin_ppc_get_timebase(), hz) : 0;
+    const ps3tc_fifo_wait *w = (const ps3tc_fifo_wait *)arg;
+    return w->hz ? ticks_to_us(__builtin_ppc_get_timebase(), w->hz) : 0;
 }
 
 static void ps3tc_fifo_sync(void *arg)
@@ -60,12 +64,14 @@ static void ps3tc_fifo_sync(void *arg)
  * and the diagnostic said nothing about which phase or for how long -
  * a 29 s phase-1 wait during a game's world load looked identical to a
  * later stall.  The rate limit (print every 1024 spins) and the
- * 30-us sleep are unchanged.  Phase 1 = waiting for GET == tail (the
- * JUMP fetch); phase 2 = waiting for GET == begin. */
+ * 30-us sleep are unchanged.  Phase 1 = waiting for GET == tail: the
+ * lap is retired up to the JUMP, which is not fetched yet; phase 2 = the
+ * JUMP is released, and the wait is for the GPU to fetch it and park at
+ * begin (GET == begin). */
 static void ps3tc_fifo_pause(void *arg, uint32_t want, uint32_t spins,
                              unsigned int phase, uint64_t elapsed_us)
 {
-    gcmControlRegister volatile *ctrl = (gcmControlRegister volatile *)arg;
+    gcmControlRegister volatile *ctrl = ((const ps3tc_fifo_wait *)arg)->ctrl;
     if (spins != 0u && (spins & 0x3ffu) == 0u)
         printf("PS3TC-FIFO-WRAP phase %u waiting for GET=0x%lx: get=0x%lx put=0x%lx (%lu ms)\n",
                (unsigned)phase, (unsigned long)want, (unsigned long)ctrl->get,
@@ -106,10 +112,11 @@ int32_t ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count)
         __builtin_trap();
     }
 
-    gcmControlRegister volatile *ctrl = gcmGetControlRegister();
+    ps3tc_fifo_wait wait = { gcmGetControlRegister(), sysGetTimebaseFrequency() };
+    gcmControlRegister volatile *ctrl = wait.ctrl;
     const ps3tc_fifo_port port = {
         &ctrl->put, &ctrl->get, ps3tc_fifo_sync, ps3tc_fifo_now_us,
-        ps3tc_fifo_pause, (void *)ctrl
+        ps3tc_fifo_pause, &wait
     };
     const uint64_t t0 = __builtin_ppc_get_timebase();
     ps3tc_fifo_wrap_protocol((volatile uint32_t *)ctx->current,

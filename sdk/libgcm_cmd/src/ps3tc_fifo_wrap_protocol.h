@@ -49,17 +49,18 @@ typedef struct ps3tc_fifo_port {
                                      fills it from the timebase; a host model fills it
                                      with a counter (a wall clock is fine too). */
     /* One wait iteration; the host model advances its consumer here. `phase`
-     * is 1 or PS3TC_FIFO_PHASE_2; `elapsed_us` is the time since the START of
-     * that phase's wait (re-measured when phase 2 begins). */
+     * is PS3TC_FIFO_PHASE_1 or PS3TC_FIFO_PHASE_2; `elapsed_us` is the time
+     * since the START of that phase's wait (re-measured when phase 2 begins). */
     void (*pause)(void *arg, uint32_t want, uint32_t spins,
                   unsigned int phase, uint64_t elapsed_us);
     void *arg;
 } ps3tc_fifo_port;
 
-/* Phase numbers passed to pause.  1 = waiting for the JUMP fetch (GET to
- * reach tail after the lap is published); 2 = waiting for GET to park at
- * begin after the JUMP is released.  Kept as plain values (not an enum) so
- * the header stays dependency-free. */
+/* Phase numbers passed to pause.  1 = waiting for GET to reach tail after
+ * the lap is published: the lap is retired up to the JUMP, and the JUMP
+ * itself is not fetched yet; 2 = the JUMP is released (PUT = begin), and
+ * the wait is for the GPU to fetch it and park at begin.  Kept as plain
+ * values (not an enum) so the header stays dependency-free. */
 #define PS3TC_FIFO_PHASE_1 1u
 #define PS3TC_FIFO_PHASE_2 2u
 
