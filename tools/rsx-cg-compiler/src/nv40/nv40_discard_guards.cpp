@@ -1,6 +1,6 @@
 #include "nv40_discard_guards.h"
 
-#include "../donor/ir/ir.h"
+#include "../cg_frontend/ir/ir.h"
 
 #include <algorithm>
 #include <memory>

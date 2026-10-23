@@ -35,7 +35,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-src_dir="$repo_root/tools/rsx-cg-compiler/src/donor/frontend"
+src_dir="$repo_root/tools/rsx-cg-compiler/src/cg_frontend/frontend"
 driver="$repo_root/tests/shader-compiler/harness/preprocessor_probe.cpp"
 [[ -f "$driver" ]] || fail "harness driver missing: $driver"
 

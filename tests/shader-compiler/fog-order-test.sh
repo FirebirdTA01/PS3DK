@@ -14,9 +14,9 @@ python3 "$repo_root/tests/shader-compiler/fog_order_check.py" "$work/fp_fog_dist
 python3 "$repo_root/tests/shader-compiler/fog_order_check.py" "$work/fp_discard_uncond_f.fpo" --unconditional
 src="$repo_root/tools/rsx-cg-compiler/src"
 "${CXX:-c++}" -std=c++17 -O0 -w -ffunction-sections -fdata-sections \
-    -I"$src" -I"$src/nv40" -I"$src/donor" -I"$src/donor/ir" \
-    -I"$src/donor/frontend" -I"$src/donor/common" \
+    -I"$src" -I"$src/nv40" -I"$src/cg_frontend" -I"$src/cg_frontend/ir" \
+    -I"$src/cg_frontend/frontend" -I"$src/cg_frontend/common" \
     "$repo_root/tests/shader-compiler/kill-demand-test.cpp" \
-    "$src/donor/ir/ir.cpp" -Wl,--gc-sections -o "$work/kill-demand"
+    "$src/cg_frontend/ir/ir.cpp" -Wl,--gc-sections -o "$work/kill-demand"
 "$work/kill-demand"
 echo 'fog order: ok'

@@ -36,7 +36,7 @@
 #include <string>
 #include <vector>
 
-#include "../donor/ir/ir.h"
+#include "../cg_frontend/ir/ir.h"
 
 class IRModule;
 

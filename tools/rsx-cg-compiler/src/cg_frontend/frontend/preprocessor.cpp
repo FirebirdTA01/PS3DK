@@ -271,7 +271,7 @@ void Preprocessor::initBuiltinMacros()
 	// both 20000 (measured 2026-09-14 on the reference); of the names checked,
 	// __CG__, _CG_, _CGC_, CGC, __psp2__, __SCE__, __STDC__ and
 	// __STDC_VERSION__ are NOT defined.
-	// The PSVita donor's set is gone on purpose: a shader that tests one of
+	// The Vita compiler's PSVita set is gone on purpose: a shader that tests one of
 	// those names must take the same branch it takes on the reference. The
 	// SDK's SpuRender shaders test __CGC__ and fall into their PPU/SPU enum
 	// branch without it (preprocessor-predefined-macros).

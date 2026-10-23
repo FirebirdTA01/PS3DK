@@ -38,7 +38,7 @@
 namespace
 {
 
-// Minimal driver context.  We deliberately do NOT pull in the donor's
+// Minimal driver context.  We deliberately do NOT pull in the Vita compiler's
 // CompilerContext because compiler_options.h transitively drags the
 // USSE back-end types (UsseProgram lives in lowering.h).
 struct CompilerContext
