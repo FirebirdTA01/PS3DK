@@ -440,7 +440,8 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
         return semanticIndex == 1 ? NV40_VP_INST_DEST_BFC1 : NV40_VP_INST_DEST_BFC0;
     if (semanticUpper == "DIFFUSE"  && semanticIndex == 0) return NV40_VP_INST_DEST_COL0;
     if (semanticUpper == "SPECULAR" && semanticIndex == 0) return NV40_VP_INST_DEST_COL1;
-    if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
+    if ((semanticUpper == "TEXCOORD" || semanticUpper == "TEX") &&
+        semanticIndex >= 0 && semanticIndex < 10)
         return NV40_VP_INST_DEST_TC(semanticIndex);
     // Six scalar clip distances share y/z/w of the FOGC and PSZ slots.
     if (semanticUpper == "CLP" && semanticIndex >= 0 && semanticIndex < 6)
@@ -13124,6 +13125,21 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
                                      VpAttributes* attrsOut)
 {
     UcodeOutput out;
+    // TEX9 is logical output 16 until encoding, when it uses register 6.
+    // PSIZE and CLP3..5 already use that register. Do not silently combine
+    // independently computed outputs in the same hardware lanes.
+    bool tex9 = false, pointOrClip = false;
+    for (const VInstr& vi : program.instrs) {
+        if (!vi.dst.output) continue;
+        tex9 |= vi.dst.index == NV40_VP_INST_DEST_TC(9);
+        pointOrClip |= vi.dst.index == NV40_VP_INST_DEST_PSZ;
+    }
+    if (tex9 && pointOrClip) {
+        out.diagnostics.push_back(
+            "nv40-general-vp: TEXCOORD9 shares result register 6 with "
+            "PSIZE/CLP3..5; simultaneous outputs are unsupported (vp-output-alias)");
+        return out;
+    }
     VpAssembler asm_;
     VpAttributes attrs;
     attrs.uniformStructLayouts = program.uniformStructLayouts;
