@@ -13,6 +13,10 @@
 # zero elapsed time, and phase 2 timed from phase 1's start.  Each must exit 1,
 # fail its own check (phase, progress, origin) and no other, and leave every
 # lap check passing.
+#
+# Last, the model is built for the two real ring sizes, each to its own
+# executable, and each run must report exactly its own size; the size check
+# is itself shown to refuse a wrong-size run.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -70,11 +74,39 @@ mutant all-phase-1     phase    1 's/PS3TC_FIFO_PHASE_2, p->now_us/PS3TC_FIFO_PH
 mutant zero-elapsed    progress 2 's/p->now_us(p->arg) - phase[12]_start)/0u)/'
 mutant phase1-origin   origin   1 's/p->now_us(p->arg) - phase2_start)/p->now_us(p->arg) - phase1_start)/'
 
-echo "fifo-wrap-protocol-test: PASS"
+# extent_ok LOG WORDS: LOG is a passing run of a model built for a WORDS-word
+# ring - exactly one repeated-lap record, for WORDS, and the all-passed line
+# last.  A run of a stale or wrong-size binary reports another size and fails.
+extent_ok() {
+    local text sizes
+    text=$(tr -d '\r' < "$1") || return 1
+    sizes=$(printf '%s\n' "$text" | sed -n 's/^  repeated lagged laps: //p') || return 1
+    [[ "$sizes" == "ok ($2 words) lap=ok" ]] || return 1
+    [[ "$(printf '%s\n' "$text" | tail -n 1)" == 'fifo-wrap-protocol: all scenarios passed' ]]
+}
 
 # Usable words including the reserved JUMP, after the firmware 4 KiB prefix.
+# Each extent is built to its own executable and must report its own size.
 for words in 261120 1047552; do
+    exe="$tmp/extent-$words"
     "$cc" -std=c11 -Wall -Wextra -Werror "${san[@]}" -I "$inc" \
-        -DWORDS="$words" "$src" -o "$tmp/extent"
-    "$tmp/extent"
+        -DWORDS="$words" "$src" -o "$exe"
+    rc=0; "$exe" >"$exe.log" 2>&1 || rc=$?
+    [[ "$rc" -eq 0 ]] || { cat "$exe.log"; fail "extent $words: expected exit 0, got $rc"; }
+    extent_ok "$exe.log" "$words" \
+        || { cat "$exe.log"; fail "extent $words: the run did not report exactly one passing $words-word ring"; }
+    printf 'extent %s: ok, %s\n' "$words" "$(sed -n 's/^  repeated lagged laps: //p' "$exe.log" | tr -d '\r')"
 done
+
+# The size check must refuse a stale or wrong-size result: the 261120-word log
+# offered as the 1047552-word run, and a log carrying both sizes.
+if extent_ok "$tmp/extent-261120.log" 1047552; then
+    fail "extent check accepted a 261120-word run as the 1047552-word one"
+fi
+cat "$tmp/extent-261120.log" "$tmp/extent-1047552.log" > "$tmp/extent-both.log"
+if extent_ok "$tmp/extent-both.log" 1047552; then
+    fail "extent check accepted a log with two size records"
+fi
+echo "extent check: refuses a wrong-size run and a doubled record"
+
+echo "fifo-wrap-protocol-test: PASS"
