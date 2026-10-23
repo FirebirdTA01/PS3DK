@@ -1303,6 +1303,9 @@ jobs:
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Test shader-differential varying coverage
+        run: bash tests/regression/shader-differential/input-coverage-test.sh
+
       # Float render-target mode: control gate (latches, required/binding/negative
       # controls, row refusals, pinned recipes, artifact-write fault injection) and
       # the host float comparator's self-test.  Host cc and python3 only.

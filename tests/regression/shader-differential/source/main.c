@@ -54,6 +54,9 @@
  *         textures-invalid | samplers-unvalidated |
  *         sampler-unsupported-a | sampler-unsupported-b |
  *         auto-invalid | uniform-unsupported-a | uniform-unsupported-b |
+ *         input-varying-undecoded (input/output contract unreadable) |
+ *         input-varying-unwritten (the selected VP does not write a
+ *         varying required by either FP: neither side is rendered) |
  *         internal-error (a render_side code the judge does not map) |
  *         vacuous (neither side painted a pixel: no verdict, never
  *         counted as identical) | path-pair-unoracled (the premise row
@@ -192,6 +195,7 @@
 #include "sd_pos_allch_vpo.h"
 #include "f32_gate.h"
 #include "f32_io.h"
+#include "input_coverage.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
@@ -1765,9 +1769,10 @@ static int channel_of_semantic(const char *sem)
  * words, stored as the assembler laid them out (no halfword swap on the
  * vertex side): an output write sets VEC_RESULT (word 0 bit 30) or
  * SCA_RESULT (word 3 bit 12) and names the output register at word 3
- * bits 2..6 - HPOS 0, COL0 1, COL1 2, BFC0/1 3/4, FOGC 5, PSZ 6, TC0..9
- * at 7..16 (the emitters write DEST_TC(n) = 7 + n without clamping and
- * the channel table judges tc8/tc9, so the decoder follows both).
+ * bits 2..6 - HPOS 0, COL0 1, COL1 2, BFC0/1 3/4, FOGC 5, TC0..8
+ * at 7..15. Register 6 supplies TEX9 when output-mask bit 13 is set;
+ * otherwise it serves PSIZE/clip outputs. The mask disambiguates the
+ * register's role; it does not establish that an instruction wrote it.
  * Mapped onto the rig's channel bits (cov = HPOS).  The
  * decoder checks itself: the LAST bit (word 3 bit 0) must sit on the
  * final instruction and on no other; otherwise it reports undecoded
@@ -1777,8 +1782,11 @@ static u32 vp_written_channels(void *container, int *decoded)
 	void *uc = NULL; u32 usz = 0;
 	cellGcmCgGetUCode((CGprogram)container, &uc, &usz);
 	const u32 *w = (const u32 *)uc;
+	const CgBinaryProgram *p = (const CgBinaryProgram *)container;
+	const CgBinaryVertexProgram *vp = (const CgBinaryVertexProgram *)
+		((const u8 *)container + p->program);
 	u32 n = usz / 16, mask = 0;
-	int last_ok = (n > 0);
+	int last_ok = (n > 0 && usz % 16 == 0);
 	for (u32 i = 0; i < n; i++) {
 		u32 w0 = w[i * 4 + 0], w3 = w[i * 4 + 3];
 		int is_last = (w3 & 1u) != 0;
@@ -1787,10 +1795,9 @@ static u32 vp_written_channels(void *container, int *decoded)
 		if (!(w0 & (1u << 30)) && !(w3 & (1u << 12)))
 			continue;
 		u32 dest = (w3 >> 2) & 31u;
-		if (dest == 0)                      mask |= 1u;                 /* HPOS -> cov */
-		else if (dest == 1 || dest == 2)    mask |= 1u << (11 + (dest - 1)); /* COL0/1 */
-		else if (dest == 5)                 mask |= 1u << 13;           /* FOGC */
-		else if (dest >= 7 && dest <= 16)   mask |= 1u << (1 + (dest - 7)); /* TC0..9: both compilers emit DEST_TC(n) = 7 + n unclamped, and k_vp_channels judges tc8/tc9 (codex, review of c201b7b) */
+		/* The shared no-output destination is 31. It supplies no channel,
+		 * as do unsupported destination numbers; neither is TEX9. */
+		mask |= sd_vp_output_channel(dest, vp->attributeOutputMask);
 	}
 	*decoded = last_ok;
 	return mask;
@@ -2564,6 +2571,38 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	sd_outdecl decl_a, decl_b;
 	fp_declared_outputs(cont_a, sz_a, &decl_a);
 	fp_declared_outputs(cont_b, sz_b, &decl_b);
+	/* A fragment comparison cannot use an interpolator its bound VP
+	 * never writes. The shared VP supplies TEX0..3 only; corpus shaders
+	 * reading TEX4..6 previously produced false mismatches on leftovers.
+	 * Check both sides before any draw. The explicit row VP is the same
+	 * one render_side_n binds, and its writes come from the existing ucode
+	 * decoder rather than its declared output mask. */
+	{
+		int decoded = 0;
+		u32 supplied = vp_written_channels(row_vp ? row_vp : vpo, &decoded);
+		u32 missing[2] = { 0, 0 };
+		const void *inputs[2] = { cont_a, cont_b };
+		u32 sizes[2] = { sz_a, sz_b };
+		for (int side = 0; side < 2; ++side) {
+			const u8 *bytes = (const u8 *)inputs[side];
+			if (sizes[side] < 32) { decoded = 0; break; }
+			u32 prog = be32_at(bytes, 20);
+			if (prog < 32 || prog > sizes[side] || sizes[side] - prog < 22) {
+				decoded = 0; break;
+			}
+			missing[side] = sd_missing_input_channels(be32_at(bytes, prog + 4), supplied);
+			if (missing[side] & 0x80000000u) decoded = 0;
+		}
+		if (!decoded) {
+			r->status = "input-varying-undecoded";
+			snprintf(r->diagnostic, sizeof(r->diagnostic), "cannot establish FP input / VP output channel coverage; neither side drawn");
+		} else if (missing[0] || missing[1]) {
+			r->status = "input-varying-unwritten";
+			snprintf(r->diagnostic, sizeof(r->diagnostic),
+			         "VP supplies channels 0x%x; missing FP channels a=0x%x b=0x%x (TEX0..9 bits 1..10, COL0/1 11/12, FOG 13); neither side drawn",
+			         supplied, missing[0], missing[1]);
+		}
+	}
 	r->color_mask_a = decl_a.color_mask;
 	r->color_mask_b = decl_b.color_mask;
 	r->depth_flag_a = decl_a.depth_replace;
