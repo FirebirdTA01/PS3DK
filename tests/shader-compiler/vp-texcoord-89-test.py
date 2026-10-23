@@ -32,7 +32,9 @@ def run(compiler, work):
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=30)
         errors = []
         if refusal:
-            if proc.returncode == 0 or refusal not in proc.stdout + proc.stderr:
+            if proc.returncode != 1:
+                errors.append(f'expected refusal exit 1, got {proc.returncode}')
+            if refusal not in proc.stdout + proc.stderr:
                 errors.append('missing refusal: ' + refusal)
             if output.exists():
                 errors.append('refused shader left a container')
