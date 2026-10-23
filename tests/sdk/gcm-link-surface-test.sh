@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The Cell-named link-time GCM commands declared in
-# <cell/gcm/gcm_command_link.h> (the rsx-backed set: 18 base commands and
+# <cell/gcm/gcm_command_link.h> (the rsx-backed set: 19 base commands and
 # 119 *Unsafe variants) compile through <cell/gcm.h> and are defined in
 # libgcm_cmd.a, in both data models.
 #
