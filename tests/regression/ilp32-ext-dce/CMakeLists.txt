@@ -12,10 +12,10 @@ include(ps3-self)
 # LP64 target opts in with -mlp64 (ps3_add_self then post-links it with
 # sprxlinker --lp64).
 # walk.c at -O2 whatever the build type: the miscompile needs the loop optimisers.
-set_source_files_properties(walk.c PROPERTIES COMPILE_OPTIONS "-O2")
+set_source_files_properties(walk.c derived-pointer-rtl.c PROPERTIES COMPILE_OPTIONS "-O2")
 
 foreach(abi ilp32 lp64)
-    add_executable(ilp32-ext-dce-${abi} main.c walk.c)
+    add_executable(ilp32-ext-dce-${abi} main.c walk.c derived-pointer-rtl.c)
     target_compile_features(ilp32-ext-dce-${abi} PRIVATE c_std_11)
     target_compile_options(ilp32-ext-dce-${abi} PRIVATE -Wall -Wextra -Werror=implicit-function-declaration)
     if(abi STREQUAL "lp64")

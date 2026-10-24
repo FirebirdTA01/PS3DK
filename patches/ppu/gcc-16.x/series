@@ -48,7 +48,6 @@
 0069-libgcc-ps3-strong-gthread-references.patch
 0070-libstdcxx-ps3-time-support.patch
 0071-libstdcxx-ps3-cxa-thread-atexit-impl.patch
-0072-rs6000-cell64lv2-ilp32-no-ext-dce.patch
 0073-rs6000-cell-lr-ctr-move-cost.patch
 0074-libgcc-ps3-atomic-fde-fast-path.patch
 0075-rs6000-cell64lv2-char-signed-ilp32.patch
@@ -56,3 +55,4 @@
 0077-libgcc-ps3-deregister-by-registration.patch
 0078-cell64lv2-cxx-default-gnu17.patch
 0079-libsupcxx-explicit-gnu20.patch
+0080-ext-dce-clear-pointer-fact.patch

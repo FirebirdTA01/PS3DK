@@ -1,0 +1,62 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] ext-dce: invalidate pointer facts after removing extensions
+
+On targets whose pointers zero-extend into a wider Pmode, REG_POINTER tells
+nonzero_bits and simplify-rtx that the upper bits are zero. Removing an
+extension can invalidate this fact. Copy propagation is not the whole
+closure: a Pmode pointer computed by adding an offset to an affected value
+can also acquire nonzero upper bits. Clearing only changed pseudos and their
+copies leaves that derived pointer marked and lets combine remove a required
+zero-extension.
+
+When an extension changed, clear REG_POINTER on every Pmode pseudo of the
+function before combine. This deliberately loses pointer hints for unrelated
+pseudos in that function; code-size/performance validation must measure the
+cost. Functions with no changed extension, hard registers and LP64 are
+unaffected. The existing SUBREG_PROMOTED copy-closure reset is unchanged.
+
+Replaces the ILP32 default-off workaround 0072 while retaining the normal
+optimization defaults and explicit controls. The dump lists the cleared
+pseudos; dump-on/off equivalence is checked separately.
+
+--- a/gcc/ext-dce.cc
++++ b/gcc/ext-dce.cc
+@@ -1204,6 +1204,38 @@
+      closure of the original CHANGED_PSEUDOS and registers they're
+      connected to via copies.  So expand the set.  */
+   expand_changed_pseudos ();
++
++#if defined (POINTERS_EXTEND_UNSIGNED)
++  /* Removing an extension can invalidate the known upper bits implied by
++     REG_POINTER, including those of arithmetic-derived pointers.  The copy
++     closure above is not sufficient for those derived values.  If anything
++     changed, conservatively discard this fact for all Pmode pseudos before
++     combine can use it.  Hard registers and equal-width pointer modes are
++     unaffected.  The normal extension-elimination optimization stays on.  */
++  if (POINTERS_EXTEND_UNSIGNED > 0
++      && known_gt (GET_MODE_PRECISION (Pmode), GET_MODE_PRECISION (ptr_mode))
++      && !bitmap_empty_p (changed_pseudos))
++    {
++      bool listed = false;
++      for (unsigned int i = FIRST_PSEUDO_REGISTER; i < max_reg_num (); ++i)
++	{
++	  rtx reg = regno_reg_rtx[i];
++	  if (reg && REG_P (reg) && GET_MODE (reg) == Pmode && REG_POINTER (reg))
++	    {
++	      REG_POINTER (reg) = 0;
++	      if (dump_file)
++	        {
++	          if (!listed)
++	            fprintf (dump_file, "ext-dce cleared REG_POINTER:");
++	          fprintf (dump_file, " r%u", i);
++	          listed = true;
++	        }
++	    }
++	}
++      if (dump_file && listed)
++	fprintf (dump_file, "\n");
++    }
++#endif
+     
+   /* If we removed an extension, that changed the promoted state
+      of the destination of that extension.  Thus we need to go

@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# gcc-16.x 0072: ext-dce is off by default for powerpc64-ps3-elf under ILP32 and untouched under LP64.
+# gcc-16.x 0080: ext-dce runs by default with correct pointer facts under ILP32; LP64 is untouched.
 #
 #  0. self-test: the checks below report a failing compiler, a failing objdump and a missing function as errors,
 #     never as a count of 0; with no argument, a compiler whose optimizer query fails is a failure, and only one that
 #     answers without an ext-dce option (GCC 12) is skipped;
-#  1. effective default (-Q --help=optimizers) at -O2, -O3 and -Os: ILP32 [disabled], LP64 [enabled];
+#  1. effective default (-Q --help=optimizers) at -O2, -O3 and -Os: both ABIs [enabled];
 #  2. an explicit -fext-dce is honoured under ILP32 ([enabled]) and -fno-ext-dce under LP64 ([disabled]);
 #  3. code: the ilp32-ext-dce row's walk.c keeps the zero-extension of its buffer pointer (an rldicl ...,0,32 that
 #     ext-dce would drop) under ILP32 at -O2 by default; also when the function carries
 #     __attribute__((optimize("O2"))), inside #pragma GCC push_options / optimize ("O2"), and through -flto
-#     (compile and link-time optimisation); with an explicit -fext-dce it is dropped (the check can see the
-#     difference).  #pragma GCC optimize ("ext-dce") inside push_options drops it, and a function after the
-#     matching pop_options keeps it again (the pop restores the default).
+#     (compile and link-time optimisation). Explicit -fext-dce must retain the same protection.
+#     #pragma GCC optimize ("no-ext-dce") inside push_options matches explicit -fno-ext-dce;
+#     a function after pop_options matches the enabled default again.
+#     Instruction counts are a focused codegen check, not runtime correctness evidence; the
+#     ilp32-ext-dce regression must also execute against its independent checksum reference.
 #
 # Every compiler, objdump and query step is status-checked; a count is taken only from a function that was found,
 # and between that function's start and its end.
@@ -143,22 +145,49 @@ state -O2 -fno-such-flag-ext-dce-selftest && fail "self-test: a failing optimize
 
 # 1 + 2
 for o in -O2 -O3 -Os; do
-    expect_state "ILP32 $o default" "[disabled]" $o
+    expect_state "ILP32 $o default" "[enabled]" $o
     expect_state "LP64 $o default" "[enabled]" -mlp64 $o
 done
 expect_state "ILP32 -O2 explicit -fext-dce" "[enabled]" -O2 -fext-dce
 expect_state "ILP32 -O2 explicit -fno-ext-dce" "[disabled]" -O2 -fno-ext-dce
 expect_state "LP64 -O2 explicit -fno-ext-dce" "[disabled]" -mlp64 -O2 -fno-ext-dce
 
-# 3: the zero-extension ext-dce drops is kept.
-d=""; f=""
+# Arithmetic-derived pointer: copy-only fact invalidation is insufficient.
+# This RTL reduction must retain one zero-extension on both ABIs, whether
+# ext-dce is defaulted, explicitly enabled or explicitly disabled.
+derived="$root/tests/regression/ilp32-ext-dce/derived-pointer-rtl.c"
+for abi in ilp32 lp64; do
+    abi_flags=(); [ "$abi" = ilp32 ] || abi_flags=(-mlp64)
+    for opt in -O2 -O3 -Os; do
+        for mode in default on off; do
+            pass_flags=()
+            case "$mode" in on) pass_flags=(-fext-dce);; off) pass_flags=(-fno-ext-dce);; esac
+            label="derived pointer $abi $opt $mode"
+            if cc "$label" "${abi_flags[@]}" "$opt" "${pass_flags[@]}" -S "$derived" -o "$work/derived.s"; then
+                if ! zext_count_s derived_pointer "$work/derived.s"; then
+                    fail "$label: no single complete function in assembly"
+                else
+                    [ "$n" -eq 1 ] && ok "$label keeps the zero-extension" || fail "$label has $n zero-extensions, want 1"
+                fi
+            fi
+        done
+    done
+done
+
+# 3: a necessary pointer zero-extension survives with the pass enabled.
+d=""; f=""; off=""
 cc "ILP32 -O2" -O2 -c "$walk" -o "$work/default.o" && count "ILP32 -O2" "$work/default.o" walk_sum && d=$n
 cc "ILP32 -O2 -fext-dce" -O2 -fext-dce -c "$walk" -o "$work/forced.o" && count "ILP32 -O2 -fext-dce" "$work/forced.o" walk_sum && f=$n
-if [ -z "$d" ] || [ -z "$f" ]; then
+cc "ILP32 -O2 -fno-ext-dce" -O2 -fno-ext-dce -c "$walk" -o "$work/off.o" && count "ILP32 -O2 -fno-ext-dce" "$work/off.o" walk_sum && off=$n
+if [ -z "$d" ] || [ -z "$f" ] || [ -z "$off" ]; then
     fail "ILP32 -O2: no baseline counts; the remaining code checks are not run"
     echo "FAIL: ext-dce-default-test"; exit 1
 fi
-if [ "$d" -gt "$f" ]; then ok "ILP32 -O2: walk_sum keeps $d zero-extensions (explicit -fext-dce: $f)"; else fail "ILP32 -O2: $d zero-extensions by default, $f with -fext-dce (the default must keep more)"; fi
+if [ "$d" -gt 0 ] && [ "$d" -eq "$f" ] && [ "$off" -gt 0 ]; then
+    ok "ILP32 -O2: default and explicit -fext-dce keep $d zero-extensions (pass off: $off)"
+else
+    fail "ILP32 -O2: default $d, explicit on $f, off $off; enabled forms must agree and all must retain a zero-extension"
+fi
 
 sed 's/^uint32_t walk_sum(/__attribute__((optimize("O2"))) uint32_t walk_sum(/' "$walk" > "$work/attr.c"
 grep -q '^__attribute__((optimize("O2"))) uint32_t walk_sum(' "$work/attr.c" || fail "attribute: walk.c's walk_sum definition line changed; the attribute was not applied"
@@ -170,15 +199,14 @@ cc "optimize(\"O2\") attribute" -O0 -c "$work/attr.c" -o "$work/attr.o" && count
 cc "pragma optimize" -O0 -c "$work/pragma.c" -o "$work/pragma.o" && count "pragma optimize" "$work/pragma.o" walk_sum &&
     { [ "$n" -eq "$d" ] && ok "push_options/optimize (\"O2\") keeps $n" || fail "pragma optimize: $n zero-extensions, default -O2 has $d"; }
 
-# Restoration from -O2: optimize ("ext-dce") inside push_options drops the extension (as -fext-dce does), and a
-# function after the pop_options keeps it (back to the default).
-{ echo '#pragma GCC push_options'; echo '#pragma GCC optimize ("ext-dce")'
+# Restoration from -O2: disable the pass inside push_options, then return to the enabled default.
+{ echo '#pragma GCC push_options'; echo '#pragma GCC optimize ("no-ext-dce")'
   sed 's/^uint32_t walk_sum(/uint32_t walk_in(/' "$walk"
   echo '#pragma GCC pop_options'
   sed 's/^uint32_t walk_sum(/uint32_t walk_after(/' "$walk"; } > "$work/pop.c"
 cc "pragma pop" -O2 -c "$work/pop.c" -o "$work/pop.o" && {
     count "pragma pop (inside)" "$work/pop.o" walk_in &&
-        { [ "$n" -eq "$f" ] && ok "optimize (\"ext-dce\") inside push_options drops to $n (as -fext-dce)" || fail "optimize (\"ext-dce\") inside push_options: $n zero-extensions, -fext-dce has $f"; }
+        { [ "$n" -eq "$off" ] && ok "optimize (\"no-ext-dce\") inside push_options keeps $n (as -fno-ext-dce)" || fail "optimize (\"no-ext-dce\") inside push_options: $n zero-extensions, -fno-ext-dce has $off"; }
     count "pragma pop (after)" "$work/pop.o" walk_after &&
         { [ "$n" -eq "$d" ] && ok "after pop_options keeps $n (default restored)" || fail "after pop_options: $n zero-extensions, default -O2 has $d"; }
 }

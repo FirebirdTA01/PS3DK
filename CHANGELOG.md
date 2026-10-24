@@ -170,10 +170,10 @@ The version stamped into builds is generated from the most recent
 - **Frame-table deregistration.** The PPU unwinder removes sorted table
   registrations correctly and no longer treats a table whose first pointer
   has a zero high word as an empty registration under LP64.
-- **PPU ILP32 code generation.** Extended dead-code elimination is disabled
-  by default for ILP32 to avoid the known miscompilation. Cell PPE costs
-  discourage spilling values through the link/count registers. Explicit
-  optimization options remain the caller's responsibility.
+- **PPU ILP32 code generation.** Extended dead-code elimination clears
+  stale pointer facts after removing extensions, keeping the pass enabled
+  without losing required address zero-extension. Cell PPE costs discourage
+  spilling values through the link/count registers.
 - **SPU C++ headers.** The GCC16 `<vmx2spu.h>` port accepts its narrowing
   constants and compound-literal forms in C++.
 - **FIFO-wrap test coverage.** Each extent uses a distinct executable and
@@ -188,9 +188,8 @@ The version stamped into builds is generated from the most recent
 
 ### Known issues
 
-- **Compiler workarounds remain enabled.** PPU ILP32 extended dead-code
-  elimination and SPU late-combine remain disabled by default. Their
-  experimental replacements are not part of this release.
+- **SPU late-combine workaround remains enabled.** SPU late-combine remains
+  disabled by default pending validation of its mode-dependent-address fix.
 - **Exception support is process-scoped.** PRX/module exception support
   and module unload are not covered. Registry-node allocation failure is
   fatal; its hardware outcome remains unvalidated.
