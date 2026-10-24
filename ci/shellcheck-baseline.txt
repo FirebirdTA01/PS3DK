@@ -1,0 +1,42 @@
+# ci/shellcheck-baseline.txt
+# ShellCheck ratchet baseline for scripts/**/*.sh (ci/shellcheck.sh, ci/shellcheck_ratchet.py).
+#
+# Format: <file> <SCcode> <count>, one pair per line.
+#   - count = how many times SCcode fires in that file, with shellcheck 0.10.0 at -S style (pinned by version and
+#     tarball sha256 in .github/workflows/ci.yml).
+#   - The ratchet FAILs when a pair fires more often than its count, or fires and is not listed.  Lowering a count or
+#     deleting a pair is always allowed - the tree can only get cleaner.
+#   - To regenerate after a reviewed change, with the pinned shellcheck on PATH:
+#       python3 ci/shellcheck_ratchet.py --write-baseline > /tmp/pairs && review /tmp/pairs, keep this header, commit
+#
+# Regenerated 2026-10-16 on main f1dee9f3 with shellcheck 0.10.0: 30 pairs, 60 findings.
+scripts/build-cell-stub-archives.sh SC2086 1
+scripts/build-cell-stub-archives.sh SC2097 4
+scripts/build-cell-stub-archives.sh SC2098 4
+scripts/build-host-tools-windows.sh SC2086 15
+scripts/build-ppu-kernel-toolchain.sh SC2012 1
+scripts/build-ppu-kernel-toolchain.sh SC2035 1
+scripts/build-ppu-kernel-toolchain.sh SC2054 1
+scripts/build-ppu-toolchain.sh SC2012 1
+scripts/build-ppu-toolchain.sh SC2035 1
+scripts/build-ppu-toolchain.sh SC2054 1
+scripts/build-psl1ght-host-tools-linux.sh SC2086 7
+scripts/build-psl1ght.sh SC2012 1
+scripts/build-psl1ght.sh SC2035 1
+scripts/build-psl1ght.sh SC2207 2
+scripts/build-runtime-lv2.sh SC2086 2
+scripts/build-spu-toolchain.sh SC2012 1
+scripts/build-spu-toolchain.sh SC2035 1
+scripts/build-spu-toolchain.sh SC2054 1
+scripts/check-release-tree.sh SC2034 1
+scripts/check-release-tree.sh SC2055 1
+scripts/check-rust-version.sh SC2206 2
+scripts/env.sh SC2155 1
+scripts/env.sh SC2317 1
+scripts/gen-required-artifacts.sh SC2016 2
+scripts/librt-bisect-harness.sh SC2034 1
+scripts/librt-bisect-harness.sh SC2178 1
+scripts/rollout-off-psl1ght-sysutil.sh SC2015 1
+scripts/rpcs3-multi-capture.sh SC2012 1
+scripts/verify-installed-copy-map.sh SC2034 1
+scripts/verify-installed-copy-map.sh SC2162 1

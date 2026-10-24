@@ -1,0 +1,2 @@
+// A comma in an array index.  Reference: twin of the last value.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float t[2]; t[0] = uv.x; t[1] = uv.y; float v = t[(0, 1)]; return float4(v, 0, 0, 1); }

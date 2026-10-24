@@ -38,7 +38,7 @@
 namespace
 {
 
-// Minimal driver context.  We deliberately do NOT pull in the donor's
+// Minimal driver context.  We deliberately do NOT pull in the Vita compiler's
 // CompilerContext because compiler_options.h transitively drags the
 // USSE back-end types (UsseProgram lives in lowering.h).
 struct CompilerContext
@@ -430,167 +430,223 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    IRBuilder irBuilder;
-    auto irModule = irBuilder.build(*ast, semantic);
-    if (irBuilder.hasErrors() || !irModule)
+    // Fragment constant sharing (canonicalizeConstants) is tried first; when
+    // the program it produces fails to emit, the IR pipeline runs again
+    // without it, and only the kept attempt's emit diagnostics are printed.
+    decltype(IRBuilder{}.build(*ast, semantic)) irModule;
+    nv40::UcodeOutput  ucode;
+    nv40::FpAttributes fpAttrs;
+    nv40::VpAttributes vpAttrs;
+    std::string        irDump;
+    for (bool fpConstCanon = true;; fpConstCanon = false)
     {
-        for (const auto& err : irBuilder.errors())
+        bool fpCanonChanged = false;
+        IRBuilder irBuilder;
+        irModule = irBuilder.build(*ast, semantic);
+        if (irBuilder.hasErrors() || !irModule)
         {
-            std::fprintf(stderr, "%s\n", err.c_str());
-        }
-        std::fprintf(stderr, "rsx-cg-compiler: IR generation failed.\n");
-        return 1;
-    }
-
-    // Generic IR cleanup: iterate AlgebraicSimplification +
-    // CommonSubexprElimination + DeadCodeElimination until fixpoint.
-    // Each individual pass currently applies one replacement per call
-    // (see ir_passes.cpp), so a manual loop is needed.  Cap at 8
-    // iterations as a sanity stop — typical entry points settle in 2-3.
-    //
-    // After loop unrolling, dead-store iterations leave behind orphan
-    // Add / LoadAttribute chains that DCE drops.  AlgebraicSimplification
-    // collapses `0 + x` (the leading constant of an `acc = 0; acc += ...`
-    // pattern) and CSE deduplicates the repeated `shuffle vcol .x`
-    // results — both prerequisites for the scale-fold detector to
-    // recognise an unrolled scalar accumulator.
-    for (int iter = 0; iter < 8; ++iter)
-    {
-        bool changed = false;
-        for (auto& fn : irModule->functions)
-        {
-            if (!fn->isEntryPoint) continue;
-            // Vertex only for now: in a fragment program the extra sharing
-            // trips the short-circuit-root refusal (2xbrz, 3xbrz main_fragment
-            // went from accepted to refused), which has to learn it first.
-            if (stage == ShaderStage::Vertex && rsx_cg::canonicalizeConstants(*fn))
-                changed = true;
-            AlgebraicSimplification algsimp;
-            if (algsimp.runOnFunction(*fn))     changed = true;
-            CommonSubexprElimination cse(stage == ShaderStage::Fragment);
-            if (cse.runOnFunction(*fn))         changed = true;
-            // Alpha-kill sampling can discard a fragment even if nobody
-            // consumes the sampled value. Until sampler provenance is on
-            // the IR operation, preserve all fetches in such programs.
-            DeadCodeElimination dce(!ctx.alphakillSamplers.empty());
-            if (dce.runOnFunction(*fn))         changed = true;
-        }
-        if (!changed) break;
-    }
-
-    // C6014 (t_52640169): a vertex program must write POSITION/HPOS on some
-    // path.  Measured on the reference: refused when the program writes only
-    // other outputs, or declares `out float4 o : POSITION` and never assigns
-    // it; accepted for a write on one path, a partial write, or an HPOS
-    // struct member.  We accepted all three refused shapes.
-    if (stage == ShaderStage::Vertex)
-    {
-        for (const auto& fn : irModule->functions)
-        {
-            if (!fn->isEntryPoint) continue;
-            bool positionWritten = false;
-            for (const auto& block : fn->blocks)
+            for (const auto& err : irBuilder.errors())
             {
-                if (!block) continue;
-                for (const auto& inst : block->instructions)
-                {
-                    if (!inst || inst->op != IROp::StoreOutput || inst->operands.empty()) continue;
-                    std::string sem = inst->semanticName;
-                    for (char& c : sem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-                    if (sem == "POSITION" || sem == "HPOS") positionWritten = true;
-                }
+                std::fprintf(stderr, "%s\n", err.c_str());
             }
-            if (!positionWritten)
-            {
-                std::fprintf(stderr, "%s: error C6014: Required output 'HPOS' not written\n",
-                             ctx.inputFile.c_str());
-                return 1;
-            }
-        }
-    }
-
-    // Run NV40-specific IR transforms before back-end lowering.
-    //
-    // CF-2 first (general-path-discard): give every `discard` the path condition
-    // that reaches it, while the control flow is still intact.  It has to
-    // precede convertSimpleIfElse - that pass's shape 5 hoists a then-arm
-    // discard into the entry block and deletes the CondBranch, after
-    // which the guard is recoverable only by position, which is the
-    // fragility this removes.
-    {
-        nv40::DiscardGuardResult dg = nv40::materialiseDiscardGuards(*irModule);
-        for (const auto& diag : dg.diagnostics)
-            std::fprintf(stderr, "%s\n", diag.c_str());
-        if (!dg.ok)
-        {
-            std::fprintf(stderr, "NV40 discard guards failed: bailing out.\n");
+            std::fprintf(stderr, "rsx-cg-compiler: IR generation failed.\n");
             return 1;
         }
-    }
 
-    // Then: collapse simple if-else diamonds into Select so the
-    // existing FP emit path handles them without IF/ELSE/ENDIF.
-    nv40::convertSimpleIfElse(*irModule);
-
-    // A select between two matrices becomes per-row selects (matrix_select.h).
-    for (auto& fn : irModule->functions)
-        if (fn) rsx_cg::splitMatrixSelects(*fn);
-
-    // Implicit TEXCOORDs go to the fragment inputs the program still reads
-    // (t_3289f98f), decided once the if/else diamonds are selects: a select
-    // on a constant condition is folded first and dead code dropped, so an
-    // input read only on a constant-false path counts as unread (measured).
-    if (stage == ShaderStage::Fragment)
-    {
-        for (auto& fn : irModule->functions)
+        // Generic IR cleanup: iterate AlgebraicSimplification +
+        // CommonSubexprElimination + DeadCodeElimination until fixpoint.
+        // Each individual pass currently applies one replacement per call
+        // (see ir_passes.cpp), so a manual loop is needed.  Cap at 8
+        // iterations as a sanity stop — typical entry points settle in 2-3.
+        //
+        // After loop unrolling, dead-store iterations leave behind orphan
+        // Add / LoadAttribute chains that DCE drops.  AlgebraicSimplification
+        // collapses `0 + x` (the leading constant of an `acc = 0; acc += ...`
+        // pattern) and CSE deduplicates the repeated `shuffle vcol .x`
+        // results — both prerequisites for the scale-fold detector to
+        // recognise an unrolled scalar accumulator.
+        for (int iter = 0; iter < 8; ++iter)
         {
-            if (!fn->isEntryPoint) continue;
-            const rsx_cg::SelectFold fold = rsx_cg::foldConstantSelects(*fn);
-            if (fold == rsx_cg::SelectFold::Failed)
+            bool changed = false;
+            for (auto& fn : irModule->functions)
             {
-                std::fprintf(stderr, "nv40-general: constant select folding did not converge "
-                             "(a select cycle); refusing rather than binding implicit "
-                             "TEXCOORDs to inputs a dead path keeps alive\n");
-                return 1;
-            }
-            if (fold == rsx_cg::SelectFold::Changed)
-            {
+                if (!fn->isEntryPoint) continue;
+                // Both stages.  In a fragment program the extra sharing merges
+                // short-circuit RHS copies (CSE keeps the RHS tag when an eager
+                // copy merges, so a short-circuit RHS shared with an ordinary use
+                // is still refused; the lowering admits a value shared only by
+                // RHS users).  Sharing can also lengthen live ranges past the
+                // temp budget, so a fragment program that then fails to emit is
+                // compiled again without it: sharing never costs acceptance.
+                if ((stage == ShaderStage::Vertex || fpConstCanon) &&
+                    rsx_cg::canonicalizeConstants(*fn))
+                {
+                    changed = true;
+                    if (stage == ShaderStage::Fragment) fpCanonChanged = true;
+                }
+                // With shared literals, any(v) and the explicit v.x != 0 || ...
+                // must read lanes the same way to merge the same comparisons.
+                if (stage == ShaderStage::Fragment && fpConstCanon &&
+                    rsx_cg::canonicalizeLaneReads(*fn))
+                {
+                    changed = true;
+                    fpCanonChanged = true;
+                }
+                AlgebraicSimplification algsimp;
+                if (algsimp.runOnFunction(*fn))     changed = true;
+                CommonSubexprElimination cse(stage == ShaderStage::Fragment);
+                if (cse.runOnFunction(*fn))         changed = true;
+                // Alpha-kill sampling can discard a fragment even if nobody
+                // consumes the sampled value. Until sampler provenance is on
+                // the IR operation, preserve all fetches in such programs.
                 DeadCodeElimination dce(!ctx.alphakillSamplers.empty());
-                while (dce.runOnFunction(*fn)) {}
+                if (dce.runOnFunction(*fn))         changed = true;
             }
-            rsx_cg::bindImplicitTexCoords(*fn, semantic.shaderInfo().implicitTexCoordOrder,
-                                          semantic.shaderInfo().explicitTexCoords);
+            if (!changed) break;
         }
-    }
 
-    // Implicit vertex attributes likewise go to the inputs the program
-    // still reads, lowest ATTR no explicit semantic claims (measured).
-    if (stage == ShaderStage::Vertex)
-    {
-        for (auto& fn : irModule->functions)
+        // C6014 (t_52640169): a vertex program must write POSITION/HPOS on some
+        // path.  Measured on the reference: refused when the program writes only
+        // other outputs, or declares `out float4 o : POSITION` and never assigns
+        // it; accepted for a write on one path, a partial write, or an HPOS
+        // struct member.  We accepted all three refused shapes.
+        if (stage == ShaderStage::Vertex)
         {
-            if (!fn->isEntryPoint) continue;
-            const rsx_cg::SelectFold fold = rsx_cg::foldConstantSelects(*fn);
-            if (fold == rsx_cg::SelectFold::Failed)
+            for (const auto& fn : irModule->functions)
             {
-                std::fprintf(stderr, "nv40-general: constant select folding did not converge "
-                             "(a select cycle); refusing rather than binding implicit "
-                             "attributes to inputs a dead path keeps alive\n");
+                if (!fn->isEntryPoint) continue;
+                bool positionWritten = false;
+                for (const auto& block : fn->blocks)
+                {
+                    if (!block) continue;
+                    for (const auto& inst : block->instructions)
+                    {
+                        if (!inst || inst->op != IROp::StoreOutput || inst->operands.empty()) continue;
+                        std::string sem = inst->semanticName;
+                        for (char& c : sem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                        if (sem == "POSITION" || sem == "HPOS") positionWritten = true;
+                    }
+                }
+                if (!positionWritten)
+                {
+                    std::fprintf(stderr, "%s: error C6014: Required output 'HPOS' not written\n",
+                                 ctx.inputFile.c_str());
+                    return 1;
+                }
+            }
+        }
+
+        // Run NV40-specific IR transforms before back-end lowering.
+        //
+        // CF-2 first (general-path-discard): give every `discard` the path condition
+        // that reaches it, while the control flow is still intact.  It has to
+        // precede convertSimpleIfElse - that pass's shape 5 hoists a then-arm
+        // discard into the entry block and deletes the CondBranch, after
+        // which the guard is recoverable only by position, which is the
+        // fragility this removes.
+        {
+            nv40::DiscardGuardResult dg = nv40::materialiseDiscardGuards(*irModule);
+            for (const auto& diag : dg.diagnostics)
+                std::fprintf(stderr, "%s\n", diag.c_str());
+            if (!dg.ok)
+            {
+                std::fprintf(stderr, "NV40 discard guards failed: bailing out.\n");
                 return 1;
             }
-            if (fold == rsx_cg::SelectFold::Changed)
-            {
-                DeadCodeElimination dce(false);
-                while (dce.runOnFunction(*fn)) {}
-            }
-            rsx_cg::bindImplicitAttributes(*fn);
         }
+
+        // Then: collapse simple if-else diamonds into Select so the
+        // existing FP emit path handles them without IF/ELSE/ENDIF.
+        nv40::convertSimpleIfElse(*irModule);
+
+        // A select between two matrices becomes per-row selects (matrix_select.h).
+        for (auto& fn : irModule->functions)
+            if (fn) rsx_cg::splitMatrixSelects(*fn);
+
+        // Implicit TEXCOORDs go to the fragment inputs the program still reads
+        // (t_3289f98f), decided once the if/else diamonds are selects: a select
+        // on a constant condition is folded first and dead code dropped, so an
+        // input read only on a constant-false path counts as unread (measured).
+        if (stage == ShaderStage::Fragment)
+        {
+            for (auto& fn : irModule->functions)
+            {
+                if (!fn->isEntryPoint) continue;
+                const rsx_cg::SelectFold fold = rsx_cg::foldConstantSelects(*fn);
+                if (fold == rsx_cg::SelectFold::Failed)
+                {
+                    std::fprintf(stderr, "nv40-general: constant select folding did not converge "
+                                 "(a select cycle); refusing rather than binding implicit "
+                                 "TEXCOORDs to inputs a dead path keeps alive\n");
+                    return 1;
+                }
+                if (fold == rsx_cg::SelectFold::Changed)
+                {
+                    DeadCodeElimination dce(!ctx.alphakillSamplers.empty());
+                    while (dce.runOnFunction(*fn)) {}
+                }
+                rsx_cg::bindImplicitTexCoords(*fn, semantic.shaderInfo().implicitTexCoordOrder,
+                                              semantic.shaderInfo().explicitTexCoords);
+            }
+        }
+
+        // Implicit vertex attributes likewise go to the inputs the program
+        // still reads, lowest ATTR no explicit semantic claims (measured).
+        if (stage == ShaderStage::Vertex)
+        {
+            for (auto& fn : irModule->functions)
+            {
+                if (!fn->isEntryPoint) continue;
+                const rsx_cg::SelectFold fold = rsx_cg::foldConstantSelects(*fn);
+                if (fold == rsx_cg::SelectFold::Failed)
+                {
+                    std::fprintf(stderr, "nv40-general: constant select folding did not converge "
+                                 "(a select cycle); refusing rather than binding implicit "
+                                 "attributes to inputs a dead path keeps alive\n");
+                    return 1;
+                }
+                if (fold == rsx_cg::SelectFold::Changed)
+                {
+                    DeadCodeElimination dce(false);
+                    while (dce.runOnFunction(*fn)) {}
+                }
+                const std::string matrixGap = rsx_cg::unsupportedVaryingMatrixInput(*fn);
+                if (!matrixGap.empty())
+                {
+                    std::fprintf(stderr, "nv40-general: %s (vp-varying-matrix-input); refusing rather than reading the wrong attributes\n",
+                                 matrixGap.c_str());
+                    return 1;
+                }
+                rsx_cg::bindImplicitAttributes(*fn);
+            }
+        }
+
+        if (dumpIr)
+            irDump = irModule->toString();
+
+        if (stage == ShaderStage::Fragment)
+        {
+            nv40::FpEmitResult r = nv40::emitFragmentProgramEx(
+                *irModule, ctx.entryName, ctx.compileOpts);
+            ucode   = std::move(r.ucode);
+            fpAttrs = r.attrs;
+        }
+        else
+        {
+            nv40::VpEmitResult r = nv40::emitVertexProgramEx(
+                *irModule, ctx.entryName, ctx.compileOpts);
+            ucode   = std::move(r.ucode);
+            vpAttrs = r.attrs;
+        }
+        if (!ucode.ok && stage == ShaderStage::Fragment && fpConstCanon && fpCanonChanged)
+            continue;
+        break;
     }
 
     if (dumpIr)
     {
         std::cout << "-- IR -----------------------------------------------------------\n";
-        std::cout << irModule->toString();
+        std::cout << irDump;
         std::cout << "----------------------------------------------------------------\n";
     }
 
@@ -602,24 +658,6 @@ int main(int argc, char** argv)
               << (stage == ShaderStage::Fragment ? "fragment" : "vertex")
               << "\n";
     std::cout << "IR functions: " << irModule->functions.size() << "\n";
-
-    nv40::UcodeOutput  ucode;
-    nv40::FpAttributes fpAttrs;
-    nv40::VpAttributes vpAttrs;
-    if (stage == ShaderStage::Fragment)
-    {
-        nv40::FpEmitResult r = nv40::emitFragmentProgramEx(
-            *irModule, ctx.entryName, ctx.compileOpts);
-        ucode   = std::move(r.ucode);
-        fpAttrs = r.attrs;
-    }
-    else
-    {
-        nv40::VpEmitResult r = nv40::emitVertexProgramEx(
-            *irModule, ctx.entryName, ctx.compileOpts);
-        ucode   = std::move(r.ucode);
-        vpAttrs = r.attrs;
-    }
 
     for (const auto& diag : ucode.diagnostics)
     {

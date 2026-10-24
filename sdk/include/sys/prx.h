@@ -154,6 +154,91 @@ typedef sysPrxUserPstopLevel sys_prx_user_p_stop_level_t;
 
 #define SYS_PRX_STOP_FAILED SYS_PRX_STOP_FAIL
 
+/* Library export/import records as a PRX lays them out (32-bit addresses), the relocation types a
+ * PRX's link records use, and the v2 module info that also reports a module's libent/libstub
+ * tables.  sys_prx_register_module, sys_prx_get_ppu_guid and sys_prx_version are not declared:
+ * no stub library here exports them yet, so a call would fail only at link time. */
+#define SYS_PRX_LIB_OPD_IMPORT          0x2000
+
+#define SYS_PRX_R_PPC_ADDR32            1   /* 32-bit absolute address */
+#define SYS_PRX_R_PPC_ADDR16_LO         4   /* low 16 bits of an absolute address */
+#define SYS_PRX_R_PPC_ADDR16_HI         5   /* high 16 bits */
+#define SYS_PRX_R_PPC_ADDR16_HA         6   /* high 16 bits, adjusted for a signed low half */
+#define SYS_PRX_R_PPC64_ADDR32          SYS_PRX_R_PPC_ADDR32
+#define SYS_PRX_R_PPC64_ADDR16_LO       SYS_PRX_R_PPC_ADDR16_LO
+#define SYS_PRX_R_PPC64_ADDR16_HI       SYS_PRX_R_PPC_ADDR16_HI
+#define SYS_PRX_R_PPC64_ADDR16_HA       SYS_PRX_R_PPC_ADDR16_HA
+#define SYS_PRX_R_PPC64_ADDR64          38  /* doubleword: S + A */
+#define SYS_PRX_VARLINK_TERMINATE32     0x00000000
+
+typedef struct sys_prx_link32_t {
+    uint32_t type;
+    uint32_t address;
+    uint32_t addend;
+} sys_prx_link32_t;
+
+typedef struct sys_prx_libent32_t {
+    unsigned char  structsize;
+    unsigned char  reserved1[1];
+    unsigned short version;
+    unsigned short attribute;
+    unsigned short nfunc;
+    unsigned short nvar;
+    unsigned short ntls;
+    unsigned char  hashinfo;
+    unsigned char  hashinfo2;
+    unsigned char  reserved2[1];
+    unsigned char  nidaltsets;
+    uint32_t libname;
+    uint32_t nidtable;
+    uint32_t addtable;
+} sys_prx_libent32_t;
+
+typedef struct sys_prx_libstub32_t {
+    unsigned char  structsize;
+    unsigned char  reserved1[1];
+    unsigned short version;
+    unsigned short attribute;
+    unsigned short nfunc;
+    unsigned short nvar;
+    unsigned short ntls;
+    unsigned char  reserved2[4];
+    uint32_t libname;
+    uint32_t func_nidtable;
+    uint32_t func_table;
+    uint32_t var_nidtable;
+    uint32_t var_table;
+    uint32_t tls_nidtable;
+    uint32_t tls_table;
+} sys_prx_libstub32_t;
+
+/* A user pointer in the system's 32-bit address space: a plain 32-bit value under LP64. */
+#ifdef __LP64__
+typedef uint32_t sys_prx_user_libent_addr_t;
+typedef uint32_t sys_prx_user_libstub_addr_t;
+#else
+typedef sys_prx_libent32_t  *sys_prx_user_libent_addr_t;
+typedef sys_prx_libstub32_t *sys_prx_user_libstub_addr_t;
+#endif
+
+typedef struct sys_prx_module_info_v2_t {
+    uint64_t size;
+    char name[30];
+    char version[2];
+    uint32_t modattribute;
+    uint32_t start_entry;
+    uint32_t stop_entry;
+    uint32_t all_segments_num;
+    sys_prx_user_pchar_t filename;
+    uint32_t filename_size;
+    sys_prx_user_segment_vector_t segments;
+    uint32_t segments_num;
+    sys_prx_user_libent_addr_t libent_addr;
+    uint32_t libent_size;
+    sys_prx_user_libstub_addr_t libstub_addr;
+    uint32_t libstub_size;
+} sys_prx_module_info_v2_t;
+
 /* offset: a 64-bit file offset; container: a sys_memory_container_t */
 sys_prx_id_t sys_prx_load_module(const char *path, uint64_t flags, sys_prx_load_module_option_t *opt);
 sys_prx_id_t sys_prx_load_module_on_memcontainer(const char *path, uint32_t container, uint64_t flags,

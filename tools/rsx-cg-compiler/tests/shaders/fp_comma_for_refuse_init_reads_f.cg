@@ -1,0 +1,2 @@
+// An extra init part writes a name the induction's initial value reads (n = 3, i = n).  Reference: accepts, ONE iteration; ours refuses by name (the proof read n before the init ran).
+float4 main(float2 uv : TEXCOORD0) : COLOR { int n = 2, i; float s = 0; for (n = 3, i = n; i < 4; i++) s += uv.x; return float4(s, 0, 0, 1); }

@@ -1,0 +1,5 @@
+// `typedef struct Foo Bar;` - the keyword spelling of the alias, with no
+// body after the tag.  Reference: byte-identical.
+struct Foo { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
+typedef struct Foo Bar;
+float4 main(Bar i) : COLOR { return float4(i.col * i.uv.x, 1); }

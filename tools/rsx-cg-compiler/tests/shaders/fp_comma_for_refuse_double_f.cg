@@ -1,0 +1,3 @@
+// Two increment parts stepping the induction.  Legal Cg; refused rather
+// than unrolled to twice the count.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float s = 0; int i; for (i = 0; i < 6; i++, i++) s += uv.x; return float4(s, 0, 0, 1); }

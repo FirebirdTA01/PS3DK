@@ -1,0 +1,4 @@
+// A forward tag that is never defined AND never used is not an error on
+// the reference (accepted); using it is (fp_typedef_refuse_fwd_used_f).
+typedef struct Foo Bar;
+float4 main(float2 uv : TEXCOORD0) : COLOR { return float4(uv, 0, 1); }

@@ -15,8 +15,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 OWNED = ('sys/mutex.h', 'sys/cond.h', 'sys/event_queue.h', 'sys/sem.h',
-         'sys/systime.h', 'sys/thread.h', 'sys/process.h',
-         'sys/synchronization.h', 'sys/lv2_fs_ext.h', 'sys/spu.h', 'ppu-asm.h')
+         'sys/systime.h', 'sys/thread.h', 'sys/process.h', 'sys/file.h',
+         'sys/synchronization.h', 'sys/lv2_fs_ext.h', 'sys/spu.h', 'ppu-asm.h',
+         'sys/tty.h', 'sys/interrupt.h')
 
 
 class InstallOrderTests(unittest.TestCase):

@@ -143,6 +143,10 @@ static inline void sys_event_queue_attribute_name_set(char attr_name[],
 #ifndef SYS_PPU_QUEUE
 # define SYS_PPU_QUEUE      SYS_EVENT_QUEUE_PPU
 #endif
+/* The queue type an SPU thread receives on (sys_spu_thread_bind_queue). */
+#ifndef SYS_SPU_QUEUE
+# define SYS_SPU_QUEUE      SYS_EVENT_QUEUE_SPU
+#endif
 
 #define sys_event_queue_attribute_initialize(x)        \
     do {                                               \

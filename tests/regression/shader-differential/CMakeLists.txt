@@ -36,3 +36,14 @@ target_link_libraries(shader-differential PRIVATE
 ps3_add_cg_shader_rsxcgc(shader-differential shaders/sd_pos_allch.vcg)
 
 ps3_add_self(shader-differential)
+
+# Hardware form: a real console shows no TTY, so SD_HW_PKG logs stdout to
+# /dev_hdd0/tmp/shader-differential.log and builds an installable package
+# (launched from the XMB; run directory staged to /dev_hdd0 over FTP).
+option(SD_HW_PKG "Build the hardware package (stdout to a log file)" OFF)
+if(SD_HW_PKG)
+    target_compile_definitions(shader-differential PRIVATE
+        SD_LOG_FILE="/dev_hdd0/tmp/shader-differential.log")
+    ps3_add_pkg(shader-differential TITLE "shader-differential (float rig)"
+        APPID "PSDKH0092" CONTENTID "UP0001-PSDKH0092_00-0000000000000000")
+endif()

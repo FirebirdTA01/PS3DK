@@ -339,8 +339,8 @@ int main()
 CPP
 
 "${CXX:-c++}" -std=c++17 \
-    -I"$repo_root/tools/rsx-cg-compiler/src/donor/frontend" \
-    "$repo_root/tools/rsx-cg-compiler/src/donor/frontend/lexer.cpp" \
+    -I"$repo_root/tools/rsx-cg-compiler/src/cg_frontend/frontend" \
+    "$repo_root/tools/rsx-cg-compiler/src/cg_frontend/frontend/lexer.cpp" \
     "$work/lexer_api_probe.cpp" \
     -o "$work/lexer_api_probe"
 "$work/lexer_api_probe"

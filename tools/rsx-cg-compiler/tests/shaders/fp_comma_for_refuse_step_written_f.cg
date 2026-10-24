@@ -1,0 +1,2 @@
+// An extra increment part writes the step (i += step, step = 2).  Reference: accepts as a hardware loop, three iterations; ours refuses by name.
+float4 main(float2 uv : TEXCOORD0) : COLOR { int step = 1, i; float s = 0; for (i = 0; i < 4; i += step, step = 2) s += uv.x; return float4(s, 0, 0, 1); }

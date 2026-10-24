@@ -62,6 +62,7 @@ HEADERS := \
     include/cell/hash/libsha384.h \
     include/cell/hash/libsha512.h \
     include/sys/prx_module.h \
+    include/sys/file.h \
     include/sys/lv2_fs_ext.h \
     include/psl1ght/lv2/timer.h \
     include/psl1ght/lv2/net.h \
@@ -102,6 +103,8 @@ HEADERS := \
     include/sys/systime.h \
     include/sys/spu.h \
     include/sys/prx.h \
+    include/sys/tty.h \
+    include/sys/interrupt.h \
     include/lv2/prx.h \
     include/lv2/mutex.h \
     include/lv2/cond.h \
@@ -537,6 +540,7 @@ HEADERS := \
     include/rsx/commands_inc.h \
     include/rsx/gcm_sys.h \
     include/rsx/mm.h \
+    include/rsx/ps3tc_mm_lasterror.h \
     include/rsx/nv40.h \
     include/rsx/resc.h \
     include/rsx/rsx.h \

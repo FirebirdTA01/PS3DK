@@ -12,6 +12,7 @@
  * libsync errors come back in the SPURS task facility (0x804109xx).
  * Independently written from the published object layout and protocol.
  */
+#include "spurs_dma.h"
 #include <stdint.h>
 #include <spu_mfcio.h>
 #include <cell/sync/lfqueue.h>
@@ -97,8 +98,7 @@ int _cellSpursSendIWLSignal(uint64_t eaSignal, uint32_t id)
 	spurs = eaSignal & ~0xfull;
 	info = spurs + ((wkl & 0x10) ? 0x1000u : 0xb00u) + (wkl & 0xfu) * 0x20u + 0x08u;
 	mfc_get(&arg[(info >> 3) & 1], info, 8, 31, 0, 0);
-	mfc_write_tag_mask(1u << 31);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(31);
 	taskset = arg[(info >> 3) & 1];
 	return cellSpursSendSignal(taskset, id & 0xff);
 }
@@ -173,8 +173,7 @@ int cellSpursLFQueuePushEnd(uint64_t ea, CellSyncLFQueuePushContainer *c)
 	int rc = check_container(ea, c, c ? c->buffer : 0, c ? c->tag : 0);
 	if (rc)
 		return rc;
-	mfc_write_tag_mask(1u << c->tag);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(c->tag);
 	return end_status(_cellSyncLFQueueCompletePushPointer(ea, c->pointer,
 	                                                     _cellSpursSendIWLSignal, 1, 0));
 }
@@ -184,8 +183,7 @@ int cellSpursLFQueuePopEnd(uint64_t ea, CellSyncLFQueuePopContainer *c)
 	int rc = check_container(ea, c, c ? c->buffer : 0, c ? c->tag : 0);
 	if (rc)
 		return rc;
-	mfc_write_tag_mask(1u << c->tag);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(c->tag);
 	return end_status(_cellSyncLFQueueCompletePopPointer(ea, c->pointer,
 	                                                    _cellSpursSendIWLSignal, 1, 0));
 }

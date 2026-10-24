@@ -19,6 +19,7 @@
  * 0x300 bytes) into a caller buffer, or a stack buffer when none is given.
  * Independently written from the published object layouts and semantics.
  */
+#include "spurs_dma.h"
 #include <stdint.h>
 #include <spu_intrinsics.h>
 #include <spu_mfcio.h>
@@ -131,8 +132,7 @@ static const unsigned char s_ident[16] __attribute__((aligned(16))) = {
 static void dma_get_wait(void *ls, uint64_t ea, uint32_t size, uint32_t tag)
 {
 	mfc_get(ls, ea, size, tag, 0, 0);
-	mfc_write_tag_mask(1u << tag);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(tag);
 }
 
 static int be16(const unsigned char *p) { return (p[0] << 8) | p[1]; }

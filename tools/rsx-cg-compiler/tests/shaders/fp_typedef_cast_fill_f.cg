@@ -1,0 +1,7 @@
+// The scalar fill `(O)0` into a variable declared through an ALIAS of
+// O.  The IR builder decides that cast by comparing the two struct
+// names, which only works because the alias resolves to O in the
+// parser.  Reference: byte-identical.
+struct O { float4 c : COLOR0; float4 d : COLOR1; };
+typedef O OA;
+O main(float2 uv : TEXCOORD0) { OA o = (O)0; o.c.xy = uv; return o; }

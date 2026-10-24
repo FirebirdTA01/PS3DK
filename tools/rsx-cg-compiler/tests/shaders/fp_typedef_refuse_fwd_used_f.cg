@@ -1,0 +1,4 @@
+// A forward tag that is used but never defined.  Reference: C1313
+// 'variable "i" has an undefined struct type'.
+typedef struct Foo Bar;
+float4 main(Bar i) : COLOR { return float4(1, 0, 0, 1); }

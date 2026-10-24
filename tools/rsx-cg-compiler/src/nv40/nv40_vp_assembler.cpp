@@ -107,6 +107,8 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
                 break;
             case NV40_VP_INST_DEST_FOGC: outputMask_ |= (1u << 4); break;
             case NV40_VP_INST_DEST_PSZ : outputMask_ |= (1u << 5); break;
+            case NV40_VP_INST_DEST_TC(8): outputMask_ |= (1u << 12); break;
+            case NV40_VP_INST_DEST_TC(9): outputMask_ |= (1u << 13); break;
             default:
                 if (dst.index >= NV40_VP_INST_DEST_TC(0) &&
                     dst.index <= NV40_VP_INST_DEST_TC(7))
@@ -115,7 +117,10 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
                 }
                 break;
             }
-            hw[3] |= (dst.index << NV40_VP_INST_DEST_SHIFT);
+            // Keep TEX9 as a distinct logical output during scheduling;
+            // the hardware routes it through result register 6, not 16.
+            hw[3] |= ((dst.index == NV40_VP_INST_DEST_TC(9) ?
+                       NV40_VP_INST_DEST_PSZ : dst.index) << NV40_VP_INST_DEST_SHIFT);
             if (slot == 0)
             {
                 hw[0] |= NV40_VP_INST_VEC_RESULT;
@@ -271,6 +276,8 @@ void VpAssembler::emitCoIssued(const struct nvfx_insn& vecInsn,
             break;
         case NV40_VP_INST_DEST_FOGC: outputMask_ |= (1u << 4); break;
         case NV40_VP_INST_DEST_PSZ : outputMask_ |= (1u << 5); break;
+        case NV40_VP_INST_DEST_TC(8): outputMask_ |= (1u << 12); break;
+        case NV40_VP_INST_DEST_TC(9): outputMask_ |= (1u << 13); break;
         default:
             if (index >= NV40_VP_INST_DEST_TC(0) &&
                 index <= NV40_VP_INST_DEST_TC(7))
@@ -301,7 +308,8 @@ void VpAssembler::emitCoIssued(const struct nvfx_insn& vecInsn,
         case NVFXSR_OUTPUT:
             anyOutputWritten = true;
             markOutput(dst.index);
-            hw[3] |= (dst.index << NV40_VP_INST_DEST_SHIFT);
+            hw[3] |= ((dst.index == NV40_VP_INST_DEST_TC(9) ?
+                       NV40_VP_INST_DEST_PSZ : dst.index) << NV40_VP_INST_DEST_SHIFT);
             if (slot == NVFX_VP_INST_SLOT_VEC)
             {
                 hw[0] |= NV40_VP_INST_VEC_RESULT;

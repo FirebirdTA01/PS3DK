@@ -1,0 +1,6 @@
+// The same literal-numerator divide written twice is ONE divide: the two
+// 0.3 literals share a constant id, so CSE merges the divides.
+float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform float4 u) : COLOR
+{
+    return (0.3 / b.x) * a + (0.3 / b.x) * b;
+}

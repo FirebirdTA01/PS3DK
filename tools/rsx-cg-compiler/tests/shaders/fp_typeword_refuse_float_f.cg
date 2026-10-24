@@ -1,0 +1,2 @@
+// `float` is a RESERVED word.  Reference: C0000 syntax error at it.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float3 float = float3(0, 0, 1); return float4(float.xy + uv, float.z, 1); }

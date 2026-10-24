@@ -1,0 +1,3 @@
+// CONTROL: the unused-member shape read directly.
+struct Tag { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; float3 n : TEXCOORD2; };
+float4 main(Tag i) : COLOR { return float4(i.col * i.uv.x, 1); }

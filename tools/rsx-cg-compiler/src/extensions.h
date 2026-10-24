@@ -22,8 +22,8 @@
  * the reference already covers (the BOM'd source compiles to the bytes of
  * the plain source), which is what its test then pins.
  *
- * This file lives beside the driver, not under donor/: the policy is ours,
- * the donor frontend is shared with the Vita compiler, and their reference
+ * This file lives beside the driver, not under cg_frontend/: the policy is ours,
+ * the front end is shared with the Vita Cg compiler, and their reference
  * makes different choices (it accepts a BOM).
  */
 

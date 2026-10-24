@@ -1,0 +1,2 @@
+// CONTROL for the parameter row.
+float4 main(float2 h : TEXCOORD0) : COLOR { return float4(h, 0, 1); }

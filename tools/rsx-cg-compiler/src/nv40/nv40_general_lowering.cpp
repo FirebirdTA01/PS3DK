@@ -440,7 +440,8 @@ static int vertexOutputIndex(const std::string& semanticUpper, int semanticIndex
         return semanticIndex == 1 ? NV40_VP_INST_DEST_BFC1 : NV40_VP_INST_DEST_BFC0;
     if (semanticUpper == "DIFFUSE"  && semanticIndex == 0) return NV40_VP_INST_DEST_COL0;
     if (semanticUpper == "SPECULAR" && semanticIndex == 0) return NV40_VP_INST_DEST_COL1;
-    if (semanticUpper == "TEXCOORD" || semanticUpper == "TEX")
+    if ((semanticUpper == "TEXCOORD" || semanticUpper == "TEX") &&
+        semanticIndex >= 0 && semanticIndex < 10)
         return NV40_VP_INST_DEST_TC(semanticIndex);
     // Six scalar clip distances share y/z/w of the FOGC and PSZ slots.
     if (semanticUpper == "CLP" && semanticIndex >= 0 && semanticIndex < 6)
@@ -853,6 +854,40 @@ private:
     std::unordered_map<IRValueID, const IRInstruction*> defMap_;
     std::unordered_set<IRValueID> comparisonLogicalValues_;
     mutable std::unordered_map<IRValueID, bool> comparisonTreeMemo_;  // isComparisonTree, per classification
+    // Per-lane reciprocals of a vector divisor (lowerDiv): the register, the
+    // lane holding each source component's reciprocal, and where each RCP was
+    // emitted.  Reused only while reciprocalsIntact says so.
+    struct Reciprocals {
+        int vreg = -1;
+        int laneOfComp[4] = {-1, -1, -1, -1};
+        std::vector<size_t> at;
+    };
+    std::unordered_map<IRValueID, Reciprocals> reciprocals_;
+
+    // Every recorded RCP is still in place, unpredicated, nothing else has
+    // written the register since the first of them, and no loop instruction
+    // lies in between (a value from inside a loop region is not live after it).
+    bool reciprocalsIntact(const Reciprocals& rec) const
+    {
+        const auto& code = program_.instrs;
+        if (rec.at.empty()) return false;
+        for (size_t idx : rec.at) {
+            if (idx >= code.size()) return false;
+            const VInstr& v = code[idx];
+            if (v.op != VOp::Rcp || v.dst.none || v.dst.output || v.dst.address ||
+                v.dst.index != rec.vreg || v.predicate != 0 || v.fpScale != 0)
+                return false;
+        }
+        for (size_t j = rec.at.front(); j < code.size(); ++j) {
+            const VInstr& w = code[j];
+            if (w.op == VOp::LoopBegin || w.op == VOp::LoopEnd || w.op == VOp::Brk)
+                return false;
+            if (!w.dst.none && !w.dst.output && !w.dst.address && w.dst.index == rec.vreg &&
+                std::find(rec.at.begin(), rec.at.end(), j) == rec.at.end())
+                return false;
+        }
+        return true;
+    }
     // VP only: float4 constructions whose one consumer is a tex2Dbias /
     // tex2Dlod coordinate.  lowerVecConstruct leaves them unlowered and
     // lowerVpFetch packs the lanes TXL reads (x, y and the LOD) itself.
@@ -996,6 +1031,18 @@ private:
         return memo[root];
     }
 
+    bool usedOnlyInShortCircuitRhs(IRValueID value,
+                                   const std::vector<const IRBasicBlock*>& blocks) const
+    {
+        for (const IRBasicBlock* b : blocks)
+            for (const auto& use : b->instructions) {
+                if (!use) continue;
+                for (IRValueID operand : use->operands)
+                    if (operand == value && !use->shortCircuitRhs) return false;
+            }
+        return true;
+    }
+
     // Admits comparison-only roots for lowering; this is not a speculative
     // predicate. Returns true when a remaining unsafe root requires refusal.
     bool classifyShortCircuitRoots(
@@ -1030,9 +1077,17 @@ private:
                     std::unordered_set<IRValueID> dependent;
                     // The top comparison may be shared: every consumer gets
                     // its already-normalized boolean, never the raw root.
+                    // A value shared only among short-circuit RHS users is
+                    // not an ordinary use: each of those RHS trees passes
+                    // this same classification (2xbrz/3xbrz: one IsPixEqual
+                    // sqrt in three && RHSs once their literals share ids).
+                    // Nor is a shared COMPARISON anywhere in the tree: like
+                    // the top one, every consumer reads its 0/1 result.
                     if (value != instPtr->operands[1] &&
                         valueDependsOnUnsafeSqrt(value, dependent) &&
-                        useCount_[value] != 1)
+                        useCount_[value] != 1 &&
+                        !isComparisonValue(value) &&
+                        !usedOnlyInShortCircuitRhs(value, blocks))
                         return true; // Do not change an ordinary shared use.
                     if (def.op == IROp::Sqrt && def.shortCircuitRhs) {
                         if (def.resultType.componentCount() != 1) return true;
@@ -2092,6 +2147,17 @@ private:
             Node bestNode;
             bool found = false;
             int nextCycle = std::numeric_limits<int>::max();
+            // Within a demand-ordered accumulation chain a later node does not
+            // overtake an earlier one that only waits on modelled latency:
+            // with a shared operand (one x for every step(k, x) term) each
+            // next term was ready first and the partial sums fell further
+            // behind, one live term per link (accumulation-order: 3/6/11/16
+            // registers for N = 2/8/24/40).  Unrelated work still fills the
+            // gap; the latency model emits no NOP.
+            int blockedDemand = std::numeric_limits<int>::max();
+            for (const Node& node : ready)
+                if (!scheduled[node.index] && node.readyTime > curCycle)
+                    blockedDemand = std::min(blockedDemand, node.demandOrder);
 
             for (auto it = ready.begin(); it != ready.end(); ++it) {
                 if (scheduled[it->index])
@@ -2100,6 +2166,9 @@ private:
                     nextCycle = std::min(nextCycle, it->readyTime);
                     continue;
                 }
+                if (it->demandOrder != std::numeric_limits<int>::max() &&
+                    it->demandOrder > blockedDemand)
+                    continue;
 
                 Node cand = *it;
                 cand.schedulableNow = true;
@@ -4975,6 +5044,26 @@ private:
             return;
         }
         const int mask = componentMask(inst.resultType);
+        // k / y with k = 2, 4, 8, 0.5, 0.25 or 0.125 and a run-time scalar y
+        // is ONE reciprocal carrying k as its destination scale: the reference
+        // emits 0.5 / u.x as RCPR_D2 and 4.0 / u.x as RCPR_M4 (measured, also
+        // for a varying y and under a following ADD).  16, 0.0625, a negative
+        // or any other k has no scale and keeps the DIVR below, as there.
+        if (profile_ == GeneralProfile::Fragment && laneCount(mask) == 1 &&
+            valueWidthOf(inst.operands[1]) == 1 && !scalarFloatLiteral(inst.operands[1])) {
+            const std::optional<float> k = scalarFloatLiteral(inst.operands[0]);
+            const std::optional<int> scale = k ? scaleCodeFor(*k) : std::nullopt;
+            if (scale && *scale != NVFX_FP_OP_DST_SCALE_1X) {
+                VInstr vi;
+                vi.op = VOp::Rcp;
+                vi.dst.index = define(inst.result);
+                vi.dst.writemask = mask;
+                vi.srcs[0] = resolve(inst.operands[1]);
+                vi.fpScale = *scale;
+                program_.instrs.push_back(vi);
+                return;
+            }
+        }
         const std::optional<float> divisorLiteral =
             scalarFloatLiteral(inst.operands[1]);
         if (divisorLiteral && *divisorLiteral != 0.0f &&
@@ -5061,16 +5150,46 @@ private:
             return;
         }
 
-        const int r = newVReg();
-        for (int lane = 0; lane < divisorWidth; lane++) {
-            VInstr rcp;
-            rcp.op = VOp::Rcp;
-            rcp.dst.index = r;
-            rcp.dst.writemask = 1 << lane;
-            rcp.srcs[0] = resolve(inst.operands[1]);
-            const uint8_t comp = rcp.srcs[0].swizzle[lane];
-            rcp.srcs[0].swizzle = {comp, comp, comp, comp};
-            program_.instrs.push_back(rcp);
+        // One reciprocal per DISTINCT divisor component: a / float4(b.x, b.x,
+        // b.y, b.y) takes two RCPs on the reference, not four (measured); the
+        // multiply reads each lane's reciprocal through its swizzle.
+        // A later divide by the SAME value reuses those reciprocals while they
+        // are still intact (scalefx divides several vectors by one: the
+        // reference computes each reciprocal once).
+        const VSrc divisor = resolve(inst.operands[1]);
+        std::array<uint8_t, 4> rcpLane = {0, 1, 2, 3};
+        int r = -1;
+        if (const auto hit = reciprocals_.find(inst.operands[1]);
+            profile_ == GeneralProfile::Fragment &&
+            hit != reciprocals_.end() && reciprocalsIntact(hit->second)) {
+            bool all = true;
+            for (int lane = 0; lane < divisorWidth && all; lane++) {
+                const int at = hit->second.laneOfComp[divisor.swizzle[lane] & 3];
+                if (at < 0) all = false;
+                else rcpLane[static_cast<size_t>(lane)] = static_cast<uint8_t>(at);
+            }
+            if (all) r = hit->second.vreg;
+        }
+        if (r < 0) {
+            Reciprocals rec;
+            rec.vreg = r = newVReg();
+            for (int lane = 0; lane < divisorWidth; lane++) {
+                const uint8_t comp = divisor.swizzle[lane];
+                if (rec.laneOfComp[comp & 3] >= 0) {
+                    rcpLane[static_cast<size_t>(lane)] = static_cast<uint8_t>(rec.laneOfComp[comp & 3]);
+                    continue;
+                }
+                rec.laneOfComp[comp & 3] = lane;
+                VInstr rcp;
+                rcp.op = VOp::Rcp;
+                rcp.dst.index = r;
+                rcp.dst.writemask = 1 << lane;
+                rcp.srcs[0] = divisor;
+                rcp.srcs[0].swizzle = {comp, comp, comp, comp};
+                rec.at.push_back(program_.instrs.size());
+                program_.instrs.push_back(rcp);
+            }
+            reciprocals_[inst.operands[1]] = rec;
         }
         VInstr mul;
         mul.op = VOp::Mul;
@@ -5080,6 +5199,8 @@ private:
         mul.srcs[1] = tempSrc(r);
         if (divisorWidth == 1)
             mul.srcs[1].swizzle = {0, 0, 0, 0};
+        else
+            mul.srcs[1].swizzle = rcpLane;
         program_.instrs.push_back(mul);
     }
 
@@ -13004,6 +13125,21 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
                                      VpAttributes* attrsOut)
 {
     UcodeOutput out;
+    // TEX9 is logical output 16 until encoding, when it uses register 6.
+    // PSIZE and CLP3..5 already use that register. Do not silently combine
+    // independently computed outputs in the same hardware lanes.
+    bool tex9 = false, pointOrClip = false;
+    for (const VInstr& vi : program.instrs) {
+        if (!vi.dst.output) continue;
+        tex9 |= vi.dst.index == NV40_VP_INST_DEST_TC(9);
+        pointOrClip |= vi.dst.index == NV40_VP_INST_DEST_PSZ;
+    }
+    if (tex9 && pointOrClip) {
+        out.diagnostics.push_back(
+            "nv40-general-vp: TEXCOORD9 shares result register 6 with "
+            "PSIZE/CLP3..5; simultaneous outputs are unsupported (vp-output-alias)");
+        return out;
+    }
     VpAssembler asm_;
     VpAttributes attrs;
     attrs.uniformStructLayouts = program.uniformStructLayouts;

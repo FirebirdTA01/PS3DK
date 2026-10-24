@@ -16,6 +16,7 @@
  *   0x2a u8   multi-thread safe
  * Independently written from the published object layouts and semantics.
  */
+#include "jq_dma.h"
 #include <stdint.h>
 #include <spu_mfcio.h>
 
@@ -265,8 +266,7 @@ static int port_copy_push(uint64_t port, const void *pJob, unsigned size, unsign
 			P32(0x10) += 1;
 	} while (!put_line(port));
 	mfc_put((volatile void *)pJob, slotEa, size, dmaTag, 0, 0);
-	mfc_write_tag_mask(1u << dmaTag);
-	(void)mfc_read_tag_status_all();
+	jq_dma_wait(dmaTag);
 	get_line(port);
 	rc = _cellSpursJobQueuePushJobBody(P32(0x20), (int)P32(0x24), slotEa, size, tag, dmaTag,
 	                                   isSync ? port : 0, isExclusive, isBlocking);

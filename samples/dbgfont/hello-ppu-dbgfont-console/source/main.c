@@ -19,6 +19,7 @@
 #include <cell/gcm.h>
 #include <cell/dbgfont.h>
 #include <rsx/rsx.h>
+#include <io/pad.h>
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
@@ -154,10 +155,23 @@ int main(void)
 	CellDbgFontConsoleId cc_id = cellDbgFontConsoleOpen(&cc);
 	printf("  cellDbgFontConsoleOpen -> %d\n", (int)cc_id);
 
-	/* Render loop: ~3 seconds at 60 fps. */
+	/* Render loop: ~100 seconds at 60 fps, or until START. */
+	const int pad_ok = ioPadInit(7) == 0;
+	if (!pad_ok) printf("  ioPadInit failed; START will not exit\n");
 	int frame = 0;
-	while (frame < 6000) {  /* ~100 seconds at 60 fps */
+	int start_pressed = 0;
+	while (frame < 6000 && !start_pressed) {
 		frame++;
+		if (pad_ok) {
+			padInfo pi = {0};
+			if (ioPadGetInfo(&pi) == 0)
+			for (int i = 0; i < MAX_PADS; i++) {
+				if (!pi.status[i]) continue;
+				padData pd = {0};
+				ioPadGetData(i, &pd);
+				if (pd.BTN_START) start_pressed = 1;
+			}
+		}
 		if (frame == 1) printf("  render loop started\n");
 		set_render_target(ctx, &bufs[cur]);
 		cellGcmSetClearColor(ctx, 0xff101822);
@@ -175,6 +189,7 @@ int main(void)
 	}
 
 	cellDbgFontConsoleClose(cc_id);
+	ioPadEnd();
 	cellDbgFontExitGcm();
 	free(dbg_buf);
 	cellGcmFinish(CELL_GCM_CURRENT, 0);

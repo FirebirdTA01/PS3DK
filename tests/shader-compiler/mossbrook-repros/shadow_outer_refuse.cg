@@ -1,0 +1,9 @@
+// Two DIFFERENT locals named r: the outer r (t.zw) and an inner-block r (t.xy) returned on the t.x > 0.5 arm. The returned-local set keyed by spelling merged them and returned zwzw on both arms. Refused until scoped returns are tracked.
+// (review: codex, 4f103738)  Reference (sce-cgc 475): t.x=0.75 -> xyxy, t.x=0.25 -> zwzw
+struct Plan { float2 mirror[2]; };
+Plan pick(float4 t) {
+ Plan r; r.mirror[0]=t.zw; r.mirror[1]=t.zw;
+ if(t.x>0.5) { Plan r; r.mirror[0]=t.xy; r.mirror[1]=t.xy; return r; }
+ return r;
+}
+float4 main(float4 t:TEXCOORD0):COLOR {Plan q=pick(t);return float4(q.mirror[0],q.mirror[1]);}

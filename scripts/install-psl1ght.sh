@@ -10,8 +10,8 @@ src=$1
 
 # Exact paths only: every other sys/ and lv2/ header remains upstream-owned.
 owned=(sys/mutex.h sys/cond.h sys/event_queue.h sys/sem.h sys/systime.h sys/spu.h
-       sys/thread.h sys/process.h sys/synchronization.h sys/lv2_fs_ext.h ppu-asm.h
-       sys/prx.h lv2/prx.h)
+       sys/thread.h sys/process.h sys/synchronization.h sys/file.h sys/lv2_fs_ext.h
+       ppu-asm.h sys/prx.h lv2/prx.h sys/tty.h sys/interrupt.h)
 excludes=()
 for header in "${owned[@]}"; do excludes+=("--exclude=./$header"); done
 mkdir -p "$PSL1GHT/ppu/include"

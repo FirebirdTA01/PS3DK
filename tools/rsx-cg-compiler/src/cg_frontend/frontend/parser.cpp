@@ -1,0 +1,3889 @@
+#include "parser.h"
+#include <iostream>
+#include <sstream>
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+
+namespace {
+// Restore optional-name visibility even when error recovery unwinds a scope.
+struct OptionalNameScope {
+    std::vector<std::unordered_set<std::string>>& scopes;
+    explicit OptionalNameScope(decltype(scopes) s) : scopes(s) { scopes.emplace_back(); }
+    ~OptionalNameScope() { scopes.pop_back(); }
+};
+std::shared_ptr<TypeNode> frozenSourceAlias(const std::shared_ptr<TypeNode>& source)
+{
+    auto copy = std::make_shared<TypeNode>(*source);
+    copy->optionalTypeName.clear();
+    if (copy->baseType == BaseType::Array && copy->elementType)
+        copy->elementType = frozenSourceAlias(copy->elementType);
+    return copy;
+}
+}
+
+// ============================================================================
+// Constructor and initialization
+// ============================================================================
+
+Parser::Parser(const std::vector<Token>& tokens, const std::string& filename)
+    : tokens(tokens), filename(filename)
+{
+    initBuiltinTypes();
+}
+
+void Parser::initBuiltinTypes()
+{
+    // All built-in type names that can be used as type specifiers
+    typeNames = {
+        "void", "bool", "int", "uint", "float", "half", "fixed",
+        "char", "uchar", "short", "ushort",
+        "bool2", "bool3", "bool4",
+        "bool2x2", "bool2x3", "bool2x4", "bool3x2", "bool3x3", "bool3x4",
+        "bool4x2", "bool4x3", "bool4x4",
+        "int2", "int3", "int4",
+        "uint2", "uint3", "uint4",
+        "float2", "float3", "float4",
+        "half2", "half3", "half4",
+        "fixed2", "fixed3", "fixed4",
+        "char2", "char3", "char4",
+        "uchar2", "uchar3", "uchar4",
+        "short2", "short3", "short4",
+        "ushort2", "ushort3", "ushort4",
+        "float2x2", "float3x3", "float4x4",
+        "float1x1", "float1x2", "float1x3", "float1x4", "float2x1", "float3x1", "float4x1",
+        "float2x3", "float2x4", "float3x2", "float3x4", "float4x2", "float4x3",
+        "matrix",
+        "half2x2", "half3x3", "half4x4",
+        "half2x3", "half2x4", "half3x2", "half3x4", "half4x2", "half4x3",
+        "double", "double2", "double3", "double4", "double2x2", "double3x3", "double4x4",
+        "double2x3", "double2x4", "double3x2", "double3x4", "double4x2", "double4x3",
+        "sampler", "sampler1D", "sampler2D", "sampler3D", "samplerCUBE", "samplerRECT",
+        "isampler1D", "isampler2D", "isampler3D", "isamplerCUBE", "isamplerRECT",
+        "usampler1D", "usampler2D", "usampler3D", "usamplerCUBE", "usamplerRECT",
+        // The Cg 1.x spelling of the five sampler types (texobj-sampler-alias).  The
+        // lexer maps them to the same tokens; this list is what decides
+        // whether a name is a TYPE, so it has to know them too.
+        "texobj1D", "texobj2D", "texobj3D", "texobjCUBE", "texobjRECT"
+    };
+}
+
+// ============================================================================
+// Main parsing entry point
+// ============================================================================
+
+// A BUILT-IN TYPE NAME DECLARED AS A VARIABLE (PSGL's vpFixedPipeline:
+// `float3 half = float3(0,0,0); ... dot(normal, half)`).  Measured on the
+// reference: every built-in type spelling except the reserved words float,
+// int and bool may name a variable - half, fixed, the floatN / halfN /
+// fixedN / intN / boolN vectors and matrices, the sampler types - and from
+// its declaration to the end of its scope that spelling is the variable
+// (`float4 float4 = ...; float4(1)` is "cannot call a non-function").  Only
+// the measured spellings are admitted.  The declaring token and every later
+// token with that spelling in the scope become identifiers, and isTypeName
+// refuses them (shadowedTypeTokens_); everything else parses as before.
+void Parser::retypeShadowedTypeNames()
+{
+    static const std::set<TokenType> shadowable = {
+        TokenType::KW_HALF, TokenType::KW_HALF2, TokenType::KW_HALF3, TokenType::KW_HALF4,
+        TokenType::KW_HALF2X2, TokenType::KW_HALF3X3, TokenType::KW_HALF4X4,
+        TokenType::KW_FIXED, TokenType::KW_FIXED2, TokenType::KW_FIXED3, TokenType::KW_FIXED4,
+        TokenType::KW_FLOAT2, TokenType::KW_FLOAT3, TokenType::KW_FLOAT4,
+        TokenType::KW_FLOAT2X2, TokenType::KW_FLOAT3X3, TokenType::KW_FLOAT4X4,
+        TokenType::KW_INT2, TokenType::KW_INT3, TokenType::KW_INT4,
+        TokenType::KW_BOOL2, TokenType::KW_BOOL3, TokenType::KW_BOOL4,
+        TokenType::KW_SAMPLER, TokenType::KW_SAMPLER1D, TokenType::KW_SAMPLER2D,
+        TokenType::KW_SAMPLER3D, TokenType::KW_SAMPLERCUBE, TokenType::KW_SAMPLERRECT,
+    };
+    // User type names (struct tags and typedef names) are not in typeNames
+    // until the parser reaches them; collect their spellings from the tokens:
+    // the identifier after `struct`, and a typedef's declarator (the last
+    // top-level identifier before its ';', outside brackets).
+    std::set<std::string> userTypeNames;
+    std::set<size_t> typedefStatementTokens;   // tokens of `typedef ... ;` statements
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i].type == TokenType::KW_STRUCT && i + 1 < tokens.size() &&
+            tokens[i + 1].type == TokenType::IDENTIFIER)
+            userTypeNames.insert(tokens[i + 1].lexeme);
+        if (tokens[i].type != TokenType::KW_TYPEDEF) continue;
+        int braces = 0, brackets = 0;
+        size_t lastName = tokens.size();
+        size_t k = i;
+        for (; k < tokens.size(); ++k) {
+            const TokenType t = tokens[k].type;
+            // `typedef struct Tag { ... } Alias;` declares the tag too (review:
+            // codex); it is a type name, never a declarator.
+            if (t == TokenType::KW_STRUCT && k + 1 < tokens.size() &&
+                tokens[k + 1].type == TokenType::IDENTIFIER)
+                userTypeNames.insert(tokens[k + 1].lexeme);
+            if (t == TokenType::LBRACE) ++braces;
+            else if (t == TokenType::RBRACE) --braces;
+            else if (t == TokenType::LBRACKET) ++brackets;
+            else if (t == TokenType::RBRACKET) --brackets;
+            else if (t == TokenType::SEMICOLON && braces == 0) break;
+            else if (t == TokenType::IDENTIFIER && braces == 0 && brackets == 0) lastName = k;
+            typedefStatementTokens.insert(k);
+        }
+        if (lastName < tokens.size()) userTypeNames.insert(tokens[lastName].lexeme);
+        i = k;
+    }
+    const auto isUserTypeName = [&](const Token& t) {
+        return t.type == TokenType::IDENTIFIER && userTypeNames.count(t.lexeme) > 0;
+    };
+    auto isTypeToken = [&](const Token& t) {
+        if (t.type == TokenType::IDENTIFIER) return typeNames.count(t.lexeme) > 0 || userTypeNames.count(t.lexeme) > 0;
+        return t.type >= TokenType::KW_VOID && typeNames.count(t.lexeme) > 0;
+    };
+    std::vector<int> braceDepth(tokens.size(), 0), parenDepth(tokens.size(), 0);
+    for (size_t i = 0, b = 0, q = 0; i < tokens.size(); ++i) {
+        if (tokens[i].type == TokenType::RBRACE && b) --b;
+        if (tokens[i].type == TokenType::RPAREN && q) --q;
+        braceDepth[i] = static_cast<int>(b); parenDepth[i] = static_cast<int>(q);
+        if (tokens[i].type == TokenType::LBRACE) ++b;
+        if (tokens[i].type == TokenType::LPAREN) ++q;
+    }
+    const size_t n = tokens.size();
+    // One past the end of the parenthesised group opening at p.
+    const auto skipParens = [&](size_t p) {
+        if (p >= n || tokens[p].type != TokenType::LPAREN) return p;
+        for (size_t m = p + 1; m < n; ++m)
+            if (tokens[m].type == TokenType::RPAREN && parenDepth[m] == parenDepth[p]) return m + 1;
+        return n;
+    };
+    // One past the end of the statement starting at k.
+    const std::function<size_t(size_t)> skipStatement = [&](size_t k) -> size_t {
+        if (k >= n) return n;
+        switch (tokens[k].type) {
+        case TokenType::LBRACE:
+            for (size_t m = k + 1; m < n; ++m)
+                if (tokens[m].type == TokenType::RBRACE && braceDepth[m] == braceDepth[k]) return m + 1;
+            return n;
+        case TokenType::KW_IF: {
+            const size_t e = skipStatement(skipParens(k + 1));
+            return e < n && tokens[e].type == TokenType::KW_ELSE ? skipStatement(e + 1) : e;
+        }
+        case TokenType::KW_FOR:
+        case TokenType::KW_WHILE:
+            return skipStatement(skipParens(k + 1));
+        case TokenType::KW_DO: {
+            size_t e = skipStatement(k + 1);
+            if (e < n && tokens[e].type == TokenType::KW_WHILE) e = skipParens(e + 1);
+            return e < n && tokens[e].type == TokenType::SEMICOLON ? e + 1 : e;
+        }
+        default:
+            for (size_t m = k; m < n; ++m)
+                if (tokens[m].type == TokenType::SEMICOLON && braceDepth[m] == braceDepth[k] &&
+                    parenDepth[m] == parenDepth[k]) return m + 1;
+            return n;
+        }
+    };
+    // `float s = 0, half = t.x;`: a later declarator of a statement-level
+    // declaration whose type is a built-in type.
+    const auto commaDeclarator = [&](size_t i) {
+        if (tokens[i - 1].type != TokenType::COMMA || parenDepth[i] != 0) return false;
+        size_t k = i - 1;
+        while (k > 0) {
+            // A '{' records the depth outside it.
+            const TokenType t = tokens[k - 1].type;
+            if (parenDepth[k - 1] == 0 &&
+                (((t == TokenType::SEMICOLON || t == TokenType::RBRACE) && braceDepth[k - 1] == braceDepth[i]) ||
+                 (t == TokenType::LBRACE && braceDepth[k - 1] + 1 == braceDepth[i]))) break;
+            --k;
+        }
+        while (k < i && (tokens[k].type == TokenType::KW_CONST || tokens[k].type == TokenType::KW_STATIC ||
+                         tokens[k].type == TokenType::KW_UNIFORM || tokens[k].type == TokenType::KW_EXTERN))
+            ++k;
+        return k + 1 < i && isTypeToken(tokens[k]) && !shadowedTypeTokens_.count(k) &&
+               (tokens[k + 1].type == TokenType::IDENTIFIER || shadowedTypeTokens_.count(k + 1));
+    };
+    for (size_t i = 1; i + 1 < n; ++i) {
+        // A user type name declared as a variable (`typedef float4 B; ...
+        // float B = 2.0; (B) - x`) shadows it the same way: there `(B)` is a
+        // parenthesised variable, not a cast.  Its tokens stay identifiers;
+        // only shadowedTypeTokens_ records them.  A typedef's own declarator
+        // is the type, not a variable.
+        const bool userName = isUserTypeName(tokens[i]) && !typedefStatementTokens.count(i);
+        if ((!shadowable.count(tokens[i].type) && !userName) || shadowedTypeTokens_.count(i)) continue;
+        const TokenType next = tokens[i + 1].type;
+        const bool declarator = next == TokenType::OP_ASSIGN || next == TokenType::SEMICOLON ||
+            next == TokenType::COMMA || next == TokenType::LBRACKET || next == TokenType::COLON ||
+            next == TokenType::RPAREN;
+        // `float half(float x) { ... }`: a FILE-SCOPE function named after a
+        // type word is called by that name afterwards (the reference compiles
+        // `half(uv.x)` after it as the call), so from its name to the end of
+        // the file the word is that function.
+        const bool function = !userName && next == TokenType::LPAREN && braceDepth[i] == 0 &&
+            parenDepth[i] == 0 && isTypeToken(tokens[i - 1]) && !shadowedTypeTokens_.count(i - 1);
+        if (!declarator && !function) continue;
+        if (!(isTypeToken(tokens[i - 1]) && !shadowedTypeTokens_.count(i - 1)) && !commaDeclarator(i)) continue;
+        if (function) {
+            const std::string name = tokens[i].lexeme;
+            for (size_t m = i; m < n; ++m)
+                if (tokens[m].lexeme == name && shadowable.count(tokens[m].type)) {
+                    tokens[m].type = TokenType::IDENTIFIER;
+                    shadowedTypeTokens_.insert(m);
+                }
+            continue;
+        }
+        // The scope: a for statement's initialiser's is that whole
+        // statement (`for (float half = 0; ...) if (..) {..} else {..}`); a
+        // parameter's is the function body that follows its list; any other
+        // declaration's runs to the end of its block.
+        const int depth = braceDepth[i];
+        size_t end = n;
+        size_t open = i;
+        if (parenDepth[i] > 0)
+            while (open > 0 && !(tokens[open].type == TokenType::LPAREN && parenDepth[open] == parenDepth[i] - 1))
+                --open;
+        if (parenDepth[i] > 0 && open > 0 && tokens[open].type == TokenType::LPAREN &&
+            tokens[open - 1].type == TokenType::KW_FOR) {
+            end = skipStatement(open - 1);
+        } else if (parenDepth[i] > 0) {
+            size_t k = i;
+            while (k < tokens.size() && !(tokens[k].type == TokenType::LBRACE && braceDepth[k] == depth)) {
+                if (tokens[k].type == TokenType::SEMICOLON && braceDepth[k] == depth && parenDepth[k] == 0) break;
+                ++k;
+            }
+            if (k < tokens.size() && tokens[k].type == TokenType::LBRACE) {
+                size_t m = k + 1;
+                while (m < tokens.size() && !(tokens[m].type == TokenType::RBRACE && braceDepth[m] == depth)) ++m;
+                end = m;
+            } else end = k;
+        } else {
+            for (size_t m = i; m < tokens.size(); ++m)
+                if (braceDepth[m] < depth) { end = m; break; }
+        }
+        const std::string name = tokens[i].lexeme;
+        for (size_t m = i; m < end; ++m)
+            if (tokens[m].lexeme == name && (shadowable.count(tokens[m].type) ||
+                                             (userName && tokens[m].type == TokenType::IDENTIFIER))) {
+                tokens[m].type = TokenType::IDENTIFIER;
+                shadowedTypeTokens_.insert(m);
+            }
+    }
+    // A struct member is a name only behind a `.`: `struct S { float3 half; }`
+    // shadows nothing outside the struct, and `s.half` reads the member.
+    for (size_t i = 1; i < n; ++i)
+        if (tokens[i - 1].type == TokenType::DOT && shadowable.count(tokens[i].type)) {
+            tokens[i].type = TokenType::IDENTIFIER;
+            shadowedTypeTokens_.insert(i);
+        }
+}
+
+std::unique_ptr<TranslationUnit> Parser::parse()
+{
+    retypeShadowedTypeNames();
+    collectGlobalValueNames();
+    auto unit = std::make_unique<TranslationUnit>();
+    unit->filename = filename;
+
+    while (!isAtEnd())
+    {
+        // THE LOOP MUST MAKE PROGRESS.  error() records a diagnostic and sets
+        // panicMode; below the error cap it does not throw and it does not
+        // consume a token, so a declaration that fails WITHOUT advancing
+        // leaves the cursor where it was and this loop would call it again on
+        // the same token, for ever.  Only reaching config.maxErrors makes
+        // error() throw (and set 'abandoned'); the catch below then unwinds
+        // to the 'abandoned' break.
+        //
+        // That is not hypothetical: ANY unknown identifier in type position
+        // hung the compiler outright - 'uniform bogusType t', or a local
+        // 'bogusType x;' - and it hung --dump-ast too, because it never
+        // reached a back end.  95 shaders in the reference SDK sample tree
+        // never terminated, most of them over the Cg 1.x texobj2D type name
+        // (parser-progress).  A compiler that refuses is workable; one that spins
+        // cannot be worked around at all.
+        const size_t before = current;
+        try
+        {
+            std::vector<std::unique_ptr<DeclNode>> extraDeclarations;
+            auto decl = parseTopLevelDeclaration(&extraDeclarations);
+            if (!decl && current == before)
+            {
+                // No declaration and no progress: synchronize, which advances
+                // at least one token, so the diagnostic already recorded is
+                // reported instead of repeated.
+                synchronize();
+                if (static_cast<int>(errors.size()) >= config.maxErrors)
+                {
+                    error("Too many errors, stopping parse");
+                    break;
+                }
+                continue;
+            }
+            if (decl)
+            {
+                // Track struct/typedef names for type resolution
+                if (decl->kind == DeclKind::Struct)
+                {
+                    typeNames.insert(decl->name);
+                }
+                else if (decl->kind == DeclKind::Typedef)
+                {
+                    typeNames.insert(decl->name);
+                }
+
+                unit->declarations.push_back(std::move(decl));
+
+                // The second and later declarators of `float g1, g2;`.
+                for (auto& extra : extraDeclarations)
+                {
+                    if (extra)
+                        unit->declarations.push_back(std::move(extra));
+                }
+            }
+        }
+        catch (...)
+        {
+            if (abandoned)
+                break;
+            synchronize();
+            if (static_cast<int>(errors.size()) >= config.maxErrors)
+            {
+                errors.push_back({currentLocation(), "Too many errors, stopping parse", false});
+                break;
+            }
+        }
+    }
+
+    // Find entry point (default "main")
+    for (auto& decl : unit->declarations)
+    {
+        if (decl->kind == DeclKind::Function)
+        {
+            auto* func = static_cast<FunctionDecl*>(decl.get());
+            if (func->name == "main" && !func->isPrototype())
+            {
+                unit->entryPoint = func;
+                break;
+            }
+        }
+    }
+
+    return unit;
+}
+
+// ============================================================================
+// Token utilities
+// ============================================================================
+
+bool Parser::isAtEnd() const
+{
+    return current >= tokens.size() || peek().type == TokenType::END_OF_FILE;
+}
+
+const Token& Parser::peek(int offset) const
+{
+    size_t idx = current + offset;
+    if (idx >= tokens.size())
+    {
+        static Token eof{TokenType::END_OF_FILE, "", 0, 0, ""};
+        return eof;
+    }
+    return tokens[idx];
+}
+
+const Token& Parser::previous() const
+{
+    if (current == 0)
+        return tokens[0];
+    return tokens[current - 1];
+}
+
+const Token& Parser::advance()
+{
+    if (!isAtEnd())
+        current++;
+    return previous();
+}
+
+bool Parser::check(TokenType type) const
+{
+    if (isAtEnd())
+        return false;
+    return peek().type == type;
+}
+
+bool Parser::match(TokenType type)
+{
+    if (check(type))
+    {
+        advance();
+        return true;
+    }
+    return false;
+}
+
+bool Parser::match(std::initializer_list<TokenType> types)
+{
+    for (auto type : types)
+    {
+        if (check(type))
+        {
+            advance();
+            return true;
+        }
+    }
+    return false;
+}
+
+Token Parser::consume(TokenType type, const std::string& message)
+{
+    if (check(type))
+        return advance();
+
+    error(message + " (got '" + peek().lexeme + "')");
+    throw std::runtime_error(message);
+}
+
+SourceLocation Parser::currentLocation() const
+{
+    const Token& tok = peek();
+    return tokenLocation(tok);
+}
+
+SourceLocation Parser::tokenLocation(const Token& token) const
+{
+    return {token.filename.empty() ? filename : token.filename, token.line, token.column};
+}
+
+// ============================================================================
+// Error handling
+// ============================================================================
+
+void Parser::error(const std::string& message)
+{
+    error(currentLocation(), message);
+}
+
+void Parser::error(const SourceLocation& loc, const std::string& message)
+{
+    errors.push_back({loc, message, false});
+    panicMode = true;
+    // Hard cap for every recovery loop, not only the top-level one: a loop
+    // that records an error without advancing must not grow without bound.
+    if (!abandoned && static_cast<int>(errors.size()) >= config.maxErrors)
+    {
+        abandoned = true;
+        errors.push_back({loc, "Too many errors, stopping parse", false});
+        throw std::runtime_error("too many errors");
+    }
+}
+
+void Parser::warning(const std::string& message)
+{
+    errors.push_back({currentLocation(), message, true});
+}
+
+void Parser::printErrors() const
+{
+    for (const auto& err : errors)
+    {
+        std::cerr << err.loc.toString() << ": "
+                  << (err.isWarning ? "warning: " : "error: ")
+                  << err.message << std::endl;
+    }
+}
+
+void Parser::synchronize()
+{
+    panicMode = false;
+    advance();
+
+    while (!isAtEnd())
+    {
+        // Synchronize after semicolon
+        if (previous().type == TokenType::SEMICOLON)
+            return;
+
+        // Synchronize before these keywords (start of new declaration/statement)
+        switch (peek().type)
+        {
+        case TokenType::KW_STRUCT:
+        case TokenType::KW_TYPEDEF:
+        case TokenType::KW_UNIFORM:
+        case TokenType::KW_IN:
+        case TokenType::KW_OUT:
+        case TokenType::KW_INOUT:
+        case TokenType::KW_CONST:
+        case TokenType::KW_STATIC:
+        case TokenType::KW_IF:
+        case TokenType::KW_FOR:
+        case TokenType::KW_WHILE:
+        case TokenType::KW_DO:
+        case TokenType::KW_RETURN:
+        case TokenType::KW_VOID:
+        case TokenType::KW_FLOAT:
+        case TokenType::KW_INT:
+        case TokenType::KW_HALF:
+        case TokenType::RBRACE:
+            return;
+        default:
+            break;
+        }
+
+        advance();
+    }
+}
+
+// ============================================================================
+// Type parsing
+// ============================================================================
+
+void Parser::collectGlobalValueNames()
+{
+    if (config.glslTypeEnableFlag.empty()) return;
+    // Semantic pass 1 already makes file-scope values visible to expressions.
+    // Index declarator names before disambiguating optional type spellings,
+    // without registering types or functions. Balanced delimiters exclude
+    // members, parameters, initializer elements and all function bodies.
+    int braces = 0, parens = 0, brackets = 0;
+    bool inTypedef = false;
+    for (size_t i = 0; i < tokens.size(); ++i)
+    {
+        const auto t = tokens[i].type;
+        if (!braces && !parens && !brackets)
+        {
+            if (t == TokenType::KW_TYPEDEF) inTypedef = true;
+            if (t == TokenType::SEMICOLON) inTypedef = false;
+            if (!inTypedef && t == TokenType::IDENTIFIER && i && i + 1 < tokens.size())
+            {
+                const auto& previous = tokens[i - 1];
+                const auto next = tokens[i + 1].type;
+                const bool afterType = typeNames.count(previous.lexeme) ||
+                    previous.type == TokenType::KW_INT || previous.type == TokenType::KW_UINT ||
+                    previous.type == TokenType::IDENTIFIER || previous.type == TokenType::RBRACKET ||
+                    previous.type == TokenType::RBRACE || previous.type == TokenType::COMMA;
+                const bool declarator = next == TokenType::OP_ASSIGN || next == TokenType::COLON ||
+                    next == TokenType::LBRACKET || next == TokenType::COMMA || next == TokenType::SEMICOLON;
+                if (afterType && declarator) globalValueNames_.insert(tokens[i].lexeme);
+            }
+        }
+        if (t == TokenType::LBRACE) ++braces;
+        else if (t == TokenType::RBRACE && braces) --braces;
+        else if (t == TokenType::LPAREN) ++parens;
+        else if (t == TokenType::RPAREN && parens) --parens;
+        else if (t == TokenType::LBRACKET) ++brackets;
+        else if (t == TokenType::RBRACKET && brackets) --brackets;
+    }
+}
+
+int Parser::afterOptionalTypeSuffix() const
+{
+    int offset = 1;
+    while (peek(offset).type == TokenType::LBRACKET)
+    {
+        int depth = 0;
+        do {
+            if (peek(offset).type == TokenType::LBRACKET) ++depth;
+            else if (peek(offset).type == TokenType::RBRACKET) --depth;
+            ++offset;
+        } while (current + offset < tokens.size() && depth);
+        if (depth) return offset;
+    }
+    return offset;
+}
+
+std::shared_ptr<TypeNode> Parser::optionalType(const std::string& name) const
+{
+    if (config.glslTypeEnableFlag.empty() || typeNames.count(name)) return nullptr;
+    for (auto scope = optionalTypeShadows_.rbegin(); scope != optionalTypeShadows_.rend(); ++scope)
+        if (scope->count(name)) return nullptr;
+    auto type = std::make_shared<TypeNode>();
+    const auto dimension = [](char c) { return c >= '2' && c <= '4'; };
+    if (name.size() >= 4 && dimension(name.back()))
+    {
+        const std::string prefix = name.substr(0, name.size() - 1);
+        if (prefix == "vec" || prefix == "dvec" || prefix == "ivec" || prefix == "bvec")
+        {
+            type->baseType = prefix == "ivec" ? BaseType::Int :
+                             prefix == "bvec" ? BaseType::Bool : BaseType::Float;
+            type->vectorSize = name.back() - '0';
+            type->optionalTypeName = name;
+            return type;
+        }
+    }
+    if (name.compare(0, 3, "mat") == 0 &&
+        ((name.size() == 4 && dimension(name[3])) ||
+         (name.size() == 6 && dimension(name[3]) && name[4] == 'x' && dimension(name[5]))))
+    {
+        type->baseType = BaseType::Float;
+        type->matrixRows = name[3] - '0';
+        type->matrixCols = name.size() == 4 ? type->matrixRows : name[5] - '0';
+        type->optionalTypeName = name;
+        return type;
+    }
+    return nullptr;
+}
+
+bool Parser::isTypeName(bool expressionContext) const
+{
+    if (isAtEnd())
+        return false;
+    // A built-in type spelling a variable shadows here (retypeShadowedTypeNames).
+    if (shadowedTypeTokens_.count(current))
+        return false;
+
+    const Token& tok = peek();
+
+    // Check if it's a type keyword
+    switch (tok.type)
+    {
+    case TokenType::KW_VOID:
+    case TokenType::KW_BOOL:
+    case TokenType::KW_INT:
+    case TokenType::KW_UINT:
+    case TokenType::KW_FLOAT:
+    case TokenType::KW_HALF:
+    case TokenType::KW_FIXED:
+    case TokenType::KW_CHAR:
+    case TokenType::KW_UCHAR:
+    case TokenType::KW_SHORT:
+    case TokenType::KW_USHORT:
+    case TokenType::KW_BOOL2:
+    case TokenType::KW_BOOL3:
+    case TokenType::KW_BOOL4:
+    case TokenType::KW_INT2:
+    case TokenType::KW_INT3:
+    case TokenType::KW_INT4:
+    case TokenType::KW_UINT2:
+    case TokenType::KW_UINT3:
+    case TokenType::KW_UINT4:
+    case TokenType::KW_FLOAT2:
+    case TokenType::KW_FLOAT3:
+    case TokenType::KW_FLOAT4:
+    case TokenType::KW_FLOAT2X2:
+    case TokenType::KW_FLOAT3X3:
+    case TokenType::KW_FLOAT4X4:
+    case TokenType::KW_HALF2:
+    case TokenType::KW_HALF3:
+    case TokenType::KW_HALF4:
+    case TokenType::KW_HALF2X2:
+    case TokenType::KW_HALF3X3:
+    case TokenType::KW_HALF4X4:
+    case TokenType::KW_FIXED2:
+    case TokenType::KW_FIXED3:
+    case TokenType::KW_FIXED4:
+    case TokenType::KW_CHAR2:
+    case TokenType::KW_CHAR3:
+    case TokenType::KW_CHAR4:
+    case TokenType::KW_UCHAR2:
+    case TokenType::KW_UCHAR3:
+    case TokenType::KW_UCHAR4:
+    case TokenType::KW_SHORT2:
+    case TokenType::KW_SHORT3:
+    case TokenType::KW_SHORT4:
+    case TokenType::KW_USHORT2:
+    case TokenType::KW_USHORT3:
+    case TokenType::KW_USHORT4:
+    case TokenType::KW_SAMPLER:
+    case TokenType::KW_SAMPLER1D:
+    case TokenType::KW_SAMPLER2D:
+    case TokenType::KW_SAMPLER3D:
+    case TokenType::KW_SAMPLERCUBE:
+    case TokenType::KW_SAMPLERRECT:
+    case TokenType::KW_ISAMPLER1D:
+    case TokenType::KW_ISAMPLER2D:
+    case TokenType::KW_ISAMPLER3D:
+    case TokenType::KW_ISAMPLERCUBE:
+    case TokenType::KW_ISAMPLERRECT:
+    case TokenType::KW_USAMPLER1D:
+    case TokenType::KW_USAMPLER2D:
+    case TokenType::KW_USAMPLER3D:
+    case TokenType::KW_USAMPLERCUBE:
+    case TokenType::KW_USAMPLERRECT:
+        return true;
+    default:
+        break;
+    }
+
+    // Check if it's a known type name (struct/typedef)
+    if (tok.type == TokenType::IDENTIFIER)
+    {
+        return typeNames.count(tok.lexeme) > 0 ||
+            (!(expressionContext && globalValueNames_.count(tok.lexeme)) && optionalType(tok.lexeme) != nullptr);
+    }
+
+    return false;
+}
+
+bool Parser::isTypeStart() const
+{
+    // Check for storage qualifiers that can precede a type
+    switch (peek().type)
+    {
+    case TokenType::KW_UNIFORM:
+    case TokenType::KW_IN:
+    case TokenType::KW_OUT:
+    case TokenType::KW_INOUT:
+    case TokenType::KW_CONST:
+    case TokenType::KW_STATIC:
+    case TokenType::KW_EXTERN:
+    case TokenType::KW_PACKED:
+    case TokenType::KW_ROW_MAJOR:
+    case TokenType::KW_COLUMN_MAJOR:
+        return true;
+    default:
+        break;
+    }
+
+    return isTypeName();
+}
+
+std::shared_ptr<TypeNode> Parser::parseType()
+{
+    auto type = parseBaseType();
+    if (!type)
+        return nullptr;
+
+    // Check for array brackets
+    type = parseArraySuffixes(type);
+
+    lastParsedType_ = type;
+    ++typesParsed_;
+    return type;
+}
+
+std::shared_ptr<TypeNode> Parser::parseBaseType()
+{
+    auto type = std::make_shared<TypeNode>();
+    bool explicitMatrixLayout = false;
+
+    // Handle matrix layout qualifiers
+    if (match(TokenType::KW_ROW_MAJOR))
+    {
+        explicitMatrixLayout = true;
+        type->isRowMajor = true;
+    }
+    else if (match(TokenType::KW_COLUMN_MAJOR))
+    {
+        explicitMatrixLayout = true;
+        type->isRowMajor = false;
+    }
+
+    // Handle packed qualifier
+    if (match(TokenType::KW_PACKED))
+    {
+        type->isPacked = true;
+    }
+
+    const Token& tok = peek();
+
+    // Expand an already-declared alias before treating a named type as a
+    // struct. Copy the node: qualifiers on this use must not modify the alias.
+    // parseType still records this type for the reference declarator-list rule.
+    if (tok.type == TokenType::IDENTIFIER)
+    {
+        const auto alias = typeAliases_.find(tok.lexeme);
+        if (alias != typeAliases_.end())
+        {
+            // Copy array elements too: a typedef freezes its complete type,
+            // and must not mutate metadata in the original declaration.
+            auto expanded = frozenSourceAlias(alias->second);
+            if (explicitMatrixLayout) expanded->isRowMajor = type->isRowMajor;
+            expanded->isPacked = expanded->isPacked || type->isPacked;
+            advance();
+            return expanded;
+        }
+    }
+
+    if (tok.type == TokenType::IDENTIFIER)
+    {
+        if (auto optional = optionalType(tok.lexeme))
+        {
+            if (!config.glslTypes)
+                error(tokenLocation(tok), "optional GLSL type name '" + tok.lexeme +
+                      "'; enable GLSL type names with " + config.glslTypeEnableFlag);
+            optional->isRowMajor = type->isRowMajor;
+            optional->isPacked = type->isPacked;
+            advance();
+            return optional;
+        }
+    }
+
+    // Cg's unsized `matrix` type is a float4x4 alias.
+    if (tok.type == TokenType::IDENTIFIER && tok.lexeme == "matrix")
+    {
+        advance();
+        type->baseType = BaseType::Float;
+        type->matrixRows = 4;
+        type->matrixCols = 4;
+        return type;
+    }
+
+    // Identifier matrix type names (float3x4, half4x3, bool3x3 ...) are not lexer
+    // keywords; they arrive as identifiers listed in typeNames.  Build the
+    // matrix node from the name so they do not fall through to the struct
+    // path below as an unknown struct (rectangular-matrix-row-access / rectangular-matrices).  The
+    // reference lays an RxC matrix out as R rows of C-wide vectors.
+    if (tok.type == TokenType::IDENTIFIER && tok.lexeme.size() >= 7 &&
+        tok.lexeme.size() <= 9 && typeNames.count(tok.lexeme) > 0)
+    {
+        const std::string& n = tok.lexeme;
+        const size_t len = n.size();
+        const bool isFloat = (n.compare(0, 5, "float") == 0 && len == 8) ||
+                             (n.compare(0, 6, "double") == 0 && len == 9);   // double-alias
+        const bool isHalf = n.compare(0, 4, "half") == 0 && len == 7;
+        const bool isBool = n.compare(0, 4, "bool") == 0 && len == 7;
+        const char minDimension = n.compare(0, 5, "float") == 0 ? '1' : '2';
+        if ((isFloat || isHalf || isBool) && n[len - 2] == 'x' &&
+            n[len - 3] >= minDimension && n[len - 3] <= '4' &&
+            n[len - 1] >= minDimension && n[len - 1] <= '4')
+        {
+            advance();
+            type->baseType = isBool ? BaseType::Bool : (isFloat ? BaseType::Float : BaseType::Half);
+            type->matrixRows = n[len - 3] - '0';
+            type->matrixCols = n[len - 1] - '0';
+            return type;
+        }
+    }
+
+    // Check for struct type reference (user-defined type name)
+    if (tok.type == TokenType::IDENTIFIER && typeNames.count(tok.lexeme) > 0)
+    {
+        advance();
+        type->baseType = BaseType::Struct;
+        type->structName = tok.lexeme;
+        return type;
+    }
+
+    // Handle "unsigned" as a type modifier (lexer maps "unsigned" to KW_UINT)
+    // When we see "unsigned char", "unsigned short", "unsigned int", etc.
+    bool isUnsigned = false;
+    if (tok.type == TokenType::KW_UINT && tok.lexeme == "unsigned")
+    {
+        // Check if next token is a type that can be modified by "unsigned"
+        if (current + 1 < tokens.size())
+        {
+            TokenType nextType = tokens[current + 1].type;
+            switch (nextType)
+            {
+            case TokenType::KW_CHAR:
+            case TokenType::KW_CHAR2:
+            case TokenType::KW_CHAR3:
+            case TokenType::KW_CHAR4:
+            case TokenType::KW_SHORT:
+            case TokenType::KW_SHORT2:
+            case TokenType::KW_SHORT3:
+            case TokenType::KW_SHORT4:
+            case TokenType::KW_INT:
+            case TokenType::KW_INT2:
+            case TokenType::KW_INT3:
+            case TokenType::KW_INT4:
+                // Consume "unsigned" and proceed to parse the actual type as unsigned
+                advance();
+                isUnsigned = true;
+                break;
+            default:
+                // Just "unsigned" alone means "unsigned int"
+                break;
+            }
+        }
+    }
+
+    // Handle "signed" as a type modifier (lexer maps "signed" to KW_INT)
+    // When we see "signed char", "signed short", "signed int", etc.
+    // signed types are the default, so we just skip the "signed" keyword
+    if (tok.type == TokenType::KW_INT && tok.lexeme == "signed")
+    {
+        // Check if next token is a type that can be modified by "signed"
+        if (current + 1 < tokens.size())
+        {
+            TokenType nextType = tokens[current + 1].type;
+            switch (nextType)
+            {
+            case TokenType::KW_CHAR:
+            case TokenType::KW_CHAR2:
+            case TokenType::KW_CHAR3:
+            case TokenType::KW_CHAR4:
+            case TokenType::KW_SHORT:
+            case TokenType::KW_SHORT2:
+            case TokenType::KW_SHORT3:
+            case TokenType::KW_SHORT4:
+            case TokenType::KW_INT:
+            case TokenType::KW_INT2:
+            case TokenType::KW_INT3:
+            case TokenType::KW_INT4:
+                // Consume "signed" and proceed to parse the actual type
+                // (signed is the default, so no additional flag needed)
+                advance();
+                break;
+            default:
+                // Just "signed" alone means "signed int" = "int"
+                break;
+            }
+        }
+    }
+
+    // Get the (possibly updated) current token
+    const Token& typeTok = peek();
+
+    // Parse built-in type
+    type->baseType = tokenToBaseType(typeTok.type);
+    if (type->baseType == BaseType::Void && typeTok.type != TokenType::KW_VOID)
+    {
+        // Name the token: 'Expected type name' on its own leaves the reader
+        // hunting for which one, and the commonest cause is a type this
+        // compiler does not know yet rather than a syntax error.
+        if (tok.type == TokenType::IDENTIFIER)
+            error("unknown type name '" + tok.lexeme + "'");
+        else
+            error("Expected type name");
+        return nullptr;
+    }
+
+    // Apply unsigned modifier if needed
+    if (isUnsigned)
+    {
+        switch (type->baseType)
+        {
+        case BaseType::Char:
+            type->baseType = BaseType::UChar;
+            break;
+        case BaseType::Short:
+            type->baseType = BaseType::UShort;
+            break;
+        case BaseType::Int:
+            type->baseType = BaseType::UInt;
+            break;
+        default:
+            // Already unsigned or not applicable
+            break;
+        }
+    }
+
+    advance();
+
+    // Set vector/matrix dimensions based on type
+    switch (typeTok.type)
+    {
+    case TokenType::KW_FLOAT2:
+    case TokenType::KW_HALF2:
+    case TokenType::KW_FIXED2:
+    case TokenType::KW_INT2:
+    case TokenType::KW_UINT2:
+    case TokenType::KW_BOOL2:
+    case TokenType::KW_CHAR2:
+    case TokenType::KW_UCHAR2:
+    case TokenType::KW_SHORT2:
+    case TokenType::KW_USHORT2:
+        type->vectorSize = 2;
+        break;
+    case TokenType::KW_FLOAT3:
+    case TokenType::KW_HALF3:
+    case TokenType::KW_FIXED3:
+    case TokenType::KW_INT3:
+    case TokenType::KW_UINT3:
+    case TokenType::KW_BOOL3:
+    case TokenType::KW_CHAR3:
+    case TokenType::KW_UCHAR3:
+    case TokenType::KW_SHORT3:
+    case TokenType::KW_USHORT3:
+        type->vectorSize = 3;
+        break;
+    case TokenType::KW_FLOAT4:
+    case TokenType::KW_HALF4:
+    case TokenType::KW_FIXED4:
+    case TokenType::KW_INT4:
+    case TokenType::KW_UINT4:
+    case TokenType::KW_BOOL4:
+    case TokenType::KW_CHAR4:
+    case TokenType::KW_UCHAR4:
+    case TokenType::KW_SHORT4:
+    case TokenType::KW_USHORT4:
+        type->vectorSize = 4;
+        break;
+    case TokenType::KW_FLOAT2X2:
+        type->matrixRows = 2;
+        type->matrixCols = 2;
+        break;
+    case TokenType::KW_FLOAT3X3:
+        type->matrixRows = 3;
+        type->matrixCols = 3;
+        break;
+    case TokenType::KW_FLOAT4X4:
+        type->matrixRows = 4;
+        type->matrixCols = 4;
+        break;
+    case TokenType::KW_HALF2X2:
+        type->matrixRows = 2;
+        type->matrixCols = 2;
+        break;
+    case TokenType::KW_HALF3X3:
+        type->matrixRows = 3;
+        type->matrixCols = 3;
+        break;
+    case TokenType::KW_HALF4X4:
+        type->matrixRows = 4;
+        type->matrixCols = 4;
+        break;
+    default:
+        type->vectorSize = 1;
+        break;
+    }
+
+    return type;
+}
+
+Parser::ConstEval Parser::evalConstInt(const ExprNode* e, long long& out) const
+{
+    if (!e) return ConstEval::NotConstant;
+    switch (e->kind)
+    {
+    case ExprKind::Literal:
+    {
+        const auto* lit = static_cast<const LiteralExpr*>(e);
+        if (lit->literalKind != LiteralExpr::LiteralKind::Int) return ConstEval::NotIntegral;
+        out = static_cast<long long>(std::get<int64_t>(lit->value));
+        return ConstEval::Ok;
+    }
+    case ExprKind::Identifier:
+    {
+        const auto& name = static_cast<const IdentifierExpr*>(e)->name;
+        for (auto it = constScopes_.rbegin(); it != constScopes_.rend(); ++it)
+        {
+            const auto found = it->find(name);
+            if (found == it->end()) continue;
+            if (!found->second) return ConstEval::NotConstant;
+            out = *found->second;
+            return ConstEval::Ok;
+        }
+        return ConstEval::NotConstant;
+    }
+    case ExprKind::Unary:
+    {
+        const auto* u = static_cast<const UnaryExpr*>(e);
+        if (u->op != UnaryOp::Negate) return ConstEval::NotConstant;
+        const ConstEval r = evalConstInt(u->operand.get(), out);
+        if (r == ConstEval::Ok) out = -out;
+        return r;
+    }
+    case ExprKind::Binary:
+    {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        long long l = 0, r = 0;
+        const ConstEval lr = evalConstInt(b->left.get(), l);
+        if (lr != ConstEval::Ok) return lr;
+        const ConstEval rr = evalConstInt(b->right.get(), r);
+        if (rr != ConstEval::Ok) return rr;
+        switch (b->op)
+        {
+        case BinaryOp::Add: out = l + r; return ConstEval::Ok;
+        case BinaryOp::Sub: out = l - r; return ConstEval::Ok;
+        case BinaryOp::Mul: out = l * r; return ConstEval::Ok;
+        case BinaryOp::Div: if (r == 0) return ConstEval::NotConstant; out = l / r; return ConstEval::Ok;
+        case BinaryOp::Mod: if (r == 0) return ConstEval::NotConstant; out = l % r; return ConstEval::Ok;
+        default: return ConstEval::NotConstant;
+        }
+    }
+    default:
+        return ConstEval::NotConstant;
+    }
+}
+
+// `T a[2][3]` is an array of 2 arrays of 3 T: the FIRST bracket is the
+// outermost dimension, so `a[1]` is a `T[3]` and `a[1][2]` a T.  The
+// brackets used to nest the other way round (the LAST outermost), which
+// gave `a[1]` the wrong size; nothing lowered a multi-dimensional array
+// then, so nothing read the difference.
+std::shared_ptr<TypeNode> Parser::parseArraySuffixes(std::shared_ptr<TypeNode> type)
+{
+    std::vector<std::shared_ptr<TypeNode>> dims;
+    while (check(TokenType::LBRACKET))
+        dims.push_back(parseArrayType(nullptr));
+    for (auto it = dims.rbegin(); it != dims.rend(); ++it)
+    {
+        (*it)->elementType = type;
+        type = *it;
+    }
+    return type;
+}
+
+std::shared_ptr<TypeNode> Parser::parseArrayType(std::shared_ptr<TypeNode> elementType)
+{
+    consume(TokenType::LBRACKET, "Expected '['");
+
+    auto arrayType = std::make_shared<TypeNode>();
+    arrayType->baseType = BaseType::Array;
+    arrayType->elementType = elementType;
+
+    // An array size is an integral constant expression.  Measured on the
+    // reference: integer literals (after macro expansion, TAPS + 1),
+    // `static const int` names in scope (2*rad+1, grid_size*grid_size with a
+    // local int) and + - * / % are accepted; a float value - even 2.0*2.0 -
+    // is C1309, a uniform or a non-static const is C1307.
+    if (!check(TokenType::RBRACKET))
+    {
+        if (check(TokenType::NUMBER) && peek(1).type == TokenType::RBRACKET &&
+            peek().lexeme.find_first_of(".eEfFhH") == std::string::npos)
+        {
+            const Token& sizeTok = advance();
+            arrayType->arraySize = std::stoi(sizeTok.lexeme);
+        }
+        else
+        {
+            auto sizeExpr = parseTernaryExpression();
+            long long value = 0;
+            const ConstEval r = sizeExpr ? evalConstInt(sizeExpr.get(), value) : ConstEval::NotConstant;
+            if (r == ConstEval::NotIntegral)
+                error("C1309: non integral expression for array size");
+            else if (r != ConstEval::Ok)
+                error("C1307: non constant expression for array size");
+            else if (value <= 0)
+                error("array size must be positive");
+            else
+                arrayType->arraySize = static_cast<int>(value);
+        }
+    }
+    else
+    {
+        // Unsized array (only valid in certain contexts)
+        arrayType->arraySize = 0;
+    }
+
+    consume(TokenType::RBRACKET, "Expected ']'");
+    return arrayType;
+}
+
+BaseType Parser::tokenToBaseType(TokenType type) const
+{
+    switch (type)
+    {
+    case TokenType::KW_VOID:
+        return BaseType::Void;
+    case TokenType::KW_BOOL:
+    case TokenType::KW_BOOL2:
+    case TokenType::KW_BOOL3:
+    case TokenType::KW_BOOL4:
+        return BaseType::Bool;
+    case TokenType::KW_INT:
+    case TokenType::KW_INT2:
+    case TokenType::KW_INT3:
+    case TokenType::KW_INT4:
+        return BaseType::Int;
+    case TokenType::KW_UINT:
+    case TokenType::KW_UINT2:
+    case TokenType::KW_UINT3:
+    case TokenType::KW_UINT4:
+        return BaseType::UInt;
+    case TokenType::KW_FLOAT:
+    case TokenType::KW_FLOAT2:
+    case TokenType::KW_FLOAT3:
+    case TokenType::KW_FLOAT4:
+    case TokenType::KW_FLOAT2X2:
+    case TokenType::KW_FLOAT3X3:
+    case TokenType::KW_FLOAT4X4:
+        return BaseType::Float;
+    case TokenType::KW_HALF:
+    case TokenType::KW_HALF2:
+    case TokenType::KW_HALF3:
+    case TokenType::KW_HALF4:
+    case TokenType::KW_HALF2X2:
+    case TokenType::KW_HALF3X3:
+    case TokenType::KW_HALF4X4:
+        return BaseType::Half;
+    case TokenType::KW_FIXED:
+    case TokenType::KW_FIXED2:
+    case TokenType::KW_FIXED3:
+    case TokenType::KW_FIXED4:
+        return BaseType::Fixed;
+    case TokenType::KW_CHAR:
+    case TokenType::KW_CHAR2:
+    case TokenType::KW_CHAR3:
+    case TokenType::KW_CHAR4:
+        return BaseType::Char;
+    case TokenType::KW_UCHAR:
+    case TokenType::KW_UCHAR2:
+    case TokenType::KW_UCHAR3:
+    case TokenType::KW_UCHAR4:
+        return BaseType::UChar;
+    case TokenType::KW_SHORT:
+    case TokenType::KW_SHORT2:
+    case TokenType::KW_SHORT3:
+    case TokenType::KW_SHORT4:
+        return BaseType::Short;
+    case TokenType::KW_USHORT:
+    case TokenType::KW_USHORT2:
+    case TokenType::KW_USHORT3:
+    case TokenType::KW_USHORT4:
+        return BaseType::UShort;
+    case TokenType::KW_SAMPLER:
+        return BaseType::SamplerGeneric;
+    case TokenType::KW_SAMPLER1D:
+        return BaseType::Sampler1D;
+    case TokenType::KW_SAMPLER2D:
+        return BaseType::Sampler2D;
+    case TokenType::KW_SAMPLER3D:
+        return BaseType::Sampler3D;
+    case TokenType::KW_SAMPLERCUBE:
+        return BaseType::SamplerCube;
+    case TokenType::KW_SAMPLERRECT:
+        return BaseType::SamplerRect;
+    case TokenType::KW_ISAMPLER1D:
+        return BaseType::ISampler1D;
+    case TokenType::KW_ISAMPLER2D:
+        return BaseType::ISampler2D;
+    case TokenType::KW_ISAMPLER3D:
+        return BaseType::ISampler3D;
+    case TokenType::KW_ISAMPLERCUBE:
+        return BaseType::ISamplerCube;
+    case TokenType::KW_ISAMPLERRECT:
+        return BaseType::ISamplerRect;
+    case TokenType::KW_USAMPLER1D:
+        return BaseType::USampler1D;
+    case TokenType::KW_USAMPLER2D:
+        return BaseType::USampler2D;
+    case TokenType::KW_USAMPLER3D:
+        return BaseType::USampler3D;
+    case TokenType::KW_USAMPLERCUBE:
+        return BaseType::USamplerCube;
+    case TokenType::KW_USAMPLERRECT:
+        return BaseType::USamplerRect;
+    default:
+        return BaseType::Void;
+    }
+}
+
+// ============================================================================
+// Declaration parsing
+// ============================================================================
+
+std::unique_ptr<DeclNode> Parser::parseTopLevelDeclaration(
+    std::vector<std::unique_ptr<DeclNode>>* extraDeclarations)
+{
+    // Skip any stray semicolons
+    while (match(TokenType::SEMICOLON))
+    {
+    }
+
+    if (isAtEnd())
+        return nullptr;
+
+    // Check for struct
+    if (check(TokenType::KW_STRUCT))
+    {
+        return parseStructDeclaration();
+    }
+
+    // Check for typedef
+    if (check(TokenType::KW_TYPEDEF))
+    {
+        return parseTypedefDeclaration(extraDeclarations);
+    }
+
+    // Otherwise it's a variable or function declaration
+    return parseVariableOrFunctionDeclaration(extraDeclarations);
+}
+
+// `struct` [name] `{` fields `}`, stopping at the closing brace.  What may
+// follow differs between the two spellings - a declarator and a semicolon
+// after a plain struct, the typedef's name after `typedef struct { ... }` -
+// so the caller owns that and this owns the body.
+std::unique_ptr<StructDecl> Parser::parseStructBody()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_STRUCT, "Expected 'struct'");
+
+    std::string name;
+    if (check(TokenType::IDENTIFIER))
+    {
+        name = advance().lexeme;
+    }
+
+    auto structDecl = std::make_unique<StructDecl>(loc, name);
+
+    consume(TokenType::LBRACE, "Expected '{' after struct name");
+
+    while (!check(TokenType::RBRACE) && !isAtEnd())
+    {
+        // A member may lead with a storage/interface qualifier.  The
+        // reference SDK writes both spellings inside structs - `uniform
+        // sampler2D texture_zstencil : TEXUNIT0;` in
+        // DeferredShading/shaders/light_structs.cgh and `in float4
+        // position : POSITION;` in the head_tracker shaders - and without
+        // this the member's TYPE is never reached and the parser reports
+        // "Expected type name" at the qualifier.
+        bool memberInline = false;
+        StorageQualifier memberStorage = parseStorageQualifier(&memberInline);
+
+        // Parse struct member
+        auto type = parseType();
+        if (!type)
+        {
+            synchronize();
+            continue;
+        }
+
+        // One type may name several members, `float2 UL, UR, DL, DR, M;`
+        // (fxaa-edge-detect), each with its own array extent and semantic.
+        bool memberOk = true;
+        do
+        {
+            if (!check(TokenType::IDENTIFIER))
+            {
+                error("Expected member name");
+                memberOk = false;
+                break;
+            }
+
+            StructField field;
+            field.name = advance().lexeme;
+            field.type = type;
+            field.storage = memberStorage;
+
+            // Check for array brackets after field name (e.g., float4 positions[8])
+            field.type = parseArraySuffixes(field.type);
+
+            // Check for semantic
+            if (match(TokenType::COLON))
+            {
+                field.semantic = parseSemantic();
+            }
+
+            structDecl->fields.push_back(field);
+        } while (match(TokenType::COMMA));
+        if (!memberOk)
+        {
+            synchronize();
+            continue;
+        }
+
+        consume(TokenType::SEMICOLON, "Expected ';' after struct member");
+    }
+
+    consume(TokenType::RBRACE, "Expected '}' after struct body");
+
+    return structDecl;
+}
+
+std::unique_ptr<StructDecl> Parser::parseStructDeclaration()
+{
+    auto structDecl = parseStructBody();
+    if (!structDecl)
+        return nullptr;
+
+    // Struct declarations are often followed by a semicolon or variable name
+    if (check(TokenType::IDENTIFIER))
+    {
+        // This is a variable declaration using the struct type
+        // For now, we just register the struct and skip this case
+        // Full handling would create a VarDecl
+        warning("Variable declaration after struct not fully supported yet");
+    }
+
+    consume(TokenType::SEMICOLON, "Expected ';' after struct declaration");
+
+    return structDecl;
+}
+
+std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration(
+    std::vector<std::unique_ptr<DeclNode>>* extraDeclarations)
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_TYPEDEF, "Expected 'typedef'");
+
+    // Every exit that has already reported its fault skips the rest of the
+    // declaration, so the top-level loop does not read the typedef's NAME as
+    // the start of a new declaration and report the same line again.
+    auto skipDeclaration = [this]() {
+        while (!check(TokenType::SEMICOLON) && !isAtEnd())
+            advance();
+        match(TokenType::SEMICOLON);
+        return std::unique_ptr<DeclNode>();
+    };
+
+    // The reference accepts five spellings, each byte-identical to the
+    // direct spelling of the type (fable's typedef rows):
+    //   typedef struct { ... } Name;       the struct IS Name (below)
+    //   typedef struct Tag { ... } Name;   the struct keeps Tag; Name aliases it
+    //   typedef struct Tag Name;           Tag may be FORWARD (defined later,
+    //                                      or never and never used)
+    //   typedef <type> Name;               any type, another alias included
+    //   typedef <type> Name[N]...;         a C-style extent after the name
+    std::shared_ptr<TypeNode> type;
+    std::unique_ptr<StructDecl> body;   // the struct a tagged typedef defines
+
+    if (check(TokenType::KW_STRUCT) && peek(1).type == TokenType::IDENTIFIER &&
+        peek(2).type != TokenType::LBRACE)
+    {
+        // `typedef struct Tag Name;` - with the keyword the tag may be
+        // forward; the keyword-less `typedef Foo Bar;` ahead of Foo is
+        // refused (parseType reports it).  An unseen tag is recorded as a
+        // type name, and a use of a tag that is never defined refuses in
+        // semantic analysis as an unknown type.
+        advance();   // struct
+        const std::string tag = advance().lexeme;
+        const auto alias = typeAliases_.find(tag);
+        if (alias != typeAliases_.end())
+            type = frozenSourceAlias(alias->second);
+        else
+        {
+            typeNames.insert(tag);
+            type = std::make_shared<TypeNode>();
+            type->baseType = BaseType::Struct;
+            type->structName = tag;
+        }
+        if (type->baseType != BaseType::Struct)
+        {
+            error(loc, "'" + tag + "' is not a struct");
+            return skipDeclaration();
+        }
+    }
+    else if (check(TokenType::KW_STRUCT))
+    {
+        body = parseStructBody();
+        if (!body)
+        {
+            error("Expected struct body in typedef");
+            return skipDeclaration();
+        }
+        if (body->name.empty())
+        {
+            // Anonymous: the typedef supplies the struct's only name, and the
+            // name registers through the DeclKind::Struct arm the same way
+            // `struct Name { ... };` does.
+            if (!check(TokenType::IDENTIFIER))
+            {
+                error("Expected name for typedef");
+                return skipDeclaration();
+            }
+            body->name = advance().lexeme;
+            consume(TokenType::SEMICOLON, "Expected ';' after typedef");
+            return body;
+        }
+        // `typedef struct S { ... } S;`: the name IS the tag, so the struct is
+        // the whole declaration (the reference accepts it, byte-identical to
+        // the plain struct); an alias of the same name would redefine it.
+        if (check(TokenType::IDENTIFIER) && peek().lexeme == body->name &&
+            peek(1).type == TokenType::SEMICOLON)
+        {
+            advance();
+            consume(TokenType::SEMICOLON, "Expected ';' after typedef");
+            return body;
+        }
+        // Tagged: the struct keeps its tag and the name aliases it.
+        type = std::make_shared<TypeNode>();
+        type->baseType = BaseType::Struct;
+        type->structName = body->name;
+    }
+    else
+    {
+        // parseType has already named the fault when it returns nothing;
+        // a second line here only repeated the position more vaguely.
+        type = parseType();
+        if (!type)
+            return skipDeclaration();
+    }
+
+    if (!check(TokenType::IDENTIFIER))
+    {
+        error("Expected name for typedef");
+        return skipDeclaration();
+    }
+    std::string name = advance().lexeme;
+    // C puts an array's extent after the declarator: `typedef float2
+    // taps_t[2];` makes taps_t the array type.
+    type = parseArraySuffixes(type);
+    consume(TokenType::SEMICOLON, "Expected ';' after typedef");
+
+    // The reference refuses a repeated typedef, even of the same type.
+    if (typeNames.count(name))
+    {
+        error(loc, "the name '" + name + "' is already defined");
+        return body ? std::unique_ptr<DeclNode>(std::move(body)) : nullptr;
+    }
+    typeNames.insert(name);
+    typeAliases_.emplace(name, type);
+
+    auto aliasDecl = std::make_unique<TypedefDecl>(loc, name, type);
+    if (body)
+    {
+        // The tagged struct is the declaration, so the tag is registered
+        // before anything reads the alias; the alias rides along after it.
+        if (extraDeclarations)
+            extraDeclarations->push_back(std::move(aliasDecl));
+        return body;
+    }
+    return aliasDecl;
+}
+
+std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration(
+    std::vector<std::unique_ptr<DeclNode>>* extraDeclarations)
+{
+    SourceLocation loc = currentLocation();
+
+    // Parse storage qualifiers.  `inline` is legal only on a function, so
+    // capture whether it was present and rule on it once the '(' or its
+    // absence has said which this declaration is.
+    bool declaredInline = false;
+    StorageQualifier storage = parseStorageQualifier(&declaredInline);
+
+    // Parse Vita attributes (can appear before type)
+    VitaAttributes vitaAttrs = parseVitaAttributes();
+
+    // Parse type
+    auto type = parseType();
+    if (!type)
+    {
+        error("Expected type");
+        return nullptr;
+    }
+
+    // Parse name
+    if (!check(TokenType::IDENTIFIER))
+    {
+        error("Expected identifier after type");
+        return nullptr;
+    }
+
+    std::string name = advance().lexeme;
+
+    // Check if this is a function (has '(') or variable
+    if (check(TokenType::LPAREN))
+    {
+        auto funcDecl = parseFunctionDeclaration(loc, type, name, storage);
+        return funcDecl;
+    }
+    else
+    {
+        // `inline float k = 0;` is not a function; the reference refuses it
+        // (C1005 "inline modifier only for functions"), so a program that
+        // relied on it being ignored must not silently compile here.
+        if (declaredInline)
+        {
+            error("inline modifier only for functions");
+            return nullptr;
+        }
+        // Could be multiple variable declarations: int a, b, c;
+        auto vars = parseMultipleVariableDeclarations(loc, type, name, storage);
+        if (vars.size() == 1)
+        {
+            vars[0]->vitaAttrs = vitaAttrs;
+            return std::move(vars[0]);
+        }
+        else
+        {
+            // Every declarator is declared.  The first is returned and the
+            // rest go to the caller through extraDeclarations - returning
+            // only the first is what made `float g1, g2;` declare g1 and
+            // refuse g2 as undeclared (multiple-declarators).
+            if (!vars.empty())
+            {
+                vars[0]->vitaAttrs = vitaAttrs;
+                if (extraDeclarations)
+                {
+                    for (size_t i = 1; i < vars.size(); ++i)
+                        extraDeclarations->push_back(std::move(vars[i]));
+                }
+                return std::move(vars[0]);
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+std::unique_ptr<FunctionDecl> Parser::parseFunctionDeclaration(
+    SourceLocation loc,
+    std::shared_ptr<TypeNode> returnType,
+    const std::string& name,
+    StorageQualifier storage)
+{
+    auto func = std::make_unique<FunctionDecl>(loc, name, returnType);
+    optionalTypeShadows_.back().insert(name);
+    OptionalNameScope parameterScope(optionalTypeShadows_);
+
+    // Parse parameters
+    func->parameters = parseParameterList(name == config.entryPointName);
+
+    // Check for return semantic
+    if (match(TokenType::COLON))
+    {
+        func->returnSemantic = parseSemantic();
+    }
+
+    // Skip GCC-style __attribute__((...)) if present
+    skipGccAttributes();
+
+    // Function body or prototype
+    if (check(TokenType::LBRACE))
+    {
+        func->body = parseBlock();
+    }
+    else
+    {
+        consume(TokenType::SEMICOLON, "Expected ';' after function prototype");
+    }
+
+    return func;
+}
+
+std::unique_ptr<VarDecl> Parser::parseVariableDeclaration(
+    SourceLocation loc,
+    std::shared_ptr<TypeNode> type,
+    const std::string& name,
+    StorageQualifier storage)
+{
+    auto var = std::make_unique<VarDecl>(loc, name, type);
+    var->storage = storage;
+    var->isStatic = lastStorageWasStatic_;
+
+    // Check for array brackets after name
+    var->type = parseArraySuffixes(var->type);
+    optionalTypeShadows_.back().insert(name);
+
+    // Check for semantic annotation
+    if (match(TokenType::COLON))
+    {
+        var->semantic = parseSemantic();
+    }
+
+    // Check for initializer
+    if (match(TokenType::OP_ASSIGN))
+    {
+        if (check(TokenType::LBRACE))
+            var->initializer = parseBracedInitializerExpression(var->type);
+        else
+            var->initializer = parseAssignmentExpression();
+    }
+
+    // Record the name for array extents: a `static const int/uint` scalar
+    // with a constant initialiser is a value, anything else shadows.
+    {
+        std::optional<long long> value;
+        long long v = 0;
+        if (var->isStatic && storage == StorageQualifier::Const && var->type &&
+            (var->type->baseType == BaseType::Int || var->type->baseType == BaseType::UInt) &&
+            var->type->isScalar() && var->initializer &&
+            evalConstInt(var->initializer.get(), v) == ConstEval::Ok)
+            value = v;
+        constScopes_.back()[name] = value;
+    }
+
+    return var;
+}
+
+std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
+    SourceLocation loc,
+    std::shared_ptr<TypeNode> type,
+    const std::string& firstName,
+    StorageQualifier storage)
+{
+    std::vector<std::unique_ptr<VarDecl>> vars;
+
+    // A LATER declarator in the list takes the type most recently named in
+    // an earlier declarator's initializer - a constructor or a cast, nested
+    // or not, the last one in source order - not the declared type.
+    // Measured on the reference (sce-cgc 475):
+    //   float3 a = float2(1,2).xyy, b = t.rgb;          b is float2 (C7011)
+    //   float3 a = float4(float2(1,2),3,4).xyz, b = ...  b is float2
+    //   float3 a = ((float2)t.xy).xyx, b = ...           b is float2
+    //   float3 a = float3(t.xy, 1), b = ...              b stays float3
+    //   float3 a = ...; float3 b = ...;                  separate: unaffected
+    // libretro bilateral.cg relies on it to be REFUSED (its `result` becomes
+    // float2 and float4(result / norm, 1.0) is C1067 there).
+    std::shared_ptr<TypeNode> declaratorType = type;
+    // With --extension=declarator-types the list keeps the declared type,
+    // exactly the separate declarations it abbreviates (which the reference
+    // compiles).  Without it, a declarator whose type the rule CHANGES is
+    // reported with the flag that would keep it: this rule is the detector.
+    auto parseOne = [&](SourceLocation at, const std::string& name) {
+        if (declaratorType != type && type && declaratorType &&
+            declaratorType->toString() != type->toString())
+        {
+            warning("'" + name + "' takes type " + declaratorType->toString() +
+                    " from an earlier declarator in its list, as the reference "
+                    "compiler does (declared " + type->toString() + "); " +
+                    "--extension=declarator-types keeps the declared type");
+        }
+        const unsigned before = typesParsed_;
+        vars.push_back(parseVariableDeclaration(at, declaratorType, name, storage));
+        if (!config.standardDeclaratorTypes && typesParsed_ != before && lastParsedType_)
+            declaratorType = lastParsedType_;
+    };
+
+    // First variable
+    parseOne(loc, firstName);
+
+    // Additional variables (comma-separated)
+    while (match(TokenType::COMMA))
+    {
+        if (!check(TokenType::IDENTIFIER))
+        {
+            error("Expected variable name after ','");
+            break;
+        }
+
+        SourceLocation varLoc = currentLocation();
+        std::string varName = advance().lexeme;
+        parseOne(varLoc, varName);
+    }
+
+    consume(TokenType::SEMICOLON, "Expected ';' after variable declaration");
+    return vars;
+}
+
+std::unique_ptr<ParamDecl> Parser::parseParameter(bool selectedEntry)
+{
+    SourceLocation loc = currentLocation();
+
+    // Parse storage qualifier (in/out/inout/uniform).  `inline` carries no
+    // meaning on a parameter and the reference accepts it in any position
+    // ("inline out", "out inline"), so it is swallowed before and after the
+    // storage word.
+    while (match(TokenType::KW_INLINE)) {}
+    StorageQualifier storage = StorageQualifier::In;  // default
+    bool declaredStatic = false;
+    if (match(TokenType::KW_STATIC))
+    {
+        declaredStatic = true;
+        if (match(TokenType::KW_CONST))
+            storage = StorageQualifier::Const;
+    }
+    else if (match(TokenType::KW_IN))
+        storage = StorageQualifier::In;
+    else if (match(TokenType::KW_OUT))
+        storage = StorageQualifier::Out;
+    else if (match(TokenType::KW_INOUT))
+        storage = StorageQualifier::InOut;
+    else if (match(TokenType::KW_UNIFORM))
+        storage = StorageQualifier::Uniform;
+    else if (match(TokenType::KW_CONST))
+    {
+        storage = StorageQualifier::Const;
+        declaredStatic = match(TokenType::KW_STATIC);
+    }
+    while (match(TokenType::KW_INLINE)) {}
+
+    if (declaredStatic)
+    {
+        // This is parameter grammar, not the file/local static storage rule.
+        // Bundled NVIDIA helpers emit the static-free parameter's bytes;
+        // const still participates in declaration consistency and write checks.
+        // Entry parameters need a separate binding contract, so never offer
+        // an enable hint for that unsupported construct.
+        // Further qualifiers are outside the measured forms in both modes;
+        // offering the flag here would promise syntax it cannot admit.
+        const bool unsupportedQualifier = check(TokenType::KW_STATIC) ||
+            check(TokenType::KW_CONST) || check(TokenType::KW_UNIFORM) ||
+            check(TokenType::KW_IN) || check(TokenType::KW_OUT) ||
+            check(TokenType::KW_INOUT) || check(TokenType::KW_EXTERN);
+        if (unsupportedQualifier)
+            error(loc, "unsupported static parameter qualifier combination");
+        else if (selectedEntry)
+            error(loc, "static parameter storage is supported for helper parameters only; "
+                       "the selected entry cannot declare static parameters");
+        else if (!config.helperStaticParameters)
+        {
+            std::string message = "C1064: static storage class is not allowed for parameters";
+            if (!config.staticParameterEnableFlag.empty())
+                message += "; enable helper static parameters with " + config.staticParameterEnableFlag;
+            error(loc, message);
+        }
+    }
+
+    // Parse type
+    auto type = parseType();
+    if (!type)
+    {
+        error("Expected parameter type");
+        return nullptr;
+    }
+
+    // Parse name (optional for prototypes)
+    std::string name;
+    if (check(TokenType::IDENTIFIER))
+    {
+        name = advance().lexeme;
+    }
+
+    auto param = std::make_unique<ParamDecl>(loc, name, type);
+    param->storage = storage;
+
+    // Check for array brackets
+    param->type = parseArraySuffixes(param->type);
+    if (!name.empty()) optionalTypeShadows_.back().insert(name);
+
+    // Check for semantic
+    if (match(TokenType::COLON))
+    {
+        param->semantic = parseSemantic();
+    }
+
+    // Check for default value.  The parser only RECORDS it; whether it is
+    // legal depends on which function was SELECTED as the entry, which the
+    // parser does not know - see the C1114 check in SemanticAnalyzer's
+    // function collection (uniform-default-records A1).  This used to error here on any
+    // '=' in any parameter list, which refused the reference's own
+    // `uniform float4 light = {1,1,1,1}` spelling on seven reference-SDK
+    // rows and a helper's default argument on sixteen more.
+    if (match(TokenType::OP_ASSIGN))
+    {
+        if (check(TokenType::LBRACE))
+            param->defaultValue = parseBracedInitializerExpression(param->type);
+        else
+            param->defaultValue = parseAssignmentExpression();
+    }
+
+    return param;
+}
+
+std::vector<std::unique_ptr<ParamDecl>> Parser::parseParameterList(bool selectedEntry)
+{
+    std::vector<std::unique_ptr<ParamDecl>> params;
+
+    consume(TokenType::LPAREN, "Expected '(' for parameter list");
+
+    if (!check(TokenType::RPAREN))
+    {
+        // Check for void parameter (means no parameters)
+        if (check(TokenType::KW_VOID) && peek(1).type == TokenType::RPAREN)
+        {
+            advance();  // consume 'void'
+        }
+        else
+        {
+            do
+            {
+                auto param = parseParameter(selectedEntry);
+                if (param)
+                {
+                    params.push_back(std::move(param));
+                }
+            } while (match(TokenType::COMMA));
+        }
+    }
+
+    consume(TokenType::RPAREN, "Expected ')' after parameters");
+    return params;
+}
+
+StorageQualifier Parser::parseStorageQualifier(bool* sawInline)
+{
+    // `inline` carries no storage meaning and may sit before or after the
+    // storage class ("inline float f", "static inline float f").  It is
+    // swallowed on either side of the storage decision and reported through
+    // `sawInline`; whether it is legal here at all is the caller's to decide.
+    // The storage decision itself is first-match, with "static const" and
+    // "const static" both canonicalized to StorageQualifier::Const so const
+    // evaluation and immutability are preserved regardless of qualifier order.
+    bool inlineSeen = false;
+    lastStorageWasStatic_ = false;
+    auto swallowInline = [&]() {
+        while (match(TokenType::KW_INLINE))
+            inlineSeen = true;
+    };
+    swallowInline();
+    StorageQualifier result = [&]() -> StorageQualifier {
+        if (match(TokenType::KW_UNIFORM))
+            return StorageQualifier::Uniform;
+        if (match(TokenType::KW_IN))
+            return StorageQualifier::In;
+        if (match(TokenType::KW_OUT))
+            return StorageQualifier::Out;
+        if (match(TokenType::KW_INOUT))
+            return StorageQualifier::InOut;
+        if (match(TokenType::KW_CONST))
+        {
+            // Handle "const static" combination: treat as Const
+            if (match(TokenType::KW_STATIC))
+                lastStorageWasStatic_ = true;
+            return StorageQualifier::Const;
+        }
+        if (match(TokenType::KW_STATIC))
+        {
+            lastStorageWasStatic_ = true;
+            // Handle "static const" combination: treat as Const
+            if (match(TokenType::KW_CONST))
+                return StorageQualifier::Const;
+            return StorageQualifier::Static;
+        }
+        if (match(TokenType::KW_EXTERN))
+            return StorageQualifier::Extern;
+        return StorageQualifier::None;
+    }();
+    swallowInline();
+    if (sawInline)
+        *sawInline = inlineSeen;
+    return result;
+}
+
+Semantic Parser::parseSemantic()
+{
+    Semantic sem;
+
+    if (!check(TokenType::IDENTIFIER))
+    {
+        error("Expected semantic name");
+        return sem;
+    }
+
+    std::string semName = advance().lexeme;
+    sem.rawName = semName;  // preserve source spelling for byte-exact container emit
+
+    // HLSL/Cg explicit binding: `: register(BANK<N>)`.  The reference
+    // compiler accepts CN (const), SN (sampler), VN (varying) — we
+    // capture the bank letter + numeric index and let the container
+    // emitter override the auto-allocator with this binding.
+    if (semName == "register" && check(TokenType::LPAREN))
+    {
+        advance();  // consume '('
+        if (!check(TokenType::IDENTIFIER))
+        {
+            error("Expected register binding (e.g. C0) inside register(...)");
+        }
+        else
+        {
+            std::string body = advance().lexeme;
+            // Body looks like "C0", "C255", "s0", etc.  The lexer fuses
+            // the bank letter with the digits into a single identifier.
+            if (!body.empty() && std::isalpha(static_cast<unsigned char>(body[0])))
+            {
+                size_t cut = 1;
+                while (cut < body.size() && std::isdigit(static_cast<unsigned char>(body[cut])))
+                    ++cut;
+                sem.explicitRegisterBank  = static_cast<char>(std::toupper(static_cast<unsigned char>(body[0])));
+                if (cut < body.size())
+                {
+                    error("Unexpected suffix in register binding '" + body + "'");
+                }
+                else if (cut > 1)
+                {
+                    sem.explicitRegisterIndex = std::stoi(body.substr(1));
+                }
+                else
+                {
+                    error("Expected register index after bank letter in '" + body + "'");
+                }
+            }
+            else
+            {
+                error("Register binding must start with a bank letter (got '" + body + "')");
+            }
+        }
+        consume(TokenType::RPAREN, "Expected ')' after register binding");
+        // Surface the parsed binding through the existing fields too so
+        // that downstream code that only inspects name/index sees a
+        // sensible non-empty semantic.  Keep rawName as just "register"
+        // — the container emitter writes the binding separately.
+        sem.name  = "register";
+        sem.index = sem.explicitRegisterIndex;
+        return sem;
+    }
+
+    // Parse semantic name and optional index (e.g., TEXCOORD0)
+    // Try to extract trailing digit
+    size_t digitStart = semName.length();
+    while (digitStart > 0 && std::isdigit(semName[digitStart - 1]))
+    {
+        digitStart--;
+    }
+
+    if (digitStart < semName.length())
+    {
+        sem.name = semName.substr(0, digitStart);
+        sem.index = std::stoi(semName.substr(digitStart));
+    }
+    else
+    {
+        sem.name = semName;
+        sem.index = 0;
+    }
+
+    // Handle bracket syntax for index (e.g., BUFFER[0])
+    if (match(TokenType::LBRACKET))
+    {
+        if (check(TokenType::NUMBER))
+        {
+            sem.index = std::stoi(advance().lexeme);
+        }
+        else
+        {
+            error("Expected integer index in semantic brackets");
+        }
+        consume(TokenType::RBRACKET, "Expected ']' after semantic index");
+    }
+
+    return sem;
+}
+
+VitaAttributes Parser::parseVitaAttributes()
+{
+    VitaAttributes attrs;
+
+    while (true)
+    {
+        if (match(TokenType::KW_NOSTRIP))
+        {
+            attrs.noStrip = true;
+        }
+        else if (match(TokenType::KW_NATIVECOLOR))
+        {
+            attrs.nativeColor = true;
+        }
+        else if (match(TokenType::KW_MSAA))
+        {
+            attrs.msaaLevel = 1;  // generic MSAA
+        }
+        else if (match(TokenType::KW_MSAA2X))
+        {
+            attrs.msaaLevel = 2;
+        }
+        else if (match(TokenType::KW_MSAA4X))
+        {
+            attrs.msaaLevel = 4;
+        }
+        else if (match(TokenType::KW_REGFORMAT))
+        {
+            // __regformat(format)
+            if (match(TokenType::LPAREN))
+            {
+                if (check(TokenType::IDENTIFIER) || check(TokenType::NUMBER))
+                {
+                    attrs.regFormat = advance().lexeme;
+                }
+                consume(TokenType::RPAREN, "Expected ')' after __regformat");
+            }
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    return attrs;
+}
+
+void Parser::skipGccAttributes()
+{
+    // Skip any number of __attribute__((...)) clauses
+    while (match(TokenType::KW_ATTRIBUTE))
+    {
+        // Expect ((
+        if (!match(TokenType::LPAREN))
+        {
+            error("Expected '(' after __attribute__");
+            return;
+        }
+        if (!match(TokenType::LPAREN))
+        {
+            error("Expected '((' after __attribute__");
+            return;
+        }
+
+        // Skip everything until we find matching ))
+        // We need to track parenthesis depth
+        int parenDepth = 2;  // We've consumed ((
+        while (!isAtEnd() && parenDepth > 0)
+        {
+            if (check(TokenType::LPAREN))
+            {
+                parenDepth++;
+            }
+            else if (check(TokenType::RPAREN))
+            {
+                parenDepth--;
+            }
+            advance();
+        }
+
+        // After the loop, we've consumed the final )
+        // Check if we need to consume another ) for the outer paren
+        // Actually the loop handles this - when parenDepth reaches 0, we've consumed ))
+    }
+}
+
+// ============================================================================
+// Statement parsing
+// ============================================================================
+
+std::unique_ptr<StmtNode> Parser::parseStatement()
+{
+    // File-scope aliases must never escape into block scope. Local aliases
+    // need their own scoped type table; refuse them until that is supported.
+    if (check(TokenType::KW_TYPEDEF))
+    {
+        error(currentLocation(), "block-scope typedef is not supported");
+        advance();
+        // parseBlock retries after a failed statement, so make progress and
+        // leave any enclosing brace for its normal parser.
+        while (!isAtEnd() && !check(TokenType::SEMICOLON) &&
+               !check(TokenType::LBRACE) && !check(TokenType::RBRACE))
+            advance();
+        if (check(TokenType::SEMICOLON))
+            advance();
+        return nullptr;
+    }
+
+    // Empty statement
+    if (match(TokenType::SEMICOLON))
+    {
+        return std::make_unique<EmptyStmt>(currentLocation());
+    }
+
+    // Flow control statement attributes: [branch] or [flatten] before 'if'
+    while (check(TokenType::LBRACKET))
+    {
+        SourceLocation attrLoc = currentLocation();
+        advance(); // consume '['
+        if (!check(TokenType::IDENTIFIER))
+        {
+            error(attrLoc, "expected attribute name after '['");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        std::string attrName = advance().lexeme;
+        if (attrName != "branch" && attrName != "flatten")
+        {
+            error(attrLoc, "unknown attribute '" + attrName + "'");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        if (!match(TokenType::RBRACKET))
+        {
+            error(attrLoc, "expected ']' after attribute '" + attrName + "'");
+            while (!check(TokenType::RBRACKET) && !isAtEnd() && !check(TokenType::SEMICOLON))
+                advance();
+            if (check(TokenType::RBRACKET)) advance();
+            return nullptr;
+        }
+        if (!check(TokenType::KW_IF))
+        {
+            error(attrLoc, "attribute '" + attrName + "' is only supported on if statements");
+            return nullptr;
+        }
+    }
+
+    // Block
+    if (check(TokenType::LBRACE))
+    {
+        return parseBlock();
+    }
+
+    // Control flow
+    if (check(TokenType::KW_IF))
+        return parseIfStatement();
+    if (check(TokenType::KW_FOR))
+        return parseForStatement();
+    if (check(TokenType::KW_WHILE))
+        return parseWhileStatement();
+    if (check(TokenType::KW_DO))
+        return parseDoWhileStatement();
+    if (check(TokenType::KW_SWITCH))
+        return parseSwitchStatement();
+    if (check(TokenType::KW_RETURN))
+        return parseReturnStatement();
+    if (check(TokenType::KW_BREAK))
+        return parseBreakStatement();
+    if (check(TokenType::KW_CONTINUE))
+        return parseContinueStatement();
+    if (check(TokenType::KW_DISCARD))
+        return parseDiscardStatement();
+
+    // Case/default labels
+    if (check(TokenType::KW_CASE))
+    {
+        SourceLocation loc = currentLocation();
+        advance();
+        auto value = parseExpression();
+        consume(TokenType::COLON, "Expected ':' after case value");
+        return std::make_unique<CaseStmt>(loc, std::move(value));
+    }
+    if (check(TokenType::KW_DEFAULT))
+    {
+        SourceLocation loc = currentLocation();
+        advance();
+        consume(TokenType::COLON, "Expected ':' after 'default'");
+        return std::make_unique<DefaultStmt>(loc);
+    }
+
+    // Expression or declaration statement
+    return parseExpressionOrDeclStatement();
+}
+
+std::unique_ptr<BlockStmt> Parser::parseBlock()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::LBRACE, "Expected '{'");
+
+    auto block = std::make_unique<BlockStmt>(loc);
+    OptionalNameScope blockNames(optionalTypeShadows_);
+    constScopes_.emplace_back();   // a block's names end with it (array extents)
+
+    while (!check(TokenType::RBRACE) && !isAtEnd())
+    {
+        auto stmt = parseStatement();
+        if (stmt)
+        {
+            block->statements.push_back(std::move(stmt));
+        }
+    }
+
+    consume(TokenType::RBRACE, "Expected '}'");
+    if (constScopes_.size() > 1) constScopes_.pop_back();
+    return block;
+}
+
+std::unique_ptr<StmtNode> Parser::parseIfStatement()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_IF, "Expected 'if'");
+    consume(TokenType::LPAREN, "Expected '(' after 'if'");
+
+    auto condition = parseExpression();
+
+    consume(TokenType::RPAREN, "Expected ')' after if condition");
+
+    auto thenBranch = parseStatement();
+
+    std::unique_ptr<StmtNode> elseBranch;
+    if (match(TokenType::KW_ELSE))
+    {
+        elseBranch = parseStatement();
+    }
+
+    return std::make_unique<IfStmt>(loc, std::move(condition), std::move(thenBranch), std::move(elseBranch));
+}
+
+std::unique_ptr<StmtNode> Parser::parseForStatement()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_FOR, "Expected 'for'");
+    consume(TokenType::LPAREN, "Expected '(' after 'for'");
+
+    auto forStmt = std::make_unique<ForStmt>(loc);
+    OptionalNameScope forNames(optionalTypeShadows_);
+
+    // Init
+    if (!check(TokenType::SEMICOLON))
+    {
+        forStmt->init = parseExpressionOrDeclStatement();
+    }
+    else
+    {
+        advance();  // consume semicolon
+    }
+
+    // Condition
+    if (!check(TokenType::SEMICOLON))
+    {
+        forStmt->condition = parseExpression();
+    }
+    consume(TokenType::SEMICOLON, "Expected ';' after for condition");
+
+    // Increment
+    if (!check(TokenType::RPAREN))
+    {
+        forStmt->increment = parseExpression();
+    }
+
+    consume(TokenType::RPAREN, "Expected ')' after for clauses");
+
+    forStmt->body = parseStatement();
+
+    return forStmt;
+}
+
+std::unique_ptr<StmtNode> Parser::parseWhileStatement()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_WHILE, "Expected 'while'");
+    consume(TokenType::LPAREN, "Expected '(' after 'while'");
+
+    auto condition = parseExpression();
+
+    consume(TokenType::RPAREN, "Expected ')' after while condition");
+
+    auto body = parseStatement();
+
+    return std::make_unique<WhileStmt>(loc, std::move(condition), std::move(body));
+}
+
+std::unique_ptr<StmtNode> Parser::parseDoWhileStatement()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_DO, "Expected 'do'");
+
+    auto body = parseStatement();
+
+    consume(TokenType::KW_WHILE, "Expected 'while' after do body");
+    consume(TokenType::LPAREN, "Expected '(' after 'while'");
+
+    auto condition = parseExpression();
+
+    consume(TokenType::RPAREN, "Expected ')' after while condition");
+    consume(TokenType::SEMICOLON, "Expected ';' after do-while");
+
+    return std::make_unique<DoWhileStmt>(loc, std::move(body), std::move(condition));
+}
+
+std::unique_ptr<StmtNode> Parser::parseSwitchStatement()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_SWITCH, "Expected 'switch'");
+    consume(TokenType::LPAREN, "Expected '(' after 'switch'");
+
+    auto expr = parseExpression();
+
+    consume(TokenType::RPAREN, "Expected ')' after switch expression");
+
+    auto switchStmt = std::make_unique<SwitchStmt>(loc, std::move(expr));
+    switchStmt->body = parseBlock();
+
+    return switchStmt;
+}
+
+std::unique_ptr<StmtNode> Parser::parseReturnStatement()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_RETURN, "Expected 'return'");
+
+    std::unique_ptr<ExprNode> value;
+    if (!check(TokenType::SEMICOLON))
+    {
+        value = parseExpression();
+    }
+
+    consume(TokenType::SEMICOLON, "Expected ';' after return");
+
+    return std::make_unique<ReturnStmt>(loc, std::move(value));
+}
+
+std::unique_ptr<StmtNode> Parser::parseBreakStatement()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_BREAK, "Expected 'break'");
+    consume(TokenType::SEMICOLON, "Expected ';' after 'break'");
+    return std::make_unique<BreakStmt>(loc);
+}
+
+std::unique_ptr<StmtNode> Parser::parseContinueStatement()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_CONTINUE, "Expected 'continue'");
+    consume(TokenType::SEMICOLON, "Expected ';' after 'continue'");
+    return std::make_unique<ContinueStmt>(loc);
+}
+
+std::unique_ptr<StmtNode> Parser::parseDiscardStatement()
+{
+    SourceLocation loc = currentLocation();
+    consume(TokenType::KW_DISCARD, "Expected 'discard'");
+    consume(TokenType::SEMICOLON, "Expected ';' after 'discard'");
+    return std::make_unique<DiscardStmt>(loc);
+}
+
+std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
+{
+    SourceLocation loc = currentLocation();
+
+    // Check if this looks like a declaration (type followed by identifier)
+    // This is tricky because "a * b" could be multiplication or pointer declaration
+    // Cg doesn't have pointers, so we check for type names
+
+    // First check storage qualifiers
+    bool hasStorageQualifier = false;
+    size_t savedPos = current;
+
+    bool declaredInline = false;
+    StorageQualifier storage = parseStorageQualifier(&declaredInline);
+    if (storage != StorageQualifier::None)
+    {
+        hasStorageQualifier = true;
+    }
+
+    // Check for Vita attributes
+    VitaAttributes vitaAttrs = parseVitaAttributes();
+
+    // Check for matrix layout qualifiers (row_major, column_major) - these indicate a type
+    bool hasMatrixLayoutQualifier = check(TokenType::KW_ROW_MAJOR) || check(TokenType::KW_COLUMN_MAJOR);
+
+    // Now check if this is a type name
+    const bool optionalExpression = optionalType(peek().lexeme) &&
+        peek(afterOptionalTypeSuffix()).type != TokenType::IDENTIFIER;
+    if ((!optionalExpression && isTypeName()) || hasMatrixLayoutQualifier)
+    {
+        // This looks like a declaration
+        auto type = parseType();
+        if (type && check(TokenType::IDENTIFIER))
+        {
+            // `inline` is legal only on a function, and there are no local
+            // functions here - a local declaration carrying it is the same
+            // C1005 the file-scope path refuses.
+            if (declaredInline)
+            {
+                error("inline modifier only for functions");
+                return nullptr;
+            }
+            std::string name = advance().lexeme;
+            auto vars = parseMultipleVariableDeclarations(loc, type, name, storage);
+
+            if (!vars.empty())
+            {
+                vars[0]->vitaAttrs = vitaAttrs;
+                // ALL of them.  Taking vars[0] alone declared only the first
+                // name of `float a, b;`, and using the second was then
+                // refused as undeclared (multiple-declarators).
+                std::vector<std::unique_ptr<DeclNode>> decls;
+                decls.reserve(vars.size());
+                for (auto& var : vars)
+                    decls.push_back(std::move(var));
+                return std::make_unique<DeclStmt>(loc, std::move(decls));
+            }
+        }
+        else
+        {
+            // Type constructor expression? e.g., float4(1,2,3,4);
+            // Reset and parse as expression
+            current = savedPos;
+        }
+    }
+    else if (hasStorageQualifier)
+    {
+        error("Storage qualifier must be followed by a type");
+        return nullptr;
+    }
+    else
+    {
+        // Reset position if we consumed Vita attributes but it's not a declaration
+        current = savedPos;
+    }
+
+    // A DECLARATION ATTEMPT WITH AN UNKNOWN TYPE.  `bogusType q;` is not
+    // an expression, but it reached expression parsing because the
+    // declaration path above is only taken when the first token is a
+    // KNOWN type name.  The result was five diagnostics for one mistake:
+    // the first pointing at the identifier AFTER the unknown type, and a
+    // later one inventing `unknown type name 'o'` about a name that is
+    // declared - the wrong line about the wrong identifier.
+    //
+    // Two adjacent identifiers are never a valid expression in Cg, so the
+    // shape is unambiguous: name the unknown TYPE at its own position,
+    // then let the caller's recovery consume to the ';' so a second, real
+    // mistake later in the body is still reported (parser-error-cascade).  The
+    // parameter path has reported it this way since parser-progress; this is
+    // the local path being made to agree with it.
+    if (check(TokenType::IDENTIFIER) &&
+        peek(1).type == TokenType::IDENTIFIER)
+    {
+        const Token& typeToken = peek();
+        error(tokenLocation(typeToken),
+              "unknown type name '" + typeToken.lexeme + "'");
+        // CONSUME THE FAILED DECLARATION.  Returning without advancing
+        // leaves the statement loop on the same token, which is the same
+        // no-progress shape parser-progress fixed at the top level - here it
+        // exhausted memory rather than hanging, because the shader tests
+        // run under a virtual-memory limit.  Stop at the ';' or at a brace
+        // so the rest of the body is still parsed and its own mistakes are
+        // still reported.
+        while (!isAtEnd() && !check(TokenType::SEMICOLON) &&
+               !check(TokenType::LBRACE) && !check(TokenType::RBRACE))
+            advance();
+        if (check(TokenType::SEMICOLON))
+            advance();
+        return nullptr;
+    }
+
+    // Parse as expression statement
+    auto expr = parseExpression();
+    consume(TokenType::SEMICOLON, "Expected ';' after expression");
+
+    return std::make_unique<ExprStmt>(loc, std::move(expr));
+}
+
+// ============================================================================
+// Expression parsing (precedence climbing)
+// ============================================================================
+
+std::unique_ptr<ExprNode> Parser::parseExpression()
+{
+    // A full expression may be a comma sequence (C semantics, measured on the
+    // reference: `a = t.x, b = t.y;`, `float2((t.x, t.y) / 2, 0)` is t.y / 2,
+    // `for (i = 0, j = 2; ...; i++, j--)`).  Arguments, initialisers and
+    // defaults use parseAssignmentExpression, where a comma separates.
+    auto left = parseAssignmentExpression();
+    while (left && check(TokenType::COMMA))
+    {
+        SourceLocation loc = currentLocation();
+        advance();
+        auto right = parseAssignmentExpression();
+        if (!right) return nullptr;
+        left = std::make_unique<BinaryExpr>(loc, BinaryOp::Comma, std::move(left), std::move(right));
+    }
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseAssignmentExpression()
+{
+    auto left = parseTernaryExpression();
+
+    if (match({TokenType::OP_ASSIGN, TokenType::OP_PLUS_ASSIGN, TokenType::OP_MINUS_ASSIGN,
+               TokenType::OP_MULTIPLY_ASSIGN, TokenType::OP_DIVIDE_ASSIGN, TokenType::OP_MODULO_ASSIGN}))
+    {
+        Token op = previous();
+        SourceLocation loc = tokenLocation(op);
+
+        BinaryOp binOp;
+        switch (op.type)
+        {
+        case TokenType::OP_ASSIGN:
+            binOp = BinaryOp::Assign;
+            break;
+        case TokenType::OP_PLUS_ASSIGN:
+            binOp = BinaryOp::AddAssign;
+            break;
+        case TokenType::OP_MINUS_ASSIGN:
+            binOp = BinaryOp::SubAssign;
+            break;
+        case TokenType::OP_MULTIPLY_ASSIGN:
+            binOp = BinaryOp::MulAssign;
+            break;
+        case TokenType::OP_DIVIDE_ASSIGN:
+            binOp = BinaryOp::DivAssign;
+            break;
+        case TokenType::OP_MODULO_ASSIGN:
+            binOp = BinaryOp::ModAssign;
+            break;
+        default:
+            binOp = BinaryOp::Assign;
+            break;
+        }
+
+        auto right = parseAssignmentExpression();  // Right associative
+        return std::make_unique<BinaryExpr>(loc, binOp, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseTernaryExpression()
+{
+    auto condition = parseLogicalOrExpression();
+
+    if (match(TokenType::QUESTION))
+    {
+        SourceLocation loc = currentLocation();
+        auto thenExpr = parseExpression();
+        consume(TokenType::COLON, "Expected ':' in ternary expression");
+        auto elseExpr = parseTernaryExpression();
+        return std::make_unique<TernaryExpr>(loc, std::move(condition), std::move(thenExpr), std::move(elseExpr));
+    }
+
+    return condition;
+}
+
+std::unique_ptr<ExprNode> Parser::parseLogicalOrExpression()
+{
+    auto left = parseLogicalAndExpression();
+
+    while (match(TokenType::OP_LOGICAL_OR))
+    {
+        SourceLocation loc = tokenLocation(previous());
+        auto right = parseLogicalAndExpression();
+        left = std::make_unique<BinaryExpr>(loc, BinaryOp::LogicalOr, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseLogicalAndExpression()
+{
+    auto left = parseBitwiseOrExpression();
+
+    while (match(TokenType::OP_LOGICAL_AND))
+    {
+        SourceLocation loc = tokenLocation(previous());
+        auto right = parseBitwiseOrExpression();
+        left = std::make_unique<BinaryExpr>(loc, BinaryOp::LogicalAnd, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseBitwiseOrExpression()
+{
+    auto left = parseBitwiseXorExpression();
+
+    while (match(TokenType::OP_BITWISE_OR))
+    {
+        SourceLocation loc = tokenLocation(previous());
+        auto right = parseBitwiseXorExpression();
+        left = std::make_unique<BinaryExpr>(loc, BinaryOp::BitwiseOr, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseBitwiseXorExpression()
+{
+    auto left = parseBitwiseAndExpression();
+
+    while (match(TokenType::OP_BITWISE_XOR))
+    {
+        SourceLocation loc = tokenLocation(previous());
+        auto right = parseBitwiseAndExpression();
+        left = std::make_unique<BinaryExpr>(loc, BinaryOp::BitwiseXor, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseBitwiseAndExpression()
+{
+    auto left = parseEqualityExpression();
+
+    while (match(TokenType::OP_BITWISE_AND))
+    {
+        SourceLocation loc = tokenLocation(previous());
+        auto right = parseEqualityExpression();
+        left = std::make_unique<BinaryExpr>(loc, BinaryOp::BitwiseAnd, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseEqualityExpression()
+{
+    auto left = parseRelationalExpression();
+
+    while (match({TokenType::OP_EQUAL, TokenType::OP_NOT_EQUAL}))
+    {
+        Token op = previous();
+        SourceLocation loc = tokenLocation(op);
+        BinaryOp binOp = (op.type == TokenType::OP_EQUAL) ? BinaryOp::Equal : BinaryOp::NotEqual;
+        auto right = parseRelationalExpression();
+        left = std::make_unique<BinaryExpr>(loc, binOp, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseRelationalExpression()
+{
+    auto left = parseShiftExpression();
+
+    while (match({TokenType::OP_LESS, TokenType::OP_LESS_EQUAL, TokenType::OP_GREATER, TokenType::OP_GREATER_EQUAL}))
+    {
+        Token op = previous();
+        SourceLocation loc = tokenLocation(op);
+
+        BinaryOp binOp;
+        switch (op.type)
+        {
+        case TokenType::OP_LESS:
+            binOp = BinaryOp::Less;
+            break;
+        case TokenType::OP_LESS_EQUAL:
+            binOp = BinaryOp::LessEqual;
+            break;
+        case TokenType::OP_GREATER:
+            binOp = BinaryOp::Greater;
+            break;
+        case TokenType::OP_GREATER_EQUAL:
+            binOp = BinaryOp::GreaterEqual;
+            break;
+        default:
+            binOp = BinaryOp::Less;
+            break;
+        }
+
+        auto right = parseShiftExpression();
+        left = std::make_unique<BinaryExpr>(loc, binOp, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseShiftExpression()
+{
+    auto left = parseAdditiveExpression();
+
+    while (match({TokenType::OP_SHIFT_LEFT, TokenType::OP_SHIFT_RIGHT}))
+    {
+        Token op = previous();
+        SourceLocation loc = tokenLocation(op);
+        BinaryOp binOp = (op.type == TokenType::OP_SHIFT_LEFT) ? BinaryOp::ShiftLeft : BinaryOp::ShiftRight;
+        auto right = parseAdditiveExpression();
+        left = std::make_unique<BinaryExpr>(loc, binOp, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseAdditiveExpression()
+{
+    auto left = parseMultiplicativeExpression();
+
+    while (match({TokenType::OP_PLUS, TokenType::OP_MINUS}))
+    {
+        Token op = previous();
+        SourceLocation loc = tokenLocation(op);
+        BinaryOp binOp = (op.type == TokenType::OP_PLUS) ? BinaryOp::Add : BinaryOp::Sub;
+        auto right = parseMultiplicativeExpression();
+        left = std::make_unique<BinaryExpr>(loc, binOp, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseMultiplicativeExpression()
+{
+    auto left = parseUnaryExpression();
+
+    while (match({TokenType::OP_MULTIPLY, TokenType::OP_DIVIDE, TokenType::OP_MODULO}))
+    {
+        Token op = previous();
+        SourceLocation loc = tokenLocation(op);
+
+        BinaryOp binOp;
+        switch (op.type)
+        {
+        case TokenType::OP_MULTIPLY:
+            binOp = BinaryOp::Mul;
+            break;
+        case TokenType::OP_DIVIDE:
+            binOp = BinaryOp::Div;
+            break;
+        case TokenType::OP_MODULO:
+            binOp = BinaryOp::Mod;
+            break;
+        default:
+            binOp = BinaryOp::Mul;
+            break;
+        }
+
+        auto right = parseUnaryExpression();
+        left = std::make_unique<BinaryExpr>(loc, binOp, std::move(left), std::move(right));
+    }
+
+    return left;
+}
+
+std::unique_ptr<ExprNode> Parser::parseUnaryExpression()
+{
+    // Unary plus is a no-op
+    if (match(TokenType::OP_PLUS))
+    {
+        return parseUnaryExpression();
+    }
+
+    // Prefix operators
+    if (match({TokenType::OP_MINUS, TokenType::OP_LOGICAL_NOT, TokenType::OP_BITWISE_NOT,
+               TokenType::OP_INCREMENT, TokenType::OP_DECREMENT}))
+    {
+        Token op = previous();
+        SourceLocation loc = tokenLocation(op);
+
+        UnaryOp unOp;
+        switch (op.type)
+        {
+        case TokenType::OP_MINUS:
+            unOp = UnaryOp::Negate;
+            break;
+        case TokenType::OP_LOGICAL_NOT:
+            unOp = UnaryOp::LogicalNot;
+            break;
+        case TokenType::OP_BITWISE_NOT:
+            unOp = UnaryOp::BitwiseNot;
+            break;
+        case TokenType::OP_INCREMENT:
+            unOp = UnaryOp::PreIncrement;
+            break;
+        case TokenType::OP_DECREMENT:
+            unOp = UnaryOp::PreDecrement;
+            break;
+        default:
+            unOp = UnaryOp::Negate;
+            break;
+        }
+
+        auto operand = parseUnaryExpression();
+        return std::make_unique<UnaryExpr>(loc, unOp, std::move(operand));
+    }
+
+    // sizeof
+    if (match(TokenType::KW_SIZEOF))
+    {
+        SourceLocation loc = currentLocation();
+        consume(TokenType::LPAREN, "Expected '(' after 'sizeof'");
+
+        // Could be sizeof(type) or sizeof(expr)
+        if (isTypeName(true) && (config.glslTypes || !optionalType(peek().lexeme)))
+        {
+            auto type = parseType();
+            consume(TokenType::RPAREN, "Expected ')' after sizeof type");
+            return std::make_unique<SizeofExpr>(loc, type);
+        }
+        else
+        {
+            auto expr = parseExpression();
+            consume(TokenType::RPAREN, "Expected ')' after sizeof expression");
+            return std::make_unique<SizeofExpr>(loc, std::move(expr));
+        }
+    }
+
+    // Cast expression: (type)expr
+    if (check(TokenType::LPAREN))
+    {
+        // Look ahead to see if this is a cast
+        size_t savedPos = current;
+        advance();  // consume '('
+
+        const int optionalSuffixEnd = afterOptionalTypeSuffix();
+        const auto afterGroup = peek(optionalSuffixEnd + 1).type;
+        const bool castOperand = afterGroup == TokenType::IDENTIFIER ||
+            afterGroup == TokenType::NUMBER || afterGroup == TokenType::LPAREN ||
+            typeNames.count(peek(optionalSuffixEnd + 1).lexeme) ||
+            afterGroup == TokenType::KW_INT || afterGroup == TokenType::KW_UINT ||
+            afterGroup == TokenType::OP_LOGICAL_NOT || afterGroup == TokenType::OP_BITWISE_NOT ||
+            afterGroup == TokenType::KW_SIZEOF;
+        // Do not leak diagnostics from tentative type parsing into ordinary
+        // grouped calls/values, including indexed values such as (vec2[0]).
+        const bool ordinaryGroupedValue = !config.glslTypes && optionalType(peek().lexeme) &&
+            (peek(optionalSuffixEnd).type != TokenType::RPAREN || !castOperand);
+        if (isTypeName(true) && !ordinaryGroupedValue)
+        {
+            auto type = parseType();
+            if (check(TokenType::RPAREN))
+            {
+                SourceLocation loc = currentLocation();
+                advance();  // consume ')'
+                auto operand = parseUnaryExpression();
+                return std::make_unique<CastExpr>(loc, type, std::move(operand));
+            }
+        }
+
+        // Not a cast, restore position
+        current = savedPos;
+    }
+
+    return parsePostfixExpression();
+}
+
+std::unique_ptr<ExprNode> Parser::parsePostfixExpression()
+{
+    auto expr = parsePrimaryExpression();
+
+    while (true)
+    {
+        if (match(TokenType::LBRACKET))
+        {
+            // Array indexing
+            SourceLocation loc = currentLocation();
+            auto index = parseExpression();
+            consume(TokenType::RBRACKET, "Expected ']' after array index");
+            expr = std::make_unique<IndexExpr>(loc, std::move(expr), std::move(index));
+        }
+        else if (match(TokenType::DOT))
+        {
+            // Member access / swizzle
+            SourceLocation loc = currentLocation();
+            if (!check(TokenType::IDENTIFIER))
+            {
+                error("Expected member name after '.'");
+                break;
+            }
+            std::string member = advance().lexeme;
+            expr = std::make_unique<MemberAccessExpr>(loc, std::move(expr), member);
+        }
+        else if (match(TokenType::OP_INCREMENT))
+        {
+            // Post-increment
+            SourceLocation loc = tokenLocation(previous());
+            expr = std::make_unique<UnaryExpr>(loc, UnaryOp::PostIncrement, std::move(expr));
+        }
+        else if (match(TokenType::OP_DECREMENT))
+        {
+            // Post-decrement
+            SourceLocation loc = tokenLocation(previous());
+            expr = std::make_unique<UnaryExpr>(loc, UnaryOp::PostDecrement, std::move(expr));
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    return expr;
+}
+
+std::unique_ptr<ExprNode> Parser::parsePrimaryExpression()
+{
+    SourceLocation loc = currentLocation();
+
+    // Number literal
+    if (check(TokenType::NUMBER))
+    {
+        return parseNumberLiteral();
+    }
+
+    // String literal (rarely used in shaders, but supported)
+    if (check(TokenType::STRING))
+    {
+        // String literals not typically used in shader code
+        error("String literals not supported in shader code");
+        advance();
+        return std::make_unique<LiteralExpr>(loc, static_cast<int64_t>(0));
+    }
+
+    // Boolean literals (true/false are identifiers in lexer, handle specially)
+    if (check(TokenType::IDENTIFIER))
+    {
+        const std::string& lexeme = peek().lexeme;
+        if (lexeme == "true")
+        {
+            advance();
+            return std::make_unique<LiteralExpr>(loc, true);
+        }
+        if (lexeme == "false")
+        {
+            advance();
+            return std::make_unique<LiteralExpr>(loc, false);
+        }
+    }
+
+    // A user type name (struct or typedef) NOT followed by '(' is a variable
+    // that shadows the type in this scope: measured, the reference accepts
+    // `struct input {...}; ... float4 input = t; input += 1;` (libretro's
+    // phosphor-trails, gb-pass-1).  Read it as an identifier.
+    if (check(TokenType::IDENTIFIER) && isTypeName(true) && peek(1).type != TokenType::LPAREN &&
+        !(peek(1).type == TokenType::LBRACKET && optionalType(peek().lexeme) &&
+          peek(afterOptionalTypeSuffix()).type == TokenType::LPAREN))
+    {
+        const Token& tok = advance();
+        return std::make_unique<IdentifierExpr>(loc, tok.lexeme);
+    }
+
+    // With the extension disabled, constructor-shaped optional names are
+    // ordinary unresolved calls. Keep their existing reachability and source
+    // binding policy instead of emitting an unconditional parser diagnostic.
+    if (!config.glslTypes && check(TokenType::IDENTIFIER) &&
+        peek(1).type == TokenType::LPAREN && isTypeName(true) && optionalType(peek().lexeme))
+    {
+        const std::string name = advance().lexeme;
+        auto call = parseCallExpression(loc, name);
+        static_cast<CallExpr*>(call.get())->optionalTypeEnableFlag = config.glslTypeEnableFlag;
+        return call;
+    }
+
+    // Type constructor: float4(1, 2, 3, 4)
+    if (isTypeName(true))
+    {
+        auto type = parseType();
+        if (check(TokenType::LPAREN))
+        {
+            return parseConstructorExpression(type);
+        }
+        // Not followed by '(', this shouldn't happen in expression context
+        error("Expected '(' after type in expression");
+        return nullptr;
+    }
+
+    // Identifier or function call
+    if (check(TokenType::IDENTIFIER))
+    {
+        std::string name = advance().lexeme;
+
+        if (check(TokenType::LPAREN))
+        {
+            // Function call
+            return parseCallExpression(loc, name);
+        }
+        else
+        {
+            // Variable reference
+            return std::make_unique<IdentifierExpr>(loc, name);
+        }
+    }
+
+    // Parenthesized expression
+    if (match(TokenType::LPAREN))
+    {
+        auto expr = parseExpression();
+        consume(TokenType::RPAREN, "Expected ')' after expression");
+        return expr;
+    }
+
+    error("Expected expression");
+    return nullptr;
+}
+
+std::unique_ptr<ExprNode> Parser::parseCallExpression(SourceLocation loc, const std::string& name)
+{
+    auto call = std::make_unique<CallExpr>(loc, name);
+    call->arguments = parseArgumentList();
+    return call;
+}
+
+std::unique_ptr<ExprNode> Parser::parseConstructorExpression(std::shared_ptr<TypeNode> type)
+{
+    SourceLocation loc = currentLocation();
+    auto ctor = std::make_unique<ConstructorExpr>(loc, type);
+
+    consume(TokenType::LPAREN, "Expected '(' in type constructor");
+
+    if (!check(TokenType::RPAREN))
+    {
+        do
+        {
+            ctor->arguments.push_back(parseAssignmentExpression());
+        } while (match(TokenType::COMMA));
+    }
+
+    consume(TokenType::RPAREN, "Expected ')' after constructor arguments");
+
+    return ctor;
+}
+
+std::unique_ptr<ExprNode> Parser::parseBracedInitializerExpression(std::shared_ptr<TypeNode> type)
+{
+    SourceLocation loc = currentLocation();
+    auto ctor = std::make_unique<ConstructorExpr>(loc, type);
+    ctor->bracedInitializer = true;
+
+    consume(TokenType::LBRACE, "Expected '{' in initializer");
+
+    if (!check(TokenType::RBRACE))
+    {
+        do
+        {
+            ctor->arguments.push_back(check(TokenType::LBRACE)
+                ? parseBracedInitializerExpression(nullptr)
+                : parseAssignmentExpression());
+        } while (match(TokenType::COMMA) && !check(TokenType::RBRACE));
+    }
+
+    consume(TokenType::RBRACE, "Expected '}' after initializer");
+
+    return ctor;
+}
+
+std::vector<std::unique_ptr<ExprNode>> Parser::parseArgumentList()
+{
+    std::vector<std::unique_ptr<ExprNode>> args;
+
+    consume(TokenType::LPAREN, "Expected '(' for argument list");
+
+    if (!check(TokenType::RPAREN))
+    {
+        do
+        {
+            args.push_back(parseAssignmentExpression());
+        } while (match(TokenType::COMMA));
+    }
+
+    consume(TokenType::RPAREN, "Expected ')' after arguments");
+
+    return args;
+}
+
+// ============================================================================
+// Literal parsing
+// ============================================================================
+
+std::unique_ptr<LiteralExpr> Parser::parseNumberLiteral()
+{
+    SourceLocation loc = currentLocation();
+    Token tok = advance();
+
+    std::string lexeme = tok.lexeme;
+    std::string suffix;
+
+    // Extract suffix (f, h, etc.)
+    size_t suffixStart = lexeme.length();
+    while (suffixStart > 0 && std::isalpha(lexeme[suffixStart - 1]))
+    {
+        suffixStart--;
+    }
+    if (suffixStart < lexeme.length())
+    {
+        suffix = lexeme.substr(suffixStart);
+        lexeme = lexeme.substr(0, suffixStart);
+    }
+
+    // Check for float (has decimal point or exponent)
+    bool isFloat = (lexeme.find('.') != std::string::npos) ||
+                   (lexeme.find('e') != std::string::npos) ||
+                   (lexeme.find('E') != std::string::npos) ||
+                   (suffix == "f" || suffix == "F" || suffix == "h" || suffix == "H");
+
+    if (isFloat)
+    {
+        double value = std::stod(lexeme);
+        return std::make_unique<LiteralExpr>(loc, value, suffix);
+    }
+    else
+    {
+        // Integer - handle hex (0x), octal (0), decimal
+        int64_t value = 0;
+        if (lexeme.length() > 2 && lexeme[0] == '0' && (lexeme[1] == 'x' || lexeme[1] == 'X'))
+        {
+            value = std::stoll(lexeme, nullptr, 16);
+        }
+        else if (lexeme.length() > 1 && lexeme[0] == '0')
+        {
+            value = std::stoll(lexeme, nullptr, 8);
+        }
+        else
+        {
+            value = std::stoll(lexeme);
+        }
+        return std::make_unique<LiteralExpr>(loc, value);
+    }
+}
+
+// ============================================================================
+// Convenience function
+// ============================================================================
+
+std::unique_ptr<TranslationUnit> parseShaderSource(
+    const std::string& source,
+    const std::string& filename,
+    std::vector<ParseError>* outErrors,
+    const ParserConfig& config)
+{
+    Lexer lexer(source, filename);
+    std::vector<Token> tokens;
+    try
+    {
+        tokens = lexer.tokenize();
+    }
+    catch (const LexerError& err)
+    {
+        if (outErrors)
+        {
+            SourceLocation loc{err.filename(), err.line(), err.column()};
+            outErrors->push_back(
+                {loc, "unknown character '" + err.lexeme() + "'", false});
+        }
+        return nullptr;
+    }
+
+    Parser parser(tokens, filename);
+    parser.setConfig(config);
+    auto unit = parser.parse();
+
+    if (outErrors)
+    {
+        *outErrors = parser.getErrors();
+    }
+
+    return unit;
+}
+
+// ============================================================================
+// Type utility implementations
+// ============================================================================
+
+bool TypeNode::isSampler() const
+{
+    switch (baseType)
+    {
+    case BaseType::SamplerGeneric:
+    case BaseType::Sampler1D:
+    case BaseType::Sampler2D:
+    case BaseType::Sampler3D:
+    case BaseType::SamplerCube:
+    case BaseType::SamplerRect:
+    case BaseType::ISampler1D:
+    case BaseType::ISampler2D:
+    case BaseType::ISampler3D:
+    case BaseType::ISamplerCube:
+    case BaseType::ISamplerRect:
+    case BaseType::USampler1D:
+    case BaseType::USampler2D:
+    case BaseType::USampler3D:
+    case BaseType::USamplerCube:
+    case BaseType::USamplerRect:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool TypeNode::isNumeric() const
+{
+    if (isSampler() || baseType == BaseType::Void || baseType == BaseType::Struct)
+        return false;
+    return true;
+}
+
+bool TypeNode::isIntegral() const
+{
+    switch (baseType)
+    {
+    case BaseType::Bool:
+    case BaseType::Int:
+    case BaseType::UInt:
+    case BaseType::Char:
+    case BaseType::UChar:
+    case BaseType::Short:
+    case BaseType::UShort:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool TypeNode::isFloatingPoint() const
+{
+    switch (baseType)
+    {
+    case BaseType::Float:
+    case BaseType::Half:
+    case BaseType::Fixed:
+        return true;
+    default:
+        return false;
+    }
+}
+
+int TypeNode::componentCount() const
+{
+    if (matrixRows > 0)
+        return matrixRows * matrixCols;
+    return vectorSize;
+}
+
+std::string TypeNode::toString() const
+{
+    std::string result = baseTypeToString(baseType);
+
+    if (vectorSize > 1 && matrixRows == 0)
+    {
+        result += std::to_string(vectorSize);
+    }
+    else if (matrixRows > 0)
+    {
+        result += std::to_string(matrixRows) + "x" + std::to_string(matrixCols);
+    }
+
+    if (arraySize > 0)
+    {
+        result += "[" + std::to_string(arraySize) + "]";
+    }
+
+    return result;
+}
+
+// Factory methods
+std::shared_ptr<TypeNode> TypeNode::makeVoid()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Void;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeBool()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Bool;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeInt()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Int;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeUInt()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::UInt;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeFloat()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Float;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeFloat2()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Float;
+    t->vectorSize = 2;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeFloat3()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Float;
+    t->vectorSize = 3;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeFloat4()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Float;
+    t->vectorSize = 4;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeFloat4x4()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Float;
+    t->matrixRows = 4;
+    t->matrixCols = 4;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeHalf()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Half;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeHalf4()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Half;
+    t->vectorSize = 4;
+    return t;
+}
+
+std::shared_ptr<TypeNode> TypeNode::makeSampler2D()
+{
+    auto t = std::make_shared<TypeNode>();
+    t->baseType = BaseType::Sampler2D;
+    return t;
+}
+
+// ============================================================================
+// Helper function implementations
+// ============================================================================
+
+std::string binaryOpToString(BinaryOp op)
+{
+    switch (op)
+    {
+    case BinaryOp::Add:
+        return "+";
+    case BinaryOp::Sub:
+        return "-";
+    case BinaryOp::Mul:
+        return "*";
+    case BinaryOp::Div:
+        return "/";
+    case BinaryOp::Mod:
+        return "%";
+    case BinaryOp::Equal:
+        return "==";
+    case BinaryOp::NotEqual:
+        return "!=";
+    case BinaryOp::Less:
+        return "<";
+    case BinaryOp::LessEqual:
+        return "<=";
+    case BinaryOp::Greater:
+        return ">";
+    case BinaryOp::GreaterEqual:
+        return ">=";
+    case BinaryOp::LogicalAnd:
+        return "&&";
+    case BinaryOp::LogicalOr:
+        return "||";
+    case BinaryOp::BitwiseAnd:
+        return "&";
+    case BinaryOp::BitwiseOr:
+        return "|";
+    case BinaryOp::BitwiseXor:
+        return "^";
+    case BinaryOp::ShiftLeft:
+        return "<<";
+    case BinaryOp::ShiftRight:
+        return ">>";
+    case BinaryOp::Assign:
+        return "=";
+    case BinaryOp::AddAssign:
+        return "+=";
+    case BinaryOp::SubAssign:
+        return "-=";
+    case BinaryOp::MulAssign:
+        return "*=";
+    case BinaryOp::DivAssign:
+        return "/=";
+    case BinaryOp::ModAssign:
+        return "%=";
+    case BinaryOp::Comma:
+        return ",";
+    default:
+        return "?";
+    }
+}
+
+std::string unaryOpToString(UnaryOp op)
+{
+    switch (op)
+    {
+    case UnaryOp::Negate:
+        return "-";
+    case UnaryOp::LogicalNot:
+        return "!";
+    case UnaryOp::BitwiseNot:
+        return "~";
+    case UnaryOp::PreIncrement:
+        return "++";
+    case UnaryOp::PreDecrement:
+        return "--";
+    case UnaryOp::PostIncrement:
+        return "++";
+    case UnaryOp::PostDecrement:
+        return "--";
+    default:
+        return "?";
+    }
+}
+
+std::string storageQualifierToString(StorageQualifier sq)
+{
+    switch (sq)
+    {
+    case StorageQualifier::None:
+        return "";
+    case StorageQualifier::Uniform:
+        return "uniform";
+    case StorageQualifier::In:
+        return "in";
+    case StorageQualifier::Out:
+        return "out";
+    case StorageQualifier::InOut:
+        return "inout";
+    case StorageQualifier::Const:
+        return "const";
+    case StorageQualifier::Static:
+        return "static";
+    case StorageQualifier::Extern:
+        return "extern";
+    default:
+        return "?";
+    }
+}
+
+std::string baseTypeToString(BaseType bt)
+{
+    switch (bt)
+    {
+    case BaseType::Void:
+        return "void";
+    case BaseType::Bool:
+        return "bool";
+    case BaseType::Int:
+        return "int";
+    case BaseType::UInt:
+        return "uint";
+    case BaseType::Float:
+        return "float";
+    case BaseType::Half:
+        return "half";
+    case BaseType::Fixed:
+        return "fixed";
+    case BaseType::Char:
+        return "char";
+    case BaseType::UChar:
+        return "uchar";
+    case BaseType::Short:
+        return "short";
+    case BaseType::UShort:
+        return "ushort";
+    case BaseType::SamplerGeneric:
+        return "sampler";
+    case BaseType::Sampler1D:
+        return "sampler1D";
+    case BaseType::Sampler2D:
+        return "sampler2D";
+    case BaseType::Sampler3D:
+        return "sampler3D";
+    case BaseType::SamplerCube:
+        return "samplerCUBE";
+    case BaseType::SamplerRect:
+        return "samplerRECT";
+    case BaseType::ISampler1D:
+        return "isampler1D";
+    case BaseType::ISampler2D:
+        return "isampler2D";
+    case BaseType::ISampler3D:
+        return "isampler3D";
+    case BaseType::ISamplerCube:
+        return "isamplerCUBE";
+    case BaseType::ISamplerRect:
+        return "isamplerRECT";
+    case BaseType::USampler1D:
+        return "usampler1D";
+    case BaseType::USampler2D:
+        return "usampler2D";
+    case BaseType::USampler3D:
+        return "usampler3D";
+    case BaseType::USamplerCube:
+        return "usamplerCUBE";
+    case BaseType::USamplerRect:
+        return "usamplerRECT";
+    case BaseType::Struct:
+        return "struct";
+    case BaseType::Array:
+        return "array";
+    default:
+        return "?";
+    }
+}
+
+// ============================================================================
+// AST Printer implementation
+// ============================================================================
+
+void AstPrinter::indent(int level)
+{
+    for (int i = 0; i < level; i++)
+        std::cout << "  ";
+}
+
+void AstPrinter::print(const TranslationUnit& unit)
+{
+    std::cout << "TranslationUnit: " << unit.filename << "\n";
+    for (const auto& decl : unit.declarations)
+    {
+        print(decl.get(), 1);
+    }
+    if (unit.entryPoint)
+    {
+        std::cout << "Entry point: " << unit.entryPoint->name << "\n";
+    }
+}
+
+void AstPrinter::print(const DeclNode* decl, int ind)
+{
+    if (!decl)
+        return;
+
+    indent(ind);
+
+    switch (decl->kind)
+    {
+    case DeclKind::Variable:
+    {
+        auto* var = static_cast<const VarDecl*>(decl);
+        std::cout << "VarDecl: " << var->name;
+        if (var->type)
+            std::cout << " : " << var->type->toString();
+        if (var->storage != StorageQualifier::None)
+            std::cout << " [" << storageQualifierToString(var->storage) << "]";
+        if (!var->semantic.isEmpty())
+            std::cout << " : " << var->semantic.name << var->semantic.index;
+        std::cout << "\n";
+        if (var->initializer)
+        {
+            indent(ind + 1);
+            std::cout << "= ";
+            print(var->initializer.get(), 0);
+            std::cout << "\n";
+        }
+        break;
+    }
+    case DeclKind::Function:
+    {
+        auto* func = static_cast<const FunctionDecl*>(decl);
+        std::cout << "FunctionDecl: " << func->name;
+        if (func->returnType)
+            std::cout << " -> " << func->returnType->toString();
+        if (!func->returnSemantic.isEmpty())
+            std::cout << " : " << func->returnSemantic.name;
+        std::cout << "\n";
+
+        for (const auto& param : func->parameters)
+        {
+            indent(ind + 1);
+            std::cout << "Param: " << param->name;
+            if (param->type)
+                std::cout << " : " << param->type->toString();
+            if (!param->semantic.isEmpty())
+                std::cout << " : " << param->semantic.name << param->semantic.index;
+            std::cout << "\n";
+        }
+
+        if (func->body)
+        {
+            print(func->body.get(), ind + 1);
+        }
+        break;
+    }
+    case DeclKind::Struct:
+    {
+        auto* str = static_cast<const StructDecl*>(decl);
+        std::cout << "StructDecl: " << str->name << "\n";
+        for (const auto& field : str->fields)
+        {
+            indent(ind + 1);
+            std::cout << "Field: " << field.name;
+            if (field.type)
+                std::cout << " : " << field.type->toString();
+            std::cout << "\n";
+        }
+        break;
+    }
+    case DeclKind::Typedef:
+    {
+        auto* td = static_cast<const TypedefDecl*>(decl);
+        std::cout << "TypedefDecl: " << td->name;
+        if (td->aliasedType)
+            std::cout << " = " << td->aliasedType->toString();
+        std::cout << "\n";
+        break;
+    }
+    default:
+        std::cout << "UnknownDecl\n";
+        break;
+    }
+}
+
+void AstPrinter::print(const StmtNode* stmt, int ind)
+{
+    if (!stmt)
+        return;
+
+    indent(ind);
+
+    switch (stmt->kind)
+    {
+    case StmtKind::Block:
+    {
+        auto* block = static_cast<const BlockStmt*>(stmt);
+        std::cout << "Block\n";
+        for (const auto& s : block->statements)
+        {
+            print(s.get(), ind + 1);
+        }
+        break;
+    }
+    case StmtKind::Expr:
+    {
+        auto* es = static_cast<const ExprStmt*>(stmt);
+        std::cout << "ExprStmt: ";
+        print(es->expr.get(), 0);
+        std::cout << "\n";
+        break;
+    }
+    case StmtKind::Return:
+    {
+        auto* ret = static_cast<const ReturnStmt*>(stmt);
+        std::cout << "Return";
+        if (ret->value)
+        {
+            std::cout << " ";
+            print(ret->value.get(), 0);
+        }
+        std::cout << "\n";
+        break;
+    }
+    case StmtKind::If:
+    {
+        auto* ifs = static_cast<const IfStmt*>(stmt);
+        std::cout << "If\n";
+        indent(ind + 1);
+        std::cout << "Cond: ";
+        print(ifs->condition.get(), 0);
+        std::cout << "\n";
+        indent(ind + 1);
+        std::cout << "Then:\n";
+        print(ifs->thenBranch.get(), ind + 2);
+        if (ifs->elseBranch)
+        {
+            indent(ind + 1);
+            std::cout << "Else:\n";
+            print(ifs->elseBranch.get(), ind + 2);
+        }
+        break;
+    }
+    case StmtKind::For:
+    {
+        auto* fs = static_cast<const ForStmt*>(stmt);
+        std::cout << "For\n";
+        if (fs->init)
+        {
+            indent(ind + 1);
+            std::cout << "Init:\n";
+            print(fs->init.get(), ind + 2);
+        }
+        if (fs->condition)
+        {
+            indent(ind + 1);
+            std::cout << "Cond: ";
+            print(fs->condition.get(), 0);
+            std::cout << "\n";
+        }
+        if (fs->increment)
+        {
+            indent(ind + 1);
+            std::cout << "Inc: ";
+            print(fs->increment.get(), 0);
+            std::cout << "\n";
+        }
+        indent(ind + 1);
+        std::cout << "Body:\n";
+        print(fs->body.get(), ind + 2);
+        break;
+    }
+    case StmtKind::Discard:
+        std::cout << "Discard\n";
+        break;
+    case StmtKind::Break:
+        std::cout << "Break\n";
+        break;
+    case StmtKind::Continue:
+        std::cout << "Continue\n";
+        break;
+    default:
+        std::cout << "Stmt\n";
+        break;
+    }
+}
+
+void AstPrinter::print(const ExprNode* expr, int ind)
+{
+    if (!expr)
+    {
+        std::cout << "<null>";
+        return;
+    }
+
+    switch (expr->kind)
+    {
+    case ExprKind::Literal:
+    {
+        auto* lit = static_cast<const LiteralExpr*>(expr);
+        switch (lit->literalKind)
+        {
+        case LiteralExpr::LiteralKind::Int:
+            std::cout << std::get<int64_t>(lit->value);
+            break;
+        case LiteralExpr::LiteralKind::Float:
+            std::cout << std::get<double>(lit->value);
+            break;
+        case LiteralExpr::LiteralKind::Bool:
+            std::cout << (std::get<bool>(lit->value) ? "true" : "false");
+            break;
+        }
+        break;
+    }
+    case ExprKind::Identifier:
+    {
+        auto* id = static_cast<const IdentifierExpr*>(expr);
+        std::cout << id->name;
+        break;
+    }
+    case ExprKind::Binary:
+    {
+        auto* bin = static_cast<const BinaryExpr*>(expr);
+        std::cout << "(";
+        print(bin->left.get(), 0);
+        std::cout << " " << binaryOpToString(bin->op) << " ";
+        print(bin->right.get(), 0);
+        std::cout << ")";
+        break;
+    }
+    case ExprKind::Unary:
+    {
+        auto* un = static_cast<const UnaryExpr*>(expr);
+        if (un->op == UnaryOp::PostIncrement || un->op == UnaryOp::PostDecrement)
+        {
+            print(un->operand.get(), 0);
+            std::cout << unaryOpToString(un->op);
+        }
+        else
+        {
+            std::cout << unaryOpToString(un->op);
+            print(un->operand.get(), 0);
+        }
+        break;
+    }
+    case ExprKind::Call:
+    {
+        auto* call = static_cast<const CallExpr*>(expr);
+        std::cout << call->functionName << "(";
+        for (size_t i = 0; i < call->arguments.size(); i++)
+        {
+            if (i > 0)
+                std::cout << ", ";
+            print(call->arguments[i].get(), 0);
+        }
+        std::cout << ")";
+        break;
+    }
+    case ExprKind::MemberAccess:
+    {
+        auto* mem = static_cast<const MemberAccessExpr*>(expr);
+        print(mem->object.get(), 0);
+        std::cout << "." << mem->member;
+        break;
+    }
+    case ExprKind::Index:
+    {
+        auto* idx = static_cast<const IndexExpr*>(expr);
+        print(idx->array.get(), 0);
+        std::cout << "[";
+        print(idx->index.get(), 0);
+        std::cout << "]";
+        break;
+    }
+    case ExprKind::Ternary:
+    {
+        auto* ter = static_cast<const TernaryExpr*>(expr);
+        std::cout << "(";
+        print(ter->condition.get(), 0);
+        std::cout << " ? ";
+        print(ter->thenExpr.get(), 0);
+        std::cout << " : ";
+        print(ter->elseExpr.get(), 0);
+        std::cout << ")";
+        break;
+    }
+    case ExprKind::Constructor:
+    {
+        auto* ctor = static_cast<const ConstructorExpr*>(expr);
+        if (ctor->constructedType)
+            std::cout << ctor->constructedType->toString();
+        std::cout << "(";
+        for (size_t i = 0; i < ctor->arguments.size(); i++)
+        {
+            if (i > 0)
+                std::cout << ", ";
+            print(ctor->arguments[i].get(), 0);
+        }
+        std::cout << ")";
+        break;
+    }
+    case ExprKind::Cast:
+    {
+        auto* cast = static_cast<const CastExpr*>(expr);
+        std::cout << "(";
+        if (cast->targetType)
+            std::cout << cast->targetType->toString();
+        std::cout << ")";
+        print(cast->operand.get(), 0);
+        break;
+    }
+    default:
+        std::cout << "<expr>";
+        break;
+    }
+}
+
+void AstPrinter::print(const TypeNode* type)
+{
+    if (type)
+        std::cout << type->toString();
+    else
+        std::cout << "<null>";
+}

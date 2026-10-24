@@ -1,0 +1,2 @@
+// CONTROL: the index written directly.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float t[2]; t[0] = uv.x; t[1] = uv.y; float v = t[1]; return float4(v, 0, 0, 1); }

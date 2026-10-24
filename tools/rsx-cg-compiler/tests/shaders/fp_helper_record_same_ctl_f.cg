@@ -1,0 +1,3 @@
+// CONTROL: the one-struct-type shape read directly.
+struct In { float2 uv; float3 col; };
+float4 main(In a, In b) : COLOR { return float4(b.col * a.uv.x, 1); }

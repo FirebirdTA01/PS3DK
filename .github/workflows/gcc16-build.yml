@@ -1,0 +1,274 @@
+name: GCC 16 build
+
+# A real GCC 16 PPU toolchain build of the GCC 16 integration branch, with the
+# runtime and SDK its compile+link checks need, from a fresh prefix.  The
+# regular CI workflow builds no target toolchain, so its compiler-dependent
+# probes skip; here a skip is a failure.
+#
+# Manual dispatch, plus a nightly run since the first successful measured run
+# (39029420544: 40.5 min, about +14 GB of the runner's disk).  A schedule only
+# fires from the default branch, which is why this file lives on main: every
+# run checks out the requested ref - feat/gcc16 for the nightly, which has no
+# inputs - and records the resolved commit.
+
+on:
+  schedule:
+    # 08:37 UTC every day (03:37 US Central daylight time, 02:37 standard
+    # time); an off-hour minute, away from the top-of-hour scheduling peak.
+    - cron: "37 8 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to build (default feat/gcc16)"
+        required: false
+        default: "feat/gcc16"
+      eh_registry_checks:
+        description: "Also require the three libgcc FDE registry checks (gcc-16.x 0074/0077) with no SKIP"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gcc16-build
+  cancel-in-progress: false
+
+jobs:
+  gcc16-ppu:
+    name: GCC 16 PPU toolchain + SDK + target checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      LOGS: ${{ github.workspace }}/gcc16-logs
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || 'feat/gcc16' }}
+          fetch-depth: 0
+
+      - name: Record identity and runner resources
+        shell: bash
+        run: |
+          mkdir -p "$LOGS"
+          {
+            echo "requested_ref=${{ inputs.ref || 'feat/gcc16' }}"
+            echo "eh_registry_checks=${{ inputs.eh_registry_checks == true }}"
+            echo "resolved_commit=$(git rev-parse HEAD)"
+            echo "workflow_commit=${{ github.sha }}"
+            echo "runner=$(uname -a)"
+            echo "nproc=$(nproc)"
+            date -u +start=%Y-%m-%dT%H:%M:%SZ
+          } | tee "$LOGS/identity.txt"
+          df -h / "$GITHUB_WORKSPACE" | tee "$LOGS/disk-start.txt"
+          free -h | tee "$LOGS/memory.txt"
+          echo "Resolved commit: \`$(git rev-parse HEAD)\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install build deps
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential gcc-12 g++-12 cmake ninja-build texinfo \
+              bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev \
+              zlib1g-dev libreadline-dev libncurses-dev libexpat1-dev \
+              libssl-dev libelf-dev python3 python3-dev git wget patch \
+              autoconf automake libtool zip unzip
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Sources only (keyed by the scripts that pin them); no toolchain or
+      # object cache: every run builds into a fresh prefix.
+      - name: Cache upstream sources
+        uses: actions/cache@v5
+        with:
+          path: src/upstream
+          key: upstream-gcc16-${{ hashFiles('scripts/bootstrap.sh', 'scripts/build-ppu-toolchain.sh', 'scripts/build-spu-toolchain.sh') }}
+
+      # A unique prefix for this run, asserted absent BEFORE bootstrap (which
+      # creates its empty layout).  A non-fresh prefix fails; nothing deletes
+      # one to make the check pass.  env.sh keeps an exported PS3DEV.
+      - name: Fresh prefix
+        shell: bash
+        run: |
+          P="$RUNNER_TEMP/ps3dev-${{ github.run_id }}-${{ github.run_attempt }}"
+          test ! -e "$P" || { echo "prefix $P already exists; this workflow builds into a fresh prefix"; exit 1; }
+          echo "PS3DEV=$P" >> "$GITHUB_ENV"
+          echo "PS3DEV=$P (absent before bootstrap)" | tee -a "$LOGS/identity.txt"
+
+      - name: Bootstrap upstream sources (+ the GCC 16.1.0 tag)
+        shell: bash
+        run: |
+          source scripts/env.sh
+          ./scripts/bootstrap.sh 2>&1 | tee "$LOGS/bootstrap.log"
+          git -C src/upstream/gcc rev-parse -q --verify refs/tags/releases/gcc-16.1.0 ||
+            git -C src/upstream/gcc fetch --depth 1 --no-tags origin \
+                "refs/tags/releases/gcc-16.1.0:refs/tags/releases/gcc-16.1.0"
+          git -C src/upstream/gcc rev-parse refs/tags/releases/gcc-16.1.0 | tee "$LOGS/gcc16-tag.txt"
+
+      - name: Build SPU toolchain
+        shell: bash
+        run: |
+          source scripts/env.sh
+          set -o pipefail
+          ./scripts/build-spu-toolchain.sh 2>&1 | tee "$LOGS/spu-toolchain.log"
+
+      - name: Build PPU toolchain (GCC 16, posix thread model)
+        shell: bash
+        run: |
+          source scripts/env.sh
+          set -o pipefail
+          PS3_GCC_THREADS=posix ./scripts/build-ppu-toolchain.sh --gcc=16 2>&1 | tee "$LOGS/ppu-toolchain.log"
+
+      - name: Assert GCC 16, posix, both multilibs
+        shell: bash
+        run: |
+          source scripts/env.sh
+          set -e
+          G="$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc"
+          "$G" --version | head -1 | tee -a "$LOGS/identity.txt"
+          "$G" -dumpfullversion | grep -qx '16\.1\.0'
+          "$G" -v 2>&1 | grep -x 'Thread model: posix'
+          "$G" -print-multi-lib | tee "$LOGS/multilib.txt"
+          grep -q '^lp64;@mlp64$' "$LOGS/multilib.txt"
+          for m in "" -mlp64; do
+            lib=$("$G" $m -print-libgcc-file-name); test -f "$lib"; echo "libgcc ${m:-ilp32}: $lib" | tee -a "$LOGS/identity.txt"
+          done
+          "$PS3DEV/spu/bin/spu-elf-gcc" --version | head -1 | tee -a "$LOGS/identity.txt"
+          # Identities tying the run to its artifacts: the driver and its
+          # programs, and each multilib's runtime archives.
+          {
+            sha256sum "$G" "$PS3DEV/spu/bin/spu-elf-gcc"
+            for p in cc1 cc1plus lto1; do f=$("$G" -print-prog-name=$p); test -f "$f"; sha256sum "$f"; done
+            for m in "" -mlp64; do
+              # No libgcc_eh.a: this static-only target builds its unwinder
+              # into libgcc.a (run 1, 39027451442, stopped on that name).
+              for a in libgcc.a libstdc++.a libsupc++.a libc.a libm.a; do
+                f=$("$G" $m -print-file-name=$a); test -f "$f"; sha256sum "$f"
+              done
+            done
+          } | sed "s#$PS3DEV/#\$PS3DEV/#" | tee "$LOGS/toolchain-identities.txt"
+
+      - name: Host tools
+        shell: bash
+        run: |
+          source scripts/env.sh
+          set -o pipefail
+          ./scripts/install-host-tools.sh 2>&1 | tee "$LOGS/host-tools.log"
+
+      - name: Runtime and SDK (PSL1GHT, headers, stub archives, SDK libraries)
+        shell: bash
+        run: |
+          source scripts/env.sh
+          set -o pipefail
+          ./scripts/build-psl1ght.sh 2>&1 | tee "$LOGS/psl1ght.log"
+          ./scripts/build-sdk.sh --headers-only 2>&1 | tee "$LOGS/sdk-headers.log"
+          ./scripts/build-cell-stub-archives.sh 2>&1 | tee "$LOGS/stub-archives.log"
+          # install-host-tools.sh already built and installed the host tools
+          # (rsx-cg-compiler included); the SDK build does not repeat them.
+          ./scripts/build-sdk.sh --no-host-tools 2>&1 | tee "$LOGS/sdk.log"
+
+      # Each check must run and pass: exit 0 AND no SKIP line (they skip when
+      # they cannot find a compiler, which here is a failure).
+      - name: Target checks (no SKIP allowed)
+        shell: bash
+        run: |
+          source scripts/env.sh
+          fails=0
+          check() {   # name, command...  (every check runs; failures are counted, not fatal)
+            local name=$1; shift; local rc=0
+            if "$@" > "$LOGS/check-$name.log" 2>&1; then rc=0; else rc=$?; fi
+            if [ $rc -ne 0 ]; then echo "FAIL $name (rc $rc)"; fails=$((fails+1))
+            elif grep -q 'SKIP' "$LOGS/check-$name.log"; then echo "FAIL $name (skipped)"; fails=$((fails+1))
+            else echo "PASS $name"; fi
+          }
+          check ppu-abi-char-wchar    bash tests/host/ppu-abi-char-wchar-test.sh
+          check spu-abi-char-wchar    bash tests/host/spu-abi-char-wchar-test.sh
+          check ppu-thread-model      bash tests/host/ppu-thread-model-test.sh
+          check lv2-decls-cxx-linkage bash tests/host/lv2-decls-cxx-linkage-test.sh
+          check cell-lr-spill         bash tests/host/cell-lr-spill-test.sh
+          check ext-dce-default       bash tests/host/ext-dce-default-test.sh
+          check cxx-default-dialect   bash tests/host/cxx-default-dialect-test.sh
+          check sdk-default-include   bash tests/host/sdk-default-include-test.sh
+          check cxx20-header          sh tests/host/cxx20-header-test.sh
+          check lv2-errno-values      bash tests/sdk/lv2-errno-values-test.sh --ps3dev "$PS3DEV"
+          check gcc16-series          bash tests/host/gcc16-series-test.sh
+          # Only when asked: a ref without gcc-16.x 0074 skips these, and here a skip is a failure, so the nightly
+          # (feat/gcc16 before the EH landing) must not run them.  Each test covers both multilibs itself.
+          if [ "${{ inputs.eh_registry_checks == true }}" = true ]; then
+            check libgcc-fde-fast-path      bash tests/host/libgcc-fde-fast-path-test.sh
+            check libgcc-heap-ready-link    bash tests/host/libgcc-heap-ready-link-test.sh
+            check libgcc-registry-adversary bash tests/host/libgcc-registry-tests-adversary-test.sh
+          fi
+          echo "target-check failures: $fails" | tee "$LOGS/checks-summary.txt"
+          [ $fails -eq 0 ]
+
+      # Compile and link every regression row (both ABIs where the row builds
+      # them); no boot - RPCS3 and hardware runs stay outside CI.
+      # A row that returns early or skips still exits 0 with nothing built, so
+      # exit status is not the evidence: every SELF the checked-out manifest
+      # names must exist and be non-empty afterwards (no SELF is tracked, so
+      # each one was built by this run), and its hash is recorded.
+      - name: Build every regression row
+        shell: bash
+        run: |
+          source scripts/env.sh
+          tracked=$(git ls-files 'tests/regression/*.self' 'tests/regression/**/*.self') ||
+            { echo "git ls-files failed: cannot prove no SELF is tracked"; exit 1; }
+          test -z "$tracked" || { echo "tracked SELFs under tests/regression: outputs would not prove a build"; exit 1; }
+          # gate <manifest> <out> [hasher]: every manifest row's SELF present and non-empty, each hash written
+          # to <out>.  Every status is checked explicitly: a caller's `||` turns errexit off inside the function.
+          gate() {
+            local hasher=${3:-sha256sum} missing=0 rows=0 bad=0
+            : > "$2" || { echo "cannot create $2"; return 2; }
+            while IFS=, read -r name self rest; do
+              case "$name" in ''|'#'*|name) continue ;; esac
+              rows=$((rows+1))
+              if [ ! -s "$self" ]; then echo "MISSING-OR-EMPTY $name $self"; missing=$((missing+1))
+              elif ! $hasher "$self" >> "$2"; then echo "HASH-FAILED $name $self"; bad=$((bad+1)); fi
+            done < "$1" || { echo "cannot read $1"; return 2; }
+            local hashes; hashes=$(wc -l < "$2") || { echo "cannot count $2"; return 2; }
+            echo "manifest rows: $rows, missing or empty: $missing, hash failures: $bad, hashes recorded: $hashes"
+            [ "$rows" -gt 0 ] && [ "$missing" -eq 0 ] && [ "$bad" -eq 0 ] && [ "$hashes" -eq "$rows" ]
+          }
+          # Controls, each of which must FAIL the gate: a SELF nothing builds, an empty SELF, and a present
+          # non-empty SELF whose hash cannot be taken.
+          C="$RUNNER_TEMP/gate-controls"; mkdir -p "$C"
+          : > "$C/empty.fake.self"; printf 'x' > "$C/present.fake.self"
+          printf 'missing,%s/no-such.fake.self,1,RAN-CLEAN,x,y\n' "$C" > "$C/missing.txt"
+          printf 'empty,%s/empty.fake.self,1,RAN-CLEAN,x,y\n' "$C" > "$C/empty.txt"
+          printf 'hashfail,%s/present.fake.self,1,RAN-CLEAN,x,y\n' "$C" > "$C/present.txt"
+          for ctl in missing:sha256sum empty:sha256sum present:false; do
+            m=${ctl%%:*}; h=${ctl#*:}
+            if gate "$C/$m.txt" "$C/$m-hashes.txt" "$h" >> "$LOGS/gate-control.log" 2>&1; then
+              echo "the output gate PASSED its '$m' control - the gate is broken"; exit 1
+            fi
+          done
+          echo "gate controls: missing, empty and hash-failure each fail the gate, as they must" | tee -a "$LOGS/rows-summary.txt"
+          attempted=0; ok=0; failed=0
+          for c in tests/regression/*/CMakeLists.txt; do
+            d=$(dirname "$c"); r=$(basename "$d"); b="$RUNNER_TEMP/rows/$r"; attempted=$((attempted+1))
+            if cmake -S "$d" -B "$b" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/ps3-ppu-toolchain.cmake" > "$LOGS/row-$r.cfg.log" 2>&1 &&
+               cmake --build "$b" > "$LOGS/row-$r.bld.log" 2>&1; then echo "ok   $r"; ok=$((ok+1))
+            else echo "FAIL $r"; failed=$((failed+1)); fi
+          done
+          echo "row dirs: attempted $attempted, succeeded $ok, failed $failed" | tee -a "$LOGS/rows-summary.txt"
+          outputs=0; gate tests/regression/manifest.txt "$LOGS/row-self-sha256.txt" | tee -a "$LOGS/rows-summary.txt" || outputs=1
+          [ "$failed" -eq 0 ] && [ "$outputs" -eq 0 ]
+
+      - name: Record end resources
+        if: always()
+        shell: bash
+        run: |
+          date -u +end=%Y-%m-%dT%H:%M:%SZ | tee -a "$LOGS/identity.txt"
+          df -h / "$GITHUB_WORKSPACE" | tee "$LOGS/disk-end.txt"
+          du -sh "$PS3DEV" src/upstream "$HOME/ps3tc" 2>/dev/null | tee "$LOGS/sizes.txt" || true   # a missing path is not a failure here
+
+      - name: Keep logs and identities
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: gcc16-build-logs-${{ github.run_id }}
+          path: gcc16-logs
+          retention-days: 30

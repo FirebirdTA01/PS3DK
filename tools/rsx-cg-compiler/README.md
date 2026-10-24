@@ -6,21 +6,22 @@ dependency and adds full Cg shader-language support, including the
 stock compiler silently ignores.
 
 The binary is named `rsx-cg-compiler` to mirror the reference
-compiler's profile names (`sce_vp_rsx`, `sce_fp_rsx`) and the sibling
-front-end donor project `vita-cg-compiler`.
+compiler's profile names (`sce_vp_rsx`, `sce_fp_rsx`) and its sibling
+project, FirebirdTA01's open-source Vita Cg compiler
+(`Vita-Cg-Compiler`), whose front end it uses.
 
 ## Architecture
 
-The compiler is composed from two donor projects, plus PS3-specific
-back-end code authored here:
+The compiler is FirebirdTA01's Vita Cg compiler front end plus a
+PS3-specific back end written here:
 
 ```
 .cg source
     │
     ▼
 ┌───────────────────────────┐
-│ Front-end (vita-cg donor) │   src/vita-cg-compiler/src/{frontend,ir,common}/
-│   preprocessor → lexer →  │   Adopts the donor's GXM Cg compiler lexer, parser,
+│ Front-end (Vita Cg comp.) │   tools/rsx-cg-compiler/src/cg_frontend/{frontend,ir,common}/
+│   preprocessor → lexer →  │   The Vita Cg compiler's lexer, parser,
 │   parser → AST →          │   AST, semantic analysis, IR builder, and IR
 │   semantic → IR builder → │   passes.  Hardware-independent IRModule output.
 │   IR optimisation passes  │
@@ -48,12 +49,11 @@ back-end code authored here:
         .fpo / .vpo
 ```
 
-The donor front-end is **copied into `src/donor/`** in this tree.
-Both projects (vita-cg-compiler and this PS3 toolchain) share the
-same author + license (MIT), so adopting the donor source directly
-beats a sibling-clone reference: the build is self-contained, no
-bootstrap dependency, and we're free to evolve the front-end for
-RSX without touching the upstream Vita repo.
+The front end is from **FirebirdTA01's Vita Cg compiler**; both projects
+are MIT.  It contains no third-party or proprietary compiler code.  It lives
+in this tree (`src/cg_frontend/`) rather than as a separate clone, so the
+build is self-contained, needs no bootstrap step, and the front end can change
+for RSX without touching the Vita repo.
 
 ## Why a separate tree from `tools/cgcomp/`
 
@@ -64,5 +64,5 @@ old cgcomp is retired.
 
 ## License
 
-MIT.  Donor front-end (vita-cg-compiler) is also MIT (matching
-copyright 2026 FirebirdTA01).
+MIT.  The front end from the Vita Cg compiler is also MIT (copyright 2026
+FirebirdTA01).

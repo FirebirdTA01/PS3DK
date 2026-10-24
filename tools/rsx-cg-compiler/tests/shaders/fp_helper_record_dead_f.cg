@@ -1,0 +1,5 @@
+// UNUSED-MEMBER CONTROL: the helper reads t.col; t.n is never read.  Reference: i.n keeps its
+// record unreferenced, i.col is referenced - stamping must not mark a field nobody loads.
+struct Tag { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; float3 n : TEXCOORD2; };
+float3 helper(Tag t) { return t.col; }
+float4 main(Tag i) : COLOR { return float4(helper(i) * i.uv.x, 1); }

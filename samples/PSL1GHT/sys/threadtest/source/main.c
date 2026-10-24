@@ -58,7 +58,7 @@ int main(int argc,char *argv[])
 			if(padinfo.status[i]){
 				ioPadGetData(i, &paddata);
 
-				if(paddata.BTN_CROSS){
+				if(paddata.BTN_CROSS || paddata.BTN_START){
 					running = 0;
 					break;
 				}

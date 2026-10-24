@@ -3,6 +3,7 @@
 #ifndef SPURS_LINE_H
 #define SPURS_LINE_H
 
+#include "spurs_dma.h"
 #include <stdint.h>
 #include <spu_mfcio.h>
 
@@ -44,8 +45,7 @@ static inline int line_put_at(void *line, uint64_t ea)
 
 static inline void dma_wait(unsigned tag)
 {
-	mfc_write_tag_mask(1u << tag);
-	(void)mfc_read_tag_status_all();
+	spurs_dma_wait(tag);
 }
 
 static inline void dma_get_wait(volatile void *ls, uint64_t ea, uint32_t size, unsigned tag)

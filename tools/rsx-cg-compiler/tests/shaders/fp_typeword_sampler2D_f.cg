@@ -1,0 +1,2 @@
+// `sampler2D` as a variable name.  Reference: byte-identical.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float3 sampler2D = float3(0, 0, 1); return float4(sampler2D.xy + uv, sampler2D.z, 1); }

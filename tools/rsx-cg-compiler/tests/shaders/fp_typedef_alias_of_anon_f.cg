@@ -1,0 +1,7 @@
+// `typedef A B;` where A is itself an anonymous-struct typedef - the
+// DeferredShading light-pass spelling (light_structs.cgh declares
+// dir_light_params_t this way and each pass typedefs it to
+// light_params_t).  Reference: byte-identical to using A.
+typedef struct { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; } A;
+typedef A B;
+float4 main(B i) : COLOR { return float4(i.col * i.uv.x, 1); }

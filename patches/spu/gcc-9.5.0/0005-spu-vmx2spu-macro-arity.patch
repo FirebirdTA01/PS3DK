@@ -1,0 +1,18 @@
+Fix unparenthesized compound literal in vec_sum2s macro invocation.
+
+In C++ modes, commas inside unparenthesized compound literal braces
+{0, -1, 0, -1} are treated by the preprocessor as macro argument separators,
+causing `spu_and` to receive 5 arguments instead of 2.  Parenthesise the
+compound literal as ((vec_int4){0, -1, 0, -1}), matching line 2262.
+
+--- a/gcc/config/spu/vmx2spu.h
++++ b/gcc/config/spu/vmx2spu.h
+@@ -2215,7 +2215,7 @@
+ 
+   sat = spu_orc(spu_xor(sign1, sign2), (vec_int4)spu_cmpeq(sum_h, sign2));
+ 
+-  d = spu_and(spu_sel(sum_l, sat_val, (vec_uint4)(sat)), (vec_int4){0, -1, 0, -1});
++  d = spu_and(spu_sel(sum_l, sat_val, (vec_uint4)(sat)), ((vec_int4){0, -1, 0, -1}));
+ 
+   return (d);
+ }

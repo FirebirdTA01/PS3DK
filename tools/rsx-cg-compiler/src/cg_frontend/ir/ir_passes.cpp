@@ -1,0 +1,1458 @@
+#include "ir_passes.h"
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+namespace IRPassUtils
+{
+
+bool isTerminator(IROp op)
+{
+    switch (op)
+    {
+    case IROp::Branch:
+    case IROp::CondBranch:
+    case IROp::Return:
+    case IROp::Discard:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool isPure(IROp op)
+{
+    switch (op)
+    {
+    // Side-effecting operations
+    case IROp::Store:
+    case IROp::StoreOutput:
+    case IROp::StoreVarying:
+    case IROp::Branch:
+    case IROp::CondBranch:
+    case IROp::Return:
+    case IROp::Discard:
+    case IROp::Call:
+    case IROp::TexSample:
+    case IROp::TexSampleLod:
+    case IROp::TexSampleGrad:
+    case IROp::TexSampleProj:
+    case IROp::TexSampleBias:
+    case IROp::TexFetch:
+    // Loop region markers and carries: barriers, never merged or dropped.
+    case IROp::LoopCarry:
+    case IROp::LoopBegin:
+    case IROp::LoopBreakIf:
+    case IROp::LoopLatch:
+    case IROp::LoopEnd:
+    case IROp::LoopOut:
+        return false;
+    default:
+        return true;
+    }
+}
+
+bool isCopy(const IRInstruction* inst)
+{
+    // A copy is a VecShuffle with identity swizzle or a simple assignment
+    if (inst->op == IROp::VecShuffle)
+    {
+        // Identity swizzle: xyzw = 0x1B (0b00011011)
+        return inst->swizzleMask == 0x1B || inst->swizzleMask == 0xE4;
+    }
+    return false;
+}
+
+IRInstruction* getDefinition(IRFunction& func, IRValueID id)
+{
+    for (auto& block : func.blocks)
+    {
+        for (auto& inst : block->instructions)
+        {
+            if (inst->result == id)
+            {
+                return inst.get();
+            }
+        }
+    }
+    return nullptr;
+}
+
+int countUses(IRFunction& func, IRValueID id)
+{
+    int count = 0;
+    for (auto& block : func.blocks)
+    {
+        for (auto& inst : block->instructions)
+        {
+            for (IRValueID op : inst->operands)
+            {
+                if (op == id) count++;
+            }
+        }
+    }
+    return count;
+}
+
+void replaceAllUses(IRFunction& func, IRValueID oldVal, IRValueID newVal)
+{
+    for (auto& block : func.blocks)
+    {
+        for (auto& inst : block->instructions)
+        {
+            for (auto& op : inst->operands)
+            {
+                if (op == oldVal)
+                {
+                    op = newVal;
+                }
+            }
+        }
+    }
+}
+
+} // namespace IRPassUtils
+
+// ============================================================================
+// Dead Code Elimination
+// ============================================================================
+
+bool DeadCodeElimination::runOnFunction(IRFunction& func)
+{
+    m_stats.reset();
+    m_usedValues.clear();
+    m_isEntryPoint = func.isEntryPoint;
+
+    // A later insert replaces one lane of its base. Bypass older writes
+    // to that lane only along an exclusive-use insert chain: another
+    // reader (including a read-modify-write RHS) must retain its value.
+    std::unordered_map<IRValueID, IRInstruction*> definitions;
+    std::unordered_map<IRValueID, unsigned> uses;
+    for (auto& block : func.blocks) {
+        for (auto& inst : block->instructions) {
+            if (inst->result != InvalidIRValue)
+                definitions[inst->result] = inst.get();
+            for (IRValueID operand : inst->operands)
+                ++uses[operand];
+        }
+    }
+    bool changed = false;
+    for (auto& block : func.blocks) {
+        for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
+            IRInstruction* link = it->get();
+            if (link->op != IROp::VecInsert || !uses[link->result] || link->operands.size() != 2 ||
+                link->componentIndex < 0 || link->componentIndex > 3)
+                continue;
+            unsigned written = 1u << link->componentIndex;
+            auto prior = definitions.find(link->operands[0]);
+            while (prior != definitions.end()) {
+                IRInstruction* older = prior->second;
+                if (older->op != IROp::VecInsert || older->operands.size() != 2 ||
+                    uses[older->result] != 1 || older->componentIndex < 0 ||
+                    older->componentIndex > 3)
+                    break;
+                const unsigned lane = 1u << older->componentIndex;
+                if (written & lane) {
+                    link->operands[0] = older->operands[0];
+                    --uses[older->result];
+                    // The dead node's base edge is replaced by this edge;
+                    // its effective use count therefore stays unchanged.
+                    changed = true;
+                } else {
+                    written |= lane;
+                    link = older;
+                }
+                prior = definitions.find(link->operands[0]);
+            }
+        }
+    }
+
+    // Step 1: Find all values that are actually used
+    computeUsedValues(func);
+
+    // Step 2: Remove instructions whose results are never used
+    for (auto& block : func.blocks)
+    {
+        auto it = block->instructions.begin();
+        while (it != block->instructions.end())
+        {
+            IRInstruction* inst = it->get();
+
+            // Keep instructions with no result (side effects) or with used results
+            bool keep = true;
+            if (inst->result != InvalidIRValue)
+            {
+                // Has a result - only keep if used
+                if (m_usedValues.find(inst->result) == m_usedValues.end())
+                {
+                    // Result not used - check for side effects or potential outputs
+                    if (!hasSideEffects(inst) && !mightBeShaderOutput(inst))
+                    {
+                        keep = false;
+                    }
+                }
+            }
+            else
+            {
+                // No result - always keep (terminators, stores, etc.)
+            }
+
+            if (!keep)
+            {
+                it = block->instructions.erase(it);
+                m_stats.instructionsRemoved++;
+                changed = true;
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
+    return changed;
+}
+
+void DeadCodeElimination::computeUsedValues(IRFunction& func)
+{
+    // Start with outputs and work backwards
+    std::vector<IRValueID> worklist;
+
+    for (auto& block : func.blocks)
+    {
+        for (auto& inst : block->instructions)
+        {
+            // All operands of side-effecting instructions are used
+            if (hasSideEffects(inst.get()) || inst->result == InvalidIRValue)
+            {
+                for (IRValueID op : inst->operands)
+                {
+                    if (op != InvalidIRValue && m_usedValues.find(op) == m_usedValues.end())
+                    {
+                        m_usedValues.insert(op);
+                        worklist.push_back(op);
+                    }
+                }
+            }
+        }
+    }
+
+    // Propagate: if a value is used, all its operands are used
+    while (!worklist.empty())
+    {
+        IRValueID id = worklist.back();
+        worklist.pop_back();
+
+        // Find the instruction that defines this value
+        IRInstruction* def = IRPassUtils::getDefinition(func, id);
+        if (def)
+        {
+            for (IRValueID op : def->operands)
+            {
+                if (op != InvalidIRValue && m_usedValues.find(op) == m_usedValues.end())
+                {
+                    m_usedValues.insert(op);
+                    worklist.push_back(op);
+                }
+            }
+        }
+    }
+}
+
+bool DeadCodeElimination::hasSideEffects(const IRInstruction* inst) const
+{
+    // A texture read whose result has no live consumer can be deleted.
+    // Keep the shared purity classification conservative: this permits
+    // removal, without also permitting CSE or motion across control flow.
+    switch (inst->op)
+    {
+    case IROp::TexSample:
+    case IROp::TexSampleLod:
+    case IROp::TexSampleGrad:
+    case IROp::TexSampleProj:
+    case IROp::TexSampleBias:
+    case IROp::TexFetch:
+        return m_preserveTextureReads;
+    default:
+        break;
+    }
+    return !IRPassUtils::isPure(inst->op);
+}
+
+bool DeadCodeElimination::mightBeShaderOutput(const IRInstruction* inst) const
+{
+    // Now that IR builder properly emits StoreOutput instructions,
+    // DCE can track outputs through normal use-def chains.
+    // No need for conservative heuristics.
+    (void)inst;  // Suppress unused parameter warning
+    return false;
+}
+
+// ============================================================================
+// Constant Folding
+// ============================================================================
+
+bool ConstantFolding::runOnFunction(IRFunction& func)
+{
+    m_stats.reset();
+    m_replacements.clear();
+
+    bool changed = false;
+
+    for (auto& block : func.blocks)
+    {
+        for (auto& inst : block->instructions)
+        {
+            if (tryFoldInstruction(func, inst.get()))
+            {
+                changed = true;
+            }
+        }
+    }
+
+    // Apply replacements
+    if (!m_replacements.empty())
+    {
+        for (auto& block : func.blocks)
+        {
+            for (auto& inst : block->instructions)
+            {
+                for (auto& op : inst->operands)
+                {
+                    auto it = m_replacements.find(op);
+                    if (it != m_replacements.end())
+                    {
+                        op = it->second;
+                    }
+                }
+            }
+        }
+    }
+
+    return changed;
+}
+
+bool ConstantFolding::tryFoldInstruction(IRFunction& func, IRInstruction* inst)
+{
+    // Check if all operands are constants
+    std::vector<const IRConstant*> constOperands;
+    bool allConst = true;
+
+    for (IRValueID op : inst->operands)
+    {
+        const IRConstant* c = getConstant(func, op);
+        if (c)
+        {
+            constOperands.push_back(c);
+        }
+        else
+        {
+            allConst = false;
+            break;
+        }
+    }
+
+    if (!allConst || constOperands.empty())
+    {
+        return false;
+    }
+
+    IRConstant* result = nullptr;
+
+    // Try to fold based on operation type
+    switch (inst->op)
+    {
+    case IROp::Add:
+    case IROp::Sub:
+    case IROp::Mul:
+    case IROp::Div:
+    case IROp::Mod:
+    case IROp::And:
+    case IROp::Or:
+    case IROp::Xor:
+    case IROp::Shl:
+    case IROp::Shr:
+        if (constOperands.size() == 2)
+        {
+            result = foldBinaryOp(func, inst->op, constOperands[0], constOperands[1]);
+        }
+        break;
+
+    case IROp::Neg:
+    case IROp::Not:
+    case IROp::IntToFloat:
+        if (constOperands.size() == 1)
+        {
+            result = foldUnaryOp(func, inst->op, constOperands[0]);
+        }
+        break;
+
+    case IROp::Sin:
+    case IROp::Cos:
+    case IROp::Sqrt:
+    case IROp::RSqrt:
+    case IROp::Abs:
+    case IROp::Floor:
+    case IROp::Ceil:
+    case IROp::Frac:
+        result = foldMathOp(func, inst->op, constOperands);
+        break;
+
+    default:
+        break;
+    }
+
+    if (result)
+    {
+        m_replacements[inst->result] = result->id;
+        m_stats.constantsFolded++;
+        return true;
+    }
+
+    return false;
+}
+
+IRConstant* ConstantFolding::foldBinaryOp(IRFunction& func, IROp op,
+                                          const IRConstant* lhs, const IRConstant* rhs)
+{
+    const bool lhsInt = std::holds_alternative<int32_t>(lhs->value);
+    const bool lhsUInt = std::holds_alternative<uint32_t>(lhs->value);
+    const bool rhsInt = std::holds_alternative<int32_t>(rhs->value);
+    const bool rhsUInt = std::holds_alternative<uint32_t>(rhs->value);
+    if ((lhsInt || lhsUInt) && (rhsInt || rhsUInt))
+    {
+        const bool isUnsigned = lhsUInt || rhsUInt ||
+                                lhs->type.baseType == IRType::UInt32 ||
+                                rhs->type.baseType == IRType::UInt32;
+        if (isUnsigned)
+        {
+            const uint32_t a = lhsUInt ? std::get<uint32_t>(lhs->value)
+                                       : static_cast<uint32_t>(std::get<int32_t>(lhs->value));
+            const uint32_t b = rhsUInt ? std::get<uint32_t>(rhs->value)
+                                       : static_cast<uint32_t>(std::get<int32_t>(rhs->value));
+            uint32_t result = 0;
+            switch (op)
+            {
+            case IROp::Add: result = a + b; break;
+            case IROp::Sub: result = a - b; break;
+            case IROp::Mul: result = a * b; break;
+            case IROp::Div:
+                if (b == 0) return nullptr;
+                result = a / b;
+                break;
+            case IROp::Mod:
+                if (b == 0) return nullptr;
+                result = a % b;
+                break;
+            case IROp::And: result = a & b; break;
+            case IROp::Or:  result = a | b; break;
+            case IROp::Xor: result = a ^ b; break;
+            case IROp::Shl:
+                result = a << (b & 31);
+                break;
+            case IROp::Shr:
+            case IROp::UShr:
+                result = a >> (b & 31);
+                break;
+            default: return nullptr;
+            }
+            return func.createConstant(IRTypeInfo::UInt(), result);
+        }
+        else
+        {
+            const int32_t a = std::get<int32_t>(lhs->value);
+            const int32_t b = std::get<int32_t>(rhs->value);
+            int32_t result = 0;
+            switch (op)
+            {
+            case IROp::Add: result = static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b)); break;
+            case IROp::Sub: result = static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b)); break;
+            case IROp::Mul: result = static_cast<int32_t>(static_cast<uint32_t>(a) * static_cast<uint32_t>(b)); break;
+            case IROp::Div:
+                if (b == 0 || (a == INT32_MIN && b == -1)) return nullptr;
+                result = a / b;
+                break;
+            case IROp::Mod:
+                if (b == 0 || (a == INT32_MIN && b == -1)) return nullptr;
+                result = a % b;
+                break;
+            case IROp::And: result = a & b; break;
+            case IROp::Or:  result = a | b; break;
+            case IROp::Xor: result = a ^ b; break;
+            case IROp::Shl:
+                result = static_cast<int32_t>(static_cast<uint32_t>(a) << (b & 31));
+                break;
+            case IROp::Shr:
+                result = a >> (b & 31);
+                break;
+            case IROp::UShr:
+                result = static_cast<int32_t>(static_cast<uint32_t>(a) >> (b & 31));
+                break;
+            default: return nullptr;
+            }
+            return func.createConstant(IRTypeInfo::Int(), result);
+        }
+    }
+
+    // Only handle float constants for now
+    if (!std::holds_alternative<float>(lhs->value) ||
+        !std::holds_alternative<float>(rhs->value))
+    {
+        return nullptr;
+    }
+
+    float a = std::get<float>(lhs->value);
+    float b = std::get<float>(rhs->value);
+    float result;
+
+    switch (op)
+    {
+    case IROp::Add: result = a + b; break;
+    case IROp::Sub: result = a - b; break;
+    case IROp::Mul: result = a * b; break;
+    case IROp::Div: result = (b != 0.0f) ? a / b : 0.0f; break;
+    default: return nullptr;
+    }
+
+    return func.createConstant(IRTypeInfo::Float(), result);
+}
+
+IRConstant* ConstantFolding::foldUnaryOp(IRFunction& func, IROp op, const IRConstant* operand)
+{
+    if (std::holds_alternative<int32_t>(operand->value))
+    {
+        const int32_t a = std::get<int32_t>(operand->value);
+        switch (op)
+        {
+        case IROp::Neg: return func.createConstant(IRTypeInfo::Int(), static_cast<int32_t>(-static_cast<uint32_t>(a)));
+        case IROp::Not: return func.createConstant(IRTypeInfo::Int(), ~a);
+        case IROp::IntToFloat: return func.createConstant(IRTypeInfo::Float(), static_cast<float>(a));
+        default: return nullptr;
+        }
+    }
+
+    if (std::holds_alternative<uint32_t>(operand->value))
+    {
+        const uint32_t a = std::get<uint32_t>(operand->value);
+        switch (op)
+        {
+        case IROp::Neg: return func.createConstant(IRTypeInfo::UInt(), static_cast<uint32_t>(-static_cast<int64_t>(a)));
+        case IROp::Not: return func.createConstant(IRTypeInfo::UInt(), ~a);
+        case IROp::IntToFloat: return func.createConstant(IRTypeInfo::Float(), static_cast<float>(a));
+        default: return nullptr;
+        }
+    }
+
+    if (!std::holds_alternative<float>(operand->value))
+    {
+        return nullptr;
+    }
+
+    float a = std::get<float>(operand->value);
+
+    switch (op)
+    {
+    case IROp::Neg: return func.createConstant(IRTypeInfo::Float(), -a);
+    case IROp::HalfToFloat: return func.createConstant(IRTypeInfo::Float(), IRUtils::roundToHalf(a));
+    case IROp::FloatToHalf: return func.createConstant(IRTypeInfo::Half(), IRUtils::roundToHalf(a));
+    case IROp::FloatToInt:
+        if (std::isnan(a) || std::isinf(a) || a < -2147483648.0f || a >= 2147483648.0f)
+            return func.createConstant(IRTypeInfo::Int(), static_cast<int32_t>(-2147483648LL));
+        return func.createConstant(IRTypeInfo::Int(), static_cast<int32_t>(a));
+    default: return nullptr;
+    }
+}
+
+IRConstant* ConstantFolding::foldMathOp(IRFunction& func, IROp op,
+                                        const std::vector<const IRConstant*>& args)
+{
+    if (args.empty() || !std::holds_alternative<float>(args[0]->value))
+    {
+        return nullptr;
+    }
+
+    float a = std::get<float>(args[0]->value);
+    float result;
+
+    switch (op)
+    {
+    case IROp::Sin: result = std::sin(a); break;
+    case IROp::Cos: result = std::cos(a); break;
+    case IROp::Sqrt: result = (a >= 0.0f) ? std::sqrt(a) : 0.0f; break;
+    case IROp::RSqrt: result = (a > 0.0f) ? 1.0f / std::sqrt(a) : 0.0f; break;
+    case IROp::Abs: result = std::abs(a); break;
+    case IROp::Floor: result = std::floor(a); break;
+    case IROp::Ceil: result = std::ceil(a); break;
+    case IROp::Frac: result = a - std::floor(a); break;
+    default: return nullptr;
+    }
+
+    return func.createConstant(IRTypeInfo::Float(), result);
+}
+
+const IRConstant* ConstantFolding::getConstant(IRFunction& func, IRValueID id) const
+{
+    IRValue* val = func.getValue(id);
+    if (val)
+    {
+        return dynamic_cast<const IRConstant*>(val);
+    }
+    return nullptr;
+}
+
+// ============================================================================
+// Copy Propagation
+// ============================================================================
+
+bool CopyPropagation::runOnFunction(IRFunction& func)
+{
+    m_stats.reset();
+    m_copyMap.clear();
+
+    // Step 1: Find all copy relationships
+    findCopies(func);
+
+    if (m_copyMap.empty())
+    {
+        return false;
+    }
+
+    // Step 2: Replace uses of copies with original sources
+    bool changed = false;
+    for (auto& block : func.blocks)
+    {
+        for (auto& inst : block->instructions)
+        {
+            for (auto& op : inst->operands)
+            {
+                IRValueID root = getRootSource(op);
+                if (root != op)
+                {
+                    op = root;
+                    m_stats.copiesPropagated++;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    return changed;
+}
+
+void CopyPropagation::findCopies(IRFunction& func)
+{
+    for (auto& block : func.blocks)
+    {
+        for (auto& inst : block->instructions)
+        {
+            // VecShuffle with identity swizzle is a copy
+            if (inst->op == IROp::VecShuffle && !inst->operands.empty())
+            {
+                // Check for identity swizzle (xyzw)
+                if (inst->swizzleMask == 0xE4)  // 0b11100100 = xyzw
+                {
+                    m_copyMap[inst->result] = inst->operands[0];
+                }
+            }
+        }
+    }
+}
+
+IRValueID CopyPropagation::getRootSource(IRValueID id) const
+{
+    // Follow the copy chain to find the root
+    IRValueID current = id;
+    while (true)
+    {
+        auto it = m_copyMap.find(current);
+        if (it == m_copyMap.end())
+        {
+            return current;
+        }
+        current = it->second;
+
+        // Safety check to avoid infinite loops
+        if (current == id)
+        {
+            return id;
+        }
+    }
+}
+
+// ============================================================================
+// Common Subexpression Elimination
+// ============================================================================
+
+size_t CommonSubexprElimination::InstrHash::operator()(const IRInstruction* inst) const
+{
+    size_t hash = static_cast<size_t>(inst->op);
+    for (IRValueID op : inst->operands)
+    {
+        hash ^= std::hash<IRValueID>()(op) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    }
+    hash ^= std::hash<int>()(inst->swizzleMask);
+    // The result SHAPE is part of the value: a vec3 shuffle "yzw" and a vec4
+    // shuffle "yzwx" share operands and mask (the encoder pads lane 3 with x)
+    // and are different values (rectangular-matrices: merging them handed a float4 to a
+    // 3-wide matrix row and refused; on plain vectors it refused
+    // float4(t.yzw, 1) + t.yzwx, which the reference accepts).
+    hash ^= std::hash<int>()(static_cast<int>(inst->resultType.baseType) * 131 +
+                             inst->resultType.vectorSize * 17 +
+                             inst->resultType.matrixRows * 5 + inst->resultType.matrixCols) +
+            0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<int>()(inst->componentIndex) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<IRValueID>()(inst->uniformSource) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<int>()(static_cast<int>(inst->arrayIndexKind));
+    if (inst->uniformStructRead) {
+        hash ^= std::hash<uint32_t>()(inst->uniformStructRead->leaf + 1) + (hash << 6);
+        hash ^= std::hash<uint32_t>()(inst->uniformStructRead->row) + (hash << 6);
+    }
+
+    // Include targetName in hash for LoadUniform/Call instructions
+    if (!inst->targetName.empty())
+    {
+        hash ^= std::hash<std::string>()(inst->targetName) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    }
+    // Include semanticName in hash for LoadAttribute/StoreOutput instructions
+    if (!inst->semanticName.empty())
+    {
+        hash ^= std::hash<std::string>()(inst->semanticName) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<int>()(inst->semanticIndex);
+    }
+    return hash;
+}
+
+bool CommonSubexprElimination::InstrEqual::operator()(const IRInstruction* a,
+                                                       const IRInstruction* b) const
+{
+    if (a->op != b->op) return false;
+    if (a->operands.size() != b->operands.size()) return false;
+    if (a->swizzleMask != b->swizzleMask) return false;
+    if (a->resultType.baseType != b->resultType.baseType ||
+        a->resultType.elementType != b->resultType.elementType ||
+        a->resultType.vectorSize != b->resultType.vectorSize ||
+        a->resultType.matrixRows != b->resultType.matrixRows ||
+        a->resultType.matrixCols != b->resultType.matrixCols ||
+        a->resultType.arraySize != b->resultType.arraySize) return false;
+    if (a->componentIndex != b->componentIndex) return false;
+    // A helper may read the global hidden by an entry parameter of the
+    // same name. Equal element indices do not make those loads equal.
+    if (a->uniformSource != b->uniformSource) return false;
+    if (a->arrayIndexKind != b->arrayIndexKind) return false;
+    if (a->uniformStructRead.has_value() != b->uniformStructRead.has_value()) return false;
+    if (a->uniformStructRead && (a->uniformStructRead->leaf != b->uniformStructRead->leaf ||
+                                a->uniformStructRead->row != b->uniformStructRead->row)) return false;
+
+    // Compare targetName for LoadUniform/Call instructions
+    if (a->targetName != b->targetName) return false;
+    // Compare semanticName/Index for LoadAttribute/StoreOutput instructions
+    if (a->semanticName != b->semanticName) return false;
+    if (a->semanticIndex != b->semanticIndex) return false;
+    // An implicit TEXCOORD index is provisional until bindImplicitTexCoords
+    // runs after this pass: two instances of one struct share it (it lives
+    // on the struct field) but are different varyings (t_3289f98f), so an
+    // implicit load is equal only to a load of the same instance and member.
+    if (a->inferredSemantic != b->inferredSemantic) return false;
+    // A vertex member with no semantic likewise: its index is the member's
+    // position until bindImplicitAttributes runs, so s.b and t.d (both
+    // second members) looked like one load and t.d was never read.
+    const bool provisional = a->inferredSemantic ||
+        (a->op == IROp::LoadAttribute && a->semanticName.empty() && !a->structParamName.empty());
+    if (provisional &&
+        (a->structParamName != b->structParamName || a->fieldName != b->fieldName)) return false;
+
+    for (size_t i = 0; i < a->operands.size(); ++i)
+    {
+        if (a->operands[i] != b->operands[i]) return false;
+    }
+
+    return true;
+}
+
+bool CommonSubexprElimination::runOnFunction(IRFunction& func)
+{
+    m_stats.reset();
+    m_exprMap.clear();
+
+    std::unordered_map<IRValueID, IRValueID> replacements;
+
+    // Dominators from the terminators (a branch names its target, a
+    // conditional branch "then,else").  An expression may be reused only
+    // where its defining block dominates the use: the sibling arm of an
+    // if/else must not take the other arm's value (libretro's ddt family -
+    // both arms compute A + D; the else arm read the then arm's result,
+    // which is not defined on its path, and the program was refused).
+    const size_t n = func.blocks.size();
+    std::unordered_map<std::string, size_t> index;
+    for (size_t i = 0; i < n; ++i) index[func.blocks[i]->name] = i;
+    std::vector<std::vector<size_t>> preds(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto& insts = func.blocks[i]->instructions;
+        if (insts.empty()) continue;
+        const IRInstruction* term = insts.back().get();
+        if (term->op != IROp::Branch && term->op != IROp::CondBranch) continue;
+        std::string names = term->targetName;
+        size_t start = 0;
+        while (start <= names.size())
+        {
+            const size_t comma = names.find(',', start);
+            const std::string t = names.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+            const auto f = index.find(t);
+            if (f != index.end()) preds[f->second].push_back(i);
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
+    }
+    // dom[b] = set of blocks dominating b (entry = block 0); iterate to a
+    // fixed point, bounded by the block count.
+    std::vector<std::vector<bool>> dom(n, std::vector<bool>(n, true));
+    if (n) { dom[0].assign(n, false); dom[0][0] = true; }
+    for (size_t round = 0; round <= n; ++round)
+    {
+        bool changed = false;
+        for (size_t b = 1; b < n; ++b)
+        {
+            std::vector<bool> next(n, !preds[b].empty());
+            for (size_t p : preds[b])
+                for (size_t k = 0; k < n; ++k) next[k] = next[k] && dom[p][k];
+            next[b] = true;
+            if (next != dom[b]) { dom[b] = next; changed = true; }
+        }
+        if (!changed) break;
+    }
+
+    // The fragment general path FLATTENS the program: every block executes,
+    // in reverse post-order of the CFG (iterative DFS from the entry,
+    // successors in branch-target order, then before else).  There a pure
+    // value defined in a block EARLIER in that order is computed before -
+    // and regardless of - a later block, so it may be reused even where its
+    // block does not dominate (an if's two arms computing the same
+    // expression, main's sharing that the dominance rule alone gave up:
+    // xbrz-freescale-pass1 went over the temp budget).  Replicates the
+    // lowering's order exactly; only with one return block and no back-edge,
+    // the shapes that order is defined for.  The ddt shape - the arm LATER
+    // in that order defining the value - still does not share.
+    std::vector<size_t> rpo(n, n);
+    if (m_straightLine && n)
+    {
+        size_t returns = 0;
+        for (const auto& b : func.blocks)
+            for (const auto& ip : b->instructions)
+                if (ip && ip->op == IROp::Return) ++returns;
+        // Successors in TARGET order, as the lowering walks them.
+        std::vector<std::vector<size_t>> succs(n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto& insts = func.blocks[i]->instructions;
+            if (insts.empty()) continue;
+            const IRInstruction* term = insts.back().get();
+            if (term->op != IROp::Branch && term->op != IROp::CondBranch) continue;
+            const std::string& t = term->targetName;
+            size_t start = 0;
+            while (true)
+            {
+                const size_t comma = t.find(',', start);
+                const auto f = index.find(t.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+                if (f != index.end()) succs[i].push_back(f->second);
+                if (comma == std::string::npos) break;
+                start = comma + 1;
+            }
+        }
+        std::vector<int> color(n, 0);
+        std::vector<size_t> post;
+        std::vector<std::pair<size_t, size_t>> stack{{0, 0}};
+        color[0] = 1;
+        bool backEdge = false;
+        while (!stack.empty() && !backEdge)
+        {
+            auto [b, next] = stack.back();
+            if (next < succs[b].size())
+            {
+                stack.back().second = next + 1;
+                const size_t nb = succs[b][next];
+                if (color[nb] == 1) backEdge = true;
+                else if (color[nb] == 0) { color[nb] = 1; stack.push_back({nb, 0}); }
+            }
+            else
+            {
+                color[b] = 2;
+                post.push_back(b);
+                stack.pop_back();
+            }
+        }
+        if (returns == 1 && !backEdge)
+            for (size_t k = 0; k < post.size(); ++k)
+                rpo[post[post.size() - 1 - k]] = k;
+    }
+
+    // A value defined inside a hardware loop region (loopbegin..loopend) is
+    // not computed when the loop exits before reaching it, and holds only the
+    // last iteration's value after it: it may be reused inside the region,
+    // never after it.  Candidates entered inside a region are withdrawn at
+    // its loopend.  A region expression may still reuse one from before the
+    // loop (that value is live across the whole region).
+    std::vector<std::pair<IRInstruction*, IRValueID>> regionCandidates;
+    int regionDepth = 0;
+    for (size_t bi = 0; bi < n; ++bi)
+    {
+        for (auto& inst : func.blocks[bi]->instructions)
+        {
+            if (inst->op == IROp::LoopBegin) ++regionDepth;
+            if (inst->op == IROp::LoopEnd && regionDepth > 0 && --regionDepth == 0)
+            {
+                for (const auto& [key, value] : regionCandidates)
+                {
+                    auto& list = m_exprMap[key];
+                    list.erase(std::remove_if(list.begin(), list.end(),
+                        [&](const auto& c) { return c.first == value; }), list.end());
+                }
+                regionCandidates.clear();
+            }
+            // Only consider pure operations
+            if (!IRPassUtils::isPure(inst->op) || inst->result == InvalidIRValue)
+            {
+                continue;
+            }
+
+            // Reuse an equivalent expression only from a dominating block
+            auto& candidates = m_exprMap[inst.get()];
+            IRValueID reuse = InvalidIRValue;
+            for (const auto& c : candidates)
+                if (dom[bi][c.second] || (rpo[c.second] < n && rpo[bi] < n && rpo[c.second] < rpo[bi]))
+                { reuse = c.first; break; }
+            if (reuse != InvalidIRValue)
+            {
+                replacements[inst->result] = reuse;
+                m_stats.instructionsRemoved++;
+                // The survivor keeps the short-circuit RHS tag even when a merged
+                // copy is eager: the lowering then refuses an RHS sqrt shared with
+                // an ordinary use (short-root-comparison), and the fragment
+                // pipeline retries without literal sharing (2xbrz/3xbrz).
+            }
+            else
+            {
+                candidates.emplace_back(inst->result, bi);
+                if (regionDepth > 0) regionCandidates.emplace_back(inst.get(), inst->result);
+            }
+        }
+    }
+
+    // Apply replacements
+    if (!replacements.empty())
+    {
+        for (auto& block : func.blocks)
+        {
+            for (auto& inst : block->instructions)
+            {
+                for (auto& op : inst->operands)
+                {
+                    auto it = replacements.find(op);
+                    if (it != replacements.end())
+                    {
+                        op = it->second;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
+// ============================================================================
+// Algebraic Simplification
+// ============================================================================
+
+bool AlgebraicSimplification::runOnFunction(IRFunction& func)
+{
+    m_stats.reset();
+    m_replacements.clear();
+
+    bool changed = false;
+
+    for (auto& block : func.blocks)
+    {
+        for (auto& inst : block->instructions)
+        {
+            if (trySimplify(func, inst.get()))
+            {
+                changed = true;
+            }
+        }
+    }
+
+    // Apply replacements
+    if (!m_replacements.empty())
+    {
+        IRPassUtils::replaceAllUses(func, m_replacements.begin()->first,
+                                     m_replacements.begin()->second);
+    }
+
+    return changed;
+}
+
+bool AlgebraicSimplification::trySimplify(IRFunction& func, IRInstruction* inst)
+{
+    switch (inst->op)
+    {
+    case IROp::Add: return simplifyAdd(func, inst);
+    case IROp::Mul: return simplifyMul(func, inst);
+    case IROp::Sub: return simplifySub(func, inst);
+    case IROp::Div: return simplifyDiv(func, inst);
+    case IROp::Pow: return simplifyPow(func, inst);
+    default: return false;
+    }
+}
+
+bool AlgebraicSimplification::simplifyAdd(IRFunction& func, IRInstruction* inst)
+{
+    if (inst->operands.size() != 2) return false;
+
+    // x + 0 = x
+    if (isZero(func, inst->operands[1]))
+    {
+        m_replacements[inst->result] = inst->operands[0];
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    // 0 + x = x
+    if (isZero(func, inst->operands[0]))
+    {
+        m_replacements[inst->result] = inst->operands[1];
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    return false;
+}
+
+bool AlgebraicSimplification::simplifyMul(IRFunction& func, IRInstruction* inst)
+{
+    if (inst->operands.size() != 2) return false;
+
+    // x * 1 = x
+    if (isOne(func, inst->operands[1]))
+    {
+        m_replacements[inst->result] = inst->operands[0];
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    // 1 * x = x
+    if (isOne(func, inst->operands[0]))
+    {
+        m_replacements[inst->result] = inst->operands[1];
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    // x * 0 = 0
+    if (isZero(func, inst->operands[0]) || isZero(func, inst->operands[1]))
+    {
+        IRConstant* zero = func.createConstant(inst->resultType, 0.0f);
+        m_replacements[inst->result] = zero->id;
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    return false;
+}
+
+bool AlgebraicSimplification::simplifySub(IRFunction& func, IRInstruction* inst)
+{
+    if (inst->operands.size() != 2) return false;
+
+    // x - 0 = x
+    if (isZero(func, inst->operands[1]))
+    {
+        m_replacements[inst->result] = inst->operands[0];
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    // x - x = 0 (same value)
+    if (inst->operands[0] == inst->operands[1])
+    {
+        IRConstant* zero = func.createConstant(inst->resultType, 0.0f);
+        m_replacements[inst->result] = zero->id;
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    return false;
+}
+
+bool AlgebraicSimplification::simplifyDiv(IRFunction& func, IRInstruction* inst)
+{
+    if (inst->operands.size() != 2) return false;
+
+    // x / 1 = x
+    if (isOne(func, inst->operands[1]))
+    {
+        m_replacements[inst->result] = inst->operands[0];
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    // x / x = 1 (same value, assume non-zero)
+    if (inst->operands[0] == inst->operands[1])
+    {
+        IRConstant* one = func.createConstant(inst->resultType, 1.0f);
+        m_replacements[inst->result] = one->id;
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    return false;
+}
+
+bool AlgebraicSimplification::simplifyPow(IRFunction& func, IRInstruction* inst)
+{
+    if (inst->operands.size() != 2) return false;
+
+    // x ^ 0 = 1
+    if (isZero(func, inst->operands[1]))
+    {
+        IRConstant* one = func.createConstant(inst->resultType, 1.0f);
+        m_replacements[inst->result] = one->id;
+        m_stats.instructionsRemoved++;
+        return true;
+    }
+
+    return false;
+}
+
+bool AlgebraicSimplification::isZero(IRFunction& func, IRValueID id) const
+{
+    IRValue* val = func.getValue(id);
+    if (auto* c = dynamic_cast<const IRConstant*>(val))
+    {
+        if (std::holds_alternative<float>(c->value))
+        {
+            return std::get<float>(c->value) == 0.0f;
+        }
+        if (std::holds_alternative<int32_t>(c->value))
+        {
+            return std::get<int32_t>(c->value) == 0;
+        }
+        if (std::holds_alternative<uint32_t>(c->value))
+        {
+            return std::get<uint32_t>(c->value) == 0;
+        }
+    }
+    return false;
+}
+
+bool AlgebraicSimplification::isOne(IRFunction& func, IRValueID id) const
+{
+    IRValue* val = func.getValue(id);
+    if (auto* c = dynamic_cast<const IRConstant*>(val))
+    {
+        if (std::holds_alternative<float>(c->value))
+        {
+            return std::get<float>(c->value) == 1.0f;
+        }
+        if (std::holds_alternative<int32_t>(c->value))
+        {
+            return std::get<int32_t>(c->value) == 1;
+        }
+        if (std::holds_alternative<uint32_t>(c->value))
+        {
+            return std::get<uint32_t>(c->value) == 1;
+        }
+    }
+    return false;
+}
+
+bool AlgebraicSimplification::isNegOne(IRFunction& func, IRValueID id) const
+{
+    IRValue* val = func.getValue(id);
+    if (auto* c = dynamic_cast<const IRConstant*>(val))
+    {
+        if (std::holds_alternative<float>(c->value))
+        {
+            return std::get<float>(c->value) == -1.0f;
+        }
+        if (std::holds_alternative<int32_t>(c->value))
+        {
+            return std::get<int32_t>(c->value) == -1;
+        }
+    }
+    return false;
+}
+
+// ============================================================================
+// Dead Block Elimination
+// ============================================================================
+
+bool DeadBlockElimination::runOnFunction(IRFunction& func)
+{
+    m_stats.reset();
+    m_reachableBlocks.clear();
+
+    if (func.blocks.empty()) return false;
+
+    // Find all reachable blocks
+    findReachableBlocks(func);
+
+    // Remove unreachable blocks
+    auto it = func.blocks.begin();
+    while (it != func.blocks.end())
+    {
+        if (m_reachableBlocks.find(it->get()) == m_reachableBlocks.end())
+        {
+            it = func.blocks.erase(it);
+            m_stats.blocksRemoved++;
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    return m_stats.blocksRemoved > 0;
+}
+
+void DeadBlockElimination::findReachableBlocks(IRFunction& func)
+{
+    if (func.blocks.empty()) return;
+
+    std::vector<IRBasicBlock*> worklist;
+    worklist.push_back(func.blocks[0].get());
+    m_reachableBlocks.insert(func.blocks[0].get());
+
+    while (!worklist.empty())
+    {
+        IRBasicBlock* block = worklist.back();
+        worklist.pop_back();
+
+        for (IRBasicBlock* succ : block->successors)
+        {
+            if (m_reachableBlocks.find(succ) == m_reachableBlocks.end())
+            {
+                m_reachableBlocks.insert(succ);
+                worklist.push_back(succ);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Instruction Combining
+// ============================================================================
+
+bool InstructionCombining::runOnFunction(IRFunction& func)
+{
+    m_stats.reset();
+    bool changed = false;
+
+    for (auto& block : func.blocks)
+    {
+        if (tryCombineMulAdd(func, block.get()))
+        {
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+bool InstructionCombining::tryCombineMulAdd(IRFunction& func, IRBasicBlock* block)
+{
+    // Look for patterns: add(mul(a, b), c) -> mad(a, b, c)
+    // Also matches: add(c, mul(a, b)) -> mad(a, b, c)
+    bool changed = false;
+
+    for (auto it = block->instructions.begin(); it != block->instructions.end(); ++it)
+    {
+        IRInstruction* addInst = it->get();
+
+        // Look for Add instructions
+        if (addInst->op != IROp::Add || addInst->operands.size() != 2)
+            continue;
+
+        IRValueID addOp0 = addInst->operands[0];
+        IRValueID addOp1 = addInst->operands[1];
+
+        // Try to find a Mul instruction that feeds into this Add
+        IRInstruction* mulInst = nullptr;
+        IRValueID addend = InvalidIRValue;
+
+        // Check if first operand is a Mul
+        IRInstruction* def0 = IRPassUtils::getDefinition(func, addOp0);
+        if (def0 && def0->op == IROp::Mul && def0->operands.size() == 2)
+        {
+            // Check if the Mul result is only used by this Add
+            if (IRPassUtils::countUses(func, def0->result) == 1)
+            {
+                mulInst = def0;
+                addend = addOp1;
+            }
+        }
+
+        // If not found, check if second operand is a Mul
+        if (!mulInst)
+        {
+            IRInstruction* def1 = IRPassUtils::getDefinition(func, addOp1);
+            if (def1 && def1->op == IROp::Mul && def1->operands.size() == 2)
+            {
+                // Check if the Mul result is only used by this Add
+                if (IRPassUtils::countUses(func, def1->result) == 1)
+                {
+                    mulInst = def1;
+                    addend = addOp0;
+                }
+            }
+        }
+
+        // If we found a fusable pattern, create MAD
+        if (mulInst && addend != InvalidIRValue)
+        {
+            // Transform: add(mul(a, b), c) -> mad(a, b, c)
+            // Modify the Add instruction in-place to become a Mad
+            addInst->op = IROp::Mad;
+            addInst->operands.clear();
+            addInst->operands.push_back(mulInst->operands[0]);  // a
+            addInst->operands.push_back(mulInst->operands[1]);  // b
+            addInst->operands.push_back(addend);                // c
+
+            // The Mul instruction will be removed by DCE since it's no longer used
+            m_stats.instructionsRemoved++;
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+bool InstructionCombining::tryCombineNormalize(IRFunction& func, IRBasicBlock* block)
+{
+    // Look for patterns: mul(v, rsqrt(dot(v, v))) -> normalize(v)
+    return false;
+}
+
+// ============================================================================
+// Pass Manager
+// ============================================================================
+
+PassManager::PassManager(OptimizationLevel level)
+{
+    configurePasses(level);
+}
+
+void PassManager::configurePasses(OptimizationLevel level)
+{
+    m_passes.clear();
+
+    if (level == OptimizationLevel::O0)
+    {
+        // No optimization
+        return;
+    }
+
+    // O1: Basic optimizations
+    m_passes.push_back(std::make_unique<DeadCodeElimination>());
+    m_passes.push_back(std::make_unique<ConstantFolding>());
+    m_passes.push_back(std::make_unique<CopyPropagation>());
+
+    if (level >= OptimizationLevel::O2)
+    {
+        // O2: Add CSE and algebraic simplification
+        m_passes.push_back(std::make_unique<CommonSubexprElimination>());
+        m_passes.push_back(std::make_unique<AlgebraicSimplification>());
+        m_passes.push_back(std::make_unique<DeadBlockElimination>());
+    }
+
+    if (level >= OptimizationLevel::O3)
+    {
+        // O3: Add instruction combining
+        m_passes.push_back(std::make_unique<InstructionCombining>());
+        // Run DCE again after combining
+        m_passes.push_back(std::make_unique<DeadCodeElimination>());
+    }
+
+    if (level >= OptimizationLevel::O4)
+    {
+        // O4: Multiple iterations
+        m_maxIterations = 8;
+    }
+}
+
+void PassManager::addPass(std::unique_ptr<IRPass> pass)
+{
+    m_passes.push_back(std::move(pass));
+}
+
+bool PassManager::runOnModule(IRModule& module)
+{
+    bool changed = false;
+
+    for (auto& func : module.functions)
+    {
+        // Only optimize the entry point function to avoid breaking builtins
+        if (!func->isEntryPoint)
+        {
+            continue;
+        }
+
+        if (runOnFunction(*func))
+        {
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+bool PassManager::runOnFunction(IRFunction& func)
+{
+    bool changed = false;
+
+    for (int iter = 0; iter < m_maxIterations; ++iter)
+    {
+        bool iterChanged = false;
+
+        for (auto& pass : m_passes)
+        {
+            if (m_verbose)
+            {
+                std::cout << "Running pass: " << pass->getName() << std::endl;
+            }
+
+            if (pass->runOnFunction(func))
+            {
+                iterChanged = true;
+                const auto& stats = pass->getStats();
+                m_totalStats.instructionsRemoved += stats.instructionsRemoved;
+                m_totalStats.constantsFolded += stats.constantsFolded;
+                m_totalStats.copiesPropagated += stats.copiesPropagated;
+                m_totalStats.blocksRemoved += stats.blocksRemoved;
+
+                if (m_verbose)
+                {
+                    std::cout << "  Removed: " << stats.instructionsRemoved
+                              << " instructions" << std::endl;
+                }
+            }
+        }
+
+        if (iterChanged)
+        {
+            changed = true;
+        }
+        else
+        {
+            // No changes in this iteration - converged
+            break;
+        }
+    }
+
+    return changed;
+}

@@ -46,8 +46,11 @@ RCP = 0x1A   # nvfx_shader.h NVFX_FP_OP_OPCODE_RCP: scalar, reads the source's x
 DIV = 0x3A   # NVFX_FP_OP_OPCODE_DIV (NV_fragment_program2 DIV): vector src0 / scalar src1.x
 MODELLED = {MOV, MUL, ADD, MAD, DP3, DP4, MIN, MAX, SLT, SGE, SLE, SGT, SNE, SEQ, FRC, FLR, FENCBR, FENCTR, DP2, RCP, DIV}
 
-INPUT_SEL = {0x3: "FOGC", 0x1: "COL0", 0x2: "COL1", 0x4: "TEX0", 0x5: "TEX1", 0x6: "TEX2", 0x7: "TEX3",
-             0x8: "TEX4", 0x9: "TEX5", 0xA: "TEX6", 0xB: "TEX7"}
+# nvfx_shader.h NVFX_FP_OP_INPUT_SRC_*: POSITION 0x0, TC(n) = 0x4 + n for TEXCOORD0..9.
+# A selector is only readable when the caller supplies that input; FACING
+# (0xE) and the unnamed selectors stay unmodelled.
+INPUT_SEL = {0x0: "WPOS", 0x3: "FOGC", 0x1: "COL0", 0x2: "COL1", 0x4: "TEX0", 0x5: "TEX1", 0x6: "TEX2",
+             0x7: "TEX3", 0x8: "TEX4", 0x9: "TEX5", 0xA: "TEX6", 0xB: "TEX7", 0xC: "TEX8", 0xD: "TEX9"}
 
 
 class Unmodelled(Exception):
@@ -149,9 +152,17 @@ def _op(opc, a, b, c):
         return [max(x, y) for x, y in zip(a, b)]
     if opc in cmp:
         return [1.0 if cmp[opc](x, y) else 0.0 for x, y in zip(a, b)]
-    if opc == FRC:
-        return [f32(x - math.floor(x)) for x in a]
-    if opc == FLR:
+    if opc in (FRC, FLR):
+        # The RSX's FRC/FLR of a NaN or an infinity is not measured, and
+        # math.floor raises on them (ValueError, OverflowError) - so a
+        # non-finite source lane is refused with a reason, never guessed.
+        # Unread lanes are 0.0 (_read), so this sees only lanes the op reads.
+        bad = [x for x in a if not math.isfinite(x)]
+        if bad:
+            raise Unmodelled("%s of a non-finite value %r (RSX result not measured)"
+                             % ("FRC" if opc == FRC else "FLR", bad[0]))
+        if opc == FRC:
+            return [f32(x - math.floor(x)) for x in a]
         return [float(math.floor(x)) for x in a]
     if opc == DIV:
         y = b[0]
@@ -167,8 +178,11 @@ _CC_TEST = {0: lambda x: False, 1: lambda x: x < 0, 2: lambda x: x == 0, 3: lamb
             4: lambda x: x > 0, 5: lambda x: x != 0, 6: lambda x: x >= 0, 7: lambda x: True}
 
 
-def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False):
-    """Run the program; `inputs` maps 'TEX0'.. / 'COL0' to 4-float lists. Returns R0."""
+def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False, out_lanes=(0, 1, 2, 3)):
+    """Run the program; `inputs` maps 'TEX0'.. / 'COL0' to 4-float lists. Returns R0.
+
+    `out_lanes` names the colour lanes the program defines (a float2 output writes
+    only x and y); only those are read, and each must have been written."""
     # zero_temps: an R temp never written reads 0 (measured on the hardware
     # model the reference relies on: a loop's induction variable and
     # accumulators start unwritten).  Off by default, so a read of an unwritten
@@ -337,7 +351,8 @@ def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False):
         raise Unmodelled("no PROGRAM_END")
     prog = struct.unpack_from(">8I", blob, 0)[5]
     key = ('H', 0) if blob[prog + 19] else ('R', 0)
-    return list(regs.read(key, [0, 1, 2, 3]))
+    out = regs.read(key, list(out_lanes))
+    return [out[i] for i in out_lanes]
 
 
 # ---- self-test: encoded controls, no compiler needed -----------------------
@@ -433,10 +448,38 @@ def self_test():
         words[2] |= scale << 28
         rows.append(('%s: output scale encoding %d' % ('green' if factor else 'red', scale),
                      _container(words), [f32(x * factor) for x in a] if factor else None))
+    # input selectors: TEXCOORD8/9 (0xC/0xD) and POSITION (0x0) read the
+    # caller's input; a selector the caller does not supply, and FACING
+    # (0xE), are refused
+    for sel_, name_ in ((0xC, 'TEX8'), (0xD, 'TEX9'), (0x0, 'WPOS')):
+        rows.append(('green: MOV R0, %s (selector %#x)' % (name_, sel_),
+                     _container(_ins(MOV, 0, 0xF, [_src(I)], sel=sel_, end=1)), b, {'TEX0': a, name_: b}))
+        rows.append(('red: %s selector, input not supplied' % name_,
+                     _container(_ins(MOV, 0, 0xF, [_src(I)], sel=sel_, end=1)), None, {'TEX0': a}))
+    rows.append(('red: FACING selector 0xe stays unmodelled',
+                 _container(_ins(MOV, 0, 0xF, [_src(I)], sel=0xE, end=1)), None, {'TEX0': a, 'FACING': b}))
+    # FLR/FRC of a non-finite source: refused with a reason (math.floor raised
+    # ValueError/OverflowError here, aborting a whole census, t_ef23a185); a
+    # finite source still evaluates, and a non-finite value in a lane the
+    # write mask leaves unread does not refuse
+    for opn, opc in (('FLR', FLR), ('FRC', FRC)):
+        for label, v in (('NaN', math.nan), ('+Inf', math.inf), ('-Inf', -math.inf)):
+            rows.append(('red: %s R0, TEX0 with TEX0.y = %s' % (opn, label),
+                         _container(_ins(opc, 0, 0xF, [_src(I)], sel=tex0, end=1)), None, {'TEX0': [1.5, v, 0.25, -2.75]}))
+    rows.append(('green: FLR R0, TEX0 (finite)', _container(_ins(FLR, 0, 0xF, [_src(I)], sel=tex0, end=1)),
+                 [1.0, -3.0, 0.0, -1.0], {'TEX0': [1.5, -2.25, 0.25, -0.5]}))
+    rows.append(('green: FRC R0, TEX0 (finite)', _container(_ins(FRC, 0, 0xF, [_src(I)], sel=tex0, end=1)),
+                 [0.5, 0.75, 0.25, 0.5], {'TEX0': [1.5, -2.25, 0.25, -0.5]}))
+    rows.append(('green: FLR R0.x, TEX0 with a NaN only in an unread lane',
+                 _container(_ins(MOV, 0, 0xF, [_src(I)], sel=0x5) + _ins(FLR, 0, 0x1, [_src(I)], sel=tex0, end=1)),
+                 [1.0, 0.5, 0.75, -1.25], {'TEX0': [1.5, math.nan, math.inf, -math.inf], 'TEX1': [9.0, 0.5, 0.75, -1.25]}))
     fails = 0
     for row in rows:
         name, blob, want = row[:3]
-        ins = {'TEX0': row[3], 'TEX1': row[4]} if len(row) > 3 else {'TEX0': a}
+        if len(row) > 3 and isinstance(row[3], dict):
+            ins = row[3]
+        else:
+            ins = {'TEX0': row[3], 'TEX1': row[4]} if len(row) > 3 else {'TEX0': a}
         try:
             got = evaluate(blob, ins)
             ok = want is not None and got == want

@@ -1,0 +1,2 @@
+// CONTROL.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float b = 2.0; float x = uv.x; return float4(b - x, uv.y, 0, 1); }

@@ -1,0 +1,4 @@
+// `typedef Foo Bar;` of a TAGGED struct.  Reference: byte-identical.
+struct Foo { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
+typedef Foo Bar;
+float4 main(Bar i) : COLOR { return float4(i.col * i.uv.x, 1); }

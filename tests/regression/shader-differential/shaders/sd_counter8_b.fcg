@@ -1,0 +1,6 @@
+// shader-differential - RGBA8 counter-control, side B: 0.5 + 2^-10 = 0.5009765625 on lane x
+// (binary32 0x3f004000), the f32-sub8 control's value.  See sd_counter8_a.fcg.
+void main(out float4 color : COLOR)
+{
+    color = float4(0.5009765625f, 0.5f, 0.5f, 0.5f);
+}

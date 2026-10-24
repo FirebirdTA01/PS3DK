@@ -1,0 +1,4 @@
+// The comma IS its right operand in a constant fold too: `(float3(1,2,3),
+// 0.5)` is one float, so float4(that, 1) has too little data.  Reference:
+// C1067.  A fold that kept the left operand's three lanes accepted this.
+float4 main(float2 uv : TEXCOORD0) : COLOR { return float4((float3(1, 2, 3), 0.5), 1); }

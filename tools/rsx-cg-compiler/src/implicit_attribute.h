@@ -64,6 +64,44 @@ inline bool isImplicitVertexParam(const IRParameter& p)
            !p.type.isArray() && !p.type.isMatrix();
 }
 
+// A varying matrix needs row loads and row records, neither modelled yet.
+// Run after DCE: an unread explicit matrix among explicit neighbours works
+// today and must remain accepted. Its declaration still reserves rows when
+// implicit inputs exist, even if no matrix read survives.
+inline std::string unsupportedVaryingMatrixInput(const IRFunction& entry)
+{
+    bool matrix = false, implicit = false;
+    for (const auto& p : entry.parameters) {
+        matrix |= !p.varyingMatrixPaths.empty();
+        implicit |= p.hasImplicitVaryingInput;
+        if (p.hasImplicitVaryingMatrix)
+            return "an implicit varying matrix needs row bindings";
+    }
+    if (!matrix) return {};
+    if (implicit) return "a varying matrix beside an implicit input needs row reservations";
+
+    for (const auto& block : entry.blocks) {
+        if (!block) continue;
+        for (const auto& inst : block->instructions) {
+            if (!inst) continue;
+            if (inst->op == IROp::LoadAttribute && inst->resultType.isMatrix())
+                return "a varying matrix read needs row loads";
+            for (const auto& p : entry.parameters) {
+                for (const auto& path : p.varyingMatrixPaths) {
+                    if (path.empty()) {
+                        if (std::find(inst->operands.begin(), inst->operands.end(), p.valueId) != inst->operands.end())
+                            return "a varying matrix read needs row loads";
+                    } else if (inst->op == IROp::LoadAttribute && inst->structParamName == p.name &&
+                               (inst->fieldName == path || inst->fieldName.compare(0, path.size() + 1, path + "[") == 0)) {
+                        return "a varying matrix member read needs row loads";
+                    }
+                }
+            }
+        }
+    }
+    return {};
+}
+
 inline void bindImplicitAttributes(IRFunction& entry)
 {
     const auto isInput = [](const IRParameter& p) {

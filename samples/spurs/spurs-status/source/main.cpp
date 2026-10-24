@@ -26,6 +26,8 @@
 #include <cell/gcm.h>
 #include <cell/dbgfont.h>
 #include <cell/sysutil.h>
+#include <io/pad.h>
+#include <sys/process.h>
 #include <rsx/rsx.h>
 
 SYS_PROCESS_PARAM(1001, 0x100000);
@@ -54,6 +56,12 @@ volatile unsigned g_current = ~0u;
 volatile bool g_done;
 uint64_t g_t0;
 volatile bool g_exit;
+bool g_padOk;
+bool g_started;              /* rows start on X, or after kAutoStartUs */
+uint64_t g_waitStart;
+constexpr uint64_t kAutoStartUs = 30000000;
+/* the LIVE panel sits under the last row, wherever that is */
+constexpr float kRowTop = 0.15f, kRowPitch = 0.019f;
 
 void on_sysutil(uint64_t status, uint64_t, void *)
 {
@@ -137,6 +145,13 @@ void draw(unsigned frame)
 
     /* header */
     text(0.04f, 0.04f, 1.25f, kCyan, "SPURS STATUS");
+    if (!g_started) {
+        const uint64_t waited = t - g_waitStart;
+        const unsigned left = waited >= kAutoStartUs ? 0u : (unsigned)((kAutoStartUs - waited + 999999u) / 1000000u);
+        const float wy = kRowTop + kRowCount * kRowPitch + 0.03f;
+        text(0.12f, wy, 1.2f, kAmber, g_padOk ? "press X to start the SPURS tests" : "no pad: starting automatically");
+        text(0.12f, wy + 0.05f, 0.85f, kDim, "auto-start in %us   -   START exits", left);
+    }
     text(0.30f, 0.05f, 0.9f, kDim, "PPU <-> SPU runtime check   %c   %4.1fs",
          g_done ? ' ' : spin, (double)(t - g_t0) / 1e6);
     char progress[41];
@@ -145,8 +160,8 @@ void draw(unsigned frame)
     text(0.62f, 0.09f, 0.9f, kWhite, "pass %u   fail %u", passed, failed);
 
     /* board */
-    float y = 0.15f;
-    for (unsigned i = 0; i < kRowCount; ++i, y += 0.021f) {   /* 18 rows end above LIVE */
+    float y = kRowTop;
+    for (unsigned i = 0; i < kRowCount; ++i, y += kRowPitch) {
         const RowStatus &r = g_rows[i];
         const char *badge = " --- ";
         uint32_t color = kDim;
@@ -159,10 +174,10 @@ void draw(unsigned frame)
         case SKIPPED: badge = " skip"; color = kDim; break;
         }
         uint64_t end = r.state == RUNNING || r.state == TIMEOUT ? t : r.end;
-        text(0.04f, y, 0.8f, color, "[%s]", badge);
-        text(0.13f, y, 0.8f, r.state == PENDING ? kDim : kWhite, "%-24s", kRows[i].name);
+        text(0.04f, y, 0.75f, color, "[%s]", badge);
+        text(0.13f, y, 0.75f, r.state == PENDING ? kDim : kWhite, "%-24s", kRows[i].name);
         if (r.state != PENDING && r.state != SKIPPED)
-            text(0.40f, y, 0.8f, kDim, "%6.2fs", end > r.start ? (double)(end - r.start) / 1e6 : 0.0);
+            text(0.40f, y, 0.75f, kDim, "%6.2fs", end > r.start ? (double)(end - r.start) / 1e6 : 0.0);
         if (r.state == FAILED || r.state == INVALID)
             text(0.48f, y, 0.7f, kRed, "%.60s", r.verdict);
     }
@@ -170,7 +185,7 @@ void draw(unsigned frame)
     /* live panel for the running row */
     unsigned cur = g_current;
     const suite::live_view &v = suite::live();
-    float py = 0.54f;
+    const float py = kRowTop + kRowCount * kRowPitch + 0.015f;
     text(0.04f, py, 0.9f, kCyan, "LIVE");
     if (cur < kRowCount) {
         RowStatus &r = g_rows[cur];
@@ -178,31 +193,32 @@ void draw(unsigned frame)
         if (r.state == RUNNING && t > r.start && t - r.start > kRowTimeout)
             r.state = TIMEOUT;
         text(0.12f, py, 0.9f, kWhite, "%s", kRows[cur].name);
-        text(0.04f, py + 0.04f, 0.85f, kAmber, "%c PPU: %s", r.state == RUNNING ? spin : '!', v.activity);
+        text(0.04f, py + 0.03f, 0.8f, kAmber, "%c PPU: %s", r.state == RUNNING ? spin : '!', v.activity);
         unsigned n = v.logCount < (unsigned)suite::LOG_LINES ? v.logCount : (unsigned)suite::LOG_LINES;
         for (unsigned k = 1; k < n; ++k) {
             unsigned idx = (v.logCount - 1 - k) % suite::LOG_LINES;
-            text(0.06f, py + 0.04f + 0.03f * k, 0.7f, kDim, "%s", v.log[idx]);
+            text(0.06f, py + 0.03f + 0.022f * k, 0.62f, kDim, "%s", v.log[idx]);
         }
         /* SPU task slots */
-        float sy = py + 0.25f;
+        const float sy = py + 0.04f + 0.022f * suite::LOG_LINES + 0.005f;
         if (v.nSlots)
             text(0.04f, sy, 0.85f, kBlue, "SPU tasks");
         for (unsigned k = 0; k < v.nSlots; ++k) {
             const volatile result_slot &s = v.slots[k];
-            float x = 0.04f + (k % 3) * 0.31f, yy = sy + 0.035f * (1 + k / 3);
+            float x = 0.04f + (k % 4) * 0.235f, yy = sy + 0.028f * (1 + k / 4);
             if (s.magic != (RESULT_MAGIC | k))
-                text(x, yy, 0.7f, kDim, "task %2u  %c running / waiting", k, spin);
+                text(x, yy, 0.6f, kDim, "task %2u  %c running / waiting", k, spin);
             else if (s.status == 0)
-                text(x, yy, 0.7f, kGreen, "task %2u  done  v=%x", k, s.value);
+                text(x, yy, 0.6f, kGreen, "task %2u  done  v=%x", k, s.value);
             else
-                text(x, yy, 0.7f, kRed, "task %2u  rc=%08x step %u", k, s.status, s.value);
+                text(x, yy, 0.6f, kRed, "task %2u  rc=%08x step %u", k, s.status, s.value);
         }
     } else if (g_done) {
         text(0.12f, py, 0.9f, failed ? kRed : kGreen,
              failed ? "run stopped at the first failing row" : "all rows passed");
     }
-    text(0.04f, 0.95f, 0.65f, kDim, "4 SPUs per row  -  verdicts also on the TTY  -  timeout %us",
+    text(0.04f, 0.95f, 0.65f, kDim, g_padOk ? "4 SPUs per row  -  verdicts also on the TTY  -  START exits  -  timeout %us"
+                                       : "4 SPUs per row  -  verdicts also on the TTY  -  NO PAD: START cannot exit  -  timeout %us",
          (unsigned)(kRowTimeout / 1000000u));
 }
 
@@ -301,15 +317,39 @@ int main()
         return 1;
 
     cellSysutilRegisterCallback(0, on_sysutil, nullptr);
+    /* START exits: there may be no PS button to reach Quit Game */
+    g_padOk = ioPadInit(7) == 0;
+    if (!g_padOk)
+        std::printf("spurs-status: ioPadInit failed; START will not exit\n");
     sys_ppu_thread_t t;
-    if (sys_ppu_thread_create(&t, worker, 0, 1500, 0x10000, 0, "spurs-status rows") != 0)
-        return 1;
+    g_waitStart = now_us();
 
     CellGcmContextData *ctx = CELL_GCM_CURRENT;
     unsigned cur = 0;
     bool flipPending = false;   /* only wait for a flip that was issued */
     for (unsigned frame = 0; !g_exit; ++frame) {
         cellSysutilCheckCallback();
+        bool startPressed = false;
+        if (g_padOk) {
+            padInfo pi = {};
+            if (ioPadGetInfo(&pi) == 0)
+            for (int i = 0; i < MAX_PADS; i++) {
+                if (!pi.status[i]) continue;
+                padData pd = {};
+                ioPadGetData(i, &pd);
+                if (pd.BTN_START) g_exit = true;
+                if (pd.BTN_CROSS) startPressed = true;
+            }
+        }
+        /* On hardware the rows finish before the display comes up, so they
+           wait for X (or start on their own after kAutoStartUs, which keeps
+           unattended RPCS3 sweeps running). */
+        if (!g_started && (startPressed || now_us() - g_waitStart >= kAutoStartUs)) {
+            g_started = true;
+            g_t0 = now_us();
+            if (sys_ppu_thread_create(&t, worker, 0, 1500, 0x10000, 0, "spurs-status rows") != 0)
+                std::printf("spurs-status: could not start the row thread\n");
+        }
         set_target(ctx, bufs[cur]);
         cellGcmSetClearColor(ctx, 0xff0b1119);
         cellGcmSetClearSurface(ctx, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
@@ -326,7 +366,13 @@ int main()
         }
         cur ^= 1;
     }
+    ioPadEnd();
     cellDbgFontExitGcm();
     cellGcmFinish(ctx, 0);
-    return 0;
+    /* Leave without the C/C++ exit path.  On a real PS3 the board froze on
+       START after spurs-jq-spu had failed.  A failed row keeps its SPURS
+       instance and SPUs on purpose; the SUSPECTED (not proven) cause is
+       exit-time teardown waiting on them.  The kernel reclaims the SPU
+       thread groups, threads and memory of an exiting process. */
+    sys_process_exit(0);
 }

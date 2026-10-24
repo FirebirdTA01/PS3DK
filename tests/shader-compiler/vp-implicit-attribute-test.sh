@@ -124,6 +124,62 @@ for name, src, terms in ROWS:
             if wrong == 1: fails.append('%s: got %s want %s' % (name, res, expect))
     print('  %-18s %s' % (name, 'ok' if wrong == 0 else '%d WRONG' % wrong))
 
+# Varying matrices are a separate, measured gap. Even m[1] with ATTR0
+# explicitly assigned currently reads ATTR0.y four times, instead of ATTR1.
+# An unread matrix must also reserve its rows before any implicit input;
+# until row loads/records are implemented these shapes must refuse.
+MATRIX_REFUSALS = {
+    'matrix_read': 'float4 main(float4x4 m:ATTR0):POSITION{return m[1];}',
+    'matrix_explicit_neighbors': 'float4 main(float4x4 m:ATTR0,float4 x:ATTR4):POSITION{return m[1]+2*x;}',
+    'matrix_implicit_neighbor': 'float4 main(float4x4 m:ATTR0,float4 x):POSITION{return x;}',
+    'matrix_implicit': 'float4 main(float4x4 m,float4 x:ATTR4):POSITION{return x;}',
+    'matrix_member': 'struct S{float4x4 m:ATTR0;float4 x;}; float4 main(S s,float4 y):POSITION{return s.m[1]+2*s.x+3*y;}',
+    'matrix_member_unread': 'struct S{float4x4 m:ATTR0;float4 x;}; float4 main(S s,float4 y):POSITION{return 2*s.x+3*y;}',
+    'matrix_nested': 'struct T{float4x4 m:ATTR0;}; struct S{T t;float4 x;}; float4 main(S s,float4 y):POSITION{return 2*s.x+3*y;}',
+    'matrix_member_read_explicit': 'struct S{float4x4 m:ATTR0;float4 x:ATTR4;}; float4 main(S s):POSITION{return s.m[1]+s.x;}',
+    'matrix_bare_array_neighbor': 'float4 main(float4x4 m:ATTR0,float4 x[2]):POSITION{return x[0];}',
+    # A matrix inside an array of structs (a parameter array, or a member array) is still a
+    # declared varying matrix: unread, beside an implicit input, it must refuse too (codex 1fb7e1f9).
+    'matrix_struct_array_unread': 'struct S{float4x4 m:ATTR0;}; float4 main(S s[2],float4 x):POSITION{return x;}',
+    'matrix_nested_array_unread': 'struct T{float4x4 m:ATTR0;};struct S{T a[2];};float4 main(S s,float4 x):POSITION{return x;}',
+}
+for name, src in MATRIX_REFUSALS.items():
+    s, o = work / (name + '.cg'), work / (name + '.vpo')
+    s.write_text(src + NL)
+    o.unlink(missing_ok=True)
+    p = subprocess.run([compiler, '-p', 'sce_vp_rsx', '-e', 'main', '--emit-container', str(o), str(s)],
+                       capture_output=True, text=True, timeout=120)
+    ok = p.returncode == 1 and 'vp-varying-matrix-input' in p.stdout + p.stderr and not o.exists()
+    if not ok: fails.append('%s: expected named refusal and no container; rc=%d, exists=%s' % (name, p.returncode, o.exists()))
+    print('  %-28s %s' % (name, 'refused' if ok else 'FAIL'))
+
+# Preserve the correct neighbour: an unread explicit matrix and only
+# explicitly bound numeric inputs. Only x is read; its record and value
+# must keep ATTR4. Also exercise DCE before the matrix-read guard.
+for name, src, xa in [
+    ('matrix_unread_explicit', 'float4 main(float4x4 m:ATTR0,float4 x:ATTR4):POSITION{return x;}', 4),
+    ('matrix_dead_explicit', 'float4 main(float4x4 m:ATTR0,float4 x:ATTR4):POSITION{float4 v=x;if(false)v=m[1];return v;}', 4),
+    ('matrix_uniform_unread', 'float4 main(uniform float4x4 m,float4 x:ATTR4):POSITION{return x;}', 4),
+    # An all-explicit unread matrix inside an array of structs, and a uniform matrix array beside
+    # an implicit input: neither has a varying matrix read or an implicit varying neighbour.
+    ('matrix_struct_array_explicit', 'struct S{float4x4 m:ATTR0;}; float4 main(S s[2],float4 x:ATTR8):POSITION{return x;}', 8),
+    ('matrix_uniform_array_implicit', 'float4 main(uniform float4x4 m[2],float4 x):POSITION{return x;}', 0),
+]:
+    s, o = work / (name + '.cg'), work / (name + '.vpo')
+    s.write_text(src + NL)
+    o.unlink(missing_ok=True)
+    p = subprocess.run([compiler, '-p', 'sce_vp_rsx', '-e', 'main', '--emit-container', str(o), str(s)],
+                       capture_output=True, text=True, timeout=120)
+    ok = p.returncode == 0 and o.is_file() and o.stat().st_size > 0
+    if ok:
+        blob = o.read_bytes()
+        ok = [r for r in inputs_of(blob) if r[0] == 'x'] == [('x', xa, 1)]
+        vecs = {i: [float(10*i+j+1) for j in range(4)] for i in range(16)}
+        ok = ok and agrees(ev.evaluate(blob, {}, inputs=vecs, binary32=True, predication=True,
+                                       branches=True).get(0), vecs[xa])
+    if not ok: fails.append('%s: explicit unread matrix neighbour failed' % name)
+    print('  %-28s %s' % (name, 'ok' if ok else 'FAIL'))
+
 for f in fails: print('vp-implicit-attribute: FAIL', f)
 print('vp-implicit-attribute: %s' % ('PASS' if not fails else 'FAIL (%d)' % len(fails)))
 sys.exit(1 if fails else 0)

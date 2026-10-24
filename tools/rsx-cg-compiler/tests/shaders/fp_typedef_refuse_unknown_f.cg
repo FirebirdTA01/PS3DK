@@ -1,0 +1,3 @@
+// A typedef of a name that never exists.  Reference: C0000 at Nope.
+typedef Nope Bar;
+float4 main(float2 uv : TEXCOORD0) : COLOR { return float4(uv, 0, 1); }

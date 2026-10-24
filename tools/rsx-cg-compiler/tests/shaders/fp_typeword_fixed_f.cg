@@ -1,0 +1,2 @@
+// `fixed` as a variable name.  Reference: byte-identical.
+float4 main(float2 uv : TEXCOORD0) : COLOR { float3 fixed = float3(0, 0, 1); return float4(fixed.xy + uv, fixed.z, 1); }

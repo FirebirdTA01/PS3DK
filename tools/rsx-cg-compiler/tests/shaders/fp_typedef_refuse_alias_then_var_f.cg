@@ -1,0 +1,6 @@
+// The alias first, then a global variable of the same name.  Reference:
+// C1002, the same as the other order.
+typedef struct { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; } A;
+typedef A B;
+float B = 2.0;
+float4 main(A i) : COLOR { return float4(i.col * i.uv.x, 1); }

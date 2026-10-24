@@ -41,6 +41,60 @@ jobs:
           python3 scripts/leakscan.py --self-test
           python3 scripts/compare-builds.py --self-test
 
+  shellcheck:
+    name: ShellCheck ratchet over scripts/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Pin the exact shellcheck the baseline was generated with so the rule
+      # set is deterministic across runs and distros (a different version can
+      # flag, or fail to flag, different codes and break the ratchet).
+      # Install into $RUNNER_TEMP so no sudo is required; publish it to
+      # PATH via GITHUB_PATH so the Version and Ratchet steps see it.
+      # The tarball is additionally pinned by sha256 so a tampered download
+      # or a re-published release-asset with the same version fails the
+      # version-check step rather than the ratchet silently passing on a
+      # different binary.
+      - name: Install shellcheck 0.10.0
+        env:
+          SHELLCHECK_VERSION: 0.10.0
+          SHELLCHECK_TARBALL_SHA256: 6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/shellcheck"
+          mkdir -p "$dest"
+          curl -fsSL -o /tmp/shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          # Verify the tarball against the pinned sha256. A tampered or
+          # substituted release-asset (same URL, different bytes) fails the
+          # step here and not later inside the ratchet.
+          echo "${SHELLCHECK_TARBALL_SHA256}  /tmp/shellcheck.tar.xz" | sha256sum -c
+          # The 0.10.0 tarball extracts to  shellcheck-v{ver}/shellcheck
+          # at its root level, not shellcheck-v{ver}/bin/shellcheck.
+          tar -xf /tmp/shellcheck.tar.xz -C /tmp
+          cp "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" "$dest/shellcheck"
+          chmod +x "$dest/shellcheck"
+          printf '%s\n' "$dest" >> "$GITHUB_PATH"
+      # Confirm the installed binary actually reports 0.10.0 before
+      # running the ratchet, so a partial or corrupt download fails here
+      # instead of producing a green-with-wrong-tool run.
+      - name: Version
+        run: |
+          actual=$(shellcheck --version 2>&1 | awk 'NR==2{print $2}')
+          if [ "$actual" != "0.10.0" ]; then
+            echo "FAIL: shellcheck reports $actual, baseline was generated with 0.10.0"
+            exit 1
+          fi
+          shellcheck --version
+
+      # Ratchet: fails on any finding not already recorded in
+      # ci/shellcheck-baseline.txt, so the tree only ever gets cleaner.
+      # It self-checks that this shellcheck can flag an unquoted variable,
+      # so a stubbed runner fails closed instead of passing silently.
+      - name: Run the ratchet over scripts/**/*.sh
+        run: bash ci/shellcheck.sh
+
   rust-tools:
     name: Rust tools build + tests
     runs-on: ubuntu-latest
@@ -320,6 +374,19 @@ jobs:
       - name: Test the SPU vmx2spu.h header compiles in C++
         run: bash tests/sdk/spu-vmx2spu-cxx-test.sh
 
+      # Skip without PS3DEV; header salvage from the 2026-10-16 branch audit:
+      # libnetctl.h and netinet/in.h in any order, the PRX record types and
+      # SYS_SPU_QUEUE, and the SDK-owned sys/tty.h + sys/interrupt.h (ILP32
+      # pointers reach the system call zero-extended).
+      - name: Test struct in_addr across libnetctl.h and netinet/in.h orders
+        run: bash tests/sdk/in-addr-order-test.sh
+      - name: Test the PRX record types and event queue type constants
+        run: bash tests/sdk/sys-prx-records-test.sh
+      - name: Test the SDK-owned sys/tty.h and sys/interrupt.h
+        run: bash tests/sdk/sys-tty-interrupt-test.sh
+      - name: Test the SDK-owned sys/file.h (pointer arguments zero-extended)
+        run: bash tests/sdk/sys-file-test.sh
+
       # Skips without PS3DEV; ld's TOC edit must write a zero pad word, not
       # heap bytes, after an odd-size ILP32 .toc (binutils patch 0007).
       - name: Test the TOC edit pads an odd-size .toc with zeros
@@ -401,6 +468,11 @@ jobs:
 
       - name: Test librt lv2error maps every LV2 status code to itself
         run: bash tests/sdk/librt-lv2errno-test.sh
+      # The ShellCheck ratchet fails closed at every step (enumeration,
+      # shellcheck status/stderr/unparsed output, baseline parsing); driven
+      # with a stub shellcheck, so no install is needed here.
+      - name: Test the ShellCheck ratchet's failure handling
+        run: bash tests/host/shellcheck-ratchet-test.sh
 
       # check-release-tree.sh refuses .self/.elf/.sprx/.prx and CMake build
       # files under samples/ and tests/: a package ships them as source.
@@ -446,6 +518,15 @@ jobs:
 
       - name: Test checked initial GCM FIFO extent admission
         run: python3 tests/sdk/fifo-init-extent-test.py
+
+      # The rsxMalloc/rsxMemalign/rsxFree surface in librsx and libgcm_cmd
+      # silently dropped the allocator's failure reason (NULL and void).
+      # This host test drives the real mm.c object against a stub heap and
+      # asserts the SDK-only last-error query reports UNINIT, GCM_CONFIG,
+      # ALLOCATION and FREE for the matching failure, and OK on success
+      # (t_9eaa8392).
+      - name: Test the RSX heap last-error diagnostic reports every failure mode
+        run: bash tests/sdk/rsx-mm-lasterror-test.sh
 
       # The SPU libsheap core is portable C: the host build checks the heap
       # layout the firmware shares, the tree bits, the allocation rules, the
@@ -782,6 +863,8 @@ jobs:
         run: bash tests/shader-compiler/stdlib-derivatives-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler DIVR opcode
         run: bash tests/shader-compiler/divr-opcode-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Fragment programs share literal expressions, reciprocals and pow2 divide scales
+        run: bash tests/shader-compiler/fp-literal-sharing-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Scalar local initializers broadcast to vectors once
         run: bash tests/shader-compiler/scalar-vector-decl-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Helper struct annotations do not bind entry inputs
@@ -861,6 +944,9 @@ jobs:
 
       - name: Test rsx-cg-compiler TEXCOORD8/9 masks
         run: bash tests/shader-compiler/texcoord-89-mask-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test rsx-cg-compiler TEXCOORD8/9 vertex output routing
+        run: bash tests/shader-compiler/vp-texcoord-89-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler discard completeness
         run: bash tests/shader-compiler/discard-completeness-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -985,6 +1071,12 @@ jobs:
         run: bash tests/shader-compiler/wrong-accept-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Typedef aliases preserve direct-type values and bindings
         run: bash tests/shader-compiler/typedef-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Typedef spellings (struct tag, forward tag, array extent) match the direct type; name clashes refuse
+        run: bash tests/shader-compiler/typedef-alias-fable-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: The comma operator evaluates its left operand and is its right; for-clause commas split when independent
+        run: bash tests/shader-compiler/comma-operator-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A type word or user type declared as a name is that name (functions, members, locals)
+        run: bash tests/shader-compiler/type-words-as-names-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Local struct initializers preserve fields and evaluate arguments once
         run: bash tests/shader-compiler/local-struct-init-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Fragment inputs with no semantic and uniform members of a varying struct
@@ -1125,6 +1217,8 @@ jobs:
         run: bash tests/shader-compiler/multi-declarator-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test struct-return .rgb/.a swizzles emit their store like .xyz/.w
         run: bash tests/shader-compiler/struct-return-swizzle-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test Mossbrook member-array broadcast and struct-copy compile (t_c773d446)
+        run: bash tests/shader-compiler/mossbrook-memberarray-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test swizzle updates preserve a struct field's current value
         run: bash tests/shader-compiler/struct-field-update-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test partial struct outputs preserve lane assignment order
@@ -1286,6 +1380,8 @@ jobs:
         run: bash tests/shader-compiler/fp-sources-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A scalar stored to the colour output must read the lane it selected
         run: bash tests/shader-compiler/output-store-lane-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A struct member read through a helper keeps its varying record, referenced
+        run: bash tests/shader-compiler/helper-varying-record-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       # LAST of the shader-compiler steps on purpose: it runs every sibling
       # script against a compiler that CRASHES instead of refusing, so it is
@@ -1298,6 +1394,17 @@ jobs:
 
       - name: Test shader-differential corpus stager
         run: bash tests/regression/shader-differential/stager-corpus-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Test shader-differential varying coverage
+        run: bash tests/regression/shader-differential/input-coverage-test.sh
+
+      # Float render-target mode: control gate (latches, required/binding/negative
+      # controls, row refusals, pinned recipes, artifact-write fault injection) and
+      # the host float comparator's self-test.  Host cc and python3 only.
+      - name: Test shader-differential float-mode gate and comparator
+        env:
+          CC: cc
+        run: bash tests/regression/shader-differential/f32-gate-test.sh
 
   host-tools-windows:
     name: Host tools build (windows mingw64)
@@ -1335,6 +1442,8 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\rpcs3-process-guard-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\regression\rpcs3-claim-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\host\sweep-samples-log-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Set up MSYS2 / mingw64
