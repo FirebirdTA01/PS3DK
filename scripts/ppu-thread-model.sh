@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Thread-model rules for the PPU GCC build, sourced by build-ppu-toolchain.sh and by
 # tests/host/ppu-thread-model-test.sh.  Defines functions only.
 #

@@ -19,6 +19,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck disable=SC1091
 source "$script_dir/env.sh"
+# shellcheck disable=SC1091
 source "$script_dir/ppu-thread-model.sh"
 # The compiler adds the SDK include directory by default (gcc-16.x patch 0068); building the
 # toolchain, the runtime or the SDK itself must never see an installed SDK's headers.
