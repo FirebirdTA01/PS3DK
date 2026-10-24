@@ -1,6 +1,7 @@
 # Exception lookup without the registry lock (GCC 16 PPU)
 
-Status: experimental. Nothing here is approved for landing; the open items are at the end.
+Status: included in v0.26.0. The supported process scope and remaining
+hardware/module limitations are described below.
 
 ## Why
 
@@ -82,8 +83,8 @@ the list registry:
 - 0074 adds b-tree node allocation, and makes its failure fatal.
 
 There is no fallback to the list registry. How this ends on
-hardware (trap, hang or a system-level outcome) has not been measured yet, and
-must be recorded before release.
+hardware (trap, hang or a system-level outcome) has not been measured yet;
+this remains a known limitation of v0.26.0.
 
 **Custom CRTs.** A custom CRT opts in by defining `__ps3dk_heap_ready`
 zero-initialized and setting it once, with a release store, only after the
@@ -135,4 +136,3 @@ is separate design work.
 
 - Hardware runs of the candidate.
 - The hardware outcome of a fatal allocation failure.
-- Landing approval.

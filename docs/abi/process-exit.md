@@ -6,11 +6,13 @@ termination hook. `_exit` and the termination path used by `abort` bypass
 those callbacks. The low-level `__librt_exit` hook calls `sysProcessExit`
 directly; it must not run `_fini`.
 
-CRT constructor 106 registers `_fini` with `atexit`, after heap initialization
-(103), syscall-table initialization (104), and newlib recursive-lock
-initialization (105). Application registrations follow that callback and
-run before it during normal termination. C++ destructor ordering also
-depends on how the target compiler registers destructors; inspect the PPU
+CRT constructor 86 registers `_fini` with `atexit`, after heap initialization
+(83), syscall-table initialization (84), and newlib recursive-lock
+initialization (85). These run before GCC 16 libstdc++ constructors at 90
+and 98 and user constructors at 101 or above. Application registrations
+follow that callback and run before it during normal termination. C++
+destructor ordering also depends on how the target compiler registers
+destructors; inspect the PPU
 probe's calls rather than assuming the host compiler's model applies.
 
 The malloc arena remains mapped throughout finalization. Other PPU threads

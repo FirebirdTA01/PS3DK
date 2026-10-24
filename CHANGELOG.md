@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.26.0] — 2026-10-24
+
 ### Added
 
 - **C++ threads on the PPU (GCC 16).**  libstdc++ and libgcc are built with
@@ -34,6 +36,15 @@ The version stamped into builds is generated from the most recent
     firmware-created threads are not covered.
 
   `std::shared_mutex` is built on a mutex and a condition variable.
+
+- **Floating-point shader comparisons.** The shader-differential rig adds
+  an RGBA32F render-target mode, raw captures and a host comparator, with
+  controls for output lanes, discarded fragments and matrix bindings.
+  A requested matrix set is required rather than silently skipped.
+- **FIFO-wrap diagnostics.** Wait reports identify the phase, spin count
+  and elapsed time. Each wrap reads the timebase frequency once into its
+  own clock context; the wait loop makes no frequency-query syscall.
+
 ### Changed
 
 - **The SPU compiler is GCC 16.1.0.**  GCC removed the SPU backend after
@@ -137,6 +148,63 @@ The version stamped into builds is generated from the most recent
     Compare against the names rather than numbers, and do not treat a
     negative `errno` as invalid.  `pthread_mutex_trylock` on a held mutex
     still returns `EBUSY`.
+
+- **PPU exception lookup.** libgcc uses the frame-registry fast path after
+  an object's lazy sort, avoiding the registry mutex on subsequent lookups.
+  A static startup reserve covers registration before the heap is ready;
+  the CRT publishes heap readiness before libgcc can allocate registry
+  nodes. Registry storage remains available through process finalization.
+  Custom CRTs must implement the heap-ready contract described in
+  `docs/design/eh-fde-fast-path.md`.
+- **Fragment shader expression sharing.** Expressions with literal
+  operands and divides by the same vector share work. A power-of-two
+  literal divided by a runtime scalar lowers to a scaled reciprocal.
+  Sharing preserves short-circuit guards and accumulation order.
+- **Cg front-end source layout.** The imported Vita Cg front end is named
+  explicitly and lives under `src/cg_frontend` instead of `src/donor`.
+
+### Fixed
+
+- **Vertex TEXCOORD8 and TEXCOORD9 outputs.** rsx-cg-compiler now encodes
+  their output destinations correctly. The differential rig refuses a
+  fragment comparison when its vertex program does not write a required
+  input, instead of comparing undefined values.
+- **Frame-table deregistration.** The PPU unwinder removes sorted table
+  registrations correctly and no longer treats a table whose first pointer
+  has a zero high word as an empty registration under LP64.
+- **PPU ILP32 code generation.** Extended dead-code elimination is disabled
+  by default for ILP32 to avoid the known miscompilation. Cell PPE costs
+  discourage spilling values through the link/count registers. Explicit
+  optimization options remain the caller's responsibility.
+- **SPU C++ headers.** The GCC16 `<vmx2spu.h>` port accepts its narrowing
+  constants and compound-literal forms in C++.
+- **FIFO-wrap test coverage.** Each extent uses a distinct executable and
+  must report the requested buffer size; stale or duplicate size records
+  are rejected. Tests check each phase's elapsed-time origin and repeated
+  wraps.
+- **GCM link-surface check.** The expected surface is 138 declarations
+  (19 base commands and 119 Unsafe forms), checked against both ABI archives.
+- **Shader evaluator refusals.** Floor/fraction operations on non-finite
+  values are refused instead of crashing. Supplied TEXCOORD8/9 and POSITION
+  inputs are available to the evaluator.
+
+### Known issues
+
+- **Compiler workarounds remain enabled.** PPU ILP32 extended dead-code
+  elimination and SPU late-combine remain disabled by default. Their
+  experimental replacements are not part of this release.
+- **Exception support is process-scoped.** PRX/module exception support
+  and module unload are not covered. Registry-node allocation failure is
+  fatal; its hardware outcome remains unvalidated.
+- **Validation scope.** The GCC16 candidate built and ran visible RPCS3
+  startup/render smokes for TestApp, PS3TestApp and Mossbrook. HexBreakers
+  was blocked before compilation by missing project PS3 shader sources.
+  Those app runs used the SPU interpreter and their existing shader compiler;
+  they do not validate rsx-cg-compiler or the SPU LLVM path. Forced stops
+  did not exercise clean exit or interrupt-thread teardown, and no hardware
+  acceptance is claimed. The SDK's shader suite and differential checks
+  are separate evidence; full Cg language coverage is not claimed.
+
 ## [v0.25.0] — 2026-10-18
 
 ### Added
