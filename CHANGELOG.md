@@ -16,8 +16,6 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-## [v0.26.0] — 2026-10-24
-
 ### Added
 
 - **C++ threads on the PPU (GCC 16).**  libstdc++ and libgcc are built with

@@ -1,7 +1,7 @@
 # Exception lookup without the registry lock (GCC 16 PPU)
 
-Status: included in v0.26.0. The supported process scope and remaining
-hardware/module limitations are described below.
+Status: landed on main, not yet in a release. The supported process scope
+and remaining hardware/module limitations are described below.
 
 ## Why
 
@@ -84,7 +84,7 @@ the list registry:
 
 There is no fallback to the list registry. How this ends on
 hardware (trap, hang or a system-level outcome) has not been measured yet;
-this remains a known limitation of v0.26.0.
+this remains a known limitation.
 
 **Custom CRTs.** A custom CRT opts in by defining `__ps3dk_heap_ready`
 zero-initialized and setting it once, with a release store, only after the
