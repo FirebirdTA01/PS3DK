@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FirebirdTA01 <FirebirdTA01@aol.com>
+Date: Wed, 21 Oct 2026 09:00:00 -0500
+Subject: [PATCH] spu: every address is mode dependent
+
+lq and stq ignore the low four address bits and move a whole quadword,
+and a value narrower than 16 bytes lives in the preferred slot of its
+register, so the bytes an address names depend on the mode of the
+access.  SPU did not define TARGET_MODE_DEPENDENT_ADDRESS_P, so generic
+code treated (mem:SI A+4) as the low part of (mem:DI A).  Before reload
+spu_split_load turns such a narrowed load into a quadword load and a
+rotate, but late-combine (GCC 15) also runs after reload: it folded a
+DImode stack reload into the SImode truncation that used it, through
+simplify_truncation's truncate-of-MEM rule, and "return (int) u64;"
+returned the high word (libsheap cellSheapQueryFree).  With the hook
+returning true, late-combine runs at its GCC 16 default on SPU again.
+---
+diff --git a/gcc/config/spu/spu.cc b/gcc/config/spu/spu.cc
+index 693524a..285d782 100644
+--- a/gcc/config/spu/spu.cc
++++ b/gcc/config/spu/spu.cc
+@@ -3601,6 +3601,27 @@ spu_addr_space_legitimate_address_p (machine_mode mode, rtx x,
+   return spu_legitimate_address_p (mode, x, reg_ok_strict);
+ }
+ 
++/* Implement TARGET_MODE_DEPENDENT_ADDRESS_P.  Every SPU address is mode
++   dependent: lq and stq ignore the low four address bits and move the
++   whole quadword, and a value narrower than 16 bytes lives in the preferred
++   slot of the register (bytes 0-3, or the low bytes of word 0 for QImode
++   and HImode).  So the bytes an address names depend on the mode of the
++   access: the big-endian lowpart (mem:SI A+4) of (mem:DI A) loads the high
++   word of the DImode value, not its low word.  Returning true stops generic
++   code from narrowing or widening a MEM in place (simplify_truncation of a
++   MEM, simplify_subreg of a MEM, combine's extraction narrowing, convert_move,
++   reload of a SUBREG of a pseudo with a memory equivalent); it keeps the
++   access in its own mode and narrows the value in registers instead.  Before
++   reload spu_split_load rewrites such a narrowed MEM as a quadword load and a
++   rotate, but late-combine (GCC 15) also runs after reload, where it does
++   not, and "return (int) u64;" returned the high word.  */
++static bool
++spu_mode_dependent_address_p (const_rtx addr ATTRIBUTE_UNUSED,
++			      addr_space_t as ATTRIBUTE_UNUSED)
++{
++  return true;
++}
++
+ /* When the address is reg + const_int, force the const_int into a
+    register.  */
+ static rtx
+@@ -7395,6 +7416,9 @@ TARGET_GNU_ATTRIBUTES (spu_attribute_table,
+ #undef TARGET_LEGITIMATE_ADDRESS_P
+ #define TARGET_LEGITIMATE_ADDRESS_P spu_legitimate_address_p
+ 
++#undef TARGET_MODE_DEPENDENT_ADDRESS_P
++#define TARGET_MODE_DEPENDENT_ADDRESS_P spu_mode_dependent_address_p
++
+ #undef TARGET_LEGITIMATE_CONSTANT_P
+ #define TARGET_LEGITIMATE_CONSTANT_P spu_legitimate_constant_p
+ 

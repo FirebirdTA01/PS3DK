@@ -170,6 +170,12 @@ spu-fiber-context,tests/regression/spu-fiber-context/spu-fiber-context.fake.self
 # sys_spu_thread_argument words ($3-$6) from crt1.o; SPU exit status is
 # the mask of wrong arguments, 0 = pass.
 spu-thread-args,tests/regression/spu-thread-args/spu-thread-args.fake.self,60,RAN-CLEAN,SPU_THREAD_ARGS_OK,SPU_THREAD_ARGS_FAIL
+# spu-lowpart-spill: a value spilled to the stack, narrowed in every SPU
+# width (DI/SI/HI to SI/HI/QI, TI, vector elements, SF/DF, __ea, a global
+# with a memory equivalent) returns its low bytes, not those at the
+# big-endian lowpart address (SPU gcc-16.x 0040); SPU exit status is the
+# mask of wrong cases, 0 = pass.
+spu-lowpart-spill,tests/regression/spu-lowpart-spill/spu-lowpart-spill.fake.self,60,RAN-CLEAN,SPU_LOWPART_SPILL_OK,SPU_LOWPART_SPILL_FAIL
 # spurs-suite: one self per SPURS row, each printing SPURS_SUITE <row> OK.
 # Every SPU driver mode (-mspurs-task, -mspurs-job, -mspurs-job-initialize)
 # has a -driver row beside the same code linked by hand (-manual or plain).
