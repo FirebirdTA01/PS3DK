@@ -95,11 +95,25 @@ Two fixes in shared GCC code (`gcc-16.x` patches 0017 and 0018):
   links without a C library and lives in the 256 KB local store; a PSL1GHT MARS
   task module failed to link on the `memcpy` reference the pass emitted.
 
-- **late-combine stays off unless asked for** (patch 0038).  The late-combine
-  pass (new in GCC 15) dropped DImode-to-SImode truncations on SPU:
-  `return (int)u64;` returned the high word.  It was found by bisecting a
-  failing SDK library object by object, then toggling passes on that object.
-  The underlying fault is OPEN; until it is understood, the pass is off.
+- **late-combine runs at its GCC 16 default, guarded by a mode-dependent
+  address hook** (patch 0040).  The late-combine pass (new in GCC 15) folded a
+  DImode stack reload into the SImode truncation that used it
+  (`return (int)u64;` returned the high word, `libsheap cellSheapQueryFree`).
+  The root cause is that every SPU address is mode dependent - `lq` / `stq`
+  move a whole quadword and ignore the low four address bits, and a value
+  narrower than 16 bytes lives in the preferred slot of its register - so
+  generic code that narrows a `MEM` in place is not correct on SPU.  Patch
+  0040 defines `TARGET_MODE_DEPENDENT_ADDRESS_P` to return `true`, which
+  stops `simplify_truncation` (of a `MEM`), `simplify_subreg`, combine's
+  extraction narrowing, `convert_move` and reload of a `SUBREG` of a pseudo
+  with a memory equivalent from folding the reload into the truncation.
+  Legitimate non-zero sub-quadword reload offsets (the reload's own
+  `si_hi_*` / `si_qi_*` / `hi_qi_*` slots and the `SI` -> `HI`/`QI` reads
+  SPU emits for preferred-slot values) are untouched: they are still
+  produced and still recognised, they are only no longer narrowed or
+  widened in place against a wider `MEM`.  An explicit
+  `-fno-late-combine-instructions` still disables the pass if a particular
+  build wants it off.
 
 - **C++ defaults to GNU C++17** (patches 0035, 0036).  GCC 16's default is GNU
   C++20.  When neither `-std=` nor `-ansi` is given, the SPU compiler selects
@@ -111,7 +125,7 @@ Two fixes in shared GCC code (`gcc-16.x` patches 0017 and 0018):
 
 ## 6. The project patch series on GCC 16
 
-`patches/spu/gcc-16.x/` holds 38 patches:
+`patches/spu/gcc-16.x/` holds 40 patches:
 
 | Patches | Contents |
 |---|---|
@@ -121,7 +135,9 @@ Two fixes in shared GCC code (`gcc-16.x` patches 0017 and 0018):
 | 0034 | the `Report` property dropped from the option records the 9.5 series adds |
 | 0035-0036 | the GNU C++17 default of section 5 |
 | 0037 | target builtins read `DECL_MD_FUNCTION_CODE` |
-| 0038 | the pass defaults of section 5, set in the target optimization table so that `optimize` attributes and pragmas get them too |
+| 0038 | loop-pattern distribution at `-O3` only by default (section 5), set in the target optimization table so that `optimize` attributes and pragmas get it too |
+| 0039 | `vmx2spu.h` compiles in C++ (port of the 9.5-series 0005) |
+| 0040 | `TARGET_MODE_DEPENDENT_ADDRESS_P` defined to return `true` so that late-combine (and other generic passes) do not narrow or widen an SPU `MEM` in place - the real fix behind the late-combine default of section 5 |
 
 The restored 9.5 backend itself is not in the series: the build script copies
 `gcc/config/spu`, `gcc/common/config/spu` and `libgcc/config/spu` from

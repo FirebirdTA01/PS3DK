@@ -35,5 +35,6 @@
 0035-spu-C-defaults-to-GNU-C-17-port-of-PPU-gcc-16.x-0078.patch
 0036-spu-from-patches-ppu-gcc-16.x-0079-libsupcxx-explici.patch
 0037-spu-target-builtins-read-DECL_MD_FUNCTION_CODE-GCC-1.patch
-0038-spu-loop-pattern-distribution-and-late-combine-off-b.patch
+0038-spu-loop-pattern-distribution-at-O3-only-by-default.patch
 0039-spu-vmx2spu.h-compiles-in-C-port-of-gcc-9.5.0-0005.patch
+0040-spu-every-address-is-mode-dependent.patch

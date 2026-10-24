@@ -1,37 +1,27 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
-Date: Sun, 18 Oct 2026 23:12:45 -0500
-Subject: [PATCH 38/38] spu: loop-pattern distribution and late-combine off by
- default
-
-Two passes whose GCC 16 defaults do not suit SPU, set in the target
-optimization table so optimize attributes and pragmas get the same
-defaults as the command line; an explicit -f option still wins.
+Date: Wed, 21 Oct 2026 09:00:00 -0500
+Subject: [PATCH] spu: loop-pattern distribution at -O3 only by default
 
 -ftree-loop-distribute-patterns runs at -O3 only, as in GCC 9.5: at -O2
 and -Os it turns copy and clear loops into memcpy/memset calls, and much
 SPU code links without a C library (a PSL1GHT MARS task module failed to
-link on one).
-
--flate-combine-instructions (GCC 15) is off: it substitutes a DImode to
-SImode lowpart as if the truncation were free, which on SPU it is not, so
-return (int) u64 returned the high word (libsheap cellSheapQueryFree).
+link on one).  The default is set in the target optimization table so
+optimize attributes and pragmas get it as well as the command line; an
+explicit -f option still wins.
 ---
- gcc/common/config/spu/spu-common.cc | 26 ++++++++++++++++++++++++++
- 1 file changed, 26 insertions(+)
-
 diff --git a/gcc/common/config/spu/spu-common.cc b/gcc/common/config/spu/spu-common.cc
-index 000ab753c4a..c23fa2c9fd8 100644
+index 000ab75..769cf8e 100644
 --- a/gcc/common/config/spu/spu-common.cc
 +++ b/gcc/common/config/spu/spu-common.cc
-@@ -31,6 +31,32 @@ spu_option_init_struct (struct gcc_options *opts)
+@@ -31,6 +31,26 @@ spu_option_init_struct (struct gcc_options *opts)
    opts->x_flag_rename_registers = 1;
  }
  
-+/* Passes whose GCC 16 defaults differ from GCC 9.5 and do not suit SPU.
++/* A pass whose GCC 16 default differs from GCC 9.5 and does not suit SPU.
 +   Kept in the optimization table, not in spu_option_override, so that
 +   optimize attributes and pragmas, which recompute the -O defaults, get
-+   them too; an explicit -f option still wins.  */
++   it too; an explicit -f option still wins.  */
 +static const struct default_options spu_option_optimization_table[] =
 +  {
 +    /* Copy and clear loops stay loops below -O3: since GCC 10,
@@ -42,12 +32,6 @@ index 000ab753c4a..c23fa2c9fd8 100644
 +       a size cost there.  GCC 9.5 had the pass on at -O3 only.  */
 +    { OPT_LEVELS_ALL, OPT_ftree_loop_distribute_patterns, NULL, 0 },
 +    { OPT_LEVELS_3_PLUS, OPT_ftree_loop_distribute_patterns, NULL, 1 },
-+    /* late-combine (GCC 15) substitutes a DImode-to-SImode lowpart as if
-+       the truncation were free; on SPU it is not (TRULY_NOOP_TRUNCATION: a
-+       SImode value lives in word 0 of the register, the low word of a
-+       DImode value in word 1), so "return (int) u64;" lost its shift and
-+       returned the high word (libsheap cellSheapQueryFree).  */
-+    { OPT_LEVELS_ALL, OPT_flate_combine_instructions, NULL, 0 },
 +    { OPT_LEVELS_NONE, 0, NULL, 0 }
 +  };
 +
