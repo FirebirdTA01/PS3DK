@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Exercise the real Linux installer and release staging with native pkg.
+"""Exercise the real Linux installer and release staging with native pkg and psgl-shader-builder.
 
-Only unrelated Rust, shader and sprx builds are replaced by inert commands.
-Removing pkg installation/staging or bypassing the SHA-1 gate must fail.
+Only unrelated Rust, rsx-cg compiler and sprx builds use inert commands.
+Removing pkg or psgl-shader-builder installation/staging or bypassing the SHA-1 gate must fail.
 """
 import os
 from pathlib import Path
@@ -63,6 +63,11 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
             shutil.copy2(source, repo / 'scripts' / script)
             (repo / 'scripts' / script).chmod(0o755)
     shutil.copytree(ROOT / 'tools/sfo-pkg', repo / 'tools/sfo-pkg')
+    shutil.copy2(ROOT / 'tools/VERSION', repo / 'tools/VERSION')
+    shutil.copytree(ROOT / 'tools/psgl-shader-builder', repo / 'tools/psgl-shader-builder')
+    (repo / 'sdk/libPSGL/src').mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / 'sdk/libPSGL/src/ffp_emit.c', repo / 'sdk/libPSGL/src/ffp_emit.c')
+    shutil.copy2(ROOT / 'sdk/libPSGL/src/ffp_emit.h', repo / 'sdk/libPSGL/src/ffp_emit.h')
     # The release staging step installs the scanner and checks the tarball
     # against the real artifact manifest.
     shutil.copy2(ROOT / 'scripts/ppu-packed-arg-scan.py', repo / 'scripts/ppu-packed-arg-scan.py')
@@ -111,12 +116,18 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
     env = dict(os.environ, PATH=str(stubs) + os.pathsep + os.environ['PATH'],
                PS3DEV=str(prefix), PS3_BUILD_ROOT=str(build))
     run(['bash', 'scripts/install-host-tools.sh'], repo, env)
+    expected_version = (ROOT / 'tools/VERSION').read_text().strip()
     for bin_dir in (prefix / 'bin', prefix / 'ps3dk/bin'):
         round_trip(bin_dir / 'pkg', scratch, env)
-    print('linux-pkg: PASS installer supplies working pkg in both prefixes')
+        builder = bin_dir / 'psgl-shader-builder'
+        assert builder.is_file() and os.access(builder, os.X_OK), f"psgl-shader-builder not installed: {builder}"
+        ver_res = run([str(builder), '--version'], scratch, env)
+        assert ver_res.stdout.strip() == f"psgl-shader-builder {expected_version}", ver_res.stdout
+    print('linux-pkg: PASS installer supplies working pkg and psgl-shader-builder in both prefixes')
 
     # Execute the actual release build/staging bodies, including tar creation.
     run(['bash', '-euo', 'pipefail', '-c', release_step('Build pkg')], repo, env)
+    run(['bash', '-euo', 'pipefail', '-c', release_step('Build psgl-shader-builder')], repo, env)
     run(['bash', '-euo', 'pipefail', '-c', release_step('Stage tool tarball')], repo, env)
     archive = repo / 'ps3-sdk-tools-test-linux-x86_64.tar.xz'
     with tarfile.open(archive) as package:
@@ -125,8 +136,16 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
         extracted = scratch / 'tarball-pkg'
         extracted.write_bytes(package.extractfile(member).read())
         extracted.chmod(0o755)
+
+        builder_member = package.getmember('ps3-sdk-tools-test-linux-x86_64/bin/psgl-shader-builder')
+        assert builder_member.isfile() and builder_member.mode & 0o111
+        extracted_builder = scratch / 'tarball-psgl-shader-builder'
+        extracted_builder.write_bytes(package.extractfile(builder_member).read())
+        extracted_builder.chmod(0o755)
+        ver_res = run([str(extracted_builder), '--version'], scratch, env)
+        assert ver_res.stdout.strip() == f"psgl-shader-builder {expected_version}", ver_res.stdout
     round_trip(extracted, scratch, env)
-    print('linux-pkg: PASS release tarball contains working native pkg')
+    print('linux-pkg: PASS release tarball contains working native pkg and psgl-shader-builder')
 
     # A failed native SHA-1 test must stop installation, even after a good build.
     (repo / 'tools/sfo-pkg/sha1-test.c').write_text(
@@ -138,4 +157,6 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
     assert result.returncode != 0 and 'injected SHA-1 failure' in result.stdout, result.stdout
     assert not (failed_prefix / 'bin/pkg').exists()
     assert not (failed_prefix / 'ps3dk/bin/pkg').exists()
+    assert not (failed_prefix / 'bin/psgl-shader-builder').exists()
+    assert not (failed_prefix / 'ps3dk/bin/psgl-shader-builder').exists()
     print('linux-pkg: PASS SHA-1 failure prevents installation')
