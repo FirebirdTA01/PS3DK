@@ -51,7 +51,8 @@ The version stamped into builds is generated from the most recent
   - The SPU ABI is unchanged: plain `char` signed, 16-bit `wchar_t`,
     `intptr_t` is `int`.
   - As with 9.5, loops are not turned into `memcpy`/`memset` calls below
-    `-O3`, and late-combine is off.  An explicit `-f` option still wins.
+    `-O3`.  Late-combine follows GCC's enabled default with the address-mode
+    correctness fix below.  An explicit `-f` option still wins.
   - `build-spu-toolchain.sh --gcc=9` still builds GCC 9.5.0.
 
 - **The PPU compiler is GCC 16.1.0.**  GCC 12.4.0 is no longer built or
@@ -186,21 +187,27 @@ The version stamped into builds is generated from the most recent
   values are refused instead of crashing. Supplied TEXCOORD8/9 and POSITION
   inputs are available to the evaluator.
 
+- **SPU spilled-value narrowing.** Mode-dependent address handling prevents
+  late-combine and reload from reading the wrong bytes when narrowing a
+  spilled value. Narrowing stays in a register after loading the original
+  value. Late-combine no longer needs to be disabled by default, and legal
+  sub-quadword reload displacements remain available.
+
 ### Known issues
 
-- **SPU late-combine workaround remains enabled.** SPU late-combine remains
-  disabled by default pending validation of its mode-dependent-address fix.
 - **Exception support is process-scoped.** PRX/module exception support
   and module unload are not covered. Registry-node allocation failure is
   fatal; its hardware outcome remains unvalidated.
-- **Validation scope.** The GCC16 candidate built and ran visible RPCS3
+- **Validation scope.** The earlier GCC16 candidate built and ran visible RPCS3
   startup/render smokes for TestApp, PS3TestApp and Mossbrook. HexBreakers
   was blocked before compilation by missing project PS3 shader sources.
-  Those app runs used the SPU interpreter and their existing shader compiler;
-  they do not validate rsx-cg-compiler or the SPU LLVM path. Forced stops
+  Those app runs used RPCS3's PPU and SPU LLVM decoders and Sony sce-cgc;
+  they do not validate rsx-cg-compiler or every SPU execution path. Forced stops
   did not exercise clean exit or interrupt-thread teardown, and no hardware
   acceptance is claimed. The SDK's shader suite and differential checks
-  are separate evidence; full Cg language coverage is not claimed.
+  are separate evidence; full Cg language coverage is not claimed. Those app
+  results predate the ext_dce and SPU late-combine repairs; a rebuilt combined
+  candidate still needs repeat app validation.
 
 ## [v0.25.0] — 2026-10-18
 
