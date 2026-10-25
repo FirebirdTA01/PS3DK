@@ -406,6 +406,11 @@ jobs:
       - name: Test the GCC 16 patch series against its port map
         run: bash tests/host/gcc16-series-test.sh
 
+      # Pure host test: exercise newlib patch 0021 getentropy provider and
+      # boundary behaviors against a controlled host syscall mock.
+      - name: Test the PPU getentropy platform provider
+        run: bash tests/host/ppu-getentropy-test.sh
+
       # build-spu-toolchain.sh: --gcc and --host pick the build root in any
       # option order, and --clean removes only that root.
       - name: Test the SPU build-root selection and --clean
