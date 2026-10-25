@@ -34,9 +34,17 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-entropy-config-') as temp:
             require(Path(archive).is_file(), abi+' missing archive '+archive)
             members = subprocess.run([ar, 't', archive], text=True, capture_output=True, check=True).stdout.splitlines()
             require(members.count(member) == 1, abi+' nonunique member '+member)
-            obj = root/(abi+'-'+member)
-            obj.write_bytes(subprocess.run([ar, 'p', archive, member], capture_output=True, check=True).stdout)
-            refs = subprocess.run([nm, '-u', str(obj)], text=True, capture_output=True, check=True).stdout.splitlines()
+            # MinGW ar's stdout can translate LF bytes in `ar p`. Extract to a
+            # fresh directory instead, keeping the object off text-mode pipes.
+            extract = root/(abi+'-'+member)
+            extract.mkdir()
+            subprocess.run([ar, 'x', str(Path(archive).resolve()), member],
+                           cwd=extract, capture_output=True, check=True)
+            obj = extract/member
+            require(obj.is_file() and obj.stat().st_size > 0, abi+' missing extracted '+member)
+            inspected = subprocess.run([nm, '-u', str(obj)], text=True, capture_output=True, check=True)
+            require(not inspected.stderr.strip(), abi+' member inspection diagnostic: '+inspected.stderr.strip())
+            refs = inspected.stdout.splitlines()
             undefined = {line.split()[-1].lstrip('.') for line in refs if line.split()}
             require(needed in undefined, abi+' '+member+' does not reference '+needed)
             require(forbidden not in undefined, abi+' '+member+' still references '+str(forbidden))
