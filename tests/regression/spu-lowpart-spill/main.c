@@ -52,7 +52,10 @@ int main(void)
         printf("SPU_LOWPART_SPILL_FAIL spu thread setup\n");
         return 0;
     }
-    if (exit_status == 0) {
+    if (cause != SPU_THREAD_GROUP_JOIN_ALL_THREADS_EXIT || status != 0) {
+        printf("SPU_LOWPART_SPILL_FAIL cause 0x%08x status 0x%08x exit %d\n",
+               (unsigned)cause, (unsigned)status, (int)exit_status);
+    } else if (exit_status == 0) {
         printf("SPU_LOWPART_SPILL_OK\n");
     } else {
         printf("SPU_LOWPART_SPILL_FAIL mask 0x%x:", (unsigned)exit_status);

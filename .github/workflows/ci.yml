@@ -414,7 +414,12 @@ jobs:
       # Static mode: the SPU GCC 16 pass defaults live in the optimization
       # table (compiler mode, SPU16_GCC=..., runs off CI).
       - name: Test the SPU GCC 16 pass defaults
-        run: bash tests/host/spu-gcc16-opt-defaults-test.sh
+        run: |
+          bash tests/host/spu-gcc16-opt-defaults-test.sh
+          bash tests/host/spu-gcc16-opt-defaults-status-test.sh
+
+      - name: Test the SPU lowpart regression verdict with host syscall stubs
+        run: bash tests/host/spu-lowpart-spill-verdict-test.sh
 
       # build-ppu-toolchain.sh builds GCC 16.1.0 only: other --gcc values and a
       # prefix holding an earlier GCC 12.4 are refused (--print-config, no build).
