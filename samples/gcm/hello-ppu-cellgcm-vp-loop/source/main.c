@@ -4,12 +4,11 @@
  * Puts .cg vertex + fragment shaders through our toolchain end-to-end:
  *
  *   .cg source
- *     -> cgcomp (PSL1GHT cgcomp + libCg)
+ *     -> rsx-cg-compiler
  *     -> .vpo / .fpo binary (NV40 + container)
  *     -> bin2s + as -> .o
  *     -> linked into PPU ELF
- *     -> loaded at runtime via rsxLoadVertexProgram /
- *        rsxLoadFragmentProgramLocation
+ *     -> loaded through the matching cellGcmCg / cellGcmSet program API
  *     -> RSX renders a triangle on screen
  *
  * Flip protocol follows the canonical flip_immediate pattern:
@@ -84,18 +83,18 @@ static void *local_align(u32 alignment, u32 size)
 	return local_alloc(size);
 }
 
-/* Shader objects. */
-static rsxVertexProgram   *vpo;
-static rsxFragmentProgram *fpo;
+/* CgBinaryProgram containers produced by ps3_add_cg_shader_rsxcgc. */
+static CGprogram          vpo;
+static CGprogram          fpo;
 static void               *vp_ucode;
 static void               *fp_ucode;
 static u32                 fp_offset;
-static rsxProgramConst    *modelViewProjConst;
-static rsxProgramConst    *biasConst;
-static rsxProgramConst    *scaleConst;
-static rsxProgramConst    *rotConst;
-static rsxProgramConst    *tweakConst;
-static rsxProgramConst    *offsetConst;
+static CGparameter        modelViewProjConst;
+static CGparameter        biasConst;
+static CGparameter        scaleConst;
+static CGparameter        rotConst;
+static CGparameter        tweakConst;
+static CGparameter        offsetConst;
 
 static vertex_t *vertex_buffer;
 static u32       vertex_buffer_offset;
@@ -248,13 +247,13 @@ static void set_render_state(CellGcmContextData *ctx)
 	static const float tweak[4]  = { 1.0f, 0.0f, 0.0f, 0.0f };
 	static const float offset[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
-	rsxLoadVertexProgram(ctx, vpo, vp_ucode);
-	rsxSetVertexProgramParameter(ctx, vpo, modelViewProjConst, identity);
-	if (biasConst)   rsxSetVertexProgramParameter(ctx, vpo, biasConst,   identity);
-	if (scaleConst)  rsxSetVertexProgramParameter(ctx, vpo, scaleConst,  identity);
-	if (rotConst)    rsxSetVertexProgramParameter(ctx, vpo, rotConst,    identity);
-	if (tweakConst)  rsxSetVertexProgramParameter(ctx, vpo, tweakConst,  tweak);
-	if (offsetConst) rsxSetVertexProgramParameter(ctx, vpo, offsetConst, offset);
+	cellGcmSetVertexProgram(ctx, vpo, vp_ucode);
+	cellGcmSetVertexProgramParameter(ctx, modelViewProjConst, identity);
+	if (biasConst)   cellGcmSetVertexProgramParameter(ctx, biasConst,   identity);
+	if (scaleConst)  cellGcmSetVertexProgramParameter(ctx, scaleConst,  identity);
+	if (rotConst)    cellGcmSetVertexProgramParameter(ctx, rotConst,    identity);
+	if (tweakConst)  cellGcmSetVertexProgramParameter(ctx, tweakConst,  tweak);
+	if (offsetConst) cellGcmSetVertexProgramParameter(ctx, offsetConst, offset);
 
 	rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_POS, 0,
 	                         vertex_buffer_offset + offsetof(vertex_t, pos),
@@ -265,7 +264,7 @@ static void set_render_state(CellGcmContextData *ctx)
 	                         sizeof(vertex_t), 4,
 	                         GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
 
-	rsxLoadFragmentProgramLocation(ctx, fpo, fp_offset, GCM_LOCATION_RSX);
+	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
 }
 
 /* ----------------------------------------------------------------
@@ -363,19 +362,29 @@ static int init_display(void)
 static void init_shaders(void)
 {
 	u32 vpsize = 0, fpsize = 0;
-	vpo = (rsxVertexProgram   *)vpshader_vpo;
-	fpo = (rsxFragmentProgram *)fpshader_fpo;
+	vpo = (CGprogram)vpshader_vpo;
+	fpo = (CGprogram)fpshader_fpo;
+	cellGcmCgInitProgram(vpo);
+	cellGcmCgInitProgram(fpo);
 
-	rsxVertexProgramGetUCode(vpo, &vp_ucode, &vpsize);
-	modelViewProjConst = rsxVertexProgramGetConst(vpo, "modelViewProj");
-	biasConst          = rsxVertexProgramGetConst(vpo, "bias");
-	scaleConst         = rsxVertexProgramGetConst(vpo, "scale");
-	rotConst           = rsxVertexProgramGetConst(vpo, "rot");
-	tweakConst         = rsxVertexProgramGetConst(vpo, "tweak");
-	offsetConst        = rsxVertexProgramGetConst(vpo, "offset");
+	cellGcmCgGetUCode(vpo, &vp_ucode, &vpsize);
+	modelViewProjConst = cellGcmCgGetNamedParameter(vpo, "modelViewProj");
+	biasConst          = cellGcmCgGetNamedParameter(vpo, "bias");
+	scaleConst         = cellGcmCgGetNamedParameter(vpo, "scale");
+	rotConst           = cellGcmCgGetNamedParameter(vpo, "rot");
+	tweakConst         = cellGcmCgGetNamedParameter(vpo, "tweak");
+	offsetConst        = cellGcmCgGetNamedParameter(vpo, "offset");
+	if (!vp_ucode || !modelViewProjConst || vpsize < 8 * 16 || vpsize % 16) {
+		fprintf(stderr, "FAIL: invalid VP container or fewer than eight instructions\n");
+		exit(1);
+	}
 
 	void *fp_ucode_blob;
-	rsxFragmentProgramGetUCode(fpo, &fp_ucode_blob, &fpsize);
+	cellGcmCgGetUCode(fpo, &fp_ucode_blob, &fpsize);
+	if (!fp_ucode_blob || !fpsize || fpsize % 16) {
+		fprintf(stderr, "FAIL: invalid FP container\n");
+		exit(1);
+	}
 	fp_ucode = local_align(64, fpsize);
 	memcpy(fp_ucode, fp_ucode_blob, fpsize);
 	cellGcmAddressToOffset(fp_ucode, &fp_offset);
@@ -410,7 +419,7 @@ int main(int argc, const char **argv)
 	void               *host_addr;
 	CellGcmContextData *ctx;
 
-	printf("hello-ppu-cellgcm-vp-loop: cg shaders + PSL1GHT cgcomp\n");
+	printf("hello-ppu-cellgcm-vp-loop: rsx-cg-compiler containers\n");
 
 	host_addr = memalign(1024 * 1024, HOST_SIZE);
 	if (cellGcmInit(CB_SIZE, HOST_SIZE, host_addr) != 0) {

@@ -19,6 +19,16 @@
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 
+static int failures;
+static void expect_unsupported_version(int32_t rc)
+{
+    if (rc != CELL_PAMF_ERROR_UNSUPPORTED_VERSION) {
+        printf("[hello-ppu-pamf] FAIL: expected unsupported version, got %08x\n",
+               (unsigned)rc);
+        ++failures;
+    }
+}
+
 int main(void)
 {
     int32_t rc;
@@ -28,7 +38,7 @@ int main(void)
     /* Load PAMF sysmodule. */
     rc = cellSysmoduleLoadModule(CELL_SYSMODULE_PAMF);
     printf("[hello-ppu-pamf] cellSysmoduleLoadModule(PAMF) = %08x\n", (unsigned)rc);
-    if (rc != CELL_OK && rc != CELL_SYSMODULE_LOADED && rc != CELL_SYSMODULE_ERROR_FATAL) {
+    if (rc != CELL_OK && rc != CELL_SYSMODULE_LOADED) {
         printf("[hello-ppu-pamf] FAIL: module load\n");
         return 1;
     }
@@ -40,37 +50,33 @@ int main(void)
         'P', 'A', 'M', 'F',
     };
 
-    /* cellPamfVerify — should reject as INVALID_PAMF or UNKNOWN_TYPE. */
+    /* The zero version field must be rejected as UNSUPPORTED_VERSION. */
     rc = cellPamfVerify(pamf_buf, sizeof(pamf_buf));
     printf("[hello-ppu-pamf] cellPamfVerify = %08x\n", (unsigned)rc);
+    expect_unsupported_version(rc);
 
     /* cellPamfGetHeaderSize — likewise. */
     uint64_t headerSize = 0;
     rc = cellPamfGetHeaderSize(pamf_buf, sizeof(pamf_buf), &headerSize);
     printf("[hello-ppu-pamf] cellPamfGetHeaderSize = %08x, size=%llu\n",
            (unsigned)rc, (unsigned long long)headerSize);
+    expect_unsupported_version(rc);
 
     /* cellPamfGetStreamOffsetAndSize — likewise. */
     uint64_t offset = 0, streamSize = 0;
     rc = cellPamfGetStreamOffsetAndSize(pamf_buf, sizeof(pamf_buf),
                                          &offset, &streamSize);
     printf("[hello-ppu-pamf] cellPamfGetStreamOffsetAndSize = %08x\n", (unsigned)rc);
+    expect_unsupported_version(rc);
 
     /* cellPamfReaderInitialize — parse into a reader context. */
-    CellPamfReader reader;
+    CellPamfReader reader = {};
     rc = cellPamfReaderInitialize(&reader, pamf_buf, sizeof(pamf_buf),
                                   CELL_PAMF_INITIALIZE_VERIFY_ON);
     printf("[hello-ppu-pamf] cellPamfReaderInitialize = %08x\n", (unsigned)rc);
+    expect_unsupported_version(rc);
 
-    /* If reader init succeeded, query a few synchronous reader calls. */
-    if (rc == CELL_OK) {
-        uint8_t n = cellPamfReaderGetNumberOfStreams(&reader);
-        printf("[hello-ppu-pamf] cellPamfReaderGetNumberOfStreams = %u\n", n);
-
-        uint32_t muxRate = cellPamfReaderGetMuxRateBound(&reader);
-        printf("[hello-ppu-pamf] cellPamfReaderGetMuxRateBound = %u\n", muxRate);
-    }
-
-    printf("[hello-ppu-pamf] all tests passed\n");
-    return 0;
+    printf("[hello-ppu-pamf] invalid-version rejection %s (no valid stream parsed)\n",
+           failures ? "FAIL" : "PASS");
+    return failures ? 1 : 0;
 }

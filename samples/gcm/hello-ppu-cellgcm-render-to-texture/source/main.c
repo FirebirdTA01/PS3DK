@@ -161,7 +161,9 @@ static void *local_align(u32 alignment, u32 size)
 
 static void wait_rsx_idle(CellGcmContextData *ctx)
 {
-	uint32_t label = 1;
+	/* Each wait must observe its own completion, not a previous value. */
+	static uint32_t label;
+	++label;
 	cellGcmSetWriteBackEndLabel(ctx, GCM_LABEL_INDEX, label);
 	cellGcmSetWaitLabel(ctx, GCM_LABEL_INDEX, label);
 	label++;

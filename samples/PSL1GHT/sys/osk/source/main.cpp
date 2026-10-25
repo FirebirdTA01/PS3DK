@@ -148,7 +148,7 @@ int main(int argc,char *argv[])
     memset(title_utf16, 0, sizeof(title_utf16));
     memset(initial_text_utf16, 0, sizeof(initial_text_utf16));
     utf8_to_utf16((uint8_t *)"Enter your name:", title_utf16);
-    utf8_to_utf16((uint8_t *)"Sergio", initial_text_utf16);
+    utf8_to_utf16((uint8_t *)"Player One", initial_text_utf16);
 
 	printf("osk test...\n");
 

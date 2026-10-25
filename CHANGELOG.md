@@ -18,6 +18,10 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **Packaged PSGL shader-library builder.** `psgl-shader-builder` ships with
+  the host tools, so the fixed-function shader-library sample no longer
+  needs a separate host C compiler or internal SDK sources.
+
 - **C++ threads on the PPU (GCC 16).**  libstdc++ and libgcc are built with
   the POSIX thread model over librt's pthreads.  What this enables:
   - `std::thread`, `std::mutex`, `std::condition_variable` and
@@ -163,6 +167,13 @@ The version stamped into builds is generated from the most recent
   explicitly and lives under `src/cg_frontend` instead of `src/donor`.
 
 ### Fixed
+
+- **Sample correctness.** Fixed shared-memory polling in the audio and SPU
+  samples, the MARS task load address, vertex-loop shader container handling,
+  and render-target completion labels. GIF, video-postprocessing, memory-map,
+  and malformed-PAMF samples now check their demonstrated API results.
+  The formatting sample's intentional null-reference probe is opt-in, and
+  the OSK example now starts with "Player One".
 
 - **PPU entropy and C++ random_device.**  `getentropy` uses the platform
   random-number service instead of returning `ENOSYS`.  GCC 16 selects that

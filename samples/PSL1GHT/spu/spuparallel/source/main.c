@@ -93,20 +93,33 @@ int main(int argc, const char* argv[])
 	printf("Waiting for SPUs to return...\n");
 	for (i = 0; i < 6; i++)
 		while (spu[i].sync == 0);
+	/* The fenced SPU writes publish the array before sync.  Order PPU reads
+	 * after observing all six completion flags, including at compile time. */
+	__sync_synchronize();
 
 	printf("Output array: ");
-	for (i = 0; i < 24; i++)
+	int fail = 0;
+	for (i = 0; i < 24; i++) {
 		printf(" %d", array[i]);
+		if (array[i] != 2 * (i + 1)) fail = 1;
+	}
 	printf("\n");
 
 	printf("Joining SPU thread group... ");
-	printf("%08x\n", sysSpuThreadGroupJoin(group_id, &cause, &status));
+	cause = status = 0;
+	s32 join_rc = sysSpuThreadGroupJoin(group_id, &cause, &status);
+	printf("%08x\n", join_rc);
 	printf("cause=%d status=%d\n", cause, status);
+	if (join_rc != 0 || cause != SPU_THREAD_GROUP_JOIN_ALL_THREADS_EXIT || status != 0)
+		fail = 1;
 
-	printf("Closing image... %08x\n", sysSpuImageClose(&image));
+	s32 close_rc = sysSpuImageClose(&image);
+	printf("Closing image... %08x\n", close_rc);
+	if (close_rc != 0) fail = 1;
 
 	free(array);
 	free(spu);
 
-	return 0;
+	printf("spuparallel: %s\n", fail ? "FAIL" : "PASS");
+	return fail;
 }

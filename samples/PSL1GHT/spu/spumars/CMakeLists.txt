@@ -19,6 +19,9 @@ target_link_libraries(spumars PRIVATE
 ps3_add_spu_image(spumars
     NAME spu
     SOURCES spu/source/main.c
+    # MARS task_map_elf requires the task text segment at LS 0x3a00.
+    # Match PSL1GHT spu_rules TASK_LDFLAGS, rather than a thread image at 0.
+    LDFLAGS -Wl,-Ttext-segment=0x3a00 -Wl,--local-store=0x3a00:0x3FFFF
     LIBS spumarstask spumars sputhread)
 
 ps3_add_self(spumars)

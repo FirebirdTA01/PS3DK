@@ -28,11 +28,11 @@ void fillBuffer(float *buf)
 	}
 }
 
-u32 playOneBlock(u64 *readIndex, float *audioDataStart)
+u32 playOneBlock(const volatile u64 *readIndex, float *audioDataStart)
 {
 	static u32 audio_block_index=1;
 
-	//get position of the hardware
+	// The audio service updates this shared index asynchronously.
 	u64 current_block = *readIndex;
 
 	//try to stay ahead of it
@@ -94,7 +94,7 @@ int main(int argc, const char* argv[])
 	int i=0;
 	while(i<1000)
 	{
-		if(playOneBlock((u64*)(u64)config.readIndex,(float*)(u64)config.audioDataStart)!=0)
+		if(playOneBlock((const volatile u64*)(u64)config.readIndex,(float*)(u64)config.audioDataStart)!=0)
 			i++;
 	}
 

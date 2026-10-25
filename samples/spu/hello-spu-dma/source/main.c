@@ -18,9 +18,18 @@
 
 #define N_ELEMS 16
 
+#define CHECK(call) do { \
+    s32 rc = (call); \
+    if (rc != 0) { \
+        printf("hello-spu-dma: FAIL %s rc=0x%08x\n", #call, (unsigned)rc); \
+        return 1; \
+    } \
+} while (0)
+
 static u32 input  [N_ELEMS] __attribute__((aligned(128)));
 static u32 output [N_ELEMS] __attribute__((aligned(128)));
-static u32 spu_done           __attribute__((aligned(128))) = 0;
+/* The SPU writes a complete 16-byte DMA packet, asynchronously to the PPU. */
+static volatile u32 spu_done[4] __attribute__((aligned(128))) = {0};
 
 int main(int argc, char **argv)
 {
@@ -35,8 +44,8 @@ int main(int argc, char **argv)
         output[i] = 0xdeadbeef; // sentinel
     }
 
-    sysSpuInitialize(6, 0);
-    sysSpuImageImport(&image, hello_spu_dma_bin, 0);
+    CHECK(sysSpuInitialize(6, 0));
+    CHECK(sysSpuImageImport(&image, hello_spu_dma_bin, 0));
 
     sysSpuThreadGroupAttribute grpattr = {
         .nsize     = 12,
@@ -44,7 +53,7 @@ int main(int argc, char **argv)
         .type      = 0,
         .option.ct = 0,
     };
-    sysSpuThreadGroupCreate(&group_id, 1, 100, &grpattr);
+    CHECK(sysSpuThreadGroupCreate(&group_id, 1, 100, &grpattr));
 
     sysSpuThreadAttribute attr = {
         .name   = (const char *)ptr2ea("hello_dma_t"),
@@ -58,16 +67,19 @@ int main(int argc, char **argv)
         .arg3 = N_ELEMS,
     };
 
-    sysSpuThreadInitialize(&thread_id, group_id, 0, &image, &attr, &arg);
+    CHECK(sysSpuThreadInitialize(&thread_id, group_id, 0, &image, &attr, &arg));
     printf("hello-spu-dma: ppu starting spu thread group\n");
-    sysSpuThreadGroupStart(group_id);
+    CHECK(sysSpuThreadGroupStart(group_id));
 
-    while (spu_done == 0) { /* spin */ }
+    while (spu_done[0] == 0) { /* poll the DMA completion packet */ }
+    __sync_synchronize(); /* Observe the output after the completion write. */
 
-    sysSpuThreadGroupJoin(group_id, &cause, &status);
-    sysSpuImageClose(&image);
+    CHECK(sysSpuThreadGroupJoin(group_id, &cause, &status));
+    CHECK(sysSpuThreadGroupDestroy(group_id));
+    CHECK(sysSpuImageClose(&image));
 
-    int fail = 0;
+    int fail = cause != SPU_THREAD_GROUP_JOIN_ALL_THREADS_EXIT || status != 0 ||
+               spu_done[0] != 0xc0ffee;
     for (u32 i = 0; i < N_ELEMS; ++i) {
         u32 expected = (i + 1) * 2;
         if (output[i] != expected) {
@@ -79,8 +91,10 @@ int main(int argc, char **argv)
     if (!fail) {
         printf("hello-spu-dma: PASS - %u/%u elements doubled correctly\n",
                N_ELEMS, N_ELEMS);
+    } else {
+        printf("hello-spu-dma: FAIL completion or output check\n");
     }
     printf("hello-spu-dma: spu finished; cause=%u status=%u done=0x%x\n",
-           cause, status, spu_done);
+           cause, status, spu_done[0]);
     return fail;
 }
