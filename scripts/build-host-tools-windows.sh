@@ -759,6 +759,8 @@ build_psgl_shader_builder() {
     ver="$(tr -d ' \t\r\n' < "$ver_file")"
     [[ -n "$ver" ]] || die "tools/VERSION is empty: $ver_file"
 
+    # REPRO_CC is the shared, space-separated list of reproducibility flags.
+    # shellcheck disable=SC2086
     "$HOST_TRIPLE-gcc" -std=c11 -O2 -Wall -static -static-libgcc $REPRO_CC \
         -DPSGL_SHADER_BUILDER_VERSION="\"$ver\"" \
         -I"$ffp_dir" \
