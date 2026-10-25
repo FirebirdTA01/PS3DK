@@ -304,3 +304,9 @@ ppu-compare-carry-lp64-O3,tests/regression/ppu-compare-carry/ppu-compare-carry-l
 # trylock/timedlock/rwlock returns, libc errno producers, strerror, std::error_code/system_error, socket errors.
 errno-lv2-ilp32,tests/regression/errno-lv2/errno-lv2-ilp32.fake.self,60,RAN-CLEAN,ERRNO_LV2_OK,ERRNO_LV2_FAIL|terminate
 errno-lv2-lp64,tests/regression/errno-lv2/errno-lv2-lp64.fake.self,60,RAN-CLEAN,ERRNO_LV2_OK,ERRNO_LV2_FAIL|terminate
+
+# Entropy provider: real service success and injected errors, both ABIs.
+entropy-success-ilp32,tests/regression/entropy-provider/entropy-success-ilp32.fake.self,60,RAN-CLEAN,(?m)^ENTROPY_OK\r?$,ENTROPY_FAIL|terminate
+entropy-success-lp64,tests/regression/entropy-provider/entropy-success-lp64.fake.self,60,RAN-CLEAN,(?m)^ENTROPY_OK\r?$,ENTROPY_FAIL|terminate
+entropy-error-ilp32,tests/regression/entropy-provider/entropy-error-ilp32.fake.self,60,RAN-CLEAN,(?m)^ENTROPY_ERROR_OK\r?$,ENTROPY_FAIL|terminate
+entropy-error-lp64,tests/regression/entropy-provider/entropy-error-lp64.fake.self,60,RAN-CLEAN,(?m)^ENTROPY_ERROR_OK\r?$,ENTROPY_FAIL|terminate

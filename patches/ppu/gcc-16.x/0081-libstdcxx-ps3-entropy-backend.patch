@@ -1,0 +1,40 @@
+Subject: [PATCH] libstdc++: select the PS3 getentropy backend deterministically
+
+--- a/libstdc++-v3/configure.ac
++++ b/libstdc++-v3/configure.ac
+@@ -618,6 +618,16 @@
+ GLIBCXX_CHECK_X86_RDSEED
+ 
+ # Check for other random number APIs
++# PS3 supplies getentropy through libsysbase + the sysPrxForUser import.
++# Bootstrap may not yet link lv2.ld/stub libraries; that must not change
++# random_device's backend between a fresh and an already populated stage.
++case "${host}" in
++  powerpc64-ps3-elf*)
++    glibcxx_cv_getentropy=yes
++    glibcxx_cv_arc4random=no
++    ;;
++esac
++
+ GLIBCXX_CHECK_GETENTROPY
+ GLIBCXX_CHECK_ARC4RANDOM
+ 
+--- a/libstdc++-v3/configure
++++ b/libstdc++-v3/configure
+@@ -51984,6 +51984,16 @@
+ 
+ 
+ # Check for other random number APIs
++# PS3 supplies getentropy through libsysbase + the sysPrxForUser import.
++# Bootstrap may not yet link lv2.ld/stub libraries; that must not change
++# random_device's backend between a fresh and an already populated stage.
++case "${host}" in
++  powerpc64-ps3-elf*)
++    glibcxx_cv_getentropy=yes
++    glibcxx_cv_arc4random=no
++    ;;
++esac
++
+ 
+ 
+ 

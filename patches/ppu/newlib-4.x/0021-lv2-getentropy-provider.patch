@@ -1,0 +1,108 @@
+Subject: [PATCH] libsysbase: obtain entropy from sysPrxForUser and fail closed
+
+--- a/libgloss/libsysbase/getentropy.c
++++ b/libgloss/libsysbase/getentropy.c
+@@ -1,25 +1,12 @@
+-#include <errno.h>
+-#include <stddef.h>
+-#include <unistd.h>
++#include "getentropy_impl.h"
+ 
+-/*
+- * Stub for getentropy(3).  Returns -1 with errno = ENOSYS so callers
+- * (libstdc++'s random_device, newlib's arc4random, libc's stack_protector)
+- * take their fallback path instead of infinite-recursing through newlib's
+- * libc/syscalls/sysgetentropy.c, which -DREENTRANT_SYSCALLS_PROVIDED turns
+- * into `getentropy -> _getentropy_r(...) -> getentropy -> ...`.
+- *
+- * A real implementation backed by PS3 lv2's sys_ss_random_number_generator
+- * (NID 0xEBA9F175) is Phase 3 / libsysutil work, not a newlib hook.  When
+- * that lands, this stub is replaced in-place, not dropped — it still has to
+- * be linked ahead of newlib/libc/syscalls/sysgetentropy.c so the toolchain
+- * spec's `--start-group -lsysbase -lc ...` group picks the libsysbase copy.
+- */
+ int
+-getentropy(void *buf, size_t buflen)
++getentropy (void *buf, size_t len)
+ {
+-	(void)buf;
+-	(void)buflen;
+-	errno = ENOSYS;
+-	return -1;
++  int error = entropy_error (buf, len);
++  if (!error)
++    return 0;
++  errno = error;
++  return -1;
+ }
++
+--- a/libgloss/libsysbase/getentropy_impl.h
++++ b/libgloss/libsysbase/getentropy_impl.h
+@@ -0,0 +1,31 @@
++/* PS3 getentropy: use the sysPrxForUser random-number service.
++   No software seed or silent fallback is provided on a platform error. */
++#include <errno.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <reent.h>
++
++/* Public PSL1GHT sysGetRandomNumber / sysPrxForUser 0x71a8472a.
++   The normal PS3 link group supplies this import from liblv2_stub.
++   Keep this declaration independent of SDK headers during bootstrap. */
++extern int sys_get_random_number (void *, uint64_t);
++
++static int
++entropy_error (void *buf, size_t len)
++{
++  int status;
++  if (len > 256)
++    return EIO;
++  if (len == 0)
++    return 0;
++  if (buf == NULL)
++    return EFAULT;
++  status = sys_get_random_number (buf, (uint64_t) len);
++  if (status == 0)
++    return 0;
++  /* PS3 errno values are the LV2 0x8001xxxx codes (patch 0020).
++     A positive/unknown return must not be mistaken for filled bytes. */
++  if (((uint32_t) status & 0xffff0000u) == 0x80010000u)
++    return status;
++  return EIO;
++}
+--- a/libgloss/libsysbase/getentropy_r.c
++++ b/libgloss/libsysbase/getentropy_r.c
+@@ -0,0 +1,13 @@
++#include "getentropy_impl.h"
++
++/* Separate archive member: libc may already supply getentropy. */
++#undef _getentropy_r
++int
++_getentropy_r (struct _reent *r, void *buf, size_t len)
++{
++  int error = entropy_error (buf, len);
++  if (!error)
++    return 0;
++  r->_errno = error;
++  return -1;
++}
+--- a/libgloss/libsysbase/Makefile.in
++++ b/libgloss/libsysbase/Makefile.in
+@@ -70,7 +70,7 @@
+ 	   wait.o unlink.o execve.o kill.o gettod.o fork.o chmod.o sleep.o dup.o glob.o \
+ 	   getrusage.o globfree.o closedir.o fstat64.o link.o lseek64.o opendir.o readdir.o \
+ 	   readdir_r.o rmdir.o rewinddir.o rename.o seekdir.o settod.o stat.o stat64.o telldir.o \
+-	   truncate.o mkdir.o umask.o utime.o times.o access.o getentropy.o
++	   truncate.o mkdir.o umask.o utime.o times.o access.o getentropy.o getentropy_r.o
+ 
+ # Object files specific to particular targets.
+ EVALOBJS = ${OBJS}
+--- a/newlib/libc/include/machine/_arc4random.h
++++ b/newlib/libc/include/machine/_arc4random.h
+@@ -1 +1,5 @@
+-/* Use default implementation, see arc4random.h */
++/* PS3 has no signal delivery behind raise(SIGKILL): _kill_r may return.
++   Never let arc4random continue with its zeroed seed if entropy fails. */
++#if defined(__PPU__)
++#define _ARC4RANDOM_GETENTROPY_FAIL() abort()
++#endif

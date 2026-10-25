@@ -164,6 +164,11 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PPU entropy and C++ random_device.**  `getentropy` uses the platform
+  random-number service instead of returning `ENOSYS`.  GCC 16 selects that
+  backend consistently during both bootstrap and populated-stage builds.
+  Provider errors remain errors; `arc4random` aborts if it cannot seed itself.
+
 - **Vertex TEXCOORD8 and TEXCOORD9 outputs.** rsx-cg-compiler now encodes
   their output destinations correctly. The differential rig refuses a
   fragment comparison when its vertex program does not write a required

@@ -56,3 +56,4 @@
 0078-cell64lv2-cxx-default-gnu17.patch
 0079-libsupcxx-explicit-gnu20.patch
 0080-ext-dce-clear-pointer-fact.patch
+0081-libstdcxx-ps3-entropy-backend.patch

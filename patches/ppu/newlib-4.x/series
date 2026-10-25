@@ -18,3 +18,4 @@
 0018-lv2-posix-thread-time-sched-declarations.patch
 0019-lv2-exit-runs-thread-local-destructors.patch
 0020-lv2-errno-values.patch
+0021-lv2-getentropy-provider.patch
