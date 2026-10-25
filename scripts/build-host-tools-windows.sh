@@ -17,6 +17,7 @@
 #   * fself.exe           — fake-signed SELF builder (zlib only)
 #   * bin2s.exe           — PSL1GHT binary-to-assembly helper
 #   * cgcomp.exe          — legacy PSL1GHT Cg shader compiler
+#   * psgl-shader-builder.exe — PSGL fixed-function shader library builder
 #   * sprxlinker.exe      — post-link ELF fixups (libelf, vendored)
 #
 # Cached intermediates live under $PS3_BUILD_ROOT/host-tools-windows/.
@@ -740,7 +741,34 @@ build_psl1ght_legacy_tools() {
 }
 
 # -----------------------------------------------------------------------------
-# 10. Host-side Python + assets that the .self / .pkg pipeline needs.
+# 10. psgl-shader-builder -> psgl-shader-builder.exe (fixed-function shaderlib)
+# -----------------------------------------------------------------------------
+build_psgl_shader_builder() {
+    say "Cross-compiling psgl-shader-builder"
+    local src_dir="$PS3_TOOLCHAIN_ROOT/tools/psgl-shader-builder"
+    local ffp_dir="$PS3_TOOLCHAIN_ROOT/sdk/libPSGL/src"
+    local src="$src_dir/psgl_shader_builder.c"
+    local emit="$ffp_dir/ffp_emit.c"
+
+    [[ -f "$src" ]] || die "psgl_shader_builder source missing: $src"
+    [[ -f "$emit" ]] || die "ffp_emit source missing: $emit"
+
+    local ver_file="$PS3_TOOLCHAIN_ROOT/tools/VERSION"
+    [[ -f "$ver_file" ]] || die "tools/VERSION missing: $ver_file"
+    local ver
+    ver="$(tr -d ' \t\r\n' < "$ver_file")"
+    [[ -n "$ver" ]] || die "tools/VERSION is empty: $ver_file"
+
+    "$HOST_TRIPLE-gcc" -std=c11 -O2 -Wall -static -static-libgcc $REPRO_CC \
+        -DPSGL_SHADER_BUILDER_VERSION="\"$ver\"" \
+        -I"$ffp_dir" \
+        "$src" "$emit" $REPRO_LD \
+        -o "$STAGE_BIN/psgl-shader-builder.exe"
+    say "  staged psgl-shader-builder.exe"
+}
+
+# -----------------------------------------------------------------------------
+# 11. Host-side Python + assets that the .self / .pkg pipeline needs.
 # -----------------------------------------------------------------------------
 stage_python_and_assets() {
     say "Staging host Python tools + assets"
@@ -858,6 +886,7 @@ build_sprx_linker
 build_sfo_pkg
 build_psl1ght_tools
 build_psl1ght_legacy_tools
+build_psgl_shader_builder
 build_gnu_make
 build_tool_alias
 stage_python_and_assets

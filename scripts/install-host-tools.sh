@@ -103,6 +103,25 @@ build_pkg() {
     install_tool "$build/pkg" "pkg"
 }
 
+build_psgl_shader_builder() {
+    say "building psgl-shader-builder"
+    local src="$TOOLS_DIR/psgl-shader-builder/psgl_shader_builder.c"
+    local ffp_src="$PS3_TOOLCHAIN_ROOT/sdk/libPSGL/src/ffp_emit.c"
+    local ffp_inc="$PS3_TOOLCHAIN_ROOT/sdk/libPSGL/src"
+    local build="$PS3_BUILD_ROOT/host-tools-linux/psgl-shader-builder"
+
+    mkdir -p "$build"
+    local ver_file="$PS3_TOOLCHAIN_ROOT/tools/VERSION"
+    [[ -f "$ver_file" ]] || die "tools/VERSION missing: $ver_file"
+    local ver
+    ver="$(tr -d ' \t\r\n' < "$ver_file")"
+    [[ -n "$ver" ]] || die "tools/VERSION is empty: $ver_file"
+
+    gcc -std=c11 -O2 -Wall -DPSGL_SHADER_BUILDER_VERSION="\"$ver\"" \
+        -I"$ffp_inc" "$src" "$ffp_src" -o "$build/psgl-shader-builder"
+    install_tool "$build/psgl-shader-builder" "psgl-shader-builder"
+}
+
 [[ -d "$PS3DEV" ]] || die "PS3DEV does not exist: $PS3DEV (run scripts/bootstrap.sh first)"
 [[ -d "$PS3DK" ]] || install -d "$PS3DK"
 
@@ -110,5 +129,6 @@ build_rust_workspace
 build_rsx_cg_compiler
 build_sprx_linker
 build_pkg
+build_psgl_shader_builder
 
 say "done"

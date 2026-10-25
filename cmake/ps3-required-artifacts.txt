@@ -59,6 +59,7 @@ host_bin  bin/nidgen.exe
 host_bin  bin/package_finalize.exe
 host_bin  bin/pkg.exe
 host_bin  bin/prx-gen.exe
+host_bin  bin/psgl-shader-builder.exe
 host_bin  bin/rsx-cg-compiler.exe
 host_bin  bin/sfo.exe
 host_bin  bin/sfo-gui.exe

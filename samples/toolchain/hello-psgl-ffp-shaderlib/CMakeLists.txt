@@ -3,21 +3,6 @@ project(hello-psgl-ffp-shaderlib C ASM)
 
 include(ps3-self)
 
-find_program(PS3_HOST_CC NAMES cc gcc clang)
-if(NOT PS3_HOST_CC)
-    message(STATUS
-        "Skipping hello-psgl-ffp-shaderlib: no host C compiler found. "
-        "A host compiler is only used to build psgl_shader_builder, which "
-        "generates the fixed-function PSGL shader library before "
-        "rsx-cg-compiler compiles its shaders. On Windows, put a cc/gcc/clang "
-        "wrapper on PATH or pass -DPS3_HOST_CC=<wrapper> to enable this sample.")
-    add_custom_target(hello-psgl-ffp-shaderlib ALL
-        COMMAND "${CMAKE_COMMAND}" -E echo
-                "Skipping hello-psgl-ffp-shaderlib: no host C compiler found"
-        VERBATIM)
-    return()
-endif()
-
 add_executable(hello-psgl-ffp-shaderlib source/main.c)
 target_compile_features(hello-psgl-ffp-shaderlib PRIVATE c_std_11)
 target_link_libraries(hello-psgl-ffp-shaderlib PRIVATE
@@ -47,25 +32,66 @@ if(NOT PSGL_RSX_CG_COMPILER)
     find_program(PSGL_RSX_CG_COMPILER NAMES rsx-cg-compiler REQUIRED)
 endif()
 
-set(_host_exe_suffix "")
-if(CMAKE_HOST_WIN32)
-    set(_host_exe_suffix ".exe")
+# Prefer packaged host tool: psgl-shader-builder (.exe on Windows).
+find_program(PSGL_SHADER_BUILDER
+    NAMES psgl-shader-builder psgl_shader_builder
+    PATHS "$ENV{PS3DEV}/bin" "$ENV{PS3DK}/bin"
+    NO_DEFAULT_PATH)
+if(NOT PSGL_SHADER_BUILDER)
+    find_program(PSGL_SHADER_BUILDER NAMES psgl-shader-builder psgl_shader_builder)
 endif()
-set(_builder "${CMAKE_CURRENT_BINARY_DIR}/psgl_shader_builder${_host_exe_suffix}")
+
+if(PSGL_SHADER_BUILDER)
+    set(_builder "${PSGL_SHADER_BUILDER}")
+else()
+    set(_builder_src "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/psgl-shader-builder/psgl_shader_builder.c")
+    set(_emit_src "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/libPSGL/src/ffp_emit.c")
+    set(_emit_hdr "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/libPSGL/src/ffp_emit.h")
+
+    if(EXISTS "${_builder_src}" AND EXISTS "${_emit_src}" AND EXISTS "${_emit_hdr}")
+        find_program(PS3_HOST_CC NAMES cc gcc clang)
+        if(NOT PS3_HOST_CC)
+            message(FATAL_ERROR
+                "hello-psgl-ffp-shaderlib: psgl-shader-builder host tool not found, "
+                "and no host C compiler (cc/gcc/clang or PS3_HOST_CC) available to build from source.")
+        endif()
+
+        set(_ver_file "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/VERSION")
+        set(_builder_ver_flag "")
+        if(EXISTS "${_ver_file}")
+            file(READ "${_ver_file}" _builder_ver)
+            string(STRIP "${_builder_ver}" _builder_ver)
+            if(_builder_ver)
+                set(_builder_ver_flag "-DPSGL_SHADER_BUILDER_VERSION=\"${_builder_ver}\"")
+            endif()
+        endif()
+
+        set(_host_exe_suffix "")
+        if(CMAKE_HOST_WIN32)
+            set(_host_exe_suffix ".exe")
+        endif()
+        set(_builder "${CMAKE_CURRENT_BINARY_DIR}/psgl_shader_builder${_host_exe_suffix}")
+        add_custom_command(
+            OUTPUT "${_builder}"
+            COMMAND "${PS3_HOST_CC}" -std=c11 -O2 ${_builder_ver_flag}
+                    "-I${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/libPSGL/src"
+                    "${_builder_src}"
+                    "${_emit_src}"
+                    -o "${_builder}"
+            DEPENDS
+                    "${_builder_src}"
+                    "${_emit_src}"
+                    "${_emit_hdr}"
+            COMMENT "Building psgl_shader_builder from source fallback"
+            VERBATIM)
+    else()
+        message(FATAL_ERROR
+            "hello-psgl-ffp-shaderlib: psgl-shader-builder host tool not found in "
+            "PS3DEV/bin or PS3DK/bin, and builder sources are not present.")
+    endif()
+endif()
+
 set(_shader_bin "${CMAKE_CURRENT_BINARY_DIR}/shaders.bin")
-add_custom_command(
-    OUTPUT "${_builder}"
-    COMMAND "${PS3_HOST_CC}" -std=c11 -O2
-            "-I${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/libPSGL/src"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/psgl-shader-builder/psgl_shader_builder.c"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/libPSGL/src/ffp_emit.c"
-            -o "${_builder}"
-    DEPENDS
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/psgl-shader-builder/psgl_shader_builder.c"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/libPSGL/src/ffp_emit.c"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/libPSGL/src/ffp_emit.h"
-    COMMENT "Building psgl_shader_builder"
-    VERBATIM)
 add_custom_command(
     OUTPUT "${_shader_bin}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaderlib-work"

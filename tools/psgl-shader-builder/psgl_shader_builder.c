@@ -10,6 +10,11 @@
 #include <process.h>
 #endif
 
+/* Documented unversioned development default outside packaging / formal builds */
+#ifndef PSGL_SHADER_BUILDER_VERSION
+#define PSGL_SHADER_BUILDER_VERSION "dev"
+#endif
+
 #define BUILDER_SOURCE_CAPACITY 8192u
 #define BUILDER_CMD_CAPACITY 4096u
 
@@ -162,6 +167,16 @@ int main(int argc, char **argv)
     long count_pos;
     uint32_t count = 0u;
     char line[256];
+
+    if (argc == 2 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0)) {
+        printf("psgl-shader-builder %s\n", PSGL_SHADER_BUILDER_VERSION);
+        return 0;
+    }
+    if (argc == 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        printf("usage: %s <rsx-cg-compiler> <state.txt> <shaders.bin> [work-dir]\n",
+               argv[0]);
+        return 0;
+    }
 
     if (argc != 4 && argc != 5) {
         fprintf(stderr,

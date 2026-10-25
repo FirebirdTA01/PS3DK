@@ -163,6 +163,17 @@ jobs:
           tools/rsx-cg-compiler/build/rsx-cg-compiler --version
           tools/rsx-cg-compiler/build/cgnv2elf --version
 
+      - name: Build psgl-shader-builder
+        run: |
+          ver="$(tr -d ' \t\r\n' < tools/VERSION)"
+          gcc -std=c11 -O2 -Wall \
+              -DPSGL_SHADER_BUILDER_VERSION="\"$ver\"" \
+              -I sdk/libPSGL/src \
+              tools/psgl-shader-builder/psgl_shader_builder.c \
+              sdk/libPSGL/src/ffp_emit.c \
+              -o tools/psgl-shader-builder/psgl-shader-builder
+          tools/psgl-shader-builder/psgl-shader-builder --version
+
       # A second rsx-cg-compiler on a DIFFERENT compiler and standard library
       # (clang + libc++).  Output that depends on unordered_* iteration order,
       # on undefined behaviour, or on a compiler's miscompile shows up as a
@@ -1455,6 +1466,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\host\sweep-samples-log-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\host\psgl-shader-builder-package-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Set up MSYS2 / mingw64
         uses: msys2/setup-msys2@v2
@@ -1502,6 +1515,18 @@ jobs:
           tools/rsx-cg-compiler/build/rsx-cg-compiler.exe --version
           tools/rsx-cg-compiler/build/cgnv2elf.exe --version
           file tools/sprx-linker/sprxlinker.exe
+
+      - name: Build psgl-shader-builder (static)
+        run: |
+          set -e
+          ver="$(tr -d ' \t\r\n' < tools/VERSION)"
+          gcc -std=c11 -O2 -Wall -static -static-libgcc \
+              -DPSGL_SHADER_BUILDER_VERSION="\"$ver\"" \
+              -I sdk/libPSGL/src \
+              tools/psgl-shader-builder/psgl_shader_builder.c \
+              sdk/libPSGL/src/ffp_emit.c \
+              -o tools/psgl-shader-builder/psgl-shader-builder.exe
+          tools/psgl-shader-builder/psgl-shader-builder.exe --version
 
       - name: Exercise Windows refusal adversary
         env:

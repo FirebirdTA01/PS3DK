@@ -155,6 +155,17 @@ jobs:
               -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler cgnv2elf
 
+      - name: Build psgl-shader-builder
+        run: |
+          mkdir -p build/host-tools-linux/psgl-shader-builder
+          ver="$(tr -d ' \t\r\n' < tools/VERSION)"
+          gcc -std=c11 -O2 -Wall \
+              -DPSGL_SHADER_BUILDER_VERSION="\"$ver\"" \
+              -I sdk/libPSGL/src \
+              tools/psgl-shader-builder/psgl_shader_builder.c \
+              sdk/libPSGL/src/ffp_emit.c \
+              -o build/host-tools-linux/psgl-shader-builder/psgl-shader-builder
+
       - name: Validate --version flags
         run: |
           # Derived from tools/Cargo.toml, so the gate cannot fall behind a
@@ -175,6 +186,7 @@ jobs:
           done
           tools/rsx-cg-compiler/build/rsx-cg-compiler --version
           tools/rsx-cg-compiler/build/cgnv2elf --version
+          build/host-tools-linux/psgl-shader-builder/psgl-shader-builder --version
           # sprx-linker has no --version yet; just confirm it's a runnable ELF.
           file tools/sprx-linker/sprxlinker
 
@@ -197,6 +209,7 @@ jobs:
           cp tools/sprx-linker/sprxlinker "$stage/bin/"
           cp tools/rsx-cg-compiler/build/rsx-cg-compiler "$stage/bin/"
           cp tools/rsx-cg-compiler/build/cgnv2elf "$stage/bin/"
+          cp build/host-tools-linux/psgl-shader-builder/psgl-shader-builder "$stage/bin/"
           cp build/host-tools-linux/sfo-pkg/pkg "$stage/bin/"
           # PSL1GHT-derived tools and data files, the same set the Windows
           # zip ships (bin2s, cgcomp, fself, make_self, make_self_npdrm,
