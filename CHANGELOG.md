@@ -18,6 +18,18 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **Cg programs from binary containers through `cgCreateProgram`.**
+  `cgCreateProgram` with `CG_BINARY` or `CG_OBJECT` creates a program from
+  a precompiled `.vpo`/`.fpo` or compact CGB container in memory; it used to
+  return NULL for every input. The container is copied, so the caller's
+  buffer may be freed afterwards, and `CG_PROFILE_UNKNOWN` takes the profile
+  from the container. Programs are never compiled at run time: `CG_SOURCE`
+  is refused with `CG_INVALID_ENUMERANT_ERROR`, and `cgGetLastListing`
+  names the offline compiler. Containers that do not parse report
+  `CG_PROGRAM_LOAD_ERROR`, and a container of the other stage or an
+  unsupported profile reports `CG_INVALID_PROFILE_ERROR`.
+  `cgCreateProgramFromFile` also accepts `CG_OBJECT`.
+
 - **PSGL sampler selection queries.** `glGetUniformiv` returns the named
   program's logical texture unit for scalar fragment `sampler2D` uniforms
   routed through TEXUNIT0-7, even when another program or no program is
@@ -44,6 +56,18 @@ The version stamped into builds is generated from the most recent
   after one release.
 
 ### Fixed
+
+- **Cg parameter classes for samplers and other types.**
+  `cgGetParameterClass` and `cgGetTypeClass` report
+  `CG_PARAMETERCLASS_SAMPLER` for every sampler type and
+  `CG_PARAMETERCLASS_VECTOR` for vector types such as `float4`, which both
+  reported `CG_PARAMETERCLASS_UNKNOWN`, and `MATRIX`, `STRUCT`, `ARRAY` and
+  `OBJECT` for the types of those classes, including half, fixed, int and
+  bool matrices. `cgGetErrorString` and `cgGetLastErrorString` return the
+  error's message instead of "no error". Parameters of a compact CGB
+  container without its optional parameter information, which is what
+  `rsx-cg-compiler --emit-cgb-container` writes, still report a
+  four-component float type: such a container does not record Cg types.
 
 - **PSGL draws whose programs cannot be installed.** When a program cannot be
   installed because its RSX copy cannot be allocated, the draw is now refused
