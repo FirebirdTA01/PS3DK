@@ -3846,7 +3846,10 @@ void psgl_context_active_texture(GLenum texture)
 {
     PSGLcontext *context = g_psgl.current_context;
     if (!context) return;
-    if (psgl_texture_unit_index(texture) >= PSGL_MAX_TEXTURE_UNITS) return;
+    if (psgl_texture_unit_index(texture) >= PSGL_MAX_TEXTURE_UNITS) {
+        psgl_gl_error(GL_INVALID_ENUM);
+        return;
+    }
     context->active_texture = texture;
     context->dirty |= PSGL_DIRTY_TEXTURES;
 }
@@ -3855,7 +3858,8 @@ void psgl_context_client_active_texture(GLenum texture)
 {
     PSGLcontext *context = g_psgl.current_context;
     if (!context) return;
-    if (psgl_texture_unit_index(texture) >= PSGL_MAX_TEXTURE_UNITS) return;
+    /* Fragment sampler capacity does not add legacy texture-coordinate arrays. */
+    if (texture < GL_TEXTURE0 || texture - GL_TEXTURE0 >= PSGL_MAX_LEGACY_TEXTURE_UNITS) return;
     context->client_active_texture = texture;
 }
 

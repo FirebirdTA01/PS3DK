@@ -34,6 +34,18 @@ unsigned psgl_gl_format_query(GLenum pname, GLint *values)
     case GL_IMPLEMENTATION_COLOR_READ_FORMAT_OES: values[0] = GL_RGBA; return 1;
     case GL_IMPLEMENTATION_COLOR_READ_TYPE_OES: values[0] = GL_UNSIGNED_BYTE; return 1;
     case GL_MAX_VERTEX_ATTRIBS: values[0] = PSGL_MAX_GL_ATTRIBS; return 1;
+    case GL_MAX_TEXTURE_IMAGE_UNITS:
+    case GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS:
+        values[0] = PSGL_MAX_TEXTURE_UNITS; return 1;
+    case GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS: values[0] = 0; return 1;
+    case GL_ACTIVE_TEXTURE:
+    case GL_TEXTURE_BINDING_2D: {
+        PSGLcontext *context = psgl_context_current();
+        if (!context) return 0;
+        values[0] = pname == GL_ACTIVE_TEXTURE ? (GLint)context->active_texture
+            : (GLint)context->textures[context->active_texture - GL_TEXTURE0].texture_2d;
+        return 1;
+    }
     case GL_SHADER_COMPILER: values[0] = GL_FALSE; return 1;
     case GL_NUM_SHADER_BINARY_FORMATS: values[0] = 1; return 1;
     case GL_SHADER_BINARY_FORMATS:
@@ -92,7 +104,7 @@ GLAPI void glGetIntegerv(GLenum pname, GLint *params)
     case GL_MAX_PROJECTION_STACK_DEPTH:  *params = 2;    break;
     case GL_MAX_TEXTURE_STACK_DEPTH:     *params = 2;    break;
     case GL_MAX_VIEWPORT_DIMS:           params[0] = 1920; params[1] = 1080; break;
-    case GL_MAX_TEXTURE_UNITS:           *params = 4;    break;
+    case GL_MAX_TEXTURE_UNITS:           *params = PSGL_MAX_LEGACY_TEXTURE_UNITS; break;
     case GL_MAX_ELEMENTS_VERTICES:       *params = 4096; break;
     case GL_MAX_ELEMENTS_INDICES:        *params = 4096; break;
     case GL_SUBPIXEL_BITS:               *params = 4;    break;

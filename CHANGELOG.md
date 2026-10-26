@@ -37,6 +37,14 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **Eight PSGL fragment texture units.** Programmable fragment binaries can
+  sample distinct textures on units 0-7. Fragment and combined image-unit
+  queries report 8; the vertex image-unit query reports 0. Active texture and
+  2D binding queries expose the selected state, and invalid active-unit
+  selectors report `INVALID_ENUM` without changing it. The legacy texture-unit
+  limit stays 4. Sampler remapping through `glUniform1i` and fixed-function
+  texture-environment stages beyond unit 0 remain implementation gaps; this
+  change does not claim ES 2.0 conformance.
 - **PSGL disabled color arrays.** Disabling legacy or direct-Cg arrays
   retires stale hardware array descriptors before the next draw. Disabled
   color arrays use the current color instead of fetching the old array.
