@@ -246,6 +246,64 @@ __attribute__((unused)) static void queued_env_rows(void)
     expect_pixel(13, 0x004000, "queued env colour four: draw 3");
 }
 
+/* The enabled-unit set changes through binding alone: unit 1 stays enabled
+   with ADD while its binding switches between a stored texture and 0 (an
+   incomplete unit behaves as disabled), gains storage, or loses its texture
+   to deletion.  Nothing else is called between a switch and its draw, so
+   only the binding can select the program.  u0 MODULATE RGBA texel 0 with
+   colour (1,0,1) gives (80,00,40); adding u1 RGB texel 1 (ff,00,ff) gives
+   (ff,00,ff). */
+__attribute__((unused)) static void bind_transition_rows(void)
+{
+    static const unsigned char b[] = {0x00,0xff,0x00, 0xff,0x00,0xff};
+    GLuint late = 0, doomed = 0;
+    reset_units();
+    glColor4f(1, 0, 1, 1);
+    use_unit(0, tex_rgba_a, GL_MODULATE, k_lo);
+    use_unit(1, tex_rgb_b, GL_ADD, k_hi);
+    row("binding: warm units {0,1}", 0xff00ff);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    row("binding: warm units {0}", 0x800040);
+    glBindTexture(GL_TEXTURE_2D, tex_rgb_b);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0xff00ff, "binding: 0 -> texture enables unit 1");
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0x800040, "binding: texture -> 0 disables unit 1");
+    glBindTexture(GL_TEXTURE_2D, tex_rgb_b);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0xff00ff, "binding: 0 -> texture again");
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0x800040, "binding: texture -> 0 again");
+
+    /* A texture without storage is incomplete until glTexImage2D. */
+    glGenTextures(1, &late);
+    glBindTexture(GL_TEXTURE_2D, late);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0x800040, "storage: incomplete unit 1 is disabled");
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, b);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0xff00ff, "storage: glTexImage2D completes unit 1");
+
+    /* Deleting the bound texture leaves unit 1 without one. */
+    glGenTextures(1, &doomed);
+    glBindTexture(GL_TEXTURE_2D, doomed);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, b);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0xff00ff, "deletion: stored texture on unit 1");
+    glDeleteTextures(1, &doomed);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0x800040, "deletion: deleting it disables unit 1");
+    glDeleteTextures(1, &late);
+}
+
 __attribute__((unused)) static void render_rows(void)
 {
     /* Initial mode is MODULATE (GL 2.1 table 6.21): no TexEnv call yet. */
@@ -414,6 +472,7 @@ int main(void)
     expect_pixel(1, 0x0000ff, "no library: unit 1 draw leaves the clear colour");
 #else
     render_rows();
+    bind_transition_rows();
     queued_env_rows();
     error_rows();
     high_unit_rows();

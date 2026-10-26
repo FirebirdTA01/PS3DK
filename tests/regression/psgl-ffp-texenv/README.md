@@ -24,6 +24,9 @@ clear.
 - A texture matrix on unit 2, which must not affect unit 0.
 - A colour array as the primary colour.
 - `glMultiTexCoord4f` for a unit without an array.
+- Binding-only changes of the enabled-unit set: unit 1 switched between a
+  stored texture and 0, completed by `glTexImage2D`, and left without a
+  texture by deletion, with no other call before the draw.
 - Env colour changed between back-to-back queued draws. Each draw keeps the
   colour set before it.
 - Error and state rows: COMBINE, unknown modes, targets and pnames give
