@@ -271,7 +271,7 @@ jobs:
           sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
           ls -l "${stage}".*
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: host-tools-linux-x86_64
           path: ps3-sdk-tools-*-linux-x86_64.tar.*
@@ -415,7 +415,7 @@ jobs:
           sha256sum "${stage}.zip" > "${stage}.zip.sha256"
           ls -l "${stage}".*
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: host-tools-windows-x86_64
           path: |
@@ -456,7 +456,7 @@ jobs:
           sha256sum "${stage}.tar.xz" > "${stage}.tar.xz.sha256"
           ls -l "${stage}".*
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: source-bundle
           path: ps3-sdk-src-*.tar.*
@@ -567,7 +567,7 @@ jobs:
           tar -cJf /tmp/ps3dev-ppu.tar.xz "$(basename "$PS3DEV")/ppu"
           ls -lh /tmp/ps3dev-ppu.tar.xz
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: ps3dev-ppu-native
           path: /tmp/ps3dev-ppu.tar.xz
@@ -647,7 +647,7 @@ jobs:
           tar -cJf /tmp/ps3dev-spu.tar.xz "$(basename "$PS3DEV")/spu"
           ls -lh /tmp/ps3dev-spu.tar.xz
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: ps3dev-spu-native
           path: /tmp/ps3dev-spu.tar.xz
@@ -740,13 +740,13 @@ jobs:
           ./scripts/bootstrap.sh
 
       - name: Download native PPU artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: ps3dev-ppu-native
           path: artifacts/ps3dev-ppu
 
       - name: Download native SPU artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: ps3dev-spu-native
           path: artifacts/ps3dev-spu
@@ -821,7 +821,7 @@ jobs:
         run: ccache --show-stats || true
 
       - name: Download host-tools-windows artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: host-tools-windows-x86_64
           path: artifacts/host-tools-windows
@@ -834,7 +834,7 @@ jobs:
           ./scripts/package-windows-release.sh --tools-zip="$tools_zip"
           ls -lh stage/release/
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: toolchain-windows-x86_64
           path: |
@@ -964,7 +964,7 @@ jobs:
           CANDIDATE_TAG: ${{ inputs.candidate_tag }}
         run: bash scripts/ci-candidate-tag.sh "$CANDIDATE_TAG"
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
           merge-multiple: true   # flatten all artifacts into artifacts/ directly

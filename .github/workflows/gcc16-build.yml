@@ -267,7 +267,7 @@ jobs:
 
       - name: Keep logs and identities
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: gcc16-build-logs-${{ github.run_id }}
           path: gcc16-logs
