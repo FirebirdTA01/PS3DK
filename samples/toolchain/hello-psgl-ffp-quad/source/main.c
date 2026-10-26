@@ -1,7 +1,6 @@
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 #include <PSGL/psgl.h>
-#include <cell/sysutil.h>
 #include <cell/pngdec.h>
 #include <cell/sysmodule.h>
 #include <malloc.h>
@@ -12,17 +11,9 @@
 #include <sys/process.h>
 #include <sys/timer.h>
 
+#include "../../psgl-common/psgl_sample_quit.h"
+
 SYS_PROCESS_PARAM(1001, 0x100000);
-
-/* Quit from the XMB ends the render loop instead of waiting it out. */
-static volatile int g_exit_requested = 0;
-
-static void on_sysutil_event(uint64_t status, uint64_t param, void *userdata)
-{
-    (void)param;
-    (void)userdata;
-    if (status == CELL_SYSUTIL_REQUEST_EXITGAME) g_exit_requested = 1;
-}
 
 extern const uint8_t ICON0_PNG[] __attribute__((aligned(4)));
 extern const uint32_t ICON0_PNG_size;
@@ -182,13 +173,7 @@ int main(void)
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    {
-        /* The render buffer follows the display mode (720p, 1080p, ...). */
-        GLuint width = 0u;
-        GLuint height = 0u;
-        psglGetRenderBufferDimensions(device, &width, &height);
-        glViewport(0, 0, (GLsizei)width, (GLsizei)height);
-    }
+    psgl_sample_viewport(device);
     glClearColor(0.02f, 0.08f, 0.18f, 1.0f);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -199,18 +184,19 @@ int main(void)
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     printf("hello-psgl-ffp-quad: ready\n");
-    if (cellSysutilRegisterCallback(0, on_sysutil_event, NULL) != 0)
-        printf("hello-psgl-ffp-quad: sysutil callback not registered\n");
-    for (int i = 0; i < 900 && !g_exit_requested; i++) {
-        cellSysutilCheckCallback();
+    int exit_code = psgl_sample_quit_begin("hello-psgl-ffp-quad");
+    for (int i = 0; i < 900 && exit_code == 0; i++) {
+        int quit = psgl_sample_quit_poll("hello-psgl-ffp-quad");
+        if (quit < 0) { exit_code = 1; break; }
+        if (quit > 0) break;
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         psglSwap();
         sys_timer_usleep(16000);
     }
 
-    cellSysutilUnregisterCallback(0);
-    printf("hello-psgl-ffp-quad: done\n");
+    psgl_sample_quit_end();
+    printf("hello-psgl-ffp-quad: %s\n", psgl_sample_quit_outcome(exit_code));
     psglExit();
-    return 0;
+    return exit_code;
 }

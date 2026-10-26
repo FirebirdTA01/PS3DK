@@ -1,27 +1,18 @@
 #include <Cg/cgGL.h>
 #include <GLES/gl.h>
 #include <PSGL/psgl.h>
-#include <cell/sysutil.h>
 #include <ppu-lv2.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/process.h>
 #include <sys/timer.h>
 
+#include "../../psgl-common/psgl_sample_quit.h"
+
 #include "fpshader_fpo.h"
 #include "vpshader_vpo.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
-
-/* Quit from the XMB ends the render loop instead of waiting it out. */
-static volatile int g_exit_requested = 0;
-
-static void on_sysutil_event(uint64_t status, uint64_t param, void *userdata)
-{
-    (void)param;
-    (void)userdata;
-    if (status == CELL_SYSUTIL_REQUEST_EXITGAME) g_exit_requested = 1;
-}
 
 #define VP_PATH "/dev_hdd0/tmp/hello-psgl-triangle.vpo"
 #define FP_PATH "/dev_hdd0/tmp/hello-psgl-triangle.fpo"
@@ -120,28 +111,23 @@ int main(void)
     glVertexPointer(3, GL_FLOAT, sizeof(Vertex), (const void *)0);
     glEnableClientState(GL_VERTEX_ARRAY);
 
-    {
-        /* The render buffer follows the display mode (720p, 1080p, ...). */
-        GLuint width = 0u;
-        GLuint height = 0u;
-        psglGetRenderBufferDimensions(device, &width, &height);
-        glViewport(0, 0, (GLsizei)width, (GLsizei)height);
-    }
+    psgl_sample_viewport(device);
     glClearColor(0.02f, 0.08f, 0.18f, 1.0f);
     printf("hello-psgl-triangle: ready\n");
-    if (cellSysutilRegisterCallback(0, on_sysutil_event, NULL) != 0)
-        printf("hello-psgl-triangle: sysutil callback not registered\n");
-    for (int i = 0; i < 900 && !g_exit_requested; i++) {
-        cellSysutilCheckCallback();
+    int exit_code = psgl_sample_quit_begin("hello-psgl-triangle");
+    for (int i = 0; i < 900 && exit_code == 0; i++) {
+        int quit = psgl_sample_quit_poll("hello-psgl-triangle");
+        if (quit < 0) { exit_code = 1; break; }
+        if (quit > 0) break;
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         psglSwap();
         sys_timer_usleep(16000);
     }
 
-    cellSysutilUnregisterCallback(0);
-    printf("hello-psgl-triangle: done\n");
+    psgl_sample_quit_end();
+    printf("hello-psgl-triangle: %s\n", psgl_sample_quit_outcome(exit_code));
     cgDestroyContext(cg_context);
     psglExit();
-    return 0;
+    return exit_code;
 }
