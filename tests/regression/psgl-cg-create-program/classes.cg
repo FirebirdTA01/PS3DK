@@ -1,0 +1,10 @@
+float4 main(uniform float4 tint, uniform float gain, uniform float4x4 xform,
+            uniform sampler1D line : TEXUNIT0, uniform sampler2D image : TEXUNIT1,
+            uniform sampler3D volume : TEXUNIT2, uniform samplerCUBE environment : TEXUNIT3,
+            uniform samplerRECT rect : TEXUNIT4) : COLOR
+{
+    float4 c = tex1D(line, 0.5) + tex2D(image, float2(0.5, 0.5)) +
+               tex3D(volume, float3(0.5, 0.5, 0.5)) + texCUBE(environment, float3(1.0, 0.0, 0.0)) +
+               texRECT(rect, float2(0.5, 0.5));
+    return mul(xform, c) * gain + tint;
+}
