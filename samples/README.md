@@ -35,17 +35,31 @@ These are the "does the compiler work" tier — don't touch RSX / sysutil.
 ### PSGL (`toolchain/hello-psgl-*`, `toolchain/hello-psglu`)
 
 OpenGL ES 1.1-style rendering through `libPSGL` / `libPSGLU` on top of GCM.
-The rendering samples size their viewport from
-`psglGetRenderBufferDimensions`, so they fill the screen at any display
-mode, and they register a sysutil callback so *Quit* from the XMB ends the
-render loop (otherwise they stop after 900 frames, about 15 s).
+
+The 13 samples with a 900-frame render loop (blend, cmdbuf, ffp-lit-bootstrap,
+ffp-quad, ffp-shaderlib, glsl-object, msaa, rotating-quad, shader-interface,
+spudraw, spudraw-triangle, textured-quad, triangle) share
+`toolchain/psgl-common/psgl_sample_quit.h`:
+
+- The viewport comes from `psglGetRenderBufferDimensions`, so it matches the
+  display mode (hello-psgl-msaa queries the size itself).
+- A sysutil callback is polled before every frame. *Quit* from the XMB ends
+  the loop before the next draw and the sample prints `quit`. A failed
+  registration or poll prints `fail` and exits nonzero. Otherwise it prints
+  `done` after 900 frames.
+
+`hello-psgl-clear` (60 frames) and `hello-psgl-cg-passthrough` (4 frames)
+keep their short fixed loops; the other samples do not render.
 
 Shaders reach a sample in one of four ways:
 
 - **`ps3_add_cg_shader_rsxcgc`**: `.vcg` / `.fcg` compiled by
   `rsx-cg-compiler` at build time and embedded with `bin2s`.
-- **GLSL subset**: `tools/psgl/glsl_subset_to_cg.py` translates the GLSL to
-  Cg, then `rsx-cg-compiler --emit-container` builds the containers.
+- **Fixed GLSL templates**: `tools/psgl/glsl_subset_to_cg.py` checks the
+  GLSL file for the tokens of one known vertex shape and one known fragment
+  shape and emits the matching fixed Cg template; it does not parse or
+  validate GLSL. `rsx-cg-compiler --emit-container` then builds the
+  containers.
 - **Fixed-function library**: `psgl-shader-builder` (shipped with the host
   tools) builds a shader library from `state.txt`, loaded with
   `psglLoadShaderLibrary`.
@@ -65,7 +79,7 @@ first write them to `/dev_hdd0/tmp`.
 | `hello-psgl-textured-quad` | Texture upload and a Cg fragment program that samples it |
 | `hello-psgl-shader-interface` | Cg program parameter interface through `cgGL`, VBO-fed draw |
 | `hello-psgl-cg-passthrough` | A hand-built `CgBinaryProgram` through the Cg runtime |
-| `hello-psgl-glsl-object` | GLSL-subset shaders translated to Cg at build time |
+| `hello-psgl-glsl-object` | GLSL sources mapped to fixed Cg templates at build time |
 | `hello-psgl-ffp-quad` | Fixed-function textured quad: texture upload, VBO with texcoords, orthographic projection |
 | `hello-psgl-rotating-quad` | Fixed-function matrix stack animation |
 | `hello-psgl-ffp-lit-bootstrap` | Fixed-function lighting: normals, one light, the built-in lit programs |

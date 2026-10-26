@@ -22,8 +22,10 @@ The version stamped into builds is generated from the most recent
   viewport from the render buffer instead of assuming 1280x720, so they fill
   the screen at 1080p and other modes; `hello-psgl-msaa` no longer fails on
   a non-720p display.
-- **PSGL sample lifecycle and checks.** The rendering samples end their loop
-  when *Quit* is chosen from the XMB. `hello-psgl-spudraw-triangle` and
+- **PSGL sample lifecycle and checks.** The 13 PSGL samples with a render
+  loop poll a sysutil callback before each frame: *Quit* from the XMB ends
+  the loop before the next draw, and a failed registration or poll makes the
+  sample exit nonzero. `hello-psgl-spudraw-triangle` and
   `hello-psgl-spuhole` check device and context creation, and `hello-psglu`
   reports which string check failed.
 
