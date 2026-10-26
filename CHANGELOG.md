@@ -71,6 +71,20 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **`gcmSetDefaultFifoSize` no longer moves the command-buffer write position.**
+  Called after `cellGcmInit` (libPSGL calls it from `psglInit`), it moved the
+  write position back to the start of the command buffer although commands
+  were already there and the RSX had already read past them, so the next
+  flush pointed the RSX at a position behind the one it had reached. It, and
+  `gcmSetDefaultCommandBufferAndSegmentWordSize`, now only set where the
+  ring ends and leave the write position and the queued commands alone. The
+  size must fit in the command buffer passed to `cellGcmInit`: a larger
+  size, one smaller than the current ring, or an invalid segment size is
+  refused and changes nothing, including what `gcmGetDefaultCommandWordSize`
+  and `gcmGetDefaultSegmentWordSize` report. On a PS3, libPSGL start-up was
+  seen to stop in `psglCreateDeviceAuto` waiting for the RSX; the old
+  behaviour is the suspected cause, which is not yet confirmed on hardware.
+
 - **Cg parameter classes for samplers and other types.**
   `cgGetParameterClass` and `cgGetTypeClass` report
   `CG_PARAMETERCLASS_SAMPLER` for every sampler type and
