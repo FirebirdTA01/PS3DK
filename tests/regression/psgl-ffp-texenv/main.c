@@ -252,18 +252,18 @@ __attribute__((unused)) static void high_unit_rows(void)
     check(&psgl_ffp_program_installs != 0 && psgl_ffp_program_installs == installs,
           "units 4-7: enabling unit 4 does not reinstall the fixed-function programs");
 
-    /* MultiTexCoord names its own coordinate set: with ACTIVE_TEXTURE 4 it
+    /* MultiTexCoord names its own coordinate set: with ACTIVE_TEXTURE 7 it
        still sets unit 0's current texcoord, used here without an array. */
     while (glGetError() != GL_NO_ERROR) {}
     glMultiTexCoord4f(GL_TEXTURE0, 0.75f, 0.5f, 0, 1);
-    check(glGetError() == GL_NO_ERROR, "MultiTexCoord(TEXTURE0) with ACTIVE_TEXTURE 4: no error");
+    check(glGetError() == GL_NO_ERROR, "MultiTexCoord(TEXTURE0) with ACTIVE_TEXTURE 7: no error");
     glColor4f(0, 0, 0, 1);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex_rgb_b);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
     glClientActiveTexture(GL_TEXTURE0);
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-    row("MultiTexCoord(TEXTURE0) from unit 4 reaches unit 0", 0xff00ff);
+    row("MultiTexCoord(TEXTURE0) from unit 7 reaches unit 0", 0xff00ff);
     glMultiTexCoord4f(GL_TEXTURE0, 0, 0, 0, 1);
 
     glActiveTexture(GL_TEXTURE4);
