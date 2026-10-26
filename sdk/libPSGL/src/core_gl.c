@@ -481,16 +481,20 @@ GLAPI void glColorPointer(GLint size, GLenum type,
 { psgl_context_set_attrib_pointer(PSGL_ATTRIB_COLOR, size, type, stride, pointer); }
 GLAPI void glTexCoordPointer(GLint size, GLenum type,
                              GLsizei stride, const GLvoid *pointer)
-{ psgl_context_set_attrib_pointer(PSGL_ATTRIB_TEXCOORD, size, type, stride, pointer); }
+{ psgl_context_tex_coord_pointer(size, type, stride, pointer); }
 
 /* ── multi-texcoord (immediate) ──────────────────────────────────── */
 
 GLAPI void glMultiTexCoord4f(GLenum target, GLfloat s, GLfloat t,
                              GLfloat r, GLfloat q)
-{ (void)target; (void)s; (void)t; (void)r; (void)q; }
+{ psgl_context_multi_tex_coord(target, s, t, r, q); }
 GLAPI void glMultiTexCoord4x(GLenum target, GLfixed s, GLfixed t,
                              GLfixed r, GLfixed q)
-{ (void)target; (void)s; (void)t; (void)r; (void)q; }
+{
+    psgl_context_multi_tex_coord(target, (GLfloat)s / 65536.0f,
+                                 (GLfloat)t / 65536.0f, (GLfloat)r / 65536.0f,
+                                 (GLfloat)q / 65536.0f);
+}
 
 /* ── fog ─────────────────────────────────────────────────────────── */
 

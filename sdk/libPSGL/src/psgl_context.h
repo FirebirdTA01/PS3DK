@@ -10,7 +10,9 @@
 #define PSGL_MAX_FBO_OBJECTS 16u
 #define PSGL_MAX_TEXTURE_UNITS 8u
 #define PSGL_MAX_LEGACY_TEXTURE_UNITS 4u
-#define PSGL_MAX_VERTEX_ATTRIBS 4u
+/* Legacy arrays: vertex, normal, colour and one texcoord array per
+   fixed-function texture unit (GL 2.1 section 2.8). */
+#define PSGL_MAX_VERTEX_ATTRIBS 7u
 #define PSGL_MAX_GENERIC_ATTRIBS 16u
 #define PSGL_MAX_GL_ATTRIBS 8u
 #define PSGL_MAX_LIGHTS 8u
@@ -22,7 +24,10 @@ typedef enum PSGLvertexAttribSlot {
     PSGL_ATTRIB_VERTEX = 0,
     PSGL_ATTRIB_NORMAL = 1,
     PSGL_ATTRIB_COLOR = 2,
-    PSGL_ATTRIB_TEXCOORD = 3
+    PSGL_ATTRIB_TEXCOORD = 3,
+    PSGL_ATTRIB_TEXCOORD1 = 4,
+    PSGL_ATTRIB_TEXCOORD2 = 5,
+    PSGL_ATTRIB_TEXCOORD3 = 6
 } PSGLvertexAttribSlot;
 
 typedef enum PSGLdirtyBits {
@@ -186,6 +191,8 @@ struct PSGLcontext {
     GLint pack_alignment;
     GLfloat clear_color[4];
     GLfloat current_color[4];
+    /* Current texcoords for units 0-3 (GL 2.7), used without an array. */
+    GLfloat current_texcoord[PSGL_MAX_LEGACY_TEXTURE_UNITS][4];
     GLfloat light_model_ambient[4];
     GLfloat clear_depth;
     GLint clear_stencil;
@@ -305,6 +312,10 @@ void psgl_context_tex_env(GLenum target, GLenum pname,
                           const GLfloat *params, GLboolean vector);
 int psgl_context_get_tex_env(GLenum target, GLenum pname, GLfloat *params);
 void psgl_context_client_active_texture(GLenum texture);
+void psgl_context_tex_coord_pointer(GLint size, GLenum type, GLsizei stride,
+                                    const GLvoid *pointer);
+void psgl_context_multi_tex_coord(GLenum target, GLfloat s, GLfloat t,
+                                  GLfloat r, GLfloat q);
 void psgl_context_gen_textures(GLsizei n, GLuint *textures);
 void psgl_context_delete_textures(GLsizei n, const GLuint *textures);
 void psgl_context_bind_texture(GLenum target, GLuint texture);

@@ -1938,6 +1938,12 @@ static uint8_t psgl_gl_index_type(GLenum type)
     }
 }
 
+static PSGLvertexAttribSlot psgl_texcoord_slot(uint32_t unit)
+{
+    return unit ? (PSGLvertexAttribSlot)(PSGL_ATTRIB_TEXCOORD1 + unit - 1u)
+                : PSGL_ATTRIB_TEXCOORD;
+}
+
 static uint8_t psgl_attrib_hw_index(uint32_t slot)
 {
     switch (slot) {
@@ -1945,6 +1951,9 @@ static uint8_t psgl_attrib_hw_index(uint32_t slot)
     case PSGL_ATTRIB_NORMAL: return GCM_VERTEX_ATTRIB_NORMAL;
     case PSGL_ATTRIB_COLOR: return GCM_VERTEX_ATTRIB_COLOR0;
     case PSGL_ATTRIB_TEXCOORD: return GCM_VERTEX_ATTRIB_TEX0;
+    case PSGL_ATTRIB_TEXCOORD1: return GCM_VERTEX_ATTRIB_TEX1;
+    case PSGL_ATTRIB_TEXCOORD2: return GCM_VERTEX_ATTRIB_TEX2;
+    case PSGL_ATTRIB_TEXCOORD3: return GCM_VERTEX_ATTRIB_TEX3;
     default: return 0u;
     }
 }
@@ -2251,6 +2260,14 @@ static void psgl_emit_current_attribs(PSGLcontext *context)
     if (!context->attribs[PSGL_ATTRIB_COLOR].enabled) {
         cellGcmSetVertexData4f(context->gcm, GCM_VERTEX_ATTRIB_COLOR0,
                                context->current_color);
+    }
+    for (uint32_t unit = 0u; unit < PSGL_MAX_LEGACY_TEXTURE_UNITS; unit++) {
+        if (!context->textures[unit].texture_2d_enabled ||
+            context->attribs[psgl_texcoord_slot(unit)].enabled)
+            continue;
+        cellGcmSetVertexData4f(context->gcm,
+                               (uint8_t)(GCM_VERTEX_ATTRIB_TEX0 + unit),
+                               context->current_texcoord[unit]);
     }
 }
 
@@ -2693,6 +2710,11 @@ PSGLcontext *psgl_context_create(void)
     context->attribs[PSGL_ATTRIB_NORMAL].size = 3;
     context->attribs[PSGL_ATTRIB_COLOR].size = 4;
     context->attribs[PSGL_ATTRIB_TEXCOORD].size = 4;
+    context->attribs[PSGL_ATTRIB_TEXCOORD1].size = 4;
+    context->attribs[PSGL_ATTRIB_TEXCOORD2].size = 4;
+    context->attribs[PSGL_ATTRIB_TEXCOORD3].size = 4;
+    for (uint32_t unit = 0u; unit < PSGL_MAX_LEGACY_TEXTURE_UNITS; unit++)
+        context->current_texcoord[unit][3] = 1.0f;
     context->fog_enabled = GL_FALSE;
     context->fog_mode = GL_EXP;
     context->fog_density = 1.0f;
@@ -4083,9 +4105,40 @@ void psgl_context_client_active_texture(GLenum texture)
 {
     PSGLcontext *context = g_psgl.current_context;
     if (!context) return;
-    /* Fragment sampler capacity does not add legacy texture-coordinate arrays. */
-    if (texture < GL_TEXTURE0 || texture - GL_TEXTURE0 >= PSGL_MAX_LEGACY_TEXTURE_UNITS) return;
+    /* Fragment sampler capacity does not add legacy texture-coordinate
+       arrays: MAX_TEXTURE_COORDS is 4 (GL 2.1 section 2.8). */
+    if (texture < GL_TEXTURE0 || texture - GL_TEXTURE0 >= PSGL_MAX_LEGACY_TEXTURE_UNITS) {
+        psgl_gl_error(GL_INVALID_ENUM);
+        return;
+    }
     context->client_active_texture = texture;
+}
+
+void psgl_context_tex_coord_pointer(GLint size, GLenum type, GLsizei stride,
+                                    const GLvoid *pointer)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    psgl_context_set_attrib_pointer(
+        psgl_texcoord_slot(context->client_active_texture - GL_TEXTURE0),
+        size, type, stride, pointer);
+}
+
+void psgl_context_multi_tex_coord(GLenum target, GLfloat s, GLfloat t,
+                                  GLfloat r, GLfloat q)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    uint32_t unit;
+    if (!context) return;
+    if (target < GL_TEXTURE0 || target - GL_TEXTURE0 >= PSGL_MAX_LEGACY_TEXTURE_UNITS) {
+        psgl_gl_error(GL_INVALID_ENUM);
+        return;
+    }
+    unit = target - GL_TEXTURE0;
+    context->current_texcoord[unit][0] = s;
+    context->current_texcoord[unit][1] = t;
+    context->current_texcoord[unit][2] = r;
+    context->current_texcoord[unit][3] = q;
 }
 
 void psgl_context_set_fog_f(GLenum pname, GLfloat param)
@@ -5093,7 +5146,9 @@ void psgl_context_set_client_state(GLenum array, GLboolean enabled)
     case GL_VERTEX_ARRAY: slot = PSGL_ATTRIB_VERTEX; break;
     case GL_NORMAL_ARRAY: slot = PSGL_ATTRIB_NORMAL; break;
     case GL_COLOR_ARRAY: slot = PSGL_ATTRIB_COLOR; break;
-    case GL_TEXTURE_COORD_ARRAY: slot = PSGL_ATTRIB_TEXCOORD; break;
+    case GL_TEXTURE_COORD_ARRAY:
+        slot = psgl_texcoord_slot(context->client_active_texture - GL_TEXTURE0);
+        break;
     default: return;
     }
     if (!enabled && context->attribs[slot].enabled)

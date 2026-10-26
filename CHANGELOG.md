@@ -75,6 +75,12 @@ The version stamped into builds is generated from the most recent
   `glEnable(GL_TEXTURE_2D)` report `GL_INVALID_OPERATION`. Textures
   remember their base format (ALPHA, LUMINANCE, LUMINANCE_ALPHA, RGB, RGBA)
   for the texture functions.
+- **PSGL per-unit texture coordinates.** `glTexCoordPointer` and
+  `GL_TEXTURE_COORD_ARRAY` apply to the `glClientActiveTexture` unit
+  (0-3), and `glMultiTexCoord4{f,x}` set a unit's current texcoord, used
+  while that unit has no array. Client units past 3 report
+  `GL_INVALID_ENUM`; previously every unit shared one array, and both
+  `glMultiTexCoord` forms did nothing.
 - **Eight PSGL fragment texture units.** Programmable fragment binaries can
   sample distinct textures on units 0-7. Fragment and combined image-unit
   queries report 8; the vertex image-unit query reports 0. Active texture and
