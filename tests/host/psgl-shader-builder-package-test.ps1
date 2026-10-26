@@ -6,6 +6,8 @@
 #   3. Source fallback requires a host compiler and succeeds only with both
 #   4. Rejects original dummy-skip behavior (proves red on exact baseline CMakeLists.txt)
 #   5. Validates --version output follows project version convention (not a versionless label)
+#   6. A compiler that lists --psgl-ffp-library builds the library itself: no builder,
+#      no sources, no host compiler, and the generated rule runs that mode
 #
 # Stubs target/toolchain setup so no compiler, target process, or emulator runs.
 # Isolates PATH, PS3DEV, and PS3DK so host tools are never accidentally discovered.
@@ -250,6 +252,46 @@ set(CMAKE_ASM_COMPILER_FORCED TRUE)
     $isDummySkip = ($resMut.rc -eq 0 -and $resMut.text -match 'Skipping hello-psgl-ffp-shaderlib: no host C compiler found')
     Check ($isDummySkip) `
         'Case D: mutation proof confirms exact baseline returned rc=0 dummy-skip (which fail-closed rejects)'
+
+    # -----------------------------------------------------------------------
+    # Case E: the compiler lists --psgl-ffp-library in --help, so the sample
+    # uses it directly, even in the package layout with no builder or sources.
+    # -----------------------------------------------------------------------
+    $mockCgFfp = (Join-Path $work 'mock-rsx-cg-ffp.cmd').Replace('\', '/')
+    @'
+@echo off
+echo usage: rsx-cg-compiler [options] ^<shader.cg^> 1>&2
+echo   --psgl-ffp-library ^<state.txt^> -o ^<shaders.bin^> 1>&2
+exit /b 0
+'@ | Out-File -Encoding ascii (Join-Path $work 'mock-rsx-cg-ffp.cmd')
+
+    $bldE = Join-Path $work 'bld-case-e'
+    $cmakeArgsE = @(
+        '-S', $pkgSample,
+        '-B', $bldE,
+        '-G', 'Ninja',
+        "-DCMAKE_MAKE_PROGRAM=$mockNinja",
+        "-DCMAKE_MODULE_PATH=$modFwd",
+        "-DCMAKE_TOOLCHAIN_FILE=$tcPath",
+        "-DPSGL_RSX_CG_COMPILER=$mockCgFfp"
+    )
+    $resE = Invoke-CMake $cmakeArgsE
+    $ninjaE = Join-Path $bldE 'build.ninja'
+    $ruleE = if (Test-Path $ninjaE) { Get-Content -Raw $ninjaE } else { '' }
+    Check ($resE.rc -eq 0) 'Case E: --psgl-ffp-library compiler configures with no builder, sources or host compiler'
+    Check ($ruleE -match '--psgl-ffp-library' -and $ruleE -notmatch 'shaderlib-work') `
+        'Case E: generated rule runs rsx-cg-compiler --psgl-ffp-library, not the builder'
+
+    # Case E2: the mode wins over a packaged builder that is also present
+    $bldE2 = Join-Path $work 'bld-case-e2'
+    $cmakeArgsE2 = $cmakeArgsE.Clone()
+    $cmakeArgsE2[3] = $bldE2
+    $cmakeArgsE2 += "-DPSGL_SHADER_BUILDER=$mockBuilder"
+    $resE2 = Invoke-CMake $cmakeArgsE2
+    $ninjaE2 = Join-Path $bldE2 'build.ninja'
+    $ruleE2 = if (Test-Path $ninjaE2) { Get-Content -Raw $ninjaE2 } else { '' }
+    Check ($resE2.rc -eq 0 -and $ruleE2 -match '--psgl-ffp-library' -and $ruleE2 -notmatch 'mock-psgl-shader-builder') `
+        'Case E2: --psgl-ffp-library is used even when psgl-shader-builder is also present'
 
     # Toolchain stub check: verify mock compiler was never invoked during configure
     Check (-not (Test-Path $ccMarker)) `

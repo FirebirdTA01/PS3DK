@@ -16,6 +16,22 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **PSGL fixed-function shader libraries from rsx-cg-compiler.**
+  `rsx-cg-compiler --psgl-ffp-library state.txt -o shaders.bin` builds the
+  library `psglLoadShaderLibrary` loads, compiling every state mask in
+  process with libPSGL's own fixed-function generator. The bytes are the
+  same as `psgl-shader-builder` wrote. A failed mask writes no partial
+  file. `hello-psgl-ffp-shaderlib` uses the mode when the compiler has it.
+
+### Deprecated
+
+- **`psgl-shader-builder`.** It is now a thin wrapper that runs
+  `rsx-cg-compiler --psgl-ffp-library` with its old command line (the work
+  directory argument is accepted and no longer used). It will be removed
+  after one release.
+
 ### Fixed
 
 - **PSGL pixel readback.** `glReadPixels` returns RGBA bytes from linear,
