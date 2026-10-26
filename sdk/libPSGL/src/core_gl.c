@@ -291,8 +291,8 @@ GLAPI void glSampleCoveragex(GLclampx value, GLboolean invert)
 
 /* ── flush / finish ──────────────────────────────────────────────── */
 
-GLAPI void glFlush(void)  {}
-GLAPI void glFinish(void) {}
+GLAPI void glFlush(void)  { psgl_context_flush(); }
+GLAPI void glFinish(void) { psgl_context_finish(); }
 
 /* ── matrices ────────────────────────────────────────────────────── */
 

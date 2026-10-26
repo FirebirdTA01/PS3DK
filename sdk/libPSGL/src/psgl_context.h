@@ -238,6 +238,8 @@ void psgl_context_bind_cg_program(CGprogram program, CGprofile profile);
 void psgl_context_set_gl_attrib_routing(const int8_t *hw_to_location);
 void psgl_context_set_gl_sampler_routing(const uint8_t *units, uint32_t mask);
 void psgl_context_swap(void);
+void psgl_context_flush(void);
+void psgl_context_finish(void);
 void psgl_context_set_clear_color(GLfloat red, GLfloat green,
                                   GLfloat blue, GLfloat alpha);
 void psgl_context_set_clear_depth(GLfloat depth);

@@ -2962,6 +2962,22 @@ void psgl_context_set_gl_attrib_routing(const int8_t *hw_to_location)
     context->dirty |= PSGL_DIRTY_CG;
 }
 
+/* glFlush submits everything queued so far; glFinish also waits on a fresh
+   completion token, so it returns only after those commands completed. */
+void psgl_context_flush(void)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !context->gcm) return;
+    cellGcmFlush(context->gcm);
+}
+
+void psgl_context_finish(void)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context || !context->gcm) return;
+    psgl_wait_rsx_idle(context->gcm);
+}
+
 void psgl_context_swap(void)
 {
     PSGLcontext *context = g_psgl.current_context;
