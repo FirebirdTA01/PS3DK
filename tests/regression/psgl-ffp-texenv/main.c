@@ -211,6 +211,10 @@ __attribute__((unused)) static void high_unit_rows(void)
     glActiveTexture(GL_TEXTURE7);
     glEnable(GL_TEXTURE_2D);
     check(glGetError() == GL_INVALID_OPERATION, "Enable(TEXTURE_2D) on unit 7 is INVALID_OPERATION");
+    glMatrixMode(GL_TEXTURE);
+    glLoadIdentity();
+    check(glGetError() == GL_INVALID_OPERATION, "texture matrix op on unit 7 is INVALID_OPERATION");
+    glMatrixMode(GL_MODELVIEW);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE4);
     glBindTexture(GL_TEXTURE_2D, 0);

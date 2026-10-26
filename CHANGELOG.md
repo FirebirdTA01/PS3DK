@@ -81,6 +81,10 @@ The version stamped into builds is generated from the most recent
   while that unit has no array. Client units past 3 report
   `GL_INVALID_ENUM`; previously every unit shared one array, and both
   `glMultiTexCoord` forms did nothing.
+- **PSGL texture matrices.** Fixed-function programs receive the texture
+  matrix of each enabled unit 0-3. Matrix operations with `GL_TEXTURE`
+  mode on units 4-7 report `GL_INVALID_OPERATION`; they previously changed
+  unit 0's matrix.
 - **Eight PSGL fragment texture units.** Programmable fragment binaries can
   sample distinct textures on units 0-7. Fragment and combined image-unit
   queries report 8; the vertex image-unit query reports 0. Active texture and

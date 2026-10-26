@@ -331,8 +331,14 @@ static GLfloat *psgl_current_matrix(PSGLcontext *context)
     case GL_MODELVIEW:  return context->modelview;
     case GL_PROJECTION: return context->projection;
     case GL_TEXTURE:
+        /* Texture matrices exist for the four texcoord sets; matrix
+           operations past MAX_TEXTURE_COORDS are INVALID_OPERATION
+           (GL 2.1 section 2.11.2). */
         unit = psgl_texture_unit_index(context->active_texture);
-        if (unit >= PSGL_MAX_TEXTURE_UNITS) unit = 0u;
+        if (unit >= PSGL_MAX_LEGACY_TEXTURE_UNITS) {
+            psgl_gl_error(GL_INVALID_OPERATION);
+            return NULL;
+        }
         return context->texture_matrix[unit];
     default:            return context->modelview;
     }
@@ -737,6 +743,20 @@ static void psgl_ffp_update_matrices(PSGLcontext *context, PSGLcgProgram *vp)
     psgl_copy(parameter->value, mvp, sizeof(mvp));
     parameter->value_count = 16u;
     parameter->dirty = CG_TRUE;
+    /* Texturing programs name one texMatrix<k> per enabled unit. */
+    for (uint32_t i = 1u; i < vp->parameter_count; i++) {
+        const char *name = vp->parameters[i].name;
+        if (name[0] != 't' || name[1] != 'e' || name[2] != 'x' || name[3] != 'M' ||
+            name[4] != 'a' || name[5] != 't' || name[6] != 'r' || name[7] != 'i' ||
+            name[8] != 'x' || name[9] < '0' ||
+            name[9] >= (char)('0' + PSGL_MAX_LEGACY_TEXTURE_UNITS) || name[10] != '\0')
+            continue;
+        psgl_copy(vp->parameters[i].value,
+                  context->texture_matrix[(uint32_t)(name[9] - '0')],
+                  sizeof(GLfloat) * 16u);
+        vp->parameters[i].value_count = 16u;
+        vp->parameters[i].dirty = CG_TRUE;
+    }
     context->dirty &= ~PSGL_DIRTY_MATRICES;
 }
 
