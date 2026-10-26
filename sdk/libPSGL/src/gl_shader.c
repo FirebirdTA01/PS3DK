@@ -13,14 +13,9 @@
 typedef struct PSGLglShader {
     GLuint name;
     GLenum type;
-    GLchar *source;
-    GLsizei source_length;
-    void *binary;
-    GLsizei binary_length;
     CGprogram cg_program;
     GLboolean compiled;
     GLboolean deleted;
-    char log[96];
     struct PSGLglShader *next;
 } PSGLglShader;
 
@@ -127,29 +122,6 @@ static PSGLglProgram *gls_find_program(GLuint name)
     return NULL;
 }
 
-static uint32_t gls_source_part_length(const GLchar *s, GLint length)
-{
-    if (!s) return 0u;
-    if (length >= 0) return (uint32_t)length;
-    return gls_len(s);
-}
-
-static void gls_copy_info_log(const char *log, GLsizei buf_size,
-                              GLsizei *length, GLchar *out)
-{
-    uint32_t n = gls_len(log);
-    uint32_t written = 0u;
-    if (buf_size > 0 && out) {
-        uint32_t cap = (uint32_t)buf_size;
-        while (written + 1u < cap && written < n) {
-            out[written] = log[written];
-            written++;
-        }
-        out[written] = '\0';
-    }
-    if (length) *length = (GLsizei)written;
-}
-
 static PSGLvertexAttribSlot gls_attrib_slot(GLuint index)
 {
     if (index == 1u) return PSGL_ATTRIB_NORMAL;
@@ -208,7 +180,6 @@ GLAPI GLuint glCreateShader(GLenum type)
     if (!shader) return 0u;
     shader->name = g_next_shader++;
     shader->type = type;
-    gls_set_log(shader->log, sizeof(shader->log), "");
     shader->next = g_shaders;
     g_shaders = shader;
     return shader->name;
@@ -224,27 +195,37 @@ GLAPI void glDeleteShader(GLuint shader)
 GLAPI GLboolean glIsShader(GLuint shader)
 { return gls_find_shader(shader) ? GL_TRUE : GL_FALSE; }
 
+/* ES 2.0.25 sections 2.10.1 and 6.1.8: no on-target compiler. */
 GLAPI void glShaderSource(GLuint shader, GLsizei count,
                           const GLchar **string, const GLint *length)
 {
-    PSGLglShader *s = gls_find_shader(shader);
-    uint32_t total = 0u;
-    uint32_t cursor = 0u;
-    GLchar *joined;
-    if (!s || count < 0 || !string) return;
-    for (GLsizei i = 0; i < count; i++)
-        total += gls_source_part_length(string[i], length ? length[i] : -1);
-    joined = (GLchar *)malloc(total + 1u);
-    if (!joined) return;
-    for (GLsizei i = 0; i < count; i++) {
-        uint32_t n = gls_source_part_length(string[i], length ? length[i] : -1);
-        if (n) gls_copy(joined + cursor, string[i], n);
-        cursor += n;
-    }
-    joined[cursor] = '\0';
-    if (s->source) free(s->source);
-    s->source = joined;
-    s->source_length = (GLsizei)cursor;
+    (void)shader; (void)count; (void)string; (void)length;
+    psgl_gl_error(GL_INVALID_OPERATION);
+}
+
+GLAPI void glCompileShader(GLuint shader)
+{
+    (void)shader;
+    psgl_gl_error(GL_INVALID_OPERATION);
+}
+
+GLAPI void glReleaseShaderCompiler(void)
+{
+    psgl_gl_error(GL_INVALID_OPERATION);
+}
+
+GLAPI void glGetShaderSource(GLuint shader, GLsizei bufSize,
+                             GLsizei *length, GLchar *source)
+{
+    (void)shader; (void)bufSize; (void)length; (void)source;
+    psgl_gl_error(GL_INVALID_OPERATION);
+}
+
+GLAPI void glGetShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype,
+                                      GLint *range, GLint *precision)
+{
+    (void)shadertype; (void)precisiontype; (void)range; (void)precision;
+    psgl_gl_error(GL_INVALID_OPERATION);
 }
 
 GLAPI void glShaderBinary(GLsizei count, const GLuint *shaders,
@@ -252,69 +233,84 @@ GLAPI void glShaderBinary(GLsizei count, const GLuint *shaders,
                           GLsizei length)
 {
     PSGLglShader *shader;
-    void *copy;
-    if (count != 1 || !shaders || binaryformat != GL_SHADER_BINARY_FORMAT_CGB_PS3DK ||
-        !binary || length <= 0)
-        return;
-    shader = gls_find_shader(shaders[0]);
-    if (!shader) return;
-    copy = malloc((uint32_t)length);
-    if (!copy) return;
-    gls_copy(copy, binary, (uint32_t)length);
-    if (shader->binary) free(shader->binary);
-    shader->binary = copy;
-    shader->binary_length = length;
-    shader->compiled = GL_FALSE;
-}
-
-GLAPI void glCompileShader(GLuint shader)
-{
-    PSGLglShader *s = gls_find_shader(shader);
+    CellCgbProgram parsed;
+    CellCgbProfile stage;
     CGprofile profile;
-    PSGLcgProgram *program;
-    if (!s) return;
-    if (!s->binary || s->binary_length <= 0) {
-        s->compiled = GL_FALSE;
-        gls_set_log(s->log, sizeof(s->log),
-                    "runtime GLSL compilation unavailable");
+    CGprogram loaded;
+    CGcontext context;
+    void *copy;
+    if (count < 0 || length < 0) {
+        psgl_gl_error(GL_INVALID_VALUE); return;
+    }
+    if (binaryformat != GL_SHADER_BINARY_FORMAT_CGB_PS3DK) {
+        psgl_gl_error(GL_INVALID_ENUM); return;
+    }
+    if (!count) return;
+    if (!shaders || count > 2) {
+        psgl_gl_error(GL_INVALID_VALUE); return;
+    }
+    shader = gls_find_shader(shaders[0]);
+    if (!shader) { psgl_gl_error(GL_INVALID_VALUE); return; }
+    if (count == 2) {
+        PSGLglShader *second = gls_find_shader(shaders[1]);
+        if (!second) { psgl_gl_error(GL_INVALID_VALUE); return; }
+        /* This format is one container for one stage, never a linked pair. */
+        psgl_gl_error(second->type == shader->type ?
+                      GL_INVALID_OPERATION : GL_INVALID_VALUE);
         return;
     }
-    profile = (s->type == GL_VERTEX_SHADER) ?
+    if (!binary || !length) { psgl_gl_error(GL_INVALID_VALUE); return; }
+    /* Client storage need not be aligned. Parse only an aligned, owned copy. */
+    copy = malloc((size_t)length);
+    if (!copy) { psgl_gl_error(GL_OUT_OF_MEMORY); return; }
+    gls_copy(copy, binary, (uint32_t)length);
+    if (cellCgbRead(copy, (uint32_t)length, &parsed) != CELL_CGB_OK) {
+        free(copy); psgl_gl_error(GL_INVALID_VALUE); return;
+    }
+    stage = cellCgbGetProfile(&parsed);
+    if ((shader->type == GL_VERTEX_SHADER && stage != CELL_CGB_PROFILE_VERTEX) ||
+        (shader->type == GL_FRAGMENT_SHADER && stage != CELL_CGB_PROFILE_FRAGMENT)) {
+        free(copy); psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+    context = gls_context();
+    if (!context) { free(copy); psgl_gl_error(GL_OUT_OF_MEMORY); return; }
+    profile = shader->type == GL_VERTEX_SHADER ?
         CG_PROFILE_SCE_VP_RSX : CG_PROFILE_SCE_FP_RSX;
-    s->cg_program = psgl_cg_create_program_from_memory(
-        gls_context(), s->binary, (uint32_t)s->binary_length, profile);
-    program = psgl_cg_program(s->cg_program);
-    if (!program) {
-        s->compiled = GL_FALSE;
-        gls_set_log(s->log, sizeof(s->log), "CGB program load failed");
+    loaded = psgl_cg_create_program_from_memory(context, copy, (uint32_t)length, profile);
+    free(copy);
+    if (!loaded) {
+        psgl_gl_error(cgGetError() == CG_MEMORY_ALLOC_ERROR ?
+                      GL_OUT_OF_MEMORY : GL_INVALID_VALUE);
         return;
     }
-    program->loaded = CG_TRUE;
-    s->compiled = GL_TRUE;
-    gls_set_log(s->log, sizeof(s->log), "");
+    /* The Cg context owns program allocations. A previous executable may
+     * still be referenced by an already linked GL program after a reload. */
+    shader->cg_program = loaded;
+    shader->compiled = GL_TRUE;
 }
 
 GLAPI void glGetShaderiv(GLuint shader, GLenum pname, GLint *params)
 {
-    PSGLglShader *s = gls_find_shader(shader);
+    PSGLglShader *s;
+    if (pname == GL_COMPILE_STATUS || pname == GL_INFO_LOG_LENGTH ||
+        pname == GL_SHADER_SOURCE_LENGTH) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+    s = gls_find_shader(shader);
+    if (!s) { psgl_gl_error(GL_INVALID_VALUE); return; }
     if (!params) return;
-    *params = 0;
-    if (!s) return;
     switch (pname) {
     case GL_SHADER_TYPE: *params = (GLint)s->type; break;
     case GL_DELETE_STATUS: *params = (GLint)s->deleted; break;
-    case GL_COMPILE_STATUS: *params = (GLint)s->compiled; break;
-    case GL_INFO_LOG_LENGTH: *params = (GLint)gls_len(s->log) + 1; break;
-    case GL_SHADER_SOURCE_LENGTH: *params = s->source_length + 1; break;
-    default: break;
+    default: psgl_gl_error(GL_INVALID_ENUM); break;
     }
 }
 
 GLAPI void glGetShaderInfoLog(GLuint shader, GLsizei bufSize,
                               GLsizei *length, GLchar *infoLog)
 {
-    PSGLglShader *s = gls_find_shader(shader);
-    gls_copy_info_log(s ? s->log : "", bufSize, length, infoLog);
+    (void)shader; (void)bufSize; (void)length; (void)infoLog;
+    psgl_gl_error(GL_INVALID_OPERATION);
 }
 
 GLAPI GLuint glCreateProgram(void)
@@ -438,8 +434,10 @@ GLAPI void glGetProgramiv(GLuint program, GLenum pname, GLint *params)
 GLAPI void glGetProgramInfoLog(GLuint program, GLsizei bufSize,
                                GLsizei *length, GLchar *infoLog)
 {
-    PSGLglProgram *p = gls_find_program(program);
-    gls_copy_info_log(p ? p->log : "", bufSize, length, infoLog);
+    /* ES 2.0.25 section 6.1.8 p.131 restricts BOTH log commands when
+     * SHADER_COMPILER is false, but not GetProgramiv(INFO_LOG_LENGTH). */
+    (void)program; (void)bufSize; (void)length; (void)infoLog;
+    psgl_gl_error(GL_INVALID_OPERATION);
 }
 
 GLAPI GLint glGetUniformLocation(GLuint program, const GLchar *name)

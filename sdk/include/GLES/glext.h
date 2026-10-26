@@ -328,6 +328,13 @@ typedef unsigned short GLhalfARB;
 #define GL_CURRENT_PROGRAM 0x8B8D
 #define GL_SHADER_BINARY_FORMATS 0x8DF8
 #define GL_NUM_SHADER_BINARY_FORMATS 0x8DF9
+#define GL_SHADER_COMPILER 0x8DFA
+#define GL_LOW_FLOAT 0x8DF0
+#define GL_MEDIUM_FLOAT 0x8DF1
+#define GL_HIGH_FLOAT 0x8DF2
+#define GL_LOW_INT 0x8DF3
+#define GL_MEDIUM_INT 0x8DF4
+#define GL_HIGH_INT 0x8DF5
 #define GL_SHADER_BINARY_FORMAT_CGB_PS3DK 0x6500
 
 GLAPI void glBlendEquation(GLenum mode);
@@ -428,6 +435,9 @@ GLAPI GLboolean glIsShader(GLuint shader);
 GLAPI void glShaderSource(GLuint shader, GLsizei count, const GLchar **string, const GLint *length);
 GLAPI void glShaderBinary(GLsizei count, const GLuint *shaders, GLenum binaryformat, const GLvoid *binary, GLsizei length);
 GLAPI void glCompileShader(GLuint shader);
+GLAPI void glReleaseShaderCompiler(void);
+GLAPI void glGetShaderSource(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source);
+GLAPI void glGetShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision);
 GLAPI void glGetShaderiv(GLuint shader, GLenum pname, GLint *params);
 GLAPI void glGetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
 GLAPI GLuint glCreateProgram(void);

@@ -51,9 +51,25 @@ GLAPI void glColor4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a)
 /* ── get queries ─────────────────────────────────────────────────── */
 
 GLAPI void glGetBooleanv(GLenum pname, GLboolean *params)
-{ psgl_context_get_booleanv(pname, params); }
+{
+    GLint values[4];
+    unsigned count;
+    if (!params) return;
+    count = psgl_gl_format_query(pname, values);
+    if (!count) { psgl_context_get_booleanv(pname, params); return; }
+    for (unsigned i = 0; i < count; ++i)
+        params[i] = values[i] ? GL_TRUE : GL_FALSE;
+}
 GLAPI void glGetFloatv(GLenum pname, GLfloat *params)
-{ psgl_context_get_floatv(pname, params); }
+{
+    GLint values[4];
+    unsigned count;
+    if (!params) return;
+    count = psgl_gl_format_query(pname, values);
+    if (!count) { psgl_context_get_floatv(pname, params); return; }
+    for (unsigned i = 0; i < count; ++i)
+        params[i] = (GLfloat)values[i];
+}
 GLAPI void glGetLightfv(GLenum light, GLenum pname, GLfloat *params)
 { psgl_context_get_lightfv(light, pname, params); }
 GLAPI void glGetMaterialfv(GLenum face, GLenum pname, GLfloat *params)

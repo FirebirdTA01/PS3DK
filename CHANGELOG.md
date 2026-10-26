@@ -18,6 +18,14 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL precompiled shader contract.** Shader binaries load directly for
+  linking, without a compile call. Compiler availability and binary/DXT format
+  queries report the supported paths; audited shader/query errors retain the
+  first error per context. Source-compilation operations are unavailable, as
+  are shader and program log retrieval and shader compiler-status queries in
+  this binary-only mode; failed queries leave outputs unchanged. Program link
+  status and log-length queries remain available. The GLSL-object sample uses
+  the binary-only sequence. This is not an ES 2.0 conformance claim.
 - **PSGL samples at other display modes.** The rendering samples size their
   viewport from the render buffer instead of assuming 1280x720, so they fill
   the screen at 1080p and other modes; `hello-psgl-msaa` no longer fails on

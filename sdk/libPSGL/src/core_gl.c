@@ -6,13 +6,37 @@
  */
 #include <stddef.h>
 
-#include <GLES/gl.h>
+#include <GLES/glext.h>
 
 #include "psgl_context.h"
 
 /* ── error state ─────────────────────────────────────────────────── */
 
-static GLenum g_gl_error = GL_NO_ERROR;
+void psgl_gl_error(GLenum error)
+{
+    PSGLcontext *context = psgl_context_current();
+    if (context && context->gl_error == GL_NO_ERROR)
+        context->gl_error = error;
+}
+
+/* Number of values written, or zero for a query handled elsewhere. */
+unsigned psgl_gl_format_query(GLenum pname, GLint *values)
+{
+    switch (pname) {
+    case GL_SHADER_COMPILER: values[0] = GL_FALSE; return 1;
+    case GL_NUM_SHADER_BINARY_FORMATS: values[0] = 1; return 1;
+    case GL_SHADER_BINARY_FORMATS:
+        values[0] = GL_SHADER_BINARY_FORMAT_CGB_PS3DK; return 1;
+    case GL_NUM_COMPRESSED_TEXTURE_FORMATS: values[0] = 4; return 1;
+    case GL_COMPRESSED_TEXTURE_FORMATS:
+        values[0] = GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
+        values[1] = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+        values[2] = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
+        values[3] = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        return 4;
+    default: return 0;
+    }
+}
 
 static void gl_zero(void *ptr, size_t size)
 {
@@ -35,8 +59,9 @@ static void gl_fixed4_to_float(const GLfixed *in, GLfloat out[4])
 
 GLAPI GLenum glGetError(void)
 {
-    GLenum e = g_gl_error;
-    g_gl_error = GL_NO_ERROR;
+    PSGLcontext *context = psgl_context_current();
+    GLenum e = context ? context->gl_error : GL_NO_ERROR;
+    if (context) context->gl_error = GL_NO_ERROR;
     return e;
 }
 
@@ -56,6 +81,7 @@ GLAPI const GLubyte *glGetString(GLenum name)
 GLAPI void glGetIntegerv(GLenum pname, GLint *params)
 {
     if (!params) return;
+    if (psgl_gl_format_query(pname, params)) return;
     switch (pname) {
     case GL_MAX_LIGHTS:                  *params = 8;    break;
     case GL_MAX_TEXTURE_SIZE:            *params = 4096; break;
@@ -71,7 +97,6 @@ GLAPI void glGetIntegerv(GLenum pname, GLint *params)
     case GL_BLUE_BITS:  case GL_ALPHA_BITS:
     case GL_DEPTH_BITS: case GL_STENCIL_BITS:
         *params = 8; break;
-    case GL_NUM_COMPRESSED_TEXTURE_FORMATS: *params = 0; break;
     case GL_ALIASED_POINT_SIZE_RANGE:
         params[0] = 1; params[1] = 64; break;
     case GL_ALIASED_LINE_WIDTH_RANGE:
@@ -86,6 +111,8 @@ GLAPI void glGetIntegerv(GLenum pname, GLint *params)
         break;
     }
     default:
+        /* This legacy switch does not yet enumerate every valid state pname.
+         * Preserve its fallback until the complete state-query audit. */
         *params = 0; break;
     }
 }

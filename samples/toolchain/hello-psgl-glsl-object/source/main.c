@@ -23,50 +23,29 @@ static const Vertex k_vertices[3] = {
     {{ 0.00f,  0.65f, 0.0f}}
 };
 
-static const char *k_vertex_source =
-    "attribute vec3 in_position;\n"
-    "uniform mat4 modelViewProj;\n"
-    "void main() {\n"
-    "    gl_Position = modelViewProj * vec4(in_position, 1.0);\n"
-    "}\n";
-
-static const char *k_fragment_source =
-    "uniform vec4 solidColor;\n"
-    "void main() {\n"
-    "    gl_FragColor = solidColor;\n"
-    "}\n";
-
-static int check_shader(GLuint shader, const char *name)
-{
-    GLint ok = 0;
-    GLchar log[96];
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-    if (ok) return 1;
-    glGetShaderInfoLog(shader, (GLsizei)sizeof(log), NULL, log);
-    printf("hello-psgl-glsl-object: %s compile failed: %s\n", name, log);
-    return 0;
-}
-
 static int check_program(GLuint program)
 {
     GLint ok = 0;
-    GLchar log[96];
     glGetProgramiv(program, GL_LINK_STATUS, &ok);
     if (ok) return 1;
-    glGetProgramInfoLog(program, (GLsizei)sizeof(log), NULL, log);
-    printf("hello-psgl-glsl-object: link failed: %s\n", log);
+    printf("hello-psgl-glsl-object: binary link failed\n");
     return 0;
 }
 
-static GLuint compile_shader(GLenum type, const char *source,
-                             const unsigned char *binary,
-                             unsigned int binary_size)
+static GLuint load_shader(GLenum type, const unsigned char *binary,
+                           unsigned int binary_size)
 {
     GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, NULL);
+    GLenum error;
+    if (!shader) return 0;
     glShaderBinary(1, &shader, GL_SHADER_BINARY_FORMAT_CGB_PS3DK,
                    binary, (GLsizei)binary_size);
-    glCompileShader(shader);
+    error = glGetError();
+    if (error != GL_NO_ERROR) {
+        printf("hello-psgl-glsl-object: binary load failed: 0x%x\n", error);
+        glDeleteShader(shader);
+        return 0;
+    }
     return shader;
 }
 
@@ -99,12 +78,11 @@ int main(void)
     }
     psglMakeCurrent(gl_context, device);
 
-    vertex_shader = compile_shader(GL_VERTEX_SHADER, k_vertex_source,
+    vertex_shader = load_shader(GL_VERTEX_SHADER,
                                    vshader_vpo, vshader_vpo_size);
-    fragment_shader = compile_shader(GL_FRAGMENT_SHADER, k_fragment_source,
+    fragment_shader = load_shader(GL_FRAGMENT_SHADER,
                                      fshader_fpo, fshader_fpo_size);
-    if (!check_shader(vertex_shader, "vertex") ||
-        !check_shader(fragment_shader, "fragment")) {
+    if (!vertex_shader || !fragment_shader) {
         psglExit();
         return 1;
     }

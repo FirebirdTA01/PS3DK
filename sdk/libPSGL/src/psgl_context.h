@@ -117,6 +117,7 @@ struct PSGLdevice {
 struct PSGLcontext {
     PSGLdevice *device;
     CellGcmContextData *gcm;
+    GLenum gl_error;
     GLenum matrix_mode;
     GLfloat modelview[16];
     GLfloat projection[16];
@@ -213,6 +214,8 @@ void psgl_context_make_current(PSGLcontext *context, PSGLdevice *device);
 void psgl_context_unbind_current(void);
 void psgl_context_reset_current(void);
 PSGLcontext *psgl_context_current(void);
+void psgl_gl_error(GLenum error);
+unsigned psgl_gl_format_query(GLenum pname, GLint *values);
 PSGLdevice *psgl_context_current_device(void);
 void psgl_context_load_shader_library(const char *filename);
 void psgl_context_bind_cg_program(CGprogram program, CGprofile profile);
