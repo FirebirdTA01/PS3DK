@@ -41,6 +41,9 @@ The version stamped into builds is generated from the most recent
   non-multisampled XRGB default and color0 texture framebuffers, with pack
   alignment, lower-left row order and opaque alpha. Invalid sizes, unsupported
   formats and incomplete framebuffers report errors without changing output.
+  Invalid format/type tokens report `GL_INVALID_ENUM`; recognized but
+  unsupported combinations report `GL_INVALID_OPERATION`, including when
+  the read has zero size.
   This synchronous path maps scratch memory rounded to 1 MiB per read; it is
   not a complete framebuffer or ES 2.0 conformance claim.
 - **PSGL pixel-store errors.** `glPixelStorei` reports `GL_INVALID_ENUM` for

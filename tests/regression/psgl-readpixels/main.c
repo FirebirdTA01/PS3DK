@@ -215,6 +215,21 @@ int main(void)
     rejected(-1, -1, GL_RGBA, GL_UNSIGNED_BYTE, GL_INVALID_VALUE, "both negative untouched");
     rejected(3, 2, GL_RGB, GL_UNSIGNED_BYTE, GL_INVALID_OPERATION, "unsupported format untouched");
     rejected(3, 2, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4, GL_INVALID_OPERATION, "unsupported type untouched");
+    /* ES 2.0 sections 2.5 and 4.3.1: invalid enums differ from valid but
+       unsupported pairs. Tables 3.2/3.4 define the tokens; ReadPixels
+       excludes luminance formats. Every rejection must preserve output. */
+    rejected(3, 2, 0xdead, GL_UNSIGNED_BYTE, GL_INVALID_ENUM, "unknown format untouched");
+    rejected(3, 2, GL_RGBA, 0xdead, GL_INVALID_ENUM, "unknown type untouched");
+    rejected(3, 2, GL_RGBA, GL_FLOAT, GL_INVALID_ENUM, "float type untouched");
+    rejected(3, 2, GL_RGBA, GL_UNSIGNED_SHORT, GL_INVALID_ENUM, "unpacked short untouched");
+    rejected(3, 2, GL_LUMINANCE, GL_UNSIGNED_BYTE, GL_INVALID_ENUM, "luminance read untouched");
+    rejected(3, 2, GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, GL_INVALID_ENUM, "luminance alpha read untouched");
+    rejected(3, 2, GL_ALPHA, GL_UNSIGNED_BYTE, GL_INVALID_OPERATION, "unsupported alpha untouched");
+    rejected(3, 2, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, GL_INVALID_OPERATION, "unsupported RGB565 untouched");
+    rejected(3, 2, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, GL_INVALID_OPERATION, "unsupported RGBA5551 untouched");
+    rejected(3, 2, GL_RGB, GL_UNSIGNED_SHORT_4_4_4_4, GL_INVALID_OPERATION, "mismatched packed pair untouched");
+    rejected(0, 2, 0xdead, GL_UNSIGNED_BYTE, GL_INVALID_ENUM, "zero width invalid format");
+    rejected(3, 0, GL_RGBA, GL_FLOAT, GL_INVALID_ENUM, "zero height invalid type");
     rejected(0, 2, GL_RGBA, GL_UNSIGNED_BYTE, GL_NO_ERROR, "zero width");
     rejected(3, 0, GL_RGBA, GL_UNSIGNED_BYTE, GL_NO_ERROR, "zero height");
     glPixelStorei(GL_PACK_ALIGNMENT, 4);

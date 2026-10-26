@@ -3637,6 +3637,15 @@ void psgl_context_read_pixels(GLint x, GLint y, GLsizei width, GLsizei height,
         psgl_gl_error(GL_INVALID_VALUE);
         return;
     }
+    /* ES 2.0 sections 2.5/4.3.1 and tables 3.2/3.4: distinguish tokens
+       not valid for ReadPixels from recognized but unsupported pairs.
+       Luminance formats are explicitly excluded from readback. */
+    if ((format != GL_ALPHA && format != GL_RGB && format != GL_RGBA) ||
+        (type != GL_UNSIGNED_BYTE && type != GL_UNSIGNED_SHORT_5_6_5 &&
+         type != GL_UNSIGNED_SHORT_4_4_4_4 && type != GL_UNSIGNED_SHORT_5_5_5_1)) {
+        psgl_gl_error(GL_INVALID_ENUM);
+        return;
+    }
     if (format != GL_RGBA || type != GL_UNSIGNED_BYTE) {
         psgl_gl_error(GL_INVALID_OPERATION);
         return;
