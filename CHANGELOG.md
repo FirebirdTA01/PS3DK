@@ -23,12 +23,20 @@ The version stamped into builds is generated from the most recent
   a precompiled `.vpo`/`.fpo` or compact CGB container in memory; it used to
   return NULL for every input. The container is copied, so the caller's
   buffer may be freed afterwards, and `CG_PROFILE_UNKNOWN` takes the profile
-  from the container. Programs are never compiled at run time: `CG_SOURCE`
+  from the container. `cgCreateProgram` takes no length: the caller must pass
+  a complete, readable container that matches its own header, because the
+  size is read from that header and that many bytes are copied. A short or
+  truncated buffer is not detected; the 16 MiB size limit only refuses an
+  absurd declared size. Programs are never compiled at run time: `CG_SOURCE`
   is refused with `CG_INVALID_ENUMERANT_ERROR`, and `cgGetLastListing`
   names the offline compiler. Containers that do not parse report
   `CG_PROGRAM_LOAD_ERROR`, and a container of the other stage or an
   unsupported profile reports `CG_INVALID_PROFILE_ERROR`.
-  `cgCreateProgramFromFile` also accepts `CG_OBJECT`.
+  `cgCreateProgramFromFile` also accepts `CG_OBJECT`, and refuses a file
+  shorter than its container with `CG_PROGRAM_LOAD_ERROR`.
+  Known defect, tracked separately: creating a program from a compact CGB
+  fragment container succeeds, but rendering with it currently draws
+  nothing; compact runtime support is not claimed.
 
 - **PSGL sampler selection queries.** `glGetUniformiv` returns the named
   program's logical texture unit for scalar fragment `sampler2D` uniforms

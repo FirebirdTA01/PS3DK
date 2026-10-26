@@ -578,7 +578,16 @@ CG_API CGenum CGENTRY cgGetParameterSettingMode(CGcontext ctx)
 
 /* Programs are precompiled: CG_BINARY and CG_OBJECT name a raw or compact
    container in memory, whose own header gives its size; the container is
-   copied.  Cg source is not compiled at run time. */
+   copied.  Cg source is not compiled at run time.
+
+   cgCreateProgram takes no length, so its precondition is that the caller
+   passes a complete, readable container that matches its own header.  The
+   size comes from that header before anything is checked (raw totalSize,
+   or the compact container's optional-block offsets), and that many bytes
+   are copied: a short or truncated buffer cannot be detected here, and
+   PSGL_CG_CONTAINER_MAX is not bounds or truncation protection.
+   cgCreateProgramFromFile knows the file length and refuses a container
+   longer than its file. */
 static const char cg_source_listing[] =
     "Cg source is not compiled at run time; compile it offline with "
     "rsx-cg-compiler and load the container as CG_BINARY or CG_OBJECT.";
@@ -592,7 +601,8 @@ static int cg_check_program_type(PSGLcgContext *context, CGenum program_type)
     return 0;
 }
 
-/* Larger than any RSX program container; guards a corrupt size field. */
+/* Larger than any RSX program container: refuses an absurd declared size
+   after the header has been read.  It does not bound the caller's buffer. */
 #define PSGL_CG_CONTAINER_MAX 0x01000000u
 
 CG_API CGprogram CGENTRY cgCreateProgram(CGcontext ctx, CGenum program_type,
