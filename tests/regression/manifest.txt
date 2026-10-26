@@ -345,3 +345,7 @@ psgl-flush-finish-ilp32,tests/regression/psgl-flush-finish/psgl-flush-finish-ilp
 psgl-flush-finish-lp64,tests/regression/psgl-flush-finish/psgl-flush-finish-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_FLUSH_OK checks=5 failures=0\r?$,PSGL_FLUSH_FAIL
 psgl-uniform-query-ilp32,tests/regression/psgl-uniform-query/psgl-uniform-query-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_UNIFORM_QUERY_OK checks=40 failures=0\r?$,PSGL_UNIFORM_QUERY_FAIL
 psgl-uniform-query-lp64,tests/regression/psgl-uniform-query/psgl-uniform-query-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_UNIFORM_QUERY_OK checks=40 failures=0\r?$,PSGL_UNIFORM_QUERY_FAIL
+psgl-ffp-texenv-ilp32,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=43 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
+psgl-ffp-texenv-lp64,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=43 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
+psgl-ffp-texenv-nolib-ilp32,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-nolib-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=3 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
+psgl-ffp-texenv-nolib-lp64,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-nolib-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=3 failures=0\r?$,PSGL_FFP_TEXENV_FAIL

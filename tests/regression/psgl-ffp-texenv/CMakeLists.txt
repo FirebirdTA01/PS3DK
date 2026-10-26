@@ -1,0 +1,57 @@
+cmake_minimum_required(VERSION 3.20)
+project(psgl_ffp_texenv C ASM)
+option(PS3TC_REGRESSION_HOST_STUB "Host cannot execute PSGL fixed-function texturing" OFF)
+if(PS3TC_REGRESSION_HOST_STUB)
+    return()
+endif()
+include(ps3-self)
+
+find_program(PSGL_RSX_CG_COMPILER NAMES rsx-cg-compiler
+    PATHS "$ENV{PS3DEV}/bin" "$ENV{PS3DK}/bin" NO_DEFAULT_PATH)
+if(NOT PSGL_RSX_CG_COMPILER)
+    find_program(PSGL_RSX_CG_COMPILER NAMES rsx-cg-compiler REQUIRED)
+endif()
+set(PSGL_FFP_STATE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/state.txt" CACHE FILEPATH
+    "Fixed-function state masks compiled into the test's shader library")
+set(_shader_bin "${CMAKE_CURRENT_BINARY_DIR}/shaders.bin")
+add_custom_command(
+    OUTPUT "${_shader_bin}"
+    COMMAND "${PSGL_RSX_CG_COMPILER}" --psgl-ffp-library "${PSGL_FFP_STATE_FILE}" -o "${_shader_bin}"
+    DEPENDS "${PSGL_RSX_CG_COMPILER}" "${PSGL_FFP_STATE_FILE}"
+    COMMENT "Generating the fixed-function shader library"
+    VERBATIM)
+add_custom_target(psgl-ffp-texenv-shaders DEPENDS "${_shader_bin}")
+
+foreach(abi ilp32 lp64)
+    foreach(variant "" "-nolib")
+        set(target psgl-ffp-texenv${variant}-${abi})
+        add_executable(${target} main.c)
+        target_compile_features(${target} PRIVATE c_std_11)
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Werror)
+        if(abi STREQUAL "lp64")
+            target_compile_options(${target} PRIVATE -mlp64)
+            target_link_options(${target} PRIVATE -mlp64)
+        endif()
+        set(PSGL_ARCHIVE_${abi} "" CACHE FILEPATH "Private PSGL archive")
+        if(PSGL_ARCHIVE_${abi})
+            target_link_libraries(${target} PRIVATE "${PSGL_ARCHIVE_${abi}}")
+        else()
+            target_link_libraries(${target} PRIVATE PSGL)
+        endif()
+        target_link_libraries(${target} PRIVATE cgb fs_stub gcm_cmd gcm_sys rsx sysutil_stub sysutil m)
+        if(variant STREQUAL "-nolib")
+            target_compile_definitions(${target} PRIVATE PSGL_FFP_TEXENV_NOLIB)
+        else()
+            add_dependencies(${target} psgl-ffp-texenv-shaders)
+            # One bin2s rule for the library; later targets reuse its output.
+            if(NOT _bin2s_done)
+                ps3_bin2s(${target} "${_shader_bin}")
+                set(_bin2s_done TRUE)
+            else()
+                target_sources(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/shaders.bin.s")
+                target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+            endif()
+        endif()
+        ps3_add_self(${target})
+    endforeach()
+endforeach()
