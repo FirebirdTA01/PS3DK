@@ -170,6 +170,10 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **POSIX thread initialization and cleanup.** `pthread_once` tracks each
+  control independently and permits retry when an initializer throws.
+  Idle mutexes and their condition variables can be destroyed in either order.
+
 - **Sample correctness.** Fixed shared-memory polling in the audio and SPU
   samples, the MARS task load address, vertex-loop shader container handling,
   and render-target completion labels. GIF, video-postprocessing, memory-map,
