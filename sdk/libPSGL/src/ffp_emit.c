@@ -100,7 +100,7 @@ uint32_t psgl_ffp_mask_texture_units(uint32_t mask)
 }
 
 /* One program pair per enabled-unit set (OpenGL 2.1 sections 2.11.2 and
-   3.13).  The vertex program passes the primary colour through and applies
+   3.8.13).  The vertex program passes the primary colour through and applies
    each enabled unit's texture matrix to its texcoord set.  The fragment
    program applies the enabled units in order; every stage computes
 
@@ -108,7 +108,7 @@ uint32_t psgl_ffp_mask_texture_units(uint32_t mask)
 
    per channel, with Cp the previous stage's colour (the primary colour for
    the first stage) and Ct the sampled texel.  The CPU picks m0..m4 for each
-   unit's mode and base format (tables 3.22 and 3.23), with the env colour
+   unit's mode and base format (tables 3.21 and 3.22), with the env colour
    folded into m3, so one program serves every mode. */
 static int psgl_emit_texture_programs(uint32_t units,
                                       char *vp_source, size_t vp_capacity,

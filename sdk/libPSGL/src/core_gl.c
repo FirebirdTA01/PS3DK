@@ -117,6 +117,7 @@ GLAPI void glGetIntegerv(GLenum pname, GLint *params)
     case GL_MAX_TEXTURE_STACK_DEPTH:     *params = 2;    break;
     case GL_MAX_VIEWPORT_DIMS:           params[0] = 1920; params[1] = 1080; break;
     case GL_MAX_TEXTURE_UNITS:           *params = PSGL_MAX_LEGACY_TEXTURE_UNITS; break;
+    case GL_MAX_TEXTURE_COORDS_ARB:      *params = PSGL_MAX_LEGACY_TEXTURE_UNITS; break;
     case GL_MAX_ELEMENTS_VERTICES:       *params = 4096; break;
     case GL_MAX_ELEMENTS_INDICES:        *params = 4096; break;
     case GL_SUBPIXEL_BITS:               *params = 4;    break;

@@ -73,7 +73,7 @@ typedef struct PSGLvertexAttribState {
 typedef struct PSGLtextureUnitState {
     GLuint texture_2d;
     GLboolean texture_2d_enabled;
-    /* Fixed-function texture environment (GL 2.1 section 3.13). */
+    /* Texture environment (GL 2.1 section 3.8.13). */
     GLenum env_mode;
     GLfloat env_color[4];
 } PSGLtextureUnitState;

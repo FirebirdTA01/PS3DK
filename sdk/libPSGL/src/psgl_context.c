@@ -68,7 +68,7 @@ typedef struct PSGLtextureObject {
     GLenum allocation_hint;
     /* GL base internal format of the image (ALPHA, LUMINANCE,
        LUMINANCE_ALPHA, RGB or RGBA); texture functions depend on it
-       (GL 2.1 table 3.22) while the storage is always expanded ARGB8. */
+       (GL 2.1 tables 3.21 and 3.22) while the storage is always expanded ARGB8. */
     GLenum base_format;
     uint16_t width;
     uint16_t height;
@@ -126,6 +126,9 @@ static PSGLffpTexProgram g_psgl_ffp_tex[1u << PSGL_FFP_TEXUNIT_COUNT];
 static PSGLffpTexProgram g_psgl_ffp_tex_builtin;
 static uint32_t g_psgl_ffp_tex_builtin_state;
 static uint32_t g_psgl_ffp_tex_refusal_reported;
+/* Internal counter of fixed-function program installs, read by regression
+   tests; not public API. */
+unsigned psgl_ffp_program_installs;
 static PSGLcgParameter g_psgl_ffp_posonly_vp_params[1];
 static PSGLcgProgram g_psgl_ffp_posonly_vp;
 static PSGLcgProgram g_psgl_ffp_posonly_fp;
@@ -748,7 +751,7 @@ static PSGLffpTexProgram *psgl_ffp_tex_program(uint32_t units)
     return g_psgl_ffp_tex_builtin_state == 1u ? &g_psgl_ffp_tex_builtin : NULL;
 }
 
-/* Texture functions of OpenGL 2.1 tables 3.22 and 3.23 as coefficients of
+/* Texture functions of OpenGL 2.1 tables 3.21 and 3.22 as coefficients of
        C = Cp*m0 + Ct*m1 + Cp*Ct*m2 + Ct*m3 + (Ct - Cp)*At*m4
    (ffp_emit.c).  Row 0 is the RGB channels, row 1 alpha; m3 is further
    scaled by the env colour.  The storage of every base format is expanded
@@ -836,7 +839,8 @@ static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
     if (context->lighting_enabled) {
         if (!context->attribs[PSGL_ATTRIB_NORMAL].enabled)
             return 0u;
-        for (uint32_t i = 0u; i < PSGL_MAX_TEXTURE_UNITS; i++) {
+        /* Only the fixed-function units 0-3 take part (section 2.11.2). */
+        for (uint32_t i = 0u; i < PSGL_FFP_TEXUNIT_COUNT; i++) {
             if (context->textures[i].texture_2d_enabled)
                 return 0u;
         }
@@ -2721,6 +2725,7 @@ static int psgl_validate_draw_state(PSGLcontext *context)
             PSGLcgProgram *ffp_fp = NULL;
             if (psgl_ffp_state_mask_to_programs(ffp_mask, &ffp_vp, &ffp_fp)) {
                 if (!vp) vp = ffp_vp;
+                psgl_ffp_program_installs++;
                 if (!fp) fp = ffp_fp;
                 psgl_ffp_update_matrices(context, ffp_vp);
                 if ((ffp_mask & PSGL_FFP_LIGHTING_MASK) != 0u)
@@ -3592,14 +3597,12 @@ void psgl_context_set_enable(GLenum cap, GLboolean enabled)
         break;
     case GL_TEXTURE_2D: {
         uint32_t unit = psgl_texture_unit_index(context->active_texture);
-        /* Units 4-7 exist for programmable samplers only (GL 2.1: fixed-
-           function enables past MAX_TEXTURE_UNITS are INVALID_OPERATION). */
-        if (unit >= PSGL_MAX_LEGACY_TEXTURE_UNITS) {
-            psgl_gl_error(GL_INVALID_OPERATION);
-            break;
-        }
+        /* An image-unit command, valid on every texture image unit (GL 2.1
+           section 2.11.2); fixed-function drawing reads units 0-3 only, so
+           units 4-7 leave the fixed-function programs alone. */
         context->textures[unit].texture_2d_enabled = enabled;
-        context->dirty |= PSGL_DIRTY_TEXTURES | PSGL_DIRTY_CG;
+        context->dirty |= PSGL_DIRTY_TEXTURES;
+        if (unit < PSGL_MAX_LEGACY_TEXTURE_UNITS) context->dirty |= PSGL_DIRTY_CG;
         break;
     }
     default:
@@ -4239,11 +4242,12 @@ void psgl_context_active_texture(GLenum texture)
     context->dirty |= PSGL_DIRTY_TEXTURES;
 }
 
-/* GL 2.1 section 3.13: TEXTURE_ENV_MODE and TEXTURE_ENV_COLOR of the
+/* GL 2.1 section 3.8.13: TEXTURE_ENV_MODE and TEXTURE_ENV_COLOR of the
    active unit.  COMBINE and point-sprite COORD_REPLACE are not implemented
-   and report INVALID_ENUM like any other unknown token; units past the
-   fixed-function limit report INVALID_OPERATION.  Rejected calls leave the
-   state unchanged. */
+   and report INVALID_ENUM like any other unknown token.  TexEnv is an
+   image-unit command, so units 4-7 store their state too (section 2.11.2),
+   although fixed-function drawing reads units 0-3 only.  Rejected calls
+   leave the state unchanged. */
 void psgl_context_tex_env(GLenum target, GLenum pname,
                           const GLfloat *params, GLboolean vector)
 {
@@ -4266,7 +4270,7 @@ void psgl_context_tex_env(GLenum target, GLenum pname,
         }
     }
     unit = psgl_texture_unit_index(context->active_texture);
-    if (unit >= PSGL_MAX_LEGACY_TEXTURE_UNITS) {
+    if (unit >= PSGL_MAX_TEXTURE_UNITS) {
         psgl_gl_error(GL_INVALID_OPERATION);
         return;
     }
@@ -4278,7 +4282,7 @@ void psgl_context_tex_env(GLenum target, GLenum pname,
             context->textures[unit].env_color[i] = v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v;
         }
     }
-    context->dirty |= PSGL_DIRTY_CG;
+    if (unit < PSGL_MAX_LEGACY_TEXTURE_UNITS) context->dirty |= PSGL_DIRTY_CG;
 }
 
 int psgl_context_get_tex_env(GLenum target, GLenum pname, GLfloat *params)
@@ -4292,7 +4296,7 @@ int psgl_context_get_tex_env(GLenum target, GLenum pname, GLfloat *params)
         return 0;
     }
     unit = psgl_texture_unit_index(context->active_texture);
-    if (unit >= PSGL_MAX_LEGACY_TEXTURE_UNITS) {
+    if (unit >= PSGL_MAX_TEXTURE_UNITS) {
         psgl_gl_error(GL_INVALID_OPERATION);
         return 0;
     }
