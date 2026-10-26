@@ -19,5 +19,19 @@ gaps. Unit values below zero or at least eight are rejected with
 INVALID_VALUE before mutation as an implementation guard. No general
 ES 2.0 conformance or hardware acceptance is claimed.
 
+The map is copied from program state into the current context on bind.
+Texture emission binds each selected logical texture to its binary physical
+slot without altering shader instructions or shared Cg parameter values.
+A successful relink resets selections; a failed relink preserves the installed
+map. Direct Cg fragment binding clears that map until the next glUseProgram.
+Unsupported sampler types keep their prior link acceptance and physical
+bindings, but glUniform1i on them returns INVALID_OPERATION. Only ambiguous
+fragment reflection assigning multiple samplers to one physical slot refuses
+link. The cube fixture tests link/bind acceptance and setter refusal, not cube
+upload or sampling (the upload path only supports 2D textures). The public
+Cg type-class query still lacks sampler classification; this GL path checks
+the sampler types explicitly. Existing global GL shader-object bookkeeping
+is not changed into a complete per-context implementation by this increment.
+
 See OpenGL ES 2.0.25 section 2.10.4 (uniform/program ownership and samplers):
 https://registry.khronos.org/OpenGL/specs/es/2.0/es_full_spec_2.0.pdf

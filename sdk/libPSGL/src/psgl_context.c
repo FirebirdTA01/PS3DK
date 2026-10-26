@@ -2221,7 +2221,9 @@ static void psgl_emit_textures(PSGLcontext *context)
 {
     if (!context || !context->gcm) return;
     for (uint32_t i = 0; i < PSGL_MAX_TEXTURE_UNITS; i++) {
-        GLuint name = context->textures[i].texture_2d;
+        uint32_t unit = context->gl_sampler_routing && (context->gl_sampler_mask & (1u << i)) ?
+            context->gl_sampler_units[i] : i;
+        GLuint name = context->textures[unit].texture_2d;
         PSGLtextureObject *texture = name ? psgl_find_texture(name) : NULL;
         if (!texture || !texture->address) {
             cellGcmSetTextureControl(context->gcm, (uint8_t)i, 0u,
@@ -2842,9 +2844,21 @@ void psgl_context_bind_cg_program(CGprogram program, CGprofile profile)
                profile == CG_PROFILE_ARBFP1 ||
                profile == CG_PROFILE_FP30 ||
                profile == CG_PROFILE_FP20) {
+        psgl_context_set_gl_sampler_routing(NULL, 0u);
         context->bound_fragment_program = program;
         context->dirty |= PSGL_DIRTY_CG;
     }
+}
+
+void psgl_context_set_gl_sampler_routing(const uint8_t *units, uint32_t mask)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    context->gl_sampler_routing = units != NULL;
+    context->gl_sampler_mask = mask;
+    for (uint32_t hw = 0; hw < PSGL_MAX_TEXTURE_UNITS; ++hw)
+        context->gl_sampler_units[hw] = units ? units[hw] : (uint8_t)hw;
+    context->dirty |= PSGL_DIRTY_TEXTURES;
 }
 
 void psgl_context_set_gl_attrib_routing(const int8_t *hw_to_location)

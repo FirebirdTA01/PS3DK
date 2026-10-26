@@ -46,6 +46,8 @@ typedef struct PSGLglProgram {
     PSGLglAttribBinding linked_attribs[PSGL_MAX_GL_ATTRIBS];
     uint32_t linked_attrib_count;
     int8_t hw_to_location[PSGL_MAX_GENERIC_ATTRIBS];
+    uint32_t sampler_mask;
+    uint8_t sampler_units[PSGL_MAX_TEXTURE_UNITS];
     struct PSGLglProgram *next;
 } PSGLglProgram;
 
@@ -147,6 +149,43 @@ static PSGLglUniform *gls_find_uniform_by_location(GLint location)
 static CGparameter gls_named_parameter(CGprogram program, const char *name)
 {
     return program ? cgGetNamedParameter(program, name) : NULL;
+}
+
+static int gls_is_sampler(CGparameter parameter)
+{
+    PSGLcgParameter *param = psgl_cg_parameter(parameter);
+    if (!param) return 0;
+    /* cgGetParameterClass does not yet classify sampler types. */
+    switch (param->type) {
+    case CG_SAMPLER1D: case CG_SAMPLER2D: case CG_SAMPLER3D:
+    case CG_SAMPLERRECT: case CG_SAMPLERCUBE: case CG_SAMPLER1DARRAY:
+    case CG_SAMPLER2DARRAY: case CG_SAMPLERCUBEARRAY: case CG_SAMPLER:
+        return 1;
+    default: return 0;
+    }
+}
+
+/* Remap only reflected scalar fragment sampler2D resources. Other resources
+   keep the previous identity binding; this does not add texture-type support.
+   No shader instruction or shared Cg value is modified. */
+static int gls_sampler_mask(CGprogram fragment, uint32_t *mask)
+{
+    PSGLcgProgram *fp = psgl_cg_program(fragment);
+    uint32_t seen = 0;
+    *mask = 0;
+    if (!fp) return 0;
+    for (uint32_t i = 0; i < fp->parameter_count; ++i) {
+        PSGLcgParameter *param = &fp->parameters[i];
+        if (!gls_is_sampler((CGparameter)param)) continue;
+        if (param->resource < CG_TEXUNIT0 || param->resource > CG_TEXUNIT15) continue;
+        uint32_t bit = 1u << (param->resource - CG_TEXUNIT0);
+        if (seen & bit) return 0;
+        seen |= bit;
+        if (param->type == CG_SAMPLER2D && param->name[0] &&
+            param->resource < CG_TEXUNIT0 + PSGL_MAX_TEXTURE_UNITS)
+            *mask |= bit;
+    }
+    return 1;
 }
 
 GLAPI GLuint glCreateShader(GLenum type)
@@ -369,6 +408,7 @@ GLAPI void glLinkProgram(GLuint program)
     CGprogram vertex = NULL, fragment = NULL;
     PSGLglAttribBinding linked[PSGL_MAX_GL_ATTRIBS];
     uint32_t count = 0, used = 0, reflected = 0;
+    uint32_t sampler_mask;
     uint8_t hardware[PSGL_MAX_GL_ATTRIBS];
     int8_t route[PSGL_MAX_GENERIC_ATTRIBS];
     CellCgbVertexProgramConfiguration conf;
@@ -440,6 +480,11 @@ GLAPI void glLinkProgram(GLuint program)
         }
         route[hardware[i]] = (int8_t)linked[i].index;
     }
+    if (!gls_sampler_mask(fragment, &sampler_mask)) {
+        gls_set_log(p->log, sizeof(p->log), "ambiguous sampler resources"); return;
+    }
+    p->sampler_mask = sampler_mask;
+    for (uint32_t hw = 0; hw < PSGL_MAX_TEXTURE_UNITS; ++hw) p->sampler_units[hw] = 0;
     p->vertex_program = vertex;
     p->fragment_program = fragment;
     p->uniform_count = 0;
@@ -465,6 +510,7 @@ GLAPI void glUseProgram(GLuint program)
     psgl_context_bind_cg_program(p->vertex_program, CG_PROFILE_SCE_VP_RSX);
     psgl_context_bind_cg_program(p->fragment_program, CG_PROFILE_SCE_FP_RSX);
     psgl_context_set_gl_attrib_routing(p->hw_to_location);
+    psgl_context_set_gl_sampler_routing(p->sampler_units, p->sampler_mask);
     g_current_program = program;
 }
 
@@ -527,12 +573,25 @@ GLAPI GLint glGetAttribLocation(GLuint program, const GLchar *name)
     return -1;
 }
 
+static PSGLglUniform *gls_current_uniform(GLint location)
+{
+    if (location == -1) return NULL;
+    PSGLglUniform *uniform = gls_find_uniform_by_location(location);
+    if (!g_current_program || ((uint32_t)location >> 8) != g_current_program || !uniform) {
+        psgl_gl_error(GL_INVALID_OPERATION); return NULL;
+    }
+    return uniform;
+}
+
 static void gls_uniform_set(GLint location, const GLfloat *values,
                             uint32_t count)
 {
-    PSGLglUniform *uniform = gls_find_uniform_by_location(location);
+    PSGLglUniform *uniform = gls_current_uniform(location);
     PSGLcontext *context;
     if (!uniform || !values) return;
+    if (gls_is_sampler(uniform->vertex_parameter) || gls_is_sampler(uniform->fragment_parameter)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
     if (uniform->vertex_parameter)
         psgl_cg_set_parameter_floats(psgl_cg_parameter(uniform->vertex_parameter),
                                      values, count);
@@ -545,6 +604,30 @@ static void gls_uniform_set(GLint location, const GLfloat *values,
 
 GLAPI void glUniform1i(GLint location, GLint v0)
 {
+    PSGLglUniform *uniform = gls_current_uniform(location);
+    if (!uniform) return;
+    if (gls_is_sampler(uniform->fragment_parameter)) {
+        PSGLglProgram *program = gls_find_program(g_current_program);
+        PSGLcgParameter *param = psgl_cg_parameter(uniform->fragment_parameter);
+        uint32_t hw = (uint32_t)(param->resource - CG_TEXUNIT0);
+        if (param->type != CG_SAMPLER2D || hw >= PSGL_MAX_TEXTURE_UNITS ||
+            !(program->sampler_mask & (1u << hw)) || gls_is_sampler(uniform->vertex_parameter)) {
+            psgl_gl_error(GL_INVALID_OPERATION); return;
+        }
+        /* Defensive implementation guard: reject an out-of-range logical
+           unit before mutating program or context state. */
+        if (v0 < 0 || v0 >= PSGL_MAX_TEXTURE_UNITS) {
+            psgl_gl_error(GL_INVALID_VALUE); return;
+        }
+        program->sampler_units[hw] = (uint8_t)v0;
+        PSGLcontext *context = psgl_context_current();
+        /* A direct Cg bind switches to physical slots. Preserve that mode
+           until UseProgram installs the GL executable again. */
+        if (context && context->gl_sampler_routing &&
+            context->bound_fragment_program == program->fragment_program)
+            psgl_context_set_gl_sampler_routing(program->sampler_units, program->sampler_mask);
+        return;
+    }
     GLfloat v[1] = {(GLfloat)v0};
     gls_uniform_set(location, v, 1u);
 }

@@ -37,14 +37,24 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL fragment sampler selection.** `glUniform1i` selects logical texture
+  units for reflected scalar `sampler2D` inputs in precompiled GL programs.
+  Selections belong to each linked program, default to zero after a successful
+  link, and survive switching programs. Multiple samplers may select the same
+  unit. Invalid setters report errors without changing the selection; direct
+  Cg programs retain physical texture bindings. Sampler arrays, uniform-value
+  queries and other sampler types remain implementation gaps.
+  Programs using other sampler types retain their prior link acceptance and
+  physical bindings, but sampler setters for them report `INVALID_OPERATION`.
+  Uniform setters using a location from a non-current program now report
+  `INVALID_OPERATION` instead of writing that other program.
 - **Eight PSGL fragment texture units.** Programmable fragment binaries can
   sample distinct textures on units 0-7. Fragment and combined image-unit
   queries report 8; the vertex image-unit query reports 0. Active texture and
   2D binding queries expose the selected state, and invalid active-unit
   selectors report `INVALID_ENUM` without changing it. The legacy texture-unit
-  limit stays 4. Sampler remapping through `glUniform1i` and fixed-function
-  texture-environment stages beyond unit 0 remain implementation gaps; this
-  change does not claim ES 2.0 conformance.
+  limit stays 4. Fixed-function texture-environment stages beyond unit 0
+  remain an implementation gap; this change does not claim ES 2.0 conformance.
 - **PSGL disabled color arrays.** Disabling legacy or direct-Cg arrays
   retires stale hardware array descriptors before the next draw. Disabled
   color arrays use the current color instead of fetching the old array.

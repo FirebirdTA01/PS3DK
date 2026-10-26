@@ -87,8 +87,17 @@ int main(void)
     glShaderBinary(1,&vs,GL_SHADER_BINARY_FORMAT_CGB_PS3DK,vertex_vpo,vertex_vpo_size);
     const void *binaries[8] = {unit0_fpo,unit1_fpo,unit2_fpo,unit3_fpo,unit4_fpo,unit5_fpo,unit6_fpo,unit7_fpo};
     const unsigned sizes[8] = {unit0_fpo_size,unit1_fpo_size,unit2_fpo_size,unit3_fpo_size,unit4_fpo_size,unit5_fpo_size,unit6_fpo_size,unit7_fpo_size};
-    for (unsigned u=0; u<8; ++u) programs[u] = program(vs,binaries[u],sizes[u]);
+    for (unsigned u=0; u<8; ++u) {
+        programs[u] = program(vs,binaries[u],sizes[u]);
+        glUseProgram(programs[u]);
+        glUniform1i(glGetUniformLocation(programs[u],"image"),(GLint)u);
+    }
     programs[8] = program(vs,combined_fpo,combined_fpo_size);
+    glUseProgram(programs[8]);
+    for (unsigned u=0; u<8; ++u) {
+        char name[8]; snprintf(name,sizeof(name),"s%u",u);
+        glUniform1i(glGetUniformLocation(programs[8],name),(GLint)u);
+    }
     glUseProgram(programs[0]);
     glGenBuffers(1,&pos); glBindBuffer(GL_ARRAY_BUFFER,pos); glBufferData(GL_ARRAY_BUFFER,sizeof(quad),quad,GL_STATIC_DRAW);
     glVertexAttribPointer(0,4,GL_FLOAT,GL_FALSE,16,0); glEnableVertexAttribArray(0);

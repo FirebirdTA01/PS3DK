@@ -212,6 +212,10 @@ struct PSGLcontext {
     GLboolean gl_attrib_routing;
     GLboolean retire_vertex_arrays;
     GLboolean gl_attrib_normalized[PSGL_MAX_GL_ATTRIBS];
+    /* GL sampler values select logical units; Cg uses physical slots. */
+    GLboolean gl_sampler_routing;
+    uint32_t gl_sampler_mask;
+    uint8_t gl_sampler_units[PSGL_MAX_TEXTURE_UNITS];
 };
 
 int psgl_context_init_system(const PSGLinitOptions *options);
@@ -232,6 +236,7 @@ PSGLdevice *psgl_context_current_device(void);
 void psgl_context_load_shader_library(const char *filename);
 void psgl_context_bind_cg_program(CGprogram program, CGprofile profile);
 void psgl_context_set_gl_attrib_routing(const int8_t *hw_to_location);
+void psgl_context_set_gl_sampler_routing(const uint8_t *units, uint32_t mask);
 void psgl_context_swap(void);
 void psgl_context_set_clear_color(GLfloat red, GLfloat green,
                                   GLfloat blue, GLfloat alpha);
