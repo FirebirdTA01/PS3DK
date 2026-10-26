@@ -5,6 +5,8 @@ blue clears, plus 1280x720 and 1920x1080 reference-texture framebuffers.
 `GL_STATIC_DRAW` exercises local-to-main transfer; `GL_SYSTEM_DRAW_SCE`
 exercises main-to-main transfer. The reference fixture has four distinct
 colors separated at storage x/y 1024, with X=0x13 to require alpha=255.
+These location labels follow the implementation's usage-to-storage mapping;
+the test does not independently query the allocated buffer's location.
 The 1080p cases also read (1001,23), width 81 and height 1041: a nonzero
 origin across both transfer boundaries, with four untouched padding bytes
 per output row at pack alignment 8. Front/back guards cover every read.
