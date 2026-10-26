@@ -61,9 +61,9 @@ Shaders reach a sample in one of four ways:
   validate GLSL. `rsx-cg-compiler --emit-container` then builds the
   containers.
 - **Fixed-function library**: `rsx-cg-compiler --psgl-ffp-library` builds a
-  shader library from `state.txt`, loaded with `psglLoadShaderLibrary`. With
-  an older compiler that lacks the mode, the sample falls back to the
-  deprecated `psgl-shader-builder`.
+  shader library from `state.txt`, loaded with `psglLoadShaderLibrary`. The
+  sample needs no host C compiler or `psgl-shader-builder`; configure refuses
+  an `rsx-cg-compiler` that lacks the mode (use the one from the same SDK).
 - **Built-in**: the fixed-function samples use the runtime's own programs.
 
 `cgCreateProgram` cannot load a program from memory yet, and

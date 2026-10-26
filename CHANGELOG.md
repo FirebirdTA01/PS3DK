@@ -23,7 +23,10 @@ The version stamped into builds is generated from the most recent
   library `psglLoadShaderLibrary` loads, compiling every state mask in
   process with libPSGL's own fixed-function generator. The bytes are the
   same as `psgl-shader-builder` wrote. A failed mask writes no partial
-  file. `hello-psgl-ffp-shaderlib` uses the mode when the compiler has it.
+  file. `hello-psgl-ffp-shaderlib` builds its library with the mode and no
+  longer needs `psgl-shader-builder` or a host C compiler; its configure
+  stops with an error naming the fix when the selected `rsx-cg-compiler`
+  lacks the mode.
 
 ### Deprecated
 
