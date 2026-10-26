@@ -45,6 +45,13 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL draws whose programs cannot be installed.** When a program cannot be
+  installed because its RSX copy cannot be allocated, the draw is now refused
+  with `GL_OUT_OF_MEMORY` and draws nothing, and the next draw installs the
+  programs again. Before, the draw went ahead with the programs of an earlier
+  state, and later draws of the same fixed-function state kept using them.
+  A fixed-function state whose built-in programs cannot be set up is refused
+  with `GL_INVALID_OPERATION`.
 - **PSGL scissor state and clipping.** Clears and draws use the same
   lower-left scissor box, clipped to the current framebuffer before RSX
   submission. Signed origins are preserved, and negative sizes report
