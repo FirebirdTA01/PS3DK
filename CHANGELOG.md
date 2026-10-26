@@ -65,9 +65,6 @@ The version stamped into builds is generated from the most recent
   selectors report `INVALID_ENUM` without changing it. The legacy texture-unit
   limit stays 4. Fixed-function texture-environment stages beyond unit 0
   remain an implementation gap; this change does not claim ES 2.0 conformance.
-  limit stays 4. Sampler remapping through `glUniform1i` and fixed-function
-  texture-environment stages beyond unit 0 remain implementation gaps; this
-  change does not claim ES 2.0 conformance.
 - **PSGL fragment uniforms under queued draws.** Changing a fragment-program
   uniform between draws no longer rewrites the ucode that earlier, still
   queued draws use, which made them render with the newest value. Each
