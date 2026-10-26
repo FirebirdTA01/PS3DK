@@ -71,6 +71,11 @@ int main(void)
     device = psglCreateDeviceAuto(0, 0, 0);
     ctx = psglGetCurrentContext();
     if (!ctx) ctx = psglCreateContext();
+    if (!device || !ctx) {
+        printf("spuhole: fail PSGL init\n");
+        psglExit();
+        return 1;
+    }
     psglMakeCurrent(ctx, device);
 
     if (!test_count(3, 16u)) ok = 0;

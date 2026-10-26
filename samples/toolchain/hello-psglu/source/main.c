@@ -62,15 +62,24 @@ static int test_lookat(void)
     return 1;
 }
 
+static int test_string(const char *what, const GLubyte *got, const char *want)
+{
+    if (!got || strcmp((const char *)got, want) != 0) {
+        printf("hello-psglu: fail %s \"%s\" want \"%s\"\n",
+               what, got ? (const char *)got : "(null)", want);
+        return 0;
+    }
+    return 1;
+}
+
 static int test_strings(void)
 {
-    if (strcmp((const char *)gluErrorString(GL_NO_ERROR), "no error") != 0)
-        return 0;
-    if (strcmp((const char *)gluErrorString(GL_INVALID_ENUM), "invalid enumerant") != 0)
-        return 0;
-    if (strcmp((const char *)gluGetString(GLU_VERSION), "1.3 PS3DK") != 0)
-        return 0;
-    return 1;
+    int ok = 1;
+    ok &= test_string("error string", gluErrorString(GL_NO_ERROR), "no error");
+    ok &= test_string("error string", gluErrorString(GL_INVALID_ENUM),
+                      "invalid enumerant");
+    ok &= test_string("version", gluGetString(GLU_VERSION), "1.3 PS3DK");
+    return ok;
 }
 
 static int test_scale_image(void)
