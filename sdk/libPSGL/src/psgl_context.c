@@ -2472,6 +2472,7 @@ PSGLcontext *psgl_context_create(void)
     context->active_texture = GL_TEXTURE0;
     context->client_active_texture = GL_TEXTURE0;
     context->unpack_alignment = 4;
+    context->pack_alignment = 4;
     context->attribs[PSGL_ATTRIB_VERTEX].size = 4;
     context->attribs[PSGL_ATTRIB_NORMAL].size = 3;
     context->attribs[PSGL_ATTRIB_COLOR].size = 4;
@@ -3606,9 +3607,121 @@ void psgl_context_get_materialfv(GLenum face, GLenum pname, GLfloat *params)
 void psgl_context_set_pixel_store(GLenum pname, GLint param)
 {
     PSGLcontext *context = g_psgl.current_context;
-    if (!context || pname != GL_UNPACK_ALIGNMENT) return;
-    if (param != 1 && param != 2 && param != 4 && param != 8) return;
-    context->unpack_alignment = param;
+    if (!context) return;
+    if (pname != GL_UNPACK_ALIGNMENT && pname != GL_PACK_ALIGNMENT) {
+        psgl_gl_error(GL_INVALID_ENUM);
+        return;
+    }
+    if (param != 1 && param != 2 && param != 4 && param != 8) {
+        psgl_gl_error(GL_INVALID_VALUE);
+        return;
+    }
+    if (pname == GL_PACK_ALIGNMENT) context->pack_alignment = param;
+    else context->unpack_alignment = param;
+}
+
+/* ES 2.0 section 4.3.1: lower-left origin, pack-aligned RGBA byte rows,
+   and alpha 1 for our XRGB surfaces. Other read formats and multisample or
+   swizzled sources are deliberately unavailable in this increment. */
+void psgl_context_read_pixels(GLint x, GLint y, GLsizei width, GLsizei height,
+                              GLenum format, GLenum type, void *pixels)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    CellGcmSurface surface;
+    unsigned char *scratch;
+    uint32_t offset, pitch, allocation;
+    uint64_t stride, span, size;
+    int64_t left, bottom, right, top;
+    if (!context) return;
+    if (width < 0 || height < 0) {
+        psgl_gl_error(GL_INVALID_VALUE);
+        return;
+    }
+    if (format != GL_RGBA || type != GL_UNSIGNED_BYTE) {
+        psgl_gl_error(GL_INVALID_OPERATION);
+        return;
+    }
+    if (!context->device || !context->gcm ||
+        psgl_context_check_framebuffer_status(GL_FRAMEBUFFER_OES) !=
+            GL_FRAMEBUFFER_COMPLETE_OES) {
+        psgl_gl_error(GL_INVALID_FRAMEBUFFER_OPERATION_OES);
+        return;
+    }
+    if (context->bound_framebuffer) {
+        int idx = psgl_fbo_find(context, context->bound_framebuffer);
+        PSGLtextureObject *color = idx < 0 ? NULL :
+            psgl_get_texture(context->fbo_objects[idx].color0);
+        if (!color || !color->address || !color->linear ||
+            (color->rsx_format & ~CELL_GCM_TEXTURE_LN) != CELL_GCM_TEXTURE_A8R8G8B8) {
+            psgl_gl_error(GL_INVALID_OPERATION);
+            return;
+        }
+    }
+    psgl_fill_surface(context, &surface);
+    if (surface.antiAlias != GCM_SURFACE_CENTER_1 ||
+        surface.type != GCM_SURFACE_TYPE_LINEAR ||
+        surface.colorFormat != GCM_SURFACE_X8R8G8B8 ||
+        surface.colorPitch[0] < (uint32_t)surface.width * 4u) {
+        psgl_gl_error(GL_INVALID_OPERATION);
+        return;
+    }
+    if (!width || !height) return;
+    if (!pixels) { psgl_gl_error(GL_INVALID_VALUE); return; }
+    stride = ((uint64_t)(uint32_t)width * 4u + context->pack_alignment - 1u) &
+             ~((uint64_t)context->pack_alignment - 1u);
+    span = stride * ((uint32_t)height - 1u) + (uint64_t)(uint32_t)width * 4u;
+    if (span > SIZE_MAX || (uintptr_t)pixels > UINTPTR_MAX - span) {
+        psgl_gl_error(GL_INVALID_VALUE);
+        return;
+    }
+    /* Pixels outside the framebuffer are undefined by GL. Leave those
+       destination bytes untouched, and never issue an out-of-range DMA. */
+    left = x < 0 ? 0 : x;
+    bottom = y < 0 ? 0 : y;
+    right = (int64_t)x + width;
+    top = (int64_t)y + height;
+    if (right > surface.width) right = surface.width;
+    if (top > surface.height) top = surface.height;
+    if (left >= right || bottom >= top) return;
+    pitch = ((uint32_t)(right - left) * 4u + 63u) & ~63u;
+    size = (uint64_t)pitch * (uint32_t)(top - bottom);
+    size = (size + PSGL_HOST_ALIGNMENT - 1u) & ~((uint64_t)PSGL_HOST_ALIGNMENT - 1u);
+    if (size > UINT32_MAX || size > SIZE_MAX) {
+        psgl_gl_error(GL_OUT_OF_MEMORY);
+        return;
+    }
+    allocation = (uint32_t)size;
+    scratch = (unsigned char *)memalign(PSGL_HOST_ALIGNMENT, allocation);
+    if (!scratch) { psgl_gl_error(GL_OUT_OF_MEMORY); return; }
+    if (cellGcmMapMainMemory(scratch, allocation, &offset) != 0) {
+        free(scratch);
+        psgl_gl_error(GL_OUT_OF_MEMORY);
+        return;
+    }
+    cellGcmSetTransferImage(context->gcm,
+        surface.colorLocation[0] == GCM_LOCATION_RSX ?
+            CELL_GCM_TRANSFER_LOCAL_TO_MAIN : CELL_GCM_TRANSFER_MAIN_TO_MAIN,
+        offset, pitch, 0, 0, surface.colorOffset[0], surface.colorPitch[0],
+        (uint32_t)left, surface.height - (uint32_t)top,
+        (uint32_t)(right - left), (uint32_t)(top - bottom), 4);
+    psgl_wait_rsx_idle(context->gcm);
+    __sync_synchronize();
+    /* GPU completion precedes unmapping; CPU storage stays allocated.
+       Leave the caller's output untouched on an unmap failure, and never
+       free a still-mapped DMA allocation. */
+    if (cellGcmUnmapEaIoAddress(scratch) != 0) {
+        psgl_gl_error(GL_INVALID_OPERATION);
+        return;
+    }
+    for (int64_t row = bottom; row < top; ++row) {
+        const unsigned char *src = scratch + (size_t)(top - row - 1) * pitch;
+        unsigned char *dst = (unsigned char *)pixels +
+            (size_t)((uint64_t)(row - y) * stride + (uint64_t)(left - x) * 4u);
+        for (int64_t col = left; col < right; ++col, src += 4, dst += 4) {
+            dst[0] = src[1]; dst[1] = src[2]; dst[2] = src[3]; dst[3] = 255;
+        }
+    }
+    free(scratch);
 }
 
 void psgl_context_active_texture(GLenum texture)

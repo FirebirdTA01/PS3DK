@@ -23,6 +23,16 @@ void psgl_gl_error(GLenum error)
 unsigned psgl_gl_format_query(GLenum pname, GLint *values)
 {
     switch (pname) {
+    case GL_PACK_ALIGNMENT:
+    case GL_UNPACK_ALIGNMENT: {
+        PSGLcontext *context = psgl_context_current();
+        if (!context) return 0;
+        values[0] = pname == GL_PACK_ALIGNMENT ? context->pack_alignment
+                                              : context->unpack_alignment;
+        return 1;
+    }
+    case GL_IMPLEMENTATION_COLOR_READ_FORMAT_OES: values[0] = GL_RGBA; return 1;
+    case GL_IMPLEMENTATION_COLOR_READ_TYPE_OES: values[0] = GL_UNSIGNED_BYTE; return 1;
     case GL_SHADER_COMPILER: values[0] = GL_FALSE; return 1;
     case GL_NUM_SHADER_BINARY_FORMATS: values[0] = 1; return 1;
     case GL_SHADER_BINARY_FORMATS:
@@ -35,14 +45,6 @@ unsigned psgl_gl_format_query(GLenum pname, GLint *values)
         values[3] = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
         return 4;
     default: return 0;
-    }
-}
-
-static void gl_zero(void *ptr, size_t size)
-{
-    unsigned char *out = (unsigned char *)ptr;
-    while (size--) {
-        *out++ = 0;
     }
 }
 
@@ -524,7 +526,5 @@ GLAPI void glMaterialxv(GLenum face, GLenum pname, const GLfixed *params)
 GLAPI void glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
                         GLenum format, GLenum type, GLvoid *pixels)
 {
-    (void)x; (void)y; (void)width; (void)height;
-    (void)format; (void)type;
-    if (pixels) gl_zero(pixels, (size_t)(width * height * 4));
+    psgl_context_read_pixels(x, y, width, height, format, type, pixels);
 }

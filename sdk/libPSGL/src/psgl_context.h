@@ -178,6 +178,7 @@ struct PSGLcontext {
     GLenum active_texture;
     GLenum client_active_texture;
     GLint unpack_alignment;
+    GLint pack_alignment;
     GLfloat clear_color[4];
     GLfloat current_color[4];
     GLfloat light_model_ambient[4];
@@ -216,6 +217,8 @@ void psgl_context_reset_current(void);
 PSGLcontext *psgl_context_current(void);
 void psgl_gl_error(GLenum error);
 unsigned psgl_gl_format_query(GLenum pname, GLint *values);
+void psgl_context_read_pixels(GLint x, GLint y, GLsizei width, GLsizei height,
+                              GLenum format, GLenum type, void *pixels);
 PSGLdevice *psgl_context_current_device(void);
 void psgl_context_load_shader_library(const char *filename);
 void psgl_context_bind_cg_program(CGprogram program, CGprofile profile);

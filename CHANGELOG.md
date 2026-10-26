@@ -18,6 +18,12 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL pixel readback.** `glReadPixels` returns RGBA bytes from linear,
+  non-multisampled XRGB default and color0 texture framebuffers, with pack
+  alignment, lower-left row order and opaque alpha. Invalid sizes, unsupported
+  formats and incomplete framebuffers report errors without changing output.
+  This synchronous path maps scratch memory rounded to 1 MiB per read; it is
+  not a complete framebuffer or ES 2.0 conformance claim.
 - **PSGL GPU completion waits.** Repeated waits use advancing completion
   tokens instead of accepting a label left by an earlier wait. The first
   wait also avoids a completion value already stored in the label.
