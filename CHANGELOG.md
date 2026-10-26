@@ -39,10 +39,12 @@ The version stamped into builds is generated from the most recent
 
 - **PSGL scissor state and clipping.** Clears and draws use the same
   lower-left scissor box, clipped to the current framebuffer before RSX
-  submission. Signed origins are preserved, empty intersections draw and
-  clear nothing, and negative sizes report `GL_INVALID_VALUE` without
-  changing state. Integer, float and boolean queries expose the box and
-  enable state; disabling the test preserves the box for re-enabling.
+  submission. Signed origins are preserved, and negative sizes report
+  `GL_INVALID_VALUE` without changing state. Integer, float and boolean
+  queries expose the box and enable state; disabling the test preserves
+  the box for re-enabling. Empty intersections emit a zero-extent RSX
+  rectangle, verified to suppress draws and clears in RPCS3; the
+  corresponding hardware validation remains pending.
 - **PSGL fragment sampler selection.** `glUniform1i` selects logical texture
   units for reflected scalar `sampler2D` inputs in precompiled GL programs.
   Selections belong to each linked program, default to zero after a successful
