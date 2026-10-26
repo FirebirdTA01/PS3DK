@@ -1,0 +1,2 @@
+float4 main(uniform sampler2D a : TEXUNIT0, uniform sampler2D b : TEXUNIT3) : COLOR
+{ return float4(tex2D(a,float2(0.5,0.5)).r, tex2D(b,float2(0.5,0.5)).gb, 1.0); }
