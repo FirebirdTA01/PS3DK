@@ -31,14 +31,18 @@ Specifications cited:
   to `psgl_context_*` in `psgl_context.c` (4731 lines). The header comment of
   `core_gl.c:1-6`, which calls the file "GLES 1.1 core stubs", is stale.
 
-  | File | Entry points | Forwards / nontrivial body | No-op body |
+  | File | Entry points | Forwards / nontrivial body | Unclassified by heuristic |
   |---|---:|---:|---:|
   | `core_gl.c` | 107 | 86 | 21 |
   | `core_gl_ext.c` | 92 | 28 | 64 |
   | `gl_shader.c` | 34 | 30 | 4 |
 
-  The counts come from the script in Appendix A. **Forwarding to a context function does not
-  establish semantic completeness**: each forwarded call still needs spec-level tests.
+  The counts come from the script in Appendix A. They do not measure stub coverage: the
+  unclassified column includes real bodies the heuristic misses, such as `glDeleteShader`
+  (`gl_shader.c:220` sets `s->deleted`) and the info-log getters, which copy through
+  `gls_copy_log`. **Forwarding to a context function does not establish semantic
+  completeness**: each forwarded call still needs spec-level tests. The source-inspected
+  list below is the record of actual no-ops.
 - **Notable no-op bodies** [measured]:
   - **Texture environment:** `glTexEnv*` (`core_gl.c:395`) and `glTexGen*`
     (`core_gl_ext.c:151`), so the texture-combiner stage of the fixed-function path is not
@@ -126,7 +130,7 @@ Specifications cited:
 | Texture formats | `CELL_GCM_TEXTURE_*` includes B8, A4R4G4B4, R5G6B5, A8R8G8B8, G8B8, D1R5G5B5, DXT1/23/45, DEPTH24_D8(_FLOAT), DEPTH16(_FLOAT), W16Z16Y16X16 float, W32Z32Y32X32 float and X32 float (`sdk/include/cell/gcm/gcm_enum.h:259-281`). The float filtering limits are [unverified]. | [measured] |
 | Render targets | Up to 4 colour targets (MRT1-3, `gcm_enum.h:200-202`); MSAA modes as in §1.1. | [measured] |
 | Instancing | Per-attribute frequency and a frequency divider operation exist (`gcm_command_c.h:474, 704`). Full GL instancing semantics (`gl_InstanceID`, a per-attribute divisor) would need to be built on these. | [measured] |
-| Geometry, tessellation and compute stages; transform feedback | Not natively supported: there is no such stage or command in the GCM headers we ship. No practical conformant implementation has been established in this design. CPU or SPU emulation is not ruled out. | [measured] absence in `gcm_enum.h` / `gcm_command_c.h` |
+| Geometry, tessellation and compute stages; transform feedback | Absent from our exposed GCM API: the GCM headers we ship have no such stage or command. Header absence alone does not prove the hardware lacks it. No practical conformant implementation has been established in this design. CPU or SPU emulation is not ruled out. | [measured] absence in `gcm_enum.h` / `gcm_command_c.h` |
 
 ## 3. Tier mapping
 
@@ -281,5 +285,5 @@ for fn in ['core_gl.c', 'core_gl_ext.c', 'gl_shader.c']:
 
 A body counts as "forwards / nontrivial" if it calls a `psgl_*`, `cg*` or `gl*` function,
 writes a `g_*` global, returns a function call, or contains `switch`/`for`/`while`. Anything
-else, such as only `(void)` casts or constant returns, counts as a no-op. This is a heuristic.
-It is not a semantic review.
+else, such as only `(void)` casts or constant returns, is left unclassified. This is a
+heuristic, not a no-op detector or a semantic review.
