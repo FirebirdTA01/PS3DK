@@ -113,7 +113,8 @@ def main():
             check(rc == 2 and 'usage:' in se, 'bad command line (%s): rc 2 with usage' % what)
 
         rc, _, se = run([rsxcg, '--help'], work)
-        check('--psgl-ffp-library' in se, 'rsx-cg-compiler --help lists --psgl-ffp-library')
+        check(rc == 0 and '--psgl-ffp-library' in se,
+              'rsx-cg-compiler --help exits 0 and lists --psgl-ffp-library (the sample relies on both)')
 
         # Each entry equals the single-program compile of the same generated source.
         if args.cg_source_dir and parsed:

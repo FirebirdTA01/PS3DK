@@ -1,23 +1,38 @@
 # tests/host/psgl-shader-builder-package-test.ps1
 #
 # Behavioral CMake configure test for psgl-shader-builder / hello-psgl-ffp-shaderlib:
-#   1. Packaged builder present with no host compiler/sources succeeds (packaged release path)
-#   2. Absent builder + absent sources fails specifically with FATAL_ERROR (refuses dummy-skip)
-#   3. Source fallback requires a host compiler and succeeds only with both
-#   4. Rejects original dummy-skip behavior (proves red on exact baseline CMakeLists.txt)
-#   5. Validates --version output follows project version convention (not a versionless label)
-#   6. A compiler that lists --psgl-ffp-library builds the library itself: no builder,
+#   1. A compiler without --psgl-ffp-library is refused at configure with an
+#      actionable FATAL_ERROR, whether or not a packaged builder, the builder
+#      sources or a host C compiler are present (no psgl-shader-builder fallback)
+#   2. A compiler whose --help lists the mode but exits nonzero is refused too
+#   3. Rejects original dummy-skip behavior (proves red on exact baseline CMakeLists.txt)
+#   4. Validates --version output follows project version convention (not a versionless label)
+#   5. A compiler that lists --psgl-ffp-library builds the library itself: no builder,
 #      no sources, no host compiler, and the generated rule runs that mode
+#   6. The shaders.bin rule depends on the compiler binary, so replacing it rebuilds
 #
 # Stubs target/toolchain setup so no compiler, target process, or emulator runs.
 # Isolates PATH, PS3DEV, and PS3DK so host tools are never accidentally discovered.
 #
+# -SampleCMakeLists runs the cases against another copy of the sample's
+# CMakeLists.txt (a red check against an older one).
+#
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tests\host\psgl-shader-builder-package-test.ps1
+
+param([string]$SampleCMakeLists = '')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $fails = 0
+if (-not $SampleCMakeLists) {
+    $SampleCMakeLists = Join-Path $repo 'samples\toolchain\hello-psgl-ffp-shaderlib\CMakeLists.txt'
+}
+if (-not (Test-Path -LiteralPath $SampleCMakeLists -PathType Leaf)) {
+    Write-Error "psgl-shader-builder-behavioral: no such CMakeLists.txt: $SampleCMakeLists"
+    exit 2
+}
+Write-Host "psgl-shader-builder-behavioral: sample CMakeLists.txt $SampleCMakeLists sha256 $((Get-FileHash -Algorithm SHA256 -LiteralPath $SampleCMakeLists).Hash.ToLower())"
 
 function Check([bool]$ok, [string]$what) {
     if ($ok) {
@@ -26,6 +41,16 @@ function Check([bool]$ok, [string]$what) {
         Write-Host "psgl-shader-builder-behavioral: FAIL $what"
         $script:fails++
     }
+}
+
+# The configure-time refusal for a compiler without --psgl-ffp-library.
+# CMake wraps FATAL_ERROR text, so whitespace is collapsed before matching.
+function Test-Refused($res) {
+    $flat = ($res.text -replace '\s+', ' ')
+    return ($res.rc -ne 0 -and
+            $flat -match 'CMake Error' -and
+            $flat -match 'does not support --psgl-ffp-library' -and
+            $flat -match 'An rsx-cg-compiler with --psgl-ffp-library is required')
 }
 
 # ---------------------------------------------------------------------------
@@ -139,7 +164,7 @@ set(CMAKE_ASM_COMPILER_FORCED TRUE)
     New-Item -ItemType Directory -Force $pkgSampleSrc | Out-Null
     New-Item -ItemType Directory -Force $pkgAssets | Out-Null
 
-    Copy-Item (Join-Path $repo 'samples\toolchain\hello-psgl-ffp-shaderlib\CMakeLists.txt') $pkgSample/
+    Copy-Item -LiteralPath $SampleCMakeLists (Join-Path $pkgSample 'CMakeLists.txt')
     Copy-Item (Join-Path $repo 'samples\toolchain\hello-psgl-ffp-shaderlib\state.txt') $pkgSample/
     Copy-Item (Join-Path $repo 'samples\toolchain\hello-psgl-ffp-shaderlib\source\main.c') $pkgSampleSrc/
     Copy-Item (Join-Path $repo 'sdk\assets\ICON0.PNG') $pkgAssets/
@@ -157,9 +182,10 @@ set(CMAKE_ASM_COMPILER_FORCED TRUE)
         "-DPSGL_SHADER_BUILDER=$mockBuilder"
     )
     $resA = Invoke-CMake $cmakeArgsA
-    Check ($resA.rc -eq 0) 'Case A: packaged builder present with no host compiler/sources succeeds'
+    Check (Test-Refused $resA) `
+        'Case A: compiler without --psgl-ffp-library is refused even with a packaged builder'
 
-    # Case B: Absent builder + absent sources fails specifically with FATAL_ERROR
+    # Case B: compiler without the mode, no builder and no sources: same refusal
     $bldB = Join-Path $work 'bld-case-b'
     $cmakeArgsB = @(
         '-S', $pkgSample,
@@ -171,8 +197,9 @@ set(CMAKE_ASM_COMPILER_FORCED TRUE)
         "-DPSGL_RSX_CG_COMPILER=$mockCg"
     )
     $resB = Invoke-CMake $cmakeArgsB
-    Check ($resB.rc -ne 0 -and $resB.text -match 'builder sources are not present') `
-        'Case B: absent builder and absent sources fails closed specifically'
+    Check (Test-Refused $resB) `
+        'Case B: compiler without --psgl-ffp-library, no builder or sources, is refused with the actionable message'
+    Write-Host "psgl-shader-builder-behavioral: Case B rc=$($resB.rc) configure output: $($resB.text -replace '\s+', ' ')"
 
     # -----------------------------------------------------------------------
     # Setup Source-Tree Layout (tools/psgl-shader-builder and sdk/libPSGL/src present)
@@ -188,7 +215,7 @@ set(CMAKE_ASM_COMPILER_FORCED TRUE)
     New-Item -ItemType Directory -Force $srcTools | Out-Null
     New-Item -ItemType Directory -Force $srcLibPSGL | Out-Null
 
-    Copy-Item (Join-Path $repo 'samples\toolchain\hello-psgl-ffp-shaderlib\CMakeLists.txt') $srcSample/
+    Copy-Item -LiteralPath $SampleCMakeLists (Join-Path $srcSample 'CMakeLists.txt')
     Copy-Item (Join-Path $repo 'samples\toolchain\hello-psgl-ffp-shaderlib\state.txt') $srcSample/
     Copy-Item (Join-Path $repo 'samples\toolchain\hello-psgl-ffp-shaderlib\source\main.c') $srcSampleSrc/
     Copy-Item (Join-Path $repo 'sdk\assets\ICON0.PNG') $srcAssets/
@@ -196,7 +223,7 @@ set(CMAKE_ASM_COMPILER_FORCED TRUE)
     Copy-Item (Join-Path $repo 'sdk\libPSGL\src\ffp_emit.c') $srcLibPSGL/
     Copy-Item (Join-Path $repo 'sdk\libPSGL\src\ffp_emit.h') $srcLibPSGL/
 
-    # Case C1: Source fallback with absent host compiler fails specifically
+    # Case C1: builder sources present, no host compiler: refused, not a source fallback
     $bldC1 = Join-Path $work 'bld-case-c1'
     $cmakeArgsC1 = @(
         '-S', $srcSample,
@@ -208,10 +235,11 @@ set(CMAKE_ASM_COMPILER_FORCED TRUE)
         "-DPSGL_RSX_CG_COMPILER=$mockCg"
     )
     $resC1 = Invoke-CMake $cmakeArgsC1
-    Check ($resC1.rc -ne 0 -and $resC1.text -match 'no\s+host C compiler' -and $resC1.text -match 'available to build') `
-        'Case C1: source fallback requires host compiler and fails when absent'
+    Check (Test-Refused $resC1) `
+        'Case C1: compiler without --psgl-ffp-library is refused in the source tree with no host compiler'
 
-    # Case C2: Source fallback with host compiler present succeeds
+    # Case C2: builder sources and a host compiler present: still refused, the
+    # wrapper built from those sources would call the missing mode
     $bldC2 = Join-Path $work 'bld-case-c2'
     $cmakeArgsC2 = @(
         '-S', $srcSample,
@@ -224,7 +252,10 @@ set(CMAKE_ASM_COMPILER_FORCED TRUE)
         "-DPS3_HOST_CC=$mockCc"
     )
     $resC2 = Invoke-CMake $cmakeArgsC2
-    Check ($resC2.rc -eq 0) 'Case C2: source fallback succeeds when sources and host compiler both exist'
+    Check (Test-Refused $resC2) `
+        'Case C2: compiler without --psgl-ffp-library is refused even with builder sources and a host compiler'
+    $ninjaC2 = Join-Path $bldC2 'build.ninja'
+    Check (-not (Test-Path $ninjaC2)) 'Case C2: no build.ninja is generated for the refused combination'
 
     # -----------------------------------------------------------------------
     # Case D: Mutation check — exact baseline CMakeLists.txt dummy-skip is rejected
@@ -292,6 +323,27 @@ exit /b 0
     $ruleE2 = if (Test-Path $ninjaE2) { Get-Content -Raw $ninjaE2 } else { '' }
     Check ($resE2.rc -eq 0 -and $ruleE2 -match '--psgl-ffp-library' -and $ruleE2 -notmatch 'mock-psgl-shader-builder') `
         'Case E2: --psgl-ffp-library is used even when psgl-shader-builder is also present'
+
+    # Case E3: the shaders.bin build edge lists the compiler as an input
+    $edgeE = @($ruleE -split "`r?`n" | Where-Object {
+        $_ -match '^build .*shaders\.bin.*: CUSTOM_COMMAND ' })
+    Check ($edgeE.Count -eq 1 -and $edgeE[0] -match 'mock-rsx-cg-ffp\.cmd') `
+        'Case E3: the shaders.bin rule depends on the rsx-cg-compiler binary'
+
+    # Case F: --help lists the mode but exits nonzero: not a capability signal
+    $mockCgBad = (Join-Path $work 'mock-rsx-cg-ffp-rc1.cmd').Replace('\', '/')
+    @'
+@echo off
+echo   --psgl-ffp-library ^<state.txt^> -o ^<shaders.bin^> 1>&2
+exit /b 1
+'@ | Out-File -Encoding ascii (Join-Path $work 'mock-rsx-cg-ffp-rc1.cmd')
+    $bldF = Join-Path $work 'bld-case-f'
+    $cmakeArgsF = $cmakeArgsE.Clone()
+    $cmakeArgsF[3] = $bldF
+    $cmakeArgsF[-1] = "-DPSGL_RSX_CG_COMPILER=$mockCgBad"
+    $resF = Invoke-CMake $cmakeArgsF
+    Check ((Test-Refused $resF) -and ($resF.text -replace '\s+', ' ') -match 'exited 1') `
+        'Case F: a compiler whose --help exits 1 is refused even though it prints the mode'
 
     # Toolchain stub check: verify mock compiler was never invoked during configure
     Check (-not (Test-Path $ccMarker)) `
