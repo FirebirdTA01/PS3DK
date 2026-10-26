@@ -60,6 +60,8 @@ struct _CGcontext {
     uint32_t magic;
     PSGLcgProgram *programs;
     CGerror last_error;
+    /* Listing of the last program creation, or NULL. */
+    const char *listing;
     CGbool vertex_profile_enabled;
     CGbool fragment_profile_enabled;
 };

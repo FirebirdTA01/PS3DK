@@ -113,11 +113,19 @@ int psgl_cg_profile_is_fragment(CGprofile profile)
 }
 
 static CGprofile cg_default_profile(const CgBinaryProgram *binary,
-                                    CGprofile requested)
+                                    uint32_t size, CGprofile requested)
 {
+    const unsigned char *b = (const unsigned char *)binary;
     if (requested != CG_PROFILE_UNKNOWN && requested != (CGprofile)0)
         return requested;
-    if (!binary) return CG_PROFILE_UNKNOWN;
+    if (!binary || size < (uint32_t)sizeof(CGprofile)) return CG_PROFILE_UNKNOWN;
+    /* A compact CGB container names its stage at offset 0x0a. */
+    if (size > 0x0au &&
+        b[0] == 0x43 && b[1] == 0x47 && b[2] == 0x42 && b[3] == 0x00) {
+        if (b[0x0a] == 0u) return CG_PROFILE_SCE_VP_RSX;
+        if (b[0x0a] == 1u) return CG_PROFILE_SCE_FP_RSX;
+        return CG_PROFILE_UNKNOWN;
+    }
     return binary->profile;
 }
 
@@ -315,7 +323,7 @@ static CGprogram cg_create_binary_program(PSGLcgContext *context,
     CGprofile selected;
     CellCgbProfile cgb_profile;
 
-    selected = cg_default_profile(binary, profile);
+    selected = cg_default_profile(binary, binary_size, profile);
     if (!psgl_cg_profile_is_vertex(selected) &&
         !psgl_cg_profile_is_fragment(selected)) {
         free(binary);
@@ -388,15 +396,14 @@ CGprogram psgl_cg_create_program_from_memory(CGcontext ctx,
 
 static CGparameterclass cg_class_for_type(CGtype type)
 {
-    if (type >= CG_FLOAT1x1 && type <= CG_FLOAT4x4)
-        return CG_PARAMETERCLASS_MATRIX;
-    if (type == CG_FLOAT || type == CG_INT || type == CG_BOOL)
-        return CG_PARAMETERCLASS_SCALAR;
-    if ((type >= CG_FLOAT1 && type <= CG_FLOAT4) ||
-        (type >= CG_INT1 && type <= CG_INT4) ||
-        (type >= CG_BOOL1 && type <= CG_BOOL4))
-        return CG_PARAMETERCLASS_VECTOR;
-    return CG_PARAMETERCLASS_UNKNOWN;
+    switch (type) {
+#define CG_DATATYPE_MACRO(name, compiler_name, enum_name, base_name,                           nrows, ncols, pc_name)     case enum_name: return pc_name;
+#include <Cg/cg_datatypes.h>
+#undef CG_DATATYPE_MACRO
+    case CG_STRUCT: return CG_PARAMETERCLASS_STRUCT;
+    case CG_ARRAY:  return CG_PARAMETERCLASS_ARRAY;
+    default:        return CG_PARAMETERCLASS_UNKNOWN;
+    }
 }
 
 static int cg_columns_for_type(CGtype type)
@@ -473,15 +480,20 @@ CG_API CGerror CGENTRY cgGetFirstError(void)
 
 CG_API const char *CGENTRY cgGetErrorString(CGerror error)
 {
-    (void)error;
-    return "no error";
+    switch (error) {
+#define CG_ERROR_MACRO(code, enum_name, message)     case enum_name: return message;
+#include <Cg/cg_errors.h>
+#undef CG_ERROR_MACRO
+    default: return "Unknown error.";
+    }
 }
 
 CG_API const char *CGENTRY cgGetLastErrorString(CGerror *error)
 {
-    if (error) *error = g_cg_error;
+    CGerror e = g_cg_error;
+    if (error) *error = e;
     g_cg_error = CG_NO_ERROR;
-    return "no error";
+    return cgGetErrorString(e);
 }
 
 CG_API void CGENTRY cgSetErrorCallback(CGerrorCallbackFunc func)
@@ -541,7 +553,10 @@ CG_API CGbool CGENTRY cgIsContext(CGcontext ctx)
 { return psgl_cg_context(ctx) ? CG_TRUE : CG_FALSE; }
 
 CG_API const char *CGENTRY cgGetLastListing(CGcontext ctx)
-{ (void)ctx; return NULL; }
+{
+    PSGLcgContext *context = psgl_cg_context(ctx);
+    return context ? context->listing : NULL;
+}
 
 CG_API void CGENTRY cgSetLastListing(CGhandle handle, const char *listing)
 { (void)handle; (void)listing; }
@@ -561,13 +576,52 @@ CG_API CGenum CGENTRY cgGetParameterSettingMode(CGcontext ctx)
 
 /* ── program ─────────────────────────────────────────────────────── */
 
+/* Programs are precompiled: CG_BINARY and CG_OBJECT name a raw or compact
+   container in memory, whose own header gives its size; the container is
+   copied.  Cg source is not compiled at run time. */
+static const char cg_source_listing[] =
+    "Cg source is not compiled at run time; compile it offline with "
+    "rsx-cg-compiler and load the container as CG_BINARY or CG_OBJECT.";
+
+static int cg_check_program_type(PSGLcgContext *context, CGenum program_type)
+{
+    context->listing = NULL;
+    if (program_type == CG_BINARY || program_type == CG_OBJECT) return 1;
+    if (program_type == CG_SOURCE) context->listing = cg_source_listing;
+    psgl_cg_set_error(context, CG_INVALID_ENUMERANT_ERROR);
+    return 0;
+}
+
+/* Larger than any RSX program container; guards a corrupt size field. */
+#define PSGL_CG_CONTAINER_MAX 0x01000000u
+
 CG_API CGprogram CGENTRY cgCreateProgram(CGcontext ctx, CGenum program_type,
                                          const char *program,
                                          CGprofile profile,
                                          const char *entry,
                                          const char **args)
-{ (void)ctx; (void)program_type; (void)program;
-  (void)profile; (void)entry; (void)args; return NULL; }
+{
+    PSGLcgContext *context = psgl_cg_context(ctx);
+    uint32_t size;
+
+    (void)entry;
+    (void)args;
+    if (!context) {
+        psgl_cg_set_error(NULL, CG_INVALID_CONTEXT_HANDLE_ERROR);
+        return NULL;
+    }
+    if (!cg_check_program_type(context, program_type)) return NULL;
+    if (!program) {
+        psgl_cg_set_error(context, CG_INVALID_PARAMETER_ERROR);
+        return NULL;
+    }
+    size = cellCgbGetSize(program);
+    if (size == 0u || size > PSGL_CG_CONTAINER_MAX) {
+        psgl_cg_set_error(context, CG_PROGRAM_LOAD_ERROR);
+        return NULL;
+    }
+    return psgl_cg_create_program_from_memory(ctx, program, size, profile);
+}
 
 CG_API CGprogram CGENTRY cgCreateProgramFromFile(CGcontext ctx,
                                                  CGenum program_type,
@@ -586,8 +640,9 @@ CG_API CGprogram CGENTRY cgCreateProgramFromFile(CGcontext ctx,
         psgl_cg_set_error(NULL, CG_INVALID_CONTEXT_HANDLE_ERROR);
         return NULL;
     }
-    if (program_type != CG_BINARY || !program_file) {
-        psgl_cg_set_error(context, CG_INVALID_ENUMERANT_ERROR);
+    if (!cg_check_program_type(context, program_type)) return NULL;
+    if (!program_file) {
+        psgl_cg_set_error(context, CG_INVALID_PARAMETER_ERROR);
         return NULL;
     }
 
