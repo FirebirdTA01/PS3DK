@@ -69,7 +69,8 @@ The version stamped into builds is generated from the most recent
 - **PSGL fixed-function texturing on units 0-3.** Fixed-function draws
   apply the enabled texture units in order with their texture environments
   (MODULATE, REPLACE, DECAL, BLEND, ADD), env colours, base formats,
-  texcoord sets and texture matrices, per OpenGL 2.1 section 3.13. Unit 0
+  texcoord sets and texture matrices, per OpenGL 2.1 section 3.8.13 (tables
+  3.21 and 3.22). Fixed-function draws read units 0-3 only. Unit 0
   now modulates by the primary colour by default, as GL specifies; it used
   to replace it. Apps that draw textured with a non-white colour therefore
   render differently. `rsx-cg-compiler --psgl-ffp-library` builds one program
@@ -84,9 +85,11 @@ The version stamped into builds is generated from the most recent
   `GL_TEXTURE_ENV_MODE` (MODULATE, REPLACE, DECAL, BLEND, ADD; MODULATE
   initially) and `GL_TEXTURE_ENV_COLOR` per texture unit, and
   `glGetTexEnv{fv,iv,xv}` return them. COMBINE and other unknown tokens or
-  targets report `GL_INVALID_ENUM` without changing state. On the
-  programmable-only texture units 4-7, `glTexEnv` and
-  `glEnable(GL_TEXTURE_2D)` report `GL_INVALID_OPERATION`. Textures
+  targets report `GL_INVALID_ENUM` without changing state. As
+  texture-image-unit commands, `glTexEnv` and `glEnable(GL_TEXTURE_2D)` also
+  store state on units 4-7 without an error (OpenGL 2.1 section 2.11.2),
+  which fixed-function draws do not read. `glGetIntegerv` reports
+  `GL_MAX_TEXTURE_COORDS` as 4. Textures
   remember their base format (ALPHA, LUMINANCE, LUMINANCE_ALPHA, RGB, RGBA)
   for the texture functions.
 - **PSGL per-unit texture coordinates.** `glTexCoordPointer` and
@@ -97,8 +100,9 @@ The version stamped into builds is generated from the most recent
   `glMultiTexCoord` forms did nothing.
 - **PSGL texture matrices.** Fixed-function programs receive the texture
   matrix of each enabled unit 0-3. Matrix operations with `GL_TEXTURE`
-  mode on units 4-7 report `GL_INVALID_OPERATION`; they previously changed
-  unit 0's matrix.
+  mode on units 4-7, which have no texture coordinate set, report
+  `GL_INVALID_OPERATION` (OpenGL 2.1 section 2.11.2); before, they changed
+  those units' own stored matrices, which fixed-function drawing never used.
 - **Eight PSGL fragment texture units.** Programmable fragment binaries can
   sample distinct textures on units 0-7. Fragment and combined image-unit
   queries report 8; the vertex image-unit query reports 0. Active texture and
