@@ -39,8 +39,8 @@ Specifications cited:
 
   The counts come from the script in Appendix A. They do not measure stub coverage: the
   unclassified column includes real bodies the heuristic misses, such as `glDeleteShader`
-  (`gl_shader.c:220` sets `s->deleted`) and the info-log getters, which copy through
-  `gls_copy_log`. **Forwarding to a context function does not establish semantic
+  (`gl_shader.c:221` sets `s->deleted`) and the info-log getters (`gl_shader.c:313`, `:438`), which copy through
+  `gls_copy_info_log`. **Forwarding to a context function does not establish semantic
   completeness**: each forwarded call still needs spec-level tests. The source-inspected
   list below is the record of actual no-ops.
 - **Notable no-op bodies** [measured]:
