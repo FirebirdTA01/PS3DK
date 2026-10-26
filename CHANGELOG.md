@@ -18,6 +18,11 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL texture uploads.** Byte luminance, alpha and luminance-alpha uploads
+  expand into the existing ARGB8 storage with unpack alignment respected.
+  Packed 32-bit RGBA uploads use four bytes per texel when advancing rows,
+  fixing corruption after the first row. This covers upload storage, not a
+  complete texture-format or ES 2.0 conformance claim.
 - **PSGL precompiled shader contract.** Shader binaries load directly for
   linking, without a compile call. Compiler availability and binary/DXT format
   queries report the supported paths; audited shader/query errors retain the

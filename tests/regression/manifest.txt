@@ -314,3 +314,7 @@ entropy-error-lp64,tests/regression/entropy-provider/entropy-error-lp64.fake.sel
 # Precompiled PSGL API contract; no rendering or full ES2 conformance claim.
 psgl-binary-contract-ilp32,tests/regression/psgl-binary-contract/psgl-binary-contract-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_BINARY_OK checks=[0-9]+ failures=0\r?$,PSGL_BINARY_FAIL
 psgl-binary-contract-lp64,tests/regression/psgl-binary-contract/psgl-binary-contract-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_BINARY_OK checks=[0-9]+ failures=0\r?$,PSGL_BINARY_FAIL
+
+# Texture upload storage and row alignment; no GPU sampling claim.
+psgl-texture-upload-ilp32,tests/regression/psgl-texture-upload/psgl-texture-upload-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_UPLOAD_OK checks=35 failures=0\r?$,PSGL_UPLOAD_FAIL
+psgl-texture-upload-lp64,tests/regression/psgl-texture-upload/psgl-texture-upload-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_UPLOAD_OK checks=35 failures=0\r?$,PSGL_UPLOAD_FAIL

@@ -1602,23 +1602,32 @@ static uint16_t psgl_align_u16(uint32_t value, uint32_t align)
     return (uint16_t)((value + align - 1u) & ~(align - 1u));
 }
 
+static uint32_t psgl_texel_size(GLenum format, GLenum type)
+{
+    if (type == GL_UNSIGNED_BYTE) {
+        if (format == GL_ALPHA || format == GL_LUMINANCE) return 1u;
+        if (format == GL_LUMINANCE_ALPHA) return 2u;
+        return (format == GL_RGB || format == GL_BGR) ? 3u : 4u;
+    }
+    if (type == GL_UNSIGNED_INT_8_8_8_8 ||
+        type == GL_UNSIGNED_INT_8_8_8_8_REV)
+        return 4u;
+    return 2u;
+}
+
 static uint32_t psgl_unpack_row_stride(GLsizei width, GLenum format,
                                        GLenum type, GLint alignment)
 {
-    uint32_t row = 0u;
+    uint32_t row = (uint32_t)width * psgl_texel_size(format, type);
     uint32_t align = alignment > 0 ? (uint32_t)alignment : 1u;
-    if (format == GL_RGBA || format == GL_BGRA) {
-        row = (type == GL_UNSIGNED_BYTE) ? (uint32_t)width * 4u : (uint32_t)width * 2u;
-    } else if (format == GL_RGB || format == GL_BGR) {
-        row = (type == GL_UNSIGNED_BYTE) ? (uint32_t)width * 3u : (uint32_t)width * 2u;
-    }
     if (align > 1u) row = (row + align - 1u) & ~(align - 1u);
     return row;
 }
 
 static int psgl_texture_supported(GLenum format, GLenum type)
 {
-    if ((format == GL_RGBA || format == GL_BGRA || format == GL_RGB || format == GL_BGR) &&
+    if ((format == GL_RGBA || format == GL_BGRA || format == GL_RGB || format == GL_BGR ||
+         format == GL_ALPHA || format == GL_LUMINANCE || format == GL_LUMINANCE_ALPHA) &&
         type == GL_UNSIGNED_BYTE)
         return 1;
     if (format == GL_RGBA &&
@@ -1704,6 +1713,13 @@ static uint32_t psgl_convert_texel_argb8(const unsigned char *src,
                                          GLenum format, GLenum type)
 {
     if (type == GL_UNSIGNED_BYTE) {
+        /* ES 2.0 table 3.12: expand logical channels into ARGB8 storage. */
+        if (format == GL_ALPHA)
+            return psgl_pack_argb8(0u, 0u, 0u, src[0]);
+        if (format == GL_LUMINANCE)
+            return psgl_pack_argb8(src[0], src[0], src[0], 255u);
+        if (format == GL_LUMINANCE_ALPHA)
+            return psgl_pack_argb8(src[0], src[0], src[0], src[1]);
         if (format == GL_RGBA)
             return psgl_pack_argb8(src[0], src[1], src[2], src[3]);
         if (format == GL_BGRA)
@@ -1758,16 +1774,6 @@ static uint32_t psgl_convert_texel_argb8(const unsigned char *src,
         return psgl_pack_argb8(r, g, b, a);
     }
     return 0u;
-}
-
-static uint32_t psgl_texel_size(GLenum format, GLenum type)
-{
-    if (type == GL_UNSIGNED_BYTE)
-        return (format == GL_RGB || format == GL_BGR) ? 3u : 4u;
-    if (type == GL_UNSIGNED_INT_8_8_8_8 ||
-        type == GL_UNSIGNED_INT_8_8_8_8_REV)
-        return 4u;
-    return 2u;
 }
 
 static void psgl_write_texture_image(PSGLtextureObject *texture,
