@@ -37,6 +37,13 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL unsigned-byte attribute normalization.** GL vertex attribute
+  pointers retain their normalization flag. Routed VBO and client arrays
+  deliver four-component byte inputs as either 0..1 or 0..255 as requested,
+  independently of their logical location. Unnormalized unsigned-byte
+  inputs of size 1-3 now report `GL_INVALID_OPERATION` without changing
+  state; they were previously accepted but incorrectly normalized. This
+  is an implementation limit. Direct Cg attribute semantics are unchanged.
 - **PSGL logical vertex attributes.** Precompiled GL programs route eight
   logical attribute locations to their binary's physical inputs. Attribute
   bindings take effect at link time; relinking the current program updates

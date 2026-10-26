@@ -642,13 +642,17 @@ GLAPI void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
                                  const GLvoid *pointer)
 {
     PSGLcontext *context = gls_attrib_context(index);
-    (void)normalized; /* Normalization has a separate regression increment. */
     if (!context) return;
     if (size < 1 || size > 4 || stride < 0) {
         psgl_gl_error(GL_INVALID_VALUE); return;
     }
     if (type != GL_FLOAT && type != GL_UNSIGNED_BYTE && type != GL_UNSIGNED_SHORT) {
         psgl_gl_error(GL_INVALID_ENUM); return;
+    }
+    /* The current unnormalized-byte path emits a four-component UB256
+       descriptor. Smaller inputs need a conversion path, not that encoding. */
+    if (type == GL_UNSIGNED_BYTE && !normalized && size != 4) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
     }
     if (stride > 255) { psgl_gl_error(GL_INVALID_OPERATION); return; }
     if (context->bound_array_buffer && (uintptr_t)pointer > UINT32_MAX) {
@@ -661,6 +665,7 @@ GLAPI void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
     attrib->pointer = pointer;
     attrib->buffer_name = context->bound_array_buffer;
     attrib->buffer_offset = context->bound_array_buffer ? (uint32_t)(uintptr_t)pointer : 0;
+    context->gl_attrib_normalized[index] = normalized ? GL_TRUE : GL_FALSE;
     if (!index && !context->bound_vertex_program)
         context->attribs[PSGL_ATTRIB_VERTEX] = *attrib;
     context->dirty |= PSGL_DIRTY_CG;

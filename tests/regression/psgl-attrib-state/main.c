@@ -60,6 +60,18 @@ int main(void)
     glBindBuffer(GL_ARRAY_BUFFER,0);
     glVertexAttribPointer(2,4,GL_UNSIGNED_BYTE,GL_TRUE,4,bytes);draw(1,0,0,"normalized client");
     glVertexAttribPointer(2,4,GL_UNSIGNED_BYTE,GL_FALSE,4,bytes);draw(255,0,0,"unnormalized client");
+    for(GLint size=1;size<=3;++size){
+        glVertexAttribPointer(2,size,GL_UNSIGNED_BYTE,GL_FALSE,4,bytes);
+        GLenum error=glGetError();
+        check(error==GL_INVALID_OPERATION,"small unnormalized input refused");
+        if(error==GL_INVALID_OPERATION){
+            draw(255,0,0,"rejected size preserves pointer");
+        }else{
+            /* The RED must not submit an invalid UB256 descriptor. */
+            check(0,"rejected size preserves pointer");
+            glVertexAttribPointer(2,4,GL_UNSIGNED_BYTE,GL_FALSE,4,bytes);
+        }
+    }
     glUseProgram(0);glDeleteProgram(p);glDeleteShader(vs);glDeleteShader(fs);
 #else
     static const float red[24]={1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1};

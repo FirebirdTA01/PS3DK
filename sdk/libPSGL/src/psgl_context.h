@@ -210,6 +210,7 @@ struct PSGLcontext {
     int8_t gl_hw_to_location[PSGL_MAX_GENERIC_ATTRIBS];
     GLboolean gl_attrib_routing;
     GLboolean retire_gl_arrays;
+    GLboolean gl_attrib_normalized[PSGL_MAX_GL_ATTRIBS];
 };
 
 int psgl_context_init_system(const PSGLinitOptions *options);

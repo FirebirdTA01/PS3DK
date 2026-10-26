@@ -1883,6 +1883,15 @@ static uint8_t psgl_gl_vertex_type(GLenum type)
     }
 }
 
+static uint8_t psgl_gl_routed_vertex_type(const PSGLcontext *context,
+                                           unsigned location)
+{
+    GLenum type = context->gl_attribs[location].type;
+    if (type == GL_UNSIGNED_BYTE && !context->gl_attrib_normalized[location])
+        return CELL_GCM_VERTEX_UB256;
+    return psgl_gl_vertex_type(type);
+}
+
 static uint8_t psgl_gl_index_type(GLenum type)
 {
     switch (type) {
@@ -2038,7 +2047,7 @@ static void psgl_emit_vertex_arrays(PSGLcontext *context)
             }
             if (!attrib->buffer_name) continue; /* Uploaded at draw time. */
             PSGLbufferObject *buffer = psgl_find_buffer(attrib->buffer_name);
-            uint8_t type = psgl_gl_vertex_type(attrib->type);
+            uint8_t type = psgl_gl_routed_vertex_type(context, (unsigned)location);
             if (!buffer || !buffer->address || !type) continue;
             cellGcmSetVertexDataArray(context->gcm, (uint8_t)hw, 0,
                 (uint8_t)psgl_attrib_stride(attrib), (uint8_t)attrib->size,
@@ -2129,7 +2138,7 @@ static int psgl_emit_client_vertex_arrays(PSGLcontext *context,
                                      element, psgl_attrib_stride(attrib));
             cellGcmSetVertexDataArray(context->gcm, (uint8_t)hw, 0,
                 (uint8_t)element, (uint8_t)attrib->size,
-                psgl_gl_vertex_type(attrib->type), CELL_GCM_LOCATION_MAIN,
+                psgl_gl_routed_vertex_type(context, (unsigned)location), CELL_GCM_LOCATION_MAIN,
                 scratch_offset + cursor);
             cursor += psgl_align_u32((uint32_t)vertices * element, PSGL_BUFFER_ALIGNMENT);
         }

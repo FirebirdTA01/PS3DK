@@ -324,3 +324,5 @@ psgl-readpixels-fullsize-ilp32,tests/regression/psgl-readpixels-fullsize/psgl-re
 psgl-readpixels-fullsize-lp64,tests/regression/psgl-readpixels-fullsize/psgl-readpixels-fullsize-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_READ_FULL_OK checks=62 failures=0\r?$,PSGL_READ_FULL_FAIL
 psgl-attrib-routing-ilp32,tests/regression/psgl-attrib-routing/psgl-attrib-routing-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_ATTR_OK checks=80 failures=0\r?$,PSGL_ATTR_FAIL
 psgl-attrib-routing-lp64,tests/regression/psgl-attrib-routing/psgl-attrib-routing-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_ATTR_OK checks=80 failures=0\r?$,PSGL_ATTR_FAIL
+psgl-attrib-normalization-ilp32,tests/regression/psgl-attrib-state/psgl-attrib-normalization-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_ATTR_STATE_OK checks=12 failures=0\r?$,PSGL_ATTR_STATE_FAIL
+psgl-attrib-normalization-lp64,tests/regression/psgl-attrib-state/psgl-attrib-normalization-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_ATTR_STATE_OK checks=12 failures=0\r?$,PSGL_ATTR_STATE_FAIL
