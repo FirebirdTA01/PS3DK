@@ -1,6 +1,7 @@
-/* Fixed-function texture environments on units 0-3 (OpenGL 2.1 section 3.13,
-   tables 3.22/3.23), per-unit texcoord arrays (2.8), current texcoords (2.7),
-   texture matrices (2.11.2) and the unit >= MAX_TEXTURE_UNITS refusals.
+/* Fixed-function texture environments on units 0-3 (OpenGL 2.1 section
+   3.8.13, tables 3.21/3.22), per-unit texcoord arrays (2.8), current
+   texcoords (2.7), texture matrices (2.11.2) and the image/coordinate unit
+   rules for units 4-7 (2.11.2).
    Expected pixels are derived by hand from those tables; every input is
    0x00, 0xff or a pass-through value, so no row depends on rounding. */
 #include <GLES/gl.h>
@@ -23,6 +24,11 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 /* Weak so the RED build links against a libPSGL without these queries. */
 extern void glGetTexEnviv(GLenum target, GLenum pname, GLint *params) __attribute__((weak));
 extern void glGetTexEnvfv(GLenum target, GLenum pname, GLfloat *params) __attribute__((weak));
+/* libPSGL internal counter of fixed-function program installs (not API). */
+extern unsigned psgl_ffp_program_installs __attribute__((weak));
+#ifndef GL_MAX_TEXTURE_COORDS_ARB
+#define GL_MAX_TEXTURE_COORDS_ARB 0x8871
+#endif
 
 #define LIB_PATH "/dev_hdd0/tmp/psgl-ffp-texenv.bin"
 static unsigned checks, failures;
@@ -43,6 +49,7 @@ static const unsigned char k_magenta[6][4] = {{255,0,255,255},{255,0,255,255},{2
 #define C(v) ((v) / 255.0f)
 
 static GLuint tex_rgba_a, tex_rgb_b, tex_alpha_c, tex_lum_d, tex_rgba_e;
+static GLuint tex_la_f, tex_rgba_half_g;
 
 static GLuint make_texture(GLenum format, const unsigned char *texels)
 {
@@ -71,6 +78,10 @@ static void make_textures(void)
     tex_alpha_c = make_texture(GL_ALPHA, c);
     tex_lum_d = make_texture(GL_LUMINANCE, d);
     tex_rgba_e = make_texture(GL_RGBA, e);
+    static const unsigned char f[] = {0x80,0x00, 0xff,0xff};                    /* LUMINANCE_ALPHA */
+    static const unsigned char g[] = {0xff,0x00,0x00,0x80, 0xff,0x00,0x00,0x80}; /* RGBA, A 0x80 */
+    tex_la_f = make_texture(GL_LUMINANCE_ALPHA, f);
+    tex_rgba_half_g = make_texture(GL_RGBA, g);
 }
 
 static void reset_units(void)
@@ -192,35 +203,119 @@ __attribute__((unused)) static void error_rows(void)
     check(glGetError() == GL_NO_ERROR, "queries raise no error");
 }
 
-/* Units 4-7 exist for programmable samplers only; fixed-function state on
-   them is refused (GL 2.1: units >= MAX_TEXTURE_UNITS), and a draw keeps the
-   unit 0 result. */
+/* Units 4-7 are texture image units without texture coordinate sets
+   (GL 2.1 section 2.11.2): image-unit commands (TexEnv, Enable, BindTexture)
+   store their state with no error, coordinate-processing commands (texture
+   matrices) are INVALID_OPERATION, and fixed-function draws read units 0-3
+   only, so enabling unit 4 changes neither the result nor the program. */
 __attribute__((unused)) static void high_unit_rows(void)
 {
-    GLint max_units = 0;
+    static const float env[4] = {C(0x40), C(0x80), C(0xff), 1.0f};
+    GLint max_units = 0, max_coords = 0, mode = 0;
+    GLfloat color[4] = {0, 0, 0, 0};
     reset_units();
     glGetIntegerv(GL_MAX_TEXTURE_UNITS, &max_units);
     check(max_units == 4, "GL_MAX_TEXTURE_UNITS stays 4");
+    glGetIntegerv(GL_MAX_TEXTURE_COORDS_ARB, &max_coords);
+    check(max_coords == 4 && glGetError() == GL_NO_ERROR, "GL_MAX_TEXTURE_COORDS reports 4");
+    glColor4f(1, 0, 1, 1);
+    use_unit(0, tex_rgba_a, GL_MODULATE, k_lo);
+    row("units 4-7: unit-0 reference draw", 0x800040);
+    unsigned installs = &psgl_ffp_program_installs != 0 ? psgl_ffp_program_installs : 0u;
     glActiveTexture(GL_TEXTURE4);
-    check(glGetError() == GL_NO_ERROR, "ActiveTexture(TEXTURE4) selects a sampler unit");
-    glBindTexture(GL_TEXTURE_2D, tex_rgba_a);
+    check(glGetError() == GL_NO_ERROR, "unit 4: ActiveTexture selects an image unit");
+    glBindTexture(GL_TEXTURE_2D, tex_rgb_b);
     glEnable(GL_TEXTURE_2D);
-    check(glGetError() == GL_INVALID_OPERATION, "Enable(TEXTURE_2D) on unit 4 is INVALID_OPERATION");
+    check(glGetError() == GL_NO_ERROR, "unit 4: Enable(TEXTURE_2D) stores state with no error");
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-    check(glGetError() == GL_INVALID_OPERATION, "TexEnv on unit 4 is INVALID_OPERATION");
+    glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, env);
+    check(glGetError() == GL_NO_ERROR, "unit 4: TexEnv stores state with no error");
+    if (glGetTexEnviv && glGetTexEnvfv) {
+        glGetTexEnviv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, &mode);
+        check(mode == GL_REPLACE, "unit 4: TexEnv mode round trip");
+        glGetTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, color);
+        check(!memcmp(color, env, sizeof(env)), "unit 4: env colour round trip");
+    } else {
+        check(0, "unit 4: TexEnv mode round trip");
+        check(0, "unit 4: env colour round trip");
+    }
     glActiveTexture(GL_TEXTURE7);
     glEnable(GL_TEXTURE_2D);
-    check(glGetError() == GL_INVALID_OPERATION, "Enable(TEXTURE_2D) on unit 7 is INVALID_OPERATION");
+    check(glGetError() == GL_NO_ERROR, "unit 7: Enable(TEXTURE_2D) stores state with no error");
+    glDisable(GL_TEXTURE_2D);
     glMatrixMode(GL_TEXTURE);
     glLoadIdentity();
-    check(glGetError() == GL_INVALID_OPERATION, "texture matrix op on unit 7 is INVALID_OPERATION");
+    check(glGetError() == GL_INVALID_OPERATION, "unit 7: texture matrix op is INVALID_OPERATION");
     glMatrixMode(GL_MODELVIEW);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0x800040, "units 4-7: enabled unit 4 does not change a unit-0 draw");
+    check(&psgl_ffp_program_installs != 0 && psgl_ffp_program_installs == installs,
+          "units 4-7: enabling unit 4 does not reinstall the fixed-function programs");
+
+    /* MultiTexCoord names its own coordinate set: with ACTIVE_TEXTURE 4 it
+       still sets unit 0's current texcoord, used here without an array. */
+    while (glGetError() != GL_NO_ERROR) {}
+    glMultiTexCoord4f(GL_TEXTURE0, 0.75f, 0.5f, 0, 1);
+    check(glGetError() == GL_NO_ERROR, "MultiTexCoord(TEXTURE0) with ACTIVE_TEXTURE 4: no error");
     glColor4f(0, 0, 0, 1);
-    use_unit(0, tex_rgb_b, GL_REPLACE, k_lo);
-    row("unit 0 draw after refused unit 4/7 enables", 0x00ff00);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex_rgb_b);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    glClientActiveTexture(GL_TEXTURE0);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    row("MultiTexCoord(TEXTURE0) from unit 4 reaches unit 0", 0xff00ff);
+    glMultiTexCoord4f(GL_TEXTURE0, 0, 0, 0, 1);
+
+    glActiveTexture(GL_TEXTURE4);
+    glDisable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glActiveTexture(GL_TEXTURE0);
+}
+
+/* A lit fixed-function draw (normal (0,0,1), light 0 at (0,0,1,0)) is not
+   suppressed by an enabled unit 4.  An unlit green draw in between swaps
+   the bound programs, so a lit draw left without a program shows green. */
+__attribute__((unused)) static void lit_unit4_rows(void)
+{
+    static const float normals[6][3] = {{0,0,1},{0,0,1},{0,0,1},{0,0,1},{0,0,1},{0,0,1}};
+    static const float position[4] = {0, 0, 1, 0};
+    unsigned char lit[4] = {0, 0, 0, 0}, got[4];
+    unsigned tries;
+    reset_units();
+    glNormalPointer(GL_FLOAT, 0, normals);
+    glEnableClientState(GL_NORMAL_ARRAY);
+    glLightfv(GL_LIGHT0, GL_POSITION, position);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_LIGHTING);
+    for (tries = 1; tries <= 10; ++tries) {
+        glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+        if (read_rgb(1, lit) && !(lit[0] == 0 && lit[1] == 0 && lit[2] == 0xff)) break;
+        usleep(200000);
+    }
+    printf("PSGL_FFP_TEXENV_DRAW lit reference attempts=%u value=%02x%02x%02x\n",
+           tries > 10 ? 10 : tries, lit[0], lit[1], lit[2]);
+    check(tries <= 10, "lit: reference draw");
+    glDisable(GL_LIGHTING);
+    glColor4f(0, 1, 0, 1);
+    row("lit: unlit draw in between", 0x00ff00);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, tex_rgba_a);
+    glEnable(GL_TEXTURE_2D);
+    glActiveTexture(GL_TEXTURE0);
+    glEnable(GL_LIGHTING);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    int ok = read_rgb(1, got) && !memcmp(got, lit, 3) && got[3] == 255;
+    if (!ok) printf("PIXEL_DETAIL lit with unit 4 got=%02x%02x%02x expected=%02x%02x%02x\n",
+                    got[0], got[1], got[2], lit[0], lit[1], lit[2]);
+    check(ok, "lit: enabled unit 4 does not change a lit draw");
+    glDisable(GL_LIGHTING);
+    glDisable(GL_LIGHT0);
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glActiveTexture(GL_TEXTURE4);
+    glDisable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
 }
 
 /* Env colour changes between back-to-back queued draws: each draw keeps the
@@ -302,11 +397,30 @@ __attribute__((unused)) static void bind_transition_rows(void)
     glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
     expect_pixel(1, 0x800040, "deletion: deleting it disables unit 1");
     glDeleteTextures(1, &late);
+
+    /* {0} <-> {}: unit 0 alone switches between its texture and none, so
+       the untextured program must replace the textured one and back. */
+    reset_units();
+    glColor4f(1, 0, 1, 1);
+    use_unit(0, tex_rgba_a, GL_MODULATE, k_lo);
+    row("binding: warm units {0}", 0x800040);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    row("binding: warm units {}", 0xff00ff);
+    glBindTexture(GL_TEXTURE_2D, tex_rgba_a);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0x800040, "binding: {} -> {0}");
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0xff00ff, "binding: {0} -> {}");
+    glBindTexture(GL_TEXTURE_2D, tex_rgba_a);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0x800040, "binding: {} -> {0} again");
 }
 
 __attribute__((unused)) static void render_rows(void)
 {
-    /* Initial mode is MODULATE (GL 2.1 table 6.21): no TexEnv call yet. */
+    /* Initial mode is MODULATE (GL 2.1 table 6.19): no TexEnv call yet. */
     glColor4f(1, 0, 1, 1);
     use_unit(0, tex_rgba_a, 0, k_lo);
     row("default MODULATE unit 0 (RGBA: Cp*Ct)", 0x800040);
@@ -424,6 +538,29 @@ __attribute__((unused)) static void render_rows(void)
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     glMultiTexCoord4f(GL_TEXTURE1, 0.75f, 0.5f, 0, 1);
     row("unit 1 current texcoord from MultiTexCoord", 0xff00ff);
+
+    /* Fractional DECAL alpha: Cv = Cp(1-At) + Ct*At with At = 0x80/0xff,
+       Cp = (0,1,0), Ct = (1,0,0): (80,7f,00). */
+    reset_units();
+    glColor4f(0, 1, 0, 1);
+    use_unit(0, tex_rgba_half_g, GL_DECAL, k_lo);
+    row("DECAL RGBA with fractional At", 0x807f00);
+
+    /* LUMINANCE_ALPHA keeps the texture alpha in REPLACE and modulates it
+       in MODULATE (table 3.21); SRC_ALPHA blending over the blue clear
+       exposes Av. */
+    reset_units();
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(1, 0, 1, 1);
+    use_unit(0, tex_la_f, GL_MODULATE, k_hi);
+    row("LUMINANCE_ALPHA MODULATE L=ff A=ff (Cp*Lt, Ap*At)", 0xff00ff);
+    use_unit(0, tex_la_f, GL_MODULATE, k_lo);
+    row("LUMINANCE_ALPHA MODULATE A=00 (Av=Ap*At)", 0x0000ff);
+    glColor4f(0, 0, 0, 0);
+    use_unit(0, tex_la_f, GL_REPLACE, k_hi);
+    row("LUMINANCE_ALPHA REPLACE keeps At with Ap=0", 0xffffff);
+    glDisable(GL_BLEND);
 }
 
 __attribute__((unused)) static int write_blob(const char *path, const void *data, size_t size)
@@ -470,12 +607,29 @@ int main(void)
     glDrawArrays(GL_TRIANGLES, 0, 6);
     check(glGetError() == GL_INVALID_OPERATION, "no library: unit 1 draw is INVALID_OPERATION");
     expect_pixel(1, 0x0000ff, "no library: unit 1 draw leaves the clear colour");
+    /* A refused draw must not disturb the installed programs: unit 1 loses
+       its texture by binding alone, and the unit-0 draw must be exact. */
+    reset_units();
+    glColor4f(1, 0, 1, 1);
+    use_unit(0, tex_rgba_a, GL_MODULATE, k_lo);
+    row("no library: warm unit 0", 0x800040);
+    use_unit(1, tex_rgb_b, GL_REPLACE, k_hi);
+    glClear(GL_COLOR_BUFFER_BIT);
+    while (glGetError() != GL_NO_ERROR) {}
+    glViewport(0, 0, 4, 4);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    check(glGetError() == GL_INVALID_OPERATION, "no library: refused {0,1} draw");
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glClear(GL_COLOR_BUFFER_BIT); draw_at(0);
+    expect_pixel(1, 0x800040, "no library: unit-0 draw after the refused draw");
 #else
     render_rows();
     bind_transition_rows();
     queued_env_rows();
     error_rows();
     high_unit_rows();
+    lit_unit4_rows();
 #endif
     printf("PSGL_FFP_TEXENV_%s checks=%u failures=%u\n", failures ? "FAIL" : "OK", checks, failures);
     psglExit();

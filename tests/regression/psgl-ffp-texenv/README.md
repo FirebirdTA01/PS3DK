@@ -2,7 +2,7 @@
 
 Fixed-function texturing on units 0-3, per OpenGL 2.1:
 
-- Texture environments: section 3.13, tables 3.22 and 3.23.
+- Texture environments: section 3.8.13, tables 3.21 and 3.22.
 - Per-unit texcoord arrays: section 2.8.
 - Current texcoords: section 2.7.
 - Texture matrices: section 2.11.2.
@@ -24,21 +24,30 @@ clear.
 - A texture matrix on unit 2, which must not affect unit 0.
 - A colour array as the primary colour.
 - `glMultiTexCoord4f` for a unit without an array.
+- DECAL with a fractional texture alpha, and LUMINANCE_ALPHA alpha in
+  REPLACE and MODULATE.
 - Binding-only changes of the enabled-unit set: unit 1 switched between a
   stored texture and 0, completed by `glTexImage2D`, and left without a
   texture by deletion, with no other call before the draw.
+  Unit 0 alone also switches between {0} and the untextured set {}.
 - Env colour changed between back-to-back queued draws. Each draw keeps the
   colour set before it.
 - Error and state rows: COMBINE, unknown modes, targets and pnames give
   `INVALID_ENUM` without changing state, and `glGetTexEnv{iv,fv}` round-trip
   per-unit state.
-- Units 4-7 are programmable sampler units only. `glEnable(GL_TEXTURE_2D)`
-  and `glTexEnv` on them give `INVALID_OPERATION`, and
-  `GL_MAX_TEXTURE_UNITS` stays 4.
+- Units 4-7 are texture image units without texture coordinate sets
+  (section 2.11.2). `glEnable(GL_TEXTURE_2D)`, `glBindTexture` and `glTexEnv`
+  on them store state with no error and `glGetTexEnv` round-trips it, but
+  fixed-function draws read units 0-3 only: an enabled unit 4 changes neither
+  a textured nor a lit draw, nor the installed programs. Texture-matrix
+  operations there are `INVALID_OPERATION`. `GL_MAX_TEXTURE_UNITS` and
+  `GL_MAX_TEXTURE_COORDS` are 4, and `glMultiTexCoord` names its own
+  coordinate set whatever unit is active.
 
 `psgl-ffp-texenv-nolib-*` runs without a shader library. Unit 0 uses the
 built-in program. A state that needs units 1-3 is refused with
-`INVALID_OPERATION` and draws nothing.
+`INVALID_OPERATION` and draws nothing, and a unit-0 draw right after such a refused draw is still
+exact.
 
 The library is built at configure time from `state.txt` with
 `rsx-cg-compiler --psgl-ffp-library`, or from `PSGL_FFP_STATE_FILE`. A
