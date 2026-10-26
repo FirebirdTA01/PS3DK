@@ -573,6 +573,38 @@ GLAPI GLint glGetAttribLocation(GLuint program, const GLchar *name)
     return -1;
 }
 
+GLAPI void glGetUniformiv(GLuint program, GLint location, GLint *params)
+{
+    PSGLglProgram *p = gls_find_program(program);
+    PSGLglUniform *uniform;
+    PSGLcgParameter *parameter;
+    uint32_t hw;
+    if (!p) {
+        psgl_gl_error(gls_find_shader(program) ? GL_INVALID_OPERATION : GL_INVALID_VALUE);
+        return;
+    }
+    if (p->deleted) { psgl_gl_error(GL_INVALID_VALUE); return; }
+    /* ES 2.0.25 section 6.1.10: query the named program, not the current
+       executable. A failed query must not modify the caller's output. */
+    uniform = gls_find_uniform_by_location(location);
+    if (!p->linked || !uniform || ((uint32_t)location >> 8) != p->name) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+    parameter = psgl_cg_parameter(uniform->fragment_parameter);
+    /* This increment exposes only scalar fragment sampler2D selections.
+       Numeric Cg values are still shared by programs using the same shader;
+       reporting those as program-owned values would be incorrect. */
+    if (!parameter || parameter->type != CG_SAMPLER2D ||
+        gls_is_sampler(uniform->vertex_parameter)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+    hw = (uint32_t)(parameter->resource - CG_TEXUNIT0);
+    if (hw >= PSGL_MAX_TEXTURE_UNITS || !(p->sampler_mask & (1u << hw))) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+    if (params) *params = (GLint)p->sampler_units[hw];
+}
+
 static PSGLglUniform *gls_current_uniform(GLint location)
 {
     if (location == -1) return NULL;

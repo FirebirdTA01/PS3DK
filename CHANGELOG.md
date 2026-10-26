@@ -18,6 +18,14 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **PSGL sampler selection queries.** `glGetUniformiv` returns the named
+  program's logical texture unit for scalar fragment `sampler2D` uniforms
+  routed through TEXUNIT0-7, even when another program or no program is
+  current. Invalid queries leave output unchanged. Numeric uniforms,
+  vertex samplers, other sampler types and resources outside that range
+  currently return `INVALID_OPERATION` as an implementation limit;
+  `glGetUniformfv` and general uniform-query conformance remain unsupported.
+
 - **PSGL fixed-function shader libraries from rsx-cg-compiler.**
   `rsx-cg-compiler --psgl-ffp-library state.txt -o shaders.bin` builds the
   library `psglLoadShaderLibrary` loads, compiling every state mask in
