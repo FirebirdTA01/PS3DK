@@ -37,6 +37,12 @@ The version stamped into builds is generated from the most recent
   Known defect, tracked separately: creating a program from a compact CGB
   fragment container succeeds, but rendering with it currently draws
   nothing; compact runtime support is not claimed.
+- **Guide: debugging with RPCS3.** `docs/debugging-rpcs3.md` explains how
+  to attach `powerpc64-ps3-elf-gdb` to RPCS3's built-in GDB server: use the
+  unstripped ELF from the build tree, and boot with the PPU interpreter,
+  because breakpoints do nothing under the LLVM recompiler. It lists what
+  works and the current limits: no detach, `stepi` not advancing, and
+  function symbols without debug info resolving wrongly.
 
 - **PSGL sampler selection queries.** `glGetUniformiv` returns the named
   program's logical texture unit for scalar fragment `sampler2D` uniforms
