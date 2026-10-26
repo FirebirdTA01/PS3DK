@@ -221,6 +221,8 @@ struct PSGLcontext {
     int8_t gl_hw_to_location[PSGL_MAX_GENERIC_ATTRIBS];
     GLboolean gl_attrib_routing;
     GLboolean retire_vertex_arrays;
+    /* Fixed-function state mask of the installed programs (0: none). */
+    uint32_t ffp_installed_mask;
     GLboolean gl_attrib_normalized[PSGL_MAX_GL_ATTRIBS];
     /* GL sampler values select logical units; Cg uses physical slots. */
     GLboolean gl_sampler_routing;

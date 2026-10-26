@@ -2711,6 +2711,10 @@ static int psgl_validate_draw_state(PSGLcontext *context)
         }
         if (psgl_ffp_update_texenv(context, entry)) context->dirty |= PSGL_DIRTY_CG;
     }
+    /* The fixed-function state the bound programs were chosen for.  Binding,
+       storage and deletion change texture completeness without marking the
+       programs dirty, so any change of the selected state reinstalls them. */
+    if (ffp_mask != context->ffp_installed_mask) context->dirty |= PSGL_DIRTY_CG;
     if (context->dirty & PSGL_DIRTY_CG) {
         if ((!vp || !fp) && ffp_mask) {
             PSGLcgProgram *ffp_vp = NULL;
@@ -2726,6 +2730,7 @@ static int psgl_validate_draw_state(PSGLcontext *context)
         psgl_emit_vertex_program(context, vp);
         psgl_emit_fragment_program(context, fp);
         psgl_emit_vertex_arrays(context);
+        context->ffp_installed_mask = ffp_mask;
         context->dirty &= ~PSGL_DIRTY_CG;
     }
     psgl_emit_current_attribs(context);
