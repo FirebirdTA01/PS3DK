@@ -60,9 +60,10 @@ Shaders reach a sample in one of four ways:
   shape and emits the matching fixed Cg template; it does not parse or
   validate GLSL. `rsx-cg-compiler --emit-container` then builds the
   containers.
-- **Fixed-function library**: `psgl-shader-builder` (shipped with the host
-  tools) builds a shader library from `state.txt`, loaded with
-  `psglLoadShaderLibrary`.
+- **Fixed-function library**: `rsx-cg-compiler --psgl-ffp-library` builds a
+  shader library from `state.txt`, loaded with `psglLoadShaderLibrary`. With
+  an older compiler that lacks the mode, the sample falls back to the
+  deprecated `psgl-shader-builder`.
 - **Built-in**: the fixed-function samples use the runtime's own programs.
 
 `cgCreateProgram` cannot load a program from memory yet, and
@@ -83,7 +84,7 @@ first write them to `/dev_hdd0/tmp`.
 | `hello-psgl-ffp-quad` | Fixed-function textured quad: texture upload, VBO with texcoords, orthographic projection |
 | `hello-psgl-rotating-quad` | Fixed-function matrix stack animation |
 | `hello-psgl-ffp-lit-bootstrap` | Fixed-function lighting: normals, one light, the built-in lit programs |
-| `hello-psgl-ffp-shaderlib` | `psgl-shader-builder` library + `psglLoadShaderLibrary`, textured quad |
+| `hello-psgl-ffp-shaderlib` | `--psgl-ffp-library` shader library + `psglLoadShaderLibrary`, textured quad |
 | `hello-psgl-vbo` | Buffer objects: create, size query, sub-data update, unmap, delete (no rendering) |
 | `hello-psgl-cmdbuf` | Command-buffer record, call and return |
 | `hello-psgl-spuhole` | Command-buffer hole sizing and alignment (no SPU) |
