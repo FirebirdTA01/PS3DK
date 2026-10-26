@@ -11,6 +11,7 @@
 #include "single0_fpo.h"
 #include "single5_fpo.h"
 #include "pair_fpo.h"
+#include "cube_fpo.h"
 SYS_PROCESS_PARAM(1001,0x100000);
 extern CGprogram psgl_cg_create_program_from_memory(CGcontext,const void *,uint32_t,CGprofile);
 static unsigned checks,failures;
@@ -87,6 +88,13 @@ int main(void)
     if(direct){cgGLBindProgram(direct);draw(204,51,17,"direct Cg physical bindings");}
     glUseProgram(pa);draw(51,153,204,"GL bind restores logical selection");
     glUseProgram(0);glUniform1i(la,0);check(glGetError()==GL_INVALID_OPERATION,"no current program rejected");
+    /* Preserve historical link acceptance, without claiming cube uploads or
+       pixel support. Unsupported sampler selection is refused explicitly. */
+    GLuint fsc=shader(GL_FRAGMENT_SHADER,cube_fpo,cube_fpo_size),pc=program(vs,fsc);
+    GLint lc=glGetUniformLocation(pc,"environment");check(lc>=0,"cube location retained");
+    glUseProgram(pc);check(glGetError()==GL_NO_ERROR,"cube program bind retained");
+    glUniform1i(lc,0);check(glGetError()==GL_INVALID_OPERATION,"cube remap refused");
+    glUseProgram(0);glDeleteProgram(pc);glDeleteShader(fsc);
     cgDestroyContext(cg);glDeleteProgram(pa);glDeleteProgram(pb);glDeleteProgram(p5);glDeleteProgram(pp);
     glDeleteShader(vs);glDeleteShader(fs0);glDeleteShader(fs5);glDeleteShader(fs2);glDeleteBuffers(1,&pos);glDeleteTextures(2,tex);
     check(glGetError()==GL_NO_ERROR,"cleanup");
