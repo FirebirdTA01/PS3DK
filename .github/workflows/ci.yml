@@ -551,6 +551,11 @@ jobs:
       - name: Test checked initial GCM FIFO extent admission
         run: python3 tests/sdk/fifo-init-extent-test.py
 
+      # gcmSetDefaultFifoSize after cellGcmInit (libPSGL's init path) must keep
+      # the live FIFO cursor and size only within the admitted allocation.
+      - name: Test default FIFO sizing keeps the live cursor
+        run: python3 tests/sdk/default-fifo-size-test.py
+
       # The rsxMalloc/rsxMemalign/rsxFree surface in librsx and libgcm_cmd
       # silently dropped the allocator's failure reason (NULL and void).
       # This host test drives the real mm.c object against a stub heap and

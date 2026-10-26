@@ -240,6 +240,10 @@ librsx-cmds-gcm_cmd-lp64,tests/regression/librsx-cmds/librsx-cmds-gcm_cmd-lp64.f
 # gcm-reset-buffer: cellGcmResetDefaultCommandBufferUnsafe returns the RSX to the start of the
 # default buffer and rewinds context->current with it; a label written afterwards lands.
 gcm-reset-buffer,tests/regression/gcm-reset-buffer/gcm-reset-buffer.fake.self,20,RAN-CLEAN,GCM_RESET_OK,GCM_RESET_FAIL [0-9]
+# gcm-default-fifo-norewind: gcmSetDefaultFifoSize after cellGcmInit (as libPSGL calls it) keeps the
+# live cursor; the first flush must not leave PUT behind GET without a wrap (RPCS3 diagnostic).
+gcm-default-fifo-norewind-ilp32,tests/regression/gcm-default-fifo-norewind/gcm-default-fifo-norewind-ilp32.fake.self,30,RAN-CLEAN,(?m)^GCM_NOREWIND_OK checks=7 failures=0?$,GCM_NOREWIND_FAIL
+gcm-default-fifo-norewind-lp64,tests/regression/gcm-default-fifo-norewind/gcm-default-fifo-norewind-lp64.fake.self,30,RAN-CLEAN,(?m)^GCM_NOREWIND_OK checks=7 failures=0?$,GCM_NOREWIND_FAIL
 # ilp32-ivspill guards GCC patch 0049: an ILP32 loop whose IV bias the
 # optimizer used to spill as 32 bits and reload zero-extended, leaking bit 32
 # into an address.  Judge it under the PPU INTERPRETER: RPCS3's LLVM
