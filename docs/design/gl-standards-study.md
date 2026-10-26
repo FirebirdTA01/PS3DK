@@ -72,7 +72,7 @@ Specifications cited:
   - 16 generic attributes in the context, 8 lights, 16 FBO objects and 3 frame buffers
     (`psgl_context.h:9-14`).
   - `GL_MAX_TEXTURE_SIZE 4096` (`core_gl.c:61`).
-  - `GL_NUM_COMPRESSED_TEXTURE_FORMATS` returns 0 (`core_gl.c:73`), although DXT1/3/5 are
+  - `GL_NUM_COMPRESSED_TEXTURE_FORMATS` returns 0 (`core_gl.c:74`), although DXT1/3/5 are
     accepted.
 - **Texture formats** [measured]:
   - **Accepted at upload** (`psgl_texture_supported`, `psgl_context.c:1619-1633`):
@@ -153,7 +153,7 @@ entry points does **not** make an implementation conformant. The audit covers:
 - **Limits:** every implementation limit in [ES2] Table 6.20. The two known gaps are
   `PSGL_MAX_TEXTURE_UNITS 4` and `PSGL_MAX_VERTEX_ATTRIBS 4` (`psgl_context.h:11-12`).
 - **Query results:** `glGet*` for every ES2 state. Today `GL_NUM_COMPRESSED_TEXTURE_FORMATS`
-  is 0 while DXT is accepted (`core_gl.c:73`).
+  is 0 while DXT is accepted (`core_gl.c:74`).
 - **Errors:** the GL error required for each invalid call.
 - **The binary-only shader contract** ([ES2] §2.10). If there is no on-target compiler:
   - `GL_SHADER_COMPILER` must report `GL_FALSE`;
