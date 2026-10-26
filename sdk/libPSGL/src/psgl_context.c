@@ -2305,39 +2305,111 @@ static int psgl_prepare_fragment_ucode(PSGLcgProgram *program)
         program->fragment_ucode_offset = 0u;
         return 0;
     }
+    program->fragment_draw_offset = program->fragment_ucode_offset;
+    program->fragment_ucode_lap = 0u;
     return 1;
 }
 
-static void psgl_patch_fragment_parameter(PSGLcgProgram *program,
-                                          PSGLcgParameter *parameter)
+/* Patches one fragment uniform into the host copy of the ucode, which always
+   holds every current value.  Returns whether any constant bytes changed. */
+static int psgl_patch_fragment_parameter(PSGLcgProgram *program,
+                                         PSGLcgParameter *parameter)
 {
     uint32_t count = 0u;
     uint16_t offsets[64];
     uint32_t size;
-    if (!program || !parameter || !program->fragment_ucode_address) return;
-    if (!parameter->value_count) return;
+    int changed = 0;
+    uint8_t *host_ucode;
+    if (!program || !parameter) return 0;
+    parameter->dirty = CG_FALSE;
+    if (!parameter->value_count) return 0;
+    host_ucode = (uint8_t *)(uintptr_t)cellCgbGetUCode(&program->cgb_program);
+    if (!host_ucode) return 0;
     cellCgbMapGetFragmentUniformOffsets(&program->cgb_program,
                                         parameter->index, NULL, &count);
     size = cellCgbGetUCodeSize(&program->cgb_program);
-    if (!count || count > 64u) return;
+    if (!count || count > 64u) return 0;
     cellCgbMapGetFragmentUniformOffsets(&program->cgb_program,
                                         parameter->index, offsets, &count);
     for (uint32_t i = 0; i < count; i++) {
         uint32_t off = offsets[i];
-        uint32_t *slot;
+        uint32_t before[4];
         uint32_t *host_slot;
         const uint32_t *value = (const uint32_t *)parameter->value;
-        const uint8_t *host_ucode = (const uint8_t *)
-            cellCgbGetUCode(&program->cgb_program);
         if (off + 16u > size) continue;
-        slot = (uint32_t *)((uint8_t *)program->fragment_ucode_address + off);
-        psgl_patch_fragment_slot(slot, value);
-        if (host_ucode) {
-            host_slot = (uint32_t *)(void *)(host_ucode + off);
-            psgl_patch_fragment_slot(host_slot, value);
-        }
+        host_slot = (uint32_t *)(void *)(host_ucode + off);
+        psgl_copy(before, host_slot, sizeof(before));
+        psgl_patch_fragment_slot(host_slot, value);
+        if (before[0] != host_slot[0] || before[1] != host_slot[1] ||
+            before[2] != host_slot[2] || before[3] != host_slot[3])
+            changed = 1;
     }
-    parameter->dirty = CG_FALSE;
+    return changed;
+}
+
+/* Fragment-program constants are part of the ucode, so a uniform change
+   needs new ucode bytes, and a draw still in the FIFO reads its ucode when
+   the GPU reaches it.  Rewriting the copy a queued draw references would
+   change that draw too, so every change goes to a fresh copy carved from
+   this ring at a new offset; nothing a queued draw may read is rewritten.
+
+   Ring rule: copies are handed out in order within a lap.  When the next
+   copy does not fit, psgl_wait_rsx_idle() waits on a fresh (advancing)
+   label token written after every command emitted so far, which covers
+   every draw that used any entry of the finished lap; the next lap then
+   restarts at offset 0.  A program whose current copy comes from an earlier
+   lap is copied again before its next draw, so no draw is ever issued
+   against a recycled entry.  A program larger than the ring (or a ring that
+   cannot be allocated) falls back to waiting for the GPU and rewriting the
+   program's own copy in place.
+
+   Cost: one ucode-sized copy into RSX memory per draw whose fragment
+   uniforms changed (none for a redraw without a change), plus one GPU wait
+   per PSGL_FP_UCODE_RING_SIZE bytes of copies. */
+#define PSGL_FP_UCODE_RING_SIZE (256u * 1024u)
+#define PSGL_FP_UCODE_ALIGNMENT 64u
+static uint8_t *g_psgl_fp_ring;
+static uint32_t g_psgl_fp_ring_offset;
+static uint32_t g_psgl_fp_ring_head;
+static uint32_t g_psgl_fp_ring_lap = 1u;
+/* Internal counters, read by regression tests; not public API. */
+unsigned psgl_fp_ucode_copies;
+unsigned psgl_fp_ucode_ring_waits;
+
+static void psgl_fp_ucode_instance(PSGLcontext *context, PSGLcgProgram *program)
+{
+    const void *ucode = cellCgbGetUCode(&program->cgb_program);
+    uint32_t size = cellCgbGetUCodeSize(&program->cgb_program);
+    uint32_t span = (size + PSGL_FP_UCODE_ALIGNMENT - 1u) &
+                    ~(PSGL_FP_UCODE_ALIGNMENT - 1u);
+    if (!ucode || !size) return;
+    if (!g_psgl_fp_ring) {
+        uint8_t *ring = (uint8_t *)rsxMemalign(PSGL_FP_UCODE_ALIGNMENT,
+                                               PSGL_FP_UCODE_RING_SIZE);
+        if (ring && cellGcmAddressToOffset(ring, &g_psgl_fp_ring_offset) == 0)
+            g_psgl_fp_ring = ring;
+        else if (ring)
+            rsxFree(ring);
+    }
+    if (!g_psgl_fp_ring || span > PSGL_FP_UCODE_RING_SIZE) {
+        psgl_wait_rsx_idle(context->gcm);
+        ++psgl_fp_ucode_ring_waits;
+        psgl_copy(program->fragment_ucode_address, ucode, size);
+        program->fragment_draw_offset = program->fragment_ucode_offset;
+        program->fragment_ucode_lap = 0u;
+        return;
+    }
+    if (g_psgl_fp_ring_head + span > PSGL_FP_UCODE_RING_SIZE) {
+        psgl_wait_rsx_idle(context->gcm);
+        ++psgl_fp_ucode_ring_waits;
+        g_psgl_fp_ring_head = 0u;
+        if (++g_psgl_fp_ring_lap == 0u) g_psgl_fp_ring_lap = 1u;
+    }
+    psgl_copy(g_psgl_fp_ring + g_psgl_fp_ring_head, ucode, size);
+    program->fragment_draw_offset = g_psgl_fp_ring_offset + g_psgl_fp_ring_head;
+    program->fragment_ucode_lap = g_psgl_fp_ring_lap;
+    g_psgl_fp_ring_head += span;
+    ++psgl_fp_ucode_copies;
 }
 
 static void psgl_emit_vertex_program(PSGLcontext *context,
@@ -2365,14 +2437,18 @@ static void psgl_emit_vertex_program(PSGLcontext *context,
 static void psgl_emit_fragment_program(PSGLcontext *context,
                                        PSGLcgProgram *program)
 {
+    int changed = 0;
     if (!context || !context->gcm || !program || !program->loaded) return;
     if (!psgl_prepare_fragment_ucode(program)) return;
     for (uint32_t i = 0; i < program->parameter_count; i++) {
         if (program->parameters[i].dirty)
-            psgl_patch_fragment_parameter(program, &program->parameters[i]);
+            changed |= psgl_patch_fragment_parameter(program, &program->parameters[i]);
     }
+    if (changed || (program->fragment_ucode_lap &&
+                    program->fragment_ucode_lap != g_psgl_fp_ring_lap))
+        psgl_fp_ucode_instance(context, program);
     cellGcmSetFragmentProgram(context->gcm, (CGprogram)program->binary,
-                              program->fragment_ucode_offset);
+                              program->fragment_draw_offset);
 }
 
 static void psgl_validate_draw_state(PSGLcontext *context)

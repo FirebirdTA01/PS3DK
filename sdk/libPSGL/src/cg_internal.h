@@ -49,6 +49,10 @@ struct _CGprogram {
     uint32_t parameter_count;
     void *fragment_ucode_address;
     uint32_t fragment_ucode_offset;
+    /* Ucode copy the next draw uses: the one above, or a patched copy in
+       the fragment ucode ring (lap != 0 names the ring lap it came from). */
+    uint32_t fragment_draw_offset;
+    uint32_t fragment_ucode_lap;
     CGbool loaded;
 };
 
