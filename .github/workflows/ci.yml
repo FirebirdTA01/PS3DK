@@ -422,6 +422,9 @@ jobs:
       - name: Test the PPU getentropy platform provider
         run: bash tests/host/ppu-getentropy-test.sh
 
+      - name: Test PSGL waits consume fresh GPU completion labels
+        run: bash tests/host/psgl-wait-label-test.sh
+
       # build-spu-toolchain.sh: --gcc and --host pick the build root in any
       # option order, and --clean removes only that root.
       - name: Test the SPU build-root selection and --clean

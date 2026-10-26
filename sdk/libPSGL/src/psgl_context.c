@@ -1286,13 +1286,20 @@ static void psgl_emit_raster(PSGLcontext *context)
 
 static void psgl_wait_rsx_idle(CellGcmContextData *gcm)
 {
-    uint32_t label = 1u;
-    cellGcmSetWriteBackEndLabel(gcm, PSGL_LABEL_INDEX, label);
-    cellGcmSetWaitLabel(gcm, PSGL_LABEL_INDEX, label);
-    label++;
+    static uint32_t label;
+    volatile uint32_t *completion =
+        (volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL_INDEX);
+    /* GL calls are serialized by the caller; this is not a thread-safety
+       mechanism. Advance modulo uint32_t, including across contexts, and
+       avoid a stored value satisfying either the GPU drain or CPU wait. */
+    label += 2u;
+    uint32_t stored = *completion;
+    if (label == stored || label - 1u == stored) label += 2u;
+    cellGcmSetWriteBackEndLabel(gcm, PSGL_LABEL_INDEX, label - 1u);
+    cellGcmSetWaitLabel(gcm, PSGL_LABEL_INDEX, label - 1u);
     cellGcmSetWriteBackEndLabel(gcm, PSGL_LABEL_INDEX, label);
     cellGcmFlush(gcm);
-    while (*(volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL_INDEX) != label)
+    while (*completion != label)
         sys_timer_usleep(30);
 }
 

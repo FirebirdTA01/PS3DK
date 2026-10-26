@@ -18,6 +18,9 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL GPU completion waits.** Repeated waits use advancing completion
+  tokens instead of accepting a label left by an earlier wait. The first
+  wait also avoids a completion value already stored in the label.
 - **PSGL texture uploads.** Byte luminance, alpha and luminance-alpha uploads
   expand into the existing ARGB8 storage with unpack alignment respected.
   Packed 32-bit RGBA uploads use four bytes per texel when advancing rows,
