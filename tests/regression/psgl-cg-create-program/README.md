@@ -8,19 +8,36 @@ the caller's buffer may be released after creation. The raw pair, and a
 fragment program whose source buffer was released, draw an exact color
 after bounded async shader warm-up.
 
+`cgCreateProgram` takes no length: the caller must pass a complete,
+readable container that matches its own header. The runtime reads the size
+from that header (raw `totalSize`, or the compact container's own block
+offsets) and copies that many bytes, so it cannot detect a short buffer;
+the 16 MiB cap only refuses an absurd declared size and is not bounds or
+truncation protection.
+
 Refusals return NULL, report one exact `cgGetError` value and add no program
 to the context: invalid context, NULL program, `CG_SOURCE` (with a listing
 naming the offline compiler), an unknown program type, bytes that are not a
-container, a wrong format revision, a truncated or oversized size field, a
-container of the other stage, and an unsupported profile.
-`cgCreateProgramFromFile` accepts `CG_OBJECT` as well.
+container, a wrong format revision, a declared `totalSize` too small for the
+container's own offsets (the backing buffer stays full size) or absurdly
+large, a container of the other stage, and an unsupported profile.
+
+`cgCreateProgramFromFile` accepts `CG_OBJECT`: a program is created from a
+real container file with the profile taken from the container, and still
+draws after the file is removed. A file truncated to half its container is
+refused with `CG_PROGRAM_LOAD_ERROR`; here the file length is known. Every
+fixture write and close is checked, and a file already at a fixture path is
+saved and written back. `cgGetLastErrorString` reports the pending error and
+its message, then clears it.
 
 Parameter classes come from the raw container's per-parameter types:
 scalar, vector and every sampler kind, plus `cgGetTypeClass` over scalar,
 vector, matrix, sampler, struct, array and object types.
 
 The compact container carries no per-parameter Cg types, so its parameters
-are not class-checked here. Drawing with compact containers is outside this
-row's claim: each stage combination is recorded as an observation line
-(`PSGL_CG_CREATE_OBSERVE`) with the parameter lists, without a check. Both ABIs run against private archives. No
+are not class-checked here. Creating a compact fragment program succeeds,
+but rendering with it currently fails (it draws nothing): a known defect,
+tracked separately. Compact runtime support is not claimed; each stage
+combination is recorded as an observation line (`PSGL_CG_CREATE_OBSERVE`)
+with the parameter lists, without a check. Both ABIs run against private archives. No
 hardware acceptance is claimed.

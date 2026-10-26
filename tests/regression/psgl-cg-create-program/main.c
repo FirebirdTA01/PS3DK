@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/process.h>
+#include <sys/stat.h>
 #include "vertex_vpo.h"
 #include "vertex_cgb_vpo.h"
 #include "tint_fpo.h"
@@ -64,6 +65,39 @@ static void list_parameters(CGprogram p,const char *tag)
 {
     for(CGparameter q=p?cgGetFirstParameter(p,CG_PROGRAM):NULL;q;q=cgGetNextParameter(q))
         printf("PSGL_CG_CREATE_PARAM %s %s type=%d resource=%d index=%lu\n",tag,cgGetParameterName(q),(int)cgGetParameterType(q),(int)cgGetParameterResource(q),(unsigned long)cgGetParameterResourceIndex(q));
+}
+/* Fixture files for cgCreateProgramFromFile.  A file already at a fixture
+   path is read first and written back at the end. */
+#define VP_FILE "/dev_hdd0/tmp/psgl-cg-create-vertex.vpo"
+#define CUT_FILE "/dev_hdd0/tmp/psgl-cg-create-truncated.vpo"
+typedef struct { const char *path; unsigned char *bytes; size_t size; int existed; } Saved;
+static int write_file(const char *path,const void *data,size_t size)
+{
+    FILE *f=fopen(path,"wb");if(!f)return 0;
+    int ok=fwrite(data,1,size,f)==size;
+    return fclose(f)==0&&ok;
+}
+static int save_path(Saved *s,const char *path)
+{
+    struct stat st;
+    s->path=path;s->bytes=NULL;s->size=0;s->existed=0;
+    if(stat(path,&st)!=0)return 1;
+    s->existed=1;
+    FILE *f=fopen(path,"rb");if(!f)return 0;
+    if(fseek(f,0,SEEK_END)!=0){fclose(f);return 0;}
+    long n=ftell(f);
+    if(n<0||fseek(f,0,SEEK_SET)!=0){fclose(f);return 0;}
+    s->size=(size_t)n;s->bytes=(unsigned char *)malloc(s->size?s->size:1u);
+    if(!s->bytes){fclose(f);return 0;}
+    int ok=fread(s->bytes,1,s->size,f)==s->size;
+    return fclose(f)==0&&ok;
+}
+static int restore_path(Saved *s)
+{
+    struct stat st;
+    int ok=s->existed?write_file(s->path,s->bytes,s->size):(stat(s->path,&st)!=0||remove(s->path)==0);
+    free(s->bytes);s->bytes=NULL;
+    return ok;
 }
 static void class_of(CGprogram p,const char *param,CGparameterclass want)
 {
@@ -140,11 +174,14 @@ int main(void)
         bad->revision^=0x100u;
         refused(cg,cg,CG_BINARY,bad,CG_PROFILE_SCE_VP_RSX,CG_PROGRAM_LOAD_ERROR,"wrong revision");
         bad->revision^=0x100u;bad->totalSize=(uint32_t)offsetof(CgBinaryProgram,data)+4u;
-        refused(cg,cg,CG_BINARY,bad,CG_PROFILE_SCE_VP_RSX,CG_PROGRAM_LOAD_ERROR,"truncated container");
+        /* The backing allocation stays full size: this checks a declared
+           totalSize too small for the container's own offsets, not a short
+           buffer (the unsized entry point cannot see the caller's length). */
+        refused(cg,cg,CG_BINARY,bad,CG_PROFILE_SCE_VP_RSX,CG_PROGRAM_LOAD_ERROR,"undersized declared totalSize");
         bad->totalSize=0x7fffffffu;
         refused(cg,cg,CG_BINARY,bad,CG_PROFILE_SCE_VP_RSX,CG_PROGRAM_LOAD_ERROR,"oversized container");
         free(bad);
-    }else{check(0,"wrong revision");check(0,"truncated container");check(0,"oversized container");}
+    }else{check(0,"wrong revision");check(0,"undersized declared totalSize");check(0,"oversized container");}
     refused(cg,cg,CG_BINARY,vertex_vpo,CG_PROFILE_SCE_FP_RSX,CG_INVALID_PROFILE_ERROR,"vertex container fragment profile");
     refused(cg,cg,CG_OBJECT,tint_cgb_fpo,CG_PROFILE_SCE_VP_RSX,CG_INVALID_PROFILE_ERROR,"compact fragment vertex profile");
     refused(cg,cg,CG_BINARY,vertex_vpo,(CGprofile)12345,CG_INVALID_PROFILE_ERROR,"unsupported profile");
@@ -152,6 +189,33 @@ int main(void)
     check(again&&cgGetError()==CG_NO_ERROR&&cgGetLastListing(cg)==NULL,"success clears listing");
     CGprogram ff=cgCreateProgramFromFile(cg,CG_OBJECT,"/dev_hdd0/tmp/psgl-cg-create-missing.vpo",CG_PROFILE_SCE_VP_RSX,NULL,NULL);
     check(!ff&&cgGetError()==CG_FILE_READ_ERROR,"object file type accepted");
+
+    /* cgCreateProgramFromFile from a real container file, and from a file
+       truncated to half its container (the file length is known here). */
+    Saved saved_vp,saved_cut;
+    int saved=save_path(&saved_vp,VP_FILE);saved=save_path(&saved_cut,CUT_FILE)&&saved;
+    check(saved,"fixture paths saved");
+    check(write_file(VP_FILE,vertex_vpo,vertex_vpo_size),"fixture written");
+    CGprogram fvp=cgCreateProgramFromFile(cg,CG_OBJECT,VP_FILE,CG_PROFILE_UNKNOWN,NULL,NULL);
+    check(fvp&&cgGetError()==CG_NO_ERROR,"object file program");
+    check(fvp&&cgGetProgramProfile(fvp)==CG_PROFILE_SCE_VP_RSX&&cgGetProgramContext(fvp)==cg,"object file profile from container");
+    check(remove(VP_FILE)==0,"fixture removed after creation");
+    static const unsigned char rgb4[4]={153,51,0,255};
+    if(fvp&&fp)draw(fvp,fp,0.6f,0.2f,0.0f,rgb4,"removed file program draws",1);else skipped("removed file program draws");
+    check(write_file(CUT_FILE,vertex_vpo,vertex_vpo_size/2u),"truncated fixture written");
+    int before_cut=count_programs(cg);
+    CGprogram cut=cgCreateProgramFromFile(cg,CG_BINARY,CUT_FILE,CG_PROFILE_SCE_VP_RSX,NULL,NULL);
+    CGerror cut_error=cgGetError();
+    if(cut||cut_error!=CG_PROGRAM_LOAD_ERROR)printf("PSGL_CG_CREATE_REFUSAL truncated file program=%s error=%d want=%d\n",cut?"nonnull":"null",(int)cut_error,(int)CG_PROGRAM_LOAD_ERROR);
+    check(!cut&&cut_error==CG_PROGRAM_LOAD_ERROR&&count_programs(cg)==before_cut,"truncated file refused");
+    int restored=restore_path(&saved_vp);restored=restore_path(&saved_cut)&&restored;
+    check(restored,"fixture paths restored");
+
+    /* cgGetLastErrorString reports the pending error and clears it. */
+    CGprogram none=cgCreateProgram(cg,CG_BINARY,NULL,CG_PROFILE_SCE_VP_RSX,NULL,NULL);
+    CGerror last=CG_NO_ERROR;const char *message=cgGetLastErrorString(&last);
+    check(!none&&last==CG_INVALID_PARAMETER_ERROR&&message&&!strcmp(message,"The parameter used is invalid."),"last error string");
+    check(cgGetError()==CG_NO_ERROR,"last error string clears");
     check(!strcmp(cgGetErrorString(CG_PROGRAM_LOAD_ERROR),"The program could not load."),"error string");
     check(!strcmp(cgGetErrorString(CG_NO_ERROR),"No error has occurred."),"no error string");
 
