@@ -43,6 +43,9 @@ typedef struct PSGLglProgram {
     uint32_t uniform_count;
     PSGLglAttribBinding attrib_bindings[PSGL_GL_MAX_ATTRIB_BINDINGS];
     uint32_t attrib_binding_count;
+    PSGLglAttribBinding linked_attribs[PSGL_MAX_GL_ATTRIBS];
+    uint32_t linked_attrib_count;
+    int8_t hw_to_location[PSGL_MAX_GENERIC_ATTRIBS];
     struct PSGLglProgram *next;
 } PSGLglProgram;
 
@@ -120,32 +123,6 @@ static PSGLglProgram *gls_find_program(GLuint name)
         p = p->next;
     }
     return NULL;
-}
-
-static PSGLvertexAttribSlot gls_attrib_slot(GLuint index)
-{
-    if (index == 1u) return PSGL_ATTRIB_NORMAL;
-    if (index == 2u) return PSGL_ATTRIB_COLOR;
-    if (index == 3u) return PSGL_ATTRIB_TEXCOORD;
-    return PSGL_ATTRIB_VERTEX;
-}
-
-static GLint gls_default_attrib_location(const char *name)
-{
-    if (gls_streq(name, "position") || gls_streq(name, "in_position") ||
-        gls_streq(name, "a_position"))
-        return (GLint)PSGL_ATTRIB_VERTEX;
-    if (gls_streq(name, "normal") || gls_streq(name, "in_normal") ||
-        gls_streq(name, "a_normal"))
-        return (GLint)PSGL_ATTRIB_NORMAL;
-    if (gls_streq(name, "color") || gls_streq(name, "in_color") ||
-        gls_streq(name, "a_color"))
-        return (GLint)PSGL_ATTRIB_COLOR;
-    if (gls_streq(name, "texCoord") || gls_streq(name, "texcoord") ||
-        gls_streq(name, "in_texCoord") || gls_streq(name, "in_texcoord") ||
-        gls_streq(name, "a_texCoord") || gls_streq(name, "a_texcoord"))
-        return (GLint)PSGL_ATTRIB_TEXCOORD;
-    return -1;
 }
 
 static GLint gls_make_uniform_location(PSGLglProgram *program, uint32_t index)
@@ -365,9 +342,22 @@ GLAPI void glBindAttribLocation(GLuint program, GLuint index,
 {
     PSGLglProgram *p = gls_find_program(program);
     PSGLglAttribBinding *binding;
-    if (!p || !name || index >= PSGL_MAX_VERTEX_ATTRIBS ||
-        p->attrib_binding_count >= PSGL_GL_MAX_ATTRIB_BINDINGS)
-        return;
+    if (!p || index >= PSGL_MAX_GL_ATTRIBS) {
+        psgl_gl_error(GL_INVALID_VALUE); return;
+    }
+    if (!name) return;
+    if (name[0] == 'g' && name[1] == 'l' && name[2] == '_') {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+    for (uint32_t i = 0; i < p->attrib_binding_count; ++i) {
+        if (gls_streq(p->attrib_bindings[i].name, name)) {
+            p->attrib_bindings[i].index = index;
+            return;
+        }
+    }
+    if (p->attrib_binding_count >= PSGL_GL_MAX_ATTRIB_BINDINGS || gls_len(name) >= 64) {
+        psgl_gl_error(GL_OUT_OF_MEMORY); return;
+    }
     binding = &p->attrib_bindings[p->attrib_binding_count++];
     binding->index = index;
     gls_copy_name(binding->name, name, sizeof(binding->name));
@@ -376,23 +366,89 @@ GLAPI void glBindAttribLocation(GLuint program, GLuint index,
 GLAPI void glLinkProgram(GLuint program)
 {
     PSGLglProgram *p = gls_find_program(program);
-    if (!p) return;
-    p->vertex_program = NULL;
-    p->fragment_program = NULL;
-    p->uniform_count = 0u;
+    CGprogram vertex = NULL, fragment = NULL;
+    PSGLglAttribBinding linked[PSGL_MAX_GL_ATTRIBS];
+    uint32_t count = 0, used = 0, reflected = 0;
+    uint8_t hardware[PSGL_MAX_GL_ATTRIBS];
+    int8_t route[PSGL_MAX_GENERIC_ATTRIBS];
+    CellCgbVertexProgramConfiguration conf;
+    if (!p) { psgl_gl_error(GL_INVALID_VALUE); return; }
+    /* Construct a fresh executable. A failed relink leaves the last good
+       executable installed if this program is currently in use. */
+    p->linked = GL_FALSE;
     for (uint32_t i = 0; i < p->attached_count; i++) {
         PSGLglShader *s = p->attached[i];
         if (!s || !s->compiled) continue;
-        if (s->type == GL_VERTEX_SHADER) p->vertex_program = s->cg_program;
-        if (s->type == GL_FRAGMENT_SHADER) p->fragment_program = s->cg_program;
+        if (s->type == GL_VERTEX_SHADER) vertex = s->cg_program;
+        if (s->type == GL_FRAGMENT_SHADER) fragment = s->cg_program;
     }
-    if (!p->vertex_program || !p->fragment_program) {
-        p->linked = GL_FALSE;
+    if (!vertex || !fragment) {
         gls_set_log(p->log, sizeof(p->log), "missing compiled shader");
         return;
     }
+    PSGLcgProgram *vp = psgl_cg_program(vertex);
+    if (!vp || cellCgbGetVertexConfiguration(&vp->cgb_program, &conf) != CELL_CGB_OK) {
+        gls_set_log(p->log, sizeof(p->log), "invalid vertex configuration"); return;
+    }
+    for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) route[hw] = -1;
+    for (uint32_t i = 0; i < vp->parameter_count; ++i) {
+        PSGLcgParameter *param = &vp->parameters[i];
+        if (param->direction != CG_IN || param->resource < CG_ATTR0 ||
+            param->resource > CG_ATTR15) continue;
+        uint32_t hw = (uint32_t)(param->resource - CG_ATTR0);
+        if (!(conf.attributeInputMask & (1u << hw))) continue;
+        if (count == PSGL_MAX_GL_ATTRIBS || !param->name[0] || (reflected & (1u << hw))) {
+            gls_set_log(p->log, sizeof(p->log), "too many or ambiguous vertex inputs"); return;
+        }
+        reflected |= 1u << hw;
+        gls_copy_name(linked[count].name, param->name, sizeof(linked[count].name));
+        linked[count].index = PSGL_MAX_GL_ATTRIBS;
+        hardware[count] = (uint8_t)hw;
+        for (uint32_t j = 0; j < p->attrib_binding_count; ++j) {
+            if (!gls_streq(p->attrib_bindings[j].name, param->name)) continue;
+            uint32_t location = p->attrib_bindings[j].index;
+            if (used & (1u << location)) {
+                gls_set_log(p->log, sizeof(p->log), "active attributes alias a location"); return;
+            }
+            linked[count].index = location;
+            used |= 1u << location;
+            break;
+        }
+        ++count;
+    }
+    if (reflected != conf.attributeInputMask) {
+        gls_set_log(p->log, sizeof(p->log), "vertex input reflection is incomplete"); return;
+    }
+    /* Binary metadata order is not part of GL's interface. Allocate unbound
+       locations in ascending physical-input order for reproducible links. */
+    for (uint32_t i = 1; i < count; ++i) {
+        uint32_t j = i;
+        while (j && hardware[j] < hardware[j - 1]) {
+            uint8_t hw = hardware[j];
+            PSGLglAttribBinding binding = linked[j];
+            hardware[j] = hardware[j - 1]; linked[j] = linked[j - 1];
+            hardware[j - 1] = hw; linked[j - 1] = binding;
+            --j;
+        }
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (linked[i].index == PSGL_MAX_GL_ATTRIBS) {
+            uint32_t location = 0;
+            while (used & (1u << location)) ++location;
+            linked[i].index = location;
+            used |= 1u << location;
+        }
+        route[hardware[i]] = (int8_t)linked[i].index;
+    }
+    p->vertex_program = vertex;
+    p->fragment_program = fragment;
+    p->uniform_count = 0;
+    p->linked_attrib_count = count;
+    gls_copy(p->linked_attribs, linked, count * sizeof(linked[0]));
+    gls_copy(p->hw_to_location, route, sizeof(route));
     p->linked = GL_TRUE;
     gls_set_log(p->log, sizeof(p->log), "");
+    if (g_current_program == program) glUseProgram(program);
 }
 
 GLAPI void glUseProgram(GLuint program)
@@ -405,9 +461,10 @@ GLAPI void glUseProgram(GLuint program)
         return;
     }
     p = gls_find_program(program);
-    if (!p || !p->linked) return;
+    if (!p || !p->linked) { psgl_gl_error(GL_INVALID_OPERATION); return; }
     psgl_context_bind_cg_program(p->vertex_program, CG_PROFILE_SCE_VP_RSX);
     psgl_context_bind_cg_program(p->fragment_program, CG_PROFILE_SCE_FP_RSX);
+    psgl_context_set_gl_attrib_routing(p->hw_to_location);
     g_current_program = program;
 }
 
@@ -425,7 +482,7 @@ GLAPI void glGetProgramiv(GLuint program, GLenum pname, GLint *params)
     case GL_ATTACHED_SHADERS: *params = (GLint)p->attached_count; break;
     case GL_ACTIVE_UNIFORMS: *params = (GLint)p->uniform_count; break;
     case GL_ACTIVE_UNIFORM_MAX_LENGTH: *params = 64; break;
-    case GL_ACTIVE_ATTRIBUTES: *params = (GLint)p->attrib_binding_count; break;
+    case GL_ACTIVE_ATTRIBUTES: *params = (GLint)p->linked_attrib_count; break;
     case GL_ACTIVE_ATTRIBUTE_MAX_LENGTH: *params = 64; break;
     default: break;
     }
@@ -462,11 +519,12 @@ GLAPI GLint glGetUniformLocation(GLuint program, const GLchar *name)
 GLAPI GLint glGetAttribLocation(GLuint program, const GLchar *name)
 {
     PSGLglProgram *p = gls_find_program(program);
-    if (!p || !name) return -1;
-    for (uint32_t i = 0; i < p->attrib_binding_count; i++)
-        if (gls_streq(p->attrib_bindings[i].name, name))
-            return (GLint)p->attrib_bindings[i].index;
-    return gls_default_attrib_location(name);
+    if (!p || !p->linked) { psgl_gl_error(GL_INVALID_OPERATION); return -1; }
+    if (!name) return -1;
+    for (uint32_t i = 0; i < p->linked_attrib_count; i++)
+        if (gls_streq(p->linked_attribs[i].name, name))
+            return (GLint)p->linked_attribs[i].index;
+    return -1;
 }
 
 static void gls_uniform_set(GLint location, const GLfloat *values,
@@ -548,60 +606,72 @@ GLAPI void glUniformMatrix4fv(GLint location, GLsizei count,
     gls_uniform_set(location, value, 16u);
 }
 
+static PSGLcontext *gls_attrib_context(GLuint index)
+{
+    if (index >= PSGL_MAX_GL_ATTRIBS) {
+        psgl_gl_error(GL_INVALID_VALUE);
+        return NULL;
+    }
+    return psgl_context_current();
+}
+
 GLAPI void glEnableVertexAttribArray(GLuint index)
 {
-    if (index >= PSGL_MAX_VERTEX_ATTRIBS) return;
-    switch (gls_attrib_slot(index)) {
-    case PSGL_ATTRIB_VERTEX:
-        psgl_context_set_client_state(GL_VERTEX_ARRAY, GL_TRUE);
-        break;
-    case PSGL_ATTRIB_NORMAL:
-        psgl_context_set_client_state(GL_NORMAL_ARRAY, GL_TRUE);
-        break;
-    case PSGL_ATTRIB_COLOR:
-        psgl_context_set_client_state(GL_COLOR_ARRAY, GL_TRUE);
-        break;
-    case PSGL_ATTRIB_TEXCOORD:
-        psgl_context_set_client_state(GL_TEXTURE_COORD_ARRAY, GL_TRUE);
-        break;
-    }
+    PSGLcontext *context = gls_attrib_context(index);
+    if (!context) return;
+    context->gl_attribs[index].enabled = GL_TRUE;
+    /* Desktop fixed-function attribute zero aliases the vertex array.
+       GL shader-object locations never alias the fixed-function arrays. */
+    if (!index && !context->bound_vertex_program)
+        context->attribs[PSGL_ATTRIB_VERTEX].enabled = GL_TRUE;
+    context->dirty |= PSGL_DIRTY_CG;
 }
 
 GLAPI void glDisableVertexAttribArray(GLuint index)
 {
-    if (index >= PSGL_MAX_VERTEX_ATTRIBS) return;
-    switch (gls_attrib_slot(index)) {
-    case PSGL_ATTRIB_VERTEX:
-        psgl_context_set_client_state(GL_VERTEX_ARRAY, GL_FALSE);
-        break;
-    case PSGL_ATTRIB_NORMAL:
-        psgl_context_set_client_state(GL_NORMAL_ARRAY, GL_FALSE);
-        break;
-    case PSGL_ATTRIB_COLOR:
-        psgl_context_set_client_state(GL_COLOR_ARRAY, GL_FALSE);
-        break;
-    case PSGL_ATTRIB_TEXCOORD:
-        psgl_context_set_client_state(GL_TEXTURE_COORD_ARRAY, GL_FALSE);
-        break;
-    }
+    PSGLcontext *context = gls_attrib_context(index);
+    if (!context) return;
+    context->gl_attribs[index].enabled = GL_FALSE;
+    if (!index && !context->bound_vertex_program)
+        context->attribs[PSGL_ATTRIB_VERTEX].enabled = GL_FALSE;
+    context->dirty |= PSGL_DIRTY_CG;
 }
 
 GLAPI void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
                                  GLboolean normalized, GLsizei stride,
                                  const GLvoid *pointer)
 {
-    (void)normalized;
-    if (index >= PSGL_MAX_VERTEX_ATTRIBS) return;
-    psgl_context_set_attrib_pointer(gls_attrib_slot(index), size, type,
-                                    stride, pointer);
+    PSGLcontext *context = gls_attrib_context(index);
+    (void)normalized; /* Normalization has a separate regression increment. */
+    if (!context) return;
+    if (size < 1 || size > 4 || stride < 0) {
+        psgl_gl_error(GL_INVALID_VALUE); return;
+    }
+    if (type != GL_FLOAT && type != GL_UNSIGNED_BYTE && type != GL_UNSIGNED_SHORT) {
+        psgl_gl_error(GL_INVALID_ENUM); return;
+    }
+    if (stride > 255) { psgl_gl_error(GL_INVALID_OPERATION); return; }
+    if (context->bound_array_buffer && (uintptr_t)pointer > UINT32_MAX) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+    PSGLvertexAttribState *attrib = &context->gl_attribs[index];
+    attrib->size = size;
+    attrib->type = type;
+    attrib->stride = stride;
+    attrib->pointer = pointer;
+    attrib->buffer_name = context->bound_array_buffer;
+    attrib->buffer_offset = context->bound_array_buffer ? (uint32_t)(uintptr_t)pointer : 0;
+    if (!index && !context->bound_vertex_program)
+        context->attribs[PSGL_ATTRIB_VERTEX] = *attrib;
+    context->dirty |= PSGL_DIRTY_CG;
 }
 
 GLAPI void glVertexAttrib4f(GLuint index, GLfloat x, GLfloat y,
                             GLfloat z, GLfloat w)
 {
-    (void)index;
-    (void)x;
-    (void)y;
-    (void)z;
-    (void)w;
+    PSGLcontext *context = gls_attrib_context(index);
+    if (!context) return;
+    GLfloat *current = context->gl_current_attribs[index];
+    current[0] = x; current[1] = y; current[2] = z; current[3] = w;
+    context->dirty |= PSGL_DIRTY_CG;
 }

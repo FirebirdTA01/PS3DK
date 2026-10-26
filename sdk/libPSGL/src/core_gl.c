@@ -33,6 +33,7 @@ unsigned psgl_gl_format_query(GLenum pname, GLint *values)
     }
     case GL_IMPLEMENTATION_COLOR_READ_FORMAT_OES: values[0] = GL_RGBA; return 1;
     case GL_IMPLEMENTATION_COLOR_READ_TYPE_OES: values[0] = GL_UNSIGNED_BYTE; return 1;
+    case GL_MAX_VERTEX_ATTRIBS: values[0] = PSGL_MAX_GL_ATTRIBS; return 1;
     case GL_SHADER_COMPILER: values[0] = GL_FALSE; return 1;
     case GL_NUM_SHADER_BINARY_FORMATS: values[0] = 1; return 1;
     case GL_SHADER_BINARY_FORMATS:

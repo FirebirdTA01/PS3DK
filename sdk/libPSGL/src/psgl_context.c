@@ -2008,9 +2008,44 @@ static uint32_t psgl_client_attrib_upload_size(
     return element_size;
 }
 
+static uint32_t psgl_gl_client_element_size(const PSGLvertexAttribState *attrib)
+{
+    if (!attrib->enabled || attrib->buffer_name || !attrib->pointer) return 0;
+    /* GL permits overlapping elements (a positive stride below their size). */
+    return psgl_attrib_element_size(attrib);
+}
+
 static void psgl_emit_vertex_arrays(PSGLcontext *context)
 {
     if (!context || !context->gcm) return;
+    if (context->gl_attrib_routing || context->retire_gl_arrays) {
+        /* A new executable can move a location to any hardware input.
+           Retire all previous array descriptors before installing it. */
+        for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw)
+            cellGcmSetVertexDataArray(context->gcm, (uint8_t)hw, 0, 0, 0,
+                                      CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_MAIN, 0);
+        context->retire_gl_arrays = GL_FALSE;
+    }
+    if (context->gl_attrib_routing) {
+        for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
+            int location = context->gl_hw_to_location[hw];
+            if (location < 0) continue;
+            PSGLvertexAttribState *attrib = &context->gl_attribs[location];
+            if (!attrib->enabled) {
+                cellGcmSetVertexData4f(context->gcm, (uint8_t)hw,
+                                        context->gl_current_attribs[location]);
+                continue;
+            }
+            if (!attrib->buffer_name) continue; /* Uploaded at draw time. */
+            PSGLbufferObject *buffer = psgl_find_buffer(attrib->buffer_name);
+            uint8_t type = psgl_gl_vertex_type(attrib->type);
+            if (!buffer || !buffer->address || !type) continue;
+            cellGcmSetVertexDataArray(context->gcm, (uint8_t)hw, 0,
+                (uint8_t)psgl_attrib_stride(attrib), (uint8_t)attrib->size,
+                type, buffer->location, buffer->offset + attrib->buffer_offset);
+        }
+        return;
+    }
     for (uint32_t i = 0; i < PSGL_MAX_VERTEX_ATTRIBS; i++) {
         PSGLvertexAttribState *attrib = &context->attribs[i];
         PSGLbufferObject *buffer;
@@ -2054,14 +2089,52 @@ static void psgl_emit_vertex_arrays(PSGLcontext *context)
     }
 }
 
-static void psgl_emit_client_vertex_arrays(PSGLcontext *context,
+static int psgl_emit_client_vertex_arrays(PSGLcontext *context,
                                            GLint first, GLsizei count)
 {
     uint32_t total = 0u;
     uint8_t *scratch = NULL;
     uint32_t scratch_offset = 0u;
     uint32_t cursor = 0u;
-    if (!context || !context->gcm || first < 0 || count <= 0) return;
+    if (!context || !context->gcm || first < 0 || count <= 0) return 0;
+    if (context->gl_attrib_routing) {
+        uint64_t vertices = (uint64_t)(uint32_t)first + (uint32_t)count;
+        uint64_t required = 0;
+        for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
+            int location = context->gl_hw_to_location[hw];
+            if (location < 0) continue;
+            PSGLvertexAttribState *attrib = &context->gl_attribs[location];
+            uint32_t element = psgl_gl_client_element_size(attrib);
+            uint64_t span = (vertices - 1u) * psgl_attrib_stride(attrib) + element;
+            if (element && (span > SIZE_MAX || (uintptr_t)attrib->pointer > UINTPTR_MAX - span)) {
+                psgl_gl_error(GL_INVALID_OPERATION); return 0;
+            }
+            if (element) required += (vertices * element + PSGL_BUFFER_ALIGNMENT - 1u) &
+                                      ~((uint64_t)PSGL_BUFFER_ALIGNMENT - 1u);
+        }
+        if (!required) return 1;
+        if (vertices > INT32_MAX || required > UINT32_MAX - PSGL_CLIENT_ARRAY_ALIGNMENT ||
+            !psgl_alloc_client_array_scratch((uint32_t)required, &scratch, &scratch_offset)) {
+            psgl_gl_error(GL_OUT_OF_MEMORY); return 0;
+        }
+        for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
+            int location = context->gl_hw_to_location[hw];
+            if (location < 0) continue;
+            PSGLvertexAttribState *attrib = &context->gl_attribs[location];
+            uint32_t element = psgl_gl_client_element_size(attrib);
+            if (!element) continue;
+            /* Keep first's index semantics: upload [0, first+count) below
+               and issue the original DrawArrays first. */
+            psgl_copy_client_attrib(scratch + cursor, attrib, 0, (GLsizei)vertices,
+                                     element, psgl_attrib_stride(attrib));
+            cellGcmSetVertexDataArray(context->gcm, (uint8_t)hw, 0,
+                (uint8_t)element, (uint8_t)attrib->size,
+                psgl_gl_vertex_type(attrib->type), CELL_GCM_LOCATION_MAIN,
+                scratch_offset + cursor);
+            cursor += psgl_align_u32((uint32_t)vertices * element, PSGL_BUFFER_ALIGNMENT);
+        }
+        return 1;
+    }
     for (uint32_t i = 0; i < PSGL_MAX_VERTEX_ATTRIBS; i++) {
         uint32_t element_size =
             psgl_client_attrib_upload_size(&context->attribs[i]);
@@ -2076,9 +2149,9 @@ static void psgl_emit_client_vertex_arrays(PSGLcontext *context,
             total += psgl_align_u32((uint32_t)count * element_size,
                                     PSGL_BUFFER_ALIGNMENT);
     }
-    if (!total) return;
+    if (!total) return 1;
     if (!psgl_alloc_client_array_scratch(total, &scratch, &scratch_offset))
-        return;
+        return 0;
     for (uint32_t i = 0; i < PSGL_MAX_VERTEX_ATTRIBS; i++) {
         PSGLvertexAttribState *attrib = &context->attribs[i];
         uint32_t element_size = psgl_client_attrib_upload_size(attrib);
@@ -2122,11 +2195,13 @@ static void psgl_emit_client_vertex_arrays(PSGLcontext *context,
                                   scratch_offset + cursor);
         cursor += psgl_align_u32(bytes, PSGL_BUFFER_ALIGNMENT);
     }
+    return 1;
 }
 
 static void psgl_emit_current_attribs(PSGLcontext *context)
 {
     if (!context || !context->gcm) return;
+    if (context->gl_attrib_routing) return;
     if (!context->attribs[PSGL_ATTRIB_COLOR].enabled) {
         cellGcmSetVertexData4f(context->gcm, GCM_VERTEX_ATTRIB_COLOR0,
                                context->current_color);
@@ -2328,6 +2403,14 @@ static void psgl_clear_deleted_buffer_bindings(GLuint name)
             context->attribs[i].buffer_offset = 0u;
         }
     }
+    for (uint32_t i = 0; i < PSGL_MAX_GL_ATTRIBS; ++i) {
+        if (context->gl_attribs[i].buffer_name == name) {
+            context->gl_attribs[i].buffer_name = 0;
+            context->gl_attribs[i].buffer_offset = 0;
+            context->gl_attribs[i].pointer = NULL;
+            context->dirty |= PSGL_DIRTY_CG;
+        }
+    }
 }
 
 int psgl_context_init_system(const PSGLinitOptions *options)
@@ -2393,6 +2476,11 @@ PSGLcontext *psgl_context_create(void)
 {
     PSGLcontext *context = (PSGLcontext *)calloc(1u, sizeof(*context));
     if (!context) return NULL;
+    for (uint32_t i = 0; i < PSGL_MAX_GL_ATTRIBS; ++i) {
+        context->gl_attribs[i].size = 4;
+        context->gl_attribs[i].type = GL_FLOAT;
+        context->gl_current_attribs[i][3] = 1.0f;
+    }
     context->gcm = CELL_GCM_CURRENT;
     context->matrix_mode = GL_MODELVIEW;
     psgl_matrix_identity(context->modelview);
@@ -2736,6 +2824,7 @@ void psgl_context_bind_cg_program(CGprogram program, CGprofile profile)
         profile == CG_PROFILE_ARBVP1 ||
         profile == CG_PROFILE_VP30 ||
         profile == CG_PROFILE_VP20) {
+        psgl_context_set_gl_attrib_routing(NULL);
         context->bound_vertex_program = program;
         context->dirty |= PSGL_DIRTY_CG;
     } else if (profile == CG_PROFILE_SCE_FP_RSX ||
@@ -2747,6 +2836,17 @@ void psgl_context_bind_cg_program(CGprogram program, CGprofile profile)
         context->bound_fragment_program = program;
         context->dirty |= PSGL_DIRTY_CG;
     }
+}
+
+void psgl_context_set_gl_attrib_routing(const int8_t *hw_to_location)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    if (!context) return;
+    if (context->gl_attrib_routing) context->retire_gl_arrays = GL_TRUE;
+    context->gl_attrib_routing = hw_to_location != NULL;
+    for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw)
+        context->gl_hw_to_location[hw] = hw_to_location ? hw_to_location[hw] : -1;
+    context->dirty |= PSGL_DIRTY_CG;
 }
 
 void psgl_context_swap(void)
@@ -4815,7 +4915,7 @@ void psgl_context_draw_arrays(GLenum mode, GLint first, GLsizei count)
     if (!context || !context->gcm || first < 0 || count <= 0 || !primitive)
         return;
     psgl_validate_draw_state(context);
-    psgl_emit_client_vertex_arrays(context, first, count);
+    if (!psgl_emit_client_vertex_arrays(context, first, count)) return;
     cellGcmSetDrawArrays(context->gcm, primitive, (uint32_t)first,
                          (uint32_t)count);
 }

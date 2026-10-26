@@ -37,6 +37,16 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL logical vertex attributes.** Precompiled GL programs route eight
+  logical attribute locations to their binary's physical inputs. Attribute
+  bindings take effect at link time; relinking the current program updates
+  its routing, and inactive names return -1. Unbound attributes no longer
+  receive name-based defaults such as `a_position`; they are assigned the
+  lowest free locations in physical-input order. This is not an ES 2.0
+  conformance claim: the current pointer path supports only float, unsigned
+  byte and unsigned short inputs and strides up to 255 bytes, and the
+  fixed-function attribute-zero alias still applies only to calls made
+  without a vertex program bound.
 - **PSGL pixel readback.** `glReadPixels` returns RGBA bytes from linear,
   non-multisampled XRGB default and color0 texture framebuffers, with pack
   alignment, lower-left row order and opaque alpha. Invalid sizes, unsupported

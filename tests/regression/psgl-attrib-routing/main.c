@@ -1,14 +1,21 @@
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 #include <PSGL/psgl.h>
+#include <Cg/cgGL.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/process.h>
 #include "vertex_vpo.h"
 #include "fragment_fpo.h"
+/* Test-only fixture loading: the public Cg memory loader is not implemented.
+   The subsequent direct-Cg attribute calls are the compatibility control. */
+extern CGprogram psgl_cg_create_program_from_memory(CGcontext, const void *,
+                                                     uint32_t, CGprofile);
 SYS_PROCESS_PARAM(1001, 0x100000);
 static unsigned checks, failures;
+static GLint draw_first;
 static GLuint positions, red_buffer, green_buffer, blue_buffer;
 static const float quad[24] = {
     -1,-1,0,1, 1,-1,0,1, 1,1,0,1,
@@ -52,7 +59,7 @@ static void rendered(unsigned char r, unsigned char g, unsigned char b,
     glClearColor(0,0,0,0); glClear(GL_COLOR_BUFFER_BIT);
     unsigned tries;
     for (tries=1; tries<=10; ++tries) {
-        glDrawArrays(GL_TRIANGLES,0,6);
+        glDrawArrays(GL_TRIANGLES,draw_first,6);
         glReadPixels(4,4,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
         if (!memcmp(pixel,want,4)) break;
         if (tries<10) usleep(200000);
@@ -117,7 +124,64 @@ int main(void)
         linked(b,i,c);array(i,positions,0);array(c,red_buffer,0);
         rendered(255,0,0,"all logical locations");
     }
-    glUseProgram(0);glDeleteProgram(a);glDeleteProgram(b);glDeleteShader(vs);glDeleteShader(fs);
+    GLuint c=glCreateProgram();
+    glAttachShader(c,vs);glAttachShader(c,fs);
+    /* An inactive name must not reserve logical zero from active inputs. */
+    glBindAttribLocation(c,0,"unused");glLinkProgram(c);
+    GLint status=0,active=0;
+    glGetProgramiv(c,GL_LINK_STATUS,&status);
+    glGetProgramiv(c,GL_ACTIVE_ATTRIBUTES,&active);
+    check(status==GL_TRUE && active==2,"auto link active count");
+    check(glGetAttribLocation(c,"position")==0 && glGetAttribLocation(c,"color")==1,
+          "automatic physical-input order");
+    check(glGetAttribLocation(c,"unused")==-1,"inactive binding ignored");
+    glUseProgram(c);array(0,positions,0);array(1,green_buffer,0);
+    rendered(0,255,0,"auto routing");
+    glBindAttribLocation(c,0,"position");glBindAttribLocation(c,0,"color");
+    glLinkProgram(c);glGetProgramiv(c,GL_LINK_STATUS,&status);
+    check(status==GL_FALSE,"active alias link refused");
+    rendered(0,255,0,"failed relink keeps installed executable");
+    GLint failed_location=glGetAttribLocation(c,"color");
+    check(failed_location==-1 && glGetError()==GL_INVALID_OPERATION,"failed link query refused");
+    glUseProgram(c);check(glGetError()==GL_INVALID_OPERATION,"failed program use refused");
+    rendered(0,255,0,"failed use preserves executable");
+    linked(c,0,1);array(1,blue_buffer,0);
+    rendered(0,0,255,"repaired link installed");
+    glBindAttribLocation(c,2,"gl_reserved");
+    check(glGetError()==GL_INVALID_OPERATION,"reserved binding rejected");
+    glVertexAttribPointer(0,0,GL_FLOAT,GL_FALSE,16,0);
+    check(glGetError()==GL_INVALID_VALUE,"bad pointer size rejected");
+    glVertexAttribPointer(0,4,GL_FLOAT,GL_FALSE,-1,0);
+    check(glGetError()==GL_INVALID_VALUE,"bad pointer stride rejected");
+    rendered(0,0,255,"rejected calls preserve arrays");
+    float prefixed[48]={0};memcpy(prefixed+24,quad,sizeof(quad));
+    array(0,0,prefixed);glDisableVertexAttribArray(1);glVertexAttrib4f(1,0,1,0,1);
+    draw_first=6;rendered(0,255,0,"nonzero-first client array");draw_first=0;
+    glUseProgram(0);
+    CGcontext cg=cgCreateContext();
+    CGprogram cv=psgl_cg_create_program_from_memory(cg,vertex_vpo,vertex_vpo_size,CG_PROFILE_SCE_VP_RSX);
+    CGprogram cf=psgl_cg_create_program_from_memory(cg,fragment_fpo,fragment_fpo_size,CG_PROFILE_SCE_FP_RSX);
+    check(cv && cf,"Cg compatibility programs");
+    if(cv && cf) {
+        cgGLBindProgram(cv);cgGLBindProgram(cf);
+        CGparameter cp=cgGetNamedParameter(cv,"position"),cc=cgGetNamedParameter(cv,"color");
+        glBindBuffer(GL_ARRAY_BUFFER,0);
+        cgGLSetParameterPointer(cp,4,GL_FLOAT,16,quad);
+        cgGLSetParameterPointer(cc,4,GL_FLOAT,16,blue);
+        cgGLEnableClientState(cp);cgGLEnableClientState(cc);
+        rendered(0,0,255,"direct Cg physical arrays");
+        glUseProgram(a);array(7,positions,0);array(6,green_buffer,0);
+        rendered(0,255,0,"GL routing ignores Cg array state");
+        cgGLBindProgram(cv);cgGLBindProgram(cf);
+        rendered(0,0,255,"Cg bind restores physical arrays");
+        cgGLDisableClientState(cp);cgGLDisableClientState(cc);
+        glBindBuffer(GL_ARRAY_BUFFER,0);
+        glVertexPointer(4,GL_FLOAT,16,quad);glColorPointer(4,GL_FLOAT,16,red);
+        glEnableClientState(GL_VERTEX_ARRAY);glEnableClientState(GL_COLOR_ARRAY);
+        rendered(255,0,0,"legacy arrays with Cg program");
+    }
+    glUseProgram(0);glDeleteProgram(a);glDeleteProgram(b);glDeleteProgram(c);glDeleteShader(vs);glDeleteShader(fs);
+    cgDestroyContext(cg);
     glDeleteBuffers(1,&positions);glDeleteBuffers(1,&red_buffer);
     glDeleteBuffers(1,&green_buffer);glDeleteBuffers(1,&blue_buffer);
     printf("PSGL_ATTR_%s checks=%u failures=%u\n",failures?"FAIL":"OK",checks,failures);

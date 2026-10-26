@@ -11,6 +11,7 @@
 #define PSGL_MAX_TEXTURE_UNITS 4u
 #define PSGL_MAX_VERTEX_ATTRIBS 4u
 #define PSGL_MAX_GENERIC_ATTRIBS 16u
+#define PSGL_MAX_GL_ATTRIBS 8u
 #define PSGL_MAX_LIGHTS 8u
 #define PSGL_MODELVIEW_STACK_DEPTH 16u
 #define PSGL_PROJECTION_STACK_DEPTH 2u
@@ -203,6 +204,12 @@ struct PSGLcontext {
     } fbo_objects[PSGL_MAX_FBO_OBJECTS];
     uint32_t fbo_next_name;
     uint32_t dirty;
+    /* GL locations are not Cg hardware indices or fixed-function arrays. */
+    PSGLvertexAttribState gl_attribs[PSGL_MAX_GL_ATTRIBS];
+    GLfloat gl_current_attribs[PSGL_MAX_GL_ATTRIBS][4];
+    int8_t gl_hw_to_location[PSGL_MAX_GENERIC_ATTRIBS];
+    GLboolean gl_attrib_routing;
+    GLboolean retire_gl_arrays;
 };
 
 int psgl_context_init_system(const PSGLinitOptions *options);
@@ -222,6 +229,7 @@ void psgl_context_read_pixels(GLint x, GLint y, GLsizei width, GLsizei height,
 PSGLdevice *psgl_context_current_device(void);
 void psgl_context_load_shader_library(const char *filename);
 void psgl_context_bind_cg_program(CGprogram program, CGprofile profile);
+void psgl_context_set_gl_attrib_routing(const int8_t *hw_to_location);
 void psgl_context_swap(void);
 void psgl_context_set_clear_color(GLfloat red, GLfloat green,
                                   GLfloat blue, GLfloat alpha);
