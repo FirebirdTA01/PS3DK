@@ -88,6 +88,10 @@ def main():
             ('unsupported mask (fog)', '0x4\n', 1, 'unsupported mask 0x00000004'),
             ('unsupported mask (lighting+fog)', '0x6\n', 1, 'unsupported mask 0x00000006'),
             ('unsupported mask (unknown bit)', '0x10\n', 1, 'unsupported mask 0x00000010'),
+            ('unsupported mask (texturing+fog)', '0x10004\n', 1, 'unsupported mask 0x00010004'),
+            ('unsupported mask (texturing+lighting)', '0x10002\n', 1, 'unsupported mask 0x00010002'),
+            ('unsupported mask (unit 4)', '0x100000\n', 1, 'unsupported mask 0x00100000'),
+            ('unsupported mask (minimal+unit bit)', '0x20001\n', 1, 'unsupported mask 0x00020001'),
         ]
         for name, text, want_rc, want_err in cases:
             st = work / ('bad-%d.txt' % len(name))
@@ -111,6 +115,21 @@ def main():
                            ([rsxcg, '--psgl-ffp-library', str(good), '-o', str(out), '-O2'], 'unknown option')]:
             rc, _, se = run(argv, work)
             check(rc == 2 and 'usage:' in se, 'bad command line (%s): rc 2 with usage' % what)
+
+        # Texturing masks: every enabled-unit set of units 0-3 compiles, and
+        # mask 0x1 (the unit-0 set under its original name) equals 0x10000.
+        units = work / 'units.txt'
+        units.write_text(''.join('0x%x\n' % (s << 16) for s in range(1, 16)) + '0x1\n', encoding='ascii')
+        out_u = work / 'units.bin'
+        rc, _, se = run([rsxcg, '--psgl-ffp-library', str(units), '-o', str(out_u)], work)
+        parsed_u = parse_library(out_u.read_bytes()) if out_u.is_file() else None
+        check(rc == 0 and parsed_u is not None and parsed_u[2] and
+              [e[0] for e in parsed_u[1]] == [s << 16 for s in range(1, 16)] + [1],
+              'texturing masks 0x10000-0xf0000 and 0x1 compile (rc %d %s)' % (rc, se.strip()[:120]))
+        if parsed_u:
+            by_mask = {e[0]: e for e in parsed_u[1]}
+            check(by_mask.get(1, (0, b'', b''))[1:] == by_mask.get(0x10000, (0, b'x', b'x'))[1:],
+                  'mask 0x1 compiles to the same programs as 0x10000')
 
         rc, _, se = run([rsxcg, '--help'], work)
         check(rc == 0 and '--psgl-ffp-library' in se,

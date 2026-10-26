@@ -66,6 +66,20 @@ The version stamped into builds is generated from the most recent
   `INVALID_OPERATION` instead of writing that other program.
   Linking now rejects ambiguous binaries with multiple reflected samplers
   assigned to the same physical `TEXUNIT` resource.
+- **PSGL fixed-function texturing on units 0-3.** Fixed-function draws
+  apply the enabled texture units in order with their texture environments
+  (MODULATE, REPLACE, DECAL, BLEND, ADD), env colours, base formats,
+  texcoord sets and texture matrices, per OpenGL 2.1 section 3.13. Unit 0
+  now modulates by the primary colour by default, as GL specifies; it used
+  to replace it. Apps that draw textured with a non-white colour therefore
+  render differently. `rsx-cg-compiler --psgl-ffp-library` builds one program
+  per enabled-unit set (state masks `0x10000`-`0xf0000`, bit 16+k for unit
+  k; `0x1` remains the unit-0 set). A draw that needs units 1-3 without a
+  loaded library reports `GL_INVALID_OPERATION` and draws nothing. Unit 0
+  alone uses the program built into libPSGL. A mask `0x1` program from an
+  older library lacks the texture-environment uniforms and is ignored in
+  favour of the built-in one. An enabled unit without a texture behaves as
+  disabled. Texturing with fog, COMBINE and texgen are not implemented.
 - **PSGL texture environment state.** `glTexEnv{f,i,x}[v]` store
   `GL_TEXTURE_ENV_MODE` (MODULATE, REPLACE, DECAL, BLEND, ADD; MODULATE
   initially) and `GL_TEXTURE_ENV_COLOR` per texture unit, and

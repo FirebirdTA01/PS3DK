@@ -109,10 +109,23 @@ static uint32_t g_psgl_client_array_scratch_cursor;
 
 static void psgl_fill_gcm_texture(PSGLtextureObject *texture);
 
-static PSGLcgParameter g_psgl_ffp_vp_params[1];
-static PSGLcgProgram g_psgl_ffp_vp;
-static PSGLcgProgram g_psgl_ffp_fp;
-static uint32_t g_psgl_ffp_initialized;
+/* A fixed-function texturing program for one enabled-unit set: the vertex
+   program takes modelViewProj then texMatrix<k>, the fragment program five
+   texenv<k>_m<j> coefficient vectors per enabled unit, in unit order. */
+typedef struct PSGLffpTexProgram {
+    PSGLcgProgram vp;
+    PSGLcgProgram fp;
+    PSGLcgParameter vp_params[1u + PSGL_FFP_TEXUNIT_COUNT];
+    PSGLcgParameter fp_params[5u * PSGL_FFP_TEXUNIT_COUNT];
+    uint32_t units;
+    uint32_t valid;
+} PSGLffpTexProgram;
+/* Loaded from a shader library, indexed by the enabled-unit set. */
+static PSGLffpTexProgram g_psgl_ffp_tex[1u << PSGL_FFP_TEXUNIT_COUNT];
+/* Built into libPSGL for the unit-0 set; 0 untried, 1 ready, 2 failed. */
+static PSGLffpTexProgram g_psgl_ffp_tex_builtin;
+static uint32_t g_psgl_ffp_tex_builtin_state;
+static uint32_t g_psgl_ffp_tex_refusal_reported;
 static PSGLcgParameter g_psgl_ffp_posonly_vp_params[1];
 static PSGLcgProgram g_psgl_ffp_posonly_vp;
 static PSGLcgProgram g_psgl_ffp_posonly_fp;
@@ -122,10 +135,6 @@ static PSGLcgParameter g_psgl_ffp_lit_fp_params[1];
 static PSGLcgProgram g_psgl_ffp_lit_vp;
 static PSGLcgProgram g_psgl_ffp_lit_fp;
 static uint32_t g_psgl_ffp_lit_initialized;
-static PSGLcgParameter g_psgl_ffp_library_vp_params[1];
-static PSGLcgProgram g_psgl_ffp_library_vp;
-static PSGLcgProgram g_psgl_ffp_library_fp;
-static uint32_t g_psgl_ffp_library_valid;
 
 static uint32_t psgl_texture_unit_index(GLenum texture);
 
@@ -595,19 +604,6 @@ static int psgl_ffp_init_pair(PSGLcgProgram *vp, PSGLcgProgram *fp,
     return 1;
 }
 
-static int psgl_ffp_init_minimal(void)
-{
-    if (g_psgl_ffp_initialized) return 1;
-    if (!psgl_ffp_init_pair(&g_psgl_ffp_vp, &g_psgl_ffp_fp,
-                            g_psgl_ffp_vp_params,
-                            psgl_ffp_minimal_vpo,
-                            psgl_ffp_minimal_vpo_len,
-                            psgl_ffp_minimal_fpo,
-                            psgl_ffp_minimal_fpo_len))
-        return 0;
-    g_psgl_ffp_initialized = 1u;
-    return 1;
-}
 
 static int psgl_ffp_init_posonly(void)
 {
@@ -660,6 +656,176 @@ static int psgl_ffp_init_lit_bootstrap(void)
     return 1;
 }
 
+static PSGLtextureObject *psgl_get_texture(GLuint name);
+
+static void psgl_ffp_unit_name(char *out, const char *prefix, uint32_t unit,
+                               const char *suffix)
+{
+    uint32_t n = 0u;
+    while (*prefix && n < 30u) out[n++] = *prefix++;
+    out[n++] = (char)('0' + unit);
+    while (*suffix && n < 30u) out[n++] = *suffix++;
+    out[n] = '\0';
+}
+
+/* Reads one texturing program pair and resolves every uniform it must
+   expose; a program without them (such as a mask 0x1 program from an older
+   library) is refused, never half-used. */
+static int psgl_ffp_init_tex(PSGLffpTexProgram *entry, uint32_t units,
+                             unsigned char *vpo, uint32_t vpo_size,
+                             unsigned char *fpo, uint32_t fpo_size)
+{
+    static const char *const k_suffix[5] = {"_m0", "_m1", "_m2", "_m3", "_m4"};
+    uint32_t vp_count = 1u, fp_count = 0u;
+    psgl_zero(entry, sizeof(*entry));
+    if (!units || units >= (1u << PSGL_FFP_TEXUNIT_COUNT)) return 0;
+    if (!psgl_ffp_init_pair(&entry->vp, &entry->fp, entry->vp_params,
+                            vpo, vpo_size, fpo, fpo_size))
+        return 0;
+    for (uint32_t unit = 0u; unit < PSGL_FFP_TEXUNIT_COUNT; unit++) {
+        if (!(units & (1u << unit))) continue;
+        PSGLcgParameter *matrix = &entry->vp_params[vp_count];
+        const float *defaults = NULL;
+        char name[32];
+        uint32_t index;
+        psgl_ffp_unit_name(name, "texMatrix", unit, "");
+        index = cellCgbMapLookup(&entry->vp.cgb_program, name);
+        if (index == (uint32_t)CELL_CGB_ERROR_FAILED) return 0;
+        matrix->magic = PSGL_CG_PARAMETER_MAGIC;
+        matrix->program = &entry->vp;
+        matrix->index = index;
+        psgl_copy_name(matrix->name, name);
+        matrix->type = CG_FLOAT4x4;
+        matrix->resource = CG_C;
+        matrix->variability = CG_UNIFORM;
+        matrix->direction = CG_IN;
+        matrix->vertex_register = 0xffffu;
+        matrix->fragment_register = 0xffffu;
+        matrix->value_count = 16u;
+        matrix->dirty = CG_TRUE;
+        cellCgbMapGetVertexUniformRegister(&entry->vp.cgb_program, index,
+                                           &matrix->vertex_register, &defaults);
+        if (matrix->vertex_register == 0xffffu) return 0;
+        vp_count++;
+        for (uint32_t term = 0u; term < 5u; term++) {
+            PSGLcgParameter *coefficient = &entry->fp_params[fp_count];
+            psgl_ffp_unit_name(name, "texenv", unit, k_suffix[term]);
+            index = cellCgbMapLookup(&entry->fp.cgb_program, name);
+            if (index == (uint32_t)CELL_CGB_ERROR_FAILED) return 0;
+            coefficient->magic = PSGL_CG_PARAMETER_MAGIC;
+            coefficient->program = &entry->fp;
+            coefficient->index = index;
+            psgl_copy_name(coefficient->name, name);
+            coefficient->type = CG_FLOAT4;
+            coefficient->resource = CG_C;
+            coefficient->variability = CG_UNIFORM;
+            coefficient->direction = CG_IN;
+            coefficient->vertex_register = 0xffffu;
+            coefficient->fragment_register = 0xffffu;
+            coefficient->value_count = 4u;
+            coefficient->dirty = CG_TRUE;
+            fp_count++;
+        }
+    }
+    entry->vp.parameter_count = vp_count;
+    entry->fp.parameters = entry->fp_params;
+    entry->fp.parameter_count = fp_count;
+    entry->units = units;
+    entry->valid = 1u;
+    return 1;
+}
+
+static PSGLffpTexProgram *psgl_ffp_tex_program(uint32_t units)
+{
+    if (!units || units >= (1u << PSGL_FFP_TEXUNIT_COUNT)) return NULL;
+    if (g_psgl_ffp_tex[units].valid) return &g_psgl_ffp_tex[units];
+    if (units != 1u) return NULL;
+    if (g_psgl_ffp_tex_builtin_state == 0u)
+        g_psgl_ffp_tex_builtin_state =
+            psgl_ffp_init_tex(&g_psgl_ffp_tex_builtin, 1u,
+                              psgl_ffp_minimal_vpo, psgl_ffp_minimal_vpo_len,
+                              psgl_ffp_minimal_fpo, psgl_ffp_minimal_fpo_len) ? 1u : 2u;
+    return g_psgl_ffp_tex_builtin_state == 1u ? &g_psgl_ffp_tex_builtin : NULL;
+}
+
+/* Texture functions of OpenGL 2.1 tables 3.22 and 3.23 as coefficients of
+       C = Cp*m0 + Ct*m1 + Cp*Ct*m2 + Ct*m3 + (Ct - Cp)*At*m4
+   (ffp_emit.c).  Row 0 is the RGB channels, row 1 alpha; m3 is further
+   scaled by the env colour.  The storage of every base format is expanded
+   ARGB8 (ALPHA as (0,0,0,A), LUMINANCE as (L,L,L,1), LUMINANCE_ALPHA as
+   (L,L,L,A), RGB as (R,G,B,1)), so Ct.rgb is Lt for the luminance formats.
+   DECAL is undefined for ALPHA and the luminance formats and passes the
+   incoming colour through. */
+static void psgl_ffp_texenv_coefficients(GLenum mode, GLenum base,
+                                         const GLfloat env[4], GLfloat m[5][4])
+{
+    enum { CP = 0, CT = 1, CPCT = 2, CCCT = 3, DECAL = 4 };
+    GLfloat rgb[5] = {0, 0, 0, 0, 0}, alpha[5] = {0, 0, 0, 0, 0};
+    int has_alpha = base == GL_ALPHA || base == GL_LUMINANCE_ALPHA || base == GL_RGBA;
+    int has_color = base != GL_ALPHA;
+    switch (mode) {
+    case GL_REPLACE:
+        if (has_color) rgb[CT] = 1.0f; else rgb[CP] = 1.0f;
+        if (has_alpha) alpha[CT] = 1.0f; else alpha[CP] = 1.0f;
+        break;
+    case GL_DECAL:
+        if (base == GL_RGB) rgb[CT] = 1.0f;
+        else if (base == GL_RGBA) { rgb[CP] = 1.0f; rgb[DECAL] = 1.0f; }
+        else rgb[CP] = 1.0f;
+        alpha[CP] = 1.0f;
+        break;
+    case GL_BLEND:
+        if (has_color) { rgb[CP] = 1.0f; rgb[CPCT] = -1.0f; rgb[CCCT] = 1.0f; }
+        else rgb[CP] = 1.0f;
+        if (has_alpha) alpha[CPCT] = 1.0f; else alpha[CP] = 1.0f;
+        break;
+    case GL_ADD:
+        rgb[CP] = 1.0f;
+        if (has_color) rgb[CT] = 1.0f;
+        if (has_alpha) alpha[CPCT] = 1.0f; else alpha[CP] = 1.0f;
+        break;
+    case GL_MODULATE:
+    default:
+        if (has_color) rgb[CPCT] = 1.0f; else rgb[CP] = 1.0f;
+        if (has_alpha) alpha[CPCT] = 1.0f; else alpha[CP] = 1.0f;
+        break;
+    }
+    for (uint32_t term = 0u; term < 5u; term++) {
+        for (uint32_t c = 0u; c < 3u; c++)
+            m[term][c] = term == CCCT ? rgb[term] * env[c] : rgb[term];
+        m[term][3] = term == CCCT ? alpha[term] * env[3] : alpha[term];
+    }
+}
+
+/* Refreshes the coefficient uniforms of a texturing program from each
+   enabled unit's mode, env colour and bound texture's base format.
+   Returns whether any value changed. */
+static int psgl_ffp_update_texenv(PSGLcontext *context, PSGLffpTexProgram *entry)
+{
+    int changed = 0;
+    uint32_t param = 0u;
+    for (uint32_t unit = 0u; unit < PSGL_FFP_TEXUNIT_COUNT; unit++) {
+        GLfloat m[5][4];
+        PSGLtextureObject *texture;
+        if (!(entry->units & (1u << unit))) continue;
+        texture = psgl_get_texture(context->textures[unit].texture_2d);
+        psgl_ffp_texenv_coefficients(context->textures[unit].env_mode,
+                                     texture ? texture->base_format : GL_RGBA,
+                                     context->textures[unit].env_color, m);
+        for (uint32_t term = 0u; term < 5u; term++, param++) {
+            PSGLcgParameter *coefficient = &entry->fp_params[param];
+            if (coefficient->value_count == 4u &&
+                memcmp(coefficient->value, m[term], sizeof(m[term])) == 0)
+                continue;
+            psgl_copy(coefficient->value, m[term], sizeof(m[term]));
+            coefficient->value_count = 4u;
+            coefficient->dirty = CG_TRUE;
+            changed = 1;
+        }
+    }
+    return changed;
+}
+
 static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
 {
     if (!context) return 0u;
@@ -682,23 +848,19 @@ static uint32_t psgl_ffp_state_mask(const PSGLcontext *context)
         }
         return mask;
     }
-    if (context->attribs[PSGL_ATTRIB_TEXCOORD].enabled &&
-        context->textures[0].texture_2d_enabled &&
-        context->textures[0].texture_2d)
-    {
-        uint32_t mask = PSGL_FFP_MINIMAL_MASK;
-        if (context->fog_enabled) mask |= PSGL_FFP_FOG_MASK;
-        for (uint32_t i = 1u; i < PSGL_MAX_TEXTURE_UNITS; i++) {
-            if (context->textures[i].texture_2d_enabled)
-                return 0u;
-        }
-        return mask;
-    }
-    for (uint32_t i = 0u; i < PSGL_MAX_TEXTURE_UNITS; i++) {
-        if (context->textures[i].texture_2d_enabled)
-            return 0u;
+    /* A unit is applied when it is enabled and has a texture with storage;
+       an enabled unit without one is incomplete and behaves as disabled
+       (GL 2.1 section 3.8.10).  Texturing combined with fog has no
+       fixed-function program yet. */
+    uint32_t units = 0u;
+    for (uint32_t unit = 0u; unit < PSGL_FFP_TEXUNIT_COUNT; unit++) {
+        PSGLtextureObject *texture;
+        if (!context->textures[unit].texture_2d_enabled) continue;
+        texture = psgl_get_texture(context->textures[unit].texture_2d);
+        if (texture && texture->address) units |= 1u << unit;
     }
     if (context->fog_enabled) return 0u;
+    if (units) return units << PSGL_FFP_TEXUNIT_SHIFT;
     return PSGL_FFP_POSITION_ONLY_MASK;
 }
 
@@ -707,6 +869,14 @@ static int psgl_ffp_state_mask_to_programs(uint32_t mask, PSGLcgProgram **vp,
 {
     if (vp) *vp = NULL;
     if (fp) *fp = NULL;
+    if ((mask & PSGL_FFP_TEXUNITS_MASK) != 0u) {
+        PSGLffpTexProgram *entry =
+            psgl_ffp_tex_program((mask & PSGL_FFP_TEXUNITS_MASK) >> PSGL_FFP_TEXUNIT_SHIFT);
+        if (!entry) return 0;
+        if (vp) *vp = &entry->vp;
+        if (fp) *fp = &entry->fp;
+        return 1;
+    }
     if ((mask & PSGL_FFP_LIGHTING_MASK) != 0u) {
         if ((mask & PSGL_FFP_FOG_MASK) != 0u) return 0;
         if (!psgl_ffp_init_lit_bootstrap()) return 0;
@@ -720,16 +890,7 @@ static int psgl_ffp_state_mask_to_programs(uint32_t mask, PSGLcgProgram **vp,
         if (fp) *fp = &g_psgl_ffp_posonly_fp;
         return 1;
     }
-    if (mask != PSGL_FFP_MINIMAL_MASK) return 0;
-    if (g_psgl_ffp_library_valid) {
-        if (vp) *vp = &g_psgl_ffp_library_vp;
-        if (fp) *fp = &g_psgl_ffp_library_fp;
-        return 1;
-    }
-    if (!psgl_ffp_init_minimal()) return 0;
-    if (vp) *vp = &g_psgl_ffp_vp;
-    if (fp) *fp = &g_psgl_ffp_fp;
-    return 1;
+    return 0;
 }
 
 static void psgl_ffp_update_matrices(PSGLcontext *context, PSGLcgProgram *vp)
@@ -2513,12 +2674,15 @@ static void psgl_emit_fragment_program(PSGLcontext *context,
                               program->fragment_draw_offset);
 }
 
-static void psgl_validate_draw_state(PSGLcontext *context)
+/* Returns 0 when the draw must be skipped: fixed-function texturing on
+   units 1-3 needs a program from psglLoadShaderLibrary, and without one the
+   draw is refused with INVALID_OPERATION rather than drawn untextured. */
+static int psgl_validate_draw_state(PSGLcontext *context)
 {
     PSGLcgProgram *vp;
     PSGLcgProgram *fp;
     uint32_t ffp_mask;
-    if (!context) return;
+    if (!context) return 0;
     if (context->dirty & PSGL_DIRTY_FRAMEBUFFER) psgl_bind_render_target(context);
     if (context->dirty & PSGL_DIRTY_VIEWPORT) psgl_emit_viewport(context);
     if (context->dirty & PSGL_DIRTY_SCISSOR) psgl_emit_scissor(context);
@@ -2530,10 +2694,24 @@ static void psgl_validate_draw_state(PSGLcontext *context)
     if (context->dirty & PSGL_DIRTY_ALPHA) psgl_emit_alpha(context);
     if (context->dirty & PSGL_DIRTY_RASTER) psgl_emit_raster(context);
     if (context->dirty & PSGL_DIRTY_TEXTURES) psgl_emit_textures(context);
+    vp = psgl_cg_program(context->bound_vertex_program);
+    fp = psgl_cg_program(context->bound_fragment_program);
+    ffp_mask = (!vp || !fp) ? psgl_ffp_state_mask(context) : 0u;
+    if ((ffp_mask & PSGL_FFP_TEXUNITS_MASK) != 0u) {
+        PSGLffpTexProgram *entry =
+            psgl_ffp_tex_program((ffp_mask & PSGL_FFP_TEXUNITS_MASK) >> PSGL_FFP_TEXUNIT_SHIFT);
+        if (!entry) {
+            if (!g_psgl_ffp_tex_refusal_reported) {
+                g_psgl_ffp_tex_refusal_reported = 1u;
+                printf("PSGL: fixed-function texturing on units 1-3 needs a shader "
+                       "library (psglLoadShaderLibrary); draw refused\n");
+            }
+            psgl_gl_error(GL_INVALID_OPERATION);
+            return 0;
+        }
+        if (psgl_ffp_update_texenv(context, entry)) context->dirty |= PSGL_DIRTY_CG;
+    }
     if (context->dirty & PSGL_DIRTY_CG) {
-        vp = psgl_cg_program(context->bound_vertex_program);
-        fp = psgl_cg_program(context->bound_fragment_program);
-        ffp_mask = psgl_ffp_state_mask(context);
         if ((!vp || !fp) && ffp_mask) {
             PSGLcgProgram *ffp_vp = NULL;
             PSGLcgProgram *ffp_fp = NULL;
@@ -2551,6 +2729,7 @@ static void psgl_validate_draw_state(PSGLcontext *context)
         context->dirty &= ~PSGL_DIRTY_CG;
     }
     psgl_emit_current_attribs(context);
+    return 1;
 }
 
 static void psgl_clear_deleted_buffer_bindings(GLuint name)
@@ -2942,6 +3121,7 @@ void psgl_context_load_shader_library(const char *filename)
     for (uint32_t i = 0u; i < count; i++) {
         unsigned char rec[12];
         uint32_t mask;
+        uint32_t units;
         uint32_t vp_size;
         uint32_t fp_size;
         unsigned char *vp_blob;
@@ -2968,12 +3148,11 @@ void psgl_context_load_shader_library(const char *filename)
             free(fp_blob);
             break;
         }
-        if (mask == PSGL_FFP_MINIMAL_MASK &&
-            psgl_ffp_init_pair(&g_psgl_ffp_library_vp,
-                               &g_psgl_ffp_library_fp,
-                               g_psgl_ffp_library_vp_params,
-                               vp_blob, vp_size, fp_blob, fp_size)) {
-            g_psgl_ffp_library_valid = 1u;
+        units = psgl_ffp_mask_texture_units(mask);
+        if (units && !g_psgl_ffp_tex[units].valid &&
+            psgl_ffp_init_tex(&g_psgl_ffp_tex[units], units,
+                              vp_blob, vp_size, fp_blob, fp_size)) {
+            /* The entry keeps the blobs. */
         } else {
             free(vp_blob);
             free(fp_blob);
@@ -5227,7 +5406,7 @@ void psgl_context_draw_arrays(GLenum mode, GLint first, GLsizei count)
     uint32_t primitive = psgl_gl_primitive(mode);
     if (!context || !context->gcm || first < 0 || count <= 0 || !primitive)
         return;
-    psgl_validate_draw_state(context);
+    if (!psgl_validate_draw_state(context)) return;
     if (!psgl_emit_client_vertex_arrays(context, first, count)) return;
     cellGcmSetDrawArrays(context->gcm, primitive, (uint32_t)first,
                          (uint32_t)count);
@@ -5247,7 +5426,7 @@ void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
     buffer = psgl_find_buffer(context->bound_element_array_buffer);
     if (!buffer || !buffer->address) return;
     offset = buffer->offset + (uint32_t)(uintptr_t)indices;
-    psgl_validate_draw_state(context);
+    if (!psgl_validate_draw_state(context)) return;
     cellGcmSetDrawIndexArray(context->gcm, (uint8_t)primitive,
                              (uint32_t)count, index_type,
                              buffer->location, offset);
