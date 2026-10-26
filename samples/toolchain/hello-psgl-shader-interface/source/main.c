@@ -1,6 +1,7 @@
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 #include <PSGL/psgl.h>
+#include <cell/sysutil.h>
 #include <cell/cgb.h>
 #include <cell/gcm.h>
 #include <rsx/mm.h>
@@ -13,6 +14,16 @@
 #include "vpshader_vpo.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
+
+/* Quit from the XMB ends the render loop instead of waiting it out. */
+static volatile int g_exit_requested = 0;
+
+static void on_sysutil_event(uint64_t status, uint64_t param, void *userdata)
+{
+    (void)param;
+    (void)userdata;
+    if (status == CELL_SYSUTIL_REQUEST_EXITGAME) g_exit_requested = 1;
+}
 
 typedef struct Vertex {
     float position[3];
@@ -140,7 +151,13 @@ int main(void)
     glVertexPointer(3, GL_FLOAT, sizeof(Vertex), (const void *)0);
     glEnableClientState(GL_VERTEX_ARRAY);
 
-    glViewport(0, 0, 1280, 720);
+    {
+        /* The render buffer follows the display mode (720p, 1080p, ...). */
+        GLuint width = 0u;
+        GLuint height = 0u;
+        psglGetRenderBufferDimensions(device, &width, &height);
+        glViewport(0, 0, (GLsizei)width, (GLsizei)height);
+    }
     glClearColor(0.02f, 0.08f, 0.18f, 1.0f);
     psglSetVertexProgramConfiguration(&vp_conf,
                                       cellCgbGetUCode(&vp_program));
@@ -154,13 +171,17 @@ int main(void)
     psglSetFragmentProgramConfigurationMemoryLocation(&fp_conf, true);
 
     printf("hello-psgl-shader-interface: ready\n");
-    for (int frame = 0; frame < 900; frame++) {
+    if (cellSysutilRegisterCallback(0, on_sysutil_event, NULL) != 0)
+        printf("hello-psgl-shader-interface: sysutil callback not registered\n");
+    for (int frame = 0; frame < 900 && !g_exit_requested; frame++) {
+        cellSysutilCheckCallback();
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         psglSwap();
         sys_timer_usleep(16000);
     }
 
+    cellSysutilUnregisterCallback(0);
     printf("hello-psgl-shader-interface: done\n");
     psglExit();
     return 0;

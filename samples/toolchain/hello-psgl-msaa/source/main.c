@@ -2,6 +2,7 @@
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 #include <PSGL/psgl.h>
+#include <cell/sysutil.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/process.h>
@@ -11,6 +12,16 @@
 #include "vpshader_vpo.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
+
+/* Quit from the XMB ends the render loop instead of waiting it out. */
+static volatile int g_exit_requested = 0;
+
+static void on_sysutil_event(uint64_t status, uint64_t param, void *userdata)
+{
+    (void)param;
+    (void)userdata;
+    if (status == CELL_SYSUTIL_REQUEST_EXITGAME) g_exit_requested = 1;
+}
 
 #define VP_PATH "/dev_hdd0/tmp/hello-psgl-msaa.vpo"
 #define FP_PATH "/dev_hdd0/tmp/hello-psgl-msaa.fpo"
@@ -79,7 +90,7 @@ int main(void)
     }
     psglMakeCurrent(gl_context, device);
     psglGetRenderBufferDimensions(device, &width, &height);
-    if (width != 1280u || height != 720u) {
+    if (width == 0u || height == 0u) {
         printf("hello-psgl-msaa: bad render dims %u %u\n", width, height);
         psglExit();
         return 1;
@@ -112,7 +123,7 @@ int main(void)
     glVertexPointer(3, GL_FLOAT, sizeof(Vertex), (const void *)0);
     glEnableClientState(GL_VERTEX_ARRAY);
 
-    glViewport(0, 0, 1280, 720);
+    glViewport(0, 0, (GLsizei)width, (GLsizei)height);
     glClearColor(0.02f, 0.08f, 0.18f, 1.0f);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -126,13 +137,17 @@ int main(void)
                                GL_MULTISAMPLING_2X_DIAGONAL_CENTERED_SCE);
 
     printf("hello-psgl-msaa: ready\n");
-    for (int i = 0; i < 900; i++) {
+    if (cellSysutilRegisterCallback(0, on_sysutil_event, NULL) != 0)
+        printf("hello-psgl-msaa: sysutil callback not registered\n");
+    for (int i = 0; i < 900 && !g_exit_requested; i++) {
+        cellSysutilCheckCallback();
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         psglSwap();
         sys_timer_usleep(16000);
     }
 
+    cellSysutilUnregisterCallback(0);
     printf("hello-psgl-msaa: done\n");
     cgDestroyContext(cg_context);
     psglExit();

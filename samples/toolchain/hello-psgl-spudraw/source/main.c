@@ -5,8 +5,10 @@
  */
 #include <GLES/gl.h>
 #include <PSGL/psgl.h>
+#include <cell/sysutil.h>
 #include <malloc.h>
 #include <ppu-types.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +23,16 @@
 #include "spu_hole_fill_bin.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
+
+/* Quit from the XMB ends the render loop instead of waiting it out. */
+static volatile int g_exit_requested = 0;
+
+static void on_sysutil_event(uint64_t status, uint64_t param, void *userdata)
+{
+    (void)param;
+    (void)userdata;
+    if (status == CELL_SYSUTIL_REQUEST_EXITGAME) g_exit_requested = 1;
+}
 
 typedef struct {
     unsigned long long initAddr, holeEA;
@@ -46,7 +58,13 @@ int main(void)
     ctx = psglGetCurrentContext();
     if (!ctx) ctx = psglCreateContext();
     psglMakeCurrent(ctx, device);
-    glViewport(0, 0, 1280, 720);
+    {
+        /* The render buffer follows the display mode (720p, 1080p, ...). */
+        GLuint width = 0u;
+        GLuint height = 0u;
+        psglGetRenderBufferDimensions(device, &width, &height);
+        glViewport(0, 0, (GLsizei)width, (GLsizei)height);
+    }
 
     cmdbuf = psglAllocateCommandBuffer(1024u * 1024u, &cmd_offset);
     if (!cmdbuf) { printf("spudraw: fail alloc\n"); psglExit(); return 1; }
@@ -104,12 +122,16 @@ int main(void)
 
     glClearColor(0.0f, 0.3f, 0.0f, 1.0f);
     printf("hello-psgl-spudraw: ready\n");
-    for (int i = 0; i < 900; i++) {
+    if (cellSysutilRegisterCallback(0, on_sysutil_event, NULL) != 0)
+        printf("hello-psgl-spudraw: sysutil callback not registered\n");
+    for (int i = 0; i < 900 && !g_exit_requested; i++) {
+        cellSysutilCheckCallback();
         glClear(GL_COLOR_BUFFER_BIT);
         psglCallCommandBuffer(cmdbuf);
         psglSwap();
         sys_timer_usleep(16000);
     }
+    cellSysutilUnregisterCallback(0);
     printf("hello-psgl-spudraw: done\n");
 
     free(params);
