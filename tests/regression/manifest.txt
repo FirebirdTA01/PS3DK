@@ -320,3 +320,5 @@ psgl-texture-upload-ilp32,tests/regression/psgl-texture-upload/psgl-texture-uplo
 psgl-texture-upload-lp64,tests/regression/psgl-texture-upload/psgl-texture-upload-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_UPLOAD_OK checks=35 failures=0\r?$,PSGL_UPLOAD_FAIL
 psgl-readpixels-ilp32,tests/regression/psgl-readpixels/psgl-readpixels-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_READ_OK checks=64 failures=0\r?$,PSGL_READ_FAIL
 psgl-readpixels-lp64,tests/regression/psgl-readpixels/psgl-readpixels-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_READ_OK checks=64 failures=0\r?$,PSGL_READ_FAIL
+psgl-readpixels-fullsize-ilp32,tests/regression/psgl-readpixels-fullsize/psgl-readpixels-fullsize-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_READ_FULL_OK checks=62 failures=0\r?$,PSGL_READ_FULL_FAIL
+psgl-readpixels-fullsize-lp64,tests/regression/psgl-readpixels-fullsize/psgl-readpixels-fullsize-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_READ_FULL_OK checks=62 failures=0\r?$,PSGL_READ_FULL_FAIL
