@@ -15,6 +15,9 @@ extern unsigned psgl_fp_ucode_copies __attribute__((weak));
 extern unsigned psgl_fp_ucode_ring_waits __attribute__((weak));
 static unsigned checks, failures;
 static CGparameter color_parameter;
+static CGcontext g_cg;
+static CGprogram g_fp_a;
+static const char *const k_fp_path = "/dev_hdd0/tmp/psgl-fp-uniform-order.fpo";
 static void check(int ok, const char *name)
 {
     ++checks;
@@ -30,18 +33,19 @@ static int write_blob(const char *path, const void *data, size_t size)
 static int setup_draw(void)
 {
     const char *vp_path = "/dev_hdd0/tmp/psgl-fp-uniform-order.vpo";
-    const char *fp_path = "/dev_hdd0/tmp/psgl-fp-uniform-order.fpo";
+    const char *fp_path = k_fp_path;
     static const float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     static const float quad[18] = {-1,-1,0, 1,-1,0, 1,1,0, -1,-1,0, 1,1,0, -1,1,0};
     GLuint vertex_buffer = 0;
     if (!write_blob(vp_path, vpshader_vpo, vpshader_vpo_size) ||
         !write_blob(fp_path, fpshader_fpo, fpshader_fpo_size)) return 0;
-    CGcontext cg = cgCreateContext();
+    CGcontext cg = g_cg = cgCreateContext();
     CGprogram vp = cgCreateProgramFromFile(cg, CG_BINARY, vp_path, CG_PROFILE_SCE_VP_RSX, NULL, NULL);
     CGprogram fp = cgCreateProgramFromFile(cg, CG_BINARY, fp_path, CG_PROFILE_SCE_FP_RSX, NULL, NULL);
     CGparameter matrix = cgGetNamedParameter(vp, "modelViewProj");
     color_parameter = cgGetNamedParameter(fp, "solidColor");
     if (!cg || !vp || !fp || !matrix || !color_parameter) return 0;
+    g_fp_a = fp;
     cgGLLoadProgram(vp); cgGLLoadProgram(fp);
     cgGLEnableProfile(CG_PROFILE_SCE_VP_RSX); cgGLEnableProfile(CG_PROFILE_SCE_FP_RSX);
     cgGLBindProgram(vp); cgGLBindProgram(fp);
@@ -193,6 +197,47 @@ int main(void)
         check(bad == 0, "exhaustion: every queued cell keeps its own value");
         check(&psgl_fp_ucode_ring_waits != 0 && psgl_fp_ucode_ring_waits > waits,
               "exhaustion: the copy ring wrapped at least once");
+    }
+
+    /* Dormant program: A takes a ring copy, then program B makes enough
+       changes to wrap the ring twice, so A's slot is certainly reused.
+       Rebinding A without a uniform change must recopy A exactly once and
+       draw A's own value, not whatever B left in A's old slot. */
+    check(&psgl_fp_ucode_copies != 0, "dormant: counters are present");
+    if (&psgl_fp_ucode_copies != 0) {
+        static const float red[4] = {1,0,0,1};
+        static const float greens[2][4] = {{0,1,0,1},{0,0.5f,0,1}};
+        CGprogram fp_b = cgCreateProgramFromFile(g_cg, CG_BINARY, k_fp_path,
+                                                 CG_PROFILE_SCE_FP_RSX, NULL, NULL);
+        CGparameter color_b = fp_b ? cgGetNamedParameter(fp_b, "solidColor") : NULL;
+        check(fp_b && color_b, "dormant: second program");
+        if (fp_b && color_b) {
+            glClearColor(0,0,0,0); glClear(GL_COLOR_BUFFER_BIT);
+            cgGLSetParameter4fv(color_parameter, red);
+            glViewport(0, 0, 8, 4); glDrawArrays(GL_TRIANGLES, 0, 6);
+            expect(1, 0, "dormant: A draws before B");
+            cgGLLoadProgram(fp_b);
+            cgGLBindProgram(fp_b);
+            unsigned waits = psgl_fp_ucode_ring_waits, changes = 0;
+            while (psgl_fp_ucode_ring_waits - waits < 2u && changes < 100000u) {
+                cgGLSetParameter4fv(color_b, greens[changes & 1u]);
+                glViewport(8, 0, 8, 4); glDrawArrays(GL_TRIANGLES, 0, 6);
+                ++changes;
+            }
+            printf("PSGL_FP_ORDER_DORMANT b_changes=%u ring_waits=%u\n",
+                   changes, psgl_fp_ucode_ring_waits - waits);
+            check(psgl_fp_ucode_ring_waits - waits >= 2u, "dormant: B wrapped the ring twice");
+            cgGLSetParameter4fv(color_b, k_colors[2]);
+            glViewport(8, 0, 8, 4); glDrawArrays(GL_TRIANGLES, 0, 6);
+            unsigned before = psgl_fp_ucode_copies;
+            cgGLBindProgram(g_fp_a);
+            glViewport(16, 0, 8, 4); glDrawArrays(GL_TRIANGLES, 0, 6);
+            unsigned recopies = psgl_fp_ucode_copies - before;
+            expect(17, 0, "dormant: A keeps its value after B reused its slot");
+            expect(9, 2, "dormant: B's last value");
+            printf("PSGL_FP_ORDER_DORMANT a_recopies=%u\n", recopies);
+            check(recopies == 1u, "dormant: A is copied again exactly once");
+        }
     }
 
     printf("PSGL_FP_ORDER_%s checks=%u failures=%u\n", failures ? "FAIL" : "OK", checks, failures);

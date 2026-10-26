@@ -17,6 +17,10 @@ earlier draws using the same program are still queued.
   which is more changes than the copy ring holds. One readback then checks
   every cell. The ring must wrap at least once, and every cell must keep its
   value.
+- Dormant program: program A takes a ring copy, then a second program
+  makes enough changes to wrap the ring twice, so A's slot is certainly
+  reused. Rebinding A without a uniform change must draw A's own value and
+  copy A exactly once more (the stale-lap path, with no changed value).
 
 A bounded warm-up (at most ten attempts, 200 ms apart, count printed) absorbs
 RPCS3 asynchronous shader compilation skipping the first cold draw. Nothing
