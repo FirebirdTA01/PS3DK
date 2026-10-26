@@ -632,8 +632,11 @@ GLAPI void glDisableVertexAttribArray(GLuint index)
     PSGLcontext *context = gls_attrib_context(index);
     if (!context) return;
     context->gl_attribs[index].enabled = GL_FALSE;
-    if (!index && !context->bound_vertex_program)
+    if (!index && !context->bound_vertex_program) {
+        if (context->attribs[PSGL_ATTRIB_VERTEX].enabled)
+            context->retire_vertex_arrays = GL_TRUE;
         context->attribs[PSGL_ATTRIB_VERTEX].enabled = GL_FALSE;
+    }
     context->dirty |= PSGL_DIRTY_CG;
 }
 

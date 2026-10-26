@@ -326,3 +326,5 @@ psgl-attrib-routing-ilp32,tests/regression/psgl-attrib-routing/psgl-attrib-routi
 psgl-attrib-routing-lp64,tests/regression/psgl-attrib-routing/psgl-attrib-routing-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_ATTR_OK checks=80 failures=0\r?$,PSGL_ATTR_FAIL
 psgl-attrib-normalization-ilp32,tests/regression/psgl-attrib-state/psgl-attrib-normalization-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_ATTR_STATE_OK checks=12 failures=0\r?$,PSGL_ATTR_STATE_FAIL
 psgl-attrib-normalization-lp64,tests/regression/psgl-attrib-state/psgl-attrib-normalization-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_ATTR_STATE_OK checks=12 failures=0\r?$,PSGL_ATTR_STATE_FAIL
+psgl-attrib-disable-ilp32,tests/regression/psgl-attrib-state/psgl-attrib-disable-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_ATTR_STATE_OK checks=7 failures=0\r?$,PSGL_ATTR_STATE_FAIL
+psgl-attrib-disable-lp64,tests/regression/psgl-attrib-state/psgl-attrib-disable-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_ATTR_STATE_OK checks=7 failures=0\r?$,PSGL_ATTR_STATE_FAIL

@@ -37,6 +37,9 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL disabled color arrays.** Disabling legacy or direct-Cg arrays
+  retires stale hardware array descriptors before the next draw. Disabled
+  color arrays use the current color instead of fetching the old array.
 - **PSGL unsigned-byte attribute normalization.** GL vertex attribute
   pointers retain their normalization flag. Routed VBO and client arrays
   deliver four-component byte inputs as either 0..1 or 0..255 as requested,

@@ -2027,13 +2027,13 @@ static uint32_t psgl_gl_client_element_size(const PSGLvertexAttribState *attrib)
 static void psgl_emit_vertex_arrays(PSGLcontext *context)
 {
     if (!context || !context->gcm) return;
-    if (context->gl_attrib_routing || context->retire_gl_arrays) {
-        /* A new executable can move a location to any hardware input.
-           Retire all previous array descriptors before installing it. */
+    if (context->gl_attrib_routing || context->retire_vertex_arrays) {
+        /* A new executable can move an input; disabling an array must
+           also retire its descriptor before installing current values. */
         for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw)
             cellGcmSetVertexDataArray(context->gcm, (uint8_t)hw, 0, 0, 0,
                                       CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_MAIN, 0);
-        context->retire_gl_arrays = GL_FALSE;
+        context->retire_vertex_arrays = GL_FALSE;
     }
     if (context->gl_attrib_routing) {
         for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
@@ -2851,7 +2851,7 @@ void psgl_context_set_gl_attrib_routing(const int8_t *hw_to_location)
 {
     PSGLcontext *context = g_psgl.current_context;
     if (!context) return;
-    if (context->gl_attrib_routing) context->retire_gl_arrays = GL_TRUE;
+    if (context->gl_attrib_routing) context->retire_vertex_arrays = GL_TRUE;
     context->gl_attrib_routing = hw_to_location != NULL;
     for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw)
         context->gl_hw_to_location[hw] = hw_to_location ? hw_to_location[hw] : -1;
@@ -4853,26 +4853,18 @@ void psgl_context_set_client_state(GLenum array, GLboolean enabled)
 {
     PSGLcontext *context = g_psgl.current_context;
     if (!context) return;
+    PSGLvertexAttribSlot slot;
     switch (array) {
-    case GL_VERTEX_ARRAY:
-        context->attribs[PSGL_ATTRIB_VERTEX].enabled = enabled;
-        context->dirty |= PSGL_DIRTY_CG;
-        break;
-    case GL_NORMAL_ARRAY:
-        context->attribs[PSGL_ATTRIB_NORMAL].enabled = enabled;
-        context->dirty |= PSGL_DIRTY_CG;
-        break;
-    case GL_COLOR_ARRAY:
-        context->attribs[PSGL_ATTRIB_COLOR].enabled = enabled;
-        context->dirty |= PSGL_DIRTY_CG;
-        break;
-    case GL_TEXTURE_COORD_ARRAY:
-        context->attribs[PSGL_ATTRIB_TEXCOORD].enabled = enabled;
-        context->dirty |= PSGL_DIRTY_CG;
-        break;
-    default:
-        break;
+    case GL_VERTEX_ARRAY: slot = PSGL_ATTRIB_VERTEX; break;
+    case GL_NORMAL_ARRAY: slot = PSGL_ATTRIB_NORMAL; break;
+    case GL_COLOR_ARRAY: slot = PSGL_ATTRIB_COLOR; break;
+    case GL_TEXTURE_COORD_ARRAY: slot = PSGL_ATTRIB_TEXCOORD; break;
+    default: return;
     }
+    if (!enabled && context->attribs[slot].enabled)
+        context->retire_vertex_arrays = GL_TRUE;
+    context->attribs[slot].enabled = enabled;
+    context->dirty |= PSGL_DIRTY_CG;
 }
 
 void psgl_context_set_attrib_pointer(PSGLvertexAttribSlot slot, GLint size,
@@ -4896,6 +4888,8 @@ void psgl_context_set_generic_attrib_enabled(GLuint index, GLboolean enabled)
 {
     PSGLcontext *context = g_psgl.current_context;
     if (!context || index >= PSGL_MAX_GENERIC_ATTRIBS) return;
+    if (!enabled && context->generic_attribs[index].enabled)
+        context->retire_vertex_arrays = GL_TRUE;
     context->generic_attribs[index].enabled = enabled;
     context->dirty |= PSGL_DIRTY_CG;
 }

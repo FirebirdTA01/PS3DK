@@ -209,7 +209,7 @@ struct PSGLcontext {
     GLfloat gl_current_attribs[PSGL_MAX_GL_ATTRIBS][4];
     int8_t gl_hw_to_location[PSGL_MAX_GENERIC_ATTRIBS];
     GLboolean gl_attrib_routing;
-    GLboolean retire_gl_arrays;
+    GLboolean retire_vertex_arrays;
     GLboolean gl_attrib_normalized[PSGL_MAX_GL_ATTRIBS];
 };
 

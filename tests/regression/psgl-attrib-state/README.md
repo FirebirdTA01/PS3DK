@@ -5,6 +5,9 @@ An UNSIGNED_BYTE input of 255 must produce framebuffer byte 1 when
 normalized, and byte 255 when not normalized. Both VBO and client arrays
 are checked. The disable row checks that disabling a legacy or direct-Cg
 color array restores the current color rather than reusing stale data.
+An enabled-to-disabled legacy/Cg transition schedules a reset of all 16
+hardware array descriptors before the remaining arrays are reinstalled.
+This adds commands on those transitions; no performance improvement is claimed.
 The normalization repair covers unsigned-byte GL inputs; the existing
 unsigned-short conversion still needs its own semantics audit. Direct-Cg
 physical ATTR7 byte conversion is unchanged.
