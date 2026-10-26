@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.26.0] — 2026-10-25
+
 ### Added
 
 - **Packaged PSGL shader-library builder.** `psgl-shader-builder` ships with
@@ -214,16 +216,25 @@ The version stamped into builds is generated from the most recent
 - **Exception support is process-scoped.** PRX/module exception support
   and module unload are not covered. Registry-node allocation failure is
   fatal; its hardware outcome remains unvalidated.
-- **Validation scope.** The earlier GCC16 candidate built and ran visible RPCS3
-  startup/render smokes for TestApp, PS3TestApp and Mossbrook. HexBreakers
-  was blocked before compilation by missing project PS3 shader sources.
-  Those app runs used RPCS3's PPU and SPU LLVM decoders and Sony sce-cgc;
-  they do not validate rsx-cg-compiler or every SPU execution path. Forced stops
-  did not exercise clean exit or interrupt-thread teardown, and no hardware
-  acceptance is claimed. The SDK's shader suite and differential checks
-  are separate evidence; full Cg language coverage is not claimed. Those app
-  results predate the ext_dce and SPU late-combine repairs; a rebuilt combined
-  candidate still needs repeat app validation.
+- **Validation scope.** The repaired GCC16 candidate built and ran visible
+  RPCS3 startup/render smokes for TestApp, PS3TestApp and Mossbrook, including
+  the entropy, ext_dce and SPU late-combine repairs. HexBreakers remains
+  unvalidated: missing project PS3 shader sources blocked compilation.
+  Those app runs used RPCS3's PPU and SPU LLVM decoders and the apps'
+  existing shader toolchain;
+  they do not validate rsx-cg-compiler or every SPU execution path. Forced
+  stops did not exercise clean exit or interrupt-thread teardown. Full
+  gameplay, hardware app acceptance and entropy quality are not established.
+  The SDK's shader suite and differential checks are separate evidence;
+  full Cg language coverage is not claimed.
+- **RPCS3 peer-SPU local-store DMA.** A minimal peer-local-store PUT16 probe
+  faults on the tested RPCS3 build but passes on hardware. Hardware also
+  passes the probe's PUT4 mode, which that emulator run never reached.
+  The SPU-chain sample exhibits the same fault class in RPCS3; its own
+  hardware correctness remains unverified.
+- **Sample coverage.** Some samples need media fixtures, peripherals,
+  online services or packaged-application metadata. Interactive and
+  prerequisite-blocked cases remain outside full functional acceptance.
 
 ## [v0.25.0] — 2026-10-18
 

@@ -1,6 +1,6 @@
 # Exception lookup without the registry lock (GCC 16 PPU)
 
-Status: landed on main, not yet in a release. The supported process scope
+Status: included in v0.26.0. The supported process scope
 and remaining hardware/module limitations are described below.
 
 ## Why
