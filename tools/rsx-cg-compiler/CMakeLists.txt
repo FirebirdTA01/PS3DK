@@ -5,7 +5,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 project(rsx-cg-compiler
-    LANGUAGES CXX
+    LANGUAGES C CXX
     DESCRIPTION "PS3 Cg-to-RSX (NV40) shader compiler (CgBinaryProgram compat)")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -140,12 +140,21 @@ set(SRC_MAIN
     ${SRC_DIR}/main.cpp
 )
 
+# --psgl-ffp-library: the fixed-function state mask -> Cg generator is
+# libPSGL's own source file, compiled here as well, so the library this
+# mode writes and the masks libPSGL looks up can never disagree.
+set(PSGL_FFP_DIR ${_repo_root}/sdk/libPSGL/src)
+set(SRC_PSGL_FFP
+    ${PSGL_FFP_DIR}/ffp_emit.c
+)
+
 add_executable(rsx-cg-compiler
     ${SRC_CG_FRONTEND}
     ${SRC_CG_FRONTEND_IR}
     ${SRC_NV40}
     ${SRC_CONTAINER}
     ${SRC_MAIN}
+    ${SRC_PSGL_FFP}
     ${EMBED_OUTPUT}
 )
 
@@ -157,6 +166,7 @@ target_include_directories(rsx-cg-compiler PRIVATE
     ${CG_FRONTEND_DIR}/ir
     ${SRC_DIR}
     ${NV40_DIR}
+    ${PSGL_FFP_DIR}
 )
 
 # ----------------------------------------------------------------------------

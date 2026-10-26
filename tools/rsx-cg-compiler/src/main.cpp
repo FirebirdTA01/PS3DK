@@ -5,6 +5,8 @@
  * builds the hardware-agnostic IRModule, then lowers + emits NV40 ucode.
  */
 
+#include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -34,6 +36,10 @@
 #include "cg_container_fp.h"
 #include "cg_container_vp.h"
 #include "version.h"
+
+extern "C" {
+#include "ffp_emit.h"
+}
 
 namespace
 {
@@ -92,6 +98,9 @@ void usage()
         "                         default, so an unflagged compile accepts and\n"
         "                         emits what the reference does)\n"
         "  --list-extensions      List the supported extension names and exit\n"
+        "  --psgl-ffp-library <state.txt> -o <shaders.bin>\n"
+        "                         Build a PSGL fixed-function shader library\n"
+        "                         (must be the first argument)\n"
         "  -h, --help             Show this message\n"
         "  -V, --version          Print version and exit\n",
         RSX_CG_COMPILER_VERSION);
@@ -154,193 +163,21 @@ std::string runPreprocessor(const std::string& sourceCode,
     return out;
 }
 
-}  // namespace
-
-int main(int argc, char** argv)
+struct DriverFlags
 {
-    CompilerContext ctx;
     bool dumpAst = false;
-    bool dumpIr  = false;
+    bool dumpIr = false;
     bool dumpPreprocess = false;
-    // The NV40 shape matcher that --legacy-lowering and RSXCG_GENERAL=0
-    // used to select has been removed; the general lowering is the only
-    // back end.  Asking for the matcher is refused by name rather than
-    // ignored, so a script that relied on it learns why its output
-    // changed instead of silently getting the other path.
-    const char* generalEnv = std::getenv("RSXCG_GENERAL");
-    if (generalEnv && std::strcmp(generalEnv, "0") == 0)
-    {
-        std::fprintf(stderr,
-            "rsx-cg-compiler: RSXCG_GENERAL=0 selected the legacy NV40 shape "
-            "matcher, which has been removed; the general lowering is the "
-            "only back end.  Unset RSXCG_GENERAL.\n");
-        return 1;
-    }
+    bool quiet = false;   // no Entry point / Stage / IR functions lines
+};
 
-    int i = 1;
-    while (i < argc)
-    {
-        const std::string arg = argv[i];
-        if (arg == "-h" || arg == "--help")
-        {
-            usage();
-            return 0;
-        }
-        else if (arg == "-V" || arg == "--version")
-        {
-            std::printf("rsx-cg-compiler %s\n", RSX_CG_COMPILER_VERSION);
-            return 0;
-        }
-        else if ((arg == "-p" || arg == "--profile") && i + 1 < argc)
-        {
-            const std::string p = argv[++i];
-            if (p == "sce_fp_rsx" || p == "sce_fp_psp2")
-                ctx.profile = CompilerContext::Profile::FragmentRsx;
-            else if (p == "sce_vp_rsx" || p == "sce_vp_psp2")
-                ctx.profile = CompilerContext::Profile::VertexRsx;
-            else
-            {
-                std::fprintf(stderr, "rsx-cg-compiler: unknown profile '%s'\n", p.c_str());
-                return 1;
-            }
-        }
-        else if ((arg == "-e" || arg == "--entry") && i + 1 < argc)
-        {
-            ctx.entryName = argv[++i];
-        }
-        else if (arg == "-I" && i + 1 < argc)
-        {
-            ctx.includeDirs.emplace_back(argv[++i]);
-        }
-        else if (arg == "--no-stdlib")
-        {
-            ctx.noStdLib = true;
-        }
-        else if (arg == "--dump-ast")
-        {
-            dumpAst = true;
-        }
-        else if (arg == "--dump-ir")
-        {
-            dumpIr = true;
-        }
-        else if (arg == "--dump-preprocess")
-        {
-            dumpPreprocess = true;
-        }
-        else if (arg == "--emit-container" && i + 1 < argc)
-        {
-            ctx.containerOutPath = argv[++i];
-        }
-        else if (arg == "--emit-cgb-container" && i + 1 < argc)
-        {
-            ctx.cgbContainerOutPath = argv[++i];
-        }
-        else if (arg == "--general-lowering")
-        {
-            // A no-op alias for one release, so every script, CI line
-            // and rig column that names the path it wanted keeps
-            // working.
-        }
-        else if (arg == "--legacy-lowering")
-        {
-            std::fprintf(stderr,
-                "rsx-cg-compiler: --legacy-lowering selected the NV40 shape "
-                "matcher, which has been removed; the general lowering is "
-                "the only back end.  Drop the flag.\n");
-            return 1;
-        }
-        else if (arg == "-O0" || arg == "--O0")
-        {
-            ctx.compileOpts.opt = rsx_cg::OptLevel::O0;
-        }
-        else if (arg == "-O1" || arg == "--O1")
-        {
-            ctx.compileOpts.opt = rsx_cg::OptLevel::O1;
-        }
-        else if (arg == "-O2" || arg == "--O2")
-        {
-            ctx.compileOpts.opt = rsx_cg::OptLevel::O2;
-        }
-        else if (arg == "-O3" || arg == "--O3")
-        {
-            ctx.compileOpts.opt = rsx_cg::OptLevel::O3;
-        }
-        else if (arg == "-O4" || arg == "--O4")
-        {
-            ctx.compileOpts.opt = rsx_cg::OptLevel::O4;
-        }
-        else if (arg == "--fastmath")
-        {
-            ctx.compileOpts.fastmath = true;
-        }
-        else if (arg == "--nofastmath")
-        {
-            ctx.compileOpts.fastmath = false;
-        }
-        else if (arg == rsx_cg::kListExtensionsFlag)
-        {
-            std::size_t count = 0;
-            const rsx_cg::ExtensionInfo* table = rsx_cg::allExtensions(count);
-            for (std::size_t n = 0; n < count; ++n)
-                std::printf("%s\t%s\n", table[n].name, table[n].summary);
-            return 0;
-        }
-        else if (arg.compare(0, std::strlen(rsx_cg::kExtensionFlagPrefix),
-                             rsx_cg::kExtensionFlagPrefix) == 0)
-        {
-            // Validated HERE, before any file is read: an unknown name is a
-            // refusal in its own right, not something to tolerate and then
-            // fail on later for a reason that has nothing to do with it.
-            // One name per flag, exact spelling; there is no "all".
-            const std::string name = arg.substr(std::strlen(rsx_cg::kExtensionFlagPrefix));
-            const rsx_cg::ExtensionInfo* info = rsx_cg::findExtension(name);
-            if (!info)
-            {
-                std::fprintf(stderr,
-                    "rsx-cg-compiler: unknown extension '%s'; supported:",
-                    name.c_str());
-                std::size_t count = 0;
-                const rsx_cg::ExtensionInfo* table = rsx_cg::allExtensions(count);
-                for (std::size_t n = 0; n < count; ++n)
-                    std::fprintf(stderr, " %s", table[n].name);
-                std::fprintf(stderr, " (%s)\n", rsx_cg::kListExtensionsFlag);
-                return 1;
-            }
-            ctx.extensions.enable(info->id);
-        }
-        else if (arg == "--extension")
-        {
-            std::fprintf(stderr,
-                "rsx-cg-compiler: --extension needs =<name>, as in %sbom; see %s\n",
-                rsx_cg::kExtensionFlagPrefix, rsx_cg::kListExtensionsFlag);
-            return 1;
-        }
-        else if (!arg.empty() && arg[0] == '-')
-        {
-            std::fprintf(stderr, "rsx-cg-compiler: unknown option '%s'\n", arg.c_str());
-            usage();
-            return 1;
-        }
-        else
-        {
-            if (!ctx.inputFile.empty())
-            {
-                std::fprintf(stderr, "rsx-cg-compiler: only one input file allowed\n");
-                return 1;
-            }
-            ctx.inputFile = arg;
-        }
-        ++i;
-    }
-
-    if (ctx.inputFile.empty())
-    {
-        usage();
-        return 1;
-    }
-
-    std::string sourceCode = slurpFile(ctx.inputFile);
+// The whole compile, from source text to a container (or the ucode dump).
+// main() drives it for one file; --psgl-ffp-library calls it once per
+// generated program with containerOut set, so the bytes stay in memory.
+int compileProgram(CompilerContext& ctx, const std::string& source,
+                   const DriverFlags& flags, std::vector<uint8_t>* containerOut)
+{
+    std::string sourceCode = source;
     std::string preprocessed;
     try
     {
@@ -359,7 +196,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (dumpPreprocess)
+    if (flags.dumpPreprocess)
     {
         std::cout << preprocessed;
         if (preprocessed.empty() || preprocessed.back() != '\n')
@@ -401,7 +238,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (dumpAst)
+    if (flags.dumpAst)
     {
         std::cout << "-- AST ----------------------------------------------------------\n";
         AstPrinter printer;
@@ -621,7 +458,7 @@ int main(int argc, char** argv)
             }
         }
 
-        if (dumpIr)
+        if (flags.dumpIr)
             irDump = irModule->toString();
 
         if (stage == ShaderStage::Fragment)
@@ -643,21 +480,24 @@ int main(int argc, char** argv)
         break;
     }
 
-    if (dumpIr)
+    if (flags.dumpIr)
     {
         std::cout << "-- IR -----------------------------------------------------------\n";
         std::cout << irDump;
         std::cout << "----------------------------------------------------------------\n";
     }
 
-    if (ast->entryPoint)
+    if (!flags.quiet)
     {
-        std::cout << "Entry point: " << ast->entryPoint->name << "\n";
+        if (ast->entryPoint)
+        {
+            std::cout << "Entry point: " << ast->entryPoint->name << "\n";
+        }
+        std::cout << "Stage: "
+                  << (stage == ShaderStage::Fragment ? "fragment" : "vertex")
+                  << "\n";
+        std::cout << "IR functions: " << irModule->functions.size() << "\n";
     }
-    std::cout << "Stage: "
-              << (stage == ShaderStage::Fragment ? "fragment" : "vertex")
-              << "\n";
-    std::cout << "IR functions: " << irModule->functions.size() << "\n";
 
     for (const auto& diag : ucode.diagnostics)
     {
@@ -678,7 +518,8 @@ int main(int argc, char** argv)
     }
 
     const std::string outPath =
-        !ctx.cgbContainerOutPath.empty() ? ctx.cgbContainerOutPath : ctx.containerOutPath;
+        containerOut ? std::string("<memory>")
+        : !ctx.cgbContainerOutPath.empty() ? ctx.cgbContainerOutPath : ctx.containerOutPath;
     const bool emitCompactCgb = !ctx.cgbContainerOutPath.empty();
 
     if (!outPath.empty())
@@ -722,6 +563,11 @@ int main(int argc, char** argv)
                 ctx.inputFile.c_str());
             return 1;
         }
+        if (containerOut)
+        {
+            *containerOut = std::move(containerBytes);
+            return 0;
+        }
         std::ofstream of(outPath, std::ios::binary | std::ios::trunc);
         if (!of)
         {
@@ -748,4 +594,364 @@ int main(int argc, char** argv)
         if ((w % 4) == 3) std::printf("\n");
     }
     return 0;
+}
+
+// --psgl-ffp-library <state.txt> -o <shaders.bin>
+//
+// Builds the PSGL fixed-function shader library that psgl-shader-builder
+// used to build by running this compiler twice per mask.  The Cg for each
+// mask comes from libPSGL's own ffp_emit.c; each program goes through the
+// same compileProgram() a single-file compile uses, so the containers are
+// the bytes `-p sce_vp_rsx --emit-container` / `-p sce_fp_rsx` would write.
+//
+// Layout (big-endian): "PSGLSHDR", u32 PSGL_SHADER_LIBRARY_VERSION, u32
+// count, then per mask: u32 mask, u32 vp size, u32 fp size, vp bytes, fp
+// bytes.  The state file holds one mask per line (strtoul base 0); '#'
+// starts a comment and blank lines are skipped.  Nothing is written unless
+// every mask compiles.
+constexpr std::size_t kFfpSourceCapacity = 8192u;
+
+void appendBe32(std::vector<uint8_t>& out, uint32_t value)
+{
+    out.push_back(static_cast<uint8_t>((value >> 24) & 0xffu));
+    out.push_back(static_cast<uint8_t>((value >> 16) & 0xffu));
+    out.push_back(static_cast<uint8_t>((value >> 8) & 0xffu));
+    out.push_back(static_cast<uint8_t>(value & 0xffu));
+}
+
+// 1 = a mask, 0 = blank or comment, -1 = malformed.
+int parseFfpMaskLine(char* line, uint32_t* mask)
+{
+    char* comment = std::strchr(line, '#');
+    char* end = nullptr;
+    unsigned long value;
+    if (comment) *comment = '\0';
+    while (*line == ' ' || *line == '\t' || *line == '\r' || *line == '\n')
+        line++;
+    if (*line == '\0') return 0;
+    errno = 0;
+    value = std::strtoul(line, &end, 0);
+    if (errno || end == line || value > 0xfffffffful) return -1;
+    while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')
+        end++;
+    if (*end != '\0') return -1;
+    *mask = static_cast<uint32_t>(value);
+    return 1;
+}
+
+bool compileFfpProgram(const std::string& name, const char* source,
+                       CompilerContext::Profile profile,
+                       std::vector<uint8_t>& container)
+{
+    CompilerContext ctx;
+    ctx.inputFile = name;
+    ctx.profile = profile;
+    DriverFlags flags;
+    flags.quiet = true;
+    return compileProgram(ctx, source, flags, &container) == 0;
+}
+
+int runPsglFfpLibrary(const std::string& statePath, const std::string& outPath)
+{
+    std::FILE* state = std::fopen(statePath.c_str(), "rb");
+    if (!state)
+    {
+        std::perror(statePath.c_str());
+        return 1;
+    }
+
+    std::vector<uint8_t> library;
+    const char magic[] = "PSGLSHDR";
+    library.insert(library.end(), magic, magic + 8);
+    appendBe32(library, PSGL_SHADER_LIBRARY_VERSION);
+    const std::size_t countPos = library.size();
+    appendBe32(library, 0u);
+
+    uint32_t count = 0u;
+    char line[256];
+    while (std::fgets(line, sizeof(line), state))
+    {
+        uint32_t mask = 0u;
+        const int parsed = parseFfpMaskLine(line, &mask);
+        if (parsed < 0)
+        {
+            std::fprintf(stderr, "rsx-cg-compiler: invalid state line\n");
+            std::fclose(state);
+            return 1;
+        }
+        if (parsed == 0) continue;
+
+        char vpSource[kFfpSourceCapacity];
+        char fpSource[kFfpSourceCapacity];
+        if (!psgl_ffp_state_mask_to_cg(mask, vpSource, sizeof(vpSource),
+                                       fpSource, sizeof(fpSource)))
+        {
+            std::fprintf(stderr, "rsx-cg-compiler: unsupported mask 0x%08x\n", mask);
+            std::fclose(state);
+            return 1;
+        }
+
+        // The names psgl-shader-builder gave its temporary files in its
+        // default work directory, so diagnostics read as they did.
+        char vpName[64];
+        char fpName[64];
+        std::snprintf(vpName, sizeof(vpName), "./mask_%08x.vcg", mask);
+        std::snprintf(fpName, sizeof(fpName), "./mask_%08x.fcg", mask);
+        std::vector<uint8_t> vp;
+        std::vector<uint8_t> fp;
+        if (!compileFfpProgram(vpName, vpSource, CompilerContext::Profile::VertexRsx, vp) ||
+            !compileFfpProgram(fpName, fpSource, CompilerContext::Profile::FragmentRsx, fp))
+        {
+            std::fprintf(stderr, "rsx-cg-compiler: mask 0x%08x failed to compile\n", mask);
+            std::fclose(state);
+            return 1;
+        }
+        appendBe32(library, mask);
+        appendBe32(library, static_cast<uint32_t>(vp.size()));
+        appendBe32(library, static_cast<uint32_t>(fp.size()));
+        library.insert(library.end(), vp.begin(), vp.end());
+        library.insert(library.end(), fp.begin(), fp.end());
+        count++;
+    }
+    const bool readError = std::ferror(state) != 0;
+    std::fclose(state);
+    if (readError)
+    {
+        std::fprintf(stderr, "rsx-cg-compiler: cannot read %s\n", statePath.c_str());
+        return 1;
+    }
+    for (int b = 0; b < 4; ++b)
+        library[countPos + b] = static_cast<uint8_t>((count >> (24 - 8 * b)) & 0xffu);
+
+    std::FILE* out = std::fopen(outPath.c_str(), "wb");
+    if (!out)
+    {
+        std::perror(outPath.c_str());
+        return 1;
+    }
+    const bool wrote =
+        std::fwrite(library.data(), 1u, library.size(), out) == library.size();
+    if (std::fclose(out) != 0 || !wrote)
+    {
+        std::fprintf(stderr, "rsx-cg-compiler: write failed: %s\n", outPath.c_str());
+        return 1;
+    }
+    return 0;
+}
+
+// Parses everything after --psgl-ffp-library: one state file and -o <out>,
+// in either order, and nothing else.
+int psglFfpLibraryMain(int argc, char** argv, int first)
+{
+    std::string statePath;
+    std::string outPath;
+    bool bad = false;
+    for (int i = first; i < argc && !bad; ++i)
+    {
+        const std::string arg = argv[i];
+        if (arg == "-o" && i + 1 < argc && outPath.empty())
+            outPath = argv[++i];
+        else if (!arg.empty() && arg[0] != '-' && statePath.empty())
+            statePath = arg;
+        else
+            bad = true;
+    }
+    if (bad || statePath.empty() || outPath.empty())
+    {
+        std::fprintf(stderr,
+            "usage: rsx-cg-compiler --psgl-ffp-library <state.txt> -o <shaders.bin>\n");
+        return 2;
+    }
+    return runPsglFfpLibrary(statePath, outPath);
+}
+
+}  // namespace
+
+int main(int argc, char** argv)
+{
+    CompilerContext ctx;
+    DriverFlags flags;
+    // The NV40 shape matcher that --legacy-lowering and RSXCG_GENERAL=0
+    // used to select has been removed; the general lowering is the only
+    // back end.  Asking for the matcher is refused by name rather than
+    // ignored, so a script that relied on it learns why its output
+    // changed instead of silently getting the other path.
+    const char* generalEnv = std::getenv("RSXCG_GENERAL");
+    if (generalEnv && std::strcmp(generalEnv, "0") == 0)
+    {
+        std::fprintf(stderr,
+            "rsx-cg-compiler: RSXCG_GENERAL=0 selected the legacy NV40 shape "
+            "matcher, which has been removed; the general lowering is the "
+            "only back end.  Unset RSXCG_GENERAL.\n");
+        return 1;
+    }
+
+    if (argc >= 2 && std::strcmp(argv[1], "--psgl-ffp-library") == 0)
+        return psglFfpLibraryMain(argc, argv, 2);
+
+    int i = 1;
+    while (i < argc)
+    {
+        const std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help")
+        {
+            usage();
+            return 0;
+        }
+        else if (arg == "-V" || arg == "--version")
+        {
+            std::printf("rsx-cg-compiler %s\n", RSX_CG_COMPILER_VERSION);
+            return 0;
+        }
+        else if ((arg == "-p" || arg == "--profile") && i + 1 < argc)
+        {
+            const std::string p = argv[++i];
+            if (p == "sce_fp_rsx" || p == "sce_fp_psp2")
+                ctx.profile = CompilerContext::Profile::FragmentRsx;
+            else if (p == "sce_vp_rsx" || p == "sce_vp_psp2")
+                ctx.profile = CompilerContext::Profile::VertexRsx;
+            else
+            {
+                std::fprintf(stderr, "rsx-cg-compiler: unknown profile '%s'\n", p.c_str());
+                return 1;
+            }
+        }
+        else if ((arg == "-e" || arg == "--entry") && i + 1 < argc)
+        {
+            ctx.entryName = argv[++i];
+        }
+        else if (arg == "-I" && i + 1 < argc)
+        {
+            ctx.includeDirs.emplace_back(argv[++i]);
+        }
+        else if (arg == "--no-stdlib")
+        {
+            ctx.noStdLib = true;
+        }
+        else if (arg == "--dump-ast")
+        {
+            flags.dumpAst = true;
+        }
+        else if (arg == "--dump-ir")
+        {
+            flags.dumpIr = true;
+        }
+        else if (arg == "--dump-preprocess")
+        {
+            flags.dumpPreprocess = true;
+        }
+        else if (arg == "--emit-container" && i + 1 < argc)
+        {
+            ctx.containerOutPath = argv[++i];
+        }
+        else if (arg == "--emit-cgb-container" && i + 1 < argc)
+        {
+            ctx.cgbContainerOutPath = argv[++i];
+        }
+        else if (arg == "--general-lowering")
+        {
+            // A no-op alias for one release, so every script, CI line
+            // and rig column that names the path it wanted keeps
+            // working.
+        }
+        else if (arg == "--legacy-lowering")
+        {
+            std::fprintf(stderr,
+                "rsx-cg-compiler: --legacy-lowering selected the NV40 shape "
+                "matcher, which has been removed; the general lowering is "
+                "the only back end.  Drop the flag.\n");
+            return 1;
+        }
+        else if (arg == "-O0" || arg == "--O0")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O0;
+        }
+        else if (arg == "-O1" || arg == "--O1")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O1;
+        }
+        else if (arg == "-O2" || arg == "--O2")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O2;
+        }
+        else if (arg == "-O3" || arg == "--O3")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O3;
+        }
+        else if (arg == "-O4" || arg == "--O4")
+        {
+            ctx.compileOpts.opt = rsx_cg::OptLevel::O4;
+        }
+        else if (arg == "--fastmath")
+        {
+            ctx.compileOpts.fastmath = true;
+        }
+        else if (arg == "--nofastmath")
+        {
+            ctx.compileOpts.fastmath = false;
+        }
+        else if (arg == rsx_cg::kListExtensionsFlag)
+        {
+            std::size_t count = 0;
+            const rsx_cg::ExtensionInfo* table = rsx_cg::allExtensions(count);
+            for (std::size_t n = 0; n < count; ++n)
+                std::printf("%s\t%s\n", table[n].name, table[n].summary);
+            return 0;
+        }
+        else if (arg.compare(0, std::strlen(rsx_cg::kExtensionFlagPrefix),
+                             rsx_cg::kExtensionFlagPrefix) == 0)
+        {
+            // Validated HERE, before any file is read: an unknown name is a
+            // refusal in its own right, not something to tolerate and then
+            // fail on later for a reason that has nothing to do with it.
+            // One name per flag, exact spelling; there is no "all".
+            const std::string name = arg.substr(std::strlen(rsx_cg::kExtensionFlagPrefix));
+            const rsx_cg::ExtensionInfo* info = rsx_cg::findExtension(name);
+            if (!info)
+            {
+                std::fprintf(stderr,
+                    "rsx-cg-compiler: unknown extension '%s'; supported:",
+                    name.c_str());
+                std::size_t count = 0;
+                const rsx_cg::ExtensionInfo* table = rsx_cg::allExtensions(count);
+                for (std::size_t n = 0; n < count; ++n)
+                    std::fprintf(stderr, " %s", table[n].name);
+                std::fprintf(stderr, " (%s)\n", rsx_cg::kListExtensionsFlag);
+                return 1;
+            }
+            ctx.extensions.enable(info->id);
+        }
+        else if (arg == "--extension")
+        {
+            std::fprintf(stderr,
+                "rsx-cg-compiler: --extension needs =<name>, as in %sbom; see %s\n",
+                rsx_cg::kExtensionFlagPrefix, rsx_cg::kListExtensionsFlag);
+            return 1;
+        }
+        else if (!arg.empty() && arg[0] == '-')
+        {
+            std::fprintf(stderr, "rsx-cg-compiler: unknown option '%s'\n", arg.c_str());
+            usage();
+            return 1;
+        }
+        else
+        {
+            if (!ctx.inputFile.empty())
+            {
+                std::fprintf(stderr, "rsx-cg-compiler: only one input file allowed\n");
+                return 1;
+            }
+            ctx.inputFile = arg;
+        }
+        ++i;
+    }
+
+    if (ctx.inputFile.empty())
+    {
+        usage();
+        return 1;
+    }
+
+    std::string sourceCode = slurpFile(ctx.inputFile);
+    return compileProgram(ctx, sourceCode, flags, nullptr);
 }

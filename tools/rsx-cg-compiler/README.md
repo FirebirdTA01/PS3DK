@@ -10,6 +10,26 @@ compiler's profile names (`sce_vp_rsx`, `sce_fp_rsx`) and its sibling
 project, FirebirdTA01's open-source Vita Cg compiler
 (`Vita-Cg-Compiler`), whose front end it uses.
 
+## PSGL fixed-function shader library
+
+    rsx-cg-compiler --psgl-ffp-library state.txt -o shaders.bin
+
+builds the library `psglLoadShaderLibrary` loads. `state.txt` holds one
+fixed-function state mask per line (any `strtoul` base-0 number; `#`
+starts a comment, blank lines are skipped). For each mask the vertex and
+fragment Cg come from libPSGL's own generator (`sdk/libPSGL/src/ffp_emit.c`,
+compiled into this binary), and both programs are compiled in process, so
+each container is the one `-p sce_vp_rsx` / `-p sce_fp_rsx` with
+`--emit-container` would write. The file is `PSGLSHDR`, a big-endian
+version and count, then per mask its value, the two sizes and the two
+containers. A malformed line, an unsupported mask or a failed compile exits
+1 and writes nothing; a bad command line exits 2. The option must come
+first.
+
+`psgl-shader-builder`, which did the same by running this compiler twice
+per mask, is now a deprecated wrapper around this mode and will be removed
+after one release.
+
 ## Architecture
 
 The compiler is FirebirdTA01's Vita Cg compiler front end plus a
