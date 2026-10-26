@@ -2,8 +2,9 @@
 
 Status: study only, nothing implemented. Written 2026-10-25 against `main` e791a391
 (the v0.26.0 tag). It covers the shader-compiler changes already agreed for the next minor
-release (a `--psgl-ffp-library` mode in `rsx-cg-compiler`, and a GLSL front end) and asks
-the director to choose a target tier.
+release (a `--psgl-ffp-library` mode in `rsx-cg-compiler`, and a GLSL front end). The
+director chose the target on 2026-10-25; see §6. That is approved direction, not an
+implementation or conformance status.
 
 Labels used below:
 - **[measured]**: read from our source at the cited line, or counted with the script in
@@ -252,12 +253,21 @@ GL 3.3 out of scope. Phases:
    - MRT, 3D textures, queries and instancing as extensions;
    - optional on-target compilation.
 
-Decisions needed from the director:
-1. Is the target ES 2.0 (recommended), or desktop GL 2.1 fixed-function as well?
-2. Do we ship an on-target GLSL compiler, or keep precompiled binaries only? If precompiled
-   only, we must implement the [ES2] §2.10 binary-only contract.
-3. Do we extend libPSGL (recommended) or add a separate `libGLESv2`?
-4. May ES 3.0-style features ship as extensions under ES 2.0, with no ES 3.0 claim?
+The decisions this section asked for are recorded in §6.
+
+## 6. Director decisions (2026-10-25)
+
+These set the direction. None of them is implemented yet, and none is a conformance claim.
+
+1. **Target:** OpenGL ES 2.0 with GLSL ES 1.00, **and** desktop GL 2.1 fixed-function. The
+   desktop fixed-function work (texenv combiners, texgen, the rest of the §3.3 gaps) stays in
+   the plan as the "Later" phase of §5, so that target is not lost.
+2. **Shaders:** precompiled only for now. The [ES2] §2.10 binary-only contract therefore
+   applies: `GL_SHADER_COMPILER` reports false, the binary-format queries are correct, and
+   the required `INVALID_OPERATION` errors are raised. An on-target compiler is follow-up
+   scope.
+3. **Library:** extend libPSGL; no separate `libGLESv2`.
+4. **ES 3.0-style features:** may ship as extensions, without any ES 3.0 conformance claim.
 
 ## Appendix A: how the entry points were counted
 
