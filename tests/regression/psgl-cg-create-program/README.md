@@ -25,9 +25,19 @@ large, a container of the other stage, and an unsupported profile.
 `cgCreateProgramFromFile` accepts `CG_OBJECT`: a program is created from a
 real container file with the profile taken from the container, and still
 draws after the file is removed. A file truncated to half its container is
-refused with `CG_PROGRAM_LOAD_ERROR`; here the file length is known. Every
-fixture write and close is checked, and a file already at a fixture path is
-saved and written back. `cgGetLastErrorString` reports the pending error and
+refused with `CG_PROGRAM_LOAD_ERROR`; here the file length is known.
+
+The fixture paths are preserved by `fixture_files.h`: snapshots of both
+paths are taken before any write, only a confirmed `ENOENT` counts as
+absent (any other stat error fails closed), and a path is restored only
+from a completed snapshot; a failed restoration is reported. If either
+snapshot fails, neither path is touched and the dependent checks fail.
+`fixture_files_check.h` checks those helpers against an in-memory file
+system with injected faults (stat error, snapshot read error, snapshot
+close error, allocation failure, failed second snapshot): the original
+bytes stay unchanged and no write or remove happens. It also checks normal
+restoration of a present and of an absent path, and that an absent-path
+restore with a stat error fails closed. `cgGetLastErrorString` reports the pending error and
 its message, then clears it.
 
 Parameter classes come from the raw container's per-parameter types:

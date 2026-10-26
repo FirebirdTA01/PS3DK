@@ -9,12 +9,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/process.h>
-#include <sys/stat.h>
 #include "vertex_vpo.h"
 #include "vertex_cgb_vpo.h"
 #include "tint_fpo.h"
 #include "tint_cgb_fpo.h"
 #include "classes_fpo.h"
+#include "fixture_files.h"
+#include "fixture_files_check.h"
 SYS_PROCESS_PARAM(1001,0x100000);
 extern CGprogram psgl_cg_create_program_from_memory(CGcontext,const void *,uint32_t,CGprofile);
 static unsigned checks,failures;
@@ -66,39 +67,10 @@ static void list_parameters(CGprogram p,const char *tag)
     for(CGparameter q=p?cgGetFirstParameter(p,CG_PROGRAM):NULL;q;q=cgGetNextParameter(q))
         printf("PSGL_CG_CREATE_PARAM %s %s type=%d resource=%d index=%lu\n",tag,cgGetParameterName(q),(int)cgGetParameterType(q),(int)cgGetParameterResource(q),(unsigned long)cgGetParameterResourceIndex(q));
 }
-/* Fixture files for cgCreateProgramFromFile.  A file already at a fixture
-   path is read first and written back at the end. */
+/* Fixture files for cgCreateProgramFromFile (fixture_files.h preserves the
+   previous state of both paths). */
 #define VP_FILE "/dev_hdd0/tmp/psgl-cg-create-vertex.vpo"
 #define CUT_FILE "/dev_hdd0/tmp/psgl-cg-create-truncated.vpo"
-typedef struct { const char *path; unsigned char *bytes; size_t size; int existed; } Saved;
-static int write_file(const char *path,const void *data,size_t size)
-{
-    FILE *f=fopen(path,"wb");if(!f)return 0;
-    int ok=fwrite(data,1,size,f)==size;
-    return fclose(f)==0&&ok;
-}
-static int save_path(Saved *s,const char *path)
-{
-    struct stat st;
-    s->path=path;s->bytes=NULL;s->size=0;s->existed=0;
-    if(stat(path,&st)!=0)return 1;
-    s->existed=1;
-    FILE *f=fopen(path,"rb");if(!f)return 0;
-    if(fseek(f,0,SEEK_END)!=0){fclose(f);return 0;}
-    long n=ftell(f);
-    if(n<0||fseek(f,0,SEEK_SET)!=0){fclose(f);return 0;}
-    s->size=(size_t)n;s->bytes=(unsigned char *)malloc(s->size?s->size:1u);
-    if(!s->bytes){fclose(f);return 0;}
-    int ok=fread(s->bytes,1,s->size,f)==s->size;
-    return fclose(f)==0&&ok;
-}
-static int restore_path(Saved *s)
-{
-    struct stat st;
-    int ok=s->existed?write_file(s->path,s->bytes,s->size):(stat(s->path,&st)!=0||remove(s->path)==0);
-    free(s->bytes);s->bytes=NULL;
-    return ok;
-}
 static void class_of(CGprogram p,const char *param,CGparameterclass want)
 {
     CGparameter q=p?cgGetNamedParameter(p,param):NULL;
@@ -190,26 +162,42 @@ int main(void)
     CGprogram ff=cgCreateProgramFromFile(cg,CG_OBJECT,"/dev_hdd0/tmp/psgl-cg-create-missing.vpo",CG_PROFILE_SCE_VP_RSX,NULL,NULL);
     check(!ff&&cgGetError()==CG_FILE_READ_ERROR,"object file type accepted");
 
+    /* The fixture helpers, against injected faults (in memory only). */
+    fixture_files_selfcheck(check);
+
     /* cgCreateProgramFromFile from a real container file, and from a file
-       truncated to half its container (the file length is known here). */
-    Saved saved_vp,saved_cut;
-    int saved=save_path(&saved_vp,VP_FILE);saved=save_path(&saved_cut,CUT_FILE)&&saved;
+       truncated to half its container (the file length is known here).
+       Both paths are snapshotted before anything is written; without both
+       snapshots nothing is written and the dependent checks fail. */
+    const FixtureOps *fs=&fixture_real_ops;
+    FixtureSnapshot saved_vp,saved_cut;
+    int saved=fixture_snapshot_pair(fs,&saved_vp,VP_FILE,&saved_cut,CUT_FILE);
     check(saved,"fixture paths saved");
-    check(write_file(VP_FILE,vertex_vpo,vertex_vpo_size),"fixture written");
-    CGprogram fvp=cgCreateProgramFromFile(cg,CG_OBJECT,VP_FILE,CG_PROFILE_UNKNOWN,NULL,NULL);
-    check(fvp&&cgGetError()==CG_NO_ERROR,"object file program");
-    check(fvp&&cgGetProgramProfile(fvp)==CG_PROFILE_SCE_VP_RSX&&cgGetProgramContext(fvp)==cg,"object file profile from container");
-    check(remove(VP_FILE)==0,"fixture removed after creation");
-    static const unsigned char rgb4[4]={153,51,0,255};
-    if(fvp&&fp)draw(fvp,fp,0.6f,0.2f,0.0f,rgb4,"removed file program draws",1);else skipped("removed file program draws");
-    check(write_file(CUT_FILE,vertex_vpo,vertex_vpo_size/2u),"truncated fixture written");
-    int before_cut=count_programs(cg);
-    CGprogram cut=cgCreateProgramFromFile(cg,CG_BINARY,CUT_FILE,CG_PROFILE_SCE_VP_RSX,NULL,NULL);
-    CGerror cut_error=cgGetError();
-    if(cut||cut_error!=CG_PROGRAM_LOAD_ERROR)printf("PSGL_CG_CREATE_REFUSAL truncated file program=%s error=%d want=%d\n",cut?"nonnull":"null",(int)cut_error,(int)CG_PROGRAM_LOAD_ERROR);
-    check(!cut&&cut_error==CG_PROGRAM_LOAD_ERROR&&count_programs(cg)==before_cut,"truncated file refused");
-    int restored=restore_path(&saved_vp);restored=restore_path(&saved_cut)&&restored;
-    check(restored,"fixture paths restored");
+    if(saved){
+        check(fixture_write(fs,VP_FILE,vertex_vpo,vertex_vpo_size),"fixture written");
+        CGprogram fvp=cgCreateProgramFromFile(cg,CG_OBJECT,VP_FILE,CG_PROFILE_UNKNOWN,NULL,NULL);
+        check(fvp&&cgGetError()==CG_NO_ERROR,"object file program");
+        check(fvp&&cgGetProgramProfile(fvp)==CG_PROFILE_SCE_VP_RSX&&cgGetProgramContext(fvp)==cg,"object file profile from container");
+        check(fs->remove(fs->ctx,VP_FILE)==0,"fixture removed after creation");
+        static const unsigned char rgb4[4]={153,51,0,255};
+        if(fvp&&fp)draw(fvp,fp,0.6f,0.2f,0.0f,rgb4,"removed file program draws",1);else skipped("removed file program draws");
+        check(fixture_write(fs,CUT_FILE,vertex_vpo,vertex_vpo_size/2u),"truncated fixture written");
+        int before_cut=count_programs(cg);
+        CGprogram cut=cgCreateProgramFromFile(cg,CG_BINARY,CUT_FILE,CG_PROFILE_SCE_VP_RSX,NULL,NULL);
+        CGerror cut_error=cgGetError();
+        if(cut||cut_error!=CG_PROGRAM_LOAD_ERROR)printf("PSGL_CG_CREATE_REFUSAL truncated file program=%s error=%d want=%d@N",cut?"nonnull":"null",(int)cut_error,(int)CG_PROGRAM_LOAD_ERROR);
+        check(!cut&&cut_error==CG_PROGRAM_LOAD_ERROR&&count_programs(cg)==before_cut,"truncated file refused");
+        int restored_vp=fixture_snapshot_restore(fs,&saved_vp);
+        int restored_cut=fixture_snapshot_restore(fs,&saved_cut);
+        if(!restored_vp||!restored_cut)printf("PSGL_CG_CREATE_RESTORE_FAILED vertex=%d truncated=%d@N",restored_vp,restored_cut);
+        check(restored_vp&&restored_cut,"fixture paths restored");
+    }else{
+        static const char *const dependent[]={"fixture written","object file program","object file profile from container",
+            "fixture removed after creation","removed file program draws","removed file program draws",
+            "truncated fixture written","truncated file refused","fixture paths restored"};
+        puts("PSGL_CG_CREATE_FIXTURE_SKIPPED snapshots failed; fixture paths left untouched");
+        for(unsigned i=0;i<sizeof(dependent)/sizeof(dependent[0]);++i)check(0,dependent[i]);
+    }
 
     /* cgGetLastErrorString reports the pending error and clears it. */
     CGprogram none=cgCreateProgram(cg,CG_BINARY,NULL,CG_PROFILE_SCE_VP_RSX,NULL,NULL);

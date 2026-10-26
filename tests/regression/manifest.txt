@@ -332,8 +332,8 @@ psgl-texture-units-ilp32,tests/regression/psgl-texture-units/psgl-texture-units-
 psgl-texture-units-lp64,tests/regression/psgl-texture-units/psgl-texture-units-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_TEXUNIT_OK checks=47 failures=0\r?$,PSGL_TEXUNIT_FAIL
 psgl-sampler-routing-ilp32,tests/regression/psgl-sampler-routing/psgl-sampler-routing-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_SAMPLER_OK checks=39 failures=0\r?$,PSGL_SAMPLER_FAIL
 psgl-sampler-routing-lp64,tests/regression/psgl-sampler-routing/psgl-sampler-routing-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_SAMPLER_OK checks=39 failures=0\r?$,PSGL_SAMPLER_FAIL
-psgl-cg-create-program-ilp32,tests/regression/psgl-cg-create-program/psgl-cg-create-program-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_CG_CREATE_OK checks=74 failures=0\r?$,PSGL_CG_CREATE_FAIL
-psgl-cg-create-program-lp64,tests/regression/psgl-cg-create-program/psgl-cg-create-program-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_CG_CREATE_OK checks=74 failures=0\r?$,PSGL_CG_CREATE_FAIL
+psgl-cg-create-program-ilp32,tests/regression/psgl-cg-create-program/psgl-cg-create-program-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_CG_CREATE_OK checks=87 failures=0\r?$,PSGL_CG_CREATE_FAIL
+psgl-cg-create-program-lp64,tests/regression/psgl-cg-create-program/psgl-cg-create-program-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_CG_CREATE_OK checks=87 failures=0\r?$,PSGL_CG_CREATE_FAIL
 psgl-scissor-ilp32,tests/regression/psgl-scissor/psgl-scissor-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_SCISSOR_OK checks=55 failures=0\r?$,PSGL_SCISSOR_FAIL
 psgl-scissor-lp64,tests/regression/psgl-scissor/psgl-scissor-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_SCISSOR_OK checks=55 failures=0\r?$,PSGL_SCISSOR_FAIL
 
