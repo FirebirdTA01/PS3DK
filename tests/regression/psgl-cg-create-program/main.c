@@ -185,11 +185,11 @@ int main(void)
         int before_cut=count_programs(cg);
         CGprogram cut=cgCreateProgramFromFile(cg,CG_BINARY,CUT_FILE,CG_PROFILE_SCE_VP_RSX,NULL,NULL);
         CGerror cut_error=cgGetError();
-        if(cut||cut_error!=CG_PROGRAM_LOAD_ERROR)printf("PSGL_CG_CREATE_REFUSAL truncated file program=%s error=%d want=%d@N",cut?"nonnull":"null",(int)cut_error,(int)CG_PROGRAM_LOAD_ERROR);
+        if(cut||cut_error!=CG_PROGRAM_LOAD_ERROR)printf("PSGL_CG_CREATE_REFUSAL truncated file program=%s error=%d want=%d\n",cut?"nonnull":"null",(int)cut_error,(int)CG_PROGRAM_LOAD_ERROR);
         check(!cut&&cut_error==CG_PROGRAM_LOAD_ERROR&&count_programs(cg)==before_cut,"truncated file refused");
         int restored_vp=fixture_snapshot_restore(fs,&saved_vp);
         int restored_cut=fixture_snapshot_restore(fs,&saved_cut);
-        if(!restored_vp||!restored_cut)printf("PSGL_CG_CREATE_RESTORE_FAILED vertex=%d truncated=%d@N",restored_vp,restored_cut);
+        if(!restored_vp||!restored_cut)printf("PSGL_CG_CREATE_RESTORE_FAILED vertex=%d truncated=%d\n",restored_vp,restored_cut);
         check(restored_vp&&restored_cut,"fixture paths restored");
     }else{
         static const char *const dependent[]={"fixture written","object file program","object file profile from container",
