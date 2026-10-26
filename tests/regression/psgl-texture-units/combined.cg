@@ -1,0 +1,10 @@
+float4 main(uniform sampler2D s0 : TEXUNIT0, uniform sampler2D s1 : TEXUNIT1,
+            uniform sampler2D s2 : TEXUNIT2, uniform sampler2D s3 : TEXUNIT3,
+            uniform sampler2D s4 : TEXUNIT4, uniform sampler2D s5 : TEXUNIT5,
+            uniform sampler2D s6 : TEXUNIT6, uniform sampler2D s7 : TEXUNIT7) : COLOR
+{
+    float2 uv = float2(0.5, 0.5);
+    return float4(tex2D(s0, uv).r + tex2D(s1, uv).r + tex2D(s2, uv).r + tex2D(s3, uv).r
+                + tex2D(s4, uv).r + tex2D(s5, uv).r + tex2D(s6, uv).r + tex2D(s7, uv).r,
+                  tex2D(s5, uv).g, tex2D(s7, uv).b, 1.0);
+}
