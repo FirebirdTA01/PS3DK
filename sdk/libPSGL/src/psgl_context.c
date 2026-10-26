@@ -2639,13 +2639,15 @@ static void psgl_fp_ucode_instance(PSGLcontext *context, PSGLcgProgram *program)
     ++psgl_fp_ucode_copies;
 }
 
-static void psgl_emit_vertex_program(PSGLcontext *context,
-                                     PSGLcgProgram *program)
+/* The program emitters return 0 when a loaded program could not be
+   installed; no program (or no device) is not a failure. */
+static int psgl_emit_vertex_program(PSGLcontext *context,
+                                    PSGLcgProgram *program)
 {
     const void *ucode;
-    if (!context || !context->gcm || !program || !program->loaded) return;
+    if (!context || !context->gcm || !program || !program->loaded) return 1;
     ucode = psgl_cg_ucode(program);
-    if (!ucode) return;
+    if (!ucode) return 0;
     cellGcmSetVertexProgram(context->gcm, (CGprogram)program->binary,
                             (void *)ucode);
     for (uint32_t i = 0; i < program->parameter_count; i++) {
@@ -2659,14 +2661,15 @@ static void psgl_emit_vertex_program(PSGLcontext *context,
                                              parameter->value);
         parameter->dirty = CG_FALSE;
     }
+    return 1;
 }
 
-static void psgl_emit_fragment_program(PSGLcontext *context,
-                                       PSGLcgProgram *program)
+static int psgl_emit_fragment_program(PSGLcontext *context,
+                                      PSGLcgProgram *program)
 {
     int changed = 0;
-    if (!context || !context->gcm || !program || !program->loaded) return;
-    if (!psgl_prepare_fragment_ucode(program)) return;
+    if (!context || !context->gcm || !program || !program->loaded) return 1;
+    if (!psgl_prepare_fragment_ucode(program)) return 0;
     for (uint32_t i = 0; i < program->parameter_count; i++) {
         if (program->parameters[i].dirty)
             changed |= psgl_patch_fragment_parameter(program, &program->parameters[i]);
@@ -2676,11 +2679,13 @@ static void psgl_emit_fragment_program(PSGLcontext *context,
         psgl_fp_ucode_instance(context, program);
     cellGcmSetFragmentProgram(context->gcm, (CGprogram)program->binary,
                               program->fragment_draw_offset);
+    return 1;
 }
 
 /* Returns 0 when the draw must be skipped: fixed-function texturing on
    units 1-3 needs a program from psglLoadShaderLibrary, and without one the
-   draw is refused with INVALID_OPERATION rather than drawn untextured. */
+   draw is refused with INVALID_OPERATION rather than drawn untextured.  A
+   program that cannot be installed refuses the draw as well. */
 static int psgl_validate_draw_state(PSGLcontext *context)
 {
     PSGLcgProgram *vp;
@@ -2720,20 +2725,31 @@ static int psgl_validate_draw_state(PSGLcontext *context)
        programs dirty, so any change of the selected state reinstalls them. */
     if (ffp_mask != context->ffp_installed_mask) context->dirty |= PSGL_DIRTY_CG;
     if (context->dirty & PSGL_DIRTY_CG) {
+        int ffp_selected = 0;
         if ((!vp || !fp) && ffp_mask) {
             PSGLcgProgram *ffp_vp = NULL;
             PSGLcgProgram *ffp_fp = NULL;
-            if (psgl_ffp_state_mask_to_programs(ffp_mask, &ffp_vp, &ffp_fp)) {
-                if (!vp) vp = ffp_vp;
-                psgl_ffp_program_installs++;
-                if (!fp) fp = ffp_fp;
-                psgl_ffp_update_matrices(context, ffp_vp);
-                if ((ffp_mask & PSGL_FFP_LIGHTING_MASK) != 0u)
-                    psgl_ffp_update_lighting(context, ffp_fp);
+            if (!psgl_ffp_state_mask_to_programs(ffp_mask, &ffp_vp, &ffp_fp)) {
+                psgl_gl_error(GL_INVALID_OPERATION);
+                return 0;
             }
+            if (!vp) vp = ffp_vp;
+            if (!fp) fp = ffp_fp;
+            ffp_selected = 1;
+            psgl_ffp_update_matrices(context, ffp_vp);
+            if ((ffp_mask & PSGL_FFP_LIGHTING_MASK) != 0u)
+                psgl_ffp_update_lighting(context, ffp_fp);
         }
-        psgl_emit_vertex_program(context, vp);
-        psgl_emit_fragment_program(context, fp);
+        /* A program that cannot be installed (its RSX ucode copy failed)
+           refuses the draw and keeps DIRTY_CG and the installed mask as they
+           were, so the next draw installs again instead of drawing with the
+           programs left by an earlier state. */
+        if (!psgl_emit_vertex_program(context, vp) ||
+            !psgl_emit_fragment_program(context, fp)) {
+            psgl_gl_error(GL_OUT_OF_MEMORY);
+            return 0;
+        }
+        if (ffp_selected) psgl_ffp_program_installs++;
         psgl_emit_vertex_arrays(context);
         context->ffp_installed_mask = ffp_mask;
         context->dirty &= ~PSGL_DIRTY_CG;
