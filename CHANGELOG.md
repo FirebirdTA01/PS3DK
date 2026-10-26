@@ -43,6 +43,11 @@ The version stamped into builds is generated from the most recent
   formats and incomplete framebuffers report errors without changing output.
   This synchronous path maps scratch memory rounded to 1 MiB per read; it is
   not a complete framebuffer or ES 2.0 conformance claim.
+- **PSGL pixel-store errors.** `glPixelStorei` reports `GL_INVALID_ENUM` for
+  names other than `GL_PACK_ALIGNMENT` and `GL_UNPACK_ALIGNMENT`, and
+  `GL_INVALID_VALUE` for alignments other than 1, 2, 4 or 8. Rejected calls
+  preserve the previous alignment. Invalid settings are no longer silently
+  ignored.
 - **PSGL GPU completion waits.** Repeated waits use advancing completion
   tokens instead of accepting a label left by an earlier wait. The first
   wait also avoids a completion value already stored in the label.
