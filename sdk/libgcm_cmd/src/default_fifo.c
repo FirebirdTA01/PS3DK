@@ -4,9 +4,17 @@
  * The firmware default command buffer starts the first usable segment
  * after a 4 KiB initialization area.  `segmentSize` is specified in
  * words, so the first active segment has 1024 fewer words available.
+ *
+ * These calls run on a live context (libPSGL calls them after cellGcmInit,
+ * when the firmware has already published and fetched its initialization
+ * words and rsxInit has queued more).  They size the ring only: begin,
+ * current and every command word stay where they are, because rewinding
+ * current would make the next flush publish PUT behind GET with no JUMP.
  */
 
+#include <stdint.h>
 #include <rsx/rsx.h>
+#include "ps3tc_fifo_extent.h"
 
 #define PS3TC_GCM_INIT_WORDS 1024u
 
@@ -19,22 +27,24 @@ static int ps3tc_apply_default_fifo_words(u32 bufferSize, u32 segmentSize)
         return -1;
     if (segmentSize <= PS3TC_GCM_INIT_WORDS)
         return -1;
-    if (bufferSize < segmentSize * 2u)
+    if (bufferSize < segmentSize * 2u || segmentSize > UINT32_MAX / 2u)
+        return -1;
+    if (bufferSize > UINT32_MAX / 4u)
         return -1;
 
-    g_ps3tc_default_command_words = bufferSize;
-    g_ps3tc_default_segment_words = segmentSize;
-
-    gGcmContext->current = gGcmContext->begin;
     /* Use the WHOLE command buffer as the ring, not just one segment.
        A single-segment ring forces a wrap (and a GPU drain) several
        times per command-heavy frame, which serializes CPU and GPU and
        cannot coexist with in-stream GPU waits (semaphore-acquire) that
        legitimately block GET mid-segment.  Wrapping over the full
        buffer drops the wrap rate to roughly once per several frames and
-       lets the GPU run concurrently with command production. */
-    gGcmContext->end = gGcmContext->begin +
-                       (bufferSize - PS3TC_GCM_INIT_WORDS) - 1u;
+       lets the GPU run concurrently with command production.  The ring
+       may only cover storage cellGcmInit admitted, and only end moves. */
+    if (ps3tc_fifo_resize_extent(gGcmContext, bufferSize * 4u) != 0)
+        return -1;
+
+    g_ps3tc_default_command_words = bufferSize;
+    g_ps3tc_default_segment_words = segmentSize;
     return 0;
 }
 

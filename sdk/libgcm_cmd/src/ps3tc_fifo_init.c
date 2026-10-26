@@ -5,9 +5,16 @@
 #include <stdint.h>
 #include <rsx/gcm_sys.h>
 #include <cell/gcm/ps3tc_fifo_wrap.h>
+#include "ps3tc_fifo_extent.h"
 
-int32_t ps3tc_fifo_init_extent(gcmContextData *ctx, uint32_t command_bytes,
-                             uint32_t io_bytes, const void *io_address)
+/* The extent cellGcmInit admitted: the only command storage the default
+ * sizing calls may use.  Mapped IO beyond it is not command storage. */
+static uint32_t g_admitted_base;
+static uint32_t g_admitted_command_bytes;
+static uint32_t g_admitted_io_bytes;
+
+static int32_t admit_extent(gcmContextData *ctx, uint32_t command_bytes,
+                            uint32_t io_bytes, const void *io_address)
 {
     const uint64_t base = (uintptr_t)io_address;
     const uint64_t io_limit = base + io_bytes;
@@ -54,4 +61,25 @@ int32_t ps3tc_fifo_init_extent(gcmContextData *ctx, uint32_t command_bytes,
      * end is the reserved JUMP word, not an extra emit-capacity word. */
     ctx->end = (uint32_t *)(uintptr_t)(limit - 4u);
     return 0;
+}
+
+int32_t ps3tc_fifo_init_extent(gcmContextData *ctx, uint32_t command_bytes,
+                             uint32_t io_bytes, const void *io_address)
+{
+    if (admit_extent(ctx, command_bytes, io_bytes, io_address) != 0)
+        return -1;
+    g_admitted_base = (uint32_t)(uintptr_t)io_address;
+    g_admitted_command_bytes = command_bytes;
+    g_admitted_io_bytes = io_bytes;
+    return 0;
+}
+
+int32_t ps3tc_fifo_resize_extent(gcmContextData *ctx, uint32_t command_bytes)
+{
+    /* Only inside what cellGcmInit admitted, and never below the live end:
+     * the same admission checks run again, and only end can change. */
+    if (!g_admitted_base || command_bytes > g_admitted_command_bytes)
+        return -1;
+    return admit_extent(ctx, command_bytes, g_admitted_io_bytes,
+                        (const void *)(uintptr_t)g_admitted_base);
 }
