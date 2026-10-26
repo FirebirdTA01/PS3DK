@@ -2365,7 +2365,9 @@ static int psgl_patch_fragment_parameter(PSGLcgProgram *program,
 
    Cost: one ucode-sized copy into RSX memory per draw whose fragment
    uniforms changed (none for a redraw without a change), plus one GPU wait
-   per PSGL_FP_UCODE_RING_SIZE bytes of copies. */
+   per PSGL_FP_UCODE_RING_SIZE bytes of copies.  The ring is one permanent
+   256 KiB RSX-local allocation, made on the first uniform change and never
+   freed. */
 #define PSGL_FP_UCODE_RING_SIZE (256u * 1024u)
 #define PSGL_FP_UCODE_ALIGNMENT 64u
 static uint8_t *g_psgl_fp_ring;

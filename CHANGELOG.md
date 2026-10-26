@@ -74,7 +74,8 @@ The version stamped into builds is generated from the most recent
   change now draws from a fresh ucode copy in a 256 KiB ring; a full ring
   waits for the GPU before reusing it. This covers direct Cg programs
   (`cgGLSetParameter*`) as well as PSGL's own fixed-function programs.
-  Redrawing without a value change makes no copy.
+  Redrawing without a value change makes no copy. Each change costs one
+  ucode-sized copy into RSX memory, from a permanent 256 KiB allocation.
 - **PSGL glFlush and glFinish.** `glFlush` now submits queued commands to
   the GPU, and `glFinish` returns only after they have completed. Both
   previously did nothing.
