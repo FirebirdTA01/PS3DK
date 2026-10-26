@@ -334,3 +334,8 @@ psgl-sampler-routing-ilp32,tests/regression/psgl-sampler-routing/psgl-sampler-ro
 psgl-sampler-routing-lp64,tests/regression/psgl-sampler-routing/psgl-sampler-routing-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_SAMPLER_OK checks=39 failures=0\r?$,PSGL_SAMPLER_FAIL
 psgl-scissor-ilp32,tests/regression/psgl-scissor/psgl-scissor-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_SCISSOR_OK checks=55 failures=0\r?$,PSGL_SCISSOR_FAIL
 psgl-scissor-lp64,tests/regression/psgl-scissor/psgl-scissor-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_SCISSOR_OK checks=55 failures=0\r?$,PSGL_SCISSOR_FAIL
+
+# vect-realign-splat: an -O3 loop vectorised with factor 1 whose splat load used
+# one realignment mask while it advanced 4 bytes per iteration (GCC patch 0082).
+vect-realign-splat-ilp32,tests/regression/vect-realign-splat/vect-realign-splat-ilp32.fake.self,30,RAN-CLEAN,(?m)^VECT_REALIGN checks=64 failures=0\r?$,VECT_REALIGN_FAIL|VECT_REALIGN mismatch
+vect-realign-splat-lp64,tests/regression/vect-realign-splat/vect-realign-splat-lp64.fake.self,30,RAN-CLEAN,(?m)^VECT_REALIGN checks=64 failures=0\r?$,VECT_REALIGN_FAIL|VECT_REALIGN mismatch

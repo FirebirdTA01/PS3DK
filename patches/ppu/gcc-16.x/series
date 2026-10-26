@@ -57,3 +57,4 @@
 0079-libsupcxx-explicit-gnu20.patch
 0080-ext-dce-clear-pointer-fact.patch
 0081-libstdcxx-ps3-entropy-backend.patch
+0082-vect-no-optimized-realign-ungrouped-vf-below-nunits.patch

@@ -1,0 +1,59 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] vect: no optimized realignment for an ungrouped load with a vectorization factor below the lane count
+
+vect_supportable_dr_alignment chose dr_explicit_realign_optimized for an
+access that is not grouped without checking how far it moves per vector
+iteration; the step check only ran for grouped accesses.  With every loop
+statement vectorised through SLP, an ungrouped single-lane load can now have
+a vectorization factor of 1 below the lane count (a splat of rows[y] feeding
+a 16-lane store group).  The realignment token is computed once in the
+preheader, but the load advances one element per iteration, so every vector
+after the first was permuted with the wrong mask: on the Cell PPU (AltiVec,
+no VSX) rows 1 and 2 of tests/regression/vect-realign-splat read the zeroed
+stack slot after the table, at -O3, in both data models.
+
+Treat an ungrouped access as a group of one in the existing check, so such
+a load is not realigned with one token; it falls back to the misalignment
+support query (unsupported without VSX), and the vectorizer picks another
+plan.  Upstream GCC 16.1 and trunk carry the same code.
+
+Codegen cost, measured with Linux-hosted cc1 builds (base = 0001-0081,
+candidate = +0082):
+- v0.26.0 archives: all 22 translation units behind the 35 shipped functions
+  that contain lvsr (SDK at -O2, both data models; cairo, freetype, pixman,
+  libpng, tiny3d) compile to identical assembly; no shipped code changes.
+- gcc.dg/vect, vect/costmodel/ppc and gcc.target/powerpc AltiVec tests
+  (2312 that compile here), -mcpu=cell -maltivec: -O2 0 changed; -O3 5
+  changed, 2583 -> 2435 instructions in those files, loops vectorized
+  2015 -> 2015.  vect-62, vect-64 and no-section-anchors-vect-64 lose the
+  bad realignment (vectorized with unroll factor 4 instead); bb-slp-phis-1
+  and slp-58 change only an alias-check bound (same instruction count).
+- vect_realign_fill (the regression witness): 84 -> 67 instructions under
+  ILP32, 81 -> 67 under LP64.
+---
+diff --git a/gcc/tree-vect-data-refs.cc b/gcc/tree-vect-data-refs.cc
+--- a/gcc/tree-vect-data-refs.cc
++++ b/gcc/tree-vect-data-refs.cc
+@@ -6893,12 +6893,18 @@
+ 	      || targetm.vectorize.builtin_mask_for_load ()))
+ 	{
+ 	  /* If we are doing SLP then the accesses need not have the
+-	     same alignment, instead it depends on the SLP group size.  */
++	     same alignment, instead it depends on the SLP group size.
++	     An access that is not grouped is a group of one: with a
++	     vectorization factor below the number of lanes (an SLP load
++	     with a load permutation) consecutive vector loads advance by
++	     less than a vector and their misalignment changes, so one
++	     realignment token cannot serve them all.  */
+ 	  if (loop_vinfo
+-	      && STMT_VINFO_GROUPED_ACCESS (stmt_info)
+ 	      && !multiple_p (LOOP_VINFO_VECT_FACTOR (loop_vinfo)
+-			      * (DR_GROUP_SIZE
+-				   (DR_GROUP_FIRST_ELEMENT (stmt_info))),
++			      * (STMT_VINFO_GROUPED_ACCESS (stmt_info)
++				 ? DR_GROUP_SIZE
++				     (DR_GROUP_FIRST_ELEMENT (stmt_info))
++				 : 1),
+ 			      TYPE_VECTOR_SUBPARTS (vectype)))
+ 	    ;
+ 	  else if (!loop_vinfo

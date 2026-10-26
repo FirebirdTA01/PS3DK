@@ -102,6 +102,12 @@ The version stamped into builds is generated from the most recent
 - **PSGL GPU completion waits.** Repeated waits use advancing completion
   tokens instead of accepting a label left by an earlier wait. The first
   wait also avoids a completion value already stored in the label.
+- **PPU -O3 vectorizer wrong code.** A loop vectorised with a factor below
+  the vector width could realign a broadcast load with one permute mask while
+  the load moved by one element per iteration, so later rows read the
+  neighbouring memory (seen as zeroed rows in a 4x16 fill at -O3, both data
+  models). GCC patch 0082 no longer uses that realignment there. No library
+  shipped in v0.26.0 contained the faulty sequence.
 - **PSGL texture uploads.** Byte luminance, alpha and luminance-alpha uploads
   expand into the existing ARGB8 storage with unpack alignment respected.
   Packed 32-bit RGBA uploads use four bytes per texel when advancing rows,

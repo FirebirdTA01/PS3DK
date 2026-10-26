@@ -374,6 +374,8 @@ jobs:
         run: bash tests/sdk/ppu-fp-alignment-codegen-test.sh
       - name: Float loads and stores keep a displacement that is a multiple of 4 (patch 0064)
         run: bash tests/sdk/ppu-fp-displacement-codegen-test.sh
+      - name: A loop vectorised with factor 1 keeps no single realignment mask (patch 0082)
+        run: bash tests/sdk/ppu-vect-realign-codegen-test.sh
 
       # Skips without PS3DEV; binding a vertex program and the standalone
       # cellGcmCgUploadInternalConsts helper both upload the literal pool.
