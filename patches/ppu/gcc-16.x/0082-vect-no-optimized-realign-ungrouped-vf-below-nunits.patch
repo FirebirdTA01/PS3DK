@@ -19,9 +19,12 @@ plan.  Upstream GCC 16.1 and trunk carry the same code.
 
 Codegen cost, measured with Linux-hosted cc1 builds (base = 0001-0081,
 candidate = +0082):
-- v0.26.0 archives: all 22 translation units behind the 35 shipped functions
-  that contain lvsr (SDK at -O2, both data models; cairo, freetype, pixman,
-  libpng, tiny3d) compile to identical assembly; no shipped code changes.
+- Compile comparison, not a runtime proof: the 22 translation units behind
+  the 35 functions with lvsr in the inspected installed archives (SDK at -O2,
+  both data models; cairo, freetype, pixman, libpng, tiny3d), plus the
+  v0.26.0-tag libgcm_cmd sources (12 per data model; the installed
+  libgcm_cmd.a is a later build), give identical assembly with and without
+  this patch.
 - gcc.dg/vect, vect/costmodel/ppc and gcc.target/powerpc AltiVec tests
   (2312 that compile here), -mcpu=cell -maltivec: -O2 0 changed; -O3 5
   changed, 2583 -> 2435 instructions in those files, loops vectorized
