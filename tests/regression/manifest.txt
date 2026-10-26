@@ -339,3 +339,5 @@ psgl-scissor-lp64,tests/regression/psgl-scissor/psgl-scissor-lp64.fake.self,120,
 # one realignment mask while it advanced 4 bytes per iteration (GCC patch 0082).
 vect-realign-splat-ilp32,tests/regression/vect-realign-splat/vect-realign-splat-ilp32.fake.self,30,RAN-CLEAN,(?m)^VECT_REALIGN checks=64 failures=0\r?$,VECT_REALIGN_FAIL|VECT_REALIGN mismatch
 vect-realign-splat-lp64,tests/regression/vect-realign-splat/vect-realign-splat-lp64.fake.self,30,RAN-CLEAN,(?m)^VECT_REALIGN checks=64 failures=0\r?$,VECT_REALIGN_FAIL|VECT_REALIGN mismatch
+psgl-fp-uniform-order-ilp32,tests/regression/psgl-fp-uniform-order/psgl-fp-uniform-order-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FP_ORDER_OK checks=26 failures=0\r?$,PSGL_FP_ORDER_FAIL
+psgl-fp-uniform-order-lp64,tests/regression/psgl-fp-uniform-order/psgl-fp-uniform-order-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FP_ORDER_OK checks=26 failures=0\r?$,PSGL_FP_ORDER_FAIL
