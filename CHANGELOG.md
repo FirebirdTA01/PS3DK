@@ -37,6 +37,12 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL scissor state and clipping.** Clears and draws use the same
+  lower-left scissor box, clipped to the current framebuffer before RSX
+  submission. Signed origins are preserved, empty intersections draw and
+  clear nothing, and negative sizes report `GL_INVALID_VALUE` without
+  changing state. Integer, float and boolean queries expose the box and
+  enable state; disabling the test preserves the box for re-enabling.
 - **PSGL fragment sampler selection.** `glUniform1i` selects logical texture
   units for reflected scalar `sampler2D` inputs in precompiled GL programs.
   Selections belong to each linked program, default to zero after a successful
@@ -48,6 +54,8 @@ The version stamped into builds is generated from the most recent
   physical bindings, but sampler setters for them report `INVALID_OPERATION`.
   Uniform setters using a location from a non-current program now report
   `INVALID_OPERATION` instead of writing that other program.
+  Linking now rejects ambiguous binaries with multiple reflected samplers
+  assigned to the same physical `TEXUNIT` resource.
 - **Eight PSGL fragment texture units.** Programmable fragment binaries can
   sample distinct textures on units 0-7. Fragment and combined image-unit
   queries report 8; the vertex image-unit query reports 0. Active texture and

@@ -79,6 +79,7 @@ typedef void (*_GLfuncptr)(void);
 #define GL_DEPTH_TEST 0x0B71
 #define GL_POINT_SMOOTH 0x0B10
 #define GL_LINE_SMOOTH 0x0B20
+#define GL_SCISSOR_BOX 0x0C10
 #define GL_SCISSOR_TEST 0x0C11
 #define GL_COLOR_MATERIAL 0x0B57
 #define GL_COLOR_MATERIAL_FACE 0x0B55

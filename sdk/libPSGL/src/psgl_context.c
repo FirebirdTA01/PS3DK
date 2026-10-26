@@ -1177,14 +1177,28 @@ static void psgl_emit_viewport(PSGLcontext *context)
 static void psgl_emit_scissor(PSGLcontext *context)
 {
     if (!context || !context->gcm || !context->device) return;
+    uint16_t tw, th;
+    psgl_current_target_dims(context, &tw, &th);
     if (context->scissor_test_enabled) {
-        cellGcmSetScissor(context->gcm, (uint16_t)context->scissor[0],
-                          (uint16_t)context->scissor[1],
-                          (uint16_t)context->scissor[2],
-                          (uint16_t)context->scissor[3]);
+        /* Preserve signed GL state; clip in wide arithmetic before narrowing
+           to RSX fields. GL uses a lower-left origin on both target kinds. */
+        int64_t left = context->scissor[0];
+        int64_t bottom = context->scissor[1];
+        int64_t right = left + context->scissor[2];
+        int64_t top = bottom + context->scissor[3];
+        if (left < 0) left = 0;
+        if (bottom < 0) bottom = 0;
+        if (right > tw) right = tw;
+        if (top > th) top = th;
+        if (right <= left || top <= bottom) {
+            cellGcmSetScissor(context->gcm, 0u, 0u, 0u, 0u);
+        } else {
+            cellGcmSetScissor(context->gcm, (uint16_t)left,
+                              (uint16_t)(th - top),
+                              (uint16_t)(right - left),
+                              (uint16_t)(top - bottom));
+        }
     } else {
-        uint16_t tw, th;
-        psgl_current_target_dims(context, &tw, &th);
         cellGcmSetScissor(context->gcm, 0u, 0u, tw, th);
     }
     context->dirty &= ~PSGL_DIRTY_SCISSOR;
@@ -2940,6 +2954,8 @@ void psgl_context_clear(GLbitfield mask)
     PSGLcontext *context = g_psgl.current_context;
     if (!context || !context->device || !context->gcm) return;
     if (context->dirty & PSGL_DIRTY_FRAMEBUFFER) psgl_bind_render_target(context);
+    /* Scissor applies to clears even if no draw has emitted pending state. */
+    if (context->dirty & PSGL_DIRTY_SCISSOR) psgl_emit_scissor(context);
 
     uint32_t clear_mask = 0u;
     if (mask & GL_COLOR_BUFFER_BIT) {
@@ -3300,9 +3316,13 @@ void psgl_context_set_blend_equation_separate(GLenum mode_rgb,
 void psgl_context_set_scissor(GLint x, GLint y, GLsizei width, GLsizei height)
 {
     PSGLcontext *context = g_psgl.current_context;
-    if (!context || width < 0 || height < 0) return;
-    context->scissor[0] = x < 0 ? 0 : x;
-    context->scissor[1] = y < 0 ? 0 : y;
+    if (!context) return;
+    if (width < 0 || height < 0) {
+        psgl_gl_error(GL_INVALID_VALUE);
+        return;
+    }
+    context->scissor[0] = x;
+    context->scissor[1] = y;
     context->scissor[2] = width;
     context->scissor[3] = height;
     context->dirty |= PSGL_DIRTY_SCISSOR;

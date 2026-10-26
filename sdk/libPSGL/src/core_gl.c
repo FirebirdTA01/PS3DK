@@ -23,6 +23,18 @@ void psgl_gl_error(GLenum error)
 unsigned psgl_gl_format_query(GLenum pname, GLint *values)
 {
     switch (pname) {
+    case GL_SCISSOR_BOX:
+    case GL_SCISSOR_TEST: {
+        PSGLcontext *context = psgl_context_current();
+        if (!context) return 0;
+        if (pname == GL_SCISSOR_TEST) {
+            values[0] = context->scissor_test_enabled;
+            return 1;
+        }
+        for (unsigned i = 0; i < 4; ++i)
+            values[i] = context->scissor[i];
+        return 4;
+    }
     case GL_PACK_ALIGNMENT:
     case GL_UNPACK_ALIGNMENT: {
         PSGLcontext *context = psgl_context_current();
