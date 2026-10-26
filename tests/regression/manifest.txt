@@ -349,3 +349,5 @@ psgl-ffp-texenv-ilp32,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-ilp32.fak
 psgl-ffp-texenv-lp64,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=73 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
 psgl-ffp-texenv-nolib-ilp32,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-nolib-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=6 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
 psgl-ffp-texenv-nolib-lp64,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-nolib-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=6 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
+psgl-ffp-install-failure-ilp32,tests/regression/psgl-ffp-install-failure/psgl-ffp-install-failure-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_INSTALL_OK checks=7 failures=0\r?$,PSGL_FFP_INSTALL_FAIL
+psgl-ffp-install-failure-lp64,tests/regression/psgl-ffp-install-failure/psgl-ffp-install-failure-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_INSTALL_OK checks=7 failures=0\r?$,PSGL_FFP_INSTALL_FAIL
