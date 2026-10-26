@@ -447,13 +447,23 @@ GLAPI void glTexParameterx(GLenum target, GLenum pname, GLfixed param)
 { psgl_context_tex_parameter(target, pname, (GLint)(param / 65536)); }
 
 GLAPI void glTexEnvf(GLenum target, GLenum pname, GLfloat param)
-{ (void)target; (void)pname; (void)param; }
+{ psgl_context_tex_env(target, pname, &param, GL_FALSE); }
 GLAPI void glTexEnvfv(GLenum target, GLenum pname, const GLfloat *params)
-{ (void)target; (void)pname; (void)params; }
+{ psgl_context_tex_env(target, pname, params, GL_TRUE); }
+/* Fixed-point colours are 16.16 values; an enum passes through unscaled. */
 GLAPI void glTexEnvx(GLenum target, GLenum pname, GLfixed param)
-{ (void)target; (void)pname; (void)param; }
+{ GLfloat f = (GLfloat)param; psgl_context_tex_env(target, pname, &f, GL_FALSE); }
 GLAPI void glTexEnvxv(GLenum target, GLenum pname, const GLfixed *params)
-{ (void)target; (void)pname; (void)params; }
+{
+    GLfloat f[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (params) {
+        if (pname == GL_TEXTURE_ENV_COLOR)
+            for (int i = 0; i < 4; i++) f[i] = (GLfloat)params[i] / 65536.0f;
+        else
+            f[0] = (GLfloat)params[0];
+    }
+    psgl_context_tex_env(target, pname, params ? f : NULL, GL_TRUE);
+}
 
 GLAPI void glClientActiveTexture(GLenum texture)
 { psgl_context_client_active_texture(texture); }

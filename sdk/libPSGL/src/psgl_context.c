@@ -66,6 +66,10 @@ typedef struct PSGLtextureObject {
     GLenum compare_mode;
     GLenum compare_func;
     GLenum allocation_hint;
+    /* GL base internal format of the image (ALPHA, LUMINANCE,
+       LUMINANCE_ALPHA, RGB or RGBA); texture functions depend on it
+       (GL 2.1 table 3.22) while the storage is always expanded ARGB8. */
+    GLenum base_format;
     uint16_t width;
     uint16_t height;
     uint16_t pitch;
@@ -1526,6 +1530,7 @@ static void psgl_init_texture_defaults(PSGLtextureObject *texture)
     texture->compare_mode = GL_NONE;
     texture->compare_func = GL_LEQUAL;
     texture->allocation_hint = GL_TEXTURE_LINEAR_GPU_SCE;
+    texture->base_format = GL_RGBA;
     texture->location = CELL_GCM_LOCATION_LOCAL;
     texture->linear = 1u;
     texture->levels = 1u;
@@ -1569,6 +1574,24 @@ static void psgl_release_texture_storage(PSGLtextureObject *texture)
     texture->owns_storage = 0u;
     psgl_zero(&texture->gcm_texture, sizeof(texture->gcm_texture));
     texture->gcm_texture.remap = psgl_texture_remap_argb();
+}
+
+static GLenum psgl_texture_base_format(GLenum internalformat, GLenum format)
+{
+    switch (internalformat) {
+    case GL_ALPHA: return GL_ALPHA;
+    case GL_LUMINANCE: return GL_LUMINANCE;
+    case GL_LUMINANCE_ALPHA: return GL_LUMINANCE_ALPHA;
+    case GL_RGB: case GL_BGR: return GL_RGB;
+    case GL_DEPTH_COMPONENT16: case GL_DEPTH_COMPONENT24: return GL_LUMINANCE;
+    case GL_RGBA: case GL_BGRA: case GL_ARGB_SCE: return GL_RGBA;
+    default: break;
+    }
+    if (format == GL_RGB || format == GL_BGR) return GL_RGB;
+    if (format == GL_ALPHA || format == GL_LUMINANCE ||
+        format == GL_LUMINANCE_ALPHA)
+        return format;
+    return GL_RGBA;
 }
 
 static uint32_t psgl_texture_unit_index(GLenum texture)
@@ -2662,6 +2685,8 @@ PSGLcontext *psgl_context_create(void)
     }
     context->active_texture = GL_TEXTURE0;
     context->client_active_texture = GL_TEXTURE0;
+    for (uint32_t unit = 0u; unit < PSGL_MAX_TEXTURE_UNITS; unit++)
+        context->textures[unit].env_mode = GL_MODULATE;
     context->unpack_alignment = 4;
     context->pack_alignment = 4;
     context->attribs[PSGL_ATTRIB_VERTEX].size = 4;
@@ -3341,6 +3366,12 @@ void psgl_context_set_enable(GLenum cap, GLboolean enabled)
         break;
     case GL_TEXTURE_2D: {
         uint32_t unit = psgl_texture_unit_index(context->active_texture);
+        /* Units 4-7 exist for programmable samplers only (GL 2.1: fixed-
+           function enables past MAX_TEXTURE_UNITS are INVALID_OPERATION). */
+        if (unit >= PSGL_MAX_LEGACY_TEXTURE_UNITS) {
+            psgl_gl_error(GL_INVALID_OPERATION);
+            break;
+        }
         context->textures[unit].texture_2d_enabled = enabled;
         context->dirty |= PSGL_DIRTY_TEXTURES | PSGL_DIRTY_CG;
         break;
@@ -3982,6 +4013,72 @@ void psgl_context_active_texture(GLenum texture)
     context->dirty |= PSGL_DIRTY_TEXTURES;
 }
 
+/* GL 2.1 section 3.13: TEXTURE_ENV_MODE and TEXTURE_ENV_COLOR of the
+   active unit.  COMBINE and point-sprite COORD_REPLACE are not implemented
+   and report INVALID_ENUM like any other unknown token; units past the
+   fixed-function limit report INVALID_OPERATION.  Rejected calls leave the
+   state unchanged. */
+void psgl_context_tex_env(GLenum target, GLenum pname,
+                          const GLfloat *params, GLboolean vector)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    uint32_t unit;
+    if (!context) return;
+    if (target != GL_TEXTURE_ENV ||
+        (pname != GL_TEXTURE_ENV_MODE && pname != GL_TEXTURE_ENV_COLOR) ||
+        (pname == GL_TEXTURE_ENV_COLOR && !vector)) {
+        psgl_gl_error(GL_INVALID_ENUM);
+        return;
+    }
+    if (!params) return;
+    if (pname == GL_TEXTURE_ENV_MODE) {
+        GLenum mode = (GLenum)params[0];
+        if (mode != GL_MODULATE && mode != GL_REPLACE && mode != GL_DECAL &&
+            mode != GL_BLEND && mode != GL_ADD) {
+            psgl_gl_error(GL_INVALID_ENUM);
+            return;
+        }
+    }
+    unit = psgl_texture_unit_index(context->active_texture);
+    if (unit >= PSGL_MAX_LEGACY_TEXTURE_UNITS) {
+        psgl_gl_error(GL_INVALID_OPERATION);
+        return;
+    }
+    if (pname == GL_TEXTURE_ENV_MODE) {
+        context->textures[unit].env_mode = (GLenum)params[0];
+    } else {
+        for (uint32_t i = 0u; i < 4u; i++) {
+            GLfloat v = params[i];
+            context->textures[unit].env_color[i] = v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v;
+        }
+    }
+    context->dirty |= PSGL_DIRTY_CG;
+}
+
+int psgl_context_get_tex_env(GLenum target, GLenum pname, GLfloat *params)
+{
+    PSGLcontext *context = g_psgl.current_context;
+    uint32_t unit;
+    if (!context) return 0;
+    if (target != GL_TEXTURE_ENV ||
+        (pname != GL_TEXTURE_ENV_MODE && pname != GL_TEXTURE_ENV_COLOR)) {
+        psgl_gl_error(GL_INVALID_ENUM);
+        return 0;
+    }
+    unit = psgl_texture_unit_index(context->active_texture);
+    if (unit >= PSGL_MAX_LEGACY_TEXTURE_UNITS) {
+        psgl_gl_error(GL_INVALID_OPERATION);
+        return 0;
+    }
+    if (!params) return 0;
+    if (pname == GL_TEXTURE_ENV_MODE) {
+        params[0] = (GLfloat)context->textures[unit].env_mode;
+        return 1;
+    }
+    for (uint32_t i = 0u; i < 4u; i++) params[i] = context->textures[unit].env_color[i];
+    return 4;
+}
+
 void psgl_context_client_active_texture(GLenum texture)
 {
     PSGLcontext *context = g_psgl.current_context;
@@ -4098,6 +4195,7 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
         return;
     if (!rt_storage && !psgl_texture_supported(format, type))
         return;
+    texture->base_format = psgl_texture_base_format((GLenum)internalformat, format);
 
     if ((GLenum)internalformat == GL_ARGB_SCE) {
         /* Color render-target storage-only. */
@@ -4660,6 +4758,8 @@ void psgl_context_copy_tex_image_2d(GLenum target, GLint level,
         uint8_t want_format;
         if (!texture)
             return;
+        /* Depth textures sample as luminance (GL 2.1 DEPTH_TEXTURE_MODE). */
+        texture->base_format = GL_LUMINANCE;
         if (src_bpp == 2u)
             want_format = CELL_GCM_TEXTURE_DEPTH16 | CELL_GCM_TEXTURE_SZ;
         else
@@ -4714,6 +4814,8 @@ void psgl_context_compressed_tex_image_2d(GLenum target, GLint level,
 
     size = (uint32_t)imageSize;
     if (size == 0u) return;
+    texture->base_format = internalformat == GL_COMPRESSED_RGB_S3TC_DXT1_EXT
+                               ? GL_RGB : GL_RGBA;
 
     address = rsxMemalign(PSGL_TEXTURE_ALIGNMENT, size);
     if (!address) return;
@@ -4816,6 +4918,7 @@ void psgl_context_texture_reference_sce(GLenum target, GLuint levels,
     if (texture_pitch > 0xffffu) return;
 
     psgl_release_texture_storage(texture);
+    texture->base_format = psgl_texture_base_format(internalformat, internalformat);
     texture->address = (unsigned char *)buffer->address + texture_offset;
     texture->offset = buffer->offset + texture_offset;
     texture->size = buffer->size - texture_offset;

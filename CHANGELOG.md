@@ -66,6 +66,15 @@ The version stamped into builds is generated from the most recent
   `INVALID_OPERATION` instead of writing that other program.
   Linking now rejects ambiguous binaries with multiple reflected samplers
   assigned to the same physical `TEXUNIT` resource.
+- **PSGL texture environment state.** `glTexEnv{f,i,x}[v]` store
+  `GL_TEXTURE_ENV_MODE` (MODULATE, REPLACE, DECAL, BLEND, ADD; MODULATE
+  initially) and `GL_TEXTURE_ENV_COLOR` per texture unit, and
+  `glGetTexEnv{fv,iv,xv}` return them. COMBINE and other unknown tokens or
+  targets report `GL_INVALID_ENUM` without changing state. On the
+  programmable-only texture units 4-7, `glTexEnv` and
+  `glEnable(GL_TEXTURE_2D)` report `GL_INVALID_OPERATION`. Textures
+  remember their base format (ALPHA, LUMINANCE, LUMINANCE_ALPHA, RGB, RGBA)
+  for the texture functions.
 - **Eight PSGL fragment texture units.** Programmable fragment binaries can
   sample distinct textures on units 0-7. Fragment and combined image-unit
   queries report 8; the vertex image-unit query reports 0. Active texture and

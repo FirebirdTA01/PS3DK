@@ -68,6 +68,9 @@ typedef struct PSGLvertexAttribState {
 typedef struct PSGLtextureUnitState {
     GLuint texture_2d;
     GLboolean texture_2d_enabled;
+    /* Fixed-function texture environment (GL 2.1 section 3.13). */
+    GLenum env_mode;
+    GLfloat env_color[4];
 } PSGLtextureUnitState;
 
 typedef struct PSGLlightState {
@@ -298,6 +301,9 @@ void psgl_context_get_lightfv(GLenum light, GLenum pname, GLfloat *params);
 void psgl_context_get_materialfv(GLenum face, GLenum pname, GLfloat *params);
 void psgl_context_set_pixel_store(GLenum pname, GLint param);
 void psgl_context_active_texture(GLenum texture);
+void psgl_context_tex_env(GLenum target, GLenum pname,
+                          const GLfloat *params, GLboolean vector);
+int psgl_context_get_tex_env(GLenum target, GLenum pname, GLfloat *params);
 void psgl_context_client_active_texture(GLenum texture);
 void psgl_context_gen_textures(GLsizei n, GLuint *textures);
 void psgl_context_delete_textures(GLsizei n, const GLuint *textures);

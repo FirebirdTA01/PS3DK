@@ -158,9 +158,40 @@ GLAPI void glReadBuffer(GLenum mode)    { (void)mode; }
 /* ── texenv int variants ─────────────────────────────────────────── */
 
 GLAPI void glTexEnvi(GLenum target, GLenum pname, GLint param)
-{ (void)target; (void)pname; (void)param; }
+{ GLfloat f = (GLfloat)param; psgl_context_tex_env(target, pname, &f, GL_FALSE); }
+/* Integer colours map the full GLint range onto [-1,1] (GL 2.1 table 2.9). */
 GLAPI void glTexEnviv(GLenum target, GLenum pname, const GLint *params)
-{ (void)target; (void)pname; (void)params; }
+{
+    GLfloat f[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (params) {
+        if (pname == GL_TEXTURE_ENV_COLOR)
+            for (int i = 0; i < 4; i++)
+                f[i] = (GLfloat)((2.0 * (double)params[i] + 1.0) / 4294967295.0);
+        else
+            f[0] = (GLfloat)params[0];
+    }
+    psgl_context_tex_env(target, pname, params ? f : NULL, GL_TRUE);
+}
+
+GLAPI void glGetTexEnvfv(GLenum target, GLenum pname, GLfloat *params)
+{ (void)psgl_context_get_tex_env(target, pname, params); }
+GLAPI void glGetTexEnviv(GLenum target, GLenum pname, GLint *params)
+{
+    GLfloat f[4];
+    int n = psgl_context_get_tex_env(target, pname, f);
+    if (!params) return;
+    if (n == 1) { params[0] = (GLint)f[0]; return; }
+    for (int i = 0; i < n; i++)
+        params[i] = (GLint)((f[i] * 4294967295.0 - 1.0) / 2.0);
+}
+GLAPI void glGetTexEnvxv(GLenum target, GLenum pname, GLfixed *params)
+{
+    GLfloat f[4];
+    int n = psgl_context_get_tex_env(target, pname, f);
+    if (!params) return;
+    if (n == 1) { params[0] = (GLfixed)f[0]; return; }
+    for (int i = 0; i < n; i++) params[i] = (GLfixed)(f[i] * 65536.0f);
+}
 
 /* ── texgen ──────────────────────────────────────────────────────── */
 
