@@ -21,8 +21,9 @@ Expected totals are 12 checks for normalization and 7 for disabled arrays.
 The direct-Cg fixture uses `psgl_cg_create_program_from_memory` to load
 embedded binaries. Public `cgCreateProgram` currently returns NULL even
 for binary input, so it cannot set up this fixture. The internal loader
-is globally defined in both ABI archives in the published v0.26.0 SDK,
-but is not a public API contract. Binding and array operations under test
+was globally defined in both ABI archives of the tested install, which
+included the GCM Phase B overlay rather than being a pristine published
+v0.26.0 extraction. It is not a public API contract. Binding and array operations under test
 use public Cg functions. Installed-archive link checks are separate from
 private-archive runtime checks; v0.26.0 also lacks the working ReadPixels
 implementation needed for these pixel verdicts.

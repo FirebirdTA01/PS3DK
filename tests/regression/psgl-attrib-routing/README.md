@@ -11,9 +11,10 @@ the installed executable, inactive bindings, invalid pointer state updates,
 and switches between logical GL, direct Cg and legacy arrays. The Cg fixture
 uses the internal binary-memory loader because the public Cg memory loader
 is still unimplemented; the array/bind calls themselves use the Cg API.
-The loader is globally defined in both published v0.26.0 ABI archives,
-though it is not a public API contract. Installed-archive link checks are
-kept separate from private-archive runtime validation.
+The loader was globally defined in both ABI archives of the tested install,
+though it is not a public API contract. That install included the GCM Phase B
+overlay; it was not a pristine published v0.26.0 extraction. Installed-archive
+link checks are kept separate from private-archive runtime validation.
 Both ABIs must finish with `PSGL_ATTR_OK checks=80 failures=0`.
 
 Bindings become visible only after a successful link. Unbound active
