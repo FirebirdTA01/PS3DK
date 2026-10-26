@@ -13,7 +13,8 @@ Labels:
 
 ## 1. What ships today
 
-**GDB is in the Linux toolchain, not in the Windows SDK.**
+**The native Linux build includes GDB; the Windows SDK does not.** Published tarball
+contents are unverified.
 - `scripts/build-ppu-toolchain.sh:596-605` returns early when `HOST_TRIPLE` is set, so the
   Windows cross build never builds GDB ("mingw-w64 GMP/MPFR not yet packaged; deferred").
   The installed v0.26.0 Windows SDK has no `gdb` executable at all [measured: only
@@ -51,9 +52,12 @@ Labels:
 GDB's ppc64 descriptor code reads
 them as 64-bit entries [measured: the minimal symbol for `add` is listed at
 `0x00010b6400049400`, i.e. entry and TOC glued together, and `info line add` falls back to
-the `.opd` address `0x40250`]. With DWARF this is harmless, because breakpoints use line
-tables. **Without debug info** (system libraries, stripped code, backtraces through them)
-symbols and breakpoints by name will be wrong. Fixing this is a small, contained GDB patch in
+the `.opd` address `0x40250`]. In these probes, with DWARF, `break add` and `break t.c:4`
+both resolved to the correct post-prologue address in both ABIs, and `print &add` gave the
+entry `0x10b64` (ILP32) / `0x10854` (LP64) [measured, `linux/gdb3-*.txt`]. That does not
+clear the defect: indirect calls through descriptors, calls into code without debug info
+(system libraries, stripped code), backtraces through such frames, and anything else that
+uses minimal symbols are not covered by those probes and should be expected to misresolve. Fixing this is a small, contained GDB patch in
 `ppc64-tdep.c`/`ppc-sysv-tdep.c` descriptor handling for the `powerpc64-ps3-elf` OSABI
 [estimate: S-M].
 
@@ -107,7 +111,9 @@ it 60 times (`rpcs3-c-*`); with `PPU Decoder: Interpreter (static)` passed throu
 | `detach` | **not supported** ("Remote doesn't know how to detach") | same |
 
 Practical notes:
-- RPCS3 binds 127.0.0.1 only. WSL2 in NAT mode cannot reach it directly; the study used a
+- The address is configurable: `GDB.cpp:119-159` parses an IPv4 `address:port` from the
+  setting [public-cited]. The default, and the study's configuration, binds 127.0.0.1:2345.
+  With that binding, WSL2 in NAT mode cannot reach it directly; the study used a
   small Windows-side TCP relay (`tools/relay.py`). A Windows-hosted GDB, or WSL mirrored
   networking, avoids the relay.
 - Debug runs need the PPU interpreter, which is far slower. A per-run `--config` copy keeps
@@ -120,7 +126,7 @@ Practical notes:
 There is no hardware debug channel on a retail console. The two candidate in-process
 mechanisms are:
 
-- **lv2dbg.** We already ship the headers and stubs: `sdk/include/sys/dbg.h` (249 lines) over
+- **lv2dbg.** We already ship the headers and stubs: `sdk/include/sys/dbg.h` (280 lines at 8b0ffb20) over
   `liblv2dbg_stub.a`, loaded as `CELL_SYSMODULE_LV2DBG` [measured]. It declares:
   - PPU exception-handler registration (`sys_dbg_register_ppu_exception_handler`, `:219`);
   - thread enumeration and context reads for PPU and SPU (`:210-214`, `:239-255`);
@@ -137,13 +143,19 @@ mechanisms are:
 ### 3.2 Recommended hardware shape
 
 An **in-app GDB stub** linked into the debugged program (`-lps3dkdbg` or a CMake option):
-- It speaks the GDB remote protocol over the ps3dk-run protocol-2 transport and pairing
-  (authenticated, already on the console as the loader, proven on hardware 2026-10-17 and
-  2026-10-25), or over a plain TCP port for local networks.
+- It speaks the GDB remote protocol over the ps3dk-run protocol-2 transport and pairing, or
+  over a plain TCP port for local networks. Protocol 2 is installed on the console as the
+  loader. The 2026-10-25 session (`C:/wt/hw-lsput-20261025-c`) launched a control child that
+  exited with `EXITED 7` and `loader_ready` true, then a probe whose transport outcome was
+  `NO_HOOK` and whose result came from a file log. That shows launch and pairing, not a
+  debug channel: multiplexing a debug stream over protocol 2 is unimplemented.
 - Breakpoints: software traps if text can be made writable, otherwise DABR for one data
-  watchpoint and "break on entry/exception" only.
-- Exceptions: the lv2dbg PPU exception handler converts faults into GDB stop replies with a
-  full register set, which alone is a large improvement over today's silent crashes.
+  watchpoint and "break on entry/exception" only. All of these assume lv2dbg works (§3.1).
+- Exceptions: **if** lv2dbg is available, its PPU exception handler converts faults into GDB
+  stop replies with a full register set, which alone is a large improvement over today's
+  silent crashes. If lv2dbg is not available on retail/HEN, that handler is not available
+  either, and the stub cannot promise exception catching; what remains would have to be
+  established separately.
 - Threads: `sys_dbg_get_ppu_thread_ids` + context reads give `info threads` and `bt` per
   thread.
 - SPU: thread and group enumeration and context reads are declared; stopping and stepping
@@ -151,10 +163,17 @@ An **in-app GDB stub** linked into the debugged program (`-lps3dkdbg` or a CMake
 
 ### 3.3 PSL1GHT / ps3dev review
 
-- **PSL1GHT:** the vendored checkout is `eca3f990a6` (2024-10-20, `ps3dev/PSL1GHT`). Upstream
-  commits since 2020 contain no debugger work: the commit messages matching
-  gdb/debug/stub/exception/trap are rsx methods and chdir support [public-cited, GitHub
-  commit list]. Nothing to take.
+- **PSL1GHT:** the vendored checkout is `eca3f990a6` (2024-10-20, `ps3dev/PSL1GHT`).
+  Searched on 2026-10-25, upstream head `f649a08fd5`:
+  - the first 100 commit messages since 2020-01-01, matched for gdb, debug, stub, exception
+    and trap, gave only `99dd0b91ef` (chdir/getcwd) and `40879a2411` (rsx methods);
+  - the commits since 2024-06-01 had no debugger subject either;
+  - the vendored tree's file contents, grepped for gdbstub, gdb_stub, gdbserver and
+    `qSupported` (case-insensitive `git grep`, rc 1), had no matches
+    (`psl1ght-grep.txt`, empty).
+
+  These searches found no debugger work [public-cited, GitHub commit API]. That is a
+  bounded search, not proof that none exists.
 - **ps3toolchain (`ps3dev/ps3toolchain`)** restored its GDB build scripts on 2026-10-11
   (merge `de85d7d5d1`, "restore_gdb") [public-cited]:
   - `scripts/003-gdb-PPU.sh` and `scripts/007-gdb-SPU.sh` build **GDB 8.3.1** for
@@ -168,7 +187,8 @@ An **in-app GDB stub** linked into the debugged program (`-lps3dkdbg` or a CMake
 
 ## 4. Host side
 
-- **Linux:** ships today in `ps3dev-ppu.tar.xz`. `powerpc64-ps3-elf-gdb build/app` then
+- **Linux:** the native build includes GDB (published `ps3dev-ppu.tar.xz` contents
+  unverified). `powerpc64-ps3-elf-gdb build/app` then
   `target remote <host>:2345` (RPCS3) or the stub's port (hardware).
 - **Windows:** no GDB in the zip. Options:
   - cross-build GDB for mingw-w64 with GMP/MPFR (the deferred item at
@@ -200,8 +220,10 @@ An **in-app GDB stub** linked into the debugged program (`-lps3dkdbg` or a CMake
 | later | SPU: inspection via lv2dbg context reads in the stub; a GDB with an SPU target is a separate, large project | — | L+ |
 
 Risks:
-- lv2dbg may be unavailable on retail/HEN, which would limit the stub to exception catching,
-  or less. Phase 1 decides.
+- lv2dbg may be unavailable on retail/HEN. The exception handler is itself an lv2dbg call,
+  so in that case even exception catching is not available, and the in-app stub design
+  would need a different mechanism or would shrink to memory/register inspection the app
+  does for itself. Phase 1 decides.
 - RPCS3's stub is limited (no detach, `stepi` did not advance in the one test, LLVM decoder
   ignores breakpoints). Upstream fixes to RPCS3 are possible but outside our control.
 - The interpreter-only debug runs are slow; long programs need targeted breakpoints.
