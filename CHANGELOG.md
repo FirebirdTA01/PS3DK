@@ -16,6 +16,22 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- **PSGL samples at other display modes.** The rendering samples size their
+  viewport from the render buffer instead of assuming 1280x720, so they fill
+  the screen at 1080p and other modes; `hello-psgl-msaa` no longer fails on
+  a non-720p display.
+- **PSGL sample lifecycle and checks.** The rendering samples end their loop
+  when *Quit* is chosen from the XMB. `hello-psgl-spudraw-triangle` and
+  `hello-psgl-spuhole` check device and context creation, and `hello-psglu`
+  reports which string check failed.
+
+### Changed
+
+- **PSGL sample guide.** `samples/README.md` lists the PSGL samples, what
+  each validates, and the four ways their shaders are built.
+
 ## [v0.26.0] — 2026-10-25
 
 ### Added

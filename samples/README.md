@@ -32,6 +32,53 @@ These are the "does the compiler work" tier — don't touch RSX / sysutil.
 | `hello-ppu-abi-check` | `.sys_proc_param` 36-byte firmware-3.30+ layout; malloc/calloc/realloc through libsysbase `_sbrk_r`; printf through `_write_r` | **green** |
 | `hello-ppu-backfill` | Batch link test — anchors one symbol from each of five stub archives (subdisplay / music / music_decode / music_export / imejp) so FNID + sceResident entries land in the ELF | **green** + RPCS3 runtime-verified |
 
+### PSGL (`toolchain/hello-psgl-*`, `toolchain/hello-psglu`)
+
+OpenGL ES 1.1-style rendering through `libPSGL` / `libPSGLU` on top of GCM.
+The rendering samples size their viewport from
+`psglGetRenderBufferDimensions`, so they fill the screen at any display
+mode, and they register a sysutil callback so *Quit* from the XMB ends the
+render loop (otherwise they stop after 900 frames, about 15 s).
+
+Shaders reach a sample in one of four ways:
+
+- **`ps3_add_cg_shader_rsxcgc`**: `.vcg` / `.fcg` compiled by
+  `rsx-cg-compiler` at build time and embedded with `bin2s`.
+- **GLSL subset**: `tools/psgl/glsl_subset_to_cg.py` translates the GLSL to
+  Cg, then `rsx-cg-compiler --emit-container` builds the containers.
+- **Fixed-function library**: `psgl-shader-builder` (shipped with the host
+  tools) builds a shader library from `state.txt`, loaded with
+  `psglLoadShaderLibrary`.
+- **Built-in**: the fixed-function samples use the runtime's own programs.
+
+`cgCreateProgram` cannot load a program from memory yet, and
+`psglLoadShaderLibrary` takes a path, so samples that load embedded shaders
+first write them to `/dev_hdd0/tmp`.
+
+| Sample | Validates |
+|---|---|
+| `hello-psgl-link` | `<PSGL/psgl.h>` compiles and links against `libPSGL` + `libPSGLU` (compile + link gate) |
+| `hello-psgl-clear` | Device + context bring-up, display-sized viewport, clear and swap |
+| `hello-psgl-triangle` | Cg vertex + fragment program through `cgGL`, VBO, one triangle |
+| `hello-psgl-blend` | Two fragment programs, alpha blending over an opaque triangle |
+| `hello-psgl-msaa` | `GL_MULTISAMPLING_2X_DIAGONAL_CENTERED_SCE` device and framebuffer mode |
+| `hello-psgl-textured-quad` | Texture upload and a Cg fragment program that samples it |
+| `hello-psgl-shader-interface` | Cg program parameter interface through `cgGL`, VBO-fed draw |
+| `hello-psgl-cg-passthrough` | A hand-built `CgBinaryProgram` through the Cg runtime |
+| `hello-psgl-glsl-object` | GLSL-subset shaders translated to Cg at build time |
+| `hello-psgl-ffp-quad` | Fixed-function textured quad: texture upload, VBO with texcoords, orthographic projection |
+| `hello-psgl-rotating-quad` | Fixed-function matrix stack animation |
+| `hello-psgl-ffp-lit-bootstrap` | Fixed-function lighting: normals, one light, the built-in lit programs |
+| `hello-psgl-ffp-shaderlib` | `psgl-shader-builder` library + `psglLoadShaderLibrary`, textured quad |
+| `hello-psgl-vbo` | Buffer objects: create, size query, sub-data update, unmap, delete (no rendering) |
+| `hello-psgl-cmdbuf` | Command-buffer record, call and return |
+| `hello-psgl-spuhole` | Command-buffer hole sizing and alignment (no SPU) |
+| `hello-psgl-spudraw` | SPU fills a command-buffer hole with NOPs; PPU replays it |
+| `hello-psgl-spudraw-triangle` | SPU fills a hole with an indexed draw via `libspuPSGL` |
+| `hello-psgl-fog-state` | Fog state set / query round trip (no rendering) |
+| `hello-psgl-light-state` | Light, material and light-model state round trip (no rendering) |
+| `hello-psglu` | `gluOrtho2Df`, `gluPerspectivef`, `gluLookAtf`, strings, `gluScaleImage` |
+
 ## gcm/
 
 RSX / cellGcm graphics.  Incremental: start at "clear the framebuffer",
