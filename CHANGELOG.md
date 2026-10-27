@@ -18,6 +18,12 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **GCM flip and frame-pacing sample.** `hello-ppu-gcm-frame-pacing`
+  presents finite VSYNC, HSYNC and application-paced VSYNC phases, with
+  a moving stripe at the current display size. It reports observed flip
+  callbacks and interval statistics, separates missed application deadlines
+  from display behaviour, and supports XMB exit with bounded flip waits.
+  It preserves the initialized FIFO cursor and requires no shader assets.
 - **Cg programs from binary containers through `cgCreateProgram`.**
   `cgCreateProgram` with `CG_BINARY` or `CG_OBJECT` creates a program from
   a precompiled `.vpo`/`.fpo` or compact CGB container in memory; it used to

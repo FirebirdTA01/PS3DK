@@ -99,6 +99,13 @@ first write them to `/dev_hdd0/tmp`.
 RSX / cellGcm graphics.  Incremental: start at "clear the framebuffer",
 grow toward shaders and full-pipeline samples.
 
+[`hello-ppu-gcm-frame-pacing`](gcm/hello-ppu-gcm-frame-pacing/README.md)
+demonstrates VSYNC, HSYNC and application-paced VSYNC with three finite
+120-frame phases. Its text summaries report flip callbacks and interval
+statistics; screenshots identify the phase. These measurements do not count
+hardware dropped frames. See its README for the bounded waits, XMB exit and
+the published v0.26.0 FIFO-sizing caveat.
+
 | Sample | Validates | Status |
 |---|---|---|
 | `hello-ppu-rsx-clear` | RSX bring-up via PSL1GHT's native `rsx*` API; cycles 6 clear colors × 60 frames (~6 s), exits clean.  No shaders | **green** + RPCS3 runtime-verified |
