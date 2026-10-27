@@ -13,12 +13,12 @@
  *   1. Query total / available user memory (sys_memory_get_user_memory_size).
  *   2. Create a container (2 MiB).
  *   3. Read its total / available size.
- *   4. Allocate four 512 KiB regions from the container, write + read back
- *      a pattern in each, then free each one.
- *   5. After each allocation the container's available size should be
- *      lower; after each free it should rise again.  We only verify the
- *      total stays constant and the allocation/failure path is sane (the
- *      exact available accounting is kernel-internal).
+ *   4. One at a time, allocate a 512 KiB region from the container,
+ *      check its address is nonzero, write and read back its first and
+ *      last words, and free it.  All four cycles must complete.
+ *   5. Read the container size again: the total must be unchanged.
+ *      Only these sequential allocations are covered, not exhausting the
+ *      container or the exact available-size accounting.
  *   6. Destroy the container.
  *
  * Negative path (each must fail; the code is printed):
@@ -96,6 +96,7 @@ int main(void)
 
     /* 4. four 512 KiB allocations from the container, use + free each. */
     enum { N = 4 };
+    int cycles = 0;   /* allocations that were written, read back and freed */
     for (int i = 0; i < N; ++i) {
         sys_addr_t addr = 0;
         rc = sys_memory_allocate_from_container(512 * 1024, cid,
@@ -103,7 +104,10 @@ int main(void)
                                                 &addr);
         char name[64];
         snprintf(name, sizeof name, "allocate_from_container(%d, 512 KiB)", i);
-        if (!expect(name, rc, CELL_OK) || !addr)
+        if (!expect(name, rc, CELL_OK))
+            continue;
+        snprintf(name, sizeof name, "region %d address is nonzero", i);
+        if (!used(name, addr != 0, (unsigned long long)addr))
             continue;
 
         volatile uint32_t *w = (volatile uint32_t *)(uintptr_t)addr;
@@ -116,8 +120,11 @@ int main(void)
         used(name, !bad, (unsigned)w[0]);
 
         snprintf(name, sizeof name, "free region %d", i);
-        expect(name, sys_memory_free(addr), CELL_OK);
+        if (expect(name, sys_memory_free(addr), CELL_OK) && !bad)
+            ++cycles;
     }
+    used("four complete allocate/readback/free cycles", cycles == N,
+         (unsigned)cycles);
 
     /* 5. after all frees the container should still be intact. */
     sys_memory_info_t cmi2;
