@@ -16,6 +16,10 @@ waits are bounded. An XMB exit request stops the worker and drains the
 outstanding flip before cleanup. Normal completion requires all four
 phases; early exit prints `AUDIO_MIX_QUIT`, not the full-run success marker.
 Only resources acquired by the sample are released.
+The main loop has a 30-second cap for the nominal eight-second run. If the
+worker does not acknowledge stop within two seconds, the sample exits with
+failure and leaves its ports open for process teardown to reclaim; it does
+not close resources that a live worker may still access.
 
 ## Build
 
