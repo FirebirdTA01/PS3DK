@@ -101,7 +101,9 @@ The version stamped into builds is generated from the most recent
   the GPU does not finish, teardown stops, keeps everything the GPU may use,
   and prints one line on stderr; a later call retries. A device whose last
   wait timed out, after its display buffers were released, stays in teardown:
-  `psglMakeCurrent` refuses to bind it and the next `psglExit` resumes it.
+  it is no longer current, so clear, draw and swap do not reach it,
+  `psglMakeCurrent` refuses to bind it, and the next `psglDestroyDevice` or
+  `psglExit` resumes it.
   `psglFreeCommandBuffer` keeps the buffer mapped and allocated, and records
   `GL_INVALID_OPERATION`, when the wait times out or unmapping fails. A
   successful `psglFreeCommandBuffer` now also unmaps the buffer, and a pointer
