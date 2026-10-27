@@ -350,6 +350,10 @@ jobs:
       - name: Test SAIL player, recorder, and composer record layouts
         run: bash tests/sdk/sail-record-layout-test.sh
 
+      # Header-shape checks always run; the compile matrix skips without PS3DEV.
+      - name: Test the camera and microphone error-code helpers
+        run: bash tests/sdk/miccam-error-helper-test.sh
+
       - name: Test the cell/hash digests against hashlib
         run: bash tests/sdk/hash-vectors-test.sh
 

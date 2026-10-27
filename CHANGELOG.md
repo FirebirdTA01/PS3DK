@@ -141,6 +141,12 @@ The version stamped into builds is generated from the most recent
   it expects. PSL1GHT's `<io/move.h>` is unchanged and can be included
   alongside.
 
+- **Camera and microphone error-code helpers.** `<cell/camera.h>` defines
+  `CELL_CAMERA_MAKE_ERROR(status)` and `<cell/mic/error.h>` defines
+  `CELL_MICIN_MAKE_ERROR(status)`, which build an error code in the shared
+  mic/camera facility from its status word and reproduce the existing
+  `CELL_CAMERA_ERROR_*` and `CELL_MICIN_ERROR_*` values.
+
 - **GCM flip and frame-pacing sample.** `hello-ppu-gcm-frame-pacing`
   presents finite VSYNC, HSYNC and application-paced VSYNC phases, with
   a moving stripe at the current display size. It reports observed flip

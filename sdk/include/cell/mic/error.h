@@ -39,4 +39,8 @@
 #define CELL_MICIN_ERROR_DSP_LIB_NOSPU    0x80140218
 #define CELL_MICIN_ERROR_DSP_LIB_SAMPRATE 0x80140219
 
+/* Build a microphone error code from its status word (low 16 bits); mic
+ * codes live in the shared mic/camera facility. */
+#define CELL_MICIN_MAKE_ERROR(status)     CELL_ERROR_MAKE_ERROR(CELL_ERROR_FACILITY_MICCAM, status)
+
 #endif /* __PS3DK_CELL_MIC_ERROR_H__ */

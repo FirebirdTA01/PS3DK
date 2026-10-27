@@ -28,6 +28,10 @@ extern "C" {
 #define CELL_CAMERA_ERROR_FATAL              0x8014080f
 #define CELL_CAMERA_ERROR_MUTEX              0x80140810
 
+/* Build a camera error code from its status word (low 16 bits); camera
+ * codes live in the shared mic/camera facility. */
+#define CELL_CAMERA_MAKE_ERROR(status)     CELL_ERROR_MAKE_ERROR(CELL_ERROR_FACILITY_MICCAM, status)
+
 #define CELL_CAMERA_MAX_CAMERAS 1
 
 typedef enum CellCameraType {
