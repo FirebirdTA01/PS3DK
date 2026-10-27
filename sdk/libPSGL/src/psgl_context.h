@@ -231,11 +231,12 @@ struct PSGLcontext {
 };
 
 int psgl_context_init_system(const PSGLinitOptions *options);
-void psgl_context_shutdown_system(void);
+int psgl_context_shutdown_system(void);
 PSGLcontext *psgl_context_create(void);
 void psgl_context_destroy(PSGLcontext *context);
 PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters);
-void psgl_device_destroy(PSGLdevice *device);
+int psgl_device_destroy(PSGLdevice *device);
+int psgl_context_wait_idle_bounded(CellGcmContextData *gcm, const char *what);
 void psgl_context_make_current(PSGLcontext *context, PSGLdevice *device);
 void psgl_context_unbind_current(void);
 void psgl_context_reset_current(void);

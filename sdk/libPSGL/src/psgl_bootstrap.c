@@ -49,12 +49,20 @@ PSGL_EXPORT void psglInit(PSGLinitOptions *options)
     }
 }
 
+/* If the GPU does not drain within the teardown bound, psglExit stops before
+   releasing anything the GPU may still use; a later psglExit retries. */
 PSGL_EXPORT void psglExit(void)
 {
+    static PSGLdevice *pending_device;
     PSGLcontext *context = psgl_context_current();
     PSGLdevice *device = psgl_context_current_device();
+    if (!device) device = pending_device;
     if (context) psgl_context_destroy(context);
-    if (device) psgl_device_destroy(device);
+    if (device && !psgl_device_destroy(device)) {
+        pending_device = device;
+        return;
+    }
+    pending_device = NULL;
     psgl_context_shutdown_system();
 }
 

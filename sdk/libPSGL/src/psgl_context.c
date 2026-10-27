@@ -25,6 +25,8 @@
 #define PSGL_HOST_ALIGNMENT    (1024u * 1024u)
 #define PSGL_CLIENT_ARRAY_ALIGNMENT PSGL_HOST_ALIGNMENT
 #define PSGL_LABEL_INDEX       255u
+/* Upper bound for one teardown wait on the GPU. */
+#define PSGL_TEARDOWN_WAIT_US  2000000ull
 #define PSGL_BUFFER_ALIGNMENT  64u
 #define PSGL_CLIENT_ARRAY_SCRATCH_SIZE (4u * 1024u * 1024u)
 #define PSGL_LABEL_PREPARED_BUFFER 0x41u
@@ -1487,7 +1489,8 @@ static void psgl_emit_raster(PSGLcontext *context)
     context->dirty &= ~PSGL_DIRTY_RASTER;
 }
 
-static void psgl_wait_rsx_idle(CellGcmContextData *gcm)
+/* Queues a completion token on the PSGL label and returns it. */
+static uint32_t psgl_issue_idle_token(CellGcmContextData *gcm)
 {
     static uint32_t label;
     volatile uint32_t *completion =
@@ -1502,8 +1505,45 @@ static void psgl_wait_rsx_idle(CellGcmContextData *gcm)
     cellGcmSetWaitLabel(gcm, PSGL_LABEL_INDEX, label - 1u);
     cellGcmSetWriteBackEndLabel(gcm, PSGL_LABEL_INDEX, label);
     cellGcmFlush(gcm);
-    while (*completion != label)
+    return label;
+}
+
+static void psgl_wait_rsx_idle(CellGcmContextData *gcm)
+{
+    volatile uint32_t *completion =
+        (volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL_INDEX);
+    uint32_t token = psgl_issue_idle_token(gcm);
+    while (*completion != token)
         sys_timer_usleep(30);
+}
+
+/* Internal counter of teardown waits that hit their bound, read by
+   regression tests; not public API. */
+unsigned psgl_teardown_wait_timeouts;
+
+/* Teardown waits for everything queued so far with a fresh token (never a
+   value the label or the reference register may already hold), bounded so
+   that a GPU that does not drain cannot hang teardown. Returns 0 on timeout;
+   the caller then keeps every GPU-visible resource alive. */
+int psgl_context_wait_idle_bounded(CellGcmContextData *gcm, const char *what)
+{
+    if (!gcm) return 1;
+    volatile uint32_t *completion =
+        (volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL_INDEX);
+    uint32_t token = psgl_issue_idle_token(gcm);
+    PSGLuint64 start = psglGetSystemTime();
+    while (*completion != token) {
+        if (psglGetSystemTime() - start >= PSGL_TEARDOWN_WAIT_US) {
+            ++psgl_teardown_wait_timeouts;
+            fprintf(stderr, "PSGL: %s: GPU did not complete within %u ms "
+                    "(token %08x, label %08x); keeping its resources\n",
+                    what, (unsigned)(PSGL_TEARDOWN_WAIT_US / 1000u),
+                    (unsigned)token, (unsigned)*completion);
+            return 0;
+        }
+        sys_timer_usleep(30);
+    }
+    return 1;
 }
 
 static void psgl_init_flip_labels(PSGLdevice *device)
@@ -2818,13 +2858,11 @@ int psgl_context_init_system(const PSGLinitOptions *options)
     return 1;
 }
 
-void psgl_context_shutdown_system(void)
+int psgl_context_shutdown_system(void)
 {
-    if (!g_psgl.initialized) return;
-    if (CELL_GCM_CURRENT && g_psgl.current_device &&
-        g_psgl.current_device->submitted_flips) {
-        cellGcmFinish(CELL_GCM_CURRENT, 1u);
-    }
+    if (!g_psgl.initialized) return 1;
+    if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT, "psglExit"))
+        return 0;
     if (g_psgl_client_array_scratch) {
         free(g_psgl_client_array_scratch);
         g_psgl_client_array_scratch = NULL;
@@ -2838,6 +2876,7 @@ void psgl_context_shutdown_system(void)
     g_psgl.current_device = NULL;
     g_psgl.host_memory = NULL;
     g_psgl.initialized = 0u;
+    return 1;
 }
 
 PSGLcontext *psgl_context_create(void)
@@ -3054,26 +3093,33 @@ PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
     return device;
 }
 
-void psgl_device_destroy(PSGLdevice *device)
+/* Returns 0 if the GPU did not drain within the teardown bound; the device
+   then keeps its frame buffers and display buffers, and stays usable for a
+   later destroy. */
+int psgl_device_destroy(PSGLdevice *device)
 {
-    if (!device) return;
-    if (g_psgl.current_device == device) psgl_context_unbind_current();
+    if (!device) return 1;
     if (CELL_GCM_CURRENT) {
-        cellGcmFinish(CELL_GCM_CURRENT, 1u);
+        if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT, "device destroy"))
+            return 0;
         for (uint32_t i = 0; i < PSGL_MAX_FRAME_BUFFERS; i++) {
             if (device->frames[i].address)
                 cellGcmSetDisplayBuffer((uint8_t)i, 0u, 0u, 0u, 0u);
         }
         cellGcmFlush(CELL_GCM_CURRENT);
         cellGcmSetWaitFlip(CELL_GCM_CURRENT);
-        cellGcmFinish(CELL_GCM_CURRENT, 1u);
+        if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT,
+                                            "device destroy after the last flip"))
+            return 0;
         cellGcmResetFlipStatus();
     }
+    if (g_psgl.current_device == device) psgl_context_unbind_current();
     for (uint32_t i = 0; i < PSGL_MAX_FRAME_BUFFERS; i++) {
         device->frames[i].address = NULL;
         device->frames[i].scanout_address = NULL;
     }
     device->depth_address = NULL;
+    return 1;
 }
 
 void psgl_context_make_current(PSGLcontext *context, PSGLdevice *device)
