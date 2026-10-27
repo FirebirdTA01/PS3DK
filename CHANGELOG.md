@@ -53,18 +53,27 @@ The version stamped into builds is generated from the most recent
 - **Combined input sample.** `hello-ppu-input-combined` polls a pad,
   keyboard and mouse in one loop and reports hot-plug on port 0 of each
   as it happens. It ends after 600 frames, on XMB quit, or on START or
-  SELECT.
+  SELECT, and exits with failure when any input or sysutil call fails
+  other than for an absent or just-unplugged device.
 
 - **cellFs asynchronous and streaming read sample.**
-  `hello-ppu-cellfs-async-stream` reads a scratch file through
-  `cellFsAioRead` with a completion callback, issues an AIO cancel, then
-  streams part of the same file through a `cellFsStRead` ring buffer,
-  checking every block's contents.
+  `hello-ppu-cellfs-async-stream` creates a uniquely named scratch file
+  exclusively, reads it through `cellFsAioRead` with a completion
+  callback, issues an AIO cancel, then streams part of the same file
+  through a `cellFsStRead` ring buffer, checking every block's contents.
+  It removes only the file it created, and stops without reusing or
+  releasing anything if an AIO request does not complete in time.
 
 - **Memory container sample.** `hello-ppu-lv2-memcontainer` creates an
   LV2 memory container, allocates, uses and frees regions from it, checks
   its size before and after, destroys it, and checks that invalid
   container IDs are refused.
+
+- **Fault witnesses for these three samples.**
+  `tests/regression/sample-trio-witness` runs each sample's code with
+  faked calls to check its failure handling: failed setup, reads and
+  shutdown, scratch-file ownership, AIO requests that never complete, and
+  allocations that succeed with a null address.
 
 - **Cg programs from binary containers through `cgCreateProgram`.**
   `cgCreateProgram` with `CG_BINARY` or `CG_OBJECT` creates a program from
