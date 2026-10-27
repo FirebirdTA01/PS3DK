@@ -1,0 +1,26 @@
+# Final line each PSGL sample prints on success (regular expression, matched
+# against whole stdout lines).  "-" means the sample prints nothing and only
+# its exit status counts.
+hello-psgl-blend                ^hello-psgl-blend: done$
+hello-psgl-cg-binary            ^hello-psgl-cg-binary: done$
+hello-psgl-cg-passthrough       ^hello-psgl-cg-passthrough: ok param=
+hello-psgl-clear                ^hello-psgl-clear: done$
+hello-psgl-cmdbuf               ^hello-psgl-cmdbuf: done$
+hello-psgl-ffp-lit-bootstrap    ^hello-psgl-ffp-lit-bootstrap: done$
+hello-psgl-ffp-quad             ^hello-psgl-ffp-quad: done$
+hello-psgl-ffp-shaderlib        ^hello-psgl-ffp-shaderlib: done$
+hello-psgl-fog-state            ^hello-psgl-fog-state: ok$
+hello-psgl-glsl-object          ^hello-psgl-glsl-object: done$
+hello-psgl-light-state          ^hello-psgl-light-state: ok$
+hello-psgl-link                 -
+hello-psgl-msaa                 ^hello-psgl-msaa: done$
+hello-psgl-multitexture         ^hello-psgl-multitexture: done$
+hello-psgl-rotating-quad        ^hello-psgl-rotating-quad: done$
+hello-psgl-shader-interface     ^hello-psgl-shader-interface: done$
+hello-psgl-spudraw              ^hello-psgl-spudraw: done$
+hello-psgl-spudraw-triangle     ^hello-psgl-spudraw-triangle: done$
+hello-psgl-spuhole              ^hello-psgl-spuhole: ok$
+hello-psgl-textured-quad        ^hello-psgl-textured-quad: done$
+hello-psgl-triangle             ^hello-psgl-triangle: done$
+hello-psgl-vbo                  ^hello-psgl-vbo: ok buffer=
+hello-psglu                     ^hello-psglu: ok$
