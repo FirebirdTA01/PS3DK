@@ -353,10 +353,10 @@ psgl-teardown-finish-ilp32,tests/regression/psgl-teardown-finish/psgl-teardown-f
 psgl-teardown-finish-lp64,tests/regression/psgl-teardown-finish/psgl-teardown-finish-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=23 failures=0\r?$,PSGL_TEARDOWN_FAIL
 psgl-teardown-exit-timeout-ilp32,tests/regression/psgl-teardown-finish/psgl-teardown-exit-timeout-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=29 failures=0\r?$,PSGL_TEARDOWN_FAIL
 psgl-teardown-exit-timeout-lp64,tests/regression/psgl-teardown-finish/psgl-teardown-exit-timeout-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=29 failures=0\r?$,PSGL_TEARDOWN_FAIL
-psgl-teardown-exit-flip-ilp32,tests/regression/psgl-teardown-finish/psgl-teardown-exit-flip-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=31 failures=0\r?$,PSGL_TEARDOWN_FAIL
-psgl-teardown-exit-flip-lp64,tests/regression/psgl-teardown-finish/psgl-teardown-exit-flip-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=31 failures=0\r?$,PSGL_TEARDOWN_FAIL
-psgl-teardown-exit-shutdown-ilp32,tests/regression/psgl-teardown-finish/psgl-teardown-exit-shutdown-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=31 failures=0\r?$,PSGL_TEARDOWN_FAIL
-psgl-teardown-exit-shutdown-lp64,tests/regression/psgl-teardown-finish/psgl-teardown-exit-shutdown-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=31 failures=0\r?$,PSGL_TEARDOWN_FAIL
+psgl-teardown-exit-flip-ilp32,tests/regression/psgl-teardown-finish/psgl-teardown-exit-flip-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=32 failures=0\r?$,PSGL_TEARDOWN_FAIL
+psgl-teardown-exit-flip-lp64,tests/regression/psgl-teardown-finish/psgl-teardown-exit-flip-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=32 failures=0\r?$,PSGL_TEARDOWN_FAIL
+psgl-teardown-exit-shutdown-ilp32,tests/regression/psgl-teardown-finish/psgl-teardown-exit-shutdown-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=32 failures=0\r?$,PSGL_TEARDOWN_FAIL
+psgl-teardown-exit-shutdown-lp64,tests/regression/psgl-teardown-finish/psgl-teardown-exit-shutdown-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=32 failures=0\r?$,PSGL_TEARDOWN_FAIL
 psgl-uniform-query-ilp32,tests/regression/psgl-uniform-query/psgl-uniform-query-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_UNIFORM_QUERY_OK checks=40 failures=0\r?$,PSGL_UNIFORM_QUERY_FAIL
 psgl-uniform-query-lp64,tests/regression/psgl-uniform-query/psgl-uniform-query-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_UNIFORM_QUERY_OK checks=40 failures=0\r?$,PSGL_UNIFORM_QUERY_FAIL
 psgl-ffp-texenv-ilp32,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=73 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
