@@ -97,11 +97,17 @@ int main(void)
     rc = sys_spu_thread_group_start(group);
     if (rc != 0) { printf("spudraw: fail start %x\n", rc); psglExit(); return 1; }
 
+    /* Normal completion: join rc 0, every thread exited (cause
+       SYS_SPU_THREAD_GROUP_JOIN_ALL_THREADS_EXIT) with status 0; the group
+       and image are then released, and both results are checked. */
     rc = sys_spu_thread_group_join(group, &cause, &status);
-    sys_spu_thread_group_destroy(group);
-    sys_spu_image_close(&spu_img);
-    if (rc != 0 || status != 0) {
-        printf("spudraw: fail spu exit rc=%d cause=%d status=%d\n", rc, cause, status);
+    int destroy_rc = sys_spu_thread_group_destroy(group);
+    int close_rc = sys_spu_image_close(&spu_img);
+    printf("spudraw: spu join rc=%d cause=%d status=%d destroy=%x close=%x\n",
+           rc, cause, status, (unsigned)destroy_rc, (unsigned)close_rc);
+    if (rc != 0 || cause != SYS_SPU_THREAD_GROUP_JOIN_ALL_THREADS_EXIT || status != 0 ||
+        destroy_rc != 0 || close_rc != 0) {
+        printf("spudraw: fail spu teardown\n");
         psglExit(); return 1;
     }
 
