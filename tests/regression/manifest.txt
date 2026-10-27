@@ -369,3 +369,40 @@ psgl-ffp-install-failure-ilp32,tests/regression/psgl-ffp-install-failure/psgl-ff
 psgl-ffp-install-failure-lp64,tests/regression/psgl-ffp-install-failure/psgl-ffp-install-failure-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_INSTALL_OK checks=7 failures=0\r?$,PSGL_FFP_INSTALL_FAIL
 psgl-mixed-relink-ilp32,tests/regression/psgl-mixed-relink/psgl-mixed-relink-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_RELINK_OK checks=38 failures=0\r?$,PSGL_RELINK_FAIL
 psgl-mixed-relink-lp64,tests/regression/psgl-mixed-relink/psgl-mixed-relink-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_RELINK_OK checks=38 failures=0\r?$,PSGL_RELINK_FAIL
+
+# sample-trio-witness: fault witnesses for hello-ppu-input-combined, hello-ppu-cellfs-async-stream and
+# hello-ppu-lv2-memcontainer. Each case runs the sample's own code with faked calls and requires the
+# exit status and call pattern the case calls for (failed setup/reads/cleanup must fail; scratch-file
+# ownership and unfinished AIO requests must leave resources alone).
+sample-trio-witness-memcontainer-control-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-memcontainer-control-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=memcontainer-control\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-memcontainer-ok-null-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-memcontainer-ok-null-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=memcontainer-ok-null\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-absent-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-input-absent-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-absent\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-idle-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-input-idle-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-idle\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-unplug-race-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-input-unplug-race-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-unplug-race\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-kb-init-fail-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-input-kb-init-fail-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-kb-init-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-dispatch-fail-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-input-dispatch-fail-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-dispatch-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-read-fail-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-input-read-fail-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-read-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-end-fail-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-input-end-fail-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-end-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-control-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-control-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-control\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-scratch-exists-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-scratch-exists-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-scratch-exists\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-stat-eio-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-stat-eio-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-stat-eio\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-req0-timeout-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-req0-timeout-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-req0-timeout\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-cancel-stuck-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-cancel-stuck-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-cancel-stuck\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-close-fail-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-close-fail-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-close-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-finish-fail-ilp32,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-finish-fail-ilp32.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-finish-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-memcontainer-control-lp64,tests/regression/sample-trio-witness/sample-trio-witness-memcontainer-control-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=memcontainer-control\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-memcontainer-ok-null-lp64,tests/regression/sample-trio-witness/sample-trio-witness-memcontainer-ok-null-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=memcontainer-ok-null\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-absent-lp64,tests/regression/sample-trio-witness/sample-trio-witness-input-absent-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-absent\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-idle-lp64,tests/regression/sample-trio-witness/sample-trio-witness-input-idle-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-idle\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-unplug-race-lp64,tests/regression/sample-trio-witness/sample-trio-witness-input-unplug-race-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-unplug-race\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-kb-init-fail-lp64,tests/regression/sample-trio-witness/sample-trio-witness-input-kb-init-fail-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-kb-init-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-dispatch-fail-lp64,tests/regression/sample-trio-witness/sample-trio-witness-input-dispatch-fail-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-dispatch-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-read-fail-lp64,tests/regression/sample-trio-witness/sample-trio-witness-input-read-fail-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-read-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-input-end-fail-lp64,tests/regression/sample-trio-witness/sample-trio-witness-input-end-fail-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=input-end-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-control-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-control-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-control\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-scratch-exists-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-scratch-exists-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-scratch-exists\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-stat-eio-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-stat-eio-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-stat-eio\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-req0-timeout-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-req0-timeout-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-req0-timeout\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-cancel-stuck-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-cancel-stuck-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-cancel-stuck\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-close-fail-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-close-fail-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-close-fail\r?$,SAMPLE_WITNESS_FAIL
+sample-trio-witness-cellfs-finish-fail-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-finish-fail-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-finish-fail\r?$,SAMPLE_WITNESS_FAIL
