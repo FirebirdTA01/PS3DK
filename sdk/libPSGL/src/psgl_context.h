@@ -122,6 +122,10 @@ struct PSGLdevice {
     uint32_t *depth_address;
     uint32_t depth_offset;
     uint32_t depth_pitch;
+    /* 0 while usable; 1 once teardown released the display buffers but the
+       last flip has not been seen to complete (only a retried destroy may
+       continue); 2 once destroyed. A device in teardown is never bound. */
+    uint32_t teardown_stage;
 };
 
 struct PSGLcontext {

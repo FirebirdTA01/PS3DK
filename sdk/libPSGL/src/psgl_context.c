@@ -1521,10 +1521,23 @@ static void psgl_wait_rsx_idle(CellGcmContextData *gcm)
    regression tests; not public API. */
 unsigned psgl_teardown_wait_timeouts;
 
-/* Teardown waits for everything queued so far with a fresh token (never a
-   value the label or the reference register may already hold), bounded so
-   that a GPU that does not drain cannot hang teardown. Returns 0 on timeout;
-   the caller then keeps every GPU-visible resource alive. */
+/* Internal test hook (not public API): called at teardown points where a
+   regression test injects GPU work that must make the next wait time out.
+   Stage 1: device destroy released the display buffers, before its last
+   wait. Stage 2: system shutdown, before its wait. */
+void (*psgl_teardown_test_hook)(unsigned stage);
+
+/* Internal counter of completed system shutdowns, read by regression tests
+   to tell a retried psglExit that finished from one that did nothing. */
+unsigned psgl_teardown_shutdowns;
+
+/* Teardown waits for everything queued so far: it writes a fresh token to
+   the PSGL back-end label (never the value that label holds now, nor that
+   value plus one) and polls for it. The bound covers only that polling.
+   Queueing the token reserves FIFO space first, and that reservation can
+   wait in the context's callback, so a GPU that never drains can still
+   stall teardown there. Returns 0 on timeout; the caller then keeps every
+   GPU-visible resource alive. */
 int psgl_context_wait_idle_bounded(CellGcmContextData *gcm, const char *what)
 {
     if (!gcm) return 1;
@@ -2861,6 +2874,7 @@ int psgl_context_init_system(const PSGLinitOptions *options)
 int psgl_context_shutdown_system(void)
 {
     if (!g_psgl.initialized) return 1;
+    if (psgl_teardown_test_hook) psgl_teardown_test_hook(2u);
     if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT, "psglExit"))
         return 0;
     if (g_psgl_client_array_scratch) {
@@ -2876,6 +2890,7 @@ int psgl_context_shutdown_system(void)
     g_psgl.current_device = NULL;
     g_psgl.host_memory = NULL;
     g_psgl.initialized = 0u;
+    ++psgl_teardown_shutdowns;
     return 1;
 }
 
@@ -3093,21 +3108,28 @@ PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
     return device;
 }
 
-/* Returns 0 if the GPU did not drain within the teardown bound; the device
-   then keeps its frame buffers and display buffers, and stays usable for a
-   later destroy. */
+/* Returns 0 if the GPU did not drain within the teardown bound, and keeps
+   the frame buffer memory. A timeout at the first wait changes nothing, so
+   the device stays usable. A timeout at the last wait comes after the
+   display buffers were released: the device is then in teardown (stage 1),
+   cannot be bound again, and only a later destroy may continue it. */
 int psgl_device_destroy(PSGLdevice *device)
 {
     if (!device) return 1;
+    if (device->teardown_stage == 2u) return 1;
     if (CELL_GCM_CURRENT) {
-        if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT, "device destroy"))
-            return 0;
-        for (uint32_t i = 0; i < PSGL_MAX_FRAME_BUFFERS; i++) {
-            if (device->frames[i].address)
-                cellGcmSetDisplayBuffer((uint8_t)i, 0u, 0u, 0u, 0u);
+        if (device->teardown_stage == 0u) {
+            if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT, "device destroy"))
+                return 0;
+            for (uint32_t i = 0; i < PSGL_MAX_FRAME_BUFFERS; i++) {
+                if (device->frames[i].address)
+                    cellGcmSetDisplayBuffer((uint8_t)i, 0u, 0u, 0u, 0u);
+            }
+            cellGcmFlush(CELL_GCM_CURRENT);
+            cellGcmSetWaitFlip(CELL_GCM_CURRENT);
+            device->teardown_stage = 1u;
+            if (psgl_teardown_test_hook) psgl_teardown_test_hook(1u);
         }
-        cellGcmFlush(CELL_GCM_CURRENT);
-        cellGcmSetWaitFlip(CELL_GCM_CURRENT);
         if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT,
                                             "device destroy after the last flip"))
             return 0;
@@ -3119,12 +3141,19 @@ int psgl_device_destroy(PSGLdevice *device)
         device->frames[i].scanout_address = NULL;
     }
     device->depth_address = NULL;
+    device->teardown_stage = 2u;
     return 1;
 }
 
 void psgl_context_make_current(PSGLcontext *context, PSGLdevice *device)
 {
     if (!context) {
+        psgl_context_unbind_current();
+        return;
+    }
+    if (device && device->teardown_stage) {
+        fprintf(stderr, "PSGL: psglMakeCurrent: device %p is being torn down; "
+                "not binding it\n", (void *)device);
         psgl_context_unbind_current();
         return;
     }
