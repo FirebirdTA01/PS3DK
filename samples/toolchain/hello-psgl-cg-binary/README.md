@@ -27,3 +27,7 @@ this sample does not use them.
 
 It prints `hello-psgl-cg-binary: ready`, then `done` after 900 frames (or
 `quit` when Quit is chosen from the XMB).
+
+Requires an SDK newer than v0.26.0: in v0.26.0, `cgCreateProgram` returns
+NULL for every input and `cgCreateProgramFromFile` refuses `CG_OBJECT`. The
+next release ships the working runtime.

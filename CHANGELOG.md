@@ -39,7 +39,9 @@ The version stamped into builds is generated from the most recent
   library that units 1-3 need. `hello-psgl-cg-binary` loads offline-compiled
   `.vpo`/`.fpo` programs through `cgCreateProgram` from memory and through
   `cgCreateProgramFromFile` from a file, and checks every Cg step with
-  `cgGetLastErrorString`.
+  `cgGetLastErrorString`. Both need this release's SDK: v0.26.0 lacks
+  `rsx-cg-compiler --psgl-ffp-library`, texturing on units 1-3 and a
+  working `cgCreateProgram`.
 - **PSGL sample hardware boot gate** (`tests/hardware/psgl-sample-boot`).
   Builds every PSGL sample with the ps3dk-run hook linked in, without
   changing the samples, and boots them on a PS3 through the network loader:

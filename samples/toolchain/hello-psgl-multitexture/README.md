@@ -20,3 +20,7 @@ Without the library, draws that need units 1-3 are refused with
 
 The sample prints `hello-psgl-multitexture: ready`, then `done` after 900
 frames (or `quit` when Quit is chosen from the XMB).
+
+Requires an SDK newer than v0.26.0: `rsx-cg-compiler --psgl-ffp-library`
+and fixed-function texturing on units 1-3 are not in v0.26.0. The next
+release ships both.

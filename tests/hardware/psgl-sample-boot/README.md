@@ -21,6 +21,7 @@ sample sources are not changed. `hook_main.c` prints
 `PSGL_SAMPLE_BOOT hook=<n>`, starts the hook and calls the sample. Without the
 loader's argv marker the hook stays inert, so the same SELF boots in RPCS3.
 
+`-RsxCg` selects the rsx-cg-compiler used for shaders and shader libraries.
 `-LibDir` puts private ILP32 archives (for example `libPSGL.a`,
 `libgcm_cmd.a`) first on the link path, to test a tree before it is
 installed. The script writes `selfs.tsv` with each SELF and its sha256.
