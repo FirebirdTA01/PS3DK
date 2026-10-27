@@ -280,6 +280,11 @@ jobs:
       - name: Test networking, pthread and LV2 header regression guards
         run: python3 tests/sdk/header-regression-test.py
 
+      # Run the real --check on all sample link inputs, with a manifest-seeded
+      # placeholder install; fixture negatives also guard the scanner itself.
+      - name: Test sample-linked artifact requirements
+        run: bash tests/sdk/required-artifacts-test.sh
+
       # sys_lwmutex and sys_lwcond in <sys/synchronization.h> must declare
       # canonical attributes, structures, and function prototypes.
       - name: Test lightweight mutex and condition variable synchronization
