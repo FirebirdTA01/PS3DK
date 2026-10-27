@@ -352,6 +352,8 @@ HEADERS := \
     include/cell/sysutil_avc2.h \
     include/cell/sysutil_avc2_video.h \
     include/cell/camera.h \
+    include/cell/gem.h \
+    include/cell/gem/libgem.h \
     include/cell/resc.h \
     include/cell/ovis.h \
     include/cell/ovis/types.h \

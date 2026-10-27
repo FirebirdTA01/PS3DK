@@ -129,6 +129,18 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **PlayStation Move headers.** `<cell/gem.h>` and `<cell/gem/libgem.h>`
+  declare the libgem interface: the 37 functions that `libgem_stub.a`
+  already exported, the controller, inertial, image and camera state
+  structures, the init and video-conversion attributes, and the `CELL_GEM_*`
+  constants and error codes. The four setup helpers
+  (`cellGemAttributeInit`, `cellGemGetVideoConvertSize`,
+  `cellGemVideoConvertAttributeInit` and
+  `cellGemVideoConvertAttributeInitRgba`) are inline. Structure layouts are
+  the same in both data models, so LP64 code passes the library the layout
+  it expects. PSL1GHT's `<io/move.h>` is unchanged and can be included
+  alongside.
+
 - **GCM flip and frame-pacing sample.** `hello-ppu-gcm-frame-pacing`
   presents finite VSYNC, HSYNC and application-paced VSYNC phases, with
   a moving stripe at the current display size. It reports observed flip
