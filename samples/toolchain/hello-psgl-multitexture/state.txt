@@ -1,0 +1,4 @@
+# Fixed-function unit sets drawn by hello-psgl-multitexture:
+# bit 16+k = texture unit k enabled (2D).
+0x00030000
+0x000f0000
