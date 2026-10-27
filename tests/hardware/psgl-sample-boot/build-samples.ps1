@@ -31,6 +31,8 @@ if (-not $Sdk) { throw 'set -Sdk or PS3DK' }
 if (Test-Path $Out) { throw "output exists: $Out" }
 if (-not (Test-Path "$HookDir/hook/ps3dk_run_hook.c")) { throw "no run hook in $HookDir" }
 New-Item -ItemType Directory $Out | Out-Null
+# powershell -File passes "a,b" as one string: split it.
+$Samples = @($Samples | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 if ($Samples.Count -eq 0) {
     $Samples = Get-ChildItem "$repo/samples/toolchain" -Directory |
         Where-Object { $_.Name -like 'hello-psgl*' } | ForEach-Object { $_.Name } | Sort-Object
