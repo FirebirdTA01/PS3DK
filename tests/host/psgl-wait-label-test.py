@@ -12,15 +12,24 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--source', type=Path, default=ROOT / 'sdk/libPSGL/src/psgl_context.c')
 args = parser.parse_args()
 source = args.source.read_text()
-start = source.index('static void psgl_wait_rsx_idle(')
-opening = source.index('{', start)
-depth = 1
-end = opening + 1
-while depth:
-    if source[end] == '{': depth += 1
-    elif source[end] == '}': depth -= 1
-    end += 1
-helper = source[start:end]
+
+
+def extract(signature):
+    start = source.index(signature)
+    opening = source.index('{', start)
+    depth = 1
+    end = opening + 1
+    while depth:
+        if source[end] == '{': depth += 1
+        elif source[end] == '}': depth -= 1
+        end += 1
+    return source[start:end]
+
+
+# psgl_wait_rsx_idle waits on the token that psgl_issue_idle_token queues;
+# the test compiles both, exactly as they stand in the library.
+helper = (extract('static uint32_t psgl_issue_idle_token(') + chr(10) + chr(10) +
+          extract('static void psgl_wait_rsx_idle('))
 
 prefix = r'''
 #include <stdint.h>
