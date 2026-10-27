@@ -18,6 +18,11 @@
  *   2: the last device wait, after the display buffers were released, 3: the
  *   shutdown wait), so psglExit stops without shutting down; a later
  *   psglExit waits on a fresh token and shuts down.
+ * - Mode 4: psglDestroyDevice on the CURRENT device times out at its last
+ *   wait. Without another psglMakeCurrent, clear, draw and swap must queue
+ *   nothing (the binding is gone), the device cannot be bound again, a
+ *   retried psglDestroyDevice waits on a fresh token, and psglExit then
+ *   shuts down.
  */
 #include <GLES/gl.h>
 #include <PSGL/psgl.h>
@@ -240,7 +245,7 @@ static int hook_fired, hook_started;
 #if TEARDOWN_EXIT_MODE >= 2
 static void inject(unsigned stage)
 {
-    if (stage != (TEARDOWN_EXIT_MODE == 2 ? 1u : 2u)) return;
+    if (stage != (TEARDOWN_EXIT_MODE == 3 ? 2u : 1u)) return;
     psgl_teardown_test_hook = 0;
     hook_fired = 1;
     queue_gated(14u);
@@ -286,6 +291,52 @@ int main(void)
     check(seen == 13u, "psglExit waits for queued work despite a stale reference value");
     check(&psgl_teardown_wait_timeouts != 0 && timeouts() == before,
           "psglExit does not time out when the GPU drains in time");
+#elif TEARDOWN_EXIT_MODE == 4
+    unsigned shut_before = shutdowns();
+    int has_hook = &psgl_teardown_test_hook != 0;
+    check(has_hook, "the library has the teardown test hook");
+    if (has_hook) psgl_teardown_test_hook = inject;
+    uint64_t t0 = now_ms();
+    psglDestroyDevice(device);
+    uint64_t elapsed = now_ms() - t0;
+    unsigned counted = timeouts() - before;
+    uint32_t seen = *done;
+    check(hook_fired && hook_started, "the injection point was reached");
+    int unbound = psglGetCurrentDevice() == NULL && psglGetCurrentContext() == NULL;
+    /* No psglMakeCurrent: try to use the binding the application had. */
+    uint32_t *queued_before = gCellGcmCurrentContext->current;
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    psglSwap();
+    uint32_t *queued_after = gCellGcmCurrentContext->current;
+    psglMakeCurrent(context, device);
+    int rebound = psglGetCurrentDevice() != NULL;
+    if (hook_started) join_release(hook_thread);
+    int drained = wait_done(14u);
+    uint32_t label_before = *(volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL);
+    unsigned before_retry = timeouts();
+    uint64_t t1 = now_ms();
+    psglDestroyDevice(device);
+    uint64_t elapsed2 = now_ms() - t1;
+    uint32_t label_after = *(volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL);
+    unsigned retry_timeouts = timeouts() - before_retry;
+    psglExit();
+    unsigned shut_total = shutdowns() - shut_before;
+    printf("PSGL_TEARDOWN_DESTROY_TIMEOUT elapsed_ms=%llu done=%u timeouts=%u unbound=%d queued_words=%ld "
+           "rebound=%d second_ms=%llu label=%08x->%08x retry_timeouts=%u shutdowns=%u\n",
+           (unsigned long long)elapsed, (unsigned)seen, counted, unbound,
+           (long)(queued_after - queued_before), rebound, (unsigned long long)elapsed2,
+           (unsigned)label_before, (unsigned)label_after, retry_timeouts, shut_total);
+    check(elapsed + 100u >= BOUND_MS, "psglDestroyDevice waits up to its bound");
+    check(seen != 14u, "the gated work was still pending at the bound");
+    check(&psgl_teardown_wait_timeouts != 0 && counted == 1u, "psglDestroyDevice counts one teardown timeout");
+    check(unbound, "a device entering teardown is no longer current");
+    check(queued_after == queued_before, "clear, draw and swap queue nothing for the torn-down device");
+    check(!rebound, "a torn-down device is not bound again");
+    check(drained, "the gated work completes after release");
+    check(label_after != label_before, "the retried psglDestroyDevice waits on a fresh token");
+    check(&psgl_teardown_wait_timeouts != 0 && retry_timeouts == 0u, "the retried psglDestroyDevice does not time out");
+    check(&psgl_teardown_shutdowns != 0 && shut_total == 1u, "psglExit then shuts down");
 #else
     unsigned shut_before = shutdowns();
 #if TEARDOWN_EXIT_MODE == 1

@@ -38,6 +38,13 @@ nothing would fail both.
   the gated work at the shutdown wait; the device is already destroyed and
   cannot be bound again.
 
+- `psgl-teardown-destroy-timeout` (`TEARDOWN_EXIT_MODE=4`): the hook makes
+  the last wait of `psglDestroyDevice` time out while that device is current.
+  Without another `psglMakeCurrent`, `glClear`, `glDrawArrays` and `psglSwap`
+  must queue nothing (the GCM write pointer does not move), the device cannot
+  be bound again, a retried `psglDestroyDevice` waits on a fresh token, and
+  `psglExit` then shuts down.
+
 The bound covers completion polling only: queueing the token reserves FIFO
 space first, and that reservation can wait in the context callback.
 
