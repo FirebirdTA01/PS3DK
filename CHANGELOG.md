@@ -91,6 +91,23 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL teardown waits for the GPU.** `psglExit`, `psglDestroyDevice` and
+  `psglFreeCommandBuffer` now wait for all queued GPU work with a fresh
+  completion token. Before, device teardown reused reference value 1, so a
+  second wait (or an application that had already used value 1) could return
+  while the GPU was still busy, and `psglFreeCommandBuffer` freed a buffer the
+  GPU might still be executing, without unmapping it. The wait is bounded
+  (2 s): if the GPU does not finish, teardown stops and keeps everything the
+  GPU may use. `psglFreeCommandBuffer` then keeps the buffer mapped and
+  allocated and records `GL_INVALID_OPERATION`; a later call retries. A
+  successful `psglFreeCommandBuffer` now also unmaps the buffer, and a pointer
+  not returned by `psglAllocateCommandBuffer` is refused with
+  `GL_INVALID_VALUE` instead of being freed. A timed-out wait prints one line
+  on stderr.
+- **SPU draw samples check SPU teardown.** `hello-psgl-spudraw` and
+  `hello-psgl-spudraw-triangle` now check the join cause and the results of
+  destroying the SPU thread group and closing the SPU image, and fail if any
+  is unexpected.
 - **Relinking a GL program preserves direct Cg stage bindings.** A successful
   `glLinkProgram` no longer replaces a vertex or fragment stage installed by
   `cgGLBindProgram`, including a direct rebind of the same shader object.
