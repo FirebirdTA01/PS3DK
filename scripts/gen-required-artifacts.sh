@@ -73,8 +73,20 @@ ppu_names="$(
 # whole point is that the module publishes its own import surface.
 generated_stubs="$(
     find "$ROOT/samples" -name CMakeLists.txt -print0 |
-    xargs -0 grep -hoE 'ps3_prx_stub_library[[:space:]]*\([[:space:]]*[A-Za-z0-9_.-]+' |
-    sed -E 's/.*\([[:space:]]*//' | sort -u
+    # A batch without a stub declaration is normal, not grep's exit 1
+    # (which xargs turns into 123 under pipefail). awk still fails on I/O
+    # errors, while no matches produce empty output successfully.
+    xargs -0 -r awk '
+        {
+            rest = $0
+            while (match(rest, /ps3_prx_stub_library[[:space:]]*\([[:space:]]*[A-Za-z0-9_.-]+/)) {
+                name = substr(rest, RSTART, RLENGTH)
+                sub(/.*\([[:space:]]*/, "", name)
+                print name
+                rest = substr(rest, RSTART + RLENGTH)
+            }
+        }
+    ' | sort -u
 )"
 if [[ -n "$generated_stubs" ]]; then
     ppu_names="$(grep -Fxv -f <(printf '%s\n' "$generated_stubs") <<< "$ppu_names" || true)"

@@ -19,6 +19,12 @@ This validates declared dependency coverage, not whether release archives
 were actually built or contain valid symbols. Packaging still runs the same
 check against the real install and validates its other required artifacts.
 
+The generator is a line-based scanner, not a CMake evaluator. Its pre-existing
+SPU scanner can stop at a closing parenthesis inside a comment, and its
+missing-file lookup searches both PPU and SPU directories. Passing this guard
+does not establish complete CMake dependency discovery or architecture-specific
+archive coverage; those scanner limitations need separate fixes.
+
 Fixtures exercise quoted and unquoted CMake variables, quoted literal library
 names, generated sample-local stubs, no generated stubs, a forced xargs batch
 with no stub declaration, a missing literal archive, an uncovered archive,

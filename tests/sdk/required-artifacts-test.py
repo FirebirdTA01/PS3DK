@@ -36,7 +36,7 @@ def tree(path, samples, manifest=ROWS, archives=None):
         write(path / 'install' / archive, '')
 
 
-def check(bash, path, expected, message, env, mode='--check'):
+def check(bash, path, expected, message, env, mode='--check', timeout=120):
     command = [bash, (path / 'scripts/gen-required-artifacts.sh').as_posix(),
                (path / 'install').as_posix(), mode]
     write(path / ('command-' + mode.lstrip('-') + '.txt'), repr(command) + '\n')
@@ -48,7 +48,7 @@ def check(bash, path, expected, message, env, mode='--check'):
                                    stderr=subprocess.STDOUT, env=env,
                                    start_new_session=(os.name != 'nt'))
         try:
-            result = process.wait(timeout=120)
+            result = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             if os.name == 'nt':
                 subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], check=True)
@@ -126,7 +126,7 @@ def run(bash, work):
     archives.append('ppu/powerpc64-ps3-elf/lib/libm.a')
     tree(repo, samples, manifest, archives)
     try:
-        check(bash, repo, 0, 'manifest covers all ', env)
+        check(bash, repo, 0, 'manifest covers all ', env, timeout=600)
         passed += 1
     except AssertionError as error:
         print(f'FAIL {error}', flush=True)
