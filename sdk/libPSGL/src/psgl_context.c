@@ -3108,19 +3108,32 @@ PSGLdevice *psgl_device_create(const PSGLdeviceParameters *parameters)
     return device;
 }
 
+/* The device whose destroy last stopped at a teardown wait, so a later
+   psglExit resumes it even when it is no longer bound. */
+static PSGLdevice *g_psgl_teardown_pending;
+
+PSGLdevice *psgl_device_teardown_pending(void)
+{
+    return g_psgl_teardown_pending;
+}
+
 /* Returns 0 if the GPU did not drain within the teardown bound, and keeps
    the frame buffer memory. A timeout at the first wait changes nothing, so
-   the device stays usable. A timeout at the last wait comes after the
-   display buffers were released: the device is then in teardown (stage 1),
-   cannot be bound again, and only a later destroy may continue it. */
+   the device stays usable and bound. Releasing the display buffers puts the
+   device in teardown (stage 1): it is unbound from the current context at
+   that point, so no clear, draw or swap reaches it through an existing
+   binding, and psglMakeCurrent refuses to bind it again. A timeout at the
+   last wait leaves it there; only a later destroy (or psglExit) continues. */
 int psgl_device_destroy(PSGLdevice *device)
 {
     if (!device) return 1;
     if (device->teardown_stage == 2u) return 1;
     if (CELL_GCM_CURRENT) {
         if (device->teardown_stage == 0u) {
-            if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT, "device destroy"))
+            if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT, "device destroy")) {
+                g_psgl_teardown_pending = device;
                 return 0;
+            }
             for (uint32_t i = 0; i < PSGL_MAX_FRAME_BUFFERS; i++) {
                 if (device->frames[i].address)
                     cellGcmSetDisplayBuffer((uint8_t)i, 0u, 0u, 0u, 0u);
@@ -3128,11 +3141,14 @@ int psgl_device_destroy(PSGLdevice *device)
             cellGcmFlush(CELL_GCM_CURRENT);
             cellGcmSetWaitFlip(CELL_GCM_CURRENT);
             device->teardown_stage = 1u;
+            if (g_psgl.current_device == device) psgl_context_unbind_current();
             if (psgl_teardown_test_hook) psgl_teardown_test_hook(1u);
         }
         if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT,
-                                            "device destroy after the last flip"))
+                                            "device destroy after the last flip")) {
+            g_psgl_teardown_pending = device;
             return 0;
+        }
         cellGcmResetFlipStatus();
     }
     if (g_psgl.current_device == device) psgl_context_unbind_current();
@@ -3142,6 +3158,7 @@ int psgl_device_destroy(PSGLdevice *device)
     }
     device->depth_address = NULL;
     device->teardown_stage = 2u;
+    if (g_psgl_teardown_pending == device) g_psgl_teardown_pending = NULL;
     return 1;
 }
 
