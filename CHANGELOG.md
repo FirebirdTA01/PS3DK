@@ -24,6 +24,14 @@ The version stamped into builds is generated from the most recent
   callbacks and interval statistics, separates missed application deadlines
   from display behaviour, and supports XMB exit with bounded flip waits.
   It preserves the initialized FIFO cursor and requires no shader assets.
+
+- **Three-port audio mixing sample.** `hello-ppu-audio-multistream` feeds
+  independent C, E and G tones into three stereo `cellAudio` ports, changes
+  their gains across four finite phases and displays matching gain bars.
+  It checks port progress and lifecycle errors, supports XMB quit, and
+  distinguishes submitted PCM from audible-output validation. It does not
+  use the currently nonfunctional `libmixer` placeholder.
+
 - **Cg programs from binary containers through `cgCreateProgram`.**
   `cgCreateProgram` with `CG_BINARY` or `CG_OBJECT` creates a program from
   a precompiled `.vpo`/`.fpo` or compact CGB container in memory; it used to

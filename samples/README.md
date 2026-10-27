@@ -160,6 +160,11 @@ The `hello-event-flag-spu` sample additionally pulls in our
 
 cellAudio mixer + cellAudioOut configuration / discovery.
 
+`hello-ppu-audio-multistream` uses three real stereo `cellAudio` ports for
+independent tones, per-port gain phases and a shader-free gain display.
+Its finite-run log checks submission and port progress; audible output is
+validated separately. See its README for the `libmixer` placeholder limit.
+
 | Sample | Validates | Status |
 |---|---|---|
 | `hello-ppu-audio` | cellAudio Init / PortOpen / PortStart / Stop / NotifyEventQueue / AddData chain; plays a chip-tune melody via direct ring fills against `libaudio_stub.a` | **green** + RPCS3 runtime-verified |
