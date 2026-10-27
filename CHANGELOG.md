@@ -50,6 +50,22 @@ The version stamped into builds is generated from the most recent
   a control, each sample, then the control again, stopping at the first
   failure. The client, control and every SELF are pinned by sha256, and
   each launch's outcome record must match all of them.
+- **Combined input sample.** `hello-ppu-input-combined` polls a pad,
+  keyboard and mouse in one loop and reports hot-plug on port 0 of each
+  as it happens. It ends after 600 frames, on XMB quit, or on START or
+  SELECT.
+
+- **cellFs asynchronous and streaming read sample.**
+  `hello-ppu-cellfs-async-stream` reads a scratch file through
+  `cellFsAioRead` with a completion callback, issues an AIO cancel, then
+  streams part of the same file through a `cellFsStRead` ring buffer,
+  checking every block's contents.
+
+- **Memory container sample.** `hello-ppu-lv2-memcontainer` creates an
+  LV2 memory container, allocates, uses and frees regions from it, checks
+  its size before and after, destroys it, and checks that invalid
+  container IDs are refused.
+
 - **Cg programs from binary containers through `cgCreateProgram`.**
   `cgCreateProgram` with `CG_BINARY` or `CG_OBJECT` creates a program from
   a precompiled `.vpo`/`.fpo` or compact CGB container in memory; it used to
