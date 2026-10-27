@@ -32,6 +32,19 @@ The version stamped into builds is generated from the most recent
   distinguishes submitted PCM from audible-output validation. It does not
   use the currently nonfunctional `libmixer` placeholder.
 
+- **Samples: `hello-psgl-multitexture` and `hello-psgl-cg-binary`.**
+  `hello-psgl-multitexture` draws fixed-function texturing on texture units
+  0-3, one texture function per quad (`MODULATE`, `DECAL`, `ADD`, `BLEND`
+  with an env colour, `REPLACE`, and all four units at once), with the shader
+  library that units 1-3 need. `hello-psgl-cg-binary` loads offline-compiled
+  `.vpo`/`.fpo` programs through `cgCreateProgram` from memory and through
+  `cgCreateProgramFromFile` from a file, and checks every Cg step with
+  `cgGetLastErrorString`.
+- **PSGL sample hardware boot gate** (`tests/hardware/psgl-sample-boot`).
+  Builds every PSGL sample with the ps3dk-run hook linked in, without
+  changing the samples, and boots them on a PS3 through the network loader:
+  a control, each sample, then the control again, stopping at the first
+  failure.
 - **Cg programs from binary containers through `cgCreateProgram`.**
   `cgCreateProgram` with `CG_BINARY` or `CG_OBJECT` creates a program from
   a precompiled `.vpo`/`.fpo` or compact CGB container in memory; it used to

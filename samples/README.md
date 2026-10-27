@@ -36,9 +36,10 @@ These are the "does the compiler work" tier — don't touch RSX / sysutil.
 
 OpenGL ES 1.1-style rendering through `libPSGL` / `libPSGLU` on top of GCM.
 
-The 13 samples with a 900-frame render loop (blend, cmdbuf, ffp-lit-bootstrap,
-ffp-quad, ffp-shaderlib, glsl-object, msaa, rotating-quad, shader-interface,
-spudraw, spudraw-triangle, textured-quad, triangle) share
+The 15 samples with a 900-frame render loop (blend, cg-binary, cmdbuf,
+ffp-lit-bootstrap, ffp-quad, ffp-shaderlib, glsl-object, msaa, multitexture,
+rotating-quad, shader-interface, spudraw, spudraw-triangle, textured-quad,
+triangle) share
 `toolchain/psgl-common/psgl_sample_quit.h`:
 
 - The viewport comes from `psglGetRenderBufferDimensions`, so it matches the
@@ -66,9 +67,10 @@ Shaders reach a sample in one of four ways:
   an `rsx-cg-compiler` that lacks the mode (use the one from the same SDK).
 - **Built-in**: the fixed-function samples use the runtime's own programs.
 
-`cgCreateProgram` cannot load a program from memory yet, and
-`psglLoadShaderLibrary` takes a path, so samples that load embedded shaders
-first write them to `/dev_hdd0/tmp`.
+`cgCreateProgram` creates a program from an embedded `.vpo`/`.fpo` buffer
+(see `hello-psgl-cg-binary`). `psglLoadShaderLibrary` takes a path, so
+samples that load an embedded shader library, or shaders through
+`cgCreateProgramFromFile`, first write them to `/dev_hdd0/tmp`.
 
 | Sample | Validates |
 |---|---|
@@ -80,11 +82,13 @@ first write them to `/dev_hdd0/tmp`.
 | `hello-psgl-textured-quad` | Texture upload and a Cg fragment program that samples it |
 | `hello-psgl-shader-interface` | Cg program parameter interface through `cgGL`, VBO-fed draw |
 | `hello-psgl-cg-passthrough` | A hand-built `CgBinaryProgram` through the Cg runtime |
+| `hello-psgl-cg-binary` | Offline-compiled `.vpo`/`.fpo` loaded with `cgCreateProgram` (from memory) and `cgCreateProgramFromFile` (from a file), with Cg error checks |
 | `hello-psgl-glsl-object` | GLSL sources mapped to fixed Cg templates at build time |
 | `hello-psgl-ffp-quad` | Fixed-function textured quad: texture upload, VBO with texcoords, orthographic projection |
 | `hello-psgl-rotating-quad` | Fixed-function matrix stack animation |
 | `hello-psgl-ffp-lit-bootstrap` | Fixed-function lighting: normals, one light, the built-in lit programs |
 | `hello-psgl-ffp-shaderlib` | `--psgl-ffp-library` shader library + `psglLoadShaderLibrary`, textured quad |
+| `hello-psgl-multitexture` | Fixed-function texturing on units 0-3: MODULATE, DECAL, ADD, BLEND and REPLACE, with a shader library for units 1-3 |
 | `hello-psgl-vbo` | Buffer objects: create, size query, sub-data update, unmap, delete (no rendering) |
 | `hello-psgl-cmdbuf` | Command-buffer record, call and return |
 | `hello-psgl-spuhole` | Command-buffer hole sizing and alignment (no SPU) |
