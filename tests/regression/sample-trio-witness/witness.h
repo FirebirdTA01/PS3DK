@@ -36,7 +36,7 @@ static int witness_finish(void)
 {
     if (!witness_bad)
         printf("SAMPLE_WITNESS_OK case=%s\n", WITNESS_NAME);
-    return 0;
+    return witness_bad ? 1 : 0;
 }
 
 #endif

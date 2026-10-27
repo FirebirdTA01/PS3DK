@@ -325,8 +325,9 @@ int main(int argc, const char **argv)
     }
     err = cellFsUnlink(path);
     check(err == CELL_FS_OK, "cellFsUnlink(own scratch file)", (unsigned)err);
-    if (stray_callbacks)
-        check(0, "no unexpected AIO callbacks", (unsigned)stray_callbacks);
+    int strays = __atomic_load_n(&stray_callbacks, __ATOMIC_RELAXED);
+    if (strays)
+        check(0, "no unexpected AIO callbacks", (unsigned)strays);
 
     return verdict();
 }

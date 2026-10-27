@@ -257,7 +257,7 @@ int main(void)
             pending_func[n](pending_aio[n], CELL_FS_OK, 100 + n, 0);
             WITNESS_REQUIRE(__atomic_load_n(&req[n].done, __ATOMIC_ACQUIRE));
             WITNESS_REQUIRE(__atomic_load_n(&req[other].done, __ATOMIC_ACQUIRE) == other_done);
-            WITNESS_REQUIRE(stray_callbacks == 0);
+            WITNESS_REQUIRE(__atomic_load_n(&stray_callbacks, __ATOMIC_RELAXED) == 0);
         }
         break;
     case 5:
