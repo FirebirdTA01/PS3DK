@@ -2,38 +2,52 @@
  * hello-ppu-cellfs-async-stream - cellFs asynchronous I/O and streaming
  * read surfaces, side by side.
  *
- * Validates, against <cell/cell_fs.h>:
+ * Uses, against <cell/cell_fs.h>:
  *   cellFsAioInit / cellFsAioRead / cellFsAioCancel / cellFsAioFinish
  *   cellFsStReadInit / cellFsStReadStart / cellFsStReadGetStatus /
  *   cellFsStReadWait / cellFsStRead / cellFsStReadStop /
  *   cellFsStReadFinish
- *   cellFsOpen / cellFsWrite / cellFsStat / cellFsClose / cellFsUnlink
+ *   cellFsStat / cellFsOpen / cellFsWrite / cellFsClose / cellFsUnlink
  *
  * Behaviour:
- *   1. Writes a 1 MiB pattern file to /dev_hdd0/tmp.
- *   2. AIO read: initialises AIO on the /dev_hdd0 mount, submits one
- *      64 KiB cellFsAioRead at offset 64 KiB, waits for the callback and
- *      verifies the bytes.
- *   3. AIO cancel: submits a second read and cancels it at once. Whether
- *      the cancel wins the race, and the error the callback then gets,
- *      are printed but not judged.
- *   4. Streaming read: a 64 KiB ring of 8 KiB blocks on the same fd,
- *      256 KiB streamed from offset 256 KiB as 32 blocks, each waited
- *      for, read and checked word by word.
- *   5. Removes the scratch file and finishes AIO.
+ *   1. Picks a scratch name in /dev_hdd0/tmp that includes the process id
+ *      and the system time, and goes on only if cellFsStat reports that
+ *      name does not exist (ENOENT). It then creates the file with
+ *      O_CREAT | O_EXCL, so an existing file is never opened, truncated or
+ *      removed; only a file this run created is unlinked at the end.
+ *   2. Writes 1 MiB of a position-dependent pattern and closes it.
+ *   3. AIO read: initialises AIO on /dev_hdd0, submits one 64 KiB
+ *      cellFsAioRead at offset 64 KiB and waits for its callback.
+ *   4. AIO cancel: submits a second 64 KiB read, into its own buffer, and
+ *      cancels it at once. Whether the cancel wins is printed, not judged,
+ *      but the request must still report completion.
+ *   5. Streaming read: a 64 KiB ring of 8 KiB blocks on the same fd;
+ *      256 KiB from offset 256 KiB as 32 blocks, each waited for, read
+ *      and checked word by word.
+ *   6. Finishes AIO, closes the fd and removes the scratch file.
  *
- * Prints one line per checked call so a failed step is visible on TTY.
- * The last line is "hello-ppu-cellfs-async-stream: PASS (n of m checks)"
- * or FAIL with the same counts.
+ * Each AIO request has its own CellFsAio, buffer and completion record.
+ * The callback finds its record through user_data, stores the result and
+ * then publishes completion with a release store; the main thread reads
+ * the result only after an acquire load sees it. If a request has not
+ * completed within AIO_TIMEOUT_MS, the sample cannot tell whether it is
+ * still running, so it stops there with FAIL and leaves the fd, the
+ * request buffers and the scratch file alone (static storage, released at
+ * process exit); the file name is printed. cellFsStReadWait blocks until
+ * the data arrives and is not bounded by this sample.
+ *
+ * Every checked call prints one line. The last line is
+ * "hello-ppu-cellfs-async-stream: PASS (n of m checks)" or FAIL with the
+ * same counts, and the exit status is 0 or 1.
  */
 
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <sys/process.h>
+#include <sys/sys_time.h>
 #include <cell/cell_fs.h>
 
 SYS_PROCESS_PARAM(1001, 0x100000);
@@ -44,7 +58,9 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define ST_OFFSET   (256 * 1024)
 #define ST_SIZE     (256 * 1024)
 #define AIO_MOUNT   "/dev_hdd0"
-#define SCRATCH     "/dev_hdd0/tmp/ps3tc_cellfs_async_stream.bin"
+#ifndef AIO_TIMEOUT_MS
+#define AIO_TIMEOUT_MS 5000
+#endif
 
 static int checks, failures;
 
@@ -54,6 +70,13 @@ static int check(int ok, const char *what, unsigned long long got)
     if (!ok) failures++;
     printf("  %s %s (0x%llx)\n", ok ? "ok  " : "FAIL", what, got);
     return ok;
+}
+
+static int verdict(void)
+{
+    printf("\nhello-ppu-cellfs-async-stream: %s (%d of %d checks)\n",
+           failures ? "FAIL" : "PASS", checks - failures, checks);
+    return failures ? 1 : 0;
 }
 
 /* Deterministic 4-byte word per file offset, so a misplaced block is
@@ -71,25 +94,64 @@ static uint32_t count_bad(const uint32_t *w, uint64_t base, size_t words)
     return bad;
 }
 
-static volatile int         aio_done;
-static volatile CellFsErrno aio_err;
-static volatile uint64_t    aio_bytes;
+/* ---- AIO requests ------------------------------------------------- */
+
+typedef struct {
+    CellFsAio   aio;
+    CellFsErrno err;      /* written by the callback before done */
+    uint64_t    bytes;    /* written by the callback before done */
+    int         done;     /* release-stored 1 by the callback */
+} aio_request;
+
+enum { NREQ = 2 };
+static aio_request req[NREQ];
+static uint32_t    req_buf[NREQ][CHUNK_SIZE / 4];
+static int         stray_callbacks;
 
 static void aio_callback(CellFsAio *aio, CellFsErrno err, int id, uint64_t size)
 {
-    (void)aio; (void)id;
-    printf("    [aio callback] err=0x%08x size=%llu\n",
-           (unsigned)err, (unsigned long long)size);
-    aio_err   = err;
-    aio_bytes = size;
-    aio_done  = 1;
+    (void)id;
+    uint64_t n = aio ? aio->user_data : NREQ;
+    if (n >= NREQ || __atomic_load_n(&req[n].done, __ATOMIC_RELAXED)) {
+        __atomic_fetch_add(&stray_callbacks, 1, __ATOMIC_RELAXED);
+        return;
+    }
+    req[n].err   = err;
+    req[n].bytes = size;
+    __atomic_store_n(&req[n].done, 1, __ATOMIC_RELEASE);
 }
 
-static void aio_wait(int max_ms)
+static void request_init(int n, int fd, uint64_t offset)
 {
-    for (int ms = 0; !aio_done && ms < max_ms; ms += 10)
-        usleep(10 * 1000);
+    memset(&req[n], 0, sizeof(req[n]));
+    req[n].aio.fd        = fd;
+    req[n].aio.offset    = offset;
+    req[n].aio.buf       = req_buf[n];
+    req[n].aio.size      = CHUNK_SIZE;
+    req[n].aio.user_data = (uint64_t)n;
 }
+
+/* 1 once request n has completed (acquire), 0 after the timeout. */
+static int request_wait(int n)
+{
+    for (int ms = 0; ms <= AIO_TIMEOUT_MS; ms += 10) {
+        if (__atomic_load_n(&req[n].done, __ATOMIC_ACQUIRE))
+            return 1;
+        usleep(10 * 1000);
+    }
+    return __atomic_load_n(&req[n].done, __ATOMIC_ACQUIRE);
+}
+
+static int abandon(int n, const char *path)
+{
+    printf("  request %d has not completed after %d ms: it may still be\n"
+           "  using the fd and its buffer, so the run stops here and leaves\n"
+           "  them, AIO and %s in place\n", n, AIO_TIMEOUT_MS, path);
+    check(0, "AIO request completed", (unsigned)n);
+    return verdict();
+}
+
+/* ---- streaming read ----------------------------------------------- */
 
 static void stream_test(int fd)
 {
@@ -145,113 +207,126 @@ static void stream_test(int fd)
     check(err == CELL_FS_OK, "cellFsStReadFinish", (unsigned)err);
 }
 
+/* ---- main --------------------------------------------------------- */
+
+static uint32_t wbuf[FILE_SIZE / 4];
+
 int main(int argc, const char **argv)
 {
     (void)argc; (void)argv;
 
+    char path[96];
+    snprintf(path, sizeof(path), "/dev_hdd0/tmp/ps3tc_aio_stream_%08x_%016llx.bin",
+             (unsigned)sys_process_getpid(),
+             (unsigned long long)sys_time_get_system_time());
+
     printf("hello-ppu-cellfs-async-stream: AIO + streaming read test\n");
-    printf("  scratch:   %s\n", SCRATCH);
+    printf("  scratch:   %s\n", path);
     printf("  file:      %u bytes\n", (unsigned)FILE_SIZE);
 
-    /* --- 1. write the 1 MiB pattern file ------------------------- */
-    uint32_t *wbuf = (uint32_t *)malloc(FILE_SIZE);
-    char *rbuf = (char *)malloc(CHUNK_SIZE);
-    if (!wbuf || !rbuf) {
-        printf("  malloc failed\n");
-        free(wbuf); free(rbuf);
-        return 1;
-    }
-    for (size_t i = 0; i < FILE_SIZE / 4; i++)
-        wbuf[i] = word_at(i * 4);
-
-    int fd = -1;
-    int aio_inited = 0;
-    CellFsErrno err = cellFsOpen(SCRATCH,
-                                 CELL_FS_O_CREAT | CELL_FS_O_TRUNC | CELL_FS_O_WRONLY,
-                                 &fd, NULL, 0);
-    if (!check(err == CELL_FS_OK, "cellFsOpen(write)", (unsigned)err)) {
-        free(wbuf); free(rbuf);
-        return 1;
-    }
-    uint64_t written = 0;
-    err = cellFsWrite(fd, wbuf, FILE_SIZE, &written);
-    check(err == CELL_FS_OK && written == FILE_SIZE, "cellFsWrite(1 MiB)",
-          (unsigned long long)written);
-    cellFsClose(fd);
-    fd = -1;
-    free(wbuf);
-
+    /* --- 1. admission: the name must not exist ------------------- */
     CellFsStat sb;
     memset(&sb, 0, sizeof(sb));
-    err = cellFsStat(SCRATCH, &sb);
-    check(err == CELL_FS_OK && sb.st_size == FILE_SIZE,
-          "cellFsStat size", (unsigned long long)sb.st_size);
+    CellFsErrno err = cellFsStat(path, &sb);
+    if (!check(err == CELL_FS_ENOENT, "scratch name is unused (stat = ENOENT)",
+               (unsigned)err)) {
+        printf("  refusing to touch an existing or unreadable path\n");
+        return verdict();
+    }
 
-    /* --- 2. AIO read + wait --------------------------------------- */
-    err = cellFsOpen(SCRATCH, CELL_FS_O_RDONLY, &fd, NULL, 0);
-    if (!check(err == CELL_FS_OK, "cellFsOpen(read)", (unsigned)err))
-        goto out;
+    int fd = -1;
+    err = cellFsOpen(path, CELL_FS_O_CREAT | CELL_FS_O_EXCL | CELL_FS_O_WRONLY,
+                     &fd, NULL, 0);
+    if (!check(err == CELL_FS_OK, "cellFsOpen(create, exclusive)", (unsigned)err))
+        return verdict();
 
-    printf("\n--- AIO read at offset %u, size %u ---\n",
-           (unsigned)CHUNK_SIZE, (unsigned)CHUNK_SIZE);
-    err = cellFsAioInit(AIO_MOUNT);
-    aio_inited = check(err == CELL_FS_OK, "cellFsAioInit(" AIO_MOUNT ")",
-                       (unsigned)err);
-    if (aio_inited) {
-        CellFsAio aio;
-        memset(&aio, 0, sizeof(aio));
-        aio.fd        = fd;
-        aio.offset    = CHUNK_SIZE;
-        aio.buf       = rbuf;
-        aio.size      = CHUNK_SIZE;
-        aio.user_data = 0;
+    /* From here on the file is ours and is removed on every exit path
+     * except an unfinished AIO request. */
 
-        int aio_id = -1;
-        aio_done = 0; aio_err = -1; aio_bytes = 0;
-        err = cellFsAioRead(&aio, &aio_id, aio_callback);
-        if (check(err == CELL_FS_OK, "cellFsAioRead", (unsigned)err)) {
-            aio_wait(5000);
-            check(aio_done, "aio callback fired", (unsigned)aio_done);
-            check(aio_err == CELL_FS_OK, "aio err == OK", (unsigned)aio_err);
-            check(aio_bytes == CHUNK_SIZE, "aio bytes == 64 KiB",
-                  (unsigned long long)aio_bytes);
-            check(aio_done && count_bad((const uint32_t *)rbuf, CHUNK_SIZE,
-                                        CHUNK_SIZE / 4) == 0,
-                  "aio data matches pattern", 0);
-        }
+    /* --- 2. write the pattern ------------------------------------ */
+    for (size_t i = 0; i < FILE_SIZE / 4; i++)
+        wbuf[i] = word_at(i * 4);
+    uint64_t written = 0;
+    err = cellFsWrite(fd, wbuf, FILE_SIZE, &written);
+    int ok = check(err == CELL_FS_OK && written == FILE_SIZE,
+                   "cellFsWrite(1 MiB)", (unsigned long long)written);
+    err = cellFsClose(fd);
+    ok &= check(err == CELL_FS_OK, "cellFsClose(write fd)", (unsigned)err);
+    fd = -1;
+    if (ok) {
+        memset(&sb, 0, sizeof(sb));
+        err = cellFsStat(path, &sb);
+        ok = check(err == CELL_FS_OK && sb.st_size == FILE_SIZE,
+                   "cellFsStat size", (unsigned long long)sb.st_size);
+    }
+    if (ok) {
+        err = cellFsOpen(path, CELL_FS_O_RDONLY, &fd, NULL, 0);
+        ok = check(err == CELL_FS_OK, "cellFsOpen(read)", (unsigned)err);
+        if (!ok) fd = -1;
+    }
 
-        /* --- 3. AIO cancel (race reported, not judged) ------------- */
-        printf("\n--- AIO cancel ---\n");
-        aio_done = 0; aio_err = -1; aio_bytes = 0;
-        aio.offset = 0;
-        err = cellFsAioRead(&aio, &aio_id, aio_callback);
-        if (check(err == CELL_FS_OK, "cellFsAioRead (cancel test)", (unsigned)err)) {
-            CellFsErrno cerr = cellFsAioCancel(aio_id);
-            printf("    cellFsAioCancel -> 0x%08x\n", (unsigned)cerr);
-            /* Wait either way so the request is no longer in flight
-             * when rbuf is freed. */
-            aio_wait(2000);
-            printf("    after cancel: callback %s, err=0x%08x size=%llu\n",
-                   aio_done ? "fired" : "not fired", (unsigned)aio_err,
-                   (unsigned long long)aio_bytes);
+    int aio_inited = 0;
+    if (ok) {
+        printf("\n--- AIO read at offset %u, size %u ---\n",
+               (unsigned)CHUNK_SIZE, (unsigned)CHUNK_SIZE);
+        err = cellFsAioInit(AIO_MOUNT);
+        aio_inited = check(err == CELL_FS_OK, "cellFsAioInit(" AIO_MOUNT ")",
+                           (unsigned)err);
+        ok = aio_inited;
+    }
+
+    /* --- 3. AIO read --------------------------------------------- */
+    if (ok) {
+        int id = -1;
+        request_init(0, fd, CHUNK_SIZE);
+        err = cellFsAioRead(&req[0].aio, &id, aio_callback);
+        ok = check(err == CELL_FS_OK, "cellFsAioRead", (unsigned)err);
+        if (ok) {
+            if (!request_wait(0))
+                return abandon(0, path);
+            check(req[0].err == CELL_FS_OK, "request 0 err == OK",
+                  (unsigned)req[0].err);
+            check(req[0].bytes == CHUNK_SIZE, "request 0 bytes == 64 KiB",
+                  (unsigned long long)req[0].bytes);
+            check(count_bad(req_buf[0], CHUNK_SIZE, CHUNK_SIZE / 4) == 0,
+                  "request 0 data matches pattern", 0);
         }
     }
 
-    /* --- 4. streaming read ---------------------------------------- */
-    stream_test(fd);
+    /* --- 4. AIO cancel ------------------------------------------- */
+    if (ok) {
+        printf("\n--- AIO cancel ---\n");
+        int id = -1;
+        request_init(1, fd, 0);
+        err = cellFsAioRead(&req[1].aio, &id, aio_callback);
+        ok = check(err == CELL_FS_OK, "cellFsAioRead (cancel test)", (unsigned)err);
+        if (ok) {
+            CellFsErrno cerr = cellFsAioCancel(id);
+            printf("    cellFsAioCancel(%d) -> 0x%08x\n", id, (unsigned)cerr);
+            if (!request_wait(1))
+                return abandon(1, path);
+            printf("    request 1 completed: err=0x%08x size=%llu\n",
+                   (unsigned)req[1].err, (unsigned long long)req[1].bytes);
+        }
+    }
 
-out:
-    /* --- 5. cleanup ----------------------------------------------- */
-    if (fd >= 0) cellFsClose(fd);
-    err = cellFsUnlink(SCRATCH);
-    check(err == CELL_FS_OK, "cellFsUnlink(scratch)", (unsigned)err);
+    /* --- 5. streaming read --------------------------------------- */
+    if (ok)
+        stream_test(fd);
+
+    /* --- 6. cleanup: no request is in flight here ---------------- */
     if (aio_inited) {
         err = cellFsAioFinish(AIO_MOUNT);
         check(err == CELL_FS_OK, "cellFsAioFinish", (unsigned)err);
     }
-    free(rbuf);
+    if (fd >= 0) {
+        err = cellFsClose(fd);
+        check(err == CELL_FS_OK, "cellFsClose(read fd)", (unsigned)err);
+    }
+    err = cellFsUnlink(path);
+    check(err == CELL_FS_OK, "cellFsUnlink(own scratch file)", (unsigned)err);
+    if (stray_callbacks)
+        check(0, "no unexpected AIO callbacks", (unsigned)stray_callbacks);
 
-    printf("\nhello-ppu-cellfs-async-stream: %s (%d of %d checks)\n",
-           failures ? "FAIL" : "PASS", checks - failures, checks);
-    return failures ? 1 : 0;
+    return verdict();
 }
