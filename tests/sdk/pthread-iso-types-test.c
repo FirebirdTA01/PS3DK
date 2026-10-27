@@ -1,5 +1,5 @@
 /*
- * pthread-iso-types-test.c — Verify pthread types available under strict ISO C/C++
+ * pthread-iso-types-test.c - Verify pthread types available under strict ISO C/C++
  *
  * Tests that <sys/types.h> included before <pthread.h> does NOT drop pthread
  * primitive types (pthread_t, pthread_mutex_t, pthread_cond_t, etc.) even

@@ -1,5 +1,5 @@
 /*
- * spu-thread-events-test.c — Static assertion and signature verification test
+ * spu-thread-events-test.c - Static assertion and signature verification test
  * for SPU thread event constants and syscall wrappers.
  */
 

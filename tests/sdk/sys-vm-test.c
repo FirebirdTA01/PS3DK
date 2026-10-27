@@ -1,5 +1,5 @@
 /*
- * sys-vm-test.c — Static assertion and signature verification test
+ * sys-vm-test.c - Static assertion and signature verification test
  * for <sys/vm.h> constants, types, and Lv2 syscall wrappers.
  */
 

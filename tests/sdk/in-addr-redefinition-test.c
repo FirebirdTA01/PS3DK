@@ -1,5 +1,5 @@
 /*
- * in-addr-redefinition-test.c — Verify struct in_addr declaration compatibility
+ * in-addr-redefinition-test.c - Verify struct in_addr declaration compatibility
  *
  * Verifies that <cell/libnetctl.h>, <netex/libnetctl.h>, and <netinet/in.h>
  * can be included in any order without "redefinition of struct in_addr" errors,
