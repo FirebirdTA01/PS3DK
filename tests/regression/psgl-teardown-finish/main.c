@@ -60,10 +60,12 @@ static unsigned timeouts(void)
     return &psgl_teardown_wait_timeouts != 0 ? psgl_teardown_wait_timeouts : 0u;
 }
 
+#if TEARDOWN_EXIT_MODE >= 1
 static unsigned shutdowns(void)
 {
     return &psgl_teardown_shutdowns != 0 ? psgl_teardown_shutdowns : 0u;
 }
+#endif
 
 static uint64_t now_ms(void)
 {
