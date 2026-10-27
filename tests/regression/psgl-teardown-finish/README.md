@@ -13,6 +13,10 @@ work has completed only once label 202 holds its value.
   reports `GL_INVALID_OPERATION`, counts one teardown timeout, and keeps the
   buffer mapped and allocated. Freeing it again after the GPU drained
   succeeds and unmaps it.
+- If unmapping fails (the test unmaps the buffer itself first), the call
+  reports `GL_INVALID_OPERATION` and keeps the buffer registered: freeing it
+  again reports the same error, not `GL_INVALID_VALUE`. Once the test maps
+  it again, freeing it succeeds and unmaps it.
 - `psglExit` waits for queued work even though the application already used
   reference value 1 with its own `cellGcmFinish`. A completion check that
   waits only for the reference register to equal 1 would return at once.

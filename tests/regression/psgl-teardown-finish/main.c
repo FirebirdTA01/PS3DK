@@ -9,6 +9,8 @@
  * - If the GPU does not complete within the teardown bound, the call reports
  *   GL_INVALID_OPERATION and keeps the buffer mapped and allocated; freeing it
  *   again after the GPU drained succeeds.
+ * - If unmapping fails, the call reports GL_INVALID_OPERATION and keeps the
+ *   buffer registered; freeing it again once it can be unmapped succeeds.
  * - psglExit waits for queued work even when the application already used
  *   reference value 1 itself (the value a stale-equality Finish would reuse).
  *   Built with TEARDOWN_EXIT_TIMEOUT, psglExit instead hits its bound, stops,
@@ -165,6 +167,45 @@ static void free_timeout_keeps_buffer(void)
     check(kept && !mapped(buffer), "freeing again unmaps the buffer");
 }
 
+/* The test unmaps the buffer itself, so the library's unmap fails. */
+static void free_unmap_failure_keeps_buffer(void)
+{
+    void *buffer = recorded_buffer();
+    check(buffer != NULL, "allocate third command buffer");
+    if (!buffer) return;
+    unsigned before = timeouts();
+    int32_t own_unmap = cellGcmUnmapEaIoAddress(buffer);
+    psglFreeCommandBuffer(buffer);
+    GLenum error = glGetError();
+    int kept = own_unmap == 0 && error == GL_INVALID_OPERATION;
+    GLenum again = GL_NO_ERROR;
+    int32_t remap = -1;
+    GLenum final_error = GL_INVALID_ENUM;
+    int final_mapped = 1;
+    if (kept) {
+        psglFreeCommandBuffer(buffer);   /* still registered, still unmapped */
+        again = glGetError();
+        uint32_t offset = 0;
+        remap = cellGcmMapMainMemory(buffer, CB_BYTES, &offset);
+        if (remap == 0) {
+            psglFreeCommandBuffer(buffer);
+            final_error = glGetError();
+            final_mapped = mapped(buffer);
+        }
+    }
+    printf("PSGL_TEARDOWN_UNMAP_FAIL own_unmap=%x error=0x%x again=0x%x remap=%x final=0x%x mapped=%d timeouts=%u\n",
+           (unsigned)own_unmap, (unsigned)error, (unsigned)again, (unsigned)remap,
+           (unsigned)final_error, final_mapped, timeouts() - before);
+    check(kept, "a failed unmap reports GL_INVALID_OPERATION and keeps the buffer");
+    check(kept && again == GL_INVALID_OPERATION,
+          "the kept buffer stays registered (not GL_INVALID_VALUE)");
+    check(remap == 0, "the kept buffer can be mapped again");
+    check(final_error == GL_NO_ERROR, "freeing it once it can be unmapped succeeds");
+    check(!final_mapped, "that free unmaps it");
+    check(&psgl_teardown_wait_timeouts != 0 && timeouts() == before,
+          "no teardown timeout on the unmap-failure path");
+}
+
 int main(void)
 {
     PSGLinitOptions options = {0};
@@ -184,6 +225,7 @@ int main(void)
 
     free_waits_and_unmaps();
     free_timeout_keeps_buffer();
+    free_unmap_failure_keeps_buffer();
 
     /* The application's own Finish leaves reference value 1 behind. */
     cellGcmFinish(gCellGcmCurrentContext, 1u);
