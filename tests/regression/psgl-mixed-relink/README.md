@@ -9,7 +9,9 @@ including its current numeric uniform and logical sampler selection.
 The witness covers independent vertex and fragment overrides, a direct Cg bind
 of the same underlying vertex object (pointer equality alone is insufficient),
 successful relinking of an active GL executable, and a failed relink followed by
-a successful repair. Read-only context observations check the installed stages
+a successful repair. An active program with no samplers changes from a constant
+yellow fragment executable to cyan on relink, without another `glUseProgram`.
+Read-only context observations check the installed stages
 and routing flags; binding, uniforms and drawing use public APIs. Shader
 containers are embedded and loaded through `cgCreateProgram(CG_OBJECT)`.
 

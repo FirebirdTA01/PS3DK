@@ -13,6 +13,7 @@
 #include "direct_vpo.h"
 #include "fragment_fpo.h"
 #include "yellow_fpo.h"
+#include "cyan_fpo.h"
 SYS_PROCESS_PARAM(1001, 0x100000);
 static unsigned checks, failures;
 static GLuint program, fs;
@@ -113,8 +114,17 @@ int main(void)
     pixel(255,255,0,"failed relink pixel preserved");
     glAttachShader(program,fs);link_ok();pixel(255,255,0,"repaired link still preserves Cg");
     glUseProgram(program);tint(1,0,0);pixel(255,0,0,"explicit GL restoration after repaired link");
+    GLuint yellow=shader(GL_FRAGMENT_SHADER,yellow_fpo,yellow_fpo_size);
+    GLuint cyan=shader(GL_FRAGMENT_SHADER,cyan_fpo,cyan_fpo_size);
+    glDetachShader(program,fs);glAttachShader(program,yellow);link_ok();
+    pixel(255,255,0,"active GL zero-sampler control");
+    check(context->gl_sampler_routing && context->gl_sampler_mask==0,
+          "zero-sampler GL still has installed routing");
+    glDetachShader(program,yellow);glAttachShader(program,cyan);link_ok();
+    pixel(0,255,255,"zero-sampler relink installs new executable");
     glUseProgram(0);cgGLUnbindProgram(CG_PROFILE_SCE_VP_RSX);cgGLUnbindProgram(CG_PROFILE_SCE_FP_RSX);
     cgDestroyContext(cg);glDeleteProgram(program);glDeleteShader(vs);glDeleteShader(fs);
+    glDeleteShader(yellow);glDeleteShader(cyan);
     glDeleteBuffers(1,&vbo);glDeleteTextures(2,tex);check(glGetError()==GL_NO_ERROR,"cleanup");
     printf("PSGL_RELINK_%s checks=%u failures=%u\n",failures?"FAIL":"OK",checks,failures);
     psglDestroyContext(context);psglDestroyDevice(device);psglExit();return failures?1:0;

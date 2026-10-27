@@ -357,5 +357,5 @@ psgl-ffp-texenv-nolib-ilp32,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-nol
 psgl-ffp-texenv-nolib-lp64,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-nolib-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=6 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
 psgl-ffp-install-failure-ilp32,tests/regression/psgl-ffp-install-failure/psgl-ffp-install-failure-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_INSTALL_OK checks=7 failures=0\r?$,PSGL_FFP_INSTALL_FAIL
 psgl-ffp-install-failure-lp64,tests/regression/psgl-ffp-install-failure/psgl-ffp-install-failure-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_INSTALL_OK checks=7 failures=0\r?$,PSGL_FFP_INSTALL_FAIL
-psgl-mixed-relink-ilp32,tests/regression/psgl-mixed-relink/psgl-mixed-relink-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_RELINK_OK checks=33 failures=0\r?$,PSGL_RELINK_FAIL
-psgl-mixed-relink-lp64,tests/regression/psgl-mixed-relink/psgl-mixed-relink-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_RELINK_OK checks=33 failures=0\r?$,PSGL_RELINK_FAIL
+psgl-mixed-relink-ilp32,tests/regression/psgl-mixed-relink/psgl-mixed-relink-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_RELINK_OK checks=38 failures=0\r?$,PSGL_RELINK_FAIL
+psgl-mixed-relink-lp64,tests/regression/psgl-mixed-relink/psgl-mixed-relink-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_RELINK_OK checks=38 failures=0\r?$,PSGL_RELINK_FAIL
