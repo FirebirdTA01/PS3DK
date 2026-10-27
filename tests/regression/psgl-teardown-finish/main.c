@@ -144,22 +144,22 @@ static void free_timeout_keeps_buffer(void)
     uint64_t elapsed = now_ms() - t0;
     GLenum error = glGetError();
     int still_mapped = mapped(buffer);
-    uint32_t first_word = ((volatile uint32_t *)buffer)[0];
-    printf("PSGL_TEARDOWN_FREE_TIMEOUT elapsed_ms=%llu error=0x%x mapped=%d word0=0x%x timeouts=%u\n",
-           (unsigned long long)elapsed, (unsigned)error, still_mapped, (unsigned)first_word,
-           timeouts() - before);
+    /* Only a buffer the library kept may be read or freed again; a library
+       that released it would make either a use after free. */
+    int kept = error == GL_INVALID_OPERATION && still_mapped;
+    uint32_t first_word = kept ? ((volatile uint32_t *)buffer)[0] : 0xFFFFFFFFu;
+    printf("PSGL_TEARDOWN_FREE_TIMEOUT elapsed_ms=%llu error=0x%x mapped=%d kept=%d word0=0x%x timeouts=%u\n",
+           (unsigned long long)elapsed, (unsigned)error, still_mapped, kept,
+           (unsigned)first_word, timeouts() - before);
     check(elapsed + 100u >= BOUND_MS, "psglFreeCommandBuffer waits up to its bound");
     check(error == GL_INVALID_OPERATION, "a timed-out free reports GL_INVALID_OPERATION");
     check(still_mapped, "a timed-out free keeps the buffer mapped");
-    check(first_word == 0u, "a timed-out free keeps the buffer allocated");
+    check(kept && first_word == 0u, "a timed-out free keeps the buffer allocated");
     check(&psgl_teardown_wait_timeouts != 0 && timeouts() == before + 1u,
           "a timed-out free counts one teardown timeout");
     join_release(thread);
     glFinish();
     check(*done == 12u, "gated work completes after release");
-    /* Free again only if the first call kept the buffer; freeing a buffer a
-       library already released would be a double free. */
-    int kept = error == GL_INVALID_OPERATION && still_mapped;
     if (kept) psglFreeCommandBuffer(buffer);
     check(kept && glGetError() == GL_NO_ERROR, "freeing again after the GPU drained succeeds");
     check(kept && !mapped(buffer), "freeing again unmaps the buffer");
