@@ -57,6 +57,9 @@ The version stamped into builds is generated from the most recent
   because breakpoints do nothing under the LLVM recompiler. It lists what
   works and the current limits: no detach, `stepi` not advancing, and
   function symbols without debug info resolving wrongly.
+  On one HEN console, a hardware probe (`tests/hardware/lv2dbg-probe`) found
+  the lv2dbg thread, register-context, exception-handler and watchpoint calls
+  refused with `0x8001042c`, so an in-app debugger cannot rely on them there.
 
 - **PSGL sampler selection queries.** `glGetUniformiv` returns the named
   program's logical texture unit for scalar fragment `sampler2D` uniforms
@@ -189,8 +192,7 @@ The version stamped into builds is generated from the most recent
   queries report 8; the vertex image-unit query reports 0. Active texture and
   2D binding queries expose the selected state, and invalid active-unit
   selectors report `INVALID_ENUM` without changing it. The legacy texture-unit
-  limit stays 4. Fixed-function texture-environment stages beyond unit 0
-  remain an implementation gap; this change does not claim ES 2.0 conformance.
+  limit stays 4. This change does not claim ES 2.0 conformance.
 - **PSGL fragment uniforms under queued draws.** Changing a fragment-program
   uniform between draws no longer rewrites the ucode that earlier, still
   queued draws use, which made them render with the newest value. Each
