@@ -30,16 +30,31 @@ installed. The script writes `selfs.tsv` with each SELF and its sha256.
 
 ```
 boot-samples.ps1 -Selfs <selfs.tsv> -Out <new dir> -Client <ps3dk-run.exe> \
-                 -Control <control child SELF> -ConsoleIp <ip> -CallbackHost <ip>
+                 -ClientSha <sha256> -Control <control child SELF> -ControlSha <sha256> \
+                 -ConsoleIp <ip> -CallbackHost <ip>
 ```
 
 Order: the control child, every sample, then the control again, one launch
-each, no retries. A row passes when the outcome is `EXITED` with the expected
-status (the control's, 7 by default; 0 for a sample), the loader is ready
-afterwards, no output was dropped, the SELF hash matches `selfs.tsv`, and
-stdout holds the sample's final line from `expect.txt` exactly once with no
-`: ... fail` line. Anything else stops the gate at that row. The results are
-in `results.tsv`, and the exit status is 0 only when every row passed.
+each, no retries. Before anything runs, the client, the control and every
+sample SELF must match their pinned sha256, and `selfs.tsv` must name each
+sample once with a valid hash. A row passes only when the client exits with
+the expected status (the control's, 7 by default; 0 for a sample), the
+outcome JSON holds exactly one record with outcome `EXITED`, that status,
+protocol 2, `loader_ready` true, `dropped_bytes` 0 and `self_sha256` equal to
+the pin, the SELF on disk is unchanged afterwards, and stdout holds the
+sample's final line from `expect.txt` exactly once with no `: ... fail`
+line. Anything else stops the gate at that row. The results are in
+`results.tsv`, and the exit status is 0 only when every row passed.
+
+`check-harness.ps1 -Out <new dir>` checks that judgement without a console:
+it runs the script's own row functions against a stub launcher and requires
+one good row to pass and every single-field fault (client status, outcome,
+status, protocol, readiness, dropped output, SELF hash, record count, JSON,
+final line, fail line, a SELF changed during the run) to fail.
+
+`tmpfile-check/` is a small SELF that checks the samples' private
+temporary-file helper (`samples/toolchain/psgl-common/psgl_sample_tmpfile.h`)
+against injected file-system faults and the real file system.
 
 A sample that hangs the GPU can leave the console needing a power cycle; the
 gate stops there, and nothing further is launched.
