@@ -71,6 +71,8 @@ ppu_names="$(
 # (hello-sprx-import, linking hello_prx_stub) fails payload validation with
 # "ship it or stop linking it" -- and neither option is right, because the
 # whole point is that the module publishes its own import surface.
+# $0 belongs to awk, not the invoking shell.
+# shellcheck disable=SC2016
 generated_stubs="$(
     find "$ROOT/samples" -name CMakeLists.txt -print0 |
     # A batch without a stub declaration is normal, not grep's exit 1
