@@ -7,7 +7,9 @@
 #include <sys/process.h>
 #include <sys/timer.h>
 
+#include "../../psgl-common/psgl_sample_frame.h"
 #include "../../psgl-common/psgl_sample_quit.h"
+#include "../../psgl-common/psgl_sample_tmpfile.h"
 
 #include "tintfp_fpo.h"
 #include "tintvp_vpo.h"
@@ -15,8 +17,6 @@
 SYS_PROCESS_PARAM(1001, 0x100000);
 
 #define NAME "hello-psgl-cg-binary"
-#define VP_PATH "/dev_hdd0/tmp/hello-psgl-cg-binary.vpo"
-#define FP_PATH "/dev_hdd0/tmp/hello-psgl-cg-binary.fpo"
 
 /* Shaders are compiled offline (rsx-cg-compiler, raw .vpo/.fpo containers)
    and created at run time from those binaries, the way an application
@@ -41,18 +41,6 @@ typedef struct ProgramPair {
     CGparameter tint;
 } ProgramPair;
 
-static int write_blob(const char *path, const unsigned char *data,
-                      unsigned int size)
-{
-    FILE *file = fopen(path, "wb");
-    if (!file) return 0;
-    if (fwrite(data, 1u, size, file) != size) {
-        fclose(file);
-        return 0;
-    }
-    return fclose(file) == 0;
-}
-
 /* Prints the pending Cg error, if any, and clears it. */
 static int cg_failed(const char *what)
 {
@@ -66,7 +54,7 @@ static int cg_failed(const char *what)
 static int finish_pair(ProgramPair *pair, const char *what)
 {
     if (!pair->vp || !pair->fp) {
-        cg_failed(what);
+        if (!cg_failed(what)) printf(NAME ": %s returned NULL\n", what);
         return 0;
     }
     pair->mvp = cgGetNamedParameter(pair->vp, "modelViewProj");
@@ -96,6 +84,24 @@ static void draw_pair(const ProgramPair *pair, float x_offset,
     glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
+/* Cg source is not compiled at run time: the request must be refused with
+   NULL and CG_INVALID_ENUMERANT_ERROR. */
+static int source_refused(CGcontext cg_context)
+{
+    CGprogram refused = cgCreateProgram(cg_context, CG_SOURCE, "void main() {}",
+                                        CG_PROFILE_SCE_FP_RSX, "main", NULL);
+    CGerror error = CG_NO_ERROR;
+    const char *text = cgGetLastErrorString(&error);
+    if (refused || error != CG_INVALID_ENUMERANT_ERROR) {
+        printf(NAME ": CG_SOURCE: program=%s error=%d, want NULL and %d\n",
+               refused ? "non-NULL" : "NULL", (int)error,
+               (int)CG_INVALID_ENUMERANT_ERROR);
+        return 0;
+    }
+    printf(NAME ": CG_SOURCE refused as expected: %s\n", text ? text : "?");
+    return 1;
+}
+
 int main(void)
 {
     static const float k_green[4] = {0.15f, 0.85f, 0.30f, 1.0f};
@@ -106,12 +112,19 @@ int main(void)
     CGcontext cg_context;
     ProgramPair from_memory = {0};
     ProgramPair from_file = {0};
-    CGprogram refused;
     GLuint vbo = 0u;
+    char vp_path[64] = "";
+    char fp_path[64] = "";
+    int exit_code = 1;
 
-    if (!write_blob(VP_PATH, tintvp_vpo, tintvp_vpo_size) ||
-        !write_blob(FP_PATH, tintfp_fpo, tintfp_fpo_size)) {
-        printf(NAME ": shader file write failed\n");
+    /* cgCreateProgramFromFile takes a path: write the containers to new
+       private files, removed again at exit. */
+    if (!psgl_sample_tmpfile_create(&psgl_sample_lv2_fs, NAME, "vpo", tintvp_vpo,
+                                    tintvp_vpo_size, vp_path, sizeof vp_path) ||
+        !psgl_sample_tmpfile_create(&psgl_sample_lv2_fs, NAME, "fpo", tintfp_fpo,
+                                    tintfp_fpo_size, fp_path, sizeof fp_path)) {
+        psgl_sample_tmpfile_remove(&psgl_sample_lv2_fs, vp_path);
+        printf(NAME ": fail\n");
         return 1;
     }
 
@@ -119,18 +132,17 @@ int main(void)
     device = psglCreateDeviceAuto(0, 0, 0);
     gl_context = psglGetCurrentContext();
     if (!gl_context) gl_context = psglCreateContext();
+    cg_context = NULL;
     if (!device || !gl_context) {
         printf(NAME ": PSGL init failed\n");
-        psglExit();
-        return 1;
+        goto out;
     }
     psglMakeCurrent(gl_context, device);
 
     cg_context = cgCreateContext();
     if (!cg_context) {
         printf(NAME ": cgCreateContext failed\n");
-        psglExit();
-        return 1;
+        goto out;
     }
 
     /* From memory: the container is copied, so the buffer may be freed
@@ -143,31 +155,14 @@ int main(void)
                                      (const char *)tintfp_fpo,
                                      CG_PROFILE_SCE_FP_RSX, NULL, NULL);
     /* From files: CG_OBJECT and CG_BINARY are both accepted. */
-    from_file.vp = cgCreateProgramFromFile(cg_context, CG_OBJECT, VP_PATH,
+    from_file.vp = cgCreateProgramFromFile(cg_context, CG_OBJECT, vp_path,
                                            CG_PROFILE_SCE_VP_RSX, NULL, NULL);
-    from_file.fp = cgCreateProgramFromFile(cg_context, CG_OBJECT, FP_PATH,
+    from_file.fp = cgCreateProgramFromFile(cg_context, CG_OBJECT, fp_path,
                                            CG_PROFILE_SCE_FP_RSX, NULL, NULL);
     if (!finish_pair(&from_memory, "cgCreateProgram") ||
-        !finish_pair(&from_file, "cgCreateProgramFromFile")) {
-        cgDestroyContext(cg_context);
-        psglExit();
-        return 1;
-    }
-
-    /* Cg source is not compiled at run time; the request is refused. */
-    refused = cgCreateProgram(cg_context, CG_SOURCE, "void main() {}",
-                              CG_PROFILE_SCE_FP_RSX, "main", NULL);
-    if (refused) {
-        printf(NAME ": CG_SOURCE was unexpectedly accepted\n");
-        cgDestroyContext(cg_context);
-        psglExit();
-        return 1;
-    }
-    {
-        CGerror error = CG_NO_ERROR;
-        const char *text = cgGetLastErrorString(&error);
-        printf(NAME ": CG_SOURCE refused as expected: %s\n", text ? text : "?");
-    }
+        !finish_pair(&from_file, "cgCreateProgramFromFile") ||
+        !source_refused(cg_context))
+        goto out;
 
     cgGLEnableProfile(CG_PROFILE_SCE_VP_RSX);
     cgGLEnableProfile(CG_PROFILE_SCE_FP_RSX);
@@ -181,8 +176,11 @@ int main(void)
 
     psgl_sample_viewport(device);
     glClearColor(0.02f, 0.08f, 0.18f, 1.0f);
+    if (!psgl_sample_frame_ok(NAME, -1) || cg_failed("setup"))
+        goto out;
+
     printf(NAME ": ready\n");
-    int exit_code = psgl_sample_quit_begin(NAME);
+    exit_code = psgl_sample_quit_begin(NAME);
     for (int i = 0; i < 900 && exit_code == 0; i++) {
         int quit = psgl_sample_quit_poll(NAME);
         if (quit < 0) { exit_code = 1; break; }
@@ -190,14 +188,27 @@ int main(void)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         draw_pair(&from_memory, -0.45f, k_green);
         draw_pair(&from_file, 0.45f, k_orange);
-        if (i == 0 && cg_failed("draw")) { exit_code = 1; break; }
+        /* Every frame: a failed draw shows up as a GL error (for example
+           GL_OUT_OF_MEMORY when a program cannot be installed), a failed
+           Cg call as a Cg error. */
+        if (!psgl_sample_frame_ok(NAME, i) || cg_failed("draw")) {
+            exit_code = 1;
+            break;
+        }
         psglSwap();
         sys_timer_usleep(16000);
     }
-
     psgl_sample_quit_end();
-    printf(NAME ": %s\n", psgl_sample_quit_outcome(exit_code));
-    cgDestroyContext(cg_context);
+
+out:
+    if (cg_context) cgDestroyContext(cg_context);
     psglExit();
+    int removed = psgl_sample_tmpfile_remove(&psgl_sample_lv2_fs, vp_path);
+    removed &= psgl_sample_tmpfile_remove(&psgl_sample_lv2_fs, fp_path);
+    if (!removed) {
+        printf(NAME ": removing a shader file failed\n");
+        exit_code = 1;
+    }
+    printf(NAME ": %s\n", psgl_sample_quit_outcome(exit_code));
     return exit_code;
 }

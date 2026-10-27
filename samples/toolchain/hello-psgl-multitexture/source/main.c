@@ -7,14 +7,15 @@
 #include <sys/process.h>
 #include <sys/timer.h>
 
+#include "../../psgl-common/psgl_sample_frame.h"
 #include "../../psgl-common/psgl_sample_quit.h"
+#include "../../psgl-common/psgl_sample_tmpfile.h"
 
 #include "shaders_bin.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
 #define NAME "hello-psgl-multitexture"
-#define SHADER_LIBRARY_PATH "/dev_hdd0/tmp/hello-psgl-multitexture.bin"
 #define TEX_SIZE 32
 
 /* Six quads in a 3 x 2 grid.  Quads 0-4 combine a base texture on unit 0
@@ -112,18 +113,6 @@ static void set_unit(int k, GLuint texture, GLint mode)
     glEnable(GL_TEXTURE_2D);
 }
 
-static int write_blob(const char *path, const unsigned char *data,
-                      unsigned int size)
-{
-    FILE *file = fopen(path, "wb");
-    if (!file) return 0;
-    if (fwrite(data, 1u, size, file) != size) {
-        fclose(file);
-        return 0;
-    }
-    return fclose(file) == 0;
-}
-
 int main(void)
 {
     static const GLint k_unit1_modes[5] = {
@@ -137,9 +126,13 @@ int main(void)
     GLuint vbo = 0u;
     GLuint textures[4];
     GLenum error;
+    char library_path[64];
 
-    if (!write_blob(SHADER_LIBRARY_PATH, shaders_bin, shaders_bin_size)) {
-        printf(NAME ": library write failed\n");
+    /* psglLoadShaderLibrary takes a path: write the embedded library to a
+       new private file, removed again at exit. */
+    if (!psgl_sample_tmpfile_create(&psgl_sample_lv2_fs, NAME, "bin", shaders_bin,
+                                    shaders_bin_size, library_path, sizeof library_path)) {
+        printf(NAME ": fail\n");
         return 1;
     }
 
@@ -150,10 +143,11 @@ int main(void)
     if (!device || !gl_context) {
         printf(NAME ": PSGL init failed\n");
         psglExit();
+        psgl_sample_tmpfile_remove(&psgl_sample_lv2_fs, library_path);
         return 1;
     }
     psglMakeCurrent(gl_context, device);
-    psglLoadShaderLibrary(SHADER_LIBRARY_PATH);
+    psglLoadShaderLibrary(library_path);
 
     for (int k = 0; k < 4; k++) textures[k] = make_texture(k);
 
@@ -189,6 +183,7 @@ int main(void)
     if (error != GL_NO_ERROR) {
         printf(NAME ": setup GL error 0x%04x\n", (unsigned)error);
         psglExit();
+        psgl_sample_tmpfile_remove(&psgl_sample_lv2_fs, library_path);
         return 1;
     }
 
@@ -216,9 +211,8 @@ int main(void)
         set_unit(3, textures[3], GL_BLEND);
         glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, k_env_yellow);
         glDrawArrays(GL_TRIANGLES, 5 * QUAD_VERTICES, QUAD_VERTICES);
-        if (i == 0 && (error = glGetError()) != GL_NO_ERROR) {
-            /* INVALID_OPERATION here means the library was not loaded. */
-            printf(NAME ": draw GL error 0x%04x\n", (unsigned)error);
+        /* GL_INVALID_OPERATION means the library was not loaded. */
+        if (!psgl_sample_frame_ok(NAME, i)) {
             exit_code = 1;
             break;
         }
@@ -227,7 +221,11 @@ int main(void)
     }
 
     psgl_sample_quit_end();
-    printf(NAME ": %s\n", psgl_sample_quit_outcome(exit_code));
     psglExit();
+    if (!psgl_sample_tmpfile_remove(&psgl_sample_lv2_fs, library_path)) {
+        printf(NAME ": removing the library file failed\n");
+        exit_code = 1;
+    }
+    printf(NAME ": %s\n", psgl_sample_quit_outcome(exit_code));
     return exit_code;
 }

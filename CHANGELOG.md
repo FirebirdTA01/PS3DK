@@ -38,15 +38,18 @@ The version stamped into builds is generated from the most recent
   with an env colour, `REPLACE`, and all four units at once), with the shader
   library that units 1-3 need. `hello-psgl-cg-binary` loads offline-compiled
   `.vpo`/`.fpo` programs through `cgCreateProgram` from memory and through
-  `cgCreateProgramFromFile` from a file, and checks every Cg step with
-  `cgGetLastErrorString`. Both need this release's SDK: v0.26.0 lacks
+  `cgCreateProgramFromFile` from a file. Both check GL (and Cg) errors on
+  every frame and end with `fail` and a nonzero status on any failure, and
+  their temporary files are new private files that never replace an
+  existing one. Both need this release's SDK: v0.26.0 lacks
   `rsx-cg-compiler --psgl-ffp-library`, texturing on units 1-3 and a
   working `cgCreateProgram`.
 - **PSGL sample hardware boot gate** (`tests/hardware/psgl-sample-boot`).
   Builds every PSGL sample with the ps3dk-run hook linked in, without
   changing the samples, and boots them on a PS3 through the network loader:
   a control, each sample, then the control again, stopping at the first
-  failure.
+  failure. The client, control and every SELF are pinned by sha256, and
+  each launch's outcome record must match all of them.
 - **Cg programs from binary containers through `cgCreateProgram`.**
   `cgCreateProgram` with `CG_BINARY` or `CG_OBJECT` creates a program from
   a precompiled `.vpo`/`.fpo` or compact CGB container in memory; it used to
