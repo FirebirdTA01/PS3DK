@@ -140,7 +140,7 @@ non-PSL1GHT-backed library pull one of the nidgen-built stub archives.
 | `hello-ppu-ap` | `cellSysutilApGetRequiredMemSize` + `Off` over `libsysutil_ap_stub.a`; FNIDs 0x9e67e0dd / 0x3343824c / 0x90c2bb19 | **green** + RPCS3 runtime-verified (returns expected 1 MiB container size) |
 | `hello-ppu-sysutil-queries` | License area, Remote Play status and volume, boot game info, HOME export path and paired Bluetooth devices through the new sysutil headers; loads and unloads each system module | **green** + RPCS3 runtime-verified |
 | `hello-ppu-l10n` | `cellSysmoduleLoadModule(CELL_SYSMODULE_L10N)` + `eucjp2sjis()` — 165-export libl10n scaling test for the nidgen-archive pipeline | **green** + RPCS3 runtime-verified (all four EUC-JP→SJIS conversions match) |
-| `hello-ppu-input-combined` | Pad + keyboard + mouse polled in one event loop; hot-plug detection on all three surfaces via `port_status` (pad), `now_connect` (keyboard), `connected` (mouse) diffing each frame; exits after 600 frames or on XMB Quit / pad START+SELECT | new — build + RPCS3 runtime pending |
+| `hello-ppu-input-combined` | Pad + keyboard + mouse polled in one event loop; hot-plug detection on port 0 of all three surfaces by diffing the connection bit (`port_status` for the pad, `status[0]` for keyboard and mouse) each frame; exits after 600 frames, on XMB Quit, or on pad START or SELECT | new — build + RPCS3 runtime pending |
 
 ## lv2/
 

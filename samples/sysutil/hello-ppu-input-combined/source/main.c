@@ -9,18 +9,18 @@
  *   <cell/sysutil.h>  cellSysutilRegisterCallback (for XMB Quit)
  *
  * Behaviour on RPCS3 / PS3:
- *   1. Inits all three surfaces; reports how many devices each reports
- *      connected (pad per port via port_status; kb/mouse via their
- *      "now connected" count field).
- *   2. Polls port 0 of each surface every frame and prints one line per
- *      surface (or "not connected" / "idle"); the sample exits after 600
- *      frames, on XMB Quit, or on SELECT or START (pad).
- *   3. Hot-plug: each frame the previous connection state is diffed. A
- *      pad port whose CELL_PAD_STATUS_CONNECTED bit toggles, or a
- *      keyboard/mouse whose connected-count changes, is printed as a
- *      CONNECTED / DISCONNECTED transition. On real hardware this is
- *      observable by plugging/unplugging a USB pad, keyboard or mouse
- *      while the sample is running.
+ *   1. Inits all three surfaces and registers a sysutil callback,
+ *      serviced every frame, so XMB Quit ends the loop.
+ *   2. Polls port 0 of each surface every frame (8 ms) and prints a
+ *      status block every 60 frames (or "not connected" / "idle"); the
+ *      sample exits after 600 frames, on XMB Quit, or on SELECT or
+ *      START (pad).
+ *   3. Hot-plug: each frame the port 0 connection bit of each surface
+ *      (CELL_PAD_STATUS_CONNECTED in port_status, CELL_KB_STATUS_CONNECTED
+ *      and CELL_MOUSE_STATUS_CONNECTED in status[]) is diffed against
+ *      the previous frame; a change prints a CONNECTED / DISCONNECTED
+ *      line at once. On real hardware this is observable by plugging
+ *      or unplugging a USB pad, keyboard or mouse while it runs.
  *
  * The sample is green with no devices present: RPCS3's input HLE
  * delivers zero-keycode frames, so an absent device is not a failure.
@@ -39,11 +39,12 @@
 #include <cell/mouse.h>
 #include <cell/sysutil.h>
 
-SYS_PROCESS_PARAM(2048, 0x100000);
+SYS_PROCESS_PARAM(1001, 0x100000);
 
-#define MAX_FRAME  600
-#define SLEEP_US   (8 * 1000)
-#define MAX_DEVS   7
+#define MAX_FRAME    600
+#define SLEEP_US     (8 * 1000)
+#define MAX_DEVS     7
+#define REPORT_EVERY 60   /* print a status block every N frames */
 
 static volatile int g_exit_requested = 0;
 
@@ -63,80 +64,85 @@ static int pad_port0_connected(const CellPadInfo2 *i)
     return (i->port_status[0] & CELL_PAD_STATUS_CONNECTED) != 0;
 }
 
-static int mouse_now_connected(const CellMouseInfo *i)
+static int kb_port0_connected(const CellKbInfo *i)
 {
-    return (i->connected != 0);
+    return (i->status[0] & CELL_KB_STATUS_CONNECTED) != 0;
 }
 
-/* --- per-surface one-line read ------------------------------------- */
+static int mouse_port0_connected(const CellMouseInfo *i)
+{
+    return (i->status[0] & CELL_MOUSE_STATUS_CONNECTED) != 0;
+}
 
-static void print_pad(const CellPadInfo2 *info)
+/* --- per-surface read; prints only on report frames ---------------- */
+
+static void print_pad(const CellPadInfo2 *info, int report)
 {
     if (!pad_port0_connected(info)) {
-        printf("    pad:   port 0 not connected\n");
+        if (report) printf("    pad:   port 0 not connected\n");
         return;
     }
     CellPadData d; memset(&d, 0, sizeof(d));
     if (cellPadGetData(0, &d) != CELL_PAD_OK) {
-        printf("    pad:   GetData failed\n");
+        if (report) printf("    pad:   GetData failed\n");
         return;
     }
     uint32_t d1 = d.button[CELL_PAD_BTN_OFFSET_DIGITAL1];
     uint32_t lx = d.button[CELL_PAD_BTN_OFFSET_ANALOG_LEFT_X];
     uint32_t rx = d.button[CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_X];
-    printf("    pad:   d1=0x%02lx  L-x=%3lu  R-x=%3lu\n",
+    if (report) printf("    pad:   d1=0x%02lx  L-x=%3lu  R-x=%3lu\n",
            (unsigned long)d1, (unsigned long)lx, (unsigned long)rx);
     if (d1 & CELL_PAD_CTRL_SELECT) g_exit_requested = 1;
     if (d1 & CELL_PAD_CTRL_START)  g_exit_requested = 1;
 }
 
-static void print_kb(void)
+static void print_kb(int report)
 {
     CellKbInfo i; memset(&i, 0, sizeof(i));
     if (cellKbGetInfo(&i) != CELL_OK) {
-        printf("    kb:    GetInfo failed\n");
+        if (report) printf("    kb:    GetInfo failed\n");
         return;
     }
-    if (i.now_connect == 0) {
-        printf("    kb:    no keyboard connected\n");
+    if (!kb_port0_connected(&i)) {
+        if (report) printf("    kb:    port 0 not connected\n");
         return;
     }
     CellKbData d; memset(&d, 0, sizeof(d));
     if (cellKbRead(0, &d) != CELL_OK) {
-        printf("    kb:    Read failed\n");
+        if (report) printf("    kb:    Read failed\n");
         return;
     }
     if (d.len <= 0) {
-        printf("    kb:    idle (no keycodes this frame)\n");
+        if (report) printf("    kb:    idle (no keycodes this frame)\n");
         return;
     }
-    printf("    kb:    %d key(s):", d.len);
-    for (int k = 0; k < d.len && k < 6; k++)
+    if (report) printf("    kb:    %d key(s):", d.len);
+    for (int k = 0; report && k < d.len && k < 6; k++)
         printf(" 0x%04x", (unsigned)d.keycode[k]);
-    printf("\n");
+    if (report) printf("\n");
 }
 
-static void print_mouse(void)
+static void print_mouse(int report)
 {
     CellMouseInfo i; memset(&i, 0, sizeof(i));
     if (cellMouseGetInfo(&i) != CELL_OK) {
-        printf("    mouse: GetInfo failed\n");
+        if (report) printf("    mouse: GetInfo failed\n");
         return;
     }
-    if (!mouse_now_connected(&i)) {
-        printf("    mouse: not connected\n");
+    if (!mouse_port0_connected(&i)) {
+        if (report) printf("    mouse: port 0 not connected\n");
         return;
     }
     CellMouseData d; memset(&d, 0, sizeof(d));
     if (cellMouseGetData(0, &d) != CELL_OK) {
-        printf("    mouse: GetData failed\n");
+        if (report) printf("    mouse: GetData failed\n");
         return;
     }
     if (d.update != CELL_MOUSE_DATA_UPDATE) {
-        printf("    mouse: idle (no movement this frame)\n");
+        if (report) printf("    mouse: idle (no movement this frame)\n");
         return;
     }
-    printf("    mouse: dx=%d dy=%d wheel=%d buttons=0x%02x\n",
+    if (report) printf("    mouse: dx=%d dy=%d wheel=%d buttons=0x%02x\n",
            (int)d.x_axis, (int)d.y_axis, (int)d.wheel, (unsigned)d.buttons);
 }
 
@@ -165,7 +171,10 @@ int main(int argc, const char **argv)
     int prev_mouse = -1;
 
     for (int frame = 0; frame < MAX_FRAME; frame++) {
-        printf("frame %3d:\n", frame);
+        /* deliver XMB events (EXIT_GAME) to on_sysutil_event */
+        cellSysutilCheckCallback();
+        int report = (frame % REPORT_EVERY) == 0;
+        if (report) printf("frame %3d:\n", frame);
 
         if (pad_ok) {
             CellPadInfo2 info; memset(&info, 0, sizeof(info));
@@ -175,7 +184,7 @@ int main(int argc, const char **argv)
                     printf("    HOT-PLUG pad port 0: %s\n",
                            now ? "CONNECTED" : "DISCONNECTED");
                 prev_pad = now;
-                print_pad(&info);
+                print_pad(&info, report);
             } else {
                 printf("    pad:   GetInfo2 failed\n");
             }
@@ -184,13 +193,13 @@ int main(int argc, const char **argv)
         if (kb_ok) {
             CellKbInfo info; memset(&info, 0, sizeof(info));
             if (cellKbGetInfo(&info) == CELL_OK) {
-                int now = (info.now_connect != 0);
+                int now = kb_port0_connected(&info);
                 if (prev_kb >= 0 && now != prev_kb)
-                    printf("    HOT-PLUG keyboard: %s (connected=%u)\n",
+                    printf("    HOT-PLUG keyboard port 0: %s (connected=%u)\n",
                            now ? "CONNECTED" : "DISCONNECTED",
                            (unsigned)info.now_connect);
                 prev_kb = now;
-                print_kb();
+                print_kb(report);
             } else {
                 printf("    kb:    GetInfo failed\n");
             }
@@ -199,13 +208,13 @@ int main(int argc, const char **argv)
         if (mouse_ok) {
             CellMouseInfo info; memset(&info, 0, sizeof(info));
             if (cellMouseGetInfo(&info) == CELL_OK) {
-                int now = mouse_now_connected(&info);
+                int now = mouse_port0_connected(&info);
                 if (prev_mouse >= 0 && now != prev_mouse)
-                    printf("    HOT-PLUG mouse: %s (connected=%u)\n",
+                    printf("    HOT-PLUG mouse port 0: %s (connected=%u)\n",
                            now ? "CONNECTED" : "DISCONNECTED",
                            (unsigned)info.connected);
                 prev_mouse = now;
-                print_mouse();
+                print_mouse(report);
             } else {
                 printf("    mouse: GetInfo failed\n");
             }
