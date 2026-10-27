@@ -483,6 +483,14 @@ GLAPI void glLinkProgram(GLuint program)
     if (!gls_sampler_mask(fragment, &sampler_mask)) {
         gls_set_log(p->log, sizeof(p->log), "ambiguous sampler resources"); return;
     }
+    /* The remembered GL name survives a direct Cg bind. Relink must only
+       replace the executable when both old GL stages are still installed.
+       Routing also distinguishes a direct Cg rebind of the same objects. */
+    PSGLcontext *context = psgl_context_current();
+    int reinstall = g_current_program == program && context &&
+        context->gl_attrib_routing && context->gl_sampler_routing &&
+        context->bound_vertex_program == p->vertex_program &&
+        context->bound_fragment_program == p->fragment_program;
     p->sampler_mask = sampler_mask;
     for (uint32_t hw = 0; hw < PSGL_MAX_TEXTURE_UNITS; ++hw) p->sampler_units[hw] = 0;
     p->vertex_program = vertex;
@@ -493,7 +501,7 @@ GLAPI void glLinkProgram(GLuint program)
     gls_copy(p->hw_to_location, route, sizeof(route));
     p->linked = GL_TRUE;
     gls_set_log(p->log, sizeof(p->log), "");
-    if (g_current_program == program) glUseProgram(program);
+    if (reinstall) glUseProgram(program);
 }
 
 GLAPI void glUseProgram(GLuint program)

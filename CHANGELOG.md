@@ -71,6 +71,14 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **Relinking a GL program preserves direct Cg stage bindings.** A successful
+  `glLinkProgram` no longer replaces a vertex or fragment stage installed by
+  `cgGLBindProgram`, including a direct rebind of the same shader object.
+  Relinking still refreshes an executable that remains fully GL-bound.
+  Explicit `glUseProgram` restores the newly linked GL stages, uniforms and
+  sampler routing. Deferred deletion and shared-shader uniform ownership
+  remain separate limitations.
+
 - **`gcmSetDefaultFifoSize` no longer moves the command-buffer write position.**
   Called after `cellGcmInit` (libPSGL calls it from `psglInit`), it moved the
   write position back to the start of the command buffer although commands
