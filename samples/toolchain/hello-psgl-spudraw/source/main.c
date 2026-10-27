@@ -100,6 +100,9 @@ int main(void)
     /* Normal completion: join rc 0, every thread exited (cause
        SYS_SPU_THREAD_GROUP_JOIN_ALL_THREADS_EXIT) with status 0; the group
        and image are then released, and both results are checked. */
+    /* A failed join need not set either output. */
+    cause = -1;
+    status = -1;
     rc = sys_spu_thread_group_join(group, &cause, &status);
     int destroy_rc = sys_spu_thread_group_destroy(group);
     int close_rc = sys_spu_image_close(&spu_img);
