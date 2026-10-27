@@ -11,10 +11,13 @@
  *   again after the GPU drained succeeds.
  * - If unmapping fails, the call reports GL_INVALID_OPERATION and keeps the
  *   buffer registered; freeing it again once it can be unmapped succeeds.
- * - psglExit waits for queued work even when the application already used
- *   reference value 1 itself (the value a stale-equality Finish would reuse).
- *   Built with TEARDOWN_EXIT_TIMEOUT, psglExit instead hits its bound, stops,
- *   and a later psglExit completes the teardown.
+ * - TEARDOWN_EXIT_MODE 0: psglExit waits for queued work even when the
+ *   application already used reference value 1 itself (the value a
+ *   stale-equality Finish would reuse).
+ * - Modes 1-3: one psglExit wait hits its bound (1: the first device wait,
+ *   2: the last device wait, after the display buffers were released, 3: the
+ *   shutdown wait), so psglExit stops without shutting down; a later
+ *   psglExit waits on a fresh token and shuts down.
  */
 #include <GLES/gl.h>
 #include <PSGL/psgl.h>
@@ -25,14 +28,21 @@
 #include <sys/process.h>
 #include <sys/timer.h>
 
+#ifndef TEARDOWN_EXIT_MODE
+#define TEARDOWN_EXIT_MODE 0
+#endif
+
 SYS_PROCESS_PARAM(1001, 0x100000);
 
-/* Internal counter of teardown waits that hit their bound (not public API).
-   Weak, so a library without it links and the checks fail at run time. */
+/* libPSGL internals for regression tests (not public API). Weak, so a
+   library without them links and the checks fail at run time. */
 extern unsigned psgl_teardown_wait_timeouts __attribute__((weak));
+extern unsigned psgl_teardown_shutdowns __attribute__((weak));
+extern void (*psgl_teardown_test_hook)(unsigned stage) __attribute__((weak));
 
 #define GATE_LABEL 201
 #define DONE_LABEL 202
+#define PSGL_LABEL 255
 #define CB_BYTES (1024u * 1024u)
 #define BOUND_MS 2000u
 
@@ -48,6 +58,11 @@ static void check(int ok, const char *name)
 static unsigned timeouts(void)
 {
     return &psgl_teardown_wait_timeouts != 0 ? psgl_teardown_wait_timeouts : 0u;
+}
+
+static unsigned shutdowns(void)
+{
+    return &psgl_teardown_shutdowns != 0 ? psgl_teardown_shutdowns : 0u;
 }
 
 static uint64_t now_ms(void)
@@ -86,6 +101,16 @@ static void queue_gated(uint32_t value)
     cellGcmSetWriteBackEndLabel(gCellGcmCurrentContext, DONE_LABEL, value);
     cellGcmFlush(gCellGcmCurrentContext);
 }
+
+#if TEARDOWN_EXIT_MODE >= 1
+/* Polls for done == value without a GL context (after psglExit). */
+static int wait_done(uint32_t value)
+{
+    for (unsigned i = 0; i < 3000u && *done != value; i++)
+        sys_timer_usleep(1000);
+    return *done == value;
+}
+#endif
 
 static int mapped(void *address)
 {
@@ -206,6 +231,21 @@ static void free_unmap_failure_keeps_buffer(void)
           "no teardown timeout on the unmap-failure path");
 }
 
+#if TEARDOWN_EXIT_MODE >= 1
+static sys_ppu_thread_t hook_thread;
+static int hook_fired, hook_started;
+#endif
+#if TEARDOWN_EXIT_MODE >= 2
+static void inject(unsigned stage)
+{
+    if (stage != (TEARDOWN_EXIT_MODE == 2 ? 1u : 2u)) return;
+    psgl_teardown_test_hook = 0;
+    hook_fired = 1;
+    queue_gated(14u);
+    hook_started = start_release(&hook_thread, (BOUND_MS + 600u) * 1000u);
+}
+#endif
+
 int main(void)
 {
     PSGLinitOptions options = {0};
@@ -229,28 +269,9 @@ int main(void)
 
     /* The application's own Finish leaves reference value 1 behind. */
     cellGcmFinish(gCellGcmCurrentContext, 1u);
-    sys_ppu_thread_t thread;
     unsigned before = timeouts();
-#ifdef TEARDOWN_EXIT_TIMEOUT
-    queue_gated(14u);
-    if (!start_release(&thread, (BOUND_MS + 600u) * 1000u)) { puts("PSGL_TEARDOWN_FAIL releaser"); return 1; }
-    uint64_t t0 = now_ms();
-    psglExit();
-    uint64_t elapsed = now_ms() - t0;
-    unsigned counted = timeouts() - before;
-    uint32_t seen = *done;
-    join_release(thread);
-    uint64_t t1 = now_ms();
-    psglExit();
-    uint64_t elapsed2 = now_ms() - t1;
-    printf("PSGL_TEARDOWN_EXIT_TIMEOUT elapsed_ms=%llu done=%u timeouts=%u second_ms=%llu done_after=%u\n",
-           (unsigned long long)elapsed, (unsigned)seen, counted,
-           (unsigned long long)elapsed2, (unsigned)*done);
-    check(elapsed + 100u >= BOUND_MS, "psglExit waits up to its bound");
-    check(seen != 14u, "the gated work was still pending at the bound");
-    check(&psgl_teardown_wait_timeouts != 0 && counted >= 1u, "psglExit counts the teardown timeout");
-    check(*done == 14u, "a second psglExit completes after the GPU drains");
-#else
+#if TEARDOWN_EXIT_MODE == 0
+    sys_ppu_thread_t thread;
     queue_gated(13u);
     if (!start_release(&thread, 300000u)) { puts("PSGL_TEARDOWN_FAIL releaser"); return 1; }
     uint64_t t0 = now_ms();
@@ -263,6 +284,52 @@ int main(void)
     check(seen == 13u, "psglExit waits for queued work despite a stale reference value");
     check(&psgl_teardown_wait_timeouts != 0 && timeouts() == before,
           "psglExit does not time out when the GPU drains in time");
+#else
+    unsigned shut_before = shutdowns();
+#if TEARDOWN_EXIT_MODE == 1
+    queue_gated(14u);
+    hook_fired = 1;
+    hook_started = start_release(&hook_thread, (BOUND_MS + 600u) * 1000u);
+#else
+    int has_hook = &psgl_teardown_test_hook != 0;
+    check(has_hook, "the library has the teardown test hook");
+    if (has_hook) psgl_teardown_test_hook = inject;
+#endif
+    uint64_t t0 = now_ms();
+    psglExit();
+    uint64_t elapsed = now_ms() - t0;
+    unsigned counted = timeouts() - before;
+    unsigned shut_first = shutdowns() - shut_before;
+    uint32_t seen = *done;
+#if TEARDOWN_EXIT_MODE >= 2
+    check(hook_fired && hook_started, "the injection point was reached");
+    /* The device was released (mode 3) or is in teardown (mode 2). */
+    PSGLcontext *again = psglCreateContext();
+    if (again) psglMakeCurrent(again, device);
+    check(again && psglGetCurrentDevice() == NULL, "a torn-down device is not bound again");
+#endif
+    if (hook_started) join_release(hook_thread);
+    int drained = wait_done(14u);
+    uint32_t label_before = *(volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL);
+    unsigned before_retry = timeouts();
+    uint64_t t1 = now_ms();
+    psglExit();
+    uint64_t elapsed2 = now_ms() - t1;
+    uint32_t label_after = *(volatile uint32_t *)cellGcmGetLabelAddress(PSGL_LABEL);
+    unsigned shut_total = shutdowns() - shut_before;
+    printf("PSGL_TEARDOWN_EXIT_TIMEOUT mode=%d elapsed_ms=%llu done=%u timeouts=%u shutdowns_first=%u "
+           "second_ms=%llu label=%08x->%08x shutdowns=%u retry_timeouts=%u\n",
+           TEARDOWN_EXIT_MODE, (unsigned long long)elapsed, (unsigned)seen, counted, shut_first,
+           (unsigned long long)elapsed2, (unsigned)label_before, (unsigned)label_after,
+           shut_total, timeouts() - before_retry);
+    check(elapsed + 100u >= BOUND_MS, "psglExit waits up to its bound");
+    check(seen != 14u, "the gated work was still pending at the bound");
+    check(&psgl_teardown_wait_timeouts != 0 && counted == 1u, "psglExit counts one teardown timeout");
+    check(&psgl_teardown_shutdowns != 0 && shut_first == 0u, "the timed-out psglExit does not shut down");
+    check(drained, "the gated work completes after release");
+    check(&psgl_teardown_shutdowns != 0 && shut_total == 1u, "the retried psglExit shuts down");
+    check(label_after != label_before, "the retried psglExit waits on a fresh token");
+    check(timeouts() == before_retry, "the retried psglExit does not time out");
 #endif
     printf("PSGL_TEARDOWN_%s checks=%u failures=%u\n", failures ? "FAIL" : "OK", checks, failures);
     return failures ? 1 : 0;
