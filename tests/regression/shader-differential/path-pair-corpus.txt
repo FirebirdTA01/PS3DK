@@ -17,6 +17,7 @@ samples/gcm/hello-ppu-cellgcm-vp-loop/shaders/fpshader.fcg
 samples/gcm/hello-ppu-gcm-zcull-clip-border/shaders/fpshader.fcg
 samples/toolchain/hello-psgl-blend/shaders/fp_blue_alpha.fcg
 samples/toolchain/hello-psgl-blend/shaders/fp_red.fcg
+samples/toolchain/hello-psgl-cg-binary/shaders/tintfp.fcg
 samples/toolchain/hello-psgl-msaa/shaders/fpshader.fcg
 samples/toolchain/hello-psgl-shader-interface/shaders/fpshader.fcg
 samples/toolchain/hello-psgl-spudraw-triangle/shaders/fpshader.fcg
