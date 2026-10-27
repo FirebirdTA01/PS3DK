@@ -8,7 +8,7 @@
 #   - its own sources compiled with main renamed to ps3dk_sample_main;
 #   - hook_main.c (or .cpp for a C++ sample) as the new main, which starts
 #     the hook and then calls the sample's main;
-#   - the hook sources and libnet.
+#   - the hook sources, libnet and the sysmodule stubs.
 # The sample's sources are not changed.  Without the loader's marker in argv
 # the hook stays inert, so the same SELF also boots in RPCS3.
 if(NOT PS3DK_RUN_HOOK_DIR)
@@ -59,7 +59,8 @@ function(_ps3dk_inject_run_hook)
             "${hook}/common/prn_sha256.c"
             "${hook}/common/prn_hmac.c")
         target_include_directories(${t} PRIVATE "${hook}/hook")
-        target_link_libraries(${t} PRIVATE net)
+        # libnet loads its sysmodule through the sysmodule stubs.
+        target_link_libraries(${t} PRIVATE net sysmodule_stub)
         math(EXPR injected "${injected} + 1")
     endforeach()
     if(injected EQUAL 0)
