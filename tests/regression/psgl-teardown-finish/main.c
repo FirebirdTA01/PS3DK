@@ -157,9 +157,12 @@ static void free_timeout_keeps_buffer(void)
     join_release(thread);
     glFinish();
     check(*done == 12u, "gated work completes after release");
-    psglFreeCommandBuffer(buffer);
-    check(glGetError() == GL_NO_ERROR, "freeing again after the GPU drained succeeds");
-    check(!mapped(buffer), "freeing again unmaps the buffer");
+    /* Free again only if the first call kept the buffer; freeing a buffer a
+       library already released would be a double free. */
+    int kept = error == GL_INVALID_OPERATION && still_mapped;
+    if (kept) psglFreeCommandBuffer(buffer);
+    check(kept && glGetError() == GL_NO_ERROR, "freeing again after the GPU drained succeeds");
+    check(kept && !mapped(buffer), "freeing again unmaps the buffer");
 }
 
 int main(void)
