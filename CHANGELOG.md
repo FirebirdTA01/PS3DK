@@ -92,18 +92,21 @@ The version stamped into builds is generated from the most recent
 ### Fixed
 
 - **PSGL teardown waits for the GPU.** `psglExit`, `psglDestroyDevice` and
-  `psglFreeCommandBuffer` now wait for all queued GPU work with a fresh
-  completion token. Before, device teardown reused reference value 1, so a
-  second wait (or an application that had already used value 1) could return
-  while the GPU was still busy, and `psglFreeCommandBuffer` freed a buffer the
-  GPU might still be executing, without unmapping it. The wait is bounded
-  (2 s): if the GPU does not finish, teardown stops and keeps everything the
-  GPU may use. `psglFreeCommandBuffer` then keeps the buffer mapped and
-  allocated and records `GL_INVALID_OPERATION`; a later call retries. A
+  `psglFreeCommandBuffer` now wait for all queued GPU work by writing a fresh
+  token to the PSGL back-end label. Before, device teardown reused reference
+  value 1, so a second wait (or an application that had already used value 1)
+  could return while the GPU was still busy, and `psglFreeCommandBuffer` freed
+  a buffer the GPU might still be executing, without unmapping it. Polling for
+  the token is bounded (2 s); queueing it can still wait for FIFO space. If
+  the GPU does not finish, teardown stops, keeps everything the GPU may use,
+  and prints one line on stderr; a later call retries. A device whose last
+  wait timed out, after its display buffers were released, stays in teardown:
+  `psglMakeCurrent` refuses to bind it and the next `psglExit` resumes it.
+  `psglFreeCommandBuffer` keeps the buffer mapped and allocated, and records
+  `GL_INVALID_OPERATION`, when the wait times out or unmapping fails. A
   successful `psglFreeCommandBuffer` now also unmaps the buffer, and a pointer
   not returned by `psglAllocateCommandBuffer` is refused with
-  `GL_INVALID_VALUE` instead of being freed. A timed-out wait prints one line
-  on stderr.
+  `GL_INVALID_VALUE` instead of being freed.
 - **SPU draw samples check SPU teardown.** `hello-psgl-spudraw` and
   `hello-psgl-spudraw-triangle` now check the join cause and the results of
   destroying the SPU thread group and closing the SPU image, and fail if any
