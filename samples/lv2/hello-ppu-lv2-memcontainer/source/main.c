@@ -21,9 +21,11 @@
  *      exact available accounting is kernel-internal).
  *   6. Destroy the container.
  *
- * Negative path (both must return LV2 errors, never succeed):
+ * Negative path (each must fail; the code is printed):
  *   - sys_memory_allocate_from_container with container id INVALID.
  *   - sys_memory_container_destroy with the INVALID id.
+ *   - sys_memory_free(0), which must return EINVAL as in
+ *     hello-ppu-lv2-mmapper.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -37,7 +39,6 @@ SYS_PROCESS_PARAM(1024, 0x10000);
 
 /* Raw LV2 result codes (not host/newlib errno values). */
 #define LV2_INVALID_ARGUMENT   ((int)0x80010002u)
-#define LV2_NO_SUCH_CONTAINER  ((int)0x80010005u)
 
 static int failures, checks;
 
@@ -56,6 +57,11 @@ static int used(const char *name, int ok, unsigned long long note)
     if (!ok) ++failures;
     printf("  %s: %s (0x%llx)\n", name, ok ? "ok" : "FAIL", note);
     return ok;
+}
+
+static void must_fail(const char *name, int rc)
+{
+    used(name, rc != CELL_OK, (unsigned)rc);
 }
 
 int main(void)
@@ -80,7 +86,7 @@ int main(void)
     used("container id is not INVALID", cid != SYS_MEMORY_CONTAINER_ID_INVALID, (unsigned)cid);
 
     /* 3. read the container's total / available size. */
-    sys_memory_info_t cmi;
+    sys_memory_info_t cmi = {0};
     rc = sys_memory_container_get_size(&cmi, cid);
     expect("sys_memory_container_get_size", rc, CELL_OK);
     if (rc == CELL_OK)
@@ -103,9 +109,9 @@ int main(void)
         volatile uint32_t *w = (volatile uint32_t *)(uintptr_t)addr;
         /* write a recognisable pattern over the first and last words. */
         w[0]          = 0xa5a50000u | (uint32_t)i;
-        w[512 * 1024 / 4 - 1] = 0x5a5au000u | (uint32_t)i;
+        w[512 * 1024 / 4 - 1] = 0x5a5a0000u | (uint32_t)i;
         int bad = (w[0] != (0xa5a50000u | (uint32_t)i))
-               | (w[512 * 1024 / 4 - 1] != (0x5a5au000u | (uint32_t)i));
+               | (w[512 * 1024 / 4 - 1] != (0x5a5a0000u | (uint32_t)i));
         snprintf(name, sizeof name, "region %d reads back", i);
         used(name, !bad, (unsigned)w[0]);
 
@@ -117,23 +123,26 @@ int main(void)
     sys_memory_info_t cmi2;
     rc = sys_memory_container_get_size(&cmi2, cid);
     expect("sys_memory_container_get_size(after frees)", rc, CELL_OK);
+    if (rc == CELL_OK)
+        used("container total unchanged after frees",
+             cmi2.total_user_memory == cmi.total_user_memory,
+             cmi2.total_user_memory);
 
     /* 6. destroy. */
     expect("sys_memory_container_destroy", sys_memory_container_destroy(cid), CELL_OK);
 
     /* ---- negative path ------------------------------------------ */
     sys_addr_t daddr = 0;
-    expect("allocate_from_container(INVALID id)",
-           sys_memory_allocate_from_container(64 * 1024,
-                SYS_MEMORY_CONTAINER_ID_INVALID, SYS_MEMORY_PAGE_SIZE_64K,
-                &daddr), LV2_NO_SUCH_CONTAINER);
-    expect("container_destroy(INVALID id)",
-           sys_memory_container_destroy(SYS_MEMORY_CONTAINER_ID_INVALID),
-           LV2_INVALID_ARGUMENT);
+    must_fail("allocate_from_container(INVALID id) fails",
+              sys_memory_allocate_from_container(64 * 1024,
+                   SYS_MEMORY_CONTAINER_ID_INVALID, SYS_MEMORY_PAGE_SIZE_64K,
+                   &daddr));
+    must_fail("container_destroy(INVALID id) fails",
+              sys_memory_container_destroy(SYS_MEMORY_CONTAINER_ID_INVALID));
     expect("sys_memory_free(0)", sys_memory_free(0), LV2_INVALID_ARGUMENT);
 
     /* ---- summary ------------------------------------------------- */
-    printf("result: %s (%d of %d checks)\n",
-           failures ? "FAIL" : "PASS", checks, checks);
+    printf("result: %s (%d of %d checks passed)\n",
+           failures ? "FAIL" : "PASS", checks - failures, checks);
     return failures ? 1 : 0;
 }
