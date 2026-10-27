@@ -57,9 +57,12 @@ The version stamped into builds is generated from the most recent
   because breakpoints do nothing under the LLVM recompiler. It lists what
   works and the current limits: no detach, `stepi` not advancing, and
   function symbols without debug info resolving wrongly.
-  On one HEN console, a hardware probe (`tests/hardware/lv2dbg-probe`) found
-  the lv2dbg thread, register-context, exception-handler and watchpoint calls
-  refused with `0x8001042c`, so an in-app debugger cannot rely on them there.
+  On one HEN console, the hardware probe (`tests/hardware/lv2dbg-probe`)
+  found that the tested lv2dbg thread queries, register-context reads,
+  exception-handler initialization and DABR address read returned
+  `0x8001042c`. Handler registration and watchpoint mutation were skipped
+  after those failures; an in-app debugger cannot rely on these services as
+  tested there.
 
 - **PSGL sampler selection queries.** `glGetUniformiv` returns the named
   program's logical texture unit for scalar fragment `sampler2D` uniforms
