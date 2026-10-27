@@ -276,6 +276,10 @@ jobs:
       - name: Test SPU thread argument structure layout and compatibility
         run: bash tests/sdk/spu-thread-argument-test.sh
 
+      # Target compile guards; explicitly skip if no PPU toolchain is available.
+      - name: Test networking, pthread and LV2 header regression guards
+        run: python3 tests/sdk/header-regression-test.py
+
       # sys_lwmutex and sys_lwcond in <sys/synchronization.h> must declare
       # canonical attributes, structures, and function prototypes.
       - name: Test lightweight mutex and condition variable synchronization
