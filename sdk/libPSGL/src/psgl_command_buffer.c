@@ -6,6 +6,7 @@
 #include <PSGL/psgl.h>
 #include <stdint.h>
 #include <malloc.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "psgl_command_buffer.h"
@@ -19,6 +20,18 @@ static uint32_t *g_record_prev_end;
 static uint32_t *g_record_prev_current;
 static psglStaticCommandBufferCallBack g_out_of_space_cb;
 static psglStallCallBack g_stall_cb;
+
+/* Buffers from psglAllocateCommandBuffer: base address and mapped extent, so
+   psglFreeCommandBuffer unmaps exactly what was mapped. */
+#define PSGL_CB_MAX_BUFFERS 32
+static struct { void *base; uint32_t size; } g_cb_buffers[PSGL_CB_MAX_BUFFERS];
+
+static int psgl_cb_find(const void *base)
+{
+    for (int i = 0; i < PSGL_CB_MAX_BUFFERS; i++)
+        if (base && g_cb_buffers[i].base == base) return i;
+    return -1;
+}
 
 /* helpers */
 
@@ -130,6 +143,9 @@ PSGL_EXPORT void *psglAllocateCommandBuffer(GLuint sizeInBytes,
     if (!sizeInBytes) return NULL;
     rounded = (sizeInBytes + 0xFFFFFu) & ~0xFFFFFu;
     if (rounded < sizeInBytes) return NULL;
+    int slot;
+    for (slot = 0; slot < PSGL_CB_MAX_BUFFERS && g_cb_buffers[slot].base; slot++) {}
+    if (slot == PSGL_CB_MAX_BUFFERS) return NULL;
     mem = memalign(1024u * 1024u, (size_t)rounded);
     if (!mem) return NULL;
     memset(mem, 0, (size_t)rounded);
@@ -137,11 +153,42 @@ PSGL_EXPORT void *psglAllocateCommandBuffer(GLuint sizeInBytes,
         free(mem);
         return NULL;
     }
+    g_cb_buffers[slot].base = mem;
+    g_cb_buffers[slot].size = rounded;
     return mem;
 }
 
+/* The GPU may still execute or CALL into the buffer, so it is unmapped and
+   freed only after everything queued so far has completed. If the GPU does
+   not drain within the teardown bound, or the unmap fails, the buffer stays
+   mapped and allocated and GL_INVALID_OPERATION is recorded. */
 PSGL_EXPORT void psglFreeCommandBuffer(void *commandBuffer)
 {
+    int slot;
+    int32_t rc;
+    if (!commandBuffer) return;
+    slot = psgl_cb_find(commandBuffer);
+    if (slot < 0) {
+        fprintf(stderr, "PSGL: psglFreeCommandBuffer: %p was not allocated by "
+                "psglAllocateCommandBuffer\n", commandBuffer);
+        psgl_gl_error(GL_INVALID_VALUE);
+        return;
+    }
+    if (!psgl_context_wait_idle_bounded(gCellGcmCurrentContext,
+                                        "psglFreeCommandBuffer")) {
+        psgl_gl_error(GL_INVALID_OPERATION);
+        return;
+    }
+    rc = cellGcmUnmapEaIoAddress(g_cb_buffers[slot].base);
+    if (rc != 0) {
+        fprintf(stderr, "PSGL: psglFreeCommandBuffer: unmapping %p (%u bytes) "
+                "failed (%08x); keeping it\n", g_cb_buffers[slot].base,
+                (unsigned)g_cb_buffers[slot].size, (unsigned)rc);
+        psgl_gl_error(GL_INVALID_OPERATION);
+        return;
+    }
+    g_cb_buffers[slot].base = NULL;
+    g_cb_buffers[slot].size = 0u;
     free(commandBuffer);
 }
 
