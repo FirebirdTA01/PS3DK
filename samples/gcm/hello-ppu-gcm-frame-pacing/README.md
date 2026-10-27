@@ -25,9 +25,13 @@ unpaced phases have no application deadlines and report zero for that counter.
 
 These are application and callback measurements, **not hardware dropped-frame
 counters**. Callback scheduling, display refresh, RPCS3 frame limiting and host
-load affect the intervals. HSYNC may tear on a display. No fixed refresh rate,
+load affect the intervals. HSYNC allows tearing by design; this is not a sample
+failure. No fixed refresh rate,
 relative speedup or absence of tearing is asserted. Screenshots confirm the phase
 and moving-stripe scene; the summaries provide the timing observations.
+The stripe and bars use scissored clears, relying on RSX clear respecting the
+scissor rectangle. A hardware boot also needs visual confirmation of that scene
+to establish its appearance; callback summaries alone do not prove the pixels.
 
 Build with the SDK CMake toolchain, then run `hello-ppu-gcm-frame-pacing.fake.self`
 in RPCS3, or package/boot it on a PS3. `GCM_PACING_OK phases=3 frames=360` plus
