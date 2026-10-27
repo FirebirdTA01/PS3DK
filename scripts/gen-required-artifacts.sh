@@ -58,7 +58,7 @@ ppu_names="$(
         }
         inblk && /\)/ { inblk = 0 }
     ' |
-    tr '(),' '   ' | tr -s '[:space:]' '
+    tr '(),' '   ' | tr -d '"' | tr -s '[:space:]' '
 ' | sed 's/^-l//' |
     grep -Ev '^(target_link_libraries|PRIVATE|PUBLIC|INTERFACE)$' |
     grep -Ev '^\$|^$' | sort -u
