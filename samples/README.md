@@ -140,6 +140,7 @@ non-PSL1GHT-backed library pull one of the nidgen-built stub archives.
 | `hello-ppu-ap` | `cellSysutilApGetRequiredMemSize` + `Off` over `libsysutil_ap_stub.a`; FNIDs 0x9e67e0dd / 0x3343824c / 0x90c2bb19 | **green** + RPCS3 runtime-verified (returns expected 1 MiB container size) |
 | `hello-ppu-sysutil-queries` | License area, Remote Play status and volume, boot game info, HOME export path and paired Bluetooth devices through the new sysutil headers; loads and unloads each system module | **green** + RPCS3 runtime-verified |
 | `hello-ppu-l10n` | `cellSysmoduleLoadModule(CELL_SYSMODULE_L10N)` + `eucjp2sjis()` — 165-export libl10n scaling test for the nidgen-archive pipeline | **green** + RPCS3 runtime-verified (all four EUC-JP→SJIS conversions match) |
+| `hello-ppu-input-combined` | Pad + keyboard + mouse polled in one event loop; hot-plug detection on all three surfaces via `port_status` (pad), `now_connect` (keyboard), `connected` (mouse) diffing each frame; exits after 600 frames or on XMB Quit / pad START+SELECT | new — build + RPCS3 runtime pending |
 
 ## lv2/
 
@@ -159,6 +160,8 @@ The `hello-event-flag-spu` sample additionally pulls in our
 | `hello-ppu-pthread` | POSIX pthread shim over Lv-2 primitives: static mutex/cond/once initialisers, recursive mutexes, `pthread_mutex_trylock`, thread-specific data, create/join, self/equal, and condition signalling | **green** + RPCS3 runtime-verified |
 | `hello-sdata` | Developer SDATA files made by `make_sdata` at build time (current format, both older layouts, 1 KB blocks, compressed layout) are written to `/dev_hdd0/tmp` and read back through `cellFsSdataOpen` in odd-sized pieces; prints `HELLO_SDATA DONE passed=5 of 5` | **green** + RPCS3 runtime-verified |
 | `hello-raw-spu` | A raw SPU created, loaded and run through its problem-state registers with the `<sys/raw_spu.h>` names: `sys_raw_spu_create` / `image_load`, `SPU_In_MBox`, `SPU_NPC`, `SPU_RunCntl`, `SPU_Out_MBox` and `SPU_Status` via `sys_raw_spu_mmio_*`, the local store via `LS_BASE_ADDR`; prints `HELLO_RAW_SPU OK` | **green** + RPCS3 runtime-verified |
+| `hello-ppu-lv2-memcontainer` | LV2 memory-container heap as a `malloc` replacement: `sys_memory_get_user_memory_size` / `sys_memory_container_create` / `sys_memory_container_get_size` / `sys_memory_allocate_from_container` (x4) / `sys_memory_free` / `sys_memory_container_destroy`; negative path (invalid container id, zero free) returns the expected LV2 errors | new — build + RPCS3 runtime pending |
+| `hello-ppu-cellfs-async-stream` | cellFs async I/O + streaming read: `cellFsAioInit` / `cellFsAioRead` (64 KiB callback) / `cellFsAioCancel` (ECANCELED) / `cellFsAioFinish` on a 1 MiB scratch file, then `cellFsStReadInit` / `Start` / `GetStatus` / `StRead` (32 x 8 KiB blocks) / `Stop` / `Finish` on the same fd | new — build + RPCS3 runtime pending |
 
 ## audio/
 
