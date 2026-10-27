@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # CELL_CAMERA_MAKE_ERROR / CELL_MICIN_MAKE_ERROR (miccam-error-helper-test.c).
-# The header-shape checks always run.  With a PPU toolchain (--ps3dev PREFIX,
+# The header-shape checks always run: each helper must have exactly one
+# definition line, in its own header, and the check itself must reject a
+# same-header duplicate and a definition in the wrong header (controls run on
+# copies of the two headers).  With a PPU toolchain (--ps3dev PREFIX,
 # or PS3DEV / PS3DK in the environment) the test also compiles the probe as
 # gnu99, c11 and c++17 for ILP32 and LP64 under -Wall -Wextra -Werror, and
 # requires the negative control to fail on its assertion in both ABIs.
@@ -19,16 +22,55 @@ inc="$root/sdk/include"
 src="$root/tests/sdk/miccam-error-helper-test.c"
 status=0
 
-# Each helper is defined exactly once, in its own header.
-for pair in cell/camera.h:CELL_CAMERA_MAKE_ERROR cell/mic/error.h:CELL_MICIN_MAKE_ERROR; do
-    header=${pair%%:*} name=${pair#*:}
-    hits=$(grep -rlE "^#define[[:space:]]+$name\b" "$inc" || true)
-    if [[ $hits == "$inc/$header" ]]; then
-        echo "miccam-error-helper: ok   $name defined only in $header"
-    else
-        echo "miccam-error-helper: FAIL $name definitions: ${hits:-none}"; status=1
-    fi
+# Each helper has exactly one definition line under the include tree, and it
+# is in its own header.  Counts lines, not files; allows the whitespace C
+# permits before and after '#'.
+shape_check() {  # shape_check INCLUDE_DIR; prints one line per helper, returns 1 on failure
+    local dir=$1 rc=0 pair header name hits count
+    for pair in cell/camera.h:CELL_CAMERA_MAKE_ERROR cell/mic/error.h:CELL_MICIN_MAKE_ERROR; do
+        header=${pair%%:*} name=${pair#*:}
+        hits=$(grep -rnE "^[[:space:]]*#[[:space:]]*define[[:space:]]+$name([^A-Za-z0-9_]|$)" "$dir" || true)
+        count=$(printf '%s' "$hits" | grep -c . || true)
+        if [[ $count -eq 1 && ${hits%%:*} == "$dir/$header" ]]; then
+            echo "miccam-error-helper: ok   $name defined once, in $header"
+        elif [[ $count -eq 0 ]]; then
+            echo "miccam-error-helper: FAIL $name has no definition"; rc=1
+        elif [[ $count -gt 1 ]]; then
+            echo "miccam-error-helper: FAIL $name defined $count times:"
+            while IFS= read -r line; do echo "    ${line#"$dir"/}"; done <<<"$hits"; rc=1
+        else
+            echo "miccam-error-helper: FAIL $name defined outside $header: ${hits#$dir/}"; rc=1
+        fi
+    done
+    return $rc
+}
+shape_check "$inc" || status=1
+
+# The shape check must reject a second definition in the same header and a
+# definition in the wrong header; run it on copies of the two headers.
+fixture=$(mktemp -d)
+for case in clean duplicate wrong-header; do
+    mkdir -p "$fixture/$case/cell/mic"
+    cp "$inc/cell/camera.h" "$fixture/$case/cell/camera.h"
+    cp "$inc/cell/mic/error.h" "$fixture/$case/cell/mic/error.h"
 done
+printf '#  define CELL_CAMERA_MAKE_ERROR(status) 0\n' >> "$fixture/duplicate/cell/camera.h"
+grep -vE 'CELL_MICIN_MAKE_ERROR|CELL_ERROR_MAKE_ERROR\(CELL_ERROR_FACILITY_MICCAM, status\)$' \
+    "$inc/cell/mic/error.h" > "$fixture/wrong-header/cell/mic/error.h"
+printf '#define CELL_MICIN_MAKE_ERROR(status) CELL_ERROR_MAKE_ERROR(CELL_ERROR_FACILITY_MICCAM, status)\n' \
+    >> "$fixture/wrong-header/cell/camera.h"
+expect() {  # expect CASE WANT_RC DIAGNOSTIC
+    local out rc
+    out=$(shape_check "$fixture/$1") && rc=0 || rc=$?
+    if [[ $rc -eq $2 ]] && grep -qF -- "$3" <<<"$out"; then
+        echo "miccam-error-helper: ok   shape control $1"
+    else
+        echo "miccam-error-helper: FAIL shape control $1 (rc=$rc)"; printf '    %s\n' "$out"; status=1
+    fi
+}
+expect clean 0 'CELL_CAMERA_MAKE_ERROR defined once, in cell/camera.h'
+expect duplicate 1 'CELL_CAMERA_MAKE_ERROR defined 2 times'
+expect wrong-header 1 'CELL_MICIN_MAKE_ERROR defined outside cell/mic/error.h'
 
 cc=; cxx=
 if [[ -n $ps3dev ]]; then
