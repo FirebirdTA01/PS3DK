@@ -9,6 +9,8 @@ set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 command -v cmake > /dev/null || { echo "prx-identity-args: SKIP (no cmake)"; exit 0; }
 helper="$root/cmake/ps3-prx-identity.cmake"
+# A native Windows cmake needs a Windows path for include().
+command -v cygpath > /dev/null && helper=$(cygpath -m "$helper")
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 status=0; n=0
 check() {  # check <label> <expected ARGS> <cmake set() lines...>

@@ -101,7 +101,11 @@ for lang in c c++; do
             # weak default would otherwise run instead of the named function.
             for case in MISSING_START MISSING_STOP; do
                 if ! compile "$lang" "$std" "$abi" "$work/inc" "$work/miss.o" "-DCASE_$case" > "$work/n.log" 2>&1; then
-                    ok "$label CASE_$case refused at compile time"
+                    if grep -q "aliased to undefined symbol" "$work/n.log"; then
+                        ok "$label CASE_$case refused at compile time"
+                    else
+                        fail "$label CASE_$case failed for another reason: $(grep -m1 error "$work/n.log")"
+                    fi
                 elif [ -z "$crt" ]; then
                     fail "$label CASE_$case compiled (no PRX crt to try the link)"
                 elif link_prx "$abi" "$work/miss.o" "$work/miss.elf" > "$work/l.log" 2>&1; then

@@ -40,6 +40,7 @@ include_guard(GLOBAL)
 # than against the caller's CMakeLists dir.  CMAKE_CURRENT_LIST_DIR
 # inside a function body evaluates lazily at the call site.
 set(_PS3_SELF_CMAKE_DIR    "${CMAKE_CURRENT_LIST_DIR}")
+include("${_PS3_SELF_CMAKE_DIR}/ps3-prx-identity.cmake")
 get_filename_component(_PS3_TOOLCHAIN_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
 # -----------------------------------------------------------------------------
@@ -413,16 +414,7 @@ function(ps3_add_prx target)
     # module source (<sys/moduleexport.h>); prx-gen refuses a module that
     # declares neither a name here nor one in its source, and one whose
     # source and arguments disagree.
-    set(_psp_identity_args)
-    if(_PSP_NAME)
-        list(APPEND _psp_identity_args --name "${_PSP_NAME}")
-    endif()
-    if(_PSP_VERSION)
-        list(APPEND _psp_identity_args --version "${_PSP_VERSION}")
-    endif()
-    if(DEFINED _PSP_ATTRIBUTES AND NOT "${_PSP_ATTRIBUTES}" STREQUAL "")
-        list(APPEND _psp_identity_args --attributes "${_PSP_ATTRIBUTES}")
-    endif()
+    _ps3_prx_identity_args(_psp_identity_args _PSP)
     if(NOT PS3_TOOL_prx_gen)
         message(FATAL_ERROR
             "ps3_add_prx: required host tool 'prx-gen${_ps3_prx_exe}' not found.\n"

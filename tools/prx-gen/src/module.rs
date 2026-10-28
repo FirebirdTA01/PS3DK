@@ -6,7 +6,7 @@
 
 use anyhow::{bail, Context, Result};
 
-use crate::elf::{rd_u16, rd_u32, read_cstr, wr_u16, Elf};
+use crate::elf::{rd_u16, rd_u32, read_cstr, wr_u16, Elf, SHT_PROGBITS};
 
 /// Section the crt places the module info block in.
 pub const MODULE_INFO_SECTION: &str = ".rodata.sceModuleInfo";
@@ -111,10 +111,22 @@ pub struct Identity {
 /// Parse a module's `SYS_MODULE_INFO` record.  `Ok(None)` when the module
 /// does not declare one.
 pub fn read_identity_section(elf: &Elf) -> Result<Option<Identity>> {
-    let sh = match elf.section(IDENTITY_SECTION) {
+    let mut found = elf.shdrs.iter().filter(|s| s.name == IDENTITY_SECTION);
+    let sh = match found.next() {
         Some(sh) => sh,
         None => return Ok(None),
     };
+    if found.next().is_some() {
+        bail!("more than one {} section", IDENTITY_SECTION);
+    }
+    if sh.sh_type != SHT_PROGBITS || sh.is_alloc() {
+        bail!(
+            "{} must be a PROGBITS section that is not loaded (type {}, flags 0x{:x})",
+            IDENTITY_SECTION,
+            sh.sh_type,
+            sh.sh_flags
+        );
+    }
     if sh.sh_size as usize != IDENTITY_SIZE {
         bail!(
             "{} is {} bytes, expected {}: SYS_MODULE_INFO must appear exactly once per module",
@@ -123,10 +135,10 @@ pub fn read_identity_section(elf: &Elf) -> Result<Option<Identity>> {
             IDENTITY_SIZE
         );
     }
-    let off = sh.sh_offset as usize;
-    let rec = elf
-        .data
-        .get(off..off + IDENTITY_SIZE)
+    let off = usize::try_from(sh.sh_offset).ok();
+    let rec = off
+        .and_then(|o| o.checked_add(IDENTITY_SIZE).map(|e| (o, e)))
+        .and_then(|(o, e)| elf.data.get(o..e))
         .with_context(|| format!("{} runs past the end of the file", IDENTITY_SECTION))?;
     if &rec[0..4] != IDENTITY_MAGIC {
         bail!("{} does not start with the expected magic", IDENTITY_SECTION);

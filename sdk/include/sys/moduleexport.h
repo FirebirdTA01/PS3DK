@@ -23,14 +23,16 @@
  *       NAME/VERSION/ATTRIBUTES when the source declares them.  If both
  *       are given they must agree, or prx-gen refuses the module.  `name'
  *       is an identifier (it is stringized) of at most
- *       SYS_MODULE_NAME_LEN characters.  Use it once per module.
+ *       SYS_MODULE_NAME_LEN characters.  `attribute', `major' and `minor'
+ *       are emitted through the assembler, so they must be integer
+ *       literals or macros expanding to literal arithmetic (enumerators
+ *       and const variables are not accepted).  Use it once per module.
  *
  *   SYS_MODULE_START(fn) / SYS_MODULE_STOP(fn)
  *       Make `fn' the module's module_start / module_stop: the symbol is
- *       bound to `fn' at assembly time, overriding the crt's weak
- *       defaults, so the management export record points at `fn'.
- *       `fn' must be defined with external linkage in the same
- *       translation unit, take
+ *       an alias of `fn', overriding the crt's weak defaults, so the
+ *       management export record points at `fn'.  `fn' must be defined
+ *       in the same translation unit (the build fails otherwise), take
  *       (size_t args, void *argp) and return SYS_PRX_RESIDENT or
  *       SYS_PRX_NO_RESIDENT.  In C++ declare it extern "C".  Defining a
  *       function named module_start / module_stop directly (see
@@ -102,10 +104,13 @@
             ".popsection");                                                \
     extern int __ps3dk_module_info_declared
 
+/*
+ * A compiler-visible alias: GCC refuses it unless `fn' is defined in this
+ * translation unit, so a misspelled or missing target cannot fall back to
+ * the crt's weak default.
+ */
 #define __PS3DK_MODEXP_BIND(entry, fn)                                     \
-    __asm__(".globl " #entry "\n\t"                                        \
-            ".set " #entry ", " #fn);                                      \
-    extern int __ps3dk_##entry##_declared
+    int entry(size_t args, void *argp) __attribute__((alias(#fn)))
 
 #define SYS_MODULE_START(fn) __PS3DK_MODEXP_BIND(module_start, fn)
 #define SYS_MODULE_STOP(fn)  __PS3DK_MODEXP_BIND(module_stop, fn)

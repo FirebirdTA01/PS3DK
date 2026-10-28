@@ -717,6 +717,20 @@ fn identity_section_rejects_bad_records() {
     let mut junk = good.clone();
     junk[8 + 5] = b'z';
     assert!(module::read_identity_section(&elf_with_identity(&junk)).is_err(), "bytes after NUL");
+
+    let mut loaded = elf_with_identity(&good);
+    loaded.shdrs.last_mut().unwrap().sh_flags = SHF_ALLOC;
+    assert!(module::read_identity_section(&loaded).is_err(), "loaded section");
+    let mut nobits = elf_with_identity(&good);
+    nobits.shdrs.last_mut().unwrap().sh_type = 8;
+    assert!(module::read_identity_section(&nobits).is_err(), "not PROGBITS");
+    let mut dup = elf_with_identity(&good);
+    let again = dup.shdrs.last().unwrap().clone();
+    dup.shdrs.push(again);
+    assert!(module::read_identity_section(&dup).is_err(), "duplicate section");
+    let mut past_end = elf_with_identity(&good);
+    past_end.shdrs.last_mut().unwrap().sh_offset = u64::MAX - 4;
+    assert!(module::read_identity_section(&past_end).is_err(), "offset overflow");
 }
 
 #[test]
