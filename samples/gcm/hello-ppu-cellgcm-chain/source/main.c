@@ -25,8 +25,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <malloc.h>
 #include <unistd.h>
+
+#include "../../common/gcm_host_buffer.h"
 
 #include <ppu-lv2.h>
 #include <ppu-types.h>
@@ -417,26 +418,34 @@ int main(int argc, const char **argv)
 	(void)argc;
 	(void)argv;
 
-	void               *host_addr;
+	sys_addr_t         host_addr = 0;
 	CellGcmContextData *ctx;
 
 	printf("hello-ppu-cellgcm-chain: rsx-cg-compiler arithmetic-chain validation\n");
 
-	host_addr = memalign(1024 * 1024, HOST_SIZE);
-	if (cellGcmInit(CB_SIZE, HOST_SIZE, host_addr) != 0) {
+	/* Host buffer from LV2 (1 MiB pages), not the sbrk heap: see
+	 * gcm_host_buffer.h for why. Note this sample reuses bytes past the
+	 * 8 MiB mark of the buffer for a readback scratch region, so the
+	 * buffer must be >= 8 MiB + the CB size; the 16 MiB default covers it.
+	 */
+	if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+		printf("  gcm_host_buffer_alloc(%d MiB) failed\n", HOST_SIZE / (1024 * 1024));
+		return 1;
+	}
+	if (cellGcmInit(CB_SIZE, HOST_SIZE, (void *)(uintptr_t)host_addr) != 0) {
 		printf("  cellGcmInit failed\n");
-		free(host_addr);
+		gcm_host_buffer_free(host_addr);
 		return 1;
 	}
 	if (!init_display()) {
 		printf("  init_display failed\n");
-		free(host_addr);
+		gcm_host_buffer_free(host_addr);
 		return 1;
 	}
 	ctx = CELL_GCM_CURRENT;
 	printf("  RSX up at %ux%u\n", display_width, display_height);
 
-	g_readback = (u32 *)((char *)host_addr + (8 * 1024 * 1024));
+	g_readback = (u32 *)((char *)(uintptr_t)host_addr + (8 * 1024 * 1024));
 	cellGcmAddressToOffset(g_readback, &g_readback_offset);
 
 	ioPadInit(7);
@@ -578,7 +587,7 @@ int main(int argc, const char **argv)
 	if (g_exit_request) printf("  early exit on user request\n");
 
 	program_exit(ctx);
-	free(host_addr);
+	gcm_host_buffer_free(host_addr);
 	ioPadEnd();
 
 	printf("hello-ppu-cellgcm-chain: done\n");

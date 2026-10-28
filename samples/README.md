@@ -103,6 +103,28 @@ samples that load an embedded shader library, or shaders through
 RSX / cellGcm graphics.  Incremental: start at "clear the framebuffer",
 grow toward shaders and full-pipeline samples.
 
+### Host buffer
+
+The command-ring host buffer passed to `cellGcmInit()` / `rsxInit()`
+must be large enough to hold both the ring and the sample's scratch.
+Take it from LV2 with `gcm_host_buffer_alloc()` in
+[`gcm/common/gcm_host_buffer.h`](gcm/common/gcm_host_buffer.h):
+
+```
+#include "../../common/gcm_host_buffer.h"
+
+sys_addr_t host = 0;
+if (gcm_host_buffer_alloc(HOST_SIZE, &host) != 0) return 1;
+/* ... cellGcmInit(CB_SIZE, HOST_SIZE, (void *)(uintptr_t)host); ... */
+gcm_host_buffer_free(host);
+```
+
+Not `memalign(1 MiB, HOST_SIZE)`: the user sbrk arena is a fixed 64 MiB
+pool shared with everything else in the process, so a 32 MiB
+alloc-from-heap is enough to exhaust it (the EMP engine hit this).  The
+LV2 page allocator gives the sample its 16/32 MiB buffer without
+touching the arena.  See the header for the rationale.
+
 [`hello-ppu-gcm-frame-pacing`](gcm/hello-ppu-gcm-frame-pacing/README.md)
 demonstrates VSYNC, HSYNC and application-paced VSYNC with three finite
 120-frame phases. Its text summaries report flip callbacks and interval

@@ -30,6 +30,8 @@
 #include <malloc.h>
 #include <unistd.h>
 
+#include "../../common/gcm_host_buffer.h"
+
 #include <ppu-lv2.h>
 #include <ppu-types.h>
 #include <sys/process.h>
@@ -183,7 +185,7 @@ int main(int argc, const char **argv)
 	(void)argv;
 
 	gcmContextData *ctx;
-	void           *host_addr;
+	sys_addr_t      host_addr = 0;
 	rsxBuffer       buffers[MAX_BUFFERS];
 	int             cur = 0;
 	u16             width = 0, height = 0;
@@ -191,11 +193,17 @@ int main(int argc, const char **argv)
 
 	printf("hello-ppu-rsx-clear: GCM validation test\n");
 
-	host_addr = memalign(1024 * 1024, HOST_SIZE);
-	ctx       = init_screen(host_addr, HOST_SIZE, &width, &height);
+	/* Host buffer from LV2 (1 MiB pages), not the sbrk heap: see
+	 * gcm_host_buffer.h for why (a 32 MiB memalign burns half the
+	 * fixed 64 MiB user arena). */
+	if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+		printf("  gcm_host_buffer_alloc(%d MiB) failed\n", HOST_SIZE / (1024 * 1024));
+		return 1;
+	}
+	ctx       = init_screen((void *)(uintptr_t)host_addr, HOST_SIZE, &width, &height);
 	if (!ctx) {
 		printf("  init_screen failed\n");
-		free(host_addr);
+		gcm_host_buffer_free(host_addr);
 		return 1;
 	}
 	printf("  RSX up at %ux%u\n", width, height);
@@ -206,7 +214,7 @@ int main(int argc, const char **argv)
 		if (!make_buffer(&buffers[i], width, height, i)) {
 			printf("  make_buffer[%d] failed\n", i);
 			rsxFinish(ctx, 0);
-			free(host_addr);
+			gcm_host_buffer_free(host_addr);
 			return 1;
 		}
 	}
@@ -267,7 +275,7 @@ int main(int argc, const char **argv)
 	 * rsxFree is allocator-only. Process exit reclaims RSX memory; for
 	 * full structured teardown see the system sampleBasic pattern.
 	 */
-	free(host_addr);
+	gcm_host_buffer_free(host_addr);
 	ioPadEnd();
 
 	printf("hello-ppu-rsx-clear: done\n");
