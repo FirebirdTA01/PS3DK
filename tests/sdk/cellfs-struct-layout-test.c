@@ -4,9 +4,10 @@
  * data models: lv2 reads them by byte offset.
  *
  * The directory/status records are 4-byte packed; the stream ring-buffer
- * description and the AIO request keep natural alignment.  An AIO request
- * with a packed layout put `buf` where lv2 reads the high word of `size`,
- * and every cellFsAioRead completed with CELL_FS_EFAULT on hardware.
+ * description and the AIO request keep natural alignment.  The system reads
+ * an AIO request's `buf` at byte 16; a 4-byte-packed request keeps `buf` at
+ * byte 12 and the high word of `size` at byte 16, and on a PS3 both tested
+ * cellFsAioRead requests built that way completed with CELL_FS_EFAULT.
  *
  * Compiled (not run) by cellfs-struct-layout-test.sh; every assert is a
  * compile-time check.

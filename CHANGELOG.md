@@ -91,11 +91,12 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
-- **cellFs asynchronous requests reach the system intact.** `CellFsAio`
-  and `CellFsRingBuffer` in `<cell/fs/cell_fs_file_api.h>` were 4-byte
-  packed, so a `CellFsAio`'s `offset`, `buf`, `size` and `user_data` sat 4
-  to 8 bytes early. On a PS3 every `cellFsAioRead` request then completed
-  with `CELL_FS_EFAULT` and no data (`cellFsAioWrite` takes the same
+- **Correct cellFs AIO and stream-ring record layouts.** `CellFsAio` and
+  `CellFsRingBuffer` in `<cell/fs/cell_fs_file_api.h>` were 4-byte packed,
+  so a `CellFsAio`'s `offset`, `buf`, `size` and `user_data` sat 4 to 8
+  bytes early and the request structure's layout did not match the
+  system's; on a PS3, both tested `cellFsAioRead` requests failed with
+  `CELL_FS_EFAULT` and no data (`cellFsAioWrite` takes the same
   structure). Both now keep natural alignment: `CellFsAio` is 40 bytes
   with `offset` at 8, `buf` at 16, `size` at 24 and `user_data` at 32, and
   `CellFsRingBuffer` is 32 bytes. Under `-mlp64` the AIO buffer is a
