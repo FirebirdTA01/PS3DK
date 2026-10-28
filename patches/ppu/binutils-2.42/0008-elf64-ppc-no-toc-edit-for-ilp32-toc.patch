@@ -1,0 +1,68 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] elf64-ppc: leave a CellOS Lv-2 ILP32 .toc out of the TOC edit
+
+ppc64_elf_edit_toc drops TOC entries that only removed sections use, and
+rewrites addis/ld pairs of in-range addresses to addis/addi so their
+entries can go too.  It does all of this in 8-byte steps: the skip and
+used maps are indexed by offset >> 3, the section is shuffled down 8
+bytes at a time, and every reference is moved by the skip of the step it
+falls in.
+
+A CellOS Lv-2 ILP32 .toc mixes 4-byte address words (R_PPC64_ADDR32)
+with 8-byte entries (R_PPC64_ADDR64) that are only 4-byte aligned, and
+the compiler reads the address in an 8-byte entry with lwz from the
+entry's low word, at entry + 4.  An 8-byte entry at 4 mod 8 therefore
+spans two steps: its relocation marks the first step optimisable, while
+its lwz reference falls in the second and does not keep the first.
+When the first step's other word is a dead 4-byte entry (for example one
+used only by a function --gc-sections removed), ld drops that step and
+moves the lwz reference back 8 bytes, onto another entry.  The program
+then loads a wrong address: an engine drew with a texture descriptor
+read from an unrelated global, and the RSX faulted.
+
+Leave a .toc out of the edit unless it is a whole number of 8-byte
+ADDR64 entries at 8-byte offsets.  An LP64 or ELFv1/ELFv2 .toc is
+unchanged; an ILP32 .toc keeps its unused entries and its loads.
+
+--- a/bfd/elf64-ppc.c
++++ b/bfd/elf64-ppc.c
+@@ -9017,6 +9017,39 @@
+ 	  || discarded_section (toc))
+ 	continue;
+ 
++      /* The edit below works on 8-byte TOC entries: it marks, drops and
++	 renumbers the section in 8-byte steps (indexed by offset >> 3).
++	 A CellOS Lv-2 ILP32 .toc mixes 4-byte address words (ADDR32)
++	 with 8-byte ones that may start at a 4-byte offset, and code
++	 reads the low word of an 8-byte entry at entry + 4.  An 8-byte
++	 step there can cover parts of two entries, so dropping one could
++	 remove a live word or shift a reference onto the wrong entry.
++	 Leave any .toc that is not a whole number of aligned 8-byte
++	 ADDR64 entries as it is.  */
++      if ((toc->size & 7) != 0)
++	continue;
++      if (toc->reloc_count != 0)
++	{
++	  Elf_Internal_Rela *trel;
++	  bool whole_entries = true;
++
++	  trel = _bfd_elf_link_read_relocs (ibfd, toc, NULL, NULL,
++					    info->keep_memory);
++	  if (trel == NULL)
++	    return false;
++	  for (rel = trel; rel < trel + toc->reloc_count; ++rel)
++	    if ((rel->r_offset & 7) != 0
++		|| ELF64_R_TYPE (rel->r_info) != R_PPC64_ADDR64)
++	      {
++		whole_entries = false;
++		break;
++	      }
++	  if (elf_section_data (toc)->relocs != trel)
++	    free (trel);
++	  if (!whole_entries)
++	    continue;
++	}
++
+       toc_relocs = NULL;
+       local_syms = NULL;
+       symtab_hdr = &elf_symtab_hdr (ibfd);

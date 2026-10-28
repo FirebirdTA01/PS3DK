@@ -146,6 +146,19 @@ The version stamped into builds is generated from the most recent
   32-bit address, so the layout is the same in both data models. The
   directory and status records keep their 4-byte packing. Rebuild code
   that uses either structure.
+
+- **ILP32 programs linked with `--gc-sections` could load a wrong global
+  address.** The linker's TOC edit works on 8-byte entries, but an ILP32 TOC
+  mixes 4-byte address words with 8-byte entries that need not be 8-byte
+  aligned, and code reads such an entry's address from its low word. When a
+  4-byte entry used only by removed code shared 8 bytes with the start of
+  another entry, the linker dropped those bytes and moved the remaining
+  reference onto a different entry, so a load returned an unrelated
+  address (an engine drew with a texture descriptor taken from the wrong
+  global and the RSX faulted). The linker now leaves an ILP32 TOC as the
+  compiler wrote it; LP64 links are unchanged. Relink affected programs;
+  `-Wl,--no-toc-optimize` avoids the problem with earlier releases.
+
 - **PSGL teardown waits for the GPU.** `psglExit`, `psglDestroyDevice` and
   `psglFreeCommandBuffer` now wait for all queued GPU work by writing a fresh
   token to the PSGL back-end label. Before, device teardown reused reference
