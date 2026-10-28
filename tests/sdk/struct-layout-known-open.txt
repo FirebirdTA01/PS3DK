@@ -7,28 +7,10 @@
 # unique across the SDK, so the entries below match any header.
 #
 # NP records.
-*	*	SceNpClansClanInfo
-*	*	SceNpClansMemberEntry
-*	*	SceNpClansMessageData
-*	*	SceNpClansMessageEntry
 *	*	SceNpClansSearchableProfile
-*	*	SceNpClansUpdatableClanInfo
-*	*	SceNpClansUpdatableMemberInfo
-*	*	SceNpCommerce2CategoryInfo
-*	*	SceNpCommerce2ContentRatingDescriptor
-*	*	SceNpCommerce2ContentRatingInfo
-*	*	SceNpCommerce2GameProductInfo
-*	*	SceNpCommerce2GameSkuInfo
-*	*	SceNpCommerce2SessionInfo
 *	*	SceNpSignalingNetInfo
 *	*	SceNpTrophyFlagArray
-*	*	struct SceNpClansClanInfo
-*	*	struct SceNpClansMemberEntry
-*	*	struct SceNpClansMessageData
-*	*	struct SceNpClansMessageEntry
 *	*	struct SceNpClansSearchableProfile
-*	*	struct SceNpClansUpdatableClanInfo
-*	*	struct SceNpClansUpdatableMemberInfo
 *	*	struct SceNpSignalingNetInfo
 *	*	struct SceNpTrophyFlagArray
 # SAIL records.

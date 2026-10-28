@@ -373,44 +373,44 @@ ilp32	cell/np/basic.h	struct SceNpBasicPresenceDetails	struct	392	4	title@0 stat
 ilp32	cell/np/basic.h	struct SceNpBasicPresenceDetails2	struct	524	4	struct_size@0 state@4 title@8 status@136 comment@328 data@392 size@520
 ilp32	cell/np/clans.h	SceNpClansBlacklistEntry	struct	72	1	entry@0 registeredBy@36
 ilp32	cell/np/clans.h	SceNpClansClanBasicInfo	struct	84	4	clanId@0 numMembers@4 name@8 tag@73 reserved@82
-ilp32	cell/np/clans.h	SceNpClansClanInfo	struct	10808	8	dateCreated@0 info@8 updatable@92
+ilp32	cell/np/clans.h	SceNpClansClanInfo	struct	568	8	dateCreated@0 info@8 updatable@92
 ilp32	cell/np/clans.h	SceNpClansEntry	struct	96	4	info@0 role@84 status@88 allowMsg@92 reserved@93
-ilp32	cell/np/clans.h	SceNpClansMemberEntry	struct	1352	4	npid@0 role@36 status@40 updatable@44
+ilp32	cell/np/clans.h	SceNpClansMemberEntry	struct	332	4	npid@0 role@36 status@40 updatable@44
 ilp32	cell/np/clans.h	SceNpClansMessage	struct	1596	4	subject@0 body@55 options@1592
-ilp32	cell/np/clans.h	SceNpClansMessageData	struct	1028	4	binData1@0 binData1Size@1024
-ilp32	cell/np/clans.h	SceNpClansMessageEntry	struct	2680	8	postDate@0 mId@8 message@12 data@1608 npid@2636 postedBy@2672
+ilp32	cell/np/clans.h	SceNpClansMessageData	struct	8	4	binData1@0 binData1Size@4
+ilp32	cell/np/clans.h	SceNpClansMessageEntry	struct	1656	8	postDate@0 mId@8 message@12 data@1608 npid@1616 postedBy@1652
 ilp32	cell/np/clans.h	SceNpClansPagingRequest	struct	8	4	startPos@0 max@4
 ilp32	cell/np/clans.h	SceNpClansPagingResult	struct	8	4	count@0 total@4
 ilp32	cell/np/clans.h	SceNpClansSearchableName	struct	72	4	nameSearchOp@0 name@4 reserved@69
 ilp32	cell/np/clans.h	SceNpClansSearchableProfile	struct	252	4	attr@0 fields@208 numMembers@212 tagSearchOp@216 numMemberSearchOp@220 intAttr1SearchOp@224 intAttr2SearchOp@228 intAttr3SearchOp@232 binAttr1SearchOp@236 tag@240 reserved@249
-ilp32	cell/np/clans.h	SceNpClansUpdatableClanInfo	struct	10712	4	fields@0 description@4 attr@260 binData1@468 binData1Size@10708
-ilp32	cell/np/clans.h	SceNpClansUpdatableMemberInfo	struct	1308	4	fields@0 binData1@4 binData1Size@1028 binAttr1@1032 description@1048 allowMsg@1304 reserved@1305
+ilp32	cell/np/clans.h	SceNpClansUpdatableClanInfo	struct	476	4	fields@0 description@4 attr@260 binData1@468 binData1Size@472
+ilp32	cell/np/clans.h	SceNpClansUpdatableMemberInfo	struct	288	4	fields@0 binData1@4 binData1Size@8 binAttr1@12 description@28 allowMsg@284 reserved@285
 ilp32	cell/np/clans.h	struct SceNpClansBlacklistEntry	struct	72	1	entry@0 registeredBy@36
 ilp32	cell/np/clans.h	struct SceNpClansClanBasicInfo	struct	84	4	clanId@0 numMembers@4 name@8 tag@73 reserved@82
-ilp32	cell/np/clans.h	struct SceNpClansClanInfo	struct	10808	8	dateCreated@0 info@8 updatable@92
+ilp32	cell/np/clans.h	struct SceNpClansClanInfo	struct	568	8	dateCreated@0 info@8 updatable@92
 ilp32	cell/np/clans.h	struct SceNpClansEntry	struct	96	4	info@0 role@84 status@88 allowMsg@92 reserved@93
-ilp32	cell/np/clans.h	struct SceNpClansMemberEntry	struct	1352	4	npid@0 role@36 status@40 updatable@44
+ilp32	cell/np/clans.h	struct SceNpClansMemberEntry	struct	332	4	npid@0 role@36 status@40 updatable@44
 ilp32	cell/np/clans.h	struct SceNpClansMessage	struct	1596	4	subject@0 body@55 options@1592
-ilp32	cell/np/clans.h	struct SceNpClansMessageData	struct	1028	4	binData1@0 binData1Size@1024
-ilp32	cell/np/clans.h	struct SceNpClansMessageEntry	struct	2680	8	postDate@0 mId@8 message@12 data@1608 npid@2636 postedBy@2672
+ilp32	cell/np/clans.h	struct SceNpClansMessageData	struct	8	4	binData1@0 binData1Size@4
+ilp32	cell/np/clans.h	struct SceNpClansMessageEntry	struct	1656	8	postDate@0 mId@8 message@12 data@1608 npid@1616 postedBy@1652
 ilp32	cell/np/clans.h	struct SceNpClansPagingRequest	struct	8	4	startPos@0 max@4
 ilp32	cell/np/clans.h	struct SceNpClansPagingResult	struct	8	4	count@0 total@4
 ilp32	cell/np/clans.h	struct SceNpClansSearchableName	struct	72	4	nameSearchOp@0 name@4 reserved@69
 ilp32	cell/np/clans.h	struct SceNpClansSearchableProfile	struct	252	4	attr@0 fields@208 numMembers@212 tagSearchOp@216 numMemberSearchOp@220 intAttr1SearchOp@224 intAttr2SearchOp@228 intAttr3SearchOp@232 binAttr1SearchOp@236 tag@240 reserved@249
-ilp32	cell/np/clans.h	struct SceNpClansUpdatableClanInfo	struct	10712	4	fields@0 description@4 attr@260 binData1@468 binData1Size@10708
-ilp32	cell/np/clans.h	struct SceNpClansUpdatableMemberInfo	struct	1308	4	fields@0 binData1@4 binData1Size@1028 binAttr1@1032 description@1048 allowMsg@1304 reserved@1305
-ilp32	cell/np/commerce2.h	SceNpCommerce2CategoryInfo	struct	80	8	commonData@0 dataType@40 categoryId@44 padding1@45 releaseDate@56 categoryName@64 categoryDescription@65 imageUrl@66 spName@67 countOfSubCategory@68 countOfProduct@72
+ilp32	cell/np/clans.h	struct SceNpClansUpdatableClanInfo	struct	476	4	fields@0 description@4 attr@260 binData1@468 binData1Size@472
+ilp32	cell/np/clans.h	struct SceNpClansUpdatableMemberInfo	struct	288	4	fields@0 binData1@4 binData1Size@8 binAttr1@12 description@28 allowMsg@284 reserved@285
+ilp32	cell/np/commerce2.h	SceNpCommerce2CategoryInfo	struct	80	8	commonData@0 dataType@40 categoryId@44 releaseDate@48 categoryName@56 categoryDescription@60 imageUrl@64 spName@68 countOfSubCategory@72 countOfProduct@76
 ilp32	cell/np/commerce2.h	SceNpCommerce2ContentInfo	struct	44	4	commonData@0 contentType@40
-ilp32	cell/np/commerce2.h	SceNpCommerce2ContentRatingDescriptor	struct	48	4	commonData@0 descriptorType@40 imageUrl@44 contentRatingDescription@45 padding1@46
-ilp32	cell/np/commerce2.h	SceNpCommerce2ContentRatingInfo	struct	48	4	commonData@0 ratingSystemId@40 imageUrl@41 padding1@42 countOfContentRatingDescriptor@44
-ilp32	cell/np/commerce2.h	SceNpCommerce2GameProductInfo	struct	72	8	commonData@0 dataType@40 productId@44 padding1@45 countOfSku@48 padding2@52 releaseDate@56 productName@64 productShortDescription@65 imageUrl@66 spName@67 productLongDescription@68 legalDescription@69 padding3@70
-ilp32	cell/np/commerce2.h	SceNpCommerce2GameSkuInfo	struct	116	4	commonData@0 dataType@40 skuId@44 padding1@45 skuType@48 countUntilExpiration@52 timeUntilExpiration@56 purchasabilityFlag@60 annotation@64 downloadable@68 padding2@69 price@72 skuName@76 productId@77 contentLinkUrl@78 padding3@79 countOfRewardInfo@80 reserved@84
+ilp32	cell/np/commerce2.h	SceNpCommerce2ContentRatingDescriptor	struct	52	4	commonData@0 descriptorType@40 imageUrl@44 contentRatingDescription@48
+ilp32	cell/np/commerce2.h	SceNpCommerce2ContentRatingInfo	struct	52	4	commonData@0 ratingSystemId@40 imageUrl@44 countOfContentRatingDescriptor@48
+ilp32	cell/np/commerce2.h	SceNpCommerce2GameProductInfo	struct	128	8	commonData@0 dataType@40 productId@44 countOfSku@48 padding@52 releaseDate@56 productName@64 productShortDescription@68 imageUrl@72 spName@76 productLongDescription@80 legalDescription@84 productAttr@88 reserved@92
+ilp32	cell/np/commerce2.h	SceNpCommerce2GameSkuInfo	struct	176	8	commonData@0 dataType@40 skuId@44 skuType@48 countUntilExpiration@52 timeUntilExpiration@56 purchasabilityFlag@60 annotation@64 downloadable@68 padding@69 price@72 skuName@76 productId@80 contentLinkUrl@84 countOfRewardInfo@88 skuAttr@92 salesType@96 firstPlayExpiration@100 countOfApplicableRewardInfo@104 countOfGameSkuEntitlementInfo@108 playableDate@112 chargeDate@120 chargeModel@128 augmentedDescription@132 reserved@136
 ilp32	cell/np/commerce2.h	SceNpCommerce2GetCategoryContentsResult	struct	52	4	commonData@0 rangeOfContents@40
 ilp32	cell/np/commerce2.h	SceNpCommerce2GetProductInfoListResult	struct	44	4	commonData@0 countOfProductInfo@40
 ilp32	cell/np/commerce2.h	SceNpCommerce2GetProductInfoResult	struct	40	4	commonData@0
 ilp32	cell/np/commerce2.h	SceNpCommerce2ProductBrowseParam	struct	4	4	size@0
 ilp32	cell/np/commerce2.h	SceNpCommerce2ProductCodeParam	struct	32	4	size@0 inputMode@4 code1@8 padding1@13 code2@16 padding2@21 code3@24 padding3@29
-ilp32	cell/np/commerce2.h	SceNpCommerce2SessionInfo	struct	48	4	currencyCode@0 decimals@4 currencySymbol@8 symbolPosition@12 symbolWithSpace@16 padding1@17 thousandSeparator@20 decimalLetter@25 padding2@30 reserved@32
+ilp32	cell/np/commerce2.h	SceNpCommerce2SessionInfo	struct	44	4	currencyCode@0 decimals@4 currencySymbol@8 symbolPosition@12 symbolWithSpace@16 thousandSeparator@17 decimalLetter@22 padding@27 reserved@28
 ilp32	cell/np/commerce2.h	struct SceNpCommerce2ProductBrowseParam	struct	4	4	size@0
 ilp32	cell/np/commerce2.h	struct SceNpCommerce2ProductCodeParam	struct	32	4	size@0 inputMode@4 code1@8 padding1@13 code2@16 padding2@21 code3@24 padding3@29
 ilp32	cell/np/common.h	SceNpAboutMe	struct	64	1	data@0 term@63
@@ -1292,44 +1292,44 @@ lp64	cell/np/basic.h	struct SceNpBasicPresenceDetails	struct	392	4	title@0 statu
 lp64	cell/np/basic.h	struct SceNpBasicPresenceDetails2	struct	524	4	struct_size@0 state@4 title@8 status@136 comment@328 data@392 size@520
 lp64	cell/np/clans.h	SceNpClansBlacklistEntry	struct	72	1	entry@0 registeredBy@36
 lp64	cell/np/clans.h	SceNpClansClanBasicInfo	struct	84	4	clanId@0 numMembers@4 name@8 tag@73 reserved@82
-lp64	cell/np/clans.h	SceNpClansClanInfo	struct	10808	8	dateCreated@0 info@8 updatable@92
+lp64	cell/np/clans.h	SceNpClansClanInfo	struct	568	8	dateCreated@0 info@8 updatable@92
 lp64	cell/np/clans.h	SceNpClansEntry	struct	96	4	info@0 role@84 status@88 allowMsg@92 reserved@93
-lp64	cell/np/clans.h	SceNpClansMemberEntry	struct	1352	4	npid@0 role@36 status@40 updatable@44
+lp64	cell/np/clans.h	SceNpClansMemberEntry	struct	332	4	npid@0 role@36 status@40 updatable@44
 lp64	cell/np/clans.h	SceNpClansMessage	struct	1596	4	subject@0 body@55 options@1592
-lp64	cell/np/clans.h	SceNpClansMessageData	struct	1028	4	binData1@0 binData1Size@1024
-lp64	cell/np/clans.h	SceNpClansMessageEntry	struct	2680	8	postDate@0 mId@8 message@12 data@1608 npid@2636 postedBy@2672
+lp64	cell/np/clans.h	SceNpClansMessageData	struct	8	4	binData1@0 binData1Size@4
+lp64	cell/np/clans.h	SceNpClansMessageEntry	struct	1656	8	postDate@0 mId@8 message@12 data@1608 npid@1616 postedBy@1652
 lp64	cell/np/clans.h	SceNpClansPagingRequest	struct	8	4	startPos@0 max@4
 lp64	cell/np/clans.h	SceNpClansPagingResult	struct	8	4	count@0 total@4
 lp64	cell/np/clans.h	SceNpClansSearchableName	struct	72	4	nameSearchOp@0 name@4 reserved@69
 lp64	cell/np/clans.h	SceNpClansSearchableProfile	struct	252	4	attr@0 fields@208 numMembers@212 tagSearchOp@216 numMemberSearchOp@220 intAttr1SearchOp@224 intAttr2SearchOp@228 intAttr3SearchOp@232 binAttr1SearchOp@236 tag@240 reserved@249
-lp64	cell/np/clans.h	SceNpClansUpdatableClanInfo	struct	10712	4	fields@0 description@4 attr@260 binData1@468 binData1Size@10708
-lp64	cell/np/clans.h	SceNpClansUpdatableMemberInfo	struct	1308	4	fields@0 binData1@4 binData1Size@1028 binAttr1@1032 description@1048 allowMsg@1304 reserved@1305
+lp64	cell/np/clans.h	SceNpClansUpdatableClanInfo	struct	476	4	fields@0 description@4 attr@260 binData1@468 binData1Size@472
+lp64	cell/np/clans.h	SceNpClansUpdatableMemberInfo	struct	288	4	fields@0 binData1@4 binData1Size@8 binAttr1@12 description@28 allowMsg@284 reserved@285
 lp64	cell/np/clans.h	struct SceNpClansBlacklistEntry	struct	72	1	entry@0 registeredBy@36
 lp64	cell/np/clans.h	struct SceNpClansClanBasicInfo	struct	84	4	clanId@0 numMembers@4 name@8 tag@73 reserved@82
-lp64	cell/np/clans.h	struct SceNpClansClanInfo	struct	10808	8	dateCreated@0 info@8 updatable@92
+lp64	cell/np/clans.h	struct SceNpClansClanInfo	struct	568	8	dateCreated@0 info@8 updatable@92
 lp64	cell/np/clans.h	struct SceNpClansEntry	struct	96	4	info@0 role@84 status@88 allowMsg@92 reserved@93
-lp64	cell/np/clans.h	struct SceNpClansMemberEntry	struct	1352	4	npid@0 role@36 status@40 updatable@44
+lp64	cell/np/clans.h	struct SceNpClansMemberEntry	struct	332	4	npid@0 role@36 status@40 updatable@44
 lp64	cell/np/clans.h	struct SceNpClansMessage	struct	1596	4	subject@0 body@55 options@1592
-lp64	cell/np/clans.h	struct SceNpClansMessageData	struct	1028	4	binData1@0 binData1Size@1024
-lp64	cell/np/clans.h	struct SceNpClansMessageEntry	struct	2680	8	postDate@0 mId@8 message@12 data@1608 npid@2636 postedBy@2672
+lp64	cell/np/clans.h	struct SceNpClansMessageData	struct	8	4	binData1@0 binData1Size@4
+lp64	cell/np/clans.h	struct SceNpClansMessageEntry	struct	1656	8	postDate@0 mId@8 message@12 data@1608 npid@1616 postedBy@1652
 lp64	cell/np/clans.h	struct SceNpClansPagingRequest	struct	8	4	startPos@0 max@4
 lp64	cell/np/clans.h	struct SceNpClansPagingResult	struct	8	4	count@0 total@4
 lp64	cell/np/clans.h	struct SceNpClansSearchableName	struct	72	4	nameSearchOp@0 name@4 reserved@69
 lp64	cell/np/clans.h	struct SceNpClansSearchableProfile	struct	252	4	attr@0 fields@208 numMembers@212 tagSearchOp@216 numMemberSearchOp@220 intAttr1SearchOp@224 intAttr2SearchOp@228 intAttr3SearchOp@232 binAttr1SearchOp@236 tag@240 reserved@249
-lp64	cell/np/clans.h	struct SceNpClansUpdatableClanInfo	struct	10712	4	fields@0 description@4 attr@260 binData1@468 binData1Size@10708
-lp64	cell/np/clans.h	struct SceNpClansUpdatableMemberInfo	struct	1308	4	fields@0 binData1@4 binData1Size@1028 binAttr1@1032 description@1048 allowMsg@1304 reserved@1305
-lp64	cell/np/commerce2.h	SceNpCommerce2CategoryInfo	struct	80	8	commonData@0 dataType@40 categoryId@44 padding1@45 releaseDate@56 categoryName@64 categoryDescription@65 imageUrl@66 spName@67 countOfSubCategory@68 countOfProduct@72
+lp64	cell/np/clans.h	struct SceNpClansUpdatableClanInfo	struct	476	4	fields@0 description@4 attr@260 binData1@468 binData1Size@472
+lp64	cell/np/clans.h	struct SceNpClansUpdatableMemberInfo	struct	288	4	fields@0 binData1@4 binData1Size@8 binAttr1@12 description@28 allowMsg@284 reserved@285
+lp64	cell/np/commerce2.h	SceNpCommerce2CategoryInfo	struct	80	8	commonData@0 dataType@40 categoryId@44 releaseDate@48 categoryName@56 categoryDescription@60 imageUrl@64 spName@68 countOfSubCategory@72 countOfProduct@76
 lp64	cell/np/commerce2.h	SceNpCommerce2ContentInfo	struct	44	4	commonData@0 contentType@40
-lp64	cell/np/commerce2.h	SceNpCommerce2ContentRatingDescriptor	struct	48	4	commonData@0 descriptorType@40 imageUrl@44 contentRatingDescription@45 padding1@46
-lp64	cell/np/commerce2.h	SceNpCommerce2ContentRatingInfo	struct	48	4	commonData@0 ratingSystemId@40 imageUrl@41 padding1@42 countOfContentRatingDescriptor@44
-lp64	cell/np/commerce2.h	SceNpCommerce2GameProductInfo	struct	72	8	commonData@0 dataType@40 productId@44 padding1@45 countOfSku@48 padding2@52 releaseDate@56 productName@64 productShortDescription@65 imageUrl@66 spName@67 productLongDescription@68 legalDescription@69 padding3@70
-lp64	cell/np/commerce2.h	SceNpCommerce2GameSkuInfo	struct	116	4	commonData@0 dataType@40 skuId@44 padding1@45 skuType@48 countUntilExpiration@52 timeUntilExpiration@56 purchasabilityFlag@60 annotation@64 downloadable@68 padding2@69 price@72 skuName@76 productId@77 contentLinkUrl@78 padding3@79 countOfRewardInfo@80 reserved@84
+lp64	cell/np/commerce2.h	SceNpCommerce2ContentRatingDescriptor	struct	52	4	commonData@0 descriptorType@40 imageUrl@44 contentRatingDescription@48
+lp64	cell/np/commerce2.h	SceNpCommerce2ContentRatingInfo	struct	52	4	commonData@0 ratingSystemId@40 imageUrl@44 countOfContentRatingDescriptor@48
+lp64	cell/np/commerce2.h	SceNpCommerce2GameProductInfo	struct	128	8	commonData@0 dataType@40 productId@44 countOfSku@48 padding@52 releaseDate@56 productName@64 productShortDescription@68 imageUrl@72 spName@76 productLongDescription@80 legalDescription@84 productAttr@88 reserved@92
+lp64	cell/np/commerce2.h	SceNpCommerce2GameSkuInfo	struct	176	8	commonData@0 dataType@40 skuId@44 skuType@48 countUntilExpiration@52 timeUntilExpiration@56 purchasabilityFlag@60 annotation@64 downloadable@68 padding@69 price@72 skuName@76 productId@80 contentLinkUrl@84 countOfRewardInfo@88 skuAttr@92 salesType@96 firstPlayExpiration@100 countOfApplicableRewardInfo@104 countOfGameSkuEntitlementInfo@108 playableDate@112 chargeDate@120 chargeModel@128 augmentedDescription@132 reserved@136
 lp64	cell/np/commerce2.h	SceNpCommerce2GetCategoryContentsResult	struct	52	4	commonData@0 rangeOfContents@40
 lp64	cell/np/commerce2.h	SceNpCommerce2GetProductInfoListResult	struct	44	4	commonData@0 countOfProductInfo@40
 lp64	cell/np/commerce2.h	SceNpCommerce2GetProductInfoResult	struct	40	4	commonData@0
 lp64	cell/np/commerce2.h	SceNpCommerce2ProductBrowseParam	struct	4	4	size@0
 lp64	cell/np/commerce2.h	SceNpCommerce2ProductCodeParam	struct	32	4	size@0 inputMode@4 code1@8 padding1@13 code2@16 padding2@21 code3@24 padding3@29
-lp64	cell/np/commerce2.h	SceNpCommerce2SessionInfo	struct	48	4	currencyCode@0 decimals@4 currencySymbol@8 symbolPosition@12 symbolWithSpace@16 padding1@17 thousandSeparator@20 decimalLetter@25 padding2@30 reserved@32
+lp64	cell/np/commerce2.h	SceNpCommerce2SessionInfo	struct	44	4	currencyCode@0 decimals@4 currencySymbol@8 symbolPosition@12 symbolWithSpace@16 thousandSeparator@17 decimalLetter@22 padding@27 reserved@28
 lp64	cell/np/commerce2.h	struct SceNpCommerce2ProductBrowseParam	struct	4	4	size@0
 lp64	cell/np/commerce2.h	struct SceNpCommerce2ProductCodeParam	struct	32	4	size@0 inputMode@4 code1@8 padding1@13 code2@16 padding2@21 code3@24 padding3@29
 lp64	cell/np/common.h	SceNpAboutMe	struct	64	1	data@0 term@63
