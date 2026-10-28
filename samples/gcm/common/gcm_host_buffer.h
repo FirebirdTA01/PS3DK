@@ -1,45 +1,48 @@
 /*
  * samples/gcm/common/gcm_host_buffer.h
  *
- * Helper for the GCM/RSX host-buffer allocation.  Every GCM sample
- * (samples/gcm/*/ and the PSGL render samples under samples/toolchain/)
- * currently does:
+ * Helper for the GCM/RSX host-buffer allocation.  The GCM samples used
+ * to take the host buffer they pass to cellGcmInit() / rsxInit() from
+ * the malloc heap:
  *
- *     host = memalign(1024*1024, HOST_SIZE);   // 1 MiB-aligned, 1-32 MiB
+ *     host = memalign(1024*1024, HOST_SIZE);
  *     ... cellGcmInit(cmdsize, HOST_SIZE, host); ...
- *     free(host);
  *
- * The buffer comes out of the malloc heap and the PS3 userland
- * sbrk arena is a fixed 64 MiB pool shared with everything else.
- * A 32 MiB memalign() call is enough to burn the arena; the only
- * way an app can still allocate a framebuffer after the pattern was
- * to grab its own before the sample did.  (The EMP engine lost 32 MiB
- * this way.)
+ * The PS3 user sbrk arena is a fixed 64 MiB pool shared with everything
+ * else in the process, so a 16 or 32 MiB host buffer taken from it
+ * leaves an application copying the pattern that much less heap.  (The
+ * EMP engine lost 32 MiB this way.)
  *
- * Instead, take the buffer straight from LV2: sys_memory_allocate()
- * with SYS_MEMORY_PAGE_SIZE_1M pages backs the allocation without
- * consuming the sbrk arena.  The caller still passes the same size to
- * cellGcmInit() / rsxInit() so the ring still fits in the buffer.
+ * Instead, take the buffer straight from LV2: sys_memory_allocate() with
+ * SYS_MEMORY_PAGE_SIZE_1M pages backs it without touching the sbrk
+ * arena, and 1 MiB pages make the start 1 MiB aligned, as the RSX IO
+ * mapping requires.  The size must be a non-zero multiple of 1 MiB; the
+ * helper refuses anything else instead of letting the IO mapping fail
+ * later.
  *
  * Usage:
  *
  *     #include "../../common/gcm_host_buffer.h"
  *
  *     sys_addr_t host = 0;
- *     rc = gcm_host_buffer_alloc(HOST_SIZE, &host);
- *     if (rc != CELL_OK) { ... return rc; }
- *     ...  cellGcmInit(CB_SIZE, HOST_SIZE, host); ...
- *     gcm_host_buffer_free(host);
+ *     if (gcm_host_buffer_alloc(HOST_SIZE, &host) != CELL_OK) { ...fail... }
+ *     ... cellGcmInit(CB_SIZE, HOST_SIZE, (void *)(uintptr_t)host); ...
  *
- * Both functions are static inline so the header is header-only and
- * links with both ILP32 and LP64.  Error propagation is the caller's
- * responsibility (return-code check); the helper never returns a
- * spurious CELL_OK on failure.
+ * Lifetime: once cellGcmInit() / rsxInit() has been called with the
+ * buffer, the RSX maps it for IO and may keep fetching commands from it,
+ * so it must stay allocated for the rest of the program; process exit
+ * reclaims it.  Call gcm_host_buffer_free() only for a buffer GCM never
+ * saw, or after the RSX is idle and the buffer's IO mapping is gone.
+ *
+ * Both functions are static inline, so the header needs no library and
+ * builds for ILP32 and LP64 alike.
  */
 
-#ifndef __PS3TC_SAMPLES_GCM_COMMON_HOST_BUFFER_H__
-#define __PS3TC_SAMPLES_GCM_COMMON_HOST_BUFFER_H__
+#ifndef PS3TC_SAMPLES_GCM_COMMON_HOST_BUFFER_H
+#define PS3TC_SAMPLES_GCM_COMMON_HOST_BUFFER_H
 
+#include <stdint.h>
+#include <ppu-types.h>
 #include <sys/memory.h>
 #include <cell/error.h>
 
@@ -47,27 +50,36 @@
 extern "C" {
 #endif
 
+#define GCM_HOST_BUFFER_PAGE (1024u * 1024u)
+
+/* Returned for a NULL out-pointer or a size that is zero or not a
+ * multiple of 1 MiB: lv2's invalid-argument status, 0x80010002. */
+#define GCM_HOST_BUFFER_EINVAL CELL_ERROR_CAST(0x80010002)
+
 /*
- * Allocate `size` bytes as 1 MiB-backed LV2 memory pages.  `size` is
- * expected to be a multiple of the 1 MiB page size, which holds the
- * sizes every current GCM sample passes (1 MiB, 16 MiB, 32 MiB).
- * Returns CELL_OK and stores the buffer's start address in *addr on
- * success; returns the LV2 error code from sys_memory_allocate()
- * otherwise (and leaves *addr = 0).  Passing addr == 0 is a caller
- * programming error: it returns a non-OK error code (0x80000001) rather
- * than dereferencing the null pointer.
+ * Allocate `size` bytes of 1 MiB LV2 pages.  On success returns CELL_OK
+ * and stores the 1 MiB-aligned start address in *addr.  On failure
+ * returns GCM_HOST_BUFFER_EINVAL or the error from sys_memory_allocate()
+ * and leaves *addr (when addr is not NULL) at 0.
  */
 static inline int gcm_host_buffer_alloc(uint32_t size, sys_addr_t *addr)
 {
-    if (addr == 0)
-        return CELL_ERROR_MAKE_ERROR(CELL_ERROR_FACILITY_NULL, 1);
+    int rc;
+
+    if (addr == NULL)
+        return GCM_HOST_BUFFER_EINVAL;
     *addr = 0;
-    return sys_memory_allocate(size, SYS_MEMORY_PAGE_SIZE_1M, addr);
+    if (size == 0 || (size % GCM_HOST_BUFFER_PAGE) != 0)
+        return GCM_HOST_BUFFER_EINVAL;
+    rc = sys_memory_allocate(size, SYS_MEMORY_PAGE_SIZE_1M, addr);
+    if (rc != CELL_OK)
+        *addr = 0;
+    return rc;
 }
 
 /*
- * Free a buffer returned by gcm_host_buffer_alloc().  Passing 0 is a
- * no-op returning CELL_OK.
+ * Free a buffer from gcm_host_buffer_alloc() (see the lifetime note
+ * above).  Freeing 0 is a no-op returning CELL_OK.
  */
 static inline int gcm_host_buffer_free(sys_addr_t addr)
 {
@@ -80,4 +92,4 @@ static inline int gcm_host_buffer_free(sys_addr_t addr)
 }
 #endif
 
-#endif /* __PS3TC_SAMPLES_GCM_COMMON_HOST_BUFFER_H__ */
+#endif /* PS3TC_SAMPLES_GCM_COMMON_HOST_BUFFER_H */
