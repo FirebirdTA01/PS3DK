@@ -14,13 +14,7 @@
 *	*	struct SceNpSignalingNetInfo
 *	*	struct SceNpTrophyFlagArray
 # SAIL records (all resolved by PR77).
-# Codec stream and output parameters under LP64 (pointer members).
-lp64	*	CellGifDecSrc
-lp64	*	CellGifDecThreadInParam
-lp64	*	CellJpgEncOutputParam
-lp64	*	CellJpgEncStreamInfo
-lp64	*	CellPngEncOutputParam
-lp64	*	CellPngEncStreamInfo
+# Codec stream and output parameters under LP64 (all resolved).
 # libc-domain records shared with lv2 (thread attributes, time, sockets, stat).
 *	*	pthread_*attr_t
 *	*	struct timespec

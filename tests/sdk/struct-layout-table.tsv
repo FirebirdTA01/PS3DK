@@ -1021,8 +1021,8 @@ lp64	cell/codec/gifdec.h	CellGifDecInParam	struct	16	8	commandPtr@0 colorSpace@8
 lp64	cell/codec/gifdec.h	CellGifDecInfo	struct	32	4	SWidth@0 SHeight@4 SGlobalColorTableFlag@8 SColorResolution@12 SSortFlag@16 SSizeOfGlobalColorTable@20 SBackGroundColor@24 SPixelAspectRatio@28
 lp64	cell/codec/gifdec.h	CellGifDecOpnInfo	struct	4	4	initSpaceAllocated@0
 lp64	cell/codec/gifdec.h	CellGifDecOutParam	struct	32	8	outputWidthByte@0 outputWidth@8 outputHeight@12 outputComponents@16 outputBitDepth@20 outputColorSpace@24 useMemorySpace@28
-lp64	cell/codec/gifdec.h	CellGifDecSrc	struct	40	8	srcSelect@0 fileName@8 fileOffset@16 fileSize@24 streamPtr@28 streamSize@32 spuThreadEnable@36
-lp64	cell/codec/gifdec.h	CellGifDecThreadInParam	struct	40	8	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@24 cbCtrlFreeArg@32
+lp64	cell/codec/gifdec.h	CellGifDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
+lp64	cell/codec/gifdec.h	CellGifDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 lp64	cell/codec/gifdec.h	CellGifDecThreadOutParam	struct	4	4	gifCodecVersion@0
 lp64	cell/codec/jpgdec.h	CellJpgDecCbCtrlDisp	struct	16	8	cbCtrlDispFunc@0 cbCtrlDispArg@8
 lp64	cell/codec/jpgdec.h	CellJpgDecCbCtrlStrm	struct	16	8	cbCtrlStrmFunc@0 cbCtrlStrmArg@8
@@ -1061,12 +1061,12 @@ lp64	cell/codec/jpgdec.h	struct CellJpgDecThreadOutParam	struct	4	4	jpegCodecVer
 lp64	cell/codec/jpgenc.h	CellJpgEncAttr	struct	16	4	memSize@0 cmdQueueDepth@4 versionUpper@8 versionLower@12
 lp64	cell/codec/jpgenc.h	CellJpgEncConfig	struct	28	4	maxWidth@0 maxHeight@4 encodeColorSpace@8 encodeSamplingFormat@12 enableSpu@16 exParamList@20 exParamNum@24
 lp64	cell/codec/jpgenc.h	CellJpgEncEncodeParam	struct	28	4	enableSpu@0 restartInterval@4 dctMethod@8 compressionMode@12 quality@16 markerSegmentList@20 markerSegmentNum@24
-lp64	cell/codec/jpgenc.h	CellJpgEncOutputParam	struct	24	8	location@0 streamFileName@8 streamAddr@16 limitSize@20
+lp64	cell/codec/jpgenc.h	CellJpgEncOutputParam	struct	16	4	location@0 streamFileName@4 streamAddr@8 limitSize@12
 lp64	cell/codec/jpgenc.h	CellJpgEncPicture	struct	24	8	width@0 height@4 colorSpace@8 pictureAddr@12 userData@16
 lp64	cell/codec/jpgenc.h	CellJpgEncPicture2	struct	32	8	width@0 height@4 pitchWidth@8 colorSpace@12 pictureAddr@16 userData@24
 lp64	cell/codec/jpgenc.h	CellJpgEncResource	struct	16	4	memAddr@0 memSize@4 ppuThreadPriority@8 spuThreadPriority@12
 lp64	cell/codec/jpgenc.h	CellJpgEncResourceEx	struct	24	4	memAddr@0 memSize@4 ppuThreadPriority@8 spurs@12 priority@16
-lp64	cell/codec/jpgenc.h	CellJpgEncStreamInfo	struct	48	8	state@0 location@4 streamFileName@8 streamAddr@16 limitSize@20 streamSize@24 processedLine@28 quality@32 userData@40
+lp64	cell/codec/jpgenc.h	CellJpgEncStreamInfo	struct	40	8	state@0 location@4 streamFileName@8 streamAddr@12 limitSize@16 streamSize@20 processedLine@24 quality@28 userData@32
 lp64	cell/codec/libatrac3multi.h	CellAtracMultiBufferInfo	struct	16	4	pucWriteAddr@0 uiWritableByte@4 uiMinWriteByte@8 uiReadPosition@12
 lp64	cell/codec/libatrac3multi.h	CellAtracMultiExtRes	struct	12	4	pSpurs@0 priority@4
 lp64	cell/codec/libatrac3plus.h	CellAtracBufferInfo	struct	16	4	pucWriteAddr@0 uiWritableByte@4 uiMinWriteByte@8 uiReadPosition@12
@@ -1113,11 +1113,11 @@ lp64	cell/codec/pngdec.h	struct CellPngDecThreadOutParam	struct	4	4	pngCodecVers
 lp64	cell/codec/pngenc.h	CellPngEncAttr	struct	16	4	memSize@0 cmdQueueDepth@4 versionUpper@8 versionLower@12
 lp64	cell/codec/pngenc.h	CellPngEncConfig	struct	28	4	maxWidth@0 maxHeight@4 maxBitDepth@8 enableSpu@12 addMemSize@16 exParamList@20 exParamNum@24
 lp64	cell/codec/pngenc.h	CellPngEncEncodeParam	struct	24	4	enableSpu@0 encodeColorSpace@4 compressionLevel@8 filterType@12 ancillaryChunkList@16 ancillaryChunkNum@20
-lp64	cell/codec/pngenc.h	CellPngEncOutputParam	struct	24	8	location@0 streamFileName@8 streamAddr@16 limitSize@20
+lp64	cell/codec/pngenc.h	CellPngEncOutputParam	struct	16	4	location@0 streamFileName@4 streamAddr@8 limitSize@12
 lp64	cell/codec/pngenc.h	CellPngEncPicture	struct	40	8	width@0 height@4 pitchWidth@8 colorSpace@12 bitDepth@16 packedPixel@20 pictureAddr@24 userData@32
 lp64	cell/codec/pngenc.h	CellPngEncResource	struct	16	4	memAddr@0 memSize@4 ppuThreadPriority@8 spuThreadPriority@12
 lp64	cell/codec/pngenc.h	CellPngEncResourceEx	struct	24	4	memAddr@0 memSize@4 ppuThreadPriority@8 spurs@12 priority@16
-lp64	cell/codec/pngenc.h	CellPngEncStreamInfo	struct	40	8	state@0 location@4 streamFileName@8 streamAddr@16 limitSize@20 streamSize@24 processedLine@28 userData@32
+lp64	cell/codec/pngenc.h	CellPngEncStreamInfo	struct	40	8	state@0 location@4 streamFileName@8 streamAddr@12 limitSize@16 streamSize@20 processedLine@24 userData@32
 lp64	cell/codec/types.h	CellCodecEsFilterId	struct	16	4	filterIdMajor@0 filterIdMinor@4 supplementalInfo1@8 supplementalInfo2@12
 lp64	cell/codec/types.h	CellCodecTimeStamp	struct	8	4	upper@0 lower@4
 lp64	cell/codec/vdec.h	CellVdecAttr	struct	16	4	memSize@0 cmdDepth@4 decoderVerUpper@8 decoderVerLower@12
