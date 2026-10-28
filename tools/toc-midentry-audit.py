@@ -6,10 +6,11 @@ Scans relocatable PowerPC 64 (PS3) objects (.o, .obj) and archives (.a)
 for mid-entry TOC relocations where a code or data reference targets
 strictly inside an existing .toc entry rather than at its start.
 
-Fails closed on any producer failure, unparseable relocation line,
-truncated row, missing declared rows, unknown relocation width,
-unresolved TOC-access symbol, unsupported ELF class/type/machine,
-missing input path, or invalid tool override.
+Enforces positive coverage accounting: verifies that every input is a
+strictly compliant ET_REL object or AR archive of ET_REL objects, and
+verifies that readelf producer outputs match expected member, section,
+and relocation inventories with zero unparsed, truncated, or contradictory lines.
+Linker scripts and non-relocatable binaries are refused.
 """
 
 import argparse
@@ -99,101 +100,97 @@ def find_tool(tool_name, user_override=None, env_vars=None):
     return None
 
 
-def is_gnu_ld_script(header_bytes, file_path):
-    """Check if an ASCII file is a GNU ld linker script (e.g. INPUT(-lm) or INPUT ( -lsysutil_stub ))."""
-    if header_bytes.startswith(b'/*') or header_bytes.startswith(b'INPUT(') or header_bytes.startswith(b'GROUP('):
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                snippet = f.read(512)
-                if re.search(r'\b(INPUT|GROUP)\s*\(', snippet):
-                    return True
-        except Exception:
-            pass
-    return False
+def inspect_ar_container(file_path):
+    """
+    Inspect an AR container, validating format admission for every constituent member.
+    Returns: (member_inventory_list, error_message)
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            magic = f.read(8)
+            if magic != b'!<arch>\n':
+                return None, f"Not a valid AR archive: bad magic {magic!r}"
+            admitted_members = []
+            while True:
+                mhdr = f.read(60)
+                if not mhdr:
+                    break
+                if len(mhdr) < 60:
+                    return None, "Truncated AR member header"
+                mname = mhdr[:16].decode('ascii', errors='replace').strip()
+                try:
+                    msize = int(mhdr[48:58].decode('ascii', errors='replace').strip())
+                except ValueError:
+                    return None, f"Invalid AR member size field for '{mname}'"
+                mdata = f.read(msize)
+                if msize % 2 == 1:
+                    f.read(1)  # 2-byte alignment padding
+
+                # Skip standard AR symbol table entries
+                if mname in ('/', '//', '/SYM64/', '__.SYMDEF', '__.SYMDEF SORTED'):
+                    continue
+
+                # Constituent member must be a valid 64-bit Big-Endian PowerPC ET_REL object
+                if len(mdata) < 20:
+                    return None, f"Archive member '{mname}' truncated (< 20 bytes)"
+                if not mdata.startswith(b'\x7fELF'):
+                    return None, f"Archive member '{mname}' is not an ELF object"
+                if mdata[4] != 2:
+                    return None, f"Archive member '{mname}' unsupported ELF class: {mdata[4]} (expected ELFCLASS64=2)"
+                if mdata[5] != 2:
+                    return None, f"Archive member '{mname}' unsupported endian: {mdata[5]} (expected Big-Endian=2)"
+                e_type = int.from_bytes(mdata[16:18], 'big')
+                if e_type != 1:
+                    return None, f"Archive member '{mname}' unsupported ELF type: {e_type} (expected ET_REL=1 relocatable object)"
+                e_machine = int.from_bytes(mdata[18:20], 'big')
+                if e_machine != 21:
+                    return None, f"Archive member '{mname}' unsupported machine: {e_machine} (expected EM_PPC64=21)"
+                admitted_members.append(mname)
+            return admitted_members, None
+    except Exception as ex:
+        return None, f"Failed to read archive container: {ex}"
 
 
 def validate_file_format(file_path):
     """
     Validate binary magic to distinguish supported relocatable ELF and AR files.
     Fails closed on executables (ET_EXEC), shared objects, unsupported architectures,
-    and archives containing malformed or unsupported members.
-    Returns: ('ELF' | 'AR' | 'SCRIPT' | None, error_message)
+    linker scripts, and archives containing malformed or unsupported members.
+    Returns: ('ELF' | 'AR' | None, member_inventory_list, error_message)
     """
     try:
         with open(file_path, 'rb') as f:
             header = f.read(64)
     except Exception as ex:
-        return None, f"Cannot open file: {ex}"
+        return None, None, f"Cannot open file: {ex}"
 
     if len(header) < 8:
-        return None, "File too short (< 8 bytes)"
-
-    if is_gnu_ld_script(header, file_path):
-        return 'SCRIPT', None
+        return None, None, "File too short (< 8 bytes)"
 
     if header.startswith(b'!<arch>\n'):
-        # Validate AR container and each member's ELF format
-        try:
-            with open(file_path, 'rb') as f:
-                f.seek(8)
-                member_count = 0
-                while True:
-                    mhdr = f.read(60)
-                    if not mhdr:
-                        break
-                    if len(mhdr) < 60:
-                        return None, "Truncated AR member header"
-                    mname = mhdr[:16].decode('ascii', errors='replace').strip()
-                    try:
-                        msize = int(mhdr[48:58].decode('ascii', errors='replace').strip())
-                    except ValueError:
-                        return None, f"Invalid AR member size field for '{mname}'"
-                    mdata = f.read(msize)
-                    if msize % 2 == 1:
-                        f.read(1)  # 2-byte alignment padding
-
-                    # Skip standard AR symbol tables
-                    if mname in ('/', '//', '/SYM64/', '__.SYMDEF', '__.SYMDEF SORTED'):
-                        continue
-
-                    # Validate constituent ELF member
-                    if len(mdata) < 20:
-                        return None, f"Archive member '{mname}' truncated (< 20 bytes)"
-                    if not mdata.startswith(b'\x7fELF'):
-                        return None, f"Archive member '{mname}' is not an ELF object"
-                    if mdata[4] != 2:
-                        return None, f"Archive member '{mname}' unsupported ELF class: {mdata[4]} (expected ELFCLASS64=2)"
-                    if mdata[5] != 2:
-                        return None, f"Archive member '{mname}' unsupported endian: {mdata[5]} (expected Big-Endian=2)"
-                    e_type = int.from_bytes(mdata[16:18], 'big')
-                    if e_type != 1:
-                        return None, f"Archive member '{mname}' unsupported ELF type: {e_type} (expected ET_REL=1 relocatable object)"
-                    e_machine = int.from_bytes(mdata[18:20], 'big')
-                    if e_machine != 21:
-                        return None, f"Archive member '{mname}' unsupported machine: {e_machine} (expected EM_PPC64=21)"
-                    member_count += 1
-        except Exception as ex:
-            return None, f"Failed to validate archive members: {ex}"
-        return 'AR', None
+        admitted, err = inspect_ar_container(file_path)
+        if err:
+            return None, None, err
+        return 'AR', admitted, None
 
     if header.startswith(b'\x7fELF'):
         if len(header) < 20:
-            return None, "Truncated ELF header (< 20 bytes)"
+            return None, None, "Truncated ELF header (< 20 bytes)"
         ei_class = header[4]
         ei_data = header[5]
         if ei_class != 2:  # ELFCLASS64
-            return None, f"Unsupported ELF class: {ei_class} (expected ELFCLASS64=2)"
+            return None, None, f"Unsupported ELF class: {ei_class} (expected ELFCLASS64=2)"
         if ei_data != 2:  # ELFDATA2MSB (Big Endian)
-            return None, f"Unsupported ELF data encoding: {ei_data} (expected Big-Endian=2)"
+            return None, None, f"Unsupported ELF data encoding: {ei_data} (expected Big-Endian=2)"
         e_type = int.from_bytes(header[16:18], 'big')
         if e_type != 1:  # ET_REL
-            return None, f"Unsupported ELF type: {e_type} (expected ET_REL=1 relocatable object; executables and shared objects are refused)"
+            return None, None, f"Unsupported ELF type: {e_type} (expected ET_REL=1 relocatable object; executables and shared objects are refused)"
         e_machine = int.from_bytes(header[18:20], 'big')
         if e_machine != 21:  # EM_PPC64
-            return None, f"Unsupported ELF machine: {e_machine} (expected EM_PPC64=21)"
-        return 'ELF', None
+            return None, None, f"Unsupported ELF machine: {e_machine} (expected EM_PPC64=21)"
+        return 'ELF', [os.path.basename(file_path)], None
 
-    return None, "Not a valid ELF object or AR archive (magic unrecognized)"
+    return None, None, "Unsupported file format (only ET_REL relocatable objects and AR archives are supported; linker scripts and non-ELF files are refused)"
 
 
 def split_readelf_by_member(stdout_text, default_name):
@@ -225,65 +222,125 @@ def split_readelf_by_member(stdout_text, default_name):
     return members
 
 
-def parse_member_toc_sec_num(s_text):
-    """Find section number of .toc section from readelf -S output."""
+def parse_sections_pass(s_text, member_name):
+    """
+    Parse section headers pass (readelf -S).
+    Validates declared count and contiguity of section indices.
+    Returns: (sections_by_nr, toc_sec_num, rela_sections_dict, errors_list)
+    """
+    m = re.search(r'There are (\d+) section headers, starting at offset 0x[0-9a-fA-F]+:', s_text)
+    if not m:
+        return None, None, None, [f"{member_name}: Malformed or unrecognized readelf -S output (missing section headers header)"]
+    declared_count = int(m.group(1))
+
+    sections_by_nr = {}
     for line in s_text.splitlines():
-        m = re.match(r'\s*\[\s*(\d+)\]\s+(\S+)', line)
-        if m and m.group(2) == '.toc':
-            return m.group(1)
-    return None
+        sm = re.match(r'^\s*\[\s*(\d+)\]\s+(\S+)\s+(\S+)', line)
+        if sm:
+            nr = int(sm.group(1))
+            name = sm.group(2)
+            stype = sm.group(3)
+            sections_by_nr[nr] = {'name': name, 'type': stype}
+
+    if len(sections_by_nr) != declared_count:
+        return None, None, None, [
+            f"{member_name}: Incomplete section headers table: declared {declared_count}, parsed {len(sections_by_nr)}"
+        ]
+
+    for i in range(declared_count):
+        if i not in sections_by_nr:
+            return None, None, None, [
+                f"{member_name}: Missing section header index [{i}] (declared {declared_count} sections)"
+            ]
+
+    toc_sec_num = None
+    rela_sections = {}
+    for nr, sec in sections_by_nr.items():
+        if sec['name'] == '.toc':
+            toc_sec_num = str(nr)
+        elif sec['type'] == 'RELA':
+            rela_sections[sec['name']] = nr
+
+    if '.rela.toc' in rela_sections and toc_sec_num is None:
+        return None, None, None, [
+            f"{member_name}: .rela.toc is present but required .toc section record is missing from section headers"
+        ]
+
+    return sections_by_nr, toc_sec_num, rela_sections, []
 
 
-def parse_member_symbols(s_text):
-    """Extract symbol dictionary mapping symbol index (int) to info (val, ndx, name, type)."""
+def parse_symbols_pass(sym_text, member_name, sections_by_nr):
+    """
+    Parse symbol table pass (readelf -s).
+    Validates declared count and asserts every symbol references a valid section.
+    Returns: (symbols_by_idx_dict, errors_list)
+    """
+    m = re.search(r"Symbol table '\.symtab' contains (\d+) entries:", sym_text)
+    if not m:
+        return None, [f"{member_name}: Malformed or unrecognized readelf -s output (missing symtab header)"]
+    declared_count = int(m.group(1))
+
     symbols_by_idx = {}
-    for line in s_text.splitlines():
+    for line in sym_text.splitlines():
         parts = line.split()
-        if len(parts) >= 8 and parts[0].endswith(':'):
+        if len(parts) >= 7 and parts[0].endswith(':'):
             try:
                 sidx = int(parts[0][:-1])
                 sval = int(parts[1], 16)
                 stype = parts[3]
                 ndx = parts[6]
-                name = parts[7]
-                symbols_by_idx[sidx] = {
-                    'val': sval,
-                    'ndx': ndx,
-                    'name': name,
-                    'type': stype,
-                }
+                name = parts[7] if len(parts) >= 8 else ""
+                if ndx.isdigit() and int(ndx) not in sections_by_nr:
+                    return None, [f"{member_name}: Symbol '{name}' references non-existent section index {ndx}"]
+                symbols_by_idx[sidx] = {'val': sval, 'ndx': ndx, 'name': name, 'type': stype}
             except ValueError:
                 continue
-    return symbols_by_idx
+
+    if len(symbols_by_idx) != declared_count:
+        return None, [f"{member_name}: Symbol table declared {declared_count} entries, parsed {len(symbols_by_idx)}"]
+
+    return symbols_by_idx, []
 
 
-def parse_member_relocations(r_text, member_name):
+def parse_relocations_pass(r_text, member_name, rela_sections):
     """
-    Parse relocations for a single member from readelf -r output.
-    Validates declared row counts, required fields, and supported relocation types.
-    Returns: (sections_dict, errors_list)
+    Parse relocations pass (readelf -r).
+    Enforces positive coverage against rela_sections inventory from readelf -S.
+    Validates declared entry counts and required fields (including addends).
+    Returns: (parsed_relocs_dict, errors_list)
     """
-    sections = {}
-    errors = []
     lines = r_text.splitlines()
 
-    # Legitimate empty relocations case
+    # Case 1: no relocations declared in section headers
+    if len(rela_sections) == 0:
+        non_empty = [l.strip() for l in lines if l.strip()]
+        if len(non_empty) == 1 and "There are no relocations in this file." in non_empty[0]:
+            return {}, []
+        return None, [
+            f"{member_name}: Unexpected relocation output for object with no declared RELA sections: {r_text[:100]}"
+        ]
+
+    # Case 2: RELA sections declared in section headers
     if any("There are no relocations in this file." in l for l in lines):
-        return {}, []
+        return None, [
+            f"{member_name}: Contradictory output: section headers declared {len(rela_sections)} RELA sections, but relocations output contains 'There are no relocations in this file.'"
+        ]
 
     curr_sec = None
-    declared_count = None
+    declared_in_sec = None
     parsed_in_sec = 0
+    parsed_relocs = {}
+    errors = []
 
     def finalize_sec():
-        nonlocal curr_sec, declared_count, parsed_in_sec
-        if curr_sec is not None and declared_count is not None:
-            if parsed_in_sec != declared_count:
+        nonlocal curr_sec, declared_in_sec, parsed_in_sec
+        if curr_sec is not None and declared_in_sec is not None:
+            if parsed_in_sec != declared_in_sec:
                 errors.append(
-                    f"{member_name}: Relocation section '{curr_sec}' declared {declared_count} entries, but {parsed_in_sec} were parsed"
+                    f"{member_name}: Relocation section '{curr_sec}' declared {declared_in_sec} entries, but {parsed_in_sec} were parsed"
                 )
         curr_sec = None
-        declared_count = None
+        declared_in_sec = None
         parsed_in_sec = 0
 
     for line_num, raw_line in enumerate(lines, 1):
@@ -296,8 +353,10 @@ def parse_member_relocations(r_text, member_name):
             m = re.search(r"Relocation section '([^']+)' at offset 0x[0-9a-fA-F]+ contains (\d+) entr", line)
             if m:
                 curr_sec = m.group(1)
-                declared_count = int(m.group(2))
-                sections[curr_sec] = []
+                declared_in_sec = int(m.group(2))
+                if curr_sec not in rela_sections:
+                    errors.append(f"{member_name}: Relocation section '{curr_sec}' was not declared in section headers")
+                parsed_relocs[curr_sec] = []
                 parsed_in_sec = 0
             else:
                 errors.append(f"{member_name}: Line {line_num}: Malformed relocation section header: {line}")
@@ -309,35 +368,56 @@ def parse_member_relocations(r_text, member_name):
         if curr_sec:
             parts = line.split()
             if len(parts) < 3:
-                errors.append(f"{member_name}: Line {line_num}: Unexpected short line in section '{curr_sec}': {line}")
+                errors.append(
+                    f"{member_name}: Line {line_num}: Truncated relocation entry: {line}"
+                )
                 continue
 
             try:
                 offset = int(parts[0], 16)
                 info = int(parts[1], 16)
                 rtype = parts[2]
-            except ValueError:
-                errors.append(f"{member_name}: Line {line_num}: Failed to parse offset/info: {line}")
+                sym_idx = info >> 32
+            except ValueError as ex:
+                errors.append(f"{member_name}: Line {line_num}: Failed to parse relocation header fields ({ex}): {line}")
                 continue
 
-            sym = ""
-            addend = 0
+            if sym_idx != 0:
+                # Every RELA row with a symbol must have at least 7 fields (including explicit + <addend> or - <addend>)
+                if len(parts) < 7 or parts[5] not in ('+', '-'):
+                    errors.append(
+                        f"{member_name}: Line {line_num}: Truncated or malformed RELA relocation entry (missing symbol/addend): {line}"
+                    )
+                    continue
 
-            # RELA sections require symbol and addend fields
-            if len(parts) >= 5:
                 sym = parts[4]
-                if len(parts) >= 7 and parts[5] in ('+', '-'):
+                try:
+                    addend_val = int(parts[6], 16)
+                    addend = addend_val if parts[5] == '+' else -addend_val
+                except ValueError as ex:
+                    errors.append(f"{member_name}: Line {line_num}: Failed to parse addend ({ex}): {line}")
+                    continue
+            else:
+                # Null symbol relocation (e.g. R_PPC64_TOC with sym=0)
+                sym = ""
+                if len(parts) == 4:
                     try:
-                        addend_val = int(parts[6], 16)
-                        addend = addend_val if parts[5] == '+' else -addend_val
-                    except ValueError:
-                        errors.append(f"{member_name}: Line {line_num}: Failed to parse addend: {line}")
+                        addend = int(parts[3], 16)
+                    except ValueError as ex:
+                        errors.append(f"{member_name}: Line {line_num}: Failed to parse null-sym addend ({ex}): {line}")
                         continue
-            elif rtype in SUPPORTED_TOC_ACCESS_RELOCS or curr_sec == '.rela.toc':
-                errors.append(f"{member_name}: Line {line_num}: Truncated relocation entry missing symbol/addend: {line}")
-                continue
+                elif len(parts) == 5 and parts[3] in ('+', '-'):
+                    try:
+                        addend_val = int(parts[4], 16)
+                        addend = addend_val if parts[3] == '+' else -addend_val
+                    except ValueError as ex:
+                        errors.append(f"{member_name}: Line {line_num}: Failed to parse null-sym signed addend ({ex}): {line}")
+                        continue
+                else:
+                    errors.append(f"{member_name}: Line {line_num}: Malformed null-sym RELA relocation entry: {line}")
+                    continue
 
-            sections[curr_sec].append({
+            parsed_relocs[curr_sec].append({
                 'offset': offset,
                 'info': info,
                 'rtype': rtype,
@@ -348,13 +428,21 @@ def parse_member_relocations(r_text, member_name):
             parsed_in_sec += 1
 
     finalize_sec()
-    return sections, errors
+
+    # Verify that every declared RELA section from readelf -S was parsed in readelf -r
+    for sec_name in rela_sections:
+        if sec_name not in parsed_relocs:
+            errors.append(f"{member_name}: Missing relocation section '{sec_name}' declared in section headers")
+
+    if errors:
+        return None, errors
+    return parsed_relocs, []
 
 
 def audit_member(member_name, secs, symbols_by_idx, toc_sec_num):
     """
     Audit parsed sections of an object member for mid-entry TOC relocations.
-    Uses symbol indices (ELF64_R_SYM) for exact symbol resolution.
+    Uses symbol table indices (ELF64_R_SYM) for unambiguous symbol resolution.
     Returns: (violations_list, errors_list, stats_dict)
     """
     violations = []
@@ -526,15 +614,10 @@ def main():
     archive_summary = []
 
     for target in targets:
-        fmt, fmt_err = validate_file_format(target)
+        fmt, member_inventory, fmt_err = validate_file_format(target)
         if fmt_err:
             print(f"[ERROR] Invalid or malformed file {target}: {fmt_err}", file=sys.stderr)
             total_errors += 1
-            continue
-
-        if fmt == 'SCRIPT':
-            if args.verbose:
-                print(f"[INFO] Skipping GNU ld script: {target}")
             continue
 
         is_archive = (fmt == 'AR')
@@ -543,7 +626,20 @@ def main():
         else:
             object_count += 1
 
-        # Run readelf -S (sections), -s (symbols), and -r (relocations)
+        expected_members = len(member_inventory)
+        # Legitimate empty archive case
+        if is_archive and expected_members == 0:
+            archive_summary.append({
+                'path': target,
+                'name': os.path.basename(target),
+                'dir': os.path.basename(os.path.dirname(target)),
+                'members': 0,
+                'violations': 0,
+                'error': False,
+            })
+            continue
+
+        # Execute readelf -S (sections), -s (symbols), and -r (relocations)
         res_S = subprocess.run([readelf_bin, '-S', '--wide', target],
                                capture_output=True, text=True, check=False)
         if res_S.returncode != 0:
@@ -597,42 +693,16 @@ def main():
         mem_s = split_readelf_by_member(res_s.stdout, target)
         mem_r = split_readelf_by_member(res_r.stdout, target)
 
-        # Handle legitimate empty archive
-        if is_archive and not mem_r and not res_r.stdout.strip():
-            archive_summary.append({
-                'path': target,
-                'name': os.path.basename(target),
-                'dir': os.path.basename(os.path.dirname(target)),
-                'members': 0,
-                'violations': 0,
-                'error': False,
-            })
-            continue
-
-        # Fail closed on empty producer output on non-empty object
-        if not mem_r or not res_r.stdout.strip():
-            print(f"[ERROR] Producer returned empty or unparseable output on {target}", file=sys.stderr)
+        # Positive member accounting: must match expected member inventory
+        if len(mem_S) != expected_members or len(mem_s) != expected_members or len(mem_r) != expected_members:
+            print(f"[ERROR] Producer member count mismatch for {target}: expected {expected_members} from container, got S={len(mem_S)}, s={len(mem_s)}, r={len(mem_r)}", file=sys.stderr)
             total_errors += 1
             if is_archive:
                 archive_summary.append({
                     'path': target,
                     'name': os.path.basename(target),
                     'dir': os.path.basename(os.path.dirname(target)),
-                    'members': 0,
-                    'violations': 0,
-                    'error': True,
-                })
-            continue
-
-        if len(mem_S) != len(mem_r) or len(mem_s) != len(mem_r):
-            print(f"[ERROR] Member count mismatch across readelf passes for {target}: sections={len(mem_S)}, symbols={len(mem_s)}, relocs={len(mem_r)}", file=sys.stderr)
-            total_errors += 1
-            if is_archive:
-                archive_summary.append({
-                    'path': target,
-                    'name': os.path.basename(target),
-                    'dir': os.path.basename(os.path.dirname(target)),
-                    'members': len(mem_r),
+                    'members': max(len(mem_S), len(mem_s), len(mem_r)),
                     'violations': 0,
                     'error': True,
                 })
@@ -644,22 +714,35 @@ def main():
         total_members_examined += arch_members
 
         for idx, (member_name, r_text) in enumerate(mem_r):
-            # Resolve section number of .toc from section headers
-            toc_sec_num = parse_member_toc_sec_num(mem_S[idx][1])
-            # Resolve all symbols in member indexed by symbol table index
-            symbols_by_idx = parse_member_symbols(mem_s[idx][1])
+            # Parse section headers pass
+            s_secs, toc_sec_num, rela_sections, s_errs = parse_sections_pass(mem_S[idx][1], member_name)
+            if s_errs:
+                for se in s_errs:
+                    print(f"[ERROR] {se}", file=sys.stderr)
+                total_errors += len(s_errs)
+                arch_has_error = True
+                continue
 
-            # Parse relocations for this member
-            secs, parse_errs = parse_member_relocations(r_text, member_name)
-            if parse_errs:
-                for pe in parse_errs:
-                    print(f"[ERROR] {pe}", file=sys.stderr)
-                total_errors += len(parse_errs)
+            # Parse symbol table pass
+            symbols_by_idx, sym_errs = parse_symbols_pass(mem_s[idx][1], member_name, s_secs)
+            if sym_errs:
+                for se in sym_errs:
+                    print(f"[ERROR] {se}", file=sys.stderr)
+                total_errors += len(sym_errs)
+                arch_has_error = True
+                continue
+
+            # Parse relocations pass
+            parsed_relocs, r_errs = parse_relocations_pass(r_text, member_name, rela_sections)
+            if r_errs:
+                for re_err in r_errs:
+                    print(f"[ERROR] {re_err}", file=sys.stderr)
+                total_errors += len(r_errs)
                 arch_has_error = True
                 continue
 
             # Audit relocations for mid-entry references
-            viols, m_errs, stats = audit_member(member_name, secs, symbols_by_idx, toc_sec_num)
+            viols, m_errs, stats = audit_member(member_name, parsed_relocs, symbols_by_idx, toc_sec_num)
             total_toc_entries += stats['toc_entries_count']
             total_toc_relocs += stats['toc_relocs_examined']
 
