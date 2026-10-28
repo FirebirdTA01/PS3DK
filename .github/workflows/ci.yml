@@ -295,6 +295,11 @@ jobs:
       - name: Test the LV2 virtual-memory surface
         run: bash tests/sdk/sys-vm-surface-test.sh
 
+      # Skips without PS3DEV; sizeof/offsetof/alignof of the cellFs records
+      # (natural-aligned AIO request and ring buffer) in both data models.
+      - name: Test the cellFs record layouts
+        run: bash tests/sdk/cellfs-struct-layout-test.sh
+
       - name: Test the cell/hash digests against hashlib
         run: bash tests/sdk/hash-vectors-test.sh
 

@@ -91,6 +91,17 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **cellFs asynchronous requests reach the system intact.** `CellFsAio`
+  and `CellFsRingBuffer` in `<cell/fs/cell_fs_file_api.h>` were 4-byte
+  packed, so a `CellFsAio`'s `offset`, `buf`, `size` and `user_data` sat 4
+  to 8 bytes early. On a PS3 every `cellFsAioRead` request then completed
+  with `CELL_FS_EFAULT` and no data (`cellFsAioWrite` takes the same
+  structure). Both now keep natural alignment: `CellFsAio` is 40 bytes
+  with `offset` at 8, `buf` at 16, `size` at 24 and `user_data` at 32, and
+  `CellFsRingBuffer` is 32 bytes. Under `-mlp64` the AIO buffer is a
+  32-bit address, so the layout is the same in both data models. The
+  directory and status records keep their 4-byte packing. Rebuild code
+  that uses either structure.
 - **PSGL teardown waits for the GPU.** `psglExit`, `psglDestroyDevice` and
   `psglFreeCommandBuffer` now wait for all queued GPU work by writing a fresh
   token to the PSGL back-end label. Before, device teardown reused reference

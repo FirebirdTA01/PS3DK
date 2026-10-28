@@ -22,6 +22,17 @@
 #include <time.h>
 #include <errno.h>
 
+/* lv2 takes 32-bit effective addresses; under -mlp64 ATTRIBUTE_PRXPTR
+ * narrows the AIO request's buffer pointer (below) to 4 bytes, so both
+ * data models share one layout. */
+#ifdef __PPU__
+#include <ppu-types.h>
+#else
+#ifndef ATTRIBUTE_PRXPTR
+#define ATTRIBUTE_PRXPTR
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -264,9 +275,12 @@ typedef int CellFsErrno;
 
 /* ---- Types ----
  *
- * pack(4) matches the reference SDK's struct layout.  CellFsStat has
+ * The directory and status records are 4-byte packed: CellFsStat has
  * 8-byte uint64 + time_t fields whose natural alignment would otherwise
- * insert padding that the SPRX does not expect. */
+ * insert padding that the SPRX does not expect.  The stream ring-buffer
+ * description and the AIO request that follow keep natural alignment
+ * (8-byte members on 8-byte boundaries), which is the layout the system
+ * reads them with. */
 #pragma pack(push, 4)
 
 typedef struct CellFsDirent
@@ -306,6 +320,8 @@ typedef enum CellFsDiscReadRetryType
     CELL_FS_DISC_READ_RETRY_DEFAULT  = 1
 } CellFsDiscReadRetryType;
 
+#pragma pack(pop)
+
 typedef struct CellFsRingBuffer
 {
     uint64_t ringbuf_size;
@@ -318,12 +334,10 @@ typedef struct CellFsAio
 {
     int      fd;
     uint64_t offset;
-    void    *buf;
+    void    *buf ATTRIBUTE_PRXPTR;
     uint64_t size;
     uint64_t user_data;
 } CellFsAio;
-
-#pragma pack(pop)
 
 /* ---- File I/O ---- */
 CellFsErrno cellFsOpen(const char *path, int flags, int *fd,
