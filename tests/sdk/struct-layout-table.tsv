@@ -644,14 +644,14 @@ ilp32	cell/sail/au_receiver.h	CellSailAuReceiver	struct	512	8	internalData@0
 ilp32	cell/sail/avi.h	CellSailAviMovie	struct	128	8	internalData@0
 ilp32	cell/sail/avi.h	CellSailAviMovieInfo	struct	48	4	maxBytesPerSec@0 flags@4 reserved0@8 streams@12 suggestedBufferSize@16 width@20 height@24 scale@28 rate@32 length@36 reserved1@40 reserved2@44
 ilp32	cell/sail/avi.h	CellSailAviStream	struct	16	8	internalData@0
-ilp32	cell/sail/avi.h	CellSailAviStreamHeader	struct	60	4	fccType@0 fccHandler@4 flags@8 priority@12 language@16 initialFrames@20 scale@24 rate@28 start@32 length@36 suggestedBufferSize@40 quality@44 sampleSize@48 left@52 top@54 right@56 bottom@58
-ilp32	cell/sail/common.h	CellSailAuInfo	struct	24	8	pts@0 dts@8 size@16 reserved@20
+ilp32	cell/sail/avi.h	CellSailAviStreamHeader	struct	56	4	fccType@0 fccHandler@4 flags@8 priority@12 language@14 initialFrames@16 scale@20 rate@24 start@28 length@32 suggestedBufferSize@36 quality@40 sampleSize@44 <anon1>.frame@48 <anon1>.<anon1>.left@48 <anon1>.<anon1>.top@50 <anon1>.<anon1>.right@52 <anon1>.<anon1>.bottom@54
+ilp32	cell/sail/common.h	CellSailAuInfo	struct	40	8	pAu@0 size@4 status@8 sessionId@12 pts@16 dts@24 reserved@32
 ilp32	cell/sail/common.h	CellSailAudioFormat	struct	24	8	coding@0 chNum@1 sampleNum@2 fs@4 chLayout@8 reserved0@12 reserved1@16
 ilp32	cell/sail/common.h	CellSailFuture	struct	24	8	mutex@0 cond@4 flags@8 result@12 userParam@16
 ilp32	cell/sail/common.h	CellSailMemAllocator	struct	12	4	callbacks@0 pArg@8
 ilp32	cell/sail/common.h	CellSailMemAllocatorFuncs	struct	8	4	pAlloc@0 pFree@4
 ilp32	cell/sail/common.h	CellSailStartCommand	struct	40	8	startType@0 seekType@4 terminusType@8 flags@12 startArg@16 reserved@20 seekArg@24 terminusArg@32
-ilp32	cell/sail/common.h	CellSailVideoFormat	struct	40	8	coding@0 scan@1 frameRate@2 aspectRatio@4 width@8 height@12 pitch@16 colorMatrix@20 alphaUsedFlag@24 reserved0@28 reserved1@32
+ilp32	cell/sail/common.h	CellSailVideoFormat	struct	32	8	coding@0 scan@1 bitsPerColor@2 frameRate@3 width@4 height@6 pitch@8 alpha@12 colorMatrix@16 aspectRatio@17 colorRange@18 reserved1@19 reserved2@20 reserved3@24
 ilp32	cell/sail/common.h	struct CellSailFuture	struct	24	8	mutex@0 cond@4 flags@8 result@12 userParam@16
 ilp32	cell/sail/common.h	struct CellSailStartCommand	struct	40	8	startType@0 seekType@4 terminusType@8 flags@12 startArg@16 reserved@20 seekArg@24 terminusArg@32
 ilp32	cell/sail/common_rec.h	CellSailCommand	struct	8	4	key@0 value@4
@@ -669,19 +669,19 @@ ilp32	cell/sail/graphics_adapter.h	CellSailGraphicsFrameInfo	struct	24	8	pBuffer
 ilp32	cell/sail/mp4.h	CellSailMp4Movie	struct	128	8	internalData@0
 ilp32	cell/sail/mp4.h	CellSailMp4MovieInfo	struct	112	8	creationDateTime@0 modificationDateTime@16 trackCount@32 movieTimeScale@36 movieDuration@40 reserved@48
 ilp32	cell/sail/mp4.h	CellSailMp4Track	struct	48	8	internalData@0
-ilp32	cell/sail/mp4.h	CellSailMp4TrackInfo	struct	64	8	isTrackEnable@0 res0@1 trackId@4 trackDuration@8 layer@16 alternateGroup@18 res1@20 trackWidth@24 trackHeight@28 language@32 res2@34 mediaType@36 res3@40
-ilp32	cell/sail/muxer.h	CellSailComposer	struct	256	8	internalData@0
+ilp32	cell/sail/mp4.h	CellSailMp4TrackInfo	struct	64	8	isTrackEnable@0 reserved0@1 trackId@4 trackDuration@8 layer@16 alternateGroup@18 reserved1@20 trackWidth@24 trackHeight@28 language@32 reserved2@34 mediaType@36 reserved3@40
+ilp32	cell/sail/muxer.h	CellSailComposer	struct	320	8	internalData@0
 ilp32	cell/sail/muxer.h	CellSailComposerAudioAuInfo	struct	32	8	pAu@0 auSize@4 pts@8 reserved@16 sessionId@24 specificInfo@28
-ilp32	cell/sail/muxer.h	CellSailComposerEsAudioParameter	struct	72	8	codecType@0 flags@4 res0@8 res1@12 maxBitrate@16 aveBitrate@20 sampleScale@24 res2@28 format@40 pSpecificInfo@64
-ilp32	cell/sail/muxer.h	CellSailComposerEsVideoParameter	struct	88	8	codecType@0 flags@4 majorMode@8 minorMode@12 maxBitrate@16 aveBitrate@20 sampleScale@24 gopDuration@28 res@32 format@40 pSpecificInfo@80
-ilp32	cell/sail/muxer.h	CellSailComposerVideoAuInfo	struct	40	8	pAu@0 auSize@4 pts@8 dts@16 reserved@24 sessionId@32 specificInfo@36
-ilp32	cell/sail/player.h	CellSailPlayer	struct	2048	8	internalData@0
+ilp32	cell/sail/muxer.h	CellSailComposerEsAudioParameter	struct	72	8	codecType@0 flags@4 reserved0@8 reserved1@12 maxBitrate@16 aveBitrate@20 sampleScale@24 reserved2@28 format@40 pSpecificInfo@64
+ilp32	cell/sail/muxer.h	CellSailComposerEsVideoParameter	struct	80	8	codecType@0 flags@4 majorMode@8 minorMode@12 maxBitrate@16 aveBitrate@20 sampleScale@24 gopDuration@28 reserved@32 format@40 pSpecificInfo@72
+ilp32	cell/sail/muxer.h	CellSailComposerVideoAuInfo	struct	56	8	pAu@0 auSize@4 pts@8 dts@32 reserved@40 sessionId@48 specificInfo@52
+ilp32	cell/sail/player.h	CellSailPlayer	struct	1024	8	internalData@0
 ilp32	cell/sail/profile.h	CellSailBsAudioParameter	struct	72	8	thisSize@0 codecType@4 flags@8 reserved0@12 reserved1@16 maxBitrate@20 aveBitrate@24 sampleScale@28 reserved2@32 format@48
-ilp32	cell/sail/profile.h	CellSailBsVideoParameter	struct	88	8	thisSize@0 codecType@4 flags@8 majorMode@12 minorMode@16 maxBitrate@20 aveBitrate@24 sampleScale@28 gopDuration@32 reserved@36 format@48
+ilp32	cell/sail/profile.h	CellSailBsVideoParameter	struct	80	8	thisSize@0 codecType@4 flags@8 majorMode@12 minorMode@16 maxBitrate@20 aveBitrate@24 sampleScale@28 gopDuration@32 reserved@36 format@48
 ilp32	cell/sail/profile.h	CellSailMp4MovieParameter	struct	56	4	thisSize@0 flags@4 timeScale@8 majorBrand@12 compatibleBrandNum@16 compatibleBrands@20 interleaveDuration@52
 ilp32	cell/sail/profile.h	CellSailProfile	struct	4096	8	internalData@0
 ilp32	cell/sail/profile.h	CellSailStreamParameter	struct	8	4	thisSize@0 heapSize@4
-ilp32	cell/sail/recorder.h	CellSailRecorder	struct	1024	8	internalData@0
+ilp32	cell/sail/recorder.h	CellSailRecorder	struct	8192	128	internalData@0
 ilp32	cell/sail/renderer_audio.h	CellSailRendererAudio	struct	256	8	internalData@0
 ilp32	cell/sail/renderer_audio.h	CellSailRendererAudioAttribute	struct	8	4	thisSize@0 pPreferredFormat@4
 ilp32	cell/sail/renderer_audio.h	CellSailRendererAudioFuncs	struct	36	4	pMakeup@0 pCleanup@4 pOpen@8 pClose@12 pStart@16 pStop@20 pCancel@24 pCheckout@28 pCheckin@32
@@ -1563,17 +1563,17 @@ lp64	cell/sail/au_receiver.h	CellSailAuReceiver	struct	512	8	internalData@0
 lp64	cell/sail/avi.h	CellSailAviMovie	struct	128	8	internalData@0
 lp64	cell/sail/avi.h	CellSailAviMovieInfo	struct	48	4	maxBytesPerSec@0 flags@4 reserved0@8 streams@12 suggestedBufferSize@16 width@20 height@24 scale@28 rate@32 length@36 reserved1@40 reserved2@44
 lp64	cell/sail/avi.h	CellSailAviStream	struct	16	8	internalData@0
-lp64	cell/sail/avi.h	CellSailAviStreamHeader	struct	60	4	fccType@0 fccHandler@4 flags@8 priority@12 language@16 initialFrames@20 scale@24 rate@28 start@32 length@36 suggestedBufferSize@40 quality@44 sampleSize@48 left@52 top@54 right@56 bottom@58
-lp64	cell/sail/common.h	CellSailAuInfo	struct	24	8	pts@0 dts@8 size@16 reserved@20
+lp64	cell/sail/avi.h	CellSailAviStreamHeader	struct	56	4	fccType@0 fccHandler@4 flags@8 priority@12 language@14 initialFrames@16 scale@20 rate@24 start@28 length@32 suggestedBufferSize@36 quality@40 sampleSize@44 <anon1>.frame@48 <anon1>.<anon1>.left@48 <anon1>.<anon1>.top@50 <anon1>.<anon1>.right@52 <anon1>.<anon1>.bottom@54
+lp64	cell/sail/common.h	CellSailAuInfo	struct	40	8	pAu@0 size@4 status@8 sessionId@12 pts@16 dts@24 reserved@32
 lp64	cell/sail/common.h	CellSailAudioFormat	struct	24	8	coding@0 chNum@1 sampleNum@2 fs@4 chLayout@8 reserved0@12 reserved1@16
 lp64	cell/sail/common.h	CellSailFuture	struct	24	8	mutex@0 cond@4 flags@8 result@12 userParam@16
 lp64	cell/sail/common.h	CellSailMemAllocator	struct	12	4	callbacks@0 pArg@8
 lp64	cell/sail/common.h	CellSailMemAllocatorFuncs	struct	8	4	pAlloc@0 pFree@4
 lp64	cell/sail/common.h	CellSailStartCommand	struct	40	8	startType@0 seekType@4 terminusType@8 flags@12 startArg@16 reserved@20 seekArg@24 terminusArg@32
-lp64	cell/sail/common.h	CellSailVideoFormat	struct	40	8	coding@0 scan@1 frameRate@2 aspectRatio@4 width@8 height@12 pitch@16 colorMatrix@20 alphaUsedFlag@24 reserved0@28 reserved1@32
+lp64	cell/sail/common.h	CellSailVideoFormat	struct	32	8	coding@0 scan@1 bitsPerColor@2 frameRate@3 width@4 height@6 pitch@8 alpha@12 colorMatrix@16 aspectRatio@17 colorRange@18 reserved1@19 reserved2@20 reserved3@24
 lp64	cell/sail/common.h	struct CellSailFuture	struct	24	8	mutex@0 cond@4 flags@8 result@12 userParam@16
 lp64	cell/sail/common.h	struct CellSailStartCommand	struct	40	8	startType@0 seekType@4 terminusType@8 flags@12 startArg@16 reserved@20 seekArg@24 terminusArg@32
-lp64	cell/sail/common_rec.h	CellSailCommand	struct	16	8	key@0 value@8
+lp64	cell/sail/common_rec.h	CellSailCommand	struct	8	4	key@0 value@4
 lp64	cell/sail/converter.h	CellSailVideoConverter	struct	256	8	internalData@0
 lp64	cell/sail/descriptor.h	CellSailDescriptor	struct	256	8	internalData@0
 lp64	cell/sail/feeder_audio.h	CellSailFeederAudio	struct	512	8	internalData@0
@@ -1588,19 +1588,19 @@ lp64	cell/sail/graphics_adapter.h	CellSailGraphicsFrameInfo	struct	24	8	pBuffer@
 lp64	cell/sail/mp4.h	CellSailMp4Movie	struct	128	8	internalData@0
 lp64	cell/sail/mp4.h	CellSailMp4MovieInfo	struct	112	8	creationDateTime@0 modificationDateTime@16 trackCount@32 movieTimeScale@36 movieDuration@40 reserved@48
 lp64	cell/sail/mp4.h	CellSailMp4Track	struct	48	8	internalData@0
-lp64	cell/sail/mp4.h	CellSailMp4TrackInfo	struct	64	8	isTrackEnable@0 res0@1 trackId@4 trackDuration@8 layer@16 alternateGroup@18 res1@20 trackWidth@24 trackHeight@28 language@32 res2@34 mediaType@36 res3@40
-lp64	cell/sail/muxer.h	CellSailComposer	struct	256	8	internalData@0
+lp64	cell/sail/mp4.h	CellSailMp4TrackInfo	struct	64	8	isTrackEnable@0 reserved0@1 trackId@4 trackDuration@8 layer@16 alternateGroup@18 reserved1@20 trackWidth@24 trackHeight@28 language@32 reserved2@34 mediaType@36 reserved3@40
+lp64	cell/sail/muxer.h	CellSailComposer	struct	320	8	internalData@0
 lp64	cell/sail/muxer.h	CellSailComposerAudioAuInfo	struct	32	8	pAu@0 auSize@4 pts@8 reserved@16 sessionId@24 specificInfo@28
-lp64	cell/sail/muxer.h	CellSailComposerEsAudioParameter	struct	72	8	codecType@0 flags@4 res0@8 res1@12 maxBitrate@16 aveBitrate@20 sampleScale@24 res2@28 format@40 pSpecificInfo@64
-lp64	cell/sail/muxer.h	CellSailComposerEsVideoParameter	struct	88	8	codecType@0 flags@4 majorMode@8 minorMode@12 maxBitrate@16 aveBitrate@20 sampleScale@24 gopDuration@28 res@32 format@40 pSpecificInfo@80
-lp64	cell/sail/muxer.h	CellSailComposerVideoAuInfo	struct	40	8	pAu@0 auSize@4 pts@8 dts@16 reserved@24 sessionId@32 specificInfo@36
-lp64	cell/sail/player.h	CellSailPlayer	struct	2048	8	internalData@0
+lp64	cell/sail/muxer.h	CellSailComposerEsAudioParameter	struct	72	8	codecType@0 flags@4 reserved0@8 reserved1@12 maxBitrate@16 aveBitrate@20 sampleScale@24 reserved2@28 format@40 pSpecificInfo@64
+lp64	cell/sail/muxer.h	CellSailComposerEsVideoParameter	struct	80	8	codecType@0 flags@4 majorMode@8 minorMode@12 maxBitrate@16 aveBitrate@20 sampleScale@24 gopDuration@28 reserved@32 format@40 pSpecificInfo@72
+lp64	cell/sail/muxer.h	CellSailComposerVideoAuInfo	struct	56	8	pAu@0 auSize@4 pts@8 dts@32 reserved@40 sessionId@48 specificInfo@52
+lp64	cell/sail/player.h	CellSailPlayer	struct	1024	8	internalData@0
 lp64	cell/sail/profile.h	CellSailBsAudioParameter	struct	72	8	thisSize@0 codecType@4 flags@8 reserved0@12 reserved1@16 maxBitrate@20 aveBitrate@24 sampleScale@28 reserved2@32 format@48
-lp64	cell/sail/profile.h	CellSailBsVideoParameter	struct	88	8	thisSize@0 codecType@4 flags@8 majorMode@12 minorMode@16 maxBitrate@20 aveBitrate@24 sampleScale@28 gopDuration@32 reserved@36 format@48
+lp64	cell/sail/profile.h	CellSailBsVideoParameter	struct	80	8	thisSize@0 codecType@4 flags@8 majorMode@12 minorMode@16 maxBitrate@20 aveBitrate@24 sampleScale@28 gopDuration@32 reserved@36 format@48
 lp64	cell/sail/profile.h	CellSailMp4MovieParameter	struct	56	4	thisSize@0 flags@4 timeScale@8 majorBrand@12 compatibleBrandNum@16 compatibleBrands@20 interleaveDuration@52
 lp64	cell/sail/profile.h	CellSailProfile	struct	4096	8	internalData@0
 lp64	cell/sail/profile.h	CellSailStreamParameter	struct	8	4	thisSize@0 heapSize@4
-lp64	cell/sail/recorder.h	CellSailRecorder	struct	1024	8	internalData@0
+lp64	cell/sail/recorder.h	CellSailRecorder	struct	8192	128	internalData@0
 lp64	cell/sail/renderer_audio.h	CellSailRendererAudio	struct	256	8	internalData@0
 lp64	cell/sail/renderer_audio.h	CellSailRendererAudioAttribute	struct	8	4	thisSize@0 pPreferredFormat@4
 lp64	cell/sail/renderer_audio.h	CellSailRendererAudioFuncs	struct	36	4	pMakeup@0 pCleanup@4 pOpen@8 pClose@12 pStart@16 pStop@20 pCancel@24 pCheckout@28 pCheckin@32

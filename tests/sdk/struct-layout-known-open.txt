@@ -13,18 +13,7 @@
 *	*	struct SceNpClansSearchableProfile
 *	*	struct SceNpSignalingNetInfo
 *	*	struct SceNpTrophyFlagArray
-# SAIL records.
-*	*	CellSailAuInfo
-*	*	CellSailAviStreamHeader
-*	*	CellSailBsVideoParameter
-*	*	CellSailMp4TrackInfo
-*	*	CellSailPlayer
-*	*	CellSailVideoFormat
-*	*	CellSailComposer
-*	*	CellSailComposerEsAudioParameter
-*	*	CellSailComposerEsVideoParameter
-*	*	CellSailComposerVideoAuInfo
-*	*	CellSailRecorder
+# SAIL records (all resolved by PR77).
 # Codec stream and output parameters under LP64 (pointer members).
 lp64	*	CellGifDecSrc
 lp64	*	CellGifDecThreadInParam
