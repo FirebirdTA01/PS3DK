@@ -10,7 +10,7 @@
 //
 // Measured 2026-09-02 on fd5aa13 (claude, then reproduced here): the
 // general path emits MOVR R0.x, f[COL0]; MOVRC RC.x; MOVR R0.x(NE.x),
-// f[TEX0]; MOVR R0, R0.x where the reference emits MOVR R0, R0;
+// f[TEX0]; MOVR R0, R0.x where the established compiler emits MOVR R0, R0;
 // MOVR R0(EQ.x), f[COL0].  Cause: the IR builder's merge type lookup
 // never consulted function parameters, so a merge whose arm is a raw
 // input was typed Void and the general path masked its write to one

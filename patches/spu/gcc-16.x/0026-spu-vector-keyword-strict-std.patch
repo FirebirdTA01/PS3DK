@@ -3,7 +3,7 @@ From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 17:39:26 -0500
 Subject: [PATCH] spu: treat vector as a context-sensitive keyword under strict -std=
 
-The reference PS3 SPU compiler accepts vector (vector unsigned int ...) in
+The system PS3 SPU compiler accepts vector (vector unsigned int ...) in
 every language mode; upstream GCC enables the context-sensitive keyword only
 when flag_iso is clear, so strict -std=c99/c++98 SPU code written against
 that compiler fails with "vector does not name a type".

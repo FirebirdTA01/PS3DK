@@ -2,7 +2,7 @@
 # FP-LOOP slice 1: a fragment `for` the static expansion cannot prove (a
 # run-time bound) compiles to a hardware loop - LOOP {255, 0, 1}, the source
 # condition tested at the head of each iteration with a BRK where it fails,
-# the shape the reference emits for a run-time bound (measured).  Judged on
+# the shape the established compiler emits for a run-time bound (measured).  Judged on
 # VALUES by fp_eval's LOOP/BRK model against the source semantics, with the
 # 255-trip cap the measured shape implies (bounds 254, 255, 256 and 300 are
 # the boundary controls) and zero-trip loops.

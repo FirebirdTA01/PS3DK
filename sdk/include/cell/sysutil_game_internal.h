@@ -9,7 +9,7 @@
   - cellSysutilGameDataAssignVmc — VMC (virtual-memory-card) bind for
                                    PSP/PS1 emu; takes no args
 
-  Not in the 475-era reference headers — the trailing `_I` suffix
+  Not in the system headers — the trailing `_I` suffix
   marks them as engine-internal.  Derived signatures
   cross-checked against RPCS3 (rpcs3/Emu/Cell/Modules/cellSysutil.cpp).
   All five resolve via libsysutil_stub.a.

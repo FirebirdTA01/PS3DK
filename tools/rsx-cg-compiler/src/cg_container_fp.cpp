@@ -5,7 +5,7 @@
  *
  *   0x00  CgBinaryProgram header (32 bytes — see cgBinary.h)
  *   0x20  CgBinaryParameter[parameterCount] (48 bytes each)
- *         (immediately after the header — the reference compiler lays
+ *         (immediately after the header — the established compiler lays
  *          this out contiguously without any pad, parameterArray = 0x20)
  *   <X>   string region (zero-terminated names + semantics, in
  *         per-parameter declaration order: emit semantic, then name).
@@ -15,7 +15,7 @@
  *         padding to a 16-byte boundary).
  *   <Z>   raw ucode (16-byte aligned).
  *
- * Strings are NOT deduplicated — the reference compiler emits a fresh
+ * Strings are NOT deduplicated — the established compiler emits a fresh
  * copy of each semantic + name per parameter, even when two parameters
  * share the same semantic ("COLOR" appears twice in identity_f.fpo).
  *
@@ -75,7 +75,7 @@ constexpr uint32_t kCgColor0     = 2757u;  // 0x0ac5  (FP COLOR semantic)
 constexpr uint32_t kCgDepth0     = 2933u;  // 0x0b75  (FP DEPTH semantic)
 constexpr uint32_t kCgTexCoord0  = 3220u;  // 0x0c94
 
-// CG_UNDEFINED = 3256 = 0x0cb8 — the reference compiler uses this resource code for
+// CG_UNDEFINED = 3256 = 0x0cb8 — the established compiler uses this resource code for
 // two cases: (1) FP uniforms without a specific binding, (2) the
 // synthetic `$kill_NNNN` parameters emitted by #pragma alphakill.
 // The runtime distinguishes via var / direction / embeddedConst.
@@ -150,7 +150,7 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     if (t.isMatrix()) {
         // CGtype packs every RxC shape as kCgFloat1x1 + (rows-1)*4 + (cols-1)
         // (2x2 = 1054, 3x3 = 1059, 3x4 = 1060, 4x3 = 1063, 4x4 = 1064); the
-        // reference records half matrices with the float codes in FP
+        // established compiler records half matrices with the float codes in FP
         // (measured 2026-09-15, rectangular-matrices: half3x4 B -> 1060, rows 1048).
         if (t.matrixRows >= 1 && t.matrixRows <= 4 && t.matrixCols >= 1 && t.matrixCols <= 4)
             return kCgFloat4x4 - 15u + (t.matrixRows - 1) * 4u + (t.matrixCols - 1);
@@ -158,7 +158,7 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     switch (t.baseType)
     {
     case IRType::Float32: return kCgFloat;
-    // A `half` scalar is recorded as FLOAT by the reference (measured:
+    // A `half` scalar is recorded as FLOAT by the established compiler (measured:
     // `uniform half u_w` -> CGtype 1045, `half u_w[3]` elements 1045,
     // `half4 u_h[3]` elements 1048); this returned 0 for it, so every
     // half scalar uniform's record carried no type at all.
@@ -182,10 +182,10 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
 // map (uniform parameters, etc.).
 uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
 {
-    // The reference canonicalises COL to COLOR (2757..2760 family), confirmed
-    // on sce-cgc for both inputs and outputs.  Fragment MRT supports up to 4 targets
+    // The established compiler canonicalises COL to COLOR (2757..2760 family), confirmed
+    // on the established compiler for both inputs and outputs.  Fragment MRT supports up to 4 targets
     // (indices 0..3: 2757..2760, fragment-colour-reflection).  Indices > 3 are refused by the
-    // reference (error C5102) and by our lowering only on the output side
+    // established compiler (error C5102) and by our lowering only on the output side
     // (nv40_general_lowering.cpp:742); our compiler accepts them as inputs.
     // 0 is the deliberate choice for an out-of-range index with no
     // reference-defined bind location.
@@ -196,7 +196,7 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
         return 0;
     }
     // DIFFUSE and SPECULAR are accepted by our frontend as legacy aliases mapping
-    // to COLOR0/COLOR1 (2757/2758); the reference refuses them in fragment profile
+    // to COLOR0/COLOR1 (2757/2758); the established compiler refuses them in fragment profile
     // (error C5108: unknown semantics).  Tracked under leniency card unknown-semantic-leniency.
     // An indexed DIFFUSE1 stays unmapped (0).
     if (semUpper == "DIFFUSE"  && semIndex == 0) return kCgColor0;
@@ -204,8 +204,8 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
         return kCgTexCoord0 + semIndex;
     // The fragment DEPTH output.  Ours left this at 0, which the
-    // reference disassembler prints as '???'; measured against the
-    // reference on a `float depth : DEPTH` fixture, it is CG_DEPTH0
+    // established compiler disassembler prints as '???'; measured against the
+    // established compiler on a `float depth : DEPTH` fixture, it is CG_DEPTH0
     // (fragment-depth-export).  Only DEPTH0 exists — there is one depth output.
     if ((semUpper == "DEPTH" || semUpper == "DEPTH0") && semIndex == 0)
         return kCgDepth0;
@@ -229,7 +229,7 @@ uint32_t fpResourceFor(const std::string& semUpper, int semIndex)
     return 0;
 }
 
-// The reference records the DEPTH output parameter's CGtype as FLOAT3,
+// The established compiler records the DEPTH output parameter's CGtype as FLOAT3,
 // not the FLOAT the Cg source declares (measured: type 0x0417 where we
 // emitted 0x0415).  Byte identity depends on reproducing it, so it is
 // recorded here rather than normalised away.
@@ -264,7 +264,7 @@ ContainerResult emitFragmentContainerImpl(
     }
 
     // ----- Parameter table description.  Same iteration order as
-    // the reference compiler: shader entry parameters, in declaration order. -----
+    // the established compiler: shader entry parameters, in declaration order. -----
     struct ParamDesc
     {
         std::string name;
@@ -288,7 +288,7 @@ ContainerResult emitFragmentContainerImpl(
         // float[4] block (zero-padded above the declared component
         // count) between the semantic string and the embedded-constant
         // record, and writes its offset into the param entry's
-        // defaultValue field.  Measured against the reference on
+        // defaultValue field.  Measured against the established compiler on
         // `uniform float4 light : C3 = {1,2,3,4}`: semantic 'C3' at
         // 0xc3, default block at 0xd0, embeddedConst at 0xe0, name
         // 'light' at 0xe8 (uniform-default-records).
@@ -299,7 +299,7 @@ ContainerResult emitFragmentContainerImpl(
     params.reserve(entry->parameters.size());
 
     // A matrix uniform is referenced as a whole: when the program reads any
-    // row, the reference marks the parent record and every row referenced,
+    // row, the established compiler marks the parent record and every row referenced,
     // and none of them when it reads no row (measured: `M[1] * t` marks M and
     // M[0..3]; an unread float4x4 is all 0).  Applied to the parent and the
     // `rows` row records just pushed.
@@ -328,7 +328,7 @@ ContainerResult emitFragmentContainerImpl(
         // rows - 43 of the 51 metadata defects the split instrument
         // found.  Synthesize one entry per distinct loaded field
         // instead, then lay them out in STRUCT order with the unread
-        // members between them (p.inputMembers): the reference declares
+        // members between them (p.inputMembers): the established compiler declares
         // every member, an unread one with isReferenced 0, its semantic's
         // resource, or 0xcb8 and no semantic string when it has none
         // (measured).  An unread POSITION member is not declared at all in
@@ -568,7 +568,7 @@ ContainerResult emitFragmentContainerImpl(
         }
 
         // A POSITION input is not visible to a fragment program: the
-        // reference does not declare it, and the parameters after it keep
+        // established compiler does not declare it, and the parameters after it keep
         // their source ordinals (measured: `float4 pos : POSITION, float2
         // tc : TEXCOORD0` declares only tc, paramno 1).
         if (p.storage != StorageQualifier::Uniform && p.storage != StorageQualifier::Out &&
@@ -578,14 +578,14 @@ ContainerResult emitFragmentContainerImpl(
 
         ParamDesc d;
         d.name      = p.name;
-        // Preserve original source spelling — the reference compiler stores "TEXCOORD0"
+        // Preserve original source spelling — the established compiler stores "TEXCOORD0"
         // when the user wrote "TEXCOORD0", and "TEXCOORD" when they wrote
         // "TEXCOORD".  Falls back to the bare name if the front-end
         // didn't capture the raw form.
         // Suppress the semantic string when the front-end inferred the
         // binding from an unbound entry-point param: the .fpo carries
         // the resource code (e.g. TEXCOORD0 → 0x0c94) but writes a zero
-        // semantic-string offset, matching the reference compiler.
+        // semantic-string offset, matching the established compiler.
         d.semantic  = p.inferredSemantic
                         ? std::string{}
                         : (p.rawSemanticName.empty() ? p.semanticName : p.rawSemanticName);
@@ -622,7 +622,7 @@ ContainerResult emitFragmentContainerImpl(
 
             // A uniform ENTRY PARAMETER's default is recorded exactly like a
             // file-scope uniform's initialiser - same 16-byte block, same
-            // placement (uniform-default-records A1).  Measured on the reference:
+            // placement (uniform-default-records A1).  Measured on the established compiler:
             // `uniform float4 light = {1,2,3,4}` -> defOff 208 [1,2,3,4];
             // `uniform float3 Ka = 0.6f` -> [0.6,0.6,0.6,0], broadcast;
             // `uniform float s = 2.5` -> [2.5,0,0,0].  isReferenced does not
@@ -665,7 +665,7 @@ ContainerResult emitFragmentContainerImpl(
             d.direction = isOut ? kCgOut : kCgIn;
             d.res       = fpResourceFor(toUpper(p.semanticName), p.semanticIndex);
             // A bare `out` varying carries no semantic, but the
-            // reference still binds it: an FP color output is COLOR0
+            // established compiler still binds it: an FP color output is COLOR0
             // by convention, and its containers say so (resource
             // COLOR0 with an empty semantic string).  Ours said
             // '???' - 5 of the 51 metadata defects.
@@ -676,7 +676,7 @@ ContainerResult emitFragmentContainerImpl(
                 d.res = kCgColor0;
             // An implicit input the program never reads binds nothing
             // (bindImplicitTexCoords cleared its TEXCOORD): UNDEFINED, as
-            // the reference records it.
+            // the established compiler records it.
             if (!isOut && p.inferredSemantic && p.semanticName.empty())
                 d.res = kCgUndefined;
         }
@@ -710,7 +710,7 @@ ContainerResult emitFragmentContainerImpl(
             {
                 const unsigned count = rsx_cg::fpUniformSlotCount(g.type);
                 // An array of STRUCTS is declared through its flattened
-                // element members ("s[0].a", ...); the reference writes no
+                // element members ("s[0].a", ...); the established compiler writes no
                 // "s[k]" record.  Its slots still count, as the lowering
                 // numbered them.
                 const std::string elementPrefix = g.name + "[0].";
@@ -803,7 +803,7 @@ ContainerResult emitFragmentContainerImpl(
                     }
                     e.isReferenced = e.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
                     // An initialised matrix uniform's compiled default lives
-                    // on the ROWS, never on the parent - the reference leaves
+                    // on the ROWS, never on the parent - the established compiler leaves
                     // the parent's defaultValue at 0 and gives each row its
                     // own 16-byte block holding that row's columns,
                     // zero-padded.  Measured on `float3x3 M = float3x3(0.25,
@@ -861,7 +861,7 @@ ContainerResult emitFragmentContainerImpl(
                 // and refuses rather than dropping it when it cannot be
                 // evaluated, so by the time the container is built the
                 // value is already in hand - we were writing zero over it.
-                // The reference records it in the parameter table and its
+                // The established compiler records it in the parameter table and its
                 // runtime returns it from cgGetParameterDefaultValue
                 // (uniform-default-records).  Measured: `uniform float4 gTint =
                 // float4(1,2,3,4)` -> [1,2,3,4]; `uniform float gK = 0.75`
@@ -901,7 +901,7 @@ ContainerResult emitFragmentContainerImpl(
                 d.isReferenced = d.embeddedConstUcodeOffsets.empty() ? 0u : 1u;
             }
             // A struct-typed uniform is declared through its flattened
-            // members (`IN_global.video_size`, ...); the reference writes no
+            // members (`IN_global.video_size`, ...); the established compiler writes no
             // record for the struct itself.  Its slot still counted above.
             // An array of structs likewise ("light[0].position", ...).
             const std::string memberPrefix = g.name + ".", elementPrefix = g.name + "[0].";
@@ -915,7 +915,7 @@ ContainerResult emitFragmentContainerImpl(
     }
 
     // Synthetic struct-return outputs — `OUT.field = ...` member
-    // assignments emit StoreOutput with a fieldName.  The reference
+    // assignments emit StoreOutput with a fieldName.  The established compiler
     // compiler names the synthetic param `<entry>.<field>` and uses
     // paramno = 0xFFFFFFFF (no user-facing parameter index).
     for (const auto& blockPtr : entry->blocks)
@@ -1047,7 +1047,7 @@ ContainerResult emitFragmentContainerImpl(
     // A scalar return carries a semantic (`float4 main(...) : COLOR { return ... }`)
     // and the IR builder emits a StoreOutput for the return value.
     // The container needs a param entry for that synthetic output
-    // named `<entry>` (matching the reference compiler) with paramno =
+    // named `<entry>` (matching the established compiler) with paramno =
     // 0xFFFFFFFF.  Skip if the entry uses an `out` parameter shape
     // (already covered above).
     {
@@ -1091,21 +1091,21 @@ ContainerResult emitFragmentContainerImpl(
     }
 
     // Append one synthetic $kill_NNNN parameter per #pragma alphakill
-    // sampler (in source-order, which the reference compiler preserves and indexes
+    // sampler (in source-order, which the established compiler preserves and indexes
     // sequentially regardless of the original sampler's position).  These
-    // params have no name/semantic in the source — the reference compiler generates the
+    // params have no name/semantic in the source — the established compiler generates the
     // name and sets paramno = 0xFFFFFFFF (no user param number).  The
     // unique resource code 0x0cb8 is what the runtime keys off of.
     for (size_t k = 0; k < opts.alphakillSamplers.size(); ++k)
     {
         ParamDesc d;
-        // the reference compiler names these `$kill_<4-digit zero-padded index>`.
+        // the established compiler names these `$kill_<4-digit zero-padded index>`.
         // 32-byte buffer covers any practical sampler count without
         // -Wformat-truncation noise.
         char buf[32];
         std::snprintf(buf, sizeof(buf), "$kill_%04zu", k);
         d.name         = buf;
-        d.semantic     = "";  // the reference compiler emits no semantic string for these
+        d.semantic     = "";  // the established compiler emits no semantic string for these
         d.type         = kCgFloat4;
         d.res          = kCgKillMarker;
         d.var          = kCgVarying;
@@ -1116,7 +1116,7 @@ ContainerResult emitFragmentContainerImpl(
     }
 
     // When a shader uses `discard;` (KIL opcode) without a #pragma
-    // alphakill directive, the reference compiler still emits one $kill_0000
+    // alphakill directive, the established compiler still emits one $kill_0000
     // CgBinaryParameter per discard instruction at the end of the
     // table.
     if (attrs.pixelKillCount > 0 && opts.alphakillSamplers.empty())
@@ -1339,7 +1339,7 @@ ContainerResult emitFragmentContainerImpl(
                     d.semantic = sp.structRecordSemantic;
         }
 
-    // ----- Build the strings region in the reference compiler's order: per param,
+    // ----- Build the strings region in the established compiler's order: per param,
     // emit semantic (if non-empty) then name.  Track each string's
     // offset relative to the start of the container. -----
     const uint32_t headerSize     = 0x20u;
@@ -1356,7 +1356,7 @@ ContainerResult emitFragmentContainerImpl(
     };
     std::vector<StringSlots> slots(params.size());
 
-    // Per-param the reference compiler layout order (verified 2026-04-18,
+    // Per-param the established compiler layout order (verified 2026-04-18,
     // step 2 added 2026-09-13 for uniform-default-records):
     //   1. Semantic string (if any)
     //   2. Compiled default value block (if any) - 16-byte aligned,
@@ -1370,7 +1370,7 @@ ContainerResult emitFragmentContainerImpl(
     //
     // Step 2's position is measured, not assumed.  Reference fixture
     // `uniform float4 light : C3 = {1.0,2.0,3.0,4.0}` compiled with
-    // sce-cgc -p sce_fp_rsx lays the region out as: semantic 'C3' at
+    // the established compiler -p sce_fp_rsx lays the region out as: semantic 'C3' at
     // 0xc3, pad, DEFAULT BLOCK at 0xd0, embeddedConst at 0xe0, name
     // 'light' at 0xe8.  The same block appears with no semantic at
     // 0xd0 in the braced-default fixture and at 0x270/0x290 on the
@@ -1401,7 +1401,7 @@ ContainerResult emitFragmentContainerImpl(
         }
         if (!params[i].embeddedConstUcodeOffsets.empty())
         {
-            // The reference compiler aligns CgBinaryEmbeddedConstant records to the
+            // The established compiler aligns CgBinaryEmbeddedConstant records to the
             // LESSER of 8-byte and "next 16 if the 8-byte slot would
             // be mid-16-byte line" — in practice observed probes
             // always land on 16-byte boundaries.  Using 16 here
@@ -1412,7 +1412,7 @@ ContainerResult emitFragmentContainerImpl(
                 stringsStart + static_cast<uint32_t>(stringsBlob.size());
             put32(stringsBlob,
                   static_cast<uint32_t>(params[i].embeddedConstUcodeOffsets.size()));
-            // the reference compiler writes ucode offsets in descending order.
+            // the established compiler writes ucode offsets in descending order.
             auto sorted = params[i].embeddedConstUcodeOffsets;
             std::sort(sorted.begin(), sorted.end(), std::greater<uint32_t>());
             for (uint32_t off : sorted)
@@ -1448,7 +1448,7 @@ ContainerResult emitFragmentContainerImpl(
     put32(out, kBinaryFormatRevision);
     put32(out, totalSize);
     put32(out, static_cast<uint32_t>(params.size()));
-    // parameterArray: the reference writes 0, not the header size, when
+    // parameterArray: the established compiler writes 0, not the header size, when
     // there is no parameter table at all (SDK fnop.cg, 'void main() {}').
     put32(out, params.empty() ? 0u : headerSize);
     put32(out, programOffset);
@@ -1491,7 +1491,7 @@ ContainerResult emitFragmentContainerImpl(
     padTo(out, 16);
 
     // ucode: words come from FpAssembler in on-disk halfword-swapped
-    // form (matches the reference compiler).  Container is BE, ucode is treated as
+    // form (matches the established compiler).  Container is BE, ucode is treated as
     // raw u32 BE.
     for (uint32_t w : ucode) put32(out, w);
 

@@ -7,9 +7,9 @@
 # Select was Void, and the general path's predicated select masked its
 # write to lane x and broadcast the lane into every channel: every
 # channel of the merge wrong, the shader compiling and exiting 0.  The
-# reference writes all four lanes on every value move of that merge.
+# established compiler writes all four lanes on every value move of that merge.
 #
-# The assertion is on the emitted words, built from the reference's
+# The assertion is on the emitted words, built from the established compiler's
 # behaviour: every MOV whose source is an INPUT register writes the full
 # mask.  In this fixture the only MOVs that read an input are the two
 # arm moves (the comparison is an SGT, not a MOV), so the rule is exact
@@ -121,7 +121,7 @@ if bad:
         "  %s instruction %s writes mask 0x%x" % b for b in bad
     )
     raise SystemExit(
-        "FAIL: this fixture merges two float4 INPUTS, and the reference "
+        "FAIL: this fixture merges two float4 INPUTS, and the established compiler "
         "writes all four lanes on every value move of that merge; a MOV "
         "from an input with a partial mask here is the merge collapsing "
         "to one lane (vector-input-select-lanes).  Offending instructions:\n" + lines

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # integer-float-conversion: atan2 on the general fragment path.
 #
-# Oracle shape, measured from sce-cgc before implementation:
+# Measured shape, measured from the established compiler before implementation:
 #   scalar atan2 uses MIN/MAX of the absolute inputs, scalar DIVR, SGTRC,
 #   a five-MADR Horner polynomial in t*t, MUL by t, CC-predicated quadrant
 #   repair, and FENCBR before the final move.
 #
-# Vector atan2 is deliberately different: the oracle does NOT use DIVR for
+# Vector atan2 is deliberately different: the established compiler does NOT use DIVR for
 # vector division.  It emits per-lane RCP on MAX(abs(y), abs(x)), one vector
 # MUL with MIN(abs(y), abs(x)), then the vector polynomial and per-lane
 # predicated repair.  The swizzle fixture catches the raw-lane bug that
@@ -16,7 +16,7 @@
 # The polynomial constants are a minimax fit, not a Taylor series.  In
 # particular 0x3f7fffb7 is 0.9999956489, not 1.0, and 0xbeaa7e45 is not
 # exactly -1/3.  All constants are asserted by their emitted bits so later
-# "cleanup" cannot silently change the oracle coefficients.
+# "cleanup" cannot silently change the established compiler coefficients.
 #
 # CONTROL: before this slice, all positive fixtures refuse with unsupported
 # IROp::Atan2.  The VP fixture must continue to refuse: the vertex atan2
@@ -138,7 +138,7 @@ def require_common(path, label):
         raise SystemExit("FAIL: %s produced no decoded instructions" % label)
     if any(d["sat"] for d in ins if d["op"] < 0x3E):
         raise SystemExit(
-            "FAIL: %s used a destination saturate modifier; the atan2 oracle "
+            "FAIL: %s used a destination saturate modifier; the established compiler's atan2 "
             "shape has none" % label)
     if sum(1 for d in ins if d["op"] == MAD) < 5:
         raise SystemExit("FAIL: %s has fewer than five MADR polynomial stages" %
@@ -192,7 +192,7 @@ def require_vector(path, label, lanes):
     ins = require_common(path, label)
     if any(d["op"] == DIV for d in ins):
         raise SystemExit(
-            "FAIL: %s emitted DIVR for vector atan2; the oracle uses RCP/MUL" %
+            "FAIL: %s emitted DIVR for vector atan2; the established compiler uses RCP/MUL" %
             label)
     rcps = [d for d in ins if d["op"] == RCP]
     if len(rcps) < lanes:

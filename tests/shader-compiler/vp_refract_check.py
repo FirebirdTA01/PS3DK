@@ -2,7 +2,7 @@
 
 The encoded comparison control distinguishes SGT from SGE at equality without
 claiming to model the scalar unit at zero. Sources and reference containers can
-be exported/imported for private oracle checks; no oracle source is required.
+be exported/imported for private measurement checks; no measurement source is required.
 """
 import argparse
 import math

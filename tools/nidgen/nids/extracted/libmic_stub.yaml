@@ -10,7 +10,7 @@ exports:
 - name: cellMicCommand
   nid: '0xc461563c'
   signature: ''
-  notes: extracted from _cellMic_0001_31.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_31.o ; NOT FOUND in system headers
 - name: cellMicEnd
   nid: '0xc6328caa'
   signature: 'int cellMicEnd(void)'
@@ -26,7 +26,7 @@ exports:
 - name: cellMicGetDeviceIdentifier
   nid: '0xfdbbe469'
   signature: ''
-  notes: extracted from _cellMic_0001_41.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_41.o ; NOT FOUND in system headers
 - name: cellMicGetFormat
   nid: '0x48108a23'
   signature: 'int cellMicGetFormat(int dev_num, CellMicInputFormatI *format)'
@@ -42,7 +42,7 @@ exports:
 - name: cellMicGetFormatEx
   nid: '0xad049ecf'
   signature: ''
-  notes: extracted from _cellMic_0001_25.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_25.o ; NOT FOUND in system headers
 - name: cellMicGetFormatRaw
   nid: '0x4e0b69ee'
   signature: 'int cellMicGetFormatRaw(int dev_num, CellMicInputFormatI *format)'
@@ -118,7 +118,7 @@ exports:
 - name: cellMicSetMultiMicNotifyEventQueue
   nid: '0x891c6291'
   signature: ''
-  notes: extracted from _cellMic_0001_20.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_20.o ; NOT FOUND in system headers
 - name: cellMicSetNotifyEventQueue
   nid: '0x7903400e'
   signature: 'int cellMicSetNotifyEventQueue(sys_ipc_key_t key)'
@@ -146,25 +146,25 @@ exports:
 - name: cellMicSysShareClose
   nid: '0x3ace58f3'
   signature: ''
-  notes: extracted from _cellMic_0001_9.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_9.o ; NOT FOUND in system headers
 - name: cellMicSysShareEnd
   nid: '0xf82bbf7c'
   signature: ''
-  notes: extracted from _cellMic_0001_38.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_38.o ; NOT FOUND in system headers
 - name: cellMicSysShareInit
   nid: '0xd127cd3e'
   signature: ''
-  notes: extracted from _cellMic_0001_34.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_34.o ; NOT FOUND in system headers
 - name: cellMicSysShareOpen
   nid: '0xc3610dbd'
   signature: ''
-  notes: extracted from _cellMic_0001_29.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_29.o ; NOT FOUND in system headers
 - name: cellMicSysShareStart
   nid: '0xcac7e7d7'
   signature: ''
-  notes: extracted from _cellMic_0001_33.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_33.o ; NOT FOUND in system headers
 - name: cellMicSysShareStop
   nid: '0xbdfd51e2'
   signature: ''
-  notes: extracted from _cellMic_0001_28.o ; NOT FOUND in reference headers
+  notes: extracted from _cellMic_0001_28.o ; NOT FOUND in system headers
 imports: []

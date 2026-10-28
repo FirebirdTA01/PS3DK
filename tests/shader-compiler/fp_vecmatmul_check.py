@@ -201,7 +201,7 @@ def main(compiler):
                         mutation_controls(blob, matrix, swizzle, t)
                     count += 1
         # A vector times a RECTANGULAR matrix is accepted since rectangular-matrices (the
-        # reference always did: mul(float3, float3x4) is a float4 built from
+        # established compiler always did: mul(float3, float3x4) is a float4 built from
         # the three rows).  Its values are executed in rect-matrix-test.sh; here
         # it must compile and its container must agree with its ucode.
         rect = compile_blob(compiler, root, 'rectangular', 'uniform float3x4 M; float4 main(float3 t:TEXCOORD0):COLOR{return mul(t,M);}')

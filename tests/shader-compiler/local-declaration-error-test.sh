@@ -8,12 +8,12 @@
 # inventing `unknown type name 'o'` about a name that is declared - so a
 # reader is sent to the wrong line about the wrong identifier.
 #
-# THERE IS NO ORACLE FOR THIS ONE, and that is a deliberate, recorded
-# decision rather than an oversight.  The reference cascades on this input
+# THERE IS NO Measurement FOR THIS ONE, and that is a deliberate, recorded
+# decision rather than an oversight.  The established compiler cascades on this input
 # too - five messages, including a "profile specifier" warning and an error
 # on the following line - so matching it would mean copying a cascade it did
-# not intend.  The rule the project settled on: the oracle governs EMITTED
-# CODE, a diagnostic is not part of that contract, and where the reference
+# not intend.  The rule the project settled on: the established compiler governs EMITTED
+# CODE, a diagnostic is not part of that contract, and where the established compiler
 # emits a cascade with no intended single answer we may be strictly better
 # provided we say we are choosing it.  Other guards here carry expectations
 # of their own - the parse-progress rule and the preprocessor harness among

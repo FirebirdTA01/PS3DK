@@ -8,7 +8,7 @@
  * syscalls accept).  Function wrappers forward to the numbered LV2
  * syscalls declared in <lv2/syscalls.h>.
  *
- * reference-SDK-name aliases (SYS_PROCESS_PRIMARY_STACK_SIZE_*, exitspawn)
+ * Cell OS-name aliases (SYS_PROCESS_PRIMARY_STACK_SIZE_*, exitspawn)
  * are threaded in alongside the long-standing PSL1GHT spellings so code
  * authored against either surface builds unchanged.
  */
@@ -54,7 +54,7 @@
 /* Primary-thread stack-size tags written into the .sys_proc_param
  * header.  These are byte-values the loader interprets as 32K … 1M
  * requests.  Both PSL1GHT's long-standing SPAWN_STACK_SIZE_* names
- * and the reference SDK PRIMARY_STACK_SIZE_* names resolve to the same
+ * and the platform ABI PRIMARY_STACK_SIZE_* names resolve to the same
  * underlying constants. */
 #define SYS_PROCESS_SPAWN_STACK_SIZE_32K         0x10
 #define SYS_PROCESS_SPAWN_STACK_SIZE_64K         0x20
@@ -112,7 +112,7 @@
     )
 
 /* Trailing `;` inside the macro lets callers use either convention at
- * file scope: `SYS_PROCESS_PARAM(...)` (Sony reference-sample style)
+ * file scope: `SYS_PROCESS_PARAM(...)` (existing-sample style)
  * or `SYS_PROCESS_PARAM(...);` (our own samples).  The second `;` at
  * file scope is a GCC-accepted empty declaration. */
 #define SYS_PROCESS_PARAM(prio, stacksize) \
@@ -248,7 +248,7 @@ static inline void exitspawn(const char *path,
                          priority, flags);
 }
 
-/* sys_process_exit — reference-SDK snake_case spelling for the
+/* sys_process_exit — Cell OS snake_case spelling for the
  * sysProcessExit syscall already declared via <lv2/process.h>. */
 static inline __attribute__((noreturn)) void sys_process_exit(int status)
 {

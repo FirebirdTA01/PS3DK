@@ -251,7 +251,7 @@ malformed huge_nparams "parameters starting at"
 # And the table cannot start inside the eight-word header either.
 poke table_in_header 16 8
 malformed table_in_header "inside the .*-byte header"
-# parameterArray = 0 is legal ONLY with no parameters (the reference writes
+# parameterArray = 0 is legal ONLY with no parameters (the established compiler writes
 # it for 'void main() {}'); with a table to find it is still a bad locator.
 poke table_zero_with_params 16 0
 malformed table_zero_with_params "inside the .*-byte header"
@@ -259,7 +259,7 @@ printf '  %-42s %s\n' "malformed input" "13 shapes refused with a reason, none a
 
 # ---- an instruction that writes NOTHING must not render a destination ------
 # FENCBR sets OUT_NONE and then puts register 0x3F and mask 0xF into fields
-# that are meaningless with it - deliberately, to match the reference byte for
+# that are meaningless with it - deliberately, to match the established compiler byte for
 # byte.  Rendering those as a write to R63.xyzw invents a destination exactly
 # as naming an unused slot invents a read (codex).
 # The BIT decides this, not the opcode name: setting OUT_NONE on an

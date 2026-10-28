@@ -1,9 +1,9 @@
-/* sys/spu_thread.h - PPU-side reference-SDK forwarders over PSL1GHT
+/* sys/spu_thread.h - PPU-side Cell OS forwarders over PSL1GHT
  * SPU-thread syscalls.
  *
  * Pulls in PSL1GHT's <sys/spu.h> for the underlying types and inline
  * sysSpu* syscall wrappers, then re-exports them under the
- * reference-SDK snake_case names so the reference SDK source compiles
+ * Cell OS snake_case names so the platform ABI source compiles
  * unchanged.  Sample code can mix sysSpu* and sys_spu_* freely; the
  * forwarders compile down to direct branches with no runtime cost.
  */

@@ -9,7 +9,7 @@ index bffc3a1..9279075 100644
 -		register s32 result asm("r3");
 +		s32 result;
 +
-+		/* Invoke the FIFO-wrap callback via the PSL1GHT / reference SDK PRX
++		/* Invoke the FIFO-wrap callback via the PSL1GHT / system PRX
 +		 * calling convention, explicitly arranging the call frame so GCC can't
 +		 * silently break the ABI.
 +		 *

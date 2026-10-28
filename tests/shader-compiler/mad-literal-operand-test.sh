@@ -148,14 +148,14 @@ def mad_multiplier_is_half(rs, label):
 
 
 # General lowering preloads literals into temps and still emits one
-# block per literal source where the reference shares a single block between
+# block per literal source where the established compiler shares a single block between
 # the MAD's two operands - that gap is mad-literal-block-sharing's fp_mad_literal_f row and
 # it is not this assertion's subject.  What IS asserted is that the 0.5
 # multiplier is carried AS DATA: if that block vanishes or becomes zero, the
 # pixels collapse to the old flat-colour mad-literal-data failure.
 #
 # THE PACKED SHAPE, not the verbatim one: the block is {0.5, 0, 0, 0} read
-# .xxxx, which is what the reference emits for this fixture (see the
+# .xxxx, which is what the established compiler emits for this fixture (see the
 # fixture's own header).  It
 # used to be {0.5, 0.5, 0.5, 0.5} here, because the shipping path wrote
 # every lane verbatim; literal-vector-dedup-swizzle's dedup landed and this expectation moved

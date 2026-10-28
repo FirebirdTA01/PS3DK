@@ -2,7 +2,7 @@
 // block (codex, counterexample to 5bee678, 2026-09-02).  The outer guard c.a < 0.5
 // must reach the kill: where it is false (columns 0..26) the else arm e = COLOR0 has
 // e.a < 0.25 on rows 46..63, so a path that loses the outer guard kills 486 pixels the
-// reference paints, and one that keeps only an inner comparison kills a different set
+// established compiler paints, and one that keeps only an inner comparison kills a different set
 // again.  Expected at the pixel centres: reference painted 2832; outer guard dropped
 // 2346.  MEASURED 2026-09-02 16:10: general IDENTICAL at 2832/2832 (the guard pass
 // intersection cancels the merge's pair and keeps the outer literal); DEFAULT path

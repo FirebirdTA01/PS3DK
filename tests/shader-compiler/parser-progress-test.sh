@@ -7,7 +7,7 @@
 # was and the top-level loop called it again on the same token, for ever.  Any
 # failure that neither advances nor throws hung the compiler; an unknown
 # identifier in type position was the commonest way in.  95 shaders in the
-# reference SDK sample tree never terminated.
+# platform ABI sample tree never terminated.
 #
 # THE TIMEOUT IS THE RED.  On the unfixed compiler these inputs do not fail -
 # they never return - so this test's failure mode on the parent is the timeout

@@ -3,11 +3,11 @@
 libretro's quad-pixel-communication.h quad_gather(..., out float4 adjx, out
 float4 adjy, out float4 diag) is called from helpers on uninitialised locals,
 and 16 community shaders were refused ("out/inout parameters are not
-supported").  The reference accepts every row below; each expected value was
-measured on it (sce-cgc 475) and is written as the Cg expression.  Aliasing:
+supported").  The established compiler accepts every row below; each expected value was
+measured on it and is written as the Cg expression.  Aliasing:
 two(x, x) leaves the LEFTMOST parameter's value (x = 1).
 
-Still refused by name: an out parameter of struct type (the reference accepts
+Still refused by name: an out parameter of struct type (the established compiler accepts
 it - a named gap, not a silent drop).
 """
 import argparse

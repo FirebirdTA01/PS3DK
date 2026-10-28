@@ -34,7 +34,7 @@ def container(path):
     require(error is None, str(error))
     return b, records, words
 
-# Deliberately asymmetric rows/elements; this oracle for values does not
+# Deliberately asymmetric rows/elements; this measurement for values does not
 # derive an expected address from the compiler's own register selection.
 def matrix(element, width):
     return [[(element+1)*10 + row*3 + col/4 for col in range(width)]
@@ -199,7 +199,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-matrix-array-') as temp:
                         require(set(reads) == expected_reads,
                                 f'{tag} i={indices}: decoded reads {reads} != {sorted(expected_reads)}')
                     except (KeyError,ValueError) as error: failures.append(tag+': '+str(error))
-                # The reference FLR/stride/ARL chain floors -0.5 to -1.
+                # The established compiler FLR/stride/ARL chain floors -0.5 to -1.
                 # Judge decoded addresses only: out-of-array source-level
                 # results have no defined value to compare here.
                 indices = [-0.5,1.75,-0.5,1.75]

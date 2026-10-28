@@ -5,7 +5,7 @@
 | Header | `<cell/sysutil_oskdialog_ext.h>` |
 | Stub archive | `libsysutil_oskdialog_ext_stub.a` (nidgen) |
 | SPRX module | `cellOskExtUtility` |
-| Entry points | 17 (16 in pre-475 firmware) |
+| Entry points | 17 (16 in pre-4.75 firmware) |
 | Required sysmodules | `CELL_SYSMODULE_SYSUTIL` (0x0015) + `CELL_SYSMODULE_SYSUTIL_OSK_EXT` (0x003b) |
 
 ## Surface
@@ -63,7 +63,7 @@ Errors are in the base cellOskDialog range (`CELL_ERROR_FACILITY_SYSUTIL_OSK`):
 
 ### 1. SDK-version delta
 
-`cellOskDialogExtRegisterKeyboardEventHookCallbackEx` is a 475+ addition. Pre-475 firmware revisions ship only 16 entry points. Downstream consumers targeting older firmware should guard the Ex variant with a runtime-version check.
+`cellOskDialogExtRegisterKeyboardEventHookCallbackEx` is a 4.75+ addition. pre-4.75 firmware revisions ship only 16 entry points. Downstream consumers targeting older firmware should guard the Ex variant with a runtime-version check.
 
 ### 2. NULL callback rejection
 

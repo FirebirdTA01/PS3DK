@@ -1,7 +1,7 @@
 /*! \file cell/sync/queue.h
  \brief Forwarder for the cellSync FIFO queue.
 
-  The reference SDK splits CellSync* primitives across per-type headers;
+  The platform ABI splits CellSync* primitives across per-type headers;
   our SDK carries the CellSyncQueue type and the cellSyncQueue* functions
   in <cell/sync.h>.  This header bridges the include path.
 */

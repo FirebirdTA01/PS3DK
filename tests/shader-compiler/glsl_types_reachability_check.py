@@ -1,6 +1,6 @@
 """Disabled optional type names retain measured unknown-name reachability.
 
-The committed parent and SCE accept dormant unresolved names and refuse
+The committed parent and the established compiler accept dormant unresolved names and refuse
 reached/default/name-binding cases. Enabling hints do not turn a
 source-name collision or forward source function into an extension request.
 """

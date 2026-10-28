@@ -22,7 +22,7 @@ both in ptr_mode instead: that is lwz under ILP32 in either Pmode, and the
 same Pmode load everywhere else.  The sign extension keys on ptr_mode for
 the same reason.
 
-Technique observed in SCE's published GCC 4.1.1 toolchain sources.
+Technique observed in the published GCC 4.1.1 PS3 toolchain sources.
 
 --- a/gcc/config/rs6000/rs6000-call.cc
 +++ b/gcc/config/rs6000/rs6000-call.cc

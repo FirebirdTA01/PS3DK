@@ -1,17 +1,17 @@
 /*
  * cell_fs_file_api.h — file-system surface for the sys_fs SPRX.
  *
- * The reference SDK splits these declarations across <sys/fs.h>
+ * The platform ABI splits these declarations across <sys/fs.h>
  * (re-includes <sys/fs_external.h>) and <cell/fs/cell_fs_file_api.h>;
  * we flatten the type definitions into this single header so that
  * <cell/cell_fs.h> is a one-stop include.
  *
  * Stub linkage: link `-lfs_stub` (built from
  * tools/nidgen/nids/cellFs.yaml).  The 49 functions declared here
- * cover the published 475-era surface; 10 additional symbols (allocate
+ * cover the published surface; 10 additional symbols (allocate
  * file area variants, sdata-with-version, arcade hdd serial, l10n
  * conversion callbacks) are exported by the SPRX but were stripped
- * from the public 475 headers — they live in the stub archive only;
+ * from the public headers — they live in the stub archive only;
  * apps that need them forward-declare locally.
  */
 #ifndef PS3TC_CELL_FS_CELL_FS_FILE_API_H
@@ -39,7 +39,7 @@ extern "C" {
 
 /* sys_memory_container_t — user-supplied memory container handle.  Same
  * 32-bit kernel handle PSL1GHT calls sys_mem_container_t and the
- * reference SDK aliases as sys_memory_container_t.  Forward-declared
+ * platform ABI aliases as sys_memory_container_t.  Forward-declared
  * here so this header is independent of <sys/memory.h>. */
 typedef uint32_t sys_memory_container_t;
 
@@ -220,7 +220,7 @@ typedef int CellFsErrno;
 #define CELL_FS_ERROR_ENOTSDATA    ENOTSDATA
 #define CELL_FS_ERROR_EAUTHFATAL   EAUTHFATAL
 
-/* ---- Unprefixed CELL_FS_E* aliases (reference SDK shipped both forms) ---- */
+/* ---- Unprefixed CELL_FS_E* aliases (platform ABI shipped both forms) ---- */
 #define CELL_FS_EDOM         CELL_FS_ERROR_EDOM
 #define CELL_FS_EFAULT       CELL_FS_ERROR_EFAULT
 #define CELL_FS_EFBIG        CELL_FS_ERROR_EFBIG

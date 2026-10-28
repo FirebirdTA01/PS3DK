@@ -1,4 +1,4 @@
-// CONTROL: the last value as a scalar initialiser.  On the reference the
+// CONTROL: the last value as a scalar initialiser.  On the established compiler the
 // comma list, this scalar and float3(0.4, 0.4, 0.4) are one container; on
 // this compiler the constructor spelling packs its constant differently
 // (a pre-existing shape divergence), so the twin is the scalar form, which

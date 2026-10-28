@@ -14,21 +14,21 @@ LexerError::LexerError(const Token& token, const std::string& fallbackFilename)
 
 namespace
 {
-// A FORM FEED AND A VERTICAL TAB ARE NOT WHITESPACE TO sce-cgc - they are
+// A FORM FEED AND A VERTICAL TAB ARE NOT WHITESPACE TO the established compiler - they are
 // invalid input. `return<FF>t*2.0;` in ordinary code is
 // "error C0000: syntax error, unexpected $undef" there, and std::isspace
 // accepts both, so skipping them silently made us accept a program the
-// reference refuses.
+// established compiler refuses.
 //
 // Doing it HERE rather than in the preprocessor is what makes the whole
 // measured table come out right: the character only matters when it reaches
 // the token stream, so a form feed inside a comment, inside a discarded #if
 // region, inside a #pragma, or in the body of a macro that is never expanded
-// stays harmless - all four are accepted by the reference - while one in code,
+// stays harmless - all four are accepted by the established compiler - while one in code,
 // or in a macro body that IS expanded, is refused.
 //
 // It surfaces as our ordinary "unknown character" diagnostic rather than the
-// reference's C0000 wording; both refuse and write nothing, and the guard
+// established compiler's C0000 wording; both refuse and write nothing, and the guard
 // pins the class rather than the text.
 bool isSkippableSpace(char c)
 {
@@ -137,7 +137,7 @@ void Lexer::initKeywords() {
     keywords["samplerCUBE"] = TokenType::KW_SAMPLERCUBE;
     keywords["samplerRECT"] = TokenType::KW_SAMPLERRECT;
 
-    // Legacy texture-object spellings: the reference compiles each one
+    // Legacy texture-object spellings: the established compiler compiles each one
     // byte-identically to the matching sampler type, in both profiles.
     keywords["texobj1D"] = TokenType::KW_SAMPLER1D;
     keywords["texobj2D"] = TokenType::KW_SAMPLER2D;
@@ -156,14 +156,14 @@ void Lexer::initKeywords() {
     keywords["usamplerCUBE"] = TokenType::KW_USAMPLERCUBE;
 
     // texobj<K> is the Cg 1.x spelling of sampler<K> and is what the
-    // reference SDK's samples use: 109 texobj2D and 2 texobj3D occurrences,
+    // platform ABI's samples use: 109 texobj2D and 2 texobj3D occurrences,
     // and every one of them an unknown type name here.  Measured against
-    // the reference, the two spellings of the same program compile to
+    // the established compiler, the two spellings of the same program compile to
     // byte-identical containers - sampled and declared-but-unused alike, so
     // the parameter table records them the same way too.  An alias, not a
     // type: same token, nothing downstream needs to know (texobj-sampler-alias).
     //
-    // These five and no more.  The reference REJECTS texobj2DShadow and
+    // These five and no more.  The established compiler REJECTS texobj2DShadow and
     // texobjRECTShadow with a syntax error at the identifier, so the family
     // stops where measurement says it stops, not where the pattern suggests.
     keywords["texobj1D"] = TokenType::KW_SAMPLER1D;

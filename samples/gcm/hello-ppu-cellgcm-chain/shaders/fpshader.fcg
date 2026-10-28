@@ -2,7 +2,7 @@
 //
 // Validates rsx-cg-compiler's FP arithmetic-chain emit: vcol + a + b + c
 // with three runtime-patched uniforms.  Cannot be folded since the
-// uniforms are dynamic, so the reference compiler emits the full 4-instruction chain
+// uniforms are dynamic, so the established compiler emits the full 4-instruction chain
 // shape:
 //
 //   MOVH H0.xyzw, f[COL0]                      # preload varying as fp16

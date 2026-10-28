@@ -145,7 +145,7 @@ def check(path, order_only=False, distinct=False):
     require(fog_reads and min(fog_reads) > kills[0], 'fog materialized before alpha kill')
     if not order_only and not distinct:
         # This change covers scheduling and input preload sharing. Reaching
-        # the reference's two registers requires the separately reviewed
+        # the established compiler's two registers requires the separately reviewed
         # texture/output composition change.
         require(slots <= 9 and registers <= 3, 'fog exceeds 9-slot/3-register bound')
     if distinct:

@@ -35,7 +35,7 @@ compile() {   # $1 shader, $2 tag, $3 extra flags
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$2.log" >&2
         fail "$2 did not compile.  An int literal in a float constructor
-converts in Cg and in the reference compiler; refusing it is the defect
+converts in Cg and in the established compiler; refusing it is the defect
 (integer-literal-constructor-conversion)."
     fi
 }

@@ -1,6 +1,6 @@
 """Rectangular matrix guard checker (rectangular-matrices / rectangular-matrix-row-access / rectangular-matrix-reflection).
 
-Reference (sce-cgc 475) contract, measured 2026-09-15 in .local/probe-rect:
+Reference contract, measured 2026-09-15 in .local/probe-rect:
 an RxC matrix is R rows of C-wide vectors; mul(M[RxC], v[C]) is one DP(C)
 per row giving v[R]; mul(v[R], M[RxC]) accumulates the rows giving v[C];
 M[i] is a row, M[i][j] a lane; constructors take one row vector of width C
@@ -14,8 +14,8 @@ Values are judged by executing OUR fragment ucode numerically on an exact
 binary input (every product and sum is representable, so no rounding model
 is assumed) and comparing with an independent row/column formula; vertex
 programs are executed the same way with uniform rows supplied from their
-own records.  Byte identity to the reference is a separate measurement and
-is NOT assumed here (our FP output already differs from the reference in
+own records.  Byte identity to the established compiler is a separate measurement and
+is NOT assumed here (our FP output already differs from the established compiler in
 input copies and export folds for square matrices).
 
 Usage: rect_matrix_check.py <workdir-with-compiled-containers>

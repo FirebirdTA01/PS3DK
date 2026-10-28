@@ -8,7 +8,7 @@
 //
 // needsInlineConstPreload in legalizeInputOperands has always handled this
 // shape; comparisons were absent from the list of ops that pass looks at,
-// so they never reached it.  The reference preloads the uniform into a
+// so they never reached it.  The established compiler preloads the uniform into a
 // register and keeps the literal inline.
 //
 // The assertion is that no instruction carries more than one const block,

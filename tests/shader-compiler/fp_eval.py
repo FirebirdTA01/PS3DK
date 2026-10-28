@@ -2,7 +2,7 @@
 
 The existing value checkers are fixture-specific.  This one runs any program
 built only from the ops it models, on caller-supplied inputs, and returns the
-colour output, so two containers (ours and the reference's) can be compared
+colour output, so two containers (ours and the established compiler's) can be compared
 by VALUE when their bytes differ.  It refuses, with a reason, anything it does
 not model rather than stepping over it:
 
@@ -184,7 +184,7 @@ def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False, out_lanes=(0,
     `out_lanes` names the colour lanes the program defines (a float2 output writes
     only x and y); only those are read, and each must have been written."""
     # zero_temps: an R temp never written reads 0 (measured on the hardware
-    # model the reference relies on: a loop's induction variable and
+    # model the established compiler relies on: a loop's induction variable and
     # accumulators start unwritten).  Off by default, so a read of an unwritten
     # temp stays a finding everywhere else.
     regs = _Regs(zero_temps)
@@ -225,7 +225,7 @@ def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False, out_lanes=(0,
                     count = (w[2] >> 2) & 0xFF
                     init, step = (w[2] >> 10) & 0xFF, (w[2] >> 19) & 0xFF
                     # Only the measured form is modelled: init 0, step 1.  A
-                    # step-0 loop (the outer loop of the reference's 256-trip
+                    # step-0 loop (the outer loop of the established compiler's 256-trip
                     # nest) or another init is refused until its counter
                     # semantics are measured (review: codex, FP-LOOP-DESIGN-R1).
                     if init != 0 or step != 1:

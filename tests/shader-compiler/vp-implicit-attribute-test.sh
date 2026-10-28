@@ -3,7 +3,7 @@
 # member - takes the lowest ATTR<N> no explicit input semantic claims, in
 # declaration order across parameters and members, and only when the
 # program reads it; an unread one has no resource and takes no index
-# (measured on the reference, every row below).  Ours bound a member to
+# (measured on the established compiler, every row below).  Ours bound a member to
 # its position in its struct, so a member beside a COLOR or NORMAL input
 # read that input's attribute, with exit 0.  Judged by the records and by
 # value: each input gets its own random vector and a distinct weight, and
@@ -26,7 +26,7 @@ import vp_pow_vector_check as ev
 f32 = lambda v: struct.unpack('>f', struct.pack('>f', v))[0]
 ATTR0, NONE = 0x841, 0xcb8
 NL = chr(10)
-# (name, source, weighted terms, bindings measured on the reference)
+# (name, source, weighted terms, bindings measured on the established compiler)
 ROWS = [
  ('member_gap', 'struct S { float4 a; float4 b; float4 c; float4 d; };' + NL +
   'float4 main(S s) : POSITION { return s.a + s.c * 2; }', [('s.a',1),('s.c',2)]),

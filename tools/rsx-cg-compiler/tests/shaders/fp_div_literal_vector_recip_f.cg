@@ -1,7 +1,7 @@
 // scalar-divr-lowering: vector division by a scalar literal divisor follows the same
 // reference fold as the scalar case: one vector MUL by the reciprocal, not
 // per-lane RCP and not DIVR.  (q is returned as it is: (c / 0.01) * 0.01
-// folds to c in the reference, which would hide the reciprocal.)
+// folds to c in the established compiler, which would hide the reciprocal.)
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)
 {
     float3 q = c.xyz / 0.01;

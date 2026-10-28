@@ -174,11 +174,11 @@ def main(compiler, output=None, oracle=False):
         for name,lane,mod,text in cases():
             src=root/(name+'.cg');out=root/(name+'.fpo')
             if oracle:
-                require(not out.exists(), 'stale oracle output')
+                require(not out.exists(), 'stale measurement output')
                 src.write_text(text)
                 def win(p): return 'C:/'+str(p)[7:] if str(p).startswith('/mnt/c/') else str(p)
                 proc=subprocess.run([compiler,'-p','sce_fp_rsx','-o',win(out),win(src)],capture_output=True,timeout=30)
-                require(proc.returncode == 0 and out.is_file(), 'oracle compile failed '+repr(proc.stderr))
+                require(proc.returncode == 0 and out.is_file(), 'measurement compile failed '+repr(proc.stderr))
                 blob=out.read_bytes()
             else: blob=compile_blob(compiler,src,out,text)
             try: judge(blob,lane,mod);error=None

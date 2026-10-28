@@ -1,5 +1,5 @@
 // function-visibility commit 1.  REFUSE: a UNIFORM DEFAULT INITIALISER roots the walk too, not just a static
-// one.  `uniform float g = f(0.25);` reaches f's body and the reference
+// one.  `uniform float g = f(0.25);` reaches f's body and the established compiler
 // name-checks it there.
 float f(float t) { return missing; }
 uniform float g = f(0.25);

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # macro-parenthesis-adjacency: A MACRO IS FUNCTION-LIKE ONLY WHEN '(' IMMEDIATELY FOLLOWS THE
 # NAME.  With a space or a tab between them the parenthesis is the first
-# character of an OBJECT-LIKE body.  Measured against sce-cgc 475.
+# character of an OBJECT-LIKE body.  Measured against the established compiler.
 #
 # WHAT WENT WRONG.  processDefine matched
 #     #\s*define\s+(\w+)(\s*\(([^)]*)\))?\s*(.*)
@@ -27,13 +27,13 @@
 #               expanded the macro to something else entirely.
 #   BODY ROW    `#define K (x) (2.0)` is the one that proves the rule changes
 #               what the BODY IS rather than merely accepting more.  The
-#               reference expands it and then fails on the undefined x
+#               established compiler expands it and then fails on the undefined x
 #               (C1008).  Ours fails inside the expanded text too.  The
 #               assertion is that the refusal does NOT name K - that was the
 #               old behaviour and it means the macro was never defined.
 #   C0105       the two no-space failures.  `#define K(3.14159f)` and
 #               `#define K(` are function-like definitions whose parameter
-#               list cannot be parsed, and the reference rejects the
+#               list cannot be parsed, and the established compiler rejects the
 #               DEFINITION.  Separate code paths: the first matches the
 #               optional group, the second does not match it at all.
 #   CONTROLS    a real function-like macro, called with and without a space,
@@ -126,14 +126,14 @@ refuse_not_saying ${P}_emptyparens_refuse_f "C0105" "#define K () is a body, not
 # ---- a form feed or vertical tab is INVALID INPUT, not a separator ----
 # These are the cells codex found on the first revision: dropping \s* from the
 # separator made `#define K<FF>(1.0)` object-like, so it ACCEPTED where the
-# reference refuses.  NOT "anywhere in the source" - that was my first wording
-# and it is wrong, as codex made me qualify: the reference refuses the
+# established compiler refuses.  NOT "anywhere in the source" - that was my first wording
+# and it is wrong, as codex made me qualify: the established compiler refuses the
 # character where it REACHES THE TOKEN STREAM.  A form feed in a comment, in a
 # macro body that is never expanded, or in an argument bound to a parameter
 # the body never names, is accepted - the accept rows below are those cases.
 # The general rule is carded (deferred-macro-token-validation) and these rows pin the acceptance
 # this slice introduced.
-# The reference says "error C0000: syntax error, unexpected $undef"; we say
+# The established compiler says "error C0000: syntax error, unexpected $undef"; we say
 # "unknown character", because the character reaches our lexer as an unknown
 # token rather than a bad expression.  Both refuse and write nothing, and the
 # row pins OUR class - a divergence in wording, named here rather than papered
@@ -145,7 +145,7 @@ refuse_saying ${P}_formfeed_name_refuse_f "C0105" "a form feed BEFORE the name i
 # WHERE THE RULE LIVES: the character is an error exactly where it is
 # TOKENISED.  These three are the whole statement, and the middle one is why
 # the check is not in the #define handler.
-refuse_saying ${P}_formfeed_code_refuse_f "unknown character" "a form feed in ordinary code (the reference refuses; we used to accept)"
+refuse_saying ${P}_formfeed_code_refuse_f "unknown character" "a form feed in ordinary code (the established compiler refuses; we used to accept)"
 accept ${P}_formfeed_unused_f  "a form feed in a macro body that is NEVER expanded"
 accept ${P}_formfeed_comment_f "a form feed inside a comment"
 
@@ -159,7 +159,7 @@ refuse_saying ${P}_ff_used_arg_refuse_f  "unknown character" "the same argument 
 
 # "Never expanded" was too strong, and it shipped a WRONG ACCEPT (CI on
 # 14efd398, preprocessor-harness-test).  An argument the body never names is
-# never OUTPUT, but the reference still SCANS it for macro calls: a wrong
+# never OUTPUT, but the established compiler still SCANS it for macro calls: a wrong
 # argument count inside it is C0107.  Only a body that does not tokenise is
 # held back, because a scan never reaches the token stream.
 refuse_saying ${P}_unused_arg_arity_refuse_f        "incorrect number of arguments" "a wrong-arity call inside an argument the body never names"
@@ -169,7 +169,7 @@ accept        ${P}_unused_arg_nested_ff_f           "an untokenisable body reach
 
 # A ## OPERAND TAKES THE RAW ARGUMENT - decided per OCCURRENCE, not per
 # parameter. The mixed row is the one that forces it: the same parameter
-# pasted AND plain, which the reference refuses while accepting every
+# pasted AND plain, which the established compiler refuses while accepting every
 # paste-only shape above it.
 accept        ${P}_paste_left_f   "BAD as the LEFT operand of ##"
 accept        ${P}_paste_right_f  "BAD as the RIGHT operand of ##"
@@ -185,7 +185,7 @@ accept        ${P}_paste_plain_f  "an ordinary paste, the control that ## still 
 # something else that also compiled", and an accept-only row is exactly what
 # let the pre-revision-4 per-parameter rule look right on every shape it did
 # not happen to refuse (codex's condition on revision 4, endorsed by Fable).
-# Measured, not assumed: all five equal the literal on the reference
+# Measured, not assumed: all five equal the literal on the established compiler
 # (43a4ac87280b) and here (29a658971f7e), so one twin is the control for all.
 accept ${P}_paste_twin_f "the literal the pasted value expands to"
 same   ${P}_paste_left_f   ${P}_paste_twin_f "the LEFT-operand paste is the value 2.0"

@@ -35,7 +35,7 @@ public:
     void emit(const struct nvfx_insn& insn, uint8_t opcode);
 
     // Emit one instruction word containing both a VEC-slot op and a
-    // SCA-slot op.  This is explicit only; callers use it where an oracle
+    // SCA-slot op.  This is explicit only; callers use it where an measurement
     // schedule requires co-issue, so existing shaders are not rescheduled
     // heuristically.
     void emitCoIssued(const struct nvfx_insn& vecInsn, uint8_t vecOpcode,
@@ -45,7 +45,7 @@ public:
     // (NVFX_COND_*) holds for lane `ccLane` (0..3 = x..w) of condition
     // register `ccReg`.  The target is set later by setBranchTarget, once
     // the final instruction indices are known.  Returns the instruction
-    // index.  Measured on the reference: every standalone BRA is
+    // index.  Measured on the established compiler: every standalone BRA is
     // h0 = 0x001f8000 | cond << 10 | lane swizzle | ccReg << 25,
     // h1 = 0x4800000d, h2 = 0x8106c080 | IADDRH, h3 = 0x00401ffc | IADDRL << 29
     // (target = IADDRH << 3 | IADDRL; nouveau's nv40_vertprog.h agrees).

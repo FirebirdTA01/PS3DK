@@ -405,7 +405,7 @@ public:
     IROp predOp = IROp::Nop;         // For PredCarry: the inner op (Add/Mul/Mad/...)
     // For Discard: the guard operand is the condition on the path that
     // REACHES the discard, and this flag says the kill fires where that
-    // condition is FALSE.  The reference folds a negated guard into the
+    // condition is FALSE.  The established compiler folds a negated guard into the
     // KIL's condition-code test (NE becomes EQ) and leaves the
     // comparison alone rather than inverting it, so the flag has to
     // travel with the instruction (CF-2, general-path-discard).
@@ -420,7 +420,7 @@ public:
     // Struct-flattened entry params:
     //   LoadAttribute  for `input.pos` carries structParamName="input", fieldName="pos"
     //   StoreOutput    for `o.pos = ...` carries fieldName="pos" (parent struct name is
-    //                  implicit — the reference compiler names outputs `<entry-func>.<field>`,
+    //                  implicit — the established compiler names outputs `<entry-func>.<field>`,
     //                  not `<struct-instance>.<field>`)
     std::string structParamName;     // Source struct-instance name (input side only)
     std::string fieldName;           // Struct member name (input + output)
@@ -467,7 +467,7 @@ public:
 
 // One member of a varying entry-point STRUCT parameter, flattened: nested
 // struct members by their path ("in1.t"), array members one per element
-// ("arr[1]").  The reference declares every member in struct order, read or
+// ("arr[1]").  The established compiler declares every member in struct order, read or
 // not, so the containers need the whole list, not just the loads.
 struct IRInputMember
 {
@@ -498,7 +498,7 @@ struct IRParameter
     // Compiled DEFAULT of a uniform entry parameter, evaluated from the
     // source's `= ...` (uniform-default-records A1).  Same shape and meaning as
     // IRGlobal::initialValue below: empty when the parameter has no default.
-    // The reference records it in the parameter table and writes it into the
+    // The established compiler records it in the parameter table and writes it into the
     // inline const block, exactly as it does for a file-scope uniform.
     std::vector<float>   initialValue;
     std::vector<int64_t> initialIntValues;
@@ -506,7 +506,7 @@ struct IRParameter
     // paramno.  It differs from its index here when an earlier uniform
     // struct parameter was flattened into one parameter per member
     // (uniform-struct-entry-parameter), and every flattened member keeps its
-    // struct's ordinal, as the reference records them.  -1: use the index.
+    // struct's ordinal, as the established compiler records them.  -1: use the index.
     int sourceOrdinal = -1;
     // A varying struct entry parameter's members in struct order (see
     // IRInputMember).  Empty when the struct holds a member shape this list
@@ -545,7 +545,7 @@ public:
     // the order the output records are declared in.
     std::vector<std::string> returnMemberOrder;
     // Semantic-less members of the returned struct the program never
-    // writes.  The reference declares them with no resource and binds no
+    // writes.  The established compiler declares them with no resource and binds no
     // implicit index to them; a written one is stored like any output.
     std::vector<IRParameter> unwrittenImplicitOutputs;
     std::vector<IRParameter> parameters;
@@ -561,7 +561,7 @@ public:
     IRModule* parentModule = nullptr;
     bool isEntryPoint = false;
     // Implicit (semantic-less) inputs that CLAIM a TEXCOORD although the
-    // program may never read them (t_8c4a982e).  Measured on the reference:
+    // program may never read them (t_8c4a982e).  Measured on the established compiler:
     // an input that flows into the return value of an inlined call - a user
     // helper, or a standard-library function implemented as one (sin, lerp,
     // mul, ...; not the hardware primitives dot, abs, pow, tex2D, ...) -

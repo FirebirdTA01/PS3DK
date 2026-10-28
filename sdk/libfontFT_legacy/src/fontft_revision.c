@@ -3,7 +3,7 @@
  * cellFontFTGetStubRevisionFlags, which the inline
  * cellFontInitLibraryFreeType in <cell/font/libfontFT.h> calls. It is not a
  * firmware export: the stub archive supplies it. The value is the one the
- * reference SDK's stub archive reports.
+ * platform ABI's stub archive reports.
  */
 
 #include <stddef.h>

@@ -19,7 +19,7 @@
  *   spu_printf_attach_thread(thread) / detach_thread(thread)
  *     Same but for a single SPU thread.
  *
- * The reference SDK ships these in libc.sprx; the SPRX-side
+ * The platform ABI ships these in libc.sprx; the SPRX-side
  * implementation (and RPCS3's HLE for it) does not connect port 1
  * via sys_spu_thread_group_connect_event_all_threads, so SPU
  * spu_printf() calls deliver CELL_ENOTCONN and the message is

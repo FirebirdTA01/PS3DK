@@ -19,7 +19,7 @@
  *      then: discard
  *
  * into `discard %c`, and the else-arm case into `discard %c` with the
- * instruction's `guardIsNegated` flag set — the shape the reference
+ * instruction's `guardIsNegated` flag set — the shape the established compiler
  * emits, which predicates the KIL on EQ rather than inverting the
  * comparison.
  *

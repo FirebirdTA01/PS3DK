@@ -1,6 +1,6 @@
 # libPSGLFX_stub -- build-unblock placeholder
 #
-# The reference SDK's unconditional -lPSGLFX flag resolves against the
+# The platform ABI's unconditional -lPSGLFX flag resolves against the
 # closed-source CgFX Effects Framework runtime (not distributed).
 # cgb_basic_psgl (and other CGB samples) do not call *any* PSGLFX
 # symbols; they carry the flag by template convention only.

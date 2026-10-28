@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # projective-texture-fetch: tex2Dproj(sampler2D, float3|float4) - the projective texture
-# fetch - is ONE NV40 instruction, TXP (opcode 0x18), as the reference emits
-# it.  texCUBEproj stays refused in this slice (see its row).  Four reference-SDK fragment
+# fetch - is ONE NV40 instruction, TXP (opcode 0x18), as the established compiler emits
+# it.  texCUBEproj stays refused in this slice (see its row).  Four Cell OS fragment
 # shaders (the two ShadowMapFp, Boy_FaceShadowFp, shadow_f) stopped at
 # "nv40-general: unsupported IR op sampleproj".
 #
-# MEASURED ON THE REFERENCE, 2026-09-07 (probes C:/cgdev/txp-probe):
+# MEASURED ON The established compiler, 2026-09-07 (probes C:/cgdev/txp-probe):
 #   * TXP reads the coordinate exactly as TEX reads it - the input register
 #     with its swizzle (TEX0.xyzw), or the temp an expression produced (MUL
 #     R0; TXP R0 <- R0) - and writes the lanes the program consumes (mask x
@@ -13,18 +13,18 @@
 #     lane, so the float3 spelling tex2Dproj(s, uv.xyw) is also TXP with
 #     the identity read of the varying.
 #   * A half output takes the fetch in R and converts at the store (TXP R0;
-#     MOV H0 <- R0 prec=1) - byte-identical to the reference here.
+#     MOV H0 <- R0 prec=1) - byte-identical to the established compiler here.
 #   * texCUBEproj is the same TXP on a cube sampler, with DISABLE_PC on the
 #     instruction that reads the varying - kept REFUSED here (see the row).
 #   * Two projective fetches from two samplers are two TXPs on two units.
-#   * The reference ACCEPTS tex2Dproj in a vertex program (vertex texture
+#   * The established compiler ACCEPTS tex2Dproj in a vertex program (vertex texture
 #     fetch, dividing by the coordinate's x); this compiler lowers VP fetches
 #     to TXL but refuses VP tex2Dproj by name - a divergence, not imitated.
 #
 # CONTROL: every accept row fails on a compiler before the TXP lowering
 # ("unsupported IR op sampleproj"), the refusal row is checked against a
 # stub that accepts everything, and with PS3_REF_CG_COMPILER set the rows
-# in BYTE_IDENTICAL must equal the reference's container byte for byte.
+# in BYTE_IDENTICAL must equal the established compiler's container byte for byte.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -115,7 +115,7 @@ forbid fp_txp_proj4_f '^[0-9]+ TEX '
 accept fp_txp_proj3_f "tex2Dproj(float3): divides by the coordinate's last lane"
 expect fp_txp_proj3_f '^[0-9]+ TXP dst=R[0-9]+ mask=xyzw .* s0=TEX0\.'
 # A float3 coordinate that lives in a TEMP or a CONSTANT has no w lane of
-# its own: the hardware divides by source W, so the reference reads .xyzz
+# its own: the hardware divides by source W, so the established compiler reads .xyzz
 # (review: codex - the candidate read .xyzw and divided by an unwritten w,
 # or by the literal block's zero).  The varying spellings already arrive
 # with the last lane smeared; these three do not.
@@ -150,7 +150,7 @@ expect fp_txp_two_f '^[0-9]+ ADD '
 # wrong bit.
 refuse "texCUBEproj (reference: TXP with DISABLE_PC on the varying read)" fp_txp_cube_f sce_fp_rsx "texCUBEproj"
 
-refuse "tex2Dproj under sce_vp_rsx (the reference accepts; a VP tex2Dproj refuses here by name)" vp_txp_refuse_v sce_vp_rsx "texture"
+refuse "tex2Dproj under sce_vp_rsx (the established compiler accepts; a VP tex2Dproj refuses here by name)" vp_txp_refuse_v sce_vp_rsx "texture"
 
 # ------------------------------------------------ reference byte identity
 BYTE_IDENTICAL="fp_txp_proj4_out_f fp_txp_half_out_f"
@@ -158,14 +158,14 @@ if [[ -n "${PS3_REF_CG_COMPILER:-}" ]]; then
     [[ -x "$PS3_REF_CG_COMPILER" ]] || fail "PS3_REF_CG_COMPILER is not executable"
     for stem in $(ls "$shaders" | grep -E '^fp_txp_.*_f\.cg$' | grep -v cube | sed 's/\.cg$//'); do
         "$PS3_REF_CG_COMPILER" -profile sce_fp_rsx -o "$work/$stem.ref" "$shaders/$stem.cg" >/dev/null 2>&1 \
-            || fail "$stem: the reference refused a fixture it is recorded as accepting"
+            || fail "$stem: the established compiler refused a fixture it is recorded as accepting"
         [[ -s "$work/$stem.bin" ]] || continue
         if cmp -s "$work/$stem.bin" "$work/$stem.ref"; then verdict=identical; else verdict=differs; fi
         if [[ " $BYTE_IDENTICAL " == *" $stem "* ]]; then
-            [[ $verdict == identical ]] || fail "$stem: no longer byte-identical to the reference"
-            pass "$stem byte-identical to the reference"
+            [[ $verdict == identical ]] || fail "$stem: no longer byte-identical to the established compiler"
+            pass "$stem byte-identical to the established compiler's"
         else
-            printf 'INFO: %s %s from the reference (not pinned)\n' "$stem" "$verdict"
+            printf 'INFO: %s %s from the established compiler (not pinned)\n' "$stem" "$verdict"
         fi
     done
 fi

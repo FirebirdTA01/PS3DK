@@ -1,15 +1,15 @@
 """any() reduces nonzero scalar/vector lanes; it evaluates its argument once.
 
 Reference475: widths 1..4, float/half/int/bool, FP/VP, zero and signed live
-lanes all equal the explicit reduction on the reference. Bool operands use
-direct OR (the reference rejects bool != 0). Our twins compare entire
+lanes all equal the explicit reduction on the established compiler. Bool operands use
+direct OR (the established compiler rejects bool != 0). Our twins compare entire
 containers. Source-defined any remains a source call.
 Scalar all() (reported C1101 "ambiguous"): reference475 accepts all() and any()
 on a scalar float/half/int/bool and on float/int/bool literals in both
 profiles, and every scalar all(x) is byte-identical to any(x) and to the
 nonzero twin there; the scalar rows below pin that. The VP half/int
 conversion gaps refuse all() exactly as they refuse any().
-The spatial rig pair is strict on ours; the reference emits different legal
+The spatial rig pair is strict on ours; the established compiler emits different legal
 instruction sequences for those spellings. Both match on pixels, with two
 output levels in R/B and a last-lane mutant differing on half the image.
 Implementation mutants: skip last lane, AND for OR, evaluate the argument twice.
@@ -58,7 +58,7 @@ def cases():
         for name,values in [('zero','0.0,-0.0,0.0,-0.0'),('negative','0.0,0.0,0.0,-2.0'),('positive','0.0,3.0,0.0,0.0')]:
             setup='float4 v=float4('+values+');'
             yield profile,name,program(profile,setup,'any(v)'),program(profile,setup,'v.x!=0 || v.y!=0 || v.z!=0 || v.w!=0')
-        # constant-any-fold: reference folds this literal reduction; ours still emits
+        # constant-any-fold: the established compiler folds this literal reduction; ours still emits
         # an exact runtime reduction. Pin it against our explicit form.
         setup='float2 v=float2(-1.0,0.0);'
         yield profile,'negative-literal-lane',program(profile,setup,'any(v)'),program(profile,setup,'v.x!=0 || v.y!=0')
@@ -77,7 +77,7 @@ def cases():
         yield profile,'scalar-all-float',program(profile,'','all(t.x)'),program(profile,'','t.x != 0')
         setup='bool v = t.x != 0;'
         yield profile,'scalar-all-bool',program(profile,setup,'all(v)'),program(profile,setup,'v')
-        # Literal arguments: the reference folds all(2.0) and any(2.0) to the
+        # Literal arguments: the established compiler folds all(2.0) and any(2.0) to the
         # same constant as true; ours emits a runtime reduction for the float
         # literal (constant-any-fold above), so pin all == any and the bool
         # literal against its value.
@@ -160,7 +160,7 @@ def main(compiler):
                             refuse=True,diagnostic=diagnostic)
                 refusals+=1
                 if width==1:
-                    # Same inherited gap through scalar all() (the reference accepts).
+                    # Same inherited gap through scalar all() (the established compiler accepts).
                     compile_one(compiler,root,'vp-conversion-gap-all-'+typ,
                                 program('sce_vp_rsx',setup,'all(v)'), 'sce_vp_rsx',
                                 refuse=True,diagnostic=diagnostic)

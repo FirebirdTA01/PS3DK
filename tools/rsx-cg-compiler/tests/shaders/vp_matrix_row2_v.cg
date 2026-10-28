@@ -2,7 +2,7 @@
 //
 // `m[0]` refused on both paths - the default one with "StoreOutput source
 // is not a direct Load or matvecmul", the general one with "operand could
-// not be resolved" - although the reference compiles it to a single
+// not be resolved" - although the established compiler compiles it to a single
 // instruction:
 //
 //     MOV o[8], c[256];

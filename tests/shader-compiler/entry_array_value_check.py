@@ -1,6 +1,6 @@
 """Entry input arrays: reference-measured element bindings, not vector lanes.
 
-The reference reads TEXCOORD0 and TEXCOORD1 for float4 a[2]:TEXCOORD0.
+The established compiler reads TEXCOORD0 and TEXCOORD1 for float4 a[2]:TEXCOORD0.
 The pre-array compiler instead broadcast TEX0.x/TEX0.y, and member-array
 tracking then hid that fallback on helper calls. Distinct inputs prove values
 independently of acceptance or paired spellings sharing the same compiler bug.

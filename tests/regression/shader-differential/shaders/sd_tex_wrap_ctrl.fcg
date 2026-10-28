@@ -6,7 +6,7 @@
 // 0..31 only, and tex0's permuted alpha ramp never dropped below 0.5
 // there, so four of the nine corpus discard witnesses (th06_probe_alpha,
 // probe_mulrgb, probe_texrgb, th06_rep: `t.a < 4/255`) read discard-blind
-// on the reference side.  The rig now addresses every texture WRAP, so a
+// on the established compiler side.  The rig now addresses every texture WRAP, so a
 // 1.0-wide window traverses every ramp wherever it sits; this row is the
 // proof that wrapped sampling lands on the texel the arithmetic twin
 // predicts (sd_tex_wrap_baked.fcg, frac-based).  Same role as the plain

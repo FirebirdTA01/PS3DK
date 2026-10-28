@@ -2,7 +2,7 @@
 
 Independent expected fx12 clamp/rounding values, and once-only side effects.
 Runtime fixed precision is deliberately not inferred from constant folding.
-Use --reference for privately supplied sce-cgc; no reference payload is stored.
+Use --reference for privately supplied the established compiler; no reference payload is stored.
 """
 import argparse
 import json

@@ -241,7 +241,7 @@ EOF
 # fp_transpose_check.py walks the emitted program and requires the exact
 # dot products.  See that file's header for what it refuses to model.
 #
-# The double spelling is here because the reference folds it: sce-cgc emits
+# The double spelling is here because the established compiler folds it: the established compiler emits
 # a BYTE-IDENTICAL container for transpose(transpose(m)) and m, in both
 # profiles.  We emit 32 fragment instructions where the direct spelling
 # takes 8.  That distance is a scheduling gap, carded separately - and it
@@ -517,7 +517,7 @@ if len(fetches1) != 3:
     sys.exit(f"FAIL typed_tex: expected 3 TEX (0x17) instructions, got {len(fetches1)}")
 
 # A half-typed fetch is an fp16 DESTINATION, not fp16 arithmetic: the
-# reference writes h2tex2D and h3texCUBE into the H bank with the
+# established compiler writes h2tex2D and h3texCUBE into the H bank with the
 # destination-half bit set and the instruction still at prec=0, and the
 # float-typed fetch beside them into R.  The two fields are independent
 # (bit 7 is the bank, bits 22..23 the arithmetic precision), so a check on
@@ -586,7 +586,7 @@ if 0x31 not in opcodes3:
 # is the class this composition broke in (the TXB fetch was invisible to
 # the surviving-texture classifier, so its sampler got no unit at all).
 # The ABSOLUTE numbers are deliberately not asserted: our allocator keeps
-# relative declaration order for used implicit samplers and the reference
+# relative declaration order for used implicit samplers and the established compiler
 # numbers by first use, so this source is 3D=1/2D=0 here and 3D=0/2D=1
 # there.  That gap is recorded (sampler-first-use-order) and is not this row's subject.
 #
@@ -738,10 +738,10 @@ if 0x1D in opcodes4_zero:
 if len(insns4_zero) > 4:
     sys.exit(f"FAIL lit_zero: expected at most 4 instructions (3 arithmetic + export fold), got {len(insns4_zero)}")
 
-# The reference's zero-exponent program is MOV R0.x, TEX0; MAX R0.y, R0.x,
+# The established compiler's zero-exponent program is MOV R0.x, TEX0; MAX R0.y, R0.x,
 # 0; LITEX2 R0, R0.xyzz - it NEVER READS the ndoth lane, so its result
 # cannot depend on that argument's sign (codex, from his own decode of the
-# reference).  Ours read it: the earlier candidate gated z on ndoth > 0
+# established compiler).  Ours read it: the earlier candidate gated z on ndoth > 0
 # with SGT/MUL/MAD.  Counting opcodes cannot see that; the operand
 # swizzles can, so this asserts which lanes of the varying the program
 # actually consumes.
@@ -763,7 +763,7 @@ zero_rows = groups(f"{work}/lit_zero.log")
 zero_lanes = varying_lanes_read(zero_rows)
 if zero_lanes != {0}:
     sys.exit(f"FAIL lit_zero: the program reads varying lanes "
-             f"{sorted(zero_lanes)}; with a zero exponent the reference reads "
+             f"{sorted(zero_lanes)}; with a zero exponent the established compiler reads "
              "only lane 0 (ndotl), so a read of lane 1 is the ndoth gating "
              "the hardware LITEX2 does not do")
 
@@ -786,15 +786,15 @@ if varying_lanes_read(doctored) == {0}:
              "lane 0 after an input operand was repointed at lane 1")
 
 # The hold this row closes was a SHAPE, not an opcode: the candidate spelled
-# lit with SGT/MUL/MAD gating in seventeen instructions while the reference
+# lit with SGT/MUL/MAD gating in seventeen instructions while the established compiler
 # spelled it in six.  LITEX2 being present says nothing about that, because
-# the gating sat around it.  The bound is the reference's six plus our
+# the gating sat around it.  The bound is the established compiler's six plus our
 # standing export-fold MOV, with slack for the half conversions this
 # fixture's half3 varyings need - it is a regression bound, not a claim of
 # byte parity.
 if len(insns4) > 10:
     sys.exit(f"FAIL lit: {len(insns4)} instructions for one lit(); the "
-             "reference emits six, and seventeen was the gated shape this "
+             "established compiler emits six, and seventeen was the gated shape this "
              "row exists to keep out")
 
 # Check 5: transpose in VP

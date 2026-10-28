@@ -1,6 +1,6 @@
 // A MATRIX leaf: the fill converted through the matrix's BASE type rather
 // than its element type, so a half2x2 filled from 1.00048828125 kept the
-// float value where the reference rounds to 1.0009765625 (codex).  Refused
+// float value where the established compiler rounds to 1.0009765625 (codex).  Refused
 // with the rest of the conversion boundary.
 struct S { half2x2 m; };
 

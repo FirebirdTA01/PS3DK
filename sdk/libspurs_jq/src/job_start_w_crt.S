@@ -2,13 +2,13 @@
  * job_start_w_crt.S - SPU spurs-job-initialize entry trampoline.
  *
  * The "with CRT" form of _start that JQ workloads require.  Layout
- * mirrors the reference job_start_w_crt.o byte-for-byte: 4-instruction
+ * mirrors the system job_start_w_crt.o byte-for-byte: 4-instruction
  * xori-dance trampoline that tail-calls __job_start, followed by 16
  * bytes of 0xa5 fill, the "JOBCRT Ver13" ASCII magic at offset 0x20,
  * ADDR32 relocations to _end and __bss_start at 0x2c / 0x30, and a
  * trailing stop word.  Total .before_text = 80 bytes.
  *
- * The reference packager + the JQ kernel both check for the "JOBCRT"
+ * The system packager + the JQ kernel both check for the "JOBCRT"
  * magic at offset 0x20 of the loaded SPU image (= LS 0x30 once the
  * .SpuGUID prefix lands at LS 0x10..0x1f and .before_text follows).
  * Without it the kernel rejects the binary as a non-CRT job.

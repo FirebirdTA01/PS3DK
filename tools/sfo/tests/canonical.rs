@@ -6,7 +6,7 @@ fn xml_template_writes_the_same_bytes_as_the_frozen_c_tool() {
     //
     // Regenerate this fixture only from a repo-built copy of tools/sfo-pkg/sfo.c.
     // The installed bin/sfo.exe is now this Rust tool, so using it as the
-    // fixture source would make the oracle self-referential.
+    // fixture source would make the measurement self-referential.
     let xml = include_str!("fixtures/ps3dk-template.xml");
     let expected = include_bytes!("fixtures/ps3dk-template.sfo");
 

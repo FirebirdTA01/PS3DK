@@ -32,15 +32,34 @@ echo "=== guard: misuse cases (expect exit 2) ==="
 bash "$SCRIPT" a b >/dev/null 2>&1
 chk "argc=2" $? 2
 
+# The shared install is the caller's PS3DK; a drive-letter stand-in makes
+# the rows below cover the C: -> /c/ and /mnt/c/ spellings.
+export PS3DK='C:/ps3dk-shared/PS3DK'
+unset PS3DK_SHARED
+
+# No PS3DK at all: refuse with the specific message, not a later check.
+out="$(env -u PS3DK -u PS3DK_SHARED bash "$SCRIPT" /s "$TWORK/sc" "$TWORK/sc/tc" 2>&1)"
+ec=$?
+if [[ "$ec" -eq 2 ]] && grep -qF "PS3DK is not set" <<< "$out"; then
+    pass "PS3DK unset -> specific message + exit 2"
+else
+    fail "PS3DK unset -> exit $ec, message: $out"
+fi
+
 # Shared-SDK collisions (case-insensitive /c vs /mnt/c, PS3DK vs ps3dk).
-bash "$SCRIPT" /s /c/SDKs/Sony/homebrew/PS3DK "$TWORK/tc" >/dev/null 2>&1
+bash "$SCRIPT" /s /c/ps3dk-shared/PS3DK "$TWORK/tc" >/dev/null 2>&1
 chk "scratch == shared (C:)" $? 2
-bash "$SCRIPT" /s /mnt/c/SDKs/Sony/homebrew/PS3DK/x "$TWORK/tc" >/dev/null 2>&1
+bash "$SCRIPT" /s /mnt/c/ps3dk-shared/PS3DK/x "$TWORK/tc" >/dev/null 2>&1
 chk "scratch under shared (/mnt/c)" $? 2
-bash "$SCRIPT" /s "$TWORK/sc" /c/SDKs/Sony/homebrew/PS3DK >/dev/null 2>&1
+bash "$SCRIPT" /s /mnt/c/PS3DK-Shared/ps3dk "$TWORK/tc" >/dev/null 2>&1
+chk "scratch == shared, other case (/mnt/c)" $? 2
+bash "$SCRIPT" /s "$TWORK/sc" /c/ps3dk-shared/PS3DK >/dev/null 2>&1
 chk "toolchain == shared (C:)" $? 2
-bash "$SCRIPT" /s "$TWORK/sc" /mnt/c/SDKs/Sony/homebrew >/dev/null 2>&1
+bash "$SCRIPT" /s "$TWORK/sc" /mnt/c/ps3dk-shared >/dev/null 2>&1
 chk "toolchain parent-of-shared (env.sh PS3DK=PS3DEV/ps3dk case)" $? 2
+PS3DK=/elsewhere PS3DK_SHARED=/c/ps3dk-shared/PS3DK \
+    bash "$SCRIPT" /s /mnt/c/ps3dk-shared/PS3DK "$TWORK/tc" >/dev/null 2>&1
+chk "PS3DK_SHARED names the shared install" $? 2
 
 # TCHAIN must be strictly under SCRATCH (resolved -- '..' and symlinks don't work).
 mkdir -p "$TWORK/scratch" "$TWORK/outside"

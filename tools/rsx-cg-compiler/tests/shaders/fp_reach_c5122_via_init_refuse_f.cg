@@ -1,6 +1,6 @@
 // function-visibility commit 1.  REFUSE, AND THE DIAGNOSTIC IS THE POINT.  C5122 SHARES THE ROOT SET:
 // measured, a helper carrying a return semantic reached ONLY from a static
-// initialiser is refused C5122 by the reference, while the same helper
+// initialiser is refused C5122 by the established compiler, while the same helper
 // never called at all is accepted - so the widened roots serve both walks
 // and prototype-default-merging does not need a second graph.
 //

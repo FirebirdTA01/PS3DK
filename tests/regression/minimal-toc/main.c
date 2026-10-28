@@ -4,7 +4,7 @@
  *
  * Under ILP32 the compiler used to die on every function that touched the
  * TOC; GCC patch 0043 loads the minimal TOC's base with lwz from a 4-byte
- * slot, as the reference compiler does.  A wrong slot or load would read
+ * slot, as the established compiler does.  A wrong slot or load would read
  * every value below through a wrong address.
  *
  * Prints MINIMAL_TOC_OK, or MINIMAL_TOC_FAIL naming the first failed check.

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # A source function accepts a wider vector argument, truncated to its leading
-# lanes (the reference warns C7011 and accepts), and dot() of two scalars is
-# their product.  Ranking, measured on the reference: dropped lanes compare
+# lanes (the established compiler warns C7011 and accepts), and dot() of two scalars is
+# their product.  Ranking, measured on the established compiler: dropped lanes compare
 # FIRST, before type narrowing and cost.  Each row's value (at TEX0 =
-# 0.1 0.2 0.3 0.4) is what the reference's own container gives.
+# 0.1 0.2 0.3 0.4) is what the established compiler's own container gives.
 #
 # Usage: tests/shader-compiler/overload-truncation-test.sh <compiler>
 set -u
@@ -35,7 +35,7 @@ EOF
 }
 # An out/inout parameter cannot take a wider vector.  Truncation still RANKS
 # (the out candidate wins on fewer dropped lanes, below), then the call is
-# refused with C1113 as on the reference; it never copies into the leading
+# refused with C1113 as on the established compiler; it never copies into the leading
 # lanes.  Exit 1 exactly: a crash or a timeout is not a refusal.
 refuse() {   # <name> <source>
     printf '%s\n' "$2" > "$work/$1.cg"

@@ -11,7 +11,7 @@
 // Exit 0, container written, no diagnostic - and the value in the
 // container was not the value in the source.
 //
-// The reference gives a vector literal a const register of its own,
+// The established compiler gives a vector literal a const register of its own,
 // holding the whole vector, and two IDENTICAL vector literals share one:
 //
 //     #: float4: internal-constant-0: C[467]     MOV o[7], c[467]

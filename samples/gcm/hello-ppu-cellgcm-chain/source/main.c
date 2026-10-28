@@ -6,10 +6,10 @@
  * 4 colour buffers, MVP-uniform VP) — exercises the FP arithmetic-
  * chain ADDR emit by adding three runtime-patched uniforms (a, b, c)
  * to the per-vertex colour.  See shaders/fpshader.fcg for the chain
- * shape the reference compiler + our compiler both emit.
+ * shape the established compiler + our compiler both emit.
  *
  * The byte-diff harness at tools/rsx-cg-compiler/tests/run_diff.sh
- * proves our compiler's output matches the reference compiler.  This sample proves
+ * proves our compiler's output matches the established compiler.  This sample proves
  * those bytes execute correctly on RSX with runtime FP uniforms
  * patched in via cellGcmSetFragmentProgramParameter between successive draws
  * in the same frame:
@@ -70,7 +70,7 @@ static u32  depth_pitch;
 static u32  color_offset[COLOR_BUFFER_NUM];
 static u32  depth_offset;
 
-/* Local-memory bump allocator (matches the reference localMemoryAlloc). */
+/* Local-memory bump allocator (matches the system localMemoryAlloc). */
 static u32 g_local_mem_heap;
 static void *local_alloc(u32 size)
 {
@@ -97,7 +97,7 @@ static void wait_rsx_idle(CellGcmContextData *ctx)
 
 /* Shader objects.  CgBinaryProgram blobs from rsx-cg-compiler's
  * --emit-container output — paired with the cellGcmCg* / cellGcmSet*
- * runtime API (matches what reference SDK basic.cpp uses). */
+ * runtime API (matches what platform ABI basic.cpp uses). */
 static CGprogram   vpo;
 static CGprogram   fpo;
 static void       *vp_ucode;

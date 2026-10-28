@@ -2,7 +2,7 @@
 # A CAST FROM A SCALAR TO A VECTOR IS A BROADCAST.
 #
 # `(float4)d` and `(half4)d` are the cast spelling of `float4(d,d,d,d)`, and
-# the reference lowers all three to ONE instruction (sce-cgc 475, measured
+# the established compiler lowers all three to ONE instruction (the established compiler, measured
 # 2026-09-07):
 #
 #   float d = a.x; return (float4)d;        MOV R0.xyzw, TEX0.xxxx
@@ -12,7 +12,7 @@
 # Only the constructor reached VecConstruct in the builder; the cast fell
 # through to the default IROp::Bitcast, and the NV40 general path refuses
 # that outright - "unsupported IR op bitcast".  It is 22 rows of the
-# reference-SDK sweep and it is NOT half-only: the float spelling refused
+# Cell OS sweep and it is NOT half-only: the float spelling refused
 # too, which is why both are pinned here (half-temporary-allocation).
 #
 # The assertion is the TWIN, not a shape: the cast container must be
@@ -62,7 +62,7 @@ twin() {   # <cast stem> <constructor stem> <what>
         python3 "$decoder" "$work/$1.fpo" | sed 's/^/  cast: /' >&2
         python3 "$decoder" "$work/$2.fpo" | sed 's/^/  ctor: /' >&2
         fail "$3: the cast spelling and the constructor spelling produced
-different containers.  They are the same program - the reference emits one
+different containers.  They are the same program - the established compiler emits one
 MOV with a broadcast swizzle for both."
     fi
 }
@@ -85,7 +85,7 @@ if not moves:
 if not any("dst=H" in l and "prec=1" in l for l in moves):
     raise SystemExit(
         "FAIL: the half broadcast is not half - no MOV writes an H register "
-        "at prec=1.  The reference emits MOV H0.xyzw, TEX0.xxxx at prec=1.\n%s"
+        "at prec=1.  The established compiler emits MOV H0.xyzw, TEX0.xxxx at prec=1.\n%s"
         % rows)
 print("cast-splat: half broadcast writes H at prec=1")
 PY

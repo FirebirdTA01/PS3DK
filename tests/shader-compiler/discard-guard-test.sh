@@ -4,11 +4,11 @@
 # A discard's guard is the PATH CONDITION that reaches it, not the last
 # comparison the emitter happened to walk past.  materialiseDiscardGuards
 # computes it while the control flow is still intact and attaches it to
-# the instruction; the lowering then emits the reference's shape - the
+# the instruction; the lowering then emits the established compiler's shape - the
 # guard's producing instruction retargeted to the condition register with
 # cc_update, then KIL testing that register.
 #
-# Every expectation here was measured against the reference before the
+# Every expectation here was measured against the established compiler before the
 # fixture that carries it was written.  The two that look like mistakes
 # are not: a lone `>=` stays fp32 where the other five comparisons demote
 # to fx12, and a negated guard flips the KIL's test instead of inverting
@@ -24,7 +24,7 @@
 #
 #   fp_discard_loop_f      - a discard in a run-time loop: the hardware-
 #                            loop region refuses it by name.  A
-#                            DIVERGENCE, not a shared limit: the reference
+#                            DIVERGENCE, not a shared limit: the established compiler
 #                            compiles a dynamic loop with real hardware
 #                            loop instructions.  The bound must be
 #                            dynamic; our frontend fully unrolls a
@@ -156,7 +156,7 @@ fi
 # Since 146a35d7 an out parameter written under a branch is stored once,
 # at the end, from a merge whose not-written side has no value yet; that
 # refuses earlier ("could not be resolved") than the skippable-store rule.
-# KNOWN-DEBT: the reference ACCEPTS this program - it writes o from a never-
+# KNOWN-DEBT: the established compiler ACCEPTS this program - it writes o from a never-
 # written temp (which reads 0) and then a predicated MULR o(NE0.x) - so the
 # eventual fix is to accept it with o = cond ? c * 2 : 0, not to refuse.
 grep -qE "the control flow can skip|could not be resolved" "$work/skippable.log" || {

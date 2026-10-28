@@ -2,11 +2,11 @@
 # pack-unpack-intrinsics: the Cg pack/unpack family - pack_2half, unpack_2half,
 # pack_4ubyte, unpack_4ubyte, pack_4byte, unpack_4byte, pack_2ushort,
 # unpack_2ushort - each ONE NV40 fragment instruction (PK2H/UP2H, PK4UB/UP4UB,
-# PK4B/UP4B, PK2US/UP2US), as the reference emits them.  Sixteen reference-SDK
+# PK4B/UP4B, PK2US/UP2US), as the established compiler emits them.  Sixteen Cell OS
 # fragment shaders (normal encoding, LogLuv, the post-processing utils) stopped
 # at "no matching function for call to 'pack_2half(half2)'".
 #
-# MEASURED ON THE REFERENCE, 2026-09-07 (probes in C:/cgdev/pack-probe, one
+# MEASURED ON The established compiler, 2026-09-07 (probes in C:/cgdev/pack-probe, one
 # builtin per probe so a fact is attributable):
 #
 #   * A PACK reads its argument DIRECTLY - an input register, swizzled
@@ -19,25 +19,25 @@
 #     destination mask is the set of lanes the program consumes (xy for
 #     .xy, yz for .gb, x for .x), and it is prec=0 even into a half local.
 #   * Both profiles: only the FRAGMENT profile has them.  Under sce_vp_rsx
-#     the reference refuses pack_2half with C1115 (no compatible overload)
+#     the established compiler refuses pack_2half with C1115 (no compatible overload)
 #     and unpack_4ubyte with C5201 (invalid internal function declaration).
 #   * Overloads: pack_2half takes half2 OR float2 and a float scalar smears
 #     (.yyyy); a HALF scalar and a float3 are C1101 "ambiguous overloaded
 #     function reference"; pack_4ubyte(float3) is C1115.
-#   * When a pack's result goes STRAIGHT TO THE OUTPUT the reference stages
+#   * When a pack's result goes STRAIGHT TO THE OUTPUT the established compiler stages
 #     the argument through an H register first (MOV H0.xy <- TEX0 prec=1,
 #     then PK2H R0.xyzw <- H0), and pack_2ushort through R (MOV R0.xy).  That
 #     staging is the half-temp allocation of half-temporary-allocation, not this slice: the
 #     output-direct rows below pin the pack instruction and its direct input
-#     read and NAME the reference's extra MOV as the known byte difference.
+#     read and NAME the established compiler's extra MOV as the known byte difference.
 #   * A pack result read by ARITHMETIC gets a FENCBR before the reader
 #     (PK4UB R0.x; FENCBR; MUL) - an unpack reader gets none.  Pinned on the
 #     tex_bgra row.
 #   * BYTE IDENTITY: the out-parameter spelling of the normal-encoding shape
-#     (fp_pack_normal_out_f) equals the reference byte for byte.  The
+#     (fp_pack_normal_out_f) equals the established compiler byte for byte.  The
 #     `return` spellings differ from it only by the export fold - the tip
 #     ends every `return expr` with a MOV into R0 and keeps the chain in R1,
-#     where the reference computes in R0 and ends on the last producer -
+#     where the established compiler computes in R0 and ends on the last producer -
 #     which is export-fold-precision's export-fold work, not this family; their
 #     instructions, masks and swizzles are pinned here and they join
 #     BYTE_IDENTICAL when that lands.
@@ -46,7 +46,7 @@
 # matching function for call to 'pack_2half(half2)'"), the refusal rows are
 # checked against a stub compiler that accepts everything, and with
 # PS3_REF_CG_COMPILER set the rows in BYTE_IDENTICAL must equal the
-# reference's container byte for byte.
+# established compiler's container byte for byte.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -128,7 +128,7 @@ pass "self-check: refuse() rejects an accept-all stub"
 
 # ---------------------------------------------------------------- SDK shapes
 # DeferredShading normal_encoding.cgh: pack two halves, unpack the bytes.
-# The out-parameter spelling is byte-identical to the reference.
+# The out-parameter spelling is byte-identical to the established compiler.
 accept fp_pack_normal_out_f "normal encoding, out-parameter spelling (byte-identical)"
 expect fp_pack_normal_out_f '^0 PK2H dst=R0 mask=x prec=0 sat=0 end=0 s0=TEX0\.xyzw$'
 expect fp_pack_normal_out_f '^1 UP4UB dst=R0 mask=xyzw prec=0 sat=0 end=1 s0=R0\.xyzw$'
@@ -165,7 +165,7 @@ expect fp_pack_tex_f '^[0-9]+ UP4UB dst=R[0-9]+ mask=xyzw '
 accept fp_pack_tex_bgra_f "pack_4ubyte(tex2D(...).bgra) then arithmetic on the packed float"
 expect fp_pack_tex_bgra_f '^[0-9]+ PK4UB dst=R[0-9]+ mask=x .* s0=R[0-9]+\.zyxw'
 expect fp_pack_tex_bgra_f '^[0-9]+ MUL .* s0=R[0-9]+\.xxxx'
-# The reference fences a pack result before an arithmetic reader, and only
+# The established compiler fences a pack result before an arithmetic reader, and only
 # there: one FENCBR here, none in the pack -> unpack shapes above.
 count  fp_pack_tex_bgra_f '^[0-9]+ FENCBR ' 1
 count  fp_pack_normal_f '^[0-9]+ FENCBR ' 0
@@ -187,7 +187,7 @@ accept fp_unpack_expr_f "unpack_4ubyte(expression) reads the expression's temp d
 expect fp_unpack_expr_f '^[0-9]+ MUL '
 expect fp_unpack_expr_f '^[0-9]+ UP4UB dst=R[0-9]+ mask=xyzw .* s0=R[0-9]+\.xyzw'
 count  fp_unpack_expr_f '^[0-9]+ MOV ' 1
-# A declared half output: the reference writes UP4UB straight into H0
+# A declared half output: the established compiler writes UP4UB straight into H0
 # (prec=0); the tip unpacks into a temp and converts at the store (MOV H0
 # prec=1) - the same export fold as above.  Pinned: the unpack, and H0 as
 # the register the colour reaches.
@@ -196,12 +196,12 @@ expect fp_unpack_half_out_f '^[0-9]+ UP4UB dst=R[0-9]+ mask=xyzw prec=0 '
 expect fp_unpack_half_out_f '^[0-9]+ (UP4UB|MOV) dst=H0 mask=xyzw '
 
 # ------------------------------------------------- output-direct pack shapes
-# Pixel-correct today; the reference stages the argument through an H
+# Pixel-correct today; the established compiler stages the argument through an H
 # register first (MOV H0.xy <- TEX0 prec=1; PK2H R0.xyzw <- H0) - that MOV
 # is half-temporary-allocation's half-temp allocation, so these rows pin the pack and its
 # direct input read, and are NOT in BYTE_IDENTICAL until that lands.
 # (The tip also keeps the .xxxx broadcast as a MOV after the pack where the
-# reference folds it into the pack's own mask - the export fold again - so
+# established compiler folds it into the pack's own mask - the export fold again - so
 # the pack's mask is x today and xyzw once that lands.)
 accept fp_pack_return_f "pack_2half(float2) straight to the output"
 expect fp_pack_return_f '^[0-9]+ PK2H dst=R0 mask=(x|xyzw) .* s0=(TEX0|H0)\.xyzw'
@@ -216,7 +216,7 @@ expect fp_pack_4byte_return_f '^[0-9]+ PK4B dst=R0 mask=(x|xyzw) '
 refuse "pack_2half under sce_vp_rsx (reference: C1115)"       vp_pack_refuse_v   sce_vp_rsx "pack_2half"
 refuse "unpack_4ubyte under sce_vp_rsx (reference: C5201)"    vp_unpack_refuse_v sce_vp_rsx "unpack_4ubyte"
 # A HALF scalar argument is C1101 "ambiguous overloaded function reference"
-# in the reference (half -> half2 by smear ties with half -> float2 by smear
+# in the established compiler (half -> half2 by smear ties with half -> float2 by smear
 # and promotion); our overload resolution prefers the half2 overload and
 # ACCEPTS it, smearing the lane as it does for a float scalar.  Pixel-safe
 # and named rather than imitated: a resolver tie rule is stdlib-overload-parity's
@@ -227,30 +227,30 @@ refuse "pack_2half(float3) (reference: C1101 ambiguous)"      fp_pack_float3_ref
 refuse "pack_4ubyte(float3) (reference: C1115)"               fp_pack4_float3_refuse_f     sce_fp_rsx "pack_4ubyte"
 
 # ------------------------------------------------ reference byte identity
-# The reference's executable is private (never named in the tree); with
+# The established compiler's executable is private (never named in the tree); with
 # PS3_REF_CG_COMPILER set, these rows must match it byte for byte, and the
 # remaining accept rows are reported (not asserted) so a newly identical row
 # can be promoted here.
 BYTE_IDENTICAL="fp_pack_normal_out_f"
 if [[ -n "${PS3_REF_CG_COMPILER:-}" ]]; then
     [[ -x "$PS3_REF_CG_COMPILER" ]] || fail "PS3_REF_CG_COMPILER is not executable"
-    # The half-scalar smear is the one accept row the reference REFUSES
+    # The half-scalar smear is the one accept row the established compiler REFUSES
     # (C1101); measured here rather than assumed.
     if "$PS3_REF_CG_COMPILER" -profile sce_fp_rsx -o "$work/half_scalar.ref" \
             "$shaders/fp_pack_half_scalar_f.cg" >/dev/null 2>&1; then
-        fail "fp_pack_half_scalar_f: the reference now ACCEPTS pack_2half(half scalar); re-measure the overload rule"
+        fail "fp_pack_half_scalar_f: the established compiler now ACCEPTS pack_2half(half scalar); re-measure the overload rule"
     fi
     pass "fp_pack_half_scalar_f refused by the reference, as recorded"
     for stem in $(ls "$shaders" | grep -E '^fp_(un)?pack.*_f\.cg$' | grep -v -e refuse -e half_scalar | sed 's/\.cg$//'); do
         "$PS3_REF_CG_COMPILER" -profile sce_fp_rsx -o "$work/$stem.ref" "$shaders/$stem.cg" >/dev/null 2>&1 \
-            || fail "$stem: the reference refused a fixture it is recorded as accepting"
+            || fail "$stem: the established compiler refused a fixture it is recorded as accepting"
         [[ -s "$work/$stem.bin" ]] || continue
         if cmp -s "$work/$stem.bin" "$work/$stem.ref"; then verdict=identical; else verdict=differs; fi
         if [[ " $BYTE_IDENTICAL " == *" $stem "* ]]; then
-            [[ $verdict == identical ]] || fail "$stem: no longer byte-identical to the reference"
-            pass "$stem byte-identical to the reference"
+            [[ $verdict == identical ]] || fail "$stem: no longer byte-identical to the established compiler"
+            pass "$stem byte-identical to the established compiler's"
         else
-            printf 'INFO: %s %s from the reference (not pinned)\n' "$stem" "$verdict"
+            printf 'INFO: %s %s from the established compiler (not pinned)\n' "$stem" "$verdict"
         fi
     done
 fi

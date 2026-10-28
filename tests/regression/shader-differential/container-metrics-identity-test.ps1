@@ -42,7 +42,7 @@ Check 'changed compile flags fail coverage' {
     $s=Get-ContainerMetricsGateSummary @($r) @(Row)
     Assert ($s.CompileFlagsMismatches -eq 1 -and $s.Status -eq 'identity-mismatch')
 }
-Check 'oracle drift is distinguished from source drift' {
+Check 'measurement drift is distinguished from source drift' {
     $r=Row; $r.oracle_sha256='d'*64
     $s=Get-ContainerMetricsGateSummary @($r) @(Row)
     Assert ($s.OracleMismatches -eq 1 -and $s.SourceVersionMismatches -eq 0)

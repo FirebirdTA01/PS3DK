@@ -4,7 +4,7 @@
  * The decoder lives in the cellPngDec SPRX (libpngdec.sprx); we link
  * against it through our nidgen-generated libpngdec_stub.a.  cellPngDec
  * writes via caller-provided malloc/free callbacks, so passing NULL
- * for the callback fields returns CELL_PNGDEC_ERROR_ARG - Sony's own
+ * for the callback fields returns CELL_PNGDEC_ERROR_ARG - the system's own
  * samples all provide non-null callbacks.
  *
  * Runtime flow:

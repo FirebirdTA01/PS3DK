@@ -14,7 +14,7 @@
  * blue into both display buffers, and shown for about three seconds (or
  * until START). FONT_RENDER_OK requires every glyph call to succeed (a
  * failure is printed with its character), each line to have ink inside
- * its band (a smoke check, not a text oracle), no coverage at all outside
+ * its band (a smoke check, not a text measurement), no coverage at all outside
  * the bands, and every flip to complete; the verdict is printed last.
  * As an optional artifact that does not affect the verdict, the displayed
  * buffer is written to /dev_hdd0/tmp/hello-ppu-font-render.bmp so the
@@ -544,7 +544,7 @@ int main(int argc, char **argv)
                ink[i].y1, ink[i].x0, ink[i].x1);
         /* Every glyph must render; the ink thresholds below are only a
          * smoke check that the images landed in the surface, not a text
-         * oracle. A line of ~40 glyphs at 48 px lights thousands of pixels
+         * measurement. A line of ~40 glyphs at 48 px lights thousands of pixels
          * and spans most of its pen advance. */
         if (failed != 0)
             ok = 0;

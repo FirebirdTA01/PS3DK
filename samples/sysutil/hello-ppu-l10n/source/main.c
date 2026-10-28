@@ -7,7 +7,7 @@
  *   - L10N converter eucjp2sjis() via <cell/l10n.h>, backed by
  *     libl10n_stub.a (165 exports).
  *
- * Differences from the reference eucjp2sjis.c:
+ * Differences from the system eucjp2sjis.c:
  *   - No argv parsing (RPCS3 launches don't pass args reliably);
  *     hardcode a few EUC-JP code points instead.
  *   - Diagnostics adjusted for our printf style; logic identical.

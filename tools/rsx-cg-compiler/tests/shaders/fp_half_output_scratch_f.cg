@@ -2,10 +2,10 @@
 // TEMP that the allocator places in R0.
 //
 // H0 is the low half of R0, so this is the shape a blanket "no temp in R0"
-// guard refused - 45 of the reference SDK's fragment programs, this one
+// guard refused - 45 of the platform ABI's fragment programs, this one
 // among them (CgTutorial/GCM/HDR/shaders/OneHalfFp.cg is the same source).
 // It is not a conflict: the temp's LAST READ is the instruction that writes
-// the colour, so ordinary liveness separates them, and the reference emits
+// the colour, so ordinary liveness separates them, and the established compiler emits
 // exactly that overlap - `TEXR R0.xyz, f[TEX0], TEX0` then
 // `MOVH H0.xyz, R0`.
 //

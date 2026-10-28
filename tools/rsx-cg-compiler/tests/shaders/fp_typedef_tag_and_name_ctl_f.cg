@@ -2,7 +2,7 @@
 // struct's tag only.  It is a separate control because on this compiler a
 // struct member that reaches the output only through a helper's parameter
 // loses its varying record in the container (the ucode still reads TEX1;
-// the reference keeps the record and emits the same bytes as the direct
+// the established compiler keeps the record and emits the same bytes as the direct
 // spelling) - a reflection gap that is not this guard's subject.
 struct Tag { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };
 float3 helper(Tag t) { return t.col; }

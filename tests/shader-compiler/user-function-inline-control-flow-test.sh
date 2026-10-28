@@ -3,18 +3,18 @@
 # instruction on NV40).  The inliner used to accept only straight-line bodies
 # ending in `return expr`, so a helper with an if/else in it, or a void helper
 # that writes file-scope state, made the whole program refuse: five
-# reference-SDK rows (edge post-sample GenerateMotion x4 - `if (mag > 1) {
+# Cell OS rows (edge post-sample GenerateMotion x4 - `if (mag > 1) {
 # mv /= mag; mag = 1; }` - and GpuBezierTessellation's void
 # generateBezierTriangleControlPoints writing a file-scope float3 B[10]).
 #
-# MEASURED ON THE REFERENCE, 2026-09-07 (probes C:/cgdev/calls-probe):
+# MEASURED ON The established compiler, 2026-09-07 (probes C:/cgdev/calls-probe):
 #   * a helper with an if inside inlines to the same predicated/select shape
 #     the entry function gets (18 instructions for the GenerateMotion float
 #     twin); if/else with the result assigned in both arms likewise.
 #   * a void helper called as a statement inlines its body; file-scope
 #     non-uniform globals it writes are plain values afterwards (the
-#     reference lists them as UNDEFINED params, B[0..2]).
-#   * the reference ALSO accepts a return inside a branch, loops inside a
+#     established compiler lists them as UNDEFINED params, B[0..2]).
+#   * the established compiler ALSO accepts a return inside a branch, loops inside a
 #     helper, and out/inout parameters. Proven static for-loops expand, and
 #     returns inside branches and out/inout parameters now inline too.
 #
@@ -219,7 +219,7 @@ accept vp_inline_void_global_v sce_vp_rsx "void helper writing file-scope B[0..2
 expect vp_inline_void_global_v '^[0-9]+ (MAD|MUL) '
 # The stores must REACH the reads: before the promotion the program compiled
 # and read B from constant slots c[46x] (the phantom uniform) - a wrong picture
-# with exit 0.  The reference computes from the inputs; so must we.
+# with exit 0.  The established compiler computes from the inputs; so must we.
 expect vp_inline_void_global_v '^[0-9]+ (MAD|MUL) .*IN(0|2)\.'
 forbid vp_inline_void_global_v '^[0-9]+ (MAD|MUL|ADD|MOV) .*c\[46[4-7]\]\.(x|y|z)(x|y|z)(x|y|z)'
 accept fp_global_array_write_f sce_fp_rsx "fragment file-scope array written in main and read back"
@@ -334,13 +334,13 @@ expect fp_inline_entry_param_rebound_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=
 count  fp_inline_entry_param_rebound_f '^[0-9]+ MUL ' 1
 factor fp_inline_entry_param_rebound_f fp 2
 forbid fp_inline_entry_param_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
-# The reference folds 3*2 into one MULR by 6; we keep both multiplies (a
+# The established compiler folds 3*2 into one MULR by 6; we keep both multiplies (a
 # pre-existing fold gap, not this boundary).  The VALUE is what is pinned:
 # has_float presence was measured insufficient - a container reading the
 # const block's zero lane, or negating the factor, passed it (review: codex).
 accept fp_inline_local_rebound_f sce_fp_rsx "a caller LOCAL G reassigned (G = G*2) before set() writes the global: main returns 6*TEXCOORD0"
 expect fp_inline_local_rebound_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
-count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 1   # (p*3)*2 is one MUL by 6, as the reference emits
+count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 1   # (p*3)*2 is one MUL by 6, as the established compiler emits
 factor fp_inline_local_rebound_f fp 6
 forbid fp_inline_local_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
 accept vp_inline_entry_param_rebound_v sce_vp_rsx "vertex twin: main's PARAMETER G reassigned before set() writes the global: o0 = 2*IN0"
@@ -359,7 +359,7 @@ forbid vp_inline_local_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
 # the parameter loop.  With it removed, a later shadowing declaration re-stashes
 # the EARLIER local (or the parameter) as "the global" and get() returns that
 # instead of loading the uniform (review: claude - mutant emitted MUL IN0*2 then
-# MOV, never a uniform read).  Both shapes are byte-identical to the reference
+# MOV, never a uniform read).  Both shapes are byte-identical to the established compiler
 # on the candidate: FENCBR; MOVR R0, G from the uniform.
 accept fp_inline_two_block_shadow_f sce_fp_rsx "two sequential block locals named G, then get() reads the file-scope G: the uniform"
 expect fp_inline_two_block_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
@@ -375,12 +375,12 @@ count  fp_inline_param_then_local_shadow_f '^[0-9]+ ' 2
 # ------------------------------------------------- block exit (dead-branch-local-predication)
 # A block's own declarations end with it: ScopeState's fourth boundary row.
 # Every row below is reference-measured (C:/cgdev/block-probe); the values are
-# the reference's, the SHAPE differs only by the standing export-fold MOV, the
+# the established compiler's, the SHAPE differs only by the standing export-fold MOV, the
 # varying preload, and a dead compare left after an arm's only consumer dies.
 # Red on 4d0097af: restash read p*2, then_only_global refused, then_only_param
 # emitted a select against the parameter, loop_local returned 3p, helper_shadow
 # read the uniform (the walked callee-scoped set dropped the post-block write).
-accept fp_block_local_restash_f sce_fp_rsx "a block-local G dies at the block's end: return G reads the file-scope G (byte-identical to the reference)"
+accept fp_block_local_restash_f sce_fp_rsx "a block-local G dies at the block's end: return G reads the file-scope G (byte-identical to the established compiler)"
 expect fp_block_local_restash_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.xyzw'
 forbid fp_block_local_restash_f 's0=TEX0'
 forbid fp_block_local_restash_f '^[0-9]+ MUL '
@@ -405,7 +405,7 @@ expect fp_block_use_before_decl_f '^[0-9]+ ADD dst=R[0-9]+ mask=xyzw .* s0=c[0-9
 count  fp_block_use_before_decl_f '^[0-9]+ (MUL|MAD) ' 1
 accept fp_block_field_write_f sce_fp_rsx "an outer struct FIELD written inside a block survives (a binding site with no DeclStmt)"
 expect fp_block_field_write_f '^[0-9]+ MAD dst=R[0-9]+ mask=xyzw .* s1=c[0-9]+\.xxxx s2=R[0-9]+\.xyzw'
-accept fp_block_loop_local_f sce_fp_rsx "a per-trip loop local does not carry past the loop: the outer t is returned (byte-identical to the reference)"
+accept fp_block_loop_local_f sce_fp_rsx "a per-trip loop local does not carry past the loop: the outer t is returned (byte-identical to the established compiler)"
 expect fp_block_loop_local_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.xyzw'
 forbid fp_block_loop_local_f '^[0-9]+ MUL '
 accept fp_block_struct_shadow_f sce_fp_rsx "an inner S s shadows an outer S s: after the block s.f is the OUTER field - a declared struct's qualified keys end with it (review: codex; byte-identical)"
@@ -430,16 +430,16 @@ expect fp_inline_struct_local_write_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.
 forbid fp_inline_struct_local_write_f '^[0-9]+ MUL '
 
 # ---------------------------------------------------------------- named gaps
-accept fp_inline_return_in_if_f sce_fp_rsx "a return inside a branch of the helper lowers to a select (was refused; the reference accepts it; helper-const-return's RUNTIME rows check values)"
+accept fp_inline_return_in_if_f sce_fp_rsx "a return inside a branch of the helper lowers to a select (was refused; the established compiler accepts it; helper-const-return's RUNTIME rows check values)"
 accept fp_inline_loop_f sce_fp_rsx "a proven three-trip helper loop expands"
-accept fp_inline_loop_explicit_f sce_fp_rsx "the reference-identical explicit expansion"
+accept fp_inline_loop_explicit_f sce_fp_rsx "the established compiler-identical explicit expansion"
 cmp -s "$work/fp_inline_loop_f.bin" "$work/fp_inline_loop_explicit_f.bin" || fail "helper loop differs from explicit expansion"
-accept vp_inline_void_out_v sce_vp_rsx "out parameters on the helper copy out (was refused; the reference accepts it; inline-out-param's vp_split row checks values)"
+accept vp_inline_void_out_v sce_vp_rsx "out parameters on the helper copy out (was refused; the established compiler accepts it; inline-out-param's vp_split row checks values)"
 # NESTED shadowing, formerly REFUSED by name (local-array-conditional-store's placeholder): an
 # enclosing helper's parameter now stashes the global at binding and its
 # locals stash at declaration / unstash at block exit, so a nested helper
 # reads and writes the GLOBAL through the stash (inline-global-stash).  Every value
-# below is the reference's (sce-cgc 450, C:/cgdev/refusal-probe): the global
+# below is the established compiler's (the established compiler 450, C:/cgdev/refusal-probe): the global
 # p in the three reads, and 2*(3*p) for the nested writer under an enclosing
 # parameter shadow - a write that the old epilogue would have ERASED with the
 # enclosing helper's stash entry.  Red on bd7d5f54 (refused).

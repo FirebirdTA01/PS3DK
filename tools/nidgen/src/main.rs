@@ -1,5 +1,5 @@
 //! nidgen CLI — drive FNID computation, stub generation, verification, and
-//! coverage against the PSL1GHT-vs-reference-SDK diff.
+//! coverage against the PSL1GHT-vs-Cell OS diff.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -56,7 +56,7 @@ enum Command {
         inputs: Vec<PathBuf>,
     },
 
-    /// Extract a NID YAML database from a reference SDK stub archive.
+    /// Extract a NID YAML database from a platform ABI stub archive.
     Extract {
         /// Path to the archive (e.g. libaudio_stub.a).
         #[arg(long)]

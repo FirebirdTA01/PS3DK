@@ -5,7 +5,7 @@
 // input resolved to Void, the Select was typed Void, and the general
 // path masked its predicated write to lane x and broadcast that lane
 // into every channel (measured 2026-09-02 on fd5aa13: MOVR R0.x, f[COL0];
-// MOVRC RC.x; MOVR R0.x(NE.x), f[TEX0]; MOVR R0, R0.x).  The reference
+// MOVRC RC.x; MOVR R0.x(NE.x), f[TEX0]; MOVR R0, R0.x).  The established compiler
 // emits MOVR R0, f[TEX0]; SGTRC RC.x; MOVR R0, R0; MOVR R0(EQ.x), f[COL0]
 // - every value move writes all four lanes.
 //

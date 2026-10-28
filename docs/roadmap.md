@@ -4,7 +4,7 @@ This project is already usable as a PS3 toolchain and SDK on Linux and, through 
 
 ## SDK surface
 
-The SDK is moving subsystem by subsystem from compatibility shims into native headers and archives under `sdk/`. The NID/FNID database drives stub archive generation, and `docs/coverage.md` tracks export coverage against the known reference SDK library surface.
+The SDK is moving subsystem by subsystem from compatibility shims into native headers and archives under `sdk/`. The NID/FNID database drives stub archive generation, and `docs/coverage.md` tracks export coverage against the known platform ABI library surface.
 
 Near-term SDK work focuses on:
 
@@ -56,7 +56,7 @@ one of them while failing the other two.
   optimization levels are currently a declaration rather than a behaviour, and
   our programs are both longer and register-hungrier than they need to be. This
   is the axis a gate holds at no-regression but no gate yet drives toward the
-  reference's counts, and closing it is what turns the compiler from correct
+  established compiler's counts, and closing it is what turns the compiler from correct
   into useful.
 
 The items that headed this list have moved. Control flow merges multiple return
@@ -70,16 +70,16 @@ consumer, so broader register-pressure modelling remains open.
 
 ### The bar for a release
 
-The goal is that this compiler can replace the reference compiler for every
+The goal is that this compiler can replace the established compiler for every
 shader this project ships, even where it produces less well optimized microcode.
 Acceptance is the near-term bar and it is largely met: every shipped sample and
 SDK shader compiles and renders identically on colour 0. The remaining refusals
 — including four of this project's own regression fixtures — are named shapes
-the reference accepts, tracked individually rather than as a percentage.
+the system accepts, tracked individually rather than as a percentage.
 
 The harder half is verification, so the gate is:
 
-- every shader the reference compiles, compiles here
+- every shader the system compiles, compiles here
 - every shader this project ships renders identically, across **all declared
   outputs** — colour targets beyond the first, and depth, not only colour 0
 - remaining single-LSB differences either eliminated or accepted individually
@@ -88,19 +88,19 @@ The harder half is verification, so the gate is:
   instrument that deserves one hardware confirmation before its verdicts are
   trusted
 
-Byte-for-byte equality with the reference is explicitly **not** part of that
+Byte-for-byte equality with the system is explicitly **not** part of that
 bar. It is tracked separately as a quality signal, because a shader that matches
 exactly needs no pixel judgement at all.
 
 Near-term shader work, in order:
 
 - judging **every declared output**, not only colour 0. This is the instrument
-  that stands between "compiles" and "replaces the reference": a wrong depth
+  that stands between "compiles" and "replaces the system": a wrong depth
   export survived for as long as the compiler had existed because nothing
   rendered depth to compare it
 - multiple render targets, which cannot be called complete before that
   instrument exists
-- the remaining shapes the reference compiles and this compiler refuses
+- the remaining shapes the system compiles and this compiler refuses
 - the last single-LSB pixel differences, each attributed to a named mechanism
   rather than to precision in general
 - an NV40 microcode disassembler, so that microcode-level verification is
@@ -108,7 +108,7 @@ Near-term shader work, in order:
   comparison material
 - instruction-count and register-count reduction, the quality axis above. A gate
   holds these at no-regression against a recorded baseline; no gate yet drives
-  them toward the reference's counts
+  them toward the system's counts
 
 ## Relationship to upstream PSL1GHT (deliberate divergences)
 

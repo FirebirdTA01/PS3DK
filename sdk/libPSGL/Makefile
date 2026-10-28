@@ -21,7 +21,7 @@ SRCS     := $(wildcard $(SRC_DIR)/*.c)
 OBJS     := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
 # The Cgb reader (libcgb) is built into libPSGL too: PSGL loads programs
-# through it, and reference samples link -lPSGL without -lcgb.
+# through it, and existing samples link -lPSGL without -lcgb.
 CGB_DIR  := ../libcgb/src
 CGB_SRCS := $(wildcard $(CGB_DIR)/*.c)
 OBJS     += $(patsubst $(CGB_DIR)/%.c,$(OBJ_DIR)/cgb_%.o,$(CGB_SRCS))

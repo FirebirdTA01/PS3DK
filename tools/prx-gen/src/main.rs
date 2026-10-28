@@ -2,7 +2,7 @@
 //!
 //! The format this tool writes is documented in
 //! `docs/local/sprx-format-facts.md`, established from public sources only
-//! (RPCS3's loader, PSDevWiki). Nothing here is derived from the reference SDK.
+//! (RPCS3's loader, PSDevWiki). Nothing here is derived from the platform ABI.
 
 // The ELF and PRX modules spell out complete on-disk layouts — every field
 // offset and every constant of the structures we read — because a partial

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A reference Makefile links an import library as -l<name>_stub, so every
-# lib<name>_stub.a the reference SDK ships has to exist in our install under
+# lib<name>_stub.a the platform ABI ships has to exist in our install under
 # that exact name, or the link fails before anything else is checked.  Six were
 # shipped under names of our own (libcellFont_stub.a for libfont_stub.a, ...)
 # and 23 were not installed at all, although nidgen had a database for each.

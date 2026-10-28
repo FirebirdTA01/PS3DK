@@ -1,6 +1,6 @@
 // hello-ppu-cellgcm-discard-blend — fragment program.
 //
-// Exercises rsx-cg-compiler features (94/94 byte-match vs the reference compiler):
+// Exercises rsx-cg-compiler features (94/94 byte-match vs the established compiler):
 //
 //   1) Simple discard: `if (texB.a < 0.1) discard;`
 //      → FX12 SLT with cc_update + KIL (NE.x)

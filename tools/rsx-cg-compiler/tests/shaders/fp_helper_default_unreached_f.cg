@@ -1,7 +1,7 @@
-// function-visibility commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against the established compiler.
 // CELL 1 OF 3.  A default expression naming an undeclared identifier is
 // ACCEPTED when the helper is never reached from the entry point.  The
-// reference analyses a default only for a REACHED function, so this compiles
+// established compiler analyses a default only for a REACHED function, so this compiles
 // clean - a compiler that analysed every default unconditionally would refuse
 // it and newly reject reference-accepted programs.
 float4 h(float4 c, float k = nosuch) { return c * k; }

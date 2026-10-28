@@ -34,7 +34,7 @@ extern "C" {
 
 /* SPU-thread MMIO problem-state base + per-thread signal-notify register
  * offsets, used by SPU code that pokes a sibling SPU's signalling
- * registers (e.g. the spuchain sample).  Matches the reference layout:
+ * registers (e.g. the spuchain sample).  Matches the system layout:
  * each SPU thread's problem-state area is SPU_THREAD_BASE + n*OFFSET, and
  * the two signal-notify registers sit at the fixed local offsets below. */
 #ifndef SPU_THREAD_BASE

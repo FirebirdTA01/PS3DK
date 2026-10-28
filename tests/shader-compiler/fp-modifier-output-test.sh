@@ -5,13 +5,13 @@
 # copy is dropped.  The instruction that computes the colour writes the
 # output register itself instead of a temp followed by `MOV R0, t`.
 # Each row's instruction count is held to a budget and reported beside the
-# reference's (sce-cgc 475); every arithmetic row is judged by value against
+# established compiler's; every arithmetic row is judged by value against
 # independent binary32 arithmetic with fp_eval.
 #
 # A fetch reads a modified coordinate in place (TEX R0, |f[TEX0]|) and
 # writes the colour itself unless its result is swizzled; those rows are
 # judged by shape only (fp_eval does not model fetches).  A two-input
-# instruction writing a temp keeps its first input direct, as the reference
+# instruction writing a temp keeps its first input direct, as the established compiler
 # does (tex_abs_temp, txp_abs_temp); a negated input feeding a MAD is still
 # staged (neg_mad): later work, the budget says so.
 #
@@ -51,7 +51,7 @@ ROWS = {
                      3, 3, None),
     'txp_abs_temp': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1, uniform sampler2D s : TEXUNIT0) : COLOR { float4 t = a * b; return tex2Dproj(s, abs(t)); }',
                      3, 3, None),
-    # A swizzled fetch result keeps its MOV, as in the reference.
+    # A swizzled fetch result keeps its MOV, as in the established compiler.
     'tex_swizzled': ('float4 main(float4 a : TEXCOORD0, uniform sampler2D s : TEXUNIT0) : COLOR { return tex2D(s, a.xy).zyxw; }',
                      2, 2, None),
 }

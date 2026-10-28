@@ -47,7 +47,7 @@ def main():
                 print('PASS' if ok else 'FAIL',label)
                 if not ok: failures.append(label);print(p.stderr)
             # A non-static const array is a uniform with defaults on the
-            # reference (t_528b9869), so both it and a true uniform must keep
+            # established compiler (t_528b9869), so both it and a true uniform must keep
             # their parameter records and match the literal-index load.
             for storage in ('const','uniform'):
                 label=storage+('_vp' if vertex else '_fp')

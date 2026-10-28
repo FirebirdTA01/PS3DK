@@ -1,6 +1,6 @@
-// function-visibility commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against the established compiler.
 // TRANSITIVE.  The default calls inner, which carries no semantic, but inner
-// calls leaf, which does.  The reference refuses, so the walk must follow the
+// calls leaf, which does.  The established compiler refuses, so the walk must follow the
 // edge through the default and then through the ordinary body.
 float leaf(float x) : COLOR { return x; }
 float inner(float x) { return leaf(x); }

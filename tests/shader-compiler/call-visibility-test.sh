@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A CALL RESOLVES AGAINST THE DECLARATIONS VISIBLE AT THAT CALL.
-# Measured against sce-cgc 475, sce_fp_rsx (function-visibility, commit 1 of 2).
+# Measured against the established compiler, sce_fp_rsx (function-visibility, commit 1 of 2).
 #
 # NO DEFAULT ARGUMENT APPEARS IN ANY ROW HERE.  That is deliberate: the rule
 # is observable without them, which is why it lands as its own commit ahead of
@@ -14,9 +14,9 @@
 # visible from everywhere and two measured things were wrong:
 #
 #   FORWARD CALL    calling a helper declared later, with no prototype, was
-#                   accepted; the reference refuses it (C1008).
+#                   accepted; the established compiler refuses it (C1008).
 #   LATE SHADOW     a source overload of a builtin's name written AFTER the
-#                   call hid the builtin; the reference uses the builtin.
+#                   call hid the builtin; the established compiler uses the builtin.
 #
 # WHY THE PAIRS.  Acceptance cannot say WHICH BODY RAN, and that is the whole
 # question for the shadow rows.  Each pair differs only in a constant in the
@@ -125,8 +125,8 @@ accept fp_visibility_walk_parity_f        "struct + uniform + const + prototype 
 
 # ---- the C1008 name-not-found class is gated on entry reachability ----
 # Found by codex reviewing the first cut of this commit: the positional filter
-# refused a forward call inside a function main never calls, and the reference
-# does not.  The reference reports this class ONLY in reachable bodies - but it
+# refused a forward call inside a function main never calls, and the established compiler
+# does not.  The established compiler reports this class ONLY in reachable bodies - but it
 # reports type and arity errors everywhere, so "unreachable bodies are not
 # analysed" is the wrong reading and the REFUSE rows below are what rule it out.
 accept fp_reach_unreached_forward_f        "forward call in an unreachable body"
@@ -139,9 +139,9 @@ accept fp_reach_suppressed_no_cascade_f        "a suppressed missing name does n
 
 # ---- a BUILTIN with no fitting overload is held like C1008 (t_a287040c) ----
 # Measured: when only builtins are visible for the name and none fits, the
-# reference reports it only in entry-reachable bodies, while a visible SOURCE
+# established compiler reports it only in entry-reachable bodies, while a visible SOURCE
 # declaration with the wrong arity stays C1103 everywhere (rows above).  The
-# accepted containers are byte-identical to the reference passthrough.
+# accepted containers are byte-identical to the established compiler passthrough.
 accept fp_reach_unreached_builtin_arity_f        "a builtin with no fitting overload (tex2D, 3 args), unreachable"
 accept fp_reach_unreached_builtin_libretro_f        "the libretro tex1D(sampler1D, float, int) wrapper, unreachable"
 accept fp_reach_unreached_builtin_type_f        "a builtin with no fitting TYPE (dot on samplers), unreachable"
@@ -183,7 +183,7 @@ refuse fp_reach_uniform_default_root_refuse_f        "a uniform default initiali
 
 # ---- used here, declared later HERE: C1002, and not reachability-gated ----
 # The deferral introduced by this commit newly ACCEPTED the first row; the
-# reference refuses it.  Keyed by the SCOPE INSTANCE - the three ACCEPT rows
+# established compiler refuses it.  Keyed by the SCOPE INSTANCE - the three ACCEPT rows
 # below are what rule out keying it by function (over-refuses all three) or by
 # scope depth (cannot tell the two siblings apart).
 refuse fp_scope_late_local_same_refuse_f        "used then declared in the same block, unreachable"
@@ -197,7 +197,7 @@ accept fp_scope_late_local_siblings_f        "two SIBLING blocks (legal; rules o
 # An error-typed argument suppresses the diagnostics on its call, but must not
 # suppress the RECORD that the callee's name was used unresolved.  The two
 # ACCEPT rows are what keep the fix from becoming "emit C1105 earlier", which
-# would refuse two programs the reference compiles (review: codex).
+# would refuse two programs the established compiler compiles (review: codex).
 refuse fp_scope_nested_unresolved_callee_refuse_f        "unresolved callee with an error-typed argument, declared later"
 refuse fp_scope_nested_unresolved_bare_refuse_f        "the same with a bare error-typed argument"
 accept fp_scope_nested_no_later_decl_f        "the same unresolved callee with NO later declaration"

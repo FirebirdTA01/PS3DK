@@ -1,7 +1,7 @@
 // Matrix reflection in the vertex container (uniform-default-records A3, matrix-default-reflection).
 //
 // THREE things at once, because they can only be seen together:
-//   M    an INITIALISED file-scope matrix uniform.  The reference leaves the
+//   M    an INITIALISED file-scope matrix uniform.  The established compiler leaves the
 //        PARENT record's defaultValue at 0 and puts each row's columns in the
 //        row record's own 16-byte block, zero-padded.  We dropped all of it.
 //   N    the same type with NO initialiser - the control that separates the
@@ -10,7 +10,7 @@
 //   mvp  a 4x4, so the row type stays FLOAT4 and the fix is proven
 //        COLUMN-SIZED rather than a blanket swap from FLOAT4 to FLOAT3.
 //
-// Measured on the reference: parent 1059 (CG_FLOAT3x3) with rows 1047
+// Measured on the established compiler: parent 1059 (CG_FLOAT3x3) with rows 1047
 // (CG_FLOAT3) for a 3x3; parent 1064 with rows 1048 for a 4x4.  We emitted
 // parent type 0 - no type at all - and FLOAT4 rows for every matrix.
 //

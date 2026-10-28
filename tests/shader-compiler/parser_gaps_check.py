@@ -1,4 +1,4 @@
-"""Community parser gaps (measured on sce-cgc 475; values from its containers).
+"""Community parser gaps (measured on the established compiler; values from its containers).
 
 - The comma operator in full expressions (statements, parentheses, for
   clauses): `a, b` evaluates a, the value is b.
@@ -10,14 +10,14 @@
 - A matrix constructor from mixed vector/scalar arguments fills row-major
   (float4x4(a, b, 8 scalars); eight float2s; float2x2(float4)).
 - modf(x, out ip): fl = floor(x), f = x - fl, ip = fl; where x < 0, ip = fl + 1
-  and f - 1 (so modf(-2) is (-1, -1), the reference's own result); an int ip
+  and f - 1 (so modf(-2) is (-1, -1), the established compiler's own result); an int ip
   for a float x is C1113.  modf_writeback's reference container runs at fx12
   precision, which fp_eval does not model: its expected value is the formula.
 - A local array from a brace list or an array constructor (float[](...),
   float[3](...)) fills its elements in order; a count mismatch refuses (the
-  reference says C1056; only the refusal is pinned here).
+  established compiler says C1056; only the refusal is pinned here).
 Values are judged with fp_eval on TEX0 = T; each expected value is the
-reference's own output.
+established compiler's own output.
 """
 import subprocess
 import sys
@@ -61,8 +61,8 @@ ROWS = {
     # Commas in for clauses: the static expansion takes the induction from the
     # operand the condition tests and runs j-- after each body (reference 0.75).
     'comma_for_clauses': ('float4 main(float4 t : TEXCOORD0) : COLOR { float s = 0; int i, j; for (i = 0, j = 2; i < 2; i++, j--) s += t[i] * j; return float4(s, 0, 0, 1); }' + '\\n', [0.75, 0.0, 0.0, 1.0]),
-    # Review of the typedef/comma port (codex 04:57; measured on sce-cgc 475
-    # 2026-10-17, values = fp_eval of the reference's own containers):
+    # Review of the typedef/comma port (codex 04:57; measured on the established compiler
+    # 2026-10-17, values = fp_eval of the established compiler's own containers):
     # the same tag and name; a tag declared inside a typedef, then shadowed
     # by a local (byte-identical to the plain-struct spelling); several
     # extra parts in one for clause; an alias as parameter and return type.
@@ -74,11 +74,11 @@ ROWS = {
     'typedef_return_type': ('typedef float B; B f(B x) { return (B) - x; } float4 main(float4 t : TEXCOORD0) : COLOR { return f(t.x); }' + '\\n', [-0.5, -0.5, -0.5, -0.5]),
 }
 DEBT = {
-    # The reference accepts an anonymous struct typedef with an extent
+    # The established compiler accepts an anonymous struct typedef with an extent
     # (byte-identical to the same-tag spelling; value 0.5); this compiler
     # still refuses it at the '[' (parent fae36356 too).
     'typedef_anon_struct_array': ('typedef struct { float x; } A[2]; float4 main(float4 t : TEXCOORD0) : COLOR { A a; a[0].x = t.x; return a[0].x; }' + '\\n', 'after typedef'),
-    # The reference accepts these and steps i / k ONCE ((0.75, t.y, 1, 1) and
+    # The established compiler accepts these and steps i / k ONCE ((0.75, t.y, 1, 1) and
     # (1, 7, 3, 2)); the lane/row store builds its lvalue twice, so it
     # refuses side-effecting shapes until the lvalue is resolved once.
     'lane_store_side_effect_index': ('float4 main(float4 t : TEXCOORD0) : COLOR { float4 a[2]; a[0] = t; a[1] = t; int i = 0; a[i++][1] = 0.75; return float4(a[0].y, a[1].y, float(i), 1); }' + '\\n', 'side effects'),

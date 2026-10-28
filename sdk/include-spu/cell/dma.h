@@ -1,13 +1,13 @@
 /*! \file cell/dma.h
  \brief Thin SPU-side wrappers around the MFC DMA channels.
 
-  Reference-SDK-compatible cellDma* surface for SPU programs. The
+  Cell OS-compatible cellDma* surface for SPU programs. The
   implementation is a header-only set of inline wrappers over the
   standard <spu_mfcio.h> intrinsics, so there is no companion library
   to link against — every call inlines to one or two channel writes.
 
   Every wrapper takes the same (ls, ea, size, tag, tid, rid) shape the
-  reference headers used:
+  system headers used:
     - ls   : local-store pointer (or LS address)
     - ea   : 64-bit effective address in main memory
     - size : transfer size in bytes (16 B aligned, ≤ 16 KiB per cmd)
@@ -32,7 +32,7 @@ extern "C" {
 
 /* DMA-list element. The SPU MFC consumes a packed list of (size,eal)
    pairs; cellDmaListGet/Put take a pointer to an array of these. The
-   bit layout matches the reference SDK / mfc_list_element_t in
+   bit layout matches the platform ABI / mfc_list_element_t in
    <spu_mfcio.h>; we re-typedef it under the cellDma* spelling. */
 typedef mfc_list_element_t CellDmaListElement;
 

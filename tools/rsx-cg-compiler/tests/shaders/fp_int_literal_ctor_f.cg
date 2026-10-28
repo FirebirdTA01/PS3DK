@@ -10,7 +10,7 @@
 //     result, or literal vec4 (arithmetic lowering lands later)
 //
 // An honest refusal rather than a miscompile, which is why this is not a
-// P1 - but the reference compiles all of these, and so should we.  The
+// P1 - but the established compiler compiles all of these, and so should we.  The
 // second fixture covers the other spelling, an int-initialised float
 // VARIABLE, which turned out to be the same site.
 void main(out float4 oColor : COLOR)

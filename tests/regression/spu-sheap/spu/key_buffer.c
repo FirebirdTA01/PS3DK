@@ -1,5 +1,5 @@
 /* sheap-key-buffer (SPU side): attach to the keyed buffer the PPU created,
- * fill it with primes and drop the reference.
+ * fill it with primes and drop the system.
  *
  * args: keyed heap EA, key, number of primes (multiple of 32).
  */

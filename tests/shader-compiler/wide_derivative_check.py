@@ -1,6 +1,6 @@
 """A float3/float4 ddx/ddy is two two-lane DDX/DDY (community blur family).
 
-NV40's DDX and DDY produce two lanes.  Measured on sce-cgc 475:
+NV40's DDX and DDY produce two lanes.  Measured on the established compiler:
 
     float4 ddx(v):  DDXR R1.xy, R0.zwzw;  MOVR R1.zw, R1.xyxy;  DDXR R1.xy, R0;
     float3 ddy(v):  DDYR R1.x,  R0.zwzw;  MOVR R1.z,  R1.xyxy;  DDYR R1.xy, R0;
@@ -80,7 +80,7 @@ def check(blob, op, width):
 
 
 def self_test():
-    """The checker must accept the reference shape and reject defect shapes."""
+    """The checker must accept the established compiler shape and reject defect shapes."""
     from fp_eval import _container, _ins, _src
     from fp_sources import INPUT, TEMP
     tex0 = 0x4

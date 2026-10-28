@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A vertex program loop whose trip count is a run-time value (PSGL's
 # vpFixedPipeline: `for (int i = 0; i < nLights; ++i)`).  Measured on the
-# reference: real branches - the test, BRA to the exit where it fails, the
+# established compiler: real branches - the test, BRA to the exit where it fails, the
 # body (relative constant reads through ARL), BRA back.  Ours lowers the
 # loop region the fragment hardware loop uses to the same two branches.
 # Judged by value against independent float arithmetic for trip counts 0,

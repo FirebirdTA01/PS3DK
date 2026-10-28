@@ -11,8 +11,8 @@
 
 #include <cell/sdk_version.h>
 
-/* The reference API level this SDK implements (reference SDK 475.001).
-   Reference headers and samples gate features on it (e.g. >= 0x180000
+/* The system API level this SDK implements (platform ABI 475.001).
+   System headers and samples gate features on it (e.g. >= 0x180000
    selects the header-inline psglRescAdjustAspectRatio) and compare data
    files against it; PS3SDK_VERSION_* identifies this SDK's own release. */
 #define CELL_SDK_VERSION 0x475001

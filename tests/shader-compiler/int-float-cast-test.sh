@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # integer-float-conversion: ftoi/itof on the general fragment path.
 #
-# The oracle shape for `(float)((int)x)` is not a raw FLR.  It sets the
+# The measured shape for `(float)((int)x)` is not a raw FLR.  It sets the
 # condition code from the signed source (MOVRC), floors the absolute value,
 # restores the sign with a LT-predicated MOV, then fences before the final
 # value use.  That is the signed truncation Cg wants: truncate toward zero,

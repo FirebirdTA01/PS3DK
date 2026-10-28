@@ -2,7 +2,7 @@
 // out parameter does.
 //
 // The half-output detection added for half-output-staging walks the entry's
-// PARAMETERS, so it never sees `half4 main() : COLOR`.  The reference
+// PARAMETERS, so it never sees `half4 main() : COLOR`.  The established compiler
 // emits `MOVH H0, {1,0,0,0}.x` with outputFromH0 set; the general path
 // emits `MOVR R0.x` with the flag clear.  That pair is internally
 // consistent - the runtime reads R0, and R0 was written - so the defect

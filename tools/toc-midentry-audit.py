@@ -73,7 +73,6 @@ def find_tool(tool_name, user_override=None, env_vars=None):
 
     # Check known absolute paths
     known_paths = [
-        rf'C:\SDKs\Sony\homebrew\PS3DK\ppu\bin\{tool_name}.exe',
         rf'C:\ps3dev\ppu\bin\{tool_name}.exe',
         rf'/usr/local/ps3dev/ppu/bin/{tool_name}',
         rf'/opt/ps3dev/ppu/bin/{tool_name}',

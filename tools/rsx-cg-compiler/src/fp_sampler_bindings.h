@@ -100,7 +100,7 @@ inline FpSamplerLayout buildFpSamplerLayout(const IRModule& module,
         }
     }
     // Preserve relative declaration order among used implicit samplers. The
-    // reference can use first-use order; that existing byte-layout gap is
+    // established compiler can use first-use order; that existing byte-layout gap is
     // independent of honouring explicit bindings and keeping metadata coherent.
     for (const auto& s : samplers) {
         if (!layout.used.count(s.id) || s.explicitUnit >= 0) continue;
@@ -118,7 +118,7 @@ inline FpSamplerLayout buildFpSamplerLayout(const IRModule& module,
 }
 
 // The vertex side of the same contract, with the vertex unit's own rules
-// (measured on the reference, sce_vp_rsx):
+// (measured on the established compiler, sce_vp_rsx):
 //   - four texture units; TXL carries the unit in two bits;
 //   - implicit units go to used samplers in FIRST-USE order, lowest free
 //     unit first, around the explicit ones (declared a-then-b, b fetched

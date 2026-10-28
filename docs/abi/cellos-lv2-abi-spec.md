@@ -82,7 +82,7 @@ Normative rules:
 2. `sh_addralign` for `.opd` is 4.
 3. Each descriptor's head reloc is `R_PPC64_ADDR32` against a defined local
    or external function symbol (by convention prefixed `.funcname` in the
-   reference tree; our toolchain may emit with or without the dot prefix as
+   system tree; our toolchain may emit with or without the dot prefix as
    long as the symbol resolves).
 4. Each descriptor's tail word (offset +4) is `R_PPC64_ADDR32` against
    `.TOC.` with addend 0, resolved to the module TOC base EA at link time.
@@ -241,7 +241,7 @@ Normative rules:
 
 PSL1GHT declares several kernel-interface structs (notably
 `gcmConfiguration`) with `void * __attribute__((mode(SI)))` fields,
-yielding a packed 24-byte struct with 32-bit pointers. Reference SDK
+yielding a packed 24-byte struct with 32-bit pointers. Platform ABI
 headers declare the analogous struct (`CellGcmConfig`) as 32 bytes
 with native 64-bit pointers.
 
@@ -274,7 +274,7 @@ sentinel - the kernel writes **exactly 24 bytes**.
   32-bit EA fields and populates the trailing `memoryFrequency`
   / `coreFrequency` words. This is correct, documented behaviour,
   not a workaround.
-- Reference-SDK-visible `memoryFrequency` / `coreFrequency` fields
+- Cell OS-visible `memoryFrequency` / `coreFrequency` fields
   in the 32-byte struct come from the same 24-byte syscall payload,
   just mapped into the trailing portion of the wider struct.
 
@@ -437,7 +437,7 @@ A PRX is a relocatable Lv-2 module produced by `tools/prx-gen` from a
 `docs/design/sprx-generation.md`; loader-side facts with public-source
 citations: `docs/local/sprx-format-facts.md`). Sections 1-6 apply with the
 differences below. Items marked *(R)* are what the emulator accepts and
-await confirmation against the reference SDK; everything else is normative.
+await confirmation against the platform ABI; everything else is normative.
 
 ### 8.1 ELF identity
 

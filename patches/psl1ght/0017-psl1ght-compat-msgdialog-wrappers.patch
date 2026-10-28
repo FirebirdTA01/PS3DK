@@ -1,6 +1,6 @@
 Subject: [PATCH] sysutil/msg: add cellMsgDialog compat wrappers
 
-Our SDK exports the reference-SDK cellMsgDialog* names; PSL1GHT samples
+Our SDK exports the Cell OS cellMsgDialog* names; PSL1GHT samples
 call msgDialog*. Add deprecated static-inline forwarders so unmodified
 samples build (each use warns to switch to cellMsgDialog*).
 
@@ -22,7 +22,7 @@ index 5f31fe7..b1b149b 100644
  
  typedef void (*msgDialogCallback)(msgButton button,void *usrData);
  
-+/* PSL1GHT-compat: our SDK exports the reference-SDK cellMsgDialog* names;
++/* PSL1GHT-compat: our SDK exports the Cell OS cellMsgDialog* names;
 + * these deprecated wrappers let unmodified PSL1GHT samples build (each use
 + * warns).  Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop them.
 + * Guarded by __has_include: PSL1GHT's own build has no cell/ on its include

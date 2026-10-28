@@ -9,9 +9,9 @@
  * SetXVColor / SetupDisplay resolve through libsysutil_avconf_ext_stub.a
  * (cellSysutilAvconfExt module).
  *
- * This header is the authoritative source for the reference SDK video-out
+ * This header is the authoritative source for the platform ABI video-out
  * type and constant namespace.  The sysutil/sysutil_sysparam.h alias
- * re-exports it for the reference SDK sample code that includes only the
+ * re-exports it for the platform ABI sample code that includes only the
  * sysutil path.
  */
 
@@ -232,7 +232,7 @@ typedef enum CellVideoOutRGBOutputRange {
 } CellVideoOutRGBOutputRange;
 
 /* ---------------------------------------------------------------------
- * Struct definitions (oracle struct-tag names)
+ * Struct definitions (measurement struct-tag names)
  * --------------------------------------------------------------------- */
 
 typedef struct CellVideoOutResolution {

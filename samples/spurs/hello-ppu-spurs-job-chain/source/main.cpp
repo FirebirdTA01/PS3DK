@@ -59,7 +59,7 @@ static uint64_t s_chain[4] __attribute__((aligned(16))) = {
 /* Per-SPU priority table for the workload backing this chain.  Slots
  * 0+1 get a non-zero priority (the SPRX schedules onto these); the
  * rest are zero ("not assigned").  Matches the canonical shape the
- * reference SDK's job samples use. */
+ * platform ABI's job samples use. */
 static const uint8_t s_priorityTable[8] = { 8, 8, 0, 0, 0, 0, 0, 0 };
 
 int main(void)
@@ -101,7 +101,7 @@ int main(void)
     /* --- JobChainAttribute --- */
     CellSpursJobChainAttribute jcAttr;
     std::memset(&jcAttr, 0, sizeof(jcAttr));
-    /* Match the canonical job_hello reference sample params: 128-byte
+    /* Match the canonical job_hello existing sample params: 128-byte
      * descriptors, 1-SPU contention, priority{8,0,0,0,0,0,0,0}. */
     static const uint8_t prio_hello[8] = { 8, 0, 0, 0, 0, 0, 0, 0 };
     std::printf("    JM_REV=%u SDK_VER=0x%x sizeof(jcAttr)=%u align=%u\n",

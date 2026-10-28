@@ -6,11 +6,11 @@
  * the PSL1GHT path:
  *
  *  - Output buffer kept in *logical* bit layout; halfword-swap applied
- *    at words() so `out.words` matches the reference compiler's on-disk encoding.
+ *    at words() so `out.words` matches the established compiler's on-disk encoding.
  *  - The 0x7fc << NV40_FP_OP_ADDR_INDEX_SHIFT default on hw[3] is
  *    written for ANY varying-input read, not just TC inputs.
  *    PSL1GHT only does it for TC because it gates perspective-correct
- *    interpolation; the reference compiler applies it across the board (verified on
+ *    interpolation; the established compiler applies it across the board (verified on
  *    identity_f.cg's MOVR R0, f[COL0] — hw[3] = 0x3fe1c800).
  *
  *  Other FP features (constants, samplers, branching, condition codes,
@@ -59,14 +59,14 @@ void FpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
         hw[0] |= NVFX_FP_OP_COND_WRITE_ENABLE;
 
     // DST_SCALE lives in hw[2] bits 28-30 (high 3 bits of SRC1).
-    // Used by the reference compiler for `2 * dot(...)` folding —
+    // Used by the established compiler for `2 * dot(...)` folding —
     // DP3 with scale=2X produces twice the dot product in one
     // instruction, saving the explicit multiply in `reflect()`.
     if (insn.scale != 0)
         hw[2] |= (static_cast<uint32_t>(insn.scale & 0x7)
                   << NVFX_FP_OP_DST_SCALE_SHIFT);
 
-    // SRC1 input precision.  the reference compiler sets bits 19-20 to 1 (FP16) and
+    // SRC1 input precision.  the established compiler sets bits 19-20 to 1 (FP16) and
     // bits 21-27 to 0x0B when a comparison instruction (SLT–SEQ)
     // uses FX12 precision (observed with cc_update for discard).
     // Together these produce 0x0168 in hw[2] bits 16-27.
@@ -75,7 +75,7 @@ void FpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
         opcode <= NVFX_FP_OP_OPCODE_SEQ)
     {
         hw[2] |= (uint32_t{1} << 19);        // input precision FP16
-        hw[2] |= (uint32_t{0x0Bu} << 21);    // the reference compiler constant
+        hw[2] |= (uint32_t{0x0Bu} << 21);    // the established compiler constant
     }
 
     hw[1] |= (static_cast<uint32_t>(insn.cc_cond) << NVFX_FP_OP_COND_SHIFT);
@@ -146,11 +146,11 @@ void FpAssembler::emitFencbr()
     hw[0] |= (uint32_t{0x3Eu} << NVFX_FP_OP_OPCODE_SHIFT);
     // OUT_NONE: no destination written.
     hw[0] |= NV40_FP_OP_OUT_NONE;
-    // the reference compiler sets OUT_REG = 0x3F (sentinel bit pattern when OUT_NONE
+    // the established compiler sets OUT_REG = 0x3F (sentinel bit pattern when OUT_NONE
     // is set — the field is otherwise meaningless).
     hw[0] |= (uint32_t{0x3Fu} << NVFX_FP_OP_OUT_REG_SHIFT);
     // OUTMASK = 0xF — all channels (also meaningless with OUT_NONE,
-    // but the reference compiler emits it this way and we match byte-for-byte).
+    // but the established compiler emits it this way and we match byte-for-byte).
     hw[0] |= (uint32_t{0xFu}  << NVFX_FP_OP_OUTMASK_SHIFT);
 
     // Source operands are default: TYPE=TEMP(0), identity swizzle,
@@ -242,7 +242,7 @@ void FpAssembler::clampUniformConstSwizzle(uint32_t constBlockByteOffset,
         if (cols == 1)
         {
             // A scalar's block is meaningful in lane x only, so broadcast
-            // it - which is also what the reference compiler emits, so the
+            // it - which is also what the established compiler emits, so the
             // narrower "clamp just the written lanes" would cost byte
             // parity for no gain.
             w &= ~static_cast<uint32_t>(NVFX_FP_REG_SWZ_ALL_MASK);
@@ -275,9 +275,9 @@ void FpAssembler::emitSrc(const struct nvfx_insn& insn, int pos, uint32_t* hw)
         // INPUT_SRC selects which interpolated varying feeds this
         // instruction; it's a per-insn field, not per-slot.
         hw[0] |= (static_cast<uint32_t>(src.reg.index) << NVFX_FP_OP_INPUT_SRC_SHIFT);
-        // the reference compiler's default for hw[3] when reading any varying:
+        // the established compiler's default for hw[3] when reading any varying:
         // (0x7fc << ADDR_INDEX_SHIFT) | (disable_pc << 31).
-        // PSL1GHT only sets this for TC inputs, but the reference compiler applies it
+        // PSL1GHT only sets this for TC inputs, but the established compiler applies it
         // unconditionally.
         hw[3] |= ((static_cast<uint32_t>(insn.disable_pc) << NV40_FP_OP_DISABLE_PC_SHIFT) |
                   (0x7fcu << NV40_FP_OP_ADDR_INDEX_SHIFT));
@@ -293,7 +293,7 @@ void FpAssembler::emitSrc(const struct nvfx_insn& insn, int pos, uint32_t* hw)
         // (Multiple consts in one shader use distinct blocks; we
         // encode that by emitting them sequentially and each MOV
         // points to its own following block via SRC-index 0 — the
-        // "current instruction's own inline" — per the reference compiler output.)
+        // "current instruction's own inline" — per the established compiler output.)
         sr |= (NVFX_FP_REG_TYPE_CONST << NVFX_FP_REG_TYPE_SHIFT);
         sr |= (static_cast<uint32_t>(src.reg.index) << NVFX_FP_REG_SRC_SHIFT);
         break;

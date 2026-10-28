@@ -3,10 +3,10 @@
 //
 // This is the fixture that chose the design.  The first draft of the CF-2
 // note proposed walking up the unique-predecessor chain and refusing any
-// block with more than one predecessor; measuring showed the reference
+// block with more than one predecessor; measuring showed the established compiler
 // compiles this shader in six instructions (the merge as a
 // condition-code-predicated MOV, then one comparison and one KIL), so the
-// walk would have turned a natural Cg idiom into a refusal the reference
+// walk would have turned a natural Cg idiom into a refusal the established compiler
 // does not have.  The guard set is computed by intersection over the
 // predecessors and verified - the only literals the intersection may drop
 // are one complementary pair from the same branch.

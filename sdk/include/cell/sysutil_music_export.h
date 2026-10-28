@@ -1,5 +1,5 @@
 /*! \file cell/sysutil_music_export.h
- \brief Sony-SDK-source-compat libsysutil_music_export (export track to XMB) API.
+ \brief Cell OS source-compat libsysutil_music_export (export track to XMB) API.
 
   Backed by libsysutil_music_export_stub.a — five exports against the
   cellMusicExportUtility SPRX module.  No PSL1GHT runtime wrapper.

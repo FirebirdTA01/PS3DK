@@ -18,7 +18,7 @@
 #
 # The defect: the general path dropped all three - it emitted MOVR o[COLR]
 # with the flag clear, exit 0, container written, no diagnostic.  The
-# expected words below are the reference's bytes for this shader.
+# expected words below are the established compiler's bytes for this shader.
 #
 # CONTROL: fp_float_output_f.cg is the same source with `out float4`.  It must
 # keep MOVR o[COLR] and a clear flag, so a fix that sets the bit
@@ -97,7 +97,7 @@ flt = container(sys.argv[2])
 
 problems = []
 
-# The reference's bytes for this shader: MOVH into the half output carries
+# The established compiler's bytes for this shader: MOVH into the half output carries
 # OUT_REG_HALF (0x00800000) and fp16 precision (0x00000040) in word 0.
 HALF_WORD0 = 0x9E810140
 FLOAT_WORD0 = 0x9E010100

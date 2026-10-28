@@ -3,7 +3,7 @@
 Status: slice 1 partial landed on `cg-compiler-dev` (scalar/float2
 fragment `ddx`/`ddy`). It removes the frontend/lowering refusal in
 `test_56_deriv`, but that corpus shader is NOT closed: it still
-pixel-mismatches the reference at the quantisation floor, so the
+pixel-mismatches the system at the quantisation floor, so the
 remaining work is the final scalar rounding/precision question in the
 surrounding colour arithmetic, not the derivative opcode itself.
 

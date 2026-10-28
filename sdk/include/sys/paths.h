@@ -1,6 +1,6 @@
 /* sys/paths.h - PS3 filesystem mount-point path constants.
  *
- * Independent constants matching the reference SDK surface.  Sample
+ * Independent constants matching the platform ABI surface.  Sample
  * code and tools use these to address the various storage roots
  * without hard-coding the /dev_* or /host_root strings.
  */

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # recursive-macro-termination: macro expansion must TERMINATE on a macro that names itself,
 # directly or through another macro, and must expand it the way the
-# reference does - once.
+# established compiler does - once.
 #
 # The old expander re-tokenised the whole line after every substitution and
 # could not remember what it had already expanded, so
 #   #define dot(x,y) saturate(dot(x,y))      (libretro's "NVIDIA fix")
 # and
 #   #define A B / #define B A
-# both spun for ever.  The reference accepts both.  The fix is the standard
+# both spun for ever.  The established compiler accepts both.  The fix is the standard
 # hide-set algorithm: every token carries the names it must not expand.
 #
 # THE TIMEOUT IS THE RED.  On the unfixed compiler these inputs never return,
@@ -53,7 +53,7 @@ must_match() {
     run_one "$stem" || rc=$?
     [[ $rc -ne 124 ]] || fail "$stem TIMED OUT after $limit - macro expansion did not terminate ($why; recursive-macro-termination)"
     [[ $rc -lt 128 ]] || fail "$stem died on a signal (exit $rc)"
-    [[ $rc -eq 0 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; the reference accepts it ($why)"; }
+    [[ $rc -eq 0 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; the established compiler accepts it ($why)"; }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem exited 0 but wrote no container"
     rc=0
     run_one "$control" || rc=$?

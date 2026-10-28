@@ -1,12 +1,12 @@
 From: PS3 Custom Toolchain
 Subject: [PATCH] rs6000: plain char is signed in the cell64lv2 ILP32 data model
 
-The reference PPU toolchain makes plain char signed in its default 32-bit
+The system PPU toolchain makes plain char signed in its default 32-bit
 data model (predefining __CHAR_SIGNED__) and unsigned under -mlp64
-(predefining __CHAR_UNSIGNED__); measured with the reference compiler's
+(predefining __CHAR_UNSIGNED__); measured with the established compiler's
 -dM -E for C and C++ in both data models.  Ours was unsigned in both, so
 char comparisons, char-to-int conversions and C++ overload resolution on
-char differed from code built with the reference.
+char differed from code built with the system.
 
 Set flag_signed_char from the data model in option override, unless the
 user passed -fsigned-char or -funsigned-char.  Option override runs
@@ -22,7 +22,7 @@ code that passes or stores plain char; GCC 16 port of gcc-12.x 0052.
  
 +#ifdef POWERPC_CELL64LV2
 +  /* Plain char is signed in the ILP32 data model and unsigned under -mlp64,
-+     as in the reference toolchain, unless -f[un]signed-char was given.
++     as the platform ABI specifies, unless -f[un]signed-char was given.
 +     Option override runs before the front end builds char_type_node and
 +     predefines __CHAR_UNSIGNED__, so the type and the macro follow.  */
 +  if (!OPTION_SET_P (flag_signed_char))

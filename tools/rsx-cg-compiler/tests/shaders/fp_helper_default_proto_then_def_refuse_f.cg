@@ -1,6 +1,6 @@
-// function-visibility commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against the established compiler.
 // THE CONTROL THAT KEEPS C1106 FROM SWALLOWING THE LEGAL SHAPE.  A PROTOTYPE
-// and its definition are not two definitions: the reference does not say
+// and its definition are not two definitions: the established compiler does not say
 // C1106 here.  It refuses for a different reason - the latest declaration
 // visible at the call is the definition, which has no default, so the call is
 // short an argument (C1103).  That is rule 1, not a redefinition.

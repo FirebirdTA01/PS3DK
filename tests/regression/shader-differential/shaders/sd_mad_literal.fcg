@@ -5,7 +5,7 @@
 // patched; nothing patches a literal), so the output collapsed to the
 // addend: 0.5 everywhere, exit 0, container written.  Found by the VP
 // rig's coverage-FP instrument rows on their first boot.  Judged against
-// the reference under the shared VP: TEXCOORD0 varies, so a zeroed
+// the established compiler under the shared VP: TEXCOORD0 varies, so a zeroed
 // multiplier paints a constant where a ramp belongs.
 void main(float4 v : TEXCOORD0, out float4 color : COLOR)
 {

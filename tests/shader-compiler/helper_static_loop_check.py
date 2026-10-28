@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Reference-measured helper expansion twins; unsupported forms remain named gaps.
 
-Mutable/dynamic bounds, dependency writes and control-flow exits are reference
-accepts but intentionally refused here - except the FRAGMENT rows a hardware
+Mutable/dynamic bounds, dependency writes and control-flow exits are accepted by the
+established compiler and but intentionally refused here - except the FRAGMENT rows a hardware
 loop now compiles (FP-LOOP slice 1), which are judged by value ("accept": TEX0
 inputs and the colour each must produce, on fp_eval), and the VERTEX rows a
 branch loop compiles (VP-CF; "accept_vp": POSITION.x, uniform N, COL0). The existing 64-trip

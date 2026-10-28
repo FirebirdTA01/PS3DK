@@ -6,7 +6,7 @@
 | Stub archive | `libusbd_stub.a` (nidgen + legacy wrappers) |
 | Legacy alias | `libusb.a` → `libusbd_stub.a` (symlink) |
 | Entry points | 35 cellUsbd* (24 documented + 11 firmware-only) + 35 usb* legacy forwarders |
-| Reference headers | 4 files (usbd.h umbrella, usb.h USB-IF types, libusbd.h API, error.h) |
+| System headers | 4 files (usbd.h umbrella, usb.h USB-IF types, libusbd.h API, error.h) |
 
 ## Surface
 

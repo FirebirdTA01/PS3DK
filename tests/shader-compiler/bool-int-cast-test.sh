@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # int(b) of a comparison in a fragment program is 0 or 1 (lcd-pass-0's
 # `int(fmod(y, h) > t)` was refused on an unresolved bitcast).  Judged by
-# value on a grid of inputs; the expected values are what the reference's
+# value on a grid of inputs; the expected values are what the established compiler's
 # own container gives on the same grid.
 #
 # Usage: tests/shader-compiler/bool-int-cast-test.sh <compiler>

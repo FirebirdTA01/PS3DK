@@ -2,11 +2,11 @@
 # `OUT o = (OUT)0;` FILLS EVERY LEAF WITH THE SCALAR.
 #
 # Semantic analysis refused the cast outright - "cannot cast from 'int' to
-# 'struct'" - and clearing an output struct that way is the reference SDK's
+# 'struct'" - and clearing an output struct that way is the platform ABI's
 # usual spelling.
 #
 # THE ROW COUNT, measured 2026-09-14 and not inherited: this construct moves
-# ZERO rows of today's 920-row reference-SDK sweep.  The "16 rows" this guard
+# ZERO rows of today's 920-row Cell OS sweep.  The "16 rows" this guard
 # used to cite came from the 2026-09-06 bucket survey; grepping every parent
 # log on the current tip finds the diagnostic ZERO times.  Two corpus sources
 # use the construct - CgTutorial/GCM/Metallic/shaders/MetallicFp.cg and
@@ -22,7 +22,7 @@
 # if the initialiser is dropped rather than emitted, since dropping a zero
 # looks correct on a register that happens to be clear.
 #
-# WHAT THIS DELIBERATELY DOES NOT DO: the reference emits NOTHING for the
+# WHAT THIS DELIBERATELY DOES NOT DO: the established compiler emits NOTHING for the
 # zero-filled lanes that no later write touches (`float4 z = (float4)0;
 # z.xy = p.xy;` is one MOV of xy there).  That is only sound if an unwritten
 # register reads as zero, and RPCS3 initialises every fragment local itself
@@ -133,7 +133,7 @@ grep -q "cannot cast" "$work/fp_struct_sampler_init_refuse_f.err" \
 # fill has to apply the LEAF's rule, and bool (a truth test), fixed (clamp
 # to [-2, 2 - 2^-10]) and the narrow integers (wrap) each have their own.
 # Writing the scalar through unchanged is a WRONG VALUE, measured against
-# the reference: (S)0.5 into a bool leaf is 1 there and was 0.5 here, (S)3.0
+# the established compiler: (S)0.5 into a bool leaf is 1 there and was 0.5 here, (S)3.0
 # into a fixed leaf is 1.9990234375 there and was 3, (S)65537 into a short
 # leaf is 1 there and was 65537 (codex, review of this commit).  These rows
 # exist so the refusal cannot quietly become an acceptance again without

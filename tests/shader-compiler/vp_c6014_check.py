@@ -1,6 +1,6 @@
 """A vertex program must write POSITION/HPOS on some path (C6014, t_52640169).
 
-Measured on sce-cgc 475: refused with "error C6014: Required output 'HPOS'
+Measured on the established compiler: refused with "error C6014: Required output 'HPOS'
 not written" when the program writes only other outputs or declares
 `out float4 o : POSITION` and never assigns it; ACCEPTED when it writes
 position on one path only, writes part of it, or writes an HPOS struct
@@ -23,7 +23,7 @@ ACCEPT = {
     'partial_write': 'void main(float4 p : POSITION, out float4 o : POSITION) { o.xy = p.xy; }\n',
     'plain': 'float4 main(float4 p : POSITION) : POSITION { return p; }\n',
 }
-# Refused today for a named reason that is NOT C6014 (the reference ACCEPTS
+# Refused today for a named reason that is NOT C6014 (the established compiler ACCEPTS
 # it: a position write on one path).  Pinned strictly - exit 1, no
 # container, this exact reason - so a crash or a silent accept cannot pass.
 # The conditional-store gap's two spellings: the block-store refusal, and
@@ -34,7 +34,7 @@ CONDITIONAL_STORE = ('output store in block', 'could not be resolved')
 NOT_C6014 = {
     'written_on_one_path': 'void main(float4 p : POSITION, out float4 o : POSITION) { if (p.x > 0) o = p; }\n',
 }
-# A position write only on a constant-false path is no write: the reference
+# A position write only on a constant-false path is no write: the established compiler
 # refuses C6014 (measured: if (false), a false static const bool, a chained
 # constant condition).  We refuse them too, earlier, with the conditional
 # store reason; either name is accepted, a container is not (review: codex).

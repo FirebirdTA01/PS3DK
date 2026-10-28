@@ -1,6 +1,6 @@
 """Measured finite float builtin initializers, with literal and binding controls.
 
-The private oracle is never needed by this test. User-defined calls and runtime
+The private measurement is never needed by this test. User-defined calls and runtime
 dependencies stay named debts; they must not be mistaken for builtin constants.
 """
 import argparse
@@ -24,7 +24,7 @@ PAIRS = [
     ('clamp_low', 'float', 'clamp(-0.5,0.0,1.0)', '0.0'),
     ('clamp_high', 'float', 'clamp(1.5,0.0,1.0)', '1.0'),
     ('nested', 'float', 'max(abs(-0.125),0.0625)', '0.125'),
-    # The oracle's ceil(-.25) is NEGATIVE zero in both profiles.
+    # The established compiler's ceil(-.25) is NEGATIVE zero in both profiles.
     ('ceil_vector', 'float4', 'ceil(float4(-1.25,-0.25,0.25,1.25))', 'float4(-1,-0.0,1,2)'),
     ('clamp_vector', 'float4', 'clamp(float4(-1,0.25,0.75,2),0.0,1.0)', 'float4(0,0.25,0.75,1)'),
     ('negative_zero', 'float', 'ceil(-0.0)', '-0.0'),

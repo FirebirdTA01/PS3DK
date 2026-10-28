@@ -6,7 +6,7 @@
  *
  * An array uniform (`uniform float4 u_colors[4]`, as an entry parameter or
  * at file scope) is N ELEMENTS to the container and to the hardware: the
- * reference declares one parameter record per element, named `name[i]`,
+ * established compiler declares one parameter record per element, named `name[i]`,
  * typed as the element, in declaration order, whether the element is used
  * or not; a used element carries its own resources (FP: its inline-const
  * relocation offsets; VP: its constant register).  The general lowering
@@ -33,7 +33,7 @@ namespace rsx_cg
 // The integer an index VALUE folds to, when it is a constant the builder
 // did not see as one: `int i = 1; u[i]` reaches the load as a run-time
 // index whose operand is the constant 1, and `float i = 1; u[int(i)]` as
-// a float-to-int of the constant 1.0.  The reference treats both as the
+// a float-to-int of the constant 1.0.  The established compiler treats both as the
 // CONSTANT index 1 - per-element layout, no address register, on both
 // profiles - and refuses an out-of-range one (C1068), so the fold has to
 // happen where the layout is classified, before any register is handed
@@ -115,7 +115,7 @@ inline ArrayUniformUses classifyArrayUniformUses(const IRFunction& entry)
 // would shift every later record's bytes, not just its own string.
 // Every value the entry function READS: an instruction operand (a uniform
 // parameter is read through its value id) or the source of a LoadUniform (a
-// file-scope uniform).  The reference gives a VERTEX uniform a c[] register
+// file-scope uniform).  The established compiler gives a VERTEX uniform a c[] register
 // only when it is read: an unread one is declared with no resource, register
 // -1 and isReferenced 0, and every later uniform keeps the register it would
 // have had without it (measured, vm1: unused_m / unused_v / g_unused_m).  The
@@ -144,7 +144,7 @@ inline std::string arrayElementName(const std::string& name, int index)
 // The VP constant registers of an array's elements, in element order,
 // -1 for an element that holds none.  `cursor` is the descending uniform
 // walk (c467 first) and is advanced past what the array took.  Two
-// shapes, both measured on the reference (constant-uniform-array-index, dynamic-uniform-array-index):
+// shapes, both measured on the established compiler (constant-uniform-array-index, dynamic-uniform-array-index):
 //   - constant indices only: a register per REFERENCED element, taken
 //     from the cursor in ASCENDING element order (u_bones[1] -> c467,
 //     u_bones[3] -> c466); unreferenced elements hold none;
@@ -235,8 +235,8 @@ inline unsigned fpFirstGlobalSlot(const IRFunction& entry)
 
 // The element types laid out per element: float and half scalars and
 // vectors (a half element is an inline-const block like a float one, and
-// the reference records it as float / float4).  A matrix element (the
-// reference accepts float4x4 m[2]) and anything nested keep a named
+// the established compiler records it as float / float4).  A matrix element (the
+// established compiler accepts float4x4 m[2]) and anything nested keep a named
 // refusal until they are measured and pinned.
 inline bool arrayElementLowered(const IRTypeInfo& type)
 {

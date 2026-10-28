@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PS3 Custom Toolchain - stub-only the reference SDK libraries
+# PS3 Custom Toolchain - stub-only the platform ABI libraries
 #
 # Builds self-contained `lib<name>_stub.a` archives for libraries that have no
 # PSL1GHT runtime backing (i.e. cell/* headers ship as declaration-only and
@@ -7,10 +7,10 @@
 # YAML in $STUB_YAMLS, then installs the resulting archive under
 # $PS3DK/ppu/lib/ so samples can link with `-l<archive_name>_stub`.
 #
-# Canonical file names follow the reference-SDK convention (lib*_stub.a).
+# Canonical file names follow the Cell OS convention (lib*_stub.a).
 # For Class 3 libraries (gcm_sys, io) that combine nidgen SPRX trampolines
 # with PSL1GHT-name forwarders, the combined archive is installed under the
-# reference-SDK _stub name; a symlink aliases the PSL1GHT legacy name back
+# Cell OS _stub name; a symlink aliases the PSL1GHT legacy name back
 # to it.  -L$(PS3DK)/ppu/lib ordering ensures the symlink shadows any
 # original PSL1GHT copy.  Reference Makefiles get the _stub name directly;
 # PSL1GHT-style homebrew follows the symlink transparently.
@@ -170,8 +170,8 @@ STUB_YAMLS=(
     "$PS3_TOOLCHAIN_ROOT/tools/nidgen/nids/cellFs.yaml"
 )
 
-# Archives that earlier releases installed under a name the reference SDK
-# does not use.  The archive now carries the reference name; the old name
+# Archives that earlier releases installed under a name the platform ABI
+# does not use.  The archive now carries the system name; the old name
 # stays as an alias so existing Makefiles keep linking.
 declare -A PREVIOUS_ARCHIVE_NAME=(
     [libcrashdump_stub]=libsys_crashdump_stub.a
@@ -182,7 +182,7 @@ declare -A PREVIOUS_ARCHIVE_NAME=(
 
 # PSL1GHT libraries that were pure import wrappers (one sprx.o of
 # trampolines, no C code) are replaced by the nidgen archive: the
-# PSL1GHT names are nidgen aliases (matched by FNID) of the reference
+# PSL1GHT names are nidgen aliases (matched by FNID) of the system
 # exports, and the PSL1GHT archive name is installed as an alias of the
 # _stub archive, as libusb.a already is.
 declare -A PSL1GHT_IMPORT_ALIAS=(
@@ -254,7 +254,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
     [[ ${#produced[@]} -eq 1 ]] \
         || die "expected exactly one archive in $out_subdir/$name, got ${#produced[@]}"
 
-    # libgcm_sys_stub.a: installed under the canonical reference-SDK
+    # libgcm_sys_stub.a: installed under the canonical Cell OS
     # name libgcm_sys_stub.a, with a libgcm_sys.a symlink aliasing back
     # for PSL1GHT compatibility.  -L$(PS3DK)/ppu/lib ordering ensures the
     # symlink shadows any original PSL1GHT copy; reference Makefiles get
@@ -263,7 +263,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
     # The combined archive folds in sdk/libgcm_sys_legacy/ wrappers so it
     # resolves both cellGcm* names (nidgen) and PSL1GHT gcm* names
     # that <cell/gcm.h>'s static-inline forwarders still emit - until the
-    # the reference SDK-primary surface reaches everywhere and those forwarders go
+    # the platform ABI-primary surface reaches everywhere and those forwarders go
     # away.
     if [[ "$name" == "libnet_stub" ]]; then
         bash "$script_dir/build-libnet-archive.sh" "${produced[0]}" "$install_dir/libnet_stub.a" "$abi"
@@ -376,7 +376,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
     fi
 done
 
-# The reference SDK links its C maths and C++ runtimes from PRX modules
+# The platform ABI links its C maths and C++ runtimes from PRX modules
 # (sys_libm, sys_libstdcxx) through libm_stub.a and libstdc++_stub.a.  Ours are
 # the toolchain's static newlib libm and GCC libstdc++, so no import
 # trampolines are generated for either: sys_libstdcxx is a different C++

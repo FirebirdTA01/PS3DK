@@ -20,7 +20,7 @@
  *     u32 fields — instructionCount, instructionSlot, registerCount,
  *     attributeInputMask, attributeOutputMask, userClipMask.
  *
- * Reference-compiler cross-checked against const_out_v.vpo,
+ * Established-compiler cross-checked against const_out_v.vpo,
  * add_uniforms_v.vpo, mvp_passthrough_v.vpo, and probe_tc_v.vpo.
  */
 

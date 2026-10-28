@@ -119,7 +119,7 @@ readCamera ()
       printf
 	  ("GemPrepareCamera return %d exposure set to 128 and quality to 0.5 before cameraStart\n",
 	  ret);
-      printf ("lets go!! It's time to look your face in Sony Bravia :P\n");
+      printf ("lets go!! It's time to look your face in the TV :P\n");
       ret = cameraStart (0);
       printf ("cameraStart return %d \n", ret);
       printf ("*******************************************\n");

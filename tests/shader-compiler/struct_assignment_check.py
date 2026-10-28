@@ -194,7 +194,7 @@ def expected(name, inputs):
         'evaluation-once':[p[0],p[0]+1,p[0]+2,1],
         'inout-read-before-write':ib[:2]+ia[:2],
         # fixed members convert as fixed declarations do: the constant
-        # fixed2(3,-3) saturates to the fixed range (measured on the reference).
+        # fixed2(3,-3) saturates to the fixed range (measured on the established compiler).
         'kind-fixed':[1.9990234375,-2.0]+p[:2],
         'fixed-output-boundary':[1.9990234375,-2.0]+p[:2],
     }
@@ -214,7 +214,7 @@ def check_reflection(blob, name):
         fields=struct.unpack_from('>12I',blob,offset)
         records.append((fields[1],fields[0],fields[8]))
     for resource in (3222,3223):  # declared TEXCOORD2/3, two float lanes each
-        # The reference reflects inout fields as incoming ATTR10/11 records
+        # The established compiler reflects inout fields as incoming ATTR10/11 records
         # even when the program writes TEXCOORD2/3. Numeric checks above must
         # still witness the physical outputs, independently of this metadata.
         reflected=(resource,1046,4098) in records or (name.startswith('inout-') and

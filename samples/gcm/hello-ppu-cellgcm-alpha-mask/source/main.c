@@ -9,12 +9,12 @@
  *      `float2 texcoord` with no explicit semantic.  Our front-end
  *      assigns it TEXCOORD0 (the lowest unused slot); the parameter
  *      table records resource code 0x0c94 with the semantic *string*
- *      suppressed, byte-matching the reference compiler.
+ *      suppressed, byte-matching the established compiler.
  *
  *   2) Alpha-mask if-else (tex-result-as-cmp-LHS): the FP samples a
  *      texture, compares its alpha to 0.5, drops to (0,0,0,0) on
  *      pass and otherwise reads the per-vertex COLOR0 varying.  The
- *      reference compiler — and now ours, byte-exact — lowers this
+ *      established compiler — and now ours, byte-exact — lowers this
  *      to a 3-instruction shape:
  *
  *        TEX  R1.w{MASK_W}, f[TC0], TEX0

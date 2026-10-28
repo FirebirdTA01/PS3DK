@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# scalar-divr-lowering: NV40 fragment DIVR (opcode 0x3A) is the oracle's divide
+# scalar-divr-lowering: NV40 fragment DIVR (opcode 0x3A) is the established compiler's divide
 # shape for tan, smoothstep's dynamic edge clamp, and the trig polynomial
 # family.  RCP-then-MUL is correct enough for some pixels but is not the
-# reference shape and blocks the rest of the stdlib lane.
+# established compiler shape and blocks the rest of the stdlib lane.
 #
 # This test deliberately has two halves:
 #   * fragment fixtures require DIVR, including a saturated DIVR for
@@ -15,11 +15,11 @@
 # smoothstep fixture is the known-good control: a vector denominator keeps
 # the per-component RCP/MUL idiom. A scalar denominator permits vector DIVR.
 # The literal
-# divisor fixtures are the other negative controls: the reference folds
+# divisor fixtures are the other negative controls: the established compiler folds
 # /3.0 to MUL by the correctly rounded reciprocal 0x3eaaaaab, and folds
 # vector /0.01 to vector MUL by 100, so neither should emit DIVR or RCP.
 # The scaled-length fixture names the shape test_83 exposed after the literal
-# fold made it compile: sce-cgc computes length(x) * k as RSQ followed by
+# fold made it compile: the established compiler computes length(x) * k as RSQ followed by
 # DIVR k, rsq, not DIVSQR followed by MUL.
 set -euo pipefail
 
@@ -173,7 +173,7 @@ def assert_literal_recip_mul(path, label, expected_word):
     if any(d["op"] == DIV for d in ins):
         raise SystemExit(
             "FAIL: %s emitted DIVR for division by a literal divisor.  The "
-            "oracle folds this to MUL by the reciprocal." % label)
+            "established compiler folds this to MUL by the reciprocal." % label)
     if any(d["op"] == RCP for d in ins):
         raise SystemExit(
             "FAIL: %s still emitted RCP for division by a literal divisor; "
@@ -183,7 +183,7 @@ def assert_literal_recip_mul(path, label, expected_word):
     raw = open(path, encoding="utf-8").read().lower()
     if expected_word not in raw:
         raise SystemExit(
-            "FAIL: %s did not emit the oracle's reciprocal bits %s" %
+            "FAIL: %s did not emit the established compiler's reciprocal bits %s" %
             (label, expected_word))
     print("%s: literal divisor folded to MUL, no DIVR/RCP" % label)
 
@@ -194,7 +194,7 @@ def assert_scaled_length_divr(path, label):
         raise SystemExit("FAIL: %s produced no decoded instructions" % label)
     if not any(d["op"] == RSQ for d in ins):
         raise SystemExit(
-            "FAIL: %s emitted no RSQ for the oracle's scaled-length shape" %
+            "FAIL: %s emitted no RSQ for the established compiler's scaled-length shape" %
             label)
     if not any(d["op"] == DIV for d in ins):
         raise SystemExit(
@@ -202,7 +202,7 @@ def assert_scaled_length_divr(path, label):
             "on the one-ULP DIVSQR/MUL path" % label)
     if any(d["op"] == DIVSQR for d in ins):
         raise SystemExit(
-            "FAIL: %s still emitted DIVSQR for a scaled length; the oracle "
+            "FAIL: %s still emitted DIVSQR for a scaled length; the established compiler "
             "uses RSQ plus DIVR" % label)
     print("%s: scaled length uses RSQ plus DIVR" % label)
 

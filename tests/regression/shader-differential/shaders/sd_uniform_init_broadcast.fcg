@@ -8,7 +8,7 @@
 // a well-formed, patchable parameter over a half-written block.
 //
 // THE ROW: set 0, no patch, output the uniform straight.  Ours paints the
-// x lane only; the reference paints the broadcast.  RED on db6dbca; green
+// x lane only; the established compiler paints the broadcast.  RED on db6dbca; green
 // once the evaluator fills the DECLARED width.  program_uniforms.fcg beside
 // it cannot see this - its initialiser is a full float4 constructor - which
 // is why a second row exists.  0.5 -> 128, exact in 8 bits.

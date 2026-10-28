@@ -10,8 +10,8 @@
 # THE FIX canonicalises a confirmed vector swizzle to its xyzw spelling wherever
 # a composite key is built, so .rgb and .xyz compose one key and the map holds
 # the last write by construction.  It covers the LOWERCASE rgba/stpq spellings
-# the reference treats as equivalent; an uppercase swizzle is left refusing, as
-# the reference refuses it (C1048), and is tracked in uppercase-swizzle-acceptance.
+# the established compiler treats as equivalent; an uppercase swizzle is left refusing, as
+# the established compiler refuses it (C1048), and is tracked in uppercase-swizzle-acceptance.
 #
 # THE GUARD IS ALIAS-SPELLING EQUIVALENCE WITH WRITE ORDER PRESERVED, not
 # order-insensitivity: spelling is free, write order is not.  Assertions:

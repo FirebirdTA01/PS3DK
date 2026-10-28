@@ -17,10 +17,10 @@ def get_output_from_h0(blob):
 
 
 # A semantic-less member of a returned struct is an output of its own: the
-# reference binds a written one to the next free COLOR (fragment) or TEXCOORD
+# established compiler binds a written one to the next free COLOR (fragment) or TEXCOORD
 # (vertex) and declares it, so these shapes are NOT byte-identical to a flat
 # twin that keeps the value in a local (that twin pinned the dropped write).
-# Output records measured on the reference: (name, resource, semantic, referenced).
+# Output records measured on the established compiler: (name, resource, semantic, referenced).
 REFERENCE_OUTPUTS = {
     'a4_nested': [('main.p', 2757, 'COLOR', 1), ('main.i.v', 2758, '', 1)],
     'vp_nested': [('main.p', 2243, 'POSITION', 1), ('main.i.v', 3220, '', 1)],
@@ -85,11 +85,11 @@ R main(float4 t : TEXCOORD0) {
 """
         blob1, out1 = compile_shader(compiler, work, 'a4_nested', 'sce_fp_rsx', code1_nested)
         blob1_twin, _ = compile_shader(compiler, work, 'a4_twin', 'sce_fp_rsx', code1_twin)
-        assert output_records(blob1) == REFERENCE_OUTPUTS["a4_nested"], "a4_nested outputs %s differ from the reference" % output_records(blob1)
+        assert output_records(blob1) == REFERENCE_OUTPUTS["a4_nested"], "a4_nested outputs %s differ from the established compiler's" % output_records(blob1)
         assert re.search(r'stout.*COLOR', out1, re.I), "a4_nested missing StoreOutput to COLOR"
-        print("PASS: a4_nested swizzle write and read-back (outputs as the reference declares them)", flush=True)
+        print("PASS: a4_nested swizzle write and read-back (outputs as the established compiler declares them)", flush=True)
 
-        # 2. Vertex shader profile with POSITION output (outputs as the reference declares them)
+        # 2. Vertex shader profile with POSITION output (outputs as the established compiler declares them)
         code2_nested = """
 struct I { float4 v; };
 struct R { float4 p : POSITION; I i; };
@@ -114,11 +114,11 @@ R main(float4 t : POSITION) {
 """
         blob2, out2 = compile_shader(compiler, work, 'vp_nested', 'sce_vp_rsx', code2_nested)
         blob2_twin, _ = compile_shader(compiler, work, 'vp_twin', 'sce_vp_rsx', code2_twin)
-        assert output_records(blob2) == REFERENCE_OUTPUTS["vp_nested"], "vp_nested outputs %s differ from the reference" % output_records(blob2)
+        assert output_records(blob2) == REFERENCE_OUTPUTS["vp_nested"], "vp_nested outputs %s differ from the established compiler's" % output_records(blob2)
         assert re.search(r'stout.*POSITION', out2, re.I), "vp_nested missing StoreOutput to POSITION"
-        print("PASS: vertex shader nested struct output (outputs as the reference declares them)", flush=True)
+        print("PASS: vertex shader nested struct output (outputs as the established compiler declares them)", flush=True)
 
-        # 3. Whole-field write to nested struct member (outputs as the reference declares them)
+        # 3. Whole-field write to nested struct member (outputs as the established compiler declares them)
         code3_nested = """
 struct I { float4 v; };
 struct R { float4 p : COLOR; I i; };
@@ -140,8 +140,8 @@ R main(float4 t : TEXCOORD0) {
 """
         blob3, out3 = compile_shader(compiler, work, 'whole_write', 'sce_fp_rsx', code3_nested)
         blob3_twin, _ = compile_shader(compiler, work, 'whole_twin', 'sce_fp_rsx', code3_twin)
-        assert output_records(blob3) == REFERENCE_OUTPUTS["whole_write"], "whole_write outputs %s differ from the reference" % output_records(blob3)
-        print("PASS: whole-field write to nested struct member (outputs as the reference declares them)", flush=True)
+        assert output_records(blob3) == REFERENCE_OUTPUTS["whole_write"], "whole_write outputs %s differ from the established compiler's" % output_records(blob3)
+        print("PASS: whole-field write to nested struct member (outputs as the established compiler declares them)", flush=True)
 
         # 4. Deeply nested struct (3 levels: c.b.a.v swizzle write, byte-identical to twin)
         code4_nested = """
@@ -169,8 +169,8 @@ C main(float4 t : TEXCOORD0) {
 """
         blob4, out4 = compile_shader(compiler, work, 'deep_nested', 'sce_fp_rsx', code4_nested)
         blob4_twin, _ = compile_shader(compiler, work, 'deep_twin', 'sce_fp_rsx', code4_twin)
-        assert output_records(blob4) == REFERENCE_OUTPUTS["deep_nested"], "deep_nested outputs %s differ from the reference" % output_records(blob4)
-        print("PASS: deeply nested 3-level struct swizzle write (outputs as the reference declares them)", flush=True)
+        assert output_records(blob4) == REFERENCE_OUTPUTS["deep_nested"], "deep_nested outputs %s differ from the established compiler's" % output_records(blob4)
+        print("PASS: deeply nested 3-level struct swizzle write (outputs as the established compiler declares them)", flush=True)
 
         # 5. Sibling instances do not alias each other (byte-identical to flat twin)
         code5_nested = """
@@ -197,7 +197,7 @@ R main(float4 t : TEXCOORD0) {
 """
         blob5, out5 = compile_shader(compiler, work, 'siblings', 'sce_fp_rsx', code5_nested)
         blob5_twin, _ = compile_shader(compiler, work, 'siblings_twin', 'sce_fp_rsx', code5_twin)
-        assert output_records(blob5) == REFERENCE_OUTPUTS["siblings"], "siblings outputs %s differ from the reference" % output_records(blob5)
+        assert output_records(blob5) == REFERENCE_OUTPUTS["siblings"], "siblings outputs %s differ from the established compiler's" % output_records(blob5)
         assert re.search(r'add vec4', out5), "siblings should emit vector add of distinct operands"
         print("PASS: separate sibling instances do not alias (byte-identical to flat twin)", flush=True)
 

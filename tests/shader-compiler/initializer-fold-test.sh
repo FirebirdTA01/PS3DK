@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # file-scope-initializer-fold: arithmetic in a file-scope initialiser is folded the way the
-# reference folds it, or refused - never compiled as a guess.
+# established compiler folds it, or refused - never compiled as a guess.
 #
-# Measured on sce-cgc 475 (2026-09-14, .local/probe-init, byte twins against
+# Measured on the established compiler (2026-09-14, .local/probe-init, byte twins against
 # hand-folded literals): integer division truncates toward zero (7/2 is 3,
 # -7/2 is -3), 7%3 is 1, a float operand makes it single-precision float
 # arithmetic rounded per operation ((16777216+1+1)-16777216 is 0), the brace
 # and constructor spellings are identical, comparisons/ternary/shifts fold, a
 # vector times a scalar folds lane by lane, a static const identifier folds.
-# A non-static file-scope const is a uniform on the reference, so an
+# A non-static file-scope const is a uniform on the established compiler, so an
 # initialiser reading one is C1059 there: a refusal here, never a fold.
 #
 # Every accepting row is a BYTE twin against a control whose value was folded
-# by hand, so the assertion is "the value the reference would compute", not
+# by hand, so the assertion is "the value the established compiler would compute", not
 # "it compiled".  Refusal rows assert exit status 1 exactly and the diagnostic
 # class, so a crash or a silent zero cannot pass as a refusal.
 set -euo pipefail
@@ -43,7 +43,7 @@ twin() {
     local cell="$1" why="$2" rc=0
     local stem="fp_initfold_${cell}_f" control="fp_initfold_${cell}_control_f"
     run_one "$stem" || rc=$?
-    [[ $rc -eq 0 ]] || { tail -n 4 "$work/$stem.log" >&2; fail "$stem exited $rc; the reference accepts it ($why)"; }
+    [[ $rc -eq 0 ]] || { tail -n 4 "$work/$stem.log" >&2; fail "$stem exited $rc; the established compiler accepts it ($why)"; }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem exited 0 but wrote no container"
     rc=0
     run_one "$control" || rc=$?
@@ -91,10 +91,10 @@ twin matrowswz  "M[1].y is 4"
 twin arrayelem  "A[1] of a static const float[3] is element 1, 6"
 twin arrayvec   "A[1] of a static const float2[2] is float2(3,4)"
 
-refuse fp_initfold_nonstatic_ident_refuse_f "cannot evaluate" "a non-static const is a uniform on the reference; reading it is C1059 there"
-refuse fp_initfold_uniform_ident_gap_f      "cannot evaluate" "NAMED GAP: the reference evaluates a static const from a uniform at run time; we do not yet"
-refuse fp_initfold_divzero_refuse_f         "cannot evaluate" "NAMED GAP: the reference folds 1.0f/0.0f to a value not yet pinned; we refuse rather than guess"
-refuse fp_initfold_toomuch_refuse_f         "constructor requires 2 components, but 3 were provided|cannot evaluate" "a brace list with more data than the declared type holds is C1058 on the reference (ours refuses at the constructor arity check)"
+refuse fp_initfold_nonstatic_ident_refuse_f "cannot evaluate" "a non-static const is a uniform on the established compiler; reading it is C1059 there"
+refuse fp_initfold_uniform_ident_gap_f      "cannot evaluate" "NAMED GAP: the established compiler evaluates a static const from a uniform at run time; we do not yet"
+refuse fp_initfold_divzero_refuse_f         "cannot evaluate" "NAMED GAP: the established compiler folds 1.0f/0.0f to a value not yet pinned; we refuse rather than guess"
+refuse fp_initfold_toomuch_refuse_f         "constructor requires 2 components, but 3 were provided|cannot evaluate" "a brace list with more data than the declared type holds is C1058 on the established compiler (ours refuses at the constructor arity check)"
 
 # Self-check for the refusal rows: a compiler that exits 1 but leaves an EMPTY
 # output file must be caught as a leak, not accepted as a refusal.

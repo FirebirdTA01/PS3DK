@@ -22,7 +22,7 @@ distinguishable from every other.  Against that fixture:
     mul(transpose(transpose(m)), p)  the same as mul(m, p)
 
 The third row is the reason the second and third fixtures both exist: the
-reference folds the double transpose to the plain multiply and emits a
+established compiler folds the double transpose to the plain multiply and emits a
 BYTE-IDENTICAL container for the two spellings, in both profiles.  We do
 not fold it (32 fragment instructions against 8), which is a scheduling
 gap and is carded separately - but a missing fold and a wrong permutation

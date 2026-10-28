@@ -5,7 +5,7 @@
 | Header | `<cell/sysutil_search.h>`, `<cell/sysutil_search_types.h>` |
 | Stub archive | `libsysutil_search_stub.a` (nidgen) |
 | SPRX module | `cellSearchUtility` (part of `CELL_SYSMODULE_SYSUTIL`, 0x0015) |
-| Entry points | 21 (20 in pre-475 firmware) |
+| Entry points | 21 (20 in pre-4.75 firmware) |
 
 ## Surface
 
@@ -84,7 +84,7 @@ The deferred-callback pump pattern (`cellSysutilCheckCallback`) applies to many 
 
 ### 1. SDK-version delta
 
-`cellSearchGetContentInfoSharable` is a 475+ addition. Pre-475 firmware ships only 20 entry points. Guard with a runtime-version check when targeting older firmware.
+`cellSearchGetContentInfoSharable` is a 4.75+ addition. pre-4.75 firmware ships only 20 entry points. Guard with a runtime-version check when targeting older firmware.
 
 ### 2. Asynchronous initialisation
 

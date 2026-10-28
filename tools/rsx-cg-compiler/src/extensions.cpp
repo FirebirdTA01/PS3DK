@@ -17,9 +17,9 @@ namespace
 const ExtensionInfo kExtensions[] = {
     { Extension::Bom, "bom",
       "accept one leading UTF-8 byte order mark (EF BB BF) in the main source "
-      "and in #include files; the reference refuses it" },
+      "and in #include files; the established compiler refuses it" },
     { Extension::DeclaratorTypes, "declarator-types",
-      "a later declarator in a list keeps the declared type; the reference gives it "
+      "a later declarator in a list keeps the declared type; the established compiler gives it "
       "the type last named in an earlier declarator" },
     { Extension::StaticParameters, "static-parameters",
       "accept helper static, static const, and const static parameters; "
@@ -305,7 +305,7 @@ void admitSourceText(std::string& text, const std::string& path,
         {
             throw std::runtime_error(
                 path + ":1:1: error: file begins with a UTF-8 byte order mark "
-                "(EF BB BF); the reference compiler refuses it, and so does "
+                "(EF BB BF); the established compiler refuses it, and so does "
                 "this compiler unless the extension is enabled: " +
                 enableFlag(Extension::Bom) + " (see " + kListExtensionsFlag + ")");
         }

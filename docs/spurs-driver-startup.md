@@ -30,8 +30,8 @@ A direct definition wins; if neither entry is supplied, linking fails. This
 split does not supply constructors, destructors, atexit registrations, job DMA
 setup or scheduling semantics missing from the existing runtime.
 
-These choices intentionally differ from the reference driver in limited ways.
-The reference accepts conflicting mode/shared/relocatable combinations at the
+These choices intentionally differ from the system driver in limited ways.
+The system accepts conflicting mode/shared/relocatable combinations at the
 driver stage; those combinations are outside our supported contract. It selects
 its own start/end objects and address options. Our independently authored linker
 scripts and runtime objects have different section and startup requirements.
@@ -53,7 +53,7 @@ It contains no startup object and no `cellSpursMain` entry adapter. The full
 members; the job and initialized-job archives are unchanged. PPU `libspurs.a`
 continues to name the separate PPU import archive.
 
-The reference SPU `libspurs.a` includes startup members, including `main.o`.
+The system SPU `libspurs.a` includes startup members, including `main.o`.
 PS3DK deliberately differs: driver patch 0006 selects the mode-specific startup
 object and specialized service archive explicitly. Adding task startup back to
 the canonical archive would blur that ownership and can conflict with job
@@ -85,7 +85,7 @@ SPURS links. This enforces the same policy when options arrive through `-Wl`
 or `-Xlinker`. Repeating the same mode is allowed; ordinary `-r` links remain
 supported. Stock SPU ld already rejects shared linking.
 
-PS3DK uses an independent 64-bit content identity; it does not reproduce Sony's
+PS3DK uses an independent 64-bit content identity; it does not reproduce the system's
 digest. The digest is SHA-1 truncated to its first eight bytes. Its input is:
 
 1. The bytes `PS3DK-SPU-GUID`, a zero byte and a byte with value 1.

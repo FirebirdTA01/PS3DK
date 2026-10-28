@@ -113,7 +113,7 @@ typedef struct {
 	uint32_t lfeUpSample;
 } CellAdecParamMpmc;
 
-/* The field names keep the reference spelling (errorPprotection,
+/* The field names keep the system spelling (errorPprotection,
  * stereoModeEextention, audioMmix, outputFramSize, channelCoufiguration),
  * since code names them. */
 typedef struct {

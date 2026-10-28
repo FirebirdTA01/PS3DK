@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A vertex program select with a VECTOR condition (PSGL's fixed pipeline:
 # `otc = texunit.genMode == float4(1,1,1,1) ? mul(v, texunit.genPlane) : otc`)
-# was refused.  Measured on the reference: the comparison writes all four
+# was refused.  Measured on the established compiler: the comparison writes all four
 # condition lanes (SEQC), the false arm is written, then the true arm under
 # (NE0) - each lane by its own condition.  Ours lowers it the same way.
 # Judged by value per lane, against independent arithmetic, with conditions

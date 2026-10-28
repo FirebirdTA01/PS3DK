@@ -24,7 +24,7 @@ def cases():
             for row in range(rows):
                 components = [f'n[{row}]' if cols == 1 else f'n[{row}][{c}]' for c in range(cols)]
                 # Nonzero padding makes every output lane explicit in the
-                # reference too; its unwritten-zero lanes are not modelled.
+                # established compiler too; its unwritten-zero lanes are not modelled.
                 result = 'return float4(' + ','.join(components + ['2.0'] * (4-cols)) + ');'
                 for name, op, value in [('one', '/', 1.), ('zero', '-', 0.)]:
                     folded = init + f'{ty} n=m+(m{op}m);' + result

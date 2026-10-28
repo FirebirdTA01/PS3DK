@@ -2,7 +2,7 @@
  *
  * Assembly wrapper for cellFiberPpuInitialize that exports both the
  * .opd function descriptor (D) and the text entry-point dot symbol
- * (T), matching the reference archive's export shape.
+ * (T), matching the system archive's export shape.
  *
  * We call into the C helper _fiberPpuInitializeImpl (in
  * fiber_init_wrapper.c) which does the actual sysmodule load +

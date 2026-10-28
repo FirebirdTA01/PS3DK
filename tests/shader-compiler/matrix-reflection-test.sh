@@ -3,14 +3,14 @@
 # initialised matrix UNIFORM carries its default on the rows with
 # column-sized types (uniform-default-records A3, matrix-default-reflection).
 #
-# Three defects, all measured against sce-cgc (475 host-win32, -e main):
+# Three defects, all measured against the established compiler (475 host-win32, -e main):
 #   1. evaluateConstInitializerTyped capped a constructor at four arguments,
-#      so a 3x3 from nine scalars refused outright.  The reference folds it
+#      so a 3x3 from nine scalars refused outright.  The established compiler folds it
 #      into the ucode and emits NO record for it.
 #   2. a matrix PARENT record carried type 0 - no type at all - because only
-#      4x4 was mapped.  The reference gives 1059 for a 3x3, 1064 for a 4x4.
+#      4x4 was mapped.  The established compiler gives 1059 for a 3x3, 1064 for a 4x4.
 #   3. matrix ROW records were FLOAT4 regardless of the column count.  The
-#      reference sizes the row to the columns: 1047 for a 3x3's rows, 1048
+#      established compiler sizes the row to the columns: 1047 for a 3x3's rows, 1048
 #      for a 4x4's.
 #
 # Defects 2 and 3 are visible WITHOUT any initialiser - the N control in the
@@ -76,7 +76,7 @@ fold = load(sys.argv[1])
 names = [r["name"] for r in fold]
 if any(n.startswith("M") for n in names):
     errs.append(f"const-fold: M reached the container as {[n for n in names if n.startswith('M')]}; "
-                "the reference folds a file-scope const matrix and emits no record for it")
+                "the established compiler folds a file-scope const matrix and emits no record for it")
 # The COUNT is the real assertion - a future change could emit correctly
 # valued parent/row records and only the count would catch it.
 if len(fold) != 2:
@@ -94,7 +94,7 @@ for name, t in want_type.items():
     elif rows[name]["type"] != t:
         errs.append(f"matrix-rows: {name} type is {rows[name]['type']}, expected {t}")
 
-# Values measured on the reference for this fixture, asymmetric by design.
+# Values measured on the established compiler for this fixture, asymmetric by design.
 want_def = {"M[0]": [0.2209, 0.339, 0.4184, 0.0],
             "M[1]": [0.1138, 0.678, 0.7319, 0.0],
             "M[2]": [0.0102, 0.113, 0.2969, 0.0]}

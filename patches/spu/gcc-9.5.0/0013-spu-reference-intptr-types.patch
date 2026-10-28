@@ -1,11 +1,11 @@
 spu: intptr_t and uintptr_t are int and unsigned int
 
 newlib-stdint.h makes the pointer-sized integers PTRDIFF_TYPE and
-SIZE_TYPE, which are long and unsigned long on SPU.  The reference SPU
+SIZE_TYPE, which are long and unsigned long on SPU.  The system SPU
 toolchain types them int and unsigned int (size_t and ptrdiff_t stay
 unsigned long and long).  With long, spu_splats((uintptr_t)p) has no
 matching overload, and C++ functions taking uintptr_t mangle differently
-from objects built by the reference toolchain.  spu-stdint.h, read after
+from objects built by the established toolchain.  spu-stdint.h, read after
 newlib-stdint.h, overrides the two.
 
 --- a/gcc/config.gcc

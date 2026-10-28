@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # integer-float-conversion: asin, acos and atan on the general fragment path.
 #
-# Oracle shape, measured from sce-cgc before implementation:
+# Measured shape, measured from the established compiler before implementation:
 #   * atan reuses atan2's minimax polynomial table, with scalar DIVR for a
 #     scalar argument and the vector-divide rule for vectors: per-lane RCP
 #     plus vector MUL, never vector DIVR.
 #   * asin and acos share a separate fitted table.  Their input-side clamp
-#     reaches the destination saturate modifier in the oracle, and their
+#     reaches the destination saturate modifier in the established compiler, and their
 #     sign/quadrant repair uses an SLT value and the m2 destination scale
 #     forms (SLTR_m2 for asin, MOVR_m2 for acos), not a CC predicate.
 #   * asin/acos vector listings are optimizer-sensitive, but the measured
-#     vector oracle uses DIVSQR instead of scalar DIVR for the shared
+#     vector measurement uses DIVSQR instead of scalar DIVR for the shared
 #     sqrt-multiply shape.
 #
 # All coefficients are asserted by their emitted bits.  For atan, 0x3f7fffb7
@@ -181,7 +181,7 @@ def require_atan(path, label, lanes):
     else:
         if divs:
             raise SystemExit(
-                "FAIL: %s emitted DIVR for vector atan; the oracle uses "
+                "FAIL: %s emitted DIVR for vector atan; the established compiler uses "
                 "per-lane RCP plus vector MUL" % label)
         if len(rcps) < lanes:
             raise SystemExit("FAIL: %s emitted fewer than %d RCPs" %
@@ -226,7 +226,7 @@ def require_asin_acos(path, label, lanes):
                 (label, lanes))
         if any(bin(d["mask"]).count("1") != 1 for d in divsqrt):
             raise SystemExit(
-                "FAIL: %s emitted a multi-lane DIVSQR.  The oracle emits "
+                "FAIL: %s emitted a multi-lane DIVSQR.  The established compiler emits "
                 "this sqrt-multiply shape one lane at a time." % label)
         if not any(
             d["src0_type"] == 0 and d["src1_type"] == 0 and

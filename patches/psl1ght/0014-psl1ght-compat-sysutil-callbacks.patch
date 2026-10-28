@@ -1,6 +1,6 @@
 Subject: [PATCH] sysutil: PSL1GHT-compat sysUtil* callback wrappers
 
-Our SDK exports the reference-SDK cellSysutil* names; PSL1GHT samples
+Our SDK exports the Cell OS cellSysutil* names; PSL1GHT samples
 call sysUtilCheckCallback/RegisterCallback/UnregisterCallback. Add
 deprecated static-inline forwarders so unmodified samples link (each
 use warns to switch to cellSysutil*).
@@ -13,7 +13,7 @@ index 85f1655..34b8dcd 100644
  check for new events. In case of an event, the callback function (previously
  registered using \ref sysUtilRegisterCallback) is called.
  */
-+/* PSL1GHT-compat: our SDK exports the reference-SDK cellSysutil* names;
++/* PSL1GHT-compat: our SDK exports the Cell OS cellSysutil* names;
 + * these deprecated wrappers let unmodified PSL1GHT samples build (each use
 + * warns).  Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop them.
 + * Guarded by __has_include: PSL1GHT's own build has no cell/ on its include

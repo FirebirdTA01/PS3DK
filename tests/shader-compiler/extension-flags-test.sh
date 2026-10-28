@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # named-extensions: the extension flag contract.
 #
-# An extension is a deliberate departure from the reference compiler, off by
+# An extension is a deliberate departure from the established compiler, off by
 # default so an unflagged compile stays reference-compatible in what it
 # accepts and what it emits.  The flag surface is small and exact on purpose:
 #
@@ -61,8 +61,8 @@ run() {
 run "$compiler" list --list-extensions
 [[ "$rc" -eq 0 ]] || { cat "$work/list.err" >&2; fail "--list-extensions exited $rc, expected 0"; }
 expected_list="$work/expected-list.txt"
-printf 'bom\taccept one leading UTF-8 byte order mark (EF BB BF) in the main source and in #include files; the reference refuses it\n' > "$expected_list"
-printf 'declarator-types\ta later declarator in a list keeps the declared type; the reference gives it the type last named in an earlier declarator\n' >> "$expected_list"
+printf 'bom\taccept one leading UTF-8 byte order mark (EF BB BF) in the main source and in #include files; the established compiler refuses it\n' > "$expected_list"
+printf 'declarator-types\ta later declarator in a list keeps the declared type; the established compiler gives it the type last named in an earlier declarator\n' >> "$expected_list"
 printf 'static-parameters\taccept helper static, static const, and const static parameters; preserve const and refuse static parameters on the selected entry\n' >> "$expected_list"
 printf 'glsl-functions\taccept fract, mix, and floor-remainder mod on numeric scalars/vectors; preserve source functions and boolean mix selection\n' >> "$expected_list"
 printf 'glsl-types\taccept vec/ivec/bvec/dvec2..4 and mat2..4/matRxC type names; retain Cg row-major matrix shapes, scalar splats, and conversion limits\n' >> "$expected_list"

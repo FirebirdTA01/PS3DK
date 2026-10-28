@@ -15,7 +15,7 @@
  *     pending bit), call _cellSpursSendWorkloadSignal to wake it.
  *
  * Independently written and tuned so the compiled output matches the
- * reference library function as closely as possible.
+ * system library function as closely as possible.
  * One REL16 reloc against _cellSpursSendWorkloadSignal at 0x1ac.
  * Size: 464 bytes.
  */

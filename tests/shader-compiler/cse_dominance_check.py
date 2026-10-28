@@ -6,7 +6,7 @@ replaced the else arm's copy with the then arm's value - not defined on the
 else path - so the program was refused (unresolved operand, 10 community
 programs).  Rows are judged by value on inputs that drive every path
 (inner then, inner else, outer else-if, neither); each expected value is the
-C formula.  The reference accepts this program, but its container aliases H
+C formula.  The established compiler accepts this program, but its container aliases H
 and R registers, which fp_eval refuses to model, so the formula is the
 judge here.
 """

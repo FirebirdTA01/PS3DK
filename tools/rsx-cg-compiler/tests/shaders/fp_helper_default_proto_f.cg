@@ -1,7 +1,7 @@
-// function-visibility commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against the established compiler.
 // A PROTOTYPE'S DEFAULT IS THE ONE THAT GETS SUBSTITUTED when the prototype is
 // the latest declaration visible at the call.  The definition below the call
-// carries no default, and the reference still accepts - byte-identically to
+// carries no default, and the established compiler still accepts - byte-identically to
 // passing inner(0.5) explicitly, which is the twin.  Skipping prototypes in
 // analysis left this expression unresolved and the IR builder failed on it.
 float inner(float x) { return x; }

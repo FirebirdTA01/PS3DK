@@ -1,6 +1,6 @@
 Subject: [PATCH] audio: align audioPortParam field to reference (attr)
 
-The reference SDK (CellAudioPortParam) and current upstream PSL1GHT use
+The platform ABI (CellAudioPortParam) and current upstream PSL1GHT use
 'attr'; our vendored PSL1GHT header had the stale 'attrib'. Anonymous
 union exposes both names (identical single-u64 layout) so 5ba78ae samples
 (.attr) build with zero breakage for any legacy .attrib user.
@@ -14,7 +14,7 @@ index 00a6fb4..8c83334 100644
  	This value must be either 0 or \ref AUDIO_PORT_INITLEVEL.
  	*/
 -	u64 attrib;
-+	/* Field name aligned to the reference SDK (CellAudioPortParam.attr) and
++	/* Field name aligned to the Cell OS ABI (CellAudioPortParam.attr) and
 +	 * current upstream PSL1GHT, which renamed the old `attrib`.  Anonymous
 +	 * union keeps the legacy `attrib` spelling working with zero breakage;
 +	 * identical single-u64 layout. */

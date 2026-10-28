@@ -1,5 +1,5 @@
 /*! \file cell/gcm.h
- \brief the reference SDK-source-compat libgcm system surface.
+ \brief the platform ABI-source-compat libgcm system surface.
 
   Maps the cellGcm* "system function" surface (init /
   address-translation / display-buffer / flip-control / handlers /
@@ -24,7 +24,7 @@
     else is cellGcmFoo.
 
   Also deferred: cellGcmInit's "global current context" model.  The
-  the reference SDK exposes gCellGcmCurrentContext as a global the inline
+  the platform ABI exposes gCellGcmCurrentContext as a global the inline
   command-emitters read; PSL1GHT exposes gGcmContext for the same
   purpose.  We alias the symbol so both names resolve to the same
   address.
@@ -32,7 +32,7 @@
   Function-level mapping notes:
 
   - cellGcmInit(cmd, io, ioAddr) wraps gcmInitBody(&gGcmContext, ...).
-    The reference SDK flavour returns int32_t; PSL1GHT's returns s32; same width.
+    The platform ABI flavour returns int32_t; PSL1GHT's returns s32; same width.
   - cellGcmAddressToOffset / cellGcmIoOffsetToAddress / cellGcmGetConfiguration
     / cellGcmGetTiledPitchSize / cellGcmMapMainMemory /
     cellGcmMapEaIoAddress / cellGcmUnmapIoAddress /
@@ -55,7 +55,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <malloc.h>        /* the reference SDK code reaches memalign via this include chain */
+#include <malloc.h>        /* existing Cell OS code reaches memalign via this include chain */
 #include <assert.h>
 #include <ppu-types.h>
 #include <rsx/gcm_sys.h>
@@ -123,13 +123,13 @@ typedef struct {
 extern void _cellGcmGetConfigurationRaw(CellGcmConfigRaw *raw);
 
 /* CellGcmSurface is byte-identical to PSL1GHT's gcmSurface (same 33
- * fields in the same order - verified against the reference SDK's
+ * fields in the same order - verified against the platform ABI's
  * gcm_struct.h); user code that fills a CellGcmSurface and passes it
  * to cellGcmSetSurface gets reinterpreted as gcmSurface * by the
  * cellGcmSetSurface forwarder.
  *
  * Defined here as our own struct (not a typedef of gcmSurface) so we
- * can expose the reference SDK lower-case `.antialias` alongside PSL1GHT's
+ * can expose the platform ABI lower-case `.antialias` alongside PSL1GHT's
  * `.antiAlias` via an anonymous union without editing PSL1GHT's
  * header. */
 typedef struct _cellGcmSurface {
@@ -152,7 +152,7 @@ typedef struct _cellGcmSurface {
 } CellGcmSurface;
 
 /* CellGcmTexture is layout-compatible with PSL1GHT's gcmTexture, but
- * exposes both the rsx `. _pad` spelling and the reference SDK `. _padding`
+ * exposes both the rsx `. _pad` spelling and the platform ABI `. _padding`
  * spelling used by samples/common/gcmutil. */
 typedef struct CellGcmTexture {
     uint8_t  format;
@@ -234,7 +234,7 @@ PS3TC_GCM_STATIC_ASSERT(offsetof(CellGcmZcullInfo, status1) == offsetof(gcmZcull
  * ============================================================ */
 
 /* cellGcmAlign(a, v): round `v` up to the next multiple of `a`.
- * Matches the reference libgcm helper in <cell/gcm/gcm_helper.h>. */
+ * Matches the system libgcm helper in <cell/gcm/gcm_helper.h>. */
 static inline uint32_t cellGcmAlign(uint32_t alignment, uint32_t value)
 {
     return (alignment == 0) ? value
@@ -267,7 +267,7 @@ static inline int32_t cellGcmBindTile(uint8_t index)
     return (int32_t)gcmBindTile(index);
 }
 
-/* Reference SDK exposes the full tile / zcull tables as
+/* Platform ABI exposes the full tile / zcull tables as
  * read-only arrays.  Forwards to the PSL1GHT lower-case wrappers. */
 static inline const CellGcmTileInfo *cellGcmGetTileInfo(void)
 {
@@ -281,7 +281,7 @@ static inline const CellGcmZcullInfo *cellGcmGetZcullInfo(void)
 
 /* Maximum number of tile / zcull regions the hardware tracks
  * (sample code uses these as the bound on index<->descriptor maps).
- * Reference SDK values; PSL1GHT doesn't name the constants. */
+ * Platform ABI values; PSL1GHT doesn't name the constants. */
 #define CELL_GCM_MAX_TILE_INDEX        15
 #define CELL_GCM_MAX_ZCULL_INDEX        7
 #define CELL_GCM_ZCULL_RAM_SIZE_MAX     GCM_ZCULL_RAM_SIZE_MAX
@@ -321,7 +321,7 @@ static inline int32_t cellGcmBindZcull(uint8_t index, uint32_t offset,
                                  zCullDir, zCullFormat, sFunc, sRef, sMask);
 }
 
-/* Reference-SDK names - same call shape as our SetTileInfo / BindZcull. */
+/* Cell OS names - same call shape as our SetTileInfo / BindZcull. */
 static inline int32_t cellGcmSetTile(uint8_t index, uint8_t location,
                                      uint32_t offset, uint32_t size, uint32_t pitch,
                                      uint8_t comp, uint16_t base, uint8_t bank)
@@ -341,7 +341,7 @@ static inline int32_t cellGcmSetZcull(uint8_t index, uint32_t offset,
                             zCullDir, zCullFormat, sFunc, sRef, sMask);
 }
 
-/* The reference SDK "current context" global.  PSL1GHT exposes gGcmContext
+/* The platform ABI "current context" global.  PSL1GHT exposes gGcmContext
  * under the same semantics; we re-bind via #define so user-side
  * l-value uses (gCellGcmCurrentContext->current = ..., etc.) and
  * rvalue reads both resolve to PSL1GHT's actual storage.  No
@@ -353,7 +353,7 @@ static inline int32_t cellGcmSetZcull(uint8_t index, uint32_t offset,
 #define gCellGcmCurrentContext  gGcmContext
 #endif
 
-/* CELL_GCM_CURRENT macro the reference SDK source uses to fetch the current
+/* CELL_GCM_CURRENT macro the platform ABI source uses to fetch the current
  * context for inline command emitters. */
 #define CELL_GCM_CURRENT        gCellGcmCurrentContext
 
@@ -365,7 +365,7 @@ static inline int32_t cellGcmSetZcull(uint8_t index, uint32_t offset,
  * (`gcmContextData * ATTRIBUTE_PRXPTR` == `mode(SI)`).  Taking its
  * address yields a `u32 *`, not a true `gcmContextData **`, so we
  * can't hand it to gcmInitBody directly without GCC warning.  Init
- * via a full-width local then mirror-assign with a cast so the reference SDK
+ * via a full-width local then mirror-assign with a cast so the platform ABI
  * source that subsequently reads `gCellGcmCurrentContext` (== gGcmContext)
  * finds the same pointer PSL1GHT stored. */
 /* Forward declaration: the native FIFO-wrap callback installer lives
@@ -516,7 +516,7 @@ static inline void cellGcmSetDefaultCommandBuffer(void)
  * (1) cellGcmSetFlip(ctx, id)  - synchronous, in-stream flip.
  *     Embeds a FLIP_COMMAND directly into the GPU command buffer.
  *     The RSX swaps the displayed buffer when it processes the
- *     command.  No queue, no PPU/GPU handshake.  The reference SDK
+ *     command.  No queue, no PPU/GPU handshake.  The platform ABI
  *     documents the API but **does not use it in any sample**, and
  *     PSL1GHT samples don't either.
  *
@@ -550,7 +550,7 @@ static inline void cellGcmSetDefaultCommandBuffer(void)
  *       - cellGcmSetWaitLabel + cellGcmSetWriteCommandLabel around
  *         render-target switches so the GPU itself stalls before
  *         reusing a buffer that's still being scanned out.
- *     This is the protocol the reference flip_immediate sample uses
+ *     This is the protocol the system flip_immediate sample uses
  *     end to end, and what samples/hello-ppu-cellgcm-triangle
  *     implements.
  *
@@ -685,35 +685,35 @@ static inline uint32_t cellGcmGetReportDataLocation(uint32_t index, uint32_t loc
 }
 #endif
 
-/* reference-SDK-style constant spellings (CELL_GCM_*).  Header-only; lives
+/* Cell OS-style constant spellings (CELL_GCM_*).  Header-only; lives
  * next to the GCM_* originals our runtime layer exposes. */
 #include <cell/gcm/gcm_enum.h>
 
-/* cellGcmCg* struct-walker API (libgcm_cmd.a in the installed SDK).  reference-SDK
+/* cellGcmCg* struct-walker API (libgcm_cmd.a in the installed SDK).  Cell OS
  * samples include <cell/gcm.h> and call cellGcmCgInitProgram /
  * cellGcmCgGetUCode / cellGcmCgGetNamedParameter / etc. without a
  * separate include, so we pull gcm_cg_func.h in transitively. */
 #include <cell/gcm/gcm_cg_func.h>
 
-/* Cg -> rsx* runtime bridge.  Translates the reference SDK CGprogram /
+/* Cg -> rsx* runtime bridge.  Translates the platform ABI CGprogram /
  * CGparameter handles to PSL1GHT's rsx{Vertex,Fragment}Program-typed
  * commands so cellGcmSetVertexProgram / cellGcmSetFragmentProgram /
  * cellGcmSetVertexProgramParameter resolve against the same runtime
  * PSL1GHT's rsx_program layer already provides. */
 #include <cell/gcm/gcm_cg_bridge.h>
 
-/* Command-emitter forwarders.  reference-SDK source includes the
+/* Command-emitter forwarders.  Cell OS source includes the
  * command-emitter family transitively through <cell/gcm.h>; we
  * preserve that. */
 #include <cell/gcm/gcm_command_c.h>
 #include <cell/gcm/gcm_command_link.h>
 
-/* The reference SDK wraps the public libgcm API in the cell::Gcm C++
+/* The platform ABI wraps the public libgcm API in the cell::Gcm C++
  * namespace; our C-side surface already lives at global scope, so an
  * empty namespace is enough to let `using namespace cell::Gcm;`
  * compile without affecting name lookup.
  *
- * Some SDK samples additionally use cell::Gcm::Inline (the reference
+ * Some SDK samples additionally use cell::Gcm::Inline (the system
  * SDK nests Inline helpers there).  We provide a similarly empty
  * Inline sub-namespace so `using namespace cell::Gcm::Inline;` also
  * compiles without errors. */
@@ -723,13 +723,13 @@ namespace cell { namespace Gcm {
 } }
 #endif
 
-/* reference-SDK-convention no-context command-emitter overloads (C++ only).
+/* Cell OS-convention no-context command-emitter overloads (C++ only).
  *
- * reference-SDK style inline emitters read the current context from the
+ * Cell OS style inline emitters read the current context from the
  * global gCellGcmCurrentContext rather than taking an explicit first
  * arg.  We ship the explicit-ctx variants via gcm_command_c.h; the
  * overloads in gcm_cmd_overloads.h let the same function names compile
- * when called the reference SDK-style - they forward to the ctx variants,
+ * when called the platform ABI-style - they forward to the ctx variants,
  * pulling the current context from the global.
  *
  * C mode cannot overload by arity, so these stay C++-only.  C callers
@@ -750,7 +750,7 @@ static inline void cellGcmSetWaitFlip(void)
 { cellGcmSetWaitFlip(gCellGcmCurrentContext); }
 #endif
 
-/* The reference SDK declares the gcm functions inside namespace cell::Gcm
+/* The platform ABI declares the gcm functions inside namespace cell::Gcm
  * as well, and samples call them qualified (cell::Gcm::cellGcmSetFlip,
  * cell::Gcm::cellGcmSetVertexProgram ...).  A using-declaration brings in
  * the overloads visible at its point, so this block stays after every

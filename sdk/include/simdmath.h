@@ -2,7 +2,7 @@
    simdmath.h - PS3 SDK umbrella for the libsimdmath SIMD math library.
 
    Makes the per-arch libsimdmath functions available as static inlines
-   so reference-SDK samples that call sincosf4() / divf4() / rsqrtf4()
+   so existing PS3 samples that call sincosf4() / divf4() / rsqrtf4()
    link WITHOUT -lsimdmath.
 
    Mechanism:
@@ -25,7 +25,7 @@
 #define PS3TC_SIMDMATH_UMBRELLA_H
 
 /* SPU vector math (vec_aos.h and friends) uses uintptr_t and relies on
-   this header for <stdint.h>, as the reference SPU simdmath provides it. */
+   this header for <stdint.h>, as the system SPU simdmath provides it. */
 #include <stdint.h>
 #define __PS3DK_SIMDMATH_INLINE_NAMES 1
 #include <simdmath/simdmath.h>

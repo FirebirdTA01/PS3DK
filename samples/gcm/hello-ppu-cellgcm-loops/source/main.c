@@ -12,7 +12,7 @@
  *   - VecConstruct lane-elision MOVR
  *
  * The byte-diff harness at tools/rsx-cg-compiler/tests/run_diff.sh
- * proves our compiler's output matches the reference compiler.  This sample proves
+ * proves our compiler's output matches the established compiler.  This sample proves
  * those bytes execute correctly on RSX: the canonical RGB-gradient
  * triangle becomes pure red at the top vertex (tripled R, clamped to
  * 1) and fades to black at the lower corners (the loop accumulator
@@ -64,7 +64,7 @@ static u32  depth_pitch;
 static u32  color_offset[COLOR_BUFFER_NUM];
 static u32  depth_offset;
 
-/* Local-memory bump allocator (matches the reference localMemoryAlloc). */
+/* Local-memory bump allocator (matches the system localMemoryAlloc). */
 static u32 g_local_mem_heap;
 static void *local_alloc(u32 size)
 {
@@ -81,9 +81,9 @@ static void *local_align(u32 alignment, u32 size)
 
 /* Shader objects.  CgBinaryProgram blobs from rsx-cg-compiler's
  * --emit-container output — the cellGcmCg* / cellGcmSet* path
- * (mirrors what the reference SDK basic.cpp uses) is the matching
+ * (mirrors what the platform ABI basic.cpp uses) is the matching
  * runtime API; PSL1GHT's rsxVertexProgramGetUCode would misparse the
- * Sony container header. */
+ * Cell OS container header. */
 static CGprogram   vpo;
 static CGprogram   fpo;
 static void       *vp_ucode;

@@ -1,7 +1,7 @@
 // control-h0-r1known (half-colour-depth-control): the H0 shape whose R1.z is known.
 //
 // sd_h0_nodepth.fcg answers "did the bit fire"; this one answers "with what",
-// so that a moved zeta is a NUMBER and not an adjective.  The reference emits
+// so that a moved zeta is a NUMBER and not an adjective.  The established compiler emits
 //
 //   MOVR r0, f[TEX0]
 //   MADR r1, r0, {0.5,0.125,0.25,0.375}.x, {0.5,0.125,0.25,0.375}.yzwx
@@ -25,7 +25,7 @@
 // Its pair is tighter than sd_h0_nodepth's: because the body is fp32 on both
 // sides, the two containers differ in the outputFromH0 flag and ONE ucode bit,
 // the destination register of the last instruction - two bytes of 272.  Note
-// also, for its own sake, that the reference is content to write a half output
+// also, for its own sake, that the established compiler is content to write a half output
 // from an fp32 ADDR, so the flag does not require an all-half body.
 void main(float4 t : TEXCOORD0, out half4 o : COLOR)
 {

@@ -1,6 +1,6 @@
 /* sys/system_types.h — catch-all system type forwarder.
  *
- * Included by code that expects the reference the reference SDK's roll-up of
+ * Included by code that expects the system the platform ABI's roll-up of
  * system type definitions.  Forward to the headers our SDK already
  * provides, avoiding the need for a separate type-definition file.
  */

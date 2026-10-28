@@ -4,7 +4,7 @@ libretro's xbr/super-xbr shaders declare `const static float3x3
 yuv_weighted = float3x3(...)` and multiply by it; the folded constant
 reached the backend as an IRConstant that no matrix lowering recognised
 ("matvecmul matrix source is not a matrix value"), about ten programs.
-The reference accepts every row below.  Entries are distinct dyadic values,
+The established compiler accepts every row below.  Entries are distinct dyadic values,
 so every product is exact and a transposed, shuffled or zeroed row gives a
 different answer: each expected value is the matrix product computed here
 (Cg: float3x3(a..i) is rows abc, def, ghi; mul(M, v) is M v, mul(v, M) is

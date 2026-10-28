@@ -1,6 +1,6 @@
 """A `uniform <struct>` ENTRY PARAMETER is one uniform per member (t_31ed8939).
 
-Measured on sce-cgc 475 (libretro's COMPAT_IN_FRAGMENT `uniform input IN`):
+Measured on the established compiler (libretro's COMPAT_IN_FRAGMENT `uniform input IN`):
 every member is its own parameter record named `IN.member`, all sharing the
 struct parameter's paramno; a later parameter keeps its own source ordinal;
 a member the program never reads is still listed, unreferenced.  Before the
@@ -44,7 +44,7 @@ out_vertex main(float4 position : POSITION, float2 texCoord : TEXCOORD0,
 { out_vertex OUT; OUT.position = mul(modelViewProj, position);
   OUT.texCoord = texCoord * IN.texture_size + IN.video_size * post; return OUT; }
 """
-# The reference gives NO register to an unread vertex uniform (t_67b3362b):
+# The established compiler gives NO register to an unread vertex uniform (t_67b3362b):
 # resource 3256, register -1, unreferenced; read ones are allocated in source
 # order, vectors from c[467] down, matrices from c[256] up.
 UNASSIGNED = 3256
@@ -87,7 +87,7 @@ float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc 
 NESTED_UNIFORMS = [('IN.in1.a', FLOAT2, 1, 1), ('IN.b', FLOAT2, 1, 1)]
 # A parameter SHADOWS a file-scope uniform struct of the same name: main reads
 # the parameter, a helper reads the global, and a helper's default argument
-# names the global too (all measured: the reference lists both sets, the
+# names the global too (all measured: the established compiler lists both sets, the
 # parameter's at paramno 1 and the global's at -1).
 GLOBAL = 0xFFFFFFFF
 SHADOW_HELPER = """struct inner { float2 a; };
@@ -127,7 +127,7 @@ float4 main(float2 tc : TEXCOORD0, uniform sampler2D s0 : TEXUNIT0, uniform prev
 { s0_global = REFERENCE.texture; return helper(tc * REFERENCE.texture_size) + tex2D(s0, tc); }
 """
 SAMPLER2D, TEXUNIT0 = 1066, 2048
-# Copy edges (review: codex; the reference accepts both): self-assignment must
+# Copy edges (review: codex; the established compiler accepts both): self-assignment must
 # not erase the members it copies, and a chain copies to every destination
 # (H.a and G.b both read IN, not the file-scope uniforms H and G).
 SELF_COPY = """struct input { float2 a; float2 b; };
@@ -137,14 +137,14 @@ CHAIN_COPY = """struct input { float2 a; float2 b; };
 input G; input H;
 float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { H = (G = IN); return float4(tc * H.a + G.b, 0, 1); }
 """
-# The reference records per-member defaults (IN.b = 1 2); not emitted yet,
+# The established compiler records per-member defaults (IN.b = 1 2); not emitted yet,
 # so a struct parameter default is REFUSED (semantic analysis refuses it before
 # the IR builder's named refusal is reached) rather than silently dropped.
 STRUCT_DEFAULT = """struct input { float2 b; float k; };
 float4 main(float2 tc : TEXCOORD0, uniform input IN = { float2(1.0, 2.0), 3.0 }) : COLOR { return float4(tc * IN.b, IN.k, 1); }
 """
 # The flattened parameter has no whole value.  A copy used as a value is a
-# NAMED GAP (the reference accepts it); it must refuse by name, never read
+# NAMED GAP (the established compiler accepts it); it must refuse by name, never read
 # nothing.
 VALUE_USES = {
     'copy_as_value': """struct input { float2 a; float2 b; };
@@ -154,7 +154,7 @@ float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc 
 """,
 }
 # The parameter passed whole to a helper binds the helper's parameter to its
-# members (the reference accepts it; it used to refuse by name).
+# members (the established compiler accepts it; it used to refuse by name).
 PARAM_AS_VALUE = """struct input { float2 a; float2 b; };
 float2 f(input s) { return s.a + s.b; }
 float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * f(IN), 0, 1); }

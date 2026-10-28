@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # integer-float-conversion: smoothstep on the general fragment path.
 #
-# The oracle probe is smoothstep(0.25, 0.75, x).  sce-cgc folds the
+# The established compiler probe is smoothstep(0.25, 0.75, x).  the established compiler folds the
 # reciprocal of (0.75 - 0.25) into the destination scale and spells the clamp
 # as ADDR_2X_sat, then computes t*t*(3 - 2*t).  This test locks that measured
 # constant-edge shape: no RCP is needed for the two fixtures here, and the
@@ -11,7 +11,7 @@
 # vector argument, and variable vector edges that cannot fold the reciprocal.
 # The swizzled cases are the same trap that caught cbb762e: per-lane lowering
 # must compose through arg.swizzle[lane], not raw lane N.  Vector variable-edge
-# smoothstep uses the reference's vector-divide shape: one RCP per divisor
+# smoothstep uses the established compiler's vector-divide shape: one RCP per divisor
 # lane and then a saturated MUL, not DIVR.
 #
 # CONTROL: this fails on compilers before the smoothstep slice because
@@ -96,7 +96,7 @@ def assert_constant_edge(path):
     if any(d["op"] == RCP for d in ins):
         raise SystemExit(
             "FAIL: %s emitted RCP for smoothstep(0.25, 0.75, x); "
-            "the oracle folds this reciprocal into ADDR_2X_sat" % path)
+            "the established compiler folds this reciprocal into ADDR_2X_sat" % path)
     if not any(d["op"] == ADD and d["sat"] and d["scale"] == DST_SCALE_2X
                for d in ins):
         raise SystemExit(
@@ -115,7 +115,7 @@ def assert_variable_edge(path):
         raise SystemExit("FAIL: %s produced no decoded instructions" % path)
     if any(d["op"] == DIV for d in ins):
         raise SystemExit(
-            "FAIL: %s emitted DIVR for vector smoothstep.  The oracle uses "
+            "FAIL: %s emitted DIVR for vector smoothstep.  The established compiler uses "
             "per-lane RCP plus vector MUL for vector divides." % path)
     rcps = [d for d in ins if d["op"] == RCP]
     if len(rcps) < 3:

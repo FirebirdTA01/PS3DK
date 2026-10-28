@@ -11,7 +11,7 @@
  * ---- Memory model on PS3 -------------------------------------------
  *
  * The RSX has its own 256 MiB pool of GDDR3 ("RSX local memory")
- * physically separate from main memory.  PSL1GHT and the reference SDK
+ * physically separate from main memory.  PSL1GHT and the platform ABI
  * both expose it through a single base pointer + size pair returned
  * by cellGcmGetConfiguration:
  *
@@ -39,7 +39,7 @@
  *
  * ---- Bump allocator pattern ---------------------------------------
  *
- * The reference SDK ships `cellGcmUtilAllocateLocalMemory` (in the
+ * The platform ABI ships `cellGcmUtilAllocateLocalMemory` (in the
  * gcmutil sample helper, not the runtime) which is a one-pointer
  * bump allocator over [localAddress, localAddress + localSize).
  * No free, no metadata: the lifetime of every RSX-local allocation is
@@ -58,14 +58,14 @@
  *   - Display buffer bases      : 64 B   (cellGcmSetDisplayBuffer)
  *   - Texture bases             : 128 B  (NV40TCL_TEX_OFFSET; we use
  *                                         128 throughout for safety)
- *   - Vertex / index buffers    : 128 B  (matches reference samples)
+ *   - Vertex / index buffers    : 128 B  (matches existing samples)
  *   - Surface row pitch         : 64 B   (multiple of 64 for LINEAR)
  *
  * The bump allocator below rounds *both* the cursor (alignment-up)
  * and the size (rounded to 1 KiB to be defensive), so consecutive
  * allocations land on at-least-1-KiB boundaries even when the caller
  * asks for 64-byte alignment.  Adopting a stricter pad keeps tile-
- * aligned regions easy to reason about and matches what the reference
+ * aligned regions easy to reason about and matches what the system
  * `cellGcmUtilAllocateLocalMemory` does.
  *
  * ---- Surface-format pitch invariants ------------------------------
@@ -87,7 +87,7 @@
  *
  * `cellGcmInit` reserves a slice at the *top* of local memory for its
  * own bookkeeping (display reports, tile descriptors, the cursor
- * texture region in some configurations).  The reference SDK pulls
+ * texture region in some configurations).  The platform ABI pulls
  * 32 MiB off the end via `cellGcmUtilInitializeLocalMemory` and only
  * hands out [base, base+size-32MiB).  We don't bother here because
  * the test only needs ~16 KiB of RTT plus a couple of MiB of frame
@@ -120,7 +120,7 @@ static u32  depth_pitch;
 static u32  depth_offset;
 static u32 *depth_buffer;
 
-/* ---- RSX local-memory bump allocator (reference SDK style) --------
+/* ---- RSX local-memory bump allocator (platform ABI style) --------
  *
  * `g_local_mem_heap` is anchored at cfg.localAddress in init_screen
  * once cellGcmInit has handed us a configuration.  Every RSX-resident
@@ -154,7 +154,7 @@ static void *local_align(u32 alignment, u32 size)
 	void *p = (void *)(uintptr_t)g_local_mem_heap;
 	/* Round the *size* up to 1 KiB so the next allocation lands on a
 	 * 1 KiB boundary regardless of what alignment it requests.  This
-	 * is what the reference helper does to keep tile regions clean. */
+	 * is what the system helper does to keep tile regions clean. */
 	g_local_mem_heap += (size + 1023u) & ~1023u;
 	return p;
 }

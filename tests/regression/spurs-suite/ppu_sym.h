@@ -9,7 +9,7 @@
 /* the PPU globals the task names; aligned for a 16-byte DMA */
 typedef struct ps_target {
     uint32_t magic;
-    uint32_t seen;        /* SPU -> PPU: set by the task through the reference */
+    uint32_t seen;        /* SPU -> PPU: set by the task through the system */
     uint32_t pad[2];
 } __attribute__((aligned(16))) ps_target;
 

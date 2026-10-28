@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # no-effect-fragment: a fragment program with NO EFFECT is legal.
 #
-# The reference compiler accepts 'void main() {}' (SDK
+# The established compiler accepts 'void main() {}' (SDK
 # samples/tutorial/SpuGraphics/SpuRender/shader/fnop.cg) and emits exactly
 # one instruction - four zero words with PROGRAM_END, which on disk reads
 # 00010000 00000000 00000000 00000000 - with instructionCount 1 and
@@ -16,9 +16,9 @@
 # simply "the instruction list is empty".
 #
 # Every accept row pins the WHOLE container, byte for byte, as measured
-# from sce-cgc 475 on 2026-09-24.  The two controls pin what must NOT
+# from the established compiler on 2026-09-24.  The two controls pin what must NOT
 # change: a discard-only program keeps its KIL and is not the NOP program,
-# and the VERTEX profile still refuses an empty entry (the reference
+# and the VERTEX profile still refuses an empty entry (the established compiler
 # refuses it too, C6014: required output HPOS not written) with exit
 # status exactly 1 and no artifact.
 set -euo pipefail
@@ -49,7 +49,7 @@ accept_row() {   # accept_row <fixture> <expected hex> <label>
     [[ "$rc" -eq 0 ]] || { tail -n 3 "$work/$stem.log" >&2; fail "$3: expected exit 0, got $rc"; }
     [[ -s "$work/$stem.fpo" ]] || fail "$3: exit 0 but wrote no container"
     [[ "$(hex_of "$work/$stem.fpo")" == "$2" ]] \
-        || fail "$3: container differs from the reference bytes (got $(hex_of "$work/$stem.fpo"))"
+        || fail "$3: container differs from the established compiler bytes (got $(hex_of "$work/$stem.fpo"))"
 }
 
 accept_row fp_empty_entry_f.cg "$NOP_NO_PARAMS" \
@@ -82,7 +82,7 @@ count_hex="$(od -An -tx1 -v -j $(( 0x$(od -An -tx1 -v -j 20 -N 4 "$work/discard.
 # StoreOutput today; an IR-only "no effect" test accepted the first as a
 # NOP (a program that should draw, drawing nothing) - found by
 # struct_field_update_check.py.  An unwritten plain out param IS the NOP
-# program on the reference, but we refuse it rather than open that door.
+# program on the established compiler, but we refuse it rather than open that door.
 refuse_row() {   # refuse_row <fixture> <label>
     local stem="${1%.cg}" rc=0
     "$compiler" -p sce_fp_rsx --emit-container "$work/$stem.fpo" "$fx/$1" \
@@ -94,7 +94,7 @@ refuse_row fp_empty_out_struct_refuse_f.cg "an out-struct store is an effect"
 refuse_row fp_empty_missing_return_refuse_f.cg "a non-void entry with no return is not the NOP program"
 refuse_row fp_empty_unwritten_out_refuse_f.cg "an entry with an out parameter is not treated as effect-free"
 
-# Control: the vertex profile refuses an empty entry, as the reference does.
+# Control: the vertex profile refuses an empty entry, as the established compiler does.
 rc=0
 "$compiler" -p sce_vp_rsx --emit-container "$work/vp.vpo" \
     "$fx/vp_empty_entry_refuse_v.cg" >"$work/vp.log" 2>&1 || rc=$?

@@ -14,7 +14,7 @@ endif()
 include(ps3-self)
 
 # -Werror=format turns a printf format that does not match the 32-bit
-# types into a build failure, as the reference headers expect.
+# types into a build failure, as the system headers expect.
 set(ABI_TYPES_WARNINGS -Wall -Wformat=2 -Werror=format)
 
 add_executable(abi-types-ilp32 main.cpp)

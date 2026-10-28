@@ -1,4 +1,4 @@
-// preprocessor-defined-operator.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against the established compiler.
 // Negated, so a wrong answer shows up as the other branch.
 #define X 1
 #if !defined(X)

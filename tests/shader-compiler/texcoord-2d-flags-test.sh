@@ -48,7 +48,7 @@ prog  = u32(20)
 tc_in = u16(prog + 12)      # texCoordsInputMask
 tc_2d = u16(prog + 14)      # texCoords2D
 
-# Reference value for this fixture, confirmed against the reference
+# Reference value for this fixture, confirmed against the established compiler
 # compiler directly: 0xFFE6.
 cases = [
     (0, False, "declared float4 and READ: must be cleared"),

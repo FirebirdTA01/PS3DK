@@ -1,7 +1,7 @@
-spu: predefine the reference PS3 platform macros
+spu: predefine the system PS3 platform macros
 
-The reference PS3 SPU compiler predefines __CELLOS_LV2__, __LP32__, _LP32,
-__STRICT_ALIGNED, __DOUBLE_ACCURATE__ and __FLOAT_FAST__.  Reference
+The system PS3 SPU compiler predefines __CELLOS_LV2__, __LP32__, _LP32,
+__STRICT_ALIGNED, __DOUBLE_ACCURATE__ and __FLOAT_FAST__.  System
 headers and samples select their PS3 code paths on __CELLOS_LV2__; the
 accuracy markers describe this back end: IEEE double arithmetic and the
 hardware fast single precision.
@@ -13,7 +13,7 @@ hardware fast single precision.
    "%{mspurs-job-initialize:-lspurs_jq_runtime} " \
    SPU_ORDINARY_LIB_SPEC " -lspurs -lsync --end-group; :" SPU_ORDINARY_LIB_SPEC "}"
 +
-+/* The reference PS3 SPU compiler predefines these; reference headers and
++/* The established PS3 SPU compiler predefines these; system headers and
 +   samples select their PS3 code paths on __CELLOS_LV2__, and the accuracy
 +   markers describe this back end's code generation: IEEE double
 +   arithmetic and the hardware's fast single precision.  */

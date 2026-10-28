@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # vp-tangent-binormal-test.sh -- regression test for VP TANGENT and BINORMAL semantic attributes (vp-tangent-binormal-binding).
 #
-# Reference contract (sce-cgc 475, measured 2026-09-14/15): TANGENT and TANGENT0
+# Reference contract (the established compiler, measured 2026-09-14/15): TANGENT and TANGENT0
 # bind ATTR14, BINORMAL and BINORMAL0 bind ATTR15; the container records the
 # semantic string AS WRITTEN (so the three spellings are three different
-# containers on the reference too) and the ucode is the same for all three.
+# containers on the established compiler too) and the ucode is the same for all three.
 # TANGENT1 / BINORMAL1 are refused C5102 (index too big); TANGENT / BINORMAL on
 # an OUTPUT are refused C5109 (domain conflict).  Our ucode for these programs
-# differs from the reference only in instruction order (the pre-existing VP
+# differs from the established compiler only in instruction order (the pre-existing VP
 # general-path ordering gap), which is why the twin rows compare ucode between
 # our own spellings and the refusal rows compare exit status, not bytes.
 # The SDK rows this closes are judged by the census, not here: the tracked test
-# tree stays free of reference-SDK paths.
+# tree stays free of Cell OS paths.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -163,7 +163,7 @@ def check_resources(data, name, sem_tangent, sem_binormal):
         raise SystemExit(f"FAIL: {name} in_tangent resource is not 0x084f: {res_map.get('in_tangent')}")
     if "in_binormal" not in res_map or res_map["in_binormal"][1] != 0x0850:
         raise SystemExit(f"FAIL: {name} in_binormal resource is not 0x0850: {res_map.get('in_binormal')}")
-    # The reference records the semantic AS WRITTEN, not the resolved ATTRn.
+    # The established compiler records the semantic AS WRITTEN, not the resolved ATTRn.
     if res_map["in_tangent"][0] != sem_tangent or res_map["in_binormal"][0] != sem_binormal:
         raise SystemExit(f"FAIL: {name} semantic strings are not recorded as written: "
                          f"{res_map['in_tangent'][0]!r}, {res_map['in_binormal'][0]!r}")

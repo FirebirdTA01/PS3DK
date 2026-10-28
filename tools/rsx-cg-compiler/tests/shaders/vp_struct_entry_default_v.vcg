@@ -14,11 +14,11 @@
 // branches of that loop - a scalar/vector uniform and a matrix's rows -
 // because they were dropped by the same omission.
 //
-// Measured on the reference: gTint's block at 800, gM's rows at 832/864/896.
+// Measured on the established compiler: gTint's block at 800, gM's rows at 832/864/896.
 // KNOWN DIVERGENCE, not this fixture's business and carded as explicit-binding-shared-reflection:
-// on this path we emit isShared=1 where the reference gives 0, on every
+// on this path we emit isShared=1 where the established compiler gives 0, on every
 // file-scope record.  When that lands, this container becomes 15/15
-// field-for-field against the reference; today it is 5/15, the other ten
+// field-for-field against the established compiler; today it is 5/15, the other ten
 // differing in isShared alone.
 struct VIN {
 	float4 position : POSITION;

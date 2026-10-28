@@ -6,7 +6,7 @@
 # `nidgen verify nids/sys_lv2.yaml` after mounting reference/private/.
 #
 # Signature paraphrase follows PSL1GHT's cleaned-up style. Semantics summary
-# only — never copy verbatim from reference headers.
+# only — never copy verbatim from system headers.
 
 library: sys_lv2
 version: 1

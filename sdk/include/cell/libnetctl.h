@@ -11,7 +11,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <netinet/in.h>     /* struct in_addr, as the reference header does */
+#include <netinet/in.h>     /* struct in_addr, as the system header does */
 
 #ifdef __cplusplus
 extern "C" {

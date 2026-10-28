@@ -11,7 +11,7 @@
 //   splat    a SCALAR initialiser for a vector - Cg broadcasts it, so the
 //            block must read (0.5,0.5,0.5,0.5), not (0.5,0,0,0)
 //   implicit NO `uniform` keyword.  Cg treats a file-scope variable as
-//            uniform, and the reference records its initialiser the same
+//            uniform, and the established compiler records its initialiser the same
 //            way.  Every one of the four SDK sources this change moved is
 //            this spelling, not the explicit one - a fix keyed on the
 //            keyword passes the other rows and misses the whole corpus.

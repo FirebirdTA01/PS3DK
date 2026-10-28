@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # A FUNCTION REACHED FROM THE SELECTED ENTRY MAY NOT CARRY A RETURN SEMANTIC.
 #
-# The reference has a diagnostic for this and ITS TEXT IS WRONG ABOUT ITS RULE:
+# The established compiler has a diagnostic for this and ITS TEXT IS WRONG ABOUT ITS RULE:
 #
 #     error C5122: semantics not allowed on functions other than the entry
 #     function
 #
-# Taken literally that forbids two shapes the reference ACCEPTS.  Measured on
-# sce-cgc 475, sce_fp_rsx, every row below compiled with -e beta:
+# Taken literally that forbids two shapes the established compiler ACCEPTS.  Measured on
+# the established compiler, sce_fp_rsx, every row below compiled with -e beta:
 #
 #     called helper, RETURN semantic                    REFUSE
 #     called helper, RETURN + PARAMETER semantics       REFUSE
@@ -25,7 +25,7 @@
 #
 # WHY THE CONTAINER ROWS EXIST.  The check walks the AST for call edges.  A
 # walker that misses ONE node kind under-approximates reachability, and
-# under-approximating means ACCEPTING a program the reference refuses - this
+# under-approximating means ACCEPTING a program the established compiler refuses - this
 # check's own defect, reintroduced by its fix, and invisible to any fixture
 # that happens to use a handled kind.  There is one row per container: if,
 # for, while, do-while, ternary, return, cast, constructor argument, index,
@@ -36,7 +36,7 @@
 # Auditing the guard against the code is a separate act from writing either.
 #
 # TWO ARMS OF THE WALK CANNOT BE WITNESSED HERE, and that is measured rather
-# than an omission: the reference's parser rejects `switch` outright -
+# than an omission: the established compiler's parser rejects `switch` outright -
 # "error C0000: syntax error, unexpected reserved word \"switch\"" - with or
 # without a call in it, so no program containing a switch reaches the C5122
 # rule at all.  The Switch and Case arms are handled in the walker for
@@ -119,11 +119,11 @@ refuse fp_c5122_deadbranch_f "syntactic: reached only inside if (false)"
 
 # ---- the PROTOTYPE cells: which DECLARATION carries the judged semantic ----
 # Measured, and the four cells disagree - so neither "judge the definition" nor
-# "judge either declaration" reproduces the reference.  The semantic that is
+# "judge either declaration" reproduces the established compiler.  The semantic that is
 # JUDGED is the one on the FIRST DECLARATION in source order; the body that is
 # WALKED is the DEFINITION's.  The bare-prototype row is the one that forbids
 # the natural fix: a walk that followed the prototype and judged the definition
-# would REFUSE it, and the reference accepts it.
+# would REFUSE it, and the established compiler accepts it.
 refuse fp_c5122_proto_transitive_f   "transitive through a bodyless prototype"
 refuse fp_c5122_proto_both_f         "prototype :COLOR + definition :COLOR"
 refuse fp_c5122_proto_sem_def_bare_f "prototype :COLOR + definition bare"

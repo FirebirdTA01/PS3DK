@@ -1,7 +1,7 @@
-// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against the established compiler.
 // AN ARGUMENT BOUND TO A PARAMETER THE BODY NEVER NAMES IS NEVER EXPANDED.
 // DROP ignores x, so BAD is not expanded and its untokenisable body never
-// reaches the token stream - the reference ACCEPTS. We expanded every
+// reaches the token stream - the established compiler ACCEPTS. We expanded every
 // argument regardless, which refused it (codex's second cell). Skipping the
 // unused ones is also what the language specifies.
 #define BAD (1.0)

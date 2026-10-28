@@ -1,5 +1,5 @@
 /*! \file cell/sysutil_ap.h
- \brief Sony-SDK-source-compat libsysutil_ap (software access-point) API.
+ \brief Cell OS source-compat libsysutil_ap (software access-point) API.
 
   PSL1GHT ships no wrappers for libsysutil_ap.  Phase 6.5 backs the
   three exports with a self-contained stub archive
@@ -50,7 +50,7 @@ extern "C" {
 /* Memory container size cellSysutilApOn requires (1 MiB). */
 #define CELL_SYSUTIL_AP_MEMORY_CONTAINER_SIZE        (1 * 1024 * 1024)
 
-/* Sony's `sys_memory_container_t` — in PSL1GHT this is
+/* The system's `sys_memory_container_t` — in PSL1GHT this is
  * `sys_mem_container_t` from <sys/memory.h>. */
 typedef sys_mem_container_t sys_memory_container_t;
 

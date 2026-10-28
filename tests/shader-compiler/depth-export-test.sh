@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fragment DEPTH export contract (fragment-depth-export).
 #
-# EVERY NUMBER BELOW WAS READ OUT OF THE REFERENCE'S OWN OUTPUT, not
+# EVERY NUMBER BELOW WAS READ OUT OF The established compiler'S OWN OUTPUT, not
 # derived from our model of what a depth export should look like.  The
-# reference builds fp_depth_export_f.cg as:
+# established compiler builds fp_depth_export_f.cg as:
 #
 #     MOVR R0, f[TEX0];
 #     MULR R1.z, R0.x, 0.5;
@@ -12,7 +12,7 @@
 # instructionCount 3, registerCount 2, and its container carries:
 #   - depthReplace = 1        (FP program header, offset +20)
 #   - depth parameter res     = 0x0b75  (CG_DEPTH0)
-#   - depth parameter CGtype  = 0x0417  (CG_FLOAT3 — the reference widens
+#   - depth parameter CGtype  = 0x0417  (CG_FLOAT3 — the established compiler widens
 #                                        the `float` the source declares)
 #
 # WHY THIS NEEDS ITS OWN TEST.  All four divergences were silent: exit 0,
@@ -159,17 +159,17 @@ for tag in sys.argv[2:]:
         typ, res = depth_param
         if res != 0x0B75:
             problems.append(
-                "%s: depth parameter resource is 0x%04x, reference emits "
+                "%s: depth parameter resource is 0x%04x, the established compiler emits "
                 "0x0b75 (CG_DEPTH0); 0 is what the disassembler prints as "
                 "'???'" % (tag, res))
         if typ != 0x0417:
             problems.append(
-                "%s: depth parameter CGtype is 0x%04x, reference emits 0x0417 "
+                "%s: depth parameter CGtype is 0x%04x, the established compiler emits 0x0417 "
                 "(CG_FLOAT3 - it widens the declared float)" % (tag, typ))
 
     if depth_replace != 1:
         problems.append(
-            "%s: depthReplace is %d, reference emits 1.  The RSX is never "
+            "%s: depthReplace is %d, the established compiler emits 1.  The RSX is never "
             "told to use the depth the program writes, so the export is "
             "inert however correct the ucode is." % (tag, depth_replace))
 
@@ -183,7 +183,7 @@ for tag in sys.argv[2:]:
         if not any(mask & Z for mask in r1):
             problems.append(
                 "%s: R1 is written with mask(s) %s but never the z lane; the "
-                "reference emits MULR R1.z and the hardware reads depth from "
+                "established compiler emits MULR R1.z and the hardware reads depth from "
                 "R1.z." % (tag, ", ".join("0x%x" % m for m in r1)))
 
 if problems:

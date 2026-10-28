@@ -13,7 +13,7 @@ zero-extended (POINTERS_EXTEND_UNSIGNED) into 64-bit registers to address.
 A symbolic address computed from the TOC pointer (local data, constant-pool
 labels) or a TLS address is built at Pmode width and then narrowed.  A symbol
 or label reached through a TOC entry keeps a pointer-sized (4-byte) entry
-loaded with lwz, as the reference toolchain does (ADDR32 relocations in .toc).
+loaded with lwz, as the established toolchain does (ADDR32 relocations in .toc).
 output_toc sizes a symbolic entry by the mode it was created in, so a 4-byte
 slot is always read with lwz and an 8-byte one with ld; the -mminimal-toc
 base slot is 4 bytes and load_toc_aix_di reads it with lwz.  AltiVec memory builtins
@@ -78,7 +78,7 @@ EXPERIMENTAL (t_3b6c018a): not yet validated against the full toolchain.
 +	  return;
 +	}
 +      /* Otherwise the address lives in a pointer-sized TOC entry: load it
-+	 with lwz from a 4-byte slot, as the reference toolchain does.  */
++	 with lwz from a 4-byte slot, as the platform ABI does.  */
 +      rtx mem = force_const_mem (ptr_mode, operands[1]);
 +      if (mem
 +	  && SYMBOL_REF_P (XEXP (mem, 0))

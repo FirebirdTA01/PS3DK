@@ -1,7 +1,7 @@
 /* core_gl_ext.c - GLES 1.1 extension entry points.
  *
  * Covers glext.h surface: VBO/PBO, 3D textures, cube maps, FBO/RBO,
- * fences (NV), events (SCE), clip planes, occlusion queries,
+ * fences (NV), events (*_SCE), clip planes, occlusion queries,
  * conditional rendering, vertex attribute sets, debug markers,
  * texture reference buffers, blend equation, polygon mode, etc.
  */
@@ -265,7 +265,7 @@ GLAPI void glFinishFenceNV(GLuint fence)   { (void)fence; }
 GLAPI void glSetFenceNV(GLuint fence, GLenum condition)
 { (void)fence; (void)condition; }
 
-/* ── events SCE ──────────────────────────────────────────────────── */
+/* ── events (*_SCE) ──────────────────────────────────────────────── */
 
 GLAPI void glDeleteEventsSCE(GLsizei n, const GLuint *fences)
 { (void)n; (void)fences; }
@@ -371,7 +371,7 @@ GLAPI void glGetQueryObjectul64vARB(GLuint id, GLenum pname,
                                     unsigned long long *params)
 { (void)id; (void)pname; if (params) *params = 0ULL; }
 
-/* ── conditional rendering SCE ──────────────────────────────────── */
+/* ── conditional rendering (*_SCE) ──────────────────────────────── */
 
 GLAPI void glBeginConditionalRenderingSCE(GLuint id)  { (void)id; }
 GLAPI void glEndConditionalRenderingSCE(void)         {}
@@ -380,7 +380,7 @@ GLAPI void glEndConditionalRenderingSCE(void)         {}
 
 GLAPI void glActiveStencilFaceEXT(GLenum face)        { (void)face; }
 
-/* ── vertex attribute sets SCE ───────────────────────────────────── */
+/* ── vertex attribute sets (*_SCE) ───────────────────────────────── */
 
 GLAPI void glGenAttribSetsSCE(GLsizei n, GLuint *names)
 { if (names) glext_zero(names, (size_t)n * sizeof(GLuint)); }
@@ -399,7 +399,7 @@ GLAPI void glPopStringMarkerSCE(void)                   {}
 GLAPI void glStringMarkerGREMEDY(GLsizei len, const void *string)
 { (void)len; (void)string; }
 
-/* ── texture reference buffers SCE ───────────────────────────────── */
+/* ── texture reference buffers (*_SCE) ───────────────────────────── */
 
 GLAPI void glTextureReferenceSCE(GLenum target, GLuint levels,
                                  GLuint baseWidth, GLuint baseHeight,

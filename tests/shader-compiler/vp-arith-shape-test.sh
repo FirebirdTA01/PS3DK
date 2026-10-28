@@ -8,7 +8,7 @@
 # lane copy out of a temp has the temp's producer write the lane itself
 # (`RCP R0.xz` builds two lanes of a vector at once).  Each row's
 # instruction count is held to a budget; where the budget is the
-# reference's count (measured with sce-cgc 475) the row says so.  Every row
+# established compiler's count (measured with the established compiler) the row says so.  Every row
 # is also judged by value against independent binary32 arithmetic.
 #
 # Usage: tests/shader-compiler/vp-arith-shape-test.sh <compiler>
@@ -39,7 +39,7 @@ ROWS = [
  ('loop_mad', 'float4 main(float4 p : POSITION, uniform float4 k, uniform int n) : POSITION { float4 a = p; for (int i = 0; i < n; i++) a = a * k + p; return a; }'),
 
 ]
-# name -> (instruction budget, the reference's count)
+# name -> (instruction budget, the established compiler's count)
 BUDGET = {
     'two_inputs': (2, 2), 'weighted_chain': (7, 7), 'uniform_mad': (2, 2),
     'struct_out': (5, 5), 'shared_product': (3, 3), 'copy_chain': (5, 6), 'loop_mad': (10, 10),

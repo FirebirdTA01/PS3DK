@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # texobj-sampler-alias: texobj<K> is the Cg 1.x spelling of sampler<K>, and nothing else.
 #
-# Measured against the reference before any of this was written: for every
+# Measured against the established compiler before any of this was written: for every
 # one of the five names, the same program spelled sampler<K> and texobj<K>
 # compiles to a BYTE-IDENTICAL container - sampled, and declared but never
 # sampled, which is the SDK's commonest shape and the one that exercises the
@@ -14,7 +14,7 @@
 # row, and pinning them here would make an unrelated divergence look like
 # this row's problem.
 #
-# THE NEGATIVE MATTERS AS MUCH AS THE POSITIVE: the reference REJECTS
+# THE NEGATIVE MATTERS AS MUCH AS THE POSITIVE: the established compiler REJECTS
 # texobj2DShadow and texobjRECTShadow with a syntax error at the identifier.
 # They are not types.  Adding the family by pattern rather than by
 # measurement would invent two.
@@ -189,7 +189,7 @@ for kind in 1D 2D 3D CUBE RECT; do
     done
 done
 
-# The two names the reference rejects.  A located diagnostic, no container.
+# The two names the established compiler rejects.  A located diagnostic, no container.
 for bogus in texobj2DShadow texobjRECTShadow; do
     src="$work/$bogus.cg"
     printf 'void main(float2 uv : TEXCOORD0, out float4 o : COLOR, uniform %s t : TEXUNIT1)\n{\n    o = float4(uv, 0, 1);\n}\n' \
@@ -197,7 +197,7 @@ for bogus in texobj2DShadow texobjRECTShadow; do
     out="$work/$bogus.fpo"
     problem="$(check_refusal "$compiler" "$src" "$out" "unknown type name .$bogus.")"
     [[ -z "$problem" ]] || fail \
-        "$bogus: $problem - the reference rejects it with a syntax error at the identifier, so it is not a type and must not be added"
+        "$bogus: $problem - the established compiler rejects it with a syntax error at the identifier, so it is not a type and must not be added"
     grep -qE ":[0-9]+:[0-9]+: error:" "$out.log" || {
         tail -n 3 "$out.log" >&2
         fail "$bogus refused without a located diagnostic"

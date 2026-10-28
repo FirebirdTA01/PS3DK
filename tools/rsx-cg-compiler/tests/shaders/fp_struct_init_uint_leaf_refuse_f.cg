@@ -1,5 +1,5 @@
 // An UNSIGNED leaf needs the signedness conversion, which this slice does
-// not do either: `(S)(-1)` emitted -1 where the reference wraps to the
+// not do either: `(S)(-1)` emitted -1 where the established compiler wraps to the
 // unsigned value (codex, review of this commit).  Same class as the bool,
 // fixed and narrow-integer leaves, same answer - refused by name.
 struct S { unsigned int i; };

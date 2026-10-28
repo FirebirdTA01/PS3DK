@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Fragment programs share work the reference shares:
+# Fragment programs share work the established compiler shares:
 #   * an expression with a literal operand, written twice, is computed once
 #     (every literal used to be its own constant, so CSE never matched them);
 #   * a value shared between two scalar && right-hand sides after that merge
 #     is still lowered (a shared comparison or an RHS-only sqrt chain);
 #   * k / y with k = 2, 4, 8, 0.5, 0.25, 0.125 is one RCP with k as its
-#     destination scale (RCPR_D2 / RCPR_M4 on the reference); 16 has no scale
+#     destination scale (RCPR_D2 / RCPR_M4 on the established compiler); 16 has no scale
 #     and stays a DIVR;
 #   * vectors divided by the same vector take one RCP per divisor component.
 #

@@ -2,8 +2,8 @@
  \brief PS3 Custom Toolchain - cell/sysutil_gamecontent.h
 
   PSL1GHT's sysutil_gamecontent.h + sysutil_game_common.h surface over
-  PSL1GHT's libsysutil.a (which embeds the reference SDK FNIDs under renamed
-  sysGame* wrappers).  Source written against PSL1GHT's reference headers
+  PSL1GHT's libsysutil.a (which embeds the platform ABI FNIDs under renamed
+  sysGame* wrappers).  Source written against PSL1GHT's system headers
   compiles unchanged against this header.
 
   Verified FNIDs imported by user code:
@@ -178,7 +178,7 @@ enum {
 #define CELL_GAME_THEMEINSTALL_BUFSIZE_MIN  4096
 
 /* ============================================================
- * the reference SDK struct types.  Layouts byte-identical to PSL1GHT's
+ * the platform ABI struct types.  Layouts byte-identical to PSL1GHT's
  * sysGame* per the _Static_asserts below.
  * ============================================================ */
 

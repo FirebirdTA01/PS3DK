@@ -2,10 +2,10 @@
  *
  * PSL1GHT libpngdec legacy convenience API: pngLoadFromFile and pngLoadFromBuffer.
  *
- * All other PSL1GHT pngDec* names are nidgen aliases of the reference cellPngDec*
+ * All other PSL1GHT pngDec* names are nidgen aliases of the system cellPngDec*
  * exports (libpngdec_stub.yaml).
  *
- * This implementation wraps the reference cellPngDec API cleanly without
+ * This implementation wraps the system cellPngDec API cleanly without
  * depending on PSL1GHT's original implementation.
  */
 

@@ -2,8 +2,8 @@
  \brief libpadfilter — second-order IIR low-pass filter for pad axis data.
 
   Independent reproduction of the cellPadFilter API surface based on the
-  SCE PlayStation(R)3 Programmer Tool Runtime Library 475 header that
-  shipped with the reference SDK.  The filter is a generic Butterworth
+  system runtime-library header that
+  shipped with the platform ABI.  The filter is a generic Butterworth
   second-order section (biquad) operating on uint32_t samples — pad
   axis values come in as 32-bit words from cellPadGetData(), and a
   smoothed value comes out per Filter() call.

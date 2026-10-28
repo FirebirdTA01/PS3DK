@@ -35,7 +35,7 @@
  *   0x80010002  ESRCH       (spup > 63 or invalid)
  *   0x8001000a  EAGAIN      (mailbox full / receive empty)
  *
- * Bytes here closely track the reference libsputhread.a; comments
+ * Bytes here closely track the system libsputhread.a; comments
  * call out the protocol bits.
  */
 	.text
@@ -90,7 +90,7 @@ sys_spu_thread_throw_event:
 	xsbh	$2, $8
 	shli	$7, $3, 24          /* $7 = spup << 24 */
 	ori	$6, $6, 2           /* $6 = 0x80010002 (ESRCH) */
-	.long	0x4020007f          /* nop $127 - byte-match the reference;
+	.long	0x4020007f          /* nop $127 - byte-match the system;
 	                             * SPU GAS folds `nop $127` to `nop $0` */
 	brhnz	$2, 1f              /* invalid spup: skip body, return ESRCH */
 	ori	$10, $5, 0          /* $10 = data1 */

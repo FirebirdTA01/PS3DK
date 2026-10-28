@@ -11,7 +11,7 @@
 #      NOT float division 2.5 (0x40200000).
 #    - 'static const int K=7; float(K & 3)' folds bitwise AND to 3.0f (0x40400000).
 # 4. Plain mutable static ('static float s = 2.0') with helper mutation starts at
-#    its initialiser and sees the helper's write: (3, 3, 0, 1), as the reference.
+#    its initialiser and sees the helper's write: (3, 3, 0, 1), as the established compiler.
 # 5. Zero uniform slots: the container parameter table carries 0 uniform parameters
 #    for static const and const static variables.
 # 6. Ucode carries immediate constant values: 255.0f (0x437f0000), 2.0f (0x40000000).
@@ -429,7 +429,7 @@ if bytes((0x00, 0x00, 0x40, 0x20)) in u_bytes:
 PY
 
 # Row 3d': arithmetic in a file-scope const initialiser FOLDS (file-scope-initializer-fold).
-# This row used to pin our own refusal of `1 + 2`; the reference folds it, so
+# This row used to pin our own refusal of `1 + 2`; the established compiler folds it, so
 # the row is now a byte twin against the hand-folded literal.
 cat >"$work/fold_int_arith.cg" <<'EOF'
 static const int K = 1 + 2;
@@ -445,7 +445,7 @@ float4 main() : COLOR {
 EOF
 for stem in fold_int_arith fold_int_arith_control; do
     rm -f "$work/$stem.fpo"
-    "$compiler" -p sce_fp_rsx --emit-container "$work/$stem.fpo" "$work/$stem.cg" >"$work/$stem.log" 2>&1         || { tail -n 5 "$work/$stem.log" >&2; fail "$stem did not compile; the reference folds 1 + 2"; }
+    "$compiler" -p sce_fp_rsx --emit-container "$work/$stem.fpo" "$work/$stem.cg" >"$work/$stem.log" 2>&1         || { tail -n 5 "$work/$stem.log" >&2; fail "$stem did not compile; the established compiler folds 1 + 2"; }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem exited 0 but wrote no container"
 done
 cmp -s "$work/fold_int_arith.fpo" "$work/fold_int_arith_control.fpo"     || fail "static const int K = 1 + 2 must fold byte-identically to K = 3 (file-scope-initializer-fold)"
@@ -751,7 +751,7 @@ mut_log="$work/neg_mutable_static.log"
     tail -n 10 "$mut_log" >&2
     fail "bare mutable static helper mutation was refused; it starts at its initialiser"
 }
-# The reference: the static starts at 2.0, the inlined helper's write is
+# The established compiler: the static starts at 2.0, the inlined helper's write is
 # seen after the call, so the colour is (3, 3, 0, 1).
 PYTHONPATH="$repo_root/tests/shader-compiler" "$python" - "$mut_fpo" <<'PY'
 import sys

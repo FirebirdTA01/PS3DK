@@ -1,7 +1,7 @@
 // prototype-default-merging PROTOTYPE CELL.  The semantic that is JUDGED is the one on the
 // FIRST DECLARATION in source order; the body that is WALKED is the
-// DEFINITION's.  Measured on sce-cgc 475 - the four cells disagree, so neither
-// "judge the definition" nor "judge either" reproduces the reference.
+// DEFINITION's.  Measured on the established compiler - the four cells disagree, so neither
+// "judge the definition" nor "judge either" reproduces the established compiler.
 //
 // prototype :COLOR and definition :COLOR
 // Compile with -e beta.  Reference verdict: REFUSE

@@ -74,7 +74,7 @@ void Parser::initBuiltinTypes()
 
 // A BUILT-IN TYPE NAME DECLARED AS A VARIABLE (PSGL's vpFixedPipeline:
 // `float3 half = float3(0,0,0); ... dot(normal, half)`).  Measured on the
-// reference: every built-in type spelling except the reserved words float,
+// established compiler: every built-in type spelling except the reserved words float,
 // int and bool may name a variable - half, fixed, the floatN / halfN /
 // fixedN / intN / boolN vectors and matrices, the sampler types - and from
 // its declaration to the end of its scope that spelling is the variable
@@ -209,7 +209,7 @@ void Parser::retypeShadowedTypeNames()
             next == TokenType::COMMA || next == TokenType::LBRACKET || next == TokenType::COLON ||
             next == TokenType::RPAREN;
         // `float half(float x) { ... }`: a FILE-SCOPE function named after a
-        // type word is called by that name afterwards (the reference compiles
+        // type word is called by that name afterwards (the established compiler compiles
         // `half(uv.x)` after it as the call), so from its name to the end of
         // the file the word is that function.
         const bool function = !userName && next == TokenType::LPAREN && braceDepth[i] == 0 &&
@@ -290,7 +290,7 @@ std::unique_ptr<TranslationUnit> Parser::parse()
         // That is not hypothetical: ANY unknown identifier in type position
         // hung the compiler outright - 'uniform bogusType t', or a local
         // 'bogusType x;' - and it hung --dump-ast too, because it never
-        // reached a back end.  95 shaders in the reference SDK sample tree
+        // reached a back end.  95 shaders in the platform ABI sample tree
         // never terminated, most of them over the Cg 1.x texobj2D type name
         // (parser-progress).  A compiler that refuses is workable; one that spins
         // cannot be worked around at all.
@@ -772,7 +772,7 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
 
     // Expand an already-declared alias before treating a named type as a
     // struct. Copy the node: qualifiers on this use must not modify the alias.
-    // parseType still records this type for the reference declarator-list rule.
+    // parseType still records this type for the established compiler declarator-list rule.
     if (tok.type == TokenType::IDENTIFIER)
     {
         const auto alias = typeAliases_.find(tok.lexeme);
@@ -816,7 +816,7 @@ std::shared_ptr<TypeNode> Parser::parseBaseType()
     // keywords; they arrive as identifiers listed in typeNames.  Build the
     // matrix node from the name so they do not fall through to the struct
     // path below as an unknown struct (rectangular-matrix-row-access / rectangular-matrices).  The
-    // reference lays an RxC matrix out as R rows of C-wide vectors.
+    // established compiler lays an RxC matrix out as R rows of C-wide vectors.
     if (tok.type == TokenType::IDENTIFIER && tok.lexeme.size() >= 7 &&
         tok.lexeme.size() <= 9 && typeNames.count(tok.lexeme) > 0)
     {
@@ -1109,7 +1109,7 @@ std::shared_ptr<TypeNode> Parser::parseArrayType(std::shared_ptr<TypeNode> eleme
     arrayType->elementType = elementType;
 
     // An array size is an integral constant expression.  Measured on the
-    // reference: integer literals (after macro expansion, TAPS + 1),
+    // established compiler: integer literals (after macro expansion, TAPS + 1),
     // `static const int` names in scope (2*rad+1, grid_size*grid_size with a
     // local int) and + - * / % are accepted; a float value - even 2.0*2.0 -
     // is C1309, a uniform or a non-static const is C1307.
@@ -1298,7 +1298,7 @@ std::unique_ptr<StructDecl> Parser::parseStructBody()
     while (!check(TokenType::RBRACE) && !isAtEnd())
     {
         // A member may lead with a storage/interface qualifier.  The
-        // reference SDK writes both spellings inside structs - `uniform
+        // platform ABI writes both spellings inside structs - `uniform
         // sampler2D texture_zstencil : TEXUNIT0;` in
         // DeferredShading/shaders/light_structs.cgh and `in float4
         // position : POSITION;` in the head_tracker shaders - and without
@@ -1393,7 +1393,7 @@ std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration(
         return std::unique_ptr<DeclNode>();
     };
 
-    // The reference accepts five spellings, each byte-identical to the
+    // The established compiler accepts five spellings, each byte-identical to the
     // direct spelling of the type (fable's typedef rows):
     //   typedef struct { ... } Name;       the struct IS Name (below)
     //   typedef struct Tag { ... } Name;   the struct keeps Tag; Name aliases it
@@ -1453,7 +1453,7 @@ std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration(
             return body;
         }
         // `typedef struct S { ... } S;`: the name IS the tag, so the struct is
-        // the whole declaration (the reference accepts it, byte-identical to
+        // the whole declaration (the established compiler accepts it, byte-identical to
         // the plain struct); an alias of the same name would redefine it.
         if (check(TokenType::IDENTIFIER) && peek().lexeme == body->name &&
             peek(1).type == TokenType::SEMICOLON)
@@ -1487,7 +1487,7 @@ std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration(
     type = parseArraySuffixes(type);
     consume(TokenType::SEMICOLON, "Expected ';' after typedef");
 
-    // The reference refuses a repeated typedef, even of the same type.
+    // The established compiler refuses a repeated typedef, even of the same type.
     if (typeNames.count(name))
     {
         error(loc, "the name '" + name + "' is already defined");
@@ -1547,7 +1547,7 @@ std::unique_ptr<DeclNode> Parser::parseVariableOrFunctionDeclaration(
     }
     else
     {
-        // `inline float k = 0;` is not a function; the reference refuses it
+        // `inline float k = 0;` is not a function; the established compiler refuses it
         // (C1005 "inline modifier only for functions"), so a program that
         // relied on it being ignored must not silently compile here.
         if (declaredInline)
@@ -1675,7 +1675,7 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
     // A LATER declarator in the list takes the type most recently named in
     // an earlier declarator's initializer - a constructor or a cast, nested
     // or not, the last one in source order - not the declared type.
-    // Measured on the reference (sce-cgc 475):
+    // Measured on the established compiler:
     //   float3 a = float2(1,2).xyy, b = t.rgb;          b is float2 (C7011)
     //   float3 a = float4(float2(1,2),3,4).xyz, b = ...  b is float2
     //   float3 a = ((float2)t.xy).xyx, b = ...           b is float2
@@ -1685,7 +1685,7 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
     // float2 and float4(result / norm, 1.0) is C1067 there).
     std::shared_ptr<TypeNode> declaratorType = type;
     // With --extension=declarator-types the list keeps the declared type,
-    // exactly the separate declarations it abbreviates (which the reference
+    // exactly the separate declarations it abbreviates (which the established compiler
     // compiles).  Without it, a declarator whose type the rule CHANGES is
     // reported with the flag that would keep it: this rule is the detector.
     auto parseOne = [&](SourceLocation at, const std::string& name) {
@@ -1693,7 +1693,7 @@ std::vector<std::unique_ptr<VarDecl>> Parser::parseMultipleVariableDeclarations(
             declaratorType->toString() != type->toString())
         {
             warning("'" + name + "' takes type " + declaratorType->toString() +
-                    " from an earlier declarator in its list, as the reference "
+                    " from an earlier declarator in its list, as the established "
                     "compiler does (declared " + type->toString() + "); " +
                     "--extension=declarator-types keeps the declared type");
         }
@@ -1729,7 +1729,7 @@ std::unique_ptr<ParamDecl> Parser::parseParameter(bool selectedEntry)
     SourceLocation loc = currentLocation();
 
     // Parse storage qualifier (in/out/inout/uniform).  `inline` carries no
-    // meaning on a parameter and the reference accepts it in any position
+    // meaning on a parameter and the established compiler accepts it in any position
     // ("inline out", "out inline"), so it is swallowed before and after the
     // storage word.
     while (match(TokenType::KW_INLINE)) {}
@@ -1815,8 +1815,8 @@ std::unique_ptr<ParamDecl> Parser::parseParameter(bool selectedEntry)
     // legal depends on which function was SELECTED as the entry, which the
     // parser does not know - see the C1114 check in SemanticAnalyzer's
     // function collection (uniform-default-records A1).  This used to error here on any
-    // '=' in any parameter list, which refused the reference's own
-    // `uniform float4 light = {1,1,1,1}` spelling on seven reference-SDK
+    // '=' in any parameter list, which refused the established compiler's own
+    // `uniform float4 light = {1,1,1,1}` spelling on seven Cell OS
     // rows and a helper's default argument on sixteen more.
     if (match(TokenType::OP_ASSIGN))
     {
@@ -1922,7 +1922,7 @@ Semantic Parser::parseSemantic()
     std::string semName = advance().lexeme;
     sem.rawName = semName;  // preserve source spelling for byte-exact container emit
 
-    // HLSL/Cg explicit binding: `: register(BANK<N>)`.  The reference
+    // HLSL/Cg explicit binding: `: register(BANK<N>)`.  The established compiler
     // compiler accepts CN (const), SN (sampler), VN (varying) — we
     // capture the bank letter + numeric index and let the container
     // emitter override the auto-allocator with this binding.
@@ -2503,7 +2503,7 @@ std::unique_ptr<StmtNode> Parser::parseExpressionOrDeclStatement()
 std::unique_ptr<ExprNode> Parser::parseExpression()
 {
     // A full expression may be a comma sequence (C semantics, measured on the
-    // reference: `a = t.x, b = t.y;`, `float2((t.x, t.y) / 2, 0)` is t.y / 2,
+    // established compiler: `a = t.x, b = t.y;`, `float2((t.x, t.y) / 2, 0)` is t.y / 2,
     // `for (i = 0, j = 2; ...; i++, j--)`).  Arguments, initialisers and
     // defaults use parseAssignmentExpression, where a comma separates.
     auto left = parseAssignmentExpression();
@@ -2948,7 +2948,7 @@ std::unique_ptr<ExprNode> Parser::parsePrimaryExpression()
     }
 
     // A user type name (struct or typedef) NOT followed by '(' is a variable
-    // that shadows the type in this scope: measured, the reference accepts
+    // that shadows the type in this scope: measured, the established compiler accepts
     // `struct input {...}; ... float4 input = t; input += 1;` (libretro's
     // phosphor-trails, gb-pass-1).  Read it as an identifier.
     if (check(TokenType::IDENTIFIER) && isTypeName(true) && peek(1).type != TokenType::LPAREN &&

@@ -19,7 +19,7 @@ work has completed only once label 202 holds its value.
   it again, freeing it succeeds and unmaps it.
 - `psglExit` waits for queued work even though the application already used
   reference value 1 with its own `cellGcmFinish`. A completion check that
-  waits only for the reference register to equal 1 would return at once.
+  waits only for the system register to equal 1 would return at once.
 
 The exit variants make one `psglExit` wait hit its bound, so `psglExit`
 stops without shutting down, and check that a second `psglExit` after the

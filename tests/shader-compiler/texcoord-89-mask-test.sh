@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # TEXCOORD8 and TEXCOORD9 use the high fragment-input selector values
 # TC(8) / TC(9), but the container metadata does not continue the TC0..7
-# attributeInputMask sequence at bits 22/23.  The reference compiler sets
+# attributeInputMask sequence at bits 22/23.  The established compiler sets
 # bits 12/13 instead, and still participates in texCoordsInputMask /
 # texCoords2D as TEXCOORD8/9.
 set -euo pipefail
@@ -55,7 +55,7 @@ attr = u32(prog + 4)
 tc_in = u16(prog + 12)
 tc_2d = u16(prog + 14)
 
-# Measured against the reference: TC8/9 occupy attribute bits 12/13.
+# Measured against the established compiler: TC8/9 occupy attribute bits 12/13.
 want_attr = 1 << (n + 4)
 want_tc = 1 << n
 

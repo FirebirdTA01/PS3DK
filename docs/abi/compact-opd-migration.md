@@ -196,7 +196,7 @@ Still separate from this document:
 - removing all remaining `mode(SI)`-style pointer declarations from legacy
   interfaces in favor of explicit `lv2_ea32_t` kernel-side fields;
 - replacing or retiring PSL1GHT compatibility wrapper libraries where native
-  reference SDK-style APIs are complete;
+  platform ABI-style APIs are complete;
 - expanding NID stub coverage and implementation verification.
 
 So the compact-descriptor ABI path is implemented, but the broader goal of a

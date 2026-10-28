@@ -4,7 +4,7 @@ This row checks `glReadPixels(GL_RGBA, GL_UNSIGNED_BYTE)` on the current
 default color buffer and a color0 texture framebuffer. It checks pack
 alignments 1, 2, 4 and 8, row padding and guards, consecutive different
 clears, lower-left row order, and alpha 255 for XRGB rendering surfaces.
-The reference-texture pattern has distinct top-to-bottom rows and a
+The system-texture pattern has distinct top-to-bottom rows and a
 non-255 X byte, so copying X as alpha or reversing rows incorrectly fails.
 An asymmetric drawn pattern independently checks both framebuffer paths:
 red below green, with a blue one-pixel marker at lower-left coordinate (2,1).

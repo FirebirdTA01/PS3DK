@@ -1,5 +1,5 @@
 /*! \file cell/sysutil_music.h
- \brief Sony-SDK-source-compat libsysutil_music (XMB BGM playback) API.
+ \brief Cell OS source-compat libsysutil_music (XMB BGM playback) API.
 
   Backed by libsysutil_music_stub.a — the loader resolves the 22 exports
   (v1 + v2 variants) against the cellMusicUtility SPRX module at runtime.
@@ -86,7 +86,7 @@ typedef sys_mem_container_t sys_memory_container_t;
 
 /* Forward decls for types defined by other headers (search, SPURS,
  * music_playback_common).  Users that need their full definitions must
- * include the appropriate Sony header. */
+ * include the appropriate system header. */
 typedef struct CellMusicSelectionContext  CellMusicSelectionContext;
 typedef struct CellMusicSelectionContext2 CellMusicSelectionContext2;
 typedef struct CellSearchContentId        CellSearchContentId;
@@ -113,7 +113,7 @@ int cellMusicGetSelectionContext(CellMusicSelectionContext *context);
 int cellMusicGetContentsId(CellSearchContentId *contents_id);
 
 /* v2 surface — same shape, distinct FNIDs.  See sysutil_music2.h in
- * Sony's reference SDK for the full v2 docs. */
+ * the system headers for the full v2 docs. */
 int cellMusicInitialize2(int mode, sys_memory_container_t container, int spuPriority,
                          CellMusicCallback func, void *userData);
 int cellMusicInitialize2SystemWorkload(int mode, sys_memory_container_t container,

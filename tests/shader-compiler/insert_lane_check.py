@@ -4,7 +4,7 @@ operand-lane-width: the general path's VecInsert lowering forced the scalar
 source's swizzle to lane 0.  That is right for a literal - lane 0 of the
 const block - and wrong for a lane extract, whose lane resolve() had
 already selected.  So `color.y = lit.y` emitted `MOV R0.y, R16.x`, the red
-channel broadcast into green and blue, on four shaders whose reference
+channel broadcast into green and blue, on four shaders whose established compiler output
 paints three distinct channels.
 
 TWO EARLIER VERSIONS OF THIS CHECK WERE TOO WEAK, in opposite ways, and
@@ -12,7 +12,7 @@ both failures are why it is written this way now.
 
 The FIRST asserted the SHAPE the compiler happened to emit: three
 single-lane MOVs, masks 0x1, 0x2 and 0x4, each from a temp.  06baa4eb then
-compacted them into one three-lane `MOV R0.xyz <- R1.xyz` - the reference's
+compacted them into one three-lane `MOV R0.xyz <- R1.xyz` - the established compiler's
 own shape, value unchanged - and the check stopped matching anything at
 all, reporting "masks found: <empty>.  Nothing was checked".  It sat red on
 the integration branch for a compiler that was behaving correctly.

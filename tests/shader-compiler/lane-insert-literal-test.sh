@@ -7,7 +7,7 @@
 # The assertions are on the EMITTED UCODE rather than on the exit status,
 # because the defect's whole character is that the exit status was 0 and
 # the container looked right.  What the shapes below check is what the
-# reference compiler does, read off its own output:
+# established compiler does, read off its own output:
 #
 #   one lane overridden : base MOV masked to the lanes the insert does NOT
 #                         write, then a MOV of the literal into that lane
@@ -53,7 +53,7 @@ all="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_insert_literal_all_f.cg"
 # was never defined and the store reported "operand could not be resolved"
 # (partial-varying-materialization).  It now materialises the varying into a
 # temp masked to the lanes the insert does not write, which is the
-# reference's own shape, so the one-lane case is judged on the exact rows
+# established compiler's own shape, so the one-lane case is judged on the exact rows
 # below.
 compile "$one" one_general
 compile "$all" all_general

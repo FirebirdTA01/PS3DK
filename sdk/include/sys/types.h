@@ -2,10 +2,10 @@
  * PS3 Custom Toolchain — <sys/types.h> wrapper.
  *
  * Provides POSIX types from newlib's <sys/types.h> (off_t, pid_t,
- * useconds_t, etc.), then adds Sony-SDK compat typedefs (usecond_t,
+ * useconds_t, etc.), then adds Cell OS compat typedefs (usecond_t,
  * second_t) from <sys/sys_types.h>.  Every translation unit that
- * includes <sys/types.h> gets the Sony types automatically,
- * matching the reference-SDK expectation that `usecond_t` is a
+ * includes <sys/types.h> gets the Cell OS types automatically,
+ * matching the Cell OS expectation that `usecond_t` is a
  * system-wide type.
  *
  * The forward runs on every inclusion, outside the include guard (as

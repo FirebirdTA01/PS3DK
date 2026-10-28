@@ -2,7 +2,7 @@
  * PS3 Custom Toolchain — minimal Cg runtime API.
  *
  * Ships the opaque handle typedefs and the ABI-visible enum values
- * that the reference compiler writes into CgBinaryProgram / CgBinaryParameter fields.
+ * that the established compiler writes into CgBinaryProgram / CgBinaryParameter fields.
  * Client code uses these to decode what a loaded shader's parameters
  * bind to at the hardware level (e.g. `if (res == CG_ATTR0) ...`).
  *
@@ -52,7 +52,7 @@ enum
     /* CG_TYPE_START_ENUM itself takes the value 1024; the first
      * datatype (CG_HALF) is the NEXT enumerator and gets 1025.  This
      * is a subtle C-enum auto-increment detail — bite us once already
-     * when every datatype constant below was off-by-one and the reference compiler-
+     * when every datatype constant below was off-by-one and the established compiler-
      * emitted `type` fields failed to match the switch in the Cg →
      * RSX bridge. */
     CG_TYPE_START_ENUM   = 1024,
@@ -295,7 +295,7 @@ typedef uint32_t CGenum;
  * We only enumerate the profiles relevant to PS3 shader authoring;
  * legacy DX9 / HLSL / VP20–VP30 profiles would be laid out between
  * CG_PROFILE_START and CG_PROFILE_SCE_VP_RSX but are not accepted by
- * the reference compiler anyway.
+ * the established compiler anyway.
  */
 enum
 {

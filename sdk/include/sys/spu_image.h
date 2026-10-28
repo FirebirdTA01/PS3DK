@@ -1,6 +1,6 @@
 /* sys/spu_image.h - SPU program image lv2 surface.
  *
- * Reference-SDK-named types and entry points for loading an SPU ELF
+ * Cell OS-named types and entry points for loading an SPU ELF
  * into a sys_spu_image_t descriptor that sys_spu_thread_initialize
  * can consume.  Two typical paths:
  *
@@ -11,7 +11,7 @@
  *                       sys_spu_image_close(&img)
  *
  * The struct byte-layout (4 x u32 = 16 bytes) is identical to
- * PSL1GHT's `sysSpuImage`; we ship reference-SDK field names
+ * PSL1GHT's `sysSpuImage`; we ship Cell OS field names
  * (entry_point, segs, nsegs) over a fresh struct definition rather
  * than typedef-aliasing onto PSL1GHT's, so sample code that writes
  * `img.entry_point = ...` compiles unchanged.  The lv2 syscall FNIDs
@@ -67,7 +67,7 @@ typedef struct sys_spu_image {
     int                nsegs;       /* number of valid segments */
 } sys_spu_image_t;
 
-/* Reference-SDK snake_case forwarders over PSL1GHT's sysSpuImage*
+/* Cell OS snake_case forwarders over PSL1GHT's sysSpuImage*
  * inline syscall wrappers.  Both sets bind to the same FNIDs - the
  * lv2 kernel exposes one set of entry points; only the C-level names
  * differ. */

@@ -3,7 +3,7 @@
 # (uniform-matrix-row-index).  `m[0]` used to refuse everywhere -
 # "StoreOutput source is not a direct Load or matvecmul" on the old default
 # path, "operand could not be resolved" on the general one - although the
-# reference compiles it to one instruction, `MOV o[8], c[256]`.
+# established compiler compiles it to one instruction, `MOV o[8], c[256]`.
 #
 # Two fixtures that differ only in the row, because the interesting way to
 # get this wrong is not to refuse.  The row arrives as OPERAND 1 of the
@@ -58,7 +58,7 @@ compile() {
     if [[ "$rc" -ne 0 ]]; then
         tail -n 20 "$work/$3.log" >&2
         fail "$3 did not compile.  A matrix row is a const register the
-reference reads directly; refusing it is the defect (uniform-matrix-row-index)."
+established compiler reads directly; refusing it is the defect (uniform-matrix-row-index)."
     fi
     # The ucode rows alone, so the comparison below is about instructions
     # and not about anything else the compiler prints.
@@ -115,7 +115,7 @@ for path, name in zip(sys.argv[1:2], ("general",)):
         )
 PY
 
-# Row 3 of a float3x3 is out of bounds - the reference calls it that and
+# Row 3 of a float3x3 is out of bounds - the established compiler calls it that and
 # refuses.  Compiling it would read a register the matrix does not own.
 for flags_tag in ":oob_general"; do
     flags="${flags_tag%%:*}"
@@ -131,7 +131,7 @@ for flags_tag in ":oob_general"; do
     if [[ "$rc" -eq 0 ]]; then
         tail -n 10 "$work/$tag.log" >&2
         fail "$tag COMPILED m3[3] on a float3x3.  The matrix owns three
-registers; row 3 is the next allocation's, and the reference rejects the
+registers; row 3 is the next allocation's, and the established compiler rejects the
 source as an out-of-bounds index.  The row index must be bounded by the
 matrix's own row count (uniform-matrix-row-index)."
     fi

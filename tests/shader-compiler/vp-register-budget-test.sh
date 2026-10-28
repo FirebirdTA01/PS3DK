@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The vertex engine has 32 temporary registers.  The reference refuses a
+# The vertex engine has 32 temporary registers.  The established compiler refuses a
 # program that needs more ("C6001: Temporary register limit of 32 exceeded").
 # Ours encoded registers past R31 in the 6-bit field and reported success - an
 # invalid program (PSGL's fixed pipeline reached R61).  Now refused by
@@ -7,8 +7,8 @@
 #
 # Rows: N values each read twice, far apart (all live at once).  N=8 and N=20
 # compile within the budget and are judged by value (N=20 needs the lowered-
-# order fallback: the latency schedule would take 40 registers, the reference
-# takes 20); N=34 is refused like the reference.
+# order fallback: the latency schedule would take 40 registers, the established compiler
+# takes 20); N=34 is refused like the established compiler.
 #
 # Usage: tests/shader-compiler/vp-register-budget-test.sh <compiler>
 set -u

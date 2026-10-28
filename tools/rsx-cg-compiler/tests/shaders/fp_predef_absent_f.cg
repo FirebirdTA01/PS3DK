@@ -1,4 +1,4 @@
-// preprocessor-predefined-macros: none of these names is defined by the reference; each would add
+// preprocessor-predefined-macros: none of these names is defined by the established compiler; each would add
 // its own power of two, so the result must stay 0.  The first four were the
 // Vita compiler's PSVita predefinitions and are the ones a port is most likely to test.
 float4 main() : COLOR {

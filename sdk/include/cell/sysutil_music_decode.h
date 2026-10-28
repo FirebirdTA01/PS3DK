@@ -47,7 +47,7 @@ typedef void (*CellMusicDecodeCallback)(uint32_t event, void *param,
                                         void *userData);
 
 /* v2 callback - same calling convention, type-namespaced for source
- * compatibility with the reference-SDK music_decode2.h API path. */
+ * compatibility with the Cell OS music_decode2.h API path. */
 typedef void (*CellMusicDecode2Callback)(uint32_t event, void *param,
                                          void *userData);
 

@@ -20,8 +20,8 @@
 
 /* CellSpursJobContext2 — passed to SPU-side cellSpursJobMain2 entry
  * point.  Describes the I/O buffers + DMA tag the job runtime set up
- * for the job before invoking it.  Layout matches the reference
- * SDK 475 cell/spurs/job_context_types.h exactly. */
+ * for the job before invoking it.  Layout matches the system
+ * SDK cell/spurs/job_context_types.h exactly. */
 typedef struct CellSpursJobContext2 {
     void *   ioBuffer;
     void *   cacheBuffer[4];

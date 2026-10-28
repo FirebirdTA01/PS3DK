@@ -3,7 +3,7 @@
  * 8-byte compact function descriptor, to probe whether the Lv-2
  * loader and our toolchain cooperate to call through it correctly.
  *
- * Shape of the descriptor matches reference SDK post-link output:
+ * Shape of the descriptor matches platform ABI post-link output:
  *   [+0] 32-bit entry EA
  *   [+4] 32-bit module TOC base EA (.TOC.@tocbase truncated)
  *

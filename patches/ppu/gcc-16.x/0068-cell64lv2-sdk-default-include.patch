@@ -10,7 +10,7 @@ newlib) declare what librt provides, but they were reachable only when
 a build added -isystem $PS3DK/ppu/include itself.  Since GCC 14 a call
 without a declaration is an error, so C code that included only the
 toolchain's headers (EMP's miniaudio, for one) stopped compiling.  The
-reference compiler searches its SDK include directory by default.
+established compiler searches its SDK include directory by default.
 
 Add %:ps3dk-include() to INCLUDE_EXTRA_SPEC (CPP_OS_DEFAULT_SPEC uses
 it), unless -nostdinc.  It expands to -isystem <SDK>/ppu/include: the
@@ -48,8 +48,8 @@ index addc86c..7e48529 100644
 -#ifndef INCLUDE_EXTRA_SPEC
 -#define INCLUDE_EXTRA_SPEC	""
 +/* The SDK's POSIX layer (its pthread.h, time.h and sched.h wrappers over
-+   newlib) is on the default include path, as the reference compiler's
-+   target/ppu/include is: -isystem, in the same place the CMake toolchain
++   newlib) is on the default include path, as the established compiler's
++   system include directory is: -isystem, in the same place the CMake toolchain
 +   puts it, from the SDK PS3DK selects or else the one installed with
 +   this compiler (driver-cell64lv2.cc).  -nostdinc drops it, and
 +   PS3DK_NO_DEFAULT_INCLUDE=1 turns it off.  */

@@ -13,9 +13,9 @@
 #
 # The IR builder now stamps a load made inside an inlined helper with the
 # entry parameter the helper's parameter is bound to.  Every expectation
-# below is measured on the reference (sce-cgc 475 -p sce_fp_rsx, 2026-10-16):
+# below is measured on the established compiler (the established compiler -p sce_fp_rsx, 2026-10-16):
 # each helper spelling is byte-identical to its direct twin there, and the
-# record tables are the reference's own.
+# record tables are the established compiler's own.
 #   - one helper, two helpers, an unsemanticked (inferred-slot) member;
 #   - unused member: i.n is never read and stays unreferenced;
 #   - two entry inputs: the helper is given b, so b.col is referenced and
@@ -47,7 +47,7 @@ compile() {
     [[ "$rc" -lt 128 ]] || fail "$stem crashed"
     if [[ "$rc" -ne 0 ]]; then
         head -n 4 "$work/$stem.log" >&2
-        fail "$stem did not compile; the reference accepts it"
+        fail "$stem did not compile; the established compiler accepts it"
     fi
     [[ -s "$work/$stem.bin" ]] || fail "$stem wrote no container"
 }
@@ -66,13 +66,13 @@ PY
 )" || rc=$?
     [[ "$rc" -eq 0 ]] || fail "$stem: the container did not decode (python exit $rc)"
     [[ "$got" == "$expected" ]] \
-        || fail "$stem records differ from the reference"$'\n'"  got:      $got"$'\n'"  expected: $expected"
+        || fail "$stem records differ from the established compiler's"$'\n'"  got:      $got"$'\n'"  expected: $expected"
 }
 
 twin() {
     compile "$1"; compile "$2"
     cmp -s "$work/$1.bin" "$work/$2.bin" \
-        || fail "$3: the helper spelling and the direct read produced different containers ($(stat -c %s "$work/$1.bin") vs $(stat -c %s "$work/$2.bin") bytes); the reference emits the same bytes"
+        || fail "$3: the helper spelling and the direct read produced different containers ($(stat -c %s "$work/$1.bin") vs $(stat -c %s "$work/$2.bin") bytes); the established compiler emits the same bytes"
     records "$1" "$4"
     printf 'PASS %s\n' "$3"
 }

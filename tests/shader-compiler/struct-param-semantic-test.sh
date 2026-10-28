@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # `: TEXUNITn` on a struct-typed entry parameter (libretro's mdapt passes:
-# `prev PASSPREV4 : TEXUNIT1`).  Measured on the reference, both profiles:
+# `prev PASSPREV4 : TEXUNIT1`).  Measured on the established compiler, both profiles:
 # every member record carries the struct's semantic string; a sampler member
 # binds to unit n (two samplers in one struct BOTH take unit n); a numeric
 # member of a varying struct stays an ordinary varying - unreferenced with
@@ -74,7 +74,7 @@ REFUSE = [
      'float4 main(S5 p : TEXCOORD1) : COLOR { return float4(p.a, p.b); }\n', 'struct-typed parameters'),
     ('fp_nested_struct', 'struct I { float2 a; sampler2D s; };\nstruct O { float3 b; I inner; };\n' +
      FP % ('O', 'return tex2D(p.inner.s, uv);'), 'struct-typed parameters'),
-    # The reference WRITES an out/inout struct's members to varying outputs;
+    # The established compiler WRITES an out/inout struct's members to varying outputs;
     # not lowered here, so refused rather than compiled with them dropped.
     ('fp_out_struct', 'struct S { float4 c; };' + chr(10) + 'void main(float2 uv : TEXCOORD0, out S p : TEXUNIT2, '
      'out float4 col : COLOR) { p.c = float4(uv, 0, 1); col = float4(uv, 1, 1); }' + chr(10), 'out/inout struct'),

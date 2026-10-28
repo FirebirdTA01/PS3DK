@@ -12,7 +12,7 @@
 # rule, and the first version of this file said it was: two operands of
 # type INPUT are perfectly legal when they name the SAME varying with
 # different swizzles - `uv.x * uv.y` is one selector read twice, and the
-# REFERENCE emits exactly that shape (a DP3 with two INPUT sources in
+# ESTABLISHED COMPILER emits exactly that shape (a DP3 with two INPUT sources in
 # fp_normalized_phong_vecinsert_f).  The encoding cannot tell the two
 # cases apart, which is precisely why the defect was invisible.
 #

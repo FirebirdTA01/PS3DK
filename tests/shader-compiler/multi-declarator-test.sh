@@ -6,16 +6,16 @@
 # it did not.  Every declarator after the first was dropped, at file scope
 # and inside a function, with and without initialisers.
 #
-# The oracle is unambiguous here, unlike the local-type diagnostic row: the
-# reference ACCEPTS all four shapes below and rejects the genuinely
+# The established compiler is unambiguous here, unlike the local-type diagnostic row: the
+# established compiler ACCEPTS all four shapes below and rejects the genuinely
 # undeclared control, so this test compares our own comma form against our
-# own separate-statement form and requires them to agree, with the reference
+# own separate-statement form and requires them to agree, with the established compiler
 # having settled which behaviour is correct.
 #
 # The pairs are byte-compared rather than merely both-compile: a declaration
 # that is accepted but binds the wrong storage would pass an acceptance-only
 # check.  Two shaders agreeing is not two shaders being right, so the
-# separate-statement form is the one the reference and we already agree on.
+# separate-statement form is the one the established compiler and we already agree on.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -180,7 +180,7 @@ printf '  %-22s ok\n' "undeclared refused"
 
 # DUPLICATE DECLARATORS MUST REFUSE.  The row has two halves and this is the
 # dangerous one: `float a, a;` compiled and WROTE A CONTAINER, so we accepted
-# invalid source as well as rejecting valid names.  The reference refuses both
+# invalid source as well as rejecting valid names.  The established compiler refuses both
 # spellings by name, so a fix that declares every declarator without checking
 # for a repeat would trade one defect for a quieter one.
 #

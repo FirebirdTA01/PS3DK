@@ -397,7 +397,7 @@ readCamera ()
       printf
           ("GemPrepareCamera return %d exposure set to 500 and quality to 0.5 before cameraStart\n",
               ret);
-      printf ("lets go!! It's time to look your face in Sony Bravia :P\n");
+      printf ("lets go!! It's time to look your face in the TV :P\n");
       cameraStart (0);
       break;
     case 0:
@@ -472,7 +472,7 @@ calibrateGem (int numgem)
   int error = 0;
   u32 hues[4];
 
-  hues[0] = 4 << 24;            // to leave Sony choose the best hue value when
+  hues[0] = 4 << 24;            // to leave the system choose the best hue value when
   // it is calibrating internally
   hues[1] = 4 << 24;
   hues[2] = 4 << 24;
@@ -511,7 +511,7 @@ calibrateGem (int numgem)
         break;
       case 5:
         printf
-            ("status %d Second set a hue value to track or let Sony choose for you :P\n",
+            ("status %d Second set a hue value to track or let the system choose for you :P\n",
                 ret);
         ret1 = gemTrackHues (hues, NULL);
         printf ("GemTrackHues return %X\n", ret1);

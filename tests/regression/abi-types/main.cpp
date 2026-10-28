@@ -1,12 +1,12 @@
 /*
- * abi-types - the reference toolchain's fundamental type choices.
+ * abi-types - the established toolchain's fundamental type choices.
  *
- * Under the ILP32 data model the reference PPU toolchain has
+ * Under the ILP32 data model the system PPU toolchain has
  *   int32_t = int, uint32_t = unsigned int (and the least32 types),
  *   wchar_t = 16-bit unsigned short, wint_t = int.
  * Those choices are ABI: they fix C++ mangled names (a function taking
  * uint32_t is ...j) and the size of wchar_t, L"" literals and any struct
- * holding one.  The reference compiler under -mlp64 keeps the same 32-bit
+ * holding one.  The established compiler under -mlp64 keeps the same 32-bit
  * integer types, the 16-bit wchar_t and the int wint_t, and makes plain char
  * unsigned (signed under ILP32).  GCC 16 (gcc-16.x 0075/0076) matches that in
  * both data models; GCC 12.4 keeps its older LP64 32-bit wchar_t and an
@@ -49,12 +49,12 @@ static_assert(std::is_same<uint_least32_t, unsigned int>::value,
               "uint_least32_t must be unsigned int");
 
 #if __GNUC__ >= 16
-/* GCC 16: the reference types in both data models. */
+/* GCC 16: the system types in both data models. */
 static constexpr bool ref_wchar = true;
 static_assert(std::is_signed<char>::value == !lp64,
               "plain char is signed under ILP32 and unsigned under LP64");
 #else
-/* GCC 12.4: the reference types under ILP32 only, unsigned plain char. */
+/* GCC 12.4: the system types under ILP32 only, unsigned plain char. */
 static constexpr bool ref_wchar = !lp64;
 static_assert(!std::is_signed<char>::value, "GCC 12.4 plain char is unsigned");
 static_assert(!lp64 || sizeof(wchar_t) == 4, "GCC 12.4 LP64 keeps a 32-bit wchar_t");
@@ -106,7 +106,7 @@ int main()
              (uint32_t)4000000000u, (int32_t)-5, (uint32_t)12);
     ok &= check(strcmp(buf, "4000000000/-5/12") == 0, "printf of 32-bit types");
 
-    /* Wide characters: unsigned, full 16-bit range wherever wchar_t is the reference one. */
+    /* Wide characters: unsigned, full 16-bit range wherever wchar_t is the system one. */
     wchar_t top = (wchar_t)0xFFFF;
     ok &= check(!ref_wchar || (unsigned long)top == 0xFFFFul, "wchar_t 0xFFFF unsigned");
     wchar_t wrap = (wchar_t)0x10000;

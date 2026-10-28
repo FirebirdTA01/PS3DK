@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The PPU compiler treats vector, pixel and bool as context-sensitive AltiVec
-# keywords under a STRICT -std= too, as the reference compiler does (measured
-# on ppu-lv2-gcc 475: `#define vector vector` with __STRICT_ANSI__ for -ansi,
+# keywords under a STRICT -std= too, as the established compiler does (measured
+# on the established PPU compiler: `#define vector vector` with __STRICT_ANSI__ for -ansi,
 # -std=c99 and -std=c++98).  Upstream GCC drops them when flag_iso is set, so
-# the reference samples' shared libraries (gcmutil, fw), compiled with
+# the existing samples' shared libraries (gcmutil, fw), compiled with
 # -std=c++98, failed in simdmath.h with "'vector' does not name a type".
 #
 # Rows: the keyword macros in every strict and GNU mode, a vector-typed
@@ -94,7 +94,7 @@ EOF
     && ok "strict C++17 keeps std::vector and bool beside AltiVec vectors" \
     || fail "strict C++17 std::vector/bool: $(head -2 "$work/s.log")"
 
-# 4. the SDK vector headers in strict C++ (the reference samples' mode).
+# 4. the SDK vector headers in strict C++ (the existing samples' mode).
 printf '#include <simdmath/simdmath.h>\n#include <vectormath/cpp/vectormath_aos.h>\nVectormath::Aos::Vector3 up() { return Vectormath::Aos::Vector3::yAxis(); }\n' > "$work/sdk.cpp"
 for std in c++98 c++17; do
     "$cxx" "${B[@]}" -std=$std -I"$inc" -c "$work/sdk.cpp" -o "$work/sdk.o" 2>"$work/sdk.log" \

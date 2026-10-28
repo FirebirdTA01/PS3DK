@@ -27,7 +27,7 @@ big-endian ELF64/PPC64 environment with:
   stack, while LP64 uses a bare `bctr` tail-call shape with caller-side
   TOC restore (see ABI spec §5.1);
 - NID/FNID-driven import metadata and stub archives, with PSL1GHT-style
-  aliases folded into the canonical Sony nidgen output.
+  aliases folded into the canonical Cell OS nidgen output.
 
 ---
 
@@ -178,7 +178,7 @@ Responsibilities:
 - distinguish native 64-bit public pointers from explicit 32-bit EA fields;
 - provide `lv2_ea32_t` and conversion helpers;
 - provide `lv2_fn_to_callback_ea`, now a bare cast for native compact `.opd`;
-- bridge some PSL1GHT-style APIs to reference SDK-style/NID-backed APIs while the SDK
+- bridge some PSL1GHT-style APIs to platform ABI-style/NID-backed APIs while the SDK
   surface is being filled out.
 
 Important distinction:

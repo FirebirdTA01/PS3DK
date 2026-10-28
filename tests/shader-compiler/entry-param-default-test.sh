@@ -2,14 +2,14 @@
 # A default value on an ENTRY PARAMETER: where it is legal, where it is not,
 # and what it records (uniform-default-records A1).
 #
-# The reference's rule, measured, and it has a named diagnostic for it:
+# The established compiler's rule, measured, and it has a named diagnostic for it:
 #   error C1114: only uniform parameters to the entry function can have
 #   default values: "<name>"
 # So legal on a UNIFORM parameter of the SELECTED entry, legal on any
 # parameter of a helper, illegal everywhere else.
 #
 # THREE THINGS THIS ASSERTS, and the third is the one a name heuristic fails:
-#  1. the four accepted spellings record the reference's exact values, in the
+#  1. the four accepted spellings record the established compiler's exact values, in the
 #     parameter table AND in the ucode's inline constant - independent places,
 #     and getting only the first right renders wrong while reflection reads
 #     correctly;
@@ -73,7 +73,7 @@ for i in range(n):
         inline = [round(struct.unpack(">f", struct.pack(">I", x))[0], 6) for x in w]
     rec[cstr(u32(o + 16))] = {"def": doff, "vals": vals, "inline": inline}
 
-# Measured on the reference for these exact spellings.
+# Measured on the established compiler for these exact spellings.
 want = {"light": [1.0, 2.0, 3.0, 4.0],     # braced
         "Ka":    [0.6, 0.6, 0.6, 0.0],     # SCALAR broadcast into a float3
         "l":     [1.0, 2.0, 3.0, 0.0],     # constructor
@@ -118,7 +118,7 @@ expect_refusal nonuniform "only uniform parameters to the entry function" \
     "a default on a non-uniform ENTRY parameter (permanent, C1114)"
 
 # A DEFAULT ON A HELPER PARAMETER.  This row pinned the INTERIM REFUSAL until
-# function-visibility commit 2; the reference always accepted it, so the row becomes the
+# function-visibility commit 2; the established compiler always accepted it, so the row becomes the
 # accept and its byte twin rather than a deleted line - a removed row is a rule
 # nobody checks, and the twin is what says the default was SUBSTITUTED and not
 # dropped.
@@ -136,7 +136,7 @@ run sce_fp_rsx "$shaders/fp_entry_swap_default_f.cg" swapalpha alpha > "$work/sw
 expect_refusal swapalpha "only uniform parameters to the entry function" \
     "-e alpha: alpha is the ENTRY, so C1114 applies"
 
-# -e beta: A NAMED GAP, and NOT a defaults gap.  The reference accepts this
+# -e beta: A NAMED GAP, and NOT a defaults gap.  The established compiler accepts this
 # program (43 lines).  We refuse it in the BACKEND - "no instructions emitted"
 # - and the refusal has nothing to do with the default: the same source with
 # `float2 bias` and no default at all is refused identically, on this build AND
@@ -150,7 +150,7 @@ expect_refusal swapalpha "only uniform parameters to the entry function" \
 # accept row and the pair means what it used to again.
 run sce_fp_rsx "$shaders/fp_entry_swap_default_f.cg" swapbeta beta > "$work/swapbeta.rc"
 expect_refusal swapbeta "no instructions emitted" \
-    "-e beta: reference ACCEPTS; we stop in the backend (helper-vector-parameter-lowering, pre-existing)"
+    "-e beta: the established compiler ACCEPTS; we stop in the backend (helper-vector-parameter-lowering, pre-existing)"
 # If those two ever produce the SAME diagnostic, the two entries have stopped
 # taking different paths.
 if cmp -s <(grep -o "error: [a-z ]*" "$work/swapalpha.log" | head -1) \
@@ -233,7 +233,7 @@ if errs:
 print("  vertex entry defaults and matrix entry rows: table and ucode both correct")
 PY
 
-# ---- 5. THE SHAPE TABLE.  Ten one-line spellings, measured on the reference,
+# ---- 5. THE SHAPE TABLE.  Ten one-line spellings, measured on the established compiler,
 # kept together IN THIS FILE rather than as ten repo fixtures: the contract is
 # only legible as a table, and a reader has to see which forms broadcast
 # beside which forms refuse.  A1's first version got four of these wrong
@@ -247,10 +247,10 @@ EOF
     rc=$(run sce_fp_rsx "$work/$tag.cg" "$tag")
     if [[ "$expect" == accept && "$rc" -ne 0 ]]; then
         tail -n 3 "$work/$tag.log" >&2
-        fail "shape '$decl': the reference ACCEPTS this; we exited $rc"
+        fail "shape '$decl': the established compiler ACCEPTS this; we exited $rc"
     fi
     if [[ "$expect" == refuse && "$rc" -ne 1 ]]; then
-        fail "shape '$decl': the reference REFUSES this; we exited $rc"
+        fail "shape '$decl': the established compiler REFUSES this; we exited $rc"
     fi
 }
 shape_case "float4 u = float4(2)"        "u*uv.x"             accept s1
@@ -263,11 +263,11 @@ shape_case "float3 u = {1,2}"            "float4(u,1)*uv.x"   refuse s7
 shape_case "float4 u = {1,2,3,4,5}"      "u*uv.x"             refuse s8
 shape_case "float4 u = float2(1)"        "u*uv.x"             refuse s9
 shape_case "float4 u = float2(1,2,3,4)"  "u*uv.x"             refuse s10
-# An ARRAY default: the reference ACCEPTS it and records a block per element;
+# An ARRAY default: the established compiler ACCEPTS it and records a block per element;
 # we refuse by name until array-default-records measures the element rules.  The row is
 # here so the interim refusal cannot quietly become accept-and-drop - the
 # failure mode this whole slice kept producing.  When that card lands, this
 # expectation flips to accept WITH the per-element blocks checked.
 shape_case "float4 a[2] = { float4(1,2,3,4), float4(5,6,7,8) }"            "a[0]*uv.x + a[1]*uv.y"                             refuse s11
 
-echo "PASS: entry-param-default: four spellings in table and ucode; vertex ""entry defaults and matrix entry rows correct on both surfaces; ten measured ""shapes agree with the reference; non-uniform entry default refused ""(permanent); helper default equals its explicit twin; entry swap gives ""different classes from one source"
+echo "PASS: entry-param-default: four spellings in table and ucode; vertex ""entry defaults and matrix entry rows correct on both surfaces; ten measured ""shapes agree with the established compiler; non-uniform entry default refused ""(permanent); helper default equals its explicit twin; entry swap gives ""different classes from one source"

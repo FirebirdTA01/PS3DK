@@ -1,5 +1,5 @@
 /*! \file sys/time_util.h
- \brief Sony-SDK-source-compat time-base read macro.
+ \brief Cell OS source-compat time-base read macro.
 
   Reads the PowerPC TimeBase register pair into a 64-bit value with the
   rollover-tolerant loop documented in the PowerPC ISA: read TBU, TBL, TBU

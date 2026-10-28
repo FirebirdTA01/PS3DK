@@ -1,4 +1,4 @@
-"""Typedef uses must equal direct types (oracle-measured, including refusal parity).
+"""Typedef uses must equal direct types (measured, including refusal parity).
 Authored fixtures only. Whole-container twins protect bindings as well as ucode;
 a dyadic value grid and uniform patching independently judge accepted programs.
 """
@@ -104,7 +104,7 @@ def judge(name,blob,profile="sce_fp_rsx"):
             assert got==expected(name,x,u),(name,x,got,expected(name,x,u))
 
 def declarator_controls(compiler, work, profile):
-    """An alias named in an initializer participates in the reference quirk.
+    """An alias named in an initializer participates in the established compiler quirk.
 
     Default mode refuses the later float2 declarator; the opt-in extension
     equals separate declarations. These are distinct, measured contracts.
@@ -154,7 +154,7 @@ def main():
                     src=work/(profile+'-'+name+'-'+kind+'.cg');dst=src.with_suffix('.bin');src.write_text(source)
                     run=subprocess.run([args.compiler,'-p',profile,'--emit-container',str(dst),str(src)],capture_output=True,text=True,timeout=20)
                     # Local typedefs are a separate, pre-existing gap. The
-                    # reference accepts local declarations and shadowing;
+                    # established compiler accepts local declarations and shadowing;
                     # neither may enter the file-scope alias map here.
                     if name in ('local_td','local_shadow') and kind=='alias':
                         if run.returncode!=1 or dst.exists() or 'block-scope typedef' not in run.stderr:

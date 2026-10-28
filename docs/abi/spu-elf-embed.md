@@ -69,7 +69,7 @@ non-ASCII-alphanumeric, non-underscore byte with `_`.
 
 This encoder uses the caller-provided `--symbol-base` for the
 `_binary_<name>_elf_*` symbols and does not emit a `STT_FILE` symbol.  The
-reference helper's `STT_FILE` symbol is build metadata only and is not part of
+established helper's `STT_FILE` symbol is build metadata only and is not part of
 the runtime contract.
 
 ## Version Sections
@@ -87,6 +87,6 @@ objcopy-style symbols.
 
 This specification does not cover custom symbol names, writable sections,
 section-alignment overrides, explicit strip-mode selection, or version-section
-emission.  Those options are not used by the current Makefile-based reference
+emission.  Those options are not used by the current Makefile-based existing
 sample set and should be specified only when a concrete consumer requires
 them.

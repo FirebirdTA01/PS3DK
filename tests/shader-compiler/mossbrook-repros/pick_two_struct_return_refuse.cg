@@ -7,11 +7,11 @@
 // mirror[] into `q` on top of the other's is a silent wrong value; the
 // correct behavior is to refuse the member-array-storage copy.
 //
-// The reference (sce-cgc 475) accepts this shape; our compiler refuses it
+// The established compiler accepts this shape; our compiler refuses it
 // by name on the tracked-source guard (array-bearing struct copy requires
 // a tracked source (member-array-storage)).
 //
-// With t = (0.75, 0.25, -0.5, 0.125) the reference would give
+// With t = (0.75, 0.25, -0.5, 0.125) the established compiler would give
 // 0.75, 0.25, 0.75, 0.25 (c=t.x>0.5 is true, so p).
 struct Plan { float2 mirror[2]; };
 Plan pick_two(float2 a, float2 b, bool c)

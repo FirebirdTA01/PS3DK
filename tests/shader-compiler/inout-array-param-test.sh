@@ -49,7 +49,7 @@ VALUE = [
      lambda t: [f32(f32(t[0] + t[1]) + t[1]), f32(f32(t[1] + t[2]) + t[2]), f32(f32(t[2] + t[3]) + t[3]), 1.0]),
     # A helper writing its own IN array parameter writes its copy: the
     # caller's array is unchanged and a second call sees the caller's
-    # values again (measured on the reference: h(a) twice = 12, 12).
+    # values again (measured on the established compiler: h(a) twice = 12, 12).
     ('in_array_param_written',
      'float h(float v[3]) { v[0] = 10.0; return v[0] + v[1]; }' + NL +
      M + 'float a[3] = { 1.0, 2.0, 3.0 }; float x = h(a); float y = h(a); return float4(x, y, a[0], t.x); }',

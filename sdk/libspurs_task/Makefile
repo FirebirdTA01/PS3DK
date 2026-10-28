@@ -29,7 +29,7 @@ SFLAGS  := -Wall
 # -fno-schedule-insns2 disables GCC's post-RA instruction scheduler.
 # SPU GCC's scheduler over-pads around indirect calls (`bisl`) — for a
 # 6-instruction body containing a single indirect call it inserts ~32
-# NOPs around the call site, bloating bodies 4-5x.  The reference SDK
+# NOPs around the call site, bloating bodies 4-5x.  The platform ABI
 # was built with the same flag (compare emitted sizes vs the
 # disassembled libspurs.a object files) — keeping it ensures we match
 # their function sizes byte-for-byte where the rest of the code lines

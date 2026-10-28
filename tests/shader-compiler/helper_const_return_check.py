@@ -3,7 +3,7 @@
 libretro's gamma-management.h `decode_input` returns from inside
 `if (linearize_input) { if (assume_opaque_alpha) ...; else ...; } else ...`
 over `static const bool`s, and 121 community shaders that include it were
-refused ("a return inside control flow").  The reference accepts every row
+refused ("a return inside control flow").  The established compiler accepts every row
 below.  An if whose condition folds to a constant now inlines only its taken
 branch, so each of the four constant combinations is judged by value.
 
@@ -66,7 +66,7 @@ float4 main(float4 p : POSITION) : POSITION { return f(p); }
 }
 # A return under a RUN-TIME condition runs each arm with the rest of the body
 # and joins the results with Select.  Expected values are the Cg expression;
-# the reference agrees where its program is evaluable here (the first three
+# the established compiler agrees where its program is evaluable here (the first three
 # rows, measured on every grid input); the others are predicated programs the
 # evaluator does not model.
 RUNTIME = {
@@ -121,7 +121,7 @@ float4 main(float4 t : TEXCOORD0) : COLOR { return scale(t); }
 """
 # Conditions fold by TYPED value (review: codex - 1 == 2 once folded true
 # as "both truthy").  COND picks the helper's first return (c * 2) when true,
-# else the second (c * 3); every expected arm was measured on the reference.
+# else the second (c * 3); every expected arm was measured on the established compiler.
 PICK = """static const int K = 3;
 static const int L = 4;
 static const float F = 0.5;
@@ -136,8 +136,8 @@ PICK_ROWS = [('1 == 2', False), ('1 != 2', True), ('2 == 2', True), ('K == L', F
              ('K != L', True), ('!(K != L)', False), ('K < L', True), ('(K < L) == false', False),
              ('F == 0.5', True), ('F > 0.75 || K == 3', True), ('K == 3 && L == 3', False),
              ('K * 2 == 6', True), ('-K == 3', False)]
-# Precision edges (review: codex), measured on the reference.  These fold
-# and must pick the reference's arm:
+# Precision edges (review: codex), measured on the established compiler.  These fold
+# and must pick the established compiler's arm:
 PREC = """static const float F = 0.1;
 static const float G = 16777217.0;
 static const half H = 0.1;
@@ -151,13 +151,13 @@ float4 main(float4 t : TEXCOORD0) : COLOR {{ return pick(t); }}
 PREC_ROWS = [('F == 0.1', True), ('F == float(0.1)', True), ('F != 0.1', False),
              ('G == 16777216.0', True), ('G == 16777217.0', True), ('F * 10.0 == 1.0', True),
              ('F + 0.2 == 0.3', True)]
-# ...and these are not folded (refused by name): the reference keeps an int
+# ...and these are not folded (refused by name): the established compiler keeps an int
 # against a float unrounded (G == 16777217 is FALSE there) and compares a
 # half constant above half precision (H == 0.1 is TRUE there).
 PREC_REFUSED = ['G == 16777217', 'H == 0.1', 'H != 0.25']
 # A static const that ALIASES one of those shapes through its initialiser is
 # refused too (review: codex), as is an int initialiser in a float const,
-# which the reference keeps unrounded (Z == 16777217.0 is FALSE there).
+# which the established compiler keeps unrounded (Z == 16777217.0 is FALSE there).
 ALIAS = """static const float G = 16777217.0;
 static const half H = 0.1;
 {decl}

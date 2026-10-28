@@ -1,7 +1,7 @@
-//! coverage-report — reference the reference SDK vs our install tree API coverage.
+//! coverage-report — platform ABI vs our install tree API coverage.
 //!
 //! Takes (a) the NID database under `tools/nidgen/nids/extracted/`, which is
-//! the ground truth of what symbols the reference stub archives export per
+//! the ground truth of what symbols the system stub archives export per
 //! library; and (b) our install tree (`stage/ps3dev/{ppu,psl1ght}/lib/*.a`,
 //! optionally `stage/ps3dev/ppu/powerpc64-ps3-elf/lib/*.a`).  Emits a
 //! Markdown report comparing the two.
@@ -29,7 +29,7 @@ use walkdir::WalkDir;
 #[command(
     name = "coverage-report",
     version = ps3dk_version::VERSION,
-    about = "Reference the reference SDK vs our install tree coverage matrix"
+    about = "Platform ABI vs our install tree coverage matrix"
 )]
 struct Cli {
     /// Directory of extracted reference NID YAMLs (tools/nidgen/nids/extracted/).
@@ -48,7 +48,7 @@ struct Cli {
     #[arg(long, default_value = "500")]
     list_missing: usize,
 
-    /// Optional alias map YAML (PSL1GHT-rename → the reference SDK-name).  If the file
+    /// Optional alias map YAML (PSL1GHT-rename → the platform ABI-name).  If the file
     /// is absent the tool runs without aliases.
     #[arg(long, default_value = "tools/nidgen/nids/aliases.yaml")]
     alias_map: PathBuf,
@@ -60,12 +60,12 @@ struct Cli {
     suggest_aliases: Option<PathBuf>,
 }
 
-/// YAML form of the alias map.  One entry per reference-the reference SDK symbol
+/// YAML form of the alias map.  One entry per reference-the platform ABI symbol
 /// that a PSL1GHT-style rename resolves for.  A single canonical name may
 /// have multiple aliases.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct AliasMap {
-    /// Canonical the reference SDK name → list of names that satisfy its coverage.
+    /// Canonical the platform ABI name → list of names that satisfy its coverage.
     #[serde(default)]
     aliases: BTreeMap<String, Vec<String>>,
 }
@@ -135,7 +135,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Generate algorithmic PSL1GHT-style rename candidates for every the reference SDK
+/// Generate algorithmic PSL1GHT-style rename candidates for every the platform ABI
 /// symbol and check them against the install tree.  Rules applied:
 ///
 ///   R1. `_sys_<snake>` → `sys<CamelSnake>`   (drop leading `_`, `_x` → `X`)
@@ -215,7 +215,7 @@ fn snake_to_upper_camel(snake: &str) -> String {
     out
 }
 
-/// A single the reference SDK library loaded from an extracted YAML.
+/// A single the platform ABI library loaded from an extracted YAML.
 struct CellSdkLibrary {
     name: String,                          // e.g. "audio"
     archive_filename: String,              // e.g. "libaudio_stub"
@@ -429,7 +429,7 @@ fn render_report(
     writeln!(out).ok();
     writeln!(
         out,
-        "Reference the reference SDK symbols vs our install tree.  Primary diff is by \
+        "Platform ABI symbols vs our install tree.  Primary diff is by \
          exact symbol name, backed by `tools/nidgen/nids/aliases.yaml` for \
          PSL1GHT-style renames (`sys_lwmutex_lock` → `sysLwMutexLock`, \
          `cellMsgDialogOpen` → `msgDialogOpen`, ...).  Alias entries are \
@@ -446,7 +446,7 @@ fn render_report(
 
     writeln!(out, "## Summary").ok();
     writeln!(out, "- Libraries tracked: **{}**", cell_sdk_libs.len()).ok();
-    writeln!(out, "- reference SDK exports total: **{cell_sdk_total}**").ok();
+    writeln!(out, "- platform ABI exports total: **{cell_sdk_total}**").ok();
     writeln!(
         out,
         "- Covered by our install tree: **{covered_total}** ({pct:.1}%) — \
@@ -470,7 +470,7 @@ fn render_report(
     // Per-library matrix.
     writeln!(out, "## Per-library coverage").ok();
     writeln!(out).ok();
-    writeln!(out, "| Library | reference SDK exports | Exact | Alias | Total | % |").ok();
+    writeln!(out, "| Library | platform ABI exports | Exact | Alias | Total | % |").ok();
     writeln!(out, "|---|---:|---:|---:|---:|---:|").ok();
     for lib in cell_sdk_libs {
         let exact = lib.exports.keys().filter(|n| our.contains_key(n.as_str())).count();

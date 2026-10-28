@@ -1,6 +1,6 @@
 // shader-differential - fixture for a FILE-SCOPE CONST (file-scope-const-initializer).
 //
-// The reference compiler folds the constant's value inline AND adds a
+// The established compiler folds the constant's value inline AND adds a
 // parameter entry named K listing the code offsets where the value sits;
 // ours folds it without the parameter.  The director retired the plan for
 // a flag over "promote vs fold" (2026-09-01 22:24): the instructions are the
@@ -8,7 +8,7 @@
 // there is nothing to compare at draw time.  What this fixture guards is
 // the FOLD ITSELF: the release dropped the initialiser and compiled K as
 // zero on both paths (file-scope-const-initializer, fixed in 0981daa).  One row, set 0,
-// both paths: ours vs the reference, no uniform applied, identical since
+// both paths: ours vs the established compiler, no uniform applied, identical since
 // the fix.
 //
 // Channels are chosen so each mechanism is visible on its own channel:

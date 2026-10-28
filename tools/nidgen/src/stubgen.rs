@@ -1,8 +1,8 @@
-//! Emit PPU assembly that produces complete the reference SDK-compatible stub archives.
+//! Emit PPU assembly that produces complete the platform ABI-compatible stub archives.
 //!
 //! The PS3 PRX loader + sprxlinker + `lv2.ld` expect specific section names
-//! in the final linked ELF — not per-library scoped variants.  The reference
-//! the reference SDK stub archives ship one per-export `.o` whose sections add up to
+//! in the final linked ELF — not per-library scoped variants.  The system
+//! the platform ABI stub archives ship one per-export `.o` whose sections add up to
 //! a self-contained import surface; PSL1GHT's `sprx/common/libexport.c` +
 //! `exports.S` reproduce the same surface, split across two source files.
 //! This module reproduces all of it in a single emit:
@@ -31,7 +31,7 @@
 //! ```
 //!
 //! The emitted archive is therefore self-contained: no PSL1GHT SPRX support
-//! is required to link against it.  This is what makes stub-only the reference SDK
+//! is required to link against it.  This is what makes stub-only the platform ABI
 //! libraries (libsysutil_screenshot, libsysutil_ap, imejp, subdisplay,
 //! music\*) work without a hand-written wrapper.
 //!
@@ -204,7 +204,7 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
         //     and return.  This path is empirically validated and must
         //     stay byte-shape compatible with the existing hybrid ABI.
         //
-        //     LP64 uses the PPC64 ELFv1/reference-SDK tail-call form:
+        //     LP64 uses the PPC64 ELFv1/Cell OS tail-call form:
         //     save caller r2 at sp+40, load the 32-bit EA of the SPRX
         //     compact descriptor from the ABI-independent 4-byte fstub
         //     slot, and bctr into the resolved entry.  There is no
@@ -212,7 +212,7 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
         //     are ABI reserved (sp+16 LR, sp+24 compiler, sp+32 link
         //     editor, sp+40 TOC).  `sprxlinker --lp64` rewrites
         //     call-site post-bl nops to `ld r2,40(r1)`, matching the
-        //     reference caller-side TOC restore contract.
+        //     system caller-side TOC restore contract.
         writeln!(out, "\t.section \".sceStub.text\",\"ax\"").ok();
         writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.globl {}", tramp_sym).ok();
@@ -272,7 +272,7 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
         //     PSL1GHT-style names (sysLwMutexCreate, sysGetRandomNumber,
         //     ...) live here; remove from the YAML when PSL1GHT is
         //     retired and the alias OPD vanishes with no churn to the
-        //     canonical Sony name.
+        //     canonical Cell OS name.
         for alias in &e.aliases {
             writeln!(out, "\t.section \".opd\",\"aw\"").ok();
             writeln!(out, "\t.align 2").ok();
@@ -290,7 +290,7 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
     }
 
     // 6. Variable imports.  The loader resolves each variable NID to the
-    //    variable's address in the module and walks the reference list its
+    //    variable's address in the module and walks the system list its
     //    vstub entry points to: {type, address, addend} triples ending with
     //    type 0; type 1 stores the 32-bit address (+ addend) at `address`.
     //    Each variable gets one such reference, to a 4-byte slot
@@ -504,7 +504,7 @@ exports:
         let s = render_library(&sample(), AbiMode::Ilp32);
         // Header preamble.
         assert!(s.contains("Library: cellPad"));
-        // reference-SDK-compatible section names.
+        // Cell OS-compatible section names.
         assert!(
             s.contains(".data.sceFStub.cellPad"),
             "missing fstub section"

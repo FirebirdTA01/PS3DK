@@ -844,7 +844,7 @@ if(NOT _PS3_SPU_TOOLS_PROBED)
     set(_ps3_ref_spu_elf_to_ppu_obj "$ENV{PS3_SPU_ELF_TO_PPU_OBJ}")
     if(_ps3_ref_spu_elf_to_ppu_obj)
         set(PS3_TOOL_ref_spu_elf_to_ppu_obj "${_ps3_ref_spu_elf_to_ppu_obj}" CACHE FILEPATH
-            "Optional reference SDK spu_elf-to-ppu_obj.exe for JOBBIN_WRAP diff/debug")
+            "Optional external spu_elf-to-ppu_obj.exe for JOBBIN_WRAP diff/debug")
     endif()
     set(_ps3_jobbin2_use_reference_helper FALSE)
     if(PS3_TOOL_ref_spu_elf_to_ppu_obj)
@@ -855,7 +855,7 @@ if(NOT _PS3_SPU_TOOLS_PROBED)
     endif()
     set(_ps3_jobbin2_wine_path "$ENV{PS3_PPU_LV2_GCC_BIN_DIR}")
     set(PS3_TOOL_ppu_lv2_gcc_dir "${_ps3_jobbin2_wine_path}" CACHE PATH
-        "Directory containing reference ppu-lv2-gcc.exe for wine PATH")
+        "Directory containing the external helper's compiler driver for wine PATH")
     # Optional — only samples that embed SPU code need the SPU compiler.
 endif()
 
@@ -911,7 +911,7 @@ function(ps3_add_spu_image target)
     elseif(_PSI_JOBBIN)
         # A job chain job (JOBBIN) is linked where the job manager loads it
         # (spurs_job.ld, LS 0x4c00), so it is built position-dependent like
-        # the reference default: addresses held in its data are final.
+        # the system default: addresses held in its data are final.
         list(APPEND _spu_cflags -fno-exceptions)
         set(_spu_cxx_only_flags -fno-rtti)
     else()
@@ -1116,10 +1116,10 @@ function(ps3_add_spu_image target)
             message(FATAL_ERROR "ps3_add_spu_image: JOBBIN_WRAP needs spu-elf-to-ppu-obj (install it under ${PS3DEV}/bin, ${PS3DK}/bin, or put it on PATH)")
         endif()
         if(NOT CMAKE_HOST_WIN32 AND _ps3_jobbin2_use_reference_helper AND NOT PS3_TOOL_wine)
-            message(FATAL_ERROR "ps3_add_spu_image: reference-helper JOBBIN_WRAP requires wine on PATH")
+            message(FATAL_ERROR "ps3_add_spu_image: external-helper JOBBIN_WRAP requires wine on PATH")
         endif()
         if(NOT CMAKE_HOST_WIN32 AND _ps3_jobbin2_use_reference_helper AND NOT PS3_TOOL_ppu_lv2_gcc_dir)
-            message(FATAL_ERROR "ps3_add_spu_image: reference-helper JOBBIN_WRAP needs the reference ppu-lv2-gcc.exe dir on wine PATH (set PS3_PPU_LV2_GCC_BIN_DIR env)")
+            message(FATAL_ERROR "ps3_add_spu_image: external-helper JOBBIN_WRAP needs the external helper's compiler directory on wine PATH (set PS3_PPU_LV2_GCC_BIN_DIR env)")
         endif()
         find_program(PS3_PPU_OBJCOPY
             NAMES "${PS3_PPU_TARGET}-objcopy${_ps3_self_exe}"
@@ -1339,7 +1339,7 @@ endfunction()
 # cellGcmCgGetNamedParameter, cellGcmSetVertexProgram, ...).
 #
 # Why a separate function instead of a flag on the cgcomp variant:
-# rsx-cg-compiler emits CgBinaryProgram blobs (the reference compiler-compatible —
+# rsx-cg-compiler emits CgBinaryProgram blobs (the established compiler-compatible —
 # magic 0x00001b5b for VP, 0x00001b5c for FP).  cgcomp emits a
 # different layout starting with "VP\0\0".  The cellGcmCg* helpers in
 # libgcm_cmd.a walk the CgBinaryProgram layout directly; passing them

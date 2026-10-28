@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # <sdk_version.h> defines CELL_SDK_VERSION 0x475001 and is installed for SPU
-# as well as PPU, as the reference ships it (target/common/include, seen by
-# both processors).  Reference samples gate features on the macro and compare
+# as well as PPU, as the system ships it (target/common/include, seen by
+# both processors).  Existing samples gate features on the macro and compare
 # data files against it; SPU samples failed "sdk_version.h: No such file".
 #
 # A. (host, always) run the SDK's real install targets for the version and
@@ -11,7 +11,7 @@
 #    0x475001 through the SPU tree.
 # B. (installed, when PS3DEV is set) PPU (both ABIs) and SPU compilers see
 #    the macro through the installed tree, and libPSGL no longer defines
-#    psglRescAdjustAspectRatio (the reference's libPSGL does not either: at
+#    psglRescAdjustAspectRatio (the system's libPSGL does not either: at
 #    CELL_SDK_VERSION >= 0x180000 it is a header inline over
 #    cellRescAdjustAspectRatio).
 set -u

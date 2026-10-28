@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # preprocessor-defined-operator: THE `defined` OPERATOR, AND WHAT COUNTS AS DEFINED.
-# Measured against sce-cgc 475.
+# Measured against the established compiler.
 #
 # WHAT WENT WRONG.  evaluateExpression called expandMacros FIRST and applied
 # two `defined` regexes afterwards, so the operand they captured was the
@@ -19,19 +19,19 @@
 # WHERE THE OPERATOR IS RECOGNISED, and why it cannot be anywhere else.
 # Inside the expansion, before the hide-set test and before the macro lookup.
 #   - not BEFORE expansion: `#define D defined` then `#if D(X)` is TRUE on the
-#     reference, and the operator only exists once D has been replaced;
+#     established compiler, and the operator only exists once D has been replaced;
 #   - not AFTER expansion: the expander rescans replacements, so by then D(X)
 #     has already become defined(1) and the operand name is gone;
 #   - before the macro lookup: `#define defined 9` does not shadow it.
 #
 # WHAT IS NOT PROTECTED.  A macro ARGUMENT is pre-expanded like any other text
-# and the reference refuses what that produces - HAS(x)=defined(x) with
+# and the established compiler refuses what that produces - HAS(x)=defined(x) with
 # HAS(X), and ID(x)=x with ID(defined(X)), are both C0105.  A blanket "protect
 # every argument" would wrong-accept both and look like a fix.
 #
 # THE NEIGHBOUR THIS SLICE ALSO FIXES, and the rule that is NOT a name list.
 # #ifdef tested macros.find() alone, so `#ifdef __LINE__` was TRUE here and
-# FALSE on the reference.  Both spellings now share ONE predicate - but the
+# FALSE on the established compiler.  Both spellings now share ONE predicate - but the
 # predicate asks the BINDING, not the name:
 #     pristine __LINE__/__FILE__/__DATE__/__TIME__   not defined, still expand
 #     __CGC__ / __SCE_CGC__                          defined
@@ -45,8 +45,8 @@
 # lives on the binding (codex found the hole; ruling by Fable).
 #
 # ONE CELL IS DELIBERATELY NOT HERE.  `#if defined(X) ? 1 : 0` is C0105 on the
-# reference and accepted by us, because our ExprParser has a ternary and the
-# reference #if grammar does not.  That is a property of the grammar, not of
+# established compiler and accepted by us, because our ExprParser has a ternary and the
+# established compiler #if grammar does not.  That is a property of the grammar, not of
 # this operator; it is carded as preprocessor-conditional-grammar and this guard asserts nothing
 # about it.  Completing the refusal list by deleting one operator would be
 # this slice quietly becoming a grammar change.

@@ -2,7 +2,7 @@
 # A fragment input with the FOGFRAC semantic (the SDK fw_fog:
 # `float fogparam : FOGFRAC`) reads lane Y of the fog input register,
 # f[FOGC].y, and its parameter record carries CG_FOGCOORD (3156) like FOG
-# (measured on the reference).  It used to be left unbound ("operand could
+# (measured on the established compiler).  It used to be left unbound ("operand could
 # not be resolved").  Judged by value and by the record.
 #
 # Usage: tests/shader-compiler/fogfrac-input-test.sh <compiler>

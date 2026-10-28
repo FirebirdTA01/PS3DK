@@ -1,7 +1,7 @@
 // The most common fragment shader there is: one constant colour
 // (literal-vector-dedup-swizzle).
 //
-// Reference compiler:
+// Established compiler:
 //
 //     FENCBR;
 //     MOVR R0, {0x3f800000(1), 0, 0, 0}.x;

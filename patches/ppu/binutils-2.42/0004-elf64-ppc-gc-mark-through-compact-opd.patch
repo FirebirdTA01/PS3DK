@@ -28,7 +28,7 @@ near 2^64 cannot wrap past them; a descriptor offset with no whole
 unchanged.  Global descriptors were already followed
 through opd_entry_value.
 
-Technique observed in SCE's published GCC 4.1.1 toolchain sources.
+Technique observed in the published GCC 4.1.1 PS3 toolchain sources.
 
 --- a/bfd/elf64-ppc.c
 +++ b/bfd/elf64-ppc.c

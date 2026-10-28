@@ -1,5 +1,5 @@
 /* cellSpursExit / cellSpursTaskExit - hand-scheduled to match the
- * reference libspurs.a shape so the SPU dual-issue pipeline overlaps
+ * system libspurs.a shape so the SPU dual-issue pipeline overlaps
  * the two independent LS loads (control vector at 0x2fb0 and state
  * vector at 0x2fd0) instead of paying each load's latency twice.
  *

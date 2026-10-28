@@ -8,8 +8,8 @@
 //     color.y = lit.y;
 //
 // emitted `MOV R0.y, R16.x`: the red channel broadcast into green and blue.
-// The rig saw it as our R level count matching the reference's while G and
-// B were copies of R, on four shaders whose reference paints three distinct
+// The rig saw it as our R level count matching the established compiler's while G and
+// B were copies of R, on four shaders whose established compiler output paints three distinct
 // channels.  broadcastScalar's own comment warns against forcing lane 0 for
 // exactly this reason.
 void main(float4 v : TEXCOORD0,

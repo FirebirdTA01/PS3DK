@@ -1,6 +1,6 @@
 """Fragment inputs with no semantic, and uniform members of a varying struct.
 
-Measured on sce-cgc 475, and the two rules behind 41 community shaders that
+Measured on the established compiler, and the two rules behind 41 community shaders that
 were refused as "unsupported input semantic" (libretro's `in data vertex`
 with semantic-less members, and `struct prev { uniform float2 video_size;
 uniform sampler2D texture; float2 tex_coord; }` passed as a plain parameter):
@@ -15,7 +15,7 @@ uniform sampler2D texture; float2 tex_coord; }` passed as a plain parameter):
    the struct's other members stay varyings under rule 1.
 
 Records are compared as a SET (name, variability, resource, paramno,
-referenced): the reference lists a struct's members in struct order and we
+referenced): the established compiler lists a struct's members in struct order and we
 list them in first-use order, a separate ordering gap.  Values are judged by
 evaluating the program on distinct per-TEXCOORD inputs.
 """
@@ -34,10 +34,10 @@ from fp_sources import instructions, ucode_words
 # the fetch reads another unit): row -> the set of fetched units, measured.
 TEX_UNITS = {'explicit_unit_member': {0, 3}, 'register_member': {5},
              'unqualified_sampler_member': {0, 1}}
-# Not flattened yet: a sampler inside a NESTED struct member (the reference
+# Not flattened yet: a sampler inside a NESTED struct member (the established compiler
 # accepts it as P.I.tex on TEXUNIT0) must refuse rather than guess a unit.
 # A varying struct NESTED in a varying struct gets no member loads at all
-# (pre-existing; card t_8370d759).  The reference accepts these, so they must
+# (pre-existing; card t_8370d759).  The established compiler accepts these, so they must
 # at least refuse (exit 1, no container) until it is implemented.
 NESTED_REFUSE = {'nested_sampler_member': """struct inner { sampler2D tex; }; struct prev { float2 tc; inner I; };
 float4 main(float4 uv : TEXCOORD0, prev P) : COLOR { return tex2D(P.I.tex, uv.xy); }
@@ -70,7 +70,7 @@ float4 main(float2 uv : TEXCOORD0, in d v, float2 z) : COLOR { return float4(uv 
 """, {('uv', VAR, TC(0), 0, 1), ('v.a', VAR, TC(1), 1, 1), ('v.b', VAR, TC(2), 1, 1), ('z', VAR, TC(3), 2, 1)},
         [1.25, 0.375, -1, 2], {'v.a', 'v.b', 'z'}),
     # a sampler member is a uniform without the qualifier (scalefx's struct prev);
-    # the tuples are the reference's own container's, unread tex_coord included
+    # the tuples are the established compiler's own container's, unread tex_coord included
     'unqualified_sampler_member': ("""struct prev { float2 tex_coord; sampler2D texture; };
 float4 main(float4 uv : TEXCOORD0, uniform sampler2D decal : TEXUNIT0, prev P) : COLOR { return tex2D(P.texture, uv.xy) + tex2D(decal, uv.zw); }
 """, {('uv', VAR, TC(0), 0, 1), ('decal', UNI, TEXUNIT0, 1, 1), ('P.tex_coord', VAR, UNDEF, 2, 0),
@@ -95,19 +95,19 @@ float4 main(in d v, float z) : COLOR { return float4(v.a, v.b, z); }
 
 
 # The same semantic-less struct type for two inputs (or two nested members):
-# the reference binds each instance separately (a.uv TEX0, b.uv TEX1); here
+# the established compiler binds each instance separately (a.uv TEX0, b.uv TEX1); here
 # the inferred binding lives on the shared struct type, so it refuses by
 # name rather than binding both to TEX0 (review: codex).
 # t_3289f98f: an implicit TEXCOORD goes only to an input the program READS
 # (after dead code is gone); an unread one is UNDEFINED and takes no index,
 # and each struct instance is bound on its own.  Records and values are the
-# reference's own (sce-cgc 475 containers, judged with fp_eval on INPUTS).
-# Named gap: we write no record for an unread STRUCT MEMBER (the reference
+# established compiler's own (the established compiler containers, judged with fp_eval on INPUTS).
+# Named gap: we write no record for an unread STRUCT MEMBER (the established compiler
 # lists it varying/UNDEFINED/unreferenced), so those rows compare the
 # referenced records; a bare parameter's unread record is compared.
 READSET = {
     # Nested varying struct members are inputs of their own (they refused):
-    # bound by the same read-set rule, measured on the reference.
+    # bound by the same read-set rule, measured on the established compiler.
     'two_nested_same_struct': ('struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.p.uv, o.q.uv); }\n',
                                {('o.p.uv', VAR, TC(0), 0, 1), ('o.q.uv', VAR, TC(1), 0, 1)}, [0.5, 0.25, 0.75, 0.125]),
     'nested_unread': ('struct S { float2 uv; }; struct O { S p; S q; }; float4 main(O o) : COLOR { return float4(o.q.uv, 0, 1); }\n',
@@ -139,7 +139,7 @@ READSET = {
                       {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     # a select chain deeper than any fixed cap (65 links; review: codex - caps of
     # 64/16 left an intermediate select live and u bound): bounds are now the
-    # number of selects, measured u unread on the reference
+    # number of selects, measured u unread on the established compiler
     'chain65': ('float4 main(float2 u, float2 k) : COLOR { float2 v0 = k; ' +
                 ' '.join('float2 v%d = true ? v%d : u;' % (i, i - 1) for i in range(1, 66)) +
                 ' return float4(v65, 0, 1); }\n',
@@ -201,7 +201,7 @@ def main():
             sems = semantic_strings(blob)
             named = sorted(n for n in unnamed if sems.get(n))
             if named:
-                failures.append('%s: %s carry a semantic string; the reference writes none' % (name, named))
+                failures.append('%s: %s carry a semantic string; the established compiler writes none' % (name, named))
                 notes.append('SEMANTIC STRING')
             if value is not None and fp_eval.evaluate(blob, INPUTS) != value:
                 failures.append('%s value %s, want %s' % (name, fp_eval.evaluate(blob, INPUTS), value))

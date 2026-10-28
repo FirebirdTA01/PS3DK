@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # A literal vec4 store packs the DISTINCT values and selects with the source
-# swizzle, the way the reference compiler does (literal-vector-dedup-swizzle).
+# swizzle, the way the established compiler does (literal-vector-dedup-swizzle).
 #
-# THE RULE, derived from the oracle over the thirteen shapes below: the
+# THE RULE, derived from the established compiler over the thirteen shapes below: the
 # block holds the distinct values in FIRST-APPEARANCE
 # order, zero-filled, and swizzle[lane] is the index of that lane's value.
 # Equality is `==`, NOT the bit pattern, and the representative is whichever
@@ -83,7 +83,7 @@ compile() {
 }
 
 # THE SHAPES.  Every expected block and swizzle below was read off the
-# REFERENCE compiler's own container, not off ours: tag|expression|four
+# Established compiler's own container, not off ours: tag|expression|four
 # block words|swizzle.  The last two are the -0 pair and they are compared
 # as WORDS, because 0.0 == -0.0 and a float comparison cannot see them.
 SHAPES=(
@@ -115,7 +115,7 @@ done
 # be one - an earlier draft had an isfinite() guard and it protected
 # nothing (review: codex).
 #
-# NAMED DIVERGENCE, and the wording is deliberate: THE REFERENCE'S PACKING
+# NAMED DIVERGENCE, and the wording is deliberate: The established compiler'S PACKING
 # OF REPEATED NON-FINITE VALUES IS NOT CHARACTERISED.  Four arrangements
 # gave four different results, and every one paints values the source does
 # not contain (nonfinite-literal-dedup):
@@ -132,7 +132,7 @@ printf 'float4 main(float4 p : TEXCOORD0) : COLOR\n{\n    return float4(3.0e38 *
 compile "$work/repeated_inf.cg" repeated_inf
 
 # The two TRACKED fixtures this script has always used, kept so they stay
-# exercised by name: both are byte-identical to the reference on the
+# exercised by name: both are byte-identical to the established compiler on the
 # shipping path as of this slice.
 broadcast="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_literal_broadcast_f.cg"
 repeat="$repo_root/tools/rsx-cg-compiler/tests/shaders/fp_literal_repeat_f.cg"
@@ -190,7 +190,7 @@ SHAPES = [
     # The tracked fixtures, same rule.
     ("broadcast", "3f800000 00000000 00000000 00000000", "xxxx"),
     ("repeat", "3f800000 3f000000 00000000 00000000", "xyxy"),
-    # OURS, not the reference's - see the named divergence above.
+    # OURS, not the established compiler's - see the named divergence above.
     ("repeated_inf", "7f800000 3f800000 40000000 00000000", "xyxz"),
 ]
 
@@ -218,7 +218,7 @@ def block_and_swizzle(tag):
 
 
 def mismatch(tag, block, swz, want_block, want_swz):
-    """None when this is the reference's packing, a reason when it is not."""
+    """None when this is the established compiler's packing, a reason when it is not."""
     if block != want_block.split():
         return ("the const block is [%s]; the rule packs the DISTINCT values "
                 "in first-appearance order, zero-filled, which is [%s]"

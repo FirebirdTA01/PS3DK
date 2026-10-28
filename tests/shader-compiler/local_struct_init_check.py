@@ -1,7 +1,7 @@
-"""Authored local-struct initializer witnesses, measured on sce-cgc 475.
+"""Authored local-struct initializer witnesses, measured on the established compiler.
 
 Both profiles use the same sources, with POSITION replacing COLOR on VP.
-The reference accepts all cases except the five malformed field lists below.
+The established compiler accepts all cases except the five malformed field lists below.
 Unsupported aggregate contexts remain strict named debts, never value passes.
 """
 import argparse
@@ -19,7 +19,7 @@ from vp_pow_vector_check import evaluate as evaluate_vp
 
 CASES = json.loads(Path(__file__).with_name('local_struct_init_cases.json').read_text())
 REFUSED = {'few', 'many', 'wrong_struct', 'numeric_splat', 'numeric_narrow',
-           'uint_field'}  # The reference rejects the bare uint spelling (C0000).
+           'uint_field'}  # The established compiler rejects the bare uint spelling (C0000).
 DEBTS = {'array_braces', 'array_member', 'sampler_field',
          'constructor_as_argument', 'constructor_member',
          'global_const_nested', 'uniform_default_nested',
@@ -42,7 +42,7 @@ def expected(name, t, u):
     if name in ('implicit_member', 'typedef_field', 'typedef_struct'):
         return [t[0], t[1], 0., 1.]
     # fixed members convert as a fixed declaration does; these inputs are
-    # exact in fixed, and the reference's containers give these values.
+    # exact in fixed, and the established compiler's containers give these values.
     if name == 'fixed_field':
         return [t[0], 0., 0., 1.]
     if name == 'fixed_source':
@@ -71,7 +71,7 @@ def judge(name, blob, profile):
             # Distinct unused input catches incorrect read-set allocation.
             inputs = {'TEX0': list(t), 'TEX1': [8., 4., 2., 1.]}
             # A struct input with no semantics binds implicitly: v.uv takes
-            # the lowest unclaimed attribute, ATTR0, as in the reference.
+            # the lowest unclaimed attribute, ATTR0, as in the established compiler.
             vp_inputs = ({0: list(t), 9: inputs['TEX1']} if name == 'implicit_member'
                          else {8: list(t), 9: inputs['TEX1']})
             got = (evaluate_vp(patched, {'u.uv': u}, vp_inputs, binary32=True).get(0)
@@ -132,7 +132,7 @@ def main():
     for failure in failures:
         print('FAIL:', failure)
     for debt in debts:
-        print('KNOWN-DEBT:', debt, '(reference accepts; not value-judged)')
+        print('KNOWN-DEBT:', debt, '(the established compiler accepts; not value-judged)')
     print('local-struct-init:', 'FAIL' if failures else 'PASS',
           'failures=', len(failures), 'values=', values, 'debts=', len(debts))
     temporary.cleanup()

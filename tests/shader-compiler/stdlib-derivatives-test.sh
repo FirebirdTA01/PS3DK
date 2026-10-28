@@ -4,7 +4,7 @@
 # The shipping path must accept scalar and float2 fragment ddx/ddy and emit
 # NV40's native DDX/DDY opcodes.  The hardware writes only X/Y, so widths 3/4
 # are two derivatives, the high lanes first through a temp (measured on the
-# reference; wide_derivative_check.py checks the shape lane by lane).  Vertex
+# established compiler; wide_derivative_check.py checks the shape lane by lane).  Vertex
 # derivatives are a profile error.
 set -euo pipefail
 

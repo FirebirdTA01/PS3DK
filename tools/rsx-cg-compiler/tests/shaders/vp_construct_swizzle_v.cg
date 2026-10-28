@@ -9,10 +9,10 @@
 //
 // A position with two lanes never written does not rasterise, so the
 // draw paints nothing at all - which is how the rig found it: our side
-// of the pair was blank while the reference's covered the quad.
+// of the pair was blank while the established compiler's covered the quad.
 //
 // Reduced from rsxgl's draw.vcg, which is in the corpus and is
-// byte-identical to the reference once the constructor counts
+// byte-identical to the established compiler once the constructor counts
 // components.
 void main(float4 in_position  : POSITION,
           float2 in_texcoord  : TEXCOORD0,

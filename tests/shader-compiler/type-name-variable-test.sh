@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A built-in type spelling used as a VARIABLE name (PSGL's vpFixedPipeline:
 # `float3 half = float3(0,0,0); ... dot(normal, half)`).  Measured on the
-# reference: every built-in type name except the reserved words float, int
+# established compiler: every built-in type name except the reserved words float, int
 # and bool may name a variable (half, fixed, the floatN / halfN / fixedN /
 # intN / boolN vectors and matrices, the samplers), and from its declaration
 # to the end of its scope (a for initialiser's: the whole for statement) the

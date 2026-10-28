@@ -8,7 +8,7 @@ operator new[] under -std=gnu++98, which has no over-aligned new) writes to
 adjacent malloc chunk header and corrupting the heap (manifests as a crash
 in a later free()).  Honor __BIGGEST_ALIGNMENT__ when it exceeds the
 historical default so plain malloc satisfies vector types in every language
-mode.  Matches the reference libc's 16-byte allocations.
+mode.  Matches the system libc's 16-byte allocations.
 
 --- a/newlib/libc/stdlib/_mallocr.c
 +++ b/newlib/libc/stdlib/_mallocr.c

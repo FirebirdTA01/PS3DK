@@ -1,6 +1,6 @@
 /* cell/spurs/error.h - SPURS error-code constants.
  *
- * Numeric values match the reference SPRX.  Grouped by minor facility:
+ * Numeric values match the system SPRX.  Grouped by minor facility:
  * core (0x80410700+), policy module (0x80410800+), task (0x80410900+),
  * job (0x80410A00+).
  */

@@ -1,11 +1,11 @@
 /*! \file sys/spu_utility.h
  \brief LV2 SPU loader / ELF-image inspector helpers.
 
-  the reference SDK source-compat surface for the small handful of sys_spu_*
+  the platform ABI source-compat surface for the small handful of sys_spu_*
   helpers that probe an SPU ELF image (entry point + segment list) and
   load programs into either a thread or a raw SPU.  The underlying LV2
   syscalls are reachable via PSL1GHT's <lv2/spu.h> wrappers — this
-  header re-spells them under the reference SDK names so the reference SDK
+  header re-spells them under the platform ABI names so the platform ABI
   source builds without per-file aliases.
 */
 

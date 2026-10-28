@@ -1,8 +1,8 @@
 /* sys/spu_thread_group.h - SPU thread-group type + constants.
  *
  * PSL1GHT has sys_spu_thread_group_* syscalls in <sys/spu.h> but
- * doesn't expose the GROUP_TYPE constants; reference SDK samples
- * expect them in this header.  Values match the reference-SDK
+ * doesn't expose the GROUP_TYPE constants; platform ABI samples
+ * expect them in this header.  Values match the Cell OS
  * sys/spu_thread_group.h.
  */
 #ifndef __PS3DK_SYS_SPU_THREAD_GROUP_H__
@@ -68,18 +68,18 @@ typedef uint32_t sys_event_type_t;
 typedef uint32_t sys_memory_container_t;
 #endif
 
-/* Reference-SDK snake_case typedef aliases.  PSL1GHT spells the
+/* Cell OS snake_case typedef aliases.  PSL1GHT spells the
  * group handle `sys_spu_group_t` and the attribute
- * structs in camelCase; reference samples use _t-suffixed snake_case
+ * structs in camelCase; existing samples use _t-suffixed snake_case
  * throughout.  These typedef aliases are layout-identical to the PSL1GHT
  * spellings.  (Note: the canonical thread argument type sys_spu_thread_argument_t
- * is defined below with Sony-standard arg1..arg4 member naming, distinct from
+ * is defined below with Cell OS standard arg1..arg4 member naming, distinct from
  * PSL1GHT's sysSpuThreadArgument arg0..arg3). */
 typedef sys_spu_group_t            sys_spu_thread_group_t;
 typedef sysSpuThreadAttribute      sys_spu_thread_attribute_t;
 typedef sysSpuThreadGroupAttribute sys_spu_thread_group_attribute_t;
 
-/* Canonical reference-SDK sys_spu_thread_argument_t (arg1..arg4).
+/* Canonical Cell OS sys_spu_thread_argument_t (arg1..arg4).
  * Distinct from legacy PSL1GHT sysSpuThreadArgument (arg0..arg3). */
 #ifndef _SYS_SPU_THREAD_ARGUMENT_T_DEFINED
 #define _SYS_SPU_THREAD_ARGUMENT_T_DEFINED
@@ -91,7 +91,7 @@ typedef struct sys_spu_thread_argument {
 } sys_spu_thread_argument_t;
 #endif
 
-/* SPU thread option constants (reference-SDK names). */
+/* SPU thread option constants (Cell OS names). */
 #ifndef SYS_SPU_THREAD_OPTION_NONE
 #define SYS_SPU_THREAD_OPTION_NONE              0x0u
 #endif
@@ -103,15 +103,15 @@ typedef struct sys_spu_thread_argument {
 #endif
 
 /* ------------------------------------------------------------------ *
- * Reference-SDK initialize macros.
+ * Cell OS initialize macros.
  *
  * PSL1GHT ships the same set under sysSpuThread{Attribute,Argument,
- * GroupAttribute}{Initialize,Name}.  Reference samples expect the
+ * GroupAttribute}{Initialize,Name}.  Existing samples expect the
  * snake_case spelling.  The macros poke struct fields directly, so
  * the PSL1GHT field-name layout is what we follow:
  *
  *   sysSpuThreadArgument fields are arg0..arg3 (PSL1GHT) — the
- *   reference SDK names them arg1..arg4 but the layout is identical;
+ *   platform ABI names them arg1..arg4 but the layout is identical;
  *   the initialize macro just zeros all four so it doesn't matter
  *   which name space callers reach for.
  * ------------------------------------------------------------------ */

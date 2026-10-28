@@ -8,7 +8,7 @@
 # Each function is a hand-written assembly stub matching the lv2
 # kernel's SPU-side calling convention (mailbox channels ch22/23/24
 # for sync, ch28/29/30 for arg passing, `stop` traps for exit).
-# Byte-for-byte equivalent to the reference libsputhread.a.
+# Byte-for-byte equivalent to the system libsputhread.a.
 
 PS3DEV     ?= $(error PS3DEV is not set — run: source scripts/env.sh)
 PS3DK      ?= $(PS3DEV)/ps3dk

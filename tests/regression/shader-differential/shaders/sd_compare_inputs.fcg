@@ -7,7 +7,7 @@
 // the arithmetic ops, so a comparison between two inputs reaches the
 // emitter with two INPUT operands and the one-input-selector rule
 // (distinct-varying-sources) makes it compare d.w with ITSELF - always false - and the
-// row paints a constant where the reference paints a band (claude,
+// row paints a constant where the established compiler paints a band (claude,
 // measured 2026-09-02 on fd5aa13).  The default path REFUSES the shape
 // ("generic arithmetic value did not lower"), so the row is general-only.
 //

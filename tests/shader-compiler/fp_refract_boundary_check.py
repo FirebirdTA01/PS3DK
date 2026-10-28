@@ -1,6 +1,6 @@
 """Judge the decoded FP refract keep predicate, not unmodelled root semantics.
 
-The private oracle uses SGT(-q,-1), q=eta^2*(1-dot(N,I)^2).
+The private measurement uses SGT(-q,-1), q=eta^2*(1-dot(N,I)^2).
 Its exact-zero policy differs from the usual k<0 spelling. Pixel output and
 DIVSQR(0,0) remain separate emulator/hardware gates.
 """
@@ -120,9 +120,9 @@ def predicate(blob, a, n):
 def verify(blob, constant=False):
     for name,a,n,want in (CONSTANT_CASES if constant else CASES):
         keep,op,args,reads = predicate(blob,a,n)
-        require(keep == want, f'{name}: keep={keep}, oracle={want}')
+        require(keep == want, f'{name}: keep={keep}, expected={want}')
         require(op == 0x0d and args[1] == (0. if constant else -1.),
-                'oracle constant SGT(k,0) required' if constant else 'oracle SGT(-q,-1) required')
+                'measurement constant SGT(k,0) required' if constant else 'measurement SGT(-q,-1) required')
         d = sum(x*y for x,y in zip(a[:3],n[:3]))
         q = f32(f32(a[3]*a[3])*f32(1.-d*d))
         require(args[0] == (f32(1.-q) if constant else -q), f'{name}: wrong predicate operand')
@@ -192,7 +192,7 @@ def main(compiler):
             except AssertionError as error:
                 require('predicate consumer' in str(error),label+': wrong rejection')
             else: raise AssertionError(label+': invalid consumer accepted')
-        print('FP refract predicate: 6/6 values, oracle operands, 4 mutation controls rejected; root/pixels unjudged')
+        print('FP refract predicate: 6/6 values, measurement operands, 4 mutation controls rejected; root/pixels unjudged')
         for constant_name,constant_source in (('constant',CONSTANT_SOURCE),
                 ('folded',CONSTANT_SOURCE.replace(',1.0)',',(.5+.5))'))):
             constant_out=Path(tmp)/('boundary-'+constant_name+'.fpo')

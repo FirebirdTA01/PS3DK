@@ -1,6 +1,6 @@
-cell64lv2: make wchar_t 16-bit and wint_t int under ILP32, as in the reference.
+cell64lv2: make wchar_t 16-bit and wint_t int under ILP32, as in the system.
 
-The reference toolchain's wchar_t is a 16-bit unsigned short and its
+The established toolchain's wchar_t is a 16-bit unsigned short and its
 wint_t is int.  Ours was a 32-bit long int and unsigned int.  This is a
 layout difference, not only a naming one: sizeof(wchar_t) was 4 instead
 of 2, L"" literals were UTF-32 instead of UTF-16, structs holding wchar_t
@@ -23,7 +23,7 @@ PS3DK that use wchar_t must be rebuilt.
  #undef	PTRDIFF_TYPE
  #define	PTRDIFF_TYPE (TARGET_LP64 ? "long int" : "int")
  
-+/* wchar_t and wint_t under ILP32 match the reference toolchain: wchar_t
++/* wchar_t and wint_t under ILP32 match the platform ABI: wchar_t
 +   is a 16-bit unsigned short (UTF-16 code units, so L"" literals and
 +   structs holding wchar_t have the reference layout) and wint_t is int.
 +   newlib's wide-character code supports a 16-bit wchar_t (this newlib

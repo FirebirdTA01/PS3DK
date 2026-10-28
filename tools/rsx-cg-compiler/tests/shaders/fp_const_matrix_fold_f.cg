@@ -3,10 +3,10 @@
 //
 // evaluateConstInitializerTyped capped a constructor at four arguments, so a
 // 3x3 built from nine scalars refused with "file-scope const 'M' has an
-// initialiser this compiler cannot evaluate".  Eight reference-SDK rows were
+// initialiser this compiler cannot evaluate".  Eight Cell OS rows were
 // that one shape, all of them including a single shared logluv.cg.
 //
-// Measured on the reference: the container is TWO records - the entry
+// Measured on the established compiler: the container is TWO records - the entry
 // parameter and the output - and M appears nowhere.  The record COUNT is the
 // assertion that matters: if a future change starts emitting parent/row
 // records for a const matrix, the record-count check catches it. Value checks

@@ -1,7 +1,7 @@
-# shader-differential: curated VERTEX programs judged against the reference
+# shader-differential: curated VERTEX programs judged against the established compiler
 # on pixels (increment 4, gate 5).  fields: repo-relative .vcg|uniform_set|path
 # (general | both; omitted = both). Legacy/default selectors are rejected.
-# Each is compiled by our general lowering and by the reference; a byte-identical pair
+# Each is compiled by our general lowering and by the established compiler; a byte-identical pair
 # is counted and not staged; a refusal on either side aborts (curated).
 # Every declared output channel is judged under the coverage FPs; see
 # docs/local/shader-vp-pairs-design.md for the row protocol.
@@ -14,20 +14,20 @@ tools/rsx-cg-compiler/tests/shaders/vp_attr_inputs_v.cg|0|general
 tools/rsx-cg-compiler/tests/shaders/vp_clp0_output_v.cg|0|general
 # uniform-matrix-row-index: a uniform matrix row index, `m_auto[0]` / `m_auto[2]`,
 # resolves to the row's VP const register.  Both containers are byte-identical
-# to the reference under the auto matrix values, so the stager records the
+# to the established compiler under the auto matrix values, so the stager records the
 # rows and skips pixel staging until a future byte drift needs judgement.
 tools/rsx-cg-compiler/tests/shaders/vp_matrix_row0_v.cg|auto|general
 tools/rsx-cg-compiler/tests/shaders/vp_matrix_row2_v.cg|auto|general
 # dynamic-uniform-array-index: a run-time array index (ARL + relative const read over a
 # contiguous block).  Two computed indices, one landing on the LAST element
 # everywhere and one splitting the quad between elements 2 and 3; every
-# element has its own auto value.  The row differs from the reference in
+# element has its own auto value.  The row differs from the established compiler in
 # operand order only, so it is staged and judged on pixels.
 tools/rsx-cg-compiler/tests/shaders/vp_array_uniform_dyn_rig_v.cg|auto|general
 
 # Our SHIPPED vertex programs (coverage audit 2026-09-06, correctness-first
 # bar): every vpshader.vcg under samples/ plus the SDK's libdbgfont VP.  None
-# had ever been compared against the reference by any list.  auto|general:
+# had ever been compared against the established compiler by any list.  auto|general:
 # uniforms synthesised, judged on the shipping path.
 samples/gcm/hello-ppu-cellgcm-alpha-mask/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-blend/shaders/vpshader.vcg|auto|general

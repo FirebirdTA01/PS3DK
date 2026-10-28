@@ -24,7 +24,7 @@
  *   - cellGcmSetClearSurface       — submit clear command (uses
  *                                    GCM_CLEAR_R|G|B|A mask)
  *   - cellGcmSetWriteBackEndLabel  — write a label (note "BackEnd"
- *                                    capitalisation — the reference SDK style)
+ *                                    capitalisation — the platform ABI style)
  *   - cellGcmSetWaitLabel          — wait on a label
  *   - cellGcmGetLabelAddress       — read label slot for the busy-wait
  *
@@ -273,7 +273,7 @@ int main(int argc, const char **argv)
 
 	/*
 	 * rsxFree is allocator-only. Process exit reclaims RSX memory; for
-	 * full structured teardown see the reference sampleBasic pattern.
+	 * full structured teardown see the system sampleBasic pattern.
 	 */
 	ioPadEnd();
 

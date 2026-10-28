@@ -73,7 +73,7 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
         case NVFXSR_ADDRESS:
         case NVFXSR_TEMP:
             // An ADDRESS destination (ARL into A0/A1) shares the temp
-            // index field but is not a temp: the reference declares
+            // index field but is not a temp: the established compiler declares
             // registerCount 1 for a program whose only registers are A0
             // and A1 (dynamic-uniform-array-index), so it must not raise the count.
             if (dst.type == NVFXSR_TEMP && numTempRegs_ < (dst.index + 1))
@@ -87,13 +87,13 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
 
         case NVFXSR_OUTPUT:
         {
-            // Container `attributeOutputMask`: the reference compiler encodes one bit
+            // Container `attributeOutputMask`: the established compiler encodes one bit
             // per *front-face* output, with HPOS implicit (= no bit).
             // Verified 2026-04-18 against identity_v / identity_color_v
             // / mvp_passthrough_v / probe_tc_v .vpo dumps.
             //
             // PSL1GHT cgcomp also sets a "back-face" bit for COL/BFC
-            // (doubling 0x01 → 0x05 for COL0, etc.); the reference compiler does not,
+            // (doubling 0x01 → 0x05 for COL0, etc.); the established compiler does not,
             // so we don't either.  HPOS contributes 0.
             switch (dst.index)
             {
@@ -167,7 +167,7 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
             break;
         case NVFXSR_CONST:
             // CONST_SRC is a 9-bit field at bits 12..20 of hw[1] (not 8 as
-            // the PSL1GHT-ported header suggests — the reference compiler writes the full
+            // the PSL1GHT-ported header suggests — the established compiler writes the full
             // absolute c[] register index here, 0..511).
             sr |= (NVFX_VP(SRC_REG_TYPE_CONST) << NVFX_VP(SRC_REG_TYPE_SHIFT));
             hw[1] |= (static_cast<uint32_t>(src.reg.index) & 0x1FF)
@@ -234,7 +234,7 @@ void VpAssembler::emit(const struct nvfx_insn& insn, uint8_t opcode)
         hw[3] |= (insn.mask << NV40_VP_INST_VEC_WRITEMASK_SHIFT);
         // TXL's texture unit lives in hw[2] bits 8..9 - the temp-index
         // bits of the unused src1 filler, which encode as zero.  Measured
-        // on the reference for units 0..3 (0x...c083, c183, c283, c383);
+        // on the established compiler for units 0..3 (0x...c083, c183, c283, c383);
         // the bits above them are unmeasured, and the vertex unit has only
         // four texture units.
         if (op == NV40_VP_INST_VEC_OP_TXL)
@@ -402,7 +402,7 @@ void VpAssembler::emitCoIssued(const struct nvfx_insn& vecInsn,
         }
     };
 
-    // NV40 co-issue has a shared source field set.  The BasicVertex oracle
+    // NV40 co-issue has a shared source field set.  The BasicVertex measurement
     // pairs use VEC src0/src1 and the SCA scalar source in src2.
     assert(vecInsn.src[2].reg.type == NVFXSR_NONE);
     assert(scaInsn.src[1].reg.type == NVFXSR_NONE);
@@ -427,7 +427,7 @@ void VpAssembler::emitCoIssued(const struct nvfx_insn& vecInsn,
     if (vecInsn.cc_update_reg) hw[0] |= NVFX_VP(INST_COND_REG_SELECT_1);
     if (vecInsn.sat)           hw[0] |= NV40_VP_INST_SATURATE;
 
-    // None of the current oracle co-issue pairs use SCA condition flags.
+    // None of the current measurement co-issue pairs use SCA condition flags.
     assert(!scaInsn.cc_update);
     assert(!scaInsn.cc_update_reg);
     assert(!scaInsn.cc_test);

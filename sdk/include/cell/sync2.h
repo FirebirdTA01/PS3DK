@@ -2,7 +2,7 @@
  \brief cellSync2 thread-pluggable sync primitives (PPU umbrella).
 
   The PPU functions are the libsync2 module's (link -lsync2_stub); the
-  headers follow the reference layout under cell/sync2/, which sources may
+  headers follow the system layout under cell/sync2/, which sources may
   include directly.
 
   cellSync2 vs cellSync: sync2 takes a CellSync2ThreadConfig* on every

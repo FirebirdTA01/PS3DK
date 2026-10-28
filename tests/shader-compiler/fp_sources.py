@@ -169,8 +169,8 @@ def ucode_words(blob):
     # (codex).  The table's extent has to be computed, and computing it also
     # bounds the parameter count: an nparams of 0xffffffff runs the end past
     # any real file.
-    # A container with NO parameters has parameterArray = 0 on the reference
-    # (sce-cgc 475, SDK fnop.cg: 'void main() {}'), so 0 is the one legal
+    # A container with NO parameters has parameterArray = 0 on the established compiler
+    # (the established compiler, SDK fnop.cg: 'void main() {}'), so 0 is the one legal
     # value below the header - and only with a zero count.
     if nparams == 0 and header_size == 0:
         header_size = HEADER_BYTES
@@ -279,7 +279,7 @@ def render(w, index):
         # OUT_NONE: the instruction writes NO register, and the destination
         # and mask fields are then meaningless - FpAssembler::emitFencbr sets
         # register 0x3F and mask 0xF into them deliberately, to match the
-        # reference byte for byte.  Rendering those as a write to R63.xyzw
+        # established compiler byte for byte.  Rendering those as a write to R63.xyzw
         # invents a destination exactly as naming an unused slot invents a
         # read, so they are marked raw and the destination is named none.
         dst_text = "dst=none"
@@ -338,8 +338,8 @@ def verify_arity(paths):
             seen[op] = seen.get(op, 0) + 1
             for slot in (1, 2, 3):
                 real = not looks_like_padding(w, slot)
-                # The reference's no-effect program is ONE all-zero NOP
-                # (sce-cgc 475, 'void main() {}'): its unused slots are zero
+                # The established compiler's no-effect program is ONE all-zero NOP
+                # (the established compiler, 'void main() {}'): its unused slots are zero
                 # words, not the padding signature.  Zero is also a genuine
                 # R0.xxxx read, so this is excused only on NOP, whose arity
                 # is 0 - never as a padding rule for anything else.

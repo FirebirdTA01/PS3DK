@@ -36,7 +36,7 @@
  *         GENERAL-path container of the same shader; gated like corpus,
  *         but judged ONLY when the row immediately before it is a
  *         reference row that judged identical - that row is the
- *         premise that makes the default container an oracle for the
+ *         premise that makes the default container an measurement for the
  *         general one; otherwise status path-pair-unoracled, counted
  *         on its own line, neither pass nor fail) |
  *         VP ROWS (increment 4, gate 5): control-vp-identical |
@@ -659,7 +659,7 @@ static int init_procedural_texture(void)
 	 * heap that judge_pair resets to its watermark after the row - so
 	 * the next row's fragment ucode was copied over the image, and its
 	 * texels at rows 4..6 became instruction words.  Measured: the
-	 * "2-3 scanline band where the reference alternates pixel to pixel"
+	 * "2-3 scanline band where the established compiler alternates pixel to pixel"
 	 * (per-sampler-pixel-discrimination) and every 2..13-pixel mismatch of the gate-1 sweep
 	 * under per-name images were the ucode of the following row, read
 	 * back through the sampler.  24 x 16 KB of local memory is the
@@ -748,7 +748,7 @@ static void bind_procedural_texture(CellGcmContextData *ctx, u32 unit, unsigned 
 	 * - read texels 0..31 only under clamp, and the permuted alpha ramp
 	 * tex0 lands on never dropped below 0.5 there, so four corpus
 	 * discard witnesses (`t.a < 4/255`) read discard-blind on the
-	 * REFERENCE side.  Under wrap any 1.0-wide window traverses every
+	 * ESTABLISHED side.  Under wrap any 1.0-wide window traverses every
 	 * ramp wherever it sits.  The second control-texture row
 	 * (sd_tex_wrap_ctrl vs its frac-based twin) proves wrapped sampling
 	 * lands where the arithmetic says; it goes red on a clamp guest. */
@@ -1213,7 +1213,7 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 		 * colour output (R0, or H0 in half precision), so a program in
 		 * which no instruction writes index 0 with a non-empty mask never
 		 * writes its output at all - it paints whatever the register
-		 * held, the 'constant where the reference varies' signature the
+		 * held, the 'constant where the established compiler varies' signature the
 		 * sensitivity fields reported for two days before the decode
 		 * named it (implicit-colour-output, claude).  Decoded per instruction, not
 		 * read from any mask the container declares. */
@@ -1637,7 +1637,7 @@ static int apply_vp_uniforms(CellGcmContextData *ctx, CGprogram vp,
 			const char *name = cellGcmCgGetParameterName(vp, prm);
 			if (!name)
 				return -5;
-			/* A matrix parameter is listed TWICE by the reference
+			/* A matrix parameter is listed TWICE by the established compiler
 			 * compiler: once as the float4x4 and once per row as a
 			 * float4 leaf named m[r] at the row's own register.
 			 * Synthesising the row leaves by their own names would
@@ -2264,10 +2264,10 @@ static int load_manifest(void)
 /* Path-pair premise coupling: the row before <shader>@paths must be an
  * identical reference row whose side A is THE SAME CONTAINER as the
  * path-pair row's side A (compared by a_path, not by name: the default
- * container is the actual oracle premise, and a name stem can collide).
+ * container is the actual measurement premise, and a name stem can collide).
  * The stager always emits them that way, but that is a property of the
  * stager, and the gate lives here: a hand-edited manifest that put
- * shader X's oracle before shader Y's pair would otherwise judge Y on
+ * shader X's measurement before shader Y's pair would otherwise judge Y on
  * X's premise with a confident verdict (review findings on the
  * path-pair role, differential-pair-isolation family). */
 
@@ -2329,7 +2329,7 @@ static u32 be32_at(const u8 *b, u32 off)
  * program header; nothing is assumed.  An `out` record (direction 0x1002 or
  * 0x1003) whose semantic is "DEPTH" declares depth; "COLOR1".."COLOR3"
  * declare that target; every other out semantic - "COLOR", "COLOR0", and
- * the EMPTY string the reference records for an unsemanticked `out float4
+ * the EMPTY string the established compiler records for an unsemanticked `out float4
  * c` (which it binds to COLOR0; a bare unsemanticked return value it
  * refuses, C5029) - declares colour 0.  Measured 2026-09-06 on reference
  * containers.  A container declaring nothing is named by the judge, never
@@ -4462,9 +4462,9 @@ int main(int argc, const char **argv)
 			continue;
 		}
 
-		/* A path-pair row is an oracle comparison only while its
-		 * premise holds: the reference row immediately before it (the
-		 * same shader's default-path container against the reference)
+		/* A path-pair row is an measurement comparison only while its
+		 * premise holds: the established compiler row immediately before it (the
+		 * same shader's default-path container against the established compiler)
 		 * must have judged identical.  "Default equals general" is
 		 * satisfiable by both being wrong the same way, so the row
 		 * checks the premise in the run rather than assuming it, and a

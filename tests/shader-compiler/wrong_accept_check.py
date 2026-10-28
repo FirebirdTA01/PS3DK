@@ -1,7 +1,7 @@
-"""Programs the reference REFUSES must refuse here too (t_fff5cf2a).
+"""Programs the established compiler REFUSES must refuse here too (t_fff5cf2a).
 
-Two rules, each measured on sce-cgc 475, behind community programs we
-accepted while the reference refused them:
+Two rules, each measured on the established compiler, behind community programs we
+accepted while the established compiler refused them:
 
 1. A declarator list's LATER declarators take the type last named in an
    earlier declarator's initializer (a constructor or a cast, nested or not,
@@ -14,7 +14,7 @@ accepted while the reference refused them:
    value a varying output semantic, whatever out parameters it has (ogre's
    DualQuaternionSkinning_Shadow.cg helpers compiled as entries).
 
-Each row's verdict is the reference's; accepted rows are judged by value.
+Each row's verdict is the established compiler's; accepted rows are judged by value.
 """
 import argparse
 import subprocess
@@ -47,7 +47,7 @@ ROWS = {
     'c5029_return_vp': (VP, 'f', 'float4 f(float4 x : TEXCOORD0) { return x; }\n', 'C5029'),
     'c5029_return_and_out': (FP, 'f', 'float4 f(float4 x : TEXCOORD0, out float4 c : COLOR) { c = x; return x; }\n', 'C5029'),
     'out_only_accepts': (FP, 'f', 'void f(float4 x : TEXCOORD0, out float4 c) { c = x; }\n', [0.5, -0.25, 0.75, 1.0]),
-    # A type named in an ARRAY EXTENT propagates too in the reference
+    # A type named in an ARRAY EXTENT propagates too in the established compiler
     # (float3 a[int(1)], b = ... makes b an int; review: codex), but this
     # parser refuses a non-literal extent outright, so that shape is a
     # refusal either way and is not pinned here.  A literal extent names
@@ -59,7 +59,7 @@ ROWS = {
 
 # --extension=declarator-types keeps the declared type.  Enabled, each list
 # must compile to EXACTLY the bytes of the separate declarations it
-# abbreviates (which the reference compiles); disabled, the refusal names the
+# abbreviates (which the established compiler compiles); disabled, the refusal names the
 # flag.  name -> the split spelling of ROWS[name].
 FLAG = '--extension=declarator-types'
 EXTENSION_ROWS = {

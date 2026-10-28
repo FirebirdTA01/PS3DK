@@ -37,7 +37,7 @@
 
 	/* ------------------------------------------------------------
 	 * __PPU_GUID and __sys_process_enabled are left as weak-undefined
-	 * references, matching reference-SDK crt1.o. Undefined weak symbols
+	 * references, matching Cell OS crt1.o. Undefined weak symbols
 	 * resolve to zero at link time, which the PRX loader reads as
 	 * "no GUID set / baseline capability set only" - semantically
 	 * different from a pointer to a data slot containing zero.
@@ -65,7 +65,7 @@
 	.long __libentend                 /* 0x14 lib_ent.end */
 	.long __libstubstart + 4          /* 0x18 lib_stub.begin */
 	.long __libstubend                /* 0x1c lib_stub.end */
-	.long 0x01010000                  /* 0x20 sdk/abi version constant; reference
+	.long 0x01010000                  /* 0x20 sdk/abi version constant; the system
 	                                     SDK crt1.o hardcodes this value in every
 	                                     shipping binary. Zero here causes RPCS3
 	                                     PRX loader to stall during startup. */

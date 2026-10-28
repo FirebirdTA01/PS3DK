@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # unsafe-select-predication, large half: simple source-defined functions are inlined before
 # the NV40 backend sees the IR.  A user call that survives to IROp::Call is a
-# backend refusal today and a wrong abstraction layer: the reference compiler
+# backend refusal today and a wrong abstraction layer: the established compiler
 # inlines these calls into the entry program.
 #
 # CONTROL: this fails on compilers before the inliner because inline_tint.fcg
@@ -236,7 +236,7 @@ expect_refusal() {
     [[ ! -s "$out" ]] || fail "$name emitted a container after refusing"
 }
 
-# A runtime return, out and inout parameters inline now (the reference
+# A runtime return, out and inout parameters inline now (the established compiler
 # accepts all three).  Values: helper-const-return's RUNTIME rows (the
 # runtime return), inline-out-param (out and inout).
 expect_compile_without_call inline_multi_return

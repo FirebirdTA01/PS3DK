@@ -2,7 +2,7 @@
 
 Deleting stride scaling, overlapping fields, or using declaration names instead
 of owners must change either the reflected registers or the patched values.
---reference uses the private oracle's command line, never its code or fixtures.
+--reference uses the private measurement's command line, never its code or fixtures.
 """
 import argparse
 import hashlib

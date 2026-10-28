@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Legacy texture-object types and unknown type names.
 #
-# The reference compiles texobj1D/2D/3D/CUBE/RECT byte-identically to the
-# matching sampler type, in both profiles (a shipped reference sample
+# The established compiler compiles texobj1D/2D/3D/CUBE/RECT byte-identically to the
+# matching sampler type, in both profiles (a shipped existing sample
 # declares `uniform texobj2D texture`).  It refuses bare `texobj` and any
 # other unknown type name with a diagnostic.
 #
@@ -75,7 +75,7 @@ for row in "${aliases[@]}"; do
         "$sampler" "$call" >"$work/s.cg"
     same_as_control sce_fp_rsx "$work/s.cg" "$work/t.cg" fpo "texobj$dim" "$sampler"
 done
-# These spellings compile today and are the ones the reference sample and
+# These spellings compile today and are the ones the existing sample and
 # ordinary fragment programs use, so a refusal-for-refusal match is not
 # enough for them.
 for dim in 2D CUBE RECT; do

@@ -1,19 +1,19 @@
 /*! \file cell/sysutil_sysparam.h
- \brief reference-SDK forwarder for cellSysutilGetSystemParam{Int,String}.
+ \brief Cell OS forwarder for cellSysutilGetSystemParam{Int,String}.
 
   Thin static-inline forwarders over PSL1GHT's sysUtilGetSystemParamInt
-  / String.  Verified: PSL1GHT's *_fnid symbols hold the reference
+  / String.  Verified: PSL1GHT's *_fnid symbols hold the system
   FNIDs -
     sysUtilGetSystemParamInt_fnid    = 0x40e895d3  (cellSysutilGetSystemParamInt)
     sysUtilGetSystemParamString_fnid = 0x938013a0  (cellSysutilGetSystemParamString)
 
   CELL_SYSUTIL_SYSTEMPARAM_ID_* constants are bit-identical to
-  PSL1GHT's SYSUTIL_SYSTEMPARAM_ID_* set; aliased here so reference-SDK
-  source writes the identifiers the reference headers document.
+  PSL1GHT's SYSUTIL_SYSTEMPARAM_ID_* set; aliased here so Cell OS
+  source writes the identifiers the system headers document.
 
   Not covered - values that cellSysutilGetSystemParam{Int,String}
   returns (enum values for language, button-assign, date format, etc.)
-  have dedicated CELL_SYSUTIL_* constants in the reference header but
+  have dedicated CELL_SYSUTIL_* constants in the system header but
   are just documentation-facing integers.  A full translation would
   blow up this header; the important ones (LANG_*, ENTER_BUTTON_ASSIGN_*)
   are included here so user code isn't forced to recall magic numbers.
@@ -30,7 +30,7 @@ extern "C" {
 #endif
 
 /* Param-ID constants - direct numeric values so this header doesn't
- * need <sysutil/sysutil.h>.  Values are the stable the reference SDK IDs the
+ * need <sysutil/sysutil.h>.  Values are the stable the platform ABI IDs the
  * SPRX recognizes (0x0111..0x0157 for the enumerated PSN/XMB
  * settings; 0x0131..0x0157 for per-user and peripheral prefs). */
 #define CELL_SYSUTIL_SYSTEMPARAM_ID_LANG                                0x0111

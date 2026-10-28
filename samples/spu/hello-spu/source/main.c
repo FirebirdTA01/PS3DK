@@ -25,7 +25,7 @@ int main(int argc, char **argv)
 
     printf("hello-spu: ppu main starting\n");
 
-    /* Reference-SDK snake_case spelling from <sys/spu_initialize.h>
+    /* Cell OS snake_case spelling from <sys/spu_initialize.h>
      * lands on the same syscall (169):
      *   sys_spu_initialize(6, 0);
      */

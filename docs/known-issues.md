@@ -60,7 +60,7 @@ saved link-register bytes and the resulting wrong return address were
 measured on RPCS3 (v0.12.65 SDK probe).  The EH data register reload
 mismatch was established from the disassembly; the register values on
 handler entry were not captured.  The fix saves and restores the link
-register and r3-r6 as 64-bit values.  The reference toolchain also uses
+register and r3-r6 as 64-bit values.  The established toolchain also uses
 a 64-bit link-register save.
 
 **Workaround (affected releases).** Build code that needs C++ exceptions
@@ -364,10 +364,10 @@ local anchor other than the baseline.
 ## SPRX stub trampolines: frame-less wrapping shape, not bctr tail-call
 
 **Status:** fixed 2026-04-27 in `tools/nidgen/src/stubgen.rs`. Documented
-here because the divergence from the reference SDK stub shape is
+here because the divergence from the platform ABI stub shape is
 load-bearing and easy to regress.
 
-**Symptom.** With a `bctr` tail-call leaf trampoline (the reference
+**Symptom.** With a `bctr` tail-call leaf trampoline (the system
 SDK's stub shape, byte-identical to `libspurs_stub.a`), every SPRX call
 that touches the TOC after returning crashes — `r2` is left holding the
 SPRX's TOC instead of the caller's.  With an `stdu`-allocated wrapping
@@ -377,10 +377,10 @@ arguments** (the spillover lives at `caller_sp+112+`) returns
 out from under the SPRX's argument loads.  The canonical reproducer is
 `cellSpursJobChainAttributeInitialize` (14 args, 6 spilled).
 
-**Why the reference shape doesn't work in our toolchain.**
-The reference's `bctr` tail-call assumes the caller's compiler emits
+**Why the system shape doesn't work in our toolchain.**
+The system's `bctr` tail-call assumes the caller's compiler emits
 `ld r2, 40(r1)` immediately after every `bl __<name>` to restore TOC
-across a cross-module call.  The reference SCE compiler does this; our
+across a cross-module call.  The established compiler does this; our
 PPU GCC + PSL1GHT linker treats the stub archive as intra-DSO (because
 it's statically linked into the same binary) and leaves the trailing
 `nop` un-rewritten.  Without the caller-side restore, `r2` holds the
@@ -433,7 +433,7 @@ won't return success unless both invariants above hold.
 **Future work.** If we ever bring up a Canadian-cross host toolchain
 (MinGW-hosted PPU compiler) or migrate to ELFv2, this assumption needs
 revisiting.  The "PPU GCC linker rewrites the trailing `nop` after
-cross-module `bl`" path was load-bearing for the reference stub shape
+cross-module `bl`" path was load-bearing for the system stub shape
 and is currently false in our setup; if we ever fix it we can switch to
 the smaller `bctr` tail-call form.
 
@@ -445,7 +445,7 @@ the smaller `bctr` tail-call form.
 whose memory layout is consumed by a runtime-loaded Cell SPRX
 (cellJpgDec, cellAudio, cellPngDec, etc).
 
-The reference SDK compiles with a 32-bit-pointer ABI globally; every
+The platform ABI compiles with a 32-bit-pointer ABI globally; every
 Cell SPRX expects "4-byte pointer at offset X" from the caller's
 struct. Our PPU64 toolchain uses natural 8-byte pointers, so a plain
 `void *field;` occupies 8 bytes and shifts every downstream field by
@@ -466,7 +466,7 @@ call that consumes the malformed struct. Discovered on jpg_dec port
 (2026-04-24), applied to `sdk/include/cell/codec/jpgdec.h` for
 `CellJpgDecThreadInParam` / `CellJpgDecSrc` / `CellJpgDecInParam`.
 
-Handle types warrant the related pattern: when the reference header
+Handle types warrant the related pattern: when the system header
 declares a handle as `void *`, prefer `typedef uint32_t CellXxxHandle;`
 in ours. The SPRX writes 4 bytes into `*handlePtr` at Create; a
 `uint64_t` or `void *` destination leaves the low 4 bytes undefined
@@ -475,7 +475,7 @@ in pngdec and jpgdec handles.
 
 ---
 
-## reference-SDK-compat struct-field aliases live in SDK, not in PSL1GHT
+## Cell OS-compat struct-field aliases live in SDK, not in PSL1GHT
 
 **Status:** fixed. Documented here for the history of how it
 evolved, because the patches/psl1ght/ tree still carries two
@@ -483,7 +483,7 @@ retired patches (0025, 0026) that describe the original PSL1GHT
 edits before the fix moved over.
 
 PSL1GHT's struct fields use camelCase (`antiAlias`,
-`resolution`); the reference SDK sample code writes them lower (`antialias`,
+`resolution`); the platform ABI sample code writes them lower (`antialias`,
 `resolutionId`). The PSL1GHT patches added anonymous unions so
 both names resolve to the same u8; we've since moved that aliasing
 into our own SDK structs (`CellGcmSurface`, `CellVideoOut*`) so
@@ -504,7 +504,7 @@ corruption that the `spinning-cube` sample visibly stops rendering
 without crashing. Replaced by a native emitter in
 `sdk/include/cell/gcm/gcm_command_c.h::cellGcmSetTimeStamp` that
 uses our own `ps3tc_gcm_reserve` helper — arg encoding matches the
-canonical `offset | (type << 24)` from the reference the reference SDK's
+canonical `offset | (type << 24)` from the system the platform ABI's
 `gcm_methods.h`.
 
 ---
@@ -693,7 +693,7 @@ shipped v0.19.0 compiler.
 A helper with an `out fixed` or `inout fixed` parameter currently accepts a
 `float` variable as its actual argument. Output parameters require matching
 types; this acceptance is invalid and is not intended to become an extension.
-The reference compiler refuses these calls with C1113.
+The established compiler refuses these calls with C1113.
 
 ```cg
 float get(inout fixed x) { x = 0.13; return x; }

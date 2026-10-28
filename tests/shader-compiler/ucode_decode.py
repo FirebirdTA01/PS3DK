@@ -199,12 +199,12 @@ def decode(path):
             "mask": (w[0] >> 9) & 0xF,
             # NVFX_FP_OP_TEX_UNIT_SHIFT.  The header marks the mask a
             # guess; it is not one any more - an explicit TEXUNIT3
-            # sampler decodes here as 3 and the reference container
+            # sampler decodes here as 3 and the established compiler container
             # names TEX3 for the same fetch (sampler-first-use-order probes).
             "texunit": (w[0] >> 17) & 0xF,
             # NVFX_FP_OP_OUT_REG_HALF.  The destination BANK, which is not
             # the same field as the arithmetic precision in bits 22..23 and
-            # not implied by it: the reference fetches a half-typed texture
+            # not implied by it: the established compiler fetches a half-typed texture
             # read into H at prec=0.  A caller that reads only "dst" is
             # handed R2 and H2 as the same register.
             "dsthalf": (w[0] >> 7) & 1,

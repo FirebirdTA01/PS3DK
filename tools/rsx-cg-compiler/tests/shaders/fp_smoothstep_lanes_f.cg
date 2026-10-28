@@ -1,5 +1,5 @@
 // integer-float-conversion: smoothstep on a vector must compute each lane independently.
-// The edges are scalar constants matching the oracle probe, so the reference
+// The edges are scalar constants matching the established compiler probe, so the established compiler
 // folds the reciprocal into a saturated 2X ADD.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)
 {

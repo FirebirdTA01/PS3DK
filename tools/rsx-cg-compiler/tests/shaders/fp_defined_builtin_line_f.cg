@@ -1,6 +1,6 @@
-// preprocessor-defined-operator.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against the established compiler.
 // __LINE__, __FILE__, __DATE__ and __TIME__ EXPAND but are not
-// "defined" on the reference; __CGC__ and __SCE_CGC__ are ordinary
+// "defined" on the established compiler; __CGC__ and __SCE_CGC__ are ordinary
 // macros and are. One predicate serves this and #ifdef.
 #if defined(__LINE__)
 #define V 1.0

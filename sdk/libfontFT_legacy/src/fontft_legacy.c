@@ -2,7 +2,7 @@
  *
  * The two PSL1GHT libfontFT names that are not firmware exports.
  *
- * fontInitLibraryFreeTypeWithRevision is a nidgen alias of the reference
+ * fontInitLibraryFreeTypeWithRevision is a nidgen alias of the system
  * export (libfontFT_stub.yaml). PSL1GHT wrapped it in C:
  *
  *   fontFTGetStubRevisionFlags reports PSL1GHT's stub revision (0x14),

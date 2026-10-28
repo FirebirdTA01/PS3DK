@@ -11,7 +11,7 @@
 #
 # The same branch handles widths 2 and 3 with {0,1,0,0} and {0,1,2,0}, so
 # `o = p.zw` wrote p.xy and `o = p.yzw` wrote p.xyz.  Measured against the
-# reference, which composes: .zwzz and .yzww for those two.
+# established compiler, which composes: .zwzz and .yzww for those two.
 #
 # WHY NOTHING ELSE CATCHES IT.  scalar-ctor-broadcast-test pins the source
 # lane for the CONSTRUCTOR path - its M2 mutation is this defect one path over
@@ -23,7 +23,7 @@
 # WHAT IS PINNED, and it is deliberately not byte parity: that the WRITTEN
 # lanes read the right source components, asserted two ways - two spellings
 # that must differ from each other, and the decoded source swizzle.  What the
-# reference puts in the lanes the mask does NOT write is not one rule
+# established compiler puts in the lanes the mask does NOT write is not one rule
 # (`o = p.zw` gives .zwzz, `o = p.yzw` gives .yzww) and cannot change a
 # rendered pixel; that stays a named byte-parity gap rather than a guess.
 set -euo pipefail
@@ -120,7 +120,7 @@ printf '  %-38s %s\n' "narrow outputs, widths 2 and 3" "the named lanes are what
 # reference measurements that were both CONTIGUOUS ASCENDING RUNS (.zw and
 # .yzw).  A rule that only handled ascending runs would give the right
 # lanes for those two and the wrong ones here.  Measured against the
-# reference: `o = p.wz` reads .wz, `o = p.zyx` reads .zyx, and reversed,
+# established compiler: `o = p.wz` reads .wz, `o = p.zyx` reads .zyx, and reversed,
 # repeated and permuted selections all compose - six samples (output-store-swizzle).
 emit w2_wz  'void main(float4 p : TEXCOORD0, out float2 o : COLOR) { o = p.wz; }'
 want w2_wz '^[0-9]+ MOV dst=R0 mask=xy .* s0=TEX0[.]wz' \

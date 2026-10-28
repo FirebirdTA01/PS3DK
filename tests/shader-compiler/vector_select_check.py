@@ -1,16 +1,16 @@
 """Vector conditions in ?:, judged by value (t_3b3a3e1e).
 
-Measured against sce-cgc 475: a bool or numeric vector condition of width N is
+Measured against the established compiler: a bool or numeric vector condition of width N is
 accepted when the arms' common type is an N-wide vector (scalar arms widen);
 two scalar arms, a width mismatch and a vector `if` condition are refused.
-The reference selects per lane with predication (a comparison writes the
+The established compiler selects per lane with predication (a comparison writes the
 condition code, a MOV commits where it holds); every reference container for
 the accepted rows matched the values below on 400 inputs with fp_eval's
 condition-code model.  This test pins ours against values computed here from
 Cg semantics, so it needs no reference output in the repository.
 
-The reference also accepts the first two shapes on sce_vp_rsx; ours now
-lowers them there too (per-lane predicated select, as the reference does) and
+The established compiler also accepts the first two shapes on sce_vp_rsx; ours now
+lowers them there too (per-lane predicated select, as the established compiler does) and
 they are judged by value on the VP instrument.  A scalar-armed VP select is
 still a named gap.
 """
@@ -80,7 +80,7 @@ REFUSE_FP = {
     'cond3_arms4': M + ' { return float4((a.xyz > b.xyz) ? a : b); }',
     'if_bool4': M + ' { float4 c = b; if (a > b) c = a; return c; }',
 }
-# The reference accepts these two on the vertex profile; judged by value.
+# The established compiler accepts these two on the vertex profile; judged by value.
 ACCEPT_VP = {
     'vp_bool4': (V + 'colour = (a > b) ? a : b; }', per_lane(4, lambda x, y, i: sel(x > y, x, y))),
     'vp_float4_cond': (V + 'colour = a ? a : b; }', per_lane(4, lambda x, y, i: sel(x != 0, x, y))),

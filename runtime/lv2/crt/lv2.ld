@@ -22,13 +22,13 @@ ENTRY(_start)
 
 PHDRS
 {
-	/* Reference CEX binaries carry Sony-specific flag bit 0x00400000 on
+	/* Reference CEX binaries carry system-specific flag bit 0x00400000 on
 	 * the main text and data LOAD segments, and 0x00200000 on the RW
 	 * segment. Without these, the PRX loader stalls inside
 	 * _sys_prx_register_module - evidence: the stock PSL1GHT script
 	 * stripped the bits and every homebrew built with it hangs at the
 	 * same point in RPCS3; surveying ftpd/cellftp/mount_hdd shows the
-	 * bits set consistently. Restoring them matches reference-SDK
+	 * bits set consistently. Restoring them matches Cell OS
 	 * segment flags byte-for-byte. */
 	hdr_text	PT_LOAD FILEHDR PHDRS	FLAGS(0x01 | 0x04 | 0x00400000);
 	hdr_data	PT_LOAD					FLAGS(0x02 | 0x04 | 0x00200000 | 0x00400000);

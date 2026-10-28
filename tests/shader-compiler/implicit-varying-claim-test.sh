@@ -2,7 +2,7 @@
 # An implicit (semantic-less) fragment input that flows into the RETURN
 # VALUE of an inlined call claims its TEXCOORD even when that call's result
 # is dead, and every later implicit input moves up one (t_8c4a982e).
-# Measured on the reference: a user helper, and standard-library functions
+# Measured on the established compiler: a user helper, and standard-library functions
 # implemented as inlined source (sin, lerp, clamp, mul, ...), claim; the
 # hardware primitives (dot, abs, pow, frac, saturate, tex2D, ...) do not,
 # nor does dead code inside the entry itself, nor a helper that ignores the

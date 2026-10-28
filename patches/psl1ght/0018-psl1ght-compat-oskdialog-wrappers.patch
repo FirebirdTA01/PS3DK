@@ -1,6 +1,6 @@
 Subject: [PATCH] sysutil/osk: add cellOskDialog compat wrappers
 
-Our SDK exports the reference-SDK cellOskDialog* names; PSL1GHT samples
+Our SDK exports the Cell OS cellOskDialog* names; PSL1GHT samples
 call osk*. Keep the legacy osk* structs and source-facing field names,
 then add deprecated static-inline forwarders to the cellOskDialog* API.
 
@@ -23,7 +23,7 @@ index f2fbb84..c554276 100644
  } oskSeparateWindowOption;
  
 +/* PSL1GHT-compat: keep the legacy osk* structs and field names for source
-+ * compatibility, but forward calls to the reference-SDK cellOskDialog* API.
++ * compatibility, but forward calls to the Cell OS cellOskDialog* API.
 + * Define __PS3DK_NO_PSL1GHT_COMPAT__ to drop these wrappers.
 + * Guarded by __has_include: PSL1GHT's own build has no cell/ on its include
 + * path and must see the upstream prototypes (libsysutil defines several of

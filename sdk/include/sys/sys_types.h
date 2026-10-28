@@ -1,9 +1,9 @@
 /*
- * PS3 Custom Toolchain — <sys/sys_types.h> Sony-SDK compat typedefs.
+ * PS3 Custom Toolchain — <sys/sys_types.h> Cell OS compat typedefs.
  *
- * The reference SDK toolchain (SNC) provides `usecond_t` and
+ * The platform ABI toolchain (SNC) provides `usecond_t` and
  * `second_t` as compiler built-ins (64-bit unsigned).  Our GCC-based
- * PS3DK defines these here so reference-SDK samples that use them
+ * PS3DK defines these here so existing PS3 samples that use them
  * compile without modification.
  */
 

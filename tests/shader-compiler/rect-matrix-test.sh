@@ -2,7 +2,7 @@
 # rect-matrix-test.sh -- non-square matrix types float3x4 / float4x3 / float2x4 /
 # half3x4 (rectangular-matrices, rectangular-matrix-row-access, rectangular-matrix-reflection).
 #
-# Reference contract (sce-cgc 475, measured 2026-09-15, .local/probe-rect): an
+# Reference contract (the established compiler, measured 2026-09-15, .local/probe-rect): an
 # RxC matrix is R rows of C-wide vectors.  mul(M[RxC], v[C]) -> v[R] as one
 # DP(C) per row; mul(v[R], M[RxC]) -> v[C] as a MUL/MAD chain over the rows;
 # mul(M[RxK], N[KxC]) -> M[RxC]; M[i] is a row of width C and M[i][j] a lane;
@@ -10,7 +10,7 @@
 # constructor takes exactly one row vector of width C per row, or R*C
 # scalars: float4x3(f4,f4,f4) and float3x4(f3,f3,f3,f3) are refused C5204 even
 # though the component totals agree.  The constructor and brace spellings are
-# byte-identical to each other on the reference, and M[i] of either is
+# byte-identical to each other on the established compiler, and M[i] of either is
 # byte-identical to the row expression, so those pairs are byte twins here.
 # Container records: parent kCgFloat1x1 + (rows-1)*4 + (cols-1) (3x4 = 1060,
 # 4x3 = 1063, 2x4 = 1056; half matrices carry the float codes in FP), one row
@@ -21,8 +21,8 @@
 # Values: our FP ucode is executed numerically on an exact binary input and
 # compared with an independent row/column formula; VP programs likewise with
 # uniform rows supplied from the container's own records.  Byte identity to
-# the reference is measured separately, never assumed here: our FP output for
-# even square matrices differs from the reference in input copies and export
+# the established compiler is measured separately, never assumed here: our FP output for
+# even square matrices differs from the established compiler in input copies and export
 # folds, so a reference-byte row would test the wrong thing.
 set -euo pipefail
 
@@ -97,7 +97,7 @@ refuse() {
 
 twin() {
     local a="$1" b="$2" why="$3"
-    cmp -s "$work/$a.$(ext_of "$a")" "$work/$b.$(ext_of "$b")" || fail "$a and $b differ; the reference emits identical bytes ($why)"
+    cmp -s "$work/$a.$(ext_of "$a")" "$work/$b.$(ext_of "$b")" || fail "$a and $b differ; the established compiler emits identical bytes ($why)"
     printf '  PASS  %-32s byte twin of %s: %s\n' "$a" "$b" "$why"
 }
 
@@ -126,12 +126,12 @@ accept fp_rect_brace_row_twin_f    "the row expression itself"
 accept fp_rect_transpose_f         "transpose(float3x4) is a float4x3"
 accept fp_rect_narrow_cast_f       "(float3x4)float4x4 keeps the first three rows"
 accept fp_rect_matmul_f            "mul(float3x4, float4x3) is a float3x3"
-accept fp_rect_prefix_shuffle_cse_f "float4(t.yzw, 1) + t.yzwx: a vec3 and a vec4 shuffle with one mask stay distinct (reference accepts)"
+accept fp_rect_prefix_shuffle_cse_f "float4(t.yzw, 1) + t.yzwx: a vec3 and a vec4 shuffle with one mask stay distinct (the established compiler accepts)"
 
 # 2b. Mixed vector/scalar constructors pack ROW-MAJOR; a vector may not straddle
 # a row (reference m1-m11).  The square globals here are a regression control:
 # the first revision refused them (found by codex).  All four accept cells are
-# byte-identical to the reference as well as to their twins.
+# byte-identical to the established compiler as well as to their twins.
 accept fp_rect_ctor_mixed_g22_f       "static const float2x2(float2, s, s)"
 accept fp_rect_ctor_mixed_g22_twin_f  "the literal row it folds to"
 accept fp_rect_ctor_mixed_g33_f       "static const float3x3(float3, s, s, s, float3)"
@@ -139,7 +139,7 @@ accept fp_rect_ctor_mixed_g33_twin_f  "the literal row it folds to"
 accept fp_rect_ctor_mixed_g34_f       "static const float3x4(float2, float2, float4, float4)"
 accept fp_rect_ctor_mixed_g34_twin_f  "the same rows as float3x4(float3, s, float4, float4)"
 
-# 3. Byte twins the reference also emits identically
+# 3. Byte twins the established compiler also emits identically
 twin fp_rect_ctor_mixed_g22_f fp_rect_ctor_mixed_g22_twin_f "a mixed 2x2 folds to its second row"
 twin fp_rect_ctor_mixed_g33_f fp_rect_ctor_mixed_g33_twin_f "a mixed 3x3 folds to its second row"
 twin fp_rect_ctor_mixed_g34_f fp_rect_ctor_mixed_g34_twin_f "two mixed packings of one 3x4"
@@ -147,7 +147,7 @@ twin fp_rect_ctor_index_f  fp_rect_ctor_index_twin_f "M[1].z, M[2][0], M[0].w ar
 twin fp_rect_brace_m43_f   fp_rect_ctor_m43_twin_f   "brace and constructor spellings of a 4x3"
 twin fp_rect_brace_row_f   fp_rect_brace_row_twin_f  "P[1] is the row expression"
 
-# 4. Constructor shapes the reference refuses (C5204): a row vector per ROW
+# 4. Constructor shapes the established compiler refuses (C5204): a row vector per ROW
 refuse fp_rect_ctor43_3xf4_refuse_f "C5204" "float4x3 from three float4 (12 components, wrong shape)"
 refuse fp_rect_ctor34_4xf3_refuse_f "C5204" "float3x4 from four float3 (12 components, wrong shape)"
 refuse fp_rect_ctor_straddle_g22_refuse_f "C5204" "float2x2(s, float2, s): the float2 straddles rows 0 and 1"

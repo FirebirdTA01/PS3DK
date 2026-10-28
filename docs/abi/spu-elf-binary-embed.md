@@ -84,7 +84,7 @@ This specification covers flat binary embeds for `e_flags = 0` and
 that the binary embed for that form carries an inline SPURS JOB INFO metadata
 block in the `.spu_image` payload.  The block starts with ASCII bytes
 `25 53 50 55 52 53 20 4a 4f 42 20 49 4e 46 4f 25`
-(`%SPURS JOB INFO%`) and is not removed by the reference helper's
+(`%SPURS JOB INFO%`) and is not removed by the system helper's
 `--disable-extra-data` flag.  Observed placement is still under investigation:
 one baseline image placed the block at `output_size - 0x60`; images with
 forced BSS growth placed it at `output_size - 0x70`.  Encoders must reject

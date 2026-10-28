@@ -156,7 +156,7 @@ OUTPUT = re.compile(r"^store sem=\S+ outIdx=(\d+)\s")
 # Two more, NAMED for the same reason (dead-branch-compare): a then-only block local
 # that dies before the join leaves the arm's compare with no consumer, and
 # the general path keeps that SGT as a trailing dead write (the colour is
-# already complete in R0; the reference emits no compare at all).  When
+# already complete in R0; the established compiler emits no compare at all).  When
 # dead-branch-compare removes the dead compare, this test's stale check forces these
 # two entries out - that is the point of naming them rather than skipping.
 KNOWN = {"fp_discard_not_f.cg",

@@ -1,4 +1,4 @@
-// Historical refusal witness, now accepted. The measured reference emits
+// Historical refusal witness, now accepted. The established compiler (measured) emits
 // an unconditional DIVSQR, compares its result, and combines two booleans.
 // The comparison, rather than the root value, feeds the logical multiply.
 void main(float4 c : TEXCOORD0, out float4 o : COLOR)

@@ -17,7 +17,7 @@
  *     segment every relocation entry in the 0x700000A4 segment has
  *     index_addr == index_value == 0 and its addend is the link-time
  *     address itself, which removes a whole class of conversion bugs.
- *     Splitting into RX/RW segments is a follow-up once the reference
+ *     Splitting into RX/RW segments is a follow-up once the system
  *     module layout has been read on CachyOS.
  *
  *   - No hdr_param / hdr_prx / hdr_tls program headers.  The loader's
@@ -62,7 +62,7 @@ PHDRS
 	 * SELF payload and the loader rebuilds an ELF from them, so a phdr table
 	 * written past the last segment does not survive. Declaring it here keeps
 	 * the table at 0x40 inside PHDR[0] -- where SIZEOF_HEADERS accounts for
-	 * both entries and where Sony's own modules put it.
+	 * both entries and where the system's own modules put it.
 	 *
 	 * No sections are assigned to it; ld emits the slot because it is named
 	 * here, and prx-gen recognises it by its type plus a zero p_filesz.

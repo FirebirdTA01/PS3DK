@@ -1,7 +1,7 @@
-// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against the established compiler.
 // *** THE CELL THAT PROVES THE BODY CHANGED, not merely that we accept more. ***
 // With the whitespace rule this is OBJECT-like with body "(x) (2.0)".  The
-// reference expands it and only then fails, on the undefined x:
+// established compiler expands it and only then fails, on the undefined x:
 //     error C1008: undefined variable "x"
 // We also fail INSIDE the expanded text.  What must never come back is
 // "undeclared identifier 'K'" - that was the old behaviour and it means the

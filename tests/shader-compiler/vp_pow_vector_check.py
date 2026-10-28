@@ -14,7 +14,7 @@ and predicates; the default pow checks retain their strict instruction subset.
 Indexed-array checks opt into ARL plus address-register-relative constants;
 undefined address lanes and out-of-range constant addresses are refused.
 
-The table follows sce-cgc 475 (measured 2026-09-25): 2 and 3 are multiplies,
+The table follows the established compiler (measured 2026-09-25): 2 and 3 are multiplies,
 -1 / -0.5 / 0.5 use RCP / RSQ per lane, anything else is LG2 / MUL / EX2 per
 lane.  Only VALUES are asserted, so a different but correct schedule passes.
 Negative controls run through the same decoder and judge: every case's own
@@ -22,7 +22,7 @@ container, with each scalar-unit source swizzle forced to .xxxx (the defect's
 shape), must be judged wrong.
 
 usage: vp_pow_vector_check.py <rsx-cg-compiler> [--reference-dir DIR]
-  --reference-dir: also judge <case>.vpo files found there (sce-cgc output of
+  --reference-dir: also judge <case>.vpo files found there (the established compiler output of
   the same sources, e.g. from --write-sources) - a check of the decoder itself.
   --write-sources DIR: write the case sources to DIR and exit.
 """
@@ -105,7 +105,7 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False,
             target = ((w[2] & 63) << 3) | (w[3] >> 29)
             assert target < count, 'BRA target outside the program'
             if mode in (0, 7):
-                # TR / FL do not read the condition (the reference writes an
+                # TR / FL do not read the condition (the established compiler writes an
                 # unconditional BRA TR with an xyzw swizzle).
                 relation = 7
             else:
@@ -587,9 +587,9 @@ def main():
             if name == 'lit2.5':
                 broken = oracle_controls(blob, name)
                 for b in broken:
-                    print('  FAIL oracle control: %s' % b)
+                    print('  FAIL measurement control: %s' % b)
                 if not broken:
-                    print('  ok   oracle controls: saturation, early END, missing END, COLOR0 redirect, NaN all rejected')
+                    print('  ok   measurement controls: saturation, early END, missing END, COLOR0 redirect, NaN all rejected')
                 ok &= not broken
             if refdir and (Path(refdir) / (name + '.vpo')).exists():
                 rgood, rdetail = judge((Path(refdir) / (name + '.vpo')).read_bytes(), name)

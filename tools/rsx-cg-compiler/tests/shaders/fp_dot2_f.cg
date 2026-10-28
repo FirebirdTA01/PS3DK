@@ -7,9 +7,9 @@
 // worse - the same source is right in one shader and wrong in the next,
 // depending on register assignment.
 //
-// The reference emits DP2 here.  NV40 has the opcode; we simply had no
+// The established compiler emits DP2 here.  NV40 has the opcode; we simply had no
 // VOp for it.  Width 1 is deliberately NOT part of this fixture: nobody
-// has measured what the reference does with a scalar dot, and guessing it
+// has measured what the established compiler does with a scalar dot, and guessing it
 // into the same change would be the same mistake in the other direction.
 //
 // Reachable through dot, length, distance, normalize and reflect on any

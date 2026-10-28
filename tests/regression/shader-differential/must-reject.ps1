@@ -3,7 +3,7 @@
 # The differential rig judges pixels, and a shader the compiler must
 # REFUSE has none: this gate lives beside the stager instead of in it,
 # and never touches the manifest a boot reads.  For every row of
-# must-reject.txt it compiles the case with the reference compiler and
+# must-reject.txt it compiles the case with the established compiler and
 # with ours on the general lowering, classifies each outcome, and holds
 # it to the listed value:
 #
@@ -13,11 +13,11 @@
 #                    discriminator: a backend refusal never names it
 #   backend-refuse   refused without naming the file
 #
-# The reference's verdict is measured every run (its diagnostic text is
+# The established compiler's verdict is measured every run (its diagnostic text is
 # printed to the console and stays out of the tree).  Any row that reads
 # other than listed fails the gate; the gate line is MUST_REJECT_OK or
 # MUST_REJECT_FAIL, and the exit code follows it, so an acceptance run
-# can call this first and stop.  Known divergences from the reference
+# can call this first and stop.  Known divergences from the established compiler
 # are LISTED as what ours does today with the board item in the note,
 # so a divergence closing shows as a move here rather than as silence.
 #
@@ -34,7 +34,7 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $List) { $List = Join-Path $here "must-reject.txt" }
 if (-not $ReferenceCompiler -and $env:PS3_REF_CG_COMPILER) { $ReferenceCompiler = $env:PS3_REF_CG_COMPILER }
 if (-not $ReferenceCompiler -or -not (Test-Path -LiteralPath $ReferenceCompiler -PathType Leaf)) {
-    throw "reference compiler not found or not a file (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
+    throw "established compiler not found or not a file (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
 }
 if (-not $WslCompiler) { throw "pass -WslCompiler <wsl path to rsx-cg-compiler>" }
 $cases = Join-Path $here "must-reject"
@@ -124,7 +124,7 @@ foreach ($row in $rows) {
     $gotRef = Classify $ref.text $ref.rc (Join-Path $scratch "$case.ref.fpo") $case
     $gen = Compile-Ours $src (Join-Path $scratch "$case.gen.fpo") @()
     $gotGen = Classify $gen.text $gen.rc (Join-Path $scratch "$case.gen.fpo") $case
-    # The reference column lists accept | reject: a reject is satisfied by
+    # The established compiler column lists accept | reject: a reject is satisfied by
     # either refusal kind (its diagnostic text is printed, not asserted).
     $okRef = if ($wantRef -eq "reject") { $gotRef -ne "accept" } else { $gotRef -eq $wantRef }
     $okGen = Matches $gotGen $wantGen

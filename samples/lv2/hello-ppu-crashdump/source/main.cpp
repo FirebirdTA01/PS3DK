@@ -5,7 +5,7 @@
  * label matches.  Does NOT trigger a crash — just validates
  * the 2-entry API surface links correctly.
  *
- * This library is 475+ only; pre-475 firmware does not ship it.
+ * This library is 4.75+ only; pre-4.75 firmware does not ship it.
  */
 
 #include <cstdio>

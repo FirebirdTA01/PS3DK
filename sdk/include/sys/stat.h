@@ -5,11 +5,11 @@
   then undefines the POSIX-2008-compat macros that otherwise rewrite
   `st_atime` / `st_mtime` / `st_ctime` into `st_atim.tv_sec` etc.
   wherever those tokens appear in subsequent source — including in
-  unrelated structs (PSL1GHT's sysFSStat, Sony's CellFsStat, any
+  unrelated structs (PSL1GHT's sysFSStat, the system's CellFsStat, any
   user-defined struct that happens to use the same member name).
 
   Rationale:
-    - The reference SDK never defined these macros.
+    - The platform ABI never defined these macros.
     - Newlib 4.4's unconditional #defines made it impossible to
       declare `st_atime` as a struct member without pragma gymnastics
       (see the original patches/psl1ght/0003 push_macro/pop_macro dance).
@@ -21,7 +21,7 @@
       still works; those are real struct members.
     - `sb.st_atime` as a shortcut for `sb.st_atim.tv_sec` NO LONGER
       compiles.  Migrate to the full timespec form.  This matches the
-      the reference SDK convention and POSIX.1-2017 guidance.
+      the platform ABI convention and POSIX.1-2017 guidance.
 
   The forward runs on every inclusion, outside the include guard (as
   stdarg.h does): every copy of this wrapper on the include path then

@@ -2,10 +2,10 @@
  *
  * PSL1GHT libjpgdec legacy convenience API: jpgLoadFromFile and jpgLoadFromBuffer.
  *
- * All other PSL1GHT jpgDec* names are nidgen aliases of the reference cellJpgDec*
+ * All other PSL1GHT jpgDec* names are nidgen aliases of the system cellJpgDec*
  * exports (libjpgdec_stub.yaml).
  *
- * This implementation wraps the reference cellJpgDec API cleanly without
+ * This implementation wraps the system cellJpgDec API cleanly without
  * depending on PSL1GHT's original implementation.
  */
 

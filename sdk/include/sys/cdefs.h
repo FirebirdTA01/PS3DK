@@ -1,13 +1,13 @@
 /*! \file sys/cdefs.h
- \brief Reference-SDK source-compat wrapper around newlib's <sys/cdefs.h>.
+ \brief Cell OS source-compat wrapper around newlib's <sys/cdefs.h>.
 
   Newlib ships its own <sys/cdefs.h> with __BEGIN_DECLS / __END_DECLS
-  etc.  The reference SDK shipped a different <sys/cdefs.h> that
+  etc.  The platform ABI shipped a different <sys/cdefs.h> that
   *also* defined CDECL_BEGIN / CDECL_END / NAMESPACE_LV2_BEGIN /
-  NAMESPACE_LV2_END.  Reference samples reach those macros through
+  NAMESPACE_LV2_END.  Existing samples reach those macros through
   <sys/cdefs.h>; rather than patch every sample, we shadow newlib's
   header with this wrapper that pulls in newlib's content via
-  #include_next then adds the reference-only macros on top.
+  #include_next then adds the system-only macros on top.
 
   This header is installed to $PS3DK/ppu/include/sys/cdefs.h, which
   appears in the include search path (via -I$PS3DK/ppu/include) before

@@ -1,7 +1,7 @@
 /*! \file cell/sync.h
  \brief cellSync user-space synchronisation primitives.
 
-  Reference-SDK-compatible cellSync surface backed by libsync_stub.a
+  Cell OS-compatible cellSync surface backed by libsync_stub.a
   (emitted from tools/nidgen/nids/extracted/libsync_stub.yaml). Link
   with `-lsync_stub`.
 

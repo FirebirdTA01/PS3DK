@@ -13,7 +13,7 @@ struct MacroDefinition
 	std::vector<Token> replacementList;
 	bool isFunctionLike = false;
 	// A REPLACEMENT LIST THAT DOES NOT TOKENISE IS NOT AN ERROR UNTIL IT IS
-	// USED.  The reference ACCEPTS `#define UNUSED (1.0<FF>)` when nothing
+	// USED.  The established compiler ACCEPTS `#define UNUSED (1.0<FF>)` when nothing
 	// expands it and refuses the same body the moment it does, so the error
 	// belongs to the expansion and not to the definition - we tokenise the
 	// body eagerly, which reported it too soon (codex asked for the cell that
@@ -22,7 +22,7 @@ struct MacroDefinition
 	std::string bodyTokeniseError;
 
 	// EXPANDING AND BEING "DEFINED" ARE DIFFERENT THINGS.  Measured on
-	// sce-cgc 475, both spellings (#ifdef and #if defined):
+	// the established compiler, both spellings (#ifdef and #if defined):
 	//     pristine __LINE__/__FILE__/__DATE__/__TIME__   NOT defined, but
 	//                                                    they still expand
 	//     __CGC__ / __SCE_CGC__                          defined
@@ -93,7 +93,7 @@ public:
 	// For dependency generation
 	const std::set<std::string> getIncludedFiles() const;
 
-	// PSL1GHT / the reference SDK Cg pragma surface — collected during preprocess
+	// PSL1GHT / the platform ABI Cg pragma surface — collected during preprocess
 	// so the back-end can pick them up (lexer drops #pragma lines, so
 	// they don't reach the parser).  Insertion order is preserved; it
 	// matters for the $kill_NNNN parameter index in the .fpo container.
@@ -115,7 +115,7 @@ private:
 	bool keepComments;
 	SourceTextHook sourceTextHook_;  // empty = no hook
 
-	// the reference SDK Cg pragma collectors.  Populated by processPragma.
+	// the platform ABI Cg pragma collectors.  Populated by processPragma.
 	std::vector<std::string> alphakillSamplers_;
 	std::set<std::string>    alphakillSeen_;     // dedup helper
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The vertex engine holds 544 instructions.  Measured on the reference: a
+# The vertex engine holds 544 instructions.  Measured on the established compiler: a
 # 544-instruction program compiles, 545 is refused ("C9999: too many
 # instruction words generated").  Ours never checked, and emitted a
 # 1091-instruction program with a success exit.  Now refused by resource
@@ -8,8 +8,8 @@
 # Rows use `s = s * k[i] + p.yzwx;` with |k| <= 0.5, so every value stays
 # bounded (|s| <= 2|p|) and is judged in binary32 against independent float32
 # arithmetic (within 1e-5 relative: the VP MAD's rounding is not pinned
-# here).  Each line is one MAD, as in the reference (one input, one
-# constant), so the boundary is the reference's own count:
+# here).  Each line is one MAD, as in the established compiler (one input, one
+# constant), so the boundary is the established compiler's own count:
 #   543 lines                     543 instructions   accepted, by value
 #   543 lines + one multiply      544 instructions   accepted, by value (the limit)
 #   545 lines                     545 instructions   refused by both

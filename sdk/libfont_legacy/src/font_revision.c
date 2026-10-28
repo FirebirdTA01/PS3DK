@@ -3,7 +3,7 @@
  * cellFontGetStubRevisionFlags, which the inline cellFontInit in
  * <cell/font/libfont.h> calls. It is not a firmware export: the stub
  * archive supplies it, telling the libfont PRX which stub revision the
- * program was linked against. The value is the one the reference SDK's
+ * program was linked against. The value is the one the platform ABI's
  * stub archive reports.
  */
 

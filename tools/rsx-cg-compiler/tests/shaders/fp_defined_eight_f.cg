@@ -1,3 +1,3 @@
-// preprocessor-defined-operator.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against the established compiler.
 // The line number the row above must equal.
 float4 main() : COLOR { return 8; }

@@ -1,7 +1,7 @@
 /*! \file cell/rtc.h
  \brief cellRtc real-time-clock API.
 
-  Reference-SDK-compatible cellRtc surface backed by the
+  Cell OS-compatible cellRtc surface backed by the
   librtc_stub.a archive emitted from
   tools/nidgen/nids/extracted/librtc_stub.yaml. Link with
   `-lrtc_stub`.
@@ -82,7 +82,7 @@ int cellRtcGetCurrentTick(CellRtcTick *pTick);
 int cellRtcGetCurrentClock(CellRtcDateTime *pTime, int iTimeZone);
 int cellRtcGetCurrentClockLocalTime(CellRtcDateTime *pTime);
 
-/* Convenience macros mirrored from the reference surface. */
+/* Convenience macros mirrored from the system surface. */
 #define cellRtcGetCurrentTickUtc(_tick)   cellRtcGetCurrentTick((_tick))
 #define cellRtcGetCurrentClockUtc(_p)     cellRtcGetCurrentClock((_p), 0)
 

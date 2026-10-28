@@ -125,7 +125,7 @@ typedef int32_t (*CellPngDecCbControlFree)(void *ptr, void *arg);
  * ------------------------------------------------------------------ */
 
 /* Callback-carrying struct fields on the PS3 HLE ABI are 32-bit EAs,
- * not native 64-bit pointers.  Sony's PS3 GCC emitted function pointers
+ * not native 64-bit pointers.  The original PS3 GCC emitted function pointers
  * as mode(SI); our GCC defaults to mode(DI), so if we type these fields
  * as raw function pointers the struct grows from 28 to 48 bytes and
  * the SPRX reads garbage, returning CELL_PNGDEC_ERROR_ARG.  We store
@@ -372,7 +372,7 @@ int32_t cellPngDecExtDecodeData(CellPngDecMainHandle           mainHandle,
 /* ------------------------------------------------------------------ *
  * Ancillary PNG metadata chunks.
  *
- * Structures for these live in <cell/codec/pngcom.h> in the reference
+ * Structures for these live in <cell/codec/pngcom.h> in the system
  * SDK; we do not redeclare them here.  Callers that need a specific
  * chunk can extern-declare it and the libpngdec_stub.a resolves the
  * symbol at link time regardless of the struct declaration path.

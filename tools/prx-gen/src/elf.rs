@@ -25,7 +25,7 @@ pub const ELFOSABI_LV2: u8 = 0x66;
 pub const EM_PPC64: u16 = 21;
 
 pub const PT_LOAD: u32 = 1;
-/// Sony's relocation segment (`SCE_PPURELA`).
+/// The system's relocation segment (`SCE_PPURELA`).
 pub const PT_SCE_PPURELA: u32 = 0x7000_00A4;
 
 pub const SHT_PROGBITS: u32 = 1;

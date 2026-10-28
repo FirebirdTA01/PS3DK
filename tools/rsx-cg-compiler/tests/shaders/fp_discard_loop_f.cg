@@ -1,7 +1,7 @@
 // CF-2: a discard inside a DYNAMIC loop must refuse, and this is a
-// DIVERGENCE from the reference rather than a shared refusal.
+// DIVERGENCE from the established compiler rather than a shared refusal.
 //
-// The reference compiles this with real hardware loop instructions -
+// The established compiler compiles this with real hardware loop instructions -
 // LOOPH / BRKH / ENDLOOP around the comparison and the kill.  Our general
 // path lowers a run-time `for` to a hardware loop (FP-LOOP slice 1) but
 // refuses a discard in its body by name ("the loop body contains

@@ -1,4 +1,4 @@
-// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against the established compiler.
 // Both operands.
 #define BAD (1.0)
 #define BADBAD 2.0

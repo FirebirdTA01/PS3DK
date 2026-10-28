@@ -1,6 +1,6 @@
 """Generic Cg samplers retain distinct type identity and measured 2D bindings.
 
-The native oracle accepts separate sampler/sampler2D overloads and conversions
+The native measurement accepts separate sampler/sampler2D overloads and conversions
 between those types. Supported generic 2D fetches produce the corresponding
 sampler2D container, including CGtype1066 reflection. Other generic dimensions
 are ordinary valid Cg but remain explicitly unsupported in this bounded slice.

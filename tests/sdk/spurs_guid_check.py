@@ -1,4 +1,4 @@
-"""Independent ELF oracle for the PS3DK SPURS job GUID content contract."""
+"""Independent ELF measurement for the PS3DK SPURS job GUID content contract."""
 import hashlib
 from pathlib import Path
 import struct

@@ -29,7 +29,7 @@
 #define GUARD 0xdeadbeefu
 #define MARKERS 8
 
-/* exported like the reference so debuggers find them */
+/* exported like the system so debuggers find them */
 uint32_t _g_pCellSpursJobMemCheckMarker[MARKERS] __attribute__((aligned(16)));
 uint8_t  _g_cellSpursJobMemoryCheckJobContext[0x30] __attribute__((aligned(16)));
 uint8_t  _g_cellSpursJobMemoryCheckJobHeader[0x30] __attribute__((aligned(16)));

@@ -30,7 +30,7 @@ void Preprocessor::addIncludePath(const std::string& path)
 // Write (or rewrite) one of the bindings the DRIVER owns, unless the source
 // has taken the name over.  Called per file for __FILE__ and per line for
 // __LINE__, so it is also what restores the binding after a #undef - which is
-// exactly the reference's behaviour: `#undef __LINE__` stops the name being
+// exactly the established compiler's behaviour: `#undef __LINE__` stops the name being
 // "defined" and does NOT stop it expanding.
 void Preprocessor::setDriverMacro(const std::string& name, const Token& value)
 {
@@ -225,7 +225,7 @@ std::string Preprocessor::process(const std::string& source, const std::string& 
 	}
 
 	// ONE CONDITIONAL STACK PER TRANSLATION UNIT, not per file.  The
-	// reference lets an included file end inside an open #if: the block
+	// established compiler lets an included file end inside an open #if: the block
 	// simply continues in the includer, whose next #else/#endif binds to
 	// it, and an open block at the end of the whole unit is closed
 	// silently.  Only a block still SKIPPING at the end of the unit draws
@@ -267,12 +267,12 @@ void Preprocessor::initBuiltinMacros()
 		macros[driverOwned].countsAsDefined = false;
 	
 	// Target-identification macros. Beyond the standard __LINE__/__FILE__/
-	// __DATE__/__TIME__ above, sce-cgc 475 predefines __CGC__ and __SCE_CGC__,
-	// both 20000 (measured 2026-09-14 on the reference); of the names checked,
+	// __DATE__/__TIME__ above, the established compiler predefines __CGC__ and __SCE_CGC__,
+	// both 20000 (measured 2026-09-14 on the established compiler); of the names checked,
 	// __CG__, _CG_, _CGC_, CGC, __psp2__, __SCE__, __STDC__ and
 	// __STDC_VERSION__ are NOT defined.
 	// The Vita compiler's PSVita set is gone on purpose: a shader that tests one of
-	// those names must take the same branch it takes on the reference. The
+	// those names must take the same branch it takes on the established compiler. The
 	// SDK's SpuRender shaders test __CGC__ and fall into their PPU/SPU enum
 	// branch without it (preprocessor-predefined-macros).
 	defineMacro("__CGC__", "20000");
@@ -371,7 +371,7 @@ void Preprocessor::ensureDateAndTimeMacros()
 	dateAndTimeEnsured_ = true;
 }
 
-// ONE predicate for both spellings, because the reference has #ifdef and
+// ONE predicate for both spellings, because the established compiler has #ifdef and
 // #if defined agree on every cell, and two nearly-identical predicates is how
 // they stop agreeing (preprocessor-defined-operator).  It asks the BINDING, never the name - see
 // MacroDefinition::countsAsDefined for the measured table.
@@ -412,17 +412,17 @@ void Preprocessor::processDirective(const std::string& directive, std::string& o
 	// the first space.  `#if(SAMPLE_COUNT > 1)` is a directive named `if`
 	// whose expression happens to start with a parenthesis, and taking the
 	// whole whitespace-delimited token made the name `if(SAMPLE_COUNT` and
-	// reported it as an unknown directive - 20 reference-SDK sources, all
-	// of them shapes the reference compiles.
+	// reported it as an unknown directive - 20 Cell OS sources, all
+	// of them shapes the established compiler compiles.
 	//
-	// Measured against the reference rather than assumed, because the
+	// Measured against the established compiler rather than assumed, because the
 	// obvious rule is too permissive in one direction:
 	//
 	//   #if(N > 1)     accepted        #elif(N > 1)   accepted
 	//   #endif(N)      accepted        #ifdef(N)      REFUSED, C0105
 	//                                                 "Syntax error in #ifdef"
 	//
-	// So `ifdef` IS recognised as the name - the reference reports a
+	// So `ifdef` IS recognised as the name - the established compiler reports a
 	// SYNTAX error in it, not the C0104 "Unknown pre-processor directive"
 	// it gives for `#frobnicate`.  The name is parsed the same way in every
 	// case; what differs is that `#ifdef` then requires an identifier and
@@ -615,7 +615,7 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 	// expanded, and eighteen SDK shaders died on "undeclared identifier".
 	// The rule changes what the BODY IS, not merely whether we accept:
 	// `#define K (x) (2.0)` is object-like with body "(x) (2.0)" and the
-	// reference expands it and then fails on the undefined x (C1008),
+	// established compiler expands it and then fails on the undefined x (C1008),
 	// which is the cell that proves it (macro-parenthesis-adjacency).
 	std::regex defineRegex(R"(#\s*define\s+(\w+)(\(([^)]*)\))?[ \t]*(.*))");
 
@@ -629,10 +629,10 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 		// \s matches as separating the name from the body, and \f and \v were
 		// the two characters where that mattered: `#define K<FF>(1.0)` used to
 		// be read as function-like (so a bare K refused, which happened to
-		// agree with the reference) and became object-like (so it ACCEPTED,
+		// agree with the established compiler) and became object-like (so it ACCEPTED,
 		// which does not). Found by codex on the first revision.
 		//
-		// Measured: the reference refuses \f and \v ANYWHERE in a source, not
+		// Measured: the established compiler refuses \f and \v ANYWHERE in a source, not
 		// only in a directive - `return<FF>t*2.0;` in ordinary code is
 		// "error C0000: syntax error, unexpected $undef" just the same. So
 		// this is not a #define rule at all, and the general form is carded;
@@ -645,13 +645,13 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 		// compiles today stops compiling.
 		{
 			// ONLY BEFORE THE NAME. A form feed there is a DIRECTIVE syntax
-			// error on the reference and is reported even when the macro is
+			// error on the established compiler and is reported even when the macro is
 			// never used:
 			//     #define<FF>UNUSED (1.0)   C0105, with no use anywhere
 			// Everywhere else a form feed only matters when it reaches the
 			// TOKEN STREAM, which is the lexer's business and not this
 			// function's - my first version refused the whole directive and so
-			// refused `#define UNUSED_MACRO (1.0<FF>)`, which the reference
+			// refused `#define UNUSED_MACRO (1.0<FF>)`, which the established compiler
 			// ACCEPTS because that body is never tokenised (codex asked for
 			// exactly this qualification before I claimed "anywhere").
 			const size_t defineEnd = directive.find("define");
@@ -677,7 +677,7 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 		// literally named "3.14159f" that no call can ever supply, and the
 		// second falls through to an object-like body of "(" - both then
 		// refuse for some unrelated reason further downstream, which is a
-		// worse answer than the reference's even though the verdict matches.
+		// worse answer than the established compiler's even though the verdict matches.
 		{
 			const std::string after = match.suffix().str();
 			const size_t nameEnd = static_cast<size_t>(match.position(1)) +
@@ -752,7 +752,7 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 			catch (const std::exception& e)
 			{
 				// REMEMBERED, NOT RAISED.  A body that does not tokenise is not an
-				// error until something expands it: the reference ACCEPTS
+				// error until something expands it: the established compiler ACCEPTS
 				// `#define UNUSED (1.0<FF>)` with no use anywhere and refuses the
 				// same body the moment it is used.  We tokenise the replacement
 				// list eagerly, which reported it at the definition - so the
@@ -836,7 +836,7 @@ void Preprocessor::processIfdef(const std::string& directive, bool isIfndef)
 // processIfdef still took everActive from its own predicate and processElif
 // evaluated before looking at the parent, so
 //     #if 0 / #ifdef NEVER / #elif defined( / #endif / #endif
-// reached the #elif expression and refused where the reference accepts
+// reached the #elif expression and refused where the established compiler accepts
 // (codex, on the first review build - my own skip fix had covered one of the
 // three doors).
 bool Preprocessor::enclosingInactive(size_t skipTop) const
@@ -871,7 +871,7 @@ void Preprocessor::processIf(const std::string& directive)
 	// invisible while a malformed condition could not fail - and stopped being
 	// invisible the moment `defined` started diagnosing one:
 	//     #if 0
-	//     #if defined(          the reference ACCEPTS the file
+	//     #if defined(          the established compiler ACCEPTS the file
 	//     #endif
 	//     #endif
 	// everActive is set so that no #elif or #else arm of the skipped group can
@@ -1358,7 +1358,7 @@ static bool needsSpaceBefore(TokenType prevType, TokenType currType)
 // round again.  The text-based fixpoint loop this replaced re-tokenised the
 // whole line after every substitution and so could not remember what had
 // already been expanded: on either shape it never terminated (recursive-macro-termination).
-// The reference accepts both shapes; a preprocessor that spins cannot be
+// The established compiler accepts both shapes; a preprocessor that spins cannot be
 // worked around at all.
 namespace {
 
@@ -1516,7 +1516,7 @@ public:
 			// nothing in it reaches the token stream:
 			//     #define BAD  (1.0<FF>)
 			//     #define DROP(x) 2.0
-			//     DROP(BAD)          reference ACCEPTS
+			//     DROP(BAD)          established ACCEPTS
 			// Expanding every argument regardless made that refuse, because
 			// BAD's body does not tokenise (found by codex). Skipping the
 			// unused ones is also just what the language says.
@@ -1529,9 +1529,9 @@ public:
 			// Marking a parameter "used" because its name appears ANYWHERE was
 			// wrong and measurable: with BAD holding a form feed,
 			//     #define CAT(a,b) a##b      CAT(BAD,x)
-			// pastes BAD raw and the reference ACCEPTS, but pre-expanding the
+			// pastes BAD raw and the established compiler ACCEPTS, but pre-expanding the
 			// argument refused it (codex, confirmed on two independent builds;
-			// Fable measured the reference verdicts m19/m20). The mixed shape
+			// Fable measured the established compiler verdicts m19/m20). The mixed shape
 			//     #define BOTH(a,b) a##b + a    BOTH(BAD,x)
 			// is reference REFUSE, because the plain occurrence of `a` DOES
 			// expand - which is exactly why the decision cannot be per
@@ -1585,7 +1585,7 @@ public:
 				if (named)
 				{
 					// EXPLICITLY NOT conditional.  A macro argument is
-					// pre-expanded like any other text, and the reference
+					// pre-expanded like any other text, and the established compiler
 					// refuses what that produces rather than protecting it:
 					//     #define X 1
 					//     #define HAS(x) defined(x)
@@ -1604,17 +1604,17 @@ public:
 					// still see what was written.
 					//
 					// But an argument whose parameter the body does not mention
-					// AT ALL is still SCANNED: the reference checks the macro
-					// calls inside it (sce-cgc 475, C0107):
+					// AT ALL is still SCANNED: the established compiler checks the macro
+					// calls inside it (the established compiler, C0107):
 					//     #define ONE(x) x      #define DROP(x) 1.0
-					//     DROP(ONE(1,2))          reference REFUSES
-					//     DROP(DROP(ONE(1,2)))    reference REFUSES
+					//     DROP(ONE(1,2))          established REFUSES
+					//     DROP(DROP(ONE(1,2)))    established REFUSES
 					// while a body that does not tokenise is still only raised
 					// where it reaches the token stream, which a dry scan never
 					// does:
-					//     DROP(BAD)  DROP(KEEP(BAD))   reference ACCEPTS
+					//     DROP(BAD)  DROP(KEEP(BAD))   established ACCEPTS
 					// An argument used only as a # or ## operand is NOT scanned:
-					// CAT(ONE(1,2),1) and STR(ONE(1,2)) fail on the reference for
+					// CAT(ONE(1,2),1) and STR(ONE(1,2)) fail on the established compiler for
 					// the paste / the cast, never for ONE's arity.
 					const bool mentioned =
 						ai < macro.parameters.size()
@@ -1662,7 +1662,7 @@ private:
 	//     #if defined(A)        TRUE - A is a macro; what it expands to is
 	//                           never asked, and 1 is not a macro name.
 	// Anything that is not one of the two forms is an error in the directive,
-	// which is how the reference reads `defined(`, `defined()` and
+	// which is how the established compiler reads `defined(`, `defined()` and
 	// `defined(1)`.  A form that merely LOOKS well formed is not enough: the
 	// old regex pair matched only the good shapes and left the bad ones to the
 	// expression parser, which evaluated them happily.
@@ -1734,13 +1734,13 @@ private:
 		// THE DEFERRED BODY FAILURE, RAISED HERE AND NOWHERE ELSE.  This is the
 		// one place a replacement list actually becomes output, so it is the
 		// only place the body reaches the token stream.  Raising it where the
-		// NAME was looked up instead refused two shapes the reference accepts,
+		// NAME was looked up instead refused two shapes the established compiler accepts,
 		// found independently by codex and Fable within a minute of each other:
 		//   a FUNCTION-LIKE name not followed by "(" is not a use at all
 		//     #define F(x) ((x)<FF>*2.0)   then   float F = t.x;
 		//   and an argument the callee never substitutes is never expanded
 		//     #define DROP(x) 1.0          then   DROP(BAD)
-		// Both accept on the reference and on the parent.
+		// Both accept on the established compiler and on the parent.
 		// A DRY SCAN of an argument no parameter names never produces output,
 		// so it never reaches the token stream either (DROP(BAD) accepts).
 		if (macro.bodyFailedToTokenise && dryScanDepth_ == 0)

@@ -19,7 +19,7 @@
 #     A fix that wrote a block for every uniform instead of only for those
 #     declared with one passes every positive row and fails this one.
 #
-# LAYOUT, measured against sce-cgc (475 host-win32, -p sce_fp_rsx -e main),
+# LAYOUT, measured against the established compiler (475 host-win32, -p sce_fp_rsx -e main),
 # not assumed.  Per parameter the string region runs
 #     semantic string -> defaultValue block -> embeddedConst record -> name
 # with the block 16-byte aligned and exactly 16 bytes, four floats, zero
@@ -27,7 +27,7 @@
 # `uniform float4 light : C3 = {1,2,3,4}` puts 'C3' at 0xc3, the block at
 # 0xd0, the embeddedConst at 0xe0 and 'light' at 0xe8.  The ordering is
 # asserted below because getting the VALUES right at the WRONG offset still
-# produces a container the reference runtime reads differently.
+# produces a container the established compiler runtime reads differently.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -81,12 +81,12 @@ def floats_at(off):
     # PLAIN big-endian floats - no halfword unswap.  See the header.
     return [round(struct.unpack_from(">f", blob, off + 4 * i)[0], 6) for i in range(4)]
 
-# Values measured on the reference for these exact fixtures.
+# Values measured on the established compiler for these exact fixtures.
 if path == "fp-align":
     # The ALIGNMENT witness.  One defaulted uniform, and the point of the row
     # is not its value but the offset the block lands at: the entry
     # parameter's strings leave the blob at 12 mod 16, so a writer padding to
-    # 4 instead of 16 puts the block at 188 where the reference puts it at
+    # 4 instead of 16 puts the block at 188 where the established compiler puts it at
     # 192.  The other fixtures cannot see that - their strings happen to
     # leave the blob already aligned, so `% 16` and `% 4` emit the same bytes
     # (found by mutation, review: Fable).  There is no `plain` control here;
@@ -99,7 +99,7 @@ else:
     }
     if path.startswith("vp"):
         # No `uniform` keyword.  Cg treats a file-scope variable as uniform and
-        # the reference records its initialiser identically.  EVERY SDK source
+        # the established compiler records its initialiser identically.  EVERY SDK source
         # this change moved is this spelling, so a fix keyed on the keyword
         # passes every other row in this file and misses the corpus entirely.
         want["implicit"] = [1.0, 2.0, 3.0, 0.0]

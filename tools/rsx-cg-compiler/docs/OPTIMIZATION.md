@@ -21,7 +21,7 @@ shaders used to regression-check output are simple enough that many of
 these transformations have no observable effect on them.  The gates
 are in place so real-world shaders start exercising them cleanly.
 
-The defaults were chosen to match the reference compiler's behaviour
+The defaults were chosen to match the established compiler's behaviour
 so the byte-diff harness can compare like-for-like without either side
 passing extra flags.
 
@@ -86,7 +86,7 @@ back-end.  The `CompileOptions` struct already has slots for them.
    name (`mad_fused_f.cg`).
 
 **Hard rule:** every new optimisation must still produce byte-exact
-output against the reference compiler at the same
+output against the established compiler at the same
 `(OptLevel, fastmath)` tuple.  Our diff harness is the gate;
 optimisations that pass functional tests but diverge from the
-reference are bugs.
+established compiler are bugs.

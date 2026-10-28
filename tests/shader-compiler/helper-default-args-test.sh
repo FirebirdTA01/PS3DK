@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A DEFAULT ON A HELPER PARAMETER IS THE EXPRESSION, SUBSTITUTED AT THE CALL
-# SITE.  Measured against sce-cgc 475, sce_fp_rsx (function-visibility).
+# SITE.  Measured against the established compiler, sce_fp_rsx (function-visibility).
 #
 # This is A1's contract INVERTED, which is why the two slices needed separate
 # guards.  An entry parameter's default is RECORDED - a defaultValue block, an
@@ -8,7 +8,7 @@
 # parameter's default is not recorded at all: the container has no record for
 # it, because the argument is materialised where the call is written.  An
 # assertion looking for a defaultValue record for a helper parameter would be
-# looking for something the reference never emits.
+# looking for something the established compiler never emits.
 #
 # WHAT IS ASSERTED, and why each row cannot be dropped:
 #
@@ -31,7 +31,7 @@
 #               Since helper-vector-argument-conversion landed, f(float3) is
 #               viable for us too (a truncation), so this IS the ranking test:
 #               dropped lanes compare first.  The history below is kept.
-#               READ THIS ROW'S STRENGTH HONESTLY.  On the REFERENCE this is a
+#               READ THIS ROW'S STRENGTH HONESTLY.  On the established compiler this is a
 #               genuine preference: it accepts a float4 argument for a float3
 #               parameter with "warning C7011: implicit cast", so both
 #               candidates are viable there and it ranks them.  WE HAVE NO SUCH
@@ -43,7 +43,7 @@
 #               fp_helper_default_narrow_gap_f is the row that makes that
 #               dependency explicit and goes red at the same moment.
 #   REFUSALS    a default naming another parameter, and an exact-arity overload
-#               beside a defaulted one.  Both by VERDICT: the reference reports
+#               beside a defaulted one.  Both by VERDICT: the established compiler reports
 #               the first as C1102 "incompatible type for parameter #3", which
 #               describes a scope failure as a type error, and pinning that
 #               text would encode its confusion rather than its rule.
@@ -55,7 +55,7 @@
 #
 # THE out/inout RULE IS NOT AN ARITY RULE, and the four ambiguity rows are what
 # prove it.  A defaulted out/inout parameter still RANKS: beside a plain
-# overload of the supplied arity the call ties and the reference says
+# overload of the supplied arity the call ties and the established compiler says
 #
 #     error C1101: ambiguous overloaded function reference "f"
 #
@@ -69,7 +69,7 @@
 # ship, and it is why the exclusion was retracted and the check moved after
 # ranking.  The mutant for these rows is that exclusion restored.
 #
-# THE THREE out/inout ACCEPT CELLS ARE DELIBERATELY ABSENT.  The reference
+# THE THREE out/inout ACCEPT CELLS ARE DELIBERATELY ABSENT.  The established compiler
 # accepts `f(t, k)` where k is a declared lvalue, in both out and inout
 # spellings, and accepts the declaration alone with no call.  We refuse the
 # first two in the IR inliner ("out/inout parameters are not supported"), which
@@ -80,9 +80,9 @@
 # WHY THE REFUSAL ROWS PIN THE DIAGNOSTIC AND NOT JUST exit 1.  A call that
 # omits a defaulted out parameter can reach two different refusals: resolution
 # failing in semantic, or resolution succeeding and the inliner refusing what
-# it materialised.  Both exit 1; only one is the reference's reason.  The
+# it materialised.  Both exit 1; only one is the established compiler's reason.  The
 # control fp_helper_default_outnodef_refuse_f - same omission, no default -
-# is the reference's C1103 and must NOT carry the C1111 text, which is what
+# is the established compiler's C1103 and must NOT carry the C1111 text, which is what
 # keeps the pair from degenerating into "both refuse".
 #
 # THE AMBIGUITY ROW BELONGS TO THIS SLICE even though it is about overload
@@ -90,7 +90,7 @@
 # never viable for a one-argument call, so `f(float4)` beside
 # `f(float4, float k = 1.0)` could not be ambiguous.  Widening the arity filter
 # is what makes it reachable, and a resolver that preferred exact arity would
-# silently pick one where the reference refuses.
+# silently pick one where the established compiler refuses.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -200,14 +200,14 @@ accept fp_helper_default_uniform_twin_f "that uniform passed explicitly"
 same    fp_helper_default_uniform_f fp_helper_default_uniform_twin_f \
         "a uniform default substitutes the EXPRESSION, not a folded constant"
 
-# ---- shapes the reference accepts that this slice must not refuse ----
+# ---- shapes the established compiler accepts that this slice must not refuse ----
 accept fp_helper_default_all_f      "defaults on every parameter, called with none"
 accept fp_helper_default_nested_f   "a defaulted helper called from a defaulted helper"
 accept fp_helper_default_midparam_f "a default on a NON-trailing parameter"
 
 # ---- overload resolution, which widening the arity filter changed ----
 accept fp_helper_default_prefer_f      "exact match with a default fill vs a conversion"
-accept fp_helper_default_prefer_twin_f "only the overload the reference chooses"
+accept fp_helper_default_prefer_twin_f "only the overload the established compiler chooses"
 same    fp_helper_default_prefer_f fp_helper_default_prefer_twin_f \
         "the DEFAULTED float4 overload is chosen over f(float3), which is viable through truncation: dropping no lane beats dropping one"
 
@@ -261,7 +261,7 @@ refuse_saying fp_helper_default_reached_supplied_refuse_f \
 refuse_saying fp_helper_default_reached_used_refuse_f \
     "nosuch" "reached helper, default used"
 
-# ---- shapes the reference accepts and this slice must keep accepting ----
+# ---- shapes the established compiler accepts and this slice must keep accepting ----
 accept fp_helper_default_call_f      "a call in a helper default"
 accept fp_helper_default_call_twin_f "that call written out"
 same    fp_helper_default_call_f fp_helper_default_call_twin_f \
@@ -350,19 +350,19 @@ accept fp_helper_default_proto_twin_f "that call written out"
 same    fp_helper_default_proto_f fp_helper_default_proto_twin_f \
         "a prototype default is resolved and substituted, not left dangling"
 
-# ---- GAPS.  Each pins a refusal the reference does NOT make, by diagnostic,
+# ---- GAPS.  Each pins a refusal the established compiler does NOT make, by diagnostic,
 # ---- so the row goes red the day its card lands and forces a rewrite here.
 refuse_saying fp_helper_default_braced_struct_gap_f \
     "too much data|Complex constructor|constructor requires|struct parameter defaults are not supported" \
-    "braced-parameter-defaults: braced struct default (reference ACCEPTS)"
+    "braced-parameter-defaults: braced struct default (the established compiler ACCEPTS)"
 refuse_saying fp_helper_default_braced_array_gap_f \
     "constructor requires|too much data|Complex constructor" \
-    "braced-parameter-defaults: braced array default (reference ACCEPTS)"
+    "braced-parameter-defaults: braced array default (the established compiler ACCEPTS)"
 refuse_saying fp_helper_default_entrycall_gap_f \
     "cannot evaluate" \
-    "entry-default-call-fold: a call in an ENTRY uniform default (reference ACCEPTS)"
+    "entry-default-call-fold: a call in an ENTRY uniform default (the established compiler ACCEPTS)"
 # helper-vector-argument-conversion LANDED: a float4 argument for a float3
-# parameter is accepted and keeps xyz, as on the reference (warning C7011).
+# parameter is accepted and keeps xyz, as on the established compiler (warning C7011).
 # Byte-equal to the call written with t.xyz.
 accept fp_helper_default_narrow_gap_f  "a float4 argument for a float3 parameter"
 accept fp_helper_default_narrow_twin_f "that argument written as t.xyz"

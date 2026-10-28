@@ -176,7 +176,7 @@ IRTypeInfo IRTypeInfo::fromCgType(const CgType& cgType)
     // above set baseType or vectorSize; the old fallback here then took the
     // scalar element kind and width 1, which turned `float4 x[N]` into
     // float[N] - the container declared CGtype 1045 (float) where the
-    // reference declares 1048 (float4), and every element was allocated
+    // established compiler declares 1048 (float4), and every element was allocated
     // one lane wide.  Convert the element type through this same function
     // and carry only the count from the array (constant-uniform-array-index).
     if (cgType.arraySize() > 0)

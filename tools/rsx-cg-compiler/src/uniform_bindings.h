@@ -41,7 +41,7 @@ inline ExplicitUniformBindings resolveExplicitUniformBindings(
     ExplicitUniformBindings result;
     const auto add = [&](const auto& uniform) {
         if (uniform.storage != StorageQualifier::Uniform) return;
-        // A sampler's C<N> is a texture-unit binding in the reference,
+        // A sampler's C<N> is a texture-unit binding in the established compiler,
         // not CG_C metadata. Its allocation belongs to the sampler layouts
         // (fp_sampler_bindings.h) in both profiles: a vertex sampler takes
         // a texture unit and never a c[] register either, and rewriting
@@ -134,9 +134,9 @@ inline ExplicitUniformBindings resolveFpExplicitUniformBindings(
 {
     auto result = resolveExplicitUniformBindings(entry, module, false);
     // FP aliases share ownership of embedded-constant patch sites in the
-    // reference. Until shared-embedded-patch-ownership coalesces those sites, exposing independent
+    // established compiler. Until shared-embedded-patch-ownership coalesces those sites, exposing independent
     // blocks as one binding would give a runtime patch the wrong reach.
-    // Unused aliases carry no sites and remain legal (oracle u-only/v-only).
+    // Unused aliases carry no sites and remain legal (measurement u-only/v-only).
     std::map<int, std::string> usedRegisters;
     const auto check = [&](const auto& uniform) {
         const auto* binding = result.find(uniform.valueId);

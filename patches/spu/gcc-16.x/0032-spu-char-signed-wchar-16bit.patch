@@ -1,14 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FirebirdTA01 <FirebirdTA01@aol.com>
 Date: Sun, 18 Oct 2026 17:39:34 -0500
-Subject: [PATCH] spu: plain char signed, 16-bit wchar_t and int wint_t, as the reference
+Subject: [PATCH] spu: plain char signed, 16-bit wchar_t and int wint_t, as the system
 
-The reference SPU compiler makes plain char signed (__CHAR_SIGNED__ 1),
+The system SPU compiler makes plain char signed (__CHAR_SIGNED__ 1),
 wchar_t a 16-bit unsigned short (__WCHAR_TYPE__ short unsigned int,
 __WCHAR_MAX__ 65535U) and wint_t int (measured with its -dM -E for C and
 C++, 2026-10-16).  Ours had unsigned char, a 32-bit int wchar_t and an
 unsigned int wint_t, so char comparisons, L"" literals and structs holding
-wchar_t differed from code built with the reference.  An ABI change for
+wchar_t differed from code built with the system.  An ABI change for
 SPU code using plain char or wchar_t; it ships with the PPU char/wchar_t
 changes (gcc-16.x 0075/0076) in the GCC 16 switchover release.
 

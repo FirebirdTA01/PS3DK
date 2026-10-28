@@ -1,7 +1,7 @@
 /*
  * PS3 Custom Toolchain - <sys/tty.h>
  *
- * The lv2 TTY channels and their read/write system calls (402, 403), as the reference declares them,
+ * The lv2 TTY channels and their read/write system calls (402, 403), as the system declares them,
  * with PSL1GHT's sysTtyRead/sysTtyWrite spellings (librt's write(2) path uses them).  SDK-owned: this
  * header replaces PSL1GHT's.
  */

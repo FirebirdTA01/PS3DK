@@ -1,7 +1,7 @@
 libzip: use the timespec members of struct stat
 
 The PS3DK <sys/stat.h> wrapper deliberately removes the st_atime/st_mtime/
-st_ctime convenience macros (reference-SDK convention; see
+st_ctime convenience macros (Cell OS convention; see
 sdk/include/sys/stat.h).  Use the real timespec members.
 
 --- a/lib/zip_source_file_stdio.c

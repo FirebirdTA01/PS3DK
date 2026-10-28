@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # utf8-bom-extension: the leading UTF-8 byte order mark extension, --extension=bom.
 #
-# The reference compiler refuses a source that begins with EF BB BF, and so
+# The established compiler refuses a source that begins with EF BB BF, and so
 # do we by default.  With --extension=bom exactly one leading mark is
 # accepted at BOTH points a file enters the compiler - the file on the
 # command line and an #include - and the result is the bytes of the same
 # source without the mark.  That equality is the whole safety argument: an
 # enabled extension is admissible only where it reduces to something the
-# reference already covers, and the plain control IS that form, so no
+# established compiler already covers, and the plain control IS that form, so no
 # reference call is needed here.
 #
 # Two guards matter more than the acceptance rows:
@@ -262,7 +262,7 @@ EMPTY_INC_BODY='Failed to read include file'
 same_as_control "on: BOM-only main"    only_on  bom_only_f.cg         empty_ctl  empty_control_f.cg         's/bom_only_f/empty_control_f/g' "$EMPTY_MAIN_BODY"
 same_as_control "on: BOM-only include" ionly_on bom_only_include_f.cg iempty_ctl empty_include_control_f.cg 's/bom_only_include_f/empty_include_control_f/g; s/inc_bom_only\.h/inc_empty.h/g' "$EMPTY_INC_BODY"
 
-# Profile independence.  The Vita reference accepts a BOM where the PS3 one
+# Profile independence.  The Vita compiler accepts a BOM where the PS3 one
 # refuses, and this compiler accepts the psp2 profile names as aliases; the
 # policy is the flag's, not the profile's.
 refuse "off: psp2 profile, leading BOM" psp2_off off sce_fp_psp2 bom_f.cg yes 'bom_f.cg:1:1: error:' "$BOM_BODY"

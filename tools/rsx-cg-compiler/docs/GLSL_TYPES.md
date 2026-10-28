@@ -27,5 +27,5 @@ conversion in vertex programs. GLSL function names are controlled separately by
 `--extension=glsl-functions`.
 
 Acceptance under this flag is an intentional extension of the Cg source surface;
-it is not counted as unflagged reference-compiler acceptance. Tests compare the
+it is not counted as unflagged Established-compiler acceptance. Tests compare the
 enabled spellings with their explicit Cg counterparts and check output values.

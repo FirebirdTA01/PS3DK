@@ -150,7 +150,7 @@ The `onExitCallback` padding pattern is critical: the function pointer takes 4 b
 
 ### PPC64 ELFv1 .opd
 
-The `cellFiberPpuInitialize` public wrapper uses a hand-written assembly prologue (`fiber_init_wrapper.S`) to export both the `.opd` function descriptor (D symbol) and the `.cellFiberPpuInitialize` text entry point (T symbol), matching the reference archive's shape.
+The `cellFiberPpuInitialize` public wrapper uses a hand-written assembly prologue (`fiber_init_wrapper.S`) to export both the `.opd` function descriptor (D symbol) and the `.cellFiberPpuInitialize` text entry point (T symbol), matching the system archive's shape.
 
 ### TLS area
 

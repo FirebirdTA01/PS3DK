@@ -2,7 +2,7 @@
  *
  * PSL1GHT's spursAttributeInitialize, which is not a firmware export.
  *
- * Every other PSL1GHT spurs* name is a nidgen alias of the reference
+ * Every other PSL1GHT spurs* name is a nidgen alias of the system
  * export it called (libspurs_stub.yaml). This one was C in PSL1GHT: it
  * supplied the attribute revision and internal SDK version and called
  * _cellSpursAttributeInitialize. That is exactly what the SDK's inline

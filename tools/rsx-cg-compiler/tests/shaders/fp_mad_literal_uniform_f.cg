@@ -14,7 +14,7 @@
 //     FENCBR;
 //     MADR R0, R0, {0.5,0,0,0}.x, R1;
 //
-// Which operand rides in R1 is the reference's choice, not a free one:
+// Which operand rides in R1 is the established compiler's choice, not a free one:
 // R1 holds the UNIFORM when exactly one operand is a uniform, and the
 // ADDEND otherwise.  Measured across all four literal/uniform
 // combinations and both two-literal overflow shapes.

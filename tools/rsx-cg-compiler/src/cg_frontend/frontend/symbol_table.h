@@ -40,14 +40,14 @@ struct Symbol
     std::vector<CgType> parameterTypes;
     std::vector<std::string> parameterNames;
     // HOW FEW ARGUMENTS A CALL MAY SUPPLY.  Equals parameterTypes.size()
-    // unless TRAILING parameters carry defaults, which the reference
+    // unless TRAILING parameters carry defaults, which the established compiler
     // materialises at the call site (function-visibility).  Counted back from the end
     // and stopping at the first parameter without a default, because Cg
     // cannot skip a middle argument: a default on a non-trailing parameter
-    // constrains nothing and the reference still requires all of them.
+    // constrains nothing and the established compiler still requires all of them.
     size_t requiredParameterCount = 0;
     // WHERE THIS DECLARATION SITS IN THE UNIT, in parser order over top-level
-    // declarations.  The reference resolves every call against the
+    // declarations.  The established compiler resolves every call against the
     // declarations VISIBLE AT THAT CALL; our frontend is two-pass, so without
     // this the whole unit is visible from everywhere and a call resolves to
     // things written after it.  A source location cannot serve as the order -
@@ -84,7 +84,7 @@ public:
     Kind kind() const { return scopeKind; }
     Scope* parent() const { return parentScope; }
 
-    // A NAME USED HERE AND NOT FOUND.  The reference refuses a name that is
+    // A NAME USED HERE AND NOT FOUND.  The established compiler refuses a name that is
     // used and then DECLARED LATER IN THE SAME LEXICAL SCOPE ("error C1002:
     // the name X is already defined"), and accepts every other arrangement:
     // use outer then declare inner, use inner then declare outer, two sibling
@@ -167,7 +167,7 @@ public:
         const std::string& name,
         const std::vector<CgType>& argumentTypes,
         // Set when two candidates tie at the best conversion cost.  The
-        // reference calls that C1101; a preference rule here would silently
+        // established compiler calls that C1101; a preference rule here would silently
         // pick one where it refuses.
         bool* ambiguous = nullptr,
         size_t visibleThrough = SIZE_MAX) const;
@@ -183,14 +183,14 @@ public:
 
     // Does this NAME have any declaration visible at that point - a source
     // declaration with declIndex <= visibleThrough, or a builtin?  Asked to
-    // separate "no such name" (the reference's C1008 class, which it reports
+    // separate "no such name" (the established compiler's C1008 class, which it reports
     // only inside entry-reachable functions) from "that name exists but no
     // overload of it fits this call" (C1103, unconditional).
     bool hasVisibleFunction(const std::string& name, size_t visibleThrough) const;
 
     // Does this NAME have a visible SOURCE declaration (not a builtin)?  A call
     // whose only visible candidates are builtins and none fits is held like
-    // the C1008 class: the reference reports it only in entry-reachable
+    // the C1008 class: the established compiler reports it only in entry-reachable
     // bodies (measured, t_a287040c), while a visible source declaration that
     // does not fit is C1103 everywhere.
     bool hasVisibleSourceFunction(const std::string& name, size_t visibleThrough) const;

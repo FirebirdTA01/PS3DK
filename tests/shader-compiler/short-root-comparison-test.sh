@@ -10,7 +10,7 @@ import pathlib,re,subprocess,sys
 compiler,root=sys.argv[1:]; errors=[]
 sys.path.insert(0,str(pathlib.Path(root)/'tests/shader-compiler'))
 # tree_not / tree_or: the right operand is a boolean tree over comparisons
-# (!near(a,b), near(a,b) || d), evaluated eagerly as the reference does.
+# (!near(a,b), near(a,b) || d), evaluated eagerly as the established compiler does.
 for tag in ('sqrt_and','sqrt_or','sqrt_zero','rsqrt_and','sqrt_discard','tree_not','tree_or'):
     p=pathlib.Path(root)/'tools/rsx-cg-compiler/tests/shaders'/('fp_short_'+tag+'_f.cg')
     r=subprocess.run([compiler,'-p','sce_fp_rsx','-e','main',str(p)],capture_output=True,text=True,timeout=30)
@@ -53,7 +53,7 @@ for alt in (False, True):
         errors.append(name+': did not finish within 20 s (exponential walk over a shared boolean DAG)')
 # On VECTORS && and || are component-wise and evaluate both operands (no
 # short-circuit), so a sqrt/rsqrt on the right is ordinary eager code: the
-# reference accepts these (judged identical on the pixel rig).
+# established compiler accepts these (judged identical on the pixel rig).
 for name, body in (('vector_and_sqrt', 'bool4 b = (t > 0.1) && (sqrt(t) < 0.8); return b ? float4(1,1,1,1) : float4(0,0,0,0);'),
                    ('vector_or_rsqrt', 'bool4 b = (t > -1.0) || (rsqrt(t) > 1.5); return b ? float4(1,1,1,1) : float4(0,0,0,0);')):
     src=pathlib.Path(tempfile.mkdtemp())/(name+'.cg')

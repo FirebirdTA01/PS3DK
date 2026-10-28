@@ -6,7 +6,7 @@
 # K as 0.0, fragment general read it as vertex attribute 0, vertex refused
 # with "LoadUniform for unknown global 'K'".
 #
-# A NON-static file-scope const is a patchable uniform on the reference
+# A NON-static file-scope const is a patchable uniform on the established compiler
 # (t_528b9869): record K, float, referenced, default 7.5, read from an inline
 # constant holding 7.5 - so it is NOT byte-equal to the inline literal.  What
 # must hold is the value: the program computes what the literal does.
@@ -79,7 +79,7 @@ if fp_eval.evaluate(a, {'TEX0': [0.25, 0.5, 0, 0]}) == fp_eval.evaluate(b, {'TEX
 PY
 done
 
-# The record, as measured on the reference: K, float (1045), referenced,
+# The record, as measured on the established compiler: K, float (1045), referenced,
 # default 7.5 in its raw 16-byte block.
 python3 - "$work/const_general.fpo" <<'PY'
 import struct, sys

@@ -35,6 +35,16 @@ jobs:
       - name: Test sync-versions.sh keeps tools/VERSION canonical
         run: bash tests/sdk/sync-versions-test.sh
 
+      # Tracked text and the new commits' messages use the project's own
+      # terms for the platform (encoded patterns, exact-line exceptions).
+      - name: Test the wording scanner's refusals and controls
+        run: python3 tests/host/neutral-wording-negative-test.py
+
+      - name: Test neutral wording in the tree and new commits
+        env:
+          NEUTRAL_WORDING_RANGE: ${{ github.event_name == 'push' && format('{0}..{1}', github.event.before, github.sha) || '' }}
+        run: bash tests/host/neutral-wording-test.sh
+
       # The pre-release gate's scripts check their parsers on built-in fixtures.
       - name: Self-test leakscan.py and compare-builds.py
         run: |
@@ -214,10 +224,10 @@ jobs:
       - name: Vertex refract values and strict boundary comparison controls
         run: bash tests/shader-compiler/vp-refract-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
-      - name: Test a run-time index into a vector is refused like the reference
+      - name: Test a run-time index into a vector is refused like the system
         run: bash tests/shader-compiler/runtime-vector-selector-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
-      - name: Test uppercase swizzles are refused like the reference
+      - name: Test uppercase swizzles are refused like the system
         run: bash tests/shader-compiler/uppercase-swizzle-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test a missing entry point is refused cleanly on both profiles
@@ -308,6 +318,15 @@ jobs:
 
       - name: Test lv2 debugger record sizes and offsets
         run: bash tests/sdk/dbg-record-layout-test.sh
+
+      # Host controls for the layout checker: run without a PS3 compiler.
+      - name: Self-test the record-layout checker
+        run: python3 tests/sdk/struct-layout-selftest.py
+
+      # Skips without PS3DEV; every lv2- and library-facing record against
+      # the current-layout baseline (sizeof, alignof, member offsets).
+      - name: Test SDK record layouts against the current-layout baseline
+        run: bash tests/sdk/struct-layout-test.sh
 
       - name: Test the cell/hash digests against hashlib
         run: bash tests/sdk/hash-vectors-test.sh
@@ -502,12 +521,12 @@ jobs:
         run: bash tests/host/sdk-default-include-test.sh
 
       # Skips without PS3DEV or on GCC 12; gcc-16.x 0075/0076 give plain char,
-      # wchar_t and wint_t the reference toolchain's types in both data models.
+      # wchar_t and wint_t the established toolchain's types in both data models.
       - name: Test the PPU plain char, wchar_t and wint_t ABI
         run: bash tests/host/ppu-abi-char-wchar-test.sh
 
       # Skips without a PS3DEV SPU compiler; spu gcc-9.5.0 0016 gives plain char,
-      # wchar_t and wint_t the reference SPU toolchain's types.
+      # wchar_t and wint_t the system SPU toolchain's types.
       - name: Test the SPU plain char, wchar_t and wint_t ABI
         run: bash tests/host/spu-abi-char-wchar-test.sh
 
@@ -853,7 +872,7 @@ jobs:
         run: bash tests/sdk/spu-atomic-overload-test.sh
 
       # Skips without PS3DEV; runs against an installed or candidate compiler.
-      - name: Test the reference PS3 platform macros are predefined
+      - name: Test the system PS3 platform macros are predefined
         run: bash tests/sdk/platform-predefines-test.sh
 
       # Skips without PS3DEV; runs against the installed SDK headers.
@@ -1137,7 +1156,7 @@ jobs:
         run: bash tests/shader-compiler/backend-diagnostics-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Uniform struct entry parameters as one uniform per member
         run: bash tests/shader-compiler/uniform-struct-param-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Programs the reference refuses refuse here too
+      - name: Programs the system refuses refuse here too
         run: bash tests/shader-compiler/wrong-accept-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Typedef aliases preserve direct-type values and bindings
         run: bash tests/shader-compiler/typedef-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -1159,7 +1178,7 @@ jobs:
         run: bash tests/shader-compiler/helper-const-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A long predicated fragment program fits the FP register range
         run: bash tests/shader-compiler/fp-schedule-pressure-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Parameter records declare every input struct member and the reference isReferenced
+      - name: Parameter records declare every input struct member and the system isReferenced
         run: bash tests/shader-compiler/param-records-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Array out parameters refuse by name until their output slots are witnessed
         run: bash tests/shader-compiler/array-out-param-refusal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -1208,18 +1227,18 @@ jobs:
         run: bash tests/shader-compiler/fp-modifier-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       # Fragment literal rsqrt/exp2/log2/frac and dot/length/normalize/lerp fold
-      # to the reference's const blocks bit for bit; the measured edges stay run time.
-      - name: Fragment literal builtins fold like the reference
+      # to the system's const blocks bit for bit; the measured edges stay run time.
+      - name: Fragment literal builtins fold like the system
         run: bash tests/shader-compiler/fp-constant-builtin-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       # A product with a power-of-two literal is its producer's output scale
-      # (x2/x4/x8 and /2../8 on MUL, ADD, MAD, DP3), as the reference emits it.
-      - name: Fragment output scale folds like the reference
+      # (x2/x4/x8 and /2../8 on MUL, ADD, MAD, DP3), as the system emits it.
+      - name: Fragment output scale folds like the system
         run: bash tests/shader-compiler/fp-output-scale-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler constant if-conditions
         run: bash tests/shader-compiler/fp-constant-branch-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: A vertex rsqrt, exp2, log2 or frac of a literal folds to the reference's constant
+      - name: A vertex rsqrt, exp2, log2 or frac of a literal folds to the system's constant
         run: bash tests/shader-compiler/vp-constant-builtin-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A vertex program past 32 temporary registers is refused
         run: bash tests/shader-compiler/vp-register-budget-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -1271,7 +1290,7 @@ jobs:
         run: bash tests/shader-compiler/half-output-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the half colour output reaches H0 through the allocator
         run: bash tests/shader-compiler/h0-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Test reference-SDK declaration and directive forms
+      - name: Test Cell OS declaration and directive forms
         run: bash tests/shader-compiler/frontend-declaration-forms-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test the shared ucode decoder refuses a corrupted dump
         run: bash tests/shader-compiler/ucode-decode-selftest.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -1360,9 +1379,9 @@ jobs:
         run: bash tests/shader-compiler/inline-qualifier-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test macro expansion terminates on self-referential macros
         run: bash tests/shader-compiler/macro-hideset-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Test the preprocessor predefines exactly the reference's macros
+      - name: Test the preprocessor predefines exactly the system's macros
         run: bash tests/shader-compiler/predefined-macro-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Test file-scope initialiser arithmetic folds like the reference
+      - name: Test file-scope initialiser arithmetic folds like the system
         run: bash tests/shader-compiler/initializer-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Constant builtin initializers
         run: bash tests/shader-compiler/constant-builtin-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler

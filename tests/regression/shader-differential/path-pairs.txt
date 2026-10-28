@@ -1,6 +1,6 @@
 # Retired legacy/general witness inventory; no executable path-pair role.
 # Every shader/set below is retained in reference-pairs.txt and judged
-# directly against the reference. Kept for the migration coverage guard.
+# directly against the established compiler. Kept for the migration coverage guard.
 tools/rsx-cg-compiler/tests/shaders/fp_computed_color_store_f.cg|auto
 tools/rsx-cg-compiler/tests/shaders/fp_normalized_phong_vecinsert_f.cg|auto
 tools/rsx-cg-compiler/tests/shaders/fp_vecinsert_select_specular_f.cg|auto

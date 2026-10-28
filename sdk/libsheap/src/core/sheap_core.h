@@ -94,7 +94,7 @@ uint64_t __sheap_heap_allocate(const sheap_tree_access *t, uint32_t n_nodes,
 int __sheap_heap_free(const sheap_tree_access *t, uint32_t n_nodes,
                       uint64_t s_root, uint64_t ea_heap, uint64_t ptr);
 
-/* Key-table entries.  An entry is one big-endian doubleword: the reference
+/* Key-table entries.  An entry is one big-endian doubleword: the system
  * count in the high word and the encoded object address in the low word
  * (0 = nothing published, else ((ea - ea_heap) >> 7) + 1). */
 enum {

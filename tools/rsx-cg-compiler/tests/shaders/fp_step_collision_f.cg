@@ -4,7 +4,7 @@
 // NOTE: Passing this test proves absence of register collision between these
 // two live values (allocating distinct registers); it does not assert that the
 // register allocator achieves reference-parity register efficiency (our compiler
-// uses more registers than the reference across the corpus).
+// uses more registers than the established compiler across the corpus).
 float4 main(float2 uv : TEXCOORD0) : COLOR {
     float a = step(0.05, uv.x);
     float b = step(uv.x, 0.95);

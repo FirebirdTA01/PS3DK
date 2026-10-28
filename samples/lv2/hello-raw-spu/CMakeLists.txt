@@ -1,5 +1,5 @@
 # hello-raw-spu - a raw SPU driven through its problem-state registers,
-# with the reference-SDK names of <sys/raw_spu.h>: sys_raw_spu_create /
+# with the Cell OS names of <sys/raw_spu.h>: sys_raw_spu_create /
 # image_load, SPU_In_MBox / SPU_NPC / SPU_RunCntl / SPU_Out_MBox /
 # SPU_Status through sys_raw_spu_mmio_*, and LS_BASE_ADDR for the local
 # store.  Prints HELLO_RAW_SPU OK when the SPU's answer and stop code

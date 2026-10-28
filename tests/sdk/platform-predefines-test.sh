@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The PPU and SPU compilers predefine the reference PS3 platform macros
-# (GCC PPU patch 0046, SPU patch 0008).  Reference headers and samples pick
+# The PPU and SPU compilers predefine the system PS3 platform macros
+# (GCC PPU patch 0046, SPU patch 0008).  System headers and samples pick
 # their PS3 code paths on __CELLOS_LV2__; without it a sample framework took
 # its host branch.  Each row checks the macro's value and, where the data
 # model decides, that the other model's macros are absent.

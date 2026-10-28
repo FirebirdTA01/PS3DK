@@ -7,7 +7,7 @@
 // colour into H0, which is why the classifier checks the parameter first
 // and only falls back to the return type.
 //
-// Measured against the reference: outputFromH0=0, depthReplace=1.
+// Measured against the established compiler: outputFromH0=0, depthReplace=1.
 half main(float4 t : TEXCOORD0, out float4 colour : COLOR) : DEPTH
 {
 	colour = t;

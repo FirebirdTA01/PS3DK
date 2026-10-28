@@ -27,7 +27,7 @@ REFUSALS = {
     'column_bounds': 'float3x1 m=float3x1(p.x,p.y,p.z);return float4(m[0][1],0,0,1);',
     'row_runtime': 'float4x1 m=float4x1(p);return float4(m[int(q.x)],0,0,1);',
     'ambiguous_scalar_mul': 'float4x1 m=float4x1(p);return mul(m,q.x);',
-    # Measured reference accepts; these conversions remain explicit debts.
+    # The established compiler accepts (measured); these conversions remain explicit debts.
     'debt_vector_assignment': 'float4x1 m=p;return float4(m[0],m[1],m[2],m[3]);',
 }
 

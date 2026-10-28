@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # <cell/libnetctl.h> and <netinet/in.h> compile in any order (struct in_addr declared once, by netinet/in.h, as
-# the reference's libnetctl.h does).  Compiles tests/sdk/in-addr-order-test.c for each include order (netinet
+# the system's libnetctl.h does).  Compiles tests/sdk/in-addr-order-test.c for each include order (netinet
 # first, libnetctl first, the netex forwarder first, libnetctl alone) as gnu99, c11 and c++17, ILP32 and LP64,
 # under -Wall -Wextra -Werror, with this tree's sdk/include in front of the installed SDK.
 # Skips without PS3DEV.  usage: in-addr-order-test.sh [--ps3dev DIR]

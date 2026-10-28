@@ -10,16 +10,16 @@
 # the dead-store and collision censuses because the register IS written -
 # and three lanes are silently wrong.  It painted 4096 of 4096 pixels wrong
 # on the rig while every corpus shader stayed green, because every corpus
-# use of these ops is on a float.  The reference emits one instruction per
+# use of these ops is on a float.  The established compiler emits one instruction per
 # lane, each naming its own component: `SINR R0.y, R0.y` and so on.
 #
 # WHY THIS IS SCOPED TO ONE FIXTURE AND NOT SWEPT OVER THE CORPUS.  A
 # multi-lane scalar-unit write is CORRECT when the lanes are meant to hold
-# the same value - a broadcast.  The reference does exactly that: on
+# the same value - a broadcast.  The established compiler does exactly that: on
 # fp_pow_computed_literal_f, whose `color = float4(lit, lit, lit, 1)` needs
-# one value in three lanes, sce-cgc emits `EX2R R0.xyz, R0` and our output
+# one value in three lanes, the established compiler emits `EX2R R0.xyz, R0` and our output
 # is byte-identical to it.  Asserting "one lane always" over the corpus
-# therefore fails on correct, oracle-matching output - measured, on the
+# therefore fails on correct, measurement-matching output - measured, on the
 # first version of this file, which is why the rule is stated over a shader
 # whose lanes CANNOT legitimately agree.
 #

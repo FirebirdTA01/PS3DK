@@ -1,7 +1,7 @@
 /*! \file cell/sync/barrier.h
  \brief Forwarder for the CellSyncBarrier surface.
 
-  The reference SDK splits CellSync* primitives across per-type
+  The platform ABI splits CellSync* primitives across per-type
   headers (cell/sync/barrier.h, cell/sync/mutex.h, cell/sync/queue.h,
   …) and re-exports the lot through <cell/sync.h>.  Our SDK ships
   the surface in a single <cell/sync.h>; this header bridges the

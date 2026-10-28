@@ -2,7 +2,7 @@
 
 ## What this is
 
-A modern, open-source PlayStation 3 toolchain and SDK, **C++17-first on both PPU (PowerPC 64) and SPU (Cell SPE)**. It replaces the stale ps3dev baseline (GCC 7.2.0 / binutils 2.22 / newlib 1.20.0) with current versions, ships its own runtime, cell-style headers, NID/FNID stub archives and a Cg shader compiler, and keeps PSL1GHT homebrew building. The proprietary reference SDK is used privately as a coverage and behaviour oracle: it is never committed and never shipped, and no reference code is copied (the gitignored `reference/` holds the private mount and its policy).
+A modern, open-source PlayStation 3 toolchain and SDK, **C++17-first on both PPU (PowerPC 64) and SPU (Cell SPE)**. It replaces the stale ps3dev baseline (GCC 7.2.0 / binutils 2.22 / newlib 1.20.0) with current versions, ships its own runtime, cell-style headers, NID/FNID stub archives and a Cg shader compiler, and keeps PSL1GHT homebrew building. A proprietary SDK is used privately as a coverage and behaviour measurement: it is never committed and never shipped, and none of its code is copied (the gitignored `reference/` holds the private mount and its policy).
 
 ## Status snapshot
 
@@ -25,7 +25,7 @@ A modern, open-source PlayStation 3 toolchain and SDK, **C++17-first on both PPU
 | newlib | 4.4.0 with the PS3 `libsysbase` / lv2 glue (`patches/ppu/newlib-4.x`, `patches/spu/newlib-4.x`). |
 | GDB | 14.2, PPU only. |
 | PSL1GHT | Supported front-end with Cell-style naming; pinned in `scripts/bootstrap.sh` and patched by `patches/psl1ght/series`. |
-| Shader compiler | `rsx-cg-compiler` (independent Cg → NV40); reference-compatible output is the target (differences, including optimisation differences, are tracked; byte identity is not the release bar); extensions only where advised. |
+| Shader compiler | `rsx-cg-compiler` (independent Cg → NV40); output compatible with the established compiler is the target (differences, including optimisation differences, are tracked; byte identity is not the release bar); extensions only where advised. |
 | Host tooling | Rust workspace in `tools/` (nidgen, coverage-report, abi-verify, prx-gen, sfo, make-sdata, ovis, spu-elf-to-ppu-obj), plus `rsx-cg-compiler` (C++) and `sprx-linker` (C). |
 
 ## Workspace layout
@@ -71,7 +71,7 @@ Agent-specific memory lives outside the repo, under each agent's own project-mem
 ## House rules
 
 - Never commit to `reference/` (`.gitignore` enforces).
-- Never copy reference SDK code into the repo. Independent only.
+- Never copy proprietary SDK code into the repo. Independent only.
 - Session handoff briefs and sample-sweep reports are LOCAL-ONLY: they live in the gitignored `docs/local/` and are never committed (director, 2026-08-29).
 - `.gitattributes` keeps `patches/**` byte-exact (no CRLF).
 - Build trees go under `$PS3_BUILD_ROOT` (default `$HOME/ps3tc/build`) to dodge MAX_PATH on Windows and keep `stage/` clean.

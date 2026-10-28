@@ -7,7 +7,7 @@
 # underscored SPRX export, so the public name needs a real object.
 #
 # _gCellFiberPpuThreadLocalStorage: 64-byte BSS area that the SPRX
-# references.  The reference archive ships this in
+# references.  The system archive ships this in
 # fiber_ppu_tls_area_for_prx.o; we replicate the same symbol here.
 #
 # Build invocation: scripts/build-cell-stub-archives.sh calls

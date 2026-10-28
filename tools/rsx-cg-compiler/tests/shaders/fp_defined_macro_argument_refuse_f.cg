@@ -1,7 +1,7 @@
-// preprocessor-defined-operator.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against the established compiler.
 // A MACRO ARGUMENT IS NOT PROTECTED. The argument X is pre-expanded to 1
 // like any other text, the operator then sees defined(1), and the
-// reference REFUSES. Inheriting the conditional mode into argument
+// established compiler REFUSES. Inheriting the conditional mode into argument
 // pre-expansion would wrong-ACCEPT this and look like a fix.
 #define X 1
 #define HAS(x) defined(x)

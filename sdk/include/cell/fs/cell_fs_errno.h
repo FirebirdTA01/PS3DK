@@ -2,7 +2,7 @@
  * cell_fs_errno.h — errno surface forward.
  *
  * Re-includes the file API header (which carries every CELL_FS_ERROR_*
- * + CELL_FS_E* alias).  Reference SDK splits errno + file API, but the
+ * + CELL_FS_E* alias).  Platform ABI splits errno + file API, but the
  * errno header itself just forwards to <sys/fs.h>; we flatten that one
  * level so applications see the same macro set whether they include
  * <cell/cell_fs.h> or just <cell/fs/cell_fs_errno.h>.

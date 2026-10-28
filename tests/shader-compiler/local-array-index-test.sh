@@ -40,7 +40,7 @@ rc=0
 "$compiler" -p sce_fp_rsx --emit-container "$work/out.fpo" "$src" \
     >"$work/general.log" 2>&1 || rc=$?
 refusal_status "$rc" "fp_local_array_dynamic_index_f"
-[[ "$rc" -eq 1 ]] || fail "dynamic local array index compiled; sce_fp_rsx reference rejects this profile-restricted shape"
+[[ "$rc" -eq 1 ]] || fail "dynamic local array index compiled; the established compiler rejects this profile-restricted shape"
 
 # Tracked array reads and writes now share the constant-selector proof.
 # This fixture remains a reference-refused dynamic read on the FP profile.

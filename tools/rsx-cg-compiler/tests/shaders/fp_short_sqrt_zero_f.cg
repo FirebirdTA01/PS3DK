@@ -1,5 +1,5 @@
 float4 main(float4 a : TEXCOORD0) : COLOR {
-    // The diagonal has d==0 at runtime, so the oracle cannot decide it
+    // The diagonal has d==0 at runtime, so the established compiler cannot decide it
     // through constant folding. Off-diagonal pixels also exercise both signs.
     float d = a.x - a.y;
     bool k = d == 0 && sqrt(d) == 0;

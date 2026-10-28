@@ -1,4 +1,4 @@
-/* hello-ppu-sail-rec — cellSailRec validation test. Composer init/finalize (475+ surface). */
+/* hello-ppu-sail-rec — cellSailRec validation test. Composer init/finalize (4.75+ surface). */
 #include <cstdio>
 #include <cstdint>
 #include <sys/process.h>

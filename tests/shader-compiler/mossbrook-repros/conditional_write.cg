@@ -1,5 +1,5 @@
 // POSITIVE: one top-level r, rewritten under a condition, returned once.
-// (review: codex, 4f103738)  Reference (sce-cgc 475): t.x=0.75 -> zwzw, t.x=0.25 -> xyxy
+// (review: codex, 4f103738)  Reference: t.x=0.75 -> zwzw, t.x=0.25 -> xyxy
 struct Plan { float2 mirror[2]; };
 Plan pick(float4 t) { Plan r; r.mirror[0]=t.xy; r.mirror[1]=t.xy; if(t.x>0.5) {r.mirror[0]=t.zw; r.mirror[1]=t.zw;} return r; }
 float4 main(float4 t:TEXCOORD0):COLOR { Plan q=pick(t); return float4(q.mirror[0],q.mirror[1]); }

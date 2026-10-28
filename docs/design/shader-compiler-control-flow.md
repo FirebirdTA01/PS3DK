@@ -64,7 +64,7 @@ the write):
    unconditionally, set the condition code from `cond`, then commit
    `thenVal` against a CC-gated destination (`op dst(NE.x), ...`) so
    it lands only where the predicate holds.  This is what the
-   reference emits for the guarded idioms (measured: `SGTRC RC.x`
+   established compiler emits for the guarded idioms (measured: `SGTRC RC.x`
    then `RCPR R0.x(NE.x)`), and the general path's VInstr already
    carries the fields (`ccUpdate`, `predicate`).
    The arithmetic blend (`d = a-b; dst = cond*d + b`) — which is what
@@ -76,7 +76,7 @@ the write):
    canonical guarded-divide (`if (x>0) r = 1/x; else r = 0;`) is
    exactly the shape real shaders write.  Purity excludes side
    effects; it does not exclude VALUE CONTAMINATION.  (Found in
-   design review, with the reference's predicated emission as the
+   design review, with the system's predicated emission as the
    settling evidence.)  NOTE the scope change the correction forces:
    the predicated select upgrade was filed as an optional follow-up
    when it looked like flatten would emit PredCarry itself; with

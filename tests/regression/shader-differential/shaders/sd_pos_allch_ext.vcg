@@ -7,7 +7,7 @@
 // same inputs and the same recipe for the base channels, and distinct
 // non-constant functions for the rest, so an instrument row staged UNDER
 // IT (manifest field vp=controls/vp_ext.vpo) proves each coverage FP on
-// pixels against the reference's container of the same FP.  REFERENCE-
+// pixels against the established compiler's container of the same FP.  REFERENCE-
 // compiled by the stager: an instrument must not rest on the compiler
 // under test.
 //

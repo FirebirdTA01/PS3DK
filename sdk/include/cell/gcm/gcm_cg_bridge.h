@@ -8,7 +8,7 @@
  * no PSL1GHT rsx{Vertex,Fragment}Program intermediate, no rsxLoad*
  * forwarding.
  *
- * Reference-compiler output is the source of truth; the hardware
+ * Established-compiler output is the source of truth; the hardware
  * register encoding is derived here from the parameter-table semantics
  * and container fields rather than being consumed from PSL1GHT-style
  * struct fields.
@@ -130,7 +130,7 @@ static inline void ps3tc_gcm_inline_transfer(CellGcmContextData *ctx,
 
 /* ---- VP result-mask synthesis ------------------------------------- */
 /*
- * the reference compiler writes a compressed / user-visible summary into
+ * the established compiler writes a compressed / user-visible summary into
  * CgBinaryVertexProgram.attributeOutputMask that doesn't line up bit-
  * for-bit with NV40TCL_VP_RESULT_EN.  We rebuild the hardware mask
  * from the parameter table: walk CgBinaryParameter entries with
@@ -155,7 +155,7 @@ static inline void ps3tc_gcm_inline_transfer(CellGcmContextData *ctx,
  * Each channel is a single bit.  Earlier revisions of this routine
  * OR'd in bit (2+idx) for the "back" variant of each colour, which
  * declared BFC0/BFC1 as outputs the VP never actually writes — the
- * interpolator then fed zeros down the COL0 path.  The reference
+ * interpolator then fed zeros down the COL0 path.  The system
  * basic-triangle sample's black-triangle symptom traced to exactly
  * that.
  */
@@ -215,7 +215,7 @@ static inline uint32_t ps3tc_cg_vp_result_en(const CgBinaryProgram *p)
  * Vertex-program bind — loads ucode to VP instruction memory and sets
  * the VP_ATTRIB_EN / TRANSFORM_TIMEOUT state that must accompany a new
  * program.  VP_RESULT_EN is owned by fragment-program binding, matching
- * the reference SDK's SetFragmentProgramOffset behavior.
+ * the platform ABI's SetFragmentProgramOffset behavior.
  * -------------------------------------------------------------------- */
 static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
                                            CGprogram prog, void *ucode)
@@ -229,7 +229,7 @@ static inline void cellGcmSetVertexProgram(CellGcmContextData *ctx,
     const uint32_t inst_count = vp->instructionCount;
     const uint32_t inst_start = vp->instructionSlot;
 
-    /* Reference SDK batches VP instructions into one UPLOAD_INST packet
+    /* Platform ABI batches VP instructions into one UPLOAD_INST packet
      * for small programs.  Keep packets below count=32; the observed
      * RPCS3 FIFO desync only appeared with consecutive count=32 packets. */
     const uint32_t packet_count = (inst_count + 6u) / 7u;
@@ -379,7 +379,7 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
     /* Bind the FP ucode address.  The lower 29 bits carry the byte
      * offset within RSX memory; bit 0 of the header-byte carries
      * location (LOCAL vs RSX) — PSL1GHT writes (location+1) | offset
-     * which matches the reference-runtime convention. */
+     * which matches the system-runtime convention. */
     {
         uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
         if (!w) return;
@@ -425,8 +425,8 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
      *                0x0e = output from H0 (half-precision)
      *                0x80 = shader uses KIL
      *              The CgBinaryFragmentProgram.outputFromH0 flag tells
-     *              us which output register the reference Cg compiler
-     *              used.  Observed: the reference basic-triangle FP had
+     *              us which output register the system Cg compiler
+     *              used.  Observed: the system basic-triangle FP had
      *              outputFromH0=0 (R0) and rendered solid black because
      *              we weren't setting 0x40
      *              — the HW then had no defined output register.
@@ -689,7 +689,7 @@ static inline void cellGcmSetVertexProgramParameterBlock(CellGcmContextData *ctx
 }
 
 /* Patch a fragment-program embedded constant in RSX local memory at
- * addrOffset.  The reference SDK emits the patch through the FIFO's
+ * addrOffset.  The platform ABI emits the patch through the FIFO's
  * inline-transfer path, which keeps RSX-side program/cache state in
  * lockstep with the command stream. */
 static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
@@ -702,7 +702,7 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
 
     const CgBinaryParameter *pp = (const CgBinaryParameter *)param;
 
-    /* Matrix-uniform detection: the reference compiler emits row leaves pp+1..pp+N
+    /* Matrix-uniform detection: the established compiler emits row leaves pp+1..pp+N
      * for float4x4 and half4x4 uniforms.  The parent has embeddedConst=0
      * (no direct slots); the row leaves carry the actual ucode patch
      * points.  We must gate on resource type to avoid matching varyings,
@@ -738,7 +738,7 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
     /* Matrix uniform: walk row leaves pp+1..pp+N.  Each leaf is a
      * float4 parameter whose embeddedConst list points into the ucode
      * slots that need the row values.  A per-leaf var gate (0x1006 =
-     * CG_UNIFORM per the reference compiler encoding) stops the walk if we overrun
+     * CG_UNIFORM per the established compiler encoding) stops the walk if we overrun
      * the row-leave sequence into unrelated parameters. */
     {
         const unsigned rows = ps3tc_cg_rows_for_type(pp->type);
@@ -772,7 +772,7 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
 }
 #endif
 
-/* reference-SDK-convention no-context C++ overloads — forward through the
+/* Cell OS-convention no-context C++ overloads — forward through the
  * gCellGcmCurrentContext global. */
 #ifdef __cplusplus
 

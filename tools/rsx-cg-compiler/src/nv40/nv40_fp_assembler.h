@@ -38,15 +38,15 @@ public:
     void emit(const struct nvfx_insn& insn, uint8_t opcode);
 
     // Emit an RSX FENCBR instruction — opcode 0x3E, OUT_NONE = 1,
-    // OUT_REG = 0x3F (sentinel bit pattern used by the reference
+    // OUT_REG = 0x3F (sentinel bit pattern used by the established compiler
     // compiler), all source operands default.  Placed before any
     // instruction that reads an inline-const block to stall the
     // pipeline until the const is available.  Not in the NV40 opcode
-    // header — verified from reference-compiler output.
+    // header — verified from Established-compiler output.
     void emitFencbr();
 
     // An all-zero instruction (opcode NOP, every field zero).  The
-    // reference emits exactly one of these, with PROGRAM_END stamped by
+    // established compiler emits exactly one of these, with PROGRAM_END stamped by
     // markEnd(), for a fragment program that has no effect at all.
     void emitNop();
 
@@ -56,7 +56,7 @@ public:
     void emitFenctr();
 
     // Append a 16-byte inline constant immediately after the most
-    // recent instruction — matches the reference compiler's layout for FP literal
+    // recent instruction — matches the established compiler's layout for FP literal
     // consts.  Values are four fp32s in the caller's natural order
     // (value[0] is the X lane etc.); the on-disk halfword swap is
     // applied at words() like for instructions.
@@ -101,7 +101,7 @@ public:
     size_t wordCount() const { return logicalWords_.size(); }
 
     // Returns the ucode in on-disk halfword-swapped form (matches
-    // the reference compiler output and what RSX expects in the .fpo blob).
+    // the established compiler output and what RSX expects in the .fpo blob).
     std::vector<uint32_t> words() const;
 
     int      numTempRegs()     const { return numTempRegs_; }

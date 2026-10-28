@@ -18,21 +18,21 @@
 # every later use a COPY of the aliased node, so semantic analysis, struct
 # layout and the IR builder's cast-target name compare never see the alias.
 #
-# Every row below was measured on the reference on 2026-09-25 (probe dir
+# Every row below was measured on the established compiler on 2026-09-25 (probe dir
 # .local/probe-decl, 33 cells).  The accept rows are TWINS: the alias
 # spelling must produce the same container as the direct spelling, which
-# is what the reference does for every one of them, VP included.  The
-# refusals are the reference's own: a keyword-less alias of a struct not
+# is what the established compiler does for every one of them, VP included.  The
+# refusals are the established compiler's own: a keyword-less alias of a struct not
 # yet declared, an unknown target, any second definition of the name
-# (an identical re-typedef included - C11 allows that, the reference does
+# (an identical re-typedef included - C11 allows that, the established compiler does
 # not, C1002), and a forward `typedef struct Foo Bar;` whose Foo is never
 # defined but IS used (C1313).  A forward tag that is never used is
-# accepted, as on the reference.
+# accepted, as on the established compiler.
 #
 # One twin has its OWN control: fp_typedef_tag_and_name_f routes i.col
 # through a helper's parameter, and on this compiler a struct member that
 # reaches the output only that way loses its varying record in the
-# container (ucode identical, record gone; the reference keeps it and its
+# container (ucode identical, record gone; the established compiler keeps it and its
 # bytes equal the direct spelling's).  That is a reflection gap of the call
 # path, present without any typedef, so the twin is the same helper shape
 # under the tag alone.
@@ -42,7 +42,7 @@
 # the DeferredShading light-pass shape.  The alias resolves (the parser no
 # longer refuses the parameter), but the lowering then treats the struct
 # parameter as a varying input and refuses "unsupported input semantic";
-# the parent does the same for the tag spelling, and the reference accepts
+# the parent does the same for the tag spelling, and the established compiler accepts
 # all three spellings (member-uniform, parameter-uniform, aliased) with one
 # container.  That is the light passes' NEXT blocker and has its own card.
 #
@@ -52,8 +52,8 @@
 # there would measure the struct-copy gap, not the alias.
 #
 # Nor a typedef inside a function body.  The
-# reference accepts it and scopes it to the body (measured: a use outside
-# the body is a syntax error there); no reference-SDK source writes one,
+# established compiler accepts it and scopes it to the body (measured: a use outside
+# the body is a syntax error there); no Cell OS source writes one,
 # and this compiler still refuses it at the statement.
 set -euo pipefail
 
@@ -97,7 +97,7 @@ compile() {   # <stem> -> rc; container at $work/<stem>.bin, log at .log
 accepts() {   # <stem> <what>
     if ! compile "$1"; then
         head -n 4 "$work/$1.log" >&2
-        fail "$2 did not compile; the reference accepts it"
+        fail "$2 did not compile; the established compiler accepts it"
     fi
     [[ -s "$work/$1.bin" ]] || fail "$2 exited 0 but wrote no container"
 }
@@ -106,13 +106,13 @@ twin() {   # <alias stem> <direct stem> <what>
     accepts "$1" "$3"
     accepts "$2" "the direct spelling of $3"
     cmp -s "$work/$1.bin" "$work/$2.bin" \
-        || fail "$3: the alias spelling and the direct spelling produced different containers; the reference emits the same bytes for both"
+        || fail "$3: the alias spelling and the direct spelling produced different containers; the established compiler emits the same bytes for both"
 }
 
 refuses() {   # <stem> <what> <text the diagnostic must contain (grep -E)>
     local rc=0
     compile "$1" || rc=$?
-    [[ "$rc" -eq 1 ]] || fail "$2 compiled; the reference refuses it"
+    [[ "$rc" -eq 1 ]] || fail "$2 compiled; the established compiler refuses it"
     [[ -s "$work/$1.bin" ]] && fail "$2 refused but still wrote a container"
     grep -qiE -- "$3" "$work/$1.log" || {
         head -n 4 "$work/$1.log" >&2
@@ -145,7 +145,7 @@ if len(data) < 64:
 print("typedef-alias: control container %d bytes" % len(data))
 PY
 
-# --- the reference's refusals --------------------------------------------
+# --- the established compiler's refusals --------------------------------------------
 refuses fp_typedef_refuse_before_def_f  "typedef Foo Bar; before struct Foo"     "unknown type name 'Foo'"
 refuses fp_typedef_refuse_unknown_f     "typedef Nope Bar;"                       "unknown type name 'Nope'"
 refuses fp_typedef_refuse_dup_same_f    "the same typedef written twice"         "'B' is already defined"

@@ -1,5 +1,5 @@
-// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
-// A lone '(' as an OBJECT-like body (note the space).  The reference takes it
+// macro-parenthesis-adjacency.  Measured against the established compiler.
+// A lone '(' as an OBJECT-like body (note the space).  The established compiler takes it
 // as the body and fails in the parser - C0000 "syntax error, unexpected ';'"
 // - NOT as a bad definition.  Pinned so the C0105 check above cannot creep
 // onto the object-like side.

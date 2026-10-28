@@ -17,7 +17,7 @@ The long-term direction is to replace individual emitters with native
 subdirectory), phasing out the `rsx*` names at callsites in
 `sdk/include/cell/*` as each native emitter lands.  Until that
 migration finishes, the absorbed sources provide full coverage.
-Reference the reference SDK layout is the target: one `libgcm_cmd.a`, no
+Reference the platform ABI layout is the target: one `libgcm_cmd.a`, no
 separate rsx library.
 
 ## License

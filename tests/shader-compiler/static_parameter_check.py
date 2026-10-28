@@ -1,9 +1,9 @@
 """Opt-in helper static parameters reduce to ordinary parameter byte twins.
 
-The pinned bundled NVIDIA oracle accepts helper static/static const/const static
-forms, keeps const writes illegal, and emits the static-free twins. Native SCE
+The pinned bundled NVIDIA measurement accepts helper static/static const/const static
+forms, keeps const writes illegal, and emits the static-free twins. The established compiler
 rejects static parameters with C1064. Entry parameters remain outside this first
-extension slice; crashes in the bundled oracle are not acceptance evidence.
+extension slice; crashes in the bundled measurement are not acceptance evidence.
 """
 import argparse
 import subprocess

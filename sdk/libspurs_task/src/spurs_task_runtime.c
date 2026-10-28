@@ -19,7 +19,7 @@
  * cellSpursExit / cellSpursTaskExit are in spurs_task_exit.S - they
  * hit the critical path, and the C compiler can't interleave the
  * load/store/dispatch chain as tightly as the hand scheduling in
- * the reference libspurs.a.  Leaf helpers below stay in C - GCC
+ * the system libspurs.a.  Leaf helpers below stay in C - GCC
  * produces identical 6-instruction bodies.
  */
 #include <stdint.h>

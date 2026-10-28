@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # utf16-extension: the UTF-16 BOM extension, --extension=utf16.
 #
-# The reference compiler refuses a source that begins with a UTF-16 byte
+# The established compiler refuses a source that begins with a UTF-16 byte
 # order mark (FF FE for UTF-16LE, FE FF for UTF-16BE), and so do we by
 # default.  With --extension=utf16 the file is transcoded to UTF-8 before
 # the lexer sees it, at BOTH points a .cg file enters the compiler - the
 # file on the command line and an #include - and the result is the bytes
 # of the same source written in UTF-8.  That equality is the whole safety
 # argument: an enabled extension is admissible only where it reduces to
-# something the reference already covers, and the UTF-8 twin IS that form,
+# something the established compiler already covers, and the UTF-8 twin IS that form,
 # so no reference call is needed here.
 #
 # The transcode is STRICT.  The director's rules:

@@ -113,7 +113,7 @@ typedef int32_t (*CellJpgDecCbControlFree)(void *ptr, void *cbCtrlFreeArg);
  * ------------------------------------------------------------------ */
 
 /* Pointer fields carry ATTRIBUTE_PRXPTR so GCC emits them as 32-bit
- * EAs in this struct's layout, matching the reference-SDK ABI that the
+ * EAs in this struct's layout, matching the Cell OS ABI that the
  * sys_io SPRX reads.  Without this the 8-byte natural pointers on
  * PPU64 shift downstream fields and the SPRX reads garbage. */
 typedef struct CellJpgDecThreadInParam {

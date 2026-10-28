@@ -1,5 +1,5 @@
 # hello-ppu-savedata-link — link-only test for the cellSaveData
-# Sony-name surface.  Confirms all 39 entry points resolve at link
+# Cell-name surface.  Confirms all 39 entry points resolve at link
 # time against libsysutil + libsysutil_savedata_stub +
 # libsysutil_savedata_extra_stub.  Real save/load callback flows
 # would need user content + RPCS3 setup, which is outside this

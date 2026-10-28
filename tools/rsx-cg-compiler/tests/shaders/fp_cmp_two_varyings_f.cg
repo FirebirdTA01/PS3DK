@@ -6,7 +6,7 @@
 // `SLT ..., f[TEX1].w, f[TEX1].w`: d.w compared with itself, silently, in
 // a container whose input mask still named both (fragment-operand-selector-limits).
 //
-// The reference preloads both operands into a register and compares those.
+// The established compiler preloads both operands into a register and compares those.
 // The assertion is that no comparison instruction addresses two DISTINCT
 // input registers - which is a property of the ucode, not of the mask.
 void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)

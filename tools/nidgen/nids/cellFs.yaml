@@ -1,9 +1,9 @@
 # cellFs — file system surface for the sys_fs SPRX module.
 #
-# Signatures lifted from the public reference SDK 475 cell_fs_file_api.h
+# Signatures lifted from the public platform ABI 475 cell_fs_file_api.h
 # header (paraphrased — never verbatim).  10 entries near the bottom
 # carry empty signatures: those functions are exported by the SPRX but
-# stripped from the 475 public headers (per memory:
+# stripped from the public headers (per memory:
 # feedback_stripped_nids_pattern).  We keep them in the stub archive so
 # applications that forward-declare them link cleanly; we don't expose
 # them through cell/cell_fs.h.
@@ -305,49 +305,49 @@ exports:
       - sysFsAioCancel
     signature: 'CellFsErrno cellFsAioCancel(int id);'
 
-  # ---- Stripped from 475 public headers, still exported by SPRX ----
+  # ---- Stripped from public headers, still exported by SPRX ----
   # These keep the stub archive complete so applications that
   # forward-declare them (e.g. firmware-internal tooling) link cleanly.
   # Signatures intentionally omitted — names + NIDs are authoritative;
   # parameter shapes vary by firmware revision and were not republished
-  # in 475-era headers.
+  # in 4.75-era headers.
   - name: cellFsAllocateFileAreaByFdWithInitialData
     nid: '0x3394f037'
     signature: ''
-    notes: stripped from 475 public headers; fd-variant of AllocateFileAreaWithInitialData
+    notes: stripped from public headers; fd-variant of AllocateFileAreaWithInitialData
   - name: cellFsAllocateFileAreaByFdWithoutZeroFill
     nid: '0x2cf1296b'
     signature: ''
-    notes: stripped from 475 public headers; fd-variant of AllocateFileAreaWithoutZeroFill
+    notes: stripped from public headers; fd-variant of AllocateFileAreaWithoutZeroFill
   - name: cellFsAllocateFileAreaWithInitialData
     nid: '0x103b8632'
     signature: ''
-    notes: stripped from 475 public headers; allocates file area pre-filled with caller bytes
+    notes: stripped from public headers; allocates file area pre-filled with caller bytes
   - name: cellFsArcadeHddSerialNumber
     nid: '0x1ea02e2f'
     signature: ''
-    notes: stripped from 475 public headers; arcade-platform HDD identity query
+    notes: stripped from public headers; arcade-platform HDD identity query
   - name: cellFsChangeFileSizeByFdWithoutAllocation
     nid: '0xe15939c3'
     signature: ''
-    notes: stripped from 475 public headers; resize without rebalancing allocation
+    notes: stripped from public headers; resize without rebalancing allocation
   - name: cellFsChangeFileSizeWithoutAllocation
     nid: '0x606f9f42'
     signature: ''
-    notes: stripped from 475 public headers; path-variant of ChangeFileSizeByFd*
+    notes: stripped from public headers; path-variant of ChangeFileSizeByFd*
   - name: cellFsRegisterConversionCallback
     nid: '0xa01ee33a'
     signature: ''
-    notes: stripped from 475 public headers; locale-conversion hook for legacy paths
+    notes: stripped from public headers; locale-conversion hook for legacy paths
   - name: cellFsSdataOpenWithVersion
     nid: '0x445c878f'
     signature: ''
-    notes: stripped from 475 public headers; sdata-open variant carrying a version tag
+    notes: stripped from public headers; sdata-open variant carrying a version tag
   - name: cellFsTruncate2
     nid: '0x3a1c8393'
     signature: ''
-    notes: stripped from 475 public headers; alternate Truncate semantics
+    notes: stripped from public headers; alternate Truncate semantics
   - name: cellFsUnregisterL10nCallbacks
     nid: '0xf94baa80'
     signature: ''
-    notes: stripped from 475 public headers; tears down RegisterConversionCallback hooks
+    notes: stripped from public headers; tears down RegisterConversionCallback hooks

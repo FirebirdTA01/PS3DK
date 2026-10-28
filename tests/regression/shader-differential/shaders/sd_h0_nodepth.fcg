@@ -1,8 +1,8 @@
 // control-h0-nodepth (half-colour-depth-control): half colour output, NO depth declared.
 //
-// A half colour output is the only thing that makes the reference set the
+// A half colour output is the only thing that makes the established compiler set the
 // container's outputFromH0 flag - measured 2026-09-06: half ARITHMETIC does
-// not (the float twin compiled with the reference's fast-precision switch
+// not (the float twin compiled with the established compiler's fast-precision switch
 // turns its whole body half and still writes its colour to the full-precision
 // output with the flag clear), so the flag tracks the DECLARED OUTPUT TYPE and
 // nothing else.  This shader and sd_h0_nodepth_twin.fcg differ in one source

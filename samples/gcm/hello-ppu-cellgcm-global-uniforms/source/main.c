@@ -88,7 +88,7 @@ static u32  depth_pitch;
 static u32  color_offset[COLOR_BUFFER_NUM];
 static u32  depth_offset;
 
-/* Local-memory bump allocator (matches the reference localMemoryAlloc). */
+/* Local-memory bump allocator (matches the system localMemoryAlloc). */
 static u32 g_local_mem_heap;
 static void *local_alloc(u32 size)
 {

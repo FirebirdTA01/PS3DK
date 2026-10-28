@@ -1,7 +1,7 @@
 /* cell/sync2.h - SPU-side sync2 declarations (umbrella).
  *
  * The SPU functions are in libsync2.a (link -lsync2); the headers follow
- * the reference layout under cell/sync2/, which sources may include
+ * the system layout under cell/sync2/, which sources may include
  * directly.
  */
 #ifndef __CELL_SYNC2_H_SPU__

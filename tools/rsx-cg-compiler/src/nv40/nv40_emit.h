@@ -54,9 +54,9 @@ struct FpAttributes
     uint32_t attributeInputMask  = 0;        // bits per FP varying read
     uint32_t partialTexType      = 0;        // 2 bits per texunit; 0 = full load
     uint16_t texCoordsInputMask  = 0;        // bit n = TEXCOORDn used
-    uint16_t texCoords2D         = 0xFFFFu;  // bit n = TEXCOORDn is 2D (the reference compiler default: all 1)
+    uint16_t texCoords2D         = 0xFFFFu;  // bit n = TEXCOORDn is 2D (the established compiler default: all 1)
     uint16_t texCoordsCentroid   = 0;
-    uint8_t  registerCount       = 2;        // the reference compiler minimum
+    uint8_t  registerCount       = 2;        // the established compiler minimum
     uint8_t  outputFromH0        = 0;        // 1 iff R0 is fp16 (H0)
     uint8_t  depthReplace        = 0;        // 1 iff DEPTH output written
     uint8_t  pixelKillCount      = 0;        // number of KIL opcodes emitted
@@ -66,7 +66,7 @@ struct FpAttributes
     // Indices into the entry function's parameter list that are
     // actually consumed by the IR.  The container emitter writes
     // isReferenced=1 for these and 0 for parameters that exist in the
-    // signature but have no IR uses (mirrors the reference compiler).
+    // signature but have no IR uses (mirrors the established compiler).
     // `out` / `inout` parameters are always added to this set since
     // they correspond to a StoreOutput in any well-formed shader.
     std::set<unsigned> referencedParamIndices;
@@ -78,7 +78,7 @@ struct FpEmitResult
     FpAttributes attrs;
 };
 
-// One internal-constant pool slot.  the reference compiler packs unique float
+// One internal-constant pool slot.  the established compiler packs unique float
 // literals (e.g. 0.0f and 1.0f from a `float4(scalar, scalar, 0, 1)`
 // constructor) into a single c[N] register and references them via
 // per-instruction swizzles — keeping ucode short and avoiding per-
@@ -102,7 +102,7 @@ struct VpAttributes
     // shared container must describe the contract used by the emitted ucode.
     bool resolvedExplicitBindings = false;
     uint32_t instructionSlot     = 0;        // load address; non-zero enables indexed reads
-    uint32_t registerCount       = 1;        // R registers used; the reference compiler minimum is 1
+    uint32_t registerCount       = 1;        // R registers used; the established compiler minimum is 1
     uint32_t attributeInputMask  = 0;        // bit n iff v[n] is read
     uint32_t attributeOutputMask = 0;        // SET_VERTEX_ATTRIB_OUTPUT_MASK bits, front-face only
     uint32_t userClipMask        = 0;        // user clip plane enables
@@ -120,7 +120,7 @@ struct VpEmitResult
 
 // All emit entry points take a `CompileOptions` that gates
 // optimization behaviour.  Callers that don't care pass a
-// default-constructed value (which matches the reference compiler's defaults).
+// default-constructed value (which matches the established compiler's defaults).
 UcodeOutput  emitVertexProgram    (const IRModule& module,
                                    const std::string& entry,
                                    const rsx_cg::CompileOptions& opts = {});

@@ -21,7 +21,7 @@
 # BYTES on both sides - the ucode words for the slots, the container header
 # for the count - rather than from a diagnostic or a disassembler.
 #
-# The floor of 2 is the reference compiler's minimum (nv40_emit.h); a
+# The floor of 2 is the established compiler's minimum (nv40_emit.h); a
 # program that writes nothing above R1 still declares 2.
 set -euo pipefail
 
@@ -64,7 +64,7 @@ shaders="$repo_root/tools/rsx-cg-compiler/tests/shaders"
 # The regression fixture, generated rather than checked in: sixteen
 # independent terms summed into the output.  It DEFINES far more values
 # than it holds - which is the shape that made the numbering defect
-# refuse - and the reference compiles it declaring 4 registers.
+# refuse - and the established compiler compiles it declaring 4 registers.
 lanes=(x y z w)
 {
     printf 'void main(float4 c : TEXCOORD0, float4 d : TEXCOORD1, out float4 o : COLOR)\n{\n'
@@ -193,7 +193,7 @@ DST_SHIFT, DST_MASK = 1, 0x3F
 HALF_BIT = 1 << 7
 NONE_BIT = 1 << 30
 
-FLOOR = 2   # the reference compiler's minimum, nv40_emit.h
+FLOOR = 2   # the established compiler's minimum, nv40_emit.h
 
 
 def be32(blob, off):

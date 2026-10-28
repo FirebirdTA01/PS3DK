@@ -3,7 +3,7 @@
 //
 // No out parameter binds COLOR0, so the return type decides: the colour is
 // H0 at fp16 with outputFromH0 set, while the fp32 DEPTH out parameter is
-// untouched.  The reference emits colour word 0x1E800140 and depth word
+// untouched.  The established compiler emits colour word 0x1E800140 and depth word
 // 0x08030100; ours matches both once the return type is read.
 //
 // The pair matters because the two fixtures differ only in WHICH output is

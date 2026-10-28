@@ -2,7 +2,7 @@
 // One value id per distinct constant.  The frontend gives every literal
 // its own IRConstant, so `1.0 / k.x` written twice was two divides that
 // common-subexpression elimination could not merge: it compares operand
-// ids, and the two `1.0`s had different ones (measured: the reference
+// ids, and the two `1.0`s had different ones (measured: the established compiler
 // computes the reciprocal once).  Constants with the same type and the
 // same bits (so 0.0 and -0.0, or two NaN payloads, stay apart) are
 // rewritten to the lowest id among them.

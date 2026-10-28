@@ -1,4 +1,4 @@
-/* math.h wrapper -- chains to newlib via #include_next.  Reference-SDK code
+/* math.h wrapper -- chains to newlib via #include_next.  Cell OS code
  * uses M_PI in strict language modes, where newlib hides it; the SDK math.h
  * always defines it, as a single-precision constant.  A definition newlib
  * already made (double) is kept.

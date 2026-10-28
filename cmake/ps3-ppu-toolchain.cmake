@@ -62,7 +62,7 @@ set(CMAKE_OBJDUMP      "${PS3DEV}/ppu/bin/${PS3_PPU_TARGET}-objdump${_ps3_exe}" 
 # while the SDK is still being built: the LV2 startfiles do not exist yet.
 # That is the only case it is needed for, and it is not free -- a try-compile
 # that never links makes every check_function_exists() / check_symbol_exists()
-# succeed, because the reference resolves at compile time and nothing ever
+# succeed, because the system resolves at compile time and nothing ever
 # looks for the definition. Against an installed SDK that silently answers YES
 # to everything: libzip's configure found clonefile, arc4random and the MSVC
 # _fseeki64 family on a PS3 target and then failed on <sys/attr.h>. 24 of its
@@ -120,7 +120,7 @@ set(CMAKE_CXX_FLAGS_DEBUG_INIT   "-O0 -g -Wall")
 # -----------------------------------------------------------------------------
 # SDK include paths
 # -----------------------------------------------------------------------------
-# $PS3DK/ppu/include holds our the reference SDK-style headers (cell/*.h, sys/*.h)
+# $PS3DK/ppu/include holds our the platform ABI-style headers (cell/*.h, sys/*.h)
 # and the simdmath subtree.  The PPU GCC driver doesn't auto-add this;
 # samples need it for `#include <cell/gcm.h>` etc.
 include_directories(SYSTEM "${PS3DK}/ppu/include")

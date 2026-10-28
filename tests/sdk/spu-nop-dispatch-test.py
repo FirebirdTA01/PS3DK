@@ -79,7 +79,7 @@ def main():
 
     try:
         # Public SPU opcode encoding: NOP has RT in bits 0..6 and base
-        # 0x40200000. No oracle output or disassembler formatting is used.
+        # 0x40200000. No measurement output or disassembler formatting is used.
         nop = bytes.fromhex('40200000')
         cases = [('bare', 'nop', nop), ('zero', 'nop 0', nop),
                  ('one', 'nop 1', bytes.fromhex('40200001')),
@@ -100,7 +100,7 @@ def main():
         # Nine four-byte NOPs leave this branch well within REL9 range.
         # Treating their operands as byte counts instead puts it beyond 1020.
         # HBRR/BR bytes below pin the measured candidate output; they are not
-        # an independent instruction-encoding oracle.
+        # an independent instruction-encoding measurement.
         source = ('.section .text.hint,"ax",@progbits\n'
                   ' hbrr branch,target\n' + ' nop 127\n' * 9 +
                   'branch:\n br target\ntarget:\n lnop\n')

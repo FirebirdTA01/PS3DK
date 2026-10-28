@@ -1,7 +1,7 @@
 name,relative_self,timeout_seconds,expected_state,required_tty_regex,forbidden_tty_regex
 librt-posix,tests/regression/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,librt-posix: PASS,ENOSYS
 sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT_OK,PRX_FAIL
-# sys-tty: the SDK-owned <sys/tty.h> write path (system call 403) under the reference and PSL1GHT names.
+# sys-tty: the SDK-owned <sys/tty.h> write path (system call 403) under the system and PSL1GHT names.
 sys-tty,tests/regression/sys-tty/sys-tty.fake.self,20,RAN-CLEAN,(?s)SYS_TTY_ROW reference-name write.*SYS_TTY_ROW psl1ght-name write.*SYS_TTY_OK,SYS_TTY_FAIL
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS
 pthread-sync,tests/regression/pthread-sync/pthread-sync.fake.self,25,RAN-CLEAN,PTHREAD_OK,PTHREAD_FAIL|ENOSYS
@@ -51,7 +51,7 @@ cxx-iostream-startup-lp64,tests/regression/cxx-iostream-startup/cxx-iostream-sta
 # higher-priority waiters that must sleep, not spin, until it publishes.
 metalock-contested-ilp32,tests/regression/metalock-contested/metalock-contested-ilp32.fake.self,60,RAN-CLEAN,METALOCK_CONTESTED_OK,METALOCK_CONTESTED_FAIL|terminate
 metalock-contested-lp64,tests/regression/metalock-contested/metalock-contested-lp64.fake.self,60,RAN-CLEAN,METALOCK_CONTESTED_OK,METALOCK_CONTESTED_FAIL|terminate
-# abi-types guards the reference toolchain's type choices (int32_t = int,
+# abi-types guards the established toolchain's type choices (int32_t = int,
 # uint32_t = unsigned int, wchar_t = 16-bit unsigned short and wint_t = int
 # - in both data models on GCC 16, ILP32 only on 12.4 - and plain char signed
 # under ILP32, unsigned under LP64 on GCC 16): static_asserts fail the build,

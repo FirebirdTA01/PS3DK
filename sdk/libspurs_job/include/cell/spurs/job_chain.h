@@ -76,7 +76,7 @@ static inline int cellSpursJobStartNextJob(CellSpursJob256 *job)
 
 /*
  * Job-chain control - PPU-callable but declared here for symmetry
- * with the reference SDK's SPU-side header layout.
+ * with the platform ABI's SPU-side header layout.
  */
 int cellSpursKickJobChain      (uint64_t eaJobChain, uint8_t numReadyCount);
 int cellSpursRunJobChain       (uint64_t eaJobChain);

@@ -1,4 +1,4 @@
-// preprocessor-defined-operator.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against the established compiler.
 // A number is not an identifier.
 #if defined(1)
 #define V 1.0

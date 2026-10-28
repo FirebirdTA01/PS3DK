@@ -9,7 +9,7 @@
 // Auto-Value / Auto-Matrix.  Identical iff the guest's auto_value and
 // auto_matrix_element agree with the host's AND the upload lands where
 // the container's row layout says.  What this row does NOT prove: that
-// the row layout agrees with the reference compiler's - the vp-reference
+// the row layout agrees with the established compiler's - the vp-reference
 // rows under set auto prove that, shader by shader.
 
 void main(

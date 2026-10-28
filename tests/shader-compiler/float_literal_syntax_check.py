@@ -122,8 +122,8 @@ float4 main(float4 a : TEXCOORD0) : COLOR {
         # 5b. Parameter DEFAULTS are ACCEPTED, and the `f` suffix survives into
         # the recorded value.  These two spellings sat in the negative controls
         # above asserting rc=1, written when the parser refused every parameter
-        # default; d5cb0e5b (uniform-default-records A1) makes them legal and the REFERENCE
-        # accepts both - measured against sce-cgc, `light` records [10,20,30] and
+        # default; d5cb0e5b (uniform-default-records A1) makes them legal and the established compiler
+        # accepts both - measured against the established compiler, `light` records [10,20,30] and
         # `x` records [1.0], byte-identical to ours.  The rows were a pinned
         # REFUSAL, not a property, so they are converted rather than deleted:
         # what this file actually cares about is that the suffix parses, and the
@@ -213,12 +213,15 @@ float4 main(float4 a : TEXCOORD0) : COLOR {
         print("PASS: unary plus operator (+a, +2.0f) byte-equals direct twin", flush=True)
 
         # 9. Real SDK samples regression if SDK available
-        sdk_root = Path("C:/SDKs/Sony/SCE/PS3/475")
-        if sdk_root.exists():
+        sdk_env = os.environ.get("PS3_SDK_ROOT", "")
+        sdk_root = Path(sdk_env) if sdk_env else None
+        if sdk_root is None or not sdk_root.is_dir():
+            print("SKIPPED SDK corpus: PS3_SDK_ROOT is unset or does not name a directory", flush=True)
+        else:
             # These three SDK shaders were pinned here as REFUSALS while the
             # parser rejected every parameter default.  d5cb0e5b (uniform-default-records A1)
-            # compiles all three, and the reference compiles them too - they are
-            # three of the six reference-SDK rows that flipped refused->accepted
+            # compiles all three, and the established compiler compiles them too - they are
+            # three of the six Cell OS rows that flipped refused->accepted
             # in the 920-row sweep for that slice.  A pinned refusal is not a
             # property, so they move to the accept list rather than being
             # deleted: the shaders are still real coverage, now of the behaviour

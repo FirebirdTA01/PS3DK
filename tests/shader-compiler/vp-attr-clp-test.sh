@@ -154,7 +154,7 @@ if clp_meta["user_clip_mask"] != 0x2:
 
 # VP ucode is big-endian raw words.  Word 3 bits 2..6 carry the output
 # destination for instructions writing the result file.  Measured against
-# sce-cgc, CLP0 advertises CG_CLP0 but encodes through destination 5; the
+# the established compiler, CLP0 advertises CG_CLP0 but encodes through destination 5; the
 # clip-specific metadata above distinguishes it from a FOGC output.
 dests = [(w >> 2) & 0x1F for w in ucode_words(clp_u32)[3::4]]
 if 5 not in dests:

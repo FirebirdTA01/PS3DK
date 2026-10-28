@@ -2,7 +2,7 @@
 # vp-input-selector-limits: a vertex instruction may address ONE input register (the
 # hardware has one per-instruction input field; two distinct inputs in one
 # instruction silently read the same one, which is why the assembler refuses
-# them).  The reference makes such programs WORK by staging the second input
+# them).  The established compiler makes such programs WORK by staging the second input
 # through a temp: measured on thirteen shapes (C:/cgdev/vp2in-probe,
 # 2026-09-07 21:15) it keeps the FIRST operand's input direct, emits one MOV
 # of the other input into a temp - the lanes the consumers read, packed -
@@ -11,20 +11,20 @@
 # also folds the staging into the POSITION copy when the staged input is the
 # position (MOV o0/R0 <- IN0), a merge this compiler does not attempt.
 #
-# Three reference-SDK vertex programs stopped at "a vertex instruction
+# Three Cell OS vertex programs stopped at "a vertex instruction
 # addresses two distinct input registers, which the hardware cannot encode"
 # (netgame vpshader, two PhysicsEffects vs_instancemesh).
 #
 # This compiler stages in legalizeInputOperands: the first operand's input
 # stays direct, every other distinct input is copied into a temp by a MOV
 # placed before its first consumer and reused by later consumers whose lanes
-# it already covers.  Pixel-equal to the reference; bytes differ where the
-# reference packs lanes or merges the copy into the position MOV, both named
+# it already covers.  Pixel-equal to the established compiler; bytes differ where the
+# established compiler packs lanes or merges the copy into the position MOV, both named
 # below rather than modelled.
 #
 # CONTROL: every accept row is refused on a compiler before this pass ("two
 # distinct input registers"), the decoded rows assert ONE input per
-# instruction and the staging MOV, and the reference rows report byte
+# instruction and the staging MOV, and the established compiler rows report byte
 # identity (none pinned yet - the merges above keep them apart).  The
 # one-input assertion reads the decoded words, and the hardware has ONE
 # selector, so it cannot see a per-slot identity the compiler meant and
@@ -110,10 +110,10 @@ accept vp_two_inputs_add_v "p + n"
 expect vp_two_inputs_add_v '^[0-9]+ ADD dst=o7 .* src0=IN0\.xyzw .* src2=R[0-9]+\.xyzw'
 accept vp_two_inputs_dot_v "dot(p.xyz, n): the staged copy carries the three lanes the DP3 reads"
 expect vp_two_inputs_dot_v '^[0-9]+ MOV dst=R[0-9]+ mask=xyz[w]? src0=IN2\.'
-# (The reference writes the DP3 straight into o7 with its scalar broadcast;
+# (The established compiler writes the DP3 straight into o7 with its scalar broadcast;
 # the tip routes a scalar result through a temp and a MOV - the export fold.)
 expect vp_two_inputs_dot_v '^[0-9]+ DP3 dst=(o7|R[0-9]+) .* src0=IN0\.'
-# A dot product must keep BOTH operands' swizzles: the reference reads
+# A dot product must keep BOTH operands' swizzles: the established compiler reads
 # dot(p.xyz, n.zyx) as IN0.xyzx, R0.zyxz and dot(p.xyz, n.www) as R0.wwww.
 # The first draft reset a staged or direct DP3 operand to xyz (review:
 # codex - dot(p.xyz, n.zyx) at p=(1,2,3), n=(4,5,6) read 32 for 28).
@@ -121,7 +121,7 @@ accept vp_two_inputs_dot_rhs_swz_v "dot(p.xyz, n.zyx): the staged operand keeps 
 expect vp_two_inputs_dot_rhs_swz_v '^[0-9]+ DP3 dst=(o7|R[0-9]+) .* src0=IN0\.xyzx src1=R[0-9]+\.zyxz'
 accept vp_two_inputs_dot_lhs_swz_v "dot(p.zyx, n.xyz): the direct operand keeps zyx"
 expect vp_two_inputs_dot_lhs_swz_v '^[0-9]+ DP3 dst=(o7|R[0-9]+) .* src0=IN0\.zyxz src1=R[0-9]+\.xyzx'
-# (The reference stages the w lane INTO LANE X and reads R0.x; we keep the
+# (The established compiler stages the w lane INTO LANE X and reads R0.x; we keep the
 # identity copy in lane w and read R0.wwww - same value, a placement byte
 # difference recorded here, not a defect - review: claude.)
 accept vp_two_inputs_dot_www_v "dot(p.xyz, n.www): the staged copy carries w and the DP3 reads it"
@@ -152,14 +152,14 @@ if [[ -n "${PS3_REF_CG_COMPILER:-}" ]]; then
     [[ -x "$PS3_REF_CG_COMPILER" ]] || fail "PS3_REF_CG_COMPILER is not executable"
     for stem in $(ls "$shaders" | grep -E '^vp_two_inputs_.*_v\.cg$' | sed 's/\.cg$//'); do
         "$PS3_REF_CG_COMPILER" -profile sce_vp_rsx -o "$work/$stem.ref" "$shaders/$stem.cg" >/dev/null 2>&1 \
-            || fail "$stem: the reference refused a fixture it is recorded as accepting"
+            || fail "$stem: the established compiler refused a fixture it is recorded as accepting"
         [[ -s "$work/$stem.bin" ]] || continue
         if cmp -s "$work/$stem.bin" "$work/$stem.ref"; then verdict=identical; else verdict=differs; fi
         if [[ " $BYTE_IDENTICAL " == *" $stem "* ]]; then
-            [[ $verdict == identical ]] || fail "$stem: no longer byte-identical to the reference"
-            pass "$stem byte-identical to the reference"
+            [[ $verdict == identical ]] || fail "$stem: no longer byte-identical to the established compiler"
+            pass "$stem byte-identical to the established compiler's"
         else
-            printf 'INFO: %s %s from the reference (not pinned)\n' "$stem" "$verdict"
+            printf 'INFO: %s %s from the established compiler (not pinned)\n' "$stem" "$verdict"
         fi
     done
 fi

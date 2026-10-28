@@ -98,7 +98,7 @@ exports:
 - name: cellPadGetCapabilityInfo
   nid: '0xdbf4c59c'
   signature: ''
-  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadGetCapabilityInfo
+  notes: pre-4.75 system export retained by sys_io SPRX; PSL1GHT ships as ioPadGetCapabilityInfo
 - name: cellPadGetDataExtra
   nid: '0x6bc09c61'
   signature: ''
@@ -106,7 +106,7 @@ exports:
 - name: cellPadGetInfo
   nid: '0x3aaad464'
   signature: ''
-  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadGetInfo
+  notes: pre-4.75 system export retained by sys_io SPRX; PSL1GHT ships as ioPadGetInfo
 - name: cellPadGetInfo2
   nid: '0xa703a51d'
   signature: ''
@@ -114,15 +114,15 @@ exports:
 - name: cellPadGetRawData
   nid: '0x3f797dff'
   signature: ''
-  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadGetRawData
+  notes: pre-4.75 system export retained by sys_io SPRX; PSL1GHT ships as ioPadGetRawData
 - name: cellPadInfoPressMode
   nid: '0x0e2dfaad'
   signature: ''
-  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadInfoPressMode
+  notes: pre-4.75 system export retained by sys_io SPRX; PSL1GHT ships as ioPadInfoPressMode
 - name: cellPadInfoSensorMode
   nid: '0x78200559'
   signature: ''
-  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadInfoSensorMode
+  notes: pre-4.75 system export retained by sys_io SPRX; PSL1GHT ships as ioPadInfoSensorMode
 - name: cellPadInit
   nid: '0x1cf98800'
   signature: ''
@@ -162,11 +162,11 @@ exports:
 - name: cellPadSetPressMode
   nid: '0xf83f8182'
   signature: ''
-  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadSetPressMode
+  notes: pre-4.75 system export retained by sys_io SPRX; PSL1GHT ships as ioPadSetPressMode
 - name: cellPadSetSensorMode
   nid: '0xbe5be3ba'
   signature: ''
-  notes: pre-475 Sony export retained by sys_io SPRX; PSL1GHT ships as ioPadSetSensorMode
+  notes: pre-4.75 system export retained by sys_io SPRX; PSL1GHT ships as ioPadSetSensorMode
 - name: sys_config_add_service_listener
   nid: '0x6ae10596'
   signature: ''

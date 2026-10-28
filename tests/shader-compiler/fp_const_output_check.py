@@ -130,7 +130,7 @@ def problems(blob, want):
     except (Unmodelled, fp_sources.ContainerError) as exc:
         return "unmodelled: %s" % exc
     if got != want:
-        return ("the colour output is [%s] (%s); the reference paints [%s] (%s)"
+        return ("the colour output is [%s] (%s); the established compiler paints [%s] (%s)"
                 % (" ".join("%08x" % v for v in got),
                    ", ".join(repr(_b2f(v)) for v in got),
                    " ".join("%08x" % v for v in want),

@@ -7,7 +7,7 @@
 // exported depth from H0.x: a full-precision output reading a half-rounded
 // number, accepted with no diagnostic.
 //
-// The reference keeps the value in fp32 and converts AT the colour store:
+// The established compiler keeps the value in fp32 and converts AT the colour store:
 //
 //     MOVR R1.xyz, f[TEX0];
 //     MOVH H0, R1.xyzz;

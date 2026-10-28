@@ -7,7 +7,7 @@
 // where uv.x <= 0.5 the untaken arm can produce inf/NaN and 0 * inf
 // poisons the blend even though the arm "was not taken".  Purity
 // excludes side effects; it does not exclude value contamination
-// (design note §2 step 3, with the reference compiler's predicated
+// (design note §2 step 3, with the established compiler's predicated
 // emission as the settling evidence).
 //
 // CF-1a must therefore REFUSE this loudly on --general-lowering.

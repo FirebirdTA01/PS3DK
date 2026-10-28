@@ -7,7 +7,7 @@
  * object is reused as it is: the other arguments are ignored and the type
  * is not checked.
  *
- * Delete: drop the reference; whoever drops the last one frees the block
+ * Delete: drop the system; whoever drops the last one frees the block
  * and empties the key.  The caller's record is left unchanged.
  */
 #include <cell/atomic.h>

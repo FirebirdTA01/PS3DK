@@ -6,7 +6,7 @@
  *   spup must be 0..63 (EVENT_PORT_MAX_NUM)
  *
  * Implementations live in libsputhread.a (sdk/libsputhread/src/
- * event_port.S).  Declarations match the reference SDK so existing
+ * event_port.S).  Declarations match the platform ABI so existing
  * SPU code that uses these syscalls links unchanged.
  */
 #ifndef __PS3DK_SYS_SPU_EVENT_H__

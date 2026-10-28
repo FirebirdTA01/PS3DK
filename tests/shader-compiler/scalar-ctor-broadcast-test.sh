@@ -4,7 +4,7 @@
 #   float3(s)        float4(s)        float3(s, s, s)
 #
 # all lower to one MOV with the scalar replicated into every result lane.
-# Measured on the reference: the single-scalar and spelled-out spellings
+# Measured on the established compiler: the single-scalar and spelled-out spellings
 # compile to byte-identical containers (320 bytes for the .rgb member store,
 # 272 for the float4 return), and the member store is `MOVR R0.xyz, R0.z`.
 # Before this the single-scalar form fell into the general packer, whose
@@ -26,7 +26,7 @@
 #     lane-pair by lane-pair and never broadcast: the width == 1 test is the
 #     boundary, and a review found it unguarded;
 #   - a width mismatch (float3(float2, float2)) still refuses by name and
-#     leaves no artifact.  The reference accepts that shape with warning
+#     leaves no artifact.  The established compiler accepts that shape with warning
 #     C7541 and truncates; our refusal is a known portability gap tracked
 #     separately, and this row pins only that the broadcast path does not
 #     swallow it.
@@ -84,7 +84,7 @@ insns() {
     python3 "$repo_root/tests/shader-compiler/fp_sources.py" "$work/$1.fpo"
 }
 
-# Two oracles for each shape, because a single one can be fooled:
+# Two independent checks for each shape, because a single one can be fooled:
 #   1. BYTES against the SWIZZLE spelling (.bbb / .gggg), which never goes
 #      through the vector constructor - so the constructor cannot break
 #      both sides of that comparison at once.  The spelled-out constructor
@@ -129,7 +129,7 @@ grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xyzw .* s0=R[0-9]+[.]yyyy$' "$work/ret4.i
 # so the comparison here is on the decoded MOV, not on the container.
 insns fp_scalar_ctor_swizzle4_f > "$work/swz4.insns"
 grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xyzw .* s0=R[0-9]+[.]yyyy$' "$work/swz4.insns" \
-    || { cat "$work/swz4.insns" >&2; fail "the .gggg control lost its xyzw .yyyy MOV - the independent oracle for the return shape is broken"; }
+    || { cat "$work/swz4.insns" >&2; fail "the .gggg control lost its xyzw .yyyy MOV - the independent check for the return shape is broken"; }
 printf '  %-36s == explicit, MOV xyzw <- .yyyy as .gggg\n' "float4(scalar) return"
 
 # The two-lane shape, float2(s), which the parent refused.  Its bytes are
@@ -143,12 +143,12 @@ grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xy .* s0=R[0-9]+[.]yyyy$' "$work/f2.insns
     || { cat "$work/f2.insns" >&2; fail "float2(s) has no xy MOV reading .yyyy - the two-lane broadcast is wrong"; }
 insns fp_scalar_ctor_float2_swizzle_f > "$work/f2s.insns"
 grep -qE '^[0-9]+ MOV dst=R[0-9]+ mask=xy .* s0=R[0-9]+[.]yyyy$' "$work/f2s.insns" \
-    || { cat "$work/f2s.insns" >&2; fail "the .gg control lost its xy .yyyy MOV - the independent oracle for float2 is broken"; }
+    || { cat "$work/f2s.insns" >&2; fail "the .gg control lost its xy .yyyy MOV - the independent check for float2 is broken"; }
 printf '  %-36s MOV xy <- .yyyy as .gg\n' "float2(scalar)"
 
 # The VERTEX profile takes the same path: float3(p.w) in a VP, which the
 # parent refused, must compile to the bytes of the .www spelling (an
-# independent path; the reference compiles both to identical 400-byte
+# independent path; the established compiler compiles both to identical 400-byte
 # containers).  No VP word decoder here yet, so bytes carry this row.
 vp_emit() {  # <stem> -> exit status, container at $work/<stem>.vpo
     local stem="$1"
@@ -187,7 +187,7 @@ printf '  %-36s packed: x<-.z y<-.y z<-.x\n' "float3(a, b, c)"
 # zw <- .xxxy from the INPUT (source type 1) - and must NOT become one
 # full-mask MOV: a broadcast keyed on operand identity alone would read
 # .xyyy and put h.y into lane z (a review found exactly that mutation green
-# before this row existed).  The reference merges the pair into one MOV
+# before this row existed).  The established compiler merges the pair into one MOV
 # reading .xyxy (swizzle 0x44); that merge is a separate packer gap
 # (repeated-vector-move-coalescing), and when it lands this row's pins become that single MOV.
 accept fp_scalar_ctor_pair2_f

@@ -699,7 +699,7 @@ size_t CommonSubexprElimination::InstrHash::operator()(const IRInstruction* inst
     // shuffle "yzwx" share operands and mask (the encoder pads lane 3 with x)
     // and are different values (rectangular-matrices: merging them handed a float4 to a
     // 3-wide matrix row and refused; on plain vectors it refused
-    // float4(t.yzw, 1) + t.yzwx, which the reference accepts).
+    // float4(t.yzw, 1) + t.yzwx, which the established compiler accepts).
     hash ^= std::hash<int>()(static_cast<int>(inst->resultType.baseType) * 131 +
                              inst->resultType.vectorSize * 17 +
                              inst->resultType.matrixRows * 5 + inst->resultType.matrixCols) +

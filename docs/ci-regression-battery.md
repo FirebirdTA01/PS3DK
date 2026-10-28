@@ -163,7 +163,7 @@ There are two useful CI layers, and they should be separated:
 Until a Windows self-hosted runner is assigned, the first commit should still add
 the push/PR host-stub job, the manual package-build job at
 `.github/workflows/regression-build.yml`, and the local runtime harness. Do not
-pretend GitHub-hosted CI has an RPCS3 oracle unless the runner actually has the
+pretend GitHub-hosted CI has an RPCS3 measurement unless the runner actually has the
 emulator and the package installed.
 
 ## First Implementation Slice

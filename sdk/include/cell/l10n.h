@@ -1,9 +1,9 @@
 /*! \file cell/l10n.h
- \brief Sony-SDK-source-compat cellL10n localisation API.
+ \brief Cell OS source-compat cellL10n localisation API.
 
-  Minimal first-cut: covers the surface needed to port Sony's smallest
+  Minimal first-cut: covers the surface needed to port the system's smallest
   l10n samples (eucjp2sjis, jis2sjis, etc.) and the UTF/SBCS/UCS2
-  converter family.  The complete Sony header is ~635 lines with
+  converter family.  The complete Cell OS header is ~635 lines with
   every codepage table; we ship only what samples actually need plus
   the L10nCode enum.  The full surface is on the Phase 6.5 backfill
   list — extend here as more l10n calls land in samples.
@@ -66,7 +66,7 @@ typedef enum {
 	L10N_CODEPAGE_1252 = 0x20000000,
 	L10N_EUC_CN        = 0x40000000,
 	L10N_EUC_JP        = 0x80000000,
-	/* Sony's full enum has more codepages (737/775/852/855/857/858/860/861/
+	/* The system's full enum has more codepages (737/775/852/855/857/858/860/861/
 	 * 865/869/1250/1253/1254/1257 etc.); add them here as samples need them. */
 } L10nCode;
 

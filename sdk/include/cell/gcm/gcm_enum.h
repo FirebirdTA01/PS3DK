@@ -1,9 +1,9 @@
 /*
  * PS3 Custom Toolchain — <cell/gcm/gcm_enum.h>
  *
- * reference-SDK-style spellings of the libgcm constants our PSL1GHT runtime
+ * Cell OS-style spellings of the libgcm constants our PSL1GHT runtime
  * layer exposes under plain `GCM_` names.  Adds the `CELL_GCM_`
- * prefix so the reference SDK-authored sample code compiles unchanged; numerics
+ * prefix so the platform ABI-authored sample code compiles unchanged; numerics
  * are preserved via macro aliases.
  *
  * This header stays header-only — no functions, no struct defs.
@@ -85,20 +85,20 @@ extern "C" {
 #define CELL_GCM_PRIMITIVE_POLYGON       GCM_TYPE_POLYGON
 
 /* Vertex-attribute element type (cellGcmSetVertexDataArray).  PSL1GHT
- * only exposes a subset (U8, F32); the reference SDK's extra tags (S1, SF,
+ * only exposes a subset (U8, F32); the platform ABI's extra tags (S1, SF,
  * CMP, S32K, UB256) land when we own rsx/gcm_sys.h — for now we only
  * alias what the runtime can actually handle. */
 #define CELL_GCM_VERTEX_UB               GCM_VERTEX_DATA_TYPE_U8
 #define CELL_GCM_VERTEX_F                GCM_VERTEX_DATA_TYPE_F32
-/* Additional the reference SDK-named vertex-data types verified against the
- * reference the reference SDK's gcm_enum.h.  PSL1GHT only aliased F32=2 and
+/* Additional the platform ABI-named vertex-data types verified against the
+ * platform ABI's gcm_enum.h.  PSL1GHT only aliased F32=2 and
  * U8=4 — NV40 supports more element kinds. */
 #define CELL_GCM_VERTEX_S1               (1)   /* signed 16-bit normalised */
 #define CELL_GCM_VERTEX_SF               (3)   /* half float (16-bit) */
 #define CELL_GCM_VERTEX_S32K             (5)   /* signed 16-bit scaled "keep" */
 #define CELL_GCM_VERTEX_CMP              (6)   /* s11_11_10 packed */
 #define CELL_GCM_VERTEX_UB256            (7)   /* unsigned byte * 256 */
-/* Long-form aliases matching the reference the reference SDK's alt names. */
+/* Long-form aliases matching the system the platform ABI's alt names. */
 #define CELL_GCM_VERTEX_S16_NR           CELL_GCM_VERTEX_S1
 #define CELL_GCM_VERTEX_F32              CELL_GCM_VERTEX_F
 #define CELL_GCM_VERTEX_F16              CELL_GCM_VERTEX_SF
@@ -138,16 +138,16 @@ extern "C" {
 #define CELL_GCM_TEXTURE_SWIZZLED_CUBEMAP_FACE_ALIGN_OFFSET \
     GCM_TEXTURE_SWIZZLED_CUBEMAP_FACE_ALIGN_OFFSET
 
-/* libgcm error codes (the reference SDK numbering — out-of-band from
+/* libgcm error codes (the platform ABI numbering — out-of-band from
  * CELL_OK / sysmodule errors). */
 #define CELL_GCM_ERROR_FAILURE                  0x802b0001
 #define CELL_GCM_ERROR_INVALID_VALUE            0x802b0002
 #define CELL_GCM_ERROR_NOT_SUPPORTED            0x802b0003
 #define CELL_GCM_SURFACE_LINEAR_ALIGN_OFFSET       GCM_SURFACE_LINEAR_ALIGN_OFFSET
 
-/* Texture remap field helper — the reference SDK builds the u32 remap value
+/* Texture remap field helper — the platform ABI builds the u32 remap value
  * inline via this macro; PSL1GHT exposes individual bit constants and
- * the user assembles them.  Provide the reference SDK helper verbatim — it
+ * the user assembles them.  Provide the platform ABI helper verbatim — it
  * just packs its nine 2-bit args into the canonical layout. */
 #define CELL_GCM_REMAP_MODE(order, inputA, inputR, inputG, inputB, outputA, outputR, outputG, outputB) \
     (((order) << 16) | ((inputA)) | ((inputR) << 2) | ((inputG) << 4) | \
@@ -161,9 +161,9 @@ extern "C" {
 
 /* PSL1GHT mis-spells reference NV40-tag 3 as "R5G5B5"; the correct
  * reference name is R5G6B5 (5 red / 6 green / 5 blue), and the same
- * applies to format 5 which the reference SDK calls X8R8G8B8_O8R8G8B8
+ * applies to format 5 which the platform ABI calls X8R8G8B8_O8R8G8B8
  * (overlay second-buffer), not bare X8R8G8B8.  Add both to the global
- * (non-CELL-prefixed) namespace so the reference SDK source that references
+ * (non-CELL-prefixed) namespace so the platform ABI source that references
  * the bare GCM_* name finds it. */
 #ifndef GCM_SURFACE_R5G6B5
 #  define GCM_SURFACE_R5G6B5             3
@@ -185,11 +185,11 @@ extern "C" {
 #define CELL_GCM_SURFACE_F_X16Z16Y16X16  GCM_SURFACE_F_X16Z16Y16X16
 #define CELL_GCM_SURFACE_F_X32           GCM_SURFACE_F_X32
 
-/* Depth/stencil formats — PSL1GHT uses the ZETA infix; the reference SDK omits it. */
+/* Depth/stencil formats — PSL1GHT uses the ZETA infix; the platform ABI omits it. */
 #define CELL_GCM_SURFACE_Z16             GCM_SURFACE_ZETA_Z16
 #define CELL_GCM_SURFACE_Z24S8           GCM_SURFACE_ZETA_Z24S8
 
-/* Surface addressing mode.  The reference SDK calls the row-major layout "PITCH";
+/* Surface addressing mode.  The platform ABI calls the row-major layout "PITCH";
  * PSL1GHT exposes it as TYPE_LINEAR.  Semantics identical. */
 #define CELL_GCM_SURFACE_PITCH           GCM_SURFACE_TYPE_LINEAR
 #define CELL_GCM_SURFACE_SWIZZLE         GCM_SURFACE_TYPE_SWIZZLE
@@ -220,12 +220,12 @@ extern "C" {
 #define CELL_GCM_TILE_ALIGN_OFFSET       GCM_TILE_ALIGN_OFFSET
 #define CELL_GCM_TILE_ALIGN_SIZE         GCM_TILE_ALIGN_SIZE
 
-/* Fragment-program ucode placement alignment.  reference-SDK samples align
+/* Fragment-program ucode placement alignment.  existing PS3 samples align
  * the local-memory allocation for FP ucode to this offset when
  * calling cellGcmUtilAllocateLocalMemory. */
 #define CELL_GCM_FRAGMENT_UCODE_LOCAL_ALIGN_OFFSET  GCM_FRAGMENT_UCODE_LOCAL_ALIGN_OFFSET
 
-/* Z-cull (early-depth) configuration.  The handle_systemmenu the reference SDK
+/* Z-cull (early-depth) configuration.  The handle_systemmenu the platform ABI
  * sample binds these via cellGcmBindZcull. */
 #define CELL_GCM_ZCULL_Z16               GCM_ZCULL_Z16
 #define CELL_GCM_ZCULL_Z24S8             GCM_ZCULL_Z24S8
@@ -233,7 +233,7 @@ extern "C" {
 #define CELL_GCM_ZCULL_LONES             GCM_ZCULL_LONES
 #define CELL_GCM_SCULL_SFUNC_LESS        GCM_SCULL_SFUNC_LESS
 
-/* Additional flip modes.  HSYNC_WITH_NOISE is the reference SDK name for what
+/* Additional flip modes.  HSYNC_WITH_NOISE is the platform ABI name for what
  * PSL1GHT calls HSYNC_AND_BREAK_EVERYTHING (both == 3). */
 #define CELL_GCM_DISPLAY_HSYNC_WITH_NOISE  GCM_FLIP_HSYNC_AND_BREAK_EVERYTHING
 
@@ -249,7 +249,7 @@ extern "C" {
  * Texture — cellGcmSetTexture / SetTextureControl /
  *           SetTextureFilter / SetTextureAddress.
  *
- * Numeric values are NV40-hardware constants that the reference
+ * Numeric values are NV40-hardware constants that the system
  * Cg compiler and libgcm encode the same way as our PSL1GHT runtime
  * (when PSL1GHT has an equivalent GCM_TEXTURE_* it's aliased,
  * otherwise the value is written out directly).
@@ -528,7 +528,7 @@ extern "C" {
 /* Compression-mode tag (cellGcmSetTileInfo extra). */
 #define CELL_GCM_COMPMODE_C32_2X2                GCM_COMPMODE_C32_2X2
 
-/* Texture unsigned-remap tag (cellGcmSetTextureAddress). The reference
+/* Texture unsigned-remap tag (cellGcmSetTextureAddress). The system
  * SDK adds a BIASED sampling mode the PSL1GHT enum doesn't name; the
  * NV40 register encodes it as bit 1 set, NORMAL is 0, FORCE is 1. */
 #ifndef CELL_GCM_TEXTURE_UNSIGNED_REMAP_BIASED

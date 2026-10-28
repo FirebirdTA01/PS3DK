@@ -8,7 +8,7 @@ namespace
 // declaration shadow a registered builtin.  PARTITION BY NAME subsumes it -
 // when any source declaration of the name is visible the builtins are not
 // candidates at all, so a source-versus-builtin tie can no longer be reached,
-// and every remaining tie is source-versus-source, which the reference calls
+// and every remaining tie is source-versus-source, which the established compiler calls
 // C1101 rather than resolving by preference (function-visibility).
 }
 
@@ -177,14 +177,14 @@ bool SymbolTable::addFunction(const std::string& name,
         // COUNT BACK OVER TRAILING DEFAULTS - and over ALL of them.
         //
         // An out/inout parameter that carries a default is NOT excluded here.
-        // Measured on sce-cgc 475: such a candidate still takes part in
+        // Measured on the established compiler: such a candidate still takes part in
         // ranking.  `void f(float4)` beside `void f(float4, out float k=.5)`,
         // called `f(t)`, is "error C1101: ambiguous overloaded function
         // reference" in BOTH declaration orders, and a plain `float k=.5`
         // second parameter behaves identically - so the default-filled
         // candidate is viable and ties, and this is not an out/inout rule at
         // all.  Excluding it here would leave `f(float4)` the unique winner
-        // and ACCEPT a program the reference refuses (verified: all four
+        // and ACCEPT a program the established compiler refuses (verified: all four
         // out/inout ambiguity cells emitted a container).
         //
         // The out/inout restriction is real but applies AFTER a unique winner
@@ -298,7 +298,7 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
     // program ambiguous, since the prototype and the definition are both
     // viable at the same cost.
     //
-    // Collapsing to the LATEST is also rule 1 itself: the reference takes a
+    // Collapsing to the LATEST is also rule 1 itself: the established compiler takes a
     // default from the declaration visible at the call, so
     //     proto k=.25 ; def k=.5 ; call        -> .5      (definition later)
     //     proto k=.25 ; call ; def k=.5        -> .25     (definition unseen)
@@ -320,7 +320,7 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
     for (Symbol* sym : overloads)
     {
         // A DECLARATION WRITTEN AFTER THIS CALL IS NOT A CANDIDATE: the
-        // reference refuses a forward call with no prior prototype ("error
+        // established compiler refuses a forward call with no prior prototype ("error
         // C1008: undefined variable") and does not let a source overload
         // written later hide a builtin.  Builtins carry index 0 and so are
         // never filtered here.
@@ -368,15 +368,15 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
         // ambiguous rather than resolved in favour of the exact arity.
         //
         // NARROWING IS COUNTED SEPARATELY AND COMPARED FIRST.  A single
-        // scalar-cost total cannot express the reference's rule, and the
+        // scalar-cost total cannot express the established compiler's rule, and the
         // arithmetic collides in practice: with "a promotion costs its rank
         // distance, a demotion costs twice it", clamp(float,float,float) for
         // clamp(f, 0, 1) costs two promotions = 2, and clamp(int,int,int)
         // costs one demotion = 2.  They tie, and a tie is C1101 - which
-        // refused five SDK shaders that the reference and our own parent both
+        // refused five SDK shaders that the established compiler and our own parent both
         // compiled (MachoQHDR x4, stereo3D fp_anaglyph).
         //
-        // Measured on sce-cgc 475, in both directions and with named
+        // Measured on the established compiler, in both directions and with named
         // variables rather than literals, so this is a TYPE rule and not a
         // literal rule:
         //     clamp(float, int,   int  )  -> the float overload  (2 up)
@@ -405,7 +405,7 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
             int cost = TypeConversion::conversionCost(argType, paramType);
             // A SOURCE function's numeric vector parameter accepts a wider
             // vector argument, truncated to its leading lanes (warning C7011
-            // on the reference: f(float a) called with t.xy reads t.x).
+            // on the established compiler: f(float a) called with t.xy reads t.x).
             // Measured ranking: dropped lanes compare FIRST, before type
             // narrowing - f(float3) beats f(float) for a float4 argument,
             // f(int4) beats f(float2), f(float2, int) beats f(float, float).
@@ -463,7 +463,7 @@ std::optional<SymbolTable::OverloadCandidate> SymbolTable::resolveOverload(
             // TWO CANDIDATES AT THE BEST COST IS C1101, whatever distinguishes
             // them.  Arity does not break it, exactness does not break it, and
             // declaration order must not - measured on three shapes the
-            // reference refuses and we used to accept:
+            // established compiler refuses and we used to accept:
             //     f(float4, float = .25) beside f(float4, int = 2)
             //     f(half4)               beside f(half4, float = .25)
             //     f(float4)              beside f(float4, float k = 1.0)
@@ -532,7 +532,7 @@ void SymbolTable::registerBuiltinTypes()
         if (n != 1)
             addType("float" + std::to_string(n) + "x1", CgType::Mat(ScalarKind::Float, n, 1));
     }
-    // Non-square matrices are real types on the reference: RxC = R rows of
+    // Non-square matrices are real types on the established compiler: RxC = R rows of
     // C-wide vectors (rectangular-matrices / rectangular-matrix-row-access).
     for (int r = 2; r <= 4; ++r)
         for (int c = 2; c <= 4; ++c)
@@ -673,12 +673,12 @@ void SymbolTable::registerMathFunctions()
     }
 
     // The pack/unpack family (pack-unpack-intrinsics): one NV40 fragment instruction each.
-    // Measured on the reference: pack_2half / pack_2ushort take half2 or
+    // Measured on the established compiler: pack_2half / pack_2ushort take half2 or
     // float2 (a float scalar smears; a half scalar and a float3 are C1101
     // ambiguous, which the two overloads reproduce), pack_4ubyte / pack_4byte
     // take half4 or float4 (float3 is C1115), and the unpacks take a float:
     // unpack_2half yields half2, the others float.  Registered for both
-    // profiles; the vertex lowering refuses them by name, as the reference
+    // profiles; the vertex lowering refuses them by name, as the established compiler
     // does (C1115 / C5201).
     for (const char* name : {"pack_2half", "pack_2ushort"})
     {
@@ -781,7 +781,7 @@ void SymbolTable::registerMathFunctions()
 
 void SymbolTable::registerVectorFunctions()
 {
-    // dot product.  The scalar forms are accepted by the reference and are
+    // dot product.  The scalar forms are accepted by the established compiler and are
     // the product (dot(float, float) was ambiguous among the vector forms).
     addFunction("dot", CgType::Float(), {CgType::Float(), CgType::Float()}, {"a", "b"}, nullptr, true);
     addFunction("dot", CgType::Half(), {CgType::Half(), CgType::Half()}, {"a", "b"}, nullptr, true);
@@ -806,13 +806,13 @@ void SymbolTable::registerVectorFunctions()
         addFunction("distance", CgType::Float(), {vec, vec}, {"a", "b"}, nullptr, true);
     }
     addFunction("length", CgType::Float(), {CgType::Float()}, {"v"}, nullptr, true);
-    // THE SCALAR distance, which the reference has and this table did not.
+    // THE SCALAR distance, which the established compiler has and this table did not.
     // `distance(p.x, p.y)` has no exact candidate without it, so every
     // vector overload becomes viable by broadcasting BOTH arguments - three
     // candidates at one broadcast each, all tying.  The parent hid that by
-    // taking the first viable one (and emitted 336 bytes where the reference
+    // taking the first viable one (and emitted 336 bytes where the established compiler
     // emits 288); once ties are C1101 it surfaced as a refusal.  The
-    // reference lowers it to ADDR + |abs|, i.e. abs(a-b), and it is the
+    // established compiler lowers it to ADDR + |abs|, i.e. abs(a-b), and it is the
     // exact-match partner of the scalar `length` registered directly above.
     addFunction("distance", CgType::Float(), {CgType::Float(), CgType::Float()}, {"a", "b"}, nullptr, true);
 
@@ -839,7 +839,7 @@ void SymbolTable::registerVectorFunctions()
     }
 
     // mul - matrix multiplication, over every RxC shape (rectangular-matrices).
-    // Measured on the reference: mul(M[RxC], v[C]) -> v[R] (one DP(C) per
+    // Measured on the established compiler: mul(M[RxC], v[C]) -> v[R] (one DP(C) per
     // row), mul(v[R], M[RxC]) -> v[C] (a MUL/MAD chain over the rows), and
     // mul(A[RxK], B[KxC]) -> M[RxC].  The square entries below are the same
     // ones this table always had; the loops add the rectangular shapes.

@@ -696,7 +696,7 @@ SPU_ONLY_HEADERS := \
     include-spu/cell/daisy/snr_qctl.h
 
 # SPU-side headers: SIMD class wrappers (simd + bits/simd_*.h).
-# Reference SDK convention is `target/spu/include/{simd,bits/simd_*.h}` and
+# Platform ABI convention is `target/spu/include/{simd,bits/simd_*.h}` and
 # we mirror that under $(PS3DK)/spu/include/.
 SPU_HEADERS := \
     include-spu/cell/ovis.h \

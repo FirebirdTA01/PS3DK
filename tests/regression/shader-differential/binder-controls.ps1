@@ -1,6 +1,6 @@
 # Deterministic controls for the FP auto binder. No corpus paths or private
 # containers belong here. Compile both sides with the same compiler; when the
-# reference compiler is supplied the stager uses it for this instrument check.
+# established compiler is supplied the stager uses it for this instrument check.
 function New-BinderControls([string]$Scratch, [string]$Controls, [scriptblock]$Compile) {
     New-Item -ItemType Directory -Force -Path $Scratch | Out-Null
     $rows = New-Object 'System.Collections.Generic.List[string]'

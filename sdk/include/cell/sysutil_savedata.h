@@ -1,24 +1,24 @@
 /*! \file cell/sysutil_savedata.h
- \brief Sony-name-compatible cellSaveData API.
+ \brief Cell-name-compatible cellSaveData API.
 
-  This header exposes the full the reference SDK cellSaveData surface —
-  Sony-named structs with Sony-named fields, Sony-named callbacks,
-  Sony-named constants — over PSL1GHT's runtime.  Source written
-  against Sony's reference sysutil_savedata.h compiles unchanged
+  This header exposes the full the platform ABI cellSaveData surface —
+  Cell-named structs with Cell-named fields, Cell-named callbacks,
+  Cell-named constants — over PSL1GHT's runtime.  Source written
+  against the system's sysutil_savedata.h compiles unchanged
   (modulo `#include` paths) and links against PSL1GHT's existing
   `libsysutil.a`.
 
   Mechanism:
-    - PSL1GHT's struct layouts are byte-identical to Sony's (Sony's
+    - PSL1GHT's struct layouts are byte-identical to the system's (the system's
       were the source; PSL1GHT transcribed them with different C
       identifiers).  _Static_assert below pins the critical layouts;
       a regression would fail the build.
     - PSL1GHT's sysUtilSaveAutoSave2 etc. are wrappers over the
-      `*Ex` SPRX trampolines that carry Sony's FNIDs.  So calling
-      into PSL1GHT's runtime with Sony-shaped structs just works —
+      `*Ex` SPRX trampolines that carry the system's FNIDs.  So calling
+      into PSL1GHT's runtime with Cell-shaped structs just works —
       the SPRX emulation on RPCS3 / real hardware reads the bytes
       at the same offsets either way.
-    - `static inline` forwarders cast Sony struct pointers and
+    - `static inline` forwarders cast Cell OS struct pointers and
       callback function pointers to PSL1GHT's types.  C permits
       function-pointer casts; the argument types are ABI-identical
       (same number, same underlying bit widths) so the cast is a
@@ -48,7 +48,7 @@ extern "C" {
 #endif
 
 /* ============================================================
- * Sizes, enums, constants.  Values paraphrased from the reference SDK
+ * Sizes, enums, constants.  Values paraphrased from the platform ABI
  * sysutil_savedata.h; the bit positions and numeric
  * values match bit-for-bit (verified against PSL1GHT's
  * SYS_SAVE_* set where they overlap).
@@ -157,7 +157,7 @@ enum {
 	CELL_SAVEDATA_FILEOP_WRITE_NOTRUNC  = 3,
 };
 
-/* Return codes (Sony names over PSL1GHT equivalents). */
+/* Return codes (Cell OS names over PSL1GHT equivalents). */
 #define CELL_SAVEDATA_RET_OK                    0
 #define CELL_SAVEDATA_RET_CANCEL                1
 
@@ -205,7 +205,7 @@ enum {
 #define CELL_SAVEDATA_OPTION_NOCONFIRM              (1 << 0)
 
 /* ============================================================
- * Sony struct types.  Layouts match PSL1GHT's sysSave*
+ * Cell OS struct types.  Layouts match PSL1GHT's sysSave*
  * structs byte-for-byte (verified by _Static_assert below).
  * Pointer fields use ATTRIBUTE_PRXPTR so the SPRX boundary sees
  * 32-bit pointer slots on our 64-bit PPU target — same treatment
@@ -382,8 +382,8 @@ _Static_assert(sizeof(CellSaveDataAutoIndicator) == 24,                         
 _Static_assert(sizeof(CellSaveDataSystemFileParam) == 1552,                        "SystemFileParam size drift");
 
 /* ============================================================
- * Sony callback typedefs.  ABI-identical to PSL1GHT's, just
- * named after Sony's arg types.  We cast function pointers when
+ * Cell OS callback typedefs.  ABI-identical to PSL1GHT's, just
+ * named after the system's arg types.  We cast function pointers when
  * forwarding (legal in C; arg-type compatibility is guaranteed by
  * the struct-layout static asserts above).
  * ============================================================ */
@@ -407,7 +407,7 @@ typedef void (*CellSaveDataFileCallback)(CellSaveDataCBResult *cbResult,
 typedef void (*CellSaveDataDoneCallback)(CellSaveDataCBResult *cbResult,
                                          CellSaveDataDoneGet *get);
 
-/* Sony's `sys_memory_container_t` — in PSL1GHT this is
+/* The system's `sys_memory_container_t` — in PSL1GHT this is
  * `sys_mem_container_t` from <sys/mempool.h>. */
 typedef sys_mem_container_t sys_memory_container_t;
 
@@ -509,7 +509,7 @@ int cellSaveDataDelete2(sys_memory_container_t container);
 typedef unsigned int CellSysutilUserId;
 #endif
 
-/* Legacy v1 entry points.  Sony stripped these from the 475 reference
+/* Legacy v1 entry points.  These were stripped from the system
  * header but the SPRX still exports the FNIDs.  Old-style empty-paren
  * declarations because the v1 argument shapes were never documented in
  * the public surface; downstreams that need them call by hand-rolled

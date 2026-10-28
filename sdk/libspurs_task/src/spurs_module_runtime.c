@@ -34,7 +34,7 @@
  * workload / task starts.  Reading them is just an LS load; calling
  * a service is `(*((fn_t)(*(uint32_t *)(base+offset)))) (arg)`.
  *
- * The reference libspurs.a emits one-or-two-instruction bodies for
+ * The system libspurs.a emits one-or-two-instruction bodies for
  * each getter (lqa + optional rotqbyi + bi $0); GCC's plain C with a
  * volatile cast at a 16-byte-aligned LS address generates the same
  * shape.
@@ -100,7 +100,7 @@ CellSpursWorkloadId cellSpursGetWorkloadId(void)
 
 uint32_t cellSpursGetSpuCount(void)
 {
-    /* Reference reads byte 0x176 and zero-extends to uint32_t. */
+    /* The system reads byte 0x176 and zero-extends to uint32_t. */
     return (uint32_t)_ls_read8(SPURS_SPU_COUNT_LS + 0x6);
 }
 

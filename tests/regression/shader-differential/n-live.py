@@ -14,7 +14,7 @@ inputs by a distinct affine op, summed into the output:
 The sum is foldable term by term, so a lowering that folds as it goes
 keeps a handful of values live whatever N is, and one that materialises
 every term before the first add keeps N live.  Compiling the family with
-OUR compiler on the general lowering and with the reference gives the register
+OUR compiler on the general lowering and with the established compiler gives the register
 bound as a NUMBER instead of the 48 that gets cited: the first N each
 compiler refuses at.
 
@@ -25,7 +25,7 @@ shape).  So the corpus's register-pressure refusals are liveness the
 lowering creates, not the budget.
 
 Usage (from Windows, the compiler living in WSL as everywhere in the rig):
-    python n-live.py --ours /tmp/<build>/rsx-cg-compiler [--reference <sce-cgc.exe>]
+    python n-live.py --ours /tmp/<build>/rsx-cg-compiler [--reference <established-compiler.exe>]
                      [--out <dir>] [--max 64]
 No boot: this is a compile-only instrument.  Exit code 0 always; the
 table is the result.
@@ -73,11 +73,11 @@ INSN_LINE = re.compile(r"^\s*(\d+):((?:\s+[0-9a-fA-F]{8})+)\s*$")
 def count_insn(text):
     """16-byte groups in the compiler's ucode dump (the 'N: w0 w1 w2 w3'
     lines), inline const blocks INCLUDED - the container's instructionCount
-    semantics, so the column is like for like with the reference's field.
+    semantics, so the column is like for like with the established compiler's field.
     The first refusal is binary and says nothing on a compiler that never
     refuses; the SLOPE of instructions per term is the finding there (the
     vita team's addition; on this measure ours reads 6.75 per term against
-    the reference's 5.25 at N 8..12, both linear)."""
+    the established compiler's 5.25 at N 8..12, both linear)."""
     n = 0
     for line in text.splitlines():
         m = INSN_LINE.match(line)
@@ -87,7 +87,7 @@ def count_insn(text):
         if len(words) < 4:
             continue
         # Counted WITH inline const blocks: that is the container's
-        # instructionCount semantics (ucode/16), which the reference's field -
+        # instructionCount semantics (ucode/16), which the established compiler's field -
         # read by reference_insn - also carries, so the two columns are like
         # for like (claude, review of a0cd14f: excluding them here read 59
         # against a reference 63 whose true like-for-like is 81).
@@ -96,8 +96,8 @@ def count_insn(text):
 
 
 def reference_insn(reference_exe, container):
-    """instructionCount from the reference's own disassembler, if it sits
-    beside the reference compiler; None otherwise."""
+    """instructionCount from the established compiler's own disassembler, if it sits
+    beside the established compiler; None otherwise."""
     d = os.path.join(os.path.dirname(reference_exe), "sce-cgcdisasm.exe")
     if not os.path.exists(d) or not os.path.exists(container):
         return None
@@ -109,7 +109,7 @@ def reference_insn(reference_exe, container):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ours", required=True, help="WSL path of rsx-cg-compiler")
-    ap.add_argument("--reference", default=os.environ.get("PS3_REF_CG_COMPILER", ""), help="reference compiler exe (optional)")
+    ap.add_argument("--reference", default=os.environ.get("PS3_REF_CG_COMPILER", ""), help="established compiler exe (optional)")
     ap.add_argument("--out", default=os.path.join(os.environ.get("TEMP", "."), "sd-n-live"))
     ap.add_argument("--max", type=int, default=64)
     a = ap.parse_args()

@@ -11,7 +11,7 @@
 // uninitialised declaration is the same case as an `out` parameter:
 // there is nothing to copy, so define the result and write the lane.
 //
-// Measured on the reference compiling this shader - it never materialises
+// Measured on the established compiler compiling this shader - it never materialises
 // `c` at all, computing the two chains straight into the output:
 //
 //   MOVH H0, f[TEX0];  MOVH H2, f[TEX1];

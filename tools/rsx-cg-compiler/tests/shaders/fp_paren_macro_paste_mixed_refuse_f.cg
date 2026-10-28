@@ -1,8 +1,8 @@
-// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against the established compiler.
 // *** THE CELL THAT FORCES PER-OCCURRENCE. *** The SAME parameter appears both
 // pasted and plain. The pasted occurrence takes the raw argument; the plain
 // one expands it, and that expansion puts the form feed into the token
-// stream - so the reference REFUSES this while accepting the paste-only
+// stream - so the established compiler REFUSES this while accepting the paste-only
 // shapes above. A per-parameter rule cannot produce both answers, in either
 // direction (Fable, m20).
 #define BAD (1.0)

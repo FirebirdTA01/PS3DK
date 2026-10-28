@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # pow-constant-exponent-test.sh -- pow() with a constant exponent follows the
-# reference's table (constant-exponent-pow, the Boy_HairFp pixel mismatch).
+# established compiler's table (constant-exponent-pow, the Boy_HairFp pixel mismatch).
 #
-# Reference (sce-cgc 475, measured 2026-09-15, .local/probe-boyhair): in FP a
+# Reference (the established compiler, measured 2026-09-15, .local/probe-boyhair): in FP a
 # constant exponent lowers as 0 -> the constant 1, 1 -> a copy, 2 -> MUL x, x
 # (vectors too), 3 -> MUL then MUL, -1 -> RCP, -0.5 -> RSQ, 0.5 -> DIVSQR |x|, x,
 # 4 / 8 / 0.25 / 0.125 -> LG2 with the multiply folded into its output scale
@@ -12,11 +12,11 @@
 #
 # The integer and root rows carry VALUE, not shape: LG2 of a NEGATIVE base is
 # NaN, so the uniform chain we used to emit painted NaN wherever
-# pow(dot(t, h), 2) had a negative dot - Boy_HairFp mismatched the reference
+# pow(dot(t, h), 2) had a negative dot - Boy_HairFp mismatched the established compiler
 # on 1369 of 4096 pixels for exactly that.  The checker executes our ucode on
 # a negative-base input against an independent expectation, keeps a control
 # proving it sees NaN, decodes the LG2 scale bits for the shape rows, and the
-# byte-twin rows below are pairs the reference also emits identically.
+# byte-twin rows below are pairs the established compiler also emits identically.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,7 +63,7 @@ accept() {
 
 twin() {
     local a="$1" b="$2" why="$3"
-    cmp -s "$work/$a.$(ext_of "$a")" "$work/$b.$(ext_of "$b")" || fail "$a and $b differ; the reference emits identical bytes ($why)"
+    cmp -s "$work/$a.$(ext_of "$a")" "$work/$b.$(ext_of "$b")" || fail "$a and $b differ; the established compiler emits identical bytes ($why)"
     printf '  PASS  %-30s byte twin of %s: %s\n' "$a" "$b" "$why"
 }
 

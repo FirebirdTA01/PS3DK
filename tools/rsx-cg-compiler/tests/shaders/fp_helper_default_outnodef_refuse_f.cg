@@ -1,6 +1,6 @@
-// function-visibility commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against the established compiler.
 // THE CONTROL THAT KEEPS THE C1111 ROWS HONEST.  Same omitted out parameter,
-// no default: the reference refuses with "error C1103: too few parameters in
+// no default: the established compiler refuses with "error C1103: too few parameters in
 // function call", a different code and a different rule.  Ours must refuse
 // here WITHOUT the C1111 text, or the two rows above are pinning exit 1 and
 // nothing more.

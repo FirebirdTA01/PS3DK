@@ -368,7 +368,7 @@ int main(int argc, const char **argv)
 	cellGcmFinish(ctx, 1);
 	/*
 	 * rsxFree is allocator-only. Process exit reclaims RSX memory; for
-	 * full structured teardown see the reference sampleBasic pattern.
+	 * full structured teardown see the system sampleBasic pattern.
 	 */
 	free(host_addr);
 	ioPadEnd();

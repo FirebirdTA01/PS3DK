@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# preprocessor-predefined-macros: the preprocessor must predefine exactly what the reference
-# predefines.  Measured on sce-cgc 475 (2026-09-14): __CGC__ and __SCE_CGC__
+# preprocessor-predefined-macros: the preprocessor must predefine exactly what the established compiler
+# predefines.  Measured on the established compiler (2026-09-14): __CGC__ and __SCE_CGC__
 # are defined, both 20000; __CG__, _CG_, _CGC_, CGC, __psp2__, __SCE__,
 # __STDC__ and __STDC_VERSION__ are not.
 #
 # The Vita Cg compiler the front end came from predefined the PSVita set (__psp2__, __SCE__, __STDC__,
-# __STDC_VERSION__) and none of the reference's, so a header written as
+# __STDC_VERSION__) and none of the established compiler's, so a header written as
 #   #ifdef __CGC__   <Cg declarations>   #else   <C declarations>   #endif
 # took the C branch and died on 'enum' - five SDK shaders (SpuRender).
 #
 # Every row is a BYTE twin against a hand-expanded control, so the assertion
-# is "the macro has the reference's value" and "the absent names are absent",
+# is "the macro has the established compiler's value" and "the absent names are absent",
 # not merely "it compiled".  A name that becomes defined adds its own power of
 # two in the absent fixture and breaks the twin.
 set -euo pipefail
@@ -36,7 +36,7 @@ compile() {
     "$compiler" -p sce_fp_rsx --emit-container "$work/$stem.fpo" "$shaders/$stem.cg" >"$work/$stem.log" 2>&1
     rc=$?
     set -e
-    [[ $rc -eq 0 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; the reference accepts it"; }
+    [[ $rc -eq 0 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; the established compiler accepts it"; }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem exited 0 but wrote no container"
 }
 
@@ -49,7 +49,7 @@ twin() {
 }
 
 twin fp_predef_values_f  fp_predef_values_control_f  "__CGC__ and __SCE_CGC__ must both be 20000"
-twin fp_predef_absent_f  fp_predef_absent_control_f  "a name the reference does not define is defined here (each adds its own power of two)"
+twin fp_predef_absent_f  fp_predef_absent_control_f  "a name the established compiler does not define is defined here (each adds its own power of two)"
 twin fp_predef_branch_f  fp_predef_branch_control_f  "#ifdef __CGC__ must take the Cg branch"
 
 # The absent fixture is only a witness if a defined name really changes bytes:

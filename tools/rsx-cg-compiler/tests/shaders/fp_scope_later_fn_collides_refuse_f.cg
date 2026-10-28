@@ -8,7 +8,7 @@
 //
 // REFUSE: the callee f has no VISIBLE binding at the call - the only f is
 // declared after this body - so the use is recorded, and the later local
-// `float f` in the same scope collides.  C1002 on the reference.
+// `float f` in the same scope collides.  C1002 on the established compiler.
 float4 unused(float4 t) { f(missing); float f; return t; }
 float4 f(float4 t) { return t; }
 float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The GCC 16 PPU compiler's plain char, wchar_t and wint_t match the reference toolchain in both data models
-# (gcc-16.x 0075, 0076).  Expected values were measured with the reference compiler's -dM -E (C and C++):
+# The GCC 16 PPU compiler's plain char, wchar_t and wint_t match the established toolchain in both data models
+# (gcc-16.x 0075, 0076).  Expected values were measured with the established compiler's -dM -E (C and C++):
 #   ILP32 (default): __CHAR_SIGNED__ 1 (no __CHAR_UNSIGNED__), __WCHAR_TYPE__ short unsigned int,
 #                    __WCHAR_MAX__ 65535U (judged by value), __WINT_TYPE__ int
 #   -mlp64:          __CHAR_UNSIGNED__ 1 (no __CHAR_SIGNED__), the same wchar_t and wint_t
@@ -85,7 +85,7 @@ for abi in ilp32 lp64; do
     else want_char='#define __CHAR_UNSIGNED__ 1'; not_char=__CHAR_SIGNED__; signed=0; fi
     for lang in c c++; do
         dm=$("$G" $flag -x $lang -dM -E "$work/empty.c") || { fail "$abi $lang: -dM -E exited non-zero"; continue; }
-        # __WCHAR_MAX__ is judged by value below (GCC 16 spells it 0xffff, the reference 65535U)
+        # __WCHAR_MAX__ is judged by value below (GCC 16 spells it 0xffff, the system 65535U)
         for m in "$want_char" '#define __WCHAR_TYPE__ short unsigned int' '#define __WINT_TYPE__ int'; do
             has "$m" "$dm"; case $? in 0) ;; 1) fail "$abi $lang: missing '$m'" ;; *) fail "$abi $lang: could not judge '$m'" ;; esac
         done

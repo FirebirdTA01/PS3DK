@@ -7,7 +7,7 @@
   stub shape.  No PSL1GHT forwarder (<sysutil/msg.h>, msgDialogOpen2,
   msgDialogOpenEx, PSL1GHT libsysutil.a) is involved.
 
-  Signatures and constant values are the reference-SDK contract
+  Signatures and constant values are the Cell OS contract
   (sysutil_msgdialog.h): the type bitfield is a set of documented
   bit positions; the button-return / progressbar-index values are
   the documented enumerators expressed as macros so existing call

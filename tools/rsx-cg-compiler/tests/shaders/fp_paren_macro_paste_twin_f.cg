@@ -1,7 +1,7 @@
-// macro-parenthesis-adjacency.  Measured against sce-cgc 475.
+// macro-parenthesis-adjacency.  Measured against the established compiler.
 // The hand-expanded spelling that ALL FIVE paste rows must equal.  Measured,
 // not assumed: left, right, both, the nested ID(CAT(...)) and the ordinary
-// local-variable paste all produce one container on the reference
+// local-variable paste all produce one container on the established compiler
 // (43a4ac87280b) and one here (29a658971f7e), so the parenthesisation of the
 // nested row and the local of the plain row both fold away and this single
 // literal is the control for every one of them.  The rows are byte-compared

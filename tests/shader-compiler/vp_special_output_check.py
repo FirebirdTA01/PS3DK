@@ -1,6 +1,6 @@
 """Pin dropped VP stores, packed output lanes, and the PSIZE lower bound.
 
-Expectations measured independently with sce-cgc: FOG=o5.x, CLP0..2=o5.yzw,
+Expectations measured independently with the established compiler: FOG=o5.x, CLP0..2=o5.yzw,
 PSIZE=max(value,.125) in o6.x, CLP3..5=o6.yzw. Clip-enable GE is bit 1 of
 each four-bit field. The decoder evaluates the small MOV/MAX/MUL/ADD probes
 so changing a destination mask without remapping its source cannot pass.

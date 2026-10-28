@@ -166,7 +166,7 @@ void cellGcmSetTransferScaleSwizzleUnsafe(CellGcmContextData *context, const Cel
 void cellGcmSetConvertSwizzleFormatUnsafe(CellGcmContextData *context, uint32_t dstOffset, uint32_t dstWidth, uint32_t dstHeight, uint32_t dstX, uint32_t dstY, uint32_t srcOffset, uint32_t srcPitch, uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height, uint32_t bytesPerPixel, uint32_t mode);
 void cellGcmSetWaitForIdleUnsafe(CellGcmContextData * context);
 void cellGcmResetDefaultCommandBufferUnsafe(CellGcmContextData * context);
-/* The reference's global form: resets the current context (gCellGcmCurrentContext). */
+/* The system's global form: resets the current context (gCellGcmCurrentContext). */
 void cellGcmResetDefaultCommandBuffer(void);
 
 #ifdef __cplusplus

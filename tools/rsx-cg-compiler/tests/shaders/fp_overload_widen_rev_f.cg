@@ -1,8 +1,8 @@
-// function-visibility commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against the established compiler.
 // THE ROW THAT SETTLES THE RULE, because no exchange rate reproduces it.
 // Here the all-widening candidate needs FEWER conversions than the narrowing
 // one: clamp(float,float,float) widens one argument, clamp(int,int,int)
-// narrows two.  The reference still picks float.  So narrowing is not
+// narrows two.  The established compiler still picks float.  So narrowing is not
 // expensive - it is disqualifying, and cost only separates candidates that
 // narrow equally.
 //

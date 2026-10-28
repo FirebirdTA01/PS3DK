@@ -5,12 +5,12 @@
 # preprocessor and the copy was discarded, so (1) every macro a header
 # defined was invisible to the file that included it, and (2) a conditional
 # left open at the header's end was refused as "Unterminated #if/#ifdef
-# block" instead of continuing in the includer.  The reference keeps one
+# block" instead of continuing in the includer.  The established compiler keeps one
 # conditional stack per translation unit: an include may end inside an open
 # block, the includer's next #else/#endif binds to it, and a block still
 # open at the end of the unit is closed silently; only a block still
 # SKIPPING at the end of the unit warns (it swallowed the entry) and the
-# program is then refused.  All four shapes were measured on the reference
+# program is then refused.  All four shapes were measured on the established compiler
 # before this test was written.
 #
 # libretro's compat_macros.inc never closes its include guard and every
@@ -54,7 +54,7 @@ must_match() {
     local rc=0
     run_one "$stem" || rc=$?
     [[ $rc -ne 124 ]] || fail "$stem TIMED OUT after $limit"
-    [[ $rc -eq 0 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; the reference accepts it ($why)"; }
+    [[ $rc -eq 0 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; the established compiler accepts it ($why)"; }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem exited 0 but wrote no container"
     cmp -s "$work/$stem.fpo" "$work/$control.fpo" \
         || fail "$stem: container differs from $control - the header's macro did not reach the includer ($why)"
@@ -72,7 +72,7 @@ stem=fp_include_open_twice_f
 rc=0
 run_one "$stem" || rc=$?
 [[ $rc -ne 124 ]] || fail "$stem TIMED OUT after $limit"
-[[ $rc -eq 1 ]] || fail "$stem exited $rc; a unit that ends while skipping must be an ordinary refusal (exit 1), as the reference does"
+[[ $rc -eq 1 ]] || fail "$stem exited $rc; a unit that ends while skipping must be an ordinary refusal (exit 1), as the established compiler does"
 [[ ! -s "$work/$stem.fpo" ]] || fail "$stem refused but still wrote a container"
 grep -q 'unmatched #if' "$work/$stem.log" \
     || { tail -n 5 "$work/$stem.log" >&2; fail "$stem refused without saying that an unmatched #if swallowed the rest of the unit"; }

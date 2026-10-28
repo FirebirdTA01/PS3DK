@@ -173,7 +173,7 @@ pub fn build(input: &Path, output: &Path, opts: &BuildOptions) -> Result<()> {
     // lv2-prx.ld therefore declares the reloc segment in PHDRS so the linker
     // reserves its slot and sizes SIZEOF_HEADERS accordingly. When that slot is
     // present we fill it in place and leave e_phoff at 0x40, inside PHDR[0],
-    // exactly as Sony's own modules are laid out. Modules linked with an older
+    // exactly as the system's own modules are laid out. Modules linked with an older
     // script have no slot, so we still append and stay usable unsigned.
     let reloc_phdr = Phdr {
         p_type: PT_SCE_PPURELA,

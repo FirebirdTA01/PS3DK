@@ -23,7 +23,7 @@ pub const CELLOS_LV2_E_FLAGS: u32 = 0x0000_0000;
 pub const SYS_PROC_PARAM_MAGIC: u32 = 0x1b43_4cec;
 
 /// Required value at `.sys_proc_prx_param` offset 0x20. Observed in every
-/// reference-SDK CEX binary surveyed; zero stalls the PRX loader. See
+/// Cell OS CEX binary surveyed; zero stalls the PRX loader. See
 /// docs/abi/cellos-lv2-abi-spec.md section 3 rule 5.
 pub const SYS_PROC_PRX_PARAM_ABI_VERSION: u32 = 0x0101_0000;
 /// CellOS Lv-2 compact `.opd` descriptor size in bytes.

@@ -1,9 +1,9 @@
 /*! \file cell/keyboard.h
- \brief Reference-SDK source-compat surface for cellKb keyboard input.
+ \brief Cell OS source-compat surface for cellKb keyboard input.
 
   Provides cellKb* function decls + Cell-named typedefs/constants on
   top of PSL1GHT's <io/kb.h>.  Function symbols resolve through
-  libio.a (nidgen-emitted Sony stubs); types/constants are local
+  libio.a (nidgen-emitted Cell OS stubs); types/constants are local
   aliases over PSL1GHT's KbData / KbInfo / KB_* layouts.
 */
 
@@ -29,7 +29,7 @@ typedef KbCodeType  CellKbCodeType;
 typedef KbMapping   CellKbMappingType;
 
 /* CellKbData uses an anonymous union to expose both field names —
- * `len` (reference SDK) and `nb_keycode` (PSL1GHT) — at the same
+ * `len` (platform ABI) and `nb_keycode` (PSL1GHT) — at the same
  * offset.  Layout is byte-identical to PSL1GHT's KbData. */
 typedef struct CellKbData {
     CellKbLed   led;
@@ -43,7 +43,7 @@ typedef struct CellKbData {
 _Static_assert(sizeof(CellKbData) == sizeof(KbData),
                "CellKbData / KbData layout drift");
 
-/* CellKbInfo: same union trick to expose Sony names (max_connect /
+/* CellKbInfo: same union trick to expose Cell OS names (max_connect /
  * now_connect) alongside PSL1GHT's (max / connected).  Status array
  * sized to MAX_KEYBOARDS to match PSL1GHT's KbInfo layout exactly. */
 typedef struct CellKbInfo {

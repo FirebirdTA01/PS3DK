@@ -11,7 +11,7 @@
 #      walks the entry's parameters, so `half4 main() : COLOR` keeps
 #      outputFromH0 clear and emits a full-precision MOVR.
 #
-# The words below are the REFERENCE's, decoded from its own container for
+# The words below are the established compiler's, decoded from its own container for
 # these exact sources; the expectations are not derived from our encoder.
 # The container stores each ucode word with its 16-bit halves swapped, so
 # the raw file words are pinned as-is and the mask/precision fields are
@@ -105,7 +105,7 @@ half_with_depth = container(sys.argv[6])
 
 problems = []
 
-# (A) The reference's whole program for `float4 main() : COLOR
+# (A) The established compiler's whole program for `float4 main() : COLOR
 # { return 1.0; }`.  Only the second instruction's word 0 differs on the
 # general path today, and only in the write mask, so the full list is a
 # safe pin: if anything else moves, the diff names it.
@@ -119,7 +119,7 @@ if scalar["words"] != REFERENCE_SCALAR:
             for i, (a, b) in enumerate(zip(scalar["words"], REFERENCE_SCALAR))
             if a != b]
     problems.append(
-        "returned scalar: ucode differs from the reference at %s "
+        "returned scalar: ucode differs from the established compiler's at %s "
         "(ours, reference); %d words vs %d"
         % (diff or "no shared index", len(scalar["words"]),
            len(REFERENCE_SCALAR)))
@@ -132,7 +132,7 @@ if colour and colour[0]["mask"] != 0xF:
 if scalar["h0"]:
     problems.append("the float return set outputFromH0=%d" % scalar["h0"])
 
-# (B) The half return type.  The reference's container for this source is
+# (B) The half return type.  The established compiler's container for this source is
 # one MOVH and no more; ours still emits a leading FENCBR for every half
 # output, which is a SEPARATE divergence the out-parameter path shows too,
 # so this half pins properties rather than the word list: the flag, and a
@@ -156,10 +156,10 @@ else:
         problems.append(
             "half return: the colour write mask is 0x%X, not 0xF"
             % movh[0]["mask"])
-    # The reference's MOVH for this source, exactly.
+    # The established compiler's MOVH for this source, exactly.
     if movh[0]["word0"] != 0x1E810140:
         problems.append(
-            "half return: colour word0 is 0x%08x, expected the reference's "
+            "half return: colour word0 is 0x%08x, expected the established compiler's "
             "0x1E810140 (XOR 0x%08x)"
             % (movh[0]["word0"], movh[0]["word0"] ^ 0x1E810140))
 if half["depth"] or half["kill"]:
@@ -167,13 +167,13 @@ if half["depth"] or half["kill"]:
                     "but the container reports depthReplace=%d pixelKill=%d"
                     % (half["depth"], half["kill"]))
 
-# The control is byte-identical to the reference today and must stay so: a
+# The control is byte-identical to the established compiler today and must stay so: a
 # fix that broadcasts every scalar store, or sets the half flag whenever an
 # entry has a return type, moves it.
 if control["words"] != REFERENCE_SCALAR:
     problems.append(
         "the out-parameter control moved: it was byte-identical to the "
-        "reference and is the negative half of this pair")
+        "established compiler and is the negative half of this pair")
 if control["h0"]:
     problems.append("the out-parameter float control set outputFromH0=%d"
                     % control["h0"])
@@ -191,8 +191,8 @@ if not half_depth["depth"]:
     problems.append("the half-depth control reports depthReplace=0; the "
                     "fixture no longer exports depth and proves nothing")
 # The colour write is the full-mask one; the depth export is masked to
-# R1.z (0x4) in the reference and in ours, so this stays true if the depth
-# store's precision is ever brought in line with the reference's fp16.  No
+# R1.z (0x4) in the established compiler and in ours, so this stays true if the depth
+# store's precision is ever brought in line with the established compiler's fp16.  No
 # word list is pinned: we are not reference-identical on this shape yet
 # (two extra FENCBRs and an fp32 depth store), and those are other rows.
 half_colour_writes = [d for d in half_depth["instructions"]
@@ -226,7 +226,7 @@ if not mixed_colour:
 elif mixed_colour[0]["word0"] != 0x1E800140:
     problems.append(
         "half-colour/float-depth: colour word0 is 0x%08x, expected the "
-        "reference's 0x1E800140 (XOR 0x%08x)"
+        "established compiler's 0x1E800140 (XOR 0x%08x)"
         % (mixed_colour[0]["word0"], mixed_colour[0]["word0"] ^ 0x1E800140))
 
 if problems:
@@ -234,7 +234,7 @@ if problems:
         print("FAIL: " + problem)
     raise SystemExit(1)
 
-print("return-output-test: ok (returned scalar broadcasts to the reference's "
+print("return-output-test: ok (returned scalar broadcasts to the established compiler's "
       "ucode; a half return type sets outputFromH0 and emits fp16; the "
       "out-parameter controls are unmoved)")
 PY

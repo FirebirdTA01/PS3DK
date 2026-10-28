@@ -1,11 +1,11 @@
 """A vector stored into a scalar keeps lane x (community bucket, 19 programs).
 
-Measured on sce-cgc 475: a declaration's initialiser or a plain `=` that
+Measured on the established compiler: a declaration's initialiser or a plain `=` that
 stores a numeric VECTOR into a numeric SCALAR is accepted with warning C7011
 and keeps lane x, converted to the scalar's type (float a = t.xyz is t.x;
 a = t.yz is t.y; half a = t.zw is t.z; int a = t.xy truncates t.x).
 libretro's ddt-waterpaint, 2xbr-v3.x and oldtv were refused here with
-"cannot assign 'floatN' to 'float'".  Each expected value is the reference's.
+"cannot assign 'floatN' to 'float'".  Each expected value is the established compiler's.
 """
 import argparse
 import subprocess

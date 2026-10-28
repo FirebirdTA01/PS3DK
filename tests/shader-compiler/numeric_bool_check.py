@@ -70,7 +70,7 @@ def main(compiler):
             require(a==b,name+': nonzero twin differs')
             count+=1
         # unsigned-conversion-lowering: the unsigned operand's cast reaches an unsupported
-        # bitcast before conversion to bool. Reference accepts both forms.
+        # bitcast before conversion to bool. The established compiler accepts both forms.
         for profile in ('sce_fp_rsx','sce_vp_rsx'):
             for label,expr in [('bool','bool((unsigned int)4294967295)'),('compare','((unsigned int)4294967295)!=0')]:
                 source='float4 main():'+('COLOR' if profile=='sce_fp_rsx' else 'POSITION')+'{return float4('+expr+',0,0,1);}'

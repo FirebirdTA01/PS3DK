@@ -710,9 +710,9 @@ bool TypeOperations::isBinaryOpValid(BinaryOp op, const CgType& left, const CgTy
             return true;
         // Cg applies && and || component-wise to two vectors of one width
         // (measured, t_19e8402f: bool4 && bool4, bool3, float4 && float4 all
-        // compile).  A scalar is NOT broadcast: the reference refuses
+        // compile).  A scalar is NOT broadcast: the established compiler refuses
         // bool && bool4.  Mixed bool/numeric vectors are unmeasured and stay
-        // refused rather than risk accepting what the reference refuses.
+        // refused rather than risk accepting what the established compiler refuses.
         if (left.isVector() && right.isVector() && left.vectorSize() == right.vectorSize())
         {
             const bool lb = left.scalarKind() == ScalarKind::Bool;
@@ -912,7 +912,7 @@ static bool structLeavesAreNumeric(const CgType& type, int depth = 0)
         // A MATRIX leaf is out too: the fill picks the leaf's element type
         // to convert through, and the matrix path selected the matrix's own
         // base type instead, so a half2x2 filled from 1.00048828125 kept the
-        // float value where the reference rounds to 1.0009765625 (codex).
+        // float value where the established compiler rounds to 1.0009765625 (codex).
         // Refused with the rest of the conversion boundary.
         if (!fieldType->isNumeric() && !fieldType->isVector())
             return false;
@@ -921,10 +921,10 @@ static bool structLeavesAreNumeric(const CgType& type, int depth = 0)
         // [-2, 2 - 2^-10]) and the narrow integers (short/char wrap) each
         // have their own; leaving them to a generic float/int dispatch
         // writes the scalar through unchanged, which is a WRONG VALUE:
-        // measured (S)0.5 into a bool leaf as 0.5 where the reference says
-        // 1, (S)3.0 into a fixed leaf as 3 where the reference says
+        // measured (S)0.5 into a bool leaf as 0.5 where the established compiler says
+        // 1, (S)3.0 into a fixed leaf as 3 where the established compiler says
         // 1.9990234375, and (S)65537 into a short leaf as 65537 where the
-        // reference says 1 (codex, review of this commit).  Refusing them by
+        // established compiler says 1 (codex, review of this commit).  Refusing them by
         // name is the bounded answer; the conversions belong with the typed
         // constant evaluator, not in a second table here.
         switch (fieldType->scalarKind())
@@ -936,7 +936,7 @@ static bool structLeavesAreNumeric(const CgType& type, int depth = 0)
         default:
             // UInt is here with bool and the narrow integers because the
             // SIGNEDNESS conversion is missing too: `(S)(-1)` into an
-            // unsigned leaf emitted -1 where the reference wraps
+            // unsigned leaf emitted -1 where the established compiler wraps
             // (codex).  Same class, same answer - refuse until the typed
             // evaluator owns the conversion.
             return false;
@@ -966,8 +966,8 @@ bool canExplicitlyConvert(const CgType& from, const CgType& to)
     }
 
     // A SCALAR CAST TO A STRUCT initialises every leaf with that scalar.
-    // `OUT o = (OUT)0;` is how the reference SDK's own shaders clear an
-    // output struct, and it is 16 rows of the reference-SDK sweep; we
+    // `OUT o = (OUT)0;` is how the platform ABI's own shaders clear an
+    // output struct, and it is 16 rows of the Cell OS sweep; we
     // refused it in semantic analysis with "cannot cast from 'int' to
     // 'struct'".  Only a struct whose leaves are all numeric qualifies -
     // there is no meaning for `(S)0` when S holds a sampler or an array.

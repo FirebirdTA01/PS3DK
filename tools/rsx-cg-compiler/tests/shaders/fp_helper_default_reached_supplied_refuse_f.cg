@@ -1,7 +1,7 @@
-// function-visibility commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against the established compiler.
 // CELL 2 OF 3, AND THE ONLY ONE THIS SLICE FIXES.  The helper IS reached and
 // the call SUPPLIES the argument, so the default is never used - and the
-// reference still refuses: "error C1008: undefined variable".  Analysis is
+// established compiler still refuses: "error C1008: undefined variable".  Analysis is
 // gated on REACHABILITY, not on use.  Before this slice we analysed a default
 // only where it was materialised, accepted this, and it was the single new
 // gap commit 2 opened.  The mutant is this check removed.

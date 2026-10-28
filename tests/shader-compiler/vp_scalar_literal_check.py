@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VP literal folds, measured on sce-cgc 475; controls contain decoded values.
+"""VP literal folds, measured on the established compiler; controls contain decoded values.
 
 sin/cos round a double result once, tan divides separately rounded sin/cos,
 sqrt rounds reciprocal-sqrt before taking its reciprocal. These are distinct

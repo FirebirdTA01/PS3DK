@@ -43,7 +43,7 @@ pub struct Export {
     /// C symbol name, e.g. "cellNetCtlInit".
     pub name: String,
 
-    /// Authoritative NID from the reference SDK's module export table. Hex string accepted:
+    /// Authoritative NID from the platform ABI's module export table. Hex string accepted:
     /// "0xbd5a59fc", "bd5a59fc", or a bare integer.
     #[serde(with = "hex_u32")]
     pub nid: u32,
@@ -80,7 +80,7 @@ pub struct Export {
     /// stubgen emits one extra .opd entry per alias pointing at the
     /// canonical trampoline, so callers using e.g. PSL1GHT-style names
     /// (`sysLwMutexCreate`) bind to the same trampoline + FNID as
-    /// callers using the canonical Sony name (`sys_lwmutex_create`).
+    /// callers using the canonical Cell OS name (`sys_lwmutex_create`).
     /// When PSL1GHT compatibility is no longer needed the alias list
     /// can be emptied without churning canonical names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -136,7 +136,7 @@ pub enum ImplStatus {
     /// or a hand-written replacement).  Signature parity not guaranteed;
     /// see `verified` for that.
     Impl,
-    /// Implementation exists AND has been checked against the reference
+    /// Implementation exists AND has been checked against the system
     /// signature and runtime behaviour (automated test, RPCS3 run, or
     /// hardware run).
     Verified,

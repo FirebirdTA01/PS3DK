@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# A RUN-TIME selector on a VECTOR is refused, as the reference does (sce-cgc
+# A RUN-TIME selector on a VECTOR is refused, as the established compiler does (the established compiler
 # 475: error C1011 "cannot index a non-array value").  Accepting it
 # lowered the selector as lane 0, so t[s] silently returned t.x whatever s was.
 # (CONSTANT float selectors on vectors are runtime-vector-index-test.sh's
 # subject and stay accepted.)  Array elements and loop indices - constant once
-# the loop is unrolled - stay accepted, as on the reference.  Every row was
-# measured on sce-cgc 475 (2026-09-25).  A refusal must be EXACTLY exit 1 with
+# the loop is unrolled - stay accepted, as on the established compiler.  Every row was
+# measured on the established compiler (2026-09-25).  A refusal must be EXACTLY exit 1 with
 # the diagnostic: a crash or a timeout is not a refusal.
 # usage: runtime-vector-selector-refusal-test.sh <rsx-cg-compiler>
 set -u

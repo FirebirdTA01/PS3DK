@@ -3,8 +3,8 @@
 # array-uniform slice (commit A, 5896ac2a, laid constant-index elements out
 # one at a time and refused every run-time index by name).
 #
-# What the reference emits, measured on sce-cgc and pinned here as literal
-# expectations (the reference cannot run in CI):
+# What the established compiler emits, measured on the established compiler and pinned here as literal
+# expectations (the established compiler cannot run in CI):
 #   - the array takes a CONTIGUOUS block of constant registers, all N
 #     elements referenced, consecutive resIndex in element order, taken at
 #     the array's place in the descending walk (u_bones[4] alone: c464..c467;
@@ -27,15 +27,15 @@
 # with "run-time index into array".  The refusals keep the slice honest: an
 # integer-arithmetic index (int(idx) + 1) needs the vertex float-to-int
 # lowering, which is still deferred; a float-typed index is the same
-# frontend gap commit A pinned on the fragment side (the reference accepts
+# frontend gap commit A pinned on the fragment side (the established compiler accepts
 # both); nine distinct index values need lane REUSE over the eight address
-# lanes, which the reference performs and this slice does not; a fragment
+# lanes, which the established compiler performs and this slice does not; a fragment
 # run-time index stays refused (array-uniform-test.sh, C6013).
 #
-# With PS3_REF_CG_COMPILER set (the reference's executable, never named in
-# the tree), the accept rows are also compiled by the reference and
+# With PS3_REF_CG_COMPILER set (the established compiler's executable, never named in
+# the tree), the accept rows are also compiled by the established compiler and
 # byte-compared; the rows listed in BYTE_IDENTICAL must match, the rest
-# report their status.  Without it the reference rows are simply absent.
+# report their status.  Without it the established compiler rows are simply absent.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -283,7 +283,7 @@ printf '  %-44s two temp indices, two ARLs
 ' "rig row"
 
 # A CONSTANT-PROPAGATED index (`int i = 1; u[i]`, `float i = 1; u[int(i)]`)
-# is a constant index to the reference: per-element layout, no ARL, the
+# is a constant index to the established compiler: per-element layout, no ARL, the
 # same on the fragment side.  Beside a real run-time index the array is a
 # block and the folded read is its element (review: codex's twins, which
 # the first sha read as ONE lane for two literals - u[1] + u[1]).
@@ -338,7 +338,7 @@ accept vp_array_uniform_dyn_same_expr_twice_v
 printf '  %-44s rewrite = two lanes; same expression twice = one
 ' "v.x = v.y between reads"
 
-# A FLOAT-TYPED index (float-array-index-conversion).  The reference accepts it on both
+# A FLOAT-TYPED index (float-array-index-conversion).  The established compiler accepts it on both
 # profiles with int() semantics: a run-time float or half index is the same
 # ARL as int(idx) (byte-identical containers), a constant truncates toward
 # zero (1.7 -> 1, -0.5 -> 0, 3.9 -> 3; 4.0 refuses C1068), an UNSIGNED cast of
@@ -382,10 +382,10 @@ refuse() {  # <label> <stem> <body>
     printf '  %-44s refused\n' "$1"
 }
 refuse "int(idx) + 1 (VP float-to-int deferred)" vp_array_uniform_dyn_arith_refuse_v "float-to-int"
-refuse "float index out of range (C1068 in the reference)" vp_array_uniform_dyn_float_oob_refuse_v "out of bounds"
+refuse "float index out of range (C1068 in the established compiler)" vp_array_uniform_dyn_float_oob_refuse_v "out of bounds"
 # A CONSTANT floating expression beyond a bare literal or a floating cast of
 # a constant is REFUSED BY NAME until the typed constant evaluator serves
-# this path (static-const-qualifiers follow-up): the reference evaluates it in float and
+# this path (static-const-qualifiers follow-up): the established compiler evaluates it in float and
 # truncates ONCE on the result - u[1.7 * 2.0] is element 3 (leaf truncation
 # reads 2), u[((float)3 / 2) * 2] is element 3 (leaf truncation reads 2, and
 # there is no float LITERAL in it), u[(int)(bool)(float)0.5] is element 1
@@ -396,22 +396,22 @@ refuse "float index out of range (C1068 in the reference)" vp_array_uniform_dyn_
 refuse "u[1.7 * 2.0] (reference: element 3)"        vp_array_uniform_dyn_float_arith_v      "floating value"
 refuse "u[((float)3 / 2) * 2] (reference: 3)"        vp_array_uniform_dyn_float_cast_arith_v "floating value"
 refuse "u[(int)(bool)(float)0.5] (reference: 1)"     vp_array_uniform_dyn_float_cast_bool_v  "floating value"
-# A FIXED cast clamps to [-2, 2 - 2^-10] before it is read - the reference
+# A FIXED cast clamps to [-2, 2 - 2^-10] before it is read - the established compiler
 # reads u[(fixed)3] as element 1 - and that conversion is the typed
 # evaluator's, so the cast refuses by name here (review: codex).  An integral
 # cast of an out-of-range float literal folds to INT_MIN (the x86 indefinite
-# value the reference uses, measured on static-const-qualifiers) and is out of bounds.
+# value the established compiler uses, measured on static-const-qualifiers) and is out of bounds.
 refuse "u[(fixed)3] (reference: element 1)"           vp_array_uniform_dyn_fixed_cast_refuse_v "floating value"
-refuse "u[(int)4294967296.0] (C1068 in the reference)" vp_array_uniform_dyn_int_cast_oob_refuse_v "out of bounds"
+refuse "u[(int)4294967296.0] (C1068 in the established compiler)" vp_array_uniform_dyn_int_cast_oob_refuse_v "out of bounds"
 # The float32 rule on bare literals, directly: 0.9999999999 is 1.0f before
 # it is read (element 1), and 3.9999999999 is 4.0f - out of bounds (claude's
 # rows).  The unsigned wrap has a bound: 2^32 + 512 (exactly representable
 # in fp32) narrows to 512 and is out of bounds, which separates "int64, then
 # narrow to 32, then the ordinary bounds check" from "wrap modulo the array".
-refuse "u[3.9999999999] (4.0f: C1068 in the reference)" vp_array_uniform_dyn_float_near3_v "out of bounds"
+refuse "u[3.9999999999] (4.0f: C1068 in the established compiler)" vp_array_uniform_dyn_float_near3_v "out of bounds"
 refuse "u[(unsigned int)4294967808.0] (C1068)"        vp_array_uniform_dyn_uint_cast_oob_refuse_v "out of bounds"
 refuse "nine index values (lane reuse not lowered)" vp_array_uniform_dyn_nine_values_refuse_v "address register lanes"
-refuse "int i = 4; u[i] (C1068 in the reference)" vp_array_uniform_dyn_local_oob_refuse_v "out of bounds"
+refuse "int i = 4; u[i] (C1068 in the established compiler)" vp_array_uniform_dyn_local_oob_refuse_v "out of bounds"
 refuse "int i = -1; u[i]"                    vp_array_uniform_dyn_local_neg_refuse_v "out of bounds"
 
 # SELF-CHECK: an exit-1 stub that leaves an EMPTY artifact, and one that
@@ -428,7 +428,7 @@ printf '  %-44s ok\n' "self-check: two stubs rejected"
 # ---------------------------------------------------------------------------
 # OPTIONAL REFERENCE ROWS.  Byte identity is the strongest predicate and the
 # one the decoded fields above approximate; it is measured here only when
-# the reference is present.  A row NOT in BYTE_IDENTICAL differs today for a
+# the established compiler is present.  A row NOT in BYTE_IDENTICAL differs today for a
 # reason outside this slice (operand order of a commutative op with a plain
 # const, ARL placement in the schedule, a MAD fusion the constant-index twin
 # loses too, lane-level dead-code elimination) and is reported, not judged.

@@ -228,7 +228,7 @@ PSGL_EXPORT int psglDrawCommandBufferHole(
     (void)mode; (void)type; (void)indices;
     if (indexOffset) *indexOffset = 0u;
 
-    /* calculate draw-hole word count using the reference formula */
+    /* calculate draw-hole word count using the system formula */
     words = 7u + 2u + 3u;
     chunks = (uint32_t)count / 0x7ff00u;
     words += chunks * (0x7ffu + 1u);

@@ -29,7 +29,7 @@ samples/sysutil/hello-ppu-png/pkg_files/USRDIR/ps3dk.png
 
 # Proprietary reference material — MUST NEVER be committed.
 # Contains pointers, mount instructions, and the actual reference mount
-# used privately for API coverage/oracle work.  Everything under
+# used privately for API coverage/measurement work.  Everything under
 # reference/ stays local to each developer's machine.
 /reference/
 
@@ -60,7 +60,7 @@ a.out
 patches/**/series.bak
 patches/**/series.bak.*
 
-# nidgen extracted audit YAMLs -- reference-SDK analysis
+# nidgen extracted audit YAMLs -- Cell OS analysis
 # artifacts.  The production NID yaml under
 # tools/nidgen/nids/extracted/<lib>_stub.yaml is what ships; *_audit.yaml
 # carries the raw nm / archive inventory and stays local.
@@ -133,15 +133,14 @@ desktop.ini
 # Private developer notes — phase/stage narrative kept out of the public tree.
 /docs/dev-notes.md
 
-# Session / planning / provenance docs that assume access to the reference
-# the reference SDK or carry too much internal phase narrative for the public tree.
+# Session / planning / provenance docs that assume access to the system
+# the platform ABI or carry too much internal phase narrative for the public tree.
 # Kept locally; never tracked.
 /docs/HANDOFF.md
 /docs/phase-0-status.md
 /docs/plan.md
 /docs/plans/
-/docs/building-sony-sdk-samples.md
-/docs/building-reference-samples.md
+/docs/building-*-samples.md
 /docs/spurs-job-binary2-re.md
 
 # Agent-team session prompts — internal-only, never tracked.
@@ -159,7 +158,7 @@ desktop.ini
 
 # rsx-cg-compiler analysis diary + diff-test harness.
 # Both are local-only: REVERSE_ENGINEERING.md will be replaced by a public
-# ARCHITECTURE.md; run_diff.sh drives a byte-match against the reference
+# ARCHITECTURE.md; run_diff.sh drives a byte-match against the system
 # compiler and depends on a proprietary tool.
 /tools/rsx-cg-compiler/docs/REVERSE_ENGINEERING.md
 /tools/rsx-cg-compiler/tests/*
@@ -171,8 +170,8 @@ desktop.ini
 !/tools/rsx-cg-compiler/tests/shaders/
 
 # Reference-output analysis methodology — describes how we capture
-# and byte-match the proprietary reference SDK/toolchain output. Local-only;
-# references the reference tools by name, must never be published.
+# and byte-match the proprietary platform ABI/toolchain output. Local-only;
+# references the system tools by name, must never be published.
 /docs/reference-output-matching-methodology.md
 
 # Per-assistant project-context / memory files — internal narrative, kept
@@ -187,7 +186,7 @@ tools/rsx-cg-compiler/docs/GENERIC_FP_ARITH_RED_BASELINE.md
 tools/rsx-cg-compiler/docs/GENERIC_VP_ARITH_RED_BASELINE.md
 tools/rsx-cg-compiler/docs/REFERENCE_SAMPLE_EMIT_RED_BASELINE.md
 
-# host-only reference-sample shim wrappers — kept locally, not tracked (independent)
+# host-only existing-sample shim wrappers — kept locally, not tracked (independent)
 scripts/install-shim-wrappers.sh
 
 # local tree-compiler build dir used by the shader-readback fixture

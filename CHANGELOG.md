@@ -24,6 +24,19 @@ The version stamped into builds is generated from the most recent
   module, and refuses one whose source and arguments disagree.
   `SYS_MODULE_EXIT` and `SYS_MODULE_STOP_LEVEL` are refused at compile time
   for now.
+- **Expected record-layout table.** `tests/sdk/struct-layout-test.sh` compiles
+  each SDK header alone and checks the size, alignment and every member offset
+  of 1849 lv2- and library-facing records (ILP32, LP64 and SPU) against
+  `tests/sdk/struct-layout-table.tsv`. Any difference, a header that does not
+  compile or a record that cannot be measured fails the test. Records with a
+  layout fix still open (NP, SAIL, LP64 codec stream and output parameters,
+  and some libc records) are listed in `tests/sdk/struct-layout-known-open.txt`
+  and are reported without failing.
+- **Wording check for the tree and new commits.**
+  `scripts/neutral-wording-scan.py` checks tracked text and the commit messages
+  and added lines of a push or pull request; CI runs it, and
+  `scripts/hooks/install-neutral-wording-hook.sh` installs the same check as a
+  pre-push hook.
 
 ### Fixed
 
@@ -1933,7 +1946,7 @@ The version stamped into builds is generated from the most recent
 ### Changed
 
 - **C/C++ ABI break: rebuild everything built with an earlier PS3DK.**  Under
-  ILP32, the default PPU ABI, the fundamental types now match the reference
+  ILP32, the default PPU ABI, the fundamental types now match the platform
   SDK:
   - `<stdint.h>` `int32_t`/`uint32_t` (and the `least32` types) change from
     `long`/`unsigned long` to `int`/`unsigned int` (GCC patch 0040).  C++
@@ -1954,7 +1967,7 @@ The version stamped into builds is generated from the most recent
   names.**  `libaudio`, `libcamera`, `libgem`, `libhttputil`, `liblv2dbg`,
   `libnetctl`, `libssl`, `libsysmodule`, `libvdec`, `libresc`, `libsysfs`,
   `libhttp`, `libspurs`, `libfont` and `libfontFT` now come from the
-  reference-shaped stub archives.  Each PSL1GHT function name is an FNID alias
+  system-shaped stub archives.  Each PSL1GHT function name is an FNID alias
   of the reference export it called, and each PSL1GHT archive name is an alias
   of the `_stub` archive in both ABIs, so LP64 links no longer fall back to
   ILP32 PSL1GHT archives.  PSL1GHT's C wrappers are replaced by aliases or
@@ -2020,7 +2033,7 @@ The version stamped into builds is generated from the most recent
   The EH data registers r3-r6 were likewise reloaded with 4-byte `lwz`, an
   inference from the disassembly (their values on handler entry were not
   captured).  GCC patch 0037 saves and restores the link register and r3-r6
-  as 64-bit values, as the reference toolchain does for the link register;
+  as 64-bit values, as the platform ABI does for the link register;
   the `.init`/`.fini` CRT frames match.  Exceptions still do not propagate
   across PRX import calls.
 - **C++ exception state was shared by every PPU thread.**
@@ -2194,7 +2207,7 @@ merged into the stub archives.
 
   The 28th, `gcmSetUserCommand`, is deliberately still undefined and is an
   explicit, documented exception in the coverage guard.  Our header declares it
-  taking a callback pointer; the reference headers and RPCS3 both implement
+  taking a callback pointer; the system headers and RPCS3 both implement
   `cellGcmSetUserCommand` as a command-buffer emitter taking `(context, cause)`.
   Leaving it unlinkable is better than guessing which contract is real.
 - **`tests/sdk/gcm-legacy-symbol-coverage-test.sh`.**  It fails when the header
@@ -2234,7 +2247,7 @@ merged into the stub archives.
   half-precision `COLOR0` selects H0 through `outputFromH0`, and a half output
   composed in a way that would alias a temporary in R0 is refused rather than
   bound wrongly.  Depth exports through `R1.z` with replacement enabled.
-  `TEXCOORD8` and `TEXCOORD9` carry the mask bits the reference emits.
+  `TEXCOORD8` and `TEXCOORD9` carry the mask bits the established compiler emits.
 - **Wider shader-differential coverage.**  The rig compares every declared
   fragment output including `COLOR1..3` and depth, though MRT and depth
   verdicts stay withheld until their proving controls pass — the gates exist
@@ -2268,7 +2281,7 @@ merged into the stub archives.
   local-to-main blit can no longer leave a later transfer pointing at the
   wrong destination.
 - **The fragment-program control word forwards the container's `depthReplace`**
-  and uses the reference's half-output bind bits rather than PSL1GHT's `0x0e`,
+  and uses the established compiler's half-output bind bits rather than PSL1GHT's `0x0e`,
   both through one shared builder with one set of callers.
 - **Fragment register allocation follows liveness.**  An ordinary preferred
   register yields to a live occupant; an *output* pin does not, because the
@@ -2380,7 +2393,7 @@ before.
   (`linux-raw-sys` 0.12.1, `parking_lot` 0.12.5) — and the stamp refuses if any
   member is missing rather than leaving it silently unstamped.
 - **The angle-stdlib test fixtures read real inputs.**  They declared their
-  input as a semantic-annotated *local*, which binds nothing — the reference
+  input as a semantic-annotated *local*, which binds nothing — the established
   compiler warns "might be used before being initialized" and emits an empty
   attribute mask for the same source.  The fixtures only passed because an
   unresolvable operand used to become vertex attribute zero, so the test was
@@ -2420,7 +2433,7 @@ before.
 ### Added
 
 - **`radians()` / `degrees()`**, lowered to a single multiply, with constants
-  that match the reference implementation bit for bit.
+  that match the established compiler bit for bit.
 - **A shader compile gate** (`scripts/shader-compile-check.py`) that compiles
   every checked-in shader and fails on any regression — and refuses to report
   a pass over an empty corpus.
@@ -2672,7 +2685,7 @@ battery.
   SELF round trip drops. `make_sprx` is built from a relabelled copy of
   `make_self.c`; `lv2-prx.ld` reserves the `0x700000A4` program header and
   `prx-gen` fills it in place, keeping the table at `0x40` inside the first
-  `PT_LOAD` (the layout Sony modules use).
+  `PT_LOAD` (the layout system modules use).
 - The packaging gate rejected every non-tag build (version suffix and
   `ON_TAG` compared unconditionally); `ON_TAG` is now required only with
   `--require-on-tag`, which packaging passes for clean `vX.Y.Z` versions.
@@ -2732,7 +2745,7 @@ battery.
   SELF round trip drops. `make_sprx` is built from a relabelled copy of
   `make_self.c`; `lv2-prx.ld` reserves the `0x700000A4` program header and
   `prx-gen` fills it in place, keeping the table at `0x40` inside the first
-  `PT_LOAD` (the layout Sony modules use).
+  `PT_LOAD` (the layout system modules use).
 - The packaging gate rejected every non-tag build (version suffix and
   `ON_TAG` compared unconditionally); `ON_TAG` is now required only with
   `--require-on-tag`, which packaging passes for clean `vX.Y.Z` versions.
@@ -2852,7 +2865,7 @@ first-run path. Fresh-extract sample sweep: 198/198 raw and 198/198 after
 ### SDK — network and PSN family
 
 This release ships the full network and PSN surface in a single wave.
-Twelve new stub archives cover the entire reference SDK network /
+Twelve new stub archives cover the entire Cell OS network /
 PSN ABI: cellNetCtl (network state notification + configuration
 query), cellNet (sys_net POSIX sockets), cellSsl (TLS), cellHttp +
 cellHttpUtil (HTTP client and URL / Base64 helpers), and the NP
@@ -2903,7 +2916,7 @@ A new `cell/codec.h` umbrella header pulls in the codec sub-headers
 so callers can `#include <cell/codec.h>` directly.  The
 `hello-ppu-jpg-dec` sample relocates from `samples/sysutil/` to
 `samples/codec/` and is expanded toward feature parity with the
-reference SDK decoder demo.  `hello-ppu-jpg-enc` is added and then
+established decoder demo.  `hello-ppu-jpg-enc` is added and then
 consolidated to a functional encoder that exercises the full
 QueryAttr / Open / WaitForInput / EncodePicture2 / WaitForOutput /
 GetStreamInfo / Close cycle on an in-code RGB test image, with FNV-1a
@@ -3208,7 +3221,7 @@ ILP32-hybrid, and a shared option file factor.
 
 ### SDK — cell/gcm
 
-- **`c597665`** — `sdk/cell/gcm: reference-SDK naming aliases
+- **`c597665`** — `sdk/cell/gcm: Cell OS naming aliases
   and no-context wrappers`.  A large batch of cell-side
   aliases over existing rsx primitives plus C++ no-context
   overloads — `CELL_GCM_KEEP` / `INCR` / `COMPMODE_C32_2X1` /
@@ -3522,7 +3535,7 @@ against the ILP32 baseline.
 ### Toolchain — ELF64 + ILP32 hybrid ABI as default
 
 PPU userland output is now ELF64 + ILP32 (32-bit C pointers in a
-64-bit ELF wrapper) by default, matching the reference SDK.  LP64 is
+64-bit ELF wrapper) by default, matching the platform ABI.  LP64 is
 retained as a `-mlp64` multilib opt-in so that LP64 inputs still
 build, but every conforming Lv-2 PPU executable emitted by the
 default driver path now follows the ILP32 contract throughout —
@@ -3763,7 +3776,7 @@ shipped reference.
 
 ### `rsx-cg-compiler` — VP/FP byte-match expansion
 
-The byte-diff suite against the reference Cg compiler at `--O2 --fastmath`
+The byte-diff suite against the established Cg compiler at `--O2 --fastmath`
 grows from 65/65 to **96/96** byte-identical:
 
 - **FP — compound-discard lowering.**  Two-pass emit (analysis + emit)
@@ -3774,7 +3787,7 @@ grows from 65/65 to **96/96** byte-identical:
   masks, `NVFXSR_NONE` CC registers, and post-discard MOV/MULR
   swizzle.  Both `discard_tex_alpha_f` (compound condition) and
   `discard_tex_varying_f` (simple condition with post-discard
-  output) now byte-match the reference Cg compiler at the full container level.
+  output) now byte-match the established Cg compiler at the full container level.
 - **FP — dual-texture discard ordering.**  When a fragment program
   contains two discard sequences gated by tex-LHS comparisons,
   the uniform-load MOV for the *second* discard must precede its
@@ -3784,7 +3797,7 @@ grows from 65/65 to **96/96** byte-identical:
 - **FP — `VecConstructTexMul` split-write shape.**  Recognises
   `oColor.xyz = tex.xyz * varying.x; oColor.w = tex.w * varying.y`
   and emits a split-write StoreOutput (two MOVs with per-lane masks)
-  instead of a single MOV, matching the reference Cg compiler's decomposition of
+  instead of a single MOV, matching the established Cg compiler's decomposition of
   post-discard output mixing.
 - **FP — implicit varying-binding inference.**  Front-end's default-
   binding pass assigns sequential `TEXCOORD<N>` slots to unbound FP
@@ -3820,7 +3833,7 @@ grows from 65/65 to **96/96** byte-identical:
   `internal-constant-N` parameter-table entries
   (`var=0x1007`, `paramno=0xFFFFFFFE`) with a 16-byte float[4] block
   embedded in the strings region pointed at by `defaultValue` —
-  exactly the layout the reference compiler produces.
+  exactly the layout the established compiler produces.
 - **VP — chained `mul(matrix, X)` with temp ping-pong.**  Prior
   matvecmul results materialise into temp registers; the temp is
   recycled after the next chain step so we ping-pong R0 → R1 → R0
@@ -3867,7 +3880,7 @@ grows from 65/65 to **96/96** byte-identical:
   API.  The fragment shader is rewritten off the split-write else
   (`oColor.rgb = ...; oColor.a = ...`) and onto a single
   `oColor = color` write so rsx-cg-compiler's alpha-mask if-convert
-  matches the reference compiler byte-for-byte.
+  matches the established compiler byte-for-byte.
 
 ### SDK — SPURS JOB CHAIN runtime
 
@@ -3941,7 +3954,7 @@ semaphore-driven sync, clean shutdown.
 ### SDK — libspurs SPU runtime expansion
 
 Eleven new SPU-side libspurs entry points added to `libspurs_task.a`,
-each byte-equivalent to the reference SDK's `libspurs.a`:
+each byte-equivalent to the system `libspurs.a`:
 
 - **Module getters (round 1):** `cellSpursGetSpursAddress`,
   `cellSpursGetCurrentSpuId`, `cellSpursGetTagId`,
@@ -3961,7 +3974,7 @@ each byte-equivalent to the reference SDK's `libspurs.a`:
   `_cellSpursTaskCanCallBlockWait` (152 B),
   `_cellSpursGetWorkloadFlag` (48 B),
   `_cellSpursSendWorkloadSignal` (168 B).  Hand-written `.S` files
-  byte-matched against the reference `libspurs.a` object disassembly
+  byte-matched against the system `libspurs.a` object disassembly
   via `cmp -l` of `.text` byte slices.  `samples/spurs/hello-spurs-semaphore`
   exercises the producer/consumer P/V path; status reports DONE
   rather than SUCCESS because the BLOCK service round-trip is
@@ -3973,7 +3986,7 @@ each byte-equivalent to the reference SDK's `libspurs.a`:
 ### SDK — libsputhread SPU lv2-syscall expansion
 
 Six SPU lv2-syscall wrappers added to `libsputhread.a`, byte-equivalent
-to the reference SDK:
+to the system library:
 
 - `sys_spu_thread_send_event` / `throw_event` / `receive_event` /
   `tryreceive_event` (event-port; `ch28+ch30` mailbox shape;
@@ -3992,7 +4005,7 @@ Two byte-match gotchas surfaced and are documented inline: SPU GAS
 folds `nop $127` to `nop $0` (use `.long 0x4020007f` for byte-
 identical output); `hbrr` branch-hint must sit on the line of the
 actual branch, not the line before, for the encoded immediate to
-match the reference.
+match the system encoding.
 
 ### SDK — SPU C++ SIMD class wrappers
 
@@ -4008,7 +4021,7 @@ handles double compares natively, no `libsimdmath` cmp dep);
 exercises every operator class; nine result groups print expected
 values in RPCS3.
 
-### SDK — reference-SDK source-compat headers
+### SDK — Cell OS source-compat headers
 
 Surfaced while attempting to build code originally written for older
 SDKs unmodified against our toolchain.  None of these are CellOS ABI
@@ -4034,14 +4047,14 @@ changes — they're naming / layout aliases over what we already ship:
   `cell/gcm/gcm_enum.h`, `cell/keyboard.h`, `sys/event.h`,
   `sys/process.h`, `sys/spu_thread.h`, `sys/sys_time.h`,
   `sysutil/sysutil_common.h`, `vectormath/cpp/vectormath_soa.h` so
-  reference-SDK code parses without local edits.
+  existing Cell OS code parses without local edits.
 
 ### Tooling — NID stub generator
 
 - **`nidgen` SPRX stub trampoline shape.**  Switches from a frame-
   ful `bctr` tail-call to a frame-less wrapping shape (`bctrl`
   preserving `LR @ sp+24` and `r2 @ sp+40`, no `stdu`).  The
-  reference `bctr` tail-call breaks on intra-DSO `bl` because PPU
+  system `bctr` tail-call breaks on intra-DSO `bl` because PPU
   GCC doesn't restore the TOC after the call; the wrapping shape
   fixes calls with more than 8 arguments through any SPRX boundary
   (libspurs `job_chain` etc.).
@@ -4192,7 +4205,7 @@ RPCS3 desyncs on the second consecutive count=32 packet — once a VP
 crosses 16 instructions the FIFO trips with `RSX: FIFO error:
 possible desync event (last cmd = 0x1c0000d)`.  Real hardware
 accepts both shapes; the small-packet form (count=4, one per VP
-instruction) is what every shipping reference sample uses, so it's
+instruction) is what every established sample program uses, so it's
 the empirically-safe option.
 
 - `patches/psl1ght/0009-librsx-vp-upload-count4.patch` rewrites
@@ -4427,7 +4440,7 @@ The byte-diff suite against `the reference Cg compiler` at `--O2 --fastmath` gro
 ### `rsx-cg-compiler` — major shader-feature expansion
 
 The Cg→NV40 compiler grew from the v0.1.0 stage-4 baseline (46/46
-byte-match against the reference Cg compiler) to **57/57** byte-match.
+byte-match against the established Cg compiler) to **57/57** byte-match.
 Highlights:
 
 - **Static for-loop unroll** in the IR builder.  Recognises
@@ -4442,7 +4455,7 @@ Highlights:
   arithmetic, not just the `(varying, uniform)` lone-add shape.
   Chained `vcol + a + b + c`-style runtime-uniform sums emit the
   full N-instruction MOVH-preload + `R0 = R0 + c[k]` link sequence
-  byte-exact against the reference compiler.
+  byte-exact against the established compiler.
 - **Repeated-add scalar-lane scale fold** (`acc=0; for (i<3) acc+=x;`
   → `MUL 3.0, x`).  CSE collapses the per-iteration swizzle reads;
   algebraic-simplification drops the `0 + x` head; a new scale-fold
@@ -4450,7 +4463,7 @@ Highlights:
   emits a single MAD/MUL with the literal coefficient.
 - **VecConstruct lane-elision MOVR** — generalised to 1-, 2-, and
   3-unique-value shapes including zero-skip, `scaledLane` X / Y / Z /
-  W, and the FENCBR-bracketed sequence the reference compiler emits
+  W, and the FENCBR-bracketed sequence the established compiler emits
   when the scaled lane lives at non-canonical positions.
 - **Three new GCM validation samples** that exercise the above features
   end-to-end on hardware:
@@ -4525,7 +4538,7 @@ First public, version-tagged snapshot.  Status:
     runs end-to-end in RPCS3 (PPU spawns embedded SPU task, SPU DMAs
     a flag back, Taskset Shutdown+Join clean).
   - `libsputhread` SPU lv2-syscall wrappers (event_flag_*, spu_thread_*)
-    byte-exact with the reference SDK; full `hello-event-flag-spu`
+    byte-exact with the system library; full `hello-event-flag-spu`
     end-to-end run.
   - `libc_stub` carries a working `spu_printf` that bypasses RPCS3's
     broken `libc.spu_thread_printf` path.
@@ -4536,7 +4549,7 @@ First public, version-tagged snapshot.  Status:
   legacy homebrew.
 - **Tools:**
   - `nidgen` — FNID/NID database + reference-format stub archive emitter.
-  - `coverage-report` — reference SDK vs install-tree coverage matrix.
+  - `coverage-report` — API-list vs install-tree coverage matrix.
   - `abi-verify` — CellOS Lv-2 ABI conformance checker.  All 8 invariants
     pass on `hello-ppu-abi-check`.
   - `sprx-linker` — fork of `make_self`/`make_fself` companion.
@@ -4548,7 +4561,7 @@ First public, version-tagged snapshot.  Status:
     end-to-end in RPCS3 against decrypted reference SELFs.
   - `ATTRIBUTE_PRXPTR` (32-bit EA) applied to all pointer fields in
     `cell/*` structs that cross the SPRX boundary.
-- **Reference-SDK builds:** unmodified `basic.cpp` (RSX triangle) and
+- **Cell OS source builds:** unmodified `basic.cpp` (RSX triangle) and
   `5spu_spurs_without_context` (Spurs class surface) compile against
   this SDK using stock `the reference Cg compiler` shaders, and run in RPCS3.
 - **Versioning infrastructure:** this changelog, `scripts/version.sh`,

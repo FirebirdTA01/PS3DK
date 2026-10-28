@@ -47,7 +47,7 @@ struct Semantic
     std::string rawName;   // original source spelling, e.g., "TEXCOORD0" — preserved for byte-exact .vpo/.fpo emit
     int index = 0;         // e.g., 0 for TEXCOORD0, 1 for TEXCOORD1
     // True when assigned by the front-end's default-binding pass for an
-    // entry-point parameter the user left unbound. The reference compiler
+    // entry-point parameter the user left unbound. The established compiler
     // resolves the resource code (e.g. TEXCOORD0 → 0x0c94) but writes a
     // *zero* semantic-string offset into the .fpo/.vpo container — the
     // container emitter consults this flag to suppress the string.
@@ -117,7 +117,7 @@ struct StructField
     std::string name;
     std::shared_ptr<TypeNode> type;
     Semantic semantic;
-    // A member may carry a storage/interface qualifier - the reference
+    // A member may carry a storage/interface qualifier - the established compiler
     // SDK's own headers write `uniform sampler2D t : TEXUNIT0;` and
     // `in float4 position : POSITION;` inside structs.  RECORDED rather
     // than dropped: nothing reads it yet, because the SEMANTIC is what
@@ -344,7 +344,7 @@ struct ConstructorExpr : ExprNode
 {
     // True when the source wrote BRACES - `float4 u = {1,2,3,4}` - rather
     // than a parenthesised constructor.  The parser builds the same node for
-    // both, but the reference applies DIFFERENT rules: a braced initialiser
+    // both, but the established compiler applies DIFFERENT rules: a braced initialiser
     // must supply exactly the declared component count (C1057 too little /
     // C1058 too much), while a parenthesised constructor with ONE argument
     // broadcasts.  `float4 u = {2}` is refused and `float4 u = float4(2)` is
@@ -582,11 +582,11 @@ struct VarDecl : DeclNode
     std::unique_ptr<ExprNode> initializer;  // nullable
     StorageQualifier storage = StorageQualifier::None;
     // "static const" / "const static" both canonicalize to Const; this keeps
-    // whether `static` was written, because the reference folds a static
+    // whether `static` was written, because the established compiler folds a static
     // const as a true constant but treats a non-static file-scope const as a
     // uniform with a default - so only a STATIC const may feed another
     // initialiser (file-scope-initializer-fold: `const float W; const float2 D = {1/W}` is
-    // C1059 on the reference).
+    // C1059 on the established compiler).
     bool isStatic = false;
     Semantic semantic;
     VitaAttributes vitaAttrs;

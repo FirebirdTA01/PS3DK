@@ -1,6 +1,6 @@
 """fmod() and all() are lowered, not left as calls (community bucket).
 
-Measured on sce-cgc 475: fmod(a, b) is r = frac(|a / b|) * |b|, negated
+Measured on the established compiler: fmod(a, b) is r = frac(|a / b|) * |b|, negated
 where a < 0 (RCP+MUL per lane or DIV, FRC of the absolute quotient, MUL by
 |b|, a predicated negate on a's sign); all(v) is every lane != 0 (SNE per
 lane, multiplied into the condition register).  33 community programs
@@ -41,7 +41,7 @@ FP_ROWS = {
                     lambda a, b: list(b) if a[0] != 0 and a[1] != 0 else [-v for v in b]),
     'all_compare': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { bool3 c = a.xyz > 0.0; return all(c) ? a : b; }\n',
                     lambda a, b: list(a) if a[0] > 0 and a[1] > 0 and a[2] > 0 else list(b)),
-    # a scalar operand broadcasts (measured on the reference)
+    # a scalar operand broadcasts (measured on the established compiler)
     'fmod_vec_by_scalar': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return fmod(a, b.x); }\n',
                            lambda a, b: [fmod_ref(x, b[0]) for x in a]),
     'fmod_scalar_by_vec': ('float4 main(float4 a : TEXCOORD0, float4 b : TEXCOORD1) : COLOR { return fmod(a.x, b); }\n',
@@ -51,7 +51,7 @@ FP_ROWS = {
 }
 # Vertex rows are judged by value with the VP evaluator (binary32).  A
 # vector fmod needs a per-lane select, which the vertex path does not have
-# (t_ca8f99a6): it stays refused by name although the reference accepts it.
+# (t_ca8f99a6): it stays refused by name although the established compiler accepts it.
 VP_ROWS = {
     'fmod_scalar_vp': ('float4 main(float4 p : POSITION, uniform float d) : POSITION { return float4(fmod(p.x, d), p.yzw); }\n',
                        lambda p: [fmod_ref(p[0], 0.5), p[1], p[2], p[3]]),

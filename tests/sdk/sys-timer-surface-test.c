@@ -1,4 +1,4 @@
-/* <sys/timer.h> surface: every LV2 timer call, as the reference SDK spells it.
+/* <sys/timer.h> surface: every LV2 timer call, as the platform ABI spells it.
  * sys-timer-surface-test.sh compiles this in C and C++, ILP32 and LP64, and
  * checks each wrapper's syscall number in the object code. */
 #include <sys/timer.h>

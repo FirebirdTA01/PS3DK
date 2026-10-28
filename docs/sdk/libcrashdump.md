@@ -6,7 +6,7 @@
 | Stub archive | `libsys_crashdump_stub.a` (nidgen) |
 | SPRX module | `sys_crashdump` (LV2 syscall library, not cellXxx) |
 | Entry points | 2 |
-| Availability | 475+ firmware only; pre-475 does not ship this library |
+| Availability | 4.75+ firmware only; pre-4.75 does not ship this library |
 
 ## Surface
 
@@ -35,7 +35,7 @@ No init/end pair required. The library is stateless — call `set` at any point 
 
 ### 1. Whole-library version requirement
 
-This library does not exist in pre-475 firmware. Applications targeting older firmware must guard or omit crashdump usage. The two entry points (`sys_crash_dump_set_user_log_area`, `sys_crash_dump_get_user_log_area`) are absent from 3.70 entirely.
+This library does not exist in pre-4.75 firmware. Applications targeting older firmware must guard or omit crashdump usage. The two entry points (`sys_crash_dump_set_user_log_area`, `sys_crash_dump_get_user_log_area`) are absent from 3.70 entirely.
 
 ### 2. sys_ naming convention (LV2 syscall library)
 

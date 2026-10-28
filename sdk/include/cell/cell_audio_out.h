@@ -2,8 +2,8 @@
  \brief cellAudioOut configuration / state surface (PS3 audio output,
         SPDIF / HDMI / analog / USB / Bluetooth / Network).
 
-  Independent header matching the reference-SDK cellAudioOut surface
-  (the one the reference SDK declares inside `sysutil_sysparam.h`
+  Independent header matching the Cell OS cellAudioOut surface
+  (the one the platform ABI declares inside `sysutil_sysparam.h`
   alongside cellVideoOut).  Split into its own header here to keep
   sysutil_sysparam.h focused on system-parameter queries.
 

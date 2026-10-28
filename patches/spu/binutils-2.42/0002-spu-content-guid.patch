@@ -17,7 +17,7 @@ Only final links defining __SPU_GUID opt in; ordinary links are unchanged.
    return true;
  }
  
-+/* Independently defined PS3DK identity format.  This is not Sony's digest. */
++/* Independently defined PS3DK identity format.  It is not any other toolchain's digest. */
 +static int
 +spu_guid_section_order (const void *left, const void *right)
 +{

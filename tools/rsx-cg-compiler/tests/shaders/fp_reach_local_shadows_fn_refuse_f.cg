@@ -1,6 +1,6 @@
 // function-visibility commit 1.  REFUSE: A NEARER BINDING WINS OVER THE FUNCTION OF THE SAME NAME.  The local
 // `float f` shadows `f(float4)`, so `f(t)` is a call on a float - C1105 on
-// the reference.  The parent ACCEPTED it (it called the function).
+// the established compiler.  The parent ACCEPTED it (it called the function).
 //
 // The body is UNREACHABLE, which is the point: C1105 is not the deferred
 // class, so it must be reported here anyway.  And the check has to run

@@ -1,7 +1,7 @@
 /*
  * altivec-strict-std - AltiVec vector types under a strict -std=.
  *
- * Built as -std=c++17 with extensions off.  The reference compiler treats
+ * Built as -std=c++17 with extensions off.  The established compiler treats
  * vector, pixel and bool as context-sensitive AltiVec keywords in every
  * language mode, and the SDK's vector headers (simdmath, vectormath) are
  * written with them; upstream GCC drops the keywords under a strict -std=,

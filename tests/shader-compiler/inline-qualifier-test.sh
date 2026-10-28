@@ -3,7 +3,7 @@
 # and ignores.  The general path lexed it as an identifier and rejected it as
 # an unknown type name, so every shader that declared an inline helper - 110
 # of the internet survey's remaining refusals - failed to compile.  The
-# reference emits the same program with or without inline, and refuses it on
+# established compiler emits the same program with or without inline, and refuses it on
 # a non-function (C1005 "inline modifier only for functions").
 #
 # The accepting fixtures are compared BYTE FOR BYTE with an inline-free
@@ -43,7 +43,7 @@ must_match() {
     local stem="$1" why="$2"
     local rc=0
     run_one "$stem" || rc=$?
-    [[ $rc -eq 0 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; the reference accepts it ($why)"; }
+    [[ $rc -eq 0 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; the established compiler accepts it ($why)"; }
     [[ -s "$work/$stem.fpo" ]] || fail "$stem exited 0 but wrote no container"
     cmp -s "$work/$stem.fpo" "$work/$control.fpo" \
         || fail "$stem: container differs from the inline-free control - inline was not a no-op ($why)"
@@ -53,11 +53,11 @@ must_match() {
 must_match fp_inline_function_f        "inline on a function is ignored"
 must_match fp_inline_static_function_f "static inline is accepted and inline ignored"
 
-# NEGATIVE: inline on a variable must be refused, as the reference does.
+# NEGATIVE: inline on a variable must be refused, as the established compiler does.
 stem=fp_inline_variable_f
 rc=0
 run_one "$stem" || rc=$?
-[[ $rc -eq 1 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; inline on a variable must be an ordinary refusal (exit 1), as the reference refuses it (C1005)"; }
+[[ $rc -eq 1 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; inline on a variable must be an ordinary refusal (exit 1), as the established compiler refuses it (C1005)"; }
 [[ ! -s "$work/$stem.fpo" ]] || fail "$stem refused but still wrote a container"
 grep -qi 'inline modifier only for functions' "$work/$stem.log" \
     || { tail -n 5 "$work/$stem.log" >&2; fail "$stem refused without naming the inline-on-non-function rule"; }
@@ -68,7 +68,7 @@ printf '  %-32s refused: inline modifier only for functions\n' "$stem"
 stem=fp_inline_local_variable_f
 rc=0
 run_one "$stem" || rc=$?
-[[ $rc -eq 1 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; inline on a local variable must be refused (exit 1), as the reference refuses it (C1005)"; }
+[[ $rc -eq 1 ]] || { tail -n 5 "$work/$stem.log" >&2; fail "$stem exited $rc; inline on a local variable must be refused (exit 1), as the established compiler refuses it (C1005)"; }
 [[ ! -s "$work/$stem.fpo" ]] || fail "$stem refused but still wrote a container"
 grep -qi 'inline modifier only for functions' "$work/$stem.log" \
     || { tail -n 5 "$work/$stem.log" >&2; fail "$stem refused without naming the inline-on-non-function rule"; }

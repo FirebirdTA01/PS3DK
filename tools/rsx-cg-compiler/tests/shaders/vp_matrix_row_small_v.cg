@@ -3,7 +3,7 @@
 //
 // Two things are asserted through this one shader.  The row index must be
 // bounded by the rows the matrix actually OWNS: `m3[3]` on a float3x3 is
-// "array index out of bounds" to the reference, and reading c[base + 3]
+// "array index out of bounds" to the established compiler, and reading c[base + 3]
 // would take a register belonging to whatever was allocated next - the
 // silent wrong value this item exists to avoid (review finding, codex;
 // its refusal is the twin fixture).

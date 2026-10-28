@@ -1,6 +1,6 @@
 """Empty statements preserve surrounding control flow and condition effects.
 
-Authored oracle probes compile each finite pair to identical containers on FP
+Authored measurement probes compile each finite pair to identical containers on FP
 and VP. Infinite/dynamic loops remain named gaps; they are never executed.
 """
 import itertools
@@ -84,7 +84,7 @@ def main():
                 if not ok:
                     print(result.returncode, result.stderr)
             # Existing CFG limitation: even while(false){} retains a back-edge.
-            # The oracle accepts both and folds them to passthrough. Keep this
+            # The established compiler accepts both and folds them to passthrough. Keep this
             # visible as debt; handling Empty must not erase enclosing loops.
             outcomes = [compile_body(profile, 'false_while_' + suffix, body)
                         for suffix, body in [('empty', 'while(false) ; return c;'),

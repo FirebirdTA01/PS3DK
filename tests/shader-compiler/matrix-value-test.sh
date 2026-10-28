@@ -2,7 +2,7 @@
 # computed-matrix-values: matrix values that are not bare uniforms must still lower.
 # The fragment fixture constructs a float2x2 from scalars and immediately
 # multiplies it by a vec2.  The vertex fixture multiplies two uniform mat4
-# values, then uses the computed matrix in a matvec multiply.  Sony accepts
+# values, then uses the computed matrix in a matvec multiply.  The established compiler accepts
 # both shapes; refusing them is the regression this guard pins.
 set -euo pipefail
 

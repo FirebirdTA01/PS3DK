@@ -1,4 +1,4 @@
-// preprocessor-defined-operator.  Measured against sce-cgc 475.
+// preprocessor-defined-operator.  Measured against the established compiler.
 // Two operators in one expression.
 #define X 1
 #define Y 1

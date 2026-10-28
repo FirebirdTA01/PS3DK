@@ -7,7 +7,7 @@
  * for the kernel-side wakeup queue.
  *
  * Independently written and tuned so the compiled output matches the
- * reference library function as closely as possible.
+ * system library function as closely as possible.
  * Single REL16 reloc against .rodata.cst16 shuffle mask.  Size: 48 B.
  */
 	.text

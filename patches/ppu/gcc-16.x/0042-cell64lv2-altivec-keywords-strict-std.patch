@@ -1,6 +1,6 @@
 rs6000: treat vector/pixel/bool as AltiVec keywords under strict -std= on cell64lv2
 
-The reference PS3 compiler defines the context-sensitive AltiVec keywords
+The system PS3 compiler defines the context-sensitive AltiVec keywords
 (and so accepts `vector float`) in every language mode; upstream GCC drops
 them when flag_iso is set, so strict -std=c99/c++98/c++17 code that uses
 the SDK vector headers fails with "vector does not name a type".
@@ -12,7 +12,7 @@ the SDK vector headers fails with "vector does not name a type".
  /* Enable the shared linux64-style override_options function in rs6000.cc.  */
  #define TARGET_USES_LINUX64_OPT 1
 +
-+/* The PS3 reference compiler recognises vector, pixel and bool as
++/* The established PS3 compiler recognises vector, pixel and bool as
 +   context-sensitive AltiVec keywords even under a strict -std=, and its
 +   SDK headers and samples rely on it (e.g. vector types in simdmath.h
 +   compiled with -std=c++98).  */
@@ -26,7 +26,7 @@ the SDK vector headers fails with "vector does not name a type".
  
  #include "rs6000-internal.h"
  
-+/* A target whose reference compiler treats vector, pixel and bool as
++/* A target whose established compiler treats vector, pixel and bool as
 +   context-sensitive AltiVec keywords in every language mode (not only the
 +   GNU dialects) sets this, so strict -std= code written against that
 +   compiler's headers keeps compiling.  */

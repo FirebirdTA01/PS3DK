@@ -9,7 +9,7 @@
 // (post-discard-colour) cannot see this one: the varying IS read; it is the
 // LITERAL that goes missing.
 //
-// Reference compiler, for this shader:
+// Established compiler, for this shader:
 //
 //     MOVR R0.yzw, f[TEX0];
 //     MOVR R0.x,   {0x3f000000(0.5), 0, 0, 0}.x;

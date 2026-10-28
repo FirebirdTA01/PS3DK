@@ -1,9 +1,9 @@
 /* cell/spurs/types.h - SPURS opaque types + C++ class wrappers.
  *
- * Independent surface matching the reference SDK's cell/spurs/types.h
+ * Independent surface matching the platform ABI's cell/spurs/types.h
  * ABI for the C-level CellSpursAttribute / CellSpurs / CellSpurs2
  * byte-array containers, plus the `cell::Spurs::*` C++ class
- * wrappers that reference-SDK samples use.  The C++ classes inherit
+ * wrappers that existing PS3 samples use.  The C++ classes inherit
  * the byte-array types and add inline methods that forward to the C
  * entry points exported by libspurs_stub.a.  Zero additional data
  * members - the byte-array size is authoritative.
@@ -322,7 +322,7 @@ public:
 }   /* namespace Spurs */
 }   /* namespace cell */
 
-/* CellSpurs2 lives outside namespace cell::Spurs in the reference
+/* CellSpurs2 lives outside namespace cell::Spurs in the system
  * SDK; it's a plain struct that extends cell::Spurs::Spurs with extra
  * bytes so cellSpursInitializeWithAttribute2 can fill a larger region
  * while the base CellSpurs view still works. */

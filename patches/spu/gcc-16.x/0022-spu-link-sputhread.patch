@@ -5,7 +5,7 @@ Subject: [PATCH] Add -lsputhread to LIB_SPEC so SPU-side runtime symbols
 
 (sys_spu_thread_exit, sys_spu_thread_group_exit, sys_event_flag_set_bit,
 sys_event_flag_set_bit_impatient, _spu_call_event_va_arg) resolve at
-link time without reference samples needing explicit -lsputhread.
+link time without existing samples needing explicit -lsputhread.
 
 libsputhread.a is symlinked into the SPU default library search path
 (spu-elf/lib/) so no additional -L is required.  The library is placed

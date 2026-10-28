@@ -6,7 +6,7 @@
  * descriptor is hand-emitted as 8 bytes instead of the standard
  * ELFv1 24-byte form.
  *
- * Here we call through it using the reference SDK's 2-read indirect-
+ * Here we call through it using the platform ABI's 2-read indirect-
  * call sequence (lwz r0,0(r11); lwz r2,4(r11); mtctr; bctrl), written
  * as inline asm so no compiler patch is required for this test.
  *

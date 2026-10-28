@@ -356,7 +356,7 @@ private:
     }
 
     // `!x` at the top of a guard is folded into the KIL's condition-code
-    // test rather than emitted: the reference keeps the comparison and
+    // test rather than emitted: the established compiler keeps the comparison and
     // predicates the kill on EQ.  Peel the whole chain so `!!x` comes
     // back to NE, and so the else-arm of `if (!(a > b))` reads as the
     // plain `a > b` with NE that it is.
@@ -387,7 +387,7 @@ private:
                 bool negated = false;
 
                 if (g.size() == 1) {
-                    // The single-literal case is where the reference's
+                    // The single-literal case is where the established compiler's
                     // fold applies: keep the comparison, flip the test.
                     acc = g[0].cond;
                     negated = !g[0].taken;

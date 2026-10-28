@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Parameter-table records the reference writes and we did not.
+# Parameter-table records the established compiler writes and we did not.
 #
 # Every member of a varying entry-point struct is declared in the parameter
 # table, in struct order, whether the shader reads it or not.
 # The containers used to list only the members the program loaded, in
 # first-use order, so a runtime looking up an unread member by name found
-# nothing.  Measured on the reference compiler: an unread member is a
+# nothing.  Measured on the established compiler: an unread member is a
 # varying input record with isReferenced 0 and its semantic's resource; a
 # member without a semantic records resource 0xcb8 and no semantic string;
 # nested struct members are named by their path and array members one per

@@ -1,6 +1,6 @@
 // half-output-staging: a PARTIALLY written half colour output.
 //
-// The reference writes the output register twice and keeps no temp at all -
+// The established compiler writes the output register twice and keeps no temp at all -
 // `MOVH o[COLH].w, {1}.---x` then `MOVH o[COLH].xyz, f[TEX0].xyz`.  The
 // general path instead composes the value in a temp and pins that temp to the
 // output slot, which for a half output is H0 - the low half of R0, the very

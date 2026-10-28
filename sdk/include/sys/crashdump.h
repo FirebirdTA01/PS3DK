@@ -9,7 +9,7 @@
  * 32-bit-pointer ABI, so `addr` and `size` are declared as uint32_t
  * rather than the LP64-native width of sys_addr_t / size_t.
  *
- * This library is 475+ only; pre-475 firmware does not ship it.
+ * This library is 4.75+ only; pre-4.75 firmware does not ship it.
  */
 #ifndef __PS3DK_SYS_CRASHDUMP_H__
 #define __PS3DK_SYS_CRASHDUMP_H__

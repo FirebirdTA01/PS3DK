@@ -8,7 +8,7 @@
 # c[] register, and implicit units follow FIRST USE.
 #
 # Expected words, records and compact-CGB entries below were measured on
-# the reference compiler (sce-cgc -p sce_vp_rsx) compiling these same
+# the established compiler (the established compiler -p sce_vp_rsx) compiling these same
 # fixtures.  Rows whose program is a single forced chain (one temp, one
 # output) compare the whole ucode; the rest compare the fetch words and the
 # unit each output was fetched with, because their unrelated scheduling is
@@ -157,7 +157,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-texture-fetch-') as tmp:
         got = records.get(name)
         require(got == want, '%s record: got %s, want %s' % (name, got, want))
 
-    # ---- whole programs, byte-exact against the reference -----------------
+    # ---- whole programs, byte-exact against the established compiler -----------------
     # (words, registerCount, attributeInputMask)
     exact = {
         # MOV R0.xy, v8.xyxx; SFL R0.z, v8.xxxx, v8.xxxx; TXL R0, R0.xyxz; MOV o0, R0
@@ -259,7 +259,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-texture-fetch-') as tmp:
     # ---- an unused sampler leaves the c[] layout alone ---------------------
     # Reference: MUL o0, v0, c467.xxxx; ADD o1, c466.xxxx, v0 - gain at c467,
     # the 0.25 literal at c466, the sampler 0xcb8 / isReferenced 0.  Our
-    # instruction order and ADD operand order differ from the reference
+    # instruction order and ADD operand order differ from the established compiler
     # (unrelated to samplers), so the constant READS are pinned per opcode.
     name = 'vp_tex_unused_slots_v'
     blob = build(name)

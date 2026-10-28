@@ -4,7 +4,7 @@
  * Writes a 256-byte "save" into a fixed directory, using the full
  * CellSaveDataSetBuf / CellSaveDataStatSet / CellSaveDataFileSet
  * dance that a real game would follow.  The source here is intended
- * to compile against the reference sysutil_savedata.h unchanged —
+ * to compile against the system sysutil_savedata.h unchanged —
  * the only PSL1GHT-ism is the #include path.
  *
  * ELF imports FNID 0x8b7ed64b (cellSaveDataAutoSave2).

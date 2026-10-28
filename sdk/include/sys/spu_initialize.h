@@ -1,6 +1,6 @@
 /* sys/spu_initialize.h - SPU subsystem initialization syscall.
  *
- * Reference-SDK-named entry point for syscall 169
+ * Cell OS-named entry point for syscall 169
  * (SYS_SPU_INITIALIZE).  Must be called once per process before any
  * SPU thread group / raw SPU is created; tells lv2 how many physical
  * SPUs the process intends to use and how many of those should be
@@ -14,7 +14,7 @@
  * max_usable_spu) case.
  *
  * PSL1GHT exposes the same syscall as `sysSpuInitialize` from
- * <sys/spu.h>; this header ships the reference-SDK snake_case
+ * <sys/spu.h>; this header ships the Cell OS snake_case
  * spelling over our own lv2_syscall.h macros so cell-style code
  * builds without dragging PSL1GHT's <ppu-lv2.h> chain in.
  */

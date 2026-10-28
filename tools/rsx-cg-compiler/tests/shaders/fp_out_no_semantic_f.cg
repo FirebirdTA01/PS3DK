@@ -8,7 +8,7 @@
 // three varyings the ucode never read: exit 0, no diagnostic, four corpus
 // rows mismatching for two days.
 //
-// The reference defaults it.  Its parameter table for a shader declared
+// The established compiler defaults it.  Its parameter table for a shader declared
 // this way reads "out.UNDEFINED: COLOR0" - declared semantic undefined,
 // resource COLOR0.
 //
@@ -16,7 +16,7 @@
 // written out.  The test requires the two to compile to the same PROGRAM -
 // identical ucode - which is the whole claim: the semantic is not optional
 // information, it is information the compiler already has.  Not the same
-// CONTAINER: the reference records the declared semantic beside the
+// CONTAINER: the established compiler records the declared semantic beside the
 // resource, "out.UNDEFINED: COLOR0" here against "out.COLOR: COLOR0"
 // there, and ours matches each of those byte for byte.
 void main(float4 color : TEXCOORD0,

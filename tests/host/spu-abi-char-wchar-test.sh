@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The SPU compiler's plain char, wchar_t and wint_t match the reference SPU toolchain (spu gcc-9.5.0 0016).
-# Measured with the reference spu-lv2-gcc -dM -E (C and C++): __CHAR_SIGNED__ 1 (no __CHAR_UNSIGNED__),
+# The SPU compiler's plain char, wchar_t and wint_t match the system SPU toolchain (spu gcc-9.5.0 0016).
+# Measured with the system spu-lv2-gcc -dM -E (C and C++): __CHAR_SIGNED__ 1 (no __CHAR_UNSIGNED__),
 # __WCHAR_TYPE__ short unsigned int, __WCHAR_MAX__ 65535U (judged by value), __WINT_TYPE__ int.
 # Checks the predefines AND compiles C11 and C++17 probes through the real headers (wchar_t size, signedness,
 # maximum and identity, wint_t identity, wide-literal size, plain char and its macros), default and both overrides.  Skips without an SPU

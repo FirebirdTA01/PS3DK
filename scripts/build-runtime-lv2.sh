@@ -89,7 +89,7 @@ ps3dk_dir="$PS3DK/ppu/lib"
 mkdir -p "$gcc_startfile_dir" "$ps3dk_dir"
 
 # Allow callers / CI to pin the SDK version word; default matches the
-# reference fixture so RPCS3 / hardware loaders that gate on it accept
+# system fixture so RPCS3 / hardware loaders that gate on it accept
 # our output.
 : "${LV2_SDK_VERSION:=0x00475001}"
 

@@ -5,7 +5,7 @@
  * If-conversion (flow → predication) pass.
  *
  * NV40 FP *does* have IF / ELSE / ENDIF branch opcodes (BRA sub-ops
- * 2 / ELSE / etc.) but the reference compiler rarely emits them — at `-O2 --fastmath`
+ * 2 / ELSE / etc.) but the established compiler rarely emits them — at `-O2 --fastmath`
  * it collapses simple if-else diamonds into straight-line CC-predicated
  * writes, which the back-end already knows how to emit via
  * `IROp::Select`.  This pass rewrites matching IR shapes into that form

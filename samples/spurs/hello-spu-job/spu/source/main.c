@@ -25,7 +25,7 @@
 /* CELL_SPU_LS_PARAM(heap_size, stack_size) - inline-asm macro from
  * <stdlib.h> in the proprietary SDK; emits the `_cell_spu_ls_param`
  * .data symbol (16 bytes: heap, stack, 0, 0) AND a `.cell_spu_ls_param`
- * section (8 bytes: heap, stack) that the reference jobbin2-wrapper
+ * section (8 bytes: heap, stack) that the system jobbin2-wrapper
  * tool checks before accepting the ELF.  We re-implement it here so
  * we don't have to patch our newlib's stdlib.h. */
 __asm__(

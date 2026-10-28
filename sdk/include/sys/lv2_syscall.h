@@ -19,7 +19,7 @@
  * tripping strict-mode parsing.
  *
  * This header replaces transitive use of PSL1GHT's <ppu-lv2.h> in
- * the reference SDK-style sub-headers.  Functionally identical at the kernel
+ * the platform ABI-style sub-headers.  Functionally identical at the kernel
  * boundary - the .word emitted for `sc` and the register pre-binds
  * are byte-for-byte the same.
  */

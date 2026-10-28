@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # constant-uniform-array-index: array uniforms with CONSTANT indices, parameter and file-scope,
-# fragment and vertex, laid out one element at a time the way the reference
+# fragment and vertex, laid out one element at a time the way the established compiler
 # lays them out.  A VERTEX run-time index is the next slice's contiguous
 # block (vp-array-dynamic-test.sh); a FRAGMENT one keeps its named refusal.
 #
-# The oracle is the reference's PARAMETER TABLE, measured on sce-cgc and
-# pinned here as literal expectations (the reference itself cannot run in
+# The established compiler is the established compiler's PARAMETER TABLE, measured on the established compiler and
+# pinned here as literal expectations (the established compiler itself cannot run in
 # CI): one record per element named `name[i]`, typed as the element (1048,
 # float4 - not the scalar 1045 the old converter declared), in declaration
 # order, used or not; every element shares the parameter's SOURCE ordinal
@@ -21,7 +21,7 @@
 #
 # The refusals are the half that keeps the slice honest: a fragment
 # run-time index refuses (no indexed constants; C6013), out-of-range and
-# invalid constant indices refuse (the reference refuses them too: C1068,
+# invalid constant indices refuse (the established compiler refuses them too: C1068,
 # C6013), and an element type this slice does not lay out refuses by name.
 set -euo pipefail
 
@@ -107,7 +107,7 @@ expect_record fp_array_uniform_literal_f 'u_colors\[0\] type=1048 paramno=none r
 expect_record fp_array_uniform_literal_f 'u_colors\[1\] type=1048 paramno=none ref=0 resIndex=none embedded=0'
 expect_record fp_array_uniform_literal_f 'u_colors\[2\] type=1048 paramno=none ref=1 resIndex=none embedded=1:[0-9]+'
 expect_record fp_array_uniform_literal_f 'u_colors\[3\] type=1048 paramno=none ref=0 resIndex=none embedded=0'
-grep -qE '^u_colors ' "$work/fp_array_uniform_literal_f.params" && fail "the array itself has a record; the reference declares only elements"
+grep -qE '^u_colors ' "$work/fp_array_uniform_literal_f.params" && fail "the array itself has a record; the established compiler declares only elements"
 printf '  %-40s 4 element records, [2] referenced\n' "FP file-scope u_colors[2]"
 
 # A FOLDED constant index is the same element: u_colors[1 + 1] byte-equals u_colors[2].
@@ -118,9 +118,9 @@ printf '  %-40s == literal\n' "FP u_colors[1 + 1]"
 
 # CASTS in a constant index APPLY the target's semantics (a review found a
 # draft passing the operand through: (int)(bool)2 read element 2 where the
-# reference reads element 1).  Measured on the reference: (int)(bool)2 ==
+# established compiler reads element 1).  Measured on the established compiler: (int)(bool)2 ==
 # u[1], (short)65538 == u[2], (int)2.5 == u[2], and a float-TYPED index
-# u[(float)2] == u[2] (accepted since float-array-index-conversion, as the reference does).
+# u[(float)2] == u[2] (accepted since float-array-index-conversion, as the established compiler does).
 accept fp_array_uniform_index1_f
 accept fp_array_uniform_cast_bool_f
 cmp -s "$work/fp_array_uniform_cast_bool_f.bin" "$work/fp_array_uniform_index1_f.bin" \
@@ -132,7 +132,7 @@ accept fp_array_uniform_cast_floatlit_f
 cmp -s "$work/fp_array_uniform_cast_floatlit_f.bin" "$work/fp_array_uniform_literal_f.bin" \
     || fail "u_colors[(int)2.5] did not compile to the bytes of u_colors[2] - the float literal was not truncated under the integral cast"
 # A FLOAT-TYPED index is accepted with int() semantics (float-array-index-conversion; the
-# reference accepts it): u_colors[(float)2] is element 2.
+# established compiler accepts it): u_colors[(float)2] is element 2.
 accept fp_array_uniform_cast_float_f
 cmp -s "$work/fp_array_uniform_cast_float_f.bin" "$work/fp_array_uniform_literal_f.bin" \
     || fail "u_colors[(float)2] did not compile to the bytes of u_colors[2] - a float-typed constant index must truncate to the element"
@@ -143,7 +143,7 @@ printf '  %-40s bool -> 1, short wraps, (int)2.5 -> 2\n' "FP casts in a constant
 # u[2] is its lane, never the global's element (a review found a draft
 # reading the global).  Pinned on the UCODE: byte-identical to the
 # unshadowed control's, while the container still declares the global's
-# four elements, all unreferenced - which is also what the reference does.
+# four elements, all unreferenced - which is also what the established compiler does.
 ucode_bytes() {  # <stem> -> the ucode region, raw, on stdout
     python3 - "$work/$1.bin" <<'PY'
 import struct, sys
@@ -235,7 +235,7 @@ expect_record vp_array_uniform_two_elements_v 'u_bones\[0\] type=1048 paramno=no
 expect_record vp_array_uniform_two_elements_v 'u_bones\[2\] type=1048 paramno=none ref=0 resIndex=none embedded=0'
 printf '  %-40s [1] -> c467, [3] -> c466\n' "VP u_bones[3] * u_bones[1]"
 
-# HALF elements: the reference records a `half` element as FLOAT (1045) and
+# HALF elements: the established compiler records a `half` element as FLOAT (1045) and
 # a `half4` element as FLOAT4 (1048), and lays them out exactly as float
 # elements; the SDK's blur family is `half gWeight[8]`.
 accept fp_array_uniform_half_f
@@ -284,7 +284,7 @@ refuse "FP run-time index"        fp_array_uniform_dynamic_refuse_f      "indexe
 refuse "index 4 of [4]"           fp_array_uniform_oob_refuse_f          "array index 4 out of bounds"
 refuse "index -1"                 fp_array_uniform_negative_refuse_f     "array index -1 out of bounds"
 refuse "index 4 / 0"              fp_array_uniform_invalid_const_refuse_f "divides by zero"
-# (int)(bool)(float)0.5 is element 1 to the reference (the fraction is
+# (int)(bool)(float)0.5 is element 1 to the established compiler (the fraction is
 # truthy); this evaluator cannot carry the fraction through the casts and
 # refuses by name rather than reading element 0 (review: codex; flips to an
 # accept row when the typed evaluator serves the index path).

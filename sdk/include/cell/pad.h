@@ -2,7 +2,7 @@
  \brief cellPad API - PS3 controller input surface, 21 exports.
 
   Includes the full reference set (14 exports) plus 7 legacy
-  pre-475 exports the sys_io SPRX still supports — kept so PSL1GHT
+  pre-4.75 exports the sys_io SPRX still supports — kept so PSL1GHT
   homebrew that calls the older names keeps working.
 
   Declarations are linked against libio.a (built from
@@ -146,7 +146,7 @@ extern "C" {
  * ------------------------------------------------------------------ */
 
 /* Legacy flat-vector info block (cellPadGetInfo).  Superseded by
- * CellPadInfo2 in 475; kept because sys_io SPRX still exports the NID
+ * CellPadInfo2 in 4.75; kept because sys_io SPRX still exports the NID
  * and PSL1GHT homebrew uses it. */
 typedef struct CellPadInfo {
     uint32_t max_connect;
@@ -218,7 +218,7 @@ int32_t cellPadGetInfo2(CellPadInfo2 *info);
 int32_t cellPadSetPortSetting(uint32_t port_no, uint32_t port_setting);
 int32_t cellPadSetActDirect(uint32_t port_no, CellPadActParam *param);
 
-/* Pre-475 legacy entry points (sys_io SPRX still exports them). */
+/* pre-4.75 legacy entry points (sys_io SPRX still exports them). */
 int32_t cellPadGetInfo(CellPadInfo *info);
 int32_t cellPadGetCapabilityInfo(uint32_t port_no, CellPadCapabilityInfo *info);
 int32_t cellPadGetRawData(uint32_t port_no, CellPadData *data);

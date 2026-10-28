@@ -1,18 +1,18 @@
 // FP half subnormal flush, boundary, and non-flush controls (half-subnormal-flush)
 //
-// Reference compiler sce-cgc oracle measurement across regions:
+// The established compiler measurement across regions:
 // 1. he in [-4, 0] (2^-19 <= |x| < 2^-14), positives & h-literals: flushes to 0.0f (0x00000000).
-// 2. he in [-4, 0], negatives via constructor/default: reference emits 0xc0800000 (-4.0, defect);
+// 2. he in [-4, 0], negatives via constructor/default: the established compiler emits 0xc0800000 (-4.0, defect);
 //    we emit 0x00000000 by deliberate divergence (rendering-correct over defect-compatible).
 // 3. he in [-9, -5] (2^-24 <= |x| < 2^-19): reference retains float32 exponent and truncates mantissa.
 //    We flush to 0x00000000 by deliberate decision.
-// 4. he <= -10 (|x| < 2^-24): reference emits 0x00000000 (pos) / 0x80000000 (-0.0 neg).
+// 4. he <= -10 (|x| < 2^-24): the established compiler emits 0x00000000 (pos) / 0x80000000 (-0.0 neg).
 //    We flush to 0x00000000 by deliberate decision.
 // Boundary values >= 2^-14 (he >= 1) preserve normal half words, and large/inf values are preserved.
 
 uniform half4 sub_pos = half4(1e-5, 3e-5, 6e-5, 6.103515e-5);
 
-// Reference emits c0800000 (-4.0) here (upstream converter defect); we emit 0 by decision
+// The established compiler emits c0800000 (-4.0) here (upstream converter defect); we emit 0 by decision
 uniform half4 sub_neg = half4(-1e-5, -3e-5, -6e-5, -0.0);
 
 // Region 3 & 4 controls:

@@ -1,6 +1,6 @@
 /* spu_printf.h - SPU-side stdio compatibility header.
  *
- * Reference samples include this at the top level (`<spu_printf.h>`);
+ * Existing samples include this at the top level (`<spu_printf.h>`);
  * PSL1GHT keeps the same declaration under `<sys/spu_printf.h>`.
  * Forward to the existing PSL1GHT header so callers get the same
  * `_spu_call_event_va_arg` + `spu_printf(fmt, args...)` macro

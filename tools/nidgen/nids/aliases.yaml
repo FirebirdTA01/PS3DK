@@ -1,9 +1,9 @@
 # tools/nidgen/nids/aliases.yaml — PSL1GHT-rename coverage aliases.
 #
-# Maps each the reference SDK canonical symbol name (left of colon) to one or more
+# Maps each the platform ABI canonical symbol name (left of colon) to one or more
 # names that our install tree may define and that semantically satisfy the
-# the reference SDK export (right of colon).  coverage-report uses this to count
-# renamed PSL1GHT wrappers as coverage instead of marking the reference SDK
+# the platform ABI export (right of colon).  coverage-report uses this to count
+# renamed PSL1GHT wrappers as coverage instead of marking the platform ABI
 # name as missing.
 #
 # Rename rules applied by `coverage-report --suggest-aliases`:

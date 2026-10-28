@@ -6,7 +6,7 @@
 # the lowest TEXCOORD (vertex) or COLOR (fragment) index no output claims.
 # The claim covers every element of an array output, but these shapes are
 # refused before emission, so that path has no witness yet.  Measured on the
-# reference, which accepts all three: the elements hold TEXCOORD0/1 (COLOR0/1)
+# established compiler, which accepts all three: the elements hold TEXCOORD0/1 (COLOR0/1)
 # and the member goes to TEXCOORD2 (COLOR2).  When these shapes become
 # supported, this test must turn into record and output-mask checks against
 # those measurements instead of passing silently.

@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
 # FLUSH HALF SUBNORMALS TO ZERO IN CONSTANT EVALUATION (half-subnormal-flush).
 #
-# Reference compiler sce-cgc (PS3_450/475) oracle measurement across regions:
+# The established compiler (PS3_450/475) measurement across regions:
 # (where he = half exponent = float_exp - 127 + 15, normal halfs have he >= 1):
 #
 #   Region 1: he in [-4, 0] (2^-19 <= |x| < 2^-14), positives & h-literals:
 #             Flushes to IEEE float +0.0f (0x00000000). Candidate matches.
 #   Region 2: he in [-4, 0] (2^-19 <= |x| < 2^-14), negatives via constructor or uniform default:
-#             Reference emits 0xc0800000 (-4.0) due to an upstream reference converter defect!
+#             The established compiler emits 0xc0800000 (-4.0) due to an upstream converter defect!
 #             Our compiler deliberately diverges and flushes to +0.0f (0x00000000) by design
 #             (rendering-correct over defect-compatible).
 #   Region 3: he in [-9, -5] (2^-24 <= |x| < 2^-19):
-#             Reference keeps float32 exponent and truncates mantissa to (15+he) bits.
+#             The established compiler keeps float32 exponent and truncates mantissa to (15+he) bits.
 #             Our compiler deliberately diverges and flushes to +0.0f (0x00000000).
 #   Region 4: he <= -10 (|x| < 2^-24):
-#             Reference emits 0x00000000 for positives/h-literals, and 0x80000000 (-0.0)
+#             The established compiler emits 0x00000000 for positives/h-literals, and 0x80000000 (-0.0)
 #             for negative constructor/default. Our compiler flushes to +0.0f (0x00000000).
 #
 #   Folded 0.0h/0.0h:
-#             Reference sce-cgc refuses uniform 0.0h/0.0h (error C1059); in VP literal pool,
-#             reference sce-cgc emits 0x00000000. Our compiler matches both behaviors.
+#             Reference the established compiler refuses uniform 0.0h/0.0h (error C1059); in VP literal pool,
+#             reference the established compiler emits 0x00000000. Our compiler matches both behaviors.
 #             Note: no NaN constant is exercised at container level; infinity is the
 #             non-finite preservation control; nan_val checks the separate zero-divide fold.
 #
@@ -356,7 +356,7 @@ open(r'$vpo_nan', 'wb').write(blob)
 check_nan_reject
 
 # 6. Negative control 5: Uniform initializer with 0.0h/0.0h NaN expression must be refused
-#    Matches reference sce-cgc error C1059 ('non constant expression in initialization')
+#    Matches reference the established compiler error C1059 ('non constant expression in initialization')
 check_nan_uniform_refusal() {
     local nan_cg="$work/nan_uniform.cg"
     cat > "$nan_cg" << 'CG'

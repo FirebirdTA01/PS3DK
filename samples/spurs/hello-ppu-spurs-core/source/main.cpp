@@ -33,7 +33,7 @@
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 
-/* Attribute tuning matching Sony's reference-sample defaults.  The
+/* Attribute tuning matching the usual sample defaults.  The
  * 4-SPU size leaves 2 for the system, so RPCS3 (which emulates 6 SPUs)
  * can scheduler us without contention. */
 static const unsigned int kNumSpu            = 4;

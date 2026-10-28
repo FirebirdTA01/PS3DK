@@ -1,12 +1,12 @@
 /*
  * hello-ppu-savedata-link — link-only test for the full cellSaveData
- * Sony-name surface.  Takes the address of every documented entry
+ * Cell-name surface.  Takes the address of every documented entry
  * point so the linker has to actually resolve each one against the
  * stub archives.  We never call them with valid arguments — running
  * a real save/load callback flow requires user content + RPCS3
  * configuration outside this test's scope.  If the link succeeds and
  * the resulting SELF boots far enough to print "all 39 resolved", the
- * Sony-name FNID dispatch is wired end-to-end.
+ * Cell-name FNID dispatch is wired end-to-end.
  */
 
 #include <stdio.h>

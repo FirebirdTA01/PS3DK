@@ -5,7 +5,7 @@ dependency and adds full Cg shader-language support, including the
 `#pragma alphakill` / `#pragma texformat` extensions that NVIDIA's
 stock compiler silently ignores.
 
-The binary is named `rsx-cg-compiler` to mirror the reference
+The binary is named `rsx-cg-compiler` to mirror the established compiler
 compiler's profile names (`sce_vp_rsx`, `sce_fp_rsx`) and its sibling
 project, FirebirdTA01's open-source Vita Cg compiler
 (`Vita-Cg-Compiler`), whose front end it uses.

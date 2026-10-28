@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Three declaration/preprocessor forms the reference SDK's own headers use
-# and our frontend rejected, each measured against the reference before it
+# Three declaration/preprocessor forms the platform ABI's own headers use
+# and our frontend rejected, each measured against the established compiler before it
 # was changed.
 #
 # 1. A PREPROCESSOR DIRECTIVE NAME ENDS AT THE FIRST NON-IDENTIFIER
 #    CHARACTER, not at the first space.  `#if(SAMPLE_COUNT > 1)` is the
 #    directive `if` whose expression starts with a parenthesis; we read the
 #    whole whitespace-delimited token as the name and reported an unknown
-#    directive.  The reference's behaviour, measured on four forms:
+#    directive.  The established compiler's behaviour, measured on four forms:
 #
 #      #if(N > 1)    accepted     #elif(N > 1)  accepted
 #      #endif(N)     accepted     #ifdef(N)     REFUSED, C0105
@@ -15,7 +15,7 @@
 #
 #    The last one is why the rule is "parse the name, then let the
 #    directive judge its own argument" and not "accept anything after a
-#    known prefix": the reference RECOGNISES `ifdef` there - it reports a
+#    known prefix": the established compiler RECOGNISES `ifdef` there - it reports a
 #    syntax error IN it, not the C0104 "Unknown pre-processor directive" it
 #    gives for `#frobnicate`.  Both of those distinctions are asserted
 #    below, because a fix that accepted `#ifdef(N)` would also pass a test
@@ -83,7 +83,7 @@ accepts() {   # $1 stem, $2 what it is
     refusal_status "$rc" "$1"
     [[ "$rc" -eq 0 ]] || {
         head -n 4 "$work/$1.log" >&2
-        fail "$2 did not compile; the reference accepts it"
+        fail "$2 did not compile; the established compiler accepts it"
     }
     [[ -s "$work/$1.fpo" ]] || fail "$2 exited 0 but wrote no container"
 }
@@ -91,7 +91,7 @@ accepts() {   # $1 stem, $2 what it is
 refuses() {   # $1 stem, $2 what it is, $3 text the diagnostic must contain
     run "$1"
     refusal_status "$rc" "$1"
-    [[ "$rc" -eq 1 ]] || fail "$2 compiled; the reference refuses it"
+    [[ "$rc" -eq 1 ]] || fail "$2 compiled; the established compiler refuses it"
     [[ -f "$work/$1.fpo" ]] && fail "$2 refused but still wrote a container"
     grep -qi -- "$3" "$work/$1.log" || {
         head -n 4 "$work/$1.log" >&2
@@ -144,7 +144,7 @@ accepts endif_junk '#endif with trailing text'
 # checked "both refuse".
 refuses ifdef_paren       '#ifdef( with no space' 'ifdef'
 grep -qi 'unknown' "$work/ifdef_paren.log" && \
-    fail "#ifdef(N) was reported as an UNKNOWN directive; the reference recognises ifdef there and reports a syntax error in it (C0105), so the name was parsed and only its argument is wrong"
+    fail "#ifdef(N) was reported as an UNKNOWN directive; the established compiler recognises ifdef there and reports a syntax error in it (C0105), so the name was parsed and only its argument is wrong"
 refuses unknown_directive 'an unknown directive' 'frobnicate'
 
 # --- 2. anonymous struct typedef --------------------------------------

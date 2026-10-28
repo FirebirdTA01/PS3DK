@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# A MISSING entry point must refuse cleanly on BOTH profiles (sce-cgc 475):
-# with no -e flag the default entry "main" is not in the unit; the reference
+# A MISSING entry point must refuse cleanly on BOTH profiles:
+# with no -e flag the default entry "main" is not in the unit; the established compiler
 # refuses with "entry point 'main' not found", writes no container, and the
 # vertex profile must behave exactly like the fragment one - a crash (rc 139)
 # or a missing diagnostic is not a refusal.  Measured on this toolchain at

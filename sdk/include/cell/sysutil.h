@@ -1,11 +1,11 @@
 /*! \file cell/sysutil.h
- \brief reference-SDK-named forwarder over PSL1GHT's <sysutil/sysutil.h>.
+ \brief Cell OS-named forwarder over PSL1GHT's <sysutil/sysutil.h>.
 
   Re-exports the PSL1GHT system-utility callback API under the
-  reference-SDK naming (`cellSysutilRegisterCallback`, etc.) so
-  source written against the reference SDK compiles against PSL1GHT's
+  Cell OS naming (`cellSysutilRegisterCallback`, etc.) so
+  source written against the platform ABI compiles against PSL1GHT's
   runtime with no other changes.  The underlying SPRX linkage is
-  identical — PSL1GHT already uses the reference FNIDs; only the
+  identical — PSL1GHT already uses the system FNIDs; only the
   C-level identifiers differ.
 
   Scope:
@@ -15,11 +15,11 @@
 
   Out of scope here (queued as libsysutil backfill follow-ups):
     - cellMsgDialog*, cellSaveData*, cellGameData*, etc. — those live
-      in their own the reference SDK sub-headers and each wants a matching
+      in their own the platform ABI sub-headers and each wants a matching
       forwarder (cell/msg_dialog.h, cell/save_data.h, ...).  Pattern
       is the same as here.
     - cellSysutilGetSystemParam{Int,String} — wait on an independent
-      match of the reference param-ID enum before forwarding.
+      match of the system param-ID enum before forwarding.
 */
 
 #ifndef __PSL1GHT_CELL_SYSUTIL_H__
@@ -31,18 +31,18 @@
 extern "C" {
 #endif
 
-/* reference SDK callback type.  Declared directly (not forwarded off
+/* platform ABI callback type.  Declared directly (not forwarded off
  * PSL1GHT's sysutilCallback typedef) so this header doesn't drag in
  * <sysutil/sysutil.h>'s global-namespace `sysutilCallback` symbol,
- * which clashes with reference-SDK sample code that declares its own
+ * which clashes with an existing PS3 sample code that declares its own
  * function of that name. */
 typedef void (*CellSysutilCallback)(uint64_t status, uint64_t param, void *userdata);
 
-/* reference SDK userid alias — most APIs that take a CellSysutilUserId
+/* platform ABI userid alias — most APIs that take a CellSysutilUserId
  * just pass it through to the underlying SPRX as an opaque uint32. */
 typedef unsigned int CellSysutilUserId;
 
-/* Common event codes — the reference SDK names over PSL1GHT's symbols.
+/* Common event codes — the platform ABI names over PSL1GHT's symbols.
  * Values are identical across the rename (same SPRX constants).
  * RPCS3 fires (at minimum) DRAWING_BEGIN / SYSTEM_MENU_OPEN /
  * BGMPLAYBACK_PLAY when the XMB opens and the matching _END /
@@ -68,7 +68,7 @@ typedef unsigned int CellSysutilUserId;
  * cellSysutil* SPRX trampolines via our compact-OPD frame-less stub
  * shape.  No PSL1GHT forwarder (sysUtilRegisterCallback /
  * __get_opd32 / PSL1GHT libsysutil.a) is involved.  Signatures are
- * the reference-SDK contract (sysutil_common.h §callback registry):
+ * the Cell OS contract (sysutil_common.h §callback registry):
  *   int cellSysutilCheckCallback(void);
  *   int cellSysutilRegisterCallback(int, CellSysutilCallback, void*);
  *   int cellSysutilUnregisterCallback(int);

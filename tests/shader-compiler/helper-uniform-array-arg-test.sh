@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A file-scope uniform array passed by name to a helper's array parameter:
 # indexing the parameter reads the global's elements (measured on the
-# reference; lcd-grid-v2 passes `const float coeffs_x[] = {...}` to
+# established compiler; lcd-grid-v2 passes `const float coeffs_x[] = {...}` to
 # `float intsmear_func(float z, float coeffs[7])`).  Before, the inliner
 # copied the argument's (absent) element values and the program refused
 # with an unresolved operand.  Values are judged by arithmetic with the

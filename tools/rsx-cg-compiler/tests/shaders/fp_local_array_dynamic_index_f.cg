@@ -1,6 +1,6 @@
-// The Sony sce_fp_rsx reference rejects dynamic indexing of ordinary local
+// The established sce_fp_rsx compiler rejects dynamic indexing of ordinary local
 // arrays with C6013.  This pins that refusal so test_86-style local array
-// indexing does not compile without a reference oracle.
+// indexing does not compile without a reference measurement.
 float4 main(float2 uv : TEXCOORD0, uniform float4 time_param) : COLOR0
 {
     float raw = time_param.x + uv.x + 4.0f;

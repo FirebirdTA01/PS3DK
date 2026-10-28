@@ -3,7 +3,7 @@
 # splat, nested-cast and vector-cast forms compile; a non-arithmetic operand
 # keeps the ordinary cast meaning with postfix operators, so (V)(arr)[i],
 # (V)(s).m, (V)(f)(x) and (V)(p)->m compile, while (V)(v)[i] casts the
-# element and is refused (as the reference compiler refuses it).  Control:
+# element and is refused (as the established compiler refuses it).  Control:
 # with -fno-paren-vector-literals the splat is refused again.
 # Run-time lane checks for the same forms live in the spurs-suite row
 # spu-vector-literals.

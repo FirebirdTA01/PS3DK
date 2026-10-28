@@ -134,7 +134,7 @@ fi
 #
 # The assertion is that THE COLOUR IS NOT A DEAD STORE.  Stating it as
 # "after the last KIL the ucode writes all four lanes of R0" was the first
-# try and it was wrong: it encodes the REFERENCE's order, which hoists both
+# try and it was wrong: it encodes the established compiler's order, which hoists both
 # kills above the composition, and our compiler composes first and kills
 # last.  That version failed on correct output - including 6ece362's, which
 # painted this shader correctly all day - so it would have been a test of

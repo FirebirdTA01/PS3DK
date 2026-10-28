@@ -57,7 +57,7 @@ Specifications cited:
     take texture attachments only.
   - **Mipmaps:** `glGenerateMipmapOES` (`core_gl_ext.c:301`).
   - **Queries:** occlusion queries `glBeginQueryARB` and family (`core_gl_ext.c:314`).
-  - **Synchronisation:** NV fences and SCE events.
+  - **Synchronisation:** NV fences and `*_SCE` events.
 - **Shaders are precompiled only.**
   - `glShaderSource` stores text (`gl_shader.c:227`). Without a supplied binary,
     `glCompileShader` sets `compiled = GL_FALSE` with the log "runtime GLSL compilation
@@ -93,7 +93,7 @@ Specifications cited:
     `GL_DEPTH_COMPONENT24` (`psgl_context.c:3715-3735`).
   - **Not accepted:** LUMINANCE, ALPHA and LUMINANCE_ALPHA.
   - **Targets:** only 2D is handled (`psgl_context.c:1126`, `:1500`, `:1564`).
-- **Multisampling:** the SCE MSAA modes (none, 2x diagonal, 4x square centred, 4x square
+- **Multisampling:** the `*_SCE` MSAA modes (none, 2x diagonal, 4x square centred, 4x square
   rotated) are accepted (`psgl_context.c:408-430`) [measured].
 - **Buffers:** VBOs are implemented, with `glBufferData`, `glBufferSubData` and
   `glMapBuffer` forwarding to the context (`core_gl_ext.c:194-198`) [measured].

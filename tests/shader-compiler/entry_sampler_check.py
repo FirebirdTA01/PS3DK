@@ -6,7 +6,7 @@ cases. A const sampler2D entry also has uniform reflection. Helpers retain their
 ordinary parameter binding; output and inout samplers remain refused.
 
 Compare complete compiler-produced twins and independently check reflection and
-actual fetch units. This test needs no reference compiler or private SDK.
+actual fetch units. This test needs no established compiler or private SDK.
 """
 import argparse
 import struct

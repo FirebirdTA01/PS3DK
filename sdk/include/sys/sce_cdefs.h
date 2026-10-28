@@ -1,8 +1,8 @@
 /*! \file sys/sce_cdefs.h
- \brief Reference-SDK source-compat macros that aren't part of newlib's
+ \brief Cell OS source-compat macros that aren't part of newlib's
         <sys/cdefs.h>.
 
-  The reference SDK's <sys/cdefs.h> (which our newlib-shipped one
+  The platform ABI's <sys/cdefs.h> (which our newlib-shipped one
   shadows) defined CDECL_BEGIN / CDECL_END and the LV2 namespace
   guards.  Reference-source samples reach them transitively through
   <sys/cdefs.h>; rather than patching our newlib copy, we ship the

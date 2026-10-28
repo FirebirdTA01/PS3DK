@@ -1,5 +1,5 @@
 // A FORWARD tag: `typedef struct Foo Bar;` before `struct Foo { ... };`.
-// The reference accepts this (and refuses the keyword-less `typedef Foo
+// The established compiler accepts this (and refuses the keyword-less `typedef Foo
 // Bar;` in the same position).  Reference: byte-identical.
 typedef struct Foo Bar;
 struct Foo { float2 uv : TEXCOORD0; float3 col : TEXCOORD1; };

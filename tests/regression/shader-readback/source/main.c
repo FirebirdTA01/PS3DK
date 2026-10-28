@@ -179,7 +179,7 @@ static void expect_refract_case(float eta, const float i[3], const float n[3],
 	float k = 1.0f - eta * eta * (1.0f - d * d);
 	float r[3] = { 0.0f, 0.0f, 0.0f };
 
-	/* Strict: k == 0 selects zero, the reference's boundary, which the
+	/* Strict: k == 0 selects zero, the system's boundary, which the
 	 * compiler matches since 0d925b66. */
 	if (k > 0.0f) {
 		float c = eta * d + sqrtf(k);
@@ -707,7 +707,7 @@ int main(int argc, const char **argv)
 		 * lowering path in CMake because that is the opt-in lowering
 		 * whose correctness this battery measures.  The refract rows
 		 * use absolute PPU-computed truth, not diff-harness
-		 * comparison: k==0 pins the reference's strict-greater boundary
+		 * comparison: k==0 pins the system's strict-greater boundary
 		 * (zero), and TIR is the case where a contaminating select
 		 * would leak the untaken arm. */
 		{ "ops", rb_ops_fpo, expect_ops, NULL, NULL, 7, 3 },

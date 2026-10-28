@@ -1,5 +1,5 @@
 //! Integration test: load the screenshot YAML and assert the rendered stub
-//! archive source contains every the reference SDK-compatible section + per-export quartet.
+//! archive source contains every the platform ABI-compatible section + per-export quartet.
 //!
 //! This test does NOT invoke the PPU toolchain (avoids needing $PS3DEV on CI);
 //! the assembled-archive sanity check happens in scripts/build-cell-stub-archives.sh

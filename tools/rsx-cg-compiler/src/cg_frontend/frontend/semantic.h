@@ -202,13 +202,13 @@ private:
     void collectFunctionDecl(FunctionDecl* decl);
     void collectVarDecl(VarDecl* decl);
     // Validates the SHAPE of a uniform entry parameter's default value
-    // against the reference's rules (uniform-default-records A1).
+    // against the established compiler's rules (uniform-default-records A1).
     void checkParameterDefaultShape(ParamDecl* p);
     // A function REACHED from the selected entry may not carry a return
     // semantic (prototype-default-merging).  Runs in pass 3, after every call has resolved.
     void checkNonEntrySemantics();
 public:
-    // The entry-reachable set, for the IR builder: the reference emits no code
+    // The entry-reachable set, for the IR builder: the established compiler emits no code
     // for a function the entry cannot reach and reports no name error from
     // inside one, so lowering skips them (function-visibility).
     // Returns DEFINITIONS, not first declarations: the IR builder walks
@@ -222,7 +222,7 @@ private:
     // and a single place it can be wrong.
     std::unordered_set<const FunctionDecl*> reachedFunctions() const;
     // A NAME-NOT-FOUND diagnostic held back until reachability is known.  The
-    // reference reports the C1008 class only inside functions reachable from
+    // established compiler reports the C1008 class only inside functions reachable from
     // the selected entry; it reports C1056 type errors and C1103 arity errors
     // everywhere, so only this class is deferred.
     struct DeferredNameFinding
@@ -252,7 +252,7 @@ private:
     // Same name AND same parameter signature - never name alone, overloads.
     bool sameSignature(const FunctionDecl* a, const FunctionDecl* b) const;
     // The FIRST declaration in source order: the one whose return semantic the
-    // reference judges.  The DEFINITION: the one whose body is walked.
+    // established compiler judges.  The DEFINITION: the one whose body is walked.
     FunctionDecl* firstDeclarationOf(const FunctionDecl* fn) const;
     FunctionDecl* definitionOf(const FunctionDecl* fn) const;
     void collectBufferDecl(BufferDecl* decl);

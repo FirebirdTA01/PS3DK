@@ -224,7 +224,7 @@ void SemanticAnalyzer::collectDeclarations(TranslationUnit& unit)
             }
             // The NAME is reserved in the symbol table, so a global variable
             // or function spelled the same way refuses in either order (the
-            // reference's C1002 'the name "B" is already defined'); a LOCAL
+            // established compiler's C1002 'the name "B" is already defined'); a LOCAL
             // of that name still shadows it through the scoped lookup.
             if (!symbols_.addSymbol(SymbolKind::Type, alias->name, underlying, alias) ||
                 (!forwardTag && !symbols_.addType(alias->name, underlying)))
@@ -309,7 +309,7 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
 
     CgType returnType(decl->returnType);
 
-    // A type already owns this name: the reference refuses `typedef A B;` or
+    // A type already owns this name: the established compiler refuses `typedef A B;` or
     // `struct B { ... };` followed by `float B(float x)` (C1002 'the name "B"
     // is already defined', measured 2026-10-17 for the typedef, the same-tag
     // `typedef struct S { ... } S;` and the plain struct) - struct tags share
@@ -348,7 +348,7 @@ void SemanticAnalyzer::collectFunctionDecl(FunctionDecl* decl)
     allFunctions_.push_back(decl);
 
     // WHERE A DEFAULT VALUE IS LEGAL (uniform-default-records A1).  Measured on the
-    // reference, which has a named diagnostic for exactly this question:
+    // established compiler, which has a named diagnostic for exactly this question:
     //
     //   float2 texcoord : TEXCOORD0 = {0.5, 0.25}   -> refused, C1114
     //   out float4 c : COLOR = {1,0,0,1}            -> refused, C1114
@@ -410,7 +410,7 @@ void SemanticAnalyzer::checkParameterDefaultShape(ParamDecl* p)
         return;
     }
     // ARRAYS have their own initialiser rules - one ELEMENT per array slot -
-    // and componentCount() describes the ELEMENT.  The reference ACCEPTS
+    // and componentCount() describes the ELEMENT.  The established compiler ACCEPTS
     // `uniform float4 a[2] = { float4(1,2,3,4), float4(5,6,7,8) }`; an
     // earlier version of this check refused it, which is worse than the gap.
     // Array defaults are not measured yet (array-default-records).
@@ -555,7 +555,7 @@ void SemanticAnalyzer::analyzeStructDecl(StructDecl* decl)
 //     ... outer(t.x) ...                            // call
 //     float outer(float x, float k) { ... }         // definition, no default
 //
-// the reference ACCEPTS this and emits the same container as passing
+// the established compiler ACCEPTS this and emits the same container as passing
 // inner(0.5) explicitly.  Rule 1 picks the default from the latest
 // declaration VISIBLE AT THE CALL, which here is the prototype - so the
 // prototype's expression is the one that gets substituted.  Skipping
@@ -657,11 +657,11 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         if (decl == shaderInfo_.entryPoint &&
             !param->semantic.isEmpty() && resolvedType.isStruct())
         {
-            // `: TEXUNITn` on a struct (measured on the reference): every
+            // `: TEXUNITn` on a struct (measured on the established compiler): every
             // member record carries the semantic, a sampler member binds to
             // unit n, numeric members of a VARYING struct stay ordinary
             // varyings.  A UNIFORM struct with a numeric member is refused
-            // as the reference refuses it (C5118).  Other semantics on a
+            // as the established compiler refuses it (C5118).  Other semantics on a
             // struct - TEXCOORDn and the rest - are not lowered yet.
             std::string sem = param->semantic.name;
             for (char& c : sem) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -673,7 +673,7 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
                 else if (!f.type->isSampler()) hasNumeric = true;
             }
             // An out/inout struct with a semantic WRITES its members to
-            // varying outputs on the reference (measured: `out S p :
+            // varying outputs on the established compiler (measured: `out S p :
             // TEXUNIT2` puts p.c on COLOR1 / TEXCOORD0); only the input side
             // is lowered here, so the output side stays refused rather than
             // compiled with the member dropped (review: codex, SP7-OUT).
@@ -707,12 +707,12 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         // `float4 u = float(2)` and `float4 u = float4(float2(1,2),
         // float2(3,4))` are legal broadcasts/nestings that a component count
         // refuses, while `float4 u = float2x2(1,2,3,4)` and `float2x2 u =
-        // float4(1,2,3,4)` are four components each and the reference refuses
+        // float4(1,2,3,4)` are four components each and the established compiler refuses
         // BOTH because the CATEGORY differs.  The existing checker already
         // models category and dimensions; it just was never reached, because
         // parameters with defaults used to be refused in the parser.
         // EVERY parameter's default is analysed, not only an entry uniform's.
-        // The reference checks a default expression when the FUNCTION IS
+        // The established compiler checks a default expression when the FUNCTION IS
         // REACHED, not when the default is used - measured, three cells:
         //
         //   helper unreached, default names an undeclared id   ACCEPT
@@ -720,7 +720,7 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
         //   helper REACHED, default actually materialised      REFUSE C1102
         //
         // The middle one is the whole point: the call never uses the default
-        // and the reference still refuses.  Analysing only on materialisation
+        // and the established compiler still refuses.  Analysing only on materialisation
         // (which is what the ir_builder does) accepts it, and analysing only
         // uniforms - as this did - never looked at a helper's default at all.
         //
@@ -768,7 +768,7 @@ void SemanticAnalyzer::analyzeVarDecl(VarDecl* decl)
         CgType initType = analyzeExpr(decl->initializer.get());
         // An unsized array declaration takes its length from the
         // initialiser: `const float c[] = float[](1.0, ...)` and
-        // `float c[] = {...}` (lcd-grid-v2; the reference accepts both).
+        // `float c[] = {...}` (lcd-grid-v2; the established compiler accepts both).
         // Keyed on the type RESOLVED BEFORE the initialiser: a brace list
         // shares the declaration's TypeNode, and analysing it has already
         // written the length there.
@@ -1012,7 +1012,7 @@ void SemanticAnalyzer::analyzeDeclStmt(DeclStmt* stmt)
         sym->semantic = varDecl->semantic;
         sym->isConst = (varDecl->storage == StorageQualifier::Const);
 
-        // USED EARLIER IN THIS SCOPE, DECLARED HERE.  The reference refuses
+        // USED EARLIER IN THIS SCOPE, DECLARED HERE.  The established compiler refuses
         // that outright - "error C1002: the name X is already defined" - and
         // it does so whether or not the function is reachable, so it is not
         // the deferred C1008 class.  Keyed by the SCOPE INSTANCE: use outer /
@@ -1236,7 +1236,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
 
     // RECORD THE UNRESOLVED CALLEE NAME BEFORE THE ERROR-ARGUMENT RETURN.
     // Recording is not diagnosing.  `f(missing(t)); float f;` is C1002 on the
-    // reference - the later `float f` collides with the earlier use of the
+    // established compiler - the later `float f` collides with the earlier use of the
     // name f - but the inner call makes the argument error-typed, and the
     // early return below skipped the outer call entirely, so the use of f was
     // never recorded and the collision could not be seen (review: codex).
@@ -1275,7 +1275,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
 
     // A NEARER BINDING WINS OVER THE FUNCTION OF THE SAME NAME.
     // `float4 f(float4 t){...}  float4 g(float4 t){ float f = 1; return f(t); }`
-    // is C1105 "cannot call a non-function" on the reference: the LOCAL
+    // is C1105 "cannot call a non-function" on the established compiler: the LOCAL
     // shadows the function, so the call is a call on a float.
     //
     // This has to be asked BEFORE the overload set is consulted, not in the
@@ -1313,11 +1313,11 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         // THE THREE FAILURES ARE DIFFERENT THINGS AND THE ORDER MATTERS.
         //
         // AMBIGUOUS first: the call DID match, twice, so the name is plainly
-        // visible and neither test below applies.  The reference calls this
+        // visible and neither test below applies.  The established compiler calls this
         // C1101.
         //
         // Then NAME-NOT-FOUND versus NO-VIABLE-OVERLOAD.  The first is the
-        // reference's C1008 class and is reachability-gated; so is a no-fit
+        // established compiler's C1008 class and is reachability-gated; so is a no-fit
         // call whose only visible candidates are BUILTINS (below).  A name
         // with a visible SOURCE declaration but no overload that fits is C1103
         // and is reported everywhere - measured, and it holds even
@@ -1335,7 +1335,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         {
             // THE NAME MAY EXIST AND SIMPLY NOT BE A FUNCTION.  `float missing
             // = 1; return missing(t);` is C1105 "cannot call a non-function"
-            // on the reference and is NOT the C1008 class, so it is reported
+            // on the established compiler and is NOT the C1008 class, so it is reported
             // unconditionally - deferring it let an unreachable body call an
             // int (review: codex).  A function declared LATER still resolves
             // to a Function symbol here, so it falls through to the deferral
@@ -1377,7 +1377,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
                 samplerScope = "; only 2D generic sampler uses are supported (generic-sampler-dimension)";
                 break;
             }
-        // ONLY BUILTINS ARE VISIBLE AND NONE FITS.  The reference holds this
+        // ONLY BUILTINS ARE VISIBLE AND NONE FITS.  The established compiler holds this
         // like the C1008 class and reports it only in entry-reachable bodies:
         // an unused helper calling tex1D(s, p, 0), tex1Dfetch(sampler1D, int4)
         // or a wrong-arity builtin compiles, and the same call from main is
@@ -1406,7 +1406,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     }
 
     // An ARRAY argument takes no element conversion: an int[3] or half[3]
-    // into a float[3] parameter is C1102 on the reference (measured, both),
+    // into a float[3] parameter is C1102 on the established compiler (measured, both),
     // and accepting it passed the elements over unconverted (review: codex).
     {
         const auto& paramTypes = candidate->symbol->parameterTypes;
@@ -1426,7 +1426,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
 
     // AN OMITTED out/inout ARGUMENT IS REFUSED AFTER RANKING, NOT BEFORE IT.
     //
-    // Measured on sce-cgc 475 (codex's six cells; Fable retracted the
+    // Measured on the established compiler (codex's six cells; Fable retracted the
     // viability exclusion on them; reproduced here): a defaulted out/inout
     // parameter does NOT make its candidate non-viable.  It ranks normally and
     // ties with a plain overload of the supplied arity - `void f(float4)`
@@ -1434,9 +1434,9 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     // declaration orders, exactly as a plain `float k=.5` second parameter is.
     // So the restriction cannot live in viability: excluding the candidate
     // there leaves `f(float4)` the unique winner and ACCEPTS four programs the
-    // reference refuses (measured on the interim build that did exclude it).
+    // established compiler refuses (measured on the interim build that did exclude it).
     //
-    // What the reference objects to is the ARGUMENT, not the arity: the
+    // What the established compiler objects to is the ARGUMENT, not the arity: the
     // default expression it would substitute is not an lvalue, so it cannot
     // bind to an out parameter.  Its wording is reproduced verbatim, as the
     // two C1033 sites already do:
@@ -1467,7 +1467,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
                 return CgType::Error();
             }
             // Truncation is ranked like any conversion, but an out/inout
-            // parameter cannot take a wider vector: the reference picks the
+            // parameter cannot take a wider vector: the established compiler picks the
             // candidate and then refuses it (C1113), it does not copy back
             // into the leading lanes.
             if (param && (param->storage == StorageQualifier::Out ||
@@ -1598,7 +1598,7 @@ CgType SemanticAnalyzer::analyzeIndexExpr(IndexExpr* expr)
         return CgType::Error();
     }
 
-    // An integral index, or a FLOATING one: the reference accepts a
+    // An integral index, or a FLOATING one: the established compiler accepts a
     // float or half index with int() semantics - a constant truncates
     // toward zero (u[1.7] is u[1], u[-0.5] is u[0], u[4.0] on four
     // elements is C1068), and a run-time float index is the same address
@@ -1643,7 +1643,7 @@ CgType SemanticAnalyzer::analyzeIndexExpr(IndexExpr* expr)
 CgType SemanticAnalyzer::analyzeTernaryExpr(TernaryExpr* expr)
 {
     // A vector condition selects per lane (Cg ?: is component-wise).  The
-    // reference takes a bool or numeric vector condition of width N only
+    // established compiler takes a bool or numeric vector condition of width N only
     // when the arms' common type is an N-wide vector; two scalar arms or a
     // width mismatch are refused.  if/while conditions stay scalar.
     int condWidth = 1;
@@ -1719,7 +1719,7 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
     // are all admitted answers TRUE from canExplicitlyConvert, so anything
     // placed in that fallback is skipped for exactly the shapes it is meant
     // to judge (codex).  A fixed, narrow-integer or UNSIGNED source carries
-    // its own conversion - the reference reads (S)((fixed)3.0) as
+    // its own conversion - the established compiler reads (S)((fixed)3.0) as
     // 1.9990234375, (S)((short)65537) as 1, and an unsigned 2147483648 into a
     // signed leaf as -2147483648 - and this fill would write it through.
     // Those scalar casts are already wrong outside any struct, so the repair
@@ -1778,7 +1778,7 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
                     break;
                 default:
                     // UInt too: `(S)(-1)` into an unsigned leaf emitted -1
-                    // where the reference wraps (codex).  The signedness
+                    // where the established compiler wraps (codex).  The signedness
                     // conversion is as missing as bool's truth test.
                     return false;
                 }
@@ -1824,7 +1824,7 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
 
     // Struct initializers supply one argument per field, with exact aggregate
     // shape. Unlike ordinary assignment, a scalar does not splat and a vector
-    // does not narrow here (measured against the reference).
+    // does not narrow here (measured against the established compiler).
     if (constructedType.isStruct())
     {
         const auto& fields = constructedType.structFields();
@@ -1995,7 +1995,7 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
     // Check component count.  A brace list initialising an ARRAY constructs
     // arraySize elements of the element type: `static const float2 taps[2] =
     // { float2(1,2), float2(3,4) }` needs 4 components, not 2, and the
-    // reference accepts the constructor, nested and flat spellings
+    // established compiler accepts the constructor, nested and flat spellings
     // byte-identically (aggregate-constructor-component-count, measured; nested braces are still the
     // parser's gap).
     int requiredComponents = constructedType.componentCount();
@@ -2034,7 +2034,7 @@ CgType SemanticAnalyzer::analyzeConstructorExpr(ConstructorExpr* expr)
     }
 
     // A matrix constructor packs its arguments ROW-MAJOR, and a VECTOR
-    // argument may not straddle a row boundary.  Measured on the reference
+    // argument may not straddle a row boundary.  Measured on the established compiler
     // (2026-09-15, rectangular-matrices, .local/probe-rect m1-m11): float2x2(float2, s, s),
     // float2x2(s, s, float2), float3x3(float3, s, s, s, float3),
     // float3x4(float2, float2, float4, float4) and float4x4(eight float2) all
@@ -2132,7 +2132,7 @@ CgType SemanticAnalyzer::resolveType(TypeNode* typeNode) const
 // A numeric VECTOR stored into a numeric SCALAR - by a declaration's
 // initialiser, an assignment (compound included: a op= v is a op v.x) or a
 // return - keeps lane x, converted to the scalar's type.
-// Measured on the reference (C7011 warning, accepted): float a = t.xyz is
+// Measured on the established compiler (C7011 warning, accepted): float a = t.xyz is
 // t.x, a = t.yz is t.y, half a = t.zw is t.z, int a = t.xy truncates t.x.
 // libretro's ddt-waterpaint / 2xbr / oldtv and ogre HeatVision rely on it.
 // Function ARGUMENTS are not widened by this (overload resolution).
@@ -2252,7 +2252,7 @@ void SemanticAnalyzer::validateSwizzle(MemberAccessExpr* expr, const CgType& obj
     int maxComponents = objectType.vectorSize();
     if (maxComponents == 1) maxComponents = 1;  // Scalar has 1 component
 
-    // The reference (sce-cgc 475) refuses ANY uppercase letter among the
+    // The established compiler refuses ANY uppercase letter among the
     // swizzle alphabet (XYZW/RGBA/STPQ), in both read and write positions,
     // with C1048 naming the FIRST offending letter and the swizzle exactly as
     // written:  invalid character 'X' in swizzle "XYZ"
@@ -2301,7 +2301,7 @@ void SemanticAnalyzer::validateShader()
     // Held C1008-class findings, now that the entry is known and the call
     // graph is fully resolved.  Before checkNonEntrySemantics only so that a
     // name error inside a function reads before that function's semantic
-    // error, which is the reference's order.
+    // error, which is the established compiler's order.
     emitDeferredNameFindings();
     emitDeferredDiscardFindings();
 
@@ -2323,7 +2323,7 @@ void SemanticAnalyzer::validateShader()
 // A function REACHED FROM THE SELECTED ENTRY may not carry a RETURN semantic
 // (prototype-default-merging).  MEASURED, because the diagnostic's own text is wrong about its
 // rule - it says "semantics not allowed on functions other than the entry
-// function", and the reference accepts two shapes that sentence forbids:
+// function", and the established compiler accepts two shapes that sentence forbids:
 //
 //   called helper, RETURN semantic                    REFUSE  C5122
 //   called helper, RETURN + PARAMETER semantics       REFUSE  C5122
@@ -2339,23 +2339,23 @@ void SemanticAnalyzer::validateShader()
 // expressions do not create edges.  Two consequences for the implementation:
 //
 //  - it cannot reuse a reachability pass that runs after constant folding.
-//    The `if (false)` row is REFUSED by the reference, so the edge has to be
+//    The `if (false)` row is REFUSED by the established compiler, so the edge has to be
 //    seen in the AST before anything prunes it.  ir_passes' m_reachableBlocks
 //    is a different notion entirely: basic blocks within one function.
 //  - it must walk EVERY container.  A missed node kind under-approximates
 //    reachability, and under-approximating means ACCEPTING a program the
-//    reference refuses - this check's own defect, reintroduced by its fix and
+//    established compiler refuses - this check's own defect, reintroduced by its fix and
 //    invisible to any fixture that happens to use a handled kind.  The
 //    switches below therefore carry NO `default:` label, so an enum addition
 //    is a compiler warning rather than a silent hole, and twelve container
 //    fixtures cover it behaviourally.
 // THE ONE REACHABILITY WALK.  Transitive and syntactic from the selected
 // entry, with no branch pruning - a call inside `if (false)` still reaches,
-// measured on the reference (prototype-default-merging, and again for the C1008 class here).
+// measured on the established compiler (prototype-default-merging, and again for the C1008 class here).
 // It runs AFTER pass 2 so CallExpr::resolvedFunction is fully populated;
 // deciding reachability from a partly-resolved graph would under-approximate
 // the reached set, and under-approximating means SUPPRESSING a diagnostic the
-// reference emits (review: codex).
+// established compiler emits (review: codex).
 std::unordered_set<const FunctionDecl*> SemanticAnalyzer::reachedFunctions() const
 {
     std::unordered_set<const FunctionDecl*> reached;
@@ -2363,7 +2363,7 @@ std::unordered_set<const FunctionDecl*> SemanticAnalyzer::reachedFunctions() con
     if (!entry) return reached;
 
     // The reached set holds the FIRST declaration of each function, because
-    // that is the one the reference judges and the one a call resolves to.
+    // that is the one the established compiler judges and the one a call resolves to.
     std::vector<FunctionDecl*> work;
     auto seed = [&](FunctionDecl* fn)
     {
@@ -2377,14 +2377,14 @@ std::unordered_set<const FunctionDecl*> SemanticAnalyzer::reachedFunctions() con
 
     // A FILE-SCOPE INITIALISER IS A ROOT TOO.  `static float g = f(0.25);`
     // reaches f's body even though the entry never mentions f, and the
-    // reference name-checks it there: that program is C1008 when f's body has
+    // established compiler name-checks it there: that program is C1008 when f's body has
     // an undeclared name, where rooting only at the entry dropped the finding
     // AND skipped lowering f (review: codex).
     //
     // C5122 SHARES THIS ROOT SET - measured, not assumed, because widening a
     // separately-measured graph on a hunch is how the prototype hole got into
     // prototype-default-merging.  A helper carrying a return semantic and called ONLY from a
-    // static initialiser is refused C5122 by the reference, while the same
+    // static initialiser is refused C5122 by the established compiler, while the same
     // helper never called at all is accepted.  So one walk serves both.
     for (VarDecl* global : allGlobalVars_)
     {
@@ -2412,24 +2412,24 @@ std::unordered_set<const FunctionDecl*> SemanticAnalyzer::reachedFunctions() con
     return reached;
 }
 
-// A NAME THE UNIT DOES NOT DECLARE AT THIS POINT.  The reference reports this
+// A NAME THE UNIT DOES NOT DECLARE AT THIS POINT.  The established compiler reports this
 // class - C1008, covering an undeclared identifier, an undeclared function and
 // a forward call - ONLY inside functions reachable from the selected entry.
 // Measured, helper never called from main:
 //
-//     undeclared identifier / function / forward call   reference ACCEPTS
-//     a type error (C1056) / a wrong arity (C1103)      reference REFUSES
+//     undeclared identifier / function / forward call   established ACCEPTS
+//     a type error (C1056) / a wrong arity (C1103)      established REFUSES
 //
 // so the body IS analysed and only this class is gated.  Outside a function
 // body there is nothing to be unreachable: a file-scope initialiser and an
-// entry-parameter default are checked unconditionally, which the reference
+// entry-parameter default are checked unconditionally, which the established compiler
 // agrees with (it refuses a later name in both, C1002).
 void SemanticAnalyzer::deferOrEmitNameError(const SourceLocation& loc,
                                             const std::string& message,
                                             const std::string& name)
 {
     // Remember it against THIS scope instance: if the same scope later
-    // declares the name, the reference calls that C1002 and refuses
+    // declares the name, the established compiler calls that C1002 and refuses
     // regardless of reachability, so the deferral must not swallow it.
     if (!name.empty()) symbols_.noteUnresolvedUse(name);
 
@@ -2551,7 +2551,7 @@ bool SemanticAnalyzer::sameSignature(const FunctionDecl* a,
 }
 
 // TWO DEFINITIONS OF ONE SIGNATURE IS C1106, and it has nothing to do with
-// defaults or with where the call sits.  Measured on sce-cgc 475:
+// defaults or with where the call sits.  Measured on the established compiler:
 //
 //     def(k=.25) ; call ; def(k=.5)      C1106
 //     def(k=.25) ; def(k=.5) ; call      C1106
@@ -2561,7 +2561,7 @@ bool SemanticAnalyzer::sameSignature(const FunctionDecl* a,
 // so it is the second BODY that is refused, not the second default, and a
 // prototype/definition pair stays legal - the last cell is rule 1 doing its
 // job (the latest visible declaration has no default, so the call is short an
-// argument).  The reference reports it at the FIRST definition, which is what
+// argument).  The established compiler reports it at the FIRST definition, which is what
 // the location below reproduces.  Its wording is kept verbatim, as the C1033
 // and C1111 sites already do.
 void SemanticAnalyzer::checkDuplicateDefinition(FunctionDecl* decl)
@@ -2629,7 +2629,7 @@ void SemanticAnalyzer::checkDefaultNamesBindAtDeclaration(FunctionDecl* decl)
         }
         // A FUNCTION NAME IS NOT VISIBLE INSIDE ITS OWN DECLARATION, hence
         // >= rather than >.  `float f(float x = f()) {...}` is C1002 on the
-        // reference - the declaration is not complete while its own default
+        // established compiler - the declaration is not complete while its own default
         // is being read - and without this the call-edge walk expands that
         // default forever.  A MUTUAL pair still resolves: each names the
         // other, whose first declaration has a strictly smaller index.
@@ -2663,7 +2663,7 @@ void SemanticAnalyzer::checkDefaultNamesBindAtDeclaration(FunctionDecl* decl)
         {
             // THE CALLEE NAME IS A NAME TOO.  Walking only the arguments let
             // `f(x, k = inner(.5))` with inner declared LATER through, which
-            // the reference refuses C1002 - and it only showed when the helper
+            // the established compiler refuses C1002 - and it only showed when the helper
             // was never reached, because a reached one is caught later by the
             // ordinary resolution path (found by codex).
             const auto* call = static_cast<const CallExpr*>(expr);
@@ -2822,15 +2822,15 @@ void SemanticAnalyzer::collectCallEdges(const ExprNode* expr,
                 //
                 //   float inner(float x) : COLOR { return x; }
                 //   float outer(float x, float k = inner(1.0)) { return x*k; }
-                //   outer(t.x)        reference REFUSES C5122 - inner is
+                //   outer(t.x)        established REFUSES C5122 - inner is
                 //                     reached, and a reached helper may not
                 //                     carry a return semantic
-                //   outer(t.x, 2.0)   reference ACCEPTS - the default is never
+                //   outer(t.x, 2.0)   established ACCEPTS - the default is never
                 //                     substituted, so inner is never reached
                 //
                 // That second cell is what stops the obvious over-fix: rooting
                 // every call named in every default of every reached helper
-                // would refuse a program the reference compiles.  The edge
+                // would refuse a program the established compiler compiles.  The edge
                 // belongs to the CALL SITE, not to the declaration.
                 //
                 // Transitive without extra machinery: the recursion below
@@ -2840,11 +2840,11 @@ void SemanticAnalyzer::collectCallEdges(const ExprNode* expr,
                 // which is how the relay cell (inner has no semantic, but
                 // calls a leaf that does) is refused.
                 // AND IT CAN BE CYCLIC.  `float f(float x = f()) {...}`
-                // expands its own default forever; the reference refuses that
+                // expands its own default forever; the established compiler refuses that
                 // program outright (C1002/C1014) but we must not blow the
                 // stack deciding so - and MUTUAL defaults that do terminate
                 // (`f(x = g(1))` beside `g(x = f(1))`, called with an
-                // argument) are ACCEPTED by the reference, so the guard has
+                // argument) are ACCEPTED by the established compiler, so the guard has
                 // to be an active set and not a depth limit or a
                 // "seen once" set.
                 for (size_t i = node->arguments.size();
@@ -2927,7 +2927,7 @@ static bool uniformMember(const StructField& field)
 void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
 {
     // A selected entry's direct sampler inputs have uniform domain even
-    // without `uniform` (including `in` and `const`, measured on the reference).
+    // without `uniform` (including `in` and `const`, measured on the established compiler).
     // Normalize before reserving or assigning varying slots, so the sampler
     // consumes only a texture unit and IR/reflection agree on its storage.
     // Helper parameters and output/inout samplers keep their declared storage.
@@ -2943,7 +2943,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
     // Counter for assigning default semantics to undecorated parameters
     int defaultAttrIndex = 0;
 
-    // Fragment-stage default-binding rule (matches reference compiler):
+    // Fragment-stage default-binding rule (matches established compiler):
     // each non-uniform input parameter without an explicit semantic gets
     // the next-available TEXCOORD<N> slot — skipping any TEXCOORD<N>
     // already explicitly used by a sibling. Verified via byte probes of
@@ -3005,7 +3005,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             // A member whose TEXCOORD was INFERRED for an earlier input of the
             // same struct type: the inference lives on the shared struct
             // field, so this second input would bind the same TEXn.  The
-            // reference binds each instance separately (struct S { float2
+            // established compiler binds each instance separately (struct S { float2
             // uv; }; main(S a, S b): a.uv TEX0, b.uv TEX1 - review: codex);
             // refused by name until bindings are per instance.
             // Each instance is bound on its own after dead-code elimination
@@ -3142,7 +3142,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             // recognise:
             //   - fragment stage: TEXCOORD<N>, skipping any TEXCOORD<N>
             //     already used by a sibling parameter. Matches the
-            //     reference compiler.
+            //     established compiler.
             //   - vertex stage: ATTR<N> in declaration order (existing
             //     behaviour, no test shader exercises it but kept).
             // The inferred semantic is written back into the AST so the
@@ -3193,13 +3193,13 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
 
     // C5029: a program that returns a value must return a struct or give it a
     // varying output semantic - whatever out parameters it also has.
-    // Measured on the reference (both profiles): `float4 f(float4 x :
+    // Measured on the established compiler (both profiles): `float4 f(float4 x :
     // TEXCOORD0) { return x; }` and `float4 f(..., out float4 c : COLOR)`
     // both refuse with C5029; a void program and a struct return do not.
     // (ogre's DualQuaternionSkinning_Shadow.cg helpers compiled as entries.)
     // The RESOLVED type decides both tests: a typedef name parses as a named
     // type, so `typedef void V; V main(..., out float4 c : COLOR)` is a void
-    // program (accepted by the reference) - review: codex.
+    // program (accepted by the established compiler) - review: codex.
     // Typedefs are registered and their uses carry the underlying type, so a
     // void alias is genuinely void rather than an unresolved error type.
     const CgType resolvedReturn = resolveType(entryPoint->returnType.get());

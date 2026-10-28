@@ -36,7 +36,7 @@
  *     the same paramno.
  *
  * Bails out when entry parameters look struct-flattened (single
- * `void` param + ldattr/stout in the IR) — the reference compiler
+ * `void` param + ldattr/stout in the IR) — the established compiler
  * names struct fields as `<param>.<field>` and `<func>.<field>`,
  * which our front-end doesn't yet preserve.  The diff harness falls
  * back to ucode-only diff for those shaders.
@@ -68,7 +68,7 @@ constexpr uint32_t kCgIn                   = 0x00001001u;
 constexpr uint32_t kCgOut                  = 0x00001002u;
 constexpr uint32_t kCgVarying              = 0x00001005u;
 constexpr uint32_t kCgUniform              = 0x00001006u;
-// Literal-pool param marker (the reference compiler emits this for `internal-constant-N`):
+// Literal-pool param marker (the established compiler emits this for `internal-constant-N`):
 //   - var field = 0x1007 (a third class beside Varying/Uniform)
 //   - paramno   = 0xFFFFFFFE (~kInvalidIndex - 1, meaning "synthesised
 //                              by the compiler, not a user parameter")
@@ -102,7 +102,7 @@ constexpr uint32_t kCgFloat1x1    = 1049u;  // first of the contiguous
                                             // float-matrix block
 constexpr uint32_t kCgFloat4x4    = 1064u;
 // Vector types of width 1 (`float1`, declared as separate enumerants
-// from CG_FLOAT scalar later in cg_datatypes.h).  The reference compiler
+// from CG_FLOAT scalar later in cg_datatypes.h).  The established compiler
 // uses CG_FLOAT1 (not CG_FLOAT) for single-lane literal-pool slots.
 constexpr uint32_t kCgFloat1      = 1091u;
 
@@ -140,11 +140,11 @@ void padTo(std::vector<uint8_t>& out, size_t alignment)
     while (out.size() % alignment) out.push_back(0);
 }
 
-// CGtype for a matrix of the given shape.  The reference's own datatype
+// CGtype for a matrix of the given shape.  The established compiler's own datatype
 // table (sdk/include/Cg/NV/cg_datatypes.h) lists the float matrices in a
 // contiguous block ordered rows-major-then-cols, starting at CG_FLOAT1x1,
 // so the code is kCgFloat1x1 + (rows-1)*4 + (cols-1).  Measured against
-// sce-cgc on six shapes rather than derived from the table alone:
+// the established compiler on six shapes rather than derived from the table alone:
 //   2x2 -> 1054   3x3 -> 1059   3x4 -> 1060   4x3 -> 1063   4x4 -> 1064
 //   2x4 -> 1056
 // Before this, only 4x4 was mapped and every other shape fell through to
@@ -157,7 +157,7 @@ uint32_t cgMatrixType(int rows, int cols)
 }
 
 // A matrix ROW is recorded as the float vector of the COLUMN width, not
-// always FLOAT4: the reference gives 1047 (CG_FLOAT3) for a 3x3's rows and
+// always FLOAT4: the established compiler gives 1047 (CG_FLOAT3) for a 3x3's rows and
 // 1048 for a 4x4's.  Five sites here hard-coded kCgFloat4 (matrix-default-reflection).
 uint32_t cgMatrixRowType(int cols)
 {
@@ -224,7 +224,7 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     switch (t.baseType)
     {
     case IRType::Float32: return kCgFloat;
-    // A `half` scalar is recorded as FLOAT by the reference (measured on
+    // A `half` scalar is recorded as FLOAT by the established compiler (measured on
     // the fragment side: 1045 for `half`, 1048 for `half4` elements).
     case IRType::Float16: return kCgFloat;
     // An int, uint or bool SCALAR is recorded as FLOAT too (measured on
@@ -242,7 +242,7 @@ uint32_t cgTypeForIRType(const IRTypeInfo& t)
     }
 }
 
-// CGtype of a sampler declaration, as the reference records a vertex
+// CGtype of a sampler declaration, as the established compiler records a vertex
 // sampler: 0x429 sampler1D, 0x42a sampler2D, 0x42c samplerRECT, 0x42d
 // samplerCUBE (measured).  sampler3D has no vertex fetch and is refused by
 // the lowering before a container is written; its code is the table's.
@@ -271,14 +271,14 @@ uint32_t vpInputResource(const std::string& semUpper, int semIndex)
 
 // CG_TEXCOORD0..7 — VP output binding code emitted when the source
 // uses the `TEXCOORD<N>` spelling (3220+N).  Distinct from CG_TEX0
-// (2179+N), which the reference compiler picks when the source spells
+// (2179+N), which the established compiler picks when the source spells
 // the semantic as `TEX<N>`.  We honour the source spelling so the
-// container is byte-exact against the reference compiler.
+// container is byte-exact against the established compiler.
 constexpr uint32_t kCgTexCoord0 = 3220u;  // 0x0c94
 
 // VP output semantic → CGresource.  `rawSpelling` carries the user's
 // original lexeme (e.g. "TEXCOORD0" vs "TEX0") so we can pick between
-// CG_TEXCOORD<N> (0x0c94) and CG_TEX<N> (0x0883) per the reference
+// CG_TEXCOORD<N> (0x0c94) and CG_TEX<N> (0x0883) per the established compiler
 // compiler's encoding table.  `semUpper` is the digit-stripped form.
 uint32_t vpOutputResource(const std::string& semUpper, int semIndex,
                           const std::string& rawSpelling = std::string{})
@@ -287,7 +287,7 @@ uint32_t vpOutputResource(const std::string& semUpper, int semIndex,
         return kCgHpos;
     if (semUpper == "COLOR" || semUpper == "COL")
         return kCgCol0 + (semIndex == 1 ? 1 : 0);
-    // Back-face colours: measured, the reference records BCOL0 as 0x8c7.
+    // Back-face colours: measured, the established compiler records BCOL0 as 0x8c7.
     if (semUpper == "BCOL" && (semIndex == 0 || semIndex == 1))
         return kCgCol0 + 2 + (semIndex == 1 ? 1 : 0);
     if (semUpper == "TEXCOORD" || semUpper == "TEX")
@@ -344,7 +344,7 @@ VpContainerResult emitVertexContainerImpl(
     // case we synthesise the parameter table from the LdAttr/StOut
     // walk instead of from entry->parameters.
     //
-    // the reference compiler names struct fields as:
+    // the established compiler names struct fields as:
     //   - inputs:  `<param-instance-name>.<field-name>`  ("input.pos")
     //   - outputs: `<entry-function-name>.<field-name>`  ("main.pos")
     //
@@ -358,7 +358,7 @@ VpContainerResult emitVertexContainerImpl(
                     });
 
     // ----- Build the parameter list, in the same iteration order as
-    // the reference compiler: shader entry parameters in declaration order, with
+    // the established compiler: shader entry parameters in declaration order, with
     // matrix uniforms expanded into parent + N row entries. -----
     struct ParamDesc
     {
@@ -421,7 +421,7 @@ VpContainerResult emitVertexContainerImpl(
     const rsx_cg::ArrayUniformUses arrayUses =
         rsx_cg::classifyArrayUniformUses(*entry);
     constexpr uint32_t kCgUnassignedRes = 3256u;  // 0x0cb8: declared, no register
-    // An unread, unpinned uniform takes no c[] register (the reference
+    // An unread, unpinned uniform takes no c[] register (the established compiler
     // declares it with no resource, register -1, isReferenced 0) and moves
     // no cursor; the lowering skips it from the same set (vpReadUniforms).
     // Recorded by (name, paramno) and rewritten after the records are built:
@@ -565,7 +565,7 @@ VpContainerResult emitVertexContainerImpl(
     };
 
     // A struct-typed file-scope uniform is declared through its flattened
-    // members (`IN_global.video_size`, ...); the reference writes no record
+    // members (`IN_global.video_size`, ...); the established compiler writes no record
     // for the struct itself, and it takes no register.
     const auto isStructUniformParent = [&](const IRGlobal& g) {
         // An array of structs likewise ("light[0].position", ...).
@@ -588,7 +588,7 @@ VpContainerResult emitVertexContainerImpl(
     };
 
     // ----- Struct-flattened path: synthesize params from
-    // LdAttr / StOut walk.  Per the reference compiler:
+    // LdAttr / StOut walk.  Per the established compiler:
     //   - all input struct fields share the same paramno = 0 (they
     //     all come from the single struct entry param)
     //   - output struct fields have paramno = 0xFFFFFFFF — they're
@@ -637,7 +637,7 @@ VpContainerResult emitVertexContainerImpl(
             }
         }
 
-        // The reference declares every member of a varying struct
+        // The established compiler declares every member of a varying struct
         // parameter in struct order, read or not: an unread member with
         // isReferenced 0 and its semantic's resource, or 0xcb8 and no
         // semantic string when it has none (measured).  Lay the loaded
@@ -779,13 +779,13 @@ VpContainerResult emitVertexContainerImpl(
         }
 
         // Every record so far belongs to an entry parameter and carries its
-        // source ordinal; the reference lists them in that order, struct
+        // source ordinal; the established compiler lists them in that order, struct
         // inputs at their parameter's place (measured: `float4 pre, V v,
         // W w` lists pre, v.*, w.*; the struct inputs used to come first).
         std::stable_sort(params.begin(), params.end(),
                          [](const ParamDesc& a, const ParamDesc& b) { return a.paramno < b.paramno; });
 
-        // File-scope uniforms — the reference compiler emits these between the
+        // File-scope uniforms — the established compiler emits these between the
         // struct-flat inputs and outputs.  They're treated as
         // "shared" (constant-buffer linkage rather than function
         // parameters): paramno = 0xFFFFFFFF (synthetic) and isShared
@@ -914,12 +914,12 @@ VpContainerResult emitVertexContainerImpl(
                 {
                     if (in.fieldName.empty()) continue;  // non-struct out; not in scope here
                     ParamDesc d;
-                    d.name      = entry->name + "." + in.fieldName;   // the reference compiler convention
+                    d.name      = entry->name + "." + in.fieldName;   // the established compiler convention
                     d.semantic  = in.inferredSemantic ? std::string{} : in.rawSemanticName.empty() ? in.semanticName : in.rawSemanticName;
                     // The IR builder stashes the source-level field
                     // type on StoreOutput so narrowed struct outputs
                     // (`float2 texcoord : TEX0`) size their parameter
-                    // entry like the reference compiler.
+                    // entry like the established compiler.
                     uint32_t fieldType = cgTypeForIRType(in.resultType);
                     d.type      = (fieldType != 0) ? fieldType : kCgFloat4;
                     d.var       = kCgVarying;
@@ -972,7 +972,7 @@ VpContainerResult emitVertexContainerImpl(
                 d.resIndex = static_cast<uint32_t>(base);
                 params.push_back(d);
                 // Expand into per-row entries.  Each child shares the
-                // parent's paramno (the reference compiler keeps the user-facing
+                // parent's paramno (the established compiler keeps the user-facing
                 // parameter index for all rows).
                 for (int row = 0; row < p.type.matrixRows; ++row)
                 {
@@ -1030,7 +1030,7 @@ VpContainerResult emitVertexContainerImpl(
     }
 
     // File-scope uniforms — Cg implicitly treats `float4x4 gFoo;` at
-    // file scope as a uniform.  The reference compiler appends these
+    // file scope as a uniform.  The established compiler appends these
     // after the user-declared entry params, with paramno = 0xFFFFFFFF
     // (synthetic) and isShared driven by whether the source pinned an
     // explicit `: register(CN)` binding.  Matrix parents expand into
@@ -1109,7 +1109,7 @@ VpContainerResult emitVertexContainerImpl(
                 r.isShared     = hasExplicit ? 1u : 0u;
                 r.resIndex     = static_cast<uint32_t>(base + row);
                 // An initialised matrix uniform's compiled default lives on
-                // the ROWS, never on the parent: the reference leaves the
+                // the ROWS, never on the parent: the established compiler leaves the
                 // parent record's defaultValue at 0 and gives each row its
                 // own 16-byte block holding that row's columns, zero-padded.
                 // Measured on `float3x3 M = float3x3(nine scalars)`:
@@ -1164,7 +1164,7 @@ VpContainerResult emitVertexContainerImpl(
     }
 
     // Synthetic struct-return outputs — `OUT.field = ...` member
-    // assignments emit StoreOutput with a fieldName.  The reference
+    // assignments emit StoreOutput with a fieldName.  The established compiler
     // compiler names the synthetic param `<entry>.<field>` and uses
     // paramno = 0xFFFFFFFF (no user-facing parameter index).
     for (const auto& blockPtr : entry->blocks)
@@ -1314,7 +1314,7 @@ VpContainerResult emitVertexContainerImpl(
         }
 
     // Unread uniforms (and a matrix's rows, named `m[k]`): declared, no
-    // resource, no register, not referenced - the reference's record.
+    // resource, no register, not referenced - the established compiler's record.
     for (auto& param : params)
     {
         if (param.var != kCgUniform) continue;
@@ -1446,7 +1446,7 @@ VpContainerResult emitVertexContainerImpl(
 
     if (compactCgb)
     {
-        // Compact CGB mode is the runtime-facing `the reference compiler -mcgb` container.
+        // Compact CGB mode is the runtime-facing `the established compiler -mcgb` container.
         // LevelA carries register indices, padded to 16 bytes, followed by
         // their float4 values. In particular PSIZE's implicit clamp needs it.
         struct CompactEntry
@@ -1604,7 +1604,7 @@ VpContainerResult emitVertexContainerImpl(
 
     // ----- Strings region: per-param, semantic\0 then name\0.
     // Literal-pool params interleave a 16-byte float[4] block between
-    // the prior strings and the param's own name string (the reference compiler lays
+    // the prior strings and the param's own name string (the established compiler lays
     // it out exactly like that — defaultValue points at the floats,
     // nameOffset points at the trailing name). -----
     const uint32_t headerSize     = 0x20u;
@@ -1626,7 +1626,7 @@ VpContainerResult emitVertexContainerImpl(
         {
             // Pad to 16-byte alignment, emit float[4] block, point
             // defaultValueOffset at it.  The 16-byte alignment is what
-            // the reference compiler uses; without it the runtime's load step picks
+            // the established compiler uses; without it the runtime's load step picks
             // up garbage from the prior string's tail.
             padBlobTo(16);
             params[i].defaultValueOffset =

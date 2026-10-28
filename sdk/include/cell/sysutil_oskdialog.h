@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-/* `sys_memory_container_t` is the reference-SDK name; PSL1GHT spells
+/* `sys_memory_container_t` is the Cell OS name; PSL1GHT spells
  * it `sys_mem_container_t` in <sys/memory.h>.  Local typedef so this
  * header compiles against either name. */
 #ifndef PS3TC_SYS_MEMORY_CONTAINER_T_DEFINED

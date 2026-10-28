@@ -27,7 +27,7 @@ The repo is growing from a refreshed ps3dev/PSL1GHT baseline into a fuller SDK u
 | Binutils | **2.42** | both targets | Assembler, linker, `ar` / `objcopy` / `nm` / `strip` for both PPU and SPU; small PS3 patch series for each target (`patches/ppu/binutils-2.42`, `patches/spu/binutils-2.42`) |
 | Newlib | **4.4.0** | both targets | C standard library + PS3 `libsysbase` / `libgloss` lv2 syscall glue (CRT0, `_write_r` / `_sbrk_r` / `_read_r` etc.) |
 | GDB | **14.2** | PPU | Debugger for RPCS3's gdbstub and (eventually) real-hardware targets |
-| PSL1GHT (v3) | pinned `f649a08` | PPU + SPU runtime | Homebrew runtime rebased for the reference SDK-style naming; source-compat shim keeps PSL1GHT-targeted homebrew building |
+| PSL1GHT (v3) | pinned `f649a08` | PPU + SPU runtime | Homebrew runtime rebased for the platform ABI-style naming; source-compat shim keeps PSL1GHT-targeted homebrew building |
 | portlibs | pinned per recipe | PPU | zlib 1.3.1, libpng 1.6.58, pixman 0.42.2, FreeType 2.13.2, cairo 1.16.0, libzip 1.11.4, tiny3d + libfont3d; ps3soundlib opt-in (`scripts/portlibs/`) |
 | Tooling | in-tree | host | `rsx-cg-compiler` (Cg vertex/fragment shader compiler); Rust tools for NID/FNID and stub archives, ABI checks, PRX/SPRX and SFO generation, coverage reports; `sprxlinker` |
 
@@ -335,7 +335,7 @@ front-ends:
 | `sfo-gui.exe` | The same operations visually: every registry-known key and flag bit as a labelled widget |
 
 Both are generated from one key/flag registry
-(`tools/sfo/registry/param-sfo.yml`), which also generates the reference
+(`tools/sfo/registry/param-sfo.yml`), which also generates the system
 document [docs/sdk/param-sfo.md](docs/sdk/param-sfo.md) — so the CLI, the
 GUI and the docs cannot drift apart.
 
@@ -612,7 +612,7 @@ rpcs3 --no-gui hello-ppu-abi-check.self
 The repo ships host tools under `tools/`; the Rust ones drive the stub-archive pipeline and the coverage report, among others:
 
 - `nidgen` — NID extraction from reference stub archives, stub-archive emission, FNID verification.
-- `coverage-report` — the reference SDK export set vs. our install tree coverage matrix → `docs/coverage.md`.
+- `coverage-report` — the platform ABI export set vs. our install tree coverage matrix → `docs/coverage.md`.
 
 `scripts/build-sdk.sh` builds and installs all of them (the whole Rust workspace and rsx-cg-compiler) through `scripts/install-host-tools.sh` unless you pass `--no-host-tools`. To build the Rust tools on their own:
 

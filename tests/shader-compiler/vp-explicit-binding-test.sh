@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PS3_475 oracle rows: local build/binding-containment/oracle/results.json.
+# PS3_475 measurement rows: local build/binding-containment/measurement/results.json.
 # Explicit pins occupy c0..255, independently of automatic c256-up/c467-down.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -74,7 +74,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-vp-binding-') as directory:
         {('u',0xffffffff):(1048,9,'C9',0xffffffff,1),('u',1):(1048,20,'C20',1,1)},
         {20:[2,3,4,5],9:[7,11,13,17]},[9,5,25,19.5])
     # The struct's own record is never read, so it takes no register and
-    # the leaves start at c467 as in the oracle (t_67b3362b); the leaf
+    # the leaves start at c467 as in the established compiler (t_67b3362b); the leaf
     # reads still resolve through owner propagation.
     run('struct-leaf-owner','struct U{float4 a;float4 b;}; uniform U u; float4 main(float4 p:POSITION):POSITION{return p*u.a+u.b;}',
         {'u.a':(1048,467,'',0xffffffff,0),'u.b':(1048,466,'',0xffffffff,0)},

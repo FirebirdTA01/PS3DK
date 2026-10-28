@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check VP TEX8/9 metadata and encoded output destinations, without an oracle."""
+"""Check VP TEX8/9 metadata and encoded output destinations, without an measurement."""
 import argparse
 import json
 import pathlib

@@ -10,8 +10,8 @@
 # fp32 R0 and shipped with outputFromH0 clear, so `half4` and `float4` entry
 # points compiled to the same container.  What stood in the way of that
 # being noticed was a blanket refusal of any program with a temp in R0,
-# which refused 45 of the reference SDK's fragment programs - among them the
-# shape THE REFERENCE ITSELF EMITS: `TEXR R0.xyz, f[TEX0], TEX0` followed by
+# which refused 45 of the platform ABI's fragment programs - among them the
+# shape The established compiler ITSELF EMITS: `TEXR R0.xyz, f[TEX0], TEX0` followed by
 # `MOVH H0.xyz, R0`, where the temp's last read is the instruction that
 # writes the colour.
 #
@@ -188,7 +188,7 @@ if merged_i and merged_i[-1]["prec"] != 1:
 # just of the colour taken from it.  When something else reads that value -
 # here the depth export - it must still read full precision, so the
 # conversion belongs AT the colour store and nowhere earlier.  The
-# discriminating count is how many instructions are fp16: the reference
+# discriminating count is how many instructions are fp16: the established compiler
 # emits exactly one (the store), and stamping the producers instead made it
 # two while the depth quietly read H0.x.
 shared = container("fp_half_output_shared_value_f")

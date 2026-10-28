@@ -9,8 +9,8 @@
 // failure that neither advances nor throws did this.  'bogusType' is simply
 // the shortest way to reach it.
 //
-// 95 shaders in the reference SDK sample tree never terminated, most of them
-// over the Cg 1.x type name texobj2D - which is a REAL type the reference
+// 95 shaders in the platform ABI sample tree never terminated, most of them
+// over the Cg 1.x type name texobj2D - which is a REAL type the established compiler
 // accepts, and supporting it is a separate row.  This fixture only asks that
 // an unknown one be refused rather than hung on.
 void main(uniform bogusType t, float4 c : TEXCOORD0, out float4 o : COLOR)

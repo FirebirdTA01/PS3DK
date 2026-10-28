@@ -1,9 +1,9 @@
 From: PS3 Custom Toolchain
 Subject: [PATCH] rs6000: 16-bit wchar_t and int wint_t under -mlp64 too (cell64lv2)
 
-0041 matched the reference wchar_t (16-bit unsigned short) and wint_t
+0041 matched the system wchar_t (16-bit unsigned short) and wint_t
 (int) in the ILP32 data model only, on the belief that LP64 had no
-reference counterpart.  The reference compiler with -mlp64 predefines
+reference counterpart.  The established compiler with -mlp64 predefines
 __WCHAR_TYPE__ short unsigned int, __WCHAR_MAX__ 65535U and __WINT_TYPE__
 int as well (measured with -dM -E for C and C++), so L"" literals and
 structs holding wchar_t in LP64 code had a different layout.  Use the
@@ -16,16 +16,16 @@ LP64 code using wchar_t; GCC 16 port of gcc-12.x 0053.
  #undef	PTRDIFF_TYPE
  #define	PTRDIFF_TYPE (TARGET_LP64 ? "long int" : "int")
  
--/* wchar_t and wint_t under ILP32 match the reference toolchain: wchar_t
+-/* wchar_t and wint_t under ILP32 match the platform ABI: wchar_t
 -   is a 16-bit unsigned short (UTF-16 code units, so L"" literals and
 -   structs holding wchar_t have the reference layout) and wint_t is int.
 -   newlib's wide-character code supports a 16-bit wchar_t (this newlib
 -   has no multibyte support).  The LP64 data model has no reference
 -   counterpart and keeps a 32-bit wchar_t.  */
-+/* wchar_t and wint_t match the reference toolchain in both data models:
++/* wchar_t and wint_t match the platform ABI in both data models:
 +   wchar_t is a 16-bit unsigned short (UTF-16 code units, so L"" literals
 +   and structs holding wchar_t have the reference layout) and wint_t is
-+   int; the reference compiler does the same under -mlp64.  newlib's
++   int; the established compiler does the same under -mlp64.  newlib's
 +   wide-character code supports a 16-bit wchar_t (this newlib has no
 +   multibyte support).  */
  #undef	WCHAR_TYPE

@@ -203,7 +203,7 @@ IRTypeInfo lookupType(const std::unordered_map<IRValueID, IRTypeInfo>& types,
     return (it != types.end()) ? it->second : fallback;
 }
 
-// Inner ops the reference compiler allows inside a multi-insn predicated THEN chain
+// Inner ops the established compiler allows inside a multi-insn predicated THEN chain
 // today.  Anything else triggers a clean fail-out so we keep the
 // existing single-stout fast paths byte-exact.
 bool isPredicatableInnerOp(IROp op)
@@ -305,7 +305,7 @@ bool tryConvertBlock(IRFunction& fn,
             //
             // `componentIndex = 1` marks the Select as originating
             // from an if-else statement (as opposed to a ternary).
-            // the reference compiler schedules the two differently: ternary preloads
+            // the established compiler schedules the two differently: ternary preloads
             // the true branch and conditional-writes the false with
             // EQ; if-else preloads the false branch and conditional-
             // writes the true with NE.  The NV40 FP emit path reads
@@ -382,12 +382,12 @@ bool tryConvertBlock(IRFunction& fn,
 
         // %sel = select %cond ? %trueVal : %defaultVal  (if-only style)
         //
-        // Shape 2 shares the reference compiler's "ternary" schedule rather than the
+        // Shape 2 shares the established compiler's "ternary" schedule rather than the
         // if-else one: the unconditional preload lands on `trueVal`
         // (the explicitly-written then branch) and the conditional
         // EQ write restores `defaultVal` when the condition was false.
         // Confirmed against `if (x) { color = a; }` with uniform
-        // defaults — the reference compiler emits MOVR R0, a; MOVR R0(EQ.x), default.
+        // defaults — the established compiler emits MOVR R0, a; MOVR R0(EQ.x), default.
         IRValueID selId = fn.allocateValueId();
         IRTypeInfo selType = lookupType(types, trueVal, IRTypeInfo::Void());
         auto sel = std::make_unique<IRInstruction>(

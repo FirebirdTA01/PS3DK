@@ -19,16 +19,16 @@
 //      sys_spu_thread_exit code), and returns it as the PPU exit
 //      code so the harness can assert on it.
 //
-// Uses the reference-SDK snake_case forwarders (sys_spu_*) over
+// Uses the Cell OS snake_case forwarders (sys_spu_*) over
 // PSL1GHT's syscalls, exercised end-to-end here.
 
 #include <stdio.h>
 #include <stdint.h>
 #include <ppu-types.h>
 #include <sys/spu.h>
-/* Reference-SDK snake_case SPU thread forwarders.  The base <sys/spu.h>
- * header carries PSL1GHT's sysSpu* camelCase spellings; the reference-
- * SDK snake_case wrappers (`sys_spu_*`) and the reference-SDK canonical
+/* Cell OS snake_case SPU thread forwarders.  The base <sys/spu.h>
+ * header carries PSL1GHT's sysSpu* camelCase spellings; the system-
+ * SDK snake_case wrappers (`sys_spu_*`) and the Cell OS canonical
  * types (`sys_spu_thread_attribute_t`, `sys_spu_thread_group_attribute_t`,
  * `sys_spu_thread_argument_t`, `sys_spu_image_t`) live in these
  * companion headers, each of which includes <sys/spu.h> itself. */
@@ -149,7 +149,7 @@ int main (int argc, char **argv)
         .nsize  = sizeof "simd_inline_thr",
         .option = SPU_THREAD_ATTR_NONE,
     };
-    /* Reference-SDK canonical argument type (arg1..arg4); the layout is
+    /* Cell OS canonical argument type (arg1..arg4); the layout is
      * identical to PSL1GHT's arg0..arg3, so the SPU's main() sees the
      * EA of `spu_done` in its first parameter. */
     sys_spu_thread_argument_t arg = {

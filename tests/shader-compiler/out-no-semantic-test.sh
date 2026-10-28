@@ -10,12 +10,12 @@
 # accident - if the omitted semantic changed what the shader computes, the
 # two would differ.
 #
-# UCODE, not the whole container, and that limit is the reference's own.
+# UCODE, not the whole container, and that limit is the established compiler's own.
 # It records the DECLARED semantic beside the resource - "out.UNDEFINED:
 # COLOR0" without the semantic, "out.COLOR: COLOR0" with it - so the two
 # containers legitimately differ by that string, and ours are byte-identical
-# to the reference's respective containers.  An identity check on the whole
-# container would be stronger than the oracle, which is a mistake worth not
+# to the established compiler's respective containers.  An identity check on the whole
+# container would be stronger than the established compiler, which is a mistake worth not
 # making twice.
 #
 # It also checks the output register is actually written, so the pair
@@ -75,7 +75,7 @@ for path_flags in ":general"; do
     compile fp_out_with_semantic_f "$flags" "sem_$tag"
 
     # The ucode rows only: the parameter table legitimately differs by the
-    # declared semantic string, exactly as the reference's does.
+    # declared semantic string, exactly as the established compiler's does.
     grep -E '^ +[0-9]+:' "$work/none_$tag.dump" > "$work/none_$tag.ucode" || true
     grep -E '^ +[0-9]+:' "$work/sem_$tag.dump"  > "$work/sem_$tag.ucode"  || true
     if ! cmp -s "$work/none_$tag.ucode" "$work/sem_$tag.ucode"; then

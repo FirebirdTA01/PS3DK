@@ -38,7 +38,7 @@ param(
     # -ReferenceCompiler: also stage the ours-vs-reference pairs listed in
     # -ReferencePairs (increment 2c).  A host-side executable, or the
     # PS3_REF_CG_COMPILER environment variable (the same discovery
-    # contract as the oracle harness: an executable, never a directory,
+    # contract as the established compiler harness: an executable, never a directory,
     # and the console reports presence, never the path).  Reference
     # containers are runtime input under dev_hdd0 only; they never enter
     # the tree.  Byte-identical pairs are not staged.
@@ -62,15 +62,15 @@ param(
     [string]$ReferenceCorpusDir = "",
     # -ReferenceTreeCorpus: stage the tracked fragment tree manifest as
     # ours-vs-reference rows, independent of the retired legacy matcher.
-    # This is the reference-backed successor to gate1's legacy/general
+    # This is the established compiler-backed successor to gate1's legacy/general
     # tree arm.  Defaults to the repo root plus path-pair-corpus.txt.
     [switch]$ReferenceTreeCorpus,
     [string]$ReferenceTreeCorpusDir = "",
     [string]$ReferenceTreeCorpusManifest = "",
     # -ReferenceProbeRefused: for every corpus shader OURS refuses and the
-    # reference compiles, stage the reference container against ITSELF as a
+    # established compiler compiles, stage the established compiler container against ITSELF as a
     # probe row (never gates).  The row's diagnostic then reports what the
-    # reference paints under the rig's inputs - painted count, levels, KIL
+    # established compiler paints under the rig's inputs - painted count, levels, KIL
     # count, and discard-blind when a kill never fires - BEFORE our
     # lowering exists, so a witness list is proven discriminating ahead of
     # the fix it waits for (CF-2's discard shaders, 2026-09-02).
@@ -88,19 +88,19 @@ param(
     [string]$PathPairCorpusManifest = "",
     # -VpPairs: judge VERTEX programs on pixels (increment 4, gate 5).  Each
     # .vcg in -VpPairsList (default <rig>/vp-pairs.txt: repo-relative|set|path)
-    # is compiled by OUR compiler on the stage's path and by the reference
+    # is compiled by OUR compiler on the stage's path and by the established compiler
     # (-p sce_vp_rsx both) and staged as a vp-reference row; the guest judges
     # every output channel the containers declare under coverage FPs
     # GENERATED here, compiled by our DEFAULT path and byte-checked against
-    # the reference; a provable channel that differs is judged as a
+    # the established compiler; a provable channel that differs is judged as a
     # reference row before any VP row, so the instrument is proven either
     # way, never assumed.  The three VP
     # controls (identical, one-lane mismatch, synthesised-vs-baked uniforms)
-    # are staged whenever any vp row is.  Needs the reference compiler.
+    # are staged whenever any vp row is.  Needs the established compiler.
     [switch]$VpPairs,
     [string]$VpPairsList = "",
     # -VpCorpus: every *.vcg / *_v.cg under -VpCorpusDir (Windows path;
-    # default = the reference corpus dir) as a vp-reference row under set
+    # default = the established compiler corpus dir) as a vp-reference row under set
     # auto (set 0 for a file-scope const); a refusal on either side is a
     # sidecar row (vp-corpus-refused.txt), not an abort; the exclude list
     # applies by corpus-relative path as for the fragment sweep.
@@ -339,14 +339,14 @@ function Print-AutoValues([string]$srcPath, [string]$label) {
 }
 
 # A shader with a FILE-SCOPE CONST cannot be judged under uniform_set auto
-# against the reference today: the reference promotes the const to a
-# parameter, the guest's auto walk patches that parameter on the reference
+# against the established compiler today: the established compiler promotes the const to a
+# parameter, the guest's auto walk patches that parameter on the established compiler
 # side, and our folded container has nothing to patch - a mismatch by
-# construction (measured: sd_const_promotion@oracle max_delta 9, the
+# construction (measured: sd_const_promotion@measurement max_delta 9, the
 # difference between 0.3125 and its auto value).  Such rows are staged
 # under set 0 instead, and the stage says so.  Stays this way: the
 # director retired promotion-as-a-flag (22:24), so ours folds without a
-# parameter and the reference's promoted one must not be patched.
+# parameter and the established compiler's promoted one must not be patched.
 function Has-FileScopeConst([string]$srcPath) {
     $text = Get-Content -Raw -LiteralPath $srcPath
     # Strip block and line comments, then walk the text tracking brace and
@@ -424,7 +424,7 @@ function Compile-Shader([string]$src, [string]$dst, [string[]]$flags, [switch]$A
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     # Our compiler reports a refusal on stderr; under "Stop" a redirected
     # native stderr line is a terminating error (same trap as the
-    # reference side), so relax the preference for the call.
+    # established compiler side), so relax the preference for the call.
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     if ($useWsl) {
@@ -588,7 +588,7 @@ if ($Corpus) {
     Write-Host "stager: corpus rows appended ($($corpusRows.Count) pairs, $($stagedFiles.Count) containers)"
 }
 
-# Reference-side compile.  The reference compiler reports progress on
+# Reference-side compile.  The established compiler reports progress on
 # stderr; under $ErrorActionPreference = "Stop" a redirected native
 # stderr line is a terminating error in PowerShell 5.1, so relax it for
 # the call and judge by exit code + container instead.
@@ -615,7 +615,7 @@ function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_f
     $ErrorActionPreference = $prevEap
     Assert-ShaderCompileInputs $inputs
     if ((Get-FileHash -LiteralPath $ReferenceCompiler -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oracleHash) {
-        throw 'reference compiler changed during compile'
+        throw 'established compiler changed during compile'
     }
     $inputs | Add-Member NoteProperty OracleHash $oracleHash
     $script:containerCompileInputs[[IO.Path]::GetFullPath($dst)] = $inputs
@@ -625,12 +625,12 @@ function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_f
 
 # Ours-vs-reference pairs (increment 2c).  Rows carry role=reference,
 # which the guest GATES like a corpus row: a pixel mismatch against the
-# reference fails the run.  Byte-identical pairs are counted and not
+# established compiler fails the run.  Byte-identical pairs are counted and not
 # staged (byte-identical implies pixel-identical); a refusal on either
 # side is a finding, not a skip, so it aborts the stage.
 if (-not $ReferenceCompiler -and $env:PS3_REF_CG_COMPILER) { $ReferenceCompiler = $env:PS3_REF_CG_COMPILER }
 if ($ReferenceTreeCorpus -and -not $ReferenceCompiler) {
-    throw "-ReferenceTreeCorpus needs the reference compiler (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
+    throw "-ReferenceTreeCorpus needs the established compiler (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
 }
 if ($ReferenceCompiler) {
     # -PathType Leaf enforces the "an executable, never a directory"
@@ -638,13 +638,13 @@ if ($ReferenceCompiler) {
     # accepts a directory, the launch then fails, and the next guard
     # blames OUR shader for a bad tool argument.
     if (-not (Test-Path -LiteralPath $ReferenceCompiler -PathType Leaf)) {
-        throw "reference compiler not found or not a file (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
+        throw "established compiler not found or not a file (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
     }
-    Write-Host "stager: reference compiler present"
+    Write-Host "stager: established compiler present"
     # Calibration control (increment 4b): a ramp vs a twin biased by 1/2550
     # (a tenth of an 8-bit step), both REFERENCE-compiled because the row
     # measures the comparator's sensitivity, not the compiler.  Staged
-    # whenever the reference compiler is present (this block); the guest
+    # whenever the established compiler is present (this block); the guest
     # requires max_delta 1 on 5%..20% of pixels (about 10% expected) and
     # fails the run otherwise, printing the measured share.
     $calibScratch = Join-Path $env:TEMP "sd-calib-stage"
@@ -850,7 +850,7 @@ if ($ReferenceCompiler) {
         if ($seenRels.ContainsKey($rel)) { $name = "$name" + "__set" + $set }
         $seenRels[$rel] = 1
         # Column 4: extra compiler flags for OUR side, space separated,
-        # applied on top of the path flag (the reference side has no
+        # applied on top of the path flag (the established compiler side has no
         # switches).  A row with flags is named
         # <shader>__<flag-slug>__set<uniform_set>, so the same shader can
         # be staged under two flags, or under one flag with two uniform
@@ -966,11 +966,11 @@ if ($ReferenceCompiler) {
         Set-Content -LiteralPath $refusedPath -Value ($refusedRows -join "`n") -Encoding Ascii
         if (($cRows.Count + $cIdentical + $cRefusedOurs + $cRefusedRef) -eq 0) { throw "reference corpus sweep compiled nothing" }
         $manifest += $cRows
-        Write-Host "stager: reference corpus: $($files.Count) shaders, $($cRows.Count - $cProbed) pairs staged, $cIdentical byte-identical skipped, ours refused $cRefusedOurs, reference refused $cRefusedRef, $cExcluded excluded, $cProbed reference-only probe rows (sidecar: reference-corpus-refused.txt)"
+        Write-Host "stager: reference corpus: $($files.Count) shaders, $($cRows.Count - $cProbed) pairs staged, $cIdentical byte-identical skipped, ours refused $cRefusedOurs, theirs refused $cRefusedRef, $cExcluded excluded, $cProbed reference-only probe rows (sidecar: reference-corpus-refused.txt)"
     }
 
     # Reference tree corpus: the tracked gate1 tree input set, but judged
-    # against the reference compiler instead of the retired legacy matcher.
+    # against the established compiler instead of the retired legacy matcher.
     if ($ReferenceTreeCorpus) {
         if (-not $ReferenceTreeCorpusDir) { $ReferenceTreeCorpusDir = $repoRoot }
         if (-not (Test-Path -LiteralPath $ReferenceTreeCorpusDir -PathType Container)) {
@@ -1014,7 +1014,7 @@ if ($ReferenceCompiler) {
             $okRef  = Compile-Reference $f.FullName $ref
             $rcRef  = $script:lastCompileRc
             if ($rel -eq "tests/regression/shader-readback/shaders/rb_refract_k0.fcg") {
-                $rtAttributions += "rb_refract_k0=known(both sides return zero at k==0 since 0d925b66; the reference folds this constant shader to one MOV, ours computes refract at run time; readback row uses PPU-computed expected values)"
+                $rtAttributions += "rb_refract_k0=known(both sides return zero at k==0 since 0d925b66; the established compiler folds this constant shader to one MOV, ours computes refract at run time; readback row uses PPU-computed expected values)"
             } elseif ($rel -eq "tests/regression/shader-differential/must-reject/accept_array_uniform.fcg") {
                 $rtAttributions += "accept_array_uniform=new-finding(uniform array row compiles on both sides but mismatches pixels under auto binding)"
             }
@@ -1061,7 +1061,7 @@ if ($ReferenceCompiler) {
 
 # ---- VP rows (increment 4, gate 5) ----
 if ($VpPairs -or $VpCorpus) {
-    if (-not $ReferenceCompiler) { throw "-VpPairs / -VpCorpus need the reference compiler (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)" }
+    if (-not $ReferenceCompiler) { throw "-VpPairs / -VpCorpus need the established compiler (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)" }
     $vpScratch = Join-Path $env:TEMP "sd-vp-stage"
     if (Test-Path $vpScratch) { Remove-Item -Recurse -Force $vpScratch }
     New-Item -ItemType Directory -Force $vpScratch | Out-Null
@@ -1069,7 +1069,7 @@ if ($VpPairs -or $VpCorpus) {
     # Coverage FPs, one per channel the guest can judge (main.c
     # k_vp_channels): cov paints 1 (which pixels the VP covers), the rest
     # paint one interpolated channel as lane * 0.5 + 0.5 so [-1, 1]
-    # survives RGBA8.  Compiled by the general lowering and byte-checked against the reference;
+    # survives RGBA8.  Compiled by the general lowering and byte-checked against the established compiler;
     # a provable channel that is not byte-identical is judged as a
     # reference row before any VP row (below).  Proven either way, never
     # assumed.
@@ -1079,10 +1079,10 @@ if ($VpPairs -or $VpCorpus) {
     # literal multiplicand of that MAD as ZERO (mad-literal-data, found by these
     # very rows on 2026-09-02) and the instrument moved to (v + 1) * 0.5
     # for one evening.  Measured on 6b2f010 (the fix): nine of the thirteen
-    # coverage FPs are byte-identical to the reference and stage no
+    # coverage FPs are byte-identical to the established compiler and stage no
     # instrument row; col0 is not and stays proven on pixels, as does any
     # provable channel that differs - the rows are the proof, whatever the
-    # spelling.  (v + 1) * 0.5 stays byte-different (the reference
+    # spelling.  (v + 1) * 0.5 stays byte-different (the established compiler
     # reassociates it into the same MAD; claude filed that).  The scalar
     # spelling `v * 0.5f + 0.5f` still refuses on the default path (rc 1).
     $vpHalf = "float4(0.5f, 0.5f, 0.5f, 0.5f)"
@@ -1100,7 +1100,7 @@ if ($VpPairs -or $VpCorpus) {
     # the rig judges.  REFERENCE-compiled (an instrument must not rest on
     # the compiler under test) and staged as a runtime vertex program the
     # guest binds for that row alone (manifest field vp=<path>).  If the
-    # reference refuses it the extended rows are simply not staged and the
+    # established compiler refuses it the extended rows are simply not staged and the
     # stage says so; nothing else changes.
     $vpExt = Join-Path $controls "vp_ext.vpo"
     $vpExtOk = Compile-Reference (Join-Path $here "shaders\sd_pos_allch_ext.vcg") $vpExt "sce_vp_rsx"
@@ -1143,11 +1143,11 @@ if ($VpPairs -or $VpCorpus) {
         $hR = (Get-FileHash -Algorithm SHA256 -LiteralPath $covRef).Hash
         if ($hO -eq $hR) { $vpCovIdentical++; continue }
         # Not byte-identical (measured: even `color = 1` differs from the
-        # reference in container metadata): the instrument is then judged
-        # on PIXELS as an ordinary reference row, ours vs the reference's
+        # established compiler in container metadata): the instrument is then judged
+        # on PIXELS as an ordinary reference row, ours vs the established compiler's
         # container of the same coverage FP under the shared VP, before any
         # vp row - a mismatch fails the run, as an instrument that paints
-        # differently from the reference must.
+        # differently from the established compiler must.
         if ($c.key -notin $vpProvable) {
             if (-not $vpExtOk) { continue }
             Copy-Item $covRef (Join-Path $controls "vpcov_$($c.key)_ref.fpo") -Force
@@ -1159,7 +1159,7 @@ if ($VpPairs -or $VpCorpus) {
         $vpCovRows += "B|reference|vpcov_$($c.key)@instrument|controls/vpcov_$($c.key).fpo|controls/vpcov_$($c.key)_ref.fpo|0"
     }
     $manifest += $vpCovRows
-    Write-Host "stager: vp coverage FPs staged ($($vpChannels.Count - $vpCovMissing.Count) of $($vpChannels.Count): $vpCovIdentical byte-identical to the reference, $($vpCovRows.Count - $vpCovExtRows) judged on pixels under the shared VP, $vpCovExtRows under the extended VP)"
+    Write-Host "stager: vp coverage FPs staged ($($vpChannels.Count - $vpCovMissing.Count) of $($vpChannels.Count): $vpCovIdentical byte-identical to the established compiler, $($vpCovRows.Count - $vpCovExtRows) judged on pixels under the shared VP, $vpCovExtRows under the extended VP)"
 
     # VP controls, compiled on the stage's path like the fragment controls.
     # control-vp-identical: one container byte-copied.  control-vp-mismatch:
@@ -1322,7 +1322,7 @@ if ($VpPairs -or $VpCorpus) {
         }
         Set-Content -LiteralPath $vcRefusedPath -Value ($vcRefusedRows -join "`n") -Encoding Ascii
         if ((($vpRows.Count - $vcStart) + $vcIdentical + $vcRefusedOurs + $vcRefusedRef) -eq 0) { throw "vp corpus sweep compiled nothing" }
-        Write-Host "stager: vp corpus: $($vcFiles.Count) vertex shaders, $($vpRows.Count - $vcStart) pairs staged, $vcIdentical byte-identical skipped, ours refused $vcRefusedOurs, reference refused $vcRefusedRef, $vcExcl excluded, $vcConstSet0 under set 0 (sidecar: vp-corpus-refused.txt)"
+        Write-Host "stager: vp corpus: $($vcFiles.Count) vertex shaders, $($vpRows.Count - $vcStart) pairs staged, $vcIdentical byte-identical skipped, ours refused $vcRefusedOurs, theirs refused $vcRefusedRef, $vcExcl excluded, $vcConstSet0 under set 0 (sidecar: vp-corpus-refused.txt)"
     }
     $manifest += $vpRows
 

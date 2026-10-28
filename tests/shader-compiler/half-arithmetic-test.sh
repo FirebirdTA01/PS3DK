@@ -6,11 +6,11 @@
 # correct fp16 when declaring them then that is incorrect."  We honoured the
 # half OUTPUT - the colour reached H0 - and computed everything feeding it in
 # fp32, converting once at the store.  Gemini measured that the cost is
-# visible: dullMetalFp differs from the reference on 213 pixels by up to
+# visible: dullMetalFp differs from the established compiler on 213 pixels by up to
 # 3/255.
 #
 # WHAT THAT NUMBER IS NOT.  It is the motivation, not this test's scope.
-# dullMetalFp's divergence is a normalize the reference keeps at prec=1, and
+# dullMetalFp's divergence is a normalize the established compiler keeps at prec=1, and
 # normalize's result is FLOAT32-TYPED in our IR whatever its inputs are - so
 # the rule these rows pin does not reach it and that shader is NOT fixed by
 # this slice (codex, review).  What the rows below pin is narrower: the
@@ -18,7 +18,7 @@
 # where no earlier writer already owns that vreg's format and the lowering
 # has not already claimed a precision of its own.
 #
-# THE RULE, measured on sce-cgc 475 (C:/cgdev/h0/hp, 2026-09-07):
+# THE RULE, measured on the established compiler (C:/cgdev/h0/hp, 2026-09-07):
 #
 #   float4 a = p * 1.003; return (half4)a;         MUL R0 prec=0, then H0
 #   half4  a = p * (half)1.003; return a;          MOV H0 prec=1, MUL H0 prec=1
@@ -113,7 +113,7 @@ if bad:
         "FAIL: half arithmetic computed at fp32.  %s is prec=%d, expected 1.  "
         "A half temp exists so the hardware computes it in fp16; converting "
         "only at the store gives the fp32 result rounded once, which is not "
-        "the same picture - the reference keeps the whole chain at prec=1."
+        "the same picture - the established compiler keeps the whole chain at prec=1."
         % (bad[0][1], bad[0][3]))
 
 # 2. A HALF VALUE UNDER A FLOAT OUTPUT is still half arithmetic.  This is the
@@ -126,7 +126,7 @@ bad = [r for r in value if r[3] != 1]
 if bad:
     raise SystemExit(
         "FAIL: a half value under a FLOAT output computed at prec=%d.  The "
-        "reference emits MUL R0 at prec=1 here: the bank follows the output, "
+        "established compiler emits MUL R0 at prec=1 here: the bank follows the output, "
         "the precision follows the value." % bad[0][3])
 
 # 3. THE CONTROL, and it is the one that fails if anyone decides a half
@@ -200,7 +200,7 @@ for stem in ("fp_half_insert_chain_f", "fp_half_computed_insert_f"):
 
 # 6. A TEXTURE FETCH'S PRECISION IS THE TEXTURE UNIT'S, NOT THE VALUE'S.
 #    h4tex2D returns half4, so the value rule stamped the fetch prec=1 and we
-#    emitted TEXH where the reference emits TEXR - measured on sce-cgc under
+#    emitted TEXH where the established compiler emits TEXR - measured on the established compiler under
 #    BOTH output types (codex, build/codex-half-tex-regression).  The fetch
 #    carries an explicit fp32 override in lowerTex for the same reason UP2H
 #    does: these instructions' format belongs to the unit that produces the
@@ -211,7 +211,7 @@ for stem in ("fp_half_insert_chain_f", "fp_half_computed_insert_f"):
 #      reference, half fetch under a half output:   TEXR H0 ; MULH H0
 #      reference, float fetch under a half output:  TEXR R0 ; MULR H0
 #
-#    (The reference's H DESTINATION on the fetch is a separate rule and is
+#    (The established compiler's H DESTINATION on the fetch is a separate rule and is
 #    deliberately not asserted here; this row is precision only.)
 for stem, mul_prec in (("fp_half_tex_float_out_f", 1),
                        ("fp_half_tex_half_out_f", 1),
@@ -225,7 +225,7 @@ for stem, mul_prec in (("fp_half_tex_float_out_f", 1),
     hot = [r for r in fetches if r[3] != 0]
     if hot:
         raise SystemExit(
-            "FAIL: %s emits the fetch at prec=%d, expected 0.  The reference "
+            "FAIL: %s emits the fetch at prec=%d, expected 0.  The established compiler "
             "emits TEXR whatever the fetch's result type and whatever the "
             "output's bank; reading the fetch's precision off its half4 "
             "result type is the regression this row exists to catch."
@@ -247,7 +247,7 @@ print("half-arithmetic: chain %d arithmetic instructions at prec=1, half "
       "prec=0, float producer under a half constructor stays float in %d "
       "instructions, both half insert chains single-bank at prec=1, all "
       "three texture fetches at prec=0 with their consumers at the "
-      "reference's precision"
+      "established compiler's precision"
       % (len(chain), len(computing)))
 PY
 

@@ -2,7 +2,7 @@
  *
  * Independent header.  Declares the 21 cellSearch* entry points for
  * save-data / video / music / photo content search across the
- * dev_hdd0 filesystem.  20 entries in 3.70 firmware; 21 in 475+
+ * dev_hdd0 filesystem.  20 entries in 3.70 firmware; 21 in 4.75+
  * (cellSearchGetContentInfoSharable is the +1).
  */
 #ifndef __PS3DK_CELL_SYSUTIL_SEARCH_H__

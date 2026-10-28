@@ -2,10 +2,10 @@
 //!
 //! Usage pattern:
 //! 1. Load the YAML NID database for a library.
-//! 2. Read the corresponding reference SDK stub `.a` symbol table (via `ar t` or
+//! 2. Read the corresponding platform ABI stub `.a` symbol table (via `ar t` or
 //!    by parsing the archive directly — we shell out to `ar` for portability).
 //! 3. For each YAML entry, recompute the FNID from the name and confirm it
-//!    matches the stored `nid` (the reference SDK uses the computed value as the raw NID).
+//!    matches the stored `nid` (the platform ABI uses the computed value as the raw NID).
 //!
 //! Note: reference stub archives contain the symbol names directly; the archive
 //! member objects embed the NID as a long constant in their `.lib.stub.*`

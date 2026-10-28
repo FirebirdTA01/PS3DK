@@ -11,9 +11,9 @@
 // A entirely, so it passed on the very shape it was written to catch.
 //
 // Measured on the rig at 5bee678: the general path renders it identically
-// to the reference at painted 2832/2832 (the intersection keeps the outer
-// literal); the DEFAULT path killed 832 pixels where the reference kills
-// 1264 - not the reference's set and not even "outer guard dropped", it
+// to the established compiler at painted 2832/2832 (the intersection keeps the outer
+// literal); the DEFAULT path killed 832 pixels where the established compiler kills
+// 1264 - not the established compiler's set and not even "outer guard dropped", it
 // kills on the wrong comparison altogether.
 //
 // The else arm reads COLOR0 on purpose.  Fable's first spelling used a

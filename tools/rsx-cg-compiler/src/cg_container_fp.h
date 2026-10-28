@@ -9,7 +9,7 @@
  * and a CgBinaryFragmentProgram subtype, each laid out per
  * cgBinary.h's documented offsets.
  *
- * Reference-compiler cross-checked against identity_f.cg and tex_f.cg
+ * Established-compiler cross-checked against identity_f.cg and tex_f.cg
  * .fpo dumps.
  */
 

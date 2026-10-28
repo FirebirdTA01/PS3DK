@@ -1,18 +1,18 @@
 """clamp(x, 0, 1) of a COMPUTED value saturates; of a plain input it is min/max.
 
-The pixel judge found crt-ddt painting full white where the reference paints
+The pixel judge found crt-ddt painting full white where the established compiler paints
 black: its GAMMA_OUT pow() gives a NaN lane, and clamp(NaN, 0, 1) as MIN with
-1 then MAX with 0 is 1 on the GPU, while the reference folds the clamp into
+1 then MAX with 0 is 1 on the GPU, while the established compiler folds the clamp into
 the producing instruction as a saturate (EX2R_sat; DIVR_SAT below), which is
-0.  For a plain input the reference keeps MIN then MAX (MINR, MAXR for
+0.  For a plain input the established compiler keeps MIN then MAX (MINR, MAXR for
 clamp(t.z, 0, 1)), and so do we.  Every expected value is measured on the
-reference compiler's output for this source:
+established compiler's output for this source:
   t = (0, 0, .5, .5)       -> (0, .5, .5, 1)   0/0 = NaN saturates to 0
   t = (1, 0, 1.5, .1)      -> (1, 1, .25, 1)   +Inf -> 1; input 1.5 -> 1
   t = (-1, 0, -.5, .9)     -> (0, 0, .75, 1)   -Inf -> 0; input -.5 -> 0
   t = (.25, .5, .75, .5)   -> (.5, .75, .5, 1) finite, unclamped
 The third lane is a clamp with bounds .25/.75 (never a saturate).
-The reference's rule: saturate folds into the producer when the clamped
+The established compiler's rule: saturate folds into the producer when the clamped
 value has no other use; a shared value (t.z beside other reads of t) keeps
 MIN then MAX.  fp_eval does not model the GPU's NaN behaviour of MIN/MAX, so
 a NaN plain input is not judged by value here.

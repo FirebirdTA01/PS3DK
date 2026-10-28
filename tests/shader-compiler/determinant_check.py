@@ -1,6 +1,6 @@
 """Float determinant values: independent permutation sum and scalar expansion.
 
-The reference accepts rectangular matrices by narrowing to their leading
+The established compiler accepts rectangular matrices by narrowing to their leading
 min(rows, cols) square, and scalar/vector inputs by taking the first scalar.
 Half/fixed and integer matrix arithmetic remain explicitly recorded debt.
 """

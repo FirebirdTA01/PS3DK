@@ -1,9 +1,9 @@
 // prototype-default-merging PROTOTYPE CELL.  The semantic that is JUDGED is the one on the
 // FIRST DECLARATION in source order; the body that is WALKED is the
-// DEFINITION's.  Measured on sce-cgc 475 - the four cells disagree, so neither
-// "judge the definition" nor "judge either" reproduces the reference.
+// DEFINITION's.  Measured on the established compiler - the four cells disagree, so neither
+// "judge the definition" nor "judge either" reproduces the established compiler.
 //
-// prototype BARE, definition :COLOR - the cell that forbids judging the\n// DEFINITION: the reference ACCEPTS this.
+// prototype BARE, definition :COLOR - the cell that forbids judging the\n// DEFINITION: the established compiler ACCEPTS this.
 // Compile with -e beta.  Reference verdict: ACCEPT
 float4 gamma(float4 t);
 float4 gamma(float4 t) : COLOR { return t*2.0; }

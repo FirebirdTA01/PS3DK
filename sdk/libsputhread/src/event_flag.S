@@ -18,7 +18,7 @@
  *     rdch $5, $ch29                  (kernel writes result here)
  *     return $5
  *
- * Note: the reference shape branches to the early-return path (which
+ * Note: the system shape branches to the early-return path (which
  * just sets $3 = $5 and returns) from BOTH "pending in queue" and
  * "after-rdch" paths.  The first uses $5 = 0x80010002, the second
  * uses $5 = whatever the kernel wrote.  Same exit code in both cases.

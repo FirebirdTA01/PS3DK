@@ -1,8 +1,8 @@
-rs6000: predefine the reference PS3 platform macros on cell64lv2
+rs6000: predefine the system PS3 platform macros on cell64lv2
 
-The reference PS3 compiler predefines __CELLOS_LV2__ and __STRICT_ALIGNED,
+The system PS3 compiler predefines __CELLOS_LV2__ and __STRICT_ALIGNED,
 and in the default ILP32 model __LP32__, _LP32 and __POINTER_32BIT__.
-Reference headers and samples select their PS3 code paths on them; without
+System headers and samples select their PS3 code paths on them; without
 __CELLOS_LV2__ a sample framework took its host branch and never saw the
 vector math it includes for the PS3.
 
@@ -14,7 +14,7 @@ vector math it includes for the PS3.
  
 +/* The reference PS3 compiler predefines __CELLOS_LV2__ and
 +   __STRICT_ALIGNED, and in the default ILP32 model __LP32__, _LP32 and
-+   __POINTER_32BIT__; reference headers and samples select their PS3
++   __POINTER_32BIT__; system headers and samples select their PS3
 +   code paths on them.  */
  #define CPP_OS_LV2_SPEC \
 -  "-D__lv2ppu__ -ffunction-sections -fdata-sections"

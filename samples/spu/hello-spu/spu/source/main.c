@@ -13,7 +13,7 @@
 
 // SPU entry point.  Parameters map directly to the four 64-bit EA
 // slots in sysSpuThreadArgument: arg1 = .arg0, arg2 = .arg1, etc.
-// (reference SDK / PSL1GHT convention — first slot lands in r3.)
+// (platform ABI / PSL1GHT convention — first slot lands in r3.)
 int main(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
 {
     (void)arg2; (void)arg3; (void)arg4;

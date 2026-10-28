@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vp_words.py - the VERTEX program's instruction words, one line each.
 
-Container in (CgBinary, our --emit-container output or the reference's),
+Container in (CgBinary, our --emit-container output or the established compiler's),
 decoded VP instructions out, restricted to the fields this module has been
 measured on.  Written for the run-time array-index slice (dynamic-uniform-array-index) after
 the room ruled the older VP slot transcription UNTRUSTED (instruction-source-decoding): every

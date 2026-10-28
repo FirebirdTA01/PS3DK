@@ -106,7 +106,7 @@ def main():
             for expanded in (False, True):
                 name = case[0] + ('_expanded' if expanded else '_builtin')
                 blobs = []
-                # The pinned oracle has only the float3 reflect overload.
+                # The pinned measurement has only the float3 reflect overload.
                 # Hand-expanded float2/float4 arithmetic is still valid.
                 refused = case[0] in ('vec2', 'vec4') and not expanded
                 if args.compiler:

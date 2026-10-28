@@ -21,7 +21,7 @@
  * Why this file exists (part 2: format-string read).  Once the event
  * is delivered to our queue, we still have to walk the SPU thread's
  * Local Storage at the address the event carried to extract the
- * format string + args.  The reference SDK ships a helper for this:
+ * format string + args.  The platform ABI ships a helper for this:
  * `spu_thread_printf(thread_id, arg_addr)` (in libc.sprx, NID
  * 0xb1f4779d).  RPCS3's HLE for that NID is **unimplemented at the
  * time of writing** — calling it logs `PPU: Unregistered function

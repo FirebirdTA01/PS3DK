@@ -142,7 +142,7 @@ private:
     // BLOCK EXIT (dead-branch-local-predication): the names each open block DECLARED, one set per
     // block, pushed by buildBlockStmt and filled by buildDeclStmt as it reaches
     // each declarator - never pre-scanned, so a use before the declaration still
-    // names the outer binding (oracle: `float4 r = G; float4 G = ...` reads the
+    // names the outer binding (measurement: `float4 r = G; float4 G = ...` reads the
     // global).  At block exit exactly these names are undone; every other key
     // the block touched (assignments to outer names, struct-field bases, loop
     // counters, join-time loads) is the block's effect on its enclosing scope
@@ -256,7 +256,7 @@ private:
     void buildFunction(FunctionDecl* decl);
 
     // True for a FRAGMENT entry's `out` parameter declared with no
-    // semantic, which binds to COLOR the way the reference compiler binds
+    // semantic, which binds to COLOR the way the established compiler binds
     // it (implicit-colour-output).  Consulted wherever a parameter's semantic decides
     // whether a store is emitted.
     bool isDefaultedFragmentOutput(const ParamDecl* param) const;
@@ -321,7 +321,7 @@ private:
     // anything else.
     std::optional<bool> constCondition(const ExprNode* e);
     // True when a constant-evaluable part of a run-time condition is one
-    // constCondition declines to fold (precision the reference does not use).
+    // constCondition declines to fold (precision the established compiler does not use).
     bool conditionFoldHazard(const ExprNode* e);
     bool runInlineStatements(FunctionDecl* callee, const std::vector<StmtNode*>& statements,
                              IRValueID& result, bool& sawReturn);

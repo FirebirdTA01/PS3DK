@@ -2,7 +2,7 @@
 # SPU code can include the C++ vector math headers.  They include
 # <simdmath.h> and use uintptr_t in their load/store helpers; the SDK must
 # install its <simdmath.h> forwarder for SPU too, and the forwarder brings in
-# <stdint.h> (the reference SPU vector math includes it itself).  The PPU
+# <stdint.h> (the system SPU vector math includes it itself).  The PPU
 # side must keep working through the same forwarder.
 #
 # usage: spu-vectormath-include-test.sh [--ps3dev DIR]

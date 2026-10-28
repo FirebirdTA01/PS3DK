@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A uniform ARRAY of structs read by a constant index (PSGL's vpFixedPipeline:
 # `uniform TexUnit texunit[4]; ... mul(texunit[0].matrix, otc0)`).  Measured
-# on the reference: every element member is a uniform record of its own,
+# on the established compiler: every element member is a uniform record of its own,
 # "s[2].m", listed element-major in field order, with no record for "s" or
 # "s[k]", and each is allocated like an ordinary uniform (an unread member
 # takes no register). Judged by records, registers and value; the fragment
@@ -41,7 +41,7 @@ def records(b):
 SRC = ('struct S { float4 a; float4x4 m; float b; };' + NL + 'uniform S s[3];' + NL +
        'float4 main(float4 p : POSITION) : POSITION { return mul(s[2].m, p) + s[1].a * s[0].b; }')
 UNREF = 0xFFFFFFFF
-# (name, register, isReferenced) as the reference lists them, in its order.
+# (name, register, isReferenced) as the established compiler lists them, in its order.
 WANT = ([('s[0].a', UNREF, 0), ('s[0].m', UNREF, 0)] + [('s[0].m[%d]' % r, UNREF, 0) for r in range(4)] +
         [('s[0].b', 467, 1), ('s[1].a', 466, 1), ('s[1].m', UNREF, 0)] +
         [('s[1].m[%d]' % r, UNREF, 0) for r in range(4)] + [('s[1].b', UNREF, 0), ('s[2].a', UNREF, 0)] +

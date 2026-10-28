@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Matrix element selectors and matrix-to-vector conversion, as Cg defines
-# them (measured on the reference):
+# them (measured on the established compiler):
 #   m._m00_m01_m10_m11 (zero-based) and m._11_12_21_22 (one-based), one to
 #   four elements, repeats allowed; an element outside the matrix is C1031;
 #   mixing the forms is C1048;
@@ -9,7 +9,7 @@
 #   float2x3, float4 of a float3x3) is refused.
 # A select between two matrices (if/else assigning a matrix on both arms)
 # is per-row selects.
-# A write through a matrix selector is accepted by the reference but not
+# A write through a matrix selector is accepted by the established compiler but not
 # lowered here yet, so it stays a named refusal.
 #
 # Usage: tests/shader-compiler/matrix-swizzle-test.sh <compiler>
@@ -36,7 +36,7 @@ VALUE = [
     ('flatten_2x2',  H + 'float2x2 m = float2x2(t.x, t.y, t.z, t.w); return float4(m) * float4(1, 2, 3, 4); }',
                      lambda t: [t[0], f32(t[1] * 2), f32(t[2] * 3), f32(t[3] * 4)]),
     # An if/else that assigns a matrix on both arms selects the whole matrix
-    # (lowered as per-row selects; measured identical to the reference).
+    # (lowered as per-row selects; measured identical to the established compiler).
     ('select_2x2', H + 'float2x2 m; if (t.x > 0.5) m = float2x2(t.x, t.y, t.z, t.w); '
                    'else m = float2x2(t.w, -t.z, 2, t.y); float2 v = mul(m, float2(1, 0.5)); return float4(v, m[1]); }',
      lambda t: (lambda m: [f32(m[0] + f32(0.5 * m[1])), f32(m[2] + f32(0.5 * m[3])), m[2], m[3]])(

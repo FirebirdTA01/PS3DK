@@ -11,7 +11,7 @@ the stub's 32-bit copy, and its next TOC-relative access faults
 (samples/spurs/sync2-objects: main calls printf, then each row through a
 pointer).
 
-The reference compiler saves the TOC with std immediately before every
+The established compiler saves the TOC with std immediately before every
 bctrl, so no call can intervene.  Do the same: under POWERPC_CELL64LV2,
 -msave-toc-indirect is off unless given explicitly.
 

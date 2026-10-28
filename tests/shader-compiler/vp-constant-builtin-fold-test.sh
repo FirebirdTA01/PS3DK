@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # A vertex program's rsqrt / exp2 / log2 / frac of a literal is folded to
-# a constant, bit for bit what the reference folds (each expected word
-# below was measured with sce-cgc 475: the double-precision result rounded
+# a constant, bit for bit what the established compiler folds (each expected word
+# below was measured with the established compiler: the double-precision result rounded
 # once to binary32, subnormal results kept); so are dot (binary32 sum of
 # the rounded products, left to right), length (the RSQ-then-RCP rule of
 # sqrt), normalize (each lane times the rounded rsqrt) and lerp
 # (a + t * (b - a), each step rounded).  rsqrt and log2 of x <= 0 and
-# an exp2 that overflows are left to run time, as the reference leaves
+# an exp2 that overflows are left to run time, as the established compiler leaves
 # them.  exp / log / log10 fold as their lowerings compute (exp through
 # log2(e) = 0x3fb8aa3a, one ulp below float32's; log and log10 as the
 # log2 fold times 0x3f317218 / 0x3e9a209b); exp(89.0), log(0.0) and
@@ -108,7 +108,7 @@ for e in RUNTIME:
         fails.append('%s: folded or refused (%s instructions); the reference leaves it to run time' % (e, count))
     print('  %-12s %s' % (e, 'run time' if blob is not None and count >= 2 else 'FAIL'))
 # A literal vector divisor: p / float4(k) is one MUL by the per-lane
-# reciprocals (measured with p = 1 on the reference).
+# reciprocals (measured with p = 1 on the established compiler).
 for lits, want in [('2.0, 3.0, 4.0, 5.0', [0x3f000000, 0x3eaaaaab, 0x3e800000, 0x3e4ccccd]),
                    ('-0.7, 11.0, 0.1, 1e-3', [0xbfb6db6e, 0x3dba2e8c, 0x41200000, 0x4479ffff])]:
     s_, o_ = work / 'div.cg', work / 'div.vpo'

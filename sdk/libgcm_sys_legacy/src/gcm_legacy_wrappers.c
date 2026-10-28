@@ -3,7 +3,7 @@
  *
  * Provides the PSL1GHT-flavoured `gcm*` names that <cell/gcm.h>'s
  * static-inline forwarders still emit, implemented as thin shims over the
- * the reference SDK `cellGcm*` NID stubs in our nidgen-generated libgcm_sys_stub archive.
+ * the platform ABI `cellGcm*` NID stubs in our nidgen-generated libgcm_sys_stub archive.
  * The combined object — nidgen stubs + these wrappers — is installed as
  * $PS3DK/ppu/lib/libgcm_sys.a, which shadows PSL1GHT's libgcm_sys.a at
  * link time so samples pull zero bytes from the PSL1GHT install tree for
@@ -73,7 +73,7 @@ extern int64_t  cellGcmGetLastFlipTime(void);
 extern int64_t  cellGcmGetLastSecondVTime(void);
 extern uint32_t cellGcmGetMaxIoMapSize(void);
 extern lv2_ea32_t cellGcmGetNotifyDataAddress(const uint32_t index);
-/* Fills two 32-bit EAs - 8 bytes - because the reference SDK's
+/* Fills two 32-bit EAs - 8 bytes - because the platform ABI's
  * CellGcmOffsetTable is a pair of 32-bit pointers.  Typed void * here so
  * the LP64 widening happens in the wrapper, not at this boundary. */
 extern void     cellGcmGetOffsetTable(void *table);
@@ -274,7 +274,7 @@ gcmNotifyData *gcmGetNotifyDataAddress(const u32 index)
     return (gcmNotifyData *)lv2_ea32_expand(cellGcmGetNotifyDataAddress(index));
 }
 
-/* The kernel writes two 32-bit EAs - 8 bytes - because the reference SDK's
+/* The kernel writes two 32-bit EAs - 8 bytes - because the platform ABI's
  * CellGcmOffsetTable is a pair of 32-bit pointers.  Under -mlp64 our
  * gcmOffsetTable is 16 bytes with 8-byte members, so the raw pair is
  * received into a fixed-width local and widened field by field.  Under

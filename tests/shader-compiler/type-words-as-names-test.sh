@@ -6,7 +6,7 @@
 # keeps `half` a keyword, and the parser read every later `half` as the
 # start of a constructor.
 #
-# Measured on the reference 2026-09-25 (.local/probe-frontend hk_*): `half`,
+# Measured on the established compiler 2026-09-25 (.local/probe-frontend hk_*): `half`,
 # `fixed`, `sampler2D`, `double` and the vector names can be declared as
 # variables, parameters or file-scope globals, in both profiles, and the
 # result is byte-identical to the same shader with an ordinary name; from
@@ -18,7 +18,7 @@
 #
 # A typedef alias or a struct name is a type word too: a local declared
 # under it shadows it the same way (`typedef A B; ... float B = 2.0;` reads
-# the local on the reference, and `B - x` under `typedef float4 B` is a
+# the local on the established compiler, and `B - x` under `typedef float4 B` is a
 # subtraction, not a cast).
 #
 # The parser records a declared type word as shadowed and reads it as an
@@ -64,7 +64,7 @@ compile() {
 accepts() {
     if ! compile "$1"; then
         head -n 4 "$work/$1.log" >&2
-        fail "$2 did not compile; the reference accepts it"
+        fail "$2 did not compile; the established compiler accepts it"
     fi
     [[ -s "$work/$1.bin" ]] || fail "$2 exited 0 but wrote no container"
 }
@@ -73,11 +73,11 @@ twin() {   # <shadow stem> <control stem> <what>
     accepts "$1" "$3"
     accepts "$2" "the control of $3"
     cmp -s "$work/$1.bin" "$work/$2.bin" \
-        || fail "$3: the shadowing spelling and its control produced different containers; the reference emits the same bytes"
+        || fail "$3: the shadowing spelling and its control produced different containers; the established compiler emits the same bytes"
 }
 
 # A parameter's or a global's NAME is recorded in the container, so those
-# rows compare the ucode region only (the reference containers differ the
+# rows compare the ucode region only (the established compiler containers differ the
 # same way: b30dffeb vs 527b4be4 for the parameter pair).
 ucode_twin() {   # <shadow stem> <control stem> <what>
     accepts "$1" "$3"
@@ -95,7 +95,7 @@ PY
 refuses() {   # <stem> <what> <text>
     local rc=0
     compile "$1" || rc=$?
-    [[ "$rc" -eq 1 ]] || fail "$2 compiled; the reference refuses it"
+    [[ "$rc" -eq 1 ]] || fail "$2 compiled; the established compiler refuses it"
     [[ -s "$work/$1.bin" ]] && fail "$2 refused but still wrote a container"
     grep -qiE -- "$3" "$work/$1.log" || {
         head -n 4 "$work/$1.log" >&2

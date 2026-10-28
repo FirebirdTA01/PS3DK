@@ -1,7 +1,7 @@
-// function-visibility commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against the established compiler.
 // THE OTHER DOOR TO AN INFINITE EXPANSION, and it is shut by ARITY rather
 // than by the name rule.  Two defaults that name each other with NO argument
-// would materialise forever; the reference refuses first, C1103 "too few
+// would materialise forever; the established compiler refuses first, C1103 "too few
 // parameters in function call", because at each declaration the OTHER
 // function’s own default is not yet visible so the call is short an argument.
 // A three-way cycle refuses the same way.  Pinned so the protection is not

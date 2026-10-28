@@ -93,10 +93,10 @@ void usage()
         "                         to stdout and stop (like C -E); tests use\n"
         "                         this to observe __DATE__/__TIME__/__LINE__/\n"
         "                         __FILE__ expansions without the full pipeline\n"
-        "  --extension=<name>     Enable a named extension to the reference\n"
+        "  --extension=<name>     Enable a named extension to the established\n"
         "                         compiler's language (repeatable; none by\n"
         "                         default, so an unflagged compile accepts and\n"
-        "                         emits what the reference does)\n"
+        "                         emits what the established compiler does)\n"
         "  --list-extensions      List the supported extension names and exit\n"
         "  --psgl-ffp-library <state.txt> -o <shaders.bin>\n"
         "                         Build a PSGL fixed-function shader library\n"
@@ -343,7 +343,7 @@ int compileProgram(CompilerContext& ctx, const std::string& source,
         }
 
         // C6014 (t_52640169): a vertex program must write POSITION/HPOS on some
-        // path.  Measured on the reference: refused when the program writes only
+        // path.  Measured on the established compiler: refused when the program writes only
         // other outputs, or declares `out float4 o : POSITION` and never assigns
         // it; accepted for a write on one path, a partial write, or an HPOS
         // struct member.  We accepted all three refused shapes.

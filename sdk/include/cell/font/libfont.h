@@ -454,7 +454,7 @@ int cellFontGraphicsGetScalePixel(
 int cellFontEndGraphics(const CellFontGraphics *);
 int cellFontEnd(void);
 
-/* Stub-revision helpers (declared in oracle wrapper, materialized
+/* Stub-revision helpers (declared in measurement wrapper, materialized
  * for link-and-resolve sample visibility) */
 extern void cellFontGetStubRevisionFlags(
 	uint64_t *revisionFlags);

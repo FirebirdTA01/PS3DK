@@ -11,7 +11,7 @@
  * 0x90b ...) selected by the chained selb chain, or 0 on success.
  *
  * Independently written and tuned so the compiled output matches the
- * reference library function as closely as possible.
+ * system library function as closely as possible.
  * No external relocations.  Size: 152 bytes.
  */
 	.text

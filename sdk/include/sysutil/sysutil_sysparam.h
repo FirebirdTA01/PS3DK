@@ -1,7 +1,7 @@
 /*
  * PS3 Custom Toolchain — <sysutil/sysutil_sysparam.h> naming shim.
  *
- * reference-SDK samples include this under the `sysutil/` prefix; our
+ * existing PS3 samples include this under the `sysutil/` prefix; our
  * PSL1GHT install tree keeps it under `cell/`.  Forward so either
  * spelling resolves to the same declarations.
  */

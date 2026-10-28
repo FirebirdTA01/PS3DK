@@ -2,7 +2,7 @@
  *
  * The five PSL1GHT libfont names that are not firmware exports.
  *
- * Every other PSL1GHT font* name is a nidgen alias of the reference export
+ * Every other PSL1GHT font* name is a nidgen alias of the system export
  * it called (libfont_stub.yaml). These were C in PSL1GHT:
  *
  *   fontGetStubRevisionFlags reports the stub revision PSL1GHT programs

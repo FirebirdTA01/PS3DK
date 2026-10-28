@@ -7,7 +7,7 @@
 // (inline.x = k1, inline.y = k2, inline.z = k3) and SRC0 swizzle is
 // .xxyz so the dst Y/Z/W lanes read inline.X/Y/Z in order.
 //
-// Lowering (matches the reference compiler byte-for-byte at --O2 --fastmath):
+// Lowering (matches the established compiler byte-for-byte at --O2 --fastmath):
 //
 //   MOVH H0.x, f[COL0]                                   # preload vcol.x as fp16
 //   MOVR R0.yzw, c[0].xxyz + inline(0.2, 0.4, 1.0, 0)    # 3-unique const lanes

@@ -2,11 +2,11 @@
 
 `static const float k[3] = {...}; k[1]` was a uniform load of the const
 global, and the lowering - no uniform record behind a const - refused it.
-The reference emits the element inline.  Rows (review: codex): scalar,
+The established compiler emits the element inline.  Rows (review: codex): scalar,
 vector, int, half and matrix element types, and shadowing (a local array
 and a helper parameter named like the global), judged by value with fp_eval
-against the reference-measured formula.  A NON-static `const` array is a
-uniform with a default on the reference (it lists k[0..2] as parameters,
+against the established compiler-measured formula.  A NON-static `const` array is a
+uniform with a default on the established compiler (it lists k[0..2] as parameters,
 each carrying its initialiser, read from the patchable inline constants), so
 it does NOT fold: it compiles as that uniform array (t_528b9869, arrays).
 """
@@ -47,7 +47,7 @@ float4 main(float4 t : TEXCOORD0) : COLOR { return float4(k[1] * t.x, k[2], 0, 1
 
 # The vertex path shares buildIndexExpr (review: codex): an ordinary scalar
 # and vector read must compile byte-identically to the same program with the
-# literals written in - the reference's two listings are identical.
+# literals written in - the established compiler's two listings are identical.
 VP_FOLD = """static const float  kf[3] = {0.25, 0.5, 0.125};
 static const float4 kv[2] = {float4(1, 2, 3, 4), float4(0.5, 0.25, 0.125, 1)};
 void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { o = p * kf[1] + kv[1]; c = kv[0] * kf[2]; }
@@ -71,7 +71,7 @@ float4 main(float4 t : TEXCOORD0) : COLOR
     return float4(a, b, c, cx[0]);
 }
 """
-# int and half element arrays into a float[3] parameter: the reference
+# int and half element arrays into a float[3] parameter: the established compiler
 # requires the exact element type (C1102), so ours must refuse - never pass
 # unconverted lanes.
 TYPE_MISMATCH = {
@@ -85,7 +85,7 @@ float4 main(float4 t : TEXCOORD0) : COLOR { return float4(g(ch), t.x, 0, 1); }
 """,
 }
 
-ROWS = [  # measured on the reference: (0.5 t.x + 4, 3.75, 6, 3) and (t.y, 0.125, t.y, 1)
+ROWS = [  # measured on the established compiler: (0.5 t.x + 4, 3.75, 6, 3) and (t.y, 0.125, t.y, 1)
     ('passed_whole', PASSED_WHOLE, lambda t: [2.0, 13.0, 13.0, 1.0]),
     ('element_types', ELEMENT_TYPES, lambda t: [0.5 * t[0] + 4.0, 3.75, 6.0, 3.0]),
     ('shadowed', SHADOWED, lambda t: [t[1], 0.125, t[1], 1.0]),
@@ -133,7 +133,7 @@ def main():
             ok = run.returncode == 1 and not dst.exists()
             print('  %-22s %s' % (name, 'refused (reference C1102)' if ok else 'NOT refused (rc %d)' % run.returncode))
             if not ok:
-                failures.append('%s must refuse like the reference (C1102), rc %d' % (name, run.returncode))
+                failures.append('%s must refuse like the established compiler (C1102), rc %d' % (name, run.returncode))
         run, dst = compile_one(compiler, tmp, 'non_static', NON_STATIC)
         if run.returncode != 0 or not dst.exists():
             failures.append('non_static const array must compile as a uniform array, rc %d' % run.returncode)
@@ -145,7 +145,7 @@ def main():
                 print('  %-14s %-26s %s' % ('non_static', t, 'value ok' if ok else 'WRONG %s want %s' % (got, want)))
                 if not ok:
                     failures.append('non_static: got %s for %s, want %s' % (got, t, want))
-            # Records as measured on the reference: k[0] unreferenced, k[1]
+            # Records as measured on the established compiler: k[0] unreferenced, k[1]
             # and k[2] referenced, float (1045), each with its own default.
             want_records = {'k[0]': (1045, 0, 0.25), 'k[1]': (1045, 1, 0.5), 'k[2]': (1045, 1, 0.125)}
             got_records = {}
@@ -162,7 +162,7 @@ def main():
                 failures.append('non_static records: %s, want %s' % (got_records, want_records))
         # Array element records carry their defaults in BOTH profiles, for a
         # non-static const array and an initialised uniform array alike
-        # (measured on the reference; ours wrote none, so a VP bound
+        # (measured on the established compiler; ours wrote none, so a VP bound
         # unpatched read zeros).  name -> (resIndex or None, default).
         record_rows = (
             ('vp_const_array', 'sce_vp_rsx',
@@ -178,7 +178,7 @@ def main():
              'float4 main(float4 t : TEXCOORD0) : COLOR { return float4(t.xyz * U[1], 1); }' + chr(10),
              {'U[0]': (None, (1.0, 2.0, 3.0, 0.0)), 'U[1]': (None, (4.0, 5.0, 6.0, 0.0))}),
             # A non-static const SCALAR or vector is a patchable uniform too,
-            # never folded (the reference multiplies k * 2.0 at run time).
+            # never folded (the established compiler multiplies k * 2.0 at run time).
             ('vp_const_vector', 'sce_vp_rsx',
              'const float4 k = float4(1, 2, 3, 4);' + chr(10) +
              'float4 main(float4 p : POSITION) : POSITION { return p * k * 2.0; }' + chr(10),

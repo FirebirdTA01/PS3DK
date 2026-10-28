@@ -3,7 +3,7 @@
 // forcing the loop branch (count=32 method packet, 8-insn batches).
 //
 // Several mat4x4 multiplies + per-channel arithmetic to produce 10+
-// instructions after the reference compiler / rsx-cg-compiler optimization.
+// instructions after the established compiler / rsx-cg-compiler optimization.
 
 void main(
     float3 in_position      : POSITION,

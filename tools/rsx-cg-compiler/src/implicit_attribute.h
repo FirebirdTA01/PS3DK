@@ -1,7 +1,7 @@
 #pragma once
 // Implicit vertex-attribute binding from the inputs a vertex program READS.
 //
-// Measured on sce-cgc 475: a semantic-less vertex input - a bare parameter
+// Measured on the established compiler: a semantic-less vertex input - a bare parameter
 // or a varying struct member, each instance on its own - takes the lowest
 // ATTR<N> no explicit input semantic claims (POSITION = ATTR0, NORMAL =
 // ATTR2, COLOR = ATTR3, ...), in declaration order across the parameters

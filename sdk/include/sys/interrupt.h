@@ -1,7 +1,7 @@
 /*
  * PS3 Custom Toolchain - <sys/interrupt.h>
  *
- * PPU interrupt tags and interrupt threads: the lv2 system calls 80, 81, 84, 88 and 89 as the reference
+ * PPU interrupt tags and interrupt threads: the lv2 system calls 80, 81, 84, 88 and 89 as the system
  * declares them, with PSL1GHT's sysInterrupt* spellings.  The types (sys_interrupt_tag_t,
  * sys_irqoutlet_id_t, sys_hw_thread_t, sys_interrupt_thread_handle_t) come from <ppu-types.h>.
  * sys_interrupt_thread_disestablish is a library call (liblv2_stub, also exported as PSL1GHT's

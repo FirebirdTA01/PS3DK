@@ -1,6 +1,6 @@
 # POSIX threads on the PS3 toolchain — what the librt shim does and does not do
 
-The reference an SDK user needs, plus the semantics that will bite whoever
+The system an SDK user needs, plus the semantics that will bite whoever
 ports the next library. Nothing here is a design document.
 
 Source of truth: `runtime/lv2/librt/pthread.c` and `sdk/include/pthread.h`.
@@ -117,7 +117,7 @@ small for POSIX-shaped code). Default priority is 1000, the same band as the mai
 
 **`pthread_mutex_trylock` returns POSIX `EBUSY` (16), not the Lv-2 value.**
 `<sys/synchronization.h>` redefines `EBUSY` to `0x8001000A` for source compatibility with
-Sony's samples; `pthread.c` deliberately does **not** include that header, and translates
+existing samples; `pthread.c` deliberately does **not** include that header, and translates
 Lv-2 status through `lv2error()`. If your translation unit includes
 `<sys/synchronization.h>`, your own `EBUSY` comparisons will not match what the shim
 returns.

@@ -8,7 +8,7 @@
 #   - Single-argument narrowing constructors float3(v4) and float3x3(m4)
 #     behave identically to the cast spelling.
 #   - Widening casts and single-argument widening constructors are REFUSED
-#     by the reference compiler with "error C1033: cast not allowed".
+#     by the established compiler with "error C1033: cast not allowed".
 #
 # The assertion is byte-identity against swizzle and row-constructor twins,
 # near-miss wrong-value controls asserting difference against .xyw, and

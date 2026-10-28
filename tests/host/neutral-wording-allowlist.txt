@@ -1,0 +1,14 @@
+# Exact-line exceptions for scripts/neutral-wording-scan.py.
+# Format: <path><TAB><sha256 of the line with surrounding whitespace removed>.
+# Each entry needs a recorded reason in the change that adds it.  Entries
+# that stop matching (the line changed or moved files) simply stop applying.
+#
+# PKG format magic bytes.
+tests/sdk/pkg-test.sh	fb88db22bd1db3bd2ded53624fa4353ee2914016d79e78111de0b726774b4f7d
+tools/sfo-pkg/pkg.c	2b555e8daba7b6798ca2a402c01dc693ea51259062c67f4807ed708a88a7a327
+# ELF note name the shader-container format uses.
+tools/rsx-cg-compiler/src/cgnv2elf/cgnv2elf.cpp	8eeff61f8968dc9997f6604a1aceedd2d30554ea89759ec05608ba5d636f66ce
+tools/rsx-cg-compiler/src/cgnv2elf/cgnv2elf.cpp	83fd7c7aeca126d89eb87fef4a15bbe9bcac2ccc940be3c3e6df2106d3cb2e65
+tests/shader-compiler/cgnv2elf-test.sh	a3dd8354992d28d1b3d6dadecf35408b0b1901daf5553eb047f0c9964702516b
+# PSL1GHT's disclaimer, kept verbatim.
+tools/sfo-pkg/sfo.xml	68ea95aecf7a1f252518033a1b2b70430ebaf2aa8e33bd068d1cb25ca7409dcb

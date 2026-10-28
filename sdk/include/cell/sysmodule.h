@@ -7,7 +7,7 @@
   by libsysmodule_stub.a - the loader resolves the eight exports
   against the cellSysmodule SPRX module at runtime.
 
-  FNIDs (verified against reference-sdk/.../libsysmodule_stub.a):
+  FNIDs (verified against libsysmodule_stub.a):
     cellSysmoduleLoadModule     0x32267a31
     cellSysmoduleUnloadModule   0x112a5ee9
     cellSysmoduleIsLoaded       0x5a59e258
@@ -151,7 +151,7 @@ extern "C" {
 #define CELL_SYSMODULE_ERROR_INVALID_MEMCONTAINER      0x80012004
 #define CELL_SYSMODULE_ERROR_FATAL                     0x800120ff
 
-/* The reference `sys_memory_container_t` - in PSL1GHT this is
+/* The system `sys_memory_container_t` - in PSL1GHT this is
  * `sys_mem_container_t` from <sys/memory.h>. */
 #ifndef _SYS_MEMORY_CONTAINER_T_DEFINED
 #define _SYS_MEMORY_CONTAINER_T_DEFINED

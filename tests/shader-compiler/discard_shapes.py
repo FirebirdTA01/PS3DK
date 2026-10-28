@@ -1,11 +1,11 @@
-"""Check the CF-2 discard shapes against what the reference emits.
+"""Check the CF-2 discard shapes against what the established compiler emits.
 
 Driven by discard-guard-test.sh.  Every expectation below was MEASURED by
-compiling the same fixture with the reference compiler and disassembling
+compiling the same fixture with the established compiler and disassembling
 it, before the fixture's header was written; the design note carries the
 shapes and the two anomalies.  Nothing here is derived from our own
 lowering, which is the mistake that made three earlier assertions stronger
-than the oracle.
+than the established compiler.
 
 Argument form:  discard_shapes.py <case> <dump>
 """
@@ -21,7 +21,7 @@ KIL = 0x12
 FX12, FP32 = 2, 0
 
 COMPARISONS = {SLT, SGE, SLE, SGT, SNE, SEQ}
-# `&&` is a multiply and `||` is a saturating add for the reference; ours
+# `&&` is a multiply and `||` is a saturating add for the established compiler; ours
 # spells `||` as MAX, which is equal on the 0/1 booleans a comparison
 # produces and is its own byte-identity item.
 COMBINERS = {MUL, ADD, MAX}
@@ -63,13 +63,13 @@ def one_kill(insns, case):
              "nothing sets what it tests" % case)
     if not g["none"]:
         fail("%s: the guard writes a general register (dst=%d); the "
-             "reference writes the condition register only" % (case, g["dst"]))
+             "established compiler writes the condition register only" % (case, g["dst"]))
     return insns[ks[0]], g
 
 
 def expect(case, got, want, what):
     if got != want:
-        fail("%s: %s is %s, the reference emits %s" % (case, what, got, want))
+        fail("%s: %s is %s, the established compiler emits %s" % (case, what, got, want))
 
 
 def check(case, path):
@@ -94,7 +94,7 @@ def check(case, path):
         expect(case, g["prec"], FP32, "the guard precision")
         expect(case, kil["cond"], 5, "the KIL test (5 is NE)")
     elif case == "ge_rev":
-        # The same predicate spelled `0.5 <= a`: the reference keeps the
+        # The same predicate spelled `0.5 <= a`: the established compiler keeps the
         # SOURCE operator, so this one IS demoted.  The pair is the proof
         # that the anomaly belongs to the opcode and not to the operands.
         expect(case, "0x%02X" % g["opcode"], "0x%02X" % SLE, "the guard opcode")
@@ -107,7 +107,7 @@ def check(case, path):
         expect(case, kil["cond"], 2, "the KIL test (2 is EQ)")
         if not any(d["opcode"] == SGT for d in insns):
             fail("not: the comparison was inverted - no SGT in the ucode. "
-                 "The reference keeps `>` and flips the kill's test.")
+                 "The established compiler keeps `>` and flips the kill's test.")
     elif case == "uncond":
         # Not a special encoding: a true condition is materialised and
         # the same KIL used.
@@ -154,12 +154,12 @@ def check(case, path):
         if set(seen) != want:
             fail("ops: the guard opcodes are %s; the six source operators "
                  "must each keep their own comparison, in source operand "
-                 "order (the reference does not canonicalise)"
+                 "order (the established compiler does not canonicalise)"
                  % sorted("0x%02X" % o for o in seen))
         for opcode, prec in seen.items():
             want_prec = FP32 if opcode == SGE else FX12
             if prec != want_prec:
-                fail("ops: guard 0x%02X has precision %d, the reference "
+                fail("ops: guard 0x%02X has precision %d, the established compiler "
                      "emits %d (SGE is the one comparison it does not "
                      "demote to fx12)" % (opcode, prec, want_prec))
     elif case == "else_arm":

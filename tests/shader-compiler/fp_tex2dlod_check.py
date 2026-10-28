@@ -1,6 +1,6 @@
 """A fragment tex2Dlod is one TXL (community bucket: 21 programs refused).
 
-Measured on sce-cgc 475: tex2Dlod(s, uv) is `TXLR R0, f[TEX0], f[TEX0].w`
+Measured on the established compiler: tex2Dlod(s, uv) is `TXLR R0, f[TEX0], f[TEX0].w`
 - TXL (0x2F) reads the coordinate from source 0 and the LOD from lane x of
 source 1, which is the coordinate again swizzled to its w.  The fetch is
 fp32 and names the sampler's texture unit; a sampler the program never
@@ -8,9 +8,9 @@ reads takes no unit (s1 alone is unit 0).
 
 Checked on every row: one TXL per tex2Dlod, fp32, the expected unit, and
 source 1 = source 0's operand with every lane set to source 0's w.  That
-last invariant is OUR construction, and it is the reference's shape only
+last invariant is OUR construction, and it is the established compiler's shape only
 for a direct coordinate (the `direct` row passes this judge on the
-reference's own container).  For a built coordinate the reference sources
+established compiler's own container).  For a built coordinate the established compiler sources
 the LOD from a constant or a spare lane instead (TXLR R0, R0, R0.z) - the
 same value, read from elsewhere.  The fetch itself is not evaluated here:
 the evaluators have no texture model.  The vertex tex2Dlod (a vertex fetch)

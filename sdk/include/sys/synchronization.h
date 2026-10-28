@@ -1,5 +1,5 @@
 /*! \file sys/synchronization.h
- \brief Sony-SDK-source-compat synchronisation primitives.
+ \brief Cell OS source-compat synchronisation primitives.
 
  * Covers event flags, mutexes, condition variables, lightweight mutexes
  * (sys_lwmutex), and lightweight condition variables (sys_lwcond) under
@@ -78,7 +78,7 @@ typedef u32 _sys_lwcond_queue_t;
 
 typedef u32 sys_event_flag_t;
 
-/* Layout matches the reference SDK sys/synchronization.h
+/* Layout matches the platform ABI sys/synchronization.h
  * exactly: 32 bytes (4 + 4 + 8 + 4 + 4 + 8).  RPCS3's
  * sys_event_flag_create rejects shorter structs with EINVAL — we
  * verified empirically that the missing pshared/key/flags fields
@@ -92,7 +92,7 @@ typedef struct sys_event_flag_attribute {
 	char                  name[SYS_SYNC_NAME_SIZE];
 } sys_event_flag_attribute_t;
 
-/* Defaults match Sony's reference SDK macro: priority scheduling,
+/* Defaults match the system macro: priority scheduling,
  * not process-shared, multiple-waiter event flag, no debug name. */
 #define sys_event_flag_attribute_initialize(_attr)              \
 	do {                                                        \
@@ -166,8 +166,8 @@ LV2_SYSCALL sys_event_flag_get(sys_event_flag_t id, u64 *flags)
 }
 
 /* ------------------------------------------------------------------ *
- * Mutex - Sony-name surface over PSL1GHT sys_mutex_t + syscalls 100-104.
- * sys_mutex_attribute_t is the Sony spelling; binary-compatible with
+ * Mutex - Cell-name surface over PSL1GHT sys_mutex_t + syscalls 100-104.
+ * sys_mutex_attribute_t is the Cell OS spelling; binary-compatible with
  * PSL1GHT's sys_mutex_attr_t (same field order + sizes).
  * ------------------------------------------------------------------ */
 
@@ -225,7 +225,7 @@ LV2_SYSCALL sys_mutex_unlock(sys_mutex_t mutex)
 }
 
 /* ------------------------------------------------------------------ *
- * Condition variable - Sony-name surface over PSL1GHT sys_cond_t +
+ * Condition variable - Cell-name surface over PSL1GHT sys_cond_t +
  * syscalls 105-109.  Layout binary-compatible with PSL1GHT's
  * sys_cond_attr_t.
  * ------------------------------------------------------------------ */

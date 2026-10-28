@@ -50,9 +50,9 @@ note() { echo "gcm-legacy-symbol-coverage: $*"; }
 # Each entry needs a reason; an unexplained entry is a silenced bug.
 #
 #   gcmSetUserCommand - PSL1GHT binds this to firmware export 0x8bde5ebf,
-#     which is FNID("cellGcmSetUserCommand"), but the reference SDK's own
+#     which is FNID("cellGcmSetUserCommand"), but the platform ABI's own
 #     libgcm_sys_stub.a does not export that symbol at all, and both the
-#     reference headers and RPCS3's cellGcmSys implement
+#     system headers and RPCS3's cellGcmSys implement
 #     cellGcmSetUserCommand as a command-buffer emitter taking
 #     (context, cause) - a different contract from the callback pointer
 #     this header declares.  Implementing it means resolving that contract

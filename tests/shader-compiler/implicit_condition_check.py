@@ -6,7 +6,7 @@ versus MOVXC); their listing selects the same nonzero condition. Our paired
 spellings are strict twins, separately from reference container identity.
 VP float->half/int casts remain named inherited gaps. Loop support is not
 expanded by this slice. Native-vector !, && and || are accepted by the
-reference on both profiles (t_19e8402f); here their implicit and explicit
+established compiler on both profiles (t_19e8402f); here their implicit and explicit
 nonzero spellings are strict twins, and the FP rows are judged by value.
 """
 from pathlib import Path

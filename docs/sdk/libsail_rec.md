@@ -5,17 +5,17 @@
 | Headers | `<cell/sail_rec.h>`, `<cell/sail/common_rec.h>`, `<cell/sail/muxer.h>`, `<cell/sail/recorder.h>` |
 | Stub archive | `libsail_rec_stub.a` (nidgen) |
 | SPRX module | `cellSailRec` |
-| Entry points | 58 (39 in 3.70, +19 Composer in 475) |
+| Entry points | 58 (39 in 3.70, +19 Composer in 4.75) |
 | Required sysmodules | `CELL_SYSMODULE_SAIL_REC` (0xf034) |
 | Co-resident | Same include directory as libsail (`<cell/sail/*.h>`) |
 
 ## Surface
 
 libsail_rec is the recording/muxing counterpart to libsail's playback framework. It provides:
-- **Composer** — low-level on-the-fly multiplexer (475+ surface)
+- **Composer** — low-level on-the-fly multiplexer (4.75+ surface)
 - **Recorder** — full state-machine encoder lifecycle
 
-### Composer (~19 functions, 475+ only)
+### Composer (~19 functions, 4.75+ only)
 
 | Function | Signature |
 |---|---|
@@ -54,7 +54,7 @@ Shared with libsail (`0x806107xx`). Composers return `CELL_SAIL_ERROR_INVALID_AR
 
 ### 1. SDK-version delta (largest in the project)
 
-3.70 firmware ships 39 entry points. 475 adds 19 cellSailComposer* functions — a real-time audio+video composition / multiplexer surface. Downstream consumers targeting pre-475 firmware should guard the Composer entries with a runtime-version check. The validation sample exercises the Composer surface specifically because it's simpler and avoids the Recorder's deep state machine.
+3.70 firmware ships 39 entry points. 475 adds 19 cellSailComposer* functions — a real-time audio+video composition / multiplexer surface. Downstream consumers targeting pre-4.75 firmware should guard the Composer entries with a runtime-version check. The validation sample exercises the Composer surface specifically because it's simpler and avoids the Recorder's deep state machine.
 
 ### 2. Recorder vs Composer
 

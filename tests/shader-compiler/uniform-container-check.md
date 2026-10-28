@@ -31,7 +31,7 @@ referenced leaf record; `CG_CONSTANT` literal-pool records count too. Referenced
 scalar/vector records require a read, except where indirect or unknown encoding
 prevents that conclusion. Explicit aliases are legal. Matrix parent and row-zero
 records may share a register. Row reference flags have aggregate granularity:
-the reference marks `m3[0]` and `m3[1]` referenced in `vp_matrix_row_small_v.cg`
+the established compiler marks `m3[0]` and `m3[1]` referenced in `vp_matrix_row_small_v.cg`
 although only `m3[2]` is read. An unread matrix row therefore does not require an
 individual read. Actual reads still need a declared leaf.
 

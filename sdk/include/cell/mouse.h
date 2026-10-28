@@ -1,5 +1,5 @@
 /*! \file cell/mouse.h
- \brief Reference-SDK source-compat surface for cellMouse input.
+ \brief Cell OS source-compat surface for cellMouse input.
 
   Provides cellMouse* function decls + Cell-named typedefs/constants
   on top of PSL1GHT's <io/mouse.h>.  Function symbols resolve through

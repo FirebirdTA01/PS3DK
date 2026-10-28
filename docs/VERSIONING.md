@@ -144,11 +144,11 @@ Pre-1.0 while we're bootstrapping the SDK.
   know.  Before deleting any tag, check whether it is the highest one,
   and if it is, confirm the tag beneath it obeys the rule.
 - **`v1.0.0`** — when:
-  - `hello-ppu-c++17`, `hello-spurs-task`, the reference `basic.cpp`,
+  - `hello-ppu-c++17`, `hello-spurs-task`, the system `basic.cpp`,
     and `5spu_spurs_without_context` all build and run clean against
     a fresh install of the published tarball, on a clean machine,
     without manual fixups;
-  - the `cell::Gcm::` Sony-name surface is complete;
+  - the `cell::Gcm::` Cell-name surface is complete;
   - the public `cell/*` and `sys/*` header surfaces are frozen;
   - the SDK is verified on real PS3 hardware (not just RPCS3).
 
@@ -191,7 +191,7 @@ them; the `ps3dev-ppu` / `ps3dev-spu` tarballs do not yet.
 - All three host tarballs (Linux + Windows, plus macOS if reasonable).
 - A `samples/` validation build is part of the release workflow: every
   candidate release tarball is round-tripped through a clean container,
-  used to build hello-ppu-c++17 + hello-spurs-task + the reference
+  used to build hello-ppu-c++17 + hello-spurs-task + the system
   basic.cpp, and the resulting `.self`s are run under RPCS3 in CI.
 - A test on real PS3 hardware before the tag is cut (this part is
   human-in-the-loop).

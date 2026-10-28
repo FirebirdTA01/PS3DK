@@ -9,7 +9,7 @@
 // DROPPED and a value the source itself overwrote, or it refuses this
 // shader for being correct.
 //
-// Reference compiler, for this shader:
+// Established compiler, for this shader:
 //
 //     FENCBR;
 //     MOVR R0, {0x3f000000(0.5), 0x3e800000(0.25), 0x3e000000(0.125), 0x3f800000(1)};

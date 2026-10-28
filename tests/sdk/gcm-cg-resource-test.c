@@ -1,4 +1,4 @@
-/* Independent consumer of the shipped enum API; no shader/oracle fixture.
+/* Independent consumer of the shipped enum API; no shader/measurement fixture.
  * An integer return breaks C++ enum assignment. Returning resIndex instead
  * of res breaks the value checks even when the declaration is correct. */
 #include <cell/gcm/gcm_cg_func.h>

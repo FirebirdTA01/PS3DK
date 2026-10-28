@@ -1,0 +1,57 @@
+# Records whose layout in our headers still differs from the system layout,
+# with a fix pending.  tests/sdk/struct-layout-test.py measures and reports
+# them, but a change to one of these rows does not fail the test.  When a
+# group is fixed: update its rows with --regenerate and delete its line here.
+#
+# Format: <abi glob><TAB><header glob>[<TAB><type glob>]; type names are
+# unique across the SDK, so the entries below match any header.
+#
+# NP records.
+*	*	SceNpClansClanInfo
+*	*	SceNpClansMemberEntry
+*	*	SceNpClansMessageData
+*	*	SceNpClansMessageEntry
+*	*	SceNpClansSearchableProfile
+*	*	SceNpClansUpdatableClanInfo
+*	*	SceNpClansUpdatableMemberInfo
+*	*	SceNpCommerce2CategoryInfo
+*	*	SceNpCommerce2ContentRatingDescriptor
+*	*	SceNpCommerce2ContentRatingInfo
+*	*	SceNpCommerce2GameProductInfo
+*	*	SceNpCommerce2GameSkuInfo
+*	*	SceNpCommerce2SessionInfo
+*	*	SceNpSignalingNetInfo
+*	*	SceNpTrophyFlagArray
+*	*	struct SceNpClansClanInfo
+*	*	struct SceNpClansMemberEntry
+*	*	struct SceNpClansMessageData
+*	*	struct SceNpClansMessageEntry
+*	*	struct SceNpClansSearchableProfile
+*	*	struct SceNpClansUpdatableClanInfo
+*	*	struct SceNpClansUpdatableMemberInfo
+*	*	struct SceNpSignalingNetInfo
+*	*	struct SceNpTrophyFlagArray
+# SAIL records.
+*	*	CellSailAuInfo
+*	*	CellSailAviStreamHeader
+*	*	CellSailBsVideoParameter
+*	*	CellSailMp4TrackInfo
+*	*	CellSailPlayer
+*	*	CellSailVideoFormat
+*	*	CellSailComposer
+*	*	CellSailComposerEsAudioParameter
+*	*	CellSailComposerEsVideoParameter
+*	*	CellSailComposerVideoAuInfo
+*	*	CellSailRecorder
+# Codec stream and output parameters under LP64 (pointer members).
+lp64	*	CellGifDecSrc
+lp64	*	CellGifDecThreadInParam
+lp64	*	CellJpgEncOutputParam
+lp64	*	CellJpgEncStreamInfo
+lp64	*	CellPngEncOutputParam
+lp64	*	CellPngEncStreamInfo
+# libc-domain records shared with lv2 (thread attributes, time, sockets, stat).
+*	*	pthread_*attr_t
+*	*	struct timespec
+*	*	struct msghdr
+*	*	struct stat

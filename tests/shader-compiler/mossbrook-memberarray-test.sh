@@ -27,12 +27,12 @@
   #        value.
  #
  # This test rows:
- #   (b)  byte-pinned against the reference (1 insn: MOVR o[COLR].xy, f[TEX0].xy),
+ #   (b)  byte-pinned against the established compiler (1 insn: MOVR o[COLR].xy, f[TEX0].xy),
  #        which our emitter already produces.
  #   (a)  judged by VALUE: our program runs through fp_eval on five flag values
  #        either side of `flags > 0.5` (the boundary included) and must give the
- #        reference's outputs; only an instruction-count band (2..9) pins size.
- #        The reference emits 4 predicated instructions; matching that shape is
+ #        established compiler's outputs; only an instruction-count band (2..9) pins size.
+ #        The established compiler emits 4 predicated instructions; matching that shape is
  #        separate codegen work.
  #
  # And three SHAPE SAFETY rows the lead required after review, all pinned
@@ -86,12 +86,12 @@ accept() {  # <stem> <what>
 }
 
 # value_rows <stem> <what> <out-lanes> "<IN=v,v,v,v ...> => <v,...>"...
-# Runs our container through fp_eval and requires the reference's values; an
+# Runs our container through fp_eval and requires the established compiler's values; an
 # instruction the evaluator does not model is UNJUDGED, and that fails too.
 value_rows() {
     local stem="$1" what="$2" lanes="$3"; shift 3
     "$python" - "$repo_root/tests/shader-compiler" "$work/$stem.fpo" "$lanes" "$@" <<'EVAL' \
-        || fail "$what: the program does not compute the reference's values (above)"
+        || fail "$what: the program does not compute the established compiler's values (above)"
 import sys
 sys.path.insert(0, sys.argv[1])
 import fp_eval
@@ -117,8 +117,8 @@ EVAL
 }
 
 # ---------------------------------------------------------------------------
-# (b) array-bearing struct copy — byte-pinned against the reference.
-# Reference (measured with sce-cgc 475, sce_fp_rsx):
+# (b) array-bearing struct copy — byte-pinned against the established compiler.
+# Reference (measured with the established compiler, sce_fp_rsx):
 #     MOVR o[COLR].xy, f[TEX0].xy--;
 # i.e. ONE instruction: MOV, dst R0 mask xy, src TEXCOORD0 swizzle xxyy, end.
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ insns_b=$(grep -cE '^[0-9]+ ' "$work/b.u" || true)
 # MOV, dst R0 mask xy, source TEX0.
 # swizzle_text in fp_sources.py decodes each 2-bit field per source slot to
 # a letter (not a global swizzle): "xyxx" reads .x in slot 0 and .y in slot 1
-# — the .xy the reference emits.  The decoder is not swizzle-notation-
+# — the .xy the established compiler emits.  The decoder is not swizzle-notation-
 # agnostic; it reports one letter per source slot rather than one for the
 # destination, which is why you see 4 letters here even though the write
 # target is a 2-component .xy.
@@ -144,7 +144,7 @@ value_rows b_member_array_storage_copy "repro b" 0,1 \
 
 # ---------------------------------------------------------------------------
 # (a) scalar-vector broadcast into a member-array element - judged by value.
-# Reference (sce-cgc 475):
+# Reference:
 #     SGTRC HC.w, f[TEX1].-x, {0.5}.-x;
 #     MOVR   o[COLR].y, {0, 1, 0, 0}.-y--;
 #     MOVR   o[COLR].x, {1}.x---;
@@ -152,10 +152,10 @@ value_rows b_member_array_storage_copy "repro b" 0,1 \
 # i.e. 4 predicated instructions: a compare-to-0.5, an unconditional 0/1
 # store, and a predicated -1 store.
 # The output depends only on `flags` (TEX1): o = (flags > 0.5 ? -1 : 1, 1).  The
-# reference never reads TEX0 (b), so no row may require it.  What our program
+# established compiler never reads TEX0 (b), so no row may require it.  What our program
 # computes is judged by VALUE below, on both sides of the 0.5 test; the shape
 # is not pinned beyond an instruction-count band (the branch's emitter wrote 9,
-# the reference writes 4; closing that gap is separate codegen work).
+# the established compiler writes 4; closing that gap is separate codegen work).
 # ---------------------------------------------------------------------------
 accept a_scalarvec_broadcast_in_memberarray \
        "repro a: scalar broadcast into a member-array under a dynamic loop index"
@@ -168,8 +168,8 @@ echo "  size ok: repro a ucode has $insns_a insns (reference: 4)"
 
 # VALUE, not shape: run our program through fp_eval on inputs either side of the
 # `flags > 0.5` test, the boundary itself included (0.5 must keep +1: SGT, not SGE).
-# Expected values are the reference's: its own container, run through the same
-# evaluator (sce-cgc 475, 2026-10-16), gives exactly these.
+# Expected values are the established compiler's: its own container, run through the same
+# evaluator (the established compiler, 2026-10-16), gives exactly these.
 value_rows a_scalarvec_broadcast_in_memberarray "repro a" 0,1 \
     "TEX0=0.25,0.75,0,0 TEX1=0,0,0,0 => 1,1" \
     "TEX0=0.25,0.75,0,0 TEX1=-1,0,0,0 => 1,1" \
@@ -253,7 +253,7 @@ refuse_saying pick_with_param_arm_refuse \
 # storage at the END of the helper's body, so only a local of the helper's
 # TOP-LEVEL block qualifies: an inner block's local is gone by then, and its
 # exit restored any outer local of the same name.  Expected values are the
-# reference's (sce-cgc 475 containers through fp_eval), on both arms of t.x > 0.5.
+# established compiler's (the established compiler containers through fp_eval), on both arms of t.x > 0.5.
 # ---------------------------------------------------------------------------
 T_HI="TEX0=0.75,0.25,-0.5,0.125"
 T_LO="TEX0=0.25,0.75,-0.5,0.125"

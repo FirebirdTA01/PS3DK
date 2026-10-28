@@ -1,5 +1,5 @@
 // POSITIVE: a top-level r initialised from a nested helper's struct return.
-// (review: codex, 4f103738)  Reference (sce-cgc 475): zwzw on both arms
+// (review: codex, 4f103738)  Reference: zwzw on both arms
 struct Plan { float2 mirror[2]; };
 Plan inner(float4 t) {Plan r; r.mirror[0]=t.zw;r.mirror[1]=t.zw;return r;} Plan pick(float4 t) { Plan r=inner(t); return r; }
 float4 main(float4 t:TEXCOORD0):COLOR { Plan q=pick(t); return float4(q.mirror[0],q.mirror[1]); }

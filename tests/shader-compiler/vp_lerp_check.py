@@ -1,4 +1,4 @@
-"""VP lerp values, including the oracle's separately rounded delta form.
+"""VP lerp values, including the established compiler's separately rounded delta form.
 
 The authored weighted spelling is a REQUIRED-RED control at cancellation
 and large-magnitude endpoints. No private source or compiler is used in CI.
@@ -33,7 +33,7 @@ for index, var in enumerate('ABT'):
         CASES.append((op+'_'+var.lower(),4,expr,[list(range(4))]*3,signs,absolute))
 
 # All inputs are binary32-exact. These two literal results distinguish the
-# oracle's ADD/MUL/ADD from the weighted spelling and a contracted MAD:
+# measurement's ADD/MUL/ADD from the weighted spelling and a contracted MAD:
 # (2^25,1,1) -> 0; (-4096,1,1+2^-12) -> 2, not 2+2^-12.
 VECTORS = [
     ([2.,-4.,8.,-16.], [6.,12.,-8.,4.], [0.,1.,-.5,1.5]),
@@ -81,7 +81,7 @@ def judge(blob, case, reference=False):
         assert outputs.get(0)==[0.,0.,0.,1.], 'POSITION changed'
         got,want=outputs.get(1),expected(case,values)
         if case[0]=='attributes' and index==3:
-            # Measured oracle contracts this case to one MAD (d * c[t] +
+            # Measured measurement contracts this case to one MAD (d * c[t] +
             # v[a]: one input, one constant) and so does the compiler since
             # the VP MAD fusion: 2 + 2^-12, not the separately rounded 2.
             want=[2.000244140625]*4
@@ -144,7 +144,7 @@ def main():
                     failures.append(name+': '+str(error))
     for failure in failures: print('FAIL:',failure)
     for name in debts:
-        print('KNOWN-DEBT:',name, 'VP constant-selector-feasible MAD contraction; separate=2, oracle=2.000244140625; all other values including large endpoint exact')
+        print('KNOWN-DEBT:',name, 'VP constant-selector-feasible MAD contraction; separate=2, measurement=2.000244140625; all other values including large endpoint exact')
     print(f'vp lerp: tests={passed+len(failures)+len(debts)} pass={passed} fail={len(failures)} known_debt={len(debts)}; {len(VECTORS)+1} value vectors per container')
     raise SystemExit(bool(failures))
 

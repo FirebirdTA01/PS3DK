@@ -1,7 +1,7 @@
 /*
  * PS3 Custom Toolchain - cell/spurs/control.h
  *
- * PPU: alias for the reference-SDK <cell/spurs/control.h> include path;
+ * PPU: alias for the Cell OS <cell/spurs/control.h> include path;
  * the PPU declarations live in <cell/spurs/types.h>.
  * SPU: workload priority and contention control from code running under
  * SPURS (libspurs.a).

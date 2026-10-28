@@ -21,7 +21,7 @@
 #                            runtime/lv2/, sdk/librsx/, sdk/libgcm_cmd/,
 #                            sdk/Makefile (the top of the tree)
 #   <scratch prefix>         a fresh writable directory.  MUST NOT be (or be
-#                            under) the shared C:/SDKs/Sony/homebrew/PS3DK
+#                            under) the shared %PS3DK%
 #                            install -- the guard below exits 2 if so.  Also
 #                            the container for the toolchain copy: arg3
 #                            below must live UNDER this (strictly a
@@ -68,26 +68,35 @@ normalize() {  # strip trailing slash; accept either sep
     printf '%s' "$p"
 }
 
+# The shared install is the caller's PS3DK (the installed %PS3DK%, in C:\,
+# /c/ or /mnt/c/ form); PS3DK_SHARED names it instead when the caller's
+# PS3DK points elsewhere.  Both the /c/ and the /mnt/c/ spelling of a
+# drive path are enforced; case is folded by ci_eq below.
+shared_install="${PS3DK_SHARED:-${PS3DK:-}}"
+if [[ -z "$shared_install" ]]; then
+    echo "verify-installed-copy-map: PS3DK is not set -- set PS3DK (or PS3DK_SHARED) to the shared SDK install this run must not touch" >&2
+    exit 2
+fi
+shared_install="$(normalize "$shared_install")"
+case "$shared_install" in
+    [A-Za-z]:/*)     shared_drive="${shared_install:0:1}"; shared_rest="${shared_install:2}" ;;
+    /mnt/[A-Za-z]/*) shared_drive="${shared_install:5:1}"; shared_rest="${shared_install:6}" ;;
+    /[A-Za-z]/*)     shared_drive="${shared_install:1:1}"; shared_rest="${shared_install:2}" ;;
+    *)               shared_drive=""; shared_rest="$shared_install" ;;
+esac
+if [[ -n "$shared_drive" ]]; then
+    shared_roots=("/${shared_drive,,}${shared_rest}" "/mnt/${shared_drive,,}${shared_rest}")
+else
+    shared_roots=("$shared_rest")
+fi
+
 # shared_roots is test-injectable: PS3TC_SHARED_ROOTS lists ADDITIONAL roots
 # to enforce (so a host test can alias a scratch-local stand-in alongside
-# the real C:/SDKs roots).  It only ADDS entries never remove; the
-# production defaults below always apply in addition.
+# the real shared install).  It only ADDS entries never remove; the
+# shared install above always applies in addition.
 if [[ -n "${PS3TC_SHARED_ROOTS:-}" ]]; then
     read -a shared_roots_extra <<< "${PS3TC_SHARED_ROOTS}"
-    shared_roots=(
-        '/c/SDKs/Sony/homebrew/PS3DK'
-        '/mnt/c/SDKs/Sony/homebrew/PS3DK'
-        '/c/SDKs/Sony/Homebrew/PS3DK'
-        '/mnt/c/SDKs/Sony/Homebrew/PS3DK'
-        "${shared_roots_extra[@]}"
-    )
-else
-    shared_roots=(
-        '/c/SDKs/Sony/homebrew/PS3DK'
-        '/mnt/c/SDKs/Sony/homebrew/PS3DK'
-        '/c/SDKs/Sony/Homebrew/PS3DK'
-        '/mnt/c/SDKs/Sony/Homebrew/PS3DK'
-    )
+    shared_roots+=("${shared_roots_extra[@]}")
 fi
 
 # Both arg2 (scratch) AND arg3 (toolchain) must clear the guard: the 7

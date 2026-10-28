@@ -1,5 +1,5 @@
 /*
- * hello-ppu-sys-event — Sony-named LV2 event-queue/event-port surface.
+ * hello-ppu-sys-event — Cell-named LV2 event-queue/event-port surface.
  *
  * Exercises the snake_case wrappers our <sys/event.h> umbrella adds
  * over PSL1GHT's camelCase sysEvent* surface:
@@ -31,7 +31,7 @@ SYS_PROCESS_PARAM(1001, 0x10000);
 
 int main(void)
 {
-	printf("hello-ppu-sys-event: Sony snake_case LV2 event surface\n");
+	printf("hello-ppu-sys-event: Cell-named snake_case LV2 event surface\n");
 
 	sys_event_queue_attribute_t attr;
 	sys_event_queue_attribute_initialize(attr);

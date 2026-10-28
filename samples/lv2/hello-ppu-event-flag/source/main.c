@@ -10,7 +10,7 @@
  * <sys/ppu_thread.h> + <sys/time_util.h> + <sys/return_code.h> +
  * <cell/error.h> on top of the existing <sys/process.h> already
  * shipped by PSL1GHT.  Source flow is otherwise identical to the
- * reference sample minus the SPU bits.
+ * existing sample minus the SPU bits.
  *
  * Imports lv2 syscalls only — no SPRX modules, no nidgen-built stub
  * archives.  Each sys_event_flag_* call goes straight into the lv2

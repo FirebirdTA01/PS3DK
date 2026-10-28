@@ -1,7 +1,7 @@
 // A UNIFORM ENTRY PARAMETER's default value (uniform-default-records A1).
 //
 // parser.cpp errored on any '=' in any parameter list, which refused the
-// reference's own spelling on seven reference-SDK rows.  The reference's rule,
+// established compiler's own spelling on seven Cell OS rows.  The established compiler's rule,
 // measured: a default is legal on a uniform parameter of the SELECTED entry
 // and on any parameter of a helper, and nowhere else (C1114).
 //
@@ -17,7 +17,7 @@
 //   l      the constructor spelling
 //   s      a scalar default on a scalar, where no broadcast is involved
 //
-// Values measured on the reference, block AND ucode inline constant:
+// Values measured on the established compiler, block AND ucode inline constant:
 //   light [1,2,3,4]  Ka [0.6,0.6,0.6,0]  l [1,2,3,0]  s [2.5,0,0,0]
 void main(
 	float2 texcoord      : TEXCOORD0,

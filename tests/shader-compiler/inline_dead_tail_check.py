@@ -4,7 +4,7 @@
 Each accepted source has an independently reduced control with the dead suffix
 removed. Complete containers must match in FP and VP.
 Both stages additionally run through the established instruction evaluators
-on inputs that exercise both sides of runtime conditions. No reference SDK is
+on inputs that exercise both sides of runtime conditions. No platform ABI is
 required by this regression test.
 """
 import argparse

@@ -12,7 +12,7 @@
  *   - PUTLLC; retry on collision
  *
  * Independently written and tuned so the compiled output matches the
- * reference library function as closely as possible.
+ * system library function as closely as possible.
  * No external relocations.  Size: 168 bytes.
  */
 	.text

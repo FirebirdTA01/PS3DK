@@ -7,18 +7,18 @@
 # allocator left in z went into the sum.  Not reliably wrong, which is the
 # bad kind - the same source is right in one shader and wrong in the next.
 #
-# The reference emits DP2 here; NV40 has the opcode (0x38) and we simply
+# The established compiler emits DP2 here; NV40 has the opcode (0x38) and we simply
 # had no VOp for it.  Asserted on the decoded ucode, both directions: DP2
 # must be there AND DP3 must not, because a lowering that emitted both
 # would satisfy a one-sided check.  The same stale-lane rule applies to
 # stdlib lowerings that reduce through a dot: length, distance, and normalize.
 # Scalar length and scalar distance must not dot at all, float2 must use DP2,
-# float3 must use DP3, and float4 must use DP4.  sce-cgc exposes reflect()
+# float3 must use DP3, and float4 must use DP4.  the established compiler exposes reflect()
 # only on 3-wide vectors, so reflect2/reflect4 belong to overload parity
 # rather than this dot-width fixture; fp_reflect3_width_f covers the accepted
 # width touched by lowerReflect.
 #
-# Fragment only.  NV40's vertex unit has no DP2 - the reference expands a
+# Fragment only.  NV40's vertex unit has no DP2 - the established compiler expands a
 # vertex dot2 into MUL + ADD - and vpOpcode's fallthrough is MOV, which
 # would be a silent wrong answer.  The vertex side of the same question is
 # its own item and is deliberately not asserted here.
@@ -117,7 +117,7 @@ three components wide and should stay on the DP3 path."
     if grep -Eq ' 0x(06|38) ' "$decoded"; then
         cat "$decoded" >&2
         fail "$stem emitted DP2 or DP4.  This fixture pins reflect(float3),
-the only reflect width sce-cgc accepts."
+the only reflect width the established compiler accepts."
     fi
 }
 

@@ -4,7 +4,7 @@ libretro's crt-geom declares `static float2 aspect = float2(1.0, 1.0);`,
 scale2xSFX `static float3 thresh = float3(...)/255.0;` and the ntsc decoders
 `static float luma_filter[TAPS + 1] = {...}`; every read refused (an
 unresolved global id, or "ldunif ... no registered uniform source").  The
-reference folds a read before any write to the initialiser and sees later
+established compiler folds a read before any write to the initialiser and sees later
 writes, including an inlined helper's.  Rows are judged by value with
 fp_eval against the C formula.
 """
@@ -89,7 +89,7 @@ float4 main(float4 t : TEXCOORD0) : COLOR { return float4(y, z, t.x, 1); }
 """, lambda t: [0.5, 1.25, t[0], 1.0]),
     # A helper the initialiser calls may write file-scope state, and the
     # write persists (review: codex's static-init-side-effect witnesses, all
-    # four measured on the reference): a scalar, the same under an entry
+    # four measured on the established compiler): a scalar, the same under an entry
     # parameter shadowing g, an array element, and a later initialiser.
     ('initialiser_side_effect', """static float g = .25; float f() { g = .75; return 1.0; } static float y = f();
 float4 main(float4 t : TEXCOORD0) : COLOR { return float4(g, y, t.x, 1); }

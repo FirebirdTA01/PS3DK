@@ -30,5 +30,5 @@ build error rather than silently replaced.
 +#define CC1PLUS_SPEC "%{!std=*:%{!ansi:-std=gnu++17}}"
 +
  /* The SDK's POSIX layer (its pthread.h, time.h and sched.h wrappers over
-    newlib) is on the default include path, as the reference compiler's
-    target/ppu/include is: -isystem, in the same place the CMake toolchain
+    newlib) is on the default include path, as the established compiler's
+    system include directory is: -isystem, in the same place the CMake toolchain

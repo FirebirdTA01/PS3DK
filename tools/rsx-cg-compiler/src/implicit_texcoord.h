@@ -2,7 +2,7 @@
 // Implicit TEXCOORD binding from the inputs a fragment program READS
 // (t_3289f98f).
 //
-// Measured on sce-cgc 475: a semantic-less fragment input - a bare
+// Measured on the established compiler: a semantic-less fragment input - a bare
 // parameter or a struct member, each instance on its own - takes the lowest
 // TEXCOORD<N> no explicit input claims, in declaration order, but ONLY when
 // the program reads it.  An unread one is a varying record with an
@@ -31,7 +31,7 @@ namespace rsx_cg {
 
 // A select on a constant condition is its chosen operand.  Measured: an
 // input read only under `if (false)`, `false ? u : k` or a `static const
-// bool` that is false is UNREAD on the reference (UNDEFINED, no index), but
+// bool` that is false is UNREAD on the established compiler (UNDEFINED, no index), but
 // such a select survives into the backend here (review: codex), keeping
 // the dead load alive.  Fold it before deciding what is read; returns
 // whether anything changed (the caller re-runs dead-code elimination).
@@ -55,7 +55,7 @@ inline SelectFold foldConstantSelects(IRFunction& entry)
 
     // A comparison of two scalar constants is a constant condition too:
     // `if (0 > 1)` leaves an input as unread as `if (false)` on the
-    // reference (measured, VP and FP), but nothing folds the compare here.
+    // established compiler (measured, VP and FP), but nothing folds the compare here.
     const auto number = [](const IRConstant* c, double& out) {
         if (!c || !c->type.isScalar()) return false;
         if (std::holds_alternative<float>(c->value)) out = std::get<float>(c->value);
@@ -99,7 +99,7 @@ inline SelectFold foldConstantSelects(IRFunction& entry)
     };
     // To a fixed point: a condition may itself be a select that an earlier
     // round folded to a constant - `bool b = true ? false : (u.x > 0);
-    // b ? u : k` (review: codex; measured u UNREAD on the reference).
+    // b ? u : k` (review: codex; measured u UNREAD on the established compiler).
     bool converged = false;
     for (size_t round = 0; round <= bound && !failed; ++round) {
         bool grew = false;

@@ -13,9 +13,9 @@
 //                MADR R0, R0, {0.5,0,0,0}.x, {0.5,0,0,0}.x
 //
 // Found by the rig's VP instrument rows on their first boot: ours painted
-// one level where the reference painted sixty-four.
+// one level where the established compiler painted sixty-four.
 //
-// Two rules are visible in the reference's shape.  An instruction carries
+// Two rules are visible in the established compiler's shape.  An instruction carries
 // a single 16-byte const block, so when the two literals' distinct values
 // fit in four lanes there is no preload and no fence - both operands read
 // that one block with their own swizzles.  And the varying is moved at

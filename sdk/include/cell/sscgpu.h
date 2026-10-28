@@ -4,7 +4,7 @@
 /* cell/sscgpu.h — GPU stereo-image converter surface (independent).
  *
  * Declares the cellSscGpu* entry points that libsscgpu.a exports.
- * Reference SDK ships these in <cell/ssc.h> alongside the CPU-side
+ * Platform ABI ships these in <cell/ssc.h> alongside the CPU-side
  * cellSsc* family; we split GPU-only surface into its own header.
  */
 

@@ -5,11 +5,11 @@
 //   1) Implicit varying-binding inference.  `texcoord` has no explicit
 //      `: TEXCOORD0` semantic; the front-end infers it because it is
 //      the only unbound entry-point input on the FP side.  The
-//      reference compiler does the same; both emit a parameter-table
+//      established compiler does the same; both emit a parameter-table
 //      entry whose resource code is 0x0c94 (TEXCOORD0) but whose
 //      semantic *string* is suppressed (the user did not write one).
 //
-//   2) Alpha-mask if-else (tex-result-as-cmp-LHS).  The reference
+//   2) Alpha-mask if-else (tex-result-as-cmp-LHS).  The established compiler
 //      compiler lowers this 3-instruction shape and elides the
 //      literal-vec4(0,0,0,0) THEN-branch by exploiting R0's implicit
 //      zero default at FP entry:

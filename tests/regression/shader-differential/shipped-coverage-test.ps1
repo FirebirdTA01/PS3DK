@@ -1,12 +1,12 @@
 # shipped-coverage-test.ps1 -- every shader we SHIP is in a curated list the
-# rig judges against the reference.
+# rig judges against the established compiler.
 #
-# The release bar (2026-09-06) is "replace the reference for all of our
+# The release bar (2026-09-06) is "replace the established compiler for all of our
 # shaders", and the denominator of that sentence is the shaders under
 # samples/ and sdk/, not the community corpus.  On 2026-09-05 an audit found
 # that all 22 shipped fragment shaders were listed and all 21 shipped vertex
 # shaders were listed NOWHERE - fourteen sample vpshader.vcg files and the
-# SDK's own libdbgfont VP had never been compared against the reference by
+# SDK's own libdbgfont VP had never been compared against the established compiler by
 # anything.  The first boot that judged them found a wrong-colour defect in a
 # shipped sample (hello-ppu-cellgcm-vp-loop).
 #

@@ -3,7 +3,7 @@
 # Builds a single translation unit — io_legacy_wrappers.o — that ships
 # inside $PS3DK/ppu/lib/libio.a alongside the nidgen-generated cellPad*/
 # cellKb*/cellMouse* stubs.  Provides PSL1GHT's ioPad*/ioKb*/ioMouse*
-# spellings as one-line pass-throughs to the Sony-named entry points.
+# spellings as one-line pass-throughs to the Cell-named entry points.
 #
 # Driven by scripts/build-cell-stub-archives.sh — it invokes
 # `make -C sdk/libio_legacy` to produce build/io_legacy_wrappers.o, then

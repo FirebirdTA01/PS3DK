@@ -1,6 +1,6 @@
 # Samples
 
-Minimal programs that exercise the toolchain, PSL1GHT, and reference-the reference SDK
+Minimal programs that exercise the toolchain, PSL1GHT, and reference-the platform ABI
 ABI conformance.  One concept per sample; big examples go elsewhere.
 
 Samples are grouped by subsystem.  New subsystems (audio, pad, network,
@@ -145,7 +145,7 @@ non-PSL1GHT-backed library pull one of the nidgen-built stub archives.
 ## lv2/
 
 lv2 syscall-layer primitives: threading, synchronisation, event flags,
-timers.  These samples use the reference SDK-name sync compat headers
+timers.  These samples use the platform ABI-name sync compat headers
 (`<sys/synchronization.h>`, `<sys/ppu_thread.h>`, `<sys/time_util.h>`,
 `<sys/lv2_syscall.h>`) over our own / PSL1GHT's lv2 syscall surface.
 The `hello-event-flag-spu` sample additionally pulls in our
@@ -233,8 +233,8 @@ existing subsystem drop into the relevant directory.
 
 ## What `toolchain/hello-ppu-abi-check` checks
 
-It is the ABI oracle: if it regresses, our output drifted from the
-reference loader's expectations.
+It is the ABI measurement: if it regresses, our output drifted from the
+system loader's expectations.
 
 - **`.sys_proc_param` section size** is 0x24 (36 bytes), 8-byte aligned.
 - **Magic** `0x13bcc5f6`.
@@ -317,7 +317,7 @@ After any rebuild of binutils / GCC+newlib / PSL1GHT, the three canonical
 green samples must still link and (where possible) run:
 
 1. `toolchain/hello-ppu-c++17` — toolchain validation test.
-2. `toolchain/hello-ppu-abi-check` — ABI oracle.
+2. `toolchain/hello-ppu-abi-check` — ABI measurement.
 3. PSL1GHT's own `sample/` tree — verifies downstream homebrew still
    compiles against the modernised headers.
 

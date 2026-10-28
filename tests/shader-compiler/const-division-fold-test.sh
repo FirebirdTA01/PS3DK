@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# A literal division by zero is THREE cases and the reference folds only one
+# A literal division by zero is THREE cases and the established compiler folds only one
 # of them (zero-division-constant-fold).
 #
-# THE RULE, read off sce-cgc 475 by printing every instruction and every
+# THE RULE, read off the established compiler by printing every instruction and every
 # const block of its container - not inferred from one probe:
 #
 #   every denominator non-zero                     fold per lane
 #   every denominator zero AND every numerator      fold each lane to its
 #     zero                                          NUMERATOR, sign preserved
 #   anything else                                   DO NOT FOLD; the
-#                                                   reference emits a runtime
+#                                                   established compiler emits a runtime
 #                                                   reciprocal
 #
 # THE SIGN IS THE POINT, and it is why the obvious implementation is wrong.
@@ -19,7 +19,7 @@
 #
 # THE THIRD CASE IS WHY THIS IS NOT "RELAX THE GUARD".  ir_builder.cpp used
 # to return InvalidIRValue for ANY zero denominator - right for x/0, wrong
-# for 0/0.  Dropping it altogether would fold x/0 too, which the reference
+# for 0/0.  Dropping it altogether would fold x/0 too, which the established compiler
 # does not do, and would fold a MIXED denominator vector, which it also does
 # not do: float4(0,0,2,3) / float4(0,0,2,1) is emitted as RCP/MUL even though
 # every zero-denominator lane there has a zero numerator.  The two rows at
@@ -27,12 +27,12 @@
 #
 # WHAT THIS FILE DOES NOT ASSERT: the SHAPE of the unfolded cases.  We spend
 # five instructions and four blocks on float4(1.0/0.0, 1, 3, 2) where the
-# reference spends two and two, because we write one constant lane per MOV
+# established compiler spends two and two, because we write one constant lane per MOV
 # instead of masking three into one.  That is constant-lane-move-coalescing and it is a
 # different subject; these rows only require that the division did not fold.
 #
 # THE ARTIFACT IS THE CONTAINER, for the values and for the predication
-# alike, and every expected block below was read off the REFERENCE's own
+# alike, and every expected block below was read off the established compiler's own
 # container.
 set -euo pipefail
 
@@ -72,7 +72,7 @@ compile() {   # <tag> <body>
 }
 
 # FOLDED rows: tag|body|expected block words|expected swizzle of the const
-# source.  All read off the reference.
+# source.  All read off the established compiler.
 compile plain     "return float4(0.0/0.0, 1.0, 3.0, 2.0);"
 compile neg_num   "return float4(-0.0/0.0, 1.0, 3.0, 2.0);"
 compile neg_den   "return float4(0.0/-0.0, 1.0, 3.0, 2.0);"
@@ -81,7 +81,7 @@ compile ordinary  "return float4(1.0/2.0, 1.0, 3.0, 2.0);"
 compile zero_num  "return float4(0.0/2.0, 1.0, 3.0, 2.0);"
 compile vec_signs "return float4(0.0, -0.0, 0.0, -0.0) / float4(0.0, 0.0, -0.0, -0.0);"
 
-# UNFOLDED rows: the reference leaves these as runtime reciprocals.
+# UNFOLDED rows: the established compiler leaves these as runtime reciprocals.
 compile x_over_0  "return float4(1.0/0.0, 1.0, 3.0, 2.0);"
 compile vec_mixed "return float4(0.0, 0.0, 2.0, 3.0) / float4(0.0, 0.0, 2.0, 1.0);"
 
@@ -105,7 +105,7 @@ value_checker="$here/fp_const_output_check.py"
 paints() {   # <tag> <four expected R0 words>
     local tag="$1"; shift
     "$PYTHON" "$value_checker" "$work/$tag.fpo" "$@" > /dev/null ||
-        fail "$tag: the colour output is not what the reference paints (run $value_checker for the lane diff)"
+        fail "$tag: the colour output is not what the established compiler paints (run $value_checker for the lane diff)"
 }
 paints plain     00000000 3f800000 40400000 40000000
 paints neg_num   80000000 3f800000 40400000 40000000
@@ -176,7 +176,7 @@ def reciprocal_reason(ops):
 
 
 def block_reason(block, swz, want_block, want_swz):
-    """A reason when the folded constant is not the reference's, else None."""
+    """A reason when the folded constant is not the established compiler's, else None."""
     if block is None:
         return "no inline const block: nothing carries the folded value"
     if block != want_block.split():
@@ -200,7 +200,7 @@ def check_folded(tag, want_block, want_swz):
 def check_unfolded(tag):
     if reciprocal_reason(opcodes(program(tag))):
         return None
-    return ("the division was FOLDED; the reference leaves this one as a "
+    return ("the division was FOLDED; the established compiler leaves this one as a "
             "runtime reciprocal, so folding it is a divergence introduced by "
             "relaxing the zero-denominator guard too far")
 

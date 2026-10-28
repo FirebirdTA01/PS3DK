@@ -484,11 +484,11 @@ int main(int argc, const char **argv)
 	       (int)cellGcmUnbindTile(PROBE_TILE_INDEX));
 	printf("  cellGcmUnbindZcull(%d)      = %d\n", PROBE_TILE_INDEX,
 	       (int)cellGcmUnbindZcull(PROBE_TILE_INDEX));
-	/* The frequency setters take one of the reference SDK's
+	/* The frequency setters take one of the platform ABI's
 	 * CELL_GCM_DISPLAY_FREQUENCY_* values (59_94HZ=1, SCANOUT=2,
 	 * DISABLE=3), NOT a frequency in Hz.  Our <cell/gcm/gcm_enum.h> does
 	 * not carry that enum yet, so the literal is spelled with the
-	 * reference's value and its name written down here rather than
+	 * system's value and its name written down here rather than
 	 * guessed at the call site.  Called after the draw loop, below, so
 	 * that changing the vblank rate cannot disturb the flips the other
 	 * checks depend on. */

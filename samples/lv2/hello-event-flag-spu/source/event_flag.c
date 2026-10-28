@@ -124,7 +124,7 @@ int main(int argc, char *argv[])
     }
 
     /* ----- bring up the SPU side ----------------------------------- */
-    /* Equivalent reference-SDK spelling lives in <sys/spu_initialize.h>:
+    /* Equivalent Cell OS spelling lives in <sys/spu_initialize.h>:
      *   rc = sys_spu_initialize(6, 0);
      * Both bind to syscall 169; pick whichever matches the surrounding
      * naming style. */

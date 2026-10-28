@@ -10,7 +10,7 @@ void RSX_FUNC(ResetCommandBuffer)(gcmContextData *context)
 	while(ctrl->get!=offset) usleep(30);
 
 	/* The RSX now reads from the start of the default buffer; so must we.
-	 * (The reference resets the default FIFO context here as well.) */
+	 * (The system resets the default FIFO context here as well.) */
 	context->current = context->begin;
 }
 

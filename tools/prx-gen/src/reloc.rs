@@ -1,7 +1,7 @@
 //! ELF `R_PPC64_*` relocations -> Lv-2 PRX relocation records.
 //!
 //! Format facts and every constant below are from
-//! `docs/local/sprx-format-facts.md` §2 (public-source oracle read of the
+//! `docs/local/sprx-format-facts.md` §2 (public-source measurement read of the
 //! RPCS3 loader).  In short: a PRX relocation record says "take LOAD segment
 //! `index_value`'s runtime base, add `ptr`, and write the result into LOAD
 //! segment `index_addr` at `offset`, encoded per `type`".

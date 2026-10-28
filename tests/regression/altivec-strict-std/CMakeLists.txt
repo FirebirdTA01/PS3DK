@@ -14,7 +14,7 @@ endif()
 include(ps3-self)
 
 # CXX_EXTENSIONS OFF makes this -std=c++17, not -std=gnu++17: the strict mode
-# the reference samples use (they pass -std=c++98), where upstream GCC drops
+# the existing samples use (they pass -std=c++98), where upstream GCC drops
 # the context-sensitive vector/pixel/bool keywords.
 foreach(abi ilp32 lp64)
     add_executable(altivec-strict-std-${abi} main.cpp)

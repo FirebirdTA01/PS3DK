@@ -29,8 +29,8 @@ def main():
         rows=[(n,b,'fp',expected) for n,(b,expected) in CASES.items()]
         rows += [('unreachable_type_error','if(false){return undeclared;}return p;','fp',None),
                  # The vertex profile folds the literal condition too and the
-                 # reference accepts the program; ours must compile it (its
-                 # values were checked against the reference, x = .5, -.5, 0).
+                 # established compiler accepts the program; ours must compile it (its
+                 # values were checked against the established compiler, x = .5, -.5, 0).
                  ('vp_folded',CASES['false_after_join'][0],'vp','accept')]
         for name,body,stage,expected in rows:
             src=work/(name+'.cg');dst=work/(name+'.bin')

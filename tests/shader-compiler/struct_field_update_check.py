@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-struct-field-update-') as temp:
     log_index = next(i for i,w in enumerate(decoded) if ((w[0] >> 24) & 63) == 29)
     assert any(w[0] & (1 << 31) for w in decoded[:log_index]), 'pow has no clamp before LG2'
     # 2.5 keeps this witness on the LG2 route: integer and half exponents now take
-    # the reference's multiply / reciprocal / root table and never emit LG2.
+    # the established compiler's multiply / reciprocal / root table and never emit LG2.
     print('PASS: pow preserves saturation before taking the logarithm', flush=True)
     # Out-struct parameters currently emit no StoreOutput on either parent
     # or candidate. Keep that gap an exact refusal, never a stale first store.

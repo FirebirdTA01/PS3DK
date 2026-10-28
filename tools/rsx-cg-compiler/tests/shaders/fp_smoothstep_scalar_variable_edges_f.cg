@@ -1,6 +1,6 @@
 // scalar-divr-lowering: scalar smoothstep with dynamic edges uses DIVR_sat for
 // saturate((x - edge0) / (edge1 - edge0)).  Vector smoothstep deliberately
-// remains on the reference's per-lane RCP plus vector MUL shape.
+// remains on the established compiler's per-lane RCP plus vector MUL shape.
 void main(float4 c : TEXCOORD0,
           float4 lo : TEXCOORD1,
           float4 hi : TEXCOORD2,

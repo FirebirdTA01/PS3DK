@@ -26,7 +26,7 @@ struct ParserConfig
     bool continueOnError = true;  // Try to recover and continue parsing
     int maxErrors = 50;
     // --extension=declarator-types: a later declarator in a list keeps the
-    // declared type instead of the reference's last-named-type rule.
+    // declared type instead of the established compiler's last-named-type rule.
     bool standardDeclaratorTypes = false;
     // Driver-owned dialect policy. The hint is composed from its extension
     // registry; other users of this frontend need not expose that extension.

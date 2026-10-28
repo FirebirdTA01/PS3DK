@@ -1,6 +1,6 @@
 /* cell/spurs/task.h - SPURS task + taskset C API + C++ class surface.
  *
- * Independent header matching the reference libspurs_stub ABI.  The
+ * Independent header matching the system libspurs_stub ABI.  The
  * underscore-prefixed entry points (_cellSpursTasksetAttributeInitialize,
  * _cellSpursTaskAttributeInitialize) take revision + sdkVersion
  * explicitly; the unprefixed forms are inline wrappers that supply

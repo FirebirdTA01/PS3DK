@@ -1,6 +1,6 @@
 """pow() with a CONSTANT exponent (constant-exponent-pow, Boy_HairFp).
 
-Reference (sce-cgc 475, measured 2026-09-15, .local/probe-boyhair, 30 cells):
+Reference (the established compiler, measured 2026-09-15, .local/probe-boyhair, 30 cells):
 a constant exponent is not always the LG2 / MUL / EX2 chain.  In FP:
 0 -> the constant 1; 1 -> a copy; 2 -> MUL x, x (vectors too); 3 -> MUL, MUL;
 -1 -> RCP; -0.5 -> RSQ; 0.5 -> DIVSQR |x|, x; 4 / 8 / 0.25 / 0.125 -> LG2 with
@@ -14,7 +14,7 @@ uniform chain painted NaN wherever pow(dot(t, h), 2) had a negative dot
 (Boy_HairFp, 1369 of 4096 pixels).  Every value row here is executed on a
 negative-base input with an independent python expectation; the scale rows
 decode the LG2 scale bits and the EX2 source sign; the twin rows compare
-bytes against the spelling the reference emits identically.
+bytes against the spelling the established compiler emits identically.
 
 Usage: pow_constant_check.py <workdir>
 """

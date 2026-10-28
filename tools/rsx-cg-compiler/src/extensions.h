@@ -4,7 +4,7 @@
 /*
  * rsx-cg-compiler — named extensions (named-extensions).
  *
- * An extension is a deliberate departure from the reference compiler.  Every
+ * An extension is a deliberate departure from the established compiler.  Every
  * one is OFF by default, so an unflagged compile is reference-compatible in
  * what it accepts and in the bytes it emits; the default's only departure is
  * the diagnostic, which names the flag that would enable the construct it
@@ -19,7 +19,7 @@
  * a hint comes only from a detector written for that construct - never from
  * a generic error - and correctness refusals stay on in every mode.  An
  * extension is admissible only where its enabled output reduces to something
- * the reference already covers (the BOM'd source compiles to the bytes of
+ * the established compiler already covers (the BOM'd source compiles to the bytes of
  * the plain source), which is what its test then pins.
  *
  * This file lives beside the driver, not under cg_frontend/: the policy is ours,
@@ -35,10 +35,10 @@ namespace rsx_cg
 enum class Extension
 {
     // Accept one leading UTF-8 byte order mark (EF BB BF) in the main
-    // source and in #include files.  The reference refuses it.
+    // source and in #include files.  The established compiler refuses it.
     Bom = 0,
 
-    // A later declarator in a list keeps the DECLARED type.  The reference
+    // A later declarator in a list keeps the DECLARED type.  The established compiler
     // gives it the type last named in an earlier declarator's initializer
     // (float3 a = float2(..).xyy, b = ...; makes b a float2); enabled, the
     // list compiles as the separate declarations it abbreviates.
@@ -54,7 +54,7 @@ enum class Extension
     // Optional type spellings retain Cg vector/matrix construction semantics.
     GlslTypes = 4,
     // Accept a source file whose FIRST two bytes are a UTF-16 byte order
-    // mark (FF FE for UTF-16LE, FE FF for UTF-16BE).  The reference
+    // mark (FF FE for UTF-16LE, FE FF for UTF-16BE).  The established compiler
     // refuses it.  Enabled, the whole file is transcoded to UTF-8 before
     // the lexer sees it (paired surrogates, no NULs, even length).  The
     // transcode is STRICT: a bad file -- odd byte count after the BOM,
@@ -104,7 +104,7 @@ private:
 // before anything is composed in front of it and before the lexer sees it.
 //
 // A construct whose extension is enabled is rewritten to the form the
-// reference accepts (a leading BOM is removed).  A construct whose extension
+// established compiler accepts (a leading BOM is removed).  A construct whose extension
 // is disabled throws std::runtime_error carrying a located diagnostic that
 // names the exact enable flag; the driver's existing handler turns that into
 // exit 1 with no output artifact.  Text with no such construct is untouched.

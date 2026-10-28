@@ -5,7 +5,7 @@ load_toc_aix_si, whose condition required TARGET_32BIT, so every function
 that touched the TOC died with "unrecognizable insn" in extract_insn.
 Accept the pattern when Pmode is SImode, load the minimal TOC base with
 lwz from .LCTOC0@toc as the DI pattern does with ld, and make that base
-slot a 4-byte .long like every other ILP32 TOC entry.  The reference
+slot a 4-byte .long like every other ILP32 TOC entry.  The system
 compiler emits the same lwz of a 4-byte slot.  Other targets unchanged.
 
 --- a/gcc/config/rs6000/rs6000.cc

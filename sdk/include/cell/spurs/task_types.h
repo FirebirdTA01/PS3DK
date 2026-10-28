@@ -90,7 +90,7 @@ typedef struct CellSpursTaskAttribute {
 /* TaskAttribute2: public struct (not opaque), fields are poked by
  * inline initializers.  Pointer fields use ATTRIBUTE_PRXPTR so they
  * occupy 4 bytes at the offsets the SPRX (compiled against the PPU32
- * reference toolchain) expects, regardless of our LP64 host ABI. */
+ * established toolchain) expects, regardless of our LP64 host ABI. */
 typedef struct CellSpursTaskAttribute2 {
     uint32_t                revision;
     uint32_t                sizeContext;
@@ -155,7 +155,7 @@ typedef struct CellSpursTasksetInfo {
     const char                           *name                          ATTRIBUTE_PRXPTR;
     CellSpursTasksetExceptionEventHandler exceptionEventHandler         ATTRIBUTE_PRXPTR;
     void                                 *exceptionEventHandlerArgument ATTRIBUTE_PRXPTR;
-    uint32_t                              sizeTaskset;   /* Sony uses size_t which is 32-bit on PPU32; pinned. */
+    uint32_t                              sizeTaskset;   /* The system uses size_t which is 32-bit on PPU32; pinned. */
     uint8_t                               reserved[9360
                                                    - sizeof(CellSpursTaskInfo) * CELL_SPURS_MAX_TASK
                                                    - sizeof(uint64_t)
@@ -191,7 +191,7 @@ struct CellSpursTaskset {
 #define CELL_SPURS_TASKSET2_SIZE                  CELL_SPURS_TASKSET_CLASS1_SIZE
 #define CELL_SPURS_TASKSET2_ALIGN                 128
 
-/* Task-binary embedding descriptor.  The reference SDK's ELF→object
+/* Task-binary embedding descriptor.  The platform ABI's ELF→object
  * tool emits one of these alongside the SPU ELF payload; Task2
  * variants accept it to avoid re-parsing the ELF at runtime. */
 typedef struct CellSpursTaskBinInfo {

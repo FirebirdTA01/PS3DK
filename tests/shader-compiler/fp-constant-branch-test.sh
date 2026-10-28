@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # An if-statement whose condition the compiler reduces to a constant takes
-# one arm at compile time, as the reference does: a comparison of static
+# one arm at compile time, as the established compiler does: a comparison of static
 # constants, and a loop index compared in an unrolled loop, leave no
 # comparison instruction and no predicated other arm.  Each row pins the
-# instruction list the reference's shape implies (sce-cgc 475, measured) and
+# instruction list the established compiler's shape implies (the established compiler, measured) and
 # is judged by value with fp_eval.  A comparison the fold must not touch (a
 # uniform operand) keeps its run-time compare.
 #

@@ -142,7 +142,7 @@ typedef enum {
 } CellDbgRsxFifoErrorStateLabelFlag;
 
 /* --- Label location --- */
-/* Note: The reference SDK 270 shipped a typo (RRORR) in the second
+/* Note: The platform ABI 270 shipped a typo (RRORR) in the second
    enumerator name; both the typo and the corrected spelling are
    provided with the same value for binary compatibility. */
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Fragment literal builtins fold to constants, bit for bit as the reference
+# Fragment literal builtins fold to constants, bit for bit as the established compiler
 # folds them: rsqrt / exp2 / log2 / frac (the double-precision result rounded
 # once to binary32) and dot / length / normalize / lerp (the measured
-# binary32 orders).  Each row's expected const block is the reference's
-# (sce-cgc 475, `return a * <expr>;`), measured on 64 random lanes per
+# binary32 orders).  Each row's expected const block is the established compiler's
+# (the established compiler, `return a * <expr>;`), measured on 64 random lanes per
 # builtin in this profile; the folded program is one MUL reading the input
 # and the constant.  Edge rows - rsqrt and log2 of x <= 0, an exp2 that
-# overflows - stay run-time instructions, as the reference leaves them.
+# overflows - stay run-time instructions, as the established compiler leaves them.
 # exp / log / log10 fold the way their run-time lowerings compute: exp is
 # the exp2 fold of f32(x * 0x3fb8aa3a) (log2(e) one ulp low, as the
-# reference's multiply has it), log and log10 are f32(log2 fold * 0x3f317218
+# established compiler's multiply has it), log and log10 are f32(log2 fold * 0x3f317218
 # / 0x3e9a209b); an exp whose exp2 overflows keeps a run-time EX2, and log
 # of x <= 0 keeps its LG2.  sqrt / sin / cos / tan fold with the vertex
 # rules; sqrt of x <= 0 stays at run time.  A literal vector divisor is one
@@ -69,7 +69,7 @@ EDGES = [('rsqrt_zero', 'rsqrt(0.0)', {'RSQ', 'DIVSQR', 'DIVSQ'}),
          ('sqrt_zero', 'sqrt(0.0)', {'RSQ', 'DIVSQR', 'DIVSQ'}),
          ('sqrt_negative', 'sqrt(-1.0)', {'RSQ', 'DIVSQR', 'DIVSQ'})]
 # A literal vector divisor is one MUL by the per-lane reciprocals (the
-# reference's const block; a / k for a scalar k already was).
+# established compiler's const block; a / k for a scalar k already was).
 DIVISORS = [('div0', 'float4(2.0, 3.0, 4.0, 5.0)', '3f000000 3eaaaaab 3e800000 3e4ccccd'),
             ('div1', 'float4(-0.7, 11.0, 0.1, 1e-3)', 'bfb6db6e 3dba2e8c 41200000 4479ffff')]
 fails = 0
@@ -99,7 +99,7 @@ for name, expr, keep in EDGES:
     fails += not ok
     print('fp-constant-builtin-fold: %s %s keeps a run-time %s (%s)' % ('ok  ' if ok else 'FAIL', name, '/'.join(sorted(keep)), ' '.join(sorted(ops))))
 # Component-wise builtins of literals: one instruction, and the program
-# with a = 1 gives the reference's values (measured as a * (expr + 1.0), so
+# with a = 1 gives the established compiler's values (measured as a * (expr + 1.0), so
 # no folded lane is zero and every lane is written).
 COMPWISE = [
     ('abs0', 'abs(float4(-0.333333343, 2.5, -7.25, 0.125)) + 2.0', '40555555 40b00000 41240000 40480000'),

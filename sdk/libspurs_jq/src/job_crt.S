@@ -4,7 +4,7 @@
  * Called from _start (in job_start_w_crt.S) with $3 =
  * CellSpursJobContext2*, $4 = CellSpursJob256*.  Runs the
  * Initialize -> _init -> user main -> _fini -> Finalize chain that
- * the JQ kernel expects.  Byte-shape mirrors the reference job_crt.o
+ * the JQ kernel expects.  Byte-shape mirrors the system job_crt.o
  * __job_start (~84 bytes); register-save sequence is fixed by ABI.
  */
 

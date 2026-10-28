@@ -1,5 +1,5 @@
 /*
- * hello-ppu-abi-check — reference the reference SDK ABI cross-check.
+ * hello-ppu-abi-check — platform ABI cross-check.
  *
  * Verifies four concrete pieces of ABI alignment between our toolchain
  * output and what the PS3 loader expects:

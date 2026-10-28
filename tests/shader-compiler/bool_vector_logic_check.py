@@ -1,10 +1,10 @@
 """Component-wise !, && and || on vectors, judged by value (t_19e8402f).
 
-Measured against sce-cgc 475, sce_fp_rsx: the reference compiles unary ! on
+Measured against the established compiler, sce_fp_rsx: the established compiler compiles unary ! on
 bool and numeric vectors, && and || on two vectors of one width (bool,
 numeric or one of each, in either order), and libretro's float4(!bool4) blend; it refuses bool && bool4 (no
 scalar broadcast for the logical operators).  Our containers were checked
-against the reference's on 400 inputs per probe with fp_eval (all equal); this
+against the established compiler's on 400 inputs per probe with fp_eval (all equal); this
 test pins the same rows against values computed here from Cg semantics, so it
 needs no reference output in the repository.
 
@@ -50,7 +50,7 @@ ACCEPT = {
     'libretro_helper_not3': ('float3 f(float3 z) { const bool3 big = z > float3(0.5); return z * float3(!big); } '
                              + M + ' { return float4(f(a.xyz), 1); }',
                              lanes(3, lambda x, y: 0.0 if x > 0.5 else x)),
-    # Mixed bool/numeric vector operands: the reference accepts both operand
+    # Mixed bool/numeric vector operands: the established compiler accepts both operand
     # orders for && and ||, the numeric side meaning != 0 per lane.
     'bool4_and_float4': (M + ' { bool4 m = a > b; return (float4)(m && a); }',
                          lanes(4, lambda x, y: F(x > y and x != 0))),

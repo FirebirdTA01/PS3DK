@@ -5,7 +5,7 @@
 // instruction's precision follows from its operands.  So `ftoh` is a MOV
 // with an fp16 destination, and `htof` a MOV with an fp32 one.
 //
-// Measured on the reference compiling this shader - it emits no
+// Measured on the established compiler compiling this shader - it emits no
 // conversion at all, because the values are already in H registers:
 //
 //   MOVH H0, f[TEX2];  MOVH H1, f[TEX0];
@@ -18,9 +18,9 @@
 //
 // KNOWN DIVERGENCE, stated because the fixture does not assert it away:
 // we lower the CASTS and do not yet propagate half-ness through the
-// arithmetic, so our ucode computes in fp32 where the reference computes
+// arithmetic, so our ucode computes in fp32 where the established compiler computes
 // in fp16.  The values agree; the intermediate rounding is the
-// reference's and not ours.  Propagating the type is a separate change
+// established compiler's and not ours.  Propagating the type is a separate change
 // and the rig's pixels are what will say whether it is observable.
 void main(float4 color : TEXCOORD0, float4 fog : TEXCOORD2, out float4 o : COLOR)
 {

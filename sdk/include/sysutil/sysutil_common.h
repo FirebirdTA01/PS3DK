@@ -1,5 +1,5 @@
 /*! \file sysutil/sysutil_common.h
- \brief Reference-SDK source-compat header - sysutil error-code base
+ \brief Cell OS source-compat header - sysutil error-code base
         macros + extern "C" guard.
 
   The cellSysutil headers share this file for the
@@ -63,7 +63,7 @@ extern "C" {
 #define CELL_SYSUTIL_ERROR_3D_SUPPORT             0x8002b108
 
 /* ---- Sysutil callback type + entry points ----
- * Reference SDK declares these in sysutil_common.h; sample code
+ * Platform ABI declares these in sysutil_common.h; sample code
  * reaches them transitively without #include <cell/sysutil.h>.
  * Reproduce the prototypes here. */
 #define CELL_SYSUTIL_USERID_CURRENT  0

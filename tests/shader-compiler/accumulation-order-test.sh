@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-accumulation-') as work:
             counts[n] = blob[program + 18]
         print('%s register counts: %s' % (shape, counts))
         # Fixed scratch allowance independent of N; do not encode the
-        # reference's exact count or accept a merely slower linear growth.
+        # established compiler's exact count or accept a merely slower linear growth.
         if counts and max(counts.values()) > 8:
             errors.append('%s exceeds the fixed eight-register bound: %s' % (shape, counts))
         if 8 in counts and any(counts[n] != counts[8] for n in (24, 40) if n in counts):

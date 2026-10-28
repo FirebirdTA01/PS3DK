@@ -1,4 +1,4 @@
-// The value is half, the OUTPUT is float.  The reference still multiplies at
+// The value is half, the OUTPUT is float.  The established compiler still multiplies at
 // prec=1 and lands the result in a float register - which is why the
 // precision cannot be read off the destination bank.
 float4 main(half4 p : TEXCOORD0) : COLOR

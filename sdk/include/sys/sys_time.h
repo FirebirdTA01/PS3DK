@@ -1,7 +1,7 @@
 /*
- * PS3 Custom Toolchain — <sys/sys_time.h> the reference SDK compat shim.
+ * PS3 Custom Toolchain — <sys/sys_time.h> the platform ABI compat shim.
  *
- * reference-SDK samples read the 64-bit microsecond LV2 system time via
+ * existing PS3 samples read the 64-bit microsecond LV2 system time via
  * `sys_time_get_system_time()`, the sysPrxForUser import declared below.
  * `sys_time_get_timebase_frequency()` forwards to
  * `sysGetTimebaseFrequency()` unchanged.

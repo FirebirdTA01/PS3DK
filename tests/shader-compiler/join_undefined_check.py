@@ -50,7 +50,7 @@ UNINIT_LOCAL = """float4 main(float4 t : TEXCOORD0) : COLOR
 
 
 def uninit_local(env):
-    # Where no arm writes p and b, they read ZERO: the reference's unwritten
+    # Where no arm writes p and b, they read ZERO: the established compiler's unwritten
     # register is 0 at run time (pixel judge, xbr family), and so is ours.
     t = env['TEX0']
     if t[0] > 0.5:
@@ -151,7 +151,7 @@ ROWS = [
 ]
 
 # A ternary self-retain is the expression form of the fragment no-write
-# join above. The reference emits byte-identical containers for these two
+# join above. The established compiler emits byte-identical containers for these two
 # forms; selecting the written arm on both paths is not equivalent.
 TERNARY_INPUTS = [{'TEX0': t} for t in (
     [0.75, 0.25, 0.5, 0.125], [0.25, 0.75, 0.5, 0.125],

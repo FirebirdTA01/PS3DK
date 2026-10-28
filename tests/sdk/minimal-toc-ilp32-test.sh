@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # -mminimal-toc compiles in both PPU ABIs (GCC patch 0043).  Under ILP32 every
 # function that touched the TOC died with "unrecognizable insn" (the
-# load_toc_aix_si pattern required TARGET_32BIT); the reference emits a
+# load_toc_aix_si pattern required TARGET_32BIT); the system emits a
 # 4-byte TOC slot for the minimal TOC's base and loads it with lwz.
 #
 # Rows: C and C++ at -O0/-O2 in both ABIs compile; in ILP32 the base slot is

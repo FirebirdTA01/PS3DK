@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /*
- * The reference SDK maps libdbgrsx errors to the GFX facility (0x021)
+ * The platform ABI maps libdbgrsx errors to the GFX facility (0x021)
  * but aliases the facility as CELL_ERROR_FACILITY_DBG_RSX for clarity.
  */
 #ifndef CELL_ERROR_FACILITY_DBG_RSX

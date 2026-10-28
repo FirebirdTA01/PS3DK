@@ -6,7 +6,7 @@ The PSL1GHT-stock copies of ppu-asm.h (low-level memory access
 primitives) and ppu-lv2.h (lv2 syscall wrappers) use the bare GCC
 extension keyword `asm` rather than its standards-conformant alias
 `__asm__`.  Under `-std=c99` or `-std=c++17` the bare keyword is
-not recognised, which makes any reference-SDK-style sample using
+not recognised, which makes any Cell OS-style sample using
 those flags fail to compile through any header that pulls these in
 (typically through <sys/process.h> -> <ppu-lv2.h>).
 

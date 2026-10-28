@@ -223,7 +223,7 @@ namespace TypeConversion
 
     // HOW MANY SCALAR RANKS THE CONVERSION GOES DOWN, 0 when it goes up or
     // stays level.  Ranking needs this SEPARATELY from the cost, because the
-    // reference does not trade narrowings against widenings at any exchange
+    // established compiler does not trade narrowings against widenings at any exchange
     // rate - see resolveOverload.
     int narrowingSteps(const CgType& from, const CgType& to);
 

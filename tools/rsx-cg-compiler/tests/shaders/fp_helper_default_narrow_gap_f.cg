@@ -1,6 +1,6 @@
-// function-visibility commit 2.  Measured against sce-cgc 475.
+// function-visibility commit 2.  Measured against the established compiler.
 // LANDED: helper-vector-argument-conversion.  Once a GAP ROW, and the row that makes fp_helper_default_prefer_f
-// HONEST.  The reference accepts a float4 argument for a float3 parameter with
+// HONEST.  The established compiler accepts a float4 argument for a float3 parameter with
 // "warning C7011: implicit cast"; so do we now (the argument keeps xyz).
 //
 // That is why the prefer row passes for us today: f(float3) is not viable at

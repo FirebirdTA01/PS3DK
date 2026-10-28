@@ -4,10 +4,10 @@
 # Deliverable: close the 7 SDK rows previously failing with
 #   'nv40-general: VP scalar intrinsic lowering deferred'
 #
-# Shape & Container Breakdown (vs Reference sce-cgc 475 -p sce_vp_rsx):
+# Shape & Container Breakdown (vs Reference the established compiler -p sce_vp_rsx):
 #   - Unit clamp lowering:
 #       Our compiler emits standalone MOV_sat (saturate bit set on MOV).
-#       The reference also uses standalone MOV_sat for the input-only fixture;
+#       The established compiler also uses standalone MOV_sat for the input-only fixture;
 #       vs_procAnim folds saturate into its arithmetic producer (vp-saturate-producer-fold).
 #   - Container deltas measured:
 #       * vs_procAnim.cg:
@@ -19,7 +19,7 @@
 #           Ours:      1600 B (params: 768 B, strings: 400 B, consts: 32 B, ucode: 368 B [23 instrs])
 #           Delta: +144 B total (+128 B ucode = +8 instructions, +16 B string/defaults alignment).
 #
-# Reference Oracle Sequences & Probes Decoded:
+# Reference Measurement Sequences & Probes Decoded:
 #   - clamp(p, 0.0, 1.0) -> MOV_SAT o[COL0], v[ATTR0]
 #   - clamp(p, lo, hi) / reversed clamp(p, 1.0, 0.0):
 #       MIN r0, v[ATTR0], c[467].x;  MAX o[COL0], r0, c[467].y (MIN against maxVal first, then MAX against minVal)

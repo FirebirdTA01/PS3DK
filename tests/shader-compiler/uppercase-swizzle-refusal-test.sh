@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# A UPPERCASE swizzle char is refused, as the reference does (sce-cgc 475:
+# A UPPERCASE swizzle char is refused, as the established compiler does (the established compiler:
 # C1048 "invalid character 'X' in swizzle \"XYZ\"").  It is not an output
 # -only rule: a READ swizzle (t.XYZ), a WRITE swizzle (c.XYZ = ...), and
 # every family (XYZW, RGBA, STPQ, single letters, mixed case) is refused on
 # the FIRST offending letter.  Lowercase xyz/rgb/stp all compile.  Every row
-# was measured on sce-cgc 475 (2026-09-06, t_373d4005).  A refusal must be
+# was measured on the established compiler (2026-09-06, t_373d4005).  A refusal must be
 # EXACTLY exit 1 with the diagnostic and NO emitted container: a crash, a
-# timeout, or a container are not refusals.  The exit status of the reference
+# timeout, or a container are not refusals.  The exit status of the established compiler
 # varies run to run (0, 1 or 2 have all been recorded), so it is not a
 # reference-valid guard; ours must still exit 1.
 # usage: uppercase-swizzle-refusal-test.sh <rsx-cg-compiler>

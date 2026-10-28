@@ -8,7 +8,7 @@
 // replaced, because a refusal is visible and this is not.
 //
 // Found by codex reviewing the mechanism before it had a sha.  Measured
-// against the reference: outputFromH0=1.
+// against the established compiler: outputFromH0=1.
 half4 main(float4 t : TEXCOORD0) : COLOR
 {
 	if (t.x > 0.5)
