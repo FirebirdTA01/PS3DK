@@ -194,6 +194,45 @@ def inspect_ar_container(file_path, member_bytes=None):
         return None, f"Failed to read archive container: {ex}"
 
 
+def read_ar_member_payloads(file_path):
+    """
+    Return the non-metadata members of an AR archive in file order, as a
+    list of (member_name, payload_bytes), or (None, error).  Admission is
+    inspect_ar_container's; this only hands back the bytes it validated.
+    """
+    names, err = inspect_ar_container(file_path)
+    if err:
+        return None, err
+    payloads = []
+    try:
+        with open(file_path, 'rb') as f:
+            data = f.read()
+    except Exception as ex:
+        return None, f"Failed to read archive container: {ex}"
+    pos = 8
+    gnu_strtab = None
+    while pos < len(data):
+        mhdr = data[pos:pos + 60]
+        raw_name = mhdr[:16].decode('ascii', errors='replace').strip()
+        msize = int(mhdr[48:58].decode('ascii', errors='replace').strip())
+        mdata = data[pos + 60:pos + 60 + msize]
+        pos += 60 + msize + (msize & 1)
+        if raw_name in ('/', '/SYM64/', '__.SYMDEF', '__.SYMDEF SORTED'):
+            continue
+        if raw_name == '//':
+            gnu_strtab = mdata
+            continue
+        if raw_name.startswith('/') and raw_name[1:].isdigit():
+            off = int(raw_name[1:])
+            mname = gnu_strtab[off:].split(b'/\n')[0].split(b'\n')[0].decode('ascii', errors='replace')
+        else:
+            mname = raw_name.rstrip('/')
+        payloads.append((mname, mdata))
+    if [n for n, _ in payloads] != names:
+        return None, "Archive member payloads do not match the admitted member inventory"
+    return payloads, None
+
+
 def validate_file_format(file_path, member_bytes=None):
     """
     Validate binary magic to distinguish supported relocatable ELF and AR files.
@@ -299,7 +338,8 @@ def parse_sections_pass(s_text, member_name):
         if m0:
             if 0 in sections_by_nr:
                 return None, None, None, [f"{member_name}: Duplicate section header index [0]"]
-            sections_by_nr[0] = {'name': '', 'type': 'NULL', 'size': 0, 'es': 0}
+            sections_by_nr[0] = {'name': '', 'type': 'NULL', 'size': 0, 'es': 0,
+                                  'addr': 0, 'off': 0, 'flags': '', 'link': 0, 'info': 0, 'align': 0}
             continue
 
         sm = re.match(r'^\s*\[\s*(\d+)\]\s+(\S+)\s+(\S+)\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)', line)
@@ -315,7 +355,14 @@ def parse_sections_pass(s_text, member_name):
             except ValueError:
                 return None, None, None, [f"{member_name}: Malformed size/entsize fields for section '{name}'"]
 
-            sections_by_nr[nr] = {'name': name, 'type': stype, 'size': size, 'es': es}
+            sections_by_nr[nr] = {'name': name, 'type': stype, 'size': size, 'es': es,
+                                  'addr': int(sm.group(4), 16), 'off': int(sm.group(5), 16)}
+            # Flg is blank for sections without flags; Lk, Inf and Al always print.
+            tail = line[sm.end():].split()
+            if len(tail) in (3, 4) and all(t.isdigit() for t in tail[-3:]):
+                sections_by_nr[nr].update({
+                    'flags': tail[0] if len(tail) == 4 else '',
+                    'link': int(tail[-3]), 'info': int(tail[-2]), 'align': int(tail[-1])})
             if name == '.toc':
                 toc_sec_num = str(nr)
             elif stype == 'RELA':
@@ -351,6 +398,14 @@ def parse_sections_pass(s_text, member_name):
         ]
 
     return sections_by_nr, toc_sec_num, rela_sections, []
+
+
+def _symbol_size(text):
+    """readelf prints st_size in decimal, or in hex with 0x once it is large."""
+    try:
+        return int(text, 16) if text.startswith('0x') else int(text)
+    except ValueError:
+        return None
 
 
 def parse_symbols_pass(sym_text, member_name, sections_by_nr):
@@ -390,7 +445,9 @@ def parse_symbols_pass(sym_text, member_name, sections_by_nr):
                 errors.append(f"{member_name}: Symbol '{name}' references non-existent section index {ndx}")
                 continue
 
-            symbols_by_idx[sidx] = {'val': sval, 'ndx': ndx, 'name': name, 'type': stype}
+            symbols_by_idx[sidx] = {'val': sval, 'ndx': ndx, 'name': name, 'type': stype,
+                                    'bind': parts[4], 'vis': parts[5],
+                                    'size': _symbol_size(parts[2])}
 
     if errors:
         return None, errors

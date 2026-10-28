@@ -524,6 +524,11 @@ jobs:
       - name: Test the TOC mid-entry relocation audit tool
         run: bash tests/host/toc-midentry-audit-test.sh
 
+      # The linked TOC checker on synthetic links: defect regressions and the
+      # doctored negatives (wrong displacement, stale map, carries, rewrites).
+      - name: Test the linked TOC checker on synthetic links
+        run: bash tests/host/toc-linked-check-test.sh
+
       # build-spu-toolchain.sh: --gcc and --host pick the build root in any
       # option order, and --clean removes only that root.
       - name: Test the SPU build-root selection and --clean
