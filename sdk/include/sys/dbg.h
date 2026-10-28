@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <ppu-types.h>
 #include <sys/spu_thread_group.h>
+/* the object attribute records the information calls report */
+#include <sys/event.h>
 /* as in the SDK: debugger code declares its process parameters with the
  * SYS_PROCESS_PARAM this brings in */
 #include <sys/process.h>
@@ -46,6 +48,12 @@ extern "C" {
 #ifndef SYS_DBG_SPU_GPR_NUM
 #define SYS_DBG_SPU_GPR_NUM 128
 #endif
+#ifndef SYS_DBG_SPU_MB_NUM
+#define SYS_DBG_SPU_MB_NUM 4
+#endif
+#ifndef SYS_DBG_SPU_MFC_CQ_SR_NUM
+#define SYS_DBG_SPU_MFC_CQ_SR_NUM 96
+#endif
 
 #ifndef __SYS_RWLOCK_T_DEFINED
 #define __SYS_RWLOCK_T_DEFINED
@@ -55,117 +63,160 @@ typedef uint32_t sys_rwlock_t;
 #define __SYS_SEMAPHORE_T_DEFINED
 typedef uint32_t sys_semaphore_t;   /* the same type as sys_sem_t */
 #endif
-typedef uint32_t sys_event_flag_t;
 typedef uint32_t sys_lwmutex_pseudo_id_t;
 typedef uint32_t sys_lwcond_pseudo_id_t;
 
-typedef struct sys_dbg_vr {
+/* 128-bit register image, viewable at any element width. */
+typedef union sys_dbg_vr {
+    uint8_t  byte[16];
+    uint16_t halfword[8];
     uint32_t word[4];
+    uint64_t dw[2];
 } sys_dbg_vr_t;
 
+/* PPU registers as lv2 reports them: fpscr follows the 32 FPRs and is a
+ * 32-bit field; cr is 32 bits wide. */
 typedef struct sys_dbg_ppu_thread_context {
     uint64_t gpr[SYS_DBG_PPU_GPR_NUM];
-    uint64_t cr;
+    uint32_t cr;
     uint64_t xer;
     uint64_t lr;
     uint64_t ctr;
     uint64_t pc;
-    uint64_t fpscr;
-    double   fpr[SYS_DBG_PPU_FPR_NUM];
+    uint64_t fpr[SYS_DBG_PPU_FPR_NUM];
+    uint32_t fpscr;
     sys_dbg_vr_t vr[SYS_DBG_PPU_VR_NUM];
     sys_dbg_vr_t vscr;
 } sys_dbg_ppu_thread_context_t;
 
-typedef struct sys_dbg_spu_gpr {
+typedef union sys_dbg_spu_gpr {
+    uint8_t  byte[16];
+    uint16_t halfword[8];
     uint32_t word[4];
+    uint64_t dw[2];
 } sys_dbg_spu_gpr_t;
 
-typedef struct sys_dbg_spu_fpscr {
+typedef union sys_dbg_spu_fpscr {
+    uint8_t  byte[16];
+    uint16_t halfword[8];
     uint32_t word[4];
+    uint64_t dw[2];
 } sys_dbg_spu_fpscr_t;
 
+/* SPU thread state.  The first form reports FPSCR as one word; the second
+ * reports the full 128-bit FPSCR. */
 typedef struct sys_dbg_spu_thread_context {
     sys_dbg_spu_gpr_t gpr[SYS_DBG_SPU_GPR_NUM];
     uint32_t npc;
     uint32_t fpscr;
+    uint32_t srr0;
+    uint32_t spu_status;
+    uint64_t spu_cfg;
     uint32_t mb_stat;
     uint32_t ppu_mb;
-    uint32_t spu_mb[4];
+    uint32_t spu_mb[SYS_DBG_SPU_MB_NUM];
     uint32_t decrementer;
-    uint32_t mfc_cq_sr[96];
+    uint64_t mfc_cq_sr[SYS_DBG_SPU_MFC_CQ_SR_NUM];
 } sys_dbg_spu_thread_context_t;
 
 typedef struct sys_dbg_spu_thread_context2 {
     sys_dbg_spu_gpr_t gpr[SYS_DBG_SPU_GPR_NUM];
     uint32_t npc;
     sys_dbg_spu_fpscr_t fpscr;
+    uint32_t srr0;
+    uint32_t spu_status;
+    uint64_t spu_cfg;
     uint32_t mb_stat;
     uint32_t ppu_mb;
-    uint32_t spu_mb[4];
+    uint32_t spu_mb[SYS_DBG_SPU_MB_NUM];
     uint32_t decrementer;
-    uint32_t mfc_cq_sr[96];
+    uint64_t mfc_cq_sr[SYS_DBG_SPU_MFC_CQ_SR_NUM];
 } sys_dbg_spu_thread_context2_t;
 
+/* Object information records.  Each starts with the object's creation
+ * attributes.  The caller supplies the list buffers (wait_id_list and the
+ * like, 32-bit addresses in both data models) and their capacity in the
+ * *_num fields; lv2 fills them and reports the total in *_all_*_num. */
 typedef struct sys_dbg_mutex_information {
+    sys_mutex_attribute_t attr;
     sys_ppu_thread_t owner;
-    uint32_t lock_counter;
-    uint32_t cond_ref_counter;
-    uint32_t cond_id;
+    int lock_counter;
+    int cond_ref_counter;
+    sys_cond_t cond_id;
+    sys_ppu_thread_t *wait_id_list ATTRIBUTE_PRXPTR;
+    uint32_t wait_threads_num;
+    uint32_t wait_all_threads_num;
 } sys_dbg_mutex_information_t;
 
 typedef struct sys_dbg_cond_information {
+    sys_cond_attribute_t attr;
     sys_mutex_t mutex_id;
+    sys_ppu_thread_t *wait_id_list ATTRIBUTE_PRXPTR;
     uint32_t wait_threads_num;
-    sys_ppu_thread_t wait_threads[16];
+    uint32_t wait_all_threads_num;
 } sys_dbg_cond_information_t;
 
 typedef struct sys_dbg_rwlock_information {
+    sys_rwlock_attribute_t attr;
     sys_ppu_thread_t owner;
-    uint32_t readers;
-    uint32_t writers;
-    uint32_t waiting_readers;
-    uint32_t waiting_writers;
+    sys_ppu_thread_t *r_wait_id_list ATTRIBUTE_PRXPTR;
+    uint32_t r_wait_threads_num;
+    uint32_t r_wait_all_threads_num;
+    sys_ppu_thread_t *w_wait_id_list ATTRIBUTE_PRXPTR;
+    uint32_t w_wait_threads_num;
+    uint32_t w_wait_all_threads_num;
 } sys_dbg_rwlock_information_t;
 
 typedef struct sys_dbg_event_queue_information {
-    uint32_t queue_size;
-    uint32_t event_queue_depth;
+    sys_event_queue_attribute_t attr;
+    sys_ipc_key_t event_queue_key;
+    int queue_size;
+    sys_ppu_thread_t *wait_id_list ATTRIBUTE_PRXPTR;
     uint32_t wait_threads_num;
-    sys_ppu_thread_t wait_threads[16];
+    uint32_t wait_all_threads_num;
+    sys_event_t *equeue_list ATTRIBUTE_PRXPTR;
+    uint32_t readable_equeue_num;
+    uint32_t readable_all_equeue_num;
 } sys_dbg_event_queue_information_t;
 
 typedef struct sys_dbg_semaphore_information {
-    int32_t current_val;
-    int32_t max_val;
+    sys_semaphore_attribute_t attr;
+    sys_semaphore_value_t max_val;
+    sys_semaphore_value_t cur_val;
+    sys_ppu_thread_t *wait_id_list ATTRIBUTE_PRXPTR;
     uint32_t wait_threads_num;
-    sys_ppu_thread_t wait_threads[16];
+    uint32_t wait_all_threads_num;
 } sys_dbg_semaphore_information_t;
 
 typedef struct sys_dbg_lwmutex_information {
+    sys_lwmutex_attribute_t attr;
     sys_ppu_thread_t owner;
-    uint32_t lock_counter;
+    int lock_counter;
+    sys_ppu_thread_t *wait_id_list ATTRIBUTE_PRXPTR;
     uint32_t wait_threads_num;
-    sys_ppu_thread_t wait_threads[16];
+    uint32_t wait_all_threads_num;
 } sys_dbg_lwmutex_information_t;
 
 typedef struct sys_dbg_lwcond_information {
-    sys_lwmutex_pseudo_id_t lwmutex_id;
+    sys_lwcond_attribute_t attr;
+    sys_lwmutex_t *lwmutex ATTRIBUTE_PRXPTR;
+    sys_ppu_thread_t *wait_id_list ATTRIBUTE_PRXPTR;
     uint32_t wait_threads_num;
-    sys_ppu_thread_t wait_threads[16];
+    uint32_t wait_all_threads_num;
 } sys_dbg_lwcond_information_t;
 
 typedef struct sys_dbg_event_flag_wait_information {
-    sys_ppu_thread_t thread_id;
     uint64_t bitptn;
     uint32_t mode;
-    uint32_t pad;
 } sys_dbg_event_flag_wait_information_t;
 
 typedef struct sys_dbg_event_flag_information {
-    uint64_t bitptn;
-    uint32_t wait_threads_num;
-    uint32_t pad;
+    sys_event_flag_attribute_t attr;
+    uint64_t cur_bitptn;
+    sys_ppu_thread_t *wait_id_list ATTRIBUTE_PRXPTR;
     sys_dbg_event_flag_wait_information_t *wait_info_list ATTRIBUTE_PRXPTR;
+    uint32_t wait_threads_num;
+    uint32_t wait_all_threads_num;
 } sys_dbg_event_flag_information_t;
 
 typedef enum sys_dbg_ppu_thread_status {

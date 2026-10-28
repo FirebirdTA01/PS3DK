@@ -21,6 +21,19 @@ The version stamped into builds is generated from the most recent
   rather than 512 bytes. Use that wrapper for arrays of job chains.
   `CellSpursWorkloadFlag` is 16 bytes, aligned to 16, and exposes the
   32-bit `flag` at offset 12. Rebuild callers that embed these records.
+- **lv2 debugger record layouts.** The `<sys/dbg.h>` records now have the
+  layout the lv2 debug services fill in. `sys_dbg_ppu_thread_context_t`
+  keeps its 1088 bytes but has a 32-bit `cr`, the FPRs at offset 296 and a
+  32-bit `fpscr` after them (they were swapped). The SPU thread contexts
+  gain `srr0`, `spu_status` and `spu_cfg` and use 64-bit `mfc_cq_sr`
+  entries (2872 and 2888 bytes). The mutex, condition, rwlock, event queue,
+  semaphore, lwmutex, lwcond and event-flag information records start with
+  the object's attributes and carry caller-supplied wait lists
+  (`wait_id_list`, 32-bit addresses in both data models) with
+  `*_threads_num` capacity and `*_all_threads_num` totals; their old fixed
+  `wait_threads[16]` arrays and invented counters are gone. The register
+  images (`sys_dbg_vr_t`, `sys_dbg_spu_gpr_t`, `sys_dbg_spu_fpscr_t`) are
+  unions with byte, halfword, word and doubleword views. Rebuild callers.
 
 - Correct voice-port record sizes without weakening their required alignment,
   debug-font field widths and order, and 64-bit media-search timestamps in both
