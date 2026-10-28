@@ -100,6 +100,26 @@ def test_archive_scanning(clean_obj, mid_obj):
     return True
 
 
+def test_malformed_fixture():
+    print("Testing malformed input failure (fail-closed test)...")
+    with tempfile.NamedTemporaryFile(suffix='.o', delete=False) as f:
+        f.write(b"plain text not an elf file\n")
+        tmp_name = f.name
+    try:
+        res = run_audit(tmp_name)
+        if res.returncode == 0:
+            print(f"FAIL: malformed input unexpectedly passed with exit 0:\n{res.stdout}", file=sys.stderr)
+            return False
+        if "Failed to inspect relocations" not in res.stderr and "Inspection errors: 1" not in res.stdout:
+            print(f"FAIL: expected inspection error diagnostic not found:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}", file=sys.stderr)
+            return False
+        print("  PASS: malformed input correctly triggered inspection error and exit code 1")
+        return True
+    finally:
+        if os.path.exists(tmp_name):
+            os.remove(tmp_name)
+
+
 def main():
     assert AUDIT_TOOL.exists(), f"Audit tool not found at {AUDIT_TOOL}"
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -113,6 +133,7 @@ def main():
         passes = test_clean_fixture(tmp_clean) and passes
         passes = test_midentry_fixture(tmp_mid) and passes
         passes = test_archive_scanning(tmp_clean, tmp_mid) and passes
+        passes = test_malformed_fixture() and passes
 
     if not passes:
         print("\nTOC mid-entry audit tests FAILED", file=sys.stderr)

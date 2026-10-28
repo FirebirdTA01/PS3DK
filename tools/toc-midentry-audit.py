@@ -96,6 +96,8 @@ class ElfReader:
     def _parse_sections(self):
         res = subprocess.run([self.readelf, '-S', '--wide', self.path],
                              capture_output=True, text=True, check=False)
+        if res.returncode != 0:
+            raise RuntimeError(f"readelf -S failed on {self.path}: {res.stderr.strip()}")
         for line in res.stdout.splitlines():
             m = re.match(r'\s*\[\s*(\d+)\]\s+(\S+)\s+(\S+)\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)', line)
             if m:
@@ -115,6 +117,8 @@ class ElfReader:
     def _parse_symbols(self):
         res = subprocess.run([self.readelf, '-s', '--wide', self.path],
                              capture_output=True, text=True, check=False)
+        if res.returncode != 0:
+            raise RuntimeError(f"readelf -s failed on {self.path}: {res.stderr.strip()}")
         for line in res.stdout.splitlines():
             parts = line.split()
             if len(parts) >= 8 and parts[0].endswith(':'):
@@ -248,20 +252,28 @@ def verify_linked_elf_slots(elf_reader, obj_path, readelf_bin):
     """
     Capability (b): For a linked ELF and an object file, verify that TOC
     references resolve to slots holding the expected symbol+addend.
-    Returns: list of mismatch records.
+    Returns: (list of mismatch records, error_count).
     """
     # 1. Parse object relocations
     res_r = subprocess.run([readelf_bin, '-r', '--wide', obj_path],
                            capture_output=True, text=True, check=False)
+    if res_r.returncode != 0:
+        print(f"[ERROR] readelf -r failed on {obj_path}: {res_r.stderr.strip()}", file=sys.stderr)
+        return [], 1
+
     members = parse_relocations_from_output(res_r.stdout, obj_path)
     if not members:
-        return []
+        return [], 0
 
     secs = next(iter(members.values()))
 
     # 2. Parse object symbols and section indices
     res_s = subprocess.run([readelf_bin, '-s', '--wide', obj_path],
                            capture_output=True, text=True, check=False)
+    if res_s.returncode != 0:
+        print(f"[ERROR] readelf -s failed on {obj_path}: {res_s.stderr.strip()}", file=sys.stderr)
+        return [], 1
+
     obj_sec_symbols = {}
     obj_symbols_by_sec_offset = {}
     for line in res_s.stdout.splitlines():
@@ -285,6 +297,9 @@ def verify_linked_elf_slots(elf_reader, obj_path, readelf_bin):
 
     res_S = subprocess.run([readelf_bin, '-S', '--wide', obj_path],
                            capture_output=True, text=True, check=False)
+    if res_S.returncode != 0:
+        print(f"[ERROR] readelf -S failed on {obj_path}: {res_S.stderr.strip()}", file=sys.stderr)
+        return [], 1
     obj_sec_idx = {}
     for line in res_S.stdout.splitlines():
         m = re.match(r'\s*\[\s*(\d+)\]\s+(\S+)', line)
@@ -439,7 +454,7 @@ def verify_linked_elf_slots(elf_reader, obj_path, readelf_bin):
                                 'expected_sym': elf_reader.lookup_symbol_at(expected_val),
                             })
 
-    return mismatches
+    return mismatches, 0
 
 
 def collect_targets(input_paths, recursive=True):
@@ -499,6 +514,7 @@ def main():
     total_files = len(targets)
     total_violations = 0
     total_mismatches = 0
+    total_errors = 0
     archive_count = 0
     object_count = 0
 
@@ -514,7 +530,11 @@ def main():
         if not os.path.exists(args.elf):
             print(f"Error: ELF file not found: {args.elf}", file=sys.stderr)
             return 2
-        elf_reader = ElfReader(args.elf, readelf_bin)
+        try:
+            elf_reader = ElfReader(args.elf, readelf_bin)
+        except Exception as ex:
+            print(f"Error initializing ELF reader: {ex}", file=sys.stderr)
+            return 2
 
     archive_summary = []
 
@@ -528,6 +548,20 @@ def main():
         # Capability (a): Relocation scan
         res_r = subprocess.run([readelf_bin, '-r', '--wide', target],
                                capture_output=True, text=True, check=False)
+        if res_r.returncode != 0:
+            print(f"[ERROR] Failed to inspect relocations in {target}: {res_r.stderr.strip()}", file=sys.stderr)
+            total_errors += 1
+            if is_archive:
+                archive_summary.append({
+                    'path': target,
+                    'name': os.path.basename(target),
+                    'dir': os.path.basename(os.path.dirname(target)),
+                    'members': 0,
+                    'violations': 0,
+                    'error': True,
+                })
+            continue
+
         members = parse_relocations_from_output(res_r.stdout, target)
         violations_by_member = audit_object_relocs(members)
 
@@ -541,6 +575,7 @@ def main():
                 'dir': os.path.basename(os.path.dirname(target)),
                 'members': len(members),
                 'violations': v_count,
+                'error': False,
             })
 
         if violations_by_member:
@@ -553,7 +588,8 @@ def main():
 
         # Capability (b): Linked slot verification (if --elf provided and not archive)
         if elf_reader and not is_archive:
-            mismatches = verify_linked_elf_slots(elf_reader, target, readelf_bin)
+            mismatches, err = verify_linked_elf_slots(elf_reader, target, readelf_bin)
+            total_errors += err
             if mismatches:
                 total_mismatches += len(mismatches)
                 print(f"[SLOT-MISMATCH] TOC slot corruption in {target} against {os.path.basename(args.elf)} ({len(mismatches)} occurrence{'s' if len(mismatches) > 1 else ''}):")
@@ -566,7 +602,12 @@ def main():
     if args.summary or (archive_count > 0 and not args.quiet):
         print("\n--- Archive Audit Summary ---")
         for item in sorted(archive_summary, key=lambda x: (x['dir'], x['name'])):
-            status = f"FLAGGED ({item['violations']} violations)" if item['violations'] > 0 else "CLEAN"
+            if item.get('error'):
+                status = "ERROR"
+            elif item['violations'] > 0:
+                status = f"FLAGGED ({item['violations']} violations)"
+            else:
+                status = "CLEAN"
             loc = f"{item['dir']}/{item['name']}"
             print(f"  {loc:<45} : {status:<12} ({item['members']} members)")
 
@@ -576,8 +617,10 @@ def main():
         print(f"Mid-entry TOC relocations (Capability a): {total_violations}")
         if elf_reader:
             print(f"Linked TOC slot mismatches (Capability b): {total_mismatches}")
+        if total_errors > 0:
+            print(f"Inspection errors: {total_errors}")
 
-    if total_violations > 0 or total_mismatches > 0:
+    if total_violations > 0 or total_mismatches > 0 or total_errors > 0:
         return 1
     return 0
 
