@@ -2,10 +2,13 @@
 """
 Test harness for tools/toc-midentry-audit.py.
 
-Exercises positive and negative fixtures to ensure:
+Exercises positive and negative test cases to ensure:
   1. Clean object with start-of-entry TOC relocations passes with exit code 0.
-  2. Crafted object with mid-entry TOC relocations is detected and exits non-zero.
-  3. Archive containing both clean and mid-entry members reports per-member status.
+  2. Crafted object with mid-entry TOC relocations is detected and exits 1.
+  3. Malformed / invalid input fails closed with exit code 1 and surfaces diagnostics.
+  4. Missing requested input path fails closed immediately with exit code 2.
+  5. Invalid tool override path fails closed immediately with exit code 2.
+  6. Archive containing both clean and mid-entry members reports per-member status.
 """
 
 import base64
@@ -39,7 +42,6 @@ def materialize_fixture(src_path, b64_fallback, out_path):
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0:
             return True
-    # Fallback to pre-assembled binary
     data = base64.b64decode(b64_fallback)
     out_path.write_bytes(data)
     return True
@@ -61,8 +63,8 @@ def test_clean_fixture(clean_obj):
 def test_midentry_fixture(mid_obj):
     print("Testing mid-entry fixture (negative case)...")
     res = run_audit(str(mid_obj))
-    if res.returncode == 0:
-        print(f"FAIL: mid-entry fixture unexpectedly exited with 0:\n{res.stdout}", file=sys.stderr)
+    if res.returncode != 1:
+        print(f"FAIL: mid-entry fixture returned {res.returncode} instead of 1:\n{res.stdout}", file=sys.stderr)
         return False
     if "targets .toc + 0x4" not in res.stdout or "Inside entry [0x0, 0x8)" not in res.stdout:
         print(f"FAIL: mid-entry details missing in output:\n{res.stdout}", file=sys.stderr)
@@ -71,6 +73,54 @@ def test_midentry_fixture(mid_obj):
         print(f"FAIL: mid-entry count mismatch:\n{res.stdout}", file=sys.stderr)
         return False
     print("  PASS: mid-entry fixture flagged 2 violations at .toc+0x4, exit code 1")
+    return True
+
+
+def test_malformed_fixture():
+    print("Testing malformed input failure (fail-closed test)...")
+    with tempfile.NamedTemporaryFile(suffix='.o', delete=False) as f:
+        f.write(b"plain text not an elf file\n")
+        tmp_name = f.name
+    try:
+        res = run_audit(tmp_name)
+        if res.returncode != 1:
+            print(f"FAIL: malformed input returned {res.returncode} instead of 1:\n{res.stdout}\n{res.stderr}", file=sys.stderr)
+            return False
+        if "Invalid or malformed file" not in res.stderr and "Inspection / producer errors: 1" not in res.stdout:
+            print(f"FAIL: expected inspection error diagnostic not found:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}", file=sys.stderr)
+            return False
+        print("  PASS: malformed input correctly triggered inspection error and exit code 1")
+        return True
+    finally:
+        if os.path.exists(tmp_name):
+            os.remove(tmp_name)
+
+
+def test_missing_input():
+    print("Testing missing input path rejection (fail-closed test)...")
+    missing_path = "tests/host/fixtures/does_not_exist_fixture.o"
+    res = run_audit(missing_path)
+    if res.returncode != 2:
+        print(f"FAIL: missing input returned {res.returncode} instead of 2:\n{res.stdout}\n{res.stderr}", file=sys.stderr)
+        return False
+    if "Input path not found" not in res.stderr:
+        print(f"FAIL: expected missing input error on stderr:\n{res.stderr}", file=sys.stderr)
+        return False
+    print("  PASS: missing input path rejected with exit code 2")
+    return True
+
+
+def test_invalid_tool_override(clean_obj):
+    print("Testing invalid tool override rejection (fail-closed test)...")
+    bad_readelf = "/nonexistent/tool/powerpc64-ps3-elf-readelf"
+    res = run_audit('--readelf', bad_readelf, str(clean_obj))
+    if res.returncode != 2:
+        print(f"FAIL: invalid tool override returned {res.returncode} instead of 2:\n{res.stdout}\n{res.stderr}", file=sys.stderr)
+        return False
+    if "Specified tool override not found" not in res.stderr:
+        print(f"FAIL: expected tool override error on stderr:\n{res.stderr}", file=sys.stderr)
+        return False
+    print("  PASS: invalid tool override rejected with exit code 2")
     return True
 
 
@@ -90,34 +140,14 @@ def test_archive_scanning(clean_obj, mid_obj):
             return True
 
         res = run_audit(str(arch_path))
-        if res.returncode == 0:
-            print(f"FAIL: archive with mid-entry member unexpectedly exited 0:\n{res.stdout}", file=sys.stderr)
+        if res.returncode != 1:
+            print(f"FAIL: archive with mid-entry member returned {res.returncode} instead of 1:\n{res.stdout}", file=sys.stderr)
             return False
         if "toc_midentry.o" not in res.stdout:
             print(f"FAIL: flagged member name missing from archive output:\n{res.stdout}", file=sys.stderr)
             return False
         print("  PASS: archive scanner flagged mid-entry member inside archive")
     return True
-
-
-def test_malformed_fixture():
-    print("Testing malformed input failure (fail-closed test)...")
-    with tempfile.NamedTemporaryFile(suffix='.o', delete=False) as f:
-        f.write(b"plain text not an elf file\n")
-        tmp_name = f.name
-    try:
-        res = run_audit(tmp_name)
-        if res.returncode == 0:
-            print(f"FAIL: malformed input unexpectedly passed with exit 0:\n{res.stdout}", file=sys.stderr)
-            return False
-        if "Failed to inspect relocations" not in res.stderr and "Inspection errors: 1" not in res.stdout:
-            print(f"FAIL: expected inspection error diagnostic not found:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}", file=sys.stderr)
-            return False
-        print("  PASS: malformed input correctly triggered inspection error and exit code 1")
-        return True
-    finally:
-        if os.path.exists(tmp_name):
-            os.remove(tmp_name)
 
 
 def main():
@@ -132,8 +162,10 @@ def main():
         passes = True
         passes = test_clean_fixture(tmp_clean) and passes
         passes = test_midentry_fixture(tmp_mid) and passes
-        passes = test_archive_scanning(tmp_clean, tmp_mid) and passes
         passes = test_malformed_fixture() and passes
+        passes = test_missing_input() and passes
+        passes = test_invalid_tool_override(tmp_clean) and passes
+        passes = test_archive_scanning(tmp_clean, tmp_mid) and passes
 
     if not passes:
         print("\nTOC mid-entry audit tests FAILED", file=sys.stderr)
