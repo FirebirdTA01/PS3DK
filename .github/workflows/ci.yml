@@ -336,6 +336,9 @@ jobs:
       - name: Test NP clans, commerce2, and matching2 record layouts
         run: bash tests/sdk/np-record-layout-test.sh
 
+      - name: Test SAIL player, recorder, and composer record layouts
+        run: bash tests/sdk/sail-record-layout-test.sh
+
       - name: Test the cell/hash digests against hashlib
         run: bash tests/sdk/hash-vectors-test.sh
 
