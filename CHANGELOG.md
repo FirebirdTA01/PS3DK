@@ -16,7 +16,7 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-## [v0.26.152] — 2026-10-27
+## [v0.26.153] — 2026-10-28
 
 ### Added
 
@@ -374,6 +374,15 @@ The version stamped into builds is generated from the most recent
 
 - **PSGL sample guide.** `samples/README.md` lists the PSGL samples, what
   each validates, and the four ways their shaders are built.
+
+### Known issues
+
+- **Intermittent loss of the network loader after an SPU draw sample.** In
+  one hardware batch on 2026-10-26, the PS3 network loader did not come
+  back after `hello-psgl-spudraw` and the console had to be power-cycled.
+  The library then still had the teardown completion race fixed in this
+  release. The loss did not reproduce in later hardware runs, with either
+  library, and its cause has not been established.
 
 ## [v0.26.0] — 2026-10-25
 
