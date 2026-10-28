@@ -26,6 +26,8 @@
 #include <malloc.h>
 #include <unistd.h>
 
+#include "../../common/gcm_host_buffer.h"
+
 #include <ppu-lv2.h>
 #include <ppu-types.h>
 #include <sys/process.h>
@@ -209,7 +211,7 @@ int main(int argc, const char **argv)
     (void)argc;
     (void)argv;
 
-    void                *host_addr;
+    sys_addr_t           host_addr = 0;
     display_buffer       buffers[MAX_BUFFERS];
     int                  cur = 0;
     padInfo              padinfo;
@@ -217,10 +219,15 @@ int main(int argc, const char **argv)
 
     printf("hello-ppu-cellgcm-drawenv: setSurface+setDrawEnv repro\n");
 
-    host_addr = memalign(1024 * 1024, HOST_SIZE);
-    if (!init_screen(host_addr, HOST_SIZE)) {
+    /* LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed after
+     * GCM init — the RSX may still fetch commands from it; process exit
+     * reclaims it. */
+    if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+        printf("  gcm_host_buffer_alloc(%d MiB) failed\n", HOST_SIZE / (1024 * 1024));
+        return 1;
+    }
+    if (!init_screen((void *)(uintptr_t)host_addr, HOST_SIZE)) {
         printf("  init_screen failed\n");
-        free(host_addr);
         return 1;
     }
     ctx = CELL_GCM_CURRENT;
@@ -232,7 +239,6 @@ int main(int argc, const char **argv)
         if (!make_buffer(&buffers[i], screen_w, screen_h, i)) {
             printf("  make_buffer[%d] failed\n", i);
             cellGcmFinish(ctx, 0);
-            free(host_addr);
             return 1;
         }
     }
@@ -293,7 +299,6 @@ int main(int argc, const char **argv)
      * rsxFree is allocator-only. Process exit reclaims RSX memory; for
      * full structured teardown see the system sampleBasic pattern.
      */
-    free(host_addr);
     ioPadEnd();
 
     printf("hello-ppu-cellgcm-drawenv: done\n");

@@ -12,6 +12,9 @@
 #include <string.h>
 #include <malloc.h>
 #include <unistd.h>
+
+#include "../../../gcm/common/gcm_host_buffer.h"
+
 #include <ppu-lv2.h>
 #include <ppu-types.h>
 #include <sys/process.h>
@@ -101,11 +104,15 @@ int main(void)
 {
 	printf("hello-ppu-dbgfont-console: starting\n");
 
-	void *host_addr = memalign(1024*1024, HOST_SIZE);
-	if (!host_addr) { printf("FAILURE: host memalign\n"); return 1; }
+	sys_addr_t host_addr = 0;
+	/* LV2 pages, not sbrk heap: see gcm_host_buffer.h.
+	 * Never freed — RSX keeps fetching from it after cellGcmInit. */
+	if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+		printf("FAILURE: gcm_host_buffer_alloc\n"); return 1;
+	}
 
 	videoState state; videoConfiguration vcfg; videoResolution res;
-	if (cellGcmInit(CB_SIZE, HOST_SIZE, host_addr) != 0) return 1;
+	if (cellGcmInit(CB_SIZE, HOST_SIZE, (void *)(uintptr_t)host_addr) != 0) return 1;
 	if (videoGetState(0,0,&state) != 0 || state.state != 0) return 1;
 	if (videoGetResolution(state.displayMode.resolution, &res) != 0) return 1;
 	memset(&vcfg,0,sizeof(vcfg));
@@ -193,7 +200,6 @@ int main(void)
 	cellDbgFontExitGcm();
 	free(dbg_buf);
 	cellGcmFinish(CELL_GCM_CURRENT, 0);
-	free(host_addr);
 	printf("SUCCESS\n");
 	return 0;
 }

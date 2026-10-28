@@ -44,6 +44,8 @@
 #include <math.h>
 #include <unistd.h>
 
+#include "../../common/gcm_host_buffer.h"
+
 #include <ppu-lv2.h>
 #include <ppu-types.h>
 #include <sys/process.h>
@@ -537,20 +539,23 @@ int main(int argc, const char **argv)
 {
 	(void)argc; (void)argv;
 
-	void               *host_addr;
+	sys_addr_t host_addr = 0;
 	CellGcmContextData *ctx;
 
 	printf("hello-ppu-cellgcm-discard-blend: FP discard + VecConstructTexMul validation\n");
 
-	host_addr = memalign(1024 * 1024, HOST_SIZE);
-	if (cellGcmInit(CB_SIZE, HOST_SIZE, host_addr) != 0) {
+	/* LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed after
+	 * GCM init — the RSX may still fetch commands from it; process exit reclaims it. */
+	if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+		printf("  gcm_host_buffer_alloc(%d MiB) failed\n", HOST_SIZE / (1024 * 1024));
+		return 1;
+	}
+	if (cellGcmInit(CB_SIZE, HOST_SIZE, (void *)(uintptr_t)host_addr) != 0) {
 		printf("  cellGcmInit failed\n");
-		free(host_addr);
 		return 1;
 	}
 	if (!init_display()) {
 		printf("  init_display failed\n");
-		free(host_addr);
 		return 1;
 	}
 	ctx = CELL_GCM_CURRENT;
@@ -616,7 +621,6 @@ int main(int argc, const char **argv)
 	if (g_exit_request) printf("  early exit on user request\n");
 
 	program_exit(ctx);
-	free(host_addr);
 	ioPadEnd();
 
 	printf("hello-ppu-cellgcm-discard-blend: done\n");

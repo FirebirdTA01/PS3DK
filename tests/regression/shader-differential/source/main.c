@@ -183,6 +183,8 @@
 #include <strings.h>
 #include <malloc.h>
 #include <unistd.h>
+
+#include "../../../../samples/gcm/common/gcm_host_buffer.h"
 #include <sys/time.h>
 
 #include <ppu-lv2.h>
@@ -4256,10 +4258,16 @@ int main(int argc, const char **argv)
 	printf("shader-differential: %d pairs, %d uniform entries, target=%s\n",
 	       g_npairs, g_nuniforms, g_target);
 
-	void *host_addr = memalign(1024 * 1024, HOST_SIZE);
-	if (!init_screen(host_addr, HOST_SIZE)) {
+	sys_addr_t host_addr = 0;
+	/* LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed
+	 * after GCM init — the RSX may still fetch from it; process exit
+	 * reclaims it. */
+	if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+		printf("shader-differential: gcm_host_buffer_alloc failed\nSHADER_DIFF_INVALID\n");
+		return 2;
+	}
+	if (!init_screen((void *)(uintptr_t)host_addr, HOST_SIZE)) {
 		printf("shader-differential: init failed\nSHADER_DIFF_INVALID\n");
-		free(host_addr);
 		return 2;
 	}
 	CellGcmContextData *ctx = (CellGcmContextData *)gCellGcmCurrentContext;
@@ -4269,7 +4277,6 @@ int main(int argc, const char **argv)
 		if (!make_buffer(&buffers[i], i)) {
 			printf("shader-differential: buffer init failed\nSHADER_DIFF_INVALID\n");
 			cellGcmFinish(ctx, 0);
-			free(host_addr);
 			return 2;
 		}
 	}
@@ -4316,16 +4323,14 @@ int main(int argc, const char **argv)
 	if (!init_procedural_texture()) {
 		printf("shader-differential: texture alloc failed\nSHADER_DIFF_INVALID\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 2;
 	}
 
 	/* ---- readback buffer at the host region's tail ---- */
-	g_readback = (u32 *)((char *)host_addr + HOST_SIZE - (64 * 1024));
+	g_readback = (u32 *)((char *)(uintptr_t)host_addr + HOST_SIZE - (64 * 1024));
 	if (cellGcmAddressToOffset(g_readback, &g_readback_off) != 0) {
 		printf("shader-differential: readback offset failed\nSHADER_DIFF_INVALID\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 2;
 	}
 
@@ -4343,7 +4348,6 @@ int main(int argc, const char **argv)
 			fclose(vf);
 		}
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return rc;
 	}
 
@@ -4367,7 +4371,6 @@ int main(int argc, const char **argv)
 	if (!rt_alloc_ok || cellGcmAddressToOffset(rt_depth, &rt_depth_off) != 0) {
 		printf("shader-differential: RT alloc failed\nSHADER_DIFF_INVALID\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 2;
 	}
 	u32 rt_a_off = rt_a_offs[0], rt_b_off = rt_b_offs[0];
@@ -4384,7 +4387,6 @@ int main(int argc, const char **argv)
 	if (!save_ok) {
 		printf("shader-differential: save alloc failed\nSHADER_DIFF_INVALID\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 2;
 	}
 	u32 *save_a = save_a_all[0], *save_b = save_b_all[0];
@@ -4413,7 +4415,6 @@ int main(int argc, const char **argv)
 	if (!canary) {
 		printf("shader-differential: cannot load the identity control's container for the poison canary\nSHADER_DIFF_INVALID\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 2;
 	}
 	int have_tex_control = 0;
@@ -4920,7 +4921,6 @@ int main(int argc, const char **argv)
 				       g_npairs - 2);
 				cellGcmSetWaitFlip(ctx);
 				cellGcmFinish(ctx, 1);
-				free(host_addr);
 				return 2;
 			}
 		} else if (strcmp(p->role, "probe") == 0) {
@@ -4980,7 +4980,6 @@ int main(int argc, const char **argv)
 			free(canary);
 			cellGcmSetWaitFlip(ctx);
 			cellGcmFinish(ctx, 1);
-			free(host_addr);
 			return 2;
 		}
 #ifdef SD_SABOTAGE_TEXTURE
@@ -5007,7 +5006,6 @@ int main(int argc, const char **argv)
 				free(canary);
 				cellGcmSetWaitFlip(ctx);
 				cellGcmFinish(ctx, 1);
-				free(host_addr);
 				return 2;
 			}
 		}
@@ -5027,6 +5025,5 @@ int main(int argc, const char **argv)
 
 	cellGcmSetWaitFlip(ctx);
 	cellGcmFinish(ctx, 1);
-	free(host_addr);
 	return failures == 0 ? 0 : 1;
 }

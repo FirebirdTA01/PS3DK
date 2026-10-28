@@ -30,6 +30,8 @@
 #include <malloc.h>
 #include <unistd.h>
 
+#include "../../common/gcm_host_buffer.h"
+
 #include <ppu-lv2.h>
 #include <ppu-types.h>
 #include <sys/process.h>
@@ -207,7 +209,7 @@ int main(int argc, const char **argv)
 	(void)argc;
 	(void)argv;
 
-	void               *host_addr;
+	sys_addr_t           host_addr = 0;
 	display_buffer      buffers[MAX_BUFFERS];
 	int                 cur = 0;
 	uint16_t            width = 0, height = 0;
@@ -225,10 +227,14 @@ int main(int argc, const char **argv)
 	fifo_rc = cellGcmInitDefaultFifoMode(CELL_GCM_DEFAULT_FIFO_MODE_CONDITIONAL);
 	printf("  cellGcmInitDefaultFifoMode(CONDITIONAL) -> %d\n", (int)fifo_rc);
 
-	host_addr = memalign(1024 * 1024, HOST_SIZE);
-	if (!init_screen(host_addr, HOST_SIZE, &width, &height)) {
+	/* LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed
+	 * after GCM init — process exit reclaims it. */
+	if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+		printf("  gcm_host_buffer_alloc(%d MiB) failed\n", HOST_SIZE / (1024 * 1024));
+		return 1;
+	}
+	if (!init_screen((void *)(uintptr_t)host_addr, HOST_SIZE, &width, &height)) {
 		printf("  init_screen failed\n");
-		free(host_addr);
 		return 1;
 	}
 	ctx = CELL_GCM_CURRENT;
@@ -242,7 +248,6 @@ int main(int argc, const char **argv)
 		if (!make_buffer(&buffers[i], width, height, i)) {
 			printf("  make_buffer[%d] failed\n", i);
 			cellGcmFinish(ctx, 0);
-			free(host_addr);
 			return 1;
 		}
 	}

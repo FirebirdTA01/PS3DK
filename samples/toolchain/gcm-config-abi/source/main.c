@@ -41,6 +41,8 @@
 #include <sys/process.h>
 #include <cell/gcm.h>
 
+#include "../../../gcm/common/gcm_host_buffer.h"
+
 /*
  * The probe call lives in probe.c — a TU that does NOT include
  * cell/gcm.h, so the raw NID-stub cellGcmGetConfiguration is
@@ -65,17 +67,18 @@ int main(void)
 {
     printf("gcm-config-abi: begin\n");
 
-    /* Allocate host memory for cellGcmInit. */
-    void *host_addr = memalign(1024 * 1024, HOST_SIZE);
-    if (!host_addr) {
-        printf("gcm-config-abi: FAIL: memalign host\n");
+    /* Allocate host memory for cellGcmInit.
+     * LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed
+     * after GCM init — process exit reclaims it. */
+    sys_addr_t host_addr = 0;
+    if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+        printf("gcm-config-abi: FAIL: gcm_host_buffer_alloc\n");
         return 1;
     }
 
-    int rc = cellGcmInit(CB_SIZE, HOST_SIZE, host_addr);
+    int rc = cellGcmInit(CB_SIZE, HOST_SIZE, (void *)(uintptr_t)host_addr);
     if (rc != 0) {
         printf("gcm-config-abi: FAIL: cellGcmInit rc=%d\n", rc);
-        free(host_addr);
         return 1;
     }
     printf("gcm-config-abi: cellGcmInit OK\n");
@@ -116,6 +119,5 @@ int main(void)
     }
 
     printf("gcm-config-abi: done\n");
-    free(host_addr);
     return 0;
 }

@@ -18,6 +18,9 @@
 #include <string.h>
 #include <malloc.h>
 #include <unistd.h>
+
+#include "../../../samples/gcm/common/gcm_host_buffer.h"
+
 #include <sys/process.h>
 #include <cell/gcm.h>
 #include <cell/gcm/ps3tc_fifo_wrap.h>
@@ -49,8 +52,14 @@ static int wait_word(volatile uint32_t *word, uint32_t value)
 
 int main(void)
 {
-	void *host = memalign(1024 * 1024, HOST_SIZE);
-	if (!host || cellGcmInit(CB_SIZE, HOST_SIZE, host) != 0) {
+	sys_addr_t host = 0;
+	/* LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed
+	 * after GCM init — process exit reclaims it. */
+	if (gcm_host_buffer_alloc(HOST_SIZE, &host) != 0) {
+		printf("GCM_NOREWIND_FAIL gcm_host_buffer_alloc failed\n");
+		return 1;
+	}
+	if (cellGcmInit(CB_SIZE, HOST_SIZE, (void *)(uintptr_t)host) != 0) {
 		printf("GCM_NOREWIND_FAIL init failed\n");
 		return 1;
 	}

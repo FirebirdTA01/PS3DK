@@ -33,6 +33,8 @@
 #include <malloc.h>
 #include <unistd.h>
 
+#include "../../../../samples/gcm/common/gcm_host_buffer.h"
+
 #include <ppu-lv2.h>
 #include <ppu-types.h>
 #include <sys/process.h>
@@ -600,10 +602,16 @@ int main(int argc, const char **argv)
 	(void)argc; (void)argv;
 	printf("shader-readback: tier-c judged shader tests\n");
 
-	void *host_addr = memalign(1024 * 1024, HOST_SIZE);
-	if (!init_screen(host_addr, HOST_SIZE)) {
+	sys_addr_t host_addr = 0;
+	/* LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed
+	 * after GCM init — the RSX may still fetch from it; process exit
+	 * reclaims it. */
+	if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+		printf("shader-readback: gcm_host_buffer_alloc failed\nSHADER_READBACK_FAIL\n");
+		return 1;
+	}
+	if (!init_screen((void *)(uintptr_t)host_addr, HOST_SIZE)) {
 		printf("shader-readback: init failed\nSHADER_READBACK_FAIL\n");
-		free(host_addr);
 		return 1;
 	}
 	CellGcmContextData *ctx = (CellGcmContextData *)gCellGcmCurrentContext;
@@ -613,7 +621,6 @@ int main(int argc, const char **argv)
 		if (!make_buffer(&buffers[i], i)) {
 			printf("shader-readback: buffer init failed\nSHADER_READBACK_FAIL\n");
 			cellGcmFinish(ctx, 0);
-			free(host_addr);
 			return 1;
 		}
 	}
@@ -666,7 +673,6 @@ int main(int argc, const char **argv)
 	if (!xform_mvp_param) {
 		printf("shader-readback: rb_xform 'mvp' uniform not found in the container\nSHADER_READBACK_FAIL\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 1;
 	}
 	cellGcmCgUploadInternalConsts(ctx, xform_vpo);
@@ -675,11 +681,10 @@ int main(int argc, const char **argv)
 	 * host region's tail (the command buffer owns the head).  Its
 	 * offset is in the RSX IO space, which is what LOCAL_TO_MAIN
 	 * transfers write through. ---- */
-	g_readback = (u32 *)((char *)host_addr + HOST_SIZE - (64 * 1024));
+	g_readback = (u32 *)((char *)(uintptr_t)host_addr + HOST_SIZE - (64 * 1024));
 	if (cellGcmAddressToOffset(g_readback, &g_readback_off) != 0) {
 		printf("shader-readback: readback offset failed\nSHADER_READBACK_FAIL\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 1;
 	}
 
@@ -693,7 +698,6 @@ int main(int argc, const char **argv)
 	    cellGcmAddressToOffset(rt_depth_ptr, &rt_depth_off) != 0) {
 		printf("shader-readback: RT alloc failed\nSHADER_READBACK_FAIL\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 1;
 	}
 
@@ -772,7 +776,6 @@ int main(int argc, const char **argv)
 			printf("shader-readback: test '%s' expected probe (%d,%d) 0x%08x collides with a sentinel — pick different test values or move the probe\nSHADER_READBACK_FAIL\n",
 			       tests[i].name, tests[i].probe_x, tests[i].probe_y, packed);
 			cellGcmFinish(ctx, 0);
-			free(host_addr);
 			return 1;
 		}
 	}
@@ -786,6 +789,5 @@ int main(int argc, const char **argv)
 
 	cellGcmSetWaitFlip(ctx);
 	cellGcmFinish(ctx, 1);
-	free(host_addr);
 	return passed == n_tests ? 0 : 1;
 }

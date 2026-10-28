@@ -37,6 +37,8 @@
 #include <malloc.h>
 #include <unistd.h>
 
+#include "../../../../samples/gcm/common/gcm_host_buffer.h"
+
 #include <ppu-lv2.h>
 #include <ppu-types.h>
 #include <sys/process.h>
@@ -229,10 +231,16 @@ int main(int argc, const char **argv)
 	(void)argc; (void)argv;
 	printf("uniform-readback: fragment uniform runtime update witness (fragment-uniform-update)\n");
 
-	void *host_addr = memalign(1024 * 1024, HOST_SIZE);
-	if (!init_screen(host_addr, HOST_SIZE)) {
+	sys_addr_t host_addr = 0;
+	/* LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed
+	 * after GCM init — the RSX may still fetch from it; process exit
+	 * reclaims it. */
+	if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+		printf("uniform-readback: gcm_host_buffer_alloc failed\nUNIFORM_READBACK_FAIL\n");
+		return 1;
+	}
+	if (!init_screen((void *)(uintptr_t)host_addr, HOST_SIZE)) {
 		printf("uniform-readback: init failed\nUNIFORM_READBACK_FAIL\n");
-		free(host_addr);
 		return 1;
 	}
 	CellGcmContextData *ctx = (CellGcmContextData *)gCellGcmCurrentContext;
@@ -242,7 +250,6 @@ int main(int argc, const char **argv)
 		if (!make_buffer(&buffers[i], i)) {
 			printf("uniform-readback: buffer init failed\nUNIFORM_READBACK_FAIL\n");
 			cellGcmFinish(ctx, 0);
-			free(host_addr);
 			return 1;
 		}
 	}
@@ -290,16 +297,14 @@ int main(int argc, const char **argv)
 	if (!u_color) {
 		printf("uniform-readback: uniform 'u_color' not found in container\nUNIFORM_READBACK_FAIL\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 1;
 	}
 
 	/* ---- host readback buffer ---- */
-	g_readback = (u32 *)((char *)host_addr + HOST_SIZE - (64 * 1024));
+	g_readback = (u32 *)((char *)(uintptr_t)host_addr + HOST_SIZE - (64 * 1024));
 	if (cellGcmAddressToOffset(g_readback, &g_readback_off) != 0) {
 		printf("uniform-readback: readback offset failed\nUNIFORM_READBACK_FAIL\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 1;
 	}
 
@@ -313,7 +318,6 @@ int main(int argc, const char **argv)
 	    cellGcmAddressToOffset(rt_depth_ptr, &rt_depth_off) != 0) {
 		printf("uniform-readback: RT alloc failed\nUNIFORM_READBACK_FAIL\n");
 		cellGcmFinish(ctx, 0);
-		free(host_addr);
 		return 1;
 	}
 
@@ -349,7 +353,7 @@ int main(int argc, const char **argv)
 	if (g_readback[0] != GPU_CLEAR_MARK1) {
 		printf("uniform-readback: draw1 gpu clear failed (got 0x%08x want 0x%08x)\nUNIFORM_READBACK_FAIL\n",
 		       g_readback[0], GPU_CLEAR_MARK1);
-		cellGcmFinish(ctx, 0); free(host_addr); return 1;
+		cellGcmFinish(ctx, 0); return 1;
 	}
 
 	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
@@ -378,7 +382,7 @@ int main(int argc, const char **argv)
 	if (g_readback[0] != GPU_CLEAR_MARK2) {
 		printf("uniform-readback: draw2 gpu clear failed (got 0x%08x want 0x%08x)\nUNIFORM_READBACK_FAIL\n",
 		       g_readback[0], GPU_CLEAR_MARK2);
-		cellGcmFinish(ctx, 0); free(host_addr); return 1;
+		cellGcmFinish(ctx, 0); return 1;
 	}
 
 	cellGcmSetFragmentProgram(ctx, fpo, fp_offset);
@@ -424,7 +428,6 @@ int main(int argc, const char **argv)
 		printf("UNIFORM_READBACK_FAIL\n");
 		cellGcmSetWaitFlip(ctx);
 		cellGcmFinish(ctx, 1);
-		free(host_addr);
 		return 1;
 	}
 
@@ -449,7 +452,6 @@ int main(int argc, const char **argv)
 		printf("UNIFORM_READBACK_OK\n");
 		cellGcmSetWaitFlip(ctx);
 		cellGcmFinish(ctx, 1);
-		free(host_addr);
 		return 0;
 	}
 
@@ -458,6 +460,5 @@ int main(int argc, const char **argv)
 	printf("UNIFORM_READBACK_FAIL\n");
 	cellGcmSetWaitFlip(ctx);
 	cellGcmFinish(ctx, 1);
-	free(host_addr);
 	return 1;
 }

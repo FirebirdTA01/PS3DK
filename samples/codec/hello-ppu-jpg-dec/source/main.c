@@ -23,6 +23,8 @@
 #include <malloc.h>
 #include <unistd.h>
 
+#include "../../../gcm/common/gcm_host_buffer.h"
+
 #include <ppu-types.h>
 #include <sys/process.h>
 #include <sysutil/video.h>
@@ -313,12 +315,18 @@ int main(int argc, char **argv)
 
     printf("hello-ppu-jpg-dec: cellJpgDec + RSX display\n");
 
-    void *host_addr = memalign(1024 * 1024, HOST_SIZE);
+    sys_addr_t host_addr = 0;
+    /* LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed after
+     * rsxInit() maps it — the RSX may still fetch commands from it; process
+     * exit reclaims it. */
+    if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0) {
+        printf("  gcm_host_buffer_alloc(%d MiB) failed\n", HOST_SIZE / (1024 * 1024));
+        return 1;
+    }
     u16   fb_w = 0, fb_h = 0;
-    gcmContextData *ctx = init_screen(host_addr, HOST_SIZE, &fb_w, &fb_h);
+    gcmContextData *ctx = init_screen((void *)(uintptr_t)host_addr, HOST_SIZE, &fb_w, &fb_h);
     if (!ctx) {
         printf("  init_screen failed\n");
-        free(host_addr);
         return 1;
     }
     printf("  RSX up at %ux%u\n", (unsigned)fb_w, (unsigned)fb_h);
@@ -329,7 +337,6 @@ int main(int argc, char **argv)
     if (!rgba) {
         printf("  decode failed\n");
         rsxFinish(ctx, 0);
-        free(host_addr);
         return 1;
     }
     printf("  decoded %ux%u (stride=%zu)\n",
@@ -340,7 +347,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < MAX_BUFFERS; i++) {
         if (!make_buffer(&buffers[i], fb_w, fb_h, i)) {
             printf("  make_buffer[%d] failed\n", i);
-            free(rgba); rsxFinish(ctx, 0); free(host_addr);
+            free(rgba); rsxFinish(ctx, 0);
             return 1;
         }
         blit_rgba_to_xrgb(&buffers[i], rgba, img_stride, img_w, img_h);
@@ -377,7 +384,6 @@ int main(int argc, char **argv)
     rsxFinish(ctx, 1);
     ioPadEnd();
     free(rgba);
-    free(host_addr);
 
     printf("hello-ppu-jpg-dec: done\n");
     return 0;

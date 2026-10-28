@@ -38,6 +38,8 @@
 #include <unistd.h>
 #include <math.h>
 
+#include "../../../gcm/common/gcm_host_buffer.h"
+
 #include <ppu-types.h>
 #include <sys/process.h>
 #include <sysutil/video.h>
@@ -484,11 +486,13 @@ int main(int argc, char **argv)
 
     printf("hello-ppu-font-render: system font through cellFont and PSL1GHT names\n");
 
-    void *host_addr = memalign(1024 * 1024, HOST_SIZE);
-    if (!host_addr)
-        return fail("host memory allocation failed");
+    sys_addr_t host_addr = 0;
+    /* LV2 pages, not the sbrk heap (see gcm_host_buffer.h).  Never freed
+     * after GCM init — process exit reclaims it. */
+    if (gcm_host_buffer_alloc(HOST_SIZE, &host_addr) != 0)
+        return fail("gcm_host_buffer_alloc failed");
     u16   fb_w = 0, fb_h = 0;
-    gcmContextData *ctx = init_screen(host_addr, HOST_SIZE, &fb_w, &fb_h);
+    gcmContextData *ctx = init_screen((void *)(uintptr_t)host_addr, HOST_SIZE, &fb_w, &fb_h);
     if (!ctx)
         return fail("init_screen failed");
     printf("  RSX up at %ux%u\n", (unsigned)fb_w, (unsigned)fb_h);
@@ -587,7 +591,6 @@ int main(int argc, char **argv)
     ioPadEnd();
     font_close(&fs);
     free(cov);
-    free(host_addr);
 
     /* The verdict comes last, after rendering, the checks and the display
      * loop have all completed. */
