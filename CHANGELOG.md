@@ -15,6 +15,13 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **SPRX registration and GUID query declarations.** `<sys/prx.h>`
+  declares `sys_prx_register_module` and `sys_prx_get_ppu_guid`, along with
+  `sys_prx_register_module_option_t`. `<sys/sys_types.h>` declares
+  `sys_ppu_guid_info_t` (`struct sys_ppu_guid_info`).
+  `liblv2_stub.yaml` exports `sys_prx_register_module` and `sys_prx_get_ppu_guid`
+  (with their `sysPrx*` aliases) with system ABI FNIDs, covered by
+  `tests/sdk/prx-register-guid-link-test.py` across both ABIs.
 - **Module identity and entry points in C.** `<sys/moduleexport.h>` adds
   `SYS_MODULE_INFO(name, attribute, major, minor)`, `SYS_MODULE_START(fn)`
   and `SYS_MODULE_STOP(fn)`, with the `SYS_MODULE_ATTR_*` and

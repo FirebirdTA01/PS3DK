@@ -578,6 +578,12 @@ exports:
     - sysPrxGetModuleId
   signature: ''
   notes: extracted from _sysPrxForUser_0001_49.o
+- name: sys_prx_get_ppu_guid
+  nid: '0x6010a160'
+  aliases:
+    - sysPrxGetPpuGuid
+  signature: ''
+  notes: ''
 - name: sys_prx_load_module
   nid: '0x26090058'
   aliases:
@@ -620,6 +626,12 @@ exports:
     - sysPrxRegisterLibrary
   signature: ''
   notes: extracted from _sysPrxForUser_0001_29.o
+- name: sys_prx_register_module
+  nid: '0x5d4d351e'
+  aliases:
+    - sysPrxRegisterModule
+  signature: ''
+  notes: ''
 - name: sys_prx_start_module
   nid: '0x9f18429d'
   aliases:

@@ -32,6 +32,8 @@ installed="$ps3dev/ps3dk/ppu/include"
 status=0
 fail() { echo "prx-headers: FAIL: $*"; status=1; }
 ok() { echo "prx-headers: ok   $*"; }
+[ -x "$cc.exe" ] && cc="$cc.exe"
+[ -x "$cxx.exe" ] && cxx="$cxx.exe"
 [ -x "$cc" ] && [ -x "$cxx" ] || { fail "no PPU compiler under $ps3dev"; exit 1; }
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

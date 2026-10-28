@@ -748,6 +748,9 @@ jobs:
       - name: Test audio compatibility alias ownership when cross SDK is available
         run: python3 tests/sdk/audio-alias-link-test.py
 
+      - name: Test SPRX register, GUID and version link and import table
+        run: python3 tests/sdk/prx-register-guid-link-test.py
+
       - name: Test SPURS task entry argument and exit-code forwarding
         run: python3 tests/sdk/spurs-task-entry-host-test.py
 

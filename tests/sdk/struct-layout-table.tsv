@@ -898,6 +898,7 @@ ilp32	lv2/prx.h	sys_prx_get_module_list_t	struct	24	8	size@0 max@8 count@12 idli
 ilp32	lv2/prx.h	sys_prx_load_module_list_option_t	struct	8	8	size@0
 ilp32	lv2/prx.h	sys_prx_load_module_option_t	struct	8	8	size@0
 ilp32	lv2/prx.h	sys_prx_module_info_t	struct	72	8	size@0 name@8 version@38 modattribute@40 start_entry@44 stop_entry@48 all_segments_num@52 filename@56 filename_size@60 segments@64 segments_num@68
+ilp32	lv2/prx.h	sys_prx_register_module_option_t	struct	8	8	size@0
 ilp32	lv2/prx.h	sys_prx_start_module_option_t	struct	8	8	size@0
 ilp32	lv2/prx.h	sys_prx_stop_module_option_t	struct	8	8	size@0
 ilp32	lv2/prx.h	sys_prx_unload_module_option_t	struct	8	8	size@0
@@ -930,6 +931,8 @@ ilp32	sys/synchronization.h	sys_lwcond_attribute_t	struct	8	1	name@0
 ilp32	sys/synchronization.h	sys_lwcond_t	struct	8	4	lwmutex@0 lwcond_queue@4
 ilp32	sys/synchronization.h	sys_lwmutex_attribute_t	struct	16	4	attr_protocol@0 attr_recursive@4 name@8
 ilp32	sys/synchronization.h	sys_lwmutex_t	struct	24	8	lock_var@0 attribute@8 recursive_count@12 sleep_queue@16 <anon1>.pad@20 <anon1>._pad@20
+ilp32	sys/sys_types.h	struct sys_ppu_guid_info	struct	32	4	magic@0 id_revision@5 reserved1@6 ppu_guid@8 reserved2@28
+ilp32	sys/sys_types.h	sys_ppu_guid_info_t	struct	32	4	magic@0 id_revision@5 reserved1@6 ppu_guid@8 reserved2@28
 ilp32	sysutil/sysutil_music_playback_common.h	CellMusicSelectionContext	struct	2048	1	data@0
 lp64	PSGL/psgl.h	CellGcmTransferScale	struct	52	4	conversion@0 format@4 operation@8 clipX@12 clipY@14 clipW@16 clipH@18 outX@20 outY@22 outW@24 outH@26 ratioX@28 ratioY@32 inW@36 inH@38 pitch@40 origin@42 interp@43 offset@44 inX@48 inY@50
 lp64	PSGL/psgl.h	CellGcmTransferSurface	struct	12	4	format@0 pitch@4 _pad0@6 offset@8
@@ -1816,6 +1819,7 @@ lp64	lv2/prx.h	sys_prx_get_module_list_t	struct	24	8	size@0 max@8 count@12 idlis
 lp64	lv2/prx.h	sys_prx_load_module_list_option_t	struct	8	8	size@0
 lp64	lv2/prx.h	sys_prx_load_module_option_t	struct	8	8	size@0
 lp64	lv2/prx.h	sys_prx_module_info_t	struct	72	8	size@0 name@8 version@38 modattribute@40 start_entry@44 stop_entry@48 all_segments_num@52 filename@56 filename_size@60 segments@64 segments_num@68
+lp64	lv2/prx.h	sys_prx_register_module_option_t	struct	8	8	size@0
 lp64	lv2/prx.h	sys_prx_start_module_option_t	struct	8	8	size@0
 lp64	lv2/prx.h	sys_prx_stop_module_option_t	struct	8	8	size@0
 lp64	lv2/prx.h	sys_prx_unload_module_option_t	struct	8	8	size@0
@@ -1848,6 +1852,8 @@ lp64	sys/synchronization.h	sys_lwcond_attribute_t	struct	8	1	name@0
 lp64	sys/synchronization.h	sys_lwcond_t	struct	16	8	lwmutex@0 lwcond_queue@8
 lp64	sys/synchronization.h	sys_lwmutex_attribute_t	struct	16	4	attr_protocol@0 attr_recursive@4 name@8
 lp64	sys/synchronization.h	sys_lwmutex_t	struct	24	8	lock_var@0 attribute@8 recursive_count@12 sleep_queue@16 <anon1>.pad@20 <anon1>._pad@20
+lp64	sys/sys_types.h	struct sys_ppu_guid_info	struct	32	4	magic@0 id_revision@5 reserved1@6 ppu_guid@8 reserved2@28
+lp64	sys/sys_types.h	sys_ppu_guid_info_t	struct	32	4	magic@0 id_revision@5 reserved1@6 ppu_guid@8 reserved2@28
 lp64	sysutil/sysutil_music_playback_common.h	CellMusicSelectionContext	struct	2048	1	data@0
 spu	cell/fiber.h	CellFiberSpuContext	struct	896	16	skip@0
 spu	cell/fiber.h	struct CellFiberSpuContext	struct	896	16	skip@0

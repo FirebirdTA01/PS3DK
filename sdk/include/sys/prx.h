@@ -156,8 +156,7 @@ typedef sysPrxUserPstopLevel sys_prx_user_p_stop_level_t;
 
 /* Library export/import records as a PRX lays them out (32-bit addresses), the relocation types a
  * PRX's link records use, and the v2 module info that also reports a module's libent/libstub
- * tables.  sys_prx_register_module, sys_prx_get_ppu_guid and sys_prx_version are not declared:
- * no stub library here exports them yet, so a call would fail only at link time. */
+ * tables. sys_prx_version is not declared yet: no stub library here exports it. */
 #define SYS_PRX_LIB_OPD_IMPORT          0x2000
 
 #define SYS_PRX_R_PPC_ADDR32            1   /* 32-bit absolute address */
@@ -261,10 +260,13 @@ sys_prx_id_t sys_prx_get_module_id_by_name(const char *name, sys_prx_flags_t fla
                                            sys_prx_get_module_id_by_name_option_t *opt);
 sys_prx_id_t sys_prx_get_module_id_by_address(void *addr);
 sys_prx_id_t sys_prx_get_my_module_id(void);
+int sys_prx_register_module(const sys_prx_register_module_option_t *opt);
+sys_addr_t sys_prx_get_ppu_guid(sys_prx_id_t id);
 int sys_prx_register_library(void *libEnt);
 int sys_prx_unregister_library(void *libEnt);
 
 /* older spellings of the calls <lv2/prx.h> does not declare */
+sys_addr_t sysPrxGetPpuGuid(sysPrxId id);
 sysPrxId sysPrxLoadModuleByFd(int fd, int64_t offset, sysPrxFlags flags, sysPrxLoadModuleOption *opt);
 sysPrxId sysPrxLoadModuleOnMemcontainer(const char *path, uint32_t container, sysPrxFlags flags,
                                         sysPrxLoadModuleOption *opt);

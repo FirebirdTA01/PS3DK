@@ -1241,6 +1241,8 @@ aliases:
   - sysPrxGetModuleInfo
   sys_prx_get_module_list:
   - sysPrxGetModuleList
+  sys_prx_get_ppu_guid:
+  - sysPrxGetPpuGuid
   sys_prx_load_module:
   - sysPrxLoadModule
   sys_prx_load_module_by_fd:
@@ -1255,6 +1257,8 @@ aliases:
   - sysPrxLoadModuleOnMemcontainerByFd
   sys_prx_register_library:
   - sysPrxRegisterLibrary
+  sys_prx_register_module:
+  - sysPrxRegisterModule
   sys_prx_start_module:
   - sysPrxStartModule
   sys_prx_stop_module:
