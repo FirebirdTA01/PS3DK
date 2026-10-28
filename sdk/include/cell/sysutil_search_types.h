@@ -2,8 +2,8 @@
  *
  * Independent header.  CellSearchContentId is a 16-byte opaque
  * identifier used across the cellSearch API.  This header also
- * provides the enums, callback typedefs, and result structs the
- * the reference SDK ABI requires.
+ * provides the enums, callback typedefs, and result structs that
+ * the system library expects.
  *
  * System timestamps use explicit 64-bit fields in either data model;
  * their width is independent of the host C library's time_t.

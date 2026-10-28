@@ -6,7 +6,7 @@
  * that use this API must link `-ldbgfont` in addition to the usual
  * `-lgcm_cmd -lrsx ...` set.
  *
- * Semantics (matches the reference SDK <cell/dbgfont.h>):
+ * API behavior:
  *
  *   InitGcm(cfg)        Init once per process.  `cfg` describes the
  *                       caller-provided buffer that holds the fragment
@@ -28,7 +28,7 @@
  *                       buffer.  Caller owns the memory.
  *
  * Tier-2 limitation: the API doesn't take a screen resolution so
- * the NDC conversion assumes a 1280x720 reference (see dbgfont.c);
+ * the NDC conversion assumes a 1280x720 baseline (see dbgfont.c);
  * text will visually scale roughly correctly on other resolutions
  * but not pixel-exact.  A follow-up surface-aware variant can take
  * resolution from the active CellGcmSurface.
@@ -81,7 +81,7 @@ int32_t cellDbgFontPrintf(float x, float y, float scale, uint32_t color,
                           const char *fmt, ...)
                           __attribute__((format(printf, 5, 6)));
 
-/* ---- Backward-compat: pre-Gcm API (the reference SDK compat) ------- */
+/* ---- Backward-compat: pre-Gcm API -------------------------------- */
 
 typedef struct CellDbgFontConfig {
     uint32_t bufSize;
@@ -110,7 +110,7 @@ typedef struct CellDbgFontConsoleConfig {
     float    posTop;        /* normalised [0..1] top anchor (y=0 top) */
     uint32_t cnsWidth;     /* character columns per line              */
     uint32_t cnsHeight;    /* character rows in the ring buffer       */
-    float    scale;        /* glyph scale (1.0 == reference 720p)     */
+    float    scale;        /* glyph scale (1.0 == baseline 720p)      */
     uint32_t color;        /* ARGB text colour                        */
 } CellDbgFontConsoleConfig;
 

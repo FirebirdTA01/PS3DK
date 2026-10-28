@@ -34,8 +34,7 @@
  * coordinates.  We map to NDC as (2x-1, 1-2y) so y=0 is the top of
  * the frame.  Glyph size in NDC is a fixed pair of constants scaled
  * by the user's `scale` argument -- we assume ~1280x720 as the
- * reference resolution, which gives the same visual size as the
- * Sony samples on a 720p RPCS3 window.  There's no runtime query of
+ * baseline resolution.  There's no runtime query of
  * the actual surface resolution (the API doesn't pass it); change
  * DBGFONT_GLYPH_NDC_W/H if your app uses a non-standard resolution.
  */
@@ -73,7 +72,7 @@ static const uint8_t dbgfont_atlas_data[128 * 128] = {
 #define DBGFONT_GLYPH_H_PX         9
 #define DBGFONT_TAB_SIZE           4
 
-/* Glyph size in NDC units at scale=1.0 on a 1280x720 reference.
+/* Glyph size in NDC units at scale=1.0 on a 1280x720 baseline.
  * NDC ranges from -1..+1 across the screen -> 2 units total.  An 8px
  * glyph on a 1280px-wide screen is 2 * 8 / 1280 = 0.0125 wide; a 9px
  * tall glyph on 720 tall is 2 * 9 / 720 = 0.025.  Kerning adds 1 px
@@ -411,7 +410,7 @@ int32_t cellDbgFontDrawGcm(void)
     if (!ctx) return -1;
 
     /* Overlay render state: alpha-blend on, depth-test off, no logic
-     * op, no depth write.  Matches the PSL1GHT reference renderer. */
+     * op, no depth write.  Matches the PSL1GHT renderer. */
     rsxSetBlendFunc(ctx, GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
                         GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
     rsxSetBlendEquation(ctx, GCM_FUNC_ADD, GCM_FUNC_ADD);

@@ -119,7 +119,7 @@ int cellDbgFontConsolePuts(CellDbgFontConsoleId id, const char *string)
 void _cellDbgFontDrawConsoles(void)
 {
     /* Kernel of a glyph height in normalised screen coords at the
-     * reference 720p resolution -- one 10 px line (= glyph + 1 px
+     * baseline 720p resolution -- one 10 px line (= glyph + 1 px
      * padding) mapped from [0..720] to [0..1]. */
     static const float kLineH = 10.0f / 720.0f;
 
