@@ -15,6 +15,9 @@ Usage:
                                              read from the committed blobs (so a
                                              line added and later removed inside
                                              the range is still seen)
+  neutral-wording-scan.py --commits REV...    the same for the commits git rev-list REV...
+                                             selects, e.g. <sha> --not --remotes=origin:
+                                             only what the remote does not have yet
   neutral-wording-scan.py --messages A..B    commit messages only
   neutral-wording-scan.py --names NAME...    ref or other names
   neutral-wording-scan.py --stdin            text from stdin
@@ -287,12 +290,18 @@ def old_keys(root, blobs, parents, path):
 
 
 def scan_range(root, rng, diffs=True):
-    """(findings, commits, unreadable) for every commit in RNG: its message,
+    """scan_commits over the commits of the range RNG (A..B)."""
+    return scan_commits(root, [rng], diffs)
+
+
+def scan_commits(root, revs, diffs=True):
+    """(findings, commits, unreadable) for every commit git rev-list REVS
+    selects: its message,
     and for each file it adds or changes, the path name (when added) and each
     finding on a line (or joined line pair) that no parent already had."""
     allowed = load_allowlist(root)
     found, unreadable = [], []
-    commits = git(root, "rev-list", "--reverse", rng).decode().split()
+    commits = git(root, "rev-list", "--reverse", *revs).decode().split()
     blobs = Blobs(root) if diffs else None
     try:
         for c in commits:
@@ -404,6 +413,10 @@ def main(argv):
         found, n, bad = scan_range(root, argv[1])
         return report(found, "%d commit(s) in %s: messages, added paths and added lines"
                       % (n, argv[1]), bad)
+    if argv[0] == "--commits" and len(argv) > 1:
+        found, n, bad = scan_commits(root, argv[1:])
+        return report(found, "%d commit(s) of %s: messages, added paths and added lines"
+                      % (n, " ".join(argv[1:])), bad)
     if argv[0] == "--messages" and len(argv) == 2:
         found, n, _ = scan_range(root, argv[1], diffs=False)
         return report(found, "%d commit message(s) in %s" % (n, argv[1]))

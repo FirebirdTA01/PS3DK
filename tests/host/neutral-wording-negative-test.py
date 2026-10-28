@@ -9,12 +9,19 @@ Drives the scanner's command line only, the way CI and the pre-push hook do:
     a refused ref name (--names), a tracked file over any size limit, and a
     tracked file missing from the work tree;
   - --stdin, --names and --self-test from a directory outside any
-    repository (they need none; --tree there is a git error, exit 2).
+    repository (they need none; --tree there is a git error, exit 2);
+  - the pre-push hook against a local bare remote: a rebased topic over
+    history the remote already has, a new refused commit in that push, and
+    new branches with and without a refused commit;
+  - which commits the CI wrapper scans for a pull request, a push to the
+    default branch, a rebased topic push and a new branch push.
 The refused fixtures are stored base64-encoded so this file passes the
 scanner itself.  Exit status 0 when every case behaves, 1 otherwise.
 """
 import base64
+import importlib.util
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -155,11 +162,117 @@ def outside_repo_cases(tmp):
     expect("outside a repository: --tree is a git error", run(["--tree"]), 2)
 
 
+def hook_cases(tmp):
+    """The pre-push hook checks only what the remote does not have yet: a
+    rebased topic pushed with --force-with-lease over main history that
+    predates the guard passes, a new commit with a refused phrase in that
+    push fails, and a brand-new branch with such a commit fails."""
+    tmp = Path(tmp)
+    remote, work, hooks = tmp / "remote.git", tmp / "push-work", tmp / "hooks"
+    hooks.mkdir()
+    shutil.copy(ROOT / "scripts/hooks/pre-push-neutral-wording.sh", hooks / "pre-push")
+    os.chmod(hooks / "pre-push", 0o755)
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    work.mkdir()
+    git(work, "init", "-q", "-b", "main")
+    for k, v in (("user.name", "fixture"), ("user.email", "fixture@invalid"),
+                 ("core.autocrlf", "false")):
+        git(work, "config", k, v)
+    git(work, "remote", "add", "origin", str(remote))
+    (work / "scripts").mkdir()
+    shutil.copy(ROOT / "scripts/neutral-wording-scan.py", work / "scripts")
+    note = work / "note.txt"
+    note.write_text("neutral\n", encoding="utf-8")
+    git(work, "add", ".")
+    git(work, "commit", "-qm", "base")
+    git(work, "push", "-q", "origin", "main")
+    git(work, "switch", "-q", "-c", "topic")
+    (work / "topic.txt").write_text("topic\n", encoding="utf-8")
+    git(work, "add", ".")
+    git(work, "commit", "-qm", "topic work")
+    git(work, "push", "-q", "origin", "topic")
+    # main gains history from before the guard existed: a refused line
+    # added by one commit and tidied by the next, pushed without the hook.
+    git(work, "switch", "-q", "main")
+    note.write_text(d(PHRASE), encoding="utf-8")
+    git(work, "commit", "-qam", "old wording")
+    note.write_text("neutral\n", encoding="utf-8")
+    git(work, "commit", "-qam", "tidy")
+    git(work, "push", "-q", "origin", "main")
+
+    def push(*args):
+        return subprocess.run(["git", "-C", str(work), "-c", "core.hooksPath=" + str(hooks), "push", "-q"]
+                              + list(args), capture_output=True).returncode
+
+    git(work, "switch", "-q", "topic")
+    git(work, "rebase", "-q", "main")
+    expect("hook: a rebased topic over already-published history is pushed",
+           push("--force-with-lease", "origin", "topic"), 0)
+    (work / "topic.txt").write_text(d(PHRASE), encoding="utf-8")
+    git(work, "commit", "-qam", "more topic work")
+    expect("hook: a new refused commit in a rebased push is refused",
+           int(push("--force-with-lease", "origin", "topic") != 0), 1)
+    git(work, "reset", "-q", "--hard", "HEAD~1")
+    git(work, "switch", "-q", "-c", "fresh", "main")
+    (work / "fresh.txt").write_text("neutral\n", encoding="utf-8")
+    git(work, "add", ".")
+    git(work, "commit", "-qm", "fresh work")
+    expect("hook: a new neutral branch is pushed", push("origin", "fresh"), 0)
+    git(work, "switch", "-q", "-c", "fresh2", "main")
+    (work / "fresh2.txt").write_text(d(PHRASE), encoding="utf-8")
+    git(work, "add", ".")
+    git(work, "commit", "-qm", "fresh work 2")
+    expect("hook: a brand-new branch with a refused commit is refused",
+           int(push("origin", "fresh2") != 0), 1)
+
+
+def wrapper_cases():
+    """tests/host/neutral-wording-test.py picks the commits a CI event
+    publishes: a pull request's commits its base lacks; a push to the
+    default branch, before..after; a push to another branch (rebased or
+    new), the commits neither the default branch nor the old head has."""
+    spec = importlib.util.spec_from_file_location("nwt", ROOT / "tests/host/neutral-wording-test.py")
+    nwt = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nwt)
+    old = subprocess.run(["git", "-C", str(ROOT), "rev-list", "--max-parents=0", "HEAD"],
+                         capture_output=True, text=True, check=True).stdout.split()[0]
+    zero = "0" * 40
+    keys = ("NEUTRAL_WORDING_RANGE", "NEUTRAL_WORDING_BASE", "GITHUB_REF_NAME", "GITHUB_BASE_REF")
+    saved = {k: os.environ.get(k) for k in keys}
+
+    def revs(**env):
+        for k in keys:
+            os.environ.pop(k, None)
+        os.environ.update(env)
+        return nwt.change_revs()
+
+    try:
+        expect("CI: a pull request publishes HEAD's commits its base lacks",
+               int(revs(GITHUB_BASE_REF="main") == ["HEAD", "--not", "origin/main"]), 1)
+        expect("CI: a push to the default branch publishes before..after",
+               int(revs(NEUTRAL_WORDING_RANGE=old + "..abc", NEUTRAL_WORDING_BASE="origin/main",
+                        GITHUB_REF_NAME="main") == [old + "..abc"]), 1)
+        expect("CI: a rebased topic push excludes the default branch and the old head",
+               int(revs(NEUTRAL_WORDING_RANGE=old + "..abc", NEUTRAL_WORDING_BASE="origin/main",
+                        GITHUB_REF_NAME="topic") == ["abc", "--not", "origin/main", old]), 1)
+        expect("CI: a new branch push excludes the default branch",
+               int(revs(NEUTRAL_WORDING_RANGE=zero + "..abc", NEUTRAL_WORDING_BASE="origin/main",
+                        GITHUB_REF_NAME="topic") == ["abc", "--not", "origin/main"]), 1)
+        expect("CI: no event information skips the commit scan", int(revs() is None), 1)
+    finally:
+        for k, v in saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+
+
 def main():
     text_cases()
+    wrapper_cases()
     with tempfile.TemporaryDirectory(prefix="nw-negative-") as tmp:
         history_cases(tmp)
         outside_repo_cases(tmp)
+        hook_cases(tmp)
     print("neutral-wording-negative: %s" % ("PASS" if not fails else "FAIL (%d)" % fails))
     return int(bool(fails))
 

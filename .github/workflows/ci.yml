@@ -43,6 +43,7 @@ jobs:
       - name: Test neutral wording in the tree and new commits
         env:
           NEUTRAL_WORDING_RANGE: ${{ github.event_name == 'push' && format('{0}..{1}', github.event.before, github.sha) || '' }}
+          NEUTRAL_WORDING_BASE: origin/${{ github.event.repository.default_branch }}
         run: bash tests/host/neutral-wording-test.sh
 
       # The pre-release gate's scripts check their parsers on built-in fixtures.

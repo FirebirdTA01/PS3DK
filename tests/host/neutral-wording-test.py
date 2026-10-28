@@ -5,11 +5,15 @@ Runs scripts/neutral-wording-scan.py three ways:
   1. its built-in self-test (detection, licence-notice exemption, allowlist);
   2. a scan of every tracked text file;
   3. the branch names CI reports (GITHUB_HEAD_REF, GITHUB_REF_NAME);
-  4. a scan of every commit of the change under test - messages, added
-     paths and added lines, from the committed blobs - when CI says what
-     that change is: GITHUB_BASE_REF for a pull request,
-     NEUTRAL_WORDING_RANGE for anything else (e.g. a push's before..after).
-     Without either, step 4 is reported as skipped.
+  4. a scan of every commit the change publishes - messages, added paths
+     and added lines, from the committed blobs - when CI says what that
+     change is.  A pull request (GITHUB_BASE_REF) publishes HEAD's commits
+     that its base does not have.  A push (NEUTRAL_WORDING_RANGE, the
+     push's before..after) to the default branch publishes before..after;
+     a push to any other branch, rebased or new, publishes the commits of
+     after that neither the default branch (NEUTRAL_WORDING_BASE) nor the
+     old head has, so main's own history is never re-scanned.  Without
+     either, step 4 is reported as skipped.
 Each step must pass; the first failure ends the test with exit status 1.
 """
 import os
@@ -29,16 +33,28 @@ def run(args, what):
         sys.exit(1)
 
 
-def change_range():
+def known(rev):
+    return subprocess.run(["git", "cat-file", "-e", rev + "^{commit}"], cwd=ROOT,
+                          capture_output=True).returncode == 0
+
+
+def change_revs():
+    """git rev-list arguments selecting the commits this change publishes."""
     rng = os.environ.get("NEUTRAL_WORDING_RANGE", "").strip()
     if rng:
-        a, _, b = rng.partition("..")
-        if not a.strip(".") or set(a) <= {"0"}:
-            return None  # first push of a branch: no base to compare
-        return rng
+        before, _, after = rng.partition("..")
+        new_branch = not before.strip(".") or set(before) <= {"0"}
+        default = os.environ.get("NEUTRAL_WORDING_BASE", "origin/main").strip()
+        branch = os.environ.get("GITHUB_REF_NAME", "").strip()
+        if default.split("/", 1)[-1] == branch:
+            return None if new_branch else [rng]
+        revs = [after, "--not", default]
+        if not new_branch and known(before):
+            revs.append(before)
+        return revs
     base = os.environ.get("GITHUB_BASE_REF", "").strip()
     if base:
-        return "origin/%s..HEAD" % base
+        return ["HEAD", "--not", "origin/%s" % base]
     return None
 
 
@@ -48,11 +64,11 @@ def main():
     names = [n for n in (os.environ.get("GITHUB_HEAD_REF", ""), os.environ.get("GITHUB_REF_NAME", "")) if n]
     if names:
         run(["--names"] + names, "ref names %s" % " ".join(names))
-    rng = change_range()
-    if rng is None:
+    revs = change_revs()
+    if revs is None:
         print("== commit messages: skipped (no change range in this environment)")
     else:
-        run(["--range", rng], "commits and added lines in %s" % rng)
+        run(["--commits"] + revs, "published commits: %s" % " ".join(revs))
     print("neutral-wording-test: PASS")
 
 
