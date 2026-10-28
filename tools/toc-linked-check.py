@@ -200,6 +200,67 @@ def disp_of(word, ds):
 
 
 # ---------------------------------------------------------------------------
+# Names from the file itself (readelf -W still truncates very long names)
+
+def raw_names(data, what):
+    """
+    (section names by index, symbol names by .symtab index) read from the
+    ELF's own string tables; raises InputError on a malformed header.
+    """
+    if len(data) < 64 or data[:4] != bytes([0x7f]) + b'ELF' or data[4] != 2 or data[5] != 2:
+        raise InputError(f"{what}: not a big-endian ELF64 file")
+    shoff, shentsize, shnum, shstrndx = be(data, 40, 8), be(data, 58, 2), be(data, 60, 2), be(data, 62, 2)
+    if shentsize != 64 or shoff + shnum * 64 > len(data) or shstrndx >= shnum:
+        raise InputError(f"{what}: section header table outside the file")
+
+    def shdr(i):
+        o = shoff + 64 * i
+        return {'name': be(data, o, 4), 'type': be(data, o + 4, 4), 'off': be(data, o + 24, 8),
+                'size': be(data, o + 32, 8), 'link': be(data, o + 40, 4)}
+
+    def cstr(tab, at):
+        if tab['off'] + tab['size'] > len(data) or at >= tab['size']:
+            raise InputError(f"{what}: string offset outside its table")
+        body = data[tab['off'] + at:tab['off'] + tab['size']]
+        end = body.find(bytes(1))
+        if end < 0:
+            raise InputError(f"{what}: unterminated string table entry")
+        return body[:end].decode('utf-8', 'replace')
+
+    hdrs = [shdr(i) for i in range(shnum)]
+    shstr = hdrs[shstrndx]
+    sec_names = [cstr(shstr, h['name']) if i else '' for i, h in enumerate(hdrs)]
+    sym_names = {}
+    tabs = [h for h in hdrs if h['type'] == 2]
+    if len(tabs) == 1:
+        t = tabs[0]
+        if t['link'] >= shnum or t['off'] + t['size'] > len(data):
+            raise InputError(f"{what}: .symtab outside the file")
+        strs = hdrs[t['link']]
+        for k in range(t['size'] // 24):
+            sym_names[k] = cstr(strs, be(data, t['off'] + 24 * k, 4))
+    return sec_names, sym_names
+
+
+def adopt_names(what, data, sections, symbols):
+    """Replace readelf's names by the file's, which readelf's must prefix."""
+    sec_names, sym_names = raw_names(data, what)
+    if len(sec_names) != len(sections):
+        raise InputError(f"{what}: readelf lists {len(sections)} sections, the file has {len(sec_names)}")
+    for nr, rec in sections.items():
+        if not sec_names[nr].startswith(rec.name):
+            raise InputError(f"{what}: section [{nr}] is {sec_names[nr]!r} in the file but {rec.name!r} in readelf")
+        rec.name = sec_names[nr]
+    for idx, sym in symbols.items():
+        if sym['type'] == 'SECTION':
+            continue
+        full = sym_names.get(idx)
+        if full is None or not full.startswith(sym['name']):
+            raise InputError(f"{what}: symbol [{idx}] is {full!r} in the file but {sym['name']!r} in readelf")
+        sym['name'] = full
+
+
+# ---------------------------------------------------------------------------
 # readelf-backed object model
 
 class Section:
@@ -231,6 +292,7 @@ class ObjectFile:
         if errs:
             raise InputError('; '.join(errs))
         self.symbols = syms
+        adopt_names(ident, data, self.sections, self.symbols)
         relocs, errs = _parse.parse_relocations_pass(r_text, ident, rela)
         if errs:
             raise InputError('; '.join(errs))
@@ -443,6 +505,7 @@ class LinkedElf:
         syms, errs = _parse.parse_symbols_pass(sym_text, 'ELF', secs)
         if errs:
             raise InputError('; '.join(errs))
+        adopt_names('ELF', self.data, {s.nr: s for s in self.sections}, syms)
         self.globals = {}
         tocs = []
         for s in syms.values():

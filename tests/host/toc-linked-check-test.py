@@ -211,6 +211,20 @@ def case_merged_string_negative_addend_wrong():
     return want_detail(check(lk.manifest_path), 1, 'FAIL', r'does not hold the datum', sites_failed=2)
 
 
+LONG = '.text._Z' + 'N3foo3barIJ' * 40 + 'E1fEv'
+
+
+def case_long_section_name():
+    d = fresh('long-name')
+    o = toc_user(medium=False)
+    o.sections[0].name = LONG
+    o.relocs[LONG] = o.relocs.pop('.text.f')
+    lk = link(d, [o, data_obj()])
+    if not any(l.strip() == LONG for l in lk.map_lines):
+        return False, "fixture: the map does not wrap the long name onto its own line"
+    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=1, sites_refused=0)
+
+
 # -- the design review's negative list ----------------------------------------
 
 def green_link(name, **kw):
@@ -598,6 +612,7 @@ NEGATIVE_CASES = [
 CASES = [
     ('defect: merged string, local symbol with a negative addend', case_merged_string_negative_addend),
     ('defect: merged string, negative addend, wrong displacement fails', case_merged_string_negative_addend_wrong),
+    ('defect: section name longer than readelf prints', case_long_section_name),
     ('green: medium and small model loads of .toc entries', case_green),
 ] + NEGATIVE_CASES
 
