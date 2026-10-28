@@ -15,6 +15,10 @@
 #define OFFSET(t, f, n) CHECK(offsetof(t, f) == (n), #t "." #f " offset")
 #define WIDTH(t, f, n) CHECK(sizeof(((t *)0)->f) == (n), #t "." #f " width")
 
+/* The runner passes the data model it asked for; prove the compiler used it. */
+CHECK(sizeof(void *) == EXPECTED_ABI_BYTES, "actual pointer data model");
+CHECK(sizeof(long) == EXPECTED_ABI_BYTES, "actual long data model");
+
 /* 128-bit register images. */
 SIZE(sys_dbg_vr_t, 16);
 ALIGN(sys_dbg_vr_t, 8);

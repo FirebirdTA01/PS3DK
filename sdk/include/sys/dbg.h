@@ -14,8 +14,8 @@
 #include <sys/spu_thread_group.h>
 /* the object attribute records the information calls report */
 #include <sys/event.h>
-/* as in the SDK: debugger code declares its process parameters with the
- * SYS_PROCESS_PARAM this brings in */
+/* SYS_PROCESS_PARAM: a debugger program declares its own process
+ * parameters (thread priority and stack size) with this macro. */
 #include <sys/process.h>
 
 #ifdef __cplusplus

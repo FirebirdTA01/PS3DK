@@ -42,7 +42,9 @@ def matrix(cc, inc, work, root):
         for abi in ['ilp32', 'lp64']:
             label = f'{std}-{abi}'
             cmd = [str(cc), '-x', lang, '-std=' + std, '-O2', '-Wall',
-                   '-Wextra', '-Werror', '-I' + str(inc)]
+                   '-Wextra', '-Werror',
+                   '-DEXPECTED_ABI_BYTES=' + ('8' if abi == 'lp64' else '4'),
+                   '-I' + str(inc)]
             if abi == 'lp64':
                 cmd.append('-mlp64')
             cmd += ['-c', str(src), '-o', str(work / (label + '.o'))]
@@ -91,7 +93,8 @@ def mutants(cc, inc, work, src):
         out.write_text(text.replace(old, new), encoding='utf-8')
         for abi in abis:
             cmd = [str(cc), '-x', 'c', '-std=c11', '-Wall', '-Wextra',
-                   '-Werror', '-I' + str(overlay), '-I' + str(inc)]
+                   '-Werror', '-DEXPECTED_ABI_BYTES=' + ('8' if abi == 'lp64' else '4'),
+                   '-I' + str(overlay), '-I' + str(inc)]
             if abi == 'lp64':
                 cmd.append('-mlp64')
             cmd += ['-c', str(src), '-o', str(work / 'mutant.o')]
