@@ -21,12 +21,16 @@ Validates:
  16. Relocation row missing explicit addend fails closed (truncated-addends), exit 1.
  17. Section headers missing declared .toc section record fails closed (missing-toc-section), exit 1.
  18. Contradictory no-relocations marker alongside real sections fails closed (contradictory-no-relocs), exit 1.
- 19. Relocation section missing declared entries reports parse error, exit 1.
- 20. Truncated relocation row reports parse error, exit 1.
- 21. Legitimate empty archive audits cleanly with 0 members, exit 0.
- 22. Genuine no-relocation object audits cleanly with 0 violations, exit 0.
- 23. Archive summary displays ERROR status when member fails.
- 24. Harness fails when invoked producer fails (does not silently fall back).
+ 19. Relocation section missing rows and declared count fails closed (rows-and-declared-count-lost), exit 1.
+ 20. Duplicate relocation section declaration fails closed (duplicate-section-erases-findings), exit 1.
+ 21. Truncated symbol table payload archive rejected (truncated-symbol-table.a), exit 1.
+ 22. Archive member sequence order/identity mismatch fails closed, exit 1.
+ 23. Relocation section missing declared entries reports parse error, exit 1.
+ 24. Truncated relocation row reports parse error, exit 1.
+ 25. Legitimate empty archive audits cleanly with 0 members, exit 0.
+ 26. Genuine no-relocation object audits cleanly with 0 violations, exit 0.
+ 27. Archive summary displays ERROR status when member fails.
+ 28. Harness fails when invoked producer fails (does not silently fall back).
 """
 
 import base64
@@ -464,6 +468,133 @@ def test_contradictory_no_relocs(named_mid_obj):
     return True
 
 
+def test_rows_and_declared_count_lost(named_mid_obj):
+    print("Testing rows-and-declared-count-lost negative repro...")
+    spec = importlib.util.spec_from_file_location('toc_audit', str(AUDIT_TOOL))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    mock_r = "\n".join([
+        "Relocation section '.rela.toc' at offset 0x130 contains 1 entry:",
+        "    Offset             Info             Type               Symbol's Value  Symbol's Name + Addend",
+        "0000000000000000  0000000700000026 R_PPC64_ADDR64         0000000000000000 target_sym + 0",
+        "",
+        "Relocation section '.rela.text.mid_func' at offset 0x148 contains 0 entries:",
+        " Offset Info Type Symbol's Value Symbol's Name + Addend",
+    ])
+
+    def fake_run(cmd, **kwargs):
+        res = MagicMock()
+        res.returncode = 0
+        res.stderr = ''
+        if '-S' in cmd:
+            res.stdout = PRODUCER_ORIG_S
+        elif '-s' in cmd:
+            res.stdout = PRODUCER_ORIG_s
+        elif '-r' in cmd:
+            res.stdout = mock_r
+        return res
+
+    with patch('subprocess.run', side_effect=fake_run):
+        with patch('sys.argv', ['toc-midentry-audit.py', str(named_mid_obj)]):
+            rc = mod.main()
+            if rc != 1:
+                print(f"FAIL: rows-and-declared-count-lost returned {rc} instead of 1", file=sys.stderr)
+                return False
+    print("  PASS: RELA section missing rows and declared count fails closed with exit code 1")
+    return True
+
+
+def test_duplicate_section_erases_findings(named_mid_obj):
+    print("Testing duplicate-section-erases-findings negative repro...")
+    spec = importlib.util.spec_from_file_location('toc_audit', str(AUDIT_TOOL))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    mock_r = PRODUCER_ORIG_r + "\nRelocation section '.rela.text.mid_func' at offset 0x148 contains 0 entries:\n Offset Info Type Symbol's Value Symbol's Name + Addend\n"
+
+    def fake_run(cmd, **kwargs):
+        res = MagicMock()
+        res.returncode = 0
+        res.stderr = ''
+        if '-S' in cmd:
+            res.stdout = PRODUCER_ORIG_S
+        elif '-s' in cmd:
+            res.stdout = PRODUCER_ORIG_s
+        elif '-r' in cmd:
+            res.stdout = mock_r
+        return res
+
+    with patch('subprocess.run', side_effect=fake_run):
+        with patch('sys.argv', ['toc-midentry-audit.py', str(named_mid_obj)]):
+            rc = mod.main()
+            if rc != 1:
+                print(f"FAIL: duplicate-section-erases-findings returned {rc} instead of 1", file=sys.stderr)
+                return False
+    print("  PASS: duplicate relocation section declaration fails closed with exit code 1")
+    return True
+
+
+def test_truncated_symbol_table_archive():
+    print("Testing truncated-symbol-table.a rejection (malformed AR header)...")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        arch_path = Path(tmpdir) / 'truncated-symbol-table.a'
+        # AR magic + 60-byte header declaring 99 bytes of payload with 0 bytes payload
+        arch_path.write_bytes(b'!<arch>\n/               0           0     0     100644  99        `\n')
+        res = run_audit(str(arch_path))
+        if res.returncode != 1:
+            print(f"FAIL: truncated symbol table archive returned {res.returncode} instead of 1:\n{res.stdout}\n{res.stderr}", file=sys.stderr)
+            return False
+        if "Truncated AR member payload" not in res.stderr:
+            print(f"FAIL: expected truncated payload diagnostic on stderr:\n{res.stderr}", file=sys.stderr)
+            return False
+        print("  PASS: malformed archive with truncated symbol table payload rejected with exit code 1")
+        return True
+
+
+def test_archive_member_order_mismatch(clean_obj, mid_obj):
+    print("Testing archive member order/identity mismatch detection...")
+    ar_bin = shutil.which('powerpc64-ps3-elf-ar') or shutil.which('ar')
+    if not ar_bin:
+        print("FAIL: ar not found on PATH", file=sys.stderr)
+        return False
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        arch_path = Path(tmpdir) / 'ordered_bundle.a'
+        subprocess.run([ar_bin, 'rcs', str(arch_path), str(clean_obj), str(mid_obj)], check=True)
+
+        spec = importlib.util.spec_from_file_location('toc_audit', str(AUDIT_TOOL))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # In mock, simulate readelf returning mismatched member order
+        real_run = subprocess.run
+        def fake_reversed_run(cmd, **kwargs):
+            res = real_run(cmd, **kwargs)
+            if res.returncode == 0 and '-S' in cmd:
+                # Invert member order
+                parts = res.stdout.split('File: ')
+                if len(parts) >= 3:
+                    inverted = parts[0] + 'File: ' + parts[2] + 'File: ' + parts[1]
+                    fake_res = MagicMock()
+                    fake_res.returncode = 0
+                    fake_res.stdout = inverted
+                    fake_res.stderr = ''
+                    return fake_res
+            return res
+
+        with patch('subprocess.run', side_effect=fake_reversed_run):
+            with patch('sys.argv', ['toc-midentry-audit.py', str(arch_path)]):
+                rc = mod.main()
+                if rc != 1:
+                    print(f"FAIL: member order mismatch returned {rc} instead of 1", file=sys.stderr)
+                    return False
+        print("  PASS: member sequence order/identity mismatch fails closed with exit code 1")
+        return True
+
+
+
+
 def test_missing_declared_rows():
     print("Testing missing declared rows validation...")
     spec = importlib.util.spec_from_file_location('toc_audit', str(AUDIT_TOOL))
@@ -474,8 +605,10 @@ def test_missing_declared_rows():
         "Relocation section '.rela.text' at offset 0x100 contains 2 entries:",
         "Offset Info Type Symbol's Value Symbol's Name + Addend"
     ])
-    secs, errs = mod.parse_relocations_pass(mock_r_text, 'test.o', {'.rela.text': 1})
-    if not errs or "declared 2 entries, but 0 were parsed" not in errs[0]:
+    secs, errs = mod.parse_relocations_pass(
+        mock_r_text, 'test.o', {'.rela.text': {'nr': 1, 'size': 0x30, 'entsize': 0x18, 'expected_entries': 2}}
+    )
+    if not errs or "row count mismatch" not in errs[0]:
         print(f"FAIL: expected missing declared rows error, got: {errs}", file=sys.stderr)
         return False
     print("  PASS: declared row count mismatch correctly flagged as parse error")
@@ -493,7 +626,9 @@ def test_truncated_relocation_row():
         "Offset Info Type Symbol's Value Symbol's Name + Addend",
         "000002 0000040000000032 R_PPC64_TOC16_HA"
     ])
-    secs, errs = mod.parse_relocations_pass(mock_r_text, 'test.o', {'.rela.text': 1})
+    secs, errs = mod.parse_relocations_pass(
+        mock_r_text, 'test.o', {'.rela.text': {'nr': 1, 'size': 0x18, 'entsize': 0x18, 'expected_entries': 1}}
+    )
     if not errs or not any("Truncated or malformed RELA relocation entry" in e for e in errs):
         print(f"FAIL: expected truncated relocation row error, got: {errs}", file=sys.stderr)
         return False
@@ -662,6 +797,10 @@ def main():
             ("truncated-addends producer output", lambda: test_truncated_addends(tmp_named_mid)),
             ("missing-toc-section producer output", lambda: test_missing_toc_section(tmp_named_mid)),
             ("contradictory-no-relocs producer output", lambda: test_contradictory_no_relocs(tmp_named_mid)),
+            ("rows-and-declared-count-lost producer output", lambda: test_rows_and_declared_count_lost(tmp_named_mid)),
+            ("duplicate-section-erases-findings producer output", lambda: test_duplicate_section_erases_findings(tmp_named_mid)),
+            ("truncated symbol table archive", test_truncated_symbol_table_archive),
+            ("archive member order mismatch", lambda: test_archive_member_order_mismatch(tmp_clean, tmp_mid)),
             ("missing declared rows", test_missing_declared_rows),
             ("truncated relocation row", test_truncated_relocation_row),
             ("legitimate empty archive", test_legitimate_empty_archive),
