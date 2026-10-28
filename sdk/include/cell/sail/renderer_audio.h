@@ -16,7 +16,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-typedef struct { void *pPcm ATTRIBUTE_PRXPTR; int status; uint64_t pts, reserved; } CellSailAudioFrameInfo;
+typedef struct CellSailAudioFrameInfo { void *pPcm ATTRIBUTE_PRXPTR; int status; uint64_t pts, reserved; } CellSailAudioFrameInfo;
 typedef int (*CellSailRendererAudioFuncMakeup)(void*);
 typedef int (*CellSailRendererAudioFuncCleanup)(void*);
 typedef void (*CellSailRendererAudioFuncOpen)(void*,const CellSailAudioFormat*,uint32_t);

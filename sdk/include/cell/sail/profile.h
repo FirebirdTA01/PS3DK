@@ -32,8 +32,25 @@ typedef struct { uint32_t thisSize; void *pReserved ATTRIBUTE_PRXPTR; CellSailAv
 typedef struct { uint32_t thisSize; int flags; uint32_t timeScale, majorBrand, compatibleBrandNum; uint32_t compatibleBrands[8]; uint32_t interleaveDuration; } CellSailMp4MovieParameter;
 typedef struct { uint32_t thisSize, timeScale, interleaveDuration; } CellSailGeneralMovieParameter;
 typedef struct { uint32_t thisSize; int heapSize; } CellSailStreamParameter;
-typedef struct { uint32_t thisSize; int codecType, flags, reserved0, reserved1, maxBitrate, aveBitrate, sampleScale; int reserved2[3]; CellSailAudioFormat format; } CellSailBsAudioParameter;
-typedef struct { uint32_t thisSize; int codecType, flags, majorMode, minorMode, maxBitrate, aveBitrate, sampleScale, gopDuration; int reserved[2]; CellSailVideoFormat format; } CellSailBsVideoParameter;
+typedef struct {
+    uint32_t thisSize;
+    int codecType, flags, reserved0, reserved1, maxBitrate, aveBitrate, sampleScale;
+    int reserved2[4];
+    CellSailAudioFormat format;
+} CellSailBsAudioParameter;
+typedef struct CellSailBsVideoParameter {
+    uint32_t thisSize;
+    int codecType;
+    int flags;
+    int majorMode;
+    int minorMode;
+    int maxBitrate;
+    int aveBitrate;
+    int sampleScale;
+    int gopDuration;
+    uint32_t reserved[3];
+    CellSailVideoFormat format;
+} CellSailBsVideoParameter;
 typedef struct { uint64_t internalData[512]; } CellSailProfile;
 
 int cellSailProfileSetStreamParameter(CellSailProfile*,CellSailStreamParameter*,void*);

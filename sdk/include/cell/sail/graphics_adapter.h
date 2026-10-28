@@ -27,7 +27,7 @@ typedef struct {
     CellSailGraphicsAdapterFuncAllocFrame    pAlloc         ATTRIBUTE_PRXPTR;
     CellSailGraphicsAdapterFuncFreeFrame     pFree          ATTRIBUTE_PRXPTR;
 } CellSailGraphicsAdapterFuncs;
-typedef struct { uint8_t *pBuffer ATTRIBUTE_PRXPTR; uint32_t sessionId,tag; int status; uint64_t pts; } CellSailGraphicsFrameInfo;
+typedef struct CellSailGraphicsFrameInfo { uint8_t *pBuffer ATTRIBUTE_PRXPTR; uint32_t sessionId,tag; int status; uint64_t pts; } CellSailGraphicsFrameInfo;
 typedef struct { uint64_t internalData[32]; } CellSailGraphicsAdapter;
 int cellSailGraphicsAdapterInitialize(CellSailGraphicsAdapter*,const CellSailGraphicsAdapterFuncs*,void*);
 int cellSailGraphicsAdapterFinalize(CellSailGraphicsAdapter*);

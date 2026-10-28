@@ -12,8 +12,36 @@ extern "C" {
 typedef struct { uint64_t internalData[16]; } CellSailAviMovie;
 typedef struct { uint64_t internalData[2]; } CellSailAviStream;
 typedef struct { uint32_t maxBytesPerSec, flags, reserved0, streams, suggestedBufferSize, width, height, scale, rate, length, reserved1, reserved2; } CellSailAviMovieInfo;
-typedef struct { uint32_t microSecPerFrame, maxBytesPerSec, padding, flags, totalFrames, initialFrames, streams, suggestedBufferSize, width, height, reserved[4]; } CellSailAviMainHeader;
-typedef struct { uint32_t fccType, fccHandler, flags, priority, language, initialFrames, scale, rate, start, length, suggestedBufferSize, quality, sampleSize; int16_t left, top, right, bottom; } CellSailAviStreamHeader;
+typedef struct { uint32_t microSecPerFrame, maxBytesPerSec, paddingGranularity, flags, totalFrames, initialFrames, streams, suggestedBufferSize, width, height, reserved[4]; } CellSailAviMainHeader;
+typedef struct CellSailAviStreamHeader {
+    uint32_t fccType;
+    uint32_t fccHandler;
+    uint32_t flags;
+    uint16_t priority;
+    uint16_t language;
+    uint32_t initialFrames;
+    uint32_t scale;
+    uint32_t rate;
+    uint32_t start;
+    uint32_t length;
+    uint32_t suggestedBufferSize;
+    uint32_t quality;
+    uint32_t sampleSize;
+    union {
+        struct {
+            int16_t left;
+            int16_t top;
+            int16_t right;
+            int16_t bottom;
+        } frame;
+        struct {
+            int16_t left;
+            int16_t top;
+            int16_t right;
+            int16_t bottom;
+        };
+    };
+} CellSailAviStreamHeader;
 int cellSailAviMovieGetMovieInfo(CellSailAviMovie*,CellSailAviMovieInfo*);
 int cellSailAviMovieGetStreamByIndex(CellSailAviMovie*,int,CellSailAviStream*);
 int cellSailAviStreamGetHeader(CellSailAviStream*,CellSailAviStreamHeader*);

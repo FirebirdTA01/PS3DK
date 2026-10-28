@@ -16,13 +16,44 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-typedef struct { int codecType, flags, res0, res1, maxBitrate, aveBitrate, sampleScale; int res2[3]; CellSailAudioFormat format; void *pSpecificInfo ATTRIBUTE_PRXPTR; } CellSailComposerEsAudioParameter;
-typedef struct { int codecType, flags, majorMode, minorMode, maxBitrate, aveBitrate, sampleScale, gopDuration; int res[2]; CellSailVideoFormat format; void *pSpecificInfo ATTRIBUTE_PRXPTR; } CellSailComposerEsVideoParameter;
+typedef struct CellSailComposerEsAudioParameter {
+    int codecType;
+    int flags;
+    int reserved0;
+    int reserved1;
+    int maxBitrate;
+    int aveBitrate;
+    int sampleScale;
+    int reserved2[3];
+    CellSailAudioFormat format;
+    void *pSpecificInfo ATTRIBUTE_PRXPTR;
+} CellSailComposerEsAudioParameter;
+typedef struct CellSailComposerEsVideoParameter {
+    int codecType;
+    int flags;
+    int majorMode;
+    int minorMode;
+    int maxBitrate;
+    int aveBitrate;
+    int sampleScale;
+    int gopDuration;
+    int reserved[2];
+    CellSailVideoFormat format;
+    void *pSpecificInfo ATTRIBUTE_PRXPTR;
+} CellSailComposerEsVideoParameter;
 typedef struct { uint8_t *pAu ATTRIBUTE_PRXPTR; uint32_t auSize; int64_t pts; uint64_t reserved; uint32_t sessionId; void *specificInfo ATTRIBUTE_PRXPTR; } CellSailComposerAudioAuInfo;
-typedef struct { uint8_t *pAu ATTRIBUTE_PRXPTR; uint32_t auSize; int64_t pts, dts; uint64_t reserved; uint32_t sessionId; void *specificInfo ATTRIBUTE_PRXPTR; } CellSailComposerVideoAuInfo;
+typedef struct CellSailComposerVideoAuInfo {
+    uint8_t *pAu ATTRIBUTE_PRXPTR;
+    uint32_t auSize;
+    int64_t pts[3];
+    int64_t dts;
+    uint64_t reserved;
+    uint32_t sessionId;
+    void *specificInfo ATTRIBUTE_PRXPTR;
+} CellSailComposerVideoAuInfo;
 typedef struct { uint8_t *pAu ATTRIBUTE_PRXPTR; uint32_t auSize; int64_t pts, dts; uint64_t reserved; uint32_t sessionId; void *specificInfo ATTRIBUTE_PRXPTR; } CellSailComposerUserAuInfo;
 typedef struct { int command; int value; } CellSailComposerCommand;
-typedef struct { uint64_t internalData[32]; } CellSailComposer;
+typedef struct { uint64_t internalData[40]; } CellSailComposer;
 int cellSailComposerInitialize(CellSailComposer*,CellSailMp4MovieParameter*,CellSailStreamParameter*,unsigned);
 int cellSailComposerFinalize(CellSailComposer*);
 int cellSailComposerGetStreamParameter(CellSailComposer*,unsigned,CellSailStreamParameter*,void**);

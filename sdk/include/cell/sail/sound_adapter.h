@@ -21,7 +21,7 @@ typedef struct {
     CellSailSoundAdapterFuncCleanup       pCleanup       ATTRIBUTE_PRXPTR;
     CellSailSoundAdapterFuncFormatChanged pFormatChanged ATTRIBUTE_PRXPTR;
 } CellSailSoundAdapterFuncs;
-typedef struct { float *pBuffer ATTRIBUTE_PRXPTR; uint32_t sessionId,tag; int status; uint64_t pts; } CellSailSoundFrameInfo;
+typedef struct CellSailSoundFrameInfo { float *pBuffer ATTRIBUTE_PRXPTR; uint32_t sessionId,tag; int status; uint64_t pts; } CellSailSoundFrameInfo;
 typedef struct { uint64_t internalData[32]; } CellSailSoundAdapter;
 int cellSailSoundAdapterInitialize(CellSailSoundAdapter*,const CellSailSoundAdapterFuncs*,void*);
 int cellSailSoundAdapterFinalize(CellSailSoundAdapter*);

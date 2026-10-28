@@ -16,7 +16,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-typedef struct { void *pPic ATTRIBUTE_PRXPTR; int status; uint64_t pts, reserved; uint16_t interval; uint8_t structure; int8_t repeatNum; uint8_t reserved2[4]; } CellSailVideoFrameInfo;
+typedef struct CellSailVideoFrameInfo { void *pPic ATTRIBUTE_PRXPTR; int status; uint64_t pts, reserved; uint16_t interval; uint8_t structure; int8_t repeatNum; uint8_t reserved2[4]; } CellSailVideoFrameInfo;
 typedef int (*CellSailRendererVideoFuncMakeup)(void*);
 typedef int (*CellSailRendererVideoFuncCleanup)(void*);
 typedef void (*CellSailRendererVideoFuncOpen)(void*,const CellSailVideoFormat*,uint32_t,uint32_t);

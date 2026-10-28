@@ -15,10 +15,10 @@ extern "C" {
 #endif
 enum { CELL_SAIL_EVENT_RECORDER_CALL_COMPLETED=2, CELL_SAIL_EVENT_RECORDER_STATE_CHANGED=3 };
 enum { CELL_SAIL_VIDEO_FRAME_RATE_100HZ=8, CELL_SAIL_VIDEO_FRAME_RATE_120000_1001HZ=9, CELL_SAIL_VIDEO_FRAME_RATE_120HZ=10 };
-typedef struct { uint32_t key; uintptr_t value; } CellSailCommand;
+typedef struct CellSailCommand { uint32_t key; uint32_t value; } CellSailCommand;
 #define CELL_SAIL_MAX_NUM_FILTER_COMMANDS 16
 typedef struct {
-    void *pFrame ATTRIBUTE_PRXPTR; uint32_t size, sampleNum, reserved0;
+    void *pFrame ATTRIBUTE_PRXPTR; uint32_t size; uint32_t sampleNum, reserved0;
     uint64_t timeStamp, reserved1; uint32_t commandNum;
     CellSailCommand *pCommands ATTRIBUTE_PRXPTR; uint32_t reserved2, reserved3;
 } CellSailFeederFrameInfo;

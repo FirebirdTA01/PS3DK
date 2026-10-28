@@ -13,9 +13,32 @@ enum { CELL_SAIL_MP4_VIDEO_SAMPLE_CODING_UNSPECIFIED=0, CELL_SAIL_MP4_VIDEO_SAMP
 enum { CELL_SAIL_MP4_TRACK_REFERENCE_SYNC=CELL_SAIL_4CC('s','y','n','c') };
 typedef struct { uint64_t internalData[16]; } CellSailMp4Movie;
 typedef struct { uint64_t internalData[6]; } CellSailMp4Track;
-typedef struct { uint16_t s,m,h,d,mo,y,res0,res1; } CellSailMp4DateTime;
+typedef struct {
+    union { uint16_t second; uint16_t s; };
+    union { uint16_t minute; uint16_t m; };
+    union { uint16_t hour;   uint16_t h; };
+    union { uint16_t day;    uint16_t d; };
+    union { uint16_t month;  uint16_t mo; };
+    union { uint16_t year;   uint16_t y; };
+    union { uint16_t reserved0; uint16_t res0; };
+    union { uint16_t reserved1; uint16_t res1; };
+} CellSailMp4DateTime;
 typedef struct { CellSailMp4DateTime creationDateTime, modificationDateTime; uint32_t trackCount, movieTimeScale; uint64_t movieDuration; uint32_t reserved[16]; } CellSailMp4MovieInfo;
-typedef struct { bool isTrackEnable; uint8_t res0[3]; uint32_t trackId; uint64_t trackDuration; int16_t layer, alternateGroup; uint16_t res1[2]; uint32_t trackWidth, trackHeight; uint16_t language, res2; uint32_t mediaType; uint32_t res3[6]; } CellSailMp4TrackInfo;
+typedef struct CellSailMp4TrackInfo {
+    bool isTrackEnable;
+    uint8_t reserved0[3];
+    uint32_t trackId;
+    uint64_t trackDuration;
+    int16_t layer;
+    int16_t alternateGroup;
+    uint16_t reserved1[2];
+    uint32_t trackWidth;
+    uint32_t trackHeight;
+    uint16_t language;
+    uint16_t reserved2;
+    uint32_t mediaType;
+    uint32_t reserved3[6];
+} CellSailMp4TrackInfo;
 int cellSailMp4MovieGetBrand(CellSailMp4Movie*,uint32_t*,uint32_t*);
 int cellSailMp4MovieIsCompatibleBrand(CellSailMp4Movie*,uint32_t);
 int cellSailMp4MovieGetMovieInfo(CellSailMp4Movie*,CellSailMp4MovieInfo*);

@@ -24,7 +24,7 @@ extern "C" {
 typedef void (*CellSailRecorderFuncNotified)(void*,CellSailEvent,uint64_t,uint64_t);
 typedef enum { CELL_SAIL_RECORDER_STATE_INITIALIZED=0, CELL_SAIL_RECORDER_STATE_BOOT_TRANSITION=1, CELL_SAIL_RECORDER_STATE_CLOSED=2, CELL_SAIL_RECORDER_STATE_OPEN_TRANSITION=3, CELL_SAIL_RECORDER_STATE_OPENED=4, CELL_SAIL_RECORDER_STATE_START_TRANSITION=5, CELL_SAIL_RECORDER_STATE_RUNNING=6, CELL_SAIL_RECORDER_STATE_STOP_TRANSITION=7, CELL_SAIL_RECORDER_STATE_CLOSE_TRANSITION=8, CELL_SAIL_RECORDER_STATE_LOST=9 } CellSailRecorderStateType;
 typedef enum { CELL_SAIL_RECORDER_PRESET_AV_SYNC_AUTO_DETECT=0, CELL_SAIL_RECORDER_PRESET_AS_IS=1 } CellSailRecorderPresetType;
-typedef struct { uint64_t internalData[128]; } CellSailRecorder;
+typedef struct __attribute__((aligned(128))) CellSailRecorder { uint64_t internalData[1024]; } CellSailRecorder;
 int cellSailRecorderInitialize(CellSailRecorder*,CellSailRecorderFuncNotified,void*,CellSailRecorderPresetType);
 int cellSailRecorderFinalize(CellSailRecorder*);
 int cellSailRecorderBoot(CellSailRecorder*,uint32_t,uint32_t,uint64_t,uint64_t);

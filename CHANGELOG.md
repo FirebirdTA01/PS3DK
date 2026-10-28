@@ -73,6 +73,29 @@ The version stamped into builds is generated from the most recent
   `SceNpMatching2JoinedSessionInfo * ATTRIBUTE_PRXPTR` rather than embedding an
   entire session structure. Rebuild code that exchanges these records with NP services.
 
+- **SAIL player, recorder, and composer layouts.** Correct the layouts of
+  multimedia records in `<cell/sail.h>`, `<cell/sail/muxer.h>`, and
+  `<cell/sail/recorder.h>`. `CellSailPlayer` storage is 1024 bytes (128 uint64_t);
+  `CellSailRecorder` is 8192 bytes aligned to 128 bytes; `CellSailComposer` is
+  320 bytes (40 uint64_t). `CellSailVideoFormat` is 32 bytes (align 8) with
+  16-bit dimensions and pitch at offset 8. Boundary records preserve fixed 32-bit
+  attributed pointers (`ATTRIBUTE_PRXPTR`) and 32-bit counts across both ILP32
+  and LP64 data models: `CellSailAuInfo` (40 bytes, align 8),
+  `CellSailSourceBufferItem` (16 bytes, align 4), `CellSailComposerVideoAuInfo`
+  (56 bytes, align 8, with 3-element PTS array at offset 8),
+  `CellSailComposerAudioAuInfo` (32 bytes), `CellSailComposerUserAuInfo` (40 bytes),
+  `CellSailComposerEsAudioParameter` (72 bytes), and `CellSailComposerEsVideoParameter`
+  (80 bytes). `CellSailBsVideoParameter` (80 bytes) and `CellSailBsAudioParameter`
+  (72 bytes) preserve 32-bit `thisSize` and control words with format at offset 48.
+  Frame info records (`CellSailAudioFrameInfo`, `CellSailVideoFrameInfo`,
+  `CellSailSoundFrameInfo`, `CellSailGraphicsFrameInfo`) and callback function
+  tables (`CellSailSoundAdapterFuncs`, `CellSailGraphicsAdapterFuncs`,
+  `CellSailRendererAudioFuncs`, `CellSailRendererVideoFuncs`) preserve 32-bit
+  service representation in both data models. Source-compatible member aliases
+  are provided for `CellSailAviStreamHeader` (`left` / `frame.left`) and
+  `CellSailMp4DateTime` (`s` / `second`, `m` / `minute`, etc.). Rebuild callers
+  exchanging these records with SAIL services for changed storage.
+
 - **SPURS job-chain and workload-flag layouts.** `CellSpursJobChain` now
   keeps 272 bytes of storage with 128-byte typedef alignment; the padded
   `CellSpursJobChainForArray` is 384 bytes with padding at offset 272,

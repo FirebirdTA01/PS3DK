@@ -51,11 +51,40 @@ enum { CELL_SAIL_VIDEO_COLOR_MATRIX_UNSPECIFIED=-1, CELL_SAIL_VIDEO_COLOR_MATRIX
 enum { CELL_SAIL_VIDEO_SCAN_UNSPECIFIED=-1, CELL_SAIL_VIDEO_SCAN_PROGRESSIVE=0, CELL_SAIL_VIDEO_SCAN_INTERLACE=1 };
 enum { CELL_SAIL_VIDEO_FRAME_RATE_UNSPECIFIED=-1, CELL_SAIL_VIDEO_FRAME_RATE_24000_1001HZ=0, CELL_SAIL_VIDEO_FRAME_RATE_24HZ=1, CELL_SAIL_VIDEO_FRAME_RATE_25HZ=2, CELL_SAIL_VIDEO_FRAME_RATE_30000_1001HZ=3, CELL_SAIL_VIDEO_FRAME_RATE_30HZ=4, CELL_SAIL_VIDEO_FRAME_RATE_50HZ=5, CELL_SAIL_VIDEO_FRAME_RATE_60000_1001HZ=6, CELL_SAIL_VIDEO_FRAME_RATE_60HZ=7 };
 enum { CELL_SAIL_VIDEO_ASPECT_RATIO_UNSPECIFIED=-1, CELL_SAIL_VIDEO_ASPECT_RATIO_1_1=1, CELL_SAIL_VIDEO_ASPECT_RATIO_12_11=2, CELL_SAIL_VIDEO_ASPECT_RATIO_10_11=3, CELL_SAIL_VIDEO_ASPECT_RATIO_16_11=4, CELL_SAIL_VIDEO_ASPECT_RATIO_40_33=5, CELL_SAIL_VIDEO_ASPECT_RATIO_4_3=14 };
-typedef struct { int8_t coding, scan; int16_t frameRate, aspectRatio; int32_t width, height, pitch, colorMatrix; int32_t alphaUsedFlag, reserved0; int64_t reserved1; } CellSailVideoFormat;
+typedef struct CellSailVideoFormat {
+    int8_t coding;
+    int8_t scan;
+    int8_t bitsPerColor;
+    int8_t frameRate;
+    int16_t width;
+    int16_t height;
+    int32_t pitch;
+    int32_t alpha;
+    int8_t colorMatrix;
+    int8_t aspectRatio;
+    int8_t colorRange;
+    int8_t reserved1;
+    int32_t reserved2;
+    uint64_t reserved3;
+} CellSailVideoFormat;
 
 /* AU info + feeder frame info */
-typedef struct { uint64_t pts, dts; uint32_t size; uint32_t reserved; } CellSailAuInfo;
-typedef struct { uint64_t internalData[8]; } CellSailSourceBufferItem;
+typedef struct CellSailAuInfo {
+    void *pAu ATTRIBUTE_PRXPTR;
+    uint32_t size;
+    uint32_t status;
+    uint32_t sessionId;
+    uint64_t pts;
+    uint64_t dts;
+    uint64_t reserved;
+} CellSailAuInfo;
+
+typedef struct CellSailSourceBufferItem {
+    void *pBuf ATTRIBUTE_PRXPTR;
+    uint32_t size;
+    uint32_t sessionId;
+    uint32_t reserved;
+} CellSailSourceBufferItem;
 
 /* Playback commands and source callbacks carry different records. */
 typedef struct CellSailStartCommand {
