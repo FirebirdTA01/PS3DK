@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.26.152] — 2026-10-27
+
 ### Added
 
 - **GCM flip and frame-pacing sample.** `hello-ppu-gcm-frame-pacing`
