@@ -191,6 +191,7 @@ int main(void)
 
 		cellDbgFontDrawGcm();
 		cellGcmFlush(ctx);
+		wait_flip();
 		do_flip(ctx, (uint8_t)cur);
 		cur = (cur + 1) % MAX_BUFFERS;
 	}

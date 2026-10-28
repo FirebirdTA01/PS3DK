@@ -197,11 +197,23 @@ static void set_render_target(CellGcmContextData *ctx, display_buffer *b)
 
 /* A userland effective address: non-null and inside the 32-bit space.
  * Under -mlp64 a pointer is 8 bytes, so a shim that returned the raw
- * register without widening correctly shows up here. */
+ * register without widening (leaving the top 32 bits set) shows up here.
+ *
+ * The range check is only meaningful when the pointer is WIDER than 32
+ * bits: on ILP32 every uintptr_t is already <= 0xffffffff, so the
+ * comparison is constant-true and -Wtype-limits rejects it.  Guard it
+ * with UINTPTR_MAX so the check survives on LP64 and compiles clean on
+ * both. */
 static int plausible_ea(const void *p)
 {
 	uintptr_t u = (uintptr_t)p;
-	return u != 0 && (uint64_t)u <= 0xffffffffull;
+	if (u == 0)
+		return 0;
+#if UINTPTR_MAX > 0xFFFFFFFFu
+	return u <= (uintptr_t)0xFFFFFFFFu;
+#else
+	return 1;
+#endif
 }
 
 int main(int argc, const char **argv)

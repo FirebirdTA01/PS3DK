@@ -257,9 +257,16 @@ static void dump_fifo_window(const char *label, uint32_t *before, uint32_t *afte
 	}
 }
 
-#define FIFO_MARK_BEFORE(ctx)   ((uint32_t *)(uintptr_t)(ctx)->current)
+/* gcmContextData fields begin/end/current are declared mode(SI)
+ * (32-bit pointers), so on LP64 the direct (uintptr_t) cast widens
+ * a 4-byte pointer into 8 and trips -Wpointer-to-int-cast.  Route
+ * through a 32-bit int first: (uint32_t) is the natural width on
+ * both ABIs, and widening that to uintptr_t is a widening, never a
+ * narrowing, so no warning.  Behaviour is unchanged on ILP32 where
+ * the pointer was already 32 bits. */
+#define FIFO_MARK_BEFORE(ctx)   ((uint32_t *)(uintptr_t)(uint32_t)(ctx)->current)
 #define FIFO_DUMP(label, ctx, before)  do {                          \
-	uint32_t *_after = (uint32_t *)(uintptr_t)(ctx)->current;        \
+	uint32_t *_after = (uint32_t *)(uintptr_t)(uint32_t)(ctx)->current; \
 	dump_fifo_window((label), (before), _after);                     \
 } while (0)
 
