@@ -11,6 +11,10 @@ strictly compliant ET_REL object or AR archive of ET_REL objects, and
 verifies that readelf producer outputs match expected member, section,
 and relocation inventories with zero unparsed, truncated, or contradictory lines.
 Linker scripts and non-relocatable binaries are refused.
+
+The exact 8-byte-entry/+4/lwz low-word shape is counted separately. Object-only
+mode cannot distinguish a legitimate low-word read from a bad remap landing
+at +4 with the same shape. The linked checker is the gate for that distinction.
 """
 
 import argparse
@@ -99,7 +103,7 @@ def find_tool(tool_name, user_override=None, env_vars=None):
     return None
 
 
-def inspect_ar_container(file_path):
+def inspect_ar_container(file_path, member_bytes=None):
     """
     Inspect an AR container, validating format admission for every constituent member.
     Validates:
@@ -191,6 +195,8 @@ def inspect_ar_container(file_path):
                     return None, f"Archive member '{mname}' unsupported machine: {e_machine} (expected EM_PPC64=21)"
 
                 admitted_members.append(mname)
+                if member_bytes is not None:
+                    member_bytes.append(mdata)
 
             if f.tell() != file_size:
                 return None, f"Trailing garbage after last AR member ({file_size - f.tell()} extra bytes)"
@@ -200,7 +206,7 @@ def inspect_ar_container(file_path):
         return None, f"Failed to read archive container: {ex}"
 
 
-def validate_file_format(file_path):
+def validate_file_format(file_path, member_bytes=None):
     """
     Validate binary magic to distinguish supported relocatable ELF and AR files.
     Fails closed on executables (ET_EXEC), shared objects, unsupported architectures,
@@ -217,7 +223,7 @@ def validate_file_format(file_path):
         return None, None, "File too short (< 8 bytes)"
 
     if header.startswith(b'!<arch>\n'):
-        admitted, err = inspect_ar_container(file_path)
+        admitted, err = inspect_ar_container(file_path, member_bytes)
         if err:
             return None, None, err
         return 'AR', admitted, None
@@ -237,6 +243,9 @@ def validate_file_format(file_path):
         e_machine = int.from_bytes(header[18:20], 'big')
         if e_machine != 21:  # EM_PPC64
             return None, None, f"Unsupported ELF machine: {e_machine} (expected EM_PPC64=21)"
+        if member_bytes is not None:
+            with open(file_path, 'rb') as f:
+                member_bytes.append(f.read())
         return 'ELF', [os.path.basename(file_path)], None
 
     return None, None, "Unsupported file format (only ET_REL relocatable objects and AR archives are supported; linker scripts and non-ELF files are refused)"
@@ -578,7 +587,171 @@ def parse_relocations_pass(r_text, member_name, rela_sections):
     return parsed_relocs, []
 
 
-def audit_member(member_name, secs, symbols_by_idx, toc_sec_num):
+def object_code_sections(data, sections, needed):
+    """Bound instruction reads using ELF sh_info, never inferred section names.
+
+    Cross-check relevant binary section identities against the producer inventory. Archive
+    payloads are supplied in container order, including duplicate member names.
+    Unsupported extended section numbering is refused rather than guessed.
+    """
+    if not needed:
+        return {}
+    if len(data) < 64:
+        raise ValueError('Truncated ELF header for instruction inspection')
+    shoff = struct.unpack_from('>Q', data, 40)[0]
+    entsize, count, names_index = struct.unpack_from('>HHH', data, 58)
+    if entsize != 64 or count != len(sections) or not 0 < names_index < count:
+        raise ValueError('Unsupported or contradictory binary section inventory')
+    if shoff + count * 64 > len(data):
+        raise ValueError('Truncated binary section headers')
+    headers = [struct.unpack_from('>IIQQQQIIQQ', data, shoff + i * 64) for i in range(count)]
+
+    def payload(h):
+        off, size = h[4:6]
+        if off + size > len(data):
+            raise ValueError('Truncated binary section payload')
+        return data[off:off + size]
+
+    names = payload(headers[names_index])
+    labels = []
+    for i, h in enumerate(headers):
+        end = names.find(b'\0', h[0])
+        if end < 0:
+            raise ValueError('Invalid binary section name')
+        name = names[h[0]:end].decode('ascii')
+        if h[5] != sections[i]['size'] or h[9] != sections[i]['es']:
+            raise ValueError('Binary / producer section inventory mismatch')
+        if h[1] != 8:  # SHT_NOBITS has no file payload
+            payload(h)
+        labels.append(name)
+    toc_indices = [i for i, name in enumerate(labels) if name == '.toc']
+    toc_rela_indices = [i for i, name in enumerate(labels) if name == '.rela.toc']
+    if len(toc_indices) != 1 or len(toc_rela_indices) != 1:
+        raise ValueError('Ambiguous binary TOC section identity')
+    toc_rela = headers[toc_rela_indices[0]]
+    if toc_rela[1] != 4 or toc_rela[7] != toc_indices[0]:
+        raise ValueError('.rela.toc does not relocate the .toc section')
+    if sum(h[1] == 4 and h[7] == toc_indices[0] and h[5] != 0 for h in headers) != 1:
+        raise ValueError('Multiple relocation sections target .toc')
+    result = {}
+    for i, h in enumerate(headers):
+        if sections[i]['name'] in needed:
+            if h[1] != 4 or labels[i] != sections[i]['name']:
+                raise ValueError('Binary / producer relocation section mismatch')
+            if h[7] >= count or h[6] >= count:
+                raise ValueError('Invalid relocation section link/info')
+            target = headers[h[7]]
+            if sum(other[1] == 4 and other[7] == h[7] and other[5] != 0 for other in headers) != 1:
+                raise ValueError('Multiple relocation sections target recognition code')
+            if labels[h[7]] != sections[h[7]]['name']:
+                raise ValueError('Binary / producer code section mismatch')
+            if target[1] == 1 and target[2] & 4 and not target[2] & 0x800:
+                if labels[i] in result:
+                    raise ValueError('Ambiguous relocation section name')
+                result[labels[i]] = payload(target)
+    return result
+
+
+def gap_writes(word):
+    """Conservative GPR write set; None terminates a linear register check.
+
+    This deliberately small whitelist covers the measured compiler sequences.
+    Branches, update forms, privileged/unknown opcodes are never skipped.
+    """
+    op, rt, ra = word >> 26, (word >> 21) & 31, (word >> 16) & 31
+    if op in (14, 15, 32):  # addi, addis, lwz
+        return {rt}
+    if op in (20, 21, 23, 24, 25, 26, 27, 28, 29):  # rotate/logical immediate
+        return {ra}
+    if op == 31 and (word >> 1) & 1023 == 444:  # or / mr
+        return {ra}
+    if op in (36, 38, 44, 52, 54):  # non-updating stw/stb/sth/stfs/stfd
+        return set()
+    if op == 62 and word & 3 == 0:  # std, not stdu
+        return set()
+    if op in (59, 63) and (word >> 1) & 1023 == 20:
+        return set()  # fsubs / fsub (no GPR writes)
+    return None
+
+
+def instruction_relocations(relocs, pos):
+    """Relocations whose write spans intersect this instruction; None if unknown.
+
+    The narrow footprint table is intentional. Unknown relocation widths cannot
+    prove that the instruction bytes survive linking, even at another offset.
+    """
+    result = []
+    for rel in relocs:
+        rtype = rel['rtype']
+        if rtype in SUPPORTED_TOC_ACCESS_RELOCS:
+            width = 2
+        elif rtype in ('R_PPC64_ADDR64', 'R_PPC64_UADDR64', 'R_PPC64_REL64', 'R_PPC64_TOC'):
+            width = 8
+        elif rtype in ('R_PPC64_ADDR32', 'R_PPC64_UADDR32', 'R_PPC64_REL32', 'R_PPC64_REL24'):
+            width = 4
+        else:
+            return None
+        if rel['offset'] < pos + 4 and pos < rel['offset'] + width:
+            result.append(rel)
+    return result
+
+
+def recognize_low_words(violations, relocations, code_sections):
+    """Return admitted violation indices and semantic access count."""
+    admitted = set()
+    accesses = 0
+    by_site = {}
+    for idx, v in enumerate(violations):
+        by_site[(v['section'], v['offset'])] = idx
+    for idx, v in enumerate(violations):
+        if v['entry_size'] != 8 or v['delta'] != 4:
+            continue
+        code = code_sections.get(v['section'], b'')
+        offset = v['offset']
+        if offset % 4 != 2 or offset < 2 or offset + 2 > len(code):
+            continue
+        rels = relocations[v['section']]
+        touching = instruction_relocations(rels, offset - 2)
+        if touching is None or len(touching) != 1 or touching[0]['offset'] != offset:
+            continue
+        word = int.from_bytes(code[offset - 2:offset + 2], 'big')
+        if word >> 26 != 32:  # exactly lwz, not lwa, ld, lwzu, etc.
+            continue
+        base = (word >> 16) & 31
+        if v['rtype'] == 'R_PPC64_TOC16' and base == 2:
+            admitted.add(idx)
+            accesses += 1
+        elif v['rtype'] == 'R_PPC64_TOC16_LO' and base != 0:
+            for pos in range(offset - 6, -1, -4):
+                previous = int.from_bytes(code[pos:pos + 4], 'big')
+                site = pos + 2
+                hi_idx = by_site.get((v['section'], site))
+                here = instruction_relocations(rels, pos)
+                if here is None:
+                    break
+                if (hi_idx is not None and hi_idx not in admitted and len(here) == 1
+                        and here[0]['offset'] == site
+                        and previous >> 26 == 15
+                        and (previous >> 21) & 31 == base
+                        and (previous >> 16) & 31 == 2):
+                    hi = violations[hi_idx]
+                    if (hi['rtype'] == 'R_PPC64_TOC16_HA'
+                            and hi['entry_size'] == 8 and hi['delta'] == 4
+                            and hi['target_addend'] == v['target_addend']):
+                        admitted.update((idx, hi_idx))
+                        accesses += 1
+                    break
+                # Any relocation capable of changing more than an immediate
+                # field defeats our instruction decoding.
+                if any(r['offset'] != site or r['rtype'] not in SUPPORTED_TOC_ACCESS_RELOCS for r in here):
+                    break
+                writes = gap_writes(previous)
+                if writes is None or base in writes:
+                    break
+    return admitted, accesses
+
+
+def audit_member(member_name, secs, symbols_by_idx, toc_sec_num, object_data=None, sections=None):
     """
     Audit parsed sections of an object member for mid-entry TOC relocations.
     Uses symbol table indices (ELF64_R_SYM) for unambiguous symbol resolution.
@@ -591,15 +764,21 @@ def audit_member(member_name, secs, symbols_by_idx, toc_sec_num):
         'toc_relocs_examined': 0,
         'sections_examined': len(secs),
         'has_toc': False,
+        'low_word_accesses': 0,
+        'low_word_sites': 0,
     }
 
     toc_entries = []
+    toc_size = sections[int(toc_sec_num)]['size'] if sections is not None and toc_sec_num else None
     for rel in secs.get('.rela.toc', []):
         rtype = rel['rtype']
         if rtype not in SUPPORTED_TOC_ENTRY_RELOCS:
             errors.append(f"{member_name}: Unknown relocation type in .rela.toc: {rtype} at offset 0x{rel['offset']:x}")
             continue
         size = SUPPORTED_TOC_ENTRY_RELOCS[rtype]
+        if toc_size is not None and rel['offset'] + size > toc_size:
+            errors.append(f"{member_name}: TOC entry outside .toc bounds at 0x{rel['offset']:x}")
+            continue
         toc_entries.append({
             'start': rel['offset'],
             'end': rel['offset'] + size,
@@ -647,6 +826,10 @@ def audit_member(member_name, secs, symbols_by_idx, toc_sec_num):
 
             stats['toc_relocs_examined'] += 1
 
+            if toc_size is not None and not 0 <= effective_target < toc_size:
+                errors.append(f"{member_name}: TOC reference outside .toc bounds: {sec_name} + 0x{rel['offset']:x} targets 0x{effective_target:x} (size 0x{toc_size:x})")
+                continue
+
             for entry in toc_entries:
                 if entry['start'] < effective_target < entry['end']:
                     violations.append({
@@ -664,6 +847,22 @@ def audit_member(member_name, secs, symbols_by_idx, toc_sec_num):
                     })
                     break
 
+    # Ambiguous overlapping entries cannot establish an eight-byte slot.
+    ordered = sorted(toc_entries, key=lambda e: e['start'])
+    overlap = any(a['end'] > b['start'] for a, b in zip(ordered, ordered[1:]))
+    if overlap:
+        errors.append(f"{member_name}: Overlapping .toc entries")
+    if object_data is not None and not errors:
+        needed = {v['section'] for v in violations if v['entry_size'] == 8 and v['delta'] == 4}
+        try:
+            code_sections = object_code_sections(object_data, sections, needed)
+        except (ValueError, struct.error) as ex:
+            errors.append(f"{member_name}: {ex}")
+        else:
+            admitted, accesses = recognize_low_words(violations, secs, code_sections)
+            stats['low_word_accesses'] = accesses
+            stats['low_word_sites'] = len(admitted)
+            violations = [v for i, v in enumerate(violations) if i not in admitted]
     return violations, errors, stats
 
 
@@ -710,7 +909,8 @@ def collect_targets(input_paths, recursive=True):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Audit tool for PowerPC 64 TOC mid-entry relocations (Capability a)."
+        description="Audit tool for PowerPC 64 TOC mid-entry relocations (Capability a).",
+        epilog="Recognizes the 8-byte-entry/+4/lwz low-word shape via matched TOC16_HA/LO registers or TOC16 on r2. Object-only mode cannot distinguish a legitimate +4 low-word read from a bad remap landing at +4 with the same shape; the linked checker is the gate for that distinction."
     )
     parser.add_argument('inputs', nargs='+', help="Object files (.o, .obj), archives (.a), or directories to scan.")
     parser.add_argument('--readelf', help="Path to powerpc64-ps3-elf-readelf executable.")
@@ -742,6 +942,8 @@ def main():
     total_members_examined = 0
     total_toc_entries = 0
     total_toc_relocs = 0
+    total_low_word_accesses = 0
+    total_low_word_sites = 0
     archive_count = 0
     object_count = 0
 
@@ -753,7 +955,8 @@ def main():
     archive_summary = []
 
     for target in targets:
-        fmt, member_inventory, fmt_err = validate_file_format(target)
+        member_bytes = []
+        fmt, member_inventory, fmt_err = validate_file_format(target, member_bytes)
         if fmt_err:
             print(f"[ERROR] Invalid or malformed file {target}: {fmt_err}", file=sys.stderr)
             total_errors += 1
@@ -906,9 +1109,11 @@ def main():
                 continue
 
             # Audit relocations for mid-entry references
-            viols, m_errs, stats = audit_member(member_name, parsed_relocs, symbols_by_idx, toc_sec_num)
+            viols, m_errs, stats = audit_member(member_name, parsed_relocs, symbols_by_idx, toc_sec_num, member_bytes[idx], s_secs)
             total_toc_entries += stats['toc_entries_count']
             total_toc_relocs += stats['toc_relocs_examined']
+            total_low_word_accesses += stats['low_word_accesses']
+            total_low_word_sites += stats['low_word_sites']
 
             if m_errs:
                 for me in m_errs:
@@ -955,6 +1160,8 @@ def main():
         print(f"Total .toc entries examined: {total_toc_entries}")
         print(f"Total TOC-referencing relocations examined: {total_toc_relocs}")
         print(f"Mid-entry TOC relocations (Capability a): {total_violations}")
+        print(f"Recognized low-word accesses: {total_low_word_accesses}")
+        print(f"Recognized low-word relocation sites: {total_low_word_sites}")
         if total_errors > 0:
             print(f"Inspection / producer errors: {total_errors}")
 

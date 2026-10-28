@@ -4,7 +4,7 @@ Test suite for tools/toc-midentry-audit.py.
 
 Validates:
   1. Clean fixture reports 0 violations, exit 0.
-  2. Crafted mid-entry fixture (.toc+4) reports 2 violations, exit 1.
+  2. Replacement mid-entry fixture (.toc+2) reports 2 violations, exit 1.
   3. Named local TOC symbol mid-entry fixture reports 2 violations, exit 1.
   4. Archive containing named-mid member reports 2 violations inside archive, exit 1.
   5. Archive containing duplicate member names is audited without table collision.
@@ -31,6 +31,10 @@ Validates:
  26. Genuine no-relocation object audits cleanly with 0 violations, exit 0.
  27. Archive summary displays ERROR status when member fails.
  28. Harness fails when invoked producer fails (does not silently fall back).
+
+Original +4 fixture bytes are preserved as low-word positive witnesses. New
+byte fixtures exercise the recognition boundary and fail-closed register flow.
+See fixtures/toc-low-word-fixtures.md for the original/replacement fixture table.
 """
 
 import base64
@@ -38,6 +42,7 @@ import importlib.util
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -142,13 +147,13 @@ def test_midentry_fixture(mid_obj):
     if res.returncode != 1:
         print(f"FAIL: mid-entry fixture returned {res.returncode} instead of 1:\n{res.stdout}", file=sys.stderr)
         return False
-    if "targets .toc + 0x4" not in res.stdout or "Inside entry [0x0, 0x8)" not in res.stdout:
+    if "targets .toc + 0x2" not in res.stdout or "Inside entry [0x0, 0x8)" not in res.stdout:
         print(f"FAIL: mid-entry details missing in output:\n{res.stdout}", file=sys.stderr)
         return False
     if "Mid-entry TOC relocations (Capability a): 2" not in res.stdout:
         print(f"FAIL: mid-entry count mismatch:\n{res.stdout}", file=sys.stderr)
         return False
-    print("  PASS: mid-entry fixture flagged 2 violations at .toc+0x4, exit code 1")
+    print("  PASS: replacement mid-entry fixture flagged 2 violations at .toc+0x2, exit code 1")
     return True
 
 
@@ -158,8 +163,8 @@ def test_named_midentry_object(named_mid_obj):
     if res.returncode != 1:
         print(f"FAIL: named-mid object returned {res.returncode} instead of 1:\n{res.stdout}", file=sys.stderr)
         return False
-    if "targets .toc + 0x4" not in res.stdout:
-        print(f"FAIL: expected target .toc + 0x4 in output:\n{res.stdout}", file=sys.stderr)
+    if "targets .toc + 0x2" not in res.stdout:
+        print(f"FAIL: expected target .toc + 0x2 in output:\n{res.stdout}", file=sys.stderr)
         return False
     if "Mid-entry TOC relocations (Capability a): 2" not in res.stdout:
         print(f"FAIL: expected 2 violations:\n{res.stdout}", file=sys.stderr)
@@ -766,6 +771,137 @@ def test_producer_failure_in_harness():
     return True
 
 
+def low_word_object(words=(0x3d220000, 0x81290000, 0x4e800020),
+                    refs=((2, 50, 4), (6, 48, 4)), widths=(8,), flags=6, extra_refs=None):
+    """Independent ELF64BE witness, no assembler or production helpers.
+
+    Relocation numbers: ADDR64=38, ADDR32=1, TOC16=47, LO=48, HA=50.
+    Default words are addis r9,r2,0; lwz r9,0(r9); blr.
+    """
+    names = b'\0.text\0.toc\0.rela.text\0.rela.toc\0.symtab\0.strtab\0.shstrtab\0.rela.extra\0'
+    sym = bytes(24) + struct.pack('>IBBHQQ', 0, 3, 0, 2, 0, 0)
+    sym += struct.pack('>IBBHQQ', 1, 16, 0, 0, 0, 0)
+    toc_rels = bytearray()
+    offset = 0
+    for width in widths:
+        toc_rels += struct.pack('>QQq', offset, (2 << 32) | {8: 38, 4: 1}[width], 0)
+        offset += width
+    # name, type, flags, data, link, info, alignment, entsize
+    sections = [('', 0, 0, b'', 0, 0, 0, 0),
+                ('.text', 1, flags, b''.join(struct.pack('>I', w) for w in words), 0, 0, 4, 0),
+                ('.toc', 1, 3, bytes(offset), 0, 0, 8, 0),
+                ('.rela.text', 4, 0x40, b''.join(struct.pack('>QQq', off, (1 << 32) | rt, add) for off, rt, add in refs), 5, 1, 8, 24),
+                ('.rela.toc', 4, 0x40, toc_rels, 5, 2, 8, 24),
+                ('.symtab', 2, 0, sym, 6, 2, 8, 24),
+                ('.strtab', 3, 0, b'\0target\0', 0, 0, 1, 0),
+                ('.shstrtab', 3, 0, names, 0, 0, 1, 0)]
+    if extra_refs is not None:
+        sections.append(('.rela.extra', 4, 0x40, b''.join(struct.pack('>QQq', off, (1 << 32) | rt, add) for off, rt, add in extra_refs), 5, 1, 8, 24))
+    data = bytearray(64)
+    headers = bytearray()
+    for name, typ, flg, payload, link, info, align, entsize in sections:
+        data += bytes((-len(data)) % max(align, 1))
+        headers += struct.pack('>IIQQQQIIQQ', names.index(name.encode() + b'\0') if name else 0,
+                               typ, flg, 0, len(data) if typ else 0, len(payload), link, info, align, entsize)
+        data += payload
+    data += bytes((-len(data)) % 8)
+    shoff = len(data)
+    data += headers
+    data[:64] = struct.pack('>16sHHIQQQIHHHHHH', b'\x7fELF\x02\x02\x01' + bytes(9),
+                            1, 21, 1, 0, 0, shoff, 0, 64, 0, 0, 64, len(sections), 7)
+    return bytes(data)
+
+
+def changed_addends(data, delta):
+    """Keep original fixture code/symbols; change its two code addends only."""
+    result = bytearray(data)
+    shoff = struct.unpack_from('>Q', data, 40)[0]
+    count = struct.unpack_from('>H', data, 60)[0]
+    for i in range(count):
+        header = struct.unpack_from('>IIQQQQIIQQ', data, shoff + i * 64)
+        if header[1] == 4 and header[7] == 6:  # fixture code section
+            for off in range(header[4], header[4] + header[5], 24):
+                struct.pack_into('>q', result, off + 16, delta)
+    return bytes(result)
+
+
+def changed_section_info(data, section, target):
+    result = bytearray(data)
+    shoff = struct.unpack_from('>Q', data, 40)[0]
+    struct.pack_into('>I', result, shoff + section * 64 + 44, target)
+    return bytes(result)
+
+
+def test_low_word_bytes(data, expected_rc, accesses=0, sites=0, archive=False):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / ('witness.a' if archive else 'witness.o')
+        if archive:
+            # Native binary AR writer avoids host ar tool dependencies and preserves LF bytes.
+            members = data if isinstance(data, tuple) else (data,)
+            data = b'!<arch>\n'
+            for member in members:
+                header = f"{'witness.o/':<16}{0:<12}{0:<6}{0:<6}{'100644':<8}{len(member):<10}`\n".encode()
+                data += header + member + (b'\n' if len(member) % 2 else b'')
+        path.write_bytes(data)
+        res = run_audit(str(path))
+        ok = (res.returncode == expected_rc
+              and f'Recognized low-word accesses: {accesses}\n' in res.stdout
+              and f'Recognized low-word relocation sites: {sites}\n' in res.stdout)
+        if expected_rc == 1:
+            ok = ok and ('[VIOLATION]' in res.stdout or 'outside .toc bounds' in res.stderr)
+        if not ok:
+            print(f'FAIL: expected rc={expected_rc}, accesses={accesses}, sites={sites}:\n{res.stdout}\n{res.stderr}')
+        return ok
+
+
+def low_word_tests():
+    cases = [
+        ('original section-symbol low word', base64.b64decode(MIDENTRY_B64), 0, 1, 2, False),
+        ('original named-symbol low word', base64.b64decode(NAMED_MID_B64), 0, 1, 2, False),
+        ('original named-symbol archive low word', base64.b64decode(NAMED_MID_B64), 0, 1, 2, True),
+        ('paired low word', low_word_object(), 0, 1, 2, False),
+        ('direct r2 low word', low_word_object(words=(0x81220000,), refs=((2, 47, 4),)), 0, 1, 1, False),
+        ('next entry start', low_word_object(widths=(4, 4)), 0, 0, 0, False),
+        ('offset +2', low_word_object(refs=((2, 50, 2), (6, 48, 2))), 1, 0, 0, False),
+        ('lone four-byte entry +4', low_word_object(widths=(4,)), 1, 0, 0, False),
+        ('ld at +4', low_word_object(words=(0x3d220000, 0xe9290000)), 1, 0, 0, False),
+        ('HA LO register mismatch', low_word_object(words=(0x3d220000, 0x812a0000)), 1, 0, 0, False),
+        ('HA not based on r2', low_word_object(words=(0x3d230000, 0x81290000)), 1, 0, 0, False),
+        ('addi under HA relocation', low_word_object(words=(0x39220000, 0x81290000)), 1, 0, 0, False),
+        ('ori under HA relocation', low_word_object(words=(0x60490000, 0x81290000)), 1, 0, 0, False),
+        ('HA destination r0', low_word_object(words=(0x3c020000, 0x81200000)), 1, 0, 0, False),
+        ('direct not based on r2', low_word_object(words=(0x81230000,), refs=((2, 47, 4),)), 1, 0, 0, False),
+        ('wrong relocation type', low_word_object(refs=((2, 50, 4), (6, 64, 4))), 1, 0, 0, False),
+        ('different pair targets', low_word_object(refs=((2, 50, 4), (6, 48, 12)), widths=(8, 8)), 1, 0, 0, False),
+        ('orphan LO', low_word_object(refs=((6, 48, 4),)), 1, 0, 0, False),
+        ('orphan HA', low_word_object(refs=((2, 50, 4),)), 1, 0, 0, False),
+        ('nonexecuting section', low_word_object(flags=3), 1, 0, 0, False),
+        ('unaligned relocation', low_word_object(refs=((1, 50, 4), (6, 48, 4))), 1, 0, 0, False),
+        ('duplicate HA relocation', low_word_object(refs=((2, 50, 4), (2, 50, 4), (6, 48, 4))), 1, 0, 0, False),
+        ('same-name archive members use own bytes', (low_word_object(), low_word_object(words=(0x3d220000, 0xe9290000))), 1, 1, 2, True),
+        ('reversed same-name archive members', (low_word_object(words=(0x3d220000, 0xe9290000)), low_word_object()), 1, 1, 2, True),
+        ('direct ld', low_word_object(words=(0xe9220000,), refs=((2, 47, 4),)), 1, 0, 0, False),
+        ('reversed relocation order', low_word_object(refs=((6, 48, 4), (2, 50, 4))), 0, 1, 2, False),
+        ('TOC relocation section targets code', changed_section_info(low_word_object(), 4, 1), 1, 0, 0, False),
+        ('preceding ADDR64 overwrites direct lwz', low_word_object(words=(0, 0x81220000), refs=((0, 38, 0), (6, 47, 4))), 1, 0, 0, False),
+        ('second relocation section overwrites HA', low_word_object(extra_refs=((0, 1, 0),)), 1, 0, 0, False),
+        ('shared HA keeps second LO flagged', low_word_object(words=(0x3d220000, 0x81490000, 0x81690000), refs=((2, 50, 4), (6, 48, 4), (10, 48, 4))), 1, 1, 2, False),
+    ]
+    # Independent literal instructions, testing both sides of each flow boundary.
+    for name, word, accepted in [
+        ('unrelated addi', 0x394a0001, True), ('addi clobber', 0x39290001, False),
+        ('store', 0xf9410000, True), ('floating subtract', 0xffe0e028, True),
+        ('mr unrelated', 0x7d4b5378, True), ('mr clobber', 0x7d495378, False),
+        ('rlwinm unrelated', 0x550a0036, True), ('rlwinm clobber', 0x55090036, False),
+        ('branch', 0x48000004, False), ('conditional branch', 0x41820004, False),
+        ('unknown instruction', 0, False), ('update store clobber', 0x95490004, False),
+    ]:
+        data = low_word_object(words=(0x3d220000, word, 0x81290000), refs=((2, 50, 4), (10, 48, 4)))
+        cases.append((name, data, 0 if accepted else 1, int(accepted), 2 if accepted else 0, False))
+    return [(name, lambda d=data, rc=rc, a=a, s=s, ar=ar: test_low_word_bytes(d, rc, a, s, ar))
+            for name, data, rc, a, s, ar in cases]
+
+
 def main():
     assert AUDIT_TOOL.exists(), f"Audit tool not found at {AUDIT_TOOL}"
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -779,6 +915,10 @@ def main():
         materialize_fixture(MIDENTRY_SRC, MIDENTRY_B64, tmp_mid)
         materialize_fixture(NORELOC_SRC, NORELOC_B64, tmp_noreloc)
         tmp_named_mid.write_bytes(base64.b64decode(NAMED_MID_B64))
+        # Original bytes remain positive witnesses below. Replacement REDs retain
+        # the old strict-interior coverage with +2, outside the admitted shape.
+        tmp_mid.write_bytes(changed_addends(tmp_mid.read_bytes(), 2))
+        tmp_named_mid.write_bytes(changed_addends(tmp_named_mid.read_bytes(), 2))
         tmp_exec.write_bytes(base64.b64decode(EXEC_B64))
 
         tests = [
@@ -812,6 +952,7 @@ def main():
             ("producer failure propagation", test_producer_failure_in_harness),
         ]
 
+        tests.extend(low_word_tests())
         passed = 0
         failed = 0
         for name, fn in tests:
@@ -822,6 +963,7 @@ def main():
                 ok = False
             if ok:
                 passed += 1
+                print(f'PASS: {name}')
             else:
                 failed += 1
 
