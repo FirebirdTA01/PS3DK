@@ -3,6 +3,7 @@
 
 #include <cell/np/common.h>
 #include <cell/rtc.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -181,7 +182,7 @@ typedef struct SceNpClansUpdatableClanInfo {
     uint32_t fields;
     char description[SCE_NP_CLANS_CLAN_DESCRIPTION_MAX_LENGTH + 1];
     SceNpClansSearchableAttr attr;
-    uint8_t binData1[SCE_NP_CLANS_CLAN_BINARY_DATA_MAX_SIZE];
+    void *binData1 ATTRIBUTE_PRXPTR;
     uint32_t binData1Size;
 } SceNpClansUpdatableClanInfo;
 
@@ -193,7 +194,7 @@ typedef struct SceNpClansClanInfo {
 
 typedef struct SceNpClansUpdatableMemberInfo {
     uint32_t fields;
-    uint8_t binData1[SCE_NP_CLANS_MEMBER_BINARY_DATA_MAX_SIZE];
+    void *binData1 ATTRIBUTE_PRXPTR;
     uint32_t binData1Size;
     uint8_t binAttr1[SCE_NP_CLANS_MEMBER_BINARY_ATTRIBUTE1_MAX_SIZE];
     char description[SCE_NP_CLANS_MEMBER_DESCRIPTION_MAX_LENGTH + 1];
@@ -215,7 +216,7 @@ typedef struct SceNpClansMessage {
 } SceNpClansMessage;
 
 typedef struct SceNpClansMessageData {
-    uint8_t binData1[SCE_NP_CLANS_MESSAGE_BINARY_DATA_MAX_SIZE];
+    void *binData1 ATTRIBUTE_PRXPTR;
     uint32_t binData1Size;
 } SceNpClansMessageData;
 

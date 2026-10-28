@@ -3,6 +3,7 @@
 
 #include <cell/np/common.h>
 #include <cell/rtc.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <sys/memory.h>
 
@@ -159,12 +160,22 @@ typedef void (*SceNpCommerce2Handler)(uint32_t ctxId, uint32_t subjectId, int32_
 
 typedef struct SceNpCommerce2CommonData {
     uint32_t version;
-    uint32_t bufHead;
-    uint32_t bufSize;
-    uint32_t data;
-    uint32_t dataSize;
-    uint32_t data2;
-    uint32_t reserved[4];
+    union {
+        void *buf_head ATTRIBUTE_PRXPTR;
+        void *bufHead ATTRIBUTE_PRXPTR;
+    };
+    union {
+        uint32_t buf_size;
+        uint32_t bufSize;
+    };
+    void *data ATTRIBUTE_PRXPTR;
+    union {
+        uint32_t data_size;
+        uint32_t dataSize;
+    };
+    void *data2 ATTRIBUTE_PRXPTR;
+    uint32_t ov;
+    uint8_t reserved[12];
 } SceNpCommerce2CommonData;
 
 typedef struct SceNpCommerce2Range {
@@ -179,23 +190,21 @@ typedef struct SceNpCommerce2SessionInfo {
     char currencySymbol[SCE_NP_COMMERCE2_CURRENCY_SYMBOL_LEN + 1];
     uint32_t symbolPosition;
     uint8_t symbolWithSpace;
-    uint8_t padding1[3];
     char thousandSeparator[SCE_NP_COMMERCE2_THOUSAND_SEPARATOR_LEN + 1];
     char decimalLetter[SCE_NP_COMMERCE2_DECIMAL_LETTER_LEN + 1];
-    uint8_t padding2[1];
-    uint32_t reserved[4];
+    uint8_t padding;
+    uint8_t reserved[16];
 } SceNpCommerce2SessionInfo;
 
 typedef struct SceNpCommerce2CategoryInfo {
     SceNpCommerce2CommonData commonData;
     uint32_t dataType;
-    int8_t categoryId;
-    uint8_t padding1[7];
+    const char *categoryId ATTRIBUTE_PRXPTR;
     CellRtcTick releaseDate;
-    int8_t categoryName;
-    int8_t categoryDescription;
-    int8_t imageUrl;
-    int8_t spName;
+    const char *categoryName ATTRIBUTE_PRXPTR;
+    const char *categoryDescription ATTRIBUTE_PRXPTR;
+    const char *imageUrl ATTRIBUTE_PRXPTR;
+    const char *spName ATTRIBUTE_PRXPTR;
     uint32_t countOfSubCategory;
     uint32_t countOfProduct;
 } SceNpCommerce2CategoryInfo;
@@ -212,18 +221,18 @@ typedef struct SceNpCommerce2GetProductInfoResult {
 typedef struct SceNpCommerce2GameProductInfo {
     SceNpCommerce2CommonData commonData;
     uint32_t dataType;
-    int8_t productId;
-    uint8_t padding1[3];
+    const char *productId ATTRIBUTE_PRXPTR;
     uint32_t countOfSku;
-    uint8_t padding2[4];
+    uint8_t padding[4];
     CellRtcTick releaseDate;
-    int8_t productName;
-    int8_t productShortDescription;
-    int8_t imageUrl;
-    int8_t spName;
-    int8_t productLongDescription;
-    int8_t legalDescription;
-    uint8_t padding3[2];
+    const char *productName ATTRIBUTE_PRXPTR;
+    const char *productShortDescription ATTRIBUTE_PRXPTR;
+    const char *imageUrl ATTRIBUTE_PRXPTR;
+    const char *spName ATTRIBUTE_PRXPTR;
+    const char *productLongDescription ATTRIBUTE_PRXPTR;
+    const char *legalDescription ATTRIBUTE_PRXPTR;
+    uint32_t productAttr;
+    uint8_t reserved[36];
 } SceNpCommerce2GameProductInfo;
 
 typedef struct SceNpCommerce2GetProductInfoListResult {
@@ -233,39 +242,44 @@ typedef struct SceNpCommerce2GetProductInfoListResult {
 
 typedef struct SceNpCommerce2ContentRatingInfo {
     SceNpCommerce2CommonData commonData;
-    int8_t ratingSystemId;
-    int8_t imageUrl;
-    uint8_t padding1[2];
+    const char *ratingSystemId ATTRIBUTE_PRXPTR;
+    const char *imageUrl ATTRIBUTE_PRXPTR;
     uint32_t countOfContentRatingDescriptor;
 } SceNpCommerce2ContentRatingInfo;
 
 typedef struct SceNpCommerce2ContentRatingDescriptor {
     SceNpCommerce2CommonData commonData;
     uint32_t descriptorType;
-    int8_t imageUrl;
-    int8_t contentRatingDescription;
-    uint8_t padding1[2];
+    const char *imageUrl ATTRIBUTE_PRXPTR;
+    const char *contentRatingDescription ATTRIBUTE_PRXPTR;
 } SceNpCommerce2ContentRatingDescriptor;
 
 typedef struct SceNpCommerce2GameSkuInfo {
     SceNpCommerce2CommonData commonData;
     uint32_t dataType;
-    int8_t skuId;
-    uint8_t padding1[3];
+    const char *skuId ATTRIBUTE_PRXPTR;
     uint32_t skuType;
     uint32_t countUntilExpiration;
     uint32_t timeUntilExpiration;
     uint32_t purchasabilityFlag;
     uint32_t annotation;
     uint8_t downloadable;
-    uint8_t padding2[3];
-    uint32_t price;
-    int8_t skuName;
-    int8_t productId;
-    int8_t contentLinkUrl;
-    uint8_t padding3[1];
+    uint8_t padding[3];
+    const char *price ATTRIBUTE_PRXPTR;
+    const char *skuName ATTRIBUTE_PRXPTR;
+    const char *productId ATTRIBUTE_PRXPTR;
+    const char *contentLinkUrl ATTRIBUTE_PRXPTR;
     uint32_t countOfRewardInfo;
-    uint32_t reserved[8];
+    uint32_t skuAttr;
+    uint32_t salesType;
+    uint32_t firstPlayExpiration;
+    uint32_t countOfApplicableRewardInfo;
+    uint32_t countOfGameSkuEntitlementInfo;
+    CellRtcTick playableDate;
+    CellRtcTick chargeDate;
+    uint32_t chargeModel;
+    const char *augmentedDescription ATTRIBUTE_PRXPTR;
+    uint8_t reserved[40];
 } SceNpCommerce2GameSkuInfo;
 
 typedef struct SceNpCommerce2ProductBrowseParam {

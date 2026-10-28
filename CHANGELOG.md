@@ -53,6 +53,26 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **Network platform (NP) clans, commerce2, and matching2 record layouts.** In
+  `<cell/np/clans.h>`, `SceNpClansUpdatableClanInfo`, `SceNpClansUpdatableMemberInfo`,
+  and `SceNpClansMessageData` pass binary data buffers by 32-bit attributed pointer
+  and 32-bit count (`void *binData1 ATTRIBUTE_PRXPTR` and `uint32_t binData1Size`),
+  matching the system service interface rather than allocating multi-kilobyte
+  embedded arrays in updatable structures. `SceNpClansClanBasicInfo` uses a 32-bit
+  `numMembers` count across both data models. In `<cell/np/commerce2.h>`, string
+  and buffer fields across `SceNpCommerce2CategoryInfo`,
+  `SceNpCommerce2ContentRatingDescriptor`, `SceNpCommerce2ContentRatingInfo`,
+  `SceNpCommerce2GameProductInfo`, and `SceNpCommerce2GameSkuInfo` use 32-bit
+  attributed pointers (`const char * ATTRIBUTE_PRXPTR`), `SceNpCommerce2CommonData`
+  restores the system's `ov` member and provides source-compatible member aliases
+  (`bufHead`/`buf_head`, `bufSize`/`buf_size`, `dataSize`/`data_size`), and
+  `SceNpCommerce2SessionInfo` removes spurious padding around currency separators.
+  In `<cell/np2/matching2.h>` and `<cell/np/common.h>`, `SceNpMatching2UserInfo`
+  and `SceNpUserInfo2` preserve fixed 32-bit service pointer representation across
+  both ILP32 and LP64, with `joinedSessionInfo` carrying
+  `SceNpMatching2JoinedSessionInfo * ATTRIBUTE_PRXPTR` rather than embedding an
+  entire session structure. Rebuild code that exchanges these records with NP services.
+
 - **SPURS job-chain and workload-flag layouts.** `CellSpursJobChain` now
   keeps 272 bytes of storage with 128-byte typedef alignment; the padded
   `CellSpursJobChainForArray` is 384 bytes with padding at offset 272,

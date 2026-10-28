@@ -253,7 +253,7 @@ typedef struct SceNpMatching2UserInfo {
     SceNpUserInfo2 userInfo;
     SceNpMatching2BinAttr *userBinAttr ATTRIBUTE_PRXPTR;
     uint32_t userBinAttrNum;
-    SceNpMatching2JoinedSessionInfo joinedSessionInfo;
+    SceNpMatching2JoinedSessionInfo *joinedSessionInfo ATTRIBUTE_PRXPTR;
     uint32_t joinedSessionInfoNum;
 } SceNpMatching2UserInfo;
 
