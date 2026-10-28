@@ -27,6 +27,14 @@ SYS_MODULE_INFO(probe_mod, 0, 256, 0);
 #elif defined(CASE_EXIT)
 SYS_MODULE_INFO(probe_mod, 0, 1, 0);
 SYS_MODULE_EXIT(probe_stop);
+#elif defined(CASE_MISSING_START)
+SYS_MODULE_INFO(probe_mod, 0, 1, 0);
+SYS_MODULE_START(misspelled_start);
+SYS_MODULE_STOP(probe_stop);
+#elif defined(CASE_MISSING_STOP)
+SYS_MODULE_INFO(probe_mod, 0, 1, 0);
+SYS_MODULE_START(probe_start);
+SYS_MODULE_STOP(misspelled_stop);
 #elif defined(CASE_STOP_LEVEL)
 SYS_MODULE_INFO(probe_mod, 0, 1, 0);
 SYS_MODULE_STOP_LEVEL(SYS_MODULE_STOP_LEVEL_SYSTEM);

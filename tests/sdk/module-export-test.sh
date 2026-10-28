@@ -24,9 +24,7 @@ if [ -z "$ps3dev" ]; then
 fi
 bin="$ps3dev/ppu/bin"
 cc="$bin/powerpc64-ps3-elf-gcc"; cxx="$bin/powerpc64-ps3-elf-g++"
-objcopy="$bin/powerpc64-ps3-elf-objcopy"; readelf="$bin/powerpc64-ps3-elf-readelf"
-nm="$bin/powerpc64-ps3-elf-nm"
-for t in "$cc" "$cxx" "$objcopy" "$readelf" "$nm"; do
+for t in "$cc" "$cxx"; do
     [ -x "$t" ] || [ -x "$t.exe" ] || { echo "module-export: FAIL: missing $t"; exit 1; }
 done
 py=$(command -v python3 || command -v python) || { echo "module-export: FAIL: no python"; exit 1; }
@@ -66,22 +64,15 @@ compile() {  # compile <lang> <std> <abi> <incdir> <out> [defines...]
         -I"$inc" -I"$installed" -c "$src" -o "$out"
 }
 
-check_object() {  # check_object <obj> -> prints problems, returns 1 if any
-    local o=$1 bad=0
-    rm -f "$o.id"; "$objcopy" --dump-section .ps3dk.module_identity="$o.id" "$o" "$o.copy" 2>/dev/null
-    local got; got=$("$py" -c 'import sys;sys.stdout.write(open(sys.argv[1],"rb").read().hex())' "$o.id" 2>/dev/null)
-    [ "$got" = "$expected" ] || { echo "identity record ${got:-<missing>}"; bad=1; }
-    local flags; flags=$("$readelf" -SW "$o" | tr -d '\r' | awk '$2==".ps3dk.module_identity"{print $9}')
-    case "$flags" in *A*) echo "identity section is loaded (flags $flags)"; bad=1 ;; esac
-    "$nm" "$o" | tr -d '\r' > "$o.nm"
-    for pair in module_start:probe_start module_stop:probe_stop; do
-        local e=${pair%%:*} f=${pair##*:}
-        local ev fv
-        ev=$(awk -v s="$e" '$3==s && $2 ~ /[A-Z]/ {print $1" "$2}' "$o.nm")
-        fv=$(awk -v s="$f" '$3==s {print $1" "$2}' "$o.nm")
-        { [ -n "$ev" ] && [ "$ev" = "$fv" ]; } || { echo "$e is '${ev:-<undefined>}', $f is '$fv'"; bad=1; }
-    done
-    return $bad
+crt=""
+[ -f "$ps3dev/ppu/lib/lv2-prx-crt.o" ] && [ -f "$ps3dev/ppu/lib/lv2-prx.ld" ] && crt="$ps3dev/ppu/lib/lv2-prx-crt.o"
+link_prx() {  # link_prx <abi> <object> <out>
+    [ -n "$crt" ] || return 0
+    "$cc" $1 -specs="$ps3dev/ppu/lib/lv2-prx.specs" -nostartfiles -Wl,-q         -Wl,--no-warn-rwx-segments -Wl,-T,"$ps3dev/ppu/lib/lv2-prx.ld" "$2" "$crt" -o "$3"
+}
+inspect="$root/tests/sdk/module-export-inspect.py"
+check_object() {  # check_object <object|linked> <file> -> prints problems, returns non-zero if any
+    "$py" -I -B "$inspect" "$1" "$2" "$expected" probe_start probe_stop
 }
 
 for lang in c c++; do
@@ -93,7 +84,7 @@ for lang in c c++; do
             if ! compile "$lang" "$std" "$abi" "$work/inc" "$o" > "$work/e.log" 2>&1; then
                 fail "$label: $(grep -m1 -E 'error' "$work/e.log")"; continue
             fi
-            if why=$(check_object "$o"); then ok "$label record and bindings"; else fail "$label: $why"; fi
+            if why=$(check_object object "$o"); then ok "$label record and bindings"; else fail "$label: $why"; fi
             for c in NAME_TOO_LONG:"module name is too long" NAME_EMPTY:"module name is empty" \
                      ATTR_TOO_WIDE:"attributes must fit 16 bits" VERSION_TOO_WIDE:"version parts must fit 8 bits" \
                      EXIT:"SYS_MODULE_EXIT is not supported" STOP_LEVEL:"SYS_MODULE_STOP_LEVEL is not supported"; do
@@ -106,17 +97,32 @@ for lang in c c++; do
                     fail "$label CASE_$case failed without '$msg': $(grep -m1 error "$work/n.log")"
                 fi
             done
+            # A binding whose target is not defined must not build: the crt's
+            # weak default would otherwise run instead of the named function.
+            for case in MISSING_START MISSING_STOP; do
+                if ! compile "$lang" "$std" "$abi" "$work/inc" "$work/miss.o" "-DCASE_$case" > "$work/n.log" 2>&1; then
+                    ok "$label CASE_$case refused at compile time"
+                elif [ -z "$crt" ]; then
+                    fail "$label CASE_$case compiled (no PRX crt to try the link)"
+                elif link_prx "$abi" "$work/miss.o" "$work/miss.elf" > "$work/l.log" 2>&1; then
+                    fail "$label CASE_$case compiled and linked"
+                else
+                    ok "$label CASE_$case refused at link time"
+                fi
+            done
         done
     done
 done
 
 # Mutants: the checks above must notice a wrong record and a missing binding.
 # Each mutant still compiles; only the record/binding checks may catch it.
-for m in 's/XSTR(major) ", "/XSTR(minor) ", "/' 's/"\.set " #entry ", " #fn/"# " #fn/'; do
+for m in 's/XSTR(major) ", "/XSTR(minor) ", "/' \
+         's/module_identity,\\"\\",/module_identity,\\"a\\",/' \
+         's/__PS3DK_MODEXP_BIND(module_stop, fn)/extern int __ps3dk_unbound/'; do
     stage "$work/mut" "$m"
     if ! compile c c11 "" "$work/mut" "$work/mut.o" > "$work/m.log" 2>&1; then
         fail "mutant '$m' did not compile: $(grep -m1 error "$work/m.log")"
-    elif check_object "$work/mut.o" > /dev/null; then
+    elif check_object object "$work/mut.o" > /dev/null; then
         fail "mutant '$m' was not caught"
     else
         ok "mutant '$m' caught"
@@ -124,15 +130,13 @@ for m in 's/XSTR(major) ", "/XSTR(minor) ", "/' 's/"\.set " #entry ", " #fn/"# "
     rm -rf "$work/mut"
 done
 
-# A real PRX link: the source's module_start must replace the crt's weak one.
-crt="$ps3dev/ppu/lib/lv2-prx-crt.o"
-if [ -f "$crt" ] && [ -f "$ps3dev/ppu/lib/lv2-prx.ld" ]; then
+# A real PRX link: the source's entry points must replace the crt's weak
+# defaults, and the management record must point at them.
+if [ -n "$crt" ]; then
     for abi in "" -mlp64; do
         o="$work/good-c-c11${abi}.o"; e="$work/link${abi}.elf"
-        if "$cc" $abi -specs="$ps3dev/ppu/lib/lv2-prx.specs" -nostartfiles -Wl,-q \
-                -Wl,--no-warn-rwx-segments -Wl,-T,"$ps3dev/ppu/lib/lv2-prx.ld" \
-                "$o" "$crt" -o "$e" > "$work/l.log" 2>&1; then
-            if why=$(check_object "$e"); then ok "${abi:-ilp32} PRX link keeps the record and bindings"
+        if link_prx "$abi" "$o" "$e" > "$work/l.log" 2>&1; then
+            if why=$(check_object linked "$e"); then ok "${abi:-ilp32} PRX link: record, bindings and management record"
             else fail "${abi:-ilp32} PRX link: $why"; fi
         else
             fail "${abi:-ilp32} PRX link: $(grep -m1 -iE 'error|undefined' "$work/l.log")"
