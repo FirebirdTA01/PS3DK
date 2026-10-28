@@ -857,6 +857,11 @@ jobs:
       - name: Test the TOC edit keeps ILP32 TOC loads on their entries
         run: bash tests/sdk/toc-edit-ilp32-test.sh
 
+      # Skips without PS3DEV; with a PPU toolchain, the linked TOC checker must
+      # verify every TOC access of real C and C++ links in both data models.
+      - name: Test the linked TOC checker on real PPU links
+        run: bash tests/sdk/toc-linked-check-test.sh
+
       # Skips without PS3DEV; with a PPU toolchain, a link that mixes ILP32
       # and LP64 objects must be refused (GCC 0058, binutils 0006).
       - name: Test links refuse mixed ILP32 and LP64 objects
