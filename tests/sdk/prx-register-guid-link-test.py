@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""SPRX register_module and get_ppu_guid link and import table verification.
+"""SPRX register_module, get_ppu_guid, and sys_prx_version link and import table verification.
 
 Builds a scratch liblv2_stub.a with nidgen from the repository YAML description into a
-fresh temporary directory, compiles probe code calling sys_prx_register_module and
-sys_prx_get_ppu_guid (and their sysPrx* aliases), links against the scratch archive
-on both ABIs (ilp32 and lp64), and asserts that the import FNIDs are present in
-.rodata.sceFNID while absent symbols (spurious and unmeasured) are absent. Includes
-negative controls that assert specific failure diagnostics and verify negative link
-isolation via a filtered stub archive.
+fresh temporary directory, compiles probe code calling sys_prx_register_module,
+sys_prx_get_ppu_guid (and their sysPrx* aliases), and reading sys_prx_version,
+links against the scratch archive on both ABIs (ilp32 and lp64), and asserts that
+the function FNIDs land in .rodata.sceFNID and the variable VNID lands in .rodata.sceVNID
+(and is absent from .rodata.sceFNID). Includes negative controls that assert specific
+failure diagnostics and verify negative link isolation via a filtered stub archive.
 """
 
 import argparse
@@ -31,7 +31,7 @@ def find_tool(bindir, name):
     return p
 
 
-def find_nidgen(root, explicit_nidgen=None):
+def find_nidgen(root, ps3dev=None, explicit_nidgen=None):
     if explicit_nidgen:
         p = Path(explicit_nidgen).resolve()
         if p.is_file():
@@ -46,7 +46,13 @@ def find_nidgen(root, explicit_nidgen=None):
         root / 'tools/target/debug/nidgen.exe',
         root / 'tools/target/release/nidgen',
         root / 'tools/target/debug/nidgen',
+        root.parent / 'prx-register-guid/tools/target/x86_64-pc-windows-gnu/debug/nidgen.exe',
     ]
+    if ps3dev:
+        candidates.extend([
+            ps3dev / 'bin/nidgen',
+            ps3dev / 'bin/nidgen.exe',
+        ])
     for cand in candidates:
         if cand.is_file():
             return cand
@@ -114,7 +120,7 @@ def main():
         print(f'prx-register-guid-link: SKIP (no compiler at {cc})')
         return 0
 
-    nidgen = find_nidgen(ROOT, args.nidgen)
+    nidgen = find_nidgen(ROOT, ps3dev, args.nidgen)
     if not nidgen:
         print('prx-register-guid-link: FAIL (nidgen tool binary not found)')
         return 1
@@ -165,6 +171,7 @@ int main(void) {
     opt.size = sizeof(opt);
     ret += sys_prx_register_module(&opt);
     ret += (int)sys_prx_get_ppu_guid((sys_prx_id_t)0);
+    ret += sys_prx_version;
 
     /* Alias names */
     sysPrxRegisterModuleOption opt_alias;
@@ -179,6 +186,9 @@ int main(void) {
         EXPECTED_FNIDS = {
             0x5d4d351e: 'sys_prx_register_module',
             0x6010a160: 'sys_prx_get_ppu_guid',
+        }
+        EXPECTED_VNIDS = {
+            0x7df066cf: 'sys_prx_version',
         }
 
         # Filtered YAML without sys_prx_register_module and sys_prx_get_ppu_guid
@@ -331,7 +341,7 @@ int main(void) {
                 print(res.stdout + res.stderr)
                 return 1
 
-            # 6. Verify .rodata.sceFNID import table contains expected FNIDs
+            # 6. Verify .rodata.sceFNID import table contains expected function FNIDs
             fnid_data = get_section_data(probe_elf, '.rodata.sceFNID')
             if fnid_data is None:
                 print(f'prx-register-guid-link: FAIL {abi}: .rodata.sceFNID section not found in {probe_elf}')
@@ -344,15 +354,32 @@ int main(void) {
                     print(f'prx-register-guid-link: FAIL {abi}: FNID 0x{nid:08x} ({name}) not found in .rodata.sceFNID')
                     return 1
 
-            # Negative control: unexported and spurious FNIDs are absent
+            # Negative control: variable NID 0x7df066cf must NOT be in function NID table
             if 0x7df066cf in found_fnids:
-                print(f'prx-register-guid-link: FAIL {abi}: FNID 0x7df066cf (sys_prx_version, not exported) unexpectedly in .rodata.sceFNID')
+                print(f'prx-register-guid-link: FAIL {abi}: variable NID 0x7df066cf unexpectedly in .rodata.sceFNID')
                 return 1
             if 0xdeadbeef in found_fnids:
                 print(f'prx-register-guid-link: FAIL {abi}: spurious FNID 0xdeadbeef unexpectedly present')
                 return 1
 
-            print(f'prx-register-guid-link: ok   {abi}: compiled, isolated negative links verified, linked, 2 import FNIDs verified (0x5d4d351e, 0x6010a160), unexported/spurious absent')
+            # 7. Verify .rodata.sceVNID import table contains expected variable VNIDs
+            vnid_data = get_section_data(probe_elf, '.rodata.sceVNID')
+            if vnid_data is None:
+                print(f'prx-register-guid-link: FAIL {abi}: .rodata.sceVNID section not found in {probe_elf}')
+                return 1
+
+            found_vnids = set(val[0] for val in struct.iter_unpack('>I', vnid_data))
+
+            for nid, name in EXPECTED_VNIDS.items():
+                if nid not in found_vnids:
+                    print(f'prx-register-guid-link: FAIL {abi}: VNID 0x{nid:08x} ({name}) not found in .rodata.sceVNID')
+                    return 1
+
+            if 0xdeadbeef in found_vnids:
+                print(f'prx-register-guid-link: FAIL {abi}: spurious VNID 0xdeadbeef unexpectedly present in .rodata.sceVNID')
+                return 1
+
+            print(f'prx-register-guid-link: ok   {abi}: compiled, isolated negative links verified, linked, 2 function FNIDs + 1 variable VNID verified (0x7df066cf in VNID, absent from FNID)')
 
         print('prx-register-guid-link: PASS')
         return 0

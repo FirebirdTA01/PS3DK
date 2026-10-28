@@ -656,6 +656,11 @@ exports:
     - sysPrxUnregisterLibrary
   signature: ''
   notes: extracted from _sysPrxForUser_0001_94.o
+- name: sys_prx_version
+  nid: '0x7df066cf'
+  kind: variable
+  signature: ''
+  notes: 'module variable; the stub resolves it into sys_prx_version_vslot'
 - name: sys_raw_spu_image_load
   nid: '0xb995662e'
   aliases:
