@@ -6,7 +6,8 @@ fresh temporary directory, compiles probe code calling sys_prx_register_module a
 sys_prx_get_ppu_guid (and their sysPrx* aliases), links against the scratch archive
 on both ABIs (ilp32 and lp64), and asserts that the import FNIDs are present in
 .rodata.sceFNID while absent symbols (spurious and unmeasured) are absent. Includes
-negative controls that assert specific failure diagnostics.
+negative controls that assert specific failure diagnostics and verify negative link
+isolation via a filtered stub archive.
 """
 
 import argparse
@@ -77,6 +78,22 @@ def get_section_data(elf_path, section_name):
                 offset, size = hdr[4], hdr[5]
                 return data[offset:offset + size]
     return None
+
+
+def filter_yaml_excluding(src_path, dst_path, excluded_names):
+    lines = src_path.read_text(encoding='utf-8').splitlines(keepends=True)
+    out_lines = []
+    skipping = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('- name:'):
+            name = stripped.split(':', 1)[1].strip()
+            skipping = (name in excluded_names)
+        elif line.startswith('- ') or (line and not line.startswith(' ') and not line.startswith('\t')):
+            skipping = False
+        if not skipping:
+            out_lines.append(line)
+    dst_path.write_text(''.join(out_lines), encoding='utf-8')
 
 
 def main():
@@ -164,6 +181,10 @@ int main(void) {
             0x6010a160: 'sys_prx_get_ppu_guid',
         }
 
+        # Filtered YAML without sys_prx_register_module and sys_prx_get_ppu_guid
+        filtered_yaml = out / 'filtered_liblv2_stub.yaml'
+        filter_yaml_excluding(yaml_input, filtered_yaml, {'sys_prx_register_module', 'sys_prx_get_ppu_guid'})
+
         env = dict(os.environ, PS3DEV=str(ps3dev))
         abis = [('ilp32', []), ('lp64', ['-mlp64'])]
 
@@ -171,24 +192,48 @@ int main(void) {
             abi_out = out / abi
             abi_out.mkdir(parents=True, exist_ok=True)
 
-            # 1. Build scratch liblv2_stub.a with nidgen
-            cmd_nidgen = [
+            # 1a. Build filtered scratch liblv2_stub.a without the new exports
+            filtered_dir = abi_out / 'filtered'
+            filtered_dir.mkdir(parents=True, exist_ok=True)
+            cmd_nidgen_filtered = [
+                str(nidgen),
+                'archive',
+                '--input', str(filtered_yaml),
+                '--toolchain-bin', str(ps3dev / 'ppu/bin'),
+                '--abi', abi,
+                '--out-dir', str(filtered_dir),
+            ]
+            res = subprocess.run(cmd_nidgen_filtered, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode != 0:
+                print(f'prx-register-guid-link: FAIL {abi}: nidgen archive (filtered) failed')
+                print(res.stdout + res.stderr)
+                return 1
+
+            filtered_archive = filtered_dir / 'liblv2_stub.a'
+            if not filtered_archive.is_file():
+                print(f'prx-register-guid-link: FAIL {abi}: expected filtered archive missing: {filtered_archive}')
+                return 1
+
+            # 1b. Build full scratch liblv2_stub.a with nidgen
+            full_dir = abi_out / 'full'
+            full_dir.mkdir(parents=True, exist_ok=True)
+            cmd_nidgen_full = [
                 str(nidgen),
                 'archive',
                 '--input', str(yaml_input),
                 '--toolchain-bin', str(ps3dev / 'ppu/bin'),
                 '--abi', abi,
-                '--out-dir', str(abi_out),
+                '--out-dir', str(full_dir),
             ]
-            res = subprocess.run(cmd_nidgen, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run(cmd_nidgen_full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if res.returncode != 0:
-                print(f'prx-register-guid-link: FAIL {abi}: nidgen archive failed')
+                print(f'prx-register-guid-link: FAIL {abi}: nidgen archive (full) failed')
                 print(res.stdout + res.stderr)
                 return 1
 
-            scratch_archive = abi_out / 'liblv2_stub.a'
-            if not scratch_archive.is_file():
-                print(f'prx-register-guid-link: FAIL {abi}: expected archive missing: {scratch_archive}')
+            full_archive = full_dir / 'liblv2_stub.a'
+            if not full_archive.is_file():
+                print(f'prx-register-guid-link: FAIL {abi}: expected full archive missing: {full_archive}')
                 return 1
 
             # 2. Compile probe
@@ -222,25 +267,62 @@ int main(void) {
                 print(f'prx-register-guid-link: FAIL {abi}: negative compile control failed for wrong reason: {combined_compile}')
                 return 1
 
-            # 4. Negative control: link without stub archive must fail with undefined references
-            probe_elf_fail = abi_out / 'probe_fail.elf'
-            cmd_link_fail = [str(cc), *flags, str(probe_obj), '-o', str(probe_elf_fail)]
-            res = subprocess.run(cmd_link_fail, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
-            combined_link = res.stdout + res.stderr
+            # 4a. Negative control: link against filtered stub archive must fail with undefined references
+            probe_elf_fail1 = abi_out / 'probe_fail1.elf'
+            cmd_link_fail1 = [
+                str(cc),
+                *flags,
+                '-L', str(filtered_dir),
+                str(probe_obj),
+                '-o', str(probe_elf_fail1),
+            ]
+            res = subprocess.run(cmd_link_fail1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            combined_link1 = res.stdout + res.stderr
             if res.returncode == 0:
-                print(f'prx-register-guid-link: FAIL {abi}: negative link control unexpectedly succeeded without stub archive')
+                print(f'prx-register-guid-link: FAIL {abi}: negative link control 1 unexpectedly succeeded')
                 return 1
-            if 'undefined reference' not in combined_link or 'sys_prx_register_module' not in combined_link:
-                print(f'prx-register-guid-link: FAIL {abi}: negative link control failed for wrong reason: {combined_link}')
+            if 'undefined reference' not in combined_link1:
+                print(f'prx-register-guid-link: FAIL {abi}: negative link control 1 missing undefined reference: {combined_link1}')
+                return 1
+            if 'sys_prx_register_module' not in combined_link1:
+                print(f'prx-register-guid-link: FAIL {abi}: negative link control 1 missing sys_prx_register_module: {combined_link1}')
+                return 1
+            if 'sys_prx_get_ppu_guid' not in combined_link1:
+                print(f'prx-register-guid-link: FAIL {abi}: negative link control 1 missing sys_prx_get_ppu_guid: {combined_link1}')
                 return 1
 
-            # 5. Link probe against scratch liblv2_stub.a
+            # 4b. Negative control: search path order independence with filtered archive first
+            probe_elf_fail2 = abi_out / 'probe_fail2.elf'
+            cmd_link_fail2 = [
+                str(cc),
+                *flags,
+                '-L', str(filtered_dir),
+                '-L', str(full_dir),
+                str(probe_obj),
+                '-o', str(probe_elf_fail2),
+            ]
+            res = subprocess.run(cmd_link_fail2, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            combined_link2 = res.stdout + res.stderr
+            if res.returncode == 0:
+                print(f'prx-register-guid-link: FAIL {abi}: negative link control 2 unexpectedly succeeded')
+                return 1
+            if 'undefined reference' not in combined_link2:
+                print(f'prx-register-guid-link: FAIL {abi}: negative link control 2 missing undefined reference: {combined_link2}')
+                return 1
+            if 'sys_prx_register_module' not in combined_link2:
+                print(f'prx-register-guid-link: FAIL {abi}: negative link control 2 missing sys_prx_register_module: {combined_link2}')
+                return 1
+            if 'sys_prx_get_ppu_guid' not in combined_link2:
+                print(f'prx-register-guid-link: FAIL {abi}: negative link control 2 missing sys_prx_get_ppu_guid: {combined_link2}')
+                return 1
+
+            # 5. Link probe against full scratch liblv2_stub.a
             probe_elf = abi_out / 'probe.elf'
             cmd_link = [
                 str(cc),
                 *flags,
                 str(probe_obj),
-                str(scratch_archive),
+                str(full_archive),
                 '-o', str(probe_elf),
             ]
             res = subprocess.run(cmd_link, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
@@ -270,7 +352,7 @@ int main(void) {
                 print(f'prx-register-guid-link: FAIL {abi}: spurious FNID 0xdeadbeef unexpectedly present')
                 return 1
 
-            print(f'prx-register-guid-link: ok   {abi}: compiled, linked, 2 import FNIDs verified (0x5d4d351e, 0x6010a160), unexported/spurious absent')
+            print(f'prx-register-guid-link: ok   {abi}: compiled, isolated negative links verified, linked, 2 import FNIDs verified (0x5d4d351e, 0x6010a160), unexported/spurious absent')
 
         print('prx-register-guid-link: PASS')
         return 0
