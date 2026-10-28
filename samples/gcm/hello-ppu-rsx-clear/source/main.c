@@ -200,10 +200,12 @@ int main(int argc, const char **argv)
 		printf("  gcm_host_buffer_alloc(%d MiB) failed\n", HOST_SIZE / (1024 * 1024));
 		return 1;
 	}
+	/* From here on the RSX maps the buffer and may fetch from it, so it is
+	 * never freed: it stays allocated until the process exits, including
+	 * on the failure paths below. */
 	ctx       = init_screen((void *)(uintptr_t)host_addr, HOST_SIZE, &width, &height);
 	if (!ctx) {
 		printf("  init_screen failed\n");
-		gcm_host_buffer_free(host_addr);
 		return 1;
 	}
 	printf("  RSX up at %ux%u\n", width, height);
@@ -214,7 +216,6 @@ int main(int argc, const char **argv)
 		if (!make_buffer(&buffers[i], width, height, i)) {
 			printf("  make_buffer[%d] failed\n", i);
 			rsxFinish(ctx, 0);
-			gcm_host_buffer_free(host_addr);
 			return 1;
 		}
 	}
@@ -275,7 +276,6 @@ int main(int argc, const char **argv)
 	 * rsxFree is allocator-only. Process exit reclaims RSX memory; for
 	 * full structured teardown see the system sampleBasic pattern.
 	 */
-	gcm_host_buffer_free(host_addr);
 	ioPadEnd();
 
 	printf("hello-ppu-rsx-clear: done\n");

@@ -432,14 +432,15 @@ int main(int argc, const char **argv)
 		printf("  gcm_host_buffer_alloc(%d MiB) failed\n", HOST_SIZE / (1024 * 1024));
 		return 1;
 	}
+	/* From here on the RSX maps the buffer and may fetch from it, so it is
+	 * never freed: it stays allocated until the process exits, including
+	 * on the failure paths below. */
 	if (cellGcmInit(CB_SIZE, HOST_SIZE, (void *)(uintptr_t)host_addr) != 0) {
 		printf("  cellGcmInit failed\n");
-		gcm_host_buffer_free(host_addr);
 		return 1;
 	}
 	if (!init_display()) {
 		printf("  init_display failed\n");
-		gcm_host_buffer_free(host_addr);
 		return 1;
 	}
 	ctx = CELL_GCM_CURRENT;
@@ -587,7 +588,6 @@ int main(int argc, const char **argv)
 	if (g_exit_request) printf("  early exit on user request\n");
 
 	program_exit(ctx);
-	gcm_host_buffer_free(host_addr);
 	ioPadEnd();
 
 	printf("hello-ppu-cellgcm-chain: done\n");
