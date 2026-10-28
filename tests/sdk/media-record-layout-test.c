@@ -11,6 +11,9 @@
 #define OFFSET(t,f,n) CHECK(offsetof(t,f)==(n), #t "." #f " offset")
 #define WIDTH(t,f,n) CHECK(sizeof(((t*)0)->f)==(n), #t "." #f " width")
 
+CHECK(sizeof(void *) == EXPECTED_ABI_BYTES, "actual pointer data model");
+CHECK(sizeof(long) == EXPECTED_ABI_BYTES, "actual long data model");
+
 #if MEDIA_GROUP == 0
 #include <cell/voice.h>
 SIZE(CellVoiceBasePortInfo, 24);

@@ -43,7 +43,8 @@ def matrix(cc, inc, work, root):
             for abi in ['ilp32', 'lp64']:
                 label = f'{name}-{std}-{abi}'
                 cmd = [str(cc), '-x', lang, '-std=' + std, '-O2', '-Wall',
-                       '-Wextra', '-Werror', '-DMEDIA_GROUP=' + str(group),
+                       '-Wextra', '-Werror', '-DEXPECTED_ABI_BYTES=' + ('8' if abi == 'lp64' else '4'),
+                       '-DMEDIA_GROUP=' + str(group),
                        '-I' + str(inc)]
                 if abi == 'lp64':
                     cmd.append('-mlp64')
@@ -94,7 +95,8 @@ def controls(cc, inc, work, root):
         for abi in ['ilp32', 'lp64']:
             label = name + '-' + abi
             cmd = [str(cc), '-x', 'c', '-std=c11', '-O2', '-Wall',
-                   '-Wextra', '-Werror', '-DMEDIA_GROUP=' + str(group),
+                   '-Wextra', '-Werror', '-DEXPECTED_ABI_BYTES=' + ('8' if abi == 'lp64' else '4'),
+                       '-DMEDIA_GROUP=' + str(group),
                    '-I' + str(overlay), '-I' + str(inc)]
             if abi == 'lp64':
                 cmd.append('-mlp64')
