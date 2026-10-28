@@ -225,6 +225,54 @@ def case_long_section_name():
     return want(check(lk.manifest_path), 0, 'PASS', sites_verified=1, sites_refused=0)
 
 
+def branch_user(variant):
+    """
+    The addis and its use are joined only through a branch; the fall-through
+    path between them writes the register (as in newlib's _malloc_r).
+      0 addis r4,r2,HA(.LC0)
+      4 beq  +0xc            -> 0x10
+      8 li   r4,9            (not on the path to the use)
+      c blr
+     10 ld   r9,LO(.LC0)(r4)
+     14 blr
+    variants: 'ok'; 'bypass' (0xc becomes b +4: the clobber reaches the use);
+    'entry' (a symbol at 0x10: the use can be entered with r4 unknown).
+    """
+    o = from_obj('m.o')
+    w = [F.addis(4, 2), F.beq(0xc), F.li(4, 9), F.BLR, F.ld(9, 4), F.BLR]
+    if variant == 'bypass':
+        w[3] = F.b(4)
+    o.section('.text.m', F.code(*w))
+    o.sym('m', '.text.m', 0, bind='GLOBAL', stype='FUNC')
+    if variant == 'entry':
+        o.sym('m_alt', '.text.m', 0x10, bind='GLOBAL', stype='FUNC')
+    o.section('.toc', bytes(8), flags='WA', align=8)
+    o.sym('.LC0', '.toc', 0)
+    o.sym('g_a', 'UND', bind='GLOBAL')
+    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.text.m', 2, 'R_PPC64_TOC16_HA', '.LC0')
+    o.rel('.text.m', 0x12, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    return o
+
+
+def case_branch_around_clobber():
+    d = fresh('branch-ok')
+    lk = link(d, [branch_user('ok'), data_obj()])
+    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=2, sites_refused=0)
+
+
+def case_branch_bypass_refused():
+    d = fresh('branch-bypass')
+    lk = link(d, [branch_user('bypass'), data_obj()])
+    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'r4 may change at \+0x8', sites_refused=2)
+
+
+def case_branch_entry_refused():
+    d = fresh('branch-entry')
+    lk = link(d, [branch_user('entry'), data_obj()])
+    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'entered', sites_refused=2)
+
+
 # -- the design review's negative list ----------------------------------------
 
 def green_link(name, **kw):
@@ -573,6 +621,53 @@ def case_trace_names_other_file():
     return want_detail(check(lk.manifest_path), 2, None, r'name different files')
 
 
+def jump_user(table_reloc=True):
+    """
+    A computed jump through an in-section offset table, as compilers emit
+    for a switch:
+      0 addis r9,r2,HA(.LC1)
+      4 ld    r9,LO(.LC1)(r9)    the table address, from a .toc entry
+      8 addis r11,r2,HA(.LC0)
+      c mtctr r9
+     10 bctr
+     14 ld    r10,LO(.LC0)(r11)  the case body: r11 from +8, through the jump
+     18 blr
+     1c .long 0x14 - 0x1c        the table (one case)
+    """
+    o = from_obj('j.o')
+    o.section('.text.j', F.code(F.addis(9, 2), F.ld(9, 9), F.addis(11, 2), F.mtctr(9), F.bctr(),
+                                F.ld(10, 11), F.BLR, -8))
+    o.sym('j', '.text.j', 0, bind='GLOBAL', stype='FUNC')
+    o.section('.toc', bytes(16), flags='WA', align=8)
+    o.sym('.LC0', '.toc', 0)
+    o.sym('.LC1', '.toc', 8)
+    o.sym('g_a', 'UND', bind='GLOBAL')
+    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    if table_reloc:
+        o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.j', 0x1c)
+    else:
+        o.rel('.toc', 8, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.text.j', 2, 'R_PPC64_TOC16_HA', '.LC1')
+    o.rel('.text.j', 6, 'R_PPC64_TOC16_LO_DS', '.LC1')
+    o.rel('.text.j', 0xa, 'R_PPC64_TOC16_HA', '.LC0')
+    o.rel('.text.j', 0x16, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    return o
+
+
+def case_jump_table():
+    d = fresh('jump-table')
+    lk = link(d, [jump_user(), data_obj()])
+    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=4, sites_refused=0)
+
+
+def case_jump_table_unknown():
+    # Without an address naming the table, the case body has no known
+    # predecessor: it is an entry point with unknown registers.
+    d = fresh('jump-unknown')
+    lk = link(d, [jump_user(False), data_obj()])
+    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'can be entered with r11 unknown', sites_verified=2, sites_refused=2)
+
+
 NEGATIVE_CASES = [
     ('review: wrong displacement while output relocations agree fails', case_wrong_displacement_relocs_agree),
     ('review: stale or shifted map placement is refused', case_stale_map_placement),
@@ -606,6 +701,8 @@ NEGATIVE_CASES = [
     ('review: missing map is bad input', case_missing_map),
     ('review: an input that changed after capture is bad input', case_wrong_object_set),
     ('review: a trace naming files outside the manifest is bad input', case_trace_names_other_file),
+    ('flow: computed jump through an in-section offset table', case_jump_table),
+    ('flow: computed jump with no named table is refused', case_jump_table_unknown),
 ]
 
 
@@ -613,6 +710,9 @@ CASES = [
     ('defect: merged string, local symbol with a negative addend', case_merged_string_negative_addend),
     ('defect: merged string, negative addend, wrong displacement fails', case_merged_string_negative_addend_wrong),
     ('defect: section name longer than readelf prints', case_long_section_name),
+    ('defect: addis reaches its use only through a branch', case_branch_around_clobber),
+    ('defect: a clobber on a path to the use is refused', case_branch_bypass_refused),
+    ('defect: a use that is also an entry point is refused', case_branch_entry_refused),
     ('green: medium and small model loads of .toc entries', case_green),
 ] + NEGATIVE_CASES
 

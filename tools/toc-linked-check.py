@@ -32,6 +32,18 @@ Scope of v1 (anything outside it is refused, never skipped):
     nop -> TOC restore after a call;
   - .toc entries written by R_PPC64_ADDR64, R_PPC64_ADDR32 or R_PPC64_TOC,
     and literal .toc bytes; other entry relocations are refused.
+  - an HA/LO pair is joined by the control flow inside the code section:
+    every path back from the LO use must reach an addis of the same target
+    in that register before any other write of it or any entry point, and
+    the use is checked against each such addis.  Entry points are the
+    section start, its symbols, addresses other relocations name in it and
+    every instruction no modelled edge reaches (landing pads among them).
+    Assumed, not proved: a branch without a relocation stays in its
+    section, and a computed jump (bcctr) reaches only the targets of an
+    offset table at an address the object's relocations name in the
+    section;
+  - names come from the files' own string tables (readelf truncates long
+    section names), and must extend readelf's.
 
 Success means every admitted access described by the inputs was verified;
 it is not a claim about other TOC uses or about runtime behaviour.
@@ -563,6 +575,7 @@ class Checker:
         self.placement = placement      # (ident, secname) -> [(addr, size)]
         self.discarded = discarded      # set of (ident, secname)
         self.anchor_cache = {}
+        self.flow_cache = {}
         self.sites = {}                 # (ident, secnr, index) -> disposition
         self.details = []
         self.counts = {'accesses': 0}
@@ -856,8 +869,9 @@ class Checker:
                 self.dispose(obj, sec, i, 'refused', f"TOC16_HA at +0x{r['offset']:x} is not on addis rX,r2", r)
                 continue
             ha_info[i] = {'reloc': r, 'reg': (w >> 21) & 31, 'used': []}
+        ha_at = {h['reloc']['offset'] - 2: (j, h) for j, h in ha_info.items()}
         for i, r, role in rest:
-            self.check_access(obj, sec, src, addr, i, r, role, ha_info)
+            self.check_access(obj, sec, src, addr, i, r, role, ha_info, ha_at)
         for i, h in ha_info.items():
             if not h['used']:
                 self.dispose(obj, sec, i, 'refused', f"TOC16_HA at +0x{h['reloc']['offset']:x} has no paired access", h['reloc'])
@@ -867,7 +881,126 @@ class Checker:
             # The paired access already reported why; the addis shares its outcome.
             self.dispose(obj, sec, i, worst, None, h['reloc'])
 
-    def check_access(self, obj, sec, src, base, i, r, role, ha_info):
+    # -- control flow for HA/LO pairing ------------------------------------
+    def flow(self, obj, sec, src):
+        """
+        The section's intra-section control flow, for the HA/LO register
+        search: predecessors of each instruction, the entry points (where
+        control may arrive with unknown registers).  Entry points are the
+        section start, its symbols, the addresses other relocations name in
+        it, and every instruction no modelled edge reaches (a landing pad,
+        for one).  Assumptions (v1): a branch without a relocation stays
+        inside its section; a computed jump (bcctr) reaches only the targets
+        of an offset table at an address the object's relocations name
+        inside the section.
+        """
+        key = (obj.ident, sec.nr)
+        if key in self.flow_cache:
+            return self.flow_cache[key]
+        size = sec.size - sec.size % 4
+        branch_rel = {r['offset'] & ~3 for r in obj.relocs.get(sec.nr, [])
+                      if r['rtype'].startswith(('R_PPC64_REL24', 'R_PPC64_REL14', 'R_PPC64_ADDR24', 'R_PPC64_ADDR14'))}
+        preds, indirect = {}, []
+        bad = None
+        for off in range(0, size, 4):
+            w = be(src, off, 4)
+            op = w >> 26
+            xo = (w >> 1) & 0x3ff
+            nxt = [off + 4] if off + 4 < size else []
+            succ = nxt
+            if op == 18:
+                tgt = off + ((w & 0x3fffffc) ^ 0x2000000) - 0x2000000
+                if w & 1:
+                    pass
+                elif (w & 2) or off in branch_rel:
+                    succ = []
+                elif 0 <= tgt < size:
+                    succ = [tgt]
+                else:
+                    bad = bad or f"branch at +0x{off:x} leaves {sec.name} without a relocation"
+                    succ = []
+            elif op == 16 or (op == 19 and xo in (16, 528)):
+                always = ((w >> 21) & 0x14) == 0x14
+                if not w & 1:
+                    succ = [] if always else nxt
+                    if op == 16 and not ((w & 2) or off in branch_rel):
+                        tgt = off + sext16(w & 0xfffc)
+                        if 0 <= tgt < size:
+                            succ = succ + [tgt]
+                        else:
+                            bad = bad or f"branch at +0x{off:x} leaves {sec.name} without a relocation"
+                    elif op == 19 and xo == 528:
+                        indirect.append(off)
+            for t in succ:
+                preds.setdefault(t, []).append(off)
+        entries = {0}
+        taken = set()
+        for s in obj.symbols.values():
+            if s['ndx'] == str(sec.nr) and s['type'] != 'SECTION':
+                entries.add(s['val'])
+        for nr, other in obj.sections.items():
+            if 'A' not in other.flags or other.name == '.eh_frame':
+                continue
+            for r in obj.relocs.get(nr, []):
+                if nr == sec.nr and (r['offset'] & ~3) in branch_rel:
+                    continue
+                sym = obj.symbols.get(r['info'] >> 32)
+                if sym and sym['ndx'] == str(sec.nr):
+                    taken.add(sym['val'] + r['addend'])
+        entries |= taken
+        if indirect:
+            targets = set()
+            for t in taken:
+                k = t
+                while t % 4 == 0 and 0 <= k and k + 4 <= size:
+                    d = t + (be(src, k, 4) ^ 0x80000000) - 0x80000000
+                    if not (0 <= d < size and d % 4 == 0):
+                        break
+                    targets.add(d)
+                    k += 4
+            for j in indirect:
+                for d in targets:
+                    preds.setdefault(d, []).append(j)
+        entries |= {off for off in range(0, size, 4) if off not in preds}
+        fl = {'preds': preds, 'entries': entries, 'bad': bad}
+        self.flow_cache[key] = fl
+        return fl
+
+    def reaching_ha(self, obj, sec, src, use_off, reg, key, ha_at):
+        """
+        The TOC16_HA sites whose addis may supply reg at use_off: every path
+        back from the use must end at an addis reg,r2 of the same target
+        before any other write of reg and before any entry point.
+        ([relocation index], None) or (None, reason).
+        """
+        fl = self.flow(obj, sec, src)
+        if fl['bad']:
+            return None, fl['bad']
+        if use_off in fl['entries']:
+            return None, f"the use can be entered with r{reg} unknown (+0x{use_off:x} is an entry point)"
+        stack = list(fl['preds'][use_off])
+        found, seen = set(), set()
+        while stack:
+            p = stack.pop()
+            if p in seen:
+                continue
+            seen.add(p)
+            h = ha_at.get(p)
+            if h is not None and h[1]['reg'] == reg:
+                hr = h[1]['reloc']
+                if (hr['info'] >> 32, hr['addend']) != key:
+                    return None, f"r{reg} may come from the TOC16_HA at +0x{p:x} of another target"
+                found.add(h[0])
+                continue
+            writes = gpr_writes(be(src, p, 4))
+            if writes is None or reg in writes:
+                return None, f"r{reg} may change at +0x{p:x} on a path to this use"
+            if p in fl['entries']:
+                return None, f"a path from the entry point +0x{p:x} reaches this use without setting r{reg}"
+            stack.extend(fl['preds'][p])
+        return sorted(found), None
+
+    def check_access(self, obj, sec, src, base, i, r, role, ha_info, ha_at):
         self.counts['accesses'] += 1
         ds = r['rtype'] in DS_RELOCS
         insn_off = r['offset'] - 2
@@ -875,9 +1008,9 @@ class Checker:
         form = classify_insn(w, ds)
         where = f"{obj.ident} {sec.name}+0x{insn_off:x}"
 
-        def done(state, msg, pair=None):
+        def done(state, msg, pairs=()):
             self.dispose(obj, sec, i, state, msg, r)
-            if pair is not None:
+            for pair in pairs:
                 pair['used'].append((state, msg))
 
         if form is None:
@@ -885,32 +1018,33 @@ class Checker:
         kind, width = form
         ra = (w >> 16) & 31
         rt = (w >> 21) & 31
-        pair = None
+        pairs = [None]
         if role == 'lo':
             if ra == 2:
                 return done('refused', f"{where}: {r['rtype']} based on r2 without its TOC16_HA")
-            key = (r['info'] >> 32, r['addend'])
-            cands = [(j, h) for j, h in ha_info.items()
-                     if (h['reloc']['info'] >> 32, h['reloc']['addend']) == key
-                     and h['reg'] == ra and h['reloc']['offset'] < r['offset']]
-            if not cands:
-                return done('refused', f"{where}: no preceding TOC16_HA of the same target sets r{ra}")
-            j, pair = max(cands, key=lambda c: c[1]['reloc']['offset'])
-            for off in range(pair['reloc']['offset'] + 2, insn_off, 4):
-                writes = gpr_writes(be(src, off, 4))
-                if writes is None or ra in writes:
-                    return done('refused', f"{where}: r{ra} may change at +0x{off:x} between its addis and this use", pair)
+            found, why = self.reaching_ha(obj, sec, src, insn_off, ra, (r['info'] >> 32, r['addend']), ha_at)
+            if why:
+                return done('refused', f"{where}: {why}")
+            pairs = [ha_info[j] for j in found]
         elif ra != 2:
             return done('refused', f"{where}: {r['rtype']} not based on r2")
+        used = [p for p in pairs if p is not None]
         target = self.resolve(obj, r['info'] >> 32, r['addend'])
         if target[0] == 'refuse':
-            return done('refused', f"{where}: {target[1]}", pair)
-
-        # Decode the ELF's instructions.
+            return done('refused', f"{where}: {target[1]}", used)
         out_w = self.elf.read(base + insn_off, 4)
         if out_w is None:
-            return done('failed', f"{where}: 0x{base + insn_off:x} is not in a file-backed section", pair)
+            return done('failed', f"{where}: 0x{base + insn_off:x} is not in a file-backed section", used)
         ow = be(out_w, 0, 4)
+        # With several HA sites reaching the use, each must give the right access.
+        results = [self.evaluate(obj, base, w, ow, ds, kind, width, ra, rt, target, pair) for pair in pairs]
+        for state in ('failed', 'refused', 'verified'):
+            hit = [m for st, m in results if st == state]
+            if hit:
+                return done(state, f"{where}: {hit[0]}" if hit[0] else None, used)
+
+    def evaluate(self, obj, base, w, ow, ds, kind, width, ra, rt, target, pair):
+        """Decode one access in the ELF, with one of its HA sites: (state, msg)."""
         hi = 0
         expect_ra = 2
         if pair is not None:
@@ -922,7 +1056,7 @@ class Checker:
                 hi = sext16(hw)
                 expect_ra = ra
             else:
-                return done('refused', f"{where}: its addis became 0x{(hw or 0):08x}, a rewrite v1 does not model", pair)
+                return 'refused', f"its addis became 0x{(hw or 0):08x}, a rewrite v1 does not model"
         o_op, o_rt, o_ra = ow >> 26, (ow >> 21) & 31, (ow >> 16) & 31
         rewritten_addi = False
         if o_op == (w >> 26) and o_rt == rt and (not ds or (ow & 3) == (w & 3)):
@@ -930,40 +1064,34 @@ class Checker:
         elif ds and kind == 'load' and width == 8 and o_op == 14 and o_rt == rt:
             rewritten_addi = True
         else:
-            return done('refused', f"{where}: the ELF has 0x{ow:08x} for 0x{w:08x}, a rewrite v1 does not model", pair)
+            return 'refused', f"the ELF has 0x{ow:08x} for 0x{w:08x}, a rewrite v1 does not model"
         if o_ra != expect_ra:
             if pair is not None and expect_ra == 2 and o_ra == ra:
-                return done('failed', f"{where}: its addis is gone but the access still uses r{ra}", pair)
-            return done('refused', f"{where}: the ELF bases the access on r{o_ra}, expected r{expect_ra}", pair)
-        disp = sext16(ow) if rewritten_addi else disp_of(ow, ds and not rewritten_addi)
+                return 'failed', f"its addis is gone but the access still uses r{ra}"
+            return 'refused', f"the ELF bases the access on r{o_ra}, expected r{expect_ra}"
+        disp = sext16(ow) if rewritten_addi else disp_of(ow, ds)
         ea = (self.elf.toc + (hi << 16) + disp) & 0xffffffffffffffff
 
         if target[0] == 'toc':
             if rewritten_addi:
-                state, msg = self.check_toc_addi(obj, target[1], ea)
-            elif kind == 'load':
-                state, msg = self.check_toc_read(obj, target[1], width, ea)
-            else:
-                state, msg = 'refused', f"{kind} on a .toc entry"
-        else:
-            if rewritten_addi:
-                state, msg = 'refused', "addi rewrite of a direct (non-.toc) load"
-            elif target[0] == 'content' and kind == 'load':
-                _, tobj, tsec, mbase, delta = target
-                start, data = self.merged_entry(tobj, tsec, mbase)
-                if start is None:
-                    state, msg = 'refused', data
-                elif not 0 <= mbase + delta - start <= len(data) - width:
-                    state, msg = 'refused', f"{width}-byte load at {tsec.name}+0x{mbase:x}{delta:+d} leaves its merged entry"
-                else:
-                    ok, m = self.content_matches(target, ea)
-                    state, msg = ('verified', None) if ok else ('failed', f"load at 0x{ea:x}: {m}")
-            else:
-                ok, m = self.value_ok(target, ea, 8)
-                state, msg = ('verified', None) if ok else ('failed', f"address 0x{ea:x}: {m}")
-        if msg:
-            msg = f"{where}: {msg}"
-        return done(state, msg, pair)
+                return self.check_toc_addi(obj, target[1], ea)
+            if kind == 'load':
+                return self.check_toc_read(obj, target[1], width, ea)
+            return 'refused', f"{kind} on a .toc entry"
+        if rewritten_addi:
+            return 'refused', "addi rewrite of a direct (non-.toc) load"
+        if target[0] == 'content' and kind == 'load':
+            _, tobj, tsec, mbase, delta = target
+            start, data = self.merged_entry(tobj, tsec, mbase)
+            if start is None:
+                return 'refused', data
+            lo = mbase + delta - start
+            if lo < 0 or lo + width > len(data):
+                return 'refused', f"{width}-byte load at {tsec.name}+0x{mbase:x}{delta:+d} leaves its merged entry"
+            ok, msg = self.content_matches(target, ea)
+            return ('verified', None) if ok else ('failed', f"load at 0x{ea:x}: {msg}")
+        ok, m = self.value_ok(target, ea, 8)
+        return ('verified', None) if ok else ('failed', f"address 0x{ea:x}: {m}")
 
     def dispose(self, obj, sec, i, state, msg, r=None):
         key = (obj.ident, sec.nr, i)
