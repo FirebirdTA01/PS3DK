@@ -1,5 +1,6 @@
 /* Three independent cellAudio ports; libmixer is not used (it is a placeholder). */
 #include "display.h"
+#include "../../../gcm/common/gcm_host_buffer.h"
 #include <cell/audio.h>
 #include <sys/ppu_thread.h>
 #include <sys/event_queue.h>
@@ -125,8 +126,10 @@ int main(void)
 {
     int audio_initialized=0,queue_created=0,queue_registered=0,sysutil_registered=0,thread_created=0;
     sys_ppu_thread_t thread=0;
-    void *host=memalign(1<<20,HOST_BYTES);
-    if (!host || cellGcmInit(FIFO_BYTES,HOST_BYTES,host) || !display_init()) {
+    /* LV2 pages, not the sbrk heap; kept for the program's life once GCM
+     * maps it (see gcm_host_buffer.h). */
+    sys_addr_t host=0;
+    if (gcm_host_buffer_alloc(HOST_BYTES,&host)!=0 || cellGcmInit(FIFO_BYTES,HOST_BYTES,(void *)(uintptr_t)host) || !display_init()) {
         puts("AUDIO_MIX_FAIL display initialization"); return 1;
     }
     CellGcmContextData *ctx=CELL_GCM_CURRENT;

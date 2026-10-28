@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <malloc.h>
+#include "../../gcm/common/gcm_host_buffer.h"
 #include <string.h>
 #include <sys/sys_time.h>
 #include <cell/gcm.h>
@@ -11,9 +12,13 @@
 int main(void) {
     printf("probe: LP64 cellgcm-clear bisect — rsxMemalign test\n");
 
-    void *host_addr = memalign(1024 * 1024, 32 * 1024 * 1024);
+    sys_addr_t host_addr = 0;
+    if (gcm_host_buffer_alloc(32 * 1024 * 1024, &host_addr) != 0) {
+        printf("probe: gcm_host_buffer_alloc failed\n");
+        return 1;
+    }
     printf("probe: cellGcmInit...\n");
-    cellGcmInit(0x100000, 32 * 1024 * 1024, host_addr);
+    cellGcmInit(0x100000, 32 * 1024 * 1024, (void *)(uintptr_t)host_addr);
 
     videoState state;
     printf("probe: videoGetState...\n");

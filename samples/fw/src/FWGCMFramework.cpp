@@ -17,6 +17,8 @@
 #include <sysutil/video.h>
 
 #include <malloc.h>
+
+#include "../../gcm/common/gcm_host_buffer.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -255,11 +257,16 @@ FWCellGCMWindow::~FWCellGCMWindow()
 
 void FWCellGCMWindow::init()
 {
-	mHostMemory = memalign(1024 * 1024, FWGCM_HOST_SIZE);
-	if (!mHostMemory) {
-		printf("  FWCellGCMWindow: host memory allocation failed\n");
+	/* LV2 pages, not the sbrk heap.  Once cellGcmInit has the buffer the RSX
+	 * may keep fetching from it, so it is never freed after that point;
+	 * process exit reclaims it (see gcm_host_buffer.h). */
+	sys_addr_t host = 0;
+	int arc = gcm_host_buffer_alloc(FWGCM_HOST_SIZE, &host);
+	if (arc != 0) {
+		printf("  FWCellGCMWindow: host buffer allocation failed (0x%08x)\n", (unsigned)arc);
 		return;
 	}
+	mHostMemory = reinterpret_cast<void *>(static_cast<uintptr_t>(host));
 	int rc = cellGcmInit(mConfig.mDefaultCBSize, FWGCM_HOST_SIZE, mHostMemory);
 	printf("  cellGcmInit -> 0x%08x\n", (unsigned)rc);
 	if (rc != 0)
@@ -332,10 +339,8 @@ void FWCellGCMWindow::destroy()
 	FWWindow::destroy();
 	if (mDebugFontRenderer)
 		mDebugFontRenderer->shutdown();
-	if (mHostMemory) {
-		free(mHostMemory);
-		mHostMemory = 0;
-	}
+	/* The host buffer stays allocated once cellGcmInit has seen it (the RSX
+	 * may still fetch from it); process exit reclaims it. */
 	mGcmInit = false;
 }
 

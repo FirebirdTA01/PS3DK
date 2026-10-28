@@ -20,6 +20,7 @@
 #include "suite_rows.h"
 
 #include <malloc.h>
+#include "../../../gcm/common/gcm_host_buffer.h"
 #include <unistd.h>
 #include <sys/sys_time.h>
 #include <sysutil/video.h>
@@ -278,11 +279,12 @@ int main()
     std::printf("spurs-status: %u rows\n", kRowCount);
     g_t0 = now_us();
 
-    void *host = memalign(1024 * 1024, kHostSize);
+    sys_addr_t host = 0;  /* LV2 pages; kept for the program's life once GCM maps it */
     videoState state;
     videoConfiguration vcfg;
     videoResolution res;
-    if (!host || cellGcmInit(kCbSize, kHostSize, host) != 0)
+    if (gcm_host_buffer_alloc(kHostSize, &host) != 0
+        || cellGcmInit(kCbSize, kHostSize, reinterpret_cast<void *>(static_cast<uintptr_t>(host))) != 0)
         return 1;
     if (videoGetState(0, 0, &state) != 0 || state.state != 0
         || videoGetResolution(state.displayMode.resolution, &res) != 0)

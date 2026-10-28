@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <malloc.h>
+#include "../../common/gcm_host_buffer.h"
 #include <unistd.h>
 
 SYS_PROCESS_PARAM(1001, 0x100000);
@@ -179,8 +180,9 @@ static int summary(const char *name, unsigned first, unsigned frames, uint64_t m
 int main(void)
 {
     static const char *names[PHASES] = {"vsync", "hsync", "paced-vsync"};
-    void *host = memalign(1 << 20, HOST_BYTES);
-    if (!host || cellGcmInit(FIFO_BYTES, HOST_BYTES, host) || !display_init()) {
+    sys_addr_t host = 0;
+    if (gcm_host_buffer_alloc(HOST_BYTES, &host) != 0
+        || cellGcmInit(FIFO_BYTES, HOST_BYTES, (void *)(uintptr_t)host) || !display_init()) {
         puts("GCM_PACING_FAIL initialization"); return 1;
     }
     /* Keep mapped FIFO storage alive until process teardown. Never rewind its
