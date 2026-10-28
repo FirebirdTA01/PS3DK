@@ -155,9 +155,11 @@ The version stamped into builds is generated from the most recent
   another entry, the linker dropped those bytes and moved the remaining
   reference onto a different entry, so a load returned an unrelated
   address (an engine drew with a texture descriptor taken from the wrong
-  global and the RSX faulted). The linker now leaves an ILP32 TOC as the
-  compiler wrote it; LP64 links are unchanged. Relink affected programs;
-  `-Wl,--no-toc-optimize` avoids the problem with earlier releases.
+  global and the RSX faulted). The linker now edits only a TOC made of
+  aligned 8-byte entries and leaves any other TOC, such as a typical ILP32
+  one or one with TLS entries, as the compiler wrote it. Relink affected
+  programs; `-Wl,--no-toc-optimize` avoids the problem with earlier
+  releases.
 
 - **PSGL teardown waits for the GPU.** `psglExit`, `psglDestroyDevice` and
   `psglFreeCommandBuffer` now wait for all queued GPU work by writing a fresh

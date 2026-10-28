@@ -21,12 +21,17 @@ then loads a wrong address: an engine drew with a texture descriptor
 read from an unrelated global, and the RSX faulted.
 
 Leave a .toc out of the edit unless it is a whole number of 8-byte
-ADDR64 entries at 8-byte offsets.  An LP64 or ELFv1/ELFv2 .toc is
-unchanged; an ILP32 .toc keeps its unused entries and its loads.
+ADDR64 entries at 8-byte offsets.  The test is on the section's layout
+and relocations, not on the data model: a .toc of aligned ADDR64 entries
+is edited as before, and any other .toc is left as the compiler wrote it.
+That covers an ILP32 .toc with 4-byte words or 4-aligned 8-byte entries,
+and also a .toc of any data model that carries TLS or other non-ADDR64
+relocations; for those the edit's optimisation is given up, and nothing
+is rewritten.
 
 --- a/bfd/elf64-ppc.c
 +++ b/bfd/elf64-ppc.c
-@@ -9017,6 +9017,39 @@
+@@ -9017,6 +9017,40 @@
  	  || discarded_section (toc))
  	continue;
  
@@ -38,7 +43,8 @@ unchanged; an ILP32 .toc keeps its unused entries and its loads.
 +	 step there can cover parts of two entries, so dropping one could
 +	 remove a live word or shift a reference onto the wrong entry.
 +	 Leave any .toc that is not a whole number of aligned 8-byte
-+	 ADDR64 entries as it is.  */
++	 ADDR64 entries as it is (whatever its data model: TLS or other
++	 non-ADDR64 relocations also keep a .toc out of the edit).  */
 +      if ((toc->size & 7) != 0)
 +	continue;
 +      if (toc->reloc_count != 0)
