@@ -222,4 +222,12 @@ OFFSET(CellSailStartCommand, seekArg, 24);
 WIDTH(CellSailStartCommand, terminusArg, 8);
 OFFSET(CellSailStartCommand, terminusArg, 32);
 CellSailStartCommand layout_CellSailStartCommand;
+/* The source callback command is a separate, unchanged record. */
+SIZE(CellSailSourceStartCommand, 40);
+ALIGN(CellSailSourceStartCommand, 8);
+OFFSET(CellSailSourceStartCommand, startFlags, 0);
+OFFSET(CellSailSourceStartCommand, startArg, 8);
+OFFSET(CellSailSourceStartCommand, lengthArg, 16);
+OFFSET(CellSailSourceStartCommand, optionalArg0, 24);
+OFFSET(CellSailSourceStartCommand, optionalArg1, 32);
 #endif

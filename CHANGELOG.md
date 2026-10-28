@@ -22,6 +22,12 @@ The version stamped into builds is generated from the most recent
   `CellSpursWorkloadFlag` is 16 bytes, aligned to 16, and exposes the
   32-bit `flag` at offset 12. Rebuild callers that embed these records.
 
+- Correct voice-port record sizes without weakening their required alignment,
+  debug-font field widths and order, and 64-bit media-search timestamps in both
+  PPU data models. `CellSailStartCommand` now has its own fields rather than
+  aliasing the distinct source-callback command. Rebuild code using these
+  records; debug-font callers and `libdbgfont` must be rebuilt together.
+
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 

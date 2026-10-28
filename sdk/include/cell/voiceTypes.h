@@ -108,7 +108,7 @@ enum {
     CELLVOICE_INVALID_PORT_ID             = 0xff
 };
 
-typedef struct __attribute__((aligned(64))) CellVoiceBasePortInfo {
+typedef struct CellVoiceBasePortInfo {
     CellVoicePortType portType;
     CellVoicePortState state;
     uint16_t numEdge;
@@ -116,7 +116,7 @@ typedef struct __attribute__((aligned(64))) CellVoiceBasePortInfo {
     uint32_t *pEdge ATTRIBUTE_PRXPTR;
     uint32_t numByte;
     uint32_t frameSize;
-} CellVoiceBasePortInfo;
+} CellVoiceBasePortInfo __attribute__((aligned(64)));
 
 typedef struct __attribute__((aligned(32))) CellVoiceInitParam {
     CellVoiceEventType eventMask;
@@ -133,7 +133,7 @@ typedef struct CellVoicePCMFormat {
     CellVoiceSamplingRate sampleRate;
 } CellVoicePCMFormat;
 
-typedef struct __attribute__((aligned(64))) CellVoicePortParam {
+typedef struct CellVoicePortParam {
     CellVoicePortType portType;
     uint16_t threshold;
     uint16_t bMute;
@@ -150,7 +150,7 @@ typedef struct __attribute__((aligned(64))) CellVoicePortParam {
             uint32_t playerId;
         } device;
     };
-} CellVoicePortParam;
+} CellVoicePortParam __attribute__((aligned(64)));
 
 typedef struct __attribute__((aligned(32))) CellVoiceStartParam {
     sys_memory_container_t container;

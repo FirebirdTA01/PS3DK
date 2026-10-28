@@ -57,9 +57,17 @@ typedef struct { int8_t coding, scan; int16_t frameRate, aspectRatio; int32_t wi
 typedef struct { uint64_t pts, dts; uint32_t size; uint32_t reserved; } CellSailAuInfo;
 typedef struct { uint64_t internalData[8]; } CellSailSourceBufferItem;
 
-/* CellSailStartCommand forward-decl from source.h */
-struct CellSailSourceStartCommand;
-typedef struct CellSailSourceStartCommand CellSailStartCommand;
+/* Playback commands and source callbacks carry different records. */
+typedef struct CellSailStartCommand {
+    uint32_t startType;
+    uint32_t seekType;
+    uint32_t terminusType;
+    uint32_t flags;
+    uint32_t startArg;
+    uint32_t reserved;
+    uint64_t seekArg;
+    uint64_t terminusArg;
+} CellSailStartCommand;
 
 /* Memory allocator (root init) */
 typedef void* (*CellSailMemAllocatorFuncAlloc)(void*,size_t,size_t);

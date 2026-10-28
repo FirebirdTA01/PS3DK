@@ -5,9 +5,8 @@
  * provides the enums, callback typedefs, and result structs the
  * the reference SDK ABI requires.
  *
- * Width-sensitive integer fields (time_t, size_t) are declared as
- * uint32_t in caller-allocated structs crossing the SPRX boundary —
- * the SPRX uses a 32-bit-pointer ABI where these are 4 bytes wide.
+ * System timestamps use explicit 64-bit fields in either data model;
+ * their width is independent of the host C library's time_t.
  */
 #ifndef __PS3DK_CELL_SYSUTIL_SEARCH_TYPES_H__
 #define __PS3DK_CELL_SYSUTIL_SEARCH_TYPES_H__
@@ -216,18 +215,10 @@ typedef struct {
     uint32_t     resultNum;
 } CellSearchResultParam;
 
-/*
- * NOTE: time_t fields (importedDate, lastPlayedDate, takenDate,
- * modifiedDate) are declared as uint32_t because the SPRX uses a
- * 32-bit-pointer ABI where time_t is 4 bytes.  Our LP64 PPU
- * toolchain would otherwise emit 8-byte time_t, misaligning every
- * subsequent field.
- */
-
 typedef struct {
-    uint32_t   importedDate;
-    uint32_t   takenDate;
-    uint32_t   modifiedDate;
+    int64_t    takenDate;
+    int64_t    importedDate;
+    int64_t    modifiedDate;
 } CellSearchTimeInfo;
 
 typedef struct {
@@ -258,8 +249,8 @@ typedef struct {
 typedef struct {
     int64_t                 duration;
     int64_t                 size;
-    uint32_t                importedDate;
-    uint32_t                lastPlayedDate;
+    int64_t                 importedDate;
+    int64_t                 lastPlayedDate;
     int32_t                 releasedYear;
     int32_t                 trackNumber;
     int32_t                 bitrate;
@@ -282,8 +273,8 @@ typedef struct {
 
 typedef struct {
     int64_t                 size;
-    uint32_t                importedDate;
-    uint32_t                takenDate;
+    int64_t                 importedDate;
+    int64_t                 takenDate;
     int32_t                 width;
     int32_t                 height;
     CellSearchOrientation   orientation;
@@ -298,8 +289,8 @@ typedef struct {
 typedef struct {
     int64_t                 duration;
     int64_t                 size;
-    uint32_t                importedDate;
-    uint32_t                takenDate;
+    int64_t                 importedDate;
+    int64_t                 takenDate;
     int32_t                 videoBitrate;
     int32_t                 audioBitrate;
     int32_t                 drmEncrypted;

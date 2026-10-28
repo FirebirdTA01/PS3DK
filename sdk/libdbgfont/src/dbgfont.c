@@ -530,8 +530,8 @@ int32_t cellDbgFontInit(const CellDbgFontConfig *cfg)
     memset(&gcmCfg, 0, sizeof(gcmCfg));
     gcmCfg.localBufAddr = (sys_addr_t)(uintptr_t)buf;
     gcmCfg.localBufSize = DBGFONT_COMPAT_BUF_SIZE;
-    gcmCfg.screenWidth  = (uint16_t)cfg->screenWidth;
-    gcmCfg.screenHeight = (uint16_t)cfg->screenHeight;
+    gcmCfg.screenWidth  = cfg->screenWidth;
+    gcmCfg.screenHeight = cfg->screenHeight;
     gcmCfg.option       = CELL_DBGFONT_VERTEX_LOCAL
                         | CELL_DBGFONT_TEXTURE_LOCAL;
 

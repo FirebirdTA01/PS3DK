@@ -67,9 +67,9 @@ typedef struct CellDbgFontConfigGcm {
     uint32_t   localBufSize;
     sys_addr_t mainBufAddr;
     uint32_t   mainBufSize;
-    uint16_t   screenWidth;
-    uint16_t   screenHeight;
     uint32_t   option;
+    uint32_t   screenWidth;
+    uint32_t   screenHeight;
 } CellDbgFontConfigGcm;
 
 int32_t cellDbgFontInitGcm(const CellDbgFontConfigGcm *cfg);
@@ -108,8 +108,8 @@ typedef int32_t CellDbgFontConsoleId;
 typedef struct CellDbgFontConsoleConfig {
     float    posLeft;      /* normalised [0..1] left anchor           */
     float    posTop;        /* normalised [0..1] top anchor (y=0 top) */
-    uint16_t cnsWidth;     /* character columns per line              */
-    uint16_t cnsHeight;    /* character rows in the ring buffer       */
+    uint32_t cnsWidth;     /* character columns per line              */
+    uint32_t cnsHeight;    /* character rows in the ring buffer       */
     float    scale;        /* glyph scale (1.0 == reference 720p)     */
     uint32_t color;        /* ARGB text colour                        */
 } CellDbgFontConsoleConfig;

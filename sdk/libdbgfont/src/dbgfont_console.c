@@ -144,7 +144,8 @@ void _cellDbgFontDrawConsoles(void)
          * ring. */
         int start  = (total <= CONSOLE_LINE_COUNT) ? 0
                      : (s->cursor % CONSOLE_LINE_COUNT);
-        int visible = (s->cfg.cnsHeight > 0 && s->cfg.cnsHeight < count)
+        int visible = (count > 0 && s->cfg.cnsHeight > 0
+                       && s->cfg.cnsHeight < (uint32_t)count)
                       ? (int)s->cfg.cnsHeight : count;
         int skip = count - visible;
         int idx = (start + skip) % CONSOLE_LINE_COUNT;
