@@ -306,6 +306,9 @@ jobs:
       - name: Test voice, font, search and SAIL record layouts
         run: bash tests/sdk/media-record-layout-test.sh
 
+      - name: Test lv2 debugger record sizes and offsets
+        run: bash tests/sdk/dbg-record-layout-test.sh
+
       - name: Test the cell/hash digests against hashlib
         run: bash tests/sdk/hash-vectors-test.sh
 
