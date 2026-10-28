@@ -162,6 +162,12 @@ int main(void)
 	CellDbgFontConsoleId cc_id = cellDbgFontConsoleOpen(&cc);
 	printf("  cellDbgFontConsoleOpen -> %d\n", (int)cc_id);
 
+	/* Prime the flip queue: the first wait_flip() in the loop spins
+	 * until a flip completes, and none has been issued yet.  Issue
+	 * one now (same idiom as every sibling sample: cellgcm-* does
+	 * do_flip(ctx, MAX_BUFFERS - 1) right before its render loop). */
+	do_flip(ctx, (uint8_t)MAX_BUFFERS - 1);
+
 	/* Render loop: ~100 seconds at 60 fps, or until START. */
 	const int pad_ok = ioPadInit(7) == 0;
 	if (!pad_ok) printf("  ioPadInit failed; START will not exit\n");
