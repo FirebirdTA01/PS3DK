@@ -48,16 +48,20 @@ enum Cmd {
         output: PathBuf,
 
         /// Module name, written into the module info block (max 27 chars).
+        /// Optional when the module declares SYS_MODULE_INFO; must match it
+        /// when both are given.
         #[arg(long)]
-        name: String,
+        name: Option<String>,
 
-        /// Module version as `major.minor`.
-        #[arg(long, default_value = "1.0")]
-        version: String,
+        /// Module version as `major.minor` (default 1.0 unless the module
+        /// declares SYS_MODULE_INFO).
+        #[arg(long)]
+        version: Option<String>,
 
-        /// Module attributes word.
-        #[arg(long, default_value = "0", value_parser = parse_u16)]
-        attributes: u16,
+        /// Module attributes word (default 0 unless the module declares
+        /// SYS_MODULE_INFO).
+        #[arg(long, value_parser = parse_u16)]
+        attributes: Option<u16>,
 
         /// Build even when the module info block's pointer fields are not all
         /// relocated. Almost always the wrong answer; see §1.3.
@@ -126,7 +130,7 @@ fn main() -> Result<()> {
         } => {
             let opts = build::BuildOptions {
                 name,
-                version: parse_version(&version)?,
+                version: version.as_deref().map(parse_version).transpose()?,
                 attributes,
                 allow_unrelocated_module_info,
                 quiet,

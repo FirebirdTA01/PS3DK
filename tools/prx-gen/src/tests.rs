@@ -468,9 +468,9 @@ fn build_fixture(tag: &str, attrs: (u16, u16)) -> (TempDir, std::path::PathBuf) 
     let output = dir.join("out.prx");
     std::fs::write(&input, synth_elf(attrs, &[])).unwrap();
     let opts = crate::build::BuildOptions {
-        name: "demo".into(),
-        version: (1, 0),
-        attributes: 0,
+        name: Some("demo".into()),
+        version: Some((1, 0)),
+        attributes: Some(0),
         allow_unrelocated_module_info: false,
         quiet: true,
     };
@@ -512,9 +512,9 @@ fn build_preserves_every_original_file_offset() {
         &input,
         &output,
         &crate::build::BuildOptions {
-            name: "demo".into(),
-            version: (1, 0),
-            attributes: 0,
+            name: Some("demo".into()),
+            version: Some((1, 0)),
+            attributes: Some(0),
             allow_unrelocated_module_info: false,
             quiet: true,
         },
@@ -566,9 +566,9 @@ fn building_a_prx_twice_is_refused() {
         &out,
         &again,
         &crate::build::BuildOptions {
-            name: "demo".into(),
-            version: (1, 0),
-            attributes: 0,
+            name: Some("demo".into()),
+            version: Some((1, 0)),
+            attributes: Some(0),
             allow_unrelocated_module_info: false,
             quiet: true,
         },
@@ -609,9 +609,9 @@ fn exports_falls_back_to_a_nid_placeholder_when_names_are_gone() {
         &input,
         &output,
         &crate::build::BuildOptions {
-            name: "demo".into(),
-            version: (1, 0),
-            attributes: 0,
+            name: Some("demo".into()),
+            version: Some((1, 0)),
+            attributes: Some(0),
             allow_unrelocated_module_info: false,
             quiet: true,
         },
@@ -654,4 +654,99 @@ fn rendered_yaml_is_what_nidgen_expects() {
     assert!(yaml.contains("version: 1"), "got:\n{yaml}");
     assert!(yaml.contains("  - name: prx_add"), "got:\n{yaml}");
     assert!(yaml.contains("    nid: '0x11111111'"), "got:\n{yaml}");
+}
+
+/// The fixture's ELF with a `SYS_MODULE_INFO` record appended as a section.
+fn elf_with_identity(record: &[u8]) -> Elf {
+    let mut elf = Elf::parse(synth_elf((module::LIB_ATTR_MANAGEMENT, module::LIB_ATTR_LIBRARY), &[])).unwrap();
+    let off = elf.data.len() as u64;
+    elf.data.extend_from_slice(record);
+    elf.shdrs.push(Shdr {
+        name: module::IDENTITY_SECTION.into(),
+        sh_name: 0,
+        sh_type: SHT_PROGBITS,
+        sh_flags: 0,
+        sh_addr: 0,
+        sh_offset: off,
+        sh_size: record.len() as u64,
+        sh_link: 0,
+        sh_info: 0,
+        sh_entsize: 0,
+    });
+    elf
+}
+
+fn identity_record(name: &str, attrs: u16, major: u8, minor: u8) -> Vec<u8> {
+    let mut r = b"PMI".to_vec();
+    r.extend_from_slice(&attrs.to_be_bytes());
+    r.push(major);
+    r.push(minor);
+    let mut field = [0u8; 28];
+    field[..name.len()].copy_from_slice(name.as_bytes());
+    r.extend_from_slice(&field);
+    r
+}
+
+#[test]
+fn identity_section_is_absent_from_a_module_without_one() {
+    let elf = Elf::parse(synth_elf((module::LIB_ATTR_MANAGEMENT, module::LIB_ATTR_LIBRARY), &[])).unwrap();
+    assert!(module::read_identity_section(&elf).unwrap().is_none());
+}
+
+#[test]
+fn identity_section_is_read() {
+    let elf = elf_with_identity(&identity_record("hello_mod", 0x0003, 2, 7));
+    let id = module::read_identity_section(&elf).unwrap().unwrap();
+    assert_eq!(id, module::Identity { name: "hello_mod".into(), version: (2, 7), attributes: 3 });
+}
+
+#[test]
+fn identity_section_rejects_bad_records() {
+    let good = identity_record("m", 0, 1, 0);
+    let mut bad_magic = good.clone();
+    bad_magic[0] = b'X';
+    assert!(module::read_identity_section(&elf_with_identity(&bad_magic)).is_err());
+    let mut two = good.clone();
+    two.extend_from_slice(&good);
+    assert!(module::read_identity_section(&elf_with_identity(&two)).is_err(), "two records");
+    let mut no_nul = good.clone();
+    for b in no_nul[8..].iter_mut() { *b = b'a'; }
+    assert!(module::read_identity_section(&elf_with_identity(&no_nul)).is_err());
+    let empty = identity_record("", 0, 1, 0);
+    assert!(module::read_identity_section(&elf_with_identity(&empty)).is_err());
+    let mut junk = good.clone();
+    junk[8 + 5] = b'z';
+    assert!(module::read_identity_section(&elf_with_identity(&junk)).is_err(), "bytes after NUL");
+}
+
+#[test]
+fn identity_resolution_prefers_agreement_and_refuses_conflicts() {
+    let d = module::Identity { name: "a".into(), version: (2, 1), attributes: 1 };
+    let r = module::resolve_identity(Some(&d), None, None, None).unwrap();
+    assert_eq!(r, d);
+    let r = module::resolve_identity(Some(&d), Some("a"), Some((2, 1)), Some(1)).unwrap();
+    assert_eq!(r, d);
+    assert!(module::resolve_identity(Some(&d), Some("b"), None, None).is_err());
+    assert!(module::resolve_identity(Some(&d), None, Some((2, 2)), None).is_err());
+    assert!(module::resolve_identity(Some(&d), None, None, Some(0)).is_err());
+    let r = module::resolve_identity(None, Some("c"), None, None).unwrap();
+    assert_eq!(r, module::Identity { name: "c".into(), version: (1, 0), attributes: 0 });
+    assert!(module::resolve_identity(None, None, Some((1, 0)), Some(0)).is_err(), "name required");
+}
+
+#[test]
+fn build_without_any_name_is_refused() {
+    let dir = TempDir::new("noname");
+    let input = dir.join("in.elf");
+    let output = dir.join("out.prx");
+    std::fs::write(&input, synth_elf((module::LIB_ATTR_MANAGEMENT, module::LIB_ATTR_LIBRARY), &[])).unwrap();
+    let opts = crate::build::BuildOptions {
+        name: None,
+        version: None,
+        attributes: None,
+        allow_unrelocated_module_info: false,
+        quiet: true,
+    };
+    let err = crate::build::build(&input, &output, &opts).unwrap_err();
+    assert!(format!("{err:#}").contains("no module name"), "{err:#}");
 }

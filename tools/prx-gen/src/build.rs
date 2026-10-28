@@ -23,9 +23,11 @@ use crate::module;
 use crate::reloc;
 
 pub struct BuildOptions {
-    pub name: String,
-    pub version: (u8, u8),
-    pub attributes: u16,
+    /// Command-line identity; each field is optional when the module
+    /// declares it with `SYS_MODULE_INFO`, and must match when both do.
+    pub name: Option<String>,
+    pub version: Option<(u8, u8)>,
+    pub attributes: Option<u16>,
     pub allow_unrelocated_module_info: bool,
     pub quiet: bool,
 }
@@ -91,9 +93,17 @@ pub fn build(input: &Path, output: &Path, opts: &BuildOptions) -> Result<()> {
         );
     }
 
+    let declared = module::read_identity_section(&elf)?;
+    let id = module::resolve_identity(
+        declared.as_ref(),
+        opts.name.as_deref(),
+        opts.version,
+        opts.attributes,
+    )?;
+
     let mut out = elf.data.clone();
 
-    module::write_identity(&mut out, &loc, &opts.name, opts.version, opts.attributes)?;
+    module::write_identity(&mut out, &loc, &id.name, id.version, id.attributes)?;
     let patched_imports = module::fixup_import_counts(&elf, &mut out)?;
 
     let conv = reloc::convert(&elf)?;
@@ -238,7 +248,7 @@ pub fn build(input: &Path, output: &Path, opts: &BuildOptions) -> Result<()> {
         );
         println!(
             "  module         {} v{}.{} attributes 0x{:04x}",
-            opts.name, opts.version.0, opts.version.1, opts.attributes
+            id.name, id.version.0, id.version.1, id.attributes
         );
         println!(
             "  module info    vaddr 0x{:x}, file offset 0x{:x} -> PHDR[0].p_paddr 0x{:x}",

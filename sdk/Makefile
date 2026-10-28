@@ -62,6 +62,7 @@ HEADERS := \
     include/cell/hash/libsha384.h \
     include/cell/hash/libsha512.h \
     include/sys/prx_module.h \
+    include/sys/moduleexport.h \
     include/sys/file.h \
     include/sys/lv2_fs_ext.h \
     include/psl1ght/lv2/timer.h \

@@ -13,6 +13,18 @@ The version stamped into builds is generated from the most recent
 
 ## [Unreleased]
 
+### Added
+
+- **Module identity and entry points in C.** `<sys/moduleexport.h>` adds
+  `SYS_MODULE_INFO(name, attribute, major, minor)`, `SYS_MODULE_START(fn)`
+  and `SYS_MODULE_STOP(fn)`, with the `SYS_MODULE_ATTR_*` and
+  `SYS_MODULE_STOP_LEVEL_*` constants. A module can now declare its name,
+  version and attributes in its source: `prx-gen build` reads them, so
+  `ps3_add_prx` no longer needs `NAME`/`VERSION`/`ATTRIBUTES` for such a
+  module, and refuses one whose source and arguments disagree.
+  `SYS_MODULE_EXIT` and `SYS_MODULE_STOP_LEVEL` are refused at compile time
+  for now.
+
 ### Fixed
 
 - **SPURS job-chain and workload-flag layouts.** `CellSpursJobChain` now

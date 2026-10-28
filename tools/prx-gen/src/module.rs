@@ -93,6 +93,104 @@ pub fn locate_module_info(elf: &Elf) -> Result<ModuleInfoLoc> {
     })
 }
 
+/// Non-loaded section a module's source fills through `SYS_MODULE_INFO`
+/// (`<sys/moduleexport.h>`): magic "PMI", attributes (u16), version
+/// major and minor (u8 each), then the NUL-terminated name in 28 bytes.
+pub const IDENTITY_SECTION: &str = ".ps3dk.module_identity";
+pub const IDENTITY_SIZE: usize = 36;
+pub const IDENTITY_MAGIC: &[u8; 4] = b"PMI";
+
+/// Module identity: name, version (major, minor) and attributes word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    pub name: String,
+    pub version: (u8, u8),
+    pub attributes: u16,
+}
+
+/// Parse a module's `SYS_MODULE_INFO` record.  `Ok(None)` when the module
+/// does not declare one.
+pub fn read_identity_section(elf: &Elf) -> Result<Option<Identity>> {
+    let sh = match elf.section(IDENTITY_SECTION) {
+        Some(sh) => sh,
+        None => return Ok(None),
+    };
+    if sh.sh_size as usize != IDENTITY_SIZE {
+        bail!(
+            "{} is {} bytes, expected {}: SYS_MODULE_INFO must appear exactly once per module",
+            IDENTITY_SECTION,
+            sh.sh_size,
+            IDENTITY_SIZE
+        );
+    }
+    let off = sh.sh_offset as usize;
+    let rec = elf
+        .data
+        .get(off..off + IDENTITY_SIZE)
+        .with_context(|| format!("{} runs past the end of the file", IDENTITY_SECTION))?;
+    if &rec[0..4] != IDENTITY_MAGIC {
+        bail!("{} does not start with the expected magic", IDENTITY_SECTION);
+    }
+    let name_field = &rec[8..8 + MI_NAME_LEN];
+    let len = name_field
+        .iter()
+        .position(|&b| b == 0)
+        .with_context(|| format!("{}: module name is not NUL-terminated", IDENTITY_SECTION))?;
+    if len == 0 {
+        bail!("{}: module name is empty", IDENTITY_SECTION);
+    }
+    if name_field[len..].iter().any(|&b| b != 0) {
+        bail!("{}: bytes after the module name's NUL are not zero", IDENTITY_SECTION);
+    }
+    let name = std::str::from_utf8(&name_field[..len])
+        .with_context(|| format!("{}: module name is not valid text", IDENTITY_SECTION))?
+        .to_string();
+    Ok(Some(Identity {
+        name,
+        version: (rec[6], rec[7]),
+        attributes: rd_u16(rec, 4),
+    }))
+}
+
+/// Combine the module's own declaration with command-line values.  Each
+/// field comes from whichever side provides it; a field given by both must
+/// match.  The name is required; version defaults to 1.0, attributes to 0.
+pub fn resolve_identity(
+    declared: Option<&Identity>,
+    name: Option<&str>,
+    version: Option<(u8, u8)>,
+    attributes: Option<u16>,
+) -> Result<Identity> {
+    let name = match (declared.map(|d| d.name.as_str()), name) {
+        (Some(d), Some(c)) if d != c => bail!(
+            "module name mismatch: SYS_MODULE_INFO declares '{d}' but --name is '{c}'"
+        ),
+        (Some(d), _) => d.to_string(),
+        (None, Some(c)) => c.to_string(),
+        (None, None) => bail!(
+            "no module name: pass --name or declare SYS_MODULE_INFO in the module source"
+        ),
+    };
+    let version = match (declared.map(|d| d.version), version) {
+        (Some(d), Some(c)) if d != c => bail!(
+            "module version mismatch: SYS_MODULE_INFO declares {}.{} but --version is {}.{}",
+            d.0, d.1, c.0, c.1
+        ),
+        (Some(d), _) => d,
+        (None, Some(c)) => c,
+        (None, None) => (1, 0),
+    };
+    let attributes = match (declared.map(|d| d.attributes), attributes) {
+        (Some(d), Some(c)) if d != c => bail!(
+            "module attributes mismatch: SYS_MODULE_INFO declares 0x{d:04x} but --attributes is 0x{c:04x}"
+        ),
+        (Some(d), _) => d,
+        (None, Some(c)) => c,
+        (None, None) => 0,
+    };
+    Ok(Identity { name, version, attributes })
+}
+
 /// Write the identity fields the crt leaves blank for us.
 pub fn write_identity(
     data: &mut [u8],

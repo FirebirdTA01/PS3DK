@@ -396,7 +396,8 @@ function(ps3_add_self target)
 endfunction()
 
 # -----------------------------------------------------------------------------
-# ps3_add_prx(target NAME name VERSION M.m [ATTRIBUTES hex] [SIGN])
+# ps3_add_prx(target [NAME name] [VERSION M.m] [ATTRIBUTES hex] [SIGN])
+# NAME is required unless the module source declares SYS_MODULE_INFO.
 # ps3_add_sprx(...) is an alias kept for callers that prefer the file suffix.
 # -----------------------------------------------------------------------------
 function(ps3_add_prx target)
@@ -408,11 +409,19 @@ function(ps3_add_prx target)
     if(NOT TARGET ${target})
         message(FATAL_ERROR "ps3_add_prx: target '${target}' does not exist")
     endif()
-    if(NOT _PSP_NAME)
-        message(FATAL_ERROR "ps3_add_prx: NAME is required")
+    # NAME / VERSION / ATTRIBUTES may instead come from SYS_MODULE_INFO in the
+    # module source (<sys/moduleexport.h>); prx-gen refuses a module that
+    # declares neither a name here nor one in its source, and one whose
+    # source and arguments disagree.
+    set(_psp_identity_args)
+    if(_PSP_NAME)
+        list(APPEND _psp_identity_args --name "${_PSP_NAME}")
     endif()
-    if(NOT _PSP_VERSION)
-        message(FATAL_ERROR "ps3_add_prx: VERSION is required")
+    if(_PSP_VERSION)
+        list(APPEND _psp_identity_args --version "${_PSP_VERSION}")
+    endif()
+    if(DEFINED _PSP_ATTRIBUTES AND NOT "${_PSP_ATTRIBUTES}" STREQUAL "")
+        list(APPEND _psp_identity_args --attributes "${_PSP_ATTRIBUTES}")
     endif()
     if(NOT PS3_TOOL_prx_gen)
         message(FATAL_ERROR
@@ -457,10 +466,6 @@ function(ps3_add_prx target)
         endif()
     endforeach()
 
-    set(_psp_attributes "${_PSP_ATTRIBUTES}")
-    if(NOT _psp_attributes)
-        set(_psp_attributes "0x0")
-    endif()
 
     target_link_options(${target} PRIVATE
         "-specs=${PS3DK}/ppu/lib/lv2-prx.specs"
@@ -495,9 +500,7 @@ function(ps3_add_prx target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${PS3_TOOL_prx_gen}" build "$<TARGET_FILE:${target}>"
                 -o "${_prx_output}"
-                --name "${_PSP_NAME}"
-                --version "${_PSP_VERSION}"
-                --attributes "${_psp_attributes}"
+                ${_psp_identity_args}
         COMMAND "${PS3_TOOL_prx_gen}" check "${_prx_output}"
         ${_sign_commands}
         BYPRODUCTS ${_byproducts}

@@ -891,6 +891,11 @@ jobs:
       - name: Test the PRX headers work alone and in either order
         run: bash tests/sdk/prx-headers-test.sh
 
+      # Skips without PS3DEV; SYS_MODULE_INFO's record, the entry-point
+      # bindings, the refused uses, two mutants and a PRX link.
+      - name: Test the module identity and entry-point macros
+        run: bash tests/sdk/module-export-test.sh
+
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
       # produce byte-identical packages for standard payloads.
