@@ -572,7 +572,7 @@ class Checker:
         Value of symbol+addend as the link must have made it:
           ('toc', offset)          inside this object's .toc
           ('addr', value)
-          ('content', obj, sec, offset)   inside a merged section
+          ('content', obj, sec, base, delta)   inside a merged section
         or ('refuse', reason).
         """
         sym = obj.symbols.get(sym_idx)
@@ -592,7 +592,17 @@ class Checker:
             if sec.name.startswith('.toc'):
                 return ('refuse', f"{obj.ident}: target in {sec.name}, a TOC section v1 does not model")
             if 'M' in sec.flags:
-                return ('content', obj, sec, off)
+                # ld resolves a section symbol in a merged section to the entry
+                # holding st_value + addend, but any other symbol to its own
+                # entry plus the addend, which may point outside that entry
+                # (a string walk's .LC0 - 1).
+                if sym['type'] == 'SECTION':
+                    base, delta = off, 0
+                else:
+                    base, delta = sym['val'], addend
+                if not 0 <= base < sec.size:
+                    return ('refuse', f"{obj.ident}: merged-section symbol at +0x{base:x} outside {sec.name}")
+                return ('content', obj, sec, base, delta)
             if sec.name == '.opd':
                 return self.resolve_descriptor(obj, sec, off)
             addr, why = self.anchored(obj, sec)
@@ -630,27 +640,43 @@ class Checker:
         return ('addr', addr + off)
 
     # -- value constraints -----------------------------------------------------
-    def content_matches(self, target, addr):
-        """A merged-section target: does the ELF hold the same datum at addr?"""
-        _, obj, sec, off = target
+    def merged_entry(self, obj, sec, base):
+        """
+        The bytes of the merged entry ld keeps together with source offset
+        base: the string from base to its terminator, or the whole
+        fixed-size constant holding base.  (start, data) or (None, reason).
+        """
         src = obj.bytes_of(sec)
-        if src is None or off < 0 or off >= sec.size:
-            return False, f"merged target +0x{off:x} outside {sec.name}"
+        if src is None:
+            return None, f"merged {sec.name} has no contents"
         es = sec.es or 1
         if 'S' in sec.flags:
-            end = off
+            end = base
             while end + es <= sec.size and src[end:end + es] != bytes(es):
                 end += es
-            want = src[off:end + es]
-        else:
-            if off % es:
-                return False, f"merged constant offset 0x{off:x} not a multiple of {es}"
-            want = src[off:off + es]
-        got = self.elf.read(addr, len(want))
+            if end + es > sec.size:
+                return None, f"string at {sec.name}+0x{base:x} has no terminator"
+            return base, src[base:end + es]
+        start = base - base % es
+        if start + es > sec.size:
+            return None, f"constant at {sec.name}+0x{base:x} runs past the section"
+        return start, src[start:start + es]
+
+    def content_matches(self, target, addr):
+        """
+        A merged-section target: addr is where the link put symbol+addend.
+        The entry the symbol names must sit at addr - addend.
+        """
+        _, obj, sec, base, delta = target
+        start, data = self.merged_entry(obj, sec, base)
+        if start is None:
+            return False, data
+        at = addr - delta - (base - start)
+        got = self.elf.read(at, len(data))
         if got is None:
-            return False, f"0x{addr:x} is not in a file-backed section"
-        if got != want:
-            return False, f"0x{addr:x} does not hold the datum {sec.name}+0x{off:x} names"
+            return False, f"0x{at:x} is not in a file-backed section"
+        if got != data:
+            return False, f"0x{at:x} does not hold the datum {sec.name}+0x{base:x} names"
         return True, None
 
     def value_ok(self, target, value, width):
@@ -860,15 +886,15 @@ class Checker:
             if rewritten_addi:
                 state, msg = 'refused', "addi rewrite of a direct (non-.toc) load"
             elif target[0] == 'content' and kind == 'load':
-                _, tobj, tsec, toff = target
-                want = tobj.bytes_of(tsec)[toff:toff + width] if tobj.bytes_of(tsec) else None
-                got = self.elf.read(ea, width)
-                if want is None or len(want) != width:
-                    state, msg = 'refused', "merged-section load outside its section"
-                elif got != want:
-                    state, msg = 'failed', f"load at 0x{ea:x} does not read {tsec.name}+0x{toff:x}"
+                _, tobj, tsec, mbase, delta = target
+                start, data = self.merged_entry(tobj, tsec, mbase)
+                if start is None:
+                    state, msg = 'refused', data
+                elif not 0 <= mbase + delta - start <= len(data) - width:
+                    state, msg = 'refused', f"{width}-byte load at {tsec.name}+0x{mbase:x}{delta:+d} leaves its merged entry"
                 else:
-                    state, msg = 'verified', None
+                    ok, m = self.content_matches(target, ea)
+                    state, msg = ('verified', None) if ok else ('failed', f"load at 0x{ea:x}: {m}")
             else:
                 ok, m = self.value_ok(target, ea, 8)
                 state, msg = ('verified', None) if ok else ('failed', f"address 0x{ea:x}: {m}")

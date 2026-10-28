@@ -165,6 +165,52 @@ def case_green():
     return True, f"verified {c['sites_verified']}"
 
 
+# -- defect regressions ----------------------------------------------------
+
+def merged_string_user(addend=-1):
+    """
+    Address formation of .LC0 - 1 in a merged string section, where .LC0 is
+    the section's first string (compilers emit this for pre-increment string
+    walks).  ld resolves a non-section symbol in a merged section to the
+    symbol's own output address plus the addend.
+    """
+    o = from_obj('s.o')
+    o.section('.text.s', F.code(F.addis(9, 2), F.addi(9, 9), F.BLR))
+    o.sym('s', '.text.s', 0, bind='GLOBAL', stype='FUNC')
+    o.section('.rodata.s.str1.8', b'hello\0\0\0world\0\0\0', flags='AMS', align=8, entsize=1)
+    o.sym('.LC0', '.rodata.s.str1.8', 0)
+    o.sym('.LC1', '.rodata.s.str1.8', 8)
+    o.rel('.text.s', 2, 'R_PPC64_TOC16_HA', '.LC0', addend)
+    o.rel('.text.s', 6, 'R_PPC64_TOC16_LO', '.LC0', addend)
+    return o
+
+
+def padded_merged_link(d):
+    pad = from_obj('pad.o')
+    pad.section('.rodata.pad', b'xyzxyzxy', flags='A', align=8)   # non-NUL bytes right in front of the string
+    lk = link(d, [pad, merged_string_user()])
+    if lk.place[('s.o', '.rodata.s.str1.8')] != lk.place[('pad.o', '.rodata.pad')] + 8:
+        raise RuntimeError("fixture: the string does not follow the pad")
+    return lk
+
+
+def case_merged_string_negative_addend():
+    d = fresh('merged-neg')
+    lk = padded_merged_link(d)
+
+    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=2, sites_failed=0, sites_refused=0)
+
+
+def case_merged_string_negative_addend_wrong():
+    d = fresh('merged-neg-wrong')
+    lk = padded_merged_link(d)
+    a = lk.place[('s.o', '.text.s')] + 4
+    w = lk.word(a)
+    lk.poke_word(a, (w & ~0xffff) | ((w - 1) & 0xffff))   # .LC0 - 2
+    lk.rewrite()
+    return want_detail(check(lk.manifest_path), 1, 'FAIL', r'does not hold the datum', sites_failed=2)
+
+
 # -- the design review's negative list ----------------------------------------
 
 def green_link(name, **kw):
@@ -550,6 +596,8 @@ NEGATIVE_CASES = [
 
 
 CASES = [
+    ('defect: merged string, local symbol with a negative addend', case_merged_string_negative_addend),
+    ('defect: merged string, negative addend, wrong displacement fails', case_merged_string_negative_addend_wrong),
     ('green: medium and small model loads of .toc entries', case_green),
 ] + NEGATIVE_CASES
 
