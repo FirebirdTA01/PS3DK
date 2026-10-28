@@ -438,6 +438,10 @@ jobs:
       - name: Test PSGL waits consume fresh GPU completion labels
         run: bash tests/host/psgl-wait-label-test.sh
 
+      # Positive/negative fixture test for TOC mid-entry relocation audit tool.
+      - name: Test the TOC mid-entry relocation audit tool
+        run: bash tests/host/toc-midentry-audit-test.sh
+
       # build-spu-toolchain.sh: --gcc and --host pick the build root in any
       # option order, and --clean removes only that root.
       - name: Test the SPU build-root selection and --clean
