@@ -300,6 +300,9 @@ jobs:
       - name: Test the cellFs record layouts
         run: bash tests/sdk/cellfs-struct-layout-test.sh
 
+      - name: Test SPURS record sizes and alignment
+        run: bash tests/sdk/spurs-record-layout-test.sh
+
       - name: Test the cell/hash digests against hashlib
         run: bash tests/sdk/hash-vectors-test.sh
 

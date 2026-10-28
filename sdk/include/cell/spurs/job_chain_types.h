@@ -37,7 +37,7 @@ extern "C" {
 
 typedef struct CellSpursJobChain {
     unsigned char skip[CELL_SPURS_JOBCHAIN_SIZE];
-} __attribute__((aligned(CELL_SPURS_JOBCHAIN_ALIGN))) CellSpursJobChain;
+} CellSpursJobChain __attribute__((aligned(CELL_SPURS_JOBCHAIN_ALIGN)));
 
 /* For arrays of job chains: the bare CellSpursJobChain has 128-byte
  * alignment but only 272 bytes of storage, so consecutive entries

@@ -13,6 +13,15 @@ The version stamped into builds is generated from the most recent
 
 ## [Unreleased]
 
+### Fixed
+
+- **SPURS job-chain and workload-flag layouts.** `CellSpursJobChain` now
+  keeps 272 bytes of storage with 128-byte typedef alignment; the padded
+  `CellSpursJobChainForArray` is 384 bytes with padding at offset 272,
+  rather than 512 bytes. Use that wrapper for arrays of job chains.
+  `CellSpursWorkloadFlag` is 16 bytes, aligned to 16, and exposes the
+  32-bit `flag` at offset 12. Rebuild callers that embed these records.
+
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 

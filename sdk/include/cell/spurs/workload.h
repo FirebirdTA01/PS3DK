@@ -148,8 +148,9 @@ extern int cellSpursGetWorkloadData(const CellSpurs *spurs,
 
 /* Workload flag: a lightweight one-shot event tied to a workload. */
 typedef struct CellSpursWorkloadFlag {
-    unsigned char skip[128];
-} __attribute__((aligned(128))) CellSpursWorkloadFlag;
+    unsigned char skip[12];
+    uint32_t flag;
+} __attribute__((aligned(16))) CellSpursWorkloadFlag;
 
 extern int cellSpursGetWorkloadFlag(const CellSpurs *spurs,
                                     CellSpursWorkloadFlag **flag);

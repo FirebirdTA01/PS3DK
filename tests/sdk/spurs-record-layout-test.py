@@ -54,7 +54,51 @@ def matrix(cc, inc, work, root):
             print(f'spurs-record-layout: {"FAIL" if result.returncode else "PASS"} {label}')
             fails += bool(result.returncode)
     print(f'spurs-record-layout: {6 - fails}/6 PASS')
+    if not fails:
+        fails += mutants(cc, inc, work, src)
     return int(fails != 0)
+
+
+def mutants(cc, inc, work, src):
+    """Each old layout defect must fail its own ABI diagnostic."""
+    cases = [
+        ('struct-alignment', 'cell/spurs/job_chain_types.h',
+         '} CellSpursJobChain __attribute__((aligned(CELL_SPURS_JOBCHAIN_ALIGN)));',
+         '} __attribute__((aligned(CELL_SPURS_JOBCHAIN_ALIGN))) CellSpursJobChain;',
+         'CellSpursJobChain size'),
+        ('flag-alignment', 'cell/spurs/workload.h',
+         '} __attribute__((aligned(16))) CellSpursWorkloadFlag;',
+         '} __attribute__((aligned(128))) CellSpursWorkloadFlag;',
+         'CellSpursWorkloadFlag alignment'),
+        ('flag-offset', 'cell/spurs/workload.h',
+         'unsigned char skip[12];', 'unsigned char skip[8];',
+         'CellSpursWorkloadFlag.flag offset'),
+    ]
+    fails = 0
+    for label, header, old, new, diagnostic in cases:
+        text = (inc / header).read_text(encoding='utf-8')
+        if text.count(old) != 1:
+            print(f'spurs-record-layout: FAIL cannot plant {label}')
+            fails += 1
+            continue
+        overlay = work / label
+        out = overlay / header
+        out.parent.mkdir(parents=True)
+        out.write_text(text.replace(old, new), encoding='utf-8')
+        for abi in ['ilp32', 'lp64']:
+            cmd = [str(cc), '-x', 'c', '-std=c11', '-Wall', '-Wextra',
+                   '-Werror', '-I' + str(overlay), '-I' + str(inc)]
+            if abi == 'lp64':
+                cmd.append('-mlp64')
+            cmd += ['-c', str(src), '-o', str(work / 'mutant.o')]
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    errors='replace', timeout=60)
+            (work / f'{label}-{abi}.log').write_text(
+                result.stdout + result.stderr, encoding='utf-8')
+            ok = result.returncode != 0 and diagnostic in result.stderr
+            print(f'spurs-record-layout: {"PASS" if ok else "FAIL"} mutant {label}-{abi}')
+            fails += not ok
+    return fails
 
 
 if __name__ == '__main__':
