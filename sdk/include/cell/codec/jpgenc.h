@@ -40,8 +40,8 @@ typedef struct { uint32_t width, height; CellJpgEncColorSpace colorSpace; void *
 typedef struct { uint32_t width, height, pitchWidth; CellJpgEncColorSpace colorSpace; void *pictureAddr ATTRIBUTE_PRXPTR; uint64_t userData; } CellJpgEncPicture2;
 typedef struct { uint32_t markerCode; uint8_t *markerSegmentData ATTRIBUTE_PRXPTR; uint32_t markerSegmentDataLength; } CellJpgEncMarkerSegment;
 typedef struct { bool enableSpu; uint32_t restartInterval; CellJpgEncDctMethod dctMethod; CellJpgEncCompressionMode compressionMode; uint32_t quality; CellJpgEncMarkerSegment *markerSegmentList ATTRIBUTE_PRXPTR; uint32_t markerSegmentNum; } CellJpgEncEncodeParam;
-typedef struct { CellJpgEncLocation location; const char *streamFileName; void *streamAddr ATTRIBUTE_PRXPTR; uint32_t limitSize; } CellJpgEncOutputParam;
-typedef struct { int32_t state; CellJpgEncLocation location; const char *streamFileName; void *streamAddr ATTRIBUTE_PRXPTR; uint32_t limitSize, streamSize; uint32_t processedLine, quality; uint64_t userData; } CellJpgEncStreamInfo;
+typedef struct { CellJpgEncLocation location; const char *streamFileName ATTRIBUTE_PRXPTR; void *streamAddr ATTRIBUTE_PRXPTR; uint32_t limitSize; } CellJpgEncOutputParam;
+typedef struct { int32_t state; CellJpgEncLocation location; const char *streamFileName ATTRIBUTE_PRXPTR; void *streamAddr ATTRIBUTE_PRXPTR; uint32_t limitSize, streamSize; uint32_t processedLine, quality; uint64_t userData; } CellJpgEncStreamInfo;
 int32_t cellJpgEncQueryAttr(const CellJpgEncConfig*,CellJpgEncAttr*);
 int32_t cellJpgEncOpen(const CellJpgEncConfig*,const CellJpgEncResource*,CellJpgEncHandle*);
 int32_t cellJpgEncOpenEx(const CellJpgEncConfig*,const CellJpgEncResourceEx*,CellJpgEncHandle*);

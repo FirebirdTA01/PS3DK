@@ -26,11 +26,11 @@ typedef enum { CELL_GIFDEC_FILE=0, CELL_GIFDEC_BUFFER=1 } CellGifDecStreamSrcSel
 typedef enum { CELL_GIFDEC_SPU_THREAD_DISABLE=0, CELL_GIFDEC_SPU_THREAD_ENABLE=1 } CellGifDecSpuThreadEna;
 typedef void* (*CellGifDecCbControlMalloc)(uint32_t,void*);
 typedef int32_t (*CellGifDecCbControlFree)(void*,void*);
-typedef struct { CellGifDecSpuThreadEna spuThreadEnable; uint32_t ppuThreadPriority, spuThreadPriority; CellGifDecCbControlMalloc cbCtrlMallocFunc ATTRIBUTE_PRXPTR; void *cbCtrlMallocArg; CellGifDecCbControlFree cbCtrlFreeFunc ATTRIBUTE_PRXPTR; void *cbCtrlFreeArg; } CellGifDecThreadInParam;
+typedef struct { CellGifDecSpuThreadEna spuThreadEnable; uint32_t ppuThreadPriority, spuThreadPriority; CellGifDecCbControlMalloc cbCtrlMallocFunc ATTRIBUTE_PRXPTR; void *cbCtrlMallocArg ATTRIBUTE_PRXPTR; CellGifDecCbControlFree cbCtrlFreeFunc ATTRIBUTE_PRXPTR; void *cbCtrlFreeArg ATTRIBUTE_PRXPTR; } CellGifDecThreadInParam;
 typedef struct { uint32_t gifCodecVersion; } CellGifDecThreadOutParam;
 typedef struct { CellSpurs *spurs ATTRIBUTE_PRXPTR; uint8_t priority[8]; uint32_t maxContention; } CellGifDecExtThreadInParam;
 typedef struct { uint32_t reserved; } CellGifDecExtThreadOutParam;
-typedef struct { CellGifDecStreamSrcSel srcSelect; const char *fileName; int64_t fileOffset; uint32_t fileSize; void *streamPtr ATTRIBUTE_PRXPTR; uint32_t streamSize; CellGifDecSpuThreadEna spuThreadEnable; } CellGifDecSrc;
+typedef struct { CellGifDecStreamSrcSel srcSelect; const char *fileName ATTRIBUTE_PRXPTR; int64_t fileOffset; uint32_t fileSize; void *streamPtr ATTRIBUTE_PRXPTR; uint32_t streamSize; CellGifDecSpuThreadEna spuThreadEnable; } CellGifDecSrc;
 typedef struct { uint32_t initSpaceAllocated; } CellGifDecOpnInfo;
 typedef struct { uint32_t SWidth,SHeight,SGlobalColorTableFlag,SColorResolution,SSortFlag,SSizeOfGlobalColorTable,SBackGroundColor,SPixelAspectRatio; } CellGifDecInfo;
 typedef enum { CELL_GIFDEC_CONTINUE=0, CELL_GIFDEC_STOP=1 } CellGifDecCommand;

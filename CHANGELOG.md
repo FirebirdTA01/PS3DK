@@ -53,6 +53,18 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **Codec gifdec, jpgenc, and pngenc record layouts.** In `<cell/codec/gifdec.h>`,
+  `CellGifDecThreadInParam` marks `cbCtrlMallocArg` and `cbCtrlFreeArg` with
+  `ATTRIBUTE_PRXPTR`, preserving 28-byte size and 4-byte alignment across both
+  ILP32 and LP64, and `CellGifDecSrc` marks `fileName` with `ATTRIBUTE_PRXPTR`,
+  preserving 32-byte size. In `<cell/codec/jpgenc.h>`, `CellJpgEncOutputParam`
+  and `CellJpgEncStreamInfo` mark `streamFileName` with `ATTRIBUTE_PRXPTR`,
+  preserving 16-byte and 40-byte sizes with matching field offsets under LP64.
+  In `<cell/codec/pngenc.h>`, `CellPngEncOutputParam` and `CellPngEncStreamInfo`
+  mark `streamFileName` with `ATTRIBUTE_PRXPTR`, preserving 16-byte and 40-byte
+  sizes and field offsets under LP64. Rebuild callers exchanging these records
+  with codec services.
+
 - **Network platform (NP) clans, commerce2, and matching2 record layouts.** In
   `<cell/np/clans.h>`, `SceNpClansUpdatableClanInfo`, `SceNpClansUpdatableMemberInfo`,
   and `SceNpClansMessageData` pass binary data buffers by 32-bit attributed pointer

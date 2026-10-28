@@ -41,8 +41,8 @@ typedef struct { void *memAddr ATTRIBUTE_PRXPTR; uint32_t memSize; int32_t ppuTh
 typedef struct { uint32_t width, height, pitchWidth; CellPngEncColorSpace colorSpace; uint32_t bitDepth; bool packedPixel; void *pictureAddr ATTRIBUTE_PRXPTR; uint64_t userData; } CellPngEncPicture;
 typedef struct { CellPngEncChunkType chunkType; void *chunkData ATTRIBUTE_PRXPTR; } CellPngEncAncillaryChunk;
 typedef struct { bool enableSpu; CellPngEncColorSpace encodeColorSpace; CellPngEncCompressionLevel compressionLevel; uint32_t filterType; CellPngEncAncillaryChunk *ancillaryChunkList ATTRIBUTE_PRXPTR; uint32_t ancillaryChunkNum; } CellPngEncEncodeParam;
-typedef struct { CellPngEncLocation location; const char *streamFileName; void *streamAddr ATTRIBUTE_PRXPTR; uint32_t limitSize; } CellPngEncOutputParam;
-typedef struct { int32_t state; CellPngEncLocation location; const char *streamFileName; void *streamAddr ATTRIBUTE_PRXPTR; uint32_t limitSize, streamSize; uint32_t processedLine; uint64_t userData; } CellPngEncStreamInfo;
+typedef struct { CellPngEncLocation location; const char *streamFileName ATTRIBUTE_PRXPTR; void *streamAddr ATTRIBUTE_PRXPTR; uint32_t limitSize; } CellPngEncOutputParam;
+typedef struct { int32_t state; CellPngEncLocation location; const char *streamFileName ATTRIBUTE_PRXPTR; void *streamAddr ATTRIBUTE_PRXPTR; uint32_t limitSize, streamSize; uint32_t processedLine; uint64_t userData; } CellPngEncStreamInfo;
 int32_t cellPngEncQueryAttr(const CellPngEncConfig*,CellPngEncAttr*);
 int32_t cellPngEncOpen(const CellPngEncConfig*,const CellPngEncResource*,CellPngEncHandle*);
 int32_t cellPngEncOpenEx(const CellPngEncConfig*,const CellPngEncResourceEx*,CellPngEncHandle*);
