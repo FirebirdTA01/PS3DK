@@ -35,6 +35,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cstdint>
+#include <new>
 
 #include <sys/process.h>
 #include <sys/spu_thread_group.h>
@@ -63,6 +65,19 @@ static const uint8_t s_priorityTable[8] = { 8, 8, 0, 0, 0, 0, 0, 0 };
 int main(void)
 {
     std::printf("hello-ppu-spurs-job-chain: bring-up\n");
+
+    static_assert(alignof(CellSpursJobChain) == 128, "job-chain alignment");
+    CellSpursJobChain *alignmentProbe = new (std::nothrow) CellSpursJobChain;
+    volatile std::uintptr_t allocatedAddress =
+        reinterpret_cast<std::uintptr_t>(alignmentProbe);
+    const bool aligned = alignmentProbe && allocatedAddress % 128 == 0;
+    std::printf("SPURS_JOBCHAIN_NEW size=%u align=%u address=%p %s\n",
+                (unsigned)sizeof(CellSpursJobChain),
+                (unsigned)alignof(CellSpursJobChain), (void *)alignmentProbe,
+                aligned ? "OK" : "FAIL");
+    delete alignmentProbe;
+    if (!aligned) return 1;
+
 
     int rc = spu_printf_initialize(kSpuPrintfPriority, 0);
     if (rc) { std::printf("  spu_printf_initialize: %#x\n", rc); return 1; }
