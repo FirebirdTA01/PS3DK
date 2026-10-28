@@ -329,6 +329,9 @@ jobs:
       - name: Test SDK record layouts against the current-layout baseline
         run: bash tests/sdk/struct-layout-test.sh
 
+      - name: Test NP clans, commerce2, and matching2 record layouts
+        run: bash tests/sdk/np-record-layout-test.sh
+
       - name: Test the cell/hash digests against hashlib
         run: bash tests/sdk/hash-vectors-test.sh
 
