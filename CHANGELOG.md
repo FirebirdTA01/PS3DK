@@ -38,6 +38,19 @@ The version stamped into builds is generated from the most recent
   `scripts/hooks/install-neutral-wording-hook.sh` installs the same check as a
   pre-push hook.
 
+### Changed
+
+- **GCM host buffers come from LV2 pages.** The samples (other than the
+  upstream PSL1GHT ports) and regression tests take the buffer they pass
+  to `cellGcmInit()` / `rsxInit()` from `gcm_host_buffer_alloc()`
+  (`samples/gcm/common/gcm_host_buffer.h`), which allocates 1 MiB LV2
+  pages and refuses sizes that are not a multiple of 1 MiB, instead of
+  `memalign()` from the malloc arena. Once GCM has mapped the buffer it
+  is kept for the life of the process: the samples no longer free it at
+  teardown, and neither does the FW framework's `destroy()`. The pages
+  still count against the process's total memory; the change frees
+  malloc arena space, not system memory.
+
 ### Fixed
 
 - **SPURS job-chain and workload-flag layouts.** `CellSpursJobChain` now

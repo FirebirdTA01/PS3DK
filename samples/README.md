@@ -123,9 +123,14 @@ Do not use `memalign(1 MiB, HOST_SIZE)`: the user sbrk arena is a fixed
 buffer from it costs the application that much heap. The 1 MiB LV2
 pages are 1 MiB aligned, and the helper refuses sizes that are not a
 multiple of 1 MiB. Once GCM has the buffer, keep it for the life of the
-program; the RSX maps it and may still fetch from it. The converted
-samples are `hello-ppu-rsx-clear`, `hello-ppu-cellgcm-clear` and
-`hello-ppu-cellgcm-chain`.
+program; the RSX maps it and may still fetch from it. The pages still
+count against the process's total memory; what the helper saves is
+malloc arena space, not system memory.
+
+Every sample and regression test that hands GCM a host buffer uses the
+helper, including the FW framework, whose `destroy()` no longer frees
+the mapped buffer. The upstream ports under `PSL1GHT/` keep their
+original allocation.
 
 [`hello-ppu-gcm-frame-pacing`](gcm/hello-ppu-gcm-frame-pacing/README.md)
 demonstrates VSYNC, HSYNC and application-paced VSYNC with three finite
