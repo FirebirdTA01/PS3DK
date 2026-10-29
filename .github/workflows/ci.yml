@@ -523,6 +523,9 @@ jobs:
       - name: Test small heap blocks preserve free-list links and payloads
         run: bash tests/host/heap-small-block-test.sh
 
+      - name: Test PSGL client scratch preserves queued draws
+        run: bash tests/host/psgl-client-scratch-test.sh
+
       # Positive/negative fixture test for TOC mid-entry relocation audit tool.
       - name: Test the TOC mid-entry relocation audit tool
         run: bash tests/host/toc-midentry-audit-test.sh

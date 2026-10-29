@@ -16,6 +16,13 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- **PSGL client-array scratch lifetime.** Wait for queued GPU reads before
+  wrapping or growing client-array upload storage, and unmap replaced storage
+  before freeing it. A completion timeout or unmap failure retains the old
+  storage, reports `GL_OUT_OF_MEMORY`, and skips the draw.
+
 ## [v0.27.0] — 2026-10-29
 
 ### Added

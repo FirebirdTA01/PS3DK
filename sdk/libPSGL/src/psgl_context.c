@@ -2219,6 +2219,10 @@ static int psgl_alloc_client_array_scratch(uint32_t size, uint8_t **address,
     void *scratch;
     uint32_t scratch_offset = 0u;
     if (!address || !offset || size == 0u) return 0;
+    if (size > UINT32_MAX - PSGL_CLIENT_ARRAY_ALIGNMENT) {
+        psgl_gl_error(GL_OUT_OF_MEMORY);
+        return 0;
+    }
     size = psgl_align_u32(size, PSGL_BUFFER_ALIGNMENT);
     if (size < PSGL_CLIENT_ARRAY_SCRATCH_SIZE)
         allocation_size = PSGL_CLIENT_ARRAY_SCRATCH_SIZE;
@@ -2229,16 +2233,32 @@ static int psgl_alloc_client_array_scratch(uint32_t size, uint8_t **address,
     if (!g_psgl_client_array_scratch ||
         g_psgl_client_array_scratch_size < allocation_size) {
         gcmContextData *ctx = CELL_GCM_CURRENT;
+        if (g_psgl_client_array_scratch) {
+            /* Queued draws retain this allocation until the fresh completion
+               token passes. A failed wait or unmap leaves all old state live. */
+            if (!psgl_context_wait_idle_bounded(ctx, "client array scratch growth") ||
+                cellGcmUnmapEaIoAddress(g_psgl_client_array_scratch) != 0) {
+                psgl_gl_error(GL_OUT_OF_MEMORY);
+                return 0;
+            }
+            free(g_psgl_client_array_scratch);
+            g_psgl_client_array_scratch = NULL;
+            g_psgl_client_array_scratch_offset = 0u;
+            g_psgl_client_array_scratch_size = 0u;
+            g_psgl_client_array_scratch_cursor = 0u;
+        }
         scratch = memalign(PSGL_CLIENT_ARRAY_ALIGNMENT, allocation_size);
-        if (!scratch) return 0;
+        if (!scratch) {
+            psgl_gl_error(GL_OUT_OF_MEMORY);
+            return 0;
+        }
         psgl_zero(scratch, allocation_size);
         if (cellGcmMapMainMemory(scratch, allocation_size,
                                  &scratch_offset) != 0) {
             free(scratch);
+            psgl_gl_error(GL_OUT_OF_MEMORY);
             return 0;
         }
-        if (g_psgl_client_array_scratch)
-            free(g_psgl_client_array_scratch);
         g_psgl_client_array_scratch = scratch;
         g_psgl_client_array_scratch_offset = scratch_offset;
         g_psgl_client_array_scratch_size = allocation_size;
@@ -2252,11 +2272,11 @@ static int psgl_alloc_client_array_scratch(uint32_t size, uint8_t **address,
     g_psgl_client_array_scratch_cursor =
         psgl_align_u32(g_psgl_client_array_scratch_cursor,
                        PSGL_BUFFER_ALIGNMENT);
-    if (g_psgl_client_array_scratch_cursor + size >
-        g_psgl_client_array_scratch_size) {
-        /* This lightweight ring deliberately has no GPU-consumption fence.
-           It is safe while a frame's client-array uploads fit before wrap
-           (CreateDevice), but heavy client-array use needs a synced ring. */
+    if (size > g_psgl_client_array_scratch_size - g_psgl_client_array_scratch_cursor) {
+        if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT, "client array scratch wrap")) {
+            psgl_gl_error(GL_OUT_OF_MEMORY);
+            return 0;
+        }
         g_psgl_client_array_scratch_cursor = 0u;
     }
     *address = (uint8_t *)g_psgl_client_array_scratch +
