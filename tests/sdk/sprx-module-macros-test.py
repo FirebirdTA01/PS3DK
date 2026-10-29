@@ -4,7 +4,9 @@
 Validates that:
 1. samples/sprx/module-export builds cleanly in both ILP32 and LP64 ABIs.
 2. Build outputs land exclusively under the binary build directory, leaving
-   samples/ completely clean (no source pollution, validating t_e8740370).
+   samples/ completely clean (no source pollution, validated via full
+   filesystem snapshot including ignored files, with deliberate leak RED
+   and clean GREEN controls).
 3. prx-gen check passes for both ILP32 and LP64 modules.
 4. prx-gen exports matches exports.yml.
 5. .ps3dk.module_identity section contains the exact PMI\\1 record and
@@ -15,6 +17,7 @@ Validates that:
 """
 
 import argparse
+import hashlib
 import os
 import shutil
 import struct
@@ -67,6 +70,28 @@ def find_objdump(ps3dev: Path):
     if cand:
         return Path(cand)
     return None
+
+
+def snapshot_directory(directory: Path):
+    """Recursively records all files in directory including ignored files.
+
+    Returns dict mapping relative posix path to (size, sha256_hex).
+    """
+    snapshot = {}
+    for entry in sorted(directory.rglob("*")):
+        if entry.is_file():
+            rel = entry.relative_to(directory).as_posix()
+            data = entry.read_bytes()
+            h = hashlib.sha256(data).hexdigest()
+            snapshot[rel] = (len(data), h)
+    return snapshot
+
+
+def diff_snapshots(before, after):
+    added = set(after.keys()) - set(before.keys())
+    removed = set(before.keys()) - set(after.keys())
+    modified = [p for p in (set(before.keys()) & set(after.keys())) if before[p] != after[p]]
+    return added, removed, modified
 
 
 def verify_stub_archive(objdump: Path, archive_path: Path, expected_abi: str):
@@ -144,6 +169,28 @@ def main():
     if not sample_src.is_dir():
         print(f"FAIL: sample directory {sample_src} not found")
         return 1
+
+    # Record baseline filesystem snapshot of sample directory before any builds
+    before_snap = snapshot_directory(sample_src)
+
+    # Deliberate leak RED/GREEN control to verify that snapshot detects ignored files
+    leak_file = sample_src / "leak_test.fake.sprx"
+    try:
+        leak_file.write_bytes(b"DELIBERATE_LEAK_TEST_PAYLOAD")
+        red_snap = snapshot_directory(sample_src)
+        added, _, _ = diff_snapshots(before_snap, red_snap)
+        if leak_file.name not in added:
+            print("FAIL: cleanliness gate RED control failed: leak_test.fake.sprx was not detected")
+            return 1
+    finally:
+        if leak_file.is_file():
+            leak_file.unlink()
+
+    green_snap = snapshot_directory(sample_src)
+    if green_snap != before_snap:
+        print("FAIL: cleanliness gate GREEN control failed after removing leak file")
+        return 1
+    print("PASS: cleanliness gate RED and GREEN controls verified")
 
     ilp32_tc = root / "cmake/ps3-ppu-toolchain.cmake"
     lp64_tc = root / "cmake/ps3-ppu-toolchain-lp64.cmake"
@@ -292,19 +339,31 @@ ps3_prx_stub_library(stub_override_ilp32
             return 1
         print("PASS: explicit ABI ilp32 override under LP64 toolchain generated ILP32 stubs")
 
-    # Assert that samples/ has no build output files
-    res = subprocess.run(["git", "status", "--porcelain", "samples/"], cwd=str(root), capture_output=True, text=True)
-    for line in res.stdout.splitlines():
-        path = line[3:].strip()
-        if path == "samples/sprx/" or path.startswith("samples/sprx/"):
-            if any(path.endswith(ext) for ext in [".prx", ".sprx", ".self", ".o", ".a", ".stamp"]):
-                print(f"FAIL: build output leaked into source tree: {path}")
-                return 1
-            continue
-        print(f"FAIL: unexpected status in samples/: {line}")
+    # Assert that samples/ has no build output files via full filesystem snapshot
+    after_snap = snapshot_directory(sample_src)
+    added, removed, modified = diff_snapshots(before_snap, after_snap)
+    if added or removed or modified:
+        print("FAIL: samples/sprx/module-export source tree was polluted by build outputs:")
+        if added:
+            print(f"  Added files: {sorted(added)}")
+        if removed:
+            print(f"  Removed files: {sorted(removed)}")
+        if modified:
+            print(f"  Modified files: {sorted(modified)}")
         return 1
 
-    print("PASS: samples/ source tree remained completely clean")
+    # Also assert that git status confirms no unstaged or ignored additions
+    res = subprocess.run(
+        ["git", "status", "--porcelain", "--ignored", str(sample_src)],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+    )
+    if res.stdout.strip():
+        print(f"FAIL: unexpected git status in samples/sprx/module-export:\n{res.stdout}")
+        return 1
+
+    print("PASS: samples/ source tree remained completely clean (verified by filesystem snapshot and git status)")
     return 0
 
 
