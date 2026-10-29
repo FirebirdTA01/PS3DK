@@ -216,14 +216,14 @@ The version stamped into builds is generated from the most recent
 
 ### Known issues
 
-- **LP64 RSX memory heap corrupts itself on small blocks.** In LP64
-  (`-mlp64`) programs, the heap behind `rsxMalloc`, `rsxMemalign`, `rsxFree`
-  and `<sys/heap.h>` gives a small allocation (8 bytes is enough) a block too
-  small for its own bookkeeping, so freeing it can corrupt a neighbouring
-  block and crash later. `libPSGL` hits this when `glBufferData` replaces a
-  small buffer's storage. ILP32 programs are not affected: there the smallest
-  block holds its bookkeeping. v0.26.153 has the same fault; the fix will ship
-  in a later release.
+- **LP64 RSX memory heap corrupts itself on small blocks.** In LP64 (`-mlp64`)
+  programs, the heap behind `rsxMalloc`, `rsxMemalign`, `rsxFree` and
+  `<sys/heap.h>` gives a small allocation (8 bytes is enough) a block too
+  small for its own bookkeeping, so freeing it can corrupt the heap
+  bookkeeping and crash later. `libPSGL` hits this when `glBufferData`
+  replaces a small buffer's storage. ILP32 programs are not affected: there
+  the smallest block holds its bookkeeping. v0.26.153 has the same fault; the
+  fix will ship in a later release.
 
 ## [v0.26.153] — 2026-10-28
 
