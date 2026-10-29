@@ -285,6 +285,9 @@ jobs:
       - name: Test sample-linked artifact requirements
         run: bash tests/sdk/required-artifacts-test.sh
 
+      - name: Test Eye sample integer conversion and capture lifecycle
+        run: bash tests/host/eye-camera-test.sh
+
       # sys_lwmutex and sys_lwcond in <sys/synchronization.h> must declare
       # canonical attributes, structures, and function prototypes.
       - name: Test lightweight mutex and condition variable synchronization

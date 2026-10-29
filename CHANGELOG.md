@@ -47,6 +47,14 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **PS Eye capture and display sample.** `hello-ppu-camera` now requests
+  640x480 YUV422 at 30fps, converts pixels with integer byte accesses, and
+  displays up to 120 fresh frames with bounded waits and explicit cleanup.
+  Host tests cover conversion and lifecycle failures; both PPU ABIs build.
+  RPCS3 Fake at `54014a7d` delivers no pixels to this read path, so emulator
+  camera runs establish only refusal and cleanup, with separate synthetic
+  display controls. Capture verification requires PS3 + Eye hardware and
+  remains unproven pending that session.
 - **GCM host buffers come from LV2 pages.** The samples (other than the
   upstream PSL1GHT ports) and regression tests take the buffer they pass
   to `cellGcmInit()` / `rsxInit()` from `gcm_host_buffer_alloc()`

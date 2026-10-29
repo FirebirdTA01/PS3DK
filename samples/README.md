@@ -132,6 +132,12 @@ helper, including the FW framework, whose `destroy()` no longer frees
 the mapped buffer. The upstream ports under `PSL1GHT/` keep their
 original allocation.
 
+[`hello-ppu-camera`](vision/hello-ppu-camera/README.md) captures 120 Eye
+frames at VGA/30fps in packed YUV422, converts them on the PPU using integer
+byte accesses, and presents a centered image through GCM. Its bounded run
+reports capture and cleanup errors. RPCS3's Fake camera may supply no image
+bytes; PS3/Eye capture validation requires a separate hardware observation.
+
 [`hello-ppu-gcm-frame-pacing`](gcm/hello-ppu-gcm-frame-pacing/README.md)
 demonstrates VSYNC, HSYNC and application-paced VSYNC with three finite
 120-frame phases. Its text summaries report flip callbacks and interval
