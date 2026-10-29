@@ -28,6 +28,10 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **LP64 JPEG and PNG decoder stream and display-info records.** The JPEG and
+  PNG decoder stream-parameter and display-info records keep their 32-bit
+  pointer layout in LP64 programs, matching what the decoder modules read.
+
 - **Scalar cube textures in PSGL.** Fragment `samplerCUBE` selections route
   independently of 2D bindings; draws reject active 2D/cube samplers sharing
   a unit, including array elements. The initial subset is level-zero,

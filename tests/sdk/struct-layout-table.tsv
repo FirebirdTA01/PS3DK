@@ -109,6 +109,7 @@ ilp32	cell/codec/jpgdec.h	CellJpgDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtr
 ilp32	cell/codec/jpgdec.h	CellJpgDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 ilp32	cell/codec/jpgdec.h	CellJpgDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 ilp32	cell/codec/jpgdec.h	CellJpgDecDataOutInfo	struct	12	4	mean@0 outputLines@4 status@8
+ilp32	cell/codec/jpgdec.h	CellJpgDecDispInfo	struct	56	8	outputFrameWidthByte@0 outputFrameHeight@8 outputStartXByte@16 outputStartY@24 outputWidthByte@32 outputHeight@40 outputComponents@44 outputImage@48
 ilp32	cell/codec/jpgdec.h	CellJpgDecDispParam	struct	4	4	nextOutputImage@0
 ilp32	cell/codec/jpgdec.h	CellJpgDecExtInParam	struct	16	4	coefBufferPtr@0 bufferMode@4 outputCounts@8 spuMode@12
 ilp32	cell/codec/jpgdec.h	CellJpgDecExtInfo	struct	16	8	coefBufferSize@0 mcuWidth@8
@@ -120,12 +121,14 @@ ilp32	cell/codec/jpgdec.h	CellJpgDecInfo	struct	16	4	imageWidth@0 imageHeight@4 
 ilp32	cell/codec/jpgdec.h	CellJpgDecOpnInfo	struct	4	4	initSpaceAllocated@0
 ilp32	cell/codec/jpgdec.h	CellJpgDecOutParam	struct	40	8	outputWidthByte@0 outputWidth@8 outputHeight@12 outputComponents@16 outputMode@20 outputColorSpace@24 downScale@28 useMemorySpace@32
 ilp32	cell/codec/jpgdec.h	CellJpgDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
+ilp32	cell/codec/jpgdec.h	CellJpgDecStrmParam	struct	8	4	strmPtr@0 strmSize@4
 ilp32	cell/codec/jpgdec.h	CellJpgDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 ilp32	cell/codec/jpgdec.h	CellJpgDecThreadOutParam	struct	4	4	jpegCodecVersion@0
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtrlDispArg@4
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecDataOutInfo	struct	12	4	mean@0 outputLines@4 status@8
+ilp32	cell/codec/jpgdec.h	struct CellJpgDecDispInfo	struct	56	8	outputFrameWidthByte@0 outputFrameHeight@8 outputStartXByte@16 outputStartY@24 outputWidthByte@32 outputHeight@40 outputComponents@44 outputImage@48
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecDispParam	struct	4	4	nextOutputImage@0
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecExtInParam	struct	16	4	coefBufferPtr@0 bufferMode@4 outputCounts@8 spuMode@12
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecExtInfo	struct	16	8	coefBufferSize@0 mcuWidth@8
@@ -137,6 +140,7 @@ ilp32	cell/codec/jpgdec.h	struct CellJpgDecInfo	struct	16	4	imageWidth@0 imageHe
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecOpnInfo	struct	4	4	initSpaceAllocated@0
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecOutParam	struct	40	8	outputWidthByte@0 outputWidth@8 outputHeight@12 outputComponents@16 outputMode@20 outputColorSpace@24 downScale@28 useMemorySpace@32
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
+ilp32	cell/codec/jpgdec.h	struct CellJpgDecStrmParam	struct	8	4	strmPtr@0 strmSize@4
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 ilp32	cell/codec/jpgdec.h	struct CellJpgDecThreadOutParam	struct	4	4	jpegCodecVersion@0
 ilp32	cell/codec/jpgenc.h	CellJpgEncAttr	struct	16	4	memSize@0 cmdQueueDepth@4 versionUpper@8 versionLower@12
@@ -159,6 +163,7 @@ ilp32	cell/codec/pngdec.h	CellPngDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtr
 ilp32	cell/codec/pngdec.h	CellPngDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 ilp32	cell/codec/pngdec.h	CellPngDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 ilp32	cell/codec/pngdec.h	CellPngDecDataOutInfo	struct	16	4	chunkInformation@0 numText@4 numUnknownChunk@8 status@12
+ilp32	cell/codec/pngdec.h	CellPngDecDispInfo	struct	64	8	outputFrameWidthByte@0 outputFrameHeight@8 outputStartXByte@16 outputStartY@24 outputWidthByte@32 outputHeight@40 outputBitDepth@44 outputComponents@48 nextOutputStartY@52 scanPassCount@56 outputImage@60
 ilp32	cell/codec/pngdec.h	CellPngDecDispParam	struct	4	4	nextOutputImage@0
 ilp32	cell/codec/pngdec.h	CellPngDecExtInParam	struct	12	4	bufferMode@0 outputCounts@4 spuMode@8
 ilp32	cell/codec/pngdec.h	CellPngDecExtInfo	struct	8	8	reserved@0
@@ -171,12 +176,14 @@ ilp32	cell/codec/pngdec.h	CellPngDecOpnInfo	struct	4	4	initSpaceAllocated@0
 ilp32	cell/codec/pngdec.h	CellPngDecOpnParam	struct	4	4	selectChunk@0
 ilp32	cell/codec/pngdec.h	CellPngDecOutParam	struct	40	8	outputWidthByte@0 outputWidth@8 outputHeight@12 outputComponents@16 outputBitDepth@20 outputMode@24 outputColorSpace@28 useMemorySpace@32
 ilp32	cell/codec/pngdec.h	CellPngDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
+ilp32	cell/codec/pngdec.h	CellPngDecStrmParam	struct	8	4	strmPtr@0 strmSize@4
 ilp32	cell/codec/pngdec.h	CellPngDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 ilp32	cell/codec/pngdec.h	CellPngDecThreadOutParam	struct	4	4	pngCodecVersion@0
 ilp32	cell/codec/pngdec.h	struct CellPngDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtrlDispArg@4
 ilp32	cell/codec/pngdec.h	struct CellPngDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 ilp32	cell/codec/pngdec.h	struct CellPngDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 ilp32	cell/codec/pngdec.h	struct CellPngDecDataOutInfo	struct	16	4	chunkInformation@0 numText@4 numUnknownChunk@8 status@12
+ilp32	cell/codec/pngdec.h	struct CellPngDecDispInfo	struct	64	8	outputFrameWidthByte@0 outputFrameHeight@8 outputStartXByte@16 outputStartY@24 outputWidthByte@32 outputHeight@40 outputBitDepth@44 outputComponents@48 nextOutputStartY@52 scanPassCount@56 outputImage@60
 ilp32	cell/codec/pngdec.h	struct CellPngDecDispParam	struct	4	4	nextOutputImage@0
 ilp32	cell/codec/pngdec.h	struct CellPngDecExtInParam	struct	12	4	bufferMode@0 outputCounts@4 spuMode@8
 ilp32	cell/codec/pngdec.h	struct CellPngDecExtInfo	struct	8	8	reserved@0
@@ -189,6 +196,7 @@ ilp32	cell/codec/pngdec.h	struct CellPngDecOpnInfo	struct	4	4	initSpaceAllocated
 ilp32	cell/codec/pngdec.h	struct CellPngDecOpnParam	struct	4	4	selectChunk@0
 ilp32	cell/codec/pngdec.h	struct CellPngDecOutParam	struct	40	8	outputWidthByte@0 outputWidth@8 outputHeight@12 outputComponents@16 outputBitDepth@20 outputMode@24 outputColorSpace@28 useMemorySpace@32
 ilp32	cell/codec/pngdec.h	struct CellPngDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
+ilp32	cell/codec/pngdec.h	struct CellPngDecStrmParam	struct	8	4	strmPtr@0 strmSize@4
 ilp32	cell/codec/pngdec.h	struct CellPngDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 ilp32	cell/codec/pngdec.h	struct CellPngDecThreadOutParam	struct	4	4	pngCodecVersion@0
 ilp32	cell/codec/pngenc.h	CellPngEncAttr	struct	16	4	memSize@0 cmdQueueDepth@4 versionUpper@8 versionLower@12
@@ -1031,6 +1039,7 @@ lp64	cell/codec/jpgdec.h	CellJpgDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtrl
 lp64	cell/codec/jpgdec.h	CellJpgDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 lp64	cell/codec/jpgdec.h	CellJpgDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 lp64	cell/codec/jpgdec.h	CellJpgDecDataOutInfo	struct	12	4	mean@0 outputLines@4 status@8
+lp64	cell/codec/jpgdec.h	CellJpgDecDispInfo	struct	56	8	outputFrameWidthByte@0 outputFrameHeight@8 outputStartXByte@16 outputStartY@24 outputWidthByte@32 outputHeight@40 outputComponents@44 outputImage@48
 lp64	cell/codec/jpgdec.h	CellJpgDecDispParam	struct	4	4	nextOutputImage@0
 lp64	cell/codec/jpgdec.h	CellJpgDecExtInParam	struct	16	4	coefBufferPtr@0 bufferMode@4 outputCounts@8 spuMode@12
 lp64	cell/codec/jpgdec.h	CellJpgDecExtInfo	struct	16	8	coefBufferSize@0 mcuWidth@8
@@ -1042,12 +1051,14 @@ lp64	cell/codec/jpgdec.h	CellJpgDecInfo	struct	16	4	imageWidth@0 imageHeight@4 n
 lp64	cell/codec/jpgdec.h	CellJpgDecOpnInfo	struct	4	4	initSpaceAllocated@0
 lp64	cell/codec/jpgdec.h	CellJpgDecOutParam	struct	40	8	outputWidthByte@0 outputWidth@8 outputHeight@12 outputComponents@16 outputMode@20 outputColorSpace@24 downScale@28 useMemorySpace@32
 lp64	cell/codec/jpgdec.h	CellJpgDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
+lp64	cell/codec/jpgdec.h	CellJpgDecStrmParam	struct	8	4	strmPtr@0 strmSize@4
 lp64	cell/codec/jpgdec.h	CellJpgDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 lp64	cell/codec/jpgdec.h	CellJpgDecThreadOutParam	struct	4	4	jpegCodecVersion@0
 lp64	cell/codec/jpgdec.h	struct CellJpgDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtrlDispArg@4
 lp64	cell/codec/jpgdec.h	struct CellJpgDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 lp64	cell/codec/jpgdec.h	struct CellJpgDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 lp64	cell/codec/jpgdec.h	struct CellJpgDecDataOutInfo	struct	12	4	mean@0 outputLines@4 status@8
+lp64	cell/codec/jpgdec.h	struct CellJpgDecDispInfo	struct	56	8	outputFrameWidthByte@0 outputFrameHeight@8 outputStartXByte@16 outputStartY@24 outputWidthByte@32 outputHeight@40 outputComponents@44 outputImage@48
 lp64	cell/codec/jpgdec.h	struct CellJpgDecDispParam	struct	4	4	nextOutputImage@0
 lp64	cell/codec/jpgdec.h	struct CellJpgDecExtInParam	struct	16	4	coefBufferPtr@0 bufferMode@4 outputCounts@8 spuMode@12
 lp64	cell/codec/jpgdec.h	struct CellJpgDecExtInfo	struct	16	8	coefBufferSize@0 mcuWidth@8
@@ -1059,6 +1070,7 @@ lp64	cell/codec/jpgdec.h	struct CellJpgDecInfo	struct	16	4	imageWidth@0 imageHei
 lp64	cell/codec/jpgdec.h	struct CellJpgDecOpnInfo	struct	4	4	initSpaceAllocated@0
 lp64	cell/codec/jpgdec.h	struct CellJpgDecOutParam	struct	40	8	outputWidthByte@0 outputWidth@8 outputHeight@12 outputComponents@16 outputMode@20 outputColorSpace@24 downScale@28 useMemorySpace@32
 lp64	cell/codec/jpgdec.h	struct CellJpgDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
+lp64	cell/codec/jpgdec.h	struct CellJpgDecStrmParam	struct	8	4	strmPtr@0 strmSize@4
 lp64	cell/codec/jpgdec.h	struct CellJpgDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 lp64	cell/codec/jpgdec.h	struct CellJpgDecThreadOutParam	struct	4	4	jpegCodecVersion@0
 lp64	cell/codec/jpgenc.h	CellJpgEncAttr	struct	16	4	memSize@0 cmdQueueDepth@4 versionUpper@8 versionLower@12
@@ -1081,6 +1093,7 @@ lp64	cell/codec/pngdec.h	CellPngDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtrl
 lp64	cell/codec/pngdec.h	CellPngDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 lp64	cell/codec/pngdec.h	CellPngDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 lp64	cell/codec/pngdec.h	CellPngDecDataOutInfo	struct	16	4	chunkInformation@0 numText@4 numUnknownChunk@8 status@12
+lp64	cell/codec/pngdec.h	CellPngDecDispInfo	struct	64	8	outputFrameWidthByte@0 outputFrameHeight@8 outputStartXByte@16 outputStartY@24 outputWidthByte@32 outputHeight@40 outputBitDepth@44 outputComponents@48 nextOutputStartY@52 scanPassCount@56 outputImage@60
 lp64	cell/codec/pngdec.h	CellPngDecDispParam	struct	4	4	nextOutputImage@0
 lp64	cell/codec/pngdec.h	CellPngDecExtInParam	struct	12	4	bufferMode@0 outputCounts@4 spuMode@8
 lp64	cell/codec/pngdec.h	CellPngDecExtInfo	struct	8	8	reserved@0
@@ -1093,12 +1106,14 @@ lp64	cell/codec/pngdec.h	CellPngDecOpnInfo	struct	4	4	initSpaceAllocated@0
 lp64	cell/codec/pngdec.h	CellPngDecOpnParam	struct	4	4	selectChunk@0
 lp64	cell/codec/pngdec.h	CellPngDecOutParam	struct	40	8	outputWidthByte@0 outputWidth@8 outputHeight@12 outputComponents@16 outputBitDepth@20 outputMode@24 outputColorSpace@28 useMemorySpace@32
 lp64	cell/codec/pngdec.h	CellPngDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
+lp64	cell/codec/pngdec.h	CellPngDecStrmParam	struct	8	4	strmPtr@0 strmSize@4
 lp64	cell/codec/pngdec.h	CellPngDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 lp64	cell/codec/pngdec.h	CellPngDecThreadOutParam	struct	4	4	pngCodecVersion@0
 lp64	cell/codec/pngdec.h	struct CellPngDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtrlDispArg@4
 lp64	cell/codec/pngdec.h	struct CellPngDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 lp64	cell/codec/pngdec.h	struct CellPngDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 lp64	cell/codec/pngdec.h	struct CellPngDecDataOutInfo	struct	16	4	chunkInformation@0 numText@4 numUnknownChunk@8 status@12
+lp64	cell/codec/pngdec.h	struct CellPngDecDispInfo	struct	64	8	outputFrameWidthByte@0 outputFrameHeight@8 outputStartXByte@16 outputStartY@24 outputWidthByte@32 outputHeight@40 outputBitDepth@44 outputComponents@48 nextOutputStartY@52 scanPassCount@56 outputImage@60
 lp64	cell/codec/pngdec.h	struct CellPngDecDispParam	struct	4	4	nextOutputImage@0
 lp64	cell/codec/pngdec.h	struct CellPngDecExtInParam	struct	12	4	bufferMode@0 outputCounts@4 spuMode@8
 lp64	cell/codec/pngdec.h	struct CellPngDecExtInfo	struct	8	8	reserved@0
@@ -1111,6 +1126,7 @@ lp64	cell/codec/pngdec.h	struct CellPngDecOpnInfo	struct	4	4	initSpaceAllocated@
 lp64	cell/codec/pngdec.h	struct CellPngDecOpnParam	struct	4	4	selectChunk@0
 lp64	cell/codec/pngdec.h	struct CellPngDecOutParam	struct	40	8	outputWidthByte@0 outputWidth@8 outputHeight@12 outputComponents@16 outputBitDepth@20 outputMode@24 outputColorSpace@28 useMemorySpace@32
 lp64	cell/codec/pngdec.h	struct CellPngDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
+lp64	cell/codec/pngdec.h	struct CellPngDecStrmParam	struct	8	4	strmPtr@0 strmSize@4
 lp64	cell/codec/pngdec.h	struct CellPngDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 lp64	cell/codec/pngdec.h	struct CellPngDecThreadOutParam	struct	4	4	pngCodecVersion@0
 lp64	cell/codec/pngenc.h	CellPngEncAttr	struct	16	4	memSize@0 cmdQueueDepth@4 versionUpper@8 versionLower@12

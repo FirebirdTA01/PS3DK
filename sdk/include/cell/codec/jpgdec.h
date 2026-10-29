@@ -264,7 +264,7 @@ typedef struct CellJpgDecExtOutParam {
 } CellJpgDecExtOutParam;
 
 typedef struct CellJpgDecStrmInfo  { uint32_t decodedStrmSize; } CellJpgDecStrmInfo;
-typedef struct CellJpgDecStrmParam { void *strmPtr; uint32_t strmSize; } CellJpgDecStrmParam;
+typedef struct CellJpgDecStrmParam { void *strmPtr ATTRIBUTE_PRXPTR; uint32_t strmSize; } CellJpgDecStrmParam;
 
 typedef struct CellJpgDecDispInfo {
     uint64_t outputFrameWidthByte;
@@ -274,7 +274,7 @@ typedef struct CellJpgDecDispInfo {
     uint64_t outputWidthByte;
     uint32_t outputHeight;
     uint32_t outputComponents;
-    void    *outputImage;
+    void    *outputImage ATTRIBUTE_PRXPTR;
 } CellJpgDecDispInfo;
 
 typedef struct CellJpgDecDispParam { void *nextOutputImage ATTRIBUTE_PRXPTR; } CellJpgDecDispParam;

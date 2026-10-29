@@ -241,7 +241,7 @@ typedef struct CellPngDecStrmInfo {
 } CellPngDecStrmInfo;
 
 typedef struct CellPngDecStrmParam {
-    void    *strmPtr;
+    void    *strmPtr ATTRIBUTE_PRXPTR;
     uint32_t strmSize;
 } CellPngDecStrmParam;
 
@@ -284,7 +284,7 @@ typedef struct CellPngDecDispInfo {
     uint32_t  outputComponents;
     uint32_t  nextOutputStartY;
     uint32_t  scanPassCount;
-    void     *outputImage;
+    void     *outputImage ATTRIBUTE_PRXPTR;
 } CellPngDecDispInfo;
 
 typedef struct CellPngDecDispParam {
