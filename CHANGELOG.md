@@ -13,6 +13,11 @@ The version stamped into builds is generated from the most recent
 
 ## [Unreleased]
 
+<!-- New entries go here while work is in progress; promote them to a
+     dated, version-tagged section at release time. -->
+
+## [v0.27.0] — 2026-10-29
+
 ### Added
 
 - **Bounded Eye microphone sample.** `samples/audio/hello-ppu-mic` now
@@ -57,6 +62,16 @@ The version stamped into builds is generated from the most recent
   and added lines of a push or pull request; CI runs it, and
   `scripts/hooks/install-neutral-wording-hook.sh` installs the same check as a
   pre-push hook.
+- **Linked TOC access checker.** `tools/toc-linked-check.py capture --out DIR
+  -- <link command>` runs a PPU link with a map and input trace and pins every
+  input by SHA-256; `check DIR/manifest.json` then proves that each TOC-relative
+  access the input objects describe still reaches the same `.toc` entry or
+  symbol in the linked ELF, taking the ground truth from the objects rather
+  than the output's relocations. It reports verified, failed and refused
+  counts and exits 0 only on PASS; code it cannot prove (unproven LR/CTR
+  transfers, unsupported relocation types, multiple TOCs) is refused, never
+  skipped. `tools/toc-midentry-audit.py` is the object-only companion: it scans
+  objects and archives for relocations that land inside a `.toc` entry.
 
 ### Changed
 
@@ -198,9 +213,6 @@ The version stamped into builds is generated from the most recent
   PPU data models. `CellSailStartCommand` now has its own fields rather than
   aliasing the distinct source-callback command. Rebuild code using these
   records; debug-font callers and `libdbgfont` must be rebuilt together.
-
-<!-- New entries go here while work is in progress; promote them to a
-     dated, version-tagged section at release time. -->
 
 ## [v0.26.153] — 2026-10-28
 
