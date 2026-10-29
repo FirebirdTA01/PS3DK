@@ -210,6 +210,11 @@ The `hello-event-flag-spu` sample additionally pulls in our
 
 cellAudio mixer + cellAudioOut configuration / discovery.
 
+[`hello-ppu-mic`](audio/hello-ppu-mic/README.md) captures bounded raw PCM
+with per-channel integer peak/RMS meters and ordered cleanup in both ABIs.
+Its default requires an Eye and exactly four channels at 48 kHz; generic USB
+capture is explicit. Eye array capture remains pending hardware validation.
+
 `hello-ppu-audio-multistream` uses three real stereo `cellAudio` ports for
 independent tones, per-port gain phases and a shader-free gain display.
 Its finite-run log checks submission and port progress; audible output is

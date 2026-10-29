@@ -294,6 +294,12 @@ jobs:
       - name: Test Move sample builds and imports in both ABIs
         run: bash tests/sdk/gem-basic-build-test.sh
 
+      - name: Test microphone PCM meters and capture lifecycle
+        run: bash tests/host/mic-capture-test.sh
+
+      - name: Test microphone sample builds and imports in both ABIs
+        run: bash tests/sdk/mic-capture-build-test.sh
+
       # sys_lwmutex and sys_lwcond in <sys/synchronization.h> must declare
       # canonical attributes, structures, and function prototypes.
       - name: Test lightweight mutex and condition variable synchronization

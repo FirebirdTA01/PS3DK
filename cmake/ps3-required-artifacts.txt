@@ -337,7 +337,7 @@ optional  ppu/lib/libcgbLevelC.a                 shipped-for-user-code
 optional  ppu/lib/libgem_stub.a                  shipped-for-user-code
 optional  ppu/lib/libmixer.a                     shipped-for-user-code
 optional  ppu/lib/libspumarsjq.a                 shipped-for-user-code
-optional  ppu/lib/libsysutil_avconf_ext_stub.a   shipped-for-user-code
+ppu_stub  ppu/lib/libsysutil_avconf_ext_stub.a
 optional  ppu/lib/libsysutil_bgdl_stub.a         shipped-for-user-code
 optional  ppu/lib/libsysutil_userinfo_stub.a     shipped-for-user-code
 optional  ppu/lib/libvdec_stub.a                 shipped-for-user-code

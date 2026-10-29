@@ -412,3 +412,6 @@ sample-trio-witness-cellfs-req0-timeout-lp64,tests/regression/sample-trio-witnes
 sample-trio-witness-cellfs-cancel-stuck-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-cancel-stuck-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-cancel-stuck\r?$,SAMPLE_WITNESS_FAIL
 sample-trio-witness-cellfs-close-fail-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-close-fail-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-close-fail\r?$,SAMPLE_WITNESS_FAIL
 sample-trio-witness-cellfs-finish-fail-lp64,tests/regression/sample-trio-witness/sample-trio-witness-cellfs-finish-fail-lp64.fake.self,30,RAN-CLEAN,(?m)^SAMPLE_WITNESS_OK case=cellfs-finish-fail\r?$,SAMPLE_WITNESS_FAIL
+# Microphone capture is opt-in: audio/hello-ppu-mic defaults to Eye 48kHz/4ch.
+# Null mic rows check refusal/cleanup only. A positive host-input row requires
+# an explicitly selected input and generic mode; Eye array proof needs hardware.

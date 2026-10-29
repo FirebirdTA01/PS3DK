@@ -15,6 +15,13 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **Bounded Eye microphone sample.** `samples/audio/hello-ppu-mic` now
+  requests four-channel raw PCM16 at 48 kHz, with integer channel meters,
+  deadlines and owned cleanup in both PPU ABIs. Generic USB input is an
+  explicit mode, with no automatic fallback. RPCS3 Null microphone rows
+  cover refusal/lifecycle only; actual Eye array capture and channel identity
+  are hardware-only checks, pending a hardware session.
+
 - **Camera-free Move input sample.** `samples/input/hello-ppu-gem-basic`
   reads buttons, trigger, accelerometer and gyro through `cell/gem.h`, with
   bounded rumble pulses, sphere colour controls and ordered GEM/SPURS cleanup
