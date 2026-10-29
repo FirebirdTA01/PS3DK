@@ -81,7 +81,7 @@ row() {  # name want(PASS|FAIL|KNOWN:count) driver abi objs ldflags...
         echo "toc-linked-check: FAIL $name: capture"; cat "$work/$name.capture"; fail=1; return
     fi
     "$py" "$checker" check "$(w "$work/$name/manifest.json")" --readelf "$(w "$readelf")" \
-        --report "$(w "$work/$name.json")" > "$work/$name.check" 2>&1
+        --report "$(w "$work/$name.json")" -v > "$work/$name.check" 2>&1
     local rc=$?
     local status; status="$(sed -n 's/^toc-linked-check: \(PASS\|FAIL\|INCOMPLETE\)$/\1/p' "$work/$name.check")"
     local counts; counts="$(awk '$1 ~ /^sites_(verified|failed|refused|discarded)$/ {printf "%s %s, ", substr($1, 7), $2}' "$work/$name.check")"
