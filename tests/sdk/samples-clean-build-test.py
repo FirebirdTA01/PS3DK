@@ -96,10 +96,13 @@ def run(args, out):
     if not cc.is_file():
         raise RuntimeError(f'configured SDK has no compiler: {cc}')
     repo = Path(__file__).resolve().parents[2]
-    env = dict(os.environ, PS3DEV=str(dev), PS3DK=str(sdk))
+    env = dict(os.environ, PS3DEV=str(dev), PS3DK=str(sdk), MSBUILDDISABLENODEREUSE='1')
+    ninja = shutil.which('ninja')
+    if not ninja:
+        raise RuntimeError('Ninja is required; add ninja to PATH')
     before = snapshot(repo / 'samples')
     save(out / 'before.json', before)
-    generator = ['-G', 'Ninja'] if shutil.which('ninja') else []
+    generator = ['-G', 'Ninja', '-DCMAKE_MAKE_PROGRAM=' + Path(ninja).as_posix()]
     builds = []
     try:
         for sample in ('sysutil/hello-ppu-png', 'vision/hello-ppu-camera'):

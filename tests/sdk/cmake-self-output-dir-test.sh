@@ -14,6 +14,8 @@
 #   5. Relative directory override: OUTPUT_DIRECTORY <rel> resolves against
 #      CMAKE_CURRENT_BINARY_DIR, landing artifacts under build and leaving source clean.
 set -euo pipefail
+# Keep Windows test runs from leaving reusable build workers behind.
+export MSBUILDDISABLENODEREUSE=1
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 ps3_self_cmake="${1:-${PS3_SELF_CMAKE_FILE:-$repo_root/cmake/ps3-self.cmake}}"
@@ -34,6 +36,9 @@ to_cmake_path() {
         printf '%s' "$1"
     fi
 }
+
+ninja=$(command -v ninja) || fail "Ninja is required; add ninja to PATH"
+cmake_ninja="$(to_cmake_path "$ninja")"
 
 if [ -n "${PS3_OUTPUT_TEST_DIR:-}" ]; then
     tmp="$PS3_OUTPUT_TEST_DIR"
@@ -291,7 +296,8 @@ else()
 endif()
 EOF
 
-    if ! cmake -S "$sample_dir" -B "$bld_dir" \
+    if ! cmake -G Ninja -S "$sample_dir" -B "$bld_dir" \
+        -DCMAKE_MAKE_PROGRAM="$cmake_ninja" \
         -DTEST_CASE="$mode" \
         -DPS3DEV="$cmake_mock_ps3dev" \
         -DPS3DK="$cmake_mock_ps3dev" > "$bld_dir/configure.log" 2>&1; then
