@@ -103,7 +103,7 @@ The version stamped into builds is generated from the most recent
   `<sys/event.h>`.
 
 - **GIF, JPEG and PNG decoder callback, display and input parameter records.** The
-  records named on card `t_849c499c` in `<cell/codec/gifdec.h>`,
+  callback, display and input parameter records in `<cell/codec/gifdec.h>`,
   `<cell/codec/jpgdec.h>` and `<cell/codec/pngdec.h>` mark their data and
   function-pointer members with `ATTRIBUTE_PRXPTR`, so they keep their 32-bit
   pointer layout in LP64 programs, matching what the decoder modules read.
