@@ -15,6 +15,12 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **Camera-free Move input sample.** `samples/input/hello-ppu-gem-basic`
+  reads buttons, trigger, accelerometer and gyro through `cell/gem.h`, with
+  bounded rumble pulses, sphere colour controls and ordered GEM/SPURS cleanup
+  in both PPU ABIs. RPCS3 checks cover API/input/lifecycle only. IMU values,
+  rumble and sphere colour are verified on hardware only; hardware validation
+  of this sample is pending.
 - **SPRX registration, GUID query, and version declarations.** `<sys/prx.h>`
   declares `sys_prx_register_module`, `sys_prx_get_ppu_guid`, and
   `sys_prx_version`, along with `sys_prx_register_module_option_t`.

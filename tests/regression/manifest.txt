@@ -1,4 +1,9 @@
 name,relative_self,timeout_seconds,expected_state,required_tty_regex,forbidden_tty_regex
+# Move H2 is opt-in: samples/input/hello-ppu-gem-basic requires a private
+# Fake player-7 mapping and separately approved Camera=Fake/Null rows.
+# See that sample's README; do not turn absent default Move input into a
+# passing sensor row. Bound each run to 60 s and require GEM_API_OK (or the
+# explicitly requested GEM_QUIT/GEM_REFUSED path), with cleanup checked.
 librt-posix,tests/regression/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,librt-posix: PASS,ENOSYS
 sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT_OK,PRX_FAIL
 sprx-module-macros,tests/regression/sprx-module-macros/sprx-module-macros.fake.self,30,RAN-CLEAN,PRX_MODULE_STOP_OK,PRX_FAIL

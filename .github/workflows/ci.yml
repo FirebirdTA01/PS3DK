@@ -288,6 +288,12 @@ jobs:
       - name: Test Eye sample integer conversion and capture lifecycle
         run: bash tests/host/eye-camera-test.sh
 
+      - name: Test Move sample input deadlines and cleanup
+        run: bash tests/host/gem-session-test.sh
+
+      - name: Test Move sample builds and imports in both ABIs
+        run: bash tests/sdk/gem-basic-build-test.sh
+
       # sys_lwmutex and sys_lwcond in <sys/synchronization.h> must declare
       # canonical attributes, structures, and function prototypes.
       - name: Test lightweight mutex and condition variable synchronization

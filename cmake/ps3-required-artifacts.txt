@@ -114,6 +114,7 @@ ppu_stub  ppu/lib/libatrac3plus_stub.a
 ppu_stub  ppu/lib/libaudio_stub.a
 ppu_stub  ppu/lib/libc_stub.a
 ppu_stub  ppu/lib/libcamera_stub.a
+ppu_stub  ppu/lib/libgem_stub.a
 ppu_stub  ppu/lib/libfontFT_stub.a
 ppu_stub  ppu/lib/libfont_stub.a
 ppu_stub  ppu/lib/libsysutil_game_stub.a

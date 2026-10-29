@@ -21,6 +21,14 @@ samples/
 └── spurs/         libspurs sync primitives + Spurs task runtime
 ```
 
+## input/
+
+`hello-ppu-gem-basic` reads Move buttons, trigger and inertial records without
+a camera. It includes bounded rumble, sphere colour controls and GEM/SPURS
+cleanup in both ABIs. See its [README](input/hello-ppu-gem-basic/README.md)
+for controls and opt-in runtime checks. Hardware IMU, rumble and sphere colour
+verification is pending; emulator checks cover API/input/lifecycle only.
+
 ## toolchain/
 
 Validate the toolchain, `libsysbase` lv2 glue, and .sys_proc_param ABI.
