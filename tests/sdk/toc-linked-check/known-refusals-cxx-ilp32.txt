@@ -1,8 +1,8 @@
 # Pinned result of one real-link row of tests/sdk/toc-linked-check-test.sh.
 # Written by known-refusals.py --regen; re-pin only after reviewing every
 # changed line.  Paths are cut to their file or archive member.
-verified 1499
-refused-sites 642
+verified 681
+refused-sites 1460
 failed-sites 0
 refused crtbegin.o .text.__do_global_dtors_aux+0x0: TOC16_HA has no paired access
 refused crtbegin.o .text.__do_global_dtors_aux+0x14: TOC16_HA has no paired access
@@ -36,6 +36,8 @@ refused crtend.o .text.__do_global_ctors_aux+0x0: TOC16_HA has no paired access
 refused crtend.o .text.__do_global_ctors_aux+0x10: computed call through CTR at +0x48 may enter any instruction of the section with r31 unknown
 refused crtend.o .text.__do_global_ctors_aux+0x14: computed call through CTR at +0x48 may enter any instruction of the section with r9 unknown
 refused crtend.o .text.__do_global_ctors_aux+0x8: TOC16_HA has no paired access
+refused ilp32-cxx.o .text._ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_dESt10_Select1stIS8_ESt4lessIS5_ESaIS8_EE22_M_emplace_hint_uniqueIJRKSt21piecewise_construct_tSt5tupleIJOS5_EESJ_IJEEEEESt17_Rb_tree_iteratorIS8_ESt23_Rb_tree_const_iteratorIS8_EDpOT_+0x98: TOC16_HA has no paired access
+refused ilp32-cxx.o .text._ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_dESt10_Select1stIS8_ESt4lessIS5_ESaIS8_EE22_M_emplace_hint_uniqueIJRKSt21piecewise_construct_tSt5tupleIJOS5_EESJ_IJEEEEESt17_Rb_tree_iteratorIS8_ESt23_Rb_tree_const_iteratorIS8_EDpOT_+0xb0: a store through r1 at +0xc4 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused ilp32-cxx.o .text.startup.main+0x104: computed call through CTR at +0x564 may enter any instruction of the section with r8 unknown
 refused ilp32-cxx.o .text.startup.main+0x128: TOC16_HA has no paired access
 refused ilp32-cxx.o .text.startup.main+0x12c: computed call through CTR at +0x564 may enter any instruction of the section with r10 unknown
@@ -76,6 +78,12 @@ refused ilp32-cxx.o .text.startup.main+0x78: computed call through CTR at +0x564
 refused ilp32-cxx.o .text.startup.main+0x88: TOC16_HA has no paired access
 refused ilp32-cxx.o .text.startup.main+0x98: computed call through CTR at +0x564 may enter any instruction of the section with r9 unknown
 refused ilp32-cxx.o .text.startup.main+0xf0: TOC16_HA has no paired access
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0x0: TOC16_HA has no paired access
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0x20: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0x3c: TOC16_HA has no paired access
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0x40: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0xf8: TOC16_HA has no paired access
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0xfc: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x158: TOC16_HA has no paired access
 refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x164: computed call through CTR at +0xac may enter any instruction of the section with r9 unknown
 refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x18: computed call through CTR at +0xac may enter any instruction of the section with r24 unknown
@@ -85,97 +93,471 @@ refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0xb8: TOC16_HA has no p
 refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0xc0: computed call through CTR at +0xac may enter any instruction of the section with r9 unknown
 refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0xc: TOC16_HA has no paired access
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x105c: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x1060: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x1060: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x1074: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x1084: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x1084: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x108: TOC16_HA has no paired access
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x10c4: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x10c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x10dc: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x10c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x10dc: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x110c: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x1114: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x1114: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x1130: TOC16_HA has no paired access
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x1138: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x1140: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x1144: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x1140: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x1144: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x114: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x11c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r20 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x11c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r20 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x1354: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x135c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x135c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x1378: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x137c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x137c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x1628: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x163c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x163c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x1694: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x1698: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x1698: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x177c: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x1784: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x1784: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x1788: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x179c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x179c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x1878: TOC16_HA has no paired access
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x187c: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x1880: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x1884: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x1880: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x1884: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x18ac: TOC16_HA has no paired access
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x18b0: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x18b4: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x18b8: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x18b4: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x18b8: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x21c: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x224: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x224: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x228: TOC16_HA has no paired access
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x230: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x23c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x244: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x23c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x244: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x248: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x25c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x25c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x28c: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x298: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x298: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x334: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x338: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r20 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x338: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r20 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x340: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x344: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x344: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x3ac: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x3b0: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r20 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x3b0: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r20 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x3c0: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x3c4: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x3c4: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x458: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x468: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x468: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x488: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x48c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x48c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x628: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x62c: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x62c: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x674: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x684: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x684: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x6b0: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x6b4: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x6b4: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x6ec: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x6fc: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x6fc: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0x714: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0x718: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0x718: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0xab8: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0xacc: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0xacc: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0xae0: TOC16_HA has no paired access
 refused libc.a(a-dtoa.o) .text._dtoa_r+0xae4: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0xaec: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
-refused libc.a(a-dtoa.o) .text._dtoa_r+0xaf0: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0xaec: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0xaf0: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0xc3c: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0xc44: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0xc44: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libc.a(a-dtoa.o) .text._dtoa_r+0xd8: TOC16_HA has no paired access
-refused libc.a(a-dtoa.o) .text._dtoa_r+0xe8: a store at +0x17c overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-dtoa.o) .text._dtoa_r+0xe8: a store through r1 at +0x174 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libc.a(a-exit.o) .text.exit+0x0: TOC16_HA has no paired access
 refused libc.a(a-exit.o) .text.exit+0x18: computed call through CTR at +0x64 may enter any instruction of the section with r9 unknown
 refused libc.a(a-exit.o) .text.exit+0x3c: TOC16_HA has no paired access
 refused libc.a(a-exit.o) .text.exit+0x40: computed call through CTR at +0x64 may enter any instruction of the section with r9 unknown
+refused libc.a(a-findfp.o) .text.__sinit+0x10: blr at +0xa4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r31 unknown
+refused libc.a(a-findfp.o) .text.__sinit+0x3c: TOC16_HA has no paired access
+refused libc.a(a-findfp.o) .text.__sinit+0x40: blr at +0xa4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-findfp.o) .text.__sinit+0x44: TOC16_HA has no paired access
+refused libc.a(a-findfp.o) .text.__sinit+0x4: TOC16_HA has no paired access
+refused libc.a(a-findfp.o) .text.__sinit+0x4c: blr at +0xa4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-freer.o) .text._free_r+0x28: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._free_r+0x298: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._free_r+0x2a8: a store through r1 at +0x16c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-freer.o) .text._free_r+0x2b8: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._free_r+0x2c0: a store through r1 at +0x16c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-freer.o) .text._free_r+0x34: a store through r1 at +0x16c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x148: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x158: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x15c: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x164: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x2c: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x30: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-freer.o) .text._malloc_trim_r+0xcc: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._malloc_trim_r+0xe0: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-getenv_r.o) .text._findenv_r+0x2c: TOC16_HA has no paired access
+refused libc.a(a-getenv_r.o) .text._findenv_r+0x30: blr at +0x174: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x274: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x278: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r11 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x3b0: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x3b4: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x3c: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x3d8: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x3dc: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x3e0: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x3e8: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x44: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r11 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x44c: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x450: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x45c: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x464: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x468: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x478: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x480: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x500: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x510: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x518: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x51c: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x520: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x574: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x578: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x584: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x588: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x58c: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x598: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x59c: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x5a0: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x5d4: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x5e4: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x618: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x61c: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x64: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x68: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x6c: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x70: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x730: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x74: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x750: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x78: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x7f8: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x810: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x864: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x868: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x870: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x8f4: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x8f8: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x9ac: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x9b4: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x9c4: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x9c8: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0xa14: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0xa1c: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0xa8: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0xb0: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0xb8: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0xc0: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0xec: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mprec.o) .text.__d2b+0x17c: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__d2b+0x180: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__d2b+0x184: a store through r1 at +0xd4 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mprec.o) .text.__d2b+0x188: a store through r1 at +0xd4 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
 refused libc.a(a-mprec.o) .text.__i2b+0x108: TOC16_HA has no paired access
 refused libc.a(a-mprec.o) .text.__i2b+0x10c: TOC16_HA has no paired access
 refused libc.a(a-mprec.o) .text.__i2b+0x110: a store at +0xac overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
 refused libc.a(a-mprec.o) .text.__i2b+0x114: a store at +0xac overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mprec.o) .text.__lshift+0x2c8: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__lshift+0x2cc: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__lshift+0x2d0: blr at +0x2c4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mprec.o) .text.__lshift+0x2d4: blr at +0x2c4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mprec.o) .text.__mdiff+0x368: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__mdiff+0x36c: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__mdiff+0x370: a store through r1 at +0x394 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mprec.o) .text.__mdiff+0x374: a store through r1 at +0x394 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mprec.o) .text.__mdiff+0x390: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__mdiff+0x398: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__mdiff+0x3a0: a store through r1 at +0x394 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mprec.o) .text.__mdiff+0x3a8: a store through r1 at +0x394 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mprec.o) .text.__multiply+0x3cc: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__multiply+0x3d4: TOC16_HA has no paired access
+refused libc.a(a-mprec.o) .text.__multiply+0x3dc: blr at +0x3a0: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mprec.o) .text.__multiply+0x3e4: blr at +0x3a0: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
 refused libc.a(a-mprec.o) .text.__pow5mult+0x148: TOC16_HA has no paired access
-refused libc.a(a-mprec.o) .text.__pow5mult+0x154: a store at +0x38 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-mprec.o) .text.__pow5mult+0x154: a store through r1 at +0x38 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libc.a(a-mprec.o) .text.__pow5mult+0x1b0: TOC16_HA has no paired access
 refused libc.a(a-mprec.o) .text.__pow5mult+0x1b4: TOC16_HA has no paired access
-refused libc.a(a-mprec.o) .text.__pow5mult+0x1b8: a store at +0x38 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
-refused libc.a(a-mprec.o) .text.__pow5mult+0x1bc: a store at +0x38 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mprec.o) .text.__pow5mult+0x1b8: a store through r1 at +0x38 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mprec.o) .text.__pow5mult+0x1bc: a store through r1 at +0x38 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-puts.o) .text._puts_r+0x2c: TOC16_HA has no paired access
+refused libc.a(a-puts.o) .text._puts_r+0x3c: blr at +0xf0: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-reallocr.o) .text._realloc_r+0x5c: TOC16_HA has no paired access
+refused libc.a(a-reallocr.o) .text._realloc_r+0x68: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-s_frexp.o) .text.frexp+0x44: TOC16_HA has no paired access
+refused libc.a(a-s_frexp.o) .text.frexp+0x54: a store through r1 at +0xa8 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-strtoul.o) .text._strtoul_l.isra.0+0x0: TOC16_HA has no paired access
+refused libc.a(a-strtoul.o) .text._strtoul_l.isra.0+0x10: blr at +0x17c: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x10dc: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x10e4: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x11b8: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x11c0: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1304: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x130c: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x143c: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1448: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r19 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1644: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1650: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r19 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x16c: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1720: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1728: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x174: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1968: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1970: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1980: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1988: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1a08: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1a10: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1a50: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1a54: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1ad8: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1adc: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1b74: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1b80: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r18 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1c28: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1c30: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1d84: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x1d8c: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r16 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x202c: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x203c: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2190: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x21b0: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2288: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2290: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r18 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x24b0: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x24d0: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2564: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2568: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x264c: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x266c: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x28c4: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x28c8: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x28cc: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x28d0: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x28d8: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x28dc: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x28f0: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2900: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2908: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2914: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2980: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2984: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2a64: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2a6c: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2ca0: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2ca4: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2ca8: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2cac: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2cb4: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2cb8: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2ccc: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2cdc: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d18: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d20: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d24: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d28: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d30: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d34: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d44: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d50: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d58: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2d5c: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2e78: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2e7c: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2e80: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2e88: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2f6c: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x2f74: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x309c: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x30ac: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x3144: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x3150: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x3258: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x3260: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x3268: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x326c: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x342c: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x3434: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x5cc: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x5d8: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x6ac: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x6b0: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x8cc: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0x8d4: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xa0: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xa8: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xab4: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xabc: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xb0: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xba0: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xba4: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xbb4: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xbc4: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xc38: TOC16_HA has no paired access
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xc44: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r19 unknown
+refused libc.a(a-svfprintf.o) .text._svfprintf_r+0xcc: a store through r1 at +0x14c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r24 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x1030: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x1038: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r14 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x12cc: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x12d4: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x1320: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x1328: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x1388: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x1390: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x15cc: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x15dc: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r21 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x17c: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x184: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x7ac: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x7b4: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x8c8: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x8c: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x8d0: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r15 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x9ac: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0x9b0: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r16 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0xb8: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r25 unknown
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0xe8c: TOC16_HA has no paired access
+refused libc.a(a-vfiprintf.o) .text._vfiprintf_r+0xe98: a store through r1 at +0x88 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r21 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x100: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r24 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1060: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1068: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x11d0: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x11d8: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x13bc: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x13c4: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x15ac: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x15b8: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r19 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x179c: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x17a8: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r19 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1878: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1880: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x19e8: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x19f8: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1a68: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1a70: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1a80: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1a88: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1ac: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1b3c: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1b44: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1b4: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1b6c: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1b70: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1c14: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1c18: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1c30: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1c50: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1f78: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x1f84: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r18 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2228: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x222c: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2364: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2368: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x236c: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2370: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2378: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x237c: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2390: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x23a0: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x23a8: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x23b4: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2420: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2424: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x25e4: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2604: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2614: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x261c: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2774: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x277c: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r16 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x29f8: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x29fc: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2a00: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2a04: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2a0c: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2a10: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2a24: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2a34: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2a78: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2a80: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2d40: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2d60: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2da0: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2da8: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2dac: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2db0: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2db8: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2dbc: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2dcc: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2dd8: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2de0: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2de4: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2dfc: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x2e04: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r18 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3004: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x300c: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3090: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3094: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3098: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x30a0: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x31c4: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x31d4: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3294: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x32a0: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3384: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x338c: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3394: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3398: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3500: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x3508: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x50c: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x518: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x5ec: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x5f0: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x80c: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x814: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x9a4: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0x9ac: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0xa90: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0xa94: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0xaa4: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0xab4: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0xac: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0xb28: TOC16_HA has no paired access
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0xb34: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r19 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0xbc: a store through r1 at +0xb0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-vfprintf.o) .text._vfprintf_r+0xf0: TOC16_HA has no paired access
+refused libgcc.a(unwind-c.o) .text.read_encoded_value_with_base+0x18: TOC16_HA has no paired access
+refused libgcc.a(unwind-c.o) .text.read_encoded_value_with_base+0x1c: blr at +0x9c: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x0: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x14: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x3c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x538: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x53c: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r25 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x58: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x6e0: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x6e8: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x8f4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x8fc: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x904: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x90c: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x914: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x918: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x9dc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x9e0: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x9ec: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x9f4: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0x9fc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text._Unwind_Find_FDE+0xa00: a store through r1 at +0x23c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text.__deregister_frame_info_bases+0x10: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text.__deregister_frame_info_bases+0x1c: blr at +0x80: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text.__deregister_frame_info_bases+0x88: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text.__deregister_frame_info_bases+0x90: blr at +0x80: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
 refused libgcc.a(unwind-dw2-fde.o) .text.btree_allocate_node+0x100: a store at +0xc0 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libgcc.a(unwind-dw2-fde.o) .text.btree_allocate_node+0x134: TOC16_HA has no paired access
 refused libgcc.a(unwind-dw2-fde.o) .text.btree_allocate_node+0x140: a store at +0xc0 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
@@ -184,6 +566,16 @@ refused libgcc.a(unwind-dw2-fde.o) .text.btree_allocate_node+0x184: a store at +
 refused libgcc.a(unwind-dw2-fde.o) .text.btree_allocate_node+0x19c: TOC16_HA has no paired access
 refused libgcc.a(unwind-dw2-fde.o) .text.btree_allocate_node+0x1a4: a store at +0xc0 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libgcc.a(unwind-dw2-fde.o) .text.btree_allocate_node+0xfc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text.read_encoded_value_with_base+0x18: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text.read_encoded_value_with_base+0x1c: blr at +0x9c: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text.register_pc_range_for_object.constprop.0+0x0: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text.register_pc_range_for_object.constprop.0+0x1c: blr at +0x80: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text.register_pc_range_for_object.constprop.0+0x38: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text.register_pc_range_for_object.constprop.0+0x40: blr at +0x80: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text.register_pc_range_for_object.constprop.0+0x8c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text.register_pc_range_for_object.constprop.0+0x94: blr at +0x80: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused libgcc.a(unwind-dw2-fde.o) .text.register_pc_range_for_object.constprop.0+0xb8: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2-fde.o) .text.register_pc_range_for_object.constprop.0+0xbc: blr at +0x80: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
 refused libgcc.a(unwind-dw2-fde.o) .text.version_lock_lock_exclusive+0x48: TOC16_HA has no paired access
 refused libgcc.a(unwind-dw2-fde.o) .text.version_lock_lock_exclusive+0x54: computed jump through LR at +0x44 may enter any instruction of the section with r10 unknown
 refused libgcc.a(unwind-dw2-fde.o) .text.version_lock_lock_exclusive+0x98: TOC16_HA has no paired access
@@ -203,19 +595,255 @@ refused libgcc.a(unwind-dw2.o) .text.execute_cfa_program_generic+0x9c: computed 
 refused libgcc.a(unwind-dw2.o) .text.execute_cfa_program_specialized+0x94: TOC16_HA has no paired access
 refused libgcc.a(unwind-dw2.o) .text.execute_cfa_program_specialized+0x9c: computed jump through LR at +0xc may enter any instruction of the section with r5 unknown
 refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x1e0: TOC16_HA has no paired access
-refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x1e8: a store at +0x134 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x1e8: a store through r1 at +0x134 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
 refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x318: TOC16_HA has no paired access
-refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x320: a store at +0x134 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x320: a store through r1 at +0x134 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
 refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x3e8: TOC16_HA has no paired access
-refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x3f0: a store at +0x134 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x3f0: a store through r1 at +0x134 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
 refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x50: TOC16_HA has no paired access
-refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x58: a store at +0x134 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x58: a store through r1 at +0x134 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
 refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x734: TOC16_HA has no paired access
-refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x73c: a store at +0x134 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x73c: a store through r1 at +0x134 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
 refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x824: TOC16_HA has no paired access
-refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x82c: a store at +0x134 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x82c: a store through r1 at +0x134 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
 refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x8f0: TOC16_HA has no paired access
-refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x8f8: a store at +0x134 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libgcc.a(unwind-dw2.o) .text.execute_stack_op+0x8f8: a store through r1 at +0x134 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libgcc.a(unwind-dw2.o) .text.read_encoded_value+0x40: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.read_encoded_value+0x44: blr at +0xc8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x124: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x12c: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x130: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x138: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x13c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x140: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x144: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x148: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x14c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x150: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x154: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x158: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x15c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x160: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x164: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x168: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x16c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x170: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x174: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x178: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x17c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x180: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x184: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x188: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x18c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x190: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x194: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x198: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x19c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1a0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1a4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1a8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1ac: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1b0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1b4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1b8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1bc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1c0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1c4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1c8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1cc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1d0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1d4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1d8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1dc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1e0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1e4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1e8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1ec: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1f0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1f4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1f8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x1fc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x200: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x204: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x208: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x20c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x210: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x214: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x218: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x21c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x220: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x224: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x228: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x22c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x230: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x234: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x238: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x23c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x240: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x244: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x248: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x24c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x250: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x254: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x258: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x25c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x260: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x264: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x268: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x26c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x270: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x274: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x278: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x27c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x280: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x284: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x288: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x28c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x290: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x294: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x298: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x29c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2a0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2a4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2a8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2ac: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2b0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2b4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2b8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2bc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2c0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2c4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2c8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2cc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2d0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2d4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2d8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2dc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2e0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2e4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2e8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2ec: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2f0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2f4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2f8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x2fc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x300: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x304: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x308: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x30c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x310: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x314: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x318: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x31c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x320: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x324: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x328: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x32c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x330: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x334: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x338: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x33c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x340: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x344: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x348: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x34c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x350: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x354: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x358: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x35c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x360: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x364: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x368: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x36c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x370: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x374: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x378: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x37c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x380: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x384: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x388: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x38c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x390: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x394: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x398: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x39c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3a0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3a4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3a8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3ac: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3b0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3b4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3b8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3bc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3c0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3c4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3c8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3cc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3d0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3d4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3d8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3dc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3e0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3e4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3e8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3ec: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3f0: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3f4: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3f8: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x3fc: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x400: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x404: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x408: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x40c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x410: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x414: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x418: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x41c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x420: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x424: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x428: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x42c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x430: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x434: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x438: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x43c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x440: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x444: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x448: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x44c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x450: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x454: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x458: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x45c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x460: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x464: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x468: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x46c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x470: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x474: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x478: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x47c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x480: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x484: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x488: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x48c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x490: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x494: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x498: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x5c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x60: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x64: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x68: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x88: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x8c: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x98: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_init_context_1+0x9c: a store through r1 at +0xdc may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_install_context_1+0x1d0: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_install_context_1+0x1d8: blr at +0x19c: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_install_context_1+0x200: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_install_context_1+0x204: blr at +0x19c: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libgcc.a(unwind-dw2.o) .text.uw_install_context_1+0x5c: TOC16_HA has no paired access
+refused libgcc.a(unwind-dw2.o) .text.uw_install_context_1+0x74: blr at +0x19c: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r24 unknown
 refused libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x114: TOC16_HA has no paired access
 refused libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x130: computed jump through CTR at +0x170 (no proven switch) may enter any instruction of the section with r30 unknown
 refused libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x154: TOC16_HA has no paired access
@@ -378,10 +1006,32 @@ refused libstdc++.a(class_type_info.o) .text._ZNK10__cxxabiv117__class_type_info
 refused libstdc++.a(class_type_info.o) .text._ZNK10__cxxabiv117__class_type_info10__do_catchEPKSt9type_infoPPvj+0xb0: computed call through CTR at +0xe4 may enter any instruction of the section with r8 unknown
 refused libstdc++.a(class_type_info.o) .text._ZNK10__cxxabiv117__class_type_info11__do_upcastEPKS0_PPv+0x10: computed call through CTR at +0x60 may enter any instruction of the section with r6 unknown
 refused libstdc++.a(class_type_info.o) .text._ZNK10__cxxabiv117__class_type_info11__do_upcastEPKS0_PPv+0x8: TOC16_HA has no paired access
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt11logic_errorC2EPKc+0x0: TOC16_HA has no paired access
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt11logic_errorC2EPKc+0x12c: TOC16_HA has no paired access
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt11logic_errorC2EPKc+0x130: blr at +0xb4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt11logic_errorC2EPKc+0x20: blr at +0xb4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt11logic_errorC2EPKc+0x88: TOC16_HA has no paired access
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt11logic_errorC2EPKc+0x8c: blr at +0xb4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt11logic_errorC2EPKc+0xb8: TOC16_HA has no paired access
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt11logic_errorC2EPKc+0xc0: blr at +0xb4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt13runtime_errorC2EPKc+0x0: TOC16_HA has no paired access
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt13runtime_errorC2EPKc+0x12c: TOC16_HA has no paired access
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt13runtime_errorC2EPKc+0x130: blr at +0xb4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt13runtime_errorC2EPKc+0x20: blr at +0xb4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt13runtime_errorC2EPKc+0x88: TOC16_HA has no paired access
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt13runtime_errorC2EPKc+0x8c: blr at +0xb4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt13runtime_errorC2EPKc+0xb8: TOC16_HA has no paired access
+refused libstdc++.a(cow-stdexcept.o) .text._ZNSt13runtime_errorC2EPKc+0xc0: blr at +0xb4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(cow-string-inst.o) .text._ZNSs4_Rep9_S_createEjjRKSaIcE+0x100: TOC16_HA has no paired access
+refused libstdc++.a(cow-string-inst.o) .text._ZNSs4_Rep9_S_createEjjRKSaIcE+0x104: blr at +0x9c: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused libstdc++.a(cp-demangle.o) .text.__cxa_demangle+0x40: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.__cxa_demangle+0x50: blr at +0x118: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r4 unknown
 refused libstdc++.a(cp-demangle.o) .text.d_append_num+0x14: computed call through CTR at +0xbc may enter any instruction of the section with r4 unknown
 refused libstdc++.a(cp-demangle.o) .text.d_append_num+0x8: TOC16_HA has no paired access
 refused libstdc++.a(cp-demangle.o) .text.d_demangle_callback.constprop.0+0x70: TOC16_HA has no paired access
 refused libstdc++.a(cp-demangle.o) .text.d_demangle_callback.constprop.0+0x78: computed call through CTR at +0x6c8 may enter any instruction of the section with r4 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_expr_primary+0x180: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_expr_primary+0x188: a store through r1 at +0x18c may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
 refused libstdc++.a(cp-demangle.o) .text.d_maybe_print_designated_init+0x22c: TOC16_HA has no paired access
 refused libstdc++.a(cp-demangle.o) .text.d_maybe_print_designated_init+0x238: computed call through CTR at +0x2ac may enter any instruction of the section with r8 unknown
 refused libstdc++.a(cp-demangle.o) .text.d_maybe_print_fold_expression+0x224: TOC16_HA has no paired access
@@ -390,6 +1040,14 @@ refused libstdc++.a(cp-demangle.o) .text.d_maybe_print_fold_expression+0x33c: TO
 refused libstdc++.a(cp-demangle.o) .text.d_maybe_print_fold_expression+0x34c: computed call through CTR at +0x16c may enter any instruction of the section with r8 unknown
 refused libstdc++.a(cp-demangle.o) .text.d_maybe_print_fold_expression+0xe4: TOC16_HA has no paired access
 refused libstdc++.a(cp-demangle.o) .text.d_maybe_print_fold_expression+0xec: computed call through CTR at +0x16c may enter any instruction of the section with r11 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_name+0x3f0: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_name+0x404: a store through r1 at +0x138 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_name+0x658: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_name+0x66c: a store through r1 at +0x138 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_operator_name+0x11c: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_operator_name+0x12c: blr at +0x74: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r11 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_operator_name+0x18: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_operator_name+0x28: blr at +0x74: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r11 unknown
 refused libstdc++.a(cp-demangle.o) .text.d_print_array_type+0x268: TOC16_HA has no paired access
 refused libstdc++.a(cp-demangle.o) .text.d_print_array_type+0x274: computed call through CTR at +0x120 may enter any instruction of the section with r11 unknown
 refused libstdc++.a(cp-demangle.o) .text.d_print_comp_inner+0x1008: computed call through CTR at +0x808 may enter any instruction of the section with r10 unknown
@@ -582,26 +1240,78 @@ refused libstdc++.a(cp-demangle.o) .text.d_print_mod_list+0x38c: TOC16_HA has no
 refused libstdc++.a(cp-demangle.o) .text.d_print_mod_list+0x394: computed call through CTR at +0x1c8 may enter any instruction of the section with r4 unknown
 refused libstdc++.a(cp-demangle.o) .text.d_print_mod_list+0x458: TOC16_HA has no paired access
 refused libstdc++.a(cp-demangle.o) .text.d_print_mod_list+0x45c: computed call through CTR at +0x1c8 may enter any instruction of the section with r7 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_source_name+0x1b8: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_source_name+0x1cc: blr at +0xe4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r6 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_special_name+0x164: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_special_name+0x174: a store through r1 at +0x3f4 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_special_name+0x7c: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_special_name+0x8c: a store through r1 at +0x3f4 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_substitution+0x84: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_substitution+0x88: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_substitution+0x8c: blr at +0x108: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_substitution+0x90: blr at +0x108: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_substitution+0xf0: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_substitution+0xf4: blr at +0x108: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x38c: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x394: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x5c: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x64: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x7a0: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x7a4: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x7ac: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x7b4: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x844: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x850: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x890: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x89c: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x8c4: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x8d0: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x90c: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0x91c: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xa18: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xa24: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xa60: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xa70: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xae8: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xaf4: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xb30: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xb40: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xb64: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xb70: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xbac: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xbbc: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xc44: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xc4c: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xe28: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xe34: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xebc: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_type+0xecc: a store through r1 at +0x2a0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libstdc++.a(cp-demangle.o) .text.d_unqualified_name+0x3e8: TOC16_HA has no paired access
+refused libstdc++.a(cp-demangle.o) .text.d_unqualified_name+0x3f0: a store through r1 at +0x424 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x0: TOC16_HA has no paired access
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x108: TOC16_HA has no paired access
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x10: a store at +0xe0 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r12 unknown
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x114: a store at +0xe0 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x14: a store at +0xe0 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x10: a store through r1 at +0xe0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r12 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x114: a store through r1 at +0xe0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x14: a store through r1 at +0xe0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x1b0: TOC16_HA has no paired access
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x1b4: a store at +0xe0 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x1b4: a store through r1 at +0xe0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x20: TOC16_HA has no paired access
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x2c: a store at +0xe0 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x2c: a store through r1 at +0xe0 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool4freeEPv.constprop.0+0x8: TOC16_HA has no paired access
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x0: TOC16_HA has no paired access
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x118: TOC16_HA has no paired access
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x124: a store at +0x128 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x124: a store through r1 at +0xd8 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x18: TOC16_HA has no paired access
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x1c: a store at +0x128 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x1c: a store through r1 at +0xd8 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x34: TOC16_HA has no paired access
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x44: a store at +0x128 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0xc: a store at +0x128 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0x44: a store through r1 at +0xd8 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0xc: a store through r1 at +0xd8 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
 refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0xdc: TOC16_HA has no paired access
-refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0xe8: a store at +0x128 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libstdc++.a(eh_alloc.o) .text._ZN12_GLOBAL__N_14pool8allocateEj.constprop.0+0xe8: a store through r1 at +0xd8 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libstdc++.a(eh_personality.o) .text.__gxx_personality_v0+0x444: TOC16_HA has no paired access
+refused libstdc++.a(eh_personality.o) .text.__gxx_personality_v0+0x448: a store through r1 at +0x358 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(eh_personality.o) .text.__gxx_personality_v0+0x888: TOC16_HA has no paired access
+refused libstdc++.a(eh_personality.o) .text.__gxx_personality_v0+0x88c: a store through r1 at +0x358 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
 refused libstdc++.a(new_op.o) .text._Znwj+0x84: TOC16_HA has no paired access
 refused libstdc++.a(new_op.o) .text._Znwj+0x88: TOC16_HA has no paired access
 refused libstdc++.a(new_op.o) .text._Znwj+0x8c: computed call through CTR at +0x6c may enter any instruction of the section with r10 unknown
@@ -612,8 +1322,116 @@ refused libstdc++.a(si_class_type_info.o) .text._ZNK10__cxxabiv120__si_class_typ
 refused libstdc++.a(si_class_type_info.o) .text._ZNK10__cxxabiv120__si_class_type_info12__do_dyncastEiNS_17__class_type_info10__sub_kindEPKS1_PKvS4_S6_RNS1_16__dyncast_resultE+0x114: computed call through CTR at +0x140 may enter any instruction of the section with r11 unknown
 refused libstdc++.a(si_class_type_info.o) .text._ZNK10__cxxabiv120__si_class_type_info20__do_find_public_srcEiPKvPKNS_17__class_type_infoES2_+0x0: TOC16_HA has no paired access
 refused libstdc++.a(si_class_type_info.o) .text._ZNK10__cxxabiv120__si_class_type_info20__do_find_public_srcEiPKvPKNS_17__class_type_infoES2_+0x14: computed call through CTR at +0x54 may enter any instruction of the section with r8 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD0Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD0Ev+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD0Ev+0x1c: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD0Ev+0x20: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD0Ev+0x68: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD0Ev+0x6c: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD2Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD2Ev+0x10: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD2Ev+0x14: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD2Ev+0x18: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD2Ev+0x50: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11logic_errorD2Ev+0x54: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD0Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD0Ev+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD0Ev+0x1c: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD0Ev+0x20: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD0Ev+0x68: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD0Ev+0x6c: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD2Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD2Ev+0x10: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD2Ev+0x14: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD2Ev+0x18: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD2Ev+0x50: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt11range_errorD2Ev+0x54: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD0Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD0Ev+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD0Ev+0x1c: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD0Ev+0x20: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD0Ev+0x68: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD0Ev+0x6c: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD2Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD2Ev+0x10: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD2Ev+0x14: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD2Ev+0x18: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD2Ev+0x50: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12domain_errorD2Ev+0x54: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD0Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD0Ev+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD0Ev+0x1c: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD0Ev+0x20: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD0Ev+0x68: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD0Ev+0x6c: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD2Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD2Ev+0x10: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD2Ev+0x14: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD2Ev+0x18: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD2Ev+0x50: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12length_errorD2Ev+0x54: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD0Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD0Ev+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD0Ev+0x1c: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD0Ev+0x20: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD0Ev+0x68: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD0Ev+0x6c: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD2Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD2Ev+0x10: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD2Ev+0x14: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD2Ev+0x18: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD2Ev+0x50: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt12out_of_rangeD2Ev+0x54: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD0Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD0Ev+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD0Ev+0x1c: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD0Ev+0x20: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD0Ev+0x68: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD0Ev+0x6c: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD2Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD2Ev+0x10: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD2Ev+0x14: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD2Ev+0x18: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD2Ev+0x50: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt13runtime_errorD2Ev+0x54: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD0Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD0Ev+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD0Ev+0x1c: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD0Ev+0x20: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD0Ev+0x68: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD0Ev+0x6c: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD2Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD2Ev+0x10: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD2Ev+0x14: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD2Ev+0x18: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD2Ev+0x50: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt14overflow_errorD2Ev+0x54: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD0Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD0Ev+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD0Ev+0x1c: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD0Ev+0x20: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD0Ev+0x68: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD0Ev+0x6c: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD2Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD2Ev+0x10: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD2Ev+0x14: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD2Ev+0x18: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD2Ev+0x50: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt15underflow_errorD2Ev+0x54: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD0Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD0Ev+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD0Ev+0x1c: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD0Ev+0x20: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD0Ev+0x68: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD0Ev+0x6c: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD2Ev+0x0: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD2Ev+0x10: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD2Ev+0x14: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD2Ev+0x18: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD2Ev+0x50: TOC16_HA has no paired access
+refused libstdc++.a(stdexcept.o) .text._ZNSt16invalid_argumentD2Ev+0x54: a store through r1 at +0x90 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
 refused libstdc++.a(string-inst.o) .text._ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_replaceEjjPKcj+0x218: TOC16_HA has no paired access
-refused libstdc++.a(string-inst.o) .text._ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_replaceEjjPKcj+0x224: a store at +0xe4 overlaps the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libstdc++.a(string-inst.o) .text._ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_replaceEjjPKcj+0x224: a store through r1 at +0x84 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
 refused libstdc++.a(vterminate.o) .text._ZN9__gnu_cxx27__verbose_terminate_handlerEv+0x0: TOC16_HA has no paired access
 refused libstdc++.a(vterminate.o) .text._ZN9__gnu_cxx27__verbose_terminate_handlerEv+0x10: computed call through CTR at +0x1e8 may enter any instruction of the section with r9 unknown
 refused libstdc++.a(vterminate.o) .text._ZN9__gnu_cxx27__verbose_terminate_handlerEv+0x150: TOC16_HA has no paired access

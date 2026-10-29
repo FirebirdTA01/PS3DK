@@ -1,8 +1,8 @@
 # Pinned result of one real-link row of tests/sdk/toc-linked-check-test.sh.
 # Written by known-refusals.py --regen; re-pin only after reviewing every
 # changed line.  Paths are cut to their file or archive member.
-verified 326
-refused-sites 152
+verified 209
+refused-sites 269
 failed-sites 0
 refused crtbegin.o .text.__do_global_dtors_aux+0x0: TOC16_HA has no paired access
 refused crtbegin.o .text.__do_global_dtors_aux+0x14: TOC16_HA has no paired access
@@ -36,6 +36,12 @@ refused crtend.o .text.__do_global_ctors_aux+0x0: TOC16_HA has no paired access
 refused crtend.o .text.__do_global_ctors_aux+0x10: computed call through CTR at +0x40 may enter any instruction of the section with r31 unknown
 refused crtend.o .text.__do_global_ctors_aux+0x14: computed call through CTR at +0x40 may enter any instruction of the section with r9 unknown
 refused crtend.o .text.__do_global_ctors_aux+0x8: TOC16_HA has no paired access
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0x0: TOC16_HA has no paired access
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0x20: blr at +0xa4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0x3c: TOC16_HA has no paired access
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0x40: blr at +0xa4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0xf0: TOC16_HA has no paired access
+refused libc.a(a-__atexit.o) .text.__register_exitproc+0xf4: blr at +0xa4: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r8 unknown
 refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x18: computed call through CTR at +0xdc may enter any instruction of the section with r25 unknown
 refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x1c8: TOC16_HA has no paired access
 refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x1d4: computed call through CTR at +0xdc may enter any instruction of the section with r9 unknown
@@ -48,6 +54,117 @@ refused libc.a(a-exit.o) .text.exit+0x0: TOC16_HA has no paired access
 refused libc.a(a-exit.o) .text.exit+0x18: computed call through CTR at +0x60 may enter any instruction of the section with r9 unknown
 refused libc.a(a-exit.o) .text.exit+0x3c: TOC16_HA has no paired access
 refused libc.a(a-exit.o) .text.exit+0x40: computed call through CTR at +0x60 may enter any instruction of the section with r9 unknown
+refused libc.a(a-freer.o) .text._free_r+0x230: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._free_r+0x240: blr at +0x114: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-freer.o) .text._free_r+0x250: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._free_r+0x258: blr at +0x114: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-freer.o) .text._free_r+0x28: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._free_r+0x34: blr at +0x114: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x140: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x14c: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x150: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x158: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x2c: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._malloc_trim_r+0x30: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-freer.o) .text._malloc_trim_r+0xc8: TOC16_HA has no paired access
+refused libc.a(a-freer.o) .text._malloc_trim_r+0xdc: blr at +0xa8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x118: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x11c: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x120: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x124: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x148: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x15c: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x160: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x16c: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x170: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x178: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x17c: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x184: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x188: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x190: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x194: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x19c: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x1a0: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x1a8: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x1ac: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x1b0: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x1b4: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x1b8: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r10 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x24: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0x2c: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-getreent.o) .text.__getreent+0x84: TOC16_HA has no paired access
+refused libc.a(a-getreent.o) .text.__getreent+0xa4: a store through r1 at +0x60 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-lock_internal.o) .text.__libc_auto_lock_allocate+0x10: blr at +0x70: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r30 unknown
+refused libc.a(a-lock_internal.o) .text.__libc_auto_lock_allocate+0x4: TOC16_HA has no paired access
+refused libc.a(a-lock_internal.o) .text.__libc_auto_lock_allocate+0x78: TOC16_HA has no paired access
+refused libc.a(a-lock_internal.o) .text.__libc_auto_lock_allocate+0x80: blr at +0x70: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x274: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x278: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r12 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x370: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x374: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x394: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x398: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x39c: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x3a0: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x3c: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x408: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x40c: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x414: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x420: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x424: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x434: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x43c: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x44: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r12 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x4c0: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x4cc: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x4d4: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x4d8: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r3 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x4dc: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x520: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x524: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x528: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x530: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x53c: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x540: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x544: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x550: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x594: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x59c: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x5c: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x5d0: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x5d4: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x64: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x708: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x710: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x714: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x718: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x798: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x7a0: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x7a4: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x7ac: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r5 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x818: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x81c: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x888: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x88: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x88c: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r8 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x8c: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x90: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x948: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x94: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r7 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x94c: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x954: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x964: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x970: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x97c: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x980: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r6 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x988: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x9c: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x9e4: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x9ec: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0x9f0: TOC16_HA has no paired access
+refused libc.a(a-mallocr.o) .text._malloc_r+0x9f4: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r9 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0xa4: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
+refused libc.a(a-mallocr.o) .text._malloc_r+0xd0: a store through r1 at +0x108 may write the LR save slot, so a blr is a computed jump that may enter any instruction of the section with r4 unknown
 refused librt.a(exit.o) .text.__librt_register_fini+0x14: TOC16_HA has no paired access
 refused librt.a(exit.o) .text.__librt_register_fini+0x18: blr at +0x50: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
 refused librt.a(gettod.o) .text.__librt_gettod_r+0xa0: TOC16_HA has no paired access
