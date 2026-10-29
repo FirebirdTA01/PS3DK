@@ -11,7 +11,7 @@
  *     SYS_MODULE_STOP(mylib_stop);
  *
  *     int mylib_start(size_t args, void *argp) { ... return SYS_PRX_RESIDENT; }
- *     int mylib_stop(size_t args, void *argp)  { ... return SYS_PRX_RESIDENT; }
+ *     int mylib_stop(size_t args, void *argp)  { ... return SYS_PRX_STOP_OK; }
  *
  * How each macro is realised in this toolchain:
  *
@@ -34,7 +34,8 @@
  *       management export record points at `fn'.  `fn' must be defined
  *       in the same translation unit (the build fails otherwise), take
  *       (size_t args, void *argp) and return SYS_PRX_RESIDENT or
- *       SYS_PRX_NO_RESIDENT.  In C++ declare it extern "C".  Defining a
+ *       SYS_PRX_NO_RESIDENT for start, or SYS_PRX_STOP_OK or
+ *       SYS_PRX_STOP_FAIL for stop.  In C++ declare it extern "C".  Defining a
  *       function named module_start / module_stop directly (see
  *       <sys/prx_module.h>) remains equivalent.
  *
