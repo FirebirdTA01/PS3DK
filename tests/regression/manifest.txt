@@ -1,6 +1,7 @@
 name,relative_self,timeout_seconds,expected_state,required_tty_regex,forbidden_tty_regex
 librt-posix,tests/regression/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,librt-posix: PASS,ENOSYS
 sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT_OK,PRX_FAIL
+sprx-module-macros,tests/regression/sprx-module-macros/sprx-module-macros.fake.self,30,RAN-CLEAN,PRX_MODULE_STOP_OK,PRX_FAIL
 # sys-tty: the SDK-owned <sys/tty.h> write path (system call 403) under the system and PSL1GHT names.
 sys-tty,tests/regression/sys-tty/sys-tty.fake.self,20,RAN-CLEAN,(?s)SYS_TTY_ROW reference-name write.*SYS_TTY_ROW psl1ght-name write.*SYS_TTY_OK,SYS_TTY_FAIL
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS

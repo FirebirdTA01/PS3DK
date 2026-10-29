@@ -1,0 +1,11 @@
+library: sample_module_export
+module: sample_module_export
+archive_name: sample_module_export
+version: 1
+exports:
+  - name: sample_calc_add
+    nid: 0xd518c5f1
+    signature: 'int sample_calc_add(int a, int b);'
+  - name: sample_get_start_counter
+    nid: 0xb803eadf
+    signature: 'uint32_t sample_get_start_counter(void);'
