@@ -18,6 +18,11 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **Fragment sampler arrays.** The shader compiler resolves constant indices
+  of one-dimensional `sampler2D` arrays to per-element texture bindings and
+  emits matching reflection records, including unused elements. Dynamic
+  sampler indices and vertex sampler arrays remain unsupported.
+
 - **Unsigned-short vertex attributes in PSGL.** Linked GL programs stage
   `UNSIGNED_SHORT` inputs of sizes 1-4 as floats, preserving unsigned values
   when unnormalized and dividing provided components by 65535 when normalized.

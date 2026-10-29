@@ -451,6 +451,15 @@ ContainerResult emitFragmentContainerImpl(
                 e.res       = kCgUndefined;
                 e.var       = kCgUniform;
                 e.direction = kCgIn;
+                if (isSamplerIRType(p.type.baseType)) {
+                    const int unit = samplerLayout.arrayUnit(p.valueId, k);
+                    const int declaredUnit = rsx_cg::explicitFpSamplerUnit(p);
+                    if (declaredUnit >= 0) e.semantic = "TEXUNIT" + std::to_string(declaredUnit);
+                    e.res = unit < 0 ? kCgUndefined : kCgTexUnit0 + unit;
+                    e.isReferenced = samplerLayout.arrayElementUsed(p.valueId, k) ? 1u : 0u;
+                    params.push_back(e);
+                    continue;
+                }
                 for (const auto& eu : attrs.embeddedUniforms)
                 {
                     if (eu.entryParamIndex == base + k)
@@ -703,6 +712,24 @@ ContainerResult emitFragmentContainerImpl(
         for (const auto& g : module.globals)
         {
             if (g.storage != StorageQualifier::Uniform) continue;
+
+            if (g.type.isArray() && isSamplerIRType(g.type.baseType)) {
+                for (int k = 0; k < g.type.arraySize; ++k) {
+                    ParamDesc e;
+                    e.name = rsx_cg::arrayElementName(g.name, k);
+                    e.type = cgTypeForIRType(g.type);
+                    e.paramno = kInvalidIndex;
+                    const int unit = samplerLayout.arrayUnit(g.valueId, k);
+                    const int declaredUnit = rsx_cg::explicitFpSamplerUnit(g);
+                    if (declaredUnit >= 0) e.semantic = "TEXUNIT" + std::to_string(declaredUnit);
+                    e.res = unit < 0 ? kCgUndefined : kCgTexUnit0 + unit;
+                    e.var = kCgUniform;
+                    e.direction = kCgIn;
+                    e.isReferenced = samplerLayout.arrayElementUsed(g.valueId, k) ? 1u : 0u;
+                    params.push_back(e);
+                }
+                continue;
+            }
 
             // A file-scope ARRAY uniform: one record per element, each on
             // its own slot, in the same order the lowering numbered them.

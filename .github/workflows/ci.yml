@@ -1440,6 +1440,8 @@ jobs:
         run: bash tests/shader-compiler/vp-c6014-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test explicit sampler units and reflection agree
         run: bash tests/shader-compiler/sampler-binding-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test fragment sampler array elements and reflection agree
+        run: bash tests/shader-compiler/sampler-array-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test entry sampler input qualifiers preserve uniform bindings
         run: bash tests/shader-compiler/entry-sampler-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Generic samplers retain distinct types and 2D bindings

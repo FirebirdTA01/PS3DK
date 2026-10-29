@@ -2413,6 +2413,10 @@ private:
         const auto samplerLayout = profile_ == GeneralProfile::Vertex
             ? rsx_cg::buildVpSamplerLayout(module_, entry_)
             : rsx_cg::buildFpSamplerLayout(module_, entry_);
+        for (const auto& load : samplerLayout.arrayLoads) {
+            samplerUnit_[load.first] = load.second;
+            samplerType_[load.first] = IRType::Sampler2D;
+        }
         if (!samplerLayout.diagnostics.empty()) {
             program_.loweringFailed = true;
             program_.diagnostics.insert(program_.diagnostics.end(),
@@ -2539,6 +2543,13 @@ private:
             if (binding && !p.type.isArray() && binding->registers[0] < 0)
                 continue;
             if (p.storage == StorageQualifier::Uniform && p.type.isArray()) {
+                if (isSamplerIRType(p.type.baseType)) {
+                    if (profile_ == GeneralProfile::Vertex) {
+                        program_.loweringFailed = true;
+                        program_.diagnostics.push_back("nv40-general: vertex sampler arrays are not lowered; refusing");
+                    }
+                    continue;
+                }
                 layoutArrayUniform(p.valueId, p.name, p.type, fpParamSlotBases[pi], true,
                                    binding);
                 continue;
@@ -2703,6 +2714,13 @@ private:
                 continue;
             }
             if (g.type.isArray()) {
+                if (isSamplerIRType(g.type.baseType)) {
+                    if (profile_ == GeneralProfile::Vertex) {
+                        program_.loweringFailed = true;
+                        program_.diagnostics.push_back("nv40-general: vertex sampler arrays are not lowered; refusing");
+                    }
+                    continue;
+                }
                 unsigned base = 0;
                 if (profile_ == GeneralProfile::Fragment) {
                     base = nextFpGlobalSlot;
@@ -5537,6 +5555,8 @@ private:
     {
         if (inst.result == InvalidIRValue)
             return;
+        if (profile_ == GeneralProfile::Fragment && samplerUnit_.count(inst.result))
+            return; // A sampler element names a unit, never a numeric source.
         if (inst.uniformStructRead) {
             const auto& read = *inst.uniformStructRead;
             const auto layout = program_.uniformStructLayouts.find(inst.uniformSource);
