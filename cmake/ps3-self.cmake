@@ -608,7 +608,11 @@ function(ps3_prx_stub_library target)
 
     set(_abi "${_PSS_ABI}")
     if(NOT _abi)
-        set(_abi "ilp32")
+        if("--lp64" IN_LIST PS3_SPRXLINKER_FLAGS)
+            set(_abi "lp64")
+        else()
+            set(_abi "ilp32")
+        endif()
     endif()
 
     get_filename_component(_ppu_tool_bin "${CMAKE_C_COMPILER}" DIRECTORY)

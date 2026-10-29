@@ -71,6 +71,12 @@ The version stamped into builds is generated from the most recent
 - **CellSpursTaskSaveConfig layout.** `CellSpursTaskSaveConfig` has the same
   12-byte layout in LP64 programs as in the default model; before, its two
   pointers widened to 8 bytes each.
+
+- **LP64 stub library generation in ps3_prx_stub_library.** When ABI is not given,
+  `ps3_prx_stub_library` now defaults to `lp64` if `--lp64` is present in
+  `PS3_SPRXLINKER_FLAGS` (the LP64 toolchain file sets it), else `ilp32`; an
+  explicit ABI still wins. LP64 programs linking a stub library made with
+  `ps3_prx_stub_library` now get LP64 stubs.
 - **Codec gifdec, jpgenc, and pngenc record layouts.** In `<cell/codec/gifdec.h>`,
   `CellGifDecThreadInParam` marks `cbCtrlMallocArg` and `cbCtrlFreeArg` with
   `ATTRIBUTE_PRXPTR`, preserving 28-byte size and 4-byte alignment across both

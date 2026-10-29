@@ -9,6 +9,9 @@ Validates that:
 4. prx-gen exports matches exports.yml.
 5. .ps3dk.module_identity section contains the exact PMI\\1 record and
    module_start / module_stop symbols are bound to the custom handlers.
+6. ps3_prx_stub_library defaults to the correct ABI matching the toolchain
+   (LP64: std/bctr caller-restore stub; ILP32: stw/lwz wrapping trampoline),
+   and respects explicit ABI overrides.
 """
 
 import argparse
@@ -53,6 +56,54 @@ def find_prx_gen(root: Path, ps3dev: Path):
     return None
 
 
+def find_objdump(ps3dev: Path):
+    for cand in [
+        ps3dev / "ppu/bin/powerpc64-ps3-elf-objdump.exe",
+        ps3dev / "ppu/bin/powerpc64-ps3-elf-objdump",
+    ]:
+        if cand.is_file():
+            return cand
+    cand = shutil.which("powerpc64-ps3-elf-objdump")
+    if cand:
+        return Path(cand)
+    return None
+
+
+def verify_stub_archive(objdump: Path, archive_path: Path, expected_abi: str):
+    res = subprocess.run([str(objdump), "-d", str(archive_path)], capture_output=True, text=True)
+    if res.returncode != 0:
+        return False, f"objdump failed on {archive_path}:\n{res.stderr}"
+    disasm = res.stdout
+    has_std = any("std" in line and "40(r1)" in line for line in disasm.splitlines())
+    has_stw = any("stw" in line and "40(r1)" in line for line in disasm.splitlines())
+    has_lwz = any("lwz" in line and "40(r1)" in line for line in disasm.splitlines())
+    has_bctrl = any("bctrl" in line for line in disasm.splitlines())
+    has_bctr = any(line.strip().endswith("bctr") for line in disasm.splitlines())
+    has_blr = any(line.strip().endswith("blr") for line in disasm.splitlines())
+
+    if expected_abi == "lp64":
+        # LP64: nidgen std/bctr caller-restore stub
+        if not (has_std and has_bctr and not has_bctrl and not has_stw and not has_lwz and not has_blr):
+            return False, (
+                f"Expected LP64 stub (std/bctr) in {archive_path}:\n"
+                f"  has_std={has_std}, has_bctr={has_bctr}, has_bctrl={has_bctrl}, "
+                f"has_stw={has_stw}, has_lwz={has_lwz}, has_blr={has_blr}\n"
+                f"Disassembly excerpt:\n{disasm[:1000]}"
+            )
+    elif expected_abi == "ilp32":
+        # ILP32: nidgen stw/lwz wrapping trampoline
+        if not (has_stw and has_lwz and has_bctrl and has_blr and not has_std and not has_bctr):
+            return False, (
+                f"Expected ILP32 stub (stw/lwz/bctrl/blr) in {archive_path}:\n"
+                f"  has_stw={has_stw}, has_lwz={has_lwz}, has_bctrl={has_bctrl}, has_blr={has_blr}, "
+                f"has_std={has_std}, has_bctr={has_bctr}\n"
+                f"Disassembly excerpt:\n{disasm[:1000]}"
+            )
+    else:
+        return False, f"Unknown expected ABI: {expected_abi}"
+    return True, disasm
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ps3dev", default=os.environ.get("PS3DEV"))
@@ -78,6 +129,11 @@ def main():
     prx_gen = find_prx_gen(root, ps3dev)
     if not prx_gen:
         print("sprx-module-macros: SKIP (prx-gen not found)")
+        return 0
+
+    objdump = find_objdump(ps3dev)
+    if not objdump:
+        print("sprx-module-macros: SKIP (objdump not found)")
         return 0
 
     ps3dk = Path(args.ps3dk) if args.ps3dk else (Path(os.environ["PS3DK"]) if "PS3DK" in os.environ else ps3dev)
@@ -154,7 +210,87 @@ def main():
                 print(f"FAIL: module-export-inspect ({abi}) failed:\n{res.stdout}\n{res.stderr}")
                 return 1
 
-            print(f"PASS: {abi} build, prx-gen check, and identity inspection ok")
+            # Verify stub archive matches expected ABI form (default behavior)
+            stub_lib = bdir / "sample_module_export_stub" / "libsample_module_export_stub.a"
+            if not stub_lib.is_file():
+                print(f"FAIL: {stub_lib} not found")
+                return 1
+
+            ok, disasm_or_err = verify_stub_archive(objdump, stub_lib, abi)
+            if not ok:
+                print(f"FAIL: stub archive ABI check ({abi}) failed:\n{disasm_or_err}")
+                return 1
+
+            print(f"PASS: {abi} build, prx-gen check, identity inspection, and {abi} stub archive ok")
+
+        # Verify explicit ABI overrides in ps3_prx_stub_library
+        override_dir = tmp / "override-abi-tests"
+        override_dir.mkdir(parents=True, exist_ok=True)
+        cmake_override = override_dir / "CMakeLists.txt"
+        cmake_override.write_text(f"""cmake_minimum_required(VERSION 3.20)
+project(stub_abi_override C ASM)
+include(ps3-self)
+ps3_prx_stub_library(stub_override_lp64
+    EXPORTS "{sample_src.as_posix()}/exports.yml"
+    ARCHIVE_NAME sample_module_export
+    ABI lp64)
+ps3_prx_stub_library(stub_override_ilp32
+    EXPORTS "{sample_src.as_posix()}/exports.yml"
+    ARCHIVE_NAME sample_module_export
+    ABI ilp32)
+""", encoding="utf-8")
+
+        # Case A: ILP32 toolchain with explicit ABI lp64 -> produces LP64 archive
+        bdir_ov_ilp32 = override_dir / "build-ilp32"
+        res = subprocess.run(
+            ["cmake", *generator, "-S", str(override_dir), "-B", str(bdir_ov_ilp32),
+             "--toolchain", str(ilp32_tc), "--fresh"],
+            env=env, capture_output=True, text=True,
+        )
+        if res.returncode != 0:
+            print(f"FAIL: cmake configure override (ILP32 toolchain) failed:\n{res.stdout}\n{res.stderr}")
+            return 1
+
+        res = subprocess.run(
+            ["cmake", "--build", str(bdir_ov_ilp32), "--target", "stub_override_lp64_archive"],
+            env=env, capture_output=True, text=True,
+        )
+        if res.returncode != 0:
+            print(f"FAIL: cmake build stub_override_lp64 failed:\n{res.stdout}\n{res.stderr}")
+            return 1
+
+        lp64_ov_archive = bdir_ov_ilp32 / "stub_override_lp64" / "libsample_module_export_stub.a"
+        ok, err = verify_stub_archive(objdump, lp64_ov_archive, "lp64")
+        if not ok:
+            print(f"FAIL: explicit ABI lp64 override under ILP32 toolchain failed:\n{err}")
+            return 1
+        print("PASS: explicit ABI lp64 override under ILP32 toolchain generated LP64 stubs")
+
+        # Case B: LP64 toolchain with explicit ABI ilp32 -> produces ILP32 archive
+        bdir_ov_lp64 = override_dir / "build-lp64"
+        res = subprocess.run(
+            ["cmake", *generator, "-S", str(override_dir), "-B", str(bdir_ov_lp64),
+             "--toolchain", str(lp64_tc), "--fresh"],
+            env=env, capture_output=True, text=True,
+        )
+        if res.returncode != 0:
+            print(f"FAIL: cmake configure override (LP64 toolchain) failed:\n{res.stdout}\n{res.stderr}")
+            return 1
+
+        res = subprocess.run(
+            ["cmake", "--build", str(bdir_ov_lp64), "--target", "stub_override_ilp32_archive"],
+            env=env, capture_output=True, text=True,
+        )
+        if res.returncode != 0:
+            print(f"FAIL: cmake build stub_override_ilp32 failed:\n{res.stdout}\n{res.stderr}")
+            return 1
+
+        ilp32_ov_archive = bdir_ov_lp64 / "stub_override_ilp32" / "libsample_module_export_stub.a"
+        ok, err = verify_stub_archive(objdump, ilp32_ov_archive, "ilp32")
+        if not ok:
+            print(f"FAIL: explicit ABI ilp32 override under LP64 toolchain failed:\n{err}")
+            return 1
+        print("PASS: explicit ABI ilp32 override under LP64 toolchain generated ILP32 stubs")
 
     # Assert that samples/ has no build output files
     res = subprocess.run(["git", "status", "--porcelain", "samples/"], cwd=str(root), capture_output=True, text=True)
