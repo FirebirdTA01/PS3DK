@@ -1436,6 +1436,54 @@ def case_r8_branch_to_root():
     return table_exec('r8-branch-to-root', 0)
 
 
+def table_reference_case(name, extra=None, delta=0):
+    """
+    table_exec_user without its orphan branch and label: a valid switch whose
+    only other reference to its table is an extra ADDR64 in extra ('.toc' as
+    a new entry at .toc+16, or a section of its own) to the table start + delta.
+    """
+    o = table_exec_user(0)
+    sec = o.sections[o.sec_index('.text.k') - 1]
+    sec.data = sec.data[:60]
+    sec.size = 60
+    o.symbols = [s_ for s_ in o.symbols if s_['name'] != 'orphan']
+    if extra == '.toc':
+        toc = o.sections[o.sec_index('.toc') - 1]
+        toc.data += bytes(8)
+        toc.size += 8
+        o.rel('.toc', 16, 'R_PPC64_ADDR64', '.text.k', 40 + delta)
+    elif extra:
+        o.section(extra, bytes(8), flags='WA', align=8)
+        o.rel(extra, 0, 'R_PPC64_ADDR64', '.text.k', 40 + delta)
+    d = fresh(name)
+    lk = link(d, [o, data_obj()])
+    return check(lk.manifest_path)
+
+
+def case_r9_own_reference():
+    # Control: only the .toc entry the dispatch loads names the table.
+    return want(table_reference_case('r9-own'), 0, 'PASS', sites_verified=4, sites_refused=0)
+
+
+def case_r9_extra_toc_start():
+    # A second, unused .toc entry naming the table start is a reference the
+    # proof did not consume: a possible entry into the table.
+    return want(table_reference_case('r9-extra-toc-start', '.toc'), 1, 'INCOMPLETE',
+                sites_verified=0, sites_failed=0, sites_refused=4)
+
+
+def case_r9_extra_data_start():
+    # Control: the same extra reference from .data.
+    return want(table_reference_case('r9-extra-data-start', '.data.ref'), 1, 'INCOMPLETE',
+                sites_verified=0, sites_failed=0, sites_refused=4)
+
+
+def case_r9_extra_toc_second():
+    # Control: an extra .toc reference to the table's second word.
+    return want(table_reference_case('r9-extra-toc-second', '.toc', 4), 1, 'INCOMPLETE',
+                sites_verified=0, sites_failed=0, sites_refused=4)
+
+
 def r2_switch_user(prefix, direct=False):
     """prefix ; a fully reachable bounded switch whose table base comes through r2
     (addis/ld pair, or with direct one ld r10,LO(r2) with TOC16_DS)."""
@@ -1501,7 +1549,8 @@ def case_r5_named_reached_mtlr():
                 1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
 
 
-def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False, label_t1=False, ref_t1=False):
+def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False, label_t1=False, ref_t1=False,
+                    two_refs=False):
     """
     A switch whose every instruction is reachable, so a broken proof shows:
          cmpldi r3,1 ; bgt dflt
@@ -1511,13 +1560,17 @@ def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False, label
     dflt: blr
     T:   .long c0-T, c0-T
     rB is r9, or r0 with zero_base; scale defaults to rldic r3,r3,2,30.
+    two_refs: the add takes the table address from a second .toc entry (.LC2,
+    also naming T) through addis r11 ; ld r11 ; add r9,r9,r11.
     """
     b = 0 if zero_base else 9
     items = [('cmp', lambda o, L: F.cmpldi(3, 1)), ('bgt', lambda o, L: F.bgt(L['dflt'] - o)),
              ('ha', lambda o, L: F.addis(b, 2)),
              ('scale', lambda o, L: scale if scale is not None else F.rldic(3, 3, 2, 30)),
              ('lo', lambda o, L: F.ld(10, b)), ('lwax', lambda o, L: F.lwax(9, 10, 3)),
-             ('add', lambda o, L: F.add(9, 9, 10)), ('mtctr', lambda o, L: F.mtctr(9))]
+             ('add', lambda o, L: F.add(9, 9, 11 if two_refs else 10)), ('mtctr', lambda o, L: F.mtctr(9))]
+    if two_refs:
+        items[5:5] = [('ha2', lambda o, L: F.addis(11, 2)), ('lo2', lambda o, L: F.ld(11, 11))]
     items += [(f'pre{k}', lambda o, L, w=w: w) for k, w in enumerate(pre_bctr)]
     # The table comes last, so a word a broken proof leaves out falls into nothing.
     items += [('bctr', lambda o, L: F.bcctr(final_bo, 0)),
@@ -1528,7 +1581,7 @@ def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False, label
     o = from_obj('k.o')
     o.section('.text.k', F.code(*words))
     o.sym('k', '.text.k', 0, bind='GLOBAL', stype='FUNC')
-    o.section('.toc', bytes(16), flags='WA', align=8)
+    o.section('.toc', bytes(24 if two_refs else 16), flags='WA', align=8)
     o.sym('.LC0', '.toc', 0)
     o.sym('.LC1', '.toc', 8)
     o.sym('g_a', 'UND', bind='GLOBAL')
@@ -1538,6 +1591,11 @@ def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False, label
     o.rel('.text.k', at['lo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC1')
     o.rel('.text.k', at['cha'] + 2, 'R_PPC64_TOC16_HA', '.LC0')
     o.rel('.text.k', at['clo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    if two_refs:
+        o.sym('.LC2', '.toc', 16)
+        o.rel('.toc', 16, 'R_PPC64_ADDR64', '.text.k', L['T'])
+        o.rel('.text.k', at['ha2'] + 2, 'R_PPC64_TOC16_HA', '.LC2')
+        o.rel('.text.k', at['lo2'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC2')
     if label_t1:
         o.sym('t1_label', '.text.k', L['T'] + 4)
     if ref_t1:
@@ -1587,6 +1645,14 @@ def case_oc_nop_control():
 
 def case_oc_decrementing_bcctr():
     return one_case('oc-bcctr-dec', False, final_bo=16)
+
+
+def case_oc_two_consumed_refs():
+    # Two .toc entries both naming the table start, one for the lwax and one
+    # for the add: both are consumed by the proof, neither is evidence.
+    d = fresh('oc-two-refs')
+    lk = link(d, [one_case_switch(two_refs=True), data_obj()])
+    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=6, sites_refused=0)
 
 
 def case_oc_label_in_table():
@@ -1960,6 +2026,11 @@ NEGATIVE_CASES = [
     ('review 8: a write of r2 before a direct TOC16 table load', case_r8_r2_written_direct),
     ('review 8: the direct-load r8 control', case_r8_r8_control_direct),
     ('review 8: a label inside a switch table makes it code', case_oc_label_in_table),
+    ('review 9: only the consumed reference names the table control', case_r9_own_reference),
+    ('review 9: two consumed references to the table start', case_oc_two_consumed_refs),
+    ('review 9: an unused .toc reference to the table start is evidence', case_r9_extra_toc_start),
+    ('review 9: a .data reference to the table start control', case_r9_extra_data_start),
+    ('review 9: a .toc reference to the second word control', case_r9_extra_toc_second),
     ('review 8: a data reference into a switch table makes it code', case_oc_data_ref_in_table),
     ('review 5: a named, reached blr control', case_r5_named_reached_blr),
     ('review 5: a named, reached mtlr control', case_r5_named_reached_mtlr),

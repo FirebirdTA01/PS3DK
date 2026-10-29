@@ -1112,7 +1112,7 @@ class Checker:
                 sym = obj.symbols.get(r['info'] >> 32)
                 if sym and sym['ndx'] == str(sec.nr):
                     entries.add(sym['val'] + r['addend'])
-                    named_from.setdefault(sym['val'] + r['addend'], set()).add(other.name)
+                    named_from.setdefault(sym['val'] + r['addend'], set()).add((nr, r['offset']))
         # Switch proofs, data words and entry seeding settle together.  An
         # entry that is no function entry starts with nothing known, r2
         # included, so a dispatch such an entry can reach has no bounded
@@ -1175,8 +1175,9 @@ class Checker:
             return set(range(0, size, 4)) - reach(starts, succ_all)
 
         def executable_evidence(j, data):
-            """A table word a branch, a fall-through from code, a label or a
-            reference other than the .toc address of the table names."""
+            """A table word a branch, a fall-through from code, a label or any
+            reference other than the exact .toc relocation(s) the proof read
+            its table address from names (by section and offset)."""
             t, n = proofs[j][2][0]
             for wd in range(t, t + 4 * n, 4):
                 if any(p_ not in data for p_ in with_edges(False).get(wd, [])):
@@ -1184,7 +1185,7 @@ class Checker:
                 if any(s_['ndx'] == str(sec.nr) and s_['type'] != 'SECTION' and s_['val'] == wd
                        for s_ in obj.symbols.values()):
                     return True
-                if named_from.get(wd, set()) - ({'.toc'} if wd == t else set()):
+                if named_from.get(wd, set()) - proofs[j][3]:
                     return True
             return False
 
@@ -1202,7 +1203,7 @@ class Checker:
             for _i in range(4 * len(indirect) + 1):
                 full = with_edges(True)
                 # A proof holds only while nothing else enters its sequences.
-                broken = [j for j, (expect, _, _) in proofs.items()
+                broken = [j for j, (expect, *_) in proofs.items()
                           if any(c in entries or sorted(full.get(c, [])) != ps for c, ps in expect.items())]
                 if not broken:
                     break
@@ -1407,7 +1408,7 @@ class Checker:
         tsym = obj.symbols.get(hit[0]['info'] >> 32)
         if tsym is None or tsym['ndx'] != str(sec.nr) or tsym['bind'] != 'LOCAL':
             return None
-        return tsym['val'] + hit[0]['addend']
+        return tsym['val'] + hit[0]['addend'], (nrs[0], hit[0]['offset'])
 
     def switch_targets(self, obj, sec, src, size, rels, preds, entries, j, r2=frozenset()):
         """
@@ -1464,11 +1465,13 @@ class Checker:
             at.setdefault(r['offset'] & ~3, []).append(r)
         table = None
         top = -1
+        consumed = frozenset()
         for path in paths:
             got = self.run_switch_path(obj, sec, src, path, at, r2)
             if got is None or (table is not None and got[0] != table):
                 return None
             table, top = got[0], max(top, got[1])
+            consumed |= got[2]
         t, k = table, top
         end = t + 4 * (k + 1)
         if t % 4 or t < 0 or end > size or any(t <= r['offset'] < end for r in rels):
@@ -1479,10 +1482,11 @@ class Checker:
             if not (0 <= d < size and d % 4 == 0):
                 return None
             targets.add(d)
-        return expect, sorted(targets), [(t, k + 1)]
+        return expect, sorted(targets), [(t, k + 1)], consumed
 
     def run_switch_path(self, obj, sec, src, path, at, r2=frozenset()):
-        """Symbolic run of one path ending at a bcctr: (T, K) when CTR = T + table[i <= K], else None."""
+        """Symbolic run of one path ending at a bcctr: (T, K, refs) when CTR = T + table[i <= K],
+        refs the .toc relocations (section, offset) the table address came from; else None."""
         regs, crs, bounds = {}, {}, {}
         ctr = None
         ids = [0]
@@ -1553,7 +1557,7 @@ class Checker:
                 t = self.toc_table(obj, sec, r['info'] >> 32, r['addend'], load) if src_ok else None
                 kill({rt})
                 if t is not None:
-                    regs[rt] = ('table', t)
+                    regs[rt] = ('table', t[0], frozenset([t[1]]))
                 continue
             if here:
                 kill(set(range(32)))
@@ -1605,10 +1609,11 @@ class Checker:
                 if xo == 341 and 'table' in pair and 'scaled' in pair and len(pair) == 2:       # lwax
                     k = bound_of(pair['scaled'][1], pair['scaled'][2])
                     if k is not None:
-                        regs[rt] = ('entry', pair['table'][1], k)
+                        regs[rt] = ('entry', pair['table'][1], k, pair['table'][2])
                 elif xo == 266 and 'table' in pair and 'entry' in pair \
                         and pair['table'][1] == pair['entry'][1]:                             # add
-                    regs[rt] = ('target', pair['entry'][1], pair['entry'][2])
+                    regs[rt] = ('target', pair['entry'][1], pair['entry'][2],
+                                pair['entry'][3] | pair['table'][2])
                 continue
             written = gpr_writes(w)
             if written is None or (op in (16, 18, 19) and w & 1):
@@ -1621,7 +1626,7 @@ class Checker:
                 crs.clear()
         if not ctr or ctr[0] != 'target':
             return None
-        return ctr[1], ctr[2]
+        return ctr[1], ctr[2], ctr[3]
 
     def reaching_ha(self, obj, sec, src, use_off, reg, key, ha_at):
         """
