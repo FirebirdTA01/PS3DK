@@ -48,6 +48,14 @@ Scope of v1 (anything outside it is refused, never skipped):
   - names come from the files' own string tables (readelf truncates long
     section names), and must extend readelf's.
 
+Coverage limits (these shapes are refused, by design):
+  - a switch dispatch that range-checks one load and indexes its table
+    with a second load of the same address: two loads are never assumed
+    equal, so the jump stays unproven (libgcc's uw_update_context_1);
+  - no ABI-extension rule: a 32-bit range check does not bound a shift of
+    the whole register, so switch (int) lowered at -O2 as cmplwi + sldi is
+    refused (cmpldi + sldi, and cmplwi + rldic ...,2,30 are proven).
+
 Success means every admitted access described by the inputs was verified;
 it is not a claim about other TOC uses or about runtime behaviour.
 Exit status: 0 PASS (verified > 0, nothing failed, refused or
@@ -928,7 +936,8 @@ class Checker:
             self.check_access(obj, sec, src, addr, i, r, role, ha_info, ha_at)
         for i, h in ha_info.items():
             if not h['used']:
-                self.dispose(obj, sec, i, 'refused', f"TOC16_HA at +0x{h['reloc']['offset']:x} has no paired access", h['reloc'])
+                self.dispose(obj, sec, i, 'refused',
+                             f"{obj.ident} {sec.name}+0x{h['reloc']['offset'] - 2:x}: TOC16_HA has no paired access", h['reloc'])
                 continue
             states = [s for s, _ in h['used']]
             worst = 'failed' if 'failed' in states else 'refused' if 'refused' in states else 'verified'
@@ -1686,13 +1695,22 @@ def cmd_check(args):
     return 0 if status == 'PASS' else 1
 
 
+COVERAGE_LIMITS = """coverage limits (refused, by design):
+  a dispatch that range-checks one load and indexes with a second load of
+  the same address (two loads are never assumed equal); and switch (int)
+  lowered as cmplwi + sldi (no ABI-extension rule: a 32-bit check does not
+  bound a shift of the whole register)."""
+
+
 def main():
-    p = argparse.ArgumentParser(description="Check a linked PPU ELF's TOC accesses against its input objects.")
+    p = argparse.ArgumentParser(description="Check a linked PPU ELF's TOC accesses against its input objects.",
+                                epilog=COVERAGE_LIMITS, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest='cmd', required=True)
     c = sub.add_parser('capture', help="run a link and pin its map, trace and inputs")
     c.add_argument('--out', required=True, help="fresh directory for the manifest, map and trace")
     c.add_argument('command', nargs=argparse.REMAINDER, help="-- followed by the link command")
-    k = sub.add_parser('check', help="check a captured link")
+    k = sub.add_parser('check', help="check a captured link", epilog=COVERAGE_LIMITS,
+                       formatter_class=argparse.RawDescriptionHelpFormatter)
     k.add_argument('manifest')
     k.add_argument('--readelf', help="readelf to use (default: the PPU readelf, then readelf on PATH)")
     k.add_argument('--report', help="also write a JSON report here")

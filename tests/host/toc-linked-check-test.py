@@ -531,7 +531,7 @@ def case_unpaired_ha():
     o.sections[0].size = 12
     o.rel('.text.f', 6, 'R_PPC64_TOC16_HA', '.LC0')
     lk = link(d, [o, data_obj()])
-    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'has no paired access',
+    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'a[.]o [.]text[.]f[+]0x4: TOC16_HA has no paired access',
                        relocation_sites=2, sites_verified=1, sites_refused=1, sites_unaccounted=0)
 
 
