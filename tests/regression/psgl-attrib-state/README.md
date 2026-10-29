@@ -8,9 +8,10 @@ color array restores the current color rather than reusing stale data.
 An enabled-to-disabled legacy/Cg transition schedules a reset of all 16
 hardware array descriptors before the remaining arrays are reinstalled.
 This adds commands on those transitions; no performance improvement is claimed.
-The normalization repair covers unsigned-byte GL inputs; the existing
-unsigned-short conversion still needs its own semantics audit. Direct-Cg
-physical ATTR7 byte conversion is unchanged.
+The normalization row covers unsigned-byte GL inputs. The separate
+`psgl-ushort-attribs` rows cover unsigned-short inputs, staged as floats with
+normalization and component defaults preserved. Direct-Cg physical ATTR7
+byte conversion is unchanged.
 Unnormalized byte inputs of sizes 1-3 are staged as four floats with GL
 component defaults; size 4 retains its UB256 descriptor. The small-byte
 conversion does not depend on whether hardware accepts smaller UB256

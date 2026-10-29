@@ -18,6 +18,12 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **Unsigned-short vertex attributes in PSGL.** Linked GL programs stage
+  `UNSIGNED_SHORT` inputs of sizes 1-4 as floats, preserving unsigned values
+  when unnormalized and dividing provided components by 65535 when normalized.
+  Client arrays, VBOs and indexed draws retain the missing-component defaults
+  and reject mapped or insufficient source storage before reading it.
+
 - **Small unnormalized byte attributes in PSGL.** Linked GL programs accept
   `UNSIGNED_BYTE` inputs of sizes 1–3 from client arrays and VBOs, staging
   integer values as floats with the missing-component defaults. Indexed

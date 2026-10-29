@@ -342,6 +342,8 @@ psgl-attrib-normalization-ilp32,tests/regression/psgl-attrib-state/psgl-attrib-n
 psgl-attrib-normalization-lp64,tests/regression/psgl-attrib-state/psgl-attrib-normalization-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_ATTR_STATE_OK checks=12 failures=0\r?$,PSGL_ATTR_STATE_FAIL
 psgl-attrib-disable-ilp32,tests/regression/psgl-attrib-state/psgl-attrib-disable-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_ATTR_STATE_OK checks=7 failures=0\r?$,PSGL_ATTR_STATE_FAIL
 psgl-attrib-disable-lp64,tests/regression/psgl-attrib-state/psgl-attrib-disable-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_ATTR_STATE_OK checks=7 failures=0\r?$,PSGL_ATTR_STATE_FAIL
+psgl-ushort-attribs-ilp32,tests/regression/psgl-ushort-attribs/psgl-ushort-attribs-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_USHORT_OK checks=201 failures=0\r?$,PSGL_USHORT_FAIL
+psgl-ushort-attribs-lp64,tests/regression/psgl-ushort-attribs/psgl-ushort-attribs-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_USHORT_OK checks=201 failures=0\r?$,PSGL_USHORT_FAIL
 psgl-small-byte-attribs-ilp32,tests/regression/psgl-small-byte-attribs/psgl-small-byte-attribs-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_SMALL_BYTE_OK checks=72 failures=0\r?$,PSGL_SMALL_BYTE_FAIL
 psgl-small-byte-attribs-lp64,tests/regression/psgl-small-byte-attribs/psgl-small-byte-attribs-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_SMALL_BYTE_OK checks=72 failures=0\r?$,PSGL_SMALL_BYTE_FAIL
 psgl-client-scratch-wrap-ilp32,tests/regression/psgl-client-scratch/psgl-client-scratch-wrap-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_SCRATCH_OK checks=12 failures=0\r?$,PSGL_SCRATCH_FAIL

@@ -2328,17 +2328,18 @@ static uint32_t psgl_gl_client_element_size(const PSGLvertexAttribState *attrib)
     return psgl_attrib_element_size(attrib);
 }
 
-static int psgl_gl_small_byte_attrib(const PSGLcontext *context, unsigned location)
+static int psgl_gl_needs_float_conversion(const PSGLcontext *context, unsigned location)
 {
     const PSGLvertexAttribState *attrib = &context->gl_attribs[location];
-    return attrib->enabled && attrib->type == GL_UNSIGNED_BYTE &&
-           !context->gl_attrib_normalized[location] &&
-           attrib->size >= 1 && attrib->size <= 3;
+    if (!attrib->enabled || attrib->size < 1 || attrib->size > 4) return 0;
+    return attrib->type == GL_UNSIGNED_SHORT ||
+           (attrib->type == GL_UNSIGNED_BYTE &&
+            !context->gl_attrib_normalized[location] && attrib->size <= 3);
 }
 
 /* Stage [0, vertices), retaining the original first/index values at the draw.
-   Small unnormalized bytes use float4 with explicit GL component defaults;
-   other client inputs retain their existing storage type. */
+   Unsigned shorts and small unnormalized bytes use float4 with explicit GL
+   component defaults; other client inputs retain their existing storage type. */
 static int psgl_emit_gl_vertex_arrays(PSGLcontext *context, uint64_t vertices)
 {
     struct upload {
@@ -2354,7 +2355,7 @@ static int psgl_emit_gl_vertex_arrays(PSGLcontext *context, uint64_t vertices)
         if (location < 0) continue;
         PSGLvertexAttribState *attrib = &context->gl_attribs[location];
         struct upload *upload = &uploads[hw];
-        upload->convert = psgl_gl_small_byte_attrib(context, (unsigned)location);
+        upload->convert = psgl_gl_needs_float_conversion(context, (unsigned)location);
         upload->element = upload->convert ? 16u : psgl_gl_client_element_size(attrib);
         if (!upload->element) continue;
         if (!vertices || vertices > INT32_MAX) {
@@ -2395,7 +2396,17 @@ static int psgl_emit_gl_vertex_arrays(PSGLcontext *context, uint64_t vertices)
                 const uint8_t *src = upload->source + (size_t)i * upload->stride;
                 dst[0] = dst[1] = dst[2] = 0.0f;
                 dst[3] = 1.0f;
-                for (GLint c = 0; c < attrib->size; ++c) dst[c] = (float)src[c];
+                for (GLint c = 0; c < attrib->size; ++c) {
+                    if (attrib->type == GL_UNSIGNED_SHORT) {
+                        /* PPU components are big-endian; byte reads also
+                           admit odd source offsets and overlapping strides. */
+                        uint32_t value = ((uint32_t)src[2*c] << 8) | src[2*c+1];
+                        dst[c] = context->gl_attrib_normalized[location] ?
+                            (float)value / 65535.0f : (float)value;
+                    } else {
+                        dst[c] = (float)src[c];
+                    }
+                }
                 dst += 4;
             }
         } else {
@@ -2433,7 +2444,7 @@ static void psgl_emit_vertex_arrays(PSGLcontext *context)
                 continue;
             }
             if (!attrib->buffer_name) continue; /* Uploaded at draw time. */
-            if (psgl_gl_small_byte_attrib(context, (unsigned)location)) continue;
+            if (psgl_gl_needs_float_conversion(context, (unsigned)location)) continue;
             PSGLbufferObject *buffer = psgl_find_buffer(attrib->buffer_name);
             uint8_t type = psgl_gl_routed_vertex_type(context, (unsigned)location);
             if (!buffer || !buffer->address || !type) continue;
@@ -5623,7 +5634,7 @@ void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
         for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
             int location = context->gl_hw_to_location[hw];
             if (location >= 0 &&
-                (psgl_gl_small_byte_attrib(context, (unsigned)location) ||
+                (psgl_gl_needs_float_conversion(context, (unsigned)location) ||
                  psgl_gl_client_element_size(&context->gl_attribs[location]))) {
                 upload = 1; break;
             }
