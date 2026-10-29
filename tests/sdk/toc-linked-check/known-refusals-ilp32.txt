@@ -1,0 +1,15 @@
+# Refusals the cxx-ilp32 row of tests/sdk/toc-linked-check-test.sh expects, exactly.
+# libgcc's uw_update_context_1 range-checks one load of a byte and indexes its
+# jump table with a second load of the same byte; the checker does not assume
+# two loads of one address are equal, so the jump stays unproven and these
+# sites are refused.  Paths are cut to the archive member.  Any other refusal,
+# a missing or extra line, or any failed site fails the row; re-pin only after
+# reviewing a new libgcc's refusals.
+libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x114: TOC16_HA has no paired access
+libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x130: a path from the entry point +0x44c reaches this use without setting r30
+libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x154: TOC16_HA has no paired access
+libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x160: r10 may change at +0x160 on a path to this use
+libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x494: TOC16_HA has no paired access
+libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x49c: r9 may change at +0x168 on a path to this use
+libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x4cc: TOC16_HA has no paired access
+libgcc.a(unwind-dw2.o) .text.uw_update_context_1+0x4d0: r10 may change at +0x160 on a path to this use

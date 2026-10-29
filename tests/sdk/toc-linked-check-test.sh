@@ -5,8 +5,12 @@
 #   ilp32-gc       toc-edit-ilp32 fixture, --gc-sections         PASS
 #   ilp32-gc-ctl   the same with --no-toc-optimize                PASS
 #   lp64-gc        the fixture with -mlp64 --gc-sections          PASS
-#   cxx-ilp32      a C++ program (libstdc++, libc)                PASS
-#   cxx-lp64       the same with -mlp64                           PASS
+#   cxx-ilp32      a C++ program (libstdc++, libc)                PASS with 8 known refusals
+#   cxx-lp64       the same with -mlp64                           PASS with 8 known refusals
+# A row with known refusals passes only when the check is INCOMPLETE with
+# no failed site and its refused sites are exactly the ones listed in
+# toc-linked-check/known-refusals-<abi>.txt (libgcc's uw_update_context_1:
+# a range check of one load, an index from a second load of the same byte).
 # With --red-ps3dev DIR (a toolchain whose ld lacks binutils patch 0008):
 #   red-ilp32-gc     the ilp32-gc row on that ld must FAIL, at draw()'s lwz
 #   red-ilp32-gc-ctl its --no-toc-optimize control must PASS
@@ -66,7 +70,7 @@ for abi in ilp32 lp64; do
 done
 
 fail=0
-row() {  # name want(PASS|FAIL) driver abi objs ldflags...
+row() {  # name want(PASS|FAIL|KNOWN:count) driver abi objs ldflags...
     local name="$1" want="$2" drv="$3" abi="$4" objs="$5"; shift 5
     local A=(); [ "$abi" = lp64 ] && A=(-mlp64)
     local in=() o
@@ -76,10 +80,25 @@ row() {  # name want(PASS|FAIL) driver abi objs ldflags...
             > "$work/$name.capture" 2>&1; then
         echo "toc-linked-check: FAIL $name: capture"; cat "$work/$name.capture"; fail=1; return
     fi
-    "$py" "$checker" check "$(w "$work/$name/manifest.json")" --readelf "$(w "$readelf")" > "$work/$name.check" 2>&1
+    "$py" "$checker" check "$(w "$work/$name/manifest.json")" --readelf "$(w "$readelf")" \
+        --report "$(w "$work/$name.json")" > "$work/$name.check" 2>&1
     local rc=$?
     local status; status="$(sed -n 's/^toc-linked-check: \(PASS\|FAIL\|INCOMPLETE\)$/\1/p' "$work/$name.check")"
     local counts; counts="$(awk '$1 ~ /^sites_(verified|failed|refused|discarded)$/ {printf "%s %s, ", substr($1, 7), $2}' "$work/$name.check")"
+    case "$want" in KNOWN:*)
+        local known krc
+        known="$("$py" "$here/toc-linked-check/known-refusals.py" "$(w "$work/$name.json")" \
+            "$(w "$here/toc-linked-check/known-refusals-$abi.txt")" "${want#KNOWN:}" 2>&1)"
+        krc=$?
+        if [ $krc -eq 0 ] && [ $rc -eq 1 ]; then
+            echo "toc-linked-check: ok   $name PASS ($known) (${counts%, })"
+        else
+            echo "toc-linked-check: FAIL $name: rc=$rc, refusals do not match the known set"
+            echo "$known" | sed 's/^/    /'
+            sed 's/^/    /' "$work/$name.check"; fail=1
+        fi
+        return ;;
+    esac
     if [ "$want" = PASS ] && [ $rc -eq 0 ] && [ "$status" = PASS ]; then
         echo "toc-linked-check: ok   $name PASS (${counts%, })"
     elif [ "$want" = FAIL ] && [ $rc -eq 1 ] && [ "$status" = FAIL ] \
@@ -95,8 +114,8 @@ fx="a b main"
 row ilp32-gc     PASS "$(w "$cc")"  ilp32 "$fx" -Wl,--gc-sections
 row ilp32-gc-ctl PASS "$(w "$cc")"  ilp32 "$fx" -Wl,--gc-sections -Wl,--no-toc-optimize
 row lp64-gc      PASS "$(w "$cc")"  lp64  "$fx" -Wl,--gc-sections
-row cxx-ilp32    PASS "$(w "$cxx")" ilp32 cxx   -Wl,--gc-sections
-row cxx-lp64     PASS "$(w "$cxx")" lp64  cxx   -Wl,--gc-sections
+row cxx-ilp32    KNOWN:8 "$(w "$cxx")" ilp32 cxx   -Wl,--gc-sections
+row cxx-lp64     KNOWN:8 "$(w "$cxx")" lp64  cxx   -Wl,--gc-sections
 if [ -n "$red" ]; then
     rcc="$(tool_of "$red" gcc)"
     [ -x "$rcc" ] || { echo "toc-linked-check: FAIL: no $rcc"; exit 1; }
