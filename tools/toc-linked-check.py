@@ -45,11 +45,15 @@ Scope of v1 (anything outside it is refused, never skipped):
     check, table address and dispatch sequence; mtctr counts only inside
     such a sequence, and a CTR-decrementing branch or a wrapping rotate
     mask in it proves nothing.  A blr is a return only when unconditional
-    and no path from an LR write (mtlr, or any branch that links) reaches
-    it.  Any other transfer through CTR or LR (an unproven bcctr, bctrl,
-    a conditional or decrementing bclr, bclrl, a blr after an LR write)
-    makes every instruction of the section an entry point with unknown
-    registers.  RA=0 in a D-form base is literal zero: such an LO never
+    and LR provably holds the entry LR there: on paths with no LR write (a
+    leaf), or after the ABI epilogue (mflr rX stored to the LR save slot,
+    entry SP + 16, before any call; rY reloaded from the slot at a known
+    SP; mtlr rY; blr), with the stack pointer followed only through
+    stdu/stwu r1,-N(r1) and addi r1,r1,N and no other store through r1
+    able to reach the slot.  Any other transfer through CTR or LR (an
+    unproven bcctr, bctrl, a conditional or decrementing bclr, bclrl, a
+    blr without that proof) makes every instruction of the section an
+    entry point with unknown registers.  RA=0 in a D-form base is literal zero: such an LO never
     pairs with an addis.  Register writes are modelled for listed
     instruction forms only; any other form may write every register;
   - names come from the files' own string tables (readelf truncates long
@@ -246,6 +250,43 @@ def gpr_writes(word):
         if (word >> 1) & 0x1ff in XO_WRITES_RT:         # XO forms, with or without OE
             return {rt}
         return None                                     # lswx (count from XER) and every unlisted form
+    return None
+
+
+# The LR save slot, as offset from the entry stack pointer and width, per data
+# model.  Measured in the compilers' own prologues and epilogues across the
+# real-link rows (mflr rX; std rX,16(r1) before the frame is allocated; ld
+# from entry SP + 16 before mtlr): ILP32 and LP64 agree.
+LR_SAVE_SLOT = {'ilp32': (16, 8), 'lp64': (16, 8)}
+LR_SLOT_OFF, LR_SLOT_WIDTH = LR_SAVE_SLOT['ilp32']
+assert LR_SAVE_SLOT['lp64'] == (LR_SLOT_OFF, LR_SLOT_WIDTH)
+
+# Stores: primary opcode -> width (D forms; DS forms by their low bits).
+D_STORE_WIDTH = {36: 4, 37: 4, 38: 1, 39: 1, 44: 2, 45: 2, 52: 4, 53: 4, 54: 8, 55: 8}
+# X-form stores and other memory writers (by extended opcode); the address
+# is register-indexed, so an r1 operand is an unknown overlap.
+X_MEMORY_WRITES = {151, 183, 215, 247, 407, 439, 149, 181, 662, 918, 150, 214, 663, 695, 727, 759,
+                   983, 661, 725, 135, 167, 199, 231, 487, 647, 679, 903, 935, 1014}
+
+
+def stack_write(word):
+    """
+    How an instruction may write memory relative to r1: None (it does not
+    write memory through r1), ('at', disp, width), ('update', disp, width)
+    for a store with update, or ('unknown',) when the address or width is
+    not a constant offset from r1.
+    """
+    op, rs, ra, rb = word >> 26, (word >> 21) & 31, (word >> 16) & 31, (word >> 11) & 31
+    if op in D_STORE_WIDTH and ra == 1:
+        return ('update' if op & 1 else 'at', sext16(word & 0xffff), D_STORE_WIDTH[op])
+    if op == 62 and ra == 1:
+        if word & 3 in (0, 1):
+            return ('update' if word & 3 else 'at', sext16(word & 0xfffc), 8)
+        return ('unknown',)
+    if op == 47 and ra == 1:
+        return ('at', sext16(word & 0xffff), 4 * (32 - rs))        # stmw
+    if op == 31 and (word >> 1) & 0x3ff in X_MEMORY_WRITES and 1 in (ra, rb):
+        return ('unknown',)
     return None
 
 
@@ -1118,27 +1159,142 @@ class Checker:
         unknown = unknown or next((f"computed jump through CTR at +0x{j:x} (no proven switch)"
                                    for j in indirect if j not in proofs), None)
         if not unknown and returns:
-            # A blr that a path from an LR write (mtlr, or any branch that
-            # links) reaches is a computed jump.
             data = {t + 4 * i for j in proofs for t, n in proofs[j][2] for i in range(n)}
-            succ = {}
-            for d, ps in with_edges(False).items():
-                for p_ in ps:
-                    succ.setdefault(p_, []).append(d)
-            seeds = [d for w_ in lr_writes for d in succ.get(w_, [])]
-            seen = set()
-            while seeds:
-                c = seeds.pop()
-                if c in seen or c in data:
-                    continue
-                seen.add(c)
-                seeds.extend(succ.get(c, []))
-            hit = next((r_ for r_ in returns if r_ in seen), None)
-            if hit is not None:
-                unknown = f"blr at +0x{hit:x} after a possible LR write: a computed jump"
+            roots = {0} | calls | {s_['val'] for s_ in obj.symbols.values()
+                                   if s_['ndx'] == str(sec.nr) and s_['type'] == 'FUNC'}
+            dead = {r_ for r_ in returns if r_ not in reached and r_ not in roots}
+            named = {e for e in entries - roots - data if e in reached}
+            unknown = self.prove_returns(src, size, with_edges(False), roots, named,
+                                         data, [r_ for r_ in returns if r_ not in dead])
         fl = {'preds': full, 'entries': entries, 'bad': bad, 'unknown': unknown}
         self.flow_cache[key] = fl
         return fl
+
+    def prove_returns(self, src, size, preds, roots, other_entries, data, returns):
+        """
+        None when every blr in returns provably returns to the caller, or
+        the reason one may not (then it is a computed jump).  A blr returns
+        when LR holds the entry LR there: on paths with no LR write (a leaf),
+        or after the ABI epilogue: mflr rX; rX stored to the LR save slot
+        (entry SP + LR_SLOT_OFF, LR_SLOT_WIDTH bytes) before any call; rY
+        reloaded from that slot at a known SP; mtlr rY with rY unchanged;
+        blr with no LR write between.  The stack pointer is followed only
+        through stdu/stwu r1,-N(r1) and addi r1,r1,N.  No other store
+        through r1 may overlap the slot, and a store through r1 at an unknown
+        offset counts as overlapping.  Facts that differ where paths merge,
+        and every entry that is not a function entry, are unknown.
+        Assumed: the program keeps the ABI's LR-save-slot contract (nothing
+        writes the slot through a base other than r1).  Instructions no
+        modelled edge reaches (landing pads) are no roots: a blr reached
+        only from them has no proof and is refused, and a blr no modelled
+        edge reaches at all is dead code, neither a return nor a jump (the
+        caller drops it).  Other named entries start unknown.
+        """
+        UNK = ('unk', 'unk', frozenset(), frozenset(), 'unk')
+        ROOT = (0, 'entry', frozenset(), frozenset(), 'none')    # sp, lr, mflr copies, slot reloads, slot
+        slot = (LR_SLOT_OFF, LR_SLOT_OFF + LR_SLOT_WIDTH)
+
+        def merge(a, b):
+            if a is None:
+                return b
+            return tuple(x if x == y else u for x, y, u in zip(a, b, UNK))
+
+        def step(off, st):
+            sp, lr, copies, reloads, sl = st
+            w = be(src, off, 4)
+            op, rt, ra = w >> 26, (w >> 21) & 31, (w >> 16) & 31
+            xo = (w >> 1) & 0x3ff
+            spr = ((w >> 16) & 31) | (((w >> 11) & 31) << 5)
+            if op == 31 and xo == 339 and spr == 8:                  # mflr rt
+                copies = (copies | {rt}) if lr == 'entry' and sl == 'none' else copies - {rt}
+                return sp, lr, copies, reloads - {rt}, sl
+            if op == 31 and xo == 467 and spr == 8:                  # mtlr rt
+                return sp, ('entry' if rt in reloads else 'unk'), copies, reloads, sl
+            if op in (16, 18) or (op == 19 and xo in (16, 528)):
+                if w & 1:                                            # a call: LR, volatile registers
+                    gone = set(VOLATILE_GPRS)
+                    return (sp, 'unk', copies - gone, reloads - gone,
+                            'late' if sl == 'none' else sl)
+                return st
+            sw = stack_write(w)
+            if sw is not None:
+                if sw[0] == 'unknown' or sp == 'unk':
+                    sl = 'unk' if sl != 'none' else 'late'
+                else:
+                    lo = sp + sw[1]
+                    hi = lo + sw[2]
+                    if (lo, hi) == slot and op == 62 and rt in copies and sl == 'none':
+                        sl = 'saved'                                 # the original save
+                    if sw[0] == 'update':
+                        sp = sp + sw[1]                              # stdu/stwu ...,d(r1) moves r1
+                written = gpr_writes(w)
+                if written is None:
+                    return UNK
+                gone = set(written) - {1}
+                return sp, lr, copies - gone, reloads - gone, sl
+            if op == 14 and rt == 1 and ra == 1:                     # addi r1,r1,N
+                return (sp + sext16(w & 0xffff) if sp != 'unk' else 'unk'), lr, copies, reloads, sl
+            if op == 58 and w & 3 == 0 and ra == 1 and rt != 1:      # ld rt,d(r1)
+                d = sext16(w & 0xfffc)
+                ok = sp != 'unk' and sl == 'saved' and (sp + d, sp + d + 8) == slot
+                return sp, lr, copies - {rt}, (reloads | {rt}) if ok else reloads - {rt}, sl
+            written = gpr_writes(w)
+            if written is None:
+                return UNK
+            if 1 in written:
+                sp = 'unk'                                           # any other write of r1
+            return sp, lr, copies - written, reloads - written, sl
+
+        state = {}
+        work = sorted(roots | other_entries)
+        for r_ in roots:
+            state[r_] = ROOT
+        for e in other_entries:
+            state[e] = merge(state.get(e), UNK)
+        succ = {}
+        for d, ps in preds.items():
+            for p_ in ps:
+                succ.setdefault(p_, []).append(d)
+        rounds = 0
+        while work:
+            rounds += 1
+            if rounds > 64 * (size // 4 + 1):
+                return "the return proof did not settle"
+            n = work.pop()
+            if n in data or n not in state:
+                continue
+            out = step(n, state[n])
+            for d in succ.get(n, []):
+                if d in data:
+                    continue
+                new = merge(state.get(d), out)
+                if d in roots:
+                    new = merge(new, ROOT)
+                if state.get(d) != new:
+                    state[d] = new
+                    work.append(d)
+        # No store through r1 anywhere in the function may reach the slot,
+        # except the proven save.
+        for off in range(0, size, 4):
+            if off in data or off not in state:
+                continue
+            w = be(src, off, 4)
+            sw = stack_write(w)
+            if sw is None:
+                continue
+            sp = state[off][0]
+            if sw[0] == 'unknown' or sp == 'unk':
+                return f"a store through r1 at +0x{off:x} may write the LR save slot, so a blr is a computed jump that"
+            lo = sp + sw[1]
+            if lo < slot[1] and slot[0] < lo + sw[2]:
+                # Only the store the step above took as the original save.
+                if not (state[off][4] == 'none' and step(off, state[off])[4] == 'saved'):
+                    return f"a store at +0x{off:x} overlaps the LR save slot, so a blr is a computed jump that"
+        for r_ in returns:
+            st = state.get(r_)
+            if st is None or st[1] != 'entry':
+                return f"blr at +0x{r_:x}: LR is not provably the entry LR there, a computed jump that"
+        return None
 
     def toc_table(self, obj, sec, toc_sym, addend, width):
         """
@@ -1745,8 +1901,12 @@ COVERAGE_LIMITS = """coverage limits (refused, by design):
   the same address (two loads are never assumed equal); switch (int)
   lowered as cmplwi + sldi (no ABI-extension rule: a 32-bit check does not
   bound a shift of the whole register); and every section with a transfer
-  through LR or CTR that is not a proven switch or a plain blr with LR
-  untouched, which includes a blr after mtlr or a call (non-leaf code)."""
+  through LR or CTR that is not a proven switch or a provable return
+  (back-chain restores ld/lwz r1,0(r1) among them).
+assumed: the program keeps the ABI LR-save-slot contract (nothing writes
+  the slot through a base other than r1); code no modelled edge reaches
+  (landing pads) is not a root of the return proof, and a blr no modelled
+  edge reaches is dead code."""
 
 
 def main():

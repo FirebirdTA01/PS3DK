@@ -1029,6 +1029,196 @@ def case_r3_plain_return():
                 0, 'PASS', sites_verified=2, sites_refused=0)
 
 
+# A non-leaf function as the compilers emit it, with its use of r30 after a call:
+#   mflr r0 ; std r0,16(r1) ; stdu r1,-112(r1) ; addis r30,r2,HA ; bl ext ; nop
+#   ld r10,LO(r30) ; <epilogue>
+# The measured epilogues reload the LR save slot (entry SP + 16, 8 bytes) after
+# addi r1,r1,112 (ld r0,16(r1)) or before it (ld r0,128(r1)).
+
+EPILOGUE = [F.addi(1, 1, 112), F.ld(0, 1, 16), F.mtlr(0), F.BLR]
+EPILOGUE_BEFORE_POP = [F.ld(0, 1, 128), F.addi(1, 1, 112), F.mtlr(0), F.BLR]
+
+
+def nonleaf_user(prologue=None, body=(), epilogue=EPILOGUE):
+    pro = prologue if prologue is not None else [F.mflr(0), F.std(0, 1, 16), F.stdu(1, 1, -112)]
+    words = list(pro) + [F.addis(30, 2), F.bl(0), F.NOP] + list(body) + [F.ld(10, 30)] + list(epilogue)
+    ha = 4 * len(pro)
+    call = ha + 4
+    lo = 4 * (len(pro) + 3 + len(body))
+    o = flow_user(words, ha, lo, branch=(call, 'R_PPC64_REL24', 'ext', 0))
+    return o
+
+
+def nonleaf(name, **kw):
+    d = fresh(name)
+    lk = link(d, [nonleaf_user(**kw), data_obj(), ext_obj()])
+    return check(lk.manifest_path)
+
+
+def case_r4_epilogue():
+    # The standard epilogue: ld r0,16(r1) after the frame is popped.
+    return want(nonleaf('r4-epilogue'), 0, 'PASS', sites_verified=2, sites_refused=0)
+
+
+def case_r4_epilogue_before_pop():
+    # The other measured form: ld r0,N+16(r1) before addi r1,r1,N.
+    return want(nonleaf('r4-epilogue-before-pop', epilogue=EPILOGUE_BEFORE_POP), 0, 'PASS',
+                sites_verified=2, sites_refused=0)
+
+
+def case_r4_backchain():
+    # std r3,0(r1) overwrites the back chain; ld r1,0(r1) then restores a
+    # stack pointer nothing tracks: the reload is not provably the slot.
+    return want(nonleaf('r4-backchain', body=[F.std(3, 1, 0)],
+                        epilogue=[F.ld(1, 1, 0), F.ld(0, 1, 16), F.mtlr(0), F.BLR]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r4_backchain_control():
+    # Control: the same store, the frame popped by addi r1,r1,112.
+    return want(nonleaf('r4-backchain-control', body=[F.std(3, 1, 0)]), 0, 'PASS',
+                sites_verified=2, sites_refused=0)
+
+
+def case_r4_partial_slot_stw():
+    # stw into the saved slot (entry SP + 16 = 128(r1) in the frame).
+    return want(nonleaf('r4-slot-stw', body=[F.stw(3, 1, 128)]), 1, 'INCOMPLETE',
+                sites_verified=0, sites_refused=2)
+
+
+def case_r4_partial_slot_stb():
+    # stb into the last byte of the saved slot.
+    return want(nonleaf('r4-slot-stb', body=[F.stb(3, 1, 135)]), 1, 'INCOMPLETE',
+                sites_verified=0, sites_refused=2)
+
+
+def case_r4_store_beside_slot():
+    # Control: a store just past the slot (entry SP + 24) leaves it intact.
+    return want(nonleaf('r4-slot-beside', body=[F.std(3, 1, 136)]), 0, 'PASS',
+                sites_verified=2, sites_refused=0)
+
+
+def case_r4_divergent_save():
+    # The save happens on one path only: the slot facts differ at the merge.
+    pro = [F.mflr(0), F.beq(8), F.std(0, 1, 16), F.stdu(1, 1, -112)]
+    return want(nonleaf('r4-divergent-save', prologue=pro), 1, 'INCOMPLETE',
+                sites_verified=0, sites_refused=2)
+
+
+def case_r4_mtlr_other_register():
+    # mtlr from a register that was not reloaded from the slot.
+    return want(nonleaf('r4-mtlr-r3', epilogue=[F.addi(1, 1, 112), F.ld(0, 1, 16), F.mtlr(3), F.BLR]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r4_save_after_call():
+    # mflr r31 ; bl ; std r31,16(r1): the save comes after a call.
+    pro = [F.mflr(31), F.stdu(1, 1, -112)]
+    body = [F.std(31, 1, 128)]
+    return want(nonleaf('r4-save-after-call', prologue=pro, body=body), 1, 'INCOMPLETE',
+                sites_verified=0, sites_refused=2)
+
+
+def case_r4_reload_wrong_slot():
+    # The reload reads entry SP + 24, not the slot.
+    return want(nonleaf('r4-reload-24', epilogue=[F.addi(1, 1, 112), F.ld(0, 1, 24), F.mtlr(0), F.BLR]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r4_reload_clobbered():
+    # r0 changes between the reload and the mtlr.
+    return want(nonleaf('r4-reload-clobbered',
+                        epilogue=[F.addi(1, 1, 112), F.ld(0, 1, 16), F.li(0, 0), F.mtlr(0), F.BLR]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r4_mflr_after_mtlr():
+    # mtlr r3 before the mflr: the saved value is not the entry LR.
+    pro = [F.mtlr(3), F.mflr(0), F.std(0, 1, 16), F.stdu(1, 1, -112)]
+    return want(nonleaf('r4-mflr-after-mtlr', prologue=pro), 1, 'INCOMPLETE',
+                sites_verified=0, sites_refused=2)
+
+
+def case_r4_call_no_restore():
+    # A call, then blr with no mtlr: LR holds the call's return address.
+    return want(nonleaf('r4-no-restore', epilogue=[F.addi(1, 1, 112), F.BLR]), 1, 'INCOMPLETE',
+                sites_verified=0, sites_refused=2)
+
+
+def case_r4_slot_store_elsewhere():
+    # A store into the slot on a path that leaves by a tail branch still
+    # breaks the slot contract for the whole function.
+    o = nonleaf_user(body=[F.beq(12), F.std(3, 1, 128), F.b(0)])
+    o.rel('.text.f', 4 * 8, 'R_PPC64_REL24', 'ext', 0)
+    d = fresh('r4-slot-elsewhere')
+    lk = link(d, [o, data_obj(), ext_obj()])
+    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'overlaps the LR save slot',
+                       sites_verified=0, sites_refused=2)
+
+
+def case_r4_named_entry_in_epilogue():
+    # A data word names the epilogue's reload: control may arrive there
+    # with nothing known.
+    o = nonleaf_user()
+    o.section('.data.p', bytes(8), flags='WA', align=8)
+    o.rel('.data.p', 0, 'R_PPC64_ADDR64', '.text.f', 4 * 10)
+    d = fresh('r4-named-epilogue')
+    lk = link(d, [o, data_obj(), ext_obj()])
+    return want(check(lk.manifest_path), 1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r4_indexed_stack_store():
+    # stdx r3,r1,r4: an r1-indexed store at an unknown offset.
+    return want_detail(nonleaf('r4-stdx', body=[F.x_form(149, 3, 1, 4)]), 1, 'INCOMPLETE',
+                       r'may write the LR save slot', sites_verified=0, sites_refused=2)
+
+
+def case_r4_non_copy_save():
+    # std r3,16(r1): the slot holds r3, not the mflr copy.
+    pro = [F.mflr(0), F.std(3, 1, 16), F.stdu(1, 1, -112)]
+    return want(nonleaf('r4-non-copy-save', prologue=pro), 1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r4_backchain_stale_offset():
+    # After ld r1,0(r1) the frame offset 128 no longer names the slot.
+    return want(nonleaf('r4-backchain-stale', epilogue=[F.ld(1, 1, 0), F.ld(0, 1, 128), F.mtlr(0), F.BLR]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r4_store_into_slot_start():
+    # std r3,124(r1) covers entry SP + 12 to + 20: it reaches the slot by its width.
+    return want(nonleaf('r4-slot-start', body=[F.std(3, 1, 124)]), 1, 'INCOMPLETE',
+                sites_verified=0, sites_refused=2)
+
+
+def case_r4_stfd_into_slot_start():
+    # stfd f1,124(r1): an 8-byte D-form store from entry SP + 12 into the slot.
+    stfd = (54 << 26) | (1 << 21) | (1 << 16) | 124
+    return want(nonleaf('r4-stfd-slot-start', body=[stfd]), 1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def call_on_one_path(order):
+    """A call on one of two paths that merge before blr (no mtlr): LR differs at the merge."""
+    if order == 'fall':
+        words = [F.addis(30, 2), F.beq(12), F.bl(0), F.NOP, F.ld(10, 30), F.BLR]
+        call, lo = 8, 16
+    else:
+        words = [F.addis(30, 2), F.beq(12), F.b(12), F.bl(0), F.NOP, F.ld(10, 30), F.BLR]
+        call, lo = 12, 20
+    o = flow_user(words, 0, lo, branch=(call, 'R_PPC64_REL24', 'ext', 0))
+    d = fresh('r4-call-one-path-' + order)
+    lk = link(d, [o, data_obj(), ext_obj()])
+    return want(check(lk.manifest_path), 1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r4_call_on_fallthrough():
+    return call_on_one_path('fall')
+
+
+def case_r4_call_on_taken():
+    return call_on_one_path('taken')
+
+
 def case_jump_table_last():
     # The same switch with its table at the section's end.
     return proven('switch-table-last', table_last=True)
@@ -1231,7 +1421,9 @@ def case_lswi_short():
 
 def case_lswx_clobber():
     # lswx's register count comes from XER: any register may change.
-    return want_detail(flow_case('lswx', [F.addis(9, 2), F.lswx(30, 3, 4), F.ld(10, 9), F.BLR], 0, 8),
+    # The function leaves by a tail branch, so no return proof is involved.
+    return want_detail(flow_case('lswx', [F.addis(9, 2), F.lswx(30, 3, 4), F.ld(10, 9), F.b(0)], 0, 8,
+                                 branch=(12, 'R_PPC64_REL24', 'ext', 0), extra=[ext_obj()]),
                        1, 'INCOMPLETE', r'r9 may change at \+0x4', sites_verified=0, sites_refused=2)
 
 
@@ -1243,7 +1435,9 @@ def case_stfdux_clobber():
 
 def case_unknown_x_form():
     # An X-form the tool does not know is a possible write of any register.
-    return want_detail(flow_case('unknown-x', [F.addis(9, 2), F.x_form(1000, 8, 3, 4), F.ld(10, 9), F.BLR], 0, 8),
+    # The function leaves by a tail branch, so no return proof is involved.
+    return want_detail(flow_case('unknown-x', [F.addis(9, 2), F.x_form(1000, 8, 3, 4), F.ld(10, 9), F.b(0)], 0, 8,
+                                 branch=(12, 'R_PPC64_REL24', 'ext', 0), extra=[ext_obj()]),
                        1, 'INCOMPLETE', r'r9 may change at \+0x4', sites_verified=0, sites_refused=2)
 
 
@@ -1346,6 +1540,29 @@ NEGATIVE_CASES = [
     ('review 3: bclrl is a computed call', case_r3_bclrl),
     ('review 3: bctrl outside a switch is a computed call', case_r3_bctrl),
     ('review 3: a plain blr with LR untouched returns', case_r3_plain_return),
+    ('review 4: the standard non-leaf epilogue returns', case_r4_epilogue),
+    ('review 4: the reload-before-pop epilogue returns', case_r4_epilogue_before_pop),
+    ('review 4: a back-chain restore is refused', case_r4_backchain),
+    ('review 4: back-chain store with addi restore control', case_r4_backchain_control),
+    ('review 4: stw into the LR save slot is refused', case_r4_partial_slot_stw),
+    ('review 4: stb into the LR save slot is refused', case_r4_partial_slot_stb),
+    ('review 4: a store beside the slot control', case_r4_store_beside_slot),
+    ('review 4: a save on one path only is refused', case_r4_divergent_save),
+    ('review 4: mtlr from a non-slot register is refused', case_r4_mtlr_other_register),
+    ('review 4: a save after a call is refused', case_r4_save_after_call),
+    ('review 4: a reload from the wrong offset is refused', case_r4_reload_wrong_slot),
+    ('review 4: a reload changed before mtlr is refused', case_r4_reload_clobbered),
+    ('review 4: mflr after mtlr is not the entry LR', case_r4_mflr_after_mtlr),
+    ('review 4: blr after a call with no restore is refused', case_r4_call_no_restore),
+    ('review 4: a slot store on another path is refused', case_r4_slot_store_elsewhere),
+    ('review 4: a named address in the epilogue is refused', case_r4_named_entry_in_epilogue),
+    ('review 4: an r1-indexed store is refused', case_r4_indexed_stack_store),
+    ('review 4: a save of another register is refused', case_r4_non_copy_save),
+    ('review 4: a stale frame offset after a back-chain restore is refused', case_r4_backchain_stale_offset),
+    ('review 4: a store reaching the slot by its width is refused', case_r4_store_into_slot_start),
+    ('review 4: an stfd reaching the slot by its width is refused', case_r4_stfd_into_slot_start),
+    ('review 4: a call on the fall-through path only is refused', case_r4_call_on_fallthrough),
+    ('review 4: a call on the taken path only is refused', case_r4_call_on_taken),
     ('flow: computed jump with no named table reaches anything', case_jump_table_unknown),
     ('flow: switch without a range check reaches anything', case_jump_table_unbounded),
     ('flow: switch whose checked index changes reaches anything', case_jump_table_index_changed),

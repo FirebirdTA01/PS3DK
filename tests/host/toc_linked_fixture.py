@@ -86,6 +86,22 @@ def mtctr(rs):
     return 0x7c0903a6 | (rs << 21)
 
 
+def mflr(rt):
+    return 0x7c0802a6 | (rt << 21)
+
+
+def std(rs, ra, d=0):
+    return (62 << 26) | (rs << 21) | (ra << 16) | (d & 0xfffc)
+
+
+def stdu(rs, ra, d=0):
+    return std(rs, ra, d) | 1
+
+
+def stb(rs, ra, d=0):
+    return (38 << 26) | (rs << 21) | (ra << 16) | (d & 0xffff)
+
+
 def mtlr(rs):
     return 0x7c0803a6 | (rs << 21)
 
