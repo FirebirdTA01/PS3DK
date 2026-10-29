@@ -5,8 +5,8 @@ Validates that:
 1. samples/sprx/module-export builds cleanly in both ILP32 and LP64 ABIs.
 2. Build outputs land exclusively under the binary build directory, leaving
    samples/ completely clean (no source pollution, validated via full
-   filesystem snapshot including ignored files, with deliberate leak RED
-   and clean GREEN controls).
+   filesystem snapshot including ignored files, with deliberate leak RED,
+   clean GREEN, and pre-existing preservation controls in an isolated copy).
 3. prx-gen check passes for both ILP32 and LP64 modules.
 4. prx-gen exports matches exports.yml.
 5. .ps3dk.module_identity section contains the exact PMI\\1 record and
@@ -94,6 +94,70 @@ def diff_snapshots(before, after):
     return added, removed, modified
 
 
+def verify_cleanliness_gate_controls(sample_src: Path) -> bool:
+    """Validates the cleanliness snapshot gate using an isolated temporary copy.
+
+    Never touches sample_src. Verifies:
+    1. Baseline snapshot captures all files including pre-existing ignored files.
+    2. Exclusive creation ('xb') of an ignored leak is detected (RED control).
+    3. Pre-existing ignored files are never overwritten, mutated, or deleted.
+    4. Removal of the leak restores exact baseline (GREEN control) while
+       preserving pre-existing files intact.
+    """
+    with tempfile.TemporaryDirectory() as fixture_tmp:
+        fixture_dir = Path(fixture_tmp) / "sample_copy"
+        shutil.copytree(sample_src, fixture_dir)
+
+        # Create a pre-existing ignored file to test preservation negative
+        preexisting_file = fixture_dir / "preexisting.fake.sprx"
+        preexisting_payload = b"PREEXISTING_IGNORED_PAYLOAD_MUST_BE_PRESERVED\n"
+        with open(preexisting_file, "xb") as f:
+            f.write(preexisting_payload)
+
+        base_snap = snapshot_directory(fixture_dir)
+        pre_rel = preexisting_file.relative_to(fixture_dir).as_posix()
+        if pre_rel not in base_snap:
+            print("FAIL: cleanliness control: pre-existing ignored file not captured in baseline snapshot")
+            return False
+
+        # Injected leak file created exclusively ('xb')
+        leak_file = fixture_dir / "deliberate_leak.fake.sprx"
+        with open(leak_file, "xb") as f:
+            f.write(b"DELIBERATE_LEAK_TEST_PAYLOAD")
+
+        red_snap = snapshot_directory(fixture_dir)
+        added, removed, modified = diff_snapshots(base_snap, red_snap)
+
+        leak_rel = leak_file.relative_to(fixture_dir).as_posix()
+        if leak_rel not in added:
+            print("FAIL: cleanliness gate RED control failed: deliberate_leak.fake.sprx was not detected")
+            return False
+
+        # Verify pre-existing file was NOT touched or marked added/modified
+        if pre_rel in added or pre_rel in modified:
+            print("FAIL: cleanliness control: pre-existing file was marked added or modified")
+            return False
+
+        if preexisting_file.read_bytes() != preexisting_payload:
+            print("FAIL: cleanliness control: pre-existing file content was mutated")
+            return False
+
+        # Clean GREEN control: unlink only the leak file we created
+        leak_file.unlink()
+        green_snap = snapshot_directory(fixture_dir)
+
+        if green_snap != base_snap:
+            print("FAIL: cleanliness gate GREEN control failed after removing leak file")
+            return False
+
+        if not preexisting_file.is_file() or preexisting_file.read_bytes() != preexisting_payload:
+            print("FAIL: cleanliness control: pre-existing file was not preserved across clean control")
+            return False
+
+    print("PASS: cleanliness gate RED, GREEN, and preservation controls verified")
+    return True
+
+
 def verify_stub_archive(objdump: Path, archive_path: Path, expected_abi: str):
     res = subprocess.run([str(objdump), "-d", str(archive_path)], capture_output=True, text=True)
     if res.returncode != 0:
@@ -170,27 +234,12 @@ def main():
         print(f"FAIL: sample directory {sample_src} not found")
         return 1
 
+    # Verify cleanliness gate in an isolated copy; never touches sample_src
+    if not verify_cleanliness_gate_controls(sample_src):
+        return 1
+
     # Record baseline filesystem snapshot of sample directory before any builds
     before_snap = snapshot_directory(sample_src)
-
-    # Deliberate leak RED/GREEN control to verify that snapshot detects ignored files
-    leak_file = sample_src / "leak_test.fake.sprx"
-    try:
-        leak_file.write_bytes(b"DELIBERATE_LEAK_TEST_PAYLOAD")
-        red_snap = snapshot_directory(sample_src)
-        added, _, _ = diff_snapshots(before_snap, red_snap)
-        if leak_file.name not in added:
-            print("FAIL: cleanliness gate RED control failed: leak_test.fake.sprx was not detected")
-            return 1
-    finally:
-        if leak_file.is_file():
-            leak_file.unlink()
-
-    green_snap = snapshot_directory(sample_src)
-    if green_snap != before_snap:
-        print("FAIL: cleanliness gate GREEN control failed after removing leak file")
-        return 1
-    print("PASS: cleanliness gate RED and GREEN controls verified")
 
     ilp32_tc = root / "cmake/ps3-ppu-toolchain.cmake"
     lp64_tc = root / "cmake/ps3-ppu-toolchain-lp64.cmake"
