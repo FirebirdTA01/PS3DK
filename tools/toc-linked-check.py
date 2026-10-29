@@ -1098,6 +1098,7 @@ class Checker:
             for t in succ:
                 preds.setdefault(t, []).append(off)
         entries = {0} | calls
+        named_from = {}
         for s_ in obj.symbols.values():
             if s_['ndx'] == str(sec.nr) and s_['type'] != 'SECTION':
                 entries.add(s_['val'])
@@ -1111,6 +1112,7 @@ class Checker:
                 sym = obj.symbols.get(r['info'] >> 32)
                 if sym and sym['ndx'] == str(sec.nr):
                     entries.add(sym['val'] + r['addend'])
+                    named_from.setdefault(sym['val'] + r['addend'], set()).add(other.name)
         # Switch proofs, data words and entry seeding settle together.  An
         # entry that is no function entry starts with nothing known, r2
         # included, so a dispatch such an entry can reach has no bounded
@@ -1155,13 +1157,46 @@ class Checker:
                 todo.extend(succ_of.get(c, []))
             return seen
 
+        def r2_known(data):
+            """
+            Where r2 provably still holds the entry TOC, over the current
+            graph (proven tables as data, their dispatches by their tables):
+            no path from a write of r2 reaches the instruction.  Unknown
+            entries need no seeding here: a dispatch one reaches loses its
+            proof anyway, and any unproven bcctr makes the section unknown.
+            """
+            succ_all = code_succ(data)
+            starts = []
+            for off in range(0, size, 4):
+                if off not in data:
+                    written = gpr_writes(be(src, off, 4))
+                    if written is None or 2 in written:
+                        starts.extend(succ_all.get(off, []))
+            return set(range(0, size, 4)) - reach(starts, succ_all)
+
+        def executable_evidence(j, data):
+            """A table word a branch, a fall-through from code, a label or a
+            reference other than the .toc address of the table names."""
+            t, n = proofs[j][2][0]
+            for wd in range(t, t + 4 * n, 4):
+                if any(p_ not in data for p_ in with_edges(False).get(wd, [])):
+                    return True
+                if any(s_['ndx'] == str(sec.nr) and s_['type'] != 'SECTION' and s_['val'] == wd
+                       for s_ in obj.symbols.values()):
+                    return True
+                if named_from.get(wd, set()) - ({'.toc'} if wd == t else set()):
+                    return True
+            return False
+
         settled = False
+        everywhere = frozenset(range(0, size, 4))
         for _ in range(2 * (size // 4) + 4):
             entries = base | seeded
+            r2 = everywhere          # optimistic; the proofs must hold under the r2 they imply
             proofs.clear()
             for j in indirect:
                 if j not in banned:
-                    proof = self.switch_targets(obj, sec, src, size, rels, preds, entries, j)
+                    proof = self.switch_targets(obj, sec, src, size, rels, preds, entries, j, r2)
                     if proof:
                         proofs[j] = proof
             for _i in range(4 * len(indirect) + 1):
@@ -1175,7 +1210,7 @@ class Checker:
                 # that falls into another dispatch is one more path into it.
                 known = with_edges(False)
                 for j in broken:
-                    proof = self.switch_targets(obj, sec, src, size, rels, known, entries, j)
+                    proof = self.switch_targets(obj, sec, src, size, rels, known, entries, j, r2)
                     if proof and proof != proofs[j]:
                         proofs[j] = proof
                     else:
@@ -1185,7 +1220,12 @@ class Checker:
             data = {t + 4 * i for j in proofs for t, n in proofs[j][2] for i in range(n)}
             succ_of = code_succ(data)
             reached_unknown = reach(entries - fn_roots, succ_of)
-            drop = {j for j in proofs if j in reached_unknown}
+            r2 = r2_known(data)
+            def holds_under_r2(j):
+                again = self.switch_targets(obj, sec, src, size, rels, with_edges(False), entries, j, r2)
+                return again is not None and again[1] == proofs[j][1]
+            drop = {j for j in proofs if j in reached_unknown or executable_evidence(j, data)
+                    or not holds_under_r2(j)}
             if drop:
                 banned |= drop
                 continue
@@ -1369,7 +1409,7 @@ class Checker:
             return None
         return tsym['val'] + hit[0]['addend']
 
-    def switch_targets(self, obj, sec, src, size, rels, preds, entries, j):
+    def switch_targets(self, obj, sec, src, size, rels, preds, entries, j, r2=frozenset()):
         """
         Prove the targets of the computed jump at +j as a switch.  The
         straight-line sequence ending at it (each instruction entered only
@@ -1425,7 +1465,7 @@ class Checker:
         table = None
         top = -1
         for path in paths:
-            got = self.run_switch_path(obj, sec, src, path, at)
+            got = self.run_switch_path(obj, sec, src, path, at, r2)
             if got is None or (table is not None and got[0] != table):
                 return None
             table, top = got[0], max(top, got[1])
@@ -1441,7 +1481,7 @@ class Checker:
             targets.add(d)
         return expect, sorted(targets), [(t, k + 1)]
 
-    def run_switch_path(self, obj, sec, src, path, at):
+    def run_switch_path(self, obj, sec, src, path, at, r2=frozenset()):
         """Symbolic run of one path ending at a bcctr: (T, K) when CTR = T + table[i <= K], else None."""
         regs, crs, bounds = {}, {}, {}
         ctr = None
@@ -1499,7 +1539,7 @@ class Checker:
                 if c and bi % 4 == 1 and ((bo == 12 and fall) or (bo == 4 and taken)):
                     bound(*c)
                 continue
-            if op == 15 and ra == 2 and len(here) == 1 and here[0]['rtype'] == 'R_PPC64_TOC16_HA' \
+            if op == 15 and ra == 2 and off in r2 and len(here) == 1 and here[0]['rtype'] == 'R_PPC64_TOC16_HA' \
                     and here[0]['offset'] == off + 2:
                 kill({rt})
                 regs[rt] = ('ha', here[0]['info'] >> 32, here[0]['addend'])
@@ -1509,7 +1549,7 @@ class Checker:
                 r = here[0]
                 src_ok = ((r['rtype'] in ('R_PPC64_TOC16_LO', 'R_PPC64_TOC16_LO_DS') and ra != 0
                            and regs.get(ra) == ('ha', r['info'] >> 32, r['addend']))
-                          or (r['rtype'] in ('R_PPC64_TOC16', 'R_PPC64_TOC16_DS') and ra == 2))
+                          or (r['rtype'] in ('R_PPC64_TOC16', 'R_PPC64_TOC16_DS') and ra == 2 and off in r2))
                 t = self.toc_table(obj, sec, r['info'] >> 32, r['addend'], load) if src_ok else None
                 kill({rt})
                 if t is not None:

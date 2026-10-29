@@ -723,7 +723,10 @@ def switch_user(check=('cmplwi', 3, 1), bc=(12, 1), scale=('rldic', 30), clobber
         o.rel('.toc', es, ent, '.text.j', L['T'])
     else:
         o.rel('.toc', es, ent, 'g_a')
-    o.rel('.toc', 2 * es, ent, '.text.j', L['T'] + 4)
+    if wrong_base:
+        # A second table address, T+4: only the wrong-base variant loads it
+        # (any other reference into the table would make its words code).
+        o.rel('.toc', 2 * es, ent, '.text.j', L['T'] + 4)
     o.rel('.text.j', at['ha9'] + 2, 'R_PPC64_TOC16_HA', '.LC1')
     o.rel('.text.j', at['ld10'] + 2, lo, '.LC1')
     if wrong_base:
@@ -1386,6 +1389,106 @@ def case_r7_head_entry():
     return switch_cycle('r7-head-entry', 'table-last', 12)
 
 
+def table_exec_user(entry_target):
+    """
+    A bounded switch at 0..32 whose table at +0x28/+0x2c holds -4 (decodes as
+    fnmsub, falling through), its case at +0x30..+0x38, and an orphan
+    labelled +0x3c that branches to entry_target.
+    """
+    words = [F.cmpldi(3, 1), F.bgt(44), F.addis(9, 2), F.rldic(3, 3, 2, 30),
+             F.ld(10, 9), F.lwax(9, 10, 3), F.add(9, 9, 10), F.mtctr(9), F.bctr(),
+             F.BLR, 0xfffffffc, 0xfffffffc, F.addis(12, 2), F.ld(10, 12), F.BLR,
+             F.b(entry_target - 60)]
+    o = from_obj('table-code.o')
+    o.section('.text.k', F.code(*words))
+    o.sym('main', '.text.k', 0, bind='GLOBAL', stype='FUNC')
+    o.sym('orphan', '.text.k', 60)
+    o.section('.toc', bytes(16), flags='WA', align=8)
+    o.sym('.LC0', '.toc', 0)
+    o.sym('.LC1', '.toc', 8)
+    o.sym('g_a', 'UND', bind='GLOBAL')
+    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.k', 40)
+    for off, typ, sym in [(10, 'R_PPC64_TOC16_HA', '.LC1'), (18, 'R_PPC64_TOC16_LO_DS', '.LC1'),
+                          (50, 'R_PPC64_TOC16_HA', '.LC0'), (54, 'R_PPC64_TOC16_LO_DS', '.LC0')]:
+        o.rel('.text.k', off, typ, sym)
+    return o
+
+
+def table_exec(name, entry_target):
+    d = fresh(name)
+    lk = link(d, [table_exec_user(entry_target), data_obj()])
+    return want(check(lk.manifest_path), 1, 'INCOMPLETE', sites_verified=0, sites_failed=0, sites_refused=4)
+
+
+def case_r8_branch_to_table():
+    # A branch into the table makes its words code: no data, no proof.
+    return table_exec('r8-branch-to-table', 40)
+
+
+def case_r8_branch_to_code():
+    # Control: the orphan branches to the case code instead.
+    return table_exec('r8-branch-to-code', 48)
+
+
+def case_r8_branch_to_root():
+    # Control: the orphan branches to the function entry.
+    return table_exec('r8-branch-to-root', 0)
+
+
+def r2_switch_user(prefix, direct=False):
+    """prefix ; a fully reachable bounded switch whose table base comes through r2
+    (addis/ld pair, or with direct one ld r10,LO(r2) with TOC16_DS)."""
+    ha, lo = (F.NOP, F.ld(10, 2)) if direct else (F.addis(9, 2), F.ld(10, 9))
+    words = [prefix, F.cmpldi(3, 1), F.bgt(44), ha, F.rldic(3, 3, 2, 30),
+             lo, F.lwax(9, 10, 3), F.add(9, 9, 10), F.mtctr(9), F.bctr(),
+             F.addis(12, 2), F.ld(10, 12), F.BLR, F.BLR, (-16) & 0xffffffff, (-16) & 0xffffffff]
+    o = from_obj('r2-switch.o')
+    o.section('.text.k', F.code(*words))
+    o.sym('main', '.text.k', 0, bind='GLOBAL', stype='FUNC')
+    o.section('.toc', bytes(16), flags='WA', align=8)
+    o.sym('.LC0', '.toc', 0)
+    o.sym('.LC1', '.toc', 8)
+    o.sym('g_a', 'UND', bind='GLOBAL')
+    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.k', 56)
+    table = [(22, 'R_PPC64_TOC16_DS', '.LC1')] if direct else [(14, 'R_PPC64_TOC16_HA', '.LC1'),
+                                                                 (22, 'R_PPC64_TOC16_LO_DS', '.LC1')]
+    for off, typ, sym in table + [(42, 'R_PPC64_TOC16_HA', '.LC0'), (46, 'R_PPC64_TOC16_LO_DS', '.LC0')]:
+        o.rel('.text.k', off, typ, sym)
+    return o
+
+
+def case_r8_r2_written_direct():
+    # The same with the table address loaded straight from r2 (TOC16_DS): the
+    # dispatch is unproven, so the case pair is refused; the single r2 load is
+    # still checked on its linked displacement, which does not depend on r2.
+    d = fresh('r8-r2-written-direct')
+    lk = link(d, [r2_switch_user(F.addi(2, 4, 0), direct=True), data_obj()])
+    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'no proven switch',
+                       sites_verified=1, sites_failed=0, sites_refused=2)
+
+
+def case_r8_r8_control_direct():
+    d = fresh('r8-r8-control-direct')
+    lk = link(d, [r2_switch_user(F.addi(8, 4, 0), direct=True), data_obj()])
+    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=3, sites_refused=0)
+
+
+def case_r8_r2_written():
+    # addi r2,r4,0 before the switch: r2 is no TOC base, so the table address is unknown.
+    d = fresh('r8-r2-written')
+    lk = link(d, [r2_switch_user(F.addi(2, 4, 0)), data_obj()])
+    return want(check(lk.manifest_path), 1, 'INCOMPLETE', sites_verified=0, sites_failed=0, sites_refused=4)
+
+
+def case_r8_r8_control():
+    # Control: the same write into r8.
+    d = fresh('r8-r8-control')
+    lk = link(d, [r2_switch_user(F.addi(8, 4, 0)), data_obj()])
+    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=4, sites_refused=0)
+
+
 def case_r5_named_reached_blr():
     # Control: the named blr is also reached from the function.
     return want(orphan_case('r5-named-reached-blr', [F.addis(9, 2), F.ld(10, 9), F.b(4), F.BLR], 12),
@@ -1398,7 +1501,7 @@ def case_r5_named_reached_mtlr():
                 1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
 
 
-def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False):
+def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False, label_t1=False, ref_t1=False):
     """
     A switch whose every instruction is reachable, so a broken proof shows:
          cmpldi r3,1 ; bgt dflt
@@ -1435,6 +1538,11 @@ def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False):
     o.rel('.text.k', at['lo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC1')
     o.rel('.text.k', at['cha'] + 2, 'R_PPC64_TOC16_HA', '.LC0')
     o.rel('.text.k', at['clo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    if label_t1:
+        o.sym('t1_label', '.text.k', L['T'] + 4)
+    if ref_t1:
+        o.section('.data.ref', bytes(8), flags='WA', align=8)
+        o.rel('.data.ref', 0, 'R_PPC64_ADDR64', '.text.k', L['T'] + 4)
     return o
 
 
@@ -1479,6 +1587,16 @@ def case_oc_nop_control():
 
 def case_oc_decrementing_bcctr():
     return one_case('oc-bcctr-dec', False, final_bo=16)
+
+
+def case_oc_label_in_table():
+    # A label at the table's second word is executable-entry evidence.
+    return one_case('oc-label-t1', False, label_t1=True)
+
+
+def case_oc_data_ref_in_table():
+    # A data reference to the table's second word: a possible entry there.
+    return one_case('oc-ref-t1', False, ref_t1=True)
 
 
 def case_oc_ra_zero():
@@ -1834,6 +1952,15 @@ NEGATIVE_CASES = [
     ('review 7: table words between bctr and case are no path', case_r7_table_middle),
     ('review 7: the middle-table dispatch named by data control', case_r7_named_dispatch_middle),
     ('review 7: an unknown entry at the range check loses the proof', case_r7_head_entry),
+    ('review 8: a branch into a switch table makes it code', case_r8_branch_to_table),
+    ('review 8: an orphan branch to the case control', case_r8_branch_to_code),
+    ('review 8: an orphan branch to the function entry control', case_r8_branch_to_root),
+    ('review 8: a write of r2 before a switch leaves its table unknown', case_r8_r2_written),
+    ('review 8: the same write into r8 control', case_r8_r8_control),
+    ('review 8: a write of r2 before a direct TOC16 table load', case_r8_r2_written_direct),
+    ('review 8: the direct-load r8 control', case_r8_r8_control_direct),
+    ('review 8: a label inside a switch table makes it code', case_oc_label_in_table),
+    ('review 8: a data reference into a switch table makes it code', case_oc_data_ref_in_table),
     ('review 5: a named, reached blr control', case_r5_named_reached_blr),
     ('review 5: a named, reached mtlr control', case_r5_named_reached_mtlr),
     ('review 4: the standard non-leaf epilogue returns', case_r4_epilogue),
