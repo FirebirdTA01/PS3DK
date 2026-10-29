@@ -1316,6 +1316,76 @@ def case_r6_stdux_frame():
                 1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
 
 
+def switch_cycle_user(layout, named_at=None):
+    """
+    The seventh review's shapes: a leaf at 0..8 (addis/ld/blr) and, unreached
+    from it, a bounded switch at 12..44 whose case branches back to 12.
+    table-last: case b at 48, table at 52/56; table-middle: table at 48/52
+    between the bctr and the case at 56.  named_at names that offset by a
+    data relocation.
+    """
+    words = [F.addis(12, 2), F.ld(10, 12), F.BLR,
+             F.cmpldi(3, 1), F.bgt(32), F.addis(9, 2), F.rldic(3, 3, 2, 30),
+             F.ld(10, 9), F.lwax(9, 10, 3), F.add(9, 9, 10), F.mtctr(9), F.bctr(),
+             F.b(-36), (-4) & 0xffffffff, (-4) & 0xffffffff]
+    table = 52
+    if layout == 'table-middle':
+        words[4] = F.bgt(40)
+        words[12:] = [8, 8, F.b(-44)]
+        table = 48
+    o = from_obj('cycle-switch.o')
+    o.section('.text.k', F.code(*words))
+    o.sym('main_leaf', '.text.k', 0, bind='GLOBAL', stype='FUNC')
+    o.section('.toc', bytes(16), flags='WA', align=8)
+    o.sym('.LC0', '.toc', 0)
+    o.sym('.LC1', '.toc', 8)
+    o.sym('g_a', 'UND', bind='GLOBAL')
+    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.k', table)
+    o.rel('.text.k', 2, 'R_PPC64_TOC16_HA', '.LC0')
+    o.rel('.text.k', 6, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    o.rel('.text.k', 22, 'R_PPC64_TOC16_HA', '.LC1')
+    o.rel('.text.k', 30, 'R_PPC64_TOC16_LO_DS', '.LC1')
+    if named_at is not None:
+        o.section('.data.entry', bytes(8), flags='WA', align=8)
+        o.rel('.data.entry', 0, 'R_PPC64_ADDR64', '.text.k', named_at)
+    return o
+
+
+def switch_cycle(name, layout, named_at=None):
+    d = fresh(name)
+    lk = link(d, [switch_cycle_user(layout, named_at), data_obj()])
+    return want(check(lk.manifest_path), 1, 'INCOMPLETE', sites_verified=0, sites_failed=0, sites_refused=4)
+
+
+def case_r7_unreached_switch_cycle():
+    # Nothing reaches the dispatch but its own cycle: it is entered unknown,
+    # its proof goes, and its bctr may reach the leaf's use.
+    return switch_cycle('r7-table-last', 'table-last')
+
+
+def case_r7_named_dispatch_last():
+    # Control: the mtctr named by data.
+    return switch_cycle('r7-table-last-named', 'table-last', 40)
+
+
+def case_r7_table_middle():
+    # The table between the bctr and its case: its words are data, not a
+    # path from the named table address into the case.
+    return switch_cycle('r7-table-middle', 'table-middle')
+
+
+def case_r7_named_dispatch_middle():
+    # Control: the mtctr named by data.
+    return switch_cycle('r7-table-middle-named', 'table-middle', 40)
+
+
+def case_r7_head_entry():
+    # An unknown entry exactly at the range check: r2, and so the table
+    # address, is unknown there, so the dispatch is no proven switch.
+    return switch_cycle('r7-head-entry', 'table-last', 12)
+
+
 def case_r5_named_reached_blr():
     # Control: the named blr is also reached from the function.
     return want(orphan_case('r5-named-reached-blr', [F.addis(9, 2), F.ld(10, 9), F.b(4), F.BLR], 12),
@@ -1471,9 +1541,12 @@ def case_jump_table_ble():
 
 
 def case_jump_table_target_skips_ha():
-    # A proven table entry lands on case 0's use, past its addis.
-    return want_detail(switch_case('switch-skip-ha', case0_at='lo'), 1, 'INCOMPLETE',
-                       r'r12', sites_verified=4, sites_refused=2)
+    # A proven table entry lands on case 0's use, past its addis.  Changed in
+    # review 7: that addis is reached by nothing but a fall-through from the
+    # table's last word, which is data, so it is an orphan entered with
+    # nothing known, and the blr it reaches is no proven return.
+    return want(switch_case('switch-skip-ha', case0_at='lo'), 1, 'INCOMPLETE',
+                sites_verified=0, sites_failed=0, sites_refused=6)
 
 
 def case_jump_table_entry_inside():
@@ -1755,6 +1828,11 @@ NEGATIVE_CASES = [
     ('review 6: mflr r1 makes the stack pointer unknown', case_r6_mflr_r1),
     ('review 6: mflr r3 control', case_r6_mflr_r3),
     ('review 6: stdux r1,r1,r0 makes the stack pointer unknown', case_r6_stdux_frame),
+    ('review 7: an unreached switch cycle loses its proof', case_r7_unreached_switch_cycle),
+    ('review 7: the same dispatch named by data control', case_r7_named_dispatch_last),
+    ('review 7: table words between bctr and case are no path', case_r7_table_middle),
+    ('review 7: the middle-table dispatch named by data control', case_r7_named_dispatch_middle),
+    ('review 7: an unknown entry at the range check loses the proof', case_r7_head_entry),
     ('review 5: a named, reached blr control', case_r5_named_reached_blr),
     ('review 5: a named, reached mtlr control', case_r5_named_reached_mtlr),
     ('review 4: the standard non-leaf epilogue returns', case_r4_epilogue),

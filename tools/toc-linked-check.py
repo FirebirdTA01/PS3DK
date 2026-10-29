@@ -1111,13 +1111,18 @@ class Checker:
                 sym = obj.symbols.get(r['info'] >> 32)
                 if sym and sym['ndx'] == str(sec.nr):
                     entries.add(sym['val'] + r['addend'])
-        # Instructions no direct edge reaches are entered from outside.
-        direct = set(preds)
-        proofs = {}
-        for j in indirect:
-            proof = self.switch_targets(obj, sec, src, size, rels, preds, entries, j)
-            if proof:
-                proofs[j] = proof
+        # Switch proofs, data words and entry seeding settle together.  An
+        # entry that is no function entry starts with nothing known, r2
+        # included, so a dispatch such an entry can reach has no bounded
+        # table address: its proof goes (head included).  Only the table
+        # words of proofs that stand are data: no root, no node, no edge.
+        # Every instruction with no code predecessor, and every one no root
+        # reaches over code, is such an entry.  Repeat until nothing changes.
+        base = set(entries)
+        fn_roots = {0} | calls | {s_['val'] for s_ in obj.symbols.values()
+                                  if s_['ndx'] == str(sec.nr) and s_['type'] == 'FUNC'}
+        proofs, banned, seeded = {}, set(), set()
+
         def with_edges(wild):
             out = {k: list(v) for k, v in preds.items()}
             for j in indirect:
@@ -1131,44 +1136,71 @@ class Checker:
                     out.setdefault(d, []).append(j)
             return out
 
-        for _ in range(4 * len(indirect) + 1):
-            full = with_edges(True)
-            # A proof holds only while nothing else enters its sequences.
-            broken = [j for j, (expect, _, _) in proofs.items()
-                      if any(c in entries or sorted(full.get(c, [])) != ps for c, ps in expect.items())]
-            if not broken:
-                break
-            # Prove a broken jump again over the edges proven so far: a case
-            # that falls into another dispatch is one more path into it.
-            known = with_edges(False)
-            for j in broken:
-                proof = self.switch_targets(obj, sec, src, size, rels, known, entries, j)
-                if proof and proof != proofs[j]:
-                    proofs[j] = proof
-                else:
-                    del proofs[j]
-        else:
-            proofs = {}
-            full = with_edges(True)
-        reached = direct | {d for j in proofs for d in proofs[j][1]}
-        entries |= {off for off in range(0, size, 4) if off not in reached}
-        # Having a predecessor is not being reachable: every instruction no
-        # root (function entry, named address, instruction without a
-        # modelled predecessor) reaches over the modelled edges, an
-        # unreached cycle for one, is an entry with nothing known (proven
-        # switch-table words are dropped as data where entries are used).
-        succ_of = {}
-        for d, ps in with_edges(False).items():
-            for p_ in ps:
-                succ_of.setdefault(p_, []).append(d)
-        seen, todo = set(), [e for e in entries if 0 <= e < size]
-        while todo:
-            c = todo.pop()
-            if c in seen:
+        def code_succ(data):
+            succ_of = {}
+            for d, ps in with_edges(False).items():
+                for p_ in ps:
+                    if p_ not in data and d not in data:
+                        succ_of.setdefault(p_, []).append(d)
+            return succ_of
+
+        def reach(starts, succ_of):
+            seen, todo = set(), [c for c in starts if 0 <= c < size]
+            while todo:
+                c = todo.pop()
+                if c in seen:
+                    continue
+                seen.add(c)
+                todo.extend(succ_of.get(c, []))
+            return seen
+
+        settled = False
+        for _ in range(2 * (size // 4) + 4):
+            entries = base | seeded
+            proofs.clear()
+            for j in indirect:
+                if j not in banned:
+                    proof = self.switch_targets(obj, sec, src, size, rels, preds, entries, j)
+                    if proof:
+                        proofs[j] = proof
+            for _i in range(4 * len(indirect) + 1):
+                full = with_edges(True)
+                # A proof holds only while nothing else enters its sequences.
+                broken = [j for j, (expect, _, _) in proofs.items()
+                          if any(c in entries or sorted(full.get(c, [])) != ps for c, ps in expect.items())]
+                if not broken:
+                    break
+                # Prove a broken jump again over the edges proven so far: a case
+                # that falls into another dispatch is one more path into it.
+                known = with_edges(False)
+                for j in broken:
+                    proof = self.switch_targets(obj, sec, src, size, rels, known, entries, j)
+                    if proof and proof != proofs[j]:
+                        proofs[j] = proof
+                    else:
+                        del proofs[j]
+            else:
+                proofs.clear()
+            data = {t + 4 * i for j in proofs for t, n in proofs[j][2] for i in range(n)}
+            succ_of = code_succ(data)
+            reached_unknown = reach((entries - fn_roots) - data, succ_of)
+            drop = {j for j in proofs if j in reached_unknown}
+            if drop:
+                banned |= drop
                 continue
-            seen.add(c)
-            todo.extend(succ_of.get(c, []))
-        entries |= {off for off in range(0, size, 4) if off not in seen}
+            has_pred = {d for ds in succ_of.values() for d in ds}
+            no_pred = {off for off in range(0, size, 4) if off not in has_pred and off not in data}
+            seen = reach((entries | no_pred) - data, succ_of)
+            new = (no_pred | {off for off in range(0, size, 4) if off not in seen}) - data
+            if new <= seeded:
+                settled = True
+                break
+            seeded |= new
+        if not settled:
+            proofs.clear()
+            seeded = set(range(0, size, 4))
+        entries = base | seeded
+        full = with_edges(True)
         unknown = unknown or next((f"computed jump through CTR at +0x{j:x} (no proven switch)"
                                    for j in indirect if j not in proofs), None)
         if not unknown and returns:
