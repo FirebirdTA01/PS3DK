@@ -26,6 +26,7 @@
 #include <cell/error.h>   /* CELL_OK */
 
 #include <stdint.h>
+#include <ppu-types.h>   /* ATTRIBUTE_PRXPTR */
 
 #ifdef __cplusplus
 extern "C" {
@@ -226,7 +227,7 @@ typedef enum {
 struct CellSpurs;
 
 typedef struct CellPngDecExtThreadInParam {
-    struct CellSpurs *spurs;
+    struct CellSpurs *spurs ATTRIBUTE_PRXPTR;
     uint8_t           priority[8];
     uint32_t          maxContention;
 } CellPngDecExtThreadInParam;
@@ -249,8 +250,8 @@ typedef int32_t (*CellPngDecCbControlStream)(CellPngDecStrmInfo  *info,
                                              void                *arg);
 
 typedef struct CellPngDecCbCtrlStrm {
-    CellPngDecCbControlStream cbCtrlStrmFunc;
-    void                     *cbCtrlStrmArg;
+    CellPngDecCbControlStream cbCtrlStrmFunc ATTRIBUTE_PRXPTR;
+    void                     *cbCtrlStrmArg ATTRIBUTE_PRXPTR;
 } CellPngDecCbCtrlStrm;
 
 typedef struct CellPngDecOpnParam {
@@ -287,7 +288,7 @@ typedef struct CellPngDecDispInfo {
 } CellPngDecDispInfo;
 
 typedef struct CellPngDecDispParam {
-    void *nextOutputImage;
+    void *nextOutputImage ATTRIBUTE_PRXPTR;
 } CellPngDecDispParam;
 
 typedef int32_t (*CellPngDecCbControlDisp)(CellPngDecDispInfo  *info,
@@ -295,8 +296,8 @@ typedef int32_t (*CellPngDecCbControlDisp)(CellPngDecDispInfo  *info,
                                            void                *arg);
 
 typedef struct CellPngDecCbCtrlDisp {
-    CellPngDecCbControlDisp cbCtrlDispFunc;
-    void                   *cbCtrlDispArg;
+    CellPngDecCbControlDisp cbCtrlDispFunc ATTRIBUTE_PRXPTR;
+    void                   *cbCtrlDispArg ATTRIBUTE_PRXPTR;
 } CellPngDecCbCtrlDisp;
 
 /* ------------------------------------------------------------------ *

@@ -1077,15 +1077,15 @@ lp64	cell/codec/libatrac3plus.h	CellAtracExtRes	struct	12	4	pSpurs@0 priority@4
 lp64	cell/codec/pamf.h	CellPamfEp	struct	24	8	indexN@0 nThRefPictureOffset@4 pts@8 rpnOffset@16
 lp64	cell/codec/pamf.h	CellPamfEpIterator	struct	16	4	isPamf@0 index@4 num@8 pCur@12
 lp64	cell/codec/pamf.h	CellPamfReader	struct	128	8	internalData@0
-lp64	cell/codec/pngdec.h	CellPngDecCbCtrlDisp	struct	16	8	cbCtrlDispFunc@0 cbCtrlDispArg@8
-lp64	cell/codec/pngdec.h	CellPngDecCbCtrlStrm	struct	16	8	cbCtrlStrmFunc@0 cbCtrlStrmArg@8
+lp64	cell/codec/pngdec.h	CellPngDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtrlDispArg@4
+lp64	cell/codec/pngdec.h	CellPngDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 lp64	cell/codec/pngdec.h	CellPngDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 lp64	cell/codec/pngdec.h	CellPngDecDataOutInfo	struct	16	4	chunkInformation@0 numText@4 numUnknownChunk@8 status@12
-lp64	cell/codec/pngdec.h	CellPngDecDispParam	struct	8	8	nextOutputImage@0
+lp64	cell/codec/pngdec.h	CellPngDecDispParam	struct	4	4	nextOutputImage@0
 lp64	cell/codec/pngdec.h	CellPngDecExtInParam	struct	12	4	bufferMode@0 outputCounts@4 spuMode@8
 lp64	cell/codec/pngdec.h	CellPngDecExtInfo	struct	8	8	reserved@0
 lp64	cell/codec/pngdec.h	CellPngDecExtOutParam	struct	16	8	outputWidthByte@0 outputHeight@8
-lp64	cell/codec/pngdec.h	CellPngDecExtThreadInParam	struct	24	8	spurs@0 priority@8 maxContention@16
+lp64	cell/codec/pngdec.h	CellPngDecExtThreadInParam	struct	16	4	spurs@0 priority@4 maxContention@12
 lp64	cell/codec/pngdec.h	CellPngDecExtThreadOutParam	struct	4	4	reserved@0
 lp64	cell/codec/pngdec.h	CellPngDecInParam	struct	28	4	commandPtr@0 outputMode@4 outputColorSpace@8 outputBitDepth@12 outputPackFlag@16 outputAlphaSelect@20 outputColorAlpha@24
 lp64	cell/codec/pngdec.h	CellPngDecInfo	struct	28	4	imageWidth@0 imageHeight@4 numComponents@8 colorSpace@12 bitDepth@16 interlaceMethod@20 chunkInformation@24
@@ -1095,15 +1095,15 @@ lp64	cell/codec/pngdec.h	CellPngDecOutParam	struct	40	8	outputWidthByte@0 output
 lp64	cell/codec/pngdec.h	CellPngDecSrc	struct	32	8	srcSelect@0 fileName@4 fileOffset@8 fileSize@16 streamPtr@20 streamSize@24 spuThreadEnable@28
 lp64	cell/codec/pngdec.h	CellPngDecThreadInParam	struct	28	4	spuThreadEnable@0 ppuThreadPriority@4 spuThreadPriority@8 cbCtrlMallocFunc@12 cbCtrlMallocArg@16 cbCtrlFreeFunc@20 cbCtrlFreeArg@24
 lp64	cell/codec/pngdec.h	CellPngDecThreadOutParam	struct	4	4	pngCodecVersion@0
-lp64	cell/codec/pngdec.h	struct CellPngDecCbCtrlDisp	struct	16	8	cbCtrlDispFunc@0 cbCtrlDispArg@8
-lp64	cell/codec/pngdec.h	struct CellPngDecCbCtrlStrm	struct	16	8	cbCtrlStrmFunc@0 cbCtrlStrmArg@8
+lp64	cell/codec/pngdec.h	struct CellPngDecCbCtrlDisp	struct	8	4	cbCtrlDispFunc@0 cbCtrlDispArg@4
+lp64	cell/codec/pngdec.h	struct CellPngDecCbCtrlStrm	struct	8	4	cbCtrlStrmFunc@0 cbCtrlStrmArg@4
 lp64	cell/codec/pngdec.h	struct CellPngDecDataCtrlParam	struct	8	8	outputBytesPerLine@0
 lp64	cell/codec/pngdec.h	struct CellPngDecDataOutInfo	struct	16	4	chunkInformation@0 numText@4 numUnknownChunk@8 status@12
-lp64	cell/codec/pngdec.h	struct CellPngDecDispParam	struct	8	8	nextOutputImage@0
+lp64	cell/codec/pngdec.h	struct CellPngDecDispParam	struct	4	4	nextOutputImage@0
 lp64	cell/codec/pngdec.h	struct CellPngDecExtInParam	struct	12	4	bufferMode@0 outputCounts@4 spuMode@8
 lp64	cell/codec/pngdec.h	struct CellPngDecExtInfo	struct	8	8	reserved@0
 lp64	cell/codec/pngdec.h	struct CellPngDecExtOutParam	struct	16	8	outputWidthByte@0 outputHeight@8
-lp64	cell/codec/pngdec.h	struct CellPngDecExtThreadInParam	struct	24	8	spurs@0 priority@8 maxContention@16
+lp64	cell/codec/pngdec.h	struct CellPngDecExtThreadInParam	struct	16	4	spurs@0 priority@4 maxContention@12
 lp64	cell/codec/pngdec.h	struct CellPngDecExtThreadOutParam	struct	4	4	reserved@0
 lp64	cell/codec/pngdec.h	struct CellPngDecInParam	struct	28	4	commandPtr@0 outputMode@4 outputColorSpace@8 outputBitDepth@12 outputPackFlag@16 outputAlphaSelect@20 outputColorAlpha@24
 lp64	cell/codec/pngdec.h	struct CellPngDecInfo	struct	28	4	imageWidth@0 imageHeight@4 numComponents@8 colorSpace@12 bitDepth@16 interlaceMethod@20 chunkInformation@24

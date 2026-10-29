@@ -56,10 +56,6 @@
 *CellOskDialogCallbackReturnParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellOskDialogInputFieldInfo	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellOskDialogSeparateWindowOption	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellPngDecCbCtrlDisp	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellPngDecCbCtrlStrm	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellPngDecDispParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellPngDecExtThreadInParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellScreenShotSetParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellSpursInfo	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellStorageDataSetParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
