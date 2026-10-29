@@ -107,6 +107,12 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **LP64 heap corruption after small allocations.** The block allocator now
+  reserves enough space for a free block's boundary tags and both links. This
+  prevents the predecessor link from overlapping the next block's boundary tag,
+  which could crash `rsxFree` during PSGL buffer data replacement. ILP32 retains
+  its existing minimum block size. Rebuild and relink programs using the runtime.
+
 - **PRX module version byte order.** `prx-gen` stores the module-info
   version as minor then major at offset `0x02`, as required by the system
   ABI, and `prx-gen check` reports it as major.minor. CLI versions and

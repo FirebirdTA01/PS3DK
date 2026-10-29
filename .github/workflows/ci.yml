@@ -520,6 +520,9 @@ jobs:
       - name: Test PSGL waits consume fresh GPU completion labels
         run: bash tests/host/psgl-wait-label-test.sh
 
+      - name: Test small heap blocks preserve free-list links and payloads
+        run: bash tests/host/heap-small-block-test.sh
+
       # Positive/negative fixture test for TOC mid-entry relocation audit tool.
       - name: Test the TOC mid-entry relocation audit tool
         run: bash tests/host/toc-midentry-audit-test.sh

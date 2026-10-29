@@ -5,6 +5,10 @@ name,relative_self,timeout_seconds,expected_state,required_tty_regex,forbidden_t
 # passing sensor row. Bound each run to 60 s and require GEM_API_OK (or the
 # explicitly requested GEM_QUIT/GEM_REFUSED path), with cleanup checked.
 librt-posix,tests/regression/librt-posix/librt-posix.fake.self,25,RAN-CLEAN,librt-posix: PASS,ENOSYS
+heap-small-blocks-ilp32,tests/regression/heap-small-blocks/heap-small-blocks-ilp32.fake.self,30,RAN-CLEAN,(?m)^HEAP_SMALL_OK tests=10 pass=10 fail=0\r?$,HEAP_SMALL_FAIL|result=FAIL
+heap-small-blocks-lp64,tests/regression/heap-small-blocks/heap-small-blocks-lp64.fake.self,30,RAN-CLEAN,(?m)^HEAP_SMALL_OK tests=10 pass=10 fail=0\r?$,HEAP_SMALL_FAIL|result=FAIL
+psgl-buffer-churn-ilp32,tests/regression/psgl-buffer-churn/psgl-buffer-churn-ilp32.fake.self,60,RAN-CLEAN,(?m)^CHURN_OK\r?$,HEAP_SMALL_FAIL
+psgl-buffer-churn-lp64,tests/regression/psgl-buffer-churn/psgl-buffer-churn-lp64.fake.self,60,RAN-CLEAN,(?m)^CHURN_OK\r?$,HEAP_SMALL_FAIL
 sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT_OK,PRX_FAIL
 sprx-module-macros,tests/regression/sprx-module-macros/sprx-module-macros.fake.self,30,RAN-CLEAN,PRX_MODULE_STOP_OK,PRX_FAIL
 # sys-tty: the SDK-owned <sys/tty.h> write path (system call 403) under the system and PSL1GHT names.

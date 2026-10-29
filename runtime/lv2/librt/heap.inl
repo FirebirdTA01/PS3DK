@@ -134,7 +134,10 @@ __heap_align_down(uintptr_t value, uintptr_t alignment)
 static __inline__ uintptr_t
 __heap_min_block_size(uintptr_t page_size)
 {
-	return HEAP_BLOCK_HEADER_SIZE + page_size;
+	/* A freed block must hold both links as well as its boundary tags.
+	 * Header + one page is only 24 bytes on LP64: its prev link would
+	 * overlap the following block's prev_size field. */
+	return __heap_align_up(sizeof(heap_block), page_size);
 }
 
 static __inline__ bool
