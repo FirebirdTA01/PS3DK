@@ -339,6 +339,16 @@ jobs:
       - name: Self-test the record-layout checker
         run: python3 tests/sdk/struct-layout-selftest.py
 
+      # Data-model parity of the same baseline: every record's ilp32 and lp64
+      # rows must agree, except the records listed with a reason category in
+      # tests/sdk/struct-layout-model-parity-allow.txt (a differing record that
+      # is not listed, or a stale entry, fails the step).  Host-only, no PS3
+      # compiler needed.
+      - name: Test ilp32/lp64 struct-layout model parity
+        run: |
+          python3 tests/sdk/struct-layout-model-parity-test.py --selftest
+          python3 tests/sdk/struct-layout-model-parity-test.py
+
       # Skips without PS3DEV; every lv2- and library-facing record against
       # the current-layout baseline (sizeof, alignof, member offsets).
       - name: Test SDK record layouts against the current-layout baseline

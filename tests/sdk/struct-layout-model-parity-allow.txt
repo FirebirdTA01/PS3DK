@@ -1,0 +1,85 @@
+#
+# Records whose ilp32 and lp64 rows in struct-layout-table.tsv differ (or are
+# unpaired), with the one-line reason category the difference falls under.
+#
+# struct-layout-model-parity-test.py pairs the two rows of every record (spu is
+# excluded -- a different data model, not an ilp32/lp64 row), compares
+# size/alignment/every member offset, and fails when a differing record is not
+# listed here, when a record present in only one model is not listed here, or when
+# an entry here matches no record that currently differs (a stale entry), so this
+# file cannot quietly outlive the layout differences it was written to justify.
+#
+# The invariant being guarded: a pointer that crosses the PPU<->lv2, PPU<->SPU,
+# or PPU<->system-module boundary (PRX / lv2 / sysutil / sync2) is a 32-bit
+# effective address (mode(SI)) even under PPU LP64.  A record that a system
+# module reads therefore has to lay out identically in ilp32 and lp64; a record
+# in this list has at least one pointer member that violates that rule.  Each
+# entry's category names which kind of violation the checker is allowing.
+#
+# Reason categories (one per line, after the tab):
+#   prx-boundary-open - a pointer member of the record would widen from 4 to 8 bytes
+#                 under PPU LP64, but the record is read by a system module
+#                 (PRX / lv2 / sysutil / sync2) that keeps 32-bit pointers. The
+#                 member is missing the 32-bit PRX attribute it needs; layout is
+#                 a probable SDK bug. Tracked under card t_849c499c.
+#   known-open  - the record is already recorded in struct-layout-known-open.txt
+#                 (system-domain / pending), so its layout is tracked there.
+#   spu-side    - the record is shared with SPU code; its pointer members are SPU
+#                 local-store / 64-bit effective addresses that do not grow under
+#                 PPU LP64, so any cross-model delta the PPU checker reports is an
+#                 artifact of the SPU-side layout only, not an SDK defect.
+#   defect-open - the record is passed between PPU and SPU with its layout
+#                 expected identical in ilp32 and lp64, but the SDK header does
+#                 not give it that. Carded for a follow-up fix; the reason line
+#                 carries the card id.
+#
+# Each line is: <type fnmatch glob><TAB><category: detail>
+# A leading-* glob ("*CellFont") matches both the "CellFont" typedef row and the
+# "struct CellFont" tag row that the table carries for some records.
+#
+
+*CellFont	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontConfig	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontGetOutlineVertexesIF	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontGlyph	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontGraphicsDrawContext	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontImageTransInfo	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontInitGraphicsConfigGcm	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontLibraryConfigFT	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontRenderSurface	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontRenderSurfaceGcm	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontRenderer	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontRendererConfig	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellFontVertexesGlyph	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellGcmContextData	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellGifDecCbCtrlDisp	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellGifDecCbCtrlStrm	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellGifDecDispParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellGifDecInParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellJpgDecCbCtrlDisp	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellJpgDecCbCtrlStrm	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellJpgDecDispParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellJpgDecExtInParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellJpgDecExtThreadInParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellMusicExportSetParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellOskDialogCallbackReturnParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellOskDialogInputFieldInfo	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellOskDialogSeparateWindowOption	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellPngDecCbCtrlDisp	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellPngDecCbCtrlStrm	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellPngDecDispParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellPngDecExtThreadInParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellScreenShotSetParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellSpursInfo	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellStorageDataSetParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellSync2QueueAttribute	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellSync2ThreadConfig	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellSysCacheParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellUserInfoListSet	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*CellUserInfoTypeSet	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*sys_lwcond_t	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*sys_spu_image_t	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
+*pthread_attr_t	known-open: listed in struct-layout-known-open.txt (system-domain layout tracked there)
+*stat	known-open: listed in struct-layout-known-open.txt (system-domain layout tracked there)
+*CellSpursJobContext2	spu-side: SPU-side record (cell/spurs/job_descriptor.h); members are SPU local-store pointers / 64-bit EAs that do not grow under PPU LP64, so the cross-model delta the PPU checker reports is a measurement artifact, not an SDK defect
+*CellSpursTaskSaveConfig	defect-open: PPU record passed to the SPU task runtime; LP64 widens void *eaContext to 8 bytes (24/8 vs 12/4) which breaks the shared PPU<->SPU layout; card t_94fe68dd
