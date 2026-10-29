@@ -96,6 +96,11 @@ The version stamped into builds is generated from the most recent
   version as minor then major at offset `0x02`, as required by the system
   ABI, and `prx-gen check` reports it as major.minor. CLI versions and
   `SYS_MODULE_INFO` arguments retain their major/minor order.
+- **PRX segment and event queue headers.** `sys_prx_segment_info_t` names its
+  size fields `filesz` and `memsz`, as the system ABI spells them; the older
+  `filesize` and `memsize` names still compile and refer to the same fields.
+  `sys_event_queue_receive` is now declared by `<sys/event_queue.h>` as well as
+  `<sys/event.h>`.
 
 - **GIF, JPEG and PNG decoder callback, display and input parameter records.** The
   records named on card `t_849c499c` in `<cell/codec/gifdec.h>`,

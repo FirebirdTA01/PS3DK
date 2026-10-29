@@ -23,6 +23,13 @@ CHECK(segments_is_32_bits, sizeof(((sysPrxModuleInfo *)0)->segments) == 4);
 CHECK(idlist_is_32_bits, sizeof(((sysPrxModuleList *)0)->idlist) == 4);
 CHECK(old_spelling_is_same_type, sizeof(sysPrxUser_pchar) == sizeof(sysPrxUserPchar));
 
+/* Segment sizes use the system spelling filesz/memsz; the older filesize/memsize
+ * names alias the same storage, so the record layout does not change. */
+CHECK(segment_info_is_40_bytes, sizeof(sys_prx_segment_info_t) == 40);
+CHECK(filesz_aliases_filesize, __builtin_offsetof(sys_prx_segment_info_t, filesz) == __builtin_offsetof(sys_prx_segment_info_t, filesize));
+CHECK(memsz_aliases_memsize, __builtin_offsetof(sys_prx_segment_info_t, memsz) == __builtin_offsetof(sys_prx_segment_info_t, memsize));
+CHECK(filesz_is_64_bits, sizeof(((sys_prx_segment_info_t *)0)->filesz) == 8);
+
 sysPrxId (*const load_module)(const char *, sysPrxFlags, sysPrxLoadModuleOption *) = sysPrxLoadModule;
 s32 (*const get_module_info)(sysPrxId, sysPrxFlags, sysPrxModuleInfo *) = sysPrxGetModuleInfo;
 s32 (*const get_module_list)(sysPrxFlags, sysPrxModuleList *) = sysPrxGetModuleList;

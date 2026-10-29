@@ -83,6 +83,19 @@ LV2_SYSCALL sysEventPortDisconnect(sys_event_port_t portId)
     lv2syscall1(137, portId);
     return_to_user_prog(s32);
 }
+
+/* snake_case forwarder matching the platform ABI's <sys/event.h> shape.
+ * Kept in this header so the whole queue surface is reachable from whichever
+ * of <sys/event.h> and <sys/event_queue.h> is included first; <sys/event.h>
+ * includes this one, so the symbol cannot be duplicated. */
+
+static inline int sys_event_queue_receive(sys_event_queue_t eventQ,
+                                          sys_event_t *event,
+                                          uint64_t timeout_usec)
+{
+    return (int)sysEventQueueReceive(eventQ, event, timeout_usec);
+}
+
 #ifdef __cplusplus
 }
 #endif

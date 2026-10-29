@@ -59,12 +59,10 @@ static inline int sys_event_queue_destroy(sys_event_queue_t eventQ, int32_t mode
     return (int)sysEventQueueDestroy(eventQ, (s32)mode);
 }
 
-static inline int sys_event_queue_receive(sys_event_queue_t eventQ,
-                                          sys_event_t *event,
-                                          uint64_t timeout_usec)
-{
-    return (int)sysEventQueueReceive(eventQ, event, timeout_usec);
-}
+/* sys_event_queue_receive now lives in <sys/event_queue.h>, which this
+ * umbrella already includes; the symbol is therefore visible without
+ * duplicating the body (two `static inline` bodies with the same name
+ * in one translation unit would be a redefinition error). */
 
 static inline int sys_event_queue_drain(sys_event_queue_t eventQ)
 {

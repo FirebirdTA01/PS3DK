@@ -34,8 +34,11 @@ typedef u64 sysPrxFlags;
 
 typedef struct _sys_prx_segment_info {
     u64 base;
-    u64 filesize;
-    u64 memsize;
+    /* filesz / filesize (and memsz / memsize) are the same storage: the system
+     * ABI spells these filesz/memsz, the old spelling is kept as an alias so
+     * both continue to compile. Anonymous unions keep the layout identical. */
+    __extension__ union { u64 filesz; u64 filesize; };
+    __extension__ union { u64 memsz;  u64 memsize; };
     u64 index;
     u64 type;
 } sysPrxSegmentInfo;
