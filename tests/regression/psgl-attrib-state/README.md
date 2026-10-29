@@ -11,11 +11,11 @@ This adds commands on those transitions; no performance improvement is claimed.
 The normalization repair covers unsigned-byte GL inputs; the existing
 unsigned-short conversion still needs its own semantics audit. Direct-Cg
 physical ATTR7 byte conversion is unchanged.
-Unnormalized byte inputs currently require size 4. Sizes 1-3 report
-INVALID_OPERATION and preserve state, rather than submitting a smaller
-UB256 descriptor. This is an implementation limit: RPCS3 enforces size 4,
-but the rule has not been checked on hardware. The negative rows never
-draw a rejected-but-accepted descriptor on the old implementation.
+Unnormalized byte inputs of sizes 1-3 are staged as four floats with GL
+component defaults; size 4 retains its UB256 descriptor. The small-byte
+conversion does not depend on whether hardware accepts smaller UB256
+descriptors. The dedicated small-byte rows check component defaults,
+client/VBO sources and indexed draws.
 Expected totals are 12 checks for normalization and 7 for disabled arrays.
 
 The direct-Cg fixture uses `psgl_cg_create_program_from_memory` to load

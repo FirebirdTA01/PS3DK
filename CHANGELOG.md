@@ -18,6 +18,12 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **Small unnormalized byte attributes in PSGL.** Linked GL programs accept
+  `UNSIGNED_BYTE` inputs of sizes 1–3 from client arrays and VBOs, staging
+  integer values as floats with the missing-component defaults. Indexed
+  draws stage client and converted attributes from the EBO's vertex extent;
+  mapped or insufficient input storage is rejected before drawing.
+
 - **PSGL client-array scratch lifetime.** Wait for queued GPU reads before
   wrapping or growing client-array upload storage, and unmap replaced storage
   before freeing it. A completion timeout or unmap failure retains the old

@@ -2328,6 +2328,89 @@ static uint32_t psgl_gl_client_element_size(const PSGLvertexAttribState *attrib)
     return psgl_attrib_element_size(attrib);
 }
 
+static int psgl_gl_small_byte_attrib(const PSGLcontext *context, unsigned location)
+{
+    const PSGLvertexAttribState *attrib = &context->gl_attribs[location];
+    return attrib->enabled && attrib->type == GL_UNSIGNED_BYTE &&
+           !context->gl_attrib_normalized[location] &&
+           attrib->size >= 1 && attrib->size <= 3;
+}
+
+/* Stage [0, vertices), retaining the original first/index values at the draw.
+   Small unnormalized bytes use float4 with explicit GL component defaults;
+   other client inputs retain their existing storage type. */
+static int psgl_emit_gl_vertex_arrays(PSGLcontext *context, uint64_t vertices)
+{
+    struct upload {
+        const uint8_t *source;
+        uint32_t stride, element;
+        int convert;
+    } uploads[PSGL_MAX_GENERIC_ATTRIBS] = {{0}};
+    uint64_t required = 0;
+    uint8_t *scratch;
+    uint32_t scratch_offset, cursor = 0;
+    for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
+        int location = context->gl_hw_to_location[hw];
+        if (location < 0) continue;
+        PSGLvertexAttribState *attrib = &context->gl_attribs[location];
+        struct upload *upload = &uploads[hw];
+        upload->convert = psgl_gl_small_byte_attrib(context, (unsigned)location);
+        upload->element = upload->convert ? 16u : psgl_gl_client_element_size(attrib);
+        if (!upload->element) continue;
+        if (!vertices || vertices > INT32_MAX) {
+            psgl_gl_error(GL_OUT_OF_MEMORY); return 0;
+        }
+        upload->stride = psgl_attrib_stride(attrib);
+        uint64_t span = (vertices - 1u) * upload->stride + psgl_attrib_element_size(attrib);
+        upload->source = (const uint8_t *)attrib->pointer;
+        if (attrib->buffer_name) {
+            PSGLbufferObject *buffer = psgl_find_buffer(attrib->buffer_name);
+            if (!buffer || !buffer->address || buffer->mapped ||
+                attrib->buffer_offset > buffer->size ||
+                span > buffer->size - attrib->buffer_offset) {
+                psgl_gl_error(GL_INVALID_OPERATION); return 0;
+            }
+            upload->source = (const uint8_t *)buffer->address + attrib->buffer_offset;
+        }
+        if (!upload->source || span > SIZE_MAX ||
+            span > UINTPTR_MAX - (uintptr_t)upload->source) {
+            psgl_gl_error(GL_INVALID_OPERATION); return 0;
+        }
+        required += (vertices * upload->element + PSGL_BUFFER_ALIGNMENT - 1u) &
+                    ~((uint64_t)PSGL_BUFFER_ALIGNMENT - 1u);
+    }
+    if (!required) return 1;
+    if (required > UINT32_MAX - PSGL_CLIENT_ARRAY_ALIGNMENT ||
+        !psgl_alloc_client_array_scratch((uint32_t)required, &scratch, &scratch_offset)) {
+        psgl_gl_error(GL_OUT_OF_MEMORY); return 0;
+    }
+    for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
+        const struct upload *upload = &uploads[hw];
+        if (!upload->element) continue;
+        unsigned location = (unsigned)context->gl_hw_to_location[hw];
+        PSGLvertexAttribState *attrib = &context->gl_attribs[location];
+        if (upload->convert) {
+            float *dst = (float *)(scratch + cursor);
+            for (uint32_t i = 0; i < (uint32_t)vertices; ++i) {
+                const uint8_t *src = upload->source + (size_t)i * upload->stride;
+                dst[0] = dst[1] = dst[2] = 0.0f;
+                dst[3] = 1.0f;
+                for (GLint c = 0; c < attrib->size; ++c) dst[c] = (float)src[c];
+                dst += 4;
+            }
+        } else {
+            psgl_copy_client_attrib(scratch + cursor, attrib, 0, (GLsizei)vertices,
+                                   upload->element, upload->stride);
+        }
+        cellGcmSetVertexDataArray(context->gcm, (uint8_t)hw, 0,
+            (uint8_t)upload->element, upload->convert ? 4u : (uint8_t)attrib->size,
+            upload->convert ? CELL_GCM_VERTEX_F : psgl_gl_routed_vertex_type(context, location),
+            CELL_GCM_LOCATION_MAIN, scratch_offset + cursor);
+        cursor += psgl_align_u32((uint32_t)vertices * upload->element, PSGL_BUFFER_ALIGNMENT);
+    }
+    return 1;
+}
+
 static void psgl_emit_vertex_arrays(PSGLcontext *context)
 {
     if (!context || !context->gcm) return;
@@ -2350,6 +2433,7 @@ static void psgl_emit_vertex_arrays(PSGLcontext *context)
                 continue;
             }
             if (!attrib->buffer_name) continue; /* Uploaded at draw time. */
+            if (psgl_gl_small_byte_attrib(context, (unsigned)location)) continue;
             PSGLbufferObject *buffer = psgl_find_buffer(attrib->buffer_name);
             uint8_t type = psgl_gl_routed_vertex_type(context, (unsigned)location);
             if (!buffer || !buffer->address || !type) continue;
@@ -2410,44 +2494,8 @@ static int psgl_emit_client_vertex_arrays(PSGLcontext *context,
     uint32_t scratch_offset = 0u;
     uint32_t cursor = 0u;
     if (!context || !context->gcm || first < 0 || count <= 0) return 0;
-    if (context->gl_attrib_routing) {
-        uint64_t vertices = (uint64_t)(uint32_t)first + (uint32_t)count;
-        uint64_t required = 0;
-        for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
-            int location = context->gl_hw_to_location[hw];
-            if (location < 0) continue;
-            PSGLvertexAttribState *attrib = &context->gl_attribs[location];
-            uint32_t element = psgl_gl_client_element_size(attrib);
-            uint64_t span = (vertices - 1u) * psgl_attrib_stride(attrib) + element;
-            if (element && (span > SIZE_MAX || (uintptr_t)attrib->pointer > UINTPTR_MAX - span)) {
-                psgl_gl_error(GL_INVALID_OPERATION); return 0;
-            }
-            if (element) required += (vertices * element + PSGL_BUFFER_ALIGNMENT - 1u) &
-                                      ~((uint64_t)PSGL_BUFFER_ALIGNMENT - 1u);
-        }
-        if (!required) return 1;
-        if (vertices > INT32_MAX || required > UINT32_MAX - PSGL_CLIENT_ARRAY_ALIGNMENT ||
-            !psgl_alloc_client_array_scratch((uint32_t)required, &scratch, &scratch_offset)) {
-            psgl_gl_error(GL_OUT_OF_MEMORY); return 0;
-        }
-        for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
-            int location = context->gl_hw_to_location[hw];
-            if (location < 0) continue;
-            PSGLvertexAttribState *attrib = &context->gl_attribs[location];
-            uint32_t element = psgl_gl_client_element_size(attrib);
-            if (!element) continue;
-            /* Keep first's index semantics: upload [0, first+count) below
-               and issue the original DrawArrays first. */
-            psgl_copy_client_attrib(scratch + cursor, attrib, 0, (GLsizei)vertices,
-                                     element, psgl_attrib_stride(attrib));
-            cellGcmSetVertexDataArray(context->gcm, (uint8_t)hw, 0,
-                (uint8_t)element, (uint8_t)attrib->size,
-                psgl_gl_routed_vertex_type(context, (unsigned)location), CELL_GCM_LOCATION_MAIN,
-                scratch_offset + cursor);
-            cursor += psgl_align_u32((uint32_t)vertices * element, PSGL_BUFFER_ALIGNMENT);
-        }
-        return 1;
-    }
+    if (context->gl_attrib_routing)
+        return psgl_emit_gl_vertex_arrays(context, (uint64_t)(uint32_t)first + (uint32_t)count);
     for (uint32_t i = 0; i < PSGL_MAX_VERTEX_ATTRIBS; i++) {
         uint32_t element_size =
             psgl_client_attrib_upload_size(&context->attribs[i]);
@@ -5560,10 +5608,40 @@ void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
     if (!context || !context->gcm || count <= 0 || !primitive ||
         index_type == 0xffu)
         return;
+    if (!psgl_validate_draw_state(context)) return;
     buffer = psgl_find_buffer(context->bound_element_array_buffer);
+    if (context->gl_attrib_routing) {
+        uintptr_t begin = (uintptr_t)indices;
+        uint32_t width = type == GL_UNSIGNED_SHORT ? 2u : 4u;
+        uint64_t bytes = (uint64_t)(uint32_t)count * width;
+        if (!buffer || !buffer->address || buffer->mapped ||
+            begin > buffer->size || bytes > buffer->size - begin ||
+            begin > UINT32_MAX - buffer->offset) {
+            psgl_gl_error(GL_INVALID_OPERATION); return;
+        }
+        int upload = 0;
+        for (uint32_t hw = 0; hw < PSGL_MAX_GENERIC_ATTRIBS; ++hw) {
+            int location = context->gl_hw_to_location[hw];
+            if (location >= 0 &&
+                (psgl_gl_small_byte_attrib(context, (unsigned)location) ||
+                 psgl_gl_client_element_size(&context->gl_attribs[location]))) {
+                upload = 1; break;
+            }
+        }
+        if (upload) {
+            const uint8_t *src = (const uint8_t *)buffer->address + begin;
+            uint32_t maximum = 0;
+            for (uint32_t i = 0; i < (uint32_t)count; ++i, src += width) {
+                /* PPU indices are big-endian; byte reads permit unaligned EBO offsets. */
+                uint32_t index = ((uint32_t)src[0] << 8) | src[1];
+                if (width == 4u) index = (index << 16) | ((uint32_t)src[2] << 8) | src[3];
+                if (index > maximum) maximum = index;
+            }
+            if (!psgl_emit_gl_vertex_arrays(context, (uint64_t)maximum + 1u)) return;
+        }
+    }
     if (!buffer || !buffer->address) return;
     offset = buffer->offset + (uint32_t)(uintptr_t)indices;
-    if (!psgl_validate_draw_state(context)) return;
     cellGcmSetDrawIndexArray(context->gcm, (uint8_t)primitive,
                              (uint32_t)count, index_type,
                              buffer->location, offset);

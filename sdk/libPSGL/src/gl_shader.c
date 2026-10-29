@@ -775,11 +775,6 @@ GLAPI void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
     if (type != GL_FLOAT && type != GL_UNSIGNED_BYTE && type != GL_UNSIGNED_SHORT) {
         psgl_gl_error(GL_INVALID_ENUM); return;
     }
-    /* The current unnormalized-byte path emits a four-component UB256
-       descriptor. Smaller inputs need a conversion path, not that encoding. */
-    if (type == GL_UNSIGNED_BYTE && !normalized && size != 4) {
-        psgl_gl_error(GL_INVALID_OPERATION); return;
-    }
     if (stride > 255) { psgl_gl_error(GL_INVALID_OPERATION); return; }
     if (context->bound_array_buffer && (uintptr_t)pointer > UINT32_MAX) {
         psgl_gl_error(GL_INVALID_OPERATION); return;

@@ -63,12 +63,11 @@ int main(void)
     for(GLint size=1;size<=3;++size){
         glVertexAttribPointer(2,size,GL_UNSIGNED_BYTE,GL_FALSE,4,bytes);
         GLenum error=glGetError();
-        check(error==GL_INVALID_OPERATION,"small unnormalized input refused");
-        if(error==GL_INVALID_OPERATION){
-            draw(255,0,0,"rejected size preserves pointer");
+        check(error==GL_NO_ERROR,"small unnormalized input accepted");
+        if(error==GL_NO_ERROR){
+            draw(255,0,0,"small input retains integer value");
         }else{
-            /* The RED must not submit an invalid UB256 descriptor. */
-            check(0,"rejected size preserves pointer");
+            check(0,"small input retains integer value");
             glVertexAttribPointer(2,4,GL_UNSIGNED_BYTE,GL_FALSE,4,bytes);
         }
     }
