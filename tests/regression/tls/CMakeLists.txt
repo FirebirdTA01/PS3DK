@@ -20,9 +20,14 @@ if(NOT EXISTS "${_sample}/CMakeLists.txt")
         "fix the path here rather than duplicating the source.")
 endif()
 
+# Ensure the subproject builds into its own binary dir rather than
+# inheriting an outer PS3_SELF_OUTPUT_DIRECTORY:
+unset(PS3_SELF_OUTPUT_DIRECTORY)
+unset(PS3_SELF_OUTPUT_DIRECTORY CACHE)
+
 add_subdirectory("${_sample}" "${CMAKE_CURRENT_BINARY_DIR}/hello-ppu-tls")
 
-set(_self "${_sample}/hello-ppu-tls.fake.self")
+set(_self "${CMAKE_CURRENT_BINARY_DIR}/hello-ppu-tls/hello-ppu-tls.fake.self")
 
 add_custom_target(tls ALL
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different

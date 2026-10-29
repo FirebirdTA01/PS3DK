@@ -36,13 +36,18 @@ foreach(_dir hello-sprx-export hello-sprx-import)
     endif()
 endforeach()
 
+# Ensure the subprojects build into their own binary dirs rather than
+# inheriting an outer PS3_SELF_OUTPUT_DIRECTORY:
+unset(PS3_SELF_OUTPUT_DIRECTORY)
+unset(PS3_SELF_OUTPUT_DIRECTORY CACHE)
+
 add_subdirectory("${_samples}/hello-sprx-export" "${CMAKE_CURRENT_BINARY_DIR}/hello-sprx-export")
 add_subdirectory("${_samples}/hello-sprx-import" "${CMAKE_CURRENT_BINARY_DIR}/hello-sprx-import")
 
-# ps3_add_prx / ps3_add_self write their artefacts next to the sample's own
-# CMakeLists, so stage the pair here where the harness and /app_home expect it.
-set(_module "${_samples}/hello-sprx-export/hello-sprx-export.fake.sprx")
-set(_loader "${_samples}/hello-sprx-import/hello-sprx-import.fake.self")
+# Subprojects build their artefacts under their own binary directories;
+# stage the pair here where the harness and /app_home expect it.
+set(_module "${CMAKE_CURRENT_BINARY_DIR}/hello-sprx-export/hello-sprx-export.fake.sprx")
+set(_loader "${CMAKE_CURRENT_BINARY_DIR}/hello-sprx-import/hello-sprx-import.fake.self")
 
 add_custom_target(sprx-load ALL
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different

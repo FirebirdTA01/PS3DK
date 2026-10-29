@@ -25,11 +25,12 @@ ps3_bin2s(hello-ppu-png data/test.png)
 # pkg-build step that copies pkg_files/* picks it up automatically.
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/assets/ICON0.PNG"
-    "${CMAKE_CURRENT_SOURCE_DIR}/pkg_files/USRDIR/ps3dk.png"
+    "${CMAKE_CURRENT_BINARY_DIR}/pkg_files/USRDIR/ps3dk.png"
     COPYONLY)
 
 ps3_add_self(hello-ppu-png)
 
 ps3_add_pkg(hello-ppu-png
     APPID     "SYUT00023"
-    CONTENTID "UP0001-SYUT00023_00-PS3DKSAMPLES0000")
+    CONTENTID "UP0001-SYUT00023_00-PS3DKSAMPLES0000"
+    PKGFILES  "${CMAKE_CURRENT_BINARY_DIR}/pkg_files")

@@ -100,7 +100,8 @@ foreach ($probe in $probeDirs) {
             "-S", $probe.FullName,
             "-B", $buildDir,
             "-G", $Generator,
-            "-DCMAKE_TOOLCHAIN_FILE=$toolchain"
+            "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+            "-DPS3_SELF_OUTPUT_DIRECTORY=$($probe.FullName)"
         )
         if ($cmakeMakeProgram) {
             $configureArgs += "-DCMAKE_MAKE_PROGRAM=$cmakeMakeProgram"

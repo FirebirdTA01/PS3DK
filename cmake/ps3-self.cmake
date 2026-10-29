@@ -358,14 +358,14 @@ function(ps3_add_self target)
     elseif(PS3_SELF_OUTPUT_DIRECTORY)
         set(_self_out_dir "${PS3_SELF_OUTPUT_DIRECTORY}")
     else()
-        set(_self_out_dir "${CMAKE_CURRENT_SOURCE_DIR}")
+        set(_self_out_dir "${CMAKE_CURRENT_BINARY_DIR}")
     endif()
     get_filename_component(_self_out_dir "${_self_out_dir}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 
     # The unstripped .elf comes from CMake's add_executable target and
-    # lives in the build dir; only the post-build artefacts move out
-    # to the destination directory (default CMAKE_CURRENT_SOURCE_DIR
-    # next to CMakeLists.txt matching legacy Makefile convention).
+    # lives in the build dir; post-build artefacts move to the destination
+    # directory (default CMAKE_CURRENT_BINARY_DIR; override per-call with
+    # OUTPUT_DIRECTORY or globally with PS3_SELF_OUTPUT_DIRECTORY).
     set(_elf       "$<TARGET_FILE:${target}>")
     set(_stripped  "${_self_out_dir}/${target}.elf")
     set(_self      "${_self_out_dir}/${target}.self")
@@ -402,7 +402,7 @@ endfunction()
 # ps3_add_sprx(...) is an alias kept for callers that prefer the file suffix.
 # -----------------------------------------------------------------------------
 function(ps3_add_prx target)
-    cmake_parse_arguments(_PSP "SIGN" "NAME;VERSION;ATTRIBUTES;EXPORTS;OUTPUT;OUTPUT_NAME" "" ${ARGN})
+    cmake_parse_arguments(_PSP "SIGN" "NAME;VERSION;ATTRIBUTES;EXPORTS;OUTPUT;OUTPUT_NAME;OUTPUT_DIRECTORY" "" ${ARGN})
 
     if(_PSP_UNPARSED_ARGUMENTS)
         message(WARNING "ps3_add_prx: unrecognised arguments ignored: ${_PSP_UNPARSED_ARGUMENTS}")
@@ -459,27 +459,40 @@ function(ps3_add_prx target)
     endforeach()
 
 
-    target_link_options(${target} PRIVATE
-        "-specs=${PS3DK}/ppu/lib/lv2-prx.specs"
-        "-nostartfiles"
-        "-Wl,-q"
-        "-Wl,--no-warn-rwx-segments"
-        "-Wl,-T,${PS3DK}/ppu/lib/lv2-prx.ld")
-    target_link_libraries(${target} PRIVATE "${PS3DK}/ppu/lib/lv2-prx-crt.o")
+    if(NOT _PS3_PRX_SKIP_LINK_FLAGS AND (CMAKE_CROSSCOMPILING OR CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"))
+        target_link_options(${target} PRIVATE
+            "-specs=${PS3DK}/ppu/lib/lv2-prx.specs"
+            "-nostartfiles"
+            "-Wl,-q"
+            "-Wl,--no-warn-rwx-segments"
+            "-Wl,-T,${PS3DK}/ppu/lib/lv2-prx.ld")
+        target_link_libraries(${target} PRIVATE "${PS3DK}/ppu/lib/lv2-prx-crt.o")
+    endif()
 
     set(_prx_output "${_PSP_OUTPUT}")
-    if(NOT _prx_output)
+    if(_prx_output)
+        get_filename_component(_prx_output "${_prx_output}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+        get_filename_component(_prx_dir "${_prx_output}" DIRECTORY)
+    else()
         set(_prx_name "${_PSP_OUTPUT_NAME}")
         if(NOT _prx_name)
             set(_prx_name "${target}.prx")
         endif()
-        set(_prx_output "${CMAKE_CURRENT_SOURCE_DIR}/${_prx_name}")
+        if(_PSP_OUTPUT_DIRECTORY)
+            set(_prx_out_dir "${_PSP_OUTPUT_DIRECTORY}")
+        elseif(PS3_SELF_OUTPUT_DIRECTORY)
+            set(_prx_out_dir "${PS3_SELF_OUTPUT_DIRECTORY}")
+        else()
+            set(_prx_out_dir "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
+        get_filename_component(_prx_out_dir "${_prx_out_dir}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+        set(_prx_output "${_prx_out_dir}/${_prx_name}")
+        set(_prx_dir "${_prx_out_dir}")
     endif()
 
     set(_byproducts "${_prx_output}")
     set(_sign_commands "")
     if(_PSP_SIGN)
-        get_filename_component(_prx_dir "${_prx_output}" DIRECTORY)
         get_filename_component(_prx_stem "${_prx_output}" NAME_WE)
         set(_sprx_output      "${_prx_dir}/${_prx_stem}.sprx")
         set(_fake_sprx_output "${_prx_dir}/${_prx_stem}.fake.sprx")
@@ -490,6 +503,7 @@ function(ps3_add_prx target)
     endif()
 
     add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_prx_dir}"
         COMMAND "${PS3_TOOL_prx_gen}" build "$<TARGET_FILE:${target}>"
                 -o "${_prx_output}"
                 ${_psp_identity_args}
@@ -501,6 +515,7 @@ function(ps3_add_prx target)
 
     set_property(TARGET ${target} PROPERTY PS3_PRX_OUTPUT "${_prx_output}")
     set_property(TARGET ${target} PROPERTY PS3_PRX_EXPORTS "${_PSP_EXPORTS}")
+    set_property(TARGET ${target} PROPERTY PS3_SELF_OUTPUT_DIRECTORY "${_prx_dir}")
 endfunction()
 
 # -----------------------------------------------------------------------------
@@ -1539,13 +1554,18 @@ function(ps3_add_pkg target)
     endif()
 
     # The .self post-build chain lands a stripped .elf at
-    # <out-dir>/<target>.elf (default <src>/<target>.elf) — that's what
+    # <out-dir>/<target>.elf (default <build-dir>/<target>.elf) — that's what
     # make_self_npdrm signs.  Packages (.pkg and .gnpdrm.pkg) follow the
     # same output directory.
     get_property(_self_out_dir TARGET ${target} PROPERTY PS3_SELF_OUTPUT_DIRECTORY)
     if(NOT _self_out_dir)
-        set(_self_out_dir "${CMAKE_CURRENT_SOURCE_DIR}")
+        if(PS3_SELF_OUTPUT_DIRECTORY)
+            set(_self_out_dir "${PS3_SELF_OUTPUT_DIRECTORY}")
+        else()
+            set(_self_out_dir "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
     endif()
+    get_filename_component(_self_out_dir "${_self_out_dir}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 
     set(_stripped  "${_self_out_dir}/${target}.elf")
     set(_pkg_dir   "${CMAKE_CURRENT_BINARY_DIR}/pkg")
@@ -1554,7 +1574,11 @@ function(ps3_add_pkg target)
 
     # Optional pkg_files/ overlay (e.g. hello-ppu-png uses this).
     if(NOT _PSP_PKGFILES)
-        set(_PSP_PKGFILES "${CMAKE_CURRENT_SOURCE_DIR}/pkg_files")
+        if(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/pkg_files")
+            set(_PSP_PKGFILES "${CMAKE_CURRENT_BINARY_DIR}/pkg_files")
+        else()
+            set(_PSP_PKGFILES "${CMAKE_CURRENT_SOURCE_DIR}/pkg_files")
+        endif()
     endif()
     if(EXISTS "${_PSP_PKGFILES}")
         set(_pkg_overlay_cmd

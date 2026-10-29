@@ -60,6 +60,15 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
+- **Build outputs default to binary directory in CMake helpers.** `ps3_add_self`,
+  `ps3_add_prx`, and `ps3_add_pkg` (`cmake/ps3-self.cmake`) now default their
+  post-build outputs to `${CMAKE_CURRENT_BINARY_DIR}` rather than
+  `${CMAKE_CURRENT_SOURCE_DIR}`. Out-of-tree builds no longer write `.elf`,
+  `.self`, `.fake.self`, `.prx`, `.sprx`, `.fake.sprx`, or `.pkg` files into
+  the source tree, keeping sample and project sources clean across builds and
+  different ABIs. Callers that require the legacy source-directory layout can
+  restore it by setting `set(PS3_SELF_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})`
+  or passing `OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}`.
 - **PS Eye capture and display sample.** `hello-ppu-camera` now requests
   640x480 YUV422 at 30fps, converts pixels with integer byte accesses, and
   displays up to 120 fresh frames with bounded waits and explicit cleanup.

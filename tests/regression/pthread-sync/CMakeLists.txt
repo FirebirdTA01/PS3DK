@@ -19,9 +19,14 @@ if(NOT EXISTS "${_sample}/CMakeLists.txt")
         "fix the path here rather than duplicating the source.")
 endif()
 
+# Ensure the subproject builds into its own binary dir rather than
+# inheriting an outer PS3_SELF_OUTPUT_DIRECTORY:
+unset(PS3_SELF_OUTPUT_DIRECTORY)
+unset(PS3_SELF_OUTPUT_DIRECTORY CACHE)
+
 add_subdirectory("${_sample}" "${CMAKE_CURRENT_BINARY_DIR}/hello-ppu-pthread")
 
-set(_self "${_sample}/hello-ppu-pthread.fake.self")
+set(_self "${CMAKE_CURRENT_BINARY_DIR}/hello-ppu-pthread/hello-ppu-pthread.fake.self")
 
 add_custom_target(pthread-sync ALL
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
