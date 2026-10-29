@@ -235,7 +235,7 @@ typedef enum {
 } CellJpgDecSpuMode;
 
 typedef struct CellJpgDecExtThreadInParam {
-    struct CellSpurs          *spurs;
+    struct CellSpurs          *spurs ATTRIBUTE_PRXPTR;
     uint8_t                    priority[8];
     uint32_t                   maxContention;
 } CellJpgDecExtThreadInParam;
@@ -250,7 +250,7 @@ typedef struct CellJpgDecExtInfo {
 } CellJpgDecExtInfo;
 
 typedef struct CellJpgDecExtInParam {
-    void                      *coefBufferPtr;
+    void                      *coefBufferPtr ATTRIBUTE_PRXPTR;
     CellJpgDecBufferMode       bufferMode;
     uint32_t                   outputCounts;
     CellJpgDecSpuMode          spuMode;
@@ -277,7 +277,7 @@ typedef struct CellJpgDecDispInfo {
     void    *outputImage;
 } CellJpgDecDispInfo;
 
-typedef struct CellJpgDecDispParam { void *nextOutputImage; } CellJpgDecDispParam;
+typedef struct CellJpgDecDispParam { void *nextOutputImage ATTRIBUTE_PRXPTR; } CellJpgDecDispParam;
 
 typedef int32_t (*CellJpgDecCbControlStream)(CellJpgDecStrmInfo *strmInfo,
                                              CellJpgDecStrmParam *strmParam,
@@ -287,13 +287,13 @@ typedef int32_t (*CellJpgDecCbControlDisp)(CellJpgDecDispInfo *dispInfo,
                                            void *cbCtrlDispArg);
 
 typedef struct CellJpgDecCbCtrlStrm {
-    CellJpgDecCbControlStream cbCtrlStrmFunc;
-    void                     *cbCtrlStrmArg;
+    CellJpgDecCbControlStream cbCtrlStrmFunc ATTRIBUTE_PRXPTR;
+    void                     *cbCtrlStrmArg ATTRIBUTE_PRXPTR;
 } CellJpgDecCbCtrlStrm;
 
 typedef struct CellJpgDecCbCtrlDisp {
-    CellJpgDecCbControlDisp cbCtrlDispFunc;
-    void                   *cbCtrlDispArg;
+    CellJpgDecCbControlDisp cbCtrlDispFunc ATTRIBUTE_PRXPTR;
+    void                   *cbCtrlDispArg ATTRIBUTE_PRXPTR;
 } CellJpgDecCbCtrlDisp;
 
 int32_t cellJpgDecExtCreate(CellJpgDecMainHandle *mainHandle,

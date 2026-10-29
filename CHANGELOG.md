@@ -74,6 +74,13 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **GIF and JPEG decoder callback, display and input parameter records.** The
+  records named on card `t_849c499c` in `<cell/codec/gifdec.h>` and
+  `<cell/codec/jpgdec.h>` mark their data and function-pointer members with
+  `ATTRIBUTE_PRXPTR`, so they keep their 32-bit pointer layout in LP64
+  programs, matching what the decoder modules read. The PNG decoder records
+  are in a follow-up card because `<cell/codec/pngdec.h>` does not currently
+  obtain `ATTRIBUTE_PRXPTR`.
 - **CellSpursTaskSaveConfig layout.** `CellSpursTaskSaveConfig` has the same
   12-byte layout in LP64 programs as in the default model; before, its two
   pointers widened to 8 bytes each.

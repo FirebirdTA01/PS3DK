@@ -52,15 +52,6 @@
 *CellFontRendererConfig	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellFontVertexesGlyph	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellGcmContextData	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellGifDecCbCtrlDisp	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellGifDecCbCtrlStrm	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellGifDecDispParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellGifDecInParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellJpgDecCbCtrlDisp	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellJpgDecCbCtrlStrm	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellJpgDecDispParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellJpgDecExtInParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
-*CellJpgDecExtThreadInParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellMusicExportSetParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellOskDialogCallbackReturnParam	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
 *CellOskDialogInputFieldInfo	prx-boundary-open: pointer member without the 32-bit PRX attribute in a record a system module reads; card t_849c499c
