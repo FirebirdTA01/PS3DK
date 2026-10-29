@@ -454,10 +454,12 @@ GLAPI void glUseProgram(GLuint program);
 GLAPI void glGetProgramiv(GLuint program, GLenum pname, GLint *params);
 GLAPI void glGetProgramInfoLog(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
 GLAPI GLint glGetUniformLocation(GLuint program, const GLchar *name);
-/* Currently supports scalar fragment sampler2D logical-unit queries only. */
+/* Fragment sampler2D logical-unit queries, including individual array elements. */
 GLAPI void glGetUniformiv(GLuint program, GLint location, GLint *params);
 GLAPI GLint glGetAttribLocation(GLuint program, const GLchar *name);
 GLAPI void glUniform1i(GLint location, GLint v0);
+/* Fragment sampler2D selections only; excess array elements are ignored. */
+GLAPI void glUniform1iv(GLint location, GLsizei count, const GLint *value);
 GLAPI void glUniform1f(GLint location, GLfloat v0);
 GLAPI void glUniform2f(GLint location, GLfloat v0, GLfloat v1);
 GLAPI void glUniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);

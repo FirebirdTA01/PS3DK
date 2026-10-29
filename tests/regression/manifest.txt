@@ -431,3 +431,7 @@ sample-trio-witness-cellfs-finish-fail-lp64,tests/regression/sample-trio-witness
 # Microphone capture is opt-in: audio/hello-ppu-mic defaults to Eye 48kHz/4ch.
 # Null mic rows check refusal/cleanup only. A positive host-input row requires
 # an explicitly selected input and generic mode; Eye array proof needs hardware.
+
+# Fragment sampler2D arrays: frozen binary reflection, vector updates and pixels.
+psgl-sampler-arrays-ilp32,tests/regression/psgl-sampler-arrays/psgl-sampler-arrays-ilp32.fake.self,180,RAN-CLEAN,(?m)^PSGL_SAMPLER_ARRAY_OK checks=178 failures=0\r?$,PSGL_SAMPLER_ARRAY_FAIL
+psgl-sampler-arrays-lp64,tests/regression/psgl-sampler-arrays/psgl-sampler-arrays-lp64.fake.self,180,RAN-CLEAN,(?m)^PSGL_SAMPLER_ARRAY_OK checks=178 failures=0\r?$,PSGL_SAMPLER_ARRAY_FAIL

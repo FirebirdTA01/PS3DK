@@ -12,9 +12,10 @@ The direct-Cg fixture uses the internal binary-memory loader (public
 cgCreateProgram does not yet implement binary input). The installed
 companion SDK includes a GCM Phase B overlay, not pristine v0.26.0.
 
-The first implementation covers reflected scalar fragment sampler2D
-resources in physical slots 0-7. Sampler arrays, glUniform1iv, glGetUniformiv,
-cube/vertex texture support and mixed-type alias validation remain tracked
+This fixture covers reflected scalar fragment sampler2D resources in physical
+slots 0-7. Sampler arrays and glUniform1iv are covered by psgl-sampler-arrays;
+named-program glGetUniformiv queries are also covered by psgl-uniform-query.
+Cube/vertex texture support and mixed-type alias validation remain tracked
 gaps. Unit values below zero or at least eight are rejected with
 INVALID_VALUE before mutation as an implementation guard. No general
 ES 2.0 conformance or hardware acceptance is claimed.
@@ -25,9 +26,10 @@ slot without altering shader instructions or shared Cg parameter values.
 A successful relink resets selections; a failed relink preserves the installed
 map. Direct Cg fragment binding clears that map until the next glUseProgram.
 Unsupported sampler types keep their prior link acceptance and physical
-bindings, but glUniform1i on them returns INVALID_OPERATION. Only ambiguous
+bindings, but glUniform1i on them returns INVALID_OPERATION. Ambiguous
 fragment reflection assigning multiple samplers to one physical slot refuses
-link. The cube fixture tests link/bind acceptance and setter refusal, not cube
+link, as do malformed sampler2D groups, unsupported resource ranges and
+descriptor exhaustion. The cube fixture tests link/bind acceptance and setter refusal, not cube
 upload or sampling (the upload path only supports 2D textures). The public
 Cg type-class query still lacks sampler classification; this GL path checks
 the sampler types explicitly. Existing global GL shader-object bookkeeping

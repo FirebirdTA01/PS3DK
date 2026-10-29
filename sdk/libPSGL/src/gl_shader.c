@@ -23,7 +23,22 @@ typedef struct PSGLglUniform {
     char name[64];
     CGparameter vertex_parameter;
     CGparameter fragment_parameter;
+    int8_t sampler_index;
 } PSGLglUniform;
+
+/* Selections belong to declarations, including unused array elements, not
+   physical slots or lazily assigned GL locations. A group is bounded by the
+   same 32-element limit as the uniform location table. */
+typedef struct PSGLglSampler {
+    char base[64];
+    CGparameter parameter;
+    int8_t hardware;
+    uint8_t group;
+    uint8_t element;
+    uint8_t extent;
+    uint8_t unit;
+    GLboolean array;
+} PSGLglSampler;
 
 typedef struct PSGLglAttribBinding {
     char name[64];
@@ -48,6 +63,8 @@ typedef struct PSGLglProgram {
     int8_t hw_to_location[PSGL_MAX_GENERIC_ATTRIBS];
     uint32_t sampler_mask;
     uint8_t sampler_units[PSGL_MAX_TEXTURE_UNITS];
+    PSGLglSampler samplers[PSGL_GL_MAX_UNIFORMS];
+    uint32_t sampler_count;
     struct PSGLglProgram *next;
 } PSGLglProgram;
 
@@ -165,25 +182,107 @@ static int gls_is_sampler(CGparameter parameter)
     }
 }
 
-/* Remap only reflected scalar fragment sampler2D resources. Other resources
-   keep the previous identity binding; this does not add texture-type support.
-   No shader instruction or shared Cg value is modified. */
-static int gls_sampler_mask(CGprogram fragment, uint32_t *mask)
+/* Return scalar (0), terminal decimal subscript (1), or malformed (-1).
+   Reject nested arrays and noncanonical spellings instead of aliasing them. */
+static int gls_sampler_name(const char *name, char *base, uint8_t *element)
+{
+    uint32_t n = 0, value = 0;
+    *element = 0;
+    while (name[n] && name[n] != '[') {
+        if (name[n] == ']' || n + 1u >= 64u) return -1;
+        base[n] = name[n];
+        ++n;
+    }
+    if (!n) return -1;
+    base[n] = '\0';
+    if (!name[n]) return 0;
+    const char *index = name + n + 1u;
+    if (*index < '0' || *index > '9' || (*index == '0' && index[1] != ']')) return -1;
+    do {
+        value = value * 10u + (uint32_t)(*index++ - '0');
+        if (value >= PSGL_GL_MAX_UNIFORMS) return -1;
+    } while (*index >= '0' && *index <= '9');
+    if (index[0] != ']' || index[1]) return -1;
+    *element = (uint8_t)value;
+    return 1;
+}
+
+static int gls_same_uniform_root(const char *name, const char *base)
+{
+    while (*base && *name == *base) { ++name; ++base; }
+    return !*base && (!*name || *name == '[');
+}
+
+/* Build into temporary storage. Failure must not disturb an installed GL
+   executable. Unsupported scalar sampler types retain their old bindings. */
+static int gls_sampler_layout(CGprogram fragment, PSGLglSampler *samplers,
+                               uint32_t *count, uint32_t *mask)
 {
     PSGLcgProgram *fp = psgl_cg_program(fragment);
     uint32_t seen = 0;
+    *count = 0;
     *mask = 0;
     if (!fp) return 0;
     for (uint32_t i = 0; i < fp->parameter_count; ++i) {
         PSGLcgParameter *param = &fp->parameters[i];
         if (!gls_is_sampler((CGparameter)param)) continue;
-        if (param->resource < CG_TEXUNIT0 || param->resource > CG_TEXUNIT15) continue;
-        uint32_t bit = 1u << (param->resource - CG_TEXUNIT0);
-        if (seen & bit) return 0;
-        seen |= bit;
-        if (param->type == CG_SAMPLER2D && param->name[0] &&
-            param->resource < CG_TEXUNIT0 + PSGL_MAX_TEXTURE_UNITS)
-            *mask |= bit;
+        if (param->resource >= CG_TEXUNIT0 && param->resource <= CG_TEXUNIT15) {
+            uint32_t bit = 1u << (param->resource - CG_TEXUNIT0);
+            if (seen & bit) return 0;
+            seen |= bit;
+        }
+        if (param->type != CG_SAMPLER2D) continue;
+        if (*count == PSGL_GL_MAX_UNIFORMS) return 0;
+        /* Cg's cached name may already be truncated. Check the binary's
+           original length before using that cache to identify a group. */
+        uint32_t name_size = 0;
+        cellCgbMapGetName(&fp->cgb_program, i, NULL, &name_size);
+        if (name_size <= 1u || name_size > sizeof(param->name)) return 0;
+        PSGLglSampler *s = &samplers[*count];
+        int array = gls_sampler_name(param->name, s->base, &s->element);
+        if (array < 0) return 0;
+        s->array = array ? GL_TRUE : GL_FALSE;
+        s->hardware = -1;
+        if (param->resource != CG_UNDEFINED) {
+            uint32_t hw = (uint32_t)(param->resource - CG_TEXUNIT0);
+            if (hw >= PSGL_MAX_TEXTURE_UNITS) return 0;
+            s->hardware = (int8_t)hw;
+            *mask |= 1u << hw;
+        } else if (!array) {
+            /* Preserve the existing refusal of unused scalar selections. */
+            continue;
+        }
+        s->parameter = (CGparameter)param;
+        s->unit = 0;
+        s->group = (uint8_t)*count;
+        s->extent = 1;
+        for (uint32_t j = 0; j < *count; ++j) {
+            if (!gls_streq(s->base, samplers[j].base)) continue;
+            if (s->array != samplers[j].array || s->element == samplers[j].element) return 0;
+            s->group = samplers[j].group;
+        }
+        ++*count;
+    }
+    for (uint32_t i = 0; i < *count; ++i) {
+        PSGLglSampler *s = &samplers[i];
+        uint32_t members = 0, extent = 0;
+        for (uint32_t j = 0; j < *count; ++j) {
+            if (samplers[j].group != s->group) continue;
+            ++members;
+            if (extent <= samplers[j].element) extent = samplers[j].element + 1u;
+        }
+        /* Unique indices and count==max+1 prove a complete declaration.
+           An unused element must be reflected as CG_UNDEFINED, not omitted. */
+        if (members != extent) return 0;
+        s->extent = (uint8_t)extent;
+        for (uint32_t j = 0; j < fp->parameter_count; ++j) {
+            PSGLcgParameter *param = &fp->parameters[j];
+            if (!gls_same_uniform_root(param->name, s->base)) continue;
+            if (param->type != CG_SAMPLER2D) return 0;
+            uint32_t k = 0;
+            while (k < *count && samplers[k].parameter != (CGparameter)param) ++k;
+            if (k == *count || samplers[k].group != s->group) return 0;
+        }
     }
     return 1;
 }
@@ -408,7 +507,8 @@ GLAPI void glLinkProgram(GLuint program)
     CGprogram vertex = NULL, fragment = NULL;
     PSGLglAttribBinding linked[PSGL_MAX_GL_ATTRIBS];
     uint32_t count = 0, used = 0, reflected = 0;
-    uint32_t sampler_mask;
+    uint32_t sampler_mask, sampler_count;
+    PSGLglSampler samplers[PSGL_GL_MAX_UNIFORMS] = {0};
     uint8_t hardware[PSGL_MAX_GL_ATTRIBS];
     int8_t route[PSGL_MAX_GENERIC_ATTRIBS];
     CellCgbVertexProgramConfiguration conf;
@@ -480,8 +580,8 @@ GLAPI void glLinkProgram(GLuint program)
         }
         route[hardware[i]] = (int8_t)linked[i].index;
     }
-    if (!gls_sampler_mask(fragment, &sampler_mask)) {
-        gls_set_log(p->log, sizeof(p->log), "ambiguous sampler resources"); return;
+    if (!gls_sampler_layout(fragment, samplers, &sampler_count, &sampler_mask)) {
+        gls_set_log(p->log, sizeof(p->log), "invalid or ambiguous sampler reflection"); return;
     }
     /* The remembered GL name survives a direct Cg bind. Relink must only
        replace the executable when both old GL stages are still installed.
@@ -492,6 +592,8 @@ GLAPI void glLinkProgram(GLuint program)
         context->bound_vertex_program == p->vertex_program &&
         context->bound_fragment_program == p->fragment_program;
     p->sampler_mask = sampler_mask;
+    p->sampler_count = sampler_count;
+    gls_copy(p->samplers, samplers, sampler_count * sizeof(samplers[0]));
     for (uint32_t hw = 0; hw < PSGL_MAX_TEXTURE_UNITS; ++hw) p->sampler_units[hw] = 0;
     p->vertex_program = vertex;
     p->fragment_program = fragment;
@@ -555,7 +657,18 @@ GLAPI GLint glGetUniformLocation(GLuint program, const GLchar *name)
 {
     PSGLglProgram *p = gls_find_program(program);
     PSGLglUniform *uniform;
+    int8_t sampler_index = -1;
     if (!p || !p->linked || !name) return -1;
+    for (uint32_t i = 0; i < p->sampler_count; ++i) {
+        PSGLglSampler *s = &p->samplers[i];
+        PSGLcgParameter *param = psgl_cg_parameter(s->parameter);
+        if (gls_streq(name, param->name) ||
+            (s->array && !s->element && gls_streq(name, s->base))) {
+            name = param->name;
+            sampler_index = (int8_t)i;
+            break;
+        }
+    }
     for (uint32_t i = 0; i < p->uniform_count; i++)
         if (gls_streq(p->uniforms[i].name, name))
             return gls_make_uniform_location(p, i);
@@ -563,6 +676,7 @@ GLAPI GLint glGetUniformLocation(GLuint program, const GLchar *name)
     uniform = &p->uniforms[p->uniform_count];
     uniform->vertex_parameter = gls_named_parameter(p->vertex_program, name);
     uniform->fragment_parameter = gls_named_parameter(p->fragment_program, name);
+    uniform->sampler_index = sampler_index;
     if (!uniform->vertex_parameter && !uniform->fragment_parameter)
         return -1;
     gls_copy_name(uniform->name, name, sizeof(uniform->name));
@@ -585,8 +699,6 @@ GLAPI void glGetUniformiv(GLuint program, GLint location, GLint *params)
 {
     PSGLglProgram *p = gls_find_program(program);
     PSGLglUniform *uniform;
-    PSGLcgParameter *parameter;
-    uint32_t hw;
     if (!p) {
         psgl_gl_error(gls_find_shader(program) ? GL_INVALID_OPERATION : GL_INVALID_VALUE);
         return;
@@ -598,19 +710,14 @@ GLAPI void glGetUniformiv(GLuint program, GLint location, GLint *params)
     if (!p->linked || !uniform || ((uint32_t)location >> 8) != p->name) {
         psgl_gl_error(GL_INVALID_OPERATION); return;
     }
-    parameter = psgl_cg_parameter(uniform->fragment_parameter);
-    /* This increment exposes only scalar fragment sampler2D selections.
+    /* Expose only program-owned fragment sampler2D selections.
        Numeric Cg values are still shared by programs using the same shader;
        reporting those as program-owned values would be incorrect. */
-    if (!parameter || parameter->type != CG_SAMPLER2D ||
+    if (uniform->sampler_index < 0 ||
         gls_is_sampler(uniform->vertex_parameter)) {
         psgl_gl_error(GL_INVALID_OPERATION); return;
     }
-    hw = (uint32_t)(parameter->resource - CG_TEXUNIT0);
-    if (hw >= PSGL_MAX_TEXTURE_UNITS || !(p->sampler_mask & (1u << hw))) {
-        psgl_gl_error(GL_INVALID_OPERATION); return;
-    }
-    if (params) *params = (GLint)p->sampler_units[hw];
+    if (params) *params = (GLint)p->samplers[(uint8_t)uniform->sampler_index].unit;
 }
 
 static PSGLglUniform *gls_current_uniform(GLint location)
@@ -642,30 +749,56 @@ static void gls_uniform_set(GLint location, const GLfloat *values,
     if (context) context->dirty |= PSGL_DIRTY_CG | PSGL_DIRTY_TEXTURES;
 }
 
+static void gls_sampler_set(PSGLglUniform *uniform, GLsizei count, const GLint *values)
+{
+    PSGLglProgram *program = gls_find_program(g_current_program);
+    if (uniform->sampler_index < 0 || gls_is_sampler(uniform->vertex_parameter)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+    PSGLglSampler *start = &program->samplers[(uint8_t)uniform->sampler_index];
+    if (!start->array && count > 1) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+    uint32_t effective = start->extent - start->element;
+    if ((uint32_t)count < effective) effective = (uint32_t)count;
+    if (!effective) return;
+    if (!values) { psgl_gl_error(GL_INVALID_VALUE); return; }
+    /* Clamp before reading, validate the entire effective span, then mutate.
+       Invalid later values cannot leave earlier elements partially changed. */
+    for (uint32_t i = 0; i < effective; ++i) {
+        if (values[i] < 0 || values[i] >= PSGL_MAX_TEXTURE_UNITS) {
+            psgl_gl_error(GL_INVALID_VALUE); return;
+        }
+    }
+    for (uint32_t i = 0; i < program->sampler_count; ++i) {
+        PSGLglSampler *s = &program->samplers[i];
+        if (s->group != start->group || s->element < start->element ||
+            (uint32_t)(s->element - start->element) >= effective) continue;
+        s->unit = (uint8_t)values[s->element - start->element];
+        if (s->hardware >= 0) program->sampler_units[(uint8_t)s->hardware] = s->unit;
+    }
+    PSGLcontext *context = psgl_context_current();
+    /* A direct Cg bind switches to physical slots. Preserve that mode until
+       UseProgram installs the GL executable again. */
+    if (context && context->gl_sampler_routing &&
+        context->bound_fragment_program == program->fragment_program)
+        psgl_context_set_gl_sampler_routing(program->sampler_units, program->sampler_mask);
+}
+
+GLAPI void glUniform1iv(GLint location, GLsizei count, const GLint *value)
+{
+    if (count < 0) { psgl_gl_error(GL_INVALID_VALUE); return; }
+    PSGLglUniform *uniform = gls_current_uniform(location);
+    if (!uniform) return;
+    gls_sampler_set(uniform, count, value);
+}
+
 GLAPI void glUniform1i(GLint location, GLint v0)
 {
     PSGLglUniform *uniform = gls_current_uniform(location);
     if (!uniform) return;
     if (gls_is_sampler(uniform->fragment_parameter)) {
-        PSGLglProgram *program = gls_find_program(g_current_program);
-        PSGLcgParameter *param = psgl_cg_parameter(uniform->fragment_parameter);
-        uint32_t hw = (uint32_t)(param->resource - CG_TEXUNIT0);
-        if (param->type != CG_SAMPLER2D || hw >= PSGL_MAX_TEXTURE_UNITS ||
-            !(program->sampler_mask & (1u << hw)) || gls_is_sampler(uniform->vertex_parameter)) {
-            psgl_gl_error(GL_INVALID_OPERATION); return;
-        }
-        /* Defensive implementation guard: reject an out-of-range logical
-           unit before mutating program or context state. */
-        if (v0 < 0 || v0 >= PSGL_MAX_TEXTURE_UNITS) {
-            psgl_gl_error(GL_INVALID_VALUE); return;
-        }
-        program->sampler_units[hw] = (uint8_t)v0;
-        PSGLcontext *context = psgl_context_current();
-        /* A direct Cg bind switches to physical slots. Preserve that mode
-           until UseProgram installs the GL executable again. */
-        if (context && context->gl_sampler_routing &&
-            context->bound_fragment_program == program->fragment_program)
-            psgl_context_set_gl_sampler_routing(program->sampler_units, program->sampler_mask);
+        gls_sampler_set(uniform, 1, &v0);
         return;
     }
     GLfloat v[1] = {(GLfloat)v0};

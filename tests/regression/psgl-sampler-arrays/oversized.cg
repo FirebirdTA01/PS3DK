@@ -1,0 +1,2 @@
+float4 main(uniform sampler2D a[33]) : COLOR
+{ float4 x=tex2D(a[0],float2(0.5,0.5)); float4 y=tex2D(a[1],float2(0.5,0.5)); return float4(x.r,y.g,x.b,1); }

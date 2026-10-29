@@ -1,0 +1,4 @@
+float4 main(uniform samplerCUBE environment : TEXUNIT5) : COLOR
+{
+    return texCUBE(environment, float3(1.0, 0.0, 0.0));
+}

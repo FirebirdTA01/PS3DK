@@ -18,6 +18,13 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **Sampler array selections in PSGL.** `glUniform1iv` selects logical
+  texture units for reflected fragment `sampler2D` array elements. Base-name
+  and `[0]` locations agree, unused elements retain their own selections,
+  and `glGetUniformiv` returns individual element values. Excess input is
+  ignored at the array boundary; invalid effective units leave all selections
+  unchanged. Cube textures and mixed sampler-type validation remain separate.
+
 - **Fragment sampler arrays.** The shader compiler resolves constant indices
   of one-dimensional `sampler2D` arrays to per-element texture bindings and
   emits matching reflection records, including unused elements. Dynamic

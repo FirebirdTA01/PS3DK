@@ -1,0 +1,1 @@
+float4 main(uniform sampler2D array_name_that_is_deliberately_longer_than_the_sixty_four_byte_name_limit[2]) : COLOR { return tex2D(array_name_that_is_deliberately_longer_than_the_sixty_four_byte_name_limit[0],float2(0.5,0.5))+tex2D(array_name_that_is_deliberately_longer_than_the_sixty_four_byte_name_limit[1],float2(0.5,0.5)); }

@@ -1,0 +1,1 @@
+float4 main(uniform sampler2D a[1] : TEXUNIT8) : COLOR { return tex2D(a[0],float2(0.5,0.5)); }
