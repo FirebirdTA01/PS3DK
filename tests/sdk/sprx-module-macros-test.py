@@ -284,9 +284,20 @@ def main():
                 print(f"FAIL: {prx_file} not found")
                 return 1
 
+            # The source declares version 1.0; module-info uses minor, major.
+            prx_data = prx_file.read_bytes()
+            phoff = struct.unpack_from(">Q", prx_data, 32)[0]
+            module_info = struct.unpack_from(">Q", prx_data, phoff + 24)[0]
+            if prx_data[module_info + 2:module_info + 4] != b"\x00\x01":
+                print(f"FAIL: module-info version bytes ({abi}) are not 00 01")
+                return 1
+
             res = subprocess.run([str(prx_gen), "check", str(prx_file)], capture_output=True, text=True)
             if res.returncode != 0:
                 print(f"FAIL: prx-gen check ({abi}) failed:\n{res.stdout}\n{res.stderr}")
+                return 1
+            if " v1.0 attributes " not in res.stdout:
+                print(f"FAIL: prx-gen check ({abi}) did not report version 1.0")
                 return 1
 
             # Check module-export-inspect on linked module ELF

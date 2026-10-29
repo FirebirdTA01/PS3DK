@@ -36,6 +36,10 @@
  *
  * Variables / TLS exports: not supported in v1 (the schema and loader
  * support are a follow-up; see the design doc §7).
+ *
+ * The separate module-info block stores version bytes as minor at 0x02
+ * and major at 0x03. prx-gen writes these from the major.minor identity;
+ * the library-record version emitted below is a distinct 16-bit field.
  */
 
 #ifndef __SYS_PRX_MODULE_H__

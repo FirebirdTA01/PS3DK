@@ -17,7 +17,7 @@ pub const MODULE_INFO_SIZE: u64 = 52;
 
 // Field offsets within the module info block.
 pub const MI_ATTRIBUTES: usize = 0x00;
-pub const MI_VERSION: usize = 0x02;
+pub const MI_VERSION: usize = 0x02; // Two bytes: minor, then major.
 pub const MI_NAME: usize = 0x04;
 pub const MI_NAME_LEN: usize = 28;
 pub const MI_TOC: usize = 0x20;
@@ -227,8 +227,8 @@ pub fn write_identity(
     }
 
     wr_u16(data, base + MI_ATTRIBUTES, attributes);
-    data[base + MI_VERSION] = version.0;
-    data[base + MI_VERSION + 1] = version.1;
+    data[base + MI_VERSION] = version.1;
+    data[base + MI_VERSION + 1] = version.0;
     for b in data[base + MI_NAME..base + MI_NAME + MI_NAME_LEN].iter_mut() {
         *b = 0;
     }

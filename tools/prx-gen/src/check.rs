@@ -113,8 +113,8 @@ pub fn check(input: &Path) -> Result<bool> {
         "  module info    vaddr 0x{:x} name '{}' v{}.{} attributes 0x{:04x}",
         mi_vaddr,
         name,
-        elf.data[mi + module::MI_VERSION],
         elf.data[mi + module::MI_VERSION + 1],
+        elf.data[mi + module::MI_VERSION],
         attributes
     );
     println!(

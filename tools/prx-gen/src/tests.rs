@@ -538,7 +538,30 @@ fn build_writes_the_module_name() {
     let prx = Elf::parse(std::fs::read(&out).unwrap()).unwrap();
     let mi = prx.phdrs[0].p_paddr as usize;
     assert_eq!(read_cstr(&prx.data, mi + module::MI_NAME), "demo");
-    assert_eq!(prx.data[mi + module::MI_VERSION], 1);
+    assert_eq!(&prx.data[mi + 0x02..mi + 0x04], &[0, 1]);
+}
+
+#[test]
+fn build_writes_module_version_minor_then_major() {
+    let dir = TempDir::new("version-order");
+    let input = dir.join("in.elf");
+    let output = dir.join("out.prx");
+    std::fs::write(&input, synth_elf((module::LIB_ATTR_MANAGEMENT, module::LIB_ATTR_LIBRARY), &[])).unwrap();
+    crate::build::build(
+        &input,
+        &output,
+        &crate::build::BuildOptions {
+            name: Some("version_probe".into()),
+            version: Some((1, 2)),
+            attributes: Some(0),
+            allow_unrelocated_module_info: false,
+            quiet: true,
+        },
+    ).unwrap();
+    let prx = Elf::parse(std::fs::read(output).unwrap()).unwrap();
+    let mi = prx.phdrs[0].p_paddr as usize;
+    // The module-info ABI stores minor at +2 and major at +3.
+    assert_eq!(&prx.data[mi + 0x02..mi + 0x04], &[2, 1]);
 }
 
 #[test]

@@ -82,6 +82,7 @@
  *   0x00 "PMI\1"   magic and record version
  *   0x04 u16       attributes
  *   0x06 u8, u8    version major, minor
+ *                  prx-gen converts these to module-info minor, major
  *   0x08 char[28]  module name, NUL-terminated
  */
 #define SYS_MODULE_INFO(name, attribute, major, minor)                     \

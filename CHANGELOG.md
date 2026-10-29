@@ -92,6 +92,11 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PRX module version byte order.** `prx-gen` stores the module-info
+  version as minor then major at offset `0x02`, as required by the system
+  ABI, and `prx-gen check` reports it as major.minor. CLI versions and
+  `SYS_MODULE_INFO` arguments retain their major/minor order.
+
 - **GIF, JPEG and PNG decoder callback, display and input parameter records.** The
   records named on card `t_849c499c` in `<cell/codec/gifdec.h>`,
   `<cell/codec/jpgdec.h>` and `<cell/codec/pngdec.h>` mark their data and
