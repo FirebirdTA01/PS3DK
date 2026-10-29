@@ -16,24 +16,25 @@
 #     <out-dir>/my_app.self      # CEX-signed (boots in RPCS3 / signed HW)
 #     <out-dir>/my_app.fake.self # fake-signed (boots in CFW / ps3load)
 #
-# By default, <out-dir> is the sample source directory (CMAKE_CURRENT_SOURCE_DIR)
-# — matching the legacy `make`-driven convention where the stripped .elf and
-# signed .self / .fake.self sat next to the Makefile.  The unstripped CMake-target
-# binary stays in the build dir as an intermediate (and isn't useful on its own —
-# it lacks the sprxlinker post-link rewrite that LV2 expects).
+# By default, <out-dir> is CMAKE_CURRENT_BINARY_DIR. SELF, PRX and PKG outputs
+# stay with the build. The raw CMake executable is an intermediate; LV2 needs
+# the sprxlinker post-link rewrite.
 #
 # Output directory override:
-#   Callers can redirect post-build artefacts away from the source tree:
+#   Callers can select another output directory:
 #     - Per-target:   ps3_add_self(my_app OUTPUT_DIRECTORY <dir>)
 #     - Project-wide: set(PS3_SELF_OUTPUT_DIRECTORY <dir>)
 #   Relative paths resolve against CMAKE_CURRENT_BINARY_DIR.
 #   When overridden, ps3_add_pkg automatically places .pkg and .gnpdrm.pkg
 #   in the same output directory and reads the stripped .elf from there.
 #
-# Sample dirs already gitignore *.elf / *.self / *.fake.self so the
-# generated files never show up in `git status`.
+# To restore source-directory placement explicitly:
+#   set(PS3_SELF_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
 include_guard(GLOBAL)
+
+# Capability read by sweep-samples.ps1 before configuring an extracted SDK.
+set(PS3_PACKAGING_OUTPUT_LAYOUT "binary-v1")
 
 # Captured once at file load so functions defined below resolve their
 # default asset / template paths against the toolchain root rather

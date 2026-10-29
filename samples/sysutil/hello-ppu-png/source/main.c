@@ -215,7 +215,7 @@ static uint8_t *decode_png(uint32_t *out_w, uint32_t *out_h,
          * /dev_hdd0/game/. */
         "/dev_hdd0/game/HELPPUPNG/USRDIR/ps3dk.png",
         /* Direct-run fallback: RPCS3 mounts /app_home to the .self's
-         * source dir, so pkg_files/USRDIR is visible there. */
+         * selected output dir, so pkg_files/USRDIR is visible there. */
         "/app_home/pkg_files/USRDIR/ps3dk.png",
         NULL,
     };

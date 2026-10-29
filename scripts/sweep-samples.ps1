@@ -17,7 +17,7 @@ param([Parameter(Mandatory=$true)][string]$root,
 #                                     codes of one sample (t_6ff5b559; the log
 #                                     path is the 6th CSV column)
 #   results.csv                       this run's table
-#   b<NNN>\                           the build dir, removed after each sample
+#   b<N>\                             complete build dir, including boot assets
 # A fresh directory means no log can hold another sweep's output, even when an
 # old log cannot be deleted (held open by an editor or a reader).  The sweep
 # refuses to start if the run directory already exists or cannot be created,
@@ -27,6 +27,12 @@ param([Parameter(Mandatory=$true)][string]$root,
 #
 # -cmake and -runName exist for tests/host/sweep-samples-log-test.ps1.
 
+$helper = Join-Path $root 'cmake/ps3-self.cmake'
+if (-not (Test-Path -LiteralPath $helper -PathType Leaf) -or
+    (Get-Content -LiteralPath $helper -Raw) -notmatch '(?m)^set\(PS3_PACKAGING_OUTPUT_LAYOUT "binary-v1"\)\s*$') {
+    Write-Host 'FAILED: SDK output layout is older or unsupported; extract an SDK with binary-v1 packaging outputs before sweeping.'
+    exit 1
+}
 $env:PS3DK = $root; $env:PS3DEV = $root; $env:PSL1GHT = $root
 $env:PATH  = "$root\bin;$env:PATH"
 $tc    = "$root\cmake\ps3-ppu-toolchain.cmake"
@@ -98,12 +104,13 @@ foreach ($s in $samples) {
     # build (skipped if configure failed)
     if ($cfg -eq "ok") {
         Append-Log $log ("--- cmake build    " + $Dash)
-        $text = & $cmake --build $bdir 2>&1 | ForEach-Object { "$_" }
+        $text = & $cmake --build $bdir --parallel 2 2>&1 | ForEach-Object { "$_" }
         $bld_ec = $LASTEXITCODE
         if ($text) { Append-Log $log $text }
         Append-Log $log ("exit   : $bld_ec")
         if ($bld_ec -eq 0) { $bld = "ok" } else { $bld = "fail" }
-        if (Get-ChildItem $s.FullName -Filter *.fake.self -EA SilentlyContinue) { $self = "yes" }
+        $foundSelf = Get-ChildItem -Path $bdir -Filter *.fake.self -Recurse -EA SilentlyContinue | Select-Object -First 1
+        if ($foundSelf) { $self = "yes" }
     }
 
     # Footer
@@ -116,7 +123,7 @@ foreach ($s in $samples) {
 
     try { "$fam,$($s.Name),$cfg,$bld,$self,$log" | Out-File -Encoding ascii -Append $csv -ErrorAction Stop }
     catch { $script:writeFailures++; Write-Warning "CSV write failed: $csv ($($_.Exception.Message))" }
-    Remove-Item $bdir -Recurse -Force -EA SilentlyContinue
+    # Keep the entire build: boot assets and intermediate evidence matter too.
     if ($i % 20 -eq 0) { Write-Host "  ...$i/$($samples.Count)  (logs at $logdir)" }
 }
 try {

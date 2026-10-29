@@ -20,10 +20,9 @@ if(NOT EXISTS "${_sample}/CMakeLists.txt")
         "fix the path here rather than duplicating the source.")
 endif()
 
-# Ensure the subproject builds into its own binary dir rather than
-# inheriting an outer PS3_SELF_OUTPUT_DIRECTORY:
-unset(PS3_SELF_OUTPUT_DIRECTORY)
-unset(PS3_SELF_OUTPUT_DIRECTORY CACHE)
+# Direct the subproject build outputs explicitly into its subproject binary dir
+# so both the installed SDK helper and current tree stage consistently:
+set(PS3_SELF_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/hello-ppu-tls")
 
 add_subdirectory("${_sample}" "${CMAKE_CURRENT_BINARY_DIR}/hello-ppu-tls")
 

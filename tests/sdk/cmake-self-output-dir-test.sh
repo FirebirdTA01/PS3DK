@@ -35,8 +35,14 @@ to_cmake_path() {
     fi
 }
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+if [ -n "${PS3_OUTPUT_TEST_DIR:-}" ]; then
+    tmp="$PS3_OUTPUT_TEST_DIR"
+    [ ! -e "$tmp" ] || fail "fresh PS3_OUTPUT_TEST_DIR required"
+    mkdir -p "$tmp"
+else
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+fi
 
 mock_ps3dev="$tmp/mock_ps3dev"
 mock_bin="$mock_ps3dev/bin"
@@ -292,7 +298,7 @@ EOF
         cat "$bld_dir/configure.log" >&2
         fail "cmake configure failed for $mode in $sample_dir"
     fi
-    if ! cmake --build "$bld_dir" > "$bld_dir/build.log" 2>&1; then
+    if ! cmake --build "$bld_dir" --parallel 2 > "$bld_dir/build.log" 2>&1; then
         cat "$bld_dir/build.log" >&2
         fail "cmake build failed for $mode in $sample_dir"
     fi

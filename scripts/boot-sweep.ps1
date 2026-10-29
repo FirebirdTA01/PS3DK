@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)][string]$root,          # extracted package root
     [string]$rpcs3 = "C:\Users\FirebirdTA01\Desktop\Emulators\RPCS3\rpcs3.exe",
     [int]$seconds  = 30,
-    [string]$label = "baseline"
+    [string]$label = "baseline",
+    [string]$sweepDir = ""                              # one named sweep run, required
 )
 
 # Boot a prioritised subset of already-built samples on the DESKTOP RELEASE build
@@ -15,6 +16,9 @@ param(
 #
 # House rules this encodes: desktop release build only, ONE instance, existing
 # logs are COPIED to a timestamped folder before clearing (never deleted).
+
+. (Join-Path $PSScriptRoot 'sample-sweep-artifacts.ps1')
+Assert-SampleSweepRun $sweepDir
 
 $log  = Join-Path (Split-Path $rpcs3) "log"
 $out  = "C:\ps3boot\$label"
@@ -33,7 +37,7 @@ if (-not $targets) { Write-Host "No $out\targets.txt ??? write one sample name p
 
 foreach ($name in $targets) {
     $name = $name.Trim(); if (-not $name) { continue }
-    $self = Get-ChildItem "$root\samples" -Recurse -Filter "$name.fake.self" -EA SilentlyContinue | Select-Object -First 1
+    $self = Resolve-SampleSweepArtifact $sweepDir $name
     if (-not $self) { "$name,NOT_BUILT,0,0," | Out-File -Encoding ascii -Append $csv; continue }
 
     Get-ChildItem $log -Filter *.log -EA SilentlyContinue | Remove-Item -Force -EA SilentlyContinue

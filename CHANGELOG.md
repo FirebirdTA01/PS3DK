@@ -67,8 +67,10 @@ The version stamped into builds is generated from the most recent
   `.self`, `.fake.self`, `.prx`, `.sprx`, `.fake.sprx`, or `.pkg` files into
   the source tree, keeping sample and project sources clean across builds and
   different ABIs. Callers that require the legacy source-directory layout can
-  restore it by setting `set(PS3_SELF_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})`
-  or passing `OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}`.
+    restore it by setting `set(PS3_SELF_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")`
+    or passing `OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"`. `scripts/sweep-samples.ps1`
+  and `scripts/boot-sweep.ps1` discover and retain binary build artifacts, and
+  sample documentation is updated to reflect binary directory artifact placement.
 - **PS Eye capture and display sample.** `hello-ppu-camera` now requests
   640x480 YUV422 at 30fps, converts pixels with integer byte accesses, and
   displays up to 120 fresh frames with bounded waits and explicit cleanup.

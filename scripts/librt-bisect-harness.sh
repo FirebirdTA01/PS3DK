@@ -539,13 +539,14 @@ cmd_build() {
 
     mkdir -p "$build_dir"
     printf 'sample_build_dir=%s\n' "$build_dir"
-    printf 'cmake_configure_cmd=%s\n' "env PS3DEV=$arm_install/ps3dev PS3DK=$arm_install/ps3dev/ps3dk GCC_EXEC_PREFIX=$arm_gcc_exec_prefix cmake -S $sample_overlay -B $build_dir -DCMAKE_TOOLCHAIN_FILE=$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain.cmake"
+    printf 'cmake_configure_cmd=%s\n' "env PS3DEV=$arm_install/ps3dev PS3DK=$arm_install/ps3dev/ps3dk GCC_EXEC_PREFIX=$arm_gcc_exec_prefix cmake -S $sample_overlay -B $build_dir -DCMAKE_TOOLCHAIN_FILE=$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain.cmake -DPS3_SELF_OUTPUT_DIRECTORY=$build_dir"
     env \
         PS3DEV="$arm_install/ps3dev" \
         PS3DK="$arm_install/ps3dev/ps3dk" \
         GCC_EXEC_PREFIX="$arm_gcc_exec_prefix" \
         cmake -S "$sample_overlay" -B "$build_dir" \
-            -DCMAKE_TOOLCHAIN_FILE="$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain.cmake"
+            -DCMAKE_TOOLCHAIN_FILE="$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain.cmake" \
+            -DPS3_SELF_OUTPUT_DIRECTORY="$build_dir"
 
     printf 'cmake_build_cmd=%s\n' "env PS3DEV=$arm_install/ps3dev PS3DK=$arm_install/ps3dev/ps3dk GCC_EXEC_PREFIX=$arm_gcc_exec_prefix cmake --build $build_dir"
     env \
@@ -555,8 +556,8 @@ cmd_build() {
         cmake --build "$build_dir"
 
     printf 'sample_elf=%s\n' "$build_dir/hello-ppu-msgdialog"
-    printf 'sample_self=%s\n' "$sample_overlay/hello-ppu-msgdialog.self"
-    printf 'sample_fake_self=%s\n' "$sample_overlay/hello-ppu-msgdialog.fake.self"
+    printf 'sample_self=%s\n' "$build_dir/hello-ppu-msgdialog.self"
+    printf 'sample_fake_self=%s\n' "$build_dir/hello-ppu-msgdialog.fake.self"
 }
 
 main() {

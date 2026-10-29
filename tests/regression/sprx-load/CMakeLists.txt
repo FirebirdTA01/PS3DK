@@ -36,12 +36,12 @@ foreach(_dir hello-sprx-export hello-sprx-import)
     endif()
 endforeach()
 
-# Ensure the subprojects build into their own binary dirs rather than
-# inheriting an outer PS3_SELF_OUTPUT_DIRECTORY:
-unset(PS3_SELF_OUTPUT_DIRECTORY)
-unset(PS3_SELF_OUTPUT_DIRECTORY CACHE)
-
+# Direct the subproject build outputs explicitly into each subproject binary dir
+# so both the installed SDK helper and current tree stage consistently:
+set(PS3_SELF_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/hello-sprx-export")
 add_subdirectory("${_samples}/hello-sprx-export" "${CMAKE_CURRENT_BINARY_DIR}/hello-sprx-export")
+
+set(PS3_SELF_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/hello-sprx-import")
 add_subdirectory("${_samples}/hello-sprx-import" "${CMAKE_CURRENT_BINARY_DIR}/hello-sprx-import")
 
 # Subprojects build their artefacts under their own binary directories;

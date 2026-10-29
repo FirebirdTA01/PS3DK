@@ -1603,6 +1603,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\host\sweep-samples-log-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\host\sample-sweep-artifacts-test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\host\psgl-shader-builder-package-test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

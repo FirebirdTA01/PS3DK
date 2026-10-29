@@ -715,11 +715,15 @@ Building the samples (CMake — recommended):
             -G Ninja
       cmake --build cmake-build
 
-  Each sample produces three artefacts at the sample directory next to
-  CMakeLists.txt: <name>.elf (raw PPU ELF), <name>.self (CEX-signed for
-  RPCS3 + signed hardware), and <name>.fake.self (fake-signed for CFW
-  hardware).  Run on RPCS3 with:
-      rpcs3 --no-gui <name>.self
+  Each sample produces three artefacts under its build directory:
+  cmake-build\<name>.elf (raw PPU ELF), cmake-build\<name>.self (CEX-signed
+  for RPCS3 + signed hardware), and cmake-build\<name>.fake.self (fake-signed
+  for CFW hardware).  Run on RPCS3 with:
+      rpcs3 --no-gui cmake-build\<name>.self
+
+  To restore the legacy layout where outputs land next to CMakeLists.txt,
+  set(PS3_SELF_OUTPUT_DIRECTORY "\${CMAKE_CURRENT_SOURCE_DIR}") in CMakeLists.txt
+  or pass OUTPUT_DIRECTORY "\${CMAKE_CURRENT_SOURCE_DIR}" to ps3_add_self/ps3_add_prx.
 
   For standalone SPU work, swap in cmake\\ps3-spu-toolchain.cmake.
 

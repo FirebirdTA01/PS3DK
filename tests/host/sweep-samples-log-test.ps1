@@ -9,24 +9,34 @@
 #   4. a log that cannot be written (the mock puts a directory at sample two's log path): exit 1, FAILED
 #   5. <out>\results.csv held with FileShare.None: exit 1, FAILED
 # usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\host\sweep-samples-log-test.ps1
+param([string]$Output='')
 $ErrorActionPreference = 'Stop'
 $repo  = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $sweep = Join-Path $repo 'scripts\sweep-samples.ps1'
-$work  = Join-Path ([IO.Path]::GetTempPath()) ("sweep-log-test-" + [guid]::NewGuid().ToString('N'))
+$work = if($Output){[IO.Path]::GetFullPath($Output)}else{Join-Path ([IO.Path]::GetTempPath()) ("sweep-log-test-" + [guid]::NewGuid().ToString('N'))}
+if(Test-Path -LiteralPath $work){throw 'Fresh fixture root required'}
+$passes=0
 $fails = 0
 function Check([bool]$ok, [string]$what) {
-    if ($ok) { Write-Host "sweep-samples-log: ok   $what" } else { Write-Host "sweep-samples-log: FAIL $what"; $script:fails++ }
+    if ($ok) { Write-Host "sweep-samples-log: ok   $what"; $script:passes++ } else { Write-Host "sweep-samples-log: FAIL $what"; $script:fails++ }
 }
 try {
     $root = Join-Path $work 'pkg'; $out = Join-Path $work 'out'
     foreach ($n in 'one', 'two') { New-Item -ItemType Directory -Force (Join-Path $root "samples\fam\$n") | Out-Null
         'project(x)' | Out-File -Encoding ascii (Join-Path $root "samples\fam\$n\CMakeLists.txt") }
     $calls = Join-Path $work 'calls.txt'
+    New-Item -ItemType Directory (Join-Path $root 'cmake') | Out-Null
+    $helper=Join-Path $root 'cmake/ps3-self.cmake'
+    'set(PS3_PACKAGING_OUTPUT_LAYOUT "binary-v1")' | Set-Content -LiteralPath $helper
     $mock = Join-Path $work 'cmake.cmd'
     @'
 @echo off
 echo %* >> "%SWEEP_TEST_CALLS%"
 if "%1"=="--build" (
+  mkdir "%~2" 2>nul
+  if not defined SWEEP_TEST_SOURCEONLY echo self > "%~2\one.fake.self"
+  echo asset > "%~2\asset.png"
+  echo object > "%~2\retained.o"
   echo BUILD_STDOUT %2
   echo BUILD_STDERR %2 1>&2
   exit /b 0
@@ -56,6 +66,8 @@ exit /b 0
     Check ($rows.Count -eq 2 -and $rows[0].configure -eq 'ok' -and $rows[0].build -eq 'ok' -and $rows[1].configure -eq 'fail' -and
            $rows[1].build -eq 'skip' -and ($rows | Where-Object { -not $_.log.StartsWith((Join-Path $out 'r1\logs')) }).Count -eq 0) "CSV rows and their log column point into run 1"
     Check ((Get-Content -Raw (Join-Path $out 'latest-run.txt')).Trim() -eq (Join-Path $out 'r1')) "latest-run.txt names run 1"
+    Check ($rows[0].self -eq 'yes' -and (Test-Path (Join-Path $out 'r1/b1/one.fake.self'))) 'binary SELF is reported and retained'
+    Check ((Test-Path (Join-Path $out 'r1/b1/asset.png')) -and (Test-Path (Join-Path $out 'r1/b1/retained.o'))) 'assets and intermediate evidence are retained'
 
     # 2. a second run while run 1's log is held open for append (deletion denied)
     $before = Get-Content -Raw (& $L 'r1' 1)
@@ -80,7 +92,24 @@ exit /b 0
     $hold = [IO.File]::Open((Join-Path $out 'results.csv'), 'Open', 'ReadWrite', 'None')
     try { $r = Sweep 'r5' } finally { $hold.Dispose() }
     Check ($r.rc -eq 1 -and $r.text -match 'FAILED') "an unwritable published results.csv: exit 1, FAILED"
+
+    # A stale source output must not make a fresh binary build look successful.
+    'stale' | Set-Content (Join-Path $root 'samples/fam/one/one.fake.self')
+    $env:SWEEP_TEST_SOURCEONLY='1'
+    try {$r=Sweep 'source-only'} finally {Remove-Item Env:SWEEP_TEST_SOURCEONLY}
+    $rows=Import-Csv (Join-Path $out 'source-only/results.csv')
+    Check ($rows[0].self -eq 'no') 'source-only stale SELF is never accepted'
+
+    '# older helper without binary layout support' | Set-Content -LiteralPath $helper
+    Remove-Item -LiteralPath $calls -Force
+    $r=Sweep 'old-sdk'
+    Check ($r.rc -ne 0 -and $r.text -match 'older.*SDK|SDK.*older|output layout' -and -not(Test-Path $calls)) 'older SDK refuses before any configure/build'
 } finally {
-    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+    if(-not $Output) {
+        $tempRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+        if(-not ([IO.Path]::GetFullPath($work)).StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe cleanup path'}
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
+Write-Host "sweep-samples-log: $passes pass, $fails fail"
 if ($fails -eq 0) { Write-Host "PASS: sweep-samples-log-test"; exit 0 } else { Write-Host "FAIL: sweep-samples-log-test ($fails)"; exit 1 }

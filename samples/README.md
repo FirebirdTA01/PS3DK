@@ -327,21 +327,30 @@ cmake -S . -B cmake-build \
 cmake --build cmake-build
 ```
 
-Final artefacts land at the sample directory next to `CMakeLists.txt`;
-`cmake-build/` holds intermediates (the unstripped CMake target binary,
-object files, generated bin2s sources, compiled shaders, etc.).
+Final artefacts land under the build directory (`cmake-build/` in the example
+above), keeping sample source trees completely clean across different ABIs.
+To restore the legacy layout where outputs land next to `CMakeLists.txt`, set
+`set(PS3_SELF_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")` in your `CMakeLists.txt`
+or pass `OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"` to `ps3_add_self` / `ps3_add_prx`.
+An explicit `OUTPUT` path to `ps3_add_prx` takes precedence over those directory
+settings. The PNG sample keeps its boot asset beside the selected SELF output.
+
+`scripts/sweep-samples.ps1` retains each complete build in its named run directory.
+It refuses older installed helpers that still use source-directory defaults.
+Pass that exact run directory to `scripts/boot-sweep.ps1 -sweepDir`; artifact lookup
+does not fall back to source files or another run.
 
 Each sample produces three artefacts:
 
 | Artefact | Target | How to launch |
 |---|---|---|
-| `<sample>.elf` | Stripped PPU ELF | `ps3load` / GDB against RPCS3's gdbstub / `rpcs3 <sample>.elf` |
-| `<sample>.self` | CEX-signed SELF | `rpcs3 --no-gui <sample>.self` |
+| `<sample>.elf` | Stripped PPU ELF | `ps3load` / GDB against RPCS3's gdbstub / `rpcs3 cmake-build/<sample>.elf` |
+| `<sample>.self` | CEX-signed SELF | `rpcs3 --no-gui cmake-build/<sample>.self` |
 | `<sample>.fake.self` | Fake-signed SELF | `ps3load` over LAN / XMB install on CFW hardware |
 
 **RPCS3 (preferred for quick iteration):**
 ```bash
-rpcs3 --no-gui <sample>.self
+rpcs3 --no-gui cmake-build/<sample>.self
 ```
 The `.self` boots directly — no install step.  Stdout goes to the
 RPCS3 terminal window (and `~/.cache/rpcs3/TTY.log`).
