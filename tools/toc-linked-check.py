@@ -1115,7 +1115,8 @@ class Checker:
         # entry that is no function entry starts with nothing known, r2
         # included, so a dispatch such an entry can reach has no bounded
         # table address: its proof goes (head included).  Only the table
-        # words of proofs that stand are data: no root, no node, no edge.
+        # words of proofs that stand are data: no edge leads into or out of
+        # them, so as roots they reach nothing.
         # Every instruction with no code predecessor, and every one no root
         # reaches over code, is such an entry.  Repeat until nothing changes.
         base = set(entries)
@@ -1183,14 +1184,14 @@ class Checker:
                 proofs.clear()
             data = {t + 4 * i for j in proofs for t, n in proofs[j][2] for i in range(n)}
             succ_of = code_succ(data)
-            reached_unknown = reach((entries - fn_roots) - data, succ_of)
+            reached_unknown = reach(entries - fn_roots, succ_of)
             drop = {j for j in proofs if j in reached_unknown}
             if drop:
                 banned |= drop
                 continue
             has_pred = {d for ds in succ_of.values() for d in ds}
             no_pred = {off for off in range(0, size, 4) if off not in has_pred and off not in data}
-            seen = reach((entries | no_pred) - data, succ_of)
+            seen = reach(entries | no_pred, succ_of)
             new = (no_pred | {off for off in range(0, size, 4) if off not in seen}) - data
             if new <= seeded:
                 settled = True

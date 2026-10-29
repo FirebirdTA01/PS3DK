@@ -1404,9 +1404,9 @@ def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False):
          cmpldi r3,1 ; bgt dflt
          addis rB,r2,HA(.LC1) ; <scale> ; ld r10,LO(.LC1)(rB)
          lwax r9,r10,r3 ; add r9,r9,r10 ; mtctr r9 ; <pre_bctr> ; bcctr final_bo,0
-    T:   .long c0-T, c0-T
     c0:  addis r12,r2,HA(.LC0) ; ld r10,LO(.LC0)(r12) ; blr
     dflt: blr
+    T:   .long c0-T, c0-T
     rB is r9, or r0 with zero_base; scale defaults to rldic r3,r3,2,30.
     """
     b = 0 if zero_base else 9
@@ -1416,10 +1416,11 @@ def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False):
              ('lo', lambda o, L: F.ld(10, b)), ('lwax', lambda o, L: F.lwax(9, 10, 3)),
              ('add', lambda o, L: F.add(9, 9, 10)), ('mtctr', lambda o, L: F.mtctr(9))]
     items += [(f'pre{k}', lambda o, L, w=w: w) for k, w in enumerate(pre_bctr)]
+    # The table comes last, so a word a broken proof leaves out falls into nothing.
     items += [('bctr', lambda o, L: F.bcctr(final_bo, 0)),
-              'T', ('t0', lambda o, L: L['c0'] - L['T']), ('t1', lambda o, L: L['c0'] - L['T']),
               'c0', ('cha', lambda o, L: F.addis(12, 2)), ('clo', lambda o, L: F.ld(10, 12)),
-              ('cr', lambda o, L: F.BLR), 'dflt', ('dr', lambda o, L: F.BLR)]
+              ('cr', lambda o, L: F.BLR), 'dflt', ('dr', lambda o, L: F.BLR),
+              'T', ('t0', lambda o, L: L['c0'] - L['T']), ('t1', lambda o, L: L['c0'] - L['T'])]
     words, L, at = asm(items)
     o = from_obj('k.o')
     o.section('.text.k', F.code(*words))
