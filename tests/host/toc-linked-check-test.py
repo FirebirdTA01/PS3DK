@@ -640,7 +640,7 @@ def asm(items):
 
 def switch_user(check=('cmplwi', 3, 1), bc=(12, 1), scale=('rldic', 30), clobber_index=False,
                 table_named=True, case0_at='c0', entry_at_mtctr=False, table_last=False,
-                wrong_base=False, reenter=None, reload=False):
+                wrong_base=False, reenter=None, reload=False, toc32=False):
     """
     A switch as the compiler emits it: a range check, then a computed jump
     through an in-section table of offsets from the table's own address:
@@ -659,8 +659,10 @@ def switch_user(check=('cmplwi', 3, 1), bc=(12, 1), scale=('rldic', 30), clobber
     cmplwi r10,K, ('twi', K) = clrlwi r10,r3,28 then twi lgt r10,K, or None.
     scale: ('rldic', MB) or ('sldi',).  reenter: (bo, bi) of a check at
     `again` (cmplwi r3,1 then bc bo,bi,head).  reload: the index is
-    reloaded from memory after a check of a first load.
+    reloaded from memory after a check of a first load.  toc32: 4-byte
+    ADDR32 .toc entries read with lwz, as the ILP32 libraries have them.
     """
+    ldw = F.lwz if toc32 else F.ld
     items = []
     if reload:
         items += [('ld3', lambda o, L: F.lbz(10, 4)), ('cmp', lambda o, L: F.cmplwi(10, 1)),
@@ -684,9 +686,9 @@ def switch_user(check=('cmplwi', 3, 1), bc=(12, 1), scale=('rldic', 30), clobber
         items.append(('scale', lambda o, L: F.sldi(3, 3, 2)))
     else:
         items.append(('scale', lambda o, L: F.rldic(3, 3, 2, scale[1])))
-    items.append(('ld10', lambda o, L: F.ld(10, 9)))
+    items.append(('ld10', lambda o, L: ldw(10, 9)))
     if wrong_base:
-        items += [('ha12', lambda o, L: F.addis(12, 2)), ('ld12', lambda o, L: F.ld(12, 12))]
+        items += [('ha12', lambda o, L: F.addis(12, 2)), ('ld12', lambda o, L: ldw(12, 12))]
     items += [('lwax', lambda o, L: F.lwax(9, 10, 3)),
               ('add', lambda o, L: F.add(9, 9, 12 if wrong_base else 10)),
               'mtctr', ('mtctr', lambda o, L: F.mtctr(9)), ('bctr', lambda o, L: F.bctr())]
@@ -695,8 +697,8 @@ def switch_user(check=('cmplwi', 3, 1), bc=(12, 1), scale=('rldic', 30), clobber
         first = {'c0': lambda L: L['c0'], 'lo': lambda L: L['c0'] + 4, 'mtctr': lambda L: L['mtctr'],
                  'head': lambda L: L['head']}[case0_at]
         return ['T', ('t0', lambda o, L: first(L) - L['T']), ('t1', lambda o, L: L['c1'] - L['T'])]
-    body = ['c0', ('c0ha', lambda o, L: F.addis(12, 2)), ('c0lo', lambda o, L: F.ld(10, 12)), ('c0r', lambda o, L: F.BLR),
-            'c1', ('c1lo', lambda o, L: F.ld(10, 11)), ('c1b', lambda o, L: F.b(L['again'] - o)), 'again']
+    body = ['c0', ('c0ha', lambda o, L: F.addis(12, 2)), ('c0lo', lambda o, L: ldw(10, 12)), ('c0r', lambda o, L: F.BLR),
+            'c1', ('c1lo', lambda o, L: ldw(10, 11)), ('c1b', lambda o, L: F.b(L['again'] - o)), 'again']
     if reenter:
         body += [('again_cmp', lambda o, L: F.cmplwi(3, 1)),
                  ('again_bc', lambda o, L: F.bc(reenter[0], reenter[1], L['head'] - o))]
@@ -708,26 +710,27 @@ def switch_user(check=('cmplwi', 3, 1), bc=(12, 1), scale=('rldic', 30), clobber
     o.sym('j', '.text.j', 0, bind='GLOBAL', stype='FUNC')
     if entry_at_mtctr:
         o.sym('j2', '.text.j', at['mtctr'], bind='GLOBAL', stype='FUNC')
-    o.section('.toc', bytes(24), flags='WA', align=8)
+    es, ent, lo = (4, 'R_PPC64_ADDR32', 'R_PPC64_TOC16_LO') if toc32 else (8, 'R_PPC64_ADDR64', 'R_PPC64_TOC16_LO_DS')
+    o.section('.toc', bytes(3 * es), flags='WA', align=8)
     o.sym('.LC0', '.toc', 0)
-    o.sym('.LC1', '.toc', 8)
-    o.sym('.LC2', '.toc', 16)
+    o.sym('.LC1', '.toc', es)
+    o.sym('.LC2', '.toc', 2 * es)
     o.sym('g_a', 'UND', bind='GLOBAL')
-    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.toc', 0, ent, 'g_a')
     if table_named:
-        o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.j', L['T'])
+        o.rel('.toc', es, ent, '.text.j', L['T'])
     else:
-        o.rel('.toc', 8, 'R_PPC64_ADDR64', 'g_a')
-    o.rel('.toc', 16, 'R_PPC64_ADDR64', '.text.j', L['T'] + 4)
+        o.rel('.toc', es, ent, 'g_a')
+    o.rel('.toc', 2 * es, ent, '.text.j', L['T'] + 4)
     o.rel('.text.j', at['ha9'] + 2, 'R_PPC64_TOC16_HA', '.LC1')
-    o.rel('.text.j', at['ld10'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC1')
+    o.rel('.text.j', at['ld10'] + 2, lo, '.LC1')
     if wrong_base:
         o.rel('.text.j', at['ha12'] + 2, 'R_PPC64_TOC16_HA', '.LC2')
-        o.rel('.text.j', at['ld12'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC2')
+        o.rel('.text.j', at['ld12'] + 2, lo, '.LC2')
     o.rel('.text.j', at['ha11'] + 2, 'R_PPC64_TOC16_HA', '.LC0')
     o.rel('.text.j', at['c0ha'] + 2, 'R_PPC64_TOC16_HA', '.LC0')
-    o.rel('.text.j', at['c0lo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC0')
-    o.rel('.text.j', at['c1lo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    o.rel('.text.j', at['c0lo'] + 2, lo, '.LC0')
+    o.rel('.text.j', at['c1lo'] + 2, lo, '.LC0')
     return o
 
 
@@ -752,6 +755,12 @@ def unproven(name, refused=6, **kw):
 def case_jump_table():
     # cmplwi + rldic ...,2,30: the 32 bits checked are the 32 bits scaled.
     return proven('switch')
+
+
+def case_jump_table_toc32():
+    # 4-byte .toc entries read with lwz: the table entry's neighbours are
+    # other 4-byte entries, not part of it.
+    return proven('switch-toc32', toc32=True)
 
 
 def case_jump_table_cmpldi_sldi():
@@ -1131,6 +1140,7 @@ NEGATIVE_CASES = [
     ('review: an input that changed after capture is bad input', case_wrong_object_set),
     ('review: a trace naming files outside the manifest is bad input', case_trace_names_other_file),
     ('flow: computed jump through a proven switch table', case_jump_table),
+    ('flow: a table address in a 4-byte .toc entry', case_jump_table_toc32),
     ('flow: cmpldi bounds sldi of the whole register', case_jump_table_cmpldi_sldi),
     ('flow: low-byte check bounds a low-byte scale', case_jump_table_low_byte),
     ('flow: a twi trap bounds the index', case_jump_table_trap_bound),
