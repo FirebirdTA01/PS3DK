@@ -82,4 +82,3 @@
 *pthread_attr_t	known-open: listed in struct-layout-known-open.txt (system-domain layout tracked there)
 *stat	known-open: listed in struct-layout-known-open.txt (system-domain layout tracked there)
 *CellSpursJobContext2	spu-side: SPU-side record (cell/spurs/job_descriptor.h); members are SPU local-store pointers / 64-bit EAs that do not grow under PPU LP64, so the cross-model delta the PPU checker reports is a measurement artifact, not an SDK defect
-*CellSpursTaskSaveConfig	defect-open: PPU record passed to the SPU task runtime; LP64 widens void *eaContext to 8 bytes (24/8 vs 12/4) which breaks the shared PPU<->SPU layout; card t_94fe68dd

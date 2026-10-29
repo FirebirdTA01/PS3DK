@@ -1665,8 +1665,8 @@ lp64	cell/spurs/queue.h	CellSpursQueue	struct	128	128	skip@0
 lp64	cell/spurs/queue.h	struct CellSpursQueue	struct	128	128	skip@0
 lp64	cell/spurs/semaphore.h	CellSpursSemaphore	struct	128	128	skip@0
 lp64	cell/spurs/semaphore.h	struct CellSpursSemaphore	struct	128	128	skip@0
-lp64	cell/spurs/task.h	CellSpursTaskSaveConfig	struct	24	8	eaContext@0 sizeContext@8 lsPattern@16
-lp64	cell/spurs/task.h	struct CellSpursTaskSaveConfig	struct	24	8	eaContext@0 sizeContext@8 lsPattern@16
+lp64	cell/spurs/task.h	CellSpursTaskSaveConfig	struct	12	4	eaContext@0 sizeContext@4 lsPattern@8
+lp64	cell/spurs/task.h	struct CellSpursTaskSaveConfig	struct	12	4	eaContext@0 sizeContext@4 lsPattern@8
 lp64	cell/spurs/task_types.h	CellSpursTaskArgument	union	16	8	u32@0 u64@0
 lp64	cell/spurs/task_types.h	CellSpursTaskAttribute	struct	256	16	skip@0
 lp64	cell/spurs/task_types.h	CellSpursTaskAttribute2	struct	256	16	revision@0 sizeContext@4 eaContext@8 lsPattern@16 name@32 __reserved__@36

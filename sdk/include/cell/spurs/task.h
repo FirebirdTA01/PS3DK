@@ -17,6 +17,14 @@
 #include <cell/spurs/types.h>
 #include <cell/spurs/task_types.h>
 #include <cell/spurs/task_exit_code.h>
+#ifdef __PPU__
+#include <ppu-types.h>
+#else
+/* SPU pointers are already 32-bit, so the PRX attribute is a no-op here. */
+#ifndef ATTRIBUTE_PRXPTR
+#define ATTRIBUTE_PRXPTR
+#endif
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,9 +37,9 @@ extern "C" {
  * the SPRX picks a default; otherwise it reads sizeContext + lsPattern
  * from here and DMAs the context to/from eaContext on suspend/resume. */
 typedef struct CellSpursTaskSaveConfig {
-    void                          *eaContext;
+    void                          *eaContext ATTRIBUTE_PRXPTR;
     uint32_t                       sizeContext;
-    const CellSpursTaskLsPattern  *lsPattern;
+    const CellSpursTaskLsPattern  *lsPattern ATTRIBUTE_PRXPTR;
 } CellSpursTaskSaveConfig;
 
 /* Convenience constant: "use the entire task area from TOP downward"

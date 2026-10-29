@@ -68,6 +68,9 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **CellSpursTaskSaveConfig layout.** `CellSpursTaskSaveConfig` has the same
+  12-byte layout in LP64 programs as in the default model; before, its two
+  pointers widened to 8 bytes each.
 - **Codec gifdec, jpgenc, and pngenc record layouts.** In `<cell/codec/gifdec.h>`,
   `CellGifDecThreadInParam` marks `cbCtrlMallocArg` and `cbCtrlFreeArg` with
   `ATTRIBUTE_PRXPTR`, preserving 28-byte size and 4-byte alignment across both
