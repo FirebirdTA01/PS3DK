@@ -31,35 +31,27 @@ def find_tool(bindir, name):
     return p
 
 
-def find_nidgen(root, ps3dev=None, explicit_nidgen=None):
-    if explicit_nidgen:
-        p = Path(explicit_nidgen).resolve()
+def find_nidgen(root, explicit_nidgen=None):
+    chosen = explicit_nidgen or os.environ.get('NIDGEN')
+    if chosen:
+        p = Path(chosen).resolve()
         if p.is_file():
             return p
         if p.with_suffix('.exe').is_file():
             return p.with_suffix('.exe')
-        raise FileNotFoundError(f"explicit nidgen not found: {explicit_nidgen}")
+        raise FileNotFoundError(f"explicit nidgen not found: {chosen}")
 
     candidates = [
+        root / 'tools/target/x86_64-pc-windows-gnu/release/nidgen.exe',
         root / 'tools/target/x86_64-pc-windows-gnu/debug/nidgen.exe',
         root / 'tools/target/release/nidgen.exe',
         root / 'tools/target/debug/nidgen.exe',
         root / 'tools/target/release/nidgen',
         root / 'tools/target/debug/nidgen',
-        root.parent / 'prx-register-guid/tools/target/x86_64-pc-windows-gnu/debug/nidgen.exe',
     ]
-    if ps3dev:
-        candidates.extend([
-            ps3dev / 'bin/nidgen',
-            ps3dev / 'bin/nidgen.exe',
-        ])
     for cand in candidates:
         if cand.is_file():
             return cand
-
-    which = shutil.which('nidgen')
-    if which:
-        return Path(which)
 
     return None
 
@@ -120,9 +112,9 @@ def main():
         print(f'prx-register-guid-link: SKIP (no compiler at {cc})')
         return 0
 
-    nidgen = find_nidgen(ROOT, ps3dev, args.nidgen)
+    nidgen = find_nidgen(ROOT, args.nidgen)
     if not nidgen:
-        print('prx-register-guid-link: FAIL (nidgen tool binary not found)')
+        print('prx-register-guid-link: FAIL (nidgen tool binary not found; pass --nidgen, set NIDGEN, or build tools/nidgen)')
         return 1
 
     temp_dir = None

@@ -952,6 +952,10 @@ jobs:
       - name: Test PRX identity argument forwarding
         run: bash tests/host/prx-identity-args-test.sh
 
+      # Pure host test: PRX nidgen tool discovery rejects sibling worktrees and external tools.
+      - name: Test PRX nidgen tool discovery isolation
+        run: bash tests/host/prx-nidgen-discovery-test.sh
+
       # pkg host tool must handle long paths (>512 chars POSIX, >260 Win32),
       # fail non-zero without writing packages when files cannot be read, and
       # produce byte-identical packages for standard payloads.
