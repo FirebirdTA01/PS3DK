@@ -218,9 +218,10 @@ The version stamped into builds is generated from the most recent
 
 - **LP64 PSGL buffer data replacement can corrupt the heap.** In the LP64
   (`-mlp64`) `libPSGL`, repeatedly replacing a buffer object's data with
-  `glBufferData` can corrupt the heap and crash in `free`. The ILP32 library
-  runs the same sequence without fault. v0.26.153 has the same fault; its
-  cause is under investigation and the fix will ship in a later release.
+  `glBufferData` can corrupt the RSX local-memory heap and crash while the
+  old storage is released. The ILP32 library runs the same sequence without
+  fault. v0.26.153 has the same fault; its cause is under investigation and
+  the fix will ship in a later release.
 
 ## [v0.26.153] — 2026-10-28
 
