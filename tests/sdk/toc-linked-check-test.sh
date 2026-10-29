@@ -15,6 +15,7 @@
 #
 # Skips without PS3DEV (CI has no PPU compiler); run it in the release gate.
 # usage: toc-linked-check-test.sh [--ps3dev DIR] [--red-ps3dev DIR]
+#   TOC_LINKED_KEEP=DIR keeps every capture and check output in DIR.
 set -u
 ps3dev="${PS3DEV:-}"; red=""
 while [ $# -gt 0 ]; do
@@ -41,8 +42,14 @@ py=python3; command -v $py > /dev/null 2>&1 || py=python
 here="$(cd "$(dirname "$0")" && pwd)"
 checker="$here/../../tools/toc-linked-check.py"
 fixture="$here/toc-edit-ilp32"
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+# TOC_LINKED_KEEP=DIR keeps the captures and checks in DIR (a new directory).
+if [ -n "${TOC_LINKED_KEEP:-}" ]; then
+    work="$TOC_LINKED_KEEP"
+    mkdir "$work" || { echo "toc-linked-check: FAIL: $work exists or cannot be made"; exit 1; }
+else
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+fi
 # Windows-hosted drivers need mixed paths.
 if command -v cygpath > /dev/null 2>&1; then w() { cygpath -m "$1"; }; else w() { printf '%s' "$1"; }; fi
 
