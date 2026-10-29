@@ -37,7 +37,7 @@ int main(int argc, char **argv)
 
 	int modres = -1;
 	int rc = sys_prx_start_module(prx_id, sizeof(handoff), &handoff, &modres, 0, NULL);
-	if (rc != 0 || modres != 0) {
+	if (rc != 0 || modres != SYS_PRX_RESIDENT) {
 		printf("PRX_FAIL start rc=0x%08lx modres=0x%08lx\n",
 		       (unsigned long)rc, (unsigned long)modres);
 		return 1;
@@ -71,11 +71,18 @@ int main(int argc, char **argv)
 	}
 	printf("PRX_EXPORT_CALL_OK val=%d\n", stub_result);
 
+	sample_module_stop_handoff_t stop_handoff;
+	memset(&stop_handoff, 0, sizeof(stop_handoff));
+
 	modres = -1;
-	rc = sys_prx_stop_module(prx_id, 0, NULL, &modres, 0, NULL);
-	if (rc != 0) {
-		printf("PRX_FAIL stop rc=0x%08lx modres=0x%08lx\n",
-		       (unsigned long)rc, (unsigned long)modres);
+	rc = sys_prx_stop_module(prx_id, sizeof(stop_handoff), &stop_handoff, &modres, 0, NULL);
+	if (rc != 0 || modres != SYS_PRX_STOP_OK ||
+	    stop_handoff.magic != SAMPLE_MODULE_STOP_MAGIC ||
+	    stop_handoff.stop_counter != 1) {
+		printf("PRX_FAIL stop rc=0x%08lx modres=0x%08lx magic=0x%08lx counter=%lu\n",
+		       (unsigned long)rc, (unsigned long)modres,
+		       (unsigned long)stop_handoff.magic,
+		       (unsigned long)stop_handoff.stop_counter);
 		return 1;
 	}
 	printf("PRX_MODULE_STOP_OK\n");

@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/prx.h>
 #include <sys/moduleexport.h>
 
 #include "module_export_contract.h"
@@ -35,8 +36,11 @@ int sample_module_start(size_t args, void *argp)
 
 int sample_module_stop(size_t args, void *argp)
 {
-	(void)args;
-	(void)argp;
 	g_stop_calls++;
-	return SYS_PRX_RESIDENT;
+	if (args >= sizeof(sample_module_stop_handoff_t) && argp != NULL) {
+		sample_module_stop_handoff_t *stop_handoff = (sample_module_stop_handoff_t *)argp;
+		stop_handoff->magic = SAMPLE_MODULE_STOP_MAGIC;
+		stop_handoff->stop_counter = g_stop_calls;
+	}
+	return SYS_PRX_STOP_OK;
 }
