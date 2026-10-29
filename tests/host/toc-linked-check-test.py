@@ -1268,6 +1268,54 @@ def case_r5_unnamed_orphan_mtlr():
                 1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
 
 
+def case_r6_cycle_joins_return():
+    # +12 mtlr r3 ; +16 beq +8 ; +20 b +12: a cycle with predecessors but no
+    # root; it may be entered, and it reaches the blr with LR = r3.
+    return want(orphan_case('r6-cycle', [F.addis(9, 2), F.ld(10, 9), F.BLR, F.mtlr(3), F.beq(-8), F.b(-8)]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r6_named_cycle():
+    # Control: the same cycle named by a data word.
+    return want(orphan_case('r6-named-cycle', [F.addis(9, 2), F.ld(10, 9), F.BLR, F.mtlr(3), F.beq(-8), F.b(-8)], 12),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r6_long_cycle():
+    # A five-instruction cycle +12..+28 that joins the return.
+    return want(orphan_case('r6-long-cycle', [F.addis(9, 2), F.ld(10, 9), F.BLR, F.mtlr(3), F.NOP, F.NOP,
+                                              F.beq(-16), F.b(-16)]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r6_two_cycles():
+    # Two disjoint unreached cycles, each joining the return with its own mtlr.
+    return want(orphan_case('r6-two-cycles', [F.addis(9, 2), F.ld(10, 9), F.BLR,
+                                              F.mtlr(3), F.beq(-8), F.b(-8),
+                                              F.mtlr(4), F.beq(-20), F.b(-8)]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r6_mflr_r1():
+    # mflr r1 after the save: r1 now holds LR, so 16(r1) is not the slot.
+    return want(orphan_case('r6-mflr-r1', [F.addis(9, 2), F.ld(10, 9), F.mflr(0), F.std(0, 1, 16), F.mflr(1),
+                                           F.ld(0, 1, 16), F.mtlr(0), F.BLR]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r6_mflr_r3():
+    # Control: mflr r3 leaves the stack pointer alone.
+    return want(orphan_case('r6-mflr-r3', [F.addis(9, 2), F.ld(10, 9), F.mflr(0), F.std(0, 1, 16), F.mflr(3),
+                                           F.ld(0, 1, 16), F.mtlr(0), F.BLR]),
+                0, 'PASS', sites_verified=2, sites_refused=0)
+
+
+def case_r6_stdux_frame():
+    # stdux r1,r1,r0 moves r1 by a register: the stack pointer is unknown.
+    return want(nonleaf('r6-stdux', prologue=[F.mflr(0), F.std(0, 1, 16), F.x_form(181, 1, 1, 0)]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
 def case_r5_named_reached_blr():
     # Control: the named blr is also reached from the function.
     return want(orphan_case('r5-named-reached-blr', [F.addis(9, 2), F.ld(10, 9), F.b(4), F.BLR], 12),
@@ -1700,6 +1748,13 @@ NEGATIVE_CASES = [
     ('review 5: a named orphan blr is refused', case_r5_named_orphan_blr),
     ('review 5: a named orphan mtlr joining the return is refused', case_r5_named_orphan_mtlr),
     ('review 5: an unnamed orphan mtlr joining the return is refused', case_r5_unnamed_orphan_mtlr),
+    ('review 6: an unreached cycle joining the return is refused', case_r6_cycle_joins_return),
+    ('review 6: the same cycle named by data control', case_r6_named_cycle),
+    ('review 6: a longer unreached cycle is refused', case_r6_long_cycle),
+    ('review 6: two disjoint unreached cycles are refused', case_r6_two_cycles),
+    ('review 6: mflr r1 makes the stack pointer unknown', case_r6_mflr_r1),
+    ('review 6: mflr r3 control', case_r6_mflr_r3),
+    ('review 6: stdux r1,r1,r0 makes the stack pointer unknown', case_r6_stdux_frame),
     ('review 5: a named, reached blr control', case_r5_named_reached_blr),
     ('review 5: a named, reached mtlr control', case_r5_named_reached_mtlr),
     ('review 4: the standard non-leaf epilogue returns', case_r4_epilogue),

@@ -1152,6 +1152,23 @@ class Checker:
             full = with_edges(True)
         reached = direct | {d for j in proofs for d in proofs[j][1]}
         entries |= {off for off in range(0, size, 4) if off not in reached}
+        # Having a predecessor is not being reachable: every instruction no
+        # root (function entry, named address, instruction without a
+        # modelled predecessor) reaches over the modelled edges, an
+        # unreached cycle for one, is an entry with nothing known (proven
+        # switch-table words are dropped as data where entries are used).
+        succ_of = {}
+        for d, ps in with_edges(False).items():
+            for p_ in ps:
+                succ_of.setdefault(p_, []).append(d)
+        seen, todo = set(), [e for e in entries if 0 <= e < size]
+        while todo:
+            c = todo.pop()
+            if c in seen:
+                continue
+            seen.add(c)
+            todo.extend(succ_of.get(c, []))
+        entries |= {off for off in range(0, size, 4) if off not in seen}
         unknown = unknown or next((f"computed jump through CTR at +0x{j:x} (no proven switch)"
                                    for j in indirect if j not in proofs), None)
         if not unknown and returns:
@@ -1194,6 +1211,13 @@ class Checker:
                 return b
             return tuple(x if x == y else u for x, y, u in zip(a, b, UNK))
 
+        def wrote(sp, copies, reloads, regs):
+            """The one write effect: the written registers hold neither an
+            mflr copy nor a slot reload, and a write of r1 makes SP unknown
+            (callers that follow r1 by a constant pass it applied already)."""
+            regs = set(regs)
+            return ('unk' if 1 in regs else sp), copies - regs, reloads - regs
+
         def step(off, st):
             sp, lr, copies, reloads, sl = st
             w = be(src, off, 4)
@@ -1201,18 +1225,23 @@ class Checker:
             xo = (w >> 1) & 0x3ff
             spr = ((w >> 16) & 31) | (((w >> 11) & 31) << 5)
             if op == 31 and xo == 339 and spr == 8:                  # mflr rt
-                copies = (copies | {rt}) if lr == 'entry' and sl == 'none' else copies - {rt}
-                return sp, lr, copies, reloads - {rt}, sl
-            if op == 31 and xo == 467 and spr == 8:                  # mtlr rt
+                sp, copies, reloads = wrote(sp, copies, reloads, {rt})
+                if lr == 'entry' and sl == 'none' and rt != 1:
+                    copies = copies | {rt}
+                return sp, lr, copies, reloads, sl
+            if op == 31 and xo == 467 and spr == 8:                  # mtlr rt (no GPR write)
                 return sp, ('entry' if rt in reloads else 'unk'), copies, reloads, sl
             if op in (16, 18) or (op == 19 and xo in (16, 528)):
                 if w & 1:                                            # a call: LR, volatile registers
-                    gone = set(VOLATILE_GPRS)
-                    return (sp, 'unk', copies - gone, reloads - gone,
-                            'late' if sl == 'none' else sl)
+                    sp, copies, reloads = wrote(sp, copies, reloads, VOLATILE_GPRS)
+                    return sp, 'unk', copies, reloads, 'late' if sl == 'none' else sl
                 return st
+            written = gpr_writes(w)
+            if written is None:
+                return UNK
             sw = stack_write(w)
             if sw is not None:
+                tracked = False
                 if sw[0] == 'unknown' or sp == 'unk':
                     sl = 'unk' if sl != 'none' else 'late'
                 else:
@@ -1222,23 +1251,18 @@ class Checker:
                         sl = 'saved'                                 # the original save
                     if sw[0] == 'update':
                         sp = sp + sw[1]                              # stdu/stwu ...,d(r1) moves r1
-                written = gpr_writes(w)
-                if written is None:
-                    return UNK
-                gone = set(written) - {1}
-                return sp, lr, copies - gone, reloads - gone, sl
+                        tracked = True
+                sp, copies, reloads = wrote(sp, copies, reloads, set(written) - ({1} if tracked else set()))
+                return sp, lr, copies, reloads, sl
             if op == 14 and rt == 1 and ra == 1:                     # addi r1,r1,N
                 return (sp + sext16(w & 0xffff) if sp != 'unk' else 'unk'), lr, copies, reloads, sl
             if op == 58 and w & 3 == 0 and ra == 1 and rt != 1:      # ld rt,d(r1)
                 d = sext16(w & 0xfffc)
                 ok = sp != 'unk' and sl == 'saved' and (sp + d, sp + d + 8) == slot
-                return sp, lr, copies - {rt}, (reloads | {rt}) if ok else reloads - {rt}, sl
-            written = gpr_writes(w)
-            if written is None:
-                return UNK
-            if 1 in written:
-                sp = 'unk'                                           # any other write of r1
-            return sp, lr, copies - written, reloads - written, sl
+                sp, copies, reloads = wrote(sp, copies, reloads, {rt})
+                return sp, lr, copies, (reloads | {rt}) if ok else reloads, sl
+            sp, copies, reloads = wrote(sp, copies, reloads, written)
+            return sp, lr, copies, reloads, sl
 
         state = {}
         work = sorted(roots | other_entries)
