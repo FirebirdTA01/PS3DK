@@ -86,6 +86,18 @@ def mtctr(rs):
     return 0x7c0903a6 | (rs << 21)
 
 
+def mtlr(rs):
+    return 0x7c0803a6 | (rs << 21)
+
+
+def bclr(bo, bi, link=0):
+    return (19 << 26) | (bo << 21) | (bi << 16) | (16 << 1) | link
+
+
+def rlwinm(ra, rs, sh, mb, me):
+    return (21 << 26) | (rs << 21) | (ra << 16) | (sh << 11) | (mb << 6) | (me << 1)
+
+
 def bcctr(bo, bi):
     return (19 << 26) | (bo << 21) | (bi << 16) | (528 << 1)
 

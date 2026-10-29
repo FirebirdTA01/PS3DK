@@ -42,9 +42,16 @@ Scope of v1 (anything outside it is refused, never skipped):
     (through a local .opd descriptor to its code address); one without
     must stay in its section or the section is refused.  A computed jump
     (bcctr) reaches the targets of a switch table proven from its range
-    check, table address and dispatch sequence, or else any instruction
-    of the section.  Register writes are modelled for listed instruction
-    forms only; any other form may write every register;
+    check, table address and dispatch sequence; mtctr counts only inside
+    such a sequence, and a CTR-decrementing branch or a wrapping rotate
+    mask in it proves nothing.  A blr is a return only when unconditional
+    and no path from an LR write (mtlr, or any branch that links) reaches
+    it.  Any other transfer through CTR or LR (an unproven bcctr, bctrl,
+    a conditional or decrementing bclr, bclrl, a blr after an LR write)
+    makes every instruction of the section an entry point with unknown
+    registers.  RA=0 in a D-form base is literal zero: such an LO never
+    pairs with an addis.  Register writes are modelled for listed
+    instruction forms only; any other form may write every register;
   - names come from the files' own string tables (readelf truncates long
     section names), and must extend readelf's.
 
@@ -1001,6 +1008,7 @@ class Checker:
                     bad = bad or f"two branch relocations on the instruction at +0x{k:x}"
                 branch_rel[k] = r
         preds, indirect, calls = {}, [], set()
+        returns, lr_writes, unknown = [], [], None
 
         def leave(why):
             nonlocal bad
@@ -1039,14 +1047,24 @@ class Checker:
             elif op == 19 and xo in (16, 528):
                 always = ((w >> 21) & 0x14) == 0x14
                 succ = nxt if (w & 1) or not always else []
-                if xo == 528 and not w & 1:
-                    indirect.append(off)
+                if xo == 16 and always and not w & 1:
+                    returns.append(off)                     # blr: a return only while LR is the entry LR
+                elif xo == 528 and not w & 1 and (w >> 21) & 4:
+                    indirect.append(off)                    # bctr/bcctr: a switch, or unknown
+                else:
+                    unknown = unknown or (f"computed {'call' if w & 1 else 'jump'} through "
+                                          f"{'LR' if xo == 16 else 'CTR'} at +0x{off:x}")
+            if (op in (16, 18) or (op == 19 and xo in (16, 528))) and w & 1:
+                lr_writes.append(off)
+            elif op == 31 and xo == 467 and ((w >> 16) & 31) | (((w >> 11) & 31) << 5) == 8:
+                lr_writes.append(off)                       # mtlr
             for t in succ:
                 preds.setdefault(t, []).append(off)
         entries = {0} | calls
         for s_ in obj.symbols.values():
             if s_['ndx'] == str(sec.nr) and s_['type'] != 'SECTION':
                 entries.add(s_['val'])
+
         for nr, other in obj.sections.items():
             if 'A' not in other.flags or other.name == '.eh_frame':
                 continue
@@ -1079,7 +1097,7 @@ class Checker:
         for _ in range(4 * len(indirect) + 1):
             full = with_edges(True)
             # A proof holds only while nothing else enters its sequences.
-            broken = [j for j, (expect, _) in proofs.items()
+            broken = [j for j, (expect, _, _) in proofs.items()
                       if any(c in entries or sorted(full.get(c, [])) != ps for c, ps in expect.items())]
             if not broken:
                 break
@@ -1097,7 +1115,28 @@ class Checker:
             full = with_edges(True)
         reached = direct | {d for j in proofs for d in proofs[j][1]}
         entries |= {off for off in range(0, size, 4) if off not in reached}
-        fl = {'preds': full, 'entries': entries, 'bad': bad}
+        unknown = unknown or next((f"computed jump through CTR at +0x{j:x} (no proven switch)"
+                                   for j in indirect if j not in proofs), None)
+        if not unknown and returns:
+            # A blr that a path from an LR write (mtlr, or any branch that
+            # links) reaches is a computed jump.
+            data = {t + 4 * i for j in proofs for t, n in proofs[j][2] for i in range(n)}
+            succ = {}
+            for d, ps in with_edges(False).items():
+                for p_ in ps:
+                    succ.setdefault(p_, []).append(d)
+            seeds = [d for w_ in lr_writes for d in succ.get(w_, [])]
+            seen = set()
+            while seeds:
+                c = seeds.pop()
+                if c in seen or c in data:
+                    continue
+                seen.add(c)
+                seeds.extend(succ.get(c, []))
+            hit = next((r_ for r_ in returns if r_ in seen), None)
+            if hit is not None:
+                unknown = f"blr at +0x{hit:x} after a possible LR write: a computed jump"
+        fl = {'preds': full, 'entries': entries, 'bad': bad, 'unknown': unknown}
         self.flow_cache[key] = fl
         return fl
 
@@ -1192,7 +1231,7 @@ class Checker:
             if not (0 <= d < size and d % 4 == 0):
                 return None
             targets.add(d)
-        return expect, sorted(targets)
+        return expect, sorted(targets), [(t, k + 1)]
 
     def run_switch_path(self, obj, sec, src, path, at):
         """Symbolic run of one path ending at a bcctr: (T, K) when CTR = T + table[i <= K], else None."""
@@ -1243,7 +1282,7 @@ class Checker:
             if op == 16 and not w & 1:                                   # bc, not a call
                 bo, bi = (w >> 21) & 31, (w >> 16) & 31
                 if not bo & 4:
-                    ctr = None                                           # decrements CTR
+                    return None                                          # decrements CTR
                 tgt = off + sext16(w & 0xfffc) if not here else None
                 fall = nxt == off + 4 and tgt != off + 4
                 taken = tgt is not None and nxt == tgt and tgt != off + 4
@@ -1260,7 +1299,7 @@ class Checker:
             load = {32: 4}.get(op) if op != 58 else (8 if w & 3 == 0 else None)
             if load and len(here) == 1 and here[0]['offset'] == off + 2 and w & 0xffff == 0:
                 r = here[0]
-                src_ok = ((r['rtype'] in ('R_PPC64_TOC16_LO', 'R_PPC64_TOC16_LO_DS')
+                src_ok = ((r['rtype'] in ('R_PPC64_TOC16_LO', 'R_PPC64_TOC16_LO_DS') and ra != 0
                            and regs.get(ra) == ('ha', r['info'] >> 32, r['addend']))
                           or (r['rtype'] in ('R_PPC64_TOC16', 'R_PPC64_TOC16_DS') and ra == 2))
                 t = self.toc_table(obj, sec, r['info'] >> 32, r['addend'], load) if src_ok else None
@@ -1277,9 +1316,11 @@ class Checker:
                 v = get(rt)
                 sh, mb, me = rb, (w >> 6) & 31, (w >> 1) & 31
                 kill({ra})
-                if v[0] == 'v' and sh == 0 and me == 31:
+                if v[0] != 'v' or mb > me:
+                    continue                                              # a wrapping mask: width unknown
+                if sh == 0 and me == 31:
                     regs[ra] = ('v', v[1], min(v[2], 32 - mb))
-                elif v[0] == 'v' and sh == 2 and me == 29:
+                elif sh == 2 and me == 29:
                     regs[ra] = ('scaled', v[1], min(v[2], 30 - mb))
                 continue
             if op == 30 and not w & 1 and (w >> 2) & 7 in (0, 1, 2):      # rldicl, rldicr, rldic
@@ -1295,7 +1336,7 @@ class Checker:
                     regs[ra] = ('v', v[1], min(v[2], 64 - mbe))
                 elif form == 1 and sh == 2 and mbe == 61:                  # sldi 2
                     regs[ra] = ('scaled', v[1], min(v[2], 62))
-                elif form == 2 and sh == 2:                                # rldic 2,MB
+                elif form == 2 and sh == 2 and mbe <= 61:                  # rldic 2,MB; MB > 61 wraps
                     regs[ra] = ('scaled', v[1], min(v[2], 62 - mbe))
                 continue
             if op == 31 and not w & 1 and xo in (341, 266, 444, 467):
@@ -1344,6 +1385,8 @@ class Checker:
         fl = self.flow(obj, sec, src)
         if fl['bad']:
             return None, fl['bad']
+        if fl.get('unknown'):
+            return None, f"{fl['unknown']} may enter any instruction of the section with r{reg} unknown"
         if use_off in fl['entries']:
             return None, f"the use can be entered with r{reg} unknown (+0x{use_off:x} is an entry point)"
         stack = list(fl['preds'][use_off])
@@ -1388,6 +1431,8 @@ class Checker:
         rt = (w >> 21) & 31
         pairs = [None]
         if role == 'lo':
+            if ra == 0:
+                return done('refused', f"{where}: {r['rtype']} on RA=0, which is literal zero: no TOC16_HA pairs with it")
             if ra == 2:
                 return done('refused', f"{where}: {r['rtype']} based on r2 without its TOC16_HA")
             found, why = self.reaching_ha(obj, sec, src, insn_off, ra, (r['info'] >> 32, r['addend']), ha_at)
@@ -1697,9 +1742,11 @@ def cmd_check(args):
 
 COVERAGE_LIMITS = """coverage limits (refused, by design):
   a dispatch that range-checks one load and indexes with a second load of
-  the same address (two loads are never assumed equal); and switch (int)
+  the same address (two loads are never assumed equal); switch (int)
   lowered as cmplwi + sldi (no ABI-extension rule: a 32-bit check does not
-  bound a shift of the whole register)."""
+  bound a shift of the whole register); and every section with a transfer
+  through LR or CTR that is not a proven switch or a plain blr with LR
+  untouched, which includes a blr after mtlr or a call (non-leaf code)."""
 
 
 def main():

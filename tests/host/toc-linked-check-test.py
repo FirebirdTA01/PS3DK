@@ -862,6 +862,173 @@ def case_jump_table_nested():
     return want(check(lk.manifest_path), 0, 'PASS', sites_verified=6, sites_refused=0)
 
 
+def review3_switch(scale, ctr_decrement=False, zero_base=False, table1=None, decrement_to_nop=False,
+                   bdnz=False, final_bo=20):
+    """
+    The third review's switch: cmpldi r3,1 ; bgt +0x50 ; addis rB,r2,HA(.LC1)
+    ; <scale> ; ld r10,LO(.LC1)(rB) ; lwax r9,r10,r3 ; add r9,r9,r10 ; mtctr r9
+    [; bdzlr] ; bctr, a table at +0x60 and three addis/ld pairs at +0x38,
+    +0x40, +0x48 (a ld at +0x4c, past its addis, is table[1]'s target
+    unless table1 says otherwise).  rB is r9, or r0 with zero_base.
+    """
+    words = [F.BLR] * 26
+    seq = [F.cmpldi(3, 1), F.bgt(80 - 4), F.addis(0 if zero_base else 9, 2), scale,
+           F.ld(10, 0 if zero_base else 9), F.lwax(9, 10, 3), F.add(9, 9, 10), F.mtctr(9)]
+    if ctr_decrement:
+        seq.append(F.NOP if decrement_to_nop else F.bc(16, 0, 4) if bdnz else F.bclr(18, 0))
+    seq.append(F.bcctr(final_bo, 0))
+    words[:len(seq)] = seq
+    for off in (56, 64, 72):
+        words[off // 4] = F.addis(12, 2)
+        words[off // 4 + 1] = F.ld(11, 12)
+    t1 = table1 if table1 is not None else (64 if ctr_decrement else 76)
+    words[24:26] = [(64 - 96) & 0xffffffff, (t1 - 96) & 0xffffffff]
+    o = from_obj('j.o')
+    o.section('.text.j', F.code(*words))
+    o.sym('j', '.text.j', 0, bind='GLOBAL', stype='FUNC')
+    o.section('.toc', bytes(16), flags='WA', align=8)
+    o.sym('.LC0', '.toc', 0)
+    o.sym('.LC1', '.toc', 8)
+    o.sym('g_a', 'UND', bind='GLOBAL')
+    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.j', 96)
+    o.rel('.text.j', 10, 'R_PPC64_TOC16_HA', '.LC1')
+    o.rel('.text.j', 18, 'R_PPC64_TOC16_LO_DS', '.LC1')
+    for off in (56, 64, 72):
+        o.rel('.text.j', off + 2, 'R_PPC64_TOC16_HA', '.LC0')
+        o.rel('.text.j', off + 6, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    return o
+
+
+def review3(name, obj):
+    d = fresh(name)
+    lk = link(d, [obj, data_obj()])
+    return check(lk.manifest_path)
+
+
+def case_r3_rldic_wrap():
+    # rldic r3,r3,2,62: the mask wraps; its width is unknown, never zero.
+    return want(review3('r3-rldic-wrap62', review3_switch(F.rldic(3, 3, 2, 62))), 1, 'INCOMPLETE',
+                sites_verified=0, sites_failed=0, sites_refused=8)
+
+
+def case_r3_rlwinm_wrap():
+    # rlwinm r3,r3,2,30,29: MB > ME wraps.
+    return want(review3('r3-rlwinm-wrap30', review3_switch(F.rlwinm(3, 3, 2, 30, 29))), 1, 'INCOMPLETE',
+                sites_verified=0, sites_failed=0, sites_refused=8)
+
+
+def case_r3_rldic_normal():
+    # Control: rldic r3,r3,2,30 proves both entries; table[1] lands past an addis.
+    return want(review3('r3-rldic-normal30', review3_switch(F.rldic(3, 3, 2, 30))), 1, 'INCOMPLETE',
+                sites_verified=6, sites_failed=0, sites_refused=2)
+
+
+def case_r3_rlwinm_normal():
+    # Control: rlwinm r3,r3,2,0,29 (slwi 2) does not wrap.
+    return want(review3('r3-rlwinm-normal0', review3_switch(F.rlwinm(3, 3, 2, 0, 29))), 1, 'INCOMPLETE',
+                sites_verified=6, sites_failed=0, sites_refused=2)
+
+
+def case_r3_bdzlr():
+    # bdzlr decrements CTR even when it falls through: the dispatch is unknown.
+    return want(review3('r3-bdzlr', review3_switch(F.rldic(3, 3, 2, 30), ctr_decrement=True)), 1, 'INCOMPLETE',
+                sites_verified=0, sites_failed=0, sites_refused=8)
+
+
+def case_r3_bdnz():
+    # bdnz to the next instruction: either way CTR is decremented.
+    return want(review3('r3-bdnz', review3_switch(F.rldic(3, 3, 2, 30), ctr_decrement=True, bdnz=True)),
+                1, 'INCOMPLETE', sites_verified=0, sites_failed=0, sites_refused=8)
+
+
+def case_r3_decrementing_bcctr():
+    # A bcctr whose BO decrements CTR is no switch dispatch.
+    return want(review3('r3-bcctr-dec', review3_switch(F.rldic(3, 3, 2, 30), table1=64, final_bo=16)),
+                1, 'INCOMPLETE', sites_verified=0, sites_failed=0, sites_refused=8)
+
+
+def case_r3_unproven_bctr_dominated():
+    # addis ; ld ; mtctr r3 ; bctr: even with the addis before the jump, an
+    # unproven jump through CTR opens the whole section.
+    return want(flow_case('unproven-dominated', [F.addis(9, 2), F.ld(10, 9), F.mtctr(3), F.bctr()], 0, 4),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r3_bdzlr_nop():
+    # Control: the same sequence with the bdzlr replaced by a nop.
+    return want(review3('r3-bdzlr-nop', review3_switch(F.rldic(3, 3, 2, 30), ctr_decrement=True,
+                                                     decrement_to_nop=True)),
+                0, 'PASS', sites_verified=8, sites_refused=0)
+
+
+def case_r3_ra_zero_switch():
+    # ld r10,LO(0): RA=0 is literal zero, not the addis r0 value.
+    return want_detail(review3('r3-ra-zero', review3_switch(F.rldic(3, 3, 2, 30), zero_base=True, table1=64)),
+                       1, 'INCOMPLETE', r'RA=0', sites_verified=0, sites_failed=0, sites_refused=8)
+
+
+def case_r3_r9_base():
+    # Control: the same switch with r9 as the base.
+    return want(review3('r3-r9-base', review3_switch(F.rldic(3, 3, 2, 30), table1=64)),
+                0, 'PASS', sites_verified=8, sites_refused=0)
+
+
+def case_r3_ra_zero_pair():
+    # addis r0,r2,HA ; ld r10,LO(0): never a pair.
+    return want_detail(flow_case('ra-zero-pair', [F.addis(0, 2), F.ld(10, 0), F.BLR], 0, 4),
+                       1, 'INCOMPLETE', r'RA=0', sites_verified=0, sites_refused=2)
+
+
+def case_r3_lr_bypass():
+    # mtlr r3 ; beqlr: LR may name the use, past the addis.
+    return want(flow_case('lr-bypass', [F.mtlr(3), F.bclr(12, 2), F.addis(9, 2), F.ld(10, 9), F.BLR], 8, 12),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r3_ctr_control():
+    # Control: the same through CTR.
+    return want(flow_case('ctr-control', [F.mtctr(3), F.bcctr(12, 2), F.addis(9, 2), F.ld(10, 9), F.BLR], 8, 12),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r3_beqlr_leaf():
+    # A conditional return is a computed jump even with LR untouched.
+    return want(flow_case('beqlr-leaf', [F.addis(9, 2), F.bclr(12, 2), F.ld(10, 9), F.BLR], 0, 8),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r3_blr_after_mtlr():
+    # mtlr r0 ; blr: LR no longer provably the entry LR.
+    return want(flow_case('blr-after-mtlr', [F.addis(9, 2), F.ld(10, 9), F.mtlr(0), F.BLR], 0, 4),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r3_blr_after_call():
+    # bl writes LR; the blr after it is a computed jump.
+    return want(flow_case('blr-after-call', [F.addis(30, 2), F.bl(0), F.NOP, F.ld(10, 30), F.BLR], 0, 12,
+                          branch=(4, 'R_PPC64_REL24', 'ext', 0), extra=[ext_obj()]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r3_bclrl():
+    # bclrl: a call through LR, target unknown.
+    return want(flow_case('bclrl', [F.addis(9, 2), F.ld(10, 9), F.bclr(20, 0, 1), F.BLR], 0, 4),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r3_bctrl():
+    # mtctr outside a proven switch: the call through CTR has an unknown target.
+    return want(flow_case('bctrl', [F.addis(9, 2), F.ld(10, 9), F.mtctr(3), F.bctr() | 1, F.BLR], 0, 4),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r3_plain_return():
+    # A plain blr with no LR write on any path is a return.
+    return want(flow_case('plain-return', [F.addis(9, 2), F.ld(10, 9), F.BLR], 0, 4),
+                0, 'PASS', sites_verified=2, sites_refused=0)
+
+
 def case_jump_table_last():
     # The same switch with its table at the section's end.
     return proven('switch-table-last', table_last=True)
@@ -992,10 +1159,16 @@ def case_reloc_branch_external():
 
 
 def case_reloc_call_target_entry():
-    # bl with REL24 to the use: a call target is entered with unknown registers.
-    return want_detail(flow_case('reloc-call', [F.addis(9, 2), F.bl(0), F.NOP, F.ld(10, 9), F.BLR], 0, 12,
-                                 branch=(4, 'R_PPC64_REL24', '.text.f', 12)),
-                       1, 'INCOMPLETE', r'entry point', sites_verified=0, sites_refused=2)
+    # bl with REL24 to the use: a call target is entered with unknown
+    # registers.  r30 survives the call, and the function leaves by a tail
+    # branch (a blr after the bl would be a computed jump on its own).
+    o = flow_user([F.addis(30, 2), F.bl(0), F.NOP, F.ld(10, 30), F.b(0)], 0, 12,
+                  branch=(4, 'R_PPC64_REL24', '.text.f', 12))
+    o.sym('ext', 'UND', bind='GLOBAL')
+    o.rel('.text.f', 16, 'R_PPC64_REL24', 'ext', 0)
+    d = fresh('reloc-call')
+    lk = link(d, [o, data_obj(), ext_obj()])
+    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'entry point', sites_verified=0, sites_refused=2)
 
 
 def case_reloc_branch_offset_outside():
@@ -1007,12 +1180,15 @@ def case_reloc_branch_offset_outside():
 
 def descriptor_call_user(into_use):
     """
-    f: addis r30; bl .opd+8 (REL24); nop; ld r10,LO(r30); blr
+    f: addis r30; bl .opd+8 (REL24); nop; ld r10,LO(r30); b ext (REL24)
     .opd+8 holds the code address .text.f+12 (the use) or g in .text.g;
     r30 is non-volatile, so it survives the call.  The call names the
     descriptor as section+addend, as compilers do for local functions.
+    The tail branch leaves the section: a blr after the bl would be a
+    computed jump.
     """
-    o = flow_user([F.addis(30, 2), F.bl(0), F.NOP, F.ld(10, 30), F.BLR], 0, 12)
+    o = flow_user([F.addis(30, 2), F.bl(0), F.NOP, F.ld(10, 30), F.b(0)], 0, 12,
+                  branch=(16, 'R_PPC64_REL24', 'ext', 0))
     o.section('.text.g', F.code(F.BLR))
     o.sym('g', '.text.g', 0, stype='FUNC')
     o.section('.opd', bytes(16), flags='WA', align=8)
@@ -1024,14 +1200,14 @@ def descriptor_call_user(into_use):
 def case_descriptor_call_into_use():
     # A call through a local descriptor whose code address is the use.
     d = fresh('opd-call-into')
-    lk = link(d, [descriptor_call_user(True), data_obj()])
+    lk = link(d, [descriptor_call_user(True), data_obj(), ext_obj()])
     return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'entry point', sites_verified=0, sites_refused=2)
 
 
 def case_descriptor_call_elsewhere():
     # A call through a local descriptor to another section returns to the nop.
     d = fresh('opd-call-out')
-    lk = link(d, [descriptor_call_user(False), data_obj()])
+    lk = link(d, [descriptor_call_user(False), data_obj(), ext_obj()])
     return want(check(lk.manifest_path), 0, 'PASS', sites_verified=2, sites_refused=0)
 
 
@@ -1150,6 +1326,26 @@ NEGATIVE_CASES = [
     ('flow: a byte check does not bound a 32-bit scale', case_jump_table_byte_check_wider_scale),
     ('flow: a reloaded index is a new value', case_jump_table_reload),
     ('flow: a case that falls into a second dispatch', case_jump_table_nested),
+    ('review 3: rldic with a wrapping mask is refused', case_r3_rldic_wrap),
+    ('review 3: rlwinm with a wrapping mask is refused', case_r3_rlwinm_wrap),
+    ('review 3: rldic 2,30 control', case_r3_rldic_normal),
+    ('review 3: rlwinm 2,0,29 control', case_r3_rlwinm_normal),
+    ('review 3: bdzlr in the dispatch is refused', case_r3_bdzlr),
+    ('review 3: bdnz in the dispatch is refused', case_r3_bdnz),
+    ('review 3: a decrementing bcctr is no dispatch', case_r3_decrementing_bcctr),
+    ('review 3: an unproven bctr opens the section', case_r3_unproven_bctr_dominated),
+    ('review 3: bdzlr replaced by nop control', case_r3_bdzlr_nop),
+    ('review 3: a table address loaded with RA=0 is refused', case_r3_ra_zero_switch),
+    ('review 3: r9 base control', case_r3_r9_base),
+    ('review 3: an LO on RA=0 never pairs', case_r3_ra_zero_pair),
+    ('review 3: mtlr + beqlr past the addis is refused', case_r3_lr_bypass),
+    ('review 3: mtctr + beqctr control', case_r3_ctr_control),
+    ('review 3: a conditional return is a computed jump', case_r3_beqlr_leaf),
+    ('review 3: blr after mtlr is a computed jump', case_r3_blr_after_mtlr),
+    ('review 3: blr after a call is a computed jump', case_r3_blr_after_call),
+    ('review 3: bclrl is a computed call', case_r3_bclrl),
+    ('review 3: bctrl outside a switch is a computed call', case_r3_bctrl),
+    ('review 3: a plain blr with LR untouched returns', case_r3_plain_return),
     ('flow: computed jump with no named table reaches anything', case_jump_table_unknown),
     ('flow: switch without a range check reaches anything', case_jump_table_unbounded),
     ('flow: switch whose checked index changes reaches anything', case_jump_table_index_changed),
