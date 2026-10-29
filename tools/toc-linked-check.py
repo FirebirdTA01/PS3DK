@@ -1049,7 +1049,7 @@ class Checker:
                     bad = bad or f"two branch relocations on the instruction at +0x{k:x}"
                 branch_rel[k] = r
         preds, indirect, calls = {}, [], set()
-        returns, lr_writes, unknown = [], [], None
+        returns, unknown = [], None
 
         def leave(why):
             nonlocal bad
@@ -1095,10 +1095,6 @@ class Checker:
                 else:
                     unknown = unknown or (f"computed {'call' if w & 1 else 'jump'} through "
                                           f"{'LR' if xo == 16 else 'CTR'} at +0x{off:x}")
-            if (op in (16, 18) or (op == 19 and xo in (16, 528))) and w & 1:
-                lr_writes.append(off)
-            elif op == 31 and xo == 467 and ((w >> 16) & 31) | (((w >> 11) & 31) << 5) == 8:
-                lr_writes.append(off)                       # mtlr
             for t in succ:
                 preds.setdefault(t, []).append(off)
         entries = {0} | calls

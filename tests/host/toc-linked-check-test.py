@@ -1280,6 +1280,92 @@ def case_r5_named_reached_mtlr():
                 1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
 
 
+def one_case_switch(scale=None, pre_bctr=(), final_bo=20, zero_base=False):
+    """
+    A switch whose every instruction is reachable, so a broken proof shows:
+         cmpldi r3,1 ; bgt dflt
+         addis rB,r2,HA(.LC1) ; <scale> ; ld r10,LO(.LC1)(rB)
+         lwax r9,r10,r3 ; add r9,r9,r10 ; mtctr r9 ; <pre_bctr> ; bcctr final_bo,0
+    T:   .long c0-T, c0-T
+    c0:  addis r12,r2,HA(.LC0) ; ld r10,LO(.LC0)(r12) ; blr
+    dflt: blr
+    rB is r9, or r0 with zero_base; scale defaults to rldic r3,r3,2,30.
+    """
+    b = 0 if zero_base else 9
+    items = [('cmp', lambda o, L: F.cmpldi(3, 1)), ('bgt', lambda o, L: F.bgt(L['dflt'] - o)),
+             ('ha', lambda o, L: F.addis(b, 2)),
+             ('scale', lambda o, L: scale if scale is not None else F.rldic(3, 3, 2, 30)),
+             ('lo', lambda o, L: F.ld(10, b)), ('lwax', lambda o, L: F.lwax(9, 10, 3)),
+             ('add', lambda o, L: F.add(9, 9, 10)), ('mtctr', lambda o, L: F.mtctr(9))]
+    items += [(f'pre{k}', lambda o, L, w=w: w) for k, w in enumerate(pre_bctr)]
+    items += [('bctr', lambda o, L: F.bcctr(final_bo, 0)),
+              'T', ('t0', lambda o, L: L['c0'] - L['T']), ('t1', lambda o, L: L['c0'] - L['T']),
+              'c0', ('cha', lambda o, L: F.addis(12, 2)), ('clo', lambda o, L: F.ld(10, 12)),
+              ('cr', lambda o, L: F.BLR), 'dflt', ('dr', lambda o, L: F.BLR)]
+    words, L, at = asm(items)
+    o = from_obj('k.o')
+    o.section('.text.k', F.code(*words))
+    o.sym('k', '.text.k', 0, bind='GLOBAL', stype='FUNC')
+    o.section('.toc', bytes(16), flags='WA', align=8)
+    o.sym('.LC0', '.toc', 0)
+    o.sym('.LC1', '.toc', 8)
+    o.sym('g_a', 'UND', bind='GLOBAL')
+    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.k', L['T'])
+    o.rel('.text.k', at['ha'] + 2, 'R_PPC64_TOC16_HA', '.LC1')
+    o.rel('.text.k', at['lo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC1')
+    o.rel('.text.k', at['cha'] + 2, 'R_PPC64_TOC16_HA', '.LC0')
+    o.rel('.text.k', at['clo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    return o
+
+
+def one_case(name, want_pass, detail=None, **kw):
+    d = fresh(name)
+    lk = link(d, [one_case_switch(**kw), data_obj()])
+    res = check(lk.manifest_path)
+    if want_pass:
+        return want(res, 0, 'PASS', sites_verified=4, sites_refused=0)
+    if detail:
+        return want_detail(res, 1, 'INCOMPLETE', detail, sites_verified=0, sites_failed=0, sites_refused=4)
+    return want(res, 1, 'INCOMPLETE', sites_verified=0, sites_failed=0, sites_refused=4)
+
+
+def case_oc_control():
+    return one_case('oc-control', True)
+
+
+def case_oc_rldic_wrap():
+    return one_case('oc-rldic-wrap62', False, scale=F.rldic(3, 3, 2, 62))
+
+
+def case_oc_rlwinm_wrap():
+    return one_case('oc-rlwinm-wrap30', False, scale=F.rlwinm(3, 3, 2, 30, 29))
+
+
+def case_oc_rlwinm_control():
+    return one_case('oc-rlwinm-normal0', True, scale=F.rlwinm(3, 3, 2, 0, 29))
+
+
+def case_oc_bdnz():
+    return one_case('oc-bdnz', False, pre_bctr=[F.bc(16, 0, 4)])
+
+
+def case_oc_bdzlr():
+    return one_case('oc-bdzlr', False, pre_bctr=[F.bclr(18, 0)])
+
+
+def case_oc_nop_control():
+    return one_case('oc-nop', True, pre_bctr=[F.NOP])
+
+
+def case_oc_decrementing_bcctr():
+    return one_case('oc-bcctr-dec', False, final_bo=16)
+
+
+def case_oc_ra_zero():
+    return one_case('oc-ra-zero', False, detail=r'RA=0', zero_base=True)
+
+
 def case_jump_table_last():
     # The same switch with its table at the section's end.
     return proven('switch-table-last', table_last=True)
@@ -1601,6 +1687,15 @@ NEGATIVE_CASES = [
     ('review 3: bclrl is a computed call', case_r3_bclrl),
     ('review 3: bctrl outside a switch is a computed call', case_r3_bctrl),
     ('review 3: a plain blr with LR untouched returns', case_r3_plain_return),
+    ('review 5: reachable one-case switch control', case_oc_control),
+    ('review 5: reachable switch, rldic wrap is refused', case_oc_rldic_wrap),
+    ('review 5: reachable switch, rlwinm wrap is refused', case_oc_rlwinm_wrap),
+    ('review 5: reachable switch, rlwinm 2,0,29 control', case_oc_rlwinm_control),
+    ('review 5: reachable switch, bdnz before the jump is refused', case_oc_bdnz),
+    ('review 5: reachable switch, bdzlr before the jump is refused', case_oc_bdzlr),
+    ('review 5: reachable switch, nop before the jump control', case_oc_nop_control),
+    ('review 5: reachable switch, decrementing bcctr is refused', case_oc_decrementing_bcctr),
+    ('review 5: reachable switch, table address on RA=0 is refused', case_oc_ra_zero),
     ('review 5: a plain leaf returns', case_r5_leaf),
     ('review 5: a named orphan blr is refused', case_r5_named_orphan_blr),
     ('review 5: a named orphan mtlr joining the return is refused', case_r5_named_orphan_mtlr),
