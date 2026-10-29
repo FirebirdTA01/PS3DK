@@ -1,0 +1,158 @@
+# Pinned result of one real-link row of tests/sdk/toc-linked-check-test.sh.
+# Written by known-refusals.py --regen; re-pin only after reviewing every
+# changed line.  Paths are cut to their file or archive member.
+verified 326
+refused-sites 152
+failed-sites 0
+refused crtbegin.o .text.__do_global_dtors_aux+0x0: TOC16_HA has no paired access
+refused crtbegin.o .text.__do_global_dtors_aux+0x14: TOC16_HA has no paired access
+refused crtbegin.o .text.__do_global_dtors_aux+0x18: TOC16_HA has no paired access
+refused crtbegin.o .text.__do_global_dtors_aux+0x20: computed jump through LR at +0xc may enter any instruction of the section with r10 unknown
+refused crtbegin.o .text.__do_global_dtors_aux+0x28: computed jump through LR at +0xc may enter any instruction of the section with r30 unknown
+refused crtbegin.o .text.__do_global_dtors_aux+0x30: TOC16_HA has no paired access
+refused crtbegin.o .text.__do_global_dtors_aux+0x44: computed jump through LR at +0xc may enter any instruction of the section with r9 unknown
+refused crtbegin.o .text.__do_global_dtors_aux+0x4: computed jump through LR at +0xc may enter any instruction of the section with r9 unknown
+refused crtbegin.o .text.__do_global_dtors_aux+0x58: TOC16_HA has no paired access
+refused crtbegin.o .text.__do_global_dtors_aux+0x5c: computed jump through LR at +0xc may enter any instruction of the section with r31 unknown
+refused crtbegin.o .text.__do_global_dtors_aux+0x9c: TOC16_HA has no paired access
+refused crtbegin.o .text.__do_global_dtors_aux+0xa0: computed jump through LR at +0xc may enter any instruction of the section with r9 unknown
+refused crtbegin.o .text.__do_global_dtors_aux+0xac: TOC16_HA has no paired access
+refused crtbegin.o .text.__do_global_dtors_aux+0xb0: computed jump through LR at +0xc may enter any instruction of the section with r3 unknown
+refused crtbegin.o .text.__do_global_dtors_aux+0xc4: TOC16_HA has no paired access
+refused crtbegin.o .text.__do_global_dtors_aux+0xc8: computed jump through LR at +0xc may enter any instruction of the section with r10 unknown
+refused crtbegin.o .text.deregister_tm_clones+0x0: TOC16_HA has no paired access
+refused crtbegin.o .text.deregister_tm_clones+0x18: TOC16_HA has no paired access
+refused crtbegin.o .text.deregister_tm_clones+0x1c: computed jump through LR at +0x14 may enter any instruction of the section with r9 unknown
+refused crtbegin.o .text.deregister_tm_clones+0x4: TOC16_HA has no paired access
+refused crtbegin.o .text.deregister_tm_clones+0x8: computed jump through LR at +0x14 may enter any instruction of the section with r3 unknown
+refused crtbegin.o .text.deregister_tm_clones+0xc: computed jump through LR at +0x14 may enter any instruction of the section with r9 unknown
+refused crtbegin.o .text.register_tm_clones+0x0: TOC16_HA has no paired access
+refused crtbegin.o .text.register_tm_clones+0x24: TOC16_HA has no paired access
+refused crtbegin.o .text.register_tm_clones+0x28: computed jump through LR at +0x20 may enter any instruction of the section with r9 unknown
+refused crtbegin.o .text.register_tm_clones+0x4: TOC16_HA has no paired access
+refused crtbegin.o .text.register_tm_clones+0x8: computed jump through LR at +0x20 may enter any instruction of the section with r3 unknown
+refused crtbegin.o .text.register_tm_clones+0xc: computed jump through LR at +0x20 may enter any instruction of the section with r4 unknown
+refused crtend.o .text.__do_global_ctors_aux+0x0: TOC16_HA has no paired access
+refused crtend.o .text.__do_global_ctors_aux+0x10: computed call through CTR at +0x40 may enter any instruction of the section with r31 unknown
+refused crtend.o .text.__do_global_ctors_aux+0x14: computed call through CTR at +0x40 may enter any instruction of the section with r9 unknown
+refused crtend.o .text.__do_global_ctors_aux+0x8: TOC16_HA has no paired access
+refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x18: computed call through CTR at +0xdc may enter any instruction of the section with r25 unknown
+refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x1c8: TOC16_HA has no paired access
+refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x1d4: computed call through CTR at +0xdc may enter any instruction of the section with r9 unknown
+refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x40: TOC16_HA has no paired access
+refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0x44: computed call through CTR at +0xdc may enter any instruction of the section with r9 unknown
+refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0xc: TOC16_HA has no paired access
+refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0xe8: TOC16_HA has no paired access
+refused libc.a(a-__call_atexit.o) .text.__call_exitprocs+0xf0: computed call through CTR at +0xdc may enter any instruction of the section with r9 unknown
+refused libc.a(a-exit.o) .text.exit+0x0: TOC16_HA has no paired access
+refused libc.a(a-exit.o) .text.exit+0x18: computed call through CTR at +0x60 may enter any instruction of the section with r9 unknown
+refused libc.a(a-exit.o) .text.exit+0x3c: TOC16_HA has no paired access
+refused libc.a(a-exit.o) .text.exit+0x40: computed call through CTR at +0x60 may enter any instruction of the section with r9 unknown
+refused librt.a(exit.o) .text.__librt_register_fini+0x14: TOC16_HA has no paired access
+refused librt.a(exit.o) .text.__librt_register_fini+0x18: blr at +0x50: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(gettod.o) .text.__librt_gettod_r+0xa0: TOC16_HA has no paired access
+refused librt.a(gettod.o) .text.__librt_gettod_r+0xa4: blr at +0xd8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(globfile.o) .text.__librt_chdir_r+0xb0: TOC16_HA has no paired access
+refused librt.a(globfile.o) .text.__librt_chdir_r+0xb4: blr at +0xdc: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused librt.a(globfile.o) .text.__librt_getcwd_r+0x68: TOC16_HA has no paired access
+refused librt.a(globfile.o) .text.__librt_getcwd_r+0x6c: blr at +0xdc: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused librt.a(globfile.o) .text.__librt_getcwd_r+0xb0: TOC16_HA has no paired access
+refused librt.a(globfile.o) .text.__librt_getcwd_r+0xb4: blr at +0xdc: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r4 unknown
+refused librt.a(globfile.o) .text.__librt_resolve_path+0x74: TOC16_HA has no paired access
+refused librt.a(globfile.o) .text.__librt_resolve_path+0x78: blr at +0x164: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused librt.a(globfile.o) .text.__librt_resolve_path+0xe8: TOC16_HA has no paired access
+refused librt.a(globfile.o) .text.__librt_resolve_path+0xec: blr at +0x164: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r4 unknown
+refused librt.a(globfile.o) .text.normalize_path+0x7c: TOC16_HA has no paired access
+refused librt.a(globfile.o) .text.normalize_path+0x80: blr at +0x1d8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r4 unknown
+refused librt.a(globfile.o) .text.pop_component+0x18: TOC16_HA has no paired access
+refused librt.a(globfile.o) .text.pop_component+0x1c: blr at +0x9c: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r4 unknown
+refused librt.a(mkdir.o) .text.__librt_mkdir_r+0x54: TOC16_HA has no paired access
+refused librt.a(mkdir.o) .text.__librt_mkdir_r+0x58: blr at +0xb0: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(open.o) .text.__librt_open_r+0xbc: TOC16_HA has no paired access
+refused librt.a(open.o) .text.__librt_open_r+0xc0: blr at +0x1a8: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x114: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x118: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x130: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x134: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x13c: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x140: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r10 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x148: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x14c: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x1c: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x20: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x54: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x58: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x60: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0x64: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xa0: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xa4: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xb0: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xb4: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xc4: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xc8: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xe4: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xe8: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xf0: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.__librt_sbrk_r+0xf4: blr at +0x168: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0x18: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0x1c: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0x2c: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0x30: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0x3c: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0x40: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0x4c: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0x50: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0x64: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0x68: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0x90: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0x94: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0x9c: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0xa0: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0xa8: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0xac: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0xc0: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0xc4: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused librt.a(sbrk.o) .text.heap_exhausted+0xcc: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_exhausted+0xd0: blr at +0x100: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.heap_write_message+0x14: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_write_message+0x18: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r3 unknown
+refused librt.a(sbrk.o) .text.heap_write_message+0x20: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_write_message+0x24: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.heap_write_message+0x3c: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.heap_write_message+0x40: blr at +0x60: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r4 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x114: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x118: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r7 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x14: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x174: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x178: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r7 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x18: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x1b0: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x1b4: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r7 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x1dc: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x1e0: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x1e8: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x1ec: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x1fc: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x200: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x208: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x20c: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x214: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x218: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x228: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x22c: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x234: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x238: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r9 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x40: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x44: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r7 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0x94: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0x98: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r7 unknown
+refused librt.a(sbrk.o) .text.sbrk_init+0xdc: TOC16_HA has no paired access
+refused librt.a(sbrk.o) .text.sbrk_init+0xe0: blr at +0x258: LR is not provably the entry LR there, a computed jump that may enter any instruction of the section with r7 unknown
+refused libsysbase.a(_exit.o) .text._exit+0x0: TOC16_HA has no paired access
+refused libsysbase.a(_exit.o) .text._exit+0x4: computed call through CTR at +0x30 may enter any instruction of the section with r9 unknown
+refused libsysbase.a(getpid.o) .text._getpid_r+0x0: TOC16_HA has no paired access
+refused libsysbase.a(getpid.o) .text._getpid_r+0x4: computed call through CTR at +0x30 may enter any instruction of the section with r9 unknown
+refused libsysbase.a(gettod.o) .text._gettimeofday_r+0x0: TOC16_HA has no paired access
+refused libsysbase.a(gettod.o) .text._gettimeofday_r+0x4: computed call through CTR at +0x30 may enter any instruction of the section with r9 unknown
+refused libsysbase.a(sbrk.o) .text._sbrk_r+0x0: TOC16_HA has no paired access
+refused libsysbase.a(sbrk.o) .text._sbrk_r+0x4: computed call through CTR at +0x30 may enter any instruction of the section with r9 unknown
