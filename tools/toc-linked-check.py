@@ -1162,10 +1162,10 @@ class Checker:
             data = {t + 4 * i for j in proofs for t, n in proofs[j][2] for i in range(n)}
             roots = {0} | calls | {s_['val'] for s_ in obj.symbols.values()
                                    if s_['ndx'] == str(sec.nr) and s_['type'] == 'FUNC'}
-            dead = {r_ for r_ in returns if r_ not in reached and r_ not in roots}
-            named = {e for e in entries - roots - data if e in reached}
-            unknown = self.prove_returns(src, size, with_edges(False), roots, named,
-                                         data, [r_ for r_ in returns if r_ not in dead])
+            # Every other entry (named, landing pad, or no modelled predecessor)
+            # starts unknown; only proven switch-table words are not code.
+            unknown = self.prove_returns(src, size, with_edges(False), roots, entries - roots - data,
+                                         data, returns)
         fl = {'preds': full, 'entries': entries, 'bad': bad, 'unknown': unknown}
         self.flow_cache[key] = fl
         return fl
@@ -1184,11 +1184,10 @@ class Checker:
         offset counts as overlapping.  Facts that differ where paths merge,
         and every entry that is not a function entry, are unknown.
         Assumed: the program keeps the ABI's LR-save-slot contract (nothing
-        writes the slot through a base other than r1).  Instructions no
-        modelled edge reaches (landing pads) are no roots: a blr reached
-        only from them has no proof and is refused, and a blr no modelled
-        edge reaches at all is dead code, neither a return nor a jump (the
-        caller drops it).  Other named entries start unknown.
+        writes the slot through a base other than r1).  Every entry that is
+        no function entry (a named address, a landing pad, any instruction
+        no modelled edge reaches) starts with everything unknown and merges
+        like any other path, so a blr it reaches is no proven return.
         """
         UNK = ('unk', 'unk', frozenset(), frozenset(), 'unk')
         ROOT = (0, 'entry', frozenset(), frozenset(), 'none')    # sp, lr, mflr copies, slot reloads, slot
@@ -1904,9 +1903,9 @@ COVERAGE_LIMITS = """coverage limits (refused, by design):
   through LR or CTR that is not a proven switch or a provable return
   (back-chain restores ld/lwz r1,0(r1) among them).
 assumed: the program keeps the ABI LR-save-slot contract (nothing writes
-  the slot through a base other than r1); code no modelled edge reaches
-  (landing pads) is not a root of the return proof, and a blr no modelled
-  edge reaches is dead code."""
+  the slot through a base other than r1).  Every instruction no modelled
+  edge reaches (landing pads, orphan code) is a possible entry with
+  nothing known."""
 
 
 def main():

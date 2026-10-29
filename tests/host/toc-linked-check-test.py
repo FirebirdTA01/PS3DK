@@ -702,7 +702,9 @@ def switch_user(check=('cmplwi', 3, 1), bc=(12, 1), scale=('rldic', 30), clobber
     if reenter:
         body += [('again_cmp', lambda o, L: F.cmplwi(3, 1)),
                  ('again_bc', lambda o, L: F.bc(reenter[0], reenter[1], L['head'] - o))]
-    body += [('again_r', lambda o, L: F.BLR), 'dflt', ('dflt_r', lambda o, L: F.BLR)]
+    body.append(('again_r', lambda o, L: F.BLR))
+    if any(not isinstance(it, str) and it[0] == 'bc' for it in items):
+        body += ['dflt', ('dflt_r', lambda o, L: F.BLR)]         # only when a range check branches there
     items += body + table() if table_last else table() + body
     words, L, at = asm(items)
     o = from_obj('j.o')
@@ -920,14 +922,20 @@ def case_r3_rlwinm_wrap():
 
 def case_r3_rldic_normal():
     # Control: rldic r3,r3,2,30 proves both entries; table[1] lands past an addis.
+    # Changed in review 5: the fixture's filler blr words and its unreached
+    # addis/ld pair are possible entries with nothing known, so its returns
+    # are not proven and every site is refused.
     return want(review3('r3-rldic-normal30', review3_switch(F.rldic(3, 3, 2, 30))), 1, 'INCOMPLETE',
-                sites_verified=6, sites_failed=0, sites_refused=2)
+                sites_verified=0, sites_failed=0, sites_refused=8)
 
 
 def case_r3_rlwinm_normal():
     # Control: rlwinm r3,r3,2,0,29 (slwi 2) does not wrap.
+    # Changed in review 5: the fixture's filler blr words and its unreached
+    # addis/ld pair are possible entries with nothing known, so its returns
+    # are not proven and every site is refused.
     return want(review3('r3-rlwinm-normal0', review3_switch(F.rlwinm(3, 3, 2, 0, 29))), 1, 'INCOMPLETE',
-                sites_verified=6, sites_failed=0, sites_refused=2)
+                sites_verified=0, sites_failed=0, sites_refused=8)
 
 
 def case_r3_bdzlr():
@@ -957,9 +965,12 @@ def case_r3_unproven_bctr_dominated():
 
 def case_r3_bdzlr_nop():
     # Control: the same sequence with the bdzlr replaced by a nop.
+    # Changed in review 5: the fixture's filler blr words and its unreached
+    # addis/ld pair are possible entries with nothing known, so its returns
+    # are not proven and every site is refused.
     return want(review3('r3-bdzlr-nop', review3_switch(F.rldic(3, 3, 2, 30), ctr_decrement=True,
                                                      decrement_to_nop=True)),
-                0, 'PASS', sites_verified=8, sites_refused=0)
+                1, 'INCOMPLETE', sites_verified=0, sites_failed=0, sites_refused=8)
 
 
 def case_r3_ra_zero_switch():
@@ -970,8 +981,11 @@ def case_r3_ra_zero_switch():
 
 def case_r3_r9_base():
     # Control: the same switch with r9 as the base.
+    # Changed in review 5: the fixture's filler blr words and its unreached
+    # addis/ld pair are possible entries with nothing known, so its returns
+    # are not proven and every site is refused.
     return want(review3('r3-r9-base', review3_switch(F.rldic(3, 3, 2, 30), table1=64)),
-                0, 'PASS', sites_verified=8, sites_refused=0)
+                1, 'INCOMPLETE', sites_verified=0, sites_failed=0, sites_refused=8)
 
 
 def case_r3_ra_zero_pair():
@@ -1217,6 +1231,53 @@ def case_r4_call_on_fallthrough():
 
 def case_r4_call_on_taken():
     return call_on_one_path('taken')
+
+
+def orphan_case(name, words, entry=None):
+    """addis r9 ; ld r10,LO(r9) ; ... with an optional data word naming .text.f+entry."""
+    o = flow_user(words, 0, 4)
+    if entry is not None:
+        o.section('.data.entry', bytes(8), flags='WA', align=8)
+        o.rel('.data.entry', 0, 'R_PPC64_ADDR64', '.text.f', entry)
+    d = fresh(name)
+    lk = link(d, [o, data_obj()])
+    return check(lk.manifest_path)
+
+
+def case_r5_leaf():
+    # Control: addis ; ld ; blr.
+    return want(orphan_case('r5-leaf', [F.addis(9, 2), F.ld(10, 9), F.BLR]), 0, 'PASS',
+                sites_verified=2, sites_refused=0)
+
+
+def case_r5_named_orphan_blr():
+    # A blr nothing branches to, named by a data word: entered with LR unknown.
+    return want(orphan_case('r5-named-orphan-blr', [F.addis(9, 2), F.ld(10, 9), F.BLR, F.BLR], 12),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r5_named_orphan_mtlr():
+    # A named orphan mtlr r3 ; b -8 joins the return: LR may be r3 there.
+    return want(orphan_case('r5-named-orphan-mtlr', [F.addis(9, 2), F.ld(10, 9), F.BLR, F.mtlr(3), F.b(-8)], 12),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r5_unnamed_orphan_mtlr():
+    # The same orphan with nothing naming it: still a possible entry.
+    return want(orphan_case('r5-orphan-mtlr', [F.addis(9, 2), F.ld(10, 9), F.BLR, F.mtlr(3), F.b(-8)]),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r5_named_reached_blr():
+    # Control: the named blr is also reached from the function.
+    return want(orphan_case('r5-named-reached-blr', [F.addis(9, 2), F.ld(10, 9), F.b(4), F.BLR], 12),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_r5_named_reached_mtlr():
+    # Control: a named, reached mtlr r3 before the blr.
+    return want(orphan_case('r5-named-reached-mtlr', [F.addis(9, 2), F.ld(10, 9), F.b(4), F.mtlr(3), F.BLR], 12),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
 
 
 def case_jump_table_last():
@@ -1540,6 +1601,12 @@ NEGATIVE_CASES = [
     ('review 3: bclrl is a computed call', case_r3_bclrl),
     ('review 3: bctrl outside a switch is a computed call', case_r3_bctrl),
     ('review 3: a plain blr with LR untouched returns', case_r3_plain_return),
+    ('review 5: a plain leaf returns', case_r5_leaf),
+    ('review 5: a named orphan blr is refused', case_r5_named_orphan_blr),
+    ('review 5: a named orphan mtlr joining the return is refused', case_r5_named_orphan_mtlr),
+    ('review 5: an unnamed orphan mtlr joining the return is refused', case_r5_unnamed_orphan_mtlr),
+    ('review 5: a named, reached blr control', case_r5_named_reached_blr),
+    ('review 5: a named, reached mtlr control', case_r5_named_reached_mtlr),
     ('review 4: the standard non-leaf epilogue returns', case_r4_epilogue),
     ('review 4: the reload-before-pop epilogue returns', case_r4_epilogue_before_pop),
     ('review 4: a back-chain restore is refused', case_r4_backchain),
