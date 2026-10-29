@@ -621,51 +621,480 @@ def case_trace_names_other_file():
     return want_detail(check(lk.manifest_path), 2, None, r'name different files')
 
 
-def jump_user(table_reloc=True):
+def asm(items):
     """
-    A computed jump through an in-section offset table, as compilers emit
-    for a switch:
-      0 addis r9,r2,HA(.LC1)
-      4 ld    r9,LO(.LC1)(r9)    the table address, from a .toc entry
-      8 addis r11,r2,HA(.LC0)
-      c mtctr r9
-     10 bctr
-     14 ld    r10,LO(.LC0)(r11)  the case body: r11 from +8, through the jump
-     18 blr
-     1c .long 0x14 - 0x1c        the table (one case)
+    Two-pass assembler for the switch fixtures.  items: label strings and
+    (name, fn) pairs, fn(off, L) -> word; L maps labels to offsets.
+    Returns (words, L, {name: offset}).
     """
+    L, at, off = {}, {}, 0
+    for it in items:
+        if isinstance(it, str):
+            L[it] = off
+        else:
+            at.setdefault(it[0], off)
+            off += 4
+    words = [it[1](o, L) for o, it in zip(range(0, off, 4), [i for i in items if not isinstance(i, str)])]
+    return words, L, at
+
+
+def switch_user(check=('cmplwi', 3, 1), bc=(12, 1), scale=('rldic', 30), clobber_index=False,
+                table_named=True, case0_at='c0', entry_at_mtctr=False, table_last=False,
+                wrong_base=False, reenter=None, reload=False):
+    """
+    A switch as the compiler emits it: a range check, then a computed jump
+    through an in-section table of offsets from the table's own address:
+         cmplwi r3,1 ; bgt dflt            (the range check; other forms below)
+    head: addis r11,r2,HA(.LC0)            (r11 for case 1, set before the jump)
+         addis r9,r2,HA(.LC1)
+         rldic r3,r3,2,30                  (4 * the low 32 bits: the bits checked)
+         ld    r10,LO(.LC1)(r9)            (the table address, from a .toc entry)
+         lwax  r9,r10,r3 ; add r9,r9,r10 ; mtctr r9 ; bctr
+    T:   .long c0-T, c1-T
+    c0:  addis r12,r2,HA(.LC0) ; ld r10,LO(.LC0)(r12) ; blr
+    c1:  ld r10,LO(.LC0)(r11) ; b again    (r11 from before the jump)
+    again: blr                             (or a second check that re-enters head)
+    dflt: blr
+    check: ('cmplwi'|'cmpldi', reg, K), ('clr8', K) = clrlwi r10,r3,24 then
+    cmplwi r10,K, ('twi', K) = clrlwi r10,r3,28 then twi lgt r10,K, or None.
+    scale: ('rldic', MB) or ('sldi',).  reenter: (bo, bi) of a check at
+    `again` (cmplwi r3,1 then bc bo,bi,head).  reload: the index is
+    reloaded from memory after a check of a first load.
+    """
+    items = []
+    if reload:
+        items += [('ld3', lambda o, L: F.lbz(10, 4)), ('cmp', lambda o, L: F.cmplwi(10, 1)),
+                  ('bc', lambda o, L: F.bc(12, 1, L['dflt'] - o))]
+    elif check and check[0] in ('cmplwi', 'cmpldi'):
+        enc = F.cmplwi if check[0] == 'cmplwi' else F.cmpldi
+        items += [('cmp', lambda o, L, c=check: enc(c[1], c[2])),
+                  ('bc', lambda o, L: F.bc(bc[0], bc[1], L['dflt'] - o))]
+    elif check and check[0] == 'clr8':
+        items += [('clr', lambda o, L: F.clrlwi(10, 3, 24)), ('cmp', lambda o, L: F.cmplwi(10, check[1])),
+                  ('bc', lambda o, L: F.bc(bc[0], bc[1], L['dflt'] - o))]
+    elif check and check[0] == 'twi':
+        items += [('clr', lambda o, L: F.clrlwi(10, 3, 28)), ('trap', lambda o, L: F.twi_lgt(10, check[1]))]
+    if clobber_index:
+        items.append(('clobber', lambda o, L: F.addi(3, 3, 1)))
+    items.append('head')
+    items += [('ha11', lambda o, L: F.addis(11, 2)), ('ha9', lambda o, L: F.addis(9, 2))]
+    if reload:
+        items.append(('reload', lambda o, L: F.lbz(3, 4)))
+    if scale[0] == 'sldi':
+        items.append(('scale', lambda o, L: F.sldi(3, 3, 2)))
+    else:
+        items.append(('scale', lambda o, L: F.rldic(3, 3, 2, scale[1])))
+    items.append(('ld10', lambda o, L: F.ld(10, 9)))
+    if wrong_base:
+        items += [('ha12', lambda o, L: F.addis(12, 2)), ('ld12', lambda o, L: F.ld(12, 12))]
+    items += [('lwax', lambda o, L: F.lwax(9, 10, 3)),
+              ('add', lambda o, L: F.add(9, 9, 12 if wrong_base else 10)),
+              'mtctr', ('mtctr', lambda o, L: F.mtctr(9)), ('bctr', lambda o, L: F.bctr())]
+
+    def table():
+        first = {'c0': lambda L: L['c0'], 'lo': lambda L: L['c0'] + 4, 'mtctr': lambda L: L['mtctr'],
+                 'head': lambda L: L['head']}[case0_at]
+        return ['T', ('t0', lambda o, L: first(L) - L['T']), ('t1', lambda o, L: L['c1'] - L['T'])]
+    body = ['c0', ('c0ha', lambda o, L: F.addis(12, 2)), ('c0lo', lambda o, L: F.ld(10, 12)), ('c0r', lambda o, L: F.BLR),
+            'c1', ('c1lo', lambda o, L: F.ld(10, 11)), ('c1b', lambda o, L: F.b(L['again'] - o)), 'again']
+    if reenter:
+        body += [('again_cmp', lambda o, L: F.cmplwi(3, 1)),
+                 ('again_bc', lambda o, L: F.bc(reenter[0], reenter[1], L['head'] - o))]
+    body += [('again_r', lambda o, L: F.BLR), 'dflt', ('dflt_r', lambda o, L: F.BLR)]
+    items += body + table() if table_last else table() + body
+    words, L, at = asm(items)
     o = from_obj('j.o')
-    o.section('.text.j', F.code(F.addis(9, 2), F.ld(9, 9), F.addis(11, 2), F.mtctr(9), F.bctr(),
-                                F.ld(10, 11), F.BLR, -8))
+    o.section('.text.j', F.code(*words))
     o.sym('j', '.text.j', 0, bind='GLOBAL', stype='FUNC')
-    o.section('.toc', bytes(16), flags='WA', align=8)
+    if entry_at_mtctr:
+        o.sym('j2', '.text.j', at['mtctr'], bind='GLOBAL', stype='FUNC')
+    o.section('.toc', bytes(24), flags='WA', align=8)
     o.sym('.LC0', '.toc', 0)
     o.sym('.LC1', '.toc', 8)
+    o.sym('.LC2', '.toc', 16)
     o.sym('g_a', 'UND', bind='GLOBAL')
     o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
-    if table_reloc:
-        o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.j', 0x1c)
+    if table_named:
+        o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.j', L['T'])
     else:
         o.rel('.toc', 8, 'R_PPC64_ADDR64', 'g_a')
-    o.rel('.text.j', 2, 'R_PPC64_TOC16_HA', '.LC1')
-    o.rel('.text.j', 6, 'R_PPC64_TOC16_LO_DS', '.LC1')
-    o.rel('.text.j', 0xa, 'R_PPC64_TOC16_HA', '.LC0')
-    o.rel('.text.j', 0x16, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    o.rel('.toc', 16, 'R_PPC64_ADDR64', '.text.j', L['T'] + 4)
+    o.rel('.text.j', at['ha9'] + 2, 'R_PPC64_TOC16_HA', '.LC1')
+    o.rel('.text.j', at['ld10'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC1')
+    if wrong_base:
+        o.rel('.text.j', at['ha12'] + 2, 'R_PPC64_TOC16_HA', '.LC2')
+        o.rel('.text.j', at['ld12'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC2')
+    o.rel('.text.j', at['ha11'] + 2, 'R_PPC64_TOC16_HA', '.LC0')
+    o.rel('.text.j', at['c0ha'] + 2, 'R_PPC64_TOC16_HA', '.LC0')
+    o.rel('.text.j', at['c0lo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    o.rel('.text.j', at['c1lo'] + 2, 'R_PPC64_TOC16_LO_DS', '.LC0')
     return o
 
 
+def switch_case(name, **kw):
+    d = fresh(name)
+    lk = link(d, [switch_user(**kw), data_obj()])
+    return check(lk.manifest_path)
+
+
+def proven(name, **kw):
+    return want(switch_case(name, **kw), 0, 'PASS', sites_verified=6, sites_refused=0)
+
+
+# Without a proven table the jump may reach any instruction: the table load
+# and case 0's use are refused through it, and case 1, which no modelled
+# edge reaches, is an entry point with unknown registers.
+
+def unproven(name, refused=6, **kw):
+    return want(switch_case(name, **kw), 1, 'INCOMPLETE', sites_verified=0, sites_refused=refused)
+
+
 def case_jump_table():
-    d = fresh('jump-table')
-    lk = link(d, [jump_user(), data_obj()])
-    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=4, sites_refused=0)
+    # cmplwi + rldic ...,2,30: the 32 bits checked are the 32 bits scaled.
+    return proven('switch')
+
+
+def case_jump_table_cmpldi_sldi():
+    # A 64-bit check bounds sldi of the whole register.
+    return proven('switch-cmpldi', check=('cmpldi', 3, 1), scale=('sldi',))
+
+
+def case_jump_table_low_byte():
+    # clrlwi r10,r3,24 ; cmplwi r10,K ; rldic r3,r3,2,54 (libstdc++'s shape).
+    return proven('switch-low-byte', check=('clr8', 1), scale=('rldic', 54))
+
+
+def case_jump_table_trap_bound():
+    # clrlwi r10,r3,28 ; twi lgt r10,K ; rldic r3,r3,2,58 (libgcc's shape).
+    return proven('switch-trap', check=('twi', 1), scale=('rldic', 58))
+
+
+def case_jump_table_reentered():
+    # A second check (ble taken) re-enters the dispatch: both paths bounded.
+    return proven('switch-reenter', reenter=(4, 1))
+
+
+def case_jump_table_reentered_unbounded():
+    # The second path enters when the index is OUT of range (bgt taken).
+    return unproven('switch-reenter-bad', reenter=(12, 1))
+
+
+def case_jump_table_sldi_after_32bit_check():
+    # A 32-bit check says nothing of the upper half sldi scales.
+    return unproven('switch-sldi-32', scale=('sldi',))
+
+
+def case_jump_table_byte_check_wider_scale():
+    # A check of the low byte does not bound 32 scaled bits.
+    return unproven('switch-byte-wide', check=('clr8', 1), scale=('rldic', 30))
+
+
+def case_jump_table_reload():
+    # The index is reloaded from memory after a check of a first load: two values.
+    return unproven('switch-reload', reload=True)
+
+
+def nested_switch_user():
+    """
+    Two dispatches; a case of the first falls into the second, so the
+    second's first instruction is entered both by fall-through and by the
+    first table:
+         cmplwi r3,1 ; bgt dflt
+         addis r9,r2,HA(.LC1) ; rldic r3,r3,2,30 ; ld r10,LO(.LC1)(r9)
+         lwax r9,r10,r3 ; add r9,r9,r10 ; mtctr r9 ; bctr
+    T1:  .long d2-T1, x-T1
+    x:   li r5,0                            (falls into d2)
+    d2:  clrlwi r10,r4,24 ; cmplwi r10,1 ; bgt dflt
+         addis r9,r2,HA(.LC2) ; rldic r4,r4,2,54 ; ld r10,LO(.LC2)(r9)
+         lwax r9,r10,r4 ; add r9,r9,r10 ; mtctr r9 ; bctr
+    T2:  .long c-T2, c-T2
+    c:   addis r12,r2,HA(.LC0) ; ld r10,LO(.LC0)(r12) ; blr
+    dflt: blr
+    """
+    items = [('cmp1', lambda o, L: F.cmplwi(3, 1)), ('bgt1', lambda o, L: F.bgt(L['dflt'] - o)),
+             ('ha1', lambda o, L: F.addis(9, 2)), ('sc1', lambda o, L: F.rldic(3, 3, 2, 30)),
+             ('ld1', lambda o, L: F.ld(10, 9)), ('lwax1', lambda o, L: F.lwax(9, 10, 3)),
+             ('add1', lambda o, L: F.add(9, 9, 10)), ('mtctr1', lambda o, L: F.mtctr(9)),
+             ('bctr1', lambda o, L: F.bctr()),
+             'T1', ('t10', lambda o, L: L['d2'] - L['T1']), ('t11', lambda o, L: L['x'] - L['T1']),
+             'x', ('li', lambda o, L: F.li(5, 0)),
+             'd2', ('clr2', lambda o, L: F.clrlwi(10, 4, 24)), ('cmp2', lambda o, L: F.cmplwi(10, 1)),
+             ('bgt2', lambda o, L: F.bgt(L['dflt'] - o)),
+             ('ha2', lambda o, L: F.addis(9, 2)), ('sc2', lambda o, L: F.rldic(4, 4, 2, 54)),
+             ('ld2', lambda o, L: F.ld(10, 9)), ('lwax2', lambda o, L: F.lwax(9, 10, 4)),
+             ('add2', lambda o, L: F.add(9, 9, 10)), ('mtctr2', lambda o, L: F.mtctr(9)),
+             ('bctr2', lambda o, L: F.bctr()),
+             'T2', ('t20', lambda o, L: L['c'] - L['T2']), ('t21', lambda o, L: L['c'] - L['T2']),
+             'c', ('cha', lambda o, L: F.addis(12, 2)), ('clo', lambda o, L: F.ld(10, 12)),
+             ('cr', lambda o, L: F.BLR), 'dflt', ('dr', lambda o, L: F.BLR)]
+    words, L, at = asm(items)
+    o = from_obj('n.o')
+    o.section('.text.n', F.code(*words))
+    o.sym('n', '.text.n', 0, bind='GLOBAL', stype='FUNC')
+    o.section('.toc', bytes(24), flags='WA', align=8)
+    o.sym('.LC0', '.toc', 0)
+    o.sym('.LC1', '.toc', 8)
+    o.sym('.LC2', '.toc', 16)
+    o.sym('g_a', 'UND', bind='GLOBAL')
+    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.toc', 8, 'R_PPC64_ADDR64', '.text.n', L['T1'])
+    o.rel('.toc', 16, 'R_PPC64_ADDR64', '.text.n', L['T2'])
+    for ha, lo, lc in (('ha1', 'ld1', '.LC1'), ('ha2', 'ld2', '.LC2'), ('cha', 'clo', '.LC0')):
+        o.rel('.text.n', at[ha] + 2, 'R_PPC64_TOC16_HA', lc)
+        o.rel('.text.n', at[lo] + 2, 'R_PPC64_TOC16_LO_DS', lc)
+    return o
+
+
+def case_jump_table_nested():
+    # The second dispatch is proven over both paths into it, the first's
+    # table edge among them, and neither proof breaks the other.
+    d = fresh('switch-nested')
+    lk = link(d, [nested_switch_user(), data_obj()])
+    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=6, sites_refused=0)
+
+
+def case_jump_table_last():
+    # The same switch with its table at the section's end.
+    return proven('switch-table-last', table_last=True)
 
 
 def case_jump_table_unknown():
-    # Without an address naming the table, the case body has no known
-    # predecessor: it is an entry point with unknown registers.
-    d = fresh('jump-unknown')
-    lk = link(d, [jump_user(False), data_obj()])
-    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'can be entered with r11 unknown', sites_verified=2, sites_refused=2)
+    # The table address names no table.
+    return unproven('switch-unnamed', table_named=False)
+
+
+def case_jump_table_unbounded():
+    # No range check: the table has no proven length.
+    return unproven('switch-unbounded', check=None)
+
+
+def case_jump_table_index_changed():
+    # The checked register changes before it indexes the table.
+    return unproven('switch-index-changed', clobber_index=True)
+
+
+def case_jump_table_past_section():
+    # The range check allows more entries than the section holds.
+    return unproven('switch-past-end', check=('cmplwi', 3, 40))
+
+
+def case_jump_table_last_past_end():
+    # Table at the end, range check one entry past it.
+    return unproven('switch-last-past-end', table_last=True, check=('cmplwi', 3, 2))
+
+
+def case_jump_table_into_dispatch():
+    # A table entry that jumps back into the dispatch sequence breaks its proof.
+    return unproven('switch-into-dispatch', case0_at='mtctr')
+
+
+def case_jump_table_into_head():
+    # A table entry back to the dispatch's first instruction adds a path
+    # the proof did not run.
+    return unproven('switch-into-head', reenter=(4, 1), case0_at='head')
+
+
+def case_jump_table_wrong_base():
+    # The entry is added to another table address: nothing is proven.
+    return unproven('switch-wrong-base', refused=8, wrong_base=True)
+
+
+def case_jump_table_blt():
+    # blt instead of bgt: the fall-through does not bound the index.
+    return unproven('switch-blt', bc=(12, 0))
+
+
+def case_jump_table_ble():
+    # ble (bc 4,gt) falls through when the index is out of range.
+    return unproven('switch-ble', bc=(4, 1))
+
+
+def case_jump_table_target_skips_ha():
+    # A proven table entry lands on case 0's use, past its addis.
+    return want_detail(switch_case('switch-skip-ha', case0_at='lo'), 1, 'INCOMPLETE',
+                       r'r12', sites_verified=4, sites_refused=2)
+
+
+def case_jump_table_entry_inside():
+    # Another entry point inside the dispatch sequence: nothing is proven.
+    return unproven('switch-entry-inside', entry_at_mtctr=True)
+
+
+# -- the second review's reproductions ----------------------------------------
+
+def ext_obj():
+    o = from_obj('ext.o')
+    o.section('.text.ext', F.code(F.NOP, F.BLR))
+    o.sym('ext', '.text.ext', 0, bind='GLOBAL', stype='FUNC')
+    return o
+
+
+def flow_user(words, ha, lo, branch=None, name='f.o'):
+    """f: words; TOC16_HA at ha, TOC16_LO_DS at lo (both .LC0 -> g_a)."""
+    o = from_obj(name)
+    o.section('.text.f', F.code(*words))
+    o.sym('f', '.text.f', 0, bind='GLOBAL', stype='FUNC')
+    o.section('.toc', bytes(8), flags='WA', align=8)
+    o.sym('.LC0', '.toc', 0)
+    o.sym('g_a', 'UND', bind='GLOBAL')
+    o.rel('.toc', 0, 'R_PPC64_ADDR64', 'g_a')
+    o.rel('.text.f', ha + 2, 'R_PPC64_TOC16_HA', '.LC0')
+    o.rel('.text.f', lo + 2, 'R_PPC64_TOC16_LO_DS', '.LC0')
+    if branch:
+        off, rtype, sym, addend = branch
+        if sym == 'ext':
+            o.sym('ext', 'UND', bind='GLOBAL')
+        o.rel('.text.f', off, rtype, sym, addend)
+    return o
+
+
+def flow_case(name, *args, extra=(), **kw):
+    d = fresh(name)
+    lk = link(d, [flow_user(*args, **kw), data_obj()] + list(extra))
+    return check(lk.manifest_path)
+
+
+def case_reloc_branch_bypass():
+    # beq carries REL14 to the use, past the addis: the taken path reaches
+    # the use with r9 unknown.
+    return want(flow_case('reloc-bypass', [F.beq(0), F.addis(9, 2), F.NOP, F.ld(10, 9), F.BLR], 4, 12,
+                          branch=(0, 'R_PPC64_REL14', '.text.f', 12)),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_encoded_branch_bypass():
+    # The same branch with its displacement encoded (no relocation).
+    return want(flow_case('encoded-bypass', [F.beq(12), F.addis(9, 2), F.NOP, F.ld(10, 9), F.BLR], 4, 12),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_reloc_branch_around():
+    # A REL14 branch that skips past the use: no path bypasses the addis.
+    return want(flow_case('reloc-around', [F.addis(9, 2), F.beq(0), F.ld(10, 9), F.BLR], 0, 8,
+                          branch=(4, 'R_PPC64_REL14', '.text.f', 12)),
+                0, 'PASS', sites_verified=2, sites_refused=0)
+
+
+def case_reloc_branch_external():
+    # A conditional branch to another function keeps its fall-through path.
+    return want(flow_case('reloc-external', [F.addis(9, 2), F.beq(0), F.ld(10, 9), F.BLR], 0, 8,
+                          branch=(4, 'R_PPC64_REL14', 'ext', 0), extra=[ext_obj()]),
+                0, 'PASS', sites_verified=2, sites_refused=0)
+
+
+def case_reloc_call_target_entry():
+    # bl with REL24 to the use: a call target is entered with unknown registers.
+    return want_detail(flow_case('reloc-call', [F.addis(9, 2), F.bl(0), F.NOP, F.ld(10, 9), F.BLR], 0, 12,
+                                 branch=(4, 'R_PPC64_REL24', '.text.f', 12)),
+                       1, 'INCOMPLETE', r'entry point', sites_verified=0, sites_refused=2)
+
+
+def case_reloc_branch_offset_outside():
+    # A branch to another section's symbol plus an addend may land anywhere.
+    return want_detail(flow_case('reloc-addend-out', [F.addis(9, 2), F.beq(0), F.ld(10, 9), F.BLR], 0, 8,
+                                 branch=(4, 'R_PPC64_REL14', 'ext', 4), extra=[ext_obj()]),
+                       1, 'INCOMPLETE', r'outside', sites_verified=0, sites_refused=2)
+
+
+def descriptor_call_user(into_use):
+    """
+    f: addis r30; bl .opd+8 (REL24); nop; ld r10,LO(r30); blr
+    .opd+8 holds the code address .text.f+12 (the use) or g in .text.g;
+    r30 is non-volatile, so it survives the call.  The call names the
+    descriptor as section+addend, as compilers do for local functions.
+    """
+    o = flow_user([F.addis(30, 2), F.bl(0), F.NOP, F.ld(10, 30), F.BLR], 0, 12)
+    o.section('.text.g', F.code(F.BLR))
+    o.sym('g', '.text.g', 0, stype='FUNC')
+    o.section('.opd', bytes(16), flags='WA', align=8)
+    o.rel('.opd', 8, 'R_PPC64_ADDR32', '.text.f' if into_use else 'g', 12 if into_use else 0)
+    o.rel('.text.f', 4, 'R_PPC64_REL24', '.opd', 8)
+    return o
+
+
+def case_descriptor_call_into_use():
+    # A call through a local descriptor whose code address is the use.
+    d = fresh('opd-call-into')
+    lk = link(d, [descriptor_call_user(True), data_obj()])
+    return want_detail(check(lk.manifest_path), 1, 'INCOMPLETE', r'entry point', sites_verified=0, sites_refused=2)
+
+
+def case_descriptor_call_elsewhere():
+    # A call through a local descriptor to another section returns to the nop.
+    d = fresh('opd-call-out')
+    lk = link(d, [descriptor_call_user(False), data_obj()])
+    return want(check(lk.manifest_path), 0, 'PASS', sites_verified=2, sites_refused=0)
+
+
+def case_unknown_ctr_bypass():
+    # mtctr r3; beqctr: CTR may name the use, past the addis.
+    return want(flow_case('ctr-bypass', [F.mtctr(3), F.bcctr(12, 2), F.addis(9, 2), F.ld(10, 9), F.BLR], 8, 12),
+                1, 'INCOMPLETE', sites_verified=0, sites_refused=2)
+
+
+def case_lswi_clobber():
+    # lswi r8,r3,8 loads r8 and r9.
+    return want_detail(flow_case('lswi', [F.addis(9, 2), F.lswi(8, 3, 8), F.ld(10, 9), F.BLR], 0, 8),
+                       1, 'INCOMPLETE', r'r9 may change at \+0x4', sites_verified=0, sites_refused=2)
+
+
+def case_lswi_short():
+    # lswi r8,r3,4 loads r8 only: r9 survives.
+    return want(flow_case('lswi-short', [F.addis(9, 2), F.lswi(8, 3, 4), F.ld(10, 9), F.BLR], 0, 8),
+                0, 'PASS', sites_verified=2, sites_refused=0)
+
+
+def case_lswx_clobber():
+    # lswx's register count comes from XER: any register may change.
+    return want_detail(flow_case('lswx', [F.addis(9, 2), F.lswx(30, 3, 4), F.ld(10, 9), F.BLR], 0, 8),
+                       1, 'INCOMPLETE', r'r9 may change at \+0x4', sites_verified=0, sites_refused=2)
+
+
+def case_stfdux_clobber():
+    # stfdux f8,r9,r3 updates r9.
+    return want_detail(flow_case('stfdux', [F.addis(9, 2), F.stfdux(8, 9, 3), F.ld(10, 9), F.BLR], 0, 8),
+                       1, 'INCOMPLETE', r'r9 may change at \+0x4', sites_verified=0, sites_refused=2)
+
+
+def case_unknown_x_form():
+    # An X-form the tool does not know is a possible write of any register.
+    return want_detail(flow_case('unknown-x', [F.addis(9, 2), F.x_form(1000, 8, 3, 4), F.ld(10, 9), F.BLR], 0, 8),
+                       1, 'INCOMPLETE', r'r9 may change at \+0x4', sites_verified=0, sites_refused=2)
+
+
+def gpr_writes_fn():
+    spec = importlib.util.spec_from_file_location('toc_linked_tool', TOOL)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.gpr_writes
+
+
+def case_gpr_writes_table():
+    gw = gpr_writes_fn()
+    rows = [
+        ('lswi r8,r3,8', F.lswi(8, 3, 8), {8, 9}),
+        ('lswi r30,r3,12 wraps', F.lswi(30, 3, 12), {30, 31, 0}),
+        ('lswi r8,r3,0 is 32 bytes', F.lswi(8, 3, 0), set(range(8, 16))),
+        ('lswi r8,r3,5 loads part of r9', F.lswi(8, 3, 5), {8, 9}),
+        ('lswx', F.lswx(8, 3, 4), None),
+        ('stfdux', F.stfdux(8, 9, 3), {9}),
+        ('lwax', F.lwax(9, 10, 3), {9}),
+        ('add', F.add(9, 9, 10), {9}),
+        ('addo (OE)', F.add(9, 9, 10) | (1 << 10), {9}),
+        ('sldi', F.sldi(3, 4, 2), {3}),
+        ('mtctr', F.mtctr(9), set()),
+        ('unknown X-form', F.x_form(1000, 8, 3, 4), None),
+        ('unknown primary opcode', 1 << 26, None),
+        ('ld with reserved DS bits', F.ld(9, 3) | 3, None),
+        ('std with reserved DS bits', (62 << 26) | (9 << 21) | (3 << 16) | 2, None),
+        ('unknown XL-form', (19 << 26) | (77 << 1), None),
+    ]
+    bad = []
+    for name, w, expect in rows:
+        got = gw(w)
+        if got != expect:
+            bad.append(f"{name} (0x{w & 0xffffffff:08x}): got {got}, expected {expect}")
+    return (not bad), '; '.join(bad) or f"{len(rows)} forms"
 
 
 NEGATIVE_CASES = [
@@ -701,8 +1130,44 @@ NEGATIVE_CASES = [
     ('review: missing map is bad input', case_missing_map),
     ('review: an input that changed after capture is bad input', case_wrong_object_set),
     ('review: a trace naming files outside the manifest is bad input', case_trace_names_other_file),
-    ('flow: computed jump through an in-section offset table', case_jump_table),
-    ('flow: computed jump with no named table is refused', case_jump_table_unknown),
+    ('flow: computed jump through a proven switch table', case_jump_table),
+    ('flow: cmpldi bounds sldi of the whole register', case_jump_table_cmpldi_sldi),
+    ('flow: low-byte check bounds a low-byte scale', case_jump_table_low_byte),
+    ('flow: a twi trap bounds the index', case_jump_table_trap_bound),
+    ('flow: a second checked path re-enters the dispatch', case_jump_table_reentered),
+    ('flow: an unchecked path re-enters the dispatch', case_jump_table_reentered_unbounded),
+    ('flow: a 32-bit check does not bound sldi', case_jump_table_sldi_after_32bit_check),
+    ('flow: a byte check does not bound a 32-bit scale', case_jump_table_byte_check_wider_scale),
+    ('flow: a reloaded index is a new value', case_jump_table_reload),
+    ('flow: a case that falls into a second dispatch', case_jump_table_nested),
+    ('flow: computed jump with no named table reaches anything', case_jump_table_unknown),
+    ('flow: switch without a range check reaches anything', case_jump_table_unbounded),
+    ('flow: switch whose checked index changes reaches anything', case_jump_table_index_changed),
+    ('flow: switch range past the section reaches anything', case_jump_table_past_section),
+    ('flow: proven switch with its table at the section end', case_jump_table_last),
+    ('flow: table at the end, range one past it', case_jump_table_last_past_end),
+    ('flow: table entry back into the dispatch breaks the proof', case_jump_table_into_dispatch),
+    ('flow: table entry back to the dispatch head breaks the proof', case_jump_table_into_head),
+    ('flow: entry added to another table address proves nothing', case_jump_table_wrong_base),
+    ('flow: blt does not bound the index', case_jump_table_blt),
+    ('flow: ble falls through out of range', case_jump_table_ble),
+    ('flow: proven table entry that skips an addis is refused', case_jump_table_target_skips_ha),
+    ('flow: entry point inside the dispatch proves nothing', case_jump_table_entry_inside),
+    ('review 2: REL14 branch past the addis is refused', case_reloc_branch_bypass),
+    ('review 2: encoded branch past the addis is refused (control)', case_encoded_branch_bypass),
+    ('review 2: REL14 branch past the use keeps the pair', case_reloc_branch_around),
+    ('review 2: branch to another function keeps the fall-through', case_reloc_branch_external),
+    ('review 2: a call into the section enters with unknown registers', case_reloc_call_target_entry),
+    ('review 2: branch to another section plus an addend is refused', case_reloc_branch_offset_outside),
+    ('review 2: a call through a descriptor to the use enters it', case_descriptor_call_into_use),
+    ('review 2: a call through a descriptor to another section returns', case_descriptor_call_elsewhere),
+    ('review 2: unknown CTR jump past the addis is refused', case_unknown_ctr_bypass),
+    ('review 2: lswi that loads the base register is refused', case_lswi_clobber),
+    ('review 2: lswi that stops short of the base register', case_lswi_short),
+    ('review 2: lswx is refused', case_lswx_clobber),
+    ('review 2: stfdux updating the base register is refused', case_stfdux_clobber),
+    ('review 2: unknown X-form is refused', case_unknown_x_form),
+    ('review 2: GPR write table', case_gpr_writes_table),
 ]
 
 

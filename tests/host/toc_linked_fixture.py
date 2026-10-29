@@ -86,6 +86,76 @@ def mtctr(rs):
     return 0x7c0903a6 | (rs << 21)
 
 
+def bcctr(bo, bi):
+    return (19 << 26) | (bo << 21) | (bi << 16) | (528 << 1)
+
+
+def cmplwi(ra, ui, cr=0):
+    return (10 << 26) | (cr << 23) | (ra << 16) | (ui & 0xffff)
+
+
+def bc(bo, bi, rel):
+    return (16 << 26) | (bo << 21) | (bi << 16) | (rel & 0xfffc)
+
+
+def bgt(rel, cr=0):
+    # bc 12,4*cr+1,rel
+    return (16 << 26) | (12 << 21) | ((4 * cr + 1) << 16) | (rel & 0xfffc)
+
+
+def sldi(ra, rs, n):
+    me = 63 - n
+    return ((30 << 26) | (rs << 21) | (ra << 16) | ((n & 31) << 11)
+            | ((((me & 31) << 1) | (me >> 5)) << 5) | (1 << 2) | ((n >> 5) << 1))
+
+
+def cmpldi(ra, ui, cr=0):
+    return cmplwi(ra, ui, cr) | (1 << 21)
+
+
+def rldic(ra, rs, sh, mb):
+    return ((30 << 26) | (rs << 21) | (ra << 16) | ((sh & 31) << 11)
+            | ((((mb & 31) << 1) | (mb >> 5)) << 5) | (2 << 2) | ((sh >> 5) << 1))
+
+
+def clrlwi(ra, rs, n):
+    # rlwinm ra,rs,0,n,31
+    return (21 << 26) | (rs << 21) | (ra << 16) | (n << 6) | (31 << 1)
+
+
+def twi_lgt(ra, si):
+    # twi 1,ra,si: trap if ra >u si
+    return (3 << 26) | (1 << 21) | (ra << 16) | (si & 0xffff)
+
+
+def lbz(rt, ra, d=0):
+    return (34 << 26) | (rt << 21) | (ra << 16) | (d & 0xffff)
+
+
+def x_form(xo, rt, ra, rb):
+    return (31 << 26) | (rt << 21) | (ra << 16) | (rb << 11) | (xo << 1)
+
+
+def lwax(rt, ra, rb):
+    return x_form(341, rt, ra, rb)
+
+
+def add(rt, ra, rb):
+    return x_form(266, rt, ra, rb)
+
+
+def lswi(rt, ra, nb):
+    return x_form(597, rt, ra, nb & 31)
+
+
+def lswx(rt, ra, rb):
+    return x_form(533, rt, ra, rb)
+
+
+def stfdux(frs, ra, rb):
+    return x_form(759, frs, ra, rb)
+
+
 BLR = 0x4e800020
 NOP = 0x60000000
 
@@ -387,6 +457,10 @@ class Link:
                         put(kind, a, 2, ha16(rel))
                     elif t == 'R_PPC64_TOC16_HI':
                         put(kind, a, 2, rel >> 16)
+                    elif t == 'R_PPC64_REL14':
+                        put(kind, a, 4, (get(kind, a, 4) & ~0xfffc) | ((v - a) & 0xfffc))
+                    elif t == 'R_PPC64_REL24':
+                        put(kind, a, 4, (get(kind, a, 4) & ~0x3fffffc) | ((v - a) & 0x3fffffc))
                     else:
                         continue
                     self.applied.append((obj.name, secname, off, t, a))

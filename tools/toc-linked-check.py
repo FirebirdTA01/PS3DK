@@ -36,12 +36,15 @@ Scope of v1 (anything outside it is refused, never skipped):
     every path back from the LO use must reach an addis of the same target
     in that register before any other write of it or any entry point, and
     the use is checked against each such addis.  Entry points are the
-    section start, its symbols, addresses other relocations name in it and
-    every instruction no modelled edge reaches (landing pads among them).
-    Assumed, not proved: a branch without a relocation stays in its
-    section, and a computed jump (bcctr) reaches only the targets of an
-    offset table at an address the object's relocations name in the
-    section;
+    section start, its symbols, addresses other relocations name in it,
+    call targets and every instruction no modelled edge reaches (landing
+    pads among them).  A branch with a relocation goes where it names
+    (through a local .opd descriptor to its code address); one without
+    must stay in its section or the section is refused.  A computed jump
+    (bcctr) reaches the targets of a switch table proven from its range
+    check, table address and dispatch sequence, or else any instruction
+    of the section.  Register writes are modelled for listed instruction
+    forms only; any other form may write every register;
   - names come from the files' own string tables (readelf truncates long
     section names), and must extend readelf's.
 
@@ -145,58 +148,109 @@ def split_member(text):
 # ---------------------------------------------------------------------------
 # Instruction decoding
 
+# GPR writes of the instruction forms the HA/LO search may walk through.
+# Every form is listed exactly; any other encoding is a possible write of
+# every register.
+D_WRITES_RT = {7, 8, 12, 13, 14, 15, 32, 34, 40, 42}   # mulli subfic addic addic. addi addis lwz lbz lhz lha
+D_WRITES_RT_RA = {33, 35, 41, 43}                       # lwzu lbzu lhzu lhau
+D_WRITES_RA = {20, 21, 23, 24, 25, 26, 27, 28, 29,      # rlwimi rlwinm rlwnm ori oris xori xoris andi. andis.
+               37, 39, 45, 49, 51, 53, 55}              # stwu stbu sthu lfsu lfdu stfsu stfdu
+D_WRITES_NONE = {2, 3, 10, 11, 36, 38, 44, 47, 48, 50, 52, 54,   # tdi twi cmpli cmpi stw stb sth stmw lfs lfd stfs stfd
+                 4, 59, 63}                             # vector and floating-point arithmetic
+XL_WRITES_NONE = {0, 33, 129, 150, 193, 225, 257, 289, 417, 449}  # mcrf, CR logical ops, isync
+X_WRITES_RA = {28, 60, 444, 412, 316, 476, 124, 284,    # and andc or orc xor nand nor eqv
+               24, 536, 792, 824, 27, 539, 794, 826, 827,   # slw srw sraw srawi sld srd srad sradi
+               26, 58, 954, 922, 986,                   # cntlzw cntlzd extsb extsh extsw
+               183, 247, 439, 181, 695, 759, 567, 631}  # stwux stbux sthux stdux stfsux stfdux lfsux lfdux
+X_WRITES_RT = {23, 87, 279, 343, 21, 341, 20, 84, 534, 790,   # lwzx lbzx lhzx lhax ldx lwax lwarx ldarx lwbrx lhbrx
+               19, 83, 339, 371}                        # mfcr/mfocrf mfmsr mfspr mftb
+X_WRITES_RT_RA = {55, 119, 311, 375, 53, 373}           # lwzux lbzux lhzux lhaux ldux lwaux
+X_WRITES_NONE = {151, 215, 407, 149, 662, 918, 150, 214,   # stwx stbx sthx stdx stwbrx sthbrx stwcx. stdcx.
+                 663, 727, 983, 535, 599, 661, 725,     # stfsx stfdx stfiwx lfsx lfdx stswx stswi
+                 7, 39, 71, 103, 359, 135, 167, 199, 231, 487, 6, 38,   # vector loads and stores, lvsl lvsr
+                 519, 551, 775, 807, 647, 679, 903, 935,   # lvlx lvrx lvlxl lvrxl stvlx stvrx stvlxl stvrxl
+                 0, 32, 4, 68,                          # cmp cmpl tw td
+                 278, 246, 1014, 86, 54, 982, 598, 854,  # dcbt dcbtst dcbz dcbf dcbst icbi sync eieio
+                 342, 374, 822,                         # dst dstst dss
+                 467, 144, 146, 178}                    # mtspr mtcrf mtmsr mtmsrd
+XO_WRITES_RT = {266, 40, 8, 10, 136, 138, 200, 202, 232, 234, 104,   # add subf subfc addc subfe adde subfze addze subfme addme neg
+                235, 233, 75, 11, 73, 9, 491, 459, 489, 457}       # mullw mulld mulhw mulhwu mulhd mulhdu divw divwu divd divdu
+VOLATILE_GPRS = frozenset({0} | set(range(3, 13)))
+
+
 def gpr_writes(word):
     """
     GPRs an instruction may write, for the HA/LO continuity check.
-    Returns a set of register numbers, or None when the form is not known
-    (the caller treats that as a possible clobber of any register).
+    Returns a set of register numbers, or None when the form is not one of
+    the listed ones (the caller treats that as a possible write of any
+    register).  A call (LK=1) may write every volatile register.
     """
     op = word >> 26
     rt = (word >> 21) & 31
     ra = (word >> 16) & 31
-    volatile = {0} | set(range(3, 13))
-    if op in (7, 8, 12, 13, 14, 15, 32, 34, 40, 42):
+    if op in D_WRITES_RT:
         return {rt}
-    if op in (33, 35, 41, 43):
+    if op in D_WRITES_RT_RA:
         return {rt, ra}
-    if op == 46:
-        return set(range(rt, 32))
-    if op in (24, 25, 26, 27, 28, 29, 20, 21, 23, 30):
+    if op in D_WRITES_RA:
         return {ra}
-    if op in (37, 39, 45, 49, 51, 53, 55):
-        return {ra}
-    if op in (36, 38, 44, 48, 50, 52, 54, 2, 3, 10, 11, 4, 59, 63):
+    if op in D_WRITES_NONE:
         return set()
-    if op == 58:
-        return {rt, ra} if (word & 3) == 1 else {rt}
-    if op == 62:
-        return {ra} if (word & 3) == 1 else set()
-    if op in (16, 18):
-        return volatile if word & 1 else set()
-    if op == 17:
-        return volatile
+    if op == 46:                                        # lmw
+        return set(range(rt, 32))
+    if op == 58:                                        # ld ldu lwa
+        return {0: {rt}, 1: {rt, ra}, 2: {rt}}.get(word & 3)
+    if op == 62:                                        # std stdu
+        return {0: set(), 1: {ra}}.get(word & 3)
+    if op == 30:                                        # rldicl rldicr rldic rldimi, rldcl rldcr
+        if (word >> 2) & 7 in (0, 1, 2, 3) or (word >> 1) & 15 in (8, 9):
+            return {ra}
+        return None
+    if op in (16, 18):                                  # bc, b
+        return set(VOLATILE_GPRS) if word & 1 else set()
+    if op == 17:                                        # sc
+        return set(VOLATILE_GPRS)
     if op == 19:
         xo = (word >> 1) & 0x3ff
-        if xo in (16, 528):
-            return volatile if word & 1 else set()
-        return set()
+        if xo in (16, 528):                             # bclr, bcctr
+            return set(VOLATILE_GPRS) if word & 1 else set()
+        return set() if xo in XL_WRITES_NONE else None
     if op == 31:
         xo = (word >> 1) & 0x3ff
-        logical = {28, 60, 444, 412, 316, 476, 124, 284, 24, 536, 792, 824,
-                   27, 539, 794, 26, 58, 954, 922, 986}
-        if xo in logical or (xo >> 1) == 413:
+        if xo in X_WRITES_RA:
             return {ra}
-        no_gpr = {151, 215, 407, 149, 727, 663, 231, 487, 983, 662, 918, 214, 150,
-                  0, 32, 278, 246, 1014, 86, 54, 598, 854, 982, 467, 144, 146, 178,
-                  4, 68, 103, 359, 7, 39, 71, 6, 38, 599, 535, 167, 199, 135, 455}
-        if xo in no_gpr:
-            return set()
-        if xo in (183, 247, 439, 181, 631, 567, 695):
-            return {ra}
-        if xo in (55, 119, 311, 375, 53, 373):
+        if xo in X_WRITES_RT:
+            return {rt}
+        if xo in X_WRITES_RT_RA:
             return {rt, ra}
-        return {rt}
+        if xo in X_WRITES_NONE:
+            return set()
+        if xo == 597:                                   # lswi: NB bytes (0 means 32) into rt, rt+1, ... wrapping
+            nb = (word >> 11) & 31 or 32
+            return {(rt + k) % 32 for k in range((nb + 3) // 4)}
+        if (word >> 1) & 0x1ff in XO_WRITES_RT:         # XO forms, with or without OE
+            return {rt}
+        return None                                     # lswx (count from XER) and every unlisted form
     return None
+
+
+def may_write_cr(word):
+    """
+    Whether an instruction may write a condition register field: compares,
+    record (Rc=1) forms, CR moves and logic, traps never; calls may.
+    """
+    op = word >> 26
+    if op in (10, 11, 13, 28, 29, 4, 17, 59, 63):        # cmpli cmpi addic. andi. andis. vector sc floating point
+        return True
+    if op in (16, 18):
+        return bool(word & 1)
+    if op == 19:
+        return (word >> 1) & 0x3ff not in (16, 528, 150) or bool(word & 1)
+    if op in (20, 21, 23, 30, 31):
+        return bool(word & 1) or (op == 31 and (word >> 1) & 0x3ff in (0, 32, 144, 512, 150, 214))
+    if op in D_WRITES_RT | D_WRITES_RT_RA | D_WRITES_RA | D_WRITES_NONE | {46, 58, 62, 2, 3}:
+        return False
+    return True
 
 
 def classify_insn(word, ds):
@@ -882,89 +936,394 @@ class Checker:
             self.dispose(obj, sec, i, worst, None, h['reloc'])
 
     # -- control flow for HA/LO pairing ------------------------------------
+    def branch_target(self, obj, sec, size, off, r):
+        """
+        Where a branch relocation at +off sends control: ('in', offset) for an
+        instruction of this section, ('out', None) for another section, or
+        ('bad', reason).
+        """
+        sym = obj.symbols.get(r['info'] >> 32)
+        if sym is None:
+            return 'bad', f"branch at +0x{off:x} names missing symbol {r['info'] >> 32}"
+        if sym['ndx'].isdigit() and obj.sections[int(sym['ndx'])].name == '.opd':
+            # A call through a local descriptor goes to the code address it holds.
+            at = sym['val'] + r['addend']
+            d = [x for x in obj.relocs.get(int(sym['ndx']), []) if x['offset'] == at]
+            if len(d) != 1 or d[0]['rtype'] != 'R_PPC64_ADDR32':
+                return 'bad', f"branch at +0x{off:x} names .opd+0x{at:x}, which holds no code address"
+            sym = obj.symbols.get(d[0]['info'] >> 32)
+            if sym is None:
+                return 'bad', f"descriptor .opd+0x{at:x} names missing symbol {d[0]['info'] >> 32}"
+            r = {'addend': d[0]['addend']}
+        if sym['ndx'] == str(sec.nr):
+            t = sym['val'] + r['addend']
+            if 0 <= t < size and t % 4 == 0:
+                return 'in', t
+            return 'bad', f"branch at +0x{off:x} names +0x{t:x}, not an instruction of {sec.name}"
+        if r['addend']:
+            # symbol+addend in another section may still land in this one
+            return 'bad', f"branch at +0x{off:x} names {sym['name']}{r['addend']:+#x} outside {sec.name}"
+        return 'out', None
+
     def flow(self, obj, sec, src):
         """
         The section's intra-section control flow, for the HA/LO register
         search: predecessors of each instruction, the entry points (where
         control may arrive with unknown registers).  Entry points are the
         section start, its symbols, the addresses other relocations name in
-        it, and every instruction no modelled edge reaches (a landing pad,
-        for one).  Assumptions (v1): a branch without a relocation stays
-        inside its section; a computed jump (bcctr) reaches only the targets
-        of an offset table at an address the object's relocations name
-        inside the section.
+        it, the targets of calls, and every instruction no modelled edge
+        reaches (a landing pad, for one).  A branch with a relocation goes
+        where the relocation names; one without stays inside the section or
+        the section is refused.  A computed jump (bcctr) reaches the targets
+        of a proven switch table (switch_targets), or else any instruction
+        of the section, with the registers it had at the jump.
         """
         key = (obj.ident, sec.nr)
         if key in self.flow_cache:
             return self.flow_cache[key]
         size = sec.size - sec.size % 4
-        branch_rel = {r['offset'] & ~3 for r in obj.relocs.get(sec.nr, [])
-                      if r['rtype'].startswith(('R_PPC64_REL24', 'R_PPC64_REL14', 'R_PPC64_ADDR24', 'R_PPC64_ADDR14'))}
-        preds, indirect = {}, []
+        rels = obj.relocs.get(sec.nr, [])
         bad = None
+        branch_rel = {}
+        for r in rels:
+            if r['rtype'].startswith(('R_PPC64_REL24', 'R_PPC64_REL14', 'R_PPC64_ADDR24', 'R_PPC64_ADDR14')):
+                k = r['offset'] & ~3
+                if k in branch_rel:
+                    bad = bad or f"two branch relocations on the instruction at +0x{k:x}"
+                branch_rel[k] = r
+        preds, indirect, calls = {}, [], set()
+
+        def leave(why):
+            nonlocal bad
+            bad = bad or why
+
         for off in range(0, size, 4):
             w = be(src, off, 4)
             op = w >> 26
             xo = (w >> 1) & 0x3ff
             nxt = [off + 4] if off + 4 < size else []
             succ = nxt
-            if op == 18:
-                tgt = off + ((w & 0x3fffffc) ^ 0x2000000) - 0x2000000
-                if w & 1:
-                    pass
-                elif (w & 2) or off in branch_rel:
-                    succ = []
-                elif 0 <= tgt < size:
-                    succ = [tgt]
-                else:
-                    bad = bad or f"branch at +0x{off:x} leaves {sec.name} without a relocation"
-                    succ = []
-            elif op == 16 or (op == 19 and xo in (16, 528)):
-                always = ((w >> 21) & 0x14) == 0x14
-                if not w & 1:
-                    succ = [] if always else nxt
-                    if op == 16 and not ((w & 2) or off in branch_rel):
-                        tgt = off + sext16(w & 0xfffc)
-                        if 0 <= tgt < size:
-                            succ = succ + [tgt]
+            if op in (16, 18):
+                link = w & 1
+                always = op == 18 or ((w >> 21) & 0x14) == 0x14
+                succ = nxt if link or not always else []
+                if off in branch_rel:
+                    where, t = self.branch_target(obj, sec, size, off, branch_rel[off])
+                    if where == 'bad':
+                        leave(t)
+                    elif where == 'in':
+                        if link:
+                            calls.add(t)
                         else:
-                            bad = bad or f"branch at +0x{off:x} leaves {sec.name} without a relocation"
-                    elif op == 19 and xo == 528:
-                        indirect.append(off)
+                            succ = succ + [t]
+                elif w & 2:
+                    leave(f"absolute branch at +0x{off:x} without a relocation")
+                else:
+                    disp = ((w & 0x3fffffc) ^ 0x2000000) - 0x2000000 if op == 18 else sext16(w & 0xfffc)
+                    t = off + disp
+                    if not 0 <= t < size:
+                        leave(f"branch at +0x{off:x} leaves {sec.name} without a relocation")
+                    elif link:
+                        calls.add(t)
+                    else:
+                        succ = succ + [t]
+            elif op == 19 and xo in (16, 528):
+                always = ((w >> 21) & 0x14) == 0x14
+                succ = nxt if (w & 1) or not always else []
+                if xo == 528 and not w & 1:
+                    indirect.append(off)
             for t in succ:
                 preds.setdefault(t, []).append(off)
-        entries = {0}
-        taken = set()
-        for s in obj.symbols.values():
-            if s['ndx'] == str(sec.nr) and s['type'] != 'SECTION':
-                entries.add(s['val'])
+        entries = {0} | calls
+        for s_ in obj.symbols.values():
+            if s_['ndx'] == str(sec.nr) and s_['type'] != 'SECTION':
+                entries.add(s_['val'])
         for nr, other in obj.sections.items():
             if 'A' not in other.flags or other.name == '.eh_frame':
                 continue
             for r in obj.relocs.get(nr, []):
                 if nr == sec.nr and (r['offset'] & ~3) in branch_rel:
-                    continue
+                    continue        # an edge or a call target above
                 sym = obj.symbols.get(r['info'] >> 32)
                 if sym and sym['ndx'] == str(sec.nr):
-                    taken.add(sym['val'] + r['addend'])
-        entries |= taken
-        if indirect:
-            targets = set()
-            for t in taken:
-                k = t
-                while t % 4 == 0 and 0 <= k and k + 4 <= size:
-                    d = t + (be(src, k, 4) ^ 0x80000000) - 0x80000000
-                    if not (0 <= d < size and d % 4 == 0):
-                        break
-                    targets.add(d)
-                    k += 4
+                    entries.add(sym['val'] + r['addend'])
+        # Instructions no direct edge reaches are entered from outside.
+        direct = set(preds)
+        proofs = {}
+        for j in indirect:
+            proof = self.switch_targets(obj, sec, src, size, rels, preds, entries, j)
+            if proof:
+                proofs[j] = proof
+        def with_edges(wild):
+            out = {k: list(v) for k, v in preds.items()}
             for j in indirect:
+                if j in proofs:
+                    targets = proofs[j][1]
+                elif wild:
+                    targets = range(0, size, 4)
+                else:
+                    continue
                 for d in targets:
-                    preds.setdefault(d, []).append(j)
-        entries |= {off for off in range(0, size, 4) if off not in preds}
-        fl = {'preds': preds, 'entries': entries, 'bad': bad}
+                    out.setdefault(d, []).append(j)
+            return out
+
+        for _ in range(4 * len(indirect) + 1):
+            full = with_edges(True)
+            # A proof holds only while nothing else enters its sequences.
+            broken = [j for j, (expect, _) in proofs.items()
+                      if any(c in entries or sorted(full.get(c, [])) != ps for c, ps in expect.items())]
+            if not broken:
+                break
+            # Prove a broken jump again over the edges proven so far: a case
+            # that falls into another dispatch is one more path into it.
+            known = with_edges(False)
+            for j in broken:
+                proof = self.switch_targets(obj, sec, src, size, rels, known, entries, j)
+                if proof and proof != proofs[j]:
+                    proofs[j] = proof
+                else:
+                    del proofs[j]
+        else:
+            proofs = {}
+            full = with_edges(True)
+        reached = direct | {d for j in proofs for d in proofs[j][1]}
+        entries |= {off for off in range(0, size, 4) if off not in reached}
+        fl = {'preds': full, 'entries': entries, 'bad': bad}
         self.flow_cache[key] = fl
         return fl
+
+    def toc_table(self, obj, sec, toc_sym, addend, width):
+        """
+        The in-section address a .toc entry holds, when the entry of this
+        width is one relocation naming a local symbol of sec; else None.
+        """
+        sym = obj.symbols.get(toc_sym)
+        nrs = obj.by_name.get('.toc', [])
+        if sym is None or len(nrs) != 1 or sym['ndx'] != str(nrs[0]):
+            return None
+        at = sym['val'] + addend
+        want = {4: 'R_PPC64_ADDR32', 8: 'R_PPC64_ADDR64'}[width]
+        fw = {'R_PPC64_ADDR32': 4, 'R_PPC64_UADDR32': 4, 'R_PPC64_ADDR16': 2}
+        hit = [r for r in obj.relocs.get(nrs[0], [])
+               if r['offset'] < at + width and at < r['offset'] + fw.get(r['rtype'], 8)]
+        if len(hit) != 1 or hit[0]['offset'] != at or hit[0]['rtype'] != want:
+            return None
+        tsym = obj.symbols.get(hit[0]['info'] >> 32)
+        if tsym is None or tsym['ndx'] != str(sec.nr) or tsym['bind'] != 'LOCAL':
+            return None
+        return tsym['val'] + hit[0]['addend']
+
+    def switch_targets(self, obj, sec, src, size, rels, preds, entries, j):
+        """
+        Prove the targets of the computed jump at +j as a switch.  The
+        straight-line sequence ending at it (each instruction entered only
+        from the one before) and, when its first instruction has several
+        predecessors, each predecessor's own straight-line sequence, are
+        run symbolically path by path; every path must reach the jump with
+        CTR = T + table[i] for a bounded i.  A register holds the low n
+        bits of a value (zero-extended); a range check bounds a value on the
+        edge where it holds:
+            cmplwi/cmpldi crF,rX,K, then bgt crF not taken (or ble taken)
+            twi/tdi lgt rX,K (falling through the trap)
+            clrlwi / clrldi        narrow a value to its low bits
+            sldi, rldic rA,rS,2,MB, slwi
+                                   4 * (the low bits of a value) kept
+            the table address T from a .toc entry naming a local label of
+            this section (addis rH,r2,HA ; lwz/ld rB,LO(rH), or one TOC16
+            load from r2)
+            lwax rE,rB,rS ; add rT,rE,rB ; mtctr rT ; bctr
+        The scaled index is bounded only by a check of at least the bits it
+        keeps: a 32-bit check bounds rldic rA,rS,2,30 (32 bits kept) but not
+        sldi of the whole register, whose upper half nothing here proves.
+        Two loads of one address are two values.  The K+1 table words must lie in the
+        section, unrelocated, each an offset from T to an instruction of the
+        section.  Returns ({offset: exact predecessors the proof relies on},
+        targets) or None.
+        """
+        def straight(end):
+            seq = [end]
+            cur = end
+            while cur not in entries and preds.get(cur) == [cur - 4] and len(seq) < 64:
+                cur -= 4
+                seq.insert(0, cur)
+            return seq
+
+        chain = straight(j)
+        head = chain[0]
+        expect = {c: [c - 4] for c in chain[1:]}
+        if head in entries or not preds.get(head):
+            paths = [chain]
+        else:
+            hp = sorted(preds[head])
+            if len(hp) > 8 or any(p in chain for p in hp):
+                return None
+            expect[head] = hp
+            paths = []
+            for p in hp:
+                seg = straight(p)
+                expect.update({c: [c - 4] for c in seg[1:]})
+                paths.append(seg + chain)
+        at = {}
+        for r in rels:
+            at.setdefault(r['offset'] & ~3, []).append(r)
+        table = None
+        top = -1
+        for path in paths:
+            got = self.run_switch_path(obj, sec, src, path, at)
+            if got is None or (table is not None and got[0] != table):
+                return None
+            table, top = got[0], max(top, got[1])
+        t, k = table, top
+        end = t + 4 * (k + 1)
+        if t % 4 or t < 0 or end > size or any(t <= r['offset'] < end for r in rels):
+            return None
+        targets = set()
+        for n in range(k + 1):
+            d = t + ((be(src, t + 4 * n, 4) ^ 0x80000000) - 0x80000000)
+            if not (0 <= d < size and d % 4 == 0):
+                return None
+            targets.add(d)
+        return expect, sorted(targets)
+
+    def run_switch_path(self, obj, sec, src, path, at):
+        """Symbolic run of one path ending at a bcctr: (T, K) when CTR = T + table[i <= K], else None."""
+        regs, crs, bounds = {}, {}, {}
+        ctr = None
+        ids = [0]
+
+        def get(g):
+            if g not in regs:
+                ids[0] += 1
+                regs[g] = ('v', ids[0], 64)
+            return regs[g]
+
+        def kill(written):
+            for g in written:
+                regs.pop(g, None)
+
+        def bound(v, wide, k):
+            """v's value is <= k in its low `wide` bits."""
+            _, vid, n = v
+            m = min(n, wide)
+            bounds[(vid, m)] = min(k, bounds.get((vid, m), k))
+
+        def bound_of(vid, n):
+            best = None
+            for (v, m), k in bounds.items():
+                if v == vid and m >= n:
+                    k = min(k, (1 << n) - 1)
+                    best = k if best is None else min(best, k)
+            return best
+
+        for i, off in enumerate(path[:-1]):
+            nxt = path[i + 1]
+            w = be(src, off, 4)
+            op, rt, ra, rb = w >> 26, (w >> 21) & 31, (w >> 16) & 31, (w >> 11) & 31
+            xo = (w >> 1) & 0x3ff
+            here = at.get(off, [])
+            if op == 10 and not (w >> 22) & 1 and not here:            # cmplwi, cmpldi
+                v = get(ra)
+                crs[(w >> 23) & 7] = (v, 64 if (w >> 21) & 1 else 32, w & 0xffff) if v[0] == 'v' else None
+                continue
+            if op in (2, 3) and rt == 1 and not here:                    # tdi/twi lgt: falling through bounds rA
+                v = get(ra)
+                k = sext16(w & 0xffff)
+                if v[0] == 'v' and k >= 0:
+                    bound(v, 64 if op == 2 else 32, k)
+                continue
+            if op == 16 and not w & 1:                                   # bc, not a call
+                bo, bi = (w >> 21) & 31, (w >> 16) & 31
+                if not bo & 4:
+                    ctr = None                                           # decrements CTR
+                tgt = off + sext16(w & 0xfffc) if not here else None
+                fall = nxt == off + 4 and tgt != off + 4
+                taken = tgt is not None and nxt == tgt and tgt != off + 4
+                c = crs.get(bi // 4)
+                # GT clear on this edge: bgt not taken, or ble taken.
+                if c and bi % 4 == 1 and ((bo == 12 and fall) or (bo == 4 and taken)):
+                    bound(*c)
+                continue
+            if op == 15 and ra == 2 and len(here) == 1 and here[0]['rtype'] == 'R_PPC64_TOC16_HA' \
+                    and here[0]['offset'] == off + 2:
+                kill({rt})
+                regs[rt] = ('ha', here[0]['info'] >> 32, here[0]['addend'])
+                continue
+            load = {32: 4}.get(op) if op != 58 else (8 if w & 3 == 0 else None)
+            if load and len(here) == 1 and here[0]['offset'] == off + 2 and w & 0xffff == 0:
+                r = here[0]
+                src_ok = ((r['rtype'] in ('R_PPC64_TOC16_LO', 'R_PPC64_TOC16_LO_DS')
+                           and regs.get(ra) == ('ha', r['info'] >> 32, r['addend']))
+                          or (r['rtype'] in ('R_PPC64_TOC16', 'R_PPC64_TOC16_DS') and ra == 2))
+                t = self.toc_table(obj, sec, r['info'] >> 32, r['addend'], load) if src_ok else None
+                kill({rt})
+                if t is not None:
+                    regs[rt] = ('table', t)
+                continue
+            if here:
+                kill(set(range(32)))
+                crs.clear()
+                ctr = None
+                continue
+            if op == 21 and not w & 1:                                    # rlwinm: clrlwi, slwi
+                v = get(rt)
+                sh, mb, me = rb, (w >> 6) & 31, (w >> 1) & 31
+                kill({ra})
+                if v[0] == 'v' and sh == 0 and me == 31:
+                    regs[ra] = ('v', v[1], min(v[2], 32 - mb))
+                elif v[0] == 'v' and sh == 2 and me == 29:
+                    regs[ra] = ('scaled', v[1], min(v[2], 30 - mb))
+                continue
+            if op == 30 and not w & 1 and (w >> 2) & 7 in (0, 1, 2):      # rldicl, rldicr, rldic
+                v = get(rt)
+                sh = rb | (((w >> 1) & 1) << 5)
+                f = (w >> 5) & 63
+                mbe = ((f >> 1) & 31) | ((f & 1) << 5)
+                form = (w >> 2) & 7
+                kill({ra})
+                if v[0] != 'v':
+                    continue
+                if form == 0 and sh == 0:                                  # clrldi
+                    regs[ra] = ('v', v[1], min(v[2], 64 - mbe))
+                elif form == 1 and sh == 2 and mbe == 61:                  # sldi 2
+                    regs[ra] = ('scaled', v[1], min(v[2], 62))
+                elif form == 2 and sh == 2:                                # rldic 2,MB
+                    regs[ra] = ('scaled', v[1], min(v[2], 62 - mbe))
+                continue
+            if op == 31 and not w & 1 and xo in (341, 266, 444, 467):
+                if xo == 467:                                             # mtspr
+                    spr = ((w >> 16) & 31) | (((w >> 11) & 31) << 5)
+                    if spr == 9:
+                        ctr = regs.get(rt)
+                    continue
+                if xo == 444:                                             # or (mr when rS == rB)
+                    v = get(rt) if rt == rb else None
+                    kill({ra})
+                    if v:
+                        regs[ra] = v
+                    continue
+                va, vb = regs.get(ra), regs.get(rb)
+                kill({rt})
+                pair = {x[0]: x for x in (va, vb) if x} if ra else {}
+                if xo == 341 and 'table' in pair and 'scaled' in pair and len(pair) == 2:       # lwax
+                    k = bound_of(pair['scaled'][1], pair['scaled'][2])
+                    if k is not None:
+                        regs[rt] = ('entry', pair['table'][1], k)
+                elif xo == 266 and 'table' in pair and 'entry' in pair \
+                        and pair['table'][1] == pair['entry'][1]:                             # add
+                    regs[rt] = ('target', pair['entry'][1], pair['entry'][2])
+                continue
+            written = gpr_writes(w)
+            if written is None or (op in (16, 18, 19) and w & 1):
+                kill(set(range(32)))
+                crs.clear()
+                ctr = None
+                continue
+            kill(written)
+            if may_write_cr(w):
+                crs.clear()
+        if not ctr or ctr[0] != 'target':
+            return None
+        return ctr[1], ctr[2]
 
     def reaching_ha(self, obj, sec, src, use_off, reg, key, ha_at):
         """
