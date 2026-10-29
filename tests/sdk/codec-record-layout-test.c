@@ -1,5 +1,5 @@
 /* Compile-time ABI guard for <cell/codec/gifdec.h>, <cell/codec/jpgenc.h>,
- * <cell/codec/pngenc.h>: the system's multimedia services exchange these
+ * <cell/codec/pngenc.h>, <cell/codec/jpgdec.h>, <cell/codec/pngdec.h>: the system's multimedia services exchange these
  * records with user space, so every size, alignment and offset is part of
  * the system interface. Both data models use the system's 32-bit layout;
  * pointer members and callback slots are 32-bit effective addresses
@@ -12,6 +12,8 @@
 #include <cell/codec/gifdec.h>
 #include <cell/codec/jpgenc.h>
 #include <cell/codec/pngenc.h>
+#include <cell/codec/jpgdec.h>
+#include <cell/codec/pngdec.h>
 
 #ifdef __cplusplus
 #define CHECK(c, m) static_assert(c, m)
@@ -143,6 +145,68 @@ OFFSET(CellPngEncStreamInfo, processedLine, 24);
 WIDTH(CellPngEncStreamInfo, processedLine, 4);
 OFFSET(CellPngEncStreamInfo, userData, 32);
 WIDTH(CellPngEncStreamInfo, userData, 8);
+
+/* 7. CellJpgDecStrmParam (jpgdec.h) */
+SIZE(CellJpgDecStrmParam, 8);
+ALIGN(CellJpgDecStrmParam, 4);
+OFFSET(CellJpgDecStrmParam, strmPtr, 0);
+WIDTH(CellJpgDecStrmParam, strmPtr, 4);
+OFFSET(CellJpgDecStrmParam, strmSize, 4);
+WIDTH(CellJpgDecStrmParam, strmSize, 4);
+
+/* 8. CellPngDecStrmParam (pngdec.h) */
+SIZE(CellPngDecStrmParam, 8);
+ALIGN(CellPngDecStrmParam, 4);
+OFFSET(CellPngDecStrmParam, strmPtr, 0);
+WIDTH(CellPngDecStrmParam, strmPtr, 4);
+OFFSET(CellPngDecStrmParam, strmSize, 4);
+WIDTH(CellPngDecStrmParam, strmSize, 4);
+
+/* 9. CellJpgDecDispInfo (jpgdec.h) */
+SIZE(CellJpgDecDispInfo, 56);
+ALIGN(CellJpgDecDispInfo, 8);
+OFFSET(CellJpgDecDispInfo, outputFrameWidthByte, 0);
+WIDTH(CellJpgDecDispInfo, outputFrameWidthByte, 8);
+OFFSET(CellJpgDecDispInfo, outputFrameHeight, 8);
+WIDTH(CellJpgDecDispInfo, outputFrameHeight, 4);
+OFFSET(CellJpgDecDispInfo, outputStartXByte, 16);
+WIDTH(CellJpgDecDispInfo, outputStartXByte, 8);
+OFFSET(CellJpgDecDispInfo, outputStartY, 24);
+WIDTH(CellJpgDecDispInfo, outputStartY, 4);
+OFFSET(CellJpgDecDispInfo, outputWidthByte, 32);
+WIDTH(CellJpgDecDispInfo, outputWidthByte, 8);
+OFFSET(CellJpgDecDispInfo, outputHeight, 40);
+WIDTH(CellJpgDecDispInfo, outputHeight, 4);
+OFFSET(CellJpgDecDispInfo, outputComponents, 44);
+WIDTH(CellJpgDecDispInfo, outputComponents, 4);
+OFFSET(CellJpgDecDispInfo, outputImage, 48);
+WIDTH(CellJpgDecDispInfo, outputImage, 4);
+
+/* 10. CellPngDecDispInfo (pngdec.h) */
+SIZE(CellPngDecDispInfo, 64);
+ALIGN(CellPngDecDispInfo, 8);
+OFFSET(CellPngDecDispInfo, outputFrameWidthByte, 0);
+WIDTH(CellPngDecDispInfo, outputFrameWidthByte, 8);
+OFFSET(CellPngDecDispInfo, outputFrameHeight, 8);
+WIDTH(CellPngDecDispInfo, outputFrameHeight, 4);
+OFFSET(CellPngDecDispInfo, outputStartXByte, 16);
+WIDTH(CellPngDecDispInfo, outputStartXByte, 8);
+OFFSET(CellPngDecDispInfo, outputStartY, 24);
+WIDTH(CellPngDecDispInfo, outputStartY, 4);
+OFFSET(CellPngDecDispInfo, outputWidthByte, 32);
+WIDTH(CellPngDecDispInfo, outputWidthByte, 8);
+OFFSET(CellPngDecDispInfo, outputHeight, 40);
+WIDTH(CellPngDecDispInfo, outputHeight, 4);
+OFFSET(CellPngDecDispInfo, outputBitDepth, 44);
+WIDTH(CellPngDecDispInfo, outputBitDepth, 4);
+OFFSET(CellPngDecDispInfo, outputComponents, 48);
+WIDTH(CellPngDecDispInfo, outputComponents, 4);
+OFFSET(CellPngDecDispInfo, nextOutputStartY, 52);
+WIDTH(CellPngDecDispInfo, nextOutputStartY, 4);
+OFFSET(CellPngDecDispInfo, scanPassCount, 56);
+WIDTH(CellPngDecDispInfo, scanPassCount, 4);
+OFFSET(CellPngDecDispInfo, outputImage, 60);
+WIDTH(CellPngDecDispInfo, outputImage, 4);
 
 /* Compile-time verification that attributed pointers remain pointer types,
  * not integers, so callers retain normal pointer syntax and assignments. */
