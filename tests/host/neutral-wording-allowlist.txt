@@ -12,3 +12,5 @@ tools/rsx-cg-compiler/src/cgnv2elf/cgnv2elf.cpp	83fd7c7aeca126d89eb87fef4a15bbe9
 tests/shader-compiler/cgnv2elf-test.sh	a3dd8354992d28d1b3d6dadecf35408b0b1901daf5553eb047f0c9964702516b
 # PSL1GHT's disclaimer, kept verbatim.
 tools/sfo-pkg/sfo.xml	68ea95aecf7a1f252518033a1b2b70430ebaf2aa8e33bd068d1cb25ca7409dcb
+# Profiler format: the unresolved (O, f) reference denotes a frame token.
+docs/design/ps3dk-prof-format.md	52f668ca56edc93ccd8f2c111fdb6f767e31ea036b199bed9756dd0ec8b45af2
