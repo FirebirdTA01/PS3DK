@@ -5927,16 +5927,14 @@ void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
     uint8_t index_type = psgl_gl_index_type(type);
     uint32_t offset;
     if (!primitive) { psgl_gl_error(GL_INVALID_ENUM); return; }
-    if (index_type == 0xffu)
-    {
-        /* UNSIGNED_BYTE is legal in ES 2.0 but the command set has no 8-bit
-           index type, so it is a legal no-op (no draw, no error); any other
-           unlisted type is an invalid enum. */
-        if (type != GL_UNSIGNED_BYTE) { psgl_gl_error(GL_INVALID_ENUM); return; }
-        return;
+    if (index_type == 0xffu && type != GL_UNSIGNED_BYTE) {
+        psgl_gl_error(GL_INVALID_ENUM); return;
     }
     if (count < 0) { psgl_gl_error(GL_INVALID_VALUE); return; }
     if (count == 0) return;   /* legal no-op, not an error */
+    /* UNSIGNED_BYTE is legal in ES 2.0 but the command set has no 8-bit index
+       type: after argument validation it draws nothing and reports nothing. */
+    if (index_type == 0xffu) return;
     if (!psgl_validate_draw_state(context)) return;
     buffer = psgl_find_buffer(context->bound_element_array_buffer);
     if (context->gl_attrib_routing) {

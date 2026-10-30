@@ -10,8 +10,8 @@
    - bad index type   -> INVALID_ENUM, EXCEPT UNSIGNED_BYTE which stays a
                         legal no-op (GCM has no 8-bit type; separate card)
    - unknown cap      -> INVALID_ENUM, no state change
-   First-error-wins: psgl_gl_error records the first error, so a call with
-   an unknown mode and a bad count reports INVALID_ENUM (the earlier check). */
+   Each row drains the error flag first and makes one call, so every row
+   checks a single error; no row combines two invalid arguments. */
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 #include <PSGL/psgl.h>
@@ -50,6 +50,7 @@ static void r_draw_elements_bad_type(void)        { glDrawElements(GL_TRIANGLES,
 static void r_draw_elements_negative_count(void)  { glDrawElements(GL_TRIANGLES, -1, GL_UNSIGNED_SHORT, 0); }
 static void r_draw_elements_zero_count(void)      { glDrawElements(GL_TRIANGLES, 0, GL_UNSIGNED_SHORT, 0); }
 static void r_draw_elements_unsigned_byte(void)   { glDrawElements(GL_TRIANGLES, 4, GL_UNSIGNED_BYTE, 0); }
+static void r_draw_elements_unsigned_byte_negative(void) { glDrawElements(GL_TRIANGLES, -1, GL_UNSIGNED_BYTE, 0); }
 
 static void r_enable_unknown_cap(void)            { glEnable(0x9999); }
 static void r_disable_unknown_cap(void)           { glDisable(0x9999); }
@@ -84,6 +85,9 @@ int main(void)
        no 8-bit form, so today it stays a legal no-op (no error, no draw);
        the widen-to-16 path is tracked on a separate card. */
     row("draw_elements UNSIGNED_BYTE is a legal no-op", GL_NO_ERROR, r_draw_elements_unsigned_byte);
+    /* The byte no-op must not bypass count validation. */
+    row("draw_elements UNSIGNED_BYTE negative count is INVALID_VALUE", GL_INVALID_VALUE,
+        r_draw_elements_unsigned_byte_negative);
 
     /* A public cap query (GL_SCISSOR_TEST) can observe whether an unknown
        cap left a known cap untouched. */

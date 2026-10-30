@@ -390,11 +390,11 @@ psgl-ffp-texenv-nolib-lp64,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-noli
 psgl-ffp-install-failure-ilp32,tests/regression/psgl-ffp-install-failure/psgl-ffp-install-failure-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_INSTALL_OK checks=7 failures=0\r?$,PSGL_FFP_INSTALL_FAIL
 psgl-ffp-install-failure-lp64,tests/regression/psgl-ffp-install-failure/psgl-ffp-install-failure-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_INSTALL_OK checks=7 failures=0\r?$,PSGL_FFP_INSTALL_FAIL
 # psgl-invalid-enum-value pins the GL ES 2.0 error rules for the draw and
-# enable entry points (first-error-wins).  The count==0 and UNSIGNED_BYTE
+# enable entry points, one invalid argument per row.  The count==0 and UNSIGNED_BYTE
 # rows are a legal no-op (no draw, no error); the UNKNOWN mode / type / cap
 # rows raise INVALID_ENUM and must not disturb a known cap.
-psgl-invalid-enum-value-ilp32,tests/regression/psgl-invalid-enum-value/psgl-invalid-enum-value-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_INV_ENUM OK checks=15 failures=0\r?$,PSGL_INV_ENUM FAIL
-psgl-invalid-enum-value-lp64,tests/regression/psgl-invalid-enum-value/psgl-invalid-enum-value-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_INV_ENUM OK checks=15 failures=0\r?$,PSGL_INV_ENUM FAIL
+psgl-invalid-enum-value-ilp32,tests/regression/psgl-invalid-enum-value/psgl-invalid-enum-value-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_INV_ENUM OK checks=16 failures=0\r?$,PSGL_INV_ENUM FAIL
+psgl-invalid-enum-value-lp64,tests/regression/psgl-invalid-enum-value/psgl-invalid-enum-value-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_INV_ENUM OK checks=16 failures=0\r?$,PSGL_INV_ENUM FAIL
 psgl-mixed-relink-ilp32,tests/regression/psgl-mixed-relink/psgl-mixed-relink-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_RELINK_OK checks=38 failures=0\r?$,PSGL_RELINK_FAIL
 psgl-mixed-relink-lp64,tests/regression/psgl-mixed-relink/psgl-mixed-relink-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_RELINK_OK checks=38 failures=0\r?$,PSGL_RELINK_FAIL
 
