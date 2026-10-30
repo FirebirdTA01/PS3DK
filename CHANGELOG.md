@@ -16,6 +16,14 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Changed
+
+- **Pinned build image.** CI and release builds run on a pinned Ubuntu 26.04
+  image instead of the moving `ubuntu-latest`, so a runner update can no
+  longer change the shipped host tools between releases. v0.27.0 was already
+  built on that image: its Windows host tools are compiled by mingw-w64 GCC 15
+  (GCC 13 in v0.26.153) and its info pages by makeinfo 7.2.
+
 ### Fixed
 
 - **Scalar cube textures in PSGL.** Fragment `samplerCUBE` selections route

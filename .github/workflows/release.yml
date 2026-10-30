@@ -35,7 +35,7 @@ permissions:
 jobs:
   verify-version:
     name: Verify version metadata
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       version: ${{ steps.v.outputs.version }}
       bare:    ${{ steps.v.outputs.bare }}
@@ -107,7 +107,7 @@ jobs:
   build-host-tools-linux:
     name: Build host tools (linux x86_64)
     needs: verify-version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -279,7 +279,7 @@ jobs:
   build-host-tools-windows:
     name: Build host tools (windows x86_64)
     needs: verify-version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
@@ -425,7 +425,7 @@ jobs:
   build-source-bundle:
     name: Build source bundle
     needs: verify-version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -485,7 +485,7 @@ jobs:
     name: Build native PPU toolchain (linux)
     if: github.event_name == 'push' || github.event.inputs.run_toolchain_windows == 'true'
     needs: verify-version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v5
@@ -577,7 +577,7 @@ jobs:
     name: Build native SPU toolchain (linux)
     if: github.event_name == 'push' || github.event.inputs.run_toolchain_windows == 'true'
     needs: verify-version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
@@ -668,7 +668,7 @@ jobs:
       - build-host-tools-windows
       - build-native-ppu
       - build-native-spu
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v5
@@ -860,7 +860,7 @@ jobs:
   require-ci-green:
     name: Require CI green on the tagged commit
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # The workflow-level block grants contents: write, and declaring ANY
     # permissions block makes every unlisted scope `none` - so without this
     # the actions/runs endpoint is unreadable and the gate would fail closed
@@ -951,7 +951,7 @@ jobs:
       - build-native-spu
       - build-toolchain-windows
       - build-source-bundle
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
         with:

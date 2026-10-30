@@ -14,7 +14,7 @@ permissions:
 jobs:
   version-pipeline:
     name: Version pipeline
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -54,7 +54,7 @@ jobs:
 
   shellcheck:
     name: ShellCheck ratchet over scripts/
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -108,7 +108,7 @@ jobs:
 
   rust-tools:
     name: Rust tools build + tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 
@@ -145,7 +145,7 @@ jobs:
 
   host-tools-cxx:
     name: C/C++ host tools build (linux)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 

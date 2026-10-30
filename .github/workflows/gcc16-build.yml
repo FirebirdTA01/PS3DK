@@ -38,7 +38,7 @@ concurrency:
 jobs:
   gcc16-ppu:
     name: GCC 16 PPU toolchain + SDK + target checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 330
     env:
       LOGS: ${{ github.workspace }}/gcc16-logs
