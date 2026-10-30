@@ -28,6 +28,13 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PSGL draw and enable errors.** `glDrawArrays` and `glDrawElements`
+  raise `GL_INVALID_ENUM` for an unknown mode or index type and
+  `GL_INVALID_VALUE` for a negative count (or first); a zero count is a
+  no-op. `glEnable` and `glDisable` raise `GL_INVALID_ENUM` for an unknown
+  capability without changing state. `GL_UNSIGNED_BYTE` indices are still
+  not drawn.
+
 - **LP64 JPEG and PNG decoder stream and display-info records.** The JPEG and
   PNG decoder stream-parameter and display-info records keep their 32-bit
   pointer layout in LP64 programs, matching what the decoder modules read.

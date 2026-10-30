@@ -4007,6 +4007,9 @@ void psgl_context_set_enable(GLenum cap, GLboolean enabled)
             context->lights[cap - GL_LIGHT0].enabled = enabled;
             psgl_mark_lighting_dirty(context);
         }
+        else {
+            psgl_gl_error(GL_INVALID_ENUM);
+        }
         break;
     }
 }
@@ -5902,9 +5905,12 @@ void psgl_context_set_generic_attrib_pointer(GLuint index, GLint size,
 void psgl_context_draw_arrays(GLenum mode, GLint first, GLsizei count)
 {
     PSGLcontext *context = g_psgl.current_context;
+    if (!context || !context->gcm) return;
     uint32_t primitive = psgl_gl_primitive(mode);
-    if (!context || !context->gcm || first < 0 || count <= 0 || !primitive)
-        return;
+    if (!primitive) { psgl_gl_error(GL_INVALID_ENUM); return; }
+    if (first < 0)   { psgl_gl_error(GL_INVALID_VALUE); return; }
+    if (count < 0)   { psgl_gl_error(GL_INVALID_VALUE); return; }
+    if (count == 0)  return;   /* legal no-op, not an error */
     if (!psgl_validate_draw_state(context)) return;
     if (!psgl_emit_client_vertex_arrays(context, first, count)) return;
     cellGcmSetDrawArrays(context->gcm, primitive, (uint32_t)first,
@@ -5915,13 +5921,22 @@ void psgl_context_draw_elements(GLenum mode, GLsizei count, GLenum type,
                                 const GLvoid *indices)
 {
     PSGLcontext *context = g_psgl.current_context;
+    if (!context || !context->gcm) return;
     PSGLbufferObject *buffer;
     uint32_t primitive = psgl_gl_primitive(mode);
     uint8_t index_type = psgl_gl_index_type(type);
     uint32_t offset;
-    if (!context || !context->gcm || count <= 0 || !primitive ||
-        index_type == 0xffu)
+    if (!primitive) { psgl_gl_error(GL_INVALID_ENUM); return; }
+    if (index_type == 0xffu)
+    {
+        /* UNSIGNED_BYTE is legal in ES 2.0 but the command set has no 8-bit
+           index type, so it is a legal no-op (no draw, no error); any other
+           unlisted type is an invalid enum. */
+        if (type != GL_UNSIGNED_BYTE) { psgl_gl_error(GL_INVALID_ENUM); return; }
         return;
+    }
+    if (count < 0) { psgl_gl_error(GL_INVALID_VALUE); return; }
+    if (count == 0) return;   /* legal no-op, not an error */
     if (!psgl_validate_draw_state(context)) return;
     buffer = psgl_find_buffer(context->bound_element_array_buffer);
     if (context->gl_attrib_routing) {
