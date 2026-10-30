@@ -2192,7 +2192,9 @@ dependencies = [
 name = "ps3dk-prof"
 version = "0.0.0"
 dependencies = [
+ "object",
  "ps3dk-version",
+ "serde_json",
 ]
 
 [[package]]

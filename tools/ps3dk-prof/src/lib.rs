@@ -16,7 +16,13 @@ pub mod reader;
 pub mod report;
 
 pub use analysis::{
-    compare, compare_with, load, AbResult, AbRow, Analysis, Attribution, CompareOptions, Comparison, ComparisonKind,
-    FrameElapsed, LaneView, Outcome, SpanView, SpansN, TokenOutcome, TokenRef, Work, ZoneStats,
+    compare, compare_with, load, AbResult, AbRow, Analysis, Attribution, CompareOptions,
+    Comparison, ComparisonKind, FrameElapsed, LaneView, Outcome, SpanView, SpansN, TokenOutcome,
+    TokenRef, Work, ZoneStats,
 };
 pub use model::{Capture, Incomplete, Malformed, Metric, Rule, Verdict};
+
+pub mod arcs;
+pub mod companions;
+pub mod gmon;
+mod wire;
