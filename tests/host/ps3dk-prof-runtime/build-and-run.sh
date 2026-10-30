@@ -44,7 +44,18 @@ out="$(cd "$1" && pwd)"
 
 CC="${CC:-cc}"
 CXX="${CXX:-c++}"
-inc=(-I"$root/sdk/include" -I"$root/sdk/libps3dkprof/src/core" -I"$root/sdk/libps3dkprof/src/pal")
+# Only the portable public API belongs on this host compiler's include path.
+# The SDK's libc/pthread wrappers target newlib and must not wrap host glibc.
+public_inc="$out/public-include"
+mkdir -p "$public_inc/ps3dk"
+cp -- "$root/sdk/include/ps3dk/prof.h" "$public_inc/ps3dk/prof.h"
+source_hash="$(sha256sum "$root/sdk/include/ps3dk/prof.h")"
+copy_hash="$(sha256sum "$public_inc/ps3dk/prof.h")"
+if [ "${source_hash%% *}" != "${copy_hash%% *}" ]; then
+    echo "FAIL public prof.h copy differs from source" >&2
+    exit 1
+fi
+inc=(-I"$public_inc" -I"$root/sdk/libps3dkprof/src/core" -I"$root/sdk/libps3dkprof/src/pal")
 warn=(-Wall -Wextra -Werror)
 lib_src=(prof_core prof_drain pal_host)
 test_c=(rt_main rt_util rt_t_lifecycle rt_t_stop rt_t_zones rt_t_init rt_t_sink rt_t_race rt_t_counters)
