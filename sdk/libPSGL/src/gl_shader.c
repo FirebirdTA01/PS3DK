@@ -32,6 +32,7 @@ typedef struct PSGLglUniform {
 typedef struct PSGLglSampler {
     char base[64];
     CGparameter parameter;
+    CGtype type;
     int8_t hardware;
     uint8_t group;
     uint8_t element;
@@ -62,6 +63,7 @@ typedef struct PSGLglProgram {
     uint32_t linked_attrib_count;
     int8_t hw_to_location[PSGL_MAX_GENERIC_ATTRIBS];
     uint32_t sampler_mask;
+    uint32_t sampler_cube_mask;
     uint8_t sampler_units[PSGL_MAX_TEXTURE_UNITS];
     PSGLglSampler samplers[PSGL_GL_MAX_UNIFORMS];
     uint32_t sampler_count;
@@ -231,7 +233,7 @@ static int gls_sampler_layout(CGprogram fragment, PSGLglSampler *samplers,
             if (seen & bit) return 0;
             seen |= bit;
         }
-        if (param->type != CG_SAMPLER2D) continue;
+        if (param->type != CG_SAMPLER2D && param->type != CG_SAMPLERCUBE) continue;
         if (*count == PSGL_GL_MAX_UNIFORMS) return 0;
         /* Cg's cached name may already be truncated. Check the binary's
            original length before using that cache to identify a group. */
@@ -240,7 +242,8 @@ static int gls_sampler_layout(CGprogram fragment, PSGLglSampler *samplers,
         if (name_size <= 1u || name_size > sizeof(param->name)) return 0;
         PSGLglSampler *s = &samplers[*count];
         int array = gls_sampler_name(param->name, s->base, &s->element);
-        if (array < 0) return 0;
+        if (array < 0 || (array && param->type == CG_SAMPLERCUBE)) return 0;
+        s->type = param->type;
         s->array = array ? GL_TRUE : GL_FALSE;
         s->hardware = -1;
         if (param->resource != CG_UNDEFINED) {
@@ -258,7 +261,7 @@ static int gls_sampler_layout(CGprogram fragment, PSGLglSampler *samplers,
         s->extent = 1;
         for (uint32_t j = 0; j < *count; ++j) {
             if (!gls_streq(s->base, samplers[j].base)) continue;
-            if (s->array != samplers[j].array || s->element == samplers[j].element) return 0;
+            if (s->type != samplers[j].type || s->array != samplers[j].array || s->element == samplers[j].element) return 0;
             s->group = samplers[j].group;
         }
         ++*count;
@@ -278,7 +281,7 @@ static int gls_sampler_layout(CGprogram fragment, PSGLglSampler *samplers,
         for (uint32_t j = 0; j < fp->parameter_count; ++j) {
             PSGLcgParameter *param = &fp->parameters[j];
             if (!gls_same_uniform_root(param->name, s->base)) continue;
-            if (param->type != CG_SAMPLER2D) return 0;
+            if (param->type != s->type) return 0;
             uint32_t k = 0;
             while (k < *count && samplers[k].parameter != (CGparameter)param) ++k;
             if (k == *count || samplers[k].group != s->group) return 0;
@@ -592,6 +595,10 @@ GLAPI void glLinkProgram(GLuint program)
         context->bound_vertex_program == p->vertex_program &&
         context->bound_fragment_program == p->fragment_program;
     p->sampler_mask = sampler_mask;
+    p->sampler_cube_mask = 0;
+    for (uint32_t i = 0; i < sampler_count; ++i)
+        if (samplers[i].type == CG_SAMPLERCUBE && samplers[i].hardware >= 0)
+            p->sampler_cube_mask |= 1u << samplers[i].hardware;
     p->sampler_count = sampler_count;
     gls_copy(p->samplers, samplers, sampler_count * sizeof(samplers[0]));
     for (uint32_t hw = 0; hw < PSGL_MAX_TEXTURE_UNITS; ++hw) p->sampler_units[hw] = 0;
@@ -620,7 +627,7 @@ GLAPI void glUseProgram(GLuint program)
     psgl_context_bind_cg_program(p->vertex_program, CG_PROFILE_SCE_VP_RSX);
     psgl_context_bind_cg_program(p->fragment_program, CG_PROFILE_SCE_FP_RSX);
     psgl_context_set_gl_attrib_routing(p->hw_to_location);
-    psgl_context_set_gl_sampler_routing(p->sampler_units, p->sampler_mask);
+    psgl_context_set_gl_sampler_routing(p->sampler_units, p->sampler_mask, p->sampler_cube_mask);
     g_current_program = program;
 }
 
@@ -710,7 +717,7 @@ GLAPI void glGetUniformiv(GLuint program, GLint location, GLint *params)
     if (!p->linked || !uniform || ((uint32_t)location >> 8) != p->name) {
         psgl_gl_error(GL_INVALID_OPERATION); return;
     }
-    /* Expose only program-owned fragment sampler2D selections.
+    /* Expose only program-owned fragment 2D and cube sampler selections.
        Numeric Cg values are still shared by programs using the same shader;
        reporting those as program-owned values would be incorrect. */
     if (uniform->sampler_index < 0 ||
@@ -782,7 +789,7 @@ static void gls_sampler_set(PSGLglUniform *uniform, GLsizei count, const GLint *
        UseProgram installs the GL executable again. */
     if (context && context->gl_sampler_routing &&
         context->bound_fragment_program == program->fragment_program)
-        psgl_context_set_gl_sampler_routing(program->sampler_units, program->sampler_mask);
+        psgl_context_set_gl_sampler_routing(program->sampler_units, program->sampler_mask, program->sampler_cube_mask);
 }
 
 GLAPI void glUniform1iv(GLint location, GLsizei count, const GLint *value)

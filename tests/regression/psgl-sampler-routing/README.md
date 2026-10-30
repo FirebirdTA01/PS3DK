@@ -15,8 +15,8 @@ companion SDK includes a GCM Phase B overlay, not pristine v0.26.0.
 This fixture covers reflected scalar fragment sampler2D resources in physical
 slots 0-7. Sampler arrays and glUniform1iv are covered by psgl-sampler-arrays;
 named-program glGetUniformiv queries are also covered by psgl-uniform-query.
-Cube/vertex texture support and mixed-type alias validation remain tracked
-gaps. Unit values below zero or at least eight are rejected with
+Scalar cube selections and mixed-type validation are covered by psgl-cube-map.
+Vertex texture support remains outside this subset. Unit values below zero or at least eight are rejected with
 INVALID_VALUE before mutation as an implementation guard. No general
 ES 2.0 conformance or hardware acceptance is claimed.
 
@@ -29,8 +29,8 @@ Unsupported sampler types keep their prior link acceptance and physical
 bindings, but glUniform1i on them returns INVALID_OPERATION. Ambiguous
 fragment reflection assigning multiple samplers to one physical slot refuses
 link, as do malformed sampler2D groups, unsupported resource ranges and
-descriptor exhaustion. The cube fixture tests link/bind acceptance and setter refusal, not cube
-upload or sampling (the upload path only supports 2D textures). The public
+descriptor exhaustion. The scalar cube setter is accepted; an independently mutated sampler3D
+reflection retains the unsupported-selection refusal witness. The public
 Cg type-class query still lacks sampler classification; this GL path checks
 the sampler types explicitly. Existing global GL shader-object bookkeeping
 is not changed into a complete per-context implementation by this increment.

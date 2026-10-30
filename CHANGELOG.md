@@ -18,12 +18,20 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **Scalar cube textures in PSGL.** Fragment `samplerCUBE` selections route
+  independently of 2D bindings; draws reject active 2D/cube samplers sharing
+  a unit, including array elements. The initial subset is level-zero,
+  uncompressed linear ARGB8 with 128-byte pitch and six aligned face slabs.
+  Mips, compressed/depth images, swizzled cubes, framebuffer attachments,
+  copies and external cube storage are refused. Cube arrays remain unsupported;
+  PS3 hardware acceptance is pending the dependent sample run.
+
 - **Sampler array selections in PSGL.** `glUniform1iv` selects logical
   texture units for reflected fragment `sampler2D` array elements. Base-name
   and `[0]` locations agree, unused elements retain their own selections,
   and `glGetUniformiv` returns individual element values. Excess input is
   ignored at the array boundary; invalid effective units leave all selections
-  unchanged. Cube textures and mixed sampler-type validation remain separate.
+  unchanged. Scalar cube textures and mixed sampler types are covered above.
 
 - **Fragment sampler arrays.** The shader compiler resolves constant indices
   of one-dimensional `sampler2D` arrays to per-element texture bindings and

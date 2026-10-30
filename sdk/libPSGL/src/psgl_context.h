@@ -72,6 +72,7 @@ typedef struct PSGLvertexAttribState {
 
 typedef struct PSGLtextureUnitState {
     GLuint texture_2d;
+    GLuint texture_cube;
     GLboolean texture_2d_enabled;
     /* Texture environment (GL 2.1 section 3.8.13). */
     GLenum env_mode;
@@ -231,7 +232,9 @@ struct PSGLcontext {
     /* GL sampler values select logical units; Cg uses physical slots. */
     GLboolean gl_sampler_routing;
     uint32_t gl_sampler_mask;
+    uint32_t gl_sampler_cube_mask;
     uint8_t gl_sampler_units[PSGL_MAX_TEXTURE_UNITS];
+    struct PSGLtextureObject *default_cube;
 };
 
 int psgl_context_init_system(const PSGLinitOptions *options);
@@ -254,7 +257,7 @@ PSGLdevice *psgl_context_current_device(void);
 void psgl_context_load_shader_library(const char *filename);
 void psgl_context_bind_cg_program(CGprogram program, CGprofile profile);
 void psgl_context_set_gl_attrib_routing(const int8_t *hw_to_location);
-void psgl_context_set_gl_sampler_routing(const uint8_t *units, uint32_t mask);
+void psgl_context_set_gl_sampler_routing(const uint8_t *units, uint32_t mask, uint32_t cube_mask);
 void psgl_context_swap(void);
 void psgl_context_flush(void);
 void psgl_context_finish(void);

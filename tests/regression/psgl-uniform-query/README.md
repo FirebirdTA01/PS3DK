@@ -5,7 +5,8 @@ program, including when no program or a different program is current. Values
 are logical texture units, not physical TEXUNIT indices. Two programs sharing
 one shader have independent selections. Successful relink resets selections;
 failed relink makes queries invalid. Output fences and sentinels check errors
-leave all output untouched. Cube queries are explicitly unsupported here.
+leave all output untouched. Scalar cube queries are supported. A sampler3D reflection mutant retains the
+unsupported-query witness without relying on cube refusal.
 Array element selections, including unused elements, are covered separately
 by psgl-sampler-arrays.
 Flagged-deleted programs are refused. Existing program deletion does not yet

@@ -3,6 +3,8 @@
 #include <PSGL/psgl.h>
 #include <Cg/cgGL.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <Cg/cgBinary.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -17,6 +19,22 @@ extern CGprogram psgl_cg_create_program_from_memory(CGcontext,const void *,uint3
 static unsigned checks,failures;
 static const float quad[24]={-1,-1,0,1,1,-1,0,1,1,1,0,1,-1,-1,0,1,1,1,0,1,-1,1,0,1};
 static void check(int ok,const char *name){++checks;if(!ok){++failures;printf("PSGL_SAMPLER_FAIL %s\n",name);}}
+/* Mutate only reflection in our own compiled binary; never execute this
+   unsupported sampler shader. This retains the negative API witness. */
+static void *unsupported_sampler(const void *bytes, unsigned size, int array)
+{
+    unsigned char *copy=malloc(size);if(!copy)return NULL;memcpy(copy,bytes,size);
+    CgBinaryProgram *binary=(CgBinaryProgram *)copy;
+    if(binary->parameterArray>size || binary->parameterCount>(size-binary->parameterArray)/sizeof(CgBinaryParameter)){free(copy);return NULL;}
+    CgBinaryParameter *params=(CgBinaryParameter *)(copy+binary->parameterArray);
+    for(unsigned i=0;i<binary->parameterCount;++i)if(params[i].type==CG_SAMPLERCUBE){
+        if(array){
+            if(params[i].name>size-5){free(copy);return NULL;}
+            memcpy(copy+params[i].name,"a[0]",5);
+        }else params[i].type=CG_SAMPLER3D;
+    }
+    return copy;
+}
 static GLuint shader(GLenum stage,const void *bytes,unsigned size)
 {
     GLuint s=glCreateShader(stage);glShaderBinary(1,&s,GL_SHADER_BINARY_FORMAT_CGB_PS3DK,bytes,size);return s;
@@ -85,15 +103,18 @@ int main(void)
     la=glGetUniformLocation(pa,"image");draw(204,51,17,"successful relink resets zero");glUniform1i(la,5);
     CGcontext cg=cgCreateContext();CGprogram direct=psgl_cg_create_program_from_memory(cg,single0_fpo,single0_fpo_size,CG_PROFILE_SCE_FP_RSX);
     check(direct!=NULL,"direct Cg fixture");
-    if(direct){cgGLBindProgram(direct);draw(204,51,17,"direct Cg physical bindings");}
+    if(direct){cgGLEnableProfile(CG_PROFILE_SCE_FP_RSX);cgGLBindProgram(direct);draw(204,51,17,"direct Cg physical bindings");}
     glUseProgram(pa);draw(51,153,204,"GL bind restores logical selection");
     glUseProgram(0);glUniform1i(la,0);check(glGetError()==GL_INVALID_OPERATION,"no current program rejected");
-    /* Preserve historical link acceptance, without claiming cube uploads or
-       pixel support. Unsupported sampler selection is refused explicitly. */
+    /* Scalar cube selections are supported; 3D selections remain refused. */
     GLuint fsc=shader(GL_FRAGMENT_SHADER,cube_fpo,cube_fpo_size),pc=program(vs,fsc);
     GLint lc=glGetUniformLocation(pc,"environment");check(lc>=0,"cube location retained");
     glUseProgram(pc);check(glGetError()==GL_NO_ERROR,"cube program bind retained");
-    glUniform1i(lc,0);check(glGetError()==GL_INVALID_OPERATION,"cube remap refused");
+    glUniform1i(lc,0);check(glGetError()==GL_NO_ERROR,"cube remap accepted");
+    void *negative=unsupported_sampler(cube_fpo,cube_fpo_size,0);check(negative!=NULL,"unsupported sampler binary");
+    if(negative){GLuint ns=shader(GL_FRAGMENT_SHADER,negative,cube_fpo_size),np=program(vs,ns);free(negative);
+        glUseProgram(np);glUniform1i(glGetUniformLocation(np,"environment"),0);check(glGetError()==GL_INVALID_OPERATION,"3D remap refused");
+        glUseProgram(pc);glDeleteProgram(np);glDeleteShader(ns);}
     glUseProgram(0);glDeleteProgram(pc);glDeleteShader(fsc);
     cgDestroyContext(cg);glDeleteProgram(pa);glDeleteProgram(pb);glDeleteProgram(p5);glDeleteProgram(pp);
     glDeleteShader(vs);glDeleteShader(fs0);glDeleteShader(fs5);glDeleteShader(fs2);glDeleteBuffers(1,&pos);glDeleteTextures(2,tex);

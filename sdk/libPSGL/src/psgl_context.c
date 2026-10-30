@@ -58,6 +58,13 @@ typedef struct PSGLbufferObject {
     struct PSGLbufferObject *next;
 } PSGLbufferObject;
 
+typedef struct PSGLcubeFace {
+    uint32_t *pixels;
+    uint32_t width, height;
+    GLenum internalformat, format, type;
+    GLboolean defined;
+} PSGLcubeFace;
+
 typedef struct PSGLtextureObject {
     GLuint name;
     GLenum target;
@@ -65,6 +72,7 @@ typedef struct PSGLtextureObject {
     GLenum mag_filter;
     GLenum wrap_s;
     GLenum wrap_t;
+    GLenum wrap_r;
     GLenum compare_mode;
     GLenum compare_func;
     GLenum allocation_hint;
@@ -84,6 +92,8 @@ typedef struct PSGLtextureObject {
     void *address;
     uint32_t offset;
     CellGcmTexture gcm_texture;
+    PSGLcubeFace faces[6];
+    GLboolean cube_dirty;
     struct PSGLtextureObject *next;
 } PSGLtextureObject;
 
@@ -102,6 +112,7 @@ typedef struct PSGLsystemState {
 static PSGLsystemState g_psgl;
 static PSGLbufferObject *g_psgl_buffers;
 static PSGLtextureObject *g_psgl_textures;
+static PSGLtextureObject g_psgl_black_cube;
 static GLuint g_psgl_next_buffer_name = 1u;
 static GLuint g_psgl_next_texture_name = 1u;
 static void *g_psgl_client_array_scratch;
@@ -110,6 +121,7 @@ static uint32_t g_psgl_client_array_scratch_size;
 static uint32_t g_psgl_client_array_scratch_cursor;
 
 static void psgl_fill_gcm_texture(PSGLtextureObject *texture);
+static int psgl_cube_target(GLenum target);
 
 /* A fixed-function texturing program for one enabled-unit set: the vertex
    program takes modelViewProj then texMatrix<k>, the fragment program five
@@ -1314,6 +1326,10 @@ void psgl_context_framebuffer_texture_2d(GLenum target, GLenum attachment,
 {
     PSGLcontext *ctx = g_psgl.current_context;
     int idx;
+    PSGLtextureObject *object = psgl_get_texture(texture);
+    if (psgl_cube_target(textarget) || (object && object->target == GL_TEXTURE_CUBE_MAP)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
     if (!ctx || target != GL_FRAMEBUFFER_OES || textarget != GL_TEXTURE_2D ||
         level != 0 || ctx->bound_framebuffer == 0u)
         return;
@@ -1760,11 +1776,13 @@ static PSGLtextureObject *psgl_find_texture(GLuint name)
 
 static void psgl_init_texture_defaults(PSGLtextureObject *texture)
 {
-    texture->target = GL_TEXTURE_2D;
+    /* A generated name acquires its immutable target on first bind. */
+    texture->target = 0;
     texture->min_filter = GL_NEAREST;
     texture->mag_filter = GL_NEAREST;
     texture->wrap_s = GL_REPEAT;
     texture->wrap_t = GL_REPEAT;
+    texture->wrap_r = GL_REPEAT;
     texture->compare_mode = GL_NONE;
     texture->compare_func = GL_LEQUAL;
     texture->allocation_hint = GL_TEXTURE_LINEAR_GPU_SCE;
@@ -1843,9 +1861,22 @@ static PSGLtextureObject *psgl_bound_texture(PSGLcontext *context, GLenum target
 {
     uint32_t unit;
     GLuint name;
-    if (!context || target != GL_TEXTURE_2D) return NULL;
+    if (!context || (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP)) return NULL;
     unit = psgl_texture_unit_index(context->active_texture);
     if (unit >= PSGL_MAX_TEXTURE_UNITS) return NULL;
+    if (target == GL_TEXTURE_CUBE_MAP) {
+        name = context->textures[unit].texture_cube;
+        if (name) return psgl_find_texture(name);
+        if (!context->default_cube) {
+            context->default_cube = calloc(1, sizeof(PSGLtextureObject));
+            if (!context->default_cube) { psgl_gl_error(GL_OUT_OF_MEMORY); return NULL; }
+            psgl_init_texture_defaults(context->default_cube);
+            context->default_cube->target = GL_TEXTURE_CUBE_MAP;
+            context->default_cube->min_filter = GL_NEAREST_MIPMAP_LINEAR;
+            context->default_cube->mag_filter = GL_LINEAR;
+        }
+        return context->default_cube;
+    }
     name = context->textures[unit].texture_2d;
     return name ? psgl_find_texture(name) : NULL;
 }
@@ -2091,7 +2122,7 @@ static void psgl_fill_gcm_texture(PSGLtextureObject *texture)
     texture->gcm_texture.format = texture->rsx_format;
     texture->gcm_texture.mipmap = texture->levels ? texture->levels : 1u;
     texture->gcm_texture.dimension = CELL_GCM_TEXTURE_DIMENSION_2;
-    texture->gcm_texture.cubemap = 0u;
+    texture->gcm_texture.cubemap = texture->target == GL_TEXTURE_CUBE_MAP;
     if (psgl_texture_is_depth(texture->rsx_format))
         texture->gcm_texture.remap = 0x0000aaaau;
     else
@@ -2104,6 +2135,145 @@ static void psgl_fill_gcm_texture(PSGLtextureObject *texture)
     texture->gcm_texture.location = texture->location;
     texture->gcm_texture.pitch = texture->pitch;
     texture->gcm_texture.offset = texture->offset;
+}
+
+/* Cube storage is level zero, linear ARGB8. CPU faces remain authoritative;
+   never reconstruct them by reading uncached RSX local memory. */
+static int psgl_cube_layout(uint32_t width, uint32_t height,
+                            uint32_t *pitch, uint32_t *stride, uint32_t *size)
+{
+    if (!width || width != height || width > 4096u) return 0;
+    uint64_t row = ((uint64_t)width * 4u + 127u) & ~127ull;
+    uint64_t face = row * height;
+    if (row > UINT16_MAX || face > UINT32_MAX / 6u) return 0;
+    *pitch = (uint32_t)row; *stride = (uint32_t)face; *size = (uint32_t)(face * 6u);
+    return 1;
+}
+
+static int psgl_cube_complete(const PSGLtextureObject *texture)
+{
+    if (!texture) return 0;
+    const PSGLcubeFace *first = &texture->faces[0];
+    if (!first->defined || !first->pixels || !first->width ||
+        first->width != first->height) return 0;
+    for (unsigned i = 1; i < 6; ++i) {
+        const PSGLcubeFace *f = &texture->faces[i];
+        if (!f->defined || !f->pixels || f->width != first->width || f->height != first->height ||
+            f->format != first->format || f->type != first->type ||
+            f->internalformat != first->internalformat) return 0;
+    }
+    int nonmip = texture->min_filter == GL_NEAREST || texture->min_filter == GL_LINEAR;
+    if (first->width > 1u && !nonmip) return 0;
+    if (!psgl_is_power_of_two(first->width) &&
+        (!nonmip || texture->wrap_s != GL_CLAMP_TO_EDGE || texture->wrap_t != GL_CLAMP_TO_EDGE)) return 0;
+    return 1;
+}
+
+static int psgl_cube_set_face(PSGLcontext *context, PSGLtextureObject *texture,
+                              unsigned face, uint32_t width, uint32_t height,
+                              GLenum internalformat, GLenum format, GLenum type,
+                              const void *pixels, GLint alignment)
+{
+    if (!texture || face >= 6 || width != height || width > 4096u) {
+        psgl_gl_error(GL_INVALID_VALUE); return 0;
+    }
+    uint32_t *image = NULL;
+    if (width) {
+        /* The dimension bound proves this product fits on both ABIs. */
+        image = calloc((size_t)width * height, sizeof(*image));
+        if (!image) { psgl_gl_error(GL_OUT_OF_MEMORY); return 0; }
+        if (pixels) {
+            uint32_t stride = psgl_unpack_row_stride((GLsizei)width, format, type, alignment);
+            uint32_t texel = psgl_texel_size(format, type);
+            for (uint32_t y = 0; y < height; ++y)
+                for (uint32_t x = 0; x < width; ++x)
+                    image[y * width + x] = psgl_convert_texel_argb8(
+                        (const unsigned char *)pixels + y * stride + x * texel, format, type);
+        }
+    }
+    PSGLcubeFace *f = &texture->faces[face];
+    free(f->pixels);
+    f->pixels = image; f->width = width; f->height = height;
+    f->format = format; f->type = type;
+    f->internalformat = psgl_texture_base_format(internalformat, format);
+    f->defined = GL_TRUE;
+    texture->cube_dirty = GL_TRUE;
+    context->dirty |= PSGL_DIRTY_TEXTURES;
+    return 1;
+}
+
+static int psgl_cube_prepare(PSGLcontext *context, PSGLtextureObject *texture)
+{
+    uint32_t pitch, stride, size, offset;
+    if (!texture->cube_dirty && texture->address) return 1;
+    if (!psgl_cube_layout(texture->faces[0].width, texture->faces[0].height, &pitch, &stride, &size)) {
+        psgl_gl_error(GL_OUT_OF_MEMORY); return 0;
+    }
+    void *address = rsxMemalign(PSGL_TEXTURE_ALIGNMENT, size);
+    if (!address) { psgl_gl_error(GL_OUT_OF_MEMORY); return 0; }
+    if (cellGcmAddressToOffset(address, &offset) != 0) {
+        rsxFree(address); psgl_gl_error(GL_OUT_OF_MEMORY); return 0;
+    }
+    psgl_zero(address, size);
+    for (unsigned face = 0; face < 6; ++face) {
+        const PSGLcubeFace *f = &texture->faces[face];
+        for (uint32_t y = 0; y < f->height; ++y)
+            memcpy((unsigned char *)address + face * stride + y * pitch,
+                   f->pixels + y * f->width, f->width * sizeof(uint32_t));
+    }
+    if (texture->address && !psgl_context_wait_idle_bounded(context->gcm, "cube replacement")) {
+        rsxFree(address); psgl_gl_error(GL_OUT_OF_MEMORY); return 0;
+    }
+    if (texture->owns_storage && texture->address) rsxFree(texture->address);
+    texture->address = address; texture->offset = offset; texture->size = size;
+    texture->width = (uint16_t)texture->faces[0].width;
+    texture->height = (uint16_t)texture->faces[0].height;
+    texture->pitch = (uint16_t)pitch; texture->levels = 1;
+    texture->linear = 1; texture->owns_storage = 1;
+    texture->location = CELL_GCM_LOCATION_LOCAL;
+    texture->rsx_format = CELL_GCM_TEXTURE_A8R8G8B8 | CELL_GCM_TEXTURE_LN;
+    texture->base_format = texture->faces[0].internalformat;
+    texture->cube_dirty = GL_FALSE;
+    psgl_fill_gcm_texture(texture);
+    return 1;
+}
+
+static int psgl_cube_release(PSGLcontext *context, PSGLtextureObject *texture)
+{
+    if (texture->address && !psgl_context_wait_idle_bounded(context ? context->gcm : CELL_GCM_CURRENT, "cube release")) {
+        psgl_gl_error(GL_OUT_OF_MEMORY); return 0;
+    }
+    psgl_release_texture_storage(texture);
+    for (unsigned i = 0; i < 6; ++i) {
+        free(texture->faces[i].pixels);
+        psgl_zero(&texture->faces[i], sizeof(texture->faces[i]));
+    }
+    texture->cube_dirty = GL_FALSE;
+    return 1;
+}
+
+static PSGLtextureObject *psgl_cube_black(PSGLcontext *context)
+{
+    static uint32_t opaque_black = 0xff000000u;
+    PSGLtextureObject *texture = &g_psgl_black_cube;
+    if (!texture->target) {
+        psgl_init_texture_defaults(texture);
+        texture->target = GL_TEXTURE_CUBE_MAP;
+        texture->wrap_s = texture->wrap_t = texture->wrap_r = GL_CLAMP_TO_EDGE;
+        for (unsigned i = 0; i < 6; ++i) {
+            texture->faces[i].pixels = &opaque_black;
+            texture->faces[i].width = texture->faces[i].height = 1;
+            texture->faces[i].internalformat = GL_RGBA;
+        }
+        texture->cube_dirty = GL_TRUE;
+    }
+    return psgl_cube_prepare(context, texture) ? texture : NULL;
+}
+
+static int psgl_cube_target(GLenum target)
+{
+    return target == GL_TEXTURE_CUBE_MAP ||
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z);
 }
 
 static int psgl_texture_reference_is_compressed(GLenum internalformat)
@@ -2588,14 +2758,31 @@ static void psgl_emit_current_attribs(PSGLcontext *context)
     }
 }
 
-static void psgl_emit_textures(PSGLcontext *context)
+static int psgl_emit_textures(PSGLcontext *context)
 {
-    if (!context || !context->gcm) return;
+    if (!context || !context->gcm) return 0;
+    uint32_t cube_mask = context->gl_sampler_cube_mask;
+    if (!context->gl_sampler_routing) {
+        PSGLcgProgram *fp = psgl_cg_program(context->bound_fragment_program);
+        if (fp) for (uint32_t i = 0; i < fp->parameter_count; ++i) {
+            PSGLcgParameter *p = &fp->parameters[i];
+            if (p->type == CG_SAMPLERCUBE && p->resource >= CG_TEXUNIT0 &&
+                p->resource < CG_TEXUNIT0 + PSGL_MAX_TEXTURE_UNITS)
+                cube_mask |= 1u << (p->resource - CG_TEXUNIT0);
+        }
+    }
     for (uint32_t i = 0; i < PSGL_MAX_TEXTURE_UNITS; i++) {
         uint32_t unit = context->gl_sampler_routing && (context->gl_sampler_mask & (1u << i)) ?
             context->gl_sampler_units[i] : i;
-        GLuint name = context->textures[unit].texture_2d;
-        PSGLtextureObject *texture = name ? psgl_find_texture(name) : NULL;
+        int cube = !!(cube_mask & (1u << i));
+        GLuint name = cube ? context->textures[unit].texture_cube : context->textures[unit].texture_2d;
+        PSGLtextureObject *texture = name ? psgl_find_texture(name) : cube ? context->default_cube : NULL;
+        if (cube) {
+            if (!psgl_cube_complete(texture)) {
+                texture = psgl_cube_black(context);
+                if (!texture) return 0;
+            } else if (!psgl_cube_prepare(context, texture)) return 0;
+        }
         if (!texture || !texture->address) {
             cellGcmSetTextureControl(context->gcm, (uint8_t)i, 0u,
                                      0u, 0u,
@@ -2622,7 +2809,7 @@ static void psgl_emit_textures(PSGLcontext *context)
                                 min_filter, mag_filter,
                                 CELL_GCM_TEXTURE_CONVOLUTION_QUINCUNX);
         cellGcmSetTextureAddress(context->gcm, (uint8_t)i,
-                                 wrap_s, wrap_t, CELL_GCM_TEXTURE_WRAP,
+                                 wrap_s, wrap_t, cube ? psgl_translate_texture_wrap(texture->wrap_r) : CELL_GCM_TEXTURE_WRAP,
                                  CELL_GCM_TEXTURE_UNSIGNED_REMAP_NORMAL,
                                  zfunc,
                                  CELL_GCM_TEXTURE_GAMMA_NONE);
@@ -2630,6 +2817,7 @@ static void psgl_emit_textures(PSGLcontext *context)
     }
     cellGcmSetInvalidateTextureCache(context->gcm, CELL_GCM_INVALIDATE_TEXTURE);
     context->dirty &= ~PSGL_DIRTY_TEXTURES;
+    return 1;
 }
 
 static const void *psgl_cg_ucode(const PSGLcgProgram *program)
@@ -2814,16 +3002,30 @@ static int psgl_emit_fragment_program(PSGLcontext *context,
     return 1;
 }
 
-/* Returns 0 when the draw must be skipped: fixed-function texturing on
-   units 1-3 needs a program from psglLoadShaderLibrary, and without one the
-   draw is refused with INVALID_OPERATION rather than drawn untextured.  A
-   program that cannot be installed refuses the draw as well. */
+/* Called on every draw, even if no state is dirty. Sampler setters may
+   temporarily collide; only an active cross-type collision prevents drawing. */
+static int psgl_validate_sampler_units(PSGLcontext *context)
+{
+    if (!context || !context->gl_sampler_routing) return 1;
+    uint32_t cubes = 0, flat = 0;
+    for (uint32_t hw = 0; hw < PSGL_MAX_TEXTURE_UNITS; ++hw) {
+        if (!(context->gl_sampler_mask & (1u << hw))) continue;
+        uint32_t bit = 1u << context->gl_sampler_units[hw];
+        if (context->gl_sampler_cube_mask & (1u << hw)) cubes |= bit;
+        else flat |= bit;
+    }
+    if (cubes & flat) { psgl_gl_error(GL_INVALID_OPERATION); return 0; }
+    return 1;
+}
+
+/* Failure skips the draw, including unavailable fixed-function programs or
+   allocation/completion failures while installing textures and shaders. */
 static int psgl_validate_draw_state(PSGLcontext *context)
 {
     PSGLcgProgram *vp;
     PSGLcgProgram *fp;
     uint32_t ffp_mask;
-    if (!context) return 0;
+    if (!context || !psgl_validate_sampler_units(context)) return 0;
     if (context->dirty & PSGL_DIRTY_FRAMEBUFFER) psgl_bind_render_target(context);
     if (context->dirty & PSGL_DIRTY_VIEWPORT) psgl_emit_viewport(context);
     if (context->dirty & PSGL_DIRTY_SCISSOR) psgl_emit_scissor(context);
@@ -2834,7 +3036,7 @@ static int psgl_validate_draw_state(PSGLcontext *context)
     if (context->dirty & PSGL_DIRTY_STENCIL) psgl_emit_stencil(context);
     if (context->dirty & PSGL_DIRTY_ALPHA) psgl_emit_alpha(context);
     if (context->dirty & PSGL_DIRTY_RASTER) psgl_emit_raster(context);
-    if (context->dirty & PSGL_DIRTY_TEXTURES) psgl_emit_textures(context);
+    if ((context->dirty & PSGL_DIRTY_TEXTURES) && !psgl_emit_textures(context)) return 0;
     vp = psgl_cg_program(context->bound_vertex_program);
     fp = psgl_cg_program(context->bound_fragment_program);
     ffp_mask = (!vp || !fp) ? psgl_ffp_state_mask(context) : 0u;
@@ -2956,6 +3158,8 @@ int psgl_context_shutdown_system(void)
     if (psgl_teardown_test_hook) psgl_teardown_test_hook(2u);
     if (!psgl_context_wait_idle_bounded(CELL_GCM_CURRENT, "psglExit"))
         return 0;
+    psgl_release_texture_storage(&g_psgl_black_cube);
+    psgl_zero(&g_psgl_black_cube, sizeof(g_psgl_black_cube));
     if (g_psgl_client_array_scratch) {
         free(g_psgl_client_array_scratch);
         g_psgl_client_array_scratch = NULL;
@@ -3089,6 +3293,11 @@ PSGLcontext *psgl_context_create(void)
 void psgl_context_destroy(PSGLcontext *context)
 {
     if (!context) return;
+    if (context->default_cube) {
+        if (!psgl_cube_release(context, context->default_cube)) return;
+        free(context->default_cube);
+        context->default_cube = NULL;
+    }
     if (g_psgl.current_context == context) psgl_context_unbind_current();
 }
 
@@ -3379,18 +3588,19 @@ void psgl_context_bind_cg_program(CGprogram program, CGprofile profile)
                profile == CG_PROFILE_ARBFP1 ||
                profile == CG_PROFILE_FP30 ||
                profile == CG_PROFILE_FP20) {
-        psgl_context_set_gl_sampler_routing(NULL, 0u);
+        psgl_context_set_gl_sampler_routing(NULL, 0u, 0u);
         context->bound_fragment_program = program;
         context->dirty |= PSGL_DIRTY_CG;
     }
 }
 
-void psgl_context_set_gl_sampler_routing(const uint8_t *units, uint32_t mask)
+void psgl_context_set_gl_sampler_routing(const uint8_t *units, uint32_t mask, uint32_t cube_mask)
 {
     PSGLcontext *context = g_psgl.current_context;
     if (!context) return;
     context->gl_sampler_routing = units != NULL;
     context->gl_sampler_mask = mask;
+    context->gl_sampler_cube_mask = units ? cube_mask & mask : 0;
     for (uint32_t hw = 0; hw < PSGL_MAX_TEXTURE_UNITS; ++hw)
         context->gl_sampler_units[hw] = units ? units[hw] : (uint8_t)hw;
     context->dirty |= PSGL_DIRTY_TEXTURES;
@@ -4596,8 +4806,11 @@ void psgl_context_delete_textures(GLsizei n, const GLuint *textures)
         if (name == 0u) continue;
         texture = psgl_find_texture(name);
         if (!texture) continue;
+        if (texture->target == GL_TEXTURE_CUBE_MAP && !psgl_cube_release(context, texture)) continue;
         if (context) {
             for (uint32_t unit = 0; unit < PSGL_MAX_TEXTURE_UNITS; unit++) {
+                if (context->textures[unit].texture_cube == name)
+                    context->textures[unit].texture_cube = 0u;
                 if (context->textures[unit].texture_2d == name)
                     context->textures[unit].texture_2d = 0u;
             }
@@ -4608,15 +4821,31 @@ void psgl_context_delete_textures(GLsizei n, const GLuint *textures)
     }
 }
 
-void psgl_context_bind_texture(GLenum target, GLuint texture)
+void psgl_context_bind_texture(GLenum target, GLuint name)
 {
     PSGLcontext *context = g_psgl.current_context;
-    uint32_t unit;
-    if (!context || target != GL_TEXTURE_2D) return;
-    unit = psgl_texture_unit_index(context->active_texture);
+    if (!context) return;
+    if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
+        psgl_gl_error(GL_INVALID_ENUM); return;
+    }
+    uint32_t unit = psgl_texture_unit_index(context->active_texture);
     if (unit >= PSGL_MAX_TEXTURE_UNITS) return;
-    if (texture != 0u && !psgl_create_texture(texture)) return;
-    context->textures[unit].texture_2d = texture;
+    if (name) {
+        PSGLtextureObject *texture = psgl_create_texture(name);
+        if (!texture) { psgl_gl_error(GL_OUT_OF_MEMORY); return; }
+        if (texture->target && texture->target != target) {
+            psgl_gl_error(GL_INVALID_OPERATION); return;
+        }
+        if (!texture->target) {
+            texture->target = target;
+            if (target == GL_TEXTURE_CUBE_MAP) {
+                texture->min_filter = GL_NEAREST_MIPMAP_LINEAR;
+                texture->mag_filter = GL_LINEAR;
+            }
+        }
+    }
+    if (target == GL_TEXTURE_CUBE_MAP) context->textures[unit].texture_cube = name;
+    else context->textures[unit].texture_2d = name;
     context->dirty |= PSGL_DIRTY_TEXTURES;
 }
 
@@ -4633,6 +4862,28 @@ void psgl_context_tex_image_2d(GLenum target, GLint level,
     uint8_t rsx_format;
     int rt_storage;
     int swizzled;
+
+    if (psgl_cube_target(target)) {
+        if (target == GL_TEXTURE_CUBE_MAP) { psgl_gl_error(GL_INVALID_ENUM); return; }
+        if (level < 0 || border != 0 || width < 0 || width != height || width > 4096) {
+            psgl_gl_error(GL_INVALID_VALUE); return;
+        }
+        if (level != 0 || format == GL_DEPTH_COMPONENT ||
+            internalformat == GL_DEPTH_COMPONENT || internalformat == GL_DEPTH_COMPONENT16 ||
+            internalformat == GL_DEPTH_COMPONENT24 || internalformat == GL_DEPTH_COMPONENT32) {
+            psgl_gl_error(GL_INVALID_OPERATION); return;
+        }
+        if (!psgl_texture_supported(format, type)) { psgl_gl_error(GL_INVALID_ENUM); return; }
+        if ((GLenum)internalformat != format &&
+            !((internalformat == GL_RGB && format == GL_BGR) ||
+              (internalformat == GL_RGBA && format == GL_BGRA))) {
+            psgl_gl_error(GL_INVALID_OPERATION); return;
+        }
+        texture = psgl_bound_texture(context, GL_TEXTURE_CUBE_MAP);
+        if (texture) psgl_cube_set_face(context, texture, target - GL_TEXTURE_CUBE_MAP_POSITIVE_X,
+            (uint32_t)width, (uint32_t)height, (GLenum)internalformat, format, type, pixels, context->unpack_alignment);
+        return;
+    }
 
     rt_storage = ((GLenum)internalformat == GL_ARGB_SCE) ||
                  ((GLenum)internalformat == GL_DEPTH_COMPONENT16) ||
@@ -4711,6 +4962,34 @@ void psgl_context_tex_sub_image_2d(GLenum target, GLint level,
 {
     PSGLcontext *context = g_psgl.current_context;
     PSGLtextureObject *texture = psgl_bound_texture(context, target);
+    if (psgl_cube_target(target)) {
+        if (target == GL_TEXTURE_CUBE_MAP) { psgl_gl_error(GL_INVALID_ENUM); return; }
+        if (level < 0 || xoffset < 0 || yoffset < 0 || width < 0 || height < 0) {
+            psgl_gl_error(GL_INVALID_VALUE); return;
+        }
+        if (level != 0 || format == GL_DEPTH_COMPONENT) { psgl_gl_error(GL_INVALID_OPERATION); return; }
+        if (!psgl_texture_supported(format, type)) { psgl_gl_error(GL_INVALID_ENUM); return; }
+        texture = psgl_bound_texture(context, GL_TEXTURE_CUBE_MAP);
+        if (!texture) return;
+        PSGLcubeFace *f = &texture->faces[target - GL_TEXTURE_CUBE_MAP_POSITIVE_X];
+        if (!f->defined) { psgl_gl_error(GL_INVALID_OPERATION); return; }
+        if ((uint32_t)xoffset > f->width || (uint32_t)yoffset > f->height ||
+            (uint32_t)width > f->width - (uint32_t)xoffset ||
+            (uint32_t)height > f->height - (uint32_t)yoffset) {
+            psgl_gl_error(GL_INVALID_VALUE); return;
+        }
+        if (!width || !height) return;
+        if (!pixels) { psgl_gl_error(GL_INVALID_VALUE); return; }
+        uint32_t stride = psgl_unpack_row_stride(width, format, type, context->unpack_alignment);
+        uint32_t texel = psgl_texel_size(format, type);
+        for (uint32_t y = 0; y < (uint32_t)height; ++y)
+            for (uint32_t x = 0; x < (uint32_t)width; ++x)
+                f->pixels[((uint32_t)yoffset + y) * f->width + (uint32_t)xoffset + x] =
+                    psgl_convert_texel_argb8((const unsigned char *)pixels + y * stride + x * texel, format, type);
+        texture->cube_dirty = GL_TRUE;
+        context->dirty |= PSGL_DIRTY_TEXTURES;
+        return;
+    }
     if (!context || !texture || !texture->address || !pixels || level != 0 ||
         xoffset < 0 || yoffset < 0 || width < 0 || height < 0 ||
         xoffset + width > texture->width || yoffset + height > texture->height ||
@@ -5103,6 +5382,7 @@ void psgl_context_copy_tex_sub_image_2d(GLenum target, GLint level,
                                         GLint x, GLint y,
                                         GLsizei width, GLsizei height)
 {
+    if (psgl_cube_target(target)) { psgl_gl_error(GL_INVALID_OPERATION); return; }
     PSGLcontext *context = g_psgl.current_context;
     PSGLtextureObject *texture = psgl_bound_texture(context, target);
     uint32_t src_offset;
@@ -5177,6 +5457,7 @@ void psgl_context_copy_tex_image_2d(GLenum target, GLint level,
                                     GLsizei width, GLsizei height,
                                     GLint border)
 {
+    if (psgl_cube_target(target)) { psgl_gl_error(GL_INVALID_OPERATION); return; }
     PSGLcontext *context = g_psgl.current_context;
     GLenum depth_format;
     uint32_t src_offset;
@@ -5238,6 +5519,7 @@ void psgl_context_compressed_tex_image_2d(GLenum target, GLint level,
                                           GLint border, GLsizei imageSize,
                                           const GLvoid *data)
 {
+    if (psgl_cube_target(target)) { psgl_gl_error(GL_INVALID_OPERATION); return; }
     PSGLcontext *context = g_psgl.current_context;
     PSGLtextureObject *texture = psgl_bound_texture(context, target);
     void *address;
@@ -5292,10 +5574,26 @@ void psgl_context_compressed_tex_image_2d(GLenum target, GLint level,
 
 void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param)
 {
+    if (target != GL_TEXTURE_CUBE_MAP && psgl_cube_target(target)) {
+        psgl_gl_error(GL_INVALID_ENUM); return;
+    }
     PSGLcontext *context = g_psgl.current_context;
     PSGLtextureObject *texture = psgl_bound_texture(context, target);
     uint32_t translated;
     if (!context || !texture) return;
+    if (target == GL_TEXTURE_CUBE_MAP) {
+        if (pname == GL_TEXTURE_ALLOCATION_HINT_SCE) {
+            if (param != GL_TEXTURE_LINEAR_GPU_SCE) { psgl_gl_error(GL_INVALID_OPERATION); return; }
+        } else if (pname == GL_TEXTURE_MIN_FILTER) {
+            if (!psgl_translate_texture_filter((GLenum)param)) { psgl_gl_error(GL_INVALID_ENUM); return; }
+        } else if (pname == GL_TEXTURE_MAG_FILTER) {
+            if (param != GL_NEAREST && param != GL_LINEAR) { psgl_gl_error(GL_INVALID_ENUM); return; }
+        } else if (pname == GL_TEXTURE_WRAP_S || pname == GL_TEXTURE_WRAP_T || pname == GL_TEXTURE_WRAP_R) {
+            if (param != GL_REPEAT && param != GL_MIRRORED_REPEAT && param != GL_CLAMP_TO_EDGE) {
+                psgl_gl_error(GL_INVALID_ENUM); return;
+            }
+        } else { psgl_gl_error(GL_INVALID_ENUM); return; }
+    }
     switch (pname) {
     case GL_TEXTURE_MIN_FILTER:
         if (!psgl_translate_texture_filter((GLenum)param)) return;
@@ -5308,6 +5606,10 @@ void psgl_context_tex_parameter(GLenum target, GLenum pname, GLint param)
     case GL_TEXTURE_WRAP_S:
         if (!psgl_translate_texture_wrap((GLenum)param)) return;
         texture->wrap_s = (GLenum)param;
+        break;
+    case GL_TEXTURE_WRAP_R:
+        if (target != GL_TEXTURE_CUBE_MAP) return;
+        texture->wrap_r = (GLenum)param;
         break;
     case GL_TEXTURE_WRAP_T:
         if (!psgl_translate_texture_wrap((GLenum)param)) return;
@@ -5341,6 +5643,7 @@ void psgl_context_texture_reference_sce(GLenum target, GLuint levels,
                                         GLenum internalformat,
                                         GLuint pitch, GLintptr offset)
 {
+    if (psgl_cube_target(target)) { psgl_gl_error(GL_INVALID_OPERATION); return; }
     PSGLcontext *context = g_psgl.current_context;
     PSGLtextureObject *texture = psgl_bound_texture(context, target);
     PSGLbufferObject *buffer =

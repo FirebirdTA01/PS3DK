@@ -1,0 +1,8 @@
+float4 main(uniform sampler2D a[3], uniform samplerCUBE environment,
+            uniform float3 direction) : COLOR
+{
+    float4 first = tex2D(a[0], float2(0.5, 0.5));
+    float4 last = tex2D(a[2], float2(0.5, 0.5));
+    float4 cube = texCUBE(environment, direction);
+    return float4(first.r, last.g, cube.b, 1.0);
+}

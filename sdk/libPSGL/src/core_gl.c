@@ -51,11 +51,14 @@ unsigned psgl_gl_format_query(GLenum pname, GLint *values)
         values[0] = PSGL_MAX_TEXTURE_UNITS; return 1;
     case GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS: values[0] = 0; return 1;
     case GL_ACTIVE_TEXTURE:
-    case GL_TEXTURE_BINDING_2D: {
+    case GL_TEXTURE_BINDING_2D:
+    case GL_TEXTURE_BINDING_CUBE_MAP: {
         PSGLcontext *context = psgl_context_current();
         if (!context) return 0;
         values[0] = pname == GL_ACTIVE_TEXTURE ? (GLint)context->active_texture
-            : (GLint)context->textures[context->active_texture - GL_TEXTURE0].texture_2d;
+            : pname == GL_TEXTURE_BINDING_CUBE_MAP
+                ? (GLint)context->textures[context->active_texture - GL_TEXTURE0].texture_cube
+                : (GLint)context->textures[context->active_texture - GL_TEXTURE0].texture_2d;
         return 1;
     }
     case GL_SHADER_COMPILER: values[0] = GL_FALSE; return 1;
@@ -111,6 +114,7 @@ GLAPI void glGetIntegerv(GLenum pname, GLint *params)
     if (psgl_gl_format_query(pname, params)) return;
     switch (pname) {
     case GL_MAX_LIGHTS:                  *params = 8;    break;
+    case GL_MAX_CUBE_MAP_TEXTURE_SIZE:
     case GL_MAX_TEXTURE_SIZE:            *params = 4096; break;
     case GL_MAX_MODELVIEW_STACK_DEPTH:   *params = 32;   break;
     case GL_MAX_PROJECTION_STACK_DEPTH:  *params = 2;    break;
@@ -437,6 +441,10 @@ GLAPI void glCompressedTexSubImage2D(GLenum target, GLint level,
                                      GLenum format, GLsizei imageSize,
                                      const GLvoid *data)
 {
+    if (target == GL_TEXTURE_CUBE_MAP ||
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
     (void)target;  (void)level;   (void)xoffset;
     (void)yoffset; (void)width;   (void)height;
     (void)format;  (void)imageSize; (void)data;

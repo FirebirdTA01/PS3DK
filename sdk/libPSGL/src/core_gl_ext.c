@@ -82,6 +82,10 @@ GLAPI void glTexImage3D(GLenum target, GLint level, GLint internalformat,
                         GLint border, GLenum format, GLenum type,
                         const GLvoid *pixels)
 {
+    if (target == GL_TEXTURE_CUBE_MAP ||
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
     (void)target;  (void)level;  (void)internalformat;
     (void)width;   (void)height; (void)depth;
     (void)border;  (void)format; (void)type;
@@ -93,6 +97,10 @@ GLAPI void glTexSubImage3D(GLenum target, GLint level,
                            GLsizei width, GLsizei height, GLsizei depth,
                            GLenum format, GLenum type, const GLvoid *pixels)
 {
+    if (target == GL_TEXTURE_CUBE_MAP ||
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
     (void)target;  (void)level;   (void)xoffset;
     (void)yoffset; (void)zoffset;
     (void)width;   (void)height;  (void)depth;
@@ -105,6 +113,10 @@ GLAPI void glCompressedTexImage3D(GLenum target, GLint level,
                                   GLsizei depth, GLint border,
                                   GLsizei imageSize, const GLvoid *data)
 {
+    if (target == GL_TEXTURE_CUBE_MAP ||
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
     (void)target;  (void)level;  (void)internalformat;
     (void)width;   (void)height; (void)depth;
     (void)border;  (void)imageSize; (void)data;
@@ -118,6 +130,10 @@ GLAPI void glCompressedTexSubImage3D(GLenum target, GLint level,
                                      GLenum format, GLsizei imageSize,
                                      const GLvoid *data)
 {
+    if (target == GL_TEXTURE_CUBE_MAP ||
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
     (void)target;  (void)level;   (void)xoffset;
     (void)yoffset; (void)zoffset;
     (void)width;   (void)height;  (void)depth;
@@ -129,6 +145,10 @@ GLAPI void glCopyTexSubImage3D(GLenum target, GLint level,
                                GLint x, GLint y,
                                GLsizei width, GLsizei height)
 {
+    if (target == GL_TEXTURE_CUBE_MAP ||
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
     (void)target;  (void)level;   (void)xoffset;
     (void)yoffset; (void)zoffset;
     (void)x;       (void)y;
@@ -345,7 +365,13 @@ GLAPI void glGetFramebufferAttachmentParameterivOES(GLenum target,
                                                      GLint *params)
 { (void)target; (void)attachment; (void)pname;
   if (params) *params = 0; }
-GLAPI void glGenerateMipmapOES(GLenum target)   { (void)target; }
+GLAPI void glGenerateMipmapOES(GLenum target)
+{
+    if (target == GL_TEXTURE_CUBE_MAP ||
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+        psgl_gl_error(GL_INVALID_OPERATION); return;
+    }
+}
 GLAPI void glFramebufferParameteriSCE(GLenum target, GLenum pname,
                                       GLint param)
 { psgl_context_framebuffer_parameter(target, pname, param); }

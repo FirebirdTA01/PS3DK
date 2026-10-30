@@ -356,8 +356,8 @@ psgl-client-scratch-growth-timeout-ilp32,tests/regression/psgl-client-scratch/ps
 psgl-client-scratch-growth-timeout-lp64,tests/regression/psgl-client-scratch/psgl-client-scratch-growth-timeout-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_SCRATCH_OK checks=12 failures=0\r?$,PSGL_SCRATCH_FAIL
 psgl-texture-units-ilp32,tests/regression/psgl-texture-units/psgl-texture-units-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_TEXUNIT_OK checks=47 failures=0\r?$,PSGL_TEXUNIT_FAIL
 psgl-texture-units-lp64,tests/regression/psgl-texture-units/psgl-texture-units-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_TEXUNIT_OK checks=47 failures=0\r?$,PSGL_TEXUNIT_FAIL
-psgl-sampler-routing-ilp32,tests/regression/psgl-sampler-routing/psgl-sampler-routing-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_SAMPLER_OK checks=39 failures=0\r?$,PSGL_SAMPLER_FAIL
-psgl-sampler-routing-lp64,tests/regression/psgl-sampler-routing/psgl-sampler-routing-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_SAMPLER_OK checks=39 failures=0\r?$,PSGL_SAMPLER_FAIL
+psgl-sampler-routing-ilp32,tests/regression/psgl-sampler-routing/psgl-sampler-routing-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_SAMPLER_OK checks=42 failures=0\r?$,PSGL_SAMPLER_FAIL
+psgl-sampler-routing-lp64,tests/regression/psgl-sampler-routing/psgl-sampler-routing-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_SAMPLER_OK checks=42 failures=0\r?$,PSGL_SAMPLER_FAIL
 psgl-cg-create-program-ilp32,tests/regression/psgl-cg-create-program/psgl-cg-create-program-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_CG_CREATE_OK checks=87 failures=0\r?$,PSGL_CG_CREATE_FAIL
 psgl-cg-create-program-lp64,tests/regression/psgl-cg-create-program/psgl-cg-create-program-lp64.fake.self,120,RAN-CLEAN,(?m)^PSGL_CG_CREATE_OK checks=87 failures=0\r?$,PSGL_CG_CREATE_FAIL
 psgl-scissor-ilp32,tests/regression/psgl-scissor/psgl-scissor-ilp32.fake.self,120,RAN-CLEAN,(?m)^PSGL_SCISSOR_OK checks=55 failures=0\r?$,PSGL_SCISSOR_FAIL
@@ -381,8 +381,8 @@ psgl-teardown-exit-shutdown-ilp32,tests/regression/psgl-teardown-finish/psgl-tea
 psgl-teardown-exit-shutdown-lp64,tests/regression/psgl-teardown-finish/psgl-teardown-exit-shutdown-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=32 failures=0\r?$,PSGL_TEARDOWN_FAIL
 psgl-teardown-destroy-timeout-ilp32,tests/regression/psgl-teardown-finish/psgl-teardown-destroy-timeout-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=33 failures=0\r?$,PSGL_TEARDOWN_FAIL
 psgl-teardown-destroy-timeout-lp64,tests/regression/psgl-teardown-finish/psgl-teardown-destroy-timeout-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_TEARDOWN_OK checks=33 failures=0\r?$,PSGL_TEARDOWN_FAIL
-psgl-uniform-query-ilp32,tests/regression/psgl-uniform-query/psgl-uniform-query-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_UNIFORM_QUERY_OK checks=40 failures=0\r?$,PSGL_UNIFORM_QUERY_FAIL
-psgl-uniform-query-lp64,tests/regression/psgl-uniform-query/psgl-uniform-query-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_UNIFORM_QUERY_OK checks=40 failures=0\r?$,PSGL_UNIFORM_QUERY_FAIL
+psgl-uniform-query-ilp32,tests/regression/psgl-uniform-query/psgl-uniform-query-ilp32.fake.self,60,RAN-CLEAN,(?m)^PSGL_UNIFORM_QUERY_OK checks=43 failures=0\r?$,PSGL_UNIFORM_QUERY_FAIL
+psgl-uniform-query-lp64,tests/regression/psgl-uniform-query/psgl-uniform-query-lp64.fake.self,60,RAN-CLEAN,(?m)^PSGL_UNIFORM_QUERY_OK checks=43 failures=0\r?$,PSGL_UNIFORM_QUERY_FAIL
 psgl-ffp-texenv-ilp32,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=73 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
 psgl-ffp-texenv-lp64,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-lp64.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=73 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
 psgl-ffp-texenv-nolib-ilp32,tests/regression/psgl-ffp-texenv/psgl-ffp-texenv-nolib-ilp32.fake.self,90,RAN-CLEAN,(?m)^PSGL_FFP_TEXENV_OK checks=6 failures=0\r?$,PSGL_FFP_TEXENV_FAIL
@@ -433,5 +433,8 @@ sample-trio-witness-cellfs-finish-fail-lp64,tests/regression/sample-trio-witness
 # an explicitly selected input and generic mode; Eye array proof needs hardware.
 
 # Fragment sampler2D arrays: frozen binary reflection, vector updates and pixels.
-psgl-sampler-arrays-ilp32,tests/regression/psgl-sampler-arrays/psgl-sampler-arrays-ilp32.fake.self,180,RAN-CLEAN,(?m)^PSGL_SAMPLER_ARRAY_OK checks=178 failures=0\r?$,PSGL_SAMPLER_ARRAY_FAIL
-psgl-sampler-arrays-lp64,tests/regression/psgl-sampler-arrays/psgl-sampler-arrays-lp64.fake.self,180,RAN-CLEAN,(?m)^PSGL_SAMPLER_ARRAY_OK checks=178 failures=0\r?$,PSGL_SAMPLER_ARRAY_FAIL
+psgl-sampler-arrays-ilp32,tests/regression/psgl-sampler-arrays/psgl-sampler-arrays-ilp32.fake.self,180,RAN-CLEAN,(?m)^PSGL_SAMPLER_ARRAY_OK checks=185 failures=0\r?$,PSGL_SAMPLER_ARRAY_FAIL
+psgl-sampler-arrays-lp64,tests/regression/psgl-sampler-arrays/psgl-sampler-arrays-lp64.fake.self,180,RAN-CLEAN,(?m)^PSGL_SAMPLER_ARRAY_OK checks=185 failures=0\r?$,PSGL_SAMPLER_ARRAY_FAIL
+
+psgl-cube-map-ilp32,tests/regression/psgl-cube-map/psgl-cube-map-ilp32.fake.self,180,RAN-CLEAN,(?m)^PSGL_CUBE_OK checks=630 failures=0\r?$,PSGL_CUBE_FAIL
+psgl-cube-map-lp64,tests/regression/psgl-cube-map/psgl-cube-map-lp64.fake.self,180,RAN-CLEAN,(?m)^PSGL_CUBE_OK checks=630 failures=0\r?$,PSGL_CUBE_FAIL

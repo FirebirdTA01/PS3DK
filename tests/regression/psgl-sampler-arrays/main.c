@@ -3,6 +3,8 @@
 #include <PSGL/psgl.h>
 #include <Cg/cgGL.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <Cg/cgBinary.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -35,6 +37,22 @@ static void check(int ok, const char *name)
 {
     ++checks;
     if (!ok) { ++failures; printf("PSGL_SAMPLER_ARRAY_FAIL %s\n", name); }
+}
+/* Mutate only reflection in our own compiled binary; never execute this
+   unsupported sampler shader. This retains the negative API witness. */
+static void *unsupported_sampler(const void *bytes, unsigned size, int array)
+{
+    unsigned char *copy=malloc(size);if(!copy)return NULL;memcpy(copy,bytes,size);
+    CgBinaryProgram *binary=(CgBinaryProgram *)copy;
+    if(binary->parameterArray>size || binary->parameterCount>(size-binary->parameterArray)/sizeof(CgBinaryParameter)){free(copy);return NULL;}
+    CgBinaryParameter *params=(CgBinaryParameter *)(copy+binary->parameterArray);
+    for(unsigned i=0;i<binary->parameterCount;++i)if(params[i].type==CG_SAMPLERCUBE){
+        if(array){
+            if(params[i].name>size-5){free(copy);return NULL;}
+            memcpy(copy+params[i].name,"a[0]",5);
+        }else params[i].type=CG_SAMPLER3D;
+    }
+    return copy;
 }
 static GLuint shader(GLenum stage, const void *bytes, unsigned size)
 {
@@ -192,7 +210,14 @@ int main(void)
     GLint numeric=glGetUniformLocation(p[5],"offset"); check(numeric>=0,"numeric parameter exists");
     set(numeric,1,&tail,GL_INVALID_OPERATION,"numeric vector outside subset");
     glUseProgram(p[6]); GLint cube=glGetUniformLocation(p[6],"environment");
-    set(cube,1,&tail,GL_INVALID_OPERATION,"cube vector outside subset");
+    set(cube,1,&tail,GL_NO_ERROR,"scalar cube vector supported");
+    void *negative=unsupported_sampler(cube_fpo,cube_fpo_size,0);check(negative!=NULL,"unsupported sampler binary");
+    if(negative){GLuint ns=shader(GL_FRAGMENT_SHADER,negative,cube_fpo_size),np=program(vs,ns,1);free(negative);
+        glUseProgram(np);set(glGetUniformLocation(np,"environment"),1,&tail,GL_INVALID_OPERATION,"3D vector outside subset");
+        glUseProgram(p[6]);glDeleteProgram(np);glDeleteShader(ns);}
+    negative=unsupported_sampler(cube_fpo,cube_fpo_size,1);check(negative!=NULL,"cube array binary");
+    if(negative){GLuint ns=shader(GL_FRAGMENT_SHADER,negative,cube_fpo_size),np=program(vs,ns,0);free(negative);
+        glDeleteProgram(np);glDeleteShader(ns);}
     glUseProgram(p[7]); GLint one=glGetUniformLocation(p[7],"a[0]");
     check(one>=0 && glGetUniformLocation(p[7],"a")==one,"one-element array alias");
     set(one,2,&tail,GL_NO_ERROR,"one-element array clamps unlike scalar");
@@ -213,7 +238,7 @@ int main(void)
     set(loc[0],2,units,GL_NO_ERROR,"restore array vector");
     CGcontext cg=cgCreateContext(); CGprogram direct=psgl_cg_create_program_from_memory(cg,ordered_fpo,ordered_fpo_size,CG_PROFILE_SCE_FP_RSX);
     check(direct!=NULL,"direct Cg array fixture");
-    if(direct) { cgGLBindProgram(direct); draw(0,1,0,"direct Cg physical identity"); }
+    if(direct) { cgGLEnableProfile(CG_PROFILE_SCE_FP_RSX);cgGLBindProgram(direct); draw(0,1,0,"direct Cg physical identity"); }
     GLint changed[2]={7,6}; set(loc[0],2,changed,GL_NO_ERROR,"GL state update during direct bind");
     draw(0,1,0,"GL setter does not change direct bindings");
     query(p[0],loc[0],7,GL_NO_ERROR,"direct bind preserves program getter");

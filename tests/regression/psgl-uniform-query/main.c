@@ -3,6 +3,8 @@
 #include <PSGL/psgl.h>
 #include <Cg/cgGL.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <Cg/cgBinary.h>
 #include <stdio.h>
 #include <sys/process.h>
 #include "vertex_vpo.h"
@@ -21,6 +23,22 @@ static void check(int ok, const char *name)
 {
     ++checks;
     if (!ok) { ++failures; printf("PSGL_UNIFORM_QUERY_FAIL %s\n", name); }
+}
+/* Mutate only reflection in our own compiled binary; never execute this
+   unsupported sampler shader. This retains the negative API witness. */
+static void *unsupported_sampler(const void *bytes, unsigned size, int array)
+{
+    unsigned char *copy=malloc(size);if(!copy)return NULL;memcpy(copy,bytes,size);
+    CgBinaryProgram *binary=(CgBinaryProgram *)copy;
+    if(binary->parameterArray>size || binary->parameterCount>(size-binary->parameterArray)/sizeof(CgBinaryParameter)){free(copy);return NULL;}
+    CgBinaryParameter *params=(CgBinaryParameter *)(copy+binary->parameterArray);
+    for(unsigned i=0;i<binary->parameterCount;++i)if(params[i].type==CG_SAMPLERCUBE){
+        if(array){
+            if(params[i].name>size-5){free(copy);return NULL;}
+            memcpy(copy+params[i].name,"a[0]",5);
+        }else params[i].type=CG_SAMPLER3D;
+    }
+    return copy;
 }
 static GLuint shader(GLenum type, const void *data, unsigned size)
 {
@@ -96,7 +114,11 @@ int main(void)
     query(0x7fffff, la, 0, GL_INVALID_VALUE, "unknown program untouched");
     GLuint unlinked = glCreateProgram();
     query(unlinked, la, 0, GL_INVALID_OPERATION, "unlinked program untouched");
-    query(cube, lc, 0, GL_INVALID_OPERATION, "unsupported cube query explicit refusal");
+    query(cube, lc, 0, GL_NO_ERROR, "scalar cube query");
+    void *negative=unsupported_sampler(cube_fpo,cube_fpo_size,0);check(negative!=NULL,"unsupported sampler binary");
+    if(negative){GLuint ns=shader(GL_FRAGMENT_SHADER,negative,cube_fpo_size),np=program(vs,ns);free(negative);
+        query(np,glGetUniformLocation(np,"environment"),0,GL_INVALID_OPERATION,"unsupported 3D query explicit refusal");
+        glDeleteProgram(np);glDeleteShader(ns);}
     GLint numeric = glGetUniformLocation(a, "offset");
     check(numeric >= 0, "numeric fixture location");
     query(a, numeric, 0, GL_INVALID_OPERATION, "numeric query explicit implementation limit");

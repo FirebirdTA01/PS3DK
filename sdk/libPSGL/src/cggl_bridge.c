@@ -627,7 +627,7 @@ CGGL_API void CGGLENTRY cgGLSetTextureParameter(CGparameter param,
     PSGLcgParameter *p = psgl_cg_parameter(param);
     uint32_t unit = cggl_texture_unit(p);
     psgl_context_active_texture(GL_TEXTURE0 + unit);
-    psgl_context_bind_texture(GL_TEXTURE_2D, texobj);
+    psgl_context_bind_texture(p && p->type == CG_SAMPLERCUBE ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D, texobj);
 }
 
 CGGL_API GLuint CGGLENTRY cgGLGetTextureParameter(CGparameter param)
