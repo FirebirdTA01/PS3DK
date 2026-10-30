@@ -16,6 +16,16 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **RPCS3 source-debug launcher.** `ps3_add_debug_rpcs3()` adds a debug target,
+  loads the unstripped ELF in GDB and holds short programs before main while
+  attaching, using a private emulator configuration. The sample covers PPU
+  breakpoints, locals and backtraces in both ABIs. RPCS3 stepping and resuming
+  at an enabled breakpoint remain unreliable; the documented workaround uses
+  temporary breakpoints and disables the current breakpoint before continuing.
+  Windows GDB packaging and the released Linux GDB dependency fix remain pending.
+
 ### Changed
 
 - **Pinned Ubuntu release for builds.** CI and release builds run on the

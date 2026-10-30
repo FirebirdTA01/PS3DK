@@ -1,101 +1,133 @@
-# Debugging with RPCS3 today
+# Debugging PPU programs in RPCS3
 
-This guide covers source-level debugging of a PPU program running in RPCS3,
-using the GDB server that RPCS3 has built in. It describes what works now,
-without new tooling. The plan for hardware debugging and a Windows GDB is in
-[design/debugger-design.md](design/debugger-design.md).
+RPCS3 contains a GDB remote server. The SDK's PPU GDB (`powerpc64-ps3-elf-gdb`,
+GDB 14.2) attaches to it, so a program can be stopped and inspected on the desktop
+without a console. Stepping is limited by the emulator, as described below.
 
-Every statement below comes from the debugger design study, run on
-2026-10-25 with RPCS3 v0.0.42-19958 (54014a7d) and GDB 14.2 from our Linux
-toolchain build. Its raw output is kept with the study's evidence; the
-study names it per claim. Anything that was not measured says so.
+## One step
 
-## What you need
+Add one line after `ps3_add_self()`:
 
-- **A GDB for `powerpc64-ps3-elf`.** The native Linux toolchain build
-  produces `ppu/bin/powerpc64-ps3-elf-gdb` (GDB 14.2, with Python and XML
-  target descriptions). The Windows SDK zip has no GDB yet; that is phase 3
-  of the plan. Whether the published Linux tarball carries GDB has not been
-  checked.
-- **The unstripped ELF.** `ps3_add_self()` writes a stripped `.elf` next to
-  the SELF, and GDB finds no symbols in it ("No symbol table is loaded").
-  Point GDB at the executable CMake builds in the build tree: the target
-  name with no extension. Build with `-g`, and preferably `-O0`, for
-  readable stepping.
-- **RPCS3 with its GDB server on.** It is on by default and listens on
-  `127.0.0.1:2345` as soon as a game boots (the log shows
-  `GDB: Started listening on '127.0.0.1:2345'`). The address is the
-  `Misc: GDB Server` setting.
-
-## Use the PPU interpreter
-
-Breakpoints do nothing under RPCS3's default LLVM PPU recompiler. RPCS3
-answers `OK` to the breakpoint request, but the program runs straight past
-it. In the study's test it passed the breakpoint 60 times.
-
-Run debug sessions with the interpreter instead. To leave your normal
-configuration alone, copy RPCS3's `config.yml`, set
-
-```yaml
-Core:
-  PPU Decoder: Interpreter (static)
+```cmake
+ps3_add_self(my_app)
+ps3_add_debug_rpcs3(my_app)                 # stops at main
+# ps3_add_debug_rpcs3(my_app BREAK update)  # or at another function
 ```
 
-and boot with that copy:
+Point the launcher at RPCS3 once (Windows: `setx PS3DK_RPCS3 C:\path\to\rpcs3.exe`,
+Linux: `export PS3DK_RPCS3=/path/to/rpcs3`), then:
 
-```
-rpcs3 --no-gui --config <copy>.yml <path-to>.self
-```
-
-The interpreter is much slower than LLVM. For long programs, break near the
-code you care about.
-
-## Connect
-
-With the program booted:
-
-```
-powerpc64-ps3-elf-gdb build/<target>
-(gdb) target remote 127.0.0.1:2345
-(gdb) break add
-(gdb) continue
+```sh
+cmake --build build --target debug-my_app
 ```
 
-RPCS3 binds the loopback address by default. A GDB inside WSL2 in NAT mode
-cannot reach it directly: the study used a small TCP relay on the Windows
-side. WSL mirrored networking, or a GDB that runs on Windows, should avoid
-the relay; neither was tested.
+This builds the program, boots its `.fake.self` in RPCS3 and starts GDB on the
+generated `build/my_app.gdbinit`, which:
 
-## What works
+- loads the **unstripped** executable from the build directory (the `.elf`
+  next to the SELF is stripped and has no symbols),
+- connects to RPCS3's GDB server (`127.0.0.1:2345` by default; change it with
+  `ps3_add_debug_rpcs3(my_app GDB_SERVER address:port)`),
+- releases the pre-main wait by setting `__ps3dk_debug_go`,
+- sets the breakpoint.
 
-Measured with the PPU interpreter, in both data models (ILP32, the default,
-and `-mlp64`):
+From there: `continue`, `bt`, `info locals`, `print`, `x/4wx &var`.
+Before continuing from a breakpoint, disable or delete that breakpoint; see
+the workaround below.
+`samples/debug/hello-debug-rpcs3` is a small program to try this on.
 
-| Operation | Result |
-|---|---|
-| `target remote`, initial stop with the source line | works |
-| `break <function>` / `break file.c:line` (DWARF), `continue` | stops at the breakpoint |
-| `info registers` (pc, r1-r4, lr) | correct |
-| `bt` with arguments | correct up to `main`, then `._start` |
-| `print`, `x/4wx` on globals | correct |
-| `ptype`, `sizeof` of structs and pointers | correct for each data model |
+## What the launcher changes, and what it does not
 
-## Known limits
+RPCS3 is started with a per-run copy of its own configuration in which exactly
+two settings differ:
 
-- **No detach.** RPCS3 does not implement detach; GDB reports "Remote
-  doesn't know how to detach". End a session with `kill`, or close RPCS3.
-- **`stepi` did not advance** in the one test made: the step request got an
-  immediate stop with the PC unchanged. The cause has not been
-  investigated. Use breakpoints and `continue` in the meantime.
-- **Software breakpoints only.** Hardware breakpoints and watchpoints are
-  refused, and breakpoint conditions are not supported by RPCS3's server
-  (from RPCS3's source; not exercised).
-- **PPU threads only.** RPCS3 does not list SPU threads to GDB, and GDB 14
-  has no SPU support.
-- **Function symbols without debug info resolve wrongly.** PS3 executables
-  use 8-byte function descriptors (a 32-bit entry and a 32-bit TOC) in both
-  data models. GDB reads the descriptor's first 8 bytes as a 64-bit entry
-  address, so a minimal symbol shows the entry and TOC glued together. Breakpoints and backtraces through code built with `-g` were
-  correct in the study. Calls through function pointers, and code without
-  debug info (system libraries, stripped objects), are expected to resolve
-  wrongly but were not tested. A GDB fix is phase 2 of the plan.
+| Setting | Debug run | Why |
+|---|---|---|
+| `PPU Decoder` | `Interpreter (static)` | RPCS3 ignores breakpoints under the LLVM recompiler (it acknowledges them and runs on). |
+| `GDB Server` | the requested address | where GDB connects |
+
+The copy lives in the temporary directory and is deleted afterwards. Your RPCS3
+configuration is never written. The interpreter is much slower than the
+recompiler, so debug runs are slower than normal runs.
+
+RPCS3 starts a command-line-booted program immediately, even with its auto-start
+setting disabled. The launcher uses `--no-gui` and creates `ps3dk-debug-wait`
+beside the SELF before boot. The CMake helper adds a constructor that detects
+this marker through `/app_home` and waits for GDB, for up to 120 seconds. The
+generated command file releases that wait. Without the marker, the constructor
+returns immediately, including during normal runs on hardware.
+
+A hard kill (such as closing the launcher terminal or `kill -9`) can leave the
+marker behind. A later plain run of that SELF from the same build directory
+then waits up to 120 seconds before main too. If no debug session is running,
+remove `ps3dk-debug-wait` from that directory before running normally.
+
+The launcher removes its marker when the session ends or startup fails. It
+refuses to overwrite an existing marker, so two sessions cannot own the same
+SELF directory. After a forced termination that prevented cleanup, remove a
+stale marker only after confirming its debug session has ended.
+
+## Limits of RPCS3's GDB server
+
+Measured with RPCS3 v0.0.42-19958 (54014a7d), interpreter mode, and GDB 14.2:
+
+- **No detach.** When the launcher starts GDB, it closes its RPCS3 process after
+  GDB exits. For an external GDB (`-NoGdb` / `--no-gdb`), press Ctrl-C in the
+  launcher terminal to end the session; there is no RPCS3 window to close.
+- **Software breakpoints only.** No hardware breakpoints or watchpoints, and no
+  breakpoint conditions evaluated by the server (GDB-side conditions work).
+- **PPU threads only.** SPU threads are not listed or debuggable.
+- **Stepping and resuming at an enabled breakpoint are unreliable.** `next`,
+  `finish`, and `continue` repeatedly stopped at the same PC in both ABIs.
+  The earlier `stepi` measurement also failed to advance. Disabling the
+  breakpoint before `next` did not make stepping usable in the follow-up test.
+  These commands are not validated as working.
+
+The measured workaround is to disable or delete the breakpoint at the current
+PC, set a temporary breakpoint at a later source location, and use `continue`:
+
+```gdb
+disable 1
+tbreak main.c:33
+continue
+info locals
+```
+
+For the sample, line 33 is the return from `accumulate`; `sum` is now 3 on the
+first call. Re-enable breakpoint 1 after leaving its address if you want to
+inspect a later call. Temporary breakpoints delete themselves when hit.
+This flow was checked on both ABIs through totals 3, 73, and 1173. It does not
+substitute for a working single-step implementation. RPCS3's
+[`cmd_vcont` implementation](https://github.com/RPCS3/rpcs3/blob/54014a7d/rpcs3/Emu/GDB.cpp)
+handles the `s` request with `dbg_step`; the recorded failures remain an emulator
+compatibility limit, not a claim that its precise cause has been fixed.
+
+## GDB on another host
+
+If GDB runs elsewhere (for example a Linux GDB inside WSL), start RPCS3 only:
+
+```powershell
+scripts\ps3dk-debug-rpcs3.ps1 -Self build\my_app.fake.self -GdbInit build\my_app.gdbinit -NoGdb
+```
+
+Leave that terminal open while using the external GDB. Press Ctrl-C there to
+stop the owned RPCS3 process and remove the marker and temporary configuration.
+If RPCS3 exits on its own, the launcher returns its exit status.
+
+and attach with `powerpc64-ps3-elf-gdb -x build/my_app.gdbinit`. RPCS3 listens on
+`127.0.0.1` by default, which a WSL2 GDB in NAT mode cannot reach; give RPCS3 an
+address the other host can reach with `GDB_SERVER` / `-GdbServer`, and only on a
+network you trust (the GDB protocol has no authentication).
+
+When using WSL GDB with a Windows-generated command file, copy the `.gdbinit`
+and change its `file` path from `C:/...` to `/mnt/c/...`, and its `target remote`
+address to the Windows host address. Add `set substitute-path C:/ /mnt/c/` so
+GDB can find the Windows-built application's source. Keep the release-wait
+assignment and breakpoint commands in that copy. A Windows path is not a
+Linux filesystem path.
+
+The acceptance run used a locally built Linux GDB 14.2. It does not validate the
+released Linux GDB package or a Windows-hosted GDB executable. Compact PS3 `.opd`
+descriptor handling and the release package's Python dependency remain separate
+toolchain work; do not infer general function-call or descriptor support from
+this source-breakpoint sample.

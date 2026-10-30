@@ -237,6 +237,9 @@ jobs:
       - name: Check every tracked test has a CI invocation
         run: python3 tests/ci-test-list-test.py
 
+      - name: Test RPCS3 debugger launcher ownership and cleanup (POSIX)
+        run: python3 tests/host/debugger-launcher-test.py "${RUNNER_TEMP}/debugger-launcher"
+
       - name: Test shader-compiler suite runner self-check
         run: bash tests/shader-compiler/suite-runner-test.sh
 

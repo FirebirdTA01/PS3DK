@@ -216,6 +216,12 @@ mkdir -p "$STAGE_DIR/scripts" "$STAGE_DIR/sdk"
 if [[ -f "$PS3_TOOLCHAIN_ROOT/scripts/version.sh" ]]; then
     install -m 0755 "$PS3_TOOLCHAIN_ROOT/scripts/version.sh" "$STAGE_DIR/scripts/version.sh"
 fi
+# ps3_add_debug_rpcs3() runs these from <root>/scripts.
+for launcher in ps3dk-debug-rpcs3.ps1 ps3dk-debug-rpcs3.sh; do
+    [[ -f "$PS3_TOOLCHAIN_ROOT/scripts/$launcher" ]] \
+        || die "scripts/$launcher missing (needed by ps3_add_debug_rpcs3)"
+    install -m 0755 "$PS3_TOOLCHAIN_ROOT/scripts/$launcher" "$STAGE_DIR/scripts/$launcher"
+done
 if [[ -d "$PS3_TOOLCHAIN_ROOT/sdk/include" ]]; then
     cp -a "$PS3_TOOLCHAIN_ROOT/sdk/include" "$STAGE_DIR/sdk/include"
 fi
