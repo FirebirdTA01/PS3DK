@@ -18,9 +18,11 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
-- **Pinned build image.** CI and release builds run on a pinned Ubuntu 26.04
-  image instead of the moving `ubuntu-latest`, so a runner update can no
-  longer change the shipped host tools between releases. v0.27.0 was already
+- **Pinned Ubuntu release for builds.** CI and release builds run on the
+  `ubuntu-26.04` runner label instead of the moving `ubuntu-latest`, so a move
+  to a new Ubuntu release is a deliberate change rather than an automatic one.
+  Packages inside that image can still be updated by the runner provider, and
+  the build's package installs are not version-pinned. v0.27.0 was already
   built on that image: its Windows host tools are compiled by mingw-w64 GCC 15
   (GCC 13 in v0.26.153) and its info pages by makeinfo 7.2.
 
