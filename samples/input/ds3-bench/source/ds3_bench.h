@@ -4,7 +4,10 @@
 #pragma once
 
 #include "pad_lifecycle.h"
+#include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace ds3b {
 
@@ -74,6 +77,34 @@ enum class End {
 
 const char *end_name(End e);
 
+// On-screen page: rows of coloured text segments, drawn left to right. No
+// row is longer than kScreenColumns characters, which fit the screen width
+// at the scale main.cpp draws with.
+constexpr std::size_t kScreenColumns = 78;
+// On-screen page: rows of coloured text segments, drawn left to right.
+enum class Ink {
+    title,   // heading
+    normal,  // values
+    dim,     // a button that is up, an absent feature
+    on,      // a button that is down, a motor that is running
+    warn,    // refusals and failures
+};
+
+struct Segment {
+    std::string text;
+    Ink ink;
+};
+
+struct Row {
+    std::vector<Segment> segments;
+};
+
+struct Screen {
+    std::vector<Row> rows;
+    // Every row's text concatenated, for tests and the TTY.
+    std::string text() const;
+};
+
 struct Counters {
     unsigned fresh = 0, no_new_data = 0, malformed = 0, disconnects = 0, reconnects = 0;
     unsigned pulses_started = 0, pulses_refused = 0, pulses_stopped = 0, stop_failures = 0;
@@ -98,11 +129,16 @@ public:
     bool pulse_active() const { return pulse_active_; }
     std::uint64_t pulse_deadline() const { return pulse_deadline_; }
 
+    // What the on-screen page shows, built from the latest valid record and
+    // the session state. Portable, so the host tests check the content.
+    Screen screen() const;
+
 private:
     void say(const char *fmt, ...);
     void start_pulse(Action a, std::uint64_t now);
     void stop_pulse(std::uint64_t now, const char *why);
     void report(const CellPadData &d, std::uint64_t now);
+    void forget_controller();
     bool analog_changed(const CellPadData &d) const;
     void remember_analog(const CellPadData &d);
 
@@ -125,6 +161,37 @@ private:
     std::uint8_t last_analog_[CELL_PAD_BTN_OFFSET_PRESS_R2 + 1] = {};
     std::uint64_t last_analog_print_ = 0;
     bool printed_analog_ = false;
+    // For the screen: the newest fresh record, the motor levels last written
+    // successfully, and the newest log line.
+    CellPadData last_record_{};
+    bool have_record_ = false;
+    std::uint8_t small_level_ = 0, large_level_ = 0;
+    std::string last_event_;
+    bool stop_gave_up_ = false;
+    // The last motor command the API accepted on this connection.
+    enum class Command { none, levels, stop };
+    Command last_command_ = Command::none;
 };
+
+// The display, as the loop sees it. ready: 1 = a frame may be drawn now,
+// 0 = the previous one is still being presented (skip, do not wait),
+// negative = the display has stopped. draw: 0, or negative to stop it.
+struct DisplayOps {
+    int (*ready)(void *ctx);
+    int (*draw)(void *ctx, const Screen &s);
+    void *ctx;
+};
+
+struct DisplayStats {
+    unsigned drawn = 0, skipped = 0;
+    bool stopped = false;
+};
+
+enum class Iteration { running, ended, refresh_failed };
+
+// One loop iteration: refresh the pad, run the session step, then draw if
+// the display is ready. Pad input, motor deadlines and exit never wait for
+// the display; display may be null (TTY only).
+Iteration iterate(PadLifecycle &pad, Bench &bench, const DisplayOps *display, DisplayStats &stats);
 
 }  // namespace ds3b
