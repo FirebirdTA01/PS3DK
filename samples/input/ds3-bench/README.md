@@ -1,9 +1,11 @@
 # DualShock 3 buttons, pressure and rumble bench
 
 This C++17 sample selects a connected controller, turns on pressure-sensitive
-buttons where the port reports them, prints button, stick and pressure changes
-to TTY, and fires short operator-triggered rumble pulses on each motor. It
-runs for 120 seconds, or until SELECT+START or the system exit request.
+buttons and the Sixaxis sensors where the port reports them, shows every
+button, both sticks, the pressure values and the raw Sixaxis readings on
+screen (and logs changes to TTY), and fires short operator-triggered rumble
+pulses on each motor. It runs for 120 seconds, or until SELECT+START or the
+system exit request.
 
 ## Controls
 
@@ -24,10 +26,41 @@ TRIANGLE, CIRCLE. The DS3 small motor is on/off only, so intensity levels
 apply to the large motor. Level 128 is only exercised together with the small
 motor (TRIANGLE); 64 and 255 run the large motor alone.
 
-Every pulse lasts 200 ms. The deadline is checked on every loop iteration,
-whatever the read returns, and a new pulse replaces the current one and
-restarts the deadline. The stop is a write of zero after the deadline; a
-failed stop is retried for up to 10 loop iterations and then reported.
+Every pulse lasts 200 ms. The loop runs every 10 ms (plus the time of its
+API calls), and the deadline is checked on every iteration whatever the read
+returns, so a stop is requested within about one iteration of the deadline.
+A new pulse replaces the current one and restarts the deadline. The stop is
+a write of zero after the deadline; a failed stop is retried for up to 10
+loop iterations, then the screen keeps a STOP FAILED warning.
+
+## Screen
+
+The page lists the controls at the top, then:
+
+- every button, highlighted while held;
+- both sticks, when the record holds them;
+- the 12 pressure values in two rows, when pressure mode is on and the record
+  holds them; otherwise why not (not supported, enable failed, or enabled but
+  not in this record);
+- the Sixaxis readings as raw 10-bit counts: accelerometer X, Y, Z and one raw
+  gyro channel G. Axes, centre and units are not verified on hardware, and
+  the page says so;
+- the last rumble command the API accepted on this connection (not a measured
+  motor state): "no command sent" until one is, or "unknown" while the
+  controller is disconnected, since no stop can be sent;
+- record counters, time left and the last event.
+
+Values belong to one connection of one controller: after a port change, a
+disconnect or a reconnect, the page shows "Waiting for the first record"
+until a new record arrives.
+
+`source/display.c` draws the page with the debug font (the setup of
+`samples/gcm/hello-ppu-dbgfont`). It never blocks the loop: if the previous
+flip has not completed, the frame is skipped, so pad input, motor deadlines
+and exit keep running even if presentation stalls. Its own polls at open and
+close stop at a one-second monotonic deadline; the GCM and OS calls inside
+them are not interruptible. If the display cannot open, or a submission
+fails, the sample continues with TTY output only and says so.
 
 ## Output
 
@@ -56,12 +89,13 @@ interprets input, and is shared with the DS3 motion sample:
 - Port selection from `cellPadGetInfo2`; L1 cycles through connected ports.
 - Pressure mode: after checking `CELL_PAD_CAPABILITY_PRESS_MODE`, the prior
   `port_setting` is saved and `cellPadSetPortSetting` turns on
-  `CELL_PAD_SETTING_PRESS_ON`, keeping its other bits. The prior value is
-  restored when the port is released or the sample exits; a failed restore is
-  retried three times and reported.
+  `CELL_PAD_SETTING_PRESS_ON`, keeping its other bits. Sixaxis works the same
+  way: after `CELL_PAD_CAPABILITY_SENSOR_MODE`, `CELL_PAD_SETTING_SENSOR_ON`
+  is added. The prior value is restored when the port is released or the
+  sample exits; a failed restore is retried three times and reported.
 - Reads: `CELL_OK` with `len == 0` is success with no new data. A record is
   used only if `len` reaches the field being read (4 for buttons, 8 for
-  sticks, 20 for pressure); shorter, negative or over-long records are
+  sticks, 20 for pressure, 24 for Sixaxis); shorter, negative or over-long records are
   counted as malformed. `CELL_PAD_ERROR_NO_DEVICE` is a disconnect; any other
   error ends the session.
 - Motors: written only when the port reports `CELL_PAD_CAPABILITY_ACTUATOR`.
@@ -91,12 +125,15 @@ Use `ps3-ppu-toolchain-lp64.cmake` and a separate build directory for LP64.
 ## Host tests
 
 `host-tests/` builds the portable logic natively against a scripted fake pad
-and a fake clock, and runs eleven CTest cases: truncated records, no new
+and a fake clock, and runs twelve CTest cases: truncated records, no new
 data, failed actuator writes, failed restore, disconnect and reconnect, held
 buttons, exit paths, missing capabilities and a failed pressure enable,
-pulse and session deadlines, the change reporter, and port-switch cleanup
-(a failed zero or restore refuses the switch and is retried on exit; a
-`NO_DEVICE` read is a disconnect).
+pulse and session deadlines, the change reporter, port-switch cleanup (a
+failed zero or restore refuses the switch and is retried on exit; a
+`NO_DEVICE` read is a disconnect), and the screen: its content, row widths,
+cleared values after a controller change, and a stalled or failing display
+that must not stop motor deadlines or exit. They check the text, not how it
+looks; the layout needs a visual check on the console.
 `tests/host/ds3-bench-test.sh` configures, builds and runs them.
 
 ## Hardware checklist (not yet run)
@@ -113,4 +150,8 @@ When a hardware run is requested:
    (TRIANGLE); small motor alone (CROSS). Note whether each felt different.
 4. Stop: start CIRCLE and press R1 at once; the motor should stop early.
 5. Port switch with two controllers (L1); reconnect by unplugging one.
-6. Exit with SELECT+START and with the PS button; check `DS3B_API_OK`.
+6. Screen: every line readable and inside the picture at the console's
+   output resolution; held buttons highlight; the page keeps updating.
+7. Sixaxis: hold still, then tilt and turn; note which raw values move for
+   each motion. This records the axes; it does not calibrate them.
+8. Exit with SELECT+START and with the PS button; check `DS3B_API_OK`.

@@ -1,6 +1,7 @@
 // DualShock 3 bench: buttons, sticks, pressure and two-motor rumble pulses.
 // Binds the portable session (ds3_bench, pad_lifecycle) to cellPad, sysutil
-// and the system clock. Output is TTY only.
+// and the system clock. Output: an on-screen page (display.c) and TTY lines.
+#include "display.h"
 #include "ds3_bench.h"
 #include "pad_lifecycle.h"
 
@@ -38,6 +39,39 @@ static std::int32_t pad_act(void *, std::uint32_t port, CellPadActParam *p) { re
 static std::uint64_t now_us(void *) { return static_cast<std::uint64_t>(sys_time_get_system_time()); }
 static void tty(void *, const char *text) { std::printf("%s\n", text); }
 
+static std::uint32_t colour(Ink ink)
+{
+    switch (ink) {
+    case Ink::title: return 0xffffffff;
+    case Ink::normal: return 0xffe0e0e0;
+    case Ink::dim: return 0xff8890a0;
+    case Ink::on: return 0xff60ff60;
+    case Ink::warn: return 0xffff9040;
+    }
+    return 0xffffffff;
+}
+
+// One page. The debug font advances about 0.0147 screen widths per
+// character at scale 1.0 (0.022 at 1.5, as hello-ppu-dbgfont measures), so
+// kScreenColumns characters at 0.8 end at about 0.97 of the width. Pending
+// visual check on hardware and RPCS3.
+static int display_ready(void *) { return ds3_display_ready(); }
+static int display_draw(void *, const Screen &s)
+{
+    constexpr float scale = 0.8f, advance = 0.0147f * scale, line = 0.045f;
+    ds3_display_begin();
+    float y = 0.05f;
+    for (const Row &r : s.rows) {
+        float x = 0.05f;
+        for (const Segment &g : r.segments) {
+            ds3_display_text(x, y, scale, colour(g.ink), g.text.c_str());
+            x += advance * float(g.text.size());
+        }
+        y += line;
+    }
+    return ds3_display_end();
+}
+
 int main()
 {
     std::printf("DS3B_START controls: L1 next port, R1 stop, CROSS small, SQUARE large64, "
@@ -50,7 +84,11 @@ int main()
     const PadOps ops{pad_init, pad_end, pad_info, pad_data, pad_setting, pad_act, nullptr};
     Wanted wanted;
     wanted.press = true;
+    wanted.sensor = true;  // Sixaxis, where the port reports it
     PadLifecycle pad(ops, wanted);
+    const int display_rc = ds3_display_open();
+    if (display_rc != 0)
+        std::printf("DS3B_DISPLAY unavailable rc=%d: TTY only\n", display_rc);
     rc = pad.open();
     if (rc != CELL_OK) {
         std::printf("DS3B_FAIL cellPadInit=0x%08x\n", unsigned(rc));
@@ -59,6 +97,9 @@ int main()
     }
     Bench bench(pad, ClockOps{now_us, nullptr}, LogOps{tty, nullptr});
     bench.begin();
+    const DisplayOps display{display_ready, display_draw, nullptr};
+    DisplayStats stats;
+    bool display_reported = false;
     int callback_rc = 0;
     for (;;) {
         callback_rc = cellSysutilCheckCallback();
@@ -66,16 +107,25 @@ int main()
             break;
         if (quitting.load(std::memory_order_acquire))
             bench.request_exit();
-        if (pad.refresh() != CELL_OK) {
+        // Never waits on the display: a pending flip skips the frame.
+        const Iteration it = iterate(pad, bench, display_rc == 0 ? &display : nullptr, stats);
+        if (it == Iteration::refresh_failed) {
             std::printf("DS3B_FAIL cellPadGetInfo2=0x%08x\n", unsigned(pad.first_error_code()));
             break;
         }
-        if (!bench.step())
+        if (it == Iteration::ended)
             break;
-        usleep(10000);
+        if (stats.stopped && !display_reported) {
+            std::printf("DS3B_DISPLAY stopped after a submission error: TTY only from here\n");
+            display_reported = true;
+        }
+        usleep(10000);  // the loop period, independent of the display rate
     }
+    std::printf("DS3B_DISPLAY frames drawn=%u skipped_pending_flip=%u stopped=%u\n", stats.drawn,
+                stats.skipped, unsigned(stats.stopped));
     bench.finish();
     pad.close();
+    ds3_display_close();
     const int unreg = cellSysutilUnregisterCallback(0);
     const Counters &n = bench.counters();
     std::printf("DS3B_SUMMARY end=%s fresh=%u no_new=%u malformed=%u disconnects=%u reconnects=%u "

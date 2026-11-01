@@ -88,6 +88,7 @@ public:
     int port() const { return port_; }
     bool port_connected() const { return selected() && port_connected_; }
     const PortCaps &caps() const { return caps_; }
+    const Wanted &wanted() const { return wanted_; }
     bool press_active() const { return press_on_; }
     bool sensor_active() const { return sensor_on_; }
 
