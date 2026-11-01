@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(ds3-bench CXX)
+include(ps3-self)
+add_executable(ds3-bench source/main.cpp source/ds3_bench.cpp source/pad_lifecycle.cpp)
+target_compile_features(ds3-bench PRIVATE cxx_std_17)
+target_compile_options(ds3-bench PRIVATE -O2 -Wall -Wextra -Werror)
+target_link_libraries(ds3-bench PRIVATE io sysutil_stub sysutil rt lv2)
+ps3_add_self(ds3-bench OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
