@@ -615,6 +615,8 @@ jobs:
       # files under samples/ and tests/: a package ships them as source.
       - name: Test the release-tree guard against shipped build outputs
         run: bash tests/host/release-tree-build-outputs-test.sh
+      - name: Test profiler release artifact and archive membership gates
+        run: bash tests/host/release-tree-profiler-test.sh
 
       # Skips without PS3DEV or on GCC 12; gcc-16.x 0074 gives the installed
       # libgcc the lock-free FDE registry in both multilibs.

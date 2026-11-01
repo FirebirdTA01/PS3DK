@@ -244,6 +244,13 @@ sdk_core  ppu/lib/lp64/librsx.a
 # lp64 archive had no presence row and the two-sided accounting never looked
 # inside lp64/ at all.
 sdk_core  ppu/lib/lp64/librt.a
+# Profiler archives are distinct: manual named zones versus automatic lifecycle.
+# Require both ABIs and their public API in source installs and Windows payloads.
+sdk_core  ppu/include/ps3dk/prof.h
+sdk_core  ppu/lib/libps3dkprof.a
+sdk_core  ppu/lib/lp64/libps3dkprof.a
+sdk_core  ppu/lib/libps3prof.a
+sdk_core  ppu/lib/lp64/libps3prof.a
 # pthread shim (2026-08-30): the shadow header fronts newlib's _POSIX_THREADS-
 # gated <pthread.h>; libpthread.a is an INPUT(-lrt) LINKER SCRIPT, not an
 # archive (validated by presence -- an alias row would demand byte-identity
