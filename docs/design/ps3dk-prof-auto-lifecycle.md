@@ -2,8 +2,9 @@
 
 This records the automatic runtime's integration requirements. The optional
 thread-exit notification and automatic startup/finalization object are implemented.
-The lifecycle tests build private archives; SDK build/install integration,
-compiler adapters and the one-switch demonstration remain separate work.
+The SDK builds and installs separate manual and automatic archives for both
+ABIs; the target lifecycle tests link those installed archives. Compiler
+adapters, the one-switch demonstration and release packaging remain separate work.
 The manual runtime and its v1 capture validity rules remain unchanged.
 
 ## Thread retirement boundary
@@ -99,10 +100,29 @@ initialization failure and archive linkage without the startup anchor. It runs
 from the existing host driver. Host cleanup explicitly models the SDK's final
 notification; `tests/sdk/ps3dk-prof-auto` instead uses the actual linked SDK
 notification after TLS destruction and two pthread-key rounds. These fixtures
-use manual zones to test lifecycle, not dummy compiler hooks. Their private
-archive is suitable for this increment; once `libps3prof.a` is installed by the
-SDK build, the target row must link that installed archive through the forced
-`__ps3dk_prof_startup_anchor` symbol, verifying extraction of its init/fini arrays.
+use manual zones to test lifecycle, not dummy compiler hooks. The target row
+compiles only the fixture and links installed `libps3prof.a` through the forced
+`__ps3dk_prof_startup_anchor` symbol, verifying extraction of its init/fini
+entries. `PROFILER_FORCE_STARTUP=OFF` is the negative control: the same fixture
+links, runs and produces no capture. Both controls link with `--gc-sections`.
+Run both settings with `PROFILER_ABI=ilp32`
+and `PROFILER_ABI=lp64`, preserving each link map and capture-reader result.
+
+The `sdk/libps3dkprof/Makefile` install target is included by the top-level SDK
+install. It writes `libps3dkprof.a` (manual core/PAL, no startup) and
+`libps3prof.a` (core/PAL, startup and arc serializer) to `ppu/lib` and
+`ppu/lib/lp64`. The top-level SDK `HEADERS` list alone owns installation of
+`<ps3dk/prof.h>`. Build products live below
+`PS3_BUILD_ROOT/sdk/libps3dkprof`; neither archive inherits application
+`CFLAGS`/`CPPFLAGS` or includes compiler instrumentation. The automatic archive
+does not yet contain the Task4 compiler adapters.
+
+To validate an install into a private SDK prefix, run
+`python3 tests/sdk/ps3dk-prof-auto/install-test.py <new-evidence-dir> --sdk <private-sdk> --cross <ppu-tool-prefix>`.
+This runs the top-level header install and sublibrary install, checking archive
+membership, startup-anchor ownership, isolation from application instrumentation
+flags and exact installed public-header bytes. It complements, rather than
+replaces, the target link/runtime controls above.
 
 Do not demonstrate `PS3_PROFILE=ON` using dummy compiler hooks or an empty
 capture. The unchanged-source counts and timings gate requires the real
