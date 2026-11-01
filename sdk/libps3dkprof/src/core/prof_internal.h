@@ -15,6 +15,9 @@
 #include <stdint.h>
 
 #include "../pal/pal.h"
+#ifdef PS3DK_PROF_WITH_ARCS
+#include "../hooks/arc_runtime.h"
+#endif
 
 /* ---- atomics (GCC builtins only; no __sync, no hand-written reservations) ---------------------------------------- */
 #define LD_ACQ(p) __atomic_load_n((p), __ATOMIC_ACQUIRE)
@@ -98,6 +101,11 @@ typedef struct slot {
     char name[64];
     cblock *cb;
     ring *rg;
+#ifdef PS3DK_PROF_WITH_ARCS
+    struct ps3dk_prof_arc_collector arcs;
+    struct ps3prof_arc_row *arc_rows;
+    uint32_t *arc_index;
+#endif
 } slot;
 
 typedef struct desc_entry {
@@ -195,7 +203,11 @@ typedef struct prof {
     int thread_result;          /* THREAD mode: the sealing result, set by the drain thread */
     int clock_failed;
     int join_failed;
-    int lock_failed;            /* a PAL mutex call failed: the capture fails closed (ESINKFAIL class, see drain) */
+    int lock_failed;            /* terminal PAL failure: mutex, or arc-enabled OS identity; fails closed */
+#ifdef PS3DK_PROF_WITH_ARCS
+    struct ps3dk_prof_arc_options arc_options; /* zero capacity disables candidate integration */
+    uint32_t arc_index_capacity;
+#endif
     uint8_t *block;
     /* HEADER strings, copied at init (the caller's config strings need not outlive init). */
     char app[33];

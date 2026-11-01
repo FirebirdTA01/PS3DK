@@ -21,6 +21,9 @@ static struct {
     int kind;                   /* 0 default directory, 1 a set directory, 2 callbacks */
     char dir[256];
     ps3dk_prof_sink_callbacks cb;
+#ifdef PS3DK_PROF_WITH_ARCS
+    struct ps3dk_prof_arc_options arcs;
+#endif
 } g_pending;
 
 #ifdef PS3DK_PROF_TEST_HOOKS
@@ -461,6 +464,13 @@ static int thread_begin_impl(prof *p, const char *name)
      * untouched, so there is nothing to roll back and no placeholder id is ever recorded.  It is not counted in
      * unregistered_refusals (codex 03:21).  auto_register goes through here too: the zone or frame is then INERT. */
     if (pal_os_thread_id(&os_id) != 0) {
+#ifdef PS3DK_PROF_WITH_ARCS
+        /* Frozen v1 excludes ETHREAD from unregistered_refusals. An arc-enabled
+         * capture instead uses the existing terminal PAL-failure channel, under
+         * the same mutex as STOP. No new counter or silently missing producer. */
+        if (p->arc_options.max_arcs_per_thread)
+            ST_RLX(&p->lock_failed, 1);
+#endif
         p_unlock(p, &p->thread_mutex);
         return PS3DK_PROF_ETHREAD;
     }
@@ -477,6 +487,15 @@ static int thread_begin_impl(prof *p, const char *name)
     s->cb->next_refused_id = 1;
     ST_RLX(&s->rg->write_idx, 0);
     ST_RLX(&s->rg->read_idx, 0);
+#ifdef PS3DK_PROF_WITH_ARCS
+    if (p->arc_options.max_arcs_per_thread) {
+        /* Only FREE storage is reset; the previous incarnation was accepted by
+         * the sole drainer before it released this slot under thread_mutex. */
+        memset(&s->arcs, 0, sizeof s->arcs);
+        (void)ps3dk_prof__arcs_init(&s->arcs, s->arc_rows, p->arc_options.max_arcs_per_thread,
+                                  s->arc_index, p->arc_index_capacity);
+    }
+#endif
     s->state = SLOT_LIVE;
     p_unlock(p, &p->thread_mutex);
 
@@ -506,6 +525,40 @@ static int auto_register(prof *p)
         return -1;
     return thread_begin_impl(p, "auto") == PS3DK_PROF_OK ? 0 : -1;
 }
+
+#ifdef PS3DK_PROF_WITH_ARCS
+int ps3dk_prof__record_arc(uint64_t caller, uint64_t callee, uint32_t flags)
+{
+    prof *p = ready();
+    tls_state *t = &g_tls;
+    slot *s;
+    int rc;
+    if (!p || !p->arc_options.max_arcs_per_thread)
+        return PS3DK_PROF_ENOTINIT;
+    if (t->in_drain)
+        return PS3DK_PROF_EBUSY;
+    /* Terminal TLS is checked BEFORE any access to potentially reused storage. */
+    if (t->acked || t->retired)
+        return PS3DK_PROF_ESTOPPED;
+    if (LD_RLX(&p->lock_failed))
+        return PS3DK_PROF_ESINKFAIL;
+    if (!t->slot1) {
+        if (!p->cfg.auto_register)
+            return PS3DK_PROF_ETHREAD;
+        rc = thread_begin_impl(p, "auto");
+        if (rc != PS3DK_PROF_OK)
+            return rc;
+    }
+    s = &p->slots[t->slot1 - 1];
+    if (s->generation != t->generation || s->incarnation != t->incarnation)
+        return PS3DK_PROF_ESTOPPED;
+    if (LD_ACQ(&p->stop_latch)) {
+        p_observe_stop(p); /* release ack remains the LAST producer write */
+        return PS3DK_PROF_ESTOPPED;
+    }
+    return ps3dk_prof__arcs_record(&s->arcs, caller, callee, flags);
+}
+#endif
 
 /* The STOP batch and the ack (5.1, 7).  The caller has checked: an incarnation, not acked, not retired, latch set. */
 void p_observe_stop(prof *p)
@@ -769,6 +822,23 @@ static int gate_enter(uint32_t to)
     return (g == G_READY || g == G_TERMINAL) ? PS3DK_PROF_EALREADY : PS3DK_PROF_EBUSY;
 }
 
+#ifdef PS3DK_PROF_WITH_ARCS
+int ps3dk_prof__configure_arcs(const struct ps3dk_prof_arc_options *o)
+{
+    int rc = gate_enter(G_CONFIGURING);
+    if (rc != PS3DK_PROF_OK)
+        return rc;
+    if (o && (!o->max_arcs_per_thread || o->max_arcs_per_thread > 65536 || !o->consume || !o->finish))
+        rc = PS3DK_PROF_EINVAL;
+    else if (o)
+        g_pending.arcs = *o;
+    else
+        memset(&g_pending.arcs, 0, sizeof g_pending.arcs);
+    ST_REL(&g_gate, (uint32_t)G_UNINIT);
+    return rc;
+}
+#endif
+
 int ps3dk_prof_set_sink_path(const char *dir)
 {
     int rc = gate_enter(G_CONFIGURING);
@@ -879,6 +949,9 @@ static int init_impl(const ps3dk_prof_config *cfg_in, int *terminal)
     uint64_t now;
     int rc, err = 0, n;
     const char *dir;
+#ifdef PS3DK_PROF_WITH_ARCS
+    size_t o_arc_rows = 0, o_arc_index = 0;
+#endif
 
     if (!cfg_in)
         return PS3DK_PROF_EINVAL;
@@ -915,6 +988,20 @@ static int init_impl(const ps3dk_prof_config *cfg_in, int *terminal)
         take(&off, c.max_threads, sizeof(snap), &o_snap) || take(&off, c.max_threads, sizeof(fentry), &o_front) ||
         take(&off, c.max_threads, sizeof(tdecl), &o_ts) || off > P_TOTAL_MAX)
         return PS3DK_PROF_EINVAL;
+#ifdef PS3DK_PROF_WITH_ARCS
+    p->arc_options = g_pending.arcs;
+    if (p->arc_options.max_arcs_per_thread) {
+        uint32_t cap = p->arc_options.max_arcs_per_thread, idx = 2;
+        while (idx < 2 * cap)
+            idx *= 2;
+        p->arc_index_capacity = idx;
+        /* cap <= 65536 and idx <= 131072 make the inner products safe even
+         * with 32-bit size_t; take checks multiplication by max_threads. */
+        if (take(&off, c.max_threads, (size_t)cap * sizeof(struct ps3prof_arc_row), &o_arc_rows) ||
+            take(&off, c.max_threads, (size_t)idx * sizeof(uint32_t), &o_arc_index) || off > P_TOTAL_MAX)
+            return PS3DK_PROF_EINVAL;
+    }
+#endif
     p->block = (uint8_t *)pal_alloc(off);
     if (!p->block)
         return PS3DK_PROF_ENOMEM;
@@ -941,6 +1028,13 @@ static int init_impl(const ps3dk_prof_config *cfg_in, int *terminal)
         s->rg->mask = c.ring_records - 1;
         s->rg->slots = p->block + o_data + (size_t)i * c.ring_records * P_REC;
         s->rg->pub_len = (uint16_t *)(p->block + o_pub + (size_t)i * (((size_t)c.ring_records * 2 + 127) & ~(size_t)127));
+#ifdef PS3DK_PROF_WITH_ARCS
+        if (p->arc_options.max_arcs_per_thread) {
+            s->arc_rows = (struct ps3prof_arc_row *)(p->block + o_arc_rows) +
+                          (size_t)i * p->arc_options.max_arcs_per_thread;
+            s->arc_index = (uint32_t *)(p->block + o_arc_index) + (size_t)i * p->arc_index_capacity;
+        }
+#endif
     }
     if (pal_mutex_init(&p->thread_mutex) != 0) {
         rc = PS3DK_PROF_ENOMEM;

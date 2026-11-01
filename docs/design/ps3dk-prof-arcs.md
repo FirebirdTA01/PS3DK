@@ -271,3 +271,46 @@ input captures. It requires final verified companions and an identity-checked EL
 Automatic timing, not sampled CPU time, is the authority. Manual-only annotations
 cannot masquerade as automatic function timings. PC sampling belongs to a separate
 later file kind and capability path.
+# Candidate runtime ownership integration
+
+The host candidate compiled with `PS3DK_PROF_WITH_ARCS` binds one bounded
+collector to each existing timing slot, generation and incarnation. The
+private `arc_runtime.h` options are copied before init under the same pending
+configuration gate as the sink. A zero option disables integration. Rows and
+indices are reserved in the existing checked, 256 MiB-limited allocation;
+there is no warm-path allocation or new thread identity table. The installed
+archives do not yet enable this candidate guard.
+
+The producer's existing release acknowledgement remains its last write.
+Only the sole drainer reads known arc rows, after acquiring that acknowledgement.
+An ordinary retirement writes its timing record and synchronously offers the
+stable arc view before the slot becomes FREE. The callback runs outside both
+runtime mutexes with the drainer reentry guard set. It must copy or encode the
+borrowed view before accepting it. While it runs, the old slot remains held:
+a slow consumer temporarily lowers thread capacity and registrations can get
+EFULL. No live collector snapshot is permitted.
+
+The frozen frontier uses the same ACKED, RETIRED or NOT_QUIESCED classification
+as timing. A NOT_QUIESCED view contains identity only, no rows, COUNTS_UNKNOWN
+and unknown counters. A late acknowledgement cannot upgrade it. Generations
+accepted during ordinary drains are not offered again. A timing write failure
+or a nonzero consumer return is terminal; it cannot free failed storage or
+retry a partially accepted view. Consumers still own persistence for accepted
+generations; bounded historical spooling and the final timing-prefix binding
+are a later exporter increment.
+
+The final consumer receives the **same single frozen `unregistered_refusals`
+value** written to the timing trailer, even if every slot retired earlier.
+Combined completeness must reject a nonzero value. There is no extra arc
+registration counter: `regerr` describes descriptor registration. Frozen v1
+explicitly excludes ETHREAD from `unregistered_refusals`. Consequently an
+arc-enabled OS-id failure uses the existing terminal PAL-failure channel under
+the thread mutex, ordered with STOP. Manual-only behavior remains unchanged.
+A successful final callback means delivery, not complete counts or successful
+timing close; the later exporter must also validate the final timing result.
+
+Host lifecycle tests exercise both drain modes, repeated reuse, stale terminal
+TLS, STOP, delayed retirement, raw exits, terminal consumer failures and
+allocation rollback. Known and unknown views pass through the real serializer
+and reader as independent test captures. Those files are not evidence for the
+unimplemented paired exporter, compiler adapters or target overhead.

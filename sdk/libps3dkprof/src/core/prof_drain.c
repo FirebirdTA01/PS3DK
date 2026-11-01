@@ -339,6 +339,43 @@ corrupt:
     sink_fail(&p->snk, -2);
 }
 
+#ifdef PS3DK_PROF_WITH_ARCS
+/* Called only by the sole drainer, outside all runtime mutexes. For known
+ * states its caller acquired the owner's last-write ack; for unknown states
+ * it must not inspect even one byte of the mutable collector. Identity stays
+ * held until acceptance, so a slow consumer temporarily lowers capacity. */
+static int consume_arcs(prof *p, uint32_t slot_id, uint32_t generation,
+                        uint32_t incarnation, uint64_t os_id, const char *name, uint32_t state)
+{
+    struct ps3dk_prof_arc_view v = {0};
+    v.generation = generation;
+    v.thread.incarnation = incarnation;
+    v.thread.slot = slot_id;
+    v.thread.os_thread_id = os_id;
+    v.thread.name = name;
+    v.thread.state = (uint8_t)state;
+    if (state == ST_NOT_QUIESCED) {
+        v.thread.limit_flags = 2; /* COUNTS_UNKNOWN */
+        v.thread.attempted = v.thread.recorded = v.thread.refused = v.thread.lost = UINT64_MAX;
+    } else {
+        const struct ps3dk_prof_arc_collector *a = &p->slots[slot_id].arcs;
+        v.thread.rows = a->rows;
+        v.thread.row_count = a->row_count;
+        v.thread.limit_flags = a->limit_flags;
+        v.thread.attempted = a->attempted;
+        v.thread.recorded = a->recorded;
+        v.thread.refused = a->refused;
+    }
+    if (p->snk.failed)
+        return -1;
+    if (p->arc_options.consume(p->arc_options.ctx, &v) != 0) {
+        sink_fail(&p->snk, -5);
+        return -1; /* terminal, including partial acceptance; never retry */
+    }
+    return 0;
+}
+#endif
+
 /* One ordinary drain: steps 1-4 of 5.4 with the r2 3.1 snapshot protocol.  Never runs after the frontier. */
 int p_drain_once(prof *p)
 {
@@ -407,9 +444,28 @@ int p_drain_once(prof *p)
             cnt++;
             if (cb->limit)
                 d->any_retired_limit = 1;
-            d->retired_gen[sn->slot] = sn->generation;
+#ifdef PS3DK_PROF_WITH_ARCS
+            if (!p->arc_options.max_arcs_per_thread)
+#endif
+                d->retired_gen[sn->slot] = sn->generation;
         }
         list_close(p, &cnt);
+#ifdef PS3DK_PROF_WITH_ARCS
+        if (p->arc_options.max_arcs_per_thread) {
+            if (p->snk.failed)
+                return -1; /* no successful transfer, therefore no reuse */
+            for (i = 0; i < n; ++i) {
+                const snap *sn = &d->snaps[i];
+                const slot *s = &p->slots[sn->slot];
+                if (!sn->retire_now)
+                    continue;
+                if (consume_arcs(p, sn->slot, sn->generation, sn->incarnation, s->os_id, s->name, ST_RETIRED))
+                    return -1;
+                /* Completion means BOTH timing output and arc acceptance. */
+                d->retired_gen[sn->slot] = sn->generation;
+            }
+        }
+#endif
         HOOK(drainer_before_free);
         if (p_lock(p, &p->thread_mutex) != 0)
             goto lockfail;
@@ -554,6 +610,24 @@ int p_quiesce_freeze_seal(prof *p)
         }
         list_close(p, &cnt);
 
+#ifdef PS3DK_PROF_WITH_ARCS
+        if (p->arc_options.max_arcs_per_thread) {
+            for (i = 0; i < d->nfront; ++i) {
+                const fentry *e = &d->front[i];
+                if (!e->done && consume_arcs(p, e->slot, e->generation, e->incarnation,
+                                             e->os_id, e->name, e->cls))
+                    goto close_capture;
+            }
+            if (p->snk.failed)
+                goto close_capture;
+            /* The EXACT frozen trailer value, not a second load/counter.
+             * Required even when ordinary drains retired every producer. */
+            if (p->arc_options.finish(p->arc_options.ctx, unreg) != 0) {
+                sink_fail(&p->snk, -5);
+                goto close_capture;
+            }
+        }
+#endif
         /* The TRAILER: ACKED and NOT_QUIESCED entries (6). */
         anylim = d->any_retired_limit;
         for (i = 0; i < d->nfront; i++) {
@@ -591,6 +665,9 @@ int p_quiesce_freeze_seal(prof *p)
         if (trailer && p->snk.kind == 2 && p->snk.cb.flush && p->snk.cb.flush(p->snk.cb.ctx) < 0)
             sink_fail(&p->snk, -4);   /* B5: a flush failure is a sink failure before close */
     }
+#ifdef PS3DK_PROF_WITH_ARCS
+close_capture:
+#endif
     sink_close(p);
 
     if (p->snk.failed || !trailer)

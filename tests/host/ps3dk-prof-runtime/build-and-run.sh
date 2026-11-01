@@ -529,6 +529,25 @@ else
     tail -n 12 "$out/arc-collector.log"
 fi
 
+# Candidate arc ownership uses real core/drain/PAL, separate from the frozen
+# manual registry. Each sanitizer runs the same lifecycle schedules and reader
+# checks; the TSan driver requires positive and negative detection controls.
+arc_lifecycle_ok=1
+for arc_variant in plain address thread; do
+    arc_args=()
+    if [ "$arc_variant" != plain ]; then arc_args=(--sanitize "$arc_variant"); fi
+    if ! python3 "$here/arcs-lifecycle-test.py" "$out/arc-lifecycle-$arc_variant" --reader "$auto_reader" \
+        "${arc_args[@]}" >"$out/arc-lifecycle-$arc_variant.log" 2>&1; then
+        arc_lifecycle_ok=0
+        tail -n 12 "$out/arc-lifecycle-$arc_variant.log"
+    fi
+done
+if [ "$arc_lifecycle_ok" = 1 ]; then
+    ok "arc incarnation and retirement integration (arc-lifecycle-*.log)"
+else
+    bad "arc incarnation and retirement integration (arc-lifecycle-*.log)"
+fi
+
 echo "== ps3dk-prof runtime host tests: $pass passed, $fail failed, $skip skipped, $notrun registry tests not run, $recfail recorder failures"
 { echo "pass $pass"; echo "fail $fail"; echo "skip $skip"; echo "not_run $notrun"; echo "recorder_failures $recfail"; } >"$out/counts.txt"
 [ "$fail" -eq 0 ] && [ "$recfail" -eq 0 ]
