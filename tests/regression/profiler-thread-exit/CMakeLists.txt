@@ -34,6 +34,8 @@ foreach(abi ilp32 lp64)
         else()
             target_compile_definitions(${target} PRIVATE EXPECT_EXIT_HOOK=0)
         endif()
+        # Keep -L explicit: CMake elides implicit link directories, allowing
+        # GCC's toolchain mirror to hide a newly installed SDK runtime archive.
         if(abi STREQUAL "lp64")
             target_compile_options(${target} PRIVATE -mlp64)
             target_link_options(${target} PRIVATE -mlp64)
@@ -41,8 +43,6 @@ foreach(abi ilp32 lp64)
         else()
             target_link_options(${target} PRIVATE "-L${PS3DK}/ppu/lib")
         endif()
-        # Keep this explicit: CMake elides implicit link directories, allowing
-        # GCC's toolchain mirror to hide a newly installed SDK runtime archive.
         target_link_options(${target} PRIVATE "-Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/${target}.map,--cref")
         ps3_add_self(${target})
       endforeach()

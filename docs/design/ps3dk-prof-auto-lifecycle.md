@@ -3,7 +3,8 @@
 This records the automatic runtime's integration requirements. The optional
 thread-exit notification is implemented; automatic startup, compiler adapters,
 capture finalization and the one-switch demonstration remain separate work.
-The manual runtime and its v1 capture validity rules remain unchanged.
+The manual runtime and its v1 capture format are developed separately on the
+profiler branch; this notification does not install or enable that runtime.
 
 ## Thread retirement boundary
 
@@ -59,7 +60,7 @@ support claims.
 | `quick_exit` | Does not run the normal fini path | Incomplete/no capture; no normal-finalization claim |
 | sysutil exit-game callback | Depends on the application's exit path | Normal main return may complete; `exit`, raw process exit or abandoned workers follow the corresponding rows above |
 
-The existing format expresses an unacknowledged producer with a `NOT_QUIESCED`
+The profiler branch's v1 format expresses an unacknowledged producer with a `NOT_QUIESCED`
 entry and `end_flags` bit0 at the shutdown frontier. Missing final drainage
 produces `NoTrailer` and/or `TornTail` in the host reader. Open spans retain the
 format's explicit validity/censoring behavior. The automatic integration must
