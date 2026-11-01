@@ -520,6 +520,15 @@ else
     tail -n 12 "$out/automatic-lifecycle.log"
 fi
 
+# Pure Task4 arc collection is distinct from compiler hooks and the frozen
+# manual registry. Inspect its captures with the same production reader.
+if python3 "$here/arcs-collector-test.py" "$out/arc-collector" --reader "$auto_reader" >"$out/arc-collector.log" 2>&1; then
+    ok "bounded arc collector (arc-collector.log)"
+else
+    bad "bounded arc collector (arc-collector.log)"
+    tail -n 12 "$out/arc-collector.log"
+fi
+
 echo "== ps3dk-prof runtime host tests: $pass passed, $fail failed, $skip skipped, $notrun registry tests not run, $recfail recorder failures"
 { echo "pass $pass"; echo "fail $fail"; echo "skip $skip"; echo "not_run $notrun"; echo "recorder_failures $recfail"; } >"$out/counts.txt"
 [ "$fail" -eq 0 ] && [ "$recfail" -eq 0 ]

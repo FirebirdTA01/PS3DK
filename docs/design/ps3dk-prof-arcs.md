@@ -124,6 +124,50 @@ No timing format field is repurposed and no invented timing event represents an
 entry-only arc. A snapshot does not require exact equality between mcount calls
 and cyg spans: inlining/tail calls and their different domains are explicit.
 
+## Bounded collector and ownership
+
+The internal collector in `sdk/libps3dkprof/src/hooks/arcs.c` uses caller-owned
+row and hash-index storage. One producer owns each instance. Initialization is
+cold; recording neither allocates nor locks nor calls the PAL or serializer.
+Storage and the collector must be disjoint, live for the entire collection,
+and untouched by the caller after initialization. Only acknowledged, stable
+rows may be passed to the serializer. This pure collector is not yet wired
+into the installed archives or compiler entry points.
+
+At every observable event boundary, `attempted = recorded + refused` and the
+sum of the retained edge counts equals `recorded`. Invalid PCs/flags and new
+edges beyond capacity increment refused; existing edges remain recordable at
+capacity. This accumulator never evicts a retained row, so it adds no lost
+events. Full-width PCs determine identity, including after a hash collision.
+
+Every counter increment is checked before any part of the event is stored.
+`UINT64_MAX` itself is representable. If the next event cannot be represented
+in any affected counter, COUNTER_LIMIT latches and all counters, rows and
+indices freeze together. All later observations remain frozen. Limits/refusals
+disqualify complete totals even when the preserved counters still balance.
+Since an edge count is at most recorded, which is at most attempted, a hot
+edge cannot overflow before both totals; tests seed valid states at their
+shared boundary and at mixed-edge/refusal boundaries.
+
+Later integration must share the timing producer's incarnation and its final
+release publication of `ack_retire`. That publication remains the last producer
+write; a separate arc-thread side table or reads of live mutable rows cannot
+supply a certified snapshot. Thread registration, snapshots and compiler hooks
+are not implemented by this collector.
+
+## Required mcount prologue measurements
+
+Before wiring `_mcount`, inspect actual GCC16 linked disassembly for ILP32 and
+LP64 at O0, O2 and Os, including shrink-wrapped paths. Pin where the profile
+call occurs relative to frame allocation, where the incoming LR is saved, and
+whether that save is `stw` or `std`. A call before `stdu` may require the current
+stack pointer's slot, while a call after frame allocation may require the
+backchain's slot; do not assume one recipe from the optimization level alone.
+Read the width actually stored: a 4-byte LR save is not a valid 8-byte value
+with a known low word. Record the compiler/input hashes and concrete per-path
+rules with that adapter's design review. The earlier no-op-hook ABI measurements
+do not establish a universal backchain+16 rule or production register preservation.
+
 ## Binding automatic timings to functions without changing .prof
 
 Automatic cyg descriptors use scope1, file empty, line0, logical_tag exactly
