@@ -1,8 +1,9 @@
 # Automatic profiler lifecycle contract
 
 This records the automatic runtime's integration requirements. The optional
-thread-exit notification is implemented; automatic startup, compiler adapters,
-capture finalization and the one-switch demonstration remain separate work.
+thread-exit notification and automatic startup/finalization object are implemented.
+The lifecycle tests build private archives; SDK build/install integration,
+compiler adapters and the one-switch demonstration remain separate work.
 The manual runtime and its v1 capture validity rules remain unchanged.
 
 ## Thread retirement boundary
@@ -68,11 +69,13 @@ warning or a successful join cannot replace them.
 
 ## Startup and finalization requirements
 
-Use internal constructor priority100 after the SDK heap/syscall setup and the
-libstdc++ priority90/98 constructors, before ordinary user constructors. This
-precedes newlib's priority105 lock constructor: allocating or taking a libc
-lock therefore relies on the lazy metaLock fix in newlib patch0004 (b7327b5c).
-Keep an early-allocation/lock regression on both ABIs when adding startup.
+Internal constructor priority100 follows the libc runtime ladder (heap83,
+syscall table84, metaLock85, finalization86) and libstdc++ priority90/98,
+before ordinary user constructors at101. Libc locks are already live; newlib
+patch0004 also retains thread-safe lazy creation for earlier callers.
+The priority101 allocation/capture regression runs on both ABIs. The drain
+thread exists before user constructors and main and accesses only PAL and
+lock-safe libc/runtime paths. It does not invoke application code.
 
 Finalization at destructor100 follows ordinary user destructors. An `atexit`
 callback registered at startup is too early for user attribute destructors.
@@ -80,6 +83,26 @@ libstdc++ priority90/98 destructors run later; keep libstdc++, CRT, profiler,
 platform layer and transport dependencies uninstrumented, with a link-map and
 compile-flag exclusion check. Write capture data through filesystem syscalls,
 not stdio teardown assumptions.
+
+The automatic object uses the runtime defaults (64 producer slots, 1024
+descriptors, 4096 records per ring, 10 ms drain interval, 1 s quiescence limit),
+with thread mode and first-use registration enabled. The file sink defaults to
+`/dev_hdd0/tmp/app-<timebase>.prof` on LV2 with exclusive creation. Initialization
+and finalization failures emit an unbuffered diagnostic; missing artifacts,
+trailers and unacknowledged producers retain the existing reader verdicts.
+An open span is censored with unknown duration; it does not alone invalidate
+an otherwise valid lane or imply transport failure.
+
+`tests/host/ps3dk-prof-runtime/auto-lifecycle-test.py` exercises real captures
+through the production reader, including abnormal exits, unretired producers,
+initialization failure and archive linkage without the startup anchor. It runs
+from the existing host driver. Host cleanup explicitly models the SDK's final
+notification; `tests/sdk/ps3dk-prof-auto` instead uses the actual linked SDK
+notification after TLS destruction and two pthread-key rounds. These fixtures
+use manual zones to test lifecycle, not dummy compiler hooks. Their private
+archive is suitable for this increment; once `libps3prof.a` is installed by the
+SDK build, the target row must link that installed archive through the forced
+`__ps3dk_prof_startup_anchor` symbol, verifying extraction of its init/fini arrays.
 
 Do not demonstrate `PS3_PROFILE=ON` using dummy compiler hooks or an empty
 capture. The unchanged-source counts and timings gate requires the real

@@ -504,6 +504,22 @@ for p in PROBE_G_COPY PROBE_G_MOVE; do
     fi
 done
 
+# Automatic lifecycle is a separate integration group; keep the frozen manual
+# registry unchanged. Its log reports the individual capture/reader totals.
+auto_reader="${READER:-}"
+if [ -z "$auto_reader" ]; then
+    cargo build --locked --manifest-path "$root/tools/Cargo.toml" -p ps3dk-prof
+    auto_target=$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/tools/Cargo.toml" |
+        python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+    auto_reader="$auto_target/debug/ps3dk-prof"
+fi
+if python3 "$here/auto-lifecycle-test.py" "$out/automatic-lifecycle" --reader "$auto_reader" >"$out/automatic-lifecycle.log" 2>&1; then
+    ok "automatic lifecycle captures (automatic-lifecycle.log)"
+else
+    bad "automatic lifecycle captures (automatic-lifecycle.log)"
+    tail -n 12 "$out/automatic-lifecycle.log"
+fi
+
 echo "== ps3dk-prof runtime host tests: $pass passed, $fail failed, $skip skipped, $notrun registry tests not run, $recfail recorder failures"
 { echo "pass $pass"; echo "fail $fail"; echo "skip $skip"; echo "not_run $notrun"; echo "recorder_failures $recfail"; } >"$out/counts.txt"
 [ "$fail" -eq 0 ] && [ "$recfail" -eq 0 ]
