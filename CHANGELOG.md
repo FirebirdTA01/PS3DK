@@ -18,6 +18,11 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **DualShock 3 bench sample.** `samples/input/ds3-bench` shows buttons, sticks
+  and pressure values and fires 200 ms pulses on each rumble motor, with port
+  selection, pressure-mode restore, length-checked records and reconnect
+  handling. Its pad lifecycle has native host tests.
+
 - **RPCS3 source-debug launcher.** `ps3_add_debug_rpcs3()` adds a debug target,
   loads the unstripped ELF in GDB and holds short programs before main while
   attaching, using a private emulator configuration. The sample covers PPU

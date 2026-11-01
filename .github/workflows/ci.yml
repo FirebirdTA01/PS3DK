@@ -294,6 +294,9 @@ jobs:
       - name: Test Move sample input deadlines and cleanup
         run: bash tests/host/gem-session-test.sh
 
+      - name: Test DS3 sample pad lifecycle, pulses and reporter
+        run: bash tests/host/ds3-bench-test.sh
+
       - name: Test Move sample builds and imports in both ABIs
         run: bash tests/sdk/gem-basic-build-test.sh
 
