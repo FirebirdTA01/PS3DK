@@ -314,3 +314,28 @@ TLS, STOP, delayed retirement, raw exits, terminal consumer failures and
 allocation rollback. Known and unknown views pass through the real serializer
 and reader as independent test captures. Those files are not evidence for the
 unimplemented paired exporter, compiler adapters or target overhead.
+
+## Bounded body stream
+
+The private `prof_arcs_stream` encoder accepts stable runtime views and emits
+only THREADS, ARCS and RETIRED chunks, starting at sequence2. Its caller owns
+the output callback, per-slot transition array and at most max_threads active
+final entries. It neither opens files nor installs itself in the runtime.
+The caller supplies a byte budget; each whole view is checked against that
+budget and sequence limits before its first write. A failed callback is
+terminal and may have left partial output. No later callback or successful
+finish can erase that failure. Input pointers are never retained.
+
+The runtime allocator supplies global incarnation uniqueness and the collector
+supplies unique row keys. The stream checks per-slot generation/incarnation
+ordering and permits reuse only after RETIRED. Production reader tests reject
+both cross-slot duplicate incarnations and duplicate keys; those are explicit
+backstops for this private trusted-input boundary. Counter equations, PCs,
+UTF-8 names, capacities and final-state rules are checked before serialization.
+
+`finish` freezes input and the existing unregistered-refusal count. It does
+not emit a final TRAILER or certify a timing capture. Append-only spool replay,
+exact finalized timing-prefix binding, file I/O and archive installation are
+later increments. Host fixtures wrap the body with an independently checked
+envelope and compare its bytes with the existing one-shot writer; those test
+wrappers are not a production exporter.

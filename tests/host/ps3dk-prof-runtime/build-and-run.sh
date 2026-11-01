@@ -548,6 +548,24 @@ else
     bad "arc incarnation and retirement integration (arc-lifecycle-*.log)"
 fi
 
+# Pure bounded body encoding; the test-only envelope uses the existing writer
+# and production reader. No file adapter or timing binding is installed here.
+arc_stream_ok=1
+for arc_variant in plain address; do
+    arc_args=()
+    if [ "$arc_variant" = address ]; then arc_args=(--sanitize); fi
+    if ! python3 "$here/arcs-stream-test.py" "$out/arc-stream-$arc_variant" --reader "$auto_reader" \
+        "${arc_args[@]}" >"$out/arc-stream-$arc_variant.log" 2>&1; then
+        arc_stream_ok=0
+        tail -n 12 "$out/arc-stream-$arc_variant.log"
+    fi
+done
+if [ "$arc_stream_ok" = 1 ]; then
+    ok "bounded arc body stream (arc-stream-*.log)"
+else
+    bad "bounded arc body stream (arc-stream-*.log)"
+fi
+
 echo "== ps3dk-prof runtime host tests: $pass passed, $fail failed, $skip skipped, $notrun registry tests not run, $recfail recorder failures"
 { echo "pass $pass"; echo "fail $fail"; echo "skip $skip"; echo "not_run $notrun"; echo "recorder_failures $recfail"; } >"$out/counts.txt"
 [ "$fail" -eq 0 ] && [ "$recfail" -eq 0 ]
