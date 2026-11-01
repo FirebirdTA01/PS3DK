@@ -1,0 +1,6 @@
+void main(float3 position : POSITION, uniform float4 motion,
+          out float4 clip : POSITION, out float2 uv : TEXCOORD0)
+{
+    clip=float4(position,1);
+    uv=position.xy*0.5+0.5+motion.xy;
+}

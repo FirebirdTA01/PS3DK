@@ -1,0 +1,4 @@
+void main(float2 uv : TEXCOORD0, out float4 color : COLOR)
+{
+    color=float4(frac(uv.x)*0.25,frac(uv.y)*0.3,0.15,1);
+}
