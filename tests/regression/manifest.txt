@@ -444,3 +444,9 @@ psgl-sampler-arrays-lp64,tests/regression/psgl-sampler-arrays/psgl-sampler-array
 
 psgl-cube-map-ilp32,tests/regression/psgl-cube-map/psgl-cube-map-ilp32.fake.self,180,RAN-CLEAN,(?m)^PSGL_CUBE_OK checks=630 failures=0\r?$,PSGL_CUBE_FAIL
 psgl-cube-map-lp64,tests/regression/psgl-cube-map/psgl-cube-map-lp64.fake.self,180,RAN-CLEAN,(?m)^PSGL_CUBE_OK checks=630 failures=0\r?$,PSGL_CUBE_FAIL
+
+# Installed librt profiler thread-exit notification: absent and present weak links.
+profiler-thread-exit-ilp32-absent,tests/regression/profiler-thread-exit/profiler-thread-exit-ilp32-absent.fake.self,30,RAN-CLEAN,(?m)^PROFILER_THREAD_EXIT tests=64 pass=64 fail=0 hook=0\r?$,profiler-thread-exit: .* FAIL
+profiler-thread-exit-ilp32-present,tests/regression/profiler-thread-exit/profiler-thread-exit-ilp32-present.fake.self,30,RAN-CLEAN,(?m)^PROFILER_THREAD_EXIT tests=64 pass=64 fail=0 hook=1\r?$,profiler-thread-exit: .* FAIL
+profiler-thread-exit-lp64-absent,tests/regression/profiler-thread-exit/profiler-thread-exit-lp64-absent.fake.self,30,RAN-CLEAN,(?m)^PROFILER_THREAD_EXIT tests=64 pass=64 fail=0 hook=0\r?$,profiler-thread-exit: .* FAIL
+profiler-thread-exit-lp64-present,tests/regression/profiler-thread-exit/profiler-thread-exit-lp64-present.fake.self,30,RAN-CLEAN,(?m)^PROFILER_THREAD_EXIT tests=64 pass=64 fail=0 hook=1\r?$,profiler-thread-exit: .* FAIL
