@@ -21,6 +21,10 @@ set(SAMPLE_BUILD_ID candidate CACHE STRING "Exact build/source identity for capt
 add_executable(heterogeneous-workload source/main.c source/spu_pool.c source/scene.c)
 target_compile_features(heterogeneous-workload PRIVATE c_std_11)
 target_compile_options(heterogeneous-workload PRIVATE -O2 -g -Wall -Wextra -Werror)
+# Zone descriptors record __FILE__: store repository-relative paths in
+# captures, not the absolute path of the machine that built the sample.
+get_filename_component(sample_repo_root "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+target_compile_options(heterogeneous-workload PRIVATE "-ffile-prefix-map=${sample_repo_root}/=")
 target_include_directories(heterogeneous-workload PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../gcm/common" "${PS3DK}/ppu/include")
 target_compile_definitions(heterogeneous-workload PRIVATE PS3DK_PROF=$<BOOL:${SAMPLE_PROFILING}>
   SAMPLE_PHASE_SECONDS=${SAMPLE_PHASE_SECONDS} SAMPLE_SESSION_SECONDS=${SAMPLE_SESSION_SECONDS}
