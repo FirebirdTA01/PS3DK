@@ -402,8 +402,9 @@ pt_self_slot_locked(struct pt_thread **out)
 /* Run the thread-specific-data destructors for the calling thread.  The
  * table lock is dropped around each destructor: POSIX lets a destructor
  * call back into the pthread API, and holding a process-wide lock across
- * arbitrary user code is how a shim like this deadlocks. */
-static void
+ * arbitrary user code is how a shim like this deadlocks. Return 0 if a lock
+ * failure prevented the destructor rounds from completing. */
+static int
 pt_run_tsd_destructors(struct pt_thread *self)
 {
 	int iteration;
@@ -417,7 +418,7 @@ pt_run_tsd_destructors(struct pt_thread *self)
 			void *value;
 
 			if (pt_table_lock() != 0)
-				return;
+				return 0;
 			value      = self->tsd[i];
 			destructor = pt_keys[i].used ? pt_keys[i].destructor : NULL;
 			if (value != NULL && destructor != NULL)
@@ -433,8 +434,9 @@ pt_run_tsd_destructors(struct pt_thread *self)
 		}
 
 		if (!progress)
-			return;
+			return 1;
 	}
+	return 1;
 }
 
 /* ------------------------------------------------------------------ *
@@ -521,6 +523,12 @@ __lv2_tls_dtors_run(void)
  * phase that runs before any slot exists. */
 static __thread int pt_in_cleanup;
 
+/* Optional automatic-profiler notification; deliberately not a public API.
+ * Undefined in unprofiled applications. The automatic archive must force its
+ * own startup object into the link; this weak reference does not extract it.
+ * Called only after all user TLS/key cleanup, outside pt_table_lock. */
+extern void __ps3dk_prof_thread_exit(void) __attribute__((weak));
+
 /* Mark SELF's cleanup as started; false if it already was. */
 static int
 pt_cleanup_claim(struct pt_thread *self)
@@ -539,6 +547,8 @@ pt_cleanup_claim(struct pt_thread *self)
 static void
 pt_thread_cleanup(struct pt_thread *self, void *retval)
 {
+	int cleanup_ok = 1;
+
 	if (pt_in_cleanup)
 		return;
 	if (self != NULL && !pt_cleanup_claim(self))
@@ -547,11 +557,24 @@ pt_thread_cleanup(struct pt_thread *self, void *retval)
 
 	__lv2_tls_dtors_run();
 
-	if (self == NULL && pt_self_cookie != NULL && pt_cleanup_claim(pt_self_cookie))
-		self = pt_self_cookie;
+	if (self == NULL && pt_self_cookie != NULL) {
+		if (pt_cleanup_claim(pt_self_cookie))
+			self = pt_self_cookie;
+		else
+			cleanup_ok = 0;
+	}
+
+	if (self != NULL)
+		cleanup_ok = pt_run_tsd_destructors(self);
+	/* pt_in_cleanup already guards reentry. A destructor that exits early
+	 * never reaches this notification; its producer remains unacknowledged.
+	 * A failed table lock also leaves the producer unacknowledged.
+	 * Cancellation is ENOSYS, so a refused cancel does not retire a thread. */
+	/* Invariant: invoke the hook outside the recursive thread-table lock. */
+	if (cleanup_ok && __ps3dk_prof_thread_exit != NULL)
+		__ps3dk_prof_thread_exit();
 
 	if (self != NULL) {
-		pt_run_tsd_destructors(self);
 		if (pt_table_lock() == 0) {
 			self->retval   = retval;
 			self->finished = 1;
