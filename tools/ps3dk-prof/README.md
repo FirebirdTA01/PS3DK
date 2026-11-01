@@ -6,9 +6,18 @@ Reads, checks and reports ps3dk-prof capture files, format v1. The normative for
 ```
 ps3dk-prof check <file>    print the verdict
 ps3dk-prof report <file>   print the verdict and the full report
+ps3dk-prof check-pair <file.arcs> <file.prof>   verify a final companion pair
 ```
 
 Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error.
+
+`check-pair` returns 0 only for a verified FINAL pair. Refused pairs and matching
+progress snapshots return 1; progress output is labelled `PROVISIONAL`.
+Malformed arcs return 2 and usage/I/O errors return 3. Timing problems inside
+the pair, including malformed bound bytes, are pair refusals (exit 1); run
+`check` on the `.prof` for its own malformed/incomplete code. The pair check
+also refuses unregistered producers even if both standalone files are COMPLETE.
+See [the companion contract](../../docs/design/ps3dk-prof-arcs.md#checking-a-companion-pair).
 
 ## Verdicts: structural pass versus whole-file verdict
 

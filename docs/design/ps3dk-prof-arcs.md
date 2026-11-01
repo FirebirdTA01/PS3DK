@@ -429,6 +429,24 @@ complete observations, a certified pair or publication at a final filename.
 Nonzero unregistered refusals leave standalone arc semantics unchanged; the
 production pair matcher rejects exact combined output. Host tests feed the real
 runtime/collector/stream into the coordinator, then use production readers and a
-test-only Rust pair oracle that exits nonzero on refusal. A public pair CLI and
-its exit-status regression, actual filesystem adapter, publication names and
-installed startup wiring remain open gates.
+test-only Rust pair oracle that exits nonzero on refusal. The public pair CLI
+below also grades these rules. The actual filesystem adapter, publication names
+and installed startup wiring remain open gates.
+
+## Checking a companion pair
+
+Run `ps3dk-prof check-pair capture.arcs capture.prof`. Exit 0 and
+`COMPLETE FINAL PAIR` mean the production matcher verified a FINAL pair.
+Matching progress snapshots print `PROVISIONAL` and exit 1; they are never
+certified final data. A pairing refusal prints `PAIR REFUSED` with its reason
+and exits 1, including nonzero timing registration refusals even when both
+standalone files are COMPLETE.
+
+Malformed arcs return 2; usage and filesystem I/O errors return 3. Timing
+problems inside the pair, including malformed bound bytes, are pair refusals,
+exit 1. Run `ps3dk-prof check capture.prof` for that file's own malformed (2) or
+incomplete (1) code. This asymmetry preserves the matcher's error boundary
+without classifying diagnostic strings. The command validates only the bound
+timing prefix for progress snapshots, so an unrelated later tail cannot change
+that snapshot's provisional result. Existing standalone commands retain their
+verdicts and exit codes.

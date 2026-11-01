@@ -14,9 +14,13 @@ const USAGE: &str = "usage:
   ps3dk-prof report <file>   print the verdict and the full report
   ps3dk-prof check-arcs <file>   validate a binary arc companion
   ps3dk-prof arcs-json <file>    export exact arc observations as JSON
+  ps3dk-prof check-pair <file.arcs> <file.prof>   verify a final companion pair
   ps3dk-prof -h | --help | -v | --version
 
-exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error";
+exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error
+check-pair: 0 verified FINAL pair; 1 refused or PROVISIONAL; 2 malformed arcs;
+3 usage or I/O error. Timing problems inside the pair, including malformed bound timing
+bytes, are pair refusals (exit 1). Run check on the .prof for its own verdict/code.";
 
 fn version_line() -> String {
     format!(
@@ -25,8 +29,55 @@ fn version_line() -> String {
     )
 }
 
+fn check_pair(arcs_path: &str, timing_path: &str) -> ExitCode {
+    use ps3dk_prof::{arcs::read_arcs, companions::match_companions};
+
+    let read = |path: &str| {
+        std::fs::read(path).map_err(|e| {
+            eprintln!("ps3dk-prof: {path}: {e}");
+            ExitCode::from(3)
+        })
+    };
+    let arcs_bytes = match read(arcs_path) {
+        Ok(bytes) => bytes,
+        Err(code) => return code,
+    };
+    let timing_bytes = match read(timing_path) {
+        Ok(bytes) => bytes,
+        Err(code) => return code,
+    };
+    let arcs = match read_arcs(&arcs_bytes) {
+        Ok(arcs) => arcs,
+        Err(e) => {
+            println!("{e}");
+            return ExitCode::from(2);
+        }
+    };
+    // The matcher owns prefix parsing: inspecting the entire timing file here
+    // would incorrectly reject a progress snapshot for unrelated later bytes.
+    match match_companions(&arcs, &timing_bytes) {
+        Ok(pair) if pair.is_final() => {
+            println!("COMPLETE FINAL PAIR");
+            ExitCode::SUCCESS
+        }
+        Ok(_) => {
+            println!("PROVISIONAL: matching progress snapshot; not a certified final pair");
+            ExitCode::from(1)
+        }
+        Err(reason) => {
+            println!("PAIR REFUSED: {reason}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [cmd, arcs, timing] = args.as_slice() {
+        if cmd == "check-pair" {
+            return check_pair(arcs, timing);
+        }
+    }
     let (full, path) = match args.as_slice() {
         [flag] if flag == "-h" || flag == "--help" => {
             println!("{}\n{USAGE}", version_line());

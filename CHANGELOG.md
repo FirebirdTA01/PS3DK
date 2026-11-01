@@ -16,6 +16,12 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **Profiler companion validation.** `ps3dk-prof check-pair` verifies an arc
+  capture against its timing companion and returns success only for a verified
+  final pair. Refused and provisional pairs return a failing exit status.
+
 ### Changed
 
 - **Pinned Ubuntu release for builds.** CI and release builds run on the
