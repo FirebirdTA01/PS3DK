@@ -91,6 +91,17 @@ pub fn match_companions(arcs: &ArcCapture, bytes: &[u8]) -> Result<VerifiedPair,
     {
         return Err("final companions must both be complete".into());
     }
+    // Frozen v1 keeps this counter informational for standalone timing.
+    // A missing producer nevertheless prevents exact FINAL combined counts.
+    if h.final_snapshot
+        && analysis
+            .capture
+            .trailer
+            .as_ref()
+            .is_some_and(|t| t.unregistered_refusals != 0)
+    {
+        return Err("final companions contain unregistered producers".into());
+    }
     Ok(VerifiedPair {
         arcs: arcs.clone(),
         timing: analysis,

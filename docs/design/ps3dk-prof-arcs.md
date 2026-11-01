@@ -112,6 +112,13 @@ without racing writes; unacknowledged threads use state3. That runtime handshake
 is implemented/tested in the later lifecycle/transport tasks, not assumed by a
 host parser of encoded test bytes.
 
+A FINAL pair also requires the timing trailer's `unregistered_refusals` to be
+zero, including when no thread was registered. Frozen v1 treats this field as
+informational for standalone timing, so both artifacts can independently be
+COMPLETE while the pair is refused: missing producers prevent exact combined
+counts. This check does not change either standalone verdict or wire format.
+Nonfinal snapshots remain provisional and retain the counter for inspection.
+
 For progress matching, parse/analyze ONLY the bound prefix. Later appended bytes,
 registrations, retirements or even an invalid later tail cannot change this older
 snapshot's result. Compare the complete set of thread incarnations declared in
