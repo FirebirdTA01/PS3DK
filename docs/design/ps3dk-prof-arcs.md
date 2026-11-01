@@ -341,9 +341,9 @@ backstops for this private trusted-input boundary. Counter equations, PCs,
 UTF-8 names, capacities and final-state rules are checked before serialization.
 
 `finish` freezes input and the existing unregistered-refusal count. It does
-not emit a final TRAILER or certify a timing capture. Append-only spool replay,
-exact finalized timing-prefix binding, file I/O and archive installation are
-later increments. Host fixtures wrap the body with an independently checked
+not emit a final TRAILER or certify a timing capture. The bounded replay
+primitive below checks body delivery; finalized timing-prefix binding, file I/O
+and archive installation are later increments. Host fixtures wrap the body with an independently checked
 envelope and compare its bytes with the existing one-shot writer; those test
 wrappers are not a production exporter.
 
@@ -369,4 +369,32 @@ join failure. It does not imply complete observations: NOT_QUIESCED or recovered
 errors can still have a fully finalized byte stream. Negative or invalid sink
 responses may have unreported side effects, so diagnostic accepted-byte metadata
 on a failed I/O path must never authorize publication. This record does not yet
-replay a spool or publish an arc file; those are the next exporter steps.
+publish an arc file; the final coordinator remains a later exporter step.
+
+## Bounded body replay
+
+The private body stream records an IEEE CRC32 over complete chunks only after
+its spool callback reports success. A failed callback makes the stream terminal,
+even if it wrote some bytes. Only a successfully finished stream can be replayed;
+expected length and CRC come from that stream, not caller-supplied metadata.
+
+Replay is synchronous, single-owner and allocation-free, with caller-provided
+disjoint scratch of 1 to 65536 bytes. The source is this capture's immutable
+spool positioned at byte zero, not an arbitrary external artifact. Positive
+read counts must fit the request, zero means EOF, and negative means failure.
+Short reads are accepted; adapters own retries. A valid attempt is latched before
+any I/O so repeats and callback reentry cannot restart partially written output.
+
+After exactly the expected byte count, replay requires a one-byte read to return
+EOF and the computed CRC to match. Truncation, extra tail, corruption, invalid
+read counts and sink errors terminate the attempt. Success means body delivery
+only, not a valid combined capture or completed output flush/close. No trailer
+is emitted here. The later coordinator must check timing finalization and refuse
+to append a final trailer after any replay failure. CRC detects accidental
+corruption; it is not authentication or an external-spool validator.
+
+Bytes are forwarded before the CRC verdict, so failed output may contain invalid
+or truncated body data. The future filesystem adapter must keep failed names
+distinct from published captures (or rename an exclusive temporary file only
+after trailer, flush and close succeed). That publication choice and actual
+filesystem operations remain an explicit 3c design gate.

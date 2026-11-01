@@ -23,8 +23,8 @@ static int text_length(const char *s, uint32_t *length) {
 static void number(unsigned char *p, uint64_t v, unsigned n) {
     for (unsigned i=0; i<n; ++i) p[i]=(unsigned char)(v>>(8*i));
 }
-static uint32_t crc32(const unsigned char *p, size_t n) {
-    uint32_t crc=UINT32_MAX;
+static uint32_t crc32_extend(uint32_t crc, const unsigned char *p, size_t n) {
+    crc=~crc;
     for (size_t i=0; i<n; ++i) {
         crc^=p[i];
         for (unsigned bit=0; bit<8; ++bit) crc=(crc>>1)^(UINT32_C(0xedb88320)&(0u-(crc&1)));
@@ -35,11 +35,12 @@ static uint32_t crc32(const unsigned char *p, size_t n) {
  * for the WHOLE view. A callback failure may have written a partial chunk. */
 static int chunk(struct ps3dk_prof_arc_stream *s, unsigned char *b, uint32_t kind, uint32_t len) {
     number(b,kind,4); number(b+4,len,4); number(b+8,s->next_sequence,8);
-    number(b+16+len,crc32(b,16+len),4);
+    number(b+16+len,crc32_extend(0,b,16+len),4);
     if (s->write_all(s->ctx,b,20+len)!=0) {
         s->error=PS3DK_PROF_STREAM_IO;
         return s->error;
     }
+    s->body_crc32=crc32_extend(s->body_crc32,b,20+len);
     s->body_bytes+=20+len;
     ++s->next_sequence;
     return 0;
@@ -130,5 +131,34 @@ int ps3dk_prof__stream_finish(struct ps3dk_prof_arc_stream *s, uint64_t n) {
     if (!s || !s->initialized || s->finished || s->busy) return PS3DK_PROF_STREAM_STATE;
     if (s->error) return s->error;
     s->unregistered_refusals=n; s->finished=1;
+    return 0;
+}
+
+int ps3dk_prof__stream_replay(struct ps3dk_prof_arc_stream *s,
+                            ps3dk_prof_stream_read read_some, void *read_ctx,
+                            ps3prof_arcs_sink write_all, void *write_ctx,
+                            void *scratch, size_t scratch_bytes) {
+    if (!s || !s->initialized || !s->finished || s->busy || s->replay_attempted)
+        return PS3DK_PROF_STREAM_STATE;
+    if (s->error) return s->error;
+    if (!read_some || !write_all || !scratch || !scratch_bytes || scratch_bytes>65536)
+        return PS3DK_PROF_STREAM_INVALID;
+    /* No retries, including from inside either callback or after failure.
+     * The finished stream and its backing storage are immutable to callbacks. */
+    s->replay_attempted=1;
+    uint64_t remaining=s->body_bytes;
+    uint32_t crc=0;
+    while (remaining) {
+        size_t n=remaining<scratch_bytes?(size_t)remaining:scratch_bytes;
+        ptrdiff_t got=read_some(read_ctx,scratch,n);
+        if (got<=0 || (size_t)got>n) return s->error=PS3DK_PROF_STREAM_IO;
+        crc=crc32_extend(crc,scratch,(size_t)got);
+        if (write_all(write_ctx,scratch,(size_t)got)!=0) return s->error=PS3DK_PROF_STREAM_IO;
+        remaining-=(size_t)got;
+    }
+    /* Even an empty spool must be empty on read. No trailer may follow unless
+     * both this exact EOF check and the whole-body CRC check succeed. */
+    if (read_some(read_ctx,scratch,1)!=0 || crc!=s->body_crc32)
+        return s->error=PS3DK_PROF_STREAM_IO;
     return 0;
 }

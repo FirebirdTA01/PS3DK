@@ -22,6 +22,8 @@ struct ps3dk_prof_arc_stream {
     void *ctx;
     uint32_t max_threads, max_arcs_per_thread, final_count, end_flags;
     uint64_t max_body_bytes, body_bytes, next_sequence, unregistered_refusals;
+    uint32_t body_crc32;
+    int replay_attempted;
     int initialized, finished, busy, error;
 };
 /* slots/finals each have max_threads elements, initially zeroed. A zero byte
@@ -41,4 +43,16 @@ int ps3dk_prof__stream_accept(struct ps3dk_prof_arc_stream *, const struct ps3dk
 /* Freezes input and the existing timing counter; does NOT emit a TRAILER or
  * certify timing finalization. Prefix binding/publication is a later layer. */
 int ps3dk_prof__stream_finish(struct ps3dk_prof_arc_stream *, uint64_t unregistered_refusals);
+/* Post-finish, single-owner replay of THIS capture's immutable spool, positioned
+ * at byte zero. Positive read counts must be <= requested, zero means EOF,
+ * negative means terminal failure. Adapters own retries. Scratch (1..65536
+ * bytes) must be disjoint from the stream, arrays and callback-owned storage.
+ * A valid attempt is consumed before I/O, including on failure or reentry.
+ * Success confirms exact body delivery/CRC/EOF only: no trailer, flush, close,
+ * timing-finalization or combined-publication guarantee. Failure can leave
+ * partial output; never append a final trailer or retry that output in place. */
+typedef ptrdiff_t (*ps3dk_prof_stream_read)(void *, void *, size_t);
+int ps3dk_prof__stream_replay(struct ps3dk_prof_arc_stream *,
+                            ps3dk_prof_stream_read, void *, ps3prof_arcs_sink, void *,
+                            void *scratch, size_t scratch_bytes);
 #endif
