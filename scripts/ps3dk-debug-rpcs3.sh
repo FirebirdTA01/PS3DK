@@ -21,7 +21,7 @@ set -eu
 
 fail() { echo "ps3dk-debug-rpcs3: $*" >&2; exit 2; }
 
-self= gdbinit= server=127.0.0.1:2345 rpcs3=${PS3DK_RPCS3:-} gdb= nogdb=0 timeout=60
+self='' gdbinit='' server=127.0.0.1:2345 rpcs3=${PS3DK_RPCS3:-} gdb='' nogdb=0 timeout=60
 while [ $# -gt 0 ]; do
     case $1 in
         --self) self=$2; shift 2 ;;
@@ -40,25 +40,30 @@ done
 echo "$server" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$' \
     || fail "--gdb-server must be IPv4 address:port, got '$server'"
 [ -n "$rpcs3" ] || rpcs3=$(command -v rpcs3 || true)
-[ -n "$rpcs3" ] && [ -x "$rpcs3" ] || fail "set --rpcs3 or PS3DK_RPCS3 to the rpcs3 executable"
+if [ -z "$rpcs3" ] || [ ! -x "$rpcs3" ]; then
+    fail "set --rpcs3 or PS3DK_RPCS3 to the rpcs3 executable"
+fi
 if [ "$nogdb" -eq 0 ]; then
     if [ -z "$gdb" ]; then
         root=${PS3DK:-${PS3DEV:-}}
         [ -n "$root" ] && gdb=$root/ppu/bin/powerpc64-ps3-elf-gdb
     fi
-    [ -n "$gdb" ] && [ -x "$gdb" ] || fail "no powerpc64-ps3-elf-gdb found (set --gdb, or use --no-gdb)"
+    if [ -z "$gdb" ] || [ ! -x "$gdb" ]; then
+        fail "no powerpc64-ps3-elf-gdb found (set --gdb, or use --no-gdb)"
+    fi
 fi
 
 cfgdir=${XDG_CONFIG_HOME:-$HOME/.config}/rpcs3
 shared=$cfgdir/config.yml
 [ -f "$shared" ] || fail "no RPCS3 configuration at '$shared' (start RPCS3 once first)"
-[ "$(grep -c '^[[:space:]]*PPU Decoder:' "$shared")" -eq 1 ] \
-    && [ "$(grep -c '^[[:space:]]*GDB Server:' "$shared")" -eq 1 ] \
-    || fail "unexpected RPCS3 configuration layout (expected one 'PPU Decoder' and 'GDB Server' line)"
+if [ "$(grep -c '^[[:space:]]*PPU Decoder:' "$shared")" -ne 1 ] \
+    || [ "$(grep -c '^[[:space:]]*GDB Server:' "$shared")" -ne 1 ]; then
+    fail "unexpected RPCS3 configuration layout (expected one 'PPU Decoder' and 'GDB Server' line)"
+fi
 
-selfdir=$(CDPATH= cd "$(dirname "$self")" && pwd)
+selfdir=$(CDPATH='' cd "$(dirname "$self")" && pwd)
 waitmarker=$selfdir/ps3dk-debug-wait
-owns_marker=0 pid= runcfg=
+owns_marker=0 pid='' runcfg=''
 cleanup() {
     [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
     [ "$owns_marker" -eq 0 ] || rm -f -- "$waitmarker"
@@ -96,7 +101,7 @@ if [ "$nogdb" -eq 1 ]; then
     echo "  Press Ctrl-C in this launcher terminal to end the session and close RPCS3."
     status=0
     wait "$pid" || status=$?
-    pid=
+    pid=''
     exit "$status"
 fi
 "$gdb" -x "$gdbinit"
