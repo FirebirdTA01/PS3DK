@@ -23,7 +23,7 @@ struct ps3dk_prof_arc_stream {
     uint32_t max_threads, max_arcs_per_thread, final_count, end_flags;
     uint64_t max_body_bytes, body_bytes, next_sequence, unregistered_refusals;
     uint32_t body_crc32;
-    int replay_attempted;
+    int replay_attempted, export_attempted;
     int initialized, finished, busy, error;
 };
 /* slots/finals each have max_threads elements, initially zeroed. A zero byte

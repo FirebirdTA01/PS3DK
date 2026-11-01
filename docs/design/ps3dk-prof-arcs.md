@@ -342,8 +342,9 @@ UTF-8 names, capacities and final-state rules are checked before serialization.
 
 `finish` freezes input and the existing unregistered-refusal count. It does
 not emit a final TRAILER or certify a timing capture. The bounded replay
-primitive below checks body delivery; finalized timing-prefix binding, file I/O
-and archive installation are later increments. Host fixtures wrap the body with an independently checked
+primitive below checks body delivery; the coordinator below binds finalized
+timing metadata. File I/O and archive installation remain later increments.
+Encoder host fixtures wrap the body with an independently checked
 envelope and compare its bytes with the existing one-shot writer; those test
 wrappers are not a production exporter.
 
@@ -368,8 +369,8 @@ producer acknowledgements and repeated shutdown calls cannot change it.
 join failure. It does not imply complete observations: NOT_QUIESCED or recovered
 errors can still have a fully finalized byte stream. Negative or invalid sink
 responses may have unreported side effects, so diagnostic accepted-byte metadata
-on a failed I/O path must never authorize publication. This record does not yet
-publish an arc file; the final coordinator remains a later exporter step.
+on a failed I/O path must never authorize publication. The private coordinator
+below consumes this record; actual file publication remains a later step.
 
 ## Bounded body replay
 
@@ -389,7 +390,7 @@ After exactly the expected byte count, replay requires a one-byte read to return
 EOF and the computed CRC to match. Truncation, extra tail, corruption, invalid
 read counts and sink errors terminate the attempt. Success means body delivery
 only, not a valid combined capture or completed output flush/close. No trailer
-is emitted here. The later coordinator must check timing finalization and refuse
+is emitted here. The coordinator must check timing finalization and refuse
 to append a final trailer after any replay failure. CRC detects accidental
 corruption; it is not authentication or an external-spool validator.
 
@@ -398,3 +399,36 @@ or truncated body data. The future filesystem adapter must keep failed names
 distinct from published captures (or rename an exclusive temporary file only
 after trailer, flush and close succeed). That publication choice and actual
 filesystem operations remain an explicit 3c design gate.
+
+## Final coordinator
+
+The host candidate `ps3dk_prof__stream_export` reads the runtime's immutable
+finalization getter directly. It requires successful timing I/O, a written
+trailer and no join failure before interpreting accepted bytes as the whole
+timing artifact. It also checks the frozen registration-refusal count against
+the stream, validates metadata bounds and preflights output length/sequence
+arithmetic. It does not accept a caller-supplied timing-success record.
+
+Preflight performs no I/O and takes no output ownership: the caller still owns
+and must close its output on refusal. An admitted attempt latches once before
+I/O and owns exactly one close on every subsequent path. Flush runs only after
+a complete trailer. Output write, replay, flush or close failure is terminal;
+even independently COMPLETE bytes after a failed close are not a successful
+export. Reentry and repeat attempts cannot resume or double-close the output.
+The source remains caller-owned throughout.
+
+The coordinator appends HEADER/CLOCKS with the exact timing identities, prefix
+length, last sequence and CRC, followed by verified spool replay. Only successful
+replay permits TRAILER from the bounded final entries. Scalar and string writes
+use bounded stack storage, with no allocation, seek-back or session-long array.
+The runtime's existing UTF-8 validation and immutable strings supply identities;
+the build identity is copied by its explicit byte length.
+
+Return zero means serialization, flush and close succeeded. It does not mean
+complete observations, a certified pair or publication at a final filename.
+Nonzero unregistered refusals leave standalone arc semantics unchanged; the
+production pair matcher rejects exact combined output. Host tests feed the real
+runtime/collector/stream into the coordinator, then use production readers and a
+test-only Rust pair oracle that exits nonzero on refusal. A public pair CLI and
+its exit-status regression, actual filesystem adapter, publication names and
+installed startup wiring remain open gates.
