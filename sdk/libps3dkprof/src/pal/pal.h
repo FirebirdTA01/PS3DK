@@ -27,6 +27,10 @@
 #define pal_open_excl ps3dk_prof__pal_open_excl
 #define pal_write ps3dk_prof__pal_write
 #define pal_close ps3dk_prof__pal_close
+#define pal_open_rw_excl ps3dk_prof__pal_open_rw_excl
+#define pal_read ps3dk_prof__pal_read
+#define pal_rewind ps3dk_prof__pal_rewind
+#define pal_sync ps3dk_prof__pal_sync
 
 /* Exactly one PAL per build, enforced here in the SHARED header so every translation unit (core, drain and PAL) checks
  * the same contract (codex 2026-10-22 03:21).  The LV2 PAL is hook-free: test hooks are a host-only build. */
@@ -92,6 +96,12 @@ int pal_os_thread_id(uint64_t *out);
 int pal_open_excl(const char *path, int *fd, int *err);
 long pal_write(int fd, const void *buf, unsigned long n, int *err);   /* bytes written, or -1 */
 int pal_close(int fd, int *err);
+/* Candidate spool IO; existing write-only timing sink remains unchanged.
+ * No retries here. Failed open transfers no ownership. Rewind is to zero only. */
+int pal_open_rw_excl(const char *path, int *fd, int *err);
+long pal_read(int fd, void *buf, unsigned long n, int *err);
+int pal_rewind(int fd, int *err);
+int pal_sync(int fd, int *err);
 /* The errno-class codes the core compares *err against come from the platform's own errno.h, in every build, so
  * the host and LV2 builds each compare against their own values (codex 2026-10-22 02:49, O2). */
 #define PAL_EINTR EINTR

@@ -187,3 +187,30 @@ int pal_close(int fd, int *err)
     }
     return 0;
 }
+
+int pal_open_rw_excl(const char *path, int *fd, int *err)
+{
+    int opened = open(path, O_RDWR | O_CREAT | O_EXCL, 0644);
+    if (opened < 0) { *err = errno; return -1; }
+    *fd = opened;
+    return 0;
+}
+
+long pal_read(int fd, void *buf, unsigned long n, int *err)
+{
+    long result = (long)read(fd, buf, (size_t)n);
+    if (result < 0) *err = errno;
+    return result;
+}
+
+int pal_rewind(int fd, int *err)
+{
+    if (lseek(fd, 0, SEEK_SET) != 0) { *err = errno; return -1; }
+    return 0;
+}
+
+int pal_sync(int fd, int *err)
+{
+    if (fsync(fd) != 0) { *err = errno; return -1; }
+    return 0;
+}

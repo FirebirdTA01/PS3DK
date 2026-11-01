@@ -395,10 +395,8 @@ to append a final trailer after any replay failure. CRC detects accidental
 corruption; it is not authentication or an external-spool validator.
 
 Bytes are forwarded before the CRC verdict, so failed output may contain invalid
-or truncated body data. The future filesystem adapter must keep failed names
-distinct from published captures (or rename an exclusive temporary file only
-after trailer, flush and close succeed). That publication choice and actual
-filesystem operations remain an explicit 3c design gate.
+or truncated body data. The candidate filesystem adapter below keeps all output
+under a distinct pending name. Final-name publication remains an explicit gate.
 
 ## Final coordinator
 
@@ -430,8 +428,66 @@ Nonzero unregistered refusals leave standalone arc semantics unchanged; the
 production pair matcher rejects exact combined output. Host tests feed the real
 runtime/collector/stream into the coordinator, then use production readers and a
 test-only Rust pair oracle that exits nonzero on refusal. The public pair CLI
-below also grades these rules. The actual filesystem adapter, publication names
-and installed startup wiring remain open gates.
+below also grades these rules. Target filesystem verification, final-name
+publication and installed startup wiring remain open gates.
+
+## Candidate file adapter
+
+The private `prof_arcs_file` adapter uses caller-owned fixed state, with no heap
+allocation or stdio. A trusted existing directory and a 1 to 64 character ASCII
+alphanumeric, underscore or hyphen token produce exclusive `<token>.spool` and
+`<token>.arcs.pending` paths, each bounded to 1023 bytes plus the terminator.
+Trailing directory slashes are normalized, preserving root `/`. Collisions fail
+without overwrite. It retains both files on success and failure,
+never renames or deletes, and never creates a final `.arcs` name.
+
+The sole drainer writes the spool through one read/write descriptor. After
+stream finish and runtime shutdown/join, one-shot prepare syncs the spool,
+rewinds the same descriptor to zero and opens pending output exclusively. It
+does not reopen a spool by path. PAL operations route through POSIX on the host
+and through librt to LV2 filesystem syscalls on the target; these target routes
+are not a claim of measured device behavior.
+
+Each underlying read or write requests at most 65536 bytes. Positive short I/O
+advances only by the accepted count. Eight consecutive EINTR retries are allowed
+for open, read, write, rewind and sync, with write progress resetting its retry
+count. No other errors spin. Zero writes and overcounts fail; zero reads mean
+EOF, which replay checks against its expected length. This bounds retries, not
+the elapsed time of a blocking syscall.
+
+Read/write/flush errors latch the first operation and errno without stealing
+the coordinator's admitted output close. Prepare failure and explicit cleanup
+close remaining owned descriptors. Ownership is discarded before close and
+close is never retried, including EINTR. Cleanup works after sticky failure,
+rejects callback reentry, is idempotent and preserves the first error. A
+coordinator preflight refusal leaves output caller-owned, so cleanup is required.
+The caller must check both export and cleanup results. In particular, output
+flush/close or spool-close failure can coexist with bytes that `check-pair`
+accepts; those bytes do not override the adapter failure or authorize publication.
+
+Successful candidates remain pending. Explicitly running `check-pair` on them
+checks bytes and pairing, not the success of previous syscalls or a publication
+receipt. Host tests combine real files, real runtime/stream/coordinator and the
+public CLI, with injected short I/O, interruptions, corruption, truncation,
+extra tails and close failures. No installed archive or automatic startup path
+enables the adapter yet.
+
+Open gates before automatic integration:
+
+- Measure `O_RDWR|O_CREAT|O_EXCL`, exclusive-name collisions, sync and replay
+  separately on the internal HDD and USB output locations, on both ABIs.
+- Choose a no-replace publication protocol for every allowed location. A hard
+  link cannot serve FAT32 USB storage; either restrict output to measured
+  supported locations or define a separate verified protocol, such as pending
+  data plus an exclusive completion marker understood by host tools. A link
+  declaration alone proves neither support nor semantics. Plain overwrite
+  rename is not an approved substitute.
+- Measure actual HDD/USB spool throughput and disk budget. Retained spool plus
+  candidate uses roughly twice the body length plus envelope overhead; the
+  encoder body budget does not bound total disk usage or reserve free space.
+- Add both-ABI target build/link and installed-anchor controls, select measured
+  memory capacities, and complete the target filesystem gate before startup
+  or default archives change.
 
 ## Checking a companion pair
 
