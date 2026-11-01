@@ -566,6 +566,24 @@ else
     bad "bounded arc body stream (arc-stream-*.log)"
 fi
 
+# Accepted-byte accounting and post-join immutable metadata stay candidate-only.
+# Independent zlib/chunk parsing checks the actual sink bytes, including faults.
+prefix_ok=1
+for prefix_variant in plain address thread; do
+    prefix_args=()
+    if [ "$prefix_variant" != plain ]; then prefix_args=(--sanitize "$prefix_variant"); fi
+    if ! python3 "$here/prefix-accounting-test.py" "$out/prefix-$prefix_variant" --reader "$auto_reader" \
+        "${prefix_args[@]}" >"$out/prefix-$prefix_variant.log" 2>&1; then
+        prefix_ok=0
+        tail -n 12 "$out/prefix-$prefix_variant.log"
+    fi
+done
+if [ "$prefix_ok" = 1 ]; then
+    ok "timing prefix and finalization record (prefix-*.log)"
+else
+    bad "timing prefix and finalization record (prefix-*.log)"
+fi
+
 echo "== ps3dk-prof runtime host tests: $pass passed, $fail failed, $skip skipped, $notrun registry tests not run, $recfail recorder failures"
 { echo "pass $pass"; echo "fail $fail"; echo "skip $skip"; echo "not_run $notrun"; echo "recorder_failures $recfail"; } >"$out/counts.txt"
 [ "$fail" -eq 0 ] && [ "$recfail" -eq 0 ]

@@ -88,6 +88,18 @@ uint32_t p_crc32(const void *data, size_t n)
     return c ^ 0xFFFFFFFFu;
 }
 
+#ifdef PS3DK_PROF_WITH_ARCS
+/* Extend a finalized IEEE CRC (empty prefix = 0), sharing the existing table. */
+uint32_t ps3dk_prof__crc32_extend(uint32_t crc, const void *data, size_t n)
+{
+    const uint8_t *b = (const uint8_t *)data;
+    uint32_t c = crc ^ 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; ++i)
+        c = crc_table[(c ^ b[i]) & 0xFFu] ^ (c >> 8);
+    return c ^ 0xFFFFFFFFu;
+}
+#endif
+
 /* 5.5: the timebase read between compiler barriers. */
 uint64_t p_tb(void)
 {

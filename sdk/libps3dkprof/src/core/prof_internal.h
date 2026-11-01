@@ -17,6 +17,7 @@
 #include "../pal/pal.h"
 #ifdef PS3DK_PROF_WITH_ARCS
 #include "../hooks/arc_runtime.h"
+#include "prof_finalization.h"
 #endif
 
 /* ---- atomics (GCC builtins only; no __sync, no hand-written reservations) ---------------------------------------- */
@@ -207,6 +208,10 @@ typedef struct prof {
 #ifdef PS3DK_PROF_WITH_ARCS
     struct ps3dk_prof_arc_options arc_options; /* zero capacity disables candidate integration */
     uint32_t arc_index_capacity;
+    uint64_t prefix_bytes, prefix_unregistered;
+    uint32_t prefix_crc32, prefix_trailer;
+    uint32_t finalization_ready; /* release-published only by the winning shutdown, after join */
+    struct ps3dk_prof_finalization finalization;
 #endif
     uint8_t *block;
     /* HEADER strings, copied at init (the caller's config strings need not outlive init). */
@@ -266,6 +271,9 @@ int p_quiesce_freeze_seal(prof *p);
 uint64_t p_fnv(uint64_t h, const void *data, size_t n);
 void p_crc32_init(void);
 uint32_t p_crc32(const void *data, size_t n);
+#ifdef PS3DK_PROF_WITH_ARCS
+uint32_t ps3dk_prof__crc32_extend(uint32_t crc, const void *data, size_t n);
+#endif
 int p_lock(prof *p, pal_mutex *m);
 void p_unlock(prof *p, pal_mutex *m);
 void p_le16(uint8_t *d, uint16_t v);

@@ -346,3 +346,27 @@ exact finalized timing-prefix binding, file I/O and archive installation are
 later increments. Host fixtures wrap the body with an independently checked
 envelope and compare its bytes with the existing one-shot writer; those test
 wrappers are not a production exporter.
+
+## Final timing-prefix record
+
+The `PS3DK_PROF_WITH_ARCS` host candidate counts bytes positively acknowledged
+by `sink_write`, including the file envelope, and extends their IEEE CRC32
+using the existing table. Short writes contribute only their accepted prefix;
+zero returns and errors add nothing. Whole-request byte-limit preflight rejects
+overflow before calling the sink. The existing `enc_end` sequence advances
+only after an entire chunk succeeds, with a candidate overflow guard.
+
+The private finalization getter returns NULL until the winning shutdown has
+completed sink close and join handling. A separate release/acquire publication
+flag protects its immutable record; SEALED alone is not enough. The record
+contains accepted length/CRC, successful chunk count and last sequence, the
+same frozen unregistered-refusal value as the trailer, shutdown outcome, and
+length-delimited identities backed by immutable runtime/static storage. Late
+producer acknowledgements and repeated shutdown calls cannot change it.
+
+`io_finalized` requires a written trailer, successful sink finalization and no
+join failure. It does not imply complete observations: NOT_QUIESCED or recovered
+errors can still have a fully finalized byte stream. Negative or invalid sink
+responses may have unreported side effects, so diagnostic accepted-byte metadata
+on a failed I/O path must never authorize publication. This record does not yet
+replay a spool or publish an arc file; those are the next exporter steps.
