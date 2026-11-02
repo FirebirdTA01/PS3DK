@@ -10,6 +10,7 @@
 //!   [`compare`] (which takes two [`Analysis`] values) all go through `load`.
 
 pub mod analysis;
+pub mod ext;
 pub mod hash;
 pub mod model;
 pub mod reader;

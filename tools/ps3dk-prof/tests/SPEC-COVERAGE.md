@@ -68,7 +68,7 @@ and a mapped test name that does not exist.  Stage 3 and later bullets are not p
 | Producer effects a file can show | ACKED with SEQ_LIMIT and an unadmitted STOP batch: refused >= k, open_spans = k, k spans OPEN, no TRUNCATED_AT_STOP END; accepted | `acked_entry_with_seq_limit_and_an_unadmitted_stop_batch_is_consistent` |
 | Producer effects a file can show | RETIRED with open_spans = 2 and 2 spans OPEN in the records; accepted, reported OPEN (censored) | `retired_entry_with_open_spans_2_and_two_open_spans_in_the_records` |
 
-## Rule variants (86) -> tests (102 in malformed.rs, 85 in stage2.rs, 3 in cli.rs)
+## Rule variants (87) -> tests (103 in malformed.rs, 86 in stage2.rs, 3 in cli.rs)
 
 | rule | tests |
 |---|---|
@@ -158,3 +158,4 @@ and a mapped test name that does not exist.  Stage 3 and later bullets are not p
 | `EndFlagSeqLimitMismatch` | `end_flag_seq_limit_mismatch`, `seq_limit_only_in_earlier_retired_entry_bit1_missing`, `seq_limit_bit1_with_no_limited_entry` |
 | `EndFlagSinkErrorMismatch` | `end_flag_sink_error_mismatch` |
 | `TokenImpossible` | `token_impossible`, `nonexistent_frame_complete_lossless_quiesced_owner_is_malformed`, `rule4_missing_incomplete_only_through_seq_limit_on_another_lane`, `rule4_missing_incomplete_only_through_seq_limit_on_owner`, `rule4_missing_incomplete_only_through_recovered_sink_error`, `rule4_missing_incomplete_only_through_other_lane_not_quiesced`, `rule4_missing_complete_lossless_capture`, `read_alone_accepts_a_rule_4_case_that_load_refuses` |
+| `Extension` | `file_flags_extensions_without_domain` |

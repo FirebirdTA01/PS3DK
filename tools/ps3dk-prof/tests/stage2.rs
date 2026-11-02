@@ -5,8 +5,8 @@ mod common;
 
 use common::*;
 use ps3dk_prof::{
-    compare, compare_with, load, reader, report, AbResult, Attribution, CompareOptions, ComparisonKind, Incomplete,
-    Metric, Outcome, Rule, SpansN, TokenOutcome,
+    compare, compare_with, report, AbResult, Attribution, CompareOptions, ComparisonKind, Incomplete, Metric, Outcome,
+    Rule, SpansN, TokenOutcome,
 };
 
 /// One completed zone on lane 1.

@@ -97,9 +97,19 @@ fn minor_version_is_readable_with_a_warning() {
 
 #[test]
 fn file_flags_nonzero() {
+    // Bit 0 is DOMAIN_EXTENSIONS since v1.1, so an unknown bit is the fixture (v1.0 rejected flags = 1 here too).
+    let mut f = ok_file();
+    f.flags = 2;
+    assert_rule(&f.bytes(), Rule::FileFlagsNonzero);
+}
+
+#[test]
+fn file_flags_extensions_without_domain() {
+    // The deliberately changed flag space: this complete flags = 1 file was FileFlagsNonzero in v1.0 and is now
+    // MALFORMED for declaring no DOMAIN (tests/ext.rs covers the extension rules).
     let mut f = ok_file();
     f.flags = 1;
-    assert_rule(&f.bytes(), Rule::FileFlagsNonzero);
+    assert_rule(&f.bytes(), Rule::Extension);
 }
 
 #[test]

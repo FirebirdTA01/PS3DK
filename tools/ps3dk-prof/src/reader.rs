@@ -122,6 +122,8 @@ struct Reader {
     live_slots: BTreeMap<u32, u32>,
     descriptor_ids: BTreeMap<u64, u32>,
     trailer_seen: bool,
+    /// file_flags bit 0: the domain extensions (chunk types 8..16).
+    ext: Option<crate::ext::ExtReader>,
 }
 
 /// The STRUCTURAL pass: sections 1-6.  `Err` is a MALFORMED verdict; `Ok` may still be INCOMPLETE.
@@ -135,6 +137,7 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
         live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
         trailer_seen: false,
+        ext: None,
     };
     if bytes.len() < FILE_HEADER_LEN {
         // A file cut inside its 16-byte header is torn only if EVERY constrained byte present is right: the magic,
@@ -150,8 +153,9 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
                 return malformed(Rule::MajorVersion, format!("{n}-byte file: major version bytes are not 1"));
             }
         }
-        if n > 12 && bytes[12..n].iter().any(|&b| b != 0) {
-            return malformed(Rule::FileFlagsNonzero, format!("{n}-byte file: file_flags bytes are not 0"));
+        // file_flags: byte 12 may be 0 or FLAG_DOMAIN_EXTENSIONS; bytes 13..15 must be 0, as far as they are present.
+        if n > 12 && (bytes[12] & !(FLAG_DOMAIN_EXTENSIONS as u8) != 0 || bytes[13..n].iter().any(|&b| b != 0)) {
+            return malformed(Rule::FileFlagsNonzero, format!("{n}-byte file: file_flags bytes are not 0 or 1"));
         }
         r.cap.incomplete.push(Incomplete::TornTail);
         r.cap.incomplete.push(Incomplete::NoTrailer);
@@ -166,8 +170,11 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
     if major != 1 {
         return malformed(Rule::MajorVersion, format!("major version {major}"));
     }
-    if file_flags != 0 {
+    if file_flags & !FLAG_DOMAIN_EXTENSIONS != 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
+    }
+    if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
+        r.ext = Some(crate::ext::ExtReader::new());
     }
     r.cap.minor_warning = minor > 0;
 
@@ -206,7 +213,8 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
         if chunk_seq != index {
             return malformed(Rule::ChunkSeqOrder, format!("chunk {index} carries chunk_seq {chunk_seq}"));
         }
-        if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) {
+        let ext_ty = r.ext.is_some() && (crate::ext::CHUNK_DOMAIN..=crate::ext::CHUNK_DOMAIN_FINAL).contains(&ty);
+        if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
         if index == 0 && ty != CHUNK_HEADER {
@@ -227,12 +235,23 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
             CHUNK_RECORDS => r.records(payload)?,
             CHUNK_RETIRED => r.retired(payload)?,
             CHUNK_TRAILER => r.trailer(payload)?,
-            _ => unreachable!(),
+            _ => {
+                let refs = crate::ext::V1Refs { descriptors: &r.cap.descriptors, declared_incarnations: &r.declared };
+                r.ext.as_mut().expect("extension chunk only with the flag").chunk(ty, payload, &refs)?
+            }
         }
         pos += total;
         index += 1;
     }
-    r.finish(torn)
+    let ext = r.ext.take();
+    let mut cap = r.finish(torn)?;
+    if let Some(x) = ext {
+        let frames: BTreeMap<u32, BTreeSet<u64>> =
+            cap.lanes.iter().map(|(&inc, l)| (inc, l.frames.iter().map(|f| f.id).collect())).collect();
+        let has_trailer = cap.has_trailer();
+        cap.ext = Some(x.finish(has_trailer, has_trailer && !cap.torn(), &frames)?);
+    }
+    Ok(cap)
 }
 
 impl Reader {

@@ -11,6 +11,8 @@ pub const FILE_HEADER_LEN: usize = 16;
 pub const CHUNK_HEADER_LEN: usize = 16;
 pub const CHUNK_CRC_LEN: usize = 4;
 pub const MAX_CHUNK_LEN: u32 = 1_048_576;
+/// file_flags bit 0: the file may carry domain-extension chunks (types 8..16).
+pub const FLAG_DOMAIN_EXTENSIONS: u32 = 1;
 pub const MAX_STRING_LEN: usize = 512;
 pub const MAX_THREADS: u32 = 1024;
 pub const MAX_DESCRIPTORS: u32 = 65_536;
@@ -153,6 +155,8 @@ pub enum Rule {
     EndFlagSinkErrorMismatch,
     // 9. Token resolution, rule 4
     TokenImpossible,
+    /// A rule of the domain extensions (chunk types 8..16, file_flags bit 0); the detail names it.
+    Extension,
 }
 
 /// A MALFORMED verdict: the rule broken and where.
@@ -431,6 +435,8 @@ pub struct Capture {
     pub spans: Vec<Span>,
     pub trailer: Option<Trailer>,
     pub incomplete: Vec<Incomplete>,
+    /// file_flags bit 0 (DOMAIN_EXTENSIONS): the extension sources; None for a v1 file (flags 0).
+    pub ext: Option<crate::ext::ExtCapture>,
 }
 
 impl Capture {

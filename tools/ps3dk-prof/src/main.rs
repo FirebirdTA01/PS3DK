@@ -3,7 +3,8 @@
 //!   ps3dk-prof check <file>    print the verdict
 //!   ps3dk-prof report <file>   print the verdict and the full report
 //!
-//! Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error.
+//! Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error, 4 (domain-extension files only)
+//! TRANSPORT COMPLETE but an extension source is not STRUCTURE COMPLETE and RAW VALID.
 
 use std::process::ExitCode;
 
@@ -17,7 +18,9 @@ const USAGE: &str = "usage:
   ps3dk-prof check-pair <file.arcs> <file.prof>   verify a final companion pair
   ps3dk-prof -h | --help | -v | --version
 
-exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error
+exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error,
+4 TRANSPORT COMPLETE but a domain-extension source is not COMPLETE and RAW VALID
+(only files with file_flags bit 0; every v1 file keeps codes 0-3)
 check-pair: 0 verified FINAL pair; 1 refused or PROVISIONAL; 2 malformed arcs;
 3 usage or I/O error. Timing problems inside the pair, including malformed bound timing
 bytes, are pair refusals (exit 1). Run check on the .prof for its own verdict/code.";
@@ -138,9 +141,13 @@ fn main() -> ExitCode {
                 print!("{}", report::render(&a));
             } else {
                 println!("{}", report::verdict_line(&a.verdict));
+                for line in report::extension_lines(&a.capture) {
+                    println!("{line}");
+                }
             }
             match a.verdict {
-                Verdict::Complete => ExitCode::SUCCESS,
+                Verdict::Complete if report::extensions_clean(&a.capture) => ExitCode::SUCCESS,
+                Verdict::Complete => ExitCode::from(4),
                 Verdict::Incomplete(_) => ExitCode::from(1),
             }
         }

@@ -10,6 +10,7 @@ use common::*;
 
 fn run(args: &[&str], bytes: &[u8], tag: &str) -> (Option<i32>, String) {
     let path: PathBuf = std::env::temp_dir().join(format!("ps3dk-prof-cli-{}-{tag}.prof", std::process::id()));
+    harvest(bytes);
     std::fs::write(&path, bytes).expect("write the capture");
     let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     argv.push(path.to_string_lossy().into_owned());
@@ -27,7 +28,7 @@ fn rule4_capture() -> Vec<u8> {
 #[test]
 fn check_reports_malformed_for_a_rule_4_case_the_structural_pass_accepts() {
     let bytes = rule4_capture();
-    assert!(ps3dk_prof::reader::read(&bytes).is_ok());
+    assert!(reader::read(&bytes).is_ok());
     let (code, out) = run(&["check"], &bytes, "rule4");
     assert_eq!(code, Some(2), "{out}");
     assert!(out.contains("TokenImpossible"), "{out}");

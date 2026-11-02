@@ -2,7 +2,33 @@
 //! its own CRC32 (table-driven, unlike the reader's bitwise one), its own FNV-1a-64 and its own field layout.
 #![allow(dead_code)]
 
-use ps3dk_prof::{load, Analysis, Incomplete, Malformed, Outcome, Rule, Verdict};
+use ps3dk_prof::{Analysis, Capture, Incomplete, Malformed, Outcome, Rule, Verdict};
+
+// ---- the reader boundary ----------------------------------------------------------------------------------------
+
+/// PROF_CORPUS_DIR: keep every input a test hands to the reader, after any mutation, named by content (the corpus of
+/// the pinned-baseline comparison).  No effect when unset.
+pub fn harvest(bytes: &[u8]) {
+    if let Ok(dir) = std::env::var("PROF_CORPUS_DIR") {
+        std::fs::create_dir_all(&dir).unwrap();
+        // FNV, not CRC32: every chunk carries its own CRC, so files differing in one chunk can share a whole-file CRC.
+        std::fs::write(format!("{dir}/{:016x}-{}.prof", fnv(bytes), bytes.len()), bytes).unwrap();
+    }
+}
+
+/// `ps3dk_prof::load`, harvested.
+pub fn load(bytes: &[u8]) -> Outcome {
+    harvest(bytes);
+    ps3dk_prof::load(bytes)
+}
+
+/// `ps3dk_prof::reader`, harvested.
+pub mod reader {
+    pub fn read(bytes: &[u8]) -> Result<super::Capture, super::Malformed> {
+        super::harvest(bytes);
+        ps3dk_prof::reader::read(bytes)
+    }
+}
 
 // ---- primitives -------------------------------------------------------------------------------------------------
 

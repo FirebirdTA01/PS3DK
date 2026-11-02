@@ -65,6 +65,70 @@ pub const W_NOTE: &str = "W = start-frame-attributed EXCLUSIVE work of one lane:
 started in, for its whole exclusive duration. W is not clipped to the frame interval, can exceed the frame's \
 elapsed time, and is never summed across lanes.";
 
+/// The extension layer (file_flags bit 0): one line per extension source, after the whole-file and PPU layers.
+/// Empty for a v1 file. A TRANSPORT COMPLETE file can still list sources that are INCOMPLETE or NOT VALID.
+pub fn extension_lines(cap: &Capture) -> Vec<String> {
+    use crate::ext::{OpenBegins, Structure};
+    let Some(x) = &cap.ext else { return Vec::new() };
+    let mut out = vec![format!(
+        "domain extensions: {} source(s); MAPPING is UNMEASURED for every source (no SPU/RSX time is claimed)",
+        x.sources.len()
+    )];
+    for s in &x.sources {
+        let structure = match s.structure {
+            Structure::Complete => "COMPLETE".to_string(),
+            Structure::Incomplete => format!("INCOMPLETE ({})", s.incomplete.join("; ")),
+        };
+        let raw = if s.raw_valid { "VALID".to_string() } else { format!("NOT VALID ({})", s.invalid.join("; ")) };
+        let coverage = if s.coverage_unknown.is_empty() {
+            "no raw gap or unlocatable event".to_string()
+        } else {
+            format!("UNKNOWN for the whole capture ({})", s.coverage_unknown.join("; "))
+        };
+        let open = match s.open_begins {
+            OpenBegins::Verified(n) => format!("open_begins {n} verified"),
+            OpenBegins::Unverifiable(n) => format!("open_begins {n} UNVERIFIABLE"),
+            OpenBegins::NoFinal => "no FINAL".to_string(),
+        };
+        out.push(format!(
+            "  {} (domain {}): STRUCTURE {structure} | RAW VALIDITY {raw} | MAPPING UNMEASURED | COVERAGE {coverage}",
+            s.key, s.domain_id
+        ));
+        let at = if s.final_state.is_some() { "FINAL" } else { "end (no FINAL)" };
+        let open_at = match s.open_at_end() {
+            Some(n) => format!("open at {at} {n}"),
+            None => format!("open at {at} UNKNOWN (protocol error)"),
+        };
+        let mut detail = format!(
+            "    events {} lost {} | paired {} censored {} unpaired {} marks {} | {open_at} | {open} | epochs {} \
+             brackets {}",
+            s.events_total,
+            s.lost_total,
+            s.paired(),
+            s.censored(),
+            s.unpaired(),
+            s.marks(),
+            s.epochs,
+            s.brackets
+        );
+        if matches!(s.key, crate::ext::SourceKey::Gpu(_)) {
+            detail.push_str(&format!(
+                " | frames resolved {} unresolved {} none {}",
+                s.frames_resolved, s.frames_unresolved, s.frames_none
+            ));
+        }
+        out.push(detail);
+    }
+    out
+}
+
+/// True when every extension source is STRUCTURE COMPLETE and RAW VALID (always true for a v1 file).
+pub fn extensions_clean(cap: &Capture) -> bool {
+    cap.ext
+        .as_ref()
+        .is_none_or(|x| x.sources.iter().all(|s| s.structure == crate::ext::Structure::Complete && s.raw_valid))
+}
+
 pub fn verdict_line(v: &Verdict) -> String {
     match v {
         Verdict::Complete => "COMPLETE (TRANSPORT COMPLETE)".to_string(),
@@ -193,6 +257,9 @@ pub fn render(a: &Analysis) -> String {
             v.spans_n,
             if notes.is_empty() { String::new() } else { format!("; {}", notes.join(", ")) }
         );
+    }
+    for line in extension_lines(cap) {
+        let _ = writeln!(o, "{line}");
     }
     o
 }
