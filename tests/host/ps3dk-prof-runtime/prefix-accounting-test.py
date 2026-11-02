@@ -50,31 +50,10 @@ if a.sanitize:
         # executable, so local-exec is valid and leaves nothing for ld to relax; the sanitizers and the null check stay
         # on.
         flags += ['-ftls-model=local-exec']
-files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c', 'hooks/arcs.c', 'core/prof_arcs_writer.c']]
-if a.red_stub:
-    files.append(a.red_stub.resolve())
-exe = out / 'prefix'
-r = run('compile', [os.environ.get('CC', 'cc'), *flags, *files,
-                    Path(__file__).with_name('prefix_accounting_test.c'), '-o', exe])
-assert r.returncode == 0, r.stderr.decode()
-if a.sanitize == 'thread':
-    # Prove that the same compiler/options/wrapper detects a real race AND
-    # accepts its mutex-protected control. Tool failure is never a skip/pass.
-    for label, args, wanted in [('race', [], 66), ('locked', ['-DRACE_CTL_LOCKED'], 0)]:
-        ctl = out / label
-        r = run(label + '-compile', [os.environ.get('CC', 'cc'), *flags, *args,
-                                    Path(__file__).with_name('tsan_race_ctl.c'), '-o', ctl])
-        assert r.returncode == 0, r.stderr.decode()
-        r = run(label + '-control', ['setarch', 'x86_64', '-R', ctl])
-        assert r.returncode == wanted, r.stderr.decode()
-        if label == 'race':
-            assert all(s in r.stderr for s in [b'ThreadSanitizer: data race', b'writer_a', b'writer_b'])
-        else:
-            assert b'ThreadSanitizer' not in r.stderr
-    print('TSan controls tests=2 pass=2 fail=0', flush=True)
 if not a.sanitize and not a.red_stub:
-    # Removing the candidate guard must leave no collector symbols/references
-    # in either core translation unit (manual archives remain independent).
+    # Removing the candidate guard must leave no collector symbols/references in either core translation unit
+    # (manual archives remain independent).  The core finalization record is unconditional: the build without arcs
+    # defines its accessor and nothing else of the arcs path.
     disabled = [v for v in flags if v != '-DPS3DK_PROF_WITH_ARCS=1']
     for name in ['prof_core', 'prof_drain']:
         obj = out / (name + '-disabled.o')
@@ -82,49 +61,124 @@ if not a.sanitize and not a.red_stub:
                                     '-c', src / 'core' / (name + '.c'), '-o', obj])
         assert r.returncode == 0, r.stderr.decode()
         r = run(name + '-disabled-symbols', ['nm', obj])
-        assert r.returncode == 0 and all(s not in r.stdout for s in [b'_arcs', b'_record_arc', b'_finalization', b'_crc32_extend'])
+        assert r.returncode == 0 and all(s not in r.stdout for s in [b'_arcs', b'_record_arc', b'_crc32_extend'])
+        if name == 'prof_drain':
+            assert re.search(rb'^[0-9a-f]+ T ps3dk_prof__finalization$', r.stdout, re.M), r.stdout.decode()
     print('disabled linkage tests=2 pass=2 fail=0', flush=True)
 import zlib
 cases = ['normal', 'short1', 'short7', 'zeros', 'zero-limit', 'overcount', 'partial',
          'trailer-fail', 'flush-fail', 'close-fail', 'thread', 'join-fail', 'late', 'unregistered',
-         'length-overflow', 'chunk-overflow', 'eintr', 'observe']
-passed = 0
-for name in cases:
-    capture = out / (name + '.prof')
-    prefix = ['setarch', 'x86_64', '-R'] if a.sanitize == 'thread' else []
-    r = run(name, [*prefix, exe, name, capture])
-    ok = r.returncode == 0
-    if ok:
-        meta = {k.decode(): int(v) for k, v in re.findall(rb'(\w+)=(\d+)', r.stdout)}
-        blob = capture.read_bytes()
-        off, chunks, last, trailer = 16, 0, 2**64-1, False
-        unreg = None
-        while off + 20 <= len(blob):
-            kind, size, seq = struct.unpack_from('<IIQ', blob, off)
-            end = off + 20 + size
-            if end > len(blob):
-                break
-            assert zlib.crc32(blob[off:end-4]) == struct.unpack_from('<I', blob, end-4)[0]
-            assert seq == chunks
-            chunks += 1
-            last = seq
-            trailer = kind == 6
+         'length-overflow', 'chunk-overflow', 'eintr', 'observe', 'refused']
+
+
+def run_arcs():
+    files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c', 'hooks/arcs.c', 'core/prof_arcs_writer.c']]
+    if a.red_stub:
+        files.append(a.red_stub.resolve())
+    exe = out / 'prefix'
+    r = run('compile', [os.environ.get('CC', 'cc'), *flags, *files,
+                        Path(__file__).with_name('prefix_accounting_test.c'), '-o', exe])
+    assert r.returncode == 0, r.stderr.decode()
+    if a.sanitize == 'thread':
+        # Prove that the same compiler/options/wrapper detects a real race AND
+        # accepts its mutex-protected control. Tool failure is never a skip/pass.
+        for label, args, wanted in [('race', [], 66), ('locked', ['-DRACE_CTL_LOCKED'], 0)]:
+            ctl = out / label
+            r = run(label + '-compile', [os.environ.get('CC', 'cc'), *flags, *args,
+                                        Path(__file__).with_name('tsan_race_ctl.c'), '-o', ctl])
+            assert r.returncode == 0, r.stderr.decode()
+            r = run(label + '-control', ['setarch', 'x86_64', '-R', ctl])
+            assert r.returncode == wanted, r.stderr.decode()
+            if label == 'race':
+                assert all(s in r.stderr for s in [b'ThreadSanitizer: data race', b'writer_a', b'writer_b'])
+            else:
+                assert b'ThreadSanitizer' not in r.stderr
+        print('TSan controls tests=2 pass=2 fail=0', flush=True)
+    passed = 0
+    for name in cases:
+        capture = out / (name + '.prof')
+        prefix = ['setarch', 'x86_64', '-R'] if a.sanitize == 'thread' else []
+        r = run(name, [*prefix, exe, name, capture])
+        ok = r.returncode == 0
+        if ok:
+            meta = {k.decode(): int(v) for k, v in re.findall(rb'(\w+)=(\d+)', r.stdout)}
+            blob = capture.read_bytes()
+            off, chunks, last, trailer = 16, 0, 2**64-1, False
+            unreg = None
+            while off + 20 <= len(blob):
+                kind, size, seq = struct.unpack_from('<IIQ', blob, off)
+                end = off + 20 + size
+                if end > len(blob):
+                    break
+                assert zlib.crc32(blob[off:end-4]) == struct.unpack_from('<I', blob, end-4)[0]
+                assert seq == chunks
+                chunks += 1
+                last = seq
+                trailer = kind == 6
+                if trailer:
+                    unreg = struct.unpack_from('<Q', blob, end-20)[0]
+                off = end
+            ok = (meta['bytes'] == len(blob) and meta['crc'] == zlib.crc32(blob) and
+                  meta['chunks'] == chunks and meta['last'] == last and meta['trailer'] == int(trailer))
+            if name in ['length-overflow','chunk-overflow']:
+                # C asserts the preflight boundary with synthetic near-MAX state;
+                # that artificial historical byte/chunk count is not a real file.
+                ok = meta['synthetic'] == 1 and meta['io'] == 0 and meta['crc'] == zlib.crc32(blob)
             if trailer:
-                unreg = struct.unpack_from('<Q', blob, end-20)[0]
-            off = end
-        ok = (meta['bytes'] == len(blob) and meta['crc'] == zlib.crc32(blob) and
-              meta['chunks'] == chunks and meta['last'] == last and meta['trailer'] == int(trailer))
-        if name in ['length-overflow','chunk-overflow']:
-            # C asserts the preflight boundary with synthetic near-MAX state;
-            # that artificial historical byte/chunk count is not a real file.
-            ok = meta['synthetic'] == 1 and meta['io'] == 0 and meta['crc'] == zlib.crc32(blob)
-        if trailer:
-            ok = ok and meta['unregistered'] == unreg
-        expected = 1 if name in ['zero-limit','overcount','partial','trailer-fail','late',
-                                'length-overflow','chunk-overflow','eintr'] else 0
-        checker = run(name+'-reader', [a.reader, 'check', capture])
-        ok = ok and checker.returncode == expected
-    passed += ok
-    print(f'{name}: {"PASS" if ok else "FAIL"}', flush=True)
-print(f'prefix tests={len(cases)} pass={passed} fail={len(cases)-passed}', flush=True)
-raise SystemExit(passed != len(cases))
+                ok = ok and meta['unregistered'] == unreg
+            expected = 1 if name in ['zero-limit','overcount','partial','trailer-fail','late',
+                                    'length-overflow','chunk-overflow','eintr'] else 0
+            checker = run(name+'-reader', [a.reader, 'check', capture])
+            ok = ok and checker.returncode == expected
+        passed += ok
+        print(f'{name}: {"PASS" if ok else "FAIL"}', flush=True)
+    print(f'prefix tests={len(cases)} pass={passed} fail={len(cases)-passed}', flush=True)
+    return passed == len(cases)
+
+
+# The core configuration: the record as every shipped archive has it (no WITH_ARCS, no arcs sources).  The C test
+# checks bytes, trailer, io, join, result, absence before finalization and no republication; the driver checks the
+# bytes against the file and the reader's verdict.
+CORE_CASES = [c for c in cases if c != 'chunk-overflow']
+
+
+def run_core():
+    core_flags = [v for v in flags if v != '-DPS3DK_PROF_WITH_ARCS=1']
+    core_files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c']]
+    exe = out / 'prefix-core'
+    r = run('core-compile', [os.environ.get('CC', 'cc'), *core_flags, *core_files,
+                             Path(__file__).with_name('prefix_accounting_test.c'), '-o', exe])
+    assert r.returncode == 0, r.stderr.decode()
+    passed = 0
+    for name in CORE_CASES:
+        capture = out / ('core-' + name + '.prof')
+        prefix = ['setarch', 'x86_64', '-R'] if a.sanitize == 'thread' else []
+        r = run('core-' + name, [*prefix, exe, name, capture])
+        ok = r.returncode == 0
+        if ok:
+            meta = {k.decode(): int(v) for k, v in re.findall(rb'(\w+)=(-?\d+)', r.stdout)}
+            blob = capture.read_bytes()
+            off, trailer = 16, False
+            while off + 20 <= len(blob):
+                kind, size, _ = struct.unpack_from('<IIQ', blob, off)
+                end = off + 20 + size
+                if end > len(blob):
+                    break
+                trailer = kind == 6
+                off = end
+            ok = meta['bytes'] == len(blob) and meta['trailer'] == int(trailer)
+            if name == 'length-overflow':
+                ok = meta['synthetic'] == 1 and meta['io'] == 0
+            expected = 1 if name in ['zero-limit', 'overcount', 'partial', 'trailer-fail', 'late',
+                                     'length-overflow', 'eintr'] else 0
+            checker = run('core-' + name + '-reader', [a.reader, 'check', capture])
+            ok = ok and checker.returncode == expected
+        passed += ok
+        print(f'core {name}: {"PASS" if ok else "FAIL"}', flush=True)
+    print(f'prefix core tests={len(CORE_CASES)} pass={passed} fail={len(CORE_CASES)-passed}', flush=True)
+    return passed == len(CORE_CASES)
+
+
+arcs_ok = run_arcs()
+core_ok = True if a.red_stub else run_core()   # the red stub replaces an arcs hook: core has nothing to replace
+raise SystemExit(not (arcs_ok and core_ok))

@@ -25,13 +25,11 @@ static int sink_write(prof *p, const uint8_t *buf, size_t n)
     unsigned noprog = 0;
     if (k->failed)
         return -1;
-#ifdef PS3DK_PROF_WITH_ARCS
     /* Refuse before invoking a sink that could accept unrepresentable bytes. */
     if ((uint64_t)n > UINT64_MAX - p->prefix_bytes) {
         sink_fail(k, -6);
         return -1;
     }
-#endif
     while (n > 0) {
         long r;
         int err = 0;
@@ -61,12 +59,12 @@ static int sink_write(prof *p, const uint8_t *buf, size_t n)
             continue;
         }
         noprog = 0;
-#ifdef PS3DK_PROF_WITH_ARCS
         /* Count only positive, in-range acknowledgements, before advancing
          * buf. Zero/retry/error responses never contribute to the prefix. */
+#ifdef PS3DK_PROF_WITH_ARCS
         p->prefix_crc32 = ps3dk_prof__crc32_extend(p->prefix_crc32, buf, (size_t)r);
-        p->prefix_bytes += (uint64_t)r;
 #endif
+        p->prefix_bytes += (uint64_t)r;
         buf += r;
         n -= (size_t)r;
     }
@@ -684,9 +682,7 @@ int p_quiesce_freeze_seal(prof *p)
         enc_u64(p, d->desc_emitted);
         enc_end(p);
         trailer = !p->snk.failed;
-#ifdef PS3DK_PROF_WITH_ARCS
         p->prefix_trailer = (uint32_t)trailer;
-#endif
         if (trailer && p->snk.kind == 2 && p->snk.cb.flush && p->snk.cb.flush(p->snk.cb.ctx) < 0)
             sink_fail(&p->snk, -4);   /* B5: a flush failure is a sink failure before close */
     }
@@ -714,7 +710,6 @@ close_capture:
 
 static prof *ready_prof(void) { return p_ready() ? g_prof : NULL; }
 
-#ifdef PS3DK_PROF_WITH_ARCS
 const struct ps3dk_prof_finalization *ps3dk_prof__finalization(void)
 {
     prof *p = ready_prof();
@@ -728,23 +723,24 @@ static void publish_finalization(prof *p, int result)
 {
     p->finalization = (struct ps3dk_prof_finalization){
         .accepted_bytes = p->prefix_bytes,
+        .trailer_written = (uint8_t)p->prefix_trailer,
+        .io_finalized = p->prefix_trailer && p->snk.closed && !p->snk.failed && !p->snk.close_failed && !p->join_failed,
+        .join_failed = (uint8_t)p->join_failed, .shutdown_result = result,
+#ifdef PS3DK_PROF_WITH_ARCS
         .completed_chunks = p->dr.chunk_seq,
         .last_chunk_sequence = p->dr.chunk_seq ? p->dr.chunk_seq - 1 : UINT64_MAX,
         .prefix_crc32 = p->prefix_crc32,
         .unregistered_refusals = p->prefix_unregistered,
         .session_id = p->tb_at_init, .freq_hz = p->tb_freq, .tb_at_init = p->tb_at_init,
         .abi = sizeof(void *) == 4 ? 1 : 2, .consumer_mode = (uint8_t)p->cfg.mode,
-        .trailer_written = (uint8_t)p->prefix_trailer,
-        .io_finalized = p->prefix_trailer && p->snk.closed && !p->snk.failed && !p->snk.close_failed && !p->join_failed,
-        .join_failed = (uint8_t)p->join_failed, .shutdown_result = result,
         .app = {p->app, p->app_len}, .build_id = {p->build_id, p->build_id_len},
         .sdk_version = {PS3DK_PROF_SDK_VERSION, (uint32_t)clen(PS3DK_PROF_SDK_VERSION)},
         .compiler_identity = {P_COMPILER, (uint32_t)clen(P_COMPILER)},
-        .flags = {p->flags, p->flags_len}, .workload_tag = {p->workload_tag, p->workload_tag_len}
+        .flags = {p->flags, p->flags_len}, .workload_tag = {p->workload_tag, p->workload_tag_len},
+#endif
     };
     ST_REL(&p->finalization_ready, 1u);
 }
-#endif
 
 int ps3dk_prof_drain(void)
 {
@@ -857,9 +853,7 @@ int ps3dk_prof_shutdown(void)
         t->in_drain = 0;
         ST_REL(&p->drain_busy, 0u);
         ST_REL(&p->phase, 3u);
-#ifdef PS3DK_PROF_WITH_ARCS
         publish_finalization(p, rc);
-#endif
         return rc;
     }
 
@@ -873,8 +867,6 @@ int ps3dk_prof_shutdown(void)
     rc = __atomic_load_n(&p->thread_result, __ATOMIC_ACQUIRE);
     if (rc == PS3DK_PROF_OK && p->join_failed)
         rc = PS3DK_PROF_ETHREAD;   /* after every sink and trailer severity */
-#ifdef PS3DK_PROF_WITH_ARCS
     publish_finalization(p, rc);
-#endif
     return rc;
 }

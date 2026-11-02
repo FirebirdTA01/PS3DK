@@ -43,7 +43,10 @@ static void *observer(void *ctx) {
     (void)ctx;
     while(!ps3dk_prof__finalization() && !LD_ACQ(&observer_stop))sched_yield();
     const struct ps3dk_prof_finalization *f=ps3dk_prof__finalization();CHECK(f!=NULL);
-    CHECK(f->io_finalized && f->trailer_written && f->completed_chunks>0);
+    CHECK(f->io_finalized && f->trailer_written);
+#ifdef PS3DK_PROF_WITH_ARCS
+    CHECK(f->completed_chunks>0);
+#endif
     return (void *)f;
 }
 static pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
@@ -56,10 +59,18 @@ static void *worker(void *ctx) {
     CHECK(pthread_mutex_unlock(&mutex)==0);ps3dk_prof_thread_end();return NULL;
 }
 static void *refused(void *ctx){(void)ctx;CHECK(ps3dk_prof_thread_begin("extra")==PS3DK_PROF_EFULL);return NULL;}
+/* A shutdown the runtime refuses (APP mode, not the owner) claims nothing and publishes nothing. */
+static void *foreign_shutdown(void *ctx){(void)ctx;CHECK(ps3dk_prof_shutdown()==PS3DK_PROF_EPERM);CHECK(ps3dk_prof__finalization()==NULL);return NULL;}
+#ifdef PS3DK_PROF_WITH_ARCS
 static void text_matches(struct ps3dk_prof_final_text t,const char *s){CHECK(t.length==strlen(s));CHECK(memcmp(t.data,s,t.length)==0);}
+#endif
 int main(int argc,char **argv) {
     if(argc!=3)return 2;
     mode=argv[1];
+#ifndef PS3DK_PROF_WITH_ARCS
+    /* The core record (every shipped archive): no chunk metadata, so no chunk ceiling to test. */
+    if(!strcmp(mode,"chunk-overflow")){fprintf(stderr,"chunk-overflow needs PS3DK_PROF_WITH_ARCS\n");return 2;}
+#endif
     CHECK(ps3dk_prof__finalization()==NULL);
     ps3dk_prof_config cfg;ps3dk_prof_config_defaults(&cfg);
     cfg.max_threads=1;cfg.max_descriptors=8;cfg.ring_records=512;cfg.quiesce_timeout_us=0;
@@ -92,6 +103,10 @@ int main(int argc,char **argv) {
     if(!strcmp(mode,"unregistered")) {
         CHECK(pthread_create(&t,NULL,refused,NULL)==0);CHECK(pthread_join(t,NULL)==0);
     }
+    if(!strcmp(mode,"refused")) {
+        CHECK(pthread_create(&t,NULL,foreign_shutdown,NULL)==0);CHECK(pthread_join(t,NULL)==0);
+        CHECK(ps3dk_prof__finalization()==NULL);
+    }
     if(!strcmp(mode,"join-fail"))ps3dk_prof_test_hooks.join_fail=1;
     int rc=ps3dk_prof_shutdown();
     int expected=0;
@@ -107,11 +122,13 @@ int main(int argc,char **argv) {
         FILE *in=fopen(g_prof->snk.path,"rb");CHECK(in!=NULL);used=fread(bytes,1,sizeof bytes,in);
         CHECK(!ferror(in) && feof(in));CHECK(fclose(in)==0);CHECK(g_prof->snk.error_count==1);
     }
-    if(length_overflow)CHECK(f->accepted_bytes==UINT64_MAX-8 && used==0 && calls==0 && f->completed_chunks==0);
+    if(length_overflow)CHECK(f->accepted_bytes==UINT64_MAX-8 && used==0 && calls==0);
     else CHECK(f->accepted_bytes==used);
-    if(chunk_overflow)CHECK(f->completed_chunks==UINT64_MAX && used==16 && calls==1);
     CHECK(f->shutdown_result==rc);
     CHECK(f->io_finalized==(expected==0 || late || file_mode));CHECK(f->join_failed==(!strcmp(mode,"join-fail")));
+#ifdef PS3DK_PROF_WITH_ARCS
+    if(length_overflow)CHECK(f->completed_chunks==0);
+    if(chunk_overflow)CHECK(f->completed_chunks==UINT64_MAX && used==16 && calls==1);
     CHECK(f->unregistered_refusals==(!strcmp(mode,"unregistered")));
     CHECK(f->abi==2 && f->consumer_mode==cfg.mode);CHECK(f->freq_hz==g_prof->tb_freq && f->tb_at_init==g_prof->tb_at_init);
     CHECK(f->session_id==f->tb_at_init);text_matches(f->app,"prefix");text_matches(f->build_id,"build");
@@ -120,6 +137,7 @@ int main(int argc,char **argv) {
     text_matches(f->compiler_identity,"clang " __clang_version__);
 #else
     text_matches(f->compiler_identity,"gcc " __VERSION__);
+#endif
 #endif
     struct ps3dk_prof_finalization saved=*f;
     if(late) {
@@ -130,9 +148,15 @@ int main(int argc,char **argv) {
     if(observe) {void *observed=NULL;ST_REL(&observer_stop,1u);CHECK(pthread_join(reader,&observed)==0);CHECK(observed==f);}
     CHECK(g_prof->snk.closed && (file_mode || (closes==1 && flushes<=1)));
     FILE *out=fopen(argv[2],"wb");CHECK(out!=NULL);CHECK(fwrite(bytes,1,used,out)==used);CHECK(fclose(out)==0);
+#ifdef PS3DK_PROF_WITH_ARCS
     printf("checks=%u bytes=%llu crc=%u chunks=%llu last=%llu trailer=%u io=%u unregistered=%llu synthetic=%d\n",
            checks,(unsigned long long)f->accepted_bytes,f->prefix_crc32,(unsigned long long)f->completed_chunks,
            (unsigned long long)f->last_chunk_sequence,f->trailer_written,f->io_finalized,(unsigned long long)f->unregistered_refusals,
            length_overflow || chunk_overflow);
+#else
+    printf("checks=%u bytes=%llu trailer=%u io=%u join=%u result=%d synthetic=%d\n",
+           checks,(unsigned long long)f->accepted_bytes,f->trailer_written,f->io_finalized,f->join_failed,
+           f->shutdown_result,length_overflow);
+#endif
     return 0;
 }

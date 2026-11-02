@@ -15,9 +15,9 @@
 #include <stdint.h>
 
 #include "../pal/pal.h"
+#include "prof_finalization.h"
 #ifdef PS3DK_PROF_WITH_ARCS
 #include "../hooks/arc_runtime.h"
-#include "prof_finalization.h"
 #endif
 
 /* ---- atomics (GCC builtins only; no __sync, no hand-written reservations) ---------------------------------------- */
@@ -205,13 +205,15 @@ typedef struct prof {
     int clock_failed;
     int join_failed;
     int lock_failed;            /* terminal PAL failure: mutex, or arc-enabled OS identity; fails closed */
+    uint64_t prefix_bytes;       /* sink bytes positively acknowledged, in range */
+    uint32_t prefix_trailer;     /* the trailer was written */
+    uint32_t finalization_ready; /* release-published only by the winning shutdown, after join */
+    struct ps3dk_prof_finalization finalization;
 #ifdef PS3DK_PROF_WITH_ARCS
     struct ps3dk_prof_arc_options arc_options; /* zero capacity disables candidate integration */
     uint32_t arc_index_capacity;
-    uint64_t prefix_bytes, prefix_unregistered;
-    uint32_t prefix_crc32, prefix_trailer;
-    uint32_t finalization_ready; /* release-published only by the winning shutdown, after join */
-    struct ps3dk_prof_finalization finalization;
+    uint64_t prefix_unregistered;
+    uint32_t prefix_crc32;
 #endif
     uint8_t *block;
     /* HEADER strings, copied at init (the caller's config strings need not outlive init). */
