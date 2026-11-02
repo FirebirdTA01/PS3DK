@@ -104,11 +104,16 @@ fn file_flags_nonzero() {
 }
 
 #[test]
-fn file_flags_extensions_without_domain() {
-    // The deliberately changed flag space: this complete flags = 1 file was FileFlagsNonzero in v1.0 and is now
-    // MALFORMED for declaring no DOMAIN (tests/ext.rs covers the extension rules).
+fn file_flags_extensions_unbound_domain() {
+    // The deliberately changed flag space: a complete flags = 1 file was FileFlagsNonzero in v1.0.  Without a DOMAIN
+    // it is now a valid empty extension file (spec r6); with an SPU domain whose lane is never declared it is MALFORMED
+    // (tests/ext.rs covers the extension rules).
     let mut f = ok_file();
     f.flags = 1;
+    let mut d = Buf(Vec::new());
+    d.u32(1).u32(2).u8(1).u8(32).u8(1).u8(0).u32(1).u32(10).u64(0).u64(0).u64(0).u64(0).str("spu");
+    let at = f.find(T_TRAILER);
+    f.chunks.insert(at, chunk(8, d.0));
     assert_rule(&f.bytes(), Rule::Extension);
 }
 

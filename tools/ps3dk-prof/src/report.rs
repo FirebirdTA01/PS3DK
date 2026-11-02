@@ -70,6 +70,12 @@ elapsed time, and is never summed across lanes.";
 pub fn extension_lines(cap: &Capture) -> Vec<String> {
     use crate::ext::{OpenBegins, Structure};
     let Some(x) = &cap.ext else { return Vec::new() };
+    if x.sources.is_empty() {
+        return vec![
+            "domain extensions: 0 sources declared (no SPU/RSX work is recorded; no SPU/RSX coverage is claimed)"
+                .to_string(),
+        ];
+    }
     let mut out = vec![format!(
         "domain extensions: {} source(s); MAPPING is UNMEASURED for every source (no SPU/RSX time is claimed)",
         x.sources.len()

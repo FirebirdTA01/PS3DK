@@ -158,4 +158,4 @@ and a mapped test name that does not exist.  Stage 3 and later bullets are not p
 | `EndFlagSeqLimitMismatch` | `end_flag_seq_limit_mismatch`, `seq_limit_only_in_earlier_retired_entry_bit1_missing`, `seq_limit_bit1_with_no_limited_entry` |
 | `EndFlagSinkErrorMismatch` | `end_flag_sink_error_mismatch` |
 | `TokenImpossible` | `token_impossible`, `nonexistent_frame_complete_lossless_quiesced_owner_is_malformed`, `rule4_missing_incomplete_only_through_seq_limit_on_another_lane`, `rule4_missing_incomplete_only_through_seq_limit_on_owner`, `rule4_missing_incomplete_only_through_recovered_sink_error`, `rule4_missing_incomplete_only_through_other_lane_not_quiesced`, `rule4_missing_complete_lossless_capture`, `read_alone_accepts_a_rule_4_case_that_load_refuses` |
-| `Extension` | `file_flags_extensions_without_domain` |
+| `Extension` | `file_flags_extensions_unbound_domain` |

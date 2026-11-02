@@ -171,7 +171,7 @@ pub struct SourceRaw {
     pub pairs: Vec<Pair>,
     /// BEGINs open when a LOSS or an epoch transition made the stack UNKNOWN.
     pub censored: Vec<u64>,
-    /// ENDs and MARKs above depth 0 seen while the stack was UNKNOWN.
+    /// Events seen while the stack was UNKNOWN that cannot be placed: every END, and every BEGIN or MARK above depth 0.
     pub unpaired: Vec<u64>,
     pub marks: Vec<u64>,
     /// BEGINs still open at the end of the source; None after a PROTOCOL ERROR (unknown, not zero).
@@ -882,10 +882,9 @@ impl ExtReader {
         trailer_ok: bool,
         frames: &BTreeMap<u32, BTreeSet<u64>>,
     ) -> Result<ExtCapture, Malformed> {
+        // Spec r6: flags = 1 with no DOMAIN is valid (0 sources; nothing measured or covered).  A declared domain whose
+        // lane is never bound is still MALFORMED once the TRAILER exists.
         if has_trailer {
-            if self.cap.domains.is_empty() {
-                return ext("DOMAIN_EXTENSIONS is set but the file declares no DOMAIN");
-            }
             if let Some((lane, domain)) = self.forward.iter().next() {
                 return ext(format!("domain {domain} names lane {lane}, which is never declared"));
             }

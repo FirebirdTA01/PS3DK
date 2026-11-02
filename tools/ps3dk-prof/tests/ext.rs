@@ -208,10 +208,21 @@ fn t0_flags_zero_rejects_an_extension_chunk() {
 }
 
 #[test]
-fn t0_flags_one_with_trailer_and_no_domain_is_malformed_for_missing_domain() {
+fn t0_flags_one_with_trailer_and_no_domain_is_a_valid_empty_extension() {
+    // Spec r6: the flag declares the permitted format, not a producer.  0 sources, explicitly reported.
     let mut f = v1_scenario().file();
     f.flags = 1;
-    expect_malformed("t0-flags1-nodomain", &f.bytes(), "declares no DOMAIN");
+    let bytes = f.bytes();
+    let v = sources("t0-flags1-nodomain", &bytes);
+    assert!(v.is_empty());
+    for cmd in ["check", "report"] {
+        let (code, out) = cli_cmd(cmd, &bytes, &format!("empty-{cmd}"));
+        assert_eq!(code, Some(0), "{cmd}: {out}");
+        assert_eq!(out.matches("domain extensions: 0 sources declared").count(), 1, "{cmd}: {out}");
+        assert!(!out.contains("MAPPING"), "{cmd}: {out}");
+    }
+    // Nonempty but unbound at the TRAILER stays MALFORMED (the same file plus one forward-referencing domain).
+    expect_malformed("t0-flags1-unbound", &ext_file(vec![domains(&[(SPU_D, 1, LANE)])]).bytes(), "never declared");
 }
 
 #[test]
@@ -221,7 +232,10 @@ fn t0_flags_one_torn_before_any_domain_is_incomplete() {
     let bytes = f.bytes();
     dump("t0-flags1-torn-nodomain", &bytes);
     match load(&bytes) {
-        Outcome::Analysed(a) => assert!(matches!(a.verdict, ps3dk_prof::Verdict::Incomplete(_))),
+        Outcome::Analysed(a) => {
+            assert!(matches!(a.verdict, ps3dk_prof::Verdict::Incomplete(_)));
+            assert!(a.capture.ext.as_ref().unwrap().sources.is_empty());
+        }
         o => panic!("{o:?}"),
     }
 }

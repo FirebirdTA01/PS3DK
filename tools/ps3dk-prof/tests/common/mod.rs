@@ -12,7 +12,20 @@ pub fn harvest(bytes: &[u8]) {
     if let Ok(dir) = std::env::var("PROF_CORPUS_DIR") {
         std::fs::create_dir_all(&dir).unwrap();
         // FNV, not CRC32: every chunk carries its own CRC, so files differing in one chunk can share a whole-file CRC.
-        std::fs::write(format!("{dir}/{:016x}-{}.prof", fnv(bytes), bytes.len()), bytes).unwrap();
+        let path = format!("{dir}/{:016x}-{}.prof", fnv(bytes), bytes.len());
+        // Write a private temporary, then hard-link it to the name: the link fails if the name exists, so the create is
+        // atomic and a reader never sees a partial file.  A same-name file with other bytes is a name collision:
+        // refused, never overwritten.
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = format!("{dir}/.tmp-{}-{n}", std::process::id());
+        std::fs::write(&tmp, bytes).unwrap();
+        let linked = std::fs::hard_link(&tmp, &path);
+        std::fs::remove_file(&tmp).unwrap();
+        if linked.is_err() {
+            let old = std::fs::read(&path).unwrap();
+            assert!(old == bytes, "corpus name collision at {path}");
+        }
     }
 }
 
