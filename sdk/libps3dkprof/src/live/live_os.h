@@ -27,6 +27,21 @@
 #define PS3DK_PROF_LIVE_OS_H
 #include <stdint.h>
 
+/* Archive names: everything the runtime archive exports outside the public API is under ps3dk_prof__. */
+#define live_os_listen ps3dk_prof__live_os_listen
+#define live_os_accept ps3dk_prof__live_os_accept
+#define live_os_set_nonblock ps3dk_prof__live_os_set_nonblock
+#define live_os_send ps3dk_prof__live_os_send
+#define live_os_recv ps3dk_prof__live_os_recv
+#define live_os_poll ps3dk_prof__live_os_poll
+#define live_os_close ps3dk_prof__live_os_close
+#define live_os_file_open ps3dk_prof__live_os_file_open
+#define live_os_file_read_at ps3dk_prof__live_os_file_read_at
+#define live_os_capture_supported ps3dk_prof__live_os_capture_supported
+#define live_os_thread_enter ps3dk_prof__live_os_thread_enter
+#define live_os_thread_exit ps3dk_prof__live_os_thread_exit
+#define live_os_stack_read ps3dk_prof__live_os_stack_read
+
 #define LIVE_OS_AGAIN (-1)  /* nothing can be done now: wait for the next poll */
 #define LIVE_OS_CLOSED (-2) /* the peer is gone: orderly close, reset or broken pipe */
 #define LIVE_OS_ERROR (-3)  /* any other failure */
@@ -83,6 +98,38 @@ int live_os_file_open(const char *path);
 /* Reads up to n bytes at offset off (a seek, then a read): bytes read (0 at
  * end of file) or LIVE_OS_ERROR. */
 int32_t live_os_file_read_at(int fd, void *buf, uint32_t n, uint64_t off);
+
+/* 1 if a capture at path may be served (a device the live link has been
+ * measured on), else 0. The host: any path. LV2: /dev_hdd0/ only, until
+ * another device is measured. */
+int live_os_capture_supported(const char *path);
+
+/* Agent-thread stack measurement. The agent thread calls enter first and
+ * exit last. Only an LV2 build with PS3DK_PROF_LIVE_STACK_PAINT (a
+ * measurement build, never a shipped archive) measures; everywhere else both
+ * are no-ops and the report says LIVE_OS_STACK_OFF. The measuring build reads
+ * the thread's stack bounds, refuses unless its stack pointer lies inside
+ * them, paints from 1 KiB below the stack pointer down to the base, and on
+ * exit scans up from the base for the first overwritten word. used is the
+ * TOTAL depth from the top of the stack to that word, so the unpainted top
+ * region (the entry frames and the 1 KiB gap) counts as used. The report is
+ * read after the thread has been joined. */
+enum {
+    LIVE_OS_STACK_DONE = 0,
+    LIVE_OS_STACK_OFF = 1,       /* not a measuring build */
+    LIVE_OS_STACK_RUNNING = 2,   /* painted; the thread has not exited */
+    LIVE_OS_STACK_NO_INFO = -1,  /* the stack bounds could not be read */
+    LIVE_OS_STACK_SP_OUTSIDE = -2 /* the stack pointer is not inside the reported bounds (or too near the base) */
+};
+typedef struct live_os_stack_report {
+    int32_t status;
+    uint32_t size;    /* the reported stack size */
+    uint32_t used;    /* total high-water depth from the top */
+    uint32_t painted; /* bytes painted at entry */
+} live_os_stack_report;
+void live_os_thread_enter(void);
+void live_os_thread_exit(void);
+void live_os_stack_read(live_os_stack_report *out);
 
 #ifdef PS3DK_PROF_TEST_HOOKS
 /* Seam-test fault injection: a non-NULL entry replaces that system call in

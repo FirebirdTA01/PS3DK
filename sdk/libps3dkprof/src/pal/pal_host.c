@@ -76,6 +76,7 @@ int pal_thread_join(pal_thread t)
 {
     int rc = pthread_join(t, NULL);
 #ifdef PS3DK_PROF_TEST_HOOKS
+    T_HOOKS.join_calls++;
     if (T_HOOKS.join_fail)
         return -1;
 #endif

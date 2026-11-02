@@ -710,6 +710,12 @@ close_capture:
 
 static prof *ready_prof(void) { return p_ready() ? g_prof : NULL; }
 
+int ps3dk_prof__shutdown_claimed(void)
+{
+    prof *p = ready_prof();
+    return p && LD_ACQ(&p->shutdown_once) != 0u;
+}
+
 const struct ps3dk_prof_finalization *ps3dk_prof__finalization(void)
 {
     prof *p = ready_prof();
@@ -819,6 +825,7 @@ int ps3dk_prof_shutdown(void)
         return PS3DK_PROF_EPERM;
     if (!CAS_ACQREL(&p->shutdown_once, &z, 1u))
         return PS3DK_PROF_EALREADY;
+    HOOK(after_shutdown_claim);   /* claimed: shutdown has begun, the stop latch is not yet set */
 
     /* The latch, under thread_mutex, fixing Ft (5.4).  A lock failure still latches, and fails the capture closed. */
     locked = p_lock(p, &p->thread_mutex) == 0;

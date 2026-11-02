@@ -116,16 +116,17 @@ typedef struct ps3dk_prof_capture_record {
     uint32_t build_id_len;
 } ps3dk_prof_capture_record;
 
-/* Live link configuration (docs/design/ps3dk-prof-viewer.md, Phase 2, "Target integration"). */
+/* Live link configuration (docs/design/ps3dk-prof-viewer.md, Phase 2, "Target integration").  A zero field takes
+ * its default; a NULL config takes every default.  Out-of-range values and nonzero reserved fields are EINVAL. */
 typedef struct ps3dk_prof_live_config {
-    uint16_t port;                /* default 31750 */
-    uint16_t reserved;
-    uint32_t poll_us;
-    uint32_t send_timeout_us;
-    uint32_t handshake_timeout_us;
-    uint32_t stack_bytes;
-    uint32_t reserved2;
-    uint64_t cap_bytes;
+    uint16_t port;                 /* TCP port on every interface; default 31750 */
+    uint16_t reserved;             /* 0 */
+    uint32_t poll_us;              /* 1000..1000000; default 10000: the agent's wait between checks */
+    uint32_t send_timeout_us;      /* 1000..60000000; default 2000000: no send progress for this long drops a viewer */
+    uint32_t handshake_timeout_us; /* 1000..60000000; default 2000000: the viewer's hello must arrive within this */
+    uint32_t stack_bytes;          /* 16 KiB..1 MiB; default 64 KiB: the agent thread's stack */
+    uint32_t reserved2;            /* 0 */
+    uint64_t cap_bytes;            /* 1..2^40: the most capture bytes served to one viewer; default the agent's cap */
 } ps3dk_prof_live_config;
 
 #ifdef __cplusplus
@@ -163,8 +164,21 @@ void ps3dk_prof_zone_end(ps3dk_prof_zone *zone);
 /* Copies the capture record.  OK; EINVAL for a NULL out; ENOTINIT before a successful init (a failed init, retryable
  * or terminal, publishes nothing); ENOTSUP with a callback sink (no file).  On any error out is left untouched. */
 int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out);
-/* Live link: DECLARED ONLY.  Not implemented in this release; a call fails to link.  The design and its review
- * gates are in docs/design/ps3dk-prof-viewer.md (Phase 2, "Target integration"). */
+/* Live link (docs/design/ps3dk-prof-viewer.md, Phase 2): one agent thread serves this run's FILE-sink capture to
+ * one PC viewer over TCP while it grows, reading the file only (the writer never waits for a viewer).  Manual
+ * lifecycle only (libps3dkprof); the network must be initialized first (netInitialize).  Calls are caller-serialized:
+ * init, live_start, shutdown and live_stop are never concurrent.
+ * live_start, after a successful init: OK; ENOTINIT before one; ESTOPPED once shutdown has begun; ENOTSUP with a
+ * callback sink or a capture outside /dev_hdd0/ (the only device measured); EALREADY after a start (once per run);
+ * EINVAL for a bad config; ENET if the listener cannot be created; ETHREAD if the thread cannot be.
+ * live_stop: lets a streaming viewer finish (END needs the shutdown's finalization) for up to graceful_us, then
+ * cancels it, and waits up to graceful_us + join_us for the agent thread to leave its loop.  OK (stopped);
+ * ETIMEDOUT or ECLOCK (still stopping: call stop again; keep the network initialized meanwhile); ETHREAD (the join
+ * failed: terminal, never retried, and the network must NOT be torn down, since the thread's state is unknown);
+ * EALREADY after a successful stop; ENOTINIT if never started; EINVAL if the deadline would overflow (nothing
+ * changes).  A graceful_us of 0 cancels at once.  What the deadlines do NOT bound: an LV2 file call already in
+ * progress, and the final ordinary join once the thread has left its loop (it waits only for the thread to return,
+ * but no API bounds that wait). */
 int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg);
 int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us);
 

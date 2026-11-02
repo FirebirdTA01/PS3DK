@@ -23,9 +23,14 @@ PPU_FLAGS := -O2 -Wall -Wextra -Werror -Wno-prio-ctor-dtor -std=c11 -mcpu=cell \
              -DPS3DK_PROF=1 -DPS3DK_PROF_PAL_LV2 -I../include -I"$(PS3DK)/ppu/include"
 CONFIG := $(BUILD)/config.h
 CORE := prof_core prof_drain pal_lv2
+# The live link (ps3dk_prof_live_start/stop) is manual-lifecycle only: separate members, pulled in by a reference.
+LIVE := live_agent live_os_lv2 live_api
+MANUAL := $(CORE) $(LIVE)
 AUTO := $(CORE) prof_arcs_writer startup
-ILP32_CORE := $(addprefix $(BUILD)/ilp32/,$(addsuffix .o,$(CORE)))
-LP64_CORE := $(addprefix $(BUILD)/lp64/,$(addsuffix .o,$(CORE)))
+ILP32_CORE := $(addprefix $(BUILD)/ilp32/,$(addsuffix .o,$(MANUAL)))
+LP64_CORE := $(addprefix $(BUILD)/lp64/,$(addsuffix .o,$(MANUAL)))
+ILP32_LIVE := $(addprefix $(BUILD)/ilp32/,$(addsuffix .o,$(LIVE)))
+LP64_LIVE := $(addprefix $(BUILD)/lp64/,$(addsuffix .o,$(LIVE)))
 ILP32_AUTO := $(addprefix $(BUILD)/ilp32/,$(addsuffix .o,$(AUTO)))
 LP64_AUTO := $(addprefix $(BUILD)/lp64/,$(addsuffix .o,$(AUTO)))
 LIBS := $(foreach abi,ilp32 lp64,$(BUILD)/$(abi)/libps3dkprof.a $(BUILD)/$(abi)/libps3prof.a)
@@ -41,7 +46,8 @@ $(CONFIG): FORCE
 	@cmp -s "$@.tmp" "$@" || cp "$@.tmp" "$@"
 	@rm -f "$@.tmp"
 
-vpath %.c src/core src/pal src/auto
+vpath %.c src/core src/pal src/auto src/live
+$(ILP32_LIVE) $(LP64_LIVE): PPU_FLAGS += -Isrc/core -Isrc/pal -Isrc/live
 $(BUILD)/ilp32/%.o: %.c $(CONFIG) Makefile
 	@mkdir -p "$(@D)"
 	$(PPU_CC) $(PPU_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
@@ -68,6 +74,6 @@ install: all
 	install -m 0644 "$(BUILD)/lp64/libps3dkprof.a" "$(BUILD)/lp64/libps3prof.a" "$(PS3DK)/ppu/lib/lp64/"
 
 clean:
-	rm -f $(ILP32_AUTO) $(LP64_AUTO) $(ILP32_AUTO:.o=.d) $(LP64_AUTO:.o=.d) $(LIBS) "$(CONFIG)" "$(CONFIG).tmp"
+	rm -f $(ILP32_AUTO) $(LP64_AUTO) $(ILP32_LIVE) $(LP64_LIVE) $(ILP32_AUTO:.o=.d) $(LP64_AUTO:.o=.d) 	      $(ILP32_LIVE:.o=.d) $(LP64_LIVE:.o=.d) $(LIBS) "$(CONFIG)" "$(CONFIG).tmp"
 
--include $(ILP32_AUTO:.o=.d) $(LP64_AUTO:.o=.d)
+-include $(ILP32_AUTO:.o=.d) $(LP64_AUTO:.o=.d) $(ILP32_LIVE:.o=.d) $(LP64_LIVE:.o=.d)

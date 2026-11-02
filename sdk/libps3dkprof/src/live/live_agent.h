@@ -21,6 +21,11 @@
  *   is a gate of the target checkpoint. */
 #ifndef PS3DK_PROF_LIVE_AGENT_H
 #define PS3DK_PROF_LIVE_AGENT_H
+/* Archive names: everything the runtime archive exports outside the public API is under ps3dk_prof__. */
+#define live_config_defaults ps3dk_prof__live_config_defaults
+#define live_agent_start ps3dk_prof__live_agent_start
+#define live_agent_port ps3dk_prof__live_agent_port
+#define live_agent_stop ps3dk_prof__live_agent_stop
 #include <stdatomic.h>
 #include <stdint.h>
 #include "live_proto.h"

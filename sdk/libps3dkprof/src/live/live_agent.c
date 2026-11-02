@@ -263,6 +263,7 @@ static void *agent_main(void *arg)
 {
     live_agent *a = arg;
     live_conn *c = &a->conn;
+    live_os_thread_enter(); /* a stack measurement build paints here; otherwise nothing */
     for (;;) {
         uint64_t now;
         if (now_us(&now) != 0) {
@@ -360,6 +361,7 @@ static void *agent_main(void *arg)
     }
     live_os_close(a->listen_fd);
     a->listen_fd = -1;
+    live_os_thread_exit(); /* the measurement scan, before the thread's last store */
     atomic_store(&a->exited, 1);
     return NULL;
 }

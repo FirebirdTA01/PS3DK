@@ -143,6 +143,24 @@ int live_os_file_open(const char *path)
     return LIVE_OS_ERROR;
 }
 
+void live_os_thread_enter(void)
+{
+}
+
+void live_os_thread_exit(void)
+{
+}
+
+void live_os_stack_read(live_os_stack_report *out)
+{
+    *out = (live_os_stack_report){.status = LIVE_OS_STACK_OFF};
+}
+
+int live_os_capture_supported(const char *path)
+{
+    return path && path[0] != 0;
+}
+
 int32_t live_os_file_read_at(int fd, void *buf, uint32_t n, uint64_t off)
 {
     if (n > LIVE_OS_MAX_IO || off > (uint64_t)INT64_MAX)

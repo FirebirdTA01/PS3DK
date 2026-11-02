@@ -1,4 +1,6 @@
-/* Private candidate metadata for the later paired exporter. No wire changes. */
+/* The runtime's private finalization record: in every build, the common prefix that the live link's END reports
+ * (live/live_api.c); with PS3DK_PROF_WITH_ARCS, the candidate metadata for the later paired exporter as well.
+ * No wire changes. */
 #ifndef PS3DK_PROF_FINALIZATION_H
 #define PS3DK_PROF_FINALIZATION_H
 #include <stdint.h>
@@ -24,4 +26,9 @@ struct ps3dk_prof_finalization {
  * io_finalized means completed I/O, not complete/qualified observations; a consumer also checks
  * shutdown_result. */
 const struct ps3dk_prof_finalization *ps3dk_prof__finalization(void);
+
+/* 1 once a shutdown has won its claim (acquire), before it takes any lock or sets the stop latch; 0 before, or when
+ * the profiler is not ready.  A snapshot: it does not arbitrate a start racing a shutdown, which the caller
+ * serializes (init, live_start, shutdown and live_stop are never concurrent). */
+int ps3dk_prof__shutdown_claimed(void);
 #endif

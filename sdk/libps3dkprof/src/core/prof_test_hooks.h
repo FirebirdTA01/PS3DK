@@ -78,6 +78,11 @@ typedef struct ps3dk_prof_test_hooks_t {
     uint64_t (*candidate_desc_id)(const char *name, uint32_t line, uint64_t natural_id);
     /* Called by the successful init after the capture record is filled and before it is published. */
     void (*before_capture_publish)(void);
+    /* Called by shutdown right after it wins its claim, before it locks anything or sets the stop latch. */
+    void (*after_shutdown_claim)(void);
+    int live_ephemeral_port;           /* ps3dk_prof_live_start binds port 0 (an ephemeral port), for host tests */
+    uint16_t live_listen_port;         /* nonzero: ps3dk_prof_live_start binds 127.0.0.1 on this port (wins) */
+    unsigned join_calls;               /* host PAL: pal_thread_join calls, counted (controlling thread only) */
 } ps3dk_prof_test_hooks_t;
 
 extern ps3dk_prof_test_hooks_t ps3dk_prof_test_hooks;
