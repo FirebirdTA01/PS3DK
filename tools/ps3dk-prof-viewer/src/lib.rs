@@ -6,6 +6,7 @@
 //! window; [`timeline_ui`] draws the timeline with egui and is driven by
 //! synthetic input in its tests.
 
+pub mod app;
 pub mod live;
 pub mod live_client;
 pub mod model;

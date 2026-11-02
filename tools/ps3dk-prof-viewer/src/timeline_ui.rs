@@ -37,6 +37,14 @@ pub struct TimelineState {
     box_from: Option<f32>,
     /// Where each track's bar area was drawn last frame, by track index.
     pub track_areas: Vec<Rect>,
+    /// The capture is still arriving (a live session): offers Follow.
+    pub live: bool,
+    /// Keep the window on the newest data as snapshots arrive. Any zoom or
+    /// pan by the user turns it off.
+    pub follow: bool,
+    /// The window shows the whole capture; a newer snapshot of a growing
+    /// capture is fitted again rather than keeping the old width.
+    pub fit_all: bool,
 }
 
 impl TimelineState {
@@ -48,7 +56,34 @@ impl TimelineState {
             view,
             box_from: None,
             track_areas: Vec::new(),
+            live: false,
+            follow: false,
+            fit_all: true,
         }
+    }
+
+    /// Rebuilds the tracks from a newer snapshot of the same capture,
+    /// keeping the window, or moving it to the newest data under Follow, or
+    /// refitting a whole-capture view. A shift-drag box in progress is kept
+    /// when the window stays put, and cancelled when the window moves under
+    /// it (its pixels would no longer mean the same times).
+    pub fn refresh(&mut self, a: &Analysis) {
+        self.tl = crate::timeline::timeline(a);
+        let before = self.view;
+        if self.follow {
+            self.view.t0 = self.tl.length() - self.view.dt;
+        } else if self.fit_all {
+            self.view = View::fit(&self.tl);
+        }
+        self.view.clamp(&self.tl);
+        if self.view != before {
+            self.box_from = None;
+        }
+    }
+
+    /// A shift-drag box is being dragged.
+    pub fn box_active(&self) -> bool {
+        self.box_from.is_some()
     }
 }
 
@@ -81,6 +116,7 @@ pub fn draw(
             }
             st.track_areas.clear();
             toolbar(p, st, tb, &*selected);
+            let before = st.view;
             p.add_space(ui::SPACE_SM);
             let width = (p.available_width() - LABEL_W).max(100.0);
             draw_ruler(p, st, tb, width, &pal);
@@ -101,6 +137,12 @@ pub fn draw(
                         p.add_space(ui::SPACE_XS);
                     }
                 });
+            // Any change the user made to the window on the tracks ends Follow;
+            // whether it now shows everything decides refitting.
+            if st.view != before {
+                st.follow = false;
+                st.fit_all = st.view == View::fit(&st.tl);
+            }
         });
 }
 
@@ -108,12 +150,30 @@ fn toolbar(p: &mut egui::Ui, st: &mut TimelineState, tb: TimeBase, selected: &Op
     p.horizontal(|p| {
         if ui::quiet_button(p, "Fit").clicked() {
             st.view = View::fit(&st.tl);
+            st.follow = false;
+            st.fit_all = true;
         }
         if ui::quiet_button(p, "Zoom in").clicked() {
             st.view.zoom(&st.tl, 0.5, 0.5);
+            st.follow = false;
+            st.fit_all = st.view == View::fit(&st.tl);
         }
         if ui::quiet_button(p, "Zoom out").clicked() {
             st.view.zoom(&st.tl, 0.5, 2.0);
+            st.follow = false;
+            st.fit_all = st.view == View::fit(&st.tl);
+        }
+        if st.live {
+            p.add_space(ui::SPACE_SM);
+            let mut follow = st.follow;
+            if p.checkbox(&mut follow, "Follow newest data").changed() {
+                st.follow = follow;
+                if follow {
+                    st.fit_all = false;
+                    st.view.t0 = st.tl.length() - st.view.dt;
+                    st.view.clamp(&st.tl);
+                }
+            }
         }
         p.add_space(ui::SPACE_LG);
         let span = match tb.ms(st.view.dt) {
@@ -380,7 +440,8 @@ fn handle_input(
             st.box_from = Some(pos.x - area.left());
         }
     }
-    if resp.dragged() && st.box_from.is_none() {
+    // A shift-drag is a box (or a box cancelled by a refresh), never a pan.
+    if resp.dragged() && st.box_from.is_none() && !shift {
         // On the first drag frame, pan by everything since the press, so the
         // pixels moved before egui recognised the drag are not lost.
         let dx = match (resp.drag_started(), p.input(|i| i.pointer.press_origin())) {

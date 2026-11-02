@@ -238,3 +238,88 @@ fn a_new_file_starts_fitted() {
     assert_eq!(h.st.view, View::fit(&h.st.tl));
     assert_eq!(h.st.track_areas.len(), 2);
 }
+
+/// One lane with `zones` zoneA instances 1000 ticks apart: a capture that
+/// "grows" as `zones` increases.
+fn growing(zones: u64) -> Analysis {
+    let mut parts = vec![vec![frame(0, 0, 0)]];
+    for i in 0..zones {
+        parts.push(zone(0, 0, 0, 1000 + i * 1000, i + 1, 0));
+        parts.push(vec![end(0, 0, 0, 1500 + i * 1000, i + 1)]);
+    }
+    analysed(&scenario(vec![lane(1, seqd(0, parts.concat()))]).bytes())
+}
+
+#[test]
+fn a_fitted_view_refits_as_the_capture_grows() {
+    let mut st = TimelineState::new(&growing(2));
+    assert!(st.fit_all);
+    st.refresh(&growing(50));
+    assert_eq!(st.view, View::fit(&st.tl), "still the whole capture");
+}
+
+#[test]
+fn follow_keeps_the_width_and_moves_to_the_newest_data() {
+    let mut st = TimelineState::new(&growing(10));
+    st.view.zoom(&st.tl, 1.0, 0.25);
+    st.fit_all = false;
+    st.follow = true;
+    let dt = st.view.dt;
+    st.refresh(&growing(50));
+    assert_eq!(st.view.dt, dt);
+    assert!((st.view.t0 + st.view.dt - st.tl.length()).abs() < 1e-6);
+}
+
+#[test]
+fn a_zoomed_view_keeps_its_window_as_the_capture_grows() {
+    let mut st = TimelineState::new(&growing(10));
+    st.view.zoom(&st.tl, 0.0, 0.25);
+    st.fit_all = false;
+    let before = st.view;
+    st.refresh(&growing(50));
+    assert_eq!(st.view, before);
+}
+
+#[test]
+fn user_zoom_ends_follow_and_fit_all() {
+    let mut h = Harness::new(capture(1));
+    h.st.live = true;
+    h.st.follow = true;
+    assert!(h.st.fit_all);
+    let p = h.at(0.5, 0);
+    h.frame(vec![Event::PointerMoved(p)]);
+    h.frame(vec![Event::MouseWheel {
+        unit: MouseWheelUnit::Point,
+        delta: Vec2::new(0.0, 120.0),
+        modifiers: Modifiers::NONE,
+    }]);
+    h.idle(30);
+    assert!(!h.st.follow && !h.st.fit_all);
+    // Double-click fits again, which is fit_all.
+    h.click(p);
+    h.click(p);
+    assert!(h.st.fit_all && !h.st.follow);
+}
+
+#[test]
+fn a_box_in_progress_survives_a_refresh_unless_the_window_moves() {
+    for (fit_all, kept) in [(false, true), (true, false)] {
+        let mut h = Harness::new(growing(10));
+        h.st.fit_all = fit_all;
+        h.modifiers = Modifiers::SHIFT;
+        let (from, to) = (h.at(0.2, 0), h.at(0.4, 0));
+        h.press(from, true);
+        for i in 1..=5 {
+            let p = from + (to - from) * (i as f32 / 5.0);
+            h.frame(vec![Event::PointerMoved(p)]);
+        }
+        assert!(h.st.box_active());
+        let bigger = growing(50);
+        h.st.refresh(&bigger);
+        h.a = bigger;
+        assert_eq!(h.st.box_active(), kept, "fit_all {fit_all}");
+        h.press(to, false);
+        h.idle(2);
+        assert!(!h.st.box_active());
+    }
+}
