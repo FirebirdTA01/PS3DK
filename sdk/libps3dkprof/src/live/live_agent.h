@@ -1,6 +1,7 @@
 /* Live link agent: serves a capture FILE that another writer is growing to
- * one viewer over TCP (schema: live_proto.h). Host-only checkpoint: the
- * runtime hook-up, the public API and the LV2 network shim come later.
+ * one viewer over TCP (schema: live_proto.h). Its OS calls go through
+ * live_os.h; only the host shim (live_os_host.c) exists so far. The runtime
+ * hook-up, the public API and the LV2 shim come in the target checkpoint.
  *
  * The agent only reads the file. It never touches drains, rings or sink
  * callbacks, so a writer never waits on a viewer; the agent still costs
@@ -153,8 +154,8 @@ typedef struct live_test_hooks {
     atomic_int clock_fail;         /* the agent's monotonic clock reads fail */
     atomic_int busy_nonblock_fail; /* the refused socket cannot be made non-blocking */
     atomic_int busy_send_eagain;   /* the one BUSY send attempt returns EAGAIN */
-    atomic_int pread_block;        /* the next pread waits until pread_release (then clears) */
-    atomic_int pread_entered;      /* set when a pread is held */
+    atomic_int pread_block;        /* the next file read waits until pread_release (then clears) */
+    atomic_int pread_entered;      /* set when a file read is held */
     atomic_int pread_release;
 } live_test_hooks;
 extern live_test_hooks ps3dk_prof_test_live_hooks; /* the archive check refuses ps3dk_prof_test_ symbols */

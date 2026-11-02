@@ -1,19 +1,9 @@
 /* Live link agent. See live_agent.h for the contract and live_proto.h for
- * the wire schema. Host-only checkpoint: sockets and file reads use POSIX
- * directly; the LV2 shim is part of the later target checkpoint. */
-#if !defined(PS3DK_PROF_PAL_HOST)
-#error "live_agent.c: only the host build exists in this checkpoint"
-#endif
-#define _GNU_SOURCE
+ * the wire schema. Every socket, poll and file call goes through the OS seam
+ * (live_os.h); this file holds only the protocol and the state machine. */
 #include "live_agent.h"
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <poll.h>
+#include "live_os.h"
 #include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #ifdef PS3DK_PROF_TEST_HOOKS
 live_test_hooks ps3dk_prof_test_live_hooks;
@@ -34,7 +24,7 @@ static int now_us(uint64_t *t)
 
 /* A file read; under test hooks it can be held to stand in for an LV2 file
  * call with no deadline. */
-static ssize_t file_pread(int fd, void *buf, size_t n, uint64_t off)
+static int32_t file_read(int fd, void *buf, uint32_t n, uint64_t off)
 {
 #ifdef PS3DK_PROF_TEST_HOOKS
     live_test_hooks *h = &ps3dk_prof_test_live_hooks;
@@ -44,11 +34,7 @@ static ssize_t file_pread(int fd, void *buf, size_t n, uint64_t off)
             pal_sleep_us(1000);
     }
 #endif
-    ssize_t r;
-    do
-        r = pread(fd, buf, n, (off_t)off);
-    while (r < 0 && errno == EINTR);
-    return r;
+    return live_os_file_read_at(fd, buf, n, off);
 }
 
 void live_config_defaults(live_config *cfg)
@@ -63,10 +49,13 @@ void live_config_defaults(live_config *cfg)
     };
 }
 
-static int set_nonblock(int fd)
+/* strnlen without POSIX: the length of s, or max if no NUL comes first. */
+static size_t bounded_len(const char *s, size_t max)
 {
-    int fl = fcntl(fd, F_GETFL, 0);
-    return fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0 ? -1 : 0;
+    size_t n = 0;
+    while (n < max && s[n])
+        n++;
+    return n;
 }
 
 static void put_hdr(uint8_t *p, uint32_t type, uint32_t len)
@@ -90,10 +79,8 @@ static void drop(live_agent *a, live_conn *c, enum live_drop why)
 {
     /* Count first: a peer that sees the close may read the counters. */
     atomic_fetch_add(&a->drops[why], 1);
-    if (c->file_fd >= 0)
-        close(c->file_fd);
-    if (c->fd >= 0)
-        close(c->fd);
+    live_os_close(c->file_fd);
+    live_os_close(c->fd);
     memset(c, 0, sizeof *c);
     c->fd = c->file_fd = -1;
     c->phase = C_NONE;
@@ -109,7 +96,7 @@ static int cancel_due(live_agent *a, uint64_t now)
 static int flush_out(live_agent *a, live_conn *c, uint64_t now)
 {
     while (c->out.done < c->out.len) {
-        ssize_t n = send(c->fd, c->out.bytes + c->out.done, c->out.len - c->out.done, MSG_NOSIGNAL);
+        int32_t n = live_os_send(c->fd, c->out.bytes + c->out.done, c->out.len - c->out.done);
         if (n > 0) {
             c->out.done += (uint32_t)n;
             c->last_progress = now;
@@ -117,9 +104,9 @@ static int flush_out(live_agent *a, live_conn *c, uint64_t now)
                 atomic_fetch_add(&a->bytes_delivered, c->out.data_bytes);
             continue;
         }
-        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+        if (n == LIVE_OS_AGAIN)
             return 0;
-        return -1;
+        return -1; /* closed, failed, or nothing accepted */
     }
     return 0;
 }
@@ -153,7 +140,7 @@ static int queue_next(live_agent *a, live_conn *c)
     if (room) {
         uint32_t want = room < LIVE_MAX_DATA ? (uint32_t)room : LIVE_MAX_DATA;
         uint8_t *payload = c->out.bytes + LIVE_HDR_BYTES;
-        ssize_t n = file_pread(c->file_fd, payload + 8, want, c->sent);
+        int32_t n = file_read(c->file_fd, payload + 8, want, c->sent);
         if (n < 0)
             return -1;
         if (n > 0) {
@@ -174,7 +161,7 @@ static int queue_next(live_agent *a, live_conn *c)
         return 0;
     if (room) {
         uint8_t probe;
-        ssize_t n = file_pread(c->file_fd, &probe, 1, c->sent);
+        int32_t n = file_read(c->file_fd, &probe, 1, c->sent);
         if (n < 0)
             return -1;
         if (n > 0)
@@ -213,7 +200,7 @@ static int read_in(live_agent *a, live_conn *c, uint64_t now)
                     return LIVE_DROP_HANDSHAKE_TIMEOUT;
                 if (live_get32(p) != LIVE_MAGIC || live_get16(p + 4) != LIVE_VERSION || live_get16(p + 6) != 0)
                     return LIVE_DROP_BAD_HELLO;
-                c->file_fd = open(a->path, O_RDONLY | O_CLOEXEC);
+                c->file_fd = live_os_file_open(a->path);
                 if (c->file_fd < 0)
                     return LIVE_DROP_IO;
                 /* open may block (a slow file system); a cancellation that
@@ -239,16 +226,14 @@ static int read_in(live_agent *a, live_conn *c, uint64_t now)
             c->in_len = 0;
             continue;
         }
-        ssize_t n = recv(c->fd, c->in + c->in_len, need - c->in_len, 0);
+        int32_t n = live_os_recv(c->fd, c->in + c->in_len, need - c->in_len);
         if (n > 0) {
             c->in_len += (uint32_t)n;
             continue;
         }
-        if (n == 0)
-            return LIVE_DROP_PEER_CLOSED;
-        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+        if (n == LIVE_OS_AGAIN)
             return -1;
-        return LIVE_DROP_PEER_CLOSED;
+        return LIVE_DROP_PEER_CLOSED; /* closed or failed */
     }
 }
 
@@ -259,7 +244,7 @@ static void refuse_busy(live_agent *a, int fd)
     uint8_t f[LIVE_HDR_BYTES + 4];
     put_hdr(f, LIVE_T_BUSY, 4);
     live_put32(f + LIVE_HDR_BYTES, LIVE_BUSY_STREAMING);
-    int nonblock = set_nonblock(fd);
+    int nonblock = live_os_set_nonblock(fd);
 #ifdef PS3DK_PROF_TEST_HOOKS
     if (atomic_load(&ps3dk_prof_test_live_hooks.busy_nonblock_fail))
         nonblock = -1;
@@ -268,10 +253,10 @@ static void refuse_busy(live_agent *a, int fd)
 #ifdef PS3DK_PROF_TEST_HOOKS
         if (!atomic_load(&ps3dk_prof_test_live_hooks.busy_send_eagain))
 #endif
-            (void)send(fd, f, sizeof f, MSG_NOSIGNAL | MSG_DONTWAIT);
+            (void)live_os_send(fd, f, sizeof f); /* one attempt, on the now non-blocking socket */
     }
     atomic_fetch_add(&a->busy_refusals, 1); /* before the close the peer observes */
-    close(fd);
+    live_os_close(fd);
 }
 
 static void *agent_main(void *arg)
@@ -294,19 +279,19 @@ static void *agent_main(void *arg)
                 drop(a, c, LIVE_DROP_CANCELLED);
             break;
         }
-        struct pollfd pf[2] = {{.fd = a->listen_fd, .events = POLLIN}, {.fd = c->fd, .events = POLLIN}};
+        live_os_pollfd pf[2] = {{.fd = a->listen_fd, .events = LIVE_OS_IN}, {.fd = c->fd, .events = LIVE_OS_IN}};
         if (c->phase != C_NONE && c->out.done < c->out.len)
-            pf[1].events |= POLLOUT;
-        (void)poll(pf, c->phase == C_NONE ? 1 : 2, (int)(a->cfg.poll_us / 1000));
+            pf[1].events |= LIVE_OS_OUT;
+        (void)live_os_poll(pf, c->phase == C_NONE ? 1 : 2, a->cfg.poll_us / 1000);
         if (now_us(&now) != 0)
             continue; /* handled at the top */
-        if (pf[0].revents & POLLIN) {
-            int fd = accept(a->listen_fd, NULL, NULL);
+        if (pf[0].revents & LIVE_OS_IN) {
+            int fd = live_os_accept(a->listen_fd);
             if (fd >= 0) {
                 if (c->phase != C_NONE || stopping) {
                     refuse_busy(a, fd);
-                } else if (set_nonblock(fd) < 0) {
-                    close(fd);
+                } else if (live_os_set_nonblock(fd) < 0) {
+                    live_os_close(fd);
                 } else {
                     memset(c, 0, sizeof *c);
                     c->fd = fd;
@@ -373,7 +358,7 @@ static void *agent_main(void *arg)
         else if (c->phase == C_STREAM && c->out.done >= c->out.len)
             c->last_progress = now; /* idle is not a stall */
     }
-    close(a->listen_fd);
+    live_os_close(a->listen_fd);
     a->listen_fd = -1;
     atomic_store(&a->exited, 1);
     return NULL;
@@ -390,7 +375,7 @@ int live_agent_start(live_agent *a, const live_config *cfg, const live_source *s
         cfg->handshake_timeout_us > 60000000 || cfg->stack_bytes < 16 * 1024 ||
         cfg->stack_bytes > 1024 * 1024 || cfg->cap_bytes == 0 || cfg->cap_bytes > (1ull << 40))
         return LIVE_EINVAL;
-    size_t plen = src->path ? strnlen(src->path, sizeof a->path) : 0;
+    size_t plen = src->path ? bounded_len(src->path, sizeof a->path) : 0;
     if (plen == 0 || plen >= sizeof a->path || !src->finalization || !src->app || src->app_len == 0 ||
         src->app_len > LIVE_MAX_APP || src->build_id_len > LIVE_MAX_BUILD_ID ||
         (src->build_id_len && !src->build_id))
@@ -425,24 +410,15 @@ int live_agent_start(live_agent *a, const live_config *cfg, const live_source *s
     for (int i = 0; i < LIVE_DROP_COUNT; ++i)
         atomic_store(&a->drops[i], 0);
 
-    int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (fd < 0)
+    int fd;
+    uint16_t bound;
+    if (live_os_listen(cfg->port, cfg->loopback_only, &fd, &bound) != 0)
         return LIVE_ENET;
-    int one = 1;
-    (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-    struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons(cfg->port),
-                             .sin_addr.s_addr = htonl(cfg->loopback_only ? INADDR_LOOPBACK : INADDR_ANY)};
-    socklen_t sl = sizeof sa;
-    if (bind(fd, (struct sockaddr *)&sa, sizeof sa) < 0 || listen(fd, 2) < 0 || set_nonblock(fd) < 0 ||
-        getsockname(fd, (struct sockaddr *)&sa, &sl) < 0) {
-        close(fd);
-        return LIVE_ENET;
-    }
     a->listen_fd = fd;
-    a->bound_port = ntohs(sa.sin_port);
+    a->bound_port = bound;
     atomic_store(&a->state, ST_RUNNING);
     if (pal_thread_create(&a->thread, agent_main, a, cfg->stack_bytes) != 0) {
-        close(fd);
+        live_os_close(fd);
         a->listen_fd = -1;
         atomic_store(&a->state, ST_IDLE);
         return LIVE_ETHREAD;

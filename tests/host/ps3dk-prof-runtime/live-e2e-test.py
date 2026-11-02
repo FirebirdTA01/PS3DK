@@ -23,7 +23,8 @@ shutil.copyfile(root / 'sdk/include/ps3dk/prof.h', inc / 'prof.h')
 serve = out / 'live-agent-serve'
 cc = [os.environ.get('CC', 'cc'), '-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-pthread',
       '-DPS3DK_PROF_PAL_HOST', '-I', inc.parent, '-I', src / 'core', '-I', src / 'pal', '-I', src / 'live',
-      src / 'live/live_agent.c', src / 'pal/pal_host.c', Path(__file__).parent / 'live_agent_serve.c', '-o', serve]
+      src / 'live/live_agent.c', src / 'live/live_os_host.c', src / 'pal/pal_host.c',
+      Path(__file__).parent / 'live_agent_serve.c', '-o', serve]
 r = subprocess.run([str(x) for x in cc], capture_output=True, text=True)
 if r.returncode != 0:
     raise SystemExit('serve compile failed:\n' + r.stderr)

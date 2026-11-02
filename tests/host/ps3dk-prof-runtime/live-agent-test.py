@@ -39,8 +39,8 @@ flags = ['-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-pthread', '-D
 if a.sanitize:
     flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
 exe = out / 'live-agent-test'
-r = run('compile', [os.environ.get('CC', 'cc'), *flags, src / 'live/live_agent.c', src / 'pal/pal_host.c',
-                    here / 'live_agent_test.c', '-o', exe])
+r = run('compile', [os.environ.get('CC', 'cc'), *flags, src / 'live/live_agent.c', src / 'live/live_os_host.c',
+                    src / 'pal/pal_host.c', here / 'live_agent_test.c', '-o', exe])
 if r.returncode != 0:
     raise SystemExit('compile failed:\n' + r.stderr.decode())
 cases = run('list', [exe, '--list']).stdout.decode().split()
