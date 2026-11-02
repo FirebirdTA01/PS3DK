@@ -72,6 +72,13 @@ int ps3dk_prof_init_ex(const ps3dk_prof_config *cfg, const ps3dk_prof_ext_config
 /* Copies the table (all-or-nothing). EFULL: 32 images; EINVAL: a bad table; ENOMEM: the image arena is full. */
 int ps3dk_prof_spu_image_register_table(const uint8_t *build_id, uint32_t build_len, const ps3dk_prof_spu_desc *descs,
                                         uint32_t n, uint32_t *image);
+/* The SPU program's RAW ELF FILE BYTES (an embedspu blob or a file in memory, not a sys_spu_image_t): record i of its
+ * ps3dkprof_spudesc section becomes descriptor i, the index the SPU writer computes.  The bytes must stay alive and
+ * unchanged for the call (no concurrent writer); the descriptor strings and the build identity are copied (the ELF
+ * itself is not kept), so the caller may free it afterwards.  EINVAL: any ELF rule of the design, nothing
+ * registered; otherwise the results of register_table.  Strings: printable ASCII 0x20..0x7E (stricter than the table
+ * path, which is unchanged); the build id is 0x01 + the GNU build id, or 0x02 + FNV-1a-64 of the whole file. */
+int ps3dk_prof_spu_image_register_elf(const void *elf, uint64_t size, uint32_t *image);
 /* owner_self: 1 = the calling thread's live incarnation (EINVAL if it has none), 0 = NONE.  EFULL: lane limits. */
 int ps3dk_prof_spu_lane_create(const char *name, uint32_t image, int owner_self, ps3dk_prof_spu_lane *out);
 /* After a SUCCESSFUL join of the SPU thread group that ran the lane.  timeout_us is a polling deadline only: it does
@@ -82,6 +89,7 @@ int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st
 
 #define PS3DK_PROF_INIT_EX(cfg, ext) ps3dk_prof_init_ex((cfg), (ext))
 #define PS3DK_PROF_SPU_IMAGE_REGISTER_TABLE(b, l, d, n, out) ps3dk_prof_spu_image_register_table((b), (l), (d), (n), (out))
+#define PS3DK_PROF_SPU_IMAGE_REGISTER_ELF(e, s, out) ps3dk_prof_spu_image_register_elf((e), (s), (out))
 #define PS3DK_PROF_SPU_LANE_CREATE(name, image, self, out) ps3dk_prof_spu_lane_create((name), (image), (self), (out))
 #define PS3DK_PROF_SPU_LANE_END(h, t, out) ps3dk_prof_spu_lane_end((h), (t), (out))
 #define PS3DK_PROF_SPU_LANE_STATS(h, st) ps3dk_prof_spu_lane_get_stats((h), (st))
@@ -91,6 +99,7 @@ int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st
 #define PS3DK_PROF_INIT_EX(cfg, ext) ((void)sizeof(cfg), (void)sizeof(ext), PS3DK_PROF_ENOTSUP)
 #define PS3DK_PROF_SPU_IMAGE_REGISTER_TABLE(b, l, d, n, out)                                                          \
     ((void)sizeof(b), (void)sizeof(l), (void)sizeof(d), (void)sizeof(n), (void)sizeof(out), PS3DK_PROF_ENOTSUP)
+#define PS3DK_PROF_SPU_IMAGE_REGISTER_ELF(e, s, out) ((void)sizeof(e), (void)sizeof(s), (void)sizeof(out), PS3DK_PROF_ENOTSUP)
 #define PS3DK_PROF_SPU_LANE_CREATE(name, image, self, out)                                                           \
     ((void)sizeof(name), (void)sizeof(image), (void)sizeof(self), (void)sizeof(out), PS3DK_PROF_ENOTSUP)
 #define PS3DK_PROF_SPU_LANE_END(h, t, out) ((void)sizeof(h), (void)sizeof(t), (void)sizeof(out), PS3DK_PROF_ENOTSUP)

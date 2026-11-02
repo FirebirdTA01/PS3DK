@@ -24,14 +24,15 @@ int main(void)
     ps3dk_prof_spu_lane l;
     ps3dk_prof_spu_lane_stats st;
     uint32_t img = 0;
-    int r[5];
+    int r[6];
     r[0] = PS3DK_PROF_INIT_EX((n++, &c), (n++, &x));
     r[1] = PS3DK_PROF_SPU_IMAGE_REGISTER_TABLE((n++, (const uint8_t *)"b"), (uint32_t)side(), (n++, d), (uint32_t)n++,
                                                (n++, &img));
     r[2] = PS3DK_PROF_SPU_LANE_CREATE((n++, "x"), (uint32_t)side(), side(), (n++, &l));
     r[3] = PS3DK_PROF_SPU_LANE_END((uint32_t)side(), (uint64_t)n++, (n++, &st));
     r[4] = PS3DK_PROF_SPU_LANE_STATS((uint32_t)n++, (n++, &st));
-    for (int i = 0; i < 5; i++)
+    r[5] = PS3DK_PROF_SPU_IMAGE_REGISTER_ELF((n++, (const void *)d), (uint64_t)side(), (n++, &img));
+    for (int i = 0; i < 6; i++)
         if (r[i] != PS3DK_PROF_ENOTSUP) {
             printf("OFFBUILD FAIL macro %d returned %d\n", i, r[i]);
             bad = 1;

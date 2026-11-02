@@ -15,6 +15,7 @@
 #define psp_drain_declare ps3dk_prof__psp_drain_declare
 #define psp_drain_ends ps3dk_prof__psp_drain_ends
 #define psp_image_add ps3dk_prof__psp_image_add
+#define psp_image_add_src ps3dk_prof__psp_image_add_src
 #define psp_lane_create ps3dk_prof__psp_lane_create
 #define psp_lane_end ps3dk_prof__psp_lane_end
 #define psp_lane_end_poll ps3dk_prof__psp_lane_end_poll
@@ -174,6 +175,19 @@ int psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const ps
 void psp_ppu_fini(psp_ppu *p);
 int psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const psp_desc *d, uint32_t n,
                   uint32_t *index);
+/* a descriptor source: get(ctx, i, out) yields record i with BOUNDED lengths (name 1..512, file 0..512, no NUL
+ * inside), or nonzero; it is called twice per record (validate, then copy) and must answer the same both times */
+typedef struct psp_desc_rec {
+    uint32_t ls_addr, line;
+    const char *name, *file;
+    size_t name_len, file_len;
+} psp_desc_rec;
+typedef struct psp_desc_src {
+    void *ctx;
+    int (*get)(void *ctx, uint32_t i, psp_desc_rec *out);
+} psp_desc_src;
+int psp_image_add_src(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const psp_desc_src *src, uint32_t n,
+                      uint32_t *index);
 int psp_lane_create(psp_ppu *p, const char *name, uint32_t image, uint32_t owner, uint32_t owner_slot,
                     uint32_t owner_gen, uint32_t *lane);
 /* the drain: declarations, then each lane's coroutine (one phase per step), then end requests.  Counts and ledger

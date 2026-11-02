@@ -52,7 +52,7 @@ def build(label, r, extra, spu, test_src, links):
     if '-DPS3DK_PROF_WITH_ARCS' in extra:
         srcs.append(lib / 'hooks/arcs.c')
     if spu:
-        srcs += [lib / 'spu/psp_ppu.c', lib / 'spu/ext_runtime.c', lib / 'spu/psp_host_emul.c']
+        srcs += [lib / 'spu/psp_ppu.c', lib / 'spu/ext_runtime.c', lib / 'spu/psp_elf.c', lib / 'spu/psp_host_emul.c']
     exe = d / 'exe'
     r_ = subprocess.run([cc, *flags, *map(str, srcs), '-o', str(exe), *links], capture_output=True, text=True)
     (d / 'build.log').write_text(r_.stdout + r_.stderr)

@@ -120,55 +120,93 @@ static size_t image_bytes(uint32_t blen, const psp_desc *d, uint32_t n)
     return b;
 }
 
-int psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const psp_desc *d, uint32_t n,
-                  uint32_t *index)
+/* registration from a descriptor SOURCE (I3b): pass 1 gets every record, checks each record's bounded lengths and
+ * sums the chunk size and the arena need; pass 2 RE-FETCHES each record (again bounded), checks the copy still fits
+ * the room pass 1 reserved, and copies into the arena's UNUSED tail; a get failure there is EINVAL.  It does not
+ * cache or compare the pass-1 lengths: correctness rests on the documented contract that the source does not change
+ * during the call, and the aggregate room check keeps every copy inside the reserved tail regardless.  Only after
+ * every copy are arena_used, the image slot, nimages and *index written. */
+int psp_image_add_src(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const psp_desc_src *src, uint32_t n,
+                      uint32_t *index)
 {
     psp_image *im;
+    psp_desc *descs;
+    psp_desc_rec r;
     uint32_t i;
-    size_t strings = 0, at = 0;
+    size_t strings = 0, at = 0, bytes = 4 + 2 + (size_t)build_len + 4, base, need;
     char *arena;
-    /* validate everything before anything is kept, then copy it all: registration is all-or-nothing */
     if (p->sealed)
         return PSP_P_ESTOPPED;
     if (p->nimages >= p->lim.images || p->nimages >= 32)
         return PSP_P_ENOSPC;
     if (build_len < 1 || build_len > 64 || n < 1 || n > 4096)
         return PSP_P_EINVAL;
-    for (i = 0; i < n; i++)
-        if (!ascii_ok(d[i].name, 1, 512) || !ascii_ok(d[i].file, 0, 512))
-            return PSP_P_EINVAL;
-    if (4 + image_bytes(build_len, d, n) > MAX_CHUNK)
-        return PSP_P_EINVAL; /* one image is one SPU_IMAGES entry: it must fit a chunk */
-    for (i = 0; i < n; i++)
-        strings += strlen(d[i].name) + 1 + (d[i].file ? strlen(d[i].file) : 0) + 1;
-    /* the arena: the descriptor array (8-aligned), then the strings; checked before any state changes */
-    {
-        size_t base = (p->arena_used + 7) & ~(size_t)7, need = sizeof *d * n;
-        if (base < p->arena_used || base > p->arena_len || need > p->arena_len - base ||
-            strings > p->arena_len - base - need)
-            return PSP_P_ENOMEM;
-        im = &p->images[p->nimages];
-        im->descs = (psp_desc *)(void *)(p->arena + base);
-        arena = (char *)p->arena + base + need;
-        p->arena_used = base + need + strings;
-    }
     for (i = 0; i < n; i++) {
-        size_t ln = strlen(d[i].name) + 1, lf = (d[i].file ? strlen(d[i].file) : 0) + 1;
-        im->descs[i].ls_addr = d[i].ls_addr;
-        im->descs[i].line = d[i].line;
-        memcpy(arena + at, d[i].name, ln);
-        im->descs[i].name = arena + at;
-        at += ln;
-        memcpy(arena + at, d[i].file ? d[i].file : "", lf);
-        im->descs[i].file = arena + at;
-        at += lf;
+        if (src->get(src->ctx, i, &r) != 0 || r.name_len < 1 || r.name_len > 512 || r.file_len > 512)
+            return PSP_P_EINVAL;
+        strings += r.name_len + 1 + r.file_len + 1;
+        bytes += 12 + 2 + r.name_len + 2 + r.file_len;
     }
+    if (4 + bytes > MAX_CHUNK)
+        return PSP_P_EINVAL; /* one image is one SPU_IMAGES entry: it must fit a chunk */
+    base = (p->arena_used + 7) & ~(size_t)7;
+    need = sizeof(psp_desc) * n;
+    if (base < p->arena_used || base > p->arena_len || need > p->arena_len - base ||
+        strings > p->arena_len - base - need)
+        return PSP_P_ENOMEM;
+    descs = (psp_desc *)(void *)(p->arena + base);
+    arena = (char *)p->arena + base + need;
+    for (i = 0; i < n; i++) {
+        size_t nl, fl;
+        if (src->get(src->ctx, i, &r) != 0)
+            return PSP_P_EINVAL; /* nothing committed: the tail is unused space */
+        nl = r.name_len;
+        fl = r.file_len;
+        if (nl < 1 || nl > 512 || fl > 512 || at + nl + 1 + fl + 1 > strings)
+            return PSP_P_EINVAL; /* a record changed size between the passes */
+        descs[i].ls_addr = r.ls_addr;
+        descs[i].line = r.line;
+        memcpy(arena + at, r.name, nl);
+        arena[at + nl] = 0;
+        descs[i].name = arena + at;
+        at += nl + 1;
+        if (fl)
+            memcpy(arena + at, r.file, fl);
+        arena[at + fl] = 0;
+        descs[i].file = arena + at;
+        at += fl + 1;
+    }
+    im = &p->images[p->nimages];
+    im->descs = descs;
     memcpy(im->build_id, build_id, build_len);
     im->build_len = build_len;
     im->ndesc = n;
     im->used = 1;
+    p->arena_used = base + need + strings;
     *index = p->nimages++;
     return PSP_P_OK;
+}
+
+/* the table path: the existing policy (ascii_ok: bytes 0x01..0x7F, bounded) and the same arena bytes as before */
+static int table_get(void *ctx, uint32_t i, psp_desc_rec *out)
+{
+    const psp_desc *d = (const psp_desc *)ctx + i;
+    if (!ascii_ok(d->name, 1, 512) || !ascii_ok(d->file, 0, 512))
+        return -1;
+    out->ls_addr = d->ls_addr;
+    out->line = d->line;
+    out->name = d->name;
+    out->name_len = strlen(d->name);
+    out->file = d->file ? d->file : "";
+    out->file_len = d->file ? strlen(d->file) : 0;
+    return 0;
+}
+
+int psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const psp_desc *d, uint32_t n,
+                  uint32_t *index)
+{
+    psp_desc_src src = {(void *)(uintptr_t)d, table_get};
+    return psp_image_add_src(p, build_id, build_len, &src, n, index);
 }
 
 int psp_lane_create(psp_ppu *p, const char *name, uint32_t image, uint32_t owner, uint32_t owner_slot,

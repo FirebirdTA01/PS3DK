@@ -20,6 +20,7 @@
 
 #include "prof_spu.h"
 #include "psp_host_emul.h"
+#include "psp_elf.h"
 #include "psp_ppu.h"
 #ifdef PS3DK_PROF_TEST_HOOKS
 #include "prof_test_hooks.h"
@@ -316,6 +317,83 @@ int ps3dk_prof_spu_image_register_table(const uint8_t *build_id, uint32_t build_
     if (rc == PS3DK_PROF_OK) {
         int u = leave(p, PS3DK_PROF_OK);
         *image = idx; /* the mutation happened: reported even when the unlock then failed */
+        return u;
+    }
+    return leave(p, rc);
+}
+
+/* the ELF descriptor source, with the test hook that fails a chosen get (the copy pass's late-failure cases) */
+static int elf_src_get(void *ctx, uint32_t i, psp_desc_rec *out)
+{
+#ifdef PS3DK_PROF_TEST_HOOKS
+    static uint32_t calls;
+    if (ps3dk_prof_test_hooks.spu_src_fail_at) {
+        if (++calls == ps3dk_prof_test_hooks.spu_src_fail_at) {
+            calls = 0;
+            ps3dk_prof_test_hooks.spu_src_fail_at = 0;
+            return -1;
+        }
+    } else {
+        calls = 0;
+    }
+#endif
+    return psp_elf_get(ctx, i, out);
+}
+
+#ifdef PS3DK_PROF_TEST_HOOKS
+/* TEST ONLY: the image arena's committed state, for the rollback assertions (no lock: tests call them quiescent) */
+size_t ps3dk_prof__test_spu_arena_used(void);
+size_t ps3dk_prof__test_spu_arena_len(void);
+unsigned ps3dk_prof__test_spu_nimages(void);
+int ps3dk_prof__test_spu_image_slot(unsigned i, void *out, size_t n);
+size_t ps3dk_prof__test_spu_arena_used(void) { return p_ready() && g_prof->spu ? g_prof->spu->arena_used : 0; }
+size_t ps3dk_prof__test_spu_arena_len(void) { return p_ready() && g_prof->spu ? g_prof->spu->arena_len : 0; }
+unsigned ps3dk_prof__test_spu_nimages(void) { return p_ready() && g_prof->spu ? g_prof->spu->nimages : 0; }
+int ps3dk_prof__test_spu_image_slot(unsigned i, void *out, size_t n)
+{
+    if (!p_ready() || !g_prof->spu || i >= 32 || n != sizeof(psp_image))
+        return -1;
+    memcpy(out, &g_prof->spu->images[i], n);
+    return 0;
+}
+#endif
+
+/* raw SPU ELF file bytes (not a sys_spu_image_t), alive and unchanged for the call (design I3b r2) */
+int ps3dk_prof_spu_image_register_elf(const void *elf, uint64_t size, uint32_t *image)
+{
+    prof *p = p_ready() ? g_prof : NULL;
+    psp_elf_view v; /* the whole parse context: on the stack, no allocation */
+    psp_desc_src src;
+    uint32_t idx;
+    int rc;
+    /* the cheap refusals first, lock-free and only on atomics (ext_sealed is read under spu_mutex only) */
+    if (!p)
+        return PS3DK_PROF_ENOTINIT;
+    if (!p->ext_flags)
+        return PS3DK_PROF_ENOTSUP;
+    if (g_tls.in_drain)
+        return PS3DK_PROF_EBUSY;
+    if (LD_ACQ(&p->ext_fault) || LD_ACQ(&p->shutdown_once))
+        return PS3DK_PROF_ESTOPPED;
+    if (!elf || !image)
+        return PS3DK_PROF_EINVAL;
+    if (psp_elf_parse(elf, size, &v) != 0)
+        return PS3DK_PROF_EINVAL;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof_test_hooks.spu_elf_after_parse)
+        ps3dk_prof_test_hooks.spu_elf_after_parse();
+#endif
+    rc = enter(&p); /* again: ready, ext_flags, in_drain, ext_fault, then the mutex */
+    if (rc != PS3DK_PROF_OK)
+        return rc;
+    if (!admitted(p))
+        return leave(p, PS3DK_PROF_ESTOPPED);
+    src.ctx = &v;
+    src.get = elf_src_get;
+    rc = map_rc(psp_image_add_src(p->spu, v.build_id, v.build_len, &src, v.n, &idx));
+    if (rc == PS3DK_PROF_OK) {
+        int u = leave(p, PS3DK_PROF_OK);
+        *image = idx; /* the mutation happened: reported even when the unlock then failed (as register_table) */
         return u;
     }
     return leave(p, rc);

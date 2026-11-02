@@ -71,6 +71,8 @@ typedef struct ps3dk_prof_test_hooks_t {
     uint32_t spu_unlock_fail_site; /* the first unlock at this site fails: 1 step 3b, 2 the seal, 3 lane_end's final */
     void (*spu_admission_pause)(void);  /* after the admission check, before the mutation (race tests) */
     void (*spu_before_seal)(void);      /* holding spu_mutex, right before psp_seal (seal-time corruption tests) */
+    uint32_t spu_src_fail_at;           /* register_elf: the nth descriptor-source get (both passes, 1-based) fails */
+    void (*spu_elf_after_parse)(void);  /* register_elf: after the lock-free parse, before spu_mutex (race tests) */
     uint64_t chunk_seq_seed;           /* nonzero: the drainer's chunk_seq starts there (ceiling tests) */
     int thread_create_fail;
     int join_fail;
