@@ -2,6 +2,10 @@
 //!
 //! Design: docs/design/ps3dk-prof-viewer.md. Every value comes from the
 //! production reader (`ps3dk_prof::load`); this crate only arranges it.
-//! [`model`] holds the view logic and is tested without a window.
+//! [`model`] and [`timeline`] hold the view logic and are tested without a
+//! window; [`timeline_ui`] draws the timeline with egui and is driven by
+//! synthetic input in its tests.
 
 pub mod model;
+pub mod timeline;
+pub mod timeline_ui;

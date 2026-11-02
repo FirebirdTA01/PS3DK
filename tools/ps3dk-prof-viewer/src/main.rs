@@ -1,5 +1,7 @@
 //! ps3dk-prof-viewer: open a ps3dk-prof capture and inspect it.
-//! Phase 1, increment 1: local files, Overview and Zones.
+//! Phase 1, increments 1 and 2: local files, Overview, Timeline and Zones.
+
+use ps3dk_prof_viewer::timeline_ui;
 
 use eframe::egui;
 use ps3dk_prof::ZoneStats;
@@ -15,6 +17,7 @@ const APP_NAME: &str = "PS3DK Profiler";
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     Overview,
+    Timeline,
     Zones,
 }
 
@@ -25,6 +28,7 @@ struct App {
     zone_rows: Vec<ZoneStats>,
     sort: (ZoneColumn, bool),
     selected_zone: Option<ZoneKey>,
+    timeline: Option<timeline_ui::TimelineState>,
 }
 
 impl App {
@@ -36,6 +40,7 @@ impl App {
             zone_rows: Vec::new(),
             sort: (ZoneColumn::Total, true),
             selected_zone: None,
+            timeline: None,
         };
         if let Some(p) = open {
             app.open(p);
@@ -50,6 +55,7 @@ impl App {
                 self.zone_rows = doc.analysis().map(zones).unwrap_or_default();
                 sort_zones(&mut self.zone_rows, self.sort.0, self.sort.1);
                 self.selected_zone = None;
+                self.timeline = doc.analysis().map(timeline_ui::TimelineState::new);
                 self.doc = Some(doc);
                 self.error = None;
             }
@@ -134,6 +140,11 @@ impl eframe::App for App {
                     self.page = Page::Overview;
                 }
                 if has_analysis {
+                    if ui::nav_item(side, self.page == Page::Timeline, "📈", "Timeline", None)
+                        .clicked()
+                    {
+                        self.page = Page::Timeline;
+                    }
                     let n = self.zone_rows.len();
                     if ui::nav_item(side, self.page == Page::Zones, "📊", "Zones", Some(n))
                         .clicked()
@@ -159,6 +170,16 @@ impl eframe::App for App {
         }
 
         let page = self.page;
+        // The timeline takes the whole page: wheel and drag belong to it.
+        if page == Page::Timeline {
+            if let (Some(a), Some(st)) = (
+                self.doc.as_ref().and_then(|d| d.analysis()),
+                self.timeline.as_mut(),
+            ) {
+                timeline_ui::draw(ctx, a, st, &mut self.selected_zone);
+                return;
+            }
+        }
         let sort = &mut self.sort;
         let rows = &mut self.zone_rows;
         let selected = &mut self.selected_zone;
@@ -178,7 +199,7 @@ impl eframe::App for App {
                     ui::field_message(p, ui::Tone::Danger, diagnosis);
                 }
                 DocState::Analysed(a) => match page {
-                    Page::Overview => draw_overview(p, a),
+                    Page::Overview | Page::Timeline => draw_overview(p, a),
                     Page::Zones => draw_zones(p, a, rows, sort, selected),
                 },
             },
@@ -365,9 +386,18 @@ fn main() -> eframe::Result<()> {
         println!("ps3dk-prof-viewer {}", ps3dk_version::VERSION);
         return Ok(());
     }
-    // ps3dk-prof-viewer [--page=overview|zones] [--min-size] [capture.prof]
+    // ps3dk-prof-viewer [--page=overview|timeline|zones] [--view=START:LEN]
+    //                   [--min-size] [capture.prof]
+    // --view sets the timeline window in ticks from the capture start (for
+    // screenshots and bug reports).
+    let window = args.iter().find_map(|a| {
+        let (t0, dt) = a.strip_prefix("--view=")?.split_once(':')?;
+        Some((t0.parse::<f64>().ok()?, dt.parse::<f64>().ok()?))
+    });
     let page = if args.iter().any(|a| a == "--page=zones") {
         Page::Zones
+    } else if args.iter().any(|a| a == "--page=timeline") {
+        Page::Timeline
     } else {
         Page::Overview
     };
@@ -395,6 +425,10 @@ fn main() -> eframe::Result<()> {
             ui::install(&cc.egui_ctx);
             let mut app = App::new(open);
             app.page = page;
+            if let (Some((t0, dt)), Some(st)) = (window, app.timeline.as_mut()) {
+                st.view = ps3dk_prof_viewer::timeline::View { t0, dt };
+                st.view.clamp(&st.tl);
+            }
             Ok(Box::new(app))
         }),
     )
