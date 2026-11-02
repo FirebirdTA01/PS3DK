@@ -2198,6 +2198,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ps3dk-prof-viewer"
+version = "0.0.0"
+dependencies = [
+ "eframe",
+ "ps3dk-prof",
+ "ps3dk-ui",
+ "ps3dk-version",
+ "rfd",
+]
+
+[[package]]
 name = "ps3dk-ui"
 version = "0.0.0"
 dependencies = [

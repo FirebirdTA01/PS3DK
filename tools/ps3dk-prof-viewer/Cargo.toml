@@ -1,0 +1,23 @@
+[package]
+name = "ps3dk-prof-viewer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Desktop viewer for ps3dk-prof captures"
+
+[lib]
+name = "ps3dk_prof_viewer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ps3dk-prof-viewer"
+path = "src/main.rs"
+
+[dependencies]
+ps3dk-prof = { path = "../ps3dk-prof" }
+ps3dk-version.workspace = true
+ps3dk-ui.workspace = true
+eframe = { version = "0.29.1", default-features = false, features = ["glow", "default_fonts"] }
+rfd = { version = "0.15.4", default-features = false, features = ["xdg-portal", "async-std"] }
