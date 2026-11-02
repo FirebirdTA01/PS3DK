@@ -32,8 +32,8 @@
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
-/* PROBE_CONTROL=1: the matched no-input control: the same profiled
- * workload and file, no reader thread. */
+/* PROBE_CONTROL=1: the matched workload control, no reader: the same
+ * profiled workload and file, without the reader thread. */
 #ifndef PROBE_CONTROL
 #define PROBE_CONTROL 0
 #endif
@@ -177,9 +177,10 @@ int main(void)
     /* The final file, read fresh, to EOF. */
     struct probe_buf fin = {.buf = final, .cap = CAP_BYTES};
     int final_eof = 0;
-    if (PROBE_CONTROL)
-        find_capture(); /* no reader thread: main finds the capture itself */
-    int ffd = joined && g_capture[0] ? open(g_capture, O_RDONLY) : -1;
+    /* No reader thread in the control: main finds the capture itself, and
+     * opens nothing unless exactly one capture is in this run's directory. */
+    int capture_found = joined && (PROBE_CONTROL ? find_capture() == 0 : g_capture[0] != 0);
+    int ffd = joined && capture_found ? open(g_capture, O_RDONLY) : -1;
     if (ffd >= 0) {
         final_eof = probe_read_available(&fin, fd_read, &ffd);
         close(ffd);
@@ -224,6 +225,8 @@ int main(void)
                     g_open_errno);
         } else if (!joined) {
             fprintf(o, "PROBE_READER unavailable: join failed\n");
+        } else {
+            fprintf(o, "PROBE_CAPTURE %s\n", capture_found ? g_capture : "(not exactly one capture found)");
         }
         fprintf(o, "PROBE_FINAL len=%llu err=%d cap_hit=%d eof=%d\n", (unsigned long long)fin.len, fin.err,
                 fin.cap_hit, final_eof);
