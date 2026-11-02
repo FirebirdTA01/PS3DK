@@ -176,3 +176,23 @@ fn the_outcome_line_keeps_cleanup_warnings_for_both_outcomes() {
         "{t}"
     );
 }
+
+#[test]
+fn an_empty_userprofile_does_not_hide_home() {
+    use std::ffi::OsString;
+    let h = |s: &str| Some(OsString::from(s));
+    assert_eq!(
+        home_from(h(""), h("/home/u")),
+        Some(PathBuf::from("/home/u"))
+    );
+    assert_eq!(
+        home_from(h("C:/Users/u"), h("/home/u")),
+        Some(PathBuf::from("C:/Users/u"))
+    );
+    assert_eq!(
+        home_from(None, h("/home/u")),
+        Some(PathBuf::from("/home/u"))
+    );
+    assert_eq!(home_from(h(""), h("")), None);
+    assert_eq!(home_from(None, None), None);
+}

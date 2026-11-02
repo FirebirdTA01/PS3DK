@@ -100,9 +100,19 @@ pub fn default_capture_dir(home: Option<PathBuf>) -> Option<String> {
 
 /// The user's home folder from the environment (read only here).
 pub fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .filter(|h| !h.is_empty())
+    home_from(std::env::var_os("USERPROFILE"), std::env::var_os("HOME"))
+}
+
+/// The first non-empty of USERPROFILE and HOME: an empty USERPROFILE does
+/// not hide a valid HOME.
+pub fn home_from(
+    userprofile: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    [userprofile, home]
+        .into_iter()
+        .flatten()
+        .find(|h| !h.is_empty())
         .map(PathBuf::from)
 }
 
