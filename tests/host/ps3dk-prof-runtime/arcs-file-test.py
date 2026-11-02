@@ -37,7 +37,11 @@ def run(label, argv):
 flags = ['-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-misleading-indentation',
          '-pthread', '-DPS3DK_PROF_PAL_HOST', '-I', inc.parent, '-I', src / 'core']
 if a.sanitize:
-    flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
+    # local-exec TLS: the host gcc's -O2 ASan + UBSan null check on a TLS address branches on the flags of an
+    # initial-exec `add`, which ld relaxes to a flag-less `lea` in an executable, so the branch reads stale flags and
+    # reports a false null (gcc 12.4 and 13.3 with binutils 2.42).  Every TLS object here is defined in this executable,
+    # so local-exec is valid and leaves nothing for ld to relax; the sanitizers and the null check stay on.
+    flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-ftls-model=local-exec']
 exe = out / 'file-test'
 r = run('compile', [os.environ.get('CC', 'cc'), *flags, src / 'core/prof_arcs_file.c',
                     src / 'pal/pal_host.c', here / 'arcs_file_test.c', '-o', exe])

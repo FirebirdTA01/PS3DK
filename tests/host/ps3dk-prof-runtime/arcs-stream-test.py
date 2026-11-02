@@ -33,7 +33,10 @@ if a.sanitize:
 core = root / 'sdk/libps3dkprof/src/core'
 obj = out / 'stream.o'
 cc = os.environ.get('CC', 'cc')
-r = run('compile', [cc, *flags, '-I', core, '-c', core / 'prof_arcs_stream.c', '-o', obj])
+# The symbol check holds the object to the target build: the SDK never enables the stack protector, but a distro
+# host compiler may by default (Ubuntu's gcc does), which would add __stack_chk_fail.  Sanitized runs keep the default.
+nsp = [] if a.sanitize else ['-fno-stack-protector']
+r = run('compile', [cc, *flags, *nsp, '-I', core, '-c', core / 'prof_arcs_stream.c', '-o', obj])
 assert r.returncode == 0, r.stderr.decode()
 if not a.sanitize:
     r = run('symbols', ['nm', '-u', obj])

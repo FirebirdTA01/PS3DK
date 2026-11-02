@@ -58,7 +58,8 @@ static void *worker(void *ctx) {
 static void *refused(void *ctx){(void)ctx;CHECK(ps3dk_prof_thread_begin("extra")==PS3DK_PROF_EFULL);return NULL;}
 static void text_matches(struct ps3dk_prof_final_text t,const char *s){CHECK(t.length==strlen(s));CHECK(memcmp(t.data,s,t.length)==0);}
 int main(int argc,char **argv) {
-    if(argc!=3)return 2;mode=argv[1];
+    if(argc!=3)return 2;
+    mode=argv[1];
     CHECK(ps3dk_prof__finalization()==NULL);
     ps3dk_prof_config cfg;ps3dk_prof_config_defaults(&cfg);
     cfg.max_threads=1;cfg.max_descriptors=8;cfg.ring_records=512;cfg.quiesce_timeout_us=0;

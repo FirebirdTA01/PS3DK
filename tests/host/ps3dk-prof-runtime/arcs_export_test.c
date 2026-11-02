@@ -68,7 +68,8 @@ static void save(const char *dir,const char *suffix,const void *data,size_t n) {
     CHECK(fwrite(data,1,n,f)==n);CHECK(fclose(f)==0);
 }
 int main(int argc,char **argv) {
-    if(argc!=3)return 2;mode=argv[1];
+    if(argc!=3)return 2;
+    mode=argv[1];
     CHECK(ps3dk_prof__stream_init(&stream,slots,finals,1,4,sizeof body,spool,NULL)==0);
     if(is("no-runtime")) {
         CHECK(ps3dk_prof__stream_finish(&stream,0)==0);

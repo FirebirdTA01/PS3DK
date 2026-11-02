@@ -369,8 +369,11 @@ static uint32_t desc_register(prof *p, cblock *cb, ring *rg, ps3dk_prof_desc *d)
     if (p_lock(p, &p->desc_mutex) != 0)
         return 0;
     st = LD_RLX(&d->state);   /* stored only under desc_mutex */
-    if (st != 0)
-        goto unlock;
+    if (st != 0) {
+        /* Registered (or failed) by another thread meanwhile: nothing measured, nothing to report. */
+        p_unlock(p, &p->desc_mutex);
+        return st;
+    }
     tl = utf8_prefix(tag, P_STR_MAX);
     fl = utf8_prefix(file, P_STR_MAX);
     if (d->name)
@@ -425,7 +428,6 @@ static uint32_t desc_register(prof *p, cblock *cb, ring *rg, ps3dk_prof_desc *d)
     st = n + 1;
 out:
     ST_REL(&d->state, st);           /* then the call site */
-unlock:
     p_unlock(p, &p->desc_mutex);
     if (code)
         regerr(cb, rg, code, d->name, nl, tag, tl, id);   /* outside the mutex; c = the id it would have had */

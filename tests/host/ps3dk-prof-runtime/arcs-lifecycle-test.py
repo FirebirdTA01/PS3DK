@@ -43,6 +43,13 @@ flags = ['-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-pthread',
 if a.sanitize:
     flags += ['-fsanitize=' + ('address,undefined' if a.sanitize == 'address' else 'thread'),
               '-fno-omit-frame-pointer']
+    if a.sanitize == 'address':
+        # local-exec TLS: the host gcc's -O2 ASan + UBSan null check on a TLS address branches on the flags of an
+        # initial-exec `add`, which ld relaxes to a flag-less `lea` in an executable, so the branch reads stale flags
+        # and reports a false null (gcc 12.4 and 13.3 with binutils 2.42).  Every TLS object here is defined in this
+        # executable, so local-exec is valid and leaves nothing for ld to relax; the sanitizers and the null check stay
+        # on.
+        flags += ['-ftls-model=local-exec']
 files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c', 'hooks/arcs.c', 'core/prof_arcs_writer.c']]
 if a.red_stub:
     files.append(a.red_stub.resolve())
