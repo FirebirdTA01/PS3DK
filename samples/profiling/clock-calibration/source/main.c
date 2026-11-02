@@ -10,10 +10,12 @@
  * One request is outstanding at a time. A timeout or identity failure STOPS that domain for the rest of the run (no
  * further request goes into a possibly outstanding one) and is recorded as such, never as a sample.
  *
- * Phases: SPU 0 (CAL_SPU_SAMPLES), RSX (CAL_RSX_SAMPLES), SPU 1; CAL_PERIOD_US apart.
+ * Phases: SPU 0 (CAL_SPU_SAMPLES, the decrementer as found), RSX (CAL_RSX_SAMPLES), ONE decrementer write
+ * (SPU_WrDec = WRITE_VALUE, row spu-write), SPU 1 (the post-write epoch); CAL_PERIOD_US apart.
  * Output: /dev_hdd0/tmp/clockcal-<timebase>.csv, columns kind,phase,index,tb0,tb1,value,note:
  *   meta (tb0 = timebase Hz, tb1 = system time us), spu samples (note "dec2=N": the SPU's second decrementer
- *   reading after a fixed spin, so a counter that does not count shows directly), rsx samples, spu-stop / rsx-stop / rsx-unavailable (note =
+ *   reading after a fixed spin, so a counter that does not count shows directly), spu-write (the one decrementer
+ *   write: value = the read right after it, note "wrote=V dec2=N"), rsx samples, spu-stop / rsx-stop / rsx-unavailable (note =
  *   the reason), cleanup (note = failed step or "ok", value = its code, tb0 = 1 if the SPU group was left running),
  *   end (tb0 = spu samples, tb1 = rsx samples, value = the run result, note = the first failure or "ok").
  * The 200 ms poll limit bounds polling only: no LV2 call, join or file write has a deadline here. */
@@ -50,9 +52,13 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 typedef struct {
     volatile uint32_t sequence;
     volatile uint32_t dec;
-    volatile uint32_t dec2; /* the SPU's second reading after a fixed spin: counting check */
-    uint32_t pad[29];
+    volatile uint32_t dec2;  /* the SPU's second reading after a fixed spin: counting check */
+    volatile uint32_t wrote; /* the value the SPU wrote to its decrementer for this request, or 0 */
+    uint32_t pad[28];
 } __attribute__((aligned(128))) line;
+
+#define WRITE_FLAG 0x80000000u   /* a request that first writes the decrementer (spu/main.c) */
+#define WRITE_VALUE 0xFFFFFFFFu  /* what the SPU writes; recorded and checked */
 
 static line payload, commit; /* separate cache lines, written only by the SPU's DMA */
 static volatile int quit;
@@ -101,48 +107,77 @@ static void on_sysutil(uint64_t status, uint64_t param, void *arg)
         quit = 1;
 }
 
+typedef struct {
+    uint64_t t0, t1;
+    uint32_t dec, dec2, wrote;
+} spu_reply;
+
+/* One bracketed request. Returns 0 with *r filled, or 1 after writing the spu-stop row: the SPU domain is then
+ * stopped for the rest of the run (a possibly outstanding request is never followed by another). */
+static int spu_request(uint32_t thread, uint32_t seq, unsigned phase, unsigned i, spu_reply *r)
+{
+    uint64_t t0 = tb_before();
+    int rc = sysSpuThreadWriteMb(thread, seq);
+    if (rc) {
+        row("spu-stop", phase, i, t0, 0, (uint64_t)(uint32_t)rc, "mailbox-write");
+        return 1;
+    }
+    int seen = 0;
+    for (;;) {
+        if (commit.sequence == seq) {
+            seen = 1;
+            break;
+        }
+        if (__builtin_ppc_get_timebase() - t0 > wait_ticks)
+            break;
+    }
+    if (!seen) {
+        row("spu-stop", phase, i, t0, 0, seq, "timeout");
+        return 1;
+    }
+    __asm__ volatile("sync" ::: "memory");
+    uint32_t p_seq = payload.sequence, p_dec = payload.dec, p_dec2 = payload.dec2, p_wrote = payload.wrote;
+    __asm__ volatile("sync" ::: "memory");
+    uint32_t c_seq = commit.sequence;
+    uint64_t t1 = tb_after();
+    uint32_t want_wrote = seq & WRITE_FLAG ? WRITE_VALUE : 0;
+    if (p_seq != seq || c_seq != seq || p_wrote != want_wrote) {
+        row("spu-stop", phase, i, t0, t1, ((uint64_t)p_seq << 32) | c_seq, "identity");
+        return 1;
+    }
+    *r = (spu_reply){t0, t1, p_dec, p_dec2, p_wrote};
+    return 0;
+}
+
 /* Returns 0 to continue, 1 if the SPU domain is stopped for the rest of the run. */
 static int spu_phase(uint32_t thread, unsigned phase, uint32_t *sequence)
 {
     for (unsigned i = 0; i < CAL_SPU_SAMPLES && !quit; ++i) {
-        uint32_t seq = ++*sequence;
-        uint64_t t0 = tb_before();
-        int rc = sysSpuThreadWriteMb(thread, seq);
-        if (rc) {
-            row("spu-stop", phase, i, t0, 0, (uint64_t)(uint32_t)rc, "mailbox-write");
+        spu_reply r;
+        if (spu_request(thread, ++*sequence, phase, i, &r))
             return 1;
-        }
-        int seen = 0;
-        for (;;) {
-            if (commit.sequence == seq) {
-                seen = 1;
-                break;
-            }
-            if (__builtin_ppc_get_timebase() - t0 > wait_ticks)
-                break;
-        }
-        if (!seen) {
-            /* The request may still be answered later: never issue another one into it. */
-            row("spu-stop", phase, i, t0, 0, seq, "timeout");
-            return 1;
-        }
-        __asm__ volatile("sync" ::: "memory");
-        uint32_t p_seq = payload.sequence, p_dec = payload.dec, p_dec2 = payload.dec2;
-        __asm__ volatile("sync" ::: "memory");
-        uint32_t c_seq = commit.sequence;
-        uint64_t t1 = tb_after();
-        if (p_seq != seq || c_seq != seq) {
-            row("spu-stop", phase, i, t0, t1, ((uint64_t)p_seq << 32) | c_seq, "identity");
-            return 1;
-        }
         char spin_note[24];
-        snprintf(spin_note, sizeof spin_note, "dec2=%u", (unsigned)p_dec2);
-        row("spu", phase, i, t0, t1, p_dec, spin_note);
+        snprintf(spin_note, sizeof spin_note, "dec2=%u", (unsigned)r.dec2);
+        row("spu", phase, i, r.t0, r.t1, r.dec, spin_note);
         ++spu_samples;
         if (cellSysutilCheckCallback() != 0)
             quit = 1;
         usleep(CAL_PERIOD_US);
     }
+    return 0;
+}
+
+/* The one decrementer write (c3): it ends the unwritten epoch (phase 0) and starts the post-write epoch (phase 1).
+ * Row "spu-write": value = the read right after the write, note "wrote=V dec2=N". Returns 1 if the domain stopped. */
+static int spu_write_event(uint32_t thread, uint32_t *sequence)
+{
+    spu_reply r;
+    if (spu_request(thread, ++*sequence | WRITE_FLAG, 1, 0, &r))
+        return 1;
+    char note[48];
+    snprintf(note, sizeof note, "wrote=%u dec2=%u", (unsigned)r.wrote, (unsigned)r.dec2);
+    row("spu-write", 1, 0, r.t0, r.t1, r.dec, note);
+    usleep(CAL_PERIOD_US);
     return 0;
 }
 
@@ -280,11 +315,13 @@ int main(void)
     else
         gcm_ok = 1;
 
-    int spu_stopped = spu_phase(thread, 0, &sequence);
+    int spu_stopped = spu_phase(thread, 0, &sequence); /* the unwritten epoch */
     if (gcm_ok && !quit)
         rsx_phase();
     if (!spu_stopped && !quit)
-        spu_phase(thread, 1, &sequence);
+        spu_stopped = spu_write_event(thread, &sequence);
+    if (!spu_stopped && !quit)
+        spu_phase(thread, 1, &sequence); /* the post-write epoch: never fitted together with phase 0 */
     if (quit)
         fail("exit-requested", 2);
 

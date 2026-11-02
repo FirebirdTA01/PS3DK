@@ -117,5 +117,36 @@ run('many one-point segments are NO FITTABLE SEGMENT', [HEADER, META] + saw + rs
 frozen_stop = CONST[:25] + ['spu-stop,0,25,1,0,26,timeout']
 run('STOPPED and NO CHANGE OBSERVED both survive', [HEADER, META] + frozen_stop + rsx(30)
     + [CLEAN, end(25, 30, 'spu-start', 1)], 3, ['domains: spu CONSTANT; STOPPED; NO CHANGE OBSERVED across the spin'])
+# c3: one decrementer write between the unwritten epoch (phase 0) and the post-write epoch (phase 1)
+P0 = spu(0, 40, 3_000_000_000)
+P1 = spu(1, 40, 4_294_000_000, t=2 * 10 ** 10)
+WR = 'spu-write,1,0,15000000000,15000004000,4294967290,wrote=4294967295 dec2=4294963290'
+R30 = rsx(30, t=1.2 * 10 ** 10)
+R30 = [r.replace('.0,', ',') for r in R30]
+run('c3 valid: write event reported, epochs separate', [HEADER, META] + P0 + R30 + [WR] + P1 + [CLEAN, end(80, 30)], 0,
+    ['spu write event: wrote 4294967295; read right after the write 4294967290; after the fixed spin 4294963290 '
+     '(changed)', 'never fitted together', 'spu-decrementer phase 0: 40 samples', 'spu-decrementer phase 1: 40 samples'])
+run('c3 two write rows', [HEADER, META] + P0 + [WR, WR.replace('15000000000,15000004000', '15000005000,15000009000')]
+    + P1 + [CLEAN, end(80, 0)], 1, ['2 spu-write rows'])
+run('c3 phase 0 sample after the write', [HEADER, META] + P0[:20] + [WR.replace('15000000000,15000004000',
+    '10010000000,10010004000')] + P0[20:] + P1 + [CLEAN, end(80, 0)], 1, ['on the wrong side of the write'])
+run('c3 phase 1 sample before the write', [HEADER, META] + P0 + P1[:1] + [WR.replace('15000000000,15000004000',
+    '25000000000,25000004000')] + P1[1:] + [CLEAN, end(80, 0)], 1, ['on the wrong side of the write'])
+run('c3 malformed write note', [HEADER, META] + P0 + [WR.replace('wrote=4294967295 dec2=4294963290', 'wrote=x')]
+    + P1 + [CLEAN, end(80, 0)], 1, ['malformed spu-write note'])
+run('c3 wrong written value', [HEADER, META] + P0 + [WR.replace('wrote=4294967295', 'wrote=5')] + P1
+    + [CLEAN, end(80, 0)], 1, ['spu-write wrote 5, want 4294967295'])
+run('c3 write after the SPU domain stopped', [HEADER, META] + P0 + ['spu-stop,0,40,1,0,41,timeout', WR]
+    + [CLEAN, end(40, 0, 'spu-start', 1)], 1, ['sample after that domain stopped'])
+run('c3 write bracket before the previous sample ended', [HEADER, META] + P0 + [WR.replace('15000000000,15000004000',
+    '10000000001,10000004000')] + P1 + [CLEAN, end(80, 0)], 1, ["bracket starts before the previous sample's bracket"])
+run('c3 write bracket with equal bounds', [HEADER, META] + P0 + [WR.replace('15000000000,15000004000',
+    '15000000000,15000000000')] + P1 + [CLEAN, end(80, 0)], 1, ['spu-write bracket tb1 <= tb0'])
+run('c3 write bracket reversed', [HEADER, META] + P0 + [WR.replace('15000000000,15000004000',
+    '15000004000,15000000000')] + P1 + [CLEAN, end(80, 0)], 1, ['spu-write bracket tb1 <= tb0'])
+run('c3 write dec2 negative', [HEADER, META] + P0 + [WR.replace('dec2=4294963290', 'dec2=-1')] + P1
+    + [CLEAN, end(80, 0)], 1, ['spu-write dec2 -1 out of range'])
+run('c3 write dec2 above 32 bits', [HEADER, META] + P0 + [WR.replace('dec2=4294963290', 'dec2=4294967296')] + P1
+    + [CLEAN, end(80, 0)], 1, ['spu-write dec2 4294967296 out of range'])
 print(f'analyze tests: {failures} failed')
 sys.exit(1 if failures else 0)

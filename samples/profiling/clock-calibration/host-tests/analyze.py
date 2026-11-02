@@ -27,7 +27,8 @@ import sys
 
 MIN_FIT = 20
 COLUMNS = ['kind', 'phase', 'index', 'tb0', 'tb1', 'value', 'note']
-KINDS = {'meta', 'spu', 'rsx', 'spu-stop', 'rsx-stop', 'rsx-unavailable', 'cleanup', 'end'}
+KINDS = {'meta', 'spu', 'spu-write', 'rsx', 'spu-stop', 'rsx-stop', 'rsx-unavailable', 'cleanup', 'end'}
+WRITE_VALUE = 0xFFFFFFFF  # what the probe's SPU writes to its decrementer (spu/main.c)
 U32, U64 = (1 << 32) - 1, (1 << 64) - 1
 
 
@@ -177,16 +178,39 @@ def validate(rows):
                 if not 0 <= d2 <= U32:
                     raise Invalid(f'line {r["line"]}: dec2 out of range')
                 r['dec2'] = d2
+    writes = [i for i, r in enumerate(rows) if r['kind'] == 'spu-write']
+    if len(writes) > 1:
+        raise Invalid(f'{len(writes)} spu-write rows')
+    if writes:
+        w = rows[writes[0]]
+        if w['phase'] != 1 or w['value'] > U32:
+            raise Invalid(f'line {w["line"]}: spu-write phase/value out of range')
+        if w['tb1'] <= w['tb0']:
+            raise Invalid(f'line {w["line"]}: spu-write bracket tb1 <= tb0')
+        parts = w['note'].split(' ')
+        try:
+            if len(parts) != 2 or not parts[0].startswith('wrote=') or not parts[1].startswith('dec2='):
+                raise ValueError
+            w['wrote'], w['dec2'] = int(parts[0][6:]), int(parts[1][5:])
+        except ValueError:
+            raise Invalid(f'line {w["line"]}: malformed spu-write note {w["note"]!r}')
+        if w['wrote'] != WRITE_VALUE:
+            raise Invalid(f'line {w["line"]}: spu-write wrote {w["wrote"]}, want {WRITE_VALUE}')
+        if not 0 <= w['dec2'] <= U32:
+            raise Invalid(f'line {w["line"]}: spu-write dec2 {w["dec2"]} out of range')
+        for i, r in enumerate(rows):
+            if r['kind'] == 'spu' and ((r['phase'] == 0 and i > writes[0]) or (r['phase'] == 1 and i < writes[0])):
+                raise Invalid(f'line {r["line"]}: spu phase {r["phase"]} sample on the wrong side of the write')
     cleanup_at = next((i for i, r in enumerate(rows) if r['kind'] == 'cleanup'), None)
     stopped_at = {}
     prev_tb1 = None
     for i, r in enumerate(rows):
         if r['kind'] in ('spu-stop', 'rsx-stop'):
             stopped_at.setdefault(r['kind'][:3], i)
-        if r['kind'] in ('spu', 'rsx'):
+        if r['kind'] in ('spu', 'rsx', 'spu-write'):
             if cleanup_at is not None and i > cleanup_at:
                 raise Invalid(f'line {r["line"]}: {r["kind"]} sample after the cleanup row')
-            if r['kind'] in stopped_at:
+            if r['kind'][:3] in stopped_at:
                 raise Invalid(f'line {r["line"]}: {r["kind"]} sample after that domain stopped')
             # one request in flight at a time: each bracket starts after the previous completed bracket ended
             if prev_tb1 is not None and r['tb0'] < prev_tb1:
@@ -229,6 +253,11 @@ def main(path):
         moved = sum(1 for r in checks if r['dec2'] != r['value'])
         print(f'spu paired reads around the fixed spin: the value changed in {moved} of {len(checks)} samples' +
               (' (no change observed in those reads)' if moved == 0 else ''))
+    w = next((r for r in rows if r['kind'] == 'spu-write'), None)
+    if w:
+        print(f'spu write event: wrote {w["wrote"]}; read right after the write {w["value"]}; after the fixed spin '
+              f'{w["dec2"]} ({"changed" if w["dec2"] != w["value"] else "no change observed"}); it separates phase 0 '
+              f'(as found) from phase 1 (after the write), which are never fitted together')
     status = {}
     spu_status = []
     for ph in (0, 1):
