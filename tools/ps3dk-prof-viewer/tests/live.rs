@@ -673,6 +673,14 @@ fn a_removal_failure_after_publication_is_a_warning_not_a_failure() {
     // The partial's directory becomes read-only: the link into `out` works,
     // removing the partial does not.
     std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // A privileged runner (root, CAP_DAC_OVERRIDE) can still write there,
+    // so the fault would not happen: say so instead of passing silently.
+    if std::fs::write(src.join("probe"), b"x").is_ok() {
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+        eprintln!("SKIP removal-failure case: a read-only directory is writable for this user");
+        return;
+    }
     let r = publish_file(&partial, &out, "p", SUFFIX_COMPLETE);
     std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o755)).unwrap();
     let p = r.expect("published");

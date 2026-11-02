@@ -213,7 +213,13 @@ impl Session {
 
     /// Feeds bytes as they arrive; any split is fine. Returns false once the
     /// link has failed (further bytes are ignored).
-    pub fn feed(&mut self, mut bytes: &[u8]) -> bool {
+    pub fn feed(&mut self, bytes: &[u8]) -> bool {
+        self.feed_with(bytes, &mut |_| {})
+    }
+
+    /// Like `feed`, and calls `on_data` with each DATA payload the session
+    /// accepted, in order (what a local copy must append).
+    pub fn feed_with(&mut self, mut bytes: &[u8], on_data: &mut dyn FnMut(&[u8])) -> bool {
         while !self.failed() {
             // After END the stream is over: any further byte is an error,
             // even one that would only start a frame.
@@ -247,7 +253,7 @@ impl Session {
             }
             let frame = std::mem::take(&mut self.pending);
             let t = u16::from_le_bytes([frame[0], frame[1]]);
-            if let Err(e) = self.on_frame(t, &frame[HDR_BYTES..]) {
+            if let Err(e) = self.on_frame(t, &frame[HDR_BYTES..], on_data) {
                 self.state = LinkState::Failed(e);
             }
         }
@@ -261,7 +267,12 @@ impl Session {
         }
     }
 
-    fn on_frame(&mut self, t: u16, p: &[u8]) -> Result<(), LinkError> {
+    fn on_frame(
+        &mut self,
+        t: u16,
+        p: &[u8],
+        on_data: &mut dyn FnMut(&[u8]),
+    ) -> Result<(), LinkError> {
         if matches!(self.state, LinkState::Ended(_)) {
             return Err(LinkError::AfterEnd);
         }
@@ -293,6 +304,7 @@ impl Session {
                     return Err(LinkError::TooLarge);
                 }
                 self.received.push(&p[8..]);
+                on_data(&p[8..]);
                 Ok(())
             }
             (T_END, LinkState::Streaming) => {
