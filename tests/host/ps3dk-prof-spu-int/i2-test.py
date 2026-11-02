@@ -73,9 +73,11 @@ for lang, comp, std in [('c', cc, '-std=c11'), ('c++', os.environ.get('CXX', 'c+
             ok = r.returncode == 0
         undef = ''
         if ok:
-            undef = subprocess.run(['nm', '-u', str(obj)], capture_output=True, text=True).stdout
+            nm = subprocess.run(['nm', '-u', str(obj)], capture_output=True, text=True)
+            undef = nm.stdout
             rr = subprocess.run([str(exe)], capture_output=True, text=True)
-            ok = rr.returncode == 0 and 'OFFBUILD PASS' in rr.stdout and 'ps3dk_prof' not in undef
+            ok = nm.returncode == 0 and rr.returncode == 0 and 'OFFBUILD PASS' in rr.stdout and \
+                'ps3dk_prof' not in undef
         print(f'{tag}: {"PASS" if ok else "FAIL"}', flush=True)
         if not ok:
             failed.append(tag)

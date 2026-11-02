@@ -1,6 +1,6 @@
 /* SPU lane producer core (design p3.2 r3): portable C behind a port, so the host model and (later) the SPU build
- * share one planner.  The port maps MFC channels; it reports abstract status bits, so no target constant is assumed
- * here.  Host model only in this slice: no SPU port exists yet. */
+ * share one planner.  The port maps MFC channels and reports abstract status bits; the host binds it through the
+ * port table, the SPU at compile time (psp_port_bind.h, psp_port_spu.h, raw status translated by psp_as.h). */
 #ifndef PSP_SPU_H
 #define PSP_SPU_H
 

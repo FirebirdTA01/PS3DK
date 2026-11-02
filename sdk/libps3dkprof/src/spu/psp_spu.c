@@ -6,6 +6,8 @@
 
 #include <string.h>
 
+#include "psp_port_bind.h"
+
 #define PSP_ENOSPC 7
 
 static uint8_t *slot_at(psp_spu *s, uint32_t i) { return s->buf + (size_t)i * PSP_SLOT; }
@@ -29,7 +31,7 @@ static void refuse(psp_spu *s)
 
 static int blocked(psp_spu *s)
 {
-    if (!s->port->blocking_events(s->port->ctx))
+    if (!PSP_S0(blocking_events))
         return 0;
     if (s->refused_calls == UINT64_MAX)
         fault(s);
@@ -40,11 +42,11 @@ static int blocked(psp_spu *s)
 
 static int tag_wait(psp_spu *s)
 {
-    const psp_port *p = s->port;
-    uint32_t saved = p->rd_tag_mask(p->ctx), st;
-    p->wr_tag_mask(p->ctx, 1u << s->tag);
-    st = p->tag_wait_all(p->ctx);
-    p->wr_tag_mask(p->ctx, saved);
+    PSP_PORT_DECL
+    uint32_t saved = PSP_P0(rd_tag_mask), st;
+    PSP_P(wr_tag_mask, 1u << s->tag);
+    st = PSP_P0(tag_wait_all);
+    PSP_P(wr_tag_mask, saved);
     return (st & (1u << s->tag)) ? 0 : -1;
 }
 
@@ -53,12 +55,12 @@ static int tag_wait(psp_spu *s)
  * either failure then latches FAULT in the caller. */
 static int snapshot(psp_spu *s, uint64_t ea, uint8_t *line)
 {
-    const psp_port *p = s->port;
+    PSP_PORT_DECL
     int ok;
-    p->getllar(p->ctx, ea, line);
-    ok = (p->rd_atomic_stat(p->ctx) & PSP_AS_GETLLAR) != 0;
-    p->putllc(p->ctx, ea, line);
-    if (!(p->rd_atomic_stat(p->ctx) & (PSP_AS_PUTLLC_OK | PSP_AS_PUTLLC_LOST)))
+    PSP_P(getllar, ea, line);
+    ok = (PSP_AS_READ(PSP_OP_GETLLAR) & PSP_AS_GETLLAR) != 0;
+    PSP_P(putllc, ea, line);
+    if (!(PSP_AS_READ(PSP_OP_PUTLLC) & (PSP_AS_PUTLLC_OK | PSP_AS_PUTLLC_LOST)))
         ok = 0;
     return ok ? 0 : -1;
 }
@@ -82,9 +84,9 @@ static void image_b(psp_spu *s, uint32_t state)
 
 static int put_b(psp_spu *s)
 {
-    const psp_port *p = s->port;
-    p->putlluc(p->ctx, s->ea_ctl + PSP_B, s->line_b);
-    if (!(p->rd_atomic_stat(p->ctx) & PSP_AS_PUTLLUC)) {
+    PSP_PORT_DECL
+    PSP_P(putlluc, s->ea_ctl + PSP_B, s->line_b);
+    if (!(PSP_AS_READ(PSP_OP_PUTLLUC) & PSP_AS_PUTLLUC)) {
         fault(s);
         return -1;
     }
@@ -140,7 +142,7 @@ static int record(psp_spu *s, uint8_t kind, uint16_t desc, uint8_t depth)
     if (s->tail_lost || s->n == s->ls_cap) {
         s->tail_lost++; /* frozen staging: a drop never lands before staged events */
     } else {
-        psp_slot(slot_at(s, PSP_HEAD + s->n), s->port->rd_dec(s->port->ctx), desc, kind, depth);
+        psp_slot(slot_at(s, PSP_HEAD + s->n), PSP_S0(rd_dec), desc, kind, depth);
         s->n++;
     }
     return 1;
@@ -283,7 +285,7 @@ int psp_spu_flush_plan(psp_spu *s)
     for (i = 0; i < t; i++)
         psp_slot(slot_at(s, PSP_HEAD + e + i), marker_count(s->tail_lost, i), 0, PSP_K_LOSS, 0);
     if (c)
-        psp_slot(slot_at(s, PSP_HEAD + e + t), s->port->rd_dec(s->port->ctx), answer, PSP_K_CAL, 0);
+        psp_slot(slot_at(s, PSP_HEAD + e + t), PSP_S0(rd_dec), answer, PSP_K_CAL, 0);
     if (k > used)
         psp_slot(slot_at(s, PSP_HEAD + e + t + c), 0, 0, PSP_K_PAD, 0);
     s->pub_first = PSP_HEAD - f - fp;
@@ -298,7 +300,7 @@ int psp_spu_flush_plan(psp_spu *s)
 
 void psp_spu_flush_put(psp_spu *s)
 {
-    const psp_port *p = s->port;
+    PSP_PORT_DECL
     uint32_t left = s->pub_k, at = s->pub_first;
     uint64_t w = s->w;
     while (left) {
@@ -307,7 +309,7 @@ void psp_spu_flush_put(psp_spu *s)
             run = left;
         while (run) {
             cmd = run > 2048 ? 2048 : run; /* 16 KiB per command */
-            p->put(p->ctx, slot_at(s, at), s->ea_ring + (uint64_t)pos * PSP_SLOT, cmd * PSP_SLOT, s->tag);
+            PSP_P(put, slot_at(s, at), s->ea_ring + (uint64_t)pos * PSP_SLOT, cmd * PSP_SLOT, s->tag);
             at += cmd;
             pos += cmd;
             w += cmd;
@@ -418,7 +420,7 @@ int psp_spu_dec_preflight(psp_spu *s)
 
 void psp_spu_dec_commit(psp_spu *s, uint32_t v)
 {
-    s->port->wr_dec(s->port->ctx, v); /* the write happens first; its record is published right after */
+    PSP_S(wr_dec, v); /* the write happens first; its record is published right after */
     psp_slot(slot_at(s, PSP_HEAD - 2), v, 0, PSP_K_EPOCH, 0);
     psp_slot(slot_at(s, PSP_HEAD - 1), 0, 0, PSP_K_PAD, 0);
     s->pub_first = PSP_HEAD - 2;
