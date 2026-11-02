@@ -89,6 +89,8 @@ int scene_init(void)
     *complete_label=0;__asm__ volatile("sync" ::: "memory");
     return 0;
 }
+static char status_line[96];
+void scene_set_status(const char *text){snprintf(status_line,sizeof status_line,"%s",text?text:"");}
 int scene_render(int heavy,const char *phase,unsigned workers,uint64_t compute_us,
                  uint64_t frame_us,uint64_t *gpu_begin,uint64_t *gpu_end,int *gpu_valid)
 {
@@ -126,6 +128,7 @@ int scene_render(int heavy,const char *phase,unsigned workers,uint64_t compute_u
         cellDbgFontPrintf(0.04f,0.32f,1.2f,0xffffffff,"RSX scene: %s | prior scene: %s",heavy?"HEAVY (8 layers)":"LIGHT (1 layer)",gpu_text);
         cellDbgFontPrintf(0.04f,0.41f,1.2f,0xffdddddd,"Raw GPU ticks are not calibrated time. SPE ticks are per-job.");
         cellDbgFontPrintf(0.04f,0.50f,1.2f,0xffffffff,"Fixed batch: 16384 items x 128 rounds; PPU/SPE digest checked.");
+        if(status_line[0])cellDbgFontPrintf(0.04f,0.66f,1.2f,0xff80ffff,"%s",status_line);
         cellDbgFontPrintf(0.04f,0.80f,1.2f,0xffffffff,"PPU capture: %s | CSV/logs: /dev_hdd0/tmp",PS3DK_PROF?"ON":"OFF");
         cellDbgFontPrintf(0.04f,0.88f,1.2f,0xffffffff,"START / XMB quit exits. Phases repeat until session deadline.");
         if(cellDbgFontDrawGcm()){failed=1;return -1;}

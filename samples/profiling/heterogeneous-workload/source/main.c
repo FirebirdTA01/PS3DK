@@ -8,6 +8,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#if SAMPLE_LIVE
+#include "live.h"
+#endif
 SYS_PROCESS_PARAM(1001,0x100000);
 static const char *names[4]={"PPU serial / light RSX","SPE parallel / light RSX",
                             "SPE parallel / heavy RSX","PPU serial / heavy RSX"};
@@ -25,8 +28,8 @@ int main(void)
     FILE *log=fdopen(fd,"w");
     if(!log){close(fd);return 1;}
     fprintf(log,"kind,frame,phase,sequence,lane,items,digest,compute_us,frame_us,spu_dec_begin,spu_dec_end,gpu_begin,gpu_end,gpu_valid\n");
-    printf("WORKLOAD_BEGIN abi=%s profiling=%d csv=%s phase_seconds=%u session_seconds=%u\n",
-           SAMPLE_ABI,PS3DK_PROF,path,(unsigned)SAMPLE_PHASE_SECONDS,(unsigned)SAMPLE_SESSION_SECONDS);
+    printf("WORKLOAD_BEGIN abi=%s profiling=%d live=%d csv=%s phase_seconds=%u session_seconds=%u\n",
+           SAMPLE_ABI,PS3DK_PROF,SAMPLE_LIVE,path,(unsigned)SAMPLE_PHASE_SECONDS,(unsigned)SAMPLE_SESSION_SECONDS);
     scene_owned=1;
     if(scene_init()){puts("WORKLOAD_FAIL scene-init");goto done;}
     uint64_t idle=sample_now_us();
@@ -44,6 +47,14 @@ int main(void)
     if(ps3dk_prof_set_sink_path("/dev_hdd0/tmp") || PS3DK_PROF_INIT(&cfg)){puts("WORKLOAD_FAIL profiler-init");goto done;}
     prof_owned=1;
     if(PS3DK_PROF_THREAD_BEGIN("main")){puts("WORKLOAD_FAIL profiler-thread");goto done;}
+#endif
+#if SAMPLE_LIVE
+    {
+        /* The live link serves this run's capture file; it never changes what is captured. */
+        char status[96];
+        sample_live_begin(path,status,sizeof status);
+        scene_set_status(status);
+    }
 #endif
     uint64_t start=sample_now_us();int previous=-1;
     for(;;){
@@ -102,6 +113,9 @@ int main(void)
 done:
     if(pool_owned && pool_close()!=0)rc=1;
     if(prof_owned && PS3DK_PROF_SHUTDOWN()!=0)rc=1;
+#if SAMPLE_LIVE
+    sample_live_end(); /* after shutdown: a connected viewer receives END first */
+#endif
     if(scene_owned)scene_close();
     fprintf(log,"END,%u,%u,0,0,%u,%d,0,0,0,0,0,0,0\n",frames,phase_seen,checked,rc);
     if(fflush(log) || fsync(fileno(log)))rc=1;

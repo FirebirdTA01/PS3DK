@@ -80,6 +80,57 @@ one in-flight batch, monotonically increasing nonzero sequence numbers, separate
 payload/commit cache lines, and a DMA completion before publishing the commit.
 There is no per-job allocation or worker creation.
 
+## Live view (SAMPLE_LIVE)
+
+`-DSAMPLE_LIVE=ON` (it needs `SAMPLE_PROFILING=ON`; configure refuses it
+otherwise) lets the PC viewer watch the capture while the sample runs. The
+console serves the `.prof` file the profiler is writing, over TCP port 31750,
+to one viewer at a time. The screen shows the address to connect to (or why the
+live view is off); in the viewer, choose Connect and enter it.
+
+**Status: not yet validated on the console.** What has been measured on HEN
+(internal HDD) is narrower: an app thread can read the profiler's open capture
+file while it grows. The live view itself (TCP serving, byte equality with the
+console file, overhead) is still pending its target gates.
+
+The viewer keeps a complete copy only when the stream ends properly: the
+console sends END after the profiler's shutdown, the connection closes cleanly,
+the reader accepts the capture, and the viewer's local checks pass before it
+publishes the file. A slow or disconnected viewer keeps an incomplete copy,
+labelled as such, when its local saving succeeds. The agent only reads the file and never changes what is
+written, but it still uses CPU, memory and I/O: a live failure does not by
+itself fail the file capture, and neither a failed start nor the agent's
+read-only design guarantees a valid capture or zero perturbation.
+
+At exit the sample waits nominally up to 2 s for a connected viewer to receive
+END, 1 s for the agent thread, and once more 2 s if it is still stopping. These
+are not a hard exit bound: a console file call already in progress and the
+final ordinary join are not covered by them.
+
+Every network and live result (network init, live start, each stop attempt,
+each network shutdown attempt, and whether the network was left initialized)
+is written to `/dev_hdd0/tmp/heterogeneous-<id>.live.txt` next to the CSV, so
+it can be read after the console returns to the XMB. It is separate from the
+workload result and the profiler's verdict.
+
+The calls an app adds, in order (`source/live.c` is the sample's complete
+version, with every result checked and recorded):
+
+1. After `ps3dk_prof_init`: `netInitialize`. If it fails, skip the live view.
+2. `ps3dk_prof_live_start` (a zeroed config takes the defaults). If it fails,
+   keep running and call `netDeinitialize` at once: no agent thread exists.
+3. At the end: `ps3dk_prof_shutdown` first, so a connected viewer can get END.
+4. `ps3dk_prof_live_stop`; on `ETIMEDOUT` or `ECLOCK` call it again. Only after
+   `OK` call `netDeinitialize`; after `ETHREAD`, or a stop that never returns
+   `OK`, leave the network initialized.
+
+Link `ps3dkprof`, `net` and `netctl_stub` (the sample asks netctl for the
+console's address). Only captures on the internal HDD (`/dev_hdd0/`) are
+served: the device on which concurrent capture-file visibility was measured;
+target live-link validation remains pending. `SAMPLE_PROF_SDK` selects a candidate profiler overlay (its
+`ppu/include/ps3dk/prof.h` and `ppu/lib[/lp64]/libps3dkprof.a`) ahead of the
+SDK's.
+
 ## Tests
 
 ```sh
