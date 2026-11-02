@@ -1,7 +1,9 @@
 # ps3dk-prof viewer: desktop profiler app
 
 Status: design for review. Phase 1 (offline viewer) approved by the director
-2026-11-01; phases 2 to 4 are planned, not approved for implementation.
+2026-11-01. Phase 2 (live connection) requested by the director the same
+day; its design below is under review. Phases 3 and 4 are planned, not
+approved for implementation.
 
 ## Goal
 
@@ -121,14 +123,167 @@ Overview and Zones views; (2) Timeline; (3) Frames; (4) Call counts with ELF
 symbols; (5) console pull. No runtime adapters or wire-format changes in
 phase 1.
 
-## Phase 2: live connection (planned)
+## Phase 2: live connection (design for review)
 
-A TCP sink in `libps3dkprof` (the runtime already takes sink callbacks)
-streams chunks to the viewer while the app runs; the viewer connects by
-console IP and updates the timeline as chunks arrive. A live view is
-labelled PROVISIONAL until the stream's trailer arrives, matching the
-reader's progress-snapshot rules. Needs: the sink, a reconnect and backlog
-policy, and an RPCS3 plus HEN measurement of overhead.
+Director 2026-11-01: watch a capture in the PC app while the app runs, over
+a proper connection (not FTP polling); the in-app approach below was
+approved in principle. A retail console with HEN has no system debug
+agent, so the agent is a library the app links, and the viewer connects to
+it by console IP. Full DEX support (external capture of unmodified apps) is
+a separate later track (X1).
+
+### Agent
+
+An opt-in part of `libps3dkprof`: one PPU thread with a TCP listener that
+serves the capture FILE the normal file sink is writing. It never touches
+the drain, the rings or sink callbacks, so the drain has no synchronous
+dependency on the viewer. That is not zero cost: the agent competes for
+CPU, memory, the file system and disk I/O, and its cost is measured (see
+Gates). The agent and the runtime are built uninstrumented, and the agent
+thread never registers as a profiled producer.
+
+**API and ownership.**
+- `ps3dk_prof_live_start(const ps3dk_prof_live_config *)` is valid only
+  after a successful `ps3dk_prof_init()` with the FILE sink, and before
+  `ps3dk_prof_shutdown()`. Before init or after shutdown it returns a
+  state error; a second start returns EALREADY; with a callback sink it
+  returns ENOTSUP. The config holds the port (default 31750), the poll
+  interval (default 10 ms, a proposed value to be measured), the send
+  timeout, the handshake timeout and the capture cap.
+- The file path and the capture identity are not supplied by the caller.
+  `ps3dk_prof_init()` already fixes both: the path it opened exclusively
+  and the init timebase value in its name. Init publishes them once, as an
+  immutable record, before it returns; start copies that record. Nothing
+  reads mutable runtime state afterwards.
+- Network initialization belongs to the app (the sample shows it). If the
+  socket cannot be created or bound, start fails and the capture is
+  unaffected.
+- The end of a capture comes from the runtime's EXISTING finalization
+  record (`ps3dk_prof__finalization()`, `prof_finalization.h`), which the
+  winning shutdown publishes with release/acquire ordering after the sink
+  close and the drain-thread join. The agent treats EOF before that record
+  as "wait for more data". Once the record exists, the file is closed, so
+  the agent sends to the file's end and then END. END copies the record's
+  `io_finalized`, `trailer_written`, `join_failed`, `shutdown_result` and
+  `accepted_bytes`. `accepted_bytes` is the whole file's size only when
+  `io_finalized` is 1; otherwise it is reported as the acknowledged count,
+  never as a successful final size. The host tests inject this record; they
+  create no second source of truth.
+- Calls are caller-serialized: one controlling thread calls start and
+  stop; the agent thread is internal.
+- `ps3dk_prof_live_stop(graceful_us, join_us)` is called after shutdown.
+  Graceful first: a viewer that is streaming keeps receiving until END has
+  been sent or `graceful_us` runs out. Then cancellation: the agent closes
+  the viewer without END (a partial download, never a success claim) and
+  exits. The agent never blocks in a socket call (non-blocking sockets,
+  polled at the poll interval), so cancellation takes effect within one
+  poll. Stop then waits up to `join_us` for the thread to exit and joins
+  it. On timeout it returns ETIMEDOUT and the agent's state stays
+  allocated (static storage, never freed), so a thread still inside a file
+  call never touches freed memory; calling stop again keeps waiting. LV2
+  file calls are not known to be deadline-bounded, so the deadline bounds
+  the wait, not the thread.
+- While the agent runs, a stream that ends by error (peer gone, protocol
+  violation, stall) returns it to LISTEN; a later viewer starts again from
+  offset 0. A completed stream (END sent) also returns to LISTEN, so a
+  viewer that connects after the run still gets the whole file and END.
+  Only stop ends the agent.
+- There is no automatic destructor. An app that exits without calling stop
+  ends the thread with the process.
+
+### Link protocol, version 1
+
+Frames: an 8-byte header (u16 type, u16 flags = 0, u32 payload length,
+little-endian), payload at most 65,536 bytes. Anything else closes the
+link with a reason.
+
+| State | Agent sends | Agent accepts | Leaves when |
+|---|---|---|---|
+| LISTEN | nothing | one connection | accepted |
+| HANDSHAKE | nothing | `CLIENT_HELLO` (magic, protocol version) within 2 s | valid hello: STREAM; timeout or anything else: close, LISTEN |
+| STREAM | `HELLO`, then `DATA` | `PING` (at most 4 per second) | finalization record and all bytes sent: FINAL; error: close |
+| FINAL | `END` | nothing | sent: close, LISTEN |
+
+- `HELLO`: protocol version, agent version, capture identity (the init
+  timebase value, app name and build id from the published init record),
+  and the file name. The identity is for display; v1 has no resume.
+- `DATA`: u64 absolute offset, then up to 65,528 bytes. Offsets start at 0
+  and are contiguous; offset plus length is checked for overflow and
+  against the capture cap (default 1 GiB).
+- `END`: `io_finalized`, `trailer_written`, `join_failed`,
+  `shutdown_result` and `accepted_bytes` from the finalization record,
+  plus the bytes this stream sent. It proves transport completion only.
+- `PING`/`PONG`: liveness; more than 4 pings a second, an unknown type or a
+  length over the bound closes the link.
+- A second client while one is connected is accepted and closed at once;
+  `BUSY` is best-effort (one non-blocking send attempt), so it may see only
+  the close. It never displaces the first.
+- Reconnecting starts a new local candidate from offset 0. Type numbers for
+  TTY and debugger traffic are reserved; reserving them establishes no
+  security or scheduling design for those channels.
+
+### Viewer
+
+- **States kept separate:** link state (connecting, streaming, ended,
+  failed with reason), transport completion (END received and its size
+  matches the bytes received), the reader's capture verdict, and each
+  lane's measurement validity. END alone proves none of the last three.
+- **Bounds:** at most 256 MiB accumulated per session (then the link is
+  closed and labelled); one background parse job at a time, coalesced to
+  the newest snapshot; snapshots are immutable copies of a received prefix;
+  the UI thread never parses. A Disconnect button cancels the link and any
+  pending parse.
+- **Local file:** bytes are appended to `<name>.partial` as received. It is
+  published as `<name>.prof` (exclusive create, never overwriting) only if
+  the received length equals END's final size, the END result and flags
+  show a successful shutdown, the reader says COMPLETE, and the local flush
+  and close succeed. Otherwise it is kept as `<name>.incomplete.prof` with
+  the reason. A local write error stops writing, keeps the in-memory copy,
+  and is shown. The link's own failure is reported locally by the viewer,
+  never only over the broken link.
+- **Partial data:** every strict prefix of a VALID capture must load as
+  INCOMPLETE (waiting for data); a test cuts a valid capture at every byte
+  to prove it with the current reader. This is a check on valid captures,
+  not a licence to relabel bad bytes: corrupt-prefix controls (a wrong
+  constrained header byte, a bad chunk type) must stay MALFORMED.
+- **Live label:** the view stays LIVE / PROVISIONAL until END is accepted,
+  even if the reader already sees a complete trailer; the reader's verdict
+  is shown beside it, separately.
+- **Schema:** the frame types, payload layouts, string bounds and END
+  fields are pinned in `sdk/libps3dkprof/src/live/live_proto.h`, the one
+  schema the agent, its tests and the viewer use.
+- **What is shown with the current reader:** until the run ends the capture
+  is not COMPLETE, so the reader marks every lane not MEASUREMENT VALID and
+  computes no zone statistics. The live timeline shows provisional,
+  hatched spans, and Zones stays empty until the final COMPLETE capture.
+  The reader is not loosened; live aggregates would need their own reviewed
+  semantics.
+- Follow keeps the window on the newest data; any zoom or pan turns it off.
+
+### Tests and gates
+
+- Host (loopback): late join from offset 0; a file grown by another thread;
+  temporary EOF waits; END only after the finalization record, with the
+  recorded size; start before init, after shutdown, twice, and with a
+  callback sink; handshake timeout; oversized and unknown frames; ping
+  flood; second client gets BUSY; stalled viewer (drain timing measured
+  against no agent); stop deadline expiry without freeing state.
+- Viewer: recorded streams split and merged at every frame boundary; gaps,
+  overlaps and offset overflow; a prefix before the header, mid-chunk, and
+  the trailer received before END; END with a failed shutdown but a
+  parseable trailer; disconnect after the trailer; size mismatch at END;
+  local write failure.
+- Hardware gate 0, before any console-side viewer work: a probe proves an
+  app thread can read its own capture file, while the sink's descriptor is
+  open, on the HEN HDD (USB only if USB is offered), and sees bytes equal to
+  the final file. RPCS3 or host success is not LV2 evidence.
+- Hardware: matched runs with no agent, an idle agent, a connected viewer
+  and a stalled viewer, each against the idle baseline; frame-time and
+  drain cost reported.
+
+**Not in phase 2:** TTY, debugger traffic, several viewers, resume,
+starting or stopping a capture from the PC (P16), live aggregates, and any
+change to the capture format.
 
 ## Phase 3: PPU, SPU and RSX on one timeline (planned)
 
