@@ -12,9 +12,11 @@
 //!
 //! Waits: connecting is bounded by `connect_timeout`, HELLO must arrive
 //! within `hello_timeout`, and while streaming some byte (data or PONG)
-//! must arrive within `liveness_timeout`. A disconnect request is seen
-//! within the 100 ms read wait, or after an in-progress connect attempt or
-//! blocked write (bounded by `connect_timeout` and the 2 s write timeout).
+//! must arrive within `liveness_timeout`. These are SOCKET-wait bounds: a
+//! disconnect request is seen within the 100 ms read wait, or after an
+//! in-progress connect attempt or blocked write (bounded by
+//! `connect_timeout` and the 2 s write timeout). File writes, parsing and
+//! finalization are not bounded by them.
 
 use crate::live::*;
 use crate::model::{Document, VerdictTone};
@@ -141,11 +143,13 @@ pub struct LiveView {
     pub parses: u64,
     pub local_error: Option<String>,
     pub outcome: Option<Outcome>,
-    /// The client's largest byte buffers at one parse: received bytes, the
-    /// snapshot's copied tail and the flattened parse buffer. It excludes
-    /// the reader's analysis, the network read buffer and allocator slack;
-    /// the memory test reports the process high-water mark beside it.
-    pub peak_working_bytes: u64,
+    /// An ESTIMATE, per parse, of the client's byte buffers: received bytes,
+    /// the snapshot's copied tail and the flattened parse buffer, maximised
+    /// over parses. It is not a measured concurrent peak (bytes may arrive
+    /// during a parse; sealing a block has transients) and it excludes the
+    /// reader's analysis, the network read buffer and allocator slack. The
+    /// memory test reports the process high-water mark (VmHWM) beside it.
+    pub snapshot_buffers_estimate: u64,
 }
 
 struct Inner {
@@ -188,7 +192,7 @@ impl LiveClient {
                     parses: 0,
                     local_error: None,
                     outcome: None,
-                    peak_working_bytes: 0,
+                    snapshot_buffers_estimate: 0,
                 },
                 dirty: false,
                 net_done: false,
@@ -267,7 +271,7 @@ fn run_worker(sh: &Shared, every: Duration) {
         drop(bytes);
         {
             let mut g = sh.inner.lock().unwrap();
-            g.view.peak_working_bytes = g.view.peak_working_bytes.max(working);
+            g.view.snapshot_buffers_estimate = g.view.snapshot_buffers_estimate.max(working);
             g.view.doc = Some(doc);
             g.view.generation += 1;
             g.view.parses += 1;

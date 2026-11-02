@@ -109,10 +109,10 @@ fn peak_memory_of_a_live_session_is_reported() {
     );
     let len = cap.len() as u64;
     println!(
-        "MEASURE capture {} KiB, {} parses; client byte buffers at peak {} KiB (received + copied tail + flattened parse buffer; EXCLUDES the reader's analysis, the 64 KiB read buffer and allocator slack); process RSS before {} KiB, VmHWM {} -> {} KiB (+{} KiB: everything, incl. the analysis and this test's own copies)",
+        "MEASURE capture {} KiB, {} parses; client byte-buffer ESTIMATE {} KiB (max over parses of received + copied tail + flattened parse buffer; not a measured concurrent peak; EXCLUDES the reader's analysis, the 64 KiB read buffer and allocator slack); process RSS before {} KiB, VmHWM {} -> {} KiB (+{} KiB: everything, incl. the analysis and this test's own copies)",
         len / 1024,
         v.parses,
-        v.peak_working_bytes / 1024,
+        v.snapshot_buffers_estimate / 1024,
         rss_before,
         hwm_before,
         hwm_after,

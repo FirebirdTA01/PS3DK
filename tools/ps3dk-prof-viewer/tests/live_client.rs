@@ -76,12 +76,12 @@ enum Step {
     /// Keep the connection open this long, then close.
     Hold(u64),
     /// Close with a TCP reset instead of a clean FIN.
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     Reset,
 }
 
 /// Arms SO_LINGER {on, 0}, so dropping the socket sends a reset.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn arm_reset(s: &TcpStream) {
     use std::os::fd::AsRawFd;
     #[repr(C)]
@@ -92,8 +92,9 @@ fn arm_reset(s: &TcpStream) {
     extern "C" {
         fn setsockopt(fd: i32, level: i32, name: i32, val: *const Linger, len: u32) -> i32;
     }
-    const SOL_SOCKET: i32 = 1; // Linux
-    const SO_LINGER: i32 = 13; // Linux
+    // Linux values; the reset case is Linux-only.
+    const SOL_SOCKET: i32 = 1;
+    const SO_LINGER: i32 = 13;
     let l = Linger { on: 1, secs: 0 };
     // SAFETY: a valid socket fd and a correctly sized struct.
     let rc = unsafe {
@@ -139,7 +140,7 @@ fn mock(script: Vec<Step>) -> (u16, Arc<AtomicU64>) {
                 }
                 Step::Sleep(ms) => std::thread::sleep(Duration::from_millis(ms)),
                 Step::Hold(ms) => std::thread::sleep(Duration::from_millis(ms)),
-                #[cfg(unix)]
+                #[cfg(target_os = "linux")]
                 Step::Reset => {
                     arm_reset(&s);
                     // End the PING counter so its cloned handle is closed;
@@ -407,7 +408,7 @@ fn a_refused_connection_is_reported() {
     assert!(files(&dir).is_empty());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_reset_after_end_is_never_published() {
     let cap = capture(20);
