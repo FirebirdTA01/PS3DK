@@ -210,10 +210,15 @@ static size_t clen(const char *s)
 static void dr_start(prof *p)
 {
     static const uint8_t magic[16] = {'P', 'S', '3', 'D', 'K', 'P', 'R', 'F', 1, 0, 0, 0, 0, 0, 0, 0};
+    uint8_t head[16];
     if (p->dr.started)
         return;
     p->dr.started = 1;
-    if (sink_write(p, magic, sizeof magic) != 0)
+    memcpy(head, magic, sizeof head);
+#ifdef PS3DK_PROF_WITH_SPU
+    head[12] = p->ext_flags; /* file_flags bit 0 (DOMAIN_EXTENSIONS); 0 when the extension is off or disabled */
+#endif
+    if (sink_write(p, head, sizeof head) != 0)
         return;
     enc_begin(p, C_HEADER);
     enc_str(p, p->app, p->app_len);

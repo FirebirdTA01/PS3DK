@@ -216,6 +216,14 @@ typedef struct prof {
     uint32_t prefix_crc32;
 #endif
     uint8_t *block;
+#ifdef PS3DK_PROF_WITH_SPU
+    /* The SPU lane extension (P3.2 slice I1, host builds only): all of it lives in the one init block. */
+    uint8_t ext_flags;          /* file_flags byte 12: 1 when SPU lanes are enabled, else 0 */
+    struct psp_ppu *spu;        /* the drainer side's state, in the block */
+    uint8_t *spu_slots;         /* lanes_max x (ring_slots x 8 + 256) */
+    size_t spu_bytes;           /* the extension subtotal of the block, alignment included */
+    size_t block_bytes;         /* the whole block (measured by the I1 layout tests) */
+#endif
     /* HEADER strings, copied at init (the caller's config strings need not outlive init). */
     char app[33];
     char build_id[P_STR_MAX + 1];

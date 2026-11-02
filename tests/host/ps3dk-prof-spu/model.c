@@ -332,8 +332,15 @@ void run_init_cap(run *r, uint32_t ring_slots, uint32_t lanes_max, uint64_t mem_
     r->m = (psp_mem){NULL, m_ld64, m_ld_line, m_ld_slots, m_st64, m_st16, m_bar, m_bar, m_isync, m_mftb, m_alloc, m_free};
     g_need_bar = 0;
     r->o = (psp_out){r, o_chunk};
-    if (psp_ppu_init(&r->p, &cfg, lim ? lim : &rl, &r->m, &r->o) != 0)
-        FAIL("ppu init");
+    r->st_scratch = malloc(PSP_SCRATCH_BYTES); /* test-side storage: the model is not the runtime */
+    r->st_copy = malloc((size_t)ring_slots * PSP_SLOT);
+    r->st_arena = malloc(1u << 20);
+    {
+        psp_storage st = {r->st_scratch, PSP_SCRATCH_BYTES, r->st_copy, (size_t)ring_slots * PSP_SLOT, r->st_arena,
+                          1u << 20};
+        if (psp_ppu_init(&r->p, &cfg, lim ? lim : &rl, &r->m, &r->o, &st) != 0)
+            FAIL("ppu init");
+    }
     if (psp_image_add(&r->p, (const uint8_t *)"\x02model-image", 12, g_descs, 3, &r->image) != 0)
         FAIL("image add");
 }
@@ -351,6 +358,9 @@ void run_free(run *r)
         free(r->lanes[j]);
     }
     psp_ppu_fini(&r->p);
+    free(r->st_scratch);
+    free(r->st_copy);
+    free(r->st_arena);
 }
 
 lane_h *lane_new(run *r, uint32_t ls_cap, int own_dec, int start)

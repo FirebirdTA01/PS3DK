@@ -10,6 +10,22 @@
 
 #include "psp_layout.h"
 
+/* Archive names: internals export only under the reserved ps3dk_prof__ prefix (as pal.h does). */
+#define psp_drain ps3dk_prof__psp_drain
+#define psp_drain_declare ps3dk_prof__psp_drain_declare
+#define psp_drain_ends ps3dk_prof__psp_drain_ends
+#define psp_image_add ps3dk_prof__psp_image_add
+#define psp_lane_create ps3dk_prof__psp_lane_create
+#define psp_lane_end ps3dk_prof__psp_lane_end
+#define psp_lane_end_poll ps3dk_prof__psp_lane_end_poll
+#define psp_lane_end_request ps3dk_prof__psp_lane_end_request
+#define psp_lane_stats_get ps3dk_prof__psp_lane_stats_get
+#define psp_lane_step ps3dk_prof__psp_lane_step
+#define psp_ppu_fini ps3dk_prof__psp_ppu_fini
+#define psp_ppu_init ps3dk_prof__psp_ppu_init
+#define psp_reader_limits ps3dk_prof__psp_reader_limits
+#define psp_seal ps3dk_prof__psp_seal
+
 typedef struct psp_mem {
     void *ctx;
     uint64_t (*ld64)(void *ctx, uint64_t ea);
@@ -100,15 +116,27 @@ typedef struct psp_lane {
     uint32_t tries;         /* inconsistent snapshots in this cycle */
 } psp_lane;
 
-/* an image is registered all-or-nothing and COPIED: descriptor structs and their name/file strings are owned here
- * after psp_image_add returns; the caller may change or free its own copies at once */
+/* an image is registered all-or-nothing and COPIED into the image arena: descriptor structs and their name/file
+ * strings are owned here after psp_image_add returns; the caller may change or free its own copies at once.
+ * "emitted" is drainer bookkeeping (the SPU_IMAGES entry was handed to the sink), not proof of acceptance. */
 typedef struct psp_image {
     int used, emitted;
     uint8_t build_id[64];
     uint32_t build_len, ndesc;
-    psp_desc *descs;        /* owned; name/file point into arena */
-    char *arena;
+    psp_desc *descs;        /* in the arena; name/file point into it too */
 } psp_image;
+
+/* All storage the PPU side needs besides its own struct, supplied by the caller (the runtime carves it from its one
+ * init block); nothing here allocates. */
+typedef struct psp_storage {
+    uint8_t *scratch;       /* one chunk payload: at least PSP_SCRATCH_BYTES */
+    size_t scratch_len;
+    uint8_t *copy;          /* one lane's ring copy: at least ring_slots * 8 */
+    size_t copy_len;
+    uint8_t *arena;         /* image descriptors and strings, bump-allocated, never freed */
+    size_t arena_len;
+} psp_storage;
+#define PSP_SCRATCH_BYTES 1048576u
 
 typedef struct psp_ppu {
     psp_cfg cfg;
@@ -128,10 +156,15 @@ typedef struct psp_ppu {
     int test_no_terminal;   /* TEST ONLY: the no-reservation control of trace C2 (never set by a library caller) */
     uint8_t *scratch;       /* one chunk payload */
     size_t spos;
+    uint8_t *copy;
+    size_t copy_len;
+    uint8_t *arena;
+    size_t arena_len, arena_used;
 } psp_ppu;
 
 psp_limits psp_reader_limits(void);
-int psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const psp_mem *mem, const psp_out *out);
+int psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const psp_mem *mem, const psp_out *out,
+                 const psp_storage *st);
 void psp_ppu_fini(psp_ppu *p);
 int psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const psp_desc *d, uint32_t n,
                   uint32_t *index);

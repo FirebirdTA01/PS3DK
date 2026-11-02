@@ -9,7 +9,6 @@
 #include "psp_ppu.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #define C_DOMAIN 8u
@@ -82,7 +81,8 @@ static int ascii_ok(const char *s, size_t lo, size_t hi)
     return n >= lo;
 }
 
-int psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const psp_mem *mem, const psp_out *out)
+int psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const psp_mem *mem, const psp_out *out,
+                 const psp_storage *st)
 {
     uint64_t per;
     memset(p, 0, sizeof *p);
@@ -92,24 +92,23 @@ int psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const ps
     per = (uint64_t)cfg->ring_slots * PSP_SLOT + PSP_CTL_BYTES;
     if (per > UINT64_MAX / cfg->lanes_max || per * cfg->lanes_max > cfg->mem_max)
         return PSP_P_ENOMEM; /* the whole budget is checked at init, with no overflow */
+    if (!st || !st->scratch || st->scratch_len < MAX_CHUNK || !st->copy ||
+        st->copy_len < (size_t)cfg->ring_slots * PSP_SLOT || (!st->arena && st->arena_len))
+        return PSP_P_EINVAL;
     p->cfg = *cfg;
     p->lim = *lim;
     p->mem = mem;
     p->out = out;
-    p->scratch = malloc(MAX_CHUNK);
-    return p->scratch ? PSP_P_OK : PSP_P_ENOMEM;
+    p->scratch = st->scratch;
+    p->copy = st->copy;
+    p->copy_len = st->copy_len;
+    p->arena = st->arena;
+    p->arena_len = st->arena_len;
+    return PSP_P_OK;
 }
 
-void psp_ppu_fini(psp_ppu *p)
-{
-    uint32_t i;
-    for (i = 0; i < 32; i++) {
-        free(p->images[i].descs);
-        free(p->images[i].arena);
-    }
-    free(p->scratch);
-    p->scratch = NULL;
-}
+/* nothing to release: all storage belongs to the caller */
+void psp_ppu_fini(psp_ppu *p) { p->scratch = NULL; }
 
 /* the SPU_IMAGES entry size of an image whose strings have been validated (ASCII, bounded) */
 static size_t image_bytes(uint32_t blen, const psp_desc *d, uint32_t n)
@@ -126,6 +125,7 @@ int psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const
     psp_image *im;
     uint32_t i;
     size_t strings = 0, at = 0;
+    char *arena;
     /* validate everything before anything is kept, then copy it all: registration is all-or-nothing */
     if (p->sealed)
         return PSP_P_ESTOPPED;
@@ -140,25 +140,26 @@ int psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const
         return PSP_P_EINVAL; /* one image is one SPU_IMAGES entry: it must fit a chunk */
     for (i = 0; i < n; i++)
         strings += strlen(d[i].name) + 1 + (d[i].file ? strlen(d[i].file) : 0) + 1;
-    im = &p->images[p->nimages];
-    im->descs = malloc(sizeof *d * n);
-    im->arena = malloc(strings);
-    if (!im->descs || !im->arena) {
-        free(im->descs);
-        free(im->arena);
-        im->descs = NULL;
-        im->arena = NULL;
-        return PSP_P_ENOMEM;
+    /* the arena: the descriptor array (8-aligned), then the strings; checked before any state changes */
+    {
+        size_t base = (p->arena_used + 7) & ~(size_t)7, need = sizeof *d * n;
+        if (base < p->arena_used || base > p->arena_len || need > p->arena_len - base ||
+            strings > p->arena_len - base - need)
+            return PSP_P_ENOMEM;
+        im = &p->images[p->nimages];
+        im->descs = (psp_desc *)(void *)(p->arena + base);
+        arena = (char *)p->arena + base + need;
+        p->arena_used = base + need + strings;
     }
     for (i = 0; i < n; i++) {
         size_t ln = strlen(d[i].name) + 1, lf = (d[i].file ? strlen(d[i].file) : 0) + 1;
         im->descs[i].ls_addr = d[i].ls_addr;
         im->descs[i].line = d[i].line;
-        memcpy(im->arena + at, d[i].name, ln);
-        im->descs[i].name = im->arena + at;
+        memcpy(arena + at, d[i].name, ln);
+        im->descs[i].name = arena + at;
         at += ln;
-        memcpy(im->arena + at, d[i].file ? d[i].file : "", lf);
-        im->descs[i].file = im->arena + at;
+        memcpy(arena + at, d[i].file ? d[i].file : "", lf);
+        im->descs[i].file = arena + at;
         at += lf;
     }
     memcpy(im->build_id, build_id, build_len);
@@ -701,8 +702,8 @@ static int step(psp_ppu *p, uint32_t i)
         }
         if (l->w_snap > l->r) {
             uint64_t n = l->w_snap - l->r, first = l->r & (p->cfg.ring_slots - 1), a = p->cfg.ring_slots - first;
-            uint8_t *buf = malloc((size_t)n * PSP_SLOT);
-            if (!buf) {
+            uint8_t *buf = p->copy; /* n <= ring_slots: snap_valid bounds w - r by the ring */
+            if ((size_t)n * PSP_SLOT > p->copy_len) {
                 corrupt(p);
                 return 1;
             }
@@ -715,7 +716,6 @@ static int step(psp_ppu *p, uint32_t i)
             m->isync(m->ctx);
             l->tb1 = m->mftb(m->ctx);
             walk_slots(p, l, buf, n);
-            free(buf);
             if (l->state == PSP_L_FINAL || p->sink_failed) {
                 l->dphase = 0;
                 return 1; /* overflow-finished (released) or the sink failed: no further access */

@@ -5,6 +5,10 @@
  * are its errata 1 and 2; "BC" is the boundary correction (format 5.1, "Counter ceiling (fail-closed)").
  * CODE-REVIEW.md maps every rule to the code. */
 #include "prof_internal.h"
+#ifdef PS3DK_PROF_WITH_SPU
+#include "psp_ppu.h"
+#include "prof_spu.h"
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -958,7 +962,38 @@ static int take(size_t *off, size_t count, size_t elem, size_t *at)
 
 #define P_TOTAL_MAX ((size_t)256 * 1024 * 1024)
 
-static int init_impl(const ps3dk_prof_config *cfg_in, int *terminal)
+#ifdef PS3DK_PROF_WITH_SPU
+/* The resolved extension configuration: enabled == 0 is the unchanged v1 path. */
+typedef struct ext_cfg {
+    int enabled;
+    uint32_t lanes_max, ring_slots, image_bytes;
+    uint64_t mem_max;
+} ext_cfg;
+
+/* 0 valid (disabled or enabled), -1 EINVAL.  Disabled means size == 40 and every other field 0. */
+static int ext_resolve(const ps3dk_prof_ext_config *e, ext_cfg *x)
+{
+    memset(x, 0, sizeof *x);
+    if (!e)
+        return 0;
+    if (e->size != PS3DK_PROF_EXT_CONFIG_SIZE || e->reserved[0] || e->reserved[1] || e->reserved[2] ||
+        e->reserved[3])
+        return -1;
+    if (!e->spu_lanes_max)
+        return (e->spu_ring_slots || e->spu_image_bytes_max || e->spu_mem_max) ? -1 : 0;
+    x->enabled = 1;
+    x->lanes_max = e->spu_lanes_max;
+    x->ring_slots = e->spu_ring_slots ? e->spu_ring_slots : 8192u;
+    x->image_bytes = e->spu_image_bytes_max ? e->spu_image_bytes_max : 65536u;
+    x->mem_max = e->spu_mem_max ? e->spu_mem_max : (uint64_t)16 * 1024 * 1024;
+    if (x->lanes_max > 64 || !is_pow2(x->ring_slots) || x->ring_slots < 64 || x->ring_slots > 1048576 ||
+        x->image_bytes < 4096 || x->image_bytes > 16777216)
+        return -1;
+    return 0;
+}
+#endif
+
+static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *terminal)
 {
     prof *p = &g_storage;
     ps3dk_prof_config c;
@@ -971,9 +1006,19 @@ static int init_impl(const ps3dk_prof_config *cfg_in, int *terminal)
 #ifdef PS3DK_PROF_WITH_ARCS
     size_t o_arc_rows = 0, o_arc_index = 0;
 #endif
+#ifdef PS3DK_PROF_WITH_SPU
+    ext_cfg x;
+    size_t o_spu = 0, o_scr = 0, o_copy = 0, o_arena = 0, o_lslots = 0, ext_start = 0;
+#endif
 
     if (!cfg_in)
         return PS3DK_PROF_EINVAL;
+#ifdef PS3DK_PROF_WITH_SPU
+    if (ext_resolve((const ps3dk_prof_ext_config *)ext_in, &x) != 0)
+        return PS3DK_PROF_EINVAL;
+#else
+    (void)ext_in;
+#endif
     c = *cfg_in;
     if ((c.mode != PS3DK_PROF_MODE_APP && c.mode != PS3DK_PROF_MODE_THREAD) || c.max_threads < 1 ||
         c.max_threads > 1024 || c.max_descriptors < 1 || c.max_descriptors > 65536 || !is_pow2(c.ring_records) ||
@@ -1021,9 +1066,40 @@ static int init_impl(const ps3dk_prof_config *cfg_in, int *terminal)
             return PS3DK_PROF_EINVAL;
     }
 #endif
+#ifdef PS3DK_PROF_WITH_SPU
+    /* The extension regions follow every v1 region, so a disabled or absent ext leaves the v1 layout untouched.
+     * Each take() is overflow-checked and 128-aligned; the subtotal includes that alignment. */
+    if (x.enabled) {
+        ext_start = off;
+        if (take(&off, 1, sizeof(psp_ppu), &o_spu) || take(&off, 1, PSP_SCRATCH_BYTES, &o_scr) ||
+            take(&off, x.ring_slots, PSP_SLOT, &o_copy) || take(&off, 1, x.image_bytes, &o_arena) ||
+            take(&off, x.lanes_max, (size_t)x.ring_slots * PSP_SLOT + PSP_CTL_BYTES, &o_lslots) ||
+            off > P_TOTAL_MAX || (uint64_t)(off - ext_start) > x.mem_max)
+            return PS3DK_PROF_EINVAL;
+    }
+#endif
     p->block = (uint8_t *)pal_alloc(off);
     if (!p->block)
         return PS3DK_PROF_ENOMEM;
+#ifdef PS3DK_PROF_WITH_SPU
+    p->block_bytes = off;
+    if (x.enabled) {
+        psp_cfg pc = {x.ring_slots, x.lanes_max,
+                      (uint64_t)x.lanes_max * ((uint64_t)x.ring_slots * PSP_SLOT + PSP_CTL_BYTES), 1024};
+        psp_limits lim = psp_reader_limits();
+        psp_storage st = {p->block + o_scr, PSP_SCRATCH_BYTES, p->block + o_copy, (size_t)x.ring_slots * PSP_SLOT,
+                          p->block + o_arena, x.image_bytes};
+        p->spu = (psp_ppu *)(void *)(p->block + o_spu);
+        p->spu_slots = p->block + o_lslots;
+        p->spu_bytes = off - ext_start;
+        p->ext_flags = 1;
+        /* no output or memory adapters yet: slice I1 has no lane API and never drains the extension */
+        if (psp_ppu_init(p->spu, &pc, &lim, NULL, NULL, &st) != PSP_P_OK) {
+            rc = PS3DK_PROF_EINVAL;
+            goto fail_block;
+        }
+    }
+#endif
     p->slots = (slot *)(p->block + o_slots);
     p->descs = (desc_entry *)(p->block + o_desc);
     p->dr.buf = p->block + o_buf;
@@ -1156,12 +1232,12 @@ int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out)
     return PS3DK_PROF_OK;
 }
 
-int ps3dk_prof_init(const ps3dk_prof_config *cfg)
+static int init_gate(const ps3dk_prof_config *cfg, const void *ext)
 {
     int terminal = 0, rc = gate_enter(G_INITIALIZING);
     if (rc != PS3DK_PROF_OK)
         return rc;   /* EBUSY while a setter or init runs; EALREADY after READY or TERMINAL.  Never waits. */
-    rc = init_impl(cfg, &terminal);
+    rc = init_impl(cfg, ext, &terminal);
     if (rc != PS3DK_PROF_OK) {
         ST_REL(&g_gate, (uint32_t)(terminal ? G_TERMINAL : G_UNINIT));
         return rc;   /* the capture record stays unpublished */
@@ -1173,7 +1249,23 @@ int ps3dk_prof_init(const ps3dk_prof_config *cfg)
     return PS3DK_PROF_OK;
 }
 
+int ps3dk_prof_init(const ps3dk_prof_config *cfg) { return init_gate(cfg, NULL); }
+
+#ifdef PS3DK_PROF_WITH_SPU
+int ps3dk_prof_init_ex(const ps3dk_prof_config *cfg, const ps3dk_prof_ext_config *ext)
+{
+    return init_gate(cfg, ext); /* ext NULL or disabled: exactly ps3dk_prof_init */
+}
+#endif
+
 /* ---- test hooks ---------------------------------------------------------------------------------------------------- */
+
+#if defined(PS3DK_PROF_TEST_HOOKS) && defined(PS3DK_PROF_WITH_SPU)
+/* I1 layout measurements (host test builds with the extension only). */
+size_t ps3dk_prof__test_spu_bytes(void) { return g_storage.spu_bytes; }
+size_t ps3dk_prof__test_block_bytes(void) { return g_storage.block_bytes; }
+unsigned ps3dk_prof__test_ext_flags(void) { return g_storage.ext_flags; }
+#endif
 
 #ifdef PS3DK_PROF_TEST_HOOKS
 static cblock *self_cb(void)

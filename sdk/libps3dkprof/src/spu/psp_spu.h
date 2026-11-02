@@ -9,6 +9,22 @@
 
 #include "psp_layout.h"
 
+/* Archive names: internals export only under the reserved ps3dk_prof__ prefix (as pal.h does). */
+#define psp_spu_begin ps3dk_prof__psp_spu_begin
+#define psp_spu_dec_commit ps3dk_prof__psp_spu_dec_commit
+#define psp_spu_dec_preflight ps3dk_prof__psp_spu_dec_preflight
+#define psp_spu_dec_write ps3dk_prof__psp_spu_dec_write
+#define psp_spu_end ps3dk_prof__psp_spu_end
+#define psp_spu_fini ps3dk_prof__psp_spu_fini
+#define psp_spu_fini_close ps3dk_prof__psp_spu_fini_close
+#define psp_spu_flush ps3dk_prof__psp_spu_flush
+#define psp_spu_flush_plan ps3dk_prof__psp_spu_flush_plan
+#define psp_spu_flush_publish ps3dk_prof__psp_spu_flush_publish
+#define psp_spu_flush_put ps3dk_prof__psp_spu_flush_put
+#define psp_spu_flush_wait ps3dk_prof__psp_spu_flush_wait
+#define psp_spu_init ps3dk_prof__psp_spu_init
+#define psp_spu_mark ps3dk_prof__psp_spu_mark
+
 /* Abstract atomic status bits a port returns from rd_atomic_stat (the SPU port maps MFC_RdAtomicStat onto them). */
 #define PSP_AS_GETLLAR 1u
 #define PSP_AS_PUTLLC_OK 2u

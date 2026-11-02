@@ -90,6 +90,7 @@ typedef struct run {
     lane_h *lanes[MAX_LANES_H];
     uint32_t nl;
     uint32_t image;
+    uint8_t *st_scratch, *st_copy, *st_arena; /* the storage the runtime would carve from its init block */
 } run;
 
 void run_init(run *r, uint32_t ring_slots, uint32_t lanes_max, const psp_limits *lim);
