@@ -120,3 +120,11 @@ RT(rt_id_same_name_not_collision)
 RT(rt_thread_begin_os_id_failure_refused)
 RT(rt_thread_begin_os_id_failure_second_thread)
 RT(rt_auto_register_os_id_failure_then_recovery)
+
+/* live link target checkpoint 1: the immutable capture record */
+RT(rt_capture_record_null_and_before_init)
+RT(rt_capture_record_failed_init_then_retry)
+RT(rt_capture_record_terminal_init_publishes_nothing)
+RT(rt_capture_record_callback_sink_enotsup)
+RT(rt_capture_record_file_init_and_after_shutdown)
+RT(rt_capture_record_publication_ordering)

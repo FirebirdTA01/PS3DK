@@ -76,6 +76,8 @@ typedef struct ps3dk_prof_test_hooks_t {
      * published ids, given the natural id.  Only that comparison uses it; a new entry and its REGERR keep the natural
      * id, so no descriptor with a forced id is ever written.  NULL (the default): the natural id. */
     uint64_t (*candidate_desc_id)(const char *name, uint32_t line, uint64_t natural_id);
+    /* Called by the successful init after the capture record is filled and before it is published. */
+    void (*before_capture_publish)(void);
 } ps3dk_prof_test_hooks_t;
 
 extern ps3dk_prof_test_hooks_t ps3dk_prof_test_hooks;

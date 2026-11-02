@@ -24,7 +24,7 @@
 # tsan_race_ctl.c, built with the tsan compiler and flags (controls.tsv, controls-tsan/): the POSITIVE control must exit
 # with the declared TSAN_OPTIONS exitcode AND print exactly one ThreadSanitizer report, a data race whose stacks name
 # writer_a at its RACE-A line and writer_b at its RACE-B line; the NEGATIVE control (mutex) must exit 0 with no
-# sanitizer report.  A failed control fails the variant and its 103 rows are NOT RUN (detection not proven).
+# sanitizer report.  A failed control fails the variant and its 109 rows are NOT RUN (detection not proven).
 # Plain and asan launches are unchanged.
 # The TSan launch path (rrun, xrun, the setarch identity check, the sanitizer probes, the detection controls and the
 # variant admission) lives in driver-tsan.sh, sourced below.  It does not rely on errexit: every launch and evidence
@@ -58,7 +58,7 @@ fi
 inc=(-I"$public_inc" -I"$root/sdk/libps3dkprof/src/core" -I"$root/sdk/libps3dkprof/src/pal")
 warn=(-Wall -Wextra -Werror)
 lib_src=(prof_core prof_drain pal_host)
-test_c=(rt_main rt_util rt_t_lifecycle rt_t_stop rt_t_zones rt_t_init rt_t_sink rt_t_race rt_t_counters)
+test_c=(rt_main rt_util rt_t_lifecycle rt_t_stop rt_t_zones rt_t_init rt_t_sink rt_t_race rt_t_counters rt_t_capture)
 
 src_of() {
     case "$1" in
@@ -226,7 +226,7 @@ export UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1"
 controls="$out/controls.tsv"
 printf 'control\tresult\treason\n' >"$controls"
 
-# The frozen registry: the 103 test names, sorted, unique.  Each built variant's `rt --list` must equal it exactly.
+# The frozen registry: the 109 test names, sorted, unique.  Each built variant's `rt --list` must equal it exactly.
 registry="$here/rt-registry.txt"
 mapfile -t names <"$registry"
 if [ "${#names[@]}" -eq 0 ] || [ "$(LC_ALL=C sort -u "$registry")" != "$(cat "$registry")" ]; then
@@ -361,7 +361,7 @@ else
 fi
 
 if [ "$lib_ok" = 1 ]; then
-    api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_init \
+    api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_get_capture_record ps3dk_prof_init \
 ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin \
 ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
     # nm output goes to files first: under pipefail a `nm | grep -q` can exit 141 on an early match.
@@ -463,8 +463,8 @@ ob_case() {
         return
     fi
     mkdir -p "$o.cap"
-    if "$o.bin" "$o.cap" >"$o.run.txt" 2>&1 && grep -qx 'hits=4' "$o.run.txt"; then
-        ok "$tag: run (hits == 4: each runtime argument evaluated once)"
+    if "$o.bin" "$o.cap" >"$o.run.txt" 2>&1 && grep -qx 'hits=5' "$o.run.txt"; then
+        ok "$tag: run (hits == 5: each runtime argument evaluated once)"
     else
         bad "$tag: run: $(cat "$o.run.txt")"
         return

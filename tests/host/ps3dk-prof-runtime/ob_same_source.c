@@ -2,9 +2,12 @@
  * PS3DK_PROF=1 (linked to the host library), with PS3DK_PROF undefined and with PS3DK_PROF=0.
  *
  * The zone names are string literals (they initialise a static descriptor when enabled), so the side effects sit in
- * the runtime arguments: a token expression, a handle expression and a thread name.  Enabled, each runtime argument is
- * evaluated exactly once per call (hits == 4); disabled, none is evaluated (hits == 0) and no function is referenced.
- * Every sizeof operand here is fixed-size (F4): a string literal, a ps3dk_prof_token, a ps3dk_prof_zone lvalue. */
+ * the runtime arguments: a token expression, a handle expression, a thread name and a capture-record pointer.
+ * Enabled, each runtime argument is evaluated exactly once per call (hits == 5); disabled, none is evaluated
+ * (hits == 0), no function is referenced, and the capture-record call is ENOTSUP.  The live start and stop calls are
+ * declared only (no implementation to link), so they appear in the disabled builds alone: ENOTSUP, arguments unevaluated.
+ * Every sizeof operand here is fixed-size (F4): a string literal, a ps3dk_prof_token, a ps3dk_prof_zone lvalue,
+ * a pointer, a uint64_t. */
 #include <ps3dk/prof.h>
 
 #include <stdio.h>
@@ -12,7 +15,7 @@
 
 #if defined(PS3DK_PROF) && PS3DK_PROF
 #define OB_ENABLED 1
-#define OB_EXPECT_HITS 4
+#define OB_EXPECT_HITS 5
 #else
 #define OB_ENABLED 0
 #define OB_EXPECT_HITS 0
@@ -79,6 +82,22 @@ int main(int argc, char **argv)
     rc = PS3DK_PROF_DRAIN();
     if (rc != PS3DK_PROF_OK)
         return 6;
+    {
+        ps3dk_prof_capture_record recs[2];
+        rc = PS3DK_PROF_GET_CAPTURE_RECORD(&recs[hits++ & 1]);
+        if (rc != (OB_ENABLED ? PS3DK_PROF_OK : PS3DK_PROF_ENOTSUP))
+            return 9;
+    }
+#if !OB_ENABLED
+    {
+        ps3dk_prof_live_config lcs[2];
+        uint64_t us[2] = {1, 2};
+        if (PS3DK_PROF_LIVE_START(&lcs[hits++ & 1]) != PS3DK_PROF_ENOTSUP)
+            return 10;
+        if (PS3DK_PROF_LIVE_STOP(us[hits++ & 1], us[hits++ & 1]) != PS3DK_PROF_ENOTSUP)
+            return 11;
+    }
+#endif
     PS3DK_PROF_THREAD_END();
     rc = PS3DK_PROF_SHUTDOWN();
     printf("hits=%d\n", hits);

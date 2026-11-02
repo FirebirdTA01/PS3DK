@@ -43,6 +43,9 @@ extern "C" {
 #define PS3DK_PROF_ENOTINIT       (-14)  /* the profiler is not initialized */
 #define PS3DK_PROF_ESTOPPED       (-15)  /* the stop latch is set: refused */
 #define PS3DK_PROF_EFULL          (-16)  /* no free thread slot, or incarnation ids exhausted */
+#define PS3DK_PROF_ENOTSUP        (-17)  /* not supported here: a callback sink, a device not yet measured, an off build */
+#define PS3DK_PROF_ENET           (-18)  /* live: the listener could not be created */
+#define PS3DK_PROF_ETIMEDOUT      (-19)  /* live stop: the agent did not finish in time; call stop again */
 
 #define PS3DK_PROF_MODE_APP     1u
 #define PS3DK_PROF_MODE_THREAD  2u
@@ -102,6 +105,29 @@ typedef struct ps3dk_prof_config {
     const char *workload_tag;
 } ps3dk_prof_config;
 
+/* The capture a successful init created, published once and immutable for the runtime's lifetime (shutdown does
+ * not change it).  Copied out by ps3dk_prof_get_capture_record; the caller owns its copy. */
+typedef struct ps3dk_prof_capture_record {
+    char path[256];               /* the file the FILE sink created exclusively, NUL-terminated, at most 255 bytes */
+    uint64_t session_id;          /* the timebase value at init (also in the file name) */
+    char app[33];                 /* NUL-terminated */
+    uint32_t app_len;
+    uint8_t build_id[512];        /* length-delimited: build_id_len bytes, not necessarily NUL-terminated */
+    uint32_t build_id_len;
+} ps3dk_prof_capture_record;
+
+/* Live link configuration (docs/design/ps3dk-prof-viewer.md, Phase 2, "Target integration"). */
+typedef struct ps3dk_prof_live_config {
+    uint16_t port;                /* default 31750 */
+    uint16_t reserved;
+    uint32_t poll_us;
+    uint32_t send_timeout_us;
+    uint32_t handshake_timeout_us;
+    uint32_t stack_bytes;
+    uint32_t reserved2;
+    uint64_t cap_bytes;
+} ps3dk_prof_live_config;
+
 #ifdef __cplusplus
 #define PS3DK_PROF_TOKEN_NONE ps3dk_prof_token{}
 #define PS3DK_PROF_INERT_ZONE ps3dk_prof_zone{}
@@ -134,6 +160,13 @@ void ps3dk_prof_frame(void);
 ps3dk_prof_token ps3dk_prof_frame_token(void);
 ps3dk_prof_zone ps3dk_prof_zone_begin(ps3dk_prof_desc *desc, ps3dk_prof_token token);
 void ps3dk_prof_zone_end(ps3dk_prof_zone *zone);
+/* Copies the capture record.  OK; EINVAL for a NULL out; ENOTINIT before a successful init (a failed init, retryable
+ * or terminal, publishes nothing); ENOTSUP with a callback sink (no file).  On any error out is left untouched. */
+int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out);
+/* Live link: DECLARED ONLY.  Not implemented in this release; a call fails to link.  The design and its review
+ * gates are in docs/design/ps3dk-prof-viewer.md (Phase 2, "Target integration"). */
+int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg);
+int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us);
 
 #define PS3DK_PROF__DESC(var, nm) \
     static ps3dk_prof_desc var = {(nm), "", __FILE__, (uint32_t)__LINE__, 1u, 0u, 0u}
@@ -157,6 +190,9 @@ void ps3dk_prof_zone_end(ps3dk_prof_zone *zone);
 #define PS3DK_PROF_THREAD_END() ps3dk_prof_thread_end()
 #define PS3DK_PROF_FRAME() ps3dk_prof_frame()
 #define PS3DK_PROF_FRAME_TOKEN() ps3dk_prof_frame_token()
+#define PS3DK_PROF_GET_CAPTURE_RECORD(out) ps3dk_prof_get_capture_record(out)
+#define PS3DK_PROF_LIVE_START(cfg) ps3dk_prof_live_start(cfg)
+#define PS3DK_PROF_LIVE_STOP(graceful_us, join_us) ps3dk_prof_live_stop(graceful_us, join_us)
 
 #ifndef __cplusplus
 static inline void ps3dk_prof__cleanup(ps3dk_prof_zone *z) { ps3dk_prof_zone_end(z); }
@@ -182,6 +218,9 @@ static inline void ps3dk_prof__cleanup(ps3dk_prof_zone *z) { ps3dk_prof_zone_end
 #define PS3DK_PROF_THREAD_END() ((void)0)
 #define PS3DK_PROF_FRAME() ((void)0)
 #define PS3DK_PROF_FRAME_TOKEN() (PS3DK_PROF_TOKEN_NONE)
+#define PS3DK_PROF_GET_CAPTURE_RECORD(out) ((void)sizeof(out), PS3DK_PROF_ENOTSUP)
+#define PS3DK_PROF_LIVE_START(cfg) ((void)sizeof(cfg), PS3DK_PROF_ENOTSUP)
+#define PS3DK_PROF_LIVE_STOP(graceful_us, join_us) ((void)sizeof(graceful_us), (void)sizeof(join_us), PS3DK_PROF_ENOTSUP)
 
 #endif
 

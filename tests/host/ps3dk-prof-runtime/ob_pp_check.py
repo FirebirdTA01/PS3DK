@@ -9,7 +9,8 @@ import sys
 
 SIDE_EFFECTS = ['hits++', 'next_token(&hits)']
 FUNCS = re.compile(r'\bps3dk_prof_(?:config_defaults|set_sink_path|set_sink_callbacks|init|shutdown|drain|'
-                   r'thread_begin|thread_end|frame|frame_token|zone_begin|zone_end)\b')
+                   r'thread_begin|thread_end|frame|frame_token|zone_begin|zone_end|'
+                   r'get_capture_record|live_start|live_stop)\b')
 
 
 def sizeof_spans(text):

@@ -285,6 +285,134 @@ link with a reason.
 starting or stopping a capture from the PC (P16), live aggregates, and any
 change to the capture format.
 
+### Target integration (design for review)
+
+Gate 0 is closed for its narrow scope (2026-11-01): on HEN 3.5.0 / 4.93, an
+app thread reads the profiler's open FILE-sink capture on the internal HDD,
+byte-exact, through newlib/librt (`samples/profiling/live-read-probe`). This
+section turns the host agent into a console agent, in three checkpoints,
+each reviewed before the next: (1) the runtime record and public API;
+(2) the `live_os` extraction, with the existing host, fault and real-agent
+end-to-end tests rerun unchanged; (3) the LV2 layer, the sample wiring and
+the hardware gates. Nothing here is claimed until its gate has a result.
+
+**Capture record (checkpoint 1).**
+- Type `ps3dk_prof_capture_record`, read by
+  `int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out)`.
+  Fields: `char path[256]` (NUL-terminated, at most 255 bytes, exactly the
+  path the file sink created), `uint64_t session_id` (the init timebase
+  value), `char app[33]` and `uint32_t app_len`, `uint8_t build_id[512]` and
+  `uint32_t build_id_len` (the configured limits). The call copies into the
+  caller's struct; the caller owns its copy.
+- A successful `ps3dk_prof_init()` with the FILE sink fills the runtime's
+  record and publishes it with a release store as its last step. Readers
+  load the flag with acquire. A failed init publishes nothing.
+- Results: `PS3DK_PROF_OK`; `PS3DK_PROF_ENOTINIT` before a successful init;
+  `PS3DK_PROF_ENOTSUP` (new, -17) with a callback sink. The record stays
+  readable, unchanged, after shutdown, for the runtime's lifetime.
+
+**Public live API (checkpoint 1, implemented in checkpoint 3).**
+- `int ps3dk_prof_live_start(const ps3dk_prof_live_config *)`,
+  `int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us)`, in
+  `ps3dk/prof.h`, compiled out (returning `PS3DK_PROF_ENOTSUP`) when the
+  profiler is.
+- Start reads the capture record and the finalization accessor itself; the
+  app passes no path. It refuses: before init (`ENOTINIT`); once shutdown
+  has begun (`ESTOPPED`); a callback sink or a capture path outside
+  `/dev_hdd0/` (`ENOTSUP`: HDD only until another device is measured); a
+  second start (`EALREADY`); no socket or listener (`ENET`, new, -18).
+- Stop returns `OK`; `ETIMEDOUT` (new, -19) or `ECLOCK`: still stopping,
+  call stop again; `ETHREAD`: the join failed, terminal, never retried; or
+  `ENOTINIT` if the agent was never started.
+- The agent object is static storage inside `libps3dkprof`, never freed.
+  Stop's deadlines bound its waits; they do not bound an LV2 file call or
+  the ordinary join after the thread's last store.
+- Calls stay caller-serialized.
+
+**`live_os` contract (checkpoint 2).** The protocol and state machine stay
+in `live_agent.c`; every OS call goes through:
+- `listen(port, loopback) -> fd`, `accept(lfd) -> fd | AGAIN`, both
+  non-blocking; `send(fd, buf, n)` and `recv(fd, buf, n)` non-blocking,
+  returning bytes or a normalized code: `AGAIN`, `INTR` (retried, at most 16
+  times in a row), `CLOSED` (peer gone), `ERROR`; `poll(fds, timeout_ms)`;
+  `close(fd)`, called exactly once by the owner of the descriptor.
+- `send` never raises a signal: the host uses `MSG_NOSIGNAL`. Whether a
+  send on a closed LV2 socket can raise a signal is UNVERIFIED; the shim
+  treats `EPIPE` as `CLOSED`, and the checkpoint 3 smoke checks a send after
+  the viewer has gone (the app keeps running, the agent sees `CLOSED`).
+- `file_open(path) -> fd` read-only; `file_read_at(fd, buf, n, off)` as
+  `lseek` + `read` on a descriptor owned only by the agent thread (no other
+  thread touches its offset).
+- Seam tests: the host shim's normalization under injected `EAGAIN`,
+  `EINTR`, `EPIPE` and a short send; then the 28 H1 fault cases and the
+  real-agent end-to-end test, unchanged, against the extracted code.
+
+**Budget (checkpoint 3).**
+- Static, exact and reported: the agent object (`sizeof`, about 66 KiB,
+  mostly one frame buffer), the capture record (about 0.8 KiB), and the
+  strings, taken from the link map of the sample. The agent uses no TLS of
+  its own; any TLS pulled in from the network layer is listed. Budget: at
+  most 72 KiB; the observed figure and its margin are reported for both
+  ABIs.
+- Stack: 32 KiB is a CANDIDATE, not accepted. A measurement build reads
+  the thread's stack bounds from `sys_ppu_thread_get_stack_information` at
+  thread start and refuses to paint unless its current stack pointer lies
+  inside them. It paints from 1 KiB below the stack pointer down to the
+  lowest address, and on exit scans up from the lowest address for the
+  first overwritten word. The reported high-water mark is the TOTAL depth
+  from the top of the stack to that word, so the unpainted top region (the
+  entry frames and the 1 KiB gap) counts as used. The painting code is in
+  the checkpoint 3 source review. The high-water mark and its margin are
+  reported for both ABIs on the real SDK call path (socket, poll, file
+  read). The candidate is accepted only if the high-water mark is at most
+  half the stack; the link map alone proves reservations, not use.
+
+**Linkage and off behaviour.**
+- The agent, the shim and everything they call are built uninstrumented, as
+  the rest of the runtime.
+- They are separate archive members, pulled in only by a reference to
+  `ps3dk_prof_live_start`. A profiling-off build or a build that never calls
+  it links no live object, opens no listener and has no network dependency;
+  a link-map test checks both.
+- Live support is in the manual-lifecycle archive only, not the automatic
+  one. The archive-member gate and the package inventories list the new
+  members.
+
+**Sample (checkpoint 3).** `heterogeneous-workload` gains `SAMPLE_LIVE`,
+which requires `SAMPLE_PROFILING` (a configure error otherwise), on in the
+hardware package.
+- `netInitialize`, then `ps3dk_prof_live_start` after profiler init. A start
+  failure is printed and shown on screen; the capture continues and stays
+  valid.
+- The screen shows the console's IP and the port for Connect.
+- Teardown branches on the stop result: `OK` -> `netDeinitialize`;
+  `ETIMEDOUT`/`ECLOCK` -> stop once more; still not `OK` -> leave the
+  network initialized (process exit releases it) and print that the agent
+  did not finish; `ETHREAD` -> no `netDeinitialize`.
+- The README shows the calls an app adds.
+
+**Target gates (checkpoint 3)**, each with its own evidence:
+1. Build: both ABIs, `-Werror`; the archive check still refuses test-hook
+   symbols; the off/unused link-map test; the static budget.
+2. HEN smoke: the sample with the agent, the PC app connected from the
+   start: a published `.prof` byte-equal to the file left on the console,
+   reader COMPLETE, stop `OK`. A second run joins mid-run. Stack
+   high-water reported.
+3. Overhead: matched HEN runs of the same sample build: no agent, agent
+   idle (no viewer), viewer connected, viewer stalled (connects then stops
+   reading). Reported per run: frame time p50/p90/p99, drain time, capture
+   verdict and lane validity, with a matched no-input idle baseline per set.
+   Numbers are reported, not turned into a pass mark, until the director
+   sets one.
+4. Failure paths on the console: a viewer drops mid-run (the app keeps
+   running; the next viewer starts from offset 0); the agent is stopped
+   while a viewer is stalled: stop's waits are bounded and no END is sent;
+   the file and join limits above still apply.
+
+**Not in this design:** USB or other devices, several viewers, TTY or
+debugger channels, resume, the automatic lifecycle, and any change to the
+capture format.
+
 ## Phase 3: PPU, SPU and RSX on one timeline (planned)
 
 Lanes for SPU jobs and RSX work, fed by the SPU raw-clock transport now in

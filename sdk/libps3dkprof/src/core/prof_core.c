@@ -31,6 +31,11 @@ ps3dk_prof_test_hooks_t ps3dk_prof_test_hooks;
 uint64_t ps3dk_prof_test_stats[128];
 #endif
 
+/* The capture record: outside g_storage, so a failed init (which clears g_storage) never touches it.  Filled once by
+ * the successful init, then published by a release store of g_capture_state; immutable afterwards, never freed. */
+static ps3dk_prof_capture_record g_capture;
+static uint32_t g_capture_state;   /* 0 none, 1 FILE sink (record valid), 2 callback sink */
+
 /* ---- primitives --------------------------------------------------------------------------------------------------- */
 
 void p_le16(uint8_t *d, uint16_t v)
@@ -1115,6 +1120,40 @@ fail_block:
     return rc;
 }
 
+/* Only the successful init calls this, once: every field is written before the release store that publishes it. */
+static void publish_capture_record(const prof *p)
+{
+    if (p->snk.kind != 1) {
+        ST_REL(&g_capture_state, 2u);
+        return;
+    }
+    memcpy(g_capture.path, p->snk.path, sizeof g_capture.path);   /* NUL-terminated by the init's snprintf check */
+    g_capture.session_id = p->tb_at_init;
+    memcpy(g_capture.app, p->app, sizeof g_capture.app);
+    g_capture.app_len = p->app_len;
+    memcpy(g_capture.build_id, p->build_id, p->build_id_len);
+    g_capture.build_id_len = p->build_id_len;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof_test_hooks.before_capture_publish)
+        ps3dk_prof_test_hooks.before_capture_publish();
+#endif
+    ST_REL(&g_capture_state, 1u);
+}
+
+int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out)
+{
+    uint32_t s;
+    if (!out)
+        return PS3DK_PROF_EINVAL;
+    s = LD_ACQ(&g_capture_state);
+    if (s == 0)
+        return PS3DK_PROF_ENOTINIT;
+    if (s != 1)
+        return PS3DK_PROF_ENOTSUP;
+    *out = g_capture;
+    return PS3DK_PROF_OK;
+}
+
 int ps3dk_prof_init(const ps3dk_prof_config *cfg)
 {
     int terminal = 0, rc = gate_enter(G_INITIALIZING);
@@ -1123,8 +1162,9 @@ int ps3dk_prof_init(const ps3dk_prof_config *cfg)
     rc = init_impl(cfg, &terminal);
     if (rc != PS3DK_PROF_OK) {
         ST_REL(&g_gate, (uint32_t)(terminal ? G_TERMINAL : G_UNINIT));
-        return rc;
+        return rc;   /* the capture record stays unpublished */
     }
+    publish_capture_record(&g_storage);
     g_prof = &g_storage;
     ST_REL(&g_gate, (uint32_t)G_READY);       /* step 8: publish, */
     ST_REL(&g_storage.start_gate, 1u);        /* then open the start gate */
