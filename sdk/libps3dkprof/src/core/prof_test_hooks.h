@@ -69,10 +69,22 @@ typedef struct ps3dk_prof_test_hooks_t {
     uint32_t slot_generation_seed, slot_generation_seed_slot;
     uint32_t spu_lock_fail_at, spu_unlock_fail_at, spu_ops; /* nth spu_mutex lock / unlock fails (1-based) */
     uint32_t spu_unlock_fail_site; /* the first unlock at this site fails: 1 step 3b, 2 the seal, 3 lane_end's final */
+    void (*ext_before_failing_unlock)(void); /* R2: runs right BEFORE the real unlock that spu_unlock_fail_site fails */
+    void (*gpu_before_ack)(void);       /* R2: between the drainer's real closing unlock and a detach acknowledgement */
     void (*spu_admission_pause)(void);  /* after the admission check, before the mutation (race tests) */
     void (*spu_before_seal)(void);      /* holding spu_mutex, right before psp_seal (seal-time corruption tests) */
     uint32_t spu_src_fail_at;           /* register_elf: the nth descriptor-source get (both passes, 1-based) fails */
     void (*spu_elf_after_parse)(void);  /* register_elf: after the lock-free parse, before spu_mutex (race tests) */
+    /* P3.3 R2 GPU domains (host only) */
+    const void *gpu_port;               /* a prg_port: the emulated GPU device (its lock and emittable fields unused) */
+    uint32_t gpu_mutex_init_fail_at;    /* the nth GPU snap mutex init fails (1-based) */
+    void (*gpu_after_pin_inc)(void);    /* after users++ and before the id load (stale-call schedules) */
+    void (*gpu_after_prologue)(void);   /* after the shutdown check, before the core call (admission schedules) */
+    void (*gpu_in_frame_install)(void); /* inside gpu_frame's thread_mutex section, after validation */
+    uint32_t gpu_snap_lock_fail_at, gpu_snap_unlock_fail_at, gpu_snap_ops; /* nth snap lock / unlock fails */
+    int gpu_snap_nolock;                /* the TSan NEGATIVE control: the snap mutex does nothing */
+    void (*drainer_after_tables)(void); /* the drain, after steps 2a/2b (THREADS, DESCRIPTORS) and before step 3 */
+    uint32_t p_lock_fail_at, p_lock_ops, p_unlock_fail_at, p_unlock_ops; /* the nth p_lock / p_unlock fails */
     uint64_t chunk_seq_seed;           /* nonzero: the drainer's chunk_seq starts there (ceiling tests) */
     int thread_create_fail;
     int join_fail;

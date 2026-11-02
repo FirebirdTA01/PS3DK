@@ -85,7 +85,7 @@ int main(int argc, char **argv)
     gpu_reset();
     G.fail_every = 7; /* FIFO refusals interleave losses with events */
     g_led = LED_READER;
-    WANT(prg_attach(&D, 7, 16, 256, 200, &port, &g_out, &g_led, g_meta, g_stage, g_scratch) == PRG_OK, "attach");
+    WANT(prg_attach(&D, 7, 16, 256, 200, &port, &g_out, &g_led, g_meta, g_stage, g_scratch, PRG_EVENTS_MAX) == PRG_OK, "attach");
     pthread_create(&g, NULL, gpu_thread, NULL);
     pthread_create(&dr, NULL, drain_thread, NULL);
     pthread_create(&pr, NULL, producer_thread, !strcmp(sc, "detach") ? (void *)1 : NULL);

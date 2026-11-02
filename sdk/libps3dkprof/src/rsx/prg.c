@@ -126,7 +126,7 @@ static int emit_loss(prg_dom *d, uint64_t first, uint64_t count, uint8_t reason,
 static void stage_event(prg_dom *d, const prg_meta *m, uint64_t timer)
 {
     uint8_t *e;
-    if (d->ev_n && (d->ev_n == PRG_EVENTS_MAX || d->ev_first + d->ev_n != m->seq))
+    if (d->ev_n && (d->ev_n == d->scratch_events || d->ev_first + d->ev_n != m->seq))
         flush_events(d);
     if (!d->ev_n)
         d->ev_first = m->seq;
@@ -173,9 +173,10 @@ static int publish(prg_dom *d)
 /* ---------------------------------------------------------------- attach */
 int prg_attach(prg_dom *d, uint32_t domain_id, uint32_t report_first, uint32_t report_count, uint32_t label,
                const prg_port *port, const prg_out *out, prg_ledger *ledger, prg_meta *meta, prg_stage *stage,
-               uint8_t *scratch)
+               uint8_t *scratch, uint32_t scratch_events)
 {
-    if (!d || !port || !out || !ledger || !meta || !stage || !scratch || report_count < 2 ||
+    if (!d || !port || !out || !ledger || !meta || !stage || !scratch || !scratch_events ||
+        scratch_events > PRG_EVENTS_MAX || report_count < 2 ||
         report_count > PRG_SLOTS_MAX || report_first > UINT32_MAX - report_count || domain_id < 2 ||
         domain_id > 65535)
         return PRG_EINVAL;
@@ -195,6 +196,7 @@ int prg_attach(prg_dom *d, uint32_t domain_id, uint32_t report_first, uint32_t r
     d->meta = meta;
     d->stage = stage;
     d->scratch = scratch;
+    d->scratch_events = scratch_events;
     ledger->loss_reserved++;
     d->terminal_reserved = 1;
     /* quiescent context (an app precondition): every slot poisoned, label 0, then a sync, before any submission */
@@ -281,7 +283,7 @@ static uint64_t submit(prg_dom *d, uint8_t kind, uint8_t depth, uint32_t desc)
         d->p_rec_head++;
         d->p_open_count = 0;
     }
-    d->meta[slot] = (prg_meta){s, d->p_frame_id, desc, d->p_frame_owner, kind, depth, 0, 0};
+    d->meta[slot] = (prg_meta){s, d->p_frame_id, desc, d->p_frame_owner, kind, depth, 0, d->p_owner_ref};
     d->p_ticket = t + 1;
     return s;
 }
@@ -357,14 +359,15 @@ int prg_mark(prg_dom *d, uint32_t desc)
     return publish_leave(d, s == UINT64_MAX ? PRG_EOVERFLOW : PRG_OK);
 }
 
-int prg_frame(prg_dom *d, uint32_t owner, uint64_t frame_id)
+int prg_frame(prg_dom *d, uint32_t owner, uint64_t frame_id, uint8_t owner_ref)
 {
     if (owner == 0 && frame_id != 0)
         return PRG_EINVAL;
     if (!admit(d))
         return PRG_ESTOPPED;
-    d->p_frame_owner = owner; /* validated against live incarnations in R2 */
+    d->p_frame_owner = owner; /* validated by the runtime (R2): the core records what it is given */
     d->p_frame_id = frame_id;
+    d->p_owner_ref = owner_ref;
     leave(d);
     return PRG_OK;
 }
@@ -574,6 +577,10 @@ static void drain_once(prg_dom *d, const prg_snap *s, int final)
             }
             continue;
         }
+        if (d->port.emittable && !d->port.emittable(d->port.ctx, &x->m)) {
+            d->st.held++; /* HOLD: the prefix stops here; the slot stays owned; next pass retries */
+            break;
+        }
         x->timer = d->port.read_timer(d->port.ctx, d->report_first + slot);
         if (x->timer == PRG_POISON || x->timer < last) {
             anomaly(d); /* label before report, poison collision or a decrease */
@@ -619,16 +626,32 @@ static void drain_once(prg_dom *d, const prg_snap *s, int final)
     emit_brackets(d, s->br_head);
 }
 
-void prg_drain(prg_dom *d)
+static int finalize(prg_dom *d);
+
+/* the caller holds the extension mutex.  DOMAIN + EPOCH are declared first, whatever the fault state: they need no
+ * snapshot, and a faulted domain must still appear in the file (unfinalized), never vanish.  With drainer_finalizes,
+ * a DETACHING domain whose published work is all drained is finalized HERE, by the drainer (the sole encoder). */
+void prg_drain_held(prg_dom *d)
 {
     prg_snap s;
-    uint32_t st;
+    uint32_t st = LD_ACQ(&d->state), e = PRG_DETACHING;
+    if (!LD_ACQ(&d->retired) && st != PRG_FREE)
+        declare(d);
+    if (faulted(d) || LD_ACQ(&d->retired) || (st != PRG_ATTACHED && st != PRG_DETACHING) || snap_copy_out(d, &s) != 0)
+        return;
+    drain_once(d, &s, 0);
+    if (d->drainer_finalizes && st == PRG_DETACHING && LD_ACQ(&d->drained_pub) == s.ticket &&
+        d->rec_tail == s.rec_head && CAS(&d->state, &e, (uint32_t)PRG_DETACH_FINAL)) {
+        (void)finalize(d); /* -1 (an unproven snapshot): no FINAL, not retired; the waiter sees the fault */
+        d->detach_turn = 1; /* the runtime acknowledges this turn after its closing extension unlock */
+    }
+}
+
+void prg_drain(prg_dom *d)
+{
     if (faulted(d) || ext_lock(d) != 0)
         return;
-    st = LD_ACQ(&d->state);
-    if (!faulted(d) && !LD_ACQ(&d->retired) && (st == PRG_ATTACHED || st == PRG_DETACHING) &&
-        snap_copy_out(d, &s) == 0)
-        drain_once(d, &s, 0);
+    prg_drain_held(d);
     (void)ext_unlock(d);
 }
 
@@ -677,20 +700,26 @@ static int finalize(prg_dom *d)
 
 /* the seal finalizes only under the ext lock and only from a proven snapshot; on a fault it does nothing (the file
  * stays incomplete, the resources stay borrowed) */
-void prg_seal(prg_dom *d)
+/* the caller holds the extension mutex */
+void prg_seal_held(prg_dom *d)
 {
     uint32_t e = PRG_ATTACHED;
-    if (faulted(d) || ext_lock(d) != 0)
-        return;
+    if (!LD_ACQ(&d->retired) && LD_ACQ(&d->state) != PRG_FREE)
+        declare(d); /* as prg_drain_held: a faulted domain is still declared */
     if (faulted(d) ||
         (!CAS_SC(&d->state, &e, (uint32_t)PRG_SEALING) &&
-         (e != PRG_DETACHING || !CAS_SC(&d->state, &e, (uint32_t)PRG_SEALING)))) {
-        (void)ext_unlock(d);
+         (e != PRG_DETACHING || !CAS_SC(&d->state, &e, (uint32_t)PRG_SEALING))))
         return; /* a fault, or already terminal: the other path owns the finalization */
-    }
     (void)LD_SC(&d->inflight); /* the handshake: an in-flight call either saw SEALING or lies beyond the snapshot */
     if (finalize(d) == 0)
         ST_REL(&d->state, PRG_SEALED);
+}
+
+void prg_seal(prg_dom *d)
+{
+    if (faulted(d) || ext_lock(d) != 0)
+        return;
+    prg_seal_held(d);
     (void)ext_unlock(d);
 }
 
@@ -742,6 +771,39 @@ int prg_detach(prg_dom *d, uint64_t timeout_us, void (*poll_hook)(void *), void 
  * not block the release; a domain that never retired (a fault before its finalization) stays borrowed.  The release
  * returns the GPU resources only: the port's mutex storage and this object stay alive (a later user observes the
  * fault), and a mutex whose unlock reported failure must never be destroyed on the strength of this release */
+int prg_detach_wait(prg_dom *d, uint64_t timeout_us, void (*poll_hook)(void *), void *poll_ctx)
+{
+    uint64_t now, deadline;
+    uint32_t e = PRG_ATTACHED;
+    if (faulted(d))
+        return PRG_EFAULT;
+    if (!CAS_SC(&d->state, &e, (uint32_t)PRG_DETACHING) && e != PRG_DETACHING && e != PRG_DETACH_FINAL)
+        return e == PRG_SEALING || e == PRG_SEALED ? PRG_ESTOPPED : PRG_EINVAL;
+    if (d->port.now_us(d->port.ctx, &now) != 0)
+        return PRG_ECLOCK;
+    deadline = timeout_us > UINT64_MAX - now ? UINT64_MAX : now + timeout_us;
+    for (;;) {
+        if (poll_hook)
+            poll_hook(poll_ctx); /* e.g. one drain on the designated drainer thread, or a short sleep */
+        if (faulted(d))
+            return PRG_EFAULT;
+        e = LD_ACQ(&d->state);
+        if (e == PRG_DETACH_FINAL) {
+            uint32_t ack = LD_ACQ(&d->detach_ack); /* not `retired` alone: that is set before FINAL is offered */
+            if (ack == 1 && LD_ACQ(&d->retired))
+                return PRG_OK; /* the acknowledged turn AND the frozen decision */
+            if (ack == 2)
+                return PRG_EFAULT;
+        }
+        if (e == PRG_SEALING || e == PRG_SEALED)
+            return PRG_ESTOPPED; /* the seal finalized it: the frozen result stands */
+        if (d->port.now_us(d->port.ctx, &now) != 0)
+            return PRG_ECLOCK;
+        if (now >= deadline)
+            return PRG_ETIMEDOUT; /* stays DETACHING; call again */
+    }
+}
+
 int prg_release(prg_dom *d)
 {
     uint32_t e;

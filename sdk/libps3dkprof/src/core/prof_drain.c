@@ -485,6 +485,7 @@ int p_drain_once(prof *p)
     if (declare_threads(p) != 0)
         goto lockfail;
     declare_descs(p, LD_ACQ(&p->desc_count));
+    HOOK(drainer_after_tables);
 
     /* 3. Records up to the snapshot. */
     for (i = 0; i < n; i++)

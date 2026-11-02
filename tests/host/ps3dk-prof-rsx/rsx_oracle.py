@@ -39,7 +39,8 @@ INVENTORY = {
         r1-loss-budget-over r1-mark-depth64 r1-nested-suppression r1-overflow r1-pair-desc r1-pair-suppressed
         r1-seal-calibrating r1-seal-inflight r1-seal-pending r1-second-label-advance r1-sink-fail-events
         r1-sink-fail-final r1-sink-fail-trailing-loss r1-small-ring-refill r1-steady r1-exhaust-admitted
-        r1-exhaust-at-seal r1-l2-back-beyond-issued r1-l2-back-beyond-issued-wrap r1-pair-suppressed-stale'''.split(),
+        r1-exhaust-at-seal r1-l2-back-beyond-issued r1-l2-back-beyond-issued-wrap r1-pair-suppressed-stale
+        r1-hold-release r1-hold-at-seal r1-scratch-split'''.split(),
     'threads': ['r1-thr-run', 'r1-thr-seal-live', 'r1-thr-detach'],
 }
 DOMAIN = 7

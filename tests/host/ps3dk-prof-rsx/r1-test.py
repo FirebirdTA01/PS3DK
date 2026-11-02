@@ -198,6 +198,14 @@ mutants = [
             tok->begin_seq != d->p_sup_stack[d->p_suppressed - 1]) {""",
         """        if (!d->p_suppressed || (tok->depth & 0x7fffffffu) != d->p_suppressed) {""")],
      't_pair_suppressed_stale:'),
+    # R2 core additions (codex GO 12:53)
+    ('hold-ignored', [('        if (d->port.emittable && !d->port.emittable(d->port.ctx, &x->m)) {', '        if (0) {')],
+     't_hold_release:'),
+    ('hold-skips-instead-of-stopping', [(
+        '            d->st.held++; /* HOLD: the prefix stops here; the slot stays owned; next pass retries */\n'
+        '            break;', '            d->st.held++;\n            continue;')], 't_hold_release:'),
+    ('scratch-split-ignored', [('d->ev_n == d->scratch_events ||', 'd->ev_n == PRG_EVENTS_MAX ||')],
+     't_scratch_split:'),
 ]
 for name, edits, kill in mutants:
     m = core

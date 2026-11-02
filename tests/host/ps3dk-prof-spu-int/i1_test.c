@@ -134,6 +134,7 @@ int main(int argc, char **argv)
     if (!strcmp(g_case, "size-39")) { x.size = 39; return refused_then_ok(x); }
     if (!strcmp(g_case, "size-41")) { x.size = 41; return refused_then_ok(x); }
     if (!strcmp(g_case, "size-0")) { x.size = 0; return refused_then_ok(x); }
+    /* P3.3 R2: offsets 24/28 became gpu_domains_max/gpu_report_slots_max (tests/host/ps3dk-prof-gpu-int) */
     if (!strncmp(g_case, "reserved-", 9)) { x.reserved[g_case[9] - '0'] = 1; return refused_then_ok(x); }
     if (!strcmp(g_case, "disabled-ring")) { x = ext_on(0); x.spu_ring_slots = 64; return refused_then_ok(x); }
     if (!strcmp(g_case, "disabled-image")) { x = ext_on(0); x.spu_image_bytes_max = 4096; return refused_then_ok(x); }

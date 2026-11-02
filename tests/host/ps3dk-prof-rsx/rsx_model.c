@@ -216,8 +216,15 @@ static int p_eunlock(void *c)
     pthread_mutex_unlock(&g_ext);
     return lk_trip(LK_EUNLOCK) ? -1 : 0;
 }
+/* R2's hold hook: events with the held descriptor are not emittable while g_hold_desc names it */
+static uint32_t g_hold_desc = UINT32_MAX;
+static int p_emittable(void *c, const prg_meta *m)
+{
+    (void)c;
+    return m->desc != __atomic_load_n(&g_hold_desc, __ATOMIC_ACQUIRE);
+}
 static const prg_port g_port = {NULL, p_reserve, p_flush, p_rlabel, p_wlabel, p_rtimer, p_wtimer, p_sync, p_mftb, p_now,
-                                p_slock, p_sunlock, p_elock, p_eunlock};
+                                p_slock, p_sunlock, p_elock, p_eunlock, p_emittable};
 
 /* ---------------------------------------------------------------- the sink */
 typedef struct chunk {
@@ -424,7 +431,7 @@ static void fresh_led(uint32_t slots, prg_ledger led)
     g_ntr = 0;
     gpu_reset();
     g_led = led;
-    WANT(prg_attach(&D, 7, 16, slots, 200, &g_port, &g_out, &g_led, g_meta, g_stage, g_scratch) == PRG_OK, "attach");
+    WANT(prg_attach(&D, 7, 16, slots, 200, &g_port, &g_out, &g_led, g_meta, g_stage, g_scratch, PRG_EVENTS_MAX) == PRG_OK, "attach");
 }
 static void fresh(uint32_t slots) { fresh_led(slots, LED_READER); }
 
@@ -840,7 +847,7 @@ static void t_first_use_stale(void)
     for (int i = 0; i < 4096; i++)
         G.timer[i] = 999999999; /* old reports from a previous user of the range: large and monotone-looking */
     g_led = LED_READER;
-    WANT(prg_attach(&D, 7, 16, 16, 200, &g_port, &g_out, &g_led, g_meta, g_stage, g_scratch) == PRG_OK, "attach");
+    WANT(prg_attach(&D, 7, 16, 16, 200, &g_port, &g_out, &g_led, g_meta, g_stage, g_scratch, PRG_EVENTS_MAX) == PRG_OK, "attach");
     G.fault = F_LABEL_FIRST;
     G.fault_at = 1;
     WANT(M(0) == 0, "mark");
@@ -1345,32 +1352,32 @@ static void t_attach_bounds(void)
     prg_ledger l = led(1, 1, 1);
     fresh_led(16, led(1, 100, 100)); /* the one credit is the terminal reservation */
     WANT(g_led.loss_reserved == 1, "attach reserved the terminal LOSS");
-    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &g_led, g_meta, g_stage, g_scratch) == PRG_EINVAL,
+    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &g_led, g_meta, g_stage, g_scratch, PRG_EVENTS_MAX) == PRG_EINVAL,
          "a second domain without a terminal credit is refused");
     l.loss_max = 0;
-    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch) == PRG_EINVAL,
+    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch, PRG_EVENTS_MAX) == PRG_EINVAL,
          "a zero ledger is refused");
     l.loss_max = 1;
-    WANT(prg_attach(&D2, 8, UINT32_MAX - 15, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch) ==
+    WANT(prg_attach(&D2, 8, UINT32_MAX - 15, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch, PRG_EVENTS_MAX) ==
              PRG_EINVAL && l.loss_reserved == 0,
          "report_first + report_count past u32: refused before any arithmetic or reservation");
-    WANT(prg_attach(&D2, 8, UINT32_MAX - 16, 16, 201, &g_port, &g_out, &l, NULL, g_stage, g_scratch) == PRG_EINVAL,
+    WANT(prg_attach(&D2, 8, UINT32_MAX - 16, 16, 201, &g_port, &g_out, &l, NULL, g_stage, g_scratch, PRG_EVENTS_MAX) == PRG_EINVAL,
          "no meta");
     /* injected maxima above the reader's hard ceilings are refused; exactly the ceilings are accepted */
     l = LED_READER;
     l.loss_max++;
-    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch) == PRG_EINVAL,
+    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch, PRG_EVENTS_MAX) == PRG_EINVAL,
          "loss_max over the reader ceiling");
     l = LED_READER;
     l.br_epoch_max++;
-    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch) == PRG_EINVAL,
+    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch, PRG_EVENTS_MAX) == PRG_EINVAL,
          "br_epoch_max over the reader ceiling");
     l = LED_READER;
     l.br_file_max++;
-    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch) == PRG_EINVAL,
+    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta, g_stage, g_scratch, PRG_EVENTS_MAX) == PRG_EINVAL,
          "br_file_max over the reader ceiling");
     l = LED_READER;
-    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta + 64, g_stage + 64, g_scratch) == PRG_OK &&
+    WANT(prg_attach(&D2, 8, 64, 16, 201, &g_port, &g_out, &l, g_meta + 64, g_stage + 64, g_scratch, PRG_EVENTS_MAX) == PRG_OK &&
              l.loss_reserved == 1,
          "exactly the reader ceilings: accepted");
     WANT(M(0) == 0, "mark");
@@ -1521,6 +1528,80 @@ static void t_pair_suppressed_stale(void)
     fclose(e);
 }
 
+/* ================================================================ R2 core additions (codex GO 12:53) */
+static prg_dom D2_SCRATCH;
+
+/* ---- the emittable HOLD: the prefix stops at a held event, nothing after it commits, then it resumes ---- */
+static void t_hold_release(void)
+{
+    FILE *e;
+    fresh(16);
+    WANT(M(0) == 0 && M(3) == 0 && M(0) == 0, "marks 0 (desc 0), 1 (desc 3), 2 (desc 0)");
+    gpu_step(100);
+    g_hold_desc = 3;
+    prg_drain(&D);
+    WANT(D.events_accepted == 1 && D.drained == 1 && D.st.held == 1 && D.drained_pub == 1,
+         "held at number 1: only number 0 committed, slots 1 and 2 still owned (drained %llu held %llu)",
+         (unsigned long long)D.drained, (unsigned long long)D.st.held);
+    WANT(p_rtimer(NULL, 17) != PRG_POISON, "the held slot is not poisoned");
+    g_hold_desc = UINT32_MAX;
+    prg_drain(&D);
+    prg_seal(&D);
+    WANT(D.final_state == 1 && D.events_accepted == 3, "released: FINALIZED 3");
+    e = finish("r1-hold-release");
+    fprintf(e, "exit 0\nevents 3\nlost 0\n");
+    fclose(e);
+}
+static void t_hold_at_seal(void)
+{
+    FILE *e;
+    fresh(16);
+    WANT(M(0) == 0 && M(3) == 0 && M(0) == 0, "marks");
+    gpu_step(100);
+    g_hold_desc = 3;
+    prg_drain(&D);
+    WANT(prg_detach(&D, 50, NULL, NULL) == PRG_ETIMEDOUT, "a held prefix: detach times out, no early completion");
+    prg_seal(&D);
+    g_hold_desc = UINT32_MAX;
+    WANT(D.final_state == 2 && D.events_accepted == 1 && D.lost_accepted == 2, "held at the seal: LOSS 4 + ABANDONED");
+    WANT(prg_release(&D) == PRG_OK, "release after the app's quiescence");
+    e = finish("r1-hold-at-seal");
+    fprintf(e, "exit 4\nevents 1\nlost 2\nloss 1 2 4\n");
+    fclose(e);
+}
+
+/* ---- the scratch capacity: GPU_EVENTS chunks split at scratch_events ---- */
+static void t_scratch_split(void)
+{
+    FILE *e;
+    int chunks = 0;
+    for (int i = 0; i < g_nch; i++)
+        free(g_ch[i].data);
+    g_nch = 0;
+    g_sink_dead = g_fail_type = g_fail_nth = g_seen_type = 0;
+    g_ntr = 0;
+    gpu_reset();
+    g_led = LED_READER;
+    WANT(prg_attach(&D, 7, 16, 16, 200, &g_port, &g_out, &g_led, g_meta, g_stage, g_scratch, 2) == PRG_OK,
+         "attach with a 2-event scratch");
+    WANT(prg_attach(&D2_SCRATCH, 8, 64, 16, 201, &g_port, &g_out, &g_led, g_meta, g_stage, g_scratch, 0) ==
+             PRG_EINVAL &&
+             prg_attach(&D2_SCRATCH, 8, 64, 16, 201, &g_port, &g_out, &g_led, g_meta, g_stage, g_scratch,
+                        PRG_EVENTS_MAX + 1) == PRG_EINVAL,
+         "scratch_events 0 and one past the chunk maximum are refused");
+    for (int i = 0; i < 5; i++)
+        WANT(M(0) == 0, "mark %d", i);
+    gpu_step(100);
+    prg_drain(&D);
+    prg_seal(&D);
+    for (int i = 0; i < g_nch; i++)
+        chunks += g_ch[i].type == 14;
+    WANT(chunks == 3 && D.events_accepted == 5, "5 events in chunks of 2, 2, 1 (got %d chunks)", chunks);
+    e = finish("r1-scratch-split");
+    fprintf(e, "exit 0\nevents 5\nlost 0\n");
+    fclose(e);
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2)
@@ -1602,6 +1683,10 @@ int main(int argc, char **argv)
     t_l2_back_beyond_issued("r1-l2-back-beyond-issued", 0);
     t_l2_back_beyond_issued("r1-l2-back-beyond-issued-wrap", 0xFFFFFFFFull); /* L1 = 1, L2 = 0 across the wrap */
     t_pair_suppressed_stale();
+    /* R2 core additions */
+    t_hold_release();
+    t_hold_at_seal();
+    t_scratch_split();
     printf("R1 traces %d, failures %d\n", g_traces, g_bad);
     return g_bad ? 1 : 0;
 }

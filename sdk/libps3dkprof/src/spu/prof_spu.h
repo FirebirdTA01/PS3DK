@@ -18,11 +18,14 @@ extern "C" {
 
 typedef struct ps3dk_prof_ext_config {
     uint32_t size;                /* exactly sizeof(ps3dk_prof_ext_config) = 40, else EINVAL */
-    uint32_t spu_lanes_max;       /* 0 = disabled (then every field but size must be 0); 1..64 */
+    uint32_t spu_lanes_max;       /* 0 = SPU lanes disabled (then spu_ring_slots and spu_image_bytes_max must be 0); 1..64 */
     uint32_t spu_ring_slots;      /* a power of two, 64..1048576; 0 = 8192 */
     uint32_t spu_image_bytes_max; /* 4096..16777216; 0 = 65536 */
-    uint64_t spu_mem_max;         /* the cap on the EXTENSION subtotal of the init block; 0 = 16 MiB */
-    uint32_t reserved[4];         /* all 0, else EINVAL */
+    uint64_t spu_mem_max;         /* the cap on the EXTENSION subtotal of the init block (SPU and GPU); 0 = 16 MiB;
+                                   * nonzero only when an extension is enabled */
+    uint32_t gpu_domains_max;     /* P3.3 R2: 0 = GPU domains disabled (then gpu_report_slots_max must be 0); 1..4 */
+    uint32_t gpu_report_slots_max; /* 0 = 256, else 2..1024: the largest report_count a GPU domain may attach */
+    uint32_t reserved[2];         /* all 0, else EINVAL */
 } ps3dk_prof_ext_config;
 
 #define PS3DK_PROF_EXT_CONFIG_SIZE 40u
@@ -35,7 +38,9 @@ _Static_assert(offsetof(ps3dk_prof_ext_config, spu_lanes_max) == 4, "ext config 
 _Static_assert(offsetof(ps3dk_prof_ext_config, spu_ring_slots) == 8, "ext config offset");
 _Static_assert(offsetof(ps3dk_prof_ext_config, spu_image_bytes_max) == 12, "ext config offset");
 _Static_assert(offsetof(ps3dk_prof_ext_config, spu_mem_max) == 16, "ext config offset");
-_Static_assert(offsetof(ps3dk_prof_ext_config, reserved) == 24, "ext config offset");
+_Static_assert(offsetof(ps3dk_prof_ext_config, gpu_domains_max) == 24, "ext config offset");
+_Static_assert(offsetof(ps3dk_prof_ext_config, gpu_report_slots_max) == 28, "ext config offset");
+_Static_assert(offsetof(ps3dk_prof_ext_config, reserved) == 32, "ext config offset");
 #endif
 
 /* ---- slice I2: the lane API (PPU side, host only) ----

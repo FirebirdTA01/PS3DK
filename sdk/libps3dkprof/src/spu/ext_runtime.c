@@ -146,13 +146,20 @@ int p_ext_init(prof *p)
     if (pal_mutex_init(&p->spu_mutex) != 0)
         return -1;
     p->spu_mutex_ok = 1;
-    g_mem = (psp_mem){p, m_ld64, m_ld_line, m_ld_slots, m_st64, m_st16, m_fence, m_fence, m_fence, m_mftb, m_alloc,
-                      m_free};
-    g_out = (psp_out){p, o_chunk};
-    p->spu->mem = &g_mem;
-    p->spu->out = &g_out;
-    p->spu->covered = covered;
-    p->spu->covered_ctx = p;
+    if (p->spu) { /* SPU lanes enabled (a GPU-only extension has no PSP state) */
+        g_mem = (psp_mem){p, m_ld64, m_ld_line, m_ld_slots, m_st64, m_st16, m_fence, m_fence, m_fence, m_mftb, m_alloc,
+                          m_free};
+        g_out = (psp_out){p, o_chunk};
+        p->spu->mem = &g_mem;
+        p->spu->out = &g_out;
+        p->spu->covered = covered;
+        p->spu->covered_ctx = p;
+    }
+    if (p->gpu_max && p_gpu_init(p) != 0) { /* it destroyed its own mutexes; unwind the extension mutex */
+        (void)pal_mutex_destroy(&p->spu_mutex);
+        p->spu_mutex_ok = 0;
+        return -1;
+    }
     return 0;
 }
 
@@ -169,7 +176,12 @@ void p_ext_threads_accepted(prof *p, const tdecl *t, uint32_t n)
     }
 }
 
-void p_ext_slot_freed(prof *p, uint32_t slot) { p->decl_acc[slot].valid = 0; }
+void p_ext_slot_freed(prof *p, uint32_t slot)
+{
+    if (p->gpu_max)
+        p_gpu_slot_freed(p, slot); /* the GPU owner evidence, BEFORE the accepted identity is cleared */
+    p->decl_acc[slot].valid = 0;
+}
 
 static int ext_lock(prof *p)
 {
@@ -181,12 +193,16 @@ static int ext_lock(prof *p)
     return pal_mutex_lock(&p->spu_mutex) == 0 ? 0 : -1;
 }
 
-enum { U_ANY, U_STEP3B, U_SEAL, U_END_FINAL }; /* unlock sites, for the site-targeted fault hook */
 
 /* 0, or -1 after setting the terminal fault (every failed unlock is terminal) */
 static int ext_unlock_at(prof *p, uint32_t site)
 {
-    int rc = pal_mutex_unlock(&p->spu_mutex);
+    int rc;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (site && ps3dk_prof_test_hooks.spu_unlock_fail_site == site && ps3dk_prof_test_hooks.ext_before_failing_unlock)
+        ps3dk_prof_test_hooks.ext_before_failing_unlock(); /* ordering schedules: work published before this unlock */
+#endif
+    rc = pal_mutex_unlock(&p->spu_mutex);
 #ifdef PS3DK_PROF_TEST_HOOKS
     if (ps3dk_prof_test_hooks.spu_unlock_fail_at &&
         ++ps3dk_prof_test_hooks.spu_ops == ps3dk_prof_test_hooks.spu_unlock_fail_at)
@@ -230,17 +246,31 @@ static void drainer_run(prof *p, int seal)
         if (ps3dk_prof_test_hooks.spu_before_seal)
             ps3dk_prof_test_hooks.spu_before_seal();
 #endif
-        psp_seal(p->spu);
+        if (p->spu)
+            psp_seal(p->spu);
+        /* corruption psp detected in a publication fails the RUNTIME sink at once, before any GPU output: no
+         * trailer, no further output (sink_fail keeps an earlier first error); the output-free lifecycle continues */
+        if (p->spu && p->spu->corrupt)
+            p_ext_sink_fail(p, -2);
+        if (p->gpu_max)
+            p_gpu_seal(p);
         p->ext_sealed = 1;
     } else {
-        psp_drain(p->spu);
+        if (p->spu)
+            psp_drain(p->spu);
+        if (p->spu && p->spu->corrupt)
+            p_ext_sink_fail(p, -2); /* as above: before any GPU output */
+        if (p->gpu_max)
+            p_gpu_step(p);
     }
-    /* corruption psp detected in a publication fails the RUNTIME sink: no trailer, no further output (sink_fail
-     * keeps an earlier first error); the output-free lifecycle continues on later drains and the seal */
-    if (p->spu->corrupt)
-        p_ext_sink_fail(p, -2);
-    if (ext_unlock_at(p, seal ? U_SEAL : U_STEP3B) != 0)
-        p_ext_sink_fail(p, -3);
+    {
+        uint32_t acks[4], nack = p->gpu_max ? p_gpu_ack_collect(p, acks) : 0; /* under the lock: pinned */
+        int ok = ext_unlock_at(p, seal ? U_SEAL : U_STEP3B) == 0;
+        if (!ok)
+            p_ext_sink_fail(p, -3);
+        /* a detach finalized in this turn completes only now, with the unlock's outcome; only the pinned slots */
+        p_gpu_ack_publish(p, acks, nack, ok);
+    }
 }
 
 void p_ext_step3b(prof *p) { drainer_run(p, 0); }
@@ -267,10 +297,10 @@ static int enter(prof **pp)
     prof *p = p_ready() ? g_prof : NULL;
     if (!p)
         return PS3DK_PROF_ENOTINIT;
-    if (!p->ext_flags)
-        return PS3DK_PROF_ENOTSUP;
-    if (g_tls.in_drain)
-        return PS3DK_PROF_EBUSY; /* a sink callback or a drain: refused before locking */
+    if (!p->spu)
+        return PS3DK_PROF_ENOTSUP; /* no SPU lanes (the extension off, or GPU domains only) */
+    if (g_tls.in_drain || g_tls.in_gpu)
+        return PS3DK_PROF_EBUSY; /* a sink callback, a drain, or a GPU port callback: refused before locking */
     if (LD_ACQ(&p->ext_fault))
         return PS3DK_PROF_ESTOPPED;
     if (ext_lock(p) != 0)
@@ -369,9 +399,9 @@ int ps3dk_prof_spu_image_register_elf(const void *elf, uint64_t size, uint32_t *
     /* the cheap refusals first, lock-free and only on atomics (ext_sealed is read under spu_mutex only) */
     if (!p)
         return PS3DK_PROF_ENOTINIT;
-    if (!p->ext_flags)
+    if (!p->spu)
         return PS3DK_PROF_ENOTSUP;
-    if (g_tls.in_drain)
+    if (g_tls.in_drain || g_tls.in_gpu)
         return PS3DK_PROF_EBUSY;
     if (LD_ACQ(&p->ext_fault) || LD_ACQ(&p->shutdown_once))
         return PS3DK_PROF_ESTOPPED;
@@ -383,7 +413,7 @@ int ps3dk_prof_spu_image_register_elf(const void *elf, uint64_t size, uint32_t *
     if (ps3dk_prof_test_hooks.spu_elf_after_parse)
         ps3dk_prof_test_hooks.spu_elf_after_parse();
 #endif
-    rc = enter(&p); /* again: ready, ext_flags, in_drain, ext_fault, then the mutex */
+    rc = enter(&p); /* again: ready, SPU lanes, in_drain, ext_fault, then the mutex */
     if (rc != PS3DK_PROF_OK)
         return rc;
     if (!admitted(p))
@@ -544,5 +574,11 @@ int ps3dk_prof_spu_lane_end(uint32_t handle, uint64_t timeout_us, ps3dk_prof_spu
         pal_sleep_us(deadline - now < 1000 ? deadline - now : 1000); /* never holding spu_mutex */
     }
 }
+
+/* ---- shared with the GPU domain runtime (src/rsx/gpu_runtime.c) ---- */
+
+int p_ext_lock_at(prof *p) { return ext_lock(p); }
+int p_ext_unlock_site(prof *p, uint32_t site) { return ext_unlock_at(p, site); }
+void p_ext_inline_drain(prof *p) { inline_drain(p); }
 
 #endif

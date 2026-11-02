@@ -8,6 +8,7 @@
 #ifdef PS3DK_PROF_WITH_SPU
 #include "psp_ppu.h"
 #include "prof_spu.h"
+#include "gpu_internal.h"
 #endif
 
 #include <stdio.h>
@@ -130,6 +131,12 @@ int p_mono_now(prof *p, uint64_t *us)
 /* Every mutex call is checked (r2 2).  A failure is recorded; the capture then fails closed at sealing. */
 int p_lock(prof *p, pal_mutex *m)
 {
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof_test_hooks.p_lock_fail_at && ++ps3dk_prof_test_hooks.p_lock_ops == ps3dk_prof_test_hooks.p_lock_fail_at) {
+        ST_RLX(&p->lock_failed, 1);
+        return -1;
+    }
+#endif
     if (pal_mutex_lock(m) != 0) {
         ST_RLX(&p->lock_failed, 1);
         return -1;
@@ -141,6 +148,11 @@ void p_unlock(prof *p, pal_mutex *m)
 {
     if (pal_mutex_unlock(m) != 0)
         ST_RLX(&p->lock_failed, 1);
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof_test_hooks.p_unlock_fail_at &&
+        ++ps3dk_prof_test_hooks.p_unlock_ops == ps3dk_prof_test_hooks.p_unlock_fail_at)
+        ST_RLX(&p->lock_failed, 1); /* the seam: really unlocked, then the error */
+#endif
 }
 
 static prof *ready(void) { return LD_ACQ(&g_gate) == G_READY ? g_prof : NULL; }
@@ -663,6 +675,26 @@ void ps3dk_prof_thread_end(void)
 
 /* ---- zones (5.1, 5.2, r2 3.2, E2, F1) ----------------------------------------------------------------------------- */
 
+#ifdef PS3DK_PROF_WITH_SPU
+/* P3.3 R2: a GPU zone's descriptor through the calling thread's own registration path (auto-register as zone_begin
+ * does); OK with the index and scope of a published descriptor; ETHREAD when the calling thread has no live
+ * incarnation and cannot register one; EINVAL when the descriptor is refused */
+int p_gpu_desc(prof *p, ps3dk_prof_desc *d, uint32_t *idx, uint32_t *scope)
+{
+    tls_state *t = &g_tls;
+    slot *s;
+    if (!d)
+        return PS3DK_PROF_EINVAL;
+    if (t->acked || t->retired || (!t->slot1 && auto_register(p) != 0))
+        return PS3DK_PROF_ETHREAD;
+    s = &p->slots[t->slot1 - 1];
+    if (!desc_index(p, s->cb, s->rg, d, idx))
+        return PS3DK_PROF_EINVAL;
+    *scope = p->descs[*idx].scope; /* published before d->state (the acquire in desc_index) */
+    return PS3DK_PROF_OK;
+}
+#endif
+
 ps3dk_prof_zone ps3dk_prof_zone_begin(ps3dk_prof_desc *desc, ps3dk_prof_token token)
 {
     ps3dk_prof_zone h;
@@ -971,30 +1003,47 @@ static int take(size_t *off, size_t count, size_t elem, size_t *at)
 #ifdef PS3DK_PROF_WITH_SPU
 /* The resolved extension configuration: enabled == 0 is the unchanged v1 path. */
 typedef struct ext_cfg {
-    int enabled;
+    int enabled;  /* either extension */
+    int spu;      /* SPU lanes */
     uint32_t lanes_max, ring_slots, image_bytes;
     uint64_t mem_max;
+    uint32_t gpu_max, gpu_slots; /* P3.3 R2: GPU domains (0 = off) */
 } ext_cfg;
 
-/* 0 valid (disabled or enabled), -1 EINVAL.  Disabled means size == 40 and every other field 0. */
+/* 0 valid (disabled or enabled), -1 EINVAL.  Each extension's fields must be 0 when it is off; spu_mem_max may be
+ * nonzero only when an extension is on; the reserved words must be 0. */
 static int ext_resolve(const ps3dk_prof_ext_config *e, ext_cfg *x)
 {
     memset(x, 0, sizeof *x);
     if (!e)
         return 0;
-    if (e->size != PS3DK_PROF_EXT_CONFIG_SIZE || e->reserved[0] || e->reserved[1] || e->reserved[2] ||
-        e->reserved[3])
+    if (e->size != PS3DK_PROF_EXT_CONFIG_SIZE || e->reserved[0] || e->reserved[1])
         return -1;
-    if (!e->spu_lanes_max)
-        return (e->spu_ring_slots || e->spu_image_bytes_max || e->spu_mem_max) ? -1 : 0;
+    if (!e->spu_lanes_max) {
+        if (e->spu_ring_slots || e->spu_image_bytes_max)
+            return -1;
+    } else {
+        x->spu = 1;
+        x->lanes_max = e->spu_lanes_max;
+        x->ring_slots = e->spu_ring_slots ? e->spu_ring_slots : 8192u;
+        x->image_bytes = e->spu_image_bytes_max ? e->spu_image_bytes_max : 65536u;
+        if (x->lanes_max > 64 || !is_pow2(x->ring_slots) || x->ring_slots < 64 || x->ring_slots > 1048576 ||
+            x->image_bytes < 4096 || x->image_bytes > 16777216)
+            return -1;
+    }
+    if (!e->gpu_domains_max) {
+        if (e->gpu_report_slots_max)
+            return -1;
+    } else {
+        x->gpu_max = e->gpu_domains_max;
+        x->gpu_slots = e->gpu_report_slots_max ? e->gpu_report_slots_max : 256u;
+        if (x->gpu_max > 4 || x->gpu_slots < 2 || x->gpu_slots > PRG_SLOTS_MAX)
+            return -1;
+    }
+    if (!x->spu && !x->gpu_max)
+        return e->spu_mem_max ? -1 : 0;
     x->enabled = 1;
-    x->lanes_max = e->spu_lanes_max;
-    x->ring_slots = e->spu_ring_slots ? e->spu_ring_slots : 8192u;
-    x->image_bytes = e->spu_image_bytes_max ? e->spu_image_bytes_max : 65536u;
     x->mem_max = e->spu_mem_max ? e->spu_mem_max : (uint64_t)16 * 1024 * 1024;
-    if (x->lanes_max > 64 || !is_pow2(x->ring_slots) || x->ring_slots < 64 || x->ring_slots > 1048576 ||
-        x->image_bytes < 4096 || x->image_bytes > 16777216)
-        return -1;
     return 0;
 }
 #endif
@@ -1015,6 +1064,7 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
 #ifdef PS3DK_PROF_WITH_SPU
     ext_cfg x;
     size_t o_spu = 0, o_scr = 0, o_copy = 0, o_arena = 0, o_lslots = 0, o_acc = 0, ext_start = 0;
+    size_t o_gslots = 0, o_gled = 0, o_gmeta = 0, o_gstage = 0, o_gscr = 0;
 #endif
 
     if (!cfg_in)
@@ -1077,10 +1127,16 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
      * Each take() is overflow-checked and 128-aligned; the subtotal includes that alignment. */
     if (x.enabled) {
         ext_start = off;
-        if (take(&off, 1, sizeof(psp_ppu), &o_spu) || take(&off, 1, PSP_SCRATCH_BYTES, &o_scr) ||
-            take(&off, x.ring_slots, PSP_SLOT, &o_copy) || take(&off, 1, x.image_bytes, &o_arena) ||
-            take(&off, x.lanes_max, (size_t)x.ring_slots * PSP_SLOT + PSP_CTL_BYTES, &o_lslots) ||
+        /* SPU regions, then decl_acc, then GPU regions: an SPU-only layout is byte-for-byte the I1/I2 one */
+        if ((x.spu && (take(&off, 1, sizeof(psp_ppu), &o_spu) || take(&off, 1, PSP_SCRATCH_BYTES, &o_scr) ||
+                       take(&off, x.ring_slots, PSP_SLOT, &o_copy) || take(&off, 1, x.image_bytes, &o_arena) ||
+                       take(&off, x.lanes_max, (size_t)x.ring_slots * PSP_SLOT + PSP_CTL_BYTES, &o_lslots))) ||
             take(&off, c.max_threads, sizeof(ext_acc), &o_acc) ||
+            (x.gpu_max && (take(&off, x.gpu_max, sizeof(gpu_slot), &o_gslots) ||
+                           take(&off, 1, sizeof(prg_ledger), &o_gled) ||
+                           take(&off, (size_t)x.gpu_max * x.gpu_slots, sizeof(prg_meta), &o_gmeta) ||
+                           take(&off, (size_t)x.gpu_max * x.gpu_slots, sizeof(prg_stage), &o_gstage) ||
+                           take(&off, x.gpu_max, PRG_SCRATCH_FOR(x.gpu_slots), &o_gscr))) ||
             off > P_TOTAL_MAX || (uint64_t)(off - ext_start) > x.mem_max)
             return PS3DK_PROF_EINVAL;
     }
@@ -1091,21 +1147,43 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
 #ifdef PS3DK_PROF_WITH_SPU
     p->block_bytes = off;
     if (x.enabled) {
+        p->spu_bytes = off - ext_start;
+        p->ext_flags = 1;
+        p->decl_acc = (ext_acc *)(void *)(p->block + o_acc);
+        memset(p->decl_acc, 0, sizeof(ext_acc) * c.max_threads);
+    }
+    if (x.spu) {
         psp_cfg pc = {x.ring_slots, x.lanes_max,
                       (uint64_t)x.lanes_max * ((uint64_t)x.ring_slots * PSP_SLOT + PSP_CTL_BYTES), 1024};
         psp_limits lim = psp_reader_limits();
         psp_storage st = {p->block + o_scr, PSP_SCRATCH_BYTES, p->block + o_copy, (size_t)x.ring_slots * PSP_SLOT,
                           p->block + o_arena, x.image_bytes};
+        if (x.gpu_max) { /* D1: the static partition of the reader's file-wide aggregates */
+            lim.loss_chunks = SPU_LOSS_CHUNKS_WITH_GPU;
+            lim.brackets_file = SPU_BRACKETS_FILE_WITH_GPU;
+            lim.epochs = SPU_EPOCHS_WITH_GPU;
+        }
         p->spu = (psp_ppu *)(void *)(p->block + o_spu);
         p->spu_slots = p->block + o_lslots;
-        p->spu_bytes = off - ext_start;
-        p->ext_flags = 1;
-        p->decl_acc = (ext_acc *)(void *)(p->block + o_acc);
-        memset(p->decl_acc, 0, sizeof(ext_acc) * c.max_threads);
         /* the memory and output adapters are installed by p_ext_init, once the mutexes exist */
         if (psp_ppu_init(p->spu, &pc, &lim, NULL, NULL, &st) != PSP_P_OK) {
             rc = PS3DK_PROF_EINVAL;
             goto fail_block;
+        }
+    }
+    if (x.gpu_max) {
+        p->gpu_max = x.gpu_max;
+        p->gpu_slots_max = x.gpu_slots;
+        p->gpu = (gpu_slot *)(void *)(p->block + o_gslots);
+        p->gpu_ledger = (prg_ledger *)(void *)(p->block + o_gled);
+        memset(p->gpu, 0, sizeof(gpu_slot) * x.gpu_max);
+        *p->gpu_ledger = (prg_ledger){GPU_LOSS_CHUNKS, 0, 0, PRG_BRACKETS_EPOCH_MAX, GPU_BRACKETS_FILE, 0};
+        for (i = 0; i < x.gpu_max; i++) {
+            gpu_slot *g = &p->gpu[i];
+            g->p = p;
+            g->meta = (prg_meta *)(void *)(p->block + o_gmeta) + (size_t)i * x.gpu_slots;
+            g->stage = (prg_stage *)(void *)(p->block + o_gstage) + (size_t)i * x.gpu_slots;
+            g->scratch = p->block + o_gscr + (size_t)i * PRG_SCRATCH_FOR(x.gpu_slots); /* take() rounds the region */
         }
     }
 #endif
@@ -1205,6 +1283,8 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
 
 fail_mutex2:
 #ifdef PS3DK_PROF_WITH_SPU
+    if (p->gpu_max)
+        p_gpu_destroy(p); /* after p_ext_init succeeded: the snap mutexes, in reverse, before the block is freed */
     if (p->spu_mutex_ok)
         (void)pal_mutex_destroy(&p->spu_mutex);
 #endif

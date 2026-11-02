@@ -39,6 +39,9 @@
 #define prg_seal ps3dk_prof__prg_seal
 #define prg_detach ps3dk_prof__prg_detach
 #define prg_release ps3dk_prof__prg_release
+#define prg_drain_held ps3dk_prof__prg_drain_held
+#define prg_seal_held ps3dk_prof__prg_seal_held
+#define prg_detach_wait ps3dk_prof__prg_detach_wait
 
 #define PRG_SLOTS_MAX 1024u
 #define PRG_INTERVALS 16u
@@ -62,6 +65,8 @@ enum { PRG_K_BEGIN = 1, PRG_K_END = 2, PRG_K_MARK = 3 };
  * the anomaly when the drainer reaches it */
 enum { PRG_CAL_IDLE = 0, PRG_CAL_ACTIVE, PRG_CAL_CONSUMED, PRG_CAL_CANCELLED, PRG_CAL_BAD };
 
+typedef struct prg_meta prg_meta;
+
 /* the GPU and memory port: reserve_pair is ALL-OR-NOTHING (0: both commands written; nonzero: nothing written) */
 typedef struct prg_port {
     void *ctx;
@@ -78,6 +83,10 @@ typedef struct prg_port {
     int (*snap_unlock)(void *ctx);
     int (*ext_lock)(void *ctx);             /* the extension mutex: drains and the one finalization are serialized */
     int (*ext_unlock)(void *ctx);
+    /* R2: may this staged event be committed now?  1 yes; 0 HOLD (the drained prefix stops at it, nothing of it or
+     * after it is committed this pass, its slot stays owned; at finalization it is pending).  NULL: always 1.
+     * Called by the drainer in the read phase only. */
+    int (*emittable)(void *ctx, const prg_meta *m);
 } prg_port;
 
 /* chunk output (the drainer's sink): 0 accepted, nonzero refused (a sink failure is terminal for output) */
@@ -94,11 +103,11 @@ typedef struct prg_ledger {
     uint32_t br_file_max, br_file_used;          /* brackets per file */
 } prg_ledger;
 
-typedef struct prg_meta { /* written before the ticket is published; immutable until the slot is drained */
+struct prg_meta { /* written before the ticket is published; immutable until the slot is drained */
     uint64_t seq, frame_id;
     uint32_t desc, frame_owner;
-    uint8_t kind, depth, is_cal, pad;
-} prg_meta;
+    uint8_t kind, depth, is_cal, owner_ref; /* owner_ref: the runtime's owner entry (0 none), for emittable */
+};
 
 typedef struct prg_stage { /* one tentatively read report, committed only after the second label read */
     uint64_t timer;
@@ -133,7 +142,7 @@ typedef struct prg_frame_ent {
 
 typedef struct prg_stats {
     uint64_t refused_api, refused_suppress_overflow, refused_mark_depth, lost_ring, lost_fifo, lost_records;
-    uint64_t brackets, brackets_dropped, cal_bad, loss_exhausted;
+    uint64_t brackets, brackets_dropped, cal_bad, loss_exhausted, held;
 } prg_stats;
 
 typedef struct prg_dom {
@@ -149,8 +158,9 @@ typedef struct prg_dom {
     uint32_t p_depth, p_suppressed, p_overflow;
     prg_frame_ent p_stack[PRG_DEPTH];
     uint32_t p_frame_owner;
-    uint64_t p_frame_id, p_last_tb1;
-    uint64_t p_sup_serial, p_sup_stack[PRG_SUPPRESS_MAX]; /* suppressed issuance serials (0 never issued) */ /* p_last_tb1: the last accepted bracket's end (brackets never overlap) */
+    uint64_t p_frame_id, p_last_tb1; /* p_last_tb1: the last accepted bracket's end (brackets never overlap) */
+    uint64_t p_sup_serial, p_sup_stack[PRG_SUPPRESS_MAX]; /* suppressed issuance serials (0 never issued) */
+    uint8_t p_owner_ref;
     /* published */
     prg_snap snap;
     prg_interval rec[PRG_INTERVALS];
@@ -166,13 +176,18 @@ typedef struct prg_dom {
     uint64_t completed, drained, next_emit, last_timer, br_epoch_used, br_seq;
     uint32_t declared, sink_failed, final_written, final_state, terminal_reserved, loss_exhausted;
     uint64_t events_accepted, lost_accepted;
-    uint8_t *scratch; /* one GPU_EVENTS chunk, caller storage: 20 + 28 * PRG_EVENTS_MAX bytes */
-    size_t ev_n;
+    uint32_t drainer_finalizes; /* R2: set by the runtime after attach: the drainer alone finalizes a detach */
+    uint32_t detach_turn;       /* R2, drainer-private: this drain turn finalized the detach (the runtime acks it) */
+    uint32_t detach_ack;        /* R2, atomic: 0 pending; 1 the finalizing turn completed, its closing extension
+                                 * unlock included; 2 that unlock failed.  Published by the runtime, never the core */
+    uint8_t *scratch; /* one GPU_EVENTS chunk, caller storage: PRG_SCRATCH_FOR(scratch_events) bytes */
+    size_t ev_n, scratch_events;
     uint64_t ev_first;
     prg_stats st;
 } prg_dom;
 
-#define PRG_SCRATCH_BYTES (20u + 28u * PRG_EVENTS_MAX)
+#define PRG_SCRATCH_FOR(n) (20u + 28u * (size_t)(n))
+#define PRG_SCRATCH_BYTES PRG_SCRATCH_FOR(PRG_EVENTS_MAX)
 
 /* Return codes.  attach: EINVAL for bad arguments, report_first + report_count past u32 (checked before any
  * arithmetic), a ledger maximum above the reader's ceiling
@@ -186,14 +201,26 @@ typedef struct prg_dom {
  * cancelled the cell first), EFAULT.  detach: ETIMEDOUT (stays DETACHING), ESTOPPED (the seal won), ECLOCK, EFAULT. */
 int prg_attach(prg_dom *d, uint32_t domain_id, uint32_t report_first, uint32_t report_count, uint32_t label,
                const prg_port *port, const prg_out *out, prg_ledger *ledger, prg_meta *meta, prg_stage *stage,
-               uint8_t *scratch);
+               uint8_t *scratch, uint32_t scratch_events);
 int prg_begin(prg_dom *d, uint32_t desc, prg_token *tok);
 int prg_end(prg_dom *d, const prg_token *tok, uint32_t desc);
 int prg_mark(prg_dom *d, uint32_t desc);
-int prg_frame(prg_dom *d, uint32_t owner, uint64_t frame_id);
+int prg_frame(prg_dom *d, uint32_t owner, uint64_t frame_id, uint8_t owner_ref);
 int prg_calibrate(prg_dom *d, uint64_t timeout_us);
 void prg_drain(prg_dom *d);
 void prg_seal(prg_dom *d);
+/* R2: the same, for a caller that already HOLDS the extension mutex (the runtime's drainer); no port lock calls */
+void prg_drain_held(prg_dom *d);
+void prg_seal_held(prg_dom *d);
+/* R2 (drainer_finalizes): ATTACHED -> DETACHING, then wait until the DRAINER (prg_drain_held) has finalized it
+ * and the runtime has ACKNOWLEDGED that finalizing turn (detach_ack): the caller never encodes.  Three separate
+ * facts: `retired` (the frozen terminal decision, set inside the finalization before FINAL is offered), final_written
+ * (the sink accepted FINAL) and the acknowledgement (the whole terminal turn completed, its closing extension unlock
+ * included).  OK only on the acknowledgement 1 (also when FINAL was refused: an output-free retirement); EFAULT on 2
+ * or a domain fault; ETIMEDOUT while pending (stays DETACHING / DETACH_FINAL; call again; a repeated wait after OK is
+ * OK again); ESTOPPED (the seal won); ECLOCK.  The core's own prg_detach (finalizing on the caller) stays for the
+ * standalone host model. */
+int prg_detach_wait(prg_dom *d, uint64_t timeout_us, void (*poll_hook)(void *), void *poll_ctx);
 int prg_detach(prg_dom *d, uint64_t timeout_us, void (*poll_hook)(void *), void *poll_ctx);
 int prg_release(prg_dom *d);
 

@@ -39,7 +39,7 @@ def tree(r):
     inc = out / f'inc-{abs(hash(str(r)))}'
     (inc / 'ps3dk').mkdir(parents=True, exist_ok=True)
     shutil.copy(r / 'sdk/include/ps3dk/prof.h', inc / 'ps3dk/prof.h')
-    return lib, [f'-I{inc}', f'-I{lib}/core', f'-I{lib}/pal', f'-I{lib}/spu']
+    return lib, [f'-I{inc}', f'-I{lib}/core', f'-I{lib}/pal', f'-I{lib}/spu', f'-I{lib}/rsx']
 
 
 def build(label, r, extra, spu, test_src, links):
@@ -53,6 +53,8 @@ def build(label, r, extra, spu, test_src, links):
         srcs.append(lib / 'hooks/arcs.c')
     if spu:
         srcs += [lib / 'spu/psp_ppu.c', lib / 'spu/ext_runtime.c', lib / 'spu/psp_elf.c', lib / 'spu/psp_host_emul.c']
+        if (lib / 'rsx/gpu_runtime.c').exists():  # P3.3 R2: the GPU domains share the extension runtime
+            srcs += [lib / 'rsx/gpu_runtime.c', lib / 'rsx/prg.c']
     exe = d / 'exe'
     r_ = subprocess.run([cc, *flags, *map(str, srcs), '-o', str(exe), *links], capture_output=True, text=True)
     (d / 'build.log').write_text(r_.stdout + r_.stderr)
@@ -73,7 +75,7 @@ def run(exe, args, label):
 # ---- I1 cases ----
 wrap = '-Wl,' + ','.join(f'--wrap={f}' for f in ['malloc', 'calloc', 'realloc', 'free', 'posix_memalign',
                                                  'aligned_alloc'])
-cases = ['size-39', 'size-41', 'size-0', 'reserved-0', 'reserved-1', 'reserved-2', 'reserved-3', 'disabled-ring',
+cases = ['size-39', 'size-41', 'size-0', 'reserved-0', 'reserved-1', 'disabled-ring',
          'disabled-image', 'disabled-mem', 'lanes-65', 'ring-32', 'ring-not-pow2', 'ring-2m', 'image-4095',
          'image-too-big', 'cap-ext-small', 'cap-total', 'cap-ext-minus-1', 'cap-ext-exact', 'defaults',
          'disabled-layout', 'null-layout', 'enabled-capture', 'disabled-capture', 'unwind-alloc', 'unwind-clock',

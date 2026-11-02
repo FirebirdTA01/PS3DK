@@ -231,6 +231,11 @@ typedef struct prof {
     struct ext_acc *decl_acc;   /* per slot: the accepted THREADS identity (drainer-private) */
     uint8_t ext_slot_used[64];  /* the lane-memory slot allocator, under spu_mutex */
     uint32_t ext_pending_slot;
+    /* P3.3 R2: GPU domains (host only).  spu_mutex is the EXTENSION mutex for both. */
+    uint32_t gpu_max, gpu_slots_max; /* 0 = GPU domains disabled */
+    uint32_t gpu_lifetime;           /* attaches so far (ids 1026 + n, never reused), under spu_mutex */
+    struct gpu_slot *gpu;            /* gpu_max table slots, in the block */
+    struct prg_ledger *gpu_ledger;   /* the GPU share of the file-wide aggregates, under spu_mutex */
 #endif
     /* HEADER strings, copied at init (the caller's config strings need not outlive init). */
     char app[33];
@@ -245,7 +250,7 @@ typedef struct prof {
 typedef struct tls_state {
     uint32_t slot1;             /* slot index + 1; 0 = no incarnation */
     uint32_t generation, incarnation;
-    uint8_t acked, retired, in_drain, pad;
+    uint8_t acked, retired, in_drain, in_gpu; /* in_gpu: inside a GPU domain API call (reentry is EBUSY) */
     uint32_t depth;
     uint64_t refused_top;
     struct {
@@ -310,6 +315,33 @@ void p_ext_slot_freed(prof *p, uint32_t slot);
 void p_ext_step3b(prof *p);
 void p_ext_seal(prof *p);
 int p_ext_init(prof *p); /* the mutex and the adapters, after the block exists; 0 on success */
+/* P3.3 R2 (src/rsx/gpu_runtime.c and the shared pieces of ext_runtime.c) */
+#define p_ext_lock_at ps3dk_prof__ext_lock_at
+#define p_ext_unlock_site ps3dk_prof__ext_unlock_site
+#define p_ext_inline_drain ps3dk_prof__ext_inline_drain
+#define p_gpu_init ps3dk_prof__gpu_init
+#define p_gpu_step ps3dk_prof__gpu_step
+#define p_gpu_seal ps3dk_prof__gpu_seal
+#define p_gpu_slot_freed ps3dk_prof__gpu_slot_freed
+#define p_gpu_desc ps3dk_prof__gpu_desc
+int p_ext_lock_at(prof *p);                  /* 0, or -1 (nothing held; the caller latches the fault) */
+int p_ext_unlock_site(prof *p, uint32_t site); /* 0, or -1 after setting ext_fault + lock_failed */
+void p_ext_inline_drain(prof *p);            /* the SPU lane_end inline drain (MODE_APP, the designated thread) */
+int p_gpu_init(prof *p);                     /* the GPU slots' process-lifetime words and snap mutexes */
+#define p_gpu_destroy ps3dk_prof__gpu_destroy
+void p_gpu_destroy(prof *p);                 /* a later failed init: every initialized snap mutex, once */
+void p_gpu_step(prof *p);                    /* the drainer, holding spu_mutex */
+void p_gpu_seal(prof *p);                    /* the drainer, holding spu_mutex */
+#define p_gpu_ack_collect ps3dk_prof__gpu_ack_collect
+#define p_gpu_ack_publish ps3dk_prof__gpu_ack_publish
+uint32_t p_gpu_ack_collect(prof *p, uint32_t *idx); /* HOLDING the extension mutex: the detaches this turn finalized,
+                                                     * markers cleared, slots pinned (at most gpu_max entries) */
+void p_gpu_ack_publish(prof *p, const uint32_t *idx, uint32_t n, int ok); /* AFTER the unlock: those slots only */
+void p_gpu_slot_freed(prof *p, uint32_t slot); /* the drainer, under thread_mutex, before decl_acc is cleared */
+int p_gpu_desc(prof *p, ps3dk_prof_desc *d, uint32_t *idx, uint32_t *scope); /* the calling thread's descriptor path */
+/* unlock sites for the site-targeted fault hook */
+enum { U_ANY = 0, U_STEP3B = 1, U_SEAL = 2, U_END_FINAL = 3, U_GPU_ATTACH = 4, U_GPU_DETACH = 5, U_GPU_RELEASE = 6,
+       U_GPU_STATS = 7 };
 #endif
 int p_lock(prof *p, pal_mutex *m);
 void p_unlock(prof *p, pal_mutex *m);
