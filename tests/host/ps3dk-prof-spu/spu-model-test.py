@@ -108,6 +108,10 @@ controls = {
     'truth-truncated': lambda t: t.write_text('\n'.join(t.read_text().splitlines()[:-1]) + '\n'),
     'identity-changed': lambda t: t.write_text(t.read_text().replace('\n1 0 ', '\n1 0 9', 1)),
     'unknown-directive': None,
+    # a truth row whose kind does not fit a u8: a checked conversion rejects it instead of wrapping (300 -> 44)
+    'kind-out-of-range': lambda t: t.write_text('\n'.join(
+        ' '.join(f[:4] + ['300'] + f[5:]) if (f := l.split()) and l[0] != '#' and f[1] == '0' else l
+        for l in t.read_text().splitlines()) + '\n'),
 }
 for name, damage in controls.items():
     d = out / f'control-{name}'

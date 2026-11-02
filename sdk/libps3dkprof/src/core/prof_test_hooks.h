@@ -64,6 +64,14 @@ typedef struct ps3dk_prof_test_hooks_t {
     int id_fail;                       /* the APP owner identity read fails (pal_owner_get / pal_owner_is_self) */
     int os_id_fail;                    /* the OS thread id read fails (pal_os_thread_id): registration refused */
     int alloc_fail;
+    /* SPU lane extension (slice I2) */
+    int slot_generation_seed_set;      /* the next registration into slot_generation_seed_slot starts from it */
+    uint32_t slot_generation_seed, slot_generation_seed_slot;
+    uint32_t spu_lock_fail_at, spu_unlock_fail_at, spu_ops; /* nth spu_mutex lock / unlock fails (1-based) */
+    uint32_t spu_unlock_fail_site; /* the first unlock at this site fails: 1 step 3b, 2 the seal, 3 lane_end's final */
+    void (*spu_admission_pause)(void);  /* after the admission check, before the mutation (race tests) */
+    void (*spu_before_seal)(void);      /* holding spu_mutex, right before psp_seal (seal-time corruption tests) */
+    uint64_t chunk_seq_seed;           /* nonzero: the drainer's chunk_seq starts there (ceiling tests) */
     int thread_create_fail;
     int join_fail;
     int freq_zero;

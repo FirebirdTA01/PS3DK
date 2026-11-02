@@ -46,10 +46,9 @@ typedef struct psp_out {
     int (*chunk)(void *ctx, uint32_t type, const uint8_t *payload, size_t len); /* nonzero: the sink failed */
 } psp_out;
 
-typedef struct psp_desc {
-    uint32_t ls_addr, line;
-    const char *name, *file;
-} psp_desc;
+/* the descriptor type is shared with the API (prof_spu.h): one struct type, so no access through a different type */
+#include "psp_desc.h"
+typedef struct ps3dk_prof_spu_desc psp_desc;
 
 /* the reader's per-file aggregates (spec 1); tests may lower them only through psp_limits, and every lowered value
  * is a MODEL limit, never the reader's */
@@ -82,6 +81,8 @@ typedef struct psp_lane {
     int state;              /* PSP_L_* */
     int end_req, released, sealed_unfreed, file_final_by_seal;
     uint32_t lane_id, domain_id, image, owner;
+    uint32_t owner_slot, owner_gen; /* the owner's exact identity (owner = its incarnation; 0 = NONE) */
+    int bound;                      /* the SPU_LANES entry was accepted: never depends on the owner slot again */
     char name[32];
     uint64_t ea_ring, ea_ctl;
     size_t bytes;
@@ -116,7 +117,8 @@ typedef struct psp_lane {
     uint32_t tries;         /* inconsistent snapshots in this cycle */
 } psp_lane;
 
-/* an image is registered all-or-nothing and COPIED into the image arena: descriptor structs and their name/file
+/* an image is registered all-or-nothing and COPIED into the image arena (whose base must be 8-aligned; the runtime's
+ * 128-aligned region satisfies it): descriptor structs and their name/file
  * strings are owned here after psp_image_add returns; the caller may change or free its own copies at once.
  * "emitted" is drainer bookkeeping (the SPU_IMAGES entry was handed to the sink), not proof of acceptance. */
 typedef struct psp_image {
@@ -154,6 +156,10 @@ typedef struct psp_ppu {
      * real mutex/atomics are deferred; this host model is single-threaded, so the boundary is the API call. */
     int cs;
     int test_no_terminal;   /* TEST ONLY: the no-reservation control of trace C2 (never set by a library caller) */
+    /* owner coverage: a lane with an owner is declared only once covered() says the owner's THREADS identity was
+     * accepted; NULL = always covered (the host model) */
+    int (*covered)(void *ctx, uint32_t incarnation, uint32_t slot, uint32_t generation);
+    void *covered_ctx;
     uint8_t *scratch;       /* one chunk payload */
     size_t spos;
     uint8_t *copy;
@@ -168,9 +174,11 @@ int psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const ps
 void psp_ppu_fini(psp_ppu *p);
 int psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const psp_desc *d, uint32_t n,
                   uint32_t *index);
-int psp_lane_create(psp_ppu *p, const char *name, uint32_t image, uint32_t owner, uint32_t *lane);
+int psp_lane_create(psp_ppu *p, const char *name, uint32_t image, uint32_t owner, uint32_t owner_slot,
+                    uint32_t owner_gen, uint32_t *lane);
 /* the drain: declarations, then each lane's coroutine (one phase per step), then end requests.  Counts and ledger
- * entries advance only for chunks the sink ACCEPTED; after a sink failure nothing more is encoded, while lifetime
+ * entries advance only for chunks the sink ACCEPTED; after a sink failure there are no further sink callbacks or output,
+ * while lifetime
  * (FINAL bookkeeping, release, free) still progresses. */
 void psp_drain_declare(psp_ppu *p);
 int psp_lane_step(psp_ppu *p, uint32_t lane); /* returns 1 when the lane's drain cycle completed */

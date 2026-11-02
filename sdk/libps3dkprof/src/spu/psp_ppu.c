@@ -1,7 +1,8 @@
 /* PPU side of the SPU lane transport (design p3.2 r3, slice 1 r2).
  *  - Counts, the replay and every ledger entry advance only for a chunk the sink ACCEPTED (emit() returned 1); a
  *    FINAL is "written" only when accepted, while retirement from encoding (PSP_L_FINAL) and release are separate.
- *  - After a sink failure nothing more is encoded; lifetime still progresses.
+ *  - After a sink failure there are no further sink callbacks or output (some payloads may still be built in
+ *    scratch and dropped); lifetime still progresses.  im->emitted is bookkeeping, never delivered metadata.
  *  - Every aggregate is charged to the ledger (emitted + reserved) before the work that needs it.
  *  - Published corruption fails the sink (v1 rule, code -2).
  *  - All drainer work on a lane happens inside the abstract lane-table lock (p->cs); a lane is freed only outside
@@ -170,7 +171,8 @@ int psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const
     return PSP_P_OK;
 }
 
-int psp_lane_create(psp_ppu *p, const char *name, uint32_t image, uint32_t owner, uint32_t *lane)
+int psp_lane_create(psp_ppu *p, const char *name, uint32_t image, uint32_t owner, uint32_t owner_slot,
+                    uint32_t owner_gen, uint32_t *lane)
 {
     uint32_t i;
     psp_lane *l;
@@ -205,6 +207,8 @@ int psp_lane_create(psp_ppu *p, const char *name, uint32_t image, uint32_t owner
     p->lanes_live++;
     l->image = image;
     l->owner = owner;
+    l->owner_slot = owner_slot;
+    l->owner_gen = owner_gen;
     strcpy(l->name, name);
     l->res_epoch1 = 1;
     p->epochs_reserved++;
@@ -263,8 +267,9 @@ static void declare(psp_ppu *p)
         for (i = 0; i < p->cfg.lanes_max; i++) {
             psp_lane *l = &p->lanes[i];
             char dn[24];
-            if (l->state != PSP_L_CREATED)
-                continue;
+            if (l->state != PSP_L_CREATED || (l->owner && p->covered &&
+                                                !p->covered(p->covered_ctx, l->owner, l->owner_slot, l->owner_gen)))
+                continue; /* not created, or its owner's THREADS identity is not accepted yet: stays pending */
             if (cnt == 64) {
                 poke32(p, 0, cnt);
                 emit(p, pass ? C_SPU_LANES : C_DOMAIN);
@@ -301,9 +306,15 @@ static void declare(psp_ppu *p)
             emit(p, pass ? C_SPU_LANES : C_DOMAIN);
         }
     }
-    for (i = 0; i < p->cfg.lanes_max; i++)
-        if (p->lanes[i].state == PSP_L_CREATED)
-            p->lanes[i].state = PSP_L_DECLARED;
+    /* the same predicate as both passes: exactly the lanes whose DOMAIN and SPU_LANES entries were just written */
+    for (i = 0; i < p->cfg.lanes_max; i++) {
+        psp_lane *l = &p->lanes[i];
+        if (l->state == PSP_L_CREATED &&
+            !(l->owner && p->covered && !p->covered(p->covered_ctx, l->owner, l->owner_slot, l->owner_gen))) {
+            l->state = PSP_L_DECLARED;
+            l->bound = !p->sink_failed;
+        }
+    }
 }
 
 void psp_drain_declare(psp_ppu *p)
@@ -642,7 +653,7 @@ static int step(psp_ppu *p, uint32_t i)
         return 1; /* not declared yet, or no longer the drainer's to touch */
     if (p->sink_failed) {
         l->dphase = 0;
-        return 1; /* output stopped: nothing more is encoded and no lane memory is read */
+        return 1; /* output stopped: no further sink callbacks, and no lane memory is read */
     }
     switch (l->dphase) {
     case 0:
@@ -783,6 +794,23 @@ static void finish_lane(psp_ppu *p, uint32_t i)
     psp_lane *l = &p->lanes[i];
     if (l->state == PSP_L_FINAL || l->released)
         goto release;
+    if (l->state == PSP_L_CREATED) {
+        /* never declared (its owner was never covered, or the sink failed first): nothing about it is in the file,
+         * so no FINAL may name it.  Retire it from encoding with its reservations refunded. */
+        if (l->res_epoch1) {
+            l->res_epoch1 = 0;
+            p->epochs_reserved--;
+        }
+        if (l->res_terminal) {
+            l->res_terminal = 0;
+            p->loss_reserved--;
+        }
+        p->lanes_live--;
+        l->fin_state = PSP_FIN_ABANDONED;
+        l->final_written = 0;
+        l->state = PSP_L_FINAL;
+        goto release;
+    }
     if (l->state >= PSP_L_DECLARED && !p->sink_failed)
         cycle(p, i);
     if (l->state == PSP_L_FINAL)

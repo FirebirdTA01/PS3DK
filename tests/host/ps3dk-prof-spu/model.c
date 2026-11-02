@@ -368,7 +368,7 @@ lane_h *lane_new(run *r, uint32_t ls_cap, int own_dec, int start)
     lane_h *h = calloc(1, sizeof *h);
     psp_lane *pl;
     int rc;
-    if (psp_lane_create(&r->p, "worker", r->image, 0, &h->idx) != 0) {
+    if (psp_lane_create(&r->p, "worker", r->image, 0, 0, 0, &h->idx) != 0) {
         free(h);
         return NULL;
     }

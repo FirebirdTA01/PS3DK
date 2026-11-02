@@ -223,6 +223,14 @@ typedef struct prof {
     uint8_t *spu_slots;         /* lanes_max x (ring_slots x 8 + 256) */
     size_t spu_bytes;           /* the extension subtotal of the block, alignment included */
     size_t block_bytes;         /* the whole block (measured by the I1 layout tests) */
+    /* slice I2 */
+    pal_mutex spu_mutex;        /* every psp call; never held with thread_mutex */
+    int spu_mutex_ok;
+    uint32_t ext_fault;         /* atomic (LD_ACQ / ST_REL): a terminal extension mutex failure */
+    uint32_t ext_sealed;        /* under spu_mutex */
+    struct ext_acc *decl_acc;   /* per slot: the accepted THREADS identity (drainer-private) */
+    uint8_t ext_slot_used[64];  /* the lane-memory slot allocator, under spu_mutex */
+    uint32_t ext_pending_slot;
 #endif
     /* HEADER strings, copied at init (the caller's config strings need not outlive init). */
     char app[33];
@@ -283,6 +291,25 @@ void p_crc32_init(void);
 uint32_t p_crc32(const void *data, size_t n);
 #ifdef PS3DK_PROF_WITH_ARCS
 uint32_t ps3dk_prof__crc32_extend(uint32_t crc, const void *data, size_t n);
+#endif
+#ifdef PS3DK_PROF_WITH_SPU
+typedef struct ext_acc {
+    uint32_t valid, incarnation, generation, pad;
+} ext_acc;
+#define p_ext_emit ps3dk_prof__ext_emit
+#define p_ext_sink_fail ps3dk_prof__ext_sink_fail
+#define p_ext_threads_accepted ps3dk_prof__ext_threads_accepted
+#define p_ext_slot_freed ps3dk_prof__ext_slot_freed
+#define p_ext_step3b ps3dk_prof__ext_step3b
+#define p_ext_seal ps3dk_prof__ext_seal
+#define p_ext_init ps3dk_prof__ext_init
+int p_ext_emit(prof *p, uint32_t type, const uint8_t *payload, size_t len);
+void p_ext_sink_fail(prof *p, int code);
+void p_ext_threads_accepted(prof *p, const tdecl *t, uint32_t n);
+void p_ext_slot_freed(prof *p, uint32_t slot);
+void p_ext_step3b(prof *p);
+void p_ext_seal(prof *p);
+int p_ext_init(prof *p); /* the mutex and the adapters, after the block exists; 0 on success */
 #endif
 int p_lock(prof *p, pal_mutex *m);
 void p_unlock(prof *p, pal_mutex *m);

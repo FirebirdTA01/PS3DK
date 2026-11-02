@@ -73,11 +73,12 @@ static ps3dk_prof_ext_config ext_on(uint32_t lanes)
 
 static size_t a128(size_t n) { return (n + 127) & ~(size_t)127; }
 
-/* the documented extension subtotal for (lanes, ring, image) */
+/* the documented extension subtotal for (lanes, ring, image), with the default max_threads (64): the I2 owner
+ * record (16 bytes per v1 slot) is part of it */
 static size_t expected_ext(uint32_t lanes, uint32_t ring, uint32_t image)
 {
     return a128(sizeof(psp_ppu)) + a128(PSP_SCRATCH_BYTES) + a128((size_t)ring * 8) + a128(image) +
-           a128((size_t)lanes * ((size_t)ring * 8 + 256));
+           a128((size_t)lanes * ((size_t)ring * 8 + 256)) + a128((size_t)64 * 16);
 }
 
 static int sink_dir(void) { return ps3dk_prof_set_sink_path(g_out); }

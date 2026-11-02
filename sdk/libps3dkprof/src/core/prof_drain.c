@@ -131,8 +131,15 @@ static void enc_end(prof *p)
 {
     drainer *d = &p->dr;
     uint8_t *b = d->buf;
-#ifdef PS3DK_PROF_WITH_ARCS
+#if defined(PS3DK_PROF_WITH_ARCS)
     if (d->chunk_seq == UINT64_MAX) {
+        sink_fail(&p->snk, -6);
+        return;
+    }
+#elif defined(PS3DK_PROF_WITH_SPU)
+    /* Extension mode: the ceiling guards EVERY chunk (v1, extension and the TRAILER), before any sink call.
+     * flags = 0 keeps the base behaviour. */
+    if (p->ext_flags && d->chunk_seq == UINT64_MAX) {
         sink_fail(&p->snk, -6);
         return;
     }
@@ -144,6 +151,23 @@ static void enc_end(prof *p)
     if (sink_write(p, b, 16 + d->pos + 4) == 0)
         d->chunk_seq++;
 }
+
+#ifdef PS3DK_PROF_WITH_SPU
+/* One extension chunk through the common framing; 0 only when the sink ACCEPTED the whole chunk. */
+int p_ext_emit(prof *p, uint32_t type, const uint8_t *payload, size_t len)
+{
+    uint64_t seq = p->dr.chunk_seq;
+    if (p->snk.failed || len > P_CHUNK_CAP)
+        return -1;
+    enc_begin(p, type);
+    memcpy(pl(p), payload, len);
+    p->dr.pos = len;
+    enc_end(p);
+    return (!p->snk.failed && p->dr.chunk_seq == seq + 1) ? 0 : -1;
+}
+
+void p_ext_sink_fail(prof *p, int code) { sink_fail(&p->snk, code); }
+#endif
 
 /* Counted lists (DESCRIPTORS, THREADS, RETIRED): split into further chunks when an entry would pass 1 MiB. */
 static void list_open(prof *p, uint32_t type, uint32_t *cnt)
@@ -214,6 +238,10 @@ static void dr_start(prof *p)
     if (p->dr.started)
         return;
     p->dr.started = 1;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof_test_hooks.chunk_seq_seed)
+        p->dr.chunk_seq = ps3dk_prof_test_hooks.chunk_seq_seed; /* the chunk-sequence ceiling tests */
+#endif
     memcpy(head, magic, sizeof head);
 #ifdef PS3DK_PROF_WITH_SPU
     head[12] = p->ext_flags; /* file_flags bit 0 (DOMAIN_EXTENSIONS); 0 when the extension is off or disabled */
@@ -263,6 +291,10 @@ static void enc_threads(prof *p, const tdecl *t, uint32_t n)
         p->dr.written[t[i].slot] = 0;
     }
     list_close(p, &cnt);
+#ifdef PS3DK_PROF_WITH_SPU
+    if (p->ext_flags && !p->snk.failed)
+        p_ext_threads_accepted(p, t, n); /* exact identities, only once their THREADS chunks were accepted */
+#endif
 }
 
 /* Step 2a: every non-FREE slot whose generation is not declared yet, copied under the mutex, encoded after it. */
@@ -407,8 +439,14 @@ int p_drain_once(prof *p)
         STAT_ADD(PS3DK_PROF_TEST_STAT_ORDINARY_DRAINS_AFTER_FRONTIER, 1);
         return -1;
     }
-    if (p->snk.failed)
+    if (p->snk.failed) {
+#ifdef PS3DK_PROF_WITH_SPU
+        /* no output, but lane lifetime still progresses: end requests are retired and released */
+        if (p->ext_flags)
+            p_ext_step3b(p);
+#endif
         return -1;
+    }
     dr_start(p);
 
     /* 1. Snapshot the table under the mutex, then (outside it) each ack word BEFORE its write index, so a RETIRED
@@ -451,6 +489,11 @@ int p_drain_once(prof *p)
     /* 3. Records up to the snapshot. */
     for (i = 0; i < n; i++)
         drain_ring(p, d->snaps[i].slot, d->snaps[i].incarnation, d->snaps[i].widx);
+#ifdef PS3DK_PROF_WITH_SPU
+    /* 3b. The SPU lane extension: after the v1 records, before retirement frees any owner slot. */
+    if (p->ext_flags)
+        p_ext_step3b(p);
+#endif
 
     /* 4. Retirement: the RETIRED entry, then (and only then) the slot is free. */
     if (nret) {
@@ -498,6 +541,10 @@ int p_drain_once(prof *p)
                 STAT_ADD(PS3DK_PROF_TEST_STAT_POST_FRONTIER_TRANSITIONS, 1);   /* never: frozen drains return above */
             p->slots[d->snaps[i].slot].state = SLOT_FREE;
             d->decl_gen[d->snaps[i].slot] = 0;
+#ifdef PS3DK_PROF_WITH_SPU
+            if (p->ext_flags)
+                p_ext_slot_freed(p, d->snaps[i].slot);
+#endif
         }
         p_unlock(p, &p->thread_mutex);
     }
@@ -653,6 +700,11 @@ int p_quiesce_freeze_seal(prof *p)
             }
         }
 #endif
+#ifdef PS3DK_PROF_WITH_SPU
+        /* The extension seal: after the frontier's THREADS and RETIRED, before the TRAILER. */
+        if (p->ext_flags)
+            p_ext_seal(p);
+#endif
         /* The TRAILER: ACKED and NOT_QUIESCED entries (6). */
         anylim = d->any_retired_limit;
         for (i = 0; i < d->nfront; i++) {
@@ -693,6 +745,11 @@ int p_quiesce_freeze_seal(prof *p)
     }
 #ifdef PS3DK_PROF_WITH_ARCS
 close_capture:
+#endif
+#ifdef PS3DK_PROF_WITH_SPU
+    /* a failed sink skipped the seal above: retire and release every lane anyway (psp_seal is idempotent) */
+    if (p->ext_flags)
+        p_ext_seal(p);
 #endif
     sink_close(p);
 

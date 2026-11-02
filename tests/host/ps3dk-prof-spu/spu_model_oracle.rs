@@ -66,12 +66,19 @@ fn read_truth(stem: &std::path::Path) -> Result<(Truth, HashMap<u32, Meta>), Str
         if x.len() != 6 {
             return Err(format!("truth line {}: {} fields", n + 1, x.len()));
         }
-        let id = x[0] as u32;
+        // checked conversions: a malformed truth row is an error, never a silently wrapped value
+        let conv = |v: u64, what: &str| -> Result<u32, String> {
+            u32::try_from(v).map_err(|_| format!("truth line {}: {what} {v} out of range", n + 1))
+        };
+        let id = conv(x[0], "lane")?;
+        let desc = conv(x[3], "descriptor")?;
+        let kind = u8::try_from(x[4]).map_err(|_| format!("truth line {}: kind {} out of range", n + 1, x[4]))?;
+        let depth = u8::try_from(x[5]).map_err(|_| format!("truth line {}: depth {} out of range", n + 1, x[5]))?;
         let m = meta.get(&id).ok_or(format!("truth line {}: lane {id} has no header", n + 1))?;
         if x[1] < m.base || x[1] - m.base >= m.export {
             return Err(format!("truth line {}: seq {} outside the exported range", n + 1, x[1]));
         }
-        if truth.insert((id, x[1]), (x[2], x[3] as u32, x[4] as u8, x[5] as u8)).is_some() {
+        if truth.insert((id, x[1]), (x[2], desc, kind, depth)).is_some() {
             return Err(format!("truth line {}: duplicate seq {} for lane {id}", n + 1, x[1]));
         }
     }

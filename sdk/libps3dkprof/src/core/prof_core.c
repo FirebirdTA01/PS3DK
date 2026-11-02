@@ -499,6 +499,12 @@ static int thread_begin_impl(prof *p, const char *name)
     }
     inc = p->next_incarnation;
     p->next_incarnation = (inc == UINT32_MAX) ? 0 : inc + 1;   /* 0: ids exhausted, later registrations refused */
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof_test_hooks.slot_generation_seed_set && i == ps3dk_prof_test_hooks.slot_generation_seed_slot) {
+        s->generation = ps3dk_prof_test_hooks.slot_generation_seed; /* the near-wrap tests: the ++ below follows */
+        ps3dk_prof_test_hooks.slot_generation_seed_set = 0;
+    }
+#endif
     s->generation++;
     s->incarnation = inc;
     s->os_id = os_id;
@@ -1008,7 +1014,7 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
 #endif
 #ifdef PS3DK_PROF_WITH_SPU
     ext_cfg x;
-    size_t o_spu = 0, o_scr = 0, o_copy = 0, o_arena = 0, o_lslots = 0, ext_start = 0;
+    size_t o_spu = 0, o_scr = 0, o_copy = 0, o_arena = 0, o_lslots = 0, o_acc = 0, ext_start = 0;
 #endif
 
     if (!cfg_in)
@@ -1074,6 +1080,7 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
         if (take(&off, 1, sizeof(psp_ppu), &o_spu) || take(&off, 1, PSP_SCRATCH_BYTES, &o_scr) ||
             take(&off, x.ring_slots, PSP_SLOT, &o_copy) || take(&off, 1, x.image_bytes, &o_arena) ||
             take(&off, x.lanes_max, (size_t)x.ring_slots * PSP_SLOT + PSP_CTL_BYTES, &o_lslots) ||
+            take(&off, c.max_threads, sizeof(ext_acc), &o_acc) ||
             off > P_TOTAL_MAX || (uint64_t)(off - ext_start) > x.mem_max)
             return PS3DK_PROF_EINVAL;
     }
@@ -1093,7 +1100,9 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
         p->spu_slots = p->block + o_lslots;
         p->spu_bytes = off - ext_start;
         p->ext_flags = 1;
-        /* no output or memory adapters yet: slice I1 has no lane API and never drains the extension */
+        p->decl_acc = (ext_acc *)(void *)(p->block + o_acc);
+        memset(p->decl_acc, 0, sizeof(ext_acc) * c.max_threads);
+        /* the memory and output adapters are installed by p_ext_init, once the mutexes exist */
         if (psp_ppu_init(p->spu, &pc, &lim, NULL, NULL, &st) != PSP_P_OK) {
             rc = PS3DK_PROF_EINVAL;
             goto fail_block;
@@ -1139,6 +1148,12 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
         rc = PS3DK_PROF_ENOMEM;
         goto fail_mutex1;
     }
+#ifdef PS3DK_PROF_WITH_SPU
+    if (p->ext_flags && p_ext_init(p) != 0) {
+        rc = PS3DK_PROF_ENOMEM; /* spu_mutex init failed: unwind like the other mutexes */
+        goto fail_mutex2;
+    }
+#endif
     p_crc32_init();
     p->fnv_build = p_fnv(p_fnv(P_FNV_BASIS, p->build_id, p->build_id_len), "", 1);
 
@@ -1189,6 +1204,10 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
     return PS3DK_PROF_OK;
 
 fail_mutex2:
+#ifdef PS3DK_PROF_WITH_SPU
+    if (p->spu_mutex_ok)
+        (void)pal_mutex_destroy(&p->spu_mutex);
+#endif
     (void)pal_mutex_destroy(&p->desc_mutex);
 fail_mutex1:
     (void)pal_mutex_destroy(&p->thread_mutex);
@@ -1265,6 +1284,11 @@ int ps3dk_prof_init_ex(const ps3dk_prof_config *cfg, const ps3dk_prof_ext_config
 size_t ps3dk_prof__test_spu_bytes(void) { return g_storage.spu_bytes; }
 size_t ps3dk_prof__test_block_bytes(void) { return g_storage.block_bytes; }
 unsigned ps3dk_prof__test_ext_flags(void) { return g_storage.ext_flags; }
+/* I2: the owner record of a slot (valid flag), for the accepted-only assertion */
+unsigned ps3dk_prof__test_decl_acc_valid(unsigned slot)
+{
+    return g_storage.decl_acc && slot < g_storage.nslots ? g_storage.decl_acc[slot].valid : 0u;
+}
 #endif
 
 #ifdef PS3DK_PROF_TEST_HOOKS
