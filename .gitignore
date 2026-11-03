@@ -156,18 +156,11 @@ desktop.ini
 /docs/rpcs3-spurs-taskset-pm-hle-fixup.md
 /docs/superpowers/
 
-# rsx-cg-compiler analysis diary + diff-test harness.
+# rsx-cg-compiler analysis diary + local diff-test harness.
 # Both are local-only: REVERSE_ENGINEERING.md will be replaced by a public
-# ARCHITECTURE.md; run_diff.sh drives a byte-match against the system
-# compiler and depends on a proprietary tool.
+# ARCHITECTURE.md; local/ contains diff harnesses and private test runs.
 /tools/rsx-cg-compiler/docs/REVERSE_ENGINEERING.md
-/tools/rsx-cg-compiler/tests/*
-# ...except the shader fixtures: tests/shader-compiler/*.sh compiles these in
-# CI, so a fresh checkout has to have them.  The ones predating this line were
-# force-added one at a time, which is a trap - a fixture can be referenced by a
-# CI step and silently left uncommitted.  Listed as a directory re-include, so
-# the * above is what keeps the rest of tests/ ignored.
-!/tools/rsx-cg-compiler/tests/shaders/
+/tools/rsx-cg-compiler/tests/local/
 
 # Reference-output analysis methodology — describes how we capture
 # and byte-match the proprietary platform ABI/toolchain output. Local-only;
