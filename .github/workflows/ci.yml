@@ -133,6 +133,13 @@ jobs:
         working-directory: tools
         run: cargo test --workspace
 
+      # The binary arc writer (sdk/libps3dkprof core) on the host, plain and ASan+UBSan, checked by its oracle
+      # and by the reader built above (check-arcs, arcs-json).
+      - name: ps3dk-prof arcs writer host test
+        env:
+          READER: tools/target/debug/ps3dk-prof
+        run: bash tests/host/ps3dk-prof-runtime/arcs-writer-test.sh "$RUNNER_TEMP/arcs-writer"
+
       # ps3dk-prof clockmap: an independent exact (Fraction vertex/ray) cross-check of the solver on fixed cases
       # plus a fixed-seed random corpus, with the checker's own self-tests and runner controls (crash, truncation,
       # stderr with exit 0, wrong count, hang).  The larger multi-seed run is local evidence.
