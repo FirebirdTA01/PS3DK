@@ -99,6 +99,10 @@ static uint32_t p_rd_mask(void *c) { return ((prod *)c)->tag_mask; }
 static void p_wr_mask(void *c, uint32_t m) { ((prod *)c)->tag_mask = m; }
 static uint32_t p_tag_wait(void *c) { return ((prod *)c)->tag_mask; }
 static int is_line_a(prod *p, uint64_t ea) { return ea == p->lane.ea_ctl; }
+/* the line-A control's access receipts: the read_idx each line-A getllar sampled (producer-local, no synchronization) */
+static uint64_t g_la_seen[64];
+static int g_la_nseen;
+static prod *g_la_prod;
 static void p_getllar(void *c, uint64_t ea, void *ls)
 {
     prod *p = c;
@@ -106,6 +110,8 @@ static void p_getllar(void *c, uint64_t ea, void *ls)
     if (lock)
         psp_emul_line_lock(ea);
     memcpy(ls, at(ea), 128);
+    if (p == g_la_prod && is_line_a(p, ea) && g_la_nseen < 64)
+        g_la_seen[g_la_nseen++] = psp_rd64((const uint8_t *)ls + PSP_A_READ_IDX);
     p->res_ver = psp_emul_version(ea);
     p->res_held = 1;
     if (lock)
@@ -312,6 +318,108 @@ static int basic(uint32_t mode, int n, const char *name)
         fprintf(e, "lane %u COMPLETE 1 1 %llu 0\nlosses %u\n", ps[k].lane.handle, (unsigned long long)ps[k].ntruth,
                 ps[k].lane.handle);
     fclose(e);
+    return 0;
+}
+
+/* ---- the TSan line-A control pair (codex 01:16; design p3.2-i2-tsan-control-repair-design.md) ----
+ * One lane, APP mode (no drain thread).  The schedule is forced by RELAXED atomics, which TSan does not treat as
+ * synchronization: (1) the producer publishes 8 zones (flush: a line-A getllar + putllc snapshot, then the line-B
+ * putlluc), step = 1; (2) main drains until this lane's read_idx moved: that is the runtime's line_a_store of
+ * read_idx (ext_runtime.c), step = 2; (3) the producer publishes 8 more: its flush getllar READS line A (p_getllar).
+ * Synchronization on that path: before (2), the producer's line-B putlluc unlock -> main's line-B lock gives
+ * producer-before-main edges only; main's line-A store is unlocked only when psp_emul_drop_line_a is set; the
+ * producer's step-3 getllar precedes its own next stripe locks (the snapshot putllc follows the getllar), so no
+ * mutex edge orders main's store before that read (stripe aliasing of lines A and B cannot add one either: main
+ * releases the stripe before its store, and the producer re-acquires only after its read).  LA_HANDOFF replaces the
+ * relaxed steps with a mutex + condition handoff (an HB edge): the harness mutant that must make the race vanish.
+ * Receipts (printed after the join only): the publication was drained, read_idx advanced, and the step-3 getllar
+ * sampled exactly the value main stored. */
+static atomic_int g_la_step;
+static pthread_mutex_t g_la_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_la_cv = PTHREAD_COND_INITIALIZER;
+static int g_la_handoff, g_la_hstep;
+static int g_la_before_step3; /* g_la_nseen when step 3 began (producer-local) */
+
+static void la_set(int v)
+{
+    if (g_la_handoff) {
+        pthread_mutex_lock(&g_la_mu);
+        g_la_hstep = v;
+        pthread_cond_broadcast(&g_la_cv);
+        pthread_mutex_unlock(&g_la_mu);
+    } else {
+        atomic_store_explicit(&g_la_step, v, memory_order_relaxed);
+    }
+}
+static void la_wait(int v)
+{
+    if (g_la_handoff) {
+        pthread_mutex_lock(&g_la_mu);
+        while (g_la_hstep != v)
+            pthread_cond_wait(&g_la_cv, &g_la_mu);
+        pthread_mutex_unlock(&g_la_mu);
+    } else {
+        while (atomic_load_explicit(&g_la_step, memory_order_relaxed) != v)
+            ;
+    }
+}
+static void la_publish(prod *p)
+{
+    for (int i = 0; i < 8; i++) {
+        ev(p, 1);
+        ev(p, 0);
+    }
+    while (psp_spu_flush(&p->s) == PSP_EBUSY)
+        ;
+}
+static void *la_producer(void *arg)
+{
+    prod *p = arg;
+    if (prod_init(p, 0) != PSP_OK)
+        return NULL;
+    p->inited = 1;
+    la_publish(p);
+    la_set(1);
+    la_wait(2);
+    g_la_before_step3 = g_la_nseen;
+    la_publish(p);
+    psp_spu_fini(&p->s);
+    return NULL;
+}
+static int line_a_pair(int drop, int handoff)
+{
+    static prod p;
+    ps3dk_prof_spu_lane_stats st;
+    uint64_t ridx = 0;
+    int tries = 0;
+    psp_emul_drop_line_a = drop; /* set before the producer exists */
+    g_la_handoff = handoff;
+    CHECK(start(PS3DK_PROF_MODE_APP, 2) == 0, "start");
+    CHECK(ps3dk_prof_thread_begin("main") == 0, "thread_begin");
+    CHECK(ps3dk_prof_spu_lane_create("linea", g_image, 0, &p.lane) == 0, "create");
+    g_la_prod = &p;
+    pthread_create(&p.th, NULL, la_producer, &p);
+    la_wait(1);
+    /* (2) drain until this lane's read_idx moved; main's own reads of line A are not synchronization */
+    while (ridx == 0 && tries++ < 1000) {
+        CHECK(ps3dk_prof_drain() == 0, "drain");
+        ridx = psp_rd64(at(p.lane.ea_ctl + PSP_A_READ_IDX));
+    }
+    la_set(2);
+    pthread_join(p.th, NULL); /* receipts only after the race window and the join */
+    printf("LINEA drop %d handoff %d: read_idx after the drain %llu (%d drains); line-A getllar samples", drop,
+           handoff, (unsigned long long)ridx, tries);
+    for (int i = 0; i < g_la_nseen; i++)
+        printf(" %llu", (unsigned long long)g_la_seen[i]);
+    printf("; step-3 samples from index %d\n", g_la_before_step3);
+    CHECK(ridx > 0, "the APP drain advanced this lane's read_idx (it stayed 0 after %d drains)", tries);
+    CHECK(g_la_before_step3 >= 1 && g_la_seen[0] == 0, "the first publication sampled read_idx 0 before the drain");
+    CHECK(g_la_nseen > g_la_before_step3 && g_la_seen[g_la_before_step3] == ridx,
+          "the step-3 getllar sampled the stored read_idx %llu", (unsigned long long)ridx);
+    CHECK(ps3dk_prof_spu_lane_end(p.lane.handle, 2000000, &st) == 0, "end");
+    CHECK(st.have_post_join && st.post_next_seq == p.s.seq, "post-join next");
+    ps3dk_prof_thread_end();
+    CHECK(ps3dk_prof_shutdown() == 0, "shutdown");
     return 0;
 }
 
@@ -1137,7 +1245,13 @@ int main(int argc, char **argv)
     else if (!strcmp(g_case, "basic-thread-drop-ma")) {
         psp_emul_drop_line_a = 1; /* the TSan negative control: line-A stores without their emulation lock */
         basic(PS3DK_PROF_MODE_THREAD, 2, "i2-basic-drop-ma");
-    } else if (!strcmp(g_case, "seal-live"))
+    } else if (!strcmp(g_case, "linea-drop"))
+        line_a_pair(1, 0);
+    else if (!strcmp(g_case, "linea-locked"))
+        line_a_pair(0, 0);
+    else if (!strcmp(g_case, "linea-drop-handoff"))
+        line_a_pair(1, 1);
+    else if (!strcmp(g_case, "seal-live"))
         seal_live();
     else if (!strcmp(g_case, "reentry"))
         reentry();

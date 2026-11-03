@@ -4,9 +4,10 @@ real host threads as SPU producers over the HOST EMULATION of the line premises 
 
 Builds i2_test.c with the runtime (core, drain, pal_host, spu/psp_ppu, psp_spu, ext_runtime, psp_host_emul) and
 PS3DK_PROF_WITH_SPU in three variants: plain, ASan + UBSan (non-recovering) and TSan.  Every case runs in its own
-process in plain and asan.  TSan runs the threaded cases under `setarch x86_64 -R`; its POSITIVE control is
-basic-thread-drop-ma (line-A emulation locks removed), which must produce a ThreadSanitizer data-race report, and
-every other TSan run must be report-free.  Every capture with an .expect is checked by the reader (exact exit code)
+process in plain and asan.  TSan runs the threaded cases under `setarch x86_64 -R`.  Its GATING positive control is
+the deterministic line-A pair (linea-drop / linea-locked / the linea-drop-handoff harness mutant, judged by
+tsan_pair_judge.py, three fresh processes each); the old pipeline control basic-thread-drop-ma is reported as
+OBSERVATIONAL (schedule-dependent) only.  Every other TSan run must be report-free.  Every capture with an .expect is checked by the reader (exact exit code)
 and by the fail-closed checker against the producers' truth.
 
 usage: i2-test.py OUT --reader READER"""
@@ -15,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument('out', type=Path)
@@ -91,9 +93,18 @@ def run(v, cs, label):
     cmd = [str(exes[v]), cs, str(d)]
     if v == 'tsan':
         cmd = ['setarch', 'x86_64', '-R', *cmd]
-    r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
+    except subprocess.TimeoutExpired as t:  # keep whatever the process wrote; the caller judges it INVALID
+        def txt(x):
+            return x.decode(errors='replace') if isinstance(x, bytes) else (x or '')
+        (d / 'stdout').write_text(txt(t.stdout))
+        (d / 'stderr').write_text(txt(t.stderr))
+        (d / 'rc').write_text('timeout\n')
+        raise
     (d / 'stdout').write_text(r.stdout)
     (d / 'stderr').write_text(r.stderr)
+    (d / 'rc').write_text(f'{r.returncode}\n')  # the recorded process status every judge uses
     return r, d
 
 
@@ -108,13 +119,40 @@ for v in ['plain', 'asan']:
             failed.append(f'{v} {cs}')
             print(r.stdout[-1500:], r.stderr[-1500:], flush=True)
 
-# TSan: the positive control must be detected; the threaded cases must be report-free
-r, d = run('tsan', 'basic-thread-drop-ma', 'control-drop-ma')
-detected = 'WARNING: ThreadSanitizer: data race' in r.stderr
-print(f'tsan positive control (line-A emulation lock removed): {"DETECTED" if detected else "NOT DETECTED"}',
-      flush=True)
-if not detected:
-    failed.append('tsan positive control not detected')
+# TSan: the GATING positive control is the deterministic line-A pair (tsan_pair_judge.py; codex 01:16).  Three fresh
+# processes per variant, all required, no retry: lock removed -> DETECTED with the named pair; lock kept -> CLEAN; the
+# mutex-handoff harness mutant (an HB edge) -> the drop judge must say NOT DETECTED from a complete rc-0 run.
+sys.path.insert(0, str(here))
+sys.dont_write_bytecode = True
+import tsan_pair_judge as TJ  # noqa: E402
+
+
+def run_judged(cs, label):
+    try:
+        r, d = run('tsan', cs, label)
+        return r.returncode, r.stdout, r.stderr, False
+    except subprocess.TimeoutExpired:
+        d = out / f'tsan-{label}'
+        return None, (d / 'stdout').read_text(), (d / 'stderr').read_text(), True
+
+
+for cs, judgef, want, title in (
+        ('linea-drop', TJ.judge, 'DETECTED', 'tsan positive control (deterministic line-A pair, lock removed)'),
+        ('linea-locked', TJ.judge, 'CLEAN', 'tsan control pair with the line-A lock'),
+        ('linea-drop-handoff', TJ.classify_drop, 'NOT DETECTED',
+         'tsan harness mutant (relaxed steps -> mutex handoff) under the drop judge')):
+    for k in range(1, 4):
+        rc, so, se, to = run_judged(cs, f'{cs}-{k}')
+        got, why = judgef(cs, rc, so, se, to)
+        print(f'{title} [{k}/3]: {got} ({why})', flush=True)
+        if got != want:
+            failed.append(f'{title} [{k}/3]: {got}')
+# the old pipeline control: OBSERVATIONAL (schedule-dependent; its race-presence expectation is not gating)
+rc, so, se, to = run_judged('basic-thread-drop-ma', 'control-drop-ma')
+obs, why = TJ.classify_observational('basic-thread-drop-ma', rc, so, se, to)
+print(f'tsan pipeline control (observational, schedule-dependent, not gating): {obs} ({why})', flush=True)
+if obs == 'INVALID':
+    failed.append('tsan pipeline control did not complete')
 for cs in threaded:
     r, d = run('tsan', cs, cs)
     clean = r.returncode == 0 and 'ThreadSanitizer' not in r.stderr and f'I2 {cs} PASS' in r.stdout
