@@ -7,6 +7,8 @@
 //! synthetic input in its tests.
 
 pub mod app;
+pub mod frames;
+pub mod frames_ui;
 pub mod live;
 pub mod live_client;
 pub mod model;

@@ -32,6 +32,8 @@ fn main() -> eframe::Result<()> {
         Page::Zones
     } else if args.iter().any(|a| a == "--page=timeline") {
         Page::Timeline
+    } else if args.iter().any(|a| a == "--page=frames") {
+        Page::Frames
     } else {
         Page::Overview
     };

@@ -5,6 +5,7 @@
 
 use crate::live::LinkState;
 use crate::live_client::{ClientConfig, LiveClient, LiveView, Outcome};
+use crate::frames_ui;
 use crate::timeline_ui;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +25,7 @@ pub const APP_NAME: &str = "PS3DK Profiler";
 pub enum Page {
     Overview,
     Timeline,
+    Frames,
     Zones,
 }
 
@@ -51,6 +53,8 @@ pub struct App {
     sort: (ZoneColumn, bool),
     pub selected_zone: Option<ZoneKey>,
     pub timeline: Option<timeline_ui::TimelineState>,
+    /// The Frames page selection and budget.
+    pub frames: frames_ui::FramesState,
     pub live: Option<Live>,
     connect: Option<ConnectForm>,
     last_host: String,
@@ -126,6 +130,7 @@ impl App {
             sort: (ZoneColumn::Total, true),
             selected_zone: None,
             timeline: None,
+            frames: frames_ui::FramesState::default(),
             live: None,
             connect: None,
             last_host: String::new(),
@@ -163,6 +168,11 @@ impl App {
                 self.timeline = a.map(timeline_ui::TimelineState::new);
             }
         }
+        // Frames: a fresh capture resets the selection; a newer snapshot keeps it only where it still exists.
+        match (fresh, doc.analysis(), doc.frames.as_ref()) {
+            (false, Some(a), Some(ix)) => self.frames.refresh(a, ix),
+            (_, _, ix) => self.frames.reset(ix),
+        }
         self.doc = Some(doc);
     }
 
@@ -184,6 +194,7 @@ impl App {
         });
         self.doc = None;
         self.timeline = None;
+        self.frames.reset(None);
         self.zone_rows.clear();
         self.selected_zone = None;
         self.error = None;
@@ -341,6 +352,11 @@ impl eframe::App for App {
                     {
                         self.page = Page::Timeline;
                     }
+                    if ui::nav_item(side, self.page == Page::Frames, "🎞", "Frames", None)
+                        .clicked()
+                    {
+                        self.page = Page::Frames;
+                    }
                     let n = self.zone_rows.len();
                     if ui::nav_item(side, self.page == Page::Zones, "📊", "Zones", Some(n))
                         .clicked()
@@ -392,6 +408,8 @@ impl eframe::App for App {
         let sort = &mut self.sort;
         let rows = &mut self.zone_rows;
         let selected = &mut self.selected_zone;
+        let frames = &mut self.frames;
+        let timeline = &mut self.timeline;
         ui::page(ctx, |p| {
             match &self.doc {
             None => ui::empty_state(
@@ -410,6 +428,12 @@ impl eframe::App for App {
                 }
                 DocState::Analysed(a) => match page {
                     Page::Overview | Page::Timeline => draw_overview(p, a, &d.ext),
+                    Page::Frames => match &d.frames {
+                        Some(ix) => {
+                            frames_ui::draw(p, a, ix, frames, timeline.as_mut());
+                        }
+                        None => ui::field_message(p, ui::Tone::Neutral, "No frame index for this document."),
+                    },
                     Page::Zones => draw_zones(p, a, rows, sort, selected),
                 },
             },

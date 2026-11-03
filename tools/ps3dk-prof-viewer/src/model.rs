@@ -18,6 +18,8 @@ pub struct Document {
     /// The EXTENSION SOURCES view, computed ONCE when the document is built (never per repaint).  Every open,
     /// replacement and live snapshot builds a new Document, so it cannot outlive the capture it describes.
     pub ext: ExtView,
+    /// The Frames page index, also computed ONCE here; None for a MALFORMED document.
+    pub frames: Option<crate::frames::FramesIndex>,
 }
 
 /// What the Overview's EXTENSION SOURCES section shows.
@@ -66,16 +68,18 @@ pub enum DocState {
 
 impl Document {
     pub fn from_bytes(path: PathBuf, bytes: &[u8]) -> Document {
-        let (state, ext) = match load(bytes) {
+        let (state, ext, frames) = match load(bytes) {
             Outcome::Malformed(m) => (
                 DocState::Malformed {
                     diagnosis: m.to_string(),
                 },
                 ExtView::None,
+                None,
             ),
             Outcome::Analysed(a) => {
                 let ext = ext_view(&a);
-                (DocState::Analysed(a), ext)
+                let frames = crate::frames::FramesIndex::build(&a);
+                (DocState::Analysed(a), ext, Some(frames))
             }
         };
         Document {
@@ -83,6 +87,7 @@ impl Document {
             size: bytes.len(),
             state,
             ext,
+            frames,
         }
     }
 
