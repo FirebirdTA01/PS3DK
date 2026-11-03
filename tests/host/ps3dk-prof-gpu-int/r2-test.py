@@ -81,7 +81,7 @@ def build(d, src_root, extra):
              f'-I{s}/pal', f'-I{s}/spu', f'-I{s}/rsx', *extra]
     srcs = [s / f for f in ('core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c', 'spu/psp_ppu.c',
                             'spu/psp_spu.c', 'spu/ext_runtime.c', 'spu/psp_elf.c', 'spu/psp_host_emul.c',
-                            'rsx/gpu_runtime.c', 'rsx/prg.c')] + [here / 'gpu_int.c']
+                            'rsx/gpu_runtime.c', 'rsx/prg.c', 'rsx/gpu_port_gcm.c')] + [here / 'gpu_int.c']
     r = run([cc, *flags, *srcs, '-o', d / 'gpu'], d / 'build.log')
     return r is not None and r.returncode == 0
 

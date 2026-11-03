@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-struct CellGcmContextData; /* incomplete here: the target binding is R3 */
+struct CellGcmContextData; /* incomplete here; R4a: host tests pass a fake context to the real GCM port */
 
 /* A GPU zone.  Zero-initialised (PS3DK_PROF_GPU_ZONE_INIT) is INERT; ending an INERT zone is EINVAL. */
 typedef struct ps3dk_prof_gpu_zone {
@@ -62,7 +62,10 @@ int ps3dk_prof_gpu_calibrate(uint32_t gpu, struct CellGcmContextData *ctx, uint6
  * output-free).  ETIMEDOUT while pending (call again; a repeated call after OK is OK); ESTOPPED when that turn's
  * closing unlock failed or the seal won. */
 int ps3dk_prof_gpu_detach(uint32_t gpu, struct CellGcmContextData *ctx, uint64_t timeout_us);
-/* *released_or_null = 1 when the GPU resources were returned, also with ESTOPPED (a closing-unlock fault after the
+/* APP PRECONDITION before a successful release: the context is idle (cellGcmFinish or an equivalent the app owns)
+ * and no CPU call on the domain is in flight.  A successful release returns the report range and label for
+ * IMMEDIATE reuse by any attach; it proves neither that submitted GPU work completed nor that no GPU write is pending.
+ * *released_or_null = 1 when the GPU resources were returned, also with ESTOPPED (a closing-unlock fault after the
  * release took effect: the table slot is quarantined).  EBUSY (released 0) while not retired, while a call is in
  * flight, or while a finalized detach's completion is still being acknowledged (this runtime rule is separate from the
  * seal's path and from the standalone core's prg_release). */

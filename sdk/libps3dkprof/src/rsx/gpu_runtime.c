@@ -32,6 +32,10 @@
 #define GPU_REPORTS 2048u
 #define GPU_LABEL_FIRST 64u
 #define GPU_LABEL_LAST 255u
+/* R4a: the runtime's ranges are the GCM port's (one set of numbers) */
+_Static_assert(GPU_REPORTS == GPP_REPORTS, "report area");
+_Static_assert(GPU_LABEL_FIRST == GPP_LABEL_USER_FIRST && GPU_LABEL_LAST == GPP_LABEL_LAST, "label range");
+_Static_assert(PRG_SLOTS_MAX <= GPP_CACHE_MAX, "gpu_report_slots_max fits the port's address cache");
 
 #define LD_SC_(p) __atomic_load_n((p), __ATOMIC_SEQ_CST)
 #define ST_SC_(p, v) __atomic_store_n((p), (v), __ATOMIC_SEQ_CST)
@@ -264,6 +268,10 @@ void p_gpu_ack_publish(prof *p, const uint32_t *idx, uint32_t n, int ok)
     for (k = 0; k < n; k++) {
         gpu_slot *g = &p->gpu[idx[k]];
         ST_REL(&g->dom.detach_ack, ok ? 1u : 2u);
+#ifdef PS3DK_PROF_TEST_HOOKS
+        if (ps3dk_prof_test_hooks.gpu_after_ack_store)
+            ps3dk_prof_test_hooks.gpu_after_ack_store(); /* published, still pinned */
+#endif
         unpin(g); /* the last access */
     }
 }
@@ -420,6 +428,7 @@ int ps3dk_prof_gpu_attach(struct CellGcmContextData *ctx, uint32_t report_first,
     prof *p;
     gpu_slot *g = NULL;
     const prg_port *dev = NULL;
+    const gpp_dev *gdev = NULL;
     prg_port port;
     prg_out out;
     uint32_t i, id;
@@ -433,9 +442,12 @@ int ps3dk_prof_gpu_attach(struct CellGcmContextData *ctx, uint32_t report_first,
         return PS3DK_PROF_ENOTSUP;
 #ifdef PS3DK_PROF_TEST_HOOKS
     dev = (const prg_port *)ps3dk_prof_test_hooks.gpu_port;
+    gdev = (const gpp_dev *)ps3dk_prof_test_hooks.gpu_gpp_dev;
 #endif
-    if (!dev)
-        return PS3DK_PROF_ENOTSUP; /* no device binding (host: the emulator hook; target: R3) */
+    if (dev && gdev)
+        return PS3DK_PROF_EINVAL; /* two device sources: a test-configuration error, nothing changes */
+    if (!dev && !gdev)
+        return PS3DK_PROF_ENOTSUP; /* no device binding (host: a test hook; target: R4b) */
     if (!ctx || !gpu)
         return PS3DK_PROF_EINVAL;
     if (LD_ACQ(&p->ext_fault) || LD_ACQ(&p->shutdown_once))
@@ -475,6 +487,18 @@ int ps3dk_prof_gpu_attach(struct CellGcmContextData *ctx, uint32_t report_first,
     if (pal_owner_get(&g->owner) != 0) {
         rc = PS3DK_PROF_ETHREAD;
         goto out;
+    }
+    /* the GCM port: (re)prepared only here, the slot FREE with users 0 under the extension mutex, before prg_attach
+     * can write through it; in_gpu is set, so an accessor re-entering the API gets EBUSY.  A failure leaves the port
+     * zeroed and changes nothing else that is visible (id, lifetime, ledger, output, slot availability). */
+    if (gdev) {
+        if (gpp_prepare(&g->gpp, gdev, (gpp_ctx *)(void *)ctx, report_first, report_count, label) != PRG_OK) {
+            rc = PS3DK_PROF_EINVAL;
+            goto out;
+        }
+        memset(&g->devport, 0, sizeof g->devport);
+        gpp_bind(&g->devport, &g->gpp); /* device ops only; their ctx is &g->gpp, never g */
+        dev = &g->devport;
     }
     /* every domain field before the id is published (the pinning words and the owner entries are untouched) */
     id = GPU_ID_BASE + p->gpu_lifetime;
@@ -823,6 +847,23 @@ void ps3dk_prof__test_gpu_set_tags(unsigned i, uint32_t tag)
 }
 uint32_t ps3dk_prof__test_gpu_tag(unsigned i, unsigned j) { return g_prof->gpu[i].own[j].tag; }
 uint32_t ps3dk_prof__test_gpu_users(unsigned i) { return g_prof->gpu ? LD_SC_(&g_prof->gpu[i].users) : 0; }
+/* R4a: is table slot i's GCM port prepared (its readiness word)? */
+uint32_t ps3dk_prof__test_gpu_gpp_ready(unsigned i);
+uint32_t ps3dk_prof__test_gpu_gpp_ready(unsigned i) { return g_prof->gpu ? LD_ACQ(&g_prof->gpu[i].gpp.ready) : 0; }
+/* R4a: exhaust (1) or restore (0) the GPU ledger's LOSS credit, so prg_attach's own credit check refuses.  Only while
+ * no drain can run (the test's APP-mode designated thread calls it between API calls). */
+void ps3dk_prof__test_gpu_ledger_exhaust(int on);
+void ps3dk_prof__test_gpu_ledger_exhaust(int on)
+{
+    static uint32_t saved;
+    prg_ledger *l = g_prof->gpu_ledger;
+    if (on) {
+        saved = l->loss_used;
+        l->loss_used = l->loss_max - l->loss_reserved;
+    } else {
+        l->loss_used = saved;
+    }
+}
 void ps3dk_prof__test_gpu_set_users(unsigned i, uint32_t v) { ST_SC_(&g_prof->gpu[i].users, v); }
 uint32_t ps3dk_prof__test_gpu_state(unsigned i) { return g_prof->gpu ? LD_ACQ(&g_prof->gpu[i].state) : 0; }
 /* {spu loss_chunks, spu brackets_file, spu epochs, gpu loss_max, gpu br_epoch_max, gpu br_file_max, gpu_max, slots} */

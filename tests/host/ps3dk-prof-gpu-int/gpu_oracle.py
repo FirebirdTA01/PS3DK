@@ -17,7 +17,7 @@ cases (EXEMPT): `sink_dead 1` (the accepted PREFIX is still checked: frames, til
 FINAL that was accepted; only the totals and the FINAL-presence claim are skipped), `preexisting_malformed 1` (the
 reader refuses the file for a CPU-side reason; every GPU check still runs), `not_quiesced 1`, `lossy 1`.
 
-usage: gpu_oracle.py DIR --suite plain|tsan   (exit 0 all consistent, 1 otherwise)"""
+usage: gpu_oracle.py DIR --suite plain|tsan|r4a|r4a-tsan   (exit 0 all consistent, 1 otherwise)"""
 import argparse
 import os
 import struct
@@ -35,6 +35,11 @@ INVENTORY = {
         r2-frame-unlock-invalid r2-frame-unlock-busy r2-ack-lifetime-1 r2-ack-lifetime-2'''.split(),
     'tsan': ['r2-tsan-run', 'r2-mixed-tsan', 'r2-detach-overlap', 'r2-completion-held', 'r2-completion-unlock',
              'r2-ack-lifetime-1', 'r2-ack-lifetime-2'],
+    # P3.3 R4a: the real GCM port inside the runtime (r4a_int.c; Mode S plain/ASan, Mode C TSan)
+    'r4a': '''r4a-s-e2e r4a-s-prepare-fail-first r4a-s-prepare-fail-middle r4a-s-prepare-fail-last
+        r4a-s-prepare-fail-label r4a-s-prepare-fail-reserved r4a-s-prg-attach-fail r4a-s-hooks
+        r4a-s-fifo-refusal'''.split(),
+    'r4a-tsan': ['r4a-c-e2e', 'r4a-c-finish-pending', 'r4a-c-seal-in-reserve'],  # one numbered domain each
 }
 # every exemption is pinned to the named cases that need it (any other use is an error)
 EXEMPT = {
@@ -43,7 +48,7 @@ EXEMPT = {
         r2-frame-thread-lock r2-frame-thread-unlock r2-fault-stats-unlock r2-mixed-corrupt r2-completion-fail
         r2-completion-unlock r2-frame-unlock-invalid r2-frame-unlock-busy'''.split()),
     'preexisting_malformed': {'r2-orphan'},
-    'not_quiesced': {'r2-sched-after-check', 'r2-sched-in-reserve'},
+    'not_quiesced': {'r2-sched-after-check', 'r2-sched-in-reserve', 'r4a-c-seal-in-reserve'},
     'lossy': {'r2-tsan-run', 'r2-mixed-tsan'},
 }
 BOOLEAN = {'final_present', 'sink_dead', 'exhausted', 'not_quiesced', 'preexisting_malformed', 'lossy', 'spu_truth'}
@@ -267,7 +272,7 @@ def main():
     have = {}
     for f in os.listdir(a.dir):
         stem, ext = os.path.splitext(f)
-        if ext in ('.prof', '.truth', '.expect') and stem.startswith('r2-'):
+        if ext in ('.prof', '.truth', '.expect') and stem.startswith(('r2-', 'r4a-')):
             have.setdefault(stem, set()).add(ext)
     ok = fails = 0
     for stem in sorted(set(have) | want):

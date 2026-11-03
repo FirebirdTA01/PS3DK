@@ -10,6 +10,21 @@
 #define GPP_SEMAPHORE_BACKENDWRITE_RELEASE 0x1d70u
 #define GPP_QUERY_TIMESTAMP (1u << 24)          /* the report type in bits 24..31 (the chosen encoding) */
 
+#ifdef GPP_HOST_DEVMEM
+#ifdef PS3DK_PROF_PAL_LV2
+#error "GPP_HOST_DEVMEM is a host-only test seam"
+#endif
+#define GPP_LD64(pc, a) ((pc)->dev->ld64(a))
+#define GPP_ST64(pc, a, v) ((pc)->dev->st64((a), (v)))
+#define GPP_LD32(pc, a) ((pc)->dev->ld32(a))
+#define GPP_ST32(pc, a, v) ((pc)->dev->st32((a), (v)))
+#else /* the real path: one aligned volatile access each */
+#define GPP_LD64(pc, a) ((void)(pc), *(a))
+#define GPP_ST64(pc, a, v) ((void)(pc), *(a) = (v))
+#define GPP_LD32(pc, a) ((void)(pc), *(a))
+#define GPP_ST32(pc, a, v) ((void)(pc), *(a) = (v))
+#endif
+
 static int gpp_label_reserved(uint32_t l)
 {
     return l == 255u || (l >= 65u && l <= 68u); /* our libPSGL's idle token and prepared-buffer/status labels */
@@ -88,7 +103,7 @@ static uint32_t gpp_read_label(void *x, uint32_t label)
 
     if (!pc->ready || label != pc->label)
         return 0;
-    return *pc->label_word;
+    return GPP_LD32(pc, pc->label_word);
 }
 
 static void gpp_write_label(void *x, uint32_t label, uint32_t value)
@@ -96,7 +111,7 @@ static void gpp_write_label(void *x, uint32_t label, uint32_t value)
     gpp_port *pc = x;
 
     if (pc->ready && label == pc->label)
-        *pc->label_word = value;
+        GPP_ST32(pc, pc->label_word, value);
 }
 
 static uint64_t gpp_read_timer(void *x, uint32_t report)
@@ -105,7 +120,7 @@ static uint64_t gpp_read_timer(void *x, uint32_t report)
 
     if (!pc->ready || report < pc->report_first || report - pc->report_first >= pc->report_count)
         return PRG_POISON;
-    return *pc->timer[report - pc->report_first];
+    return GPP_LD64(pc, pc->timer[report - pc->report_first]);
 }
 
 static void gpp_write_timer(void *x, uint32_t report, uint64_t value)
@@ -113,7 +128,7 @@ static void gpp_write_timer(void *x, uint32_t report, uint64_t value)
     gpp_port *pc = x;
 
     if (pc->ready && report >= pc->report_first && report - pc->report_first < pc->report_count)
-        *pc->timer[report - pc->report_first] = value;
+        GPP_ST64(pc, pc->timer[report - pc->report_first], value);
 }
 
 static void gpp_sync(void *x)
@@ -122,7 +137,9 @@ static void gpp_sync(void *x)
 #ifdef PS3DK_PROF_PAL_LV2
     __asm__ volatile("sync" ::: "memory");
 #else
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    /* host: a full barrier that TSan accepts (it refuses atomic_thread_fence): a SC no-op RMW on a private word */
+    static uint32_t gpp_fence_word;
+    (void)__atomic_fetch_add(&gpp_fence_word, 0u, __ATOMIC_SEQ_CST);
 #endif
 }
 
@@ -139,6 +156,10 @@ int gpp_prepare(gpp_port *pc, const gpp_dev *dev, gpp_ctx *ctx, uint32_t report_
     if (dev == NULL || dev->report_addr == NULL || dev->label_addr == NULL || dev->flush == NULL || ctx == NULL ||
         !gpp_ctx_valid(ctx))
         return PRG_EINVAL;
+#ifdef GPP_HOST_DEVMEM
+    if (dev->ld64 == NULL || dev->st64 == NULL || dev->ld32 == NULL || dev->st32 == NULL)
+        return PRG_EINVAL;
+#endif
     /* the count first (nonzero, within the cache and the area), only then the first index against what remains */
     if (report_count == 0 || report_count > GPP_CACHE_MAX || report_count > GPP_REPORTS ||
         report_first > GPP_REPORTS - report_count)

@@ -53,6 +53,14 @@ typedef struct gpp_dev {
     void *(*report_addr)(uint32_t index); /* the LOCAL report entry `index` */
     void *(*label_addr)(uint32_t index);  /* label `index` (already checked <= 255) */
     void (*flush)(gpp_ctx *ctx);
+#ifdef GPP_HOST_DEVMEM
+    /* HOST-ONLY device-memory seam (R4a Mode C): every timer/label access of the ops goes through these (the host
+     * tests implement them with SC atomics, which real device memory does not promise).  Never on target. */
+    uint64_t (*ld64)(volatile uint64_t *a);
+    void (*st64)(volatile uint64_t *a, uint64_t v);
+    uint32_t (*ld32)(volatile uint32_t *a);
+    void (*st32)(volatile uint32_t *a, uint32_t v);
+#endif
 } gpp_dev;
 
 typedef struct gpp_port {

@@ -28,6 +28,7 @@ out.mkdir(parents=True, exist_ok=False)
 cc = os.environ.get('CC', 'cc')
 base = ['-std=c11', '-O1', '-g', '-Wall', '-Wextra', '-Werror']
 SAN = ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined']
+SAN_TEXT = ('runtime error', 'Sanitizer')
 rows = []
 
 
@@ -56,7 +57,9 @@ for v, extra in (('plain', []), ('asan', SAN)):
         continue
     r = run([exe], out / f'r3-{v}.txt')
     last = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ''
-    row(f'cases-{v}', r.returncode == 0 and last.startswith('R3 PORT PASS') and ' FAIL' not in r.stdout, last)
+    san = any(t in r.stderr for t in SAN_TEXT)  # an inherited recovering sanitizer must never pass silently
+    row(f'cases-{v}', r.returncode == 0 and last.startswith('R3 PORT PASS') and ' FAIL' not in r.stdout and not san,
+        last + (' (sanitizer text in stderr)' if san else ''))
 
 # ---- 2. mutants: (name, [(old, new), ...], killing case) ----
 RE = '        if (!gpp_room(c, &cur)) /* re-read: the callback may have flushed, relocated or rewritten the context */\n            return 1;\n'
@@ -125,7 +128,9 @@ for name, edits, case in MUT:
         row(f'mutant {name}', False, 'build failed')
         continue
     r = run([exe, case], d / f'{case}.txt')
-    row(f'mutant {name}', r.returncode == 1 and f'{case}: FAIL' in r.stdout, f'killed by {case}: rc {r.returncode}')
+    san = any(t in r.stderr for t in SAN_TEXT)
+    row(f'mutant {name}', r.returncode == 1 and f'{case}: FAIL' in r.stdout and not san,
+        f'killed by {case}: rc {r.returncode}' + (' (sanitizer text: INVALID)' if san else ''))
 
 bad = [n for n, ok in rows if not ok]
 print(f'R3 HOST {"PASS" if not bad else "FAIL"}: {len(rows)} rows, {len(bad)} failed {bad if bad else ""}'.rstrip())

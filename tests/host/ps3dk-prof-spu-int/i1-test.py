@@ -55,6 +55,8 @@ def build(label, r, extra, spu, test_src, links):
         srcs += [lib / 'spu/psp_ppu.c', lib / 'spu/ext_runtime.c', lib / 'spu/psp_elf.c', lib / 'spu/psp_host_emul.c']
         if (lib / 'rsx/gpu_runtime.c').exists():  # P3.3 R2: the GPU domains share the extension runtime
             srcs += [lib / 'rsx/gpu_runtime.c', lib / 'rsx/prg.c']
+            if (lib / 'rsx/gpu_port_gcm.c').exists():  # P3.3 R4a: the runtime prepares the GCM port
+                srcs += [lib / 'rsx/gpu_port_gcm.c']
     exe = d / 'exe'
     r_ = subprocess.run([cc, *flags, *map(str, srcs), '-o', str(exe), *links], capture_output=True, text=True)
     (d / 'build.log').write_text(r_.stdout + r_.stderr)

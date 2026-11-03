@@ -15,6 +15,7 @@
 
 #include <stdint.h>
 
+#include "gpu_port_gcm.h"
 #include "pal.h"
 #include "prg.h"
 
@@ -57,7 +58,13 @@ typedef struct gpu_slot {
     gpu_owner own[GPU_OWNER_REFS];
     /* domain fields (attach) */
     struct prof *p;
-    const prg_port *dev;  /* the GPU device (host: the test-hook emulator) */
+    const prg_port *dev;  /* the GPU device: &devport (the GCM port), or the legacy test-hook emulator */
+    /* R4a: the prepared GCM port and its bound device ops (ctx = &gpp).  Prepared by attach under the extension
+     * mutex before prg_attach; NEVER cleared by a logical release: only the next attach that selects this slot
+     * (FREE, users 0, under the mutex) clears and re-prepares it.  Reachable only through dev, i.e. by a pinned call
+     * whose id matched, by the drainer for a LIVE slot under the mutex, or by attach before publication. */
+    gpp_port gpp;
+    prg_port devport;
     pal_owner owner;      /* the ctx owner thread */
     void *ctx;
     uint32_t label;

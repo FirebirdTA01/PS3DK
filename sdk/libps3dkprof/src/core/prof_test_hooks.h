@@ -77,6 +77,8 @@ typedef struct ps3dk_prof_test_hooks_t {
     void (*spu_elf_after_parse)(void);  /* register_elf: after the lock-free parse, before spu_mutex (race tests) */
     /* P3.3 R2 GPU domains (host only) */
     const void *gpu_port;               /* a prg_port: the emulated GPU device (its lock and emittable fields unused) */
+    const void *gpu_gpp_dev;            /* R4a: a gpp_dev: the REAL GCM port over fake memory (exclusive with gpu_port) */
+    void (*gpu_after_ack_store)(void);  /* R4a: after a detach acknowledgement's store, before the publisher's unpin */
     uint32_t gpu_mutex_init_fail_at;    /* the nth GPU snap mutex init fails (1-based) */
     void (*gpu_after_pin_inc)(void);    /* after users++ and before the id load (stale-call schedules) */
     void (*gpu_after_prologue)(void);   /* after the shutdown check, before the core call (admission schedules) */

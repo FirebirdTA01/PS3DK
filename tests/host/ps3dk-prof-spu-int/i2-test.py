@@ -34,7 +34,7 @@ flags = ['-std=c11', '-O1', '-g', '-pthread', '-DPS3DK_PROF=1', '-DPS3DK_PROF_PA
          f'-I{lib}/spu', f'-I{lib}/rsx']
 srcs = [lib / 'core/prof_core.c', lib / 'core/prof_drain.c', lib / 'pal/pal_host.c', lib / 'spu/psp_ppu.c',
         lib / 'spu/psp_spu.c', lib / 'spu/ext_runtime.c', lib / 'spu/psp_elf.c', lib / 'spu/psp_host_emul.c',
-        lib / 'rsx/gpu_runtime.c', lib / 'rsx/prg.c', here / 'i2_test.c']
+        lib / 'rsx/gpu_runtime.c', lib / 'rsx/prg.c', lib / 'rsx/gpu_port_gcm.c', here / 'i2_test.c']
 wrap = '-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free,--wrap=posix_memalign,--wrap=aligned_alloc'
 variants = {'plain': [], 'asan': ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
                                   '-fno-omit-frame-pointer'], 'tsan': ['-fsanitize=thread']}
