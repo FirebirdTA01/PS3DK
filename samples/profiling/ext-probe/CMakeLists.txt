@@ -21,13 +21,13 @@ target_compile_options(ext-probe PRIVATE -O2 -g -Wall -Wextra -Werror)
 target_include_directories(ext-probe PRIVATE "${E1_PROF_SRC}/../../include" "${CMAKE_CURRENT_LIST_DIR}/source" "${CMAKE_CURRENT_LIST_DIR}/../../gcm/common"
   "${E1_PROF_SRC}/spu" "${E1_PROF_SRC}/rsx" "${PS3DK}/ppu/include")
 target_compile_definitions(ext-probe PRIVATE PS3DK_PROF=1 "E1_BUILD_ID=\"${E1_BUILD_ID}\"")
-target_link_libraries(ext-probe PRIVATE "${E1_EXT_ARCHIVE}" ps3dkprof gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m)
+target_link_libraries(ext-probe PRIVATE "${E1_EXT_ARCHIVE}" gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m)
 set(E1_SPU_SDK "${PS3DK}" CACHE PATH "SPU SDK root")
 ps3_add_spu_image(ext-probe NAME e1_spu
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/spu/main.c" "${CMAKE_CURRENT_LIST_DIR}/spu/e1_spu_core.c"
           "${E1_PROF_SRC}/spu/psp_spu.c" "${E1_PROF_SRC}/spu/prof_spu_writer.c"
   LIBS sputhread
-  CFLAGS "-DPS3DK_PROF=1" "-I${E1_PROF_SRC}/spu" "-I${CMAKE_CURRENT_LIST_DIR}/source" "-I${E1_SPU_SDK}/spu/include"
+  CFLAGS "-DPS3DK_PROF=1" "-mno-error-reloc" "-I${E1_PROF_SRC}/spu" "-I${CMAKE_CURRENT_LIST_DIR}/source" "-I${E1_SPU_SDK}/spu/include"
   LDFLAGS "-L${E1_SPU_SDK}/spu/lib")
 ps3_add_self(ext-probe)
 ps3_add_pkg(ext-probe APPID "EXTPROBE1" CONTENTID "UP0001-EXTPROBE1_00-PS3DKSAMPLES0000")
