@@ -77,3 +77,32 @@ clean:
 	rm -f $(ILP32_AUTO) $(LP64_AUTO) $(ILP32_LIVE) $(LP64_LIVE) $(ILP32_AUTO:.o=.d) $(LP64_AUTO:.o=.d) 	      $(ILP32_LIVE:.o=.d) $(LP64_LIVE:.o=.d) $(LIBS) "$(CONFIG)" "$(CONFIG).tmp"
 
 -include $(ILP32_AUTO:.o=.d) $(LP64_AUTO:.o=.d) $(ILP32_LIVE:.o=.d) $(LP64_LIVE:.o=.d)
+
+# The SPU-lane + GPU-domain extension (P3.3 R4b): ILP32 only, NOT part of all or install.  Its own build directory and
+# rules; the shipped archives above are untouched.  Compile/link gating only: no target behaviour follows from it.
+include ext-members.mk
+EXT_DIR := $(BUILD)/ilp32-ext
+EXT_OBJS := $(addprefix $(EXT_DIR)/,$(addsuffix .o,$(EXT_MEMBERS)))
+EXT_FLAGS := $(PPU_FLAGS) -DPS3DK_PROF_WITH_SPU -Isrc/core -Isrc/pal -Isrc/spu -Isrc/rsx
+
+.PHONY: ext-ilp32 ext-clean
+ext-ilp32: $(EXT_DIR)/libps3dkprof_ext.a
+$(EXT_DIR)/%.o: src/core/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXT_DIR)/%.o: src/pal/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXT_DIR)/%.o: src/spu/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXT_DIR)/%.o: src/rsx/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXT_DIR)/libps3dkprof_ext.a: $(EXT_OBJS)
+	@rm -f "$@"
+	$(PPU_AR) rcs "$@" $^
+ext-clean:
+	rm -f $(EXT_OBJS) $(EXT_OBJS:.o=.d) "$(EXT_DIR)/libps3dkprof_ext.a"
+
+-include $(EXT_OBJS:.o=.d)

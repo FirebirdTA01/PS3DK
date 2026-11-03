@@ -1,4 +1,4 @@
-/* GPU (RSX) timestamp domains inside the runtime (P3.3 R2, host PAL only): the port adapters over the R1 core
+/* GPU (RSX) timestamp domains inside the runtime (P3.3 R2; R4b: LV2 ILP32): the port adapters over the R1 core
  * (prg.c), the table-slot pin protocol, owner entries and their declaration evidence, the drain/seal steps, and the
  * API of prof_gpu.h.  Design: p3.3-r2 935936fb + deltas 2400e50a, 0e23d13e and the codex 12:53 rulings.
  *
@@ -11,13 +11,28 @@
  *
  * Faults: after ext_fault no GPU call takes the extension mutex again (ESTOPPED); a domain whose finalization never
  * ran keeps its ctx, reports and label BORROWED until process end, and a faulted table slot is never reused. */
+/* configuration refusals, before any include, so each fails with its own message (R4b) */
+#ifdef PS3DK_PROF_WITH_SPU
+#if defined(PS3DK_PROF_PAL_HOST) && defined(PS3DK_PROF_PAL_LV2)
+#error "the GPU domain extension: PS3DK_PROF_PAL_HOST and PS3DK_PROF_PAL_LV2 together"
+#elif !defined(PS3DK_PROF_PAL_HOST) && !defined(PS3DK_PROF_PAL_LV2)
+#error "the GPU domain extension: no PAL selected"
+#endif
+#ifdef PS3DK_PROF_PAL_LV2 /* R4b: the GCM device; ILP32 only, never with a host seam */
+#ifdef __LP64__
+#error "the GPU domain extension target is ILP32 only"
+#endif
+#ifdef PS3DK_PROF_TEST_HOOKS
+#error "the GPU domain extension target never carries test hooks"
+#endif
+#ifdef GPP_HOST_DEVMEM
+#error "GPP_HOST_DEVMEM is a host-only test seam"
+#endif
+#endif
+#endif
 #include "prof_internal.h"
 
 #ifdef PS3DK_PROF_WITH_SPU
-
-#ifndef PS3DK_PROF_PAL_HOST
-#error "the GPU domain extension is host-PAL only in this checkpoint"
-#endif
 
 #include <string.h>
 
@@ -444,10 +459,13 @@ int ps3dk_prof_gpu_attach(struct CellGcmContextData *ctx, uint32_t report_first,
     dev = (const prg_port *)ps3dk_prof_test_hooks.gpu_port;
     gdev = (const gpp_dev *)ps3dk_prof_test_hooks.gpu_gpp_dev;
 #endif
+#ifdef PS3DK_PROF_PAL_LV2
+    gdev = &gpp_dev_gcm; /* the only device on the target (test hooks are refused above) */
+#endif
     if (dev && gdev)
         return PS3DK_PROF_EINVAL; /* two device sources: a test-configuration error, nothing changes */
     if (!dev && !gdev)
-        return PS3DK_PROF_ENOTSUP; /* no device binding (host: a test hook; target: R4b) */
+        return PS3DK_PROF_ENOTSUP; /* no device binding (host: no test hook; unreachable on LV2) */
     if (!ctx || !gpu)
         return PS3DK_PROF_EINVAL;
     if (LD_ACQ(&p->ext_fault) || LD_ACQ(&p->shutdown_once))

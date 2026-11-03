@@ -6,20 +6,43 @@
  * lock_failed), on every path.  Residual: a real failed unlock may leave the mutex locked, and a later acquirer may
  * then block forever; no recovery or shutdown bound is promised for that case.
  *
- * Host PAL only in this checkpoint: the memory adapter uses the host emulation of the line premises
- * (psp_host_emul.h), which is not target evidence. */
+ * Two memory adapters: the host one emulates the line premises (psp_host_emul.h; not target evidence); the LV2 one
+ * (R4b, ILP32 only) uses plain aligned accesses and real barriers.  Its correctness rests on the OPEN target
+ * assumptions T1-T6 of p3.3-r4b r2 (line-B putlluc indivisible and coherent as seen by PPU loads, ordered loads, ring
+ * data visible before its publication, single-copy aligned line-A stores whose stores cancel an SPU reservation,
+ * MFC coherence); the build gates check only the code shapes they require. */
+/* configuration refusals, before any include, so each fails with its own message (R4b) */
+#ifdef PS3DK_PROF_WITH_SPU
+#if defined(PS3DK_PROF_PAL_HOST) && defined(PS3DK_PROF_PAL_LV2)
+#error "the SPU lane extension: PS3DK_PROF_PAL_HOST and PS3DK_PROF_PAL_LV2 together"
+#elif !defined(PS3DK_PROF_PAL_HOST) && !defined(PS3DK_PROF_PAL_LV2)
+#error "the SPU lane extension: no PAL selected"
+#endif
+#ifdef PS3DK_PROF_PAL_LV2
+#ifdef __LP64__
+#error "the SPU lane extension target is ILP32 only"
+#endif
+#ifdef PS3DK_PROF_TEST_HOOKS
+#error "the SPU lane extension target never carries test hooks"
+#endif
+#ifdef GPP_HOST_DEVMEM
+#error "GPP_HOST_DEVMEM is a host-only test seam"
+#endif
+#endif
+#endif
 #include "prof_internal.h"
 
 #ifdef PS3DK_PROF_WITH_SPU
 
-#ifndef PS3DK_PROF_PAL_HOST
-#error "the SPU lane extension is host-PAL only in this checkpoint"
-#endif
-
 #include <string.h>
 
 #include "prof_spu.h"
+#ifdef PS3DK_PROF_PAL_HOST
 #include "psp_host_emul.h"
+#endif
+#ifdef PS3DK_PROF_PAL_LV2
+_Static_assert(sizeof(uintptr_t) == 4, "LV2 extension: ILP32 effective addresses");
+#endif
 #include "psp_elf.h"
 #include "psp_ppu.h"
 #ifdef PS3DK_PROF_TEST_HOOKS
@@ -30,6 +53,8 @@
 /* ---- the psp_mem adapter: plain process memory; EAs are addresses; host emulation of the line premises ---- */
 
 static uint8_t *at(uint64_t ea) { return (uint8_t *)(uintptr_t)ea; }
+
+#ifdef PS3DK_PROF_PAL_HOST
 
 static uint64_t m_ld64(void *c, uint64_t ea)
 {
@@ -85,6 +110,72 @@ static uint64_t m_mftb(void *c)
     (void)c;
     return p_tb();
 }
+#define M_LWSYNC m_fence
+#define M_SYNC m_fence
+#define M_ISYNC m_fence
+
+#else /* PS3DK_PROF_PAL_LV2 */
+
+/* ILP32: the EA is the 32-bit effective address zero-extended (at() above).  Every line-A store is ONE naturally
+ * aligned store (assumption T5); native big-endian order equals the psp_be64 / psp_rd64 byte order. */
+static uint64_t m_ld64(void *c, uint64_t ea)
+{
+    (void)c;
+    return *(const volatile uint64_t *)(const void *)at(ea);
+}
+/* 16 aligned doubleword loads of the line; a torn copy is the drainer's seqlock's concern under T1 (not detected in
+ * general: the WEAK-model counterexample stands).  The private output buffer is filled by an endian-preserving copy. */
+static void m_ld_line(void *c, uint64_t ea, uint8_t out[128])
+{
+    const volatile uint64_t *src = (const volatile uint64_t *)(const void *)at(ea);
+    unsigned i;
+    (void)c;
+#pragma GCC unroll 16 /* straight-line: the linked-image gate counts the 16 source loads per path */
+    for (i = 0; i < 16; i++) {
+        uint64_t v = src[i];
+        memcpy(out + 8 * i, &v, 8);
+    }
+}
+static void m_ld_slots(void *c, uint64_t ea, uint8_t *out, size_t n)
+{
+    (void)c;
+    memcpy(out, at(ea), n); /* ordered by the caller's lwsync after the accepting recheck */
+}
+static void m_st64(void *c, uint64_t ea, uint64_t v)
+{
+    (void)c;
+    *(volatile uint64_t *)(void *)at(ea) = v;
+}
+static void m_st16(void *c, uint64_t ea, uint16_t v)
+{
+    (void)c;
+    *(volatile uint16_t *)(void *)at(ea) = v;
+}
+static void m_lwsync(void *c)
+{
+    (void)c;
+    __asm__ volatile("lwsync" ::: "memory");
+}
+static void m_sync(void *c)
+{
+    (void)c;
+    __asm__ volatile("sync" ::: "memory");
+}
+static void m_isync(void *c)
+{
+    (void)c;
+    __asm__ volatile("isync" ::: "memory");
+}
+static uint64_t m_mftb(void *c)
+{
+    (void)c;
+    return p_tb();
+}
+#define M_LWSYNC m_lwsync
+#define M_SYNC m_sync
+#define M_ISYNC m_isync
+
+#endif
 
 /* the slot allocator over the init block: psp_lane_create asks for the ring, then the control block, of one lane */
 static size_t slot_bytes(const prof *p) { return (size_t)p->spu->cfg.ring_slots * PSP_SLOT + PSP_CTL_BYTES; }
@@ -93,6 +184,7 @@ static int m_alloc(void *c, size_t size, uint64_t *ea)
 {
     prof *p = c;
     size_t ring = (size_t)p->spu->cfg.ring_slots * PSP_SLOT;
+    uint8_t *slot;
     uint32_t i;
     if (LD_ACQ(&p->ext_fault))
         return -1; /* frozen: an uncertain lifetime is never reused */
@@ -103,8 +195,13 @@ static int m_alloc(void *c, size_t size, uint64_t *ea)
             return -1;
         p->ext_slot_used[i] = 1;
         p->ext_pending_slot = i;
-        memset(p->spu_slots + (size_t)i * slot_bytes(p), 0, slot_bytes(p));
-        *ea = (uint64_t)(uintptr_t)(p->spu_slots + (size_t)i * slot_bytes(p));
+        slot = p->spu_slots + (size_t)i * slot_bytes(p); /* once: the zeroed slot IS the EA returned below */
+        memset(slot, 0, slot_bytes(p));
+#ifdef PS3DK_PROF_PAL_LV2
+        __asm__ volatile("sync" ::: "memory"); /* the zeroed ring + control block are performed before the lane's EA
+                                                * can leave this thread (r4b D2) */
+#endif
+        *ea = (uint64_t)(uintptr_t)slot;
         return 0;
     }
     if (size == PSP_CTL_BYTES) {
@@ -147,7 +244,7 @@ int p_ext_init(prof *p)
         return -1;
     p->spu_mutex_ok = 1;
     if (p->spu) { /* SPU lanes enabled (a GPU-only extension has no PSP state) */
-        g_mem = (psp_mem){p, m_ld64, m_ld_line, m_ld_slots, m_st64, m_st16, m_fence, m_fence, m_fence, m_mftb, m_alloc,
+        g_mem = (psp_mem){p, m_ld64, m_ld_line, m_ld_slots, m_st64, m_st16, M_LWSYNC, M_SYNC, M_ISYNC, m_mftb, m_alloc,
                           m_free};
         g_out = (psp_out){p, o_chunk};
         p->spu->mem = &g_mem;
