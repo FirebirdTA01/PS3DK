@@ -1463,3 +1463,312 @@ fn cv_report_lines() {
     let g = rendered(&ext_file(std_ext()).bytes());
     assert_eq!(g.matches("    epoch ").count(), 1, "one epoch line for the lane, none for the GPU domain:\n{g}");
 }
+
+// ---- conditional affine bounds over a decoded capture ---------------------------------------------------------
+
+use ps3dk_prof::clockmap::{
+    lines as clockmap_lines, map_capture, solve, Budgets, CaptureMap, Coordinate, EpochState, Limit, Meter, Obs,
+    Premises, SPU_DEC_TOP,
+};
+
+const NOWRAP: Premises = Premises { spu_nowrap: true };
+
+/// std_ext plus two RSX brackets: b in [(400-110)/3000, (410-100)/3000] = [29/300, 31/300]; the SPU brackets under
+/// W32 sit at f = TOP-1000 and TOP-900: b in [(30-20)/100, (40-10)/100] = [1/10, 3/10].  Every event lies between
+/// its epoch's brackets, at 1/3 and 2/3 (RSX) or 1/10 and 2/10 (SPU) of the way: each width is exactly 10.
+fn cm_ext() -> Vec<Chunk> {
+    let mut ext = std_ext();
+    ext.insert(5, calibration(RSX_D, 1, 0, &[(4000, 100, 110), (7000, 400, 410)]));
+    ext
+}
+
+fn state(c: &CaptureMap, key: SourceKey, epoch: u32) -> &EpochState {
+    &c.epochs.iter().find(|e| e.source == key && e.epoch == epoch).unwrap_or_else(|| panic!("{key} {epoch}")).state
+}
+
+#[test]
+fn cm_default_spu_is_ambiguous_and_rsx_is_mapped() {
+    let x = capture("cm-default", cm_ext());
+    let c = map_capture(&x, Premises::default(), &Budgets::default());
+    let spu = c.epochs.iter().find(|e| e.source == SourceKey::Lane(LANE)).unwrap();
+    assert_eq!((spu.coordinate, spu.brackets, &spu.state), (None, 2, &EpochState::AmbiguousLift));
+    let gpu = c.epochs.iter().find(|e| e.source == SourceKey::Gpu(RSX_D)).unwrap();
+    assert_eq!(gpu.coordinate, Some(Coordinate::R64));
+    let EpochState::Compatible(s) = &gpu.state else { panic!("{:?}", gpu.state) };
+    assert_eq!(
+        (s.slope_lo.to_string(), s.slope_lo_open, s.slope_hi.as_ref().map(|z| z.to_string())),
+        ("29/300".to_string(), false, Some("31/300".to_string()))
+    );
+    assert_eq!((s.events, s.interpolated, s.extrapolated, s.bounded, s.open_bound), (2, 2, 0, 2, 0));
+    assert_eq!(
+        (s.width_max.as_ref().unwrap().to_string(), s.width_median.as_ref().unwrap().to_string()),
+        ("10".to_string(), "10".to_string())
+    );
+    let l = clockmap_lines(&x, &c);
+    let spu_line = format!(
+        "  SPU lane {LANE} (domain {SPU_D}) epoch 1: AMBIGUOUS-LIFT (no SPU coordinate premise selected; the \
+         capture does not determine the decrementer's wrap count) | premises none applied | brackets 2"
+    );
+    let gpu_line = format!(
+        "  GPU domain {RSX_D} (domain {RSX_D}) epoch 1: COMPATIBLE | premises C,A,S,R64 | brackets 2 distinct_f 2 \
+         | slope [29/300, 31/300] | covered f [4000, 7000] | events 2: interpolated 2 extrapolated 0; bounded 2 \
+         half-unbounded 0 unbounded 0; open-bound 0 | width max 10 median 10"
+    );
+    assert!(l.contains(&spu_line), "{l:#?}");
+    assert!(l.contains(&gpu_line), "{l:#?}");
+    assert!(!l.iter().any(|t| t.contains("SPU lane") && t.contains("W32")), "W32 was not selected: {l:#?}");
+}
+
+#[test]
+fn cm_spu_under_w32() {
+    let x = capture("cm-w32", cm_ext());
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let spu = c.epochs.iter().find(|e| e.source == SourceKey::Lane(LANE)).unwrap();
+    assert_eq!(spu.coordinate, Some(Coordinate::W32));
+    let EpochState::Compatible(s) = &spu.state else { panic!("{:?}", spu.state) };
+    assert_eq!(
+        (s.slope_lo.to_string(), s.slope_hi.as_ref().unwrap().to_string()),
+        ("1/10".to_string(), "3/10".to_string())
+    );
+    assert_eq!((s.fmin, s.fmax), (SPU_DEC_TOP - 1000, SPU_DEC_TOP - 900));
+    assert_eq!(s.width_median.as_ref().unwrap().to_string(), "10");
+    assert!(clockmap_lines(&x, &c).iter().any(|t| t.contains("SPU lane") && t.contains("premises C,A,S,W32")));
+}
+
+#[test]
+fn cm_no_rsx_brackets_is_no_observations() {
+    let x = capture("cm-noobs", std_ext());
+    let c = map_capture(&x, Premises::default(), &Budgets::default());
+    assert_eq!(state(&c, SourceKey::Gpu(RSX_D), 1), &EpochState::NoObservations);
+}
+
+#[test]
+fn cm_cache_is_scoped_to_the_epoch() {
+    // The same raw value 950 in two epochs with different brackets: f is equal, the models are not.  Epoch 1 width
+    // at the midpoint: (20+40)/2 - (10+30)/2 = 10; epoch 2: (120+140)/2 - (100+130)/2 = 15.
+    let body = vec![
+        calibration(SPU_D, 1, 0, &[(1000, 10, 20), (900, 30, 40)]),
+        spu_events(LANE, 1, 0, &[(950, 0, M, 0), (950, 0, M, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        calibration(SPU_D, 2, 0, &[(1000, 100, 120), (900, 130, 140)]),
+        spu_events(LANE, 2, 2, &[(950, 0, M, 0), (950, 0, M, 0)]),
+    ];
+    let x = capture("cm-cache", lane_only(body, (1, 4, 4, 0)));
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let width = |e| match state(&c, SourceKey::Lane(LANE), e) {
+        EpochState::Compatible(s) => s.width_median.as_ref().unwrap().to_string(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!((width(1), width(2)), ("10".to_string(), "15".to_string()));
+}
+
+#[test]
+fn cm_capture_budget_boundaries_are_exact_and_atomic() {
+    let x = capture("cm-budget", cm_ext());
+    let full = map_capture(&x, NOWRAP, &Budgets::default());
+    assert_eq!(full.exhausted_at, None);
+    let need = full.used;
+    let with = |capture| map_capture(&x, NOWRAP, &Budgets { capture, ..Budgets::default() });
+    // Exactly enough: the identical result.
+    let exact = with(need);
+    assert_eq!((exact.epochs.clone(), exact.exhausted_at), (full.epochs.clone(), None));
+    // One under: the LAST mapped epoch (the GPU domain) runs out; the SPU result is complete and unchanged.
+    let short = with(need - 1);
+    assert_eq!(short.exhausted_at, Some((SourceKey::Gpu(RSX_D), 1)));
+    assert_eq!(state(&short, SourceKey::Gpu(RSX_D), 1), &EpochState::Unsupported(Limit::Capture));
+    assert_eq!(state(&short, SourceKey::Lane(LANE), 1), state(&full, SourceKey::Lane(LANE), 1));
+    // The SPU source pays its undeclared-epoch scan (2 events), then the solve completes and the distinct-coordinate
+    // pass (2 more) runs out: no partial result, and every later mapping-eligible epoch is UNSUPPORTED too.
+    let obs: Vec<Obs> = [(1000u64, 10u64, 20u64), (900, 30, 40)]
+        .iter()
+        .map(|&(f, lo, hi)| Obs { f: SPU_DEC_TOP - i128::from(f), lo: i128::from(lo), hi: i128::from(hi) })
+        .collect();
+    let mut m = Meter::unlimited();
+    solve(&mut m, &obs).unwrap();
+    let mid = with(2 + m.used() + 1);
+    assert_eq!(mid.exhausted_at, Some((SourceKey::Lane(LANE), 1)));
+    assert_eq!(state(&mid, SourceKey::Lane(LANE), 1), &EpochState::Unsupported(Limit::Capture));
+    assert_eq!(state(&mid, SourceKey::Gpu(RSX_D), 1), &EpochState::Unsupported(Limit::Capture));
+}
+
+#[test]
+fn cm_zero_budget_keeps_true_bracket_counts() {
+    let x = capture("cm-zero", cm_ext());
+    let zero = Budgets { capture: 0, ..Budgets::default() };
+    let w = map_capture(&x, NOWRAP, &zero);
+    assert_eq!(w.exhausted_at, Some((SourceKey::Lane(LANE), 1)));
+    for key in [SourceKey::Lane(LANE), SourceKey::Gpu(RSX_D)] {
+        let e = w.epochs.iter().find(|e| e.source == key).unwrap();
+        assert_eq!((e.brackets, &e.state), (2, &EpochState::Unsupported(Limit::Capture)), "{key}");
+    }
+    let d = map_capture(&x, Premises::default(), &zero);
+    let spu = d.epochs.iter().find(|e| e.source == SourceKey::Lane(LANE)).unwrap();
+    assert_eq!((spu.brackets, &spu.state), (2, &EpochState::AmbiguousLift));
+    let gpu = d.epochs.iter().find(|e| e.source == SourceKey::Gpu(RSX_D)).unwrap();
+    assert_eq!((gpu.brackets, &gpu.state), (2, &EpochState::Unsupported(Limit::Capture)));
+    assert_eq!((d.exhausted_at, d.used), (Some((SourceKey::Gpu(RSX_D), 1)), 0));
+    let l = clockmap_lines(&x, &d);
+    assert!(l.iter().any(|t| t.contains("AMBIGUOUS-LIFT") && t.ends_with("| brackets 2")), "{l:#?}");
+    assert!(l.iter().any(|l| l.starts_with("clockmap: capture budget exhausted at GPU domain")));
+}
+
+#[test]
+fn cm_ambiguous_only_capture_does_no_work() {
+    let body = vec![
+        calibration(SPU_D, 1, 0, &[(1000, 10, 20), (900, 30, 40)]),
+        spu_events(LANE, 1, 0, &[(950, 0, M, 0), (940, 0, M, 0)]),
+    ];
+    let x = capture("cm-ambiguous-only", lane_only(body, (1, 2, 2, 0)));
+    let c = map_capture(&x, Premises::default(), &Budgets::default());
+    assert_eq!(c.used, 0, "no charged work: nothing is mapped");
+    assert_eq!(c.epochs.len(), 1);
+    assert_eq!((c.epochs[0].brackets, &c.epochs[0].state), (2, &EpochState::AmbiguousLift));
+}
+
+#[test]
+fn cm_repeated_coordinate_source_is_bounded_by_distinct_values() {
+    // 100000 events at one raw value: one distinct coordinate, so a cap of 1 still maps every event.
+    let n = 100_000u64;
+    let ev = vec![(950u32, 0u16, M, 0u8); n as usize];
+    let body = vec![calibration(SPU_D, 1, 0, &[(1000, 10, 20), (900, 30, 40)]), spu_events(LANE, 1, 0, &ev)];
+    let x = capture("cm-repeated", lane_only(body, (1, n, n, 0)));
+    let c = map_capture(&x, NOWRAP, &Budgets { max_distinct_q: 1, ..Budgets::default() });
+    let EpochState::Compatible(s) = state(&c, SourceKey::Lane(LANE), 1) else { panic!("{c:?}") };
+    assert_eq!((s.events, s.interpolated, s.width_median.as_ref().unwrap().to_string()), (n, n, "10".to_string()));
+}
+
+#[test]
+fn cm_distinct_coordinate_cap() {
+    let x = capture("cm-qcap", cm_ext());
+    let c = map_capture(&x, Premises::default(), &Budgets { max_distinct_q: 1, ..Budgets::default() });
+    assert_eq!(state(&c, SourceKey::Gpu(RSX_D), 1), &EpochState::Unsupported(Limit::Coordinates));
+}
+
+fn cm_cli(args: &[&str], bytes: Option<&[u8]>, tag: &str) -> (Option<i32>, String) {
+    let path = std::env::temp_dir().join(format!("ps3dk-prof-cm-{}-{tag}.prof", std::process::id()));
+    let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    if let Some(b) = bytes {
+        std::fs::write(&path, b).expect("write the capture");
+        argv.push(path.to_string_lossy().into_owned());
+    }
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof")).args(&argv).output().expect("run");
+    let _ = std::fs::remove_file(&path);
+    (out.status.code(), String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[test]
+fn cm_cli_exit_status_is_the_check_status() {
+    let clean = ext_file(cm_ext()).bytes();
+    let invalid = {
+        let body = vec![
+            spu_events(LANE, 1, 0, &[(990, 0, M, 0), (990, 0, M, 0)]),
+            epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+            spu_events(LANE, 2, 2, &[(5, 0, M, 0), (4, 0, M, 0)]),
+        ];
+        ext_file(lane_only(body, (1, 4, 4, 0))).bytes()
+    };
+    let mut bad = std_ext();
+    bad[4] = calibration(SPU_D, 1, 0, &[(1000, 20, 20)]);
+    let malformed = ext_file(bad).bytes();
+    let v1 = v1_scenario().bytes();
+    for (tag, bytes, want) in [("clean", &clean, 0), ("invalid", &invalid, 4), ("malformed", &malformed, 2), ("v1", &v1, 0)]
+    {
+        let (check, _) = cm_cli(&["check"], Some(bytes), &format!("{tag}-check"));
+        let (code, out) = cm_cli(&["clockmap"], Some(bytes), &format!("{tag}-cm"));
+        let (code_w, _) = cm_cli(&["clockmap", "--premise", "spu-nowrap"], Some(bytes), &format!("{tag}-cmw"));
+        assert_eq!((check, code, code_w), (Some(want), Some(want), Some(want)), "{tag}: {out}");
+    }
+    let (_, out) = cm_cli(&["clockmap"], Some(&v1), "v1-text");
+    assert!(out.contains("clockmap: no domain extensions (nothing to map)"), "{out}");
+    let (_, out) = cm_cli(&["clockmap"], Some(&clean), "clean-text");
+    assert!(out.starts_with("COMPLETE (TRANSPORT COMPLETE)\nclockmap: CONDITIONAL AFFINE BOUNDS"), "{out}");
+    // The report is untouched by the mapping.
+    let (_, rep) = cm_cli(&["report"], Some(&clean), "clean-report");
+    assert!(rep.contains("MAPPING UNMEASURED") && !rep.contains("clockmap"), "{rep}");
+}
+
+#[test]
+fn cm_cli_prints_the_source_facts_beside_the_results() {
+    let cal = || calibration(SPU_D, 1, 0, &[(1000, 10, 20), (900, 30, 40)]);
+    let cases = [
+        (
+            "transition",
+            lane_only(
+                vec![
+                    cal(),
+                    spu_events(LANE, 1, 0, &[(950, 0, M, 0), (950, 0, M, 0)]),
+                    epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+                    spu_events(LANE, 2, 2, &[(5, 0, M, 0), (4, 0, M, 0)]),
+                ],
+                (1, 4, 4, 0),
+            ),
+            "open_begins not verified",
+        ),
+        (
+            "loss",
+            lane_only(
+                vec![
+                    cal(),
+                    spu_events(LANE, 1, 0, &[(990, 0, M, 0)]),
+                    loss(LANE, 1, 1, 1),
+                    spu_events(LANE, 1, 2, &[(980, 0, M, 0)]),
+                ],
+                (1, 3, 2, 1),
+            ),
+            "1 events lost",
+        ),
+        (
+            "protocol",
+            lane_only(
+                vec![
+                    cal(),
+                    spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 2, 0)]),
+                    spu_events(LANE, 1, 2, &[(970, 0, M, 0)]),
+                ],
+                (1, 3, 3, 0),
+            ),
+            "PROTOCOL ERROR",
+        ),
+    ];
+    for (tag, ext, reason) in cases {
+        let bytes = ext_file(ext).bytes();
+        let (check_code, check) = cm_cli(&["check"], Some(&bytes), &format!("{tag}-check"));
+        let (code, out) = cm_cli(&["clockmap", "--premise", "spu-nowrap"], Some(&bytes), &format!("{tag}-cm"));
+        assert_eq!(code, check_code, "{tag}");
+        let facts: Vec<&str> =
+            check.lines().filter(|l| l.starts_with("  SPU lane") || l.starts_with("    events")).collect();
+        assert_eq!(facts.len(), 2, "{tag}: {check}");
+        assert!(facts[0].contains(reason), "{tag}: {}", facts[0]);
+        let got: Vec<&str> = out.lines().collect();
+        let at = got.iter().position(|l| *l == facts[0]).unwrap_or_else(|| panic!("{tag}: no fact line in: {out}"));
+        assert_eq!(got[at + 1], facts[1], "{tag}");
+        assert!(got[at + 2].starts_with(&format!("  SPU lane {LANE} (domain {SPU_D}) epoch 1: COMPATIBLE")), "{tag}: {out}");
+    }
+}
+
+#[test]
+fn cm_cli_premise_parsing() {
+    let clean = ext_file(cm_ext()).bytes();
+    for (tag, args) in [
+        ("unknown", vec!["clockmap", "--premise", "rsx-nowrap"]),
+        ("dup", vec!["clockmap", "--premise", "spu-nowrap", "--premise", "spu-nowrap"]),
+        ("flag", vec!["clockmap", "--nowrap"]),
+    ] {
+        let (code, _) = cm_cli(&args, Some(&clean), tag);
+        assert_eq!(code, Some(3), "{tag}");
+    }
+    let (code, _) = cm_cli(&["clockmap", "--premise"], None, "novalue");
+    assert_eq!(code, Some(3));
+    let (code, _) = cm_cli(&["clockmap"], None, "nofile");
+    assert_eq!(code, Some(3));
+    let path = std::env::temp_dir().join(format!("ps3dk-prof-cm-{}-two.prof", std::process::id()));
+    std::fs::write(&path, &clean).unwrap();
+    let p = path.to_string_lossy().into_owned();
+    let out =
+        std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof")).args(["clockmap", &p, &p]).output().unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(out.status.code(), Some(3), "two paths");
+    let (code, out) = cm_cli(&["clockmap", "--premise", "spu-nowrap"], Some(&clean), "w32");
+    assert_eq!(code, Some(0));
+    assert!(out.lines().any(|l| l.contains("SPU lane") && l.contains("premises C,A,S,W32")), "{out}");
+}

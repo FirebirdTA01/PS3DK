@@ -180,7 +180,6 @@ pub const EXT_EMPTY_LINE: &str =
     "domain extensions: 0 sources declared (no SPU/RSX work is recorded; no SPU/RSX coverage is claimed)";
 
 pub fn extension_lines(cap: &Capture) -> Vec<String> {
-    use crate::ext::OpenBegins;
     let Some(x) = &cap.ext else { return Vec::new() };
     if x.sources.is_empty() {
         return vec![EXT_EMPTY_LINE.to_string()];
@@ -190,42 +189,51 @@ pub fn extension_lines(cap: &Capture) -> Vec<String> {
         x.sources.len()
     )];
     for s in &x.sources {
-        let p = source_parts(s);
-        let open = match s.open_begins {
-            OpenBegins::Verified(n) => format!("open_begins {n} verified"),
-            OpenBegins::Unverifiable(n) => format!("open_begins {n} UNVERIFIABLE"),
-            OpenBegins::NoFinal => "no FINAL".to_string(),
-        };
-        out.push(format!(
-            "  {} (domain {}): STRUCTURE {} | RAW VALIDITY {} | MAPPING UNMEASURED | COVERAGE {}",
-            p.source, p.domain, p.structure, p.raw, p.coverage
-        ));
-        let at = if s.final_state.is_some() { "FINAL" } else { "end (no FINAL)" };
-        let open_at = match s.open_at_end() {
-            Some(n) => format!("open at {at} {n}"),
-            None => format!("open at {at} UNKNOWN (protocol error)"),
-        };
-        let mut detail = format!(
-            "    events {} lost {} | paired {} censored {} unpaired {} marks {} | {open_at} | {open} | epochs {} \
-             brackets {}",
-            s.events_total,
-            s.lost_total,
-            s.paired(),
-            s.censored(),
-            s.unpaired(),
-            s.marks(),
-            s.epochs,
-            s.brackets
-        );
-        if matches!(s.key, crate::ext::SourceKey::Gpu(_)) {
-            detail.push_str(&format!(
-                " | frames resolved {} unresolved {} none {}",
-                s.frames_resolved, s.frames_unresolved, s.frames_none
-            ));
-        }
-        out.push(detail);
+        out.extend(source_fact_lines(s));
         out.extend(counter_lines(x, s));
     }
+    out
+}
+
+/// The two fact lines of one extension source (its verdict layers, then its counts), exactly as `check` and
+/// `report` print them; `ps3dk-prof clockmap` prints them too, before the source's conditional results.
+pub fn source_fact_lines(s: &crate::ext::SourceReport) -> Vec<String> {
+    use crate::ext::OpenBegins;
+    let mut out = Vec::with_capacity(2);
+    let p = source_parts(s);
+    let open = match s.open_begins {
+        OpenBegins::Verified(n) => format!("open_begins {n} verified"),
+        OpenBegins::Unverifiable(n) => format!("open_begins {n} UNVERIFIABLE"),
+        OpenBegins::NoFinal => "no FINAL".to_string(),
+    };
+    out.push(format!(
+        "  {} (domain {}): STRUCTURE {} | RAW VALIDITY {} | MAPPING UNMEASURED | COVERAGE {}",
+        p.source, p.domain, p.structure, p.raw, p.coverage
+    ));
+    let at = if s.final_state.is_some() { "FINAL" } else { "end (no FINAL)" };
+    let open_at = match s.open_at_end() {
+        Some(n) => format!("open at {at} {n}"),
+        None => format!("open at {at} UNKNOWN (protocol error)"),
+    };
+    let mut detail = format!(
+        "    events {} lost {} | paired {} censored {} unpaired {} marks {} | {open_at} | {open} | epochs {} \
+         brackets {}",
+        s.events_total,
+        s.lost_total,
+        s.paired(),
+        s.censored(),
+        s.unpaired(),
+        s.marks(),
+        s.epochs,
+        s.brackets
+    );
+    if matches!(s.key, crate::ext::SourceKey::Gpu(_)) {
+        detail.push_str(&format!(
+            " | frames resolved {} unresolved {} none {}",
+            s.frames_resolved, s.frames_unresolved, s.frames_none
+        ));
+    }
+    out.push(detail);
     out
 }
 

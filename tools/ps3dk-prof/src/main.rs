@@ -2,6 +2,7 @@
 //!
 //!   ps3dk-prof check <file>    print the verdict
 //!   ps3dk-prof report <file>   print the verdict and the full report
+//!   ps3dk-prof clockmap [--premise spu-nowrap] <file>   print the verdict and the conditional affine bounds
 //!
 //! Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error, 4 (domain-extension files only)
 //! TRANSPORT COMPLETE but an extension source is not STRUCTURE COMPLETE and RAW VALID.
@@ -13,6 +14,8 @@ use ps3dk_prof::{load, report, Outcome, Verdict};
 const USAGE: &str = "usage:
   ps3dk-prof check <file>    print the verdict
   ps3dk-prof report <file>   print the verdict and the full report
+  ps3dk-prof clockmap [--premise spu-nowrap] <file>   print the verdict and the conditional
+                                                      affine bounds (exit status as check)
   ps3dk-prof check-arcs <file>   validate a binary arc companion
   ps3dk-prof arcs-json <file>    export exact arc observations as JSON
   ps3dk-prof check-pair <file.arcs> <file.prof>   verify a final companion pair
@@ -74,8 +77,89 @@ fn check_pair(arcs_path: &str, timing_path: &str) -> ExitCode {
     }
 }
 
+/// The exit status of `check` for an analysed capture.
+fn verdict_code(a: &ps3dk_prof::Analysis) -> ExitCode {
+    match a.verdict {
+        Verdict::Complete if report::extensions_clean(&a.capture) => ExitCode::SUCCESS,
+        Verdict::Complete => ExitCode::from(4),
+        Verdict::Incomplete(_) => ExitCode::from(1),
+    }
+}
+
+/// `clockmap [--premise <name>]... <file>`: each premise at most once, only known names; anything else is a usage
+/// error (exit 3).  The mapping never changes the verdict or the exit status: those are exactly as for `check`.
+fn clockmap(rest: &[String]) -> ExitCode {
+    use ps3dk_prof::clockmap::{lines, map_capture, Budgets, Premises};
+
+    let mut premises = Premises::default();
+    let mut path: Option<&str> = None;
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--premise" => {
+                match rest.get(i + 1).map(String::as_str) {
+                    Some("spu-nowrap") if premises.spu_nowrap => {
+                        eprintln!("ps3dk-prof: premise spu-nowrap given twice");
+                        return ExitCode::from(3);
+                    }
+                    Some("spu-nowrap") => premises.spu_nowrap = true,
+                    Some(other) => {
+                        eprintln!("ps3dk-prof: unknown premise {other:?} (known: spu-nowrap)");
+                        return ExitCode::from(3);
+                    }
+                    None => {
+                        eprintln!("{USAGE}");
+                        return ExitCode::from(3);
+                    }
+                }
+                i += 2;
+            }
+            a if a.starts_with('-') || path.is_some() => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(3);
+            }
+            a => {
+                path = Some(a);
+                i += 1;
+            }
+        }
+    }
+    let Some(path) = path else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(3);
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ps3dk-prof: {path}: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    match load(&bytes) {
+        Outcome::Malformed(m) => {
+            println!("{m}");
+            ExitCode::from(2)
+        }
+        Outcome::Analysed(a) => {
+            println!("{}", report::verdict_line(&a.verdict));
+            match &a.capture.ext {
+                None => println!("clockmap: no domain extensions (nothing to map)"),
+                Some(x) => {
+                    for line in lines(x, &map_capture(x, premises, &Budgets::default())) {
+                        println!("{line}");
+                    }
+                }
+            }
+            verdict_code(&a)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|c| c == "clockmap") {
+        return clockmap(&args[1..]);
+    }
     if let [cmd, arcs, timing] = args.as_slice() {
         if cmd == "check-pair" {
             return check_pair(arcs, timing);
@@ -145,11 +229,7 @@ fn main() -> ExitCode {
                     println!("{line}");
                 }
             }
-            match a.verdict {
-                Verdict::Complete if report::extensions_clean(&a.capture) => ExitCode::SUCCESS,
-                Verdict::Complete => ExitCode::from(4),
-                Verdict::Incomplete(_) => ExitCode::from(1),
-            }
+            verdict_code(&a)
         }
     }
 }
