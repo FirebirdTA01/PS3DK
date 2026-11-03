@@ -1224,3 +1224,242 @@ fn epoch_calibration_and_loss_after_final_are_malformed() {
         expect_malformed(&format!("af-{name}"), &ext_file(ext).bytes(), "data after its DOMAIN_FINAL");
     }
 }
+
+// ---- the decrementer observed-variation classification (design p3.2 dec-write r2 section 3; codex 02:07/02:08) ----
+
+use ps3dk_prof::ext::{counter_variation, CounterVariation, EpochVariation, ExtCapture};
+use CounterVariation::{Insufficient, Moving, Static};
+
+const M: u8 = 3; // MARK: an observation that makes no pairing claim
+
+/// One SPU lane only: epoch 1 declared (reason 1, written_value 0), then `body`, then its FINAL (state, next, events,
+/// lost).
+fn lane_only(body: Vec<Chunk>, fin: (u8, u64, u64, u64)) -> Vec<Chunk> {
+    let (state, next, events, lost) = fin;
+    let mut v = vec![
+        domains(&[(SPU_D, 1, LANE)]),
+        images(0, b"spu-build", 2),
+        lanes(&[(LANE, SPU_D, 0, 1)]),
+        epochs(&[(SPU_D, 1, 1, 0)]),
+    ];
+    v.extend(body);
+    v.push(finals(&[(LANE, 1, state, next, events, lost, 0)]));
+    v
+}
+
+fn capture(name: &str, ext: Vec<Chunk>) -> ExtCapture {
+    let bytes = ext_file(ext).bytes();
+    dump(name, &bytes);
+    match load(&bytes) {
+        Outcome::Analysed(a) => a.capture.ext.expect("extension capture"),
+        Outcome::Malformed(m) => panic!("{name}: expected a readable file, got {m}"),
+    }
+}
+
+fn variation(name: &str, ext: Vec<Chunk>) -> (Vec<EpochVariation>, SourceReport) {
+    let x = capture(name, ext);
+    let s = x.sources.iter().find(|s| s.key == SourceKey::Lane(LANE)).expect("lane").clone();
+    (counter_variation(&x, &s).expect("an SPU lane is classified"), s)
+}
+
+fn epv(epoch: u32, events: u64, brackets: u64, state: CounterVariation, span: Option<u64>) -> EpochVariation {
+    EpochVariation { epoch, events, brackets, state, loss_records_in_event_span: span }
+}
+
+#[test]
+fn cv_design_cases() {
+    // 0 observations: the epoch is declared, nothing observed
+    let (v, _) = variation("cv-0", lane_only(vec![], (1, 0, 0, 0)));
+    assert_eq!(v, vec![epv(1, 0, 0, Insufficient, None)]);
+    // 1 observation
+    let (v, _) = variation("cv-1", lane_only(vec![spu_events(LANE, 1, 0, &[(990, 0, M, 0)])], (1, 1, 1, 0)));
+    assert_eq!(v, vec![epv(1, 1, 0, Insufficient, None)]);
+    // 2 equal / 2 unequal
+    let two_eq = vec![spu_events(LANE, 1, 0, &[(990, 0, M, 0), (990, 0, M, 0)])];
+    let (v, _) = variation("cv-2eq", lane_only(two_eq.clone(), (1, 2, 2, 0)));
+    assert_eq!(v, vec![epv(1, 2, 0, Static, Some(0))]);
+    let two_ne = vec![spu_events(LANE, 1, 0, &[(990, 0, M, 0), (980, 0, M, 0)])];
+    let (v, _) = variation("cv-2ne", lane_only(two_ne, (1, 2, 2, 0)));
+    assert_eq!(v, vec![epv(1, 2, 0, Moving, Some(0))]);
+    // a wrap is just variation
+    let wrap = vec![spu_events(LANE, 1, 0, &[(1, 0, M, 0), (0xFFFF_FFFE, 0, M, 0)])];
+    let (v, _) = variation("cv-wrap", lane_only(wrap, (1, 2, 2, 0)));
+    assert_eq!(v[0].state, Moving);
+    // the EPOCH written_value (epoch 2, the dec_write) differs from every (equal) read: it is not an observation
+    let body = vec![
+        two_eq[0].clone(),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        spu_events(LANE, 2, 2, &[(990, 0, M, 0), (990, 0, M, 0)]),
+    ];
+    let (v, _) = variation("cv-written", lane_only(body, (1, 4, 4, 0)));
+    assert_eq!(v, vec![epv(1, 2, 0, Static, Some(0)), epv(2, 2, 0, Static, Some(0))]);
+}
+
+#[test]
+fn cv_equal_values_with_a_loss_between_them_and_unchanged_qualifiers() {
+    let body = vec![
+        spu_events(LANE, 1, 0, &[(990, 0, M, 0)]),
+        loss(LANE, 1, 1, 2),
+        spu_events(LANE, 1, 3, &[(990, 0, M, 0)]),
+    ];
+    let (v, s) = variation("cv-loss-between", lane_only(body, (1, 4, 2, 2)));
+    assert_eq!(v, vec![epv(1, 2, 0, Static, Some(1))], "1 LOSS record (2 lost events) inside the event span");
+    assert_eq!((s.structure, s.raw_valid, s.lost_total), (Structure::Complete, false, 2));
+    assert!(s.coverage_unknown.iter().any(|c| c == "LOSS"), "{:?}", s.coverage_unknown);
+}
+
+#[test]
+fn cv_half_open_loss_containment() {
+    // leading LOSS [0,2) before the span; [3,5) ends exactly at the last event seq b = 5 (contained: its last lost
+    // seq is b-1); trailing LOSS [6,7) after the span
+    let body = vec![
+        loss(LANE, 1, 0, 2),
+        spu_events(LANE, 1, 2, &[(990, 0, M, 0)]),
+        loss(LANE, 1, 3, 2),
+        spu_events(LANE, 1, 5, &[(990, 0, M, 0)]),
+        loss(LANE, 1, 6, 1),
+    ];
+    let (v, _) = variation("cv-halfopen", lane_only(body, (1, 7, 2, 5)));
+    assert_eq!(v, vec![epv(1, 2, 0, Static, Some(1))]);
+}
+
+#[test]
+fn cv_two_epochs_independent_with_an_epoch_boundary_loss() {
+    // epoch 1 seqs 0,1 equal; LOSS at seq 2 between the epochs (inside neither event span); epoch 2 seqs 3,4 unequal
+    let body = vec![
+        spu_events(LANE, 1, 0, &[(990, 0, M, 0), (990, 0, M, 0)]),
+        loss(LANE, 1, 2, 1),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        spu_events(LANE, 2, 3, &[(0xFFFF_0000, 0, M, 0), (0xFFFE_0000, 0, M, 0)]),
+    ];
+    let (v, s) = variation("cv-two-epochs", lane_only(body, (1, 5, 4, 1)));
+    assert_eq!(v, vec![epv(1, 2, 0, Static, Some(0)), epv(2, 2, 0, Moving, Some(0))]);
+    assert!(!s.raw_valid && s.invalid.iter().any(|r| r == "open_begins not verified"), "{:?}", s.invalid);
+}
+
+#[test]
+fn cv_epoch_2_transition_without_loss_is_classified_with_its_invalidity_kept() {
+    let body = vec![
+        spu_events(LANE, 1, 0, &[(990, 0, M, 0), (990, 0, M, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        spu_events(LANE, 2, 2, &[(0xFFFF_FFFE, 0, M, 0), (0xFFFF_E930, 0, M, 0)]),
+    ];
+    let (v, s) = variation("cv-epoch2", lane_only(body, (1, 4, 4, 0)));
+    assert_eq!(v, vec![epv(1, 2, 0, Static, Some(0)), epv(2, 2, 0, Moving, Some(0))]);
+    assert_eq!((s.structure, s.raw_valid), (Structure::Complete, false));
+}
+
+#[test]
+fn cv_brackets_alone_and_event_versus_bracket() {
+    let body = vec![calibration(SPU_D, 1, 0, &[(500, 10, 20), (500, 30, 40)])];
+    let (v, _) = variation("cv-brackets", lane_only(body, (1, 0, 0, 0)));
+    assert_eq!(v, vec![epv(1, 0, 2, Static, None)], "brackets classify; the event span stays NOT AVAILABLE");
+    let body = vec![calibration(SPU_D, 1, 0, &[(1000, 10, 20)]), spu_events(LANE, 1, 0, &[(990, 0, M, 0)])];
+    let (v, _) = variation("cv-ev-br", lane_only(body, (1, 1, 1, 0)));
+    assert_eq!(v, vec![epv(1, 1, 1, Moving, None)]);
+}
+
+#[test]
+fn cv_pairs_and_marks_do_not_add_observations() {
+    let body = vec![spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (990, 0, 2, 0), (990, 0, M, 0)])];
+    let (v, s) = variation("cv-pairs", lane_only(body, (1, 3, 3, 0)));
+    assert_eq!((s.paired(), s.marks()), (1, 1));
+    assert_eq!(v, vec![epv(1, 3, 0, Static, Some(0))], "3 stored events, counted once each");
+}
+
+#[test]
+fn cv_incomplete_sources_are_classified_with_their_qualifiers() {
+    for (state, word) in [(2u8, "ABANDONED"), (3, "OVERFLOWED")] {
+        let body = vec![spu_events(LANE, 1, 0, &[(990, 0, M, 0), (980, 0, M, 0)])];
+        let (v, s) = variation(&format!("cv-{word}"), lane_only(body, (state, 2, 2, 0)));
+        assert_eq!(v, vec![epv(1, 2, 0, Moving, Some(0))], "{word}");
+        assert_eq!((s.structure, s.raw_valid), (Structure::Incomplete, false), "{word}");
+        assert_eq!(s.incomplete, vec![word.to_string()]);
+    }
+    // no FINAL at all
+    let mut ext = lane_only(vec![spu_events(LANE, 1, 0, &[(990, 0, M, 0), (990, 0, M, 0)])], (1, 2, 2, 0));
+    ext.pop();
+    let (v, s) = variation("cv-nofinal", ext);
+    assert_eq!(v, vec![epv(1, 2, 0, Static, Some(0))]);
+    assert_eq!(s.open_begins, OpenBegins::NoFinal);
+}
+
+#[test]
+fn cv_protocol_error_source_classifies_only_its_recorded_values() {
+    // the t4 protocol-error shape: END desc 1 vs open desc 0, then a MARK; all three events stay decoded
+    let body = vec![
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 2, 0)]),
+        spu_events(LANE, 1, 2, &[(970, 0, M, 0)]),
+    ];
+    let (v, s) = variation("cv-protocol", lane_only(body, (1, 3, 3, 0)));
+    assert_eq!(v, vec![epv(1, 3, 0, Moving, Some(0))]);
+    assert!(s.protocol_error.is_some() && !s.raw_valid);
+    assert_eq!(s.raw.open, None, "the pairing view stays UNKNOWN; only equality/variation is classified");
+}
+
+#[test]
+fn cv_domain_isolation_across_lanes() {
+    // lane 10 / domain 2 equal events; lane 11 / domain 4 unequal brackets: neither sees the other's observations
+    let ext = vec![
+        domains(&[(SPU_D, 1, LANE), (4, 1, 11)]),
+        images(0, b"spu-build", 2),
+        lanes(&[(LANE, SPU_D, 0, 1), (11, 4, 0, 1)]),
+        epochs(&[(SPU_D, 1, 1, 0), (4, 1, 1, 0)]),
+        spu_events(LANE, 1, 0, &[(990, 0, M, 0), (990, 0, M, 0)]),
+        calibration(4, 1, 0, &[(1, 10, 20), (2, 30, 40)]),
+        finals(&[(LANE, 1, 1, 2, 2, 0, 0), (11, 1, 1, 0, 0, 0, 0)]),
+    ];
+    let x = capture("cv-isolation", ext);
+    let a = x.sources.iter().find(|s| s.key == SourceKey::Lane(LANE)).unwrap();
+    let b = x.sources.iter().find(|s| s.key == SourceKey::Lane(11)).unwrap();
+    assert_eq!(counter_variation(&x, a).unwrap(), vec![epv(1, 2, 0, Static, Some(0))]);
+    assert_eq!(counter_variation(&x, b).unwrap(), vec![epv(1, 0, 2, Moving, None)]);
+}
+
+#[test]
+fn cv_gpu_sources_are_not_classified() {
+    let x = capture("cv-gpu", std_ext());
+    let g = x.sources.iter().find(|s| s.key == SourceKey::Gpu(RSX_D)).unwrap();
+    assert_eq!(counter_variation(&x, g), None);
+}
+
+#[test]
+fn cv_duplicate_bracket_identity_is_still_malformed() {
+    // a repeated bracket seq is rejected by the reader (never deduplicated by the classification); the duplicate
+    // EVENT identity case is t2_gap_and_overlap_are_malformed ("events start at 1, want 2")
+    let mut ext = std_ext();
+    ext.insert(5, calibration(SPU_D, 1, 1, &[(800, 50, 60)]));
+    expect_malformed("cv-dup-bracket", &ext_file(ext).bytes(), "brackets start at 1, want 2");
+}
+
+#[test]
+fn cv_report_lines() {
+    let body = vec![
+        spu_events(LANE, 1, 0, &[(990, 0, M, 0), (990, 0, M, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        spu_events(LANE, 2, 2, &[(5, 0, M, 0), (4, 0, M, 0)]),
+        epochs(&[(SPU_D, 3, 2, 0xFFFF_FFFF)]),
+    ];
+    let r = rendered(&ext_file(lane_only(body, (1, 4, 4, 0))).bytes());
+    let q = " | source RAW VALIDITY is NOT VALID: open_begins not verified";
+    let tail = "| order and raw endpoints only (no durations)";
+    for line in [
+        format!(
+            "    epoch 1: COUNTER_STATIC (all observed values equal; says nothing about unobserved intervals) | \
+             observations: 2 events + 0 brackets | LOSS records inside the observed event-sequence span: 0 {tail}{q}"
+        ),
+        format!(
+            "    epoch 2: COUNTER_MOVING (variation observed; not proof of continuous counting) | observations: 2 \
+             events + 0 brackets | LOSS records inside the observed event-sequence span: 0 {tail}{q}"
+        ),
+        format!(
+            "    epoch 3: INSUFFICIENT (fewer than 2 observations) | observations: 0 events + 0 brackets | LOSS \
+             records inside the observed event-sequence span: NOT AVAILABLE (fewer than 2 events) {tail}{q}"
+        ),
+    ] {
+        assert_eq!(r.lines().filter(|l| *l == line).count(), 1, "missing {line:?} in\n{r}");
+    }
+    assert!(r.contains("MAPPING UNMEASURED"), "{r}");
+    let g = rendered(&ext_file(std_ext()).bytes());
+    assert_eq!(g.matches("    epoch ").count(), 1, "one epoch line for the lane, none for the GPU domain:\n{g}");
+}

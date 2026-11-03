@@ -124,8 +124,46 @@ pub fn extension_lines(cap: &Capture) -> Vec<String> {
             ));
         }
         out.push(detail);
+        out.extend(counter_lines(x, s));
     }
     out
+}
+
+/// One line per declared epoch of an SPU lane: the observed variation of its recorded decrementer values (no
+/// durations; MAPPING stays UNMEASURED); a source that is not RAW VALID repeats why on every line.
+fn counter_lines(x: &crate::ext::ExtCapture, s: &crate::ext::SourceReport) -> Vec<String> {
+    use crate::ext::{counter_variation, CounterVariation, SourceKey};
+    if !matches!(s.key, SourceKey::Lane(_)) {
+        return Vec::new();
+    }
+    let Some(v) = counter_variation(x, s) else {
+        return vec!["    counter variation: not classified (decoded epochs inconsistent)".to_string()];
+    };
+    let qual = if s.raw_valid {
+        String::new()
+    } else {
+        format!(" | source RAW VALIDITY is NOT VALID: {}", s.invalid.join("; "))
+    };
+    v.iter()
+        .map(|e| {
+            let state = match e.state {
+                CounterVariation::Insufficient => "INSUFFICIENT (fewer than 2 observations)",
+                CounterVariation::Static => {
+                    "COUNTER_STATIC (all observed values equal; says nothing about unobserved intervals)"
+                }
+                CounterVariation::Moving => "COUNTER_MOVING (variation observed; not proof of continuous counting)",
+            };
+            let span = match e.loss_records_in_event_span {
+                Some(k) => format!("{k}"),
+                None => "NOT AVAILABLE (fewer than 2 events)".to_string(),
+            };
+            format!(
+                "    epoch {}: {state} | observations: {} events + {} brackets | LOSS records inside the observed \
+                 event-sequence span: {span} | order and raw endpoints only (no durations){qual}",
+                e.epoch, e.events, e.brackets
+            )
+        })
+        .collect()
 }
 
 /// True when every extension source is STRUCTURE COMPLETE and RAW VALID (always true for a v1 file).

@@ -238,6 +238,121 @@ impl SourceReport {
     }
 }
 
+/// The observed variation of an SPU lane's decrementer values within one declared epoch (design p3.2 dec-write r2
+/// section 3).  An equality/variation fact about the recorded values only: no durations, no mapping (UNMEASURED),
+/// not a timeline or a pairing claim, and independent of the source's STRUCTURE / RAW VALIDITY / COVERAGE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CounterVariation {
+    /// Fewer than two observations.
+    Insufficient,
+    /// Two or more observations, all equal (says nothing about unobserved intervals).
+    Static,
+    /// At least two unequal observations (variation observed; not proof of continuous counting).
+    Moving,
+}
+
+/// One declared epoch of an SPU lane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpochVariation {
+    pub epoch: u32,
+    /// Observations: the epoch's decoded events (their raw decrementer values) and the lane domain's CALIBRATION
+    /// brackets of the epoch (their foreign values).  The EPOCH record's written_value is not an observation.
+    pub events: u64,
+    pub brackets: u64,
+    pub state: CounterVariation,
+    /// LOSS RECORDS (not lost events) contained in the epoch's observed EVENT-sequence span: for first/last event
+    /// seqs a < b, a LOSS [f, f+n) counts when a < f and f+n <= b.  None (NOT AVAILABLE) with fewer than two events;
+    /// bracket seqs are a separate namespace and never form a span.  Zero says nothing about loss outside the span
+    /// and does not place missing events in an epoch.
+    pub loss_records_in_event_span: Option<u64>,
+}
+
+#[derive(Default, Clone, Copy)]
+struct Observed {
+    events: u64,
+    brackets: u64,
+    value: Option<u64>,
+    moving: bool,
+    span: Option<(u64, u64)>,
+}
+
+impl Observed {
+    fn see(&mut self, v: u64) {
+        match self.value {
+            None => self.value = Some(v),
+            Some(w) if w != v => self.moving = true,
+            Some(_) => {}
+        }
+    }
+}
+
+/// The counter variation of every declared epoch of one SPU lane source; None for GPU (and any non-lane) sources.
+/// `x` and `s` must come from the SAME decoded capture (the reader's accepted representation of a non-MALFORMED
+/// file); nothing here repairs or re-validates fabricated structures.  An event whose epoch is outside 1..=epochs
+/// (impossible for a decoded capture) makes the result None rather than being guessed into an epoch.
+pub fn counter_variation(x: &ExtCapture, s: &SourceReport) -> Option<Vec<EpochVariation>> {
+    let SourceKey::Lane(_) = s.key else { return None };
+    let n = s.epochs as usize;
+    let mut acc = vec![Observed::default(); n];
+    let slot = |epoch: u32| (epoch as usize).checked_sub(1).filter(|&i| i < n);
+    for e in &s.raw.events {
+        let a = &mut acc[slot(e.epoch)?];
+        a.events += 1;
+        a.see(e.raw);
+        a.span = Some(match a.span {
+            None => (e.seq, e.seq),
+            Some((lo, hi)) => (lo.min(e.seq), hi.max(e.seq)),
+        });
+    }
+    for b in x.brackets.iter().filter(|b| b.domain_id == s.domain_id) {
+        let a = &mut acc[slot(b.epoch)?];
+        a.brackets += 1;
+        a.see(b.foreign);
+    }
+    // LOSS records inside each epoch's event span, in one monotone pass: the spans of different epochs do not
+    // overlap (event seqs grow with the epoch) and the decoded LOSS records tile the gaps in seq order.
+    let mut spans: Vec<(u64, u64, usize)> = acc
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| a.span.filter(|(lo, hi)| lo < hi).map(|(lo, hi)| (lo, hi, i)))
+        .collect();
+    spans.sort_unstable();
+    let mut losses: Vec<(u64, Option<u64>)> =
+        s.raw.losses.iter().map(|l| (l.first, l.first.checked_add(l.count))).collect();
+    losses.sort_unstable();
+    let mut inside = vec![0u64; n];
+    let mut li = 0;
+    for &(lo, hi, i) in &spans {
+        while li < losses.len() && losses[li].0 <= lo {
+            li += 1;
+        }
+        while li < losses.len() && losses[li].0 < hi {
+            if losses[li].1.is_some_and(|end| end <= hi) {
+                inside[i] += 1;
+            }
+            li += 1;
+        }
+    }
+    Some(
+        acc.iter()
+            .enumerate()
+            .map(|(i, a)| EpochVariation {
+                epoch: i as u32 + 1,
+                events: a.events,
+                brackets: a.brackets,
+                state: if a.events + a.brackets < 2 {
+                    CounterVariation::Insufficient
+                } else if a.moving {
+                    CounterVariation::Moving
+                } else {
+                    CounterVariation::Static
+                },
+                loss_records_in_event_span: if a.events >= 2 { Some(inside[i]) } else { None },
+            })
+            .collect(),
+    )
+}
+
 /// The extension part of a capture.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtCapture {
