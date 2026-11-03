@@ -15,9 +15,14 @@ endif()
 if(NOT EXISTS "${E1_EXT_ARCHIVE}")
   message(FATAL_ERROR "E1_EXT_ARCHIVE must name the uninstalled ILP32 ext archive (got '${E1_EXT_ARCHIVE}')")
 endif()
+# Stable source paths: the exported repo root, absolute and normalized, is mapped to "." in __FILE__ and debug paths,
+# to remove the exported source-root prefix from this sample's compiled source paths; whole-image reproducibility is
+# checked separately (sample-scoped; PPU and every SPU compile).
+get_filename_component(_e1_repo_root "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+set(_e1_path_maps "-ffile-prefix-map=${_e1_repo_root}=." "-fmacro-prefix-map=${_e1_repo_root}=.")
 add_executable(ext-probe source/main.c)
 target_compile_features(ext-probe PRIVATE c_std_11)
-target_compile_options(ext-probe PRIVATE -O2 -g -Wall -Wextra -Werror)
+target_compile_options(ext-probe PRIVATE -O2 -g -Wall -Wextra -Werror ${_e1_path_maps})
 target_include_directories(ext-probe PRIVATE "${E1_PROF_SRC}/../../include" "${CMAKE_CURRENT_LIST_DIR}/source" "${CMAKE_CURRENT_LIST_DIR}/../../gcm/common"
   "${E1_PROF_SRC}/spu" "${E1_PROF_SRC}/rsx" "${PS3DK}/ppu/include")
 target_compile_definitions(ext-probe PRIVATE PS3DK_PROF=1 "E1_BUILD_ID=\"${E1_BUILD_ID}\"")
@@ -27,7 +32,7 @@ ps3_add_spu_image(ext-probe NAME e1_spu
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/spu/main.c" "${CMAKE_CURRENT_LIST_DIR}/spu/e1_spu_core.c"
           "${E1_PROF_SRC}/spu/psp_spu.c" "${E1_PROF_SRC}/spu/prof_spu_writer.c"
   LIBS sputhread
-  CFLAGS "-DPS3DK_PROF=1" "-mno-error-reloc" "-I${E1_PROF_SRC}/spu" "-I${CMAKE_CURRENT_LIST_DIR}/source" "-I${E1_SPU_SDK}/spu/include"
+  CFLAGS "-DPS3DK_PROF=1" "-mno-error-reloc" ${_e1_path_maps} "-I${E1_PROF_SRC}/spu" "-I${CMAKE_CURRENT_LIST_DIR}/source" "-I${E1_SPU_SDK}/spu/include"
   LDFLAGS "-L${E1_SPU_SDK}/spu/lib")
 ps3_add_self(ext-probe)
 ps3_add_pkg(ext-probe APPID "EXTPROBE1" CONTENTID "UP0001-EXTPROBE1_00-PS3DKSAMPLES0000")
