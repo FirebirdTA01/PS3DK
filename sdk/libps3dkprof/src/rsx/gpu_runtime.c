@@ -396,7 +396,7 @@ static int done(gpu_slot *g, int rc)
 
 /* the producer calls' common checks after the prologue: the ctx, then the shutdown claim (admitted-before-stop
  * calls that passed it proceed; the core's SC handshake decides their side of the frozen frontier) */
-static int producer_checks(prof *p, gpu_slot *g, struct CellGcmContextData *ctx)
+static int producer_checks(prof *p, gpu_slot *g, ps3dk_prof_gcm_ctx *ctx)
 {
     if (ctx != g->ctx) {
         g->refused_ctx++;
@@ -437,7 +437,7 @@ static int ext_enter(prof *p)
 
 /* ---- the API ---- */
 
-int ps3dk_prof_gpu_attach(struct CellGcmContextData *ctx, uint32_t report_first, uint32_t report_count,
+int ps3dk_prof_gpu_attach(ps3dk_prof_gcm_ctx *ctx, uint32_t report_first, uint32_t report_count,
                           uint32_t label, uint32_t *gpu)
 {
     prof *p;
@@ -552,7 +552,7 @@ out:
     return p_ext_unlock_site(p, U_GPU_ATTACH) == 0 ? rc : PS3DK_PROF_ESTOPPED;
 }
 
-int ps3dk_prof_gpu_begin(uint32_t h, struct CellGcmContextData *ctx, ps3dk_prof_desc *desc, ps3dk_prof_gpu_zone *out)
+int ps3dk_prof_gpu_begin(uint32_t h, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *desc, ps3dk_prof_gpu_zone *out)
 {
     prof *p;
     gpu_slot *g;
@@ -582,7 +582,7 @@ int ps3dk_prof_gpu_begin(uint32_t h, struct CellGcmContextData *ctx, ps3dk_prof_
     return done(g, rc);
 }
 
-int ps3dk_prof_gpu_end(uint32_t h, struct CellGcmContextData *ctx, ps3dk_prof_gpu_zone *zone)
+int ps3dk_prof_gpu_end(uint32_t h, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_gpu_zone *zone)
 {
     prof *p;
     gpu_slot *g;
@@ -604,7 +604,7 @@ int ps3dk_prof_gpu_end(uint32_t h, struct CellGcmContextData *ctx, ps3dk_prof_gp
     return done(g, rc);
 }
 
-int ps3dk_prof_gpu_mark(uint32_t h, struct CellGcmContextData *ctx, ps3dk_prof_desc *desc)
+int ps3dk_prof_gpu_mark(uint32_t h, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *desc)
 {
     prof *p;
     gpu_slot *g;
@@ -719,7 +719,7 @@ int ps3dk_prof_gpu_frame(uint32_t h, ps3dk_prof_token tok)
     return done(g, rc);
 }
 
-int ps3dk_prof_gpu_calibrate(uint32_t h, struct CellGcmContextData *ctx, uint64_t timeout_us)
+int ps3dk_prof_gpu_calibrate(uint32_t h, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us)
 {
     prof *p;
     gpu_slot *g;
@@ -750,7 +750,7 @@ static void poll_inline(void *c)
  * unlock (p_gpu_ack).  OK: retired and that turn completed (FINAL accepted or, with a failed sink, refused: see the
  * stats' final_written); ESTOPPED: the turn's closing unlock failed, or the seal won; ETIMEDOUT while pending.  The
  * caller holds no lock while it waits; its inline drain (designated APP thread) takes the extension mutex itself. */
-int ps3dk_prof_gpu_detach(uint32_t h, struct CellGcmContextData *ctx, uint64_t timeout_us)
+int ps3dk_prof_gpu_detach(uint32_t h, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us)
 {
     prof *p;
     gpu_slot *g;

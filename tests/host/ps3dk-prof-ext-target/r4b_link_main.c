@@ -11,16 +11,9 @@
 
 volatile uint64_t r4b_sink;
 
-/* OPEN FINDING (R4b target step 1): in C, <cell/gcm.h> makes CellGcmContextData a typedef of gcmContextData, so the
- * struct CellGcmContextData tag the GPU API takes is a different, incomplete type, and a C caller passing
- * gCellGcmCurrentContext gets -Wincompatible-pointer-types.  This never-executed link witness casts ONLY to continue
- * the code-shape inspection; it does not clear C API compatibility.  R4B_UNCAST keeps the reproducer: compiled
- * without the cast, the diagnostic must still appear (a separate typedef-compatible API fix is tracked). */
-#ifdef R4B_UNCAST
+/* The GPU API takes ps3dk_prof_gcm_ctx * (struct _gcmCtxData), which gCellGcmCurrentContext is in C: no cast (the
+ * R4b finding, fixed; the old header's defect is the ctxtype/ control). */
 #define R4B_CTX gCellGcmCurrentContext
-#else
-#define R4B_CTX ((struct CellGcmContextData *)(void *)gCellGcmCurrentContext)
-#endif
 
 #ifdef R4B_LINK_NONE
 int main(int argc, char **argv)

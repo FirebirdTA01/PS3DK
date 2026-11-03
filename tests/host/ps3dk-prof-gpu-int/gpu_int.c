@@ -391,8 +391,8 @@ static FILE *expect(const char *name)
 static ps3dk_prof_desc D_A = {"gpu_a", "", "gpu_int.c", 1, 2, 0, 0}, D_B = {"gpu_b", "", "gpu_int.c", 2, 2, 0, 0},
                        D_C = {"gpu_c", "", "gpu_int.c", 3, 2, 0, 0}, D_N = {"gpu_new", "", "gpu_int.c", 4, 2, 0, 0},
                        D_CPU = {"cpu_scope", "", "gpu_int.c", 5, 1, 0, 0};
-#define CTX ((struct CellGcmContextData *)(uintptr_t)0x1000)
-#define CTX2 ((struct CellGcmContextData *)(uintptr_t)0x2000)
+#define CTX ((ps3dk_prof_gcm_ctx *)(uintptr_t)0x1000)
+#define CTX2 ((ps3dk_prof_gcm_ctx *)(uintptr_t)0x2000)
 static int B(uint32_t h, ps3dk_prof_desc *d, ps3dk_prof_gpu_zone *z)
 {
     int rc = ps3dk_prof_gpu_begin(h, CTX, d, z);
@@ -625,7 +625,7 @@ static int c_api_refusals(void)
     CHECK(ps3dk_prof_gpu_attach(CTX2, 2048 - 20, 8, 65, &h2) == PS3DK_PROF_EINVAL, "overlapping reports");
     CHECK(ps3dk_prof_gpu_attach(CTX2, 0, 16, 64, &h2) == PS3DK_PROF_EINVAL, "same label");
     CHECK(ps3dk_prof_gpu_attach(CTX2, 0, 16, 65, &h2) == 0 && h2 == 1027, "a disjoint second domain");
-    CHECK(ps3dk_prof_gpu_attach((struct CellGcmContextData *)(uintptr_t)0x3000, 100, 16, 66, &u) == PS3DK_PROF_EFULL,
+    CHECK(ps3dk_prof_gpu_attach((ps3dk_prof_gcm_ctx *)(uintptr_t)0x3000, 100, 16, 66, &u) == PS3DK_PROF_EFULL,
           "table full: EFULL");
     /* zones */
     memset(sentinel, 0xA5, sizeof sentinel);

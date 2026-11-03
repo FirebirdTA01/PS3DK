@@ -1,7 +1,7 @@
-/* GPU (RSX) timestamp domains in the runtime (P3.3 R2): INTERNAL and host-only in this checkpoint.  It is not
- * installed under sdk/include and no target archive contains it (the extension compiles only with
- * PS3DK_PROF_WITH_SPU, which only host builds define); the GPU device is a test-hook emulator until the target
- * binding (R3).  Enabled by ps3dk_prof_ext_config.gpu_domains_max (prof_spu.h).
+/* GPU (RSX) timestamp domains in the runtime (P3.3 R2; R4b target wiring): INTERNAL.  It is not installed under
+ * sdk/include; the only target archive containing the GPU runtime is the UNINSTALLED ILP32 ext archive (make
+ * ext-ilp32), where the device is GCM; host builds use a test-hook device.  Enabled by
+ * ps3dk_prof_ext_config.gpu_domains_max (prof_spu.h).
  *
  * Every call: EBUSY inside a drain, a sink callback or another GPU call (port callbacks included), checked before any
  * lock; ENOTINIT before init; ENOTSUP without GPU domains (or without a device); ESTOPPED after a terminal extension
@@ -22,7 +22,12 @@
 extern "C" {
 #endif
 
-struct CellGcmContextData; /* incomplete here; R4a: host tests pass a fake context to the real GCM port */
+/* The GCM context: PSL1GHT's struct _gcmCtxData.  In C, <cell/gcm.h>'s CellGcmContextData and gcmContextData and
+ * gCellGcmCurrentContext are all this type (no cast, full pointer checking); in C++ CellGcmContextData is a
+ * distinct type DERIVED from it, so a CellGcmContextData* converts implicitly to this base pointer (not the reverse).
+ * Declared, not included: usable before or after <cell/gcm.h>, and on the host with no cell headers. */
+struct _gcmCtxData;
+typedef struct _gcmCtxData ps3dk_prof_gcm_ctx;
 
 /* A GPU zone.  Zero-initialised (PS3DK_PROF_GPU_ZONE_INIT) is INERT; ending an INERT zone is EINVAL. */
 typedef struct ps3dk_prof_gpu_zone {
@@ -45,23 +50,23 @@ typedef struct ps3dk_prof_gpu_stats {
  * (named constants, pinned against GCM in R3); no overlap with another domain's ctx, reports or label (EINVAL);
  * EFULL: no free table slot or the 64 lifetime ids are used.  The context must be quiescent (an app precondition).
  * After a failed closing unlock: ESTOPPED with *gpu written (diagnostic only: no later call can lock). */
-int ps3dk_prof_gpu_attach(struct CellGcmContextData *ctx, uint32_t report_first, uint32_t report_count,
+int ps3dk_prof_gpu_attach(ps3dk_prof_gcm_ctx *ctx, uint32_t report_first, uint32_t report_count,
                           uint32_t label, uint32_t *gpu);
 /* out NULL: EINVAL, nothing written; any other failure writes an INERT zone; desc must be scope 2 (EINVAL). */
-int ps3dk_prof_gpu_begin(uint32_t gpu, struct CellGcmContextData *ctx, ps3dk_prof_desc *desc,
+int ps3dk_prof_gpu_begin(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *desc,
                          ps3dk_prof_gpu_zone *out);
-int ps3dk_prof_gpu_end(uint32_t gpu, struct CellGcmContextData *ctx, ps3dk_prof_gpu_zone *zone);
-int ps3dk_prof_gpu_mark(uint32_t gpu, struct CellGcmContextData *ctx, ps3dk_prof_desc *desc);
+int ps3dk_prof_gpu_end(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_gpu_zone *zone);
+int ps3dk_prof_gpu_mark(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *desc);
 /* NONE ({0, 0, 0}) or a token ps3dk_prof_frame_token() returned on a LIVE thread for a frame that thread began;
  * EBUSY when every owner entry is still leased. */
 int ps3dk_prof_gpu_frame(uint32_t gpu, ps3dk_prof_token frame);
-int ps3dk_prof_gpu_calibrate(uint32_t gpu, struct CellGcmContextData *ctx, uint64_t timeout_us);
+int ps3dk_prof_gpu_calibrate(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us);
 /* Requests the detach and waits; the drain thread (or the designated APP thread's drains) finalizes it.  OK once
  * the finalizing drain turn completed, its closing extension unlock included: the domain is RETIRED (the frozen
  * terminal decision); whether the FINAL chunk was ACCEPTED is final_written in the stats (a failed sink retires
  * output-free).  ETIMEDOUT while pending (call again; a repeated call after OK is OK); ESTOPPED when that turn's
  * closing unlock failed or the seal won. */
-int ps3dk_prof_gpu_detach(uint32_t gpu, struct CellGcmContextData *ctx, uint64_t timeout_us);
+int ps3dk_prof_gpu_detach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us);
 /* APP PRECONDITION before a successful release: the context is idle (cellGcmFinish or an equivalent the app owns)
  * and no CPU call on the domain is in flight.  A successful release returns the report range and label for
  * IMMEDIATE reuse by any attach; it proves neither that submitted GPU work completed nor that no GPU write is pending.

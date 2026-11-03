@@ -121,7 +121,7 @@ static void *rep_at(int b, uint32_t i)
     if (g_reenter) {
         uint32_t h;
         g_reenter = 0;
-        atomic_store(&g_reenter_rc, ps3dk_prof_gpu_attach((struct CellGcmContextData *)(void *)&BK[1], 0, 2, 64, &h));
+        atomic_store(&g_reenter_rc, ps3dk_prof_gpu_attach((ps3dk_prof_gcm_ctx *)(void *)&BK[1], 0, 2, 64, &h));
     }
     if ((int64_t)i == g_fail_index || i >= GPP_REPORTS)
         return NULL;
@@ -296,7 +296,7 @@ static void fx_init(int i, int bank, uint32_t first, uint32_t count, uint32_t la
     f->c.end = f->buf + CBUF;
     f->c.callback = fcb;
 }
-#define CTXP(i) ((struct CellGcmContextData *)(void *)&FX[i].c)
+#define CTXP(i) ((ps3dk_prof_gcm_ctx *)(void *)&FX[i].c)
 
 /* ---- the runtime ---- */
 typedef struct tr {
