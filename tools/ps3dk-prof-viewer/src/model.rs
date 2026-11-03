@@ -15,6 +15,45 @@ pub struct Document {
     pub path: PathBuf,
     pub size: usize,
     pub state: DocState,
+    /// The EXTENSION SOURCES view, computed ONCE when the document is built (never per repaint).  Every open,
+    /// replacement and live snapshot builds a new Document, so it cannot outlive the capture it describes.
+    pub ext: ExtView,
+}
+
+/// What the Overview's EXTENSION SOURCES section shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExtView {
+    /// A v1 file or a MALFORMED one: no section.
+    None,
+    /// An extension file that declares no source: "no sources recorded; no SPU/RSX coverage is claimed".
+    Empty,
+    /// One block per source, in the reader's order: its facts and, for an SPU lane, its own epoch rows.
+    Sources(Vec<ExtBlock>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtBlock {
+    pub source: ps3dk_prof::report::SourceParts,
+    pub epochs: ps3dk_prof::report::LaneEpochs,
+}
+
+pub fn ext_view(a: &Analysis) -> ExtView {
+    use ps3dk_prof::report::{epoch_parts, source_parts};
+    let Some(x) = &a.capture.ext else {
+        return ExtView::None;
+    };
+    if x.sources.is_empty() {
+        return ExtView::Empty;
+    }
+    ExtView::Sources(
+        x.sources
+            .iter()
+            .map(|s| ExtBlock {
+                source: source_parts(s),
+                epochs: epoch_parts(x, s),
+            })
+            .collect(),
+    )
 }
 
 pub enum DocState {
@@ -27,16 +66,23 @@ pub enum DocState {
 
 impl Document {
     pub fn from_bytes(path: PathBuf, bytes: &[u8]) -> Document {
-        let state = match load(bytes) {
-            Outcome::Malformed(m) => DocState::Malformed {
-                diagnosis: m.to_string(),
-            },
-            Outcome::Analysed(a) => DocState::Analysed(a),
+        let (state, ext) = match load(bytes) {
+            Outcome::Malformed(m) => (
+                DocState::Malformed {
+                    diagnosis: m.to_string(),
+                },
+                ExtView::None,
+            ),
+            Outcome::Analysed(a) => {
+                let ext = ext_view(&a);
+                (DocState::Analysed(a), ext)
+            }
         };
         Document {
             path,
             size: bytes.len(),
             state,
+            ext,
         }
     }
 

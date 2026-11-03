@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crate::model::{
     overview, sort_zones, zone_cell, zone_cell_exact, zone_key, zone_sites, zones, DocState,
-    Document, TimeBase, VerdictTone, ZoneColumn, ZoneKey,
+    Document, ExtView, TimeBase, VerdictTone, ZoneColumn, ZoneKey,
 };
 use eframe::egui;
 use ps3dk_prof::ZoneStats;
@@ -409,7 +409,7 @@ impl eframe::App for App {
                     ui::field_message(p, ui::Tone::Danger, diagnosis);
                 }
                 DocState::Analysed(a) => match page {
-                    Page::Overview | Page::Timeline => draw_overview(p, a),
+                    Page::Overview | Page::Timeline => draw_overview(p, a, &d.ext),
                     Page::Zones => draw_zones(p, a, rows, sort, selected),
                 },
             },
@@ -511,7 +511,7 @@ fn kv_grid(p: &mut egui::Ui, id: &str, rows: &[(String, String)]) {
         });
 }
 
-fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis) {
+fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis, ext: &ExtView) {
     let o = overview(a);
     ui::page_header(
         p,
@@ -566,6 +566,7 @@ fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis) {
                     g.end_row();
                 }
             });
+        draw_ext_sources(p, ext);
         p.add_space(ui::SPACE_LG);
         ui::section_label(p, "TRAILER");
         if o.trailer.is_empty() {
@@ -578,6 +579,98 @@ fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis) {
             kv_grid(p, "trailer", &o.trailer);
         }
     });
+}
+
+/// A wrapped "Label: value" line (long reasons wrap at the window width; nothing is tooltip-only).
+fn fact(p: &mut egui::Ui, label: &str, value: &str) {
+    p.horizontal_wrapped(|h| {
+        h.label(egui::RichText::new(format!("{label}:")).strong());
+        h.add(egui::Label::new(value).wrap());
+    });
+}
+
+/// The EXTENSION SOURCES section: one block per source, its facts directly above its own epoch rows.  The three
+/// counter states are neutral (they describe recorded values, not timing quality); warnings keep their tone.
+fn draw_ext_sources(p: &mut egui::Ui, ext: &ExtView) {
+    use ps3dk_prof::report::{LaneEpochs, EPOCH_LOSS_SPAN_LABEL, EPOCH_TAIL};
+    let blocks = match ext {
+        ExtView::None => return,
+        ExtView::Empty => {
+            p.add_space(ui::SPACE_LG);
+            ui::section_label(p, "EXTENSION SOURCES");
+            p.add(
+                egui::Label::new("No SPU/RSX sources recorded; no SPU/RSX coverage is claimed.")
+                    .wrap(),
+            );
+            return;
+        }
+        ExtView::Sources(b) => b,
+    };
+    p.add_space(ui::SPACE_LG);
+    ui::section_label(p, "EXTENSION SOURCES");
+    p.add(
+        egui::Label::new(
+            "MAPPING UNMEASURED: no SPU/RSX time is shown; states describe recorded values only.",
+        )
+        .wrap(),
+    );
+    for b in blocks {
+        let s = &b.source;
+        p.add_space(ui::SPACE_MD);
+        ui::card(p, |c| {
+            c.label(egui::RichText::new(format!("{} (domain {})", s.source, s.domain)).strong());
+            c.horizontal_wrapped(|h| {
+                if s.structure_complete {
+                    ui::badge(h, "COMPLETE", ui::Tone::Success);
+                } else {
+                    ui::badge(h, "INCOMPLETE", ui::Tone::Warning);
+                }
+                if s.raw_valid {
+                    ui::badge(h, "RAW VALID", ui::Tone::Success);
+                } else {
+                    ui::badge(h, "RAW NOT VALID", ui::Tone::Warning);
+                }
+            });
+            fact(c, "Structure", &s.structure);
+            fact(c, "Raw validity", &s.raw);
+            fact(c, "Coverage", &s.coverage);
+            fact(
+                c,
+                "Events",
+                &format!("{} written, {} lost", s.events, s.lost),
+            );
+            match &b.epochs {
+                LaneEpochs::NotALane => {
+                    c.add(
+                        egui::Label::new(
+                            "Source facts only (no counter classification for this domain).",
+                        )
+                        .wrap(),
+                    );
+                }
+                LaneEpochs::Inconsistent => ui::field_message(
+                    c,
+                    ui::Tone::Warning,
+                    "Counter variation: not classified (decoded epochs inconsistent).",
+                ),
+                LaneEpochs::Epochs(v) => {
+                    if let Some(q) = v.first().and_then(|e| e.invalidity.as_ref()) {
+                        ui::field_message(c, ui::Tone::Warning, &format!("Epoch rows below: {q}"));
+                    }
+                    for e in v {
+                        c.add_space(ui::SPACE_XS);
+                        c.indent(("epoch", s.domain, e.epoch), |i| {
+                            i.label(egui::RichText::new(format!("Epoch {}", e.epoch)).strong());
+                            i.add(egui::Label::new(e.state_text).wrap());
+                            fact(i, "Observations", &e.observations);
+                            fact(i, EPOCH_LOSS_SPAN_LABEL, &e.loss_span);
+                            i.add(egui::Label::new(EPOCH_TAIL).wrap());
+                        });
+                    }
+                }
+            }
+        });
+    }
 }
 
 fn draw_zones(

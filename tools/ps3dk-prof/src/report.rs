@@ -67,38 +67,138 @@ elapsed time, and is never summed across lanes.";
 
 /// The extension layer (file_flags bit 0): one line per extension source, after the whole-file and PPU layers.
 /// Empty for a v1 file. A TRANSPORT COMPLETE file can still list sources that are INCOMPLETE or NOT VALID.
+/// The words of one extension source's verdict layers, shared by the text report and the viewer (so they cannot
+/// diverge).  Each text is exactly what the report prints for that layer; the booleans carry the semantics, so no
+/// consumer has to infer them from the text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceParts {
+    /// e.g. "SPU lane 10" or "GPU domain 3"
+    pub source: String,
+    pub is_lane: bool,
+    pub domain: u32,
+    pub structure_complete: bool,
+    /// "COMPLETE" or "INCOMPLETE (reasons)"
+    pub structure: String,
+    pub raw_valid: bool,
+    /// "VALID" or "NOT VALID (reasons)"
+    pub raw: String,
+    pub coverage_known: bool,
+    /// "no raw gap or unlocatable event" or "UNKNOWN for the whole capture (reasons)"
+    pub coverage: String,
+    pub events: u64,
+    pub lost: u64,
+}
+
+pub fn source_parts(s: &crate::ext::SourceReport) -> SourceParts {
+    use crate::ext::{SourceKey, Structure};
+    SourceParts {
+        source: s.key.to_string(),
+        is_lane: matches!(s.key, SourceKey::Lane(_)),
+        domain: s.domain_id,
+        structure_complete: s.structure == Structure::Complete,
+        structure: match s.structure {
+            Structure::Complete => "COMPLETE".to_string(),
+            Structure::Incomplete => format!("INCOMPLETE ({})", s.incomplete.join("; ")),
+        },
+        raw_valid: s.raw_valid,
+        raw: if s.raw_valid { "VALID".to_string() } else { format!("NOT VALID ({})", s.invalid.join("; ")) },
+        coverage_known: s.coverage_unknown.is_empty(),
+        coverage: if s.coverage_unknown.is_empty() {
+            "no raw gap or unlocatable event".to_string()
+        } else {
+            format!("UNKNOWN for the whole capture ({})", s.coverage_unknown.join("; "))
+        },
+        events: s.events_total,
+        lost: s.lost_total,
+    }
+}
+
+/// The words of one declared epoch of an SPU lane (the counter_variation() result), shared by report and viewer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpochParts {
+    pub epoch: u32,
+    pub state: crate::ext::CounterVariation,
+    /// The state with its complete observed qualifier, e.g. "COUNTER_STATIC (all observed values equal; says nothing
+    /// about unobserved intervals)".
+    pub state_text: &'static str,
+    /// "N events + M brackets"
+    pub observations: String,
+    /// The count of LOSS records inside the observed event-sequence span, or "NOT AVAILABLE (fewer than 2 events)".
+    pub loss_span: String,
+    /// "source RAW VALIDITY is NOT VALID: reasons" when the source is not RAW VALID: an invalid source never gets an
+    /// epoch view that looks valid.
+    pub invalidity: Option<String>,
+}
+
+/// The per-epoch view of one extension source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaneEpochs {
+    /// A GPU domain (or any non-lane source): source facts only.
+    NotALane,
+    /// counter_variation() refused (an event outside the declared epochs: not guessed).
+    Inconsistent,
+    Epochs(Vec<EpochParts>),
+}
+
+pub const EPOCH_LOSS_SPAN_LABEL: &str = "LOSS records inside the observed event-sequence span";
+pub const EPOCH_TAIL: &str = "order and raw endpoints only (no durations)";
+
+pub fn epoch_parts(x: &crate::ext::ExtCapture, s: &crate::ext::SourceReport) -> LaneEpochs {
+    use crate::ext::{counter_variation, CounterVariation, SourceKey};
+    if !matches!(s.key, SourceKey::Lane(_)) {
+        return LaneEpochs::NotALane;
+    }
+    let Some(v) = counter_variation(x, s) else { return LaneEpochs::Inconsistent };
+    let invalidity =
+        if s.raw_valid { None } else { Some(format!("source RAW VALIDITY is NOT VALID: {}", s.invalid.join("; "))) };
+    LaneEpochs::Epochs(
+        v.iter()
+            .map(|e| EpochParts {
+                epoch: e.epoch,
+                state: e.state,
+                state_text: match e.state {
+                    CounterVariation::Insufficient => "INSUFFICIENT (fewer than 2 observations)",
+                    CounterVariation::Static => {
+                        "COUNTER_STATIC (all observed values equal; says nothing about unobserved intervals)"
+                    }
+                    CounterVariation::Moving => {
+                        "COUNTER_MOVING (variation observed; not proof of continuous counting)"
+                    }
+                },
+                observations: format!("{} events + {} brackets", e.events, e.brackets),
+                loss_span: match e.loss_records_in_event_span {
+                    Some(k) => format!("{k}"),
+                    None => "NOT AVAILABLE (fewer than 2 events)".to_string(),
+                },
+                invalidity: invalidity.clone(),
+            })
+            .collect(),
+    )
+}
+
+pub const EXT_EMPTY_LINE: &str =
+    "domain extensions: 0 sources declared (no SPU/RSX work is recorded; no SPU/RSX coverage is claimed)";
+
 pub fn extension_lines(cap: &Capture) -> Vec<String> {
-    use crate::ext::{OpenBegins, Structure};
+    use crate::ext::OpenBegins;
     let Some(x) = &cap.ext else { return Vec::new() };
     if x.sources.is_empty() {
-        return vec![
-            "domain extensions: 0 sources declared (no SPU/RSX work is recorded; no SPU/RSX coverage is claimed)"
-                .to_string(),
-        ];
+        return vec![EXT_EMPTY_LINE.to_string()];
     }
     let mut out = vec![format!(
         "domain extensions: {} source(s); MAPPING is UNMEASURED for every source (no SPU/RSX time is claimed)",
         x.sources.len()
     )];
     for s in &x.sources {
-        let structure = match s.structure {
-            Structure::Complete => "COMPLETE".to_string(),
-            Structure::Incomplete => format!("INCOMPLETE ({})", s.incomplete.join("; ")),
-        };
-        let raw = if s.raw_valid { "VALID".to_string() } else { format!("NOT VALID ({})", s.invalid.join("; ")) };
-        let coverage = if s.coverage_unknown.is_empty() {
-            "no raw gap or unlocatable event".to_string()
-        } else {
-            format!("UNKNOWN for the whole capture ({})", s.coverage_unknown.join("; "))
-        };
+        let p = source_parts(s);
         let open = match s.open_begins {
             OpenBegins::Verified(n) => format!("open_begins {n} verified"),
             OpenBegins::Unverifiable(n) => format!("open_begins {n} UNVERIFIABLE"),
             OpenBegins::NoFinal => "no FINAL".to_string(),
         };
         out.push(format!(
-            "  {} (domain {}): STRUCTURE {structure} | RAW VALIDITY {raw} | MAPPING UNMEASURED | COVERAGE {coverage}",
-            s.key, s.domain_id
+            "  {} (domain {}): STRUCTURE {} | RAW VALIDITY {} | MAPPING UNMEASURED | COVERAGE {}",
+            p.source, p.domain, p.structure, p.raw, p.coverage
         ));
         let at = if s.final_state.is_some() { "FINAL" } else { "end (no FINAL)" };
         let open_at = match s.open_at_end() {
@@ -132,38 +232,22 @@ pub fn extension_lines(cap: &Capture) -> Vec<String> {
 /// One line per declared epoch of an SPU lane: the observed variation of its recorded decrementer values (no
 /// durations; MAPPING stays UNMEASURED); a source that is not RAW VALID repeats why on every line.
 fn counter_lines(x: &crate::ext::ExtCapture, s: &crate::ext::SourceReport) -> Vec<String> {
-    use crate::ext::{counter_variation, CounterVariation, SourceKey};
-    if !matches!(s.key, SourceKey::Lane(_)) {
-        return Vec::new();
+    match epoch_parts(x, s) {
+        LaneEpochs::NotALane => Vec::new(),
+        LaneEpochs::Inconsistent => {
+            vec!["    counter variation: not classified (decoded epochs inconsistent)".to_string()]
+        }
+        LaneEpochs::Epochs(v) => v
+            .iter()
+            .map(|e| {
+                let qual = e.invalidity.as_ref().map(|q| format!(" | {q}")).unwrap_or_default();
+                format!(
+                    "    epoch {}: {} | observations: {} | {EPOCH_LOSS_SPAN_LABEL}: {} | {EPOCH_TAIL}{qual}",
+                    e.epoch, e.state_text, e.observations, e.loss_span
+                )
+            })
+            .collect(),
     }
-    let Some(v) = counter_variation(x, s) else {
-        return vec!["    counter variation: not classified (decoded epochs inconsistent)".to_string()];
-    };
-    let qual = if s.raw_valid {
-        String::new()
-    } else {
-        format!(" | source RAW VALIDITY is NOT VALID: {}", s.invalid.join("; "))
-    };
-    v.iter()
-        .map(|e| {
-            let state = match e.state {
-                CounterVariation::Insufficient => "INSUFFICIENT (fewer than 2 observations)",
-                CounterVariation::Static => {
-                    "COUNTER_STATIC (all observed values equal; says nothing about unobserved intervals)"
-                }
-                CounterVariation::Moving => "COUNTER_MOVING (variation observed; not proof of continuous counting)",
-            };
-            let span = match e.loss_records_in_event_span {
-                Some(k) => format!("{k}"),
-                None => "NOT AVAILABLE (fewer than 2 events)".to_string(),
-            };
-            format!(
-                "    epoch {}: {state} | observations: {} events + {} brackets | LOSS records inside the observed \
-                 event-sequence span: {span} | order and raw endpoints only (no durations){qual}",
-                e.epoch, e.events, e.brackets
-            )
-        })
-        .collect()
 }
 
 /// True when every extension source is STRUCTURE COMPLETE and RAW VALID (always true for a v1 file).
