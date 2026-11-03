@@ -18,7 +18,7 @@ endif()
 add_executable(ext-probe source/main.c)
 target_compile_features(ext-probe PRIVATE c_std_11)
 target_compile_options(ext-probe PRIVATE -O2 -g -Wall -Wextra -Werror)
-target_include_directories(ext-probe PRIVATE "${CMAKE_CURRENT_LIST_DIR}/source" "${CMAKE_CURRENT_LIST_DIR}/../../gcm/common"
+target_include_directories(ext-probe PRIVATE "${E1_PROF_SRC}/../../include" "${CMAKE_CURRENT_LIST_DIR}/source" "${CMAKE_CURRENT_LIST_DIR}/../../gcm/common"
   "${E1_PROF_SRC}/spu" "${E1_PROF_SRC}/rsx" "${PS3DK}/ppu/include")
 target_compile_definitions(ext-probe PRIVATE PS3DK_PROF=1 "E1_BUILD_ID=\"${E1_BUILD_ID}\"")
 target_link_libraries(ext-probe PRIVATE "${E1_EXT_ARCHIVE}" ps3dkprof gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m)
