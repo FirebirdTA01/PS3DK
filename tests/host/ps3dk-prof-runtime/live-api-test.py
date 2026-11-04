@@ -62,4 +62,39 @@ for label, extra in [('plain', []), ('sanitize', san)]:
             print(f'FAIL {label} {name} rc={r.returncode} reports={reports} {r.stderr.strip()[:400]}')
     failed += passed != len(cases)
     print(f'live-api {label}: {passed}/{len(cases)} passed')
+
+# ps3dk_prof_live_stats from C and C++, enabled and off.  The enabled builds link the runtime objects (compiled as C);
+# the off builds link nothing of the profiler, so a reference the off macro leaked would fail the link.
+cxx = os.environ.get('CXX', 'c++')
+hdr = here / 'live_stats_header.c'
+objs = []
+for s in sources[:-1]:
+    o = out / f'hdr-{s.stem}.o'
+    r = subprocess.run([cc, *base, '-c', str(s), '-o', str(o)], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit(f'runtime object {s.name} failed:\n{r.stderr}')
+    objs.append(str(o))
+cflags = ['-O2', '-Wall', '-Wextra', '-Werror', '-I', str(inc.parent)]
+variants = [
+    ('c-enabled', [cc, '-std=c11', *cflags, '-DPS3DK_PROF=1', '-x', 'c', str(hdr), '-x', 'none', *objs, '-pthread']),
+    ('cxx-enabled', [cxx, '-std=c++17', *cflags, '-DPS3DK_PROF=1', '-x', 'c++', str(hdr), '-x', 'none', *objs,
+                     '-pthread']),
+    ('c-off', [cc, '-std=c11', *cflags, '-x', 'c', str(hdr)]),
+    ('cxx-off', [cxx, '-std=c++17', *cflags, '-x', 'c++', str(hdr)]),
+]
+hpass = 0
+for label, cmd in variants:
+    exe = out / f'live-stats-header-{label}'
+    r = subprocess.run([*cmd, '-o', str(exe)], capture_output=True, text=True)
+    (out / f'header-{label}.compile.log').write_text(r.stderr)
+    if r.returncode != 0:
+        print(f'FAIL header {label}: build rc={r.returncode} {r.stderr.strip()[:400]}')
+        continue
+    r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+    ok = r.returncode == 0 and r.stdout.strip() == 'PASS' and not r.stderr
+    hpass += ok
+    if not ok:
+        print(f'FAIL header {label}: rc={r.returncode} {r.stdout.strip()} {r.stderr.strip()[:200]}')
+print(f'live-api header: {hpass}/{len(variants)} passed')
+failed += hpass != len(variants)
 raise SystemExit(1 if failed else 0)

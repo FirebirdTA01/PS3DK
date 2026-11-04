@@ -5,6 +5,8 @@
  * (heterogeneous-<id>.live.txt), so the stop and error paths can be read after the console returns to the XMB:
  *   net_init rc=..                       live_start rc=.. port=.. ip=..
  *   stop attempt=N graceful_us=.. join_us=.. rc=..
+ *   stats rc=0 version=1 connections=.. busy_refusals=.. bytes_delivered=.. pongs=.. drop_<reason>=.. (all ten)
+ *     or stats rc=<refusal> (no counters)
  *   net_deinit context=.. rc=..          end network_left_initialized=0|1 live_stopped=0|1
  * The record is separate from the workload result and the profiler's verdict. A failure to write it is printed. */
 #include "live.h"
@@ -123,6 +125,38 @@ void sample_live_begin(const char *csv_path, char *status, size_t n)
     snprintf(status, n, "Live view: connect the PC viewer to %s:%u", ip, SAMPLE_LIVE_PORT);
 }
 
+/* The agent's final counters, recorded before the network is torn down.  The rc is always recorded: only rc=0
+ * carries counters, so a refused or failed copy-out is never read as zeros.  The same line also goes to the TTY: a
+ * second observation channel if the record write fails (reported by close_record), not a guarantee when both fail. */
+static void record_stats(void)
+{
+    ps3dk_prof_live_stats s;
+    int rc = ps3dk_prof_live_get_stats(&s);
+    if (rc != PS3DK_PROF_OK) {
+        record("stats rc=%d", rc);
+        printf("WORKLOAD_LIVE stats rc=%d\n", rc);
+        return;
+    }
+    char line[512];
+    int w = snprintf(line, sizeof line,
+             "stats rc=0 version=%u connections=%llu busy_refusals=%llu bytes_delivered=%llu pongs=%llu "
+             "drop_end=%llu drop_handshake_timeout=%llu drop_bad_hello=%llu drop_protocol=%llu drop_ping_flood=%llu "
+             "drop_stalled=%llu drop_peer_closed=%llu drop_io=%llu drop_cancelled=%llu drop_clock=%llu",
+             (unsigned)s.version, (unsigned long long)s.connections, (unsigned long long)s.busy_refusals,
+             (unsigned long long)s.bytes_delivered, (unsigned long long)s.pongs, (unsigned long long)s.drop_end,
+             (unsigned long long)s.drop_handshake_timeout, (unsigned long long)s.drop_bad_hello,
+             (unsigned long long)s.drop_protocol, (unsigned long long)s.drop_ping_flood,
+             (unsigned long long)s.drop_stalled, (unsigned long long)s.drop_peer_closed,
+             (unsigned long long)s.drop_io, (unsigned long long)s.drop_cancelled, (unsigned long long)s.drop_clock);
+    if (w < 0 || (size_t)w >= sizeof line) {
+        record("stats rc=0 format-failed w=%d", w);
+        printf("WORKLOAD_LIVE stats rc=0 format-failed w=%d\n", w);
+        return;
+    }
+    record("%s", line);
+    printf("WORKLOAD_LIVE %s\n", line);
+}
+
 static int stop_attempt(int attempt, uint64_t graceful_us, uint64_t join_us)
 {
     int rc = ps3dk_prof_live_stop(graceful_us, join_us);
@@ -140,6 +174,7 @@ void sample_live_end(void)
         int rc = stop_attempt(1, 2000000, 1000000);
         if (rc == PS3DK_PROF_ETIMEDOUT || rc == PS3DK_PROF_ECLOCK)
             rc = stop_attempt(2, 0, 2000000);
+        record_stats(); /* rc=0 with counters after a successful stop; otherwise its refusal (EBUSY or ETHREAD) */
         if (rc == PS3DK_PROF_OK) {
             live_up = 0;
             live_stopped = 1;

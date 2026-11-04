@@ -126,6 +126,45 @@ int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us)
     }
 }
 
+_Static_assert(LIVE_DROP_COUNT == 10, "ps3dk_prof_live_stats names every drop reason");
+
+int ps3dk_prof_live_get_stats(ps3dk_prof_live_stats *out)
+{
+    if (!out)
+        return PS3DK_PROF_EINVAL;
+    switch (g_api_state) {
+    case API_NEVER:
+        return PS3DK_PROF_ENOTINIT;
+    case API_RUNNING:
+        return PS3DK_PROF_EBUSY;
+    case API_JOIN_FAILED:
+        return PS3DK_PROF_ETHREAD;
+    default:
+        break;
+    }
+    /* API_STOPPED: the thread is joined, so these are final; the explicit mapping keeps each field's reason */
+    const live_agent *a = &g_agent;
+    ps3dk_prof_live_stats s;
+    memset(&s, 0, sizeof s);
+    s.version = 1;
+    s.connections = atomic_load(&a->connections);
+    s.busy_refusals = atomic_load(&a->busy_refusals);
+    s.bytes_delivered = atomic_load(&a->bytes_delivered);
+    s.pongs = atomic_load(&a->pongs);
+    s.drop_end = atomic_load(&a->drops[LIVE_DROP_END]);
+    s.drop_handshake_timeout = atomic_load(&a->drops[LIVE_DROP_HANDSHAKE_TIMEOUT]);
+    s.drop_bad_hello = atomic_load(&a->drops[LIVE_DROP_BAD_HELLO]);
+    s.drop_protocol = atomic_load(&a->drops[LIVE_DROP_PROTOCOL]);
+    s.drop_ping_flood = atomic_load(&a->drops[LIVE_DROP_PING_FLOOD]);
+    s.drop_stalled = atomic_load(&a->drops[LIVE_DROP_STALLED]);
+    s.drop_peer_closed = atomic_load(&a->drops[LIVE_DROP_PEER_CLOSED]);
+    s.drop_io = atomic_load(&a->drops[LIVE_DROP_IO]);
+    s.drop_cancelled = atomic_load(&a->drops[LIVE_DROP_CANCELLED]);
+    s.drop_clock = atomic_load(&a->drops[LIVE_DROP_CLOCK]);
+    *out = s;
+    return PS3DK_PROF_OK;
+}
+
 uint16_t ps3dk_prof__live_port(void)
 {
     return g_api_state == API_NEVER ? 0 : live_agent_port(&g_agent);

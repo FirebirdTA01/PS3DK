@@ -490,10 +490,201 @@ static int case_hdd_path_rule(const char *dir)
     return 0;
 }
 
+/* ---- ps3dk_prof_live_get_stats ---------------------------------------------------------------------------------- */
+
+/* A refused read leaves out byte-for-byte untouched. */
+static void refused(int want)
+{
+    ps3dk_prof_live_stats s, poison;
+    memset(&s, 0xa5, sizeof s);
+    poison = s;
+    CHECK(ps3dk_prof_live_get_stats(&s) == want);
+    CHECK(memcmp(&s, &poison, sizeof s) == 0);
+}
+
+static ps3dk_prof_live_stats stats_ok(void)
+{
+    ps3dk_prof_live_stats s, again;
+    memset(&s, 0xa5, sizeof s);
+    CHECK(ps3dk_prof_live_get_stats(&s) == PS3DK_PROF_OK);
+    CHECK(s.version == 1 && s.reserved == 0);
+    memset(&again, 0x5a, sizeof again);
+    CHECK(ps3dk_prof_live_get_stats(&again) == PS3DK_PROF_OK); /* repeatable, never clearing */
+    CHECK(memcmp(&s, &again, sizeof s) == 0);
+    return s;
+}
+
+static uint64_t drop_sum(const ps3dk_prof_live_stats *s)
+{
+    return s->drop_end + s->drop_handshake_timeout + s->drop_bad_hello + s->drop_protocol + s->drop_ping_flood +
+           s->drop_stalled + s->drop_peer_closed + s->drop_io + s->drop_cancelled + s->drop_clock;
+}
+
+/* Every lifecycle refusal: NULL, never started, running, still stopping after ETIMEDOUT; then OK after the stop,
+ * repeatable, and still readable after shutdown. */
+static int case_stats_lifecycle(const char *dir)
+{
+    CHECK(ps3dk_prof_live_get_stats(NULL) == PS3DK_PROF_EINVAL);
+    refused(PS3DK_PROF_ENOTINIT); /* before init */
+    file_init(dir, PS3DK_PROF_MODE_APP);
+    refused(PS3DK_PROF_ENOTINIT); /* init, no start */
+    ps3dk_prof_test_hooks.live_ephemeral_port = 1;
+    CHECK(ps3dk_prof_live_start(NULL) == PS3DK_PROF_OK);
+    CHECK(ps3dk_prof_live_get_stats(NULL) == PS3DK_PROF_EINVAL);
+    refused(PS3DK_PROF_EBUSY); /* running */
+    live_test_hooks *h = &ps3dk_prof_test_live_hooks;
+    atomic_store(&h->pread_block, 1);
+    struct client c = {.data = calloc(64u << 20, 1)};
+    CHECK(c.data != NULL);
+    c.fd = connect_client(ps3dk_prof__live_port(), 1);
+    pthread_t t;
+    CHECK(pthread_create(&t, NULL, client_main, &c) == 0);
+    for (int i = 0; i < 5000 && !atomic_load(&h->pread_entered); ++i)
+        usleep(1000);
+    CHECK(atomic_load(&h->pread_entered));
+    CHECK(ps3dk_prof_live_stop(0, 100000) == PS3DK_PROF_ETIMEDOUT);
+    refused(PS3DK_PROF_EBUSY); /* still stopping */
+    atomic_store(&h->pread_release, 1);
+    CHECK(ps3dk_prof_live_stop(0, 2000000) == PS3DK_PROF_OK);
+    CHECK(pthread_join(t, NULL) == 0);
+    ps3dk_prof_live_stats s = stats_ok();
+    CHECK(s.connections == 1 && s.drop_cancelled == 1 && drop_sum(&s) == 1 && s.busy_refusals == 0);
+    CHECK(ps3dk_prof_thread_begin("main") == PS3DK_PROF_OK);
+    CHECK(ps3dk_prof_shutdown() == PS3DK_PROF_OK);
+    ps3dk_prof_live_stats after = stats_ok(); /* after the profiler's shutdown */
+    CHECK(memcmp(&s, &after, sizeof s) == 0);
+    CHECK(close(c.fd) == 0);
+    free(c.data);
+    return 0;
+}
+
+/* A failed join: ETHREAD, the output untouched, every time. */
+static int case_stats_join_failed(const char *dir)
+{
+    file_init(dir, PS3DK_PROF_MODE_APP);
+    ps3dk_prof_test_hooks.live_ephemeral_port = 1;
+    CHECK(ps3dk_prof_live_start(NULL) == PS3DK_PROF_OK);
+    ps3dk_prof_test_hooks.join_fail = 1;
+    CHECK(ps3dk_prof_live_stop(0, 2000000) == PS3DK_PROF_ETHREAD);
+    ps3dk_prof_test_hooks.join_fail = 0;
+    refused(PS3DK_PROF_ETHREAD);
+    refused(PS3DK_PROF_ETHREAD);
+    CHECK(ps3dk_prof_thread_begin("main") == PS3DK_PROF_OK);
+    CHECK(ps3dk_prof_shutdown() == PS3DK_PROF_OK);
+    refused(PS3DK_PROF_ETHREAD);
+    return 0;
+}
+
+/* The explicit field mapping: a distinct value in every agent counter must come out in exactly its own field.
+ * (The test writes the joined agent's counters directly; nothing else runs then.) */
+static int case_stats_field_mapping(const char *dir)
+{
+    file_init(dir, PS3DK_PROF_MODE_APP);
+    ps3dk_prof_test_hooks.live_ephemeral_port = 1;
+    CHECK(ps3dk_prof_live_start(NULL) == PS3DK_PROF_OK);
+    CHECK(ps3dk_prof_live_stop(0, 2000000) == PS3DK_PROF_OK);
+    live_agent *a = (live_agent *)ps3dk_prof__live_agent();
+    atomic_store(&a->connections, 0x1001);
+    atomic_store(&a->busy_refusals, 0x1002);
+    atomic_store(&a->bytes_delivered, 0x123456789abcull);
+    atomic_store(&a->pongs, 0x1004);
+    for (int i = 0; i < LIVE_DROP_COUNT; ++i)
+        atomic_store(&a->drops[i], 0x2000u + (unsigned)i);
+    ps3dk_prof_live_stats s = stats_ok();
+    CHECK(s.connections == 0x1001 && s.busy_refusals == 0x1002 && s.bytes_delivered == 0x123456789abcull &&
+          s.pongs == 0x1004);
+    CHECK(s.drop_end == 0x2000u + LIVE_DROP_END);
+    CHECK(s.drop_handshake_timeout == 0x2000u + LIVE_DROP_HANDSHAKE_TIMEOUT);
+    CHECK(s.drop_bad_hello == 0x2000u + LIVE_DROP_BAD_HELLO);
+    CHECK(s.drop_protocol == 0x2000u + LIVE_DROP_PROTOCOL);
+    CHECK(s.drop_ping_flood == 0x2000u + LIVE_DROP_PING_FLOOD);
+    CHECK(s.drop_stalled == 0x2000u + LIVE_DROP_STALLED);
+    CHECK(s.drop_peer_closed == 0x2000u + LIVE_DROP_PEER_CLOSED);
+    CHECK(s.drop_io == 0x2000u + LIVE_DROP_IO);
+    CHECK(s.drop_cancelled == 0x2000u + LIVE_DROP_CANCELLED);
+    CHECK(s.drop_clock == 0x2000u + LIVE_DROP_CLOCK);
+    CHECK(sizeof s == 8 + 14 * 8); /* fixed width: version, reserved, then 14 u64 counters */
+    CHECK(ps3dk_prof_thread_begin("main") == PS3DK_PROF_OK);
+    CHECK(ps3dk_prof_shutdown() == PS3DK_PROF_OK);
+    return 0;
+}
+
+/* A real stream to END, plus a second viewer refused as busy while the first streams, plus a viewer that sends
+ * nothing (handshake timeout) and one that closes after its hello (peer closed): each reason counted once. */
+static int case_stats_traffic(const char *dir)
+{
+    file_init(dir, PS3DK_PROF_MODE_APP);
+    ps3dk_prof_test_hooks.live_ephemeral_port = 1;
+    ps3dk_prof_live_config lc;
+    memset(&lc, 0, sizeof lc);
+    lc.poll_us = 2000;
+    lc.handshake_timeout_us = 50000;
+    CHECK(ps3dk_prof_live_start(&lc) == PS3DK_PROF_OK);
+    uint16_t port = ps3dk_prof__live_port();
+    const live_agent *a = ps3dk_prof__live_agent();
+    /* 1. no hello: dropped at the handshake deadline */
+    int silent = connect_client(port, 0);
+    for (int i = 0; i < 5000 && atomic_load(&a->drops[LIVE_DROP_HANDSHAKE_TIMEOUT]) == 0; ++i)
+        usleep(1000);
+    CHECK(atomic_load(&a->drops[LIVE_DROP_HANDSHAKE_TIMEOUT]) == 1);
+    CHECK(close(silent) == 0);
+    /* 2. hello, then close: peer closed */
+    CHECK(ps3dk_prof_thread_begin("main") == PS3DK_PROF_OK);
+    some_zones(50);
+    CHECK(ps3dk_prof_drain() == PS3DK_PROF_OK);
+    int quitter = connect_client(port, 1);
+    for (int i = 0; i < 5000 && atomic_load(&a->bytes_delivered) == 0; ++i)
+        usleep(1000);
+    CHECK(close(quitter) == 0);
+    for (int i = 0; i < 5000 && atomic_load(&a->drops[LIVE_DROP_PEER_CLOSED]) == 0; ++i)
+        usleep(1000);
+    CHECK(atomic_load(&a->drops[LIVE_DROP_PEER_CLOSED]) == 1);
+    /* 3. a streaming viewer, and a second one refused while it streams */
+    struct client c = {.data = calloc(64u << 20, 1)};
+    CHECK(c.data != NULL);
+    uint64_t before = atomic_load(&a->connections);
+    c.fd = connect_client(port, 1);
+    pthread_t t;
+    CHECK(pthread_create(&t, NULL, client_main, &c) == 0);
+    for (int i = 0; i < 5000 && atomic_load(&a->connections) == before; ++i)
+        usleep(1000);
+    int second = connect_client(port, 1);
+    for (int i = 0; i < 5000 && atomic_load(&a->busy_refusals) == 0; ++i)
+        usleep(1000);
+    CHECK(atomic_load(&a->busy_refusals) == 1);
+    CHECK(close(second) == 0);
+    some_zones(200);
+    CHECK(ps3dk_prof_drain() == PS3DK_PROF_OK);
+    CHECK(ps3dk_prof_shutdown() == PS3DK_PROF_OK);
+    CHECK(pthread_join(t, NULL) == 0);
+    CHECK(c.got_end);
+    refused(PS3DK_PROF_EBUSY); /* END delivered, but stop has not run */
+    CHECK(ps3dk_prof_live_stop(1000000, 1000000) == PS3DK_PROF_OK);
+    ps3dk_prof_live_stats s = stats_ok();
+    ps3dk_prof_capture_record rec;
+    CHECK(ps3dk_prof_get_capture_record(&rec) == PS3DK_PROF_OK);
+    uint64_t flen;
+    unsigned char *file = read_file(rec.path, &flen);
+    CHECK(s.drop_end == 1 && s.drop_handshake_timeout == 1 && s.drop_peer_closed == 1 && s.busy_refusals == 1);
+    CHECK(drop_sum(&s) == 3 && s.connections == 3);
+    CHECK(s.bytes_delivered >= flen); /* the full stream plus whatever the quitter's frames carried */
+    CHECK(c.data_len == flen && memcmp(c.data, file, flen) == 0);
+    CHECK(close(c.fd) == 0);
+    printf("MEASURE stats connections=%llu delivered=%llu file=%llu\n", (unsigned long long)s.connections,
+           (unsigned long long)s.bytes_delivered, (unsigned long long)flen);
+    free(file);
+    free(c.data);
+    return 0;
+}
+
 static const struct {
     const char *name;
     int (*fn)(const char *dir);
 } cases[] = {
+    {"stats_lifecycle", case_stats_lifecycle},
+    {"stats_join_failed", case_stats_join_failed},
+    {"stats_field_mapping", case_stats_field_mapping},
+    {"stats_traffic", case_stats_traffic},
     {"enet_then_retry", case_enet_then_retry},
     {"thread_fail_then_retry", case_thread_fail_then_retry},
     {"stop_timeout_then_ok", case_stop_timeout_then_ok},

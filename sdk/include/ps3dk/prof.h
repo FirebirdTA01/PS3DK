@@ -129,6 +129,29 @@ typedef struct ps3dk_prof_live_config {
     uint64_t cap_bytes;            /* 1..2^40: the most capture bytes served to one viewer; default the agent's cap */
 } ps3dk_prof_live_config;
 
+/* The live agent's final counters (EXPERIMENTAL, like the rest of the live API), copied out by
+ * ps3dk_prof_live_get_stats after a successful stop.  Every count covers the whole run, all viewers together.
+ * Each ADMITTED connection (counted in connections) that has finished is counted in exactly one drop_* field: the
+ * reason it ended.  Busy refusals and connections that failed during setup are not admitted and have no drop. */
+typedef struct ps3dk_prof_live_stats {
+    uint32_t version;                /* 1 */
+    uint32_t reserved;               /* 0 */
+    uint64_t connections;            /* connections admitted (each finished one ends in one drop_* reason) */
+    uint64_t busy_refusals;          /* connections refused because a viewer was being served or the agent stopping */
+    uint64_t bytes_delivered;        /* capture bytes in DATA frames the socket fully accepted */
+    uint64_t pongs;                  /* PING answers queued */
+    uint64_t drop_end;               /* the socket accepted END (not proof the viewer kept the file) */
+    uint64_t drop_handshake_timeout; /* no CLIENT_HELLO in time */
+    uint64_t drop_bad_hello;         /* a CLIENT_HELLO that was not acceptable */
+    uint64_t drop_protocol;          /* an unknown type, nonzero flags, or a bad or oversize length */
+    uint64_t drop_ping_flood;        /* too many PINGs in a window */
+    uint64_t drop_stalled;           /* no send progress within send_timeout_us */
+    uint64_t drop_peer_closed;       /* the viewer closed, a receive failed, or a send failed or accepted nothing */
+    uint64_t drop_io;                /* the capture file could not be opened or read */
+    uint64_t drop_cancelled;         /* stop's graceful interval ran out */
+    uint64_t drop_clock;             /* the monotonic clock failed */
+} ps3dk_prof_live_stats;
+
 #ifdef __cplusplus
 #define PS3DK_PROF_TOKEN_NONE ps3dk_prof_token{}
 #define PS3DK_PROF_INERT_ZONE ps3dk_prof_zone{}
@@ -181,6 +204,12 @@ int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out);
  * but no API bounds that wait). */
 int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg);
 int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us);
+/* live_get_stats (EXPERIMENTAL), caller-serialized with live_start and live_stop: OK copies the final counters once
+ * a live_stop has succeeded (the agent thread is joined), and again on every later call: reading never clears them,
+ * and they stay readable after ps3dk_prof_shutdown.  EINVAL for a NULL out; ENOTINIT if no live_start succeeded;
+ * EBUSY while the agent runs or is still stopping (before a successful stop, including after ETIMEDOUT or ECLOCK);
+ * ETHREAD after a failed join (the counters are not final).  On any error out is left untouched. */
+int ps3dk_prof_live_get_stats(ps3dk_prof_live_stats *out);
 
 #define PS3DK_PROF__DESC(var, nm) \
     static ps3dk_prof_desc var = {(nm), "", __FILE__, (uint32_t)__LINE__, 1u, 0u, 0u}
@@ -207,6 +236,7 @@ int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us);
 #define PS3DK_PROF_GET_CAPTURE_RECORD(out) ps3dk_prof_get_capture_record(out)
 #define PS3DK_PROF_LIVE_START(cfg) ps3dk_prof_live_start(cfg)
 #define PS3DK_PROF_LIVE_STOP(graceful_us, join_us) ps3dk_prof_live_stop(graceful_us, join_us)
+#define PS3DK_PROF_LIVE_GET_STATS(out) ps3dk_prof_live_get_stats(out)
 
 #ifndef __cplusplus
 static inline void ps3dk_prof__cleanup(ps3dk_prof_zone *z) { ps3dk_prof_zone_end(z); }
@@ -235,6 +265,7 @@ static inline void ps3dk_prof__cleanup(ps3dk_prof_zone *z) { ps3dk_prof_zone_end
 #define PS3DK_PROF_GET_CAPTURE_RECORD(out) ((void)sizeof(out), PS3DK_PROF_ENOTSUP)
 #define PS3DK_PROF_LIVE_START(cfg) ((void)sizeof(cfg), PS3DK_PROF_ENOTSUP)
 #define PS3DK_PROF_LIVE_STOP(graceful_us, join_us) ((void)sizeof(graceful_us), (void)sizeof(join_us), PS3DK_PROF_ENOTSUP)
+#define PS3DK_PROF_LIVE_GET_STATS(out) ((void)sizeof(out), PS3DK_PROF_ENOTSUP)
 
 #endif
 

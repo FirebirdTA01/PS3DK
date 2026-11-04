@@ -41,8 +41,9 @@ else
 fi
 lib="$out/build/sdk/libps3dkprof"
 api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_get_capture_record \
-ps3dk_prof_init ps3dk_prof_live_start ps3dk_prof_live_stop ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path \
-ps3dk_prof_shutdown ps3dk_prof_thread_begin ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
+ps3dk_prof_init ps3dk_prof_live_get_stats ps3dk_prof_live_start ps3dk_prof_live_stop ps3dk_prof_set_sink_callbacks \
+ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin ps3dk_prof_thread_end ps3dk_prof_zone_begin \
+ps3dk_prof_zone_end"
 auto_api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token \
 ps3dk_prof_get_capture_record ps3dk_prof_init ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path \
 ps3dk_prof_shutdown ps3dk_prof_thread_begin ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
@@ -115,7 +116,9 @@ int main(void)
     int a = ps3dk_prof_get_capture_record(&r);
     int b = ps3dk_prof_live_start(0);
     int c = ps3dk_prof_live_stop(0, 0);
-    return a + b + c;
+    ps3dk_prof_live_stats s;
+    int d = ps3dk_prof_live_get_stats(&s);
+    return a + b + c + d;
 }
 C
 cat >"$out/no_live.c" <<'C'
