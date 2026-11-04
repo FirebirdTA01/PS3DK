@@ -890,20 +890,27 @@ typedef struct _gcmSurface
 typedef struct _gcmTexture
 {
 	/*! \brief Texture format.
-	
-	This is an OR-ed combination of the following values:
+
+	This value combines one base format with a layout choice and a coordinate-mode choice.
+
+	Layout flags:
 	- \ref GCM_TEXTURE_FORMAT_SWZ
 	- \ref GCM_TEXTURE_FORMAT_LIN
+
+	Coordinate mode flags:
 	- \ref GCM_TEXTURE_FORMAT_NRM
+	- \ref GCM_TEXTURE_FORMAT_UNRM
+
+	Base format examples (see GCM_TEXTURE_FORMAT_* definitions):
 	- \ref GCM_TEXTURE_FORMAT_B8
 	- \ref GCM_TEXTURE_FORMAT_A1R5G5B5
 	- \ref GCM_TEXTURE_FORMAT_A4R4G4B4
 	- \ref GCM_TEXTURE_FORMAT_R5G6B5
 	- \ref GCM_TEXTURE_FORMAT_A8R8G8B8
 	- \ref GCM_TEXTURE_FORMAT_DXT1
-	- \ref GCM_TEXTURE_FORMAT_DXT3
-	- \ref GCM_TEXTURE_FORMAT_DXT5
-	- \ref GCM_TEXTURE_FORMAT_A8L8
+	- \ref GCM_TEXTURE_FORMAT_DXT23
+	- \ref GCM_TEXTURE_FORMAT_DXT45
+	- \ref GCM_TEXTURE_FORMAT_G8B8
 	*/
 	u8 format;
 
