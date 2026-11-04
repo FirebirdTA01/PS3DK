@@ -14,10 +14,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
 #include <getopt.h>
+#include <errno.h>
 
 #define PS3SFO_APP_VERSION "0.3"
 
@@ -90,18 +92,71 @@ typedef struct {
 static uint8_t *read_file(const char *path, size_t *out_len)
 {
     FILE *fp = fopen(path, "rb");
-    if (!fp) { perror(path); return NULL; }
-    fseek(fp, 0, SEEK_END);
+    if (!fp) {
+        perror(path);
+        return NULL;
+    }
+    errno = 0;
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        int saved_errno = errno;
+        fclose(fp);
+        if (saved_errno != 0)
+            fprintf(stderr, "%s: seek error: %s\n", path, strerror(saved_errno));
+        else
+            fprintf(stderr, "%s: seek error\n", path);
+        return NULL;
+    }
+    errno = 0;
     long len = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    if (len < 0) { fclose(fp); return NULL; }
+    if (len < 0) {
+        int saved_errno = errno;
+        fclose(fp);
+        if (saved_errno != 0)
+            fprintf(stderr, "%s: tell error: %s\n", path, strerror(saved_errno));
+        else
+            fprintf(stderr, "%s: tell error\n", path);
+        return NULL;
+    }
+    errno = 0;
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        int saved_errno = errno;
+        fclose(fp);
+        if (saved_errno != 0)
+            fprintf(stderr, "%s: seek error: %s\n", path, strerror(saved_errno));
+        else
+            fprintf(stderr, "%s: seek error\n", path);
+        return NULL;
+    }
     uint8_t *buf = (uint8_t *)malloc((size_t)len + 1);
-    if (!buf) { fclose(fp); return NULL; }
-    if (fread(buf, 1, (size_t)len, fp) != (size_t)len) {
-        free(buf); fclose(fp); return NULL;
+    if (!buf) {
+        fprintf(stderr, "SFO: out of memory\n");
+        fclose(fp);
+        return NULL;
+    }
+    if ((size_t)len > 0) {
+        errno = 0;
+        if (fread(buf, 1, (size_t)len, fp) != (size_t)len) {
+            int saved_errno = errno;
+            free(buf);
+            fclose(fp);
+            if (saved_errno != 0)
+                fprintf(stderr, "%s: read error: %s\n", path, strerror(saved_errno));
+            else
+                fprintf(stderr, "%s: read error\n", path);
+            return NULL;
+        }
     }
     buf[len] = '\0';
-    fclose(fp);
+    errno = 0;
+    if (fclose(fp) != 0) {
+        int saved_errno = errno;
+        free(buf);
+        if (saved_errno != 0)
+            fprintf(stderr, "%s: close error: %s\n", path, strerror(saved_errno));
+        else
+            fprintf(stderr, "%s: close error\n", path);
+        return NULL;
+    }
     *out_len = (size_t)len;
     return buf;
 }
@@ -196,50 +251,150 @@ static int parse_sfo(const uint8_t *data, size_t data_len,
 /* ------------------------------------------------------------------ */
 /* Print dict representation (matches Python's print(stuff))          */
 /* ------------------------------------------------------------------ */
-static void print_repr_str(const char *s)
+typedef struct {
+    int err;
+    int saved_errno;
+    const char *op; /* "write error" or "flush error" */
+} stdout_err_t;
+
+static void report_stdout_err(const stdout_err_t *se)
 {
-    /* Output Python single-quoted string repr */
-    putchar('\'');
-    for (; *s; s++) {
-        unsigned char c = (unsigned char)*s;
-        if (c == '\\')       fputs("\\\\", stdout);
-        else if (c == '\'')  fputs("\\'", stdout);
-        else if (c == '\n')  fputs("\\n", stdout);
-        else if (c == '\r')  fputs("\\r", stdout);
-        else if (c == '\t')  fputs("\\t", stdout);
-        else                 putchar(c);
+    if (se->saved_errno != 0) {
+        fprintf(stderr, "stdout: %s: %s\n", se->op, strerror(se->saved_errno));
+    } else {
+        fprintf(stderr, "stdout: %s\n", se->op);
     }
-    putchar('\'');
 }
 
-static void print_dict(const sfo_kv_t *kvs, int count)
+static int stdout_putchar(int c, stdout_err_t *se)
 {
-    putchar('{');
-    for (int i = 0; i < count; i++) {
-        if (i > 0) fputs(", ", stdout);
-        print_repr_str(kvs[i].key);
-        fputs(": ", stdout);
-        if (kvs[i].type == SFO_STRING)
-            print_repr_str(kvs[i].str_val);
-        else
-            printf("%u", kvs[i].int_val);
+    if (se && se->err) return -1;
+    errno = 0;
+    if (putchar(c) == EOF) {
+        if (se && !se->err) {
+            se->err = 1;
+            se->saved_errno = errno;
+            se->op = "write error";
+        }
+        return -1;
     }
-    puts("}");
+    return 0;
+}
+
+static int stdout_fputs(const char *s, stdout_err_t *se)
+{
+    if (se && se->err) return -1;
+    errno = 0;
+    if (fputs(s, stdout) == EOF) {
+        if (se && !se->err) {
+            se->err = 1;
+            se->saved_errno = errno;
+            se->op = "write error";
+        }
+        return -1;
+    }
+    return 0;
+}
+
+static int stdout_puts(const char *s, stdout_err_t *se)
+{
+    if (se && se->err) return -1;
+    errno = 0;
+    if (puts(s) == EOF) {
+        if (se && !se->err) {
+            se->err = 1;
+            se->saved_errno = errno;
+            se->op = "write error";
+        }
+        return -1;
+    }
+    return 0;
+}
+
+static int stdout_printf(stdout_err_t *se, const char *fmt, ...)
+{
+    if (se && se->err) return -1;
+    va_list ap;
+    va_start(ap, fmt);
+    errno = 0;
+    int ret = vprintf(fmt, ap);
+    va_end(ap);
+    if (ret < 0) {
+        if (se && !se->err) {
+            se->err = 1;
+            se->saved_errno = errno;
+            se->op = "write error";
+        }
+        return -1;
+    }
+    return 0;
+}
+
+static int stdout_flush(stdout_err_t *se)
+{
+    errno = 0;
+    if (fflush(stdout) != 0) {
+        if (se && !se->err) {
+            se->err = 1;
+            se->saved_errno = errno;
+            se->op = "flush error";
+        }
+        return -1;
+    }
+    return 0;
+}
+
+static int print_repr_str(const char *s, stdout_err_t *se)
+{
+    /* Output Python single-quoted string repr */
+    if (stdout_putchar('\'', se) != 0) return -1;
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        int ret = 0;
+        if (c == '\\')       ret = stdout_fputs("\\\\", se);
+        else if (c == '\'')  ret = stdout_fputs("\\'", se);
+        else if (c == '\n')  ret = stdout_fputs("\\n", se);
+        else if (c == '\r')  ret = stdout_fputs("\\r", se);
+        else if (c == '\t')  ret = stdout_fputs("\\t", se);
+        else                 ret = stdout_putchar(c, se);
+        if (ret != 0) return -1;
+    }
+    return stdout_putchar('\'', se);
+}
+
+static int print_dict(const sfo_kv_t *kvs, int count, stdout_err_t *se)
+{
+    if (stdout_putchar('{', se) != 0) return -1;
+    for (int i = 0; i < count; i++) {
+        if (i > 0) {
+            if (stdout_fputs(", ", se) != 0) return -1;
+        }
+        if (print_repr_str(kvs[i].key, se) != 0) return -1;
+        if (stdout_fputs(": ", se) != 0) return -1;
+        if (kvs[i].type == SFO_STRING) {
+            if (print_repr_str(kvs[i].str_val, se) != 0) return -1;
+        } else {
+            if (stdout_printf(se, "%u", kvs[i].int_val) != 0) return -1;
+        }
+    }
+    if (stdout_puts("}", se) != 0) return -1;
+    if (stdout_flush(se) != 0) return -1;
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* list_sfo: -l option                                                 */
 /* ------------------------------------------------------------------ */
-static void list_sfo(const char *file, int debug, int pretty)
+static int list_sfo(const char *file, int debug, int pretty)
 {
     size_t data_len;
     uint8_t *data = read_file(file, &data_len);
-    if (!data) return;
+    if (!data) return 1;
 
     if (data_len < SFO_HDR_SIZE) {
         fprintf(stderr, "SFO: file too small\n");
         free(data);
-        return;
+        return 1;
     }
 
     uint32_t magic        = rd_le32(data);
@@ -248,122 +403,210 @@ static void list_sfo(const char *file, int debug, int pretty)
     uint32_t value_offset = rd_le32(data + 12);
     uint32_t pair_count   = rd_le32(data + 16);
 
+    stdout_err_t se = {0, 0, NULL};
+
     if (debug) {
-        printf("[X] Magic: %08x\n", magic);
-        printf("[ ] Unk1: %08x\n", unk1);
-        printf("[X] Key Offset: %08x\n", key_offset);
-        printf("[X] Value Offset: %08x\n", value_offset);
-        printf("[X] Pair Count: %08x\n\n", pair_count);
+        stdout_printf(&se, "[X] Magic: %08x\n", magic);
+        stdout_printf(&se, "[ ] Unk1: %08x\n", unk1);
+        stdout_printf(&se, "[X] Key Offset: %08x\n", key_offset);
+        stdout_printf(&se, "[X] Value Offset: %08x\n", value_offset);
+        stdout_printf(&se, "[X] Pair Count: %08x\n\n", pair_count);
+        if (se.err) {
+            stdout_flush(&se);
+            report_stdout_err(&se);
+            free(data);
+            return 1;
+        }
     }
 
     if (magic != SFO_MAGIC || unk1 != 0x00000101) {
         fprintf(stderr, "SFO: invalid header\n");
         free(data);
-        return;
+        return 1;
     }
     if (pair_count > KV_MAX_PAIRS) {
         fprintf(stderr, "SFO: too many pairs\n");
         free(data);
-        return;
+        return 1;
     }
 
     sfo_kv_t *kvs = (sfo_kv_t *)calloc(KV_MAX_PAIRS, sizeof(sfo_kv_t));
     if (!kvs) {
         fprintf(stderr, "SFO: out of memory\n");
         free(data);
-        return;
+        return 1;
     }
     int count;
     if (parse_sfo(data, data_len, kvs, &count, NULL, NULL) != 0) {
         free(kvs);
         free(data);
-        return;
+        return 1;
     }
 
     if (debug) {
         for (int i = 0; i < count; i++) {
             if (!pretty) {
-                printf("[X] Key Offset: %04x\n", kvs[i].key_off);
-                printf("[ ] Unk1: %02x\n", kvs[i].unk1);
-                printf("[/] Value Type: %02x\n", kvs[i].type);
-                printf("[X] Value Length: %08x\n", kvs[i].value_len);
-                printf("[X] Padded Length: %08x\n", kvs[i].padded_len);
-                printf("[X] Value Offset: %08x\n\n", kvs[i].value_off);
+                if (stdout_printf(&se, "[X] Key Offset: %04x\n", kvs[i].key_off) != 0 ||
+                    stdout_printf(&se, "[ ] Unk1: %02x\n", kvs[i].unk1) != 0 ||
+                    stdout_printf(&se, "[/] Value Type: %02x\n", kvs[i].type) != 0 ||
+                    stdout_printf(&se, "[X] Value Length: %08x\n", kvs[i].value_len) != 0 ||
+                    stdout_printf(&se, "[X] Padded Length: %08x\n", kvs[i].padded_len) != 0 ||
+                    stdout_printf(&se, "[X] Value Offset: %08x\n\n", kvs[i].value_off) != 0) {
+                    break;
+                }
             } else {
                 /* Pretty print */
-                printf("[X] Key: '%s'[%04x]\n", kvs[i].key, kvs[i].key_off);
-                printf("[/] Unk: %02x\n", kvs[i].unk1);
-                printf("[/] Value Type: %02x\n", kvs[i].type);
-                printf("[X] Value Length: %08x\n", kvs[i].value_len);
-                printf("[X] Padded Length: %08x\n", kvs[i].padded_len);
+                if (stdout_printf(&se, "[X] Key: '%s'[%04x]\n", kvs[i].key, kvs[i].key_off) != 0 ||
+                    stdout_printf(&se, "[/] Unk: %02x\n", kvs[i].unk1) != 0 ||
+                    stdout_printf(&se, "[/] Value Type: %02x\n", kvs[i].type) != 0 ||
+                    stdout_printf(&se, "[X] Value Length: %08x\n", kvs[i].value_len) != 0 ||
+                    stdout_printf(&se, "[X] Padded Length: %08x\n", kvs[i].padded_len) != 0) {
+                    break;
+                }
                 if (kvs[i].type == SFO_STRING) {
-                    printf("[X] Value Offset: %08x\n[X] Value: '%s'[%08x]\n\n",
-                           kvs[i].value_off,
-                           kvs[i].str_val,
-                           value_offset + kvs[i].value_off);
+                    if (stdout_printf(&se, "[X] Value Offset: %08x\n[X] Value: '%s'[%08x]\n\n",
+                                      kvs[i].value_off,
+                                      kvs[i].str_val,
+                                      value_offset + kvs[i].value_off) != 0) {
+                        break;
+                    }
                 } else if (kvs[i].type == SFO_INT) {
-                    printf("[X] Value Offset: %08x\n[X] Value: %u[%08x]\n\n",
-                           kvs[i].value_off,
-                           kvs[i].int_val,
-                           value_offset + kvs[i].value_off);
+                    if (stdout_printf(&se, "[X] Value Offset: %08x\n[X] Value: %u[%08x]\n\n",
+                                      kvs[i].value_off,
+                                      kvs[i].int_val,
+                                      value_offset + kvs[i].value_off) != 0) {
+                        break;
+                    }
                 } else {
-                    printf("[X] Value Offset: %08x\n[X] Value Type Unknown\n\n",
-                           kvs[i].value_off);
+                    if (stdout_printf(&se, "[X] Value Offset: %08x\n[X] Value Type Unknown\n\n",
+                                      kvs[i].value_off) != 0) {
+                        break;
+                    }
                 }
             }
         }
+        stdout_flush(&se);
     } else {
-        print_dict(kvs, count);
+        print_dict(kvs, count, &se);
+    }
+
+    if (se.err) {
+        stdout_flush(&se);
+        report_stdout_err(&se);
+        free(kvs);
+        free(data);
+        return 1;
     }
 
     free(kvs);
     free(data);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* convert_to_xml: --toxml option                                      */
 /* ------------------------------------------------------------------ */
-static void convert_to_xml(const char *sfofile, const char *xmlfile, int debug)
+static int convert_to_xml(const char *sfofile, const char *xmlfile, int debug)
 {
     size_t data_len;
     uint8_t *data = read_file(sfofile, &data_len);
-    if (!data) return;
+    if (!data) return 1;
 
     sfo_kv_t *kvs = (sfo_kv_t *)calloc(KV_MAX_PAIRS, sizeof(sfo_kv_t));
     if (!kvs) {
         fprintf(stderr, "SFO: out of memory\n");
         free(data);
-        return;
+        return 1;
     }
     int count;
     if (parse_sfo(data, data_len, kvs, &count, NULL, NULL) != 0) {
         free(kvs);
         free(data);
-        return;
+        return 1;
     }
 
-    if (!debug)
-        print_dict(kvs, count);
+    if (!debug) {
+        stdout_err_t se = {0, 0, NULL};
+        if (print_dict(kvs, count, &se) != 0 || se.err) {
+            stdout_flush(&se);
+            report_stdout_err(&se);
+            free(kvs);
+            free(data);
+            return 1;
+        }
+    }
 
     free(data);
 
     FILE *fp = fopen(xmlfile, "w");
-    if (!fp) { perror(xmlfile); free(kvs); return; }
+    if (!fp) {
+        perror(xmlfile);
+        free(kvs);
+        return 1;
+    }
 
-    fputs("<?xml version=\"1.0\" ?>\n", fp);
-    fputs("<sfo>\n", fp);
-    for (int i = 0; i < count; i++) {
-        if (kvs[i].type == SFO_STRING) {
-            fprintf(fp, "\t<value name=\"%s\" type=\"string\">%s</value>\n",
-                    kvs[i].key, kvs[i].str_val);
-        } else if (kvs[i].type == SFO_INT) {
-            fprintf(fp, "\t<value name=\"%s\" type=\"integer\">%u</value>\n",
-                    kvs[i].key, kvs[i].int_val);
+    int err = 0;
+    int saved_errno = 0;
+    const char *failed_op = NULL;
+
+#define RECORD_XML_WRITE_ERR(op) do { \
+    if (!err) { \
+        err = 1; \
+        saved_errno = errno; \
+        failed_op = (op); \
+    } \
+} while (0)
+
+    if (!err) {
+        errno = 0;
+        if (fputs("<?xml version=\"1.0\" ?>\n<sfo>\n", fp) == EOF) {
+            RECORD_XML_WRITE_ERR("write error");
         }
     }
-    fputs("</sfo>\n", fp);
-    fclose(fp);
+    for (int i = 0; i < count; i++) {
+        if (!err) {
+            errno = 0;
+            int wrc = 0;
+            if (kvs[i].type == SFO_STRING) {
+                wrc = fprintf(fp, "\t<value name=\"%s\" type=\"string\">%s</value>\n",
+                              kvs[i].key, kvs[i].str_val);
+            } else if (kvs[i].type == SFO_INT) {
+                wrc = fprintf(fp, "\t<value name=\"%s\" type=\"integer\">%u</value>\n",
+                              kvs[i].key, kvs[i].int_val);
+            }
+            if (wrc < 0) {
+                RECORD_XML_WRITE_ERR("write error");
+            }
+        }
+    }
+    if (!err) {
+        errno = 0;
+        if (fputs("</sfo>\n", fp) == EOF) {
+            RECORD_XML_WRITE_ERR("write error");
+        }
+    }
+
+    if (!err) {
+        errno = 0;
+        if (fclose(fp) != 0) {
+            RECORD_XML_WRITE_ERR("close error");
+        }
+    } else {
+        fclose(fp);
+    }
+
     free(kvs);
+
+    if (err) {
+        if (saved_errno != 0) {
+            fprintf(stderr, "%s: %s: %s\n", xmlfile, failed_op, strerror(saved_errno));
+        } else {
+            fprintf(stderr, "%s: %s\n", xmlfile, failed_op);
+        }
+        return 1;
+    }
+
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -437,13 +680,21 @@ static int parse_xml(const char *xmldata,
         /* Check this is actually the start of a tag (not e.g. </value>) */
         if (tag[6] != ' ' && tag[6] != '\t' && tag[6] != '\n' &&
             tag[6] != '\r' && tag[6] != '>') {
+            if (tag[6] == '\0') {
+                /* Truncated bare '<value' at end of file */
+                fprintf(stderr, "SFO: malformed XML tag\n");
+                return -1;
+            }
             p = tag + 1;
             continue;
         }
 
         /* Find the '>' that closes this tag */
         const char *tag_end = strchr(tag, '>');
-        if (!tag_end) break;
+        if (!tag_end) {
+            fprintf(stderr, "SFO: malformed XML tag\n");
+            return -1;
+        }
 
         /* Extract name and type attributes from tag content */
         char name[KV_MAX_KEY]  = {0};
@@ -452,7 +703,10 @@ static int parse_xml(const char *xmldata,
         /* Make a temporary copy of the tag so extract_attr works correctly */
         size_t tag_inner_len = (size_t)(tag_end - tag);
         char *tag_buf = (char *)malloc(tag_inner_len + 1);
-        if (!tag_buf) break;
+        if (!tag_buf) {
+            fprintf(stderr, "SFO: out of memory\n");
+            return -1;
+        }
         memcpy(tag_buf, tag, tag_inner_len);
         tag_buf[tag_inner_len] = '\0';
 
@@ -461,18 +715,24 @@ static int parse_xml(const char *xmldata,
         free(tag_buf);
 
         if (!has_name || !has_type) {
-            p = tag_end + 1;
-            continue;
+            fprintf(stderr, "SFO: malformed XML tag\n");
+            return -1;
         }
 
         /* Extract content between > and </value> */
         const char *content_start = tag_end + 1;
         const char *close_tag = strstr(content_start, "</value>");
-        if (!close_tag) break;
+        if (!close_tag) {
+            fprintf(stderr, "SFO: malformed XML tag\n");
+            return -1;
+        }
 
         size_t clen = (size_t)(close_tag - content_start);
         char *content = (char *)malloc(clen + 1);
-        if (!content) break;
+        if (!content) {
+            fprintf(stderr, "SFO: out of memory\n");
+            return -1;
+        }
         memcpy(content, content_start, clen);
         content[clen] = '\0';
         strip_ws(content);
@@ -481,18 +741,26 @@ static int parse_xml(const char *xmldata,
         if (forcetitle && strcmp(name, "TITLE") == 0) {
             free(content);
             content = (char *)malloc(strlen(forcetitle) + 1);
-            if (!content) break;
+            if (!content) {
+                fprintf(stderr, "SFO: out of memory\n");
+                return -1;
+            }
             strcpy(content, forcetitle);
         } else if (forceappid && strcmp(name, "TITLE_ID") == 0) {
             free(content);
             content = (char *)malloc(strlen(forceappid) + 1);
-            if (!content) break;
+            if (!content) {
+                fprintf(stderr, "SFO: out of memory\n");
+                return -1;
+            }
             strcpy(content, forceappid);
         }
 
         /* Fill kv entry */
-        strncpy(kvs[count].key, name, KV_MAX_KEY - 1);
-        kvs[count].key[KV_MAX_KEY - 1] = '\0';
+        size_t nlen = strlen(name);
+        if (nlen >= KV_MAX_KEY) nlen = KV_MAX_KEY - 1;
+        memcpy(kvs[count].key, name, nlen);
+        kvs[count].key[nlen] = '\0';
 
         if (strcmp(type_s, "integer") == 0) {
             kvs[count].type    = SFO_INT;
@@ -500,14 +768,26 @@ static int parse_xml(const char *xmldata,
             kvs[count].str_val[0] = '\0';
         } else {
             kvs[count].type = SFO_STRING;
-            strncpy(kvs[count].str_val, content, KV_MAX_STR - 1);
-            kvs[count].str_val[KV_MAX_STR - 1] = '\0';
+            size_t slen = strlen(content);
+            if (slen >= KV_MAX_STR) slen = KV_MAX_STR - 1;
+            memcpy(kvs[count].str_val, content, slen);
+            kvs[count].str_val[slen] = '\0';
             kvs[count].int_val = 0;
         }
 
         free(content);
         count++;
         p = close_tag + 8; /* skip "</value>" */
+    }
+
+    if (count == 0) {
+        fprintf(stderr, "SFO: no valid entries in XML\n");
+        return -1;
+    }
+
+    if (strstr(p, "<value")) {
+        fprintf(stderr, "SFO: malformed XML tag\n");
+        return -1;
     }
 
     *out_count = count;
@@ -517,24 +797,24 @@ static int parse_xml(const char *xmldata,
 /* ------------------------------------------------------------------ */
 /* convert_from_xml: --fromxml option                                  */
 /* ------------------------------------------------------------------ */
-static void convert_from_xml(const char *xmlfile, const char *sfofile,
-                               const char *forcetitle, const char *forceappid)
+static int convert_from_xml(const char *xmlfile, const char *sfofile,
+                            const char *forcetitle, const char *forceappid)
 {
     size_t xml_len;
     uint8_t *xmldata = read_file(xmlfile, &xml_len);
-    if (!xmldata) return;
+    if (!xmldata) return 1;
 
     sfo_kv_t *kvs = (sfo_kv_t *)calloc(KV_MAX_PAIRS, sizeof(sfo_kv_t));
     if (!kvs) {
         fprintf(stderr, "SFO: out of memory\n");
         free(xmldata);
-        return;
+        return 1;
     }
     int count = 0;
     if (parse_xml((const char *)xmldata, kvs, &count, forcetitle, forceappid) != 0) {
         free(kvs);
         free(xmldata);
-        return;
+        return 1;
     }
     free(xmldata);
 
@@ -548,7 +828,13 @@ static void convert_from_xml(const char *xmlfile, const char *sfofile,
     uint32_t *pad_lens   = (uint32_t *)calloc(count, sizeof(uint32_t));
     uint32_t *val_lens   = (uint32_t *)calloc(count, sizeof(uint32_t));
     if (!key_offs || !val_offs || !pad_lens || !val_lens) {
-        goto cleanup;
+        fprintf(stderr, "SFO: out of memory\n");
+        free(key_offs);
+        free(val_offs);
+        free(pad_lens);
+        free(val_lens);
+        free(kvs);
+        return 1;
     }
 
     for (int i = 0; i < count; i++) {
@@ -581,7 +867,27 @@ static void convert_from_xml(const char *xmlfile, const char *sfofile,
 
     /* Write SFO */
     FILE *fp = fopen(sfofile, "wb");
-    if (!fp) { perror(sfofile); goto cleanup; }
+    if (!fp) {
+        perror(sfofile);
+        free(key_offs);
+        free(val_offs);
+        free(pad_lens);
+        free(val_lens);
+        free(kvs);
+        return 1;
+    }
+
+    int err = 0;
+    int saved_errno = 0;
+    const char *failed_op = NULL;
+
+#define RECORD_SFO_WRITE_ERR(op) do { \
+    if (!err) { \
+        err = 1; \
+        saved_errno = errno; \
+        failed_op = (op); \
+    } \
+} while (0)
 
     /* Header */
     uint8_t hdr[SFO_HDR_SIZE];
@@ -590,7 +896,12 @@ static void convert_from_xml(const char *xmlfile, const char *sfofile,
     wr_le32(hdr + 8,  header_key_offset);
     wr_le32(hdr + 12, header_value_offset);
     wr_le32(hdr + 16, (uint32_t)count);
-    fwrite(hdr, 1, SFO_HDR_SIZE, fp);
+    if (!err) {
+        errno = 0;
+        if (fwrite(hdr, 1, SFO_HDR_SIZE, fp) != SFO_HDR_SIZE) {
+            RECORD_SFO_WRITE_ERR("write error");
+        }
+    }
 
     /* Entries */
     for (int i = 0; i < count; i++) {
@@ -601,67 +912,136 @@ static void convert_from_xml(const char *xmlfile, const char *sfofile,
         wr_le32(entry + 4,  val_lens[i]);
         wr_le32(entry + 8,  pad_lens[i]);
         wr_le32(entry + 12, val_offs[i]);
-        fwrite(entry, 1, SFO_ENTRY_SIZE, fp);
+        if (!err) {
+            errno = 0;
+            if (fwrite(entry, 1, SFO_ENTRY_SIZE, fp) != SFO_ENTRY_SIZE) {
+                RECORD_SFO_WRITE_ERR("write error");
+            }
+        }
     }
 
     /* Key table */
     for (int i = 0; i < count; i++) {
-        fputs(kvs[i].key, fp);
-        fputc('\0', fp);
+        if (!err) {
+            errno = 0;
+            if (fputs(kvs[i].key, fp) == EOF) {
+                RECORD_SFO_WRITE_ERR("write error");
+            }
+        }
+        if (!err) {
+            errno = 0;
+            if (fputc('\0', fp) == EOF) {
+                RECORD_SFO_WRITE_ERR("write error");
+            }
+        }
     }
     /* Key padding */
-    for (uint32_t j = 0; j < keypad; j++)
-        fputc('\0', fp);
+    for (uint32_t j = 0; j < keypad; j++) {
+        if (!err) {
+            errno = 0;
+            if (fputc('\0', fp) == EOF) {
+                RECORD_SFO_WRITE_ERR("write error");
+            }
+        }
+    }
 
     /* Value table */
     for (int i = 0; i < count; i++) {
         if (kvs[i].type == SFO_INT) {
             uint8_t vbuf[4];
             wr_le32(vbuf, kvs[i].int_val);
-            fwrite(vbuf, 1, 4, fp);
+            if (!err) {
+                errno = 0;
+                if (fwrite(vbuf, 1, 4, fp) != 4) {
+                    RECORD_SFO_WRITE_ERR("write error");
+                }
+            }
         } else {
             size_t slen = strlen(kvs[i].str_val);
-            fwrite(kvs[i].str_val, 1, slen, fp);
-            fputc('\0', fp);
+            if (!err) {
+                errno = 0;
+                if (fwrite(kvs[i].str_val, 1, slen, fp) != slen) {
+                    RECORD_SFO_WRITE_ERR("write error");
+                }
+            }
+            if (!err) {
+                errno = 0;
+                if (fputc('\0', fp) == EOF) {
+                    RECORD_SFO_WRITE_ERR("write error");
+                }
+            }
             /* Padding after string+NUL to reach padded_len */
             uint32_t written = (uint32_t)slen + 1;
-            for (uint32_t j = written; j < pad_lens[i]; j++)
-                fputc('\0', fp);
+            for (uint32_t j = written; j < pad_lens[i]; j++) {
+                if (!err) {
+                    errno = 0;
+                    if (fputc('\0', fp) == EOF) {
+                        RECORD_SFO_WRITE_ERR("write error");
+                    }
+                }
+            }
         }
     }
 
-    fclose(fp);
+    if (!err) {
+        errno = 0;
+        if (fclose(fp) != 0) {
+            RECORD_SFO_WRITE_ERR("close error");
+        }
+    } else {
+        fclose(fp);
+    }
 
-cleanup:
     free(key_offs);
     free(val_offs);
     free(pad_lens);
     free(val_lens);
     free(kvs);
+
+    if (err) {
+        if (saved_errno != 0) {
+            fprintf(stderr, "%s: %s: %s\n", sfofile, failed_op, strerror(saved_errno));
+        } else {
+            fprintf(stderr, "%s: %s\n", sfofile, failed_op);
+        }
+        return 1;
+    }
+
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* Usage / version                                                     */
 /* ------------------------------------------------------------------ */
+static void usage_print(stdout_err_t *se)
+{
+    stdout_puts("sfo v" PS3SFO_APP_VERSION " - A tool to manage PlayStation 3 SFO files.\n", se);
+    stdout_puts("usage:", se);
+    stdout_puts("    sfo [options]\n", se);
+    stdout_puts("     -h / --help \t\t\t\t display this help and exit.", se);
+    stdout_puts("     -v / --version \t\t\t\t output version information and exit.", se);
+    stdout_puts("     -d / --debug \t\t\t\t display extra information such as header and table data.", se);
+    stdout_puts("     -p / --pretty \t\t\t\t when used with -l and -d, display the key name and value.", se);
+    stdout_puts("     -l / --list <sfofile> \t\t\t list the contents of the provided SFO file.", se);
+    stdout_puts("     -t / --toxml   <sfofile> <xmlfile>  convert a SFO file to an XML file.", se);
+    stdout_puts("     -f / --fromxml <xmlfile> <sfofile>  convert an XML file to a SFO file.", se);
+    stdout_puts("       --title=<title> \t\t\t\t (override TITLE when using --fromxml)", se);
+    stdout_puts("       --appid=<appid> \t\t\t\t (override TITLE_ID when using --fromxml)\n", se);
+}
+
 static void usage(void)
 {
-    puts("sfo v" PS3SFO_APP_VERSION " - A tool to manage PlayStation 3 SFO files.\n");
-    puts("usage:");
-    puts("    sfo [options]\n");
-    puts("     -h / --help \t\t\t\t display this help and exit.");
-    puts("     -v / --version \t\t\t\t output version information and exit.");
-    puts("     -d / --debug \t\t\t\t display extra information such as header and table data.");
-    puts("     -p / --pretty \t\t\t\t when used with -l and -d, display the key name and value.");
-    puts("     -l / --list <sfofile> \t\t\t list the contents of the provided SFO file.");
-    puts("     -t / --toxml   <sfofile> <xmlfile>  convert a SFO file to an XML file.");
-    puts("     -f / --fromxml <xmlfile> <sfofile>  convert an XML file to a SFO file.");
-    puts("       --title=<title> \t\t\t\t (override TITLE when using --fromxml)");
-    puts("       --appid=<appid> \t\t\t\t (override TITLE_ID when using --fromxml)\n");
+    usage_print(NULL);
+}
+
+static void version_print(stdout_err_t *se)
+{
+    stdout_puts("sfo " PS3SFO_APP_VERSION, se);
 }
 
 static void version(void)
 {
-    puts("sfo " PS3SFO_APP_VERSION);
+    version_print(NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -694,8 +1074,26 @@ int main(int argc, char *argv[])
     int opt;
     while ((opt = getopt_long(argc, argv, "hdvpl:tf", long_opts, NULL)) != -1) {
         switch (opt) {
-        case 'h': usage();   return 0;
-        case 'v': version(); return 0;
+        case 'h': {
+            stdout_err_t se = {0, 0, NULL};
+            usage_print(&se);
+            stdout_flush(&se);
+            if (se.err) {
+                report_stdout_err(&se);
+                return 1;
+            }
+            return 0;
+        }
+        case 'v': {
+            stdout_err_t se = {0, 0, NULL};
+            version_print(&se);
+            stdout_flush(&se);
+            if (se.err) {
+                report_stdout_err(&se);
+                return 1;
+            }
+            return 0;
+        }
         case 'd': debug  = 1; break;
         case 'p': pretty = 1; break;
         case 'l': filelist = optarg; do_list = 1; break;
@@ -708,11 +1106,11 @@ int main(int argc, char *argv[])
     }
 
     if (do_list) {
-        list_sfo(filelist, debug, pretty);
+        return list_sfo(filelist, debug, pretty);
     } else if (do_toxml && !do_fromxml && (argc - optind) == 2) {
-        convert_to_xml(argv[optind], argv[optind + 1], debug);
+        return convert_to_xml(argv[optind], argv[optind + 1], debug);
     } else if (do_fromxml && !do_toxml && (argc - optind) == 2) {
-        convert_from_xml(argv[optind], argv[optind + 1], forcetitle, forceappid);
+        return convert_from_xml(argv[optind], argv[optind + 1], forcetitle, forceappid);
     } else {
         usage();
         return 2;
