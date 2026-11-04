@@ -2,10 +2,14 @@
  * Arguments: arg0 = the lane ring EA, arg1 = (ring_slots << 32) | 0, arg2 = the lane control-block EA, arg3 =
  * (payload EA << 32) | commit EA (both 32-bit ILP32 PPU addresses, 128-aligned).  Reports follow the W probe's
  * sequence exactly (clock-calibration/spu/main.c): PAYLOAD put, wait-all, COMMIT put, wait-all, on E1_REPORT_TAG,
- * with the caller's tag mask saved and restored.  No outbound mailbox, no SPU events, no other decrementer user. */
+ * with the caller's tag mask saved and restored.  No other decrementer user.  The program ends with an explicit
+ * sys_spu_thread_exit(0) (libsputhread): after an MFC tag-status sequence it writes the exit code to the outbound
+ * mailbox and executes stop 0x102 (the LV2 thread-exit trap).  Returning from main instead ends in
+ * the C library's _exit, which executes stop 0x2000, not that trap. */
 #include <spu_intrinsics.h>
 #include <spu_mfcio.h>
 #include <stdint.h>
+#include <sys/spu_thread.h>
 
 #include "e1_spu_core.h"
 
@@ -48,5 +52,5 @@ int main(uint64_t ea_ring, uint64_t slots_arg, uint64_t ea_ctl, uint64_t report_
     t.payload_ea = report_eas >> 32;
     t.commit_ea = report_eas & 0xffffffffu;
     e1_spu_run(&port, &g_writer, g_staging, ea_ring, (uint32_t)(slots_arg >> 32), ea_ctl);
-    return 0;
+    sys_spu_thread_exit(0);
 }
