@@ -1772,3 +1772,458 @@ fn cm_cli_premise_parsing() {
     assert_eq!(code, Some(0));
     assert!(out.lines().any(|l| l.contains("SPU lane") && l.contains("premises C,A,S,W32")), "{out}");
 }
+
+// ---- conditional durations (P3.5): parsed captures --------------------------------------------------------------
+
+use ps3dk_prof::durations::{
+    durations, lines as du_lines, DLimit, DurState, DurationBudgets, DurationMap, Inventory, ZoneDur,
+};
+
+/// SPU brackets under W32: dec 1000 -> f = TOP-1000 in [10, 20]; dec 900 in [30, 40]: B = [1/10, 3/10].
+fn du_cal() -> Chunk {
+    calibration(SPU_D, 1, 0, &[(1000, 10, 20), (900, 30, 40)])
+}
+
+/// lane_only with an explicit FINAL open_begins value.
+fn lane_fin(body: Vec<Chunk>, fin: (u8, u64, u64, u64, u32)) -> Vec<Chunk> {
+    let (state, next, events, lost, open) = fin;
+    let mut v = vec![
+        domains(&[(SPU_D, 1, LANE)]),
+        images(0, b"spu-build", 2),
+        lanes(&[(LANE, SPU_D, 0, 1)]),
+        epochs(&[(SPU_D, 1, 1, 0)]),
+    ];
+    v.extend(body);
+    v.push(finals(&[(LANE, 1, state, next, events, lost, open)]));
+    v
+}
+
+fn du_run(name: &str, ext: Vec<Chunk>, b: &DurationBudgets) -> (ExtCapture, CaptureMap, DurationMap) {
+    let x = capture(name, ext);
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let d = durations(&x, &c, b);
+    (x, c, d)
+}
+
+fn du(name: &str, ext: Vec<Chunk>) -> (ExtCapture, CaptureMap, DurationMap) {
+    du_run(name, ext, &DurationBudgets::default())
+}
+
+fn dstate(d: &DurationMap, epoch: u32) -> &DurState {
+    &d.epochs.iter().find(|e| e.source == SourceKey::Lane(LANE) && e.epoch == epoch).expect("a duration entry").state
+}
+
+fn summaries(d: &DurationMap, epoch: u32) -> (&Inventory, &Vec<ZoneDur>) {
+    match dstate(d, epoch) {
+        DurState::Summaries { inventory, zones } => (inventory, zones),
+        other => panic!("expected summaries, got {other:?}"),
+    }
+}
+
+fn zone_of(z: &[ZoneDur], desc: u32) -> &ZoneDur {
+    z.iter().find(|z| z.desc == desc).unwrap_or_else(|| panic!("no zone {desc}"))
+}
+
+/// "[lo, hi]" with ( for an open lower end and +inf).
+fn btext(b: &ps3dk_prof::durations::Bound) -> String {
+    format!(
+        "{}{}, {}",
+        if b.lo_open { "(" } else { "[" },
+        b.lo,
+        b.hi.as_ref().map_or("+inf)".to_string(), |h| format!("{h}]"))
+    )
+}
+
+#[test]
+fn du_nested_pair_inclusive_and_exclusive_scale_with_one_b() {
+    // zone 0 at dec 990..950 (d = 40) holding zone 1 at 980..970 (d = 10): exclusive 30.  B = [1/10, 3/10].
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 1, 1), (970, 1, 2, 1), (950, 0, 2, 0)]),
+    ];
+    let (_, _, d) = du("du-nested", lane_only(body, (1, 4, 4, 0)));
+    let (inv, z) = summaries(&d, 1);
+    assert_eq!((inv.events, inv.paired, inv.pairs, inv.marks, inv.open, inv.unclassified), (4, 4, 2, 0, Some(0), 0));
+    let p = zone_of(z, 0);
+    let i = p.inclusive.as_ref().unwrap();
+    assert_eq!((i.n, i.sum, btext(&i.b_sum)), (1, 40, "[4, 12]".to_string()));
+    let e = p.exclusive.as_ref().unwrap();
+    assert_eq!((e.sum, btext(&e.b_sum)), (30, "[3, 9]".to_string()));
+    let c = zone_of(z, 1);
+    assert_eq!(btext(&c.inclusive.as_ref().unwrap().b_sum), "[1, 3]");
+    assert_eq!(c.exclusive.as_ref().unwrap().sum, 10, "a leaf's exclusive is its inclusive");
+}
+
+#[test]
+fn du_exclusive_is_joint_not_independent_interval_subtraction() {
+    // B = [1, 2]: brackets dec 1000 in [100, 101], dec 990 in [111, 120] (df = 10: b in [(111-101)/10, (120-100)/10]).
+    // Parent d = 10 (dec 1000..990) holding child d = 4 (997..993): exclusive 6 -> [6, 12], never [2, 16].
+    let body = vec![
+        calibration(SPU_D, 1, 0, &[(1000, 100, 101), (990, 111, 120)]),
+        spu_events(LANE, 1, 0, &[(1000, 0, 1, 0), (997, 1, 1, 1), (993, 1, 2, 1), (990, 0, 2, 0)]),
+    ];
+    let (_, c, d) = du("du-joint", lane_only(body, (1, 4, 4, 0)));
+    let EpochState::Compatible(s) = state(&c, SourceKey::Lane(LANE), 1) else { panic!() };
+    assert_eq!((s.slope_lo.to_string(), s.slope_hi.as_ref().unwrap().to_string()), ("1".into(), "2".into()));
+    let (_, z) = summaries(&d, 1);
+    assert_eq!(btext(&zone_of(z, 0).exclusive.as_ref().unwrap().b_sum), "[6, 12]");
+}
+
+#[test]
+fn du_child_outside_parent_contradicts_order() {
+    // f (= TOP - dec, relative): parent 0..100, child 110..120 -> sequence order f 0, 110, 120, 100: one decrease.
+    let t = 2_000u32;
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(t, 0, 1, 0), (t - 110, 1, 1, 1), (t - 120, 1, 2, 1), (t - 100, 0, 2, 0)]),
+    ];
+    let (_, c, d) = du("du-outside", lane_only(body, (1, 4, 4, 0)));
+    assert!(matches!(state(&c, SourceKey::Lane(LANE), 1), EpochState::Compatible(_)), "clockmap unchanged");
+    let DurState::Contradicted { decreases, first, zones, inventory } = dstate(&d, 1) else { panic!("{d:?}") };
+    let top = SPU_DEC_TOP;
+    assert_eq!(*decreases, 1);
+    assert_eq!(*first, (2, 3, top - i128::from(t - 120), top - i128::from(t - 100)));
+    assert_eq!(inventory.pairs, 2);
+    let got: Vec<(u32, i128)> = zones.iter().map(|z| (z.desc, z.sum)).collect();
+    assert_eq!(got, vec![(0, 100), (1, 10)]);
+}
+
+#[test]
+fn du_overlapping_siblings_contradict_order() {
+    // parent 0..100; children 20..80 then 30..90 (sequence order f: 0, 20, 80, 30, 90, 100): 80 -> 30 decreases.
+    let t = 2_000u32;
+    let ev = [(t, 0, 1, 0), (t - 20, 1, 1, 1), (t - 80, 1, 2, 1), (t - 30, 1, 1, 1), (t - 90, 1, 2, 1), (t - 100, 0, 2, 0)];
+    let (_, _, d) = du("du-siblings", lane_only(vec![du_cal(), spu_events(LANE, 1, 0, &ev)], (1, 6, 6, 0)));
+    let DurState::Contradicted { decreases, first, .. } = dstate(&d, 1) else { panic!("{d:?}") };
+    assert_eq!((*decreases, first.0, first.1), (1, 2, 3));
+}
+
+#[test]
+fn du_a_negative_pair_reports_signed_raw_deltas_only() {
+    // BEGIN dec 900, END dec 950: d = -50 in the premise coordinate.
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(900, 0, 1, 0), (950, 0, 2, 0)])];
+    let (x, c, d) = du("du-negative", lane_only(body, (1, 2, 2, 0)));
+    let DurState::Contradicted { zones, .. } = dstate(&d, 1) else { panic!("{d:?}") };
+    assert_eq!((zones[0].sum, zones[0].min, zones[0].max), (-50, -50, -50));
+    let cap = match load(&ext_file(lane_only(vec![du_cal(), spu_events(LANE, 1, 0, &[(900, 0, 1, 0), (950, 0, 2, 0)])], (1, 2, 2, 0))).bytes()) {
+        Outcome::Analysed(a) => a.capture,
+        Outcome::Malformed(m) => panic!("{m}"),
+    };
+    let text = du_lines(&cap, &x, &c, &d).join("\n");
+    assert!(text.contains("ORDER CONTRADICTED (1 decrease(s)"), "{text}");
+    assert!(text.contains("signed raw counter deltas sum -50 min -50 max -50 (no time claimed)"), "{text}");
+    assert!(!text.contains("inclusive ("), "no time summary: {text}");
+}
+
+#[test]
+fn du_a_zero_pair_is_zero_and_no_pairs_is_unavailable() {
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(950, 0, 1, 0), (950, 0, 2, 0)])];
+    let (_, _, d) = du("du-zero", lane_only(body, (1, 2, 2, 0)));
+    let (_, z) = summaries(&d, 1);
+    let i = zone_of(z, 0).inclusive.as_ref().unwrap();
+    assert_eq!((i.sum, btext(&i.b_sum)), (0, "[0, 0]".to_string()));
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(950, 0, M, 0), (940, 0, M, 0)])];
+    let (_, _, d) = du("du-marks", lane_only(body, (1, 2, 2, 0)));
+    let (inv, z) = summaries(&d, 1);
+    assert_eq!((inv.marks, inv.pairs, z.len()), (2, 0, 0), "no eligible pairs: no zone, never a zero");
+}
+
+#[test]
+fn du_protocol_error_events_are_unclassified_not_repaired() {
+    // The t4 shape: seq 0 BEGIN, seq 1 END of another descriptor (protocol error), seq 2 MARK: all unclassified.
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 2, 0)]), spu_events(LANE, 1, 2, &[(970, 0, M, 0)])];
+    let (_, _, d) = du("du-protocol", lane_only(body, (1, 3, 3, 0)));
+    let (inv, z) = summaries(&d, 1);
+    assert_eq!((inv.events, inv.paired, inv.marks, inv.open, inv.unclassified), (3, 0, 0, None, 3));
+    assert!(z.is_empty());
+    // An accepted pair, then an open BEGIN, then the error: the pair stays eligible; the rest is unclassified.
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 0, 2, 0), (970, 0, 1, 0), (960, 1, 2, 0)])];
+    let (_, _, d) = du("du-pair-error", lane_only(body, (1, 4, 4, 0)));
+    let (inv, z) = summaries(&d, 1);
+    assert_eq!((inv.paired, inv.pairs, inv.open, inv.unclassified), (2, 1, None, 2));
+    assert_eq!(zone_of(z, 0).inclusive.as_ref().unwrap().sum, 10);
+}
+
+#[test]
+fn du_loss_then_resync_never_spans_the_loss() {
+    // BEGIN (seq 0), LOSS of seq 1, then a depth-0 resync pair (seq 2, 3): the first BEGIN is censored.
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0)]),
+        loss(LANE, 1, 1, 1),
+        spu_events(LANE, 1, 2, &[(970, 0, 1, 0), (960, 0, 2, 0)]),
+    ];
+    let (x, _, d) = du("du-loss", lane_only(body, (1, 4, 3, 1)));
+    let (inv, z) = summaries(&d, 1);
+    assert_eq!((inv.events, inv.paired, inv.censored), (3, 2, 1));
+    assert_eq!(inv.loss_records_in_span, Some(1));
+    let s = x.sources.iter().find(|s| s.key == SourceKey::Lane(LANE)).unwrap();
+    let cv = counter_variation(&x, s).unwrap();
+    assert_eq!(cv[0].loss_records_in_event_span, inv.loss_records_in_span, "the counter_variation fact, exactly");
+    assert_eq!(zone_of(z, 0).pairs, 1, "only the resync pair; nothing crosses the LOSS");
+}
+
+#[test]
+fn du_two_epochs_are_isolated_with_their_own_inventory() {
+    // Epoch 1: a pair, then a BEGIN left open by the transition (censored).  Epoch 2: one pair, own brackets.
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 0, 2, 0), (970, 0, 1, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        calibration(SPU_D, 2, 0, &[(0xFFFF_1000, 500, 510), (0xFFFE_0000, 600, 700)]),
+        spu_events(LANE, 2, 3, &[(0xFFFF_0000, 0, 1, 0), (0xFFFE_8000, 0, 2, 0)]),
+    ];
+    let (_, _, d) = du("du-two-epochs", lane_only(body, (1, 5, 5, 0)));
+    let (i1, z1) = summaries(&d, 1);
+    assert_eq!((i1.events, i1.paired, i1.censored), (3, 2, 1));
+    assert_eq!(zone_of(z1, 0).inclusive.as_ref().unwrap().sum, 10);
+    let (i2, z2) = summaries(&d, 2);
+    assert_eq!((i2.events, i2.paired, i2.censored), (2, 2, 0));
+    assert_eq!(zone_of(z2, 0).inclusive.as_ref().unwrap().sum, 0x8000, "the same descriptor in another epoch, alone");
+}
+
+#[test]
+fn du_open_parent_with_a_completed_child() {
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 1, 1), (970, 1, 2, 1)])];
+    let (_, _, d) = du("du-open-parent", lane_fin(body, (1, 3, 3, 0, 1)));
+    let (inv, z) = summaries(&d, 1);
+    assert_eq!((inv.paired, inv.open), (2, Some(1)));
+    let c = zone_of(z, 1);
+    assert_eq!((c.inclusive.as_ref().unwrap().sum, c.exclusive.as_ref().unwrap().sum), (10, 10));
+    assert!(z.iter().all(|z| z.desc != 0), "the open parent has no duration");
+}
+
+#[test]
+fn du_percentiles_need_twenty_eligible_pairs() {
+    // Pairs of zone 0 with d = 1, 2, ..., n (back to back, nondecreasing f).
+    let mk = |n: u32| {
+        let mut ev = Vec::new();
+        let mut dec = 999u32;
+        for i in 1..=n {
+            ev.push((dec, 0u16, 1u8, 0u8));
+            dec -= i;
+            ev.push((dec, 0, 2, 0));
+        }
+        lane_only(vec![du_cal(), spu_events(LANE, 1, 0, &ev)], (1, 2 * u64::from(n), 2 * u64::from(n), 0))
+    };
+    let (_, _, d) = du("du-p19", mk(19));
+    let i = zone_of(summaries(&d, 1).1, 0).inclusive.clone().unwrap();
+    assert_eq!((i.n, i.p50, i.p90), (19, None, None));
+    let (_, _, d) = du("du-p20", mk(20));
+    let i = zone_of(summaries(&d, 1).1, 0).inclusive.clone().unwrap();
+    assert_eq!((i.n, i.p50, i.p90, i.sum), (20, Some(10), Some(18), 210));
+}
+
+#[test]
+fn du_rsx_pair_uses_its_domains_own_slope() {
+    let (x, c, d) = {
+        let x = capture("du-rsx", cm_ext());
+        let c = map_capture(&x, Premises::default(), &Budgets::default());
+        let d = durations(&x, &c, &DurationBudgets::default());
+        (x, c, d)
+    };
+    assert!(d.epochs.iter().all(|e| e.source == SourceKey::Gpu(RSX_D)), "default premises: SPU stays AMBIGUOUS-LIFT");
+    let DurState::Summaries { zones, .. } = &d.epochs[0].state else { panic!("{d:?}") };
+    // GPU pair 5000..6000: d = 1000, B = [29/300, 31/300] -> [290/3, 310/3].
+    assert_eq!(btext(&zones[0].inclusive.as_ref().unwrap().b_sum), "[290/3, 310/3]");
+    let cap = match load(&ext_file(cm_ext()).bytes()) {
+        Outcome::Analysed(a) => a.capture,
+        Outcome::Malformed(m) => panic!("{m}"),
+    };
+    let text = du_lines(&cap, &x, &c, &d);
+    assert!(text.iter().any(|l| l.contains("desc 3 gpuzone")), "{text:#?}");
+}
+
+#[test]
+fn du_clockmap_lines_and_map_are_unchanged_by_durations() {
+    let x = capture("du-identity", cm_ext());
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let before = c.clone();
+    let d = durations(&x, &c, &DurationBudgets::default());
+    assert_eq!(c, before);
+    let cap = match load(&ext_file(cm_ext()).bytes()) {
+        Outcome::Analysed(a) => a.capture,
+        Outcome::Malformed(m) => panic!("{m}"),
+    };
+    let plain = clockmap_lines(&x, &c);
+    let with = du_lines(&cap, &x, &c, &d);
+    // Every clockmap line appears, in order, unchanged; the rest are duration lines.
+    let mut it = with.iter();
+    for l in &plain {
+        assert!(it.any(|w| w == l), "missing or reordered clockmap line {l:?}");
+    }
+    assert!(with.iter().filter(|w| !plain.contains(w)).all(|w| w.starts_with("    durations: ") || w.starts_with("      ")));
+}
+
+#[test]
+fn du_budget_exact_one_over_and_scan_boundary() {
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 1, 1), (970, 1, 2, 1), (950, 0, 2, 0)]),
+    ];
+    let ext = lane_only(body, (1, 4, 4, 0));
+    let full = du("du-budget", ext.clone()).2;
+    let need = full.used;
+    let with = |ops: u64| du_run("du-budget", ext.clone(), &DurationBudgets { capture_ops: ops, ..DurationBudgets::default() }).2;
+    let exact = with(need);
+    assert_eq!((exact.epochs.clone(), exact.exhausted_at), (full.epochs.clone(), None));
+    let short = with(need - 1);
+    assert_eq!(dstate(&short, 1), &DurState::Unsupported(DLimit::CaptureOps));
+    assert_eq!(short.exhausted_at, Some((SourceKey::Lane(LANE), 1)));
+    // The preliminary source scan unaffordable: nothing partial, the epoch unsupported.
+    let none = with(1);
+    assert_eq!(dstate(&none, 1), &DurState::Unsupported(DLimit::CaptureOps));
+}
+
+#[test]
+fn du_epoch_local_caps_isolate_their_epoch() {
+    // Epoch 1: 6 MARKs (over a 4-event cap); epoch 2: one pair.  Only epoch 1 is unsupported.
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, M, 0), (989, 0, M, 0), (988, 0, M, 0), (987, 0, M, 0), (986, 0, M, 0), (985, 0, M, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        calibration(SPU_D, 2, 0, &[(0xFFFF_1000, 500, 510), (0xFFFE_0000, 600, 700)]),
+        spu_events(LANE, 2, 6, &[(0xFFFF_0000, 0, 1, 0), (0xFFFE_8000, 0, 2, 0)]),
+    ];
+    let ext = lane_only(body, (1, 8, 8, 0));
+    let b = DurationBudgets { max_events_per_epoch: 4, ..DurationBudgets::default() };
+    let d = du_run("du-cap-events", ext.clone(), &b).2;
+    assert_eq!(dstate(&d, 1), &DurState::Unsupported(DLimit::Events));
+    assert!(matches!(dstate(&d, 2), DurState::Summaries { .. }), "{d:?}");
+    assert_eq!(d.exhausted_at, None);
+    // Exactly at the cap: summarised.
+    let at = du_run("du-cap-events", ext, &DurationBudgets { max_events_per_epoch: 6, ..DurationBudgets::default() }).2;
+    assert!(matches!(dstate(&at, 1), DurState::Summaries { .. }));
+    // Pairs and zones caps.
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 1, 1), (970, 1, 2, 1), (950, 0, 2, 0)]),
+    ];
+    let ext = lane_only(body, (1, 4, 4, 0));
+    let p = du_run("du-cap-pairs", ext.clone(), &DurationBudgets { max_pairs_per_epoch: 1, ..DurationBudgets::default() }).2;
+    assert_eq!(dstate(&p, 1), &DurState::Unsupported(DLimit::Pairs));
+    let z = du_run("du-cap-zones", ext.clone(), &DurationBudgets { max_zones_per_epoch: 1, ..DurationBudgets::default() }).2;
+    assert_eq!(dstate(&z, 1), &DurState::Unsupported(DLimit::Zones));
+    let ok = du_run("du-cap-zones", ext, &DurationBudgets { max_pairs_per_epoch: 2, max_zones_per_epoch: 2, ..DurationBudgets::default() }).2;
+    assert!(matches!(dstate(&ok, 1), DurState::Summaries { .. }));
+}
+
+#[test]
+fn du_defensive_incomplete_child_propagates_to_every_ancestor() {
+    // DEFENSIVE (synthetic, not reachable from the reader): the nested fixture with the child pair removed from the
+    // reader's pairs and its events re-listed as censored/unpaired.  The parent's inside then holds non-member events,
+    // so its exclusive is unavailable (never inflated); its inclusive is unchanged.
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 1, 1), (970, 1, 2, 1), (950, 0, 2, 0)]),
+    ];
+    let mut x = capture("du-defensive", lane_only(body, (1, 4, 4, 0)));
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let s = x.sources.iter_mut().find(|s| s.key == SourceKey::Lane(LANE)).unwrap();
+    s.raw.pairs.retain(|p| p.desc == 0);
+    s.raw.censored.push(1);
+    s.raw.unpaired.push(2);
+    let d = durations(&x, &c, &DurationBudgets::default());
+    let (_, z) = summaries(&d, 1);
+    let p = zone_of(z, 0);
+    assert_eq!((p.inclusive.as_ref().unwrap().sum, p.exclusive.is_none(), p.exclusive_unavailable), (40, true, 1));
+    // A remainder on a source WITHOUT a protocol error is an inventory defect, not 'unclassified'.
+    let mut x2 = x.clone();
+    let s2 = x2.sources.iter_mut().find(|s| s.key == SourceKey::Lane(LANE)).unwrap();
+    s2.raw.unpaired.clear();
+    let d2 = durations(&x2, &c, &DurationBudgets::default());
+    assert_eq!(dstate(&d2, 1), &DurState::Unsupported(DLimit::Inventory));
+    // A double claim is an inventory defect too.
+    let mut x3 = x.clone();
+    x3.sources.iter_mut().find(|s| s.key == SourceKey::Lane(LANE)).unwrap().raw.marks.push(0);
+    assert_eq!(dstate(&durations(&x3, &c, &DurationBudgets::default()), 1), &DurState::Unsupported(DLimit::Inventory));
+}
+
+/// The clockmap + duration text of a parsed capture (W32 selected).
+fn du_text(name: &str, ext: Vec<Chunk>) -> Vec<String> {
+    let bytes = ext_file(ext).bytes();
+    dump(name, &bytes);
+    let cap = match load(&bytes) {
+        Outcome::Analysed(a) => a.capture,
+        Outcome::Malformed(m) => panic!("{name}: {m}"),
+    };
+    let x = cap.ext.clone().expect("extension capture");
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let d = durations(&x, &c, &DurationBudgets::default());
+    du_lines(&cap, &x, &c, &d)
+}
+
+#[test]
+fn du_scratch_is_bounded_by_the_epoch_not_the_source() {
+    // An over-cap epoch (6 MARKs, cap 4) followed by a small eligible epoch (one pair): only the small epoch's
+    // scratch is ever allocated (class 2 + pairs 1 + coordinates 2 + positions 2 = 7 elements).
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, M, 0), (989, 0, M, 0), (988, 0, M, 0), (987, 0, M, 0), (986, 0, M, 0), (985, 0, M, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        calibration(SPU_D, 2, 0, &[(0xFFFF_1000, 500, 510), (0xFFFE_0000, 600, 700)]),
+        spu_events(LANE, 2, 6, &[(0xFFFF_0000, 0, 1, 0), (0xFFFE_8000, 0, 2, 0)]),
+    ];
+    let d = du_run("du-hw-cap", lane_only(body, (1, 8, 8, 0)), &DurationBudgets { max_events_per_epoch: 4, ..DurationBudgets::default() }).2;
+    assert_eq!(dstate(&d, 1), &DurState::Unsupported(DLimit::Events));
+    assert_eq!(d.scratch_high_water, 7, "only epoch 2's scratch");
+    // A large INELIGIBLE epoch (no brackets: NO-OBSERVATIONS, 200 MARKs) beside a small eligible one: same bound.
+    let marks: Vec<(u32, u16, u8, u8)> = (0..200u32).map(|i| (5_000 - i, 0, M, 0)).collect();
+    let body = vec![
+        spu_events(LANE, 1, 0, &marks),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        calibration(SPU_D, 2, 0, &[(0xFFFF_1000, 500, 510), (0xFFFE_0000, 600, 700)]),
+        spu_events(LANE, 2, 200, &[(0xFFFF_0000, 0, 1, 0), (0xFFFE_8000, 0, 2, 0)]),
+    ];
+    let (_, c, d) = du("du-hw-ineligible", lane_only(body, (1, 202, 202, 0)));
+    assert_eq!(state(&c, SourceKey::Lane(LANE), 1), &EpochState::NoObservations);
+    assert!(d.epochs.iter().all(|e| e.epoch == 2), "only the eligible epoch has a duration entry");
+    assert!(matches!(dstate(&d, 2), DurState::Summaries { .. }));
+    assert_eq!(d.scratch_high_water, 7, "the 200-event epoch allocated nothing");
+}
+
+#[test]
+fn du_inventory_names_a_protocol_error_only_when_the_source_has_one() {
+    // A clean source: no unclassified term, no error qualifier.
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 1, 1), (970, 1, 2, 1), (950, 0, 2, 0)]),
+    ];
+    let t = du_text("du-text-clean", lane_only(body, (1, 4, 4, 0)));
+    let clean = "    durations: premises C,A,S,E,W32 | inventory: 4 events = 4 paired (2 pairs) + 0 marks + 0 censored + 0 \
+                 unpaired + open 0 | LOSS records inside the observed event-sequence span: 0";
+    assert!(t.iter().any(|l| l == clean), "{t:#?}");
+    assert!(!t.iter().any(|l| l.contains("PROTOCOL ERROR")), "{t:#?}");
+    // A real terminal error (the t4 shape, its earlier BEGIN included): open unknown, 3 unclassified, qualified.
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 2, 0)]), spu_events(LANE, 1, 2, &[(970, 0, M, 0)])];
+    let t = du_text("du-text-error", lane_only(body, (1, 3, 3, 0)));
+    let err = "    durations: premises C,A,S,E,W32 | inventory: 3 events = 0 paired (0 pairs) + 0 marks + 0 censored + 0 \
+               unpaired + open unknown + 3 unclassified (no pairing claim; source PROTOCOL ERROR) | LOSS records inside the \
+               observed event-sequence span: 0";
+    assert!(t.iter().any(|l| l == err), "{t:#?}");
+    // A terminal error with ZERO remainder is not constructible from the reader: the offending event itself is
+    // stored and never placed in a list, so an error source always has at least one unclassified event.
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 0, 2, 0), (970, 1, 2, 0)])];
+    let (_, _, d) = du("du-text-error-min", lane_only(body, (1, 3, 3, 0)));
+    let (inv, _) = summaries(&d, 1);
+    assert!(inv.protocol_error && inv.unclassified >= 1 && inv.open.is_none(), "{inv:?}");
+}
+
+#[test]
+fn du_defensive_incomplete_mark_reaches_the_grandparent() {
+    // DEFENSIVE (synthetic): grandparent (desc 0, depth 0) > parent (desc 1, depth 1) > child (desc 0, depth 2); the
+    // child pair is removed and its events re-listed as censored/unpaired.  The non-member events sit directly inside
+    // the parent, and the incomplete mark must reach the grandparent as the pairs close.
+    let ev = [(990, 0, 1, 0), (985, 1, 1, 1), (980, 0, 1, 2), (975, 0, 2, 2), (970, 1, 2, 1), (950, 0, 2, 0)];
+    let mut x = capture("du-defensive-3", lane_only(vec![du_cal(), spu_events(LANE, 1, 0, &ev)], (1, 6, 6, 0)));
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let s = x.sources.iter_mut().find(|s| s.key == SourceKey::Lane(LANE)).unwrap();
+    s.raw.pairs.retain(|p| p.depth < 2);
+    s.raw.censored.push(2);
+    s.raw.unpaired.push(3);
+    let d = durations(&x, &c, &DurationBudgets::default());
+    let (_, z) = summaries(&d, 1);
+    let (g, p) = (zone_of(z, 0), zone_of(z, 1));
+    assert_eq!((g.exclusive.is_none(), g.exclusive_unavailable), (true, 1), "grandparent: {g:?}");
+    assert_eq!((p.exclusive.is_none(), p.exclusive_unavailable), (true, 1), "parent: {p:?}");
+}

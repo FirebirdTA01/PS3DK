@@ -89,7 +89,8 @@ fn verdict_code(a: &ps3dk_prof::Analysis) -> ExitCode {
 /// `clockmap [--premise <name>]... <file>`: each premise at most once, only known names; anything else is a usage
 /// error (exit 3).  The mapping never changes the verdict or the exit status: those are exactly as for `check`.
 fn clockmap(rest: &[String]) -> ExitCode {
-    use ps3dk_prof::clockmap::{lines, map_capture, Budgets, Premises};
+    use ps3dk_prof::clockmap::{map_capture, Budgets, Premises};
+    use ps3dk_prof::durations::{durations, lines, DurationBudgets};
 
     let mut premises = Premises::default();
     let mut path: Option<&str> = None;
@@ -145,7 +146,10 @@ fn clockmap(rest: &[String]) -> ExitCode {
             match &a.capture.ext {
                 None => println!("clockmap: no domain extensions (nothing to map)"),
                 Some(x) => {
-                    for line in lines(x, &map_capture(x, premises, &Budgets::default())) {
+                    // The clockmap result first and unchanged; durations run after it on their own budget.
+                    let cm = map_capture(x, premises, &Budgets::default());
+                    let dm = durations(x, &cm, &DurationBudgets::default());
+                    for line in lines(&a.capture, x, &cm, &dm) {
                         println!("{line}");
                     }
                 }

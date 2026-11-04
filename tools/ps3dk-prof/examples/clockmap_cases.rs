@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::io::Read;
 
 use ps3dk_prof::clockmap::{reduce, solve, summarize, End, Meter, Obs, Rat, Solved};
+use ps3dk_prof::durations::duration_bound;
 use serde_json::{json, Value};
 
 fn num(v: &Value) -> Option<i128> {
@@ -69,7 +70,22 @@ fn case(c: &Value) -> Option<Value> {
         }),
         Err(l) => json!({"error": l.name()}),
     };
+    let mut dur = Vec::new();
+    for t in c["x"].as_array().map(Vec::as_slice).unwrap_or(&[]) {
+        let x: u128 = t.as_str()?.parse().ok()?;
+        let b = duration_bound(
+            &mut Meter::unlimited(),
+            &model.slope_lo,
+            model.slope_lo_open(),
+            model.slope_hi.as_ref(),
+            x,
+        )
+        .ok()?;
+        dur.push(json!({"x": x.to_string(), "lo": rat(&b.lo), "lo_open": b.lo_open,
+                        "hi": b.hi.as_ref().map_or("+inf".to_string(), rat)}));
+    }
     Some(json!({
+        "dur": dur,
         "state": "COMPATIBLE",
         "slope_lo": rat(&model.slope_lo),
         "slope_lo_open": model.slope_lo_open(),

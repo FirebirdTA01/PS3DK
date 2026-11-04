@@ -217,6 +217,12 @@ pub fn reduce(m: &mut Meter, x: &Rat) -> Result<Rat, Limit> {
     Ok(Rat { num: &x.num / &g, den: &x.den / &g })
 }
 
+/// `r * x` in lowest terms (one checked product and one gcd): a duration bound from a slope bound.
+pub fn scale_rat(m: &mut Meter, r: &Rat, x: u128) -> Result<Rat, Limit> {
+    let n = mul(m, &r.num, &BigInt::from(x))?;
+    reduce(m, &Rat { num: n, den: r.den.clone() })
+}
+
 /// y + s * (q - x) for an integer point (x, y) and a rational s.
 fn line_at(m: &mut Meter, x: i128, y: i128, s: &Rat, q: i128) -> Result<Rat, Limit> {
     let t = mul(m, &s.num, &big(q - x))?;
@@ -943,13 +949,22 @@ fn epoch_line(e: &EpochMap) -> String {
 /// The text of a capture's conditional affine bounds: for each source, the report's own source fact lines
 /// ([`crate::report::source_fact_lines`], byte-identical to `check` / `report`), then its epoch results.
 pub fn lines(x: &ExtCapture, c: &CaptureMap) -> Vec<String> {
+    lines_with(x, c, &|_| Vec::new())
+}
+
+/// [`lines`] with `extra(epoch)` appended directly after each epoch's line (the durations); with an `extra` that
+/// returns nothing the output is exactly [`lines`].
+pub fn lines_with(x: &ExtCapture, c: &CaptureMap, extra: &dyn Fn(&EpochMap) -> Vec<String>) -> Vec<String> {
     let mut out = vec![HEADER.to_string()];
     for s in &x.sources {
         out.extend(crate::report::source_fact_lines(s));
         if c.not_mapped.contains(&s.key) {
             out.push(format!("  {}: not mapped (decoded epochs inconsistent)", s.key));
         }
-        out.extend(c.epochs.iter().filter(|e| e.source == s.key).map(epoch_line));
+        for e in c.epochs.iter().filter(|e| e.source == s.key) {
+            out.push(epoch_line(e));
+            out.extend(extra(e));
+        }
     }
     if let Some((key, epoch)) = &c.exhausted_at {
         out.push(format!(

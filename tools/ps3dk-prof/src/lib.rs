@@ -11,6 +11,7 @@
 
 pub mod analysis;
 pub mod clockmap;
+pub mod durations;
 pub mod ext;
 pub mod hash;
 pub mod model;

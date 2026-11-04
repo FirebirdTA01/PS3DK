@@ -30,7 +30,7 @@ def rat(x):
     return str(x.numerator) if x.denominator == 1 else f"{x.numerator}/{x.denominator}"
 
 
-def expected(obs, qs):
+def expected(obs, qs, xs=()):
     """The checker's own answer for one case."""
     if not obs:
         return {"state": "NO-OBSERVATIONS"}
@@ -69,6 +69,15 @@ def expected(obs, qs):
         attained = ray_opt or any(v == top and b > 0 for v, b in vals)
         return (rat(sign * top), not attained)
 
+    dur = []
+    for x in xs:
+        if x == 0:
+            dur.append({"x": "0", "lo": "0", "lo_open": False, "hi": "0"})
+            continue
+        lo_b = min(b for _, b in verts)
+        hi = "+inf" if ray is not None else rat(max(b for _, b in verts) * x)
+        # inf b*x is attained only at a point with b > 0: open exactly when the minimum b over the closure is 0.
+        dur.append({"x": str(x), "lo": rat(lo_b * x), "lo_open": lo_b == 0, "hi": hi})
     proj = []
     for q, _ in qs:
         lo, lo_open = best(q, -1)
@@ -117,7 +126,7 @@ def expected(obs, qs):
     else:
         s["width_max"] = None
         s["width_median"] = None
-    return {"state": "COMPATIBLE", "slope_lo": rat(bmin), "slope_lo_open": bmin == 0,
+    return {"state": "COMPATIBLE", "dur": dur, "slope_lo": rat(bmin), "slope_lo_open": bmin == 0,
             "slope_hi": None if bmax is None else rat(bmax), "proj": proj, "summary": s}
 
 
@@ -165,10 +174,18 @@ def gen_case(rng, huge):
     for _ in range(3):
         qs.add(rng.randint(0, (1 << 64) - 1) if huge else rng.randint(-9, 9))
     qs = sorted(q for q in qs if -LIMIT <= q <= LIMIT)
-    return obs, [(q, rng.randint(1, 3)) for q in qs]
+    xs = [0, 1, rng.randint(0, 50), rng.randint(0, 1 << 64)]
+    return obs, [(q, rng.randint(1, 3)) for q in qs], xs
 
+
+# The correlation control: brackets give B = [1, 2]; exclusive = parent 10 - child 4 = 6 -> [6, 12] jointly.
+CORRELATION = ([(0, 0, 1), (10, 11, 20)], [(0, 1)], [10, 4, 6, 0])
 
 FIXED = [
+    CORRELATION,
+    ([(5, 10, 20)], [(5, 1)], [0, 7]),
+    ([(3, 7, 7)], [(3, 1)], [0, 2]),
+    ([(0, 5, 6), (10, 5, 6)], [(0, 1)], [0, 3]),
     ([], [(0, 1)]),
     ([(0, 0, 2), (10, 10, 12)], [(q, 1) for q in (-10, 0, 3, 5, 10, 20)]),
     ([(0, 0, 0), (1, 1, 1)], [(0, 1), (5, 2)]),
@@ -193,7 +210,7 @@ def compare(want, got):
     """Every disagreement between the checker's answer and the solver's, as strings."""
     bad = []
     for key in sorted(set(want) | set(got)):
-        if key == "proj":
+        if key in ("proj", "dur"):
             w, g = want.get(key, []), got.get(key, [])
             if len(w) != len(g):
                 bad.append(f"proj count {len(w)} != {len(g)}")
@@ -211,8 +228,9 @@ class ToolFailure(Exception):
 
 def run_tool(argv, cases, timeout):
     """The tool's results for `cases`, or ToolFailure: a watchdog, and stderr must be EMPTY even with exit 0."""
-    payload = {"cases": [{"obs": [[str(f), str(lo), str(hi)] for f, lo, hi in obs],
-                          "q": [[str(q), str(n)] for q, n in qs]} for obs, qs in cases]}
+    payload = {"cases": [{"obs": [[str(f), str(lo), str(hi)] for f, lo, hi in c[0]],
+                          "q": [[str(q), str(n)] for q, n in c[1]],
+                          "x": [str(x) for x in (c[2] if len(c) > 2 else ())]} for c in cases]}
     try:
         r = subprocess.run(argv, input=json.dumps(payload), capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -288,7 +306,7 @@ def main(argv):
     except ToolFailure as e:
         print(f"clockmap_check: tool failure: {e}")
         return 2
-    wants = [expected(obs, qs) for obs, qs in cases]
+    wants = [expected(c[0], c[1], c[2] if len(c) > 2 else ()) for c in cases]
     states = {}
     failures = []
     for i, (w, g) in enumerate(zip(wants, got)):
@@ -318,6 +336,19 @@ def main(argv):
             break
         if not compare({"state": "INCONSISTENT"}, {"state": "COMPATIBLE"}):
             failures.append("self-test: a state flip was not detected")
+        # The correlation damage control: interval subtraction of the parent and child bounds is NOT the joint bound.
+        w = expected(*CORRELATION)
+        d10, d4 = (next(d for d in w["dur"] if d["x"] == x) for x in ("10", "4"))
+        independent = (Fraction(d10["lo"]) - Fraction(d4["hi"]), Fraction(d10["hi"]) - Fraction(d4["lo"]))
+        joint = next(d for d in w["dur"] if d["x"] == "6")
+        if (joint["lo"], joint["hi"]) != ("6", "12"):
+            failures.append(f"self-test: the joint exclusive bound is {joint}, not [6, 12]")
+        if (rat(independent[0]), rat(independent[1])) != ("2", "16"):
+            failures.append(f"self-test: independent subtraction gave {independent}, expected [2, 16]")
+        bad = dict(w, dur=[dict(d, lo="2", hi="16") if d["x"] == "6" else d for d in w["dur"]])
+        if not compare(w, bad):
+            failures.append("self-test: an independently subtracted exclusive bound was not detected")
+        probes += 1
         print(f"self-test probes: {probes + 1}")
     if controls:
         failures.extend(runner_controls())
