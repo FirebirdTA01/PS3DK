@@ -9,7 +9,8 @@ use crate::frames::{
     frame_tables, glyph, scale, slot_at, summary, visible_slots, Budget, FramesIndex, Glyph, LaneTable, Selection,
     SlotKind, Table,
 };
-use crate::frames::MEASURED_ONLY;
+use crate::foreign::{self, ForeignSlot, ForeignView, Mark, VerdictView};
+use crate::frames::{Owner, MEASURED_ONLY};
 use crate::model::{metric_text, TimeBase};
 use crate::timeline_ui::TimelineState;
 
@@ -22,6 +23,8 @@ pub struct FramesState {
     pub tables: Option<((u32, u64), Vec<LaneTable>)>,
     /// The absolute slot range painted by the last repaint (the visible columns only).
     pub painted: std::ops::Range<usize>,
+    /// The SPU coordinate premise W32 for the SPU/RSX lanes (page-local, off by default).
+    pub w32: bool,
 }
 
 impl FramesState {
@@ -79,6 +82,7 @@ pub fn draw(
     ix: &FramesIndex,
     st: &mut FramesState,
     timeline: Option<&mut TimelineState>,
+    foreign: Option<&ForeignSlot>,
 ) -> Drawn {
     let pal = ui::Palette::of(p);
     let tb = TimeBase::of(a);
@@ -137,6 +141,23 @@ pub fn draw(
             }
         });
         let budget = if ix.freq_hz.is_some() { st.budget() } else { Budget::None };
+        let budget_ticks = match (budget.fps(), ix.freq_hz) {
+            (Some(fps), Some(f)) => Some(f as f64 / fps as f64),
+            _ => None,
+        };
+
+        // SPU/RSX lanes (F2b): only for an extension capture; the reader runs once per (owner, W32), the view once per
+        // budget selector, never per repaint.
+        let foreign = foreign.filter(|_| a.capture.ext.is_some());
+        if foreign.is_some() {
+            p.horizontal_wrapped(|h| {
+                h.label(egui::RichText::new("SPU premise").strong());
+                h.checkbox(&mut st.w32, "W32");
+                h.label(foreign::W32_MEANING);
+            });
+        }
+        let fv_ref = foreign.map(|f| f.view(a, ix, owner_id, st.w32, budget));
+        let fv: Option<&ForeignView> = fv_ref.as_deref();
 
         // Legend.
         p.horizontal_wrapped(|h| {
@@ -213,6 +234,10 @@ pub fn draw(
                     clicked = slot_at(n, f64::from(slot_w), f64::from(pos.x - rect.left()));
                 }
             }
+            if let Some(v) = fv {
+                let strips = Strips { o, slot_w, width, budget_ticks, selected: st.sel.frame };
+                strips.draw(p, v, viewport, &painted, &pal);
+            }
         });
         st.painted = painted;
         if let Some(i) = clicked {
@@ -245,6 +270,10 @@ pub fn draw(
             p.label(format!("over the {} budget: {over} of {} measured", budget.label(), sm.measured));
         }
 
+        if let Some(v) = fv {
+            draw_lane_text(p, v);
+        }
+
         // The selected frame.
         p.add_space(ui::SPACE_LG);
         ui::section_label(p, "SELECTED FRAME");
@@ -272,18 +301,197 @@ pub fn draw(
         );
         if let Some((_, tables)) = &st.tables {
             if tables.is_empty() {
-                p.label("No lane has attributed work in this frame.");
+                p.label("No PPU lane has attributed work in this frame.");
             } else {
                 let lanes: Vec<String> = tables.iter().map(|t| t.lane.to_string()).collect();
-                p.label(format!("lanes with attributed work: {}", lanes.join(", ")));
+                p.label(format!("PPU lanes with attributed work: {}", lanes.join(", ")));
             }
             for t in tables {
                 draw_table(p, a, t, tb);
             }
         }
+        if let Some(v) = fv {
+            draw_lane_tables(p, v, o, k);
+        }
         draw_unattributed(p, ix);
     });
     drawn
+}
+
+const STRIP_H: f32 = 48.0;
+/// The label row at the top of each strip; bars use the rest.
+const STRIP_LABEL_H: f32 = 14.0;
+
+/// The SPU/RSX lane strips under the PPU graph: same slot columns and scroll, one shared y scale (`ForeignView::top`).
+struct Strips<'o> {
+    o: &'o Owner,
+    slot_w: f32,
+    width: f32,
+    budget_ticks: Option<f64>,
+    selected: Option<u64>,
+}
+
+impl Strips<'_> {
+    fn draw(&self, p: &mut egui::Ui, v: &ForeignView, viewport: Rect, painted: &std::ops::Range<usize>, pal: &ui::Palette) {
+        let span = STRIP_H - STRIP_LABEL_H - 4.0;
+        for lane in &v.lanes {
+            p.add_space(2.0);
+            let (rect, _) = p.allocate_exact_size(Vec2::new(self.width, STRIP_H), Sense::hover());
+            let painter = p.painter_at(rect);
+            painter.rect_filled(rect, 2.0, pal.surface);
+            let base = rect.bottom() - 2.0;
+            // Pixels only: the ratio is clamped, so a huge or non-finite value stays inside the strip.
+            let y = |t: f64| -> f32 {
+                let f = if t.is_finite() { (t / v.top).clamp(0.0, 1.0) } else { 1.0 };
+                base - f as f32 * span
+            };
+            let top_y = base - span;
+            for i in painted.clone() {
+                let x0 = rect.left() + i as f32 * self.slot_w;
+                let cx = x0 + self.slot_w / 2.0;
+                match foreign::mark(self.o, lane, i) {
+                    Mark::Bar(b) => {
+                        let lo = y(b.lo);
+                        let hi = b.hi.map_or(top_y, y);
+                        let r = Rect::from_min_max(
+                            Pos2::new(x0 + 1.0, hi.min(lo - 2.0)),
+                            Pos2::new(x0 + self.slot_w - 1.0, lo),
+                        );
+                        let c = match b.verdict {
+                            VerdictView::Over => pal.danger,
+                            VerdictView::Within => pal.accent,
+                            VerdictView::Undetermined => pal.warning,
+                            _ => pal.text_muted,
+                        };
+                        // Faint from 0 to lo (the bound's guaranteed part), solid from lo to hi (its uncertainty).
+                        let under =
+                            Rect::from_min_max(Pos2::new(x0 + 1.0, r.bottom()), Pos2::new(x0 + self.slot_w - 1.0, base));
+                        painter.rect_filled(under, 0.0, c.gamma_multiply(0.3));
+                        painter.rect_filled(r, 1.0, c);
+                        if b.verdict == VerdictView::Undetermined {
+                            let mut yy = r.top() + 2.0;
+                            while yy < r.bottom() {
+                                painter.line_segment(
+                                    [Pos2::new(r.left(), yy), Pos2::new(r.right(), yy)],
+                                    Stroke::new(1.0_f32, pal.text),
+                                );
+                                yy += 3.0;
+                            }
+                        }
+                        if b.hi_inf {
+                            // the open-arrow cap: +inf
+                            let st = Stroke::new(1.5_f32, pal.text);
+                            painter.line_segment([Pos2::new(cx - 3.0, top_y + 3.0), Pos2::new(cx, top_y)], st);
+                            painter.line_segment([Pos2::new(cx + 3.0, top_y + 3.0), Pos2::new(cx, top_y)], st);
+                        }
+                        if b.lo_open {
+                            painter.circle_stroke(Pos2::new(cx, lo), 2.0, Stroke::new(1.0_f32, pal.text));
+                        }
+                    }
+                    Mark::NonePlaced => {
+                        painter.circle_filled(Pos2::new(cx, base - 2.0), 1.5, pal.text_muted);
+                    }
+                    Mark::NoInterval => {}
+                }
+                if self.selected == Some(self.o.slots[i].frame) {
+                    let r = Rect::from_min_max(Pos2::new(x0 + 1.0, rect.top() + 1.0), Pos2::new(x0 + self.slot_w - 1.0, rect.bottom() - 1.0));
+                    painter.rect_stroke(r, 1.0, Stroke::new(1.5_f32, pal.text));
+                }
+            }
+            if let Some(t) = self.budget_ticks {
+                let yb = y(t);
+                painter.line_segment([Pos2::new(rect.left(), yb), Pos2::new(rect.right(), yb)], Stroke::new(1.0_f32, pal.danger));
+            }
+            painter.text(
+                Pos2::new(rect.left() + viewport.min.x + 4.0, rect.top() + 1.0),
+                Align2::LEFT_TOP,
+                &lane.label,
+                FontId::proportional(11.0),
+                pal.text,
+            );
+        }
+    }
+}
+
+/// The lanes' always-visible text: premise, refusal or state, legend, and per lane its epoch rows and counts.
+fn draw_lane_text(p: &mut egui::Ui, v: &ForeignView) {
+    p.add_space(ui::SPACE_LG);
+    ui::section_label(p, "SPU/RSX LANES");
+    p.add(egui::Label::new(foreign::PREMISE_LINE).wrap());
+    if let Some(r) = &v.refusal {
+        ui::field_message(p, ui::Tone::Warning, r);
+        return;
+    }
+    if let Some(s) = &v.state {
+        ui::field_message(p, ui::Tone::Neutral, s);
+    }
+    p.add(
+        egui::Label::new(
+            "strips: one range bar per frame from lo to hi (arrow cap: +inf; hollow cap: open lower end); red OVER, \
+             blue WITHIN, amber striped UNDETERMINED, grey no verdict; the faint part below a bar is its guaranteed \
+             lower bound; dot: measured frame, nothing included on this lane; one scale for every strip",
+        )
+        .wrap(),
+    );
+    for lane in &v.lanes {
+        p.add_space(ui::SPACE_MD);
+        p.label(egui::RichText::new(&lane.label).strong());
+        for e in &lane.epochs {
+            p.add(egui::Label::new(e).wrap());
+        }
+        for e in &lane.errors {
+            ui::field_message(p, ui::Tone::Warning, e);
+        }
+        for f in &lane.footer {
+            p.add(egui::Label::new(f).wrap());
+        }
+    }
+}
+
+/// The selected frame's per-lane rows: the bar (exact), its verdict, the zone rows (exclusive, exact) and the counts.
+fn draw_lane_tables(p: &mut egui::Ui, v: &ForeignView, o: &Owner, k: u64) {
+    if v.refusal.is_some() || v.lanes.is_empty() {
+        return;
+    }
+    let Some((i, _)) = o.slot_of(k) else { return };
+    for lane in &v.lanes {
+        p.add_space(ui::SPACE_MD);
+        p.label(egui::RichText::new(format!("{} (frame {k})", lane.label)).strong());
+        let Some(c) = lane.cells.get(&i) else {
+            p.label(match foreign::mark(o, lane, i) {
+                Mark::NoInterval => "no measured interval for this frame: nothing placed",
+                _ => "none placed on this lane",
+            });
+            continue;
+        };
+        match (&c.bar, &c.bar_exact) {
+            (Some(b), Some(exact)) => {
+                p.add(egui::Label::new(foreign::BAR_CAPTION).wrap());
+                p.add(egui::Label::new(format!("bar {}", b.label)).wrap());
+                p.add(egui::Label::new(format!("exact: {exact}")).wrap());
+                if c.bar_epochs > 1 {
+                    p.label(format!("spans {} epochs (interval sum)", c.bar_epochs));
+                }
+                p.label(b.verdict.text());
+            }
+            _ => {
+                p.label("none placed on this lane (nothing included)");
+            }
+        }
+        if !c.rows.is_empty() {
+            p.add(egui::Label::new(format!("{} {}", ps3dk_prof::report::W_NOTE, foreign::ZONE_NOTE)).wrap());
+            // One stacked block per zone (wrapped text, never wider than the page).
+            for r in &c.rows {
+                p.add_space(ui::SPACE_XS);
+                p.add(egui::Label::new(egui::RichText::new(&r.label).strong()).wrap());
+                let spans =
+                    if r.epochs > 1 { format!("; spans {} epochs (interval sum)", r.epochs) } else { String::new() };
+                p.add(egui::Label::new(format!("exclusive {}; {} pair(s){spans}", r.rounded, r.pairs)).wrap());
+                p.add(egui::Label::new(format!("exact: {}", r.exact)).wrap());
+            }
+        }
+        p.add(egui::Label::new(&c.counts).wrap());
+    }
 }
 
 fn counts_line(t: &LaneTable) -> String {

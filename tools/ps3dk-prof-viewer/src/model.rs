@@ -20,6 +20,8 @@ pub struct Document {
     pub ext: ExtView,
     /// The Frames page index, also computed ONCE here; None for a MALFORMED document.
     pub frames: Option<crate::frames::FramesIndex>,
+    /// The Frames page's SPU/RSX lanes: a one-entry cache filled on first need, so it never outlives this capture.
+    pub foreign: crate::foreign::ForeignSlot,
 }
 
 /// What the Overview's EXTENSION SOURCES section shows.
@@ -88,6 +90,7 @@ impl Document {
             state,
             ext,
             frames,
+            foreign: crate::foreign::ForeignSlot::default(),
         }
     }
 

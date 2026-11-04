@@ -55,7 +55,7 @@ impl Harness {
         let (a, ix, st, tl) = (&self.a, &self.ix, &mut self.st, &mut self.tl);
         let mut drawn = Drawn::default();
         let _ = self.ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |p| drawn = draw(p, a, ix, st, Some(tl)));
+            egui::CentralPanel::default().show(ctx, |p| drawn = draw(p, a, ix, st, Some(tl), None));
         });
         self.graph = drawn.graph;
         self.drawn = drawn;

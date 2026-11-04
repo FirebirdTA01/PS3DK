@@ -430,7 +430,7 @@ impl eframe::App for App {
                     Page::Overview | Page::Timeline => draw_overview(p, a, &d.ext),
                     Page::Frames => match &d.frames {
                         Some(ix) => {
-                            frames_ui::draw(p, a, ix, frames, timeline.as_mut());
+                            frames_ui::draw(p, a, ix, frames, timeline.as_mut(), Some(&d.foreign));
                         }
                         None => ui::field_message(p, ui::Tone::Neutral, "No frame index for this document."),
                     },

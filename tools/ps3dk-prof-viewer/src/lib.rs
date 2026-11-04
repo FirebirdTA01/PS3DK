@@ -7,6 +7,7 @@
 //! synthetic input in its tests.
 
 pub mod app;
+pub mod foreign;
 pub mod frames;
 pub mod frames_ui;
 pub mod live;
