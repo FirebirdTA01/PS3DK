@@ -759,6 +759,7 @@ fn map_epoch(
     brackets: &[&Bracket],
     events: &[RawEvent],
     epoch: u32,
+    keep: Option<&mut Option<Box<Model>>>,
 ) -> Result<EpochState, Limit> {
     let f = |raw: u64| -> Option<i128> {
         match coord {
@@ -807,8 +808,55 @@ fn map_epoch(
     match summary {
         Err(Limit::Capture) => Err(Limit::Capture),
         Err(l) => Ok(EpochState::Unsupported(l)),
-        Ok(s) => Ok(EpochState::Compatible(Box::new(s))),
+        Ok(s) => {
+            // The model is handed out only when the caller asked to retain it (F2); the default path drops it here
+            // exactly as before, with no extra allocation and no extra charge.
+            if let Some(slot) = keep {
+                *slot = Some(model);
+            }
+            Ok(EpochState::Compatible(Box::new(s)))
+        }
     }
+}
+
+/// F2 (t_d9789c06 r2 section 8 point 2): models retained capture-wide for the per-span frame placement.  Retention is
+/// a separate, explicit budget in hull vertices; it never charges the clockmap meter, so `used`, `exhausted_at` and
+/// every refusal boundary of the clockmap result are those of [`map_capture`].  Exceeding the limit refuses F2 only:
+/// the sink is marked refused, keeps nothing more, and every caller must treat the whole F2 result as unavailable.
+#[derive(Debug, Default)]
+pub struct ModelSink {
+    pub models: BTreeMap<(SourceKey, u32), Box<Model>>,
+    pub retained_vertices: u64,
+    pub limit_vertices: u64,
+    pub refused: bool,
+}
+
+impl ModelSink {
+    pub fn new(limit_vertices: u64) -> ModelSink {
+        ModelSink { limit_vertices, ..ModelSink::default() }
+    }
+
+    fn retain(&mut self, key: (SourceKey, u32), model: Box<Model>) {
+        if self.refused {
+            return;
+        }
+        let v = (model.up.hull.len() + model.down.hull.len()) as u64;
+        match self.retained_vertices.checked_add(v) {
+            Some(t) if t <= self.limit_vertices => {
+                self.retained_vertices = t;
+                self.models.insert(key, model);
+            }
+            _ => {
+                self.refused = true;
+                self.models.clear();
+            }
+        }
+    }
+}
+
+/// [`map_capture`] that also retains every COMPATIBLE epoch's model in `sink` (the CaptureMap is identical).
+pub fn map_capture_models(x: &ExtCapture, premises: Premises, budgets: &Budgets, sink: &mut ModelSink) -> CaptureMap {
+    map_capture_inner(x, premises, budgets, Some(sink))
 }
 
 /// Conditional affine bounds for every declared (domain, epoch) of a decoded capture, in source order then epoch.
@@ -818,6 +866,10 @@ fn map_epoch(
 /// mapped source's events are scanned once for undeclared epochs, then once per COMPATIBLE epoch; an SPU source
 /// without W32, and every source after the capture budget ran out, touches no event at all.
 pub fn map_capture(x: &ExtCapture, premises: Premises, budgets: &Budgets) -> CaptureMap {
+    map_capture_inner(x, premises, budgets, None)
+}
+
+fn map_capture_inner(x: &ExtCapture, premises: Premises, budgets: &Budgets, mut sink: Option<&mut ModelSink>) -> CaptureMap {
     let mut out = CaptureMap::default();
     let mut capture = Meter::new(budgets.capture, Limit::Capture);
     let mut by_epoch: BTreeMap<(u32, u32), Vec<&Bracket>> = BTreeMap::new();
@@ -861,8 +913,15 @@ pub fn map_capture(x: &ExtCapture, premises: Premises, budgets: &Budgets) -> Cap
             em.state = if exhausted {
                 EpochState::Unsupported(Limit::Capture)
             } else {
-                match map_epoch(&mut capture, budgets, coord, brackets, &s.raw.events, epoch) {
-                    Ok(state) => state,
+                let mut kept: Option<Box<Model>> = None;
+                let keep = if sink.is_some() { Some(&mut kept) } else { None };
+                match map_epoch(&mut capture, budgets, coord, brackets, &s.raw.events, epoch, keep) {
+                    Ok(state) => {
+                        if let (Some(sk), Some(model)) = (sink.as_deref_mut(), kept) {
+                            sk.retain((s.key, epoch), model);
+                        }
+                        state
+                    }
                     Err(_) => {
                         exhausted = true;
                         EpochState::Unsupported(Limit::Capture)

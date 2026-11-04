@@ -315,6 +315,61 @@ fn coord(c: Coordinate, raw: u64) -> Result<i128, DLimit> {
     }
 }
 
+/// F2 (t_d9789c06 r2 section 5 / section 8 point 2): one reader pair of an order-consistent epoch, in the premise
+/// coordinate.  `exclusive` None: unavailable (something inside the pair was not a member).  `top_level`: no parent
+/// pair on its lane.  `extrapolated`: the durations.rs SPAN rule, fb < fmin or fe > fmax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairFact {
+    /// The epoch's SPU image (None on RSX): the zone identity is (image, desc), as in [`ZoneDur`].
+    pub image: Option<u32>,
+    pub desc: u32,
+    pub fb: i128,
+    pub fe: i128,
+    pub inclusive: u64,
+    pub exclusive: Option<u64>,
+    pub top_level: bool,
+    pub extrapolated: bool,
+}
+
+/// Pair facts retained capture-wide for F2, under an explicit aggregate limit (in facts).  Retention never charges
+/// the durations meter and never changes the DurationMap (`used`, `exhausted_at`, `scratch_high_water`, every
+/// refusal).  Exceeding the limit refuses F2 only: the sink is marked refused and keeps nothing; an epoch is
+/// published into it only whole.
+#[derive(Debug, Default)]
+pub struct PairSink {
+    pub epochs: BTreeMap<(SourceKey, u32), Vec<PairFact>>,
+    pub retained: u64,
+    pub limit: u64,
+    pub refused: bool,
+}
+
+impl PairSink {
+    pub fn new(limit: u64) -> PairSink {
+        PairSink { limit, ..PairSink::default() }
+    }
+
+    fn publish(&mut self, key: (SourceKey, u32), facts: Vec<PairFact>) {
+        if self.refused {
+            return;
+        }
+        match self.retained.checked_add(facts.len() as u64) {
+            Some(t) if t <= self.limit => {
+                self.retained = t;
+                self.epochs.insert(key, facts);
+            }
+            _ => {
+                self.refused = true;
+                self.epochs.clear();
+            }
+        }
+    }
+}
+
+/// [`durations`] that also retains every order-consistent epoch's pair facts in `sink` (the DurationMap is identical).
+pub fn durations_pairs(x: &ExtCapture, c: &CaptureMap, b: &DurationBudgets, sink: &mut PairSink) -> DurationMap {
+    durations_inner(x, c, b, Some(sink))
+}
+
 /// One duration-eligible epoch; Err(CaptureOps) means the capture budget ran out (no partial result).
 #[allow(clippy::too_many_arguments)]
 fn epoch(
@@ -327,6 +382,7 @@ fn epoch(
     sm: &Summary,
     co: Coordinate,
     hw: &mut usize,
+    keep: Option<&mut Option<Vec<PairFact>>>,
 ) -> Result<DurState, DLimit> {
     let ev: &[RawEvent] = &s.raw.events;
     let (start, end) = pre.runs.get(&epoch).copied().unwrap_or((0, 0));
@@ -476,12 +532,17 @@ fn epoch(
     }
     *hw = (*hw).max(class.len() + pairs.len() + f.len() + at.len());
     let mut excl: Vec<Option<u64>> = vec![None; pairs.len()];
+    // F2 only (not counted in `hw`, never allocated on the default path): which pairs open with an empty stack
+    let mut toplevel: Vec<bool> = if keep.is_some() { vec![false; pairs.len()] } else { Vec::new() };
     // (pair, sum of direct children's inclusive deltas, inside incomplete)
     let mut stack: Vec<(usize, u128, bool)> = Vec::new();
     for (i, &j) in at.iter().enumerate() {
         let c = class[i];
         if c == C_PAIRED {
             if pairs[j].0 == start + i {
+                if !toplevel.is_empty() {
+                    toplevel[j] = stack.is_empty();
+                }
                 stack.push((j, 0, false));
             } else {
                 let Some((top, kids, bad)) = stack.pop() else { return Ok(DurState::Unsupported(DLimit::Inventory)) };
@@ -549,11 +610,36 @@ fn epoch(
             exclusive: stats(m, sm, a.excl)?,
         });
     }
+    // F2: the facts are handed out only after every zone statistic completed (whole-epoch publication)
+    if let Some(slot) = keep {
+        let facts = pairs
+            .iter()
+            .enumerate()
+            .map(|(j, &(bi, ei, k))| {
+                let (fb, fe) = (f[bi - start], f[ei - start]);
+                PairFact {
+                    image,
+                    desc: s.raw.pairs[k].desc,
+                    fb,
+                    fe,
+                    inclusive: incl[j],
+                    exclusive: excl[j],
+                    top_level: toplevel[j],
+                    extrapolated: fb < sm.fmin || fe > sm.fmax,
+                }
+            })
+            .collect();
+        *slot = Some(facts);
+    }
     Ok(DurState::Summaries { inventory: inv, zones: out })
 }
 
 /// Conditional durations of every COMPATIBLE (domain, epoch) of `c` (from map_capture on the same `x`).
 pub fn durations(x: &ExtCapture, c: &CaptureMap, b: &DurationBudgets) -> DurationMap {
+    durations_inner(x, c, b, None)
+}
+
+fn durations_inner(x: &ExtCapture, c: &CaptureMap, b: &DurationBudgets, mut sink: Option<&mut PairSink>) -> DurationMap {
     let mut out = DurationMap::default();
     let mut m = Meter::new(b.capture_ops, Limit::Capture);
     let mut exhausted = false;
@@ -608,8 +694,15 @@ pub fn durations(x: &ExtCapture, c: &CaptureMap, b: &DurationBudgets) -> Duratio
             let state = if exhausted {
                 DurState::Unsupported(DLimit::CaptureOps)
             } else {
-                match epoch(&mut m, b, s, image, &pre, e.epoch, sm, *co, &mut out.scratch_high_water) {
-                    Ok(st) => st,
+                let mut kept: Option<Vec<PairFact>> = None;
+                let keep = if sink.is_some() { Some(&mut kept) } else { None };
+                match epoch(&mut m, b, s, image, &pre, e.epoch, sm, *co, &mut out.scratch_high_water, keep) {
+                    Ok(st) => {
+                        if let (Some(sk), Some(facts)) = (sink.as_deref_mut(), kept) {
+                            sk.publish((s.key, e.epoch), facts);
+                        }
+                        st
+                    }
                     Err(DLimit::CaptureOps) => {
                         exhausted = true;
                         out.exhausted_at = Some((s.key, e.epoch));

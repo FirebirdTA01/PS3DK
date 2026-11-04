@@ -2227,3 +2227,280 @@ fn du_defensive_incomplete_mark_reaches_the_grandparent() {
     assert_eq!((g.exclusive.is_none(), g.exclusive_unavailable), (true, 1), "grandparent: {g:?}");
     assert_eq!((p.exclusive.is_none(), p.exclusive_unavailable), (true, 1), "parent: {p:?}");
 }
+
+// ---- F2a: SPU/RSX reader pairs placed on PPU frames (t_d9789c06) -------------------------------------------------
+
+use ps3dk_prof::clockmap::{map_capture_models, ModelSink};
+use ps3dk_prof::durations::{durations_pairs, PairSink};
+use ps3dk_prof::frames_foreign::{
+    foreign_frames, EpochF2, FLimit, ForeignFrames, FrameBudgets, LaneF2, PlacementState, Refusal, Retention,
+};
+
+/// The v1 scenario with a third PPU FRAME: measured frames [0, 150) and [150, 300) on owner 1.  Under cm_ext the SPU
+/// pair (W32) begins at t in [10, 40] (frame 0) and the RSX pair at t(5000), about [200, 210] (frame 1).
+fn f2_file(ext: Vec<Chunk>) -> File {
+    let mut s = scenario(vec![lane(
+        1,
+        seqd(
+            0,
+            [
+                vec![frame(0, 0, 0)],
+                zone(0, 0, 0, 110, 1, 0),
+                vec![end(0, 0, 0, 120, 1), frame(0, 150, 1), frame(0, 300, 2)],
+            ]
+            .concat(),
+        ),
+    )]);
+    let mut gd = desc(GPU_DESC, "gpuzone", "");
+    gd.scope = 2;
+    s.descs.push(gd);
+    let mut f = s.file();
+    let at = f.find(T_TRAILER);
+    for (i, c) in ext.into_iter().enumerate() {
+        f.chunks.insert(at + i, c);
+    }
+    f.flags = 1;
+    f
+}
+
+fn analysed(name: &str, f: File) -> ps3dk_prof::Analysis {
+    let bytes = f.bytes();
+    dump(name, &bytes);
+    match load(&bytes) {
+        Outcome::Analysed(a) => *a,
+        Outcome::Malformed(m) => panic!("{name}: {m}"),
+    }
+}
+
+fn f2(a: &ps3dk_prof::Analysis, p: Premises, b: &FrameBudgets, keep: &Retention) -> Result<ForeignFrames, Refusal> {
+    foreign_frames(a, 1, p, &Budgets::default(), &DurationBudgets::default(), b, keep)
+}
+
+fn f2_lane(r: &ForeignFrames, key: SourceKey) -> &LaneF2 {
+    r.lanes.iter().find(|l| l.source == key).unwrap_or_else(|| panic!("no lane {key}: {r:?}"))
+}
+
+#[test]
+fn f2_places_spu_and_rsx_pairs_on_their_own_frames() {
+    let a = analysed("f2-place", f2_file(cm_ext()));
+    let r = f2(&a, NOWRAP, &FrameBudgets::default(), &Retention::default()).unwrap();
+    assert_eq!(r.state, PlacementState::Placed);
+    assert_eq!(r.frames.measured.len(), 2);
+    let spu = f2_lane(&r, SourceKey::Lane(LANE));
+    assert_eq!(spu.epochs[0].state, EpochF2::Placed);
+    assert_eq!(spu.frames.len(), 1, "{spu:?}");
+    let c = &spu.frames[0];
+    assert_eq!((c.frame, c.included, c.bar_epochs), (0, 1, 1));
+    // d = 10 under W32, B = [1/10, 3/10]
+    assert_eq!(btext(c.bar.as_ref().unwrap()), "[1, 3]");
+    let rsx = f2_lane(&r, SourceKey::Gpu(RSX_D));
+    let c = &rsx.frames[0];
+    assert_eq!((c.frame, c.included), (1, 1), "{rsx:?}");
+    // d = 1000, B = [29/300, 31/300]: the same bound durations reports for this pair
+    assert_eq!(btext(c.bar.as_ref().unwrap()), "[290/3, 310/3]");
+    assert_eq!(btext(&c.zones[&(None, GPU_DESC)].bound), "[290/3, 310/3]");
+    // lanes are separate: no lane holds the other lane's frame
+    assert!(spu.frames.iter().all(|c| c.frame == 0) && rsx.frames.iter().all(|c| c.frame == 1));
+}
+
+#[test]
+fn f2_default_premises_leave_spu_ambiguous_lift_with_its_pair_count() {
+    let a = analysed("f2-default", f2_file(cm_ext()));
+    let r = f2(&a, Premises::default(), &FrameBudgets::default(), &Retention::default()).unwrap();
+    let spu = f2_lane(&r, SourceKey::Lane(LANE));
+    assert_eq!((spu.epochs[0].state.clone(), spu.epochs[0].pairs), (EpochF2::AmbiguousLift, Some(1)));
+    assert!(spu.frames.is_empty(), "never drawn: {spu:?}");
+    assert_eq!(f2_lane(&r, SourceKey::Gpu(RSX_D)).epochs[0].state, EpochF2::Placed);
+}
+
+#[test]
+fn f2_owner_refusals() {
+    let a = analysed("f2-owner", f2_file(cm_ext()));
+    let r = foreign_frames(
+        &a,
+        99,
+        NOWRAP,
+        &Budgets::default(),
+        &DurationBudgets::default(),
+        &FrameBudgets::default(),
+        &Retention::default(),
+    );
+    assert_eq!(r, Err(Refusal::NotAnOwner));
+    let few = FrameBudgets { max_frames: 2, ..FrameBudgets::default() };
+    assert_eq!(f2(&a, NOWRAP, &few, &Retention::default()), Err(Refusal::TooManyFrames));
+}
+
+/// The scoped-reuse entry points return exactly the old results, at every budget boundary tried.
+#[test]
+fn f2_retaining_entry_points_equal_the_old_ones() {
+    for (name, ext) in [("f2-eq-std", std_ext()), ("f2-eq-cm", cm_ext())] {
+        let x = capture(name, ext);
+        for p in [Premises::default(), NOWRAP] {
+            let full = map_capture(&x, p, &Budgets::default()).used;
+            for capture in [0, 1, full / 2, full.saturating_sub(1), full, full + 1, Budgets::default().capture] {
+                let b = Budgets { capture, ..Budgets::default() };
+                let plain = map_capture(&x, p, &b);
+                let mut ms = ModelSink::new(u64::MAX);
+                assert_eq!(map_capture_models(&x, p, &b, &mut ms), plain, "{name} capture {capture}");
+                let mut none = ModelSink::new(0);
+                assert_eq!(map_capture_models(&x, p, &b, &mut none), plain, "{name} refused sink, capture {capture}");
+            }
+            let c = map_capture(&x, p, &Budgets::default());
+            let full = durations(&x, &c, &DurationBudgets::default()).used;
+            for capture_ops in [0, 1, full / 2, full.saturating_sub(1), full, full + 1] {
+                let b = DurationBudgets { capture_ops, ..DurationBudgets::default() };
+                let plain = durations(&x, &c, &b);
+                let mut ps = PairSink::new(u64::MAX);
+                assert_eq!(durations_pairs(&x, &c, &b, &mut ps), plain, "{name} capture_ops {capture_ops}");
+                let mut none = PairSink::new(0);
+                assert_eq!(durations_pairs(&x, &c, &b, &mut none), plain, "{name} refused sink, ops {capture_ops}");
+            }
+        }
+    }
+}
+
+#[test]
+fn f2_retention_exhaustion_refuses_f2_only() {
+    let a = analysed("f2-keep", f2_file(cm_ext()));
+    let x = a.capture.ext.as_ref().unwrap();
+    let mut ms = ModelSink::new(0);
+    let c = map_capture_models(x, NOWRAP, &Budgets::default(), &mut ms);
+    assert!(ms.refused && ms.models.is_empty());
+    assert_eq!(c, map_capture(x, NOWRAP, &Budgets::default()));
+    let tiny = Retention { model_vertices: 0, ..Retention::default() };
+    assert_eq!(f2(&a, NOWRAP, &FrameBudgets::default(), &tiny), Err(Refusal::RetentionModels));
+    let tiny = Retention { pair_facts: 1, ..Retention::default() }; // two epochs of one pair each
+    assert_eq!(f2(&a, NOWRAP, &FrameBudgets::default(), &tiny), Err(Refusal::RetentionPairs));
+    let exact = Retention { pair_facts: 2, ..Retention::default() };
+    assert!(f2(&a, NOWRAP, &FrameBudgets::default(), &exact).is_ok());
+}
+
+type F2States = (EpochF2, EpochF2, Option<(SourceKey, u32)>);
+
+/// capture_ops: below what both epochs need, the later epoch is refused once the earlier fits, the earlier is never
+/// refused while the later is placed, and the refusal set is the same on every run.
+#[test]
+fn f2_capture_ops_refuses_the_current_and_later_epochs() {
+    let a = analysed("f2-cap", f2_file(cm_ext()));
+    let full = f2(&a, NOWRAP, &FrameBudgets::default(), &Retention::default()).unwrap();
+    assert!(full.exhausted_at.is_none());
+    let order: Vec<SourceKey> = full.lanes.iter().map(|l| l.source).collect();
+    assert_eq!(order.len(), 2);
+    let states = |cap: u64| -> Option<F2States> {
+        let b = FrameBudgets { capture_ops: cap, ..FrameBudgets::default() };
+        let r = f2(&a, NOWRAP, &b, &Retention::default()).ok()?;
+        Some((f2_lane(&r, order[0]).epochs[0].state.clone(), f2_lane(&r, order[1]).epochs[0].state.clone(), r.exhausted_at))
+    };
+    let mut split = None;
+    for cap in 0..=full.used {
+        let s = states(cap);
+        assert_eq!(s, states(cap), "reproducible at {cap}");
+        match s {
+            None => assert!(split.is_none(), "an owner-scan refusal can only come first ({cap})"),
+            Some((first, second, at)) => {
+                if first == EpochF2::Placed && second == EpochF2::Unsupported(FLimit::CaptureOps) {
+                    assert_eq!(at, Some((order[1], 1)));
+                    split.get_or_insert(cap);
+                }
+                if first == EpochF2::Unsupported(FLimit::CaptureOps) {
+                    assert_eq!(second, EpochF2::Unsupported(FLimit::CaptureOps), "later epochs follow at {cap}");
+                    assert_eq!(at, Some((order[0], 1)), "exhausted_at names the FIRST refused epoch at {cap}");
+                    assert!(split.is_none());
+                }
+            }
+        }
+    }
+    assert!(split.is_some(), "some budget places the first epoch and refuses the second");
+    let (f, s, at) = states(full.used).unwrap();
+    assert_eq!((f, s, at), (EpochF2::Placed, EpochF2::Placed, None), "exactly the full use suffices");
+    let (_, s, _) = states(full.used - 1).unwrap();
+    assert_eq!(s, EpochF2::Unsupported(FLimit::CaptureOps), "one under refuses the last epoch");
+}
+
+fn f2_nested() -> Vec<Chunk> {
+    // du_nested_pair_inclusive_and_exclusive_scale_with_one_b: zone 0 (d 40) holding zone 1 (d 10), B = [1/10, 3/10]
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 1, 1, 1), (970, 1, 2, 1), (950, 0, 2, 0)]),
+    ];
+    lane_only(body, (1, 4, 4, 0))
+}
+
+#[test]
+fn f2_pair_facts_of_a_parsed_nested_capture() {
+    let x = capture("f2-facts-nested", f2_nested());
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let mut ps = PairSink::new(u64::MAX);
+    durations_pairs(&x, &c, &DurationBudgets::default(), &mut ps);
+    let facts = &ps.epochs[&(SourceKey::Lane(LANE), 1)];
+    let mut got: Vec<_> =
+        facts.iter().map(|f| (f.desc, f.image, f.fe - f.fb, f.inclusive, f.exclusive, f.top_level, f.extrapolated)).collect();
+    got.sort();
+    assert_eq!(got, vec![(0, Some(0), 40, 40, Some(30), true, false), (1, Some(0), 10, 10, Some(10), false, false)]);
+    assert_eq!(facts.iter().find(|f| f.desc == 0).unwrap().fb, SPU_DEC_TOP - 990);
+}
+
+#[test]
+fn f2_bar_is_top_level_inclusive_and_zone_rows_are_exclusive() {
+    let a = analysed("f2-nested", f2_file(f2_nested()));
+    let r = f2(&a, NOWRAP, &FrameBudgets::default(), &Retention::default()).unwrap();
+    let spu = f2_lane(&r, SourceKey::Lane(LANE));
+    assert_eq!(spu.frames.len(), 1, "{spu:?}");
+    let c = &spu.frames[0];
+    assert_eq!((c.frame, c.included), (0, 2));
+    assert_eq!(btext(c.bar.as_ref().unwrap()), "[4, 12]", "the parent's inclusive only");
+    let rows: Vec<(u32, String)> = c.zones.iter().map(|(k, z)| (k.1, btext(&z.bound))).collect();
+    assert_eq!(rows, vec![(0, "[3, 9]".to_string()), (1, "[1, 3]".to_string())]);
+}
+
+#[test]
+fn f2_extrapolated_end_on_a_parsed_capture_is_excluded_and_counted() {
+    // B from dec 1000 / 900 (f = TOP-1000 .. TOP-900); the pair begins at dec 950 (inside) and ends at dec 850 (outside)
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(950, 0, 1, 0), (850, 0, 2, 0)])];
+    let ext = lane_only(body, (1, 2, 2, 0));
+    let x = capture("f2-extrap-end-facts", ext.clone());
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let mut ps = PairSink::new(u64::MAX);
+    durations_pairs(&x, &c, &DurationBudgets::default(), &mut ps);
+    let f = &ps.epochs[&(SourceKey::Lane(LANE), 1)][0];
+    assert!(f.fb >= SPU_DEC_TOP - 1000 && f.fb <= SPU_DEC_TOP - 900, "begin inside: {f:?}");
+    assert!(f.extrapolated, "end outside the calibration range: {f:?}");
+    let a = analysed("f2-extrap-end", f2_file(ext));
+    let r = f2(&a, NOWRAP, &FrameBudgets::default(), &Retention::default()).unwrap();
+    let spu = f2_lane(&r, SourceKey::Lane(LANE));
+    assert_eq!((spu.counts.extrapolated.definite, spu.counts.extrapolated.total()), (1, 1), "{spu:?}");
+    let c = &spu.frames[0];
+    assert_eq!((c.included, c.bar.is_none(), c.excluded_extrapolated, c.zones.len()), (0, true, 1, 0), "{c:?}");
+}
+
+/// One PPU owner with `n` measured frames (tb 0, 10, ...) and an unrelated owner with `m` frames.
+fn f2_two_owners(n: u64, m: u64) -> ps3dk_prof::Analysis {
+    let frames = |k: u64| (0..=k).map(|i| frame(0, 10 * i, i)).collect::<Vec<_>>();
+    let s = scenario(vec![lane(1, seqd(0, frames(n))), lane(2, seqd(0, frames(m)))]);
+    analysed(&format!("f2-owners-{n}-{m}"), s.file())
+}
+
+/// owner_frames is one pass over the analysis' frame facts plus one lookup per owner FRAME, all charged before the
+/// work: an unrelated owner's frames cost exactly one scan step each, the exact charge suffices, one less refuses.
+#[test]
+fn f2_owner_frames_work_accounting() {
+    use ps3dk_prof::clockmap::{Limit, Meter};
+    use ps3dk_prof::frames_foreign::owner_frames;
+    let used = |a: &ps3dk_prof::Analysis| {
+        let mut m = Meter::unlimited();
+        let fs = owner_frames(a, 1, &mut m).unwrap();
+        (m.used(), fs.measured.len())
+    };
+    let small = f2_two_owners(200, 0);
+    let big = f2_two_owners(200, 2000);
+    let (u0, n0) = used(&small);
+    let (u1, n1) = used(&big);
+    assert_eq!((n0, n1), (200, 200));
+    let extra = big.frames.len() as u64 - small.frames.len() as u64;
+    assert!(extra >= 2000, "the unrelated owner has its own frame facts: {extra}");
+    assert_eq!(u1 - u0, extra, "an unrelated owner's frame fact costs exactly one scan step");
+    // linear, not quadratic, in the owner's frames: the per-frame charge stays logarithmic
+    assert!(u0 <= 201 * (4 + 2 * 8) + 3 * 200 + 201, "used {u0}");
+    assert!(owner_frames(&big, 1, &mut Meter::new(u1, Limit::Capture)).is_ok());
+    assert_eq!(owner_frames(&big, 1, &mut Meter::new(u1 - 1, Limit::Capture)).err(), Some(Refusal::CaptureOps));
+}

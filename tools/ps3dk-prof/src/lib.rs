@@ -13,6 +13,7 @@ pub mod analysis;
 pub mod clockmap;
 pub mod durations;
 pub mod ext;
+pub mod frames_foreign;
 pub mod hash;
 pub mod model;
 pub mod reader;
