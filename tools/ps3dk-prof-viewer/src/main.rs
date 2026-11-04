@@ -34,6 +34,8 @@ fn main() -> eframe::Result<()> {
         Page::Timeline
     } else if args.iter().any(|a| a == "--page=frames") {
         Page::Frames
+    } else if args.iter().any(|a| a == "--page=paths") {
+        Page::HotPaths
     } else {
         Page::Overview
     };

@@ -3,6 +3,7 @@
 //!   ps3dk-prof check <file>    print the verdict
 //!   ps3dk-prof report <file>   print the verdict and the full report
 //!   ps3dk-prof clockmap [--premise spu-nowrap] <file>   print the verdict and the conditional affine bounds
+//!   ps3dk-prof paths <file>    print the verdict and the PPU hot paths
 //!
 //! Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error, 4 (domain-extension files only)
 //! TRANSPORT COMPLETE but an extension source is not STRUCTURE COMPLETE and RAW VALID.
@@ -16,6 +17,7 @@ const USAGE: &str = "usage:
   ps3dk-prof report <file>   print the verdict and the full report
   ps3dk-prof clockmap [--premise spu-nowrap] <file>   print the verdict and the conditional
                                                       affine bounds (exit status as check)
+  ps3dk-prof paths <file>    print the verdict and the PPU hot paths (exit status as check)
   ps3dk-prof check-arcs <file>   validate a binary arc companion
   ps3dk-prof arcs-json <file>    export exact arc observations as JSON
   ps3dk-prof check-pair <file.arcs> <file.prof>   verify a final companion pair
@@ -180,6 +182,7 @@ fn main() -> ExitCode {
         }
         [cmd, path] if cmd == "check" => (false, path),
         [cmd, path] if cmd == "report" => (true, path),
+        [cmd, path] if cmd == "paths" => (false, path),
         [cmd, path] if cmd == "check-arcs" || cmd == "arcs-json" => (false, path),
         _ => {
             eprintln!("{USAGE}");
@@ -223,6 +226,14 @@ fn main() -> ExitCode {
         Outcome::Malformed(m) => {
             println!("{m}");
             ExitCode::from(2)
+        }
+        Outcome::Analysed(a) if args[0] == "paths" => {
+            use ps3dk_prof::paths::{lines, paths, PathBudgets};
+            println!("{}", report::verdict_line(&a.verdict));
+            for line in lines(&a, &paths(&a, &PathBudgets::default())) {
+                println!("{line}");
+            }
+            verdict_code(&a)
         }
         Outcome::Analysed(a) => {
             if full {

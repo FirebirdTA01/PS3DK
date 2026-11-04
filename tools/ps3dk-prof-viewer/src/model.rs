@@ -22,6 +22,8 @@ pub struct Document {
     pub frames: Option<crate::frames::FramesIndex>,
     /// The Frames page's SPU/RSX lanes: a one-entry cache filled on first need, so it never outlives this capture.
     pub foreign: crate::foreign::ForeignSlot,
+    /// The Hot paths page, computed ONCE here (reader budgets bound it); None for a MALFORMED document.
+    pub hot: Option<crate::hotpaths::HotView>,
 }
 
 /// What the Overview's EXTENSION SOURCES section shows.
@@ -70,18 +72,21 @@ pub enum DocState {
 
 impl Document {
     pub fn from_bytes(path: PathBuf, bytes: &[u8]) -> Document {
-        let (state, ext, frames) = match load(bytes) {
+        let (state, ext, frames, hot) = match load(bytes) {
             Outcome::Malformed(m) => (
                 DocState::Malformed {
                     diagnosis: m.to_string(),
                 },
                 ExtView::None,
                 None,
+                None,
             ),
             Outcome::Analysed(a) => {
                 let ext = ext_view(&a);
                 let frames = crate::frames::FramesIndex::build(&a);
-                (DocState::Analysed(a), ext, Some(frames))
+                let pm = ps3dk_prof::paths::paths(&a, &ps3dk_prof::paths::PathBudgets::default());
+                let hot = crate::hotpaths::build(&a, &pm);
+                (DocState::Analysed(a), ext, Some(frames), Some(hot))
             }
         };
         Document {
@@ -91,6 +96,7 @@ impl Document {
             ext,
             frames,
             foreign: crate::foreign::ForeignSlot::default(),
+            hot,
         }
     }
 

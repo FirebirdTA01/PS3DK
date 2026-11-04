@@ -10,6 +10,8 @@ pub mod app;
 pub mod foreign;
 pub mod frames;
 pub mod frames_ui;
+pub mod hotpaths;
+pub mod hotpaths_ui;
 pub mod live;
 pub mod live_client;
 pub mod model;

@@ -16,6 +16,7 @@ pub mod ext;
 pub mod frames_foreign;
 pub mod hash;
 pub mod model;
+pub mod paths;
 pub mod reader;
 pub mod report;
 

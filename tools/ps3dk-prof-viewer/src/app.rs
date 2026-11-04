@@ -27,6 +27,7 @@ pub enum Page {
     Timeline,
     Frames,
     Zones,
+    HotPaths,
 }
 
 /// The Connect dialog's fields.
@@ -55,6 +56,8 @@ pub struct App {
     pub timeline: Option<timeline_ui::TimelineState>,
     /// The Frames page selection and budget.
     pub frames: frames_ui::FramesState,
+    /// The Hot paths page selection.
+    pub hot: crate::hotpaths_ui::HotState,
     pub live: Option<Live>,
     connect: Option<ConnectForm>,
     last_host: String,
@@ -131,6 +134,7 @@ impl App {
             selected_zone: None,
             timeline: None,
             frames: frames_ui::FramesState::default(),
+            hot: crate::hotpaths_ui::HotState::default(),
             live: None,
             connect: None,
             last_host: String::new(),
@@ -173,6 +177,10 @@ impl App {
             (false, Some(a), Some(ix)) => self.frames.refresh(a, ix),
             (_, _, ix) => self.frames.reset(ix),
         }
+        // Hot paths: a fresh capture resets the lane and row; a newer snapshot keeps them (the page revalidates).
+        if fresh {
+            self.hot = crate::hotpaths_ui::HotState::default();
+        }
         self.doc = Some(doc);
     }
 
@@ -195,6 +203,7 @@ impl App {
         self.doc = None;
         self.timeline = None;
         self.frames.reset(None);
+        self.hot = crate::hotpaths_ui::HotState::default();
         self.zone_rows.clear();
         self.selected_zone = None;
         self.error = None;
@@ -363,6 +372,9 @@ impl eframe::App for App {
                     {
                         self.page = Page::Zones;
                     }
+                    if ui::nav_item(side, self.page == Page::HotPaths, "🔥", "Hot paths", None).clicked() {
+                        self.page = Page::HotPaths;
+                    }
                 }
             },
             |_| {},
@@ -410,6 +422,8 @@ impl eframe::App for App {
         let selected = &mut self.selected_zone;
         let frames = &mut self.frames;
         let timeline = &mut self.timeline;
+        let hot = &mut self.hot;
+        let mut nav: Option<(u32, u64)> = None;
         ui::page(ctx, |p| {
             match &self.doc {
             None => ui::empty_state(
@@ -435,10 +449,21 @@ impl eframe::App for App {
                         None => ui::field_message(p, ui::Tone::Neutral, "No frame index for this document."),
                     },
                     Page::Zones => draw_zones(p, a, rows, sort, selected),
+                    Page::HotPaths => match &d.hot {
+                        Some(hv) => nav = crate::hotpaths_ui::draw(p, hv, hot),
+                        None => ui::field_message(p, ui::Tone::Neutral, "No hot paths for this document."),
+                    },
                 },
             },
         }
         });
+        // A frame link on the Hot paths page opens that (owner, frame) on the Frames page.
+        if let (Some((owner, frame)), Some(d)) = (nav, self.doc.clone()) {
+            if let (Some(a), Some(ix)) = (d.analysis(), d.frames.as_ref()) {
+                self.frames.select(a, ix, owner, Some(frame));
+                self.page = Page::Frames;
+            }
+        }
     }
 }
 
