@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.20)
+project(cellgcm_transfer_data C)
+option(PS3TC_REGRESSION_HOST_STUB "Build with host stubs for CI syntax/link coverage" OFF)
+if(PS3TC_REGRESSION_HOST_STUB)
+    # The probe requires live RSX M2MF execution.
+    message(STATUS "cellgcm-transfer-data: skipped under PS3TC_REGRESSION_HOST_STUB")
+    return()
+endif()
+include(ps3-self)
+
+foreach(abi ilp32 lp64)
+    set(target cellgcm-transfer-data-${abi})
+    add_executable(${target} main.c judge.c)
+    target_compile_features(${target} PRIVATE c_std_11)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror)
+    if(abi STREQUAL "lp64")
+        target_compile_options(${target} PRIVATE -mlp64)
+        target_link_options(${target} PRIVATE -mlp64)
+    endif()
+    # Explicit link against libgcm_cmd containing rsxSetTransferData
+    target_link_libraries(${target} PRIVATE gcm_cmd gcm_sys rt lv2)
+    ps3_add_self(${target})
+endforeach()
