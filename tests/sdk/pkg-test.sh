@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Automated test for pkg (tools/sfo-pkg/pkg.c).
+# Automated test for pkg (tools/sfo-pkg/pkg.c) and sfo (tools/sfo-pkg/sfo.c).
 #
 # Covers:
 #   Row (a): Payload path over 512 characters packages successfully and
@@ -10,6 +10,13 @@
 #            with no output package file created (fixes silent exit 0 defect).
 #   Row (c): Control: ordinary short-path package is byte-identical to
 #            current tool output (SHA-256 fixture match and unpack verification).
+#   Row (d): Directory recursion depth (1 to 16 levels, SkyBox) packaging and
+#            unpacking byte-for-byte under pinned 2048 KiB stack reserve with
+#            mandatory non-recovering ASan/UBSan, plus synthetic stack-pressure
+#            negative control (1.0 MiB frame arrays) requiring exact SIGSEGV (exit 139)
+#            and validating controls for compile, limit, mutation, and exit codes.
+#   Row (e): SFO heap allocation, base-parity comparison against pre-change tool,
+#            failure cleanups, and injected calloc OOM handling under 2048 KiB stack reserve.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -33,17 +40,25 @@ note() {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# Resolve or build the pkg binary
+# Pin Linux stack limit to 2048 KiB (simulating 2 MB stack reserve)
+ulimit -S -s 2048
+effective_stack=$(ulimit -s)
+if [ "$effective_stack" -ne 2048 ]; then
+    fail "could not pin stack limit to 2048 KiB (current: $effective_stack)"
+fi
+note "stack limit pinned to ${effective_stack} KiB"
+
+# Resolve compiler and verify mandatory non-recovering ASan/UBSan
 CC="${CC:-gcc}"
 if ! command -v "$CC" >/dev/null 2>&1; then
     CC="cc"
 fi
 
-SAN_FLAGS=""
-if "$CC" -fsanitize=address,undefined -x c /dev/null -c -o "$tmp/san_test.o" >/dev/null 2>&1; then
-    SAN_FLAGS="-fsanitize=address,undefined"
-    note "compiler supports ASan/UBSan: enabling $SAN_FLAGS"
+SAN_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all"
+if ! "$CC" $SAN_FLAGS -x c /dev/null -c -o "$tmp/san_test.o" >/dev/null 2>&1; then
+    fail "required non-recovering ASan/UBSan ($SAN_FLAGS) not supported by compiler: $CC"
 fi
+note "required non-recovering ASan/UBSan enabled: $SAN_FLAGS"
 
 pkg="${1:-${PKG_BIN:-}}"
 if [ -z "$pkg" ]; then
@@ -321,6 +336,406 @@ fi
 
 if [ "$row_c_ok" -eq 1 ]; then
     note "Row (c) PASS: control package is byte-identical (SHA-256 $expected_sha) and extracts cleanly"
+fi
+
+# ---------------------------------------------------------------------------
+# Row (d): Directory recursion depth (1 to 16 levels, SkyBox) and synthetic stack-pressure control
+# ---------------------------------------------------------------------------
+note "Row (d): testing nested directory recursion depth (1-16, SkyBox) and stack frames..."
+row_d_ok=1
+
+# Test trees of depth 1, 2, 3 (reporter bisection repro), 4, 5, 8, 16
+for d in 1 2 3 4 5 8 16; do
+    tree_d="$tmp/depth_$d"
+    curr="$tree_d"
+    for i in $(seq 1 "$d"); do
+        curr="$curr/dir_$i"
+    done
+    mkdir -p "$curr"
+    printf 'depth %d payload content\n' "$d" > "$curr/payload.txt"
+done
+
+# Reporter bisection repro: USRDIR/Data/SkyBox (4 directory levels from package root)
+skybox_dir="$tmp/repro_skybox/USRDIR/Data/SkyBox"
+mkdir -p "$skybox_dir"
+printf 'skybox texture data\n' > "$skybox_dir/skybox.bin"
+
+# Test packing and unpacking each depth under pinned 2048 KiB stack reserve
+for d in 1 2 3 4 5 8 16; do
+    in_dir="$tmp/depth_$d"
+    out_pkg="$tmp/out_depth_$d.pkg"
+    pack_log="$tmp/pack_depth_$d.log"
+    pack_err="$tmp/pack_depth_$d.err"
+
+    if ! "$pkg" --contentid=UP0001-TEST12345_00-0000000000000001 "$in_dir" "$out_pkg" > "$pack_log" 2> "$pack_err"; then
+        row_fail "Row (d)" "pkg failed to pack depth $d"
+        row_d_ok=0
+    elif [ ! -s "$out_pkg" ]; then
+        row_fail "Row (d)" "pkg output package missing or empty for depth $d"
+        row_d_ok=0
+    fi
+
+    if grep -E "Sanitizer|runtime error:" "$pack_err" >/dev/null 2>&1; then
+        row_fail "Row (d)" "sanitizer diagnostic detected packing depth $d"
+        row_d_ok=0
+    fi
+
+    # Unpack and verify byte-identity against original payload
+    if [ "$row_d_ok" -eq 1 ]; then
+        extract_d="$tmp/extract_$d"
+        mkdir -p "$extract_d"
+        extract_err="$tmp/extract_$d.err"
+        (
+            cd "$extract_d"
+            "$pkg" -x "$out_pkg" >/dev/null 2> "$extract_err"
+        )
+        if grep -E "Sanitizer|runtime error:" "$extract_err" >/dev/null 2>&1; then
+            row_fail "Row (d)" "sanitizer diagnostic detected unpacking depth $d"
+            row_d_ok=0
+        fi
+
+        rel_path=""
+        for i in $(seq 1 "$d"); do
+            rel_path="${rel_path}dir_$i/"
+        done
+        rel_path="${rel_path}payload.txt"
+
+        if ! cmp -s "$in_dir/$rel_path" "$extract_d/UP0001-TEST12345_00-0000000000000001/$rel_path"; then
+            row_fail "Row (d)" "extracted payload mismatch at depth $d ($rel_path)"
+            row_d_ok=0
+        fi
+    fi
+done
+
+# Test packing and unpacking SkyBox repro tree
+if [ "$row_d_ok" -eq 1 ]; then
+    out_sb="$tmp/out_skybox.pkg"
+    pack_sb_err="$tmp/pack_skybox.err"
+    if ! "$pkg" --contentid=UP0001-TEST12345_00-0000000000000001 "$tmp/repro_skybox" "$out_sb" >/dev/null 2> "$pack_sb_err"; then
+        row_fail "Row (d)" "pkg failed to pack SkyBox repro tree"
+        row_d_ok=0
+    fi
+    if grep -E "Sanitizer|runtime error:" "$pack_sb_err" >/dev/null 2>&1; then
+        row_fail "Row (d)" "sanitizer diagnostic detected packing SkyBox repro tree"
+        row_d_ok=0
+    fi
+
+    extract_sb="$tmp/extract_skybox"
+    mkdir -p "$extract_sb"
+    extract_sb_err="$tmp/extract_skybox.err"
+    (
+        cd "$extract_sb"
+        "$pkg" -x "$out_sb" >/dev/null 2> "$extract_sb_err"
+    )
+    if grep -E "Sanitizer|runtime error:" "$extract_sb_err" >/dev/null 2>&1; then
+        row_fail "Row (d)" "sanitizer diagnostic detected unpacking SkyBox repro tree"
+        row_d_ok=0
+    fi
+    if ! cmp -s "$skybox_dir/skybox.bin" "$extract_sb/UP0001-TEST12345_00-0000000000000001/USRDIR/Data/SkyBox/skybox.bin"; then
+        row_fail "Row (d)" "extracted SkyBox payload content mismatch"
+        row_d_ok=0
+    fi
+fi
+
+# Synthetic stack-pressure negative control:
+# Injects large stack arrays (1.0 MiB per frame: 2 x 512 KiB) into collect_dir,
+# reproducing stack exhaustion under the pinned 2048 KiB stack limit.
+# Gate enforcement controls:
+# 1. Reject missing or non-pinned stack limit.
+# 2. Reject no-op / absent mutation needle via shared match-count refusal helper.
+# 3. Reject failed compilation (fail gate if control fails to build).
+# 4. Reject wrong exit codes (require exact 0 for flat directory, exact 139 SIGSEGV for depth 4).
+check_stack_control_exit() {
+    local expected="$1"
+    local actual="$2"
+    local context="$3"
+    if [ "$actual" -ne "$expected" ]; then
+        row_fail "Row (d)" "synthetic stack-pressure control $context: expected exit $expected, got $actual"
+        row_d_ok=0
+        return 1
+    fi
+    return 0
+}
+
+# Shared mutation target count validator: enforces match count and fails gate on mismatch
+check_mutation_target_count() {
+    local needle="$1"
+    local expected="$2"
+    local context="$3"
+    local count
+    count=$(grep -F -c "$needle" "$repo_root/tools/sfo-pkg/pkg.c" || true)
+    if [ "$count" -ne "$expected" ]; then
+        row_fail "Row (d)" "$context target match count mismatch (expected $expected, got $count)"
+        row_d_ok=0
+        return 1
+    fi
+    return 0
+}
+
+# Unit self-checks on check_stack_control_exit (proves classifier rejects wrong exits)
+check_self_failures=0
+if ( check_stack_control_exit 139 0 "self-check: wrong exit 0" ) >/dev/null 2>&1; then check_self_failures=$((check_self_failures + 1)); fi
+if ( check_stack_control_exit 139 1 "self-check: wrong exit 1" ) >/dev/null 2>&1; then check_self_failures=$((check_self_failures + 1)); fi
+if ( check_stack_control_exit 0 139 "self-check: wrong exit 139" ) >/dev/null 2>&1; then check_self_failures=$((check_self_failures + 1)); fi
+if [ "$check_self_failures" -ne 0 ]; then
+    row_fail "Row (d)" "synthetic stack-pressure control exit classifier self-checks failed ($check_self_failures missed rejections)"
+    row_d_ok=0
+fi
+
+# Self-check: prove check_mutation_target_count refuses an absent needle when expecting 1 match
+needle_refusal_failed=0
+if ( check_mutation_target_count "NONEXISTENT_MUTATION_TARGET_NEEDLE" 1 "refusal-self-check" ) >/dev/null 2>&1; then
+    needle_refusal_failed=$((needle_refusal_failed + 1))
+fi
+if [ "$needle_refusal_failed" -ne 0 ]; then
+    row_fail "Row (d)" "mutation needle match count refusal check failed (permitted missing needle)"
+    row_d_ok=0
+fi
+
+# Verify mutation needle matches exactly once in pkg.c
+mutation_needle='DIR *dp = opendir(folder);'
+check_mutation_target_count "$mutation_needle" 1 "synthetic stack-pressure mutation"
+
+# Verify stack limit is pinned to 2048 KiB before executing control
+ctrl_limit=$(ulimit -s)
+if [ "$ctrl_limit" -ne 2048 ]; then
+    row_fail "Row (d)" "stack limit missing or not pinned to 2048 KiB (current: $ctrl_limit)"
+    row_d_ok=0
+fi
+
+control_c="$tmp/pkg_stack_control.c"
+control_bin="$tmp/pkg_stack_control"
+sed -e 's/DIR \*dp = opendir(folder);/volatile char synthetic_files_list[1024 * 512]; synthetic_files_list[0] = 1; volatile char synthetic_dirs_list[1024 * 512]; synthetic_dirs_list[0] = 1; DIR *dp = opendir(folder);/' \
+    "$repo_root/tools/sfo-pkg/pkg.c" > "$control_c"
+
+if ! "$CC" -O2 -I "$repo_root/tools/sfo-pkg" "$control_c" "$repo_root/tools/sfo-pkg/sha1.c" -o "$control_bin" > "$tmp/ctrl_build.log" 2>&1; then
+    row_fail "Row (d)" "synthetic stack-pressure control compilation failed (see $tmp/ctrl_build.log)"
+    row_d_ok=0
+fi
+
+if [ "$row_d_ok" -eq 1 ]; then
+    # Create flat directory (1 collect_dir frame = 1.0 MiB < 2048 KiB: must succeed with exit 0)
+    flat_dir="$tmp/depth_flat"
+    mkdir -p "$flat_dir"
+    printf 'flat file content\n' > "$flat_dir/flat.txt"
+
+    rc_ctrl_flat=0
+    { (ulimit -S -s 2048; exec "$control_bin" --contentid=UP0001-TEST12345_00-0000000000000001 "$flat_dir" "$tmp/out_ctrl_flat.pkg" >/dev/null 2>&1); } 2>/dev/null || rc_ctrl_flat=$?
+    check_stack_control_exit 0 "$rc_ctrl_flat" "flat directory (depth 0)"
+
+    # Nested depth 4 (5 collect_dir frames = 5.0 MiB > 2048 KiB: must exhaust stack and crash with exact exit 139 SIGSEGV)
+    rc_ctrl_4=0
+    { (ulimit -S -s 2048; exec "$control_bin" --contentid=UP0001-TEST12345_00-0000000000000001 "$tmp/depth_4" "$tmp/out_ctrl_4.pkg" >/dev/null 2>&1); } 2>/dev/null || rc_ctrl_4=$?
+    check_stack_control_exit 139 "$rc_ctrl_4" "nested directory (depth 4)"
+
+    if [ "$rc_ctrl_flat" -eq 0 ] && [ "$rc_ctrl_4" -eq 139 ]; then
+        note "Row (d) synthetic stack-pressure control PASS: flat tree exited 0, depth 4 crashed with exact exit 139 (SIGSEGV under Linux 2048 KiB stack; synthetic control distinct from historical binary / pending Windows execution)"
+    fi
+fi
+
+if [ "$row_d_ok" -eq 1 ]; then
+    note "Row (d) PASS: nested directories 1-16 levels and SkyBox repro pack, unpack, and byte-compare cleanly under 2048 KiB stack; synthetic stack pressure confirmed"
+fi
+
+# ---------------------------------------------------------------------------
+# Row (e): SFO heap allocation, golden baseline parity, error cleanups, and calloc OOM
+# ---------------------------------------------------------------------------
+note "Row (e): testing SFO heap allocation, golden baseline parity, error paths, and calloc OOM..."
+row_e_ok=1
+
+# Compile candidate sfo binary under pinned 2048 KiB stack with mandatory non-recovering ASan/UBSan
+sfo_bin="$tmp/sfo"
+if ! "$CC" -O2 -Wall -Wextra $SAN_FLAGS -Wno-stringop-truncation \
+    "$repo_root/tools/sfo-pkg/sfo.c" \
+    -o "$sfo_bin" > "$tmp/sfo_build.log" 2>&1; then
+    row_fail "Row (e)" "candidate sfo build failed (see $tmp/sfo_build.log)"
+    row_e_ok=0
+fi
+
+# Locate checked-in golden fixtures (generated once from pinned pre-change blob e7efc0bc5836)
+golden_dir="$repo_root/tests/sdk/fixtures/sfo-golden"
+expected_sfo="$golden_dir/fixture.sfo"
+expected_list="$golden_dir/fixture_list.txt"
+expected_xml="$golden_dir/fixture_exported.xml"
+expected_roundtrip="$golden_dir/fixture_roundtrip.sfo"
+
+for f in "$expected_sfo" "$expected_list" "$expected_xml" "$expected_roundtrip"; do
+    if [ ! -s "$f" ]; then
+        row_fail "Row (e)" "missing or empty golden baseline fixture: $f"
+        row_e_ok=0
+    fi
+done
+
+if [ "$row_e_ok" -eq 1 ]; then
+    # Candidate tool executions (running under pinned 2048 KiB stack reserve with mandatory non-recovering ASan/UBSan):
+    cand_sfo="$tmp/cand_fixture.sfo"
+    cand_list_log="$tmp/cand_list.log"
+    cand_exported_xml="$tmp/cand_exported.xml"
+    cand_roundtrip="$tmp/cand_roundtrip.sfo"
+
+    cand_fromxml_err="$tmp/cand_fromxml.err"
+    cand_list_err="$tmp/cand_list.err"
+    cand_toxml_err="$tmp/cand_toxml.err"
+    cand_rt_err="$tmp/cand_rt.err"
+
+    "$sfo_bin" --fromxml "$golden_dir/input.xml" "$cand_sfo" 2> "$cand_fromxml_err"
+    "$sfo_bin" -l "$cand_sfo" > "$cand_list_log" 2> "$cand_list_err"
+    "$sfo_bin" -t "$cand_sfo" "$cand_exported_xml" 2> "$cand_toxml_err"
+    "$sfo_bin" --fromxml "$cand_exported_xml" "$cand_roundtrip" 2> "$cand_rt_err"
+
+    for err in "$cand_fromxml_err" "$cand_list_err" "$cand_toxml_err" "$cand_rt_err"; do
+        if grep -E "Sanitizer|runtime error:" "$err" >/dev/null 2>&1; then
+            row_fail "Row (e)" "sanitizer diagnostic detected in candidate run ($err)"
+            row_e_ok=0
+        fi
+    done
+
+    # Assert exact byte-identity between candidate outputs (under 2048 KiB) and checked-in golden baseline
+    if ! cmp -s "$expected_sfo" "$cand_sfo"; then
+        row_fail "Row (e)" "candidate generated SFO binary mismatch against golden baseline fixture"
+        row_e_ok=0
+    fi
+    if ! cmp -s "$expected_list" "$cand_list_log"; then
+        row_fail "Row (e)" "candidate sfo -l output mismatch against golden baseline list"
+        row_e_ok=0
+    fi
+    if ! cmp -s "$expected_xml" "$cand_exported_xml"; then
+        row_fail "Row (e)" "candidate sfo -t XML export mismatch against golden baseline XML"
+        row_e_ok=0
+    fi
+    if ! cmp -s "$expected_roundtrip" "$cand_roundtrip"; then
+        row_fail "Row (e)" "candidate round-trip SFO mismatch against golden baseline fixture"
+        row_e_ok=0
+    fi
+fi
+
+# Judge helper for sfo error paths:
+# Asserts exact exit status, verifies expected diagnostic, and rejects sanitizer diagnostics.
+judge_sfo_invocation() {
+    local expected_rc="$1"
+    local actual_rc="$2"
+    local expected_diag="$3"
+    local err_file="$4"
+    local context="$5"
+    if [ "$actual_rc" -ne "$expected_rc" ]; then
+        row_fail "Row (e)" "$context: expected exit $expected_rc, got $actual_rc"
+        row_e_ok=0
+        return 1
+    fi
+    if [ -n "$expected_diag" ] && ! grep -F "$expected_diag" "$err_file" >/dev/null 2>&1; then
+        row_fail "Row (e)" "$context: missing expected diagnostic '$expected_diag'"
+        row_e_ok=0
+        return 1
+    fi
+    if grep -E "Sanitizer|runtime error:" "$err_file" >/dev/null 2>&1; then
+        row_fail "Row (e)" "$context: sanitizer error detected"
+        row_e_ok=0
+        return 1
+    fi
+    return 0
+}
+
+# Unit control on judge_sfo_invocation: verify that matching diagnostic with a failing/mismatched exit code is rejected
+ctrl_diag_err="$tmp/judge_ctrl.err"
+printf 'SFO: out of memory\n' > "$ctrl_diag_err"
+judge_ctrl_failed=0
+if ( judge_sfo_invocation 0 1 "SFO: out of memory" "$ctrl_diag_err" "judge-control: exit 1 with expected diagnostic" ) >/dev/null 2>&1; then
+    judge_ctrl_failed=$((judge_ctrl_failed + 1))
+fi
+if [ "$judge_ctrl_failed" -ne 0 ]; then
+    row_fail "Row (e)" "judge control failed: permitted expected diagnostic with failing process status"
+    row_e_ok=0
+fi
+
+# Malformed and I/O error cleanups:
+# Note: sfo list_sfo / convert_to_xml / convert_from_xml return void and exit 0 from main on file read errors;
+# verify exact rc 0, expected stderr diagnostics, and clean sanitizer stderr without leaks/crashes.
+if [ "$row_e_ok" -eq 1 ]; then
+    # 5a. Nonexistent input file (rc=0, perror diagnostic, clean sanitizer stderr)
+    sfo_nonexistent_err="$tmp/sfo_nonexistent.err"
+    rc_nonexistent=0
+    "$sfo_bin" -l "$tmp/nonexistent.sfo" >/dev/null 2> "$sfo_nonexistent_err" || rc_nonexistent=$?
+    judge_sfo_invocation 0 "$rc_nonexistent" "nonexistent.sfo" "$sfo_nonexistent_err" "nonexistent input file"
+
+    # 5b. File too small (< 20 bytes: rc=0, 'SFO: file too small', clean sanitizer stderr)
+    printf 'SHORT_FILE' > "$tmp/too_small.sfo"
+    sfo_small_err="$tmp/sfo_too_small.err"
+    rc_small=0
+    "$sfo_bin" -l "$tmp/too_small.sfo" >/dev/null 2> "$sfo_small_err" || rc_small=$?
+    judge_sfo_invocation 0 "$rc_small" "SFO: file too small" "$sfo_small_err" "too-small input file"
+
+    # 5c. Corrupt header (>= 20 bytes, bad magic: rc=0, 'SFO: invalid header', clean sanitizer stderr)
+    head -c 24 /dev/zero > "$tmp/corrupt.sfo"
+    sfo_corrupt_err="$tmp/sfo_corrupt.err"
+    rc_corrupt=0
+    "$sfo_bin" -l "$tmp/corrupt.sfo" >/dev/null 2> "$sfo_corrupt_err" || rc_corrupt=$?
+    judge_sfo_invocation 0 "$rc_corrupt" "SFO: invalid header" "$sfo_corrupt_err" "corrupt header"
+
+    # 5d. Output file open failure (rc=0, perror diagnostic, no output file created, clean sanitizer stderr)
+    sfo_outfail_err="$tmp/sfo_outfail.err"
+    outfail_target="$tmp/nonexistent_dir/output.xml"
+    rc_outfail=0
+    "$sfo_bin" -t "$cand_sfo" "$outfail_target" >/dev/null 2> "$sfo_outfail_err" || rc_outfail=$?
+    judge_sfo_invocation 0 "$rc_outfail" "nonexistent_dir" "$sfo_outfail_err" "output file open failure"
+    if [ -e "$outfail_target" ]; then
+        row_fail "Row (e)" "output file open failure created output file ($outfail_target)"
+        row_e_ok=0
+    fi
+fi
+
+# 6. Calloc OOM injection via linker wrap
+cat > "$tmp/wrap_calloc.c" << 'EOF'
+#include <stddef.h>
+#include <stdlib.h>
+void *__real_calloc(size_t nmemb, size_t size);
+void *__wrap_calloc(size_t nmemb, size_t size) {
+    if (nmemb == 256) { /* Injected failure on KV_MAX_PAIRS allocation */
+        return NULL;
+    }
+    return __real_calloc(nmemb, size);
+}
+EOF
+
+sfo_oom_bin="$tmp/sfo_oom"
+if ! "$CC" -O2 $SAN_FLAGS -Wno-stringop-truncation \
+    "$repo_root/tools/sfo-pkg/sfo.c" \
+    "$tmp/wrap_calloc.c" \
+    -Wl,--wrap=calloc \
+    -o "$sfo_oom_bin" > "$tmp/sfo_oom_build.log" 2>&1; then
+    row_fail "Row (e)" "sfo_oom compilation with wrapped calloc failed (see $tmp/sfo_oom_build.log)"
+    row_e_ok=0
+fi
+
+if [ "$row_e_ok" -eq 1 ]; then
+    # Test list_sfo OOM injection (rc=0, 'SFO: out of memory', clean sanitizer stderr)
+    oom_list_err="$tmp/oom_list.err"
+    rc_oom_list=0
+    "$sfo_oom_bin" -l "$cand_sfo" >/dev/null 2> "$oom_list_err" || rc_oom_list=$?
+    judge_sfo_invocation 0 "$rc_oom_list" "SFO: out of memory" "$oom_list_err" "list_sfo OOM injection"
+
+    # Test convert_to_xml OOM injection (rc=0, 'SFO: out of memory', no output file, clean sanitizer stderr)
+    oom_toxml_err="$tmp/oom_toxml.err"
+    rc_oom_toxml=0
+    "$sfo_oom_bin" -t "$cand_sfo" "$tmp/oom.xml" >/dev/null 2> "$oom_toxml_err" || rc_oom_toxml=$?
+    judge_sfo_invocation 0 "$rc_oom_toxml" "SFO: out of memory" "$oom_toxml_err" "convert_to_xml OOM injection"
+    if [ -e "$tmp/oom.xml" ]; then
+        row_fail "Row (e)" "convert_to_xml created output file on OOM failure"
+        row_e_ok=0
+    fi
+
+    # Test convert_from_xml OOM injection (rc=0, 'SFO: out of memory', no output file, clean sanitizer stderr)
+    oom_fromxml_err="$tmp/oom_fromxml.err"
+    rc_oom_fromxml=0
+    "$sfo_oom_bin" --fromxml "$golden_dir/input.xml" "$tmp/oom.sfo" >/dev/null 2> "$oom_fromxml_err" || rc_oom_fromxml=$?
+    judge_sfo_invocation 0 "$rc_oom_fromxml" "SFO: out of memory" "$oom_fromxml_err" "convert_from_xml OOM injection"
+    if [ -e "$tmp/oom.sfo" ]; then
+        row_fail "Row (e)" "convert_from_xml created output file on OOM failure"
+        row_e_ok=0
+    fi
+fi
+
+if [ "$row_e_ok" -eq 1 ]; then
+    note "Row (e) PASS: SFO heap allocation, golden baseline parity, CLI operations, malformed error cleanups, and calloc OOM verified cleanly with 0 sanitizer defects"
 fi
 
 # ---------------------------------------------------------------------------

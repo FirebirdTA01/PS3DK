@@ -267,9 +267,15 @@ static void list_sfo(const char *file, int debug, int pretty)
         return;
     }
 
-    sfo_kv_t kvs[KV_MAX_PAIRS];
+    sfo_kv_t *kvs = (sfo_kv_t *)calloc(KV_MAX_PAIRS, sizeof(sfo_kv_t));
+    if (!kvs) {
+        fprintf(stderr, "SFO: out of memory\n");
+        free(data);
+        return;
+    }
     int count;
     if (parse_sfo(data, data_len, kvs, &count, NULL, NULL) != 0) {
+        free(kvs);
         free(data);
         return;
     }
@@ -310,6 +316,7 @@ static void list_sfo(const char *file, int debug, int pretty)
         print_dict(kvs, count);
     }
 
+    free(kvs);
     free(data);
 }
 
@@ -322,9 +329,15 @@ static void convert_to_xml(const char *sfofile, const char *xmlfile, int debug)
     uint8_t *data = read_file(sfofile, &data_len);
     if (!data) return;
 
-    sfo_kv_t kvs[KV_MAX_PAIRS];
+    sfo_kv_t *kvs = (sfo_kv_t *)calloc(KV_MAX_PAIRS, sizeof(sfo_kv_t));
+    if (!kvs) {
+        fprintf(stderr, "SFO: out of memory\n");
+        free(data);
+        return;
+    }
     int count;
     if (parse_sfo(data, data_len, kvs, &count, NULL, NULL) != 0) {
+        free(kvs);
         free(data);
         return;
     }
@@ -335,7 +348,7 @@ static void convert_to_xml(const char *sfofile, const char *xmlfile, int debug)
     free(data);
 
     FILE *fp = fopen(xmlfile, "w");
-    if (!fp) { perror(xmlfile); return; }
+    if (!fp) { perror(xmlfile); free(kvs); return; }
 
     fputs("<?xml version=\"1.0\" ?>\n", fp);
     fputs("<sfo>\n", fp);
@@ -350,6 +363,7 @@ static void convert_to_xml(const char *sfofile, const char *xmlfile, int debug)
     }
     fputs("</sfo>\n", fp);
     fclose(fp);
+    free(kvs);
 }
 
 /* ------------------------------------------------------------------ */
@@ -510,9 +524,15 @@ static void convert_from_xml(const char *xmlfile, const char *sfofile,
     uint8_t *xmldata = read_file(xmlfile, &xml_len);
     if (!xmldata) return;
 
-    sfo_kv_t kvs[KV_MAX_PAIRS];
+    sfo_kv_t *kvs = (sfo_kv_t *)calloc(KV_MAX_PAIRS, sizeof(sfo_kv_t));
+    if (!kvs) {
+        fprintf(stderr, "SFO: out of memory\n");
+        free(xmldata);
+        return;
+    }
     int count = 0;
     if (parse_xml((const char *)xmldata, kvs, &count, forcetitle, forceappid) != 0) {
+        free(kvs);
         free(xmldata);
         return;
     }
@@ -528,8 +548,7 @@ static void convert_from_xml(const char *xmlfile, const char *sfofile,
     uint32_t *pad_lens   = (uint32_t *)calloc(count, sizeof(uint32_t));
     uint32_t *val_lens   = (uint32_t *)calloc(count, sizeof(uint32_t));
     if (!key_offs || !val_offs || !pad_lens || !val_lens) {
-        free(key_offs); free(val_offs); free(pad_lens); free(val_lens);
-        return;
+        goto cleanup;
     }
 
     for (int i = 0; i < count; i++) {
@@ -618,6 +637,7 @@ cleanup:
     free(val_offs);
     free(pad_lens);
     free(val_lens);
+    free(kvs);
 }
 
 /* ------------------------------------------------------------------ */

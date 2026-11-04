@@ -1,0 +1,29 @@
+Golden SFO fixtures generated from tests/sdk/fixtures/sfo-golden/input.xml
+using the pre-change sfo tool (git blob e7efc0bc583654135ccbaccadce76c0ad16c6129
+on origin/main, containing historical sfo_kv_t kvs[KV_MAX_PAIRS] stack arrays).
+Generation driver: tests/sdk/fixtures/sfo-golden/generate-golden.sh under
+verified 8192 KiB stack limit bound.
+
+- input.xml:
+  Size: 764 bytes
+  SHA-256: e62b43199cdcbc7cdb688175d77ba3f6c24049cd37edecf5badc6756e27638df
+
+- fixture.sfo:
+  Command: sfo --fromxml input.xml fixture.sfo
+  Size: 1040 bytes
+  SHA-256: 5946a0dc76e38b68964671425b9f57980ac8f5b36e220afa1dc71b8d0de2e01f
+
+- fixture_list.txt:
+  Command: sfo -l fixture.sfo > fixture_list.txt
+  Size: 282 bytes
+  SHA-256: bf8281edcab6542fb05a6f96e07f5b82604133ebcfe91e546c86f215494ca5ce
+
+- fixture_exported.xml:
+  Command: sfo -t fixture.sfo fixture_exported.xml
+  Size: 704 bytes
+  SHA-256: 99bc0fb79143b3ccddfac3e85c1ed28e2a966a0fba753caa4d90011fda3bbf28
+
+- fixture_roundtrip.sfo:
+  Command: sfo --fromxml fixture_exported.xml fixture_roundtrip.sfo
+  Size: 1040 bytes
+  SHA-256: 5946a0dc76e38b68964671425b9f57980ac8f5b36e220afa1dc71b8d0de2e01f
