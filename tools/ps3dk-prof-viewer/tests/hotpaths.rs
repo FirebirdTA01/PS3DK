@@ -137,7 +137,7 @@ fn grouping_refusal_is_not_shown_as_an_empty_capture() {
         let mut st = HotState::default();
         let mut nav = Some((0, 0));
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |p| nav = draw(p, hv, &mut st));
+            egui::CentralPanel::default().show(ctx, |p| nav = draw(p, hv, &mut st, None));
         });
         assert_eq!(nav, None);
         // a refused or empty page never selects a lane

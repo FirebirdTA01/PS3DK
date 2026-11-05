@@ -329,6 +329,14 @@ pub struct PairFact {
     pub exclusive: Option<u64>,
     pub top_level: bool,
     pub extrapolated: bool,
+    /// F3b: the index, in this epoch's fact vector, of the pair on top of the completed-pair stack when this pair's
+    /// BEGIN was pushed (None exactly when `top_level`).  Pairs are in END order, so a parent's index is greater.
+    /// `u32::MAX` marks an index that does not fit (refused by the path pass; unreachable under the pair cap).
+    pub parent: Option<u32>,
+    /// F3b: the BEGIN event's own nesting depth and sequence, the evidence for ancestry the completed-pair stack
+    /// cannot see (an open, censored or lost ancestor) and for BEGIN order.
+    pub depth: u8,
+    pub begin_seq: u64,
 }
 
 /// Pair facts retained capture-wide for F2, under an explicit aggregate limit (in facts).  Retention never charges
@@ -534,6 +542,8 @@ fn epoch(
     let mut excl: Vec<Option<u64>> = vec![None; pairs.len()];
     // F2 only (not counted in `hw`, never allocated on the default path): which pairs open with an empty stack
     let mut toplevel: Vec<bool> = if keep.is_some() { vec![false; pairs.len()] } else { Vec::new() };
+    // F3b, retention path only: the stack-top pair at each push (not counted in `hw`, not charged to this meter).
+    let mut parentv: Vec<Option<usize>> = if keep.is_some() { vec![None; pairs.len()] } else { Vec::new() };
     // (pair, sum of direct children's inclusive deltas, inside incomplete)
     let mut stack: Vec<(usize, u128, bool)> = Vec::new();
     for (i, &j) in at.iter().enumerate() {
@@ -542,6 +552,7 @@ fn epoch(
             if pairs[j].0 == start + i {
                 if !toplevel.is_empty() {
                     toplevel[j] = stack.is_empty();
+                    parentv[j] = stack.last().map(|t| t.0);
                 }
                 stack.push((j, 0, false));
             } else {
@@ -626,6 +637,9 @@ fn epoch(
                     exclusive: excl[j],
                     top_level: toplevel[j],
                     extrapolated: fb < sm.fmin || fe > sm.fmax,
+                    parent: parentv[j].map(|p| u32::try_from(p).unwrap_or(u32::MAX)),
+                    depth: ev[bi].depth,
+                    begin_seq: ev[bi].seq,
                 }
             })
             .collect();

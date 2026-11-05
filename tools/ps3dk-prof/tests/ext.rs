@@ -2504,3 +2504,338 @@ fn f2_owner_frames_work_accounting() {
     assert!(owner_frames(&big, 1, &mut Meter::new(u1, Limit::Capture)).is_ok());
     assert_eq!(owner_frames(&big, 1, &mut Meter::new(u1 - 1, Limit::Capture)).err(), Some(Refusal::CaptureOps));
 }
+
+// ---- F3b: SPU/RSX hot paths over completed pairs (t_d9789c06) ----------------------------------------------------
+
+use ps3dk_prof::foreign_paths::{foreign_paths, FEpochState, FPLimit, FRoot, FSourceState, ForeignPathBudgets, ForeignPathMap};
+
+fn fp_run(name: &str, ext: Vec<Chunk>, b: &ForeignPathBudgets) -> (ExtCapture, PairSink, ForeignPathMap) {
+    let x = capture(name, ext);
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let mut ps = PairSink::new(u64::MAX);
+    let d = durations_pairs(&x, &c, &DurationBudgets::default(), &mut ps);
+    let p = foreign_paths(&c, &d, &ps, b);
+    (x, ps, p)
+}
+
+fn fp_rows(p: &ForeignPathMap) -> &Vec<ps3dk_prof::foreign_paths::FRow> {
+    let s = p.sources.iter().find(|s| s.source == SourceKey::Lane(LANE)).expect("SPU lane");
+    match &s.state {
+        FSourceState::Paths { rows, .. } => rows,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn chain_descs(r: &ps3dk_prof::foreign_paths::FRow) -> Vec<u32> {
+    r.key.chain.iter().map(|c| c.1).collect()
+}
+
+#[test]
+fn fp_parent_index_and_depth_on_a_parsed_three_level_capture() {
+    // zone 0 (d0) > zone 1 (d1) > zone 0 (d2); facts are in END order: inner, middle, outer
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (985, 1, 1, 1), (982, 0, 1, 2), (980, 0, 2, 2), (975, 1, 2, 1), (970, 0, 2, 0)]),
+    ];
+    let (_, ps, p) = fp_run("fp-three", lane_only(body, (1, 6, 6, 0)), &ForeignPathBudgets::default());
+    let f = &ps.epochs[&(SourceKey::Lane(LANE), 1)];
+    let got: Vec<(Option<u32>, u8, bool)> = f.iter().map(|x| (x.parent, x.depth, x.top_level)).collect();
+    assert_eq!(got, vec![(Some(1), 2, false), (Some(2), 1, false), (None, 0, true)]);
+    assert!(f[0].begin_seq > f[1].begin_seq && f[1].begin_seq > f[2].begin_seq);
+    let mut keys: Vec<Vec<u32>> = fp_rows(&p).iter().map(chain_descs).collect();
+    keys.sort();
+    assert_eq!(keys, vec![vec![0], vec![0, 1], vec![0, 1, 0]]);
+    assert!(fp_rows(&p).iter().all(|r| r.key.root.complete()));
+}
+
+#[test]
+fn fp_an_open_ancestor_at_eof_gives_a_partial_root_never_merged_with_a_complete_one() {
+    // B (desc 1) completed at depth 0; then A (desc 0) BEGIN, B BEGIN/END at depth 1, A never ends (open at EOF)
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(995, 1, 1, 0), (992, 1, 2, 0), (990, 0, 1, 0), (985, 1, 1, 1), (980, 1, 2, 1)]),
+    ];
+    let (_, _, p) = fp_run("fp-open-eof", lane_fin(body, (1, 5, 5, 0, 1)), &ForeignPathBudgets::default());
+    let rows = fp_rows(&p);
+    let mut roots: Vec<(FRoot, Vec<u32>)> = rows.iter().map(|r| (r.key.root.clone(), chain_descs(r))).collect();
+    roots.sort();
+    assert_eq!(roots, vec![(FRoot { missing: 0, gaps: vec![] }, vec![1]), (FRoot { missing: 1, gaps: vec![] }, vec![1])]);
+    let partial = rows.iter().find(|r| !r.key.root.complete()).unwrap();
+    assert_eq!(partial.key.root.text(), "PARTIAL(missing 1) > ");
+}
+
+#[test]
+fn fp_a_loss_after_the_child_end_gives_a_partial_root() {
+    // A BEGIN (d0), B BEGIN/END (d1), then a LOSS censors A
+    let mut ext = std_ext();
+    ext[5] = spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (985, 1, 1, 1), (980, 1, 2, 1)]);
+    ext.insert(6, loss(LANE, 1, 3, 1));
+    ext[8] = finals(&[(LANE, 1, 1, 4, 3, 1, 0), (RSX_D, 2, 1, 2, 2, 0, 0)]);
+    let (_, _, p) = fp_run("fp-loss", ext, &ForeignPathBudgets::default());
+    let rows = fp_rows(&p);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!((rows[0].key.root.clone(), chain_descs(&rows[0])), (FRoot { missing: 1, gaps: vec![] }, vec![1]));
+}
+
+#[test]
+fn fp_an_excluded_parent_keeps_its_child_under_it() {
+    // the parent ends outside the calibration range (extrapolated): counted, not summed; the child stays under it
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(950, 0, 1, 0), (945, 1, 1, 1), (940, 1, 2, 1), (850, 0, 2, 0)])];
+    let (_, _, p) = fp_run("fp-excl-parent", lane_only(body, (1, 4, 4, 0)), &ForeignPathBudgets::default());
+    let rows = fp_rows(&p);
+    let parent = rows.iter().find(|r| chain_descs(r) == vec![0]).unwrap();
+    let child = rows.iter().find(|r| chain_descs(r) == vec![0, 1]).expect("the child keeps its excluded parent");
+    assert_eq!((parent.counts.extrapolated, parent.counts.included), (1, 0));
+    assert_eq!(parent.exclusive.hi, Some(ps3dk_prof::clockmap::Rat::int(0)), "not summed");
+    assert_eq!(child.counts.included, 1);
+}
+
+#[test]
+fn fp_one_epoch_sum_equals_the_zone_exclusive_bound() {
+    let (_, _, p) = fp_run("fp-nested", f2_nested(), &ForeignPathBudgets::default());
+    let (_, _, d) = du("fp-nested-du", f2_nested());
+    let z = summaries(&d, 1).1;
+    let top = fp_rows(&p).iter().find(|r| chain_descs(r) == vec![0]).unwrap();
+    assert_eq!(btext(&top.exclusive), btext(&zone_of(z, 0).exclusive.as_ref().unwrap().b_sum));
+    let child = fp_rows(&p).iter().find(|r| chain_descs(r) == vec![0, 1]).unwrap();
+    assert_eq!(btext(&child.exclusive), btext(&zone_of(z, 1).exclusive.as_ref().unwrap().b_sum));
+}
+
+#[test]
+fn fp_synthetic_invalid_parents_and_gap_refuse_or_mark_the_epoch() {
+    // SYNTHETIC: the reader never yields these; they are made by rewriting retained facts.
+    let x = capture("fp-synth", lane_only(vec![du_cal(), spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (985, 1, 1, 1), (980, 1, 2, 1), (970, 0, 2, 0)])], (1, 4, 4, 0)));
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let mut ps = PairSink::new(u64::MAX);
+    let d = durations_pairs(&x, &c, &DurationBudgets::default(), &mut ps);
+    let key = (SourceKey::Lane(LANE), 1);
+    let state = |ps: &PairSink| {
+        let p = foreign_paths(&c, &d, ps, &ForeignPathBudgets::default());
+        p.sources.iter().find(|s| s.source == SourceKey::Lane(LANE)).unwrap().epochs[0].state.clone()
+    };
+    assert_eq!(state(&ps), FEpochState::Summed);
+    for (bad, what) in [(Some(9u32), "out of range"), (Some(0u32), "self"), (Some(u32::MAX), "overflow marker")] {
+        let mut q = PairSink::new(u64::MAX);
+        q.epochs = ps.epochs.clone();
+        q.epochs.get_mut(&key).unwrap()[0].parent = bad;
+        assert_eq!(state(&q), FEpochState::Refused(FPLimit::InvalidParent), "{what}");
+    }
+    // BEGIN order violated (the parent's BEGIN after the child's)
+    let mut q = PairSink::new(u64::MAX);
+    q.epochs = ps.epochs.clone();
+    let v = q.epochs.get_mut(&key).unwrap();
+    v[1].begin_seq = v[0].begin_seq + 100;
+    assert_eq!(state(&q), FEpochState::Refused(FPLimit::InvalidParent), "BEGIN order");
+    // a depth jump inside the chain (a censored middle pair): a PARTIAL gap root, never merged
+    let mut q = PairSink::new(u64::MAX);
+    q.epochs = ps.epochs.clone();
+    q.epochs.get_mut(&key).unwrap()[0].depth = 2;
+    let p = foreign_paths(&c, &d, &q, &ForeignPathBudgets::default());
+    assert!(fp_rows(&p).iter().any(|r| r.key.root == FRoot { missing: 0, gaps: vec![(1, 1)] }), "{p:?}");
+}
+
+#[test]
+fn fp_depth_cap_exact_and_one_over_is_counted() {
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (985, 1, 1, 1), (982, 0, 1, 2), (980, 0, 2, 2), (975, 1, 2, 1), (970, 0, 2, 0)]),
+    ];
+    let ext = lane_only(body, (1, 6, 6, 0));
+    let (_, _, at) = fp_run("fp-cap-at", ext.clone(), &ForeignPathBudgets { max_path_depth: 3, ..ForeignPathBudgets::default() });
+    let (_, _, over) = fp_run("fp-cap-over", ext, &ForeignPathBudgets { max_path_depth: 2, ..ForeignPathBudgets::default() });
+    let deep = |p: &ForeignPathMap| match &p.sources.iter().find(|s| s.source == SourceKey::Lane(LANE)).unwrap().state {
+        FSourceState::Paths { too_deep, rows, .. } => (*too_deep, rows.len()),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(deep(&at), (0, 3));
+    assert_eq!(deep(&over), (1, 2));
+}
+
+#[test]
+fn fp_capture_ops_exact_and_one_short_refuse_the_last_source() {
+    let (_, _, full) = fp_run("fp-ops", cm_ext(), &ForeignPathBudgets::default());
+    assert!(full.exhausted_at.is_none());
+    let (_, _, at) = fp_run("fp-ops-at", cm_ext(), &ForeignPathBudgets { capture_ops: full.used, ..ForeignPathBudgets::default() });
+    assert_eq!(at, full);
+    let (_, _, short) = fp_run("fp-ops-short", cm_ext(), &ForeignPathBudgets { capture_ops: full.used - 1, ..ForeignPathBudgets::default() });
+    let last = short.sources.last().unwrap();
+    assert_eq!(last.state, FSourceState::Refused(FPLimit::CaptureOps));
+    assert!(last.epochs.iter().all(|e| matches!(e.state, FEpochState::NotComputed(_) | FEpochState::NotMapped(_))), "{last:?}");
+    assert!(matches!(short.sources[0].state, FSourceState::Paths { .. }), "the earlier source is kept whole");
+}
+
+// ---- F3b r3: cross-epoch, collisions, population, unknown counts, budgets ----------------------------------------
+
+fn fp_two_epochs(second_desc: u16) -> Vec<Chunk> {
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (980, 0, 2, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        calibration(SPU_D, 2, 0, &[(0xFFFF_1000, 500, 510), (0xFFFE_0000, 600, 700)]),
+        spu_events(LANE, 2, 2, &[(0xFFFF_0000, second_desc, 1, 0), (0xFFFE_8000, second_desc, 2, 0)]),
+    ];
+    lane_only(body, (1, 4, 4, 0))
+}
+
+fn rat_add(a: &ps3dk_prof::clockmap::Rat, b: &ps3dk_prof::clockmap::Rat) -> (num_bigint::BigInt, num_bigint::BigInt) {
+    use num_integer::Integer;
+    let n = &a.num * &b.den + &b.num * &a.den;
+    let d = &a.den * &b.den;
+    let g = n.gcd(&d);
+    (n / &g, d / &g)
+}
+
+#[test]
+fn fp_one_path_over_two_epochs_is_their_interval_sum_and_spans_n() {
+    let (_, _, p) = fp_run("fp-x-epoch", fp_two_epochs(0), &ForeignPathBudgets::default());
+    let rows = fp_rows(&p);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let r = &rows[0];
+    assert_eq!((r.epochs, r.counts.pairs), (2, 2));
+    // each epoch alone (the same path in a one-epoch capture would be that epoch's row)
+    let (_, _, d) = du("fp-x-epoch-du", fp_two_epochs(0));
+    let (b1, b2) = (zone_of(summaries(&d, 1).1, 0).exclusive.clone().unwrap().b_sum, zone_of(summaries(&d, 2).1, 0).exclusive.clone().unwrap().b_sum);
+    let lo = rat_add(&b1.lo, &b2.lo);
+    use num_integer::Integer;
+    let g = r.exclusive.lo.num.gcd(&r.exclusive.lo.den);
+    assert_eq!((&r.exclusive.lo.num / &g, &r.exclusive.lo.den / &g), lo, "lo is the sum of the epochs' lo");
+    match (&r.exclusive.hi, &b1.hi, &b2.hi) {
+        (Some(h), Some(x), Some(y)) => {
+            let g = h.num.gcd(&h.den);
+            assert_eq!((&h.num / &g, &h.den / &g), rat_add(x, y));
+        }
+        (None, _, _) => assert!(b1.hi.is_none() || b2.hi.is_none()),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn fp_the_path_cap_jointly_over_epochs_refuses_the_source() {
+    let cap = ForeignPathBudgets { max_paths_per_source: 1, ..ForeignPathBudgets::default() };
+    let (_, _, one) = fp_run("fp-cap-joint-ok", fp_two_epochs(0), &cap);
+    assert!(matches!(one.sources[0].state, FSourceState::Paths { .. }), "one path in both epochs fits");
+    let (_, _, two) = fp_run("fp-cap-joint", fp_two_epochs(1), &cap);
+    let s = &two.sources[0];
+    assert_eq!(s.state, FSourceState::Refused(FPLimit::PathsPerSource));
+    assert!(s.epochs.iter().all(|e| e.state == FEpochState::NotComputed(FPLimit::PathsPerSource)), "{s:?}");
+    assert!(s.epochs.iter().all(|e| e.pairs == Some(1)), "known inventory counts stay: {s:?}");
+    // a later source is NOT refused by a path cap (only the capture budget refuses later sources)
+    assert!(two.exhausted_at.is_none());
+}
+
+#[test]
+fn fp_the_same_descriptor_in_another_image_is_another_path() {
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (985, 0, 2, 0), (980, 0, 1, 0), (975, 0, 2, 0)])];
+    let x = capture("fp-collide", lane_only(body, (1, 4, 4, 0)));
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let mut ps = PairSink::new(u64::MAX);
+    let d = durations_pairs(&x, &c, &DurationBudgets::default(), &mut ps);
+    let p = foreign_paths(&c, &d, &ps, &ForeignPathBudgets::default());
+    assert_eq!(fp_rows(&p).len(), 1, "same image and descriptor: one path");
+    // SYNTHETIC: the second pair rewritten to image 1
+    let mut q = PairSink::new(u64::MAX);
+    q.epochs = ps.epochs.clone();
+    q.epochs.get_mut(&(SourceKey::Lane(LANE), 1)).unwrap()[1].image = Some(1);
+    let p = foreign_paths(&c, &d, &q, &ForeignPathBudgets::default());
+    let keys: Vec<_> = fp_rows(&p).iter().map(|r| r.key.chain.clone()).collect();
+    assert_eq!(keys.len(), 2, "{keys:?}");
+    // and an SPU lane and an RSX domain never share rows (separate sources)
+    let (_, _, cm) = fp_run("fp-collide-src", cm_ext(), &ForeignPathBudgets::default());
+    assert_eq!(cm.sources.len(), 2);
+}
+
+#[test]
+fn fp_population_reconciles_with_retained_rows_and_the_depth_cap() {
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (985, 1, 1, 1), (982, 0, 1, 2), (980, 0, 2, 2), (975, 1, 2, 1), (970, 0, 2, 0)]),
+    ];
+    let (_, _, p) = fp_run("fp-pop", lane_only(body, (1, 6, 6, 0)), &ForeignPathBudgets { max_path_depth: 2, ..ForeignPathBudgets::default() });
+    match &p.sources[0].state {
+        FSourceState::Paths { population, counts, too_deep, .. } => {
+            assert_eq!((population.pairs, counts.pairs, *too_deep), (3, 2, 1));
+            assert_eq!(population.pairs, counts.pairs + too_deep);
+            assert_eq!(population.included + population.extrapolated + population.exclusive_unavailable, population.pairs);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn fp_epochs_without_an_inventory_report_unknown_pairs_never_zero() {
+    let x = capture("fp-unknown", cm_ext());
+    let c = map_capture(&x, Premises { spu_nowrap: false }, &Budgets::default());
+    let mut ps = PairSink::new(u64::MAX);
+    let d = durations_pairs(&x, &c, &DurationBudgets::default(), &mut ps);
+    let p = foreign_paths(&c, &d, &ps, &ForeignPathBudgets::default());
+    let spu = p.sources.iter().find(|s| s.source == SourceKey::Lane(LANE)).unwrap();
+    assert!(matches!(spu.epochs[0].state, FEpochState::NotMapped(_)));
+    assert_eq!(spu.epochs[0].pairs, None);
+}
+
+#[test]
+fn fp_budget_zero_refuses_every_source_and_keeps_known_counts() {
+    let (_, _, p) = fp_run("fp-zero", cm_ext(), &ForeignPathBudgets { capture_ops: 0, ..ForeignPathBudgets::default() });
+    assert_eq!(p.sources.len(), 2);
+    assert_eq!(p.exhausted_at, Some(p.sources[0].source));
+    for s in &p.sources {
+        assert_eq!(s.state, FSourceState::Refused(FPLimit::CaptureOps), "{s:?}");
+        assert!(s.epochs.iter().all(|e| e.state == FEpochState::NotComputed(FPLimit::CaptureOps)), "{s:?}");
+        assert!(s.epochs.iter().all(|e| e.pairs.is_some()), "every epoch here has an inventory: {s:?}");
+    }
+}
+
+#[test]
+fn fp_every_budget_refuses_monotonically_and_never_publishes_a_partial_source() {
+    let (_, _, full) = fp_run("fp-sweep", cm_ext(), &ForeignPathBudgets::default());
+    let mut last_refused = 0usize;
+    for ops in 0..=full.used {
+        let (_, _, p) = fp_run("fp-sweep-b", cm_ext(), &ForeignPathBudgets { capture_ops: ops, ..ForeignPathBudgets::default() });
+        let refused: Vec<bool> = p.sources.iter().map(|s| matches!(s.state, FSourceState::Refused(_))).collect();
+        assert!(refused.windows(2).all(|w| !w[0] || w[1]), "{ops}: once refused, later sources too: {refused:?}");
+        let n = refused.iter().filter(|&&r| r).count();
+        assert!(ops == 0 || n <= last_refused, "{ops}: more budget never refuses more");
+        last_refused = n;
+        for (s, f) in p.sources.iter().zip(&full.sources) {
+            let (got, want): (Vec<u32>, Vec<u32>) = (s.epochs.iter().map(|e| e.epoch).collect(), f.epochs.iter().map(|e| e.epoch).collect());
+            assert_eq!(got, want, "{ops}: every epoch listed exactly once, in order");
+            if let FSourceState::Paths { .. } = s.state {
+                assert_eq!(s, f, "{ops}: a published source is whole and equal to the full run");
+            }
+        }
+    }
+    assert_eq!(last_refused, 0);
+}
+
+#[test]
+fn fp_the_pair_fact_lookup_is_charged_by_the_map_size_including_empty_fact_epochs() {
+    use ps3dk_prof::clockmap::clog2;
+    let x = capture("fp-lookup", cm_ext());
+    let c = map_capture(&x, NOWRAP, &Budgets::default());
+    let mut ps = PairSink::new(u64::MAX);
+    let d = durations_pairs(&x, &c, &DurationBudgets::default(), &mut ps);
+    let lookups = 2u64; // one summed epoch per source under W32
+    let grow = |base: &PairSink, k: u32| {
+        let mut q = PairSink::new(u64::MAX);
+        q.epochs = base.epochs.clone();
+        for e in 0..k {
+            q.epochs.insert((SourceKey::Lane(9_999), e), Vec::new()); // SYNTHETIC: unrelated entries
+        }
+        q
+    };
+    for base in [ps.epochs.clone(), {
+        // the RSX epoch with an EMPTY fact vector: its lookup is still charged
+        let mut v = ps.epochs.clone();
+        *v.get_mut(&(SourceKey::Gpu(RSX_D), 1)).unwrap() = Vec::new();
+        v
+    }] {
+        let mut small = PairSink::new(u64::MAX);
+        small.epochs = base;
+        let a = foreign_paths(&c, &d, &small, &ForeignPathBudgets::default());
+        let big = grow(&small, 1000);
+        let b = foreign_paths(&c, &d, &big, &ForeignPathBudgets::default());
+        let (n0, n1) = (small.epochs.len() as u64, big.epochs.len() as u64);
+        assert_eq!(b.used - a.used, lookups * (clog2(n1 + 1) - clog2(n0 + 1)), "the lookup charge alone differs");
+        assert_eq!(a.sources.iter().map(|s| &s.state).collect::<Vec<_>>(), b.sources.iter().map(|s| &s.state).collect::<Vec<_>>());
+    }
+}

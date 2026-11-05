@@ -541,3 +541,72 @@ fn no_interval_for_unknown_refused_and_zero_length_slots() {
         assert_eq!(mark(bo, &l, i), Mark::NoInterval, "REFUSED slot {i}");
     }
 }
+
+// ---- F3b: SPU/RSX lanes on the Hot paths page ------------------------------------------------------------------
+
+#[test]
+fn hot_paths_foreign_lanes_w32_and_cache() {
+    use ps3dk_prof_viewer::foreign_hot::ForeignHotSlot;
+    use std::sync::atomic::Ordering;
+    let a = analysed(&f2_bytes(cm_ext()));
+    let slot = ForeignHotSlot::default();
+    let off = slot.view(&a, false);
+    let spu = off.lanes.iter().find(|l| l.label == "SPU lane 10").expect("SPU lane");
+    assert!(spu.coverage.iter().any(|c| c.contains("AMBIGUOUS-LIFT") && c.contains("coverage unknown")), "{spu:?}");
+    assert!(spu.rows.is_empty());
+    let rsx = off.lanes.iter().find(|l| l.label == "RSX domain 3").expect("RSX lane");
+    assert_eq!(rsx.rows.len(), 1);
+    assert_eq!(rsx.rows[0].leaf, "desc 3 gpuzone");
+    assert!(rsx.rows[0].exclusive_exact.starts_with("[290/3 ticks, 310/3 ticks]"), "{}", rsx.rows[0].exclusive_exact);
+    // one row: [lo / sum hi, hi / sum lo] = [290/310 rounded down, 310/290 clamped to 1]
+    assert!(rsx.rows[0].share.starts_with("share [93.5%, 100.0%]"), "{}", rsx.rows[0].share);
+    let on = slot.view(&a, true);
+    let spu = on.lanes.iter().find(|l| l.label == "SPU lane 10").unwrap();
+    assert_eq!(spu.rows.len(), 1);
+    assert_eq!(spu.rows[0].leaf, "image 0 desc 0 spuzone0");
+    assert!(!spu.rows[0].partial);
+    for _ in 0..10 {
+        drop(slot.view(&a, true));
+    }
+    assert_eq!(slot.builds.load(Ordering::Relaxed), 2, "one build per W32 value; repaints reuse it");
+}
+
+#[test]
+fn hot_paths_foreign_counts_unknown_pairs_population_and_exact_inclusive() {
+    use ps3dk_prof_viewer::foreign_hot::ForeignHotSlot;
+    let a = analysed(&f2_bytes(cm_ext()));
+    let slot = ForeignHotSlot::default();
+    let off = slot.view(&a, false);
+    let spu = off.lanes.iter().find(|l| l.label == "SPU lane 10").unwrap();
+    assert!(spu.coverage.iter().all(|c| c.ends_with("pairs unknown")), "no inventory: unknown, never 0: {spu:?}");
+    let rsx = off.lanes.iter().find(|l| l.label == "RSX domain 3").unwrap();
+    assert!(rsx.lines[0].starts_with("pairs in summed epochs (population): 1 = included 1"), "{:?}", rsx.lines);
+    assert!(rsx.lines[1].starts_with("kept in paths: 1"), "{:?}", rsx.lines);
+    assert!(rsx.lines[3].starts_with("non-pair events in summed epochs:"), "{:?}", rsx.lines);
+    assert!(rsx.rows[0].inclusive_exact.starts_with('['), "{}", rsx.rows[0].inclusive_exact);
+}
+
+#[test]
+fn hot_paths_a_premise_change_clears_the_selected_row_before_the_view_is_taken() {
+    use ps3dk_prof_viewer::hotpaths_ui::{apply_premise, HotState};
+    let mut st = HotState { row: Some(2), ..HotState::default() };
+    apply_premise(&mut st, false);
+    assert_eq!((st.w32, st.row), (false, Some(2)), "no change keeps the row");
+    apply_premise(&mut st, true);
+    assert_eq!((st.w32, st.row), (true, None), "a change clears it");
+}
+
+#[test]
+fn hot_paths_foreign_partial_root_is_labelled() {
+    use ps3dk_prof_viewer::foreign_hot::ForeignHotSlot;
+    // A (desc 0) BEGIN at depth 0 stays open; B (desc 1) completes at depth 1: a PARTIAL(missing 1) root
+    let mut ext = cm_ext();
+    ext[6] = spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (985, 1, 1, 1), (980, 1, 2, 1)]);
+    ext[8] = finals(&[(LANE, 1, 1, 3, 3, 0, 1), (RSX_D, 2, 1, 2, 2, 0, 0)]);
+    let a = analysed(&f2_bytes(ext));
+    let v = ForeignHotSlot::default().view(&a, true);
+    let spu = v.lanes.iter().find(|l| l.label == "SPU lane 10").unwrap();
+    assert_eq!(spu.rows.len(), 1, "{spu:?}");
+    assert!(spu.rows[0].partial);
+    assert!(spu.rows[0].text.starts_with("PARTIAL(missing 1) > image 0 desc 1 spuzone1"), "{}", spu.rows[0].text);
+}

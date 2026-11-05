@@ -1132,7 +1132,19 @@ mod tests {
     }
 
     fn fact(fb: i128, fe: i128, incl: u64, excl: Option<u64>, top: bool, desc: u32) -> PairFact {
-        PairFact { image: Some(0), desc, fb, fe, inclusive: incl, exclusive: excl, top_level: top, extrapolated: false }
+        PairFact {
+            image: Some(0),
+            desc,
+            fb,
+            fe,
+            inclusive: incl,
+            exclusive: excl,
+            top_level: top,
+            extrapolated: false,
+            parent: None,
+            depth: 0,
+            begin_seq: 0,
+        }
     }
 
     /// t = 10 * f exactly (brackets at f = 0 and f = 100 with zero width): every projection is a point.

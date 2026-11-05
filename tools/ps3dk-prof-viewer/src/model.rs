@@ -24,6 +24,8 @@ pub struct Document {
     pub foreign: crate::foreign::ForeignSlot,
     /// The Hot paths page, computed ONCE here (reader budgets bound it); None for a MALFORMED document.
     pub hot: Option<crate::hotpaths::HotView>,
+    /// The Hot paths page's SPU/RSX lanes (F3b): a one-entry cache keyed by W32, filled on first need.
+    pub foreign_hot: crate::foreign_hot::ForeignHotSlot,
 }
 
 /// What the Overview's EXTENSION SOURCES section shows.
@@ -122,6 +124,7 @@ impl Document {
             frames,
             foreign: crate::foreign::ForeignSlot::default(),
             hot,
+            foreign_hot: crate::foreign_hot::ForeignHotSlot::default(),
         }
     }
 

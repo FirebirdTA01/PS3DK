@@ -8,6 +8,7 @@
 
 pub mod app;
 pub mod foreign;
+pub mod foreign_hot;
 pub mod frames;
 pub mod frames_ui;
 pub mod hotpaths;
