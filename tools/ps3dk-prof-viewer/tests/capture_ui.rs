@@ -360,8 +360,10 @@ mod live_mock {
         port
     }
 
-    fn capture_bytes() -> Vec<u8> {
-        let p = write_capture("live-src");
+    /// Each test writes its own source file: the live tests run concurrently in one process, and a shared path
+    /// let one read the other's half-written capture (a truncated capture has no measured frame).
+    fn capture_bytes(name: &str) -> Vec<u8> {
+        let p = write_capture(name);
         std::fs::read(p).unwrap()
     }
 
@@ -394,9 +396,12 @@ mod live_mock {
     fn a_snapshot_taken_after_the_session_ended_is_bookmarked_at_once() {
         let d = out_dir("after");
         let mut app = App::new(None);
-        connect(&mut app, agent(capture_bytes(), Some(Duration::from_millis(50))), &d);
+        connect(&mut app, agent(capture_bytes("live-src-after"), Some(Duration::from_millis(50))), &d);
         poll_until(&mut app, "the outcome", |a| a.live.as_ref().is_some_and(|l| l.client.finished()));
-        app.poll();
+        // the app handles the outcome (binding the session to its saved file) on a later poll, under load
+        poll_until(&mut app, "the session homed at its saved file", |a| {
+            matches!(a.captures.home, Home::File(_)) && a.capture_blocked().is_none()
+        });
         assert!(frames_files(&d).is_empty(), "no snapshot yet, no bookmark file");
         app.capture_frame();
         assert!(app.shown.is_some(), "{:?}", app.captures.message);
@@ -410,7 +415,7 @@ mod live_mock {
     fn replacing_an_unfinished_session_keeps_its_snapshots_until_its_file_is_published() {
         let d = out_dir("retire");
         let mut app = App::new(None);
-        connect(&mut app, agent(capture_bytes(), None), &d);
+        connect(&mut app, agent(capture_bytes("live-src-retire"), None), &d);
         poll_until(&mut app, "a snapshot with a measured frame", |a| a.capture_blocked().is_none());
         app.capture_frame();
         assert_eq!(app.captures.list.len(), 1, "{:?}", app.captures.message);

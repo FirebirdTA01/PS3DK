@@ -31,6 +31,8 @@ pub enum Page {
     Frames,
     Zones,
     HotPaths,
+    /// RSX frame captures found in the data.
+    RsxFrames,
     /// One frame snapshot (`App::shown`).
     Snapshot,
 }
@@ -65,6 +67,8 @@ pub struct App {
     pub frames: frames_ui::FramesState,
     /// The Hot paths page selection.
     pub hot: crate::hotpaths_ui::HotState,
+    /// The RSX frames page selection.
+    pub rsx: crate::rsx_ui::RsxState,
     pub live: Option<Live>,
     connect: Option<ConnectForm>,
     last_host: String,
@@ -153,6 +157,7 @@ impl App {
             timeline: None,
             frames: frames_ui::FramesState::default(),
             hot: crate::hotpaths_ui::HotState::default(),
+            rsx: crate::rsx_ui::RsxState::default(),
             live: None,
             connect: None,
             last_host: String::new(),
@@ -212,6 +217,8 @@ impl App {
         // Hot paths: a fresh capture resets the lane and row; a newer snapshot keeps them (the page revalidates).
         if fresh {
             self.hot = crate::hotpaths_ui::HotState::default();
+            // RSX frames: a newer snapshot keeps the selected cap (the page shows nothing if it is gone).
+            self.rsx = crate::rsx_ui::RsxState::default();
         }
         self.doc = Some(doc);
     }
@@ -240,6 +247,7 @@ impl App {
         self.timeline = None;
         self.frames.reset(None);
         self.hot = crate::hotpaths_ui::HotState::default();
+        self.rsx = crate::rsx_ui::RsxState::default();
         self.zone_rows.clear();
         self.selected_zone = None;
         self.error = None;
@@ -519,6 +527,7 @@ impl eframe::App for App {
         }
 
         let has_analysis = self.doc.as_ref().and_then(|d| d.analysis()).is_some();
+        let rsx_count = self.rsx_count();
         let mut side_act = None;
         let shown_id = self.shown.as_ref().filter(|_| self.page == Page::Snapshot).map(|s| s.id);
         let caps = &self.captures;
@@ -549,6 +558,11 @@ impl eframe::App for App {
                     }
                     if ui::nav_item(side, self.page == Page::HotPaths, "🔥", "Hot paths", None).clicked() {
                         self.page = Page::HotPaths;
+                    }
+                    if let Some(n) = rsx_count {
+                        if ui::nav_item(side, self.page == Page::RsxFrames, "🖼", crate::rsx_ui::TITLE, Some(n)).clicked() {
+                            self.page = Page::RsxFrames;
+                        }
                     }
                 }
                 side_act = capture_ui::sidebar(side, caps, shown_id, &mut Vec::new());
@@ -617,6 +631,7 @@ impl eframe::App for App {
         let frames = &mut self.frames;
         let timeline = &mut self.timeline;
         let hot = &mut self.hot;
+        let rsx = &mut self.rsx;
         let mut nav: Option<(u32, u64)> = None;
         ui::page(ctx, |p| {
             match &self.doc {
@@ -635,7 +650,9 @@ impl eframe::App for App {
                     ui::field_message(p, ui::Tone::Danger, diagnosis);
                 }
                 DocState::Analysed(a) => match page {
-                    Page::Overview | Page::Timeline | Page::Snapshot => draw_overview(p, a, &d.ext),
+                    Page::Overview | Page::Timeline | Page::Snapshot => {
+                        draw_overview(p, a, &d.ext, &d.rsx.get(a))
+                    }
                     Page::Frames => match &d.frames {
                         Some(ix) => {
                             frames_ui::draw(p, a, ix, frames, timeline.as_mut(), Some(&d.foreign));
@@ -647,6 +664,9 @@ impl eframe::App for App {
                         Some(hv) => nav = crate::hotpaths_ui::draw(p, hv, hot, Some((a, &d.foreign_hot))),
                         None => ui::field_message(p, ui::Tone::Neutral, "No hot paths for this document."),
                     },
+                    Page::RsxFrames => {
+                        crate::rsx_ui::page(p, a, &d.rsx.get(a), rsx, &mut crate::rsx_ui::Drawn::default())
+                    }
                 },
             },
         }
@@ -662,6 +682,14 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// The RSX frames sidebar count (captures found, analysed or not), or None when the page is not offered (no
+    /// analysis, or no GPU source).  Builds the Document's RSX view on first need.
+    pub fn rsx_count(&self) -> Option<usize> {
+        let d = self.doc.as_ref()?;
+        let v = d.rsx.get(d.analysis()?);
+        v.has_gpu.then(|| v.caps.captures.len() + v.caps.not_analysed.len() + v.caps.not_analysed_omitted as usize)
+    }
+
     fn connect_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut form) = self.connect.take() else {
             return;
@@ -767,7 +795,7 @@ fn kv_grid(p: &mut egui::Ui, id: &str, rows: &[(String, String)]) {
         });
 }
 
-fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis, ext: &ExtView) {
+fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis, ext: &ExtView, rsx: &crate::rsx::RsxView) {
     let o = overview(a);
     ui::page_header(
         p,
@@ -823,6 +851,12 @@ fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis, ext: &ExtView) {
                 }
             });
         draw_ext_sources(p, ext);
+        if let Some(line) = rsx.overview_line() {
+            p.add_space(ui::SPACE_LG);
+            ui::section_label(p, "RSX FRAME CAPTURES");
+            let tone = if rsx.caps.anomaly_count() > 0 { ui::Tone::Danger } else { ui::Tone::Neutral };
+            ui::field_message(p, tone, &format!("{line} (see the RSX frames page)"));
+        }
         p.add_space(ui::SPACE_LG);
         ui::section_label(p, "TRAILER");
         if o.trailer.is_empty() {

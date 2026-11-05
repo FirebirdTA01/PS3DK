@@ -21,6 +21,7 @@ pub mod model;
 pub mod paths;
 pub mod reader;
 pub mod report;
+pub mod rsx_capture;
 
 pub use analysis::{
     compare, compare_with, load, load_prefix, AbResult, AbRow, Analysis, Attribution, CompareOptions,

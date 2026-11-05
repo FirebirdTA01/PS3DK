@@ -1,0 +1,145 @@
+# ps3dk.rsxcap.v1 marker, draw-descriptor and live ACK contract (Capture RSX frame, B1).  FROZEN.  The reader
+# (ps3dk-prof src/rsx_capture.rs) is tested against these records now; the runtime marker and descriptor encoder
+# (slice S2) and the live-protocol ACK encoder (slice S4) MUST be tested against these same records with the real
+# reader when they are written.  Change a record only together with the format, never to fit one implementation.
+#
+# Format: UTF-8 text, one record per line.  Blank lines and lines starting with '#' are ignored; a trailing CR is
+# ignored.  Fields are separated by exactly one space.
+#
+#   TAG <id> <marker> <expect> <tag>
+#     marker  begin | ckpt | end: the descriptor name is rsx.capture.begin / rsx.capture.ckpt / rsx.capture.end
+#     expect  ok       the tag parses and satisfies the value rules
+#             grammar  the grammar refuses the tag (an unparsable reserved tag)
+#             value    the tag is grammatical but semantically invalid: cap 0 (reserved for refusals before a
+#                      request is claimed), owner 0 in BEGIN/END (NONE is never a capture frame; frame 0 of a real
+#                      owner is valid), a checkpoint block outside 0..=62, or an END block other than
+#                      floor((hooks - 1) / 4096) (0 with zero counts when hooks = 0): an anomaly that blocks
+#                      FINALIZED
+#     tag     the rest of the line, verbatim except for three escapes: \s (a space; used where a space would be
+#             invisible, at either end), \t (a tab) and \\ (a backslash)
+#
+#   DRAW <id> <expect> <name> <tag>
+#     The runtime MUST register each draw-kind descriptor with the kind as its name and the tag
+#     "ps3dk.rsxcap.v1 kind=<kind>" (kind: draw.arrays, draw.index, draw.inline, clear, clear.zcull).
+#     name    the descriptor name (no spaces)
+#     expect  draw     a genuine draw-kind descriptor (name and tag agree exactly)
+#             fault    a draw-kind descriptor gone wrong (malformed tag, unknown kind, name/tag mismatch): a fault,
+#                      which taints a capture whose interval it falls in
+#             plain    not in the capture namespace (an ordinary app zone, even with a draw-kind name)
+#     tag     as for TAG (empty for none)
+#
+#   ACK <id> <expect> <hex> [wire=<u32> state=<u32> reason=<u32> cap=<u32>]
+#     hex     the ACK payload, two lowercase hex digits per byte (empty for a zero-length payload).  A 16-byte
+#             payload is u32 little-endian wire id, state, reason, cap; the four key=value fields restate it.
+#     expect  accepted | done | refused | abandoned   state 1 | 2 | 3 | 4
+#             bad-state                                any other state: a protocol error
+#             bad-length                               not 16 bytes: a protocol error (no fields given)
+#     Reason values are opaque here (their numbering belongs to the live-protocol slice).
+#
+# Lengths: begin-max 121 bytes, ckpt-max-width 107, end-max-width 490 (every u32 at 10 digits, frame at 20, hooks
+# and the five side counters at 262144); end-hooks-10-digits is 494 bytes (the writer's END buffer bound) and is
+# refused because hooks > 262144.
+
+# ---- canonical tags ----
+TAG begin-min begin value ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-min-valid begin ok ps3dk.rsxcap.v1 cap=1 conn=0 wire=0 dom=0 owner=1 frame=0
+TAG begin-frame-0 begin ok ps3dk.rsxcap.v1 cap=1 conn=0 wire=0 dom=0 owner=1 frame=0
+TAG begin-typical begin ok ps3dk.rsxcap.v1 cap=7 conn=3 wire=2 dom=1026 owner=1 frame=42
+TAG begin-max begin ok ps3dk.rsxcap.v1 cap=4294967295 conn=4294967295 wire=4294967295 dom=4294967295 owner=4294967295 frame=18446744073709551615
+TAG ckpt-min ckpt value ps3dk.rsxcap.v1 cap=0 block=0 ev=0 lost=0 sup=0 ref=0
+TAG ckpt-min-valid ckpt ok ps3dk.rsxcap.v1 cap=1 block=0 ev=0 lost=0 sup=0 ref=0
+TAG ckpt-typical ckpt ok ps3dk.rsxcap.v1 cap=7 block=0 ev=8192 lost=0 sup=0 ref=0
+TAG ckpt-max-valid ckpt ok ps3dk.rsxcap.v1 cap=4294967295 block=62 ev=4294967295 lost=4294967295 sup=4294967295 ref=4294967295
+TAG ckpt-max-width ckpt value ps3dk.rsxcap.v1 cap=4294967295 block=4294967295 ev=4294967295 lost=4294967295 sup=4294967295 ref=4294967295
+TAG end-min end value ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-min-valid end ok ps3dk.rsxcap.v1 cap=1 conn=0 wire=0 dom=0 owner=1 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-typical end ok ps3dk.rsxcap.v1 cap=7 conn=3 wire=2 dom=1026 owner=1 frame=42 block=1 ev=10 lost=0 sup=0 ref=0 hooks=4101 capped=0 other_ctx=2 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-max-valid end ok ps3dk.rsxcap.v1 cap=4294967295 conn=4294967295 wire=4294967295 dom=4294967295 owner=4294967295 frame=18446744073709551615 block=63 ev=4294967295 lost=4294967295 sup=4294967295 ref=4294967295 hooks=262144 capped=1 other_ctx=4294967295 other_ctx_sat=1 other_thread=4294967295 other_thread_sat=1 immediate=4294967295 immediate_sat=1 ckpt_missing=4294967295 unsafe=262144 no_space=262144 reentrant=262144 invalid=262144 mismatch=262144 counts_sat=1 hook_fault=1 coverage=librsx-draws-v1
+TAG end-max-width end value ps3dk.rsxcap.v1 cap=4294967295 conn=4294967295 wire=4294967295 dom=4294967295 owner=4294967295 frame=18446744073709551615 block=4294967295 ev=4294967295 lost=4294967295 sup=4294967295 ref=4294967295 hooks=262144 capped=1 other_ctx=4294967295 other_ctx_sat=1 other_thread=4294967295 other_thread_sat=1 immediate=4294967295 immediate_sat=1 ckpt_missing=4294967295 unsafe=262144 no_space=262144 reentrant=262144 invalid=262144 mismatch=262144 counts_sat=1 hook_fault=1 coverage=librsx-draws-v1
+
+# ---- grammar refusals ----
+TAG begin-version-v2 begin grammar ps3dk.rsxcap.v2 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-no-version begin grammar cap=0 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-other-namespace begin grammar ps3dk.rsx.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-order begin grammar ps3dk.rsxcap.v1 conn=0 cap=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-extra-key begin grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 extra=0
+TAG begin-missing-key begin grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0
+TAG begin-leading-zero begin grammar ps3dk.rsxcap.v1 cap=01 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-zero-zero begin grammar ps3dk.rsxcap.v1 cap=00 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-plus-sign begin grammar ps3dk.rsxcap.v1 cap=+1 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-minus-sign begin grammar ps3dk.rsxcap.v1 cap=-1 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-hex begin grammar ps3dk.rsxcap.v1 cap=0x1 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-empty-value begin grammar ps3dk.rsxcap.v1 cap= conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-u32-overflow begin grammar ps3dk.rsxcap.v1 cap=4294967296 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-u64-overflow begin grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=18446744073709551616
+TAG begin-21-digits begin grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=100000000000000000000
+TAG begin-double-space begin grammar ps3dk.rsxcap.v1 cap=0  conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-trailing-space begin grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0\s
+TAG begin-leading-space begin grammar \sps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-tab begin grammar ps3dk.rsxcap.v1 cap=0\tconn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-upper-key begin grammar ps3dk.rsxcap.v1 CAP=0 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG begin-ckpt-tag begin grammar ps3dk.rsxcap.v1 cap=0 block=0 ev=0 lost=0 sup=0 ref=0
+TAG begin-empty begin grammar 
+TAG ckpt-end-tag ckpt grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG ckpt-u32-overflow ckpt grammar ps3dk.rsxcap.v1 cap=0 block=0 ev=4294967296 lost=0 sup=0 ref=0
+TAG ckpt-extra-key ckpt grammar ps3dk.rsxcap.v1 cap=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0
+TAG end-capped-2 end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=2 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-sat-2 end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=2 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-hooks-over end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=262145 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-hooks-10-digits end grammar ps3dk.rsxcap.v1 cap=4294967295 conn=4294967295 wire=4294967295 dom=4294967295 owner=4294967295 frame=18446744073709551615 block=4294967295 ev=4294967295 lost=4294967295 sup=4294967295 ref=4294967295 hooks=4294967295 capped=1 other_ctx=4294967295 other_ctx_sat=1 other_thread=4294967295 other_thread_sat=1 immediate=4294967295 immediate_sat=1 ckpt_missing=4294967295 unsafe=262144 no_space=262144 reentrant=262144 invalid=262144 mismatch=262144 counts_sat=1 hook_fault=1 coverage=librsx-draws-v1
+TAG end-unsafe-over end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=262145 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-no-space-over end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=262145 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-reentrant-over end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=262145 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-invalid-over end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=262145 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-mismatch-over end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=262145 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-counts-sat-2 end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=2 hook_fault=0 coverage=librsx-draws-v1
+TAG end-hook-fault-2 end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=2 coverage=librsx-draws-v1
+TAG end-coverage-old end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=safe-draws-v1
+TAG end-no-coverage end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0
+TAG end-order end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 no_space=0 unsafe=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-begin-tag end grammar ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=0 frame=0
+
+# ---- value rules (they parse; the reader reports an anomaly) ----
+TAG begin-cap-0 begin value ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=1 frame=5
+TAG begin-owner-none begin value ps3dk.rsxcap.v1 cap=1 conn=0 wire=0 dom=0 owner=0 frame=0
+TAG ckpt-cap-0 ckpt value ps3dk.rsxcap.v1 cap=0 block=0 ev=0 lost=0 sup=0 ref=0
+TAG end-cap-0 end value ps3dk.rsxcap.v1 cap=0 conn=0 wire=0 dom=0 owner=1 frame=5 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-owner-none end value ps3dk.rsxcap.v1 cap=1 conn=0 wire=0 dom=0 owner=0 frame=0 block=0 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG ckpt-block-63 ckpt value ps3dk.rsxcap.v1 cap=1 block=63 ev=0 lost=0 sup=0 ref=0
+TAG end-hooks0-block1 end value ps3dk.rsxcap.v1 cap=1 conn=0 wire=0 dom=0 owner=1 frame=0 block=1 ev=0 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-hooks0-counts end value ps3dk.rsxcap.v1 cap=1 conn=0 wire=0 dom=0 owner=1 frame=0 block=0 ev=2 lost=0 sup=0 ref=0 hooks=0 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+TAG end-block-wrong end value ps3dk.rsxcap.v1 cap=1 conn=0 wire=0 dom=0 owner=1 frame=0 block=0 ev=2 lost=0 sup=0 ref=0 hooks=4097 capped=0 other_ctx=0 other_ctx_sat=0 other_thread=0 other_thread_sat=0 immediate=0 immediate_sat=0 ckpt_missing=0 unsafe=0 no_space=0 reentrant=0 invalid=0 mismatch=0 counts_sat=0 hook_fault=0 coverage=librsx-draws-v1
+
+# ---- draw-kind descriptors ----
+DRAW draw-draw-arrays draw draw.arrays ps3dk.rsxcap.v1 kind=draw.arrays
+DRAW draw-draw-index draw draw.index ps3dk.rsxcap.v1 kind=draw.index
+DRAW draw-draw-inline draw draw.inline ps3dk.rsxcap.v1 kind=draw.inline
+DRAW draw-clear draw clear ps3dk.rsxcap.v1 kind=clear
+DRAW draw-clear-zcull draw clear.zcull ps3dk.rsxcap.v1 kind=clear.zcull
+DRAW draw-unknown-kind fault draw.points ps3dk.rsxcap.v1 kind=draw.points
+DRAW draw-unknown-kind-known-name fault clear ps3dk.rsxcap.v1 kind=clear.color
+DRAW draw-mismatch fault draw.index ps3dk.rsxcap.v1 kind=draw.arrays
+DRAW draw-version-v2 fault clear ps3dk.rsxcap.v2 kind=clear
+DRAW draw-extra-field fault clear ps3dk.rsxcap.v1 kind=clear extra=1
+DRAW draw-double-space fault clear ps3dk.rsxcap.v1  kind=clear
+DRAW draw-trailing-space fault clear ps3dk.rsxcap.v1 kind=clear\s
+DRAW draw-empty-kind fault clear ps3dk.rsxcap.v1 kind=
+DRAW draw-marker-tag-on-draw-name fault draw.arrays ps3dk.rsxcap.v1 cap=1 conn=0 wire=0 dom=0 owner=0 frame=0
+DRAW draw-kind-under-other-name fault my.zone ps3dk.rsxcap.v1 kind=clear
+DRAW draw-untagged-clear plain clear 
+DRAW draw-untagged-arrays plain draw.arrays 
+DRAW draw-other-tag plain draw.arrays app.tag
+
+# ---- ACK records ----
+ACK ack-accepted accepted 01000000010000000000000007000000 wire=1 state=1 reason=0 cap=7
+ACK ack-done done 01000000020000000000000007000000 wire=1 state=2 reason=0 cap=7
+ACK ack-refused-before-claim refused 02000000030000000100000000000000 wire=2 state=3 reason=1 cap=0
+ACK ack-refused-after-claim refused 03000000030000000500000009000000 wire=3 state=3 reason=5 cap=9
+ACK ack-abandoned abandoned 01000000040000000200000007000000 wire=1 state=4 reason=2 cap=7
+ACK ack-state-0 bad-state 01000000000000000000000007000000 wire=1 state=0 reason=0 cap=7
+ACK ack-state-5 bad-state 01000000050000000000000007000000 wire=1 state=5 reason=0 cap=7
+ACK ack-wire-max accepted ffffffff0100000000000000ffffffff wire=4294967295 state=1 reason=0 cap=4294967295
+ACK ack-len-0 bad-length 
+ACK ack-len-12 bad-length 010000000100000000000000
+ACK ack-len-15 bad-length 010000000100000000000000070000
+ACK ack-len-17 bad-length 0100000001000000000000000700000000

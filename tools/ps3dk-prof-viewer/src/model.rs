@@ -30,6 +30,8 @@ pub struct Document {
     pub foreign_hot: crate::foreign_hot::ForeignHotSlot,
     /// The Timeline's SPU/RSX rows: a one-entry cache keyed by W32, filled on first need.
     pub foreign_tl: crate::timeline_foreign::ForeignTimelineSlot,
+    /// The RSX frames page (captures found in the data): built once, on first need.
+    pub rsx: crate::rsx::RsxSlot,
 }
 
 /// What the Overview's EXTENSION SOURCES section shows.
@@ -131,6 +133,7 @@ impl Document {
             hot,
             foreign_hot: crate::foreign_hot::ForeignHotSlot::default(),
             foreign_tl: crate::timeline_foreign::ForeignTimelineSlot::default(),
+            rsx: crate::rsx::RsxSlot::default(),
         }
     }
 

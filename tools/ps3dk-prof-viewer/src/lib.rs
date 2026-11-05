@@ -19,6 +19,8 @@ pub mod hotpaths_ui;
 pub mod live;
 pub mod live_client;
 pub mod model;
+pub mod rsx;
+pub mod rsx_ui;
 pub mod sha256;
 pub mod timeline;
 pub mod timeline_foreign;
