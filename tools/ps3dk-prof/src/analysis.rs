@@ -169,6 +169,20 @@ pub struct Analysis {
     pub frames: Vec<FrameElapsed>,
     pub work: Vec<Work>,
     pub zones: Vec<ZoneStats>,
+    /// Set only by [`load_prefix`]: the capture is an accepted prefix (ended early) and lanes were judged up to the
+    /// cut.  `verdict` and `capture.incomplete` stay the strict transport facts.
+    pub prefix: Option<PrefixAcceptance>,
+}
+
+/// Why a byte string was accepted as a prefix capture (see [`load_prefix`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrefixAcceptance {
+    /// Bytes analysed: the end of the last whole chunk.
+    pub cut: usize,
+    /// Bytes of a torn final chunk dropped after `cut` (0 when the input ended on a chunk boundary).
+    pub torn_dropped: usize,
+    /// Whole chunks kept, the HEADER and CLOCKS chunks included.
+    pub chunks: u64,
 }
 
 impl Analysis {
@@ -200,13 +214,80 @@ pub fn load(bytes: &[u8]) -> Outcome {
     }
 }
 
-fn lane_view(inc: u32, lane: &Lane, complete: bool) -> LaneView {
+/// The end of the last whole chunk of `bytes` and what lies after it, by a checked linear walk of the chunk
+/// lengths only (contents are judged by the reader on the cut bytes).  `Err` when what follows the last whole
+/// chunk is not a genuinely torn final chunk.
+fn prefix_cut(bytes: &[u8]) -> Result<(usize, u64, u64), String> {
+    if bytes.len() < FILE_HEADER_LEN {
+        return Err(format!("{} bytes: no whole file header", bytes.len()));
+    }
+    let mut pos = FILE_HEADER_LEN;
+    let mut chunks: u64 = 0;
+    let mut data: u64 = 0;
+    while pos < bytes.len() {
+        let rem = bytes.len() - pos;
+        // The length is judged as soon as its 4 bytes are present, even in a torn chunk header: a length over the
+        // cap is never a torn tail.
+        if rem >= 8 {
+            let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().expect("4 bytes"));
+            if len > MAX_CHUNK_LEN {
+                return Err(format!("chunk {chunks}: len {len} over the cap"));
+            }
+        }
+        if rem < CHUNK_HEADER_LEN {
+            break; // torn inside a chunk header
+        }
+        let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().expect("4 bytes"));
+        let total = CHUNK_HEADER_LEN + len as usize + CHUNK_CRC_LEN;
+        if rem < total {
+            break; // torn inside a payload or its CRC
+        }
+        let ty = u32::from_le_bytes(bytes[pos..pos + 4].try_into().expect("4 bytes"));
+        if matches!(ty, CHUNK_RECORDS | crate::ext::CHUNK_SPU_EVENTS | crate::ext::CHUNK_GPU_EVENTS) {
+            data += 1;
+        }
+        pos += total;
+        chunks += 1;
+    }
+    Ok((pos, chunks, data))
+}
+
+/// A capture that ended early (a live session the user disconnected, a dropped link, a copy cut short), analysed
+/// up to its last whole chunk.  Accepted only when ALL hold, checked here:
+/// - at least one whole event chunk (RECORDS, SPU or GPU events): metadata alone is not a capture;
+/// - after the last whole chunk there is at most a torn final chunk (a whole chunk is never dropped);
+/// - the strict [`load`] of the cut bytes is `Analysed` and its only reasons are `NoTrailer` (required) and
+///   `MissingFinalEntry`.
+///
+/// Lanes are then judged up to the cut: only the two absence reasons ("capture not TRANSPORT COMPLETE", "no final
+/// entry") are relaxed; GAP, CLOCK_ANOMALY and every observed final-entry loss stay.  `verdict` stays the strict
+/// INCOMPLETE verdict; acceptance is in [`Analysis::prefix`].  Open spans stay censored and the last frame's end
+/// stays unknown: nothing is closed at the cut.
+pub fn load_prefix(bytes: &[u8]) -> Result<Analysis, String> {
+    let (cut, chunks, data) = prefix_cut(bytes)?;
+    if data == 0 {
+        return Err(format!("{chunks} whole chunk(s), none with events"));
+    }
+    let cap = reader::read(&bytes[..cut]).map_err(|m| m.to_string())?;
+    if !cap.incomplete.contains(&Incomplete::NoTrailer) {
+        return Err("the capture has a TRAILER: not a prefix".to_string());
+    }
+    if let Some(r) = cap.incomplete.iter().find(|r| !matches!(r, Incomplete::NoTrailer | Incomplete::MissingFinalEntry(_))) {
+        return Err(format!("not a clean prefix: {r}"));
+    }
+    let mut a = analyze_mode(cap, true).map_err(|m| m.to_string())?;
+    a.prefix = Some(PrefixAcceptance { cut, torn_dropped: bytes.len() - cut, chunks });
+    Ok(a)
+}
+
+fn lane_view(inc: u32, lane: &Lane, complete: bool, prefix: bool) -> LaneView {
     let mut reasons = Vec::new();
-    if !complete {
+    if !complete && !prefix {
         reasons.push("capture not TRANSPORT COMPLETE".to_string());
     }
     let mut loss = lane.gap_count > 0;
     match &lane.final_entry {
+        None if prefix => {}
         None => reasons.push("no final entry".to_string()),
         Some(e) if e.state == STATE_NOT_QUIESCED => {
             loss = true;
@@ -257,10 +338,15 @@ fn resolve(cap: &Capture, owner: u32, frame: u64) -> Result<TokenOutcome, Malfor
 }
 
 pub fn analyze(cap: Capture) -> Result<Analysis, Malformed> {
+    analyze_mode(cap, false)
+}
+
+/// `prefix` is reachable only through [`load_prefix`], which checks acceptance first.
+fn analyze_mode(cap: Capture, prefix: bool) -> Result<Analysis, Malformed> {
     let complete = cap.incomplete.is_empty();
     let verdict = if complete { Verdict::Complete } else { Verdict::Incomplete(cap.incomplete.clone()) };
     let lanes: BTreeMap<u32, LaneView> =
-        cap.lanes.iter().map(|(&inc, lane)| (inc, lane_view(inc, lane, complete))).collect();
+        cap.lanes.iter().map(|(&inc, lane)| (inc, lane_view(inc, lane, complete, prefix))).collect();
     let valid = |inc: u32| lanes.get(&inc).is_some_and(|l| l.valid);
 
     // Tokens and attribution.
@@ -372,7 +458,7 @@ pub fn analyze(cap: Capture) -> Result<Analysis, Malformed> {
         .collect();
 
     let zones = zone_stats(&cap, &valid);
-    Ok(Analysis { capture: cap, verdict, lanes, spans, tokens, frames, work, zones })
+    Ok(Analysis { capture: cap, verdict, lanes, spans, tokens, frames, work, zones, prefix: None })
 }
 
 fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
