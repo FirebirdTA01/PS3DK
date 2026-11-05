@@ -15,5 +15,19 @@ int pool_submit(uint32_t sequence);
 int pool_ready(uint32_t sequence);
 const volatile work_slot *pool_slot(unsigned lane);
 int pool_close(void);
+#if SAMPLE_PROF_EXT
+/* SAMPLE_PROF_EXT: the group is created first (its worker count sizes the lanes), started with the lane EAs. */
+int pool_create(void);
+int pool_start_ext(void);
+/* Jobs and keep-alive resets go through the epoch rule (prof_ext.h); completions report the SPU status. */
+int pool_submit_ext(uint32_t sequence);
+void pool_done_ext(void);
+int pool_keepalive(uint32_t sequence);
+/* Exit words, the final markers (bounded), then terminate + join.  *join_ok: the workers are stopped. */
+int pool_close_ext(int *join_ok);
+/* The caller's own SPE deadline failed: eligibility is cleared. */
+void pool_failed_ext(const char *why);
+int pool_w32_eligible(const char **why);
+#endif
 #endif
 #endif

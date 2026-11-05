@@ -16,6 +16,15 @@
 #include "light_fpo.h"
 #include "heavy_fpo.h"
 #include <ps3dk/prof.h>
+#if SAMPLE_PROF_EXT
+#include "prof_ext_rt.h"
+#include "prof_gpu.h"
+/* An RSX zone around a block of commands; a failed begin leaves the zone INERT (ended never), logged once.  Used
+ * only inside #if SAMPLE_PROF_EXT blocks, so an OFF build preprocesses to today's tokens. */
+static int gpu_zone_failed;
+#define SCENE_GPU_BEGIN(z,name) do{uint32_t g_=pe_rt_gpu();if(g_ && PS3DK_PROF_GPU_ZONE_BEGIN(g_,ctx,name,z) && !gpu_zone_failed){gpu_zone_failed=1;puts("PROF_EXT gpu zone begin failed");}}while(0)
+#define SCENE_GPU_END(z) do{uint32_t g_=pe_rt_gpu();if(g_ && (z).gpu && PS3DK_PROF_GPU_ZONE_END(g_,ctx,z) && !gpu_zone_failed){gpu_zone_failed=1;puts("PROF_EXT gpu zone end failed");}}while(0)
+#endif
 static uint16_t width,height;
 static uint32_t pitch,depth,colors[2],vertex_offset,fragment_offset[2];
 static unsigned current,submitted;
@@ -106,6 +115,10 @@ int scene_render(int heavy,const char *phase,unsigned workers,uint64_t compute_u
     float offset[4]={width/2.0f,height/2.0f,0.5f,0};
     {
         PS3DK_PROF_ZONE("render.submit");
+#if SAMPLE_PROF_EXT
+        ps3dk_prof_gpu_zone setup_zone=PS3DK_PROF_GPU_ZONE_INIT,draw_zone=PS3DK_PROF_GPU_ZONE_INIT;
+        SCENE_GPU_BEGIN(setup_zone,"rsx.setup");
+#endif
         cellGcmSetSurface(ctx,&sf);cellGcmSetViewport(ctx,0,0,width,height,0,1,scale,offset);
         cellGcmSetScissor(ctx,0,0,width,height);cellGcmSetDepthTestEnable(ctx,GCM_FALSE);
         cellGcmSetCullFaceEnable(ctx,GCM_FALSE);cellGcmSetBlendEnable(ctx,GCM_FALSE);
@@ -115,8 +128,17 @@ int scene_render(int heavy,const char *phase,unsigned workers,uint64_t compute_u
         cellGcmSetVertexProgramParameter(ctx,motion,shift);
         cellGcmSetVertexDataArray(ctx,position_index,0,3*sizeof(float),3,GCM_VERTEX_DATA_TYPE_F32,GCM_LOCATION_RSX,vertex_offset);
         cellGcmSetFragmentProgram(ctx,fragment[heavy!=0],fragment_offset[heavy!=0]);
+#if SAMPLE_PROF_EXT
+        SCENE_GPU_END(setup_zone);
+#endif
         cellGcmSetTimeStamp(ctx,0);
+#if SAMPLE_PROF_EXT
+        SCENE_GPU_BEGIN(draw_zone,"rsx.draw");
+#endif
         for(unsigned i=0;i<(heavy?8u:1u);++i)cellGcmSetDrawArrays(ctx,GCM_TYPE_TRIANGLES,0,3);
+#if SAMPLE_PROF_EXT
+        SCENE_GPU_END(draw_zone);
+#endif
         cellGcmSetTimeStamp(ctx,1);
         cellGcmSetWriteBackEndLabel(ctx,240,submitted+1);
         cellDbgFontPrintf(0.04f,0.05f,1.2f,0xffffffff,"PS3DK: PPU / SPE / RSX WORKLOAD");

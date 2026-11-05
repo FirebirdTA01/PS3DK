@@ -131,6 +131,18 @@ target live-link validation remains pending. `SAMPLE_PROF_SDK` selects a candida
 `ppu/include/ps3dk/prof.h` and `ppu/lib[/lp64]/libps3dkprof.a`) ahead of the
 SDK's.
 
+## SPU lanes and RSX domains (SAMPLE_PROF_EXT)
+
+`-DSAMPLE_PROF_EXT=ON` (ILP32 only, needs `SAMPLE_PROFILING`) records each SPU worker's jobs as `spu.work` zones
+on its own SPU lane and the scene's command blocks as `rsx.setup` / `rsx.draw` zones on an RSX domain, so the
+viewer's Timeline shows PPU, SPU and RSX rows.  It links the uninstalled extension archive
+(`make -C sdk/libps3dkprof ext-ilp32`, `SAMPLE_EXT_ARCHIVE`); with `SAMPLE_LIVE` it also needs the live members
+compiled with the same flags (`SAMPLE_EXT_LIVE_ARCHIVE`).  The SPU decrementer is reset at least every 20 s per
+worker (idle workers get reset-only commands), so every SPU epoch spans under 22 s, well inside the 32-bit wrap
+(53.8 s): the run prints `w32_eligible=1` when every check held, and only then is the viewer's W32 premise
+justified for that capture.  The GPU domain uses reports 32..63 and label 241; the application fence uses label
+242.  Status: host-tested only; target build and hardware validation are pending.
+
 ## Tests
 
 ```sh
@@ -138,6 +150,13 @@ cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined \
   samples/profiling/heterogeneous-workload/host-tests/test.c -o workload-test
 ./workload-test
 python3 samples/profiling/heterogeneous-workload/host-tests/verify.py capture.csv --workers 6
+```
+
+The SPU-lane/RSX-domain lifecycle (`SAMPLE_PROF_EXT`) has its own host test against a mocked profiler:
+
+```sh
+cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined   samples/profiling/heterogeneous-workload/host-tests/test_prof_ext.c   samples/profiling/heterogeneous-workload/source/prof_ext.c -o prof-ext-test
+./prof-ext-test
 ```
 
 Use the **observed** worker count, not an assumed six. The verifier requires all
