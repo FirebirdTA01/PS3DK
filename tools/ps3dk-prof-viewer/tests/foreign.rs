@@ -610,3 +610,540 @@ fn hot_paths_foreign_partial_root_is_labelled() {
     assert!(spu.rows[0].partial);
     assert!(spu.rows[0].text.starts_with("PARTIAL(missing 1) > image 0 desc 1 spuzone1"), "{}", spu.rows[0].text);
 }
+
+// ---- Timeline SPU/RSX rows (director 2026-11-04 19:32) ----------------------------------------------------------
+
+mod tl_rows {
+    use super::*;
+    use ps3dk_prof::clockmap::{End, Projection};
+    use ps3dk_prof::foreign_timeline::{FtBar, FtCounts, FtEpoch, FtEpochRow, FtSource, FtSourceState};
+    use ps3dk_prof_viewer::model::Document;
+    use ps3dk_prof_viewer::timeline::{timeline, View};
+    use ps3dk_prof_viewer::timeline_foreign::{build_track, hit, layout, FDrawKind, FTrack, QueryCaps, WIDE_TILES};
+    use ps3dk_prof_viewer::timeline_ui::TimelineState;
+    use std::path::PathBuf;
+
+    fn at(n: i64, d: i64, open: bool) -> End {
+        End::At { value: rat(n, d), open }
+    }
+
+    fn fbar(b: (End, End), e: (End, End), depth: u8, extrapolated: bool) -> FtBar {
+        FtBar {
+            epoch: 1,
+            image: Some(0),
+            desc: 0,
+            depth,
+            begin: Projection { lo: b.0, hi: b.1, interpolated: true },
+            end: Projection { lo: e.0, hi: e.1, interpolated: true },
+            inclusive: 5,
+            exclusive: None,
+            extrapolated,
+        }
+    }
+
+    fn src(bars: Vec<FtBar>) -> FtSource {
+        FtSource {
+            source: SourceKey::Lane(LANE),
+            epochs: vec![FtEpochRow { epoch: 1, state: FtEpoch::Placed { bars: bars.len() as u64, too_deep: 0 }, pairs: Some(bars.len() as u64) }],
+            counts: FtCounts { placed: bars.len() as u64, open: Some(0), loss_records: Some(0), ..FtCounts::default() },
+            state: FtSourceState::Bars(bars),
+        }
+    }
+
+    fn view(t0: f64, dt: f64) -> View {
+        View { t0, dt }
+    }
+
+    fn one(t: &FTrack, v: &View) -> ps3dk_prof_viewer::timeline_foreign::FDraw {
+        let l = layout(t, v, 100.0, QueryCaps::default(), true);
+        assert_eq!(l.draws.len(), 1, "{l:?}");
+        l.draws[0]
+    }
+
+    #[test]
+    fn core_rounds_inward_and_whiskers_outward() {
+        // begin [10.2, 10.4], end [20.6, 20.8] ticks; 1 px per tick
+        let t = build_track(&src(vec![fbar((at(51, 5, false), at(52, 5, false)), (at(103, 5, false), at(104, 5, false)), 0, false)]), 0);
+        let d = one(&t, &view(0.0, 100.0));
+        assert_eq!((d.w0, d.w1), (10.0, 21.0));
+        assert_eq!(d.core, Some((11.0, 20.0)));
+        assert!(!d.arrow_left && !d.arrow_right);
+    }
+
+    #[test]
+    fn touching_bounds_and_sub_pixel_cores_draw_no_core() {
+        let touch = build_track(&src(vec![fbar((at(10, 1, false), at(20, 1, false)), (at(20, 1, false), at(30, 1, false)), 0, false)]), 0);
+        assert_eq!(one(&touch, &view(0.0, 100.0)).core, None, "exact touch: no core");
+        // a real core of 0.5 tick: inward rounding leaves under a pixel -> none
+        let thin = build_track(&src(vec![fbar((at(10, 1, false), at(102, 10, false)), (at(107, 10, false), at(30, 1, false)), 0, false)]), 0);
+        assert!(thin.bars[0].core, "exactly a core");
+        assert_eq!(one(&thin, &view(0.0, 100.0)).core, None, "under a pixel after inward rounding");
+        // point bounds: no fabricated width
+        let point = build_track(&src(vec![fbar((at(10, 1, false), at(10, 1, false)), (at(10, 1, false), at(10, 1, false)), 0, false)]), 0);
+        let l = layout(&point, &view(0.0, 100.0), 100.0, QueryCaps::default(), true);
+        assert_eq!(l.draws.len(), 1);
+        assert!(matches!(l.draws[0].kind, FDrawKind::Bar(0)) && l.draws[0].tick && l.draws[0].core.is_none(), "{l:?}");
+        assert_eq!(hit(&l, 0, 10.0), Some(0), "a lone point is a tick with its own hover");
+    }
+
+    #[test]
+    fn unbounded_sides_reach_the_edge_with_arrows_and_open_finite_ends_do_not() {
+        let t = build_track(&src(vec![fbar((End::NegInf, at(20, 1, false)), (at(30, 1, false), End::PosInf), 0, false)]), 0);
+        let d = one(&t, &view(0.0, 100.0));
+        assert_eq!((d.w0, d.w1, d.arrow_left, d.arrow_right), (0.0, 100.0, true, true));
+        assert_eq!(d.core, Some((20.0, 30.0)), "outer unbounded sides keep the finite core");
+        let open = build_track(&src(vec![fbar((at(10, 1, true), at(20, 1, false)), (at(30, 1, false), at(40, 1, true)), 0, false)]), 0);
+        let d = one(&open, &view(0.0, 100.0));
+        assert!(!d.arrow_left && !d.arrow_right, "open finite is finite: {d:?}");
+        assert_eq!((d.w0, d.w1), (10.0, 40.0));
+    }
+
+    #[test]
+    fn huge_absolute_ticks_with_one_tick_deltas_keep_their_geometry() {
+        let o: i64 = 1 << 62;
+        let t = build_track(&src(vec![fbar((at(o + 10, 1, false), at(o + 11, 1, false)), (at(o + 13, 1, false), at(o + 14, 1, false)), 0, false)]), o as u64);
+        let d = one(&t, &view(0.0, 100.0));
+        assert_eq!((d.w0, d.w1, d.core), (10.0, 14.0, Some((11.0, 13.0))));
+    }
+
+    #[test]
+    fn chart_range_clips_cores_and_whiskers_never_extends_them() {
+        let t = build_track(&src(vec![fbar((at(-50, 1, false), at(-40, 1, false)), (at(150, 1, false), at(160, 1, false)), 0, false)]), 0);
+        let d = one(&t, &view(0.0, 100.0));
+        assert_eq!((d.w0, d.w1, d.core), (0.0, 100.0, Some((0.0, 100.0))));
+    }
+
+    #[test]
+    fn a_bar_spanning_tiles_is_drawn_once_and_wide_bars_are_listed_once() {
+        let mut bars: Vec<FtBar> = (0..50).map(|i| fbar((at(i * 10, 1, false), at(i * 10 + 1, 1, false)), (at(i * 10 + 3, 1, false), at(i * 10 + 4, 1, false)), 0, false)).collect();
+        // spans a few tiles (under WIDE_TILES) and one spanning everything (wide)
+        bars.push(fbar((at(5, 1, false), at(6, 1, false)), (at(9, 1, false), at(9 + (WIDE_TILES as i64 / 2), 1, false)), 1, false));
+        bars.push(fbar((at(0, 1, false), at(1, 1, false)), (at(499, 1, false), at(504, 1, false)), 2, false));
+        let n = bars.len();
+        let t = build_track(&src(bars), 0);
+        let l = layout(&t, &view(0.0, 510.0), 1020.0, QueryCaps::default(), true);
+        let mut seen: Vec<usize> = l.draws.iter().filter_map(|d| match d.kind { FDrawKind::Bar(i) => Some(i), _ => None }).collect();
+        let dense: usize = l.draws.iter().map(|d| match d.kind { FDrawKind::Dense { count } => count, _ => 0 }).sum();
+        seen.sort();
+        let before = seen.len();
+        seen.dedup();
+        assert_eq!(before, seen.len(), "each bar drawn once");
+        assert_eq!(seen.len() + dense, n, "every bar in view drawn or merged: {l:?}");
+        assert_eq!(l.omitted, None);
+    }
+
+    #[test]
+    fn paint_and_inspection_caps_say_what_was_omitted() {
+        let bars: Vec<FtBar> = (0..20).map(|i| fbar((at(i * 5, 1, false), at(i * 5 + 1, 1, false)), (at(i * 5 + 3, 1, false), at(i * 5 + 4, 1, false)), 0, false)).collect();
+        let t = build_track(&src(bars), 0);
+        let v = view(0.0, 100.0);
+        let paint = layout(&t, &v, 1000.0, QueryCaps { inspect_cap: 1000, paint_cap: 5 }, true);
+        assert_eq!(paint.omitted, Some(Some(15)), "exact: every candidate was inspected");
+        assert_eq!(paint.draws.len(), 5);
+        let insp = layout(&t, &v, 1000.0, QueryCaps { inspect_cap: 3, paint_cap: 1000 }, true);
+        assert_eq!(insp.omitted, Some(None), "inspection stopped: count unknown");
+        assert_eq!(insp.inspected, 3);
+    }
+
+    #[test]
+    fn an_all_wide_track_is_bounded_by_the_inspection_cap() {
+        let bars: Vec<FtBar> = (0..30).map(|i| fbar((End::NegInf, at(i, 1, false)), (at(i + 2, 1, false), End::PosInf), 0, false)).collect();
+        let t = build_track(&src(bars), 0);
+        let full = layout(&t, &view(0.0, 100.0), 100.0, QueryCaps::default(), true);
+        assert_eq!(full.draws.len(), 30);
+        let capped = layout(&t, &view(0.0, 100.0), 100.0, QueryCaps { inspect_cap: 7, paint_cap: 1000 }, true);
+        assert_eq!((capped.inspected, capped.draws.len(), capped.omitted), (7, 7, Some(None)));
+    }
+
+    #[test]
+    fn hidden_extrapolated_bars_are_not_drawn_and_not_omitted() {
+        let t = build_track(&src(vec![fbar((at(10, 1, false), at(11, 1, false)), (at(20, 1, false), at(21, 1, false)), 0, true)]), 0);
+        assert!(one(&t, &view(0.0, 100.0)).extrapolated);
+        let hid = layout(&t, &view(0.0, 100.0), 100.0, QueryCaps::default(), false);
+        assert!(hid.draws.is_empty() && hid.omitted.is_none());
+    }
+
+    #[test]
+    fn hover_identity_under_overlap_is_the_last_drawn_bar() {
+        let t = build_track(&src(vec![
+            fbar((at(10, 1, false), at(11, 1, false)), (at(50, 1, false), at(51, 1, false)), 0, false),
+            fbar((at(20, 1, false), at(21, 1, false)), (at(30, 1, false), at(31, 1, false)), 0, false),
+            fbar((at(20, 1, false), at(21, 1, false)), (at(30, 1, false), at(31, 1, false)), 1, false),
+        ]), 0);
+        let l = layout(&t, &view(0.0, 100.0), 100.0, QueryCaps::default(), true);
+        assert_eq!(hit(&l, 0, 25.0), Some(1), "the later bar at depth 0");
+        assert_eq!(hit(&l, 0, 45.0), Some(0));
+        assert_eq!(hit(&l, 1, 25.0), Some(2), "depth decides the row");
+        assert_eq!(hit(&l, 0, 25.0), hit(&l, 0, 25.0), "stable");
+    }
+
+    #[test]
+    fn rows_are_cached_per_document_and_w32_and_spu_comes_before_rsx() {
+        let bytes = f2_bytes(cm_ext());
+        let doc = Document::from_bytes(PathBuf::from("t.prof"), &bytes);
+        let a = doc.analysis().unwrap();
+        let tl = timeline(a);
+        let r64 = doc.foreign_tl.view(a, &tl, false);
+        let again = doc.foreign_tl.view(a, &tl, false);
+        assert!(std::sync::Arc::ptr_eq(&r64, &again));
+        let w32 = doc.foreign_tl.view(a, &tl, true);
+        assert_eq!(doc.foreign_tl.builds.load(std::sync::atomic::Ordering::Relaxed), 2);
+        let labels: Vec<&str> = w32.tracks.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels, vec!["SPU lane 10", "RSX domain 3"]);
+        // R64: the SPU lane is an ambiguous lift -> coverage text, no bars; RSX unaffected
+        let spu = &r64.tracks[0];
+        assert!(spu.bars.is_empty() && spu.coverage.iter().any(|c| c.contains("ambiguous")), "{spu:?}");
+        assert!(!r64.tracks[1].bars.is_empty());
+        assert!(!w32.tracks[0].bars.is_empty());
+        assert!(r64.caption.contains("R64") && w32.caption.contains("W32"));
+        assert!(spu.header.contains("1 epoch(s) without an inventory: their events are unknown"), "{}", spu.header);
+        let rsx = &r64.tracks[1];
+        assert!(rsx.header.contains("events in 1 epoch(s) with an inventory") && rsx.header.contains("(pairs unknown)"), "{}", rsx.header);
+    }
+
+    #[test]
+    fn a_w32_toggle_never_draws_old_premise_rows_beside_the_new_caption() {
+        let bytes = f2_bytes(cm_ext());
+        let doc = Document::from_bytes(PathBuf::from("t.prof"), &bytes);
+        let a = doc.analysis().unwrap();
+        let mut st = TimelineState::new(a);
+        st.sync_foreign(&doc.foreign_tl, a);
+        assert!(!st.foreign.as_ref().unwrap().w32);
+        st.w32 = true;
+        st.sync_foreign(&doc.foreign_tl, a); // what draw() does first, every frame
+        let f = st.foreign.as_ref().unwrap();
+        assert!(f.w32 && f.caption.contains("W32") && !f.tracks[0].bars.is_empty());
+    }
+
+    #[test]
+    fn a_foreign_only_capture_takes_its_axis_from_interpolated_bounds() {
+        let mut s = scenario(vec![lane(1, Vec::new())]); // declared, no records: no PPU data
+        let mut gd = desc(GPU_DESC, "gpuzone", "");
+        gd.scope = 2;
+        s.descs.push(gd);
+        let mut f = s.file();
+        let at_ = f.find(T_TRAILER);
+        for (i, c) in cm_ext().into_iter().enumerate() {
+            f.chunks.insert(at_ + i, c);
+        }
+        f.flags = 1;
+        let bytes = f.bytes();
+        let doc = Document::from_bytes(PathBuf::from("t.prof"), &bytes);
+        let a = doc.analysis().unwrap();
+        let mut st = TimelineState::new(a);
+        assert!(!st.tl.has_data);
+        st.w32 = true;
+        st.sync_foreign(&doc.foreign_tl, a);
+        let fv = st.foreign.clone().unwrap();
+        let (lo, hi) = fv.extent.expect("finite interpolated bounds exist");
+        assert_eq!((st.tl.start, st.tl.end), (lo, hi));
+        assert!(hi > lo);
+        assert_eq!(fv.origin, lo);
+        // an empty capture: no extension, no axis, no rows
+        let empty = scenario(vec![]).bytes();
+        let d2 = Document::from_bytes(PathBuf::from("e.prof"), &empty);
+        let a2 = d2.analysis().unwrap();
+        let mut st2 = TimelineState::new(a2);
+        st2.sync_foreign(&d2.foreign_tl, a2);
+        assert!(st2.foreign.as_ref().unwrap().tracks.is_empty());
+        assert_eq!((st2.tl.start, st2.tl.end), (0, 0));
+    }
+}
+
+#[test]
+fn tl_rows_sub_pixel_bars_merge_into_dense_runs_and_runs_count_against_the_paint_cap() {
+    use ps3dk_prof::clockmap::{End, Projection};
+    use ps3dk_prof::foreign_timeline::{FtBar, FtCounts, FtSource, FtSourceState};
+    use ps3dk_prof_viewer::timeline::View;
+    use ps3dk_prof_viewer::timeline_foreign::{build_track, layout, FDrawKind, QueryCaps};
+    let at = |v: i64| End::At { value: rat(v, 1), open: false };
+    let bars: Vec<FtBar> = (0..1000)
+        .map(|i| FtBar {
+            epoch: 1,
+            image: Some(0),
+            desc: 0,
+            depth: 0,
+            begin: Projection { lo: at(i * 100), hi: at(i * 100 + 1), interpolated: true },
+            end: Projection { lo: at(i * 100 + 3), hi: at(i * 100 + 4), interpolated: true },
+            inclusive: 3,
+            exclusive: Some(3),
+            extrapolated: false,
+        })
+        .collect();
+    let s = FtSource { source: SourceKey::Lane(LANE), epochs: vec![], counts: FtCounts::default(), state: FtSourceState::Bars(bars) };
+    let t = build_track(&s, 0);
+    let l = layout(&t, &View { t0: 0.0, dt: 100_000.0 }, 100.0, QueryCaps { inspect_cap: 10_000, paint_cap: 10_000 }, true);
+    let dense: usize = l.draws.iter().map(|d| match d.kind { FDrawKind::Dense { count } => count, _ => 0 }).sum();
+    assert_eq!(dense, 1000, "{l:?}");
+    assert!(l.draws.len() < 200 && l.omitted.is_none(), "{} draws, {:?}", l.draws.len(), l.omitted);
+    // one primitive allowed: one run is drawn, every other bar is reported exactly as not drawn
+    let one = layout(&t, &View { t0: 0.0, dt: 100_000.0 }, 100.0, QueryCaps { inspect_cap: 10_000, paint_cap: 1 }, true);
+    let drawn: usize = one.draws.iter().map(|d| match d.kind { FDrawKind::Dense { count } => count, _ => 1 }).sum();
+    assert_eq!(one.draws.len(), 1);
+    let want = if drawn == 1000 { None } else { Some(Some(1000 - drawn)) };
+    assert_eq!(one.omitted, want, "{one:?}");
+}
+
+#[test]
+fn tl_rows_bars_outside_the_axis_are_counted_in_the_header() {
+    use ps3dk_prof::clockmap::{End, Projection};
+    use ps3dk_prof::foreign_timeline::{FtBar, FtCounts, FtSource, FtSourceState, ForeignTimeline};
+    use ps3dk_prof_viewer::timeline_foreign::build;
+    let at = |v: i64| End::At { value: rat(v, 1), open: false };
+    let b = |lo: i64, hi: i64| FtBar {
+        epoch: 1,
+        image: Some(0),
+        desc: 0,
+        depth: 0,
+        begin: Projection { lo: at(lo), hi: at(lo + 1), interpolated: true },
+        end: Projection { lo: at(hi - 1), hi: at(hi), interpolated: true },
+        inclusive: 1,
+        exclusive: Some(1),
+        extrapolated: false,
+    };
+    let ft = ForeignTimeline {
+        sources: vec![FtSource {
+            source: SourceKey::Lane(LANE),
+            epochs: vec![],
+            counts: FtCounts::default(),
+            state: FtSourceState::Bars(vec![b(100, 200), b(1000, 1100), b(1500, 1600), b(2100, 2200), b(2300, 2400)]),
+        }],
+        ..ForeignTimeline::default()
+    };
+    let a = analysed(&f2_bytes(cm_ext()));
+    let v = build(&a, &ft, 1000, 1000, true);
+    assert!(v.tracks[0].header.contains("outside the PPU data range: 1 before, 2 after"), "{}", v.tracks[0].header);
+    let inside = build(&a, &ft, 0, 10_000, true);
+    assert!(!inside.tracks[0].header.contains("outside"), "{}", inside.tracks[0].header);
+}
+
+mod tl_rows_r2 {
+    use super::*;
+    use ps3dk_prof::clockmap::{End, Projection};
+    use ps3dk_prof::foreign_timeline::{FtBar, FtCounts, FtSource, FtSourceState};
+    use ps3dk_prof_viewer::model::Document;
+    use ps3dk_prof_viewer::timeline::View;
+    use ps3dk_prof_viewer::timeline_foreign::{
+        build_track, build_track_with, hit, hit_dense, layout, FDrawKind, QueryCaps, ViewBudgets, TILES, WIDE_TILES,
+    };
+    use ps3dk_prof_viewer::timeline_ui::TimelineState;
+    use std::path::PathBuf;
+
+    fn at(v: i64) -> End {
+        End::At { value: rat(v, 1), open: false }
+    }
+
+    fn b(lo: i64, hi: i64, extrapolated: bool) -> FtBar {
+        FtBar {
+            epoch: 1,
+            image: Some(0),
+            desc: 0,
+            depth: 0,
+            begin: Projection { lo: at(lo), hi: at(lo), interpolated: !extrapolated },
+            end: Projection { lo: at(hi), hi: at(hi), interpolated: !extrapolated },
+            inclusive: 1,
+            exclusive: Some(1),
+            extrapolated,
+        }
+    }
+
+    fn src(bars: Vec<FtBar>) -> FtSource {
+        FtSource { source: SourceKey::Lane(LANE), epochs: vec![], counts: FtCounts::default(), state: FtSourceState::Bars(bars) }
+    }
+
+    #[test]
+    fn a_zero_paint_cap_draws_nothing_and_reports_every_bar() {
+        let t = build_track(&src((0..10).map(|i| b(i * 10, i * 10 + 5, false)).collect()), 0);
+        let l = layout(&t, &View { t0: 0.0, dt: 100.0 }, 1000.0, QueryCaps { inspect_cap: 1000, paint_cap: 0 }, true);
+        assert!(l.draws.is_empty());
+        assert_eq!(l.omitted, Some(Some(10)));
+        // sub-pixel runs too
+        let l = layout(&t, &View { t0: 0.0, dt: 100_000.0 }, 10.0, QueryCaps { inspect_cap: 1000, paint_cap: 0 }, true);
+        assert!(l.draws.is_empty());
+        assert_eq!(l.omitted, Some(Some(10)));
+    }
+
+    #[test]
+    fn separated_dense_runs_are_each_one_primitive() {
+        // three clusters of three sub-pixel bars, far apart: three runs
+        let mut v = Vec::new();
+        for c in [0i64, 40_000, 80_000] {
+            for k in 0..3 {
+                v.push(b(c + k * 2, c + k * 2 + 1, false));
+            }
+        }
+        let t = build_track(&src(v), 0);
+        let view = View { t0: 0.0, dt: 100_000.0 };
+        let l = layout(&t, &view, 100.0, QueryCaps::default(), true);
+        assert_eq!(l.draws.len(), 3, "{l:?}");
+        assert!(l.draws.iter().all(|d| matches!(d.kind, FDrawKind::Dense { count: 3 })));
+        let capped = layout(&t, &view, 100.0, QueryCaps { inspect_cap: 1000, paint_cap: 2 }, true);
+        assert_eq!((capped.draws.len(), capped.omitted), (2, Some(Some(3))));
+    }
+
+    #[test]
+    fn extrapolated_and_interpolated_sub_pixel_bars_never_share_a_run() {
+        let t = build_track(&src(vec![b(0, 1, false), b(2, 3, true), b(4, 5, false), b(6, 7, true)]), 0);
+        let l = layout(&t, &View { t0: 0.0, dt: 100_000.0 }, 100.0, QueryCaps::default(), true);
+        assert_eq!(l.draws.len(), 2, "{l:?}");
+        let mut styles: Vec<(bool, usize)> = l
+            .draws
+            .iter()
+            .map(|d| (d.extrapolated, match d.kind { FDrawKind::Dense { count } => count, _ => 1 }))
+            .collect();
+        styles.sort();
+        assert_eq!(styles, vec![(false, 2), (true, 2)]);
+        let x = l.draws.iter().find(|d| d.extrapolated).unwrap();
+        assert_eq!(hit_dense(&l, 0, x.w0), Some((2, true)));
+        assert!(ps3dk_prof_viewer::timeline_foreign::dense_text(2, true).contains("EXTRAPOLATED"));
+        // a lone extrapolated point keeps its style as a tick
+        let one = build_track(&src(vec![b(10, 10, true)]), 0);
+        let l = layout(&one, &View { t0: 0.0, dt: 100.0 }, 100.0, QueryCaps::default(), true);
+        assert!(l.draws[0].tick && l.draws[0].extrapolated, "{l:?}");
+        assert_eq!(hit(&l, 0, 10.0), Some(0));
+    }
+
+    #[test]
+    fn duplicate_tile_entries_count_as_inspections() {
+        // span = [0, 1024): 1 tick per tile; the bar [100, 103] sits in 4 tiles (under WIDE_TILES)
+        let t = build_track(&src(vec![b(0, 1, false), b(100, 103, false), b(1022, 1023, false)]), 0);
+        let l = layout(&t, &View { t0: 0.0, dt: 1023.0 }, 2000.0, QueryCaps::default(), true);
+        assert_eq!(l.inspected, 2 + 4 + 2, "every entry, duplicates included");
+        let ids: Vec<usize> = l.draws.iter().filter_map(|d| match d.kind { FDrawKind::Bar(i) => Some(i), _ => None }).collect();
+        assert_eq!(ids, vec![0, 1, 2], "each bar drawn once");
+        const { assert!(4 <= WIDE_TILES) };
+    }
+
+    #[test]
+    fn the_view_build_budget_is_exact_and_one_short_refuses_the_drawing() {
+        let bars: Vec<FtBar> = (0..5).map(|i| b(i * 100, i * 100 + 50, false)).collect();
+        let s = src(bars);
+        let full = build_track(&s, 0);
+        // independent count: 6 per bar, the tile table, one entry per covered tile (no wide bars here)
+        let lo = 0.0;
+        let hi = 450.0;
+        let tile = |v: f64| (((v - lo) / (hi - lo) * TILES as f64).floor() as usize).min(TILES - 1);
+        let entries: u64 = (0..5).map(|i| (tile((i * 100 + 50) as f64) - tile((i * 100) as f64) + 1).min(WIDE_TILES + 1) as u64).map(|e| if e > WIDE_TILES as u64 { 1 } else { e }).sum();
+        let need = 6 * 5 + TILES as u64 + entries;
+        let exact = build_track_with(&s, 0, ViewBudgets { build_ops: need });
+        assert!(exact.refusal.is_none() && exact.bars.len() == 5, "{:?}", exact.refusal);
+        assert_eq!(exact, full);
+        let short = build_track_with(&s, 0, ViewBudgets { build_ops: need - 1 });
+        assert!(short.refusal.as_deref().unwrap_or("").contains("view build budget") && short.bars.is_empty());
+        let l = layout(&short, &View { t0: 0.0, dt: 500.0 }, 100.0, QueryCaps::default(), true);
+        assert!(l.draws.is_empty() && l.inspected == 0);
+    }
+
+    fn rb(lo: (i64, i64), hi: (i64, i64)) -> FtBar {
+        let e = |(n, d): (i64, i64)| End::At { value: rat(n, d), open: false };
+        FtBar {
+            epoch: 1,
+            image: Some(0),
+            desc: 0,
+            depth: 0,
+            begin: Projection { lo: e(lo), hi: e(lo), interpolated: true },
+            end: Projection { lo: e(hi), hi: e(hi), interpolated: true },
+            inclusive: 1,
+            exclusive: Some(1),
+            extrapolated: false,
+        }
+    }
+
+    #[test]
+    fn a_wide_bar_visited_after_tiled_ones_never_joins_a_run_on_its_far_side() {
+        // codex 20:52: outer [0,10] (wide: 11 tiles), [900, 900.1] and [1000, 1000] (tiled); visit order 1, 2, 0
+        let t = build_track(&src(vec![rb((0, 1), (10, 1)), rb((900, 1), (9001, 10)), rb((1000, 1), (1000, 1))]), 0);
+        let l = layout(&t, &View { t0: 0.0, dt: 2000.0 }, 100.0, QueryCaps::default(), true);
+        let mut ids: Vec<usize> = l.draws.iter().filter_map(|d| match d.kind { FDrawKind::Bar(i) => Some(i), _ => None }).collect();
+        ids.sort();
+        assert_eq!(ids, vec![0, 1, 2], "every bar drawn as its own tick: {l:?}");
+        assert_eq!(l.omitted, None);
+        let b0 = l.draws.iter().find(|d| d.kind == FDrawKind::Bar(0)).unwrap();
+        assert!(b0.w0 <= 0.5 && b0.tick, "{b0:?}");
+        // an overlapping visit in reverse order grows the run both ways
+        let t = build_track(&src(vec![rb((0, 1), (10, 1)), rb((5, 1), (6, 1)), rb((8, 1), (9, 1))]), 0);
+        let l = layout(&t, &View { t0: 0.0, dt: 2000.0 }, 100.0, QueryCaps::default(), true);
+        assert_eq!(l.draws.len(), 1, "{l:?}");
+        assert!(matches!(l.draws[0].kind, FDrawKind::Dense { count: 3 }) && l.draws[0].w0 <= 0.0, "{l:?}");
+    }
+
+    #[test]
+    fn hover_resolves_bars_and_runs_by_paint_order_in_both_stackings() {
+        use ps3dk_prof_viewer::timeline_foreign::{hit_any, FDraw, FHit, FLayout};
+        let bar = FDraw { depth: 0, w0: 10.0, w1: 20.0, core: None, arrow_left: false, arrow_right: false, extrapolated: false, tick: false, kind: FDrawKind::Bar(7) };
+        let run = FDraw { depth: 0, w0: 12.0, w1: 14.0, core: None, arrow_left: false, arrow_right: false, extrapolated: true, tick: true, kind: FDrawKind::Dense { count: 4 } };
+        let above = FLayout { draws: vec![bar, run], inspected: 0, omitted: None };
+        assert_eq!(hit_any(&above, 0, 13.0), Some(FHit::Dense { count: 4, extrapolated: true }), "the run is drawn on top");
+        assert_eq!(hit(&above, 0, 13.0), None, "the bar below never steals the hover");
+        assert_eq!(hit_any(&above, 0, 18.0), Some(FHit::Bar(7)));
+        let below = FLayout { draws: vec![run, bar], inspected: 0, omitted: None };
+        assert_eq!(hit_any(&below, 0, 13.0), Some(FHit::Bar(7)), "the bar is drawn on top");
+        assert_eq!(hit_dense(&below, 0, 13.0), None);
+        let plain = FDraw { extrapolated: false, ..run };
+        let mixed = FLayout { draws: vec![run, plain], inspected: 0, omitted: None };
+        assert_eq!(hit_any(&mixed, 0, 13.0), Some(FHit::Dense { count: 4, extrapolated: false }), "the topmost style answers");
+    }
+
+    #[test]
+    fn the_outside_count_promises_fit_all_only_for_interpolated_bars() {
+        use ps3dk_prof::foreign_timeline::ForeignTimeline;
+        use ps3dk_prof_viewer::timeline_foreign::build;
+        let mut x = b(-500, -400, true);
+        x.begin.interpolated = false;
+        let ft = ForeignTimeline {
+            sources: vec![FtSource { source: SourceKey::Lane(LANE), epochs: vec![], counts: FtCounts::default(), state: FtSourceState::Bars(vec![b(-300, -200, false), x, b(50, 60, false)]) }],
+            ..ForeignTimeline::default()
+        };
+        let a = analysed(&f2_bytes(cm_ext()));
+        let v = build(&a, &ft, 0, 100, true);
+        let h = &v.tracks[0].header;
+        assert!(h.contains("outside the PPU data range: 2 before, 0 after (Fit all shows the 1 interpolated); 1 of them extrapolated (not covered by Fit all)"), "{h}");
+    }
+
+    #[test]
+    fn ruler_labels_before_the_capture_start_carry_one_minus_sign() {
+        use ps3dk_prof_viewer::model::TimeBase;
+        use ps3dk_prof_viewer::timeline::ruler;
+        let tb = TimeBase { freq_hz: Some(1_000_000_000) }; // 1 tick = 1 ns
+        let v = View { t0: -300_000_000.0, dt: 400_000_000.0 };
+        let labels: Vec<String> = ruler(&v, tb, 1500.0, 90.0).into_iter().map(|(_, l)| l).collect();
+        assert!(labels.iter().any(|l| l.starts_with('-') && l.ends_with(" ms")), "{labels:?}");
+        assert!(labels.iter().any(|l| l.starts_with('+')), "{labels:?}");
+        assert!(labels.iter().all(|l| !l.contains("+-")), "{labels:?}");
+    }
+
+    #[test]
+    fn fit_all_reaches_bars_outside_the_ppu_data() {
+        let bytes = f2_bytes(cm_ext());
+        let doc = Document::from_bytes(PathBuf::from("t.prof"), &bytes);
+        let a = doc.analysis().unwrap();
+        let mut st = TimelineState::new(a);
+        st.w32 = true;
+        st.sync_foreign(&doc.foreign_tl, a);
+        let fv = st.foreign.clone().unwrap();
+        let (ilo, ihi) = fv.interp_extent.expect("interpolated bars exist");
+        let ppu = st.tl.length();
+        assert!(ihi > ppu, "the RSX bounds end after the PPU data: {ihi} vs {ppu}");
+        assert!(st.view.t0 + st.view.dt < ihi, "PPU-only: the window cannot reach them");
+        st.axis_all = true;
+        st.sync_foreign(&doc.foreign_tl, a);
+        assert!(st.view.t0 <= ilo.min(0.0) && st.view.t0 + st.view.dt >= ihi, "{:?}", st.view);
+        // every interpolated bar of every track is now drawable inside the chart
+        for t in &fv.tracks {
+            let l = layout(t, &st.view, 1000.0, QueryCaps::default(), true);
+            let n: usize = l.draws.iter().map(|d| match d.kind { FDrawKind::Dense { count } => count, _ => 1 }).sum();
+            assert_eq!(n, t.bars.len(), "{}", t.label);
+            assert!(l.draws.iter().all(|d| d.w1 <= 1000.0 && !d.arrow_right), "{l:?}");
+        }
+        // a bar mapped before the PPU data (as on the E1-x capture) is reached by the same axis rule
+        let mut tl = ps3dk_prof_viewer::timeline::timeline(a);
+        tl.extra = Some((-5000.0, -4000.0));
+        let v = View::fit(&tl);
+        assert!(v.t0 <= -5000.0 && v.t0 + v.dt >= tl.length());
+        // and switching it off returns to the PPU data
+        st.axis_all = false;
+        st.sync_foreign(&doc.foreign_tl, a);
+        assert_eq!(st.view, View::fit(&st.tl));
+        assert!(st.tl.extra.is_none());
+    }
+}

@@ -50,6 +50,7 @@ struct Harness {
     selected: Option<ZoneKey>,
     time: f64,
     modifiers: Modifiers,
+    slot: ps3dk_prof_viewer::timeline_foreign::ForeignTimelineSlot,
 }
 
 impl Harness {
@@ -62,6 +63,7 @@ impl Harness {
             selected: None,
             time: 0.0,
             modifiers: Modifiers::NONE,
+            slot: Default::default(),
         };
         h.frame(vec![]);
         h
@@ -77,7 +79,8 @@ impl Harness {
             ..Default::default()
         };
         let (a, st, sel) = (&self.a, &mut self.st, &mut self.selected);
-        let _ = self.ctx.run(input, |ctx| draw(ctx, a, st, sel));
+        let slot = &self.slot;
+        let _ = self.ctx.run(input, |ctx| draw(ctx, slot, a, st, sel));
     }
 
     fn idle(&mut self, frames: usize) {

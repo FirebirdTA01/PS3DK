@@ -17,4 +17,5 @@ pub mod live;
 pub mod live_client;
 pub mod model;
 pub mod timeline;
+pub mod timeline_foreign;
 pub mod timeline_ui;

@@ -14,6 +14,7 @@ pub mod clockmap;
 pub mod durations;
 pub mod ext;
 pub mod foreign_paths;
+pub mod foreign_timeline;
 pub mod frames_foreign;
 pub mod hash;
 pub mod model;

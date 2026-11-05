@@ -47,13 +47,18 @@ pub struct Track {
     longest: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Timeline {
     pub tracks: Vec<Track>,
     /// The earliest and latest timebase value in the capture: BEGINs, ENDs
     /// and FRAMEs. Censored bars are drawn to `end`.
     pub start: u64,
     pub end: u64,
+    /// Any PPU BEGIN, END or FRAME was seen (else start = end = 0 and the axis may come from SPU/RSX bounds).
+    pub has_data: bool,
+    /// An extension of the axis beyond the PPU data, relative to `start` (the finite interpolated SPU/RSX bounds when
+    /// the user asks for them); None: the axis is the PPU data.
+    pub extra: Option<(f64, f64)>,
 }
 
 pub fn timeline(a: &Analysis) -> Timeline {
@@ -127,7 +132,8 @@ pub fn timeline(a: &Analysis) -> Timeline {
             longest,
         });
     }
-    if lo > hi {
+    let has_data = lo <= hi;
+    if !has_data {
         lo = 0;
         hi = 0;
     }
@@ -135,6 +141,8 @@ pub fn timeline(a: &Analysis) -> Timeline {
         tracks,
         start: lo,
         end: hi,
+        has_data,
+        extra: None,
     }
 }
 
@@ -142,6 +150,14 @@ impl Timeline {
     /// Ticks from the first to the last value, at least 1.
     pub fn length(&self) -> f64 {
         (self.end - self.start).max(1) as f64
+    }
+
+    /// The axis the window may cover, relative to `start`: the PPU data, widened by `extra` when set.
+    pub fn axis(&self) -> (f64, f64) {
+        match self.extra {
+            Some((lo, hi)) => (lo.min(0.0), hi.max(self.length())),
+            None => (0.0, self.length()),
+        }
     }
 
     /// A tick relative to `start`. The integer origin is removed before the
@@ -164,18 +180,20 @@ pub const MIN_WINDOW: f64 = 8.0;
 
 impl View {
     pub fn fit(tl: &Timeline) -> View {
+        let (lo, hi) = tl.axis();
         View {
-            t0: 0.0,
-            dt: tl.length(),
+            t0: lo,
+            dt: (hi - lo).max(1.0),
         }
     }
 
     /// Keep the window inside the data and between `MIN_WINDOW` and the
     /// whole capture.
     pub fn clamp(&mut self, tl: &Timeline) {
-        let total = tl.length();
+        let (lo, hi) = tl.axis();
+        let total = (hi - lo).max(1.0);
         self.dt = self.dt.clamp(MIN_WINDOW.min(total), total);
-        self.t0 = self.t0.clamp(0.0, total - self.dt);
+        self.t0 = self.t0.clamp(lo, hi - self.dt);
     }
 
     /// Zoom by `factor` (below 1 zooms in) keeping the tick under `anchor`
@@ -361,7 +379,7 @@ pub fn ruler(view: &View, tb: TimeBase, width: f64, min_px: f64) -> Vec<(f64, St
     let step = nice_step(raw);
     let step_ticks = step * unit;
     let first = (view.t0 / step_ticks).ceil() as i64;
-    let scale = ((view.t0 + view.dt) / unit).max(step);
+    let scale = (view.t0.abs().max((view.t0 + view.dt).abs()) / unit).max(step);
     let mut out = Vec::new();
     let mut k = first;
     loop {
@@ -416,7 +434,10 @@ fn format_ns(ns: f64, step_ns: f64, scale_ns: f64) -> String {
     } else {
         (-step.log10()).ceil() as usize
     };
-    format!("+{:.*} {unit}", decimals, ns / div)
+    // Offsets before the capture's start (a widened axis) are negative: one sign, never "+-".
+    let v = ns / div;
+    let sign = if v < 0.0 { "-" } else { "+" };
+    format!("{sign}{:.*} {unit}", decimals, v.abs())
 }
 
 /// The tooltip lines for one bar: zone, site, durations as the reader gives

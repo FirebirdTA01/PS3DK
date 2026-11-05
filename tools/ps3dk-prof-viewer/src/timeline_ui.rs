@@ -1,7 +1,10 @@
 //! The Timeline page: draws `timeline::layout` output and turns input into
 //! `View` changes. All placement and hit testing lives in the tested model.
 
+use crate::foreign::Labels;
 use crate::model::{format_ms, TimeBase, ZoneKey};
+use crate::timeline_foreign::{self as tf, FDrawKind, FTimeline, QueryCaps};
+use std::sync::Arc;
 use crate::timeline::{
     bar_details, color_slot, frame_marks, hit, layout, ruler, DrawKind, Timeline, View,
 };
@@ -45,6 +48,15 @@ pub struct TimelineState {
     /// The window shows the whole capture; a newer snapshot of a growing
     /// capture is fitted again rather than keeping the old width.
     pub fit_all: bool,
+    /// SPU premise for the SPU/RSX rows: assume no decrementer wrap (W32) instead of R64.
+    pub w32: bool,
+    pub show_extrapolated: bool,
+    /// Collapsed groups: PPU threads, SPU lanes, RSX domains.
+    pub collapsed: [bool; 3],
+    /// The SPU/RSX rows drawn this frame (from the Document's cache, for the current W32).
+    pub foreign: Option<Arc<FTimeline>>,
+    /// The axis also covers the finite interpolated SPU/RSX bounds ("Fit all"), not only the PPU data.
+    pub axis_all: bool,
 }
 
 impl TimelineState {
@@ -59,7 +71,39 @@ impl TimelineState {
             live: false,
             follow: false,
             fit_all: true,
+            w32: false,
+            show_extrapolated: true,
+            collapsed: [false; 3],
+            foreign: None,
+            axis_all: false,
         }
+    }
+
+    /// Takes the Document's SPU/RSX rows for the current W32 (dropping any rows built under the other premise
+    /// first), and for a capture with no PPU data adopts their extent as the axis.
+    pub fn sync_foreign(&mut self, slot: &tf::ForeignTimelineSlot, a: &Analysis) {
+        if self.foreign.as_ref().is_some_and(|f| f.w32 != self.w32) {
+            self.foreign = None;
+        }
+        let v = slot.view(a, &self.tl, self.w32);
+        if !self.tl.has_data {
+            let (s, e) = v.extent.unwrap_or((0, 0));
+            if (self.tl.start, self.tl.end) != (s, e) {
+                self.tl.start = s;
+                self.tl.end = e;
+                self.view = View::fit(&self.tl);
+                self.fit_all = true;
+            }
+        }
+        // The widened axis: the interpolated SPU/RSX bounds only (never an unbounded or extrapolated extent).
+        let extra = if self.axis_all { v.interp_extent } else { None };
+        if self.tl.extra != extra {
+            self.tl.extra = extra;
+            self.view = View::fit(&self.tl);
+            self.fit_all = true;
+            self.box_from = None;
+        }
+        self.foreign = Some(v);
     }
 
     /// Rebuilds the tracks from a newer snapshot of the same capture,
@@ -69,6 +113,7 @@ impl TimelineState {
     /// it (its pixels would no longer mean the same times).
     pub fn refresh(&mut self, a: &Analysis) {
         self.tl = crate::timeline::timeline(a);
+        self.foreign = None; // the next frame takes the new snapshot's rows
         let before = self.view;
         if self.follow {
             self.view.t0 = self.tl.length() - self.view.dt;
@@ -89,12 +134,15 @@ impl TimelineState {
 
 pub fn draw(
     ctx: &egui::Context,
+    slot: &tf::ForeignTimelineSlot,
     a: &Analysis,
     st: &mut TimelineState,
     selected: &mut Option<ZoneKey>,
 ) {
     let pal = ui::Palette::of_ctx(ctx);
     let tb = TimeBase::of(a);
+    st.sync_foreign(slot, a);
+    let labels = Labels::build(a);
     egui::CentralPanel::default()
         .frame(
             egui::Frame::none()
@@ -132,9 +180,30 @@ pub fn draw(
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                 .show(p, |p| {
-                    for i in 0..st.tl.tracks.len() {
-                        draw_track(p, a, st, i, width, tb, selected, &pal);
-                        p.add_space(ui::SPACE_XS);
+                    let fv = st.foreign.clone().unwrap_or_default();
+                    let spu = fv.tracks.iter().filter(|t| matches!(t.source, ps3dk_prof::ext::SourceKey::Lane(_))).count();
+                    let rsx = fv.tracks.len() - spu;
+                    if group_header(p, st, 0, &format!("PPU threads ({})", st.tl.tracks.len()), &pal) {
+                        for i in 0..st.tl.tracks.len() {
+                            draw_track(p, a, st, i, width, tb, selected, &pal);
+                            p.add_space(ui::SPACE_XS);
+                        }
+                    }
+                    if a.capture.ext.is_some() {
+                        if let Some(n) = &fv.notice {
+                            ui::field_message(p, ui::Tone::Warning, n);
+                        }
+                        p.add(egui::Label::new(egui::RichText::new(&fv.caption).small().color(pal.text_muted)).wrap());
+                        for (g, title, want_gpu) in [(1usize, format!("SPU lanes ({spu})"), false), (2, format!("RSX domains ({rsx})"), true)] {
+                            if group_header(p, st, g, &title, &pal) {
+                                for (i, t) in fv.tracks.iter().enumerate() {
+                                    if matches!(t.source, ps3dk_prof::ext::SourceKey::Gpu(_)) == want_gpu {
+                                        draw_foreign_track(p, a, st, &labels, &fv, i, width, tb, &pal);
+                                        p.add_space(ui::SPACE_XS);
+                                    }
+                                }
+                            }
+                        }
                     }
                 });
             // Any change the user made to the window on the tracks ends Follow;
@@ -147,7 +216,7 @@ pub fn draw(
 }
 
 fn toolbar(p: &mut egui::Ui, st: &mut TimelineState, tb: TimeBase, selected: &Option<ZoneKey>) {
-    p.horizontal(|p| {
+    p.horizontal_wrapped(|p| {
         if ui::quiet_button(p, "Fit").clicked() {
             st.view = View::fit(&st.tl);
             st.follow = false;
@@ -163,6 +232,10 @@ fn toolbar(p: &mut egui::Ui, st: &mut TimelineState, tb: TimeBase, selected: &Op
             st.follow = false;
             st.fit_all = st.view == View::fit(&st.tl);
         }
+        p.add_space(ui::SPACE_SM);
+        p.checkbox(&mut st.w32, "SPU: assume no decrementer wrap (W32)");
+        p.checkbox(&mut st.show_extrapolated, "Show extrapolated SPU/RSX bars");
+        p.checkbox(&mut st.axis_all, "Fit all: axis includes SPU/RSX bounds");
         if st.live {
             p.add_space(ui::SPACE_SM);
             let mut follow = st.follow;
@@ -504,5 +577,203 @@ fn handle_input(
         });
     } else if resp.clicked() && !shift {
         *selected = None;
+    }
+}
+
+/// A collapsible group title; true when the group is expanded.
+fn group_header(p: &mut egui::Ui, st: &mut TimelineState, g: usize, title: &str, pal: &ui::Palette) -> bool {
+    let mark = if st.collapsed[g] { "+" } else { "-" };
+    let r = p.add(
+        egui::Label::new(egui::RichText::new(format!("{mark} {title}")).strong().color(pal.text)).sense(Sense::click()),
+    );
+    if r.clicked() {
+        st.collapsed[g] = !st.collapsed[g];
+    }
+    !st.collapsed[g]
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_foreign_track(
+    p: &mut egui::Ui,
+    a: &Analysis,
+    st: &mut TimelineState,
+    labels: &Labels,
+    fv: &FTimeline,
+    index: usize,
+    width: f32,
+    tb: TimeBase,
+    pal: &ui::Palette,
+) {
+    let t = &fv.tracks[index];
+    let mut text = vec![t.header.clone()];
+    text.extend(t.coverage.iter().cloned());
+    if let Some(r) = &t.refusal {
+        text.push(r.clone());
+    }
+    let galley = p.fonts(|f| f.layout(text.join("\n"), FontId::proportional(11.0), pal.text_muted, LABEL_W - ui::SPACE_SM));
+    let label_h = 20.0 + galley.size().y + 4.0;
+    let rows = if t.bars.is_empty() { 0.0 } else { t.max_depth as f32 + 1.0 };
+    let height = (rows * ROW_H + 2.0 * TRACK_PAD).max(44.0).max(label_h);
+    let (rect, _) = p.allocate_exact_size(Vec2::new(LABEL_W + width, height), Sense::hover());
+    let label_rect = Rect::from_min_size(rect.min, Vec2::new(LABEL_W - ui::SPACE_SM, rect.height()));
+    let area = Rect::from_min_max(Pos2::new(rect.left() + LABEL_W, rect.top()), rect.max);
+    let id = p.id().with(("ftrack", index));
+    let resp = p.interact(area, id, Sense::click_and_drag());
+    let painter = p.painter();
+    painter.text(label_rect.left_top() + Vec2::new(0.0, 2.0), Align2::LEFT_TOP, &t.label, FontId::proportional(13.0), pal.text);
+    p.painter_at(label_rect).galley(label_rect.left_top() + Vec2::new(0.0, 20.0), galley, pal.text_muted);
+
+    let painter = p.painter_at(area);
+    painter.rect_filled(area, 2.0, pal.surface_alt);
+    let w = width as f64;
+    let l = tf::layout(t, &st.view, w, QueryCaps::default(), st.show_extrapolated);
+    for d in &l.draws {
+        let top = area.top() + TRACK_PAD + d.depth as f32 * ROW_H;
+        let mid = top + ROW_H / 2.0;
+        let (w0, w1) = (area.left() + d.w0 as f32, area.left() + d.w1 as f32);
+        match d.kind {
+            FDrawKind::Dense { .. } => {
+                let r = Rect::from_min_max(Pos2::new(w0, top + 1.0), Pos2::new(w1.max(w0 + 1.0), top + ROW_H - 1.0));
+                if d.extrapolated {
+                    // An extrapolated run: outlined and hatched, never filled like interpolated bounds.
+                    painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, pal.warning));
+                    hatch(&p.painter_at(r), r, pal.warning);
+                } else {
+                    painter.rect_filled(r, 0.0, pal.text_faint);
+                }
+            }
+            FDrawKind::Bar(i) => {
+                let b = &t.bars[i];
+                let key: ZoneKey = (labels.zone(a, b.bar.image, b.bar.desc), String::new());
+                let color = ZONE_COLORS[color_slot(&key, ZONE_COLORS.len())];
+                if d.tick {
+                    // Under a pixel: a tick with its own hover (dashed when extrapolated).
+                    let x = w0.max(area.left());
+                    if d.extrapolated {
+                        dashed(&painter, Pos2::new(x, top + 1.0), Pos2::new(x, top + ROW_H - 1.0), color);
+                    } else {
+                        painter.line_segment([Pos2::new(x, top + 1.0), Pos2::new(x, top + ROW_H - 1.0)], Stroke::new(1.5_f32, color));
+                    }
+                    continue;
+                }
+                // Whiskers: where it may have started or ended (dashed when extrapolated: a prediction).
+                if d.extrapolated {
+                    dashed(&painter, Pos2::new(w0, mid), Pos2::new(w1, mid), color);
+                } else {
+                    painter.line_segment([Pos2::new(w0, mid), Pos2::new(w1, mid)], Stroke::new(1.0_f32, color));
+                }
+                for (x, on) in [(w0, !d.arrow_left), (w1, !d.arrow_right)] {
+                    if on {
+                        painter.line_segment([Pos2::new(x, mid - 4.0), Pos2::new(x, mid + 4.0)], Stroke::new(1.0_f32, color));
+                    }
+                }
+                if d.arrow_left {
+                    let pts = vec![Pos2::new(w0 + 6.0, mid - 4.0), Pos2::new(w0, mid), Pos2::new(w0 + 6.0, mid + 4.0)];
+                    painter.add(Shape::line(pts, Stroke::new(1.5_f32, color)));
+                }
+                if d.arrow_right {
+                    let pts = vec![Pos2::new(w1 - 6.0, mid - 4.0), Pos2::new(w1, mid), Pos2::new(w1 - 6.0, mid + 4.0)];
+                    painter.add(Shape::line(pts, Stroke::new(1.5_f32, color)));
+                }
+                // Core: where it surely ran.
+                if let Some((c0, c1)) = d.core {
+                    let r = Rect::from_min_max(
+                        Pos2::new(area.left() + c0 as f32, top + 2.0),
+                        Pos2::new(area.left() + c1 as f32, top + ROW_H - 2.0),
+                    );
+                    if d.extrapolated {
+                        // Hatched outline: a conditional prediction, never styled like an interpolated bound.
+                        painter.rect_stroke(r, 2.0, Stroke::new(1.0_f32, color));
+                        hatch(&p.painter_at(r), r, color);
+                    } else {
+                        painter.rect_filled(r, 2.0, color);
+                        if r.width() > 40.0 {
+                            let clip = r.shrink2(Vec2::new(4.0, 0.0)).intersect(area);
+                            p.painter_at(clip).text(
+                                Pos2::new(clip.left(), r.center().y),
+                                Align2::LEFT_CENTER,
+                                &key.0,
+                                FontId::proportional(11.0),
+                                Color32::WHITE,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(o) = l.omitted {
+        let msg = match o {
+            Some(n) => format!("{n} bars not drawn at this zoom; zoom in"),
+            None => "additional bars omitted at this zoom (count unknown); zoom in".to_string(),
+        };
+        painter.text(area.right_bottom() - Vec2::new(4.0, 2.0), Align2::RIGHT_BOTTOM, msg, FontId::proportional(11.0), pal.warning);
+    }
+    // Wheel and drag act on the shared window, as on a PPU track.
+    let wf = width as f64;
+    if let Some(pos) = resp.hover_pos() {
+        let (dy, dx) = p.input(|i| (i.smooth_scroll_delta.y, i.smooth_scroll_delta.x));
+        if dy != 0.0 || dx != 0.0 {
+            let anchor = f64::from(pos.x - area.left()) / wf;
+            if dy != 0.0 {
+                st.view.zoom(&st.tl, anchor, (-f64::from(dy) * 0.002).exp());
+            }
+            if dx != 0.0 {
+                st.view.pan(&st.tl, -f64::from(dx) / wf);
+            }
+            p.ctx().input_mut(|i| i.smooth_scroll_delta = Vec2::ZERO);
+        }
+        let rel = pos.y - area.top() - TRACK_PAD;
+        if rel >= 0.0 {
+            let depth = (rel / ROW_H) as u8;
+            let x = f64::from(pos.x - area.left());
+            // One reverse paint-order test for bars and dense runs alike: the topmost primitive answers.
+            let topmost = tf::hit_any(&l, depth, x);
+            if let Some(tf::FHit::Bar(i)) = topmost {
+                let lines = tf::details(a, labels, t, i, tb.freq_hz);
+                resp.clone().on_hover_ui_at_pointer(|tt| {
+                    for (n, line) in lines.iter().enumerate() {
+                        if n == 0 {
+                            tt.label(egui::RichText::new(line).strong());
+                        } else {
+                            tt.label(line);
+                        }
+                    }
+                });
+            } else if let Some(tf::FHit::Dense { count, extrapolated }) = topmost {
+                let line = tf::dense_text(count, extrapolated);
+                resp.clone().on_hover_ui_at_pointer(|tt| {
+                    tt.label(line);
+                });
+            }
+        }
+    }
+    if resp.dragged() {
+        st.view.pan(&st.tl, -f64::from(resp.drag_delta().x) / wf);
+    }
+}
+
+/// Diagonal hatching inside `r` (clipped by the painter).
+fn hatch(painter: &egui::Painter, r: Rect, color: Color32) {
+    let mut x = r.left() - r.height();
+    while x < r.right() {
+        painter.line_segment([Pos2::new(x, r.bottom()), Pos2::new(x + r.height(), r.top())], Stroke::new(1.0_f32, color));
+        x += 6.0;
+    }
+}
+
+/// A dashed segment from `a` to `b` (4 px on, 3 px off).
+fn dashed(painter: &egui::Painter, a: Pos2, b: Pos2, color: Color32) {
+    let len = a.distance(b);
+    if len < 1.0 {
+        painter.circle_filled(a, 1.0, color);
+        return;
+    }
+    let dir = (b - a) / len;
+    let mut t = 0.0;
+    while t < len {
+        let e = (t + 4.0).min(len);
+        painter.line_segment([a + dir * t, a + dir * e], Stroke::new(1.0_f32, color));
+        t += 7.0;
     }
 }

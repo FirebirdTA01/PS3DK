@@ -26,6 +26,8 @@ pub struct Document {
     pub hot: Option<crate::hotpaths::HotView>,
     /// The Hot paths page's SPU/RSX lanes (F3b): a one-entry cache keyed by W32, filled on first need.
     pub foreign_hot: crate::foreign_hot::ForeignHotSlot,
+    /// The Timeline's SPU/RSX rows: a one-entry cache keyed by W32, filled on first need.
+    pub foreign_tl: crate::timeline_foreign::ForeignTimelineSlot,
 }
 
 /// What the Overview's EXTENSION SOURCES section shows.
@@ -125,6 +127,7 @@ impl Document {
             foreign: crate::foreign::ForeignSlot::default(),
             hot,
             foreign_hot: crate::foreign_hot::ForeignHotSlot::default(),
+            foreign_tl: crate::timeline_foreign::ForeignTimelineSlot::default(),
         }
     }
 

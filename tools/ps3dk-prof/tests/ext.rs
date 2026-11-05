@@ -2664,6 +2664,262 @@ fn fp_capture_ops_exact_and_one_short_refuse_the_last_source() {
     assert!(matches!(short.sources[0].state, FSourceState::Paths { .. }), "the earlier source is kept whole");
 }
 
+// ---- SPU/RSX timeline rows (director 2026-11-04 19:32) -----------------------------------------------------------
+
+use ps3dk_prof::clockmap::{End, Projection, Rat};
+use ps3dk_prof::foreign_timeline::{
+    end_cmp, foreign_timeline, has_core, FtBar, FtEpoch, FtLimit, FtSourceState, ForeignTimeline, TimelineBudgets,
+};
+
+fn ft_run(name: &str, ext: Vec<Chunk>, p: Premises, b: &TimelineBudgets) -> (ModelSink, PairSink, ForeignTimeline) {
+    let x = capture(name, ext);
+    let mut ms = ModelSink::new(u64::MAX);
+    let c = ps3dk_prof::clockmap::map_capture_models(&x, p, &Budgets::default(), &mut ms);
+    let mut ps = PairSink::new(u64::MAX);
+    let d = durations_pairs(&x, &c, &DurationBudgets::default(), &mut ps);
+    let t = foreign_timeline(&c, &d, &ms, &ps, b);
+    (ms, ps, t)
+}
+
+fn ft_bars(t: &ForeignTimeline, key: SourceKey) -> &Vec<FtBar> {
+    match &t.sources.iter().find(|s| s.source == key).expect("source").state {
+        FtSourceState::Bars(v) => v,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn at(n: i128, d: i128, open: bool) -> End {
+    End::At { value: Rat { num: n.into(), den: d.into() }, open }
+}
+
+fn bar(b: (End, End), e: (End, End)) -> FtBar {
+    FtBar {
+        epoch: 1,
+        image: None,
+        desc: 0,
+        depth: 0,
+        begin: Projection { lo: b.0, hi: b.1, interpolated: true },
+        end: Projection { lo: e.0, hi: e.1, interpolated: true },
+        inclusive: 1,
+        exclusive: Some(1),
+        extrapolated: false,
+    }
+}
+
+#[test]
+fn ft_every_completed_pair_is_placed_with_the_models_exact_projections() {
+    let (ms, ps, t) = ft_run("ft-cm", cm_ext(), NOWRAP, &TimelineBudgets::default());
+    assert!(t.exhausted_at.is_none() && !t.retention_refused);
+    for s in &t.sources {
+        let key = (s.source, 1);
+        let facts = &ps.epochs[&key];
+        let FtSourceState::Bars(bars) = &s.state else { panic!("{s:?}") };
+        assert_eq!(bars.len(), facts.len(), "{:?}", s.source);
+        assert_eq!(s.counts.placed, facts.len() as u64);
+        let model = &ms.models[&key];
+        for f in facts {
+            let mut m = Meter::unlimited();
+            let (b, e) = (model.project(&mut m, f.fb).unwrap(), model.project(&mut m, f.fe).unwrap());
+            assert!(bars.iter().any(|x| x.begin == b && x.end == e && x.desc == f.desc), "{f:?}");
+        }
+        assert!(bars.windows(2).all(|w| end_cmp(&w[0].begin.lo, &w[1].begin.lo) != std::cmp::Ordering::Greater));
+    }
+}
+
+#[test]
+fn ft_core_is_decided_by_exact_finite_bounds_only() {
+    let p = |n| at(n, 3, false);
+    assert!(!has_core(&bar((p(1), p(2)), (p(2), p(4)))), "touching: no core");
+    assert!(!has_core(&bar((p(1), p(3)), (p(2), p(4)))), "overlapping endpoint intervals: no core");
+    assert!(has_core(&bar((p(1), p(2)), (p(3), p(4)))));
+    assert!(has_core(&bar((End::NegInf, p(2)), (p(3), End::PosInf))), "unbounded OUTER sides keep a finite core");
+    assert!(!has_core(&bar((p(1), End::PosInf), (p(3), p(4)))), "unbounded inner side: no core");
+    assert!(!has_core(&bar((p(1), p(2)), (End::NegInf, p(4)))));
+    assert!(has_core(&bar((p(1), at(2, 3, true)), (p(3), p(4)))), "an OPEN finite end is finite");
+    assert_eq!(end_cmp(&at(2, 3, true), &End::PosInf), std::cmp::Ordering::Less, "open finite is not infinity");
+    assert_eq!(end_cmp(&at(2, 3, true), &at(4, 6, false)), std::cmp::Ordering::Equal, "value order ignores openness");
+    let big = |v: i128| at(v, 1, false);
+    let h = 1i128 << 62;
+    assert!(has_core(&bar((big(h), big(h + 1)), (big(h + 2), big(h + 3)))), "huge ticks, 1-tick gap");
+    assert!(!has_core(&bar((big(h), big(h + 2)), (big(h + 2), big(h + 3)))));
+}
+
+#[test]
+fn ft_depth_rows_cap_counts_deeper_pairs() {
+    let body = vec![
+        du_cal(),
+        spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (985, 1, 1, 1), (982, 0, 1, 2), (980, 0, 2, 2), (975, 1, 2, 1), (970, 0, 2, 0)]),
+    ];
+    let ext = lane_only(body, (1, 6, 6, 0));
+    let (_, _, all) = ft_run("ft-depth-all", ext.clone(), NOWRAP, &TimelineBudgets { max_depth_rows: 3, ..TimelineBudgets::default() });
+    let (_, _, cut) = ft_run("ft-depth-cut", ext, NOWRAP, &TimelineBudgets { max_depth_rows: 2, ..TimelineBudgets::default() });
+    let key = SourceKey::Lane(LANE);
+    assert_eq!(ft_bars(&all, key).len(), 3);
+    assert_eq!(ft_bars(&cut, key).len(), 2);
+    let s = cut.sources.iter().find(|s| s.source == key).unwrap();
+    assert_eq!((s.counts.placed, s.counts.too_deep), (2, 1));
+    assert_eq!(s.epochs[0].state, FtEpoch::Placed { bars: 2, too_deep: 1 });
+}
+
+#[test]
+fn ft_capture_ops_exact_and_one_short_refuse_the_current_and_later_sources() {
+    let (_, _, full) = ft_run("ft-ops", cm_ext(), NOWRAP, &TimelineBudgets::default());
+    assert_eq!(full.sources.len(), 2);
+    let run = |ops| ft_run("ft-ops-b", cm_ext(), NOWRAP, &TimelineBudgets { capture_ops: ops, ..TimelineBudgets::default() }).2;
+    assert_eq!(run(full.used), full, "exactly the full use suffices");
+    let short = run(full.used - 1);
+    assert_eq!(short.sources.last().unwrap().state, FtSourceState::Refused(FtLimit::CaptureOps));
+    assert!(matches!(short.sources[0].state, FtSourceState::Bars(_)), "the earlier source is kept whole");
+    for ops in 0..=full.used {
+        let t = run(ops);
+        let refused: Vec<bool> = t.sources.iter().map(|s| matches!(s.state, FtSourceState::Refused(_))).collect();
+        assert!(refused.windows(2).all(|w| !w[0] || w[1]), "{ops}: {refused:?}");
+        for s in &t.sources {
+            if let FtSourceState::Refused(_) = s.state {
+                assert_eq!(s.counts.placed, 0, "{ops}");
+                assert!(s.epochs.iter().all(|r| !matches!(r.state, FtEpoch::Placed { .. })), "{ops}");
+            }
+        }
+    }
+}
+
+#[test]
+fn ft_retained_bars_exact_and_one_over() {
+    let (_, _, full) = ft_run("ft-ret", cm_ext(), NOWRAP, &TimelineBudgets::default());
+    let total: u64 = full.sources.iter().map(|s| s.counts.placed).sum();
+    let run = |n| ft_run("ft-ret-b", cm_ext(), NOWRAP, &TimelineBudgets { retained_bars: n, ..TimelineBudgets::default() }).2;
+    let exact = run(total);
+    assert!(exact.sources.iter().all(|s| matches!(s.state, FtSourceState::Bars(_))));
+    let over = run(total - 1);
+    assert_eq!(over.sources.last().unwrap().state, FtSourceState::Refused(FtLimit::RetainedBars));
+    assert!(matches!(over.sources[0].state, FtSourceState::Bars(_)));
+}
+
+#[test]
+fn ft_an_unmapped_epoch_has_coverage_and_no_bars() {
+    let (_, _, t) = ft_run("ft-ambig", cm_ext(), Premises { spu_nowrap: false }, &TimelineBudgets::default());
+    let s = t.sources.iter().find(|s| s.source == SourceKey::Lane(LANE)).unwrap();
+    assert_eq!(s.epochs[0].state, FtEpoch::AmbiguousLift);
+    assert_eq!(ft_bars(&t, SourceKey::Lane(LANE)).len(), 0);
+    assert_eq!(s.counts.placed, 0);
+    assert!(!ft_bars(&t, SourceKey::Gpu(RSX_D)).is_empty(), "the RSX domain is unaffected");
+}
+
+#[test]
+fn ft_extrapolated_and_exclusive_unavailable_pairs_are_kept_and_marked() {
+    let body = vec![du_cal(), spu_events(LANE, 1, 0, &[(950, 0, 1, 0), (850, 0, 2, 0)])];
+    let (_, _, t) = ft_run("ft-extrap", lane_only(body, (1, 2, 2, 0)), NOWRAP, &TimelineBudgets::default());
+    let b = &ft_bars(&t, SourceKey::Lane(LANE))[0];
+    assert!(b.extrapolated && !b.end.interpolated, "{b:?}");
+    assert_eq!(t.sources[0].counts.extrapolated, 1);
+    let (_, ps, t) = ft_run("ft-nested", f2_nested(), NOWRAP, &TimelineBudgets::default());
+    let facts = &ps.epochs[&(SourceKey::Lane(LANE), 1)];
+    let bars = ft_bars(&t, SourceKey::Lane(LANE));
+    for f in facts {
+        assert!(bars.iter().any(|x| x.exclusive == f.exclusive && x.inclusive == f.inclusive && x.depth == f.depth), "{f:?}");
+    }
+}
+
+#[test]
+fn ft_loss_is_counted_in_records_never_as_pairs() {
+    let mut ext = std_ext();
+    ext[5] = spu_events(LANE, 1, 0, &[(990, 0, 1, 0), (985, 1, 1, 1), (980, 1, 2, 1)]);
+    ext.insert(6, loss(LANE, 1, 3, 1));
+    ext[8] = finals(&[(LANE, 1, 1, 4, 3, 1, 0), (RSX_D, 2, 1, 2, 2, 0, 0)]);
+    let (_, _, t) = ft_run("ft-loss", ext, NOWRAP, &TimelineBudgets::default());
+    let s = t.sources.iter().find(|s| s.source == SourceKey::Lane(LANE)).unwrap();
+    assert_eq!(s.counts.placed, 1, "only the completed pair: {s:?}");
+    assert!(s.counts.censored >= 1, "the cut ancestor is an event count: {s:?}");
+}
+
+#[test]
+fn ft_retention_refusal_places_nothing() {
+    let x = capture("ft-keep", cm_ext());
+    let mut ms = ModelSink::new(0);
+    let c = ps3dk_prof::clockmap::map_capture_models(&x, NOWRAP, &Budgets::default(), &mut ms);
+    let mut ps = PairSink::new(u64::MAX);
+    let d = durations_pairs(&x, &c, &DurationBudgets::default(), &mut ps);
+    let t = foreign_timeline(&c, &d, &ms, &ps, &TimelineBudgets::default());
+    assert!(t.retention_refused && t.sources.is_empty(), "{t:?}");
+}
+
+#[test]
+fn ft_spu_lane_and_rsx_domain_stay_distinct_sources() {
+    let (_, _, t) = ft_run("ft-keys", cm_ext(), NOWRAP, &TimelineBudgets::default());
+    let keys: Vec<SourceKey> = t.sources.iter().map(|s| s.source).collect();
+    assert!(keys.contains(&SourceKey::Lane(LANE)) && keys.contains(&SourceKey::Gpu(RSX_D)), "{keys:?}");
+}
+
+#[test]
+fn ft_charges_match_the_independent_cost_model() {
+    use ps3dk_prof::clockmap::clog2;
+    let (ms, ps, t) = ft_run("ft-model", cm_ext(), NOWRAP, &TimelineBudgets::default());
+    let mut want = 0u64;
+    for s in &t.sources {
+        let key = (s.source, 1);
+        let facts = &ps.epochs[&key];
+        assert_eq!(facts.len(), 1, "one pair per source in cm_ext");
+        let f = &facts[0];
+        // projection: the model's own charge for the distinct coordinates (two, fb != fe)
+        assert_ne!(f.fb, f.fe);
+        let mut pm = Meter::unlimited();
+        let model = &ms.models[&key];
+        let mut qs = vec![f.fb, f.fe];
+        qs.sort();
+        for q in qs {
+            model.project(&mut pm, q).unwrap();
+        }
+        let lookups = (1 + clog2(ms.models.len() as u64 + 1)) + (1 + clog2(ps.epochs.len() as u64 + 1));
+        let collect = 2 * (1 + clog2(1));
+        let publish = 2 * (1 + clog2(3)) + 1;
+        let sort = 2 + 1; // n = 1: two slot vectors, no comparison, the final permutation
+        want += 1 + lookups + 1 + collect + pm.used() + publish + sort;
+    }
+    assert_eq!(t.used, want);
+}
+
+#[test]
+fn ft_a_zero_retained_limit_projects_and_allocates_nothing() {
+    use ps3dk_prof::clockmap::clog2;
+    let (ms, ps, t) = ft_run("ft-ret0", cm_ext(), NOWRAP, &TimelineBudgets { retained_bars: 0, ..TimelineBudgets::default() });
+    // the first source: traversal, the two lookups, the eligibility count of its one fact; then refused (and every
+    // later source with it, uncharged)
+    let lookups = (1 + clog2(ms.models.len() as u64 + 1)) + (1 + clog2(ps.epochs.len() as u64 + 1));
+    assert_eq!(t.used, 1 + lookups + 1);
+    assert!(t.sources.iter().all(|s| s.state == FtSourceState::Refused(FtLimit::RetainedBars)), "{t:?}");
+}
+
+#[test]
+fn ft_sort_refuses_bits_and_large_sorts_stay_within_the_model() {
+    use ps3dk_prof::clockmap::{clog2, Meter};
+    use ps3dk_prof::foreign_timeline::sort_bars;
+    let big = |shift: usize, den_shift: usize| End::At {
+        value: Rat { num: num_bigint::BigInt::from(1) << shift, den: (num_bigint::BigInt::from(1) << den_shift) + 1 },
+        open: false,
+    };
+    let a = bar((big(500, 1), big(500, 1)), (big(501, 1), big(501, 1)));
+    let b = bar((big(10, 40), big(10, 40)), (big(11, 40), big(11, 40)));
+    assert_eq!(sort_bars(&mut Meter::unlimited(), vec![a, b]).err(), Some(FtLimit::Bits));
+    // 4096 bars in reverse order: comparisons <= n * clog2(n), each at most 1 + 3 + 3
+    let n = 4096u64;
+    let v: Vec<FtBar> = (0..n as i128).rev().map(|i| bar((at(i, 1, false), at(i, 1, false)), (at(i + 1, 1, false), at(i + 1, 1, false)))).collect();
+    let mut m = Meter::unlimited();
+    let out = sort_bars(&mut m, v).unwrap();
+    assert!(out.windows(2).all(|w| end_cmp(&w[0].begin.lo, &w[1].begin.lo) == std::cmp::Ordering::Less));
+    let comps_max = n * clog2(n);
+    let upper = 2 * n + comps_max * (1 + 1 + 3 + 3) + clog2(n) * n + n;
+    assert!(m.used() <= upper && m.used() >= 3 * n, "{} not in [{}, {upper}]", m.used(), 3 * n);
+}
+
+#[test]
+fn ft_event_counts_carry_their_scope() {
+    let (_, _, t) = ft_run("ft-scope", cm_ext(), Premises { spu_nowrap: false }, &TimelineBudgets::default());
+    let spu = t.sources.iter().find(|s| s.source == SourceKey::Lane(LANE)).unwrap();
+    assert_eq!((spu.counts.inventory_epochs, spu.counts.no_inventory_epochs), (0, 1), "{spu:?}");
+    let rsx = t.sources.iter().find(|s| s.source == SourceKey::Gpu(RSX_D)).unwrap();
+    assert_eq!((rsx.counts.inventory_epochs, rsx.counts.no_inventory_epochs), (1, 0), "{rsx:?}");
+}
+
 // ---- F3b r3: cross-epoch, collisions, population, unknown counts, budgets ----------------------------------------
 
 fn fp_two_epochs(second_desc: u16) -> Vec<Chunk> {

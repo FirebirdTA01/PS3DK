@@ -410,12 +410,11 @@ impl eframe::App for App {
         let page = self.page;
         // The timeline takes the whole page: wheel and drag belong to it.
         if page == Page::Timeline {
-            if let (Some(a), Some(st)) = (
-                self.doc.as_ref().and_then(|d| d.analysis()),
-                self.timeline.as_mut(),
-            ) {
-                timeline_ui::draw(ctx, a, st, &mut self.selected_zone);
-                return;
+            if let (Some(doc), Some(st)) = (self.doc.as_ref(), self.timeline.as_mut()) {
+                if let Some(a) = doc.analysis() {
+                    timeline_ui::draw(ctx, &doc.foreign_tl, a, st, &mut self.selected_zone);
+                    return;
+                }
             }
         }
         let sort = &mut self.sort;
