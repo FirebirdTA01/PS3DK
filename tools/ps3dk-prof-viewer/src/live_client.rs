@@ -229,6 +229,13 @@ impl LiveClient {
         self.shared.inner.lock().unwrap().view.clone()
     }
 
+    /// The first `len` received bytes (a snapshot's bytes: received bytes only grow), or None when fewer arrived.
+    pub fn received_prefix(&self, len: u64) -> Option<Vec<u8>> {
+        // The snapshot shares the sealed blocks (copies at most the tail); only the prefix is copied out.
+        let snap = self.shared.inner.lock().unwrap().session.received.snapshot();
+        snap.prefix_vec(len)
+    }
+
     /// Asks the session to end; valid data that arrived is published as a capture that ended early.
     pub fn disconnect(&self) {
         self.shared.cancel.store(true, Ordering::SeqCst);

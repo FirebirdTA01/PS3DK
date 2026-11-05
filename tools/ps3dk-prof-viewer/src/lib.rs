@@ -7,6 +7,9 @@
 //! synthetic input in its tests.
 
 pub mod app;
+pub mod capture;
+pub mod capture_ctl;
+pub mod capture_ui;
 pub mod foreign;
 pub mod foreign_hot;
 pub mod frames;
@@ -16,6 +19,7 @@ pub mod hotpaths_ui;
 pub mod live;
 pub mod live_client;
 pub mod model;
+pub mod sha256;
 pub mod timeline;
 pub mod timeline_foreign;
 pub mod timeline_ui;

@@ -5,6 +5,9 @@
 
 use crate::live::LinkState;
 use crate::live_client::{ClientConfig, LiveClient, LiveView, Outcome};
+use crate::capture::{FrameSnapshot, Premise};
+use crate::capture_ctl::{Captures, Home};
+use crate::capture_ui;
 use crate::frames_ui;
 use crate::timeline_ui;
 use std::sync::Arc;
@@ -28,6 +31,8 @@ pub enum Page {
     Frames,
     Zones,
     HotPaths,
+    /// One frame snapshot (`App::shown`).
+    Snapshot,
 }
 
 /// The Connect dialog's fields.
@@ -44,6 +49,8 @@ pub struct Live {
     pub client: LiveClient,
     pub target: String,
     generation: u64,
+    /// The session's outcome was handled (bookmarks written, or the reason they were not shown).
+    bookmarks_done: bool,
 }
 
 pub struct App {
@@ -61,6 +68,16 @@ pub struct App {
     pub live: Option<Live>,
     connect: Option<ConnectForm>,
     last_host: String,
+    /// The current session's frame snapshots and bookmarks.
+    pub captures: Captures,
+    /// The snapshot on the Snapshot page (a counted reference: a deleted snapshot is refunded only once this lets go).
+    pub shown: Option<Arc<FrameSnapshot>>,
+    sessions: u64,
+    /// Live sessions replaced before their outcome was known, with their snapshots: disconnected, polled until the
+    /// outcome, bookmarked against the file it saved, then dropped.
+    pub retiring: Vec<(Live, Captures)>,
+    /// The one accounted retention budget every session (current and retiring) draws on.
+    pub pool: Arc<crate::capture::Pool>,
 }
 
 /// Turns the dialog's fields into a checked client config, changing
@@ -125,6 +142,7 @@ pub fn home_from(
 
 impl App {
     pub fn new(open: Option<PathBuf>) -> App {
+        let pool = crate::capture::Pool::new(crate::capture::RETAIN_BUDGET);
         let mut app = App {
             doc: None,
             error: None,
@@ -138,6 +156,11 @@ impl App {
             live: None,
             connect: None,
             last_host: String::new(),
+            captures: Captures::with_pool("none", Home::Live, pool.clone()),
+            pool,
+            shown: None,
+            sessions: 0,
+            retiring: Vec::new(),
         };
         if let Some(p) = open {
             app.open(p);
@@ -150,10 +173,19 @@ impl App {
             Ok(bytes) => {
                 // Ends any live session: Drop only requests the disconnect;
                 // the session's threads finish in the background.
+                self.end_captures();
                 self.live = None;
-                let doc = Arc::new(Document::from_bytes(path, &bytes));
+                let doc = Arc::new(Document::from_bytes(path.clone(), &bytes));
                 self.install(doc, true);
                 self.error = None;
+                self.sessions += 1;
+                self.captures = Captures::with_pool(
+                    &format!("file:{}:{}", path.display(), self.sessions),
+                    Home::File(path.clone()),
+                    self.pool.clone(),
+                );
+                self.captures.bind_source(&bytes);
+                self.captures.load_marks(&path, &bytes);
             }
             Err(e) => self.error = Some(format!("{}: {e}", path.display())),
         }
@@ -195,10 +227,14 @@ impl App {
         let host = cfg.host.trim().to_string();
         let client = LiveClient::start(cfg)?;
         // Only now does the new session replace what was shown.
+        self.end_captures();
+        self.sessions += 1;
+        self.captures = Captures::with_pool(&format!("live:{target}:{}", self.sessions), Home::Live, self.pool.clone());
         self.live = Some(Live {
             client,
             target,
             generation: 0,
+            bookmarks_done: false,
         });
         self.doc = None;
         self.timeline = None;
@@ -213,8 +249,33 @@ impl App {
 
     /// Takes the newest snapshot of a live session, if there is one.
     fn poll_live(&mut self, ctx: &egui::Context) {
+        if self.poll() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+    }
+
+    /// One poll of the live session and of every retiring one (no egui): installs a newer snapshot, and once an
+    /// outcome is known bookmarks that session's snapshots.  True while something is still running.
+    pub fn poll(&mut self) -> bool {
+        let mut running = false;
+        let mut i = 0;
+        while i < self.retiring.len() {
+            let v = self.retiring[i].0.client.view();
+            match &v.outcome {
+                Some(o) => {
+                    let (_, mut caps) = self.retiring.remove(i);
+                    let note = finish_live(&mut caps, o);
+                    caps.clear();
+                    self.captures.message = Some((note.0, format!("Previous session: {}", note.1)));
+                }
+                None => {
+                    running = true;
+                    i += 1;
+                }
+            }
+        }
         let Some(live) = self.live.as_mut() else {
-            return;
+            return running;
         };
         let v = live.client.view();
         let streaming = v.outcome.is_none();
@@ -231,8 +292,104 @@ impl App {
                 st.follow = false;
             }
         }
-        if !self.live.as_ref().is_some_and(|l| l.client.finished()) {
-            ctx.request_repaint_after(Duration::from_millis(100));
+        if let (Some(o), Some(l)) = (&v.outcome, self.live.as_mut()) {
+            if !l.bookmarks_done {
+                l.bookmarks_done = true;
+                let note = finish_live(&mut self.captures, o);
+                if !note.1.is_empty() {
+                    self.captures.message = Some(note);
+                }
+            }
+        }
+        running || !self.live.as_ref().is_some_and(|l| l.client.finished())
+    }
+
+
+    /// Ends the current session's snapshots (a new session or file).  A live session whose outcome is not known yet
+    /// keeps its snapshots: it is disconnected and retired until its file is published, then bookmarked.
+    fn end_captures(&mut self) {
+        self.shown = None;
+        if self.page == Page::Snapshot {
+            self.page = Page::Overview;
+        }
+        let unfinished = self.live.as_ref().is_some_and(|l| !l.bookmarks_done);
+        let caps = std::mem::replace(&mut self.captures, Captures::with_pool("none", Home::Live, self.pool.clone()));
+        if unfinished && !caps.list.is_empty() {
+            let live = self.live.take().expect("unfinished implies a live session");
+            live.client.disconnect();
+            self.retiring.push((live, caps));
+        } else {
+            let mut caps = caps;
+            caps.clear();
+        }
+    }
+
+    /// Why "Capture full frame" is unavailable, or None.
+    pub fn capture_blocked(&self) -> Option<String> {
+        self.captures.blocked(self.doc.as_deref())
+    }
+
+    /// The "Capture full frame" click: the Frames selection when a frame is selected, else the newest frame
+    /// (`capture::choose_frame`), under the Timeline's current premise.
+    pub fn capture_frame(&mut self) {
+        let Some(doc) = self.doc.clone() else { return };
+        let (owner, frame) = (self.frames.sel.owner, self.frames.sel.frame);
+        let premise = self
+            .timeline
+            .as_ref()
+            .map(|t| Premise { w32: t.w32, show_extrapolated: t.show_extrapolated })
+            .unwrap_or(Premise { w32: false, show_extrapolated: true });
+        let taken = now_text();
+        let live = self.live.as_ref();
+        let path = doc.path.clone();
+        let mut fetch = |n: u64| -> Option<Vec<u8>> {
+            match live {
+                Some(l) => l.client.received_prefix(n),
+                None => std::fs::read(&path).ok().filter(|b| b.len() as u64 == n),
+            }
+        };
+        if let Ok(s) = self.captures.capture(&doc, owner, frame, premise, &taken, &mut fetch) {
+            self.shown = Some(s);
+            self.page = Page::Snapshot;
+        }
+    }
+
+    /// Applies a snapshot action from the sidebar or the Snapshot page.
+    pub fn snapshot_action(&mut self, a: capture_ui::Action) {
+        match a {
+            capture_ui::Action::Show(id) => {
+                if let Some(s) = self.captures.list.iter().find(|s| s.id == id) {
+                    self.shown = Some(s.clone());
+                    self.page = Page::Snapshot;
+                }
+            }
+            capture_ui::Action::OpenMark(i) => {
+                let Home::File(p) = self.captures.home.clone() else { return };
+                if let Ok(s) = self.captures.open_mark(i, &p) {
+                    self.shown = Some(s);
+                    self.page = Page::Snapshot;
+                }
+            }
+            capture_ui::Action::Delete(id) => {
+                if self.shown.as_ref().is_some_and(|s| s.id == id) {
+                    self.shown = None;
+                    self.page = Page::Frames;
+                }
+                self.captures.delete(id);
+                self.captures.sweep();
+            }
+            capture_ui::Action::Reresolve(premise) => {
+                if let Some(cur) = self.shown.clone() {
+                    if let Ok(s) = self.captures.reresolve(&cur, premise) {
+                        self.shown = Some(s);
+                    }
+                }
+            }
+            capture_ui::Action::Back => {
+                self.shown = None;
+                self.page = Page::Frames;
+                self.captures.sweep();
+            }
         }
     }
 
@@ -283,6 +440,10 @@ impl eframe::App for App {
         };
         let streaming = live_view.as_ref().is_some_and(|v| v.outcome.is_none());
         let mut want_open = false;
+        let mut want_capture = false;
+        self.captures.sweep();
+        let has_doc_analysis = self.doc.as_ref().and_then(|d| d.analysis()).is_some();
+        let capture_blocked = self.capture_blocked();
         let mut want_connect = false;
         let mut want_disconnect = false;
         ui::app_bar(
@@ -303,6 +464,9 @@ impl eframe::App for App {
                 if ui::primary_button(bar, "Open…").clicked() {
                     want_open = true;
                 }
+                if has_doc_analysis && capture_ui::button(bar, capture_blocked.as_deref(), &mut None) {
+                    want_capture = true;
+                }
                 if streaming {
                     if ui::danger_button(bar, "Disconnect").clicked() {
                         want_disconnect = true;
@@ -314,6 +478,9 @@ impl eframe::App for App {
         );
         if want_open {
             self.pick_file();
+        }
+        if want_capture {
+            self.capture_frame();
         }
         if want_disconnect {
             if let Some(l) = &self.live {
@@ -332,7 +499,8 @@ impl eframe::App for App {
         // The full verdict, always visible under the bar on every page; it
         // wraps instead of being cut off at small window sizes.
         let link_line = live_view.as_ref().map(live_line);
-        if self.doc.is_some() || link_line.is_some() {
+        let snap_msg = self.captures.message.clone();
+        if self.doc.is_some() || link_line.is_some() || snap_msg.is_some() {
             let verdict = self.doc.as_ref().map(|d| d.verdict());
             egui::TopBottomPanel::top("verdict").show(ctx, |strip| {
                 strip.add_space(ui::SPACE_XS);
@@ -343,11 +511,17 @@ impl eframe::App for App {
                 if let Some(v) = &verdict {
                     ui::field_message(strip, tone(v.tone), &v.text);
                 }
+                if let Some((bad, m)) = &snap_msg {
+                    ui::field_message(strip, if *bad { ui::Tone::Warning } else { ui::Tone::Neutral }, m);
+                }
                 strip.add_space(ui::SPACE_XS);
             });
         }
 
         let has_analysis = self.doc.as_ref().and_then(|d| d.analysis()).is_some();
+        let mut side_act = None;
+        let shown_id = self.shown.as_ref().filter(|_| self.page == Page::Snapshot).map(|s| s.id);
+        let caps = &self.captures;
         ui::sidebar(
             ctx,
             |side| {
@@ -377,6 +551,7 @@ impl eframe::App for App {
                         self.page = Page::HotPaths;
                     }
                 }
+                side_act = capture_ui::sidebar(side, caps, shown_id, &mut Vec::new());
             },
             |_| {},
         );
@@ -407,7 +582,26 @@ impl eframe::App for App {
             },
         }
 
+        if let Some(a) = side_act {
+            self.snapshot_action(a);
+        }
         let page = self.page;
+        if page == Page::Snapshot {
+            if let Some(s) = self.shown.clone() {
+                let mut act = None;
+                ui::page(ctx, |p| {
+                    egui::ScrollArea::vertical().show(p, |p| {
+                        act = capture_ui::page(p, &s, &mut capture_ui::Drawn::default());
+                    });
+                });
+                drop(s);
+                if let Some(a) = act {
+                    self.snapshot_action(a);
+                }
+                return;
+            }
+            self.page = Page::Frames;
+        }
         // The timeline takes the whole page: wheel and drag belong to it.
         if page == Page::Timeline {
             if let (Some(doc), Some(st)) = (self.doc.as_ref(), self.timeline.as_mut()) {
@@ -441,7 +635,7 @@ impl eframe::App for App {
                     ui::field_message(p, ui::Tone::Danger, diagnosis);
                 }
                 DocState::Analysed(a) => match page {
-                    Page::Overview | Page::Timeline => draw_overview(p, a, &d.ext),
+                    Page::Overview | Page::Timeline | Page::Snapshot => draw_overview(p, a, &d.ext),
                     Page::Frames => match &d.frames {
                         Some(ix) => {
                             frames_ui::draw(p, a, ix, frames, timeline.as_mut(), Some(&d.foreign));
@@ -823,4 +1017,45 @@ fn draw_zones(
                     }
                 });
         });
+}
+
+/// The current UTC time of day, for a snapshot's label.
+fn now_text() -> String {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        % 86_400;
+    format!("{:02}:{:02}:{:02} UTC", t / 3600, t / 60 % 60, t % 60)
+}
+
+/// The file a session's snapshots are bookmarked against: whatever file the live client's outcome saved, under its
+/// own classification (a complete `.prof`, an accepted early ending's `.prof`, or a kept `.incomplete.prof`); None
+/// when nothing was saved.
+pub fn bookmark_target(o: &Outcome) -> Option<std::path::PathBuf> {
+    match o {
+        Outcome::Published(p) | Outcome::PublishedEarly { published: p, .. } => Some(p.path.clone()),
+        Outcome::Incomplete { saved, .. } => saved.as_ref().map(|p| p.path.clone()),
+    }
+}
+
+/// A live session's outcome is known: its snapshots are bookmarked next to the file the outcome saved (the live
+/// client's own classification decides which file that is; this never reclassifies it), and the session is homed
+/// there so later snapshots are bookmarked at once.  Returns (is a warning, note).
+pub fn finish_live(caps: &mut Captures, o: &Outcome) -> (bool, String) {
+    match bookmark_target(o) {
+        Some(path) => match caps.write_live_bookmarks(&path, &mut crate::capture::RealIo::default()) {
+            Ok(_) if caps.list.is_empty() => (false, String::new()),
+            Ok(note) => (false, note),
+            Err(e) => (true, e),
+        },
+        None => {
+            caps.home = Home::Unsaved;
+            if caps.list.is_empty() {
+                (false, String::new())
+            } else {
+                (true, "Bookmarks not saved: the session saved no file. The snapshots stay in memory until the next session.".into())
+            }
+        }
+    }
 }

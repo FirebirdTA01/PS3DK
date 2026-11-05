@@ -156,6 +156,21 @@ impl Received {
         v.extend_from_slice(&self.tail);
         v
     }
+    /// The first `n` bytes as one buffer (copies only those), or None when fewer were received.
+    pub fn prefix_vec(&self, n: u64) -> Option<Vec<u8>> {
+        if n > self.len {
+            return None;
+        }
+        let mut v = Vec::with_capacity(n as usize);
+        for s in self.sealed.iter().map(|s| &s[..]).chain(std::iter::once(&self.tail[..])) {
+            let want = n as usize - v.len();
+            if want == 0 {
+                break;
+            }
+            v.extend_from_slice(&s[..want.min(s.len())]);
+        }
+        Some(v)
+    }
     fn push(&mut self, mut bytes: &[u8]) {
         self.len += bytes.len() as u64;
         while !bytes.is_empty() {
@@ -529,7 +544,7 @@ impl LocalSink for FileSink {
 /// Closes a file and reports the OS result (std's `Drop` discards it). The
 /// handle is released exactly once; a failed close is not retried.
 #[cfg(unix)]
-fn checked_close(file: std::fs::File) -> std::io::Result<()> {
+pub(crate) fn checked_close(file: std::fs::File) -> std::io::Result<()> {
     use std::os::fd::IntoRawFd;
     extern "C" {
         fn close(fd: i32) -> i32;
@@ -544,7 +559,7 @@ fn checked_close(file: std::fs::File) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-fn checked_close(file: std::fs::File) -> std::io::Result<()> {
+pub(crate) fn checked_close(file: std::fs::File) -> std::io::Result<()> {
     use std::os::windows::io::IntoRawHandle;
     #[link(name = "kernel32")]
     extern "system" {
@@ -560,7 +575,7 @@ fn checked_close(file: std::fs::File) -> std::io::Result<()> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn checked_close(file: std::fs::File) -> std::io::Result<()> {
+pub(crate) fn checked_close(file: std::fs::File) -> std::io::Result<()> {
     drop(file);
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -732,4 +747,23 @@ pub fn publish_file(
         }
     }
     Err(std::io::Error::other("no free file name"))
+}
+
+#[cfg(test)]
+mod prefix_tests {
+    use super::*;
+
+    #[test]
+    fn prefix_vec_copies_only_the_prefix_across_blocks() {
+        let mut r = Received::default();
+        let data: Vec<u8> = (0..(BLOCK_BYTES * 2 + 300)).map(|i| (i * 7) as u8).collect();
+        r.push(&data);
+        assert_eq!(r.block_count(), 3);
+        for n in [0, 1, BLOCK_BYTES - 1, BLOCK_BYTES, BLOCK_BYTES + 5, BLOCK_BYTES * 2 + 300] {
+            let v = r.prefix_vec(n as u64).unwrap();
+            assert_eq!(v, &data[..n], "{n}");
+            assert!(v.capacity() == n || n == 0, "{n}: allocated only the prefix");
+        }
+        assert!(r.prefix_vec(data.len() as u64 + 1).is_none());
+    }
 }

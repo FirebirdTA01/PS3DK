@@ -14,6 +14,8 @@ use std::path::PathBuf;
 pub struct Document {
     pub path: PathBuf,
     pub size: usize,
+    /// The analysis mode it was built with: an accepted prefix allowed (true) or strict.
+    pub prefix_ok: bool,
     pub state: DocState,
     /// The EXTENSION SOURCES view, computed ONCE when the document is built (never per repaint).  Every open,
     /// replacement and live snapshot builds a new Document, so it cannot outlive the capture it describes.
@@ -121,6 +123,7 @@ impl Document {
         Document {
             path,
             size: bytes.len(),
+            prefix_ok,
             state,
             ext,
             frames,
