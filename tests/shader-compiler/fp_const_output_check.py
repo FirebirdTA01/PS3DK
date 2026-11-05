@@ -1,7 +1,7 @@
 """The colour output's VALUE, computed from the program, not read off a block.
 
 A const-fold row is about what the shader PAINTS.  Asserting the inline
-const block and the swizzle that reads it is not that assertion: codex
+const block and the swizzle that reads it is not that assertion: review
 flipped SRC0's negate bit on the folded MOV of const-division-fold-test's
 `plain` container, left the block, the swizzle, the status and every byte of
 stdout untouched, and the whole guard - all four self-checks and the COND_FL
@@ -33,7 +33,7 @@ The four words are the expected R0 lanes as 8-digit hex, in the order the
 program paints them.
 
 --control mutates the CONTAINER BYTES and requires this checker to REJECT
-the result: `negate` sets SRC0's negate bit on the first R0 write (codex's
+the result: `negate` sets SRC0's negate bit on the first R0 write (the review's
 mutation), `swizzle` rewrites its swizzle to .xxxx, `mask` drops the write
 mask to .x, `scale` sets a 2X destination scale, `precision` sets a
 non-fp32 precision, and `no-end` clears END so the program never finishes.  Exit 0 means the mutant was rejected; exit 1 means this checker
@@ -47,7 +47,7 @@ import fp_sources  # noqa: E402
 # THE ENVELOPE IS SHARED, NOT RE-DERIVED.  inline_factor_check already
 # refuses the fields an operand-level evaluator cannot see, and this file
 # missed two of them by writing its own list: destination SCALE (hw[2] bits
-# 28..30 - codex set 2X on a clean container and every row here stayed
+# 28..30 - a reviewer set 2X on a clean container and every row here stayed
 # green) and non-fp32 PRECISION (hw[0] bits 22..23).  Importing its table
 # means a field added there is added here, instead of the two drifting
 # until someone mutates the difference.
@@ -155,7 +155,7 @@ def _first_r0_write(blob):
 def mutate(blob, kind):
     off, i, w = _first_r0_write(blob)
     out = bytearray(blob)
-    if kind == "negate":                      # codex's mutation
+    if kind == "negate":                      # the review's mutation
         new = w[1] | (1 << 17)
         struct.pack_into(">I", out, off + (i + 1) * 4, fp_sources.unswap(new))
     elif kind == "swizzle":
@@ -164,7 +164,7 @@ def mutate(blob, kind):
     elif kind == "mask":
         new = (w[0] & ~(0xF << 9)) | (0x1 << 9)        # .x only
         struct.pack_into(">I", out, off + i * 4, fp_sources.unswap(new))
-    elif kind == "scale":                     # codex's second mutation
+    elif kind == "scale":                     # the review's second mutation
         new = (w[2] & ~(7 << 28)) | (1 << 28)          # 2X destination scale
         struct.pack_into(">I", out, off + (i + 2) * 4, fp_sources.unswap(new))
     elif kind == "precision":

@@ -63,7 +63,7 @@ def uninit_local(env):
 
 
 # An input member ASSIGNED in one arm before any read is not undefined on the
-# other side: it is the input (review: codex, join-input-write).  Both
+# other side: it is the input (review, join-input-write).  Both
 # branches are judged, and an else-only write.
 INPUT_WRITE_THEN = """struct D { float c : TEXCOORD0; float x : TEXCOORD1; };
 float4 main(D v) : COLOR
@@ -95,7 +95,7 @@ INPUT_WRITE_INPUTS = [
 ]
 
 # A copy of ANOTHER input into the member is an assignment too, not a read
-# of the member (review: codex, join-other-input-write): the untouched side
+# of the member (review, join-other-input-write): the untouched side
 # is still the member's own input.  Same-instance then/else copies and a
 # copy across two struct parameters.
 COPY_STRUCT = "struct D { float c : TEXCOORD0; float x : TEXCOORD1; float y : TEXCOORD2; };\n"

@@ -1,4 +1,4 @@
-/* W/W0 checkpoint markers (design r4 2afa7bf3 + codex 19:47): the CLKW1 sidecar.  Included by main.c only.
+/* W/W0 checkpoint markers (design r4 2afa7bf3 + review 19:47): the CLKW1 sidecar.  Included by main.c only.
  *
  * One file per ATTEMPTED marker, <W_DIR>/clockcal-<run>-<NN>.mk, created O_EXCL and written once:
  *   CLKW1 run=<16hex> variant=<W|W0> build=<16hex> seq=<NN> stage=<name> result=<R> tb=<16hex>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P3.3 R4b archive contract (design r2 delta section 3; codex 22:15 CHANGES).  The EXPECTED member set and external
+"""P3.3 R4b archive contract (design r2 delta section 3; review 22:15 CHANGES).  The EXPECTED member set and external
 import set are fixed here, from the reviewed contract; sdk/libps3dkprof/ext-members.mk is parsed and compared AGAINST
 them, so editing that list cannot change the expectation.  Names are kept verbatim as nm prints them (".TOC."
 included).  Any difference is a FAIL naming it and stops the checkpoint for review.
@@ -26,7 +26,7 @@ IMPORTS_R4B_R2 = ('.TOC.', '__errno', 'clock_gettime', 'close', 'free', 'memalig
                   'pthread_create', 'pthread_join', 'pthread_mutex_destroy', 'pthread_mutex_init',
                   'pthread_mutex_lock', 'pthread_mutex_unlock', 'snprintf', 'strlen', 'sysThreadGetId', 'write',
                   'gcmGetLabelAddress', 'gcmGetReportDataAddressLocation', 'rsxFlushBuffer', 'strcpy')
-# Contract amendment (codex 23:01, exactly these three): the 10-31 reference archive predates pal_lv2.c's pal_read
+# Contract amendment (review 23:01, exactly these three): the 10-31 reference archive predates pal_lv2.c's pal_read
 # (read), pal_rewind (lseek) and pal_sync (fsync), so the r2 baseline above was stale; target attempt 2 (r4b-t3)
 # failed on exactly them.  Any further unexpected import still stops the checkpoint.
 IMPORTS = IMPORTS_R4B_R2 + ('fsync', 'lseek', 'read')

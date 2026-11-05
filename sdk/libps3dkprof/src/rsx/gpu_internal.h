@@ -1,5 +1,5 @@
 /* P3.3 R2: the runtime's GPU domain table (host only, internal).  Design: p3.3-r2 935936fb + deltas 2400e50a,
- * 0e23d13e and the codex 12:53 rulings.
+ * 0e23d13e and the review 12:53 rulings.
  *
  * A TABLE SLOT outlives the domains attached in it:
  *  - users, id (atomics) and the snap mutex are process-lifetime words, initialized once at runtime init and never

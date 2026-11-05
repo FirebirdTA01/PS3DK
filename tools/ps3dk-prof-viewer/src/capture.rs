@@ -1,4 +1,4 @@
-//! Frame snapshots ("Capture full frame": design r1 + r2 delta 088bfb34, codex 2026-11-04 21:58 corrections and the
+//! Frame snapshots ("Capture full frame": design r1 + r2 delta 088bfb34, review 2026-11-04 21:58 corrections and the
 //! 22:29-22:30 A1 review, docs/local/prof-viewer/frame-capture-a1-r2-checklist.md).  No egui types.
 //!
 //! - A snapshot is an OBSERVED-DATA freeze of one (owner, frame) of one analysed byte string.  It is never a complete

@@ -48,12 +48,12 @@ ROWS = {
     'c5029_return_and_out': (FP, 'f', 'float4 f(float4 x : TEXCOORD0, out float4 c : COLOR) { c = x; return x; }\n', 'C5029'),
     'out_only_accepts': (FP, 'f', 'void f(float4 x : TEXCOORD0, out float4 c) { c = x; }\n', [0.5, -0.25, 0.75, 1.0]),
     # A type named in an ARRAY EXTENT propagates too in the established compiler
-    # (float3 a[int(1)], b = ... makes b an int; review: codex), but this
+    # (float3 a[int(1)], b = ... makes b an int; review), but this
     # parser refuses a non-literal extent outright, so that shape is a
     # refusal either way and is not pinned here.  A literal extent names
     # no type:
     'array_extent_literal': (FP, 'main', 'float4 main(float4 t : TEXCOORD0) : COLOR { float3 a[1], b = t.rgb; return float4(b, 1.0); }\n', [0.5, -0.25, 0.75, 1.0]),
-    # A void program spelled through a typedef is still void (review: codex).
+    # A void program spelled through a typedef is still void (review).
     'typedef_void_accepts': (FP, 'main', 'typedef void V;\nV main(float4 x : TEXCOORD0, out float4 c : COLOR) { c = x; }\n', [0.5, -0.25, 0.75, 1.0]),
 }
 

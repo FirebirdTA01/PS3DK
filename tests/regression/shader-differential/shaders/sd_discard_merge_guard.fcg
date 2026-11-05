@@ -1,5 +1,5 @@
 // shader-differential - a discard in a two-predecessor merge INSIDE an outer guarded
-// block (codex, counterexample to 5bee678, 2026-09-02).  The outer guard c.a < 0.5
+// block (review, counterexample to 5bee678, 2026-09-02).  The outer guard c.a < 0.5
 // must reach the kill: where it is false (columns 0..26) the else arm e = COLOR0 has
 // e.a < 0.25 on rows 46..63, so a path that loses the outer guard kills 486 pixels the
 // established compiler paints, and one that keeps only an inner comparison kills a different set
@@ -7,7 +7,7 @@
 // 2346.  MEASURED 2026-09-02 16:10: general IDENTICAL at 2832/2832 (the guard pass
 // intersection cancels the merge's pair and keeps the outer literal); DEFAULT path
 // MISMATCH, ours painted 3264 in 4 instructions (kills on the wrong comparison), and
-// 5bee678's refusal did not fire - the shape codex named.  Curated |general only:
+// 5bee678's refusal did not fire - the shape the review named.  Curated |general only:
 // the default disposition is a refusal (nested-discard-reachability replacement), and a refusing
 // curated row aborts the stage.
 //

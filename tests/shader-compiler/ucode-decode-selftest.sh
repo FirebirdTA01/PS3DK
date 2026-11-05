@@ -124,8 +124,8 @@ must_refuse("dropped", dropped, "a whole row went missing", len(rows))
 #    no successor index to disagree with, so the run-length check stays
 #    silent and the decoder returns n-1 of n rows as if that were the whole
 #    program.  The unparseable row therefore has to raise ON ITS OWN.
-#    codex measured this against both decoders on a real 174-row dump
-#    (build/codex-dump-integrity-review/last-row-spliced.log): both returned
+#    A reviewer measured this against both decoders on a real 174-row dump
+#    (build/review-dump-integrity-review/last-row-spliced.log): both returned
 #    173 of 174 before this rule.
 last = []
 for n, line in enumerate(good):
@@ -142,7 +142,7 @@ must_refuse("last-row", last, "a stderr fragment landed in the FINAL row, "
 #    digits and the colon of the final row, so the two lines it leaves
 #    behind - "4 src0 kind=1 ..." and ": 8280..." - neither open
 #    "<digits>:" nor break the index sequence, and the row simply vanishes.
-#    Fable measured it on the revised decoder (review of c5916bb6).  What
+#    A reviewer measured it on the revised decoder (review of c5916bb6).  What
 #    catches it is the dump's own header: "NV40 ucode words: N" is a row
 #    count the log states independently, so 4 * rows == N closes every
 #    final-row shape, this one included, and a tail lost to a truncated

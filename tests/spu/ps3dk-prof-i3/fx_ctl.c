@@ -1,4 +1,4 @@
-/* I3a checker controls (codex 09:24): small SPU entry points the ordering checker must judge exactly.  Linked only.
+/* I3a checker controls (review 09:24): small SPU entry points the ordering checker must judge exactly.  Linked only.
  * Every entry takes the control struct first (the checker's P(arg,0)), as the API entries take the writer.
  *   ctl_good              PUT tag 5, mask 1<<5, update ALL, RdTagStat, PUTLLUC + status: PASS (the model clears)
  *   ctl_tail              a wrapper TAIL-BRANCHES to a PUT helper, then PUTLLUC: VIOLATION C

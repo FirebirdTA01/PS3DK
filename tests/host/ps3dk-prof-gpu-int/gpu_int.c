@@ -857,7 +857,7 @@ static void hold_setup(int frames_a)
     CHECK(ps3dk_prof_drain() == 0, "drain 1: THREADS for A and B");
     ps3dk_prof_test_hooks.drainer_after_tables = after_tables;
 }
-/* codex's case: two owners queued, the first prefix held, the second owner declared then RETIRED with its slot freed
+/* review case: two owners queued, the first prefix held, the second owner declared then RETIRED with its slot freed
  * and REUSED before the drainer ever reads its event: its evidence must come from the free scan (decl_acc of that
  * slot then names the new incarnation, which must never bind); then everything unblocks and is emitted exactly */
 static int c_two_owner(void)
@@ -1486,7 +1486,7 @@ static int c_fault(const char *which)
     return 0;
 }
 
-/* ================================================================ codex 14:03 corrections */
+/* ================================================================ review 14:03 corrections */
 
 /* the callback sink's observations: which threads wrote, which chunk types, a pause, reentry from the callback */
 static pthread_t g_ctx_th, g_main_th;
@@ -1942,7 +1942,7 @@ static int c_mixed_tsan(void)
     return 0;
 }
 
-/* ================================================================ codex 14:53: detach COMPLETION (THREAD mode) */
+/* ================================================================ review 14:53: detach COMPLETION (THREAD mode) */
 
 /* the drain thread's terminal turn is held inside its FINAL write: `retired` is already set, the turn is not done.
  * held:   a waiter times out (never OK early); released: OK; a repeated wait: OK
@@ -2086,7 +2086,7 @@ static int c_frame_unlock_refusal(const char *which)
     return 0;
 }
 
-/* ================================================================ codex 16:11: the acknowledgement's lifetime */
+/* ================================================================ review 16:11: the acknowledgement's lifetime */
 
 /* THREAD mode: the drain thread pauses between its REAL closing unlock and the detach acknowledgement.  Meanwhile:
  * the timed-out waiter's release is EBUSY (the completion is pending); an attach goes into ANOTHER free slot (two

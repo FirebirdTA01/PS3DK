@@ -1,4 +1,4 @@
-/* E1: the first on-console SPU-lane + RSX-domain probe (design p3.3 E1 r1-r4 + codex 05:30).  UNVALIDATED ON TARGET.
+/* E1: the first on-console SPU-lane + RSX-domain probe (design p3.3 E1 r1-r4 + review 05:30).  UNVALIDATED ON TARGET.
  *
  * One SPU lane (one thread, the program in spu/), then one GPU domain (NOP blocks, no display), APP drain mode on this
  * thread, phases strictly in sequence.  Every group of calls is bracketed by an EXTP1 marker (e1_marker.h) so a hang

@@ -1,4 +1,4 @@
-/* Localization probe W / W0 (design r4 2afa7bf3 + codex 19:47): the c4 clock probe (samples/profiling/clock-
+/* Localization probe W / W0 (design r4 2afa7bf3 + review 19:47): the c4 clock probe (samples/profiling/clock-
  * calibration at 0ae94745) PLUS checkpoint markers.  A CHANGED, INSTRUMENTED binary: never "c4 unchanged", and no
  * timing result is compared with c2/c4.  W_VARIANT_W0 omits the one decrementer write request (milestones 11/12);
  * W0 is a later, separately gated experiment.  UNVALIDATED ON TARGET.

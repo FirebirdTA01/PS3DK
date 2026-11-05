@@ -42,7 +42,7 @@ VALUE = [
 REFUSE = [
     ('three_dimensions', M + 'float c[2][2][2]; c[0][0][0] = t.x; return float4(c[0][0][0], 0, 0, 1); }', 'more than two dimensions'),
     # A two-dimensional array PARAMETER is refused: its rows would not be
-    # rebound, so a caller row of the same name could be read (review: codex).
+    # rebound, so a caller row of the same name could be read (review).
     ('param_2d_shadow', 'float h(float a[2][2]) { return a[0][0]; }' + NL +
                         M + 'float a[2][2]; float b[2][2]; a[0][0] = t.x; b[0][0] = t.y; return float4(h(b), 0, 0, 1); }',
      'two-dimensional array parameter'),

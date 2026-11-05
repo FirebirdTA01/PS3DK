@@ -88,7 +88,7 @@ int pal_thread_create(pal_thread *t, void *(*fn)(void *), void *arg, size_t stac
     rc = pthread_attr_setstacksize(&a, stack_bytes);
     if (rc == 0)
         rc = pthread_create(t, &a, fn, arg);
-    /* Deliberately unchecked (codex 03:21): an error path here could lose ownership of a drain thread that
+    /* Deliberately unchecked (review 03:21): an error path here could lose ownership of a drain thread that
      * pthread_create already started.  Source-bound assumption: the pinned librt pthread_attr_destroy returns 0 for a
      * non-NULL attribute (runtime/lv2/librt/pthread.c:1009-1015@ea58c6ea: EINVAL only for NULL, else clears
      * is_initialized and returns 0), and &a is a non-NULL local. */

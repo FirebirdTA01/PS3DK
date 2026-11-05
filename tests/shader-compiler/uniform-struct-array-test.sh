@@ -84,7 +84,7 @@ else:
 
 # A sampler member's binding (`sampler2D tex : TEXUNIT3`) carries to every
 # element, read or not, and the TEX samples unit 3; the same for a plain
-# uniform struct (codex's probe; both used to sample unit 0).
+# uniform struct (the review's probe; both used to sample unit 0).
 def sampler_info(b):
     h = struct.unpack_from('>8I', b, 0); recs = []
     for i in range(h[3]):

@@ -159,7 +159,7 @@ accept fp_c5122_nosem_f               "called helper with no semantics (control)
 # EACH ROW MUST STAND ON ITS OWN BEFORE THE TWO ARE COMPARED.  Comparing two
 # results that are both INVALID compares equal: a crash gives 134 on both files
 # with empty first diagnostics, and a bare "the two agree" then reads PASS.
-# codex measured exactly that against a wrapper returning 134 (2026-09-14).  So
+# A reviewer measured exactly that against a wrapper returning 134 (2026-09-14).  So
 # each file is first held to the same bar as every other refusal row here -
 # exit 1 exactly, the named evaluator diagnostic, no container - and only then
 # are the two compared.  When entry-default-call-fold lands and the fold starts working,

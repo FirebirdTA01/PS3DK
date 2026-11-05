@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""P3.3 R4a: the REAL GCM port inside the REAL runtime, HOST ONLY (design 5bb6b922 + r2 delta 7cb3397d, codex GO
-18:55; harness corrections codex 19:26).  Host-model evidence, not target evidence: the executor decoding the
+"""P3.3 R4a: the REAL GCM port inside the REAL runtime, HOST ONLY (design 5bb6b922 + r2 delta 7cb3397d, review GO
+18:55; harness corrections review 19:26).  Host-model evidence, not target evidence: the executor decoding the
 command words is ours; Q1/Q2 stay hardware questions; A1/A2 stay assumptions; Mode C's SC device memory and its
 completion accounting are EMULATOR properties, stronger than anything real hardware promises.
 

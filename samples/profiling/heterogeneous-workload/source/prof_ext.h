@@ -1,7 +1,7 @@
 #ifndef HETEROGENEOUS_PROF_EXT_H
 #define HETEROGENEOUS_PROF_EXT_H
 /* SPU-lane and RSX-domain profiling for the heterogeneous workload (SAMPLE_PROF_EXT; design
- * docs/local/prof-viewer/hw-sample-spu-rsx-design.md r1 + r2/r3 deltas + codex 20:57 and 21:08 corrections).
+ * docs/local/prof-viewer/hw-sample-spu-rsx-design.md r1 + r2/r3 deltas + review 20:57 and 21:08 corrections).
  *
  * Pure logic and the lifecycle ORDER live here, with no SDK header: the profiler and GCM calls go through ports,
  * bound to the real API in prof_ext_bind.c (target) and to mocks in host-tests/test_prof_ext.c.

@@ -5,7 +5,7 @@
 // default-value assignment to the first and shipped (a208a73d) with the
 // second still dropping every default; A3's row-TYPE fix covered both loops,
 // which is what made it look right while the values were missing.  Found by a
-// review probe (codex), not by any fixture - vp_matrix_default_v.vcg and
+// review probe, not by any fixture - vp_matrix_default_v.vcg and
 // fp_uniform_default_f.cg both take ordinary entry parameters and cannot see
 // this path at all.
 //

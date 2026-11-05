@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P3.2 I3b driver (design I3b r2 + codex 09:49): SPU image registration from the raw SPU ELF, host only.
+"""P3.2 I3b driver (design I3b r2 + review 09:49): SPU image registration from the raw SPU ELF, host only.
 
 Runs on Windows with an installed SDK's SPU tools and WSL (Ubuntu) for the host harness:
   1. SPU fixture images from the I3a fixture sources: -O2, -O2 pic (-fpic -mno-error-reloc), -Os gc, a

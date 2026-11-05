@@ -10,7 +10,7 @@
 // ACCEPT: a suppressed missing name must not CASCADE.  f takes two arguments
 // and gets one error-typed argument from the held finding; fabricating an
 // arity error from it would refuse a program the established compiler accepts
-// (review: codex).
+// (review).
 float4 f(float4 a, float b) { return a * b; }
 float4 unused(float4 t) { return f(missing(t)); }
 float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

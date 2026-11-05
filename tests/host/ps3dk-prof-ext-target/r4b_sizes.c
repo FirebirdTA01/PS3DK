@@ -1,6 +1,6 @@
 /* P3.3 R4b target SIZE/ASSERT probe (compiled, never linked or run): the ILP32 sizes of the extension's structures,
  * each as the size of an array the nm -S of this object reports, and the GCM layout / constant assertions the GPU
- * binding relies on (codex 22:26: in the target fixture). */
+ * binding relies on (review 22:26: in the target fixture). */
 #include <stddef.h>
 #include <stdint.h>
 

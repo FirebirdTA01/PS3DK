@@ -228,7 +228,7 @@ PY
 # puts the subtype block on top of the header, and len-1 leaves 21 of its 22
 # bytes off the end.  Both used to be accepted, and the ucode still decoded,
 # because the ucode is found by its own offset - so the container read clean
-# while its metadata pointed at nothing (codex).
+# while its metadata pointed at nothing (review).
 poke prog_zero 20 0
 malformed prog_zero "inside the parameter table"
 poke prog_end 20 "$(( $(wc -c < "$work/tex0.fpo") - 1 ))"
@@ -243,7 +243,7 @@ malformed bad_revision "format revision"
 # programOffset land in the MIDDLE of the table - the records are still there,
 # the ucode is still found by its own offset, and the container reads clean
 # while its metadata points into someone else's bytes.  And an unbounded
-# parameter count puts the table's end past any real file (codex).
+# parameter count puts the table's end past any real file (review).
 poke prog_in_table 20 32
 malformed prog_in_table "inside the parameter table"
 poke huge_nparams 12 0xffffffff
@@ -261,7 +261,7 @@ printf '  %-42s %s\n' "malformed input" "13 shapes refused with a reason, none a
 # FENCBR sets OUT_NONE and then puts register 0x3F and mask 0xF into fields
 # that are meaningless with it - deliberately, to match the established compiler byte for
 # byte.  Rendering those as a write to R63.xyzw invents a destination exactly
-# as naming an unused slot invents a read (codex).
+# as naming an unused slot invents a read (review).
 # The BIT decides this, not the opcode name: setting OUT_NONE on an
 # ordinary MOV must take its destination away too.  Every FENCBR the tree
 # emits is checked further down, where the corpus containers already exist.

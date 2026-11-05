@@ -1,7 +1,7 @@
 // errno-lv2: the LV2 errno values (newlib 0020) as EXECUTED by the rebuilt runtime, both ABIs.
 //
 // On the PS3 LV2 target the E* names are the LV2 status codes (EBUSY == 0x8001000A, ...).  The macros alone prove
-// nothing about the libraries that produce and consume errno, so this row runs them (review: codex):
+// nothing about the libraries that produce and consume errno, so this row runs them (review):
 //   1. the names carry the LV2 codes;
 //   2. pthreads: a held mutex's trylock returns EBUSY by name, the self-held (EDEADLK -> EBUSY fold) case too, a
 //      timed lock that cannot get a held mutex returns ETIMEDOUT, a rwlock trywrlock under the caller's own write

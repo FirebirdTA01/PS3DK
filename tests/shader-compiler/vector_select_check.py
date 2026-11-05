@@ -66,7 +66,7 @@ ACCEPT = {
     'int4_cond': (M + ' { int4 k = (int4)(a*4); return k ? a : b; }',
                   per_lane(4, lambda x, y, i: sel(int(x * 4) != 0, x, y))),
     # Finite constant arms an arithmetic blend gets wrong: (1 - 2^30) + 2^30
-    # is 0 in binary32 (codex, review of c0b6589e).  The scalar form was
+    # is 0 in binary32 (review of c0b6589e).  The scalar form was
     # already wrong before vector conditions existed.
     'big_const_arms': (M + ' { return (a > b) ? float4(1.0) : float4(1073741824.0); }',
                        per_lane(4, lambda x, y, i: sel(x > y, 1.0, 2.0 ** 30))),

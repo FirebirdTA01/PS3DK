@@ -1,5 +1,5 @@
 /* Every host B test, in plan order: RT(name).  rt_main.c turns this into the registry; build-and-run.sh runs each in
- * its own process.  The test names are those of STAGE3-PLAN-r2, its errata 1 and 2, and the codex 23:55 boundary
+ * its own process.  The test names are those of STAGE3-PLAN-r2, its errata 1 and 2, and the review 23:55 boundary
  * correction; "(+)" marks a test added beside a named one (CODE-REVIEW.md lists why). */
 
 /* r2 10.1: the section 10 stage-3 obligations */
@@ -103,7 +103,7 @@ RT(rt_mixed_pushed_refused_lifo)
 RT(rt_pushed_copy_after_pop_no_aba)
 RT(rt_init_clock_failure_eclock_retryable)
 
-/* codex 23:55 boundary correction */
+/* review 23:55 boundary correction */
 RT(rt_counter_refused_misuse_at_ceiling)
 RT(rt_counter_refused_at_ceiling_id_below)
 RT(rt_counter_regerr_at_ceiling)
@@ -111,12 +111,12 @@ RT(rt_counter_refused_id_exhausted)
 RT(rt_counter_span_id_exhausted) /* (+) the span-id counter of the same rule */
 RT(rt_counter_stop_batch_refused_at_ceiling)
 
-/* codex 00:59 / 01:13 / 02:34: ID_COLLISION as SYNTHETIC branch coverage (test-only candidate-id hook) */
+/* review 00:59 / 01:13 / 02:34: ID_COLLISION as SYNTHETIC branch coverage (test-only candidate-id hook) */
 RT(rt_id_collision_detected)
 RT(rt_id_noncollision_control)
 RT(rt_id_same_name_not_collision)
 
-/* codex 2026-10-22 02:45 R3: the OS thread id read fails closed (pal_os_thread_id status + out-param) */
+/* review 2026-10-22 02:45 R3: the OS thread id read fails closed (pal_os_thread_id status + out-param) */
 RT(rt_thread_begin_os_id_failure_refused)
 RT(rt_thread_begin_os_id_failure_second_thread)
 RT(rt_auto_register_os_id_failure_then_recovery)

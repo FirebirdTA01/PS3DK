@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""I3a ordering checker over the disassembly of a LINKED SPU ELF (design I3 r2 section 4, codex 09:24).
+"""I3a ordering checker over the disassembly of a LINKED SPU ELF (design I3 r2 section 4, review 09:24).
 Instruction-order evidence only: it says nothing about hardware visibility, and it does not decide which LS stores
 feed which DMA (that is the separate store-placement audit).
 

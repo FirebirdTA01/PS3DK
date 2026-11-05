@@ -7,7 +7,7 @@
 //
 // So an unreachable body IS analysed - only this one class is gated.
 //
-// REFUSE: the discriminator codex measured.  The name HAS a visible
+// REFUSE: the discriminator the review measured.  The name HAS a visible
 // declaration - f(float4,float) - so the wrong arity is C1103 and
 // unconditional, EVEN THOUGH a later exact f(float4) exists and even
 // though the body is unreachable.  A gate keyed on "resolution would have

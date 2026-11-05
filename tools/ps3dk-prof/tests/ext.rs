@@ -1225,7 +1225,7 @@ fn epoch_calibration_and_loss_after_final_are_malformed() {
     }
 }
 
-// ---- the decrementer observed-variation classification (design p3.2 dec-write r2 section 3; codex 02:07/02:08) ----
+// ---- the decrementer observed-variation classification (design p3.2 dec-write r2 section 3; review 02:07/02:08) ----
 
 use ps3dk_prof::ext::{counter_variation, CounterVariation, EpochVariation, ExtCapture};
 use CounterVariation::{Insufficient, Moving, Static};

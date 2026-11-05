@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E1 host tests (design p3.3 E1 r3 section F + r4 section 4 + codex 05:30 and 10:25): the PPU flow of source/main.c
+"""E1 host tests (design p3.3 E1 r3 section F + r4 section 4 + review 05:30 and 10:25): the PPU flow of source/main.c
 built for the host (e1_host.h fakes, the real runtime, the real SPU core and writer on a host thread, the R4a GCM port
 model), the report predicate, the marker validator and the acceptance checker, each with damage controls and judge
 controls.  HOST MODEL ONLY: no statement here is target evidence.
@@ -499,7 +499,7 @@ def main():
         fname = next(d.glob(f'extp-*-{seq:02d}.mk')).name
         verdict(f'validator control {name}: exactly its named reason', applied and v.returncode == 1 and
                 named_judge(v.stdout, fname, reason), v.stdout[-300:])
-    # a writer result the call cannot return, and a post-GO call in report 1 (codex 10:25 point 3)
+    # a writer result the call cannot return, and a post-GO call in report 1 (review 10:25 point 3)
     for name, (src_case, edits, reason) in {
         'rc-not-a-writer-result': ('attach-fails', [('spu-status:attach:-5', 'spu-status:attach:-1'),
                                                     ('fail=attach:-5', 'fail=attach:-1')],

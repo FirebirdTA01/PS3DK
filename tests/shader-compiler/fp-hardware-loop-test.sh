@@ -167,25 +167,25 @@ VALUE = [
                 'return float4(a, b, i, 1); }', if_else),
     ('else_if', H + 'float s = 0; for (float i = 0; i < t.x; i++) { if (i < 1) s += 1; else if (i < 3) s += 10; '
                 'else s += 100; } return float4(s, 0, 0, 1); }', else_if),
-    # Two loops in one block: each keeps its own carries (review: codex, LOOP2).
+    # Two loops in one block: each keeps its own carries (review, LOOP2).
     ('sequential', H + 'float a = 0, b = 0; for (float i = 0; i < t.x; i++) a += t.y; '
                    'for (float j = 0; j < t.z; j++) b += t.w; return float4(a, b, 0, 1); }', sequential),
     # A carried variable takes an unchanged one's value: the latch reads the
-    # unchanged value, not a dropped carry (review: codex, LOOP3).
+    # unchanged value, not a dropped carry (review, LOOP3).
     ('assign_invariant', H + 'float a = 7, b = t.y; for (float i = 0; i < t.x; i++) a = b; '
                          'return float4(a, b, 0, 1); }', assign_invariant),
     # A tail break, taken (s > t.z inside the trip count) and untaken.
     ('tail_break', H + 'float s = 0; float i; for (i = 0; i < t.x; i++) { s += t.y; if (s > t.z) break; } '
                    'return float4(s, i, 0, 1); }', tail_break_sum),
     # A swap with a tail break: the breaking iteration's swap is kept and the
-    # induction is not stepped (review: codex R2, swap-at-break control).
+    # induction is not stepped (review R2, swap-at-break control).
     ('tail_break_swap', H + 'float a = t.y, b = t.w; float i; for (i = 0; i < t.x; i++) { float k = a; a = b; b = k; '
                         'if (i >= t.z) break; } return float4(a, b, i, 1); }', tail_break_swap),
-    # The break guard IS a carry the latch swaps (review: codex TAIL1): the
+    # The break guard IS a carry the latch swaps (review TAIL1): the
     # guard is frozen before the latch writes the carries back.
     ('tail_break_bool_swap', H + 'bool a = t.y > 0; bool b = t.z > 0; float i; for (i = 0; i < t.x; i++) { '
                              'bool k = a; a = b; b = k; if (a) break; } return float4(a, b, i, 1); }', tail_bool_swap),
-    # The guard is a carry the body leaves alone, folded away (review: codex TAIL3).
+    # The guard is a carry the body leaves alone, folded away (review TAIL3).
     ('tail_break_invariant_bool', H + 'bool stop = t.y > 0; float s = 0; float i; for (i = 0; i < t.x; i++) { '
                                   's += 1; if (stop) break; } return float4(s, i, 0, 1); }', tail_invariant_bool),
     # The SDK SmokeEffect shape: a constant bound (50) and an accumulation that
@@ -209,7 +209,7 @@ REFUSE = [
     ('nested_runtime_loop', H + 'float s = 0; for (float i = 0; i < t.x; i++) { for (float j = 0; j < t.y; j++) s += 1; } '
                             'return float4(s, 0, 0, 1); }', 'error'),
     # The exit test runs before the latch: a condition that assigns would
-    # lose that write at the exit (review: codex, LOOP1).
+    # lose that write at the exit (review, LOOP1).
     ('condition_assigns', H + 'float n = t.x; float s = 0; for (float i = 0; i < (n = n - 1); i++) s += 1; '
                           'return float4(s, n, 0, 1); }', 'the loop condition assigns a variable'),
     # A constant trip count over 255 needs the nested loop (not implemented):
@@ -217,11 +217,11 @@ REFUSE = [
     ('constant_over_255', H + 'float s = 0; for (float i = 0; i < 300; i += 0.5) s += t.y; return float4(s, 0, 0, 1); }',
      'more than 255 iterations'),
     # A constant bound the guard must evaluate, not a literal (review:
-    # codex LOOP4): abs(-300.0) with step 0.5 is 600 iterations.
+    # review LOOP4): abs(-300.0) with step 0.5 is 600 iterations.
     ('constant_expression_over_255', H + 'float s = 0; for (float i = 0; i < abs(-300.0); i += 0.5) s += t.y; '
                                      'return float4(s, 0, 0, 1); }', 'more than 255 iterations'),
     # A constant bound behind a 40-level shared DAG (k[n] = min(k[n-1], k[n-1]))
-    # is classified once per value, not once per path (review: codex,
+    # is classified once per value, not once per path (review,
     # LOOP5-DAG): a named refusal well inside the subprocess timeout.
     ('constant_dag_over_255', H.replace(' { ', ' { float k0 = abs(-300.0); ' +
                               ''.join('float k%d = min(k%d, k%d); ' % (n, n - 1, n - 1) for n in range(1, 41))) +
@@ -229,7 +229,7 @@ REFUSE = [
      'more than 255 iterations'),
     ('break_not_last', H + 'float s = 0; for (float i = 0; i < t.x; i++) { if (s > t.z) break; s += t.y; } '
                        'return float4(s, 0, 0, 1); }', 'back-edge'),
-    # A closing break with a body write to the induction (review: codex TAIL2).
+    # A closing break with a body write to the induction (review TAIL2).
     ('tail_break_induction_write', H + 'float s = 0; float i; for (i = 0; i < t.x; i++) { s += 1; i += 1; '
                                    'if (s > t.y) break; } return float4(s, i, 0, 1); }', 'writes its induction variable'),
     ('tail_break_induction_alias', H + 'float i; float b = t.y; float s = 0; for (i = 0; i < t.x; i++) { float k = i; '

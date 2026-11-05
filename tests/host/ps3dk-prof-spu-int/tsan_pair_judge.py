@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Judge of the I2 TSan line-A control pair and the shared TSan run classifier (codex 01:16; codex 01:23 CHANGES).
+"""Judge of the I2 TSan line-A control pair and the shared TSan run classifier (review 01:16; review 01:23 CHANGES).
 
 Only COMPLETE, fully parsed executions count.  stderr is parsed as the GCC ThreadSanitizer report format (the format
 observed in i2ctl-g1/tsan-linea-drop-1, stated as the supported format; anything else is INVALID):
@@ -260,8 +260,8 @@ def selftest():
         ('only a p_putllc report (the read is not named)',
          judge(D, 66, out(D), report(a1=('memcpy', 'p_putllc'), a2=('memcpy', 'line_a_store')) +
                'ThreadSanitizer: reported 1 warnings\n'), 'INVALID'),
-        ('codex repro: truncated from the Location section on', judge(D, 66, out(D), trunc), 'INVALID'),
-        ('codex repro: bogus receipt and completion', judge(D, 66, 'LINEA drop nonsense\nI2 linea-drop PASS_BOGUS\n',
+        ('review repro: truncated from the Location section on', judge(D, 66, out(D), trunc), 'INVALID'),
+        ('review repro: bogus receipt and completion', judge(D, 66, 'LINEA drop nonsense\nI2 linea-drop PASS_BOGUS\n',
                                                             one), 'INVALID'),
         ('a receipt of another case', judge(D, 66, out(D, rec['linea-locked']), one), 'INVALID'),
         ('a receipt whose step-3 sample is not the stored read_idx',

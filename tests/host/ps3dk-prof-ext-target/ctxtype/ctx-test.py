@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GPU API context-type matrix (P3.3 ctx-type fix; codex 00:14 GO + carries).
+"""GPU API context-type matrix (P3.3 ctx-type fix; review 00:14 GO + carries).
 
 --target: the PPU compilers.  POSITIVE (each must compile with NO diagnostic, -Werror): C11 in both include orders;
 C++ gnu++17 and c++20 in both include orders.  NEGATIVE (each must FAIL, and its FIRST error must be the pointer

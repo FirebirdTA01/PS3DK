@@ -89,7 +89,7 @@ def count_insn(text):
         # Counted WITH inline const blocks: that is the container's
         # instructionCount semantics (ucode/16), which the established compiler's field -
         # read by reference_insn - also carries, so the two columns are like
-        # for like (claude, review of a0cd14f: excluding them here read 59
+        # for like (review of a0cd14f: excluding them here read 59
         # against a reference 63 whose true like-for-like is 81).
         n += 1
     return n

@@ -1,4 +1,4 @@
-/* E1 SPU program logic (design p3.3 E1 r2-r4 + codex 05:30), portable: the SPU build binds it to the MFC channels
+/* E1 SPU program logic (design p3.3 E1 r2-r4 + review 05:30), portable: the SPU build binds it to the MFC channels
  * (spu/main.c), the host tests to an atomics-based model (host-tests).  The profiler writer API is the real one
  * (prof_spu_lane.h): SPU-built on the target, PS3DK_PROF_SPU_HOST_TEST over the host port table in the tests. */
 #ifndef E1_SPU_CORE_H

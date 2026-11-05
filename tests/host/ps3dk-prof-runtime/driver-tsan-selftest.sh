@@ -267,7 +267,7 @@ check id-write "admitted=0 controls=NA recfail=1 fail=1 notbuilt=recorder failur
     "setarch identity evidence write fails: recorder FAIL, no setarch call" "" ""
 # exact status codes
 check xrun-clean "st=0 xrc=7 recfail=0" "xrun records a child exit 7 as status 0, xrc 7 (recorder status separate from the child exit)" ""
-check xrun-argv "st=3 xrc=NOT-RUN recfail=1" "xrun with the argv record a directory (codex 01:40 repro): status 3, child NOT run" "" ""
+check xrun-argv "st=3 xrc=NOT-RUN recfail=1" "xrun with the argv record a directory (review 01:40 repro): status 3, child NOT run" "" ""
 check xrun-rc "st=4 xrc=7 recfail=1" "xrun with the rc record a directory: status 4 after the child ran" ""
 check direct-wrapper-ok "st=0 recfail=0" "tsan_wrapper_ok clean: 0" "" "--version|x86_64 -R true"
 check direct-probe-argv "st=2 recfail=1" "sanitizer_links tsan with the argv record a directory: 2, probe NOT launched" ""

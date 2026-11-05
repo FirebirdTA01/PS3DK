@@ -1,7 +1,7 @@
 # SPRX / PRX module generation — design
 
 Board task: `t_107ce1f6`. Follow-ups this design sequences: `t_fe7c705a` (export round-trip), `t_4bfdccc9` (CachyOS reference read — shares the host/mount).
-Companion facts memo (local-only, public-source citations with RPCS3 file:line): `docs/local/sprx-format-facts.md` (claude_PS3DK, 2026-08-29). **The memo is the byte-level spec; this document is the design and the contract between the pieces.**
+Companion facts memo (local-only, public-source citations with RPCS3 file:line): `docs/local/sprx-format-facts.md` (2026-08-29). **The memo is the byte-level spec; this document is the design and the contract between the pieces.**
 Status: **v2, 2026-08-29 02:00** — implementation started overnight on the director's instruction ("working (s)prx build option + RPCS3-tested sample by morning"). Tags: `[C]` confirmed from public source or our tree (link-tested where stated), `[R]` confirm on the CachyOS 475.001 read (read-only, never copied — `reference/REFERENCE_POLICY.md`).
 
 ## 0. Decisions
@@ -86,7 +86,7 @@ Segment count/flags/section names of a shipped `.sprx`; whether `p_paddr − p_o
 * **Install**: `scripts/build-runtime-lv2.sh` builds `lv2-prx-crt.o` for ILP32 and LP64 and installs `.o/.ld/.specs` next to `lv2.ld` in both trees; manifest rows `sdk_core ppu/lib/{lv2-prx-crt.o,lv2-prx.ld,lv2-prx.specs}` + `ppu/lib/lp64/lv2-prx-crt.o`.
 * **Link-test result** (scratch module: `prx_add`, a data table, a function pointer, a strong `module_start`; offsets are from the original single-phdr script — with the reserved `0x700000A4` slot added on 2026-08-29 the table is 2 entries at `0x40`–`0xb0` and `.rodata.sceModuleInfo` sits at `0xb0`): one `PT_LOAD` `off 0 vaddr 0 filesz 0x234 memsz 0x238 RWE`; `.rodata.sceModuleInfo` at file offset 0x78; `.rela.rodata.sceModuleInfo` = exactly five `ADDR32` (`.TOC.`, the four range symbols) — **the `.TOC.` relocation survives `-q`**; `.rela.opd` = two `ADDR32` per entry; whole-file reloc set `ADDR32 ×22, REL32 ×2 (.eh_frame), TOC16_HA ×2, TOC16_LO ×2`; `.lib.ent` bytes: management `2c00 0001 8000 0002 … name 0`, named `2c00 0001 0001 0001 … name → "hello_prx"`. `.TOC.` resolves to `0x8200` (= `__lv2_got_start + 0x8000`), a value outside the segment — normal r2 bias; the loader bounds-checks sites, not values.
 
-### 3.2 `prx-gen` (`tools/prx-gen/`, Rust, MIT) — claude_PS3DK
+### 3.2 `prx-gen` (`tools/prx-gen/`, Rust, MIT)
 
 `prx-gen build <in.elf> -o <out.prx> --name N --version M.m [--attributes 0x..]`; `prx-gen check <prx>`; `prx-gen exports <prx> -o <yml>` (follow-up).
 
@@ -98,7 +98,7 @@ Segment count/flags/section names of a shipped `.sprx`; whether `p_paddr − p_o
 6. **Write**: ELF64 BE header (`0x66`, `0xFFA4`, `e_entry 0`, `e_phnum 2`), `PT_LOAD` copied with `p_paddr` = module-info file offset, `0x700000A4` segment last; no section headers in v1.
 7. **`check`**: re-open the output, derive the block from `p_paddr`, walk both ranges by stride, verify `attributes ∈ {0x0001 set, 0x8000-only}`, all `nids/addrs/name` pointers inside the segment, management record carries `0xBC9A0086`; decode every reloc at a fake base and assert the five block pointers land inside their ranges.
 
-### 3.3 CMake surface (`cmake/ps3-self.cmake`) — codex
+### 3.3 CMake surface (`cmake/ps3-self.cmake`)
 
 ```cmake
 ps3_add_prx(<target> NAME <≤27> VERSION <M.m> [ATTRIBUTES <hex>] [SIGN])
@@ -114,16 +114,16 @@ ps3_prx_stub_library(<lib-target> EXPORTS <exports.yml>)    # lib<name>_stub.a v
 
 | # | Deliverable | Path | Owner | State (02:00) |
 |---|---|---|---|---|
-| 1 | Design doc | `docs/design/sprx-generation.md` | Fable | this |
-| 2 | Facts memo | `docs/local/sprx-format-facts.md` | claude_PS3DK | done |
-| 3 | crt + ld + specs + install | `runtime/lv2/crt/lv2-prx.{S,ld,specs}`, `scripts/build-runtime-lv2.sh` | Fable | done, link-tested |
-| 4 | Export macros header | `sdk/include/sys/prx_module.h`, `sdk/Makefile` HEADERS | Fable | done |
-| 5 | `prx-gen` crate + manifest row | `tools/prx-gen/`, `tools/Cargo.toml`, `tools/Cargo.lock`, `cmake/ps3-required-artifacts.txt` | claude_PS3DK | done; 13 unit tests on a synthetic BE ELF (U0) incl. `.TOC.`-outside-segment, unencoded addends, attributes-0 rejection, re-run refusal |
-| 6 | `make_sprx` host tool + manifest row | `scripts/build-host-tools-windows.sh`, manifest | codex | in progress |
-| 7 | CMake surface | `cmake/ps3-self.cmake` | codex | in progress |
-| 8 | Samples | `samples/lv2/hello-sprx-export/`, `hello-sprx-import/` | codex | in progress |
-| 9 | Spec update (§8 "Lv-2 module layout"), `section-reference.md` §3 record layout, `abi-verify` PRX mode | `docs/abi/…`, `tools/abi-verify` | Fable | after the RPCS3 pass |
-| 10 | `nidgen entgen` + `kind` field; `prx-gen exports` | `tools/nidgen`, `tools/prx-gen` | claude_PS3DK | morning |
+| 1 | Design doc | `docs/design/sprx-generation.md` | - | this |
+| 2 | Facts memo | `docs/local/sprx-format-facts.md` | - | done |
+| 3 | crt + ld + specs + install | `runtime/lv2/crt/lv2-prx.{S,ld,specs}`, `scripts/build-runtime-lv2.sh` | - | done, link-tested |
+| 4 | Export macros header | `sdk/include/sys/prx_module.h`, `sdk/Makefile` HEADERS | - | done |
+| 5 | `prx-gen` crate + manifest row | `tools/prx-gen/`, `tools/Cargo.toml`, `tools/Cargo.lock`, `cmake/ps3-required-artifacts.txt` | - | done; 13 unit tests on a synthetic BE ELF (U0) incl. `.TOC.`-outside-segment, unencoded addends, attributes-0 rejection, re-run refusal |
+| 6 | `make_sprx` host tool + manifest row | `scripts/build-host-tools-windows.sh`, manifest | - | in progress |
+| 7 | CMake surface | `cmake/ps3-self.cmake` | - | in progress |
+| 8 | Samples | `samples/lv2/hello-sprx-export/`, `hello-sprx-import/` | - | in progress |
+| 9 | Spec update (§8 "Lv-2 module layout"), `section-reference.md` §3 record layout, `abi-verify` PRX mode | `docs/abi/…`, `tools/abi-verify` | - | after the RPCS3 pass |
+| 10 | `nidgen entgen` + `kind` field; `prx-gen exports` | `tools/nidgen`, `tools/prx-gen` | - | morning |
 
 Cargo is available in WSL Ubuntu only (`/home/firebirdta01/.cargo/bin/cargo`, targets `x86_64-pc-windows-gnu` + linux); the dev loop builds `prx-gen.exe` there and copies it to `$PS3DK/bin`. Nothing is committed until the director's `approved:`; every owner keeps an explicit-path file list.
 

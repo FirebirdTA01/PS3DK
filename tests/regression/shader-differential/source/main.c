@@ -497,7 +497,7 @@ static u32            attr_buffer_offset;
 /* Lane recipe for attribute i (1..15) at quad corner (u, v): LINEAR in
  * (u, v), so the interpolated value at a pixel centre is the formula
  * itself.  Built for DISCRIMINATING POWER after the coverage FP's
- * *0.5+0.5 map and 8-bit quantisation (design review, claude): the
+ * *0.5+0.5 map and 8-bit quantisation (design review): the
  * index is the dominant term and every lane shares one (u, v) term, so
  * the separation between two attributes, or two lanes of one, does not
  * depend on where in the image you look.  Measured at the 64x64 pixel
@@ -561,7 +561,7 @@ static u32 base_texel(u32 x, u32 y, unsigned c)
  * stager mirrors it and prints the permutation per sampler).  Two
  * samplers in one program therefore see two different images, and a
  * container that reports the wrong texture unit for a name - the
- * declaration-order vs first-use sampler numbering codex found on
+ * declaration-order vs first-use sampler numbering the review found on
  * 5d44ba6 - shows as the wrong image, where one shared texture could
  * not show it.  Table order is lexicographic over "RGBA": entry p,
  * position i, names the BASE channel that output channel i reads. */
@@ -1123,7 +1123,7 @@ static int painted_depth(const u32 *img, u32 rt_pitch)
 /* Painted over the JUDGED outputs: the most pixels any judged colour
  * target or the judged zeta surface shows drawn.  A depth-only or
  * COLOR1-only program paints nothing on colour 0, and keying painted on
- * colour 0 alone made such a program vacuous by construction (codex,
+ * colour 0 alone made such a program vacuous by construction (review,
  * 2026-09-06). */
 static int painted_over(u32 *const *saves, int judge_mask, int judge_depth, u32 rt_pitch)
 {
@@ -1176,7 +1176,7 @@ static int canary_paints(CellGcmContextData *ctx, void *canary_container,
  * of them are instructions: an instruction whose source has type 2
  * (constant, low two bits of the source word) is followed by one 16-byte
  * block of immediate data.  ucode/16 counted those as instructions
- * (review finding, codex), which for the promotion comparison would
+ * (review finding), which for the promotion comparison would
  * report const-slot growth as instruction growth.  The words are read
  * as the guest sees them: the container stores each 32-bit word with
  * its halfwords swapped, so the type bits sit at bit 16 of the word as
@@ -1217,7 +1217,7 @@ static void measure_cost(void *container, u32 bytes, sd_cost *out)
 		 * writes its output at all - it paints whatever the register
 		 * held, the 'constant where the established compiler varies' signature the
 		 * sensitivity fields reported for two days before the decode
-		 * named it (implicit-colour-output, claude).  Decoded per instruction, not
+		 * named it (implicit-colour-output, review).  Decoded per instruction, not
 		 * read from any mask the container declares. */
 		{
 			u32 w0 = w[i * 4 + 0];
@@ -1568,7 +1568,7 @@ static int is_matrix_row_leaf(CGprogram vp, const char *name)
  * (int, bool, fixed). */
 /* The uniform names one side actually applied, as a bounded SET: a
  * list that silently dropped a name that did not fit could make two
- * different enumerations compare equal (review finding, claude), so an
+ * different enumerations compare equal (review finding), so an
  * overflow is recorded and withholds the verdict instead; and the two
  * sides need not enumerate in the same order - values are keyed by name
  * - so the comparison sorts first. */
@@ -1908,7 +1908,7 @@ static int     g_npairs;
  * The optional seventh field marks a SWEEP row (reference corpus,
  * path-pair corpus): there a discard-blind verdict is measurement
  * inventory.  A curated row carries no flag, and its contract is
- * identical AND discriminating - discard-blind fails the run (claude,
+ * identical AND discriminating - discard-blind fails the run (review,
  * review of 5a9630b: without this the curated list can regress from
  * discriminating to blind and still read SHADER_DIFF_OK). */
 static int load_manifest(void)
@@ -1979,7 +1979,7 @@ static int load_manifest(void)
 		/* The splitter stops at the ninth field and leaves anything after
 		 * it INSIDE the ninth ('vp=x|bogus' would read as a vp= path), so a
 		 * separator still present in the last field is a line with too many
-		 * fields (codex, review of 67a3f48). */
+		 * fields (review of 67a3f48). */
 		if (nf < 6 || nf > 9 || strchr(fields[nf - 1], '|')) {
 			printf("shader-differential: manifest line %d: expected 6 |-fields (up to 9 with blind-ok / vp=<path> / judge=<list>), got %d\n",
 			       lineno, nf);
@@ -2039,7 +2039,7 @@ static int load_manifest(void)
 				snprintf(p->vp_path, sizeof(p->vp_path), "%s", fields[k] + 3);
 			} else if (g_rt_f32 && strncmp(fields[k], "judge=", 6) == 0) {
 				/* float mode judges colour 0 only; an extra output it would
-				 * silently ignore is refused (codex review of f37d5f41) */
+				 * silently ignore is refused (review of f37d5f41) */
 				printf("shader-differential: manifest line %d: judge= is not supported in float mode (@rt f32 judges colour 0 only)\n",
 				       lineno);
 				fclose(f);
@@ -2336,7 +2336,7 @@ static u32 be32_at(const u8 *b, u32 off)
  * refuses, C5029) - declares colour 0.  Measured 2026-09-06 on reference
  * containers.  A container declaring nothing is named by the judge, never
  * seeded with colour 0: the first draft seeded bit 0 and so could not tell
- * a depth-only or COLOR1-only program from one writing colour 0 (codex). */
+ * a depth-only or COLOR1-only program from one writing colour 0 (review). */
 static void fp_declared_outputs(const void *container, u32 size, sd_outdecl *o)
 {
 	const u8 *b = (const u8 *)container;
@@ -2490,7 +2490,7 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	/* Zeroed here, not only on the full path: a control row that exits
 	 * early (load failed, unstable) still has its painted/kil fields
 	 * printed by its validator, and an uninitialised sd_result would
-	 * print stack (codex, review of 5a9630b). */
+	 * print stack (review of 5a9630b). */
 	r->painted_a = r->painted_b = 0;
 	r->kil_a = r->kil_b = 0;
 	r->max_delta = 0;
@@ -2616,13 +2616,13 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 	 * under a COLOR0+COLOR2 program) receives whatever its register R2
 	 * held, and R2 is ordinary scratch for that program: comparing it
 	 * would compare two allocators' scratch choices - a false mismatch
-	 * when they differ and a false identical when they agree (codex,
-	 * claude 2026-09-06).  Only judged outputs are read back or compared. */
+	 * when they differ and a false identical when they agree (review,
+	 * review 2026-09-06).  Only judged outputs are read back or compared. */
 	int judge_mask = decl_a.color_mask | decl_b.color_mask;
 	/* ... except for an instrument row that opts in (judge=): a bind
 	 * defect writes a surface the container never declared, and an
 	 * instrument that only looks where the declaration points cannot
-	 * see it (claude, half-colour-depth-control).  The opted-in outputs are judged
+	 * see it (review, half-colour-depth-control).  The opted-in outputs are judged
 	 * with the ordinary comparison - identical means nothing
 	 * distinguishable was written - and the row still waits behind the
 	 * proving gates below like any other. */
@@ -2729,7 +2729,7 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 
 	/* Cost metrics are taken HERE, while both containers are live: the
 	 * first version of the cost column read them after the frees below
-	 * (review finding, codex: use-after-free that only looked stable
+	 * (review finding: use-after-free that only looked stable
 	 * because the heap had not been reused yet). */
 	sd_cost cost_a, cost_b;
 	measure_cost(cont_a, sz_a, &cost_a);
@@ -2970,7 +2970,7 @@ static void judge_pair(CellGcmContextData *ctx, const sd_pair *p,
 			}
 			/* Each side's Z24 range over the pixels it painted, and the
 			 * per-row step between the first two rows: a "moved" zeta is
-			 * then numbers against a prediction (claude's shape B expects
+			 * then numbers against a prediction (the review's shape B expects
 			 * Z24(row) = 7163085 + 65536 * row), not a word. */
 			u32 zmin_a = 0xffffffu, zmax_a = 0, zmin_b = 0xffffffu, zmax_b = 0;
 			for (int i = 0; i < RT_W * RT_H; i++) {
@@ -3036,7 +3036,7 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 	/* Zeroed here, not only on the full path: a control row that exits
 	 * early (load failed, unstable) still has its painted/kil fields
 	 * printed by its validator, and an uninitialised sd_result would
-	 * print stack (codex, review of 5a9630b). */
+	 * print stack (review of 5a9630b). */
 	r->painted_a = r->painted_b = 0;
 	r->kil_a = r->kil_b = 0;
 	r->max_delta = 0;
@@ -3120,7 +3120,7 @@ static void judge_vp_pair(CellGcmContextData *ctx, const sd_pair *p,
 		 * a matrix and its row leaves, the other only the leaves) and
 		 * then receive DIFFERENT values from the same synthesis - a
 		 * mismatch that would be the rig's, not the compiler's (review
-		 * finding, claude).  Lists that differ are a finding about the
+		 * finding, review).  Lists that differ are a finding about the
 		 * containers and end the row without a pixel verdict. */
 		if (!asymmetric && ua == 0 && ub == 0 &&
 		    (applied_a.overflow || applied_b.overflow)) {
@@ -3301,7 +3301,7 @@ static void print_row(const sd_pair *p, const sd_result *r)
 
 /* ==== float render-target mode (`@rt f32`) ====
  * Design: docs/local/design-rig-float-target-2026-10-19.md (reviewed,
- * codex 2026-10-19 15:34).  The default A8R8G8B8 path above hides any
+ * review 2026-10-19 15:34).  The default A8R8G8B8 path above hides any
  * difference below one 8-bit step; this mode renders colour 0 into a
  * CELL_GCM_SURFACE_F_W32Z32Y32X32 target (16 bytes per pixel) and reads
  * it back raw through an NV0039 linear copy, so the two sides are compared
@@ -3606,7 +3606,7 @@ static int f32_side(CellGcmContextData *ctx, void *kcont, void *cont, const char
 		/* A partly painted image keeps THIS frame's sentinel in its
 		 * unpainted pixels, so it never repeats across frames and the side
 		 * reports unstable: such rows stay OPEN.  Rewriting those pixels to
-		 * a fixed word set was tried and rejected in review (codex
+		 * a fixed word set was tried and rejected in review
 		 * 2026-10-19 20:12): no ordinary float word can stand in for the
 		 * coverage mask, and it destroyed the raw capture.  Judging partial
 		 * coverage needs a separate mask, which is not built yet. */
@@ -3671,7 +3671,7 @@ static const char *f32_verdict(const u32 *a, const u32 *b, int *diff, int *pnan,
 	return *diff ? "mismatch" : (*pnan ? "paired-nan" : "identical");
 }
 
-/* The control-texture binding predicate (codex 2026-10-19 17:43): every
+/* The control-texture binding predicate (review 2026-10-19 17:43): every
  * lane of both images must be a finite value inside [0, 1] BEFORE any
  * quantisation - a NaN, an infinity or an out-of-domain value is reported
  * as -1, never clamped into range - and then both images rounded to 8 bits
@@ -3976,7 +3976,7 @@ static int run_f32(CellGcmContextData *ctx)
 			ok_control = 0;
 		} else if (is_k && !f32_k_recipe_ok(p->name, p->ka, p->kb)) {
 			/* a named core control's words are fixed in f32_gate.h, never
-			 * taken from the manifest alone (codex review of f37d5f41) */
+			 * taken from the manifest alone (review of f37d5f41) */
 			r.status = "control-f32-k-recipe-mismatch";
 			ok_control = 0;
 		} else if (is_mtwin && (twin_refuse = f32_matrix_twin_refusal(p->name, p->uniform_set, p->a_path, p->b_path,
@@ -4127,7 +4127,7 @@ static int run_f32(CellGcmContextData *ctx)
 						} else {
 							/* The verdict stays as compared (and is still counted);
 							 * the run is latched INVALID in the gate, where no later
-							 * control result can clear it (codex 20:12). */
+							 * control result can clear it (review 20:12). */
 							snprintf(r.artifact, sizeof(r.artifact), "WRITE-FAILED a=%d b=%d", wa, wb);
 							f32_gate_artifact_failed(&gate, p->name);
 						}
@@ -4427,7 +4427,7 @@ int main(int argc, const char **argv)
 	 * needs the instrument.  The first draft initialised the gates open
 	 * and scanned for the mismatch role's mere presence, so a manifest
 	 * with its controls after the corpus judged the corpus blind and a
-	 * deleted identical/blind control went unnoticed (codex, claude
+	 * deleted identical/blind control went unnoticed (review
 	 * 2026-09-06).  The stager refuses such manifests before they are
 	 * written; this is the second line. */
 	unsigned mrt_seen = 0, mrt_pass = 0, depth_seen = 0, depth_pass = 0;
@@ -4622,7 +4622,7 @@ int main(int argc, const char **argv)
 				 * merely one: a wiring fault between the channel table
 				 * and the coverage FPs that reported one wrong channel
 				 * would otherwise open every vp row (review finding,
-				 * codex). */
+				 * review). */
 				printf("shader-differential: control-vp-mismatch judged '%s' in %d channel(s) (%s) - the VP comparator did not see the one-lane difference as channel tc1 alone; vp rows will not be judged\n",
 				       r.status, r.diff_channels, r.diff_channel);
 				vp_ok = 0;

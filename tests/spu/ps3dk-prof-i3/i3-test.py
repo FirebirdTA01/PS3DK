@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P3.2 I3a: SPU compile/link evidence for the lane writer (design I3 r2, codex 09:24).  Nothing executes on target.
+"""P3.2 I3a: SPU compile/link evidence for the lane writer (design I3 r2, review 09:24).  Nothing executes on target.
 
 With the SPU tools of an installed SDK (default %PS3DK%/spu/bin; pic = the multilib's own -fpic -mno-error-reloc):
   1. compile matrix: the core and the writer, -Werror, {-O0,-O2,-Os} x {default, pic};

@@ -1,6 +1,6 @@
 /* GPU (RSX) timestamp domains inside the runtime (P3.3 R2; R4b: LV2 ILP32): the port adapters over the R1 core
  * (prg.c), the table-slot pin protocol, owner entries and their declaration evidence, the drain/seal steps, and the
- * API of prof_gpu.h.  Design: p3.3-r2 935936fb + deltas 2400e50a, 0e23d13e and the codex 12:53 rulings.
+ * API of prof_gpu.h.  Design: p3.3-r2 935936fb + deltas 2400e50a, 0e23d13e and the review 12:53 rulings.
  *
  * Locks: the EXTENSION mutex (spu_mutex) serializes every drain/finalization, attach, release, the stats copy and the
  * GPU ledger; it is held across sink callbacks (the drainer emits under it).  Each table slot's snap mutex is taken
@@ -152,7 +152,7 @@ static int gp_elock(void *c)
 }
 static int gp_eunlock(void *c) { return p_ext_unlock_site(((gpu_slot *)c)->p, U_GPU_DETACH); }
 
-/* The HOLD (codex 12:53 rulings).  Only the drainer holds the declaration state, so anything else holds (the
+/* The HOLD (review 12:53 rulings).  Only the drainer holds the declaration state, so anything else holds (the
  * finalization of an already drained detach reads nothing).  Sink failed: DISCARD (emit, output-free).  Otherwise
  * the descriptor must have been declared and the owner entry evidenced for its current tag; an ORPHAN entry stays
  * held (the seal turns it into the terminal LOSS 4), never rewritten to NONE. */
@@ -253,7 +253,7 @@ void p_gpu_step(prof *p)
             prg_drain_held(&p->gpu[i].dom);
 }
 
-/* The detach acknowledgement, in two halves around the drainer's closing extension unlock (codex 16:11).
+/* The detach acknowledgement, in two halves around the drainer's closing extension unlock (review 16:11).
  * COLLECT, still holding the extension mutex: the exact domains this turn finalized are recorded (at most gpu_max,
  * the caller's array), each per-turn marker is cleared under the lock, and each slot is PINNED (users++), so neither
  * a release nor an attach can recycle it.  PUBLISH, after the unlock: only those recorded slots are touched, the

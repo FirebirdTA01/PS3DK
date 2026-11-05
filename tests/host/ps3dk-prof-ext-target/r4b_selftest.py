@@ -148,11 +148,11 @@ ROWS = [
     ('c1 st64 byte-wise', lambda: I.check_store(listing(ST64_BYTES), 8, S8), 'FAIL', '8 stores to the EA'),
     ('st64 two stores', lambda: I.check_store(listing(ST64_TWO), 8, S8), 'FAIL', '2 stores to the EA'),
     ('st64 v spilled', lambda: I.check_store(listing(ST64_SPILL), 8, S8), 'FAIL', 'stack store of v'),
-    ('codex repro: unknown side-effect opcode', lambda: v(I.check_store, listing(ST64_UNKNOWN), 8, S8), 'UNMET',
+    ('review repro: unknown side-effect opcode', lambda: v(I.check_store, listing(ST64_UNKNOWN), 8, S8), 'UNMET',
      'unmodelled instruction'),
     ('sc (a system call) is unmodelled', lambda: v(I.check_store, listing(ST64_SC), 8, S8), 'UNMET',
      'unmodelled instruction'),
-    ('codex repro: unannotated branch, taken path has no store',
+    ('review repro: unannotated branch, taken path has no store',
      lambda: v(I.check_store, raw(ST64_BRANCH_RAW), 8, S8), 'FAIL', '0 stores to the EA'),
     ('unannotated listing parses numerically', lambda: I.check_store(listing(ST64_GOOD, annotate=False), 8, S8),
      'PASS', 'one std'),
@@ -172,7 +172,7 @@ ROWS = [
     ('st16 as stw', lambda: I.check_store(listing(ST16_WORD), 2, {'sth', 'sthx'}), 'FAIL', 'not one 2-byte store'),
     ('ld64 one ld', lambda: I.check_ld64(listing(LD64_GOOD)), 'PASS', 'returned unmodified'),
     ('ld64 two words', lambda: I.check_ld64(listing(LD64_WORDS)), 'FAIL', '2 EA loads'),
-    ('codex repro: ld64 loses the loaded value', lambda: I.check_ld64(listing(LD64_LOST)), 'FAIL',
+    ('review repro: ld64 loses the loaded value', lambda: I.check_ld64(listing(LD64_LOST)), 'FAIL',
      'returned value is not the loaded doubleword'),
     ('ld_line std copy', lambda: I.check_ld_line(listing(ld_line_std())), 'PASS', '16 source ld'),
     ('ld_line byte copy into the private buffer', lambda: I.check_ld_line(listing(ld_line_bytecopy())), 'PASS',
@@ -208,7 +208,7 @@ ROWS = [
      'indirect call'),
     ('alloc no sync at all', lambda: v(I.check_alloc, listing(alloc(sync_at='none'))), 'FAIL',
      'no sync after the zeroing memset'),
-    ('codex repro: nonzero memset fill', lambda: v(I.check_alloc, listing(alloc(fill='1'))), 'FAIL',
+    ('review repro: nonzero memset fill', lambda: v(I.check_alloc, listing(alloc(fill='1'))), 'FAIL',
      'memset fill is not zero'),
     ('memset of a different region than the stored EA', lambda: v(I.check_alloc, listing(alloc(dest='r29'))), 'FAIL',
      'stored EA is not the zeroed region address'),
@@ -412,7 +412,7 @@ def arch_rows():
         ('imports good', not A.judge_imports(NM_GOOD)[0]),
         ('d unexpected import puts', has(A.judge_imports(NM_GOOD + '                 U puts\n')[0],
                                          'unexpected import puts')),
-        ('codex repro: local definition does not discharge U puts',
+        ('review repro: local definition does not discharge U puts',
          has(A.judge_imports(NM_GOOD + '                 U puts\n0000000000000030 t puts\n')[0],
              'unexpected import puts')),
         ('unexpected weak import', has(A.judge_imports(NM_GOOD + '                 w __weak_hook\n')[0],
@@ -434,7 +434,7 @@ def arch_rows():
 
 
 def retention_rows():
-    """r4b_retention witnesses (codex 23:35): only GLOBAL/WEAK definitions in a numeric nonzero section count.  The
+    """r4b_retention witnesses (review 23:35): only GLOBAL/WEAK definitions in a numeric nonzero section count.  The
     archive defines exactly one witness per member (sym_<member>; prof_core also ps3dk_prof_init/__lock); each
     control makes psp_elf.o's ONLY witness ineligible while keeping the complete symbol inventory."""
     import r4b_retention as RT

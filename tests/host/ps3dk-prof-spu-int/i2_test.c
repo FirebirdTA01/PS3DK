@@ -321,7 +321,7 @@ static int basic(uint32_t mode, int n, const char *name)
     return 0;
 }
 
-/* ---- the TSan line-A control pair (codex 01:16; design p3.2-i2-tsan-control-repair-design.md) ----
+/* ---- the TSan line-A control pair (review 01:16; design p3.2-i2-tsan-control-repair-design.md) ----
  * One lane, APP mode (no drain thread).  The schedule is forced by RELAXED atomics, which TSan does not treat as
  * synchronization: (1) the producer publishes 8 zones (flush: a line-A getllar + putllc snapshot, then the line-B
  * putlluc), step = 1; (2) main drains until this lane's read_idx moved: that is the runtime's line_a_store of

@@ -1,4 +1,4 @@
-"""The E1 probe's control flow as the design states it (r3 C/D, r4, codex 10:25 point 5): for one fault script, the
+"""The E1 probe's control flow as the design states it (r3 C/D, r4, review 10:25 point 5): for one fault script, the
 EXACT marker list, the exact PPU call/cleanup inventory, the exact producer-thread inventory and the exit status.
 Polling calls (p.drain, p.lane_stats, p.gpu_stats) are not in the PPU inventory; their count is bounded separately.
 Imported by test_e1.py only.  Faults (a dict; absent keys = no fault):

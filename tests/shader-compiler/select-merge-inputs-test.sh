@@ -87,7 +87,7 @@ for path in sys.argv[1:]:
         # An inline const block is 16 bytes of DATA following the
         # instruction that names it (a source of register type CONST, 2);
         # decoding it as an instruction is the shape of a false red
-        # (claude, review of d5fda09).  Skip it the way the guest's
+        # (review of d5fda09).  Skip it the way the guest's
         # measure_cost does.
         if skip_next:
             skip_next = False

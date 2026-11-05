@@ -37,7 +37,7 @@ NOT_C6014 = {
 # A position write only on a constant-false path is no write: the established compiler
 # refuses C6014 (measured: if (false), a false static const bool, a chained
 # constant condition).  We refuse them too, earlier, with the conditional
-# store reason; either name is accepted, a container is not (review: codex).
+# store reason; either name is accepted, a container is not (review).
 DEAD_WRITE = {
     'dead_if_false': 'void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { c = p; if (false) o = p; }\n',
     'dead_static_bool': 'static const bool B = false; void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { c = p; if (B) o = p; }\n',

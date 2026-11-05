@@ -25,7 +25,7 @@ def lanes(swz):
 
 
 def plain(w):
-    """None, or the modifier this shape check does not allow (review: codex)."""
+    """None, or the modifier this shape check does not allow (review)."""
     if (w[1] >> 18) & 7 != 7:
         return 'a predicated instruction (condition %d)' % ((w[1] >> 18) & 7)
     if (w[0] >> 7) & 1:

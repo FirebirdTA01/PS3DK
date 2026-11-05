@@ -250,6 +250,9 @@ jobs:
       - name: Check every tracked test has a CI invocation
         run: python3 tests/ci-test-list-test.py
 
+      - name: Test RPCS3 debugger launcher ownership and cleanup (POSIX)
+        run: python3 tests/host/debugger-launcher-test.py "${RUNNER_TEMP}/debugger-launcher"
+
       - name: Test shader-compiler suite runner self-check
         run: bash tests/shader-compiler/suite-runner-test.sh
 
@@ -1264,7 +1267,7 @@ jobs:
       - name: Typedef aliases preserve direct-type values and bindings
         run: bash tests/shader-compiler/typedef-alias-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Typedef spellings (struct tag, forward tag, array extent) match the direct type; name clashes refuse
-        run: bash tests/shader-compiler/typedef-alias-fable-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+        run: bash tests/shader-compiler/typedef-alias-spellings-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: The comma operator evaluates its left operand and is its right; for-clause commas split when independent
         run: bash tests/shader-compiler/comma-operator-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: A type word or user type declared as a name is that name (functions, members, locals)

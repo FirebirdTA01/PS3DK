@@ -44,7 +44,7 @@ float4 main(float4 t : TEXCOORD0) : COLOR
 """, lambda t: [t[1] if t[0] > 0.5 else 0.25, 0.0, 0.0, 1.0]),
     # An entry parameter named like a static shadows it, and the two stay
     # independent: the entry reads its parameter, an inlined helper the
-    # static, and a helper's write lands on the static (review: codex,
+    # static, and a helper's write lands on the static (review,
     # static-entry-shadow; measured: (t, 0.75, 0, 1) and (t, t + 1, 0, 1)).
     ('entry_param_shadow', """static float g = 0.75;
 float4 main(float g : TEXCOORD0) : COLOR { return float4(g, 0.0, 0.0, 1.0); }
@@ -73,7 +73,7 @@ float rd() { return g; }
 float4 main(float g : TEXCOORD0) : COLOR { return float4(g, rd(), 0, 1); }
 """, lambda t: [t[0], 0.5, 0.0, 1.0]),
     # The initialiser is file-scope code: under an entry parameter named like
-    # a static it reads, it still reads the STATIC (review: codex; measured
+    # a static it reads, it still reads the STATIC (review; measured
     # (0.5, t.x, 0, 1)), and a later static sees an earlier one (measured
     # z = f(y) + x = 1.25).
     ('initialiser_reads_file_scope', """static float x = 0.25;
@@ -88,7 +88,7 @@ static float z = f(y) + x;
 float4 main(float4 t : TEXCOORD0) : COLOR { return float4(y, z, t.x, 1); }
 """, lambda t: [0.5, 1.25, t[0], 1.0]),
     # A helper the initialiser calls may write file-scope state, and the
-    # write persists (review: codex's static-init-side-effect witnesses, all
+    # write persists (review static-init-side-effect witnesses, all
     # four measured on the established compiler): a scalar, the same under an entry
     # parameter shadowing g, an array element, and a later initialiser.
     ('initialiser_side_effect', """static float g = .25; float f() { g = .75; return 1.0; } static float y = f();

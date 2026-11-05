@@ -3,7 +3,7 @@
 // special names gets the pristine rows right and every one of these
 // wrong: the moment the SOURCE writes its own #define, the name counts
 // as defined in both spellings, #undef takes it away again, and a
-// re-#define brings it back (codex; ruling by Fable).
+// re-#define brings it back (found in review; ruling in review).
 #define __LINE__ 7
 #undef __LINE__
 #if defined(__LINE__)

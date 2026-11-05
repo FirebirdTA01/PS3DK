@@ -1,5 +1,5 @@
 // A discard in a two-predecessor MERGE, inside an outer guarded block
-// (codex's counterexample to the first form of nested-discard-reachability's refusal).
+// (the review's counterexample to the first form of nested-discard-reachability's refusal).
 //
 //   if (A) { if (B) { .. } else { .. }  discard; }
 //
@@ -16,7 +16,7 @@
 // 1264 - not the established compiler's set and not even "outer guard dropped", it
 // kills on the wrong comparison altogether.
 //
-// The else arm reads COLOR0 on purpose.  Fable's first spelling used a
+// The else arm reads COLOR0 on purpose.  The review's first spelling used a
 // TEXCOORD whose alpha never crosses the threshold, which made the outer
 // guard an IDENTITY for the kill and both paths read identical - a guard
 // probe has to be built so the WRONG answer paints differently.

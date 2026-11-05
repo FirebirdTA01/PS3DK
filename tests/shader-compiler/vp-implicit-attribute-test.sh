@@ -139,7 +139,7 @@ MATRIX_REFUSALS = {
     'matrix_member_read_explicit': 'struct S{float4x4 m:ATTR0;float4 x:ATTR4;}; float4 main(S s):POSITION{return s.m[1]+s.x;}',
     'matrix_bare_array_neighbor': 'float4 main(float4x4 m:ATTR0,float4 x[2]):POSITION{return x[0];}',
     # A matrix inside an array of structs (a parameter array, or a member array) is still a
-    # declared varying matrix: unread, beside an implicit input, it must refuse too (codex 1fb7e1f9).
+    # declared varying matrix: unread, beside an implicit input, it must refuse too (review 1fb7e1f9).
     'matrix_struct_array_unread': 'struct S{float4x4 m:ATTR0;}; float4 main(S s[2],float4 x):POSITION{return x;}',
     'matrix_nested_array_unread': 'struct T{float4x4 m:ATTR0;};struct S{T a[2];};float4 main(S s,float4 x):POSITION{return x;}',
 }

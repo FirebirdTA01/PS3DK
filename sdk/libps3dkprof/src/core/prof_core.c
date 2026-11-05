@@ -494,10 +494,10 @@ static int thread_begin_impl(prof *p, const char *name)
         p_unlock(p, &p->thread_mutex);
         return PS3DK_PROF_EFULL;
     }
-    /* R3 (codex 2026-10-22): the OS thread id is read BEFORE anything changes.  A failed read refuses the registration
+    /* R3 (review 2026-10-22): the OS thread id is read BEFORE anything changes.  A failed read refuses the registration
      * with ETHREAD while the slot is still FREE and the incarnation counter, the slot generation and the TLS state are
      * untouched, so there is nothing to roll back and no placeholder id is ever recorded.  It is not counted in
-     * unregistered_refusals (codex 03:21).  auto_register goes through here too: the zone or frame is then INERT. */
+     * unregistered_refusals (review 03:21).  auto_register goes through here too: the zone or frame is then INERT. */
     if (pal_os_thread_id(&os_id) != 0) {
 #ifdef PS3DK_PROF_WITH_ARCS
         /* Frozen v1 excludes ETHREAD from unregistered_refusals. An arc-enabled

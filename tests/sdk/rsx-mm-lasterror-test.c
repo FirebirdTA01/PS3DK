@@ -153,7 +153,7 @@ static int is_defined_code(int c)
     return 0;
 }
 
-/* ---- concurrent-allocation hammer (codex change 1) --------------------
+/* ---- concurrent-allocation hammer (review change 1) --------------------
  * Two pthreads hammer rsxMalloc / rsxFree at the same time, then the
  * test asserts the final query returns a code from the defined set.
  * The only unsynchronised shared word left in the process is the one

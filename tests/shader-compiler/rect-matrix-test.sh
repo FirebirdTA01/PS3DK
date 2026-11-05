@@ -130,7 +130,7 @@ accept fp_rect_prefix_shuffle_cse_f "float4(t.yzw, 1) + t.yzwx: a vec3 and a vec
 
 # 2b. Mixed vector/scalar constructors pack ROW-MAJOR; a vector may not straddle
 # a row (reference m1-m11).  The square globals here are a regression control:
-# the first revision refused them (found by codex).  All four accept cells are
+# the first revision refused them (found in review).  All four accept cells are
 # byte-identical to the established compiler as well as to their twins.
 accept fp_rect_ctor_mixed_g22_f       "static const float2x2(float2, s, s)"
 accept fp_rect_ctor_mixed_g22_twin_f  "the literal row it folds to"

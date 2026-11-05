@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ci/shellcheck_ratchet.py fails closed at every step (codex 1fe28976).  Drives the ratchet against small fixture
+# ci/shellcheck_ratchet.py fails closed at every step (review 1fe28976).  Drives the ratchet against small fixture
 # trees with a stub shellcheck that reports SC2086 for every "echo $" line (gcc format) and can be told to misbehave
 # (STUB_MODE).  Needs no real shellcheck.  Rows, each with its expected exit and message:
 #   clean tree, empty baseline .................... 0     finding within baseline ............... 0

@@ -4,7 +4,7 @@
 Judges two raw readbacks of a CELL_GCM_SURFACE_F_W32Z32Y32X32 colour
 target: RT_W x RT_H pixels, four big-endian binary32 lanes per pixel in
 guest memory order, rows `pitch` bytes apart.  The verdict rules are the
-reviewed design's (docs/local/design-rig-float-target-2026-10-19.md, codex
+reviewed design's (docs/local/design-rig-float-target-2026-10-19.md, review
 2026-10-19 15:34):
 
   - the primary result is the RAW bit comparison per lane;
@@ -62,7 +62,7 @@ def _ordered(w):
 
 
 def judge(raw_a, raw_b, pitch=RT_W * PIXEL_BYTES, lanes=(0, 1, 2, 3), first_n=8):
-    # an empty selection would judge nothing and report identical (codex review)
+    # an empty selection would judge nothing and report identical (review)
     lanes = tuple(lanes)
     if not lanes or len(set(lanes)) != len(lanes) or any(l not in (0, 1, 2, 3) for l in lanes):
         raise ValueError('lanes must be a non-empty set of distinct lanes from 0..3, got %r' % (lanes,))
@@ -172,7 +172,7 @@ def self_test():
         fails += not ok
         print('  %-44s %s  (%s)' % (name, 'ok' if ok else 'FAIL', got['status']))
     # an empty, duplicated or out-of-range lane selection is refused, never
-    # judged as "identical" (codex probe: lanes=() compared differing images equal)
+    # judged as "identical" (review probe: lanes=() compared differing images equal)
     D = _image(base, edits=[(0, 0, 0, base(0, 0, 0) + 1)])
     for bad in ((), (0, 0), (4,), (-1,)):
         try:

@@ -630,7 +630,7 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 		// the two characters where that mattered: `#define K<FF>(1.0)` used to
 		// be read as function-like (so a bare K refused, which happened to
 		// agree with the established compiler) and became object-like (so it ACCEPTED,
-		// which does not). Found by codex on the first revision.
+		// which does not). Found in review on the first revision.
 		//
 		// Measured: the established compiler refuses \f and \v ANYWHERE in a source, not
 		// only in a directive - `return<FF>t*2.0;` in ordinary code is
@@ -652,7 +652,7 @@ void Preprocessor::processDefine(const std::string& directive, const std::string
 			// TOKEN STREAM, which is the lexer's business and not this
 			// function's - my first version refused the whole directive and so
 			// refused `#define UNUSED_MACRO (1.0<FF>)`, which the established compiler
-			// ACCEPTS because that body is never tokenised (codex asked for
+			// ACCEPTS because that body is never tokenised (a reviewer asked for
 			// exactly this qualification before I claimed "anywhere").
 			const size_t defineEnd = directive.find("define");
 			if (defineEnd != std::string::npos)
@@ -806,7 +806,7 @@ void Preprocessor::processIfdef(const std::string& directive, bool isIfndef)
 		// Same rule as processIf: a group inside a skipped one is inert, and
 		// everActive has to say so or its #elif and #else arms will be
 		// evaluated.  Setting only `active` left everActive false, which is
-		// exactly the door codex's cell walked through.
+		// exactly the door the review cell walked through.
 		if (enclosingInactive(0))
 		{
 			state.active = false;
@@ -837,7 +837,7 @@ void Preprocessor::processIfdef(const std::string& directive, bool isIfndef)
 // evaluated before looking at the parent, so
 //     #if 0 / #ifdef NEVER / #elif defined( / #endif / #endif
 // reached the #elif expression and refused where the established compiler accepts
-// (codex, on the first review build - my own skip fix had covered one of the
+// (review, on the first review build - my own skip fix had covered one of the
 // three doors).
 bool Preprocessor::enclosingInactive(size_t skipTop) const
 {
@@ -1518,7 +1518,7 @@ public:
 			//     #define DROP(x) 2.0
 			//     DROP(BAD)          established ACCEPTS
 			// Expanding every argument regardless made that refuse, because
-			// BAD's body does not tokenise (found by codex). Skipping the
+			// BAD's body does not tokenise (found in review). Skipping the
 			// unused ones is also just what the language says.
 			// WHICH PARAMETERS NEED THE EXPANDED ARGUMENT - decided PER
 			// OCCURRENCE, not per parameter.  An occurrence that is an operand
@@ -1530,8 +1530,8 @@ public:
 			// wrong and measurable: with BAD holding a form feed,
 			//     #define CAT(a,b) a##b      CAT(BAD,x)
 			// pastes BAD raw and the established compiler ACCEPTS, but pre-expanding the
-			// argument refused it (codex, confirmed on two independent builds;
-			// Fable measured the established compiler verdicts m19/m20). The mixed shape
+			// argument refused it (review, confirmed on two independent builds;
+			// A reviewer measured the established compiler verdicts m19/m20). The mixed shape
 			//     #define BOTH(a,b) a##b + a    BOTH(BAD,x)
 			// is reference REFUSE, because the plain occurrence of `a` DOES
 			// expand - which is exactly why the decision cannot be per
@@ -1593,7 +1593,7 @@ public:
 					//     #define ID(x) x
 					//     #if ID(defined(X))    C0105 - the same, from inside
 					// Inheriting the mode here would wrong-ACCEPT both and
-					// look like a fix (codex; cells f5 and g1).
+					// look like a fix (review; cells f5 and g1).
 					expandedArgs.push_back(
 						expand(std::deque<HsToken>(args[ai].begin(), args[ai].end()), false));
 				}
@@ -1735,7 +1735,7 @@ private:
 		// one place a replacement list actually becomes output, so it is the
 		// only place the body reaches the token stream.  Raising it where the
 		// NAME was looked up instead refused two shapes the established compiler accepts,
-		// found independently by codex and Fable within a minute of each other:
+		// found independently by two reviewers within a minute of each other:
 		//   a FUNCTION-LIKE name not followed by "(" is not a use at all
 		//     #define F(x) ((x)<FF>*2.0)   then   float F = t.x;
 		//   and an argument the callee never substitutes is never expanded

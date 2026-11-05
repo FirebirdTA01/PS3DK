@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""I3b ELF tooling (design P3.2 I3b r2 + codex 09:49): a synthetic SPU ELF writer, the INDEPENDENT acceptance checker
+"""I3b ELF tooling (design P3.2 I3b r2 + review 09:49): a synthetic SPU ELF writer, the INDEPENDENT acceptance checker
 (written from the design rules, not from psp_elf.c), the named single-rule corpus and the seeded mutations.
 
 The checker's verdict line format is the one the C harness prints:

@@ -4,7 +4,8 @@
 The project describes the platform in its own terms (the system ABI, what
 lv2 expects, what existing PS3 code relies on).  This scanner keeps words
 that point at another vendor's SDK, compiler or install paths out of the
-tracked tree, out of file and ref names, and out of commit messages.  The
+tracked tree, out of file and ref names, and out of commit messages; it
+also refuses the names of the automated tools that contribute to it.  The
 patterns are stored encoded so the guard does not itself contain the words
 it refuses.
 
@@ -62,7 +63,9 @@ _PATTERNS = (
     "dG9cYnx2YWx1ZXM/fGltYWdlcz98ZnJhbWVzP3xwb2ludGVycz98cG9pbnRzP3xyZXNvbHV0"
     "aW9ufDcyMHApKQpcYnJlZmVyZW5jZVxzKyg/OmFjY2VwdHN8cmVmdXNlc3xyZWZ1c2VkfGVt"
     "aXRzfGZvbGRzfGNvbXBpbGVzfHJlamVjdHN8ZGVjbGFyZXN8Z2l2ZXN8cmVhZHN8d3JpdGVz"
-    "fGtlZXBzfHJlY29yZHN8cGFpbnRzfGxvd2Vyc3xyZXNvbHZlc3xyZXBvcnRzKVxi"
+    "fGtlZXBzfHJlY29yZHN8cGFpbnRzfGxvd2Vyc3xyZXNvbHZlc3xyZXBvcnRzKVxiCig/PCFb"
+    "YS16MC05XSkoPzpjbGF1ZGV8Y29kZXh8cXdlbnxnZW1pbml8ZmFibGV8YW50aHJvcGljfGRl"
+    "ZXBzZWVrKSg/IVthLXowLTldKQ=="
 )
 # Verified notice-line shapes; a line is exempt from _NOTICE_EXEMPT only
 # when one of these matches it as a whole notice line.
@@ -75,7 +78,8 @@ _NOTICES = (
 )
 _ANY = (
     "cmVmZXJlbmNlfHNvbnl8c2NlfHBwdS1sdjJ8NDc1fHNka3N8dXNyL2xvY2FsL2NlbGx8b2Zm"
-    "aWNpYWx8cHB1LmluY2x1ZGV8b3JhY2xl"
+    "aWNpYWx8cHB1LmluY2x1ZGV8b3JhY2xlfGNsYXVkZXxjb2RleHxxd2VufGdlbWluaXxmYWJs"
+    "ZXxhbnRocm9waWN8ZGVlcHNlZWs="
 )
 # Rules a verified notice line may trip without being a finding.
 _NOTICE_EXEMPT = {8, 9}
@@ -385,8 +389,18 @@ def self_test():
            "CELL_SSL_LOAD_CERT_SCE GL_ARGB_SCE `*_SCE` CELL_SDK_VERSION 0x475001\n")
     got4 = findings_in(api, "t", set())
     ok = ok and got4 == []
-    print("neutral-wording: self-test %s (got %s, allowlisted %s, cross-line %s, api %s)" %
-          ("PASS" if ok else "FAIL", got, got2, got3, got4))
+    # Contributor-tool names are refused as words and inside identities joined
+    # with underscores; an identifier that only starts with the same letters
+    # (followed by another letter or digit) is not one.
+    names = base64.b64decode(
+        "Rm91bmQgaW4gcmV2aWV3IChjb2RleCAxZmUyODk3NikuCnJldCA9IGdlbUluaXQoJmF0dHIp"
+        "OyAvKiByZXZpZXdlZCAqLwpSZXZpZXdlZCBieSBjb2RleF9QUzNESwpSZXZpZXdlZCBieSBD"
+        "bGF1ZGVfUFMzREtfRnJvbnRFbmQKUmV2aWV3ZWQgYnkgUXdlbl9QUzNES19IZWxwZXJfT25l"
+        "ClJldmlld2VkIGJ5IEdlbWluaV9QUzNES19KRQo=").decode()
+    got5 = [n for (_, n, _, _) in findings_in(names, "t", set())]
+    ok = ok and got5 == [1, 3, 4, 5, 6]
+    print("neutral-wording: self-test %s (got %s, allowlisted %s, cross-line %s, api %s, names %s)" %
+          ("PASS" if ok else "FAIL", got, got2, got3, got4, got5))
     print("neutral-wording: more cases: tests/host/neutral-wording-negative-test.py")
     return 0 if ok else 1
 

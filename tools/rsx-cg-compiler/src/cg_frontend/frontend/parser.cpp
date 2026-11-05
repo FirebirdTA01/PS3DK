@@ -112,7 +112,7 @@ void Parser::retypeShadowedTypeNames()
         for (; k < tokens.size(); ++k) {
             const TokenType t = tokens[k].type;
             // `typedef struct Tag { ... } Alias;` declares the tag too (review:
-            // codex); it is a type name, never a declarator.
+            // review); it is a type name, never a declarator.
             if (t == TokenType::KW_STRUCT && k + 1 < tokens.size() &&
                 tokens[k + 1].type == TokenType::IDENTIFIER)
                 userTypeNames.insert(tokens[k + 1].lexeme);
@@ -1394,7 +1394,7 @@ std::unique_ptr<DeclNode> Parser::parseTypedefDeclaration(
     };
 
     // The established compiler accepts five spellings, each byte-identical to the
-    // direct spelling of the type (fable's typedef rows):
+    // direct spelling of the type (the review's typedef rows):
     //   typedef struct { ... } Name;       the struct IS Name (below)
     //   typedef struct Tag { ... } Name;   the struct keeps Tag; Name aliases it
     //   typedef struct Tag Name;           Tag may be FORWARD (defined later,

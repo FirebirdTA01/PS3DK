@@ -972,7 +972,7 @@ static void t_detach_vs_seal(void)
     fclose(e);
 }
 
-/* ================================================================ the R1 corrections (codex 11:52) */
+/* ================================================================ the R1 corrections (review 11:52) */
 
 /* ---- 1. the fault policy at every lock site, the seam (the real unlock, then the error) included.  A fault latches:
  * no admission, no work, no finalization from an unproven snapshot; only a fault AFTER a completed finalization (its
@@ -1412,7 +1412,7 @@ static void t_cal_budget(const char *name, prg_ledger l, int n, int kept)
     fclose(e);
 }
 
-/* ================================================================ the r1c3 carries (codex 12:24) */
+/* ================================================================ the r1c3 carries (review 12:24) */
 
 /* ---- 1. LOSS-budget exhaustion is a sticky admission stop and FINAL OVERFLOWED: racing an admitted call (the drain
  * that exhausts runs inside the call's reserve callback) and inside the seal's own finalization ---- */
@@ -1528,7 +1528,7 @@ static void t_pair_suppressed_stale(void)
     fclose(e);
 }
 
-/* ================================================================ R2 core additions (codex GO 12:53) */
+/* ================================================================ R2 core additions (review GO 12:53) */
 static prg_dom D2_SCRATCH;
 
 /* ---- the emittable HOLD: the prefix stops at a held event, nothing after it commits, then it resumes ---- */

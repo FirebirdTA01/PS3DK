@@ -1,5 +1,5 @@
 // shader-differential - NAMED REGRESSION for sampler PARAMETERS on the
-// general path (claude 2026-09-01 21:44): lowerTex sets the texture unit
+// general path (review 2026-09-01 21:44): lowerTex sets the texture unit
 // to 0 unconditionally, so every tex2D samples unit 0 and a two-texture
 // shader reads the first texture twice while the container still reports
 // sa = TEX0, sb = TEX1.  One shared image for every sampler paints this

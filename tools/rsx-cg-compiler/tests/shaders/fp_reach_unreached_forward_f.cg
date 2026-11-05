@@ -7,7 +7,7 @@
 //
 // So an unreachable body IS analysed - only this one class is gated.
 //
-// ACCEPT: a forward call inside a function main never calls.  Found by codex
+// ACCEPT: a forward call inside a function main never calls.  Found in review
 // reviewing commit 1 - the positional filter refused it and the established compiler
 // does not.
 float4 unused(float4 t) { return f(t); }

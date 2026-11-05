@@ -2383,7 +2383,7 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
-    // codex_PS3DK's review counterexamples for 4eca269a (draft-state-repros
+    // Review counterexamples for 4eca269a (draft-state-repros
     // .patch), carried over unchanged in substance: index-based actions
     // became key-based and field writes go through `edit`.
 
@@ -2504,7 +2504,7 @@ mod tests {
         let _ = std::fs::remove_file(other);
     }
 
-    // codex_PS3DK's review counterexample for 7bed249d, verbatim.
+    // Review counterexample for 7bed249d, verbatim.
     #[test]
     fn review_same_key_flag_toggle_survives_save_of_pending_numeric_draft() {
         let (mut app, path) = app_on_copy("review-flag-same-key");

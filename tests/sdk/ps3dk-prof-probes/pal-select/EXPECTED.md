@@ -1,7 +1,7 @@
 # PAL selection guard: planned preprocess checks
 
 These are PLANNED checks, for review only. Nothing here was run, and nothing is wired into a build, CI job or test
-list. No compile or run GO is implied (codex 2026-10-22 03:21).
+list. No compile or run GO is implied (review 2026-10-22 03:21).
 
 ## The guard
 

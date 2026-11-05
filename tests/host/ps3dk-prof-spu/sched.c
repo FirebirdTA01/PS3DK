@@ -1,4 +1,4 @@
-/* The adversarial scheduler of design p3.2 r3 F, as corrected by codex 01:35:
+/* The adversarial scheduler of design p3.2 r3 F, as corrected by the review 01:35:
  *  - STRONG model (assumption: a putlluc update is indivisible and coherent as seen by PPU loads): every
  *    interleaving of the producer's shared steps with the drainer's steps, exhaustively for a small configuration;
  *    every accepted snapshot must be a published version; no unread slot is ever overwritten; the emitted streams
@@ -288,7 +288,7 @@ static long random_walks(const uint64_t *seeds, int nseeds, int steps, long samp
     return runs;
 }
 
-/* ---- the lifetime model (codex 02:18 item 5): every order of D (one drainer step, a saved coroutine between
+/* ---- the lifetime model (review 02:18 item 5): every order of D (one drainer step, a saved coroutine between
  * steps), X (end processing), R (end request), P (poll: free, then slot reuse by a new lane), S (seal), for four
  * variants.  The join precondition holds before the schedule (the producer is done).  The shim fails any PPU access
  * to freed memory; every lane must be freed at the end with the cap fully refunded.  One abstract lock: each action

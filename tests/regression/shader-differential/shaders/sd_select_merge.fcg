@@ -8,7 +8,7 @@
 // lane x and broadcasts it, so an arm pair differing only in x paints
 // identically under the bug and would read green.
 //
-// Measured 2026-09-02 on fd5aa13 (claude, then reproduced here): the
+// Measured 2026-09-02 on fd5aa13 (review, then reproduced here): the
 // general path emits MOVR R0.x, f[COL0]; MOVRC RC.x; MOVR R0.x(NE.x),
 // f[TEX0]; MOVR R0, R0.x where the established compiler emits MOVR R0, R0;
 // MOVR R0(EQ.x), f[COL0].  Cause: the IR builder's merge type lookup

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The ONE TSan decision for the E1 host rows (codex 10:51): status, completion and report together.
+"""The ONE TSan decision for the E1 host rows (review 10:51): status, completion and report together.
 
 The report parser is the reviewed I2 strict parser (tests/host/ps3dk-prof-spu-int/tsan_pair_judge.py parse_tsan):
 every stderr line classified, complete === delimiters, exactly two access sections first, frames taken from those

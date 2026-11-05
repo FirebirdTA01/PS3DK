@@ -39,7 +39,7 @@ static volatile int g_unrepresentable;
 static bool build_frame(Synth &s)
 {
 	// Same image as eh-fde-registry: CIE "zR" udata4, one FDE over s.code; no library calls (runs pre-heap).
-	// udata4 must describe the whole range, in both ABIs (review: codex): otherwise refuse to build the image.
+	// udata4 must describe the whole range, in both ABIs (review): otherwise refuse to build the image.
 	if ((uintptr_t)s.code > 0xffffffffu - sizeof s.code) {
 		g_unrepresentable = g_unrepresentable + 1;
 		return false;

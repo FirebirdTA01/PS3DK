@@ -5,7 +5,7 @@
 # The whole reason to use half types is performance and if we don't honor the
 # correct fp16 when declaring them then that is incorrect."  We honoured the
 # half OUTPUT - the colour reached H0 - and computed everything feeding it in
-# fp32, converting once at the store.  Gemini measured that the cost is
+# fp32, converting once at the store.  A reviewer measured that the cost is
 # visible: dullMetalFp differs from the established compiler on 213 pixels by up to
 # 3/255.
 #
@@ -13,7 +13,7 @@
 # dullMetalFp's divergence is a normalize the established compiler keeps at prec=1, and
 # normalize's result is FLOAT32-TYPED in our IR whatever its inputs are - so
 # the rule these rows pin does not reach it and that shader is NOT fixed by
-# this slice (codex, review).  What the rows below pin is narrower: the
+# this slice (review).  What the rows below pin is narrower: the
 # instructions a lowering appends to write a FLOAT16-TYPED IR RESULT's vreg,
 # where no earlier writer already owns that vreg's format and the lowering
 # has not already claimed a precision of its own.
@@ -28,7 +28,7 @@
 # destination there is a float register and the multiply is still prec=1, so
 # the precision follows the VALUE's type and the bank does not.  The first row
 # is the control that keeps the two apart in the other direction - float
-# values under a half output stay prec=0 (codex's 15-shape matrix) - and it
+# values under a half output stay prec=0 (the review's 15-shape matrix) - and it
 # is red on any change that reads precision off the output declaration.
 set -euo pipefail
 
@@ -141,7 +141,7 @@ if bad:
     raise SystemExit(
         "FAIL: FLOAT arithmetic under a half output computed at prec=%d, "
         "expected 0.  The reference computes `float4 a = p * 1.003` in full "
-        "precision and only the write into the colour is half (codex's "
+        "precision and only the write into the colour is half (the review's "
         "15-shape matrix).  Reading precision off the OUTPUT declaration is "
         "what this row exists to catch." % bad[0][3])
 
@@ -150,7 +150,7 @@ if bad:
 #    even on half inputs, so `half4(cross(p.xyz, p.zyx), p.w)` writes xyz as
 #    FLOAT data through the constructor's shared base and only the w lane is
 #    half-typed; stamping the register fp16 for that one lane reinterprets
-#    xyz and the pixel is wrong (codex).  Every computing instruction here
+#    xyz and the pixel is wrong (review).  Every computing instruction here
 #    stays in a float register at prec=0, and the ONLY half destination is
 #    the move into the colour.
 lanes = rows("fp_half_ctor_float_lanes_f")
@@ -201,7 +201,7 @@ for stem in ("fp_half_insert_chain_f", "fp_half_computed_insert_f"):
 # 6. A TEXTURE FETCH'S PRECISION IS THE TEXTURE UNIT'S, NOT THE VALUE'S.
 #    h4tex2D returns half4, so the value rule stamped the fetch prec=1 and we
 #    emitted TEXH where the established compiler emits TEXR - measured on the established compiler under
-#    BOTH output types (codex, build/codex-half-tex-regression).  The fetch
+#    BOTH output types (review).  The fetch
 #    carries an explicit fp32 override in lowerTex for the same reason UP2H
 #    does: these instructions' format belongs to the unit that produces the
 #    value.  What must NOT move with it is the arithmetic that consumes the

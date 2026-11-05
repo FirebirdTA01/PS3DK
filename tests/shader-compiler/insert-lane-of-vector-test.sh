@@ -4,7 +4,7 @@
 #
 # The rule, its scope, and why the two earlier versions of this guard were
 # too weak - one asserted a shape that 06baa4eb legitimately changed, the
-# other asserted lane indices, which codex bypassed in review by pointing
+# other asserted lane indices, which a reviewer bypassed in review by pointing
 # the final MOV at the original input - are in insert_lane_check.py.
 #
 # THE CHECK IS RUN EIGHT TIMES.  Once on what the compiler emitted, which
@@ -12,13 +12,13 @@
 # each of which must be refused with status EXACTLY 1:
 #
 #   broadcast   the original defect: the source swizzle forced to x
-#   bypass      codex's first finding: the same lanes read straight from
+#   bypass      the review's first finding: the same lanes read straight from
 #               the input, so the multiply never happens
 #   constant    one factor in the inline const block doubled
-#   hwinput     codex's second finding: the multiply's per-instruction
+#   hwinput     the review's second finding: the multiply's per-instruction
 #               input selector moved to another varying, so RGB and w come
 #               from different attributes
-#   earlyend    codex's third finding: PROGRAM_END set on the first
+#   earlyend    the review's third finding: PROGRAM_END set on the first
 #               instruction, so the hardware stops before the multiply and
 #               before the final colour write
 #   saturate    the multiply's destination saturation bit set

@@ -127,7 +127,7 @@ desktop.ini
 .ccache/
 .sccache/
 
-# Claude Code local-only settings (per-user; team-shared settings.json is OK to commit)
+# local-only per-user tool settings (a team-shared settings.json is OK to commit)
 .claude/settings.local.json
 
 # Private developer notes — phase/stage narrative kept out of the public tree.

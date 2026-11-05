@@ -1,4 +1,4 @@
-/* RSX (GPU) zone domain core (design P3.3 r2 + r3/r4/r5 deltas, R1 corrections codex 11:52): portable C behind a
+/* RSX (GPU) zone domain core (design P3.3 r2 + r3/r4/r5 deltas, R1 corrections review 11:52): portable C behind a
  * port, HOST MODEL ONLY in slice R1.  One domain per GCM context.  The render (ctx owner) thread numbers and submits
  * events; one drainer at a time (the ext lock) reads completions and emits chunks; publication between them is a
  * serialized snapshot (snap lock).

@@ -155,7 +155,7 @@ FORBIDDEN = [  # (seq, result, fields, var, kw, named reason)
     (4, 'ok', '', 'W', {'unres': ('u', 'n')}, 'unres before'),
     (2, 'error:open:5', '', 'W', {}, 'cannot carry result'), (2, 'error:open:8001000A', '', 'W', {}, 'cannot carry result'),
     (6, 'ok', 'issued=0 csv=ok', 'W', {}, 'fields'), (8, 'ok', '', 'W', {}, 'fields'),
-    # codex 20:15 (a)-(d) and the related consistency rules
+    # review 20:15 (a)-(d) and the related consistency rules
     (8, 'timeout', PH(1), 'W', {'unres': ('n', 'n')}, 'needs SPU unres u'),
     (16, 'ok', 'left_running=0 spu_join=ok', 'W', {'prev': '00:ok:0000000000001100'}, 'cannot follow 00'),
     (3, 'ok', '', 'W', {'counts': (4294967296, 0)}, 'beyond the u32 width'),

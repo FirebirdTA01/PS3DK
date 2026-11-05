@@ -103,7 +103,7 @@ for n, label in ((34, 'N=34 refused like the reference'),):
     ok = p.returncode == 1 and not o.exists() and 'vp-register-budget' in p.stdout + p.stderr
     print('  %-34s %s' % (label, 'refused' if ok else 'NOT refused (rc %d)' % p.returncode))
     if not ok: fails.append('%s: expected exit 1, no container and vp-register-budget' % label)
-# The edge of today's scheduler (codex): the largest family member that fits
+# The edge of today's scheduler (review): the largest family member that fits
 # and the first that does not - vector-only, and with scalar-slot work.
 # Since the VP MAD fusion each chain step is one MAD, and the vector family
 # lands exactly on the encoding boundary: N=31 tops out at R31 (accepted),

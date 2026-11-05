@@ -30,7 +30,7 @@ int pthread_attr_setinheritsched(pthread_attr_t *attr, int inherit)
  * Our runtime supports only SCHED_OTHER; any other policy
  * (SCHED_FIFO, SCHED_RR, an out-of-range value) is not a valid input.
  *
- * Contract (agreed with codex, t_a2644ed1):
+ * Contract (agreed with review, t_a2644ed1):
  *   - SCHED_OTHER : return 0.  The portable code pattern
  *         sched_param p = { .sched_priority = sched_get_priority_min(SCHED_OTHER) };
  *     is expected to yield a priority the shim honours.  A priority of

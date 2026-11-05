@@ -227,7 +227,7 @@ def evaluate(blob, inputs, *, scalar_kill=False, zero_temps=False, out_lanes=(0,
                     # Only the measured form is modelled: init 0, step 1.  A
                     # step-0 loop (the outer loop of the established compiler's 256-trip
                     # nest) or another init is refused until its counter
-                    # semantics are measured (review: codex, FP-LOOP-DESIGN-R1).
+                    # semantics are measured (review, FP-LOOP-DESIGN-R1).
                     if init != 0 or step != 1:
                         raise Unmodelled("LOOP {%d, %d, %d}: only init 0 / step 1 is modelled" % (count, init, step))
                     target = (w[3] & 0x7FFFFFFF)
@@ -391,7 +391,7 @@ def self_test():
     rows.append(('green: R0 = RCP(TEX0.x) broadcast',
                  _container(_ins(RCP, 0, 0xF, [_src(I)], sel=tex0, end=1)), [4.0] * 4))
     rows.append(('green: H0 output (outputFromH0)', _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, half=1, end=1), h0=1), a))
-    # RED controls (codex review of fae9ca52): each must be refused, not evaluated
+    # RED controls (review of fae9ca52): each must be refused, not evaluated
     rows.append(('red: MOV R0, R5 (undefined source)', _container(_ins(MOV, 0, 0xF, [_src(T, 5)], end=1)), None))
     rows.append(('red: R0=.., H0.x=.., R0.w=.. (stale xyz output)',
                  _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0) + _ins(MOV, 0, 0x1, [_src(I)], sel=tex0, half=1)
@@ -419,7 +419,7 @@ def self_test():
     rows.append(('red: predicated MOV with CC never written',
                  _container(_ins(MOV, 0, 0xF, [_src(I)], sel=tex1)
                             + _pred(_ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1), 5)), None, az, b))
-    # RCP precision is judged on the lane it READS (review: codex): fx12/fp16
+    # RCP precision is judged on the lane it READS (review): fx12/fp16
     # RCP R0.y, TEX0.x with TEX0.x = 0.1 must refuse; masked and swizzled
     # reads of representable lanes stay green
     def _rcp(dst_mask, swz, prec):
@@ -443,7 +443,7 @@ def self_test():
     rows.append(('green: DIV R0, TEX0, TEX0.w', _div(0xFF), [f32(x / 1.5) for x in a]))
     rows.append(('red: fx12 DIV, divisor TEX0.x = 0.1 not fx12', _div(0x00, prec=2), None, tenth, b))
     rows.append(('green: fx12 DIV R0, TEX0, TEX0.y (all fx12)', _div(0x55, prec=2), [-0.5, 1.0, -2.0, -3.0]))
-    for scale, factor in ((1, 2.0), (6, 0.25), (4, None)):  # x2, /4, reserved (review: codex)
+    for scale, factor in ((1, 2.0), (6, 0.25), (4, None)):  # x2, /4, reserved (review)
         words = _ins(MOV, 0, 0xF, [_src(I)], sel=tex0, end=1)
         words[2] |= scale << 28
         rows.append(('%s: output scale encoding %d' % ('green' if factor else 'red', scale),

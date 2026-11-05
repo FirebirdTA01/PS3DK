@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P3.3 R1: the RSX (GPU) domain core as a HOST MODEL (design r2 + r3/r4/r5 deltas, codex GO 10:27; corrections codex
+"""P3.3 R1: the RSX (GPU) domain core as a HOST MODEL (design r2 + r3/r4/r5 deltas, review GO 10:27; corrections review
 11:52).  Not target evidence: a GPU emulator executes the submitted pairs; A1 (report visible before its label) and
 A2 (coherent report read) are assumptions; the mapping is UNMEASURED.
 
@@ -185,7 +185,7 @@ mutants = [
     ('no-epoch-bracket-budget', [('d->br_epoch_used >= g->br_epoch_max || ', '')], 'r1-cal-epoch-over:'),
     ('no-file-bracket-budget', [(' || g->br_file_used >= g->br_file_max) {', ') {')], 'r1-cal-file-over:'),
     ('report-range-unchecked', [('report_first > UINT32_MAX - report_count || ', '')], 't_attach_bounds:'),
-    # the r1c3 carries (codex 12:24)
+    # the r1c3 carries (review 12:24)
     ('exhaustion-keeps-admitting', [(' || LD_ACQ(&d->exhausted) ||', ' ||')], 't_exhaust_admitted:'),
     ('exhaustion-finalized', [(': s.overflow || d->loss_exhausted ? FIN_OVERFLOWED', ': s.overflow ? FIN_OVERFLOWED')],
      't_exhaust_at_seal:'),
@@ -198,7 +198,7 @@ mutants = [
             tok->begin_seq != d->p_sup_stack[d->p_suppressed - 1]) {""",
         """        if (!d->p_suppressed || (tok->depth & 0x7fffffffu) != d->p_suppressed) {""")],
      't_pair_suppressed_stale:'),
-    # R2 core additions (codex GO 12:53)
+    # R2 core additions (review GO 12:53)
     ('hold-ignored', [('        if (d->port.emittable && !d->port.emittable(d->port.ctx, &x->m)) {', '        if (0) {')],
      't_hold_release:'),
     ('hold-skips-instead-of-stopping', [(

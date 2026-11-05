@@ -2,8 +2,8 @@
 // A ## OPERAND TAKES THE RAW ARGUMENT, so BAD is pasted, never expanded, and
 // its form-feed body never reaches the token stream: the established compiler ACCEPTS.
 // Deciding per PARAMETER rather than per OCCURRENCE refused this - the name
-// "a" appears in the body, so the argument was pre-expanded (found by codex,
-// reproduced on two independent builds; reference verdicts by Fable, m19).
+// "a" appears in the body, so the argument was pre-expanded (found in review,
+// reproduced on two independent builds; reference verdicts measured in review, m19).
 #define BAD (1.0)
 #define BADx 2.0
 #define CAT(a,b) a##b

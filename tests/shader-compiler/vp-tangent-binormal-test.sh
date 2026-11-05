@@ -30,7 +30,7 @@ fi
 
 # A FRESH scratch directory every run, never a reusable PID-named one: a stale
 # directory seeded with yesterday's containers would let a compiler that writes
-# nothing pass every accept row (found by codex on the first revision).
+# nothing pass every accept row (found in review on the first revision).
 scratch_root="${TMPDIR:-$repo_root/.local/tmp}"
 mkdir -p "$scratch_root"
 work="$(mktemp -d "$scratch_root/vp-tangent-binormal-test.XXXXXX")"

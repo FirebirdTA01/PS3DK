@@ -7,7 +7,7 @@ counted.  ci/shellcheck-baseline.txt records the allowed count per pair:
   - a pair whose count rose above the baseline is a REGRESSION -> fail
   - an equal or lower count passes (lower counts are listed so the baseline can shrink).
 
-Fail closed, every step (codex 1fe28976): the walk of scripts/ must complete (an unreadable directory fails);
+Fail closed, every step (review 1fe28976): the walk of scripts/ must complete (an unreadable directory fails);
 shellcheck must exit 0 or 1, and 0 only with no output; every output line must parse as a gcc-format finding
 (file:line:col: level: text [SCnnnn]) - anything else, or exit 1 with no finding, fails; every baseline line must be
 a comment, blank, or "<file> <SCnnnn> <count>"; and first, shellcheck must report SC2086 on a known unquoted

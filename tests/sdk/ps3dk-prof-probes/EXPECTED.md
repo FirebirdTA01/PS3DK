@@ -7,7 +7,7 @@
 - **What they can establish:** the compiler's lowering of the same builtins under the stated flags. The actual-object
   checks (PROBE-O-actual, PROBE-T-actual) come after pal_lv2 (ordering step 3).
 
-## How to read the expected-lowering tables (codex 2026-10-22 03:21)
+## How to read the expected-lowering tables (review 2026-10-22 03:21)
 
 - **Shapes, not spellings:** the tables below give expected SHAPES, not one required instruction spelling. A
   different instruction sequence with the same ordering and atomicity effect (for example `sync` where `lwsync` is
@@ -62,4 +62,4 @@
 - **Control:** `probe_t_control_no_barriers` is recorded as found. Whatever order it shows is not a finding. It only
   shows that the barriers are the variable under test.
 - **Stated guarantee:** NO hardware serialization and NO register-only-motion guarantee. The conclusion is bounded to
-  this fixture, these call sites and these flags (codex 02:49).
+  this fixture, these call sites and these flags (review 02:49).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """P3.3 slice R2: GPU (RSX) domains inside the runtime, HOST ONLY (design 935936fb + deltas 2400e50a, 0e23d13e, the
-codex 12:53 rulings and the 14:03 corrections).  The GPU device is an in-order emulator behind the test-hook port:
+review 12:53 rulings and the 14:03 corrections).  The GPU device is an in-order emulator behind the test-hook port:
 host-model evidence, not target evidence; A1/A2 remain assumptions; the mapping is UNMEASURED.
 
 Rows (exit 0 only if all pass):

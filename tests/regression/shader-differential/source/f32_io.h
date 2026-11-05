@@ -2,7 +2,7 @@
  * short write and the close.  The stdio calls go through F32_FOPEN /
  * F32_FWRITE / F32_FCLOSE so the host test (f32-gate-test.c) can inject
  * each failure; the guest uses plain stdio.  A failed write latches the
- * run INVALID in run_f32 (codex review 2026-10-19 20:12). */
+ * run INVALID in run_f32 (review 2026-10-19 20:12). */
 #ifndef F32_IO_H
 #define F32_IO_H
 

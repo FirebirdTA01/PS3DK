@@ -1,4 +1,4 @@
-/* The counter ceiling, fail-closed (format 5.1 "Counter ceiling", the codex 23:55 boundary correction).  Every case
+/* The counter ceiling, fail-closed (format 5.1 "Counter ceiling", the review 23:55 boundary correction).  Every case
  * presets a counter near 2^63, then checks: the counter is exact and never past 2^63, SEQ_LIMIT is set, the
  * shutdown result is ESEQLIMIT and the capture is INCOMPLETE (end_flags bit1), never clean. */
 #define _POSIX_C_SOURCE 200809L

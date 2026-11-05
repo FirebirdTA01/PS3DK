@@ -110,7 +110,7 @@ float4 main(float2 tc : TEXCOORD0) : COLOR { return float4(tc * G.b + G.in1.a, 0
 # A whole-struct copy of a flattened parameter into a file-scope struct that a
 # helper reads (libretro `IN_global = IN;`).  The destination is filled from A,
 # then REPLACED from B, and both members are read: a stale binding left from A
-# or a missed member from B shows up as a wrong value (review: codex).
+# or a missed member from B shows up as a wrong value (review).
 COPY_REPLACE = """struct input { float2 video_size; float2 texture_size; };
 input G;
 float2 helper() { return G.texture_size * 2.0 + G.video_size; }
@@ -127,7 +127,7 @@ float4 main(float2 tc : TEXCOORD0, uniform sampler2D s0 : TEXUNIT0, uniform prev
 { s0_global = REFERENCE.texture; return helper(tc * REFERENCE.texture_size) + tex2D(s0, tc); }
 """
 SAMPLER2D, TEXUNIT0 = 1066, 2048
-# Copy edges (review: codex; the established compiler accepts both): self-assignment must
+# Copy edges (review; the established compiler accepts both): self-assignment must
 # not erase the members it copies, and a chain copies to every destination
 # (H.a and G.b both read IN, not the file-scope uniforms H and G).
 SELF_COPY = """struct input { float2 a; float2 b; };
@@ -160,7 +160,7 @@ float2 f(input s) { return s.a + s.b; }
 float4 main(float2 tc : TEXCOORD0, uniform input IN) : COLOR { return float4(tc * f(IN), 0, 1); }
 """
 # Forwarded on through a helper whose parameter shadows a caller name (main's
-# x): the helper's x is the flattened u, not main's input (review: codex).
+# x): the helper's x is the flattened u, not main's input (review).
 FORWARD_SHADOW = """struct U { float4 a; };
 float4 h(U q) { return q.a; }
 float4 g(U x) { return h(x); }

@@ -373,7 +373,7 @@ same   fp_helper_default_narrow_gap_f fp_helper_default_narrow_twin_f \
 # refuse_saying / refuse_not_saying, and the failure they are most exposed to
 # is the one that already shipped once on the sister guard: a compiler that
 # exits 1 with the right words while STILL writing a container satisfies the
-# verdict and the reason and leaks the artifact (review: codex).  This re-runs
+# verdict and the reason and leaks the artifact (review).  This re-runs
 # this script against a stub that does exactly that on one row and requires the
 # run to FAIL, on that assertion.  A guard with no self-test is a guard nobody
 # has tested.
@@ -406,7 +406,7 @@ LEAK
 
     # AND AN EMPTY FILE IS A FILE.  The refusal helpers used `! -s`, which is
     # false for a zero-byte output - so a compiler that refused correctly but
-    # left an empty artifact behind passed every refusal row (review: codex,
+    # left an empty artifact behind passed every refusal row (review,
     # who demonstrated it with a wrapper rather than by reading the test).
     # They use `! -e` now, and this proves the difference: the stub below
     # writes NOTHING to a file it creates, which the old spelling accepted.

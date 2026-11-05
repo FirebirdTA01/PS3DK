@@ -65,7 +65,7 @@ VP_VECTOR_ROWS = {
                        VP_VECTOR_D, lambda p: [fmod_ref(p[i], VP_VECTOR_D[i]) for i in range(4)]),
 }
 # The VP evaluator's new vector opcodes (MIN, SLT, FRC, FLR, SNE) are proven
-# on hand-encoded programs here, not only on compiler output (review: codex):
+# on hand-encoded programs here, not only on compiler output (review):
 # R0 = v0; R1 = v1; COLOR0 = op(R0, R1), opcode numbers from nvfx_shader.h.
 VP_OPS = {'MIN': 9, 'SLT': 11, 'SGE': 12, 'FRC': 14, 'FLR': 15, 'SNE': 20}
 V0 = [-1.5, 0.25, -0.25, 2.0]

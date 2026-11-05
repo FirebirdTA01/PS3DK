@@ -751,7 +751,7 @@ bool foldBinaryScalar(BinaryOp op, const ConstEvalScalar& a, const ConstEvalScal
 }
 
 // The type both branches of a ternary convert to before anything uses the
-// result: (true ? 7 : 2.0f) / 2 is 3.5 on the established compiler, not 3 (codex's cell).
+// result: (true ? 7 : 2.0f) / 2 is 3.5 on the established compiler, not 3 (the review's cell).
 BaseType commonBaseType(const ConstEvalScalar& a, const ConstEvalScalar& b)
 {
     using K = ConstEvalScalar::Kind;
@@ -1367,7 +1367,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             // and the frontend accepts them.  The evaluator above reports
             // what the EXPRESSION held, which is one component, so without
             // this the compiled default is (1,0,0,0) - right in x and zero
-            // everywhere else (review finding, codex).  Widen to the
+            // everywhere else (review finding).  Widen to the
             // DECLARED component count, which is the width a runtime patch
             // of this parameter writes and the width the fold needs.
             if (constInit.size() == 1)
@@ -1460,7 +1460,7 @@ void IRBuilder::buildGlobals(TranslationUnit& unit)
             // Bare file-scope `static` is deliberately excluded here: static
             // variables in Cg are mutable, and folding an initial value at
             // every read would silently drop writes from helpers or other
-            // functions (review finding, codex).
+            // functions (review finding).
             const bool foldableConst =
                 varDecl->storage == StorageQualifier::Const &&
                 (!global.initialValue.empty() || !global.initialIntValues.empty());
@@ -1639,7 +1639,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
     // assigned file-scope name already does.  An array binds per element.
     // FIRST, before any parameter: a parameter of the same name binds after
     // it and stashes it, as a local shadowing a global does, so the entry
-    // reads its parameter and an inlined helper the static (review: codex,
+    // reads its parameter and an inlined helper the static (review,
     // static-entry-shadow).
     if (currentFunction_->isEntryPoint)
     {
@@ -1795,7 +1795,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                 // Stash the file-scope bindings this parameter shadows BEFORE
                 // binding the members: the stash records each global key's
                 // current binding, so stashing after would save the
-                // parameter's members as the global's (review: codex), and a
+                // parameter's members as the global's (review), and a
                 // helper reading the file-scope `IN.b` would read the
                 // parameter.  The ordinary parameter path stashes first too.
                 stashShadowedGlobal(param->name);
@@ -1895,7 +1895,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                     member.valueId = currentFunction_->allocateValueId();
                     member.storage = StorageQualifier::Uniform;
                     member.sourceOrdinal = sourceOrdinal;
-                    // The member's own binding carries over (review: codex;
+                    // The member's own binding carries over (review;
                     // measured: `sampler2D tex : TEXUNIT3` is unit 3 and
                     // `: register(s5)` unit 5 - without these the sampler
                     // took the next free unit and read the wrong texture).
@@ -2000,7 +2000,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                 // (0.6,0,0,0): right in x and zero elsewhere, which renders
                 // as a plausible darker colour rather than as anything
                 // obviously wrong.  The file-scope path learned this the
-                // same way (review finding, codex); the fixture caught it
+                // same way (review finding); the fixture caught it
                 // here before the first review round.
                 if (irParam.initialValue.size() == 1)
                 {
@@ -2228,7 +2228,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
                 continue;
             // The initialiser is FILE-SCOPE code: build it with the file-scope
             // bindings, not the entry's parameters that have since shadowed
-            // some of them (review: codex - `static float y = f(x);` under
+            // some of them (review - `static float y = f(x);` under
             // `main(float x : TEXCOORD0)` reads the static x, measured 0.5).
             // The stash holds each shadowed name's file-scope binding;
             // restore the entry's view afterwards.
@@ -2248,7 +2248,7 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             const auto fileArrays = localArrayValues_;
             const IRValueID value = buildExpr(decl->initializer.get());
             // A helper the initialiser calls may WRITE file-scope state, and
-            // the write persists (review: codex; measured: `g = .75` inside
+            // the write persists (review; measured: `g = .75` inside
             // f() of `static float y = f();` reads 0.75 afterwards - scalar,
             // array element, a shadowed g, and a later initialiser all
             // see it).  Every binding the build changed is such a write:
@@ -2575,7 +2575,7 @@ void IRBuilder::exitBlockBinding(const std::string& name, const ScopeState& pre)
     // A declared STRUCT owns qualified keys too ("s.f", "s.f.xyz", nested
     // "s.a.b"): buildDeclStmt seeds them and field assignment rebinds them,
     // so they end with the declaration exactly as the bare name does
-    // (review: codex - an inner `S s` left its s.f visible after the block,
+    // (review - an inner `S s` left its s.f visible after the block,
     // and the return read 3p where the established compiler reads the outer p).
     const std::string prefix = name + ".", rows = name + "[";
     auto owned = [&](const std::string& key) {
@@ -2917,14 +2917,14 @@ void IRBuilder::buildConditional(ExprNode* condition, SourceLocation loc,
     // A varying struct member of the entry is bound lazily, at its first
     // use.  When an arm ASSIGNS it before any read (`if (c) v.x = 0.75;`),
     // the other side never bound it, yet its value there is the INPUT - not
-    // undefined (review: codex, join-input-write).  Load the input here at
+    // undefined (review, join-input-write).  Load the input here at
     // the merge so the join selects against it.  A key every arm only READ
     // is left alone: both sides are the same input, and the join below
     // takes the load as it is.
     // True only for the load OF THIS KEY's input - the same parameter and
     // member - not any input load: `v.x = v.y` binds v.x to v.y's load,
     // and treating that as a read of v.x took y on the untouched side too
-    // (review: codex, join-other-input-write).
+    // (review, join-other-input-write).
     auto isLoadOf = [&](IRValueID id, const std::string& key) {
         const size_t dot = key.find('.');
         if (dot == std::string::npos) return false;
@@ -3754,7 +3754,7 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
     return true;
 }
 
-// FP-LOOP slice 1 (fp-loop-design.md R2, codex R1/R2): a fragment `for` the
+// FP-LOOP slice 1 (fp-loop-design.md R2, review R1/R2): a fragment `for` the
 // expansion above could not prove becomes a hardware loop REGION in the
 // current block - LOOP {255, 0, 1} with the source's condition tested at
 // the head of every iteration and a BRK when it fails, the shape the
@@ -3928,7 +3928,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         cond = normalizeCondition(stmt->condition.get(), cond);
         // The exit test runs before any carry is written back, so a
         // condition that assigns (`i < (n = n - 1)`) would leave the exit
-        // without that write: refused (review: codex, LOOP1).
+        // without that write: refused (review, LOOP1).
         if (scope_.fold() != beforeCondition) {
             --hardwareLoopDepth_;
             blockDeclared_.pop_back();
@@ -4092,7 +4092,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // Every reference to a folded carry - region operands, every name bound
     // to it (`a = b;` binds a to b's carry), every other carry's next value -
     // is canonicalised to that value BEFORE any definition is removed
-    // (review: codex, LOOP3).
+    // (review, LOOP3).
     std::unordered_map<IRValueID, IRValueID> folded;
     for (const Carry& c : carries) {
         const auto it = nameToValue_.find(c.name);
@@ -4101,7 +4101,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     }
     for (const auto& [carry, init] : folded) replaceInRegion(carry, init);
     if (const auto f = folded.find(tailBreakCond); f != folded.end())
-        tailBreakCond = f->second;   // review: codex TAIL3
+        tailBreakCond = f->second;   // review TAIL3
     for (auto& kv : nameToValue_) {
         const auto f = folded.find(kv.second);
         if (f != folded.end()) kv.second = f->second;
@@ -4140,14 +4140,14 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // established compiler nests a second LOOP for it, not implemented), so more than
     // 255 iterations is refused; a body that also writes the induction makes
     // the count unknowable from the header, refused too when the bound is
-    // constant (review: codex, constant fractional 300 / .5).
+    // constant (review, constant fractional 300 / .5).
     {
         // Each of start and bound is CONSTANT (evaluated here), RUN-TIME (it
         // reads an input, a uniform, a texture, a carry: the measured
         // LOOP {255} shape) or UNKNOWN (built only from constants through an
         // operation this evaluator does not model).  UNKNOWN is refused: a
         // constant expression the guard cannot evaluate must not reach
-        // LOOP {255} unchecked (`i < abs(-300.0)`, review: codex LOOP4).
+        // LOOP {255} unchecked (`i < abs(-300.0)`, review LOOP4).
         enum class Kind { Constant, Runtime, Unknown };
         std::unordered_map<IRValueID, const IRInstruction*> defs;
         for (const auto& bp : currentFunction_->blocks)
@@ -4156,7 +4156,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
                     if (ip && ip->result != InvalidIRValue) defs[ip->result] = ip.get();
         // Memoised per IR id: a shared constant DAG (`min(k, k)` repeated)
         // would otherwise be walked once per path - exponential work
-        // (review: codex LOOP5-DAG).  Each id is classified once.
+        // (review LOOP5-DAG).  Each id is classified once.
         std::unordered_map<IRValueID, std::pair<Kind, double>> memo;
         std::function<Kind(IRValueID, double&, int)> classifyOnce;
         auto classify = [&](IRValueID id, double& out, int depth) -> Kind {
@@ -4307,7 +4307,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     }
     // Drop THIS loop's folded carry definitions - only its own provisional
     // ids, never an earlier loop's carries in the same block (review:
-    // codex, LOOP2).
+    // review, LOOP2).
     {
         auto& insts = block->instructions;
         const auto first = insts.begin() + static_cast<std::ptrdiff_t>(carryStart);
@@ -4323,7 +4323,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // BRK where the condition holds; the induction alone is written back by
     // the final latch, after the increment.
     if (tailBreak) {
-        // TAIL2 (review: codex): a body that writes the induction would need
+        // TAIL2 (review): a body that writes the induction would need
         // that write in the break snapshot and an increment that reads it
         // past the latch.  Refused for this slice.
         const Carry* indCarry = nullptr;
@@ -4343,7 +4343,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
         latch = induction;
         auto first = std::make_unique<IRInstruction>(IROp::LoopLatch, InvalidIRValue, IRTypeInfo::Void());
         first->operands = beforeBreak;
-        // TAIL1 (review: codex): the guard is FROZEN into a fresh value before
+        // TAIL1 (review): the guard is FROZEN into a fresh value before
         // the latch.  The condition may BE a carry (`if (a) break;` after
         // `a = b`) or read one through a lane alias, and the latch rewrites
         // carry registers before the BRK reads its guard.
@@ -4725,10 +4725,10 @@ void IRBuilder::buildReturnStmt(ReturnStmt* stmt)
                             // index too, members of an out struct included
                             // (measured: `out float4 explicitTc : TEXCOORD0`
                             // moves a semantic-less returned member to TEXCOORD1;
-                            // they collided on TEXCOORD0 - review: codex).
+                            // they collided on TEXCOORD0 - review).
                             // An array claims every element's index (measured:
                             // out float4 t[2] : TEXCOORD0 holds 0 and 1, and the
-                            // member goes to TEXCOORD2 - review: codex).
+                            // member goes to TEXCOORD2 - review).
                             const auto claimSemantic = [&](const Semantic& s, TypeNode* t) {
                                 if (s.isEmpty()) return;
                                 std::string u = s.name;
@@ -4967,7 +4967,7 @@ void IRBuilder::buildExprStmt(ExprStmt* stmt)
 // stash so an inlined helper can still reach the GLOBAL by that name.
 // Captured ONCE: a second binding of the same name (a nested declaration
 // inside an inlined helper) must not replace the global's binding with the
-// outer one's (review: codex, nested_local_shadow).  InvalidIRValue / an
+// outer one's (review, nested_local_shadow).  InvalidIRValue / an
 // empty vector means "shadowed, never assigned": the helper's read then
 // falls through to the global load.
 void IRBuilder::stashShadowedGlobal(const std::string& name)
@@ -4977,7 +4977,7 @@ void IRBuilder::stashShadowedGlobal(const std::string& name)
     // ("s.f"), and a local `S s` shadows every one of them: each key the
     // declared name owns gets its own stash entry, keyed by that qualified
     // name, so a helper's write to the real global field is routed to the
-    // stash and comes back out at block exit (review: codex - the bare-name
+    // stash and comes back out at block exit (review - the bare-name
     // stash never fired for a struct, findGlobal("s") being null, and the
     // helper's write was restored away).
     const std::string prefix = name + ".";
@@ -5057,7 +5057,7 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
         // of every fragment local (FragmentProgramDecompiler AddReg) cannot
         // tell a hardware guarantee from an emulator convenience; a physical
         // register reused after another value's live range holds that value
-        // either way (codex, 2026-09-07).  So: correct now, shorter later.
+        // either way (review, 2026-09-07).  So: correct now, shorter later.
         if (varDecl->initializer && getStructFields(varDecl->type.get()) &&
             varDecl->initializer->kind == ExprKind::Cast)
         {
@@ -5071,7 +5071,7 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
                 cast->targetType->baseType == BaseType::Struct &&
                 cast->targetType->structName == varDecl->type->structName;
             // A DEFENSIVE BACKSTOP.  The unsigned source is refused in
-            // semantic analysis, where the type still says UInt - codex
+            // semantic analysis, where the type still says UInt - review
             // measured ScalarKind UInt reaching analyzeCastExpr, correcting
             // my earlier belief that the unsignedness was lost by then.  This
             // check is what catches a source that arrives here typed
@@ -6085,7 +6085,7 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
         // read IN_global.texture_size).  A chain `H = (G = IN)` copies to
         // every destination.  The source members are SNAPSHOT before any
         // destination is cleared, so `IN = IN` (or an overlapping path)
-        // cannot erase what it copies (review: codex); each destination's
+        // cannot erase what it copies (review); each destination's
         // old members are dropped so an absent source member cannot leave
         // an older value behind.
         if (expr->op == BinaryOp::Assign)
@@ -6172,7 +6172,7 @@ IRValueID IRBuilder::buildBinaryExpr(BinaryExpr* expr)
             // and only then converted to a's (measured: int a = 3;
             // a *= float2(1.5, 9) is 4; float a = .5; a *= int2(3, 9) is 1.5;
             // float a = 1.000244140625; a *= half2(1, 2) keeps the float a;
-            // half a *= float2 multiplies in float - review: codex).
+            // half a *= float2 multiplies in float - review).
             bool narrowedCompound = false;
             {
                 const IRTypeInfo leftType = getExprType(expr->left.get());
@@ -6491,7 +6491,7 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
     //
     // A DEFAULT EXPRESSION BINDS ITS NAMES AT ITS DECLARATION, NOT AT THE CALL.
     // It is materialised here, so the instructions land in the caller's block -
-    // but name resolution must not see the caller's locals.  Measured (codex,
+    // but name resolution must not see the caller's locals.  Measured (review,
     // function-visibility review):
     //
     //     uniform float g = 2;
@@ -6570,7 +6570,7 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             // Dropping it wholesale left `static float G; float bump(){G=2;}
             // ... outer(x, k = bump()) ... return r + G;` reading the old G -
             // the established compiler makes that form byte-identical to passing bump()
-            // explicitly (found by codex; on this base it surfaces as a
+            // explicitly (found in review; on this base it surfaces as a
             // refusal, "ldunif of 'G' has no registered uniform source",
             // because the binding vanished rather than going stale).
             //
@@ -7477,7 +7477,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // argument is a plain caller lvalue; anything else is refused by name.
     // A two-dimensional array PARAMETER: its rows ("a[i]", storageKey) are
     // not bound by the parameter binding below, so a caller row of the same
-    // name would stay in scope (review: codex, array2d_param_shadow).  Refused.
+    // name would stay in scope (review, array2d_param_shadow).  Refused.
     for (const auto& param : callee->parameters)
         if (param && param->type && param->type->isArray() && param->type->elementType &&
             param->type->elementType->isArray())
@@ -7563,7 +7563,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // Locals are added from the executed body's declaration frame below.
     // A declaration after return never shadows an earlier global write.
     // Ownership, not equality: a callee that binds `s` owns "s.f" too (review:
-    // codex - the callee's own struct field write must not be routed to the
+    // review - the callee's own struct field write must not be routed to the
     // caller's stash as a write to the global struct of the same name).
     auto calleeOwns = [&](const std::string& key) -> bool
     {
@@ -7662,7 +7662,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                     nameToValue_[to + entry.first.substr(from.size())] = entry.second;
             // The parameter shadows a caller name it shares (main's `x`):
             // inside the helper the name has no whole value, so forwarding
-            // it on (h(x)) is again a flattened argument (review: codex).
+            // it on (h(x)) is again a flattened argument (review).
             // The scope restore after the call brings the caller's back.
             nameToValue_.erase(param->name);
             if (flattenedUniformStructParams_.insert(param->name).second)
@@ -7792,7 +7792,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // Only the callee's PARAMETERS are exempt here - they were bound above
     // and every occurrence in the body names them.  A top-level local the
     // callee declares LATER is not: a read before that declaration names
-    // the global (review: codex - `D = G; float4 G = ...;` read the
+    // the global (review - `D = G; float4 G = ...;` read the
     // enclosing helper's parameter when the whole-body ownership set was
     // used as the exemption; the declaration rebinds the name when it is
     // reached, as buildDeclStmt does for any shadowing local).
@@ -7959,7 +7959,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     // entry outlives every reassignment of that binding.  The earlier
     // test compared the name's current value with the declaration's
     // value, which stopped matching after one `G = G * 2` (review:
-    // codex, scope-param-rebound; inline-entry-parameter-scope) - a reassigned local lost
+    // review, scope-param-rebound; inline-entry-parameter-scope) - a reassigned local lost
     // the same way.
     auto callerLocalBinding = [&](const std::string& name, IRValueID) -> bool
     {
@@ -7982,7 +7982,7 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
     }
     // Arrays follow the same rule with their own stash: the callee's write
     // to the file-scope array of the same name must not replace the
-    // caller's own array (review: codex - reverse_array.cg returned 2*p
+    // caller's own array (review - reverse_array.cg returned 2*p
     // where the established compiler returns the caller's p).
     auto callerLocalArray = [&](const std::string& name) -> bool
     {
@@ -8334,7 +8334,7 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                         // block (`if (c) { Plan r; ...; return r; }`) is
                         // gone by then - its block's exit restored any
                         // outer `r` of the same name, whose storage the
-                        // remap would install instead (review: codex,
+                        // remap would install instead (review,
                         // shadow_outer / single_constant_inner).  The
                         // innermost frame block declaring the name is the
                         // one the identifier resolves to; anything but the
@@ -8382,7 +8382,7 @@ bool IRBuilder::runInlineStatements(FunctionDecl* callee, const std::vector<Stmt
                 // A returned struct LOCAL's members, by the declared return
                 // type's own field paths only: a scalar return named like a
                 // caller's struct, or a caller struct of another type that
-                // shares the name, must not contribute (review: codex).
+                // shares the name, must not contribute (review).
                 const std::vector<StructField>* fields =
                     ret->value->kind == ExprKind::Identifier ? getStructFields(callee->returnType.get())
                                                              : nullptr;
@@ -8686,7 +8686,7 @@ std::optional<bool> IRBuilder::constCondition(const ExprNode* e)
             const auto* id = static_cast<const IdentifierExpr*>(x);
             if (nameToValue_.count(id->name) != 0) return true;
             // A static const carries its initialiser's precision rules with
-            // it (review: codex - static const bool B = (G == 16777217);
+            // it (review - static const bool B = (G == 16777217);
             // if (B) bypassed the comparison guard, and the established compiler keeps
             // static const float Z = 16777217; as 16777217, unequal to the
             // float 16777217.0).  Walk the initialiser with the same guard,
@@ -9268,7 +9268,7 @@ bool checkedMul(int64_t a, int64_t b, int64_t& out)
 // float and truncates ONCE on the result: u[1.7 * 2] is element 3,
 // u[((float)3 / 2) * 2] is element 3, u[(int)(bool)(float)0.5] is element
 // 1 (the fraction is truthy).  Truncating leaf by leaf read those as 2, 2
-// and 0 (review: codex found the second and third, the second with no
+// and 0 (review found the second and third, the second with no
 // float literal in it at all).  So the only floating shapes evaluated
 // here are the two whose measured rule is exactly one truncation - a bare
 // float literal (or its negation), and a cast to a floating type around a
@@ -9396,7 +9396,7 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
             // 2 where the established compiler reads element 3.
             // The established compiler holds a float literal in SINGLE precision: the
             // rounding happens before any conversion (4294967297.0 is
-            // 4294967296 by the time an unsigned cast wraps it - codex's
+            // 4294967296 by the time an unsigned cast wraps it - the review's
             // boundary rows), so the lexer's double is narrowed first.
             const double d = static_cast<double>(static_cast<float>(std::get<double>(lit->value)));
             if (!(d > -9.2e18 && d < 9.2e18))
@@ -9507,7 +9507,7 @@ IndexEval evaluateIntegralIndex(const ExprNode* e, int64_t& out, std::string& wh
                 // measured on static-const-qualifiers), so u[(int)4294967296.0] is out of
                 // bounds.  An UNSIGNED target wraps instead - the established compiler
                 // reads u[(unsigned int)4294967296.0] as element 0 (review:
-                // codex) - and the narrowing below does that.
+                // review) - and the narrowing below does that.
                 v = INT32_MIN;
             else
                 v = static_cast<int64_t>(d);
@@ -11513,7 +11513,7 @@ IRValueID IRBuilder::buildAssignment(ExprNode* target, IRValueID value)
         {
             // This path reads the aggregate and then assigns it through its
             // own lvalue, so the lvalue's subexpressions build TWICE: `a[i++][1]
-            // = x` would step i twice (review: codex).  Refuse the
+            // = x` would step i twice (review).  Refuse the
             // side-effecting shapes rather than build them twice.
             error(target->loc, "lane or row store through an lvalue with side effects "
                                "(++, --, an assignment or a call) is not supported; refusing");

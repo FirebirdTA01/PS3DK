@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""P3.3 R4b real-mutant judge (codex 22:49).  A mutant is KILLED only when the image checker ran to completion and
+"""P3.3 R4b real-mutant judge (review 22:49).  A mutant is KILLED only when the image checker ran to completion and
 reported, for its named row, the expected verdict with the named reason:
   - the checker's rc is exactly 1 (its normal NOT PASS exit; 0, 2 or a crash code is INVALID);
   - the report holds EXACTLY the expected row inventory (each (check, name) once, nothing else), every row a
     MACHINE-PROVED / FAIL / UNMET line, and the last non-blank line is exactly 'R4B IMAGE NOT PASS';
   - no traceback or other unclassified line anywhere;
   - the named row carries the expected verdict and the reason substring;
-  - AND (codex 23:01) the BASE image of the same run reports that same row MACHINE-PROVED in a complete base report;
+  - AND (review 23:01) the BASE image of the same run reports that same row MACHINE-PROVED in a complete base report;
     a base FAIL/UNMET there makes the mutation INCONCLUSIVE even if the mutant's reason matches.
 Anything else is INVALID (never a kill); a complete report whose named row differs is NOT KILLED.
 

@@ -95,7 +95,7 @@ done
 
 # THE VALUE, computed from the program - not read off the block.  The rows
 # below also assert the block and the swizzle, which localise a failure, but
-# THIS is the binding assertion: codex flipped SRC0's negate bit on `plain`'s
+# THIS is the binding assertion: a reviewer flipped SRC0's negate bit on `plain`'s
 # folded MOV, leaving the block, the swizzle, the status and stdout untouched,
 # and every row and self-check in this file stayed green while the shader
 # painted (-0,-1,-3,-2).  A block says what is STORED.  Only walking the
@@ -121,7 +121,7 @@ paints vec_signs 00000000 00000000 00000000 00000000
 
 # THE ARTIFACT CONTROLS, on this row's own container: each mutation must be
 # REJECTED by the same evaluator, or the rows above are decoration.  negate is
-# codex's first; scale (a 2X destination scale) is his second, and it is why
+# the review's first; scale (a 2X destination scale) is its second, and it is why
 # this evaluator now shares inline_factor_check's mode table instead of
 # carrying its own list; swizzle rewrites the read to .xxxx; mask drops the
 # write to one lane; precision sets a non-fp32 precision; no-end clears END.

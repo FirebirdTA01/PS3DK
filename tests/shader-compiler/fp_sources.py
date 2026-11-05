@@ -166,7 +166,7 @@ def ucode_words(blob):
     # Word 4 is where the parameter table BEGINS, not where it ends - reading
     # it as an end lets programOffset land in the MIDDLE of the table and the
     # container still decodes, because the ucode is found by its own offset
-    # (codex).  The table's extent has to be computed, and computing it also
+    # (review).  The table's extent has to be computed, and computing it also
     # bounds the parameter count: an nparams of 0xffffffff runs the end past
     # any real file.
     # A container with NO parameters has parameterArray = 0 on the established compiler

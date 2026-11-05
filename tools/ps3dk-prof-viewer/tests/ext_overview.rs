@@ -1,4 +1,4 @@
-//! The Overview's EXTENSION SOURCES model (codex 03:23): the reader's shared parts per source, its own epoch rows,
+//! The Overview's EXTENSION SOURCES model (review 03:23): the reader's shared parts per source, its own epoch rows,
 //! computed once per Document, and document switches that never leave stale rows.  Fixtures come from a minimal
 //! copy of the reader tests' extension chunk writer (the reader's own file is not edited for this slice).
 

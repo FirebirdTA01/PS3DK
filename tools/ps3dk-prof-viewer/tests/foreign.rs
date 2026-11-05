@@ -420,7 +420,7 @@ fn every_refusal_and_epoch_state_has_distinct_words() {
     assert!(!t[0].contains("coverage unknown"));
 }
 
-// ---- codex 12:24 carries: the no-clock draw path, excluded/candidate-only cells, NoInterval slot kinds -----------
+// ---- review 12:24 carries: the no-clock draw path, excluded/candidate-only cells, NoInterval slot kinds -----------
 
 /// Owner 1 with FRAMEs at `tbs` (ids 0..) and an optional lost record (owner NOT VALID).
 fn owner_bytes(tbs: &[u64], gap: bool, ext: Vec<Chunk>) -> Vec<u8> {
@@ -1051,7 +1051,7 @@ mod tl_rows_r2 {
 
     #[test]
     fn a_wide_bar_visited_after_tiled_ones_never_joins_a_run_on_its_far_side() {
-        // codex 20:52: outer [0,10] (wide: 11 tiles), [900, 900.1] and [1000, 1000] (tiled); visit order 1, 2, 0
+        // review 20:52: outer [0,10] (wide: 11 tiles), [900, 900.1] and [1000, 1000] (tiled); visit order 1, 2, 0
         let t = build_track(&src(vec![rb((0, 1), (10, 1)), rb((900, 1), (9001, 10)), rb((1000, 1), (1000, 1))]), 0);
         let l = layout(&t, &View { t0: 0.0, dt: 2000.0 }, 100.0, QueryCaps::default(), true);
         let mut ids: Vec<usize> = l.draws.iter().filter_map(|d| match d.kind { FDrawKind::Bar(i) => Some(i), _ => None }).collect();

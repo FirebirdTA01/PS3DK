@@ -43,7 +43,7 @@ static void epochs(void)
     pe_epochs_init(&e, 1, 0);
     pe_job_word(&e, 0, 1, S(21), 1);
     pe_job_done(&e, 0, S(23), 0);
-    check(!e.w32_eligible, "codex control: dispatch 21 s, ack 23 s clears eligibility");
+    check(!e.w32_eligible, "review control: dispatch 21 s, ack 23 s clears eligibility");
 
     /* the deadline is tracked independently of the epoch bound */
     pe_epochs_init(&e, 1, 0);

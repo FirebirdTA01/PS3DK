@@ -50,7 +50,7 @@ def judge(nm_text, syms_text, expect):
     defs, errs = member_defs(nm_text)
     try:
         # a witness must be an externally visible DEFINITION in the image: GLOBAL or WEAK, in a numeric nonzero
-        # section (UND, LOCAL, ABS and COMMON never establish that a member's code/data was linked; codex 23:35)
+        # section (UND, LOCAL, ABS and COMMON never establish that a member's code/data was linked; review 23:35)
         names = {s['name'] for s in I.parse_symbols(syms_text)
                  if s['bind'] in ('GLOBAL', 'WEAK') and s['ndx'].isdigit() and int(s['ndx']) != 0}
     except I.Unmet as u:

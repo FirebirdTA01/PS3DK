@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E1 TRANSPORT ACCEPTANCE (design p3.3 E1 r2 section 5 + r3 section E; codex 10:25): one run directory's markers and
+"""E1 TRANSPORT ACCEPTANCE (design p3.3 E1 r2 section 5 + r3 section E; review 10:25): one run directory's markers and
 its capture, read HERE by the pinned reader (tools/ps3dk-prof example ext_facts).  Fail-closed: anything not stated
 below as accepted is a REJECT.
 

@@ -1,5 +1,5 @@
 // shader-differential - NAMED REGRESSION for a SCALAR initialiser on a
-// VECTOR file-scope uniform (codex, review of db6dbca, 2026-09-01 22:34).
+// VECTOR file-scope uniform (review of db6dbca, 2026-09-01 22:34).
 //
 // The frontend accepts scalar-to-vector broadcast, so `uniform float4 k =
 // 0.5;` means (0.5, 0.5, 0.5, 0.5).  The initialiser evaluator stored the

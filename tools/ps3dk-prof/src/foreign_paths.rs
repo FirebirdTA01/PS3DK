@@ -1,5 +1,5 @@
 //! SPU/RSX hot paths over completed reader pairs (t_d9789c06 slice F3b: design 0414c846 plus binding r2 delta
-//! e30e4a03 and the codex 18:04 GO carries).
+//! e30e4a03 and the review 18:04 GO carries).
 //!
 //! **Paths over completed pairs.** A path is the `(image, desc)` chain from a pair's top completed pair to the pair,
 //! along the F2a `PairFact.parent` (the completed-pair stack top at BEGIN).  That stack cannot see an ancestor that

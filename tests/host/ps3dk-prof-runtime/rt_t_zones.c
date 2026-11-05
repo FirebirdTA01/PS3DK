@@ -428,7 +428,7 @@ int rt_retired_drain_then_reuse_generation(const char *out)
     return rt_expect(out, 0);
 }
 
-/* ---- ID_COLLISION: SYNTHETIC branch coverage (codex 00:59 / 01:13 / 02:34) -----------------------------------------
+/* ---- ID_COLLISION: SYNTHETIC branch coverage (review 00:59 / 01:13 / 02:34) -----------------------------------------
  * No natural FNV-1a-64 collision is searched for or claimed.  The candidate_desc_id test hook replaces ONLY the
  * candidate id that the production collision comparison uses; the published descriptor, every stored id, the REGERR
  * record and the reader's id validation are untouched, so the capture is checked by the normal reader. */

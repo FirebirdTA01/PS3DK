@@ -6,7 +6,7 @@ Select behind.  A row that asserts this on fp_sources' text cannot see it:
 that decoder prints neither the condition test (hw[1] bits 18..20) nor the
 condition-code write (hw[0] bit 8), so a container whose output MOV carries
 NVFX_COND_FL - a write that never executes - decodes to the same text as an
-unconditional one (review: codex, block-then-param-cond-false.bin passed
+unconditional one (review, block-then-param-cond-false.bin passed
 the suite).  This reads the fields.
 
 An instruction is predicated when its condition test is not NVFX_COND_TR
@@ -58,7 +58,7 @@ def mutate(blob):
 
     Returns (mutant, index) so the caller can require the rejection to name
     THIS instruction for THIS reason - a control rejected for an unrelated
-    reason (a cc-write elsewhere, say) proves nothing (review: codex).
+    reason (a cc-write elsewhere, say) proves nothing (review).
     """
     ucode_off = struct.unpack_from(">8I", blob, 0)[7]
     words = fp_sources.ucode_words(blob)
@@ -88,7 +88,7 @@ def vp_problems(blob):
     indexed input, abs, relative const, a scalar-slot write, PROGRAM_END
     anywhere but the last row, and any vector opcode but MOV/MUL (an
     unmodelled program is a refusal, never a pass).  vp_words prints none of
-    those fields, so a text row cannot see them (review: claude)."""
+    those fields, so a text row cannot see them (review)."""
     import inline_factor_check
     try:
         inline_factor_check.vp_envelope(blob)
@@ -117,7 +117,7 @@ def main(argv):
     if is_vp(blob):
         if len(argv) == 3:
             # Two container mutations, each rejected for EXACTLY its own reason
-            # (review: codex - a text row could not see either): the first
+            # (review - a text row could not see either): the first
             # o0 write predicated, and PROGRAM_END cleared on the last row.
             mutant, index = vp_mutate(blob)
             open(argv[1] + ".condtest", "wb").write(mutant)

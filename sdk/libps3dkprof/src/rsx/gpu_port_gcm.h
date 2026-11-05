@@ -1,4 +1,4 @@
-/* P3.3 R3: the GCM device binding of the prg_port DEVICE operations (binding contract r2, codex GO 17:08).  The
+/* P3.3 R3: the GCM device binding of the prg_port DEVICE operations (binding contract r2, review GO 17:08).  The
  * locks, the clock and the hold stay the runtime's; this file binds only reserve_pair, flush, read/write_label,
  * read/write_timer and sync.  NOT wired into the runtime in this slice, and not part of any archive.  ILP32 only
  * (LP64 is unsupported by this binding).  A1 (report visible before its label) and A2 (coherent report read) remain

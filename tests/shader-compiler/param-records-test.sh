@@ -298,7 +298,7 @@ void main_vertex(float4 p : POSITION, float2 t : TEXCOORD0, out float4 op : POSI
 [ -s "$work/fixed_struct_initializer.bin" ] && outputs fixed_struct_initializer \
 'op 418 8c3 POSITION; o.a 416 c95 TEXCOORD1; o.b 416 c96 TEXCOORD2'
 
-# Review rows (codex, slice 2).  A semantic-less returned member does not take
+# Review rows (slice 2).  A semantic-less returned member does not take
 # an index an explicit out PARAMETER claims (it collided on TEXCOORD0).
 check implicit_vs_out_param sce_vp_rsx main \
 'v 418 841 POSITION 0 1; t 418 84a TEXCOORD1 1 1' '

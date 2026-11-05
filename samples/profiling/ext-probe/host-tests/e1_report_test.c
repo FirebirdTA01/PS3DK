@@ -86,7 +86,7 @@ int main(void)
         expect(good[i].n, w, good[i].kind, 0);
     }
 
-    /* ---- codex 10:25 counterexamples ---- */
+    /* ---- review 10:25 counterexamples ---- */
     make(w, 1, k1_clean); w[E1_W_FAIL_CALL] = E1_CALL_GO; w[E1_W_FAIL_RC] = 0xFFFFFFFFu; expect("k1 call go (post-GO only)", w, 1, 19);
     make(w, 1, k1_attach); w[E1_W_EV1] = 132; w[E1_W_DESC] = D; expect("attach failure with ev1 132", w, 1, 17);
     make(w, 2, k2_fini); w[E1_W_EV2] = 0; expect("fini with ev2 0", w, 2, 14);

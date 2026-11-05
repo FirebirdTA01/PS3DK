@@ -190,8 +190,8 @@ bool SymbolTable::addFunction(const std::string& name,
         // The out/inout restriction is real but applies AFTER a unique winner
         // is picked: the omitted argument is not an lvalue, which the semantic
         // analyser reports as "error C1111: non-lvalue actual parameter #N
-        // cannot be out parameter".  Ruling: Fable, retracting the viability
-        // exclusion on codex's six cells.
+        // cannot be out parameter".  Ruling in review, retracting the viability
+        // exclusion on the review's six cells.
         size_t required = decl->parameters.size();
         while (required > 0 && decl->parameters[required - 1] &&
                decl->parameters[required - 1]->defaultValue != nullptr)

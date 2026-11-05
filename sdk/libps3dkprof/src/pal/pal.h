@@ -33,7 +33,7 @@
 #define pal_sync ps3dk_prof__pal_sync
 
 /* Exactly one PAL per build, enforced here in the SHARED header so every translation unit (core, drain and PAL) checks
- * the same contract (codex 2026-10-22 03:21).  The LV2 PAL is hook-free: test hooks are a host-only build. */
+ * the same contract (review 2026-10-22 03:21).  The LV2 PAL is hook-free: test hooks are a host-only build. */
 #if defined(PS3DK_PROF_PAL_HOST) && defined(PS3DK_PROF_PAL_LV2)
 #error "ps3dk prof: define exactly one of PS3DK_PROF_PAL_HOST and PS3DK_PROF_PAL_LV2, not both"
 #endif
@@ -61,7 +61,7 @@ typedef struct pal_owner {
     uint64_t id;   /* a sys_ppu_thread_t, u64 in both ABIs */
     int valid;     /* set only by a successful pal_owner_get: an unset owner is never the caller */
 } pal_owner;
-#define PAL_DEFAULT_SINK_DIR "/dev_hdd0/tmp"   /* accepted (codex 03:21); exclusive create and the configurable sink kept */
+#define PAL_DEFAULT_SINK_DIR "/dev_hdd0/tmp"   /* accepted (review 03:21); exclusive create and the configurable sink kept */
 #endif
 
 /* Memory: one 128-byte-aligned block at init; pal_free only unwinds a failed init. */
@@ -103,7 +103,7 @@ long pal_read(int fd, void *buf, unsigned long n, int *err);
 int pal_rewind(int fd, int *err);
 int pal_sync(int fd, int *err);
 /* The errno-class codes the core compares *err against come from the platform's own errno.h, in every build, so
- * the host and LV2 builds each compare against their own values (codex 2026-10-22 02:49, O2). */
+ * the host and LV2 builds each compare against their own values (review 2026-10-22 02:49, O2). */
 #define PAL_EINTR EINTR
 #define PAL_EEXIST EEXIST
 

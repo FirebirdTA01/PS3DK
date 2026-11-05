@@ -124,10 +124,10 @@ refuse_not_saying ${P}_lonparen_refuse_f    "C0105" "#define K ( is a body, not 
 refuse_not_saying ${P}_emptyparens_refuse_f "C0105" "#define K () is a body, not a bad definition"
 
 # ---- a form feed or vertical tab is INVALID INPUT, not a separator ----
-# These are the cells codex found on the first revision: dropping \s* from the
+# These are the cells a reviewer found on the first revision: dropping \s* from the
 # separator made `#define K<FF>(1.0)` object-like, so it ACCEPTED where the
 # established compiler refuses.  NOT "anywhere in the source" - that was my first wording
-# and it is wrong, as codex made me qualify: the established compiler refuses the
+# and it is wrong, as the review established: the established compiler refuses the
 # character where it REACHES THE TOKEN STREAM.  A form feed in a comment, in a
 # macro body that is never expanded, or in an argument bound to a parameter
 # the body never names, is accepted - the accept rows below are those cases.
@@ -184,7 +184,7 @@ accept        ${P}_paste_plain_f  "an ordinary paste, the control that ## still 
 # accept-only row cannot tell "the paste produced 2.0" from "the paste produced
 # something else that also compiled", and an accept-only row is exactly what
 # let the pre-revision-4 per-parameter rule look right on every shape it did
-# not happen to refuse (codex's condition on revision 4, endorsed by Fable).
+# not happen to refuse (the review's condition on revision 4, endorsed in review).
 # Measured, not assumed: all five equal the literal on the established compiler
 # (43a4ac87280b) and here (29a658971f7e), so one twin is the control for all.
 accept ${P}_paste_twin_f "the literal the pasted value expands to"

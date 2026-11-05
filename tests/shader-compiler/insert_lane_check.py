@@ -18,7 +18,7 @@ all, reporting "masks found: <empty>.  Nothing was checked".  It sat red on
 the integration branch for a compiler that was behaving correctly.
 
 The SECOND asserted the LANE INDEX only: for each written lane, the last
-writer's src0 must read that same lane.  codex broke it in review, by
+writer's src0 must read that same lane.  A reviewer broke it in review, by
 measurement rather than by argument: rewrite that MOV's src0 from the
 computed temp to the ORIGINAL INPUT, keeping the xyz selectors, and the
 check still passes - while the shader now paints (.8, .4, .2) instead of
@@ -75,7 +75,7 @@ class Unmodelled(Exception):
 
 
 # EVERY MODE THAT CHANGES A VALUE AND IS NOT MODELLED IS REFUSED, BY NAME.
-# codex found three of these in review, each a mutation of the real words
+# A reviewer found three of these in review, each a mutation of the real words
 # that changed what the shader paints while the interpreter reported a
 # green: destination saturation, a half-bank destination that the next
 # instruction still reads as R, and (with the input-register fix in
@@ -107,7 +107,7 @@ def reject_unmodelled(w, index):
 def source(word, lane, block, regs, absolute, input_src):
     """The symbolic value this operand reads for destination lane 'lane'.
 
-    TWO FIELDS THIS OPERAND WORD DOES NOT CARRY, both found by codex in
+    TWO FIELDS THIS OPERAND WORD DOES NOT CARRY, both found in
     review after an earlier version read them out of the wrong place:
 
       the INPUT REGISTER's identity is per-INSTRUCTION, hw[0] bits 13..16
@@ -155,7 +155,7 @@ def evaluate(path):
     """Interpret the program, stopping where the hardware stops.
 
     PROGRAM_END is hw[0] bit 0 and it is part of the semantics, not
-    decoration: codex's third round set END on the FIRST instruction of the
+    decoration: the review's third round set END on the FIRST instruction of the
     real dump and an earlier version of this walk still read the multiply
     and the final colour write that the hardware would never reach - the
     output's x lane is not even initialised there.  So the walk stops at

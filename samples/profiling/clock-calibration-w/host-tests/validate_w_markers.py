@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate W / W0 probe markers (CLKW1, design r4 2afa7bf3 + codex 19:47 / 20:15) fetched from /dev_hdd0/tmp.
+"""Validate W / W0 probe markers (CLKW1, design r4 2afa7bf3 + review 19:47 / 20:15) fetched from /dev_hdd0/tmp.
 
 usage: validate_w_markers.py DIR --build BUILD [--run RUN] [--targets SPU,RSX]
 

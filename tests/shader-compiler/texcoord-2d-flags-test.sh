@@ -6,7 +6,7 @@
 # this reads the container's FP sub-header directly.
 #
 # Run on the general lowering, which once decided the field at the use site
-# with the old consumed-lanes rule (review finding, codex).
+# with the old consumed-lanes rule (review finding).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"

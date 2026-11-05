@@ -19,7 +19,7 @@
 #     list once.
 #
 # Run against an SDK that has <sys/ppu_thread.h> and, for a newlib without
-# 0018, the sched.h wrapper (qwen/t_a2644ed1-sched, 9d622bb0).
+# 0018, the sched.h wrapper (branch t_a2644ed1-sched, 9d622bb0).
 #
 # usage: sdk-default-include-test.sh [--ppu-gcc <powerpc64-ps3-elf-gcc> --sdk <PS3DK root>]
 #   <PS3DK root> holds ppu/include (the packaged $PS3DK, or staged $PS3DEV/ps3dk).

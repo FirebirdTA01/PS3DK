@@ -1,5 +1,5 @@
 // A block-local S s shadows the GLOBAL struct s; a helper called inside the block writes the
-// real global's field. After the block, s.f is the global's field: 2*p (codex, composed boundary).
+// real global's field. After the block, s.f is the global's field: 2*p (review, composed boundary).
 struct S { float4 f; };
 S s;
 void set(float4 q) { s.f = q * 2.0; }

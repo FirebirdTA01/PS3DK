@@ -91,7 +91,7 @@ run('meta not first', [HEADER] + S[:1] + [META], 1, ['the first row must be the 
 run('empty file', [''], 1, ['VERDICT INVALID'])
 run('phases are never joined', [HEADER, META] + spu(0, 40, 3_000_000_000) + spu(1, 40, 2_000_000_000, t=2 * 10 ** 10)
     + rsx(30) + [CLEAN, end(80, 30)], 0, ['spu-decrementer phase 0: 40 samples', 'spu-decrementer phase 1: 40 samples'])
-# codex 23:38 regressions
+# review 23:38 regressions
 run('end code nonzero with note ok is INVALID', [HEADER, META] + S + [CLEAN, end(100, 0, 'ok', 7)], 1,
     ["end note 'ok' contradicts code 7"])
 run('end failure note with code 0 is INVALID', [HEADER, META] + S + [CLEAN, end(100, 0, 'spu-start', 0)], 1,

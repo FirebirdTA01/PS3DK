@@ -1,5 +1,5 @@
 //! Timeline rows for SPU lanes and RSX domains (director 2026-11-04 19:32; design timeline-foreign-rows r1 + r2
-//! delta + codex carries 19:56 and 20:21).  No egui types.
+//! delta + review carries 19:56 and 20:21).  No egui types.
 //!
 //! A bar is a completed pair whose two endpoints are clock-mapping BOUNDS on the PPU timebase.  It is drawn as a
 //! solid core where the pair surely ran (only when EXACT finite `begin.hi < end.lo`; core pixel edges rounded

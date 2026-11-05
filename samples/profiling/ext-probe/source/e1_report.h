@@ -1,4 +1,4 @@
-/* E1 SPU -> PPU report lines (design p3.3 E1 r4 delta sections 1-2; codex 05:30 carry 1).  Shared by the PPU, the
+/* E1 SPU -> PPU report lines (design p3.3 E1 r4 delta sections 1-2; review 05:30 carry 1).  Shared by the PPU, the
  * SPU core and the host tests.  Two 128-byte lines in PPU memory written ONLY by the SPU's DMA: PAYLOAD, then (after
  * a tag wait-all) COMMIT.  The PPU trusts a report only after: commit == s, sync, a private copy of the whole
  * payload, sync, commit re-read == s, and e1_report_check() on the private copy.  Same hardware ordering assumptions

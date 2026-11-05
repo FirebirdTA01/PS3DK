@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P3.3 R4b linked-image checker (design p3.3-r4b r2 delta section 2; codex 21:23 carries; codex 22:15 CHANGES).
+"""P3.3 R4b linked-image checker (design p3.3-r4b r2 delta section 2; review 21:23 carries; review 22:15 CHANGES).
 
 Fail-closed code-shape checks of the LV2 psp_mem adapter and the GPU attach in a LINKED ILP32 ELFv1 image.  Verdicts:
   PASS   machine-proved for the stated (narrow) property over every path of the function as disassembled;

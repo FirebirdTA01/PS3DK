@@ -249,7 +249,7 @@ refuse_saying pick_with_param_arm_refuse \
     "a helper whose arm returns a PARAMETER (return x) is refused, not resolved to the other local arm"
 
 # ---------------------------------------------------------------------------
-# SCOPE rows (review: codex, 4f103738).  The install reads the returned local's
+# SCOPE rows (review, 4f103738).  The install reads the returned local's
 # storage at the END of the helper's body, so only a local of the helper's
 # TOP-LEVEL block qualifies: an inner block's local is gone by then, and its
 # exit restored any outer local of the same name.  Expected values are the

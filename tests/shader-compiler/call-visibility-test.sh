@@ -74,7 +74,7 @@ refuse_saying() {  # <stem> <pattern> <what>
     # THE SAME NO-CONTAINER ASSERTION refuse() MAKES.  Omitting it let a
     # compiler exit 1 with the right words AND still write an artifact, and
     # the whole guard passed - proven with a wrapper that did exactly that
-    # (review: codex).  A refusal contract is a verdict, a reason AND an
+    # (review).  A refusal contract is a verdict, a reason AND an
     # absence; checking two of the three is not checking the contract.
     [[ ! -s "$work/$1.fpo" ]] || fail "$3: refused but still wrote a container"
     grep -qE "$2" <(tr -d '
@@ -114,7 +114,7 @@ accept fp_visibility_early_source_075_f "early source overload of a builtin name
 differs fp_visibility_early_source_050_f fp_visibility_early_source_075_f \
        "a source overload declared BEFORE the call DOES hide the builtin"
 
-# ---- walk parity between the two passes (review: Fable) ----
+# ---- walk parity between the two passes (review) ----
 # Every top-level declaration KIND in one unit.  This row CANNOT fail today -
 # both passes are the same `for` over unit.declarations with the counter bumped
 # before the switch, so parity holds by construction - and that is exactly why
@@ -124,7 +124,7 @@ differs fp_visibility_early_source_050_f fp_visibility_early_source_075_f \
 accept fp_visibility_walk_parity_f        "struct + uniform + const + prototype + helper + entry in one unit"
 
 # ---- the C1008 name-not-found class is gated on entry reachability ----
-# Found by codex reviewing the first cut of this commit: the positional filter
+# Found in review of the first cut of this commit: the positional filter
 # refused a forward call inside a function main never calls, and the established compiler
 # does not.  The established compiler reports this class ONLY in reachable bodies - but it
 # reports type and arity errors everywhere, so "unreachable bodies are not
@@ -197,7 +197,7 @@ accept fp_scope_late_local_siblings_f        "two SIBLING blocks (legal; rules o
 # An error-typed argument suppresses the diagnostics on its call, but must not
 # suppress the RECORD that the callee's name was used unresolved.  The two
 # ACCEPT rows are what keep the fix from becoming "emit C1105 earlier", which
-# would refuse two programs the established compiler compiles (review: codex).
+# would refuse two programs the established compiler compiles (review).
 refuse fp_scope_nested_unresolved_callee_refuse_f        "unresolved callee with an error-typed argument, declared later"
 refuse fp_scope_nested_unresolved_bare_refuse_f        "the same with a bare error-typed argument"
 accept fp_scope_nested_no_later_decl_f        "the same unresolved callee with NO later declaration"
@@ -212,7 +212,7 @@ accept fp_scope_later_fn_no_local_f        "recorded but never collided (no loca
 # SELF-CHECK: the guard's own refusal contract.  refuse_saying() shipped for
 # ten minutes checking the verdict and the diagnostic but NOT the absence of a
 # container, and a compiler that exited 1 with the right words while writing an
-# artifact passed the whole suite (review: codex).  This re-runs this script
+# artifact passed the whole suite (review).  This re-runs this script
 # against a stub that does exactly that and requires it to FAIL.  A guard
 # without a self-test is a guard nobody has tested.
 #

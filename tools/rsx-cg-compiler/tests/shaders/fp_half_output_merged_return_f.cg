@@ -7,7 +7,7 @@
 // fp32 R0 and outputFromH0 clear, which is worse than the refusal it
 // replaced, because a refusal is visible and this is not.
 //
-// Found by codex reviewing the mechanism before it had a sha.  Measured
+// Found in review of the mechanism before it had a sha.  Measured
 // against the established compiler: outputFromH0=1.
 half4 main(float4 t : TEXCOORD0) : COLOR
 {

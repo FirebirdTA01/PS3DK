@@ -43,7 +43,7 @@ ROWS = [
                            'float4 main(float b, float f) : COLOR { float d = t(b); return float4(f, 0, 0, 1); }' + chr(10),
                            {'b': (TEX0, 0), 'f': (TEX1, 1)}),
     # A scalar return named like a caller's struct must not claim the
-    # caller's members (review: codex, SP8-SCOPE): b stays unbound.
+    # caller's members (review, SP8-SCOPE): b stays unbound.
     ('scalar_named_like_struct', 'struct S { float v; };' + chr(10) + 'float s1(float s) { return s; }' + chr(10) +
                            'float4 main(float b, float f) : COLOR { S s; s.v = b; float d = s1(1); return float4(f, 0, 0, 1); }' + chr(10),
                            {'b': (UNDEF, 0), 'f': (TEX0, 1)}),

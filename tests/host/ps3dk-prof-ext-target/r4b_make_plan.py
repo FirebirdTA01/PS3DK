@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P3.3 R4b shipped-build invariance (codex 21:23 carry 2): for the default goal, `all` and `install`, the REACHABLE
+"""P3.3 R4b shipped-build invariance (review 21:23 carry 2): for the default goal, `all` and `install`, the REACHABLE
 dependency graph (each reachable target's prerequisites and recipe lines, from `make -p -n GOAL`) and the dry-run
 recipe output (`make -n GOAL`) are identical between two sdk/libps3dkprof trees, and neither mentions the extension
 (ext-ilp32 / ilp32-ext / libps3dkprof_ext / EXT_).  Nothing is built or installed (-n).

@@ -1,4 +1,4 @@
-/* Deterministic traces of the SPU lane transport model (design p3.2 r3 sections 4, A, C, D, E and the codex 01:35
+/* Deterministic traces of the SPU lane transport model (design p3.2 r3 sections 4, A, C, D, E and the review 01:35
  * corrections).  Each trace writes <name>.prof, .truth and .expect; the stream check runs here, and the driver runs
  * the unchanged reader and the checker on every file.  Limits are the reader's unless a trace is named "model-limit".
  * Model evidence only. */
@@ -1162,7 +1162,7 @@ static void t_e5_post_seal_stats(void)
     run_free(&r);
 }
 
-/* ---- r2 of slice 1: accepted versus attempted output (codex 02:18 item 1) ---- */
+/* ---- r2 of slice 1: accepted versus attempted output (review 02:18 item 1) ---- */
 
 /* the sink fails at the nth chunk of a type, after an accepted prefix; stats must equal the accepted chunks and
  * final_written must be false unless a FINAL was accepted */

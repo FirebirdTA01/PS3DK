@@ -518,7 +518,7 @@ void SemanticAnalyzer::analyzeDeclarations(TranslationUnit& unit)
     // ever diverge - one loop filtering a declaration kind the other does not -
     // every index after the divergence is wrong and calls silently resolve
     // against the wrong set, with nothing to see.  Cheap to assert, impossible
-    // to notice otherwise (review: Fable).
+    // to notice otherwise (review).
     if (declIndex != declCountPass1_)
     {
         SourceLocation unitLoc;
@@ -561,7 +561,7 @@ void SemanticAnalyzer::analyzeStructDecl(StructDecl* decl)
 // prototype's expression is the one that gets substituted.  Skipping
 // prototypes outright left that AST unanalysed and unresolved, and the IR
 // builder then failed on an unresolved operand rather than diagnosing
-// anything (found by codex).  Only the BODY is skipped now; the parameter
+// anything (found in review).  Only the BODY is skipped now; the parameter
 // scope and the default analysis are the same code the definition runs.
 void SemanticAnalyzer::analyzePrototypeDefaults(FunctionDecl* decl)
 {
@@ -676,7 +676,7 @@ void SemanticAnalyzer::analyzeFunctionDecl(FunctionDecl* decl)
             // varying outputs on the established compiler (measured: `out S p :
             // TEXUNIT2` puts p.c on COLOR1 / TEXCOORD0); only the input side
             // is lowered here, so the output side stays refused rather than
-            // compiled with the member dropped (review: codex, SP7-OUT).
+            // compiled with the member dropped (review, SP7-OUT).
             if (param->storage == StorageQualifier::Out || param->storage == StorageQualifier::InOut)
             {
                 error(param->loc, "semantics on out/inout struct-typed parameters are not supported: '" +
@@ -780,7 +780,7 @@ void SemanticAnalyzer::analyzeVarDecl(VarDecl* decl)
             // The symbol was bound with the unsized type before this ran
             // (collectVarDecl for a global, analyzeDeclStmt for a local), so
             // every later use - indexing, bounds, a helper's sized-array
-            // parameter - would see `array` with no length (review: codex).
+            // parameter - would see `array` with no length (review).
             if (Symbol* bound = symbols_.lookup(decl->name); bound && bound->declaration == decl)
                 bound->type = varType;
         }
@@ -1239,7 +1239,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     // established compiler - the later `float f` collides with the earlier use of the
     // name f - but the inner call makes the argument error-typed, and the
     // early return below skipped the outer call entirely, so the use of f was
-    // never recorded and the collision could not be seen (review: codex).
+    // never recorded and the collision could not be seen (review).
     //
     // THE FIX IS NOT TO MOVE THE C1105 CHECK ABOVE THAT RETURN.  An
     // error-typed argument SUPPRESSES the diagnostics on its call, measured
@@ -1250,7 +1250,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     // has no visibility cutoff: pass 1 put every function in the table, so a
     // function declared AFTER this call is still "found" and the use went
     // unrecorded - `f(missing); float f;` with `float4 f(...)` later lost its
-    // C1002 the same way the error-argument return did (review: codex, twice,
+    // C1002 the same way the error-argument return did (review, twice,
     // on two different lookups).
     //
     // A NON-FUNCTION binding still counts as visible here.  A file-scope
@@ -1281,8 +1281,8 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
     // This has to be asked BEFORE the overload set is consulted, not in the
     // failure path below - functionOverloads is keyed by NAME and knows
     // nothing about scopes, so resolveOverload SUCCEEDS here and a check
-    // inside `if (!candidate)` is never reached (review: codex read the
-    // ordering out of the source; Fable measured the cell).  Scope::lookup
+    // inside `if (!candidate)` is never reached (review read the
+    // ordering out of the source; a reviewer measured the cell).  Scope::lookup
     // already walks innermost-first, so the nearest binding is exactly what
     // symbols_.lookup returns and no scope-chain rewrite is needed.
     if (Symbol* nearest = symbols_.lookup(expr->functionName))
@@ -1323,7 +1323,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
         // and is reported everywhere - measured, and it holds even
         // when a later exact overload exists, which is why this asks about
         // visibility of the NAME and never about whole-unit resolvability
-        // (review: codex).
+        // (review).
         if (ambiguousOverload)
         {
             error(expr->loc, "ambiguous overloaded function reference '" +
@@ -1337,7 +1337,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
             // = 1; return missing(t);` is C1105 "cannot call a non-function"
             // on the established compiler and is NOT the C1008 class, so it is reported
             // unconditionally - deferring it let an unreachable body call an
-            // int (review: codex).  A function declared LATER still resolves
+            // int (review).  A function declared LATER still resolves
             // to a Function symbol here, so it falls through to the deferral
             // and this does not swallow the forward-call case.
             Symbol* named = symbols_.lookup(expr->functionName);
@@ -1407,7 +1407,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
 
     // An ARRAY argument takes no element conversion: an int[3] or half[3]
     // into a float[3] parameter is C1102 on the established compiler (measured, both),
-    // and accepting it passed the elements over unconverted (review: codex).
+    // and accepting it passed the elements over unconverted (review).
     {
         const auto& paramTypes = candidate->symbol->parameterTypes;
         for (size_t i = 0; i < argTypes.size() && i < paramTypes.size(); ++i)
@@ -1426,7 +1426,7 @@ CgType SemanticAnalyzer::analyzeCallExpr(CallExpr* expr)
 
     // AN OMITTED out/inout ARGUMENT IS REFUSED AFTER RANKING, NOT BEFORE IT.
     //
-    // Measured on the established compiler (codex's six cells; Fable retracted the
+    // Measured on the established compiler (the review's six cells; review retracted the
     // viability exclusion on them; reproduced here): a defaulted out/inout
     // parameter does NOT make its candidate non-viable.  It ranks normally and
     // ties with a plain overload of the supplied arity - `void f(float4)`
@@ -1718,7 +1718,7 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
     // has to sit OUTSIDE the conversion fallback below: a struct whose leaves
     // are all admitted answers TRUE from canExplicitlyConvert, so anything
     // placed in that fallback is skipped for exactly the shapes it is meant
-    // to judge (codex).  A fixed, narrow-integer or UNSIGNED source carries
+    // to judge (review).  A fixed, narrow-integer or UNSIGNED source carries
     // its own conversion - the established compiler reads (S)((fixed)3.0) as
     // 1.9990234375, (S)((short)65537) as 1, and an unsigned 2147483648 into a
     // signed leaf as -2147483648 - and this fill would write it through.
@@ -1763,7 +1763,7 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
                 if (resolved.isMatrix()) return false;
                 // Matrix leaves are refused with the rest of the boundary -
                 // the fill converted through the matrix's base type rather
-                // than its element type (codex).
+                // than its element type (review).
                 if (!resolved.isNumeric() && !resolved.isVector())
                     return false;
                 // Only the leaf types the fill can convert - see the same
@@ -1778,7 +1778,7 @@ CgType SemanticAnalyzer::analyzeCastExpr(CastExpr* expr)
                     break;
                 default:
                     // UInt too: `(S)(-1)` into an unsigned leaf emitted -1
-                    // where the established compiler wraps (codex).  The signedness
+                    // where the established compiler wraps (review).  The signedness
                     // conversion is as missing as bool's truth test.
                     return false;
                 }
@@ -2355,7 +2355,7 @@ void SemanticAnalyzer::validateShader()
 // It runs AFTER pass 2 so CallExpr::resolvedFunction is fully populated;
 // deciding reachability from a partly-resolved graph would under-approximate
 // the reached set, and under-approximating means SUPPRESSING a diagnostic the
-// established compiler emits (review: codex).
+// established compiler emits (review).
 std::unordered_set<const FunctionDecl*> SemanticAnalyzer::reachedFunctions() const
 {
     std::unordered_set<const FunctionDecl*> reached;
@@ -2379,7 +2379,7 @@ std::unordered_set<const FunctionDecl*> SemanticAnalyzer::reachedFunctions() con
     // reaches f's body even though the entry never mentions f, and the
     // established compiler name-checks it there: that program is C1008 when f's body has
     // an undeclared name, where rooting only at the entry dropped the finding
-    // AND skipped lowering f (review: codex).
+    // AND skipped lowering f (review).
     //
     // C5122 SHARES THIS ROOT SET - measured, not assumed, because widening a
     // separately-measured graph on a hunch is how the prototype hole got into
@@ -2665,7 +2665,7 @@ void SemanticAnalyzer::checkDefaultNamesBindAtDeclaration(FunctionDecl* decl)
             // `f(x, k = inner(.5))` with inner declared LATER through, which
             // the established compiler refuses C1002 - and it only showed when the helper
             // was never reached, because a reached one is caught later by the
-            // ordinary resolution path (found by codex).
+            // ordinary resolution path (found in review).
             const auto* call = static_cast<const CallExpr*>(expr);
             checkName(call->functionName, expr->loc);
             for (const auto& a : call->arguments) walk(a.get());
@@ -2699,7 +2699,7 @@ void SemanticAnalyzer::checkDefaultNamesBindAtDeclaration(FunctionDecl* decl)
             break;
         // NO SILENT ARM.  A kind this switch does not list would simply not be
         // walked, and the rule would go unchecked inside it with nothing to
-        // see (review: Fable).  ExprKind has exactly the eleven members above;
+        // see (review).  ExprKind has exactly the eleven members above;
         // if one is added, this stops compiling rather than quietly skipping.
         }
     };
@@ -2817,7 +2817,7 @@ void SemanticAnalyzer::collectCallEdges(const ExprNode* expr,
                 out.push_back(fn);
                 // A MATERIALISED DEFAULT IS CODE AT THIS CALL SITE, so the
                 // calls inside it are call edges OF THIS CALL - and only when
-                // the argument is actually OMITTED.  Measured (codex's cells,
+                // the argument is actually OMITTED.  Measured (the review's cells,
                 // reproduced here):
                 //
                 //   float inner(float x) : COLOR { return x; }
@@ -3006,7 +3006,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
             // same struct type: the inference lives on the shared struct
             // field, so this second input would bind the same TEXn.  The
             // established compiler binds each instance separately (struct S { float2
-            // uv; }; main(S a, S b): a.uv TEX0, b.uv TEX1 - review: codex);
+            // uv; }; main(S a, S b): a.uv TEX0, b.uv TEX1 - review);
             // refused by name until bindings are per instance.
             // Each instance is bound on its own after dead-code elimination
             // (bindImplicitTexCoords, measured: S a, S b, S c reading b.uv and
@@ -3199,7 +3199,7 @@ void SemanticAnalyzer::collectShaderIO(FunctionDecl* entryPoint)
     // (ogre's DualQuaternionSkinning_Shadow.cg helpers compiled as entries.)
     // The RESOLVED type decides both tests: a typedef name parses as a named
     // type, so `typedef void V; V main(..., out float4 c : COLOR)` is a void
-    // program (accepted by the established compiler) - review: codex.
+    // program (accepted by the established compiler) - review.
     // Typedefs are registered and their uses carry the underlying type, so a
     // void alias is genuinely void rather than an unresolved error type.
     const CgType resolvedReturn = resolveType(entryPoint->returnType.get());

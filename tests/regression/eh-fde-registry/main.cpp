@@ -232,7 +232,7 @@ static bool found_with_bases(Synth &s, int off, void *tb, void *db)
 
 // A route whose removal failed leaves its object (and the image it describes) registered.  Registering the same
 // storage again would build on that stale registration, so every later check on it stops being an independent
-// witness (review: codex).  Such a route is retired: later passes report it skipped and never touch its storage.
+// witness (review).  Such a route is retired: later passes report it skipped and never touch its storage.
 static bool g_retired[7];
 static bool live(int i, const char *route)
 {
@@ -392,7 +392,7 @@ int __wrap_pthread_mutex_lock(pthread_mutex_t *m)
 		// start their lookups only once this is set, so each of their entries happens while the mutex is held.
 		g_ls_owner_holding.store(1);
 		// Wait for BOTH counts: a contender bumps its entry before it samples the holder count, so releasing on
-		// entries alone could let the last one sample after the unlock (review: codex).
+		// entries alone could let the last one sample after the unlock (review).
 		auto arrived = [] {
 			int want = g_ls_expected.load();
 			return g_ls_entries[1].load() >= want && g_ls_entered_held[1].load() >= want - 1;
@@ -611,12 +611,12 @@ int main()
 	}
 	check(found(g_first, 60), "the persistent object is still found after the churn");
 
-	// 7. registration variants (review: codex).  Every route is checked twice per round - deregistered with no
+	// 7. registration variants (review).  Every route is checked twice per round - deregistered with no
 	//    lookup in between, and after a lookup (which sorts the object) - over two rounds (so re-registration after
 	//    removal is checked too), plus a two-image table and genuine empty-frame controls.
 	variants();
 
-	// 8. lazy-sort contention witness (review: codex): deterministic contention on the object mutex, then a
+	// 8. lazy-sort contention witness (review): deterministic contention on the object mutex, then a
 	//    warm phase that must take the 0074 fast path without the mutex.
 	lazy_sort_witness(have_counters);
 

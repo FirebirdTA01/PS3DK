@@ -4,7 +4,7 @@
 // the name from the body; form feed and vertical tab are the two characters
 // where that is observable.  Read as function-like the bare K refused (which
 // agreed with the established compiler by accident); read as object-like it ACCEPTED,
-// which does not.  Found by codex on the first revision.
+// which does not.  Found in review on the first revision.
 //
 // The established compiler refuses these characters ANYWHERE in a source - even
 // `return<FF>t*2.0;` in ordinary code - so this is not a #define rule; the

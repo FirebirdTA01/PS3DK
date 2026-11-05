@@ -119,7 +119,7 @@ for v in ['plain', 'asan']:
             failed.append(f'{v} {cs}')
             print(r.stdout[-1500:], r.stderr[-1500:], flush=True)
 
-# TSan: the GATING positive control is the deterministic line-A pair (tsan_pair_judge.py; codex 01:16).  Three fresh
+# TSan: the GATING positive control is the deterministic line-A pair (tsan_pair_judge.py; review 01:16).  Three fresh
 # processes per variant, all required, no retry: lock removed -> DETECTED with the named pair; lock kept -> CLEAN; the
 # mutex-handoff harness mutant (an HB edge) -> the drop judge must say NOT DETECTED from a complete rc-0 run.
 sys.path.insert(0, str(here))

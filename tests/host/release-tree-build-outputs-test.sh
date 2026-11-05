@@ -50,7 +50,7 @@ tree() {
 [ -f "$crt" ] || { echo "release-tree-build-outputs: no $crt"; exit 1; }
 tree "$work/clean"; expect "clean sources" "$work/clean" ok
 mkdir -p "$work/none"; expect "no samples/ or tests/" "$work/none" ok
-# One tree per marker, so each predicate is witnessed on its own (codex 8cd38b21: grouped cases let a dropped
+# One tree per marker, so each predicate is witnessed on its own (review 8cd38b21: grouped cases let a dropped
 # predicate pass).
 n=0
 for rel in samples/lv2/hello/hello.self samples/lv2/hello/hello.fake.self tests/regression/spurs-suite/row/row.elf \

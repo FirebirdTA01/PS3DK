@@ -37,12 +37,12 @@ ROWS = {
     'compound_self': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = t.x; a *= (a * t); return float4(a, 0, 0, 1); }\n',
                       [0.125, 0.0, 0.0, 1.0]),
     # the operation runs in v's element type and only then converts to a's
-    # (review: codex): int a = 3; a *= float2(1.5, 9) is int(4.5) = 4, not 3 * 1
+    # (review): int a = 3; a *= float2(1.5, 9) is int(4.5) = 4, not 3 * 1
     'compound_int_mul': ('float4 main(float4 t : TEXCOORD0) : COLOR { int a = 3; a *= float2(1.5, 9); return float4(a, 0, 0, 1); }\n',
                          [4.0, 0.0, 0.0, 1.0]),
     'compound_int_div': ('float4 main(float4 t : TEXCOORD0) : COLOR { int a = 3; a /= float2(1.5, 9); return float4(a, 0, 0, 1); }\n',
                          [2.0, 0.0, 0.0, 1.0]),
-    # ...in the COMMON type, not v's (review: codex; measured): a float a
+    # ...in the COMMON type, not v's (review; measured): a float a
     # keeps full precision against a half vector, and an int vector does not
     # truncate a float a.  1.000244140625 is not an fp16 value (rounds to 1).
     'compound_float_by_half': ('float4 main(float4 t : TEXCOORD0) : COLOR { float a = 1.000244140625; a *= half2(1, 2); return float4(a, 0, 0, 1); }\n',

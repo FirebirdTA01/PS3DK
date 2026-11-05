@@ -352,7 +352,7 @@ function Has-FileScopeConst([string]$srcPath) {
     # Strip block and line comments, then walk the text tracking brace and
     # parenthesis depth: a `const` counts only at depth 0 of both (outside
     # every function body and every parameter list).  Indentation plays no
-    # part (review note, codex: the first version keyed on column 0, which
+    # part (review note: the first version keyed on column 0, which
     # is a convention, not a property).
     $text = [regex]::Replace($text, '/\*[\s\S]*?\*/', ' ')
     $text = [regex]::Replace($text, '//[^\n]*', ' ')
@@ -844,7 +844,7 @@ if ($ReferenceCompiler) {
         # named by its set on every listing after the first, so the row and
         # its artifacts say which question they answer.  Two DIFFERENT
         # shaders sharing a basename fall through to the md5 suffix below.
-        # (Review finding, codex: the first version only reached the set
+        # (Review finding: the first version only reached the set
         # suffix when the md5 name collided too, which it never does for one
         # path listed twice.)
         if ($seenRels.ContainsKey($rel)) { $name = "$name" + "__set" + $set }
@@ -1083,7 +1083,7 @@ if ($VpPairs -or $VpCorpus) {
     # instrument row; col0 is not and stays proven on pixels, as does any
     # provable channel that differs - the rows are the proof, whatever the
     # spelling.  (v + 1) * 0.5 stays byte-different (the established compiler
-    # reassociates it into the same MAD; claude filed that).  The scalar
+    # reassociates it into the same MAD; review filed that).  The scalar
     # spelling `v * 0.5f + 0.5f` still refuses on the default path (rc 1).
     $vpHalf = "float4(0.5f, 0.5f, 0.5f, 0.5f)"
     foreach ($n in 0..9) { $vpChannels += @{ key = "tc$n"; src = "void main(float4 v : TEXCOORD$n, out float4 color : COLOR) { color = v * $vpHalf + $vpHalf; }" } }

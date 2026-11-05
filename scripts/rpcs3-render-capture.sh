@@ -9,7 +9,7 @@
 # Checkpoint file format (one per line):
 #   x y expected_R expected_G expected_B tolerance
 #
-# Fixes vs original harness (deepseek, 2026-05-30):
+# Fixes vs original harness (review, 2026-05-30):
 #   - WINDOW-FIND: uses xdotool --pid and accepts any non-empty window
 #     name because direct .self samples can render into the main GUI window.
 #   - FATAL-GREP: matches actual RPCS3 fatal-marker log lines, not

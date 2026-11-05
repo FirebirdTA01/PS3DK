@@ -88,7 +88,7 @@ public:
     // used and then DECLARED LATER IN THE SAME LEXICAL SCOPE ("error C1002:
     // the name X is already defined"), and accepts every other arrangement:
     // use outer then declare inner, use inner then declare outer, two sibling
-    // blocks, and file-scope-later are all legal (measured by codex over nine
+    // blocks, and file-scope-later are all legal (measured in review over nine
     // probes; file-scope-forward-visibility).  So the record belongs to the SCOPE INSTANCE - not
     // to the function, which would over-refuse three legal shapes, and not to
     // the depth, which cannot tell siblings apart.

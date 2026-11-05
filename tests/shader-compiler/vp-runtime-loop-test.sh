@@ -106,7 +106,7 @@ ROWS = [
     ('loop_in_if', M + 'float4 s = p; if (f.x != 0) { for (int i = 0; i < n; ++i) s += k[i]; s = s * 2; } '
                    'else { s = s - 1; } return s; }', e_in_if),
     # A loop in an UNTAKEN arm must not run: a flattened if executes both arms,
-    # so the arm's condition joins the loop's exit test (codex S3-CONTROL).
+    # so the arm's condition joins the loop's exit test (review S3-CONTROL).
     # This loop diverges once entered; judged only where it is not.
     ('untaken_arm_loop', M + 'float4 s = p; if (f.x != 0) { for (int i = 0; i < n; --i) s += 1; } return s; }',
      e_untaken),
@@ -134,7 +134,7 @@ def compile_one(name, src):
 
 def agrees(got, want):
     # Exactly four finite lanes, each within tolerance: a NaN lane or a
-    # short / empty output is WRONG, never vacuously right (codex S3-TEST).
+    # short / empty output is WRONG, never vacuously right (review S3-TEST).
     if got is None or len(got) != 4 or len(want) != 4:
         return False
     if not all(isinstance(a, float) and math.isfinite(a) for a in got):

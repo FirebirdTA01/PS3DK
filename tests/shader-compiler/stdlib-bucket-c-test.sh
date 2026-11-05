@@ -295,7 +295,7 @@ reject_lanes() {                           # $1 stem, $2 a wrong expectation
 reject_lanes lanes_direct     "1,4,7;2,5,8;3,6,9"
 reject_lanes lanes_transposed "1,2,3;4,5,6;7,8,9"
 
-# TWO ARTIFACT CONTROLS (review: codex, who broke the first version of the
+# TWO ARTIFACT CONTROLS (review, which broke the first version of the
 # checker with both).  A wrong EXPECTATION is a weak control: it proves the
 # comparison runs, not that the walk reads the fields that decide the
 # value.  These doctor the emitted dump itself, one bit each, leaving
@@ -375,7 +375,7 @@ reject_doctored input "different input registers"
 # the runtime patches a row by its record's offset, those rows could never
 # be written - the shader sampled M[0] over three rows of permanent zero.
 # It compiled, it looked right, and the parent refused the shader outright,
-# so nothing here caught it (review: Fable).
+# so nothing here caught it (review).
 cat > "$work/mat_uniform_44.cg" << 'EOF'
 float4 main(float4 p : TEXCOORD0, uniform float4x4 M) : COLOR
 {
@@ -401,7 +401,7 @@ done
 # the instruction is PREDICATED, so a container whose colour writes carried
 # NVFX_COND_FL - writes that never execute - would satisfy every relocation
 # and association clause while the shader painted nothing.  That is the same
-# blindness codex found in dead-branch-local-predication's rows, in its harder form: those read
+# blindness the review found in dead-branch-local-predication's rows, in its harder form: those read
 # fp_sources' RENDERED text, which omits the condition test (hw[1] bits
 # 18..20) and the condition-code write (hw[0] bit 8) entirely.
 # predication_check.py reads those fields off the container these rows
@@ -591,7 +591,7 @@ if 0x31 not in opcodes3:
 # there.  That gap is recorded (sampler-first-use-order) and is not this row's subject.
 #
 # The records are pinned BY NAME, with their type, resource and live flag
-# together (codex): a bare "1067 appears among the types" is a numeric word
+# together (review): a bare "1067 appears among the types" is a numeric word
 # found somewhere in a container, and a matching word can be unrelated
 # payload.  It also cannot see a second record of the same type, which is
 # how the sampler3D case would hide a type-0 reflection record.
@@ -639,7 +639,7 @@ err = association_error(insns3, unit3d, unit2d)
 if err:
     sys.exit("FAIL tex3d_bias: " + err)
 
-# CONTROL (codex): swap the two fetches' unit fields and leave the named
+# CONTROL (review): swap the two fetches' unit fields and leave the named
 # reflection untouched - the program now samples the 3D texture through the
 # 2D sampler's unit and back, which is the defect this row exists for.  The
 # checker must reject it.  A checker that only counted opcodes, or read the
@@ -740,7 +740,7 @@ if len(insns4_zero) > 4:
 
 # The established compiler's zero-exponent program is MOV R0.x, TEX0; MAX R0.y, R0.x,
 # 0; LITEX2 R0, R0.xyzz - it NEVER READS the ndoth lane, so its result
-# cannot depend on that argument's sign (codex, from his own decode of the
+# cannot depend on that argument's sign (review, from its own decode of the
 # established compiler).  Ours read it: the earlier candidate gated z on ndoth > 0
 # with SGT/MUL/MAD.  Counting opcodes cannot see that; the operand
 # swizzles can, so this asserts which lanes of the varying the program
@@ -834,7 +834,7 @@ if "m[0]" not in u_names or "m[1]" not in u_names or "m[2]" not in u_names:
 # Check 6d: every ROW of a uniform matrix entry parameter is patchable.
 #
 # The assertion is not "the records exist" and not "the offsets differ".
-# codex's requirement, and it is the right one: an offset is a promise to
+# the review's requirement, and it is the right one: an offset is a promise to
 # the runtime that patching those bytes changes what a particular
 # instruction reads, so each one must be IN RANGE, 16-BYTE ALIGNED, and
 # must address the inline constant DATA block that the row's own dot
@@ -881,7 +881,7 @@ def matrix_rows_patchable(container, name, rows, dot_opcode):
         if not any((instr[s] & 3) == 2 for s in (1, 2, 3)):   # CONST
             return ("%s's offset %d points at a block its instruction does "
                     "not name as a source" % (row_name, off))
-        # ...AND IT MUST BE THIS ROW'S OWN DOT PRODUCT (review: codex).
+        # ...AND IT MUST BE THIS ROW'S OWN DOT PRODUCT (review).
         # Everything above is satisfied by an offset that lands on SOME
         # dot product's block: he swapped M[0]'s and M[1]'s offsets in a
         # real container, left the ucode alone, and it passed - a runtime
@@ -908,7 +908,7 @@ def swap_two_row_offsets(path, out_path, name):
     """A real container with M[0]'s and M[1]'s offsets exchanged.
 
     The UCODE IS UNTOUCHED: only the two records' relocation offsets move,
-    which is exactly the shape codex used to break the first version of
+    which is exactly the shape a reviewer used to break the first version of
     this check.  Every other property still holds - both offsets are in
     range, aligned, distinct, and land on a dot product's const block -
     and a runtime would patch each row into the other row's multiply.

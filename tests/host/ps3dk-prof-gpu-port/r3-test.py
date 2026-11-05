@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """P3.3 R3: host tests of the GCM device binding (sdk/libps3dkprof/src/rsx/gpu_port_gcm.c; binding contract r2,
-codex GO 17:08).  Not target evidence: a fake context and fake report/label memory.  The word tests pin the CHOSEN
+review GO 17:08).  Not target evidence: a fake context and fake report/label memory.  The word tests pin the CHOSEN
 encoding, not the one the hardware accepts; A1/A2 remain assumptions.
 
 Rows (exit 0 only if all pass):

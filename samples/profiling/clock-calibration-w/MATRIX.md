@@ -1,6 +1,6 @@
 # CLKW1 marker matrix (W / W0)
 
-The pinned stage/result/field matrix of the W probe's markers (design r4 + codex 19:47). `host-tests/validate_w_markers.py`
+The pinned stage/result/field matrix of the W probe's markers (design r4 + review 19:47). `host-tests/validate_w_markers.py`
 holds the same table as data; anything not listed is FORBIDDEN. H8 = 8 lowercase hex digits; D = decimal.
 
 ## Every record

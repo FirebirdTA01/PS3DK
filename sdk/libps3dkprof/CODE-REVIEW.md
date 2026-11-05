@@ -1,11 +1,11 @@
 # libps3dkprof step 3, host half: code review map
 
-**Status:** written, never compiled or run (codex 23:55: code only). Host build and run is `tests/host/ps3dk-prof-runtime/build-and-run.sh <out-dir>`. Target compilation, `pal_lv2.c`, SDK delivery (`SUBLIBS`), packaging and landing are NOT part of this step.
+**Status:** written, never compiled or run (review 23:55: code only). Host build and run is `tests/host/ps3dk-prof-runtime/build-and-run.sh <out-dir>`. Target compilation, `pal_lv2.c`, SDK delivery (`SUBLIBS`), packaging and landing are NOT part of this step.
 
 **Contract:**
 - the normative format `docs/design/ps3dk-prof-format.md` at `bece3bd3`, plus the one edit quoted in section 1;
 - `STAGE3-PLAN-r2.md` (`a11a5861`), plus ERRATUM-1 (`5a075d04`) and ERRATUM-2 (`6b0d9e74`), where the later document supersedes the earlier one;
-- the codex 23:55 boundary correction.
+- the review 23:55 boundary correction.
 
 Line numbers are for the files as delivered. `core` means `src/core/prof_core.c` and `drain` means `src/core/prof_drain.c`.
 
@@ -70,8 +70,8 @@ All six are in `rt_t_counters.c`. Each asserts:
 | File | Role |
 |---|---|
 | `sdk/include/ps3dk/prof.h` | The API, the types, the enabled and disabled macros, the C++ guard, the SPU `#error`. Not in `sdk/Makefile` HEADERS or SUBLIBS: it serves the isolated host tests only. |
-| `src/pal/pal.h`, `src/pal/pal_host.c` | The PAL interface and the POSIX implementation. Test faults are injected here. `pal.h` is the shared header every core, drain and PAL object includes, and it refuses with `#error` both PAL macros together, neither, and `PS3DK_PROF_PAL_LV2` with `PS3DK_PROF_TEST_HOOKS` (codex 03:21). Planned preprocess checks, not run: `tests/sdk/ps3dk-prof-probes/pal-select/`. The guard does not prove that every object of a build used the SAME branch: the frozen build request must bind every core, drain and PAL compile invocation and the installed header and provider identities. |
-| `src/pal/pal_lv2.c` | The LV2 implementation (TARGET-PLAN-r2 section 1, rulings R1-R8): written for review, NOT built and not in SUBLIBS or any install rule. Hook-free (refuses `PS3DK_PROF_TEST_HOOKS`); needs `-DPS3DK_PROF_PAL_LV2` on every object. Default sink directory `/dev_hdd0/tmp` (accepted, codex 03:21), with exclusive create and the configurable sink kept. NOT every librt return is checked: `pthread_attr_destroy` in `pal_thread_create` is deliberately unchecked (see the note there). The `uintptr_t` low-bit alignment check in `pal_alloc` is accepted; the provider, link-map, alignment and usable-memory gates stay OPEN until a frozen target request. The allocator is `memalign(128, n)` / `free` (C:/wt/prof/PAL-AUDIT-r1.md), replacing `posix_memalign`, which target-c showed is not declared under `-std=c11` and has no libc provider in the stage; `memalign` is declared unconditionally by `sdk/include/stdlib.h` and libc exports it in both ABIs, but link selection and runtime behaviour are not proven by that. The identity call stays `sys_ppu_thread_get_id` -> `sysThreadGetId` (declared in PSL1GHT `lv2/thread.h:23`); its provider is not established: the motivated candidate is the `liblv2_stub.a` alias descriptor (nidgen `liblv2_stub.yaml`, NID 0x350d454e), pending a frozen read-only archive inspection. |
+| `src/pal/pal.h`, `src/pal/pal_host.c` | The PAL interface and the POSIX implementation. Test faults are injected here. `pal.h` is the shared header every core, drain and PAL object includes, and it refuses with `#error` both PAL macros together, neither, and `PS3DK_PROF_PAL_LV2` with `PS3DK_PROF_TEST_HOOKS` (review 03:21). Planned preprocess checks, not run: `tests/sdk/ps3dk-prof-probes/pal-select/`. The guard does not prove that every object of a build used the SAME branch: the frozen build request must bind every core, drain and PAL compile invocation and the installed header and provider identities. |
+| `src/pal/pal_lv2.c` | The LV2 implementation (TARGET-PLAN-r2 section 1, rulings R1-R8): written for review, NOT built and not in SUBLIBS or any install rule. Hook-free (refuses `PS3DK_PROF_TEST_HOOKS`); needs `-DPS3DK_PROF_PAL_LV2` on every object. Default sink directory `/dev_hdd0/tmp` (accepted, review 03:21), with exclusive create and the configurable sink kept. NOT every librt return is checked: `pthread_attr_destroy` in `pal_thread_create` is deliberately unchecked (see the note there). The `uintptr_t` low-bit alignment check in `pal_alloc` is accepted; the provider, link-map, alignment and usable-memory gates stay OPEN until a frozen target request. The allocator is `memalign(128, n)` / `free` (C:/wt/prof/PAL-AUDIT-r1.md), replacing `posix_memalign`, which target-c showed is not declared under `-std=c11` and has no libc provider in the stage; `memalign` is declared unconditionally by `sdk/include/stdlib.h` and libc exports it in both ABIs, but link selection and runtime behaviour are not proven by that. The identity call stays `sys_ppu_thread_get_id` -> `sysThreadGetId` (declared in PSL1GHT `lv2/thread.h:23`); its provider is not established: the motivated candidate is the `liblv2_stub.a` alias descriptor (nidgen `liblv2_stub.yaml`, NID 0x350d454e), pending a frozen read-only archive inspection. |
 | `src/core/prof_internal.h` | Structures, atomics, constants, the `ps3dk_prof__` symbol renames, the hook macros. |
 | `src/core/prof_test_hooks.h` | The `PS3DK_PROF_TEST_HOOKS`-only hook table, presets and statistics. |
 | `src/core/prof_core.c` | Init and the setters, threads, zones, frames, the STOP batch, descriptor registration. |
@@ -172,7 +172,7 @@ All six are in `rt_t_counters.c`. Each asserts:
 
 ### Decisions the contract left open
 
-These choices are recorded for review. They are NOT accepted (codex 2026-10-22 00:59).
+These choices are recorded for review. They are NOT accepted (review 2026-10-22 00:59).
 
 | Decision | Choice and reason |
 |---|---|
@@ -181,7 +181,7 @@ These choices are recorded for review. They are NOT accepted (codex 2026-10-22 0
 | The first use of a failing site | Also refused (+1). Format 5.1 lists "every zone of a descriptor whose registration failed". |
 | A PUSHED END refused at the limit | Still pops: the stack follows the calls. Its span stays OPEN in the records. |
 | Zones and frames inside a drain (sink callbacks; the THREAD drain thread) | INERT, with no self-instrumentation. `thread_begin` inside a callback is allowed, which is how the drain thread becomes "registered" (`rt_drain_thread_self_acks`). |
-| `unregistered_refusals` | Counts both id exhaustion and "no free slot" (EFULL), and nothing else. The field is informational. An ETHREAD refusal (failed OS thread id read, explicit or auto-registration) is NOT counted, and neither is every zone on a never-registered thread (codex 03:21; format 5.4 wording note). No new wire counter. |
+| `unregistered_refusals` | Counts both id exhaustion and "no free slot" (EFULL), and nothing else. The field is informational. An ETHREAD refusal (failed OS thread id read, explicit or auto-registration) is NOT counted, and neither is every zone on a never-registered thread (review 03:21; format 5.4 wording note). No new wire counter. |
 | Mutex failures | Recorded in `lock_failed`. The capture then fails closed: sealing treats it as a sink failure, ESINKFAIL. |
 | Chunk buffer | The full chunk cap (16 + 1 MiB + 4), not r2 7's records-only size, because DESCRIPTORS chunks also fill to 1 MiB. Checked inside the 256 MiB cap. |
 | Exported names | Exactly the API under `ps3dk_prof_`; every internal is under `ps3dk_prof__`. `build-and-run.sh` checks this with `nm`. |
@@ -199,7 +199,7 @@ Every name in the plan and its errata is implemented, apart from `rt_thread_mode
 | F1, F3 | 5 rows | `rt_t_zones.c`, `rt_t_init.c` |
 | Boundary correction | 6 rows | `rt_t_counters.c` |
 | ID_COLLISION (synthetic) | 3 rows | `rt_t_zones.c` |
-| R3 OS thread id fails closed (codex 02:45, 03:21) | 3 rows: `rt_thread_begin_os_id_failure_refused`, `rt_thread_begin_os_id_failure_second_thread`, `rt_auto_register_os_id_failure_then_recovery` | `rt_t_lifecycle.c` |
+| R3 OS thread id fails closed (review 02:45, 03:21) | 3 rows: `rt_thread_begin_os_id_failure_refused`, `rt_thread_begin_os_id_failure_second_thread`, `rt_auto_register_os_id_failure_then_recovery` | `rt_t_lifecycle.c` |
 | Off-build and probes (host) | OB-E1, OB-E2 (enabled, undefined, =0; RUN), host OB-P, OB-N, PROBE-G (copy and move), archive symbols | `build-and-run.sh` |
 
 `rt_list.h` is the authoritative list, frozen in sorted form as `tests/host/ps3dk-prof-runtime/rt-registry.txt`, which each variant's `rt --list` must equal exactly: 103 tests, each run under plain, ASan+UBSan and TSan. Every capture is checked by `ps3dk-prof check` against the verdict the test declares.
@@ -212,9 +212,9 @@ Every name in the plan and its errata is implemented, apart from `rt_thread_mode
 | OB-P and OB-S (cross `-E` and `-S`, ILP32 and LP64), OB-SPU | Need `powerpc64-ps3-elf-gcc` and `spu-elf-gcc`. The host OB-P and OB-N run here instead. |
 | PROBE-A, PROBE-L (both ABIs), PROBE-U, PROBE-O, PROBE-T | Layout, lock-free, libatomic, ordering and timebase codegen on the shipped compilers. PROBE-L's host half is the `_Static_assert` in `prof_internal.h`. |
 | PROBE-H on the installed archives | No target archive exists in this step. Its host equivalent, the archive-symbol check, runs on hook-free host objects. |
-| OB-H (sdk-header-list) | It runs `make install-headers` and is not run here. `prof.h` is NOT in the sdk/Makefile HEADERS list (codex 00:59): the header serves the isolated host tests only until a library ships. |
+| OB-H (sdk-header-list) | It runs `make install-headers` and is not run here. `prof.h` is NOT in the sdk/Makefile HEADERS list (review 00:59): the header serves the isolated host tests only until a library ships. |
 
-**ID_COLLISION: SYNTHETIC branch coverage (codex 00:59 / 01:13 / 02:34; written, not yet built or run).** The path
+**ID_COLLISION: SYNTHETIC branch coverage (review 00:59 / 01:13 / 02:34; written, not yet built or run).** The path
 (core:384-386) is now exercised through a test-only hook. This is branch coverage of the refusal; no natural FNV-1a-64
 collision is searched for or claimed.
 
@@ -231,13 +231,13 @@ collision is searched for or claimed.
     with no second REGERR.
   - The descriptor count stays 1, coll_a stays in use, and every BEGIN/END names index 0.
   - Exactly one REGERR is written: a=2, b=FNV(name, 0, tag), c=coll_b's natural id. Per format section 4 (record 6),
-    c is "the descriptor id it would have had", not a reference to a published descriptor (codex 02:43 Q1).
+    c is "the descriptor id it would have had", not a reference to a published descriptor (review 02:43 Q1).
   - The normal reader verdict is 0 (TRANSPORT COMPLETE).
   - Through the normal `ps3dk-prof report` (section 9: MEASUREMENT VALID needs refused_count=0 AND regerr_count=0;
     `analysis.rs` lane_view): lane 1 is `INVALID (refused 2, regerr 1)`; the statistics scope is `lanes [none]`; no
     zone row is computed for coll_a or coll_b; the one retained descriptor is coll_a exactly as published
     (`index 0 id <coll_a natural id> scope 1 rt_runtime.c:401 coll_a`), and coll_b appears nowhere. So a TRANSPORT
-    COMPLETE capture is compatible with this lane being INVALID (codex 02:43 Q2).
+    COMPLETE capture is compatible with this lane being INVALID (review 02:43 Q2).
   - Not asserted end to end: comparison exclusion. The binary has no compare subcommand; `compare` uses the same
     lane validity (`analysis.rs` "lane invalid" / `InvalidLanesOnly`), but no host test drives it on this capture.
 - **`rt_id_noncollision_control`:** the hook stays OFF; both descriptors register (2 descriptors, no REGERR, nothing
@@ -254,11 +254,11 @@ collision is searched for or claimed.
   `report_lists_every_published_descriptor_with_its_identity`; Cargo.lock unchanged).
 - **Hook-free checks:** the archive check (no ps3dk_prof_test_ symbol), plus an off-build preprocessor check (the
   hook-free preprocessed prof_core.c names neither candidate_desc_id nor ps3dk_prof_test_hooks). Both use grep_status:
-  status 0 = found (FAIL), 1 = absent (PASS), >1 = inspection failure (FAIL), never read as absent (codex 02:43).
+  status 0 = found (FAIL), 1 = absent (PASS), >1 = inspection failure (FAIL), never read as absent (review 02:43).
 - **Counts:** 100 registry tests x 3 variants = 300 rows; 29 non-row checks (driver-tsan selftest, 3 variant builds,
   TSan controls, the hook-free library build, 4 archive/preprocessor checks, 16 OB-E1/E2 checks, 3 PROBE-G), so a
   fully passing run reports pass 329 (build-m at f01e1bcd: 291 + 28 = 319). With the two R3 rows (PAL work on top of
-  157c42ce) the expectation became 102 x 3 = 306 rows and pass 335, and with the auto-registration recovery row (codex
+  157c42ce) the expectation became 102 x 3 = 306 rows and pass 335, and with the auto-registration recovery row (review
   03:21) 103 x 3 = 309 rows and pass 338 (build-n measured 300 + 29 = 329 at 157c42ce); expectations, not
   measurements.
 - **Still open:** the full runtime code review, and these tests' first host run (a separate request).

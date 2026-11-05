@@ -80,7 +80,7 @@ def origin(insns, i, reg):
 def call_target(a, fn, funcs):
     """The symbol a b/bl reaches when it is PROVEN another function: a FUNC symbol (objdump -t) other than
     the current one, with no "+off".  Anything else - a local label, this function, no symbol, no FUNC
-    list - is None: the branch may stay inside the function and reach a counted loop (codex 15e26177)."""
+    list - is None: the branch may stay inside the function and reach a counted loop (review 15e26177)."""
     if funcs is None:
         return None
     m = re.search(r"<([^>]+)>", a[-1]) if a else None
@@ -214,7 +214,7 @@ def scan(lines, out=sys.stdout, funcs=None):
             other.append("%s %s mtctr %s -> %s" % (fn, addr, args[0], terminal))
             continue
         loops += 1
-        # A WITNESSED counted loop (codex 67047a74, c1dcf020): a CTR-decrementing branch reachable from this
+        # A WITNESSED counted loop (review 67047a74, c1dcf020): a CTR-decrementing branch reachable from this
         # mtctr whose in-function target leads back to it - a cycle - with no CTR redefinition, call or return
         # on the way.  Hazards are judged on every possible count either way; only a witness proves the
         # listing still has a CTR-controlled loop.  Anything this walk cannot resolve fails the witness.
@@ -280,7 +280,7 @@ def self_test_cases():
     4:	7d 29 03 a6 	mtctr   r9
     8:	4e 80 04 21 	bctrl
 """, 0),
-        # Codex P1 (t_54ed85f8 review): mfctr only READS CTR; it does not
+        # Review P1 (t_54ed85f8 review): mfctr only READS CTR; it does not
         # consume or redefine it, so a later bdnz still sees the original
         # count and the mtctr IS a loop use.  Old version (mfctr treated as
         # non-loop terminal) reported 0 findings here; it must report 1.
@@ -291,7 +291,7 @@ def self_test_cases():
     c:	7c 0a 02 a6 	mfctr   r10
    10:	42 00 ff fc 	bdnz    10 <.f+0x10>
 """, 1),
-        # codex P1-b (v2 review): a plain b to a LOCAL label is the common
+        # review P1-b (v2 review): a plain b to a LOCAL label is the common
         # rotated-loop shape, not proof the count is unused.  b .f+0x14 must
         # NOT be a terminal; the mtctr stays a possible loop count (finding).
         "red-b-into-loop": ("""0000000000000000 <.f>:
@@ -303,7 +303,7 @@ def self_test_cases():
    14:	42 00 ff fc 	bdnz    10 <.f+0x10>
    18:	4e 80 00 20 	blr
 """, 1),
-        # codex P1-a (v2 review): a listing that ENDS at the mtctr proves
+        # review P1-a (v2 review): a listing that ENDS at the mtctr proves
         # nothing; end-of-function/listing is not a non-loop terminal, so the
         # count is still judged (finding).  Guards the two embedded .sh RED
         # controls that fall off the end.
@@ -312,7 +312,7 @@ def self_test_cases():
     4:	38 a9 00 02 	addi    r5,r9,2
     8:	7c a9 03 a6 	mtctr   r5
 """, 1),
-        # codex P1-b (v2 review): a b to ANOTHER function (target without
+        # review P1-b (v2 review): a b to ANOTHER function (target without
         # "+off") is a tail call, which clobbers CTR - a genuine non-loop
         # terminal.  Must stay green.  Written in real objdump form:
         # "b  <addr> <sym>" (the address is separate from the symbol).
@@ -332,13 +332,13 @@ def self_test_cases():
     8:	7c a9 03 a6 	mtctr   r5
     c:	48 00 00 00 	b       0 <.f>
 """, 1),
-        # codex 15e26177: a "<sym>:" label in objdump output is not proof of a function.  A b to a local
+        # review 15e26177: a "<sym>:" label in objdump output is not proof of a function.  A b to a local
         # label printed as its own symbol (hand-written assembly: loop_entry) reaches the counted loop.
         # With the object's FUNC list (only f) the label is not a boundary; without one the target is
         # unproven.  Either way the count is judged (finding).
         "red-b-local-label": ('0000000000000000 <f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 08 \tb       14 <loop_entry>\n   10:\t60 00 00 00 \tnop\n\n0000000000000014 <loop_entry>:\n   14:\t60 00 00 00 \tnop\n   18:\t42 00 ff fc \tbdnz    14 <loop_entry>\n   1c:\t4e 80 00 20 \tblr\n', 1, {"f"}),
         "red-b-local-label-no-funcs": ('0000000000000000 <f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 08 \tb       14 <loop_entry>\n   10:\t60 00 00 00 \tnop\n\n0000000000000014 <loop_entry>:\n   14:\t60 00 00 00 \tnop\n   18:\t42 00 ff fc \tbdnz    14 <loop_entry>\n   1c:\t4e 80 00 20 \tblr\n', 1, None),
-        # codex 15e26177: bl does not itself clobber CTR; a bl to a local label reaches the loop too.
+        # review 15e26177: bl does not itself clobber CTR; a bl to a local label reaches the loop too.
         "red-bl-local-label": ('0000000000000000 <f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 09 \tbl      14 <loop_entry>\n   10:\t60 00 00 00 \tnop\n\n0000000000000014 <loop_entry>:\n   14:\t60 00 00 00 \tnop\n   18:\t42 00 ff fc \tbdnz    14 <loop_entry>\n   1c:\t4e 80 00 20 \tblr\n', 1, {"f"}),
         # A b to another function is a tail call only with proof: no FUNC list -> judged.
         "red-b-tailcall-unproven": ('0000000000000000 <.f>:\n    0:\t81 24 00 00 \tlwz     r9,0(r4)\n    4:\t38 a9 00 02 \taddi    r5,r9,2\n    8:\t7c a9 03 a6 \tmtctr   r5\n    c:\t48 00 00 10 \tb       1c <.g>\n', 1, None),
@@ -347,7 +347,7 @@ def self_test_cases():
     }
 
 def witness_cases():
-    """name -> (listing, FUNC symbols, expected witnessed CTR loops) (codex c1dcf020: a bd* mnemonic later in the
+    """name -> (listing, FUNC symbols, expected witnessed CTR loops) (review c1dcf020: a bd* mnemonic later in the
     function is not a loop; the bd* must close a cycle reachable from the mtctr with CTR intact)."""
     return {
         "w-normal-loop": ('0000000000000000 <.f>:\n    0:\t79 4a 00 20 \tclrldi  r10,r10,32\n    4:\t7d 49 03 a6 \tmtctr   r10\n    8:\t60 00 00 00 \tnop\n    c:\t42 00 ff fc \tbdnz    8 <.f+0x8>\n   10:\t4e 80 00 20 \tblr\n', {".f"}, 1),

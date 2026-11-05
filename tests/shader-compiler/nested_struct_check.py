@@ -60,7 +60,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='ps3dk-nested-struct-') as temp:
         work = Path(temp)
 
-        # 1. Fable's a4_nested.cg probe: swizzle write and read-back on nested struct
+        # 1. The review's a4_nested.cg probe: swizzle write and read-back on nested struct
         code1_nested = """
 struct I { float4 v; };
 struct R { float4 p : COLOR; I i; };
@@ -236,7 +236,7 @@ float4 main(float4 t : TEXCOORD0) : COLOR {
         assert "no member named 'nonexistent' in 'I'" in p7.stderr, f"unexpected error: {p7.stderr}"
         print("PASS: negative control correctly refuses with rc=1, no artifact, and exact error", flush=True)
 
-        # 8. Codex probe: nested struct semantic leaf in VP return
+        # 8. Review probe: nested struct semantic leaf in VP return
         code8 = """
 struct I { float4 v : POSITION; };
 struct R { I i; float4 keep : TEXCOORD0; };
@@ -255,7 +255,7 @@ R main(float4 t : POSITION) {
         assert b'main.keep' in blob8, "container param table missing main.keep"
         print("PASS: nested struct semantic leaves in VP return exported correctly", flush=True)
 
-        # 9. Codex probe: nested struct semantic leaf in FP return with partial writes
+        # 9. Review probe: nested struct semantic leaf in FP return with partial writes
         code9 = """
 struct I { float4 v : COLOR; };
 struct R { I i; float4 keep : COLOR1; };
@@ -291,7 +291,7 @@ R main(float4 t : POSITION) {
         assert not re.search(r'stout.*TEXCOORD1', out10, re.I), "untouched nested semantic emitted unexpected StoreOutput"
         print("PASS: untouched nested semantic leaf emits no StoreOutput", flush=True)
 
-        # 11. Codex bank witness: all-nested with unwritten float COLOR1 forces float bank (R0, outputFromH0=0)
+        # 11. Review bank witness: all-nested with unwritten float COLOR1 forces float bank (R0, outputFromH0=0)
         code11_nested = """
 struct I { half4 c : COLOR; float4 unused : COLOR1; };
 struct R { I i; };

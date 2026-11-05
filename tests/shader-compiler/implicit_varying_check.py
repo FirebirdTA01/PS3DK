@@ -75,7 +75,7 @@ float4 main(float2 uv : TEXCOORD0, in d v, float2 z) : COLOR { return float4(uv 
 float4 main(float4 uv : TEXCOORD0, uniform sampler2D decal : TEXUNIT0, prev P) : COLOR { return tex2D(P.texture, uv.xy) + tex2D(decal, uv.zw); }
 """, {('uv', VAR, TC(0), 0, 1), ('decal', UNI, TEXUNIT0, 1, 1), ('P.tex_coord', VAR, UNDEF, 2, 0),
         ('P.texture', UNI, TEXUNIT0 + 1, 2, 1)}, None, set()),
-    # an explicit binding on a sampler member is honoured (review: codex; measured)
+    # an explicit binding on a sampler member is honoured (review; measured)
     'explicit_unit_member': ("""struct prev { float2 tc; sampler2D tex : TEXUNIT3; };
 float4 main(float4 uv : TEXCOORD0, uniform sampler2D decal : TEXUNIT0, prev P) : COLOR { return tex2D(P.tex, uv.xy) + tex2D(decal, uv.zw); }
 """, {('uv', VAR, TC(0), 0, 1), ('decal', UNI, TEXUNIT0, 1, 1), ('P.tc', VAR, UNDEF, 2, 0),
@@ -97,7 +97,7 @@ float4 main(in d v, float z) : COLOR { return float4(v.a, v.b, z); }
 # The same semantic-less struct type for two inputs (or two nested members):
 # the established compiler binds each instance separately (a.uv TEX0, b.uv TEX1); here
 # the inferred binding lives on the shared struct type, so it refuses by
-# name rather than binding both to TEX0 (review: codex).
+# name rather than binding both to TEX0 (review).
 # t_3289f98f: an implicit TEXCOORD goes only to an input the program READS
 # (after dead code is gone); an unread one is UNDEFINED and takes no index,
 # and each struct instance is bound on its own.  Records and values are the
@@ -120,7 +120,7 @@ READSET = {
                         {('b.uv', VAR, TC(0), 1, 1), ('c.uv', VAR, TC(1), 2, 1)}, [0.5, 0.25, 0.75, 0.125]),
     'two_inputs_same_struct': ('struct S { float2 uv; }; float4 main(S a, S b) : COLOR { return float4(a.uv, b.uv); }\n',
                                {('a.uv', VAR, TC(0), 0, 1), ('b.uv', VAR, TC(1), 1, 1)}, [0.5, 0.25, 0.75, 0.125]),
-    # read only on a constant-false path = unread (review: codex; measured)
+    # read only on a constant-false path = unread (review; measured)
     'const_false_branch': ('float4 main(float2 u, float2 k) : COLOR { float4 r = float4(k, 0, 1); if (false) r = float4(u, 0, 1); return r; }\n',
                            {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     'const_false_ternary': ('float4 main(float2 u, float2 k) : COLOR { return false ? float4(u, 0, 1) : float4(k, 0, 1); }\n',
@@ -132,12 +132,12 @@ READSET = {
                             {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     'static_false_branch': ('static const bool B = false; float4 main(float2 u, float2 k) : COLOR { float4 r = float4(k, 0, 1); if (B) r = float4(u, 0, 1); return r; }\n',
                             {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
-    # a constant select whose condition is itself a constant select (review: codex)
+    # a constant select whose condition is itself a constant select (review)
     'chained_false': ('float4 main(float2 u, float2 k) : COLOR { bool b = true ? false : (u.x > 0); return b ? float4(u, 0, 1) : float4(k, 0, 1); }\n',
                       {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
     'chained_true': ('float4 main(float2 u, float2 k) : COLOR { bool b = false ? (u.x > 0) : true; return b ? float4(k, 0, 1) : float4(u, 0, 1); }\n',
                       {('u', VAR, UNDEF, 0, 0), ('k', VAR, TC(0), 1, 1)}, [0.5, 0.25, 0.0, 1.0]),
-    # a select chain deeper than any fixed cap (65 links; review: codex - caps of
+    # a select chain deeper than any fixed cap (65 links; review - caps of
     # 64/16 left an intermediate select live and u bound): bounds are now the
     # number of selects, measured u unread on the established compiler
     'chain65': ('float4 main(float2 u, float2 k) : COLOR { float2 v0 = k; ' +

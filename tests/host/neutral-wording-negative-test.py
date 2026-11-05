@@ -41,6 +41,13 @@ REFUSE = {
     "compared with the other side": "Q29tcGFyZWQgd2l0aCB0aGUgcmVmZXJlbmNlLg==",
     "noun split from SDK across a line": "cmVmZXJlbmNlClNESw==",
     "article split from the noun across a line": "dGhlCi8vIHJlZmVyZW5jZSBhY2NlcHRzIGl0",
+    "a contributor-tool name": "Ly8gYWdyZWVkIHdpdGggQ2xhdWRlLCB0X2EyNjQ0ZWQx",
+    "a review identity with a project suffix": "UmV2aWV3ZWQgYnkgY29kZXhfUFMzREs=",
+    "a front-end identity": "UmV2aWV3ZWQgYnkgQ2xhdWRlX1BTM0RLX0Zyb250RW5k",
+    "a helper identity": "UmV2aWV3ZWQgYnkgUXdlbl9QUzNES19IZWxwZXJfT25l",
+    "a short-suffix identity": "UmV2aWV3ZWQgYnkgR2VtaW5pX1BTM0RLX0pF",
+    "another helper identity": "cG9zdGVkIHRvIEBkZWVwc2Vla19QUzNESw==",
+    "an identity inside a snake_case word": "YnVpbGQvcmV2aWV3X2NvZGV4X3RtcA==",
 }
 ACCEPT = {
     "API identifiers": "SCE_OK SCE_PPURELA SceNpId sceNpInit sce_fp_rsx sce_vp_rsx sce/hl\n"
@@ -50,12 +57,14 @@ ACCEPT = {
     "copyright notice": "Q29weXJpZ2h0IChDKSAyMDA3LCAyMDA4IFNvbnkgQ29tcHV0ZXIgRW50ZXJ0YWlubWVudCBJbmMu",
     "licence clause": "ICogTmVpdGhlciB0aGUgbmFtZSBvZiB0aGUgU29ueSBDb21wdXRlciBFbnRlcnRhaW5tZW50IEluYyBub3IgdGhlIG5hbWVz",
     "notice box line": "LyogU29ueSBDb21wdXRlciBFbnRlcnRhaW5tZW50LCBJbmMuLCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICov",
+    "an identifier sharing a tool name's letters": "cmV0ID0gZ2VtSW5pdCgmYXR0cik7IC8qIGNvZGUgcmV2aWV3ICovCg==",
     "affiliation disclaimer": "QnVpbHQgd2l0aCB0aGUgUFMzIEN1c3RvbSBUb29sY2hhaW4uICBOb3QgYWZmaWxpYXRlZCB3aXRoIFNvbnkgQ29tcHV0ZXIgRW50ZXJ0YWlubWVudCBJbmMu",
 }
 PLAIN = ("API identifiers", "generic English")  # the other ACCEPT values are encoded
 PHRASE ="Ly8gcmVmZXJlbmNlIFNESwo="          # one refused line of C
 BAD_NAME = "cmVmZXJlbmNlX3Nka19ub3Rlcy50eHQ="  # a refused file name
 BAD_REF = "c29ueS1wb3J0"                     # a refused branch name
+BAD_ID = "UXdlbl9QUzNES19IZWxwZXJfT25l"  # a contributor identity
 
 fails = 0
 
@@ -130,6 +139,19 @@ def history_cases(tmp):
     git(repo, "commit", "-qm", "drop the name")
 
     expect("refuses a refused ref name", scan(["--names", "refs/heads/" + d(BAD_REF)], repo), 1)
+    expect("refuses an identity in a ref name", scan(["--names", "refs/heads/" + d(BAD_ID) + "/x"], repo), 1)
+
+    mark = head(repo)
+    note.write_text("// fix from " + d(BAD_ID) + "\n", encoding="utf-8")
+    git(repo, "commit", "-qam", "neutral subject")
+    expect("refuses an identity in an added line", scan(["--range", mark + "..HEAD"], repo), 1)
+    note.write_text("neutral\n", encoding="utf-8")
+    git(repo, "commit", "-qam", "tidy")
+    mark = head(repo)
+    note.write_text("neutral again\n", encoding="utf-8")
+    git(repo, "commit", "-qam", "change suggested by " + d(BAD_ID))
+    expect("refuses an identity in a commit message", scan(["--range", mark + "..HEAD"], repo), 1)
+    expect("refuses an identity in commit messages only", scan(["--messages", mark + "..HEAD"], repo), 1)
     expect("accepts neutral ref names", scan(["--names", "refs/heads/tests/layout", "main"], repo), 0)
 
     big = repo / "big.txt"
@@ -143,6 +165,34 @@ def history_cases(tmp):
     note.unlink()
     rc = scan(["--tree"], repo)
     expect("a tracked file missing from the work tree is not a pass", int(rc != 0), 1)
+
+
+def allowlist_cases(tmp):
+    """Only the exact allowlisted .gitignore lines pass; a modified or copied line is refused."""
+    repo = Path(tmp) / "allow"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "fixture")
+    git(repo, "config", "user.email", "fixture@invalid")
+    git(repo, "config", "core.autocrlf", "false")
+    (repo / "tests/host").mkdir(parents=True)
+    (repo / "tests/host/neutral-wording-allowlist.txt").write_bytes(
+        (ROOT / "tests/host/neutral-wording-allowlist.txt").read_bytes())
+    keep = [l for l in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+            if l.strip() in (d("LnF3ZW4v"), d("LmNsYXVkZS9zZXR0aW5ncy5sb2NhbC5qc29u"), d("L0NMQVVERS5tZA=="), d("L1FXRU4ubWQ="))]
+    assert len(keep) == 4, keep
+    ign = repo / ".gitignore"
+    ign.write_text("\n".join(keep) + "\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "ignore rules")
+    expect("accepts the exact allowlisted .gitignore lines", scan(["--tree"], repo), 0)
+    ign.write_text("\n".join(keep + [keep[1].replace(".local", "")]) + "\n", encoding="utf-8")
+    git(repo, "add", ".")
+    expect("refuses a modified allowlisted line", scan(["--tree"], repo), 1)
+    ign.write_text("\n".join(keep) + "\n", encoding="utf-8")
+    (repo / "notes.txt").write_text(keep[0] + "\n", encoding="utf-8")
+    git(repo, "add", ".")
+    expect("refuses an allowlisted line copied to another path", scan(["--tree"], repo), 1)
 
 
 def outside_repo_cases(tmp):
@@ -271,6 +321,7 @@ def main():
     wrapper_cases()
     with tempfile.TemporaryDirectory(prefix="nw-negative-") as tmp:
         history_cases(tmp)
+        allowlist_cases(tmp)
         outside_repo_cases(tmp)
         hook_cases(tmp)
     print("neutral-wording-negative: %s" % ("PASS" if not fails else "FAIL (%d)" % fails))

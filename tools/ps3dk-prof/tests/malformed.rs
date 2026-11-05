@@ -727,7 +727,7 @@ fn frame_id_repeated_after_gap() {
 
 #[test]
 fn frame_id_u64_max_after_gap() {
-    // Codex's case: u64::MAX after a GAP (previously accepted, then a second u64::MAX passed by saturation).
+    // The review's case: u64::MAX after a GAP (previously accepted, then a second u64::MAX passed by saturation).
     let recs = vec![frame(0, 10, 0), gap(1, 1), frame(2, 30, u64::MAX), frame(3, 40, u64::MAX)];
     assert_rule(&with_recs(recs), Rule::FrameIdBound);
 }

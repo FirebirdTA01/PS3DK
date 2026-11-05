@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Float-mode matrix-binder controls (design r3, codex-approved 2026-10-19 23:00).
+"""Float-mode matrix-binder controls (design r3, review-approved 2026-10-19 23:00).
 
 Generates the probe, negative and integration-twin controls for plain float4x4
 and float3x3 (plus 3x4/4x3 stride coverage) automatic matrix uniforms, with the

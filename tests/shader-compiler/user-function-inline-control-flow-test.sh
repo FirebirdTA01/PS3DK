@@ -76,7 +76,7 @@ forbid() {   # <stem> <regex that must match no line>
 # The join must be WIRED, not merely present: the compare's destination lane
 # has to be read by a later instruction (the select/blend), and the row's
 # output must come from that consumer.  A compare that nothing reads is the
-# exact shape of the defect (local-array-conditional-store / codex's review of d204f228: MUL,
+# exact shape of the defect (local-array-conditional-store / the review of d204f228: MUL,
 # SGT unused, MOV o0 <- MUL).  Works over vp_words.py and fp_sources.py lines.
 joined() {   # <stem> <compare opcode regex>
     python3 - "$work/$1.dec" "$2" <<'PYEOF' || { cat "$work/$1.dec" >&2; fail "$1: the compare's result is never read (unjoined store)"; }
@@ -125,7 +125,7 @@ factor() {   # <stem> fp|vp <k>: the output is exactly k * the one input, lane b
 }
 joined_none() {   # <stem>: NO predicated write anywhere (an arm local that died never joined).
                   # Read from the condition-test and condition-write FIELDS, not from
-                  # fp_sources' text, which prints neither (review: codex - a container
+                  # fp_sources' text, which prints neither (review - a container
                   # whose output MOV carried NVFX_COND_FL decoded to the same text and
                   # passed).  Then the row's own artifact control: the first R0 write's
                   # condition flipped to FL must be REJECTED by the same predicate.
@@ -137,7 +137,7 @@ envelope() {  # <stem>: no predicated write and a sound instruction envelope, re
               # container's FIELDS by predication_check.py (FP: condition test / cc-write /
               # OUT_NONE; VP: inline_factor_check's envelope - condition test, saturate, abs,
               # scalar slot, PROGRAM_END placement).  vp_words and fp_sources print none of
-              # those fields, so a text row cannot see them (review: claude, codex).  Then the
+              # those fields, so a text row cannot see them (review).  Then the
               # checker's own container controls must be rejected for exactly their reasons.
     python3 "$here/predication_check.py" "$work/$1.bin"         || fail "$1: a predicated write or a broken envelope is present"
     python3 "$here/predication_check.py" "$work/$1.bin" --control         || fail "$1: an envelope control was NOT rejected for its own reason"
@@ -146,7 +146,7 @@ envelope() {  # <stem>: no predicated write and a sound instruction envelope, re
 value_is_input() {  # <stem> fp|vp: the program's output IS its one input, lane for lane, evaluated
                     # from the decoded operands (inline_factor_check with factor 1).  An envelope
                     # check is not a value check: a correct MOV followed by a second write of -IN0
-                    # to the same output passes the text rows and the envelope (review: codex).
+                    # to the same output passes the text rows and the envelope (review).
                     # No lane/sign controls here - a one-instruction MOV has no MUL to mutate.
     python3 "$here/inline_factor_check.py" "$work/$1.bin" "$2" 1         || fail "$1: output is not the input (see the value diff above)"
     pass "$1: output = input on every lane"
@@ -227,7 +227,7 @@ expect fp_global_array_write_f '^[0-9]+ (MAD|MUL) '
 expect fp_global_array_write_f 'TEX0'
 expect fp_global_array_write_f 'TEX1'
 
-# ---------------------------------------------------------------- the array join and global effects (review: codex, claude)
+# ---------------------------------------------------------------- the array join and global effects (review)
 accept vp_global_array_if_v sce_vp_rsx "B[0]=p; if (p.x>0) B[0]=p*2: the conditional store joins (negative p.x must NOT double)"
 joined vp_global_array_if_v 'SGT|SLT|SGE|SLE'
 accept vp_global_array_if_else_v sce_vp_rsx "both arms store B[0]"
@@ -240,7 +240,7 @@ array_join_values vp_global_array_if_multi_v
 accept vp_global_array_if_unwritten_v sce_vp_rsx "an element never written before the if selects against its UNIFORM element"
 joined vp_global_array_if_unwritten_v 'SGT|SLT|SGE|SLE'
 array_join_values vp_global_array_if_unwritten_v
-accept fp_global_two_arrays_if_f sce_fp_rsx "TWO promoted arrays, one element of each written in one branch: both never-written elements select against their uniform (the merge loads are numbered by sorted (name, index), never by hash order - review: claude)"
+accept fp_global_two_arrays_if_f sce_fp_rsx "TWO promoted arrays, one element of each written in one branch: both never-written elements select against their uniform (the merge loads are numbered by sorted (name, index), never by hash order - review)"
 joined fp_global_two_arrays_if_f 'SGT|SLT|SGE|SLE'
 accept vp_global_two_arrays_if_v sce_vp_rsx "two promoted arrays in a vertex program, two never-written elements"
 joined vp_global_two_arrays_if_v 'SGT|SLT|SGE|SLE'
@@ -254,13 +254,13 @@ count  vp_inline_array_shadow_v '^[0-9]+ ' 1
 accept vp_inline_reverse_shadow_v sce_vp_rsx "a CALLER-local G shadows the global gen() writes: main returns its own 3*p"
 has_float vp_inline_reverse_shadow_v 40400000 "the caller's 3.0"
 count  vp_inline_reverse_shadow_v '^[0-9]+ MUL ' 1
-accept vp_inline_reverse_array_shadow_v sce_vp_rsx "a CALLER-local B[1] shadows the file-scope B that gen() writes: main returns its own p (review: codex)"
+accept vp_inline_reverse_array_shadow_v sce_vp_rsx "a CALLER-local B[1] shadows the file-scope B that gen() writes: main returns its own p (review)"
 expect vp_inline_reverse_array_shadow_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
 forbid vp_inline_reverse_array_shadow_v '^[0-9]+ MUL '
 # A caller-local shadowing a file-scope name: for an inlined helper the name
 # means the GLOBAL (its stashed binding, or the uniform when never assigned),
 # and the helper's write goes back to that stash, never to the local
-# (review: codex - void_shadow_read returned the local's 3p, reference p).
+# (review - void_shadow_read returned the local's 3p, reference p).
 accept vp_inline_void_shadow_read_v sce_vp_rsx "void gen(){D=G;} after main shadows G with a local 3p: D reads the GLOBAL p"
 expect vp_inline_void_shadow_read_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=IN0\.xyzw'
 forbid vp_inline_void_shadow_read_v '^[0-9]+ MUL '
@@ -277,7 +277,7 @@ accept vp_inline_shadow_unassigned_v sce_vp_rsx "a shadowed global nothing assig
 expect vp_inline_shadow_unassigned_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C4[0-9][0-9]\.xyzw'
 # The stashed global bindings are control-flow state like the maps they
 # mirror: a helper called INSIDE a branch writes the global through the
-# stash and that write must join (review: codex - conditional_stash.cg took
+# stash and that write must join (review - conditional_stash.cg took
 # the helper's 2p on both paths, compare unread).
 accept vp_inline_conditional_call_global_v sce_vp_rsx "if (p.x>0) gen(p) writes the shadowed global: get() selects p / 2p"
 joined vp_inline_conditional_call_global_v 'SGT|SLT|SGE|SLE'
@@ -289,7 +289,7 @@ array_join_values vp_inline_conditional_call_unassigned_v
 # The parameter exemption decides only whether to REFUSE; the binding itself
 # still resolves through the name map, so an inner local shadowing a
 # PARAMETER reads the inner local (reference: the {9,8,7,6} constant).
-# Newly accepted here - the parent refuses the nested block (review: claude).
+# Newly accepted here - the parent refuses the nested block (review).
 accept fp_inline_param_inner_shadow_f sce_fp_rsx "an inner block local shadows the helper's PARAMETER: D takes the inner constant"
 forbid fp_inline_param_inner_shadow_f '^[0-9]+ MOV dst=R0 .* s0=TEX0'
 expect fp_inline_param_inner_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9]+\.'
@@ -325,7 +325,7 @@ forbid fp_inline_entry_param_read_f 's0=TEX0'
 accept fp_inline_entry_param_write_f sce_fp_rsx "fragment twin: set() writes the global while main's PARAMETER G is live: main returns TEXCOORD0"
 expect fp_inline_entry_param_write_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.'
 forbid fp_inline_entry_param_write_f 's0=c[0-9]+'
-# The caller binding survives REASSIGNMENT (review: codex, scope-param-rebound):
+# The caller binding survives REASSIGNMENT (review, scope-param-rebound):
 # the write-back asks the stash, not whether the name still holds the value
 # its declaration was given.  Red on 47459167 AND on the first candidate
 # c0884536: both emit a bare MOV R0 <- c0 and never read TEXCOORD0.
@@ -337,7 +337,7 @@ forbid fp_inline_entry_param_rebound_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=c[0-9
 # The established compiler folds 3*2 into one MULR by 6; we keep both multiplies (a
 # pre-existing fold gap, not this boundary).  The VALUE is what is pinned:
 # has_float presence was measured insufficient - a container reading the
-# const block's zero lane, or negating the factor, passed it (review: codex).
+# const block's zero lane, or negating the factor, passed it (review).
 accept fp_inline_local_rebound_f sce_fp_rsx "a caller LOCAL G reassigned (G = G*2) before set() writes the global: main returns 6*TEXCOORD0"
 expect fp_inline_local_rebound_f '^[0-9]+ MUL dst=R[0-9]+ mask=xyzw .* s0=TEX0\.xyzw'
 count  fp_inline_local_rebound_f '^[0-9]+ MUL ' 1   # (p*3)*2 is one MUL by 6, as the established compiler emits
@@ -358,7 +358,7 @@ forbid vp_inline_local_rebound_v '^[0-9]+ MOV dst=o0 mask=xyzw src0=C[0-9]+'
 # capture-once clause), and since inline-entry-parameter-scope that clause has a second caller:
 # the parameter loop.  With it removed, a later shadowing declaration re-stashes
 # the EARLIER local (or the parameter) as "the global" and get() returns that
-# instead of loading the uniform (review: claude - mutant emitted MUL IN0*2 then
+# instead of loading the uniform (review - mutant emitted MUL IN0*2 then
 # MOV, never a uniform read).  Both shapes are byte-identical to the established compiler
 # on the candidate: FENCBR; MOVR R0, G from the uniform.
 accept fp_inline_two_block_shadow_f sce_fp_rsx "two sequential block locals named G, then get() reads the file-scope G: the uniform"
@@ -408,7 +408,7 @@ expect fp_block_field_write_f '^[0-9]+ MAD dst=R[0-9]+ mask=xyzw .* s1=c[0-9]+\.
 accept fp_block_loop_local_f sce_fp_rsx "a per-trip loop local does not carry past the loop: the outer t is returned (byte-identical to the established compiler)"
 expect fp_block_loop_local_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.xyzw'
 forbid fp_block_loop_local_f '^[0-9]+ MUL '
-accept fp_block_struct_shadow_f sce_fp_rsx "an inner S s shadows an outer S s: after the block s.f is the OUTER field - a declared struct's qualified keys end with it (review: codex; byte-identical)"
+accept fp_block_struct_shadow_f sce_fp_rsx "an inner S s shadows an outer S s: after the block s.f is the OUTER field - a declared struct's qualified keys end with it (review; byte-identical)"
 expect fp_block_struct_shadow_f '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0\.xyzw'
 forbid fp_block_struct_shadow_f '^[0-9]+ MUL '
 accept fp_block_outer_shadow_helper_write_f sce_fp_rsx "an outer local shadows G; a helper writes the real G inside an inner block; get() after the block reads 2*p (a pre-existing stash entry is kept, not restored)"
@@ -418,7 +418,7 @@ factor fp_block_local_then_helper_write_f fp 2
 # A GLOBAL struct is flattened into globals named by its qualified keys ("s.f"),
 # so a shadowing local `S s` stashes every key it owns and a helper's write to
 # the real field is routed to the stash and comes back at block exit (review:
-# codex, composed boundary - the candidate restored that write away; the parent
+# review, composed boundary - the candidate restored that write away; the parent
 # was right by accident, the local and the global sharing one flat key).
 accept fp_block_struct_global_write_f sce_fp_rsx "a block-local S s shadows the GLOBAL struct; a helper inside the block writes the real s.f; after the block s.f is the global's 2*p"
 factor fp_block_struct_global_write_f fp 2
@@ -462,7 +462,7 @@ accept vp_inline_nested_writer_v sce_vp_rsx "a nested helper WRITES the global u
 factor vp_inline_nested_writer_v vp 6
 # A read BEFORE a top-level local of the same name in the SAME helper body:
 # the read names the GLOBAL, not the enclosing helper's parameter (review:
-# codex, lift-late-direct-local - only the callee's PARAMETERS exempt a name
+# review, lift-late-direct-local - only the callee's PARAMETERS exempt a name
 # from the prologue's stash rebinding; a later top-level local rebinds the
 # name when its declaration is reached).  Reference: D = the global p.
 accept vp_inline_late_direct_local_v sce_vp_rsx "D = G before a top-level local G in the same helper, under an enclosing parameter shadow: D is the global p"

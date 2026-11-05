@@ -912,7 +912,7 @@ static bool structLeavesAreNumeric(const CgType& type, int depth = 0)
         // A MATRIX leaf is out too: the fill picks the leaf's element type
         // to convert through, and the matrix path selected the matrix's own
         // base type instead, so a half2x2 filled from 1.00048828125 kept the
-        // float value where the established compiler rounds to 1.0009765625 (codex).
+        // float value where the established compiler rounds to 1.0009765625 (review).
         // Refused with the rest of the conversion boundary.
         if (!fieldType->isNumeric() && !fieldType->isVector())
             return false;
@@ -924,7 +924,7 @@ static bool structLeavesAreNumeric(const CgType& type, int depth = 0)
         // measured (S)0.5 into a bool leaf as 0.5 where the established compiler says
         // 1, (S)3.0 into a fixed leaf as 3 where the established compiler says
         // 1.9990234375, and (S)65537 into a short leaf as 65537 where the
-        // established compiler says 1 (codex, review of this commit).  Refusing them by
+        // established compiler says 1 (review of this commit).  Refusing them by
         // name is the bounded answer; the conversions belong with the typed
         // constant evaluator, not in a second table here.
         switch (fieldType->scalarKind())
@@ -937,7 +937,7 @@ static bool structLeavesAreNumeric(const CgType& type, int depth = 0)
             // UInt is here with bool and the narrow integers because the
             // SIGNEDNESS conversion is missing too: `(S)(-1)` into an
             // unsigned leaf emitted -1 where the established compiler wraps
-            // (codex).  Same class, same answer - refuse until the typed
+            // (review).  Same class, same answer - refuse until the typed
             // evaluator owns the conversion.
             return false;
         }

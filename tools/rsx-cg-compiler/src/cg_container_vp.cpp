@@ -176,7 +176,7 @@ uint32_t cgMatrixRowType(int cols)
 // sites - the plain file-scope loop and the STRUCT-FLATTENED one, each with a
 // scalar/vector and a matrix branch.  uniform-default-records A2 wrote it at one of them
 // and the struct-flattened path silently dropped every default until a
-// review probe found it (codex).  One helper, four call sites, no drift.
+// review probe found it.  One helper, four call sites, no drift.
 std::vector<float> uniformDefaultSlice(const std::vector<float>& fv,
                                        const std::vector<int64_t>& iv,
                                        size_t first, size_t count)
@@ -204,7 +204,7 @@ std::vector<float> uniformDefaultSlice(const std::vector<float>& fv,
 // IRGlobal and IRParameter carry the evaluated default in identically named
 // fields, and both had to be routed through here.  A1 first wrote the entry
 // case into cg_container_fp.cpp only, and the VERTEX side silently dropped
-// every entry default until review caught it (codex and Fable, independently).
+// every entry default until review caught it (two reviewers, independently).
 std::vector<float> uniformDefaultSlice(const IRGlobal& g, size_t first, size_t count)
 {
     return uniformDefaultSlice(g.initialValue, g.initialIntValues, first, count);
@@ -625,7 +625,7 @@ VpContainerResult emitVertexContainerImpl(
                     d.direction = kCgIn;
                     // The member belongs to ITS struct parameter: a second
                     // struct's members carry that parameter's ordinal (measured:
-                    // V v, W w -> w.c paramno 1; all were 0 - review: codex).
+                    // V v, W w -> w.c paramno 1; all were 0 - review).
                     d.paramno   = inputStructParamNo;
                     for (size_t k = 0; k < entry->parameters.size(); ++k)
                         if (entry->parameters[k].name == in.structParamName &&

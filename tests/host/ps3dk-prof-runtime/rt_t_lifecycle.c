@@ -89,7 +89,7 @@ int rt_owner_identity_failure_is_eperm(const char *out)
     return rt_expect(out, 0);
 }
 
-/* R3 (codex 2026-10-22): a failed OS thread id read refuses the registration with ETHREAD before anything changes.
+/* R3 (review 2026-10-22): a failed OS thread id read refuses the registration with ETHREAD before anything changes.
  * The slot stays FREE, no incarnation id or slot generation is consumed, and the thread's TLS stays unregistered, so
  * the retry is the first registration the capture ever sees. */
 int rt_thread_begin_os_id_failure_refused(const char *out)
@@ -119,7 +119,7 @@ int rt_thread_begin_os_id_failure_refused(const char *out)
     CHECK_EQ(cap.nthreads, 1);
     CHECK_EQ(cap.threads_inc[0], 1);
     CHECK_EQ(cap.threads_slot[0], 0);
-    CHECK_EQ(cap.unreg, 0);   /* an ETHREAD refusal is not counted as unregistered (codex 03:21) */
+    CHECK_EQ(cap.unreg, 0);   /* an ETHREAD refusal is not counted as unregistered (review 03:21) */
     rt_cap_free(&cap);
     return rt_expect(out, 0);
 }
@@ -167,7 +167,7 @@ int rt_thread_begin_os_id_failure_second_thread(const char *out)
     return rt_expect(out, 0);
 }
 
-/* auto_register follows the same rule (codex 03:21): an id-read failure on an auto-registering BEGIN returns an INERT
+/* auto_register follows the same rule (review 03:21): an id-read failure on an auto-registering BEGIN returns an INERT
  * zone and consumes no slot, incarnation id or generation; it is not counted in unregistered_refusals.  A later BEGIN
  * on the same thread then registers and records normally.  The capture's COMPLETE verdict does not mean every
  * attempted auto zone was captured: the refused attempt is absent from it, which is asserted below. */

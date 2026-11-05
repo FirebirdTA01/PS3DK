@@ -89,7 +89,7 @@ if path == "fp-align":
     # 4 instead of 16 puts the block at 188 where the established compiler puts it at
     # 192.  The other fixtures cannot see that - their strings happen to
     # leave the blob already aligned, so `% 16` and `% 4` emit the same bytes
-    # (found by mutation, review: Fable).  There is no `plain` control here;
+    # (found by mutation, review).  There is no `plain` control here;
     # the other two fixtures carry it.
     want = {"gB": [1.0, 2.0, 3.0, 4.0]}
 else:
